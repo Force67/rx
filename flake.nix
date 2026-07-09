@@ -18,9 +18,17 @@
       url = "github:GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/v3.1.0";
       flake = false;
     };
+
+    # third_party/NRD-MathLib FetchContent-fetches sse2neon on aarch64; under
+    # FETCHCONTENT_FULLY_DISCONNECTED that fetch fails unless we hand it a
+    # source dir. Pinned to the master ref NRD-MathLib declares.
+    sse2neon-src = {
+      url = "github:DLTcollab/sse2neon";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, vulkan-headers-src, volk-src, vma-src }:
+  outputs = { self, nixpkgs, vulkan-headers-src, volk-src, vma-src, sse2neon-src }:
     let
       systems = [ "x86_64-linux" "aarch64-linux" ];
       forAllSystems = f: nixpkgs.lib.genAttrs systems
@@ -31,6 +39,7 @@
         "-DFETCHCONTENT_SOURCE_DIR_VULKANHEADERS=${vulkan-headers-src}"
         "-DFETCHCONTENT_SOURCE_DIR_VOLK=${volk-src}"
         "-DFETCHCONTENT_SOURCE_DIR_VULKANMEMORYALLOCATOR=${vma-src}"
+        "-DFETCHCONTENT_SOURCE_DIR_SSE2NEON=${sse2neon-src}"
       ];
 
       # WineHQ vkd3d (native Linux D3D12-on-Vulkan), built from the release
