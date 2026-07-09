@@ -1,0 +1,17 @@
+// The feature-flag manifest: the single source of truth for every flag.
+//
+// This file is intentionally header-guard-free and #included several times
+// with RX_FEATURE redefined each time (the X-macro trick), so the enum, the
+// table and the count can never drift apart. Editing this list is the only
+// thing you do to add a flag.
+//
+//   RX_FEATURE(Id, "dotted.name", default_enabled)
+//     Id              C++ identifier, reached as rx::FeatureId::k<Id>
+//     "dotted.name"   stable string the RX_FEATURES env override matches on
+//     default_enabled value before any override is applied
+//
+// A subsystem reads a flag with rx::FeatureEnabled(rx::FeatureId::k<Id>).
+
+RX_FEATURE(PathTracer, "render.pathtracer", false)
+RX_FEATURE(MeshShaderLod, "render.mesh_shader_lod", false)
+RX_FEATURE(DistantLod, "render.distant_lod", true)

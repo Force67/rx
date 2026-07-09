@@ -1,0 +1,4 @@
+[submodule "third_party/equilibrium"]
+	path = third_party/equilibrium
+	url = https://github.com/Force67/equilibrium
+	branch = devel5

@@ -1,0 +1,81 @@
+{
+  "nodes": {
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1783224372,
+        "narHash": "sha256-8i/87eeoqiGE4yOTjwSA3Eh/ziJRQEmd/unYU+K27sk=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d407951447dcd00442e97087bf374aad70c04cea",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "nixpkgs": "nixpkgs",
+        "vma-src": "vma-src",
+        "volk-src": "volk-src",
+        "vulkan-headers-src": "vulkan-headers-src"
+      }
+    },
+    "vma-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1716812524,
+        "narHash": "sha256-j0Z9OEwQx3RB2cni9eK3gYfwkhOc2ST213b6VseaVzg=",
+        "owner": "GPUOpen-LibrariesAndSDKs",
+        "repo": "VulkanMemoryAllocator",
+        "rev": "009ecd192c1289c7529bff248a16cfe896254816",
+        "type": "github"
+      },
+      "original": {
+        "owner": "GPUOpen-LibrariesAndSDKs",
+        "ref": "v3.1.0",
+        "repo": "VulkanMemoryAllocator",
+        "type": "github"
+      }
+    },
+    "volk-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1734711344,
+        "narHash": "sha256-+SLGRvCUKFntz60/xL/NjoFjvvATWMImR4CGnCHUj2o=",
+        "owner": "zeux",
+        "repo": "volk",
+        "rev": "0b17a763ba5643e32da1b2152f8140461b3b7345",
+        "type": "github"
+      },
+      "original": {
+        "owner": "zeux",
+        "ref": "1.4.304",
+        "repo": "volk",
+        "type": "github"
+      }
+    },
+    "vulkan-headers-src": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1734673432,
+        "narHash": "sha256-X6HqcZDZ4ZQGBG3PlSxi0mhmYyrjmJYwk/pJ/XBqEZU=",
+        "owner": "KhronosGroup",
+        "repo": "Vulkan-Headers",
+        "rev": "d4a196d8c84e032d27f999adcea3075517c1c97f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "KhronosGroup",
+        "ref": "v1.4.304",
+        "repo": "Vulkan-Headers",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
