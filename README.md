@@ -1,14 +1,14 @@
-# rx — render experience
+# rx - render experience
 
 A standalone real-time rendering engine, extracted from the
-[recreation](https://github.com/Force67/recreation) project. rx is everything
-that engine grew that has nothing to do with Bethesda games: the Vulkan/D3D12
-renderer, the asset pipeline, ECS, physics, animation and audio — with a small
+[recreation](https://github.com/Force67/recreation) project. rx is the part of
+that engine that has nothing to do with Bethesda games: the Vulkan/D3D12
+renderer, the asset pipeline, ECS, physics, animation and audio, plus a small
 viewer runtime in place of the game.
 
 ## What's here
 
-- **engine/render** — the renderer, behind a backend-agnostic RHI
+- **engine/render** - the renderer, behind a backend-agnostic RHI
   (`engine/render/rhi/`: vulkan, d3d12-via-vkd3d, null). HLSL shaders compiled
   to SPIR-V at build time with dxc. Feature set includes: TAA / MSAA /
   FSR3 / DLSS upscaling + FSR3 frame generation, hardware ray tracing (RT
@@ -17,13 +17,15 @@ viewer runtime in place of the game.
   (cluster DAG), froxel volumetrics, local shadow atlas, decals, lit
   translucency, FFT ocean, gaussian splats, GPU particles, HDR10 output,
   dynamic resolution, texture streaming, async compute, VRS, meshlet path.
-- **engine/asset** — glTF loading (cgltf), MaterialX, primitives, LOD
+- **engine/asset** - glTF loading (cgltf), MaterialX, primitives, LOD
   simplification, Loop subdivision, virtual filesystem.
-- **engine/core** — SDL3 windowing (+ KDE HDR monitor), job system, input
+- **engine/core** - SDL3 windowing (+ KDE HDR monitor), job system, input
   action layer with gamepad support, math, logging, feature registry.
-- **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** — the usual
-  suspects; `libs/kinema` is a reusable SoA animation runtime.
-- **runtime/** — the `rx` viewer: `--gltf <scene>` or `--demo <id>` (water,
+- **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** - entity
+  storage and scheduling, scene components, Jolt-backed rigid bodies, pose and
+  locomotion helpers, an SDL mixer with wav/xwma decoding, and a small RPC
+  value/registry layer. `libs/kinema` is a reusable SoA animation runtime.
+- **runtime/** - the `rx` viewer: `--gltf <scene>` or `--demo <id>` (water,
   materials, cornell, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
   meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx),
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
@@ -56,8 +58,8 @@ build/linux/runtime/rx --gltf assets/sponza/Sponza.gltf
 ## Notes
 
 - The C++ namespace is `rx::`; env-var knobs are `RX_*` (`RX_PATHTRACE=1`,
-  `RX_DRS=1`, `RX_MSAA=4`, `RX_HDR_OUTPUT=pq`, ... — grep `base::Option` for
-  the full set).
+  `RX_DRS=1`, `RX_MSAA=4`, `RX_HDR_OUTPUT=pq`). Grep for `base::Option` to see
+  the full set.
 - `engine/render/presets/` holds editable .ini quality presets, loadable live
   from the debug overlay.
 - History predating the extraction lives in the recreation repository.

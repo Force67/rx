@@ -69,7 +69,7 @@ class BindlessRegistry {
   // material record still points at it (the material system's retire ring
   // guarantees both). RewriteTextureIndex repoints a material record's
   // texture references (all four fields checked) from one slot to another;
-  // the table is host visible, so pending frames read either index — both
+  // the table is host visible, so pending frames read either index - both
   // stay valid images until the old slot is released.
   void ReleaseTexture(u32 index);
   void RewriteTextureIndex(u32 material_index, u32 old_texture, u32 new_texture);

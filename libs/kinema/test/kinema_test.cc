@@ -78,7 +78,7 @@ void TestClipRoundTrip() {
     f32 time = clip->duration() * static_cast<f32>(i) / 200.0f;
     clip->Sample(time, pose);
     // Ground truth is the piecewise-linear interpolation of the uniform
-    // samples — exactly what the codec stores — so the deltas below measure
+    // samples - exactly what the codec stores - so the deltas below measure
     // pure quantization error, not source-curve linearization.
     f32 x = time * kRate;
     u32 k = std::min(static_cast<u32>(x), kFrames - 2);

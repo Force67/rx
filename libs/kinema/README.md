@@ -10,15 +10,15 @@ adapter.
 
 - **Transcode once, stream forever.** Clips are baked into a relocatable
   binary blob: uniformly sampled keys, 16-bit range-quantized, stored
-  frame-major SoA. Sampling a pose is two contiguous row reads and a lerp —
+  frame-major SoA. Sampling a pose is two contiguous row reads and a lerp -
   no curve evaluation, no branches per bone, no allocation. Constant tracks
   are detected at build time and stored once at full precision.
 - **Poses are SoA views** over arena memory; blend operations are flat
   kernels over whole arrays that autovectorize.
 - **Blend trees run as compiled programs** (a flat `PoseOp` list over pose
   registers), so authoring structure never appears in the hot path.
-- **Transitions are inertialized** — capture the pose offset at the switch
-  and decay it C2-smoothly — so a transition evaluates one graph, not two.
+- **Transitions are inertialized** - capture the pose offset at the switch
+  and decay it C2-smoothly - so a transition evaluates one graph, not two.
 
 ## Use
 

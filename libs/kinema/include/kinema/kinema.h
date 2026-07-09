@@ -6,7 +6,7 @@
 // Design (the short version):
 //  - Clips are transcoded once into a relocatable binary blob: uniformly
 //    sampled keys, 16-bit range-quantized, stored frame-major SoA so sampling
-//    a pose is two contiguous row reads and one lerp — no per-bone branching,
+//    a pose is two contiguous row reads and one lerp - no per-bone branching,
 //    no curve evaluation, no allocation. Constant tracks are detected at build
 //    time and stored once at full precision (zero error for static bones).
 //  - Poses are structure-of-arrays views over caller/arena memory. Blend
