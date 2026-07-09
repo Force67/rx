@@ -74,8 +74,8 @@ function(rx_embed_shaders target)
     endif()
     add_custom_command(OUTPUT ${header}
       COMMAND ${CMAKE_COMMAND} -DSPV=${spv} -DHEADER=${header} -DSYMBOL=${symbol}
-              ${embed_args} -P ${CMAKE_SOURCE_DIR}/cmake/embed_spv.cmake
-      DEPENDS ${embed_deps} ${CMAKE_SOURCE_DIR}/cmake/embed_spv.cmake
+              ${embed_args} -P ${PROJECT_SOURCE_DIR}/cmake/embed_spv.cmake
+      DEPENDS ${embed_deps} ${PROJECT_SOURCE_DIR}/cmake/embed_spv.cmake
       COMMENT "embed ${name}")
     list(APPEND headers ${header})
   endforeach()

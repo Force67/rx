@@ -115,8 +115,8 @@ foreach(pass IN LISTS FFX_FSR3_PASSES)
               -DNAME=${name}
               -DHALF=${half}
               -DSHADER=${shader}
-              -P ${CMAKE_SOURCE_DIR}/cmake/ffx_sc_compile.cmake
-      DEPENDS ffx_sc ${shader} ${CMAKE_SOURCE_DIR}/cmake/ffx_sc_compile.cmake
+              -P ${PROJECT_SOURCE_DIR}/cmake/ffx_sc_compile.cmake
+      DEPENDS ffx_sc ${shader} ${PROJECT_SOURCE_DIR}/cmake/ffx_sc_compile.cmake
       COMMENT "ffx_sc ${name}"
       VERBATIM)
     list(APPEND FFX_FSR3_PERMUTATION_HEADERS ${header})
@@ -177,8 +177,8 @@ foreach(entry IN LISTS FFX_FG_SHADERS)
               -DHALF=${half}
               -DSHADER=${shader}
               -DEFFECT=${effect}
-              -P ${CMAKE_SOURCE_DIR}/cmake/ffx_sc_compile_fg.cmake
-      DEPENDS ffx_sc ${shader} ${CMAKE_SOURCE_DIR}/cmake/ffx_sc_compile_fg.cmake
+              -P ${PROJECT_SOURCE_DIR}/cmake/ffx_sc_compile_fg.cmake
+      DEPENDS ffx_sc ${shader} ${PROJECT_SOURCE_DIR}/cmake/ffx_sc_compile_fg.cmake
       COMMENT "ffx_sc ${name}"
       VERBATIM)
     list(APPEND FFX_FSR3_PERMUTATION_HEADERS ${header})

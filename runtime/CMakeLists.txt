@@ -35,5 +35,5 @@ if(TARGET rx_imgui)
   # The debug ui lists and loads them; override with the env var RX_PRESETS_DIR.
   # Absolute so the dev build finds the source files.
   target_compile_definitions(rx PRIVATE
-    RX_PRESETS_DIR_DEFAULT="${CMAKE_SOURCE_DIR}/engine/render/presets")
+    RX_PRESETS_DIR_DEFAULT="${PROJECT_SOURCE_DIR}/engine/render/presets")
 endif()

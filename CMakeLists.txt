@@ -13,6 +13,7 @@ option(RX_DLSS "Enable the NVIDIA DLSS upscaler backend" ON)
 option(RX_NRD "Enable the NVIDIA NRD ray tracing denoiser" ON)
 option(RX_JOLT "Enable Jolt physics" ON)
 option(RX_BUILD_TESTS "Build library test suites" ON)
+option(RX_BUILD_RUNTIME "Build the rx viewer executable" ON)
 option(RX_AUDIO_FFMPEG "Decode compressed audio via FFmpeg (libav*)" OFF)
 option(RX_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 # Route the engine's allocations through mimalloc for faster, lower-fragmentation
@@ -80,24 +81,27 @@ find_package(ZLIB QUIET)
 # Vulkan headers and the volk loader are pinned and fetched, no SDK needed.
 # volk dlopens the system vulkan loader at runtime, missing drivers degrade
 # the renderer to a stub instead of failing the build.
-FetchContent_Declare(VulkanHeaders
-  GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-  GIT_TAG v1.4.304
-  GIT_SHALLOW ON)
-FetchContent_Declare(volk
-  GIT_REPOSITORY https://github.com/zeux/volk.git
-  GIT_TAG 1.4.304
-  GIT_SHALLOW ON)
-FetchContent_Declare(VulkanMemoryAllocator
-  GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
-  GIT_TAG v3.1.0
-  GIT_SHALLOW ON)
-FetchContent_MakeAvailable(VulkanHeaders volk VulkanMemoryAllocator)
-target_link_libraries(volk PUBLIC Vulkan::Headers)
-if(ANDROID)
-  # So volk's loader compiles the android-surface entry point and consumers see
-  # vkCreateAndroidSurfaceKHR / VkAndroidSurfaceCreateInfoKHR.
-  target_compile_definitions(volk PUBLIC VK_USE_PLATFORM_ANDROID_KHR=1)
+# A parent project may already vendor volk/VMA; only fetch when it has not.
+if(NOT TARGET volk)
+  FetchContent_Declare(VulkanHeaders
+    GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+    GIT_TAG v1.4.304
+    GIT_SHALLOW ON)
+  FetchContent_Declare(volk
+    GIT_REPOSITORY https://github.com/zeux/volk.git
+    GIT_TAG 1.4.304
+    GIT_SHALLOW ON)
+  FetchContent_Declare(VulkanMemoryAllocator
+    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
+    GIT_TAG v3.1.0
+    GIT_SHALLOW ON)
+  FetchContent_MakeAvailable(VulkanHeaders volk VulkanMemoryAllocator)
+  target_link_libraries(volk PUBLIC Vulkan::Headers)
+  if(ANDROID)
+    # So volk's loader compiles the android-surface entry point and consumers see
+    # vkCreateAndroidSurfaceKHR / VkAndroidSurfaceCreateInfoKHR.
+    target_compile_definitions(volk PUBLIC VK_USE_PLATFORM_ANDROID_KHR=1)
+  endif()
 endif()
 
 # Shaders are hlsl, compiled to spirv at build time with dxc and embedded.
@@ -137,13 +141,16 @@ include(mimalloc)
 
 # equilibrium's base library (third_party/equilibrium, a submodule) supplies the
 # base:: containers, strings and atomics every module builds on.
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium/CMakeLists.txt")
-  message(FATAL_ERROR
-    "equilibrium submodule missing; run: git submodule update --init third_party/equilibrium")
+# A parent project may already vendor equilibrium; only add it when it has not.
+if(NOT TARGET equilibrium::base)
+  if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium/CMakeLists.txt")
+    message(FATAL_ERROR
+      "equilibrium submodule missing; run: git submodule update --init third_party/equilibrium")
+  endif()
+  set(EQ_USE_STD_ATOMIC ON CACHE BOOL "" FORCE)
+  set(EQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  add_subdirectory(third_party/equilibrium equilibrium EXCLUDE_FROM_ALL)
 endif()
-set(EQ_USE_STD_ATOMIC ON CACHE BOOL "" FORCE)
-set(EQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-add_subdirectory(third_party/equilibrium equilibrium EXCLUDE_FROM_ALL)
 
 add_subdirectory(third_party)
 
@@ -170,4 +177,6 @@ foreach(module ${RX_MODULES})
   add_subdirectory(engine/${module})
 endforeach()
 
-add_subdirectory(runtime)
+if(RX_BUILD_RUNTIME)
+  add_subdirectory(runtime)
+endif()

@@ -259,8 +259,8 @@ set(RX_RENDER_SHADERS
 # whenever NRD is vendored (independent of RX_NRD, so an NRD-off build of
 # a vendored tree still compiles rtao). The denoiser-only inputs are embedded
 # only when the denoiser is built.
-if(EXISTS ${CMAKE_SOURCE_DIR}/third_party/NRD/Shaders/NRD.hlsli)
-  set(RX_SHADER_INCLUDE_DIRS ${CMAKE_SOURCE_DIR}/third_party/NRD/Shaders)
+if(EXISTS ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders/NRD.hlsli)
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
 endif()
 # Shaders include siblings from their own subfolder (atmosphere.hlsli; the
 # mesh/shadow base vertex shaders reused by the *_skin variants). Add those dirs
