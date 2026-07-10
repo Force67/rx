@@ -27,6 +27,34 @@ option(RX_MIMALLOC "Route allocations through mimalloc" OFF)
 option(RX_INSTALL "Generate install()/export rules for find_package(rx)"
   ${PROJECT_IS_TOP_LEVEL})
 
+# The "DLL test": build each rx module as a shared library instead of a static
+# archive. Off by default (the static build is the shipping configuration). This
+# is a correctness discipline, not a distribution mode: hidden visibility plus
+# explicit per-module export annotations (engine/core/export.h) document each
+# module's real cross-DSO API and flush out ambient-state bugs. See EMBEDDING.md.
+option(RX_SHARED "Build rx modules as shared libraries (experimental)" OFF)
+
+if(RX_SHARED)
+  if(RX_INSTALL)
+    message(FATAL_ERROR
+      "RX_SHARED + RX_INSTALL is unsupported: the install/export rules and the "
+      "bundled-archive packaging assume static rx_* archives. Configure with "
+      "-DRX_INSTALL=OFF (it defaults off for add_subdirectory consumers).")
+  endif()
+  set(RX_LIB_TYPE SHARED)
+  # Third-party static archives (equilibrium::base, volk, VMA, Jolt, kinema, NRD,
+  # FSR3) get linked into rx shared objects, so their objects must be PIC.
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+  message(WARNING
+    "RX_SHARED is experimental. rx modules build as shared objects with hidden "
+    "visibility + explicit export annotations. Caveat: equilibrium's base::Option "
+    "registry (base::InitChain) is a per-DSO instance under hidden visibility, so "
+    "each option-owning DSO re-applies env overrides at init (see EMBEDDING.md). "
+    "Env knobs work; the mechanism differs from the static single-registry build.")
+else()
+  set(RX_LIB_TYPE STATIC)
+endif()
+
 # Android is a first-class target, but several desktop backends do not apply:
 # DLSS/FSR3/NRD ship x86_64 host libraries (and Adreno has no HW ray tracing or
 # mesh shaders, so the raster path is the real path), and SDL3 is replaced by a
@@ -105,6 +133,22 @@ if(NOT TARGET volk)
     GIT_SHALLOW ON)
   FetchContent_MakeAvailable(VulkanHeaders volk VulkanMemoryAllocator)
   target_link_libraries(volk PUBLIC Vulkan::Headers)
+  if(RX_SHARED)
+    # volk names its global function-pointer table identically to the real
+    # Vulkan entry points (vkEnumerateInstanceExtensionProperties, ...). volk.c
+    # already hides the pointer definitions but leaves volkInitialize/volkLoad*
+    # at default visibility, so under RX_SHARED those functions get EXPORTED from
+    # every DSO that links volk and interpose one another (the filled table and
+    # the read table end up in different DSOs -> a null vk* call). Exporting the
+    # whole table instead is worse: it collides with SDL3's own Vulkan symbols.
+    # The correct model is a fully-private volk copy per DSO that uses it, each
+    # initialized by that DSO. Force hidden visibility so no volk symbol leaks
+    # out to interpose another DSO or SDL. (render initializes its copy in
+    # vk_device.cc; the viewer initializes the imgui copy, see debug_ui.cc.)
+    set_target_properties(volk PROPERTIES
+      C_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON)
+  endif()
   if(ANDROID)
     # So volk's loader compiles the android-surface entry point and consumers see
     # vkCreateAndroidSurfaceKHR / VkAndroidSurfaceCreateInfoKHR.

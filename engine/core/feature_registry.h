@@ -2,6 +2,8 @@
 #define RX_CORE_FEATURE_REGISTRY_H_
 
 #include <base/containers/span.h>
+
+#include "core/export.h"
 // base/feature.h's constructor parameters shadow its members, so the header is
 // not -Wshadow clean. Silence just this include rather than spraying the
 // warning across every consumer or patching the vendored library.
@@ -42,15 +44,20 @@ enum class FeatureId : unsigned {
 
 // True when the flag is on (default from the manifest, after env overrides).
 // A single array read, no list walk.
-bool FeatureEnabled(FeatureId id);
+//
+// The g_features table backing these is an anonymous-namespace global in
+// feature_registry.cc, reached only through these three functions, so under
+// RX_SHARED it stays a single instance inside the core DSO (verified: no other
+// translation unit can name the array).
+RX_CORE_EXPORT bool FeatureEnabled(FeatureId id);
 
 // The whole table, for listing in the debug UI. size() == kCount.
-base::Span<base::Feature> Features();
+RX_CORE_EXPORT base::Span<base::Feature> Features();
 
 // Apply RX_FEATURES overrides once, early in engine startup. Tokens are comma
 // or whitespace separated: "name" / "+name" enable, "-name" / "name=0" disable.
 // Unknown names are warned about and skipped.
-void InitFeatures();
+RX_CORE_EXPORT void InitFeatures();
 
 }  // namespace rx
 

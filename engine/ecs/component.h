@@ -3,6 +3,7 @@
 
 #include <type_traits>
 
+#include "core/export.h"
 #include "core/types.h"
 
 namespace rx::ecs {
@@ -18,11 +19,16 @@ struct ComponentInfo {
 
 namespace detail {
 
-ComponentId NextComponentId();
-void RegisterComponent(ComponentId id, const ComponentInfo& info);
+RX_ECS_EXPORT ComponentId NextComponentId();
+RX_ECS_EXPORT void RegisterComponent(ComponentId id, const ComponentInfo& info);
 
+// RX_DSO_EXPORT (default visibility, even under -fvisibility-inlines-hidden)
+// forces the function-local `id` static below to be a single process-wide
+// instance. Without it each DSO in an RX_SHARED build would instantiate its own
+// copy, call NextComponentId() independently, and hand the SAME component type a
+// DIFFERENT id in different shared objects. No-op in the static build.
 template <typename T>
-ComponentId ComponentIdFor() {
+RX_DSO_EXPORT ComponentId ComponentIdFor() {
   static_assert(std::is_move_constructible_v<T>);
   static const ComponentId id = [] {
     ComponentId new_id = NextComponentId();
@@ -40,11 +46,11 @@ ComponentId ComponentIdFor() {
 }  // namespace detail
 
 template <typename T>
-ComponentId GetComponentId() {
+RX_DSO_EXPORT ComponentId GetComponentId() {
   return detail::ComponentIdFor<std::remove_cvref_t<T>>();
 }
 
-const ComponentInfo& GetComponentInfo(ComponentId id);
+RX_ECS_EXPORT const ComponentInfo& GetComponentInfo(ComponentId id);
 
 }  // namespace rx::ecs
 

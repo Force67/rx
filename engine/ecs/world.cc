@@ -1,24 +1,60 @@
 #include "ecs/world.h"
 
 #include <atomic>
+#include <cassert>
 
 namespace rx::ecs {
 
 namespace detail {
 namespace {
-std::atomic<ComponentId> g_next_id{0};
-base::Vector<ComponentInfo> g_infos(256);
+
+// The one and only component-type registry. It is a function-local static
+// living in this translation unit (the ecs DSO); NextComponentId /
+// RegisterComponent / GetComponentInfo are the only ways to touch it and they
+// are exported, so under RX_SHARED there is exactly one instance process-wide
+// even though the template that drives registration (ComponentIdFor<T>) is
+// instantiated in every consumer DSO.
+//
+// Thread-safety without a lock on the hot read path:
+//   - `next` is an atomic counter (fetch_add), so id assignment is safe.
+//   - `infos` is a FIXED-capacity array: it never reallocates, so a write to
+//     one slot never races a read of another (unlike the old resizing Vector).
+//   - Each type registers exactly once, from the initializer of its
+//     ComponentIdFor<T> function-local static. That per-type guard has
+//     acquire/release semantics, and (because ComponentIdFor<T> is forced to
+//     default visibility) it is a single guard process-wide. Any code that
+//     holds an id obtained it by returning through that guard, which
+//     happens-before publishes the matching infos[id] write. So GetComponentInfo
+//     is a plain array read: no atomics, no lock.
+struct Registry {
+  // Generous ceiling; the engine + a large game register on the order of a few
+  // hundred component types. Overflow is a hard error, not silent corruption.
+  static constexpr u32 kMaxComponents = 4096;
+  std::atomic<ComponentId> next{0};
+  ComponentInfo infos[kMaxComponents]{};
+};
+
+Registry& TheRegistry() {
+  static Registry registry;
+  return registry;
+}
+
 }  // namespace
 
-ComponentId NextComponentId() { return g_next_id.fetch_add(1); }
+ComponentId NextComponentId() {
+  const ComponentId id = TheRegistry().next.fetch_add(1, std::memory_order_relaxed);
+  assert(id < Registry::kMaxComponents && "component-type registry overflow");
+  return id;
+}
 
 void RegisterComponent(ComponentId id, const ComponentInfo& info) {
-  if (id >= g_infos.size()) g_infos.resize(id + 1);
-  g_infos[id] = info;
+  if (id >= Registry::kMaxComponents) return;  // overflow already asserted above
+  TheRegistry().infos[id] = info;
 }
+
 }  // namespace detail
 
-const ComponentInfo& GetComponentInfo(ComponentId id) { return detail::g_infos[id]; }
+const ComponentInfo& GetComponentInfo(ComponentId id) { return detail::TheRegistry().infos[id]; }
 
 World::World() { GetOrCreateArchetype({}); }
 
