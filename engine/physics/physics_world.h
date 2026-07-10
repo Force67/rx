@@ -18,6 +18,8 @@ using BodyId = u64;
 using CharacterId = u64;
 // Opaque joint/constraint handle; 0 is invalid.
 using JointId = u64;
+// Opaque wheeled-vehicle handle; 0 is invalid.
+using VehicleId = u64;
 
 // Jolt-backed rigid body world. Fixed-step simulation driven from the sim
 // stage; dynamic bodies report their transforms back for ECS sync. Bodies
@@ -138,6 +140,41 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   void MoveCharacter(CharacterId id, const Vec3& horizontal_velocity, bool jump, f32 dt,
                      Vec3* out_position, bool* out_grounded);
   void SetCharacterPosition(CharacterId id, const Vec3& position);
+
+  // Wheeled vehicle (Jolt VehicleConstraint + WheeledVehicleController): a
+  // dynamic chassis box with four suspension wheels, rear-wheel drive and an
+  // automatic transmission. Engine space, +Z forward, +Y up; wheel order is
+  // FL, FR, RL, RR (front wheels steer, rear wheels take the handbrake). The
+  // caller renders the chassis/wheels from the transforms below; there is no
+  // wheel geometry in the physics world (wheels are suspension raycasts).
+  struct VehicleDesc {
+    Vec3 half_extent{0.9f, 0.5f, 2.0f};  // chassis box half extents
+    f32 mass = 1500;                     // kg
+    f32 wheel_radius = 0.34f;
+    f32 wheel_width = 0.25f;
+    f32 wheel_x = 0.85f;   // half track width (wheel center from chassis center)
+    f32 front_z = 1.4f;    // front axle offset, +Z = forward
+    f32 rear_z = -1.3f;
+    f32 suspension_min = 0.15f;  // suspension travel below the wheel attach
+    f32 suspension_max = 0.4f;
+    f32 max_engine_torque = 600;
+    f32 max_steer_angle = 0.6f;  // radians
+    // Center of mass dropped below the chassis center: arcade stability (hard
+    // to roll in normal cornering, still flippable off ramps).
+    f32 com_drop = 0.4f;
+  };
+  // Spawns the chassis at `position` (chassis center) yawed around +Y. Spawn
+  // slightly high and let the suspension settle. 0 on failure.
+  VehicleId CreateVehicle(const VehicleDesc& desc, const Vec3& position, f32 yaw_radians);
+  void RemoveVehicle(VehicleId id);
+  // Driver input, each -1..1 (forward: throttle vs reverse; right: steer) or
+  // 0..1 (brake, handbrake). Wakes the body while any input is non-zero.
+  void DriveVehicle(VehicleId id, f32 forward, f32 right, f32 brake, f32 handbrake);
+  bool GetVehicleTransform(VehicleId id, Vec3* position, f32 rotation[4]) const;
+  // World transform of wheel 0..3, suspension and steering applied.
+  bool GetVehicleWheel(VehicleId id, u32 wheel, Vec3* position, f32 rotation[4]) const;
+  // Signed speed along the chassis forward axis, m/s.
+  f32 VehicleForwardSpeed(VehicleId id) const;
 
   // Closest hit of a ray; used by foot IK to find the ground under a foot.
   struct RayHit {

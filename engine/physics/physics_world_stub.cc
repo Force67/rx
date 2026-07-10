@@ -43,6 +43,12 @@ BodyId PhysicsWorld::AddDynamicSphere(const Vec3&, f32, f32, const Vec3&) { retu
 BodyId PhysicsWorld::AddKinematicCapsule(const Vec3&, f32, f32) { return 0; }
 void PhysicsWorld::SetBodyPosition(BodyId, const Vec3&, const f32[4]) {}
 void PhysicsWorld::RemoveBody(BodyId) {}
+VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc&, const Vec3&, f32) { return 0; }
+void PhysicsWorld::RemoveVehicle(VehicleId) {}
+void PhysicsWorld::DriveVehicle(VehicleId, f32, f32, f32, f32) {}
+bool PhysicsWorld::GetVehicleTransform(VehicleId, Vec3*, f32[4]) const { return false; }
+bool PhysicsWorld::GetVehicleWheel(VehicleId, u32, Vec3*, f32[4]) const { return false; }
+f32 PhysicsWorld::VehicleForwardSpeed(VehicleId) const { return 0; }
 CharacterId PhysicsWorld::CreateCharacter(const Vec3&, f32, f32) { return 0; }
 void PhysicsWorld::MoveCharacter(CharacterId, const Vec3&, bool, f32, Vec3*, bool*) {}
 void PhysicsWorld::SetCharacterPosition(CharacterId, const Vec3&) {}

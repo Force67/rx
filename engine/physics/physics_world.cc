@@ -30,8 +30,12 @@
 #include <Jolt/Physics/Constraints/SpringSettings.h>
 #include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
+#include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Vehicle/VehicleCollisionTester.h>
+#include <Jolt/Physics/Vehicle/VehicleConstraint.h>
+#include <Jolt/Physics/Vehicle/WheeledVehicleController.h>
 #include <Jolt/RegisterTypes.h>
 
 #include <base/containers/unordered_map.h>
@@ -118,6 +122,14 @@ struct PhysicsWorld::Impl {
     bool hinge = false;
   };
   base::Vector<JointEntry> joints;
+  // Wheeled vehicles; VehicleId is index + 1, dead entries keep their slot so
+  // handles stay stable.
+  struct VehicleEntry {
+    JPH::BodyID body;
+    JPH::Ref<JPH::VehicleConstraint> constraint;
+    bool alive = false;
+  };
+  base::Vector<VehicleEntry> vehicles;
 };
 
 PhysicsWorld::PhysicsWorld() = default;
@@ -716,6 +728,161 @@ void PhysicsWorld::RemoveBody(BodyId id) {
       break;
     }
   }
+}
+
+VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& position,
+                                      f32 yaw_radians) {
+  if (!impl_) return 0;
+
+  // Chassis: a box with the center of mass dropped for arcade stability.
+  JPH::RefConst<JPH::Shape> box = new JPH::BoxShape(ToJolt(desc.half_extent));
+  JPH::ShapeSettings::ShapeResult chassis_result =
+      JPH::OffsetCenterOfMassShapeSettings(JPH::Vec3(0, -desc.com_drop, 0),
+                                           new JPH::BoxShapeSettings(ToJolt(desc.half_extent)))
+          .Create();
+  if (chassis_result.HasError()) {
+    RX_WARN("vehicle chassis shape failed: {}", chassis_result.GetError().c_str());
+    return 0;
+  }
+
+  JPH::BodyCreationSettings body_settings(
+      chassis_result.Get(), ToJolt(position),
+      JPH::Quat::sRotation(JPH::Vec3::sAxisY(), yaw_radians), JPH::EMotionType::Dynamic,
+      layers::kDynamic);
+  body_settings.mOverrideMassProperties = JPH::EOverrideMassProperties::CalculateInertia;
+  body_settings.mMassPropertiesOverride.mMass = desc.mass;
+  // Cars scrape walls constantly; a little friction keeps glancing contact
+  // from killing all speed, and high angular damping settles landings.
+  body_settings.mFriction = 0.4f;
+  body_settings.mAngularDamping = 0.6f;
+
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  JPH::Body* body = bodies.CreateBody(body_settings);
+  if (!body) return 0;
+  bodies.AddBody(body->GetID(), JPH::EActivation::Activate);
+  impl_->dynamic_bodies.push_back(body->GetID());
+
+  JPH::VehicleConstraintSettings vehicle;
+  vehicle.mMaxPitchRollAngle = JPH::DegreesToRadians(60.0f);
+
+  const f32 attach_y = -0.9f * desc.half_extent.y;
+  auto make_wheel = [&](f32 x, f32 z, bool front) {
+    JPH::WheelSettingsWV* w = new JPH::WheelSettingsWV;
+    w->mPosition = JPH::Vec3(x, attach_y, z);
+    w->mRadius = desc.wheel_radius;
+    w->mWidth = desc.wheel_width;
+    w->mSuspensionMinLength = desc.suspension_min;
+    w->mSuspensionMaxLength = desc.suspension_max;
+    w->mMaxSteerAngle = front ? desc.max_steer_angle : 0.0f;
+    // Handbrake locks the rear axle only: the drift lever.
+    w->mMaxHandBrakeTorque = front ? 0.0f : 8000.0f;
+    return w;
+  };
+  vehicle.mWheels = {
+      make_wheel(-desc.wheel_x, desc.front_z, true),   // FL
+      make_wheel(desc.wheel_x, desc.front_z, true),    // FR
+      make_wheel(-desc.wheel_x, desc.rear_z, false),   // RL
+      make_wheel(desc.wheel_x, desc.rear_z, false),    // RR
+  };
+
+  JPH::WheeledVehicleControllerSettings* controller = new JPH::WheeledVehicleControllerSettings;
+  controller->mEngine.mMaxTorque = desc.max_engine_torque;
+  controller->mTransmission.mClutchStrength = 10.0f;
+  // Rear-wheel drive with a limited slip differential: throttle oversteer.
+  controller->mDifferentials.resize(1);
+  controller->mDifferentials[0].mLeftWheel = 2;
+  controller->mDifferentials[0].mRightWheel = 3;
+  vehicle.mController = controller;
+
+  // Anti-roll bars per axle, like the Jolt vehicle sample.
+  vehicle.mAntiRollBars.resize(2);
+  vehicle.mAntiRollBars[0].mLeftWheel = 0;
+  vehicle.mAntiRollBars[0].mRightWheel = 1;
+  vehicle.mAntiRollBars[1].mLeftWheel = 2;
+  vehicle.mAntiRollBars[1].mRightWheel = 3;
+
+  JPH::Ref<JPH::VehicleConstraint> constraint = new JPH::VehicleConstraint(*body, vehicle);
+  constraint->SetVehicleCollisionTester(
+      new JPH::VehicleCollisionTesterCastCylinder(layers::kDynamic, 0.05f));
+  impl_->system->AddConstraint(constraint);
+  impl_->system->AddStepListener(constraint);
+
+  impl_->vehicles.push_back({body->GetID(), constraint, true});
+  return impl_->vehicles.size();
+}
+
+void PhysicsWorld::RemoveVehicle(VehicleId id) {
+  if (!impl_ || id == 0 || id > impl_->vehicles.size()) return;
+  Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
+  if (!entry.alive) return;
+  impl_->system->RemoveStepListener(entry.constraint);
+  impl_->system->RemoveConstraint(entry.constraint);
+  entry.constraint = nullptr;
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  bodies.RemoveBody(entry.body);
+  bodies.DestroyBody(entry.body);
+  for (size_t i = 0; i < impl_->dynamic_bodies.size(); ++i) {
+    if (impl_->dynamic_bodies[i] == entry.body) {
+      impl_->dynamic_bodies.erase(impl_->dynamic_bodies.begin() + i);
+      break;
+    }
+  }
+  entry.alive = false;
+}
+
+void PhysicsWorld::DriveVehicle(VehicleId id, f32 forward, f32 right, f32 brake, f32 handbrake) {
+  if (!impl_ || id == 0 || id > impl_->vehicles.size()) return;
+  Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
+  if (!entry.alive) return;
+  auto* controller = static_cast<JPH::WheeledVehicleController*>(entry.constraint->GetController());
+  controller->SetDriverInput(forward, right, brake, handbrake);
+  if (forward != 0 || right != 0 || brake != 0 || handbrake != 0) {
+    impl_->system->GetBodyInterface().ActivateBody(entry.body);
+  }
+}
+
+bool PhysicsWorld::GetVehicleTransform(VehicleId id, Vec3* position, f32 rotation[4]) const {
+  if (!impl_ || id == 0 || id > impl_->vehicles.size()) return false;
+  const Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
+  if (!entry.alive) return false;
+  JPH::RVec3 p;
+  JPH::Quat q;
+  impl_->system->GetBodyInterface().GetPositionAndRotation(entry.body, p, q);
+  *position = {static_cast<f32>(p.GetX()), static_cast<f32>(p.GetY()),
+               static_cast<f32>(p.GetZ())};
+  rotation[0] = q.GetX();
+  rotation[1] = q.GetY();
+  rotation[2] = q.GetZ();
+  rotation[3] = q.GetW();
+  return true;
+}
+
+bool PhysicsWorld::GetVehicleWheel(VehicleId id, u32 wheel, Vec3* position,
+                                   f32 rotation[4]) const {
+  if (!impl_ || id == 0 || id > impl_->vehicles.size() || wheel >= 4) return false;
+  const Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
+  if (!entry.alive) return false;
+  const JPH::RMat44 m =
+      entry.constraint->GetWheelWorldTransform(wheel, JPH::Vec3::sAxisX(), JPH::Vec3::sAxisY());
+  const JPH::RVec3 p = m.GetTranslation();
+  const JPH::Quat q = m.GetRotation().GetQuaternion().Normalized();
+  *position = {static_cast<f32>(p.GetX()), static_cast<f32>(p.GetY()),
+               static_cast<f32>(p.GetZ())};
+  rotation[0] = q.GetX();
+  rotation[1] = q.GetY();
+  rotation[2] = q.GetZ();
+  rotation[3] = q.GetW();
+  return true;
+}
+
+f32 PhysicsWorld::VehicleForwardSpeed(VehicleId id) const {
+  if (!impl_ || id == 0 || id > impl_->vehicles.size()) return 0;
+  const Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
+  if (!entry.alive) return 0;
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  const JPH::Vec3 velocity = bodies.GetLinearVelocity(entry.body);
+  const JPH::Vec3 forward = bodies.GetRotation(entry.body) * JPH::Vec3::sAxisZ();
+  return velocity.Dot(forward);
 }
 
 bool PhysicsWorld::Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance,
