@@ -47,14 +47,18 @@ class Host {
 
   Services& services() { return services_; }
 
+  // (Re)seeds the day/night clock. `base_timescale` is the caller's authored
+  // day-length (game-clock seconds per real second); RX_TIMESCALE / RX_GAME_HOUR
+  // override the timescale and start hour. The host seeds it once at startup; an
+  // application calls this again once content supplies its own authored
+  // timescale.
+  void ConfigureClock(f32 base_timescale);
+
  private:
   // Resolves the configured quality tier from the gpu (or a forced preset)
   // and applies it to the renderer's live settings, carrying the RX_* debug
   // env overrides through.
   void ApplyRenderPreset();
-  // (Re)seeds the day/night clock. RX_TIMESCALE / RX_GAME_HOUR override the
-  // timescale and start hour.
-  void ConfigureClock(f32 base_timescale);
   // Fills view.draws from every visible Transform+Renderable entity, keeping
   // last frame's world matrices for motion vectors.
   void GatherEntityDraws(render::FrameView& view);

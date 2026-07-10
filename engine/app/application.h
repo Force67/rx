@@ -15,16 +15,24 @@ struct AppConfig {
   // deck, android, low/medium/high/ultra, console).
   render::QualityPreset preset = render::QualityPreset::kAuto;
   bool headless = false;
+  // When true (the default) the host gathers every visible
+  // scene::Transform+scene::Renderable entity into the FrameView before
+  // OnBuildView. A game that stores its renderables in its own component types,
+  // or that needs a bespoke gather (skinned draws, decals, per-entity tint),
+  // sets this false and appends every draw itself in OnBuildView.
+  bool gather_entity_draws = true;
 };
 
 // The game's side of the host contract. Host::RunFrame drives these in order:
 //
 //   per fixed step:   ECS kPreSim/kSim/kPostSim stages, then OnFixedStep(dt)
+//   every iteration:  OnSimulate(frame_delta)
 //   per drawn frame:  OnUpdate, ECS kPreRender stage, host transform gather,
 //                     OnBuildView, RenderFrame, OnFrameEnd
 //
-// Headless runs tick only the fixed-step side; none of the per-frame
-// callbacks fire. All callbacks run on the main thread.
+// A headless run ticks the fixed-step side and OnSimulate; the per-drawn-frame
+// callbacks (OnUpdate/OnBuildView/OnFrameEnd) fire only when a window is up.
+// All callbacks run on the main thread.
 class Application {
  public:
   virtual ~Application() = default;
@@ -36,6 +44,12 @@ class Application {
 
   // Once per fixed simulation step, after the sim stages ran.
   virtual void OnFixedStep(f32 dt) { (void)dt; }
+
+  // Once per host iteration, after the fixed-step loop, at frame cadence. Fires
+  // in both windowed and headless runs, so authoritative game simulation that a
+  // dedicated server must advance (scripting, networked actors, quest logic)
+  // lives here rather than in the windowed-only OnUpdate.
+  virtual void OnSimulate(f32 frame_delta) { (void)frame_delta; }
 
   // Once per drawn frame, before the kPreRender stage: read input, move the
   // camera, begin UI frames.

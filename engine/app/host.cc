@@ -204,6 +204,7 @@ bool Host::RunFrame() {
 
   int steps = timer_.Tick();
   f32 dt = static_cast<f32>(timer_.fixed_step());
+  f32 frame_delta = static_cast<f32>(timer_.frame_delta());
   // Advance the day/night clock by the real frame time; applications derive
   // sun/sky from it.
   clock_.Advance(timer_.frame_delta());
@@ -214,14 +215,17 @@ bool Host::RunFrame() {
     app_->OnFixedStep(dt);
   }
 
+  // Frame-cadence simulation, run in both windowed and headless modes so a
+  // dedicated server advances the same authoritative logic a client does.
+  app_->OnSimulate(frame_delta);
+
   if (!config_.headless) {
-    f32 frame_delta = static_cast<f32>(timer_.frame_delta());
     app_->OnUpdate(frame_delta);
     scheduler_.RunStage(ecs::Stage::kPreRender, world_, frame_delta);
 
     render::FrameView view;
     view.frame_delta_seconds = frame_delta;
-    GatherEntityDraws(view);
+    if (config_.gather_entity_draws) GatherEntityDraws(view);
     app_->OnBuildView(frame_delta, view);
     // Move the audio listener to this frame's viewpoint, so positional
     // voices pan and attenuate around the camera.
