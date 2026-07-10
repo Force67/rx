@@ -457,18 +457,22 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
 
     // Alpha-weighted colour from taps a bit down the strand; reject the seed if
     // the card is transparent there (background beige texels never colour hair).
+    // Without a diffuse texture there is nothing to sample (and SampleTex's
+    // wrap would divide by the zero-sized texture): strands stay white.
     static const f32 taps[] = {0.08f, 0.20f, 0.34f, 0.50f};
     Vec3 col_acc{0, 0, 0};
     f32 a_acc = 0;
-    for (f32 tf : taps) {
-      f32 a = comp.a_root + (comp.a_tip - comp.a_root) * tf;
-      f32 uu = comp.along_is_u ? a : c_seed;
-      f32 vv = comp.along_is_u ? c_seed : a;
-      Texel s = SampleTex(diffuse, uu, vv);
-      col_acc = col_acc + s.rgb * s.a;
-      a_acc += s.a;
+    if (have_tex) {
+      for (f32 tf : taps) {
+        f32 a = comp.a_root + (comp.a_tip - comp.a_root) * tf;
+        f32 uu = comp.along_is_u ? a : c_seed;
+        f32 vv = comp.along_is_u ? c_seed : a;
+        Texel s = SampleTex(diffuse, uu, vv);
+        col_acc = col_acc + s.rgb * s.a;
+        a_acc += s.a;
+      }
+      if (a_acc < kAlphaMin * 4.0f) continue;
     }
-    if (have_tex && a_acc < kAlphaMin * 4.0f) continue;
     Vec3 color = (have_tex && a_acc > 1e-3f) ? col_acc * (1.0f / a_acc) : Vec3{1, 1, 1};
 
     f32 ha = 0.8f * std::fabs(comp.a_tip - comp.a_root) / (P - 1) + 1e-4f;
