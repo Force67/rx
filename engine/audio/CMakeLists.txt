@@ -7,11 +7,10 @@ rx_add_module(audio
   audio_system.cc
 )
 
-# Sound bytes come from the game Vfs (loose files + BSA/BA2); the mixer math and
-# decoders only need core. The ambient layer reads sound records (SOUN/SNDR/REGN),
-# so it also links bethesda. The SDL output backend is optional: without it (the
-# Android native backend, a headless server) audio_device.cc compiles to a silent
-# stub and the rest of the module is unchanged.
+# Sound bytes come from the application's Vfs; the mixer math and decoders only
+# need core + asset. The SDL output backend is optional: without it (the Android
+# native backend, a headless server) audio_device.cc compiles to a silent stub
+# and the rest of the module is unchanged.
 target_link_libraries(rx_audio PUBLIC
   rx::core rx::asset)
 

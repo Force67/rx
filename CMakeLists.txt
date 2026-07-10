@@ -72,8 +72,10 @@ if(RX_JOLT AND NOT EXISTS
   set(RX_JOLT OFF)
 endif()
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-include(warnings)
+# Helpers are included by path, never via CMAKE_MODULE_PATH: a parent project
+# with same-named modules (warnings/shaders/mimalloc) must not shadow these,
+# and rx must not shadow the parent's.
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/warnings.cmake)
 
 include(FetchContent)
 find_package(ZLIB QUIET)
@@ -109,7 +111,7 @@ find_program(RX_DXC dxc)
 if(NOT RX_DXC)
   message(FATAL_ERROR "dxc (DirectXShaderCompiler) is required to compile hlsl to spirv")
 endif()
-include(shaders)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/shaders.cmake)
 
 find_package(SDL3 QUIET)
 if(NOT SDL3_FOUND AND RX_FETCH_SDL3)
@@ -137,7 +139,7 @@ if(RX_MIMALLOC AND RX_SANITIZE)
   message(STATUS "mimalloc disabled: RX_SANITIZE owns the allocator")
   set(RX_MIMALLOC OFF CACHE BOOL "" FORCE)
 endif()
-include(mimalloc)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/mimalloc.cmake)
 
 # equilibrium's base library (third_party/equilibrium, a submodule) supplies the
 # base:: containers, strings and atomics every module builds on.
@@ -164,6 +166,7 @@ set(RX_MODULES
   anim
   audio
   rpc
+  app
 )
 
 # Self-contained reusable libraries (no engine dependencies).
