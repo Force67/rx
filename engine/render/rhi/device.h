@@ -95,6 +95,17 @@ class Device {
   static constexpr u32 kMaxFramesInFlight = 2;
 
   static std::unique_ptr<Device> Create(const DeviceDesc& desc, Window& window);
+
+  // Surfaceless device: a real GPU device with the same feature enablement and
+  // caps as the windowed path, but with no presentation surface or swapchain.
+  // The frame ring, fences, immediate submit, resource and pipeline creation
+  // all work identically; only Acquire/Present are absent. Drive a frame with
+  // BeginFrame -> record -> SubmitFrame(cmd) (the swapchainless overload) and
+  // read pixels back with ReadbackImage. Picks the Vulkan backend; falls back
+  // to the null backend when no Vulkan driver is present (is_stub() true), so
+  // callers get a valid, safe device on any machine. D3D12 offscreen is not
+  // wired yet (it also falls back to null).
+  static std::unique_ptr<Device> CreateOffscreen(const DeviceDesc& desc);
   virtual ~Device() = default;
 
   Device(const Device&) = delete;
@@ -239,6 +250,29 @@ class Device {
   // image_index. Backends fold "suboptimal but same extent" (Android rotation)
   // into kOk; kOutOfDate means the caller must recreate the swapchain.
   virtual PresentResult SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) = 0;
+
+  // Swapchainless submit: ends recording and submits the frame's work,
+  // signaling the slot's fence, with no Acquire and no Present. This is the
+  // frame-completion half of the offscreen contract (the windowed path uses
+  // the swapchain overload above; both share BeginFrame). A windowed device may
+  // also use it for a frame that renders but does not present. The async-compute
+  // join (SplitFrame/BeginAsync/SubmitAsync) still applies. Default no-op so the
+  // null backend stays inert; the Vulkan backend implements it.
+  virtual void SubmitFrame(CommandList* /*cmd*/) {}
+
+  // Copies mip 0 of `image` into `out`. `current` is the image's present state
+  // (e.g. kColorTarget straight after rendering); the readback transitions it to
+  // kCopySrc internally, CopyTextureToBuffer's it into a host-visible staging
+  // buffer, host-read-barriers and drives it through ImmediateSubmit, then
+  // memcpys `out_size` bytes (which must be at least
+  // width*height*FormatTexelBytes(format)). The image must have been created
+  // with kTextureUsageTransferSrc. Works on windowed and offscreen devices.
+  // Returns false when out_size is too small or the backend has no readback
+  // (null/d3d12 report false honestly).
+  virtual bool ReadbackImage(const GpuImage& /*image*/, ResourceState /*current*/, void* /*out*/,
+                             size_t /*out_size*/) {
+    return false;
+  }
 
   // --- async compute (optional; see caps().async_compute) ---
   // A second queue of the same family overlaps flagged compute passes with the

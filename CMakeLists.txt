@@ -246,6 +246,19 @@ if(RX_BUILD_RUNTIME)
   add_subdirectory(runtime)
 endif()
 
+# Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a
+# triangle into a GpuImage and reads the pixels back through the RHI. Registered
+# like kinematest; skips cleanly (null backend) when no Vulkan driver is present,
+# so plain `ctest` passes and a real GPU run under vkrun proves the pixel path.
+if(RX_BUILD_TESTS AND RX_RHI_VULKAN)
+  add_executable(offscreen_test test/offscreen_test.cc)
+  target_link_libraries(offscreen_test PRIVATE rx::render rx::core)
+  rx_embed_shaders(offscreen_test
+    test/shaders/offscreen_tri.vs.hlsl
+    test/shaders/offscreen_tri.ps.hlsl)
+  add_test(NAME offscreen_test COMMAND offscreen_test)
+endif()
+
 # install()/export rules, generated last so every module target (and the
 # RX_INSTALL_* feature flags the modules set) already exists.
 if(RX_INSTALL)

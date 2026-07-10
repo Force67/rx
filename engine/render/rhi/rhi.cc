@@ -9,6 +9,7 @@ namespace rx::render {
 // on this machine", and Create falls through to the next candidate.
 namespace vk {
 std::unique_ptr<Device> CreateVulkanDevice(const DeviceDesc& desc, Window& window);
+std::unique_ptr<Device> CreateVulkanDeviceOffscreen(const DeviceDesc& desc);
 }
 namespace d3d12 {
 std::unique_ptr<Device> CreateD3D12Device(const DeviceDesc& desc, Window& window);
@@ -57,6 +58,26 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
     if (desc.backend != Backend::kNull) {
       RX_WARN("no {} gpu backend available, renderer disabled",
                BackendName(desc.backend));
+    }
+    device = null::CreateNullDevice();
+  }
+  return device;
+}
+
+std::unique_ptr<Device> Device::CreateOffscreen(const DeviceDesc& desc) {
+  std::unique_ptr<Device> device;
+  // Offscreen is wired for Vulkan only; other backends fall back to the null
+  // device (a valid, no-op offscreen device). d3d12 offscreen is not wired yet.
+  if (desc.backend == Backend::kVulkan || desc.backend == Backend::kAuto) {
+#if defined(RX_RHI_VULKAN)
+    device = vk::CreateVulkanDeviceOffscreen(desc);
+#endif
+  }
+  if (!device) {
+    if (desc.backend == Backend::kD3D12) {
+      RX_WARN("d3d12 offscreen device is not wired; using the null backend");
+    } else if (desc.backend != Backend::kNull) {
+      RX_WARN("no vulkan gpu backend available, offscreen device is a null stub");
     }
     device = null::CreateNullDevice();
   }

@@ -244,6 +244,9 @@ class VulkanSwapchain final : public Swapchain {
 class VulkanDevice final : public Device {
  public:
   static std::unique_ptr<Device> Create(const DeviceDesc& desc, Window& window);
+  // Surfaceless device: no window, no surface, no swapchain extension. Same
+  // adapter selection, feature enablement and caps as the windowed path.
+  static std::unique_ptr<Device> CreateOffscreen(const DeviceDesc& desc);
   ~VulkanDevice() override;
 
   void WaitIdle() override;
@@ -298,8 +301,11 @@ class VulkanDevice final : public Device {
   bool GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, u64* out) override;
 
   void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
+  bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
+                     size_t out_size) override;
   CommandList* BeginFrame(u32 slot) override;
   PresentResult SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) override;
+  void SubmitFrame(CommandList* cmd) override;
   CommandList* SplitFrame(CommandList* cmd, bool signal_fork) override;
   CommandList* BeginAsync() override;
   void SubmitAsync(CommandList* cmd) override;
@@ -354,6 +360,13 @@ class VulkanDevice final : public Device {
 
  private:
   VulkanDevice() = default;
+
+  // Shared bringup for the windowed and offscreen paths. `window` is null for
+  // an offscreen device: no surface instance extensions, no surface, no
+  // swapchain device extension, and the graphics family is picked without a
+  // present-support requirement. Everything else (adapter scoring, feature
+  // enablement, caps, queues, resources) is identical.
+  static std::unique_ptr<Device> CreateImpl(const DeviceDesc& desc, Window* window);
 
   bool InitResources();
   void ShutdownResources();

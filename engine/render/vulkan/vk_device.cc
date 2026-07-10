@@ -63,8 +63,9 @@ bool HasInstanceExtension(const char* name) {
   return HasExtension(extensions, name);
 }
 
-// Graphics family that can also present. Async compute and transfer queues
-// come later, one universal queue is enough for bringup.
+// Graphics family that can also present, or - when `surface` is VK_NULL_HANDLE
+// (an offscreen device) - simply the first graphics family. Async compute and
+// transfer queues come later, one universal queue is enough for bringup.
 int FindGraphicsFamily(VkPhysicalDevice physical, VkSurfaceKHR surface) {
   u32 count = 0;
   vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, nullptr);
@@ -72,6 +73,7 @@ int FindGraphicsFamily(VkPhysicalDevice physical, VkSurfaceKHR surface) {
   vkGetPhysicalDeviceQueueFamilyProperties(physical, &count, families.data());
   for (u32 i = 0; i < count; ++i) {
     if (!(families[i].queueFlags & VK_QUEUE_GRAPHICS_BIT)) continue;
+    if (surface == VK_NULL_HANDLE) return static_cast<int>(i);
     VkBool32 present = VK_FALSE;
     vkGetPhysicalDeviceSurfaceSupportKHR(physical, i, surface, &present);
     if (present) return static_cast<int>(i);
@@ -79,12 +81,15 @@ int FindGraphicsFamily(VkPhysicalDevice physical, VkSurfaceKHR surface) {
   return -1;
 }
 
+// `surface` is VK_NULL_HANDLE for an offscreen device: the present-support and
+// swapchain-extension requirements are then dropped.
 VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface) {
   u32 count = 0;
   vkEnumeratePhysicalDevices(instance, &count, nullptr);
   base::Vector<VkPhysicalDevice> devices(count);
   vkEnumeratePhysicalDevices(instance, &count, devices.data());
 
+  const bool need_present = surface != VK_NULL_HANDLE;
   VkPhysicalDevice best = VK_NULL_HANDLE;
   int best_score = -1;
   for (VkPhysicalDevice candidate : devices) {
@@ -92,7 +97,8 @@ VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface) {
     vkGetPhysicalDeviceProperties(candidate, &props);
     if (props.apiVersion < VK_API_VERSION_1_3) continue;
     if (FindGraphicsFamily(candidate, surface) < 0) continue;
-    if (!HasExtension(DeviceExtensions(candidate), VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
+    if (need_present && !HasExtension(DeviceExtensions(candidate), VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+      continue;
 
     int score = 0;
     if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 1000;
@@ -194,12 +200,25 @@ VkDescriptorPool CreateTransientPool(VkDevice device) {
 }  // namespace
 
 std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& window) {
+  return CreateImpl(desc, &window);
+}
+
+std::unique_ptr<Device> VulkanDevice::CreateOffscreen(const DeviceDesc& desc) {
+  return CreateImpl(desc, nullptr);
+}
+
+std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window* window) {
   auto device = std::unique_ptr<VulkanDevice>(new VulkanDevice());
 
-  auto surface_extensions = window.vulkan_instance_extensions();
-  if (surface_extensions.empty()) {
-    RX_WARN("window cannot present, vulkan backend unavailable");
-    return nullptr;
+  // A windowed device needs the platform surface instance extensions; an
+  // offscreen device (window == nullptr) creates no surface and needs none.
+  std::vector<const char*> surface_extensions;
+  if (window) {
+    surface_extensions = window->vulkan_instance_extensions();
+    if (surface_extensions.empty()) {
+      RX_WARN("window cannot present, vulkan backend unavailable");
+      return nullptr;
+    }
   }
   if (volkInitialize() != VK_SUCCESS) {
     RX_WARN("no vulkan loader on this system, vulkan backend unavailable");
@@ -293,11 +312,15 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
                                    &device->debug_messenger_);
   }
 
-  if (!window.CreateVulkanSurface(device->instance_, &device->surface_)) {
-    RX_ERROR("surface creation failed");
-    return nullptr;
+  if (window) {
+    if (!window->CreateVulkanSurface(device->instance_, &device->surface_)) {
+      RX_ERROR("surface creation failed");
+      return nullptr;
+    }
   }
 
+  // surface_ is VK_NULL_HANDLE for an offscreen device; PickPhysicalDevice /
+  // FindGraphicsFamily then drop the present-support and swapchain requirements.
   device->physical_device_ = PickPhysicalDevice(device->instance_, device->surface_);
   if (device->physical_device_ == VK_NULL_HANDLE) {
     RX_ERROR("no vulkan 1.3 capable gpu found");
@@ -322,7 +345,9 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
       static_cast<u32>(FindGraphicsFamily(device->physical_device_, device->surface_));
 
   auto available = DeviceExtensions(device->physical_device_);
-  base::Vector<const char*> device_extensions = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+  // The swapchain extension is only needed by a windowed device that presents.
+  base::Vector<const char*> device_extensions;
+  if (window) device_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
 
   // A portability-subset device (MoltenVK) must have this extension enabled when
   // it advertises it, otherwise vkCreateDevice fails. The name macro lives
@@ -573,17 +598,21 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
     return nullptr;
   }
 
-  RX_INFO("gpu: {} ({}, {} MB, vk {}.{}, rt={} rayquery={} mesh={} vrs={})",
+  RX_INFO("gpu: {} ({}{}, {} MB, vk {}.{}, rt={} rayquery={} mesh={} vrs={})",
            device->caps_.adapter_name, device->caps_.integrated ? "integrated" : "discrete",
-           device->caps_.device_local_bytes >> 20, VK_API_VERSION_MAJOR(props.apiVersion),
-           VK_API_VERSION_MINOR(props.apiVersion), device->caps_.raytracing,
-           device->caps_.ray_query, device->caps_.mesh_shaders,
+           window ? "" : ", offscreen", device->caps_.device_local_bytes >> 20,
+           VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
+           device->caps_.raytracing, device->caps_.ray_query, device->caps_.mesh_shaders,
            device->caps_.fragment_shading_rate);
   return device;
 }
 
 std::unique_ptr<Device> CreateVulkanDevice(const DeviceDesc& desc, Window& window) {
   return VulkanDevice::Create(desc, window);
+}
+
+std::unique_ptr<Device> CreateVulkanDeviceOffscreen(const DeviceDesc& desc) {
+  return VulkanDevice::CreateOffscreen(desc);
 }
 
 bool VulkanDevice::InitResources() {
@@ -1895,6 +1924,48 @@ void VulkanDevice::ImmediateSubmit(const std::function<void(CommandList&)>& reco
   vkResetDescriptorPool(device_, immediate_descriptor_pool_, 0);
 }
 
+bool VulkanDevice::ReadbackImage(const GpuImage& image, ResourceState current, void* out,
+                                 size_t out_size) {
+  if (!image || !out) return false;
+  const u64 texel = FormatTexelBytes(image.format);
+  const u64 needed = static_cast<u64>(image.extent.width) * image.extent.height * texel;
+  if (needed == 0 || out_size < needed) return false;
+
+  // Host-visible staging buffer with random host access (the readback reads it,
+  // so a write-combined sequential-write buffer would be the wrong hint).
+  VkBufferCreateInfo buffer_info{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+  buffer_info.size = needed;
+  buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+  VmaAllocationCreateInfo alloc_info{};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+  alloc_info.flags =
+      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+  VkBuffer buffer = VK_NULL_HANDLE;
+  VmaAllocation allocation = nullptr;
+  VmaAllocationInfo mapped{};
+  if (vmaCreateBuffer(allocator_, &buffer_info, &alloc_info, &buffer, &allocation, &mapped) !=
+      VK_SUCCESS) {
+    RX_ERROR("readback staging buffer allocation failed ({} bytes)", needed);
+    return false;
+  }
+  BufferRecord staging_record{buffer, allocation};
+  GpuBuffer staging{.handle = MakeHandle<BufferHandle>(&staging_record), .size = needed,
+                    .mapped = mapped.pMappedData};
+
+  ImmediateSubmit([&](CommandList& cmd) {
+    cmd.Barrier(Transition(image, current, ResourceState::kCopySrc));
+    BufferTextureCopy region{};  // whole mip 0 at origin
+    cmd.CopyTextureToBuffer(image, staging, region);
+    // Make the transfer's writes visible to the host mapping.
+    cmd.MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kHostRead);
+  });
+
+  vmaInvalidateAllocation(allocator_, allocation, 0, VK_WHOLE_SIZE);
+  std::memcpy(out, mapped.pMappedData, needed);
+  vmaDestroyBuffer(allocator_, buffer, allocation);
+  return true;
+}
+
 CommandList* VulkanDevice::BeginFrame(u32 slot) {
   FrameRing& frame = frames_[slot];
   vkWaitForFences(device_, 1, &frame.in_flight, VK_TRUE, UINT64_MAX);
@@ -2042,6 +2113,42 @@ PresentResult VulkanDevice::SubmitFrame(CommandList* cmd, Swapchain& swapchain, 
   present.pImageIndices = &image_index;
   VkResult presented = vkQueuePresentKHR(graphics_queue_, &present);
   return TranslatePresent(presented, swapchain);
+}
+
+void VulkanDevice::SubmitFrame(CommandList* cmd) {
+  // Swapchainless completion of an offscreen (or non-presenting) frame: no
+  // acquire wait, no present. Ends recording, signals the slot fence so the
+  // next BeginFrame(slot) can reuse it, and joins any async-compute submission.
+  FrameRing* frame = nullptr;
+  for (FrameRing& candidate : frames_) {
+    if (candidate.list.get() == cmd) frame = &candidate;
+    for (const auto& seg : candidate.seg_lists) {
+      if (seg && seg.get() == cmd) frame = &candidate;
+    }
+  }
+  if (!frame) return;
+
+  VkCommandBuffer active =
+      frame->active_segment == 0 ? frame->cmd : frame->seg_cmds[frame->active_segment - 1];
+  vkEndCommandBuffer(active);
+  vkResetFences(device_, 1, &frame->in_flight);
+
+  VkSemaphoreSubmitInfo wait{.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
+  u32 wait_count = 0;
+  if (frame->async_submitted) {
+    wait.semaphore = frame->async_sem;
+    wait.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    wait_count = 1;
+    frame->async_submitted = false;
+  }
+  VkCommandBufferSubmitInfo cmd_info{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+  cmd_info.commandBuffer = active;
+  VkSubmitInfo2 submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+  submit.waitSemaphoreInfoCount = wait_count;
+  submit.pWaitSemaphoreInfos = &wait;
+  submit.commandBufferInfoCount = 1;
+  submit.pCommandBufferInfos = &cmd_info;
+  vkQueueSubmit2(graphics_queue_, 1, &submit, frame->in_flight);
 }
 
 PresentResult VulkanDevice::SubmitFrameGen(CommandList* cmd, Swapchain& swapchain,
