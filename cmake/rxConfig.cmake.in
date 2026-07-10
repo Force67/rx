@@ -131,4 +131,9 @@ if(@RX_INSTALL_JOLT@)
     INTERFACE_LINK_LIBRARIES $<LINK_ONLY:Jolt> $<LINK_ONLY:kinema::kinema>)
 endif()
 
+# rx::anim's graph/rig/foot-placement units link kinema (link-only; kinema is
+# always bundled and imported above).
+set_property(TARGET rx::anim APPEND PROPERTY
+  INTERFACE_LINK_LIBRARIES $<LINK_ONLY:kinema::kinema>)
+
 check_required_components(rx)

@@ -63,7 +63,11 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/engine/
   FILES_MATCHING
     PATTERN "*.h"
     PATTERN "*.hpp"
-    PATTERN "*.inl")
+    PATTERN "*.inl"
+    # *_internal.h are kinema-visible glue (e.g. engine/anim/anim_internal.h),
+    # not part of the public package: kinema headers are not bundled, so a public
+    # header may never include <kinema/kinema.h>.
+    PATTERN "*_internal.h" EXCLUDE)
 
 # --- third-party archive + header bundling ----------------------------------
 # Resolve an imported/interface target's own include dir(s), stripping the
