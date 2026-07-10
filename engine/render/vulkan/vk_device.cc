@@ -1780,6 +1780,8 @@ AccelSizes VulkanDevice::GetBlasSizes(const BlasBuildDesc& desc) {
   info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
   info.flags = desc.fast_trace ? VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
                                : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+  if (desc.allow_compaction)
+    info.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
   info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
   info.geometryCount = static_cast<u32>(geometries.size());
   info.pGeometries = geometries.data();
@@ -1872,6 +1874,32 @@ void VulkanDevice::DestroyAccelStruct(AccelStructHandle handle) {
 }
 
 u64 VulkanDevice::accel_address(AccelStructHandle handle) { return Rec(handle)->address; }
+
+AccelCompactionQueryHandle VulkanDevice::CreateCompactionQuery(u32 count) {
+  VkQueryPoolCreateInfo info{.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+  info.queryType = VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR;
+  info.queryCount = count;
+  VkQueryPool pool = VK_NULL_HANDLE;
+  if (vkCreateQueryPool(device_, &info, nullptr, &pool) != VK_SUCCESS) return {};
+  auto* record = new AccelCompactionQueryRecord{pool, count};
+  return MakeHandle<AccelCompactionQueryHandle>(record);
+}
+
+void VulkanDevice::DestroyCompactionQuery(AccelCompactionQueryHandle query) {
+  if (AccelCompactionQueryRecord* record = Rec(query)) {
+    if (record->pool) vkDestroyQueryPool(device_, record->pool, nullptr);
+    delete record;
+  }
+}
+
+bool VulkanDevice::GetCompactedSizes(AccelCompactionQueryHandle query, u64* out, u32 count) {
+  AccelCompactionQueryRecord* record = Rec(query);
+  if (!record || count == 0) return false;
+  // No WAIT bit: returns VK_NOT_READY (-> false) until the recorded query's
+  // submission fence has signalled, so the caller polls a frame later.
+  return vkGetQueryPoolResults(device_, record->pool, 0, count, count * sizeof(u64), out,
+                               sizeof(u64), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
+}
 
 // --- profiling ---
 

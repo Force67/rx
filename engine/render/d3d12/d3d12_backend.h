@@ -240,6 +240,7 @@ class D3D12CommandList final : public CommandList {
                  u64 scratch_offset) override;
   void BuildTlas(AccelStructHandle tlas, const GpuBuffer& instances, u32 instance_count,
                  const GpuBuffer& scratch) override;
+  void CopyAccelStruct(AccelStructHandle dst, AccelStructHandle src, bool compact) override;
   void ResetTimestamps(TimestampPoolHandle pool, u32 first, u32 count) override;
   void WriteTimestamp(TimestampPoolHandle pool, u32 index, bool after_work) override;
   void BeginDebugLabel(const char* name) override;

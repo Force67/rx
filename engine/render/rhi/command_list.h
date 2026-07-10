@@ -76,6 +76,12 @@ struct AccelTriangles {
 struct BlasBuildDesc {
   std::span<const AccelTriangles> geometries;
   bool fast_trace = true;  // PREFER_FAST_TRACE; false = PREFER_FAST_BUILD
+  // Builds with ALLOW_COMPACTION so a later CommandList::CopyAccelStruct(compact)
+  // can shrink the structure into a tight buffer. The flag must be set both here
+  // and in the matching Device::GetBlasSizes call (it grows the scratch/result
+  // sizes); the size query and the build derive their flags from the same desc,
+  // so pass the same desc to both. Costs nothing on the trace side.
+  bool allow_compaction = false;
 };
 
 // One TLAS instance. Layout is identical between
@@ -210,6 +216,26 @@ class CommandList {
                          const GpuBuffer& scratch, u64 scratch_offset = 0) = 0;
   virtual void BuildTlas(AccelStructHandle tlas, const GpuBuffer& instances, u32 instance_count,
                          const GpuBuffer& scratch) = 0;
+  // Records, into this command list, a compacted-size query over `count`
+  // just-built acceleration structures (each built with allow_compaction). It
+  // inserts the AS-build->AS-read barrier itself, so the builds only need to
+  // have been recorded earlier on this same list. The results are NOT available
+  // when the call returns: read them with Device::GetCompactedSizes once the
+  // fence for the submission carrying this command list has signalled (a frame
+  // later in the ring pattern, or immediately after ImmediateSubmit's blocking
+  // wait). `query` must have capacity >= count. Default no-op so backends
+  // without compaction (and null) stay inert.
+  virtual void QueryCompactedSizes(AccelCompactionQueryHandle /*query*/,
+                                   const AccelStructHandle* /*accels*/, u32 /*count*/) {}
+  // Copies `src` into `dst`. With compact=true this is the compacting copy that
+  // reclaims memory: `dst` must have been created at the compacted size read
+  // back from a QueryCompactedSizes over `src` (and `src` built with
+  // allow_compaction). With compact=false it is a plain clone (dst sized like
+  // src). Maps to vkCmdCopyAccelerationStructureKHR MODE_COMPACT/MODE_CLONE and
+  // d3d12 CopyRaytracingAccelerationStructure. Default no-op (null / backends
+  // without ray tracing).
+  virtual void CopyAccelStruct(AccelStructHandle /*dst*/, AccelStructHandle /*src*/,
+                               bool /*compact*/) {}
 
   // --- profiling ---
   virtual void ResetTimestamps(TimestampPoolHandle pool, u32 first, u32 count) = 0;

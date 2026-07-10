@@ -216,6 +216,23 @@ class Device {
   virtual void DestroyAccelStruct(AccelStructHandle accel) = 0;
   virtual u64 accel_address(AccelStructHandle accel) = 0;
 
+  // Compacted-size query pool: `count` slots, one per acceleration structure a
+  // CommandList::QueryCompactedSizes call reports on. Reuse the object across
+  // frames (each QueryCompactedSizes re-resets the slots it writes). Returns a
+  // null handle on backends without compaction support (caller then skips it).
+  virtual AccelCompactionQueryHandle CreateCompactionQuery(u32 /*count*/) { return {}; }
+  virtual void DestroyCompactionQuery(AccelCompactionQueryHandle /*query*/) {}
+  // Non-blocking read of the compacted sizes (bytes) written by the matching
+  // QueryCompactedSizes. Returns false until every slot's result is ready, i.e.
+  // until the fence for the submission that carried the QueryCompactedSizes has
+  // signalled (poll it the next frame, or call it straight after ImmediateSubmit
+  // whose blocking wait guarantees readiness). On true, out[0..count) hold the
+  // sizes to pass to CreateAccelStruct before a compacting CopyAccelStruct.
+  virtual bool GetCompactedSizes(AccelCompactionQueryHandle /*query*/, u64* /*out*/,
+                                 u32 /*count*/) {
+    return false;
+  }
+
   // --- frame-safe deferred destruction ---
   // Retire a resource that a submitted-but-not-yet-finished frame may still
   // reference. The resource is parked in a per-frame-slot graveyard and freed

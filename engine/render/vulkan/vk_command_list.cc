@@ -381,6 +381,8 @@ VkAccelerationStructureBuildGeometryInfoKHR BlasBuildInfo(
   info.type = VK_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL_KHR;
   info.flags = desc.fast_trace ? VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR
                                : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
+  if (desc.allow_compaction)
+    info.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
   info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
   info.geometryCount = static_cast<u32>(geometry.geometries.size());
   info.pGeometries = geometry.geometries.data();
@@ -426,6 +428,45 @@ void VulkanCommandList::BuildTlas(AccelStructHandle tlas, const GpuBuffer& insta
   VkAccelerationStructureBuildRangeInfoKHR range{.primitiveCount = instance_count};
   const VkAccelerationStructureBuildRangeInfoKHR* ranges = &range;
   vkCmdBuildAccelerationStructuresKHR(cmd_, 1, &info, &ranges);
+}
+
+void VulkanCommandList::QueryCompactedSizes(AccelCompactionQueryHandle query,
+                                            const AccelStructHandle* accels, u32 count) {
+  AccelCompactionQueryRecord* record = Rec(query);
+  if (!record || count == 0) return;
+
+  // The property write reads the just-built structures on the AS-build stage;
+  // gate it behind the builds' AS-build writes so the sizes are final.
+  VkMemoryBarrier2 mem{.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+  mem.srcStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+  mem.srcAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR;
+  mem.dstStageMask = VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR;
+  mem.dstAccessMask = VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR;
+  VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+  dep.memoryBarrierCount = 1;
+  dep.pMemoryBarriers = &mem;
+  vkCmdPipelineBarrier2(cmd_, &dep);
+
+  // Queries must be reset before they are written; re-resettable each frame.
+  vkCmdResetQueryPool(cmd_, record->pool, 0, count);
+
+  base::Vector<VkAccelerationStructureKHR> handles;
+  handles.reserve(count);
+  for (u32 i = 0; i < count; ++i) handles.push_back(Rec(accels[i])->accel);
+  vkCmdWriteAccelerationStructuresPropertiesKHR(
+      cmd_, count, handles.data(),
+      VK_QUERY_TYPE_ACCELERATION_STRUCTURE_COMPACTED_SIZE_KHR, record->pool, 0);
+}
+
+void VulkanCommandList::CopyAccelStruct(AccelStructHandle dst, AccelStructHandle src,
+                                        bool compact) {
+  VkCopyAccelerationStructureInfoKHR info{
+      .sType = VK_STRUCTURE_TYPE_COPY_ACCELERATION_STRUCTURE_INFO_KHR};
+  info.src = Rec(src)->accel;
+  info.dst = Rec(dst)->accel;
+  info.mode = compact ? VK_COPY_ACCELERATION_STRUCTURE_MODE_COMPACT_KHR
+                      : VK_COPY_ACCELERATION_STRUCTURE_MODE_CLONE_KHR;
+  vkCmdCopyAccelerationStructureKHR(cmd_, &info);
 }
 
 void VulkanCommandList::ResetTimestamps(TimestampPoolHandle pool, u32 first, u32 count) {

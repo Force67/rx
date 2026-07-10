@@ -257,6 +257,14 @@ if(RX_BUILD_TESTS AND RX_RHI_VULKAN)
     test/shaders/offscreen_tri.vs.hlsl
     test/shaders/offscreen_tri.ps.hlsl)
   add_test(NAME offscreen_test COMMAND offscreen_test)
+
+  # Acceleration-structure compaction: builds a BLAS with allow_compaction,
+  # queries the compacted size across a submit boundary, compact-copies into a
+  # tight structure and builds a TLAS over it. Skips (exit 0) with no driver or
+  # no ray tracing; the real path runs under vkrun.
+  add_executable(compaction_test test/compaction_test.cc)
+  target_link_libraries(compaction_test PRIVATE rx::render rx::core)
+  add_test(NAME compaction_test COMMAND compaction_test)
 endif()
 
 # install()/export rules, generated last so every module target (and the

@@ -258,6 +258,7 @@ using PipelineHandle = RhiHandle<struct PipelineTag>;
 using BindingLayoutHandle = RhiHandle<struct BindingLayoutTag>;
 using BindingSetHandle = RhiHandle<struct BindingSetTag>;
 using AccelStructHandle = RhiHandle<struct AccelStructTag>;
+using AccelCompactionQueryHandle = RhiHandle<struct AccelCompactionQueryTag>;
 using TimestampPoolHandle = RhiHandle<struct TimestampPoolTag>;
 
 }  // namespace rx::render

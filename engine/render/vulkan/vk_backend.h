@@ -81,6 +81,11 @@ struct TimestampPoolRecord {
   u32 count = 0;
 };
 
+struct AccelCompactionQueryRecord {
+  VkQueryPool pool = VK_NULL_HANDLE;  // VK_QUERY_TYPE_..._COMPACTED_SIZE_KHR
+  u32 count = 0;
+};
+
 // Handle <-> record casts. Handles are record pointers; TextureView and
 // SamplerHandle carry the Vulkan handle bits directly (they are immutable and
 // need no metadata).
@@ -98,6 +103,9 @@ inline AccelStructRecord* Rec(AccelStructHandle h) {
 }
 inline TimestampPoolRecord* Rec(TimestampPoolHandle h) {
   return reinterpret_cast<TimestampPoolRecord*>(h.value);
+}
+inline AccelCompactionQueryRecord* Rec(AccelCompactionQueryHandle h) {
+  return reinterpret_cast<AccelCompactionQueryRecord*>(h.value);
 }
 template <typename Handle, typename Record>
 inline Handle MakeHandle(Record* record) {
@@ -185,6 +193,9 @@ class VulkanCommandList final : public CommandList {
                  u64 scratch_offset) override;
   void BuildTlas(AccelStructHandle tlas, const GpuBuffer& instances, u32 instance_count,
                  const GpuBuffer& scratch) override;
+  void QueryCompactedSizes(AccelCompactionQueryHandle query, const AccelStructHandle* accels,
+                           u32 count) override;
+  void CopyAccelStruct(AccelStructHandle dst, AccelStructHandle src, bool compact) override;
   void ResetTimestamps(TimestampPoolHandle pool, u32 first, u32 count) override;
   void WriteTimestamp(TimestampPoolHandle pool, u32 index, bool after_work) override;
   void BeginDebugLabel(const char* name) override;
@@ -295,6 +306,9 @@ class VulkanDevice final : public Device {
   AccelStructHandle CreateAccelStruct(AccelStructType type, u64 size) override;
   void DestroyAccelStruct(AccelStructHandle accel) override;
   u64 accel_address(AccelStructHandle accel) override;
+  AccelCompactionQueryHandle CreateCompactionQuery(u32 count) override;
+  void DestroyCompactionQuery(AccelCompactionQueryHandle query) override;
+  bool GetCompactedSizes(AccelCompactionQueryHandle query, u64* out, u32 count) override;
 
   TimestampPoolHandle CreateTimestampPool(u32 count) override;
   void DestroyTimestampPool(TimestampPoolHandle pool) override;

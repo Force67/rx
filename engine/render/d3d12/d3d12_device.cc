@@ -1681,6 +1681,8 @@ AccelSizes D3D12Device::GetBlasSizes(const BlasBuildDesc& desc) {
   inputs.Flags = desc.fast_trace
                      ? D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE
                      : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+  if (desc.allow_compaction)
+    inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
   inputs.NumDescs = static_cast<u32>(geometries.size());
   inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
   inputs.pGeometryDescs = geometries.data();

@@ -808,6 +808,8 @@ void D3D12CommandList::BuildBlas(AccelStructHandle blas, const BlasBuildDesc& de
   build.Inputs.Flags = desc.fast_trace
                            ? D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE
                            : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+  if (desc.allow_compaction)
+    build.Inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
   build.Inputs.NumDescs = static_cast<u32>(geometries.size());
   build.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
   build.Inputs.pGeometryDescs = geometries.data();
@@ -834,6 +836,19 @@ void D3D12CommandList::BuildTlas(AccelStructHandle tlas, const GpuBuffer& instan
   u64 alignment = device_.caps().accel_scratch_alignment;
   build.ScratchAccelerationStructureData = (scratch.address + alignment - 1) & ~(alignment - 1);
   list4->BuildRaytracingAccelerationStructure(&build, 0, nullptr);
+  list4->Release();
+}
+
+void D3D12CommandList::CopyAccelStruct(AccelStructHandle dst, AccelStructHandle src, bool compact) {
+  ID3D12GraphicsCommandList4* list4 = nullptr;
+  if (FAILED(list_->QueryInterface(IID_ID3D12GraphicsCommandList4,
+                                   reinterpret_cast<void**>(&list4)))) {
+    return;
+  }
+  list4->CopyRaytracingAccelerationStructure(
+      Rec(dst)->address, Rec(src)->address,
+      compact ? D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE_COMPACT
+              : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE_CLONE);
   list4->Release();
 }
 

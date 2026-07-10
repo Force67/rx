@@ -50,6 +50,15 @@ gate compilation; the null backend always builds.
   `TlasInstance` (layout-identical between VK and D3D12) and
   `Device::CreateAccelStruct`/`cmd->BuildBlas/BuildTlas`. `RayTracingContext`
   (`gi/raytracing.*`) owns BLAS/TLAS lifecycles on top.
+- **AS compaction**: build with `BlasBuildDesc::allow_compaction` (set it on the
+  matching `GetBlasSizes` too), record `cmd->QueryCompactedSizes(query, ...)`
+  after the builds, then read back with `Device::GetCompactedSizes` once the
+  submission's fence has signalled (non-blocking, poll a frame later or read
+  straight after `ImmediateSubmit`). Create a tight AS at the reported size and
+  `cmd->CopyAccelStruct(dst, src, /*compact=*/true)` into it; retire the fat one
+  via `DestroyAccelStructDeferred`. Vulkan-complete; d3d12 has the build flag +
+  compacting copy but stubs the size query (returns a null query handle); null
+  inert.
 
 ## Migration pattern (old raw Vulkan → RHI)
 
