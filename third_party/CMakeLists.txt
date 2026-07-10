@@ -2,29 +2,41 @@
 # with FETCHCONTENT_FULLY_DISCONNECTED, so anything fetched needs a flake
 # input; small single-header or few-file libraries are simpler vendored.
 
-# Dear ImGui (docking branch) with the SDL3 platform and Vulkan renderer
-# backends. The Vulkan backend resolves entry points through volk, matching
-# the engine's loader setup. Only built when a window backend exists.
+# Dear ImGui (docking branch). Split into a platform/API-agnostic core and the
+# SDL3 platform + raw-Vulkan render backends:
+#   rx_imgui_core - imgui core only (no SDL3, no volk). The engine's RHI imgui
+#                   render backend (engine/render/util/imgui_renderer) links this
+#                   for the imgui headers/structs, so engine/render pulls in
+#                   neither SDL3 nor a second volk copy.
+#   rx_imgui      - the SDL3 platform backend plus the raw imgui_impl_vulkan
+#                   backend, on top of the core. Kept for apps that still record
+#                   imgui through raw Vulkan (recreation's own debug overlay).
+# Only built when a window backend exists.
 if(SDL3_FOUND)
-  add_library(rx_imgui STATIC
+  add_library(rx_imgui_core STATIC
     imgui/imgui.cpp
     imgui/imgui_draw.cpp
     imgui/imgui_tables.cpp
     imgui/imgui_widgets.cpp
     imgui/imgui_demo.cpp
+  )
+  add_library(rx::imgui_core ALIAS rx_imgui_core)
+  target_include_directories(rx_imgui_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/imgui
+    ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends)
+
+  add_library(rx_imgui STATIC
     imgui/backends/imgui_impl_sdl3.cpp
     imgui/backends/imgui_impl_vulkan.cpp
   )
   add_library(rx::imgui ALIAS rx_imgui)
-  target_include_directories(rx_imgui PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/imgui
-    ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends)
   target_compile_definitions(rx_imgui PUBLIC IMGUI_IMPL_VULKAN_USE_VOLK)
   # imgui carries its own volk copy here. Under RX_SHARED volk is compiled hidden
   # (top-level CMakeLists), so this copy is private to the final executable and
   # does not interpose librx_render's copy; the viewer initializes it before
-  # imgui draws (see runtime/debug_ui.cc, RX_SHARED_BUILD path).
-  target_link_libraries(rx_imgui PUBLIC SDL3::SDL3 volk)
+  # imgui draws (see runtime/debug_ui.cc, RX_SHARED_BUILD path). rx_imgui_core is
+  # PUBLIC so rx::imgui consumers still get the imgui headers and one core.
+  target_link_libraries(rx_imgui PUBLIC rx_imgui_core SDL3::SDL3 volk)
 endif()
 
 add_library(rx_cgltf INTERFACE)

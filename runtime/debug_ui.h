@@ -1,11 +1,8 @@
 #ifndef RX_RUNTIME_DEBUG_UI_H_
 #define RX_RUNTIME_DEBUG_UI_H_
 
-// The overlay records raw Vulkan (imgui_impl_vulkan); the rhi headers pulled in
-// via renderer.h are backend-agnostic, so the VkFormat member below needs volk
-// directly (cf. gui_backend.h).
-#include <volk.h>
-
+// The overlay records through the engine's RHI imgui render backend
+// (render/util/imgui_renderer.h) - no raw Vulkan, no volk here.
 #include <functional>
 #include <string>
 #include <utility>
@@ -15,6 +12,10 @@
 #include "core/window.h"
 #include "core/world_clock.h"
 #include "render/core/renderer.h"
+
+#if defined(RX_HAS_IMGUI)
+#include "render/util/imgui_renderer.h"
+#endif
 
 namespace rx {
 
@@ -90,7 +91,9 @@ class DebugUi {
   int preset_file_choice_ = 0;
   char preset_save_name_[64] = "custom";
   std::string preset_status_;
-  VkFormat swapchain_format_ = VK_FORMAT_UNDEFINED;  // outlives imgui init info
+#if defined(RX_HAS_IMGUI)
+  render::ImGuiRenderer imgui_renderer_;  // RHI imgui render backend
+#endif
   f32 render_scale_ui_ = 1.0f;  // in-progress render-scale slider; committed on release
   f32 frame_times_[150] = {};
   u32 frame_time_cursor_ = 0;

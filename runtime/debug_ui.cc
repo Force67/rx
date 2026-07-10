@@ -18,12 +18,10 @@
 #include <SDL3/SDL.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
-#include <imgui_impl_vulkan.h>
 
 #include "core/log.h"
 #include "render/core/presets.h"
 #include "render/core/settings_ini.h"
-#include "render/rhi/vulkan_interop.h"
 
 namespace rx {
 namespace {
@@ -81,52 +79,23 @@ bool DebugUi::Initialize(Window& window, render::Renderer& renderer) {
   SDL_Window* sdl_window = static_cast<SDL_Window*>(window.native_handles().window);
   render::Device* device = renderer.device();
   if (!sdl_window || !device || device->is_stub()) return false;
-  // imgui_impl_vulkan records raw Vulkan; on other backends the overlay is off.
-  const render::VulkanHandles vk = render::GetVulkanHandles(*device);
-  if (vk.device == VK_NULL_HANDLE) return false;
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_DockingEnable;
   io.IniFilename = nullptr;  // no imgui.ini litter next to the binary
+  // The RHI render backend honors dynamic textures and large-mesh vertex
+  // offsets; it sets no imgui globals itself (RX_SHARED keeps one context in
+  // this app DSO), so the flags are the app's to set.
+  io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
   ImGui::StyleColorsDark();
 
   io.Fonts->AddFontDefault();
 
   if (!ImGui_ImplSDL3_InitForVulkan(sdl_window)) return false;
 
-#if defined(RX_SHARED_BUILD)
-  // In the shared build imgui links its own volk copy, compiled with hidden
-  // visibility so it does not interpose librx_render's (or SDL's) Vulkan
-  // symbols. That private table is separate from the renderer's and starts out
-  // null, so it must be initialized here before the imgui backend records any
-  // Vulkan. Re-loading an already-created instance/device is safe and cheap; in
-  // the static build there is a single shared table and this block is compiled
-  // out entirely.
-  if (volkInitialize() == VK_SUCCESS) {
-    volkLoadInstance(vk.instance);
-    volkLoadDevice(vk.device);
-  }
-#endif
-
-  swapchain_format_ = render::GetVkFormat(renderer.swapchain_format());
-  ImGui_ImplVulkan_InitInfo info{};
-  info.ApiVersion = VK_API_VERSION_1_3;
-  info.Instance = vk.instance;
-  info.PhysicalDevice = vk.physical_device;
-  info.Device = vk.device;
-  info.QueueFamily = vk.graphics_family;
-  info.Queue = vk.graphics_queue;
-  info.DescriptorPoolSize = 64;  // backend manages its own pool
-  info.MinImageCount = std::max(2u, renderer.swapchain_image_count());
-  info.ImageCount = std::max(2u, renderer.swapchain_image_count());
-  info.UseDynamicRendering = true;
-  info.PipelineInfoMain.PipelineRenderingCreateInfo = {
-      .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR};
-  info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
-  info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapchain_format_;
-  if (!ImGui_ImplVulkan_Init(&info)) {
+  if (!imgui_renderer_.Initialize(*device, renderer.swapchain_format())) {
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
     return false;
@@ -141,13 +110,13 @@ bool DebugUi::Initialize(Window& window, render::Renderer& renderer) {
   if (HideDebugUi) visible_ = false;
   window_ = &window;
   initialized_ = true;
-  RX_INFO("imgui {} initialized (vulkan dynamic rendering)", IMGUI_VERSION);
+  RX_INFO("imgui {} initialized (rhi render backend)", IMGUI_VERSION);
   return true;
 }
 
 void DebugUi::Shutdown() {
   if (!initialized_) return;
-  ImGui_ImplVulkan_Shutdown();
+  imgui_renderer_.Shutdown();
   ImGui_ImplSDL3_Shutdown();
   ImGui::DestroyContext();
   initialized_ = false;
@@ -155,7 +124,6 @@ void DebugUi::Shutdown() {
 
 void DebugUi::BeginFrame() {
   if (!initialized_) return;
-  ImGui_ImplVulkan_NewFrame();
   ImGui_ImplSDL3_NewFrame();
   ImGui::NewFrame();
 }
@@ -302,8 +270,8 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
 
   ImGui::Render();
   if (visible_ || ImGui::GetDrawData()->TotalVtxCount > 0) {
-    view->ui_draw = [](render::CommandList& cmd) {
-      ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), render::GetVkCommandBuffer(cmd));
+    view->ui_draw = [this](render::CommandList& cmd) {
+      imgui_renderer_.Render(ImGui::GetDrawData(), cmd);
     };
   }
 }

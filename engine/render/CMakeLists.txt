@@ -317,4 +317,18 @@ set(RX_SHADER_NO_DXIL
   reflection_trace.cs.hlsl
 )
 
+# Optional RHI imgui render backend. engine/render must not hard-depend on
+# imgui, so this compiles only when the vendored imgui core target exists. It
+# links imgui core only (no SDL3, no raw-Vulkan backend, no second volk copy);
+# the shaders embed alongside the rest of the render module's.
+if(TARGET rx_imgui_core)
+  target_sources(rx_render PRIVATE util/imgui_renderer.cc)
+  # BUILD_INTERFACE: kept out of the installed export (find_package consumers
+  # bring their own imgui); add_subdirectory consumers link it directly.
+  target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx_imgui_core>)
+  list(APPEND RX_RENDER_SHADERS
+    shaders/util/imgui.vs.hlsl
+    shaders/util/imgui.ps.hlsl)
+endif()
+
 rx_embed_shaders(rx_render ${RX_RENDER_SHADERS})
