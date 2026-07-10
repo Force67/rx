@@ -108,20 +108,28 @@ if(RX_RHI_D3D12)
   else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(VKD3D REQUIRED IMPORTED_TARGET libvkd3d libvkd3d-utils)
-    target_link_libraries(rx_render PRIVATE PkgConfig::VKD3D)
+    # BUILD_INTERFACE: kept out of the installed export; rxConfig.cmake
+    # re-resolves vkd3d via pkg-config for find_package consumers.
+    target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:PkgConfig::VKD3D>)
+    set(RX_INSTALL_RHI_D3D12 ON PARENT_SCOPE)
   endif()
 endif()
 
+# volk / VMA are PUBLIC (their headers propagate through the RHI interop
+# surface). Wrapped in BUILD_INTERFACE so they stay out of the installed export;
+# rxConfig.cmake re-adds bundled imported equivalents for find_package consumers.
 target_link_libraries(rx_render
-  PUBLIC rx::core rx::asset volk GPUOpen::VulkanMemoryAllocator)
-target_link_libraries(rx_render PRIVATE rx::stb)
+  PUBLIC rx::core rx::asset
+         $<BUILD_INTERFACE:volk> $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)
+target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::stb>)
 
 if(RX_FSR3)
   target_sources(rx_render PRIVATE
     post/upscaler_fsr3.cc
     post/frame_generation.cc)
   target_compile_definitions(rx_render PRIVATE RX_HAS_FSR3)
-  target_link_libraries(rx_render PRIVATE rx::ffx_fsr3)
+  target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::ffx_fsr3>)
+  set(RX_INSTALL_FSR3 ON PARENT_SCOPE)
 endif()
 
 if(RX_DLSS)
@@ -133,7 +141,8 @@ if(RX_DLSS)
   # translation unit that includes it must agree on the layout (same rule as
   # RX_HAS_NRD below).
   target_compile_definitions(rx_render PUBLIC RX_HAS_DLSS)
-  target_link_libraries(rx_render PRIVATE rx::dlss)
+  target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::dlss>)
+  set(RX_INSTALL_DLSS ON PARENT_SCOPE)
 endif()
 
 if(RX_NRD)
@@ -142,7 +151,8 @@ if(RX_NRD)
   # translation unit that includes it must agree on the layout or the Renderer
   # ctor writes past a shorter allocation.
   target_compile_definitions(rx_render PUBLIC RX_HAS_NRD)
-  target_link_libraries(rx_render PRIVATE rx::nrd)
+  target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::nrd>)
+  set(RX_INSTALL_NRD ON PARENT_SCOPE)
 endif()
 
 if(NOT MSVC)

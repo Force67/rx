@@ -12,6 +12,14 @@ endfunction()
 function(rx_add_module name)
   add_library(rx_${name} STATIC ${ARGN})
   add_library(rx::${name} ALIAS rx_${name})
-  target_include_directories(rx_${name} PUBLIC ${PROJECT_SOURCE_DIR}/engine)
+  # BUILD_INTERFACE keeps in-tree (add_subdirectory) consumers seeing the source
+  # header root unchanged; INSTALL_INTERFACE points find_package() consumers at
+  # the installed, module-qualified include root (see cmake/install.cmake).
+  target_include_directories(rx_${name} PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/engine>
+    $<INSTALL_INTERFACE:include>)
+  # C++23 is a hard usage requirement (base:: headers use deducing this etc.);
+  # propagate it so installed consumers compile with the right standard.
+  target_compile_features(rx_${name} PUBLIC cxx_std_23)
   rx_set_warnings(rx_${name})
 endfunction()

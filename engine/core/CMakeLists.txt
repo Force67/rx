@@ -10,8 +10,11 @@ rx_add_module(core
 
 # equilibrium's base library; linking it here makes base:: containers and
 # strings available to every engine module.
+# equilibrium::base is wrapped in BUILD_INTERFACE so it is not written into the
+# installed export set (find_package consumers get it back as a bundled imported
+# target from rxConfig.cmake); in-tree consumers still link it normally.
 target_link_libraries(rx_core PUBLIC
-  equilibrium::base
+  $<BUILD_INTERFACE:equilibrium::base>
   $<$<PLATFORM_ID:Linux>:pthread>)
 
 if(SDL3_FOUND)
@@ -34,7 +37,10 @@ if(SDL3_FOUND)
         ${PROJECT_SOURCE_DIR}/third_party/plasma-wayland/kde-output-device-v2-protocol.c)
       target_include_directories(rx_core PRIVATE
         ${PROJECT_SOURCE_DIR}/third_party/plasma-wayland)
-      target_link_libraries(rx_core PRIVATE PkgConfig::WAYLAND_CLIENT)
+      # BUILD_INTERFACE: kept out of the installed export; rxConfig.cmake
+      # re-resolves wayland-client via pkg-config for find_package consumers.
+      target_link_libraries(rx_core PRIVATE $<BUILD_INTERFACE:PkgConfig::WAYLAND_CLIENT>)
+      set(RX_INSTALL_WAYLAND_KDE_HDR ON PARENT_SCOPE)
       target_compile_definitions(rx_core PRIVATE RX_HAS_WAYLAND_KDE_HDR=1)
     endif()
   endif()

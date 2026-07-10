@@ -9,7 +9,11 @@ rx_add_module(asset
 )
 
 target_link_libraries(rx_asset PUBLIC rx::core)
-target_link_libraries(rx_asset PRIVATE rx::cgltf rx::stb)
+# Header-only, PRIVATE: only needed to compile rx_asset itself. Wrapped in
+# BUILD_INTERFACE so they never reach the installed export (find_package
+# consumers neither include nor link them).
+target_link_libraries(rx_asset PRIVATE
+  $<BUILD_INTERFACE:rx::cgltf> $<BUILD_INTERFACE:rx::stb>)
 
 if(NOT MSVC)
   # vendored single header libraries are not warning clean

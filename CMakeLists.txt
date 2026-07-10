@@ -21,6 +21,12 @@ option(RX_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OF
 # default. Incompatible with the sanitizer build (ASan owns the allocator).
 option(RX_MIMALLOC "Route allocations through mimalloc" OFF)
 
+# install()/find_package(rx) support. Default ON only when rx is the top-level
+# project; an add_subdirectory consumer (recreation) leaves it OFF so its build
+# is untouched. See cmake/install.cmake and EMBEDDING.md.
+option(RX_INSTALL "Generate install()/export rules for find_package(rx)"
+  ${PROJECT_IS_TOP_LEVEL})
+
 # Android is a first-class target, but several desktop backends do not apply:
 # DLSS/FSR3/NRD ship x86_64 host libraries (and Adreno has no HW ray tracing or
 # mesh shaders, so the raster path is the real path), and SDL3 is replaced by a
@@ -182,4 +188,10 @@ endforeach()
 
 if(RX_BUILD_RUNTIME)
   add_subdirectory(runtime)
+endif()
+
+# install()/export rules, generated last so every module target (and the
+# RX_INSTALL_* feature flags the modules set) already exists.
+if(RX_INSTALL)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/install.cmake)
 endif()

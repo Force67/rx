@@ -1,0 +1,134 @@
+@PACKAGE_INIT@
+
+# rxConfig.cmake - package config for a find_package(rx) consumer.
+#
+# rx's static module archives (rx::core ... rx::app) come from rxTargets.cmake.
+# Their third-party link/usage closure is bundled with the package (see
+# cmake/install.cmake) and recreated here as IMPORTED targets, then re-attached
+# to the rx:: targets. Static archives never absorb their dependencies, so this
+# is what lets the consumer's linker resolve every symbol.
+#
+# This package is toolchain/platform specific: it assumes the consumer builds
+# in the same environment rx was built in (matching C++ runtime, and pkg-config
+# reachable for the vkd3d / wayland system libraries when those were enabled).
+
+include(CMakeFindDependencyMacro)
+
+set(_rx_deps_lib "@PACKAGE_RX_DEPS_LIBDIR@")
+set(_rx_deps_inc "@PACKAGE_RX_DEPS_INCDIR@")
+
+find_dependency(Threads)
+if(@RX_INSTALL_SDL3@)
+  find_dependency(SDL3)
+endif()
+
+# Helper: define a bundled static archive as an imported target.
+function(_rx_import_static name archive)
+  if(NOT TARGET ${name})
+    add_library(${name} STATIC IMPORTED)
+    set_target_properties(${name} PROPERTIES
+      IMPORTED_LOCATION "${_rx_deps_lib}/${archive}")
+  endif()
+endfunction()
+
+# --- equilibrium::base (PUBLIC headers + defs) ------------------------------
+if(NOT TARGET equilibrium::base)
+  add_library(equilibrium::base STATIC IMPORTED)
+  set_target_properties(equilibrium::base PROPERTIES
+    IMPORTED_LOCATION "${_rx_deps_lib}/libeq_base.a"
+    INTERFACE_INCLUDE_DIRECTORIES
+      "${_rx_deps_inc}/equilibrium;${_rx_deps_inc}/equilibrium/base"
+    INTERFACE_COMPILE_DEFINITIONS "OS_LINUX;OS_POSIX;BASE_USE_STD_ATOMIC=1"
+    INTERFACE_LINK_LIBRARIES "Threads::Threads")
+endif()
+
+# --- Vulkan headers / volk / VMA (PUBLIC via rhi/vulkan_interop.h) ----------
+if(NOT TARGET Vulkan::Headers)
+  add_library(Vulkan::Headers INTERFACE IMPORTED)
+  set_target_properties(Vulkan::Headers PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${_rx_deps_inc}")
+endif()
+if(NOT TARGET volk)
+  add_library(volk STATIC IMPORTED)
+  set_target_properties(volk PROPERTIES
+    IMPORTED_LOCATION "${_rx_deps_lib}/libvolk.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${_rx_deps_inc}/volk"
+    INTERFACE_LINK_LIBRARIES "Vulkan::Headers;${CMAKE_DL_LIBS}")
+endif()
+if(NOT TARGET GPUOpen::VulkanMemoryAllocator)
+  add_library(GPUOpen::VulkanMemoryAllocator INTERFACE IMPORTED)
+  set_target_properties(GPUOpen::VulkanMemoryAllocator PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${_rx_deps_inc}/vma"
+    INTERFACE_LINK_LIBRARIES "Vulkan::Headers")
+endif()
+
+# --- PRIVATE static archives (link-only for the consumer) -------------------
+_rx_import_static(kinema::kinema libkinema.a)
+if(@RX_INSTALL_JOLT@)
+  _rx_import_static(Jolt libJolt.a)
+endif()
+if(@RX_INSTALL_FSR3@)
+  _rx_import_static(rx::ffx_fsr3 librx_ffx_fsr3.a)
+  set_property(TARGET rx::ffx_fsr3 APPEND PROPERTY INTERFACE_LINK_LIBRARIES volk)
+endif()
+if(@RX_INSTALL_DLSS@)
+  _rx_import_static(rx::dlss librx_dlss.a)
+  set_property(TARGET rx::dlss APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES "${CMAKE_DL_LIBS};volk")
+endif()
+if(@RX_INSTALL_NRD@)
+  _rx_import_static(rx::ShaderMakeBlob libShaderMakeBlob.a)
+  _rx_import_static(rx::nrd libNRD.a)
+  set_property(TARGET rx::nrd APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES rx::ShaderMakeBlob)
+endif()
+
+# --- system shared libraries re-resolved through pkg-config -----------------
+if(@RX_INSTALL_RHI_D3D12@ OR @RX_INSTALL_WAYLAND_KDE_HDR@)
+  find_package(PkgConfig REQUIRED)
+endif()
+if(@RX_INSTALL_RHI_D3D12@ AND NOT TARGET PkgConfig::VKD3D)
+  pkg_check_modules(VKD3D REQUIRED IMPORTED_TARGET libvkd3d libvkd3d-utils)
+endif()
+if(@RX_INSTALL_WAYLAND_KDE_HDR@ AND NOT TARGET PkgConfig::WAYLAND_CLIENT)
+  pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
+endif()
+
+# --- the rx module targets --------------------------------------------------
+include("${CMAKE_CURRENT_LIST_DIR}/rxTargets.cmake")
+
+# --- re-attach the bundled closure to the rx:: targets ----------------------
+set_property(TARGET rx::core APPEND PROPERTY
+  INTERFACE_LINK_LIBRARIES equilibrium::base)
+if(@RX_INSTALL_WAYLAND_KDE_HDR@)
+  set_property(TARGET rx::core APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:PkgConfig::WAYLAND_CLIENT>)
+endif()
+
+# volk / VMA are PUBLIC on rx::render (headers propagate), the SDK archives are
+# link-only.
+set_property(TARGET rx::render APPEND PROPERTY
+  INTERFACE_LINK_LIBRARIES volk GPUOpen::VulkanMemoryAllocator)
+if(@RX_INSTALL_RHI_D3D12@)
+  set_property(TARGET rx::render APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:PkgConfig::VKD3D>)
+endif()
+if(@RX_INSTALL_FSR3@)
+  set_property(TARGET rx::render APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::ffx_fsr3>)
+endif()
+if(@RX_INSTALL_DLSS@)
+  set_property(TARGET rx::render APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::dlss>)
+endif()
+if(@RX_INSTALL_NRD@)
+  set_property(TARGET rx::render APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::nrd>)
+endif()
+
+if(@RX_INSTALL_JOLT@)
+  set_property(TARGET rx::physics APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:Jolt> $<LINK_ONLY:kinema::kinema>)
+endif()
+
+check_required_components(rx)
