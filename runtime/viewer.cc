@@ -53,6 +53,10 @@ bool Viewer::OnInitialize(app::Services& services) {
   actions_ = services.actions;
   physics_entities_ = services.physics_bindings;
 
+  // The engine owns no actions; register the viewer's set (names, folds and
+  // default bindings) before the host resolves input.
+  RegisterViewerInput(*input_map_);
+
   // When SunDir is set the world clock stops driving the day/night cycle.
   drive_sun_from_clock_ = SunDir.get() == nullptr;
 

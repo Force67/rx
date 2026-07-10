@@ -5,8 +5,10 @@
 
 namespace rx {
 
-// Just the keys the engine binds. Backends translate their native codes,
-// unknown keys drop.
+// The physical keys the engine can deliver to bindings. Purely device codes;
+// which action each drives is a game decision (see InputMap). Backends
+// translate their native codes, unknown keys drop. Append only: the numeric
+// codes are frozen so a game's C# key bridge stays stable across versions.
 enum class Key : u8 {
   kW,
   kA,
@@ -17,12 +19,12 @@ enum class Key : u8 {
   kF,
   kT,
   kC,
-  kR,  // editor: rotate the selection
-  kG,  // editor: grab / move the selection
-  kX,  // editor: delete the selection
-  kZ,  // editor: undo (with Ctrl)
-  kB,  // editor: toggle the asset browser
-  kV,  // editor: duplicate the selection (with Ctrl)
+  kR,
+  kG,
+  kX,
+  kZ,
+  kB,
+  kV,
   kSpace,
   kLeftShift,
   kLeftCtrl,
@@ -30,24 +32,24 @@ enum class Key : u8 {
   kF1,
   kF2,
   kF3,
-  kF4,  // toggle the map editor
-  kF5,  // editor: save the layout
-  kDelete,     // editor: delete the selection
+  kF4,
+  kF5,
+  kDelete,
   kBackspace,  // text fields: erase
   kReturn,     // text fields: commit
-  k1,  // dialogue option select; also journal pick when the journal is open
+  k1,
   k2,
   k3,
   k4,
-  kJ,  // toggle the quest journal
-  // Menu navigation keys. Appended after the original set so the numeric codes
-  // of the keys above stay stable for the C# KeyPressed bridge.
+  kJ,
+  // The keys below were appended after the original set; keep the prior codes
+  // stable for any C# KeyPressed bridge that mirrors this enum.
   kArrowUp,
   kArrowDown,
   kArrowLeft,
   kArrowRight,
   kTab,
-  kM,  // toggle the Civil War war map (appended to keep prior codes stable)
+  kM,
   kCount,
 };
 

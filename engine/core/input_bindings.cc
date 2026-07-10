@@ -2,16 +2,19 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <utility>
 
 namespace rx {
 namespace {
 
-// --- Name tables. Each is indexed by the matching enum value, so order here
-// must track the enum declarations. ---
+// --- Device token tables. Each is indexed by the matching enum value, so order
+// here must track the enum declarations in input.h. These are physical device
+// codes, not game actions, so they stay in the engine. ---
 
 // Bindable keys, in Key declaration order (input.h).
 constexpr const char* kKeyTokens[] = {
@@ -44,24 +47,6 @@ static_assert(sizeof(kPadAxisTokens) / sizeof(kPadAxisTokens[0]) ==
                   static_cast<int>(GamepadAxis::kCount),
               "kPadAxisTokens must match the GamepadAxis enum");
 
-// Action / Axis INI names, in enum order.
-constexpr const char* kActionNames[] = {
-    "move_forward",    "move_back",      "move_left",      "move_right",
-    "jump",            "sprint",         "sneak",          "cam_up",
-    "cam_down",        "activate",       "attack",         "ready",
-    "throw_debug",     "toggle_walk",    "toggle_third_person", "toggle_journal",
-    "toggle_editor",   "toggle_menu",    "toggle_debug",   "toggle_trace",
-    "toggle_quests",   "menu_up",        "menu_down",      "menu_left",
-    "menu_right",      "menu_accept",    "menu_cancel",    "menu_tab",
-    "menu_page_left",  "menu_page_right",
-};
-static_assert(sizeof(kActionNames) / sizeof(kActionNames[0]) == static_cast<int>(Action::kCount),
-              "kActionNames must match the Action enum");
-
-constexpr const char* kAxisNames[] = {"move_x", "move_y", "look_x", "look_y"};
-static_assert(sizeof(kAxisNames) / sizeof(kAxisNames[0]) == static_cast<int>(Axis::kCount),
-              "kAxisNames must match the Axis enum");
-
 int FindToken(const char* name, const char* const* table, int count) {
   for (int i = 0; i < count; ++i)
     if (std::strcmp(name, table[i]) == 0) return i;
@@ -70,24 +55,7 @@ int FindToken(const char* name, const char* const* table, int count) {
 
 }  // namespace
 
-// --- Name lookups -----------------------------------------------------------
-
-const char* ActionName(Action a) { return kActionNames[static_cast<int>(a)]; }
-const char* AxisName(Axis a) { return kAxisNames[static_cast<int>(a)]; }
-
-bool ActionFromName(const char* name, Action* out) {
-  int i = FindToken(name, kActionNames, static_cast<int>(Action::kCount));
-  if (i < 0) return false;
-  *out = static_cast<Action>(i);
-  return true;
-}
-
-bool AxisFromName(const char* name, Axis* out) {
-  int i = FindToken(name, kAxisNames, static_cast<int>(Axis::kCount));
-  if (i < 0) return false;
-  *out = static_cast<Axis>(i);
-  return true;
-}
+// --- Binding tokens (device-only, independent of the game's action set) ------
 
 std::string BindingToken(const Binding& b) {
   switch (b.kind) {
@@ -180,94 +148,73 @@ std::string BindingLabel(const Binding& b) {
   return "(unbound)";
 }
 
-// --- Defaults ---------------------------------------------------------------
+// --- Schema registration -----------------------------------------------------
+
+void InputMap::RegisterActionId(ActionId id, const char* ini_name) {
+  if (id >= kMaxActions) return;
+  action_names_[id] = ini_name;
+  if (id + 1 > action_count_) action_count_ = id + 1;
+}
+
+void InputMap::RegisterAxisId(AxisId id, const char* ini_name) {
+  if (id >= kMaxAxes) return;
+  axis_names_[id] = ini_name;
+  if (id + 1 > axis_count_) axis_count_ = id + 1;
+}
+
+void InputMap::RegisterFoldId(AxisId axis, ActionId positive, ActionId negative) {
+  folds_.push_back({axis, positive, negative});
+}
+
+void InputMap::SetDefaultsFn(std::function<void(InputMap&)> fn) {
+  defaults_ = std::move(fn);
+  LoadDefaults();
+}
+
+const char* InputMap::ActionName(ActionId a) const {
+  return a < kMaxActions ? action_names_[a] : nullptr;
+}
+
+const char* InputMap::AxisName(AxisId a) const {
+  return a < kMaxAxes ? axis_names_[a] : nullptr;
+}
+
+bool InputMap::ActionFromName(const char* name, ActionId* out) const {
+  for (int i = 0; i < action_count_; ++i)
+    if (action_names_[i] && std::strcmp(name, action_names_[i]) == 0) {
+      *out = static_cast<ActionId>(i);
+      return true;
+    }
+  return false;
+}
+
+bool InputMap::AxisFromName(const char* name, AxisId* out) const {
+  for (int i = 0; i < axis_count_; ++i)
+    if (axis_names_[i] && std::strcmp(name, axis_names_[i]) == 0) {
+      *out = static_cast<AxisId>(i);
+      return true;
+    }
+  return false;
+}
+
+// --- Defaults ----------------------------------------------------------------
 
 void InputMap::LoadDefaults() {
   for (auto& v : action_) v.clear();
   for (auto& v : axis_) v.clear();
-
-  auto key = [](Key k) { return Binding{SourceKind::kKey, static_cast<u16>(k), 0}; };
-  auto mb = [](MouseButton m) { return Binding{SourceKind::kMouseButton, static_cast<u16>(m), 0}; };
-  auto pad = [](GamepadButton g) {
-    return Binding{SourceKind::kGamepadButton, static_cast<u16>(g), 0};
-  };
-  auto axis = [](GamepadAxis a, i8 dir) {
-    return Binding{SourceKind::kGamepadAxis, static_cast<u16>(a), dir};
-  };
-
-  // Movement (keyboard discrete; the sticks feed the analog Axis values below).
-  AddBinding(Action::kMoveForward, key(Key::kW));
-  AddBinding(Action::kMoveBack, key(Key::kS));
-  AddBinding(Action::kMoveLeft, key(Key::kA));
-  AddBinding(Action::kMoveRight, key(Key::kD));
-  AddBinding(Action::kJump, key(Key::kSpace));
-  AddBinding(Action::kJump, pad(GamepadButton::kSouth));
-  AddBinding(Action::kSprint, key(Key::kLeftShift));
-  AddBinding(Action::kSprint, pad(GamepadButton::kLeftStick));
-  AddBinding(Action::kSneak, key(Key::kLeftCtrl));
-  AddBinding(Action::kSneak, pad(GamepadButton::kRightStick));
-  AddBinding(Action::kCamUp, key(Key::kE));
-  AddBinding(Action::kCamUp, pad(GamepadButton::kRightShoulder));
-  AddBinding(Action::kCamDown, key(Key::kQ));
-  AddBinding(Action::kCamDown, pad(GamepadButton::kLeftShoulder));
-
-  // Gameplay verbs.
-  AddBinding(Action::kActivate, key(Key::kE));
-  AddBinding(Action::kActivate, pad(GamepadButton::kWest));
-  AddBinding(Action::kAttack, mb(MouseButton::kLeft));
-  AddBinding(Action::kAttack, axis(GamepadAxis::kRightTrigger, 1));
-  AddBinding(Action::kReady, key(Key::kR));
-  AddBinding(Action::kReady, pad(GamepadButton::kNorth));
-  AddBinding(Action::kThrowDebug, key(Key::kF));
-
-  // Mode toggles.
-  AddBinding(Action::kToggleWalk, key(Key::kT));
-  AddBinding(Action::kToggleThirdPerson, key(Key::kC));
-  AddBinding(Action::kToggleJournal, key(Key::kJ));
-  AddBinding(Action::kToggleJournal, pad(GamepadButton::kTouchpad));
-  AddBinding(Action::kToggleEditor, key(Key::kF4));
-  AddBinding(Action::kToggleMenu, key(Key::kEscape));
-  AddBinding(Action::kToggleMenu, pad(GamepadButton::kStart));
-  AddBinding(Action::kToggleDebug, key(Key::kF1));
-  AddBinding(Action::kToggleTrace, key(Key::kF2));
-  AddBinding(Action::kToggleQuests, key(Key::kF3));
-
-  // Menu navigation: keyboard arrows + gamepad dpad and left stick.
-  AddBinding(Action::kMenuUp, key(Key::kArrowUp));
-  AddBinding(Action::kMenuUp, pad(GamepadButton::kDpadUp));
-  AddBinding(Action::kMenuUp, axis(GamepadAxis::kLeftY, -1));
-  AddBinding(Action::kMenuDown, key(Key::kArrowDown));
-  AddBinding(Action::kMenuDown, pad(GamepadButton::kDpadDown));
-  AddBinding(Action::kMenuDown, axis(GamepadAxis::kLeftY, 1));
-  AddBinding(Action::kMenuLeft, key(Key::kArrowLeft));
-  AddBinding(Action::kMenuLeft, pad(GamepadButton::kDpadLeft));
-  AddBinding(Action::kMenuLeft, axis(GamepadAxis::kLeftX, -1));
-  AddBinding(Action::kMenuRight, key(Key::kArrowRight));
-  AddBinding(Action::kMenuRight, pad(GamepadButton::kDpadRight));
-  AddBinding(Action::kMenuRight, axis(GamepadAxis::kLeftX, 1));
-  AddBinding(Action::kMenuAccept, key(Key::kReturn));
-  AddBinding(Action::kMenuAccept, pad(GamepadButton::kSouth));
-  AddBinding(Action::kMenuCancel, key(Key::kEscape));
-  AddBinding(Action::kMenuCancel, pad(GamepadButton::kEast));
-  AddBinding(Action::kMenuTab, key(Key::kTab));
-  AddBinding(Action::kMenuPageLeft, pad(GamepadButton::kLeftShoulder));
-  AddBinding(Action::kMenuPageRight, pad(GamepadButton::kRightShoulder));
-
-  // Analog axes: left stick drives movement, right stick drives the look.
-  AddBinding(Axis::kMoveX, axis(GamepadAxis::kLeftX, 0));
-  AddBinding(Axis::kMoveY, axis(GamepadAxis::kLeftY, 0));
-  AddBinding(Axis::kLookX, axis(GamepadAxis::kRightX, 0));
-  AddBinding(Axis::kLookY, axis(GamepadAxis::kRightY, 0));
+  if (defaults_) defaults_(*this);
 }
 
-void InputMap::AddBinding(Action a, Binding b) {
-  auto& v = action_[idx(a)];
+void InputMap::AddActionBinding(ActionId a, Binding b) {
+  if (a >= kMaxActions) return;
+  auto& v = action_[a];
   if (static_cast<int>(v.size()) >= kMaxBindings) return;
   if (std::find(v.begin(), v.end(), b) == v.end()) v.push_back(b);
 }
 
-void InputMap::AddBinding(Axis a, Binding b) {
-  auto& v = axis_[idx(a)];
+void InputMap::AddAxisBindingId(AxisId a, Binding b) {
+  if (a >= kMaxAxes) return;
+  auto& v = axis_[a];
   if (static_cast<int>(v.size()) >= kMaxBindings) return;
   if (std::find(v.begin(), v.end(), b) == v.end()) v.push_back(b);
 }
@@ -281,12 +228,13 @@ int SourceFamily(SourceKind k) {
 }
 }  // namespace
 
-void InputMap::Rebind(Action a, Binding b) {
+void InputMap::RebindAction(ActionId a, Binding b) {
+  if (a >= kMaxActions) return;
   // Remove this source from every action so it isn't bound twice.
   for (auto& v : action_)
     v.erase(std::remove(v.begin(), v.end(), b), v.end());
   // Drop the target's existing same-family binding, then add the new one.
-  auto& t = action_[idx(a)];
+  auto& t = action_[a];
   const int fam = SourceFamily(b.kind);
   t.erase(std::remove_if(t.begin(), t.end(),
                          [&](const Binding& x) { return SourceFamily(x.kind) == fam; }),
@@ -309,14 +257,14 @@ void InputMap::ResetToDefaults() {
   led_b = 120;
 }
 
-Action InputMap::ConflictingAction(const Binding& b) const {
-  for (int a = 0; a < static_cast<int>(Action::kCount); ++a)
+ActionId InputMap::ConflictingAction(const Binding& b) const {
+  for (int a = 0; a < action_count_; ++a)
     if (std::find(action_[a].begin(), action_[a].end(), b) != action_[a].end())
-      return static_cast<Action>(a);
-  return Action::kCount;
+      return static_cast<ActionId>(a);
+  return static_cast<ActionId>(action_count_);
 }
 
-// --- Resolution -------------------------------------------------------------
+// --- Resolution --------------------------------------------------------------
 
 bool InputMap::SourceHeld(const Binding& b, const InputState& kbm, const GamepadState& pad) const {
   switch (b.kind) {
@@ -357,14 +305,14 @@ f32 InputMap::AxisValue(const Binding& b, const GamepadState& pad) const {
 
 void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, ActionState* out) {
   // Analog axes from their gamepad sources (summed, then clamped).
-  for (int a = 0; a < static_cast<int>(Axis::kCount); ++a) {
+  for (int a = 0; a < axis_count_; ++a) {
     f32 v = 0;
     for (const Binding& b : axis_[a]) v += AxisValue(b, pad);
     out->analog[a] = std::clamp(v, -1.0f, 1.0f);
   }
 
   // Digital actions: a source held => action held; edge from the previous pump.
-  for (int a = 0; a < static_cast<int>(Action::kCount); ++a) {
+  for (int a = 0; a < action_count_; ++a) {
     bool held = false;
     for (const Binding& b : action_[a])
       if (SourceHeld(b, kbm, pad)) {
@@ -376,16 +324,14 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, ActionSta
     prev_held_[a] = held;
   }
 
-  // Fold keyboard movement into the move axes so gameplay reads one value.
-  // Stick convention is SDL's: down/right positive, so forward subtracts on Y.
-  auto fold = [&](Axis ax, Action positive, Action negative) {
-    f32 v = out->analog[idx(ax)];
-    if (out->down(positive)) v += 1.0f;
-    if (out->down(negative)) v -= 1.0f;
-    out->analog[idx(ax)] = std::clamp(v, -1.0f, 1.0f);
-  };
-  fold(Axis::kMoveX, Action::kMoveRight, Action::kMoveLeft);
-  fold(Axis::kMoveY, Action::kMoveBack, Action::kMoveForward);
+  // Fold each registered digital +/- action pair into its analog axis, so
+  // gameplay reads keyboard movement and stick deflection as one value.
+  for (const Fold& f : folds_) {
+    f32 v = out->analog[f.axis];
+    if (out->held[f.positive]) v += 1.0f;
+    if (out->held[f.negative]) v -= 1.0f;
+    out->analog[f.axis] = std::clamp(v, -1.0f, 1.0f);
+  }
 
   // Track the most recently active device for prompt glyphs.
   bool kbm_active = kbm.text_len > 0 || kbm.mouse_dx != 0 || kbm.mouse_dy != 0 || kbm.wheel != 0;
@@ -409,7 +355,7 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, ActionSta
   out->last_device = last_device_;
 }
 
-// --- Persistence ------------------------------------------------------------
+// --- Persistence -------------------------------------------------------------
 
 namespace {
 
@@ -472,26 +418,26 @@ bool InputMap::LoadFromIni(const std::string& path) {
         led_b = hex(4);
       }
     } else if (section == "actions") {
-      Action a;
+      ActionId a;
       if (!ActionFromName(key.c_str(), &a)) continue;
-      action_[idx(a)].clear();  // file overrides the default for this action
+      action_[a].clear();  // file overrides the default for this action
       std::stringstream ss(value);
       std::string tok;
       while (std::getline(ss, tok, ',')) {
         tok = Trim(tok);
         Binding b;
-        if (!tok.empty() && BindingFromToken(tok.c_str(), &b)) AddBinding(a, b);
+        if (!tok.empty() && BindingFromToken(tok.c_str(), &b)) AddActionBinding(a, b);
       }
     } else if (section == "axes") {
-      Axis ax;
+      AxisId ax;
       if (!AxisFromName(key.c_str(), &ax)) continue;
-      axis_[idx(ax)].clear();
+      axis_[ax].clear();
       std::stringstream ss(value);
       std::string tok;
       while (std::getline(ss, tok, ',')) {
         tok = Trim(tok);
         Binding b;
-        if (!tok.empty() && BindingFromToken(tok.c_str(), &b)) AddBinding(ax, b);
+        if (!tok.empty() && BindingFromToken(tok.c_str(), &b)) AddAxisBindingId(ax, b);
       }
     }
   }
@@ -523,14 +469,16 @@ bool InputMap::SaveToIni(const std::string& path) const {
   };
 
   out << "[actions]\n";
-  for (int a = 0; a < static_cast<int>(Action::kCount); ++a) {
-    out << kActionNames[a] << "=";
+  for (int a = 0; a < action_count_; ++a) {
+    if (!action_names_[a]) continue;
+    out << action_names_[a] << "=";
     write_tokens(action_[a]);
     out << "\n";
   }
   out << "\n[axes]\n";
-  for (int x = 0; x < static_cast<int>(Axis::kCount); ++x) {
-    out << kAxisNames[x] << "=";
+  for (int x = 0; x < axis_count_; ++x) {
+    if (!axis_names_[x]) continue;
+    out << axis_names_[x] << "=";
     write_tokens(axis_[x]);
     out << "\n";
   }

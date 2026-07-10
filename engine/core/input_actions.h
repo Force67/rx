@@ -5,67 +5,51 @@
 
 namespace rx {
 
-// Semantic, device-agnostic input. Gameplay queries these instead of raw keys
-// so the same code serves keyboard/mouse and gamepad, and bindings can be
-// remapped at runtime (see InputMap in input_bindings.h). Raw InputState /
-// GamepadState stay available for text fields, the editor, and the C# bridge.
-enum class Action : u8 {
-  // Movement (digital; analog sticks feed the Axis values below as well).
-  kMoveForward,
-  kMoveBack,
-  kMoveLeft,
-  kMoveRight,
-  kJump,
-  kSprint,
-  kSneak,
-  kCamUp,    // free-fly camera rise (Q)
-  kCamDown,  // free-fly camera descend (E)
-  // Gameplay verbs.
-  kActivate,
-  kAttack,
-  kReady,
-  kThrowDebug,
-  // Mode toggles.
-  kToggleWalk,
-  kToggleThirdPerson,
-  kToggleJournal,
-  kToggleEditor,
-  kToggleMenu,
-  // Debug overlays.
-  kToggleDebug,
-  kToggleTrace,
-  kToggleQuests,
-  // Menu navigation (also drives the ugui focus ring).
-  kMenuUp,
-  kMenuDown,
-  kMenuLeft,
-  kMenuRight,
-  kMenuAccept,
-  kMenuCancel,
-  kMenuTab,
-  kMenuPageLeft,
-  kMenuPageRight,
-  kCount,
-};
+// Semantic, device-agnostic input. Gameplay queries resolved *actions* and
+// *axes* instead of raw keys, so the same code serves keyboard/mouse and
+// gamepad and bindings can be remapped at runtime (see InputMap in
+// input_bindings.h). Raw InputState / GamepadState stay available for text
+// fields, the editor, and the C# bridge.
+//
+// The engine owns none of the actions: which verbs and screens exist is a game
+// decision. An application defines its own action/axis enums, registers their
+// stable names + default bindings with an InputMap at startup, and queries the
+// resolved ActionState with those enum values. Action / axis ids are plain
+// small integers here; the game's enums cast to them.
+using ActionId = u16;
+using AxisId = u16;
 
-// Analog axes in [-1,1] (down/right positive). Look axes carry the right stick;
-// mouse look stays on InputState deltas. Move axes combine stick deflection with
-// the digital movement actions so gameplay can read one continuous value.
-enum class Axis : u8 { kMoveX, kMoveY, kLookX, kLookY, kCount };
+// Fixed upper bounds on how many actions/axes an application may register. Sized
+// generously; the resolved ActionState carries one slot per possible id so the
+// snapshot stays a trivially-copyable POD regardless of the game's set.
+inline constexpr int kMaxActions = 64;
+inline constexpr int kMaxAxes = 8;
 
 enum class InputDevice : u8 { kKeyboardMouse, kGamepad };
 
-// Resolved per pump from InputState + GamepadState through an InputMap.
+// Resolved per pump from InputState + GamepadState through an InputMap. Indexed
+// by the application's action/axis ids (its enum values cast to an integer).
 struct ActionState {
-  bool held[static_cast<u8>(Action::kCount)] = {};
-  bool edge[static_cast<u8>(Action::kCount)] = {};  // went down this pump
-  f32 analog[static_cast<u8>(Axis::kCount)] = {};
+  bool held[kMaxActions] = {};
+  bool edge[kMaxActions] = {};  // went down this pump
+  f32 analog[kMaxAxes] = {};
   // Which device produced the most recent input, for prompt glyphs.
   InputDevice last_device = InputDevice::kKeyboardMouse;
 
-  bool down(Action a) const { return held[static_cast<u8>(a)]; }
-  bool pressed(Action a) const { return edge[static_cast<u8>(a)]; }
-  f32 axis(Axis a) const { return analog[static_cast<u8>(a)]; }
+  // Accept the game's own enum (or a raw id) directly, so call sites read
+  // actions.down(Action::kJump) without casting.
+  template <class A>
+  bool down(A a) const {
+    return held[static_cast<int>(a)];
+  }
+  template <class A>
+  bool pressed(A a) const {
+    return edge[static_cast<int>(a)];
+  }
+  template <class X>
+  f32 axis(X x) const {
+    return analog[static_cast<int>(x)];
+  }
 };
 
 }  // namespace rx

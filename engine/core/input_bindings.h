@@ -1,6 +1,7 @@
 #ifndef RX_CORE_INPUT_BINDINGS_H_
 #define RX_CORE_INPUT_BINDINGS_H_
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -30,13 +31,44 @@ struct Binding {
 // raw input into an ActionState each pump, and serialises to a controls INI.
 // One instance lives for the session; Resolve keeps the previous held state so
 // it can report per-action press edges regardless of the source device.
+//
+// The map knows *how* to resolve and persist input but not *which* actions
+// exist: the application registers its action/axis set (stable INI name per id,
+// the digital->analog folds, and a default-binding routine) at startup, then
+// drives resolution and rebinding by its own enum values. This keeps every
+// game-specific verb, screen, and key default out of the engine.
 class InputMap {
  public:
   static constexpr int kMaxBindings = 3;  // per action/axis (primary + alternates)
 
-  InputMap() { LoadDefaults(); }
+  // Empty until the application registers its schema and defaults.
+  InputMap() = default;
 
-  // Installs the built-in keyboard/mouse + gamepad layout.
+  // --- Schema registration (call once at startup, before Resolve / LoadFromIni)
+  // Registers an action/axis id with the stable token used in controls.ini and
+  // the rebind UI. `id` is the game's enum value; names must round-trip old INIs.
+  template <class A>
+  void RegisterAction(A id, const char* ini_name) {
+    RegisterActionId(static_cast<ActionId>(id), ini_name);
+  }
+  template <class X>
+  void RegisterAxis(X id, const char* ini_name) {
+    RegisterAxisId(static_cast<AxisId>(id), ini_name);
+  }
+  // Folds a digital +/- action pair into an analog axis, so keyboard movement
+  // reads as one continuous value alongside the stick (e.g. move_x from
+  // move_right / move_left).
+  template <class X, class A>
+  void RegisterFold(X axis, A positive, A negative) {
+    RegisterFoldId(static_cast<AxisId>(axis), static_cast<ActionId>(positive),
+                   static_cast<ActionId>(negative));
+  }
+  // The application's default-binding routine (it calls AddBinding/AddAxisBinding
+  // for its whole set). Stored so ResetToDefaults() can reapply it, and invoked
+  // immediately to seed the built-in layout.
+  void SetDefaultsFn(std::function<void(InputMap&)> fn);
+
+  // Reapplies the registered defaults (bindings only).
   void LoadDefaults();
 
   // Builds `out` from this pump's raw input. Non-const: tracks press edges and
@@ -44,22 +76,47 @@ class InputMap {
   void Resolve(const InputState& kbm, const GamepadState& pad, ActionState* out);
 
   // --- Rebinding (used by the settings UI) ---
-  const std::vector<Binding>& bindings(Action a) const { return action_[idx(a)]; }
-  const std::vector<Binding>& bindings(Axis a) const { return axis_[idx(a)]; }
-  void ClearBindings(Action a) { action_[idx(a)].clear(); }
-  void ClearBindings(Axis a) { axis_[idx(a)].clear(); }
+  template <class A>
+  const std::vector<Binding>& bindings(A a) const {
+    return action_[static_cast<int>(a)];
+  }
+  template <class X>
+  const std::vector<Binding>& axis_bindings(X a) const {
+    return axis_[static_cast<int>(a)];
+  }
+  template <class A>
+  void ClearBindings(A a) {
+    action_[static_cast<int>(a)].clear();
+  }
+  template <class X>
+  void ClearAxisBindings(X a) {
+    axis_[static_cast<int>(a)].clear();
+  }
   // Adds a binding (capped at kMaxBindings, drops duplicates).
-  void AddBinding(Action a, Binding b);
-  void AddBinding(Axis a, Binding b);
+  template <class A>
+  void AddBinding(A a, Binding b) {
+    AddActionBinding(static_cast<ActionId>(a), b);
+  }
+  template <class X>
+  void AddAxisBinding(X a, Binding b) {
+    AddAxisBindingId(static_cast<AxisId>(a), b);
+  }
   // Rebinds an action to `b`: removes `b` from every other action (no dup),
   // replaces `a`'s existing same-family binding (keyboard/mouse vs gamepad), and
   // keeps the other-device binding. Used by the settings capture flow.
-  void Rebind(Action a, Binding b);
+  template <class A>
+  void Rebind(A a, Binding b) {
+    RebindAction(static_cast<ActionId>(a), b);
+  }
   // Restores the built-in bindings and the look/deadzone options.
   void ResetToDefaults();
-  // Returns the action this source is already bound to, or Action::kCount if
-  // free. Lets the UI warn about / clear conflicts before committing a rebind.
-  Action ConflictingAction(const Binding& b) const;
+  // Returns the action id this source is already bound to, or the registered
+  // action count if free. Lets the UI warn about / clear conflicts before a
+  // rebind.
+  ActionId ConflictingAction(const Binding& b) const;
+
+  int action_count() const { return action_count_; }
+  int axis_count() const { return axis_count_; }
 
   // --- Options (persisted) ---
   f32 look_sens_kbm = 0.0025f;  // radians per mouse pixel
@@ -80,23 +137,43 @@ class InputMap {
   static std::string DefaultConfigPath();
 
  private:
-  static int idx(Action a) { return static_cast<int>(a); }
-  static int idx(Axis a) { return static_cast<int>(a); }
+  struct Fold {
+    AxisId axis;
+    ActionId positive;
+    ActionId negative;
+  };
+
+  void RegisterActionId(ActionId id, const char* ini_name);
+  void RegisterAxisId(AxisId id, const char* ini_name);
+  void RegisterFoldId(AxisId axis, ActionId positive, ActionId negative);
+
+  void AddActionBinding(ActionId a, Binding b);
+  void AddAxisBindingId(AxisId a, Binding b);
+  void RebindAction(ActionId a, Binding b);
+
+  // Registered INI name for an id, or nullptr / false when unregistered.
+  const char* ActionName(ActionId a) const;
+  const char* AxisName(AxisId a) const;
+  bool ActionFromName(const char* name, ActionId* out) const;
+  bool AxisFromName(const char* name, AxisId* out) const;
 
   bool SourceHeld(const Binding& b, const InputState& kbm, const GamepadState& pad) const;
   f32 AxisValue(const Binding& b, const GamepadState& pad) const;
 
-  std::vector<Binding> action_[static_cast<int>(Action::kCount)];
-  std::vector<Binding> axis_[static_cast<int>(Axis::kCount)];
-  bool prev_held_[static_cast<int>(Action::kCount)] = {};
+  std::vector<Binding> action_[kMaxActions];
+  std::vector<Binding> axis_[kMaxAxes];
+  bool prev_held_[kMaxActions] = {};
+
+  const char* action_names_[kMaxActions] = {};
+  const char* axis_names_[kMaxAxes] = {};
+  int action_count_ = 0;  // one past the highest registered action id
+  int axis_count_ = 0;    // one past the highest registered axis id
+  std::vector<Fold> folds_;
+  std::function<void(InputMap&)> defaults_;
+
   InputDevice last_device_ = InputDevice::kKeyboardMouse;
 };
 
-// Human-readable names for the INI and the rebind UI. Round-trip safe.
-const char* ActionName(Action a);
-bool ActionFromName(const char* name, Action* out);
-const char* AxisName(Axis a);
-bool AxisFromName(const char* name, Axis* out);
 // Source token, e.g. "key:W", "mouse:left", "pad:south", "padaxis:lefty+".
 std::string BindingToken(const Binding& b);
 bool BindingFromToken(const char* token, Binding* out);
