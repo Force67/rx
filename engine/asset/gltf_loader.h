@@ -8,6 +8,7 @@
 #include "asset/material.h"
 #include "asset/mesh.h"
 #include "asset/texture.h"
+#include "core/export.h"
 #include "core/math.h"
 
 namespace rx::asset {
@@ -33,7 +34,7 @@ struct GltfScene {
 // Loads .gltf or .glb including external buffers and images. Generates
 // tangents from uv derivatives when the source has none. Returns false and
 // logs on malformed input.
-bool LoadGltfScene(const std::string& path, GltfScene* out);
+RX_ASSET_EXPORT bool LoadGltfScene(const std::string& path, GltfScene* out);
 
 }  // namespace rx::asset
 

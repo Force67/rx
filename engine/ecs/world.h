@@ -14,7 +14,7 @@
 
 namespace rx::ecs {
 
-class World {
+class RX_ECS_EXPORT World {
  public:
   World();
   ~World();

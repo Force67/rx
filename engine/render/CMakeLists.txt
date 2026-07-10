@@ -118,6 +118,8 @@ endif()
 # volk / VMA are PUBLIC (their headers propagate through the RHI interop
 # surface). Wrapped in BUILD_INTERFACE so they stay out of the installed export;
 # rxConfig.cmake re-adds bundled imported equivalents for find_package consumers.
+# Under RX_SHARED volk is compiled hidden (see the top-level CMakeLists), so each
+# DSO that links it gets a private, non-interposing copy it initializes itself.
 target_link_libraries(rx_render
   PUBLIC rx::core rx::asset
          $<BUILD_INTERFACE:volk> $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)

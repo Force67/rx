@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include "core/export.h"
 #include "render/core/settings.h"
 
 namespace rx::render {
@@ -33,10 +34,10 @@ int ApplyIni(std::string_view text, RenderSettings& s);
 
 // Reads a preset file and overlays it onto `s` (see ApplyIni). False if the file
 // cannot be opened.
-bool LoadSettingsIni(const std::filesystem::path& path, RenderSettings& s);
+RX_RENDER_EXPORT bool LoadSettingsIni(const std::filesystem::path& path, RenderSettings& s);
 
 // Writes SettingsToIni(s) to `path`. False on a write error.
-bool SaveSettingsIni(const std::filesystem::path& path, const RenderSettings& s);
+RX_RENDER_EXPORT bool SaveSettingsIni(const std::filesystem::path& path, const RenderSettings& s);
 
 }  // namespace rx::render
 

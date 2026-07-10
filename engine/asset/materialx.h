@@ -4,6 +4,7 @@
 #include <string>
 
 #include "asset/material.h"
+#include "core/export.h"
 
 namespace rx::asset {
 
@@ -13,7 +14,7 @@ namespace rx::asset {
 // film, emission, ...) onto the engine's pbr lobes. Node-graph connected inputs
 // (no constant value) are skipped. Returns false on a read/parse error; out is
 // left at its defaults for inputs the document omits.
-bool LoadMaterialX(const std::string& path, Material* out);
+RX_ASSET_EXPORT bool LoadMaterialX(const std::string& path, Material* out);
 
 }  // namespace rx::asset
 

@@ -46,7 +46,7 @@ struct SignatureEqual {
 };
 
 // Columnar storage. One column per component type, rows are entities.
-class Archetype {
+class RX_ECS_EXPORT Archetype {
  public:
   explicit Archetype(Signature signature);
   ~Archetype();

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cmath>
 
+#include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -85,7 +86,7 @@ struct SkyLighting {
   Vec3 sun_color;         // light tint (warm at the horizon, cool at night)
   f32 ambient = 0;        // flat fill so shadows are not crushed black
 };
-SkyLighting ComputeSkyLighting(f32 hour);
+RX_CORE_EXPORT SkyLighting ComputeSkyLighting(f32 hour);
 
 }  // namespace rx
 

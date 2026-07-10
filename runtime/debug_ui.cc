@@ -96,6 +96,20 @@ bool DebugUi::Initialize(Window& window, render::Renderer& renderer) {
 
   if (!ImGui_ImplSDL3_InitForVulkan(sdl_window)) return false;
 
+#if defined(RX_SHARED_BUILD)
+  // In the shared build imgui links its own volk copy, compiled with hidden
+  // visibility so it does not interpose librx_render's (or SDL's) Vulkan
+  // symbols. That private table is separate from the renderer's and starts out
+  // null, so it must be initialized here before the imgui backend records any
+  // Vulkan. Re-loading an already-created instance/device is safe and cheap; in
+  // the static build there is a single shared table and this block is compiled
+  // out entirely.
+  if (volkInitialize() == VK_SUCCESS) {
+    volkLoadInstance(vk.instance);
+    volkLoadDevice(vk.device);
+  }
+#endif
+
   swapchain_format_ = render::GetVkFormat(renderer.swapchain_format());
   ImGui_ImplVulkan_InitInfo info{};
   info.ApiVersion = VK_API_VERSION_1_3;

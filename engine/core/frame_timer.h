@@ -3,12 +3,13 @@
 
 #include <chrono>
 
+#include "core/export.h"
 #include "core/types.h"
 
 namespace rx {
 
 // Fixed timestep simulation clock with a variable render delta.
-class FrameTimer {
+class RX_CORE_EXPORT FrameTimer {
  public:
   explicit FrameTimer(f64 fixed_step = 1.0 / 60.0);
 

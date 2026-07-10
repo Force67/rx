@@ -3,6 +3,7 @@
 
 #include <string>
 
+#include "core/export.h"
 #include "core/types.h"
 #include "render/rhi/device.h"
 #include "render/core/settings.h"
@@ -25,18 +26,18 @@ enum class QualityPreset : u8 {
 
 // Tunes a fresh RenderSettings for the tier, then clamps every ray-traced
 // feature off when the device cannot do it, so the result is always runnable.
-RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps);
+RX_RENDER_EXPORT RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps);
 
 // Picks a concrete tier from the gpu class, vram and ray tracing support.
-QualityPreset DetectPreset(const DeviceCaps& caps);
+RX_RENDER_EXPORT QualityPreset DetectPreset(const DeviceCaps& caps);
 
 // Resolves kAuto, leaves a concrete tier untouched.
 inline QualityPreset ResolvePreset(QualityPreset preset, const DeviceCaps& caps) {
   return preset == QualityPreset::kAuto ? DetectPreset(caps) : preset;
 }
 
-const char* PresetName(QualityPreset preset);
-QualityPreset ParsePreset(const std::string& name);  // kAuto on no match
+RX_RENDER_EXPORT const char* PresetName(QualityPreset preset);
+RX_RENDER_EXPORT QualityPreset ParsePreset(const std::string& name);  // kAuto on no match
 
 }  // namespace rx::render
 

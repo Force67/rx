@@ -16,7 +16,7 @@ using SystemFn = base::StaticFunction<void(World& world, f32 dt), 256>;
 
 enum class Stage { kPreSim, kSim, kPostSim, kPreRender, kStageCount };
 
-class Scheduler {
+class RX_ECS_EXPORT Scheduler {
  public:
   void AddSystem(Stage stage, base::NameString name, SystemFn fn);
   void RunStage(Stage stage, World& world, f32 dt);

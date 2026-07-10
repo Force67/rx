@@ -9,6 +9,7 @@
 #include "audio/audio_device.h"
 #include "audio/mixer.h"
 #include "audio/spatial.h"
+#include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -26,7 +27,7 @@ namespace rx::audio {
 // Suppression: RX_AUDIO_MUTE (base::Option "audio.mute") opens no device and
 // makes every play a no-op; RX_AUDIO_VOLUME ("audio.volume", 0..1) sets the
 // master level. Both are read once at Initialize.
-class AudioSystem {
+class RX_AUDIO_EXPORT AudioSystem {
  public:
   // `vfs` supplies sound bytes; may be null (then only absolute callers that hand
   // over bytes directly work, and path lookups fail quietly). Returns false when

@@ -20,6 +20,10 @@ if(SDL3_FOUND)
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui
     ${CMAKE_CURRENT_SOURCE_DIR}/imgui/backends)
   target_compile_definitions(rx_imgui PUBLIC IMGUI_IMPL_VULKAN_USE_VOLK)
+  # imgui carries its own volk copy here. Under RX_SHARED volk is compiled hidden
+  # (top-level CMakeLists), so this copy is private to the final executable and
+  # does not interpose librx_render's copy; the viewer initializes it before
+  # imgui draws (see runtime/debug_ui.cc, RX_SHARED_BUILD path).
   target_link_libraries(rx_imgui PUBLIC SDL3::SDL3 volk)
 endif()
 

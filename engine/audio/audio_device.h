@@ -3,6 +3,7 @@
 
 #include <vector>
 
+#include "core/export.h"
 #include "core/types.h"
 
 namespace rx::audio {
@@ -13,7 +14,7 @@ class Mixer;
 // and pulls interleaved stereo float from the mixer on SDL's audio thread. When
 // SDL audio is not compiled in (Android's native backend, a headless server) Open
 // is a no-op that reports inactive, and the rest of the audio system runs silent.
-class AudioDevice {
+class RX_AUDIO_EXPORT AudioDevice {
  public:
   ~AudioDevice();
 

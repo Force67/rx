@@ -9,6 +9,7 @@
 #include <base/containers/vector.h>
 
 #include "asset/mesh.h"
+#include "core/export.h"
 #include "core/math.h"
 #include "core/window.h"
 #include "render/screenspace/ambient_occlusion.h"
@@ -150,7 +151,7 @@ struct FrameView {
   mutable SamplerHandle blur_sampler;
 };
 
-class Renderer {
+class RX_RENDER_EXPORT Renderer {
  public:
   Renderer();
   ~Renderer();

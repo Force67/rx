@@ -3,6 +3,7 @@
 
 #include <string_view>
 
+#include "core/export.h"
 #include "core/types.h"
 
 namespace rx::asset {
@@ -27,11 +28,11 @@ struct AssetId {
   explicit operator bool() const { return hash != 0; }
 };
 
-AssetId MakeAssetId(std::string_view normalized_path);
+RX_ASSET_EXPORT AssetId MakeAssetId(std::string_view normalized_path);
 
 // Lowercases and converts backslashes to forward slashes (e.g. Bethesda-style
 // backslash asset paths normalize the same as forward-slash ones).
-std::string NormalizePath(std::string_view path);
+RX_ASSET_EXPORT std::string NormalizePath(std::string_view path);
 
 }  // namespace rx::asset
 

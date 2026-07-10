@@ -9,6 +9,7 @@
 #include <base/containers/vector.h>
 #include <base/memory/unique_pointer.h>
 
+#include "core/export.h"
 #include "core/types.h"
 
 namespace rx::asset {
@@ -28,7 +29,7 @@ class FileProvider {
 // Later mounts win. Mount base game archives first, then DLC, then mod
 // archives in plugin order, then loose files last. This reproduces the
 // override behavior mods rely on.
-class Vfs {
+class RX_ASSET_EXPORT Vfs {
  public:
   void Mount(base::UniquePointer<FileProvider> provider);
 

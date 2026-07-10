@@ -186,6 +186,55 @@ public headers into the package** and **recreates them as imported targets in
   the include path of the rx targets that need them; treat them as private to
   rx, not as a general vendored-dependency SDK.
 
+## RX_SHARED — shared-library mode (experimental, the "DLL test")
+
+`-DRX_SHARED=ON` builds each rx module as a shared object (`librx_core.so`,
+`librx_render.so`, ...) instead of a static archive. This is **not** a
+distribution mode — the static build is what ships. It is a correctness
+discipline: every module is compiled with hidden visibility (in *both* build
+modes, so the annotations stay honest), and a symbol only crosses a module
+boundary when its declaration carries that module's export macro from
+`engine/core/export.h` (`RX_CORE_EXPORT`, `RX_RENDER_EXPORT`, ...). Building
+shared forces the real cross-DSO API to be declared and flushes out ambient
+process-global state that a single static link would paper over.
+
+```sh
+cmake -S . -B build/shared -G Ninja -DRX_SHARED=ON -DRX_INSTALL=OFF
+cmake --build build/shared
+ldd build/shared/runtime/rx | grep librx_   # links the 8 module .so's
+```
+
+Status and constraints:
+
+- **Experimental.** Configuring with `RX_SHARED=ON` prints a warning. The
+  Linux/GCC + Vulkan + vkd3d configuration on this tree builds and runs all
+  demos; MSVC `__declspec(dllexport/dllimport)` branches exist in `export.h` but
+  are untested.
+- **`RX_SHARED` + `RX_INSTALL` is unsupported** and errors out at configure
+  time: the install/export packaging bundles and re-imports *static* `rx_*`
+  archives. `RX_INSTALL` defaults on only for a top-level rx, so pass
+  `-DRX_INSTALL=OFF` (an `add_subdirectory` consumer already has it off).
+- **`base::Option` env knobs are per-DSO.** equilibrium's option registry
+  (`base::InitChain`) keeps its list head in a vague-linkage function-local
+  static. Under hidden visibility that head is a *separate instance per shared
+  object*, so `base::InitOptionsFromEnv()` called from one DSO only populates
+  that DSO's options. rx handles this by re-applying env overrides inside each
+  option-owning DSO at init (`Renderer::Initialize`, `AudioSystem::Initialize`,
+  the viewer's `main`), all guarded by `RX_SHARED_BUILD` so the static build is
+  unchanged. Net effect: `RX_WIN_W`, `RX_ASYNC_COMPUTE`, `RX_AUDIO_VOLUME`, etc.
+  all work — but the mechanism differs from the static single-registry build,
+  and a *new* option-owning DSO must apply its own overrides. `base::Feature`
+  (the `features.def` registry in `rx::core`) is unaffected: it is a hand-rolled
+  array reached only through exported `core` functions, so it is single-instance
+  process-wide either way.
+- **volk is one private copy per DSO.** volk's global function-pointer table is
+  named identically to the real Vulkan entry points; exporting it would collide
+  with SDL's own Vulkan symbols, and leaving it half-exported (volk's default)
+  splits the filled table from the read table across DSOs. Under `RX_SHARED`
+  volk is compiled fully hidden, so each DSO that uses it (`librx_render`, the
+  viewer's imgui) gets a private, non-interposing copy that it initializes
+  itself (render in `vk_device.cc`, the viewer in `debug_ui.cc`).
+
 ## Current limitations
 
 - No public/private header split yet: every module header is reachable from

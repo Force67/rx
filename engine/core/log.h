@@ -4,15 +4,17 @@
 #include <format>
 #include <string_view>
 
+#include "core/export.h"
+
 namespace rx {
 
 enum class LogLevel { kTrace, kDebug, kInfo, kWarn, kError };
 
 namespace detail {
-void LogMessage(LogLevel level, std::string_view message);
+RX_CORE_EXPORT void LogMessage(LogLevel level, std::string_view message);
 }
 
-void SetLogLevel(LogLevel level);
+RX_CORE_EXPORT void SetLogLevel(LogLevel level);
 
 template <typename... Args>
 void Log(LogLevel level, std::format_string<Args...> fmt, Args&&... args) {

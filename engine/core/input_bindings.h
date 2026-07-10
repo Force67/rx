@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include "core/export.h"
 #include "core/input.h"
 #include "core/input_actions.h"
 #include "core/types.h"
@@ -37,7 +38,7 @@ struct Binding {
 // the digital->analog folds, and a default-binding routine) at startup, then
 // drives resolution and rebinding by its own enum values. This keeps every
 // game-specific verb, screen, and key default out of the engine.
-class InputMap {
+class RX_CORE_EXPORT InputMap {
  public:
   static constexpr int kMaxBindings = 3;  // per action/axis (primary + alternates)
 

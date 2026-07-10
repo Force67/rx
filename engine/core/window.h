@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "core/export.h"
 #include "core/input.h"
 #include "core/types.h"
 
@@ -29,7 +30,7 @@ struct NativeWindowHandles {
   void* display = nullptr;
 };
 
-class Window {
+class RX_CORE_EXPORT Window {
  public:
   virtual ~Window() = default;
 

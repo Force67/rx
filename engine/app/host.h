@@ -9,6 +9,7 @@
 
 #include "app/application.h"
 #include "app/services.h"
+#include "core/export.h"
 #include "core/frame_timer.h"
 
 namespace rx::app {
@@ -17,7 +18,7 @@ namespace rx::app {
 // runs the fixed-step simulation + render loop and tears them down. Game
 // policy enters only through the Application callbacks; the host appears in
 // no engine signature below this layer.
-class Host {
+class RX_APP_EXPORT Host {
  public:
   Host() = default;
   ~Host();

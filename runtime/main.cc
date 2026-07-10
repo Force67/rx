@@ -1,6 +1,8 @@
 #include <cstring>
 #include <string>
 
+#include <base/option.h>
+
 #include "app/host.h"
 #include "core/log.h"
 #include "viewer.h"
@@ -55,6 +57,15 @@ int main(int argc, char** argv) {
   app_config.renderer = config.renderer;
   app_config.preset = config.preset;
   app_config.headless = config.headless;
+
+#if defined(RX_SHARED_BUILD)
+  // The viewer's own base::Option knobs (viewer.cc, camera_input.cc,
+  // demo_scenes.cc, debug_ui.cc) live on this executable's InitChain, which
+  // under RX_SHARED is a separate instance from the engine DSOs' chains. Apply
+  // the executable's env overrides here; each engine DSO applies its own at
+  // subsystem init. Compiled out in the static build (one shared chain).
+  base::InitOptionsFromEnv();
+#endif
 
   rx::Viewer viewer(config);
   rx::app::Host host;

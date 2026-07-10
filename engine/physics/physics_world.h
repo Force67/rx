@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "asset/mesh.h"
+#include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
 #include "physics/shape_desc.h"
@@ -23,7 +24,7 @@ using JointId = u64;
 // below a water surface get buoyancy and drag impulses each step (the Jolt
 // boat/water sample scheme), with the surface height supplied per position
 // so streamed worlds and flat demo sheets share one path.
-class PhysicsWorld {
+class RX_PHYSICS_EXPORT PhysicsWorld {
  public:
   // Returns true with the surface height and flow velocity when `position`
   // is over water. Flow drags floating bodies (rivers carry them).

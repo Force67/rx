@@ -10,9 +10,11 @@
 #include <base/containers/static_function.h>
 #include <base/containers/vector.h>
 
+#include "core/export.h"
+
 namespace rx {
 
-class JobSystem {
+class RX_CORE_EXPORT JobSystem {
  public:
   // Closures are stored inline; captures must fit and be copy-constructible.
   using JobFn = base::StaticFunction<void(), 256>;

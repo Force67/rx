@@ -12,6 +12,7 @@
 
 #include <vk_mem_alloc.h>
 
+#include "core/export.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
 
@@ -27,7 +28,7 @@ struct VulkanHandles {
 };
 
 // Null-filled when `device` is not the Vulkan backend.
-VulkanHandles GetVulkanHandles(Device& device);
+RX_RENDER_EXPORT VulkanHandles GetVulkanHandles(Device& device);
 
 // The command list's VkCommandBuffer, or null on other backends.
 inline VkCommandBuffer GetVkCommandBuffer(CommandList& cmd) {
@@ -35,12 +36,12 @@ inline VkCommandBuffer GetVkCommandBuffer(CommandList& cmd) {
 }
 
 // Raw handles behind rhi resources, for handing to api-specific SDKs.
-VkImage GetVkImage(const GpuImage& image);
-VkImageView GetVkImageView(TextureView view);
-VkSampler GetVkSampler(SamplerHandle sampler);
-VkBuffer GetVkBuffer(const GpuBuffer& buffer);
-VkAccelerationStructureKHR GetVkAccelStruct(AccelStructHandle accel);
-VkFormat GetVkFormat(Format format);
+RX_RENDER_EXPORT VkImage GetVkImage(const GpuImage& image);
+RX_RENDER_EXPORT VkImageView GetVkImageView(TextureView view);
+RX_RENDER_EXPORT VkSampler GetVkSampler(SamplerHandle sampler);
+RX_RENDER_EXPORT VkBuffer GetVkBuffer(const GpuBuffer& buffer);
+RX_RENDER_EXPORT VkAccelerationStructureKHR GetVkAccelStruct(AccelStructHandle accel);
+RX_RENDER_EXPORT VkFormat GetVkFormat(Format format);
 
 }  // namespace rx::render
 
