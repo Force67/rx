@@ -15,6 +15,7 @@
 #include "engine_context.h"
 #include "render/core/renderer.h"
 #include "scene_hook_demo.h"
+#include "scene_hook_rhi_demo.h"
 
 namespace rx {
 
@@ -62,6 +63,8 @@ class DemoScenes {
   void EmitLocomotion(f32 dt, render::FrameView& view);
   // Bring-your-own-GPU-passes acceptance demo (--demo scenehook).
   void CreateSceneHookDemoScene();
+  // Pure-RHI GPU-driven acceptance demo (--demo scenehook-rhi).
+  void CreateSceneHookRhiDemoScene();
 
   struct DemoParticle {
     Vec3 position;
@@ -127,6 +130,9 @@ class DemoScenes {
   // --demo scenehook: an app-owned raw-Vulkan GPU pass recorded through rx's
   // scene hooks. Non-null only for that demo.
   std::unique_ptr<SceneHookDemo> scene_hook_;
+  // --demo scenehook-rhi: the same acceptance scene driven purely through the
+  // backend-agnostic RHI. Non-null only for that demo.
+  std::unique_ptr<SceneHookRhiDemo> scene_hook_rhi_;
 };
 
 }  // namespace rx

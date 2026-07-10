@@ -67,10 +67,44 @@ void DemoScenes::CreateSceneHookDemoScene() {
   }
 }
 
-void DemoScenes::Shutdown() { scene_hook_.reset(); }
+void DemoScenes::CreateSceneHookRhiDemoScene() {
+  // Reuse the scenehook scene layout (rx cube + ground) so the app's own pure-RHI
+  // GPU-driven boxes visibly interleave in depth with rx geometry.
+  asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));
+  asset::Mesh ground = asset::MakeCube(3.0f, asset::MakeAssetId("builtin/ground"));
+  if (!config_.headless) {
+    renderer_.UploadMesh(cube);
+    renderer_.UploadMesh(ground);
+  }
+  ecs::Entity center = world_.Create();
+  world_.Add(center, scene::Transform{.position = {0.0f, 0.5f, 0.0f}});
+  world_.Add(center, scene::Renderable{cube.id});
+
+  ecs::Entity floor = world_.Create();
+  world_.Add(floor, scene::Transform{.position = {0.0f, -3.1f, 0.0f}});
+  world_.Add(floor, scene::Renderable{ground.id});
+
+  camera_.set_position({2.5f, 2.0f, 4.0f});
+  camera_.set_yaw_pitch(-0.56f, -0.31f);
+  camera_.speed = 4.0f;
+
+  if (!config_.headless) {
+    scene_hook_rhi_ = std::make_unique<SceneHookRhiDemo>();
+    if (!scene_hook_rhi_->Init(renderer_)) {
+      RX_WARN("scenehook-rhi demo unavailable; showing the rx geometry only");
+      scene_hook_rhi_.reset();
+    }
+  }
+}
+
+void DemoScenes::Shutdown() {
+  scene_hook_.reset();
+  scene_hook_rhi_.reset();
+}
 
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (scene_hook_) scene_hook_->Emit(dt, view);
+  if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   UpdateParticles(dt, view);
   if (gpu_particle_count_ > 0) {
     view.gpu_particle_count = gpu_particle_count_;
@@ -1794,6 +1828,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "scenehook") {
     CreateSceneHookDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "scenehook-rhi") {
+    CreateSceneHookRhiDemoScene();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));

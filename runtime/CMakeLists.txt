@@ -8,6 +8,7 @@ set(RX_RUNTIME_SOURCES
   viewer_input.cc
   demo_scenes.cc
   scene_hook_demo.cc
+  scene_hook_rhi_demo.cc
   fly_camera.cc
   showcase_camera.cc
   debug_ui.cc
@@ -39,11 +40,19 @@ set(RX_SHADER_NO_DXIL
   scenehook_cull.cs.hlsl
   scenehook.vs.hlsl
   scenehook.ps.hlsl
+  scenehook_rhi_cull.cs.hlsl
+  scenehook_rhi.vs.hlsl
+  scenehook_rhi.ps.hlsl
+  scenehook_rhi.ms.hlsl
 )
 rx_embed_shaders(rx
   shaders/scenehook_cull.cs.hlsl
   shaders/scenehook.vs.hlsl
   shaders/scenehook.ps.hlsl
+  shaders/scenehook_rhi_cull.cs.hlsl
+  shaders/scenehook_rhi.vs.hlsl
+  shaders/scenehook_rhi.ps.hlsl
+  shaders/scenehook_rhi.ms.hlsl
 )
 
 if(TARGET rx_imgui)
