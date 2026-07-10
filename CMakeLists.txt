@@ -223,8 +223,20 @@ set(RX_MODULES
 if(RX_BUILD_TESTS)
   enable_testing()  # before the libs so their add_test calls register
 endif()
-set(KINEMA_BUILD_TESTS ${RX_BUILD_TESTS})
-add_subdirectory(libs/kinema)
+
+# kinema: the skeletal animation runtime, its own repo since 2026-07
+# (github.com/Force67/kinema), consumed as a sibling checkout like the other
+# co-developed libraries. A parent project may already vendor it; only add it
+# when the target is absent.
+if(NOT TARGET kinema)
+  set(RX_KINEMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../kinema" CACHE PATH "Path to a kinema checkout")
+  if(NOT EXISTS "${RX_KINEMA_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+      "kinema not found at ${RX_KINEMA_DIR}; clone https://github.com/Force67/kinema next to rx (or set RX_KINEMA_DIR)")
+  endif()
+  set(KINEMA_BUILD_TESTS ${RX_BUILD_TESTS})
+  add_subdirectory(${RX_KINEMA_DIR} kinema)
+endif()
 
 foreach(module ${RX_MODULES})
   add_subdirectory(engine/${module})

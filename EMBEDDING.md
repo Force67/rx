@@ -56,6 +56,9 @@ provides the targets, checked with `if(NOT TARGET ...)`:
 - `volk` / `VMA` / `Vulkan::Headers` - fetched (pinned tags) when absent.
 - `equilibrium::base` - from rx's `third_party/equilibrium` submodule when
   absent (`git submodule update --init` in the rx checkout).
+- `kinema` - the skeletal animation runtime, a sibling checkout of
+  [Force67/kinema](https://github.com/Force67/kinema) when absent
+  (`RX_KINEMA_DIR` overrides the `../kinema` default).
 - `SDL3` - `find_package` (QUIET); without it the window/audio backends
   compile to headless stubs. `RX_FETCH_SDL3=ON` downloads it instead.
 

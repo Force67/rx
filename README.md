@@ -24,7 +24,9 @@ viewer runtime in place of the game.
 - **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** - entity
   storage and scheduling, scene components, Jolt-backed rigid bodies, pose and
   locomotion helpers, an SDL mixer with wav/xwma decoding, and a small RPC
-  value/registry layer. `libs/kinema` is a reusable SoA animation runtime.
+  value/registry layer. Skeletal animation sampling comes from
+  [kinema](https://github.com/Force67/kinema), a reusable SoA animation
+  runtime consumed as a sibling checkout.
 - **engine/app** - the composition root a game embeds instead of forking the
   viewer: `app::Host` owns the subsystems and the fixed-step/render loop and
   drives a game-implemented `app::Application`. See [EMBEDDING.md](EMBEDDING.md)
@@ -41,6 +43,7 @@ viewer runtime in place of the game.
 
 ```sh
 git submodule update --init          # third_party/equilibrium
+git clone https://github.com/Force67/kinema ../kinema   # animation runtime (sibling)
 tools/get_jolt.sh                    # physics (optional but recommended)
 tools/get_fidelityfx.sh              # FSR3 (optional)
 tools/get_nrd.sh                     # NRD denoiser (optional)
