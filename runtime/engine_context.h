@@ -9,6 +9,7 @@
 #include "asset/asset_database.h"
 #include "asset/vfs.h"
 #include "audio/audio_system.h"
+#include "core/input_actions.h"
 #include "core/math.h"
 #include "debug_ui.h"
 #include "ecs/scheduler.h"
@@ -52,6 +53,9 @@ struct EngineContext {
   audio::AudioSystem* audio = nullptr;
   DebugUi* debug_ui = nullptr;
   base::Vector<PhysicsEntity>* physics_entities = nullptr;
+  // Resolved semantic input this frame (move/look axes); null before the first
+  // pump. Demos read it to drive interactive behaviour (e.g. locomotion speed).
+  const ActionState* actions = nullptr;
 
   // Late-built services, null until the engine creates them.
   asset::AssetDatabase* assets = nullptr;

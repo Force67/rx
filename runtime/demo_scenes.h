@@ -6,6 +6,11 @@
 
 #include <base/containers/vector.h>
 
+#include "anim/anim_graph.h"
+#include "anim/foot_placement.h"
+#include "anim/pose.h"
+#include "anim/rig_player.h"
+#include "asset/skeleton.h"
 #include "core/math.h"
 #include "engine_context.h"
 #include "render/core/renderer.h"
@@ -48,6 +53,8 @@ class DemoScenes {
   void CreateStrandHairDemoScene();
   void CreateImposterDemoScene();
   void CreateSssDemoScene();
+  void CreateLocomotionDemoScene();
+  void EmitLocomotion(f32 dt, render::FrameView& view);
 
   struct DemoParticle {
     Vec3 position;
@@ -89,6 +96,26 @@ class DemoScenes {
   u32 hair_orbit_groom_ = 0;           // the groom driven on a slow orbit
   Vec3 hair_orbit_center_{0, 0, 0};
   f32 hair_time_ = 0;
+
+  // Locomotion demo: a kinema-driven skinned biped. The archetype graph is
+  // shared; the rig player + foot placement hold this one character's state. The
+  // pose/palette buffers are reused every frame (no per-frame allocation).
+  bool locomotion_enabled_ = false;
+  asset::Skeleton loco_skeleton_;
+  asset::SkinBinding loco_skin_;
+  u64 loco_mesh_ = 0;
+  anim::AnimGraph loco_graph_;
+  anim::RigPlayer loco_rig_;
+  anim::FootPlacement loco_feet_;
+  anim::SkeletonPose loco_pose_;
+  base::Vector<i32> loco_remap_;
+  base::Vector<Mat4> loco_bone_model_;
+  base::Vector<Mat4> loco_palette_;
+  Vec3 loco_pos_{0, 0, 0};
+  f32 loco_yaw_ = 0;
+  f32 loco_time_ = 0;
+  u32 loco_footsteps_ = 0;
+  Mat4 loco_prev_xform_ = Mat4::Identity();
 };
 
 }  // namespace rx

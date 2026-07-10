@@ -16,6 +16,7 @@
 #include "core/math.h"
 #include "render/geometry/hair_groom.h"
 #include "scene/components.h"
+#include "viewer_input.h"
 
 namespace rx {
 
@@ -83,6 +84,8 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
     Mat4 m = MakeTranslation(pos) * MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * std::sin(a)));
     renderer_.SetHairGroomTransform(hair_orbit_groom_, m);
   }
+
+  if (locomotion_enabled_) EmitLocomotion(dt, view);
 }
 
 namespace {
@@ -1749,6 +1752,10 @@ void DemoScenes::CreateDemoScene() {
     CreatePointLightDemoScene();
     return;
   }
+  if (config_.demo_scene == "locomotion") {
+    CreateLocomotionDemoScene();
+    return;
+  }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));
   asset::Mesh ground = asset::MakeCube(2.5f, asset::MakeAssetId("builtin/ground"));
   if (!config_.headless) {
@@ -1776,7 +1783,153 @@ void DemoScenes::CreateDemoScene() {
   RX_INFO("no scene given, spinning a cube instead");
 }
 
+namespace {
+// FNV-1a, matching kinema::HashName, so the demo can name a curve without
+// pulling in kinema (which stays a private detail of engine/anim).
+constexpr u64 NameHash(const char* s) {
+  u64 h = 14695981039346656037ull;
+  while (*s) {
+    h ^= static_cast<u8>(*s++);
+    h *= 1099511628211ull;
+  }
+  return h;
+}
+}  // namespace
 
+void DemoScenes::CreateLocomotionDemoScene() {
+  locomotion_enabled_ = true;
 
+  // The character: a blocky skinned biped and its rig, driven by a kinema graph.
+  asset::Mesh biped;
+  asset::MakeSkinnedBiped(asset::MakeAssetId("builtin/locomotion/biped"), &loco_skeleton_, &biped);
+  asset::Material skin_mat;
+  skin_mat.id = asset::MakeAssetId("builtin/locomotion/biped_mat");
+  skin_mat.base_color_factor[0] = 0.64f;
+  skin_mat.base_color_factor[1] = 0.46f;
+  skin_mat.base_color_factor[2] = 0.36f;
+  skin_mat.roughness_factor = 0.7f;
+  biped.lods[0].submeshes[0].material = skin_mat.id;
+  loco_skin_ = biped.skin;
+  loco_mesh_ = biped.id.hash;
+  if (!config_.headless) {
+    renderer_.UploadMaterial(skin_mat);
+    renderer_.UploadMesh(biped);
+  }
+
+  // Shared animation archetype; per-character player + foot placement bound to it.
+  loco_graph_ = anim::BuildBipedLocomotionGraph(loco_skeleton_);
+  loco_rig_.Bind(loco_graph_);
+  loco_feet_.Bind(loco_graph_, 0.08f);
+  loco_remap_ = anim::BuildBoneRemap(loco_skeleton_, loco_skin_);
+  loco_pose_.ResetToBind(loco_skeleton_);
+  loco_pos_ = {0, 0, -2.0f};
+  loco_yaw_ = 0.0f;  // facing +Z, the walk direction
+
+  // Ground + collision (foot IK raycasts against it).
+  asset::Material gmat;
+  gmat.id = asset::MakeAssetId("builtin/locomotion/ground_mat");
+  gmat.base_color_factor[0] = 0.32f;
+  gmat.base_color_factor[1] = 0.34f;
+  gmat.base_color_factor[2] = 0.30f;
+  gmat.roughness_factor = 0.95f;
+  if (!config_.headless) renderer_.UploadMaterial(gmat);
+
+  asset::Mesh ground = asset::MakeBox(20.0f, 0.5f, 20.0f, asset::MakeAssetId("builtin/loco/ground"));
+  ground.lods[0].submeshes.push_back({0, static_cast<u32>(ground.lods[0].indices.size()), gmat.id});
+  if (!config_.headless) renderer_.UploadMesh(ground);
+  ecs::Entity g = world_.Create();
+  world_.Add(g, scene::Transform{.position = {0, -0.5f, 0}});  // top surface at y = 0
+  world_.Add(g, scene::Renderable{ground.id});
+  physics_.AddStaticBox({0, -0.5f, 0}, {20.0f, 0.5f, 20.0f});
+
+  // A run of uneven bumps along the +Z walk path for the foot placement to adapt
+  // to (each box's top is its height above the ground plane).
+  asset::Mesh bump = asset::MakeBox(0.55f, 0.12f, 0.7f, asset::MakeAssetId("builtin/loco/bump"));
+  bump.lods[0].submeshes.push_back({0, static_cast<u32>(bump.lods[0].indices.size()), gmat.id});
+  if (!config_.headless) renderer_.UploadMesh(bump);
+  const f32 heights[5] = {0.07f, 0.15f, 0.10f, 0.19f, 0.09f};
+  for (int i = 0; i < 5; ++i) {
+    f32 z = 0.6f + static_cast<f32>(i) * 1.45f;
+    f32 x = (i % 2 == 0) ? -0.14f : 0.14f;
+    f32 cy = heights[i] - 0.12f;  // box centre so its top sits at `heights[i]`
+    ecs::Entity be = world_.Create();
+    world_.Add(be, scene::Transform{.position = {x, cy, z}});
+    world_.Add(be, scene::Renderable{bump.id});
+    physics_.AddStaticBox({x, cy, z}, {0.55f, 0.12f, 0.7f});
+  }
+
+  // Side-on camera framing the path.
+  camera_.set_position({-4.5f, 2.8f, 3.0f});
+  camera_.set_yaw_pitch(1.5708f, -0.35f);
+  RX_INFO("locomotion demo: kinema-driven biped (idle/walk/run blend + foot IK)");
+}
+
+void DemoScenes::EmitLocomotion(f32 dt, render::FrameView& view) {
+  (void)dt;
+  // Fixed step so a headless capture animates deterministically by frame count
+  // regardless of wall-clock frame time.
+  const f32 sdt = 1.0f / 60.0f;
+  loco_time_ += sdt;
+
+  // Speed: the viewer's move axes when the player drives, else a scripted
+  // idle->walk->run ramp so an unattended capture still shows locomotion.
+  f32 speed = 0.0f;
+  bool input_driven = false;
+  if (ctx_.actions) {
+    f32 mx = ctx_.actions->axis(Axis::kMoveX);
+    f32 my = ctx_.actions->axis(Axis::kMoveY);
+    f32 mag = std::sqrt(mx * mx + my * my);
+    if (mag > 0.05f) {
+      speed = std::min(mag, 1.0f) * 4.5f;  // full stick -> run
+      input_driven = true;
+    }
+  }
+  if (!input_driven) {
+    f32 t = loco_time_;
+    if (t < 0.7f) speed = 0.0f;
+    else if (t < 1.4f) speed = (t - 0.7f) / 0.7f * 1.6f;       // ramp into a walk
+    else if (t < 2.0f) speed = 1.6f + (t - 1.4f) / 0.6f * 2.4f;  // ramp into a run
+    else speed = 4.0f;
+  }
+  loco_rig_.SetSpeed(speed);
+
+  // Advance the graph. Footfall markers + the footstep-intensity curve are
+  // consumed here as a footstep log (the notify/curve path, demonstrably fired).
+  Vec3 root = loco_rig_.Update(sdt, &loco_pose_, [&](const anim::RigPlayer::Event& e) {
+    if (e.phase != anim::RigPlayer::Event::Phase::kPoint) return;
+    ++loco_footsteps_;
+    f32 intensity = loco_rig_.SampleCurve(NameHash("FootstepIntensity"), 0.5f);
+    RX_INFO("footstep {} (#{}, intensity {:.2f})", e.name, loco_footsteps_, intensity);
+  });
+
+  // Root motion moves the entity (never teleported inside the anim layer). Loop
+  // it back so it keeps re-crossing the bump run and stays framed.
+  Quat facing = QuatFromAxisAngle({0, 1, 0}, loco_yaw_);
+  loco_pos_ += Rotate(facing, root);
+  if (loco_pos_.z > 8.0f) loco_pos_.z = -2.0f;
+
+  // Foot placement: raycast the physics world under each foot. The probe works
+  // in the actor's model space; convert to/from world with the actor transform
+  // (physics stays out of engine/anim).
+  Mat4 actor = MakeTransform(loco_pos_, facing, 1.0f);
+  Mat4 inv = Inverse(actor);
+  auto probe = [&](const Vec3& model_origin, Vec3* hit, Vec3* normal) -> bool {
+    Vec3 world_origin = TransformPoint(actor, model_origin);
+    physics::PhysicsWorld::RayHit rh;
+    if (!physics_.Raycast(world_origin, {0, -1, 0}, 2.0f, &rh)) return false;
+    *hit = TransformPoint(inv, rh.position);
+    *normal = Normalize(TransformDir(inv, rh.normal));
+    return true;
+  };
+  loco_feet_.Apply(&loco_pose_, probe);
+
+  // Skin the SoA pose into a GPU palette and submit one skinned draw.
+  anim::ComputeModelMatrices(loco_skeleton_, loco_pose_, &loco_bone_model_);
+  anim::BuildSkinPalette(loco_bone_model_, loco_skin_, loco_remap_, &loco_palette_);
+  i32 skin_offset = static_cast<i32>(view.bone_matrices.size());
+  for (const Mat4& m : loco_palette_) view.bone_matrices.push_back(m);
+  view.draws.push_back({loco_mesh_, actor, loco_prev_xform_, skin_offset});
+  loco_prev_xform_ = actor;
+}
 
 }  // namespace rx
