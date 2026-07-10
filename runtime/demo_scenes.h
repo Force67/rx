@@ -14,6 +14,7 @@
 #include "core/math.h"
 #include "engine_context.h"
 #include "render/core/renderer.h"
+#include "scene_hook_demo.h"
 
 namespace rx {
 
@@ -30,6 +31,10 @@ class DemoScenes {
   // Appends the live demo effects (particles, gaussians, oit, lights, fur, gpu
   // particles) into this frame's render view.
   void EmitToView(f32 dt, render::FrameView& view);
+
+  // Releases demo-owned GPU resources (the scenehook demo's raw pipelines) while
+  // the renderer's device is still alive. Call from the app's OnShutdown.
+  void Shutdown();
 
  private:
   void CreateWaterDemoScene();
@@ -55,6 +60,8 @@ class DemoScenes {
   void CreateSssDemoScene();
   void CreateLocomotionDemoScene();
   void EmitLocomotion(f32 dt, render::FrameView& view);
+  // Bring-your-own-GPU-passes acceptance demo (--demo scenehook).
+  void CreateSceneHookDemoScene();
 
   struct DemoParticle {
     Vec3 position;
@@ -116,6 +123,10 @@ class DemoScenes {
   f32 loco_time_ = 0;
   u32 loco_footsteps_ = 0;
   Mat4 loco_prev_xform_ = Mat4::Identity();
+
+  // --demo scenehook: an app-owned raw-Vulkan GPU pass recorded through rx's
+  // scene hooks. Non-null only for that demo.
+  std::unique_ptr<SceneHookDemo> scene_hook_;
 };
 
 }  // namespace rx

@@ -194,6 +194,9 @@ void Viewer::OnFrameEnd() {
 }
 
 void Viewer::OnShutdown() {
+  // Release demo GPU resources (scenehook raw pipelines) before the host tears
+  // the renderer's device down.
+  if (demos_) demos_->Shutdown();
   if (!config_.headless) debug_ui_.Shutdown();
 }
 

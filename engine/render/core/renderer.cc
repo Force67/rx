@@ -179,7 +179,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   window_ = &window;
   device_ = Device::Create({.backend = backend,
                             .enable_validation = desc.enable_validation,
-                            .request_raytracing = desc.enable_raytracing},
+                            .request_raytracing = desc.enable_raytracing,
+                            .extra_device_extensions = desc.vulkan.extensions},
                            window);
   if (device_->is_stub()) {
     RX_WARN("renderer running in stub mode");
@@ -2968,6 +2969,61 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     }
   }
 
+  // App scene passes (render/rhi hooks): record raw app GPU work into rx's
+  // frame, depth-interleaved with rx geometry. Nothing added when unset.
+  // `add_scene_hook` runs the callback inside a first-class graph pass with the
+  // color/depth (and, for the opaque phase, depth-export) writes declared so the
+  // graph barriers them; the callback opens its own dynamic-rendering section.
+  auto add_scene_hook = [&](const std::function<void(const SceneHookContext&)>& hook,
+                            ScenePhase phase, ResourceHandle color_h, ResourceHandle depth_h,
+                            ResourceHandle export_h) {
+    const f32 jx = globals.jitter[0], jy = globals.jitter[1];
+    graph_.AddPass(
+        phase == ScenePhase::kOpaque ? "app_scene_opaque" : "app_scene_transparent",
+        [color_h, depth_h, export_h](RenderGraph::PassBuilder& b) {
+          b.Write(color_h, ResourceUsage::kColorAttachment);
+          b.Write(depth_h, ResourceUsage::kDepthAttachment);
+          if (export_h != kInvalidResource) b.Write(export_h, ResourceUsage::kColorAttachment);
+        },
+        // `hook` is copied into the closure (the graph executes this after
+        // add_scene_hook returns, so a reference to the parameter would dangle).
+        [this, hook, phase, color_h, depth_h, export_h, proj, view_mat, view_proj, jx, jy,
+         &view](PassContext& ctx) {
+          SceneHookContext hc;
+          hc.phase = phase;
+          hc.cmd = ctx.cmd;
+          hc.device = ctx.device;
+          const GpuImage& color_img = ctx.graph->image(color_h);
+          hc.color = &color_img;
+          hc.color_view = color_img.view;
+          hc.color_format = color_img.format;
+          const GpuImage& depth_img = ctx.graph->image(depth_h);
+          hc.depth = &depth_img;
+          hc.depth_view = depth_img.view;
+          hc.depth_format = depth_img.format;
+          if (export_h != kInvalidResource) {
+            const GpuImage& export_img = ctx.graph->image(export_h);
+            hc.depth_export = &export_img;
+            hc.depth_export_view = export_img.view;
+            hc.depth_export_format = export_img.format;
+          }
+          hc.extent = {render_width_, render_height_};
+          hc.frame_slot = frame_index_ % kFramesInFlight;
+          hc.frames_in_flight = kFramesInFlight;
+          hc.view = view_mat;
+          hc.proj = proj;
+          hc.view_proj = view_proj;
+          hc.jitter[0] = jx;
+          hc.jitter[1] = jy;
+          hc.near_plane = 0.1f;
+          hc.camera_pos = view.camera.eye;
+          hook(hc);
+        });
+  };
+  if (view.scene_opaque && !path_trace && depth != kInvalidResource) {
+    add_scene_hook(view.scene_opaque, ScenePhase::kOpaque, scene_color, depth, depth_export);
+  }
+
   // Screen-space subsurface scattering: separable per-channel diffusion of the
   // skin buffer the scene pass exported, folded back into the opaque color
   // before anything composites on top.
@@ -3340,6 +3396,12 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
   if (settings_.debug_view == DebugView::kBounds) {
     gpu_cull_.AddBoundsPass(graph_, lit, view_proj, cull_instance_count, cull_slot);
+  }
+
+  // App translucents over the fully composited scene (after rx transparency,
+  // before post/tonemap). Blends into `lit`, depth-tested against rx geometry.
+  if (view.scene_transparent && !path_trace && depth != kInvalidResource) {
+    add_scene_hook(view.scene_transparent, ScenePhase::kTransparent, lit, depth, kInvalidResource);
   }
 
   // Overdraw debug view: clear lit and additive-replay all geometry so the heat

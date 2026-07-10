@@ -7,6 +7,7 @@ set(RX_RUNTIME_SOURCES
   camera_input.cc
   viewer_input.cc
   demo_scenes.cc
+  scene_hook_demo.cc
   fly_camera.cc
   showcase_camera.cc
   debug_ui.cc
@@ -29,6 +30,21 @@ target_link_libraries(rx PRIVATE ${RX_RUNTIME_MODULES})
 target_compile_definitions(rx PRIVATE RX_VERSION="${PROJECT_VERSION}")
 rx_set_warnings(rx)
 rx_enable_mimalloc(rx)
+
+# --demo scenehook: the app builds its own raw-Vulkan pipeline through the render
+# interop, so its shaders embed here instead of in the render module. They read a
+# buffer-device-address arena (RawBufferLoad/Store), a SPIR-V-only construct, so
+# they cannot target DXIL (no d3d12 sidecar).
+set(RX_SHADER_NO_DXIL
+  scenehook_cull.cs.hlsl
+  scenehook.vs.hlsl
+  scenehook.ps.hlsl
+)
+rx_embed_shaders(rx
+  shaders/scenehook_cull.cs.hlsl
+  shaders/scenehook.vs.hlsl
+  shaders/scenehook.ps.hlsl
+)
 
 if(TARGET rx_imgui)
   target_link_libraries(rx PRIVATE rx::imgui)

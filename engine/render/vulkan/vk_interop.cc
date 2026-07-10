@@ -15,6 +15,11 @@ VulkanHandles GetVulkanHandles(Device& device) {
           .allocator = vk_device.allocator()};
 }
 
+u32 GetVulkanFramesInFlight(Device& device) {
+  if (device.caps().backend != Backend::kVulkan) return 0;
+  return Device::kMaxFramesInFlight;
+}
+
 VkImage GetVkImage(const GpuImage& image) {
   return image.handle ? vk::Rec(image.handle)->image : VK_NULL_HANDLE;
 }

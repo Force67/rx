@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 
+#include <base/containers/vector.h>
+
 #include "core/types.h"
 #include "core/window.h"
 #include "render/rhi/bindings.h"
@@ -31,6 +33,14 @@ struct DeviceDesc {
   Backend backend = Backend::kAuto;
   bool enable_validation = false;
   bool request_raytracing = true;
+  // Additional device extensions an app's own GPU passes need (e.g. a game with
+  // a custom Vulkan pipeline recorded through the scene hooks). Each is enabled
+  // only if the adapter advertises it; the granted set lands in
+  // DeviceCaps::extra_extensions. Vulkan-only; ignored by other backends. The
+  // baseline rx enables (BDA, descriptor indexing, timeline, dynamic rendering,
+  // sync2, and every core / Vulkan 1.1-1.3 feature bit the driver reports, plus
+  // mesh-shader and ray-query when present) does not need listing here.
+  base::Vector<std::string> extra_device_extensions;
 };
 
 // What the picked GPU actually supports. Optional features are queried,
@@ -56,6 +66,10 @@ struct DeviceCaps {
   u64 device_local_bytes = 0;        // summed device-local heap size, vram proxy
   u32 accel_scratch_alignment = 256;  // min scratch offset alignment for AS builds
   bool async_compute = false;  // second same-family queue for overlapped compute
+  // App-requested device extensions (DeviceDesc::extra_device_extensions) that
+  // the adapter actually granted. An app checks this to know whether its custom
+  // GPU pass can use a given extension.
+  base::Vector<std::string> extra_extensions;
 };
 
 enum class AccelStructType : u8 { kBlas, kTlas };

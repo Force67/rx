@@ -9,11 +9,14 @@
 
 #include <cstddef>
 
+#include "core/export.h"
+
 namespace rx::render {
 
 // Wraps an embedded spirv blob. The embedded arrays are byte aligned,
 // spirv wants words, so this copies. Returns VK_NULL_HANDLE on failure.
-VkShaderModule CreateShaderModule(VkDevice device, const unsigned char* code, size_t size);
+RX_RENDER_EXPORT VkShaderModule CreateShaderModule(VkDevice device, const unsigned char* code,
+                                                   size_t size);
 
 }  // namespace rx::render
 

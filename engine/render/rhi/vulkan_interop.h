@@ -30,6 +30,12 @@ struct VulkanHandles {
 // Null-filled when `device` is not the Vulkan backend.
 RX_RENDER_EXPORT VulkanHandles GetVulkanHandles(Device& device);
 
+// Frames-in-flight the renderer cycles (== the number of distinct frame slots a
+// SceneHookContext::frame_slot can take). An app sizing per-frame resources for
+// its own GPU passes at init time uses this instead of hardcoding a count.
+// Returns 0 on the null backend.
+RX_RENDER_EXPORT u32 GetVulkanFramesInFlight(Device& device);
+
 // The command list's VkCommandBuffer, or null on other backends.
 inline VkCommandBuffer GetVkCommandBuffer(CommandList& cmd) {
   return static_cast<VkCommandBuffer>(cmd.native_handle());

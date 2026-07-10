@@ -402,6 +402,23 @@ std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& win
     device_extensions.push_back(VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
   }
 
+  // App-requested extras (custom GPU passes): enable each only if advertised and
+  // not already in the list, and report the granted set through caps. Their
+  // feature bits, when core / 1.1-1.3, are already enabled by the full-features
+  // query below; extensions carrying their own feature struct would need the app
+  // to also supply it, which this generic path does not chain.
+  for (const std::string& name : desc.extra_device_extensions) {
+    if (!HasExtension(available, name.c_str())) continue;
+    const char* cname = name.c_str();
+    if (std::ranges::any_of(device_extensions,
+                            [cname](const char* e) { return std::strcmp(e, cname) == 0; })) {
+      device->caps_.extra_extensions.push_back(name);
+      continue;
+    }
+    device_extensions.push_back(cname);
+    device->caps_.extra_extensions.push_back(name);
+  }
+
 #if defined(RX_HAS_DLSS)
   // Add NGX's device extensions that the gpu advertises (it is nvidia here, so
   // they should all be present). Missing ones just leave dlss unavailable.

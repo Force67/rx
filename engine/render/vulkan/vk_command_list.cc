@@ -124,6 +124,21 @@ void VulkanCommandList::DrawIndexedIndirect(const GpuBuffer& args, u64 offset, u
   vkCmdDrawIndexedIndirect(cmd_, Rec(args.handle)->buffer, offset, draw_count, stride);
 }
 
+void VulkanCommandList::DrawIndirectCount(const GpuBuffer& args, u64 offset,
+                                          const GpuBuffer& count_buffer, u64 count_offset,
+                                          u32 max_draw_count, u32 stride) {
+  vkCmdDrawIndirectCount(cmd_, Rec(args.handle)->buffer, offset, Rec(count_buffer.handle)->buffer,
+                         count_offset, max_draw_count, stride);
+}
+
+void VulkanCommandList::DrawIndexedIndirectCount(const GpuBuffer& args, u64 offset,
+                                                 const GpuBuffer& count_buffer, u64 count_offset,
+                                                 u32 max_draw_count, u32 stride) {
+  vkCmdDrawIndexedIndirectCount(cmd_, Rec(args.handle)->buffer, offset,
+                                Rec(count_buffer.handle)->buffer, count_offset, max_draw_count,
+                                stride);
+}
+
 void VulkanCommandList::DrawMeshTasks(u32 x, u32 y, u32 z) {
   vkCmdDrawMeshTasksEXT(cmd_, x, y, z);
 }

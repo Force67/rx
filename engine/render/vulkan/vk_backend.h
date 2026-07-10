@@ -157,6 +157,10 @@ class VulkanCommandList final : public CommandList {
   void DrawIndexed(u32 index_count, u32 instance_count, u32 first_index, i32 vertex_offset,
                    u32 first_instance) override;
   void DrawIndexedIndirect(const GpuBuffer& args, u64 offset, u32 draw_count, u32 stride) override;
+  void DrawIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                         u64 count_offset, u32 max_draw_count, u32 stride) override;
+  void DrawIndexedIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                                u64 count_offset, u32 max_draw_count, u32 stride) override;
   void DrawMeshTasks(u32 x, u32 y, u32 z) override;
   void TextureBarriers(std::span<const TextureBarrier> barriers) override;
   void MemoryBarrier(BarrierScope src, BarrierScope dst) override;

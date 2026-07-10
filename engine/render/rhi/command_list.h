@@ -144,6 +144,17 @@ class CommandList {
                            i32 vertex_offset = 0, u32 first_instance = 0) = 0;
   virtual void DrawIndexedIndirect(const GpuBuffer& args, u64 offset, u32 draw_count,
                                    u32 stride) = 0;
+  // GPU-driven draw count: the number of draws comes from count_buffer (a u32 at
+  // count_offset), clamped to max_draw_count. Maps to
+  // vkCmdDraw{,Indexed}IndirectCount (vulkan 1.2 core, always enabled here).
+  // Default no-op so backends without it stay inert; the null/d3d12 backends do
+  // not implement it.
+  virtual void DrawIndirectCount(const GpuBuffer& /*args*/, u64 /*offset*/,
+                                 const GpuBuffer& /*count_buffer*/, u64 /*count_offset*/,
+                                 u32 /*max_draw_count*/, u32 /*stride*/) {}
+  virtual void DrawIndexedIndirectCount(const GpuBuffer& /*args*/, u64 /*offset*/,
+                                        const GpuBuffer& /*count_buffer*/, u64 /*count_offset*/,
+                                        u32 /*max_draw_count*/, u32 /*stride*/) {}
   virtual void DrawMeshTasks(u32 x, u32 y, u32 z) = 0;
 
   // --- synchronization ---

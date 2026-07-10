@@ -118,6 +118,72 @@ Platforms that own the main loop (mobile) drive `host.RunFrame()` directly
 and forward surface loss/recreation to `host.OnSurfaceDestroyed()` /
 `OnSurfaceCreated()`.
 
+## Bring your own GPU passes
+
+A game with its own GPU-driven pipeline (a voxel engine with buffer-device-
+address arenas, compute culling + multi-draw-indirect, mesh-shader or ray-query
+passes, its own Slang/HLSL-compiled SPIR-V) can record **raw GPU work directly
+into rx's frame at scene phase**, depth-interleaved with rx's own geometry, so
+rx's sky, atmosphere, post and tonemap still apply over the whole frame. This is
+the Vulkan escape hatch (`render/rhi/vulkan_interop.h`) extended from the final
+UI pass to the scene. The `runtime/` viewer's `--demo scenehook` is a complete
+worked example (`runtime/scene_hook_demo.{h,cc}` + `runtime/shaders/scenehook*`).
+
+**Hooks.** `render::FrameView` carries two optional callbacks, mirroring
+`hud_draw`/`ui_draw`:
+
+```cpp
+std::function<void(const render::SceneHookContext&)> scene_opaque;      // after rx opaque+sky, before transparency/atmosphere
+std::function<void(const render::SceneHookContext&)> scene_transparent; // after rx transparency, before post/tonemap
+```
+
+Install them in `Application::OnBuildView`. Each fires from inside a first-class
+render-graph pass with the color/depth (and, for `scene_opaque`, the R32F depth-
+export) writes declared, so the graph barriers the images for you. No pass is
+added when a hook is unset (zero cost), and hooks fire on the Vulkan backend
+only.
+
+**What each phase guarantees** (everything at *render* resolution, before
+upscale/post):
+
+- `scene_opaque`: `color` is rx's scene color (opaque + sky), HDR-linear
+  `RGBA16F`; `depth` is the reversed-Z hardware depth (D32, clear 0 = far) with
+  rx geometry already in it; `depth_export` is the R32F copy rx's depth-aware
+  passes (sky/fog/aerial/SSAO/SSR) sample. Depth-test `GREATER_OR_EQUAL` to
+  interleave with rx geometry; write `depth` so rx's downstream draws occlude
+  against yours; write `depth_export` (as a second color attachment,
+  `SV_Position.z`) so those effects respect your opaque geometry (skip it and rx
+  treats those pixels as background).
+- `scene_transparent`: `color` is the fully composited scene to blend over;
+  `depth` holds rx geometry depth (test against it); `depth_export` is null.
+
+**The context** (`render::SceneHookContext`) carries the `CommandList&`, the
+color/depth/depth-export images as rhi handles (unwrap with
+`GetVkImage`/`GetVkImageView`/`GetVkFormat`), their formats + `extent`, the
+`frame_slot` and `frames_in_flight`, and rx's exact **un-jittered** `view` /
+`proj` / `view_proj` this frame plus `jitter` (NDC) and `near_plane`. Under
+TAA/upscaling add the jitter in your vertex shader (`clip.xy += jitter * clip.w`)
+to stay pixel-aligned with rx geometry. `GetVulkanFramesInFlight(device)` gives
+the slot count at init time for sizing per-frame resources.
+
+**Compute-then-raster in one hook.** rx transitions the images to their
+attachment layouts before the callback runs; the callback may `Dispatch` compute
+(e.g. cull, writing its own BDA buffers) on `ctx.cmd` first, insert its own
+`MemoryBarrier` for those buffers, then open its own dynamic-rendering section
+(`ctx.cmd->BeginRendering(...)` with `LoadOp::kLoad` / `EndRendering`) and draw.
+Mix raw `vkCmd*` on `GetVkCommandBuffer(*ctx.cmd)` with the rhi wrappers freely.
+
+**Device features / extensions.** rx already enables every core and Vulkan
+1.1-1.3 feature bit the driver reports (so `shaderInt8/16/64`, 8/16-bit storage,
+scalar block layout, `shaderDrawParameters`, `multiDrawIndirect`,
+`drawIndirectCount`, `fragmentStoresAndAtomics`, sampler anisotropy) plus mesh-
+shader and ray-query when present. If your passes need an extra device
+*extension* rx does not itself request, list it in `RendererDesc::vulkan.extensions`;
+each is enabled when the adapter advertises it and the granted set is reported in
+`Renderer::caps()->extra_extensions`. `CommandList::DrawIndirectCount` and
+`DrawIndexedIndirectCount` (Vulkan 1.2 core) are available for GPU-driven draw
+counts.
+
 ## Install / find_package
 
 As an alternative to `add_subdirectory`, rx can be built and installed once,

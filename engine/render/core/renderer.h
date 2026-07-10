@@ -70,6 +70,19 @@
 
 namespace rx::render {
 
+// Backend-specific device requests for apps that record their own GPU passes
+// through the FrameView scene hooks. Ignored on non-Vulkan backends. rx already
+// enables the whole core / Vulkan 1.1-1.3 feature set the driver reports (so
+// shaderInt8/16/64, storage 8/16-bit, scalar block layout, shaderDrawParameters,
+// multiDrawIndirect, drawIndirectCount, fragmentStoresAndAtomics, samplerAniso
+// are on when supported) plus mesh-shader and ray-query when present; this only
+// covers extra device extensions rx does not itself request.
+struct VulkanDeviceExtras {
+  // Enabled if the adapter advertises them; the granted set is reported in
+  // Renderer::caps()->extra_extensions.
+  base::Vector<std::string> extensions;
+};
+
 struct RendererDesc {
   Backend backend = Backend::kAuto;
   bool enable_validation = false;
@@ -77,6 +90,65 @@ struct RendererDesc {
   UpscalerKind upscaler = UpscalerKind::kNone;
   RayTracingSettings raytracing;
   bool enable_raytracing = true;
+  VulkanDeviceExtras vulkan;
+};
+
+// Phase at which an app's own GPU pass is recorded into rx's frame. Selects the
+// FrameView hook and the state guarantees the SceneHookContext documents.
+enum class ScenePhase : u8 {
+  kOpaque,       // after rx opaque+sky, before transparency/atmosphere resolve
+  kTransparent,  // after rx transparency, before post/tonemap
+};
+
+// Handed to a FrameView scene hook. Everything is at RENDER resolution (before
+// upscaling and post). rx's render graph has already transitioned the color and
+// depth images to their attachment layouts; the hook opens its OWN dynamic-
+// rendering section (ctx.cmd->BeginRendering / EndRendering, LoadOp::kLoad to
+// preserve rx's content) and may run compute (e.g. GPU culling) on ctx.cmd
+// BEFORE beginning that section - a single hook does compute-then-raster, the
+// app inserting its own MemoryBarrier between them for its own buffers. Raw
+// Vulkan handles behind these come from render/rhi/vulkan_interop.h
+// (GetVkImage / GetVkImageView / GetVkFormat). Hooks fire on the Vulkan backend
+// only.
+struct SceneHookContext {
+  ScenePhase phase = ScenePhase::kOpaque;
+  CommandList* cmd = nullptr;
+  Device* device = nullptr;
+
+  // Color target. kOpaque: rx's scene color (opaque + sky), HDR-linear RGBA16F.
+  // kTransparent: the composited scene the app blends its translucents over.
+  const GpuImage* color = nullptr;
+  TextureView color_view;
+  Format color_format = Format::kRGBA16Float;
+  // Reversed-Z hardware depth (D32, clear 0 = far) with rx geometry already in
+  // it. Depth-test GREATER_OR_EQUAL to interleave with rx geometry; writing it
+  // (kOpaque) lets the app's geometry occlude rx's downstream draws too.
+  const GpuImage* depth = nullptr;
+  TextureView depth_view;
+  Format depth_format = Format::kD32Float;
+  // kOpaque only (null in kTransparent): the R32F depth copy rx's depth-aware
+  // passes (sky/fog/aerial/SSAO/SSR) sample - the depth attachment itself is
+  // never sampled (nvidia compression). Write it as a second color attachment
+  // (SV_Position.z) so those passes respect the app's opaque geometry; skip it
+  // and rx treats those pixels as background behind the effects.
+  const GpuImage* depth_export = nullptr;
+  TextureView depth_export_view;
+  Format depth_export_format = Format::kR32Float;
+
+  Extent2D extent{};        // render resolution
+  u32 frame_slot = 0;       // 0..frames_in_flight-1, index per-slot resources
+  u32 frames_in_flight = 1;
+
+  // Exactly the matrices rx uses this frame, column-major, UN-jittered (jitter
+  // is applied in-shader). Under TAA/upscaling add the jitter in the vertex
+  // shader (clip.xy += jitter * clip.w) to stay pixel-aligned with rx geometry;
+  // leave it out otherwise.
+  Mat4 view = Mat4::Identity();
+  Mat4 proj = Mat4::Identity();
+  Mat4 view_proj = Mat4::Identity();
+  f32 jitter[2] = {0, 0};   // NDC units (already 2*pixel/dimension)
+  f32 near_plane = 0.1f;    // reversed-Z, infinite far
+  Vec3 camera_pos{};
 };
 
 struct CameraPose {
@@ -140,6 +212,16 @@ struct FrameView {
   // ui_draw (the debug ImGui overlay) on top.
   std::function<void(CommandList&)> hud_draw;
   std::function<void(CommandList&)> ui_draw;
+
+  // App-provided GPU passes recorded into the scene, depth-interleaved with rx's
+  // own geometry (a game with its own GPU-driven pipeline: compute cull, multi-
+  // draw-indirect, mesh/ray-query passes, ...). scene_opaque fires after rx's
+  // opaque+sky and before transparency/atmosphere; scene_transparent after rx
+  // transparency and before post/tonemap. Each runs inside a first-class render-
+  // graph pass (so barriers are handled) and only when set, on the Vulkan
+  // backend. Zero cost when unset: no pass is added. See SceneHookContext.
+  std::function<void(const SceneHookContext&)> scene_opaque;
+  std::function<void(const SceneHookContext&)> scene_transparent;
 
   // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI sets
   // needs_blur so the renderer captures + blurs the backbuffer before the ui
