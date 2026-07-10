@@ -132,6 +132,9 @@ class Device {
   // --- resources ---
   virtual GpuBuffer CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible = false) = 0;
   virtual GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) = 0;
+  // Immediate destruction: the caller guarantees the GPU is done with the
+  // resource (no in-flight frame references it). For a resource that may still
+  // be read by a submitted-but-unfinished frame use the *Deferred variants.
   virtual void DestroyBuffer(GpuBuffer& buffer) = 0;
 
   // samples > 1 creates a multisampled image (mip_levels must stay 1); resolve
@@ -146,6 +149,15 @@ class Device {
   }
   virtual GpuImage CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
                                    u32 mip_levels = 1) = 0;
+  // Layered 2D image (texture atlas arrays, GPU-driven material stacks). The
+  // whole-image default view is a 2D_ARRAY over every layer and mip; upload a
+  // layer with CopyBufferToTexture (BufferTextureCopy::array_layer). Backends
+  // without it return a null image and the caller skips the feature.
+  virtual GpuImage CreateImage2DArray(Format /*format*/, u32 /*width*/, u32 /*height*/,
+                                      u32 /*array_layers*/, TextureUsageFlags /*usage*/,
+                                      u32 /*mip_levels*/ = 1) {
+    return {};
+  }
   virtual void DestroyImage(GpuImage& image) = 0;
   // Extra single-mip view for mip-chained images (bloom pyramid).
   virtual TextureView CreateMipView(const GpuImage& image, u32 mip) = 0;
@@ -192,6 +204,20 @@ class Device {
   virtual AccelStructHandle CreateAccelStruct(AccelStructType type, u64 size) = 0;
   virtual void DestroyAccelStruct(AccelStructHandle accel) = 0;
   virtual u64 accel_address(AccelStructHandle accel) = 0;
+
+  // --- frame-safe deferred destruction ---
+  // Retire a resource that a submitted-but-not-yet-finished frame may still
+  // reference. The resource is parked in a per-frame-slot graveyard and freed
+  // only once a fence proves every frame that could have touched it has
+  // completed (drained at BeginFrame after the slot's fence wait, and fully at
+  // WaitIdle / device teardown). Use this instead of the immediate Destroy* for
+  // per-frame churned resources (e.g. a buffer resized mid-frame): the handle is
+  // nulled out immediately, but the GPU object outlives the call by up to
+  // kMaxFramesInFlight frames. Backends without a frame ring (null) fall back to
+  // immediate destruction, which is safe there because nothing is in flight.
+  virtual void DestroyBufferDeferred(GpuBuffer& buffer) { DestroyBuffer(buffer); }
+  virtual void DestroyImageDeferred(GpuImage& image) { DestroyImage(image); }
+  virtual void DestroyAccelStructDeferred(AccelStructHandle accel) { DestroyAccelStruct(accel); }
 
   // --- profiling ---
   virtual TimestampPoolHandle CreateTimestampPool(u32 count) = 0;

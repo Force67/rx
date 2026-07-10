@@ -213,7 +213,15 @@ class D3D12CommandList final : public CommandList {
   void DrawIndexed(u32 index_count, u32 instance_count, u32 first_index, i32 vertex_offset,
                    u32 first_instance) override;
   void DrawIndexedIndirect(const GpuBuffer& args, u64 offset, u32 draw_count, u32 stride) override;
+  void DrawIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                         u64 count_offset, u32 max_draw_count, u32 stride) override;
+  void DrawIndexedIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                                u64 count_offset, u32 max_draw_count, u32 stride) override;
   void DrawMeshTasks(u32 x, u32 y, u32 z) override;
+  void DrawMeshTasksIndirect(const GpuBuffer& args, u64 offset, u32 draw_count,
+                             u32 stride) override;
+  void DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                                  u64 count_offset, u32 max_draws, u32 stride) override;
   void TextureBarriers(std::span<const TextureBarrier> barriers) override;
   void MemoryBarrier(BarrierScope src, BarrierScope dst) override;
   void CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
@@ -341,7 +349,12 @@ class D3D12Device final : public Device {
                          TextureUsageFlags usage) override;
   GpuImage CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
                            u32 mip_levels) override;
+  GpuImage CreateImage2DArray(Format format, u32 width, u32 height, u32 array_layers,
+                              TextureUsageFlags usage, u32 mip_levels) override;
   void DestroyImage(GpuImage& image) override;
+  void DestroyBufferDeferred(GpuBuffer& buffer) override;
+  void DestroyImageDeferred(GpuImage& image) override;
+  void DestroyAccelStructDeferred(AccelStructHandle accel) override;
   TextureView CreateMipView(const GpuImage& image, u32 mip) override;
   TextureView CreateArrayView(const GpuImage& image) override;
   void DestroyView(TextureView view) override;
@@ -431,6 +444,10 @@ class D3D12Device final : public Device {
                                                 bool push_root_constants,
                                                 PipelineRecord* out_params);
   ID3D12CommandSignature* GetDrawIndexedSignature(u32 stride);
+  // Command signature for a single root-argument-free indirect argument type
+  // (DRAW / DRAW_INDEXED / DISPATCH_MESH), cached by (type, stride). Shared by
+  // the plain and count-buffer ExecuteIndirect paths.
+  ID3D12CommandSignature* GetIndirectSignature(D3D12_INDIRECT_ARGUMENT_TYPE type, u32 stride);
 
   // Internal texture-to-texture filtered blit pipeline (BlitMip); one PSO per
   // destination format.
@@ -495,10 +512,23 @@ class D3D12Device final : public Device {
     u64 push_cursor = 0;
     std::unique_ptr<D3D12CommandList> wrapper;
     base::Vector<ID3D12Resource*> deferred;
+    // Public frame-safe deferred destruction: whole records (resource + views)
+    // retired here are freed once this ring's fence proves the GPU is done,
+    // alongside `deferred` in BeginRing.
+    base::Vector<BufferRecord*> dead_buffers;
+    base::Vector<TextureRecord*> dead_textures;
+    base::Vector<AccelStructRecord*> dead_accels;
     bool warned_views = false;
   };
   Ring rings_[kRingCount];
   u64 frame_epoch_ = 0;
+  u32 current_ring_ = 0;  // frame ring targeted by public deferred destroys
+
+  // Immediate record teardown, shared by Destroy* and the ring graveyard drain.
+  void FreeBufferRecord(BufferRecord* record);
+  void FreeTextureRecord(TextureRecord* record);
+  void FreeAccelRecord(AccelStructRecord* record);
+  void DrainRingGraveyard(Ring& ring);
 
   base::UnorderedMap<u64, SetLayout*> set_layout_cache_;
   base::UnorderedMap<u64, ID3D12RootSignature*> root_signature_cache_;

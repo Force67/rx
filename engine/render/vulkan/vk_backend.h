@@ -162,6 +162,10 @@ class VulkanCommandList final : public CommandList {
   void DrawIndexedIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
                                 u64 count_offset, u32 max_draw_count, u32 stride) override;
   void DrawMeshTasks(u32 x, u32 y, u32 z) override;
+  void DrawMeshTasksIndirect(const GpuBuffer& args, u64 offset, u32 draw_count,
+                             u32 stride) override;
+  void DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
+                                  u64 count_offset, u32 max_draws, u32 stride) override;
   void TextureBarriers(std::span<const TextureBarrier> barriers) override;
   void MemoryBarrier(BarrierScope src, BarrierScope dst) override;
   void CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
@@ -252,12 +256,17 @@ class VulkanDevice final : public Device {
   GpuBuffer CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible) override;
   GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override;
   void DestroyBuffer(GpuBuffer& buffer) override;
+  void DestroyBufferDeferred(GpuBuffer& buffer) override;
+  void DestroyImageDeferred(GpuImage& image) override;
+  void DestroyAccelStructDeferred(AccelStructHandle accel) override;
   GpuImage CreateImage2D(Format format, Extent2D extent, TextureUsageFlags usage,
                          u32 mip_levels, u32 samples) override;
   GpuImage CreateImage3D(Format format, u32 width, u32 height, u32 depth,
                          TextureUsageFlags usage) override;
   GpuImage CreateImageCube(Format format, u32 size, TextureUsageFlags usage,
                            u32 mip_levels) override;
+  GpuImage CreateImage2DArray(Format format, u32 width, u32 height, u32 array_layers,
+                              TextureUsageFlags usage, u32 mip_levels) override;
   void DestroyImage(GpuImage& image) override;
   TextureView CreateMipView(const GpuImage& image, u32 mip) override;
   TextureView CreateArrayView(const GpuImage& image) override;
@@ -348,6 +357,15 @@ class VulkanDevice final : public Device {
 
   bool InitResources();
   void ShutdownResources();
+  // Immediate record teardown, shared by the immediate Destroy* paths and the
+  // graveyard drain.
+  void FreeBufferRecord(BufferRecord* record);
+  void FreeTextureRecord(TextureRecord* record);
+  void FreeAccelRecord(AccelStructRecord* record);
+  // Frees everything retired against `slot` (call after that slot's fence has
+  // been waited); DrainAllGraveyards frees every slot (device idle / teardown).
+  void DrainGraveyard(u32 slot);
+  void DrainAllGraveyards();
   // Shared present-result handling (out-of-date / rotated-suboptimal folding).
   PresentResult TranslatePresent(VkResult presented, Swapchain& swapchain);
   void ShareWithAsyncCompute(VkImageCreateInfo& info, TextureUsageFlags usage,
@@ -401,6 +419,18 @@ class VulkanDevice final : public Device {
   VkFence immediate_fence_ = VK_NULL_HANDLE;
   VkDescriptorPool immediate_descriptor_pool_ = VK_NULL_HANDLE;
   FrameRing frames_[kMaxFramesInFlight];
+
+  // Frame-safe deferred destruction. A resource retired during frame slot S is
+  // parked in graveyard_[S] and freed at the next BeginFrame(S), whose fence
+  // wait proves S's (and every earlier) submission finished. Guarded because a
+  // streaming worker may retire resources off the render thread.
+  struct Graveyard {
+    base::Vector<BufferRecord*> buffers;
+    base::Vector<TextureRecord*> images;
+    base::Vector<AccelStructRecord*> accels;
+  };
+  Graveyard graveyard_[kMaxFramesInFlight];
+  std::mutex graveyard_mutex_;
 
   // Caches, keyed by content hash; entries live for the device's lifetime.
   // The layout caches are shared with pipeline-batch worker threads.

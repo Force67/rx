@@ -156,6 +156,19 @@ class CommandList {
                                         const GpuBuffer& /*count_buffer*/, u64 /*count_offset*/,
                                         u32 /*max_draw_count*/, u32 /*stride*/) {}
   virtual void DrawMeshTasks(u32 x, u32 y, u32 z) = 0;
+  // GPU-driven mesh-task dispatch: draw_count VkDrawMeshTasksIndirectCommandEXT
+  // records (3 u32 group counts each) fetched from `args` at `offset`, `stride`
+  // bytes apart. Maps to vkCmdDrawMeshTasksIndirectEXT / d3d12 ExecuteIndirect
+  // with a DISPATCH_MESH signature. Requires caps().mesh_shaders; default no-op
+  // so backends without it (and null) stay inert.
+  virtual void DrawMeshTasksIndirect(const GpuBuffer& /*args*/, u64 /*offset*/,
+                                     u32 /*draw_count*/, u32 /*stride*/) {}
+  // As above, but the record count comes from count_buffer (a u32 at
+  // count_offset), clamped to max_draws. Maps to vkCmdDrawMeshTasksIndirect-
+  // CountEXT / d3d12 ExecuteIndirect with a count buffer.
+  virtual void DrawMeshTasksIndirectCount(const GpuBuffer& /*args*/, u64 /*offset*/,
+                                          const GpuBuffer& /*count_buffer*/, u64 /*count_offset*/,
+                                          u32 /*max_draws*/, u32 /*stride*/) {}
 
   // --- synchronization ---
   virtual void TextureBarriers(std::span<const TextureBarrier> barriers) = 0;

@@ -347,6 +347,37 @@ void D3D12CommandList::DrawIndexedIndirect(const GpuBuffer& args, u64 offset, u3
   list_->ExecuteIndirect(signature, draw_count, record->resource, offset, nullptr, 0);
 }
 
+void D3D12CommandList::DrawIndirectCount(const GpuBuffer& args, u64 offset,
+                                        const GpuBuffer& count_buffer, u64 count_offset,
+                                        u32 max_draw_count, u32 stride) {
+  if (!bound_) return;
+  FlushVertexBuffers();
+  BufferRecord* record = Rec(args.handle);
+  BufferRecord* count = Rec(count_buffer.handle);
+  RequireBufferState(record, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+  RequireBufferState(count, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+  ID3D12CommandSignature* signature =
+      device_.GetIndirectSignature(D3D12_INDIRECT_ARGUMENT_TYPE_DRAW, stride);
+  if (!signature) return;
+  list_->ExecuteIndirect(signature, max_draw_count, record->resource, offset, count->resource,
+                         count_offset);
+}
+
+void D3D12CommandList::DrawIndexedIndirectCount(const GpuBuffer& args, u64 offset,
+                                                const GpuBuffer& count_buffer, u64 count_offset,
+                                                u32 max_draw_count, u32 stride) {
+  if (!bound_) return;
+  FlushVertexBuffers();
+  BufferRecord* record = Rec(args.handle);
+  BufferRecord* count = Rec(count_buffer.handle);
+  RequireBufferState(record, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+  RequireBufferState(count, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+  ID3D12CommandSignature* signature = device_.GetDrawIndexedSignature(stride);
+  if (!signature) return;
+  list_->ExecuteIndirect(signature, max_draw_count, record->resource, offset, count->resource,
+                         count_offset);
+}
+
 void D3D12CommandList::DrawMeshTasks(u32 x, u32 y, u32 z) {
   if (!bound_) return;
   ID3D12GraphicsCommandList6* list6 = nullptr;
@@ -355,6 +386,32 @@ void D3D12CommandList::DrawMeshTasks(u32 x, u32 y, u32 z) {
     list6->DispatchMesh(x, y, z);
     list6->Release();
   }
+}
+
+void D3D12CommandList::DrawMeshTasksIndirect(const GpuBuffer& args, u64 offset, u32 draw_count,
+                                             u32 stride) {
+  if (!bound_) return;
+  BufferRecord* record = Rec(args.handle);
+  RequireBufferState(record, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+  ID3D12CommandSignature* signature =
+      device_.GetIndirectSignature(D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH, stride);
+  if (!signature) return;
+  list_->ExecuteIndirect(signature, draw_count, record->resource, offset, nullptr, 0);
+}
+
+void D3D12CommandList::DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 offset,
+                                                  const GpuBuffer& count_buffer, u64 count_offset,
+                                                  u32 max_draws, u32 stride) {
+  if (!bound_) return;
+  BufferRecord* record = Rec(args.handle);
+  BufferRecord* count = Rec(count_buffer.handle);
+  RequireBufferState(record, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+  RequireBufferState(count, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+  ID3D12CommandSignature* signature =
+      device_.GetIndirectSignature(D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_MESH, stride);
+  if (!signature) return;
+  list_->ExecuteIndirect(signature, max_draws, record->resource, offset, count->resource,
+                         count_offset);
 }
 
 // --- synchronization ---

@@ -143,6 +143,19 @@ void VulkanCommandList::DrawMeshTasks(u32 x, u32 y, u32 z) {
   vkCmdDrawMeshTasksEXT(cmd_, x, y, z);
 }
 
+void VulkanCommandList::DrawMeshTasksIndirect(const GpuBuffer& args, u64 offset, u32 draw_count,
+                                              u32 stride) {
+  vkCmdDrawMeshTasksIndirectEXT(cmd_, Rec(args.handle)->buffer, offset, draw_count, stride);
+}
+
+void VulkanCommandList::DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 offset,
+                                                   const GpuBuffer& count_buffer, u64 count_offset,
+                                                   u32 max_draws, u32 stride) {
+  vkCmdDrawMeshTasksIndirectCountEXT(cmd_, Rec(args.handle)->buffer, offset,
+                                     Rec(count_buffer.handle)->buffer, count_offset, max_draws,
+                                     stride);
+}
+
 VkPipelineStageFlags2 VulkanCommandList::FilterStages(VkPipelineStageFlags2 stages) const {
   if (!compute_only_) return stages;
   constexpr VkPipelineStageFlags2 kComputeLegal =

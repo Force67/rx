@@ -670,6 +670,9 @@ bool VulkanDevice::InitResources() {
 }
 
 void VulkanDevice::ShutdownResources() {
+  // Free any still-parked deferred resources while the allocator/device are
+  // alive (the caller already waited the device idle).
+  DrainAllGraveyards();
   for (FrameRing& frame : frames_) {
     if (frame.descriptor_pool) vkDestroyDescriptorPool(device_, frame.descriptor_pool, nullptr);
     if (frame.in_flight) vkDestroyFence(device_, frame.in_flight, nullptr);
@@ -724,7 +727,10 @@ VulkanDevice::~VulkanDevice() {
 }
 
 void VulkanDevice::WaitIdle() {
-  if (device_ != VK_NULL_HANDLE) vkDeviceWaitIdle(device_);
+  if (device_ != VK_NULL_HANDLE) {
+    vkDeviceWaitIdle(device_);
+    DrainAllGraveyards();
+  }
 }
 
 bool VulkanDevice::RecreateSurface(Window& window) {
@@ -835,12 +841,53 @@ GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usa
   return buffer;
 }
 
+void VulkanDevice::FreeBufferRecord(BufferRecord* record) {
+  if (!record) return;
+  if (record->buffer) vmaDestroyBuffer(allocator_, record->buffer, record->allocation);
+  delete record;
+}
+
 void VulkanDevice::DestroyBuffer(GpuBuffer& buffer) {
+  FreeBufferRecord(Rec(buffer.handle));
+  buffer = {};
+}
+
+void VulkanDevice::DestroyBufferDeferred(GpuBuffer& buffer) {
   if (BufferRecord* record = Rec(buffer.handle)) {
-    if (record->buffer) vmaDestroyBuffer(allocator_, record->buffer, record->allocation);
-    delete record;
+    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    graveyard_[current_slot_].buffers.push_back(record);
   }
   buffer = {};
+}
+
+void VulkanDevice::DestroyImageDeferred(GpuImage& image) {
+  if (TextureRecord* record = Rec(image.handle)) {
+    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    graveyard_[current_slot_].images.push_back(record);
+  }
+  image = {};
+}
+
+void VulkanDevice::DestroyAccelStructDeferred(AccelStructHandle accel) {
+  if (AccelStructRecord* record = Rec(accel)) {
+    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    graveyard_[current_slot_].accels.push_back(record);
+  }
+}
+
+void VulkanDevice::DrainGraveyard(u32 slot) {
+  Graveyard drained;
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    std::swap(drained, graveyard_[slot]);
+  }
+  for (BufferRecord* record : drained.buffers) FreeBufferRecord(record);
+  for (TextureRecord* record : drained.images) FreeTextureRecord(record);
+  for (AccelStructRecord* record : drained.accels) FreeAccelRecord(record);
+}
+
+void VulkanDevice::DrainAllGraveyards() {
+  for (u32 slot = 0; slot < kMaxFramesInFlight; ++slot) DrainGraveyard(slot);
 }
 
 
@@ -993,13 +1040,63 @@ VmaAllocationCreateInfo alloc_info{};
           .mip_levels = mip_levels};
 }
 
-void VulkanDevice::DestroyImage(GpuImage& image) {
-  if (TextureRecord* record = Rec(image.handle)) {
-    if (record->view) vkDestroyImageView(device_, record->view, nullptr);
-    if (record->image && record->allocation)
-      vmaDestroyImage(allocator_, record->image, record->allocation);
-    delete record;
+GpuImage VulkanDevice::CreateImage2DArray(Format format, u32 width, u32 height, u32 array_layers,
+                                          TextureUsageFlags usage, u32 mip_levels) {
+  VkFormat vk_format = ToVkFormat(format);
+  VkImageCreateInfo image_info{.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+  image_info.imageType = VK_IMAGE_TYPE_2D;
+  image_info.format = vk_format;
+  image_info.extent = {width, height, 1};
+  image_info.mipLevels = mip_levels;
+  image_info.arrayLayers = array_layers;
+  image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+  image_info.usage = ToVkImageUsage(usage, format);
+
+  const u32 shared_families[2] = {graphics_family_, compute_family_};
+  ShareWithAsyncCompute(image_info, usage, shared_families);
+
+  VmaAllocationCreateInfo alloc_info{};
+  alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
+
+  VkImage image = VK_NULL_HANDLE;
+  VmaAllocation allocation = nullptr;
+  VkResult result =
+      vmaCreateImage(allocator_, &image_info, &alloc_info, &image, &allocation, nullptr);
+  if (result != VK_SUCCESS) {
+    RX_ERROR("2d-array image allocation failed: result {} format {} {}x{}x{} usage {:#x} mips {}",
+              static_cast<int>(result), static_cast<int>(format), width, height, array_layers,
+              static_cast<u64>(usage), mip_levels);
+    return {};
   }
+
+  VkImageAspectFlags aspect = AspectOf(format);
+  VkImageViewCreateInfo view_info{.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+  view_info.image = image;
+  view_info.viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
+  view_info.format = vk_format;
+  view_info.subresourceRange = {aspect, 0, mip_levels, 0, array_layers};
+  VkImageView view = VK_NULL_HANDLE;
+  vkCreateImageView(device_, &view_info, nullptr, &view);
+
+  auto* record =
+      new TextureRecord{image, allocation, view, vk_format, aspect, mip_levels, array_layers};
+  return {.handle = MakeHandle<TextureHandle>(record),
+          .view = MakeView(view),
+          .format = format,
+          .extent = {width, height},
+          .mip_levels = mip_levels};
+}
+
+void VulkanDevice::FreeTextureRecord(TextureRecord* record) {
+  if (!record) return;
+  if (record->view) vkDestroyImageView(device_, record->view, nullptr);
+  if (record->image && record->allocation)
+    vmaDestroyImage(allocator_, record->image, record->allocation);
+  delete record;
+}
+
+void VulkanDevice::DestroyImage(GpuImage& image) {
+  FreeTextureRecord(Rec(image.handle));
   image = {};
 }
 
@@ -1729,13 +1826,16 @@ AccelStructHandle VulkanDevice::CreateAccelStruct(AccelStructType type, u64 size
   return MakeHandle<AccelStructHandle>(record);
 }
 
+void VulkanDevice::FreeAccelRecord(AccelStructRecord* record) {
+  if (!record) return;
+  if (record->accel) vkDestroyAccelerationStructureKHR(device_, record->accel, nullptr);
+  if (record->backing.buffer)
+    vmaDestroyBuffer(allocator_, record->backing.buffer, record->backing.allocation);
+  delete record;
+}
+
 void VulkanDevice::DestroyAccelStruct(AccelStructHandle handle) {
-  if (AccelStructRecord* record = Rec(handle)) {
-    if (record->accel) vkDestroyAccelerationStructureKHR(device_, record->accel, nullptr);
-    if (record->backing.buffer)
-      vmaDestroyBuffer(allocator_, record->backing.buffer, record->backing.allocation);
-    delete record;
-  }
+  FreeAccelRecord(Rec(handle));
 }
 
 u64 VulkanDevice::accel_address(AccelStructHandle handle) { return Rec(handle)->address; }
@@ -1794,6 +1894,9 @@ void VulkanDevice::ImmediateSubmit(const std::function<void(CommandList&)>& reco
 CommandList* VulkanDevice::BeginFrame(u32 slot) {
   FrameRing& frame = frames_[slot];
   vkWaitForFences(device_, 1, &frame.in_flight, VK_TRUE, UINT64_MAX);
+  // The fence just proved this slot's previous submission finished, so anything
+  // retired while recording that frame is now safe to free.
+  DrainGraveyard(slot);
   vkResetCommandPool(device_, frame.pool, 0);
   if (frame.async_pool) vkResetCommandPool(device_, frame.async_pool, 0);
   vkResetDescriptorPool(device_, frame.descriptor_pool, 0);

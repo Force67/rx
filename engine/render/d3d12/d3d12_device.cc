@@ -417,6 +417,7 @@ void D3D12Device::ShutdownResources() {
   for (Ring& ring : rings_) {
     for (ID3D12Resource* resource : ring.deferred) resource->Release();
     ring.deferred.clear();
+    DrainRingGraveyard(ring);
     SafeRelease(ring.push_ring);
     SafeRelease(ring.fence);
     SafeRelease(ring.list);
@@ -557,12 +558,57 @@ GpuBuffer D3D12Device::CreateBufferWithData(ByteSpan data, BufferUsageFlags usag
   return buffer;
 }
 
-void D3D12Device::DestroyBuffer(GpuBuffer& buffer) {
-  if (BufferRecord* record = Rec(buffer.handle)) {
-    SafeRelease(record->resource);
-    delete record;
+void D3D12Device::FreeBufferRecord(BufferRecord* record) {
+  if (!record) return;
+  SafeRelease(record->resource);
+  delete record;
+}
+
+void D3D12Device::FreeTextureRecord(TextureRecord* record) {
+  if (!record) return;
+  if (record->default_view) {
+    DestroyView(MakeHandle<TextureView>(record->default_view));
+    record->default_view = nullptr;
   }
+  SafeRelease(record->resource);
+  delete record;
+}
+
+void D3D12Device::FreeAccelRecord(AccelStructRecord* record) {
+  if (!record) return;
+  SafeRelease(record->resource);
+  delete record;
+}
+
+void D3D12Device::DrainRingGraveyard(Ring& ring) {
+  for (BufferRecord* record : ring.dead_buffers) FreeBufferRecord(record);
+  for (TextureRecord* record : ring.dead_textures) FreeTextureRecord(record);
+  for (AccelStructRecord* record : ring.dead_accels) FreeAccelRecord(record);
+  ring.dead_buffers.clear();
+  ring.dead_textures.clear();
+  ring.dead_accels.clear();
+}
+
+void D3D12Device::DestroyBuffer(GpuBuffer& buffer) {
+  FreeBufferRecord(Rec(buffer.handle));
   buffer = {};
+}
+
+void D3D12Device::DestroyBufferDeferred(GpuBuffer& buffer) {
+  if (BufferRecord* record = Rec(buffer.handle))
+    rings_[current_ring_].dead_buffers.push_back(record);
+  buffer = {};
+}
+
+void D3D12Device::DestroyImageDeferred(GpuImage& image) {
+  if (TextureRecord* record = Rec(image.handle))
+    rings_[current_ring_].dead_textures.push_back(record);
+  image = {};
+}
+
+void D3D12Device::DestroyAccelStructDeferred(AccelStructHandle accel) {
+  if (AccelStructRecord* record = Rec(accel))
+    rings_[current_ring_].dead_accels.push_back(record);
 }
 
 TextureRecord* D3D12Device::MakeTextureRecord(ID3D12Resource* resource, Format format,
@@ -692,15 +738,45 @@ GpuImage D3D12Device::CreateImageCube(Format format, u32 size, TextureUsageFlags
                                        usage));
 }
 
-void D3D12Device::DestroyImage(GpuImage& image) {
-  if (TextureRecord* record = Rec(image.handle)) {
-    if (record->default_view) {
-      DestroyView(MakeHandle<TextureView>(record->default_view));
-      record->default_view = nullptr;
-    }
-    SafeRelease(record->resource);
-    delete record;
+GpuImage D3D12Device::CreateImage2DArray(Format format, u32 width, u32 height, u32 array_layers,
+                                         TextureUsageFlags usage, u32 mip_levels) {
+  bool depth = IsDepthFormat(format);
+  bool block = format >= Format::kBC1RgbUnorm && format <= Format::kBC7Srgb;
+
+  D3D12_RESOURCE_DESC desc = {};
+  desc.Dimension = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  desc.Width = width;
+  desc.Height = height;
+  desc.DepthOrArraySize = static_cast<UINT16>(array_layers);
+  desc.MipLevels = static_cast<UINT16>(mip_levels);
+  desc.Format = depth ? (format == Format::kD16Unorm ? DXGI_FORMAT_R16_TYPELESS
+                                                     : DXGI_FORMAT_R32_TYPELESS)
+                      : ToDxgiFormat(format);
+  desc.SampleDesc.Count = 1;
+  if (usage & kTextureUsageColorTarget) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+  if (usage & kTextureUsageDepthTarget) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL;
+  if (usage & kTextureUsageStorage) desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  if ((usage & kTextureUsageTransferDst) && !depth && !block) {
+    desc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
   }
+
+  D3D12_HEAP_PROPERTIES heap = {};
+  heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  ID3D12Resource* resource = nullptr;
+  if (FAILED(device_->CreateCommittedResource(&heap, D3D12_HEAP_FLAG_NONE, &desc,
+                                              D3D12_RESOURCE_STATE_COMMON, nullptr,
+                                              IID_ID3D12Resource,
+                                              reinterpret_cast<void**>(&resource)))) {
+    RX_ERROR("d3d12: 2d-array image allocation failed: format {} {}x{}x{} mips {}",
+              static_cast<int>(format), width, height, array_layers, mip_levels);
+    return {};
+  }
+  return WrapTexture(
+      MakeTextureRecord(resource, format, {width, height}, mip_levels, array_layers, false, usage));
+}
+
+void D3D12Device::DestroyImage(GpuImage& image) {
+  FreeTextureRecord(Rec(image.handle));
   image = {};
 }
 
@@ -1512,11 +1588,12 @@ void D3D12Device::DestroyPipeline(PipelineHandle pipeline) {
   }
 }
 
-ID3D12CommandSignature* D3D12Device::GetDrawIndexedSignature(u32 stride) {
-  u64 key = stride;
+ID3D12CommandSignature* D3D12Device::GetIndirectSignature(D3D12_INDIRECT_ARGUMENT_TYPE type,
+                                                          u32 stride) {
+  u64 key = (static_cast<u64>(type) << 32) | stride;
   if (ID3D12CommandSignature** cached = command_signature_cache_.find(key)) return *cached;
   D3D12_INDIRECT_ARGUMENT_DESC argument = {};
-  argument.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED;
+  argument.Type = type;
   D3D12_COMMAND_SIGNATURE_DESC desc = {};
   desc.ByteStride = stride;
   desc.NumArgumentDescs = 1;
@@ -1524,11 +1601,16 @@ ID3D12CommandSignature* D3D12Device::GetDrawIndexedSignature(u32 stride) {
   ID3D12CommandSignature* signature = nullptr;
   if (FAILED(device_->CreateCommandSignature(&desc, nullptr, IID_ID3D12CommandSignature,
                                              reinterpret_cast<void**>(&signature)))) {
-    RX_ERROR("d3d12: command signature creation failed (stride {})", stride);
+    RX_ERROR("d3d12: command signature creation failed (type {} stride {})",
+              static_cast<int>(type), stride);
     return nullptr;
   }
   command_signature_cache_.insert(key, signature);
   return signature;
+}
+
+ID3D12CommandSignature* D3D12Device::GetDrawIndexedSignature(u32 stride) {
+  return GetIndirectSignature(D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED, stride);
 }
 
 PipelineHandle D3D12Device::GetBlitPipeline(Format format) {
@@ -1646,12 +1728,7 @@ AccelStructHandle D3D12Device::CreateAccelStruct(AccelStructType type, u64 size)
   return MakeHandle<AccelStructHandle>(record);
 }
 
-void D3D12Device::DestroyAccelStruct(AccelStructHandle accel) {
-  if (AccelStructRecord* record = Rec(accel)) {
-    SafeRelease(record->resource);
-    delete record;
-  }
-}
+void D3D12Device::DestroyAccelStruct(AccelStructHandle accel) { FreeAccelRecord(Rec(accel)); }
 
 u64 D3D12Device::accel_address(AccelStructHandle accel) { return Rec(accel)->address; }
 
@@ -1711,6 +1788,7 @@ D3D12CommandList* D3D12Device::BeginRing(u32 ring_index) {
   Ring& ring = rings_[ring_index];
   for (ID3D12Resource* resource : ring.deferred) resource->Release();
   ring.deferred.clear();
+  DrainRingGraveyard(ring);
   ring.alloc->Reset();
   ring.list->Reset(ring.alloc, nullptr);
   ID3D12DescriptorHeap* heaps[] = {view_heap_, sampler_heap_};
@@ -1744,10 +1822,15 @@ void D3D12Device::ImmediateSubmit(const std::function<void(CommandList&)>& recor
   }
   for (ID3D12Resource* resource : ring.deferred) resource->Release();
   ring.deferred.clear();
+  DrainRingGraveyard(ring);
 }
 
 CommandList* D3D12Device::BeginFrame(u32 slot) {
   Ring& ring = rings_[slot];
+  // Public deferred destroys during this frame's recording retire against this
+  // slot's ring, whose fence gates the drain. Set here (not in BeginRing) so a
+  // nested ImmediateSubmit cannot re-point it at the immediate ring.
+  current_ring_ = slot;
   if (ring.fence_value > 0 && ring.fence->GetCompletedValue() < ring.fence_value) {
     HANDLE event = CreateFenceEvent();
     ring.fence->SetEventOnCompletion(ring.fence_value, event);
