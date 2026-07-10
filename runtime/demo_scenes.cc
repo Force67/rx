@@ -698,6 +698,7 @@ void DemoScenes::CreateStrandHairDemoScene() {
     params.strand_width = 0.0007f;
     params.tint = specs[i].tint;
     params.seed = i + 1;
+    params.units_to_meters = 0.01428f;  // scalp built with this same unit scale
     u32 id = renderer_.CreateHairGroom(scalp, params, MakeTranslation(head_center));
     if (id == 0) continue;
     hair_grooms_.push_back(id);

@@ -11,12 +11,12 @@
 namespace rx::render {
 namespace {
 
-// Bethesda object space (Z-up, game units) -> engine space (Y-up, metres). Same
-// mapping the cell streamer uses: engine = (x, z, -y) * units_to_metres.
-constexpr f32 kUnitsToMeters = 0.01428f;
-
-Vec3 ToEngine(const f32 p[3]) {
-  return {p[0] * kUnitsToMeters, p[2] * kUnitsToMeters, -p[1] * kUnitsToMeters};
+// Authored object space (Z-up source units) -> engine space (Y-up, metres):
+// engine = (x, z, -y) * units_to_metres. The unit->metre scale is supplied by
+// the caller via GroomParams (content authored in game units passes that scale;
+// content already in metres passes 1).
+Vec3 ToEngine(const f32 p[3], f32 units_to_meters) {
+  return {p[0] * units_to_meters, p[2] * units_to_meters, -p[1] * units_to_meters};
 }
 
 struct GVert {
@@ -274,7 +274,7 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
   base::Vector<GVert> verts;
   verts.resize(lod.vertices.size());
   for (size_t i = 0; i < lod.vertices.size(); ++i) {
-    verts[i].p = ToEngine(lod.vertices[i].position);
+    verts[i].p = ToEngine(lod.vertices[i].position, params.units_to_meters);
     verts[i].u = lod.vertices[i].uv[0];
     verts[i].v = lod.vertices[i].uv[1];
   }

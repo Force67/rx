@@ -169,9 +169,9 @@ float3 Moon(float3 dir, float3 to_sun, float3 sun_color, float intensity) {
   return result;
 }
 
-// Procedural aurora borealis (Skyrim's northern lights): undulating vertical
-// curtains in a band of the night sky, green at the base fading to magenta tips,
-// animated. Gated to night (fade) and to Skyrim (the aurora frame flag).
+// Procedural aurora borealis: undulating vertical curtains in a band of the
+// night sky, green at the base fading to magenta tips, animated. Gated to night
+// (fade) and to the aurora frame flag (set when the app enables the effect).
 float3 Aurora(float3 dir, float fade, float time) {
   if (dir.y < 0.03 || fade <= 0.0) return 0.0.xxx;
   float alt = asin(saturate(dir.y));   // 0 horizon .. ~1.57 zenith
@@ -212,7 +212,7 @@ PsOut main(float4 sv_position : SV_Position,
   float night = smoothstep(0.04, -0.10, to_sun.y);  // 1 at night, 0 by day
   // Stars first (behind everything), fading out as the sun climbs.
   col += Stars(dir, night);
-  // Aurora (Skyrim only, via the frame flag), behind the sun/moon.
+  // Aurora (when the app enables it, via the frame flag), behind the sun/moon.
   if ((frame.flags & kFrameFlagAurora) != 0u) col += Aurora(dir, night, frame.time);
   // Crisp limb-darkened sun disk on top of the cubemap's scattered glow.
   col += SunDisk(dir, to_sun, frame.misc.z, frame.sun_color.rgb, frame.sun_direction.w);

@@ -10,19 +10,20 @@
 namespace rx {
 
 // The in-world clock that drives the day/night cycle. Game time advances with
-// real time scaled by `timescale` (game minutes per real minute, Bethesda's
-// default 20). game_days is the fractional days-since-start the games expose as
-// GameDaysPassed / Utility.GetCurrentGameTime; its fractional part is the time
-// of day. The clock is the single source of truth: the renderer reads it to
-// place the sun and the Papyrus time natives/globals read and write it.
+// real time scaled by `timescale` (game minutes per real minute); the
+// application picks the timescale its world runs at (see Configure). game_days
+// is the fractional days-since-start; its fractional part is the time of day.
+// The clock is the single source of truth: the renderer reads it to place the
+// sun and gameplay/scripting layers read and write it.
 //
-// Advance() runs on the main loop; the Papyrus guest thread may read or set the
-// time through GetGlobalValue/SetGlobalValue, so the shared fields are atomic.
-// The main-thread advance is the only writer except for the occasional script
-// set, so the read-modify-write needs no stronger ordering than relaxed.
+// Advance() runs on the main loop; a scripting guest thread may read or set the
+// time concurrently, so the shared fields are atomic. The main-thread advance
+// is the only writer except for the occasional script set, so the
+// read-modify-write needs no stronger ordering than relaxed.
 class WorldClock {
  public:
-  // start_hour: time of day at start (0..24). timescale: game min / real min.
+  // start_hour: time of day at start (0..24). timescale: game min / real min
+  // (the application supplies its world's rate; 1 keeps game time == wall time).
   void Configure(f32 start_hour, f32 timescale) {
     game_days_.store(static_cast<f64>(Wrap24(start_hour)) / 24.0, std::memory_order_relaxed);
     set_timescale(timescale);
@@ -39,7 +40,7 @@ class WorldClock {
                      std::memory_order_relaxed);
   }
 
-  // GameDaysPassed: fractional days since start.
+  // Fractional days since start (the whole part counts elapsed days).
   f64 game_days() const { return game_days_.load(std::memory_order_relaxed); }
   void set_game_days(f64 days) { game_days_.store(days, std::memory_order_relaxed); }
 
@@ -48,7 +49,7 @@ class WorldClock {
     const f64 d = game_days();
     return static_cast<f32>((d - std::floor(d)) * 24.0);
   }
-  // Sets the time of day, keeping the whole-day count (a GameHour.SetValue).
+  // Sets the time of day, keeping the whole-day count.
   void set_hour(f32 h) {
     const f64 d = game_days();
     set_game_days(std::floor(d) + static_cast<f64>(Wrap24(h)) / 24.0);
@@ -57,7 +58,7 @@ class WorldClock {
   f32 timescale() const { return timescale_.load(std::memory_order_relaxed); }
   void set_timescale(f32 t) { timescale_.store(t < 0 ? 0 : t, std::memory_order_relaxed); }
 
-  // Real wall-clock hours since Configure (Utility.GetCurrentRealTime / friends).
+  // Real wall-clock hours elapsed since Configure.
   f32 real_hours() const {
     return static_cast<f32>(real_seconds_.load(std::memory_order_relaxed) / 3600.0);
   }
@@ -68,7 +69,9 @@ class WorldClock {
     return h < 0 ? h + 24.0f : h;
   }
   std::atomic<f64> game_days_{0.0};
-  std::atomic<f32> timescale_{20.0f};
+  // Neutral default: game time tracks wall time 1:1 until Configure sets the
+  // application's rate. The clock is game-agnostic; callers pass their timescale.
+  std::atomic<f32> timescale_{1.0f};
   std::atomic<f64> real_seconds_{0.0};
 };
 

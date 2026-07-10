@@ -281,7 +281,7 @@ inline Mat4 LookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
 
 // Reversed z with an infinite far plane: near maps to depth 1, infinity to
 // 0. Paired with GREATER depth tests this keeps precision uniform across the
-// whole range, which matters for bethesda sized exteriors. Y is flipped for
+// whole range, which matters for large open-world exteriors. Y is flipped for
 // vulkan clip space.
 inline Mat4 PerspectiveReversedZ(f32 fov_y_radians, f32 aspect, f32 near_plane) {
   f32 g = 1.0f / std::tan(fov_y_radians * 0.5f);

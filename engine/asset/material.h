@@ -8,14 +8,14 @@ namespace rx::asset {
 
 enum class AlphaMode : u8 { kOpaque, kMask, kBlend };
 
-// PBR metallic roughness. Legacy spec/gloss materials from the Bethesda
-// shader sets are approximated into this during conversion.
+// PBR metallic roughness. Legacy spec/gloss materials (e.g. from Bethesda
+// shader sets) are approximated into this during conversion.
 struct Material {
   AssetId id;
   AssetId base_color;
   AssetId normal;
   // Model-space normal map (_msn): the map stores the surface normal in the
-  // mesh's object space (Bethesda head/face maps), not a tangent-space delta.
+  // mesh's object space (e.g. Bethesda head/face maps), not a tangent-space delta.
   // The shader rotates it straight to world by the model matrix instead of
   // building a TBN; sampling an _msn map as tangent-space smears the lighting.
   bool normal_model_space = false;

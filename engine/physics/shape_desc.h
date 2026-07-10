@@ -3,7 +3,7 @@
 
 // Engine-neutral collision shape description: a tree of primitives,
 // convex hulls and placed children that PhysicsWorld lowers into Jolt
-// shapes. Producers include the Havok .hkx decoder (authored Bethesda
+// shapes. Producers include the Havok .hkx decoder (e.g. authored game
 // collision/ragdolls) and, eventually, NIF bhk blocks; nothing in here is
 // format-specific.
 

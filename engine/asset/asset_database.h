@@ -15,11 +15,11 @@
 
 namespace rx::asset {
 
-// Converts raw bytes from the Vfs into an engine asset. The bethesda module
-// registers converters for .nif, .dds, .bgsm and friends. Keyed by extension
-// so new formats plug in without touching this module. The normalized source
-// path rides along for converters that key behavior off naming conventions
-// (e.g. _n.dds normal maps stay linear).
+// Converts raw bytes from the Vfs into an engine asset. The application
+// registers converters for its formats (e.g. a Bethesda module registers .nif,
+// .dds, .bgsm and friends). Keyed by extension so new formats plug in without
+// touching this module. The normalized source path rides along for converters
+// that key behavior off naming conventions (e.g. _n.dds normal maps stay linear).
 using MeshConverter =
     std::function<base::UniquePointer<Mesh>(ByteSpan, AssetId, std::string_view path)>;
 using TextureConverter =

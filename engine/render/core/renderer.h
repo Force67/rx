@@ -96,7 +96,8 @@ struct DrawItem {
   // Only meaningful for skinned meshes.
   i32 skin_offset = -1;
   // Packed rgb8 tint (0xRRGGBB) modulating this draw's albedo, 0 = untinted.
-  // Colours skinned actors by faction/team (e.g. red vs blue armies).
+  // A per-instance tint the app can use to distinguish otherwise-identical
+  // actors (e.g. team/faction colouring).
   u32 tint = 0;
 };
 
@@ -174,9 +175,9 @@ class Renderer {
   // Makes a mesh drawable, keyed by its asset id. Materials referenced by
   // submeshes should be uploaded first. No-op without a device. id_salt
   // namespaces the mesh/BLAS key so two content domains with colliding asset
-  // paths (Skyrim and Fallout 4 both ship "meshes/...") do not overwrite each
+  // paths (e.g. two games that both ship "meshes/...") do not overwrite each
   // other; entities must carry the salted id in their Renderable. Zero (the
-  // primary game) leaves the key unchanged.
+  // default/primary domain) leaves the key unchanged.
   bool UploadMesh(const asset::Mesh& mesh, u64 id_salt = 0);
   // Same per-domain salt as UploadMesh; it must match so a mesh's submesh
   // material references resolve to this domain's materials/textures.

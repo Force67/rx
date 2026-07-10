@@ -11,6 +11,9 @@ struct Leg {
   const char* knee;
   const char* ankle;
 };
+// Leg joints named by the common game biped rig's bone-name convention (the
+// same convention engine/anim/locomotion drives); a skeleton lacking these
+// names simply gets no foot IK. A rig convention, not a universal standard.
 constexpr Leg kLegs[2] = {
     {"NPC L Thigh [LThg]", "NPC L Calf [LClf]", "NPC L Foot [Lft ]"},
     {"NPC R Thigh [RThg]", "NPC R Calf [RClf]", "NPC R Foot [Rft ]"},
@@ -59,7 +62,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
     leg_span = std::max(leg_span, leg);
     Vec3 hit, normal;
     // Start the down-ray well above the foot, scaled to the leg so it works in
-    // metres (test rig) or game units (Skyrim) alike.
+    // metres (test rig) or game units alike.
     if (!ground(ankle_pos + up * (leg * 0.6f), &hit, &normal)) continue;
     p.grounded = true;
     p.normal = normal;

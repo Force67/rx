@@ -11,6 +11,11 @@ constexpr f32 kStride = 1.5f;  // meters per gait cycle, sets step frequency
 
 f32 Clamp01(f32 v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
 
+// The driven joints are looked up by the bone-name convention of the common
+// game biped rig (the "NPC ..." names below); a skeleton without these names
+// is left in its bind pose. This is a rig convention the helper expects, not a
+// universal standard.
+
 // Layer a local-space rotation delta about `axis` onto a bone's bind pose.
 void Swing(const asset::Skeleton& skeleton, SkeletonPose* pose, const char* bone,
            const Vec3& axis, f32 radians) {

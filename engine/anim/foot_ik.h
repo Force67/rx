@@ -20,7 +20,8 @@ using GroundQuery = std::function<bool(const Vec3& origin, Vec3* hit, Vec3* norm
 // the hip/knee/ankle/pelvis local transforms and leaves `bone_model` updated.
 //
 // `up` and `forward` are the model-space ground-up and character-facing axes
-// (engine test rig: +Y / +Z; Skyrim skeleton: +Z / +Y). `ankle_height` is the
+// (engine test rig: +Y / +Z; a game skeleton may differ, e.g. +Z / +Y).
+// `ankle_height` is the
 // distance from the ankle joint down to the sole. `foot_weight` is the stance
 // weight per leg (left, right): 1 plants the foot, 0 leaves it to the swing
 // (so a walking foot lifts instead of sticking to the ground).

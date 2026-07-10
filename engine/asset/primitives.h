@@ -28,10 +28,11 @@ Mesh MakeLodSphere(f32 radius, AssetId id);
 // skinned, multi-submesh, or already-multi-lod meshes, or tiny meshes.
 void GenerateLods(Mesh* mesh);
 
-// A blocky biped: a skeleton with the standard Skyrim bone names (so the
-// procedural locomotion drives it) and a skinned box-limb mesh bound to it,
-// authored in engine space (meters, Y-up). For bringup of the skinning,
-// animation and foot IK paths without game data.
+// A blocky biped: a skeleton using the biped rig bone-name convention the
+// built-in locomotion helpers expect (so the procedural locomotion drives it)
+// and a skinned box-limb mesh bound to it, authored in engine space (meters,
+// Y-up). For bringup of the skinning, animation and foot IK paths without game
+// data.
 void MakeSkinnedBiped(AssetId mesh_id, Skeleton* out_skeleton, Mesh* out_mesh);
 
 }  // namespace rx::asset

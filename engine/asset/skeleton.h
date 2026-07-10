@@ -13,9 +13,10 @@
 namespace rx::asset {
 
 // One joint of a skeleton. The bind pose is the parent-relative rest transform
-// in Bethesda object space (Z-up, game units); the per-entity model matrix
-// carries the engine space conversion, the same as static NIF geometry. Stored
-// decomposed so animation can layer rotation deltas onto the rest orientation.
+// in the source asset's object space (e.g. Bethesda's Z-up game units); the
+// per-entity model matrix carries the engine space conversion, the same as
+// static source geometry. Stored decomposed so animation can layer rotation
+// deltas onto the rest orientation.
 struct Bone {
   std::string name;
   i32 parent = -1;  // index into Skeleton::bones, -1 = root
@@ -24,9 +25,9 @@ struct Bone {
   f32 bind_scale = 1.0f;
 };
 
-// A flat bone array (parents always precede children after ConvertNifSkeleton
-// orders them) plus name lookup. Built from skeleton.nif or a self-contained
-// creature NIF.
+// A flat bone array (parents always precede children after the importer orders
+// them) plus name lookup. Built from an authored skeleton asset (e.g. a
+// skeleton.nif or a self-contained creature NIF).
 struct Skeleton {
   AssetId id;
   base::Vector<Bone> bones;
@@ -42,7 +43,8 @@ struct Skeleton {
 // Binds one skinned mesh to a skeleton by bone name. `bones[i]` names the bone
 // that vertex skin index i refers to (MeshLod::skinning stores these local
 // indices). `inverse_bind[i]` maps a bind-pose vertex into that bone's local
-// space (Skyrim NiSkinData skin-to-bone). The GPU palette is
+// space (the source format's skin-to-bone matrix, e.g. NiSkinData). The GPU
+// palette is
 // `bone_model[skeleton.Find(bones[i])] * inverse_bind[i]`.
 struct SkinBinding {
   base::Vector<std::string> bones;

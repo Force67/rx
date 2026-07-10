@@ -180,8 +180,8 @@ VsOut main(VsIn input) {
   output.uv = input.uv;
   output.color = input.color;
 #ifdef RX_SKINNED
-  // Modulate the actor's albedo by its packed team/faction tint so the two
-  // armies read apart (and the lower-than-1 factors also tame the snow blowout).
+  // Modulate the actor's albedo by its packed per-instance tint so otherwise
+  // identical actors read apart (lower-than-1 factors also tame bright blowout).
   if (push.tint_packed != 0u) {
     float3 t = float3(float((push.tint_packed >> 16) & 0xffu),
                       float((push.tint_packed >> 8) & 0xffu),

@@ -173,7 +173,8 @@ struct RenderSettings {
   f32 precipitation = 0.0f;  // 0 none .. 1 heavy
   bool precip_snow = false;  // snow flakes vs rain streaks
 
-  // Procedural night-sky aurora (Skyrim's northern lights). On for Skyrim.
+  // Procedural night-sky aurora (undulating polar-light curtains). Off by
+  // default; the application enables it for worlds that want an aurora.
   bool aurora = false;
 
   // Lightning flash intensity this frame (0 none .. 1 peak), driven by the engine
@@ -250,11 +251,12 @@ struct RenderSettings {
   Vec3 sun_color{1.0f, 0.96f, 0.9f};
   f32 ambient = 0.06f;
 
-  // Authored interior-cell lighting resolved from CELL XCLL + its LGTM template.
-  // When `interior` is set the renderer suppresses the sky/atmosphere/clouds/
-  // aerial/ocean, replaces sky IBL with the flat ambient, drives the directional
-  // fill through the sun path, and fades geometry to the fog colours over the
-  // near..far distance. Colours are 0..1 (byte/255); distances are meters.
+  // Authored interior lighting supplied by the application (e.g. resolved from a
+  // game's interior/room lighting definition). When `interior` is set the
+  // renderer suppresses the sky/atmosphere/clouds/aerial/ocean, replaces sky IBL
+  // with the flat ambient, drives the directional fill through the sun path, and
+  // fades geometry to the fog colours over the near..far distance. Colours are
+  // 0..1 (byte/255); distances are meters.
   bool interior = false;
   Vec3 interior_ambient{0.05f, 0.05f, 0.06f};
   Vec3 interior_directional_color{0.0f, 0.0f, 0.0f};

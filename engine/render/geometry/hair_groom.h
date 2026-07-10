@@ -9,8 +9,8 @@
 
 namespace rx::render {
 
-// Guide-strand grooming from a real Bethesda hair mesh. Hair NIFs are card
-// (shell) meshes whose UVs run root->tip along one axis; we resample each card
+// Guide-strand grooming from an authored hair mesh. Hair card meshes are
+// (shell) sheets whose UVs run root->tip along one axis; we resample each card
 // into strands that trace it from the scalp edge to the tip, so the groom keeps
 // the original silhouette instead of dissolving into a fuzzball.
 
@@ -24,6 +24,11 @@ struct GroomParams {
   Vec3 tint{1, 1, 1};             // multiplies the sampled diffuse colour
   const asset::Texture* diffuse = nullptr;  // hair diffuse for per-strand colour
   u32 seed = 1;
+  // Scale that converts the source mesh's authored units into engine metres
+  // (the groom is built in engine space, Y-up). Default 1 assumes the mesh is
+  // already in engine metres; a caller whose content is authored in game units
+  // passes that content's unit->metre scale.
+  f32 units_to_meters = 1.0f;
   // Scales the per-strand flyaway + curl amplitude. 1 = the demo's loose,
   // wind-blown look; lower values keep strands tight to the card silhouette for
   // groomed styles (facegen heads read as spikes at full frizz).

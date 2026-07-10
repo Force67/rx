@@ -46,9 +46,10 @@ struct FrameGlobals {
   // Froxel light clustering: x slice scale, y slice bias (exponential view-z
   // slicing), z,w tile size in pixels.
   f32 cluster_params[4] = {0, 0, 64, 64};
-  // Authored interior lighting (XCLL/LGTM), used when kFrameFlagInterior is set:
-  // flat ambient replaces sky IBL, a linear distance fog fades to the fog
-  // colours, and the directional fill rides the sun_direction/sun_color path.
+  // Authored interior lighting mode, used when kFrameFlagInterior is set: flat
+  // ambient replaces sky IBL, a linear distance fog fades to the fog colours,
+  // and the directional fill rides the sun_direction/sun_color path. The app
+  // supplies these values (e.g. from an interior/room lighting definition).
   f32 interior_ambient[4] = {0, 0, 0, 0};      // rgb flat ambient (x albedo), w unused
   f32 interior_fog_color0[4] = {0, 0, 0, 0};   // rgb near fog colour, w near dist (m)
   f32 interior_fog_color1[4] = {0, 0, 0, 0};   // rgb far fog colour, w far dist (m)
@@ -92,7 +93,7 @@ inline constexpr u32 kFrameFlagAurora = 1u << 8;       // draw the night-sky aur
 inline constexpr u32 kFrameFlagSpecReflTex = 1u << 9;  // sample the denoised reflection target
 inline constexpr u32 kFrameFlagRestirDi = 1u << 10;     // point/spot lights come from the ReSTIR DI textures
 inline constexpr u32 kFrameFlagFftOcean = 1u << 11;     // water displaces/shades from the FFT ocean maps
-inline constexpr u32 kFrameFlagInterior = 1u << 12;    // authored interior lighting: flat ambient + fog, no sky
+inline constexpr u32 kFrameFlagInterior = 1u << 12;    // interior lighting mode: flat ambient + fog, no sky
 
 // model + prev_model are 128 bytes; skinned draws append the bone palette's
 // buffer device address and this mesh's offset into it (needs a 144 byte push

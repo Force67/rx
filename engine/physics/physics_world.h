@@ -55,7 +55,8 @@ class PhysicsWorld {
 
   // Generic shape-tree bodies (authored collision from the havok decoder or
   // other producers). `scale` converts the desc's units into meters (pass
-  // the game-unit scale for Bethesda data). Dynamic bodies take an explicit
+  // the content's unit->metre scale, e.g. a game-unit scale). Dynamic bodies
+  // take an explicit
   // mass in kg; 0 falls back to Jolt's density-derived mass.
   BodyId AddStaticShape(const ShapeDesc& desc, const Vec3& position, const f32 rotation[4],
                         f32 scale);

@@ -16,9 +16,9 @@ enum class AssetType : u8 {
   kScript,
 };
 
-// Stable id derived from the normalized virtual path. Converted Bethesda
-// assets keep their source path, so "meshes/clutter/bucket01.nif" hashes the
-// same no matter which archive or loose directory provided it.
+// Stable id derived from the normalized virtual path. Converted assets keep
+// their source path, so "meshes/clutter/bucket01.nif" hashes the same no matter
+// which archive or loose directory provided it.
 struct AssetId {
   u64 hash = 0;
 
@@ -29,7 +29,8 @@ struct AssetId {
 
 AssetId MakeAssetId(std::string_view normalized_path);
 
-// Lowercases and converts backslashes, matching Bethesda path conventions.
+// Lowercases and converts backslashes to forward slashes (e.g. Bethesda-style
+// backslash asset paths normalize the same as forward-slash ones).
 std::string NormalizePath(std::string_view path);
 
 }  // namespace rx::asset
