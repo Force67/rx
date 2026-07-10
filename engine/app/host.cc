@@ -1,49 +1,46 @@
-#include "engine.h"
+#include "app/host.h"
 
-#include <cstdlib>
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <utility>
 
 #include <base/option.h>
 
-#include "asset/asset_database.h"
-#include "asset/gltf_loader.h"
-#include "asset/primitives.h"
 #include "core/feature_registry.h"
 #include "core/log.h"
+#include "core/math.h"
 #include "scene/components.h"
 
-// Engine lifecycle and service wiring: construction (renderer/UI/physics
-// bringup and the shared EngineContext), the resolved render preset, the
-// front-door content dispatch, and ordered teardown. The frame loop and
-// camera/input live in sibling engine translation units (see frame_loop.cc,
-// camera_input.cc).
-namespace rx {
+// Host lifecycle and the per-frame heartbeat: subsystem bringup in dependency
+// order, the resolved render preset, the fixed-step simulation loop and the
+// render path that gathers entity draws into the FrameView and submits it.
+// Everything game-specific happens inside the Application callbacks.
+namespace rx::app {
 namespace {
-// Engine-startup options. Namespace scope, so they register before
+// Host-startup options. Namespace scope, so they register before
 // InitOptionsFromEnv() runs. WinW/WinH=0 keep the WindowDesc default
 // (1920x1080); they shrink the window for fast headless capture (e.g. the
 // software-rendered swrun path).
 base::Option<int> WinW{"win.width", 0, "RX_WIN_W"};
 base::Option<int> WinH{"win.height", 0, "RX_WIN_H"};
-// SunDir pins a fixed sun for headless lighting/shadow tests (its presence
-// disables the world clock driving the sun); the renderer parses the value.
-base::Option<const char*> SunDir{"sun.dir", nullptr, "RX_SUN_DIR"};
 base::Option<bool> NoOcclusion{"no.occlusion", false, "RX_NO_OCCLUSION"};
 // Timescale (0 freezes time) overrides the default day/night speed; GameHour
 // overrides the mid-morning start the world boots lit at.
 base::Option<float> Timescale{"timescale", 0.0f, "RX_TIMESCALE"};
 base::Option<float> GameHour{"game.hour", 11.0f, "RX_GAME_HOUR"};
+// RX_FIXED_DT=<seconds> locks every frame to one delta (frame-index-pure
+// animation for golden-image captures; wall clock stops mattering).
+base::Option<float> FixedDt{"fixed.dt", 0.0f, "RX_FIXED_DT"};
 }  // namespace
 
-bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> window) {
+bool Host::Initialize(const AppConfig& config, Application& app,
+                      std::unique_ptr<Window> window) {
   config_ = config;
+  app_ = &app;
   InitFeatures();              // apply RX_FEATURES overrides before any flag read
   base::InitOptionsFromEnv();  // populate every base::Option from the environment
   jobs_ = std::make_unique<JobSystem>();
-  // When SunDir is set the world clock stops driving the day/night cycle.
-  // Seed the clock now so the demo and glTF scenes get a lit time of day.
-  drive_sun_from_clock_ = SunDir.get() == nullptr;
   ConfigureClock(20.0f);
 
   if (!config_.headless) {
@@ -55,55 +52,18 @@ bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> wind
     ApplyRenderPreset();
   }
 
-  if (!config_.headless) {
-    if (!debug_ui_.Initialize(*window_, renderer_)) {
-      RX_WARN("debug ui unavailable");
-    }
-    debug_ui_.set_clock(&clock_);  // Lighting panel scrubs the day/night cycle
-  }
-
-  // Wire the shared service bundle and build the demo subsystem. The late-built
-  // services (assets) are filled into the context as they come up.
-  ctx_.config = &config_;
-  ctx_.world = &world_;
-  ctx_.scheduler = &scheduler_;
-  ctx_.renderer = &renderer_;
-  ctx_.camera = &camera_;
-  ctx_.physics = &physics_;
-  ctx_.vfs = &vfs_;
-  ctx_.debug_ui = &debug_ui_;
-  ctx_.physics_entities = &physics_entities_;
   // Audio comes up before content loads (it reads sound bytes lazily through
   // the Vfs). Headless runs and mute (RX_AUDIO_MUTE) open no device and run
   // silent; the rest of the engine is unaffected either way.
   audio_ = std::make_unique<audio::AudioSystem>();
   audio_->Initialize(&vfs_);
-  ctx_.audio = audio_.get();
-  demos_ = std::make_unique<DemoScenes>(ctx_);
 
   if (physics_.Initialize()) {
-    // A small wooden cube every scene can throw around (F key).
-    asset::Material wood;
-    wood.id = asset::MakeAssetId("builtin/physics_cube/material");
-    wood.base_color_factor[0] = 0.42f;
-    wood.base_color_factor[1] = 0.26f;
-    wood.base_color_factor[2] = 0.14f;
-    wood.roughness_factor = 0.75f;
-    asset::Mesh cube = asset::MakeCube(0.25f, asset::MakeAssetId("builtin/physics_cube"));
-    for (asset::MeshLod& lod : cube.lods) {
-      for (asset::Submesh& submesh : lod.submeshes) submesh.material = wood.id;
-      if (lod.submeshes.empty()) {
-        lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), wood.id});
-      }
-    }
-    physics_cube_mesh_ = cube.id;
-    if (!config_.headless) {
-      renderer_.UploadMaterial(wood);
-      renderer_.UploadMesh(cube);
-    }
+    // Mirror enrolled dynamic bodies back into their ECS transforms after
+    // each step, so renderable entities follow their physics proxies.
     scheduler_.AddSystem(ecs::Stage::kSim, "physics", [this](ecs::World& world, f32 dt) {
       physics_.Update(dt);
-      for (const PhysicsEntity& body : physics_entities_) {
+      for (const PhysicsBinding& body : physics_bindings_) {
         scene::Transform* transform = world.Get<scene::Transform>(body.entity);
         if (!transform) continue;
         Vec3 position;
@@ -118,47 +78,26 @@ bool Engine::Initialize(const EngineConfig& config, std::unique_ptr<Window> wind
     });
   }
 
-  if (!config_.gltf_path.empty()) {
-    if (!LoadGltfScene()) return false;
-  } else {
-    demos_->CreateDemoScene();
-  }
+  // Hand the application every service it may wire against. Addresses are
+  // host members, stable until Shutdown.
+  services_.host = this;
+  services_.window = window_.get();
+  services_.jobs = jobs_.get();
+  services_.clock = &clock_;
+  services_.world = &world_;
+  services_.scheduler = &scheduler_;
+  services_.renderer = &renderer_;
+  services_.physics = &physics_;
+  services_.vfs = &vfs_;
+  services_.audio = audio_.get();
+  services_.input_map = &input_map_;
+  services_.actions = &actions_;
+  services_.physics_bindings = &physics_bindings_;
 
-  return true;
+  return app_->OnInitialize(services_);
 }
 
-bool Engine::LoadGltfScene() {
-  asset::GltfScene scene;
-  if (!asset::LoadGltfScene(config_.gltf_path, &scene)) return false;
-
-  if (!config_.headless) {
-    for (const asset::Texture& texture : scene.textures) {
-      if (texture.id) renderer_.UploadTexture(texture);
-    }
-    for (const asset::Material& material : scene.materials) renderer_.UploadMaterial(material);
-    for (const asset::Mesh& mesh : scene.meshes) renderer_.UploadMesh(mesh);
-  }
-
-  for (const asset::GltfScene::Instance& instance : scene.instances) {
-    ecs::Entity entity = world_.Create();
-    scene::Transform transform;
-    transform.position[0] = instance.position.x;
-    transform.position[1] = instance.position.y;
-    transform.position[2] = instance.position.z;
-    std::memcpy(transform.rotation, instance.rotation, sizeof(transform.rotation));
-    transform.scale = instance.scale;
-    world_.Add(entity, transform);
-    world_.Add(entity, scene::Renderable{scene.meshes[instance.mesh_index].id});
-  }
-
-  // Sponza-friendly start: inside the atrium looking down the long axis.
-  camera_.set_position({-7.0f, 1.7f, 0.0f});
-  camera_.set_yaw_pitch(1.5708f, 0.0f);
-  camera_.speed = 4.0f;
-  return true;
-}
-
-void Engine::ApplyRenderPreset() {
+void Host::ApplyRenderPreset() {
   render::Device* device = renderer_.device();
   if (!device || device->is_stub()) return;  // no gpu, nothing to tune
   const render::DeviceCaps& caps = device->caps();
@@ -247,7 +186,7 @@ void Engine::ApplyRenderPreset() {
           config_.preset == render::QualityPreset::kAuto ? "auto" : "forced");
 }
 
-void Engine::ConfigureClock(f32 base_timescale) {
+void Host::ConfigureClock(f32 base_timescale) {
   f32 timescale = base_timescale > 0 ? base_timescale : 20.0f;
   if (Timescale.overridden() && Timescale.get() >= 0) timescale = Timescale.get();
   const f32 start_hour = GameHour.get();
@@ -255,34 +194,100 @@ void Engine::ConfigureClock(f32 base_timescale) {
   RX_INFO("day/night clock: start hour {:.1f}, timescale {:.0f}", start_hour, timescale);
 }
 
-int Engine::Run() {
+bool Host::RunFrame() {
+  if (quit_.load(std::memory_order_relaxed)) return false;
+  if (FixedDt.get() > 0.0f) timer_.set_fixed_delta(static_cast<f64>(FixedDt.get()));
+  if (window_ && !window_->PumpEvents()) return false;
+  // Resolve this pump's raw keyboard/mouse + gamepad state into semantic
+  // actions for the application to read.
+  if (window_) input_map_.Resolve(window_->input(), window_->gamepad(), &actions_);
+
+  int steps = timer_.Tick();
+  f32 dt = static_cast<f32>(timer_.fixed_step());
+  // Advance the day/night clock by the real frame time; applications derive
+  // sun/sky from it.
+  clock_.Advance(timer_.frame_delta());
+  for (int i = 0; i < steps; ++i) {
+    scheduler_.RunStage(ecs::Stage::kPreSim, world_, dt);
+    scheduler_.RunStage(ecs::Stage::kSim, world_, dt);
+    scheduler_.RunStage(ecs::Stage::kPostSim, world_, dt);
+    app_->OnFixedStep(dt);
+  }
+
+  if (!config_.headless) {
+    f32 frame_delta = static_cast<f32>(timer_.frame_delta());
+    app_->OnUpdate(frame_delta);
+    scheduler_.RunStage(ecs::Stage::kPreRender, world_, frame_delta);
+
+    render::FrameView view;
+    view.frame_delta_seconds = frame_delta;
+    GatherEntityDraws(view);
+    app_->OnBuildView(frame_delta, view);
+    // Move the audio listener to this frame's viewpoint, so positional
+    // voices pan and attenuate around the camera.
+    if (audio_) {
+      const Vec3 eye = view.camera.eye;
+      const Vec3 forward = Normalize(view.camera.target - eye);
+      audio_->SetListener(eye, forward, Vec3{0, 1, 0});
+    }
+    renderer_.RenderFrame(view);
+    app_->OnFrameEnd();
+  } else {
+    // No vsync to pace the loop; yield between fixed steps instead of
+    // spinning a core.
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return !quit_.load(std::memory_order_relaxed);
+}
+
+void Host::GatherEntityDraws(render::FrameView& view) {
+  // Rebuilt every frame so destroyed entities drop out on their own.
+  base::UnorderedMap<u64, Mat4> transforms;
+  world_.Each<scene::Transform, scene::Renderable>(
+      [&](ecs::Entity entity, scene::Transform& transform, scene::Renderable& renderable) {
+        if (world_.Has<scene::Hidden>(entity)) return;
+        u64 key = static_cast<u64>(entity.generation) << 32 | entity.index;
+        Mat4 current =
+            MakeTranslation(
+                {transform.position[0], transform.position[1], transform.position[2]}) *
+            MakeFromQuat(transform.rotation[0], transform.rotation[1], transform.rotation[2],
+                         transform.rotation[3]) *
+            MakeScale(transform.scale);
+        const Mat4* prev = prev_transforms_.find(key);
+        view.draws.push_back({renderable.mesh.hash, current, prev ? *prev : current});
+        transforms.insert(key, current);
+      });
+  prev_transforms_ = std::move(transforms);
+}
+
+int Host::Run() {
   while (RunFrame()) {
   }
   return 0;
 }
 
-void Engine::OnSurfaceDestroyed() {
+void Host::OnSurfaceDestroyed() {
   if (!config_.headless) renderer_.DestroySurface();
 }
 
-void Engine::OnSurfaceCreated() {
+void Host::OnSurfaceCreated() {
   if (!config_.headless) renderer_.RecreateSurface();
 }
 
-Engine::~Engine() { Shutdown(); }
+Host::~Host() { Shutdown(); }
 
-void Engine::Shutdown() {
+void Host::Shutdown() {
   if (shut_down_) return;  // idempotent: explicit Shutdown then destructor
   shut_down_ = true;
   // Stop the audio device thread early, before the systems whose sounds it
   // might still be streaming go away.
   if (audio_) audio_->Shutdown();
-  if (!config_.headless) {
-    renderer_.WaitIdle();
-    debug_ui_.Shutdown();
-    renderer_.Shutdown();
-  }
+  if (!config_.headless) renderer_.WaitIdle();
+  // The renderer is idle but alive: the application drops its GPU-dependent
+  // resources (UI backends etc.) before the device goes away.
+  if (app_) app_->OnShutdown();
+  if (!config_.headless) renderer_.Shutdown();
   if (jobs_) jobs_->WaitIdle();
 }
 
-}  // namespace rx
+}  // namespace rx::app

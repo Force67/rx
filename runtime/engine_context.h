@@ -5,6 +5,7 @@
 
 #include <base/containers/vector.h>
 
+#include "app/services.h"
 #include "asset/asset_database.h"
 #include "asset/vfs.h"
 #include "audio/audio_system.h"
@@ -19,6 +20,8 @@
 
 namespace rx {
 
+// The viewer's boot configuration: the app::AppConfig fields plus the
+// front-door content selection (main.cc maps the overlap into AppConfig).
 struct EngineConfig {
   std::string gltf_path;   // standalone gltf/glb scene (e.g. sponza)
   std::string demo_scene;  // builtin demo scene id ("water", "materials", ...)
@@ -29,15 +32,13 @@ struct EngineConfig {
   bool headless = false;
 };
 
-// A dynamic physics body mirrored into an ECS transform after each step.
-struct PhysicsEntity {
-  physics::BodyId body;
-  ecs::Entity entity;
-};
+// A dynamic physics body the host mirrors into an ECS transform after each
+// step (the viewer's name for the host's binding type).
+using PhysicsEntity = app::PhysicsBinding;
 
-// Shared services the engine subsystems read through. The engine owns this and
-// the systems it created; pointers to late-built services (assets) are filled
-// in once those exist.
+// Shared services the viewer subsystems (demo scenes, debug overlay) read
+// through: the host-owned engine services plus the viewer's own camera, UI
+// and config. The viewer populates it at OnInitialize.
 struct EngineContext {
   const EngineConfig* config = nullptr;
 

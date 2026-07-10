@@ -1,8 +1,9 @@
 #include <cstring>
 #include <string>
 
+#include "app/host.h"
 #include "core/log.h"
-#include "engine.h"
+#include "viewer.h"
 
 namespace {
 
@@ -50,12 +51,18 @@ int main(int argc, char** argv) {
     }
   }
 
-  rx::Engine engine;
-  if (!engine.Initialize(config)) {
+  rx::app::AppConfig app_config;
+  app_config.renderer = config.renderer;
+  app_config.preset = config.preset;
+  app_config.headless = config.headless;
+
+  rx::Viewer viewer(config);
+  rx::app::Host host;
+  if (!host.Initialize(app_config, viewer)) {
     RX_ERROR("engine initialization failed");
     return 1;
   }
-  int rc = engine.Run();
-  engine.Shutdown();
+  int rc = host.Run();
+  host.Shutdown();
   return rc;
 }

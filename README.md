@@ -25,7 +25,12 @@ viewer runtime in place of the game.
   storage and scheduling, scene components, Jolt-backed rigid bodies, pose and
   locomotion helpers, an SDL mixer with wav/xwma decoding, and a small RPC
   value/registry layer. `libs/kinema` is a reusable SoA animation runtime.
-- **runtime/** - the `rx` viewer: `--gltf <scene>` or `--demo <id>` (water,
+- **engine/app** - the composition root a game embeds instead of forking the
+  viewer: `app::Host` owns the subsystems and the fixed-step/render loop and
+  drives a game-implemented `app::Application`. See [EMBEDDING.md](EMBEDDING.md)
+  for using rx as the engine of your own game.
+- **runtime/** - the `rx` viewer (the reference `app::Application`):
+  `--gltf <scene>` or `--demo <id>` (water,
   materials, cornell, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
   meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx),
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera

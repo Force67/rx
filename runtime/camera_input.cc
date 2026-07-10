@@ -1,4 +1,4 @@
-#include "engine.h"
+#include "viewer.h"
 
 #include <algorithm>
 #include <cmath>
@@ -27,30 +27,30 @@ static base::Option<bool> Showcase{"showcase", false, "RX_SHOWCASE"};
 static base::Option<const char*> ShowcaseShots{"showcase.shots", nullptr, "RX_SHOWCASE_SHOTS"};
 static base::Option<bool> ShowcaseQuit{"showcase.quit", false, "RX_SHOWCASE_QUIT"};
 
-void Engine::UpdateCamera(f32 frame_delta) {
+void Viewer::UpdateCamera(f32 frame_delta) {
   if (!window_) return;
   const InputState& input = window_->input();
 
   bool kb = debug_ui_.wants_keyboard();
   bool allow_mouse = !debug_ui_.wants_mouse() || camera_.looking();
   bool allow_keyboard = !kb;
-  camera_.Update(input, actions_, allow_mouse, allow_keyboard, frame_delta);
+  camera_.Update(input, *actions_, allow_mouse, allow_keyboard, frame_delta);
   window_->SetRelativeMouseMode(camera_.looking());
 
   DriveCamera(frame_delta);  // orbit / replay overrides + record
 
-  if (actions_.pressed(Action::kToggleDebug) && !kb) debug_ui_.ToggleVisible();
-  if (actions_.pressed(Action::kThrowDebug) && !kb) ThrowPhysicsCube();
+  if (actions_->pressed(Action::kToggleDebug) && !kb) debug_ui_.ToggleVisible();
+  if (actions_->pressed(Action::kThrowDebug) && !kb) ThrowPhysicsCube();
 }
 
-void Engine::LookCameraAt(const Vec3& eye, const Vec3& center) {
+void Viewer::LookCameraAt(const Vec3& eye, const Vec3& center) {
   camera_.set_position(eye);
   Vec3 d = Normalize(center - eye);
   camera_.set_yaw_pitch(std::atan2(d.x, -d.z),
                         std::asin(std::clamp(d.y, -1.0f, 1.0f)));  // forward() convention
 }
 
-void Engine::DriveCamera(f32 dt) {
+void Viewer::DriveCamera(f32 dt) {
   if (!cam_init_) {
     cam_init_ = true;
     // RX_CAM="x,y,z,yaw,pitch" pins the camera for a framed capture (handy for
@@ -107,7 +107,7 @@ void Engine::DriveCamera(f32 dt) {
         char path[1024];
         std::snprintf(path, sizeof(path), "%s/%02d_%s.png", showcase_shot_dir_.c_str(), idx,
                       label.c_str());
-        renderer_.CaptureScreenshot(path);
+        renderer_->CaptureScreenshot(path);
         RX_INFO("showcase capture: {}", path);
       }
     }
@@ -129,7 +129,7 @@ void Engine::DriveCamera(f32 dt) {
                 showcase_frames_, showcase_bench_time_, avg > 0 ? 1.0f / avg : 0.0f,
                 showcase_dt_max_ > 0 ? 1.0f / showcase_dt_max_ : 0.0f,
                 showcase_dt_min_ > 0 ? 1.0f / showcase_dt_min_ : 0.0f);
-        if (showcase_quit_) RequestQuit();
+        if (showcase_quit_) host_->RequestQuit();
       }
     }
   } else if (cam_orbit_) {
@@ -161,7 +161,7 @@ void Engine::DriveCamera(f32 dt) {
   }
 }
 
-void Engine::BuildShowcase() {
+void Viewer::BuildShowcase() {
   // A drone pass over the origin-anchored scene: establishing wide, descending
   // push-in, low skim, crane-up reveal. Every waypoint sits at ~zero velocity
   // (smoothstep), so each is a clean, well-framed still.
@@ -176,19 +176,19 @@ void Engine::BuildShowcase() {
   showcase_.Add(wp(c + Vec3{12, 9.2f, 7}, c + Vec3{3, 1.5f, 0}, 5.0f, true, "reveal"));
 }
 
-void Engine::ThrowPhysicsCube() {
-  if (!physics_.initialized() || !physics_cube_mesh_) return;
+void Viewer::ThrowPhysicsCube() {
+  if (!physics_->initialized() || !physics_cube_mesh_) return;
   Vec3 forward = camera_.forward();
   Vec3 origin = camera_.position() + forward * 0.8f;
   // Wood-ish density: heavy enough to splash, light enough to float.
   physics::BodyId body =
-      physics_.AddDynamicBox(origin, {0.25f, 0.25f, 0.25f}, 350.0f, forward * 14.0f);
+      physics_->AddDynamicBox(origin, {0.25f, 0.25f, 0.25f}, 350.0f, forward * 14.0f);
   if (!body) return;
-  ecs::Entity entity = world_.Create();
-  world_.Add(entity, scene::Transform{.position = {origin.x, origin.y, origin.z}});
-  world_.Add(entity, scene::Renderable{physics_cube_mesh_});
-  physics_entities_.push_back({body, entity});
-  if (window_ && input_map_.rumble) window_->SetRumble(0.35f, 0.7f, 180);  // toss kick
+  ecs::Entity entity = world_->Create();
+  world_->Add(entity, scene::Transform{.position = {origin.x, origin.y, origin.z}});
+  world_->Add(entity, scene::Renderable{physics_cube_mesh_});
+  physics_entities_->push_back({body, entity});
+  if (window_ && input_map_->rumble) window_->SetRumble(0.35f, 0.7f, 180);  // toss kick
 }
 
 }  // namespace rx

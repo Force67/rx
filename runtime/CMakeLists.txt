@@ -1,9 +1,9 @@
-# The rx viewer: window + renderer + built-in demo scenes / glTF loading + fly
-# camera + imgui debug overlay. The debug overlay compiles to a stub when imgui
-# is absent, so the same translation units serve headless builds.
+# The rx viewer: an app::Application on top of app::Host, adding the built-in
+# demo scenes / glTF loading, the fly camera and the imgui debug overlay. The
+# debug overlay compiles to a stub when imgui is absent, so the same
+# translation units serve headless builds.
 set(RX_RUNTIME_SOURCES
-  engine.cc
-  frame_loop.cc
+  viewer.cc
   camera_input.cc
   demo_scenes.cc
   fly_camera.cc
@@ -12,6 +12,7 @@ set(RX_RUNTIME_SOURCES
 )
 
 set(RX_RUNTIME_MODULES
+  rx::app
   rx::core
   rx::ecs
   rx::asset
