@@ -11,7 +11,9 @@ namespace rx::asset {
 RX_ASSET_EXPORT Mesh MakeCube(f32 half_extent, AssetId id);
 
 // An axis-aligned box with per-axis half extents (a cube is the uniform case),
-// for wall slabs and rooms. One empty submesh so the caller sets the material.
+// for wall slabs and rooms. The submesh list is left EMPTY: callers append
+// their own (the Cornell scene builds multi-material boxes); a submesh-less
+// mesh uploads as one full-range draw with a null material.
 RX_ASSET_EXPORT Mesh MakeBox(f32 hx, f32 hy, f32 hz, AssetId id);
 
 // A uv sphere with smooth normals, tangents and equirect uvs. One empty
