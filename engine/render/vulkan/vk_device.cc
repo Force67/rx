@@ -1735,11 +1735,15 @@ AccelSizes VulkanDevice::GetBlasSizes(const BlasBuildDesc& desc) {
     tri.vertexData.deviceAddress = t.vertex_address;
     tri.vertexStride = t.vertex_stride;
     tri.maxVertex = t.vertex_count == 0 ? 0 : t.vertex_count - 1;
-    tri.indexType =
-        t.index_type == IndexType::kUint16 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
-    tri.indexData.deviceAddress = t.index_address;
+    // index_count 0 = a non-indexed triangle soup (primitives from the vertex
+    // count, no index buffer); must match TranslateBlas in vk_command_list.cc.
+    const bool indexed = t.index_count > 0;
+    tri.indexType = !indexed ? VK_INDEX_TYPE_NONE_KHR
+                             : (t.index_type == IndexType::kUint16 ? VK_INDEX_TYPE_UINT16
+                                                                   : VK_INDEX_TYPE_UINT32);
+    tri.indexData.deviceAddress = indexed ? t.index_address : 0;
     geometries.push_back(geometry);
-    primitive_counts.push_back(t.index_count / 3);
+    primitive_counts.push_back(indexed ? t.index_count / 3 : t.vertex_count / 3);
   }
 
   VkAccelerationStructureBuildGeometryInfoKHR info{

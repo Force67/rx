@@ -67,7 +67,8 @@ struct AccelTriangles {
   u32 vertex_count = 0;
   Format vertex_format = Format::kRGB32Float;
   u64 index_address = 0;  // absolute address of this range's first index
-  u32 index_count = 0;
+  u32 index_count = 0;    // 0 = non-indexed triangle soup (primitives from
+                          // vertex_count/3; index_address/index_type ignored)
   IndexType index_type = IndexType::kUint32;
   bool opaque = true;  // false = alpha-tested, ray queries run the any-hit loop
 };

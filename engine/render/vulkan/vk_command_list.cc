@@ -359,12 +359,17 @@ BlasGeometry TranslateBlas(const BlasBuildDesc& desc) {
     tri.vertexData.deviceAddress = t.vertex_address;
     tri.vertexStride = t.vertex_stride;
     tri.maxVertex = t.vertex_count == 0 ? 0 : t.vertex_count - 1;
-    tri.indexType = t.index_type == IndexType::kUint16 ? VK_INDEX_TYPE_UINT16
-                                                       : VK_INDEX_TYPE_UINT32;
-    tri.indexData.deviceAddress = t.index_address;
+    // index_count 0 = a non-indexed triangle soup: the primitive count comes
+    // from the vertex count and the index buffer is omitted (indexType NONE).
+    const bool indexed = t.index_count > 0;
+    tri.indexType = !indexed ? VK_INDEX_TYPE_NONE_KHR
+                             : (t.index_type == IndexType::kUint16 ? VK_INDEX_TYPE_UINT16
+                                                                   : VK_INDEX_TYPE_UINT32);
+    tri.indexData.deviceAddress = indexed ? t.index_address : 0;
+    const u32 primitives = indexed ? t.index_count / 3 : t.vertex_count / 3;
     result.geometries.push_back(geometry);
-    result.ranges.push_back({.primitiveCount = t.index_count / 3});
-    result.primitive_counts.push_back(t.index_count / 3);
+    result.ranges.push_back({.primitiveCount = primitives});
+    result.primitive_counts.push_back(primitives);
   }
   return result;
 }
