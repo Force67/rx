@@ -590,32 +590,55 @@ ResourceHandle NrdDenoiser::AddDenoisePass(RenderGraph& graph, u32 identifier, c
       [this, identifier, normal_roughness, view_z, motion, noisy, noisy_type, &output, output_type](
           PassContext& ctx) {
         for (auto& b : bindings_) b = {};
+        // User inputs arrive from the graph in SHADER_READ_ONLY, but NRD may
+        // bind some of them as read-write storage in individual dispatches
+        // (IN_MV shows up as gInOut_Mv). Track their layout like pool textures
+        // so RecordDispatches emits the GENERAL transition, and restore below.
+        PoolTexture user_inputs[4] = {
+            {ctx.graph->image(motion), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+            {ctx.graph->image(normal_roughness), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+            {ctx.graph->image(view_z), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+            {ctx.graph->image(noisy), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL},
+        };
         bindings_[static_cast<int>(nrd::ResourceType::IN_MV)] = {
-            GetVkImageView(ctx.graph->image(motion).view), nullptr};
+            GetVkImageView(user_inputs[0].image.view), &user_inputs[0]};
         bindings_[static_cast<int>(nrd::ResourceType::IN_NORMAL_ROUGHNESS)] = {
-            GetVkImageView(ctx.graph->image(normal_roughness).view), nullptr};
+            GetVkImageView(user_inputs[1].image.view), &user_inputs[1]};
         bindings_[static_cast<int>(nrd::ResourceType::IN_VIEWZ)] = {
-            GetVkImageView(ctx.graph->image(view_z).view), nullptr};
-        bindings_[noisy_type] = {GetVkImageView(ctx.graph->image(noisy).view), nullptr};
+            GetVkImageView(user_inputs[2].image.view), &user_inputs[2]};
+        bindings_[noisy_type] = {GetVkImageView(user_inputs[3].image.view), &user_inputs[3]};
         // The graph leaves the imported output in GENERAL before the pass.
         output.layout = VK_IMAGE_LAYOUT_GENERAL;
         bindings_[output_type] = {GetVkImageView(output.image.view), &output};
         RecordDispatches(ctx, identifier);
-        // Hand the output back to the graph in GENERAL (its kStorageWrite state).
-        if (output.layout != VK_IMAGE_LAYOUT_GENERAL) {
-          VkImageMemoryBarrier2 b{.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-          b.srcStageMask = b.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
-          b.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
-          b.dstAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
-          b.oldLayout = output.layout;
-          b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-          b.image = GetVkImage(output.image);
+        // Hand resources back in the layout the graph believes they hold:
+        // the output in GENERAL (its kStorageWrite state), user inputs in
+        // SHADER_READ_ONLY (their kSampledCompute state).
+        VkImageMemoryBarrier2 barriers[5];
+        u32 barrier_count = 0;
+        auto restore = [&](PoolTexture& t, VkImageLayout want) {
+          if (t.layout == want) return;
+          VkImageMemoryBarrier2& b = barriers[barrier_count++];
+          b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+          b.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+          b.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+          b.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+          b.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
+          b.oldLayout = t.layout;
+          b.newLayout = want;
+          b.image = GetVkImage(t.image);
           b.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+          t.layout = want;
+        };
+        restore(output, VK_IMAGE_LAYOUT_GENERAL);
+        for (PoolTexture& t : user_inputs) {
+          restore(t, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+        if (barrier_count > 0) {
           VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-          dep.imageMemoryBarrierCount = 1;
-          dep.pImageMemoryBarriers = &b;
+          dep.imageMemoryBarrierCount = barrier_count;
+          dep.pImageMemoryBarriers = barriers;
           vkCmdPipelineBarrier2(GetVkCommandBuffer(*ctx.cmd), &dep);
-          output.layout = VK_IMAGE_LAYOUT_GENERAL;
         }
       });
   return out_handle;

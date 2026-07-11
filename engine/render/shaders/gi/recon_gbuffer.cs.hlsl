@@ -195,7 +195,7 @@ Hit TraceClosest(float3 origin, float3 dir, float cone_spread, bool sample_mr) {
   ray.Direction = dir;
   ray.TMax = 1000.0;
   RayQuery<RAY_FLAG_NONE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_PATHTRACE, ray);
   while (rq.Proceed()) {
     if (rq.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE &&
         PassesAlpha(rq.CandidateInstanceID(), rq.CandidateGeometryIndex(),
@@ -284,7 +284,7 @@ bool Occluded(float3 origin, float3 dir, float dist, float cone_spread) {
   ray.Direction = dir;
   ray.TMax = dist;
   RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_PATHTRACE, ray);
   while (rq.Proceed()) {
     if (rq.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE &&
         PassesAlpha(rq.CandidateInstanceID(), rq.CandidateGeometryIndex(),

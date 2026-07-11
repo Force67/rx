@@ -177,7 +177,7 @@ bool Occluded(float3 origin, float3 dir, float dist) {
   ray.Direction = dir;
   ray.TMax = dist;
   RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_PATHTRACE, ray);
   while (rq.Proceed()) {
     if (rq.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE &&
         PassesAlpha(rq.CandidateInstanceID(), rq.CandidateGeometryIndex(),

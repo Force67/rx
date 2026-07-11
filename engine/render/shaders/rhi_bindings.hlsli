@@ -16,3 +16,9 @@
 #endif
 
 #endif  // RX_RHI_BINDINGS_HLSLI_
+
+// TLAS instance masks; mirror render::RayMask (gi/raytracing.h). Realtime
+// effects trace RX_RAY_MASK_REALTIME and never see no_rt fill geometry; the
+// path-tracer family traces RX_RAY_MASK_PATHTRACE, which includes it.
+#define RX_RAY_MASK_REALTIME 0x01
+#define RX_RAY_MASK_PATHTRACE 0x02

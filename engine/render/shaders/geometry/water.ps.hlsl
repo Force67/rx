@@ -3,6 +3,8 @@
 // absorption against the opaque snapshot, fresnel weighting and a ggx sun
 // glint. Material base color acts as the absorption tint.
 
+#include "rhi_bindings.hlsli"
+
 struct FrameGlobals {
   column_major float4x4 view_proj;
   column_major float4x4 prev_view_proj;
@@ -201,7 +203,7 @@ float3 TraceReflection(float3 origin, float3 dir) {
   ray.Direction = dir;
   ray.TMax = 500.0;
   RayQuery<RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
   rq.Proceed();
   if (rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
     return SkyReflection(dir, 1.0);

@@ -503,7 +503,7 @@ float3 TraceReflection(float3 origin, float3 dir) {
   ray.Direction = dir;
   ray.TMax = 200.0;
   RayQuery<RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
   rq.Proceed();
   if (rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
     return min(prefiltered_cube.SampleLevel(prefiltered_sampler, dir, 1.0).rgb, 8.0.xxx);
@@ -878,7 +878,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
         pray.Direction = pl_l;
         pray.TMax = dist - 0.04;
         RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> prq;
-        prq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, pray);
+        prq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, pray);
         prq.Proceed();
         if (prq.CommittedStatus() == COMMITTED_TRIANGLE_HIT) continue;
       }
@@ -962,7 +962,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       sray.Direction = pl_l;
       sray.TMax = dist - 0.04;
       RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> srq;
-      srq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, sray);
+      srq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, sray);
       srq.Proceed();
       if (srq.CommittedStatus() == COMMITTED_TRIANGLE_HIT) pvis = 0.0;
     }
@@ -1142,7 +1142,7 @@ float SunShadow(PsIn input, float3 n) {
   ray.Direction = l;
   ray.TMax = 1000.0;
   RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
   rq.Proceed();
   return rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
 }

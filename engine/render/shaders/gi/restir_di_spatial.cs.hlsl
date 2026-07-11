@@ -172,7 +172,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
       ray.TMin = 0.0;
       ray.TMax = max(dist - 0.05, 0.0);
       RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> rq;
-      rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+      rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
       rq.Proceed();
       vis = rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
 

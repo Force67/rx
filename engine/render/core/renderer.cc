@@ -1956,11 +1956,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     instances.reserve(view.draws.size());
     for (const DrawItem& item : view.draws) {
       const GpuMesh* mesh = meshes_.find(item.mesh);
-      // no_rt grass-like fill is excluded from the realtime tlas, but the path
-      // tracer wants it (it built a blas for it; see UploadMesh include_rt).
+      // no_rt grass-like fill stays out of the realtime tlas; when the path
+      // tracer is active it joins with a path-trace-only instance mask, so
+      // realtime rays (shadows/RTAO/reflections/fog/water) skip it either way:
+      // they trace with RX_RAY_MASK_REALTIME.
       if (!mesh || mesh->all_blend || (mesh->no_rt && !path_trace)) continue;
+      u8 mask = mesh->no_rt ? static_cast<u8>(kRayMaskPathTrace)
+                            : static_cast<u8>(kRayMaskRealtime | kRayMaskPathTrace);
       instances.push_back({.mesh_key = item.mesh,
                            .custom_index = mesh->bindless_index,
+                           .mask = mask,
                            .transform = item.transform});
     }
     // Grow the TLAS now, on the build thread, so the record-time BuildTlas never

@@ -136,7 +136,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   ray.Direction = dir;
   ray.TMax = volume.params.z;
   RayQuery<RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
   rq.Proceed();
 
   float3 radiance;
@@ -194,7 +194,7 @@ void main(uint3 id : SV_DispatchThreadID) {
       shadow_ray.Direction = to_sun;
       shadow_ray.TMax = 1000.0;
       RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> srq;
-      srq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, shadow_ray);
+      srq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, shadow_ray);
       srq.Proceed();
       if (srq.CommittedStatus() == COMMITTED_TRIANGLE_HIT) shadow = 0.0;
     }

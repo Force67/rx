@@ -102,7 +102,7 @@ Hit TraceClosest(float3 origin, float3 dir) {
   ray.Direction = dir;
   ray.TMax = 1000.0;
   RayQuery<RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_PATHTRACE, ray);
   rq.Proceed();
   if (rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT) return h;
 
@@ -149,7 +149,7 @@ bool Occluded(float3 origin, float3 dir, float dist) {
   ray.Direction = dir;
   ray.TMax = dist;
   RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, 0xff, ray);
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_PATHTRACE, ray);
   rq.Proceed();
   return rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT;
 }

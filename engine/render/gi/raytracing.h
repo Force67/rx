@@ -21,6 +21,18 @@ struct RayTracingSettings {
   bool global_illumination = false;
 };
 
+// TLAS instance mask bits. Mirrored by the RX_RAY_MASK_* defines in
+// shaders/rhi_bindings.hlsli; keep the two in sync. Realtime effects
+// (shadows, RTAO, reflections, fog, water, forward hits) trace with
+// kRayMaskRealtime; the path-tracer family traces with kRayMaskPathTrace,
+// which additionally sees no_rt fill geometry (grass-like meshes that are
+// too dense for realtime rays but wanted for ground-truth light transport).
+enum RayMask : u8 {
+  kRayMaskRealtime = 0x01,
+  kRayMaskPathTrace = 0x02,
+  kRayMaskAll = 0xff,
+};
+
 // Owns acceleration structures. Only constructed when DeviceCaps::raytracing
 // is true; every effect it feeds degrades to the raster path otherwise.
 // BLASes build once per uploaded mesh, the TLAS rebuilds every frame from
@@ -33,6 +45,8 @@ class RayTracingContext {
   struct Instance {
     u64 mesh_key = 0;
     u32 custom_index = 0;  // shader-visible instanceCustomIndex (bindless mesh record)
+    u8 mask = kRayMaskAll;  // RayMask bits; rays only hit instances whose mask
+                            // intersects the query's InstanceInclusionMask
     Mat4 transform = Mat4::Identity();
   };
 
@@ -67,6 +81,10 @@ class RayTracingContext {
 
   AccelStructHandle tlas(u32 slot) const { return tlas_[slot].handle; }
 
+  // Total BLAS bytes reclaimed by compaction so far (0 on backends without
+  // the compacted-size query).
+  u64 compacted_saved_bytes() const { return compacted_saved_bytes_; }
+
  private:
   struct Blas {
     AccelStructHandle handle;
@@ -93,6 +111,7 @@ class RayTracingContext {
   // lavapipe, whose build workers can outlive the signal; a persistent
   // arena avoids both that and the per-build allocation.
   GpuBuffer blas_scratch_;
+  u64 compacted_saved_bytes_ = 0;
   Tlas tlas_[kSlots];
 };
 

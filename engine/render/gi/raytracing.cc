@@ -77,24 +77,54 @@ bool RayTracingContext::BuildBlas(u64 mesh_key, const GpuMesh& mesh) {
   base::Vector<AccelTriangles> geometries = BlasGeometries(mesh);
   if (geometries.empty()) return false;
 
-  BlasBuildDesc desc{.geometries = {geometries.data(), geometries.size()}};
+  // Compaction runs when the backend has the size query (vulkan; d3d12 stubs
+  // it and keeps the full-size structure). Meshes upload once, so the extra
+  // blocking submit happens at load time, and static BLAS memory typically
+  // shrinks to roughly half.
+  AccelCompactionQueryHandle query = device_.CreateCompactionQuery(1);
+  BlasBuildDesc desc{.geometries = {geometries.data(), geometries.size()},
+                     .allow_compaction = static_cast<bool>(query)};
   AccelSizes sizes = device_.GetBlasSizes(desc);
-  if (sizes.accel_bytes == 0) return false;
+  if (sizes.accel_bytes == 0) {
+    if (query) device_.DestroyCompactionQuery(query);
+    return false;
+  }
 
   Blas blas;
   blas.handle = device_.CreateAccelStruct(AccelStructType::kBlas, sizes.accel_bytes);
-  if (!blas.handle) return false;
+  if (!blas.handle) {
+    if (query) device_.DestroyCompactionQuery(query);
+    return false;
+  }
 
   u32 alignment = device_.caps().accel_scratch_alignment;
   if (!EnsureBlasScratch(sizes.scratch_bytes + alignment)) {
     device_.DestroyAccelStruct(blas.handle);
+    if (query) device_.DestroyCompactionQuery(query);
     return false;
   }
   u64 scratch_offset = AlignUp(blas_scratch_.address, alignment) - blas_scratch_.address;
 
   device_.ImmediateSubmit([&](CommandList& cmd) {
     cmd.BuildBlas(blas.handle, desc, blas_scratch_, scratch_offset);
+    if (query) cmd.QueryCompactedSizes(query, &blas.handle, 1);
   });
+  if (query) {
+    // ImmediateSubmit waited the fence, so the size is ready to read.
+    u64 compacted = 0;
+    if (device_.GetCompactedSizes(query, &compacted, 1) && compacted > 0 &&
+        compacted < sizes.accel_bytes) {
+      if (AccelStructHandle lean =
+              device_.CreateAccelStruct(AccelStructType::kBlas, compacted)) {
+        device_.ImmediateSubmit(
+            [&](CommandList& cmd) { cmd.CopyAccelStruct(lean, blas.handle, /*compact=*/true); });
+        device_.DestroyAccelStruct(blas.handle);
+        blas.handle = lean;
+        compacted_saved_bytes_ += sizes.accel_bytes - compacted;
+      }
+    }
+    device_.DestroyCompactionQuery(query);
+  }
   blas.address = device_.accel_address(blas.handle);
 
   blas_.emplace(mesh_key, blas);
@@ -143,7 +173,7 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot,
     TlasInstance gpu{};
     ToInstanceTransform(instance.transform, gpu.transform);
     gpu.custom_index = instance.custom_index & 0xffffffu;
-    gpu.mask = 0xff;
+    gpu.mask = instance.mask;
     gpu.flags = kTlasInstanceTriangleCullDisable;
     gpu.blas_address = blas->address;
     gpu_instances.push_back(gpu);
