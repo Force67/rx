@@ -21,6 +21,11 @@ enum class BindingType : u8 {
   kUniformBuffer,
   kStorageBuffer,
   kAccelStruct,
+  // Read-only raw buffer (ByteAddressBuffer). Unlike kStorageBuffer it maps
+  // to a single SRV per element on d3d12 (one contiguous register range for
+  // arrays), which keeps large bindless buffer tables - the DXIL stand-in for
+  // buffer-device-address geometry reads - cheap in the root signature.
+  kByteBuffer,
 };
 
 // One shader-visible slot in a set. `count` > 1 declares an array;
@@ -98,6 +103,10 @@ inline BindingItem StorageBuffer(u32 slot, const GpuBuffer& buffer, u64 offset =
 }
 inline BindingItem Accel(u32 slot, AccelStructHandle accel) {
   return {.slot = slot, .type = BindingType::kAccelStruct, .accel = accel};
+}
+inline BindingItem ByteBuffer(u32 slot, const GpuBuffer& buffer, u64 offset = 0, u64 range = 0) {
+  return {.slot = slot, .type = BindingType::kByteBuffer, .buffer = buffer.handle,
+          .buffer_offset = offset, .buffer_range = range};
 }
 
 }  // namespace Bind

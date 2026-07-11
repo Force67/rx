@@ -13,3 +13,4 @@ third_party/DLSS/
 third_party/NRD/
 third_party/NRD-MathLib/
 third_party/NRD-ShaderMake/
+vkd3d-proton.cache*

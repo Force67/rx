@@ -27,7 +27,12 @@ bool BindlessRegistry::Initialize() {
                 {1, BindingType::kStorageBuffer},
                 {2, BindingType::kStorageBuffer},
                 {3, BindingType::kSampledImage, kMaxTextures, /*variable_count=*/true},
-                {4, BindingType::kSampler}},
+                {4, BindingType::kSampler},
+                // Per-mesh vertex/index buffers for the DXIL geometry readers
+                // (the SPIR-V path reads the same buffers through BDA and
+                // never declares this binding).
+                {kGeometryBufferBinding, BindingType::kByteBuffer, kMaxGeometryBuffers,
+                 /*variable_count=*/true}},
       .update_after_bind = true,
   });
   if (!set_layout_) return false;
@@ -98,6 +103,14 @@ u32 BindlessRegistry::RegisterMesh(const GpuBuffer& vertices, const GpuBuffer& i
   record.vertex_address = vertices.address;
   record.index_address = indices.address;
   record.geometry_offset = geometry_count_;
+  // Mirror the buffers into the geometry buffer array for the DXIL readers.
+  record.vertex_srv = 2 * mesh_count_;
+  record.index_srv = 2 * mesh_count_ + 1;
+  BindingItem vertex_srv = Bind::ByteBuffer(kGeometryBufferBinding, vertices);
+  vertex_srv.array_index = record.vertex_srv;
+  BindingItem index_srv = Bind::ByteBuffer(kGeometryBufferBinding, indices);
+  index_srv.array_index = record.index_srv;
+  device_.UpdateBindingSet(set_, {vertex_srv, index_srv});
   std::memcpy(static_cast<u8*>(geometry_table_.mapped) +
                   geometry_count_ * sizeof(GeometryRecord),
               geometries, geometry_count * sizeof(GeometryRecord));

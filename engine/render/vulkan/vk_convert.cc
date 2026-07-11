@@ -122,6 +122,7 @@ VkDescriptorType ToVkDescriptorType(BindingType type) {
     case BindingType::kSampler: return VK_DESCRIPTOR_TYPE_SAMPLER;
     case BindingType::kUniformBuffer: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     case BindingType::kStorageBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    case BindingType::kByteBuffer: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     case BindingType::kAccelStruct: return VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
   }
   return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;

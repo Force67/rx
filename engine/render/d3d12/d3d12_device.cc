@@ -953,6 +953,11 @@ SetLayout* D3D12Device::GetOrCreateSetLayout(const BindingLayoutDesc& desc) {
         entry.view_offset = layout->view_count;
         layout->view_count += 2 * slot.count;
         break;
+      case BindingType::kByteBuffer:
+        // Read-only raw views: one SRV per element, one contiguous range.
+        entry.view_offset = layout->view_count;
+        layout->view_count += slot.count;
+        break;
       case BindingType::kCombinedTextureSampler:
         entry.view_offset = layout->view_count;
         layout->view_count += slot.count;
@@ -1025,6 +1030,10 @@ ID3D12RootSignature* D3D12Device::GetOrCreateRootSignature(std::span<SetLayout* 
         case BindingType::kUniformBuffer:
           view_ranges.push_back(
               range(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, slot.slot.count, slot.view_offset));
+          break;
+        case BindingType::kByteBuffer:
+          view_ranges.push_back(
+              range(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, slot.slot.count, slot.view_offset));
           break;
         case BindingType::kStorageBuffer:
           // SRV/UAV descriptor pairs are interleaved per array element.
@@ -1223,6 +1232,16 @@ void D3D12Device::WriteNullViewDescriptors(const SetLayout& layout, u32 table_st
                                              ViewCpu(table_start + slot.view_offset + 2 * i + 1));
           break;
         }
+        case BindingType::kByteBuffer: {
+          D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+          srv.Format = DXGI_FORMAT_R32_TYPELESS;
+          srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+          srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+          srv.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+          device_->CreateShaderResourceView(nullptr, &srv,
+                                            ViewCpu(table_start + slot.view_offset + i));
+          break;
+        }
         case BindingType::kSampler: break;
       }
     }
@@ -1281,6 +1300,19 @@ void D3D12Device::WriteViewDescriptor(const SetLayout::Slot& slot, const Binding
       uav.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
       device_->CreateUnorderedAccessView(buffer->allows_uav ? buffer->resource : nullptr, nullptr,
                                          &uav, ViewCpu(index + 1));
+      break;
+    }
+    case BindingType::kByteBuffer: {
+      BufferRecord* buffer = Rec(item.buffer);
+      u64 range = item.buffer_range ? item.buffer_range : buffer->size - item.buffer_offset;
+      D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
+      srv.Format = DXGI_FORMAT_R32_TYPELESS;
+      srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+      srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+      srv.Buffer.FirstElement = item.buffer_offset / 4;
+      srv.Buffer.NumElements = static_cast<u32>(range / 4);
+      srv.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+      device_->CreateShaderResourceView(buffer->resource, &srv, ViewCpu(index));
       break;
     }
     case BindingType::kAccelStruct: {

@@ -166,6 +166,10 @@ void D3D12CommandList::BindTransient(u32 set_index, std::span<const BindingItem>
                                        ? D3D12_RESOURCE_STATE_UNORDERED_ACCESS
                                        : (D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
                                           D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE));
+      } else if (item.type == BindingType::kByteBuffer) {
+        RequireBufferState(Rec(item.buffer),
+                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE |
+                               D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
       }
     }
     if (bound_->compute) {

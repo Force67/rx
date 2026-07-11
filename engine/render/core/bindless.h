@@ -13,9 +13,10 @@ namespace rx::render {
 // GPU-side scene tables for ray hit shading: every uploaded mesh, geometry
 // range, material and base color texture is reachable from a shader given a
 // TLAS hit (instanceCustomIndex -> mesh record -> geometry record ->
-// material record -> texture). Vertex and index data go through buffer
-// device addresses, so only the textures need a descriptor array (update
-// after bind, partially bound).
+// material record -> texture). Vertex and index data carry a dual identity:
+// buffer device addresses for the SPIR-V readers (vk::RawBufferLoad) and
+// bindless ByteAddressBuffer slots for DXIL, which has no BDA (see
+// shaders/rt_geometry.hlsli).
 class BindlessRegistry {
  public:
   static constexpr u32 kMaxTextures = 4096;
@@ -23,13 +24,22 @@ class BindlessRegistry {
   static constexpr u32 kMaxGeometries = 1u << 17;
   static constexpr u32 kMaxMaterials = 16384;
   static constexpr u32 kInvalidIndex = 0xffffffffu;
+  // Geometry buffer array: two slots per mesh (vertex, index).
+  static constexpr u32 kMaxGeometryBuffers = 2 * kMaxMeshes;
+  // Binding number of the geometry buffer array. On d3d12 register numbers
+  // derive from the binding, so it must clear the texture array's range
+  // (t3 + kMaxTextures). Mirrored by RX_GEOMETRY_BUFFER_BINDING in
+  // shaders/rt_geometry.hlsli.
+  static constexpr u32 kGeometryBufferBinding = 4100;
 
   // Layouts match the StructuredBuffer declarations in ddgi_rays.cs.hlsl.
   struct MeshRecord {
     u64 vertex_address = 0;
     u64 index_address = 0;
     u32 geometry_offset = 0;
-    u32 pad[3] = {};
+    u32 vertex_srv = 0;  // geometry-buffer-array slot of the vertex buffer
+    u32 index_srv = 0;   // geometry-buffer-array slot of the index buffer
+    u32 pad = 0;
   };
   struct GeometryRecord {
     u32 index_offset = 0;

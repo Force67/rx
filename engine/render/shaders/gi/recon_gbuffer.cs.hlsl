@@ -48,18 +48,8 @@ PUSH_CONSTANTS(PathGbufferPush, pc);
 [[vk::binding(15, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> rr_normals_out : register(u15, space0);
 [[vk::binding(16, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> rr_depth_out : register(u16, space0);
 
-struct MeshRecord {
-  uint64_t vertex_address;
-  uint64_t index_address;
-  uint geometry_offset;
-  uint pad0;
-  uint pad1;
-  uint pad2;
-};
-struct GeometryRecord {
-  uint index_offset;
-  uint material_index;
-};
+#define RX_GEOMETRY_SPACE space1
+#include "rt_geometry.hlsli"
 struct MaterialRecord {
   float4 base_color_factor;
   float3 emissive;
@@ -78,14 +68,11 @@ static const uint kMaterialTerrain = 2u;
 [[vk::binding(0, 1)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space1);
 [[vk::binding(1, 1)]] StructuredBuffer<GeometryRecord> geometry_records : register(t1, space1);
 [[vk::binding(2, 1)]] StructuredBuffer<MaterialRecord> material_records : register(t2, space1);
-[[vk::binding(3, 1)]] Texture2D bindless_textures[] : register(t3, space1);
+[[vk::binding(3, 1)]] Texture2D bindless_textures[RX_BINDLESS_TEXTURE_COUNT] : register(t3, space1);
 [[vk::binding(4, 1)]] SamplerState bindless_sampler : register(s4, space1);
 
 static const float kPi = 3.14159265359;
 static const float kInvPi = 0.31830988618;
-static const uint kVertexStride = 52;
-static const uint kNormalOffset = 12;
-static const uint kUvOffset = 40;
 static const float kDenoisingRange = 1.0e6;
 // Must match the near plane the renderer bakes into PerspectiveReversedZ
 // (renderer.cc BuildFrameGraph); viewz below reconstructs from reversed-inf-z.
@@ -162,19 +149,14 @@ bool PassesAlpha(uint inst, uint geom, uint prim, float2 bary, float cone_width)
   GeometryRecord geometry = geometry_records[mesh.geometry_offset + geom];
   MaterialRecord m = material_records[NonUniformResourceIndex(geometry.material_index)];
   if ((m.flags & kMaterialAlphaMask) == 0u || m.base_color_texture == 0xffffffffu) return true;
-  uint64_t index_base = mesh.index_address + (geometry.index_offset + prim * 3) * 4;
-  uint3 tri;
-  tri.x = vk::RawBufferLoad<uint>(index_base);
-  tri.y = vk::RawBufferLoad<uint>(index_base + 4);
-  tri.z = vk::RawBufferLoad<uint>(index_base + 8);
+  uint3 tri = RxLoadTriangle(mesh, geometry.index_offset + prim * 3);
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
   float2 uvv[3];
   float3 pos[3];
   [unroll]
   for (uint c = 0; c < 3; ++c) {
-    uint64_t vertex = mesh.vertex_address + tri[c] * kVertexStride;
-    pos[c] = vk::RawBufferLoad<float3>(vertex, 4);
-    uvv[c] = vk::RawBufferLoad<float2>(vertex + kUvOffset, 4);
+    pos[c] = RxLoadPosition(mesh, tri[c]);
+    uvv[c] = RxLoadUv(mesh, tri[c]);
   }
   float2 uv = uvv[0] * w[0] + uvv[1] * w[1] + uvv[2] * w[2];
   float lod = ConeLod(m.base_color_texture, uvv[0], uvv[1], uvv[2], pos[1] - pos[0], pos[2] - pos[0],
@@ -216,12 +198,8 @@ Hit TraceClosest(float3 origin, float3 dir, float cone_spread, bool sample_mr) {
   h.inst = rq.CommittedInstanceIndex();
   MeshRecord mesh = mesh_records[NonUniformResourceIndex(rq.CommittedInstanceID())];
   GeometryRecord geometry = geometry_records[mesh.geometry_offset + rq.CommittedGeometryIndex()];
-  uint64_t index_base =
-      mesh.index_address + (geometry.index_offset + rq.CommittedPrimitiveIndex() * 3) * 4;
-  uint3 tri;
-  tri.x = vk::RawBufferLoad<uint>(index_base);
-  tri.y = vk::RawBufferLoad<uint>(index_base + 4);
-  tri.z = vk::RawBufferLoad<uint>(index_base + 8);
+  uint3 tri =
+      RxLoadTriangle(mesh, geometry.index_offset + rq.CommittedPrimitiveIndex() * 3);
   float2 bary = rq.CommittedTriangleBarycentrics();
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
   float3 pos[3];
@@ -229,10 +207,9 @@ Hit TraceClosest(float3 origin, float3 dir, float cone_spread, bool sample_mr) {
   float2 uvv[3];
   [unroll]
   for (uint c = 0; c < 3; ++c) {
-    uint64_t vertex = mesh.vertex_address + tri[c] * kVertexStride;
-    pos[c] = vk::RawBufferLoad<float3>(vertex, 4);
-    nrm[c] = vk::RawBufferLoad<float3>(vertex + kNormalOffset, 4);
-    uvv[c] = vk::RawBufferLoad<float2>(vertex + kUvOffset, 4);
+    pos[c] = RxLoadPosition(mesh, tri[c]);
+    nrm[c] = RxLoadNormal(mesh, tri[c]);
+    uvv[c] = RxLoadUv(mesh, tri[c]);
   }
   float3 n_local = nrm[0] * w[0] + nrm[1] * w[1] + nrm[2] * w[2];
   float2 uv = uvv[0] * w[0] + uvv[1] * w[1] + uvv[2] * w[2];

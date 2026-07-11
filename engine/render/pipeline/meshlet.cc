@@ -214,8 +214,12 @@ bool MeshletPass::Initialize(Device& device, Format color_format, Format depth_f
       .debug_name = "meshlet",
   });
   if (!pipeline_) {
-    RX_ERROR("meshlet pipeline creation failed");
-    return false;
+    // Backends that report mesh shaders but lack this shader's binary (the
+    // meshlet mesh shader is SPIR-V-only pending its DXIL port) stay inert,
+    // same as no mesh-shader support.
+    RX_WARN("meshlet pipeline unavailable; meshlet pass disabled");
+    available_ = false;
+    return true;
   }
 
   for (u32 i = 0; i < kFramesInFlight; ++i) {

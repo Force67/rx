@@ -1011,8 +1011,13 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     return true;
   }
 
+  // kBufferUsageStorage: the bindless registry mirrors RT mesh buffers into
+  // its geometry buffer array (raw reads for the DXIL hit shaders), so the
+  // buffers must be descriptor-bindable, not just address-reachable.
   BufferUsageFlags rt_usage =
-      raytracing_ ? (kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress) : 0;
+      raytracing_
+          ? (kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress | kBufferUsageStorage)
+          : 0;
   // The mesh-shader path reads vertices/meshlets by device address.
   const bool build_meshlets = device_->caps().mesh_shaders && !mesh.skinned;
   BufferUsageFlags ms_usage = build_meshlets ? kBufferUsageDeviceAddress : 0;

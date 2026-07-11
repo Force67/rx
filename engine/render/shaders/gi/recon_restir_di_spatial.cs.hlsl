@@ -50,18 +50,8 @@ struct PointLight {
 
 // Bindless scene tables for alpha-tested shadow rays (same layout as the
 // recon gbuffer; foliage cutouts must keep casting correct shadows).
-struct MeshRecord {
-  uint64_t vertex_address;
-  uint64_t index_address;
-  uint geometry_offset;
-  uint pad0;
-  uint pad1;
-  uint pad2;
-};
-struct GeometryRecord {
-  uint index_offset;
-  uint material_index;
-};
+#define RX_GEOMETRY_SPACE space1
+#include "rt_geometry.hlsli"
 struct MaterialRecord {
   float4 base_color_factor;
   float3 emissive;
@@ -79,7 +69,7 @@ static const uint kMaterialAlphaMask = 1u;
 [[vk::binding(0, 1)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space1);
 [[vk::binding(1, 1)]] StructuredBuffer<GeometryRecord> geometry_records : register(t1, space1);
 [[vk::binding(2, 1)]] StructuredBuffer<MaterialRecord> material_records : register(t2, space1);
-[[vk::binding(3, 1)]] Texture2D bindless_textures[] : register(t3, space1);
+[[vk::binding(3, 1)]] Texture2D bindless_textures[RX_BINDLESS_TEXTURE_COUNT] : register(t3, space1);
 [[vk::binding(4, 1)]] SamplerState bindless_sampler : register(s4, space1);
 
 static const float kPi = 3.14159265359;
@@ -87,8 +77,6 @@ static const float kSkyClamp = 6.0;  // matches SampleSky / recon_sky_cdf
 static const uint kSkyGridW = 128;
 static const uint kSkyGridH = 64;
 static const uint kSkyLuma = 1u + kSkyGridH + kSkyGridW * kSkyGridH;
-static const uint kVertexStride = 52;
-static const uint kUvOffset = 40;
 static const float kShadowLod = 4.0;  // fixed mip for shadow-ray alpha tests
 
 uint Pcg(inout uint state) {
@@ -152,17 +140,12 @@ bool PassesAlpha(uint inst, uint geom, uint prim, float2 bary) {
   GeometryRecord geometry = geometry_records[mesh.geometry_offset + geom];
   MaterialRecord m = material_records[NonUniformResourceIndex(geometry.material_index)];
   if ((m.flags & kMaterialAlphaMask) == 0u || m.base_color_texture == 0xffffffffu) return true;
-  uint64_t index_base = mesh.index_address + (geometry.index_offset + prim * 3) * 4;
-  uint3 tri;
-  tri.x = vk::RawBufferLoad<uint>(index_base);
-  tri.y = vk::RawBufferLoad<uint>(index_base + 4);
-  tri.z = vk::RawBufferLoad<uint>(index_base + 8);
+  uint3 tri = RxLoadTriangle(mesh, geometry.index_offset + prim * 3);
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
   float2 uv = 0.0.xx;
   [unroll]
   for (uint c = 0; c < 3; ++c) {
-    uint64_t vertex = mesh.vertex_address + tri[c] * kVertexStride;
-    uv += vk::RawBufferLoad<float2>(vertex + kUvOffset, 4) * w[c];
+    uv += RxLoadUv(mesh, tri[c]) * w[c];
   }
   float a = m.base_color_factor.a *
             bindless_textures[NonUniformResourceIndex(m.base_color_texture)]

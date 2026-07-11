@@ -53,18 +53,8 @@ struct DdgiVolume {
 };
 [[vk::binding(6, 2)]] ConstantBuffer<DdgiVolume> ddgi : register(b6, space2);
 
-struct MeshRecord {
-  uint64_t vertex_address;
-  uint64_t index_address;
-  uint geometry_offset;
-  uint pad0;
-  uint pad1;
-  uint pad2;
-};
-struct GeometryRecord {
-  uint index_offset;
-  uint material_index;
-};
+#define RX_GEOMETRY_SPACE space3
+#include "rt_geometry.hlsli"
 struct MaterialRecord {
   float4 base_color_factor;
   float3 emissive;
@@ -81,7 +71,7 @@ struct MaterialRecord {
 [[vk::binding(0, 3)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space3);
 [[vk::binding(1, 3)]] StructuredBuffer<GeometryRecord> geometry_records : register(t1, space3);
 [[vk::binding(2, 3)]] StructuredBuffer<MaterialRecord> material_records : register(t2, space3);
-[[vk::binding(3, 3)]] Texture2D bindless_textures[] : register(t3, space3);
+[[vk::binding(3, 3)]] Texture2D bindless_textures[RX_BINDLESS_TEXTURE_COUNT] : register(t3, space3);
 [[vk::binding(4, 3)]] SamplerState bindless_sampler : register(s4, space3);
 
 [[vk::combinedImageSampler]] [[vk::binding(0, 4)]] Texture2D opaque_color : register(t0, space4);
@@ -92,9 +82,6 @@ struct MaterialRecord {
 static const uint kFrameDdgi = 4u;
 static const uint kFrameWaterRt = 8u;
 static const float kPi = 3.14159265359;
-static const uint kVertexStride = 52;
-static const uint kNormalOffset = 12;
-static const uint kUvOffset = 40;
 
 struct PsIn {
   float4 sv_position : SV_Position;
@@ -212,21 +199,16 @@ float3 TraceReflection(float3 origin, float3 dir) {
   float3 hit_pos = origin + dir * rq.CommittedRayT();
   MeshRecord mesh = mesh_records[NonUniformResourceIndex(rq.CommittedInstanceID())];
   GeometryRecord geometry = geometry_records[mesh.geometry_offset + rq.CommittedGeometryIndex()];
-  uint64_t index_base =
-      mesh.index_address + (geometry.index_offset + rq.CommittedPrimitiveIndex() * 3) * 4;
-  uint3 tri;
-  tri.x = vk::RawBufferLoad<uint>(index_base);
-  tri.y = vk::RawBufferLoad<uint>(index_base + 4);
-  tri.z = vk::RawBufferLoad<uint>(index_base + 8);
+  uint3 tri =
+      RxLoadTriangle(mesh, geometry.index_offset + rq.CommittedPrimitiveIndex() * 3);
   float2 bary = rq.CommittedTriangleBarycentrics();
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
   float3 n_local = 0.0.xxx;
   float2 uv = 0.0.xx;
   [unroll]
   for (uint corner = 0; corner < 3; ++corner) {
-    uint64_t vertex = mesh.vertex_address + tri[corner] * kVertexStride;
-    n_local += vk::RawBufferLoad<float3>(vertex + kNormalOffset, 4) * w[corner];
-    uv += vk::RawBufferLoad<float2>(vertex + kUvOffset, 4) * w[corner];
+    n_local += RxLoadNormal(mesh, tri[corner]) * w[corner];
+    uv += RxLoadUv(mesh, tri[corner]) * w[corner];
   }
   float3x4 to_world = rq.CommittedObjectToWorld3x4();
   float3 n = normalize(mul((float3x3)to_world, n_local));

@@ -1386,6 +1386,7 @@ void VulkanDevice::WriteDescriptors(VkDescriptorSet set, std::span<const Binding
         break;
       case BindingType::kUniformBuffer:
       case BindingType::kStorageBuffer:
+      case BindingType::kByteBuffer:
         buffers[i] = {.buffer = Rec(item.buffer)->buffer,
                       .offset = item.buffer_offset,
                       .range = item.buffer_range ? item.buffer_range : VK_WHOLE_SIZE};

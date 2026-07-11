@@ -302,13 +302,14 @@ if(RX_NRD)
        shaders/gi/pathtrace_gbuffer.cs.hlsl shaders/gi/pathtrace_composite.cs.hlsl)
 endif()
 
-# SPIR-V-only shaders: everything reading GPU memory through buffer device
-# addresses (vk::RawBufferLoad), which has no DXIL equivalent. The meshlet
-# path and the ray-hit shading readers need a descriptor-based port before
-# they can run on d3d12 (see RHI.md); the d3d12 device reports their pipelines
-# unavailable and the engine's caps/feature gating keeps them unreached (mesh
-# shaders and ray query are off under vkd3d). The skinned vertex permutations
-# are NOT here: they carry a dual path (rec_bone_palette root SRV on DXIL).
+# SPIR-V-only shaders: what's left of the vk::RawBufferLoad (buffer device
+# address) users. The ray-hit shading readers now go through the dual-path
+# helpers in shaders/rt_geometry.hlsli (BDA on SPIR-V, the bindless
+# ByteAddressBuffer array on DXIL) and compile for d3d12; only the mesh-shader
+# path remains: mesh_scene reads meshlet data through push-constant addresses
+# and meshlet.ms trips DXIL validation (SetMeshOutputCounts in two branches).
+# The skinned vertex permutations carry their own dual path
+# (rec_bone_palette root SRV on DXIL).
 # Wrapper-shader include dependencies (see cmake/shaders.cmake).
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl)
@@ -319,15 +320,6 @@ set(RX_SHADER_NO_DXIL
   mesh_scene.as.hlsl
   mesh_scene.ms.hlsl
   meshlet.ms.hlsl
-  mesh_rt.ps.hlsl
-  mesh_rt_sss.ps.hlsl
-  water.ps.hlsl
-  pathtrace.cs.hlsl
-  pathtrace_gbuffer.cs.hlsl
-  ddgi_rays.cs.hlsl
-  recon_gbuffer.cs.hlsl
-  recon_restir_di_spatial.cs.hlsl
-  reflection_trace.cs.hlsl
 )
 
 # Optional RHI imgui render backend. engine/render must not hard-depend on

@@ -23,7 +23,10 @@ struct MaterialParams {
 
 static const uint kFlagAlphaMask = 1u;
 
-void main([[vk::location(0)]] float2 uv : TEXCOORD0) {
+// SV_Position is declared (unused) so the DXIL input signature assigns
+// TEXCOORD0 the register the vertex shader outputs it in: d3d12 links stages
+// by register and vkd3d-proton validates the match (WineHQ vkd3d did not).
+void main(float4 pos : SV_Position, [[vk::location(0)]] float2 uv : TEXCOORD0) {
   if ((material.flags & kFlagAlphaMask) != 0u) {
     float a = base_color_map.Sample(base_color_sampler, uv).a * material.base_color_factor.a;
     if (a < material.alpha_cutoff) discard;

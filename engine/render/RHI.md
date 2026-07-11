@@ -149,10 +149,18 @@ itself beyond loading SDL3's window-property helpers dynamically.
   (vkd3d 2.0's ceiling - 6.6 DXIL is rejected; 6.5 still covers ray queries
   and mesh shaders). The DXIL is unsigned, which vkd3d accepts natively and
   Windows accepts with experimental shader models; shipping Windows builds
-  would sign via dxil.dll. SPIR-V-only shaders (`vk::RawBufferLoad` users:
-  the meshlet path, ray-hit shading readers) sit on the
-  `RX_SHADER_NO_DXIL` list and embed a null sidecar; the d3d12 device
-  reports their pipelines unavailable and caps gating keeps them unreached.
+  would sign via dxil.dll. The ray-hit shading readers are dual-path through
+  `shaders/rt_geometry.hlsli`: `vk::RawBufferLoad` on buffer device
+  addresses for SPIR-V, a bindless `ByteAddressBuffer` array
+  (`BindingType::kByteBuffer`, one contiguous SRV range at `t4100` in the
+  bindless space) for DXIL, with `MeshRecord` carrying both the addresses
+  and the array slots. Only the mesh-shader path (`mesh_scene.as/ms`,
+  `meshlet.ms`) remains on the `RX_SHADER_NO_DXIL` list with a null
+  sidecar; its pipelines report unavailable and the passes disable
+  themselves. DXIL links inter-stage IO by register, so a pixel shader must
+  declare the same leading inputs its vertex shader outputs (shadow.ps
+  declares SV_Position for this; vkd3d-proton validates the match, WineHQ
+  vkd3d 2.0 silently accepted mismatches).
 - **Bindings**: one root-signature descriptor table per set for views and one
   for samplers (`space = set index`); `kStorageBuffer` slots occupy an SRV+UAV
   descriptor pair (raw views - vkd3d lowers structured access to byte ranges;
@@ -222,8 +230,11 @@ libvkd3d implements aggregate returns with the Windows out-pointer ABI.
 - Vulkan-interop consumers (ugui HUD/menus, imgui debug overlay, NRD, DLSS,
   FSR3, thumbnailer) degrade gracefully on d3d12 - feature-unavailable, as
   designed. A d3d12 gui backend would restore UI there.
-- The meshlet/ray-hit `vk::RawBufferLoad` shaders need a descriptor-based
-  port before mesh shaders / ray queries can light up on Windows.
+- The mesh-shader shaders (`mesh_scene.as/ms` push-constant BDA reads,
+  `meshlet.ms` multi-branch SetMeshOutputCounts) still need DXIL-compatible
+  ports; the ray-hit readers are already dual-path and run on DXR (verified
+  through vkd3d-proton, `RX_VKD3D_PROTON=ON`: RT reflections/DDGI/path
+  tracer render on the d3d12 backend on Linux).
 
 Console backends follow the same recipe in their own directory; nothing in
 pass code assumes descriptor sets, image layouts or SPIR-V.
