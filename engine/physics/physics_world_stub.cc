@@ -46,6 +46,8 @@ void PhysicsWorld::SetBodyPosition(BodyId, const Vec3&, const f32[4]) {}
 void PhysicsWorld::MoveBodyKinematic(BodyId, const Vec3&, const f32[4], f32) {}
 void PhysicsWorld::RemoveBody(BodyId) {}
 VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc&, const Vec3&, f32) { return 0; }
+VehicleId PhysicsWorld::CreateMotorcycle(const MotorcycleDesc&, const Vec3&, f32) { return 0; }
+bool PhysicsWorld::GetVehicleState(VehicleId, VehicleState*) const { return false; }
 void PhysicsWorld::RemoveVehicle(VehicleId) {}
 void PhysicsWorld::DriveVehicle(VehicleId, f32, f32, f32, f32) {}
 bool PhysicsWorld::GetVehicleTransform(VehicleId, Vec3*, f32[4]) const { return false; }

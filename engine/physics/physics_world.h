@@ -158,11 +158,15 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   void SetCharacterPosition(CharacterId id, const Vec3& position);
 
   // Wheeled vehicle (Jolt VehicleConstraint + WheeledVehicleController): a
-  // dynamic chassis box with four suspension wheels, rear-wheel drive and an
-  // automatic transmission. Engine space, +Z forward, +Y up; wheel order is
-  // FL, FR, RL, RR (front wheels steer, rear wheels take the handbrake). The
-  // caller renders the chassis/wheels from the transforms below; there is no
-  // wheel geometry in the physics world (wheels are suspension raycasts).
+  // dynamic chassis box with four suspension wheels and an automatic
+  // transmission. Engine space, +Z forward, +Y up; wheel order is FL, FR,
+  // RL, RR (front wheels steer, rear wheels take the handbrake). The caller
+  // renders the chassis/wheels from the transforms below; there is no wheel
+  // geometry in the physics world (wheels are suspension raycasts). The
+  // racing-sim fields all default to "keep the legacy arcade tune" (0 or -1
+  // = use the previous hardcoded/Jolt default), so existing consumers are
+  // unchanged.
+  enum class Drivetrain : u8 { kRWD, kFWD, kAWD };
   struct VehicleDesc {
     Vec3 half_extent{0.9f, 0.5f, 2.0f};  // chassis box half extents
     f32 mass = 1500;                     // kg
@@ -178,19 +182,115 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // Center of mass dropped below the chassis center: arcade stability (hard
     // to roll in normal cornering, still flippable off ramps).
     f32 com_drop = 0.4f;
+
+    // --- racing-sim extensions ---
+    Drivetrain drivetrain = Drivetrain::kRWD;
+    f32 awd_front_split = 0.4f;  // kAWD: engine torque fraction to the front axle
+    // Gearbox: gear_count 0 keeps Jolt's default 5-speed. Ratios are
+    // engine:gearbox; final_drive is the differential ratio (0 = default).
+    u32 gear_count = 0;
+    f32 gear_ratios[8] = {};
+    f32 final_drive = 0;
+    f32 shift_up_rpm = 0;   // 0 = default (4000)
+    f32 shift_down_rpm = 0; // 0 = default (2000)
+    f32 max_rpm = 0;        // 0 = default (6000)
+    f32 min_rpm = 0;        // 0 = default (1000)
+    // Engine flywheel inertia, kg m^2 (0 = Jolt default 0.5). Through a big
+    // total reduction this reflects as ratio^2 * inertia of extra vehicle
+    // mass, so light vehicles want a realistic (small) value.
+    f32 engine_inertia = 0;
+    f32 clutch_strength = 0;  // 0 = legacy (10)
+    // Tire grip: scales Jolt's default longitudinal/lateral slip curves
+    // (1 = stock street tire, ~1.5+ slicks). 0 = default (1).
+    f32 tire_long_friction = 0;
+    f32 tire_lat_friction = 0;
+    // Suspension spring per wheel; 0 = Jolt default (1.5 Hz / 0.5).
+    f32 suspension_frequency = 0;
+    f32 suspension_damping = 0;
+    f32 anti_roll_stiffness = 0;    // 0 = Jolt default (1000)
+    f32 max_brake_torque = 0;       // Nm per wheel; 0 = Jolt default (1500)
+    f32 max_handbrake_torque = -1;  // rear axle; < 0 = legacy (8000)
+    // Aero downforce applied at the COM along the body -Y each step:
+    // F = downforce * forward_speed^2 (N). 0 = off.
+    f32 downforce = 0;
+    // Driver aid: cuts throttle when driven-wheel longitudinal slip exceeds
+    // ~8%, holding the tire near its grip peak (and letting the automatic
+    // box shift, which Jolt gates on slip). Off = raw throttle.
+    bool traction_control = false;
   };
   // Spawns the chassis at `position` (chassis center) yawed around +Y. Spawn
   // slightly high and let the suspension settle. 0 on failure.
   VehicleId CreateVehicle(const VehicleDesc& desc, const Vec3& position, f32 yaw_radians);
+
+  // Motorcycle (Jolt MotorcycleController): two-wheeler with a lean spring
+  // that banks the bike into corners and a speed-aware steering limit so it
+  // doesn't topple. Wheel 0 = front (steers, caster-raked fork), 1 = rear
+  // (drive). Same handle space and Drive/Get API as cars; handbrake input is
+  // ignored.
+  struct MotorcycleDesc {
+    Vec3 half_extent{0.2f, 0.3f, 0.9f};  // chassis box half extents
+    f32 mass = 240;                      // kg, bike + rider
+    f32 com_drop = 0.3f;                 // rider crouch keeps it low
+    f32 wheel_radius = 0.31f;
+    f32 wheel_width = 0.11f;
+    f32 front_z = 0.75f;  // axle offsets, +Z = forward
+    f32 rear_z = -0.75f;
+    f32 caster_angle = 0.52f;  // front fork rake from vertical, radians
+    f32 suspension_min = 0.15f;
+    f32 suspension_max = 0.35f;
+    f32 front_suspension_frequency = 1.5f;  // Hz
+    f32 rear_suspension_frequency = 2.0f;
+    f32 max_steer_angle = 0.52f;  // radians; the lean limiter shrinks it with speed
+    f32 max_engine_torque = 150;
+    f32 max_rpm = 10000;
+    f32 min_rpm = 1000;
+    // Bike engines are light: Jolt's default 0.5 kg m^2 flywheel through a
+    // ~13:1 reduction reflects as ~4x the whole bike's mass and eats the
+    // torque as engine spin-up.
+    f32 engine_inertia = 0.08f;
+    u32 gear_count = 0;  // 0 = a stock 6-speed bike box
+    f32 gear_ratios[8] = {};
+    f32 final_drive = 4.8f;  // primary + sprocket combined
+    f32 shift_up_rpm = 8000;
+    f32 shift_down_rpm = 2000;
+    f32 front_brake_torque = 500;
+    f32 rear_brake_torque = 250;
+    f32 tire_long_friction = 0;  // like VehicleDesc: 0 = default curves
+    f32 tire_lat_friction = 0;
+    f32 max_lean_angle = 0.79f;  // radians (~45 deg)
+    f32 lean_spring = 5000;
+    f32 lean_damping = 1000;
+    f32 downforce = 0;
+    bool traction_control = false;  // same throttle-governing aid as cars
+  };
+  VehicleId CreateMotorcycle(const MotorcycleDesc& desc, const Vec3& position, f32 yaw_radians);
+
   void RemoveVehicle(VehicleId id);
   // Driver input, each -1..1 (forward: throttle vs reverse; right: steer) or
   // 0..1 (brake, handbrake). Wakes the body while any input is non-zero.
   void DriveVehicle(VehicleId id, f32 forward, f32 right, f32 brake, f32 handbrake);
   bool GetVehicleTransform(VehicleId id, Vec3* position, f32 rotation[4]) const;
-  // World transform of wheel 0..3, suspension and steering applied.
+  // World transform of a wheel (cars 0..3 = FL FR RL RR, bikes 0..1 =
+  // front/rear), suspension and steering applied.
   bool GetVehicleWheel(VehicleId id, u32 wheel, Vec3* position, f32 rotation[4]) const;
   // Signed speed along the chassis forward axis, m/s.
   f32 VehicleForwardSpeed(VehicleId id) const;
+
+  // Drivetrain + per-wheel telemetry for HUDs, audio and effects.
+  struct VehicleState {
+    f32 rpm = 0;
+    i32 gear = 0;  // Jolt convention: -1 reverse, 0 neutral, 1..N forward
+    f32 forward_speed = 0;  // m/s, signed
+    u32 wheel_count = 0;
+    struct WheelState {
+      bool contact = false;
+      f32 suspension_length = 0;   // current, meters
+      f32 longitudinal_slip = 0;   // 0 = full traction, 1 = locked/spinning
+      f32 angular_velocity = 0;    // rad/s around the axle
+      f32 rotation_angle = 0;      // accumulated spin, radians
+    } wheels[4];
+  };
+  bool GetVehicleState(VehicleId id, VehicleState* out) const;
 
   // Closest hit of a ray; used by foot IK to find the ground under a foot.
   struct RayHit {
