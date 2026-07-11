@@ -689,6 +689,36 @@ void PhysicsWorld::MoveCharacter(CharacterId id, const Vec3& horizontal_velocity
   }
 }
 
+void PhysicsWorld::MoveCharacterVelocity(CharacterId id, const Vec3& velocity, f32 dt,
+                                         Vec3* out_position, bool* out_grounded,
+                                         Vec3* out_ground_velocity) {
+  if (!impl_ || id == 0 || id > impl_->characters.size()) return;
+  JPH::CharacterVirtual* character = impl_->characters[id - 1].character;
+
+  character->SetLinearVelocity(ToJolt(velocity));
+  JPH::CharacterVirtual::ExtendedUpdateSettings update;
+  character->ExtendedUpdate(dt, impl_->system->GetGravity(), update,
+                            impl_->system->GetDefaultBroadPhaseLayerFilter(layers::kDynamic),
+                            impl_->system->GetDefaultLayerFilter(layers::kDynamic), {}, {},
+                            *impl_->temp_allocator);
+  JPH::RVec3 p = character->GetPosition();
+  if (out_position) {
+    *out_position = {static_cast<f32>(p.GetX()), static_cast<f32>(p.GetY()),
+                     static_cast<f32>(p.GetZ())};
+  }
+  const bool grounded =
+      character->GetGroundState() == JPH::CharacterVirtual::EGroundState::OnGround;
+  if (out_grounded) *out_grounded = grounded;
+  if (out_ground_velocity) {
+    *out_ground_velocity = Vec3{};
+    if (grounded) {
+      character->UpdateGroundVelocity();
+      const JPH::Vec3 gv = character->GetGroundVelocity();
+      *out_ground_velocity = {gv.GetX(), gv.GetY(), gv.GetZ()};
+    }
+  }
+}
+
 void PhysicsWorld::SetCharacterPosition(CharacterId id, const Vec3& position) {
   if (!impl_ || id == 0 || id > impl_->characters.size()) return;
   impl_->characters[id - 1].character->SetPosition(ToJolt(position));
@@ -704,6 +734,30 @@ BodyId PhysicsWorld::AddKinematicCapsule(const Vec3& position, f32 radius, f32 h
   JPH::BodyID id =
       impl_->system->GetBodyInterface().CreateAndAddBody(settings, JPH::EActivation::Activate);
   return id.GetIndexAndSequenceNumber() + 1;
+}
+
+BodyId PhysicsWorld::AddKinematicBox(const Vec3& position, const Vec3& half_extent) {
+  if (!impl_) return 0;
+  JPH::Ref<JPH::BoxShape> shape = new JPH::BoxShape(ToJolt(half_extent));
+  // Kinematic but in the dynamic layer so character controllers collide with
+  // it (same scheme as AddKinematicCapsule).
+  JPH::BodyCreationSettings settings(shape, ToJolt(position), JPH::Quat::sIdentity(),
+                                     JPH::EMotionType::Kinematic, layers::kDynamic);
+  JPH::BodyID id =
+      impl_->system->GetBodyInterface().CreateAndAddBody(settings, JPH::EActivation::Activate);
+  return id.GetIndexAndSequenceNumber() + 1;
+}
+
+void PhysicsWorld::MoveBodyKinematic(BodyId id, const Vec3& position, const f32 rotation[4],
+                                     f32 dt) {
+  if (!impl_ || id == 0) return;
+  if (dt <= 0) {
+    SetBodyPosition(id, position, rotation);
+    return;
+  }
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  JPH::Quat q(rotation[0], rotation[1], rotation[2], rotation[3]);
+  impl_->system->GetBodyInterface().MoveKinematic(body, ToJolt(position), q, dt);
 }
 
 void PhysicsWorld::SetBodyPosition(BodyId id, const Vec3& position, const f32 rotation[4]) {

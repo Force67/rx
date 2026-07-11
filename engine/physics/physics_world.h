@@ -127,9 +127,17 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // player's character controller collides with them (they block / get shoved)
   // while their authoritative position comes from animation / replication.
   BodyId AddKinematicCapsule(const Vec3& position, f32 radius, f32 half_height);
+  // Kinematic box (moving platforms, doors): never falls or tips, pushes
+  // characters/bodies out of its way. Drive it with MoveBodyKinematic.
+  BodyId AddKinematicBox(const Vec3& position, const Vec3& half_extent);
   // Teleports a body to a new pose (rotation is x,y,z,w). For the kinematic
   // capsules above, called every tick from the entity's transform.
   void SetBodyPosition(BodyId id, const Vec3& position, const f32 rotation[4]);
+  // Moves a kinematic body to the target pose over `dt` by assigning its
+  // velocity (Jolt MoveKinematic) instead of teleporting, so a character
+  // standing on it reads a real ground velocity and rides it. dt <= 0 falls
+  // back to SetBodyPosition.
+  void MoveBodyKinematic(BodyId id, const Vec3& position, const f32 rotation[4], f32 dt);
 
   // Kinematic character controller (Jolt CharacterVirtual): a capsule that
   // walks slopes/stairs. `position` is the capsule centre. 0 is invalid.
@@ -139,6 +147,14 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // capsule-centre position and whether it is on the ground.
   void MoveCharacter(CharacterId id, const Vec3& horizontal_velocity, bool jump, f32 dt,
                      Vec3* out_position, bool* out_grounded);
+  // Steps the controller with a fully game-owned velocity vector: no internal
+  // gravity or jump impulse, so games that integrate their own arcs
+  // (platformer variable-height jumps, dashes) keep authority over the
+  // vertical axis. `out_ground_velocity` reports the velocity of whatever the
+  // character stands on (kinematic movers included) so the caller can ride
+  // moving platforms; zero when airborne.
+  void MoveCharacterVelocity(CharacterId id, const Vec3& velocity, f32 dt, Vec3* out_position,
+                             bool* out_grounded, Vec3* out_ground_velocity = nullptr);
   void SetCharacterPosition(CharacterId id, const Vec3& position);
 
   // Wheeled vehicle (Jolt VehicleConstraint + WheeledVehicleController): a

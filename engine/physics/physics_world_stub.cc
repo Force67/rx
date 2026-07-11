@@ -41,7 +41,9 @@ void PhysicsWorld::ApplyImpulse(BodyId, const Vec3&) {}
 void PhysicsWorld::SetBodyKinematic(BodyId) {}
 BodyId PhysicsWorld::AddDynamicSphere(const Vec3&, f32, f32, const Vec3&) { return 0; }
 BodyId PhysicsWorld::AddKinematicCapsule(const Vec3&, f32, f32) { return 0; }
+BodyId PhysicsWorld::AddKinematicBox(const Vec3&, const Vec3&) { return 0; }
 void PhysicsWorld::SetBodyPosition(BodyId, const Vec3&, const f32[4]) {}
+void PhysicsWorld::MoveBodyKinematic(BodyId, const Vec3&, const f32[4], f32) {}
 void PhysicsWorld::RemoveBody(BodyId) {}
 VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc&, const Vec3&, f32) { return 0; }
 void PhysicsWorld::RemoveVehicle(VehicleId) {}
@@ -51,6 +53,11 @@ bool PhysicsWorld::GetVehicleWheel(VehicleId, u32, Vec3*, f32[4]) const { return
 f32 PhysicsWorld::VehicleForwardSpeed(VehicleId) const { return 0; }
 CharacterId PhysicsWorld::CreateCharacter(const Vec3&, f32, f32) { return 0; }
 void PhysicsWorld::MoveCharacter(CharacterId, const Vec3&, bool, f32, Vec3*, bool*) {}
+void PhysicsWorld::MoveCharacterVelocity(CharacterId, const Vec3&, f32, Vec3*, bool* grounded,
+                                         Vec3* ground_velocity) {
+  if (grounded) *grounded = false;
+  if (ground_velocity) *ground_velocity = Vec3{};
+}
 void PhysicsWorld::SetCharacterPosition(CharacterId, const Vec3&) {}
 bool PhysicsWorld::Raycast(const Vec3&, const Vec3&, f32, RayHit*) const { return false; }
 bool PhysicsWorld::GetBodyTransform(BodyId, Vec3*, f32[4]) const { return false; }
