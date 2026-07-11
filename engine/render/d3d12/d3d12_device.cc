@@ -309,7 +309,7 @@ std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* wind
 
   if (!device->InitResources()) return nullptr;
 
-  u64 frequency = 0;
+  UINT64 frequency = 0;  // proton's UINT64 is unsigned long long, not rx::u64
   if (SUCCEEDED(device->queue_->GetTimestampFrequency(&frequency)) && frequency > 0) {
     device->caps_.timestamp_period = 1e9f / static_cast<f32>(frequency);
   }

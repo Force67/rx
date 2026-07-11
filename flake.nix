@@ -61,6 +61,36 @@
         configureFlags = [ "--disable-tests" "--disable-doxygen-doc" ];
         enableParallelBuilding = true;
       };
+
+      # vkd3d-proton (the Proton D3D12 implementation), built as native Linux
+      # libraries. Unlike WineHQ vkd3d 2.0 it exposes DXR 1.1, mesh shaders and
+      # SM 6.6, so the d3d12 backend's ray tracing paths can run on Linux.
+      # Selected in CMake with -DRX_VKD3D_PROTON=ON.
+      vkd3dProtonFor = pkgs: pkgs.stdenv.mkDerivation {
+        pname = "vkd3d-proton";
+        version = "3.0.1";
+        src = pkgs.fetchFromGitHub {
+          owner = "HansKristian-Work";
+          repo = "vkd3d-proton";
+          rev = "v3.0.1";
+          fetchSubmodules = true;
+          hash = "sha256-7f2Ups5GZMe2vCeb3xveuMnGFSZgk605oy9aUXhvhlk=";
+        };
+        # wine's widl generates the d3d12 headers from the .idl sources.
+        nativeBuildInputs = with pkgs; [ meson ninja pkg-config glslang
+                                         wineWow64Packages.minimal ];
+        mesonFlags = [ "-Denable_tests=false" ];
+        mesonAutoFeatures = "auto";
+        enableParallelBuilding = true;
+        # d3d12.so dlopens d3d12core.so from its own directory on the RUNPATH,
+        # which meson drops at install; put it back so consumers only need to
+        # link (or LD_LIBRARY_PATH) the front library.
+        postFixup = ''
+          find $out/lib -name libvkd3d-proton-d3d12.so | while read -r lib; do
+            ${pkgs.patchelf}/bin/patchelf --add-rpath "$(dirname "$lib")" "$lib"
+          done
+        '';
+      };
     in
     {
       packages = forAllSystems (pkgs: {
@@ -178,6 +208,7 @@
               vulkan-validation-layers
               vulkan-tools
               (vkd3dFor pkgs)         # native D3D12-on-Vulkan, for the d3d12 rhi backend
+              (vkd3dProtonFor pkgs)   # proton d3d12 (DXR/mesh/SM6.6), RX_VKD3D_PROTON=ON
               vkrun
               swrun
             ];

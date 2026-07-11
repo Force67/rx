@@ -26,7 +26,45 @@ inline void WaitFenceEvent(HANDLE event) { WaitForSingleObject(event, INFINITE);
 inline void DestroyFenceEvent(HANDLE event) { CloseHandle(event); }
 }  // namespace rx::render::d3d12
 
-#else  // vkd3d (Linux and friends)
+#elif defined(RX_VKD3D_PROTON)  // vkd3d-proton native (Linux)
+
+// Proton's D3D12: same widl-generated headers and aggregate-return ABI as
+// WineHQ vkd3d (see below), but D3D12CreateDevice & friends export straight
+// from libvkd3d-proton-d3d12.so and fence events are eventfd file
+// descriptors (ID3D12Fence::SetEventOnCompletion writes the fd), matching
+// the native demos in the vkd3d-proton tree.
+#define WIDL_EXPLICIT_AGGREGATE_RETURNS
+
+#include <vkd3d_windows.h>
+#include <vkd3d_d3d12.h>
+
+#include <sys/eventfd.h>
+#include <unistd.h>
+
+#include <cstdint>
+
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+
+namespace rx::render::d3d12 {
+inline HANDLE CreateFenceEvent() {
+  return reinterpret_cast<HANDLE>(static_cast<intptr_t>(eventfd(0, EFD_CLOEXEC)));
+}
+inline void WaitFenceEvent(HANDLE event) {
+  uint64_t value = 0;
+  ssize_t r = read(static_cast<int>(reinterpret_cast<intptr_t>(event)), &value, sizeof(value));
+  (void)r;
+}
+inline void DestroyFenceEvent(HANDLE event) {
+  close(static_cast<int>(reinterpret_cast<intptr_t>(event)));
+}
+}  // namespace rx::render::d3d12
+
+#else  // WineHQ vkd3d (Linux and friends)
 
 // libvkd3d implements aggregate-returning methods (GetDesc,
 // Get*DescriptorHandleForHeapStart, GetResourceAllocationInfo, ...) with the

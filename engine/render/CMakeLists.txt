@@ -66,10 +66,14 @@ option(RX_RHI_VULKAN "Build the Vulkan render backend" ON)
 if(WIN32)
   option(RX_RHI_D3D12 "Build the D3D12 render backend" ON)
 else()
-  # Default to ON when vkd3d is available (the nix dev shell provides it).
+  # Default to ON when a D3D12 provider is available (the nix dev shell
+  # provides both WineHQ vkd3d and vkd3d-proton).
   find_package(PkgConfig QUIET)
   if(PkgConfig_FOUND)
     pkg_check_modules(VKD3D_PROBE QUIET libvkd3d libvkd3d-utils)
+    if(NOT VKD3D_PROBE_FOUND)
+      pkg_check_modules(VKD3D_PROBE QUIET libvkd3d-proton-d3d12)
+    endif()
   endif()
   if(VKD3D_PROBE_FOUND)
     option(RX_RHI_D3D12 "Build the D3D12 render backend" ON)
@@ -103,8 +107,18 @@ if(RX_RHI_D3D12)
   # PUBLIC: RX_SHADER grows the DXIL sidecar reference under this define, so
   # every consumer of the embed headers must agree.
   target_compile_definitions(rx_render PUBLIC RX_RHI_D3D12)
+  # Linux D3D12 provider: WineHQ vkd3d (default) or vkd3d-proton, Proton's
+  # implementation, which exposes DXR 1.1 / mesh shaders / SM 6.6 and so runs
+  # the backend's ray tracing paths natively.
+  option(RX_VKD3D_PROTON "Use vkd3d-proton as the Linux D3D12 provider" OFF)
   if(WIN32)
     target_link_libraries(rx_render PRIVATE d3d12 dxgi)
+  elseif(RX_VKD3D_PROTON)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(VKD3D_PROTON REQUIRED IMPORTED_TARGET libvkd3d-proton-d3d12)
+    target_compile_definitions(rx_render PRIVATE RX_VKD3D_PROTON)
+    target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:PkgConfig::VKD3D_PROTON>)
+    set(RX_INSTALL_RHI_D3D12 ON PARENT_SCOPE)
   else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(VKD3D REQUIRED IMPORTED_TARGET libvkd3d libvkd3d-utils)
