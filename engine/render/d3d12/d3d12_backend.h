@@ -149,6 +149,18 @@ struct TimestampPoolRecord {
   u32 count = 0;
 };
 
+struct AccelCompactionQueryRecord {
+  // EmitRaytracingAccelerationStructurePostbuildInfo writes compacted sizes to
+  // a DEFAULT-heap UAV buffer; QueryCompactedSizes copies them into the mapped
+  // READBACK buffer and arms the recording ring's fence as the ready signal.
+  ID3D12Resource* gpu = nullptr;       // count * 8 bytes, UNORDERED_ACCESS
+  ID3D12Resource* readback = nullptr;  // count * 8 bytes, persistently mapped
+  void* mapped = nullptr;
+  u32 count = 0;
+  ID3D12Fence* fence = nullptr;  // ring fence of the recording command list
+  u64 fence_target = 0;          // completed value that proves the copy landed
+};
+
 // Handle <-> record casts (handles are record pointers).
 inline BufferRecord* Rec(BufferHandle h) { return reinterpret_cast<BufferRecord*>(h.value); }
 inline TextureRecord* Rec(TextureHandle h) { return reinterpret_cast<TextureRecord*>(h.value); }
@@ -164,6 +176,9 @@ inline AccelStructRecord* Rec(AccelStructHandle h) {
 }
 inline TimestampPoolRecord* Rec(TimestampPoolHandle h) {
   return reinterpret_cast<TimestampPoolRecord*>(h.value);
+}
+inline AccelCompactionQueryRecord* Rec(AccelCompactionQueryHandle h) {
+  return reinterpret_cast<AccelCompactionQueryRecord*>(h.value);
 }
 inline TextureViewRecord* Rec(TextureView v) {
   return reinterpret_cast<TextureViewRecord*>(v.value);
@@ -241,6 +256,8 @@ class D3D12CommandList final : public CommandList {
   void BuildTlas(AccelStructHandle tlas, const GpuBuffer& instances, u32 instance_count,
                  const GpuBuffer& scratch) override;
   void CopyAccelStruct(AccelStructHandle dst, AccelStructHandle src, bool compact) override;
+  void QueryCompactedSizes(AccelCompactionQueryHandle query, const AccelStructHandle* accels,
+                           u32 count) override;
   void ResetTimestamps(TimestampPoolHandle pool, u32 first, u32 count) override;
   void WriteTimestamp(TimestampPoolHandle pool, u32 index, bool after_work) override;
   void BeginDebugLabel(const char* name) override;
@@ -377,6 +394,9 @@ class D3D12Device final : public Device {
   AccelStructHandle CreateAccelStruct(AccelStructType type, u64 size) override;
   void DestroyAccelStruct(AccelStructHandle accel) override;
   u64 accel_address(AccelStructHandle accel) override;
+  AccelCompactionQueryHandle CreateCompactionQuery(u32 count) override;
+  void DestroyCompactionQuery(AccelCompactionQueryHandle query) override;
+  bool GetCompactedSizes(AccelCompactionQueryHandle query, u64* out, u32 count) override;
 
   TimestampPoolHandle CreateTimestampPool(u32 count) override;
   void DestroyTimestampPool(TimestampPoolHandle pool) override;

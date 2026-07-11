@@ -839,6 +839,53 @@ void D3D12CommandList::BuildTlas(AccelStructHandle tlas, const GpuBuffer& instan
   list4->Release();
 }
 
+void D3D12CommandList::QueryCompactedSizes(AccelCompactionQueryHandle query,
+                                           const AccelStructHandle* accels, u32 count) {
+  AccelCompactionQueryRecord* record = Rec(query);
+  if (!record || count == 0 || count > record->count) return;
+  ID3D12GraphicsCommandList4* list4 = nullptr;
+  if (FAILED(list_->QueryInterface(IID_ID3D12GraphicsCommandList4,
+                                   reinterpret_cast<void**>(&list4)))) {
+    return;
+  }
+
+  // The postbuild read must see the builds' writes: a UAV barrier (null =
+  // all UAV work) is d3d12's AS-build write/read hazard fence.
+  D3D12_RESOURCE_BARRIER uav = {};
+  uav.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+  list_->ResourceBarrier(1, &uav);
+
+  base::Vector<D3D12_GPU_VIRTUAL_ADDRESS> addresses;
+  addresses.reserve(count);
+  for (u32 i = 0; i < count; ++i) addresses.push_back(Rec(accels[i])->address);
+
+  D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC info = {};
+  info.DestBuffer = record->gpu->GetGPUVirtualAddress();
+  info.InfoType = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
+  list4->EmitRaytracingAccelerationStructurePostbuildInfo(&info, count, addresses.data());
+  list4->Release();
+
+  // Land the sizes in the mapped readback buffer, then return the UAV dest to
+  // its steady state for reuse.
+  D3D12_RESOURCE_BARRIER to_copy = {};
+  to_copy.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+  to_copy.Transition.pResource = record->gpu;
+  to_copy.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+  to_copy.Transition.StateBefore = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+  to_copy.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+  list_->ResourceBarrier(1, &to_copy);
+  list_->CopyBufferRegion(record->readback, 0, record->gpu, 0,
+                          static_cast<u64>(count) * sizeof(u64));
+  std::swap(to_copy.Transition.StateBefore, to_copy.Transition.StateAfter);
+  list_->ResourceBarrier(1, &to_copy);
+
+  // Readiness = this list's ring fence reaching the value CloseAndExecute
+  // signals for this submission.
+  D3D12Device::Ring& ring = device_.rings_[ring_];
+  record->fence = ring.fence;
+  record->fence_target = ring.fence_value + 1;
+}
+
 void D3D12CommandList::CopyAccelStruct(AccelStructHandle dst, AccelStructHandle src, bool compact) {
   ID3D12GraphicsCommandList4* list4 = nullptr;
   if (FAILED(list_->QueryInterface(IID_ID3D12GraphicsCommandList4,

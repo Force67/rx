@@ -56,9 +56,12 @@ gate compilation; the null backend always builds.
   submission's fence has signalled (non-blocking, poll a frame later or read
   straight after `ImmediateSubmit`). Create a tight AS at the reported size and
   `cmd->CopyAccelStruct(dst, src, /*compact=*/true)` into it; retire the fat one
-  via `DestroyAccelStructDeferred`. Vulkan-complete; d3d12 has the build flag +
-  compacting copy but stubs the size query (returns a null query handle); null
-  inert.
+  via `DestroyAccelStructDeferred`. Vulkan-complete; d3d12 implements the size
+  query via `EmitRaytracingAccelerationStructurePostbuildInfo` + readback copy
+  (needs real DXR - under vkd3d, which reports no raytracing caps, the query
+  handle comes back null and callers skip compaction; Windows runtime
+  validation pending); null inert. The engine `RayTracingContext` compacts
+  every mesh BLAS on upload whenever the query is available.
 
 ## Migration pattern (old raw Vulkan → RHI)
 

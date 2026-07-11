@@ -1788,6 +1788,70 @@ bool D3D12Device::GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, 
   return true;
 }
 
+AccelCompactionQueryHandle D3D12Device::CreateCompactionQuery(u32 count) {
+  // Needs real DXR: EmitRaytracingAccelerationStructurePostbuildInfo. vkd3d
+  // reports no raytracing caps, so callers get the documented null handle
+  // there and skip compaction.
+  if (!caps_.raytracing || !device5_ || count == 0) return {};
+
+  D3D12_RESOURCE_DESC desc = {};
+  desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+  desc.Width = static_cast<u64>(count) * sizeof(u64);
+  desc.Height = 1;
+  desc.DepthOrArraySize = 1;
+  desc.MipLevels = 1;
+  desc.SampleDesc.Count = 1;
+  desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+  D3D12_HEAP_PROPERTIES gpu_heap = {};
+  gpu_heap.Type = D3D12_HEAP_TYPE_DEFAULT;
+  ID3D12Resource* gpu = nullptr;
+  if (FAILED(device_->CreateCommittedResource(&gpu_heap, D3D12_HEAP_FLAG_NONE, &desc,
+                                              D3D12_RESOURCE_STATE_UNORDERED_ACCESS, nullptr,
+                                              IID_ID3D12Resource,
+                                              reinterpret_cast<void**>(&gpu)))) {
+    return {};
+  }
+
+  desc.Flags = D3D12_RESOURCE_FLAG_NONE;
+  D3D12_HEAP_PROPERTIES read_heap = {};
+  read_heap.Type = D3D12_HEAP_TYPE_READBACK;
+  ID3D12Resource* readback = nullptr;
+  if (FAILED(device_->CreateCommittedResource(&read_heap, D3D12_HEAP_FLAG_NONE, &desc,
+                                              D3D12_RESOURCE_STATE_COPY_DEST, nullptr,
+                                              IID_ID3D12Resource,
+                                              reinterpret_cast<void**>(&readback)))) {
+    gpu->Release();
+    return {};
+  }
+
+  auto* record = new AccelCompactionQueryRecord();
+  record->gpu = gpu;
+  record->readback = readback;
+  record->count = count;
+  readback->Map(0, nullptr, &record->mapped);
+  return MakeHandle<AccelCompactionQueryHandle>(record);
+}
+
+void D3D12Device::DestroyCompactionQuery(AccelCompactionQueryHandle query) {
+  if (AccelCompactionQueryRecord* record = Rec(query)) {
+    SafeRelease(record->gpu);
+    SafeRelease(record->readback);
+    delete record;
+  }
+}
+
+bool D3D12Device::GetCompactedSizes(AccelCompactionQueryHandle query, u64* out, u32 count) {
+  AccelCompactionQueryRecord* record = Rec(query);
+  if (!record || !record->mapped || count == 0 || count > record->count) return false;
+  // Not ready until the fence of the submission that carried the matching
+  // QueryCompactedSizes has signalled (the non-blocking poll contract).
+  if (!record->fence || record->fence->GetCompletedValue() < record->fence_target) return false;
+  std::memcpy(out, record->mapped, static_cast<size_t>(count) * sizeof(u64));
+  return true;
+}
+
 // --- recording & submission ---
 
 D3D12CommandList* D3D12Device::BeginRing(u32 ring_index) {
