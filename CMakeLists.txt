@@ -206,18 +206,22 @@ endif()
 
 add_subdirectory(third_party)
 
-set(RX_MODULES
-  core
-  ecs
-  asset
-  scene
-  render
-  physics
-  anim
-  audio
-  rpc
-  app
-)
+# Overridable so special-purpose builds (e.g. the mingw cross-compile that
+# packages the d3d12 backend tests for a Windows runtime) can build a slice.
+if(NOT DEFINED RX_MODULES)
+  set(RX_MODULES
+    core
+    ecs
+    asset
+    scene
+    render
+    physics
+    anim
+    audio
+    rpc
+    app
+  )
+endif()
 
 # Self-contained reusable libraries (no engine dependencies).
 if(RX_BUILD_TESTS)
@@ -250,7 +254,7 @@ endif()
 # triangle into a GpuImage and reads the pixels back through the RHI. Registered
 # like kinematest; skips cleanly (null backend) when no Vulkan driver is present,
 # so plain `ctest` passes and a real GPU run under vkrun proves the pixel path.
-if(RX_BUILD_TESTS AND RX_RHI_VULKAN)
+if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_executable(offscreen_test test/offscreen_test.cc)
   target_link_libraries(offscreen_test PRIVATE rx::render rx::core)
   rx_embed_shaders(offscreen_test

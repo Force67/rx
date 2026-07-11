@@ -25,22 +25,33 @@ std::unique_ptr<D3D12Swapchain> D3D12Swapchain::Create(D3D12Device& device, u32 
 
 #if defined(_WIN32)
 
-// SDL3 window-property access, declared locally so the render module does not
-// grow an SDL include dependency (the runtime links SDL3, resolving these).
-extern "C" {
+// SDL3 window-property access, resolved at runtime from the already-loaded
+// SDL3.dll so the render module carries no SDL link (or even build)
+// dependency - headless/offscreen embedders never load SDL at all.
+namespace {
+
 typedef struct SDL_Window SDL_Window;
-unsigned int SDL_GetWindowProperties(SDL_Window* window);
-void* SDL_GetPointerProperty(unsigned int props, const char* name, void* default_value);
+using PfnGetWindowProperties = unsigned int (*)(SDL_Window*);
+using PfnGetPointerProperty = void* (*)(unsigned int, const char*, void*);
+
+HWND HwndFromSdlWindow(void* sdl_window) {
+  if (!sdl_window) return nullptr;
+  HMODULE sdl = GetModuleHandleA("SDL3.dll");
+  if (!sdl) return nullptr;
+  auto get_props = reinterpret_cast<PfnGetWindowProperties>(
+      GetProcAddress(sdl, "SDL_GetWindowProperties"));
+  auto get_pointer = reinterpret_cast<PfnGetPointerProperty>(
+      GetProcAddress(sdl, "SDL_GetPointerProperty"));
+  if (!get_props || !get_pointer) return nullptr;
+  return static_cast<HWND>(get_pointer(get_props(static_cast<SDL_Window*>(sdl_window)),
+                                       "SDL.window.win32.hwnd", nullptr));
 }
+
+}  // namespace
 
 bool D3D12Swapchain::Init(u32 width, u32 height, bool vsync) {
   vsync_ = vsync;
-  auto* sdl_window = static_cast<SDL_Window*>(device_.native_window());
-  HWND hwnd = nullptr;
-  if (sdl_window) {
-    hwnd = static_cast<HWND>(SDL_GetPointerProperty(SDL_GetWindowProperties(sdl_window),
-                                                    "SDL.window.win32.hwnd", nullptr));
-  }
+  HWND hwnd = HwndFromSdlWindow(device_.native_window());
   if (!hwnd) {
     RX_ERROR("d3d12: no HWND for the swapchain");
     return false;

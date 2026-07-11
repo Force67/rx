@@ -121,6 +121,24 @@ couple dozen errors that originate inside vkd3d 2.0's own translation
 `VkImageFormatListCreateInfo` gaps), not from rx's D3D12 API usage - the
 real arbiter for that half is the D3D12 debug layer on a Windows runtime.
 
+### Wine runtime (real d3d12.dll)
+
+The `_WIN32` half of the backend also runs against Wine's own `d3d12.dll`
+(a Windows-shaped runtime rather than in-process vkd3d): the tests
+cross-compile as x86_64 PEs via `cmake/toolchain-mingw-w64.cmake` and run
+through `tools/wine_d3d12_test.sh` - on aarch64 hosts the x86_64 Wine runs
+under box64, whose winevulkan -> libvulkan boundary is wrapped to the native
+loader, so the host NVIDIA ICD *and* the Khronos validation layer serve the
+emulated process. Verified on the GB10 box: `offscreen_test` renders
+pixel-exact and both tests report zero validation errors on the Vulkan
+instance underneath Wine's d3d12; `compaction_test` skips (Wine's bundled
+vkd3d reports no DXR tier here). wined3d must be pinned to its Vulkan
+adapter path (`HKCU\Software\Wine\Direct3D renderer=vulkan`, the script does
+this) - the default GL path finds no pixel formats under Xvfb. The DXGI
+flip-model swapchain still needs a real interactive Windows desktop to
+validate; the mingw cross build required no source changes in the backend
+itself beyond loading SDL3's window-property helpers dynamically.
+
 ### How it maps
 
 - **Shaders**: every HLSL resource carries both `[[vk::binding(N, S)]]` and
