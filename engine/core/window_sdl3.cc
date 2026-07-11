@@ -177,6 +177,12 @@ class Sdl3Window final : public Window {
           input_.text[input_.text_len] = '\0';
           break;
         }
+        case SDL_EVENT_WINDOW_FOCUS_GAINED:
+          focused_ = true;
+          break;
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+          focused_ = false;
+          break;
         case SDL_EVENT_GAMEPAD_ADDED:
           OpenGamepad(event.gdevice.which);
           break;
@@ -214,6 +220,14 @@ class Sdl3Window final : public Window {
   void SetRelativeMouseMode(bool enabled) override {
     SDL_SetWindowRelativeMouseMode(window_, enabled);
   }
+
+  void SetFullscreen(bool enabled) override { SDL_SetWindowFullscreen(window_, enabled); }
+
+  bool fullscreen() const override {
+    return (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) != 0;
+  }
+
+  bool focused() const override { return focused_; }
 
   bool relative_mouse_mode() const override {
     return SDL_GetWindowRelativeMouseMode(window_);
@@ -337,6 +351,7 @@ class Sdl3Window final : public Window {
   SDL_Window* window_;
   SDL_Gamepad* pad_ = nullptr;
   SDL_JoystickID pad_id_ = 0;
+  bool focused_ = true;
 #if defined(RX_HAS_WAYLAND_KDE_HDR)
   // Lazily created by hdr_enabled() (a const query), hence mutable.
   mutable bool kde_hdr_checked_ = false;

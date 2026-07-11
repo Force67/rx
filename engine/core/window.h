@@ -55,6 +55,15 @@ class RX_CORE_EXPORT Window {
   virtual void SetRelativeMouseMode(bool enabled) {}
   virtual bool relative_mouse_mode() const { return false; }
 
+  // Runtime borderless-fullscreen toggle (settings menus); headless and
+  // platforms without the concept no-op and report false.
+  virtual void SetFullscreen(bool enabled) { (void)enabled; }
+  virtual bool fullscreen() const { return false; }
+
+  // False while the window lacks input focus (alt-tab, another app on top);
+  // games auto-pause on it. Headless stays focused.
+  virtual bool focused() const { return true; }
+
   // True when the OS actually has HDR enabled (Windows advanced-color toggle,
   // KWin's per-output HDR setting via kde_output_device_v2, macOS EDR) - NOT
   // merely an HDR-capable display. The renderer gates its HDR swapchain
