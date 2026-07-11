@@ -17,17 +17,49 @@
 # Then, inside `nix develop` (for vkrun and Xvfb):
 #   tools/wine_d3d12_test.sh [build/mingw]
 #
-# Store paths are pinned like cmake/toolchain-mingw-w64.cmake; override with
-# RX_WINE64 / RX_BOX64 / RX_MINGW_MCF when they drift.
+# The wine/box64/mcfgthread tools are provisioned through nix on first run,
+# pinned by this repo's flake.lock (--inputs-from) and protected from
+# nix-collect-garbage by GC roots under .cache/tool-roots/. Override with
+# RX_WINE64 / RX_BOX64 / RX_MINGW_MCF to test a specific build.
 set -euo pipefail
 
 BUILD_DIR="${1:-build/mingw}"
-WINE64="${RX_WINE64:-/nix/store/4813hlbs1q9smib1109sxvm9251yqbjb-wine64-11.0}"
-BOX64="${RX_BOX64:-/nix/store/rh5nr388whprv8r61bimvpc5frkwddx5-box64-0.4.2}"
-MCF="${RX_MINGW_MCF:-/nix/store/y8iv45r55ryaxgwdxjkbbprmcd8jyl91-mcfgthread-x86_64-w64-mingw32-2.4.1}"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+ROOTS="$REPO_DIR/.cache/tool-roots"
+mkdir -p "$ROOTS"
+
+# Resolves a nixpkgs attribute to a store path with a GC root, so the tool
+# survives garbage collection and is re-fetched when the root dangles.
+provision() {  # <root-name> <attr> [extra nix build args...]
+  local name="$1" attr="$2"
+  shift 2
+  if [ ! -e "$ROOTS/$name" ] || [ ! -e "$(readlink -f "$ROOTS/$name")" ]; then
+    nix build --inputs-from "$REPO_DIR" "nixpkgs#$attr" "$@" -o "$ROOTS/$name" \
+      || nix build "nixpkgs#$attr" "$@" -o "$ROOTS/$name"
+  fi
+  readlink -f "$ROOTS/$name"
+}
+
+WINE64="${RX_WINE64:-$(provision wine64 wine64 --system x86_64-linux)}"
+BOX64="${RX_BOX64:-$(provision box64 box64)}"
+MCF="${RX_MINGW_MCF:-$(provision mcfgthread pkgsCross.mingwW64.windows.mcfgthreads)}"
 
 export WINEPREFIX="${WINEPREFIX:-$HOME/.cache/rx-wine-x64}"
-export WINELOADER="$WINE64/bin/.wine"
+# box64 needs the raw x86_64 ELF loader, not nixpkgs' bash wrapper; the
+# unwrapped binary's name varies across nixpkgs wine revisions.
+WINELOADER=""
+for candidate in "$WINE64/bin/.wine" "$WINE64/bin/.wine64" \
+                 "$WINE64/bin/.wine64-wrapped" "$WINE64/bin/wine64" "$WINE64/bin/wine"; do
+  if [ -e "$candidate" ] && file -b "$candidate" | grep -q "ELF 64-bit.*x86-64"; then
+    WINELOADER="$candidate"
+    break
+  fi
+done
+if [ -z "$WINELOADER" ]; then
+  echo "wine_d3d12_test: no x86_64 ELF wine loader under $WINE64/bin" >&2
+  exit 1
+fi
+export WINELOADER
 export WINEDEBUG="${WINEDEBUG:--all}"
 # The mingw test binaries link the mcfgthread runtime DLL.
 export WINEPATH="Z:$(sed 's|/|\\\\|g' <<<"$MCF")\\\\bin"
