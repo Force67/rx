@@ -177,6 +177,9 @@ BlendConfig BlendConfigOf(BlendMode mode) {
 // Transient descriptor pool sizing, per frame slot: generous multiples of the
 // busiest frame observed, cheap in host memory.
 constexpr u32 kTransientMaxSets = 512;
+// The acceleration-structure entry must stay last: its descriptor type is only
+// a valid pool size when VK_KHR_acceleration_structure is enabled, so pools on
+// non-RT devices are created without it.
 constexpr VkDescriptorPoolSize kTransientPoolSizes[] = {
     {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2048},
     {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 4096},
@@ -187,10 +190,10 @@ constexpr VkDescriptorPoolSize kTransientPoolSizes[] = {
     {VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, 64},
 };
 
-VkDescriptorPool CreateTransientPool(VkDevice device) {
+VkDescriptorPool CreateTransientPool(VkDevice device, bool with_accel) {
   VkDescriptorPoolCreateInfo info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   info.maxSets = kTransientMaxSets;
-  info.poolSizeCount = static_cast<u32>(std::size(kTransientPoolSizes));
+  info.poolSizeCount = static_cast<u32>(std::size(kTransientPoolSizes)) - (with_accel ? 0 : 1);
   info.pPoolSizes = kTransientPoolSizes;
   VkDescriptorPool pool = VK_NULL_HANDLE;
   vkCreateDescriptorPool(device, &info, nullptr, &pool);
@@ -639,7 +642,7 @@ bool VulkanDevice::InitResources() {
 
   VkFenceCreateInfo fence_info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
   vkCreateFence(device_, &fence_info, nullptr, &immediate_fence_);
-  immediate_descriptor_pool_ = CreateTransientPool(device_);
+  immediate_descriptor_pool_ = CreateTransientPool(device_, caps_.raytracing);
 
   for (FrameRing& frame : frames_) {
     VkCommandPoolCreateInfo frame_pool{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
@@ -660,7 +663,7 @@ bool VulkanDevice::InitResources() {
     VkFenceCreateInfo frame_fence{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     frame_fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     vkCreateFence(device_, &frame_fence, nullptr, &frame.in_flight);
-    frame.descriptor_pool = CreateTransientPool(device_);
+    frame.descriptor_pool = CreateTransientPool(device_, caps_.raytracing);
     frame.list = std::make_unique<VulkanCommandList>(*this, frame.cmd, frame.descriptor_pool);
 
     if (caps_.async_compute) {

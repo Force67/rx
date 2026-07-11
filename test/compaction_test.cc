@@ -1,5 +1,6 @@
 // Acceleration-structure compaction acceptance test. Through the RHI on a
-// surfaceless Vulkan device: build a small triangle BLAS with allow_compaction,
+// surfaceless device (backend from RX_RHI, default vulkan): build a small
+// triangle BLAS with allow_compaction,
 // query its compacted size across a submit boundary (exercising both the
 // non-blocking poll and the post-fence read), create a tight BLAS at that size,
 // compact-copy into it, and (when ray queries are available) build a TLAS over
@@ -32,14 +33,16 @@ u64 AlignUp(u64 v, u64 a) { return (v + a - 1) & ~(a - 1); }
 
 int main() {
   DeviceDesc desc;
-  desc.backend = Backend::kVulkan;
+  const char* rhi = std::getenv("RX_RHI");
+  desc.backend = (rhi && std::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = true;
   desc.enable_validation = std::getenv("RX_VALIDATION") != nullptr;
   std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
 
   if (device->is_stub()) {
-    std::printf("compaction_test: no vulkan driver, skipping (null backend)\n");
+    std::printf("compaction_test: no %s driver, skipping (null backend)\n",
+                BackendName(desc.backend));
     return 0;
   }
   if (!device->caps().raytracing) {

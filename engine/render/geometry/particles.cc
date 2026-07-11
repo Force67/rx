@@ -88,6 +88,17 @@ bool ParticleSystem::Initialize(Device& device, Format color_format,
       .debug_name = "particles",
   };
   pipeline_ = device.CreateGraphicsPipeline(desc);
+  if (!pipeline_ && textured) {
+    // Backends without the textured variant (no DXIL sidecar on d3d12) fall
+    // back to flat-shaded billboards rather than failing engine init.
+    RX_WARN("textured particle pipeline unavailable; falling back to untextured");
+    textured = false;
+    bindless_layout_ = {};
+    sets.pop_back();
+    desc.fragment = RX_SHADER(k_particle_ps_hlsl);
+    desc.sets = sets;
+    pipeline_ = device.CreateGraphicsPipeline(desc);
+  }
   // Fire path: HDR additive color, motion still alpha-weighted.
   desc.blend = {BlendMode::kAdditive, BlendMode::kAlpha};
   desc.debug_name = "particles_additive";

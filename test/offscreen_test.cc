@@ -1,12 +1,15 @@
-// Offscreen RHI acceptance test: create a surfaceless Vulkan device through the
-// RHI, clear+draw a triangle into an RGBA8 GpuImage, read it back and assert the
+// Offscreen RHI acceptance test: create a surfaceless device through the RHI,
+// clear+draw a triangle into an RGBA8 GpuImage, read it back and assert the
 // pixels (red triangle at the centre, blue background in the corners).
 //
-// Skips cleanly (exit 0) when no Vulkan driver is present: CreateOffscreen then
-// returns a null-backend stub. Run under vkrun to exercise the real GPU path.
+// The backend follows RX_RHI (vulkan|d3d12; default vulkan), so the same binary
+// validates both paths — d3d12 runs against vkd3d on linux. Skips cleanly
+// (exit 0) when no driver is present: CreateOffscreen then returns a
+// null-backend stub. Run under vkrun to exercise the real GPU path.
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <vector>
 
 #include "render/rhi/command_list.h"
@@ -29,15 +32,17 @@ int Fail(const char* msg) {
 
 int main() {
   DeviceDesc desc;
-  desc.backend = Backend::kVulkan;
+  const char* rhi = std::getenv("RX_RHI");
+  desc.backend = (rhi && std::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = false;  // not needed; keeps the adapter requirements minimal
   std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
 
   if (device->is_stub()) {
-    // No Vulkan driver on this machine (plain ctest without vkrun). A skip, not
-    // a failure - the real pixel path is proven by running under vkrun.
-    std::printf("offscreen_test: no vulkan driver, skipping (null backend)\n");
+    // No driver for the requested backend on this machine (plain ctest without
+    // vkrun). A skip, not a failure - the real pixel path is proven under vkrun.
+    std::printf("offscreen_test: no %s driver, skipping (null backend)\n",
+                BackendName(desc.backend));
     return 0;
   }
 

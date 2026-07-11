@@ -244,11 +244,11 @@ void CpuDescriptorPool::Free(u32 index) { free_.push_back(index); }
 
 // --- device creation ---
 
-std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window& window) {
+std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* window) {
   auto device = std::unique_ptr<D3D12Device>(new D3D12Device());
   // Unused on linux (offscreen swapchain); the DXGI swapchain pulls the HWND
-  // out of the SDL window on windows.
-  device->native_window_ = window.native_handles().window;
+  // out of the SDL window on windows. Null for an offscreen device.
+  device->native_window_ = window ? window->native_handles().window : nullptr;
 
 #if defined(_WIN32)
   if (desc.enable_validation) {
@@ -322,7 +322,11 @@ std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window& wind
 }
 
 std::unique_ptr<Device> CreateD3D12Device(const DeviceDesc& desc, Window& window) {
-  return D3D12Device::Create(desc, window);
+  return D3D12Device::Create(desc, &window);
+}
+
+std::unique_ptr<Device> CreateD3D12DeviceOffscreen(const DeviceDesc& desc) {
+  return D3D12Device::Create(desc, nullptr);
 }
 
 bool D3D12Device::InitResources() {
@@ -1853,6 +1857,43 @@ PresentResult D3D12Device::SubmitFrame(CommandList* cmd, Swapchain& swapchain, u
     }
   }
   return PresentResult::kFailed;
+}
+
+void D3D12Device::SubmitFrame(CommandList* cmd) {
+  for (u32 i = 0; i < kMaxFramesInFlight; ++i) {
+    if (rings_[i].wrapper.get() == cmd) {
+      CloseAndExecute(i);  // signals the slot fence; no Acquire, no Present
+      return;
+    }
+  }
+}
+
+bool D3D12Device::ReadbackImage(const GpuImage& image, ResourceState current, void* out,
+                                size_t out_size) {
+  if (!image || !out) return false;
+  const u64 texel = FormatTexelBytes(image.format);
+  const u64 needed = static_cast<u64>(image.extent.width) * image.extent.height * texel;
+  if (needed == 0 || out_size < needed) return false;
+
+  // READBACK-heap staging buffer, persistently mapped by CreateBuffer.
+  GpuBuffer staging = CreateBuffer(needed, kBufferUsageTransferDst, /*host_visible=*/true);
+  if (!staging || !staging.mapped) {
+    RX_ERROR("d3d12: readback staging buffer allocation failed ({} bytes)", needed);
+    if (staging) DestroyBuffer(staging);
+    return false;
+  }
+
+  ImmediateSubmit([&](CommandList& cmd) {
+    cmd.Barrier(Transition(image, current, ResourceState::kCopySrc));
+    BufferTextureCopy region{};  // whole mip 0 at origin
+    cmd.CopyTextureToBuffer(image, staging, region);
+    // ImmediateSubmit's fence wait makes the copy visible to the mapped
+    // READBACK heap; no extra barrier is needed under the d3d12 memory model.
+  });
+
+  std::memcpy(out, staging.mapped, needed);
+  DestroyBuffer(staging);
+  return true;
 }
 
 }  // namespace rx::render::d3d12

@@ -329,7 +329,9 @@ class D3D12Swapchain final : public Swapchain {
 
 class D3D12Device final : public Device {
  public:
-  static std::unique_ptr<Device> Create(const DeviceDesc& desc, Window& window);
+  // `window` may be null: an offscreen device has no HWND and never creates a
+  // swapchain (frames complete through the swapchainless SubmitFrame overload).
+  static std::unique_ptr<Device> Create(const DeviceDesc& desc, Window* window);
   ~D3D12Device() override;
 
   void WaitIdle() override;
@@ -383,6 +385,9 @@ class D3D12Device final : public Device {
   void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
   CommandList* BeginFrame(u32 slot) override;
   PresentResult SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) override;
+  void SubmitFrame(CommandList* cmd) override;
+  bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
+                     size_t out_size) override;
 
   // --- backend internals ---
 

@@ -265,6 +265,16 @@ if(RX_BUILD_TESTS AND RX_RHI_VULKAN)
   add_executable(compaction_test test/compaction_test.cc)
   target_link_libraries(compaction_test PRIVATE rx::render rx::core)
   add_test(NAME compaction_test COMMAND compaction_test)
+
+  # The same acceptance tests against the d3d12 backend (vkd3d on linux). The
+  # tests read RX_RHI to pick the backend and skip cleanly when the driver or
+  # feature is unavailable.
+  if(RX_RHI_D3D12)
+    add_test(NAME offscreen_test_d3d12 COMMAND offscreen_test)
+    set_tests_properties(offscreen_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
+    add_test(NAME compaction_test_d3d12 COMMAND compaction_test)
+    set_tests_properties(compaction_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
+  endif()
 endif()
 
 # install()/export rules, generated last so every module target (and the

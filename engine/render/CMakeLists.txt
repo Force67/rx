@@ -307,7 +307,6 @@ set(RX_SHADER_NO_DXIL
   meshlet.ms.hlsl
   mesh_rt.ps.hlsl
   mesh_rt_sss.ps.hlsl
-  particle_tex.ps.hlsl
   water.ps.hlsl
   pathtrace.cs.hlsl
   pathtrace_gbuffer.cs.hlsl

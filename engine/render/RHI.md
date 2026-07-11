@@ -100,7 +100,23 @@ over vkd3d (WineHQ vkd3d 2.0, the native D3D12-on-Vulkan library, provided by
 the nix dev shell). `vkrun env RX_RHI=d3d12 ./build/nix/runtime/rx
 --demo materials --no-rt` renders the materials demo pixel-identical to the
 Vulkan backend outside the stochastic cloud layer (MAE < 1/255, p99 = 0
-against `RX_RHI=vulkan` with clouds pinned off).
+against `RX_RHI=vulkan` with clouds pinned off; the demo is not run-to-run
+deterministic - animated particles and TAA state add temporal noise to any
+two captures, so judge parity against a same-backend rerun baseline).
+
+Offscreen devices are wired for d3d12 (`Device::CreateOffscreen` with
+`Backend::kD3D12`): no swapchain, frames complete through the swapchainless
+`SubmitFrame(CommandList*)`, and pixels come back via `ReadbackImage`
+(READBACK-heap staging; `ImmediateSubmit`'s fence wait covers host
+visibility). The `offscreen_test`/`compaction_test` acceptance tests pick
+their backend from `RX_RHI` and are registered twice (`*_d3d12` variants)
+when `RX_RHI_D3D12` is on. Validation status under
+`VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`: the Vulkan backend and the
+d3d12 offscreen tests run clean; the full demo on d3d12 still reports a
+couple dozen errors that originate inside vkd3d 2.0's own translation
+(read-only-depth render pass layouts, typeless-depth
+`VkImageFormatListCreateInfo` gaps), not from rx's D3D12 API usage - the
+real arbiter for that half is the D3D12 debug layer on a Windows runtime.
 
 ### How it maps
 
