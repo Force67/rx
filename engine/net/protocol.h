@@ -31,6 +31,11 @@ enum class MessageType : u16 {
 // game-message sinks.
 inline constexpr u16 kFirstGameMessage = 128;
 
+// "No peer": the sentinel for server-owned/unowned in the interest map and
+// ownership queries. Matches the transport's invalid peer id -- real peer ids
+// start at 0, so 0 is NOT usable as a sentinel.
+inline constexpr u32 kNoPeer = 0xffffffffu;
+
 // Why the server refused a join or dropped a client.
 enum class DisconnectReason : u8 {
   kUnknown = 0,

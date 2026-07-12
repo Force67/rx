@@ -140,6 +140,12 @@ class RX_NET_EXPORT ServerSession : public Session {
   u64 tick() const { return tick_; }
   ecs::Entity PlayerOf(u32 peer) const;
 
+  // Visits every admitted peer id (game layers pushing per-peer payloads,
+  // e.g. re-offering an asset manifest after a live reload).
+  void ForEachPeer(const std::function<void(u32 peer)>& fn) const {
+    for (auto entry : clients_) fn(entry.key);
+  }
+
  private:
   struct RemoteClient {
     base::NameString name;

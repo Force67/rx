@@ -22,8 +22,8 @@ namespace rx::net {
 // density instead of world population -- the lever that lets one server carry
 // more players.
 struct InterestBubble {
-  u32 peer = 0;    // the transport peer this bubble streams to
-  f32 radius = 0;  // world units; entities inside are relevant
+  u32 peer = kNoPeer;  // the transport peer this bubble streams to
+  f32 radius = 0;      // world units; entities inside are relevant
 };
 
 struct InterestConfig {
@@ -43,10 +43,10 @@ struct InterestConfig {
 // deterministically -- and keeps it until its own bubble no longer contains
 // the entity (sticky, so ownership doesn't ping-pong on the overlap seam).
 // Only then does the entity hand off to the nearest containing bubble (ties
-// break to the lower peer id), or back to the server (owner 0) when no bubble
-// holds it. A player's own avatar is always owned by its peer. The game
-// decides what ownership gates -- interaction rights, simulation islands,
-// update priority -- through OwnerOf and the changed-sink.
+// break to the lower peer id), or back to the server (owner kNoPeer) when no
+// bubble holds it. A player's own avatar is always owned by its peer. The
+// game decides what ownership gates -- interaction rights, simulation
+// islands, update priority -- through OwnerOf and the changed-sink.
 class RX_NET_EXPORT InterestMap {
  public:
   void Configure(const InterestConfig& config) { config_ = config; }
@@ -58,7 +58,7 @@ class RX_NET_EXPORT InterestMap {
   // The interest set for one peer, or null when that peer has no bubble.
   const InterestSet* InterestOf(u32 peer) const;
 
-  // The peer owning a replicated entity, 0 = server-owned / unowned.
+  // The peer owning a replicated entity, kNoPeer = server-owned / unowned.
   u32 OwnerOf(u64 net_id) const;
 
   // Every bubble as of the last Update, ready to replicate (kBubbleSync) and
@@ -68,8 +68,8 @@ class RX_NET_EXPORT InterestMap {
   // Forgets a departed peer's bubble state and releases everything it owned.
   void RemovePeer(u32 peer);
 
-  // Invoked from Update for every ownership handoff (old_peer/new_peer may be
-  // 0 for the server side).
+  // Invoked from Update for every ownership handoff (old_peer/new_peer are
+  // kNoPeer for the server side).
   void SetOwnerChangedSink(std::function<void(u64 net_id, u32 old_peer, u32 new_peer)> sink) {
     owner_changed_ = std::move(sink);
   }
