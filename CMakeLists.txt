@@ -288,6 +288,14 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_test(NAME morph_test
            COMMAND morph_test ${CMAKE_CURRENT_SOURCE_DIR}/test/data/AnimatedMorphCube.glb)
 
+  # Expression controller: pose transitions converge and stay C1 through a
+  # mid-flight retarget, outputs stay clamped, seeded blinks land inside their
+  # window (and are absorbed by a closed-eyes pose) and a fixed seed replays
+  # bit-identically. Pure CPU.
+  add_executable(expression_test test/expression_test.cc)
+  target_link_libraries(expression_test PRIVATE rx::anim rx::asset rx::core)
+  add_test(NAME expression_test COMMAND expression_test)
+
   # The same acceptance tests against the d3d12 backend (vkd3d on linux). The
   # tests read RX_RHI to pick the backend and skip cleanly when the driver or
   # feature is unavailable.
