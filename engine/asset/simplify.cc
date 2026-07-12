@@ -47,14 +47,15 @@ u64 EdgeKey(u32 a, u32 b) {
   return (static_cast<u64>(std::min(a, b)) << 32) | std::max(a, b);
 }
 
-}  // namespace
-
-std::vector<u32> SimplifyIndices(const Vec3* positions, u32 vertex_count, const u32* indices,
-                                 u32 index_count, u32 target_index_count, const u8* locked,
-                                 f32* out_error) {
-  if (out_error) *out_error = 0.0f;
+// The actual collapse loop, over a DENSE vertex range: every scratch array is
+// sized by vertex_count, so callers must pass a compacted submesh (the public
+// wrapper below does). Called once per cluster group during the DAG build -
+// sizing scratch by the whole source mesh instead made thousands of group
+// calls over a multi-million-vertex mesh spend all their time in allocation.
+std::vector<u32> SimplifyDense(const Vec3* positions, u32 vertex_count, const u32* indices,
+                               u32 index_count, u32 target_index_count, const u8* locked,
+                               f32* out_error) {
   std::vector<u32> result(indices, indices + index_count);
-  if (index_count <= target_index_count || index_count < 12) return result;
 
   // Union-find style remap: collapsed vertices forward to their target.
   std::vector<u32> remap(vertex_count);
@@ -207,6 +208,44 @@ std::vector<u32> SimplifyIndices(const Vec3* positions, u32 vertex_count, const 
     out.push_back(v2);
   }
   if (out_error) *out_error = static_cast<f32>(std::sqrt(std::max(max_cost, 0.0)));
+  return out;
+}
+
+}  // namespace
+
+std::vector<u32> SimplifyIndices(const Vec3* positions, u32 vertex_count, const u32* indices,
+                                 u32 index_count, u32 target_index_count, const u8* locked,
+                                 f32* out_error) {
+  if (out_error) *out_error = 0.0f;
+  if (index_count <= target_index_count || index_count < 12) {
+    return std::vector<u32>(indices, indices + index_count);
+  }
+  (void)vertex_count;
+
+  // Compact to the vertices this submesh actually references, simplify in
+  // that dense space, then map the survivors back to source indices.
+  std::unordered_map<u32, u32> to_local;
+  to_local.reserve(index_count);
+  std::vector<u32> to_global;
+  std::vector<Vec3> local_positions;
+  std::vector<u8> local_locked;
+  std::vector<u32> local_indices(index_count);
+  for (u32 i = 0; i < index_count; ++i) {
+    u32 g = indices[i];
+    auto [it, inserted] = to_local.emplace(g, static_cast<u32>(to_global.size()));
+    if (inserted) {
+      to_global.push_back(g);
+      local_positions.push_back(positions[g]);
+      local_locked.push_back(locked ? locked[g] : 0);
+    }
+    local_indices[i] = it->second;
+  }
+
+  std::vector<u32> out = SimplifyDense(local_positions.data(),
+                                       static_cast<u32>(to_global.size()),
+                                       local_indices.data(), index_count,
+                                       target_index_count, local_locked.data(), out_error);
+  for (u32& v : out) v = to_global[v];
   return out;
 }
 
