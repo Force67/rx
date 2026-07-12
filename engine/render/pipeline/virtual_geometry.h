@@ -73,6 +73,11 @@ class VirtualGeometryPass {
   void Upload(Device& device, const asset::Mesh& mesh);
   // World transforms drawn next frame; empty keeps a single identity instance.
   void SetInstances(std::span<const Mat4> transforms);
+  // Albedo the resolve drapes over the mesh by planar world-xz projection
+  // (uv = world.xz * world_to_uv + 0.5): rgba_mips is a full RGBA8 mip chain,
+  // size x size at mip 0, levels concatenated. The pass owns the upload.
+  // Textures the debug=0 mode; heightmap-style content needs no vertex uvs.
+  void SetAlbedo(Device& device, ByteSpan rgba_mips, u32 size, f32 world_to_uv);
 
   bool active() const { return meshlet_count_ > 0; }
   bool gpu_driven() const { return gpu_driven_; }
@@ -149,6 +154,9 @@ class VirtualGeometryPass {
   GpuBuffer legacy_counters_[kFramesInFlight];
   GpuBuffer visbuffer_;
   GpuImage dummy_hiz_;
+  GpuImage albedo_;
+  SamplerHandle albedo_sampler_;
+  f32 world_to_uv_ = 0;
   // Own hi-z ping-pong: the map built this frame (scene depth + visibility
   // buffer, rebuilt again after the post raster so it is complete) is next
   // frame's main-pass occlusion source. Self-contained: no dependency on when

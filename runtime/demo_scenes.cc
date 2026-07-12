@@ -932,6 +932,25 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
     }
   }
   if (!config_.headless) renderer_.UploadVirtualGeometryMesh(terrain);
+  // RX_VGEO_ALBEDO=<file.rgba> drapes an image over the terrain by planar xz
+  // projection: raw RGBA8 full mip chain, RX_VGEO_ALBEDO_SIZE px at mip 0
+  // (default 4096). Shown by the default-shaded (debug 0) resolve mode.
+  if (const char* al = std::getenv("RX_VGEO_ALBEDO")) {
+    u32 an = 4096;
+    if (const char* e = std::getenv("RX_VGEO_ALBEDO_SIZE")) an = std::max(1, std::atoi(e));
+    size_t bytes = 0;
+    for (u32 m = an;; m /= 2) {
+      bytes += static_cast<size_t>(m) * m * 4;
+      if (m == 1) break;
+    }
+    std::ifstream f(al, std::ios::binary);
+    std::vector<rx::u8> mips(bytes);
+    if (f && f.read(reinterpret_cast<char*>(mips.data()), bytes) && !config_.headless) {
+      renderer_.SetVirtualGeometryAlbedo({mips.data(), mips.size()}, an, 1.0f / kSize);
+    } else {
+      RX_ERROR("vgeo demo: albedo {} unreadable or short", al);
+    }
+  }
   // RX_VGEO_INSTANCES=N tiles the terrain N x N: N^2 x 800k source triangles
   // feed the gpu cull while the rastered count stays bounded by the screen.
   int grid = 1;
