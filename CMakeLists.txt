@@ -270,6 +270,24 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   target_link_libraries(compaction_test PRIVATE rx::render rx::core)
   add_test(NAME compaction_test COMMAND compaction_test)
 
+  # Morph targets: glTF import + weight-track sampling against the committed
+  # CC0 Khronos AnimatedMorphCube, and the shared morph.hlsli accumulation
+  # replayed in a compute shader against a CPU reference. The GPU section is
+  # Vulkan-only (buffer-device-address reads, like the skinned path) and skips
+  # without a driver.
+  add_executable(morph_test test/morph_test.cc)
+  target_link_libraries(morph_test PRIVATE rx::render rx::anim rx::asset rx::core)
+  set(RX_SHADER_INCLUDE_DIRS
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders/pipeline)
+  set(RX_SHADER_NO_DXIL morph_apply.cs.hlsl)
+  set(RX_SHADER_DEPS_morph_apply_cs_hlsl engine/render/shaders/pipeline/morph.hlsli)
+  rx_embed_shaders(morph_test test/shaders/morph_apply.cs.hlsl)
+  unset(RX_SHADER_INCLUDE_DIRS)
+  unset(RX_SHADER_NO_DXIL)
+  add_test(NAME morph_test
+           COMMAND morph_test ${CMAKE_CURRENT_SOURCE_DIR}/test/data/AnimatedMorphCube.glb)
+
   # The same acceptance tests against the d3d12 backend (vkd3d on linux). The
   # tests read RX_RHI to pick the backend and skip cleanly when the driver or
   # feature is unavailable.
