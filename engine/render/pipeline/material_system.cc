@@ -75,7 +75,9 @@ std::unique_ptr<MaterialSystem> MaterialSystem::Create(Device& device,
                 {2, BindingType::kCombinedTextureSampler},
                 {3, BindingType::kCombinedTextureSampler},
                 {4, BindingType::kCombinedTextureSampler},
-                {5, BindingType::kCombinedTextureSampler}},
+                {5, BindingType::kCombinedTextureSampler},
+                {6, BindingType::kCombinedTextureSampler},   // metallic (separate)
+                {7, BindingType::kCombinedTextureSampler}},  // occlusion
   });
   if (!system->set_layout_) return nullptr;
 
@@ -117,7 +119,7 @@ bool MaterialSystem::CreateDefaults() {
   }
   default_set_ = AllocateSet();
   if (!default_set_) return false;
-  u64 map_keys[5];
+  u64 map_keys[7];
   return WriteSet(default_set_, static_cast<u32>(param_buffers_.size()) - 1,
                   sets_in_last_pool_ - 1, default_material, 0, map_keys);
 }
@@ -315,12 +317,14 @@ u32 MaterialSystem::EnsureBindless(u64 key) {
 }
 
 void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime) {
-  const GpuImage* maps[5] = {
+  const GpuImage* maps[7] = {
       texture_or(runtime.map_keys[0], white_),
       texture_or(runtime.map_keys[1], flat_normal_),
       texture_or(runtime.map_keys[2], white_),
       texture_or(runtime.map_keys[3], white_),
       texture_or(runtime.map_keys[4], white_),  // white = surface level
+      texture_or(runtime.map_keys[5], white_),  // white metallic = mr map alone
+      texture_or(runtime.map_keys[6], white_),  // white occlusion = no AO
   };
   GpuBuffer& buffer = param_buffers_[runtime.pool];
   u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
@@ -329,17 +333,20 @@ void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntim
                                  Bind::Combined(2, maps[1]->view, sampler_),
                                  Bind::Combined(3, maps[2]->view, sampler_),
                                  Bind::Combined(4, maps[3]->view, sampler_),
-                                 Bind::Combined(5, maps[4]->view, sampler_)});
+                                 Bind::Combined(5, maps[4]->view, sampler_),
+                                 Bind::Combined(6, maps[5]->view, sampler_),
+                                 Bind::Combined(7, maps[6]->view, sampler_)});
 }
 
 bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
                               const asset::Material& material, u64 id_salt,
-                              u64 out_map_keys[5]) {
+                              u64 out_map_keys[7]) {
   Params params;
   std::memcpy(params.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
   std::memcpy(params.emissive_factor, material.emissive_factor, sizeof(f32) * 3);
   params.metallic_factor = material.metallic_factor;
   params.roughness_factor = material.roughness_factor;
+  params.ao_strength = material.ao_strength;
   params.alpha_cutoff = material.alpha_cutoff;
   params.clearcoat = material.clearcoat;
   params.clearcoat_roughness = material.clearcoat_roughness;
@@ -386,6 +393,18 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
     params.flags |= kFlagHasHeightMap;
     params.height_scale = material.height_scale;
   }
+  // Separate metallic / occlusion maps (engines that don't ship packed ORM,
+  // e.g. Starfield). kFlagSeparateMetallic tells the shader the mr slot is a
+  // roughness-only map (read .g, never .b for metallic); metallic then comes
+  // from metallic_map.r when it uploaded, else the scalar metallic_factor. The
+  // separate flag is set on request even without the map so a missing metallic
+  // texture reads as a plain dielectric (factor 0) instead of the roughness
+  // map's blue channel. Occlusion only flags when its map is actually present
+  // (white default would wrongly darken nothing / everything otherwise).
+  if (material.separate_metallic) params.flags |= kFlagSeparateMetallic;
+  if (material.occlusion_map && textures_.find(material.occlusion_map.hash ^ id_salt)) {
+    params.flags |= kFlagHasOcclusion;
+  }
   // Terrain splat v2: resolve the palette to bindless indices. The indices
   // live in this uniform, so the layers are pinned - a streamed slot move
   // would leave the params stale. Any unresolvable layer keeps the whole
@@ -429,6 +448,8 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   runtime.map_keys[2] = material.metallic_roughness.hash ^ id_salt;
   runtime.map_keys[3] = material.emissive.hash ^ id_salt;
   runtime.map_keys[4] = material.height.hash ^ id_salt;
+  runtime.map_keys[5] = material.metallic_map.hash ^ id_salt;
+  runtime.map_keys[6] = material.occlusion_map.hash ^ id_salt;
   WriteSetBindings(set, runtime);
   std::memcpy(out_map_keys, runtime.map_keys, sizeof(runtime.map_keys));
   return true;

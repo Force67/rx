@@ -230,7 +230,8 @@ struct MaterialParams {
   float transmission;
   float irid_pad;
   float2 uv_scroll;  // animated texture scroll (uv units/sec)
-  float2 scroll_pad;
+  float ao_strength; // occlusion-map strength (1 = full); pads the row otherwise
+  float scroll_pad;
   float4 effect_falloff;  // start angle, stop angle, start opacity, stop opacity
   float2 emissive_pulse;  // x frequency (Hz), y amount
   float2 effect_pad;
@@ -249,6 +250,13 @@ struct MaterialParams {
 [[vk::combinedImageSampler]] [[vk::binding(3, 1)]] SamplerState metallic_roughness_sampler : register(s3, space1);
 [[vk::combinedImageSampler]] [[vk::binding(5, 1)]] Texture2D height_map : register(t5, space1);
 [[vk::combinedImageSampler]] [[vk::binding(5, 1)]] SamplerState height_sampler : register(s5, space1);
+// Dedicated metallic (r) and ambient-occlusion (r) maps for engines that ship
+// them separately instead of packed into the mr map (Starfield). Default 1x1
+// white; only read under kFlagSeparateMetallic / kFlagHasOcclusion.
+[[vk::combinedImageSampler]] [[vk::binding(6, 1)]] Texture2D metallic_map : register(t6, space1);
+[[vk::combinedImageSampler]] [[vk::binding(6, 1)]] SamplerState metallic_map_sampler : register(s6, space1);
+[[vk::combinedImageSampler]] [[vk::binding(7, 1)]] Texture2D occlusion_map : register(t7, space1);
+[[vk::combinedImageSampler]] [[vk::binding(7, 1)]] SamplerState occlusion_sampler : register(s7, space1);
 [[vk::combinedImageSampler]] [[vk::binding(4, 1)]] Texture2D emissive_map : register(t4, space1);
 [[vk::combinedImageSampler]] [[vk::binding(4, 1)]] SamplerState emissive_sampler : register(s4, space1);
 
@@ -315,6 +323,8 @@ static const uint kFlagEffectGrayColor = 2048u; // 1 << 11, luminance through th
 static const uint kFlagEffectGrayAlpha = 4096u; // 1 << 12, coverage from luminance
 static const uint kFlagEffectFalloff = 8192u;   // 1 << 13, view-angle opacity fade
 static const uint kFlagTerrainV2 = 32768u;      // 1 << 15, bindless splat palette
+static const uint kFlagSeparateMetallic = 65536u;   // 1 << 16, mr slot is roughness-only, metallic from metallic_map.r
+static const uint kFlagHasOcclusion = 131072u;      // 1 << 17, dedicated occlusion map multiplies ambient
 static const uint kFrameIbl = 1u;
 static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
@@ -735,9 +745,15 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
 
   // glTF metallic roughness packing: g roughness, b metallic. Terrain reuses
   // this slot as a land layer, so it takes the neutral rough dielectric path.
+  // Engines with separate maps (kFlagSeparateMetallic, e.g. Starfield) keep the
+  // mr slot as roughness-only (.g) and pull metallic from metallic_map.r; the
+  // white default there makes metallic == metallic_factor when the map is absent.
   float2 mr = (material.flags & kFlagTerrain) != 0u
                   ? float2(1.0, 0.0)
                   : metallic_roughness_map.Sample(metallic_roughness_sampler, input.uv).gb;
+  if ((material.flags & kFlagSeparateMetallic) != 0u) {
+    mr.y = metallic_map.Sample(metallic_map_sampler, input.uv).r;
+  }
   float roughness = clamp(mr.x * material.roughness_factor * decal_rough_mult, 0.045, 1.0);
   roughness = SpecularAaRoughness(roughness, n);
   float metallic = clamp(mr.y * material.metallic_factor, 0.0, 1.0);
@@ -988,6 +1004,13 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   float ao = 1.0;
   if ((frame.flags & kFrameAoValid) != 0u) {
     ao = ao_map.Sample(ao_sampler, input.sv_position.xy / frame.misc.xy).r;
+  }
+  // Material occlusion map: bakes contact/crevice shadow into the indirect term.
+  // ao_strength lerps the sample toward 1 (no effect). Multiplies the
+  // screen-space AO so both attenuate the ambient.
+  if ((material.flags & kFlagHasOcclusion) != 0u) {
+    float mao = occlusion_map.Sample(occlusion_sampler, input.uv).r;
+    ao *= lerp(1.0, mao, material.ao_strength);
   }
 
   float3 ambient;
