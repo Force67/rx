@@ -81,6 +81,15 @@ struct Material {
   // parallax occlusion mapping; scale is the depth in uv-tangent units.
   AssetId height;
   f32 height_scale = 0.05f;
+  // Silhouette-aware POM: approximate the underlying mesh as a locally curved
+  // patch so the height march bends over the surface, and discard fragments
+  // whose view ray exits the height shell near grazing convex edges - carving
+  // the heightfield profile into the object outline instead of leaving the flat
+  // polygon silhouette (Crimson Desert-style POM). Only meaningful on curved
+  // geometry with a height map. silhouette_curvature scales the per-pixel mesh
+  // curvature the shader derives (1 = as-measured; lower softens the carve).
+  bool silhouette_pom = false;
+  f32 silhouette_curvature = 1.0f;
   // Animated texture scroll from a NIF shader float controller (U/V Offset),
   // in uv units per second. The raster shaders add frame.time * this to the uv
   // before sampling, so waterfalls/rivers/lava flow. 0 = static.

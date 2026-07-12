@@ -222,7 +222,7 @@ struct MaterialParams {
   float iridescence;
   float iridescence_thickness;
   float transmission;
-  float irid_pad;
+  float silhouette_curvature;  // silhouette-pom curvature gain (0 = flat pom)
   float2 uv_scroll;  // animated texture scroll (uv units/sec)
   float ao_strength; // occlusion-map strength (1 = full); pads the row otherwise
   float scroll_pad;
@@ -309,6 +309,7 @@ static const uint kFlagEffectFalloff = 8192u;   // 1 << 13, view-angle opacity f
 static const uint kFlagTerrainV2 = 32768u;      // 1 << 15, bindless splat palette
 static const uint kFlagSeparateMetallic = 65536u;   // 1 << 16, mr slot is roughness-only, metallic from metallic_map.r
 static const uint kFlagHasOcclusion = 131072u;      // 1 << 17, dedicated occlusion map multiplies ambient
+static const uint kFlagSilhouettePom = 262144u;  // 1 << 18, curvature-aware pom + silhouette carve
 static const uint kFrameIbl = 1u;
 static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
@@ -542,6 +543,80 @@ float ParallaxShadow(float2 uv, float3 light_ts, float scale, float2 dx, float2 
     cur += delta;
     ray_h += 1.0 / 12.0;
     float h = height_map.SampleGrad(height_sampler, cur, dx, dy).r;
+    occlusion = max(occlusion, h - ray_h);
+  }
+  return 1.0 - saturate(occlusion * 6.0) * 0.75;
+}
+
+// --- silhouette-aware parallax occlusion ------------------------------------
+// Classic POM leaves the mesh outline polygon-straight: the heightfield displaces
+// the interior but the silhouette is still the flat triangle edge. Here the
+// underlying mesh is approximated as a locally curved (quadric) patch, after
+// Oliveira & Policarpo 2005, reduced to a single mean-curvature term `curv`
+// (turn of the interpolated normal per uv unit, derived per pixel). As the
+// tangent-space view ray travels laterally by `off` uv units the curved surface
+// bends away from the flat tangent plane, so the depth the heightfield must reach
+// to be hit lifts by curv*dot(off,off). When the ray reaches the bottom of the
+// height shell without ever meeting the lifted field it has marched past where
+// the real curved surface exists: `clip` is set and the caller discards the
+// fragment, carving the heightfield's profile into the silhouette. On a flat
+// patch curv is ~0, bend stays 0 and this reduces to the classic march (nothing
+// clips). Gradients are passed in (taken before any divergent flow) so the loop
+// and the caller's discard never touch implicit derivatives.
+float2 ParallaxUvSilhouette(float2 uv, float3 view_ts, float scale, float curv, float2 dx,
+                            float2 dy, out bool clip) {
+  clip = false;
+  float steps = lerp(48.0, 16.0, saturate(view_ts.z));
+  float layer = 1.0 / steps;
+  float2 delta = view_ts.xy / max(view_ts.z, 0.06) * scale * layer;
+  float depth = 0.0;
+  float2 cur = uv;
+  float bend = 0.0;
+  float prev_bend = 0.0;
+  float h = 1.0 - height_map.SampleGrad(height_sampler, cur, dx, dy).r;
+  float prev_h = h;
+  bool hit = depth + 1e-4 >= h + bend;
+  [loop]
+  for (uint i = 0; i < 64u && !hit && depth < 1.0; ++i) {
+    cur -= delta;
+    depth += layer;
+    prev_h = h;
+    prev_bend = bend;
+    float2 off = cur - uv;
+    bend = curv * dot(off, off);
+    h = 1.0 - height_map.SampleGrad(height_sampler, cur, dx, dy).r;
+    hit = depth + 1e-4 >= h + bend;
+  }
+  // Missed the shell entirely: the curved surface has fallen away here (only
+  // possible when bend lifted the floor out of reach -> grazing a convex edge).
+  if (!hit) {
+    clip = true;
+    return uv;
+  }
+  // Refine: intersect the last linear segment against the bent field.
+  float after = (h + bend) - depth;
+  float before = (prev_h + prev_bend) - (depth - layer);
+  float w = saturate(after / min(after - before, -1e-5));
+  return lerp(cur, cur + delta, w);
+}
+
+// Self-shadow that respects the curved shell: the light ray's height reference
+// lifts with curv*dot(off,off) the same way the view march does, so shadows do
+// not leak across a carved silhouette. curv 0 reproduces ParallaxShadow.
+float ParallaxShadowCurved(float2 uv, float3 light_ts, float scale, float curv, float2 dx,
+                           float2 dy) {
+  if (light_ts.z <= 0.05) return 0.35;
+  float h0 = height_map.SampleGrad(height_sampler, uv, dx, dy).r;
+  float2 delta = light_ts.xy / light_ts.z * scale / 12.0;
+  float occlusion = 0.0;
+  float2 cur = uv;
+  float ray_h = h0;
+  [unroll]
+  for (uint i = 0; i < 12u; ++i) {
+    cur += delta;
+    ray_h += 1.0 / 12.0;
+    float2 off = cur - uv;
+    float h = height_map.SampleGrad(height_sampler, cur, dx, dy).r - curv * dot(off, off);
     occlusion = max(occlusion, h - ray_h);
   }
   return 1.0 - saturate(occlusion * 6.0) * 0.75;
@@ -1143,6 +1218,10 @@ PsOut main(PsIn input) {
   {
     float2 pom_dx = ddx(input.uv);
     float2 pom_dy = ddy(input.uv);
+    // Curvature of the interpolated normal per uv unit; taken up front (uniform
+    // flow) so the silhouette discard below never sits between a derivative op.
+    float3 nrm_dx = ddx(input.normal);
+    float3 nrm_dy = ddy(input.normal);
     if ((material.flags & kFlagHasHeightMap) != 0u && material.height_scale > 0.0) {
       float3 gn = normalize(input.normal);
       float3 gt = input.tangent.xyz - gn * dot(input.tangent.xyz, gn);
@@ -1152,11 +1231,25 @@ PsOut main(PsIn input) {
         float3 pv = normalize(frame.camera_position.xyz - input.world_pos);
         float3 view_ts = float3(dot(pv, gt), dot(pv, gb), dot(pv, gn));
         if (view_ts.z > 0.02) {
-          input.uv = ParallaxUv(input.uv, view_ts, material.height_scale, pom_dx, pom_dy);
           float3 pl = normalize(-frame.sun_direction.xyz);
           float3 light_ts = float3(dot(pl, gt), dot(pl, gb), dot(pl, gn));
-          parallax_sun =
-              ParallaxShadow(input.uv, light_ts, material.height_scale, pom_dx, pom_dy);
+          if ((material.flags & kFlagSilhouettePom) != 0u) {
+            // Mesh curvature as normal-turn per uv unit, scaled by the material
+            // gain; drives how fast the height shell bends over the surface.
+            float curv = material.silhouette_curvature *
+                         (length(nrm_dx) + length(nrm_dy)) /
+                         (length(pom_dx) + length(pom_dy) + 1e-5);
+            bool clip = false;
+            input.uv = ParallaxUvSilhouette(input.uv, view_ts, material.height_scale, curv,
+                                            pom_dx, pom_dy, clip);
+            if (clip) discard;  // fragment is past the carved silhouette
+            parallax_sun = ParallaxShadowCurved(input.uv, light_ts, material.height_scale, curv,
+                                                pom_dx, pom_dy);
+          } else {
+            input.uv = ParallaxUv(input.uv, view_ts, material.height_scale, pom_dx, pom_dy);
+            parallax_sun =
+                ParallaxShadow(input.uv, light_ts, material.height_scale, pom_dx, pom_dy);
+          }
         }
       }
     }

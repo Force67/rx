@@ -54,6 +54,7 @@ class DemoScenes {
   void UpdateParticles(f32 dt, render::FrameView& view);
   void CreateFireDemoScene();
   void CreateBrickDemoScene();
+  void CreateSilhouettePomDemoScene();
   void CreateVirtualTextureDemoScene();
   void CreateVirtualGeometryDemoScene();
   void CreateStrandHairDemoScene();

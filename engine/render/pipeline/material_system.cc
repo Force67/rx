@@ -392,6 +392,12 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   if (material.height && textures_.find(material.height.hash ^ id_salt)) {
     params.flags |= kFlagHasHeightMap;
     params.height_scale = material.height_scale;
+    // Silhouette-aware march carves the object outline; only meaningful with a
+    // height map, so it nests under the same guard.
+    if (material.silhouette_pom) {
+      params.flags |= kFlagSilhouettePom;
+      params.silhouette_curvature = material.silhouette_curvature;
+    }
   }
   // Separate metallic / occlusion maps (engines that don't ship packed ORM,
   // e.g. Starfield). kFlagSeparateMetallic tells the shader the mr slot is a
