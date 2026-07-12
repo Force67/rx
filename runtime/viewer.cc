@@ -33,6 +33,14 @@ base::Option<const char*> SunDir{"sun.dir", nullptr, "RX_SUN_DIR"};
 // driving the app.
 base::Option<const char*> UiShot{"ui.shot", nullptr, "RX_UI_SHOT"};
 base::Option<int> UiShotFrames{"ui.shot.frames", 30, "RX_UI_SHOT_FRAMES"};
+// RX_UI_SHOT_SEQ treats RX_UI_SHOT as a prefix and dumps every frame as
+// <prefix>_NNNN.png for RX_UI_SHOT_FRAMES frames (pair with RX_FIXED_DT for
+// an even cadence), for assembling headless captures into video.
+base::Option<bool> UiShotSeq{"ui.shot.seq", false, "RX_UI_SHOT_SEQ"};
+// Capture hook: RX_MORPH_WEIGHTS="name=w,name=w" pins named morph targets to
+// fixed weights on every morphed instance (unmatched names are skipped per
+// mesh), instead of the imported track / scripted sweep.
+base::Option<const char*> MorphWeights{"morph.weights", nullptr, "RX_MORPH_WEIGHTS"};
 }  // namespace
 
 Viewer::Viewer(const EngineConfig& config) : config_(config) {}
@@ -143,6 +151,45 @@ bool Viewer::LoadGltfScene() {
           MakeScale(instance.scale);
       if (!mesh.morph_animations.empty()) morphed.animation = mesh.morph_animations[0];
       morphed.weights.resize(mesh.morph_targets.size());
+      if (const char* spec = MorphWeights.get()) {
+        // "name=w,name=w": resolve each name against this mesh's targets.
+        morphed.pinned = true;
+        std::string s(spec);
+        size_t pos = 0;
+        while (pos < s.size()) {
+          size_t comma = s.find(',', pos);
+          if (comma == std::string::npos) comma = s.size();
+          std::string entry = s.substr(pos, comma - pos);
+          pos = comma + 1;
+          size_t eq = entry.find('=');
+          if (eq == std::string::npos) continue;
+          std::string name = entry.substr(0, eq);
+          f32 weight = std::strtof(entry.c_str() + eq + 1, nullptr);
+          i32 index = mesh.FindMorphTarget(asset::MakeAssetId(name).hash);
+          if (index >= 0) morphed.weights[static_cast<u32>(index)] = weight;
+        }
+      } else if (mesh.morph_animations.empty()) {
+        // No imported track: hand the instance to the expression controller
+        // when its targets carry names the stock poses know (an ARKit-style
+        // face; the eyelash/brow meshes share those names and follow). An
+        // imported track always wins over the controller.
+        if (!expression_demo_) {
+          expression_.AddDefaultPoses();
+          expression_.SetExpression("neutral");
+        }
+        u32 matched = 0;
+        morphed.expression_map.resize(expression_.channel_count());
+        for (u32 c = 0; c < expression_.channel_count(); ++c) {
+          i32 index = mesh.FindMorphTarget(expression_.channel_target(c));
+          morphed.expression_map[c] = index;
+          if (index >= 0) ++matched;
+        }
+        if (matched == 0) {
+          morphed.expression_map.clear();  // unnamed targets: keep the sweep
+        } else {
+          expression_demo_ = true;
+        }
+      }
       morphed_.push_back(std::move(morphed));
       continue;
     }
@@ -199,12 +246,32 @@ void Viewer::OnBuildView(f32 frame_delta, render::FrameView& view) {
 void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
   if (morphed_.empty()) return;
   morph_time_ += frame_delta;
+  if (expression_demo_) {
+    // Cycle the stock poses; the life layer keeps blinking through the holds.
+    expression_hold_ -= frame_delta;
+    if (expression_hold_ <= 0) {
+      static constexpr std::string_view kCycle[] = {"neutral", "smile",  "angry",      "surprised",
+                                                    "smirk",   "pucker", "eyes_closed"};
+      expression_.SetExpression(kCycle[expression_pose_ % std::size(kCycle)]);
+      ++expression_pose_;
+      expression_hold_ = 3.0f;
+    }
+    expression_.Update(frame_delta);
+  }
   for (MorphedInstance& instance : morphed_) {
-    if (!instance.animation.times.empty()) {
+    if (instance.pinned) {
+      // RX_MORPH_WEIGHTS: weights were fixed at load; skip track/sweep.
+    } else if (!instance.animation.times.empty()) {
       f32 time = instance.animation.duration > 0
                      ? std::fmod(morph_time_, instance.animation.duration)
                      : 0.0f;
       anim::SampleMorphWeights(instance.animation, time, &instance.weights);
+    } else if (!instance.expression_map.empty()) {
+      std::fill(instance.weights.begin(), instance.weights.end(), 0.0f);
+      for (u32 c = 0; c < instance.expression_map.size(); ++c) {
+        i32 index = instance.expression_map[c];
+        if (index >= 0) instance.weights[static_cast<u32>(index)] = expression_.channel_weight(c);
+      }
     } else if (!instance.weights.empty()) {
       // No imported track (e.g. an ARKit-style blendshape face): sweep one
       // target at a time, eased in and out, so the expressions cycle live.
@@ -232,6 +299,18 @@ void Viewer::OnFrameEnd() {
       return UiShotFrames.get() > 0 ? UiShotFrames.get() : 30;
     }();
     ++ui_shot_frames;
+    if (bool(UiShotSeq)) {
+      // Sequence capture: request a numbered frame each OnFrameEnd (each is
+      // written by the next RenderFrame), then quit once the last one landed.
+      if (ui_shot_frames <= ui_shot_target) {
+        char path[512];
+        std::snprintf(path, sizeof(path), "%s_%04d.png", shot, ui_shot_frames);
+        renderer_->CaptureScreenshot(path);
+      } else {
+        host_->RequestQuit();
+      }
+      return;
+    }
     // CaptureScreenshot is deferred: it is written by the NEXT RenderFrame.
     // Request at the target frame, then quit one frame later so the write
     // actually lands.
