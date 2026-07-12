@@ -1,6 +1,8 @@
 #ifndef RX_ASSET_MESH_H_
 #define RX_ASSET_MESH_H_
 
+#include <string>
+
 #include <base/containers/vector.h>
 
 #include "asset/asset_id.h"
@@ -23,6 +25,28 @@ struct Vertex {
 struct SkinnedVertexExtra {
   u8 bone_indices[4] = {};
   u8 bone_weights[4] = {};
+};
+
+// One morph target (blend shape): dense per-vertex deltas added onto the lod 0
+// vertices, scaled by a per-instance weight (facial expressions, correctives).
+// Position deltas are always present; normal/tangent deltas are empty when the
+// source carries none. Deltas apply before skinning, in mesh space.
+struct MorphTarget {
+  std::string name;   // source target name (e.g. "jawOpen"), empty if unnamed
+  u64 name_hash = 0;  // MakeAssetId(name).hash, 0 when unnamed
+  base::Vector<f32> position_deltas;  // 3 floats per lod 0 vertex
+  base::Vector<f32> normal_deltas;    // 3 floats per vertex, or empty
+  base::Vector<f32> tangent_deltas;   // 3 floats per vertex, or empty
+};
+
+// Keyframed weight animation over a mesh's morph targets (a glTF "weights"
+// channel). weights holds one row of morph_targets.size() values per key.
+struct MorphAnimation {
+  std::string name;
+  f32 duration = 0;   // seconds, last key time
+  bool step = false;  // hold each key instead of lerping (STEP interpolation)
+  base::Vector<f32> times;
+  base::Vector<f32> weights;  // times.size() * target count
 };
 
 struct Submesh {
@@ -92,6 +116,17 @@ struct Mesh {
   SkinBinding skin;
   // Particle emitters riding along with the mesh (NIF particle systems).
   base::Vector<ParticleEmitter> emitters;
+  // Morph targets on lod 0, weighted per draw instance. Meshes with targets
+  // always render lod 0 (the deltas index its vertices).
+  base::Vector<MorphTarget> morph_targets;
+  base::Vector<MorphAnimation> morph_animations;
+
+  i32 FindMorphTarget(u64 name_hash) const {
+    for (u32 i = 0; i < morph_targets.size(); ++i) {
+      if (morph_targets[i].name_hash == name_hash) return static_cast<i32>(i);
+    }
+    return -1;
+  }
 };
 
 }  // namespace rx::asset
