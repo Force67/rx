@@ -1028,8 +1028,10 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
       raytracing_
           ? (kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress | kBufferUsageStorage)
           : 0;
-  // The mesh-shader path reads vertices/meshlets by device address.
-  const bool build_meshlets = device_->caps().mesh_shaders && !mesh.skinned;
+  // The mesh-shader path reads vertices/meshlets by device address. Skinned
+  // and morphed meshes stay on the raster vertex path, which deforms them.
+  const bool build_meshlets =
+      device_->caps().mesh_shaders && !mesh.skinned && mesh.morph_targets.empty();
   BufferUsageFlags ms_usage = build_meshlets ? kBufferUsageDeviceAddress : 0;
 
   // On the mesh-shader path, synthesize coarse lods for eligible single-material
@@ -1076,6 +1078,33 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
                  lod.skinning.size() * sizeof(asset::SkinnedVertexExtra)),
         kBufferUsageVertex);
     gpu.skinned = static_cast<bool>(gpu.skinning);
+  }
+  // Morph target deltas, packed [target][vertex] as {position, normal,
+  // tangent} float3 triples and read by device address in the vertex shaders.
+  // Targets are authored against lod 0; morphed meshes stay on it (see the
+  // cull build below).
+  if (!mesh.morph_targets.empty()) {
+    const size_t verts = lod.vertices.size();
+    base::Vector<f32> deltas(mesh.morph_targets.size() * verts * 9);
+    for (size_t t = 0; t < mesh.morph_targets.size(); ++t) {
+      const asset::MorphTarget& target = mesh.morph_targets[t];
+      f32* out = deltas.data() + t * verts * 9;
+      for (size_t v = 0; v < verts; ++v, out += 9) {
+        if (target.position_deltas.size() >= (v + 1) * 3) {
+          std::memcpy(out, &target.position_deltas[v * 3], sizeof(f32) * 3);
+        }
+        if (target.normal_deltas.size() >= (v + 1) * 3) {
+          std::memcpy(out + 3, &target.normal_deltas[v * 3], sizeof(f32) * 3);
+        }
+        if (target.tangent_deltas.size() >= (v + 1) * 3) {
+          std::memcpy(out + 6, &target.tangent_deltas[v * 3], sizeof(f32) * 3);
+        }
+      }
+    }
+    gpu.morph_deltas = device_->CreateBufferWithData(
+        ByteSpan(reinterpret_cast<const u8*>(deltas.data()), deltas.size() * sizeof(f32)),
+        kBufferUsageStorage | kBufferUsageDeviceAddress);
+    gpu.morph_target_count = static_cast<u32>(mesh.morph_targets.size());
   }
   auto build_submeshes = [&](const asset::MeshLod& l, u32 index_base,
                              base::Vector<GpuSubmesh>& out) {
@@ -1189,6 +1218,7 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     device_->DestroyBuffer(previous->vertices);
     device_->DestroyBuffer(previous->indices);
     if (previous->skinning) device_->DestroyBuffer(previous->skinning);
+    if (previous->morph_deltas) device_->DestroyBuffer(previous->morph_deltas);
     if (previous->meshlets) device_->DestroyBuffer(previous->meshlets);
     if (previous->meshlet_vertices) device_->DestroyBuffer(previous->meshlet_vertices);
     if (previous->meshlet_triangles) device_->DestroyBuffer(previous->meshlet_triangles);
@@ -1683,6 +1713,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             if (draw.item != bound_item) {
               MeshPushConstants push{.model = draw.item->transform,
                                      .prev_model = draw.item->prev_transform};
+              // The blend pipelines run the static vertex path, which still
+              // applies morphs (only skinning needs the extra vertex stream).
+              if (mesh->morph_target_count > 0 && draw.item->morph_offset >= 0 &&
+                  draw.item->morph_count > 0) {
+                push.morph_delta_address = mesh->morph_deltas.address;
+                push.morph_weight_address = frame.morph_weights.address;
+                push.morph_first = static_cast<u32>(draw.item->morph_offset);
+                push.morph_count = draw.item->morph_count;
+                push.morph_vertex_count = mesh->vertex_count;
+              }
               if (as_water) {
                 // The water pipeline shares the mesh push block. Push the whole
                 // struct so detail_rect is zeroed: mesh.vs sinks vertices inside
@@ -1874,6 +1914,12 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (!view.bone_matrices.empty() && frame.bone_palette.mapped) {
     u32 count = std::min<u32>(static_cast<u32>(view.bone_matrices.size()), kMaxFrameBones);
     std::memcpy(frame.bone_palette.mapped, view.bone_matrices.data(), count * sizeof(Mat4));
+  }
+  // Active morph target weights for every morphed draw, read by device address.
+  if (!view.morph_weights.empty() && frame.morph_weights.mapped) {
+    u32 count = std::min<u32>(static_cast<u32>(view.morph_weights.size()), kMaxFrameMorphWeights);
+    std::memcpy(frame.morph_weights.mapped, view.morph_weights.data(),
+                count * sizeof(MorphWeight));
   }
 
   ResourceHandle scene_color = graph_.CreateTexture(
@@ -2329,15 +2375,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       inst.bounds[2] = mesh->bounds_center[2];
       inst.bounds[3] = mesh->bounds_radius;
       inst.first_cmd = cmd_total;
-      inst.cull_disabled = (mesh->skinned || mesh->bounds_radius <= 0.0f) ? 1u : 0u;
+      inst.cull_disabled =
+          (mesh->skinned || mesh->morph_target_count > 0 || mesh->bounds_radius <= 0.0f) ? 1u
+                                                                                         : 0u;
       inst.pad = 0;
 
       // Default to lod 0 (finest): we stream and render the highest detail the
       // game ships. Distance-based downgrade is opt-in (settings_.distance_lod).
-      // Skinned meshes and rt-shaded meshes always stay on lod 0 (their bounds
-      // deform / the tlas is built from lod 0). The submesh count matches lod 0
-      // so the prepass/scene draw loops issue one indirect per submesh.
-      bool fixed_lod = !settings_.distance_lod || mesh->skinned || (tlas_shaded && !mesh->no_rt);
+      // Skinned, morphed and rt-shaded meshes always stay on lod 0 (their
+      // bounds deform / the morph deltas index lod 0 vertices / the tlas is
+      // built from lod 0). The submesh count matches lod 0 so the prepass/scene
+      // draw loops issue one indirect per submesh.
+      bool fixed_lod = !settings_.distance_lod || mesh->skinned ||
+                       mesh->morph_target_count > 0 || (tlas_shaded && !mesh->no_rt);
       u32 lod = 0;
       if (!fixed_lod) {
         Vec3 wc = TransformPoint(item.transform, {mesh->bounds_center[0], mesh->bounds_center[1],
@@ -2513,6 +2563,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             if (draw_skinned && item.skin_offset >= 0) {
               push.bone_address = frame.bone_palette.address;
               push.skin_offset = static_cast<u32>(item.skin_offset);
+            }
+            if (mesh->morph_target_count > 0 && item.morph_offset >= 0 && item.morph_count > 0) {
+              push.morph_delta_address = mesh->morph_deltas.address;
+              push.morph_weight_address = frame.morph_weights.address;
+              push.morph_first = static_cast<u32>(item.morph_offset);
+              push.morph_count = item.morph_count;
+              push.morph_vertex_count = mesh->vertex_count;
             }
             mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
           }
@@ -2912,6 +2969,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             if (draw_skinned && item.skin_offset >= 0) {
               push.bone_address = frame.bone_palette.address;
               push.skin_offset = static_cast<u32>(item.skin_offset);
+            }
+            if (mesh->morph_target_count > 0 && item.morph_offset >= 0 && item.morph_count > 0) {
+              push.morph_delta_address = mesh->morph_deltas.address;
+              push.morph_weight_address = frame.morph_weights.address;
+              push.morph_first = static_cast<u32>(item.morph_offset);
+              push.morph_count = item.morph_count;
+              push.morph_vertex_count = mesh->vertex_count;
             }
             push.tint_packed = item.tint;  // faction/team colour for skinned actors
             mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
@@ -3518,6 +3582,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               push.bone_address = frame.bone_palette.address;
               push.skin_offset = static_cast<u32>(item.skin_offset);
             }
+            if (mesh->morph_target_count > 0 && item.morph_offset >= 0 && item.morph_count > 0) {
+              push.morph_delta_address = mesh->morph_deltas.address;
+              push.morph_weight_address = frame.morph_weights.address;
+              push.morph_first = static_cast<u32>(item.morph_offset);
+              push.morph_count = item.morph_count;
+              push.morph_vertex_count = mesh->vertex_count;
+            }
             mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
             for (const GpuSubmesh& submesh : mesh->submeshes) {
               if (submesh.blend) continue;  // transparency owns its own depth
@@ -3770,6 +3841,12 @@ bool Renderer::CreateFrameResources() {
         kBufferUsageStorage | kBufferUsageDeviceAddress, true);
     if (!frame.bone_palette.mapped) return false;
 
+    // Morph weights: host visible (target, weight) pairs, read like the bones.
+    frame.morph_weights = device_->CreateBuffer(
+        static_cast<u64>(kMaxFrameMorphWeights) * sizeof(MorphWeight),
+        kBufferUsageStorage | kBufferUsageDeviceAddress, true);
+    if (!frame.morph_weights.mapped) return false;
+
     frame.lights = device_->CreateBuffer(static_cast<u64>(kMaxFrameLights) * sizeof(PointLight),
                                          kBufferUsageStorage, true);
     if (!frame.lights.mapped) return false;
@@ -3784,6 +3861,7 @@ void Renderer::DestroyFrameResources() {
   for (FrameResources& frame : frames_) {
     if (frame.globals) device_->DestroyBuffer(frame.globals);
     if (frame.bone_palette) device_->DestroyBuffer(frame.bone_palette);
+    if (frame.morph_weights) device_->DestroyBuffer(frame.morph_weights);
     if (frame.lights) device_->DestroyBuffer(frame.lights);
     if (frame.decals) device_->DestroyBuffer(frame.decals);
     frame = {};
@@ -3866,6 +3944,7 @@ void Renderer::Shutdown() {
       device_->DestroyBuffer(kv.value.vertices);
       device_->DestroyBuffer(kv.value.indices);
       if (kv.value.skinning) device_->DestroyBuffer(kv.value.skinning);
+      if (kv.value.morph_deltas) device_->DestroyBuffer(kv.value.morph_deltas);
       if (kv.value.meshlets) device_->DestroyBuffer(kv.value.meshlets);
       if (kv.value.meshlet_vertices) device_->DestroyBuffer(kv.value.meshlet_vertices);
       if (kv.value.meshlet_triangles) device_->DestroyBuffer(kv.value.meshlet_triangles);

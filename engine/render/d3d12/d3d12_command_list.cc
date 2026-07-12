@@ -217,19 +217,25 @@ void D3D12CommandList::PushConstants(const void* data, u32 size, u32 offset) {
     SetPushRootCbv();
   }
   // Push-block BDA convention: blocks big enough to carry the skinned bone
-  // palette address (u64 at byte 128) feed it to the t998 root SRV. Shaders
-  // that do not declare rec_bone_palette leave the parameter unused.
-  if (bound_->bda_param >= 0 && bound_->push_size >= 136 && offset <= 128 &&
-      offset + size >= 136) {
+  // palette address (u64 at byte 128) feed it to the t998 root SRV; the mesh
+  // push block's morph delta/weight addresses (bytes 160/168) feed t997/t996.
+  // Shaders that do not declare the buffers leave the parameters unused, and
+  // zero addresses stay unbound (their draws never read them).
+  auto bind_push_address = [&](i32 param, u32 byte_offset) {
+    if (param < 0 || offset > byte_offset || offset + size < byte_offset + 8) return;
     u64 address = 0;
-    std::memcpy(&address, push_shadow_ + 128, sizeof(address));
-    if (address != 0) {
-      if (bound_->compute) {
-        list_->SetComputeRootShaderResourceView(bound_->bda_param, address);
-      } else {
-        list_->SetGraphicsRootShaderResourceView(bound_->bda_param, address);
-      }
+    std::memcpy(&address, push_shadow_ + byte_offset, sizeof(address));
+    if (address == 0) return;
+    if (bound_->compute) {
+      list_->SetComputeRootShaderResourceView(param, address);
+    } else {
+      list_->SetGraphicsRootShaderResourceView(param, address);
     }
+  };
+  if (bound_->push_size >= 136) bind_push_address(bound_->bda_param, 128);
+  if (bound_->push_size >= 176) {
+    bind_push_address(bound_->morph_delta_param, 160);
+    bind_push_address(bound_->morph_weight_param, 168);
   }
 }
 

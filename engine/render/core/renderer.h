@@ -168,6 +168,11 @@ struct DrawItem {
   // Index of this mesh's first bone in FrameView::bone_matrices, -1 = static.
   // Only meaningful for skinned meshes.
   i32 skin_offset = -1;
+  // Range in FrameView::morph_weights holding this draw's active morph target
+  // weights, -1 = none. Only meaningful for meshes with morph targets; apps
+  // should skip zero weights so idle targets cost nothing.
+  i32 morph_offset = -1;
+  u32 morph_count = 0;
   // Packed rgb8 tint (0xRRGGBB) modulating this draw's albedo, 0 = untinted.
   // A per-instance tint the app can use to distinguish otherwise-identical
   // actors (e.g. team/faction colouring).
@@ -189,6 +194,9 @@ struct FrameView {
   // Bone palette for every skinned draw this frame, concatenated; each skinned
   // DrawItem indexes its run by skin_offset. Column-major model-space matrices.
   base::Vector<Mat4> bone_matrices;
+  // Active morph target weights for every morphed draw this frame,
+  // concatenated; each DrawItem indexes its run by morph_offset/morph_count.
+  base::Vector<MorphWeight> morph_weights;
   // Live billboard particles for this frame (engine-simulated). Drawn lit and
   // soft-faded over the resolved scene before reconstruction.
   base::Vector<ParticleInstance> particles;
@@ -350,11 +358,14 @@ class RX_RENDER_EXPORT Renderer {
   struct FrameResources {
     GpuBuffer globals;       // host visible FrameGlobals
     GpuBuffer bone_palette;  // host visible skinning matrices, read by device address
+    GpuBuffer morph_weights;  // host visible MorphWeight pairs, read by device address
     GpuBuffer lights;        // host visible PointLight array
     GpuBuffer decals;        // host visible Decal array
   };
   // Max bones across all skinned draws in one frame.
   static constexpr u32 kMaxFrameBones = 8192;
+  // Max active morph target weights across all morphed draws in one frame.
+  static constexpr u32 kMaxFrameMorphWeights = 4096;
   static constexpr u32 kMaxFrameLights = 256;
 
   bool CreateFrameResources();
