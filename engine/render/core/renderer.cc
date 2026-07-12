@@ -61,6 +61,8 @@ base::Option<bool> VrsOpt{"vrs", true, "RX_VRS"};
 base::Option<double> VrsThreshold{"vrs.threshold", 0.06, "RX_VRS_THRESHOLD"};
 base::Option<bool> RestirDiOpt{"restir.di", false, "RX_RESTIR_DI"};
 base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
+// 0 shaded, 1 cluster tint, 2 lod tint, 3 sw/hw raster path.
+base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
@@ -942,6 +944,10 @@ void Renderer::UploadMeshletMesh(const asset::Mesh& mesh) {
 void Renderer::UploadVirtualGeometryMesh(const asset::Mesh& mesh) {
   if (!device_ || device_->is_stub()) return;
   vgeo_.Upload(*device_, mesh);
+}
+
+void Renderer::SetVirtualGeometryInstances(std::span<const Mat4> transforms) {
+  vgeo_.SetInstances(transforms);
 }
 
 void Renderer::SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 strands,
@@ -3465,16 +3471,28 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     hair_.AddToGraph(graph_, lit, depth, {render_width_, render_height_}, hf, frame_slot);
   }
 
-  // Virtual geometry: cluster-DAG LOD cut + cull + draw, all on the gpu.
+  // Virtual geometry: cluster-DAG LOD cut, two-pass occlusion cull and
+  // visibility-buffer raster, all on the gpu (single-pass fallback inside).
   if (vgeo_.active()) {
-    f32 planes[5][4];
-    ExtractFrustumPlanes(view_proj, planes);
+    VirtualGeometryPass::Frame vf;
+    vf.view_proj = view_proj;
+    ExtractFrustumPlanes(view_proj, vf.planes);
+    vf.eye = view.camera.eye;
     // Screen pixels per world unit at distance 1 (|proj.m5| carries the
     // vulkan y-flip, hence the fabs).
-    f32 proj_scale = std::fabs(proj.m[5]) * static_cast<f32>(render_height_) * 0.5f;
-    f32 tau = VgeoError.get() > 0.0f ? VgeoError.get() : 1.0f;
-    vgeo_.AddToGraph(graph_, lit, depth, view_proj, planes, view.camera.eye, proj_scale, tau,
-                     frame_index_);
+    vf.proj_scale = std::fabs(proj.m[5]) * static_cast<f32>(render_height_) * 0.5f;
+    vf.proj_m00 = std::fabs(proj.m[0]);
+    vf.proj_m11 = std::fabs(proj.m[5]);
+    vf.error_pixels = VgeoError.get() > 0.0f ? VgeoError.get() : 1.0f;
+    // Reversed-z infinite far: proj m[14] is the near plane distance.
+    vf.near_plane = proj.m[14] > 0.0f ? proj.m[14] : 0.1f;
+    vf.color = lit;
+    vf.depth = depth;
+    vf.width = render_width_;
+    vf.height = render_height_;
+    vf.debug = static_cast<u32>(std::max(VgeoDebug.get(), 0));
+    vf.slot = frame_index_;
+    vgeo_.AddToGraph(*device_, graph_, vf);
   }
 
   if (settings_.debug_view == DebugView::kBounds) {

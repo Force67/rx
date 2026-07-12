@@ -280,6 +280,9 @@ class RX_RENDER_EXPORT Renderer {
   // Builds the cluster-DAG LOD hierarchy and activates the virtual-geometry
   // demo pass (--demo vgeo).
   void UploadVirtualGeometryMesh(const asset::Mesh& mesh);
+  // World transforms the virtual-geometry mesh draws with (default: one
+  // identity instance). The gpu culls every cluster of every instance.
+  void SetVirtualGeometryInstances(std::span<const Mat4> transforms);
   // Seeds simulated hair strands on a head sphere (--demo strands).
   void SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 strands, f32 length);
   // Builds simulated guide strands from a real hair mesh and places the groom

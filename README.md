@@ -14,7 +14,9 @@ viewer runtime in place of the game.
   FSR3 / DLSS upscaling + FSR3 frame generation, hardware ray tracing (RT
   shadows/AO/reflections, DDGI, ReSTIR DI), a reference path tracer, NRD
   denoising, screen-space SSS, strand hair, virtual textures, virtual geometry
-  (cluster DAG), froxel volumetrics, local shadow atlas, decals, lit
+  (cluster-DAG LOD, gpu-driven two-pass hi-z occlusion culling, 64-bit
+  visibility buffer with compute + mesh-shader rasterization, instancing),
+  froxel volumetrics, local shadow atlas, decals, lit
   translucency, FFT ocean, gaussian splats, GPU particles, HDR10 output,
   dynamic resolution, texture streaming, async compute, VRS, meshlet path.
 - **engine/asset** - glTF loading (cgltf) including morph targets and weight
