@@ -102,4 +102,10 @@
 #  define RX_APP_EXPORT RX_DSO_IMPORT
 #endif
 
+#if defined(RX_EDIT_IMPLEMENTATION)
+#  define RX_EDIT_EXPORT RX_DSO_EXPORT
+#else
+#  define RX_EDIT_EXPORT RX_DSO_IMPORT
+#endif
+
 #endif  // RX_CORE_EXPORT_H_

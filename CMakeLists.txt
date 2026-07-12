@@ -215,6 +215,7 @@ if(NOT DEFINED RX_MODULES)
     ecs
     asset
     scene
+    edit
     render
     physics
     anim
@@ -302,6 +303,14 @@ if(RX_BUILD_TESTS)
   add_executable(vfs_test test/vfs_test.cc)
   target_link_libraries(vfs_test PRIVATE rx::asset rx::core)
   add_test(NAME vfs_test COMMAND vfs_test)
+endif()
+
+# Editor foundations test: reflection, scene round-trip, undo/redo and hierarchy
+# composition. Fully headless (no GPU), so it always runs under plain ctest.
+if(RX_BUILD_TESTS)
+  add_executable(edit_test test/edit_test.cc)
+  target_link_libraries(edit_test PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::core)
+  add_test(NAME edit_test COMMAND edit_test)
 endif()
 
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a
