@@ -15,6 +15,9 @@
 [[vk::binding(5, 0)]] StructuredBuffer<VgeoInstance> instances : register(t5, space0);
 [[vk::binding(6, 0)]] StructuredBuffer<uint2> visible : register(t6, space0);
 [[vk::binding(7, 0)]] StructuredBuffer<uint64_t> visbuffer : register(t7, space0);
+// Planar-projected albedo (uv = world.xz * hiz.w + 0.5; hiz.w = 0 disables).
+[[vk::combinedImageSampler]] [[vk::binding(8, 0)]] Texture2D albedo : register(t8, space0);
+[[vk::combinedImageSampler]] [[vk::binding(8, 0)]] SamplerState albedo_sampler : register(s8, space0);
 
 struct PsOut {
   float4 color : SV_Target0;
@@ -38,6 +41,7 @@ PsOut main(float4 pos : SV_Position) {
 
   uint packed = meshlet_triangles[m.triangle_offset + tri];
   float3 n[3];
+  float3 wp[3];
   float3 ndc[3];
   float inv_w[3];
   [unroll]
@@ -48,6 +52,7 @@ PsOut main(float4 pos : SV_Position) {
     float w = max(abs(clip.w), 1e-6) * sign(clip.w == 0.0 ? 1.0 : clip.w);
     inv_w[k] = 1.0 / w;
     ndc[k] = float3(clip.xy * inv_w[k], clip.z * inv_w[k]);
+    wp[k] = world.xyz;
     n[k] = mul((float3x3)inst.model, float3(mv.nx, mv.ny, mv.nz));
   }
 
@@ -72,6 +77,13 @@ PsOut main(float4 pos : SV_Position) {
     base = VgeoMeshletColor(m.lod * 7u + 3u);
   } else if (p.debug == 3) {
     base = sw ? float3(1.0, 0.45, 0.1) : float3(0.15, 0.5, 1.0);
+  } else if (p.hiz.w > 0.0) {
+    // Screen-space uv derivatives drive the mip pick; they go wrong only in
+    // the quads straddling a silhouette, where neighboring pixels belong to
+    // another surface.
+    float3 world = wp[0] * l.x + wp[1] * l.y + wp[2] * l.z;
+    float2 uv = world.xz * p.hiz.w + 0.5;
+    base = albedo.Sample(albedo_sampler, uv).rgb;
   } else {
     base = VgeoMeshletColor(entry.x);
   }

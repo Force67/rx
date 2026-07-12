@@ -950,6 +950,11 @@ void Renderer::SetVirtualGeometryInstances(std::span<const Mat4> transforms) {
   vgeo_.SetInstances(transforms);
 }
 
+void Renderer::SetVirtualGeometryAlbedo(ByteSpan rgba_mips, u32 size, f32 world_to_uv) {
+  if (!device_ || device_->is_stub()) return;
+  vgeo_.SetAlbedo(*device_, rgba_mips, size, world_to_uv);
+}
+
 void Renderer::SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 strands,
                                f32 length) {
   if (!device_ || device_->is_stub()) return;

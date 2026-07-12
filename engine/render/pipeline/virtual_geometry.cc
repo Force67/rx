@@ -176,7 +176,8 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
                 .format = depth_format},
       .color_formats = {color_format},
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
-                          storage(5), storage(6), storage(7)},
+                          storage(5), storage(6), storage(7),
+                          {8, BindingType::kCombinedTextureSampler}},
                 .stages = kShaderStageFragment}},
       .debug_name = "vgeo_resolve",
   });
@@ -201,6 +202,12 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
     readback_[i] = device.CreateBuffer(kCounterSlots * sizeof(u32),
                                        kBufferUsageTransferDst, true);
   }
+
+  SamplerDesc albedo_sampler_desc{};
+  if (device.caps().max_anisotropy > 1.0f) {
+    albedo_sampler_desc.max_anisotropy = std::min(16.0f, device.caps().max_anisotropy);
+  }
+  albedo_sampler_ = device.GetSampler(albedo_sampler_desc);
 
   // 1x1 fallback so the cull's hi-z descriptor is always valid; bound (with
   // occlusion disabled through the params) on frames without a real hi-z.
@@ -233,6 +240,8 @@ void VirtualGeometryPass::Destroy(Device& device) {
   }
   if (dummy_hiz_) device.DestroyImage(dummy_hiz_);
   dummy_hiz_ = {};
+  if (albedo_) device.DestroyImage(albedo_);
+  albedo_ = {};
   for (GpuImage& img : hiz_img_) {
     if (img) device.DestroyImage(img);
     img = {};
@@ -529,6 +538,34 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
            gpu_driven_ ? "gpu-driven" : "single-pass");
 }
 
+void VirtualGeometryPass::SetAlbedo(Device& device, ByteSpan rgba_mips, u32 size,
+                                    f32 world_to_uv) {
+  if (!gpu_driven_ || size == 0) return;
+  u32 mips = 1;
+  while ((size >> mips) > 0) ++mips;
+  if (albedo_) device.DestroyImage(albedo_);
+  albedo_ = device.CreateImage2D(Format::kRGBA8Srgb, {size, size},
+                                 kTextureUsageSampled | kTextureUsageTransferDst, mips);
+  if (!albedo_) return;
+  GpuBuffer staging = device.CreateBufferWithData(rgba_mips, kBufferUsageTransferSrc);
+  device.ImmediateSubmit([&](CommandList& cmd) {
+    cmd.Barrier(Transition(albedo_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    base::Vector<BufferTextureCopy> regions;
+    u64 offset = 0;
+    u32 extent = size;
+    for (u32 mip = 0; mip < mips; ++mip) {
+      regions.push_back({.buffer_offset = offset, .mip = mip, .extent = {extent, extent}});
+      offset += u64(extent) * extent * 4;
+      extent = std::max(1u, extent / 2);
+    }
+    cmd.CopyBufferToTexture(staging, albedo_, {regions.data(), regions.size()});
+    cmd.Barrier(Transition(albedo_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+  });
+  device.DestroyBuffer(staging);
+  world_to_uv_ = world_to_uv;
+  RX_INFO("vgeo albedo: {}x{}, {} mips", size, size, mips);
+}
+
 void VirtualGeometryPass::SetInstances(std::span<const Mat4> transforms) {
   pending_instances_.clear();
   for (const Mat4& m : transforms) {
@@ -631,6 +668,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
     p.hiz[0] = static_cast<f32>(hiz_w);
     p.hiz[1] = static_cast<f32>(hiz_h);
     p.hiz[2] = frame.near_plane;
+    p.hiz[3] = albedo_ ? world_to_uv_ : 0.0f;
     p.cluster_count = meshlet_count_;
     p.instance_count = instance_count_;
     p.width = frame.width;
@@ -828,7 +866,8 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
                 Bind::StorageBuffer(2, meshlet_vertices_),
                 Bind::StorageBuffer(3, meshlet_triangles_), Bind::StorageBuffer(4, vertices_),
                 Bind::StorageBuffer(5, instances_[slot]), Bind::StorageBuffer(6, visible_),
-                Bind::StorageBuffer(7, visbuffer_)});
+                Bind::StorageBuffer(7, visbuffer_),
+                Bind::Combined(8, albedo_ ? albedo_.view : dummy_hiz_.view, albedo_sampler_)});
         ctx.cmd->Draw(3, 1, 0, 0);
         ctx.cmd->EndRendering();
       });
