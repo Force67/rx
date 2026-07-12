@@ -22,6 +22,14 @@ namespace rx::anim {
 // eyes and brows lead a new expression and the mouth and jaw settle in a beat
 // behind them, the way real faces move.
 //
+// An always-on life layer keeps a held expression from going dead: periodic
+// blinks at randomized intervals (fast close, slower open, occasional double
+// blink) and low-amplitude smoothed noise on the brows. Blinks composite over
+// the expression with max(), so a pose that already holds the eyes closed
+// absorbs them, and the micro-motion fades out as the expression takes over
+// its channels. The layer is seedable and the whole controller is
+// deterministic for a fixed seed and dt sequence.
+//
 // The controller is one producer of morph weights and does not know about
 // imported glTF weight tracks. When a mesh has an active imported animation
 // that track wins: drive the instance from the track and leave the controller
@@ -50,6 +58,20 @@ class RX_ANIM_EXPORT ExpressionController {
     f32 delay = 0;        // seconds
   };
 
+  // Life-layer tuning. Blinks drive eyeBlinkLeft/Right; micro-motion rides
+  // the brow channels.
+  struct LifeConfig {
+    bool enabled = true;
+    f32 blink_interval_min = 2.0f;  // seconds between blinks
+    f32 blink_interval_max = 6.0f;
+    f32 double_blink_chance = 0.25f;  // immediate second blink
+    f32 blink_close = 0.07f;          // lid close time (fast)
+    f32 blink_hold = 0.04f;
+    f32 blink_open = 0.17f;  // lid open time (slower)
+    f32 micro_amplitude = 0.03f;
+    f32 micro_hz = 0.5f;  // brow noise knot frequency
+  };
+
   ExpressionController();
 
   // Pose library. AddPose replaces a same-named pose and creates channels for
@@ -75,10 +97,16 @@ class RX_ANIM_EXPORT ExpressionController {
   bool SetExpression(u64 pose_hash, f32 transition_time = 0);
   u64 expression() const { return active_pose_; }
 
+  // Reseeds the life layer and restarts its timers (deterministic replays).
+  void set_seed(u64 seed);
+  void set_life(const LifeConfig& config) { life_ = config; }
+  const LifeConfig& life() const { return life_; }
+
   void Update(f32 dt);
 
-  // Smoothed output, one channel per target the pose library ever mentioned.
-  // Targets are MakeAssetId(name).hash; weights are clamped to [0, 1].
+  // Smoothed output, one channel per target the pose library ever mentioned
+  // (plus the life layer's blink/brow channels). Targets are
+  // MakeAssetId(name).hash; weights are composited and clamped to [0, 1].
   u32 channel_count() const { return static_cast<u32>(channels_.size()); }
   u64 channel_target(u32 index) const { return channels_[index].target; }
   f32 channel_weight(u32 index) const { return channels_[index].out; }
@@ -97,20 +125,35 @@ class RX_ANIM_EXPORT ExpressionController {
     f32 base_halflife = 0.1f;
     f32 base_delay = 0;
     f32 out = 0;
+    i32 micro = -1;  // life-layer noise lane, -1 = none
+    bool blink = false;
   };
   struct Pose {
     u64 name_hash = 0;
     base::Vector<u32> channel;
     base::Vector<f32> weight;
   };
+  enum class BlinkPhase : u8 { kWait, kClose, kHold, kOpen };
 
   u32 EnsureChannel(std::string_view name);
+  void UpdateBlink(f32 dt);
+  f32 NextRand01();
 
   base::Vector<Region> regions_;
   base::Vector<Channel> channels_;
   base::Vector<Pose> poses_;
   base::Vector<f32> scratch_;
   u64 active_pose_ = 0;
+
+  LifeConfig life_;
+  u64 seed_ = 0;
+  u64 rng_ = 0;
+  f32 life_time_ = 0;
+  BlinkPhase blink_phase_ = BlinkPhase::kWait;
+  f32 blink_t_ = 0;
+  f32 blink_wait_ = 0;
+  f32 blink_env_ = 0;
+  bool blink_double_ = false;  // current wait is the gap of a double blink
 };
 
 }  // namespace rx::anim
