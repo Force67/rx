@@ -55,7 +55,9 @@ class TileMap {
   f32 tile_size = 16.0f;
   base::Vector<TileLayer> layers;
 
-  // Appends a layer (all tiles empty) and returns it by reference.
+  // Appends a layer (all tiles empty) and returns it by reference. The returned
+  // reference is valid only until the next AddLayer (the layer vector may
+  // reallocate); to keep editing an older layer, index `layers` instead.
   TileLayer& AddLayer(u32 w, u32 h, f32 depth, f32 parallax = 1.0f, bool collision = false);
 
   Vec2i WorldToTile(Vec2 world) const;
