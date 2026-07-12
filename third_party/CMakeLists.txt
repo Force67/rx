@@ -76,6 +76,12 @@ if(RX_JOLT)
   # the dynamic one (/MD, CMake's default), so linking the engine against Jolt
   # otherwise trips LNK2038/LNK2005 runtime-library mismatches. Keep Jolt on /MD.
   set(USE_STATIC_MSVC_RUNTIME_LIBRARY OFF CACHE BOOL "" FORCE)
+  # 5.6's compute backends (for Jolt's own GPU hair) drag in a shader
+  # toolchain; the engine uses CPU soft bodies and renders hair itself.
+  set(JPH_USE_DX12 OFF CACHE BOOL "" FORCE)
+  set(JPH_USE_VK OFF CACHE BOOL "" FORCE)
+  set(JPH_USE_MTL OFF CACHE BOOL "" FORCE)
+  set(JPH_USE_CPU_COMPUTE OFF CACHE BOOL "" FORCE)
   add_subdirectory(JoltPhysics/Build jolt EXCLUDE_FROM_ALL)
   # This Jolt revision's Core.h leans on <type_traits> arriving transitively,
   # which holds under libstdc++ but not libc++ (only some traits leak through) on
