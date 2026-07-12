@@ -281,6 +281,15 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   endif()
 endif()
 
+# Strand-hair simulation: builds the braid + ponytail test grooms, steps the
+# Jolt soft-body strand sim under a static and a moving head transform, and
+# asserts pins, cross-strand binds and head collision hold. Headless, no GPU.
+if(RX_BUILD_TESTS AND RX_JOLT)
+  add_executable(hair_sim_test test/hair_sim_test.cc)
+  target_link_libraries(hair_sim_test PRIVATE rx::render rx::physics rx::core)
+  add_test(NAME hair_sim_test COMMAND hair_sim_test)
+endif()
+
 # install()/export rules, generated last so every module target (and the
 # RX_INSTALL_* feature flags the modules set) already exists.
 if(RX_INSTALL)
