@@ -244,7 +244,6 @@ set(RX_RENDER_SHADERS
   shaders/gi/restir_di_temporal.cs.hlsl
   shaders/gi/restir_di_spatial.cs.hlsl
   shaders/pipeline/vgeo.ms.hlsl
-  shaders/geometry/hair_sim.cs.hlsl
   shaders/geometry/hair.vs.hlsl
   shaders/geometry/hair.ps.hlsl
   shaders/geometry/ocean_spectrum.cs.hlsl

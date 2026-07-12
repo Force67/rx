@@ -40,13 +40,34 @@ struct GroomParams {
   bool recenter = true;
 };
 
+// Per-style simulation feel, carried by the groom data and handed to the
+// physics strand sim (physics::PhysicsWorld::StrandGroomDesc mirrors these
+// fields; compliance is inverse stiffness, 0 = rigid).
+struct GroomSimParams {
+  f32 stretch_compliance = 0;
+  f32 bend_compliance = 0.02f;
+  f32 bind_compliance = 1e-5f;
+  f32 damping = 0.15f;
+  f32 gravity_factor = 1.0f;
+  f32 node_mass = 0.02f;
+  f32 node_radius = 0.0015f;
+  f32 max_stretch = 1.03f;
+  u32 iterations = 5;
+};
+
 // A CPU-built groom in a groom-local frame: engine units, Y-up, recentred so the
 // scalp sits at the local origin. A root transform drops it onto a head bone;
-// `collision_*` is that head sphere in the same local frame.
+// `collision_*` is that head sphere in the same local frame. Hairstyles are
+// data: `pins` fixes extra mid-strand nodes in the groom frame (a ponytail
+// tie, bun pinning), `binds` weaves nodes of different strands together
+// (braids, dreadlocks), `sim` sets the per-style feel.
 struct GroomData {
   base::Vector<f32> points;  // guide_count * kGroomPointsPerStrand * 3 (xyz)
   base::Vector<f32> roots;   // guide_count * 3 (local root pos, for sim reset)
   base::Vector<f32> colors;  // guide_count * 3 (linear rgb)
+  base::Vector<u32> pins;    // (strand, point) pairs pinned to the groom frame
+  base::Vector<u32> binds;   // (strand_a, point_a, strand_b, point_b) ties
+  GroomSimParams sim;
   u32 guide_count = 0;
   Vec3 collision_center{0, 0, 0};
   f32 collision_radius = 0;
@@ -57,6 +78,13 @@ struct GroomData {
 // Traces guide strands along the hair cards. Returns false when the mesh has no
 // usable geometry.
 bool BuildHairGroom(const asset::Mesh& hair_mesh, const GroomParams& params, GroomData* out);
+
+// Procedural hairstyle grooms exercising the full style data model: loose
+// long hair (roots only), a three-bundle braid woven with cross-strand binds,
+// and a ponytail whose strands are pinned mid-strand at a gather point. Used
+// by the strands demo and the strand-sim regression test.
+enum class TestGroomStyle { kLoose, kBraid, kPonytail };
+bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* out);
 
 }  // namespace rx::render
 

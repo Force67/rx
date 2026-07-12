@@ -279,7 +279,13 @@ class RX_RENDER_EXPORT Renderer {
   // groom-local frame has the scalp at the origin, engine units, Y-up.
   u32 CreateHairGroom(const asset::Mesh& hair_mesh, const GroomParams& params,
                       const Mat4& transform);
+  // Same, from an already-built groom (procedural test grooms, callers that
+  // also feed the groom data to the physics strand sim).
+  u32 CreateHairGroom(const GroomData& data, const GroomParams& params, const Mat4& transform);
   void SetHairGroomTransform(u32 id, const Mat4& transform);
+  // This frame's simulated node positions (world xyz, strand-major), read
+  // back from the physics strand groom; see app::HairStrandBinding.
+  void SetHairGroomPoints(u32 id, const f32* positions, u32 count);
   void SetHairGroomTint(u32 id, const Vec3& tint);
   void DestroyHairGroom(u32 id);
   // World-space head collision sphere of a groom, for aligning a head mesh.

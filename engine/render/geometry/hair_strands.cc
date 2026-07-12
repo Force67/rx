@@ -1,35 +1,16 @@
 #include "render/geometry/hair_strands.h"
 
 #include <cmath>
+#include <cstring>
 
 #include "core/log.h"
 #include "shaders/hair_ps_hlsl.h"
-#include "shaders/hair_sim_cs_hlsl.h"
 #include "shaders/hair_vs_hlsl.h"
 
 namespace rx::render {
 namespace {
 
 constexpr u32 kPointsPerStrand = kGroomPointsPerStrand;
-
-struct HairPoint {
-  f32 pos[4];   // xyz, w inv_mass
-  f32 prev[4];  // xyz previous, w rest length
-};
-
-struct SimPush {
-  Mat4 model;
-  f32 head[4];  // xyz local center, w radius
-  f32 wind[4];
-  u32 strand_count;
-  u32 points_per_strand;
-  f32 dt;
-  f32 damping;
-  f32 root_stiff;
-  f32 tip_stiff;
-  f32 gravity;
-  f32 pad;
-};
 
 struct DrawPush {
   Mat4 view_proj;
@@ -43,15 +24,11 @@ ByteSpan Span(const void* data, size_t bytes) {
   return ByteSpan(static_cast<const u8*>(data), bytes);
 }
 
+constexpr u32 kAllSlotsStale = (1u << HairStrands::kFramesInFlight) - 1;
+
 }  // namespace
 
 bool HairStrands::Initialize(Device& device, Format color_format, Format depth_format) {
-  sim_pipeline_ = device.CreateComputePipeline({
-      .shader = RX_SHADER(k_hair_sim_cs_hlsl),
-      .sets = {{.slots = {{0, BindingType::kStorageBuffer}, {1, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(SimPush),
-      .debug_name = "hair_sim",
-  });
   draw_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_hair_vs_hlsl),
       .fragment = RX_SHADER(k_hair_ps_hlsl),
@@ -64,7 +41,7 @@ bool HairStrands::Initialize(Device& device, Format color_format, Format depth_f
       .push_constant_size = sizeof(DrawPush),
       .debug_name = "hair_draw",
   });
-  if (!sim_pipeline_ || !draw_pipeline_) {
+  if (!draw_pipeline_) {
     RX_ERROR("hair pipeline creation failed");
     return false;
   }
@@ -72,12 +49,14 @@ bool HairStrands::Initialize(Device& device, Format color_format, Format depth_f
 }
 
 void HairStrands::Destroy(Device& device) {
-  for (PipelineHandle* p : {&sim_pipeline_, &draw_pipeline_}) {
-    if (*p) device.DestroyPipeline(*p);
-    *p = {};
-  }
+  if (draw_pipeline_) device.DestroyPipeline(draw_pipeline_);
+  draw_pipeline_ = {};
   for (Groom& g : grooms_) {
-    for (GpuBuffer* b : {&g.points, &g.rest, &g.colors, &g.indices}) {
+    for (u32 i = 0; i < kFramesInFlight; ++i) {
+      if (g.points[i]) device.DestroyBuffer(g.points[i]);
+      g.points[i] = {};
+    }
+    for (GpuBuffer* b : {&g.colors, &g.indices}) {
       if (*b) device.DestroyBuffer(*b);
       *b = {};
     }
@@ -108,33 +87,25 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
   const u32 n = data.guide_count;
   const u32 children = params.children_per_guide == 0 ? 1 : params.children_per_guide;
 
-  base::Vector<HairPoint> host_points;
-  host_points.resize(static_cast<size_t>(n) * kPointsPerStrand);
-  base::Vector<f32> host_rest;
-  host_rest.resize(static_cast<size_t>(n) * kPointsPerStrand * 4);
+  Groom g;
+  g.host_points.resize(static_cast<size_t>(n) * kPointsPerStrand);
   base::Vector<f32> host_colors;
   host_colors.resize(static_cast<size_t>(n) * 4);
 
   for (u32 s = 0; s < n; ++s) {
-    Vec3 prev_world{};
     for (u32 k = 0; k < kPointsPerStrand; ++k) {
       size_t li = (static_cast<size_t>(s) * kPointsPerStrand + k);
       const f32* lp = &data.points[li * 3];
       Vec3 world = TransformPoint(transform, Vec3{lp[0], lp[1], lp[2]});
-      HairPoint& hp = host_points[li];
+      HairPoint& hp = g.host_points[li];
       hp.pos[0] = world.x;
       hp.pos[1] = world.y;
       hp.pos[2] = world.z;
-      hp.pos[3] = k == 0 ? 0.0f : 1.0f;  // root pinned
+      hp.pos[3] = 0.0f;
       hp.prev[0] = world.x;
       hp.prev[1] = world.y;
       hp.prev[2] = world.z;
-      hp.prev[3] = k == 0 ? 0.0f : Length(world - prev_world);  // rest length
-      prev_world = world;
-      host_rest[li * 4 + 0] = lp[0];  // local rest pose for the stiffness spring
-      host_rest[li * 4 + 1] = lp[1];
-      host_rest[li * 4 + 2] = lp[2];
-      host_rest[li * 4 + 3] = 0.0f;
+      hp.prev[3] = 0.0f;
     }
     host_colors[s * 4 + 0] = data.colors[s * 3 + 0];
     host_colors[s * 4 + 1] = data.colors[s * 3 + 1];
@@ -155,11 +126,19 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
     }
   }
 
-  Groom g;
-  g.points = device.CreateBufferWithData(
-      Span(host_points.data(), host_points.size() * sizeof(HairPoint)), kBufferUsageStorage);
-  g.rest = device.CreateBufferWithData(
-      Span(host_rest.data(), host_rest.size() * sizeof(f32)), kBufferUsageStorage);
+  // Host-visible per-frame ring: the CPU simulation feed rewrites a slot only
+  // when SetGroomPoints marked it stale, so an unfed groom costs no copies.
+  const u64 points_bytes = g.host_points.size() * sizeof(HairPoint);
+  for (u32 i = 0; i < kFramesInFlight; ++i) {
+    g.points[i] = device.CreateBuffer(points_bytes, kBufferUsageStorage, true);
+    if (!g.points[i].mapped) {
+      for (u32 j = 0; j <= i; ++j) {
+        if (g.points[j]) device.DestroyBuffer(g.points[j]);
+      }
+      return 0;
+    }
+    std::memcpy(g.points[i].mapped, g.host_points.data(), points_bytes);
+  }
   g.colors = device.CreateBufferWithData(
       Span(host_colors.data(), host_colors.size() * sizeof(f32)), kBufferUsageStorage);
   g.indices = device.CreateBufferWithData(Span(idx.data(), idx.size() * sizeof(u32)),
@@ -175,10 +154,10 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
   g.tint = params.tint;
   g.id = next_id_++;
   g.alive = true;
-  grooms_.push_back(g);
-  RX_INFO("hair: groom {} uploaded, {} guides x{} children, {} ribbon tris", g.id, n, children,
-           g.index_count / 3);
-  return g.id;
+  grooms_.push_back(std::move(g));
+  RX_INFO("hair: groom {} uploaded, {} guides x{} children, {} ribbon tris", grooms_.back().id, n,
+           children, grooms_.back().index_count / 3);
+  return grooms_.back().id;
 }
 
 u32 HairStrands::CreateGroom(Device& device, const GroomData& data, const GroomParams& params,
@@ -194,6 +173,23 @@ void HairStrands::SetGroomTint(u32 id, const Vec3& tint) {
   if (Groom* g = Find(id)) g->tint = tint;
 }
 
+void HairStrands::SetGroomPoints(u32 id, const f32* positions, u32 count) {
+  Groom* g = Find(id);
+  if (!g || !positions) return;
+  const size_t nodes =
+      std::min<size_t>(static_cast<size_t>(count) / 3, g->host_points.size());
+  for (size_t i = 0; i < nodes; ++i) {
+    HairPoint& hp = g->host_points[i];
+    hp.prev[0] = hp.pos[0];
+    hp.prev[1] = hp.pos[1];
+    hp.prev[2] = hp.pos[2];
+    hp.pos[0] = positions[i * 3 + 0];
+    hp.pos[1] = positions[i * 3 + 1];
+    hp.pos[2] = positions[i * 3 + 2];
+  }
+  g->stale = kAllSlotsStale;
+}
+
 bool HairStrands::GroomHead(u32 id, Vec3* center, f32* radius) {
   Groom* g = Find(id);
   if (!g) return false;
@@ -205,7 +201,11 @@ bool HairStrands::GroomHead(u32 id, Vec3* center, f32* radius) {
 void HairStrands::DestroyGroom(Device& device, u32 id) {
   Groom* g = Find(id);
   if (!g) return;
-  for (GpuBuffer* b : {&g->points, &g->rest, &g->colors, &g->indices}) {
+  for (u32 i = 0; i < kFramesInFlight; ++i) {
+    if (g->points[i]) device.DestroyBuffer(g->points[i]);
+    g->points[i] = {};
+  }
+  for (GpuBuffer* b : {&g->colors, &g->indices}) {
     if (*b) device.DestroyBuffer(*b);
     *b = {};
   }
@@ -215,7 +215,7 @@ void HairStrands::DestroyGroom(Device& device, u32 id) {
 void HairStrands::SeedCap(Device& device, const Vec3& head_center, f32 head_radius,
                           u32 strand_count, f32 strand_length) {
   // Fibonacci-distributed roots over the upper hemisphere, in a groom-local
-  // frame (scalp at origin); the sim relaxes them under gravity.
+  // frame (scalp at origin); a simulation feed relaxes them under gravity.
   GroomData data;
   data.guide_count = strand_count;
   data.points.reserve(static_cast<size_t>(strand_count) * kPointsPerStrand * 3);
@@ -257,39 +257,19 @@ void HairStrands::SeedCap(Device& device, const Vec3& head_center, f32 head_radi
 }
 
 void HairStrands::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
-                             Extent2D extent, const Frame& frame) {
+                             Extent2D extent, const Frame& frame, u32 frame_slot) {
   if (!active()) return;
 
-  graph.AddPass(
-      "hair_sim", [](RenderGraph::PassBuilder&) {},
-      [this, frame](PassContext& ctx) {
-        ctx.cmd->BindPipeline(sim_pipeline_);
-        for (Groom& g : grooms_) {
-          if (!g.alive) continue;
-          SimPush push{};
-          push.model = g.transform;
-          push.head[0] = g.collision_center.x;
-          push.head[1] = g.collision_center.y;
-          push.head[2] = g.collision_center.z;
-          push.head[3] = g.collision_radius;
-          push.wind[0] = frame.wind[0];
-          push.wind[1] = frame.wind[1];
-          push.wind[2] = frame.wind[2];
-          push.wind[3] = frame.time;
-          push.strand_count = g.guide_count;
-          push.points_per_strand = kPointsPerStrand;
-          push.dt = frame.delta_seconds;
-          push.damping = 0.96f;
-          push.root_stiff = 0.9f;   // near-rigid at the scalp: holds the groom
-          push.tip_stiff = 0.25f;   // loose at the tip: sways with wind/motion
-          push.gravity = 0.35f;     // gentle sag on top of the groomed shape
-          ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, g.points, 0, g.points.size),
-                                     Bind::StorageBuffer(1, g.rest, 0, g.rest.size)});
-          ctx.cmd->Push(push);
-          ctx.cmd->Dispatch((g.guide_count + 63) / 64, 1, 1);
-        }
-        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
-      });
+  // Publish this frame's simulated positions into the slot's buffer before
+  // the graph executes (host-visible memory, no GPU copy).
+  const u32 slot = frame_slot % kFramesInFlight;
+  const u32 slot_bit = 1u << slot;
+  for (Groom& g : grooms_) {
+    if (!g.alive || !(g.stale & slot_bit)) continue;
+    std::memcpy(g.points[slot].mapped, g.host_points.data(),
+                g.host_points.size() * sizeof(HairPoint));
+    g.stale &= ~slot_bit;
+  }
 
   graph.AddPass(
       "hair_draw",
@@ -297,7 +277,7 @@ void HairStrands::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
         b.Write(color, ResourceUsage::kColorAttachment);
         b.Write(depth, ResourceUsage::kDepthAttachment);
       },
-      [this, color, depth, extent, frame](PassContext& ctx) {
+      [this, color, depth, extent, frame, slot](PassContext& ctx) {
         ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
         DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = extent, .colors = {&att, 1}, .depth = &depth_att});
@@ -323,8 +303,9 @@ void HairStrands::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
           push.tint[1] = g.tint.y;
           push.tint[2] = g.tint.z;
           push.tint[3] = static_cast<f32>(g.children);
-          ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, g.points, 0, g.points.size),
-                                     Bind::StorageBuffer(1, g.colors, 0, g.colors.size)});
+          ctx.cmd->BindTransient(
+              0, {Bind::StorageBuffer(0, g.points[slot], 0, g.points[slot].size),
+                  Bind::StorageBuffer(1, g.colors, 0, g.colors.size)});
           ctx.cmd->Push(push);
           ctx.cmd->BindIndexBuffer(g.indices, 0, IndexType::kUint32);
           ctx.cmd->DrawIndexed(g.index_count, 1, 0, 0, 0);

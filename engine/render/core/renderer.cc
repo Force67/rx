@@ -961,8 +961,18 @@ u32 Renderer::CreateHairGroom(const asset::Mesh& hair_mesh, const GroomParams& p
   return hair_.CreateGroom(*device_, data, params, transform);
 }
 
+u32 Renderer::CreateHairGroom(const GroomData& data, const GroomParams& params,
+                              const Mat4& transform) {
+  if (!device_ || device_->is_stub()) return 0;
+  return hair_.CreateGroom(*device_, data, params, transform);
+}
+
 void Renderer::SetHairGroomTransform(u32 id, const Mat4& transform) {
   hair_.SetGroomTransform(id, transform);
+}
+
+void Renderer::SetHairGroomPoints(u32 id, const f32* positions, u32 count) {
+  hair_.SetGroomPoints(id, positions, count);
 }
 
 void Renderer::SetHairGroomTint(u32 id, const Vec3& tint) { hair_.SetGroomTint(id, tint); }
@@ -3379,17 +3389,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     imposters_.AddToGraph(graph_, lit, depth, {render_width_, render_height_}, imf);
   }
 
-  // Strand hair: verlet sim + ribbon draw over the lit scene with depth.
+  // Strand hair: ribbon draw over the lit scene with depth, node positions
+  // fed by the physics strand sim through SetHairGroomPoints.
   if (hair_.active()) {
     HairStrands::Frame hf;
     hf.view_proj = view_proj;
     hf.camera_pos = view.camera.eye;
-    hf.delta_seconds = view.frame_delta_seconds;
     hf.sun_direction = applied_sun_direction_;
     hf.sun_intensity = applied_sun_intensity_;
     hf.sun_color = applied_sun_color_;
-    hf.time = static_cast<f32>(time_seconds_);
-    hair_.AddToGraph(graph_, lit, depth, {render_width_, render_height_}, hf);
+    hair_.AddToGraph(graph_, lit, depth, {render_width_, render_height_}, hf, frame_slot);
   }
 
   // Virtual geometry: cluster-DAG LOD cut + cull + draw, all on the gpu.

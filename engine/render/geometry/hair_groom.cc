@@ -586,4 +586,192 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
   return true;
 }
 
+bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* out) {
+  if (guide_count == 0) return false;
+  const u32 P = kGroomPointsPerStrand;
+  const f32 head_r = 0.085f;
+
+  u32 rng = seed * 2654435761u + 1u;
+  auto randf = [&]() {
+    rng = rng * 1664525u + 1013904223u;
+    return static_cast<f32>(rng >> 8) / 16777216.0f;
+  };
+  auto push_point = [&](const Vec3& p) {
+    out->points.push_back(p.x);
+    out->points.push_back(p.y);
+    out->points.push_back(p.z);
+  };
+  auto push_root = [&](const Vec3& p) {
+    out->roots.push_back(p.x);
+    out->roots.push_back(p.y);
+    out->roots.push_back(p.z);
+  };
+  auto push_color = [&](const Vec3& base) {
+    f32 v = 0.85f + 0.3f * randf();
+    out->colors.push_back(base.x * v);
+    out->colors.push_back(base.y * v);
+    out->colors.push_back(base.z * v);
+  };
+  // Fibonacci-distributed root normal over the upper hemisphere.
+  auto cap_normal = [&](u32 s, u32 count) {
+    f32 t = (static_cast<f32>(s) + 0.5f) / count;
+    f32 y = 0.35f + 0.6f * t;
+    f32 r = std::sqrt(std::max(0.0f, 1.0f - y * y));
+    f32 a = 2.399963f * static_cast<f32>(s);
+    return Vec3{r * std::cos(a), y, r * std::sin(a)};
+  };
+
+  out->points.reserve(static_cast<size_t>(guide_count) * P * 3);
+  out->roots.reserve(static_cast<size_t>(guide_count) * 3);
+  out->colors.reserve(static_cast<size_t>(guide_count) * 3);
+  f64 length_sum = 0;
+
+  switch (style) {
+    case TestGroomStyle::kLoose: {
+      // Long free hair: roots over the cap, groomed outward then hanging, no
+      // constraints beyond the pinned roots; soft feel.
+      for (u32 s = 0; s < guide_count; ++s) {
+        Vec3 nrm = cap_normal(s, guide_count);
+        Vec3 root = nrm * head_r;
+        f32 len = 0.38f + 0.08f * randf();
+        f32 segment = len / (P - 1);
+        Vec3 p = root, prev = root;
+        push_root(root);
+        for (u32 k = 0; k < P; ++k) {
+          if (k > 0) {
+            f32 t = static_cast<f32>(k) / (P - 1);
+            Vec3 dir = Normalize(Lerp(nrm, {0, -1, 0}, std::pow(t, 0.7f)));
+            p = p + dir * segment;
+            length_sum += Length(p - prev);
+            prev = p;
+          }
+          push_point(p);
+        }
+        push_color({0.50f, 0.36f, 0.24f});
+      }
+      out->sim.bend_compliance = 0.05f;
+      out->sim.damping = 0.1f;
+      break;
+    }
+    case TestGroomStyle::kBraid: {
+      // Three bundles woven down from the nape. The weave is pure data: every
+      // strand binds to the next strand of its bundle (bundle cohesion), the
+      // bundle leaders bind where their rest paths cross (the plait), and all
+      // three leaders bind at the tip (the elastic).
+      const u32 per_bundle = std::max(1u, guide_count / 3);
+      const u32 count = per_bundle * 3;
+      const Vec3 nape{0, -0.15f * head_r, -0.98f * head_r};
+      const f32 len = 0.34f;
+      const f32 amp = 0.014f;
+      base::Vector<Vec3> centers;  // bundle centerlines, 3 * P
+      centers.resize(static_cast<size_t>(3) * P);
+      for (u32 b = 0; b < 3; ++b) {
+        f32 phase = 2.0943951f * static_cast<f32>(b);  // 2*pi/3
+        for (u32 k = 0; k < P; ++k) {
+          f32 t = static_cast<f32>(k) / (P - 1);
+          f32 w = 18.849556f * t + phase;  // three full crossings down the braid
+          centers[b * P + k] = nape + Vec3{amp * std::sin(w), -len * t,
+                                           -0.02f * t - 0.5f * amp * std::cos(2.0f * w)};
+        }
+      }
+      for (u32 b = 0; b < 3; ++b) {
+        for (u32 i = 0; i < per_bundle; ++i) {
+          u32 s = b * per_bundle + i;
+          // Per-strand offset within the bundle, tapering to the tip.
+          f32 ang = randf() * 6.2831853f;
+          f32 rad = 0.004f * std::sqrt(randf());
+          Vec3 off{rad * std::cos(ang), 0, rad * std::sin(ang)};
+          Vec3 root = Normalize(centers[b * P] + off * 2.0f) * head_r;
+          push_root(root);
+          Vec3 prev{};
+          for (u32 k = 0; k < P; ++k) {
+            f32 t = static_cast<f32>(k) / (P - 1);
+            Vec3 p = k == 0 ? root : centers[b * P + k] + off * (1.0f - 0.6f * t);
+            if (k > 0) length_sum += Length(p - prev);
+            prev = p;
+            push_point(p);
+          }
+          push_color({0.28f, 0.18f, 0.10f});
+          // Bundle cohesion: tie to the next strand of the same bundle.
+          if (i + 1 < per_bundle) {
+            for (u32 k = 4; k < P; k += 4) {
+              out->binds.push_back(s);
+              out->binds.push_back(k);
+              out->binds.push_back(s + 1);
+              out->binds.push_back(k);
+            }
+          }
+        }
+      }
+      // The plait: bind bundle leaders where their rest centerlines cross,
+      // and all three at the tip.
+      for (u32 a = 0; a < 3; ++a) {
+        for (u32 b = a + 1; b < 3; ++b) {
+          for (u32 k = 2; k < P - 1; ++k) {
+            if (Length(centers[a * P + k] - centers[b * P + k]) < amp) {
+              out->binds.push_back(a * per_bundle);
+              out->binds.push_back(k);
+              out->binds.push_back(b * per_bundle);
+              out->binds.push_back(k);
+            }
+          }
+          out->binds.push_back(a * per_bundle);
+          out->binds.push_back(P - 1);
+          out->binds.push_back(b * per_bundle);
+          out->binds.push_back(P - 1);
+        }
+      }
+      out->guide_count = count;
+      out->sim.bend_compliance = 0.008f;
+      out->sim.bind_compliance = 1e-6f;
+      out->sim.damping = 0.25f;
+      break;
+    }
+    case TestGroomStyle::kPonytail: {
+      // Roots over the cap sweep back to a gather point where every strand is
+      // pinned mid-strand (the tie); the free tail hangs from there.
+      const u32 tie = 5;
+      const Vec3 gather{0, 0.2f * head_r, -1.25f * head_r};
+      for (u32 s = 0; s < guide_count; ++s) {
+        Vec3 nrm = cap_normal(s, guide_count);
+        Vec3 root = nrm * head_r;
+        // Small spread at the tie so the tail keeps volume.
+        f32 ang = randf() * 6.2831853f;
+        f32 rad = 0.006f * std::sqrt(randf());
+        Vec3 tie_off{rad * std::cos(ang), 0, rad * std::sin(ang)};
+        f32 tail_len = 0.30f + 0.05f * randf();
+        push_root(root);
+        Vec3 prev{};
+        for (u32 k = 0; k < P; ++k) {
+          Vec3 p;
+          if (k <= tie) {
+            // Sweep over the scalp to the gather point, held off the sphere.
+            f32 t = static_cast<f32>(k) / tie;
+            p = Lerp(root, gather + tie_off, t);
+            f32 d = Length(p);
+            if (d < head_r * 1.02f && d > 1e-6f) p = p * (head_r * 1.02f / d);
+          } else {
+            f32 t = static_cast<f32>(k - tie) / (P - 1 - tie);
+            p = gather + tie_off + Vec3{0, -tail_len * t, -0.02f * t};
+          }
+          if (k > 0) length_sum += Length(p - prev);
+          prev = p;
+          push_point(p);
+        }
+        out->pins.push_back(s);
+        out->pins.push_back(tie);
+        push_color({0.62f, 0.44f, 0.22f});
+      }
+      out->sim.bend_compliance = 0.03f;
+      break;
+    }
+  }
+
+  if (out->guide_count == 0) out->guide_count = guide_count;
+  out->collision_center = {0, 0, 0};
+  out->collision_radius = head_r * 1.02f;
+  out->mean_length = static_cast<f32>(length_sum / out->guide_count);
+  return true;
+}
+
 }  // namespace rx::render
