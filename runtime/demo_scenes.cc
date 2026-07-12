@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include <base/option.h>
@@ -849,17 +851,49 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
   // through the cluster-DAG LOD path. Clusters tint by id (meshlet.ps), so
   // the per-cluster LOD cut is directly visible: cluster density stays
   // roughly constant in screen space as the camera moves.
-  constexpr u32 kGrid = 640;
-  constexpr f32 kSize = 300.0f;
+  //
+  // RX_VGEO_HEIGHTMAP=<file.r32> swaps the analytic tile for a real-world DEM:
+  // a raw little-endian float32 height grid (meters), RX_VGEO_HM_SIZE samples
+  // per side (default 2048), RX_VGEO_HM_STEP meters between samples (default
+  // 30). 2048^2 is a ~8.4M-triangle source mesh.
+  u32 kGrid = 640;
+  f32 kSize = 300.0f;
+  std::vector<f32> dem;
+  f32 hm_step = 30.0f;
+  if (const char* hm = std::getenv("RX_VGEO_HEIGHTMAP")) {
+    u32 n = 2048;
+    if (const char* e = std::getenv("RX_VGEO_HM_SIZE")) n = std::max(2, std::atoi(e));
+    if (const char* e = std::getenv("RX_VGEO_HM_STEP")) hm_step = std::atof(e);
+    std::ifstream f(hm, std::ios::binary);
+    if (f) {
+      dem.resize(static_cast<size_t>(n) * n);
+      f.read(reinterpret_cast<char*>(dem.data()), dem.size() * sizeof(f32));
+      if (f.gcount() == static_cast<std::streamsize>(dem.size() * sizeof(f32))) {
+        kGrid = n - 1;
+        kSize = static_cast<f32>(n - 1) * hm_step;
+        RX_INFO("vgeo demo: heightmap {} ({}x{}, {:.1f} km)", hm, n, n, kSize / 1000.0f);
+      } else {
+        RX_ERROR("vgeo demo: heightmap {} short read, using analytic terrain", hm);
+        dem.clear();
+      }
+    } else {
+      RX_ERROR("vgeo demo: heightmap {} unreadable, using analytic terrain", hm);
+    }
+  }
   asset::Mesh terrain;
   terrain.id = asset::MakeAssetId("builtin/vgeo/terrain");
   terrain.lods.resize(1);
   asset::MeshLod& lod = terrain.lods[0];
   lod.vertices.reserve(static_cast<size_t>(kGrid + 1) * (kGrid + 1));
-  auto height = [](f32 x, f32 z) {
+  auto analytic = [](f32 x, f32 z) {
     return 3.0f * std::sin(x * 0.05f) * std::cos(z * 0.045f) +
            0.8f * std::sin(x * 0.31f + 1.7f) * std::sin(z * 0.27f) +
            0.15f * std::sin(x * 1.7f) * std::cos(z * 1.9f);
+  };
+  const u32 hm_n = kGrid + 1;
+  auto height = [&](f32 wx, f32 wz, u32 xi, u32 zi) {
+    if (dem.empty()) return analytic(wx, wz);
+    return dem[static_cast<size_t>(zi) * hm_n + xi];
   };
   for (u32 z = 0; z <= kGrid; ++z) {
     for (u32 x = 0; x <= kGrid; ++x) {
@@ -867,11 +901,13 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
       f32 wz = (static_cast<f32>(z) / kGrid - 0.5f) * kSize;
       asset::Vertex v{};
       v.position[0] = wx;
-      v.position[1] = height(wx, wz);
+      v.position[1] = height(wx, wz, x, z);
       v.position[2] = wz;
-      f32 e = 0.25f;
-      f32 hx = height(wx + e, wz) - height(wx - e, wz);
-      f32 hz = height(wx, wz + e) - height(wx, wz - e);
+      f32 e = dem.empty() ? 0.25f : hm_step;
+      u32 x0 = x > 0 ? x - 1 : x, x1 = x < kGrid ? x + 1 : x;
+      u32 z0 = z > 0 ? z - 1 : z, z1 = z < kGrid ? z + 1 : z;
+      f32 hx = height(wx + e, wz, x1, z) - height(wx - e, wz, x0, z);
+      f32 hz = height(wx, wz + e, x, z1) - height(wx, wz - e, x, z0);
       f32 nx = -hx / (2.0f * e), nz = -hz / (2.0f * e);
       f32 len = std::sqrt(nx * nx + 1.0f + nz * nz);
       v.normal[0] = nx / len;
@@ -920,6 +956,20 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
   camera_.set_position({0.0f, 6.0f, 40.0f});
   camera_.set_yaw_pitch(0.0f, -0.12f);
   camera_.speed = 20.0f;
+  if (!dem.empty()) {
+    // Perch over the terrain center; DEM scenes are tens of kilometers.
+    u32 ci = (hm_n / 2) * hm_n + hm_n / 2;
+    camera_.set_position({0.0f, dem[ci] + 400.0f, 0.0f});
+    camera_.speed = 300.0f;
+  }
+  // RX_VGEO_CAM="x,y,z,yaw,pitch" pins the fly camera for repeatable captures.
+  if (const char* cam = std::getenv("RX_VGEO_CAM")) {
+    f32 v[5] = {0, 0, 0, 0, 0};
+    if (std::sscanf(cam, "%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4]) == 5) {
+      camera_.set_position({v[0], v[1], v[2]});
+      camera_.set_yaw_pitch(v[3], v[4]);
+    }
+  }
 }
 
 void DemoScenes::CreateVirtualTextureDemoScene() {
