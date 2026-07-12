@@ -3,12 +3,49 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
+
+#include <base/containers/unordered_map.h>
 
 #include "asset/asset_id.h"
 
 namespace rx::asset {
 
 AssetId MakeAssetId(std::string_view normalized_path) { return AssetId{Fnv1a(normalized_path)}; }
+
+namespace {
+
+// Guarded by a mutex: recording happens on the load path (potentially the job
+// system), lookups from tooling on the main thread. Small and cold, so a plain
+// mutex is fine.
+struct PathTable {
+  std::mutex mutex;
+  base::UnorderedMap<u64, std::string> paths;
+};
+
+PathTable& ThePathTable() {
+  static PathTable table;
+  return table;
+}
+
+}  // namespace
+
+void RecordAssetPath(AssetId id, std::string_view normalized_path) {
+  if (!id) return;
+  PathTable& table = ThePathTable();
+  std::lock_guard<std::mutex> lock(table.mutex);
+  if (std::string* existing = table.paths.find(id.hash))
+    *existing = std::string(normalized_path);
+  else
+    table.paths.emplace(id.hash, std::string(normalized_path));
+}
+
+std::optional<std::string> LookupAssetPath(AssetId id) {
+  PathTable& table = ThePathTable();
+  std::lock_guard<std::mutex> lock(table.mutex);
+  if (const std::string* found = table.paths.find(id.hash)) return *found;
+  return std::nullopt;
+}
 
 std::string NormalizePath(std::string_view path) {
   std::string out(path);

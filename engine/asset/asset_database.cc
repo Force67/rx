@@ -18,6 +18,10 @@ const Asset* LoadWith(Vfs& vfs, std::string_view path,
                       base::UnorderedMap<u64, base::UniquePointer<Asset>>& cache) {
   std::string normalized = NormalizePath(path);
   AssetId id = MakeAssetId(normalized);
+  // Record the id -> path mapping so tooling (scene serialization) can write a
+  // relocatable path for this asset even without a database handle. Done before
+  // the cache check so it survives repeated lookups and cached failures.
+  RecordAssetPath(id, normalized);
   if (auto* cached = cache.find(id.hash)) return cached->Get_UseOnlyIfYouKnowWhatYouareDoing();
 
   // Failures below cache a null entry so repeated lookups stay cheap.
