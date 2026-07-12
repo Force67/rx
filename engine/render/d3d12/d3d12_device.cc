@@ -1082,19 +1082,24 @@ ID3D12RootSignature* D3D12Device::GetOrCreateRootSignature(std::span<SetLayout* 
     out->sets.push_back(set_params);
   }
 
-  // Push-block buffer-device-address emulation (skinned bone palettes): a
-  // root SRV at (t998, space0). Shaders that do not declare it simply leave
-  // the parameter unused; the command list binds it from the address at push
-  // byte 128 whenever the push block is large enough to carry one.
-  {
+  // Push-block buffer-device-address emulation: root SRVs at (t998, space0)
+  // for the skinned bone palette and (t997/t996, space0) for the morph target
+  // deltas/weights. Shaders that do not declare them simply leave the
+  // parameters unused; the command list binds them from the addresses at push
+  // bytes 128 (bones) and 160/168 (morphs) when the push block carries them.
+  auto add_bda_param = [&](u32 shader_register) {
     D3D12_ROOT_PARAMETER param = {};
     param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
-    param.Descriptor.ShaderRegister = 998;
+    param.Descriptor.ShaderRegister = shader_register;
     param.Descriptor.RegisterSpace = 0;
     param.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
-    out->bda_param = static_cast<i32>(params.size());
+    i32 index = static_cast<i32>(params.size());
     params.push_back(param);
-  }
+    return index;
+  };
+  out->bda_param = add_bda_param(998);
+  out->morph_delta_param = add_bda_param(997);
+  out->morph_weight_param = add_bda_param(996);
 
   if (ID3D12RootSignature** cached = root_signature_cache_.find(key)) return *cached;
 
@@ -1436,7 +1441,10 @@ PipelineHandle D3D12Device::CreateComputePipeline(const ComputePipelineDesc& des
     delete record;
     return {};
   }
-  record->bda_param = -1;  // no compute shader uses the push-BDA convention
+  // No compute shader uses the push-BDA convention.
+  record->bda_param = -1;
+  record->morph_delta_param = -1;
+  record->morph_weight_param = -1;
   return MakeHandle<PipelineHandle>(record);
 }
 
@@ -1614,6 +1622,13 @@ PipelineHandle D3D12Device::CreateGraphicsPipeline(const GraphicsPipelineDesc& d
     return {};
   }
   if (!uses_bone_palette) record->bda_param = -1;
+  // The morph root SRVs only apply to the raster mesh pipelines, identified by
+  // their push block (sizeof(MeshPushConstants), the only 192-byte one). Other
+  // pipelines leave them unbound for the same garbage-address reason.
+  if (desc.push_constant_size != 192) {
+    record->morph_delta_param = -1;
+    record->morph_weight_param = -1;
+  }
   return MakeHandle<PipelineHandle>(record);
 }
 

@@ -51,8 +51,23 @@ struct PushData {
   // World-space rect (min_x, min_z, max_x, max_z) of the fully streamed
   // terrain cells; set only on distant terrain-LOD draws, zeros otherwise.
   float4 detail_rect;
+  // Morph targets (blend shapes), zero on unmorphed draws. The deltas are a
+  // per-mesh buffer, the active (target, weight) pairs a per-frame buffer;
+  // both read by device address (root SRVs t997/t996 on DXIL, see morph.hlsli).
+  uint64_t morph_delta_address;
+  uint64_t morph_weight_address;
+  uint morph_first;         // this draw's first pair in the weight buffer
+  uint morph_count;         // active pairs, 0 = no morphing
+  uint morph_vertex_count;  // vertices per target in the delta buffer
+  uint pad_morph;
 };
 PUSH_CONSTANTS(PushData, push);
+
+#include "morph.hlsli"
+#ifndef __spirv__
+ByteAddressBuffer rec_morph_deltas : register(t997, space0);
+ByteAddressBuffer rec_morph_weights : register(t996, space0);
+#endif
 
 struct VsIn {
   [[vk::location(0)]] float3 position : POSITION;
@@ -64,6 +79,9 @@ struct VsIn {
   [[vk::location(5)]] uint4 bone_indices : BLENDINDICES0;
   [[vk::location(6)]] float4 bone_weights : BLENDWEIGHT0;  // unorm 0..1
 #endif
+  // Indexes the morph delta buffer. Morphed meshes always draw lod 0 with
+  // base vertex 0, where SPIR-V and DXIL vertex-id semantics agree.
+  uint vertex_id : SV_VertexID;
 };
 
 struct VsOut {
@@ -87,12 +105,15 @@ ByteAddressBuffer rec_bone_palette : register(t998, space0);
 #endif
 
 // Each bone is a column-major 4x4 (64 bytes) in the palette, so M*v is the
-// weighted sum of columns. Normals/tangents use the upper 3x3.
-void SkinVertex(VsIn input, out float3 position, out float3 normal, out float3 tangent) {
+// weighted sum of columns. Normals/tangents use the upper 3x3. position/
+// normal/tangent come in mesh space (already morphed) and leave posed.
+void SkinVertex(VsIn input, inout float3 position, inout float3 normal, inout float3 tangent) {
+  float4 p = float4(position, 1.0);
+  float3 in_normal = normal;
+  float3 in_tangent = tangent;
   position = float3(0, 0, 0);
   normal = float3(0, 0, 0);
   tangent = float3(0, 0, 0);
-  float4 p = float4(input.position, 1.0);
   [unroll]
   for (uint i = 0; i < 4; ++i) {
     float w = input.bone_weights[i];
@@ -111,9 +132,8 @@ void SkinVertex(VsIn input, out float3 position, out float3 normal, out float3 t
     float4 c3 = asfloat(rec_bone_palette.Load4(bone_byte_offset + 48));
 #endif
     position += w * (c0 * p.x + c1 * p.y + c2 * p.z + c3 * p.w).xyz;
-    normal += w * (c0.xyz * input.normal.x + c1.xyz * input.normal.y + c2.xyz * input.normal.z);
-    tangent +=
-        w * (c0.xyz * input.tangent.x + c1.xyz * input.tangent.y + c2.xyz * input.tangent.z);
+    normal += w * (c0.xyz * in_normal.x + c1.xyz * in_normal.y + c2.xyz * in_normal.z);
+    tangent += w * (c0.xyz * in_tangent.x + c1.xyz * in_tangent.y + c2.xyz * in_tangent.z);
   }
 }
 #endif
@@ -123,6 +143,18 @@ VsOut main(VsIn input) {
   float3 local_pos = input.position;
   float3 local_normal = input.normal;
   float3 local_tangent = input.tangent.xyz;
+  // Morphs deform in mesh space, before skinning poses the result.
+  if (push.morph_count != 0u) {
+#ifdef __spirv__
+    ApplyMorphs(push.morph_delta_address, push.morph_weight_address, push.morph_first,
+                push.morph_count, push.morph_vertex_count, input.vertex_id, local_pos,
+                local_normal, local_tangent);
+#else
+    ApplyMorphs(rec_morph_deltas, rec_morph_weights, push.morph_first, push.morph_count,
+                push.morph_vertex_count, input.vertex_id, local_pos, local_normal,
+                local_tangent);
+#endif
+  }
 #ifdef RX_SKINNED
   SkinVertex(input, local_pos, local_normal, local_tangent);
 #endif

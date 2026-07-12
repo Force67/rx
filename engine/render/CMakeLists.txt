@@ -311,6 +311,8 @@ endif()
 # The skinned vertex permutations carry their own dual path
 # (rec_bone_palette root SRV on DXIL).
 # Wrapper-shader include dependencies (see cmake/shaders.cmake).
+set(RX_SHADER_DEPS_mesh_vs_hlsl shaders/pipeline/morph.hlsli)
+set(RX_SHADER_DEPS_mesh_skin_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl)
 set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl)

@@ -178,7 +178,10 @@ itself beyond loading SDL3's window-property helpers dynamically.
   `ByteAddressBuffer` root SRV at `(t998, space0)` on DXIL. The backend
   detects skinned pipelines by their `BLENDINDICES` input signature and binds
   that root SRV from the u64 palette address it finds at byte 128 of the push
-  block (both `mesh.vs` and `shadow.vs` keep it there).
+  block (both `mesh.vs` and `shadow.vs` keep it there). Morph target deltas
+  and weights extend the convention with root SRVs at `(t997/t996, space0)`,
+  fed from the addresses at push bytes 160/168 of the 192-byte mesh push
+  block (`MeshPushConstants`); other push sizes leave them unbound.
 - **Barriers**: legacy `D3D12_RESOURCE_STATES` (vkd3d 2.0 has no enhanced
   barriers). Texture states are tracked per subresource on the device record;
   buffers decay to COMMON per ExecuteCommandLists, so per-list lazy

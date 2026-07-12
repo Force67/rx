@@ -95,9 +95,18 @@ inline constexpr u32 kFrameFlagRestirDi = 1u << 10;     // point/spot lights com
 inline constexpr u32 kFrameFlagFftOcean = 1u << 11;     // water displaces/shades from the FFT ocean maps
 inline constexpr u32 kFrameFlagInterior = 1u << 12;    // interior lighting mode: flat ambient + fog, no sky
 
+// One active morph target on a draw: index into the mesh's target list and
+// its weight. FrameView::morph_weights concatenates every morphed draw's
+// nonzero set, so untouched targets cost nothing in the vertex shader.
+struct MorphWeight {
+  u32 target = 0;
+  f32 weight = 0;
+};
+
 // model + prev_model are 128 bytes; skinned draws append the bone palette's
 // buffer device address and this mesh's offset into it (needs a 144 byte push
-// range, available on every desktop GPU). Non-skinned shaders ignore the tail.
+// range, available on every desktop GPU). Morphed draws use the trailing block
+// (192 bytes total). Shaders ignore the tails they do not read.
 struct MeshPushConstants {
   Mat4 model;
   Mat4 prev_model;
@@ -109,6 +118,15 @@ struct MeshPushConstants {
   // vertices inside it so the coarse proxy never bridges above the real land
   // (it cut through buildings otherwise). All zeros = no clip.
   f32 detail_rect[4] = {0, 0, 0, 0};
+  // Morph targets: per-mesh deltas (GpuMesh::morph_deltas) and the frame's
+  // (target, weight) pair buffer, read by device address like the bones.
+  // morph_count = 0 disables morphing for the draw.
+  u64 morph_delta_address = 0;
+  u64 morph_weight_address = 0;
+  u32 morph_first = 0;         // this draw's first pair in the weight buffer
+  u32 morph_count = 0;         // active (nonzero-weight) pairs
+  u32 morph_vertex_count = 0;  // vertices per target in the delta buffer
+  u32 pad_morph = 0;
 };
 
 // Push constants for the optional mesh-shader opaque path. The geometry buffers

@@ -64,6 +64,11 @@ struct GpuMesh {
   GpuBuffer vertices;  // all lods concatenated
   GpuBuffer indices;   // all lods concatenated
   GpuBuffer skinning;      // per-vertex bone indices/weights, set when skinned
+  // Morph target deltas, read by device address in the mesh vertex shaders:
+  // one 36-byte {position, normal, tangent} float3 triple per lod 0 vertex,
+  // targets concatenated ([target][vertex]). Empty for unmorphed meshes.
+  GpuBuffer morph_deltas;
+  u32 morph_target_count = 0;
   u32 index_count = 0;     // lod 0 index count (shadow / overdraw / blas use lod 0)
   u32 vertex_count = 0;    // lod 0 vertex count
   bool all_blend = false;  // pure transparency (water): stays out of the tlas
