@@ -343,6 +343,32 @@ bool LoadGltfScene(const std::string& path, GltfScene* out) {
         GenerateTangents(&lod, vertex_offset, index_offset);
       }
 
+      // Morph targets: per-vertex deltas for this primitive's vertex range.
+      // glTF requires the same target count on every primitive of a mesh, so
+      // the mesh-level weight order matches across submeshes. Target tangent
+      // deltas are vec3 (the w handedness never morphs).
+      if (primitive.targets_count > mesh.morph_targets.size()) {
+        mesh.morph_targets.resize(primitive.targets_count);
+      }
+      for (size_t t = 0; t < primitive.targets_count; ++t) {
+        MorphTarget& target = mesh.morph_targets[t];
+        for (size_t a = 0; a < primitive.targets[t].attributes_count; ++a) {
+          const cgltf_attribute& attribute = primitive.targets[t].attributes[a];
+          base::Vector<f32>* deltas = nullptr;
+          switch (attribute.type) {
+            case cgltf_attribute_type_position: deltas = &target.position_deltas; break;
+            case cgltf_attribute_type_normal: deltas = &target.normal_deltas; break;
+            case cgltf_attribute_type_tangent: deltas = &target.tangent_deltas; break;
+            default: break;
+          }
+          if (!deltas || attribute.data->count != vertex_count) continue;
+          ReadFloats(attribute.data, 3, &scratch);
+          deltas->resize((static_cast<size_t>(vertex_offset) + vertex_count) * 3);
+          std::memcpy(deltas->data() + static_cast<size_t>(vertex_offset) * 3, scratch.data(),
+                      vertex_count * sizeof(f32) * 3);
+        }
+      }
+
       Submesh submesh;
       submesh.index_offset = index_offset;
       submesh.index_count = static_cast<u32>(lod.indices.size()) - index_offset;
@@ -351,6 +377,21 @@ bool LoadGltfScene(const std::string& path, GltfScene* out) {
             out->materials[static_cast<size_t>(primitive.material - data->materials)].id;
       }
       lod.submeshes.push_back(submesh);
+    }
+
+    // Pad delta streams a primitive left short (missing attribute, later
+    // primitives without targets) to the full vertex count, and name the
+    // targets from the mesh extras so games can address them by hash.
+    for (size_t t = 0; t < mesh.morph_targets.size(); ++t) {
+      MorphTarget& target = mesh.morph_targets[t];
+      size_t full = lod.vertices.size() * 3;
+      target.position_deltas.resize(full);
+      if (!target.normal_deltas.empty()) target.normal_deltas.resize(full);
+      if (!target.tangent_deltas.empty()) target.tangent_deltas.resize(full);
+      if (t < src.target_names_count && src.target_names[t]) {
+        target.name = src.target_names[t];
+        target.name_hash = MakeAssetId(target.name).hash;
+      }
     }
 
     // Bounding sphere around the vertex centroid, for culling later.
@@ -370,6 +411,39 @@ bool LoadGltfScene(const std::string& path, GltfScene* out) {
         radius_sq = std::max(radius_sq, dx * dx + dy * dy + dz * dz);
       }
       mesh.bounds_radius = std::sqrt(radius_sq);
+    }
+  }
+
+  // Morph weight animations: every "weights" channel becomes a track on the
+  // mesh its node instances. CUBICSPLINE outputs carry in-tangent/value/out-
+  // tangent per key; only the value is kept (sampled linearly).
+  for (size_t i = 0; i < data->animations_count; ++i) {
+    const cgltf_animation& animation = data->animations[i];
+    for (size_t c = 0; c < animation.channels_count; ++c) {
+      const cgltf_animation_channel& channel = animation.channels[c];
+      if (channel.target_path != cgltf_animation_path_type_weights) continue;
+      if (!channel.target_node || !channel.target_node->mesh) continue;
+      Mesh& mesh = out->meshes[static_cast<size_t>(channel.target_node->mesh - data->meshes)];
+      u32 targets = static_cast<u32>(mesh.morph_targets.size());
+      const cgltf_animation_sampler* sampler = channel.sampler;
+      if (targets == 0 || !sampler->input || !sampler->output) continue;
+
+      MorphAnimation track;
+      track.name = animation.name ? animation.name : "";
+      track.step = sampler->interpolation == cgltf_interpolation_type_step;
+      ReadFloats(sampler->input, 1, &scratch);
+      track.times = scratch;
+      track.duration = track.times.empty() ? 0.0f : track.times.back();
+      ReadFloats(sampler->output, 1, &scratch);
+      bool cubic = sampler->interpolation == cgltf_interpolation_type_cubic_spline;
+      size_t stride = cubic ? targets * 3 : targets;
+      if (scratch.size() < track.times.size() * stride) continue;
+      track.weights.resize(track.times.size() * targets);
+      for (size_t k = 0; k < track.times.size(); ++k) {
+        const f32* row = &scratch[k * stride + (cubic ? targets : 0)];
+        std::memcpy(&track.weights[k * targets], row, targets * sizeof(f32));
+      }
+      mesh.morph_animations.push_back(std::move(track));
     }
   }
 
