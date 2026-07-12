@@ -14,6 +14,7 @@ option(RX_NRD "Enable the NVIDIA NRD ray tracing denoiser" ON)
 option(RX_JOLT "Enable Jolt physics" ON)
 option(RX_BUILD_TESTS "Build library test suites" ON)
 option(RX_BUILD_RUNTIME "Build the rx viewer executable" ON)
+option(RX_BUILD_TOOLS "Build the asset authoring tools (rxpack)" ON)
 option(RX_AUDIO_FFMPEG "Decode compressed audio via FFmpeg (libav*)" OFF)
 option(RX_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 # Route the engine's allocations through mimalloc for faster, lower-fragmentation
@@ -248,6 +249,22 @@ endforeach()
 
 if(RX_BUILD_RUNTIME)
   add_subdirectory(runtime)
+endif()
+
+# Asset authoring tools. rxpack creates/lists/extracts/verifies .rxp game
+# archives (engine/asset/pack.h).
+if(RX_BUILD_TOOLS)
+  add_executable(rxpack tools/rxpack.cc)
+  target_link_libraries(rxpack PRIVATE rx::asset rx::core)
+  rx_set_warnings(rxpack)
+endif()
+
+# Vfs mount points + .rxp pack round trip, pure CPU: no driver or window
+# needed, runs everywhere plain `ctest` runs.
+if(RX_BUILD_TESTS)
+  add_executable(vfs_test test/vfs_test.cc)
+  target_link_libraries(vfs_test PRIVATE rx::asset rx::core)
+  add_test(NAME vfs_test COMMAND vfs_test)
 endif()
 
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a

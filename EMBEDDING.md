@@ -118,6 +118,42 @@ Platforms that own the main loop (mobile) drive `host.RunFrame()` directly
 and forward surface loss/recreation to `host.OnSurfaceDestroyed()` /
 `OnSurfaceCreated()`.
 
+## Virtual filesystem and .rxp archives
+
+The Host's `Services::vfs` is a mount table (`asset/vfs.h`). A provider — a
+loose directory, an `.rxp` pack, or your own `FileProvider` (BSA, network,
+whatever) — mounts under a named mount point and every consumer addresses it
+by virtual path:
+
+```cpp
+using namespace rx::asset;
+Vfs& vfs = *services_->vfs;
+vfs.Mount("game", MakePackFileProvider("content/base.rxp"));       // game://...
+vfs.Mount("game://dlc/", MakePackFileProvider("content/dlc1.rxp")); // a subtree
+vfs.Mount("game", MakeLooseFileProvider("content/dev"));            // later mounts win
+vfs.Mount(MakeLooseFileProvider("content"));                        // root: schemeless paths
+
+auto bytes = vfs.Read("game://textures/rock.dds");  // dev override, else base.rxp
+```
+
+Later mounts shadow earlier ones, so the mount order *is* the override order:
+base archives first, DLC, then mods, then loose files for development.
+Schemeless paths (`"textures/rock.dds"`) resolve against the root namespace,
+which is what the engine's own loaders use.
+
+`.rxp` is the engine's game archive (`asset/pack.h`): a hash-indexed table of
+contents, deflate or raw payloads, a CRC-32 per entry. Author archives with
+the `rxpack` tool (built with `-DRX_BUILD_TOOLS=ON`, the default):
+
+```sh
+rxpack create base.rxp content/     # pack a directory tree
+rxpack list base.rxp
+rxpack extract base.rxp out/ [textures/rock.dds ...]
+rxpack verify base.rxp              # checksum every entry
+```
+
+or programmatically with `PackWriter` (e.g. from your own asset pipeline).
+
 ## Bring your own GPU passes
 
 A game with its own GPU-driven pipeline (a voxel engine with buffer-device-
