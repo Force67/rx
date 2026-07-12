@@ -393,6 +393,12 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
     std::vector<u8> grouped(count, 0);
     std::vector<u32> score(count, 0);
     std::vector<u32> touched;
+    // Group-local scratch, level-sized once and reset via the touched list:
+    // allocating these per group is quadratic in vertex count (fatal on
+    // multi-million-vertex source meshes).
+    std::vector<u32> group_use(vertex_count, 0);
+    std::vector<u8> lock(vertex_count, 0);
+    std::vector<u32> group_verts;
     std::vector<WorkCluster> next;
     bool progressed = false;
     for (u32 seed_pos = 0; seed_pos < count; ++seed_pos) {
@@ -430,13 +436,16 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
       for (u32 nb : touched) score[nb] = 0;
 
       std::vector<u32> group_indices;
-      std::vector<u32> group_use(vertex_count, 0);
+      group_verts.clear();
       f32 max_child_error = 0.0f;
       Vec3 center{};
       for (u32 ci : members) {
         const WorkCluster& c = current[ci];
         group_indices.insert(group_indices.end(), c.indices.begin(), c.indices.end());
-        for (u32 v : c.indices) ++group_use[v];
+        for (u32 v : c.indices) {
+          if (group_use[v] == 0) group_verts.push_back(v);
+          ++group_use[v];
+        }
         max_child_error = std::max(max_child_error, c.self_error);
         center = center + Vec3{c.self_sphere[0], c.self_sphere[1], c.self_sphere[2]};
       }
@@ -450,8 +459,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
       }
       f32 group_sphere[4] = {center.x, center.y, center.z, radius};
 
-      std::vector<u8> lock(vertex_count, 0);
-      for (u32 idx : group_indices) {
+      for (u32 idx : group_verts) {
         if (group_use[idx] < use_count[idx]) lock[idx] = 1;
       }
 
@@ -460,6 +468,10 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
           positions.data(), vertex_count, group_indices.data(),
           static_cast<u32>(group_indices.size()),
           static_cast<u32>(group_indices.size()) / 2, lock.data(), &err);
+      for (u32 idx : group_verts) {
+        group_use[idx] = 0;
+        lock[idx] = 0;
+      }
       // A group that refuses to shrink stays terminal: its clusters keep
       // FLT_MAX parents and simply draw whenever their own error passes.
       if (simplified.size() >= group_indices.size() * 4 / 5) continue;
