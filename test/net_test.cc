@@ -351,7 +351,7 @@ void TestBubbleOwnership() {
   map.Configure(net::InterestConfig{});
 
   int handoffs = 0;
-  u32 last_new_owner = 0xffffffff;
+  u32 last_new_owner = 0;
   map.SetOwnerChangedSink([&](u64 net_id, u32, u32 new_peer) {
     if (net_id == 7) {
       ++handoffs;
@@ -382,7 +382,7 @@ void TestBubbleOwnership() {
   // Peer 2 leaves too: back to the server (owner 0).
   MoveTo(world, avatar2, 100, 0, 50);
   map.Update(world, 4);
-  CHECK_EQ(map.OwnerOf(7), 0u);
+  CHECK_EQ(map.OwnerOf(7), net::kNoPeer);
 
   // Tie-break: both bubbles at the same distance claim simultaneously; the
   // lower peer id wins, deterministically.
@@ -393,7 +393,7 @@ void TestBubbleOwnership() {
 
   // A departing peer releases everything it owns.
   map.RemovePeer(1);
-  CHECK_EQ(map.OwnerOf(7), 0u);
+  CHECK_EQ(map.OwnerOf(7), net::kNoPeer);
 }
 
 void TestBubbleCounts() {

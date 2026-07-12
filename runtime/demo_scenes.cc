@@ -187,7 +187,7 @@ void DemoScenes::EmitBubbles(render::FrameView& view) {
   world_.Each<net::NetworkId, scene::Tint>(
       [&](ecs::Entity, net::NetworkId& id, scene::Tint& tint) {
         const u32 owner = bubble_map_.OwnerOf(id.value);
-        tint.rgb = owner == 0 ? 0x555555 : net::PeerColor(owner);
+        tint.rgb = owner == net::kNoPeer ? 0x555555 : net::PeerColor(owner);
       });
   if (bubble_viz_) bubble_viz_->Emit(view, bubble_map_.bubbles());
 }

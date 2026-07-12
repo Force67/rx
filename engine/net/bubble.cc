@@ -28,7 +28,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
   f32 max_exit = 0;
   world.Each<InterestBubble, scene::Transform>(
       [&](ecs::Entity entity, InterestBubble& bubble, scene::Transform& t) {
-        if (bubble.peer == 0 || bubble.radius <= 0) return;
+        if (bubble.peer == kNoPeer || bubble.radius <= 0) return;
         BubbleRef ref;
         ref.peer = bubble.peer;
         ref.state_index = static_cast<u32>(bubbles_.size());
@@ -71,7 +71,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
     for (auto owned : owners_) scratch_removed_.push_back(owned.key);
     for (u64 net_id : scratch_removed_) {
       const Ownership* o = owners_.find(net_id);
-      if (o && o->peer != 0 && owner_changed_) owner_changed_(net_id, o->peer, 0);
+      if (o && owner_changed_) owner_changed_(net_id, o->peer, kNoPeer);
       owners_.erase(net_id);
     }
     return;
@@ -135,7 +135,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
         const i32 cx = static_cast<i32>(std::floor(t.position[0] * inv_cell));
         const i32 cz = static_cast<i32>(std::floor(t.position[2] * inv_cell));
         const base::Vector<u32>* bucket = scratch_grid_.find(CellKey(cx, cz));
-        u32 avatar_peer = 0;
+        u32 avatar_peer = kNoPeer;
         if (bucket) {
           for (u32 bi : *bucket) {
             BubbleRef& b = scratch_bubbles_[bi];
@@ -158,10 +158,10 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
 
         // --- ownership ---
         Ownership* owned = owners_.find(id.value);
-        const u32 prev_owner = owned ? owned->peer : 0;
+        const u32 prev_owner = owned ? owned->peer : kNoPeer;
         u32 next_owner = prev_owner;
 
-        if (avatar_peer != 0) {
+        if (avatar_peer != kNoPeer) {
           // A player's avatar belongs to its own peer, always.
           next_owner = avatar_peer;
         } else {
@@ -172,10 +172,10 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
           if (!prev_owner_holds) {
             // Handoff: nearest containing bubble, ties to the lower peer id;
             // no bubble means back to the server.
-            next_owner = 0;
+            next_owner = kNoPeer;
             f32 best = 0;
             for (const Candidate& c : candidates) {
-              if (next_owner == 0 || c.dist_sq < best ||
+              if (next_owner == kNoPeer || c.dist_sq < best ||
                   (c.dist_sq == best && c.peer < next_owner)) {
                 next_owner = c.peer;
                 best = c.dist_sq;
@@ -185,7 +185,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
         }
 
         if (next_owner != prev_owner) {
-          if (next_owner == 0) {
+          if (next_owner == kNoPeer) {
             owners_.erase(id.value);
           } else if (owned) {
             owned->peer = next_owner;
@@ -222,7 +222,7 @@ const InterestSet* InterestMap::InterestOf(u32 peer) const {
 
 u32 InterestMap::OwnerOf(u64 net_id) const {
   const Ownership* owned = owners_.find(net_id);
-  return owned ? owned->peer : 0;
+  return owned ? owned->peer : kNoPeer;
 }
 
 void InterestMap::RemovePeer(u32 peer) {
@@ -233,7 +233,7 @@ void InterestMap::RemovePeer(u32 peer) {
   }
   for (u64 net_id : scratch_removed_) {
     owners_.erase(net_id);
-    if (owner_changed_) owner_changed_(net_id, peer, 0);
+    if (owner_changed_) owner_changed_(net_id, peer, kNoPeer);
   }
 }
 
