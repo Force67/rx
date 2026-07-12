@@ -3594,9 +3594,20 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
 
   // Camera state for both this frame and reprojection. Jitter lives in the
   // projection, not the matrices used for motion vectors.
-  f32 aspect =
-      static_cast<f32>(render_width_) / static_cast<f32>(render_height_);
-  Mat4 proj = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f);
+  f32 aspect = static_cast<f32>(render_width_) / static_cast<f32>(render_height_);
+  // Orthographic main view (isometric / top-down / 2.5D) when the camera asks
+  // for it; otherwise the reversed-z infinite-far perspective every other path
+  // uses. The ortho matrix shares the reversed-z clip space so the depth-aware
+  // passes below are unchanged.
+  Mat4 proj;
+  if (view.camera.ortho_height > 0.0f) {
+    f32 half_h = view.camera.ortho_height * 0.5f;
+    f32 half_w = half_h * aspect;
+    proj = OrthographicReversedZ(-half_w, half_w, -half_h, half_h, view.camera.ortho_near,
+                                 view.camera.ortho_far);
+  } else {
+    proj = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f);
+  }
   Mat4 view_mat = LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
   Mat4 view_proj = proj * view_mat;
 

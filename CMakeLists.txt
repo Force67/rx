@@ -221,6 +221,7 @@ if(NOT DEFINED RX_MODULES)
     terrain
     edit
     render
+    render2d
     weather
     placement
     physics

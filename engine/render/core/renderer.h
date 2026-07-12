@@ -205,7 +205,17 @@ struct SceneHookContext {
 struct CameraPose {
   Vec3 eye{0, 0, 3};
   Vec3 target{};
-  f32 fov_y = 1.0472f; // 60 degrees
+  f32 fov_y = 1.0472f;  // 60 degrees (perspective vertical field of view)
+  // Orthographic override for isometric / top-down / 2.5D presentations. When
+  // > 0 the main view uses an orthographic projection whose vertical extent is
+  // `ortho_height` world units (the horizontal extent follows from the aspect
+  // ratio) instead of the perspective `fov_y`; eye/target still define where
+  // the camera sits and looks. 0 (the default) leaves the perspective path
+  // untouched, so existing consumers are unaffected. ortho_near/ortho_far bound
+  // the reversed-z depth range (finite, unlike the perspective infinite far).
+  f32 ortho_height = 0.0f;
+  f32 ortho_near = 0.1f;
+  f32 ortho_far = 1000.0f;
 };
 
 // What the simulation hands the renderer each frame. The engine extracts
