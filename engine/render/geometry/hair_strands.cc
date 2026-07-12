@@ -89,6 +89,9 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
 
   Groom g;
   g.host_points.resize(static_cast<size_t>(n) * kPointsPerStrand);
+  g.local_points.resize(static_cast<size_t>(n) * kPointsPerStrand * 3);
+  std::memcpy(g.local_points.data(), data.points.data(),
+              g.local_points.size() * sizeof(f32));
   base::Vector<f32> host_colors;
   host_colors.resize(static_cast<size_t>(n) * 4);
 
@@ -166,7 +169,19 @@ u32 HairStrands::CreateGroom(Device& device, const GroomData& data, const GroomP
 }
 
 void HairStrands::SetGroomTransform(u32 id, const Mat4& transform) {
-  if (Groom* g = Find(id)) g->transform = transform;
+  Groom* g = Find(id);
+  if (!g) return;
+  g->transform = transform;
+  if (g->fed) return;  // node positions are owned by the simulation feed
+  for (size_t i = 0; i < g->host_points.size(); ++i) {
+    const f32* lp = &g->local_points[i * 3];
+    Vec3 world = TransformPoint(transform, Vec3{lp[0], lp[1], lp[2]});
+    HairPoint& hp = g->host_points[i];
+    hp.pos[0] = world.x;
+    hp.pos[1] = world.y;
+    hp.pos[2] = world.z;
+  }
+  g->stale = kAllSlotsStale;
 }
 
 void HairStrands::SetGroomTint(u32 id, const Vec3& tint) {
@@ -187,6 +202,7 @@ void HairStrands::SetGroomPoints(u32 id, const f32* positions, u32 count) {
     hp.pos[1] = positions[i * 3 + 1];
     hp.pos[2] = positions[i * 3 + 2];
   }
+  g->fed = true;
   g->stale = kAllSlotsStale;
 }
 
