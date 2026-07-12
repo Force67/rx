@@ -257,25 +257,63 @@ bool Host::RunFrame() {
   return !quit_.load(std::memory_order_relaxed);
 }
 
+namespace {
+
+Mat4 LocalTransformMatrix(const scene::Transform& t) {
+  return MakeTranslation({t.position[0], t.position[1], t.position[2]}) *
+         MakeFromQuat(t.rotation[0], t.rotation[1], t.rotation[2], t.rotation[3]) *
+         MakeScale(t.scale);
+}
+
+}  // namespace
+
 void Host::GatherEntityDraws(render::FrameView& view) {
   // Rebuilt every frame so destroyed entities drop out on their own.
   base::UnorderedMap<u64, Mat4> transforms;
-  world_.Each<scene::Transform, scene::Renderable>(
-      [&](ecs::Entity entity, scene::Transform& transform, scene::Renderable& renderable) {
-        if (world_.Has<scene::Hidden>(entity)) return;
-        u64 key = static_cast<u64>(entity.generation) << 32 | entity.index;
-        Mat4 current =
-            MakeTranslation(
-                {transform.position[0], transform.position[1], transform.position[2]}) *
-            MakeFromQuat(transform.rotation[0], transform.rotation[1], transform.rotation[2],
-                         transform.rotation[3]) *
-            MakeScale(transform.scale);
-        const Mat4* prev = prev_transforms_.find(key);
-        render::DrawItem item{renderable.mesh.hash, current, prev ? *prev : current};
-        if (const auto* tint = world_.Get<scene::Tint>(entity)) item.tint = tint->rgb;
-        view.draws.push_back(item);
-        transforms.insert(key, current);
-      });
+
+  // Hierarchy is opt-in per world. A world with zero Parent components visits no
+  // Parent archetype here, so this probe is near-free and the parent-free path
+  // below stays byte-identical to the pre-hierarchy behavior.
+  bool any_parent = false;
+  world_.Each<scene::Parent>([&](ecs::Entity, scene::Parent&) { any_parent = true; });
+
+  auto emit = [&](ecs::Entity entity, const Mat4& current, const asset::AssetId& mesh) {
+    u64 key = static_cast<u64>(entity.generation) << 32 | entity.index;
+    const Mat4* prev = prev_transforms_.find(key);
+    render::DrawItem item{mesh.hash, current, prev ? *prev : current};
+    if (const auto* tint = world_.Get<scene::Tint>(entity)) item.tint = tint->rgb;
+    view.draws.push_back(item);
+    transforms.insert(key, current);
+  };
+
+  if (!any_parent) {
+    world_.Each<scene::Transform, scene::Renderable>(
+        [&](ecs::Entity entity, scene::Transform& transform, scene::Renderable& renderable) {
+          if (world_.Has<scene::Hidden>(entity)) return;
+          emit(entity, LocalTransformMatrix(transform), renderable.mesh);
+        });
+  } else {
+    // Compose the world matrix up the Parent chain; an entity without a Parent
+    // yields its own local matrix, exactly as the fast path above.
+    auto world_matrix = [&](ecs::Entity e) -> Mat4 {
+      scene::Transform* t = world_.Get<scene::Transform>(e);
+      Mat4 m = t ? LocalTransformMatrix(*t) : Mat4::Identity();
+      scene::Parent* p = world_.Get<scene::Parent>(e);
+      int guard = 0;  // bound a corrupt cycle
+      while (p && p->value && world_.IsAlive(p->value) && guard++ < 4096) {
+        ecs::Entity pe = p->value;
+        scene::Transform* pt = world_.Get<scene::Transform>(pe);
+        m = (pt ? LocalTransformMatrix(*pt) : Mat4::Identity()) * m;
+        p = world_.Get<scene::Parent>(pe);
+      }
+      return m;
+    };
+    world_.Each<scene::Transform, scene::Renderable>(
+        [&](ecs::Entity entity, scene::Transform&, scene::Renderable& renderable) {
+          if (world_.Has<scene::Hidden>(entity)) return;
+          emit(entity, world_matrix(entity), renderable.mesh);
+        });
+  }
   prev_transforms_ = std::move(transforms);
 }
 
