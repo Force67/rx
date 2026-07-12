@@ -7,6 +7,7 @@
 
 #include <base/containers/vector.h>
 
+#include "anim/expression.h"
 #include "app/application.h"
 #include "app/host.h"
 #include "asset/mesh.h"
@@ -81,16 +82,26 @@ class Viewer : public app::Application {
 
   // Morphed glTF instances, drawn by the viewer instead of the host's entity
   // gather so per-frame weights ride the DrawItems: a looping imported weight
-  // track when the mesh has one, else a scripted sweep over the targets.
+  // track when the mesh has one, the expression controller when the targets
+  // carry ARKit-style names, else a scripted sweep over the targets.
   struct MorphedInstance {
     u64 mesh = 0;
     Mat4 transform = Mat4::Identity();
     asset::MorphAnimation animation;  // empty times = no imported track
     base::Vector<f32> weights;        // dense per-target set, rewritten each frame
+    base::Vector<i32> expression_map;  // controller channel -> target, empty = not driven
+    bool pinned = false;               // RX_MORPH_WEIGHTS: weights fixed at load
   };
   void EmitMorphedInstances(f32 frame_delta, render::FrameView& view);
   base::Vector<MorphedInstance> morphed_;
   f32 morph_time_ = 0;
+
+  // Expression demo: faces the controller recognizes cycle through the stock
+  // poses with the life layer (blinks, brow micro-motion) always on.
+  anim::ExpressionController expression_;
+  bool expression_demo_ = false;
+  u32 expression_pose_ = 0;
+  f32 expression_hold_ = 0;
 
   // Camera record/replay state, lazily armed from env on the first frame.
   struct CamKey {
