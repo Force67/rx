@@ -1185,6 +1185,115 @@ void DemoScenes::CreateBrickDemoScene() {
   RX_INFO("brick demo: pom wall (left) vs flat normal-mapped wall (right)");
 }
 
+void DemoScenes::CreateSilhouettePomDemoScene() {
+  // Silhouette-POM A/B: two identical studded spheres against the sky. The left
+  // one carries the silhouette-aware flag - its outline is carved by the height
+  // field (studs poke past the mesh edge, the gaps between them are eaten in),
+  // so the limb reads as real relief. The right one runs classic POM: the same
+  // interior displacement but a polygon-smooth circular outline. The carving is
+  // strongest along the limb, where the view ray grazes the convex surface.
+  constexpr u32 kTex = 256;
+  constexpr f32 kTilesU = 10.0f, kTilesV = 5.0f;  // ~square studs over the 2:1 uv
+  auto stud_height = [](f32 u, f32 v) -> f32 {
+    // Grid of rounded domes; deep flat gaps between them give the limb something
+    // to carve. Round-shouldered so the normal map stays smooth.
+    f32 cu = u * kTilesU, cv = v * kTilesV;
+    f32 fu = cu - std::floor(cu) - 0.5f;
+    f32 fv = cv - std::floor(cv) - 0.5f;
+    f32 d = std::sqrt(fu * fu + fv * fv) * 2.0f;  // 0 centre .. ~1.4 corner
+    f32 h = std::max(0.0f, 1.0f - d / 0.82f);
+    return h * h * (3.0f - 2.0f * h);  // smoothstep dome
+  };
+  asset::Texture height;
+  height.id = asset::MakeAssetId("builtin/silpom/height");
+  height.format = asset::TextureFormat::kRgba8;
+  height.width = height.height = kTex;
+  height.data.resize(static_cast<size_t>(kTex) * kTex * 4);
+  asset::Texture albedo = height;
+  albedo.id = asset::MakeAssetId("builtin/silpom/albedo");
+  albedo.is_srgb = true;
+  asset::Texture normal = height;
+  normal.id = asset::MakeAssetId("builtin/silpom/normal");
+  for (u32 y = 0; y < kTex; ++y) {
+    for (u32 x = 0; x < kTex; ++x) {
+      f32 u = (x + 0.5f) / kTex, v = (y + 0.5f) / kTex;
+      f32 h = stud_height(u, v);
+      size_t o = (static_cast<size_t>(y) * kTex + x) * 4;
+      height.data[o] = height.data[o + 1] = height.data[o + 2] = static_cast<u8>(h * 255.0f);
+      height.data[o + 3] = 255;
+      f32 e = 1.0f / kTex;
+      f32 hx = stud_height(u + e, v) - stud_height(u - e, v);
+      f32 hy = stud_height(u, v + e) - stud_height(u, v - e);
+      f32 nx = -hx * 6.0f, ny = -hy * 6.0f, nz = 1.0f;
+      f32 len = std::sqrt(nx * nx + ny * ny + nz * nz);
+      normal.data[o] = static_cast<u8>((nx / len * 0.5f + 0.5f) * 255.0f);
+      normal.data[o + 1] = static_cast<u8>((ny / len * 0.5f + 0.5f) * 255.0f);
+      normal.data[o + 2] = static_cast<u8>((nz / len * 0.5f + 0.5f) * 255.0f);
+      normal.data[o + 3] = 255;
+      // Warm sandstone studs, dark recessed gaps.
+      f32 r = h * 0.72f + (1.0f - h) * 0.10f;
+      f32 g = h * 0.52f + (1.0f - h) * 0.09f;
+      f32 b = h * 0.34f + (1.0f - h) * 0.08f;
+      albedo.data[o] = static_cast<u8>(r * 255.0f);
+      albedo.data[o + 1] = static_cast<u8>(g * 255.0f);
+      albedo.data[o + 2] = static_cast<u8>(b * 255.0f);
+      albedo.data[o + 3] = 255;
+    }
+  }
+  if (!config_.headless) {
+    renderer_.UploadTexture(height);
+    renderer_.UploadTexture(albedo);
+    renderer_.UploadTexture(normal);
+  }
+
+  asset::Material sil;
+  sil.id = asset::MakeAssetId("builtin/silpom/mat_sil");
+  sil.base_color = albedo.id;
+  sil.normal = normal.id;
+  sil.height = height.id;
+  sil.height_scale = 0.09f;
+  sil.roughness_factor = 0.85f;
+  sil.silhouette_pom = true;
+  sil.silhouette_curvature = 0.5f;
+  asset::Material classic = sil;  // same look, polygon-straight outline
+  classic.id = asset::MakeAssetId("builtin/silpom/mat_classic");
+  classic.silhouette_pom = false;
+  if (!config_.headless) {
+    renderer_.UploadMaterial(sil);
+    renderer_.UploadMaterial(classic);
+  }
+
+  auto spawn = [&](const char* tag, Vec3 pos, const asset::Material& mat) {
+    asset::Mesh sphere = asset::MakeSphere(0.7f, 48, 64, asset::MakeAssetId(tag));
+    sphere.lods[0].submeshes[0].material = mat.id;
+    if (!config_.headless) renderer_.UploadMesh(sphere);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, scene::Renderable{sphere.id});
+  };
+  spawn("builtin/silpom/sphere_sil", {-0.95f, 1.3f, 0.0f}, sil);
+  spawn("builtin/silpom/sphere_classic", {0.95f, 1.3f, 0.0f}, classic);
+
+  // Grazing warm sun to rake the studs; spheres float well above a distant floor
+  // so their upper limbs read against the sky where the carve is clearest.
+  asset::Mesh floor_mesh =
+      asset::MakeBox(24.0f, 0.2f, 24.0f, asset::MakeAssetId("builtin/silpom/floor"));
+  if (!config_.headless) renderer_.UploadMesh(floor_mesh);
+  ecs::Entity fl = world_.Create();
+  world_.Add(fl, scene::Transform{.position = {0, -1.6f, 0}});
+  world_.Add(fl, scene::Renderable{floor_mesh.id});
+
+  ctx_.scene_owns_sun = true;
+  renderer_.settings().sun_direction = {-0.82f, -0.22f, -0.52f};
+  renderer_.settings().sun_intensity = 3.2f;
+  renderer_.settings().sun_color = {1.0f, 0.86f, 0.72f};
+
+  camera_.set_position({0.0f, 1.35f, 3.15f});
+  camera_.set_yaw_pitch(0.0f, -0.02f);
+  camera_.speed = 2.5f;
+  RX_INFO("silhouette pom: left sphere carves its outline, right sphere is classic flat-edge pom");
+}
+
 void DemoScenes::CreateSssDemoScene() {
   // Screen-space subsurface scattering A/B: two identical skin-toned spheres
   // under a hard side sun. The right one carries the skin flag (diffuse routed
@@ -1812,6 +1921,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "bricks") {
     CreateBrickDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "silpom") {
+    CreateSilhouettePomDemoScene();
     return;
   }
   if (config_.demo_scene == "vt") {

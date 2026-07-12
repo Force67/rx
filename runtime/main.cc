@@ -13,7 +13,7 @@ void PrintUsage() {
   RX_INFO("usage: rx [options]");
   RX_INFO("  --gltf <path>         load a gltf/glb scene (e.g. assets/sponza/Sponza.gltf)");
   RX_INFO("  --demo <id>           builtin scene: water | materials | gaussian | cornell |");
-  RX_INFO("                        locomotion | lod | oit | fire | brick | sss | scenehook | ... (cube)");
+  RX_INFO("                        locomotion | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
   RX_INFO("  --headless            no window, no renderer");
   RX_INFO("  --preset <tier>       auto (default) | android | steamdeck | low |");
   RX_INFO("                        medium | high | ultra | console");

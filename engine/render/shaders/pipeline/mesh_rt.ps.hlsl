@@ -228,7 +228,7 @@ struct MaterialParams {
   float iridescence;
   float iridescence_thickness;
   float transmission;
-  float irid_pad;
+  float silhouette_curvature;  // silhouette-pom curvature gain (unused on the rt path)
   float2 uv_scroll;  // animated texture scroll (uv units/sec)
   float ao_strength; // occlusion-map strength (1 = full); pads the row otherwise
   float scroll_pad;

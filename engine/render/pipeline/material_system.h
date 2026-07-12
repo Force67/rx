@@ -59,7 +59,7 @@ class MaterialSystem {
     f32 iridescence = 0;
     f32 iridescence_thickness = 400.0f;
     f32 transmission = 0;
-    f32 irid_pad = 0;
+    f32 silhouette_curvature = 0;  // silhouette-pom curvature gain (0 = classic flat pom)
     // Animated texture scroll rate (uv units/sec); the shader adds
     // frame.time * uv_scroll to the uv before sampling.
     f32 uv_scroll[2] = {0, 0};
@@ -99,6 +99,7 @@ class MaterialSystem {
   static constexpr u32 kFlagTerrainV2 = 1u << 15;  // splat v2: bindless palette + 2 weight maps
   static constexpr u32 kFlagSeparateMetallic = 1u << 16;  // metallic from metallic_map.r, not mr.b
   static constexpr u32 kFlagHasOcclusion = 1u << 17;      // dedicated occlusion map multiplies ambient
+  static constexpr u32 kFlagSilhouettePom = 1u << 18;  // curvature-aware pom that carves silhouettes
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).
