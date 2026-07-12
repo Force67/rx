@@ -19,10 +19,13 @@ namespace rx::render {
 //   binding 0  uniform MaterialParams
 //   binding 1  base color        (srgb)
 //   binding 2  normal map        (linear)
-//   binding 3  metallic roughness(linear)
+//   binding 3  metallic roughness(linear; glTF ORM, or a lone roughness map)
 //   binding 4  emissive          (srgb)
-// Missing maps fall back to builtin 1x1 defaults so the shader never
-// branches on texture presence.
+//   binding 5  height            (linear)
+//   binding 6  metallic          (linear; only when separate_metallic)
+//   binding 7  occlusion         (linear; multiplies ambient)
+// Missing maps fall back to builtin 1x1 defaults (white metallic = the mr map
+// alone, white occlusion = no AO) so the shader never branches on presence.
 //
 // Texture streaming: multi-mip BCn textures above the tail size keep a CPU
 // copy of their source and can be demoted to a low-mip tail image under VRAM
@@ -60,7 +63,8 @@ class MaterialSystem {
     // Animated texture scroll rate (uv units/sec); the shader adds
     // frame.time * uv_scroll to the uv before sampling.
     f32 uv_scroll[2] = {0, 0};
-    f32 scroll_pad[2] = {0, 0};
+    f32 ao_strength = 1.0f;  // occlusion-map strength (1 = full), else pads the row
+    f32 scroll_pad = 0;
     // Effect-shader (unlit vfx) view-angle falloff: start angle, stop angle,
     // start opacity, stop opacity (dot-of-view thresholds). Only read on the
     // mesh.ps unlit branch (kFlagEffect).
@@ -93,6 +97,8 @@ class MaterialSystem {
   static constexpr u32 kFlagEffectFalloff = 1u << 13;    // view-angle opacity fade
   static constexpr u32 kFlagNormalModelSpace = 1u << 14;  // _msn object-space normal map
   static constexpr u32 kFlagTerrainV2 = 1u << 15;  // splat v2: bindless palette + 2 weight maps
+  static constexpr u32 kFlagSeparateMetallic = 1u << 16;  // metallic from metallic_map.r, not mr.b
+  static constexpr u32 kFlagHasOcclusion = 1u << 17;      // dedicated occlusion map multiplies ambient
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).
@@ -208,7 +214,7 @@ class MaterialSystem {
     BindingSetHandle set;
     u32 pool = 0;         // param_buffers_ index of the uniform slot
     u32 param_index = 0;  // slot within the pool
-    u64 map_keys[5] = {};  // salted texture hashes for bindings 1..5
+    u64 map_keys[7] = {};  // salted texture hashes for bindings 1..7
     u32 bindless_material = BindlessRegistry::kInvalidIndex;
     u32 last_used = 0;
   };
@@ -228,7 +234,7 @@ class MaterialSystem {
   bool AddPool();
   BindingSetHandle AllocateSet();
   bool WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
-                const asset::Material& material, u64 id_salt, u64 out_map_keys[5]);
+                const asset::Material& material, u64 id_salt, u64 out_map_keys[7]);
   void WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime);
   const GpuImage* texture_or(u64 hash, const GpuImage& fallback) const;
   TextureRecord* record_for(u64 hash);

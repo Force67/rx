@@ -19,11 +19,23 @@ struct Material {
   // The shader rotates it straight to world by the model matrix instead of
   // building a TBN; sampling an _msn map as tangent-space smears the lighting.
   bool normal_model_space = false;
+  // glTF ORM packing: g = roughness, b = metallic. Engines that ship separate
+  // metallic / occlusion maps (e.g. Bethesda Starfield: slot 3 roughness, slot 4
+  // metallic, slot 5 AO) point `metallic_roughness` at the roughness map and set
+  // `separate_metallic` so the shader reads metallic from `metallic_map.r`
+  // instead of the combined `.b`. Both default empty so combined-ORM and
+  // untextured materials shade exactly as before.
   AssetId metallic_roughness;
+  AssetId metallic_map;   // dedicated metallic (r) when separate_metallic is set
+  AssetId occlusion_map;  // dedicated ambient-occlusion (r), multiplies indirect
+  bool separate_metallic = false;
   AssetId emissive;
   f32 base_color_factor[4] = {1, 1, 1, 1};
   f32 metallic_factor = 0;
   f32 roughness_factor = 1;
+  // Ambient-occlusion strength: lerps the sampled occlusion toward 1 (no
+  // effect). Only applied when an occlusion_map is bound; 1 = full AO.
+  f32 ao_strength = 1.0f;
   f32 emissive_factor[3] = {0, 0, 0};
   f32 alpha_cutoff = 0.5f;
   // Extended pbr lobes (glTF KHR_materials_*). Defaults are neutral/off so a
