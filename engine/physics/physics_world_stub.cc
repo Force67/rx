@@ -61,6 +61,12 @@ void PhysicsWorld::MoveCharacterVelocity(CharacterId, const Vec3&, f32, Vec3*, b
   if (ground_velocity) *ground_velocity = Vec3{};
 }
 void PhysicsWorld::SetCharacterPosition(CharacterId, const Vec3&) {}
+StrandGroomId PhysicsWorld::CreateStrandGroom(const StrandGroomDesc&, const Mat4&) { return 0; }
+void PhysicsWorld::SetStrandGroomTransform(StrandGroomId, const Mat4&, f32) {}
+void PhysicsWorld::SetStrandGroomWind(StrandGroomId, const Vec3&) {}
+u32 PhysicsWorld::StrandGroomPositionCount(StrandGroomId) const { return 0; }
+bool PhysicsWorld::GetStrandGroomPositions(StrandGroomId, f32*, u32) const { return false; }
+void PhysicsWorld::RemoveStrandGroom(StrandGroomId) {}
 bool PhysicsWorld::Raycast(const Vec3&, const Vec3&, f32, RayHit*) const { return false; }
 bool PhysicsWorld::GetBodyTransform(BodyId, Vec3*, f32[4]) const { return false; }
 

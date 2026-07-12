@@ -20,6 +20,8 @@ using CharacterId = u64;
 using JointId = u64;
 // Opaque wheeled-vehicle handle; 0 is invalid.
 using VehicleId = u64;
+// Opaque strand-groom handle; 0 is invalid.
+using StrandGroomId = u64;
 
 // Jolt-backed rigid body world. Fixed-step simulation driven from the sim
 // stage; dynamic bodies report their transforms back for ECS sync. Bodies
@@ -291,6 +293,71 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     } wheels[4];
   };
   bool GetVehicleState(VehicleId id, VehicleState* out) const;
+
+  // Strand groom (Jolt soft-body Cosserat rods): hair guide strands simulated
+  // on the CPU inside the physics step. Nodes are strand-major
+  // (strand_count * points_per_strand xyz triplets) in a groom-local frame;
+  // node 0 of each strand is the root, pinned to the groom transform (the
+  // animated head bone). Hairstyles are data, not code: `pins` fix extra
+  // mid-strand nodes in the groom frame (a ponytail tie, bun pinning),
+  // `binds` weave nodes of different strands together (braids, dreadlocks),
+  // and the compliance/damping scalars set the per-style feel (compliance is
+  // inverse stiffness, 0 = rigid).
+  struct StrandGroomDesc {
+    const f32* points = nullptr;  // strand_count * points_per_strand * 3
+    u32 strand_count = 0;
+    u32 points_per_strand = 0;
+    // (strand, point) pairs pinned to the groom frame beyond the roots.
+    const u32* pins = nullptr;
+    u32 pin_count = 0;
+    // (strand_a, point_a, strand_b, point_b) cross-strand ties, kept at their
+    // rest-pose distance with `bind_compliance`.
+    const u32* binds = nullptr;
+    u32 bind_count = 0;
+    // Coarse collision proxy for the owning character (scalp/shoulders) in
+    // the groom frame; follows the groom transform as one kinematic body.
+    struct Sphere {
+      Vec3 center;
+      f32 radius = 0;
+    };
+    const Sphere* spheres = nullptr;
+    u32 sphere_count = 0;
+    struct Capsule {
+      Vec3 a;  // segment endpoints
+      Vec3 b;
+      f32 radius = 0;
+    };
+    const Capsule* capsules = nullptr;
+    u32 capsule_count = 0;
+    // Per-style feel.
+    f32 stretch_compliance = 0;      // rod stretch/shear (0 = inextensible)
+    f32 bend_compliance = 0.02f;     // rod bend/twist (higher = looser hair)
+    f32 bind_compliance = 1e-5f;     // cross-strand ties
+    f32 damping = 0.15f;             // linear velocity damping
+    f32 gravity_factor = 1.0f;
+    f32 node_mass = 0.02f;           // kg per dynamic node
+    f32 node_radius = 0.0015f;       // collision radius around each node
+    f32 max_stretch = 1.03f;         // long-range attachment: max node distance
+                                     // from its pin as a fraction of rest arc length
+    u32 iterations = 5;              // solver iterations per step
+  };
+  // Spawns the groom with `transform` placing the groom-local frame in the
+  // world. 0 on failure.
+  StrandGroomId CreateStrandGroom(const StrandGroomDesc& desc, const Mat4& transform);
+  // Retargets the pinned nodes (and the collision proxy) to a new groom
+  // transform; call each frame with the animated head transform. The pins are
+  // pulled to their targets over the next fixed step so the free hair reads a
+  // real root velocity; dt <= 0 teleports instead (spawn, cuts).
+  void SetStrandGroomTransform(StrandGroomId id, const Mat4& transform, f32 dt);
+  // Wind as an acceleration (m/s^2) applied to the whole groom each step; the
+  // caller varies it over time for gusts. Zero (the default) applies nothing.
+  void SetStrandGroomWind(StrandGroomId id, const Vec3& wind);
+  // Number of f32s GetStrandGroomPositions writes (node count * 3); 0 for a
+  // dead handle.
+  u32 StrandGroomPositionCount(StrandGroomId id) const;
+  // World-space node positions, strand-major xyz, for the hair renderer.
+  bool GetStrandGroomPositions(StrandGroomId id, f32* out, u32 count) const;
+  void RemoveStrandGroom(StrandGroomId id);
 
   // Closest hit of a ray; used by foot IK to find the ground under a foot.
   struct RayHit {
