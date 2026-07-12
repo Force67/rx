@@ -180,6 +180,10 @@ if(NOT MSVC)
 endif()
 
 set(RX_RENDER_SHADERS
+  shaders/util/debug_line.vs.hlsl
+  shaders/util/debug_line.ps.hlsl
+  shaders/util/pick_id.vs.hlsl
+  shaders/util/pick_id.ps.hlsl
   shaders/pipeline/mesh.vs.hlsl
   shaders/pipeline/mesh_skin.vs.hlsl
   shaders/gi/shadow.vs.hlsl
