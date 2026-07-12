@@ -13,6 +13,8 @@
 #include "asset/skeleton.h"
 #include "core/math.h"
 #include "engine_context.h"
+#include "net/bubble.h"
+#include "net/bubble_debug.h"
 #include "render/core/renderer.h"
 #include "scene_hook_demo.h"
 #include "scene_hook_rhi_demo.h"
@@ -66,6 +68,11 @@ class DemoScenes {
   void CreateSceneHookDemoScene();
   // Pure-RHI GPU-driven acceptance demo (--demo scenehook-rhi).
   void CreateSceneHookRhiDemoScene();
+  // Streaming-bubble acceptance demo (--demo bubbles): wandering fake players
+  // with interest bubbles over a field of replicated entities, entities tinted
+  // by their owning peer, wire spheres via the net_viz visualizer.
+  void CreateBubbleDemoScene();
+  void EmitBubbles(render::FrameView& view);
 
   struct DemoParticle {
     Vec3 position;
@@ -136,6 +143,13 @@ class DemoScenes {
   // --demo scenehook-rhi: the same acceptance scene driven purely through the
   // backend-agnostic RHI. Non-null only for that demo.
   std::unique_ptr<SceneHookRhiDemo> scene_hook_rhi_;
+
+  // --demo bubbles: the streaming-bubble interest map driven locally (no
+  // transport), plus its wire-sphere visualizer. Non-null only for that demo.
+  bool bubbles_enabled_ = false;
+  net::InterestMap bubble_map_;
+  std::unique_ptr<net::BubbleVisualizer> bubble_viz_;
+  u64 bubble_tick_ = 0;
 };
 
 }  // namespace rx

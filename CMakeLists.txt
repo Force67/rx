@@ -220,6 +220,7 @@ if(NOT DEFINED RX_MODULES)
     anim
     audio
     rpc
+    net
     app
   )
 endif()
@@ -243,9 +244,45 @@ if(NOT TARGET kinema)
   add_subdirectory(${RX_KINEMA_DIR} kinema)
 endif()
 
+# zetanet: the UDP transport rx::net's sessions ride, consumed as an optional
+# sibling checkout. A parent project may already provide the target; without
+# either, rx::net still builds its transport-free half (codec, replication,
+# interest bubbles) and only the sessions are absent. Zetanet hard-codes
+# add_subdirectory(vendor/equilibrium); rather than patch upstream,
+# add_subdirectory is locally overridden so that one call reuses the
+# equilibrium::base vendored above instead of compiling a second, conflicting
+# copy.
+if(NOT TARGET zetanet AND "net" IN_LIST RX_MODULES)
+  set(RX_ZETANET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../zetanet" CACHE PATH
+    "Path to a zetanet checkout (develop branch); missing disables the net sessions")
+  if(EXISTS "${RX_ZETANET_DIR}/CMakeLists.txt")
+    set(ZNET_USE_STL OFF CACHE BOOL "" FORCE)
+    set(ZNET_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
+    function(add_subdirectory _dir)
+      get_filename_component(_leaf "${_dir}" NAME)
+      if(_leaf STREQUAL "equilibrium" AND TARGET equilibrium::base)
+        return()  # zetanet's vendored copy: reuse the one vendored above
+      endif()
+      _add_subdirectory("${_dir}" ${ARGN})
+    endfunction()
+    add_subdirectory(${RX_ZETANET_DIR} zetanet EXCLUDE_FROM_ALL)
+  else()
+    message(STATUS "rx: no zetanet at ${RX_ZETANET_DIR}, net sessions disabled")
+  endif()
+endif()
+
 foreach(module ${RX_MODULES})
   add_subdirectory(engine/${module})
 endforeach()
+
+# rx::net unit tests: pure logic (wire codec, per-peer delta streams, bubble
+# membership + ownership), no GPU, driver or transport needed, so plain
+# `ctest` runs them everywhere.
+if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
+  add_executable(net_test test/net_test.cc)
+  target_link_libraries(net_test PRIVATE rx::net rx::core)
+  add_test(NAME net_test COMMAND net_test)
+endif()
 
 if(RX_BUILD_RUNTIME)
   add_subdirectory(runtime)

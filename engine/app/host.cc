@@ -271,7 +271,9 @@ void Host::GatherEntityDraws(render::FrameView& view) {
                          transform.rotation[3]) *
             MakeScale(transform.scale);
         const Mat4* prev = prev_transforms_.find(key);
-        view.draws.push_back({renderable.mesh.hash, current, prev ? *prev : current});
+        render::DrawItem item{renderable.mesh.hash, current, prev ? *prev : current};
+        if (const auto* tint = world_.Get<scene::Tint>(entity)) item.tint = tint->rgb;
+        view.draws.push_back(item);
         transforms.insert(key, current);
       });
   prev_transforms_ = std::move(transforms);
