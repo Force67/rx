@@ -222,6 +222,7 @@ class D3D12CommandList final : public CommandList {
   void BindTransient(u32 set_index, std::span<const BindingItem> items) override;
   void PushConstants(const void* data, u32 size, u32 offset) override;
   void Dispatch(u32 x, u32 y, u32 z) override;
+  void DispatchIndirect(const GpuBuffer& args, u64 offset) override;
   void BeginRendering(const RenderingInfo& info) override;
   void EndRendering() override;
   void SetViewport(f32 x, f32 y, f32 width, f32 height) override;

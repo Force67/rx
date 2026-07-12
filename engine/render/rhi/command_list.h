@@ -136,6 +136,11 @@ class CommandList {
   void Dispatch2D(Extent2D extent, u32 tile = 8) {
     Dispatch((extent.width + tile - 1) / tile, (extent.height + tile - 1) / tile, 1);
   }
+  // GPU-driven dispatch: 3 u32 group counts fetched from `args` at `offset`
+  // (VkDispatchIndirectCommand / D3D12_DISPATCH_ARGUMENTS). Maps to
+  // vkCmdDispatchIndirect / ExecuteIndirect with a DISPATCH signature. Default
+  // no-op so the null backend stays inert.
+  virtual void DispatchIndirect(const GpuBuffer& /*args*/, u64 /*offset*/) {}
 
   // --- raster ---
   // Begins dynamic rendering and sets viewport+scissor to the full extent.

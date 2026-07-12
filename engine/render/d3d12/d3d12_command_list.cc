@@ -258,6 +258,16 @@ void D3D12CommandList::Dispatch(u32 x, u32 y, u32 z) {
   list_->Dispatch(x, y, z);
 }
 
+void D3D12CommandList::DispatchIndirect(const GpuBuffer& args, u64 offset) {
+  if (!bound_) return;
+  BufferRecord* record = Rec(args.handle);
+  RequireBufferState(record, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+  ID3D12CommandSignature* signature = device_.GetIndirectSignature(
+      D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH, sizeof(D3D12_DISPATCH_ARGUMENTS));
+  if (!signature) return;
+  list_->ExecuteIndirect(signature, 1, record->resource, offset, nullptr, 0);
+}
+
 // --- raster ---
 
 void D3D12CommandList::BeginRendering(const RenderingInfo& info) {

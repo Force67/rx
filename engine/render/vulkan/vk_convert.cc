@@ -219,6 +219,9 @@ ScopeInfo ScopeInfoOf(BarrierScope scope, bool as_source) {
     case BarrierScope::kGraphicsRead:
       return {VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT,
               VK_ACCESS_2_MEMORY_READ_BIT};
+    case BarrierScope::kGraphicsStorageWrite:
+      return {VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT,
+              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
     case BarrierScope::kIndirectArgs:
       return {VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT};
     case BarrierScope::kTransferWrite:
