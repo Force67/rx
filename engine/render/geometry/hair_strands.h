@@ -28,6 +28,9 @@ class HairStrands {
   // transform places the groom-local frame (scalp at origin) into the world.
   u32 CreateGroom(Device& device, const GroomData& data, const GroomParams& params,
                   const Mat4& transform);
+  // Re-places the groom. A groom that no simulation feeds follows rigidly
+  // (its rest pose re-transformed); a fed groom only moves its head sphere,
+  // the node positions stay owned by the feed.
   void SetGroomTransform(u32 id, const Mat4& transform);
   void SetGroomTint(u32 id, const Vec3& tint);
   // Feeds this frame's simulated node positions (world-space xyz, strand-major,
@@ -66,7 +69,9 @@ class HairStrands {
     GpuBuffer colors;                   // guide_count float4 linear rgb
     GpuBuffer indices;  // ribbon triangle list over guide_count * children strands
     base::Vector<HairPoint> host_points;  // canonical CPU copy, world space
+    base::Vector<f32> local_points;       // groom-local rest, for the unfed rigid path
     u32 stale = 0;      // per-slot bits: host_points newer than points[slot]
+    bool fed = false;   // a simulation has supplied points at least once
     u32 guide_count = 0;
     u32 children = 1;
     u32 index_count = 0;
