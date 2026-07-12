@@ -26,6 +26,14 @@ struct PhysicsBinding {
   ecs::Entity entity;
 };
 
+// A physics strand groom the host mirrors into a renderer hair groom every
+// frame: simulated node positions are read back and fed to the ribbon draw.
+// Applications append to Services::hair_bindings; dead handles are skipped.
+struct HairStrandBinding {
+  physics::StrandGroomId strands;
+  u32 groom;  // renderer hair groom id
+};
+
 // The engine services the host owns, handed to the application at
 // OnInitialize. Addresses are stable for the host's lifetime.
 struct Services {
@@ -52,6 +60,7 @@ struct Services {
   const ActionState* actions = nullptr;
 
   base::Vector<PhysicsBinding>* physics_bindings = nullptr;
+  base::Vector<HairStrandBinding>* hair_bindings = nullptr;
 };
 
 }  // namespace rx::app

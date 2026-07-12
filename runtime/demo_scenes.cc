@@ -141,18 +141,26 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (!demo_lights_.empty()) view.lights = demo_lights_;
   if (!demo_decals_.empty()) view.decals = demo_decals_;
 
-  // Strand-hair demo: swing one groom on a slow orbit to show the moving
-  // attachment (its collision sphere and roots ride the transform; the sim
-  // catches up), so the hair sways as the head bobs.
-  if (hair_orbit_groom_ != 0) {
+  // Strand-hair demo: gusty wind over every groom, and one head swung on a
+  // slow orbit to show the moving attachment (its roots and collision proxy
+  // ride the transform; the Jolt strand sim catches up), so the hair sways
+  // and lags as the head bobs.
+  if (!hair_sims_.empty()) {
     hair_time_ += dt;
-    f32 a = hair_time_ * 0.9f;
-    // Mostly a head turn (rotation keeps the head under the hair) plus a small
-    // bob, so the hair sways and lags without exposing the scalp.
-    Vec3 pos{hair_orbit_center_.x + 0.03f * std::sin(a),
-             hair_orbit_center_.y + 0.02f * std::sin(a * 1.7f), hair_orbit_center_.z};
-    Mat4 m = MakeTranslation(pos) * MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * std::sin(a)));
-    renderer_.SetHairGroomTransform(hair_orbit_groom_, m);
+    Vec3 wind = Vec3{0.5f, 0.0f, 0.25f} * (0.6f + 0.4f * std::sin(hair_time_ * 2.1f)) +
+                Vec3{0.0f, 0.15f * std::sin(hair_time_ * 3.7f), 0.0f};
+    for (physics::StrandGroomId sim : hair_sims_) physics_.SetStrandGroomWind(sim, wind);
+    if (hair_orbit_strands_ != 0) {
+      f32 a = hair_time_ * 0.9f;
+      // Mostly a head turn (rotation keeps the head under the hair) plus a
+      // small bob, so the hair sways without exposing the scalp.
+      Vec3 pos{hair_orbit_center_.x + 0.03f * std::sin(a),
+               hair_orbit_center_.y + 0.02f * std::sin(a * 1.7f), hair_orbit_center_.z};
+      Mat4 m =
+          MakeTranslation(pos) * MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * std::sin(a)));
+      physics_.SetStrandGroomTransform(hair_orbit_strands_, m, dt);
+      renderer_.SetHairGroomTransform(hair_orbit_groom_, m);
+    }
   }
 
   if (locomotion_enabled_) EmitLocomotion(dt, view);
@@ -697,10 +705,38 @@ void DemoScenes::CreateImposterDemoScene() {
   camera_.speed = 15.0f;
 }
 
+namespace {
+
+// The physics strand desc is the groom data's constraint/feel model with the
+// buffers passed by pointer; collision shapes are added by the caller.
+physics::PhysicsWorld::StrandGroomDesc ToStrandGroomDesc(const render::GroomData& data) {
+  physics::PhysicsWorld::StrandGroomDesc desc;
+  desc.points = data.points.data();
+  desc.strand_count = data.guide_count;
+  desc.points_per_strand = render::kGroomPointsPerStrand;
+  desc.pins = data.pins.data();
+  desc.pin_count = static_cast<u32>(data.pins.size() / 2);
+  desc.binds = data.binds.data();
+  desc.bind_count = static_cast<u32>(data.binds.size() / 4);
+  desc.stretch_compliance = data.sim.stretch_compliance;
+  desc.bend_compliance = data.sim.bend_compliance;
+  desc.bind_compliance = data.sim.bind_compliance;
+  desc.damping = data.sim.damping;
+  desc.gravity_factor = data.sim.gravity_factor;
+  desc.node_mass = data.sim.node_mass;
+  desc.node_radius = data.sim.node_radius;
+  desc.max_stretch = data.sim.max_stretch;
+  desc.iterations = data.sim.iterations;
+  return desc;
+}
+
+}  // namespace
+
 void DemoScenes::CreateStrandHairDemoScene() {
-  // Strand hair from real Skyrim hairstyles: three grooms on head spheres, each
-  // resampled into simulated guide strands that trace the original hair cards,
-  // tinted distinctly. The right one orbits to prove the moving attachment.
+  // Strand hair simulated by the Jolt soft-body strand sim: three hairstyles
+  // built purely as groom data (loose long hair, a woven braid, a pinned
+  // ponytail) on head spheres, tinted distinctly. The ponytail head orbits to
+  // prove the moving attachment.
   asset::Material skin;
   skin.id = asset::MakeAssetId("builtin/strands/skin");
   skin.base_color_factor[0] = 0.68f;
@@ -739,45 +775,57 @@ void DemoScenes::CreateStrandHairDemoScene() {
 
   if (config_.headless) return;
 
-  // Three grooms grown from procedural scalp spheres, tinted distinctly; guide
-  // strands are resampled over the scalp triangles and simulated. The right one
-  // orbits to prove the moving attachment.
+  // Three data-defined hairstyles, tinted distinctly; the last one orbits.
   struct HairSpec {
+    render::TestGroomStyle style;
+    u32 guides;
+    u32 children;
     Vec3 tint;
     bool orbit;
   };
   const HairSpec specs[] = {
-      {{0.50f, 0.36f, 0.24f}, false},  // brown
-      {{0.78f, 0.36f, 0.22f}, false},  // auburn
-      {{1.10f, 0.95f, 0.62f}, true},   // blonde, orbiting
+      {render::TestGroomStyle::kLoose, 700, 20, {1.0f, 0.95f, 0.85f}, false},
+      {render::TestGroomStyle::kBraid, 48, 30, {0.9f, 0.85f, 0.8f}, false},
+      {render::TestGroomStyle::kPonytail, 500, 20, {1.1f, 0.95f, 0.62f}, true},
   };
   const f32 xs[] = {-0.62f, 0.0f, 0.62f};
 
   for (u32 i = 0; i < 3; ++i) {
+    const HairSpec& spec = specs[i];
     Vec3 head_center{xs[i], 1.62f, 0.0f};
-    asset::Mesh scalp = asset::MakeSphere(
-        head_radius, 24, 36,
-        asset::MakeAssetId(std::string("builtin/strands/scalp") + std::to_string(i)));
-    for (auto& v : scalp.lods[0].vertices) {
-      v.position[0] += head_center.x;
-      v.position[1] += head_center.y;
-      v.position[2] += head_center.z;
-    }
+    render::GroomData data;
+    if (!render::BuildTestGroom(spec.style, spec.guides, i + 1, &data)) continue;
 
     render::GroomParams params;
-    params.guide_count = 8000;
-    params.children_per_guide = 20;
+    params.children_per_guide = spec.children;
     params.clump_radius = 0.0035f;
     params.strand_width = 0.0007f;
-    params.tint = specs[i].tint;
-    params.seed = i + 1;
-    params.units_to_meters = 0.01428f;  // scalp built with this same unit scale
-    u32 id = renderer_.CreateHairGroom(scalp, params, MakeTranslation(head_center));
+    params.tint = spec.tint;
+    Mat4 transform = MakeTranslation(head_center);
+    u32 id = renderer_.CreateHairGroom(data, params, transform);
     if (id == 0) continue;
     hair_grooms_.push_back(id);
-    if (specs[i].orbit) {
-      hair_orbit_groom_ = id;
-      hair_orbit_center_ = head_center;
+
+    // The matching physics groom: head sphere + a shoulders capsule as the
+    // character collision proxy, bound to the renderer groom for readback.
+    physics::PhysicsWorld::StrandGroomDesc desc = ToStrandGroomDesc(data);
+    physics::PhysicsWorld::StrandGroomDesc::Sphere head_sphere{data.collision_center,
+                                                               data.collision_radius};
+    physics::PhysicsWorld::StrandGroomDesc::Capsule shoulders{
+        {-0.14f, -0.30f, 0.0f}, {0.14f, -0.30f, 0.0f}, 0.07f};
+    desc.spheres = &head_sphere;
+    desc.sphere_count = 1;
+    desc.capsules = &shoulders;
+    desc.capsule_count = 1;
+    physics::StrandGroomId sim = physics_.CreateStrandGroom(desc, transform);
+    if (sim != 0) {
+      hair_sims_.push_back(sim);
+      ctx_.hair_bindings->push_back({sim, id});
+      if (spec.orbit) {
+        hair_orbit_groom_ = id;
+        hair_orbit_strands_ = sim;
+        hair_orbit_center_ = head_center;
+      }
     }
 
     // Head prop sized to sit just inside the groom's collision sphere so the
@@ -785,7 +833,7 @@ void DemoScenes::CreateStrandHairDemoScene() {
     Vec3 hc = head_center;
     f32 hr = head_radius;
     renderer_.HairGroomHead(id, &hc, &hr);
-    asset::Mesh head = asset::MakeSphere(hr * 0.58f, 24, 36,
+    asset::Mesh head = asset::MakeSphere(hr * 0.92f, 24, 36,
                                          asset::MakeAssetId(std::string("builtin/strands/head") +
                                                             std::to_string(i)));
     head.lods[0].submeshes.push_back({0, static_cast<u32>(head.lods[0].indices.size()), skin.id});

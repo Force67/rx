@@ -93,6 +93,7 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   services_.input_map = &input_map_;
   services_.actions = &actions_;
   services_.physics_bindings = &physics_bindings_;
+  services_.hair_bindings = &hair_bindings_;
 
   return app_->OnInitialize(services_);
 }
@@ -221,6 +222,18 @@ bool Host::RunFrame() {
 
   if (!config_.headless) {
     app_->OnUpdate(frame_delta);
+
+    // Mirror enrolled strand grooms into their renderer hair grooms: read the
+    // simulated node positions back and feed the ribbon draw.
+    for (const HairStrandBinding& hair : hair_bindings_) {
+      u32 count = physics_.StrandGroomPositionCount(hair.strands);
+      if (count == 0) continue;
+      hair_positions_.resize(count);
+      if (physics_.GetStrandGroomPositions(hair.strands, hair_positions_.data(), count)) {
+        renderer_.SetHairGroomPoints(hair.groom, hair_positions_.data(), count);
+      }
+    }
+
     scheduler_.RunStage(ecs::Stage::kPreRender, world_, frame_delta);
 
     render::FrameView view;
