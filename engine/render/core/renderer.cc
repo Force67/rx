@@ -17,8 +17,12 @@
 #include "shaders/hdr_capture_cs_hlsl.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
 #include "shaders/contact_shadow_cs_hlsl.h"
+#include "shaders/debug_line_vs_hlsl.h"
+#include "shaders/debug_line_ps_hlsl.h"
 #include "shaders/depth_copy_ps_hlsl.h"
 #include "shaders/fullscreen_vs_hlsl.h"
+#include "shaders/pick_id_vs_hlsl.h"
+#include "shaders/pick_id_ps_hlsl.h"
 #include "shaders/light_cluster_cs_hlsl.h"
 #include "shaders/msaa_resolve_cs_hlsl.h"
 #include "shaders/sss_blur_cs_hlsl.h"
@@ -1552,7 +1556,220 @@ void Renderer::RenderFrame(const FrameView& view) {
   if (presented == PresentResult::kOutOfDate) {
     RecreateSwapchain();
   }
+
+  // Editor picking runs as a standalone synchronous submit after the frame (a
+  // rare operation, so the stall is acceptable) so it never perturbs the main
+  // frame graph. It reuses the meshes/transforms this frame presented.
+  if (pick_requested_) RenderPickPass(view);
+
   ++frame_index_;
+}
+
+// --- Editor debug lines ------------------------------------------------------
+
+namespace {
+// One vertex of a debug line: world position + packed rgba8 colour.
+struct DebugLineVertex {
+  f32 pos[3];
+  u8 rgba[4];
+};
+struct DebugLinePush {
+  Mat4 view_proj;
+};
+}  // namespace
+
+void Renderer::BuildDebugLinePipelines() {
+  if (debug_line_pipeline_) return;
+  VertexBufferLayout stream{
+      .stride = sizeof(DebugLineVertex),
+      .attributes = {{0, Format::kRGB32Float, offsetof(DebugLineVertex, pos)},
+                     {1, Format::kRGBA8Unorm, offsetof(DebugLineVertex, rgba)}}};
+  GraphicsPipelineDesc desc{
+      .vertex = RX_SHADER(k_debug_line_vs_hlsl),
+      .fragment = RX_SHADER(k_debug_line_ps_hlsl),
+      .vertex_buffers = {stream},
+      .topology = PrimitiveTopology::kLineList,
+      .raster = {.cull = CullMode::kNone, .front = FrontFace::kCounterClockwise,
+                 .polygon = PolygonMode::kFill},
+      .depth = {.test = true, .write = false, .compare = CompareOp::kGreaterEqual,
+                .format = kDepthFormat},
+      .color_formats = {kSceneColorFormat},
+      .blend = {BlendMode::kAlpha},
+      .push_constant_size = sizeof(DebugLinePush),
+      .debug_name = "debug_line",
+  };
+  debug_line_pipeline_ = device_->CreateGraphicsPipeline(desc);
+  // Overlay variant: identical but no depth test, so it always draws on top.
+  desc.depth = {.test = false, .write = false, .format = kDepthFormat};
+  desc.debug_name = "debug_line_overlay";
+  debug_line_overlay_pipeline_ = device_->CreateGraphicsPipeline(desc);
+}
+
+void Renderer::DrawDebugLines(CommandList& cmd, const FrameView& view, const Mat4& view_proj,
+                              Extent2D extent) {
+  const size_t total = view.debug_lines.size() + view.debug_lines_overlay.size();
+  if (total == 0) return;
+  BuildDebugLinePipelines();
+  if (!debug_line_pipeline_ || !debug_line_overlay_pipeline_) return;
+
+  const u32 slot = frame_index_ % kFramesInFlight;
+  const u32 needed_vertices = static_cast<u32>(total * 2);
+  if (debug_line_vbo_capacity_[slot] < needed_vertices) {
+    // Grow to the requested count (host-visible; the slot's fence already fired
+    // in BeginFrame, so overwriting is safe). Round up to reduce churn.
+    u32 cap = 256;
+    while (cap < needed_vertices) cap *= 2;
+    device_->DestroyBufferDeferred(debug_line_vbo_[slot]);
+    debug_line_vbo_[slot] =
+        device_->CreateBuffer(static_cast<u64>(cap) * sizeof(DebugLineVertex),
+                              kBufferUsageVertex, /*host_visible=*/true);
+    debug_line_vbo_capacity_[slot] = cap;
+  }
+  auto* verts = static_cast<DebugLineVertex*>(debug_line_vbo_[slot].mapped);
+  if (!verts) return;
+
+  auto append = [&](const DebugLine& l, u32& at) {
+    auto write = [&](const Vec3& p) {
+      verts[at].pos[0] = p.x; verts[at].pos[1] = p.y; verts[at].pos[2] = p.z;
+      verts[at].rgba[0] = static_cast<u8>((l.rgba >> 24) & 0xff);
+      verts[at].rgba[1] = static_cast<u8>((l.rgba >> 16) & 0xff);
+      verts[at].rgba[2] = static_cast<u8>((l.rgba >> 8) & 0xff);
+      verts[at].rgba[3] = static_cast<u8>(l.rgba & 0xff);
+      ++at;
+    };
+    write(l.a);
+    write(l.b);
+  };
+
+  u32 count = 0;
+  const u32 depth_first = count;
+  for (const DebugLine& l : view.debug_lines) append(l, count);
+  const u32 depth_count = count - depth_first;
+  const u32 overlay_first = count;
+  for (const DebugLine& l : view.debug_lines_overlay) append(l, count);
+  const u32 overlay_count = count - overlay_first;
+
+  DebugLinePush push{view_proj};
+  cmd.SetViewport(0, 0, static_cast<f32>(extent.width), static_cast<f32>(extent.height));
+  cmd.SetScissor(0, 0, extent.width, extent.height);
+  cmd.BindVertexBuffer(0, debug_line_vbo_[slot], 0);
+  if (depth_count) {
+    cmd.BindPipeline(debug_line_pipeline_);
+    cmd.PushConstants(&push, sizeof(push), 0);
+    cmd.Draw(depth_count, 1, depth_first, 0);
+  }
+  if (overlay_count) {
+    cmd.BindPipeline(debug_line_overlay_pipeline_);
+    cmd.PushConstants(&push, sizeof(push), 0);
+    cmd.Draw(overlay_count, 1, overlay_first, 0);
+  }
+}
+
+// --- Editor picking ----------------------------------------------------------
+
+void Renderer::RequestPick(u32 x, u32 y) {
+  pick_requested_ = true;
+  pick_x_ = x;
+  pick_y_ = y;
+}
+
+std::optional<PickResult> Renderer::TakePickResult() {
+  if (!pick_result_ready_) return std::nullopt;
+  pick_result_ready_ = false;
+  return PickResult{pick_result_id_};
+}
+
+namespace {
+struct PickPush {
+  Mat4 mvp;
+  u32 id;
+};
+}  // namespace
+
+void Renderer::RenderPickPass(const FrameView& view) {
+  pick_requested_ = false;
+  if (!device_ || device_->is_stub() || render_width_ == 0 || render_height_ == 0) return;
+
+  // (Re)create the id + depth targets at render resolution.
+  if (pick_image_w_ != render_width_ || pick_image_h_ != render_height_ || !pick_id_image_) {
+    if (pick_id_image_) device_->DestroyImageDeferred(pick_id_image_);
+    if (pick_depth_image_) device_->DestroyImageDeferred(pick_depth_image_);
+    pick_id_image_ = device_->CreateImage2D(
+        Format::kR32Uint, {render_width_, render_height_},
+        kTextureUsageColorTarget | kTextureUsageTransferSrc);
+    pick_depth_image_ = device_->CreateImage2D(Format::kD32Float,
+                                               {render_width_, render_height_},
+                                               kTextureUsageDepthTarget);
+    pick_image_w_ = render_width_;
+    pick_image_h_ = render_height_;
+  }
+  if (!pick_id_image_ || !pick_depth_image_) return;
+
+  if (!pick_pipeline_) {
+    pick_pipeline_ = device_->CreateGraphicsPipeline({
+        .vertex = RX_SHADER(k_pick_id_vs_hlsl),
+        .fragment = RX_SHADER(k_pick_id_ps_hlsl),
+        .vertex_buffers = {{.stride = sizeof(asset::Vertex),
+                            .attributes = {{0, Format::kRGB32Float,
+                                            offsetof(asset::Vertex, position)}}}},
+        .raster = {.cull = CullMode::kBack, .front = FrontFace::kCounterClockwise},
+        .depth = {.test = true, .write = true, .compare = CompareOp::kGreaterEqual,
+                  .format = Format::kD32Float},
+        .color_formats = {Format::kR32Uint},
+        .push_constant_size = sizeof(PickPush),
+        .debug_name = "pick_id",
+    });
+  }
+  if (!pick_pipeline_) return;
+
+  const f32 aspect = static_cast<f32>(render_width_) / static_cast<f32>(render_height_);
+  const Mat4 view_proj =
+      PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f) *
+      LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
+
+  device_->ImmediateSubmit([&](CommandList& cmd) {
+    cmd.Barrier(Transition(pick_id_image_, ResourceState::kUndefined, ResourceState::kColorTarget));
+    cmd.Barrier(
+        Transition(pick_depth_image_, ResourceState::kUndefined, ResourceState::kDepthTarget));
+    ColorAttachment color{.view = pick_id_image_.view, .load = LoadOp::kClear};
+    DepthAttachment depth{.view = pick_depth_image_.view, .load = LoadOp::kClear, .clear = 0.0f};
+    cmd.BeginRendering({.extent = {render_width_, render_height_},
+                        .colors = {&color, 1},
+                        .depth = &depth});
+    cmd.SetViewport(0, 0, static_cast<f32>(render_width_), static_cast<f32>(render_height_));
+    cmd.SetScissor(0, 0, render_width_, render_height_);
+    cmd.BindPipeline(pick_pipeline_);
+    for (const DrawItem& item : view.draws) {
+      if (item.pick_id == 0) continue;  // unpickable: leave the cleared 0
+      const GpuMesh* mesh = meshes_.find(item.mesh);
+      if (!mesh || !mesh->indices) continue;
+      PickPush push{view_proj * item.transform, item.pick_id};
+      cmd.PushConstants(&push, sizeof(push), 0);
+      cmd.BindVertexBuffer(0, mesh->vertices, 0);
+      cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+      for (const GpuSubmesh& submesh : mesh->submeshes) {
+        cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
+      }
+    }
+    cmd.EndRendering();
+  });
+
+  // Read back the whole id target and sample the requested pixel (in output
+  // pixels, scaled to render resolution).
+  std::vector<u32> pixels(static_cast<size_t>(render_width_) * render_height_);
+  if (!device_->ReadbackImage(pick_id_image_, ResourceState::kColorTarget, pixels.data(),
+                              pixels.size() * sizeof(u32))) {
+    return;
+  }
+  u32 px = pick_x_, py = pick_y_;
+  if (output_width_ > 0 && output_height_ > 0) {
+    px = pick_x_ * render_width_ / output_width_;
+    py = pick_y_ * render_height_ / output_height_;
+  }
+  if (px >= render_width_) px = render_width_ - 1;
+  if (py >= render_height_) py = render_height_ - 1;
+  pick_result_id_ = pixels[static_cast<size_t>(py) * render_width_ + px];
+  pick_result_ready_ = true;
 }
 
 void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const FrameView& view) {
@@ -3742,6 +3959,29 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               });
         });
   }
+
+  // Editor debug lines over the resolved scene (depth-tested + overlay), just
+  // before post/UI. Only added when the app supplied lines this frame.
+  if (!view.debug_lines.empty() || !view.debug_lines_overlay.empty()) {
+    graph_.AddPass(
+        "debug_lines",
+        [lit, depth](RenderGraph::PassBuilder& builder) {
+          builder.Write(lit, ResourceUsage::kColorAttachment);
+          if (depth != kInvalidResource) builder.Write(depth, ResourceUsage::kDepthAttachment);
+        },
+        [this, lit, depth, view_proj, &view](PassContext& ctx) {
+          const GpuImage& color = ctx.graph->image(lit);
+          ColorAttachment ca{.view = color.view, .load = LoadOp::kLoad};
+          const bool have_depth = depth != kInvalidResource;
+          DepthAttachment da{};
+          if (have_depth) da = {.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
+          ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
+                                   .colors = {&ca, 1},
+                                   .depth = have_depth ? &da : nullptr});
+          DrawDebugLines(*ctx.cmd, view, view_proj, {render_width_, render_height_});
+          ctx.cmd->EndRendering();
+        });
+  }
   }  // end raster path
 
   // Water has no place in the path tracer (blend geometry never enters the tlas),
@@ -4206,6 +4446,14 @@ void Renderer::Shutdown() {
     if (contact_shadow_pipeline_) device_->DestroyPipeline(contact_shadow_pipeline_);
     if (cloud_shadow_pipeline_) device_->DestroyPipeline(cloud_shadow_pipeline_);
     if (sss_pipeline_) device_->DestroyPipeline(sss_pipeline_);
+    // Editor debug-line + picking resources (lazily created).
+    if (debug_line_pipeline_) device_->DestroyPipeline(debug_line_pipeline_);
+    if (debug_line_overlay_pipeline_) device_->DestroyPipeline(debug_line_overlay_pipeline_);
+    for (GpuBuffer& vbo : debug_line_vbo_)
+      if (vbo) device_->DestroyBuffer(vbo);
+    if (pick_pipeline_) device_->DestroyPipeline(pick_pipeline_);
+    if (pick_id_image_) device_->DestroyImage(pick_id_image_);
+    if (pick_depth_image_) device_->DestroyImage(pick_depth_image_);
     if (cluster_counts_) device_->DestroyBuffer(cluster_counts_);
     if (cluster_indices_) device_->DestroyBuffer(cluster_indices_);
     if (decal_cluster_indices_) device_->DestroyBuffer(decal_cluster_indices_);

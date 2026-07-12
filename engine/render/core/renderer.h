@@ -3,6 +3,8 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
+#include <span>
 #include <string>
 
 #include <base/containers/unordered_map.h>
@@ -180,6 +182,25 @@ struct DrawItem {
   // A per-instance tint the app can use to distinguish otherwise-identical
   // actors (e.g. team/faction colouring).
   u32 tint = 0;
+  // Entity id written to the pick target on a RequestPick frame. 0 = not
+  // pickable (the id readback returns 0 for background and unpickable draws).
+  u32 pick_id = 0;
+};
+
+// A world-space debug line segment with a packed rgba8 (0xRRGGBBAA) color.
+// Filled per frame into FrameView::debug_lines (depth-tested against the scene)
+// or debug_lines_overlay (drawn on top). Editor gizmos, bounds and grids ride
+// this path without the app recording its own GPU pass.
+struct DebugLine {
+  Vec3 a;
+  Vec3 b;
+  u32 rgba = 0xffffffff;
+};
+
+// The entity id under a requested pixel, read back from the pick target. See
+// Renderer::RequestPick / TakePickResult.
+struct PickResult {
+  u32 pick_id = 0;
 };
 
 struct FrameView {
@@ -239,6 +260,12 @@ struct FrameView {
   std::function<void(const SceneHookContext&)> scene_opaque;
   std::function<void(const SceneHookContext&)> scene_transparent;
 
+  // Debug line lists for this frame (non-owning; valid for the RenderFrame call).
+  // debug_lines are depth-tested against the resolved scene depth; overlay lines
+  // draw on top. Both are drawn just before the UI pass. Empty = no line pass.
+  std::span<const DebugLine> debug_lines;
+  std::span<const DebugLine> debug_lines_overlay;
+
   // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI sets
   // needs_blur so the renderer captures + blurs the backbuffer before the ui
   // pass and writes the result here for hud_draw to bind. blur_source/sampler
@@ -270,6 +297,14 @@ class RX_RENDER_EXPORT Renderer {
   // Saves the next presented frame as png. Also armed by the
   // RX_SCREENSHOT env var ("path.png:seconds") for headless captures.
   void CaptureScreenshot(const std::string& path);
+
+  // Editor picking. RequestPick arms an entity-id pass for the next frame that
+  // rasterizes the opaque draw list into an R32_UINT target and reads back the
+  // single pixel at (x, y) in output pixels. The result arrives asynchronously
+  // (1-2 frames later); poll TakePickResult, which returns and clears the
+  // pending result when it is ready. pick_id 0 means background/unpickable.
+  void RequestPick(u32 x, u32 y);
+  std::optional<PickResult> TakePickResult();
 
   // Makes a mesh drawable, keyed by its asset id. Materials referenced by
   // submeshes should be uploaded first. No-op without a device. id_salt
@@ -543,6 +578,30 @@ class RX_RENDER_EXPORT Renderer {
   f32 applied_sun_intensity_ = -1;
   Vec3 applied_sun_color_{};
   bool environment_dirty_ = true;
+
+  // Editor debug-line pass: a line-list pipeline (lazily built) drawing
+  // FrameView::debug_lines/overlay from per-frame host-visible vertex buffers.
+  void BuildDebugLinePipelines();
+  void DrawDebugLines(CommandList& cmd, const FrameView& view, const Mat4& view_proj,
+                      Extent2D extent);
+  PipelineHandle debug_line_pipeline_;          // depth-tested
+  PipelineHandle debug_line_overlay_pipeline_;  // always on top
+  GpuBuffer debug_line_vbo_[kFramesInFlight];   // host-visible, one per slot
+  u32 debug_line_vbo_capacity_[kFramesInFlight] = {};  // in vertices
+
+  // Editor picking: an R32_UINT id pass over the opaque draws, read back at the
+  // requested pixel. A request arms the id pass for the next rendered frame; the
+  // readback is synchronous within that frame and the result is queued for
+  // TakePickResult (a rare editor operation, so the stall is acceptable).
+  void RenderPickPass(const FrameView& view);
+  bool pick_requested_ = false;
+  u32 pick_x_ = 0, pick_y_ = 0;
+  bool pick_result_ready_ = false;
+  u32 pick_result_id_ = 0;
+  PipelineHandle pick_pipeline_;
+  GpuImage pick_id_image_;     // R32_UINT, render resolution
+  GpuImage pick_depth_image_;  // D32, render resolution
+  u32 pick_image_w_ = 0, pick_image_h_ = 0;
 
   void WriteBackbufferPng(const std::string& path, u32 image_index);
   void WriteScreenshot(u32 image_index);
