@@ -6,6 +6,7 @@ rx_add_module(anim
   rig_player.cc
   foot_placement.cc
   morph.cc
+  expression.cc
 )
 target_link_libraries(rx_anim PUBLIC rx::core rx::asset)
 # kinema is a PRIVATE implementation detail of the graph/rig/foot-placement units
