@@ -46,7 +46,7 @@ struct PushData {
 #else
   uint2 pad_bone;  // layout mirrors the skinned block (MeshPushConstants)
   uint pad_skin;
-  uint pad_tint;
+  uint tint_packed;  // rgb8 (0xRRGGBB) albedo tint, 0 = none
 #endif
   // World-space rect (min_x, min_z, max_x, max_z) of the fully streamed
   // terrain cells; set only on distant terrain-LOD draws, zeros otherwise.
@@ -179,9 +179,9 @@ VsOut main(VsIn input) {
   output.tangent = float4(mul((float3x3)push.model, local_tangent), input.tangent.w);
   output.uv = input.uv;
   output.color = input.color;
-#ifdef RX_SKINNED
-  // Modulate the actor's albedo by its packed per-instance tint so otherwise
-  // identical actors read apart (lower-than-1 factors also tame bright blowout).
+  // Modulate the albedo by the packed per-instance tint so otherwise identical
+  // instances read apart: team/faction colours on skinned actors, owner
+  // colours on tinted props (lower-than-1 factors also tame bright blowout).
   if (push.tint_packed != 0u) {
     float3 t = float3(float((push.tint_packed >> 16) & 0xffu),
                       float((push.tint_packed >> 8) & 0xffu),
@@ -189,6 +189,5 @@ VsOut main(VsIn input) {
                255.0;
     output.color.rgb *= t;
   }
-#endif
   return output;
 }

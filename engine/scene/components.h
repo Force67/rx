@@ -20,6 +20,13 @@ struct Renderable {
 // data, its presence is the state.
 struct Hidden {};
 
+// Packed rgb8 tint (0xRRGGBB) modulating the entity's albedo, 0 = untinted.
+// Host::GatherEntityDraws copies it into the DrawItem, so apps can color
+// otherwise-identical entities (teams, owners, debug states) per instance.
+struct Tint {
+  u32 rgb = 0;
+};
+
 }  // namespace rx::scene
 
 #endif  // RX_SCENE_COMPONENTS_H_

@@ -24,6 +24,8 @@ set(RX_RUNTIME_MODULES
   rx::render
   rx::physics
   rx::anim
+  rx::net
+  rx::net_viz
 )
 
 add_executable(rx main.cc ${RX_RUNTIME_SOURCES})

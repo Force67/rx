@@ -97,14 +97,111 @@ void DemoScenes::CreateSceneHookRhiDemoScene() {
   }
 }
 
+namespace {
+
+// A fake player wandering a lissajous path, dragging its interest bubble
+// across the entity field.
+struct BubbleAgent {
+  f32 time = 0;
+  f32 rate_x = 0.3f;
+  f32 rate_z = 0.2f;
+  f32 extent = 14.0f;
+};
+
+}  // namespace
+
+void DemoScenes::CreateBubbleDemoScene() {
+  // The streaming-bubble acceptance scene: a field of replicated entities
+  // (NetworkId), three wandering "players" carrying InterestBubbles, the
+  // InterestMap driven locally each frame. Entities tint to their owner's
+  // color, wire spheres draw through rx::net_viz -- the whole bubble feature
+  // without a transport in sight.
+  asset::Mesh pawn = asset::MakeCube(0.35f, asset::MakeAssetId("bubbles/pawn"));
+  asset::Mesh player = asset::MakeCube(0.7f, asset::MakeAssetId("bubbles/player"));
+  asset::Mesh ground = asset::MakeCube(24.0f, asset::MakeAssetId("bubbles/ground"));
+  if (!config_.headless) {
+    renderer_.UploadMesh(pawn);
+    renderer_.UploadMesh(player);
+    renderer_.UploadMesh(ground);
+  }
+
+  ecs::Entity floor = world_.Create();
+  world_.Add(floor, scene::Transform{.position = {0.0f, -24.35f, 0.0f}});
+  world_.Add(floor, scene::Renderable{ground.id});
+
+  // The replicated field: a 13x13 grid of pawns.
+  for (int gx = -6; gx <= 6; ++gx) {
+    for (int gz = -6; gz <= 6; ++gz) {
+      ecs::Entity e = world_.Create();
+      world_.Add(e, scene::Transform{.position = {gx * 3.0f, 0.0f, gz * 3.0f}});
+      world_.Add(e, scene::Renderable{pawn.id});
+      world_.Add(e, net::AllocateNetworkId());
+      world_.Add(e, scene::Tint{0x555555});
+    }
+  }
+
+  // Three players with 8-unit bubbles on offset wander paths.
+  for (u32 peer = 1; peer <= 3; ++peer) {
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {peer * 4.0f, 0.6f, 0.0f}});
+    world_.Add(e, scene::Renderable{player.id});
+    world_.Add(e, net::AllocateNetworkId());
+    world_.Add(e, net::InterestBubble{peer, 8.0f});
+    world_.Add(e, scene::Tint{net::PeerColor(peer)});
+    BubbleAgent agent;
+    agent.time = static_cast<f32>(peer) * 2.4f;
+    agent.rate_x = 0.23f + 0.07f * static_cast<f32>(peer);
+    agent.rate_z = 0.31f - 0.05f * static_cast<f32>(peer);
+    world_.Add(e, agent);
+  }
+
+  scheduler_.AddSystem(ecs::Stage::kSim, "bubble_agents", [](ecs::World& world, f32 dt) {
+    world.Each<BubbleAgent, scene::Transform>(
+        [dt](ecs::Entity, BubbleAgent& agent, scene::Transform& t) {
+          agent.time += dt;
+          t.position[0] = std::sin(agent.time * agent.rate_x) * agent.extent;
+          t.position[2] = std::cos(agent.time * agent.rate_z) * agent.extent;
+        });
+  });
+
+  bubble_map_.Configure(net::InterestConfig{});
+  bubbles_enabled_ = true;
+
+  camera_.set_position({0.0f, 16.0f, 24.0f});
+  camera_.set_yaw_pitch(0.0f, -0.55f);
+  camera_.speed = 10.0f;
+
+  if (!config_.headless) {
+    bubble_viz_ = std::make_unique<net::BubbleVisualizer>();
+    if (!bubble_viz_->Init(renderer_)) {
+      RX_WARN("bubble visualizer unavailable; tinting only");
+      bubble_viz_.reset();
+    }
+  }
+  RX_INFO("bubbles demo: 3 wandering players, 169 replicated pawns, RX_NET_BUBBLES=0 hides the spheres");
+}
+
+void DemoScenes::EmitBubbles(render::FrameView& view) {
+  bubble_map_.Update(world_, ++bubble_tick_);
+  // Paint every replicated entity with its owner's color; unowned = grey.
+  world_.Each<net::NetworkId, scene::Tint>(
+      [&](ecs::Entity, net::NetworkId& id, scene::Tint& tint) {
+        const u32 owner = bubble_map_.OwnerOf(id.value);
+        tint.rgb = owner == 0 ? 0x555555 : net::PeerColor(owner);
+      });
+  if (bubble_viz_) bubble_viz_->Emit(view, bubble_map_.bubbles());
+}
+
 void DemoScenes::Shutdown() {
   scene_hook_.reset();
   scene_hook_rhi_.reset();
+  bubble_viz_.reset();
 }
 
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (scene_hook_) scene_hook_->Emit(dt, view);
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
+  if (bubbles_enabled_) EmitBubbles(view);
   UpdateParticles(dt, view);
   if (gpu_particle_count_ > 0) {
     view.gpu_particle_count = gpu_particle_count_;
@@ -1832,6 +1929,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "scenehook-rhi") {
     CreateSceneHookRhiDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "bubbles") {
+    CreateBubbleDemoScene();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));

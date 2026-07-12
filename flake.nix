@@ -202,6 +202,7 @@
               glslang                  # FidelityFX shader permutations
               pkg-config
               sdl3
+              openssl                  # zetanet crypto backend (optional net sessions)
               wayland                  # libwayland-client, KDE HDR-toggle monitor
               vulkan-headers
               vulkan-loader

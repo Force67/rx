@@ -84,6 +84,18 @@
 #  define RX_RPC_EXPORT RX_DSO_IMPORT
 #endif
 
+#if defined(RX_NET_IMPLEMENTATION)
+#  define RX_NET_EXPORT RX_DSO_EXPORT
+#else
+#  define RX_NET_EXPORT RX_DSO_IMPORT
+#endif
+
+#if defined(RX_NET_VIZ_IMPLEMENTATION)
+#  define RX_NET_VIZ_EXPORT RX_DSO_EXPORT
+#else
+#  define RX_NET_VIZ_EXPORT RX_DSO_IMPORT
+#endif
+
 #if defined(RX_APP_IMPLEMENTATION)
 #  define RX_APP_EXPORT RX_DSO_EXPORT
 #else
