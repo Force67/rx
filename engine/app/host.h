@@ -83,6 +83,8 @@ class RX_APP_EXPORT Host {
   render::Renderer renderer_;
   physics::PhysicsWorld physics_;
   base::Vector<PhysicsBinding> physics_bindings_;
+  base::Vector<HairStrandBinding> hair_bindings_;
+  base::Vector<f32> hair_positions_;  // strand readback scratch
 
   // Device-agnostic input: bindings + the per-frame resolved action snapshot.
   InputMap input_map_;

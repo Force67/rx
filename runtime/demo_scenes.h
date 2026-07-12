@@ -103,7 +103,9 @@ class DemoScenes {
   f32 demo_input_time_ = 0;
 
   base::Vector<u32> hair_grooms_;      // strand-hair demo groom handles
+  base::Vector<physics::StrandGroomId> hair_sims_;  // matching physics grooms
   u32 hair_orbit_groom_ = 0;           // the groom driven on a slow orbit
+  physics::StrandGroomId hair_orbit_strands_ = 0;
   Vec3 hair_orbit_center_{0, 0, 0};
   f32 hair_time_ = 0;
 

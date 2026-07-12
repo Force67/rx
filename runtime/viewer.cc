@@ -78,6 +78,7 @@ bool Viewer::OnInitialize(app::Services& services) {
   ctx_.audio = services.audio;
   ctx_.debug_ui = &debug_ui_;
   ctx_.physics_entities = physics_entities_;
+  ctx_.hair_bindings = services.hair_bindings;
   ctx_.actions = actions_;
   demos_ = std::make_unique<DemoScenes>(ctx_);
 
