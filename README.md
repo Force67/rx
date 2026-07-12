@@ -17,8 +17,9 @@ viewer runtime in place of the game.
   (cluster DAG), froxel volumetrics, local shadow atlas, decals, lit
   translucency, FFT ocean, gaussian splats, GPU particles, HDR10 output,
   dynamic resolution, texture streaming, async compute, VRS, meshlet path.
-- **engine/asset** - glTF loading (cgltf), MaterialX, primitives, LOD
-  simplification, Loop subdivision, virtual filesystem.
+- **engine/asset** - glTF loading (cgltf) including morph targets and weight
+  animations, MaterialX, primitives, LOD simplification, Loop subdivision,
+  virtual filesystem.
 - **engine/core** - SDL3 windowing (+ KDE HDR monitor), job system, input
   action layer with gamepad support, math, logging, feature registry.
 - **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** - entity
