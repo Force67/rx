@@ -33,6 +33,9 @@
 #include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/SoftBody/SoftBodyCreationSettings.h>
+#include <Jolt/Physics/SoftBody/SoftBodyMotionProperties.h>
+#include <Jolt/Physics/SoftBody/SoftBodySharedSettings.h>
 #include <Jolt/Physics/Vehicle/MotorcycleController.h>
 #include <Jolt/Physics/Vehicle/VehicleCollisionTester.h>
 #include <Jolt/Physics/Vehicle/VehicleConstraint.h>
@@ -140,6 +143,22 @@ struct PhysicsWorld::Impl {
     f32 tc_scale = 1;  // smoothed traction-control throttle authority
   };
   base::Vector<VehicleEntry> vehicles;
+  // Strand grooms (soft-body Cosserat rods); StrandGroomId is index + 1, dead
+  // entries keep their slot so handles stay stable.
+  struct StrandGroomEntry {
+    JPH::BodyID body;
+    JPH::BodyID proxy;  // kinematic character collision proxy; may be invalid
+    bool alive = false;
+    u32 node_count = 0;
+    f32 total_mass = 0;
+    JPH::Vec3 wind = JPH::Vec3::sZero();
+    // Pinned nodes (roots + style pins) and their current body-local targets;
+    // Update() pulls each one to its target over the step.
+    base::Vector<u32> pinned;
+    base::Vector<Vec3> pinned_rest;  // groom-local rest, retargeted by transform
+    base::Vector<JPH::Vec3> targets;
+  };
+  base::Vector<StrandGroomEntry> strand_grooms;
 };
 
 PhysicsWorld::PhysicsWorld() = default;
@@ -215,6 +234,28 @@ void PhysicsWorld::Update(f32 dt) {
       const JPH::Vec3 up = rotation * JPH::Vec3::sAxisY();
       const f32 v = bodies.GetLinearVelocity(entry.body).Dot(forward);
       bodies.AddForce(entry.body, up * (-entry.downforce * v * v));
+    }
+  }
+
+  // Strand grooms: pull every pinned node to its retargeted position over
+  // this step (kinematic soft-body vertices integrate their velocity) and
+  // apply wind as a whole-body force. Sleeping grooms are settled and skip.
+  if (dt > 0) {
+    JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+    const f32 inv_dt = 1.0f / dt;
+    for (Impl::StrandGroomEntry& entry : impl_->strand_grooms) {
+      if (!entry.alive || !bodies.IsActive(entry.body)) continue;
+      if (!entry.wind.IsNearZero()) {
+        bodies.AddForce(entry.body, entry.wind * entry.total_mass);
+      }
+      JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(), entry.body);
+      if (!lock.Succeeded()) continue;
+      auto* soft =
+          static_cast<JPH::SoftBodyMotionProperties*>(lock.GetBody().GetMotionProperties());
+      for (size_t i = 0; i < entry.pinned.size(); ++i) {
+        JPH::SoftBodyVertex& v = soft->GetVertex(entry.pinned[i]);
+        v.mVelocity = (entry.targets[i] - v.mPosition) * inv_dt;
+      }
     }
   }
 
@@ -1181,6 +1222,234 @@ bool PhysicsWorld::GetVehicleState(VehicleId id, VehicleState* out) const {
     ws.rotation_angle = wheel->GetRotationAngle();
   }
   return true;
+}
+
+StrandGroomId PhysicsWorld::CreateStrandGroom(const StrandGroomDesc& desc,
+                                              const Mat4& transform) {
+  if (!impl_ || !desc.points || desc.strand_count == 0 || desc.points_per_strand < 2) return 0;
+  const u32 pps = desc.points_per_strand;
+  const u32 node_count = desc.strand_count * pps;
+  const Vec3 origin = Translation(transform);
+  const f32 inv_mass = 1.0f / JPH::max(desc.node_mass, 1.0e-6f);
+
+  // Vertices carry the full transform baked in (body-local = world - origin,
+  // body rotation stays identity); roots are kinematic.
+  JPH::Ref<JPH::SoftBodySharedSettings> shared = new JPH::SoftBodySharedSettings;
+  shared->mVertices.reserve(node_count);
+  for (u32 s = 0; s < desc.strand_count; ++s) {
+    for (u32 k = 0; k < pps; ++k) {
+      const f32* lp = &desc.points[(static_cast<size_t>(s) * pps + k) * 3];
+      Vec3 world = TransformPoint(transform, {lp[0], lp[1], lp[2]});
+      JPH::SoftBodySharedSettings::Vertex v;
+      v.mPosition = {world.x - origin.x, world.y - origin.y, world.z - origin.z};
+      v.mInvMass = k == 0 ? 0.0f : inv_mass;
+      shared->mVertices.push_back(v);
+    }
+  }
+  for (u32 i = 0; i < desc.pin_count; ++i) {
+    u32 s = desc.pins[i * 2], k = desc.pins[i * 2 + 1];
+    if (s < desc.strand_count && k < pps) shared->mVertices[s * pps + k].mInvMass = 0.0f;
+  }
+
+  // One rod chain per strand, bend/twist between consecutive rods, and a long
+  // range attachment from each node to the nearest pinned node up its strand
+  // so fast head motion cannot stretch the hair.
+  for (u32 s = 0; s < desc.strand_count; ++s) {
+    const u32 vbase = s * pps;
+    const u32 rbase = static_cast<u32>(shared->mRodStretchShearConstraints.size());
+    u32 anchor = vbase;
+    f32 arc = 0;
+    for (u32 k = 1; k < pps; ++k) {
+      shared->mRodStretchShearConstraints.push_back(JPH::SoftBodySharedSettings::RodStretchShear(
+          vbase + k - 1, vbase + k, desc.stretch_compliance));
+      if (k >= 2) {
+        shared->mRodBendTwistConstraints.push_back(JPH::SoftBodySharedSettings::RodBendTwist(
+            rbase + k - 2, rbase + k - 1, desc.bend_compliance));
+      }
+      if (shared->mVertices[vbase + k].mInvMass == 0.0f) {
+        anchor = vbase + k;
+        arc = 0;
+        continue;
+      }
+      JPH::Vec3 a(shared->mVertices[vbase + k - 1].mPosition);
+      JPH::Vec3 b(shared->mVertices[vbase + k].mPosition);
+      arc += (b - a).Length();
+      shared->mLRAConstraints.push_back(
+          JPH::SoftBodySharedSettings::LRA(anchor, vbase + k, arc * desc.max_stretch));
+    }
+  }
+
+  // Cross-strand ties (braid weave, dreadlock bundling) as edge springs at
+  // their rest-pose distance.
+  for (u32 i = 0; i < desc.bind_count; ++i) {
+    const u32* b = &desc.binds[i * 4];
+    if (b[0] >= desc.strand_count || b[1] >= pps || b[2] >= desc.strand_count || b[3] >= pps) {
+      continue;
+    }
+    u32 v1 = b[0] * pps + b[1], v2 = b[2] * pps + b[3];
+    if (v1 == v2) continue;
+    if (shared->mVertices[v1].mInvMass == 0.0f && shared->mVertices[v2].mInvMass == 0.0f) continue;
+    shared->mEdgeConstraints.push_back(
+        JPH::SoftBodySharedSettings::Edge(v1, v2, desc.bind_compliance));
+  }
+  if (!shared->mEdgeConstraints.empty()) shared->CalculateEdgeLengths();
+  shared->CalculateRodProperties();
+  shared->Optimize();
+
+  JPH::SoftBodyCreationSettings body(shared, ToJolt(origin), JPH::Quat::sIdentity(),
+                                     layers::kDynamic);
+  body.mNumIterations = JPH::max(desc.iterations, 1u);
+  body.mLinearDamping = desc.damping;
+  body.mGravityFactor = desc.gravity_factor;
+  body.mVertexRadius = desc.node_radius;
+  body.mUpdatePosition = false;  // the origin is the fixed groom anchor
+
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  Impl::StrandGroomEntry entry;
+  entry.body = bodies.CreateAndAddSoftBody(body, JPH::EActivation::Activate);
+  if (entry.body.IsInvalid()) return 0;
+  entry.alive = true;
+  entry.node_count = node_count;
+
+  for (u32 s = 0; s < desc.strand_count; ++s) {
+    for (u32 k = 0; k < pps; ++k) {
+      u32 v = s * pps + k;
+      if (shared->mVertices[v].mInvMass != 0.0f) {
+        entry.total_mass += desc.node_mass;
+        continue;
+      }
+      const f32* lp = &desc.points[static_cast<size_t>(v) * 3];
+      entry.pinned.push_back(v);
+      entry.pinned_rest.push_back({lp[0], lp[1], lp[2]});
+      entry.targets.push_back(JPH::Vec3(shared->mVertices[v].mPosition));
+    }
+  }
+
+  // The character collision proxy: a kinematic compound of spheres/capsules
+  // in the groom frame, moved with the groom transform like the NPC capsules.
+  if (desc.sphere_count + desc.capsule_count > 0) {
+    JPH::StaticCompoundShapeSettings compound;
+    u32 added = 0;
+    for (u32 i = 0; i < desc.sphere_count; ++i) {
+      const StrandGroomDesc::Sphere& sph = desc.spheres[i];
+      if (sph.radius < 1e-4f) continue;
+      compound.AddShape(ToJolt(sph.center), JPH::Quat::sIdentity(),
+                        new JPH::SphereShape(sph.radius));
+      ++added;
+    }
+    for (u32 i = 0; i < desc.capsule_count; ++i) {
+      const StrandGroomDesc::Capsule& cap = desc.capsules[i];
+      JPH::Vec3 a = ToJolt(cap.a), b = ToJolt(cap.b);
+      f32 half_height = (b - a).Length() * 0.5f;
+      if (cap.radius < 1e-4f) continue;
+      if (half_height < 1e-4f) {
+        compound.AddShape(a, JPH::Quat::sIdentity(), new JPH::SphereShape(cap.radius));
+      } else {
+        compound.AddShape((a + b) * 0.5f,
+                          JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), (b - a).Normalized()),
+                          new JPH::CapsuleShape(half_height, cap.radius));
+      }
+      ++added;
+    }
+    JPH::ShapeSettings::ShapeResult proxy_shape = compound.Create();
+    if (added > 0 && proxy_shape.IsValid()) {
+      JPH::BodyCreationSettings proxy(proxy_shape.Get(), ToJolt(origin),
+                                      QuatFromColumns(transform.m), JPH::EMotionType::Kinematic,
+                                      layers::kDynamic);
+      entry.proxy = bodies.CreateAndAddBody(proxy, JPH::EActivation::Activate);
+    }
+  }
+
+  impl_->strand_grooms.push_back(std::move(entry));
+  return impl_->strand_grooms.size();
+}
+
+void PhysicsWorld::SetStrandGroomTransform(StrandGroomId id, const Mat4& transform, f32 dt) {
+  if (!impl_ || id == 0 || id > impl_->strand_grooms.size()) return;
+  Impl::StrandGroomEntry& entry = impl_->strand_grooms[id - 1];
+  if (!entry.alive) return;
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+
+  if (!entry.proxy.IsInvalid()) {
+    JPH::RVec3 position = ToJolt(Translation(transform));
+    if (dt > 0) {
+      bodies.MoveKinematic(entry.proxy, position, QuatFromColumns(transform.m), dt);
+    } else {
+      bodies.SetPositionAndRotation(entry.proxy, position, QuatFromColumns(transform.m),
+                                    JPH::EActivation::Activate);
+    }
+  }
+
+  // Body-local pin targets; the origin never moves (mUpdatePosition off).
+  const JPH::RVec3 origin = bodies.GetPosition(entry.body);
+  for (size_t i = 0; i < entry.pinned.size(); ++i) {
+    Vec3 world = TransformPoint(transform, entry.pinned_rest[i]);
+    entry.targets[i] = JPH::Vec3(world.x - static_cast<f32>(origin.GetX()),
+                                 world.y - static_cast<f32>(origin.GetY()),
+                                 world.z - static_cast<f32>(origin.GetZ()));
+  }
+  if (dt <= 0) {
+    JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(), entry.body);
+    if (lock.Succeeded()) {
+      auto* soft =
+          static_cast<JPH::SoftBodyMotionProperties*>(lock.GetBody().GetMotionProperties());
+      for (size_t i = 0; i < entry.pinned.size(); ++i) {
+        JPH::SoftBodyVertex& v = soft->GetVertex(entry.pinned[i]);
+        v.mPosition = entry.targets[i];
+        v.mVelocity = JPH::Vec3::sZero();
+      }
+    }
+  }
+  bodies.ActivateBody(entry.body);
+}
+
+void PhysicsWorld::SetStrandGroomWind(StrandGroomId id, const Vec3& wind) {
+  if (!impl_ || id == 0 || id > impl_->strand_grooms.size()) return;
+  Impl::StrandGroomEntry& entry = impl_->strand_grooms[id - 1];
+  if (!entry.alive) return;
+  entry.wind = ToJolt(wind);
+  if (!entry.wind.IsNearZero()) {
+    impl_->system->GetBodyInterface().ActivateBody(entry.body);
+  }
+}
+
+u32 PhysicsWorld::StrandGroomPositionCount(StrandGroomId id) const {
+  if (!impl_ || id == 0 || id > impl_->strand_grooms.size()) return 0;
+  const Impl::StrandGroomEntry& entry = impl_->strand_grooms[id - 1];
+  return entry.alive ? entry.node_count * 3 : 0;
+}
+
+bool PhysicsWorld::GetStrandGroomPositions(StrandGroomId id, f32* out, u32 count) const {
+  if (!impl_ || !out || id == 0 || id > impl_->strand_grooms.size()) return false;
+  const Impl::StrandGroomEntry& entry = impl_->strand_grooms[id - 1];
+  if (!entry.alive || count < entry.node_count * 3) return false;
+  JPH::BodyLockRead lock(impl_->system->GetBodyLockInterface(), entry.body);
+  if (!lock.Succeeded()) return false;
+  const JPH::Body& body = lock.GetBody();
+  const auto* soft =
+      static_cast<const JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
+  const JPH::RMat44 com = body.GetCenterOfMassTransform();
+  const JPH::Array<JPH::SoftBodyVertex>& vertices = soft->GetVertices();
+  for (size_t i = 0; i < vertices.size(); ++i) {
+    JPH::RVec3 world = com * vertices[i].mPosition;
+    out[i * 3 + 0] = static_cast<f32>(world.GetX());
+    out[i * 3 + 1] = static_cast<f32>(world.GetY());
+    out[i * 3 + 2] = static_cast<f32>(world.GetZ());
+  }
+  return true;
+}
+
+void PhysicsWorld::RemoveStrandGroom(StrandGroomId id) {
+  if (!impl_ || id == 0 || id > impl_->strand_grooms.size()) return;
+  Impl::StrandGroomEntry& entry = impl_->strand_grooms[id - 1];
+  if (!entry.alive) return;
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  for (JPH::BodyID body : {entry.body, entry.proxy}) {
+    if (body.IsInvalid()) continue;
+    bodies.RemoveBody(body);
+    bodies.DestroyBody(body);
+  }
+  entry.alive = false;
 }
 
 bool PhysicsWorld::Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance,
