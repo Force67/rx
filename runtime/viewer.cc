@@ -2,11 +2,13 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <algorithm>
 #include <cstring>
 #include <utility>
 
 #include <base/option.h>
 
+#include "anim/morph.h"
 #include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "core/log.h"
@@ -128,6 +130,22 @@ bool Viewer::LoadGltfScene() {
   }
 
   for (const asset::GltfScene::Instance& instance : scene.instances) {
+    const asset::Mesh& mesh = scene.meshes[instance.mesh_index];
+    // Morphed instances stay out of the ECS gather; EmitMorphedInstances
+    // draws them with live weights (imported track or scripted sweep).
+    if (!mesh.morph_targets.empty()) {
+      MorphedInstance morphed;
+      morphed.mesh = mesh.id.hash;
+      morphed.transform =
+          MakeTranslation(instance.position) *
+          MakeFromQuat(instance.rotation[0], instance.rotation[1], instance.rotation[2],
+                       instance.rotation[3]) *
+          MakeScale(instance.scale);
+      if (!mesh.morph_animations.empty()) morphed.animation = mesh.morph_animations[0];
+      morphed.weights.resize(mesh.morph_targets.size());
+      morphed_.push_back(std::move(morphed));
+      continue;
+    }
     ecs::Entity entity = world_->Create();
     scene::Transform transform;
     transform.position[0] = instance.position.x;
@@ -137,6 +155,9 @@ bool Viewer::LoadGltfScene() {
     transform.scale = instance.scale;
     world_->Add(entity, transform);
     world_->Add(entity, scene::Renderable{scene.meshes[instance.mesh_index].id});
+  }
+  if (!morphed_.empty()) {
+    RX_INFO("gltf: {} morphed instance(s) animated by the viewer", morphed_.size());
   }
 
   // Sponza-friendly start: inside the atrium looking down the long axis.
@@ -171,7 +192,37 @@ void Viewer::OnBuildView(f32 frame_delta, render::FrameView& view) {
   view.camera.eye = camera_.position();
   view.camera.target = camera_.target();
   demos_->EmitToView(frame_delta, view);
+  EmitMorphedInstances(frame_delta, view);
   debug_ui_.Build(*renderer_, camera_, frame_delta, &view);
+}
+
+void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
+  if (morphed_.empty()) return;
+  morph_time_ += frame_delta;
+  for (MorphedInstance& instance : morphed_) {
+    if (!instance.animation.times.empty()) {
+      f32 time = instance.animation.duration > 0
+                     ? std::fmod(morph_time_, instance.animation.duration)
+                     : 0.0f;
+      anim::SampleMorphWeights(instance.animation, time, &instance.weights);
+    } else if (!instance.weights.empty()) {
+      // No imported track (e.g. an ARKit-style blendshape face): sweep one
+      // target at a time, eased in and out, so the expressions cycle live.
+      std::fill(instance.weights.begin(), instance.weights.end(), 0.0f);
+      const f32 period = 1.2f;  // seconds per target
+      u32 index = static_cast<u32>(morph_time_ / period) % instance.weights.size();
+      f32 phase = std::fmod(morph_time_, period) / period;
+      instance.weights[index] = std::sin(phase * 3.14159265f);
+    }
+    render::DrawItem draw;
+    draw.mesh = instance.mesh;
+    draw.transform = instance.transform;
+    draw.prev_transform = instance.transform;
+    draw.morph_offset = static_cast<i32>(view.morph_weights.size());
+    draw.morph_count = anim::AppendActiveMorphWeights(instance.weights, &view.morph_weights);
+    if (draw.morph_count == 0) draw.morph_offset = -1;
+    view.draws.push_back(draw);
+  }
 }
 
 void Viewer::OnFrameEnd() {
