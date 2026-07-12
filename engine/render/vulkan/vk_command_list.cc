@@ -39,6 +39,10 @@ void VulkanCommandList::PushConstants(const void* data, u32 size, u32 offset) {
 
 void VulkanCommandList::Dispatch(u32 x, u32 y, u32 z) { vkCmdDispatch(cmd_, x, y, z); }
 
+void VulkanCommandList::DispatchIndirect(const GpuBuffer& args, u64 offset) {
+  vkCmdDispatchIndirect(cmd_, Rec(args.handle)->buffer, offset);
+}
+
 void VulkanCommandList::BeginRendering(const RenderingInfo& info) {
   VkRenderingAttachmentInfo colors[8];
   for (size_t i = 0; i < info.colors.size(); ++i) {

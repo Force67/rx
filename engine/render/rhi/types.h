@@ -110,6 +110,7 @@ enum class BarrierScope : u8 {
   kComputeWrite,      // compute shader storage writes
   kComputeRead,       // compute shader reads (storage/sampled/uniform)
   kGraphicsRead,      // any graphics-stage read (vertex/index/uniform/sampled)
+  kGraphicsStorageWrite,  // storage writes from graphics stages (fragment/mesh)
   kIndirectArgs,      // indirect draw/dispatch argument fetch
   kTransferWrite,
   kTransferRead,

@@ -491,6 +491,8 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     device->caps_.shading_rate_max_size = std::max(fsr_props.maxFragmentSize.width, 1u);
   }
   device->caps_.fill_mode_non_solid = features.features.fillModeNonSolid;
+  // Enabled by the full-features query below whenever the driver reports it.
+  device->caps_.buffer_atomics64 = f12.shaderBufferInt64Atomics;
   if (features.features.samplerAnisotropy) {
     device->caps_.max_anisotropy = props.limits.maxSamplerAnisotropy;
   }

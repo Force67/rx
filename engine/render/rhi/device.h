@@ -66,6 +66,10 @@ struct DeviceCaps {
   u64 device_local_bytes = 0;        // summed device-local heap size, vram proxy
   u32 accel_scratch_alignment = 256;  // min scratch offset alignment for AS builds
   bool async_compute = false;  // second same-family queue for overlapped compute
+  // 64-bit min/max/exchange atomics on storage buffers (vulkan
+  // shaderBufferInt64Atomics). The virtual-geometry software rasterizer packs
+  // depth|payload into a u64 and resolves visibility with one InterlockedMax.
+  bool buffer_atomics64 = false;
   // App-requested device extensions (DeviceDesc::extra_device_extensions) that
   // the adapter actually granted. An app checks this to know whether its custom
   // GPU pass can use a given extension.
