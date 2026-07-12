@@ -244,6 +244,14 @@ set(RX_RENDER_SHADERS
   shaders/gi/restir_di_temporal.cs.hlsl
   shaders/gi/restir_di_spatial.cs.hlsl
   shaders/pipeline/vgeo.ms.hlsl
+  shaders/pipeline/vgeo_cull.cs.hlsl
+  shaders/pipeline/vgeo_args.cs.hlsl
+  shaders/pipeline/vgeo_clear.cs.hlsl
+  shaders/pipeline/vgeo_sw.cs.hlsl
+  shaders/pipeline/vgeo_hzb.cs.hlsl
+  shaders/pipeline/vgeo_vis.ms.hlsl
+  shaders/pipeline/vgeo_vis.ps.hlsl
+  shaders/pipeline/vgeo_resolve.ps.hlsl
   shaders/geometry/hair.vs.hlsl
   shaders/geometry/hair.ps.hlsl
   shaders/geometry/ocean_spectrum.cs.hlsl
@@ -315,12 +323,29 @@ set(RX_SHADER_DEPS_mesh_skin_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipel
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl)
 set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl)
+set(RX_SHADER_DEPS_vgeo_cull_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
+set(RX_SHADER_DEPS_vgeo_args_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
+set(RX_SHADER_DEPS_vgeo_clear_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
+set(RX_SHADER_DEPS_vgeo_sw_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
+set(RX_SHADER_DEPS_vgeo_hzb_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
+set(RX_SHADER_DEPS_vgeo_vis_ms_hlsl shaders/pipeline/vgeo_common.hlsli)
+set(RX_SHADER_DEPS_vgeo_vis_ps_hlsl shaders/pipeline/vgeo_common.hlsli)
+set(RX_SHADER_DEPS_vgeo_resolve_ps_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_particle_tex_ps_hlsl shaders/geometry/particle.ps.hlsl)
 
+# The gpu-driven virtual geometry shaders touching the 64-bit visibility
+# buffer need SM 6.6 atomics/types the 6.5 DXIL sidecar cannot express; d3d12
+# runs the single-pass fallback instead (caps().buffer_atomics64 stays false).
 set(RX_SHADER_NO_DXIL
   mesh_scene.as.hlsl
   mesh_scene.ms.hlsl
   meshlet.ms.hlsl
+  vgeo_clear.cs.hlsl
+  vgeo_sw.cs.hlsl
+  vgeo_hzb.cs.hlsl
+  vgeo_vis.ms.hlsl
+  vgeo_vis.ps.hlsl
+  vgeo_resolve.ps.hlsl
 )
 
 # Optional RHI imgui render backend. engine/render must not hard-depend on

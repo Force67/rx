@@ -896,6 +896,22 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
     }
   }
   if (!config_.headless) renderer_.UploadVirtualGeometryMesh(terrain);
+  // RX_VGEO_INSTANCES=N tiles the terrain N x N: N^2 x 800k source triangles
+  // feed the gpu cull while the rastered count stays bounded by the screen.
+  int grid = 1;
+  if (const char* env = std::getenv("RX_VGEO_INSTANCES")) grid = std::max(1, std::atoi(env));
+  if (grid > 1 && !config_.headless) {
+    std::vector<rx::Mat4> instances;
+    instances.reserve(static_cast<size_t>(grid) * grid);
+    for (int z = 0; z < grid; ++z) {
+      for (int x = 0; x < grid; ++x) {
+        instances.push_back(rx::MakeTranslation(
+            {(x - (grid - 1) * 0.5f) * kSize, 0.0f, (z - (grid - 1) * 0.5f) * kSize}));
+      }
+    }
+    renderer_.SetVirtualGeometryInstances(instances);
+    RX_INFO("vgeo demo: {}x{} instances", grid, grid);
+  }
   RX_INFO("vgeo demo: {} tris in the source terrain", lod.indices.size() / 3);
 
   ctx_.scene_owns_sun = true;
