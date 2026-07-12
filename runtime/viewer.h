@@ -9,6 +9,7 @@
 
 #include "app/application.h"
 #include "app/host.h"
+#include "asset/mesh.h"
 
 #include "debug_ui.h"
 #include "engine_context.h"
@@ -77,6 +78,19 @@ class Viewer : public app::Application {
   f32 last_sky_hour_ = -1000.0f;
 
   asset::AssetId physics_cube_mesh_;
+
+  // Morphed glTF instances, drawn by the viewer instead of the host's entity
+  // gather so per-frame weights ride the DrawItems: a looping imported weight
+  // track when the mesh has one, else a scripted sweep over the targets.
+  struct MorphedInstance {
+    u64 mesh = 0;
+    Mat4 transform = Mat4::Identity();
+    asset::MorphAnimation animation;  // empty times = no imported track
+    base::Vector<f32> weights;        // dense per-target set, rewritten each frame
+  };
+  void EmitMorphedInstances(f32 frame_delta, render::FrameView& view);
+  base::Vector<MorphedInstance> morphed_;
+  f32 morph_time_ = 0;
 
   // Camera record/replay state, lazily armed from env on the first frame.
   struct CamKey {
