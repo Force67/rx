@@ -73,6 +73,9 @@ class DemoScenes {
   // by their owning peer, wire spheres via the net_viz visualizer.
   void CreateBubbleDemoScene();
   void EmitBubbles(render::FrameView& view);
+  // Water demo: each floating cube pushes a wake ripple + foam splat into the
+  // persistent water field, scaled by its physics velocity.
+  void EmitWaterDisturbances(f32 dt, render::FrameView& view);
 
   struct DemoParticle {
     Vec3 position;
@@ -93,6 +96,9 @@ class DemoScenes {
 
   bool particles_enabled_ = false;
   Vec3 particle_emitter_{0, 0, 0};
+  // Water demo floaters, tracked to derive per-frame velocity for wake/foam.
+  base::Vector<physics::BodyId> water_cubes_;
+  base::Vector<Vec3> water_cube_prev_;
   u32 gpu_particle_count_ = 0;  // > 0 selects the gpu-simulated fountain
   Vec3 gpu_particle_emitter_{0, 0, 0};
   base::Vector<render::Decal> demo_decals_;

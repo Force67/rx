@@ -65,6 +65,7 @@ base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
 base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true, "RX_ADAPTIVE_WATER"};
+base::Option<bool> WaterFieldOpt{"water.field", true, "RX_WATER_FIELD"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "RX_MOTION_BLUR_DEBUG_VEL"};
@@ -418,6 +419,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (!ocean_.Initialize(*device_)) {
     RX_WARN("fft ocean unavailable");  // non-fatal: gerstner fallback
   }
+  if (!water_field_.Initialize(*device_)) {
+    RX_WARN("water foam field unavailable");  // non-fatal: instantaneous crest foam
+  }
   if (device_->caps().mesh_shaders) {
     // 1x1 fallback hi-z so the mesh-shader cull descriptor is always valid; bound
     // (with occlusion disabled) on frames where no real hi-z was built.
@@ -611,6 +615,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (RestirDiOpt.overridden()) settings_.restir_di = RestirDiOpt;
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
+  if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -1722,7 +1727,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               decal_normal_atlas_view_, TextureView{}, TextureView{}, GpuBuffer{}, TextureView{},
               TextureView{},
               fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
-              fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
+              fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
+              water_field_active_ ? water_field_.ring_view(0) : TextureView{},
+              water_field_active_ ? water_field_.ring_view(1) : TextureView{},
+              water_field_active_ ? water_field_.params_buffer(frame_slot) : GpuBuffer{});
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
@@ -1980,6 +1988,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   fft_ocean_active_ = settings_.fft_ocean && ocean_.available() && !path_trace && !interior;
   const bool fft_ocean_active = fft_ocean_active_;
   if (fft_ocean_active) globals.flags |= kFrameFlagFftOcean;
+  water_field_active_ = settings_.water_field && water_field_.available() && !path_trace && !interior;
+  if (water_field_active_) globals.flags |= kFrameFlagWaterField;
   // Hybrid ReSTIR DI decision happens before the globals upload below; the
   // graph passes record later under the same flag.
   bool restir_active = settings_.restir_di && rt_available_ && restir_di_.available() &&
@@ -2089,6 +2099,22 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // FFT ocean: evolve the spectrum and rebuild the displacement/normal maps
   // the water shaders sample this frame.
   if (fft_ocean_active) ocean_.AddToGraph(graph_, static_cast<f32>(time_seconds_));
+
+  // Persistent foam/ripple field: recenter+advect+decay the rings, step the
+  // near-camera ripples, and inject crest foam + this frame's object wakes. Runs
+  // after the FFT ocean so it can sample the fresh foam map for crest injection.
+  if (water_field_active_) {
+    WaterField::UpdateParams wf{};
+    wf.camera_pos = view.camera.eye;
+    wf.time = static_cast<f32>(time_seconds_);
+    wf.dt = std::min(view.frame_delta_seconds, 1.0f / 30.0f);  // clamp for stability
+    wf.frame_slot = frame_slot;
+    wf.fft_ocean = fft_ocean_active;
+    wf.disturbances = view.water_disturbances.data();
+    wf.disturbance_count = static_cast<u32>(view.water_disturbances.size());
+    water_field_.AddToGraph(graph_, wf,
+                            fft_ocean_active ? ocean_.normal_foam_view() : TextureView{});
+  }
 
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
@@ -4103,6 +4129,7 @@ void Renderer::Shutdown() {
     vgeo_.Destroy(*device_);
     hair_.Destroy(*device_);
     ocean_.Destroy(*device_);
+    water_field_.Destroy(*device_);
     imposters_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);

@@ -269,6 +269,11 @@ bool EnvironmentSystem::CreatePipelines() {
   // 28/29: FFT ocean displacement + normal/foam maps (wrap-sampled tiles).
   env_desc.slots.push_back({28, BindingType::kCombinedTextureSampler});
   env_desc.slots.push_back({29, BindingType::kCombinedTextureSampler});
+  // 30/31/32: persistent water foam/ripple field (ring 0 + ring 1 textures,
+  // clamp-sampled, kept in GENERAL by the compute chain) + the ring params CB.
+  env_desc.slots.push_back({30, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({31, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({32, BindingType::kUniformBuffer});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -440,7 +445,9 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     TextureView restir_diffuse, TextureView restir_spec,
                                     const GpuBuffer& vt_feedback, TextureView vt_indirection,
                                     TextureView vt_atlas, TextureView ocean_displacement,
-                                    TextureView ocean_normal) const {
+                                    TextureView ocean_normal, TextureView water_field_ring0,
+                                    TextureView water_field_ring1,
+                                    const GpuBuffer& water_field_params) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -493,7 +500,15 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        ocean_displacement ? InGeneral(Bind::Combined(28, ocean_displacement, wrap_sampler_))
                           : Bind::Combined(28, black_.view, wrap_sampler_),
        ocean_normal ? InGeneral(Bind::Combined(29, ocean_normal, wrap_sampler_))
-                    : Bind::Combined(29, black_.view, wrap_sampler_)});
+                    : Bind::Combined(29, black_.view, wrap_sampler_),
+       // The water field rings are storage images kept in GENERAL, clamp-sampled
+       // by world position; the params CB carries their origins/extents.
+       water_field_ring0 ? InGeneral(Bind::Combined(30, water_field_ring0, sampler_))
+                         : Bind::Combined(30, black_.view, sampler_),
+       water_field_ring1 ? InGeneral(Bind::Combined(31, water_field_ring1, sampler_))
+                         : Bind::Combined(31, black_.view, sampler_),
+       Bind::Uniform(32, water_field_params ? water_field_params : dummy_volume_, 0,
+                     water_field_params ? water_field_params.size : 256)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

@@ -231,6 +231,9 @@ float3 TraceReflection(float3 origin, float3 dir) {
 // --- surface ----------------------------------------------------------------
 
 #include "water_waves.hlsli"
+#include "water_field.hlsli"
+
+static const uint kFrameWaterField = 8192u;  // 1 << 13, mirrors mesh_pipeline.h
 
 PsOut main(PsIn input) {
   float3 v = normalize(frame.camera_position.xyz - input.world_pos);
@@ -251,6 +254,24 @@ PsOut main(PsIn input) {
                    saturate(material.roughness_factor * 16.0);
   float3 detail = WaveNormal(input.world_pos.xz * float2(2.6, 1.4), frame.time * 0.7, strength);
   float3 n = normalize(float3(gerstner_n.xz + detail.xz, gerstner_n.y * detail.y).xzy);
+
+  // Persistent field: advected foam + near-camera interactive ripples (object
+  // wakes, the ripple wave equation). Sampled once by world xz; zero when off.
+  float4 field = 0.0.xxxx;
+  if ((frame.flags & kFrameWaterField) != 0u) {
+    field = SampleWaterField(input.world_pos.xz);
+    // Ripple-height gradient perturbs the shading normal, faded out with
+    // distance so only the detailed near ring contributes (ring 0 ~48 m).
+    float ripple_fade = saturate(1.0 - view_dist / 60.0);
+    if (ripple_fade > 0.0) {
+      const float e = 0.25;  // meters
+      float hx = WaterFieldHeight(input.world_pos.xz + float2(e, 0.0)) -
+                 WaterFieldHeight(input.world_pos.xz - float2(e, 0.0));
+      float hz = WaterFieldHeight(input.world_pos.xz + float2(0.0, e)) -
+                 WaterFieldHeight(input.world_pos.xz - float2(0.0, e));
+      n = normalize(n + float3(-hx, 0.0, -hz) * (ripple_fade * 1.2 / (2.0 * e)));
+    }
+  }
 
   // Refraction against the opaque snapshot, distorted by the waves.
   float2 screen_uv = input.sv_position.xy / frame.misc.xy;
@@ -312,18 +333,28 @@ PsOut main(PsIn input) {
   color += sss_tint * frame.sun_color.rgb * frame.sun_direction.w *
            (backlight * crest * 0.18);
 
-  // Foam: whitecaps on pinched crests + a scrolling shoreline band where the
-  // water thins out over geometry. Foam is rough diffuse: it replaces the
-  // mirror response.
+  // Foam: the persistent advected field is now the primary source (whitecaps
+  // streak and dissolve with the waves instead of flickering in place); the
+  // instantaneous crest + shoreline terms stay as a reduced-weight high-
+  // frequency sparkle. Foam is rough diffuse: it replaces the mirror response.
   float shore = saturate(1.0 - water_depth / 0.55);
   float foam_noise = WaveHeight(input.world_pos.xz * 1.7 + float2(0.0, frame.time * 0.35), frame.time) * 0.5 + 0.5;
-  float foam = saturate(crest * smoothstep(0.55, 0.85, foam_noise) * 1.2 +
-                        shore * smoothstep(0.35, 0.7, foam_noise + shore * 0.3));
+  // Thickness model: coverage saturates with accumulated foam density.
+  float persistent = 1.0 - exp(-1.1 * field.b);
+  float instant = saturate(crest * smoothstep(0.6, 0.9, foam_noise) * 0.35 +
+                           shore * smoothstep(0.35, 0.7, foam_noise + shore * 0.3));
+  // Screen-composite so the persistent field always shows through in open water
+  // (where the instantaneous term is ~0) instead of being masked by a max().
+  float foam = saturate(persistent + instant - persistent * instant);
   if (foam > 0.001) {
+    // Fresh foam (low age) is bright white; it greys as it ages, the noise
+    // term breaking it up with high-frequency structure.
+    float freshness = exp(-field.a / 6.0);
+    float tone = lerp(0.55, 0.95, freshness) * (0.75 + 0.25 * foam_noise);
     float foam_ndl = max(dot(float3(0, 1, 0), l), 0.0);
-    float3 foam_col = 0.92.xxx * (frame.sun_color.rgb * frame.sun_direction.w * (0.25 * foam_ndl) +
+    float3 foam_col = tone.xxx * (frame.sun_color.rgb * frame.sun_direction.w * (0.25 * foam_ndl) +
                                   irradiance_cube.SampleLevel(irradiance_sampler, float3(0, 1, 0), 0).rgb);
-    color = lerp(color, foam_col, foam * 0.85);
+    color = lerp(color, foam_col, foam * 0.9);
     fresnel *= 1.0 - foam * 0.8;
   }
 

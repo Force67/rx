@@ -92,7 +92,9 @@ class EnvironmentSystem {
                    TextureView restir_diffuse = {}, TextureView restir_spec = {},
                    const GpuBuffer& vt_feedback = {}, TextureView vt_indirection = {},
                    TextureView vt_atlas = {}, TextureView ocean_displacement = {},
-                   TextureView ocean_normal = {}) const;
+                   TextureView ocean_normal = {}, TextureView water_field_ring0 = {},
+                   TextureView water_field_ring1 = {},
+                   const GpuBuffer& water_field_params = {}) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}

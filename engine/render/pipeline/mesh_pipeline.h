@@ -94,6 +94,7 @@ inline constexpr u32 kFrameFlagSpecReflTex = 1u << 9;  // sample the denoised re
 inline constexpr u32 kFrameFlagRestirDi = 1u << 10;     // point/spot lights come from the ReSTIR DI textures
 inline constexpr u32 kFrameFlagFftOcean = 1u << 11;     // water displaces/shades from the FFT ocean maps
 inline constexpr u32 kFrameFlagInterior = 1u << 12;    // interior lighting mode: flat ambient + fog, no sky
+inline constexpr u32 kFrameFlagWaterField = 1u << 13;  // water samples the persistent foam/ripple ring field
 
 // One active morph target on a draw: index into the mesh's target list and
 // its weight. FrameView::morph_weights concatenates every morphed draw's

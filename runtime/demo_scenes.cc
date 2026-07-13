@@ -263,6 +263,32 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   }
 
   if (locomotion_enabled_) EmitLocomotion(dt, view);
+  if (!water_cubes_.empty()) EmitWaterDisturbances(dt, view);
+}
+
+void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
+  // A bobbing/drifting cube drags a wake ripple and throws foam scaled by how
+  // hard it moves; a still cube leaves only a faint standing ripple.
+  const f32 inv_dt = 1.0f / std::max(dt, 1e-4f);
+  for (u32 i = 0; i < water_cubes_.size(); ++i) {
+    Vec3 pos;
+    f32 rot[4];
+    if (!physics_.GetBodyTransform(water_cubes_[i], &pos, rot)) continue;
+    Vec3 vel = (pos - water_cube_prev_[i]) * inv_dt;
+    water_cube_prev_[i] = pos;
+    f32 horiz = std::sqrt(vel.x * vel.x + vel.z * vel.z);
+    f32 vert = std::fabs(vel.y);
+    f32 motion = horiz + vert;
+    render::WaterDisturbance d;
+    d.position = {pos.x, 0.0f, pos.z};
+    d.radius = 2.2f;
+    // Rates (per second); the field integrates them over the foam time constant.
+    d.ripple_strength = std::min(motion * 0.4f, 2.0f);
+    d.foam_amount = std::min(std::max(motion - 0.2f, 0.0f) * 0.7f, 1.8f);
+    d.velocity_x = vel.x;
+    d.velocity_z = vel.z;
+    view.water_disturbances.push_back(d);
+  }
 }
 
 namespace {
@@ -359,7 +385,11 @@ void DemoScenes::CreateWaterDemoScene() {
     world_.Add(block, scene::Transform{.position = {position.x, position.y, position.z}});
     world_.Add(block, scene::Renderable{cube.id});
     physics::BodyId body = physics_.AddDynamicBox(position, {1.0f, 1.0f, 1.0f}, 400.0f, {});
-    if (body) ctx_.physics_entities->push_back({body, block});
+    if (body) {
+      ctx_.physics_entities->push_back({body, block});
+      water_cubes_.push_back(body);
+      water_cube_prev_.push_back(position);
+    }
   }
 
   // A sparse additive ember fountain directly in front of the nearest cube:
