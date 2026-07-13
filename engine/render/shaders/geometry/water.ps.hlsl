@@ -331,7 +331,9 @@ PsOut main(PsIn input) {
     caustic = frame.sun_color.rgb * frame.sun_direction.w * web *
               exp(-water_depth * 0.5) * sun_up * 0.6;
   }
-  float3 scatter = material.base_color_factor.rgb *
+  // Single-scatter body colour for water too deep to see through. The 0.35
+  // keeps it a deep sea-blue: full upward irradiance reads as milky turquoise.
+  float3 scatter = material.base_color_factor.rgb * 0.35 *
                    irradiance_cube.SampleLevel(irradiance_sampler, float3(0, 1, 0), 0).rgb;
   float3 refracted = opaque_color.SampleLevel(opaque_color_sampler, refracted_uv, 0).rgb +
                      caustic;

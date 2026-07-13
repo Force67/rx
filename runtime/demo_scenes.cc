@@ -373,12 +373,14 @@ void DemoScenes::CreateWaterDemoScene() {
   // cubes are rigid bodies light enough to float: jolt buoyancy keeps them
   // bobbing on the sheet.
   ecs::Entity floor = world_.Create();
-  world_.Add(floor, scene::Transform{.position = {0, -48.0f, 0}});
+  // Deep enough that Beer-Lambert absorption swallows the box: with its top at
+  // -8 m the clear water showed it as a giant dark rectangle mid-ocean.
+  world_.Add(floor, scene::Transform{.position = {0, -78.0f, 0}});
   world_.Add(floor, scene::Renderable{ground.id});
   ecs::Entity sheet = world_.Create();
   world_.Add(sheet, scene::Transform{});
   world_.Add(sheet, scene::Renderable{water.id});
-  physics_.AddStaticBox({0, -48.0f, 0}, {40.0f, 40.0f, 40.0f});
+  physics_.AddStaticBox({0, -78.0f, 0}, {40.0f, 40.0f, 40.0f});
   physics_.set_water_height([](const Vec3&, f32* height, Vec3* flow) {
     *height = 0.0f;
     if (flow) *flow = {};
