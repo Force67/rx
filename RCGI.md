@@ -102,6 +102,7 @@ DDGI-style octahedral probe cascades fed from the radiance cache.
   GPU-verifiable before the gather exists.
 - **M2 (screen side)**: final gather + denoise + upscale + composite +
   debug UI/presets; replaces the M1 debug composite. GPU-verified vs DDGI.
+  **Landed** (see "M2 implementation notes" below).
 
 ## Verification
 
@@ -234,3 +235,112 @@ Verified: `--demo cornell` (red/green wall bleed present, matches DDGI baseline
 in `DebugView::kIndirectGi`), `--demo materials` (clean, no speckle/seams),
 `--demo lights` (light-grid path, IBL-forced), `--no-rt` (silently unavailable,
 no crash), and `--validation` on+off (zero errors from RCGI passes).
+
+---
+
+## M2 implementation notes (screen side — landed)
+
+M2 replaces the M1 full-res cascade resolve with the idTech8-style screen-side
+chain: **half-res SH final gather → separable bilateral denoise → full-res
+poisson upscale + temporal filter**, writing the same `rcgi_irradiance`
+transient (env set 2 slot 35). GPU-verified on NVIDIA GB10 (`vkrun`), `--demo
+cornell`/`materials`/`lights`, async on+off, `--validation` clean (from M2
+passes). `RX_RCGI=1` enables; off by default with zero behaviour change (no
+gather, no history copies — all gated on `rcgi_world`).
+
+### Passes (all compute; `RcgiSystem::AddGatherChain` / `AddHistoryCopy`)
+
+- **`rcgi_gather`** (`rcgi_gather.cs.hlsl`, half res = render/`kGatherDivisor`,
+  divisor a code constant, `4` = quarter-res ready). Reconstructs world pos from
+  the reversed-Z depth + inv_view_proj, oct-decodes the prepass normal, traces
+  **1 cosine-weighted ray** (inline `RayQuery`, `RAY_FLAG_FORCE_OPAQUE`, mask
+  `RX_RAY_MASK_REALTIME`, TLAS like the M1 probe trace) with per-pixel/per-frame
+  hash noise + a normal-offset origin bias. Sky pixels bail (zero SH). Radiance
+  from the three-level fallback: **(a) screen cache** — project the hit with
+  `prev_view_proj`, accept if the reversed-Z depth matches the stored previous
+  depth within a relative epsilon (linearised `near/d`), take the previous lit
+  HDR colour; **(b) `RcgiCacheLookup`** at the hit; **(c) `SampleRcgiIrradiance`**
+  with the negated ray dir as the geometric-normal approximation (no geometry
+  fetch). Ray miss = sky cube. Radiance is firefly-clamped and projected into
+  2-band SH along the ray dir (`sh.hlsli`, `weight = pi/max(cos,0.1)` — the
+  cosine-pdf 1/p estimate). Outputs 3× RGBA16F SH transients + R16F hitT.
+- **`rcgi_denoise`** (`rcgi_denoise.cs.hlsl`, gather res, H then V, ping-pong
+  A↔B). Separable gaussian (radius 5) with bilateral weights from linear-depth,
+  normal dot, and a **relative, gentle** hitT term (the per-pixel single-ray
+  hitT is noisy — a hard hitT weight rejects every neighbour; contact-scale
+  detail, center hitT < 1 m, sharpens it).
+- **`rcgi_upscale`** (`rcgi_upscale.cs.hlsl`, full res). 4-tap bilateral poisson
+  upsample of the denoised SH (depth/normal agreement, nearest-valid fallback),
+  evaluated with the **full-res** normal (`ShIrradiance`, restores normal
+  detail, negative lobes clamped) → RGB irradiance. Temporal filter: motion
+  reproject, per-pixel counter in history alpha (`new=(n·hist+cur)/(n+1)`, n≤48),
+  reset on out-of-bounds; **generous** neighbourhood clamp (the 4 upsample taps
+  come from one denoised frame — a tight box pins history to the noisy current
+  sample and blocks convergence; GI is low-freq and TAA follows). Writes
+  `rcgi_irradiance = accum · rcgi_intensity` (intensity applied here, once, as
+  the M1 resolve did) plus the raw-irradiance temporal history.
+- **`rcgi_history`** (`rcgi_history.cs.hlsl`, full res, end of lit frame). Copies
+  the composited lit HDR colour + depth into the persistent screen-cache images
+  for next frame's gather. Recorded only when the M2 gather ran.
+
+### Persistent resources (owned by `RcgiSystem`, render res, `ImportImage`)
+
+- `screen_color_hist_` (RGBA16F) + `screen_depth_hist_` (R32F): the screen-cache
+  history, written late (`AddHistoryCopy`) and read early next frame (gather).
+  Single images — read-before-write in the same frame is the last-frame content.
+- `irr_hist_[2]` (RGBA16F): temporal irradiance history, ping-pong by frame
+  parity (`new=(n·hist+cur)/(n+1)`, sample count in `.a`).
+- Created/resized by `EnsureScreenResources`, primed to `kGeneral`. `first_frame`
+  / resize / teleport (`RequestReset`) drops screen-cache + temporal history.
+
+### Debug toggle
+
+- **`RX_RCGI_PROBES_ONLY=1`** (`rcgi.probes_only`) swaps the gather chain for the
+  retained M1 per-pixel cascade resolve — near-free A/B (the resolve pipeline is
+  still compiled). `DebugView::kIndirectGi` (`RX_DEBUG_VIEW=6`) shows the M2
+  chain has clear per-pixel contact occlusion / directional bleed near geometry
+  where the probes-only path is flat and blurry.
+
+### Async compute
+
+- **Enabled** and default-on (`settings_.async_compute`, `RX_ASYNC_COMPUTE`,
+  gated on `device.caps().async_compute`). The M1 world passes (light grid +
+  probe trace → args → cache shade → blend → border) fork onto the async queue
+  via `b.Async()`; an empty `async_join` `b.JoinAsync()` pass sits before the
+  gather (their first consumer), mirroring DDGI. The `kGeneral` world resources
+  ride the M1 manual-barrier discipline across the join fine — validated clean
+  with async **on and off**. RCGI and DDGI are mutually exclusive
+  (`ddgi_active = … && !rcgi_active`), so only one async fork is live.
+
+### Transparent gap closed
+
+- The transparent surfaces' `WriteEnvSet` now receives the `rcgi_irradiance`
+  view (was black under RCGI), so glass/particles get RCGI ambient. Verified in
+  `--demo materials` (front glass spheres lit, not black).
+
+### Measured GPU cost (1920×1011, GB10, steady state)
+
+- `rcgi_gather` + `rcgi_denoise` (H+V) + `rcgi_upscale` + `rcgi_history` ≈
+  **1.2–1.4 ms** combined (each pass ~0.3–0.4 ms steady state). Under the
+  ~1.5 ms target. NB: the `RX_UI_SHOT` capture frame stalls whichever pass
+  overlaps the readback fence, so a single overlay sample can spike one pass to
+  ~1.5–1.9 ms — that is a capture artifact, not steady-state cost.
+- Temporal convergence (static cornell camera): back wall/floor essentially
+  frozen (0 % pixels change > 6/255 across a 6-frame gap); the bright mid-floor
+  keeps a small residual (~2–3/255 mean) that TAA further smooths.
+
+### Known limitations / TODOs
+
+- **Reflection/spec-refl bounce** still reads the DDGI atlas (black under RCGI) —
+  unchanged from M1, not wired to the cache/gather yet.
+- **Quarter-res gather** is a one-constant change (`kGatherDivisor = 4`) but not
+  exposed as a user setting; not yet tuned/verified.
+- **RGB9E5** irradiance storage still deferred (RGBA16F throughout).
+- **Screen-cache validation** uses a linearised `near/d` reversed-Z depth
+  compare (no prev-frame inverse matrix in the push budget); robust in practice
+  but a full prev-world reconstruction would be tighter.
+- **Pre-existing (not M2)**: the M1 `rcgi_args` indirect-dispatch barrier trips
+  a validation warning (`VkMemoryBarrier2` INDIRECT_COMMAND_READ under a compute
+  dst stage — an rhi-layer `BarrierScope::kIndirectArgs` translation issue,
+  engine-wide, left untouched). M2 fixed the M1 `vkCmdFillBuffer` TRANSFER_DST
+  errors by adding `kBufferUsageTransferDst` to the filled buffers.

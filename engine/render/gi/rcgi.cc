@@ -9,8 +9,12 @@
 #include "shaders/rcgi_blend_cs_hlsl.h"
 #include "shaders/rcgi_border_cs_hlsl.h"
 #include "shaders/rcgi_cache_shade_cs_hlsl.h"
+#include "shaders/rcgi_denoise_cs_hlsl.h"
+#include "shaders/rcgi_gather_cs_hlsl.h"
+#include "shaders/rcgi_history_cs_hlsl.h"
 #include "shaders/rcgi_probe_trace_cs_hlsl.h"
 #include "shaders/rcgi_resolve_cs_hlsl.h"
+#include "shaders/rcgi_upscale_cs_hlsl.h"
 
 namespace rx::render {
 namespace {
@@ -43,6 +47,27 @@ struct ResolvePush {
   f32 inv_size[2];
   f32 pad[2];
   f32 camera_pos[4];
+};
+struct GatherPush {
+  f32 inv_view_proj[16];
+  f32 prev_view_proj[16];
+  f32 camera_pos[4];  // xyz eye, w near plane
+  u32 dims[4];        // full_w, full_h, gather_w, gather_h
+  u32 misc[4];        // frame_index, screen_valid, asuint(ray_max), pad
+};
+struct DenoisePush {
+  u32 dims[4];    // full_w, full_h, gather_w, gather_h
+  u32 misc[4];    // dir_x, dir_y, radius, pad
+  f32 params[4];  // near_plane, ...
+};
+struct UpscalePush {
+  u32 dims[4];    // full_w, full_h, gather_w, gather_h
+  f32 params[4];  // near_plane, intensity, max_history, reset
+  u32 misc[4];    // frame_index, pad...
+};
+struct HistoryPush {
+  u32 size[2];
+  u32 pad[2];
 };
 
 // Uniformly random rotation per frame (axis-angle from a weyl hash), same scheme
@@ -98,7 +123,14 @@ bool RcgiSystem::CreateResources() {
                                  .address_v = AddressMode::kClampToEdge,
                                  .address_w = AddressMode::kClampToEdge,
                                  .max_lod = 0.0f});
-  if (!sampler_) return false;
+  linear_sampler_ = device_.GetSampler({.min_filter = Filter::kLinear,
+                                        .mag_filter = Filter::kLinear,
+                                        .mip_filter = Filter::kNearest,
+                                        .address_u = AddressMode::kClampToEdge,
+                                        .address_v = AddressMode::kClampToEdge,
+                                        .address_w = AddressMode::kClampToEdge,
+                                        .max_lod = 0.0f});
+  if (!sampler_ || !linear_sampler_) return false;
 
   TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageStorage;
   irradiance_ = device_.CreateImage2D(Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, usage);
@@ -106,13 +138,14 @@ bool RcgiSystem::CreateResources() {
   rays_ = device_.CreateImage2D(Format::kRGBA16Float, {kRaysPerProbe, kProbeCount}, usage);
   if (!irradiance_ || !visibility_ || !rays_) return false;
 
+  // state_ / active_meta_ are FillBuffer-cleared, so they need TRANSFER_DST.
   state_ = device_.CreateBuffer(static_cast<u64>(kHashCapacity) * kEntryStride * sizeof(u32),
-                                kBufferUsageStorage);
+                                kBufferUsageStorage | kBufferUsageTransferDst);
   radiance_ = device_.CreateBuffer(static_cast<u64>(kHashCapacity) * 2 * sizeof(u32),
                                    kBufferUsageStorage);
   active_list_ = device_.CreateBuffer(static_cast<u64>(kActiveCapacity) * sizeof(u32),
                                       kBufferUsageStorage);
-  active_meta_ = device_.CreateBuffer(4 * sizeof(u32), kBufferUsageStorage);
+  active_meta_ = device_.CreateBuffer(4 * sizeof(u32), kBufferUsageStorage | kBufferUsageTransferDst);
   dispatch_args_ =
       device_.CreateBuffer(4 * sizeof(u32), kBufferUsageStorage | kBufferUsageIndirect);
   if (!state_ || !radiance_ || !active_list_ || !active_meta_ || !dispatch_args_) return false;
@@ -190,12 +223,116 @@ bool RcgiSystem::CreatePipelines() {
       .push_constant_size = sizeof(ResolvePush),
       .debug_name = "rcgi_resolve",
   });
+  gather_pipeline_ = device_.CreateComputePipeline({
+      .shader = RX_SHADER(k_rcgi_gather_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kStorageImage},
+                          {1, BindingType::kStorageImage},
+                          {2, BindingType::kStorageImage},
+                          {3, BindingType::kStorageImage},
+                          {4, BindingType::kSampledImage},
+                          {5, BindingType::kSampledImage},
+                          {6, BindingType::kAccelStruct},
+                          {7, BindingType::kUniformBuffer},
+                          {8, BindingType::kStorageBuffer},
+                          {9, BindingType::kStorageBuffer},
+                          {10, BindingType::kCombinedTextureSampler},
+                          {11, BindingType::kCombinedTextureSampler},
+                          {12, BindingType::kCombinedTextureSampler},
+                          {13, BindingType::kCombinedTextureSampler},
+                          {14, BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = sizeof(GatherPush),
+      .debug_name = "rcgi_gather",
+  });
+  denoise_pipeline_ = device_.CreateComputePipeline({
+      .shader = RX_SHADER(k_rcgi_denoise_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kStorageImage},
+                          {1, BindingType::kStorageImage},
+                          {2, BindingType::kStorageImage},
+                          {3, BindingType::kSampledImage},
+                          {4, BindingType::kSampledImage},
+                          {5, BindingType::kSampledImage},
+                          {6, BindingType::kSampledImage},
+                          {7, BindingType::kSampledImage},
+                          {8, BindingType::kSampledImage}}}},
+      .push_constant_size = sizeof(DenoisePush),
+      .debug_name = "rcgi_denoise",
+  });
+  upscale_pipeline_ = device_.CreateComputePipeline({
+      .shader = RX_SHADER(k_rcgi_upscale_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kStorageImage},
+                          {1, BindingType::kStorageImage},
+                          {2, BindingType::kSampledImage},
+                          {3, BindingType::kSampledImage},
+                          {4, BindingType::kSampledImage},
+                          {5, BindingType::kSampledImage},
+                          {6, BindingType::kSampledImage},
+                          {7, BindingType::kSampledImage},
+                          {8, BindingType::kSampledImage}}}},
+      .push_constant_size = sizeof(UpscalePush),
+      .debug_name = "rcgi_upscale",
+  });
+  history_pipeline_ = device_.CreateComputePipeline({
+      .shader = RX_SHADER(k_rcgi_history_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kStorageImage},
+                          {1, BindingType::kStorageImage},
+                          {2, BindingType::kSampledImage},
+                          {3, BindingType::kSampledImage}}}},
+      .push_constant_size = sizeof(HistoryPush),
+      .debug_name = "rcgi_history",
+  });
   if (!probe_trace_pipeline_ || !args_pipeline_ || !cache_shade_pipeline_ || !blend_pipeline_ ||
-      !border_pipeline_ || !resolve_pipeline_) {
+      !border_pipeline_ || !resolve_pipeline_ || !gather_pipeline_ || !denoise_pipeline_ ||
+      !upscale_pipeline_ || !history_pipeline_) {
     RX_ERROR("rcgi pipeline creation failed");
     return false;
   }
   return true;
+}
+
+void RcgiSystem::DestroyScreenResources() {
+  for (GpuImage* img : {&screen_color_hist_, &screen_depth_hist_, &irr_hist_[0], &irr_hist_[1]}) {
+    if (*img) device_.DestroyImage(*img);
+    *img = {};
+  }
+  screen_color_state_ = ResourceState::kUndefined;
+  screen_depth_state_ = ResourceState::kUndefined;
+  irr_hist_state_[0] = ResourceState::kUndefined;
+  irr_hist_state_[1] = ResourceState::kUndefined;
+  screen_extent_ = {};
+  screen_history_valid_ = false;
+}
+
+void RcgiSystem::EnsureScreenResources(Extent2D extent) {
+  if (extent.width == screen_extent_.width && extent.height == screen_extent_.height &&
+      screen_color_hist_) {
+    return;
+  }
+  DestroyScreenResources();
+  screen_extent_ = extent;
+  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageStorage;
+  screen_color_hist_ = device_.CreateImage2D(Format::kRGBA16Float, extent, usage);
+  screen_depth_hist_ = device_.CreateImage2D(Format::kR32Float, extent, usage);
+  irr_hist_[0] = device_.CreateImage2D(Format::kRGBA16Float, extent, usage);
+  irr_hist_[1] = device_.CreateImage2D(Format::kRGBA16Float, extent, usage);
+  if (!screen_color_hist_ || !screen_depth_hist_ || !irr_hist_[0] || !irr_hist_[1]) {
+    RX_ERROR("rcgi screen resource creation failed");
+    return;
+  }
+  // Prime to kGeneral so the first frame's imports have a defined source state.
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    TextureBarrier b[4] = {
+        Transition(screen_color_hist_, ResourceState::kUndefined, ResourceState::kGeneral),
+        Transition(screen_depth_hist_, ResourceState::kUndefined, ResourceState::kGeneral),
+        Transition(irr_hist_[0], ResourceState::kUndefined, ResourceState::kGeneral),
+        Transition(irr_hist_[1], ResourceState::kUndefined, ResourceState::kGeneral)};
+    cmd.TextureBarriers(b);
+  });
+  screen_color_state_ = ResourceState::kGeneral;
+  screen_depth_state_ = ResourceState::kGeneral;
+  irr_hist_state_[0] = ResourceState::kGeneral;
+  irr_hist_state_[1] = ResourceState::kGeneral;
+  screen_history_valid_ = false;
+  screen_reset_ = true;  // the freshly created temporal history holds undefined data
 }
 
 void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
@@ -411,9 +548,199 @@ ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle dep
   return out;
 }
 
+ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext& raytracing,
+                                          u32 tlas_slot, ResourceHandle depth_export,
+                                          ResourceHandle normals, ResourceHandle motion,
+                                          Extent2D extent, const Mat4& inv_view_proj,
+                                          const Mat4& prev_view_proj, const Vec3& camera,
+                                          f32 intensity, u32 frame_index, bool reset) {
+  Extent2D gather{(extent.width + kGatherDivisor - 1) / kGatherDivisor,
+                  (extent.height + kGatherDivisor - 1) / kGatherDivisor};
+  reset = reset || screen_reset_;  // freshly (re)created history must not be read
+  screen_reset_ = false;
+  bool screen_valid = screen_history_valid_ && !reset;
+
+  auto tex = [&](const char* name, Format fmt, Extent2D e) {
+    return graph.CreateTexture(
+        {.name = name, .format = fmt, .width = e.width, .height = e.height});
+  };
+  // Gather-res SH triples (ping-pong: A gather/denoise-V, B denoise-H) + hitT.
+  ResourceHandle a_r = tex("rcgi_sh_a_r", Format::kRGBA16Float, gather);
+  ResourceHandle a_g = tex("rcgi_sh_a_g", Format::kRGBA16Float, gather);
+  ResourceHandle a_b = tex("rcgi_sh_a_b", Format::kRGBA16Float, gather);
+  ResourceHandle b_r = tex("rcgi_sh_b_r", Format::kRGBA16Float, gather);
+  ResourceHandle b_g = tex("rcgi_sh_b_g", Format::kRGBA16Float, gather);
+  ResourceHandle b_b = tex("rcgi_sh_b_b", Format::kRGBA16Float, gather);
+  ResourceHandle hitt = tex("rcgi_hitt", Format::kR16Float, gather);
+  ResourceHandle out = tex("rcgi_irradiance", Format::kRGBA16Float, extent);
+
+  u32 cur = frame_index % 2;
+  u32 prv = 1u - cur;
+  ResourceHandle screen_color = graph.ImportImage("rcgi_screen_color", screen_color_hist_,
+                                                  &screen_color_state_);
+  ResourceHandle screen_depth = graph.ImportImage("rcgi_screen_depth", screen_depth_hist_,
+                                                  &screen_depth_state_);
+  screen_color_handle_ = screen_color;  // reused by AddHistoryCopy (this frame only)
+  screen_depth_handle_ = screen_depth;
+  ResourceHandle irr_cur = graph.ImportImage("rcgi_irr_hist_c", irr_hist_[cur], &irr_hist_state_[cur]);
+  ResourceHandle irr_prv = graph.ImportImage("rcgi_irr_hist_p", irr_hist_[prv], &irr_hist_state_[prv]);
+
+  const f32 near_plane = 0.1f;
+  const f32 ray_max = kBaseSpacing * static_cast<f32>(kProbesPerAxis) * 2.0f;  // ~64 m reach
+
+  // --- 1. final gather (half res) ---
+  graph.AddPass(
+      "rcgi_gather",
+      [&](RenderGraph::PassBuilder& pb) {
+        for (ResourceHandle h : {a_r, a_g, a_b, hitt}) pb.Write(h, ResourceUsage::kStorageWrite);
+        pb.Read(depth_export, ResourceUsage::kSampledCompute);
+        pb.Read(normals, ResourceUsage::kSampledCompute);
+        pb.Read(screen_color, ResourceUsage::kSampledCompute);
+        pb.Read(screen_depth, ResourceUsage::kSampledCompute);
+      },
+      [this, &raytracing, tlas_slot, a_r, a_g, a_b, hitt, depth_export, normals, screen_color,
+       screen_depth, gather, extent, inv_view_proj, prev_view_proj, camera, frame_index,
+       screen_valid, ray_max, near_plane](PassContext& ctx) {
+        const GpuBuffer& globals = globals_buffers_[frame_index % 2];
+        GatherPush p{};
+        std::memcpy(p.inv_view_proj, &inv_view_proj, sizeof(p.inv_view_proj));
+        std::memcpy(p.prev_view_proj, &prev_view_proj, sizeof(p.prev_view_proj));
+        p.camera_pos[0] = camera.x; p.camera_pos[1] = camera.y; p.camera_pos[2] = camera.z;
+        p.camera_pos[3] = near_plane;
+        p.dims[0] = extent.width; p.dims[1] = extent.height;
+        p.dims[2] = gather.width; p.dims[3] = gather.height;
+        p.misc[0] = frame_index;
+        p.misc[1] = screen_valid ? 1u : 0u;
+        std::memcpy(&p.misc[2], &ray_max, sizeof(f32));
+        ctx.cmd->BindPipeline(gather_pipeline_);
+        ctx.cmd->BindTransient(
+            0, {Bind::Storage(0, ctx.graph->image(a_r)), Bind::Storage(1, ctx.graph->image(a_g)),
+                Bind::Storage(2, ctx.graph->image(a_b)), Bind::Storage(3, ctx.graph->image(hitt)),
+                Bind::Sampled(4, ctx.graph->image(depth_export)),
+                Bind::Sampled(5, ctx.graph->image(normals)),
+                Bind::Accel(6, raytracing.tlas(tlas_slot)),
+                Bind::Uniform(7, globals, 0, sizeof(RcgiGlobals)),
+                Bind::StorageBuffer(8, state_, 0, state_.size),
+                Bind::StorageBuffer(9, radiance_, 0, radiance_.size),
+                InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
+                InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
+                Bind::Combined(12, sky_view_, sky_sampler_),
+                Bind::Combined(13, ctx.graph->image(screen_color).view, linear_sampler_),
+                Bind::Combined(14, ctx.graph->image(screen_depth).view, sampler_)});
+        ctx.cmd->Push(p);
+        ctx.cmd->Dispatch2D(gather);
+      });
+
+  // --- 2. separable bilateral denoise (H: A->B, V: B->A) ---
+  auto denoise = [&](ResourceHandle in_r, ResourceHandle in_g, ResourceHandle in_b,
+                     ResourceHandle out_r, ResourceHandle out_g, ResourceHandle out_b, int dx,
+                     int dy) {
+    graph.AddPass(
+        "rcgi_denoise",
+        [&](RenderGraph::PassBuilder& pb) {
+          for (ResourceHandle h : {out_r, out_g, out_b}) pb.Write(h, ResourceUsage::kStorageWrite);
+          for (ResourceHandle h : {in_r, in_g, in_b, hitt, depth_export, normals})
+            pb.Read(h, ResourceUsage::kSampledCompute);
+        },
+        [this, in_r, in_g, in_b, out_r, out_g, out_b, hitt, depth_export, normals, gather, extent,
+         dx, dy, near_plane](PassContext& ctx) {
+          DenoisePush p{};
+          p.dims[0] = extent.width; p.dims[1] = extent.height;
+          p.dims[2] = gather.width; p.dims[3] = gather.height;
+          p.misc[0] = static_cast<u32>(dx); p.misc[1] = static_cast<u32>(dy); p.misc[2] = 5u;
+          p.params[0] = near_plane;
+          ctx.cmd->BindPipeline(denoise_pipeline_);
+          ctx.cmd->BindTransient(
+              0, {Bind::Storage(0, ctx.graph->image(out_r)),
+                  Bind::Storage(1, ctx.graph->image(out_g)),
+                  Bind::Storage(2, ctx.graph->image(out_b)),
+                  Bind::Sampled(3, ctx.graph->image(in_r)),
+                  Bind::Sampled(4, ctx.graph->image(in_g)),
+                  Bind::Sampled(5, ctx.graph->image(in_b)),
+                  Bind::Sampled(6, ctx.graph->image(hitt)),
+                  Bind::Sampled(7, ctx.graph->image(depth_export)),
+                  Bind::Sampled(8, ctx.graph->image(normals))});
+          ctx.cmd->Push(p);
+          ctx.cmd->Dispatch2D(gather);
+        });
+  };
+  denoise(a_r, a_g, a_b, b_r, b_g, b_b, 1, 0);  // horizontal
+  denoise(b_r, b_g, b_b, a_r, a_g, a_b, 0, 1);  // vertical
+
+  // --- 3. upscale + temporal + SH resolve (full res) ---
+  graph.AddPass(
+      "rcgi_upscale",
+      [&](RenderGraph::PassBuilder& pb) {
+        pb.Write(out, ResourceUsage::kStorageWrite);
+        pb.Write(irr_cur, ResourceUsage::kStorageWrite);
+        for (ResourceHandle h : {a_r, a_g, a_b, depth_export, normals, motion, irr_prv})
+          pb.Read(h, ResourceUsage::kSampledCompute);
+      },
+      [this, out, irr_cur, a_r, a_g, a_b, depth_export, normals, motion, irr_prv, gather, extent,
+       intensity, frame_index, reset, near_plane](PassContext& ctx) {
+        UpscalePush p{};
+        p.dims[0] = extent.width; p.dims[1] = extent.height;
+        p.dims[2] = gather.width; p.dims[3] = gather.height;
+        p.params[0] = near_plane;
+        p.params[1] = intensity;
+        p.params[2] = 48.0f;  // temporal history cap (GI is low-freq; stability > lag)
+        p.params[3] = reset ? 1.0f : 0.0f;
+        p.misc[0] = frame_index;
+        ctx.cmd->BindPipeline(upscale_pipeline_);
+        ctx.cmd->BindTransient(
+            0, {Bind::Storage(0, ctx.graph->image(out)),
+                Bind::Storage(1, ctx.graph->image(irr_cur)),
+                Bind::Sampled(2, ctx.graph->image(a_r)),
+                Bind::Sampled(3, ctx.graph->image(a_g)),
+                Bind::Sampled(4, ctx.graph->image(a_b)),
+                Bind::Sampled(5, ctx.graph->image(depth_export)),
+                Bind::Sampled(6, ctx.graph->image(normals)),
+                Bind::Sampled(7, ctx.graph->image(motion)),
+                Bind::Sampled(8, ctx.graph->image(irr_prv))});
+        ctx.cmd->Push(p);
+        ctx.cmd->Dispatch2D(extent);
+      });
+
+  // Next frame's gather may trust the screen cache once this frame fills it.
+  screen_history_valid_ = true;
+  return out;
+}
+
+void RcgiSystem::AddHistoryCopy(RenderGraph& graph, ResourceHandle lit_color,
+                                ResourceHandle depth_export, Extent2D extent) {
+  if (!screen_color_handle_ || !screen_depth_handle_) return;
+  ResourceHandle color_h = screen_color_handle_;
+  ResourceHandle depth_h = screen_depth_handle_;
+  graph.AddPass(
+      "rcgi_history",
+      [&](RenderGraph::PassBuilder& pb) {
+        pb.Write(color_h, ResourceUsage::kStorageWrite);
+        pb.Write(depth_h, ResourceUsage::kStorageWrite);
+        pb.Read(lit_color, ResourceUsage::kSampledCompute);
+        pb.Read(depth_export, ResourceUsage::kSampledCompute);
+      },
+      [this, color_h, depth_h, lit_color, depth_export, extent](PassContext& ctx) {
+        HistoryPush p{};
+        p.size[0] = extent.width; p.size[1] = extent.height;
+        ctx.cmd->BindPipeline(history_pipeline_);
+        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(color_h)),
+                                   Bind::Storage(1, ctx.graph->image(depth_h)),
+                                   Bind::Sampled(2, ctx.graph->image(lit_color)),
+                                   Bind::Sampled(3, ctx.graph->image(depth_export))});
+        ctx.cmd->Push(p);
+        ctx.cmd->Dispatch2D(extent);
+      });
+  // Consumed: clear so a stray later call cannot double-write.
+  screen_color_handle_ = {};
+  screen_depth_handle_ = {};
+}
+
 RcgiSystem::~RcgiSystem() {
+  DestroyScreenResources();
   for (PipelineHandle* p : {&probe_trace_pipeline_, &args_pipeline_, &cache_shade_pipeline_,
-                            &blend_pipeline_, &border_pipeline_, &resolve_pipeline_}) {
+                            &blend_pipeline_, &border_pipeline_, &resolve_pipeline_,
+                            &gather_pipeline_, &denoise_pipeline_, &upscale_pipeline_,
+                            &history_pipeline_}) {
     device_.DestroyPipeline(*p);
     *p = {};
   }

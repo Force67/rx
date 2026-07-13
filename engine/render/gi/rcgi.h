@@ -63,13 +63,39 @@ class RcgiSystem {
 
   // M1 filler: full-res irradiance from the cascades, sampled per screen pixel.
   // Reads the prepass depth + oct normals; returns the "rcgi_irradiance"
-  // transient the forward pass reads (multiplied by `intensity`).
+  // transient the forward pass reads (multiplied by `intensity`). Retained as the
+  // `RX_RCGI_PROBES_ONLY=1` A/B fallback for the M2 gather chain.
   ResourceHandle AddResolvePass(RenderGraph& graph, ResourceHandle depth_export,
                                 ResourceHandle normals, Extent2D extent, const Mat4& inv_view_proj,
                                 const Vec3& camera, f32 intensity, u32 frame_index);
 
+  // M2 screen side: half-res SH final gather -> separable bilateral denoise ->
+  // full-res poisson upscale + temporal filter, writing the same
+  // "rcgi_irradiance" transient (env set 2 slot 35) the M1 resolve produced.
+  // Consumes the prepass depth/normals/motion, the frame TLAS, and the world
+  // cache/atlas resources this system owns. `reset` drops temporal + screen-cache
+  // history (first frame / resize / teleport).
+  ResourceHandle AddGatherChain(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
+                                ResourceHandle depth_export, ResourceHandle normals,
+                                ResourceHandle motion, Extent2D extent, const Mat4& inv_view_proj,
+                                const Mat4& prev_view_proj, const Vec3& camera, f32 intensity,
+                                u32 frame_index, bool reset);
+
+  // End-of-frame snapshot of the lit HDR scene colour + depth into the persistent
+  // screen-cache history the next frame's gather samples. Record only when RCGI
+  // is active (zero cost otherwise).
+  void AddHistoryCopy(RenderGraph& graph, ResourceHandle lit_color, ResourceHandle depth_export,
+                      Extent2D extent);
+
+  // (Re)create the render-resolution screen-side history images when the extent
+  // changes. No-op if already sized. Must be called before AddGatherChain.
+  void EnsureScreenResources(Extent2D extent);
+
   // Zero the hash on the next update (camera teleports / big jumps).
-  void RequestReset() { clear_hash_ = true; }
+  void RequestReset() {
+    clear_hash_ = true;
+    screen_history_valid_ = false;
+  }
 
  private:
   struct RcgiGlobals {
@@ -85,11 +111,13 @@ class RcgiSystem {
   explicit RcgiSystem(Device& device) : device_(device) {}
   bool CreateResources();
   bool CreatePipelines();
+  void DestroyScreenResources();
   Vec3 SnapOrigin(const Vec3& camera, u32 cascade) const;
 
   Device& device_;
   Settings settings_;
-  SamplerHandle sampler_;
+  SamplerHandle sampler_;        // nearest clamp (atlases / depth)
+  SamplerHandle linear_sampler_; // linear clamp (screen-cache colour)
   TextureView sky_view_;
   SamplerHandle sky_sampler_;
   BindlessRegistry* bindless_ = nullptr;
@@ -110,9 +138,30 @@ class RcgiSystem {
   PipelineHandle blend_pipeline_;
   PipelineHandle border_pipeline_;
   PipelineHandle resolve_pipeline_;
+  PipelineHandle gather_pipeline_;
+  PipelineHandle denoise_pipeline_;
+  PipelineHandle upscale_pipeline_;
+  PipelineHandle history_pipeline_;
+
+  // M2 screen-side persistent images (render resolution). Screen-cache history is
+  // written late (AddHistoryCopy) and read early next frame (gather); the
+  // irradiance temporal history ping-pongs by frame parity.
+  static constexpr u32 kGatherDivisor = 2;  // half res (2), quarter-res ready (4)
+  Extent2D screen_extent_{};
+  GpuImage screen_color_hist_;               // rgba16f lit HDR snapshot
+  GpuImage screen_depth_hist_;               // r32f depth snapshot
+  GpuImage irr_hist_[2];                     // rgba16f temporal irradiance history
+  ResourceState screen_color_state_ = ResourceState::kUndefined;
+  ResourceState screen_depth_state_ = ResourceState::kUndefined;
+  ResourceState irr_hist_state_[2] = {ResourceState::kUndefined, ResourceState::kUndefined};
+  // Handles imported this frame in AddGatherChain, reused by AddHistoryCopy.
+  ResourceHandle screen_color_handle_{};
+  ResourceHandle screen_depth_handle_{};
 
   bool atlas_initialized_ = false;
   bool history_valid_ = false;
+  bool screen_history_valid_ = false;
+  bool screen_reset_ = true;  // force a temporal reset after (re)creating the images
   bool clear_hash_ = true;  // first update zeroes the hash
   Vec3 blended_origin_[kCascades] = {};
   Vec3 last_camera_{};
