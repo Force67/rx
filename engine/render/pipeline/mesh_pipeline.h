@@ -111,6 +111,7 @@ inline constexpr u32 kFrameFlagInterior = 1u << 12;    // interior lighting mode
 inline constexpr u32 kFrameFlagWaterField = 1u << 13;    // water samples the persistent foam/ripple ring field
 inline constexpr u32 kFrameFlagShoreWetting = 1u << 14;  // sample the shoreline wetting field (env slot 33)
 inline constexpr u32 kFrameFlagWaterCaustics = 1u << 15;  // modulate sun on submerged surfaces by the caustic map (env slot 34)
+inline constexpr u32 kFrameFlagRcgi = 1u << 16;  // indirect diffuse from the RCGI resolve texture (env slot 35), replaces DDGI + SSGI
 
 // One active morph target on a draw: index into the mesh's target list and
 // its weight. FrameView::morph_weights concatenates every morphed draw's

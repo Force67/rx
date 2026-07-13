@@ -22,6 +22,8 @@
 #include "render/core/bindless.h"
 #include "render/post/bloom.h"
 #include "render/gi/ddgi.h"
+#include "render/gi/light_grid.h"
+#include "render/gi/rcgi.h"
 #include "render/gi/denoiser_nrd.h"
 #include "render/gi/denoiser_rr.h"
 #include "render/post/exposure.h"
@@ -447,6 +449,8 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<MaterialSystem> material_system_;
   std::unique_ptr<EnvironmentSystem> environment_;
   std::unique_ptr<DdgiSystem> ddgi_;
+  std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI)
+  LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
   std::unique_ptr<WaterPass> water_;
   std::unique_ptr<MeshPipeline> mesh_pipeline_;
   std::unique_ptr<PostPass> post_;

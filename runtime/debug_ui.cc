@@ -499,6 +499,13 @@ void DebugUi::DrawGiTab(render::RenderSettings& settings, const render::DeviceCa
   }
   ImGui::EndDisabled();
 
+  ImGui::BeginDisabled(!ray_query || !settings.ibl);
+  ImGui::Checkbox("RCGI (idTech8, experimental)", &settings.rcgi);
+  if (settings.rcgi) {
+    ImGui::SliderFloat("RCGI intensity", &settings.rcgi_intensity, 0.0f, 4.0f);
+  }
+  ImGui::EndDisabled();
+
   ImGui::SeparatorText("Ambient occlusion");
   ImGui::BeginDisabled(!ray_query);
   ImGui::Checkbox("RT ambient occlusion", &settings.rtao);

@@ -172,6 +172,8 @@ void Host::ApplyRenderPreset() {
   tuned.dynamic_target_ms = env.dynamic_target_ms;
   tuned.dynamic_min_scale = env.dynamic_min_scale;
   tuned.restir_di = env.restir_di;  // honor RX_RESTIR_DI
+  tuned.rcgi = env.rcgi;            // honor RX_RCGI over the preset
+  tuned.rcgi_intensity = env.rcgi_intensity;
   tuned.fft_ocean = env.fft_ocean;  // honor RX_FFT_OCEAN
   tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;

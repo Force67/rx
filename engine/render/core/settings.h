@@ -121,6 +121,13 @@ struct RenderSettings {
   f32 ddgi_spacing = 1.5f;
   f32 ddgi_intensity = 1.0f;
 
+  // RCGI: idTech8-style radiance-cached GI (cascaded world light grid +
+  // spatial-hash radiance cache + irradiance cascades). Replaces the DDGI +
+  // SSGI indirect-diffuse path when on. Needs ray query; experimental (off by
+  // default), RX_RCGI=1.
+  bool rcgi = false;
+  f32 rcgi_intensity = 1.0f;
+
   bool water_reflections = true;  // raytraced; off falls back to sky only
   // Persistent compute-tessellated ocean geometry. Only the largest planar
   // water sheet uses it; authored non-planar water keeps its uploaded mesh.

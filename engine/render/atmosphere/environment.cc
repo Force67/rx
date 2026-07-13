@@ -279,6 +279,10 @@ bool EnvironmentSystem::CreatePipelines() {
   // 34: underwater caustic map (RG16F tiling, wrap-sampled, kept in GENERAL by
   // the caustics compute chain).
   env_desc.slots.push_back({34, BindingType::kCombinedTextureSampler});
+  // 35: RCGI resolved full-res indirect diffuse irradiance (RGBA16F,
+  // screen-space; the forward pass adds it when kFrameFlagRcgi is set). Black
+  // when RCGI is off.
+  env_desc.slots.push_back({35, BindingType::kCombinedTextureSampler});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -453,7 +457,8 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     TextureView ocean_normal, TextureView water_field_ring0,
                                     TextureView water_field_ring1,
                                     const GpuBuffer& water_field_params,
-                                    TextureView shore_wetness, TextureView caustics) const {
+                                    TextureView shore_wetness, TextureView caustics,
+                                    TextureView rcgi_irradiance) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -522,7 +527,10 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        // The live caustic map is a storage image kept in GENERAL by the caustics
        // compute; the black dummy (no caustics) is shader-read.
        caustics ? InGeneral(Bind::Combined(34, caustics, wrap_sampler_))
-                : Bind::Combined(34, black_.view, wrap_sampler_)});
+                : Bind::Combined(34, black_.view, wrap_sampler_),
+       // RCGI resolved irradiance is a transient the frame graph moves to
+       // shader-read for the scene pass; black (no indirect) when off.
+       Bind::Combined(35, rcgi_irradiance ? rcgi_irradiance : black_.view, sampler_)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

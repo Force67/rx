@@ -279,6 +279,9 @@ struct MaterialParams {
 [[vk::combinedImageSampler]] [[vk::binding(4, 2)]] SamplerState ddgi_irradiance_sampler : register(s4, space2);
 [[vk::combinedImageSampler]] [[vk::binding(5, 2)]] Texture2DArray ddgi_distance : register(t5, space2);
 [[vk::combinedImageSampler]] [[vk::binding(5, 2)]] SamplerState ddgi_distance_sampler : register(s5, space2);
+// RCGI resolved full-res indirect diffuse (env slot 35, replaces DDGI + SSGI).
+[[vk::combinedImageSampler]] [[vk::binding(35, 2)]] Texture2D rcgi_irradiance : register(t35, space2);
+[[vk::combinedImageSampler]] [[vk::binding(35, 2)]] SamplerState rcgi_irradiance_sampler : register(s35, space2);
 
 struct DdgiVolume {
   float4 origin;          // xyz grid origin, w probe spacing
@@ -335,6 +338,7 @@ static const uint kFlagHasOcclusion = 131072u;      // 1 << 17, dedicated occlus
 static const uint kFrameIbl = 1u;
 static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
+static const uint kFrameRcgi = 65536u;  // 1 << 16, indirect diffuse from the RCGI resolve texture
 static const uint kFrameReflections = 16u;
 static const uint kFrameRtShadows = 32u;
 static const uint kFrameSigmaShadow = 128u;
@@ -1057,7 +1061,11 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       radiance = lerp(traced, radiance, blend);
     }
     float3 irradiance = irradiance_cube.Sample(irradiance_sampler, n).rgb;
-    if ((frame.flags & kFrameDdgi) != 0u) {
+    if ((frame.flags & kFrameRcgi) != 0u) {
+      // RCGI replaces the DDGI + SSGI indirect-diffuse path with the resolved
+      // full-res irradiance (already scaled by rcgi_intensity).
+      irradiance += rcgi_irradiance.Load(int3(input.sv_position.xy, 0)).rgb;
+    } else if ((frame.flags & kFrameDdgi) != 0u) {
       irradiance += SampleDdgi(input.world_pos, n, v);
     }
     // Fdez-Aguera energy compensation: single scatter split-sum plus a
