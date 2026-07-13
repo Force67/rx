@@ -46,6 +46,7 @@ constexpr f32 kInteractStandDisp = 0.35f;   // meters the footprint depresses th
 struct GpuDisturbance {
   f32 pos_radius[4];
   f32 params[4];
+  f32 wake[2];  // elongation, angular_velocity
 };
 static_assert(sizeof(GpuDisturbance) == sizeof(WaterDisturbance));
 

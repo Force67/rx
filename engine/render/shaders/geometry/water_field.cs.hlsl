@@ -44,6 +44,7 @@ struct PushData {
 struct Disturbance {
   float4 pos_radius;  // xyz world, w radius
   float4 params;      // ripple_strength, foam_amount, vel_x, vel_z
+  float2 wake;        // elongation (speed stretch), angular_velocity (turn skew)
 };
 [[vk::binding(3, 0)]] StructuredBuffer<Disturbance> disturbances : register(t3, space0);
 
@@ -224,16 +225,41 @@ void main(uint3 tid : SV_DispatchThreadID) {
   float inject = (saturate((fft_foam - 0.18) * 1.5) * 0.5 +
                   saturate((gerstner - 0.80) * 3.0) * 0.2) * dt;
 
-  // Object disturbances: a wake ripple (ring 0) plus a foam splat, both faded
-  // toward the disturbance radius.
+  // Object disturbances: a VELOCITY-SHAPED wake ripple (ring 0) plus a foam
+  // splat. A still body (speed ~0) collapses to the old radial blob; a moving
+  // body stretches the splat along its heading, sharpens the leading (bow) edge
+  // and trails a stern band, skewing sideways under a turn. Speed scales the
+  // stretch (via the CPU-supplied elongation) and the intensity.
   for (uint i = 0u; i < push.control.w; ++i) {
     Disturbance d = disturbances[i];
-    float dist = length(world - d.pos_radius.xz);
-    float falloff = 1.0 - saturate(dist / max(d.pos_radius.w, 0.01));
+    float2 rel = world - d.pos_radius.xz;
+    float radius = max(d.pos_radius.w, 0.01);
+    float2 vel_xz = d.params.zw;
+    float speed = length(vel_xz);
+    float2 fwd = speed > 1e-3 ? vel_xz / speed : float2(0.0, 1.0);
+    float2 side = float2(-fwd.y, fwd.x);
+    float along = dot(rel, fwd);    // + ahead of the body (bow), - behind (stern)
+    float across = dot(rel, side);
+    float e = d.wake.x;             // elongation (0 = radial)
+    // Turning skews the wake: shear the lateral offset by the yaw rate along the
+    // motion axis, so the wake curves to the inside of the turn.
+    across += d.wake.y * along * 0.4;
+    // Anisotropic footprint: a tight bow ahead, a long tail astern, narrower
+    // across as it stretches. e = 0 makes every scale = radius (a plain circle).
+    float fore = radius / (1.0 + e * 1.5);         // ahead: compressed, sharp bow
+    float aft = radius * (1.0 + e * 3.0);          // behind: elongated stern tail
+    float lat = radius * (0.6 + 0.4 / (1.0 + e));  // across: narrows with speed
+    float an = along >= 0.0 ? along / fore : along / aft;
+    float ac = across / lat;
+    float falloff = 1.0 - saturate(sqrt(an * an + ac * ac));
     falloff *= falloff;  // soft edge
     if (falloff <= 0.0) continue;
-    if (ring == 0u) vel += d.params.x * falloff * dt * 12.0;
-    inject += d.params.y * falloff * dt;
+    float bow = saturate(an);    // 0 astern .. 1 at the bow tip
+    float stern = saturate(-an); // 0 at the bow .. 1 astern
+    // Ripple is strongest right at the bow (the pressure wave a hull pushes);
+    // foam lingers in the trailing stern band.
+    if (ring == 0u) vel += d.params.x * falloff * (1.0 + 1.6 * bow * e) * dt * 12.0;
+    inject += d.params.y * falloff * (1.0 + 1.0 * stern) * dt;
   }
 
   // Depth-buffer interaction: turn geometry crossing the waterline at this
