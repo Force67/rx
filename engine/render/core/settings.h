@@ -127,6 +127,10 @@ struct RenderSettings {
   bool adaptive_water = true;
   u32 water_triangle_budget = 16384;
   f32 water_target_triangle_pixels = 24.0f;
+  // Persistent camera-following foam/ripple data field (nested rings): foam that
+  // advects with the waves and streaks/decays instead of flickering in place,
+  // plus object wakes. Off falls back to the per-frame instantaneous crest foam.
+  bool water_field = true;
 
   bool rt_reflections = true;  // raytraced specular for opaque surfaces (needs ray query)
   f32 reflection_roughness_cutoff = 0.6f;  // above this, fall back to prefiltered ibl

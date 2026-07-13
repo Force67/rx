@@ -42,6 +42,7 @@
 #include "render/pipeline/virtual_geometry.h"
 #include "render/geometry/hair_strands.h"
 #include "render/geometry/ocean_fft.h"
+#include "render/geometry/water_field.h"
 #include "render/geometry/imposters.h"
 #include "render/atmosphere/volumetric_fog.h"
 #include "render/pipeline/material_system.h"
@@ -216,6 +217,10 @@ struct FrameView {
   // 3D gaussian splats: non-triangle primitives, projected and alpha blended
   // over the resolved scene.
   base::Vector<GaussianInstance> gaussians;
+  // Object disturbances written into the persistent water field this frame:
+  // boat wakes, bobbing props. Each injects a ripple impulse + foam splat at a
+  // world position, scaled by the object's motion. Bounded; empty = no-op.
+  base::Vector<WaterDisturbance> water_disturbances;
   // Recorded inside the final ui pass with the backbuffer bound as the
   // color attachment. hud_draw (the libultragui HUD/menu) records first, then
   // ui_draw (the debug ImGui overlay) on top.
@@ -494,8 +499,10 @@ class RX_RENDER_EXPORT Renderer {
   VirtualGeometryPass vgeo_;
   HairStrands hair_;
   OceanFft ocean_;
+  WaterField water_field_;
   ImposterPass imposters_;
   bool fft_ocean_active_ = false;  // maps valid + flag set this frame
+  bool water_field_active_ = false;  // ring field valid + flag set this frame
   GpuImage ms_dummy_hiz_;  // 1x1 fallback bound to the mesh-shader cull when occlusion is off
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
   f32 pt_prev_sig_ = 0;  // lighting signature; change resets accumulation
