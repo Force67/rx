@@ -99,7 +99,7 @@ void ShoreWetting::FieldParams(f32 out[4]) const {
   out[0] = origin_[0];
   out[1] = origin_[1];
   out[2] = 1.0f / kExtent;
-  out[3] = 0.0f;
+  out[3] = 0.0f;  // rest water height: the shader fades wetness out above the swell's reach
 }
 
 void ShoreWetting::AddToGraph(RenderGraph& graph, const Params& params) {

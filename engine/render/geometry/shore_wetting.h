@@ -39,7 +39,7 @@ class ShoreWetting {
   // Snap the field origin to the camera and advance the ping-pong. Call once
   // per frame, before FrameGlobals is uploaded and before AddToGraph.
   void BeginFrame(const Vec3& camera_eye);
-  // Fills FrameGlobals::shore_field: origin xz, 1/extent, unused.
+  // Fills FrameGlobals::shore_field: origin xz, 1/extent, rest water height.
   void FieldParams(f32 out[4]) const;
 
   // Records the wetting compute for this frame using the origin from BeginFrame.
