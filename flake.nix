@@ -202,6 +202,8 @@
               glslang                  # FidelityFX shader permutations
               pkg-config
               sdl3
+              freetype                 # libultragui text rasterization (editor UI)
+              harfbuzz                 # libultragui text shaping (editor UI)
               openssl                  # zetanet crypto backend (optional net sessions)
               wayland                  # libwayland-client, KDE HDR-toggle monitor
               vulkan-headers
