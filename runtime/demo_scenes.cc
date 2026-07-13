@@ -362,11 +362,13 @@ void DemoScenes::CreateWaterDemoScene() {
     if (body) ctx_.physics_entities->push_back({body, block});
   }
 
-  // A sparse additive ember fountain, offset from the nearest cube so the
-  // particle test does not read as corruption of its silhouette. Volumetric
-  // sky clouds are intentionally off: this scene isolates water shading.
+  // A sparse additive ember fountain directly in front of the nearest cube:
+  // pixel-sized sprites over a high-contrast silhouette are the acceptance
+  // test for jitter-aligned billboards (unjittered ones flicker here).
+  // Volumetric sky clouds are intentionally off: this scene isolates water
+  // shading.
   particles_enabled_ = true;
-  particle_emitter_ = {-7.0f, 0.8f, -3.0f};
+  particle_emitter_ = {-7.0f, 0.8f, 0.0f};
   renderer_.settings().clouds = false;
   // DDGI's low-resolution probe volume can imprint its lattice on the large
   // untextured floaters. This scene validates water geometry, so use the
@@ -524,10 +526,16 @@ void DemoScenes::UpdateParticles(f32 dt, render::FrameView& view) {
     inst.pos[1] = p.position.y;
     inst.pos[2] = p.position.z;
     inst.size = p.size * (1.3f - 0.3f * t);
-    inst.color[0] = p.color.x;
-    inst.color[1] = p.color.y;
-    inst.color[2] = p.color.z;
-    inst.color[3] = t * t * 0.8f;  // fade out over life
+    // Additive-path convention (see particle_emitters.cc): the life fade is
+    // premultiplied into the HDR radiance and alpha stays 1. Alpha only weights
+    // the motion-vector write there, so a fade authored in alpha never dims the
+    // ember - it dies at full brightness between two frames (a visible pop) and
+    // loses temporal tracking as it ages.
+    f32 fade = t * t * 0.8f;  // fade out over life
+    inst.color[0] = p.color.x * fade;
+    inst.color[1] = p.color.y * fade;
+    inst.color[2] = p.color.z * fade;
+    inst.color[3] = 1.0f;
     inst.prev_pos[0] = p.position.x - p.velocity.x * dt;  // one frame back, for the motion vector
     inst.prev_pos[1] = p.position.y - p.velocity.y * dt;
     inst.prev_pos[2] = p.position.z - p.velocity.z * dt;
