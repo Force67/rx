@@ -64,6 +64,7 @@ base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
 // 0 shaded, 1 cluster tint, 2 lod tint, 3 sw/hw raster path.
 base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
+base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true, "RX_ADAPTIVE_WATER"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "RX_MOTION_BLUR_DEBUG_VEL"};
@@ -609,6 +610,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (VrsThreshold.overridden()) settings_.vrs_threshold = static_cast<f32>(double(VrsThreshold));
   if (RestirDiOpt.overridden()) settings_.restir_di = RestirDiOpt;
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
+  if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -3502,7 +3504,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       particles_.SimulateAndDraw(graph_, lit, depth_export, motion, sim, pf, frame_index_ % 2,
                                  particle_bindless);
     } else {
-      for (const ParticleInstance& inst : view.particles) emitter_lit.push_back(inst);
+      base::Vector<ParticleInstance>& demo_particles =
+          view.particles_emissive ? emitter_additive : emitter_lit;
+      for (const ParticleInstance& inst : view.particles) demo_particles.push_back(inst);
       BindingSetHandle particle_bindless = bindless_ ? bindless_->set() : BindingSetHandle{};
       particles_.AddToGraph(graph_, lit, depth_export, motion, emitter_lit, emitter_additive,
                             pf, frame_index_ % 2, particle_bindless);

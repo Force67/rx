@@ -1,5 +1,7 @@
 # Adaptive water geometry integration plan
 
+![Adaptive CBT ocean in the built-in water demo](../../../docs/images/adaptive-water-cbt.png)
+
 ## Goal
 
 Replace the dense, uniformly subdivided ocean sheet with a persistent GPU-owned
@@ -44,7 +46,8 @@ mesh path.
 
 - Add `adaptive_water`, `water_triangle_budget`, and
   `water_target_triangle_pixels` settings. Presets scale the budget by platform
-  tier; setting `adaptive_water = false` restores the uploaded mesh exactly.
+  tier; setting `adaptive_water = false` or `RX_ADAPTIVE_WATER=0` restores the
+  uploaded mesh exactly for A/B captures.
 - Allocation failure, unsupported indirect drawing, a non-planar candidate, or a
   candidate change falls back to the existing water draw for that frame.
 - Expose active triangle count and capacity to the debug UI after the rendering

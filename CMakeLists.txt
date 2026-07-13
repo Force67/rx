@@ -313,6 +313,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   target_include_directories(adaptive_water_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/engine
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(adaptive_water_test PRIVATE rx::core)
   add_test(NAME adaptive_water_test COMMAND adaptive_water_test)
 
   add_executable(offscreen_test test/offscreen_test.cc)

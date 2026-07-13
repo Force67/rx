@@ -128,7 +128,7 @@ float3 SampleGgxVndf(float3 v, float3 n, float alpha, float2 u) {
 float2 ProbeAtlasUv(uint3 probe, float3 dir, float texels, float2 atlas_size) {
   float2 oct = OctEncode(dir) * 0.5 + 0.5;
   float2 base = float2(probe.x + probe.z * ddgi.counts.x, probe.y) * (texels + 2.0) + 1.0;
-  return (base + oct * texels) / atlas_size;
+  return (base + 0.5 + oct * (texels - 1.0)) / atlas_size;
 }
 
 // Nearest-probe diffuse gi at the reflection hit (matches the forward rt

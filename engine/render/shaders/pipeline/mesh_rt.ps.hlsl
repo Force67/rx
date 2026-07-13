@@ -414,7 +414,7 @@ float2 OctEncode(float3 d) {
 float2 ProbeAtlasUv(uint3 probe, float3 dir, float texels, float2 atlas_size) {
   float2 oct = OctEncode(dir) * 0.5 + 0.5;
   float2 base = float2(probe.x + probe.z * ddgi.counts.x, probe.y) * (texels + 2.0) + 1.0;
-  return (base + oct * texels) / atlas_size;
+  return (base + 0.5 + oct * (texels - 1.0)) / atlas_size;
 }
 
 // Trilinear probe blend with chebyshev visibility, the DDGI estimator.
@@ -471,7 +471,7 @@ float3 SampleDdgi(float3 world_pos, float3 n, float3 v) {
     float3 irr = ddgi_irradiance
         .SampleLevel(ddgi_irradiance_sampler,
                      float3(ProbeAtlasUv(probe, n, irr_texels, irr_atlas), 0.0), 0.0).rgb;
-    sum += sqrt(irr) * weight;  // blend in perceptual space, square after
+    sum += irr * weight;  // atlas is already perceptually encoded
     weight_sum += weight;
   }
   float3 mean = sum / max(weight_sum, 1e-4);
