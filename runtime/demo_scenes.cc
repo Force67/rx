@@ -405,6 +405,80 @@ void DemoScenes::CreateWaterDemoScene() {
   // stable environment-lighting path here.
   renderer_.settings().ddgi = false;
 
+  // A procedural sandy island so waves visibly wet its beach. A radial gaussian
+  // dome that peaks kPeak above the rest water and dips below it further out, so
+  // the waterline sits partway up the slope where the swell can lap in and out.
+  // The wetting field (renderer) evaluates the same analytic height, keyed off
+  // shore_island below; keep the two in sync.
+  constexpr f32 kIslandCenterX = 16.0f, kIslandCenterZ = 0.0f;
+  constexpr f32 kSigma = 13.0f;   // gaussian falloff (m); gentle slope = wide wet band
+  constexpr f32 kPeak = 2.4f;     // height above rest water at the centre (m)
+  constexpr f32 kRadius = 28.0f;  // mesh half-extent (m)
+  constexpr u32 kIslandGrid = 96;
+  asset::Material sand_material;
+  sand_material.id = asset::MakeAssetId("demo/sand_material");
+  sand_material.base_color_factor[0] = 0.40f;
+  sand_material.base_color_factor[1] = 0.34f;
+  sand_material.base_color_factor[2] = 0.24f;  // a muted tan; bright sand clips to white here
+  sand_material.base_color_factor[3] = 1.0f;
+  sand_material.metallic_factor = 0.0f;
+  sand_material.roughness_factor = 0.9f;
+
+  asset::Mesh island;
+  island.id = asset::MakeAssetId("demo/island");
+  island.lods.emplace_back();
+  asset::MeshLod& island_lod = island.lods[0];
+  for (u32 gy = 0; gy <= kIslandGrid; ++gy) {
+    for (u32 gx = 0; gx <= kIslandGrid; ++gx) {
+      f32 lx = -kRadius + 2.0f * kRadius * static_cast<f32>(gx) / kIslandGrid;
+      f32 lz = -kRadius + 2.0f * kRadius * static_cast<f32>(gy) / kIslandGrid;
+      f32 g = std::exp(-(lx * lx + lz * lz) / (2.0f * kSigma * kSigma));
+      f32 slope = kPeak * 2.0f * g / (kSigma * kSigma);  // -dh/dr factor
+      Vec3 n = Normalize(Vec3{slope * lx, 1.0f, slope * lz});
+      asset::Vertex v{};
+      v.position[0] = lx;
+      v.position[1] = kPeak * (2.0f * g - 1.0f);
+      v.position[2] = lz;
+      v.normal[0] = n.x;
+      v.normal[1] = n.y;
+      v.normal[2] = n.z;
+      v.tangent[0] = 1;
+      v.tangent[3] = 1;
+      v.uv[0] = lx / 8.0f;
+      v.uv[1] = lz / 8.0f;
+      v.color = 0xffffffff;
+      island_lod.vertices.push_back(v);
+    }
+  }
+  for (u32 gy = 0; gy < kIslandGrid; ++gy) {
+    for (u32 gx = 0; gx < kIslandGrid; ++gx) {
+      u32 a = gy * (kIslandGrid + 1) + gx;
+      u32 b = a + 1;
+      u32 c = a + (kIslandGrid + 1);
+      u32 d = c + 1;
+      for (u32 index : {a, b, c, b, d, c}) island_lod.indices.push_back(index);
+    }
+  }
+  asset::Submesh island_submesh;
+  island_submesh.index_count = static_cast<u32>(island_lod.indices.size());
+  island_submesh.material = sand_material.id;
+  island_lod.submeshes.push_back(island_submesh);
+  island.bounds_radius = kRadius * 1.5f;
+  if (!config_.headless) {
+    renderer_.UploadMaterial(sand_material);
+    renderer_.UploadMesh(island);
+  }
+  ecs::Entity island_entity = world_.Create();
+  world_.Add(island_entity, scene::Transform{.position = {kIslandCenterX, 0.0f, kIslandCenterZ}});
+  world_.Add(island_entity, scene::Renderable{island.id});
+
+  // Turn the wetting field on and point it at this beach.
+  renderer_.settings().shore_wetting = true;
+  renderer_.settings().shore_island[0] = kIslandCenterX;
+  renderer_.settings().shore_island[1] = kIslandCenterZ;
+  renderer_.settings().shore_island[2] = kSigma;
+  renderer_.settings().shore_island[3] = kPeak;
+
   camera_.set_position({-14.0f, 3.0f, 0.0f});
   camera_.set_yaw_pitch(1.5708f, -0.25f);
   RX_INFO("water demo scene");

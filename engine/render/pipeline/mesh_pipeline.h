@@ -54,6 +54,9 @@ struct FrameGlobals {
   f32 interior_fog_color0[4] = {0, 0, 0, 0};   // rgb near fog colour, w near dist (m)
   f32 interior_fog_color1[4] = {0, 0, 0, 0};   // rgb far fog colour, w far dist (m)
   f32 interior_fog_params[4] = {1, 1, 0, 0};   // x fog power, y fog max, zw unused
+  // Shoreline wetting field (kFrameFlagShoreWetting): xy field min-corner world
+  // xz, z 1/extent (1/m), w unused. Zeroed when the feature is off.
+  f32 shore_field[4] = {0, 0, 0, 0};
 };
 
 // A projected decal: an oriented box whose -z face carries an atlas region,
@@ -94,7 +97,8 @@ inline constexpr u32 kFrameFlagSpecReflTex = 1u << 9;  // sample the denoised re
 inline constexpr u32 kFrameFlagRestirDi = 1u << 10;     // point/spot lights come from the ReSTIR DI textures
 inline constexpr u32 kFrameFlagFftOcean = 1u << 11;     // water displaces/shades from the FFT ocean maps
 inline constexpr u32 kFrameFlagInterior = 1u << 12;    // interior lighting mode: flat ambient + fog, no sky
-inline constexpr u32 kFrameFlagWaterField = 1u << 13;  // water samples the persistent foam/ripple ring field
+inline constexpr u32 kFrameFlagWaterField = 1u << 13;    // water samples the persistent foam/ripple ring field
+inline constexpr u32 kFrameFlagShoreWetting = 1u << 14;  // sample the shoreline wetting field (env slot 33)
 
 // One active morph target on a draw: index into the mesh's target list and
 // its weight. FrameView::morph_weights concatenates every morphed draw's

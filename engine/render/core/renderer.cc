@@ -66,6 +66,7 @@ base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true, "RX_ADAPTIVE_WATER"};
 base::Option<bool> WaterFieldOpt{"water.field", true, "RX_WATER_FIELD"};
+base::Option<bool> ShoreWettingOpt{"shore.wetting", false, "RX_SHORE_WETTING"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "RX_MOTION_BLUR_DEBUG_VEL"};
@@ -422,6 +423,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (!water_field_.Initialize(*device_)) {
     RX_WARN("water foam field unavailable");  // non-fatal: instantaneous crest foam
   }
+  if (!shore_wetting_.Initialize(*device_)) {
+    RX_WARN("shoreline wetting unavailable");  // non-fatal: feature stays off
+  }
   if (device_->caps().mesh_shaders) {
     // 1x1 fallback hi-z so the mesh-shader cull descriptor is always valid; bound
     // (with occlusion disabled) on frames where no real hi-z was built.
@@ -616,6 +620,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
+  if (ShoreWettingOpt.overridden()) settings_.shore_wetting = ShoreWettingOpt;
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -1990,6 +1995,15 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (fft_ocean_active) globals.flags |= kFrameFlagFftOcean;
   water_field_active_ = settings_.water_field && water_field_.available() && !path_trace && !interior;
   if (water_field_active_) globals.flags |= kFrameFlagWaterField;
+  // Shoreline wetting: snap the field to the camera and hand the shader its
+  // origin/extent before the globals upload; the compute pass records below.
+  shore_wetting_active_ =
+      settings_.shore_wetting && shore_wetting_.available() && !path_trace && !interior;
+  if (shore_wetting_active_) {
+    shore_wetting_.BeginFrame(view.camera.eye);
+    shore_wetting_.FieldParams(globals.shore_field);
+    globals.flags |= kFrameFlagShoreWetting;
+  }
   // Hybrid ReSTIR DI decision happens before the globals upload below; the
   // graph passes record later under the same flag.
   bool restir_active = settings_.restir_di && rt_available_ && restir_di_.available() &&
@@ -2114,6 +2128,20 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     wf.disturbance_count = static_cast<u32>(view.water_disturbances.size());
     water_field_.AddToGraph(graph_, wf,
                             fft_ocean_active ? ocean_.normal_foam_view() : TextureView{});
+  }
+
+  // Shoreline wetting: update the world-space wet field this frame. Follows the
+  // ocean pass so it can read the freshly-built displacement map when active.
+  if (shore_wetting_active_) {
+    ShoreWetting::Params sp;
+    sp.camera_eye = view.camera.eye;
+    sp.time = static_cast<f32>(time_seconds_);
+    sp.dt = view.frame_delta_seconds;
+    sp.drying_time = settings_.shore_drying_time;
+    for (u32 i = 0; i < 4; ++i) sp.island[i] = settings_.shore_island[i];
+    sp.fft_active = fft_ocean_active;
+    sp.ocean_displacement = fft_ocean_active ? ocean_.displacement_view() : TextureView{};
+    shore_wetting_.AddToGraph(graph_, sp);
   }
 
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
@@ -3038,7 +3066,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             virtual_texture_.available() ? virtual_texture_.indirection_view() : TextureView{},
             virtual_texture_.available() ? virtual_texture_.atlas_view() : TextureView{},
             fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
-            fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
+            fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
+            TextureView{}, TextureView{}, GpuBuffer{},  // water field rings: transparent pass only
+            shore_wetting_active_ ? shore_wetting_.current_view() : TextureView{});
 
         ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(geom_scene).view,
@@ -4130,6 +4160,7 @@ void Renderer::Shutdown() {
     hair_.Destroy(*device_);
     ocean_.Destroy(*device_);
     water_field_.Destroy(*device_);
+    shore_wetting_.Destroy(*device_);
     imposters_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);

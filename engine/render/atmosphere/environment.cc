@@ -274,6 +274,8 @@ bool EnvironmentSystem::CreatePipelines() {
   env_desc.slots.push_back({30, BindingType::kCombinedTextureSampler});
   env_desc.slots.push_back({31, BindingType::kCombinedTextureSampler});
   env_desc.slots.push_back({32, BindingType::kUniformBuffer});
+  // 33: shoreline wetting field (R16F world-space wetness, clamp-sampled).
+  env_desc.slots.push_back({33, BindingType::kCombinedTextureSampler});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -447,7 +449,8 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     TextureView vt_atlas, TextureView ocean_displacement,
                                     TextureView ocean_normal, TextureView water_field_ring0,
                                     TextureView water_field_ring1,
-                                    const GpuBuffer& water_field_params) const {
+                                    const GpuBuffer& water_field_params,
+                                    TextureView shore_wetness) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -508,7 +511,11 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        water_field_ring1 ? InGeneral(Bind::Combined(31, water_field_ring1, sampler_))
                          : Bind::Combined(31, black_.view, sampler_),
        Bind::Uniform(32, water_field_params ? water_field_params : dummy_volume_, 0,
-                     water_field_params ? water_field_params.size : 256)});
+                     water_field_params ? water_field_params.size : 256),
+       // The live field is a storage image kept in GENERAL by the wetting
+       // compute; the black dummy (dry) is shader-read.
+       shore_wetness ? InGeneral(Bind::Combined(33, shore_wetness, sampler_))
+                     : Bind::Combined(33, black_.view, sampler_)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

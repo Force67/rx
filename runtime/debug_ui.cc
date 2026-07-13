@@ -385,6 +385,11 @@ void DebugUi::DrawRayTracingTab(render::Renderer& renderer, render::RenderSettin
   ImGui::Checkbox("Screen-space reflections", &settings.ssr);
   ImGui::EndDisabled();
 
+  ImGui::Checkbox("Shoreline wetting", &settings.shore_wetting);
+  if (settings.shore_wetting) {
+    ImGui::SliderFloat("Shore drying time", &settings.shore_drying_time, 5.0f, 60.0f, "%.0f s");
+  }
+
   ImGui::SeparatorText("Path tracing");
   ImGui::BeginDisabled(!ray_query);
   ImGui::Checkbox("Path tracing", &settings.path_trace);
