@@ -65,6 +65,8 @@ base::Option<bool> VrsOpt{"vrs", true, "RX_VRS"};
 base::Option<double> VrsThreshold{"vrs.threshold", 0.06, "RX_VRS_THRESHOLD"};
 base::Option<bool> RestirDiOpt{"restir.di", false, "RX_RESTIR_DI"};
 base::Option<bool> RcgiOpt{"rcgi", false, "RX_RCGI"};
+// A/B debug: use the M1 per-pixel cascade resolve instead of the M2 gather chain.
+base::Option<bool> RcgiProbesOnlyOpt{"rcgi.probes_only", false, "RX_RCGI_PROBES_ONLY"};
 base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
 // 0 shaded, 1 cluster tint, 2 lod tint, 3 sw/hw raster path.
 base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
@@ -1909,8 +1911,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   auto add_water = [&](ResourceHandle scene_color, ResourceHandle depth,
                        ResourceHandle depth_export, ResourceHandle motion,
                        ResourceHandle sun_shadow, ResourceHandle shadow_atlas, bool csm_on,
-                       u32 shadow_slot, u32 water_tlas_slot,
-                       bool globals_written) -> ResourceHandle {
+                       u32 shadow_slot, u32 water_tlas_slot, bool globals_written,
+                       ResourceHandle rcgi_irr = kInvalidResource) -> ResourceHandle {
     std::sort(transparent.begin(), transparent.end(),
               [](const TransparentDraw& a, const TransparentDraw& b) {
                 return a.distance_sq > b.distance_sq;
@@ -1946,12 +1948,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           if (sun_shadow != kInvalidResource)
             builder.Read(sun_shadow, ResourceUsage::kSampledFragment);
           if (csm_on) builder.Read(shadow_atlas, ResourceUsage::kSampledFragment);
+          if (rcgi_irr != kInvalidResource) builder.Read(rcgi_irr, ResourceUsage::kSampledFragment);
         },
         [this, composite, motion, depth, opaque_color, opaque_depth, sun_shadow, water_tlas_slot,
          use_rt_frag, ddgi_active, water_pipeline_active, csm_on, shadow_slot, shadow_atlas,
          globals_set, globals_written, update_globals_set, frame_slot,
          adaptive_water_item, adaptive_water_submesh, transparent = std::move(transparent),
-         &frame, &view](PassContext& ctx) {
+         rcgi_irr, &frame, &view](PassContext& ctx) {
           if (!globals_written) {
             update_globals_set(ctx, kInvalidResource, false, /*want_tlas=*/true);
           }
@@ -1961,6 +1964,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           if (ddgi_active) ddgi_binding = ddgi_->binding(frame_index_);
           TextureView sun_shadow_view =
               sun_shadow != kInvalidResource ? ctx.graph->image(sun_shadow).view : TextureView{};
+          TextureView rcgi_irr_view =
+              rcgi_irr != kInvalidResource ? ctx.graph->image(rcgi_irr).view : TextureView{};
           environment_->WriteEnvSet(
               env_set, TextureView{}, ddgi_active ? &ddgi_binding : nullptr,
               csm_on ? ctx.graph->image(shadow_atlas).view : TextureView{},
@@ -1976,7 +1981,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
               water_field_active_ ? water_field_.ring_view(0) : TextureView{},
               water_field_active_ ? water_field_.ring_view(1) : TextureView{},
-              water_field_active_ ? water_field_.params_buffer(frame_slot) : GpuBuffer{});
+              water_field_active_ ? water_field_.params_buffer(frame_slot) : GpuBuffer{},
+              TextureView{}, TextureView{}, rcgi_irr_view);
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
@@ -2460,15 +2466,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   }
 
   // RCGI world side: cascaded light grid + spatial-hash radiance cache +
-  // irradiance cascades. Run synchronously in v1 (correctness first); the
-  // screen-side resolve/gather consumes the atlases after the prepass.
+  // irradiance cascades. Like DDGI it can fork onto the async compute queue and
+  // overlap up to the JoinAsync before its first consumer (the M2 gather).
   bool rcgi_world = rcgi_active && !path_trace;
+  bool rcgi_async = rcgi_world && settings_.async_compute && device_->caps().async_compute;
   if (rcgi_world) {
     light_grid_.AddToGraph(graph_, frame.lights, light_count, view.camera.eye, frame_index_,
-                           /*async=*/false);
+                           rcgi_async);
     rcgi_->AddToGraph(graph_, *raytracing_, tlas_slot, light_grid_, frame.lights, view.camera.eye,
                       applied_sun_direction_, applied_sun_intensity_, applied_sun_color_,
-                      frame_index_, /*async=*/false);
+                      frame_index_, rcgi_async);
   }
 
   // The path tracer takes over the whole frame: it writes scene_color directly
@@ -3262,13 +3269,28 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                           frame_index_);
   }
 
-  // RCGI M1 filler: sample the irradiance cascades per screen pixel into the
-  // full-res indirect-diffuse texture the forward pass folds in (M2 replaces
-  // this with the gather/denoise/upscale chain writing the same texture).
+  // RCGI screen side: M2 half-res SH final gather -> bilateral denoise -> full-res
+  // upscale + temporal filter, writing the same "rcgi_irradiance" transient the
+  // forward pass folds in. `RX_RCGI_PROBES_ONLY=1` swaps in the M1 per-pixel
+  // cascade resolve for A/B comparison. The gather is the first consumer of the
+  // (optionally async) world passes, so join the compute queue before it.
   if (rcgi_world && depth_export != kInvalidResource && normals != kInvalidResource) {
-    rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
-                                     {render_width_, render_height_}, globals.inv_view_proj,
-                                     view.camera.eye, settings_.rcgi_intensity, frame_index_);
+    if (rcgi_async) {
+      graph_.AddPass(
+          "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
+          [](PassContext&) {});
+    }
+    if (RcgiProbesOnlyOpt) {
+      rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
+                                       {render_width_, render_height_}, globals.inv_view_proj,
+                                       view.camera.eye, settings_.rcgi_intensity, frame_index_);
+    } else {
+      rcgi_->EnsureScreenResources({render_width_, render_height_});
+      rcgi_irr = rcgi_->AddGatherChain(
+          graph_, *raytracing_, tlas_slot, depth_export, normals, motion,
+          {render_width_, render_height_}, globals.inv_view_proj, globals.prev_view_proj,
+          view.camera.eye, settings_.rcgi_intensity, frame_index_, first_frame);
+    }
   }
 
   // Hybrid ReSTIR DI: reservoir-resampled point/spot lights with one shadow
@@ -3675,7 +3697,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
   if (!transparent.empty() && water_) {
     lit = add_water(scene_color, depth, depth_export, motion, sun_shadow, shadow_atlas, csm_active,
-                    shadow_slot, tlas_slot, /*globals_written=*/true);
+                    shadow_slot, tlas_slot, /*globals_written=*/true, rcgi_irr);
   }
 
   // Surface weather: wet/darken (rain) or whiten (snow) the lit surfaces before
@@ -4123,6 +4145,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (vrs_active_) {
     vrs_.AddToGraph(graph_, lit, motion, {render_width_, render_height_},
                     settings_.vrs_threshold, /*motion_scale=*/2.5f);
+  }
+
+  // RCGI screen cache: snapshot this frame's lit HDR colour + depth so next
+  // frame's final gather can read last-frame radiance for its screen cache.
+  // Only when the M2 gather ran (probes-only / off record nothing).
+  if (rcgi_world && !RcgiProbesOnlyOpt && lit != kInvalidResource &&
+      depth_export != kInvalidResource) {
+    rcgi_->AddHistoryCopy(graph_, lit, depth_export, {render_width_, render_height_});
   }
 
   // The path tracer already resolved antialiasing through accumulation; the
