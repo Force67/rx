@@ -7,6 +7,7 @@ set(RX_RUNTIME_SOURCES
   camera_input.cc
   viewer_input.cc
   demo_scenes.cc
+  demo_ship.cc
   scene_hook_demo.cc
   scene_hook_rhi_demo.cc
   fly_camera.cc
