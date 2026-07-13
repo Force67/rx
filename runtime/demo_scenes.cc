@@ -410,10 +410,12 @@ void DemoScenes::CreateWaterDemoScene() {
   // the waterline sits partway up the slope where the swell can lap in and out.
   // The wetting field (renderer) evaluates the same analytic height, keyed off
   // shore_island below; keep the two in sync.
-  constexpr f32 kIslandCenterX = 16.0f, kIslandCenterZ = 0.0f;
-  constexpr f32 kSigma = 13.0f;   // gaussian falloff (m); gentle slope = wide wet band
+  // Far enough out that deep water stays under the camera and the floaters;
+  // the submerged sandy skirt otherwise brightens the whole foreground sea.
+  constexpr f32 kIslandCenterX = 30.0f, kIslandCenterZ = -6.0f;
+  constexpr f32 kSigma = 10.0f;   // gaussian falloff (m); gentle slope = wide wet band
   constexpr f32 kPeak = 2.4f;     // height above rest water at the centre (m)
-  constexpr f32 kRadius = 28.0f;  // mesh half-extent (m)
+  constexpr f32 kRadius = 22.0f;  // mesh half-extent (m)
   constexpr u32 kIslandGrid = 96;
   asset::Material sand_material;
   sand_material.id = asset::MakeAssetId("demo/sand_material");
@@ -473,7 +475,10 @@ void DemoScenes::CreateWaterDemoScene() {
   world_.Add(island_entity, scene::Renderable{island.id});
 
   // Turn the wetting field on and point it at this beach.
-  renderer_.settings().shore_wetting = true;
+  // RX_SHORE_WETTING=0 must survive as a kill switch for A/B captures even
+  // though this scene opts in.
+  const char* shore_env = std::getenv("RX_SHORE_WETTING");
+  renderer_.settings().shore_wetting = !(shore_env && shore_env[0] == '0');
   renderer_.settings().shore_island[0] = kIslandCenterX;
   renderer_.settings().shore_island[1] = kIslandCenterZ;
   renderer_.settings().shore_island[2] = kSigma;
