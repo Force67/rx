@@ -13,6 +13,8 @@ rx_add_module(render
   gi/local_shadows.cc
   gi/shadow_trace.cc
   gi/ddgi.cc
+  gi/light_grid.cc
+  gi/rcgi.cc
   gi/raytracing.cc
   gi/path_tracer.cc
   gi/recon_path_tracer.cc
@@ -273,6 +275,13 @@ set(RX_RENDER_SHADERS
   shaders/gi/ddgi_rays.cs.hlsl
   shaders/gi/ddgi_blend.cs.hlsl
   shaders/gi/ddgi_border.cs.hlsl
+  shaders/gi/light_grid.cs.hlsl
+  shaders/gi/rcgi_probe_trace.cs.hlsl
+  shaders/gi/rcgi_args.cs.hlsl
+  shaders/gi/rcgi_cache_shade.cs.hlsl
+  shaders/gi/rcgi_blend.cs.hlsl
+  shaders/gi/rcgi_border.cs.hlsl
+  shaders/gi/rcgi_resolve.cs.hlsl
   shaders/geometry/water.ps.hlsl
   shaders/geometry/adaptive_water.cs.hlsl
   shaders/geometry/water_field.cs.hlsl
@@ -344,6 +353,11 @@ set(RX_SHADER_DEPS_vgeo_vis_ms_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_vis_ps_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_resolve_ps_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_particle_tex_ps_hlsl shaders/geometry/particle.ps.hlsl)
+set(RX_SHADER_DEPS_light_grid_cs_hlsl shaders/gi/light_grid.hlsli)
+set(RX_SHADER_DEPS_rcgi_probe_trace_cs_hlsl shaders/gi/rcgi_common.hlsli shaders/rt_geometry.hlsli)
+set(RX_SHADER_DEPS_rcgi_cache_shade_cs_hlsl shaders/gi/rcgi_common.hlsli shaders/gi/light_grid.hlsli shaders/rt_geometry.hlsli)
+set(RX_SHADER_DEPS_rcgi_blend_cs_hlsl shaders/gi/rcgi_common.hlsli)
+set(RX_SHADER_DEPS_rcgi_resolve_cs_hlsl shaders/gi/rcgi_common.hlsli)
 
 # The gpu-driven virtual geometry shaders touching the 64-bit visibility
 # buffer need SM 6.6 atomics/types the 6.5 DXIL sidecar cannot express; d3d12

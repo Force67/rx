@@ -64,6 +64,7 @@ base::Option<double> DrsMinScale{"drs.min.scale", 0.5, "RX_DRS_MIN_SCALE"};
 base::Option<bool> VrsOpt{"vrs", true, "RX_VRS"};
 base::Option<double> VrsThreshold{"vrs.threshold", 0.06, "RX_VRS_THRESHOLD"};
 base::Option<bool> RestirDiOpt{"restir.di", false, "RX_RESTIR_DI"};
+base::Option<bool> RcgiOpt{"rcgi", false, "RX_RCGI"};
 base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
 // 0 shaded, 1 cluster tint, 2 lod tint, 3 sw/hw raster path.
 base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
@@ -453,6 +454,13 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
     ddgi_ = DdgiSystem::Create(*device_, environment_->sky_view(), environment_->sampler(),
                                *bindless_);
     if (!ddgi_) return false;
+    // RCGI (idTech8-style radiance-cached GI): needs bindless for cache shading.
+    if (bindless_) {
+      rcgi_ = RcgiSystem::Create(*device_, environment_->sky_view(), environment_->sampler(),
+                                 *bindless_);
+      if (!rcgi_) return false;
+      if (!light_grid_.Initialize(*device_)) return false;
+    }
     water_ = WaterPass::Create(*device_, kSceneColorFormat, kMotionFormat, kDepthFormat,
                                mesh_pipeline_->set_layout(), material_system_->set_layout(),
                                environment_->env_set_layout(), bindless_->set_layout());
@@ -630,6 +638,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (VrsOpt.overridden()) settings_.vrs = VrsOpt;
   if (VrsThreshold.overridden()) settings_.vrs_threshold = static_cast<f32>(double(VrsThreshold));
   if (RestirDiOpt.overridden()) settings_.restir_di = RestirDiOpt;
+  if (RcgiOpt.overridden()) settings_.rcgi = RcgiOpt;
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
@@ -947,6 +956,7 @@ void Renderer::ApplySettings() {
                       .hysteresis = 0.97f,
                       .energy_scale = settings_.ddgi_intensity});
   }
+  if (rcgi_) rcgi_->Configure({.hysteresis = 0.97f, .energy_scale = 1.0f});
 
   Vec3 sun = Normalize(settings_.sun_direction);
   bool sun_changed = sun.x != applied_sun_direction_.x || sun.y != applied_sun_direction_.y ||
@@ -1776,7 +1786,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   u32 frame_slot = frame_index_ % kFramesInFlight;
   bool rt_shadows = rt_available_ && settings_.rt_shadows;
   bool rtao_active = rt_available_ && settings_.rtao;
-  bool ddgi_active = ddgi_ && settings_.ddgi && settings_.ibl;
+  // RCGI takes over the indirect-diffuse path (DDGI + SSGI) when on.
+  bool rcgi_active =
+      rcgi_ && settings_.rcgi && settings_.ibl && rt_available_ && bindless_ != nullptr;
+  bool ddgi_active = ddgi_ && settings_.ddgi && settings_.ibl && !rcgi_active;
   bool reflections_active = rt_available_ && settings_.rt_reflections && bindless_ != nullptr;
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
@@ -1821,11 +1834,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // blas (built at lod 0), or ao/reflection rays self-intersect the finer sphere
   // and read black. Distance lod then only applies on non-rt (low/mobile) tiers.
   bool tlas_shaded =
-      rt_shadows || rtao_active || ddgi_active || reflections_active || path_trace;
+      rt_shadows || rtao_active || ddgi_active || rcgi_active || reflections_active || path_trace;
   // Screen-space reflections stand in for ray-traced reflections on raster tiers.
   bool ssr_active = settings_.ssr && !path_trace && !reflections_active;
   // Screen-space gi stands in for the ddgi probe volume on raster tiers.
-  bool ssgi_active = settings_.ssgi && !path_trace && !ddgi_active;
+  bool ssgi_active = settings_.ssgi && !path_trace && !ddgi_active && !rcgi_active;
   time_seconds_ += view.frame_delta_seconds;
 
   // Transparent work is gathered up front: water forces a tlas (the water
@@ -2188,6 +2201,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (nrd_ao || ss_ao) globals.flags |= kFrameFlagAoValid;
   if (csm_active && !interior) globals.flags |= kFrameFlagShadowMap;
   if (ddgi_active && !interior) globals.flags |= kFrameFlagDdgi;
+  if (rcgi_active && !interior) globals.flags |= kFrameFlagRcgi;
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows && !interior) globals.flags |= kFrameFlagRtShadows;
   if (settings_.aurora && !interior) globals.flags |= kFrameFlagAurora;
@@ -2443,6 +2457,18 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     ddgi_->AddToGraph(graph_, *raytracing_, tlas_slot, view.camera.eye,
                       applied_sun_direction_, applied_sun_intensity_, applied_sun_color_,
                       frame_index_, ddgi_async);
+  }
+
+  // RCGI world side: cascaded light grid + spatial-hash radiance cache +
+  // irradiance cascades. Run synchronously in v1 (correctness first); the
+  // screen-side resolve/gather consumes the atlases after the prepass.
+  bool rcgi_world = rcgi_active && !path_trace;
+  if (rcgi_world) {
+    light_grid_.AddToGraph(graph_, frame.lights, light_count, view.camera.eye, frame_index_,
+                           /*async=*/false);
+    rcgi_->AddToGraph(graph_, *raytracing_, tlas_slot, light_grid_, frame.lights, view.camera.eye,
+                      applied_sun_direction_, applied_sun_intensity_, applied_sun_color_,
+                      frame_index_, /*async=*/false);
   }
 
   // The path tracer takes over the whole frame: it writes scene_color directly
@@ -3078,6 +3104,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   ResourceHandle ao = kInvalidResource;
   ResourceHandle sun_shadow = kInvalidResource;
   ResourceHandle spec_refl = kInvalidResource;
+  ResourceHandle rcgi_irr = kInvalidResource;
 #if defined(RX_HAS_NRD)
   if (nrd_ao || nrd_shadow) {
     // Shared NRD guides (normal+roughness, viewZ) and per-frame camera state for
@@ -3235,6 +3262,15 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                           frame_index_);
   }
 
+  // RCGI M1 filler: sample the irradiance cascades per screen pixel into the
+  // full-res indirect-diffuse texture the forward pass folds in (M2 replaces
+  // this with the gather/denoise/upscale chain writing the same texture).
+  if (rcgi_world && depth_export != kInvalidResource && normals != kInvalidResource) {
+    rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
+                                     {render_width_, render_height_}, globals.inv_view_proj,
+                                     view.camera.eye, settings_.rcgi_intensity, frame_index_);
+  }
+
   // Hybrid ReSTIR DI: reservoir-resampled point/spot lights with one shadow
   // ray per pixel, shaded off the prepass G-buffer into screen-space targets
   // the forward pass folds back in (env slots 23/24, kFrameFlagRestirDi).
@@ -3316,15 +3352,18 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           builder.Read(restir_out.diffuse, ResourceUsage::kSampledFragment);
           builder.Read(restir_out.spec, ResourceUsage::kSampledFragment);
         }
+        if (rcgi_irr != kInvalidResource) builder.Read(rcgi_irr, ResourceUsage::kSampledFragment);
         if (ms_occlude) builder.Read(cull_hiz, ResourceUsage::kSampledTaskMesh);
       },
       [this, geom_scene, geom_motion, geom_skin, geom_depth, msaa, ao, sun_shadow, spec_refl,
-       use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands, ms_active,
-       globals_set, frame_slot, restir_active, restir_out, &frame, &view,
+       rcgi_irr, use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands,
+       ms_active, globals_set, frame_slot, restir_active, restir_out, &frame, &view,
        draw_meshlet_instances](PassContext& ctx) {
         BindingSetHandle env_set = env_scene_sets_[frame_slot];
         TextureView ao_view =
             ao != kInvalidResource ? ctx.graph->image(ao).view : TextureView{};
+        TextureView rcgi_irr_view =
+            rcgi_irr != kInvalidResource ? ctx.graph->image(rcgi_irr).view : TextureView{};
         TextureView sun_shadow_view =
             sun_shadow != kInvalidResource ? ctx.graph->image(sun_shadow).view : TextureView{};
         TextureView spec_refl_view =
@@ -3350,7 +3389,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
             TextureView{}, TextureView{}, GpuBuffer{},  // water field rings: transparent pass only
             shore_wetting_active_ ? shore_wetting_.current_view() : TextureView{},
-            water_caustics_active_ ? water_caustics_.current_view() : TextureView{});
+            water_caustics_active_ ? water_caustics_.current_view() : TextureView{}, rcgi_irr_view);
 
         ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(geom_scene).view,
@@ -4422,6 +4461,7 @@ void Renderer::Shutdown() {
     ssao_.Destroy(*device_);
     ssr_.Destroy(*device_);
     ssgi_.Destroy(*device_);
+    if (rcgi_) light_grid_.Destroy(*device_);  // rcgi_ (unique_ptr) frees itself
     device_->DestroyPipeline(hdr_pipeline_);
     hdr_pipeline_ = {};
     device_->DestroyBuffer(hdr_readback_);
