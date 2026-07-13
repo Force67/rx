@@ -200,6 +200,7 @@ struct FrameView {
   // Live billboard particles for this frame (engine-simulated). Drawn lit and
   // soft-faded over the resolved scene before reconstruction.
   base::Vector<ParticleInstance> particles;
+  bool particles_emissive = false;  // route the set through HDR additive blending
   // gpu-simulated particle fountain: when count > 0, the renderer steps the
   // simulation on the gpu (compute) and draws it, instead of the cpu particles.
   u32 gpu_particle_count = 0;

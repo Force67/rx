@@ -362,9 +362,16 @@ void DemoScenes::CreateWaterDemoScene() {
     if (body) ctx_.physics_entities->push_back({body, block});
   }
 
-  // An ember fountain in front of the camera to exercise the particle path.
+  // A sparse additive ember fountain, offset from the nearest cube so the
+  // particle test does not read as corruption of its silhouette. Volumetric
+  // sky clouds are intentionally off: this scene isolates water shading.
   particles_enabled_ = true;
-  particle_emitter_ = {-7.0f, 0.8f, 0.0f};
+  particle_emitter_ = {-7.0f, 0.8f, -3.0f};
+  renderer_.settings().clouds = false;
+  // DDGI's low-resolution probe volume can imprint its lattice on the large
+  // untextured floaters. This scene validates water geometry, so use the
+  // stable environment-lighting path here.
+  renderer_.settings().ddgi = false;
 
   camera_.set_position({-14.0f, 3.0f, 0.0f});
   camera_.set_yaw_pitch(1.5708f, -0.25f);
@@ -491,24 +498,25 @@ void DemoScenes::UpdateParticles(f32 dt, render::FrameView& view) {
   }
 
   // Spawn an upward cone of embers at a steady rate.
-  particle_spawn_accum_ += 1400.0f * dt;
+  particle_spawn_accum_ += 45.0f * dt;
   u32 spawn = static_cast<u32>(particle_spawn_accum_);
   particle_spawn_accum_ -= static_cast<f32>(spawn);
   for (u32 s = 0; s < spawn && demo_particles_.size() < 20000; ++s) {
     DemoParticle p;
     p.position = particle_emitter_;
     f32 ang = rnd() * 6.2831853f;
-    f32 spread = rnd() * 1.4f;
-    p.velocity = {std::cos(ang) * spread, 4.5f + rnd() * 2.0f, std::sin(ang) * spread};
-    p.max_life = 1.6f + rnd() * 0.8f;
+    f32 spread = rnd() * 0.65f;
+    p.velocity = {std::cos(ang) * spread, 2.8f + rnd() * 1.4f, std::sin(ang) * spread};
+    p.max_life = 0.8f + rnd() * 0.6f;
     p.life = p.max_life;
-    p.size = 0.12f + rnd() * 0.10f;
-    p.color = {1.0f, 0.45f + rnd() * 0.3f, 0.1f};  // warm embers
+    p.size = 0.02f + rnd() * 0.02f;
+    p.color = {1.6f, 0.35f + rnd() * 0.25f, 0.03f};  // HDR warm embers
     demo_particles_.push_back(p);
   }
 
   // Emit live billboards into the frame view.
   view.particles.reserve(demo_particles_.size());
+  view.particles_emissive = true;
   for (const DemoParticle& p : demo_particles_) {
     f32 t = p.life / p.max_life;  // 1 at birth, 0 at death
     render::ParticleInstance inst;

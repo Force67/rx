@@ -14,14 +14,10 @@ struct PushData {
 [[vk::binding(0, 0)]] RWStructuredBuffer<uint> states : register(u0, space0);
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> counters : register(u1, space0);
 
-struct WaterVertex {
-  float3 position;
-  float3 normal;
-  float4 tangent;
-  float2 uv;
-  uint color;
-};
-[[vk::binding(2, 0)]] RWStructuredBuffer<WaterVertex> vertices : register(u2, space0);
+// asset::Vertex is deliberately packed to 52 bytes on the CPU/vertex-input
+// side. A StructuredBuffer float3 layout becomes 64-byte std430 in SPIR-V,
+// so write the packed ABI explicitly instead of relying on structure stride.
+[[vk::binding(2, 0)]] RWByteAddressBuffer vertices : register(u2, space0);
 
 struct DrawCommand {
   uint vertex_count;
@@ -179,13 +175,13 @@ void EmitNode(uint node) {
     float2 p[3] = {a, b, c};
     [unroll]
     for (uint i = 0u; i < 3u; ++i) {
-      WaterVertex v;
-      v.position = float3(p[i].x, push.camera_height_time.z, p[i].y);
-      v.normal = float3(0.0, 1.0, 0.0);
-      v.tangent = float4(1.0, 0.0, 0.0, 1.0);
-      v.uv = p[i] / 8.0;
-      v.color = 0xffffffffu;
-      vertices[node * 3u + i] = v;
+      uint offset = (node * 3u + i) * 52u;
+      vertices.Store3(offset + 0u,
+                      asuint(float3(p[i].x, push.camera_height_time.z, p[i].y)));
+      vertices.Store3(offset + 12u, asuint(float3(0.0, 1.0, 0.0)));
+      vertices.Store4(offset + 24u, asuint(float4(1.0, 0.0, 0.0, 1.0)));
+      vertices.Store2(offset + 40u, asuint(p[i] / 8.0));
+      vertices.Store(offset + 48u, 0xffffffffu);
     }
   }
   states[node] = state & ~kDirty;

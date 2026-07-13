@@ -88,7 +88,7 @@ PUSH_CONSTANTS(PushData, push);
 float2 ProbeAtlasUv(uint3 probe, float3 dir, float texels, float2 atlas_size) {
   float2 oct = OctEncode(dir) * 0.5 + 0.5;
   float2 base = float2(probe.x + probe.z * volume.counts.x, probe.y) * (texels + 2.0) + 1.0;
-  return (base + oct * texels) / atlas_size;
+  return (base + 0.5 + oct * (texels - 1.0)) / atlas_size;
 }
 
 float3 PrevIrradiance(float3 world_pos, float3 n) {
