@@ -149,6 +149,11 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "water_reflections = " << Bool(s.water_reflections) << "\n";
   o << "ssr = " << Bool(s.ssr) << "\n\n";
 
+  o << "[water]\n";
+  o << "adaptive_water = " << Bool(s.adaptive_water) << "\n";
+  o << "water_triangle_budget = " << s.water_triangle_budget << "\n";
+  o << "water_target_triangle_pixels = " << s.water_target_triangle_pixels << "\n\n";
+
   o << "[path_tracing]\n";
   o << "path_trace = " << Bool(s.path_trace) << "\n";
   o << "path_trace_reference = " << Bool(s.path_trace_reference) << "\n";
@@ -255,6 +260,9 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   fl("reflection_roughness_cutoff", s.reflection_roughness_cutoff);
   b("water_reflections", s.water_reflections);
   b("ssr", s.ssr);
+  b("adaptive_water", s.adaptive_water);
+  u("water_triangle_budget", s.water_triangle_budget);
+  fl("water_target_triangle_pixels", s.water_target_triangle_pixels);
 
   b("path_trace", s.path_trace);
   b("path_trace_reference", s.path_trace_reference);

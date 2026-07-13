@@ -78,6 +78,12 @@ struct GpuMesh {
   u32 bindless_index = 0;  // mesh record in the bindless registry
   f32 bounds_center[3] = {0, 0, 0};  // model-space bounding sphere, for gpu culling
   f32 bounds_radius = 0;             // 0 = unknown, treated as never-culled
+  // Planar water bounds discovered at upload time. The adaptive ocean path
+  // replaces only meshes that are flat in local Y; irregular rivers and
+  // waterfalls keep their authored triangles.
+  bool planar_water = false;
+  f32 water_bounds[4] = {0, 0, 0, 0};  // local min xz, max xz
+  f32 water_height = 0;
   base::Vector<GpuSubmesh> submeshes;  // lod 0
   base::Vector<GpuLod> lods;           // extra lods (1+), selected by distance
 

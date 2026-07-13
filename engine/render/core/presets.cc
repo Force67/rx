@@ -50,6 +50,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.ao_rays = 1;  // 8 screen-space taps
       s.shadow_resolution = 1024;  // one small cascade atlas fits the power budget
       s.sun_angular_radius = 0.0f;
+      s.water_triangle_budget = 2048;
       break;
 
     case QualityPreset::kSteamDeck:
@@ -66,6 +67,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.ddgi_spacing = 2.5f;
       s.rt_reflections = false;
       s.water_reflections = false;
+      s.water_triangle_budget = 4096;
       s.fog = false;
       break;
 
@@ -76,6 +78,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.upscaler_quality = UpscalerQuality::kPerformance;
       s.rt_shadows = s.rtao = s.ddgi = s.rt_reflections = false;
       s.water_reflections = s.fog = false;
+      s.water_triangle_budget = 4096;
       s.ssao = true;
       s.ao_rays = 2;  // 16 screen-space taps
       break;
@@ -94,6 +97,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.5f;
       s.water_reflections = true;
+      s.water_triangle_budget = 8192;
       s.fog = false;  // volumetric fog off by default (RX_FOG=1 / debug UI to enable)
       s.fog_density = 0.02f;
       break;
@@ -111,6 +115,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.4f;
       s.water_reflections = true;
+      s.water_triangle_budget = 8192;
       s.fog = false;
       break;
 
@@ -127,6 +132,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.6f;
       s.water_reflections = true;
+      s.water_triangle_budget = 16384;
       s.fog = false;  // volumetric fog off by default (RX_FOG=1 / debug UI to enable)
       break;
 
@@ -144,6 +150,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.85f;
       s.water_reflections = true;
+      s.water_triangle_budget = 32768;
       s.fog = false;  // volumetric fog off by default (RX_FOG=1 / debug UI to enable)
       break;
 

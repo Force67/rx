@@ -370,6 +370,12 @@ void DebugUi::DrawRayTracingTab(render::Renderer& renderer, render::RenderSettin
   ImGui::SeparatorText("Reflections");
   ImGui::BeginDisabled(!ray_query);
   ImGui::Checkbox("Water RT reflections", &settings.water_reflections);
+  ImGui::Checkbox("Adaptive water geometry", &settings.adaptive_water);
+  int water_budget = static_cast<int>(settings.water_triangle_budget);
+  if (ImGui::SliderInt("Water triangle budget", &water_budget, 1024, 32768))
+    settings.water_triangle_budget = static_cast<u32>(water_budget);
+  ImGui::SliderFloat("Water triangle pixels", &settings.water_target_triangle_pixels, 8.0f,
+                     96.0f, "%.0f px");
   ImGui::Checkbox("RT reflections", &settings.rt_reflections);
   if (settings.rt_reflections) {
     ImGui::SliderFloat("Reflection roughness", &settings.reflection_roughness_cutoff, 0.05f, 1.0f,

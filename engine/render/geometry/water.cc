@@ -68,10 +68,14 @@ std::unique_ptr<WaterPass> WaterPass::Create(Device& device, Format color_format
     RX_ERROR("water copy pipeline creation failed");
     return nullptr;
   }
+  if (!pass->adaptive_.Initialize(device)) {
+    RX_WARN("adaptive water unavailable; using authored water meshes");
+  }
   return pass;
 }
 
 WaterPass::~WaterPass() {
+  adaptive_.Destroy(device_);
   if (pipeline_) device_.DestroyPipeline(pipeline_);
   if (copy_pipeline_) device_.DestroyPipeline(copy_pipeline_);
 }
