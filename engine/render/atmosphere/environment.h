@@ -95,7 +95,8 @@ class EnvironmentSystem {
                    TextureView ocean_normal = {}, TextureView water_field_ring0 = {},
                    TextureView water_field_ring1 = {},
                    const GpuBuffer& water_field_params = {},
-                   TextureView shore_wetness = {}) const;
+                   TextureView shore_wetness = {},
+                   TextureView caustics = {}) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}

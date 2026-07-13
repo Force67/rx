@@ -390,6 +390,24 @@ void DebugUi::DrawRayTracingTab(render::Renderer& renderer, render::RenderSettin
     ImGui::SliderFloat("Shore drying time", &settings.shore_drying_time, 5.0f, 60.0f, "%.0f s");
   }
 
+  ImGui::SeparatorText("Water shading");
+  ImGui::ColorEdit3("Water absorption (1/m)", settings.water_absorption,
+                    ImGuiColorEditFlags_Float | ImGuiColorEditFlags_HDR);
+  ImGui::SliderFloat("Absorption scale", &settings.water_absorption_scale, 0.0f, 4.0f, "%.2f");
+  ImGui::SliderFloat("Transmission", &settings.water_transmission, 0.0f, 1.5f, "%.2f");
+  ImGui::SliderFloat("Reflection foam gain", &settings.water_refl_foam_gain, 0.0f, 2.0f, "%.2f");
+  ImGui::SliderFloat("Crest SSS intensity", &settings.water_sss_intensity, 0.0f, 3.0f, "%.2f");
+  ImGui::SliderFloat("Crest SSS exponent", &settings.water_sss_exponent, 1.0f, 12.0f, "%.1f");
+  ImGui::Checkbox("Underwater caustics", &settings.water_caustics);
+  if (settings.water_caustics) {
+    ImGui::SliderFloat("Caustic intensity", &settings.water_caustic_intensity, 0.0f, 1.0f, "%.2f");
+    ImGui::SliderFloat("Caustic depth fade", &settings.water_caustic_depth_fade, 0.0f, 1.0f,
+                       "%.2f /m");
+    ImGui::SliderFloat("Caustic receiver depth", &settings.water_caustic_receiver_depth, 0.5f,
+                       16.0f, "%.1f m");
+    ImGui::SliderFloat("Water rest height", &settings.water_rest_height, -10.0f, 10.0f, "%.1f m");
+  }
+
   ImGui::SeparatorText("Path tracing");
   ImGui::BeginDisabled(!ray_query);
   ImGui::Checkbox("Path tracing", &settings.path_trace);

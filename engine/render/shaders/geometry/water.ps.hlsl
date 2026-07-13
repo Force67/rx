@@ -17,7 +17,24 @@ struct FrameGlobals {
   float4 misc;             // x,y render size, z sun radius, w frame index
   uint flags;
   float time;
-  float2 pad;
+  // Full mirror of mesh_pipeline.h FrameGlobals from here on, so the trailing
+  // water_* params (appended last) land at the right offset. Only the water
+  // block below is read by this shader; the middle fields are pad-through.
+  uint debug_view;
+  float reflection_cutoff;
+  uint ao_ray_count;
+  uint light_count;
+  float2 pad_wind;
+  float4 wind;
+  float4 cluster_params;
+  float4 interior_ambient;
+  float4 interior_fog_color0;
+  float4 interior_fog_color1;
+  float4 interior_fog_params;
+  float4 shore_field;
+  float4 water_absorption;  // rgb Beer coeff (1/m), w overall scale
+  float4 water_material;    // x transmission, y refl foam gain, z crest-sss intensity, w crest-sss exponent
+  float4 water_caustics;    // x intensity, y rest height, z depth-fade, w unused
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 [[vk::binding(1, 0)]] RaytracingAccelerationStructure tlas : register(t1, space0);
@@ -293,7 +310,10 @@ PsOut main(PsIn input) {
     water_depth = min(length(behind_world.xyz - input.world_pos), 200.0);
   }
 
-  float3 absorption = (1.0 - saturate(material.base_color_factor.rgb)) * 0.9;
+  // Beer-Lambert absorption over the refracted path length (water_depth): the
+  // per-channel coefficients (red dies first) turn deep water blue-green while
+  // shallow water stays clear. Tunable through the [water] settings.
+  float3 absorption = frame.water_absorption.rgb * frame.water_absorption.w;
   float3 transmittance = exp(-absorption * water_depth);
 
   // Caustics on the refracted seafloor: two counter-scrolling ridge-noise
@@ -315,23 +335,54 @@ PsOut main(PsIn input) {
                    irradiance_cube.SampleLevel(irradiance_sampler, float3(0, 1, 0), 0).rgb;
   float3 refracted = opaque_color.SampleLevel(opaque_color_sampler, refracted_uv, 0).rgb +
                      caustic;
-  float3 below = lerp(scatter, refracted, transmittance);
+  // Transmission strength scales how much of the refracted floor survives vs the
+  // scattered water body colour (foam reduces it further below).
+  float3 below = lerp(scatter, refracted, saturate(transmittance * frame.water_material.x));
+
+  // Foam density + ripple energy roughen the reflection: foamy/choppy water
+  // scatters its mirror into a broad, dimmer response instead of a sharp sky.
+  float foam_density = 1.0 - exp(-1.1 * field.b);
+  float ripple_energy = saturate(abs(field.g) * 2.0 + length(detail.xz) * 3.0);
+  float refl_rough = saturate((foam_density + ripple_energy * 0.5) * frame.water_material.y);
 
   // Reflection, kept above the surface so the trace never self-hits.
   float3 r = reflect(-v, n);
   r.y = max(r.y, 0.03);
   float3 reflection = TraceReflection(input.world_pos, normalize(r));
+  if (refl_rough > 0.001) {
+    // Widen toward a blurred sky mip and dim; the sharp RT/mirror term fades as
+    // the surface roughens so rough water reads matte rather than glassy.
+    float3 broad = SkyReflection(normalize(r), lerp(2.0, 5.0, refl_rough));
+    reflection = lerp(reflection, broad, refl_rough * 0.7) * lerp(1.0, 0.6, refl_rough);
+  }
 
   float fresnel = 0.02 + 0.98 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
   float3 color = lerp(below, reflection, fresnel);
 
-  // Wave-backlight subsurface: sun shining through a lifted crest from
-  // behind scatters turquoise toward the camera.
-  float3 l = normalize(-frame.sun_direction.xyz);
-  float backlight = pow(saturate(dot(v, -l) * 0.5 + 0.5), 3.0);
-  float3 sss_tint = saturate(material.base_color_factor.rgb * 2.5 + float3(0.0, 0.15, 0.12));
-  color += sss_tint * frame.sun_color.rgb * frame.sun_direction.w *
-           (backlight * crest * 0.18);
+  // Wave subsurface scattering: sun shining through a thin, lifted crest from
+  // behind scatters forward to the camera. Thickness is proxied from the crest
+  // factor (pinched tops are thin) and the height above rest; the transmission
+  // lobe attenuates by exp(-thickness*absorption) - turquoise, since red dies
+  // first - along the refracted sun direction, so backlit thin crests rim
+  // turquoise while thick bases stay dark. Zero cost when intensity is 0.
+  float3 l = normalize(-frame.sun_direction.xyz);  // toward the sun
+  float sss_intensity = frame.water_material.z;
+  if (sss_intensity > 0.0) {
+    // Thickness proxy: pinched crests (high crest) and lifted water are thin,
+    // troughs (below rest) are thick. The absorption gain turns thickness into
+    // exp() attenuation - thin crests transmit nearly white, thick bases go dark
+    // and turquoise (red dies first), so the glow rims the crests.
+    float height_above = input.world_pos.y - frame.water_caustics.y;
+    float thickness = lerp(1.4, 0.10, crest) + saturate(-height_above) * 0.8;
+    float3 trans = exp(-thickness * absorption * 4.0);  // absorption-derived turquoise
+    float3 sun_travel = normalize(frame.sun_direction.xyz);
+    float3 l_refr = refract(sun_travel, n, 1.0 / 1.33);  // transmitted travel dir
+    if (dot(l_refr, l_refr) < 1e-6) l_refr = sun_travel;  // total-internal-reflection guard
+    // Backlit lobe: the transmitted sun travels toward the camera, so the glow
+    // peaks where the view direction aligns with the refracted travel direction.
+    float glow = pow(saturate(dot(v, l_refr)), max(frame.water_material.w, 1.0));
+    color += trans * frame.sun_color.rgb * frame.sun_direction.w * (glow * sss_intensity);
+  }
 
   // Foam: the persistent advected field is now the primary source (whitecaps
   // streak and dissolve with the waves instead of flickering in place); the

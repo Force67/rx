@@ -40,10 +40,14 @@ struct FrameGlobals {
   float4 interior_fog_color1;  // rgb far fog colour, w far dist (m)
   float4 interior_fog_params;  // x fog power, y fog max
   float4 shore_field;          // shoreline wetting: xy field origin xz, z 1/extent, w rest water height
+  float4 water_absorption;     // rgb Beer coeff (1/m), w overall scale (read for caustic depth fade)
+  float4 water_material;       // x transmission, y refl foam gain, z crest-sss intensity, w crest-sss exponent
+  float4 water_caustics;       // x intensity, y rest height, z depth-fade (1/m), w unused
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 
 #include "geometry/shore_wetting.hlsli"  // ShoreWetness / ApplyShoreWetness (env slot 33)
+#include "geometry/water_caustics.hlsli"  // WaterCaustic (env slot 34)
 
 struct PointLight {
   float4 pos_radius;       // xyz position, w influence radius
@@ -747,6 +751,12 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   // the roughness/f0 below, where the waves have reached the beach.
   float shore_wet = ShoreWetness(input.world_pos, frame.flags, frame.shore_field);
   albedo *= lerp(1.0, 0.55, shore_wet);
+
+  // Underwater caustics + wave shadows: fold an energy-conserving (mean-1) sun
+  // modulation into the shadow term for surfaces below the water rest height, so
+  // convergent refraction brightens the seafloor and divergent darkens it.
+  shadow *= WaterCaustic(input.world_pos, frame.flags,
+                         frame.water_absorption.rgb * frame.water_absorption.w, frame.water_caustics);
 
   // glTF metallic roughness packing: g roughness, b metallic. Terrain reuses
   // this slot as a land layer, so it takes the neutral rough dielectric path.

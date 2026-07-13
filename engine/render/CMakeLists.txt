@@ -49,6 +49,7 @@ rx_add_module(render
   geometry/adaptive_water.cc
   geometry/water_field.cc
   geometry/shore_wetting.cc
+  geometry/water_caustics.cc
   geometry/particles.cc
   geometry/particle_emitters.cc
   geometry/fur.cc
@@ -272,6 +273,7 @@ set(RX_RENDER_SHADERS
   shaders/geometry/adaptive_water.cs.hlsl
   shaders/geometry/water_field.cs.hlsl
   shaders/geometry/shore_wetting.cs.hlsl
+  shaders/geometry/water_caustics.cs.hlsl
   shaders/geometry/copy.cs.hlsl
   shaders/util/hdr_capture.cs.hlsl
   shaders/gi/pathtrace.cs.hlsl
