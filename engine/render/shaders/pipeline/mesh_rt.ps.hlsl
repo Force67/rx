@@ -41,7 +41,7 @@ struct FrameGlobals {
   float4 interior_fog_color0;  // rgb near fog colour, w near dist (m)
   float4 interior_fog_color1;  // rgb far fog colour, w far dist (m)
   float4 interior_fog_params;  // x fog power, y fog max
-  float4 shore_field;          // shoreline wetting: xy field origin xz, z 1/extent
+  float4 shore_field;          // shoreline wetting: xy field origin xz, z 1/extent, w rest water height
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 
