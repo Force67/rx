@@ -19,26 +19,30 @@ struct ComponentInfo {
 
 namespace detail {
 
-RX_ECS_EXPORT ComponentId NextComponentId();
-RX_ECS_EXPORT void RegisterComponent(ComponentId id, const ComponentInfo& info);
+RX_ECS_EXPORT ComponentId ResolveComponentId(u64 type_key, const ComponentInfo& info);
 
-// RX_DSO_EXPORT (default visibility, even under -fvisibility-inlines-hidden)
-// forces the function-local `id` static below to be a single process-wide
-// instance. Without it each DSO in an RX_SHARED build would instantiate its own
-// copy, call NextComponentId() independently, and hand the SAME component type a
-// DIFFERENT id in different shared objects. No-op in the static build.
 template <typename T>
-RX_DSO_EXPORT ComponentId ComponentIdFor() {
+consteval u64 ComponentTypeKey() {
+#if defined(_MSC_VER)
+  return Fnv1a(__FUNCSIG__);
+#else
+  return Fnv1a(__PRETTY_FUNCTION__);
+#endif
+}
+
+template <typename T>
+ComponentId ComponentIdFor() {
   static_assert(std::is_move_constructible_v<T>);
   static const ComponentId id = [] {
-    ComponentId new_id = NextComponentId();
-    RegisterComponent(new_id, ComponentInfo{
-      .size = sizeof(T),
-      .align = alignof(T),
-      .move_construct = [](void* dst, void* src) { new (dst) T(std::move(*static_cast<T*>(src))); },
-      .destruct = [](void* ptr) { static_cast<T*>(ptr)->~T(); },
-    });
-    return new_id;
+    return ResolveComponentId(
+        ComponentTypeKey<T>(),
+        ComponentInfo{
+            .size = sizeof(T),
+            .align = alignof(T),
+            .move_construct = [](void* dst,
+                                 void* src) { new (dst) T(std::move(*static_cast<T*>(src))); },
+            .destruct = [](void* ptr) { static_cast<T*>(ptr)->~T(); },
+        });
   }();
   return id;
 }
@@ -46,7 +50,7 @@ RX_DSO_EXPORT ComponentId ComponentIdFor() {
 }  // namespace detail
 
 template <typename T>
-RX_DSO_EXPORT ComponentId GetComponentId() {
+ComponentId GetComponentId() {
   return detail::ComponentIdFor<std::remove_cvref_t<T>>();
 }
 

@@ -71,9 +71,23 @@ class RX_ECS_EXPORT Archetype {
 
  private:
   struct Column {
+    Column(ComponentId component_id, u32 component_stride, u32 component_align)
+        : id(component_id), stride(component_stride), align(component_align) {}
+    ~Column();
+
+    Column(Column&& other) noexcept;
+    Column& operator=(Column&& other) noexcept;
+
+    Column(const Column&) = delete;
+    Column& operator=(const Column&) = delete;
+
+    void Reserve(u32 row_capacity, u32 live_rows);
+
     ComponentId id;
     u32 stride;
-    base::Vector<u8> data;
+    u32 align;
+    u8* data = nullptr;
+    u32 capacity = 0;
   };
 
   Signature signature_;

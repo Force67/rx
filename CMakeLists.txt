@@ -319,6 +319,12 @@ if(RX_BUILD_TESTS)
   add_test(NAME edit_test COMMAND edit_test)
 endif()
 
+if(RX_BUILD_TESTS)
+  add_executable(camera_test test/camera_test.cc)
+  target_link_libraries(camera_test PRIVATE rx::scene rx::ecs rx::core)
+  add_test(NAME camera_test COMMAND camera_test)
+endif()
+
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a
 # triangle into a GpuImage and reads the pixels back through the RHI. Registered
 # like kinematest; skips cleanly (null backend) when no Vulkan driver is present,
