@@ -1,0 +1,277 @@
+// rx editor shell. Static chrome + a class library; the dynamic regions
+// (hierarchy rows, inspector components, content cards, add-component menu) are
+// generated in C++ and spliced in at the @@MARKER@@ lines by EditorUi::BuildDoc.
+// Dark, dense, professional tool aesthetic (fixed 1920x1080 design resolution).
+
+// ---- shared style classes ----
+class panel_surface {
+  background: #212327;
+}
+class panel_header {
+  layout: row;
+  align: center;
+  height: 32;
+  padding: 0 12;
+  background: #262a2f;
+  border-color: #101113;
+  border-width: 0 0 1 0;
+}
+class header_label {
+  font-size: 11;
+  font-weight: bold;
+  letter-spacing: 1;
+  color: #9a9da3;
+}
+class field {
+  layout: row;
+  align: center;
+  height: 26;
+  padding: 0 7;
+  gap: 5;
+  background: #191a1d;
+  corner-radius: 5;
+  border-color: #33363c;
+  border-width: 1;
+  flex-grow: 1;
+}
+class field_val {
+  font-size: 12;
+  color: #c9ccd2;
+  flex-grow: 1;
+}
+class row_label {
+  font-size: 12;
+  color: #8a8d93;
+  width: 66;
+}
+class comp_header {
+  layout: row;
+  align: center;
+  height: 30;
+  padding: 0 12;
+  gap: 8;
+  background: #25272b;
+}
+class comp_title {
+  font-size: 12;
+  font-weight: bold;
+  color: #c9ccd2;
+}
+class tool_btn {
+  layout: row;
+  justify: center;
+  align: center;
+  width: 34;
+  height: 30;
+  background: #2c2f34;
+  corner-radius: 6;
+  color: #b7bac0;
+  font-size: 12;
+  cursor: pointer;
+  :hover { background: #3a3d44; }
+}
+class tool_btn_on {
+  layout: row;
+  justify: center;
+  align: center;
+  width: 34;
+  height: 30;
+  background: #3a5bbf;
+  corner-radius: 6;
+  color: #ffffff;
+  font-size: 12;
+  cursor: pointer;
+}
+class menu_item {
+  font-size: 13;
+  color: #b7bac0;
+  padding: 7 11;
+  corner-radius: 5;
+  cursor: pointer;
+  :hover { background: #2c2f34; }
+}
+
+panel root {
+  layout: column;
+  width: 100vw;
+  height: 100vh;
+  background: transparent;
+
+  --accent: #5a8dee;
+
+  // ================= TOP BAR =================
+  panel topbar {
+    layout: row;
+    align: center;
+    height: 44;
+    padding: 0 10;
+    gap: 4;
+    background: #212327;
+    border-color: #101113;
+    border-width: 0 0 1 0;
+
+    panel brand {
+      layout: row; align: center; gap: 8; padding: 0 8 0 2;
+      panel brand_dot { width: 22; height: 22; background: #5a8dee; corner-radius: 5; }
+      text brand_txt { text: "rx editor"; font-size: 14; font-weight: bold; color: #eceef2; }
+    }
+    button menu_new { class: menu_item; text: "New"; }
+    button menu_open { class: menu_item; text: "Open"; }
+    button menu_save { class: menu_item; text: "Save"; }
+    button menu_saveas { class: menu_item; text: "Save As"; }
+
+    panel sep1 { width: 1; height: 22; background: #34373d; margin: 0 8; }
+
+    button tool_translate { class: tool_btn_on; text: "Move"; }
+    button tool_rotate { class: tool_btn; text: "Rot"; }
+    button tool_scale { class: tool_btn; text: "Scl"; }
+
+    panel spacer { flex-grow: 1; }
+
+    button btn_play { class: tool_btn; text: "Play"; color: #63d18a; }
+    button btn_stop { class: tool_btn; text: "Stop"; }
+
+    panel sep2 { width: 1; height: 22; background: #34373d; margin: 0 8; }
+
+    button btn_undo { class: menu_item; text: "Undo"; background: #2c2f34; }
+    button btn_redo { class: menu_item; text: "Redo"; background: #2c2f34; }
+  }
+
+  // ================= MIDDLE =================
+  panel middle {
+    layout: row;
+    flex-grow: 1;
+
+    // ---- LEFT: hierarchy ----
+    panel hierarchy {
+      class: panel_surface;
+      layout: column;
+      width: 300;
+      border-color: #101113;
+      border-width: 0 1 0 0;
+
+      panel hierarchy_head {
+        class: panel_header;
+        justify: space-between;
+        text h_hdr { class: header_label; text: "HIERARCHY"; }
+        panel h_actions {
+          layout: row; gap: 6;
+          button hier_add { text: "+"; font-size: 15; color: #9aa0a8; cursor: pointer; :hover { color: #ffffff; } }
+          button hier_del { text: "x"; font-size: 13; color: #9aa0a8; cursor: pointer; :hover { color: #e0655f; } }
+        }
+      }
+      panel hierarchy_search_row {
+        layout: row; padding: 8 10;
+        text-input hier_search {
+          placeholder: "Search";
+          font-size: 12; color: #c9ccd2;
+          background: #191a1d; corner-radius: 6;
+          border-color: #33363c; border-width: 1;
+          padding: 6 9; flex-grow: 1; tab-index: 1;
+        }
+      }
+      scroll hierarchy_scroll {
+        layout: column;
+        flex-grow: 1;
+        overflow: scroll;
+        panel hierarchy_list {
+          layout: column;
+          padding: 2 6;
+          gap: 1;
+          //@@HIERARCHY@@
+        }
+      }
+    }
+
+    // ---- CENTER: viewport hole (transparent; scene renders beneath) ----
+    panel viewport {
+      layout: column;
+      flex-grow: 1;
+      background: transparent;
+      panel viewport_bar {
+        layout: row; align: center; height: 30; padding: 0 12; gap: 12;
+        background: #191a1dcc;
+        border-color: #101113; border-width: 0 0 1 0;
+        text vp_mode { text: "Perspective"; font-size: 11; color: #8a8d93; }
+        text vp_shade { text: "Shaded"; font-size: 11; color: #8a8d93; }
+        panel vp_spacer { flex-grow: 1; }
+        text vp_gizmo { text: "Gizmo: Move"; font-size: 11; color: #6a6d73; }
+      }
+      panel viewport_body {
+        layout: column; flex-grow: 1; background: transparent;
+      }
+    }
+
+    // ---- RIGHT: inspector ----
+    panel inspector {
+      class: panel_surface;
+      layout: column;
+      width: 360;
+      border-color: #101113;
+      border-width: 0 0 0 1;
+
+      panel inspector_tabs {
+        class: panel_header;
+        padding: 0;
+        button tab_inspector { text: "INSPECTOR"; class: header_label; color: #e6e8ec; padding: 0 16; height: 32; layout: row; align: center; border-color: #5a8dee; border-width: 0 0 2 0; cursor: pointer; }
+        button tab_material { text: "MATERIAL"; class: header_label; padding: 0 16; height: 32; layout: row; align: center; cursor: pointer; :hover { color: #c9ccd2; } }
+      }
+      scroll inspector_scroll {
+        layout: column; flex-grow: 1; overflow: scroll;
+        panel inspector_body {
+          layout: column;
+          //@@INSPECTOR@@
+        }
+      }
+    }
+  }
+
+  // ================= CONTENT BROWSER =================
+  panel content {
+    class: panel_surface;
+    layout: column;
+    height: 186;
+    border-color: #101113;
+    border-width: 1 0 0 0;
+
+    panel content_head {
+      class: panel_header;
+      gap: 12;
+      text c_hdr { class: header_label; text: "CONTENT"; }
+      text c_path { text: "assets://"; font-size: 11; color: #7a7d83; }
+      panel c_spacer { flex-grow: 1; }
+      text-input content_filter {
+        placeholder: "Filter";
+        font-size: 11; color: #c9ccd2;
+        background: #191a1d; corner-radius: 6;
+        border-color: #33363c; border-width: 1;
+        padding: 5 9; width: 200; tab-index: 2;
+      }
+    }
+    scroll content_scroll {
+      layout: row; flex-grow: 1; overflow: scroll;
+      panel content_grid {
+        layout: row; flex-wrap: wrap; padding: 12; gap: 12;
+        //@@CONTENT@@
+      }
+    }
+  }
+
+  // ================= STATUS BAR =================
+  panel statusbar {
+    layout: row; align: center; height: 26; padding: 0 12; gap: 10;
+    background: #191a1d;
+    border-color: #101113; border-width: 1 0 0 0;
+    text status_path { text: "untitled.rxscene"; font-size: 11; color: #8a8d93; }
+    text status_dirty { text: ""; font-size: 11; color: #e0a05a; }
+    panel status_spacer { flex-grow: 1; }
+    text status_count { text: "0 entities"; font-size: 11; color: #8a8d93; }
+    text status_fps { text: "0 FPS"; font-size: 11; color: #63d18a; }
+  }
+
+  // ================= GIZMO OVERLAY (window-space absolute handles) =========
+  //@@GIZMO@@
+
+  // ================= MODAL DIALOG LAYER =================
+  //@@DIALOG@@
+}

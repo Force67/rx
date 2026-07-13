@@ -14,6 +14,7 @@ option(RX_NRD "Enable the NVIDIA NRD ray tracing denoiser" ON)
 option(RX_JOLT "Enable Jolt physics" ON)
 option(RX_BUILD_TESTS "Build library test suites" ON)
 option(RX_BUILD_RUNTIME "Build the rx viewer executable" ON)
+option(RX_BUILD_EDITOR "Build the rx editor application (apps/editor, needs libultragui)" OFF)
 option(RX_BUILD_TOOLS "Build the asset authoring tools (rxpack)" ON)
 option(RX_AUDIO_FFMPEG "Decode compressed audio via FFmpeg (libav*)" OFF)
 option(RX_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
@@ -287,6 +288,11 @@ endif()
 
 if(RX_BUILD_RUNTIME)
   add_subdirectory(runtime)
+endif()
+
+# The editor application: an app::Application whose entire UI is libultragui.
+if(RX_BUILD_EDITOR)
+  add_subdirectory(apps/editor)
 endif()
 
 # Asset authoring tools. rxpack creates/lists/extracts/verifies .rxp game
