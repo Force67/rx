@@ -22,18 +22,29 @@
 namespace rx::render {
 
 // One object disturbance the field consumes this frame: a wake ripple and/or a
-// foam splat at a world position, scaled by the object's motion. Laid out to
-// match the GPU `Disturbance` struct (two float4s) so it memcpy's straight into
-// the storage buffer.
+// foam splat at a world position, SHAPED by the object's motion. Laid out to
+// match the GPU `Disturbance` struct (two float4s + a float2) so it memcpy's
+// straight into the storage buffer.
+//
+// A still body leaves a near-radial splat (the degenerate case). A MOVING body
+// leaves a directional wake: the splat elongates along its velocity vector,
+// concentrates at the leading (bow) edge and trails a stern band behind, and
+// skews left/right under `angular_velocity` (turning). The velocity vector both
+// biases foam advection and gives the shader the motion heading + speed it
+// shapes the wake from. This is how a large hull (a ship) drives a real wake:
+// scatter several disturbances along the keel, each with the hull's world
+// velocity/turn rate and a radius covering its footprint.
 struct WaterDisturbance {
   Vec3 position{};          // world (XZ used)
-  f32 radius = 1.0f;        // meters
+  f32 radius = 1.0f;        // meters (footprint half-size of the near-radial core)
   f32 ripple_strength = 0;  // impulse added to the ripple velocity channel
   f32 foam_amount = 0;      // foam density injected
-  f32 velocity_x = 0;       // object XZ velocity, biases the foam advection
+  f32 velocity_x = 0;       // object XZ velocity: biases advection, sets wake heading
   f32 velocity_z = 0;
+  f32 elongation = 0;       // 0 = radial splat, >0 stretches the wake with speed
+  f32 angular_velocity = 0; // yaw rate (rad/s): skews the wake sideways in a turn
 };
-static_assert(sizeof(WaterDisturbance) == 32);
+static_assert(sizeof(WaterDisturbance) == 40);
 
 class WaterField {
  public:

@@ -16,6 +16,7 @@
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "core/math.h"
+#include "physics/water_waves.h"
 #include "render/geometry/hair_groom.h"
 #include "scene/components.h"
 #include "viewer_input.h"
@@ -267,6 +268,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // the depth-driven water interaction (RX_WATER_INTERACTION) ringing the
   // floaters on its own, with no CPU-fed foam confusing the picture.
   if (!water_cubes_.empty()) {
+    water_time_ += dt;  // wave clock for the Gerstner buoyancy proxy
     const char* disturb = std::getenv("RX_WATER_DISTURB");
     if (!(disturb && disturb[0] == '0')) EmitWaterDisturbances(dt, view);
   }
@@ -274,7 +276,9 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
 
 void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
   // A bobbing/drifting cube drags a wake ripple and throws foam scaled by how
-  // hard it moves; a still cube leaves only a faint standing ripple.
+  // hard it moves; a still cube leaves only a faint standing ripple. A moving
+  // cube stretches its splat into a directional wake (elongation), and a cube
+  // slamming into the surface throws a one-shot splash (foam pulse + spray).
   const f32 inv_dt = 1.0f / std::max(dt, 1e-4f);
   for (u32 i = 0; i < water_cubes_.size(); ++i) {
     Vec3 pos;
@@ -282,6 +286,14 @@ void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
     if (!physics_.GetBodyTransform(water_cubes_[i], &pos, rot)) continue;
     Vec3 vel = (pos - water_cube_prev_[i]) * inv_dt;
     water_cube_prev_[i] = pos;
+    water_cube_slam_cd_[i] = std::max(water_cube_slam_cd_[i] - dt, 0.0f);
+
+    // Local wave surface (height + its vertical velocity) under the cube, from
+    // the same Gerstner proxy the buoyancy rides, so slam is measured against
+    // the MOVING surface rather than a flat plane.
+    f32 surface_vy = 0.0f;
+    f32 surface = physics::GerstnerWaveHeight(pos.x, pos.z, water_time_, nullptr, &surface_vy);
+
     f32 horiz = std::sqrt(vel.x * vel.x + vel.z * vel.z);
     f32 vert = std::fabs(vel.y);
     f32 motion = horiz + vert;
@@ -293,7 +305,63 @@ void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
     d.foam_amount = std::min(std::max(motion - 0.2f, 0.0f) * 0.7f, 1.8f);
     d.velocity_x = vel.x;
     d.velocity_z = vel.z;
+    // Faster horizontal motion stretches the wake down-track; cubes carry no
+    // meaningful yaw, so no turn skew (a ship would pass its hull yaw rate).
+    d.elongation = std::min(horiz * 0.35f, 2.5f);
+    d.angular_velocity = 0.0f;
     view.water_disturbances.push_back(d);
+
+    // Impact splash: vertical velocity relative to the local surface exceeding a
+    // threshold while the cube is at the waterline is a slam. Emit a stronger
+    // one-shot foam + ripple pulse (plus an additive spray burst) and start a
+    // cooldown so a single impact fires once, not every frame it stays wet.
+    const f32 rel_vy = vel.y - surface_vy;
+    const f32 kSlamSpeed = 2.5f;         // m/s of downward closing speed
+    const f32 kWaterlineBand = 1.4f;     // cube half-height + margin
+    if (rel_vy < -kSlamSpeed && std::fabs(pos.y - surface) < kWaterlineBand &&
+        water_cube_slam_cd_[i] <= 0.0f) {
+      water_cube_slam_cd_[i] = 0.6f;
+      f32 slam = std::min(-rel_vy, 12.0f);
+      render::WaterDisturbance s;
+      s.position = {pos.x, 0.0f, pos.z};
+      s.radius = 3.4f;                   // splashes ring wider than the wake
+      s.ripple_strength = slam * 0.9f;   // sharp pressure pulse
+      s.foam_amount = std::min(1.5f + slam * 0.25f, 4.0f);  // big whitewater burst
+      s.velocity_x = 0.0f;               // radial: an impact has no heading
+      s.velocity_z = 0.0f;
+      s.elongation = 0.0f;
+      s.angular_velocity = 0.0f;
+      view.water_disturbances.push_back(s);
+      SpawnSplashSpray(pos, surface, slam);
+    }
+  }
+}
+
+void DemoScenes::SpawnSplashSpray(const Vec3& pos, f32 surface, f32 strength) {
+  // A small burst of additive white spray for the slam. Reuses the demo
+  // particle pool (integrated + emitted by UpdateParticles next frame); the
+  // additive convention there premultiplies the life fade into the HDR radiance
+  // with alpha = 1, so the fade never dims the additive path.
+  if (!particles_enabled_) return;
+  auto rnd = [&]() -> f32 {
+    particle_seed_ ^= particle_seed_ << 13;
+    particle_seed_ ^= particle_seed_ >> 17;
+    particle_seed_ ^= particle_seed_ << 5;
+    return static_cast<f32>(particle_seed_ & 0xffffffu) / 16777216.0f;
+  };
+  u32 count = 10u + static_cast<u32>(strength * 3.0f);
+  for (u32 s = 0; s < count && demo_particles_.size() < 20000; ++s) {
+    DemoParticle p;
+    p.position = {pos.x + (rnd() - 0.5f) * 1.6f, surface + 0.1f, pos.z + (rnd() - 0.5f) * 1.6f};
+    f32 ang = rnd() * 6.2831853f;
+    f32 spread = 0.6f + rnd() * (0.5f + 0.15f * strength);
+    p.velocity = {std::cos(ang) * spread, 2.0f + rnd() * (1.0f + 0.25f * strength),
+                  std::sin(ang) * spread};
+    p.max_life = 0.5f + rnd() * 0.4f;
+    p.life = p.max_life;
+    p.size = 0.03f + rnd() * 0.03f;
+    p.color = {1.3f, 1.45f, 1.6f};  // cool whitewater spray (HDR, premultiplied on emit)
+    demo_particles_.push_back(p);
   }
 }
 
@@ -381,9 +449,15 @@ void DemoScenes::CreateWaterDemoScene() {
   world_.Add(sheet, scene::Transform{});
   world_.Add(sheet, scene::Renderable{water.id});
   physics_.AddStaticBox({0, -78.0f, 0}, {40.0f, 40.0f, 40.0f});
-  physics_.set_water_height([](const Vec3&, f32* height, Vec3* flow) {
-    *height = 0.0f;
-    if (flow) *flow = {};
+  // Wave-riding buoyancy: the surface height (and its horizontal orbital flow)
+  // comes from the analytic Gerstner proxy, so the cubes ride the swell instead
+  // of bobbing on a flat plane and drift along with the passing waves. Entirely
+  // CPU/analytic — no GPU readback. Constants live in physics/water_waves.h,
+  // kept in sync with the shader Gerstner field.
+  physics_.set_water_height([this](const Vec3& p, f32* height, Vec3* flow) {
+    Vec3 f{};
+    *height = physics::GerstnerWaveHeight(p.x, p.z, water_time_, &f);
+    if (flow) *flow = f;  // carries floaters with the swell (rivers would add net drift)
     return true;
   });
   for (int i = 0; i < 6; ++i) {
@@ -392,11 +466,20 @@ void DemoScenes::CreateWaterDemoScene() {
     Vec3 position{std::cos(angle) * 6.0f, 2.0f + (i % 3), std::sin(angle) * 6.0f};
     world_.Add(block, scene::Transform{.position = {position.x, position.y, position.z}});
     world_.Add(block, scene::Renderable{cube.id});
-    physics::BodyId body = physics_.AddDynamicBox(position, {1.0f, 1.0f, 1.0f}, 400.0f, {});
+    // Density 450 kg/m^3 against the 1.2x buoyancy factor settles the cubes at
+    // ~40% submerged (V_sub/V = density / (1.2 * 1000)) with a little freeboard,
+    // and keeps the buoyancy spring stiff enough to track the swell rather than
+    // resonate with it. One cube gets an initial horizontal shove so it planes
+    // across the swell and carves a visible directional wake; the rest ride the
+    // waves and drift with the flow.
+    Vec3 initial_velocity = (i == 0) ? Vec3{12.0f, 0.0f, 0.0f} : Vec3{};
+    physics::BodyId body =
+        physics_.AddDynamicBox(position, {1.0f, 1.0f, 1.0f}, 450.0f, initial_velocity);
     if (body) {
       ctx_.physics_entities->push_back({body, block});
       water_cubes_.push_back(body);
       water_cube_prev_.push_back(position);
+      water_cube_slam_cd_.push_back(0.0f);
     }
   }
 

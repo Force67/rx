@@ -54,16 +54,62 @@ density instead of saturating.
 ## Object interaction (wakes)
 
 `FrameView::water_disturbances` is a bounded `base::Vector<WaterDisturbance>`
-(world pos, radius, ripple strength, foam amount, XZ velocity), uploaded into a
-per-frame-in-flight storage buffer and consumed by the injection pass. In the
-water demo each floating cube pushes one disturbance per frame scaled by its
-physics velocity (derived from per-frame position deltas): horizontal + vertical
-motion drives the ripple impulse and the foam splat, so a bobbing/drifting cube
-throws foam and a still one leaves only a faint standing ripple.
+(world pos, radius, ripple strength, foam amount, XZ velocity, **elongation**,
+**angular_velocity**), uploaded into a per-frame-in-flight storage buffer and
+consumed by the injection pass. The C++ struct (40 B) and the HLSL `Disturbance`
+mirror (`float4 pos_radius; float4 params; float2 wake;`) are size-asserted
+against each other. In the water demo each floating cube pushes one disturbance
+per frame scaled by its physics velocity (derived from per-frame position
+deltas): horizontal + vertical motion drives the ripple impulse and the foam
+splat, so a bobbing/drifting cube throws foam and a still one leaves only a faint
+standing ripple.
 
-Splash particles are intentionally *not* emitted — foam injection into the field
-covers the wake more cheaply. (If particles were added they would follow the
-additive convention: premultiplied fade into RGB, alpha = 1.)
+### Velocity-shaped wakes
+
+A *still* body leaves a near-radial splat (the degenerate case — with speed ~0
+the shaping below collapses to the old circular falloff). A *moving* body leaves
+a directional wake, shaped entirely on the GPU from the disturbance's velocity
+and wake fields:
+
+* The splat is projected onto **along** (the motion heading) and **across**
+  (perpendicular) axes.
+* `elongation` (a speed-scaled stretch the CPU supplies) makes the footprint a
+  tight **bow** ahead (`fore = radius/(1+e·1.5)`), a long **stern tail** astern
+  (`aft = radius·(1+e·3)`) and **narrower across** (`lat = radius·(0.6+0.4/(1+e))`).
+* The ripple impulse is emphasised at the leading edge (`×(1+1.6·bow·e)`, the
+  pressure wave a hull pushes); foam lingers in the trailing band
+  (`×(1+1.0·stern)`).
+* `angular_velocity` (a yaw rate, rad/s) **shears** the lateral offset along the
+  motion axis, so the wake curves to the inside of a turn.
+
+Intensity scales with speed because the demo derives `ripple_strength` /
+`foam_amount` (and `elongation`) from the body's speed.
+
+**Ship usage.** A large hull is just many disturbances: scatter several probes
+along the keel, each emitting a disturbance with the hull's world velocity, its
+yaw rate in `angular_velocity`, a `radius` covering its local footprint and an
+`elongation` scaled by forward speed. The bow probe(s) get the sharp leading
+ripple, the stern probes the trailing foam band; the whole set reads as one
+coherent V-wake without any hull-specific code in the field.
+
+### Impact splashes (slam)
+
+When a body's vertical velocity *relative to the local wave surface* (both from
+the analytic Gerstner proxy — see sync note below) exceeds a threshold while it
+sits at the waterline, the demo emits a one-shot stronger disturbance (wide
+radius, sharp ripple pulse, big foam burst) with a short cooldown so a single
+impact fires once. It also spawns a small **additive spray burst** into the demo
+particle pool: the additive convention is a premultiplied fade into the RGB
+radiance with `alpha = 1` (an alpha fade does *not* dim the additive path).
+
+### CPU/GPU Gerstner sync
+
+The demo's buoyancy water-height callback and the slam's surface-velocity test
+evaluate a CPU port of the analytic Gerstner field in `engine/physics/`
+`water_waves.h`. Its constants **must stay in sync** with the GPU field in
+`shaders/geometry/water_waves.hlsli` (and the mirrors in `mesh.vs`, `water.ps`,
+`shore_wetting.cs.hlsl` and this file's `GerstnerCrest`/`WaterSurfaceHeight`), or
+the floaters ride a surface that no longer matches the rendered water.
 
 ## Local interaction (depth impulses + obstacles)
 

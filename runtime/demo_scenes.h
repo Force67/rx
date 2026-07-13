@@ -76,6 +76,8 @@ class DemoScenes {
   // Water demo: each floating cube pushes a wake ripple + foam splat into the
   // persistent water field, scaled by its physics velocity.
   void EmitWaterDisturbances(f32 dt, render::FrameView& view);
+  // Additive spray burst for a slam impact, spawned into the demo particle pool.
+  void SpawnSplashSpray(const Vec3& pos, f32 surface, f32 strength);
 
   struct DemoParticle {
     Vec3 position;
@@ -99,6 +101,8 @@ class DemoScenes {
   // Water demo floaters, tracked to derive per-frame velocity for wake/foam.
   base::Vector<physics::BodyId> water_cubes_;
   base::Vector<Vec3> water_cube_prev_;
+  base::Vector<f32> water_cube_slam_cd_;  // per-cube splash cooldown (s)
+  f32 water_time_ = 0;                    // wave clock for the Gerstner proxy
   u32 gpu_particle_count_ = 0;  // > 0 selects the gpu-simulated fountain
   Vec3 gpu_particle_emitter_{0, 0, 0};
   base::Vector<render::Decal> demo_decals_;
