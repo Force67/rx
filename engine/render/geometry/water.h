@@ -5,6 +5,7 @@
 
 #include "render/core/bindless.h"
 #include "render/core/render_graph.h"
+#include "render/geometry/adaptive_water.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {
@@ -38,6 +39,12 @@ class WaterPass {
             BindingSetHandle bindless, ResourceHandle opaque_color, ResourceHandle opaque_depth);
   void BindMaterial(CommandList& cmd, BindingSetHandle material);
 
+  bool adaptive_available() const { return adaptive_.available(); }
+  void UpdateAdaptive(CommandList& cmd, const AdaptiveWaterMesh::UpdateParams& params) {
+    adaptive_.Update(cmd, params);
+  }
+  void DrawAdaptive(CommandList& cmd) const { adaptive_.Draw(cmd); }
+
  private:
   explicit WaterPass(Device& device) : device_(device) {}
 
@@ -45,6 +52,7 @@ class WaterPass {
   SamplerHandle sampler_;
   PipelineHandle pipeline_;
   PipelineHandle copy_pipeline_;
+  AdaptiveWaterMesh adaptive_;
 };
 
 }  // namespace rx::render

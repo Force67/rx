@@ -122,6 +122,11 @@ struct RenderSettings {
   f32 ddgi_intensity = 1.0f;
 
   bool water_reflections = true;  // raytraced; off falls back to sky only
+  // Persistent compute-tessellated ocean geometry. Only the largest planar
+  // water sheet uses it; authored non-planar water keeps its uploaded mesh.
+  bool adaptive_water = true;
+  u32 water_triangle_budget = 16384;
+  f32 water_target_triangle_pixels = 24.0f;
 
   bool rt_reflections = true;  // raytraced specular for opaque surfaces (needs ray query)
   f32 reflection_roughness_cutoff = 0.6f;  // above this, fall back to prefiltered ibl

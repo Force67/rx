@@ -46,6 +46,7 @@ rx_add_module(render
   post/depth_of_field.cc
   post/upscaler.cc
   geometry/water.cc
+  geometry/adaptive_water.cc
   geometry/particles.cc
   geometry/particle_emitters.cc
   geometry/fur.cc
@@ -266,6 +267,7 @@ set(RX_RENDER_SHADERS
   shaders/gi/ddgi_blend.cs.hlsl
   shaders/gi/ddgi_border.cs.hlsl
   shaders/geometry/water.ps.hlsl
+  shaders/geometry/adaptive_water.cs.hlsl
   shaders/geometry/copy.cs.hlsl
   shaders/util/hdr_capture.cs.hlsl
   shaders/gi/pathtrace.cs.hlsl

@@ -1147,8 +1147,33 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     gpu.lods.push_back(std::move(glod));
   }
   gpu.all_blend = true;
+  bool all_water = !gpu.submeshes.empty();
   for (const GpuSubmesh& submesh : gpu.submeshes) {
     if (!submesh.blend) gpu.all_blend = false;
+    if (!submesh.water) all_water = false;
+  }
+  if (all_water && lod.vertices.size() >= 4) {
+    f32 min_x = lod.vertices[0].position[0], max_x = min_x;
+    f32 min_y = lod.vertices[0].position[1], max_y = min_y;
+    f32 min_z = lod.vertices[0].position[2], max_z = min_z;
+    for (const asset::Vertex& vertex : lod.vertices) {
+      min_x = std::min(min_x, vertex.position[0]);
+      max_x = std::max(max_x, vertex.position[0]);
+      min_y = std::min(min_y, vertex.position[1]);
+      max_y = std::max(max_y, vertex.position[1]);
+      min_z = std::min(min_z, vertex.position[2]);
+      max_z = std::max(max_z, vertex.position[2]);
+    }
+    const f32 horizontal_extent = std::max(max_x - min_x, max_z - min_z);
+    const f32 planar_tolerance = std::max(0.02f, horizontal_extent * 1e-4f);
+    gpu.planar_water = horizontal_extent > 1.0f && max_y - min_y <= planar_tolerance;
+    if (gpu.planar_water) {
+      gpu.water_bounds[0] = min_x;
+      gpu.water_bounds[1] = min_z;
+      gpu.water_bounds[2] = max_x;
+      gpu.water_bounds[3] = max_z;
+      gpu.water_height = (min_y + max_y) * 0.5f;
+    }
   }
   std::memcpy(gpu.bounds_center, mesh.bounds_center, sizeof(f32) * 3);
   gpu.bounds_radius = mesh.bounds_radius;
@@ -1572,6 +1597,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   };
   base::Vector<TransparentDraw> transparent;
   bool any_water = false;
+  const DrawItem* adaptive_water_item = nullptr;
+  const GpuSubmesh* adaptive_water_submesh = nullptr;
+  f32 adaptive_water_area = 0.0f;
   for (const DrawItem& item : view.draws) {
     const GpuMesh* mesh = meshes_.find(item.mesh);
     if (!mesh) continue;
@@ -1581,7 +1609,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       f32 dy = item.transform.m[13] - view.camera.eye.y;
       f32 dz = item.transform.m[14] - view.camera.eye.z;
       transparent.push_back({&item, &submesh, dx * dx + dy * dy + dz * dz});
-      if (submesh.water) any_water = true;
+      if (submesh.water) {
+        any_water = true;
+        if (settings_.adaptive_water && water_ && water_->adaptive_available() &&
+            mesh->planar_water) {
+          f32 area = (mesh->water_bounds[2] - mesh->water_bounds[0]) *
+                     (mesh->water_bounds[3] - mesh->water_bounds[1]);
+          if (area > adaptive_water_area) {
+            adaptive_water_area = area;
+            adaptive_water_item = &item;
+            adaptive_water_submesh = &submesh;
+          }
+        }
+      }
     }
   }
   bool water_pipeline_active = any_water && water_ != nullptr;
@@ -1657,7 +1697,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         [this, composite, motion, depth, opaque_color, opaque_depth, sun_shadow, water_tlas_slot,
          use_rt_frag, ddgi_active, water_pipeline_active, csm_on, shadow_slot, shadow_atlas,
          globals_set, globals_written, update_globals_set, frame_slot,
-         transparent = std::move(transparent), &frame, &view](PassContext& ctx) {
+         adaptive_water_item, adaptive_water_submesh, transparent = std::move(transparent),
+         &frame, &view](PassContext& ctx) {
           if (!globals_written) {
             update_globals_set(ctx, kInvalidResource, false, /*want_tlas=*/true);
           }
@@ -1681,6 +1722,32 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
               fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{});
 
+          // Update the dominant planar surface before beginning rasterization.
+          // Its CBT/vertex/indirect buffers persist inside WaterPass; this
+          // dispatch only changes leaf slots whose LOD decision changed.
+          if (adaptive_water_item && adaptive_water_submesh) {
+            if (const GpuMesh* adaptive_mesh = meshes_.find(adaptive_water_item->mesh)) {
+              const f32 aspect = static_cast<f32>(render_width_) /
+                                 static_cast<f32>(std::max(render_height_, 1u));
+              Mat4 vp = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f) *
+                        LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
+              Vec3 camera_local = TransformPoint(Inverse(adaptive_water_item->transform),
+                                                 view.camera.eye);
+              AdaptiveWaterMesh::UpdateParams params;
+              params.local_to_clip = vp * adaptive_water_item->transform;
+              std::copy_n(adaptive_mesh->water_bounds, 4, params.bounds);
+              params.camera_local = camera_local;
+              params.height = adaptive_mesh->water_height;
+              params.time = static_cast<f32>(time_seconds_);
+              params.target_pixels = settings_.water_target_triangle_pixels;
+              params.render_width = render_width_;
+              params.render_height = render_height_;
+              params.triangle_budget = settings_.water_triangle_budget;
+              params.surface_key = adaptive_water_item->mesh;
+              water_->UpdateAdaptive(*ctx.cmd, params);
+            }
+          }
+
           ColorAttachment colors[2];
           colors[0] = {.view = ctx.graph->image(composite).view, .load = LoadOp::kLoad};
           colors[1] = {.view = ctx.graph->image(motion).view, .load = LoadOp::kLoad};
@@ -1701,6 +1768,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             const GpuMesh* mesh = meshes_.find(draw.item->mesh);
             if (!mesh) continue;
             bool as_water = draw.submesh->water && water_pipeline_active;
+            bool adaptive_draw = as_water && draw.item == adaptive_water_item &&
+                                 draw.submesh == adaptive_water_submesh;
             bool additive = draw.submesh->effect_additive;
 
             Mode wanted = as_water ? Mode::kWater
@@ -1739,8 +1808,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                 // struct so detail_rect is zeroed: mesh.vs sinks vertices inside
                 // a nonzero rect, and a stale one would sink the water plane.
                 ctx.cmd->PushConstants(&push, sizeof(push));
-                ctx.cmd->BindVertexBuffer(0, mesh->vertices);
-                ctx.cmd->BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+                if (!adaptive_draw) {
+                  ctx.cmd->BindVertexBuffer(0, mesh->vertices);
+                  ctx.cmd->BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+                }
               } else {
                 mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
               }
@@ -1755,7 +1826,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               }
               bound_material = material;
             }
-            mesh_pipeline_->DrawSubmesh(*ctx.cmd, *draw.submesh);
+            if (adaptive_draw) {
+              water_->DrawAdaptive(*ctx.cmd);
+              // A following authored submesh may share this DrawItem; force it
+              // to restore the source vertex/index buffers.
+              bound_item = nullptr;
+            } else {
+              mesh_pipeline_->DrawSubmesh(*ctx.cmd, *draw.submesh);
+            }
           }
           ctx.cmd->EndRendering();
         });

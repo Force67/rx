@@ -309,6 +309,12 @@ endif()
 # like kinematest; skips cleanly (null backend) when no Vulkan driver is present,
 # so plain `ctest` passes and a real GPU run under vkrun proves the pixel path.
 if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
+  add_executable(adaptive_water_test test/adaptive_water_test.cc)
+  target_include_directories(adaptive_water_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  add_test(NAME adaptive_water_test COMMAND adaptive_water_test)
+
   add_executable(offscreen_test test/offscreen_test.cc)
   target_link_libraries(offscreen_test PRIVATE rx::render rx::core)
   rx_embed_shaders(offscreen_test
