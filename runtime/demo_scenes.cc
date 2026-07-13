@@ -263,7 +263,13 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   }
 
   if (locomotion_enabled_) EmitLocomotion(dt, view);
-  if (!water_cubes_.empty()) EmitWaterDisturbances(dt, view);
+  // RX_WATER_DISTURB=0 mutes the CPU wake disturbances so a clean A/B can show
+  // the depth-driven water interaction (RX_WATER_INTERACTION) ringing the
+  // floaters on its own, with no CPU-fed foam confusing the picture.
+  if (!water_cubes_.empty()) {
+    const char* disturb = std::getenv("RX_WATER_DISTURB");
+    if (!(disturb && disturb[0] == '0')) EmitWaterDisturbances(dt, view);
+  }
 }
 
 void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {

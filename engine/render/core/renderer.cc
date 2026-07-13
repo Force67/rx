@@ -66,6 +66,11 @@ base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true, "RX_ADAPTIVE_WATER"};
 base::Option<bool> WaterFieldOpt{"water.field", true, "RX_WATER_FIELD"};
+base::Option<bool> WaterInteractionOpt{"water.interaction", true, "RX_WATER_INTERACTION"};
+// Debug/verification only: force the ripple obstacle boundary off while leaving
+// the shoreline-wetting shading on, so an A/B isolates ripples reflecting off
+// the island from the wet-sand shading. Not wired to the ini/UI on purpose.
+base::Option<bool> WaterObstacleOpt{"water.obstacle", true, "RX_WATER_OBSTACLE"};
 base::Option<bool> ShoreWettingOpt{"shore.wetting", false, "RX_SHORE_WETTING"};
 base::Option<bool> WaterCausticsOpt{"water.caustics", true, "RX_WATER_CAUSTICS"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
@@ -624,6 +629,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
+  if (WaterInteractionOpt.overridden()) settings_.water_interaction = WaterInteractionOpt;
   if (ShoreWettingOpt.overridden()) settings_.shore_wetting = ShoreWettingOpt;
   if (WaterCausticsOpt.overridden()) settings_.water_caustics = WaterCausticsOpt;
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
@@ -2135,21 +2141,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // the water shaders sample this frame.
   if (fft_ocean_active) ocean_.AddToGraph(graph_, static_cast<f32>(time_seconds_));
 
-  // Persistent foam/ripple field: recenter+advect+decay the rings, step the
-  // near-camera ripples, and inject crest foam + this frame's object wakes. Runs
-  // after the FFT ocean so it can sample the fresh foam map for crest injection.
-  if (water_field_active_) {
-    WaterField::UpdateParams wf{};
-    wf.camera_pos = view.camera.eye;
-    wf.time = static_cast<f32>(time_seconds_);
-    wf.dt = std::min(view.frame_delta_seconds, 1.0f / 30.0f);  // clamp for stability
-    wf.frame_slot = frame_slot;
-    wf.fft_ocean = fft_ocean_active;
-    wf.disturbances = view.water_disturbances.data();
-    wf.disturbance_count = static_cast<u32>(view.water_disturbances.size());
-    water_field_.AddToGraph(graph_, wf,
-                            fft_ocean_active ? ocean_.normal_foam_view() : TextureView{});
-  }
+  // The persistent foam/ripple field runs later, after the prepass, so its
+  // local-interaction phase can read the opaque depth (see below, past the
+  // depth export). It still samples the FFT ocean foam recorded just above.
 
   // Shoreline wetting: update the world-space wet field this frame. Follows the
   // ocean pass so it can read the freshly-built displacement map when active.
@@ -2830,6 +2824,38 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Snapshot this frame's depth for next frame's occlusion test.
   if (settings_.gpu_culling && settings_.gpu_occlusion) {
     gpu_cull_.CopyDepth(graph_, depth_export, cull_slot);
+  }
+
+  // Persistent foam/ripple field: recenter+advect+decay the rings, step the
+  // near-camera ripples, and inject crest foam + object wakes. Scheduled here,
+  // after the prepass exports depth, so the local-interaction phase can read it:
+  // it projects each ring-0 column into the frame, and where opaque geometry
+  // crosses the waterline it rings the surface (no CPU disturbance needed) and
+  // reflects ripples off the analytic island. Still ordered after the FFT ocean
+  // (recorded earlier) so crest injection samples the fresh foam map.
+  if (water_field_active_) {
+    WaterField::UpdateParams wf{};
+    wf.camera_pos = view.camera.eye;
+    wf.time = static_cast<f32>(time_seconds_);
+    wf.dt = std::min(view.frame_delta_seconds, 1.0f / 30.0f);  // clamp for stability
+    wf.frame_slot = frame_slot;
+    wf.fft_ocean = fft_ocean_active;
+    wf.disturbances = view.water_disturbances.data();
+    wf.disturbance_count = static_cast<u32>(view.water_disturbances.size());
+    wf.interaction = settings_.water_interaction;
+    // The analytic island is only a defined terrain source where the shoreline
+    // wetting owns it; reflect ripples off it only then (mirrors that gating).
+    wf.obstacle = settings_.water_interaction && shore_wetting_active_ && WaterObstacleOpt;
+    wf.view_proj = globals.view_proj;
+    wf.inv_view_proj = globals.inv_view_proj;
+    for (u32 i = 0; i < 4; ++i) wf.island[i] = settings_.shore_island[i];
+    wf.water_level = 0.0f;
+    wf.render_size[0] = static_cast<f32>(render_width_);
+    wf.render_size[1] = static_cast<f32>(render_height_);
+    water_field_.AddToGraph(graph_, wf,
+                            fft_ocean_active ? ocean_.normal_foam_view() : TextureView{},
+                            fft_ocean_active ? ocean_.displacement_view() : TextureView{},
+                            depth_export);
   }
 
   ResourceHandle ao = kInvalidResource;
