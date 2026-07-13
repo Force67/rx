@@ -276,6 +276,9 @@ bool EnvironmentSystem::CreatePipelines() {
   env_desc.slots.push_back({32, BindingType::kUniformBuffer});
   // 33: shoreline wetting field (R16F world-space wetness, clamp-sampled).
   env_desc.slots.push_back({33, BindingType::kCombinedTextureSampler});
+  // 34: underwater caustic map (RG16F tiling, wrap-sampled, kept in GENERAL by
+  // the caustics compute chain).
+  env_desc.slots.push_back({34, BindingType::kCombinedTextureSampler});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -450,7 +453,7 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     TextureView ocean_normal, TextureView water_field_ring0,
                                     TextureView water_field_ring1,
                                     const GpuBuffer& water_field_params,
-                                    TextureView shore_wetness) const {
+                                    TextureView shore_wetness, TextureView caustics) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -515,7 +518,11 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        // The live field is a storage image kept in GENERAL by the wetting
        // compute; the black dummy (dry) is shader-read.
        shore_wetness ? InGeneral(Bind::Combined(33, shore_wetness, sampler_))
-                     : Bind::Combined(33, black_.view, sampler_)});
+                     : Bind::Combined(33, black_.view, sampler_),
+       // The live caustic map is a storage image kept in GENERAL by the caustics
+       // compute; the black dummy (no caustics) is shader-read.
+       caustics ? InGeneral(Bind::Combined(34, caustics, wrap_sampler_))
+                : Bind::Combined(34, black_.view, wrap_sampler_)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

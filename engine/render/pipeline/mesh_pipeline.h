@@ -57,6 +57,17 @@ struct FrameGlobals {
   // Shoreline wetting field (kFrameFlagShoreWetting): xy field min-corner world
   // xz, z 1/extent (1/m), w unused. Zeroed when the feature is off.
   f32 shore_field[4] = {0, 0, 0, 0};
+  // Physically-based water shading ([water] settings). Trailing append so the
+  // shorter water.ps mirror can extend to reach these; read by water.ps (Beer
+  // absorption + crest SSS) and mesh.ps/mesh_rt.ps (underwater caustics).
+  // rgb per-channel Beer-Lambert absorption coefficient (1/m), w overall scale.
+  f32 water_absorption[4] = {0.35f, 0.045f, 0.028f, 1.0f};
+  // x transmission strength, y reflection foam/ripple roughening gain,
+  // z crest-SSS intensity, w crest-SSS view exponent.
+  f32 water_material[4] = {1.0f, 1.0f, 0.6f, 3.0f};
+  // Underwater caustics (kFrameFlagWaterCaustics): x intensity (0..1 lerp),
+  // y water rest height (m), z extra depth-fade (1/m), w unused.
+  f32 water_caustics[4] = {0.6f, 0.0f, 0.15f, 0.0f};
 };
 
 // A projected decal: an oriented box whose -z face carries an atlas region,
@@ -99,6 +110,7 @@ inline constexpr u32 kFrameFlagFftOcean = 1u << 11;     // water displaces/shade
 inline constexpr u32 kFrameFlagInterior = 1u << 12;    // interior lighting mode: flat ambient + fog, no sky
 inline constexpr u32 kFrameFlagWaterField = 1u << 13;    // water samples the persistent foam/ripple ring field
 inline constexpr u32 kFrameFlagShoreWetting = 1u << 14;  // sample the shoreline wetting field (env slot 33)
+inline constexpr u32 kFrameFlagWaterCaustics = 1u << 15;  // modulate sun on submerged surfaces by the caustic map (env slot 34)
 
 // One active morph target on a draw: index into the mesh's target list and
 // its weight. FrameView::morph_weights concatenates every morphed draw's

@@ -141,6 +141,26 @@ struct RenderSettings {
   // SHORELINE_WETTING.md for the height-source choice.
   f32 shore_island[4] = {0.0f, 0.0f, 10.0f, 1.5f};
 
+  // Physically-based water shading. Beer-Lambert absorption over the refracted
+  // path (per-channel 1/m; red dies first -> deep water blue-green, shallow
+  // clear), a transmission strength, and a foam/ripple reflection-roughening
+  // gain, all consumed by water.ps. See WATER_SHADING.md.
+  f32 water_absorption[3] = {0.35f, 0.045f, 0.028f};
+  f32 water_absorption_scale = 1.0f;
+  f32 water_transmission = 1.0f;      // refracted floor visibility vs body colour
+  f32 water_refl_foam_gain = 1.0f;    // how much foam/ripple broadens+dims reflections
+  // Wave subsurface-scattering crest glow (backlit thin crests rim turquoise).
+  f32 water_sss_intensity = 0.6f;     // 0 disables the lobe (zero cost)
+  f32 water_sss_exponent = 3.0f;      // view tightness of the transmission lobe
+  // Energy-conserving underwater caustics + wave shadows (compute pass; the map
+  // modulates direct sun on surfaces below the rest height). Enabled per frame
+  // when a water surface is present.
+  bool water_caustics = true;
+  f32 water_rest_height = 0.0f;           // world y of the water rest plane (m)
+  f32 water_caustic_intensity = 0.85f;    // 0..1 lerp toward the caustic pattern
+  f32 water_caustic_depth_fade = 0.06f;   // extra depth fade (1/m) beyond absorption
+  f32 water_caustic_receiver_depth = 6.0f;  // reference receiver plane depth below rest (m)
+
   bool rt_reflections = true;  // raytraced specular for opaque surfaces (needs ray query)
   f32 reflection_roughness_cutoff = 0.6f;  // above this, fall back to prefiltered ibl
 

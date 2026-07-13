@@ -155,7 +155,20 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "water_target_triangle_pixels = " << s.water_target_triangle_pixels << "\n";
   o << "water_field = " << Bool(s.water_field) << "\n";
   o << "shore_wetting = " << Bool(s.shore_wetting) << "\n";
-  o << "shore_drying_time = " << s.shore_drying_time << "\n\n";
+  o << "shore_drying_time = " << s.shore_drying_time << "\n";
+  o << "water_absorption_r = " << s.water_absorption[0] << "\n";
+  o << "water_absorption_g = " << s.water_absorption[1] << "\n";
+  o << "water_absorption_b = " << s.water_absorption[2] << "\n";
+  o << "water_absorption_scale = " << s.water_absorption_scale << "\n";
+  o << "water_transmission = " << s.water_transmission << "\n";
+  o << "water_refl_foam_gain = " << s.water_refl_foam_gain << "\n";
+  o << "water_sss_intensity = " << s.water_sss_intensity << "\n";
+  o << "water_sss_exponent = " << s.water_sss_exponent << "\n";
+  o << "water_caustics = " << Bool(s.water_caustics) << "\n";
+  o << "water_rest_height = " << s.water_rest_height << "\n";
+  o << "water_caustic_intensity = " << s.water_caustic_intensity << "\n";
+  o << "water_caustic_depth_fade = " << s.water_caustic_depth_fade << "\n";
+  o << "water_caustic_receiver_depth = " << s.water_caustic_receiver_depth << "\n\n";
 
   o << "[path_tracing]\n";
   o << "path_trace = " << Bool(s.path_trace) << "\n";
@@ -269,6 +282,19 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   b("water_field", s.water_field);
   b("shore_wetting", s.shore_wetting);
   fl("shore_drying_time", s.shore_drying_time);
+  fl("water_absorption_r", s.water_absorption[0]);
+  fl("water_absorption_g", s.water_absorption[1]);
+  fl("water_absorption_b", s.water_absorption[2]);
+  fl("water_absorption_scale", s.water_absorption_scale);
+  fl("water_transmission", s.water_transmission);
+  fl("water_refl_foam_gain", s.water_refl_foam_gain);
+  fl("water_sss_intensity", s.water_sss_intensity);
+  fl("water_sss_exponent", s.water_sss_exponent);
+  b("water_caustics", s.water_caustics);
+  fl("water_rest_height", s.water_rest_height);
+  fl("water_caustic_intensity", s.water_caustic_intensity);
+  fl("water_caustic_depth_fade", s.water_caustic_depth_fade);
+  fl("water_caustic_receiver_depth", s.water_caustic_receiver_depth);
 
   b("path_trace", s.path_trace);
   b("path_trace_reference", s.path_trace_reference);

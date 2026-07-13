@@ -67,6 +67,7 @@ base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true, "RX_ADAPTIVE_WATER"};
 base::Option<bool> WaterFieldOpt{"water.field", true, "RX_WATER_FIELD"};
 base::Option<bool> ShoreWettingOpt{"shore.wetting", false, "RX_SHORE_WETTING"};
+base::Option<bool> WaterCausticsOpt{"water.caustics", true, "RX_WATER_CAUSTICS"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0, "RX_MOTION_BLUR_DEBUG_VEL"};
@@ -426,6 +427,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (!shore_wetting_.Initialize(*device_)) {
     RX_WARN("shoreline wetting unavailable");  // non-fatal: feature stays off
   }
+  if (!water_caustics_.Initialize(*device_)) {
+    RX_WARN("water caustics unavailable");  // non-fatal: no seafloor caustics
+  }
   if (device_->caps().mesh_shaders) {
     // 1x1 fallback hi-z so the mesh-shader cull descriptor is always valid; bound
     // (with occlusion disabled) on frames where no real hi-z was built.
@@ -621,6 +625,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
   if (ShoreWettingOpt.overridden()) settings_.shore_wetting = ShoreWettingOpt;
+  if (WaterCausticsOpt.overridden()) settings_.water_caustics = WaterCausticsOpt;
   if (PathtraceSpp.overridden()) settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden()) settings_.path_trace_accum = static_cast<u32>(std::max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden()) settings_.path_trace_recon = PathtraceRecon;
@@ -2004,6 +2009,22 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     shore_wetting_.FieldParams(globals.shore_field);
     globals.flags |= kFrameFlagShoreWetting;
   }
+  // Physically-based water material + crest-SSS tunables ([water] settings),
+  // read by water.ps and (for the caustic depth fade) mesh.ps/mesh_rt.ps.
+  for (u32 i = 0; i < 3; ++i) globals.water_absorption[i] = settings_.water_absorption[i];
+  globals.water_absorption[3] = settings_.water_absorption_scale;
+  globals.water_material[0] = settings_.water_transmission;
+  globals.water_material[1] = settings_.water_refl_foam_gain;
+  globals.water_material[2] = settings_.water_sss_intensity;
+  globals.water_material[3] = settings_.water_sss_exponent;
+  globals.water_caustics[0] = settings_.water_caustic_intensity;
+  globals.water_caustics[1] = settings_.water_rest_height;
+  globals.water_caustics[2] = settings_.water_caustic_depth_fade;
+  // Underwater caustics: only worthwhile with a water surface in the scene (the
+  // demo/water path enables the field); fall back to no-op when unavailable.
+  water_caustics_active_ = settings_.water_caustics && water_caustics_.available() &&
+                           !path_trace && !interior && (fft_ocean_active_ || water_field_active_);
+  if (water_caustics_active_) globals.flags |= kFrameFlagWaterCaustics;
   // Hybrid ReSTIR DI decision happens before the globals upload below; the
   // graph passes record later under the same flag.
   bool restir_active = settings_.restir_di && rt_available_ && restir_di_.available() &&
@@ -2142,6 +2163,23 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     sp.fft_active = fft_ocean_active;
     sp.ocean_displacement = fft_ocean_active ? ocean_.displacement_view() : TextureView{};
     shore_wetting_.AddToGraph(graph_, sp);
+  }
+
+  // Underwater caustics: refract a sun-ray grid through the surface onto a
+  // reference receiver plane and build the energy-conserving caustic map the
+  // opaque scene pass samples. Follows the ocean pass so it can read the fresh
+  // displacement/normal maps when the FFT ocean is active.
+  if (water_caustics_active_) {
+    WaterCaustics::Params cp;
+    cp.sun_travel = Normalize(Vec3{globals.sun_direction[0], globals.sun_direction[1],
+                                   globals.sun_direction[2]});
+    cp.time = static_cast<f32>(time_seconds_);
+    cp.rest_height = settings_.water_rest_height;
+    cp.receiver_depth = settings_.water_caustic_receiver_depth;
+    cp.fft_active = fft_ocean_active;
+    cp.ocean_displacement = fft_ocean_active ? ocean_.displacement_view() : TextureView{};
+    cp.ocean_normal = fft_ocean_active ? ocean_.normal_foam_view() : TextureView{};
+    water_caustics_.AddToGraph(graph_, cp);
   }
 
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
@@ -3068,7 +3106,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             fft_ocean_active_ ? ocean_.displacement_view() : TextureView{},
             fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
             TextureView{}, TextureView{}, GpuBuffer{},  // water field rings: transparent pass only
-            shore_wetting_active_ ? shore_wetting_.current_view() : TextureView{});
+            shore_wetting_active_ ? shore_wetting_.current_view() : TextureView{},
+            water_caustics_active_ ? water_caustics_.current_view() : TextureView{});
 
         ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(geom_scene).view,
@@ -4161,6 +4200,7 @@ void Renderer::Shutdown() {
     ocean_.Destroy(*device_);
     water_field_.Destroy(*device_);
     shore_wetting_.Destroy(*device_);
+    water_caustics_.Destroy(*device_);
     imposters_.Destroy(*device_);
     profiler_.Shutdown();
     path_tracer_.Destroy(*device_);

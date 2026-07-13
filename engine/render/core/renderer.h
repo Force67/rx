@@ -44,6 +44,7 @@
 #include "render/geometry/ocean_fft.h"
 #include "render/geometry/water_field.h"
 #include "render/geometry/shore_wetting.h"
+#include "render/geometry/water_caustics.h"
 #include "render/geometry/imposters.h"
 #include "render/atmosphere/volumetric_fog.h"
 #include "render/pipeline/material_system.h"
@@ -502,10 +503,12 @@ class RX_RENDER_EXPORT Renderer {
   OceanFft ocean_;
   WaterField water_field_;
   ShoreWetting shore_wetting_;
+  WaterCaustics water_caustics_;
   ImposterPass imposters_;
   bool fft_ocean_active_ = false;  // maps valid + flag set this frame
   bool water_field_active_ = false;  // ring field valid + flag set this frame
   bool shore_wetting_active_ = false;  // shore wetting field valid this frame
+  bool water_caustics_active_ = false;  // caustic map valid + flag set this frame
   GpuImage ms_dummy_hiz_;  // 1x1 fallback bound to the mesh-shader cull when occlusion is off
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
   f32 pt_prev_sig_ = 0;  // lighting signature; change resets accumulation
