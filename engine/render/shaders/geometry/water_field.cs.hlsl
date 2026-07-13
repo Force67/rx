@@ -123,8 +123,11 @@ void main(uint3 tid : SV_DispatchThreadID) {
                        ? ocean_foam.SampleLevel(ocean_sampler, world / kOceanPatchSize, 0.0).w
                        : 0.0;
   float gerstner = GerstnerCrest(world, push.drift_time.w);
-  float inject = (saturate((fft_foam - 0.12) * 1.5) * 0.7 +
-                  saturate((gerstner - 0.72) * 2.5) * 0.5) * dt;
+  // Rates tuned against the 20 s equilibrium (density ~ rate * 13 * duty
+  // cycle): only genuinely pinched crests inject, or the whole sea saturates
+  // into milky bands by the time the field reaches steady state.
+  float inject = (saturate((fft_foam - 0.18) * 1.5) * 0.5 +
+                  saturate((gerstner - 0.80) * 3.0) * 0.2) * dt;
 
   // Object disturbances: a wake ripple (ring 0) plus a foam splat, both faded
   // toward the disturbance radius.
