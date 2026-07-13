@@ -46,6 +46,10 @@ class ParticleSystem {
     f32 ambient = 0.1f;
     f32 near_plane = 0.1f;
     f32 soft_fade = 0.5f;  // meters of view-z fade as a particle nears geometry
+    // Temporal jitter in ndc units, same value the frame's geometry rasterizes
+    // with. Billboards must jitter identically or the resolve makes them (and
+    // their soft-fade depth compare) swim against the rest of the frame.
+    f32 jitter[2] = {0, 0};
     // HDR additive mode (fire): particle color is radiance, drawn with an
     // additive blend instead of lit alpha.
     bool emissive = false;

@@ -24,7 +24,8 @@ struct PushData {
   float ambient;
   column_major float4x4 prev_view_proj;
   uint emissive;  // 1: hdr additive (fire) - color is radiance, no sun/ambient
-  float3 pad;
+  float2 jitter;  // ndc units, consumed by particle.vs
+  float pad;
   float4 cluster_params;  // x slice scale, y slice bias, zw tile size px
   float4 froxel_params;   // x near, y far, z enabled
 };

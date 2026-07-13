@@ -22,6 +22,8 @@ struct PushData {
   float3 sun_color;
   float ambient;
   column_major float4x4 prev_view_proj;
+  uint emissive;
+  float2 jitter;  // ndc units, applied on top of the unjittered clip pos
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -42,6 +44,10 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   float3 world = p.pos + push.cam_right * (c.x * p.size) + push.cam_up * (c.y * p.size);
   VsOut o;
   o.pos = mul(push.view_proj, float4(world, 1.0));
+  // Rasterize with the frame's temporal jitter, like every geometry pass:
+  // an unjittered billboard swims against the jittered depth/resolve grid,
+  // which flickers pixel-sized sprites and their silhouette-edge soft fade.
+  o.pos.xy += push.jitter * o.pos.w;
   o.uv = c;
   o.world_pos = world;
   o.color = p.color;
