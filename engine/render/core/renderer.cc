@@ -3473,6 +3473,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     pf.ambient = std::max(settings_.ambient, 0.15f);
     pf.near_plane = 0.1f;
     pf.soft_fade = 0.6f;
+    pf.jitter[0] = globals.jitter[0];
+    pf.jitter[1] = globals.jitter[1];
     // Lit translucency inputs: clustered lights + shadows + the fog volume.
     std::memcpy(pf.cluster_params, globals.cluster_params, sizeof(pf.cluster_params));
     pf.froxel_near = FroxelFog::kNear;

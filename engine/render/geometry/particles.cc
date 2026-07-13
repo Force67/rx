@@ -26,7 +26,8 @@ struct ParticlePush {
   f32 ambient;
   Mat4 prev_view_proj;
   u32 emissive;
-  f32 pad[3];
+  f32 jitter[2];
+  f32 pad;
   f32 cluster_params[4];
   f32 froxel_params[4];
 };
@@ -234,6 +235,8 @@ void ParticleSystem::RecordSet(PassContext& ctx, ResourceHandle depth, const Gpu
   push.froxel_params[2] = frame.froxel_enabled ? 1.0f : 0.0f;
   push.froxel_params[3] = 0.0f;
   push.emissive = emissive ? 1u : 0u;
+  push.jitter[0] = frame.jitter[0];
+  push.jitter[1] = frame.jitter[1];
   ctx.cmd->Push(push);
   ctx.cmd->Draw(4, count, 0, 0);
 }
