@@ -51,6 +51,15 @@ class WaterField {
     bool fft_ocean = false;  // crest injection samples the FFT foam vs Gerstner
     const WaterDisturbance* disturbances = nullptr;
     u32 disturbance_count = 0;
+    // Local interaction (depth-buffer ripple impulses + island obstacle
+    // boundaries). Only meaningful on ring 0; a no-op unless `interaction`.
+    bool interaction = false;
+    bool obstacle = false;             // reflect ripples off the analytic island
+    Mat4 view_proj{};                  // project each texel column to screen
+    Mat4 inv_view_proj{};              // reconstruct geometry world pos from depth
+    f32 island[4] = {0, 0, 10, 0};     // center xz, sigma, peak (obstacle terrain)
+    f32 water_level = 0.0f;            // rest surface height the band tests against
+    f32 render_size[2] = {0, 0};      // depth buffer resolution (for the depth Load)
   };
 
   bool Initialize(Device& device);
@@ -60,8 +69,14 @@ class WaterField {
   // Recenter+advect+decay, ripple wave step (ring 0), and injection, per ring.
   // `ocean_normal_foam` is the FFT normal/foam map (its .w channel), sampled for
   // crest injection when params.fft_ocean is set; pass {} for the Gerstner path.
+  // `ocean_displacement` is the FFT ocean displacement map (its .y height);
+  // interaction tests the waterline against the live swell when it is bound, and
+  // an analytic proxy otherwise. `opaque_depth` is the frame's prepass depth
+  // (always valid when the field is active — the caller must schedule this pass
+  // after the prepass writes it); it is only read when params.interaction is set.
   void AddToGraph(RenderGraph& graph, const UpdateParams& params,
-                  TextureView ocean_normal_foam);
+                  TextureView ocean_normal_foam, TextureView ocean_displacement,
+                  ResourceHandle opaque_depth);
 
   // This frame's written texture for a ring, kept in GENERAL by the compute
   // chain (bind through EnvironmentSystem::InGeneral).
@@ -82,6 +97,7 @@ class WaterField {
   PipelineHandle pipeline_;
   SamplerHandle sampler_;               // linear clamp, for the resample
   GpuImage rings_[kRingCount][2];       // ping-pong per ring
+  GpuImage mask_[2];                    // ring-0 waterline intersection band, ping-pong
   GpuBuffer params_[Device::kMaxFramesInFlight];
   GpuBuffer disturbances_[Device::kMaxFramesInFlight];
   f32 origin_[kRingCount][2] = {};      // snapped world origin xz, persisted

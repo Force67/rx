@@ -65,6 +65,50 @@ Splash particles are intentionally *not* emitted — foam injection into the fie
 covers the wake more cheaply. (If particles were added they would follow the
 additive convention: premultiplied fade into RGB, alpha = 1.)
 
+## Local interaction (depth impulses + obstacles)
+
+Setting `water_interaction` (default on, only meaningful with `water_field`) /
+env `RX_WATER_INTERACTION` / debug-UI checkbox. Makes ANY geometry crossing the
+surface ripple with no CPU disturbances, and makes ripples reflect off the beach
+instead of passing through it. Both live inside the `water_field` pass's own
+transient set (extra binding slots 4–7, all bound every dispatch; the depth
+slot is a real graph resource, the rest are the field's own GENERAL images) plus
+its push constant — no env-set slots, FrameGlobals fields, or frame flags were
+added. **The pass is scheduled after the prepass** (renderer.cc, past the
+`depth_export` write) so it can read the opaque depth; it still records after the
+FFT ocean, so crest injection samples the fresh foam.
+
+* **Depth-buffer ripples (ring 0 only, injection phase).** Each ring-0 texel's
+  water column `(x, surface, z)` is projected into the frame with `view_proj`;
+  the opaque prepass depth there is reconstructed to a world position with
+  `inv_view_proj` (the exact reversed-z convention `contact_shadow.cs.hlsl`
+  uses). Geometry that both straddles the waterline (`|geo.y − surface| < band`)
+  and sits at this column (`|geo.xz − world| < proximity`, rejecting distant
+  walls seen past the water) writes a soft **intersection band** into a small
+  ping-ponged R32F mask (recentred with the rings via the same `PrevUv`
+  resample). The band drives three things: a **bounded standing dent** the
+  surface is *pinned* toward (`lerp` to a fixed target, so it can never
+  accumulate — the previous agent's runaway came from integrating an un-signed
+  source) which the wave equation rings outward; a **swell-driven bob** velocity
+  (`mask × dSurface/dt`, zero-mean over a wave cycle) so a *static* floater keeps
+  ringing as waves lap past it; and a **motion** velocity (`mask` change between
+  frames) so a moving object rings harder. Foam is a `mask × swell-speed` RATE ×
+  dt, so the long always-active shoreline reaches a modest steady density
+  instead of saturating. The waterline `surface` rides the FFT swell (slot 7)
+  when the ocean is on, an analytic proxy otherwise. Screen-space is
+  view-dependent: off-screen / behind-camera texels **hold** their mask (no
+  injection, no clearing), so scrolling the camera never flickers the field.
+* **Obstacle boundaries (`water_interaction && shore_wetting`).** Texels whose
+  analytic terrain height (the island push values, mirroring
+  `shore_wetting.cs.hlsl`'s `TerrainHeight`) rises above the water are reflecting
+  Neumann boundaries: their ripple height/velocity is zeroed every frame, and
+  the phase-0 wave stencil substitutes the centre's own height for any neighbour
+  that is an obstacle. Rings therefore bounce off the beach instead of leaking
+  onto the island. Gated on `shore_wetting` because that is where the analytic
+  island is a defined terrain source (a real world would swap in a heightmap).
+  Debug-only `RX_WATER_OBSTACLE=0` forces just this off (leaving the wetting
+  shading on) for an isolated A/B; it is intentionally not wired to the ini/UI.
+
 ## Shading (`water.ps.hlsl`)
 
 The field is sampled once by world XZ with a ring-0-priority distance blend

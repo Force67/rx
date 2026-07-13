@@ -131,6 +131,11 @@ struct RenderSettings {
   // advects with the waves and streaks/decays instead of flickering in place,
   // plus object wakes. Off falls back to the per-frame instantaneous crest foam.
   bool water_field = true;
+  // Local water interaction: depth-buffer ripple impulses (any geometry
+  // crossing the waterline rings, no CPU disturbances needed) plus obstacle
+  // boundaries (ripples reflect off the analytic island beach instead of
+  // crossing it). Only meaningful when water_field is on.
+  bool water_interaction = true;
   // Wave-driven shoreline wetting: a camera-following world-space field that
   // darkens/smooths opaque surfaces the waves reach and dries them gradually.
   // Enabled per-scene (the water demo turns it on).
