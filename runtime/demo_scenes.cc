@@ -204,6 +204,7 @@ void DemoScenes::Shutdown() {
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (scene_hook_) scene_hook_->Emit(dt, view);
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
+  if (ship_) ship_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
   UpdateParticles(dt, view);
   if (gpu_particle_count_ > 0) {
@@ -2395,6 +2396,11 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "bubbles") {
     CreateBubbleDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "ship") {
+    ship_ = std::make_unique<ShipDemo>(ctx_);
+    ship_->Create();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));
