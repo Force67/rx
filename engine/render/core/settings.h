@@ -131,6 +131,15 @@ struct RenderSettings {
   // advects with the waves and streaks/decays instead of flickering in place,
   // plus object wakes. Off falls back to the per-frame instantaneous crest foam.
   bool water_field = true;
+  // Wave-driven shoreline wetting: a camera-following world-space field that
+  // darkens/smooths opaque surfaces the waves reach and dries them gradually.
+  // Enabled per-scene (the water demo turns it on).
+  bool shore_wetting = false;
+  f32 shore_drying_time = 28.0f;  // seconds for a wet patch to fade back to dry
+  // Analytic beach the wetting field evaluates as its terrain height source
+  // (demo): center xz, gaussian sigma (m), peak above rest water (m). See
+  // SHORELINE_WETTING.md for the height-source choice.
+  f32 shore_island[4] = {0.0f, 0.0f, 10.0f, 1.5f};
 
   bool rt_reflections = true;  // raytraced specular for opaque surfaces (needs ray query)
   f32 reflection_roughness_cutoff = 0.6f;  // above this, fall back to prefiltered ibl

@@ -39,8 +39,11 @@ struct FrameGlobals {
   float4 interior_fog_color0;  // rgb near fog colour, w near dist (m)
   float4 interior_fog_color1;  // rgb far fog colour, w far dist (m)
   float4 interior_fog_params;  // x fog power, y fog max
+  float4 shore_field;          // shoreline wetting: xy field origin xz, z 1/extent
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
+
+#include "geometry/shore_wetting.hlsli"  // ShoreWetness / ApplyShoreWetness (env slot 33)
 
 struct PointLight {
   float4 pos_radius;       // xyz position, w influence radius
@@ -740,6 +743,11 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   ApplyDecals(albedo, n, decal_rough_mult, decal_emissive, input.world_pos,
               input.sv_position.xy, 0.1 / max(input.sv_position.z, 1e-6));
 
+  // Shoreline wetting darkens the albedo here (before it feeds diffuse/f0) and
+  // the roughness/f0 below, where the waves have reached the beach.
+  float shore_wet = ShoreWetness(input.world_pos, frame.flags, frame.shore_field);
+  albedo *= lerp(1.0, 0.55, shore_wet);
+
   // glTF metallic roughness packing: g roughness, b metallic. Terrain reuses
   // this slot as a land layer, so it takes the neutral rough dielectric path.
   // Engines with separate maps (kFlagSeparateMetallic, e.g. Starfield) keep the
@@ -752,6 +760,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     mr.y = metallic_map.Sample(metallic_map_sampler, input.uv).r;
   }
   float roughness = clamp(mr.x * material.roughness_factor * decal_rough_mult, 0.045, 1.0);
+  roughness *= lerp(1.0, 0.45, shore_wet);  // a wet surface is glossier
   roughness = SpecularAaRoughness(roughness, n);
   float metallic = clamp(mr.y * material.metallic_factor, 0.0, 1.0);
 
@@ -761,6 +770,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   // Dielectric f0 from the ior (1.5 reproduces the classic 0.04).
   float dielectric_f0 = pow((material.ior - 1.0) / (material.ior + 1.0), 2.0);
   float3 f0 = lerp(dielectric_f0.xxx, albedo, metallic);
+  f0 = lerp(f0, max(f0, 0.05.xxx), shore_wet * 0.6);  // thin water film reflectance
   float3 diffuse_color = albedo * (1.0 - metallic);
 
   float3 h = normalize(l + v);
