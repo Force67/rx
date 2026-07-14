@@ -12,7 +12,8 @@ viewer runtime in place of the game.
   (`engine/render/rhi/`: vulkan, d3d12-via-vkd3d, null). HLSL shaders compiled
   to SPIR-V at build time with dxc. Feature set includes: TAA / MSAA /
   FSR3 / DLSS upscaling + FSR3 frame generation, hardware ray tracing (RT
-  shadows/AO/reflections, DDGI, ReSTIR DI), a reference path tracer, NRD
+  shadows/AO/reflections, DDGI, RCGI radiance-cache GI, ReSTIR DI), a
+  reference path tracer, NRD
   denoising, screen-space SSS, strand hair, virtual textures, virtual geometry
   (cluster-DAG LOD, gpu-driven two-pass hi-z occlusion culling, 64-bit
   visibility buffer with compute + mesh-shader rasterization, instancing),
@@ -43,6 +44,35 @@ viewer runtime in place of the game.
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`
   / `RX_SHOWCASE`), frame capture (`RX_UI_SHOT`).
+
+## Global illumination
+
+Indirect diffuse comes from one of three tiers, all fully dynamic (rx bakes
+nothing - no lightmaps, no probe bakes, no per-level GI data on disk):
+
+- **SSGI** - screen-space bounce; the raster fallback when ray query is
+  unavailable.
+- **DDGI** (default) - a single camera-following probe volume, traced and
+  blended every frame. Simple and cheap, but range-limited (its whole volume
+  is ~24 m) and it only bounces sun + emissive.
+- **RCGI** (`RX_RCGI=1`, experimental) - a cascaded radiance-cache pipeline
+  modeled on the GI id Software shipped in idTech 8: a world-space cascaded
+  light grid lights ray hits outside the frustum, hits land in a spatially
+  hashed world radiance cache that is shaded incrementally (sun + emissive +
+  clustered lights + previous-frame bounce), cascaded octahedral irradiance
+  volumes (~256 m range, one cascade updated per frame) integrate the cache,
+  and a half-res 1-ray/pixel final gather resolves per-pixel GI through a
+  three-level cache fallback (previous frame's screen radiance, then the
+  radiance cache, then the volumes) into 2-band SH, which a bilateral
+  denoise + temporal upscale turn into the indirect-diffuse term. The why:
+  DDGI's every-probe-every-frame update cannot scale its volume up, while
+  RCGI's amortized caches keep a flat ~0.2 ms world-side cost regardless of
+  range, add point/spot-light bounce, and the gather restores the per-pixel
+  contact detail probe interpolation loses - for roughly +1 ms over DDGI.
+  Design, GPU interfaces and measured costs: [RCGI.md](RCGI.md).
+
+Both probe modes need ray query; the path tracer modes (`RX_PATHTRACE*`)
+remain the ground-truth reference.
 
 ## Building
 
