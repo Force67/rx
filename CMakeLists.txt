@@ -323,6 +323,10 @@ if(RX_BUILD_TESTS)
   add_executable(camera_test test/camera_test.cc)
   target_link_libraries(camera_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME camera_test COMMAND camera_test)
+
+  add_executable(camera_rig_test test/camera_rig_test.cc)
+  target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::core)
+  add_test(NAME camera_rig_test COMMAND camera_rig_test)
 endif()
 
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a

@@ -56,6 +56,7 @@ void BeginTransition(CameraOutput& output, CameraStack& stack, ecs::Entity mode,
   stack.transition.elapsed = 0;
   stack.transition.duration = spec.duration;
   stack.transition.easing = spec.easing;
+  stack.transition.discontinuity = spec.discontinuity;
   stack.transition.active = true;
 }
 
@@ -224,10 +225,18 @@ void ResolveCameraStacks(ecs::World& world, f32 dt) {
       CutToMode(output, stack, mode_entity, *mode);
       return;
     }
-    if (output.observed_discontinuity_revision != mode->discontinuity_revision ||
-        output.view.lens.projection != mode->view.lens.projection) {
+    if (output.view.lens.projection != mode->view.lens.projection) {
       CutToMode(output, stack, mode_entity, *mode);
       return;
+    }
+    if (output.observed_discontinuity_revision != mode->discontinuity_revision) {
+      if (stack.transition.active &&
+          stack.transition.discontinuity == CameraDiscontinuityPolicy::kRetarget) {
+        output.observed_discontinuity_revision = mode->discontinuity_revision;
+      } else {
+        CutToMode(output, stack, mode_entity, *mode);
+        return;
+      }
     }
 
     if (!stack.transition.active) {

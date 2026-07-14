@@ -16,8 +16,8 @@
     },
     {
       "type": "text", "id": "subtitle", "x": 56, "y": 83, "width": 970, "height": 24,
-      "text": "Every mode is data + a plain system. Push/pop changes composition; no virtual camera hierarchy.",
-      "originalText": "Every mode is data + a plain system. Push/pop changes composition; no virtual camera hierarchy.",
+      "text": "Rig behaviors compose into modes. Push/pop changes composition; no virtual camera hierarchy.",
+      "originalText": "Rig behaviors compose into modes. Push/pop changes composition; no virtual camera hierarchy.",
       "fontSize": 17, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100,
@@ -45,7 +45,7 @@
     },
     {
       "type": "text", "id": "free_name", "x": 83, "y": 229, "width": 240, "height": 24,
-      "text": "FreeCameraMode", "originalText": "FreeCameraMode", "fontSize": 18,
+      "text": "First-person recipe", "originalText": "First-person recipe", "fontSize": 18,
       "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#1e40af", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100,
@@ -55,7 +55,7 @@
     },
     {
       "type": "text", "id": "free_detail", "x": 83, "y": 260, "width": 245, "height": 19,
-      "text": "input system writes CameraMode.view", "originalText": "input system writes CameraMode.view",
+      "text": "Anchor + Orbit + LocalOffset", "originalText": "Anchor + Orbit + LocalOffset",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100,
@@ -73,7 +73,7 @@
     },
     {
       "type": "text", "id": "follow_name", "x": 83, "y": 344, "width": 240, "height": 24,
-      "text": "FollowCameraMode", "originalText": "FollowCameraMode", "fontSize": 18,
+      "text": "Third-person recipe", "originalText": "Third-person recipe", "fontSize": 18,
       "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#1e3a5f", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100,
@@ -83,7 +83,7 @@
     },
     {
       "type": "text", "id": "follow_detail", "x": 83, "y": 375, "width": 245, "height": 19,
-      "text": "target system writes CameraMode.view", "originalText": "target system writes CameraMode.view",
+      "text": "Anchor + Boom + Framing + Obstruction", "originalText": "Anchor + Boom + Framing + Obstruction",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#374151", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100,
@@ -111,7 +111,7 @@
     },
     {
       "type": "text", "id": "cinematic_detail", "x": 83, "y": 490, "width": 245, "height": 19,
-      "text": "track sampler writes CameraMode.view", "originalText": "track sampler writes CameraMode.view",
+      "text": "custom producer writes CameraMode.view", "originalText": "custom producer writes CameraMode.view",
       "fontSize": 12, "fontFamily": 3, "textAlign": "left", "verticalAlign": "top",
       "strokeColor": "#64748b", "backgroundColor": "transparent", "fillStyle": "solid",
       "strokeWidth": 1, "strokeStyle": "solid", "roughness": 0, "opacity": 100,
