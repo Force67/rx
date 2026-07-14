@@ -5,14 +5,18 @@
 
 #include "core/log.h"
 #include "render/gi/raytracing.h"
+#include "render/gi/sdf_clipmap.h"
+#include "render/rhi/bindings.h"
 #include "shaders/rcgi_args_cs_hlsl.h"
 #include "shaders/rcgi_blend_cs_hlsl.h"
 #include "shaders/rcgi_border_cs_hlsl.h"
 #include "shaders/rcgi_cache_shade_cs_hlsl.h"
+#include "shaders/rcgi_cache_shade_sw_cs_hlsl.h"
 #include "shaders/rcgi_denoise_cs_hlsl.h"
 #include "shaders/rcgi_gather_cs_hlsl.h"
 #include "shaders/rcgi_history_cs_hlsl.h"
 #include "shaders/rcgi_probe_trace_cs_hlsl.h"
+#include "shaders/rcgi_probe_trace_sw_cs_hlsl.h"
 #include "shaders/rcgi_resolve_cs_hlsl.h"
 #include "shaders/rcgi_upscale_cs_hlsl.h"
 
@@ -100,12 +104,12 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
 
 std::unique_ptr<RcgiSystem> RcgiSystem::Create(Device& device, TextureView sky_view,
                                                SamplerHandle sky_sampler,
-                                               BindlessRegistry& bindless) {
+                                               BindlessRegistry& bindless, bool rt_available) {
   auto rcgi = std::unique_ptr<RcgiSystem>(new RcgiSystem(device));
   rcgi->sky_view_ = sky_view;
   rcgi->sky_sampler_ = sky_sampler;
   rcgi->bindless_ = &bindless;
-  if (!rcgi->CreateResources() || !rcgi->CreatePipelines()) return nullptr;
+  if (!rcgi->CreateResources() || !rcgi->CreatePipelines(rt_available)) return nullptr;
   return rcgi;
 }
 
@@ -184,7 +188,54 @@ bool RcgiSystem::CreateResources() {
   return true;
 }
 
-bool RcgiSystem::CreatePipelines() {
+bool RcgiSystem::CreatePipelines(bool rt_available) {
+  rt_pipelines_ = rt_available;
+  // Software SDF-clipmap descriptor set (set 1) shared by both sw variants:
+  // {0 sdf globals UBO, 1..3 distance/albedo/emissive Texture3D, 4 sampler}.
+  const PipelineBindings kSdfSet{.slots = {{0, BindingType::kUniformBuffer},
+                                           {1, BindingType::kSampledImage},
+                                           {2, BindingType::kSampledImage},
+                                           {3, BindingType::kSampledImage},
+                                           {4, BindingType::kSampler}}};
+  // Software probe trace: hardware set 0 minus the accel-struct slot (1), plus
+  // the SDF set. Contains no RayQuery, so it creates on non-ray-query devices.
+  probe_trace_sw_pipeline_ = device_.CreateComputePipeline({
+      .shader = RX_SHADER(k_rcgi_probe_trace_sw_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kStorageImage},
+                          {2, BindingType::kUniformBuffer},
+                          {3, BindingType::kStorageBuffer},
+                          {4, BindingType::kStorageBuffer},
+                          {5, BindingType::kStorageBuffer},
+                          {6, BindingType::kCombinedTextureSampler}}},
+               kSdfSet},
+      .push_constant_size = sizeof(RotationPush),
+      .debug_name = "rcgi_probe_trace_sw",
+  });
+  // Software cache shade: hardware set 0 minus the accel-struct slot (5), plus
+  // the SDF set. No bindless material tables (colour comes from the entry).
+  cache_shade_sw_pipeline_ = device_.CreateComputePipeline({
+      .shader = RX_SHADER(k_rcgi_cache_shade_sw_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kUniformBuffer},
+                          {1, BindingType::kStorageBuffer},
+                          {2, BindingType::kStorageBuffer},
+                          {3, BindingType::kStorageBuffer},
+                          {4, BindingType::kStorageBuffer},
+                          {6, BindingType::kStorageBuffer},
+                          {7, BindingType::kStorageBuffer},
+                          {8, BindingType::kStorageBuffer},
+                          {9, BindingType::kUniformBuffer},
+                          {10, BindingType::kCombinedTextureSampler},
+                          {11, BindingType::kCombinedTextureSampler}}},
+               kSdfSet},
+      .push_constant_size = 0,
+      .debug_name = "rcgi_cache_shade_sw",
+  });
+  if (!probe_trace_sw_pipeline_ || !cache_shade_sw_pipeline_) {
+    RX_ERROR("rcgi software pipeline creation failed");
+    return false;
+  }
+
+  if (rt_available) {
   probe_trace_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_probe_trace_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
@@ -198,6 +249,7 @@ bool RcgiSystem::CreatePipelines() {
       .push_constant_size = sizeof(RotationPush),
       .debug_name = "rcgi_probe_trace",
   });
+  }
   args_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_args_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
@@ -205,6 +257,7 @@ bool RcgiSystem::CreatePipelines() {
       .push_constant_size = 0,
       .debug_name = "rcgi_args",
   });
+  if (rt_available) {
   cache_shade_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_cache_shade_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kUniformBuffer},
@@ -223,6 +276,7 @@ bool RcgiSystem::CreatePipelines() {
       .push_constant_size = 0,
       .debug_name = "rcgi_cache_shade",
   });
+  }
   blend_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_blend_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
@@ -250,6 +304,10 @@ bool RcgiSystem::CreatePipelines() {
       .push_constant_size = sizeof(ResolvePush),
       .debug_name = "rcgi_resolve",
   });
+  // M2 gather chain (ray-query gather + its denoise/upscale/history filters):
+  // only used by the hardware resolve path, so skip on non-ray-query devices
+  // (software mode forces the probes-only resolve below).
+  if (rt_available) {
   gather_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_gather_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
@@ -307,9 +365,12 @@ bool RcgiSystem::CreatePipelines() {
       .push_constant_size = sizeof(HistoryPush),
       .debug_name = "rcgi_history",
   });
-  if (!probe_trace_pipeline_ || !args_pipeline_ || !cache_shade_pipeline_ || !blend_pipeline_ ||
-      !border_pipeline_ || !resolve_pipeline_ || !gather_pipeline_ || !denoise_pipeline_ ||
-      !upscale_pipeline_ || !history_pipeline_) {
+  }  // rt_available (gather chain)
+  bool shared_ok = args_pipeline_ && blend_pipeline_ && border_pipeline_ && resolve_pipeline_;
+  bool hw_ok = !rt_available || (probe_trace_pipeline_ && cache_shade_pipeline_ &&
+                                 gather_pipeline_ && denoise_pipeline_ && upscale_pipeline_ &&
+                                 history_pipeline_);
+  if (!shared_ok || !hw_ok) {
     RX_ERROR("rcgi pipeline creation failed");
     return false;
   }
@@ -367,10 +428,11 @@ bool RcgiSystem::EnsureScreenResources(Extent2D extent) {
   return true;
 }
 
-void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
+void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u32 tlas_slot,
                             const LightGrid& light_grid, const GpuBuffer& lights,
                             const Vec3& camera, const Vec3& sun_direction, f32 sun_intensity,
-                            const Vec3& sun_color, u32 frame_index, bool async) {
+                            const Vec3& sun_color, u32 frame_index, bool async,
+                            const SdfClipmap* sdf) {
   // A camera teleport (bigger than cascade 0's extent) invalidates the whole
   // world cache; zero it before this frame's inserts.
   f32 jump = std::sqrt((camera.x - last_camera_.x) * (camera.x - last_camera_.x) +
@@ -459,11 +521,23 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   bool do_clear = clear_hash_;
   clear_hash_ = false;
 
+  const bool software = sdf != nullptr;
   graph.AddPass(
       "rcgi", [async](RenderGraph::PassBuilder& b) { if (async) b.Async(); },
-      [this, &raytracing, tlas_slot, &light_grid, &lights, trace_push, frame_index, current, reset,
-       do_clear](PassContext& ctx) {
+      [this, raytracing, tlas_slot, &light_grid, &lights, trace_push, frame_index, current, reset,
+       do_clear, software, sdf](PassContext& ctx) {
         const GpuBuffer& globals = globals_buffers_[frame_index % 2];
+        // Software mode binds the SDF clipmap resources into set 1 for both the
+        // probe trace and cache shade sw variants (mirrors sdf_debug's wiring).
+        auto bind_sdf = [&](u32 set) {
+          const GpuBuffer& sdf_globals = sdf->globals(frame_index);
+          ctx.cmd->BindTransient(
+              set, {Bind::Uniform(0, sdf_globals, 0, sdf_globals.size),
+                    InGeneral(Bind::Sampled(1, sdf->distance_volume())),
+                    InGeneral(Bind::Sampled(2, sdf->albedo_volume())),
+                    InGeneral(Bind::Sampled(3, sdf->emissive_volume())),
+                    Bind::Sampler(4, sdf->sampler())});
+        };
 
         // First touch transitions the atlases from UNDEFINED to GENERAL.
         if (!atlas_initialized_) {
@@ -490,15 +564,27 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
         ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeReadWrite);
 
         // Probe trace: register hits into the cache, sky into the rays buffer.
-        ctx.cmd->BindPipeline(probe_trace_pipeline_);
-        ctx.cmd->BindTransient(
-            0, {Bind::Storage(0, rays_), Bind::Accel(1, raytracing.tlas(tlas_slot)),
-                Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
-                Bind::StorageBuffer(3, state_, 0, state_.size),
-                Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
-                Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
-                Bind::Combined(6, sky_view_, sky_sampler_)});
-        ctx.cmd->BindSet(1, bindless_->set());
+        // Software mode sphere-traces the SDF clipmap (no TLAS, no bindless).
+        if (software) {
+          ctx.cmd->BindPipeline(probe_trace_sw_pipeline_);
+          ctx.cmd->BindTransient(
+              0, {Bind::Storage(0, rays_), Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
+                  Bind::StorageBuffer(3, state_, 0, state_.size),
+                  Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
+                  Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
+                  Bind::Combined(6, sky_view_, sky_sampler_)});
+          bind_sdf(1);
+        } else {
+          ctx.cmd->BindPipeline(probe_trace_pipeline_);
+          ctx.cmd->BindTransient(
+              0, {Bind::Storage(0, rays_), Bind::Accel(1, raytracing->tlas(tlas_slot)),
+                  Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
+                  Bind::StorageBuffer(3, state_, 0, state_.size),
+                  Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
+                  Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
+                  Bind::Combined(6, sky_view_, sky_sampler_)});
+          ctx.cmd->BindSet(1, bindless_->set());
+        }
         ctx.cmd->Push(trace_push);
         ctx.cmd->Dispatch((kRaysPerProbe + 31) / 32, kProbeCount, 1);
 
@@ -512,22 +598,44 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kIndirectArgs);
 
         // Cache shade: one thread per active cell, resolve + light + store.
-        ctx.cmd->BindPipeline(cache_shade_pipeline_);
-        ctx.cmd->BindTransient(
-            0, {Bind::Uniform(0, globals, 0, sizeof(RcgiGlobals)),
-                Bind::StorageBuffer(1, state_, 0, state_.size),
-                Bind::StorageBuffer(2, radiance_, 0, radiance_.size),
-                Bind::StorageBuffer(3, active_list_, 0, active_list_.size),
-                Bind::StorageBuffer(4, active_meta_, 0, active_meta_.size),
-                Bind::Accel(5, raytracing.tlas(tlas_slot)),
-                Bind::StorageBuffer(6, lights, 0, lights.size),
-                Bind::StorageBuffer(7, light_grid.counts_buffer(), 0,
-                                    light_grid.counts_buffer().size),
-                Bind::StorageBuffer(8, light_grid.ids_buffer(), 0, light_grid.ids_buffer().size),
-                Bind::Uniform(9, light_grid.params_buffer(frame_index), 0, LightGrid::params_size()),
-                InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
-                InGeneral(Bind::Combined(11, visibility_.view, sampler_))});
-        ctx.cmd->BindSet(1, bindless_->set());
+        // Software mode reads surface colour from the entry (packed by the sw
+        // probe trace) and traces sun occlusion against the SDF clipmap.
+        if (software) {
+          ctx.cmd->BindPipeline(cache_shade_sw_pipeline_);
+          ctx.cmd->BindTransient(
+              0, {Bind::Uniform(0, globals, 0, sizeof(RcgiGlobals)),
+                  Bind::StorageBuffer(1, state_, 0, state_.size),
+                  Bind::StorageBuffer(2, radiance_, 0, radiance_.size),
+                  Bind::StorageBuffer(3, active_list_, 0, active_list_.size),
+                  Bind::StorageBuffer(4, active_meta_, 0, active_meta_.size),
+                  Bind::StorageBuffer(6, lights, 0, lights.size),
+                  Bind::StorageBuffer(7, light_grid.counts_buffer(), 0,
+                                      light_grid.counts_buffer().size),
+                  Bind::StorageBuffer(8, light_grid.ids_buffer(), 0, light_grid.ids_buffer().size),
+                  Bind::Uniform(9, light_grid.params_buffer(frame_index), 0,
+                                LightGrid::params_size()),
+                  InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
+                  InGeneral(Bind::Combined(11, visibility_.view, sampler_))});
+          bind_sdf(1);
+        } else {
+          ctx.cmd->BindPipeline(cache_shade_pipeline_);
+          ctx.cmd->BindTransient(
+              0, {Bind::Uniform(0, globals, 0, sizeof(RcgiGlobals)),
+                  Bind::StorageBuffer(1, state_, 0, state_.size),
+                  Bind::StorageBuffer(2, radiance_, 0, radiance_.size),
+                  Bind::StorageBuffer(3, active_list_, 0, active_list_.size),
+                  Bind::StorageBuffer(4, active_meta_, 0, active_meta_.size),
+                  Bind::Accel(5, raytracing->tlas(tlas_slot)),
+                  Bind::StorageBuffer(6, lights, 0, lights.size),
+                  Bind::StorageBuffer(7, light_grid.counts_buffer(), 0,
+                                      light_grid.counts_buffer().size),
+                  Bind::StorageBuffer(8, light_grid.ids_buffer(), 0, light_grid.ids_buffer().size),
+                  Bind::Uniform(9, light_grid.params_buffer(frame_index), 0,
+                                LightGrid::params_size()),
+                  InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
+                  InGeneral(Bind::Combined(11, visibility_.view, sampler_))});
+          ctx.cmd->BindSet(1, bindless_->set());
+        }
         ctx.cmd->DispatchIndirect(dispatch_args_, 0);
 
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
@@ -797,11 +905,11 @@ void RcgiSystem::AddHistoryCopy(RenderGraph& graph, ResourceHandle lit_color,
 
 RcgiSystem::~RcgiSystem() {
   DestroyScreenResources();
-  for (PipelineHandle* p : {&probe_trace_pipeline_, &args_pipeline_, &cache_shade_pipeline_,
-                            &blend_pipeline_, &border_pipeline_, &resolve_pipeline_,
-                            &gather_pipeline_, &denoise_pipeline_, &upscale_pipeline_,
-                            &history_pipeline_}) {
-    device_.DestroyPipeline(*p);
+  for (PipelineHandle* p : {&probe_trace_pipeline_, &probe_trace_sw_pipeline_, &args_pipeline_,
+                            &cache_shade_pipeline_, &cache_shade_sw_pipeline_, &blend_pipeline_,
+                            &border_pipeline_, &resolve_pipeline_, &gather_pipeline_,
+                            &denoise_pipeline_, &upscale_pipeline_, &history_pipeline_}) {
+    if (*p) device_.DestroyPipeline(*p);
     *p = {};
   }
   device_.DestroyImage(irradiance_);

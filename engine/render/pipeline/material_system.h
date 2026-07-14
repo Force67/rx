@@ -144,6 +144,16 @@ class MaterialSystem {
   // Bindless material record index for ray hit shading; 0 (the default
   // material) for unknown hashes.
   u32 bindless_material(u64 material_hash) const;
+
+  // Flat surface colour factors (base-colour rgb + emissive rgb) retained
+  // CPU-side for coarse GI proxies (the SDF clipmap's per-mesh average colour).
+  // Texture averaging is out of scope, so this is the factor only. Unknown
+  // hashes return the default material's grey albedo, zero emissive.
+  struct MaterialColor {
+    f32 albedo[3] = {0.6f, 0.6f, 0.65f};
+    f32 emissive[3] = {0, 0, 0};
+  };
+  MaterialColor material_color(u64 material_hash) const;
   // Bindless texture-table index for an uploaded (sRGB) texture, or
   // BindlessRegistry::kInvalidIndex when absent. Used to texture particles.
   u32 bindless_texture(u64 texture_hash) const;
@@ -261,6 +271,7 @@ class MaterialSystem {
   base::UnorderedMap<u64, u8> water_;        // material hash -> is_water
   base::UnorderedMap<u64, u8> effects_;      // 0 none, 1 alpha effect, 2 additive effect
   base::UnorderedMap<u64, u32> bindless_materials_;  // material hash -> registry index
+  base::UnorderedMap<u64, MaterialColor> colors_;    // material hash -> flat colour factors
   BindingLayoutHandle set_layout_;
   BindingSetHandle default_set_;
   u64 budget_bytes_ = 0;    // 0 = unlimited

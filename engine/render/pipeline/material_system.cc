@@ -483,6 +483,10 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
   asset::AlphaMode mode =
       material.transmission > 0.0f ? asset::AlphaMode::kBlend : material.alpha_mode;
   blend_modes_.insert(key, static_cast<u8>(mode));
+  MaterialColor color;
+  std::memcpy(color.albedo, material.base_color_factor, sizeof(f32) * 3);
+  std::memcpy(color.emissive, material.emissive_factor, sizeof(f32) * 3);
+  colors_.insert(key, color);
   if (material.is_water) water_.insert(key, 1);
   if (material.effect) effects_.insert(key, material.effect_additive ? 2 : 1);
   if (registry_) {
@@ -726,6 +730,11 @@ bool MaterialSystem::is_water(u64 material_hash) const {
 u32 MaterialSystem::bindless_material(u64 material_hash) const {
   if (const u32* index = bindless_materials_.find(material_hash)) return *index;
   return 0;
+}
+
+MaterialSystem::MaterialColor MaterialSystem::material_color(u64 material_hash) const {
+  if (const MaterialColor* color = colors_.find(material_hash)) return *color;
+  return {};
 }
 
 u32 MaterialSystem::bindless_texture(u64 texture_hash) const {

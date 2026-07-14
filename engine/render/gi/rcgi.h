@@ -12,6 +12,7 @@
 namespace rx::render {
 
 class RayTracingContext;
+class SdfClipmap;
 
 // RCGI world side (idTech8-style radiance-cached GI, SIGGRAPH 2025). Owns the
 // cascaded irradiance/visibility probe atlases, the spatially-hashed world
@@ -43,8 +44,15 @@ class RcgiSystem {
     f32 energy_scale = 1.0f;
   };
 
+  // `rt_available` selects which trace pipelines are built. When true, the
+  // hardware ray-query pipelines (probe trace, cache shade, gather chain) plus
+  // the software SDF variants are all created (so RX_RCGI_SW A/B works on RT
+  // hardware). When false, ONLY the software variants + the shared/probes-only
+  // pipelines are created -- a SPIR-V module declaring RayQuery can fail pipeline
+  // creation on a non-ray-query device, so the hw pipelines are skipped entirely.
   static std::unique_ptr<RcgiSystem> Create(Device& device, TextureView sky_view,
-                                            SamplerHandle sky_sampler, BindlessRegistry& bindless);
+                                            SamplerHandle sky_sampler, BindlessRegistry& bindless,
+                                            bool rt_available);
   ~RcgiSystem();
 
   RcgiSystem(const RcgiSystem&) = delete;
@@ -56,10 +64,16 @@ class RcgiSystem {
   // snaps the cascade, uploads the globals UBO, and records trace/args/shade/
   // blend/border. `light_grid` must have been updated earlier in the graph;
   // `lights` is the same StructuredBuffer<Light> the cluster/light-grid consume.
-  void AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
+  //
+  // When `sdf` is non-null the world side runs in SOFTWARE mode: the probe trace
+  // and cache shade sphere-trace the SDF clipmap instead of the TLAS (no ray
+  // query), and `raytracing` may be null. The caller must have composed the
+  // clipmap earlier in the graph this frame. When `sdf` is null the hardware
+  // (ray-query) path runs and `raytracing` must be valid.
+  void AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u32 tlas_slot,
                   const LightGrid& light_grid, const GpuBuffer& lights, const Vec3& camera,
                   const Vec3& sun_direction, f32 sun_intensity, const Vec3& sun_color,
-                  u32 frame_index, bool async = false);
+                  u32 frame_index, bool async = false, const SdfClipmap* sdf = nullptr);
 
   // M1 filler: full-res irradiance from the cascades, sampled per screen pixel.
   // Reads the prepass depth + oct normals; returns the "rcgi_irradiance"
@@ -114,7 +128,7 @@ class RcgiSystem {
 
   explicit RcgiSystem(Device& device) : device_(device) {}
   bool CreateResources();
-  bool CreatePipelines();
+  bool CreatePipelines(bool rt_available);
   void DestroyScreenResources();
   Vec3 SnapOrigin(const Vec3& camera, u32 cascade) const;
 
@@ -137,8 +151,10 @@ class RcgiSystem {
   GpuBuffer globals_buffers_[2]; // host visible, ping-pong by frame parity
 
   PipelineHandle probe_trace_pipeline_;
+  PipelineHandle probe_trace_sw_pipeline_;   // SDF-clipmap software variant
   PipelineHandle args_pipeline_;
   PipelineHandle cache_shade_pipeline_;
+  PipelineHandle cache_shade_sw_pipeline_;   // SDF-clipmap software variant
   PipelineHandle blend_pipeline_;
   PipelineHandle border_pipeline_;
   PipelineHandle resolve_pipeline_;
@@ -162,6 +178,7 @@ class RcgiSystem {
   ResourceHandle screen_color_handle_{};
   ResourceHandle screen_depth_handle_{};
 
+  bool rt_pipelines_ = false;  // hardware ray-query pipelines were created
   bool atlas_initialized_ = false;
   bool history_valid_ = false;
   bool screen_history_valid_ = false;

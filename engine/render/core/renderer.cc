@@ -67,6 +67,14 @@ base::Option<bool> RestirDiOpt{"restir.di", false, "RX_RESTIR_DI"};
 base::Option<bool> RcgiOpt{"rcgi", false, "RX_RCGI"};
 // A/B debug: use the M1 per-pixel cascade resolve instead of the M2 gather chain.
 base::Option<bool> RcgiProbesOnlyOpt{"rcgi.probes_only", false, "RX_RCGI_PROBES_ONLY"};
+// Force RCGI's world side through the software SDF tracer (no ray query). Implied
+// on non-ray-query devices; on RT hardware this is the A/B toggle vs the TLAS
+// path. Implies the SDF clipmap cost (RX_SDF is auto-enabled when RCGI needs it).
+base::Option<bool> RcgiSwOpt{"rcgi.software", false, "RX_RCGI_SW"};
+// SDF software-trace infrastructure (S1): mesh SDFs + global SDF clipmap. Off by
+// default; RX_SDF_DEBUG raymarches the clipmap (1 = distance field, 2 = albedo).
+base::Option<bool> SdfOpt{"sdf", false, "RX_SDF"};
+base::Option<int> SdfDebugOpt{"sdf.debug", 0, "RX_SDF_DEBUG"};
 base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
 // 0 shaded, 1 cluster tint, 2 lod tint, 3 sw/hw raster path.
 base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
@@ -457,7 +465,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
                                *bindless_);
     if (!ddgi_) return false;
     // RCGI (idTech8-style radiance-cached GI) is ~85 MiB and off by default, so
-    // it is created lazily on first activation (ApplySettings), not here.
+    // it is created lazily on first activation (ApplySettings), not here. Its
+    // software SDF path also makes it available on non-ray-query devices.
     water_ = WaterPass::Create(*device_, kSceneColorFormat, kMotionFormat, kDepthFormat,
                                mesh_pipeline_->set_layout(), material_system_->set_layout(),
                                environment_->env_set_layout(), bindless_->set_layout());
@@ -660,6 +669,29 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (Snow.overridden()) settings_.precip_snow = Snow;
   if (Aurora.overridden()) settings_.aurora = Aurora;
 
+  // RCGI software mode: on a device without ray query (or when RX_RCGI_SW forces
+  // it for A/B on RT hardware), RCGI's world side runs through the SDF clipmap
+  // tracer, which needs the SDF infrastructure. SDF availability is an IMMUTABLE
+  // STARTUP decision, NOT a live settings bit: the CPU mesh positions/indices used
+  // to voxelise mesh SDFs are not retained after upload, so there is no way to
+  // backfill the field on a later toggle, and a quality preset applied live must
+  // not be able to turn a seeded path off. Decide want_sdf once here from the
+  // startup desc flag, the SDF-implying envs (RX_SDF / RX_RCGI_SW), or a non-RT
+  // RCGI request; it is gated on creation success into `sdf_available_` below and
+  // stays fixed for the session. RCGI-software therefore implies the SDF memory +
+  // compose cost documented in SDF_TRACE.md. (A late programmatic rcgi enable on a
+  // non-RT device that seeded nothing at startup gets no software path;
+  // ApplySettings logs that once.)
+  if (RcgiSwOpt.overridden()) rcgi_force_software_ = RcgiSwOpt;
+  const bool want_sdf = desc.software_gi || SdfOpt.get() || rcgi_force_software_ ||
+                        (settings_.rcgi && !rt_available_);
+
+  // RCGI is created lazily on first activation (ApplySettings), covering both
+  // the RT (hw + sw pipelines, so RX_RCGI_SW A/B works) and the non-ray-query
+  // software-only path once the SDF clipmap is up. The SDF infrastructure below
+  // is what makes the software path possible, but the ~85 MiB RCGI cache itself
+  // is deferred so a device that never enables it pays nothing.
+
   auto t_batch1 = std::chrono::steady_clock::now();
   if (!pipeline_batch.End()) {
     RX_ERROR("pipeline batch reported failed compilations");
@@ -669,6 +701,28 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   RX_INFO("renderer init: {} ms (pipeline batch joined in {} ms)",
            std::chrono::duration_cast<std::chrono::milliseconds>(t_batch1 - t_batch0).count(),
            std::chrono::duration_cast<std::chrono::milliseconds>(t_batch2 - t_batch1).count());
+
+  // SDF software-trace infrastructure (RX_SDF) is created AFTER the pipeline
+  // batch is joined, on purpose: it is an OPTIONAL, non-fatal path, but inside a
+  // batch Create*Pipeline returns a placeholder handle that only fails at
+  // EndPipelineBatch -- a failed SDF pipeline would then abort the whole renderer
+  // above instead of degrading. Built immediately here, a pipeline (or 3D-storage
+  // -image) failure surfaces at this call site and is handled non-fatally: log,
+  // tear the SDF systems down, leave the software path unavailable. (RcgiSystem's
+  // _sw pipelines are likewise created outside any batch -- lazily in
+  // ApplySettings during RenderFrame -- so a failure there returns a null system
+  // and is handled non-fatally at that call site too.)
+  if (want_sdf) {
+    sdf_scene_ = std::make_unique<SdfScene>(*device_);
+    sdf_clipmap_ = std::make_unique<SdfClipmap>(*device_);
+    if (!sdf_clipmap_->Initialize()) {
+      RX_WARN("sdf: clipmap unavailable, disabling the SDF path");
+      sdf_clipmap_.reset();
+      sdf_scene_.reset();
+    } else {
+      sdf_available_ = true;  // immutable for the session once creation succeeds
+    }
+  }
   return true;
 }
 
@@ -956,11 +1010,25 @@ void Renderer::ApplySettings() {
   // Lazily create RCGI (~85 MiB) the first time it is switched on, so a device
   // that never enables it pays nothing and creation failure is non-fatal (the
   // feature just stays unavailable). Created once, kept across toggle-off so a
-  // rapid on/off does not thrash the allocation. Needs bindless for cache shading.
-  if (settings_.rcgi && rt_available_ && bindless_ && environment_ && !rcgi_ &&
-      !rcgi_create_failed_) {
+  // rapid on/off does not thrash the allocation. Needs bindless for cache
+  // shading. Available on RT hardware (hw + sw pipelines so RX_RCGI_SW A/B works)
+  // OR on a non-ray-query device once the SDF clipmap is up (software-only
+  // pipelines); `rt_available_` selects which pipelines are built.
+  bool rcgi_sw_possible = sdf_available_ && sdf_clipmap_ != nullptr;
+  // Honest failure for a late/programmatic rcgi enable on a non-RT device that
+  // never seeded the SDF path at startup: the software tracer cannot come up
+  // (SDF availability is a startup decision -- see Initialize / SDF_TRACE.md), so
+  // say so once rather than silently leaving rcgi doing nothing. (The debug-UI
+  // rcgi toggle is already greyed out when the device lacks ray query.)
+  if (settings_.rcgi && !rt_available_ && !rcgi_sw_possible && !rcgi_sw_unavailable_logged_) {
+    RX_WARN("rcgi: requested but the software SDF path was not enabled at startup; set RX_RCGI "
+            "(or RX_SDF) before launch on a non-ray-query device. Ignoring.");
+    rcgi_sw_unavailable_logged_ = true;
+  }
+  if (settings_.rcgi && (rt_available_ || rcgi_sw_possible) && bindless_ && environment_ &&
+      !rcgi_ && !rcgi_create_failed_) {
     rcgi_ = RcgiSystem::Create(*device_, environment_->sky_view(), environment_->sampler(),
-                               *bindless_);
+                               *bindless_, rt_available_);
     if (rcgi_ && light_grid_.Initialize(*device_)) {
       RX_INFO("rcgi: created on first activation (~85 MiB)");
     } else {
@@ -1317,6 +1385,66 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // Pure transparency never enters the tlas: water occluding rtao and
   // shadow rays would black out everything under it.
   if (raytracing_ && !gpu.all_blend && include_rt) raytracing_->BuildBlas(mesh_key, gpu);
+  // SDF: generate a per-mesh signed distance field from the lod-0 CPU geometry.
+  // The SDF stands in for RCGI's realtime visibility rays (RX_RAY_MASK_REALTIME),
+  // so it must mirror that TLAS set exactly: skip no_rt fill geometry entirely
+  // (never in the realtime tlas), and build the field from only the OPAQUE
+  // submesh triangle ranges (blended submeshes -- glass/water/effects -- are
+  // excluded from the tlas and must not turn the SDF opaque). Average albedo /
+  // emissive over the opaque submeshes only, matching the geometry that fed it.
+  // Eligibility can flip on a same-key re-upload (opaque mesh replaced by an all-
+  // blend / no_rt one, or one that lost its opaque submeshes). When it does the
+  // block below never calls RegisterMesh, so the previous field must be dropped
+  // explicitly or it lingers as a stale occluder -- Remove covers every such
+  // replacement path (no-op when nothing was registered).
+  bool sdf_eligible = sdf_scene_ && !gpu.all_blend && !gpu.no_rt;
+  if (sdf_eligible) {
+    SdfScene::MeshInput in{};
+    in.positions = lod.vertices.empty() ? nullptr : lod.vertices[0].position;
+    in.position_stride = static_cast<u32>(sizeof(asset::Vertex));
+    in.vertex_count = static_cast<u32>(lod.vertices.size());
+    // Concatenate the opaque submeshes' index ranges (their index_offset is
+    // absolute in the shared buffer; lod 0's base is 0, so it indexes lod.indices).
+    base::Vector<u32> opaque_indices;
+    f32 albedo[3] = {0, 0, 0}, emissive[3] = {0, 0, 0};
+    u64 weight = 0;
+    for (const GpuSubmesh& sm : gpu.submeshes) {
+      if (sm.blend || sm.index_count == 0) continue;
+      if (!lod.indices.empty()) {
+        for (u32 e = 0; e < sm.index_count; ++e) {
+          u32 gi = sm.index_offset + e;
+          if (gi < lod.indices.size()) opaque_indices.push_back(lod.indices[gi]);
+        }
+      }
+      if (material_system_) {
+        MaterialSystem::MaterialColor mc = material_system_->material_color(sm.material);
+        u64 w = std::max<u64>(sm.index_count, 1);
+        for (int k = 0; k < 3; ++k) {
+          albedo[k] += mc.albedo[k] * static_cast<f32>(w);
+          emissive[k] += mc.emissive[k] * static_cast<f32>(w);
+        }
+        weight += w;
+      }
+    }
+    in.indices = opaque_indices.empty() ? nullptr : opaque_indices.data();
+    in.index_count = static_cast<u32>(opaque_indices.size());
+    if (weight > 0) {
+      for (int k = 0; k < 3; ++k) {
+        in.albedo[k] = albedo[k] / static_cast<f32>(weight);
+        in.emissive[k] = emissive[k] / static_cast<f32>(weight);
+      }
+    }
+    // Only register when there is opaque indexed geometry to voxelise (an all-
+    // blend mesh is already excluded above; a non-indexed opaque mesh is not a
+    // shape we generate SDFs for here). If there is none, this is not eligible
+    // after all -- drop any prior field below.
+    if (in.positions && in.index_count > 0)
+      sdf_scene_->RegisterMesh(mesh_key, in);
+    else
+      sdf_eligible = false;
+  }
+  // Any ineligible replacement (or first upload) removes a stale SDF for this key.
+  if (sdf_scene_ && !sdf_eligible) sdf_scene_->Remove(mesh_key);
   // Foliage uploaded while path tracing was off got no blas/geometry above; flag a
   // catch-up so toggling path tracing on later still pulls it into the tlas
   // (BuildFrameGraph runs EnsureRayTracingGeometry on the next path-traced frame).
@@ -1800,9 +1928,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   u32 frame_slot = frame_index_ % kFramesInFlight;
   bool rt_shadows = rt_available_ && settings_.rt_shadows;
   bool rtao_active = rt_available_ && settings_.rtao;
-  // RCGI takes over the indirect-diffuse path (DDGI + SSGI) when on.
-  bool rcgi_active =
-      rcgi_ && settings_.rcgi && settings_.ibl && rt_available_ && bindless_ != nullptr;
+  // RCGI takes over the indirect-diffuse path (DDGI + SSGI) when on. It is
+  // available with hardware ray query OR the software SDF clipmap tracer.
+  bool sdf_ready = sdf_clipmap_ && sdf_clipmap_->ready() && sdf_available_;
+  bool rcgi_active = rcgi_ && settings_.rcgi && settings_.ibl && bindless_ != nullptr &&
+                     (rt_available_ || sdf_ready);
+  // Software mode: forced by a non-ray-query device or RX_RCGI_SW (A/B on RT
+  // hardware). Needs the SDF clipmap; the world side then traces the clipmap and
+  // the resolve is forced to the probes-only path (the M2 gather is ray-query).
+  bool rcgi_software = rcgi_active && sdf_ready && (!rt_available_ || rcgi_force_software_);
+  bool rcgi_probes_only = RcgiProbesOnlyOpt || rcgi_software;
   bool ddgi_active = ddgi_ && settings_.ddgi && settings_.ibl && !rcgi_active;
   bool reflections_active = rt_available_ && settings_.rt_reflections && bindless_ != nullptr;
   // The ray-query fragment variant serves both shadows and reflections.
@@ -1847,8 +1982,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // When the tlas is consulted for shading, the rasterized surface must match the
   // blas (built at lod 0), or ao/reflection rays self-intersect the finer sphere
   // and read black. Distance lod then only applies on non-rt (low/mobile) tiers.
-  bool tlas_shaded =
-      rt_shadows || rtao_active || ddgi_active || rcgi_active || reflections_active || path_trace;
+  bool tlas_shaded = rt_shadows || rtao_active || ddgi_active ||
+                     (rcgi_active && !rcgi_software) || reflections_active || path_trace;
   // Screen-space reflections stand in for ray-traced reflections on raster tiers.
   bool ssr_active = settings_.ssr && !path_trace && !reflections_active;
   // Screen-space gi stands in for the ddgi probe volume on raster tiers.
@@ -2437,8 +2572,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         });
   }
 
-  if (rt_shadows || rtao_active || ddgi_active || rcgi_active || water_pipeline_active ||
-      reflections_active || path_trace || fog_active) {
+  // RCGI contributes to the TLAS build only in hardware mode; the software SDF
+  // path has no ray query and (on non-ray-query devices) no raytracing context.
+  if (rt_shadows || rtao_active || ddgi_active || (rcgi_active && !rcgi_software) ||
+      water_pipeline_active || reflections_active || path_trace || fog_active) {
     base::Vector<RayTracingContext::Instance> instances;
     instances.reserve(view.draws.size());
     for (const DrawItem& item : view.draws) {
@@ -2477,17 +2614,37 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                       frame_index_, ddgi_async);
   }
 
+  // SDF clipmap composition (RX_SDF): min-blend the frame's instance SDFs into
+  // the camera-following clipmap. This is the software-trace world side and is
+  // independent of ray tracing (the whole point). One clip recomposited per
+  // frame plus any clip that snapped this frame. Composed BEFORE the RCGI world
+  // pass so the software probe trace reads this frame's clipmap (there is no
+  // tlas_build to anchor after in software mode). Both use the kGeneral manual-
+  // barrier discipline, so submission order is execution order on the queue.
+  if (sdf_clipmap_ && sdf_available_) {
+    base::Vector<SdfClipmap::Instance> sdf_instances;
+    sdf_instances.reserve(view.draws.size());
+    for (const DrawItem& item : view.draws) {
+      if (sdf_scene_->Find(item.mesh)) sdf_instances.push_back({item.mesh, item.transform});
+    }
+    sdf_clipmap_->AddComposeToGraph(graph_, *sdf_scene_, std::move(sdf_instances), view.camera.eye,
+                                    frame_index_);
+  }
+
   // RCGI world side: cascaded light grid + spatial-hash radiance cache +
-  // irradiance cascades. Like DDGI it can fork onto the async compute queue and
-  // overlap up to the JoinAsync before its first consumer (the M2 gather).
+  // irradiance cascades. On RT hardware it can fork onto the async compute queue
+  // and overlap up to the JoinAsync before its first consumer (the M2 gather).
+  // In software mode it traces the SDF clipmap (no tlas) on the main timeline.
   bool rcgi_world = rcgi_active && !path_trace;
-  bool rcgi_async = rcgi_world && settings_.async_compute && device_->caps().async_compute;
+  bool rcgi_async =
+      rcgi_world && !rcgi_software && settings_.async_compute && device_->caps().async_compute;
   if (rcgi_world) {
     light_grid_.AddToGraph(graph_, frame.lights, light_count, view.camera.eye, frame_index_,
                            rcgi_async);
-    rcgi_->AddToGraph(graph_, *raytracing_, tlas_slot, light_grid_, frame.lights, view.camera.eye,
-                      applied_sun_direction_, applied_sun_intensity_, applied_sun_color_,
-                      frame_index_, rcgi_async);
+    rcgi_->AddToGraph(graph_, raytracing_.get(), tlas_slot, light_grid_, frame.lights,
+                      view.camera.eye, applied_sun_direction_, applied_sun_intensity_,
+                      applied_sun_color_, frame_index_, rcgi_async,
+                      rcgi_software ? sdf_clipmap_.get() : nullptr);
   }
 
   // The path tracer takes over the whole frame: it writes scene_color directly
@@ -3283,18 +3440,21 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
   // RCGI screen side: M2 half-res SH final gather -> bilateral denoise -> full-res
   // upscale + temporal filter, writing the same "rcgi_irradiance" transient the
-  // forward pass folds in. `RX_RCGI_PROBES_ONLY=1` swaps in the M1 per-pixel
-  // cascade resolve for A/B comparison. The gather is the first consumer of the
-  // (optionally async) world passes, so join the compute queue before it.
+  // forward pass folds in. `RX_RCGI_PROBES_ONLY=1` (and always in software mode,
+  // where the M2 gather is ray-query) swaps in the M1 per-pixel cascade resolve.
+  // The gather is the first consumer of the (optionally async) world passes, so
+  // join the compute queue before it.
   if (rcgi_world && depth_export != kInvalidResource && normals != kInvalidResource) {
     if (rcgi_async) {
       graph_.AddPass(
           "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
           [](PassContext&) {});
     }
-    // Probes-only A/B, or fall back to it if the gather's screen-history images
-    // failed to (re)create this frame (so we never import null images).
-    if (RcgiProbesOnlyOpt ||
+    // Probes-only A/B (and always in software mode, where the M2 gather is
+    // ray-query), or fall back to it if the gather's screen-history images
+    // failed to (re)create this frame (so we never import null images). The
+    // short-circuit also means software mode never touches screen resources.
+    if (rcgi_probes_only ||
         !rcgi_->EnsureScreenResources({render_width_, render_height_})) {
       rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
                                        {render_width_, render_height_}, globals.inv_view_proj,
@@ -4057,6 +4217,15 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           ctx.cmd->EndRendering();
         });
   }
+
+  // SDF clipmap debug raymarch (RX_SDF_DEBUG): replace the lit scene with a view
+  // built purely from the SDF clipmap (1 = distance field tinted by clip,
+  // 2 = hit albedo + gradient-normal shading). Standalone S1 verification.
+  if (sdf_clipmap_ && sdf_available_ && SdfDebugOpt) {
+    sdf_clipmap_->AddDebugPass(graph_, lit, {render_width_, render_height_}, globals.inv_view_proj,
+                               view.camera.eye, static_cast<u32>(static_cast<int>(SdfDebugOpt)),
+                               frame_index_);
+  }
   }  // end raster path
 
   // Water has no place in the path tracer (blend geometry never enters the tlas),
@@ -4164,7 +4333,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // RCGI screen cache: snapshot this frame's lit HDR colour + depth so next
   // frame's final gather can read last-frame radiance for its screen cache.
   // Only when the M2 gather ran (probes-only / off record nothing).
-  if (rcgi_world && !RcgiProbesOnlyOpt && lit != kInvalidResource &&
+  if (rcgi_world && !rcgi_probes_only && lit != kInvalidResource &&
       depth_export != kInvalidResource) {
     rcgi_->AddHistoryCopy(graph_, lit, depth_export, {render_width_, render_height_});
   }
@@ -4506,6 +4675,10 @@ void Renderer::Shutdown() {
     ssr_.Destroy(*device_);
     ssgi_.Destroy(*device_);
     if (rcgi_) light_grid_.Destroy(*device_);  // rcgi_ (unique_ptr) frees itself
+    // Free SDF GPU resources while the device is still valid (the unique_ptr
+    // destructors call DestroyImage/DestroyBuffer/DestroyPipeline).
+    sdf_clipmap_.reset();
+    sdf_scene_.reset();
     device_->DestroyPipeline(hdr_pipeline_);
     hdr_pipeline_ = {};
     device_->DestroyBuffer(hdr_readback_);

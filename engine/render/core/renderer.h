@@ -24,6 +24,8 @@
 #include "render/gi/ddgi.h"
 #include "render/gi/light_grid.h"
 #include "render/gi/rcgi.h"
+#include "render/gi/sdf_clipmap.h"
+#include "render/gi/sdf_scene.h"
 #include "render/gi/denoiser_nrd.h"
 #include "render/gi/denoiser_rr.h"
 #include "render/post/exposure.h"
@@ -97,6 +99,13 @@ struct RendererDesc {
   UpscalerKind upscaler = UpscalerKind::kNone;
   RayTracingSettings raytracing;
   bool enable_raytracing = true;
+  // Build the software-GI (SDF clipmap trace) infrastructure at startup. This is
+  // an IMMUTABLE availability decision that MUST be set before Initialize: the CPU
+  // mesh geometry that voxelises the SDFs is not retained past upload, so the path
+  // cannot be backfilled by a later live toggle. Env RX_SDF / RX_RCGI_SW, or a
+  // non-RT RX_RCGI request, force it on too; hosted apps use this field for the
+  // programmatic equivalent (OnInitialize runs after renderer init, too late).
+  bool software_gi = false;
   VulkanDeviceExtras vulkan;
 };
 
@@ -451,7 +460,17 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<DdgiSystem> ddgi_;
   std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI), lazily created
   bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
+  bool rcgi_sw_unavailable_logged_ = false;  // logged the "no startup SDF path" notice once
   LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
+  // SDF software-trace infrastructure (RX_SDF / software_gi): per-mesh SDFs +
+  // global clipmap. Both null unless the path was enabled at startup, so with it
+  // off nothing is generated/allocated. `sdf_available_` is the IMMUTABLE startup
+  // availability bit, decided once in Initialize and gated on creation success --
+  // separate from any live RenderSettings toggle, so applying a quality preset can
+  // never turn the seeded software path off (see RendererDesc::software_gi).
+  bool sdf_available_ = false;
+  std::unique_ptr<SdfScene> sdf_scene_;
+  std::unique_ptr<SdfClipmap> sdf_clipmap_;
   std::unique_ptr<WaterPass> water_;
   std::unique_ptr<MeshPipeline> mesh_pipeline_;
   std::unique_ptr<PostPass> post_;
@@ -639,6 +658,7 @@ class RX_RENDER_EXPORT Renderer {
   f64 time_seconds_ = 0;
   bool has_prev_frame_ = false;
   bool rt_available_ = false;
+  bool rcgi_force_software_ = false;  // RX_RCGI_SW: force the SDF software tracer
   u32 frame_index_ = 0;
   u32 cull_total_commands_ = 0;  // opaque indirect draws this frame
   u32 cull_visible_ = 0;         // survivors from the last completed cull (fence-safe)

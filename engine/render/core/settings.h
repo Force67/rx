@@ -127,6 +127,12 @@ struct RenderSettings {
   // default), RX_RCGI=1.
   bool rcgi = false;
   f32 rcgi_intensity = 1.0f;
+  // NOTE: SDF software-trace availability is intentionally NOT a RenderSettings
+  // field. It is an immutable startup decision (RendererDesc::software_gi / RX_SDF
+  // / RX_RCGI_SW / a non-RT RX_RCGI request) held on Renderer::sdf_available_, so
+  // that applying a quality preset live -- which wholesale-replaces this struct --
+  // can never turn a seeded software path off. RX_SDF_DEBUG raymarches the clipmap
+  // for verification and gates on availability.
 
   bool water_reflections = true;  // raytraced; off falls back to sky only
   // Persistent compute-tessellated ocean geometry. Only the largest planar
