@@ -8,6 +8,7 @@
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
+#include "physics/cloth.h"
 #include "physics/shape_desc.h"
 
 namespace rx::physics {
@@ -358,6 +359,32 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // World-space node positions, strand-major xyz, for the hair renderer.
   bool GetStrandGroomPositions(StrandGroomId id, f32* out, u32 count) const;
   void RemoveStrandGroom(StrandGroomId id);
+
+  // Arbitrary triangle cloth. Jolt owns structural XPBD constraints, skeletal
+  // skinning, pressure and rigid collision; rx adds swept-BVH continuous
+  // vertex/triangle and edge/edge self-collision. The same path handles open curtains,
+  // cylindrical skirts and consistently wound closed inflatables.
+  ClothId CreateCloth(const ClothDesc& desc, const Mat4& transform);
+  // Retargets descriptor pins through a new object transform. Returns false
+  // for invalid or unpinned cloth. dt <= 0 is an intentional teleport/reset;
+  // positive dt preserves attachment velocity.
+  bool SetClothTransform(ClothId id, const Mat4& transform, f32 dt);
+  // Retargets pins directly in descriptor pin order, for rails/hooks whose
+  // motion is not represented by one transform. Targets are world-space. Fast
+  // retargets are limited by max_linear_velocity; use dt = 0 to teleport.
+  bool SetClothPinTargets(ClothId id, const Vec3* targets, u32 target_count, f32 dt);
+  // Updates native Jolt skin targets. `hard_reset` snaps every skinned vertex
+  // to animation and is intended for spawn/teleport, not ordinary motion.
+  bool SetClothJointTransforms(ClothId id, const Mat4* world_joints, u32 joint_count,
+                               bool hard_reset = false);
+  // World-space air velocity in m/s. Aerodynamic force depends on triangle
+  // area, orientation and relative cloth velocity; zero disables the pass.
+  void SetClothWind(ClothId id, const Vec3& velocity);
+  // Jolt pressure coefficient (n*R*T), for one outward-wound closed shell.
+  void SetClothPressure(ClothId id, f32 pressure);
+  u32 ClothVertexCount(ClothId id) const;
+  bool GetClothPositions(ClothId id, Vec3* out, u32 count) const;
+  void RemoveCloth(ClothId id);
 
   // Closest hit of a ray; used by foot IK to find the ground under a foot.
   struct RayHit {

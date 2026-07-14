@@ -327,6 +327,12 @@ if(RX_BUILD_TESTS)
   add_executable(camera_rig_test test/camera_rig_test.cc)
   target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME camera_rig_test COMMAND camera_rig_test)
+
+  add_executable(cloth_collision_test
+    test/cloth_collision_test.cc
+    engine/physics/cloth_collision.cc)
+  target_link_libraries(cloth_collision_test PRIVATE rx::core)
+  add_test(NAME cloth_collision_test COMMAND cloth_collision_test)
 endif()
 
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a
@@ -400,6 +406,12 @@ if(RX_BUILD_TESTS AND RX_JOLT)
   add_executable(hair_sim_test test/hair_sim_test.cc)
   target_link_libraries(hair_sim_test PRIVATE rx::render rx::physics rx::core)
   add_test(NAME hair_sim_test COMMAND hair_sim_test)
+
+  add_executable(cloth_sim_test test/cloth_sim_test.cc)
+  target_link_libraries(cloth_sim_test PRIVATE rx::physics rx::core)
+  add_test(NAME cloth_sim_test COMMAND cloth_sim_test)
+  add_test(NAME cloth_feature_off_test COMMAND cloth_sim_test --feature-off)
+  set_tests_properties(cloth_feature_off_test PROPERTIES ENVIRONMENT "RX_FEATURES=-physics.cloth")
 endif()
 
 # install()/export rules, generated last so every module target (and the

@@ -26,8 +26,9 @@ viewer runtime in place of the game.
 - **engine/core** - SDL3 windowing (+ KDE HDR monitor), job system, input
   action layer with gamepad support, math, logging, feature registry.
 - **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** - entity
-  storage and scheduling, scene components, Jolt-backed rigid bodies, pose and
-  locomotion helpers, a facial expression controller (damped per-region
+  storage and scheduling, scene components, Jolt-backed rigid bodies and
+  arbitrary-mesh cloth (native XPBD/skinning/pressure plus fast self-collision;
+  see `engine/physics/README.md`), pose and locomotion helpers, a facial expression controller (damped per-region
   transitions between named morph poses, plus a blink/micro-motion life
   layer), an SDL mixer with wav/xwma decoding, and a small RPC value/registry
   layer. Skeletal animation sampling comes from
@@ -39,7 +40,7 @@ viewer runtime in place of the game.
   for using rx as the engine of your own game.
 - **runtime/** - the `rx` viewer (the reference `app::Application`):
   `--gltf <scene>` or `--demo <id>` (water,
-  materials, cornell, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
+  materials, cornell, cloth, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
   meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx),
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`

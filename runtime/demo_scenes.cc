@@ -196,9 +196,34 @@ void DemoScenes::EmitBubbles(render::FrameView& view) {
 }
 
 void DemoScenes::Shutdown() {
+  if (cloth_ != 0) {
+    physics_.RemoveCloth(cloth_);
+    cloth_ = 0;
+  }
   scene_hook_.reset();
   scene_hook_rhi_.reset();
   bubble_viz_.reset();
+}
+
+void DemoScenes::ApplyRenderPolicy() {
+  if (cloth_ == 0) return;
+  render::RenderSettings& settings = renderer_.settings();
+  settings.aa_mode = render::AntiAliasingMode::kNone;
+  settings.upscaler = render::UpscalerKind::kNone;
+  settings.dynamic_resolution = false;
+  settings.motion_blur = false;
+  settings.frame_generation = false;
+  settings.path_trace = false;
+  settings.path_trace_reference = false;
+  settings.path_trace_recon = false;
+  settings.rt_shadows = false;
+  settings.rtao = false;
+  settings.rt_reflections = false;
+  settings.ddgi = false;
+  settings.rcgi = false;
+  settings.ssr = false;
+  settings.ssgi = false;
+  settings.shadow_maps = true;
 }
 
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
@@ -206,6 +231,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   if (ship_) ship_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
+  if (cloth_ != 0) EmitCloth(view);
   UpdateParticles(dt, view);
   if (gpu_particle_count_ > 0) {
     view.gpu_particle_count = gpu_particle_count_;
@@ -1158,6 +1184,243 @@ void DemoScenes::CreateStrandHairDemoScene() {
     world_.Add(h, scene::Transform{.position = {hc.x, hc.y, hc.z}});
     world_.Add(h, scene::Renderable{head.id});
   }
+}
+
+void DemoScenes::CreateClothDemoScene() {
+  constexpr u32 kWidth = 13;
+  constexpr u32 kHeight = 15;
+  constexpr u32 kVertexCount = kWidth * kHeight;
+  constexpr f32 kSpacing = 0.14f;
+  static_assert(kVertexCount <= 256, "the demo uses one u8 skin bone per cloth vertex");
+
+  base::Vector<Vec3> rest;
+  base::Vector<f32> uvs;
+  base::Vector<u32> pins;
+  rest.reserve(kVertexCount);
+  uvs.reserve(kVertexCount * 2);
+  pins.reserve(kWidth);
+  cloth_indices_.clear();
+  cloth_indices_.reserve((kWidth - 1) * (kHeight - 1) * 6);
+  for (u32 y = 0; y < kHeight; ++y) {
+    for (u32 x = 0; x < kWidth; ++x) {
+      rest.push_back({(static_cast<f32>(x) - static_cast<f32>(kWidth - 1) * 0.5f) * kSpacing,
+                      -static_cast<f32>(y) * kSpacing, 0});
+      uvs.push_back(static_cast<f32>(x) / static_cast<f32>(kWidth - 1));
+      uvs.push_back(static_cast<f32>(y) / static_cast<f32>(kHeight - 1));
+    }
+  }
+  for (u32 x = 0; x < kWidth; ++x) pins.push_back(x);
+  for (u32 y = 0; y + 1 < kHeight; ++y) {
+    for (u32 x = 0; x + 1 < kWidth; ++x) {
+      const u32 a = y * kWidth + x;
+      const u32 b = a + 1;
+      const u32 c = a + kWidth;
+      const u32 d = c + 1;
+      for (u32 index : {a, c, b, b, c, d}) cloth_indices_.push_back(index);
+    }
+  }
+
+  physics::ClothDesc desc;
+  desc.positions = rest.data();
+  desc.vertex_count = static_cast<u32>(rest.size());
+  desc.indices = cloth_indices_.data();
+  desc.index_count = static_cast<u32>(cloth_indices_.size());
+  desc.uvs = uvs.data();
+  desc.pins = pins.data();
+  desc.pin_count = static_cast<u32>(pins.size());
+  desc.areal_density = 0.24f;
+  desc.shear_compliance = 2.0e-6f;
+  desc.bend_compliance = 1.5e-4f;
+  desc.iterations = 8;
+  desc.damping = 0.07f;
+  desc.collision_radius = 0.009f;
+  desc.self_collision_distance = 0.018f;
+  desc.self_collision_iterations = 3;
+  desc.aerodynamic_drag = 1.2f;
+  cloth_ = physics_.CreateCloth(desc, MakeTranslation({0, 3.0f, 0}));
+  if (cloth_ == 0) {
+    RX_WARN("cloth demo unavailable: physics.cloth is disabled or Jolt is unavailable");
+    return;
+  }
+  // The render adapter uses a zero-position bind mesh posed entirely by the
+  // skin palette. Disable dynamic BLAS and temporal consumers before upload.
+  ApplyRenderPolicy();
+  physics_.SetClothWind(cloth_, {0.65f, 0.08f, -2.4f});
+  cloth_width_ = kWidth;
+  cloth_positions_.resize(kVertexCount);
+  cloth_normals_.resize(kVertexCount);
+  cloth_lines_.reserve(cloth_indices_.size());
+
+  asset::Material fabric;
+  fabric.id = asset::MakeAssetId("builtin/cloth/fabric");
+  fabric.base_color_factor[0] = 0.018f;
+  fabric.base_color_factor[1] = 0.22f;
+  fabric.base_color_factor[2] = 0.25f;
+  fabric.roughness_factor = 0.62f;
+  fabric.sheen_color[0] = 0.12f;
+  fabric.sheen_color[1] = 0.34f;
+  fabric.sheen_color[2] = 0.32f;
+  fabric.sheen_roughness = 0.72f;
+  fabric.two_sided = true;
+
+  asset::Mesh cloth_mesh;
+  cloth_mesh.id = asset::MakeAssetId("builtin/cloth/simulation_cage");
+  cloth_mesh.skinned = true;
+  cloth_mesh.exclude_from_rt = true;
+  asset::MeshLod& cloth_lod = cloth_mesh.lods.emplace_back();
+  cloth_lod.indices = cloth_indices_;
+  cloth_lod.vertices.reserve(kVertexCount);
+  cloth_lod.skinning.reserve(kVertexCount);
+  for (u32 i = 0; i < kVertexCount; ++i) {
+    asset::Vertex vertex{};
+    // The per-vertex palette matrix supplies both position and shading frame.
+    vertex.normal[2] = 1.0f;
+    vertex.tangent[0] = 1.0f;
+    vertex.tangent[3] = 1.0f;
+    vertex.uv[0] = uvs[i * 2 + 0];
+    vertex.uv[1] = uvs[i * 2 + 1];
+    cloth_lod.vertices.push_back(vertex);
+    asset::SkinnedVertexExtra skin;
+    skin.bone_indices[0] = static_cast<u8>(i);
+    skin.bone_weights[0] = 255;
+    cloth_lod.skinning.push_back(skin);
+  }
+  cloth_lod.submeshes.push_back(
+      {0, static_cast<u32>(cloth_lod.indices.size()), fabric.id});
+  cloth_mesh_ = cloth_mesh.id.hash;
+
+  asset::Material frame;
+  frame.id = asset::MakeAssetId("builtin/cloth/frame_material");
+  frame.base_color_factor[0] = 0.52f;
+  frame.base_color_factor[1] = 0.16f;
+  frame.base_color_factor[2] = 0.055f;
+  frame.metallic_factor = 0.65f;
+  frame.roughness_factor = 0.3f;
+  asset::Material stage;
+  stage.id = asset::MakeAssetId("builtin/cloth/stage_material");
+  stage.base_color_factor[0] = 0.055f;
+  stage.base_color_factor[1] = 0.065f;
+  stage.base_color_factor[2] = 0.07f;
+  stage.roughness_factor = 0.92f;
+  asset::Material collider;
+  collider.id = asset::MakeAssetId("builtin/cloth/collider_material");
+  collider.base_color_factor[0] = 0.16f;
+  collider.base_color_factor[1] = 0.18f;
+  collider.base_color_factor[2] = 0.19f;
+  collider.metallic_factor = 0.2f;
+  collider.roughness_factor = 0.48f;
+
+  auto add_prop = [&](asset::Mesh mesh, const asset::Material& material, const Vec3& position) {
+    if (mesh.lods[0].submeshes.empty()) {
+      mesh.lods[0].submeshes.push_back(
+          {0, static_cast<u32>(mesh.lods[0].indices.size()), material.id});
+    } else {
+      for (asset::Submesh& submesh : mesh.lods[0].submeshes) submesh.material = material.id;
+    }
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity entity = world_.Create();
+    world_.Add(entity, scene::Transform{.position = {position.x, position.y, position.z}});
+    world_.Add(entity, scene::Renderable{mesh.id});
+  };
+
+  if (!config_.headless) {
+    renderer_.UploadMaterial(fabric);
+    renderer_.UploadMaterial(frame);
+    renderer_.UploadMaterial(stage);
+    renderer_.UploadMaterial(collider);
+    renderer_.UploadMesh(cloth_mesh);
+  }
+  add_prop(asset::MakeBox(5.0f, 0.1f, 5.0f, asset::MakeAssetId("builtin/cloth/stage")),
+           stage, {0, -0.1f, 0});
+  add_prop(asset::MakeBox(1.02f, 0.055f, 0.055f, asset::MakeAssetId("builtin/cloth/top_bar")),
+           frame, {0, 3.06f, 0.02f});
+  add_prop(asset::MakeBox(0.045f, 1.53f, 0.045f,
+                          asset::MakeAssetId("builtin/cloth/support_left")),
+           frame, {-1.02f, 1.53f, 0.02f});
+  add_prop(asset::MakeBox(0.045f, 1.53f, 0.045f,
+                          asset::MakeAssetId("builtin/cloth/support_right")),
+           frame, {1.02f, 1.53f, 0.02f});
+  add_prop(asset::MakeSphere(0.45f, 24, 36,
+                             asset::MakeAssetId("builtin/cloth/collision_sphere")),
+           collider, {0.52f, 1.68f, -0.28f});
+
+  physics_.AddStaticBox({0, -0.1f, 0}, {5.0f, 0.1f, 5.0f});
+  physics_.AddKinematicCapsule({0.52f, 1.68f, -0.28f}, 0.45f, 0.02f);
+
+  ctx_.scene_owns_sun = true;
+  renderer_.settings().sun_direction = Normalize(Vec3{-0.65f, -0.52f, -0.55f});
+  renderer_.settings().sun_intensity = 4.0f;
+  renderer_.settings().sun_color = {1.0f, 0.91f, 0.80f};
+  renderer_.settings().ambient = 0.09f;
+  renderer_.settings().dof = false;
+  renderer_.settings().clouds = false;
+  renderer_.settings().aerial_perspective = 0.0f;
+  camera_.set_position({3.2f, 2.15f, 2.6f});
+  camera_.set_yaw_pitch(-0.89f, -0.08f);
+  camera_.speed = 3.0f;
+  RX_INFO("cloth demo: {} vertices, {} triangles, wind + rigid contact",
+          kVertexCount, cloth_indices_.size() / 3);
+  RX_INFO("cloth demo: raster-only AA/RT/upscaler controls are locked");
+}
+
+void DemoScenes::EmitCloth(render::FrameView& view) {
+  if (cloth_mesh_ == 0 || cloth_width_ == 0 ||
+      !physics_.GetClothPositions(cloth_, cloth_positions_.data(),
+                                  static_cast<u32>(cloth_positions_.size()))) {
+    return;
+  }
+
+  std::fill(cloth_normals_.begin(), cloth_normals_.end(), Vec3{});
+  cloth_lines_.clear();
+  for (size_t i = 0; i < cloth_indices_.size(); i += 3) {
+    const u32 a = cloth_indices_[i + 0];
+    const u32 b = cloth_indices_[i + 1];
+    const u32 c = cloth_indices_[i + 2];
+    const Vec3 normal = Cross(cloth_positions_[b] - cloth_positions_[a],
+                              cloth_positions_[c] - cloth_positions_[a]);
+    cloth_normals_[a] += normal;
+    cloth_normals_[b] += normal;
+    cloth_normals_[c] += normal;
+    cloth_lines_.push_back({cloth_positions_[a], cloth_positions_[b], 0x84d5c5ff});
+    cloth_lines_.push_back({cloth_positions_[b], cloth_positions_[c], 0x84d5c5ff});
+    cloth_lines_.push_back({cloth_positions_[c], cloth_positions_[a], 0x84d5c5ff});
+  }
+
+  const i32 skin_offset = static_cast<i32>(view.bone_matrices.size());
+  for (u32 i = 0; i < cloth_positions_.size(); ++i) {
+    Vec3 normal = Normalize(cloth_normals_[i]);
+    if (Length(normal) < 1.0e-5f) normal = {0, 0, 1};
+    if (Dot(normal, view.camera.eye - cloth_positions_[i]) < 0) {
+      normal = normal * -1.0f;
+    }
+    const u32 x = i % cloth_width_;
+    const u32 left = x > 0 ? i - 1 : i;
+    const u32 right = x + 1 < cloth_width_ ? i + 1 : i;
+    Vec3 tangent = cloth_positions_[right] - cloth_positions_[left];
+    tangent = Normalize(tangent - normal * Dot(tangent, normal));
+    if (Length(tangent) < 1.0e-5f) tangent = Normalize(Cross({0, 1, 0}, normal));
+    if (Length(tangent) < 1.0e-5f) tangent = {1, 0, 0};
+    const Vec3 bitangent = Normalize(Cross(normal, tangent));
+
+    Mat4 pose = Mat4::Identity();
+    pose.m[0] = tangent.x;
+    pose.m[1] = tangent.y;
+    pose.m[2] = tangent.z;
+    pose.m[4] = bitangent.x;
+    pose.m[5] = bitangent.y;
+    pose.m[6] = bitangent.z;
+    pose.m[8] = normal.x;
+    pose.m[9] = normal.y;
+    pose.m[10] = normal.z;
+    pose.m[12] = cloth_positions_[i].x;
+    pose.m[13] = cloth_positions_[i].y;
+    pose.m[14] = cloth_positions_[i].z;
+    view.bone_matrices.push_back(pose);
+  }
+  view.draws.push_back(
+      {cloth_mesh_, Mat4::Identity(), Mat4::Identity(), skin_offset});
+  view.debug_lines_overlay =
+      std::span<const render::DebugLine>(cloth_lines_.data(), cloth_lines_.size());
 }
 
 void DemoScenes::CreateVirtualGeometryDemoScene() {
@@ -2336,6 +2599,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "strands") {
     CreateStrandHairDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "cloth") {
+    CreateClothDemoScene();
     return;
   }
   if (config_.demo_scene == "imposters") {

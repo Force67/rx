@@ -1,5 +1,6 @@
 if(RX_JOLT)
   rx_add_module(physics
+    cloth_collision.cc
     physics_world.cc
     kinema_jolt.cc
   )

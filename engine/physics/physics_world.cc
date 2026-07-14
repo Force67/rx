@@ -1,8 +1,10 @@
 #include "physics/physics_world.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
+#include <limits>
 
 #include <Jolt/Jolt.h>
 
@@ -44,7 +46,12 @@
 
 #include <base/containers/unordered_map.h>
 
+#include "core/feature_registry.h"
 #include "core/log.h"
+#include "physics/cloth_collision.h"
+
+static_assert(JPH_VERSION_MAJOR > 5 || (JPH_VERSION_MAJOR == 5 && JPH_VERSION_MINOR >= 6),
+              "rx cloth and strand simulation require Jolt 5.6 or newer");
 
 namespace rx::physics {
 namespace {
@@ -101,6 +108,24 @@ void TraceCallback(const char* fmt, ...) {
 
 JPH::Vec3 ToJolt(const Vec3& v) { return {v.x, v.y, v.z}; }
 
+JPH::Mat44 ToJolt(const Mat4& m) {
+  return {JPH::Vec4(m.m[0], m.m[1], m.m[2], m.m[3]),
+          JPH::Vec4(m.m[4], m.m[5], m.m[6], m.m[7]),
+          JPH::Vec4(m.m[8], m.m[9], m.m[10], m.m[11]),
+          JPH::Vec4(m.m[12], m.m[13], m.m[14], m.m[15])};
+}
+
+bool IsFinite(const Vec3& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+bool IsFinite(const Mat4& value) {
+  for (f32 element : value.m) {
+    if (!std::isfinite(element)) return false;
+  }
+  return true;
+}
+
 // Friction of static world geometry (ground, roads, walls). Jolt's default
 // of 0.2 is ice: vehicle tires combine as sqrt(tire * body), so the body
 // side must carry a real asphalt/concrete-grade value.
@@ -112,7 +137,8 @@ struct PhysicsWorld::Impl {
   BroadPhaseLayers broad_phase_layers;
   ObjectVsBroadPhase object_vs_broad_phase;
   ObjectLayerPair object_layer_pair;
-  std::unique_ptr<JPH::TempAllocatorImpl> temp_allocator;
+  std::unique_ptr<JPH::TempAllocator> temp_allocator;
+  JPH::TempAllocatorImplWithMallocFallback skin_allocator{1024 * 1024};
   std::unique_ptr<JPH::JobSystemThreadPool> job_system;
   std::unique_ptr<JPH::PhysicsSystem> system;
   base::Vector<JPH::BodyID> dynamic_bodies;
@@ -159,6 +185,35 @@ struct PhysicsWorld::Impl {
     base::Vector<JPH::Vec3> targets;
   };
   base::Vector<StrandGroomEntry> strand_grooms;
+  // Triangle cloth; ClothId is index + 1 and dead slots are retained so
+  // handles never alias a later instance. TODO: pack generation + index into
+  // ClothId so dead slots can be reused without accepting stale handles.
+  struct ClothEntry {
+    JPH::BodyID body;
+    bool alive = false;
+    bool pressure_capable = false;
+    u32 vertex_count = 0;
+    u32 joint_count = 0;
+    u32 skin_constraint_count = 0;
+    f32 aerodynamic_drag = 0;
+    f32 gravity_factor = 1;
+    f32 max_linear_velocity = 100;
+    f32 pin_time_remaining = 0;
+    JPH::Vec3 wind = JPH::Vec3::sZero();
+    base::Vector<u32> pinned;
+    base::Vector<Vec3> pinned_rest;
+    base::Vector<Vec3> targets;  // persistent world-space targets
+    base::Vector<Vec3> target_scratch;
+    base::Vector<Mat4> last_joint_transforms;
+    base::Vector<JPH::Mat44> skin_pose;
+    detail::ClothTopology topology;
+    detail::ClothSelfCollisionConfig self_collision;
+    detail::ClothSelfCollisionScratch self_collision_scratch;
+    base::Vector<Vec3> collision_positions;
+    base::Vector<Vec3> collision_velocities;
+    base::Vector<f32> collision_inverse_masses;
+  };
+  base::Vector<ClothEntry> cloth;
 };
 
 PhysicsWorld::PhysicsWorld() = default;
@@ -179,7 +234,10 @@ bool PhysicsWorld::Initialize() {
   JPH::RegisterTypes();
 
   impl_ = std::make_unique<Impl>();
-  impl_->temp_allocator = std::make_unique<JPH::TempAllocatorImpl>(16 * 1024 * 1024);
+  // Large cloth batches can exceed the fixed arena. The normal path remains a
+  // lock-free stack allocation; exceptional peaks fall back instead of aborting.
+  impl_->temp_allocator =
+      std::make_unique<JPH::TempAllocatorImplWithMallocFallback>(32 * 1024 * 1024);
   impl_->job_system = std::make_unique<JPH::JobSystemThreadPool>(
       JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
       static_cast<int>(std::thread::hardware_concurrency()) - 1);
@@ -259,7 +317,104 @@ void PhysicsWorld::Update(f32 dt) {
     }
   }
 
-  impl_->system->Update(dt, 1, impl_->temp_allocator.get(), impl_->job_system.get());
+  // Cloth attachments, aerodynamic drag and rx's self-collision extension are
+  // velocity-only prepasses. Jolt then integrates them together with its native
+  // XPBD constraints and rigid contacts in the parallel soft-body jobs.
+  if (dt > 0) {
+    constexpr f32 kAirDensity = 1.225f;
+    JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+    for (Impl::ClothEntry& entry : impl_->cloth) {
+      if (!entry.alive || !bodies.IsActive(entry.body)) continue;
+      JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(), entry.body);
+      if (!lock.Succeeded()) continue;
+      JPH::Body& body = lock.GetBody();
+      auto* soft = static_cast<JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
+      JPH::Array<JPH::SoftBodyVertex>& vertices = soft->GetVertices();
+
+      const JPH::Mat44 to_local =
+          body.GetCenterOfMassTransform().InversedRotationTranslation().ToMat44();
+      const f32 pin_duration = std::max(entry.pin_time_remaining, dt);
+      for (size_t i = 0; i < entry.pinned.size(); ++i) {
+        JPH::SoftBodyVertex& vertex = vertices[entry.pinned[i]];
+        const JPH::Vec3 target = to_local * ToJolt(entry.targets[i]);
+        vertex.mVelocity = (target - vertex.mPosition) / pin_duration;
+      }
+      entry.pin_time_remaining = std::max(entry.pin_time_remaining - dt, 0.0f);
+
+      if (entry.aerodynamic_drag > 0) {
+        const JPH::Quat inverse_rotation = body.GetRotation().Conjugated();
+        const JPH::Vec3 local_wind = inverse_rotation * entry.wind;
+        for (size_t i = 0; i < entry.topology.indices.size(); i += 3) {
+          const u32 ia = entry.topology.indices[i + 0];
+          const u32 ib = entry.topology.indices[i + 1];
+          const u32 ic = entry.topology.indices[i + 2];
+          JPH::SoftBodyVertex& a = vertices[ia];
+          JPH::SoftBodyVertex& b = vertices[ib];
+          JPH::SoftBodyVertex& c = vertices[ic];
+          const JPH::Vec3 area_normal =
+              (b.mPosition - a.mPosition).Cross(c.mPosition - a.mPosition);
+          const f32 area_twice = area_normal.Length();
+          if (area_twice < 1.0e-8f) continue;
+          const JPH::Vec3 normal = area_normal / area_twice;
+          const JPH::Vec3 cloth_velocity = (a.mVelocity + b.mVelocity + c.mVelocity) / 3.0f;
+          const f32 normal_speed = (local_wind - cloth_velocity).Dot(normal);
+          const JPH::Vec3 force = normal * (0.25f * kAirDensity * entry.aerodynamic_drag *
+                                             area_twice * normal_speed * std::abs(normal_speed));
+          if (!std::isfinite(force.GetX()) || !std::isfinite(force.GetY()) ||
+              !std::isfinite(force.GetZ())) {
+            continue;
+          }
+          for (JPH::SoftBodyVertex* vertex : {&a, &b, &c}) {
+            JPH::Vec3 delta = force * (vertex->mInvMass * dt / 3.0f);
+            const f32 delta_sq = delta.LengthSq();
+            // Explicit quadratic drag must not overshoot the air velocity in
+            // one face contribution or it can oscillate and hit the speed cap.
+            const f32 max_delta =
+                std::min(entry.max_linear_velocity * 0.25f, std::abs(normal_speed));
+            if (delta_sq > max_delta * max_delta) delta *= max_delta / std::sqrt(delta_sq);
+            vertex->mVelocity += delta;
+            const f32 speed_sq = vertex->mVelocity.LengthSq();
+            if (speed_sq > entry.max_linear_velocity * entry.max_linear_velocity) {
+              vertex->mVelocity *= entry.max_linear_velocity / std::sqrt(speed_sq);
+            }
+          }
+        }
+      }
+
+      if (entry.self_collision.distance > 0) {
+        const JPH::Vec3 gravity_delta = body.GetRotation().Conjugated() *
+                                        impl_->system->GetGravity() * (entry.gravity_factor * dt);
+        entry.collision_positions.resize(vertices.size());
+        entry.collision_velocities.resize(vertices.size());
+        for (size_t i = 0; i < vertices.size(); ++i) {
+          entry.collision_positions[i] = {vertices[i].mPosition.GetX(),
+                                          vertices[i].mPosition.GetY(),
+                                          vertices[i].mPosition.GetZ()};
+          entry.collision_velocities[i] = {vertices[i].mVelocity.GetX(),
+                                           vertices[i].mVelocity.GetY(),
+                                           vertices[i].mVelocity.GetZ()};
+          if (vertices[i].mInvMass > 0) {
+            entry.collision_velocities[i] +=
+                Vec3{gravity_delta.GetX(), gravity_delta.GetY(), gravity_delta.GetZ()};
+          }
+        }
+        detail::SolveClothSelfCollision(
+            entry.topology, entry.self_collision, entry.collision_positions,
+            &entry.collision_velocities, entry.collision_inverse_masses, dt,
+            &entry.self_collision_scratch);
+        for (size_t i = 0; i < vertices.size(); ++i) {
+          vertices[i].mVelocity = ToJolt(entry.collision_velocities[i]);
+          if (vertices[i].mInvMass > 0) vertices[i].mVelocity -= gravity_delta;
+        }
+      }
+    }
+  }
+
+  const JPH::EPhysicsUpdateError error =
+      impl_->system->Update(dt, 1, impl_->temp_allocator.get(), impl_->job_system.get());
+  if (error != JPH::EPhysicsUpdateError::None) {
+    RX_WARN("jolt update capacity error mask: {}", static_cast<u32>(error));
+  }
 }
 
 BodyId PhysicsWorld::AddStaticBox(const Vec3& position, const Vec3& half_extent) {
@@ -1450,6 +1605,502 @@ void PhysicsWorld::RemoveStrandGroom(StrandGroomId id) {
     bodies.DestroyBody(body);
   }
   entry.alive = false;
+}
+
+ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) {
+  if (!impl_ || !FeatureEnabled(FeatureId::kCloth) || !desc.positions || !desc.indices ||
+      desc.vertex_count < 3 || desc.index_count < 3 || (desc.pin_count > 0 && !desc.pins) ||
+      !IsFinite(transform)) {
+    return 0;
+  }
+  if (!std::isfinite(desc.areal_density) || desc.areal_density <= 0 ||
+      !std::isfinite(desc.warp_compliance) || desc.warp_compliance < 0 ||
+      !std::isfinite(desc.weft_compliance) || desc.weft_compliance < 0 ||
+      !std::isfinite(desc.shear_compliance) || desc.shear_compliance < 0 ||
+      !std::isfinite(desc.bend_compliance) || desc.bend_compliance < 0 ||
+      !std::isfinite(desc.max_stretch) || desc.max_stretch < 1 ||
+      !std::isfinite(desc.collision_radius) || desc.collision_radius < 0 ||
+      !std::isfinite(desc.self_collision_distance) || desc.self_collision_distance < 0 ||
+      !std::isfinite(desc.self_collision_relaxation) || desc.self_collision_relaxation < 0 ||
+      desc.self_collision_relaxation > 1 ||
+      !std::isfinite(desc.aerodynamic_drag) || desc.aerodynamic_drag < 0 ||
+      !std::isfinite(desc.damping) || desc.damping < 0 ||
+      !std::isfinite(desc.gravity_factor) || !std::isfinite(desc.friction) || desc.friction < 0 ||
+      !std::isfinite(desc.restitution) || desc.restitution < 0 ||
+      !std::isfinite(desc.pressure) || desc.pressure < 0 ||
+      !std::isfinite(desc.max_linear_velocity) || desc.max_linear_velocity <= 0 ||
+      desc.iterations > 64 || desc.self_collision_iterations > 8 ||
+      (desc.self_collision_distance > 0 && desc.self_collision_iterations == 0)) {
+    RX_WARN("cloth rejected: invalid material or collision parameters");
+    return 0;
+  }
+
+  // Bake the complete spawn transform into body-local vertices around a nearby
+  // origin. Jolt keeps soft-body rotation identity for better solver accuracy.
+  const Vec3 origin = Translation(transform);
+  base::Vector<Vec3> positions;
+  positions.reserve(desc.vertex_count);
+  for (u32 i = 0; i < desc.vertex_count; ++i) {
+    const Vec3 world = TransformPoint(transform, desc.positions[i]);
+    positions.push_back(world - origin);
+  }
+
+  detail::ClothTopology topology;
+  if (!detail::BuildClothTopology(positions.data(), desc.vertex_count, desc.indices,
+                                  desc.index_count, &topology)) {
+    RX_WARN("cloth rejected: topology is degenerate, duplicated, non-manifold or mis-wound");
+    return 0;
+  }
+  const bool pressure_capable = topology.closed && topology.component_count == 1 &&
+                                std::isfinite(topology.signed_volume) &&
+                                topology.signed_volume > 1.0e-9f;
+  if (desc.pressure > 0 && !pressure_capable) {
+    RX_WARN("cloth rejected: pressure requires one closed, outward-wound volume");
+    return 0;
+  }
+  if (desc.uvs) {
+    for (u32 i = 0; i < desc.vertex_count * 2; ++i) {
+      if (!std::isfinite(desc.uvs[i])) {
+        RX_WARN("cloth rejected: non-finite material UV");
+        return 0;
+      }
+    }
+  }
+
+  base::Vector<u8> pin_mask;
+  pin_mask.resize(desc.vertex_count);
+  std::fill(pin_mask.begin(), pin_mask.end(), 0);
+  for (u32 i = 0; i < desc.pin_count; ++i) {
+    const u32 vertex = desc.pins[i];
+    if (vertex >= desc.vertex_count || pin_mask[vertex]) {
+      RX_WARN("cloth rejected: pin index is invalid or duplicated");
+      return 0;
+    }
+    pin_mask[vertex] = 1;
+  }
+
+  if ((desc.joint_count > 0 || desc.skin_constraint_count > 0) &&
+      (!desc.inverse_bind_matrices || !desc.skin_constraints || desc.joint_count == 0 ||
+       desc.skin_constraint_count == 0)) {
+    RX_WARN("cloth rejected: skin constraints require inverse bind matrices");
+    return 0;
+  }
+  base::Vector<u8> skinned;
+  base::Vector<u8> hard_skinned;
+  base::Vector<u8> backstopped;
+  skinned.resize(desc.vertex_count);
+  hard_skinned.resize(desc.vertex_count);
+  backstopped.resize(desc.vertex_count);
+  std::fill(skinned.begin(), skinned.end(), 0);
+  std::fill(hard_skinned.begin(), hard_skinned.end(), 0);
+  std::fill(backstopped.begin(), backstopped.end(), 0);
+  for (u32 i = 0; i < desc.skin_constraint_count; ++i) {
+    const ClothSkinConstraint& skin = desc.skin_constraints[i];
+    if (skin.vertex >= desc.vertex_count || skinned[skin.vertex] || pin_mask[skin.vertex] ||
+        !std::isfinite(skin.max_distance) || skin.max_distance < 0 ||
+        !std::isfinite(skin.backstop_distance) || !std::isfinite(skin.backstop_radius) ||
+        skin.backstop_radius < 0) {
+      RX_WARN("cloth rejected: invalid skin constraint");
+      return 0;
+    }
+    u32 weight_count = 0;
+    for (const ClothSkinWeight& weight : skin.weights) {
+      if (weight.weight == 0) continue;
+      if (!std::isfinite(weight.weight) || weight.weight < 0 || weight.joint >= desc.joint_count ||
+          weight_count >= JPH::SoftBodySharedSettings::Skinned::cMaxSkinWeights) {
+        RX_WARN("cloth rejected: invalid skin weight");
+        return 0;
+      }
+      ++weight_count;
+    }
+    if (weight_count == 0) {
+      RX_WARN("cloth rejected: skin constraint has no positive weights");
+      return 0;
+    }
+    skinned[skin.vertex] = 1;
+    hard_skinned[skin.vertex] = skin.max_distance == 0;
+    backstopped[skin.vertex] = skin.backstop_distance < skin.max_distance;
+  }
+  base::Vector<u32> skinned_face_counts;
+  skinned_face_counts.resize(desc.vertex_count);
+  std::fill(skinned_face_counts.begin(), skinned_face_counts.end(), 0);
+  for (u32 face = 0; face < desc.index_count; face += 3) {
+    const u32 a = desc.indices[face + 0];
+    const u32 b = desc.indices[face + 1];
+    const u32 c = desc.indices[face + 2];
+    if (skinned[a] && skinned[b] && skinned[c]) {
+      for (u32 vertex : {a, b, c}) {
+        if (++skinned_face_counts[vertex] >= 256) {
+          RX_WARN("cloth rejected: a skinned vertex has too many incident faces");
+          return 0;
+        }
+      }
+    } else if (backstopped[a] || backstopped[b] || backstopped[c]) {
+      RX_WARN("cloth rejected: backstops require fully skinned incident faces");
+      return 0;
+    }
+  }
+
+  base::Vector<f32> inverse_masses;
+  inverse_masses.resize(desc.vertex_count);
+  if (desc.inverse_masses) {
+    for (u32 i = 0; i < desc.vertex_count; ++i) {
+      if (!std::isfinite(desc.inverse_masses[i]) || desc.inverse_masses[i] < 0) {
+        RX_WARN("cloth rejected: inverse masses must be finite and non-negative");
+        return 0;
+      }
+      inverse_masses[i] = desc.inverse_masses[i];
+    }
+  } else {
+    base::Vector<f64> masses;
+    masses.resize(desc.vertex_count);
+    std::fill(masses.begin(), masses.end(), 0.0);
+    for (size_t i = 0; i < topology.indices.size(); i += 3) {
+      const u32 a = topology.indices[i + 0];
+      const u32 b = topology.indices[i + 1];
+      const u32 c = topology.indices[i + 2];
+      const f64 triangle_mass =
+          static_cast<f64>(topology.triangle_areas[i / 3]) * desc.areal_density;
+      if (!std::isfinite(triangle_mass)) return 0;
+      masses[a] += triangle_mass / 3.0;
+      masses[b] += triangle_mass / 3.0;
+      masses[c] += triangle_mass / 3.0;
+    }
+    for (u32 i = 0; i < desc.vertex_count; ++i) {
+      const f64 inverse_mass = 1.0 / masses[i];
+      if (masses[i] <= 1.0e-8 || !std::isfinite(masses[i]) ||
+          !std::isfinite(inverse_mass) || inverse_mass > std::numeric_limits<f32>::max()) {
+        RX_WARN("cloth rejected: every vertex must belong to a non-degenerate face");
+        return 0;
+      }
+      inverse_masses[i] = static_cast<f32>(inverse_mass);
+    }
+  }
+  for (u32 i = 0; i < desc.pin_count; ++i) inverse_masses[desc.pins[i]] = 0;
+  for (u32 i = 0; i < desc.vertex_count; ++i) {
+    if (hard_skinned[i]) inverse_masses[i] = 0;
+  }
+
+  JPH::Ref<JPH::SoftBodySharedSettings> shared = new JPH::SoftBodySharedSettings;
+  shared->mVertices.reserve(desc.vertex_count);
+  for (u32 i = 0; i < desc.vertex_count; ++i) {
+    JPH::SoftBodySharedSettings::Vertex vertex;
+    vertex.mPosition = {positions[i].x, positions[i].y, positions[i].z};
+    vertex.mInvMass = inverse_masses[i];
+    shared->mVertices.push_back(vertex);
+  }
+  shared->mFaces.reserve(desc.index_count / 3);
+  for (u32 i = 0; i < desc.index_count; i += 3) {
+    shared->mFaces.emplace_back(desc.indices[i + 0], desc.indices[i + 1], desc.indices[i + 2]);
+  }
+
+  JPH::SoftBodySharedSettings::VertexAttributes attributes;
+  attributes.mCompliance = 0.5f * (desc.warp_compliance + desc.weft_compliance);
+  attributes.mShearCompliance = desc.shear_compliance;
+  attributes.mBendCompliance = desc.bend_compliance;
+  attributes.mLRAMaxDistanceMultiplier = desc.max_stretch;
+  switch (desc.lra_mode) {
+    case ClothLraMode::kNone:
+      attributes.mLRAType = JPH::SoftBodySharedSettings::ELRAType::None;
+      break;
+    case ClothLraMode::kEuclidean:
+      attributes.mLRAType = JPH::SoftBodySharedSettings::ELRAType::EuclideanDistance;
+      break;
+    case ClothLraMode::kGeodesic:
+      attributes.mLRAType = JPH::SoftBodySharedSettings::ELRAType::GeodesicDistance;
+      break;
+  }
+  JPH::SoftBodySharedSettings::EBendType bend = JPH::SoftBodySharedSettings::EBendType::Dihedral;
+  switch (desc.bend_model) {
+    case ClothBendModel::kNone:
+      bend = JPH::SoftBodySharedSettings::EBendType::None;
+      break;
+    case ClothBendModel::kDistance:
+      bend = JPH::SoftBodySharedSettings::EBendType::Distance;
+      break;
+    case ClothBendModel::kDihedral:
+      bend = JPH::SoftBodySharedSettings::EBendType::Dihedral;
+      break;
+  }
+  shared->CreateConstraints(&attributes, 1, bend);
+
+  // Jolt identifies shear diagonals while generating constraints. Topology
+  // edges and generated diagonal shears get fabric-oriented compliance; the
+  // extra non-diagonal springs in distance-bend mode retain bend compliance.
+  if (desc.uvs) {
+    auto is_topology_edge = [&](u32 a, u32 b) {
+      if (a > b) std::swap(a, b);
+      size_t low = 0, high = topology.edges.size() / 2;
+      while (low < high) {
+        const size_t middle = (low + high) / 2;
+        const u32 edge_a = topology.edges[middle * 2 + 0];
+        const u32 edge_b = topology.edges[middle * 2 + 1];
+        if (edge_a < a || (edge_a == a && edge_b < b))
+          low = middle + 1;
+        else
+          high = middle;
+      }
+      return low < topology.edges.size() / 2 && topology.edges[low * 2 + 0] == a &&
+             topology.edges[low * 2 + 1] == b;
+    };
+    for (JPH::SoftBodySharedSettings::Edge& edge : shared->mEdgeConstraints) {
+      const f32 du = std::abs(desc.uvs[edge.mVertex[1] * 2 + 0] -
+                              desc.uvs[edge.mVertex[0] * 2 + 0]);
+      const f32 dv = std::abs(desc.uvs[edge.mVertex[1] * 2 + 1] -
+                              desc.uvs[edge.mVertex[0] * 2 + 1]);
+      const bool warp = du > 2.0f * dv;
+      const bool weft = dv > 2.0f * du;
+      if (desc.bend_model == ClothBendModel::kDistance &&
+          !is_topology_edge(edge.mVertex[0], edge.mVertex[1])) {
+        continue;
+      }
+      if (warp) {
+        edge.mCompliance = desc.warp_compliance;
+      } else if (weft) {
+        edge.mCompliance = desc.weft_compliance;
+      } else {
+        edge.mCompliance = desc.shear_compliance;
+      }
+    }
+  }
+
+  Mat4 spawn_linear = transform;
+  spawn_linear.m[12] = spawn_linear.m[13] = spawn_linear.m[14] = 0;
+  spawn_linear.m[3] = spawn_linear.m[7] = spawn_linear.m[11] = 0;
+  spawn_linear.m[15] = 1;
+  const Mat4 inverse_spawn_linear = Inverse(spawn_linear);
+  for (u32 joint = 0; joint < desc.joint_count; ++joint) {
+    if (!IsFinite(desc.inverse_bind_matrices[joint])) {
+      RX_WARN("cloth rejected: non-finite inverse bind matrix");
+      return 0;
+    }
+    shared->mInvBindMatrices.emplace_back(
+        joint, ToJolt(desc.inverse_bind_matrices[joint] * inverse_spawn_linear));
+  }
+  for (u32 i = 0; i < desc.skin_constraint_count; ++i) {
+    const ClothSkinConstraint& skin = desc.skin_constraints[i];
+    JPH::SoftBodySharedSettings::Skinned native(
+        skin.vertex, skin.max_distance, skin.backstop_distance, skin.backstop_radius);
+    u32 weight_count = 0;
+    for (const ClothSkinWeight& weight : skin.weights) {
+      if (weight.weight == 0) continue;
+      native.mWeights[weight_count++] =
+          JPH::SoftBodySharedSettings::SkinWeight(weight.joint, weight.weight);
+    }
+    native.NormalizeWeights();
+    shared->mSkinnedConstraints.push_back(native);
+  }
+  if (!shared->mSkinnedConstraints.empty()) shared->CalculateSkinnedConstraintNormals();
+  shared->Optimize();
+
+  JPH::SoftBodyCreationSettings body(shared, ToJolt(origin), JPH::Quat::sIdentity(),
+                                      layers::kDynamic);
+  body.mNumIterations = std::max(desc.iterations, 1u);
+  body.mLinearDamping = std::max(desc.damping, 0.0f);
+  body.mGravityFactor = desc.gravity_factor;
+  body.mFriction = std::max(desc.friction, 0.0f);
+  body.mRestitution = std::max(desc.restitution, 0.0f);
+  body.mPressure = desc.pressure;
+  body.mVertexRadius = desc.collision_radius;
+  body.mMaxLinearVelocity = std::max(desc.max_linear_velocity, 0.01f);
+  body.mUpdatePosition = desc.update_position;
+  body.mMakeRotationIdentity = true;
+  body.mAllowSleeping = desc.allow_sleeping;
+  body.mFacesDoubleSided = desc.faces_double_sided;
+
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  Impl::ClothEntry entry;
+  entry.body = bodies.CreateAndAddSoftBody(body, JPH::EActivation::Activate);
+  if (entry.body.IsInvalid()) return 0;
+  entry.alive = true;
+  entry.pressure_capable = pressure_capable;
+  entry.vertex_count = desc.vertex_count;
+  entry.joint_count = desc.joint_count;
+  entry.skin_constraint_count = desc.skin_constraint_count;
+  entry.aerodynamic_drag = desc.aerodynamic_drag;
+  entry.gravity_factor = desc.gravity_factor;
+  entry.max_linear_velocity = desc.max_linear_velocity;
+  entry.collision_inverse_masses = std::move(inverse_masses);
+  entry.topology = std::move(topology);
+  entry.self_collision.distance = desc.self_collision_distance;
+  entry.self_collision.relaxation = desc.self_collision_relaxation;
+  entry.self_collision.max_velocity = desc.max_linear_velocity;
+  entry.self_collision.iterations = desc.self_collision_iterations;
+  for (u32 i = 0; i < desc.pin_count; ++i) {
+    const u32 vertex = desc.pins[i];
+    entry.pinned.push_back(vertex);
+    entry.pinned_rest.push_back(desc.positions[vertex]);
+    entry.targets.push_back(TransformPoint(transform, desc.positions[vertex]));
+  }
+  if (entry.skin_constraint_count > 0) {
+    JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(), entry.body);
+    if (!lock.Succeeded()) {
+      bodies.RemoveBody(entry.body);
+      bodies.DestroyBody(entry.body);
+      return 0;
+    }
+    auto* soft =
+        static_cast<JPH::SoftBodyMotionProperties*>(lock.GetBody().GetMotionProperties());
+    soft->SetEnableSkinConstraints(false);
+  }
+  impl_->cloth.push_back(std::move(entry));
+  return impl_->cloth.size();
+}
+
+bool PhysicsWorld::SetClothTransform(ClothId id, const Mat4& transform, f32 dt) {
+  if (!impl_ || id == 0 || id > impl_->cloth.size() || !IsFinite(transform) ||
+      !std::isfinite(dt) || dt < 0) {
+    return false;
+  }
+  Impl::ClothEntry& entry = impl_->cloth[id - 1];
+  if (!entry.alive || entry.pinned.empty()) return false;
+  entry.target_scratch.resize(entry.pinned_rest.size());
+  for (size_t i = 0; i < entry.pinned_rest.size(); ++i) {
+    entry.target_scratch[i] = TransformPoint(transform, entry.pinned_rest[i]);
+  }
+  return SetClothPinTargets(id, entry.target_scratch.data(),
+                            static_cast<u32>(entry.target_scratch.size()), dt);
+}
+
+bool PhysicsWorld::SetClothPinTargets(ClothId id, const Vec3* targets, u32 target_count, f32 dt) {
+  if (!impl_ || id == 0 || id > impl_->cloth.size() || !std::isfinite(dt) || dt < 0) return false;
+  Impl::ClothEntry& entry = impl_->cloth[id - 1];
+  if (!entry.alive || target_count != entry.pinned.size() || (target_count > 0 && !targets)) {
+    return false;
+  }
+  bool changed = false;
+  for (u32 i = 0; i < target_count; ++i) {
+    if (!IsFinite(targets[i])) return false;
+    changed = changed || Length(targets[i] - entry.targets[i]) > 1.0e-7f;
+  }
+  if (!changed) return true;
+
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  entry.targets.assign(targets, targets + target_count);
+  entry.pin_time_remaining = dt;
+  if (dt == 0 && target_count > 0) {
+    JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(), entry.body);
+    if (!lock.Succeeded()) return false;
+    const JPH::Mat44 to_local =
+        lock.GetBody().GetCenterOfMassTransform().InversedRotationTranslation().ToMat44();
+    auto* soft =
+        static_cast<JPH::SoftBodyMotionProperties*>(lock.GetBody().GetMotionProperties());
+    for (u32 i = 0; i < target_count; ++i) {
+      JPH::SoftBodyVertex& vertex = soft->GetVertex(entry.pinned[i]);
+      const JPH::Vec3 local_target = to_local * ToJolt(entry.targets[i]);
+      vertex.mPreviousPosition = local_target;
+      vertex.mPosition = local_target;
+      vertex.mVelocity = JPH::Vec3::sZero();
+    }
+  }
+  bodies.ActivateBody(entry.body);
+  return true;
+}
+
+bool PhysicsWorld::SetClothJointTransforms(ClothId id, const Mat4* world_joints, u32 joint_count,
+                                           bool hard_reset) {
+  if (!impl_ || id == 0 || id > impl_->cloth.size()) return false;
+  Impl::ClothEntry& entry = impl_->cloth[id - 1];
+  if (!entry.alive || entry.skin_constraint_count == 0 || !world_joints ||
+      joint_count < entry.joint_count) {
+    return false;
+  }
+  bool changed = hard_reset || entry.last_joint_transforms.size() != entry.joint_count;
+  for (u32 i = 0; i < entry.joint_count; ++i) {
+    if (!IsFinite(world_joints[i])) return false;
+    if (!changed) {
+      for (u32 element = 0; element < 16; ++element) {
+        if (std::abs(world_joints[i].m[element] - entry.last_joint_transforms[i].m[element]) >
+            1.0e-7f) {
+          changed = true;
+          break;
+        }
+      }
+    }
+  }
+  if (!changed) return true;
+  {
+    JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(), entry.body);
+    if (!lock.Succeeded()) return false;
+    JPH::Body& body = lock.GetBody();
+    const JPH::RMat44 center_of_mass = body.GetCenterOfMassTransform();
+    const JPH::Mat44 to_local = center_of_mass.InversedRotationTranslation().ToMat44();
+    entry.skin_pose.clear();
+    entry.skin_pose.reserve(entry.joint_count);
+    for (u32 i = 0; i < entry.joint_count; ++i) {
+      entry.skin_pose.push_back(to_local * ToJolt(world_joints[i]));
+    }
+    auto* soft = static_cast<JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
+    const bool initialize_skin = entry.last_joint_transforms.empty();
+    soft->SkinVertices(center_of_mass, entry.skin_pose.data(), entry.joint_count,
+                        hard_reset || initialize_skin, impl_->skin_allocator);
+    soft->SetEnableSkinConstraints(true);
+  }
+  entry.last_joint_transforms.assign(world_joints, world_joints + entry.joint_count);
+  impl_->system->GetBodyInterface().ActivateBody(entry.body);
+  return true;
+}
+
+void PhysicsWorld::SetClothWind(ClothId id, const Vec3& velocity) {
+  if (!impl_ || id == 0 || id > impl_->cloth.size() || !IsFinite(velocity)) return;
+  Impl::ClothEntry& entry = impl_->cloth[id - 1];
+  if (!entry.alive) return;
+  const JPH::Vec3 previous = entry.wind;
+  entry.wind = ToJolt(velocity);
+  if (!entry.wind.IsClose(previous)) impl_->system->GetBodyInterface().ActivateBody(entry.body);
+}
+
+void PhysicsWorld::SetClothPressure(ClothId id, f32 pressure) {
+  if (!impl_ || id == 0 || id > impl_->cloth.size() || !std::isfinite(pressure) || pressure < 0) {
+    return;
+  }
+  Impl::ClothEntry& entry = impl_->cloth[id - 1];
+  if (!entry.alive || !entry.pressure_capable) return;
+  bool changed = false;
+  {
+    JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(), entry.body);
+    if (!lock.Succeeded()) return;
+    auto* soft =
+        static_cast<JPH::SoftBodyMotionProperties*>(lock.GetBody().GetMotionProperties());
+    changed = soft->GetPressure() != pressure;
+    if (changed) soft->SetPressure(pressure);
+  }
+  if (changed) impl_->system->GetBodyInterface().ActivateBody(entry.body);
+}
+
+u32 PhysicsWorld::ClothVertexCount(ClothId id) const {
+  if (!impl_ || id == 0 || id > impl_->cloth.size()) return 0;
+  const Impl::ClothEntry& entry = impl_->cloth[id - 1];
+  return entry.alive ? entry.vertex_count : 0;
+}
+
+bool PhysicsWorld::GetClothPositions(ClothId id, Vec3* out, u32 count) const {
+  if (!impl_ || !out || id == 0 || id > impl_->cloth.size()) return false;
+  const Impl::ClothEntry& entry = impl_->cloth[id - 1];
+  if (!entry.alive || count < entry.vertex_count) return false;
+  JPH::BodyLockRead lock(impl_->system->GetBodyLockInterface(), entry.body);
+  if (!lock.Succeeded()) return false;
+  const JPH::Body& body = lock.GetBody();
+  const auto* soft =
+      static_cast<const JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
+  const JPH::RMat44 center_of_mass = body.GetCenterOfMassTransform();
+  const JPH::Array<JPH::SoftBodyVertex>& vertices = soft->GetVertices();
+  for (u32 i = 0; i < entry.vertex_count; ++i) {
+    const JPH::RVec3 world = center_of_mass * vertices[i].mPosition;
+    out[i] = {static_cast<f32>(world.GetX()), static_cast<f32>(world.GetY()),
+              static_cast<f32>(world.GetZ())};
+  }
+  return true;
+}
+
+void PhysicsWorld::RemoveCloth(ClothId id) {
+  if (!impl_ || id == 0 || id > impl_->cloth.size()) return;
+  Impl::ClothEntry& entry = impl_->cloth[id - 1];
+  if (!entry.alive) return;
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  bodies.RemoveBody(entry.body);
+  bodies.DestroyBody(entry.body);
+  entry = Impl::ClothEntry{};
 }
 
 bool PhysicsWorld::Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance,
