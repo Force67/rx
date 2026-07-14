@@ -92,7 +92,12 @@ void main(uint3 id : SV_DispatchThreadID) {
   uint checksum = RcgiCellChecksum(q, lod_exp);
   uint capacity = rcgi.misc.w;
   uint slot0 = RcgiCellHash(q, lod_exp) % capacity;
+  uint stamp = RcgiStampEncode(frame);  // frame+1; 0 = never (matches cleared slot)
 
+  // Locate (or claim) this cell's slot. Empty and matching slots take directly;
+  // a slot held by a *different* cell that has not been queued for kRcgiEvictAge
+  // frames is age-reclaimed (finding: no eviction) so stale cells cannot wedge
+  // the probe chain forever.
   int found = -1;
   [loop]
   for (uint i = 0u; i < kRcgiHashProbe; ++i) {
@@ -100,10 +105,33 @@ void main(uint3 id : SV_DispatchThreadID) {
     uint prev;
     InterlockedCompareExchange(rcgi_state_rw[idx * kRcgiEntry + kRcgiOffKey], 0u, checksum, prev);
     if (prev == 0u || prev == checksum) { found = int(idx); break; }
+    // Occupied by another cell: reclaim if its last-queued stamp is stale enough.
+    uint q_stamp = rcgi_state_rw[idx * kRcgiEntry + kRcgiOffQueued];
+    if (q_stamp != 0u && (stamp - q_stamp) >= kRcgiEvictAge) {
+      uint prev2;
+      InterlockedCompareExchange(rcgi_state_rw[idx * kRcgiEntry + kRcgiOffKey], prev, checksum,
+                                 prev2);
+      if (prev2 == prev) {  // won the eviction race (ABA-tolerant: cache semantics)
+        // Clear the shaded stamp so the previous occupant's radiance cannot leak
+        // through RcgiCacheLookup before this cell is (re)shaded.
+        rcgi_state_rw[idx * kRcgiEntry + kRcgiOffStamp] = 0u;
+        found = int(idx);
+        break;
+      }
+    }
   }
   if (found < 0) return;  // hash overflow: drop the sample
 
   uint base = uint(found) * kRcgiEntry;
+
+  // Exactly one ray per cell per frame owns the multiword payload write. Claiming
+  // it through the queued-frame stamp unifies the per-frame dedup with payload
+  // ownership: losers write nothing, so the payload can never be torn across rays
+  // (finding: torn cache payloads -> OOB geometry reads in the shade pass).
+  uint prevq;
+  InterlockedExchange(rcgi_state_rw[base + kRcgiOffQueued], stamp, prevq);
+  if (prevq == stamp) return;  // another ray already owns this cell this frame
+
   rcgi_state_rw[base + kRcgiOffHit0] = (instance & 0x00ffffffu) | (geom_index << 24u);
   rcgi_state_rw[base + kRcgiOffHit1] = prim;
   rcgi_state_rw[base + kRcgiOffHit2] = f32tof16(bary.x) | (f32tof16(bary.y) << 16u);
@@ -113,15 +141,13 @@ void main(uint3 id : SV_DispatchThreadID) {
   rcgi_state_rw[base + kRcgiOffNrm] = RcgiPackOct(n);
   rcgi_state_rw[base + kRcgiOffHitT] = asuint(distance);
 
-  uint stamp = rcgi_state_rw[base + kRcgiOffStamp];
-  bool stale = (stamp == 0u) || (frame - stamp) >= 4u;
+  // Re-shade round-robin: append to the active list only when the cached radiance
+  // is stale (never shaded, or older than 4 frames). shaded stamp is +1 encoded.
+  uint shaded = rcgi_state_rw[base + kRcgiOffStamp];
+  bool stale = (shaded == 0u) || (stamp - shaded) >= 4u;
   if (stale) {
-    uint prevq;
-    InterlockedExchange(rcgi_state_rw[base + kRcgiOffQueued], frame, prevq);
-    if (prevq != frame) {  // first thread to queue this entry this frame
-      uint slot;
-      InterlockedAdd(active_meta[0], 1u, slot);
-      if (slot < RX_RCGI_ACTIVE_CAP) active_list[slot] = uint(found);
-    }
+    uint slot;
+    InterlockedAdd(active_meta[0], 1u, slot);
+    if (slot < RX_RCGI_ACTIVE_CAP) active_list[slot] = uint(found);
   }
 }

@@ -456,13 +456,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
     ddgi_ = DdgiSystem::Create(*device_, environment_->sky_view(), environment_->sampler(),
                                *bindless_);
     if (!ddgi_) return false;
-    // RCGI (idTech8-style radiance-cached GI): needs bindless for cache shading.
-    if (bindless_) {
-      rcgi_ = RcgiSystem::Create(*device_, environment_->sky_view(), environment_->sampler(),
-                                 *bindless_);
-      if (!rcgi_) return false;
-      if (!light_grid_.Initialize(*device_)) return false;
-    }
+    // RCGI (idTech8-style radiance-cached GI) is ~85 MiB and off by default, so
+    // it is created lazily on first activation (ApplySettings), not here.
     water_ = WaterPass::Create(*device_, kSceneColorFormat, kMotionFormat, kDepthFormat,
                                mesh_pipeline_->set_layout(), material_system_->set_layout(),
                                environment_->env_set_layout(), bindless_->set_layout());
@@ -957,6 +952,23 @@ void Renderer::ApplySettings() {
     ddgi_->Configure({.probe_spacing = settings_.ddgi_spacing,
                       .hysteresis = 0.97f,
                       .energy_scale = settings_.ddgi_intensity});
+  }
+  // Lazily create RCGI (~85 MiB) the first time it is switched on, so a device
+  // that never enables it pays nothing and creation failure is non-fatal (the
+  // feature just stays unavailable). Created once, kept across toggle-off so a
+  // rapid on/off does not thrash the allocation. Needs bindless for cache shading.
+  if (settings_.rcgi && rt_available_ && bindless_ && environment_ && !rcgi_ &&
+      !rcgi_create_failed_) {
+    rcgi_ = RcgiSystem::Create(*device_, environment_->sky_view(), environment_->sampler(),
+                               *bindless_);
+    if (rcgi_ && light_grid_.Initialize(*device_)) {
+      RX_INFO("rcgi: created on first activation (~85 MiB)");
+    } else {
+      RX_ERROR("rcgi: creation failed; feature unavailable this session");
+      if (rcgi_) light_grid_.Destroy(*device_);
+      rcgi_.reset();
+      rcgi_create_failed_ = true;  // do not retry every frame
+    }
   }
   if (rcgi_) rcgi_->Configure({.hysteresis = 0.97f, .energy_scale = 1.0f});
 
@@ -2425,8 +2437,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         });
   }
 
-  if (rt_shadows || rtao_active || ddgi_active || water_pipeline_active || reflections_active ||
-      path_trace || fog_active) {
+  if (rt_shadows || rtao_active || ddgi_active || rcgi_active || water_pipeline_active ||
+      reflections_active || path_trace || fog_active) {
     base::Vector<RayTracingContext::Instance> instances;
     instances.reserve(view.draws.size());
     for (const DrawItem& item : view.draws) {
@@ -3280,12 +3292,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
           [](PassContext&) {});
     }
-    if (RcgiProbesOnlyOpt) {
+    // Probes-only A/B, or fall back to it if the gather's screen-history images
+    // failed to (re)create this frame (so we never import null images).
+    if (RcgiProbesOnlyOpt ||
+        !rcgi_->EnsureScreenResources({render_width_, render_height_})) {
       rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
                                        {render_width_, render_height_}, globals.inv_view_proj,
                                        view.camera.eye, settings_.rcgi_intensity, frame_index_);
     } else {
-      rcgi_->EnsureScreenResources({render_width_, render_height_});
       rcgi_irr = rcgi_->AddGatherChain(
           graph_, *raytracing_, tlas_slot, depth_export, normals, motion,
           {render_width_, render_height_}, globals.inv_view_proj, globals.prev_view_proj,
@@ -4556,6 +4570,7 @@ void Renderer::Shutdown() {
     surface_weather_.Destroy(*device_);
     water_.reset();
     ddgi_.reset();
+    rcgi_.reset();  // owns GPU resources through device_; destroy before device teardown
     environment_.reset();
     material_system_.reset();
     bindless_.reset();

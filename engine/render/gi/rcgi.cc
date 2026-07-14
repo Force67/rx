@@ -132,11 +132,38 @@ bool RcgiSystem::CreateResources() {
                                         .max_lod = 0.0f});
   if (!sampler_ || !linear_sampler_) return false;
 
+  // TransferDst on the atlases so they can be cleared to black at creation: a
+  // cascade blends incrementally (one per frame) and cascades not yet blended
+  // this session must read as 0, never as undefined image memory.
+  TextureUsageFlags atlas_usage =
+      kTextureUsageSampled | kTextureUsageStorage | kTextureUsageTransferDst;
   TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageStorage;
-  irradiance_ = device_.CreateImage2D(Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, usage);
-  visibility_ = device_.CreateImage2D(Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, usage);
+  irradiance_ =
+      device_.CreateImage2D(Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, atlas_usage);
+  visibility_ =
+      device_.CreateImage2D(Format::kRGBA16Float, {kAtlasWidth, kAtlasHeight}, atlas_usage);
   rays_ = device_.CreateImage2D(Format::kRGBA16Float, {kRaysPerProbe, kProbeCount}, usage);
   if (!irradiance_ || !visibility_ || !rays_) return false;
+
+  // Clear the atlases to black now (belt and braces alongside the per-cascade
+  // valid mask), then settle all three in GENERAL where the passes keep them.
+  // rays_ is fully rewritten each frame before it is read, so it only needs the
+  // undefined->general settle.
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    TextureBarrier to_clear[2] = {
+        Transition(irradiance_, ResourceState::kUndefined, ResourceState::kCopyDst),
+        Transition(visibility_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+    cmd.TextureBarriers(to_clear);
+    const f32 black[4] = {0, 0, 0, 0};
+    cmd.ClearColor(irradiance_, black);
+    cmd.ClearColor(visibility_, black);
+    TextureBarrier to_general[3] = {
+        Transition(irradiance_, ResourceState::kCopyDst, ResourceState::kGeneral),
+        Transition(visibility_, ResourceState::kCopyDst, ResourceState::kGeneral),
+        Transition(rays_, ResourceState::kUndefined, ResourceState::kGeneral)};
+    cmd.TextureBarriers(to_general);
+  });
+  atlas_initialized_ = true;  // the first-touch transition in AddToGraph is done
 
   // state_ / active_meta_ are FillBuffer-cleared, so they need TRANSFER_DST.
   state_ = device_.CreateBuffer(static_cast<u64>(kHashCapacity) * kEntryStride * sizeof(u32),
@@ -302,10 +329,10 @@ void RcgiSystem::DestroyScreenResources() {
   screen_history_valid_ = false;
 }
 
-void RcgiSystem::EnsureScreenResources(Extent2D extent) {
+bool RcgiSystem::EnsureScreenResources(Extent2D extent) {
   if (extent.width == screen_extent_.width && extent.height == screen_extent_.height &&
       screen_color_hist_) {
-    return;
+    return true;
   }
   DestroyScreenResources();
   screen_extent_ = extent;
@@ -316,7 +343,11 @@ void RcgiSystem::EnsureScreenResources(Extent2D extent) {
   irr_hist_[1] = device_.CreateImage2D(Format::kRGBA16Float, extent, usage);
   if (!screen_color_hist_ || !screen_depth_hist_ || !irr_hist_[0] || !irr_hist_[1]) {
     RX_ERROR("rcgi screen resource creation failed");
-    return;
+    // Tear down whatever was created and clear the cached extent so a later
+    // frame retries (the extent fast-path above would otherwise wedge on a
+    // partial success). The caller must skip the gather chain this frame.
+    DestroyScreenResources();
+    return false;
   }
   // Prime to kGeneral so the first frame's imports have a defined source state.
   device_.ImmediateSubmit([&](CommandList& cmd) {
@@ -333,6 +364,7 @@ void RcgiSystem::EnsureScreenResources(Extent2D extent) {
   irr_hist_state_[1] = ResourceState::kGeneral;
   screen_history_valid_ = false;
   screen_reset_ = true;  // the freshly created temporal history holds undefined data
+  return true;
 }
 
 void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
@@ -344,19 +376,33 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   f32 jump = std::sqrt((camera.x - last_camera_.x) * (camera.x - last_camera_.x) +
                        (camera.y - last_camera_.y) * (camera.y - last_camera_.y) +
                        (camera.z - last_camera_.z) * (camera.z - last_camera_.z));
-  if (history_valid_ && jump > kBaseSpacing * kProbesPerAxis) clear_hash_ = true;
+  if (history_valid_ && jump > kBaseSpacing * kProbesPerAxis) {
+    clear_hash_ = true;
+    // A teleport invalidates every cascade's blended history, not just the one
+    // updated this frame: each must re-converge (reset=true) on its next turn.
+    for (u32 c = 0; c < kCascades; ++c) cascade_valid_[c] = false;
+  }
   last_camera_ = camera;
 
   if (!history_valid_) {
-    for (u32 c = 0; c < kCascades; ++c) blended_origin_[c] = SnapOrigin(camera, c);
+    for (u32 c = 0; c < kCascades; ++c) {
+      blended_origin_[c] = SnapOrigin(camera, c);
+      cascade_valid_[c] = false;
+    }
   }
   u32 current = frame_index % kCascades;
   Vec3 new_origin = SnapOrigin(camera, current);
-  bool reset = !history_valid_ || new_origin.x != blended_origin_[current].x ||
+  // Reset (hysteresis 0, full overwrite) when this cascade has never been blended
+  // since creation/teleport, or when it just snapped to a new origin. Only the
+  // *current* cascade blends this frame, so validity is tracked per cascade;
+  // marking history globally valid after one cascade's reset (the old behaviour)
+  // left the other three cascades blending against undefined atlas memory.
+  bool reset = !cascade_valid_[current] || new_origin.x != blended_origin_[current].x ||
                new_origin.y != blended_origin_[current].y ||
                new_origin.z != blended_origin_[current].z;
   blended_origin_[current] = new_origin;
   history_valid_ = true;
+  cascade_valid_[current] = true;  // blended this frame -> valid from here on
 
   f32 current_spacing = kBaseSpacing * static_cast<f32>(1u << current);
 
@@ -393,6 +439,17 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   g.params[1] = settings_.hysteresis;
   g.params[2] = settings_.energy_scale;
   g.params[3] = kBaseCell;
+  // Per-cascade validity mask consumed by the bounce/resolve/gather sampling
+  // (RcgiCascadeValid): a cascade contributes only once blended at least once.
+  // The current cascade is included here (it blends this frame); its pre-blend
+  // reads in the same frame land on the black-cleared atlas, so 0, not garbage.
+  u32 valid_mask = 0;
+  for (u32 c = 0; c < kCascades; ++c)
+    if (cascade_valid_[c]) valid_mask |= (1u << c);
+  g.valid[0] = valid_mask;
+  g.valid[1] = 0;
+  g.valid[2] = 0;
+  g.valid[3] = 0;
   GpuBuffer& globals = globals_buffers_[frame_index % 2];
   std::memcpy(globals.mapped, &g, sizeof(g));
 
@@ -421,13 +478,16 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
         }
 
         // Zero the hash on first frame / teleport (garbage keys = false hits).
+        // The probe trace consumes these via InterlockedCompareExchange, which
+        // both reads and writes, so the clear must be visible to compute READS
+        // as well as writes (kComputeReadWrite, not just kComputeWrite).
         if (do_clear) {
           ctx.cmd->FillBuffer(state_, 0, state_.size, 0);
-          ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeWrite);
+          ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeReadWrite);
         }
-        // Per-frame: reset the active-cell counter.
+        // Per-frame: reset the active-cell counter (read+incremented by InterlockedAdd).
         ctx.cmd->FillBuffer(active_meta_, 0, active_meta_.size, 0);
-        ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeWrite);
+        ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeReadWrite);
 
         // Probe trace: register hits into the cache, sky into the rays buffer.
         ctx.cmd->BindPipeline(probe_trace_pipeline_);

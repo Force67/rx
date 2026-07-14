@@ -37,6 +37,11 @@ static const uint kRcgiVisTexels = 8u;   // interior visibility texels / probe
 static const uint kRcgiRaysPerProbe = 32u;
 static const uint kRcgiEntry = 12u;      // u32 per hash slot (offsets below)
 static const uint kRcgiHashProbe = 8u;   // linear-probe steps
+// Age-based eviction: during insertion, a probed slot owned by a different cell
+// whose last-queued stamp is older than this (frames) may be reclaimed. Cache
+// semantics tolerate the ABA window this opens (a slot re-inserted within the
+// same probe is rare and only costs one stale radiance sample).
+static const uint kRcgiEvictAge = 256u;
 
 // Hash-slot u32 offsets.
 static const uint kRcgiOffKey = 0u;   // checksum, 0 = empty
@@ -48,9 +53,14 @@ static const uint kRcgiOffPosY = 5u;
 static const uint kRcgiOffPosZ = 6u;
 static const uint kRcgiOffNrm = 7u;   // world normal, octahedral (2x f16)
 static const uint kRcgiOffHitT = 8u;  // hit distance (f32)
-static const uint kRcgiOffStamp = 9u;    // last shade frame (0 = never)
-static const uint kRcgiOffQueued = 10u;  // last frame queued for shading
+static const uint kRcgiOffStamp = 9u;    // last shade frame, +1 encoded (0 = never shaded)
+static const uint kRcgiOffQueued = 10u;  // last frame queued/owned, +1 encoded (0 = never)
 static const uint kRcgiOffPad = 11u;
+
+// Frame stamps stored in slots 9/10 are frame_index+1 so that a freshly cleared
+// slot (0) reads as "never" and can never be mistaken for frame 0. Callers pass
+// frame_index; encode/decode through these.
+uint RcgiStampEncode(uint frame_index) { return frame_index + 1u; }
 
 static const float kRcgiPi = 3.14159265359;
 
@@ -62,7 +72,15 @@ struct RcgiGlobals {
   uint4 counts;                          // probes x,y,z, irradiance texels
   uint4 misc;                            // x current cascade, y frame, z cascades, w hash capacity
   float4 params;                         // x max ray dist, y hysteresis, z energy scale, w base cell
+  uint4 valid;                           // x = per-cascade "blended since (re)creation" bitmask
 };
+
+// A cascade contributes only once it has actually been blended at least once
+// since creation/teleport; until then its atlas slab is undefined (or freshly
+// cleared to black) and must read as zero.
+bool RcgiCascadeValid(RcgiGlobals g, uint cascade) {
+  return (g.valid.x & (1u << cascade)) != 0u;
+}
 
 // ---- octahedral ----
 float2 RcgiOctEncode(float3 d) {
@@ -184,6 +202,9 @@ float3 SampleRcgiIrradiance(RcgiGlobals g, Texture2D irr_atlas, SamplerState irr
                             float3 n, float3 v) {
   uint c;
   if (!RcgiSelectCascade(g, world_pos, c)) return 0.0.xxx;
+  // A not-yet-blended cascade holds undefined (or black) atlas data; skip it so
+  // it contributes zero rather than garbage (finding: first-use blend).
+  if (!RcgiCascadeValid(g, c)) return 0.0.xxx;
   float spacing = g.cascade_origin[c].w;
   float3 origin = g.cascade_origin[c].xyz;
 
@@ -246,6 +267,10 @@ bool RcgiCacheLookup(RcgiGlobals g, StructuredBuffer<uint> state, StructuredBuff
     uint idx = (slot0 + i) % capacity;
     uint key = state[idx * kRcgiEntry + kRcgiOffKey];
     if (key == checksum) {
+      // The key can be published (by the probe trace) a frame before the shade
+      // pass fills the radiance, so an entry with a zero SHADED stamp still holds
+      // undefined radiance. Reject it until it has been shaded at least once.
+      if (state[idx * kRcgiEntry + kRcgiOffStamp] == 0u) return false;
       rad = RcgiUnpackRadiance(radiance[idx]);
       return true;
     }

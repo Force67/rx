@@ -341,6 +341,65 @@ gather, no history copies — all gated on `rcgi_world`).
   but a full prev-world reconstruction would be tighter.
 - **Pre-existing (not M2)**: the M1 `rcgi_args` indirect-dispatch barrier trips
   a validation warning (`VkMemoryBarrier2` INDIRECT_COMMAND_READ under a compute
-  dst stage — an rhi-layer `BarrierScope::kIndirectArgs` translation issue,
-  engine-wide, left untouched). M2 fixed the M1 `vkCmdFillBuffer` TRANSFER_DST
-  errors by adding `kBufferUsageTransferDst` to the filled buffers.
+  dst stage — an rhi-layer `BarrierScope::kIndirectArgs` translation issue that
+  only surfaces on the **async compute queue** (the `compute_only_` stage filter
+  drops `DRAW_INDIRECT` and falls back to `COMPUTE_SHADER`); engine-wide, left
+  untouched — clean with async off). M2 fixed the M1 `vkCmdFillBuffer`
+  TRANSFER_DST errors by adding `kBufferUsageTransferDst` to the filled buffers.
+
+---
+
+## Review fixes (PR #12)
+
+Behavioral changes landed while addressing the PR review; the notes above are
+updated inline where they described the old behavior.
+
+- **Lazy creation.** `RcgiSystem` + `LightGrid` (~85 MiB) are now created on the
+  first activation in `Renderer::ApplySettings` (`settings_.rcgi && rt_available_
+  && bindless_ && !rcgi_`), not eagerly on every RT-capable device. Creation
+  failure is non-fatal: it logs, leaves `rcgi_` null (feature silently
+  unavailable), and latches `rcgi_create_failed_` so it is not retried each
+  frame. Created-once: toggling RCGI off keeps the allocation (no 85 MiB thrash).
+  A `RX_INFO("rcgi: created on first activation")` line fires only when it is
+  actually enabled.
+- **Frame-stamp encoding.** The per-entry shade stamp (slot 9) and queued stamp
+  (slot 10) are stored as `frame_index + 1` (`RcgiStampEncode`), so a cleared
+  slot (0) reads unambiguously as "never" and frame 0 is not aliased with the
+  empty sentinel. `RcgiCacheLookup` now rejects a key-matched entry whose shade
+  stamp is still 0 (published by the probe trace but not yet shaded → undefined
+  radiance), falling through to the cascade/sky level.
+- **Cache payload ownership.** Exactly one ray per cell per frame claims the
+  entry via `InterlockedExchange` on the queued stamp and writes the full
+  multiword payload; losers write nothing, so the payload can no longer be torn
+  across rays. The shade pass also bounds-checks the unpacked instance/geometry/
+  material indices against the record counts before any bindless fetch.
+- **Age-based eviction.** During the insertion probe, a slot owned by a different
+  cell whose queued stamp is older than `kRcgiEvictAge` (256 frames, in
+  `rcgi_common.hlsli`) is reclaimed with a key `InterlockedCompareExchange`; the
+  winner zeroes the shade stamp so the previous occupant's radiance cannot leak.
+  ABA is tolerated (cache semantics). This replaces "insert only accepts
+  empty-or-matching slots; stale cells accumulate until probing rejects samples".
+- **Per-cascade validity.** Only the round-robin `frame % 4` cascade blends each
+  frame, so first-blend reset and sample validity are tracked per cascade
+  (`cascade_valid_[4]`), not a single global `history_valid_`. A cascade's first
+  blend after creation/teleport runs with `reset=true` (hysteresis 0). A
+  per-cascade valid bitmask is uploaded in `RcgiGlobals::valid.x`; the shared
+  `SampleRcgiIrradiance` returns zero from a not-yet-valid cascade. The atlases
+  are additionally cleared to black at creation (they now carry
+  `kTextureUsageTransferDst`) so even a pre-blend read is 0, not garbage.
+- **Barrier scopes.** The post-`FillBuffer` clear barriers for `state_` /
+  `active_meta_` now target `BarrierScope::kComputeReadWrite` (new RHI scope =
+  compute read + storage write), because the probe trace consumes those buffers
+  through `InterlockedCompareExchange`/`InterlockedAdd`, which read as well as
+  write. (`light_grid` writes `cell_counts` per-thread with no clear, so no
+  equivalent hazard.)
+- **Screen-resource failure & upscale robustness.** `EnsureScreenResources`
+  returns `bool`; on failure it tears down partial allocations, clears the cached
+  extent (so a later frame retries), and the caller falls back to the
+  probes-only resolve — no null images are imported. The upscale pass treats an
+  all-sky tap neighborhood (inverted `mn > mx`) as a disocclusion (zero
+  irradiance, history reset, temporal clamp skipped) and guards its output to a
+  finite non-negative range so history can never go non-finite.
+- **Shutdown order.** `Renderer::Shutdown` resets `rcgi_` (and destroys
+  `light_grid_`) before `device_` teardown, next to `ddgi_`, so `~RcgiSystem`
+  no longer runs against a destroyed `Device&`.
