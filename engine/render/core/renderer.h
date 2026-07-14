@@ -449,7 +449,8 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<MaterialSystem> material_system_;
   std::unique_ptr<EnvironmentSystem> environment_;
   std::unique_ptr<DdgiSystem> ddgi_;
-  std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI)
+  std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI), lazily created
+  bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
   LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
   std::unique_ptr<WaterPass> water_;
   std::unique_ptr<MeshPipeline> mesh_pipeline_;

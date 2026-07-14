@@ -63,8 +63,6 @@ void main(uint3 id : SV_DispatchThreadID) {
   float wsum = 0.0;
   // Track evaluated irradiance of each tap for the neighborhood clamp.
   float3 mn = 1e30.xxx, mx = 0.0.xxx;
-  Sh2 best_sh = ShZero();
-  float best_w = -1.0;
   [unroll]
   for (uint i = 0; i < 4; ++i) {
     int2 q = clamp(base + taps[i], int2(0, 0), int2(gsz) - 1);
@@ -89,10 +87,18 @@ void main(uint3 id : SV_DispatchThreadID) {
     float3 tap_irr = max(ShIrradiance(tap, cn), 0.0.xxx);
     mn = min(mn, tap_irr);
     mx = max(mx, tap_irr);
-    if (w > best_w) { best_w = w; best_sh = tap; }
   }
-  if (wsum <= 1e-4) { sh = best_sh; wsum = 1.0; }  // nearest-valid fallback
-  else { float inv = 1.0 / wsum; sh.r *= inv; sh.g *= inv; sh.b *= inv; }
+  // No valid tap at all: every gather-res representative of this full-res pixel
+  // was sky (thin geometry over a sky background). mn/mx are still inverted
+  // (1e30 / 0), so the neighborhood clamp below would produce non-finite FP16.
+  // Treat it as a disocclusion: emit zero irradiance and reset history, skipping
+  // the temporal clamp entirely.
+  if (wsum <= 1e-4) {
+    irradiance_out[id.xy] = 0.0.xxxx;
+    hist_out[id.xy] = 0.0.xxxx;
+    return;
+  }
+  float inv = 1.0 / wsum; sh.r *= inv; sh.g *= inv; sh.b *= inv;
 
   // Evaluate with the full-res normal -> irradiance (restores normal detail).
   float3 cur = max(ShIrradiance(sh, cn), 0.0.xxx);
@@ -116,6 +122,12 @@ void main(uint3 id : SV_DispatchThreadID) {
     float w = 1.0 / n;
     accum = lerp(hist_c, cur, w);
   }
+
+  // Final guard: history must never go non-finite (a single NaN/Inf would
+  // poison every subsequent temporal frame). Clamp to a finite, non-negative
+  // FP16 range and scrub any stray non-finite lanes.
+  accum = clamp(accum, 0.0.xxx, 65504.0.xxx);
+  if (any(isnan(accum)) || any(isinf(accum))) { accum = 0.0.xxx; n = 1.0; }
 
   hist_out[id.xy] = float4(accum, n);
   irradiance_out[id.xy] = float4(accum * push.params.y, 1.0);  // apply intensity once

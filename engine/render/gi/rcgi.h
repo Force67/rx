@@ -89,7 +89,10 @@ class RcgiSystem {
 
   // (Re)create the render-resolution screen-side history images when the extent
   // changes. No-op if already sized. Must be called before AddGatherChain.
-  void EnsureScreenResources(Extent2D extent);
+  // Returns false if (re)creation failed: in that case nothing is left imported
+  // and the caller must skip the gather chain (fall back to the probes-only
+  // resolve) for this frame; the cleared extent lets a later frame retry.
+  bool EnsureScreenResources(Extent2D extent);
 
   // Zero the hash on the next update (camera teleports / big jumps).
   void RequestReset() {
@@ -106,6 +109,7 @@ class RcgiSystem {
     u32 counts[4];                     // probes x,y,z, irradiance texels
     u32 misc[4];                       // x current cascade, y frame, z cascades, w hash capacity
     f32 params[4];                     // x max ray dist, y hysteresis, z energy, w base cell
+    u32 valid[4];                      // x per-cascade "blended since (re)creation" bitmask
   };
 
   explicit RcgiSystem(Device& device) : device_(device) {}
@@ -163,6 +167,10 @@ class RcgiSystem {
   bool screen_history_valid_ = false;
   bool screen_reset_ = true;  // force a temporal reset after (re)creating the images
   bool clear_hash_ = true;  // first update zeroes the hash
+  // Per-cascade "has been blended at least once since creation/teleport". Only
+  // the current (frame % 4) cascade blends each frame, so first-blend reset and
+  // sample validity are tracked per cascade, not as one global flag.
+  bool cascade_valid_[kCascades] = {};
   Vec3 blended_origin_[kCascades] = {};
   Vec3 last_camera_{};
 };

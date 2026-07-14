@@ -216,6 +216,10 @@ ScopeInfo ScopeInfoOf(BarrierScope scope, bool as_source) {
       return {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
               VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
                   VK_ACCESS_2_UNIFORM_READ_BIT};
+    case BarrierScope::kComputeReadWrite:
+      return {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+              VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT |
+                  VK_ACCESS_2_UNIFORM_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT};
     case BarrierScope::kGraphicsRead:
       return {VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT,
               VK_ACCESS_2_MEMORY_READ_BIT};

@@ -89,13 +89,26 @@ void main(uint3 id : SV_DispatchThreadID) {
                              rcgi_state_rw[base + kRcgiOffPosZ]));
   float3 n = RcgiUnpackOct(rcgi_state_rw[base + kRcgiOffNrm]);
 
+  // Defensive bounds check on the unpacked geometry indices. The payload is now
+  // single-writer (probe trace claims one owner per cell), but a stale/evicted
+  // slot or corrupt key could still surface an out-of-range instance; reject it
+  // rather than issue an out-of-bounds bindless fetch.
+  uint mesh_count, geom_count, mat_count, stride;
+  mesh_records.GetDimensions(mesh_count, stride);
+  geometry_records.GetDimensions(geom_count, stride);
+  material_records.GetDimensions(mat_count, stride);
+  if (instance >= mesh_count) return;
+
   // Material: interpolate uv, sample base colour, read emissive.
   MeshRecord mesh = mesh_records[NonUniformResourceIndex(instance)];
-  GeometryRecord geometry = geometry_records[mesh.geometry_offset + geom_index];
+  uint geom_slot = mesh.geometry_offset + geom_index;
+  if (geom_slot >= geom_count) return;
+  GeometryRecord geometry = geometry_records[geom_slot];
   uint3 tri = RxLoadTriangle(mesh, geometry.index_offset + prim * 3);
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
   float2 uv = RxLoadUv(mesh, tri[0]) * w[0] + RxLoadUv(mesh, tri[1]) * w[1] +
               RxLoadUv(mesh, tri[2]) * w[2];
+  if (geometry.material_index >= mat_count) return;
   MaterialRecord material = material_records[NonUniformResourceIndex(geometry.material_index)];
   float3 albedo = material.base_color_factor.rgb;
   if (material.base_color_texture != 0xffffffffu) {
@@ -136,5 +149,6 @@ void main(uint3 id : SV_DispatchThreadID) {
                                             rcgi_vis_sampler, pos, n, n);
 
   rcgi_radiance_rw[idx] = RcgiPackRadiance(radiance);
-  rcgi_state_rw[base + kRcgiOffStamp] = rcgi.misc.y;
+  // +1 encoded (0 = never shaded) so RcgiCacheLookup can reject unshaded entries.
+  rcgi_state_rw[base + kRcgiOffStamp] = RcgiStampEncode(rcgi.misc.y);
 }
