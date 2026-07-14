@@ -2081,6 +2081,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     f32 distance_sq;
   };
   base::Vector<TransparentDraw> transparent;
+  transparent.reserve(view.draws.size());
   bool any_water = false;
   const DrawItem* adaptive_water_item = nullptr;
   const GpuSubmesh* adaptive_water_submesh = nullptr;

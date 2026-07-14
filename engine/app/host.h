@@ -92,6 +92,10 @@ class RX_APP_EXPORT Host {
 
   // Last frame's world matrices keyed by entity, for motion vectors.
   base::UnorderedMap<u64, Mat4> prev_transforms_;
+  base::UnorderedMap<u64, Mat4> transforms_scratch_;  // swaps with prev_ each frame
+  // Persistent so the per-frame gather lists keep their capacity (see
+  // FrameView::Clear).
+  render::FrameView frame_view_;
 
   Services services_;
 

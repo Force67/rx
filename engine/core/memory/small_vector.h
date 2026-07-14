@@ -67,6 +67,12 @@ class SmallVector {
 
   void pop_back() { data_[--size_].~T(); }
 
+  void resize(size_t new_size) {
+    reserve(new_size);
+    while (size_ < new_size) new (data_ + size_++) T();
+    while (size_ > new_size) pop_back();
+  }
+
   void clear() {
     for (size_t i = 0; i < size_; ++i) data_[i].~T();
     size_ = 0;

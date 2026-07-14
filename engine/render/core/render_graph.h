@@ -4,6 +4,7 @@
 #include <functional>
 #include <string>
 
+#include <base/containers/static_function.h>
 #include <base/containers/vector.h>
 
 #include "core/types.h"
@@ -101,8 +102,14 @@ class RenderGraph {
     bool join_async = false;
   };
 
-  using SetupFn = std::function<void(PassBuilder&)>;
-  using ExecuteFn = std::function<void(PassContext&)>;
+  // Inline-storage closures: ~63 passes are added per frame, and std::function
+  // heap-allocated every capture bigger than its tiny SBO. Setup runs (and
+  // dies) inside AddPass; execute closures live in passes_ until Reset. A
+  // capture larger than the inline budget is a compile error — restructure it
+  // (capture pointers/handles, move big payloads into a member) or bump the
+  // budget deliberately.
+  using SetupFn = base::StaticFunction<void(PassBuilder&), 256>;
+  using ExecuteFn = base::StaticFunction<void(PassContext&), 768>;
 
   ResourceHandle CreateTexture(const TransientTextureDesc& desc);
 
@@ -161,6 +168,10 @@ class RenderGraph {
   };
   const Stats& stats() const { return stats_; }
 
+  // The Stats snapshot copies every pass/resource name each Compile; only the
+  // debug inspector reads it, so it stays off until the inspector is open.
+  void set_stats_enabled(bool enabled) { stats_enabled_ = enabled; }
+
  private:
   struct Resource {
     TransientTextureDesc desc;
@@ -183,7 +194,9 @@ class RenderGraph {
   base::Vector<Resource> resources_;
   base::Vector<Pass> passes_;
   base::Vector<TextureBarrier> final_barriers_;
+  base::Vector<TextureUsageFlags> usage_scratch_;  // reused across Compiles
   Stats stats_;
+  bool stats_enabled_ = false;
   PassBegin pass_begin_;
   PassEnd pass_end_;
 };

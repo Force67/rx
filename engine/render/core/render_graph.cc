@@ -136,7 +136,9 @@ void RenderGraph::AddPass(std::string name, SetupFn setup, ExecuteFn execute) {
 bool RenderGraph::Compile(Device& device, TransientPool& pool) {
   // Transients get the union of every declared usage so one physical image
   // serves all passes that touch it.
-  base::Vector<TextureUsageFlags> usages(resources_.size());
+  base::Vector<TextureUsageFlags>& usages = usage_scratch_;
+  usages.clear();
+  usages.resize(resources_.size());
   for (const Pass& pass : passes_) {
     for (const auto& access : pass.builder.accesses) {
       usages[access.handle - 1] |= ImageUsageFor(access.usage);
@@ -180,7 +182,9 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
     if (resource.external_state) *resource.external_state = resource.state;
   }
 
-  // Snapshot the compiled graph for the debug inspector.
+  // Snapshot the compiled graph for the debug inspector; costs a string copy
+  // per pass/resource, so only while the inspector is open.
+  if (!stats_enabled_) return true;
   stats_ = Stats{};
   for (const Pass& pass : passes_) {
     Stats::Pass entry;

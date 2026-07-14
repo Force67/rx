@@ -10,6 +10,8 @@
 #include "core/feature_registry.h"
 #include "core/log.h"
 #include "core/math.h"
+#include "core/memory/frame_arena.h"
+#include "core/memory/memory_config.h"
 #include "scene/components.h"
 
 // Host lifecycle and the per-frame heartbeat: subsystem bringup in dependency
@@ -40,6 +42,9 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   app_ = &app;
   InitFeatures();              // apply RX_FEATURES overrides before any flag read
   base::InitOptionsFromEnv();  // populate every base::Option from the environment
+  // Memory plan first, so the pools are pre-reserved and the budgets are in
+  // place before any subsystem starts allocating in earnest.
+  mem::ApplyMemoryConfig(mem::LoadMemoryConfig());
   jobs_ = std::make_unique<JobSystem>();
   ConfigureClock(20.0f);
 
@@ -202,6 +207,7 @@ void Host::ConfigureClock(f32 base_timescale) {
 
 bool Host::RunFrame() {
   if (quit_.load(std::memory_order_relaxed)) return false;
+  mem::MainFrameArena().Reset();
   if (FixedDt.get() > 0.0f) timer_.set_fixed_delta(static_cast<f64>(FixedDt.get()));
   if (window_ && !window_->PumpEvents()) return false;
   // Resolve this pump's raw keyboard/mouse + gamepad state into semantic
@@ -241,7 +247,8 @@ bool Host::RunFrame() {
 
     scheduler_.RunStage(ecs::Stage::kPreRender, world_, frame_delta);
 
-    render::FrameView view;
+    render::FrameView& view = frame_view_;
+    view.Clear();
     view.frame_delta_seconds = frame_delta;
     if (config_.gather_entity_draws) GatherEntityDraws(view);
     app_->OnBuildView(frame_delta, view);
@@ -273,8 +280,11 @@ Mat4 LocalTransformMatrix(const scene::Transform& t) {
 }  // namespace
 
 void Host::GatherEntityDraws(render::FrameView& view) {
-  // Rebuilt every frame so destroyed entities drop out on their own.
-  base::UnorderedMap<u64, Mat4> transforms;
+  // Rebuilt every frame so destroyed entities drop out on their own; the two
+  // maps swap roles each frame so buckets are reused instead of re-allocated.
+  base::UnorderedMap<u64, Mat4>& transforms = transforms_scratch_;
+  transforms.clear();
+  transforms.reserve(prev_transforms_.size());
 
   // Hierarchy is opt-in per world. A world with zero Parent components visits no
   // Parent archetype here, so this probe is near-free and the parent-free path
@@ -319,7 +329,7 @@ void Host::GatherEntityDraws(render::FrameView& view) {
           emit(entity, world_matrix(entity), renderable.mesh);
         });
   }
-  prev_transforms_ = std::move(transforms);
+  std::swap(prev_transforms_, transforms_scratch_);
 }
 
 int Host::Run() {
