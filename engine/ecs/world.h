@@ -45,14 +45,27 @@ class RX_ECS_EXPORT World {
   }
 
   // Calls fn(Entity, Ts&...) for every entity that has all of Ts.
+  // Allocation-free: the required set lives on the stack and iteration walks
+  // each archetype chunk by chunk.
   template <typename... Ts, typename Fn>
   void Each(Fn&& fn) {
-    Signature required = MakeSignature({GetComponentId<Ts>()...});
+    static_assert(sizeof...(Ts) > 0);
+    ComponentId required[sizeof...(Ts)] = {GetComponentId<Ts>()...};
+    std::sort(std::begin(required), std::end(required));
     for (auto& archetype : archetypes_) {
-      if (!SignatureContainsAll(archetype->signature(), required)) continue;
-      auto columns = std::make_tuple(static_cast<Ts*>(archetype->ColumnData(GetComponentId<Ts>()))...);
-      for (u32 row = 0; row < archetype->row_count(); ++row) {
-        fn(archetype->entity_at(row), std::get<Ts*>(columns)[row]...);
+      if (!SignatureContainsAll(archetype->signature(), required, sizeof...(Ts))) continue;
+      const u32 count = archetype->row_count();
+      const u32 rows_per_chunk = archetype->rows_per_chunk();
+      int indices[sizeof...(Ts)] = {archetype->ColumnIndex(GetComponentId<Ts>())...};
+      u32 row = 0;
+      for (u32 chunk = 0; row < count; ++chunk) {
+        size_t next_index = 0;
+        std::tuple<Ts*...> columns{
+            static_cast<Ts*>(archetype->ChunkColumnData(chunk, indices[next_index++]))...};
+        const u32 in_chunk = archetype->ChunkRowCount(chunk);
+        for (u32 i = 0; i < in_chunk; ++i, ++row) {
+          fn(archetype->entity_at(row), std::get<Ts*>(columns)[i]...);
+        }
       }
     }
   }

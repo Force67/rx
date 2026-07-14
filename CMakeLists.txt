@@ -351,6 +351,12 @@ if(RX_BUILD_TESTS)
   target_link_libraries(memory_test PRIVATE rx::core)
   rx_enable_mimalloc(memory_test)
   add_test(NAME memory_test COMMAND memory_test)
+
+  # Chunked ECS storage: spawn storms, non-POD relocation, chunk reclamation.
+  add_executable(ecs_test test/ecs_test.cc)
+  target_link_libraries(ecs_test PRIVATE rx::ecs rx::core)
+  rx_enable_mimalloc(ecs_test)
+  add_test(NAME ecs_test COMMAND ecs_test)
 endif()
 
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a
