@@ -15,3 +15,4 @@
 RX_FEATURE(PathTracer, "render.pathtracer", false)
 RX_FEATURE(MeshShaderLod, "render.mesh_shader_lod", false)
 RX_FEATURE(DistantLod, "render.distant_lod", true)
+RX_FEATURE(Cloth, "physics.cloth", true)

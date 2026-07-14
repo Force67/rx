@@ -67,6 +67,15 @@ void PhysicsWorld::SetStrandGroomWind(StrandGroomId, const Vec3&) {}
 u32 PhysicsWorld::StrandGroomPositionCount(StrandGroomId) const { return 0; }
 bool PhysicsWorld::GetStrandGroomPositions(StrandGroomId, f32*, u32) const { return false; }
 void PhysicsWorld::RemoveStrandGroom(StrandGroomId) {}
+ClothId PhysicsWorld::CreateCloth(const ClothDesc&, const Mat4&) { return 0; }
+void PhysicsWorld::SetClothTransform(ClothId, const Mat4&, f32) {}
+bool PhysicsWorld::SetClothPinTargets(ClothId, const Vec3*, u32, f32) { return false; }
+bool PhysicsWorld::SetClothJointTransforms(ClothId, const Mat4*, u32, bool) { return false; }
+void PhysicsWorld::SetClothWind(ClothId, const Vec3&) {}
+void PhysicsWorld::SetClothPressure(ClothId, f32) {}
+u32 PhysicsWorld::ClothVertexCount(ClothId) const { return 0; }
+bool PhysicsWorld::GetClothPositions(ClothId, Vec3*, u32) const { return false; }
+void PhysicsWorld::RemoveCloth(ClothId) {}
 bool PhysicsWorld::Raycast(const Vec3&, const Vec3&, f32, RayHit*) const { return false; }
 bool PhysicsWorld::GetBodyTransform(BodyId, Vec3*, f32[4]) const { return false; }
 
