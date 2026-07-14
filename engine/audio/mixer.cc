@@ -84,7 +84,8 @@ void Mixer::SetMasterGain(f32 gain) {
 }
 
 void Mixer::ApplyCommands() {
-  std::vector<Command> commands;
+  std::vector<Command>& commands = commands_scratch_;
+  commands.clear();
   {
     std::lock_guard<std::mutex> lock(mutex_);
     commands.swap(pending_);
@@ -147,7 +148,8 @@ bool Mixer::FillSource(Voice& voice, size_t frames) {
                     voice.src.begin() + static_cast<std::ptrdiff_t>(voice.head) * ch);
     voice.head = 0;
   }
-  std::vector<float> chunk(kDecodeChunkFrames * ch);
+  std::vector<float>& chunk = decode_scratch_;
+  chunk.resize(static_cast<size_t>(kDecodeChunkFrames) * ch);
   while (voice.src.size() / ch - voice.head < frames) {
     if (voice.ended) return voice.src.size() / ch > voice.head;
     u32 got = voice.decoder->Read(chunk.data(), kDecodeChunkFrames);

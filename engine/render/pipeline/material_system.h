@@ -257,10 +257,18 @@ class MaterialSystem {
   bool SwapResident(TextureRecord& record, u32 first_mip, u32 frame_index);
   u64 BytesForMips(const asset::Texture& texture, u32 first_mip) const;
 
+  // Grow-only staging buffer reused across texture uploads: streaming used to
+  // create + destroy a VMA allocation per streamed texture, fragmenting the
+  // GPU heap over long sessions. Safe to reuse because uploads go through the
+  // synchronous ImmediateSubmit.
+  GpuBuffer& AcquireStaging(u64 bytes);
+
   Device& device_;
   BindlessRegistry* registry_ = nullptr;
   SamplerHandle sampler_;
   u32 sets_in_last_pool_ = 0;
+  GpuBuffer staging_;
+  u64 staging_bytes_ = 0;
 
   base::Vector<GpuBuffer> param_buffers_;  // one per pool, host visible
   base::Vector<std::unique_ptr<TextureRecord>> texture_records_;
