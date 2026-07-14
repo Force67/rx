@@ -3,6 +3,7 @@
 #include <base/containers/vector.h>
 
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 #include "ecs/world.h"
@@ -15,6 +16,10 @@ using namespace rx::ecs;
 using namespace rx::scene;
 
 int failures = 0;
+
+struct alignas(64) OverAlignedComponent {
+  int value = 0;
+};
 
 void Check(bool condition, const char* message) {
   if (condition) return;
@@ -62,6 +67,19 @@ void TestDynamicStackSurvivesArchetypeGrowth() {
   Check(pushed.result == CameraStackResult::kSuccess, "push after archetype relocation");
   Check(world.Get<CameraStack>(outputs[0])->entries.size() == 2,
         "dynamic stack grows after archetype relocation");
+}
+
+void TestOverAlignedComponentStorage() {
+  World world;
+  for (int i = 0; i < 128; ++i) {
+    Entity entity = world.Create();
+    world.Add(entity, OverAlignedComponent{.value = i});
+  }
+
+  world.Each<OverAlignedComponent>([](Entity, OverAlignedComponent& component) {
+    Check(reinterpret_cast<uintptr_t>(&component) % alignof(OverAlignedComponent) == 0,
+          "component column preserves over-alignment");
+  });
 }
 
 void TestAnimatedTransitionUsesLiveDestination() {
@@ -224,6 +242,7 @@ void TestLensAndOrientationInterpolation() {
 
 int main() {
   TestDynamicStackSurvivesArchetypeGrowth();
+  TestOverAlignedComponentStorage();
   TestAnimatedTransitionUsesLiveDestination();
   TestInterruptedTransitionStartsAtResolvedPose();
   TestActivationOwnership();

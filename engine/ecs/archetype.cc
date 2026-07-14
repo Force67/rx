@@ -9,7 +9,7 @@ namespace rx::ecs {
 
 namespace {
 
-u8* AllocateColumn(u32 byte_size, u32 align) {
+u8* AllocateColumn(size_t byte_size, u32 align) {
   if (align > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
     return static_cast<u8*>(::operator new(byte_size, std::align_val_t(align)));
   return static_cast<u8*>(::operator new(byte_size));
@@ -48,9 +48,9 @@ Archetype::Column& Archetype::Column::operator=(Column&& other) noexcept {
 void Archetype::Column::Reserve(u32 row_capacity, u32 live_rows) {
   if (row_capacity <= capacity) return;
 
-  u32 new_capacity = capacity > 0 ? capacity * 2 : 1;
+  size_t new_capacity = capacity > 0 ? capacity * 2 : 1;
   if (new_capacity < row_capacity) new_capacity = row_capacity;
-  u8* new_data = AllocateColumn(new_capacity * stride, align);
+  u8* new_data = AllocateColumn(new_capacity * static_cast<size_t>(stride), align);
   const ComponentInfo& info = GetComponentInfo(id);
   for (u32 row = 0; row < live_rows; ++row) {
     u8* source = data + static_cast<size_t>(row) * stride;

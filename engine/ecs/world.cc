@@ -3,6 +3,8 @@
 #include <cassert>
 #include <mutex>
 
+#include <base/check.h>
+
 namespace rx::ecs {
 
 namespace detail {
@@ -33,12 +35,12 @@ ComponentId ResolveComponentId(u64 type_key, const ComponentInfo& info) {
   std::lock_guard lock(registry.mutex);
   for (u32 id = 0; id < registry.count; ++id) {
     if (registry.keys[id] != type_key) continue;
-    assert(registry.infos[id].size == info.size && registry.infos[id].align == info.align &&
-           "component type-key collision");
+    BASE_BUGCHECK(registry.infos[id].size == info.size && registry.infos[id].align == info.align,
+                  "component type-key collision");
     return id;
   }
 
-  assert(registry.count < Registry::kMaxComponents && "component-type registry overflow");
+  BASE_BUGCHECK(registry.count < Registry::kMaxComponents, "component-type registry overflow");
   const ComponentId id = registry.count++;
   registry.keys[id] = type_key;
   registry.infos[id] = info;
@@ -47,7 +49,14 @@ ComponentId ResolveComponentId(u64 type_key, const ComponentInfo& info) {
 
 }  // namespace detail
 
-const ComponentInfo& GetComponentInfo(ComponentId id) { return detail::TheRegistry().infos[id]; }
+const ComponentInfo& GetComponentInfo(ComponentId id) {
+  detail::Registry& registry = detail::TheRegistry();
+#ifndef NDEBUG
+  std::lock_guard lock(registry.mutex);
+  assert(id < registry.count && "unregistered component id");
+#endif
+  return registry.infos[id];
+}
 
 World::World() { GetOrCreateArchetype({}); }
 
