@@ -1,7 +1,9 @@
 #include "render/gi/sdf_clipmap.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 #include "core/log.h"
 #include "render/gi/sdf_scene.h"
@@ -48,6 +50,18 @@ struct ClipJob {
   f32 origin[3];
   f32 voxel;
 };
+
+struct ComposeCandidate {
+  const SdfClipmap::Instance* instance;
+  const SdfScene::MeshSdf* mesh;
+  f32 distance_sq;
+};
+
+// Each candidate dispatch touches the full 128^3 clip volume. Persistent groups
+// explicitly opt into this approximate nearest-N policy; omitted instances are
+// the bounded-quality tradeoff, not a claim of scene equivalence. Ordinary frame
+// instances remain unbounded.
+constexpr size_t kMaxBoundedQualityInstancesPerClip = 32;
 
 f32 ClipVoxel(u32 clip) {
   return (SdfClipmap::kBaseExtent * static_cast<f32>(1u << clip)) / SdfClipmap::kRes;
@@ -218,7 +232,8 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
   const SdfScene* scene_ptr = &scene;
   graph.AddPass(
       "sdf_compose", [](RenderGraph::PassBuilder&) {},
-      [this, scene_ptr, jobs = std::move(jobs), instances = std::move(instances)](PassContext& ctx) {
+      [this, scene_ptr, jobs = std::move(jobs), instances = std::move(instances),
+       camera](PassContext& ctx) {
         CommandList* cmd = ctx.cmd;
         // Order this frame's writes after any prior-frame reads of the volumes.
         cmd->MemoryBarrier(BarrierScope::kComputeRead, BarrierScope::kComputeWrite);
@@ -236,9 +251,58 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
           cmd->Dispatch(groups, groups, groups);
           cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
 
+          base::Vector<ComposeCandidate> unbounded;
+          base::Vector<ComposeCandidate> bounded_quality;
           for (const Instance& inst : instances) {
             const SdfScene::MeshSdf* mesh = scene_ptr->Find(inst.mesh_key);
             if (!mesh) continue;
+
+            const Vec3 local_min{mesh->box_min[0], mesh->box_min[1], mesh->box_min[2]};
+            const Vec3 local_max{mesh->box_min[0] + mesh->voxel * mesh->res[0],
+                                 mesh->box_min[1] + mesh->voxel * mesh->res[1],
+                                 mesh->box_min[2] + mesh->voxel * mesh->res[2]};
+            Vec3 world_min{std::numeric_limits<f32>::max(), std::numeric_limits<f32>::max(),
+                           std::numeric_limits<f32>::max()};
+            Vec3 world_max{-std::numeric_limits<f32>::max(), -std::numeric_limits<f32>::max(),
+                           -std::numeric_limits<f32>::max()};
+            for (u32 corner = 0; corner < 8; ++corner) {
+              const Vec3 local{corner & 1 ? local_max.x : local_min.x,
+                               corner & 2 ? local_max.y : local_min.y,
+                               corner & 4 ? local_max.z : local_min.z};
+              const Vec3 world = TransformPoint(inst.transform, local);
+              world_min = {std::min(world_min.x, world.x), std::min(world_min.y, world.y),
+                           std::min(world_min.z, world.z)};
+              world_max = {std::max(world_max.x, world.x), std::max(world_max.y, world.y),
+                           std::max(world_max.z, world.z)};
+            }
+
+            const Vec3 clip_min{j.origin[0], j.origin[1], j.origin[2]};
+            const Vec3 clip_max =
+                clip_min + Vec3{j.voxel * SdfClipmap::kRes, j.voxel * SdfClipmap::kRes,
+                                j.voxel * SdfClipmap::kRes};
+            if (world_max.x < clip_min.x || world_max.y < clip_min.y || world_max.z < clip_min.z ||
+                world_min.x > clip_max.x || world_min.y > clip_max.y || world_min.z > clip_max.z)
+              continue;
+
+            const Vec3 closest{std::clamp(camera.x, world_min.x, world_max.x),
+                               std::clamp(camera.y, world_min.y, world_max.y),
+                               std::clamp(camera.z, world_min.z, world_max.z)};
+            const Vec3 delta = closest - camera;
+            ComposeCandidate candidate{&inst, mesh, Dot(delta, delta)};
+            (inst.bounded_quality ? bounded_quality : unbounded).push_back(candidate);
+          }
+
+          std::sort(bounded_quality.begin(), bounded_quality.end(),
+                    [](const ComposeCandidate& a, const ComposeCandidate& b) {
+                      return a.distance_sq < b.distance_sq;
+                    });
+          const size_t bounded_quality_count =
+              std::min(static_cast<size_t>(bounded_quality.size()),
+                       kMaxBoundedQualityInstancesPerClip);
+
+          auto compose = [&](const ComposeCandidate& candidate) {
+            const Instance& inst = *candidate.instance;
+            const SdfScene::MeshSdf* mesh = candidate.mesh;
 
             // Conservative local->world distance scale: the transform's minimum
             // axis scale is a safe lower bound on world distance (so the sphere
@@ -277,7 +341,9 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             cmd->Dispatch(groups, groups, groups);
             // RMW ordering across overlapping instance dispatches.
             cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
-          }
+          };
+          for (const ComposeCandidate& candidate : unbounded) compose(candidate);
+          for (size_t i = 0; i < bounded_quality_count; ++i) compose(bounded_quality[i]);
         }
         // Make the composed volumes visible to later readers (debug / S2 trace).
         cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);

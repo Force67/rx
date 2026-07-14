@@ -489,6 +489,7 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
   colors_.insert(key, color);
   if (material.is_water) water_.insert(key, 1);
   if (material.effect) effects_.insert(key, material.effect_additive ? 2 : 1);
+  if (material.normal_model_space) normal_model_space_.insert(key, 1);
   if (registry_) {
     BindlessRegistry::MaterialRecord record;
     std::memcpy(record.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
@@ -765,6 +766,10 @@ bool MaterialSystem::is_effect(u64 material_hash) const {
 bool MaterialSystem::is_effect_additive(u64 material_hash) const {
   const u8* kind = effects_.find(material_hash);
   return kind && *kind == 2;
+}
+
+bool MaterialSystem::is_normal_model_space(u64 material_hash) const {
+  return normal_model_space_.find(material_hash) != nullptr;
 }
 
 BindingSetHandle MaterialSystem::set(u64 material_hash) const {

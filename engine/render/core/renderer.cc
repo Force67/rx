@@ -132,6 +132,54 @@ u32 SelectLod(const GpuMesh& mesh, f32 distance) {
   return lod < lod_count ? lod : lod_count - 1;
 }
 
+bool SupportsStaticInstances(const GpuMesh& mesh, const MaterialSystem* materials) {
+  if (mesh.all_blend || mesh.skinned || mesh.morph_target_count > 0 || mesh.terrain_lod) return false;
+  auto supported = [materials](const base::Vector<GpuSubmesh>& submeshes) {
+    for (const GpuSubmesh& submesh : submeshes) {
+      if (submesh.blend || (materials && materials->is_normal_model_space(submesh.material))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (!supported(mesh.submeshes)) return false;
+  for (const GpuLod& lod : mesh.lods) {
+    if (!supported(lod.submeshes)) return false;
+  }
+  return true;
+}
+
+bool HasUniformScale(std::span<const Mat4> transforms) {
+  for (const Mat4& transform : transforms) {
+    const f32* m = transform.m;
+    for (u32 i = 0; i < 16; ++i)
+      if (!std::isfinite(m[i])) return false;
+    if (std::abs(m[3]) > 1e-5f || std::abs(m[7]) > 1e-5f || std::abs(m[11]) > 1e-5f ||
+        std::abs(m[15] - 1.0f) > 1e-5f)
+      return false;
+    const f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    const f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    const f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+    const f32 tolerance = std::max({sx, sy, sz}) * 1e-4f;
+    if (sx <= 1e-6f || std::abs(sx - sy) > tolerance || std::abs(sx - sz) > tolerance) return false;
+    const f32 orthogonal_tolerance = sx * sx * 1e-4f;
+    const f32 determinant = m[0] * (m[5] * m[10] - m[6] * m[9]) -
+                            m[4] * (m[1] * m[10] - m[2] * m[9]) +
+                            m[8] * (m[1] * m[6] - m[2] * m[5]);
+    if (determinant <= 0 ||
+        std::abs(m[0] * m[4] + m[1] * m[5] + m[2] * m[6]) > orthogonal_tolerance ||
+        std::abs(m[0] * m[8] + m[1] * m[9] + m[2] * m[10]) > orthogonal_tolerance ||
+        std::abs(m[4] * m[8] + m[5] * m[9] + m[6] * m[10]) > orthogonal_tolerance)
+      return false;
+  }
+  return true;
+}
+
+f32 InstanceGroupDistance(const InstanceStore::Group& group, const Vec3& eye) {
+  const Vec3 delta = eye - group.bounds_center;
+  return std::max(std::sqrt(Dot(delta, delta)) - group.bounds_radius, 0.0f) / group.lod_scale;
+}
+
 // Gribb-Hartmann frustum planes (left,right,bottom,top,near) from a column-major
 // view_proj, normalized so a point is inside when dot(n,p)+d >= 0. Far is skipped.
 void ExtractFrustumPlanes(const Mat4& vp, f32 out[5][4]) {
@@ -1123,6 +1171,34 @@ void Renderer::BakeImposter(const asset::Mesh& mesh,
   imposters_.SetInstances(*device_, instances);
 }
 
+InstanceGroupHandle Renderer::CreateInstanceGroup(u64 mesh, std::span<const Mat4> transforms) {
+  if (!device_ || device_->is_stub()) return {};
+  const GpuMesh* gpu = meshes_.find(mesh);
+  if (!gpu || !SupportsStaticInstances(*gpu, material_system_.get()) || mesh_emitters_.find(mesh) ||
+      !HasUniformScale(transforms))
+    return {};
+  InstanceGroupHandle handle =
+      instances_.Create(*device_, mesh, transforms, gpu->bounds_center, gpu->bounds_radius);
+  if (handle) ++scene_revision_;
+  return handle;
+}
+
+bool Renderer::UpdateInstanceGroup(InstanceGroupHandle handle, std::span<const Mat4> transforms) {
+  if (!device_ || device_->is_stub() || handle.index >= instances_.groups().size()) return false;
+  const InstanceStore::Group& group = instances_.groups()[handle.index];
+  const GpuMesh* gpu = meshes_.find(group.mesh);
+  const bool replaced = gpu && HasUniformScale(transforms) &&
+                        instances_.Replace(*device_, handle, transforms, gpu->bounds_center,
+                                           gpu->bounds_radius);
+  if (replaced) ++scene_revision_;
+  return replaced;
+}
+
+void Renderer::DestroyInstanceGroup(InstanceGroupHandle handle) {
+  if (!device_ || device_->is_stub()) return;
+  if (instances_.Destroy(*device_, handle)) ++scene_revision_;
+}
+
 bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   if (!device_ || device_->is_stub()) return false;
   const u64 mesh_key = mesh.id.hash ^ id_salt;
@@ -1368,8 +1444,12 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // Re-uploading under an existing key (the builtin biped goes up once for
   // the test spawn and again for the npc template) must free the previous
   // buffers or they leak until vkDestroyDevice complains.
+  bool grouped_mesh = false;
+  for (const InstanceStore::Group& group : instances_.groups())
+    grouped_mesh |= group.alive && group.mesh == mesh_key;
   if (GpuMesh* previous = meshes_.find(mesh_key)) {
     device_->WaitIdle();  // uploads happen at load time; never per frame
+    if (raytracing_) raytracing_->RemoveBlas(mesh_key);
     device_->DestroyBuffer(previous->vertices);
     device_->DestroyBuffer(previous->indices);
     if (previous->skinning) device_->DestroyBuffer(previous->skinning);
@@ -1379,9 +1459,15 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     if (previous->meshlet_triangles) device_->DestroyBuffer(previous->meshlet_triangles);
   }
   meshes_[mesh_key] = gpu;
+  instances_.RefreshMesh(*device_, mesh_key, gpu.bounds_center, gpu.bounds_radius,
+                         SupportsStaticInstances(gpu, material_system_.get()) &&
+                             mesh.emitters.empty());
   // NIF particle emitters ride along with the mesh; every placed draw of it
   // feeds a cpu pool (see emitter_sim_ in BuildFrameGraph).
-  if (!mesh.emitters.empty()) register_emitters(mesh.emitters);
+  if (!mesh.emitters.empty())
+    register_emitters(mesh.emitters);
+  else
+    mesh_emitters_.erase(mesh_key);
   // Pure transparency never enters the tlas: water occluding rtao and
   // shadow rays would black out everything under it.
   if (raytracing_ && !gpu.all_blend && include_rt) raytracing_->BuildBlas(mesh_key, gpu);
@@ -1449,6 +1535,7 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // catch-up so toggling path tracing on later still pulls it into the tlas
   // (BuildFrameGraph runs EnsureRayTracingGeometry on the next path-traced frame).
   if (raytracing_ && !gpu.all_blend && gpu.no_rt && !include_rt) rt_foliage_dirty_ = true;
+  if (grouped_mesh) ++scene_revision_;
   return true;
 }
 
@@ -1979,11 +2066,6 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Cascaded shadow maps: the raster sun-shadow path, used whenever ray-traced
   // shadows are not. The rt fragment variant traces its own shadow ray instead.
   bool csm_active = settings_.shadow_maps && !rt_shadows && !path_trace;
-  // When the tlas is consulted for shading, the rasterized surface must match the
-  // blas (built at lod 0), or ao/reflection rays self-intersect the finer sphere
-  // and read black. Distance lod then only applies on non-rt (low/mobile) tiers.
-  bool tlas_shaded = rt_shadows || rtao_active || ddgi_active ||
-                     (rcgi_active && !rcgi_software) || reflections_active || path_trace;
   // Screen-space reflections stand in for ray-traced reflections on raster tiers.
   bool ssr_active = settings_.ssr && !path_trace && !reflections_active;
   // Screen-space gi stands in for the ddgi probe volume on raster tiers.
@@ -2027,6 +2109,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     }
   }
   bool water_pipeline_active = any_water && water_ != nullptr;
+  // When the tlas is consulted for shading, the rasterized surface must match the
+  // blas (built at lod 0), or rays can hit geometry that the selected raster lod
+  // did not draw. This includes water reflections and volumetric-fog visibility,
+  // not only the opaque scene's ray-traced effects.
+  bool force_lod0_for_tlas = rt_shadows || rtao_active || ddgi_active ||
+                             (rcgi_active && !rcgi_software) || reflections_active || path_trace ||
+                             (water_pipeline_active && settings_.water_reflections) || fog_active;
 
   u32 tlas_slot = frame_index_ % RayTracingContext::kSlots;
 
@@ -2276,6 +2365,18 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
       f32 radius = mesh->bounds_radius * std::max(sx, std::max(sy, sz));
       if (radius > 0.0f && SphereOutsideFrustum(touch_planes, wc, radius)) continue;
+      for (const GpuSubmesh& submesh : mesh->submeshes) {
+        material_system_->Touch(submesh.material, frame_index_);
+      }
+    }
+    for (const InstanceStore::Group& group : instances_.groups()) {
+      if (!group.alive ||
+          (group.cullable &&
+           SphereOutsideFrustum(touch_planes, group.bounds_center, group.bounds_radius))) {
+        continue;
+      }
+      const GpuMesh* mesh = meshes_.find(group.mesh);
+      if (!mesh) continue;
       for (const GpuSubmesh& submesh : mesh->submeshes) {
         material_system_->Touch(submesh.material, frame_index_);
       }
@@ -2577,7 +2678,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (rt_shadows || rtao_active || ddgi_active || (rcgi_active && !rcgi_software) ||
       water_pipeline_active || reflections_active || path_trace || fog_active) {
     base::Vector<RayTracingContext::Instance> instances;
-    instances.reserve(view.draws.size());
+    instances.reserve(view.draws.size() + instances_.instance_count());
     for (const DrawItem& item : view.draws) {
       const GpuMesh* mesh = meshes_.find(item.mesh);
       // no_rt grass-like fill stays out of the realtime tlas; when the path
@@ -2591,6 +2692,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                            .custom_index = mesh->bindless_index,
                            .mask = mask,
                            .transform = item.transform});
+    }
+    for (const InstanceStore::Group& group : instances_.groups()) {
+      if (!group.alive) continue;
+      const GpuMesh* mesh = meshes_.find(group.mesh);
+      if (!mesh || mesh->all_blend || (mesh->no_rt && !path_trace)) continue;
+      const u8 mask = mesh->no_rt ? static_cast<u8>(kRayMaskPathTrace)
+                                  : static_cast<u8>(kRayMaskRealtime | kRayMaskPathTrace);
+      for (const Mat4& transform : group.transforms) {
+        instances.push_back({.mesh_key = group.mesh,
+                             .custom_index = mesh->bindless_index,
+                             .mask = mask,
+                             .transform = transform});
+      }
     }
     // Grow the TLAS now, on the build thread, so the record-time BuildTlas never
     // stalls the device or frees buffers mid command list (which races the
@@ -2623,9 +2737,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // barrier discipline, so submission order is execution order on the queue.
   if (sdf_clipmap_ && sdf_available_) {
     base::Vector<SdfClipmap::Instance> sdf_instances;
-    sdf_instances.reserve(view.draws.size());
+    sdf_instances.reserve(view.draws.size() + instances_.instance_count());
     for (const DrawItem& item : view.draws) {
       if (sdf_scene_->Find(item.mesh)) sdf_instances.push_back({item.mesh, item.transform});
+    }
+    for (const InstanceStore::Group& group : instances_.groups()) {
+      if (!group.alive || !sdf_scene_->Find(group.mesh)) continue;
+      for (const Mat4& transform : group.transforms) {
+        sdf_instances.push_back(
+            {.mesh_key = group.mesh, .transform = transform, .bounded_quality = true});
+      }
     }
     sdf_clipmap_->AddComposeToGraph(graph_, *sdf_scene_, std::move(sdf_instances), view.camera.eye,
                                     frame_index_);
@@ -2665,6 +2786,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               settings_.sun_color.y * 5.0f + settings_.sun_color.z * 7.0f;
     bool moved = std::memcmp(&view_proj, &pt_prev_view_proj_, sizeof(Mat4)) != 0;
     bool lit_changed = sig != pt_prev_sig_;
+    bool scene_changed = scene_revision_ != pt_prev_scene_revision_;
     bool denoised_path = false;
 
     // Gameplay reconstruction renderer: own 1-spp gbuffer + temporal accumulation
@@ -2702,7 +2824,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       // Reset on first frame, on (re)activation, AND when switching into recon
       // from another path-trace mode (its ping-pong history was never written by
       // the reference/NRD paths). Never on the day/night drift.
-      rf.reset = first_frame || !pt_was_active_ || pt_prev_mode_ != 2;
+      rf.reset = first_frame || !pt_was_active_ || pt_prev_mode_ != 2 || scene_changed;
       rf.current_weight_min = settings_.path_trace_recon_weight;
       rf.max_history = settings_.path_trace_accum;
       rf.atrous_passes = settings_.path_trace_recon_atrous;
@@ -2784,7 +2906,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       // would stay 1-spp grainy forever). NRD tracks gradual lighting changes
       // through its own temporal accumulation + antilag instead. Also reset when
       // switching into the NRD path from another mode (stale reprojection history).
-      fs.reset = first_frame || !pt_was_active_ || pt_prev_mode_ != 1;
+      fs.reset = first_frame || !pt_was_active_ || pt_prev_mode_ != 1 || scene_changed;
       nrd_.SetFrame(fs);
       ResourceHandle denoised = nrd_.DenoiseDiffuse(graph_, t.normal_roughness, t.viewz, t.motion,
                                                     t.radiance_hitdist);
@@ -2800,12 +2922,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     if (!denoised_path && !recon_path) {
       // Reference: brute-force accumulation, hard reset on any motion = ground
       // truth. Also reset when switching into reference from another mode.
-      pt.reset = !pt_was_active_ || moved || lit_changed || pt_prev_mode_ != 0;
+      pt.reset = !pt_was_active_ || moved || lit_changed || scene_changed || pt_prev_mode_ != 0;
       path_tracer_.AddToGraph(graph_, *raytracing_, tlas_slot, bindless_->set(),
                               environment_->sky_view(), environment_->sampler(), scene_color, pt);
     }
     pt_prev_view_proj_ = view_proj;
     pt_prev_sig_ = sig;
+    pt_prev_scene_revision_ = scene_revision_;
     pt_was_active_ = true;
     pt_prev_mode_ = recon_path ? 2 : (denoised_path ? 1 : 0);
   } else {
@@ -2827,7 +2950,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         },
         [this, shadow_atlas, &frame, &view](PassContext& ctx) {
           TextureView atlas = ctx.graph->image(shadow_atlas).view;
-          shadow_.Render(*ctx.cmd, atlas, [this, &frame, &view](CommandList& cmd) {
+          shadow_.Render(*ctx.cmd, atlas,
+                         [this, &frame, &view](CommandList& cmd, const Mat4& light_view_proj) {
             BindingSetHandle bound_material{};
             // ShadowPass::Render bound the masked static permutation; all four
             // shadow pipelines share one layout, so pushes and set binds
@@ -2875,6 +2999,36 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                   }
                 }
                 cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
+              }
+            }
+            f32 shadow_planes[5][4];
+            ExtractFrustumPlanes(light_view_proj, shadow_planes);
+            for (const InstanceStore::Group& group : instances_.groups()) {
+              if (!group.alive) continue;
+              if (group.cullable &&
+                  SphereOutsideFrustum(shadow_planes, group.bounds_center, group.bounds_radius))
+                continue;
+              const GpuMesh* mesh = meshes_.find(group.mesh);
+              if (!mesh || mesh->all_blend || mesh->no_rt) continue;
+              cmd.BindVertexBuffer(0, mesh->vertices);
+              cmd.BindVertexBuffer(1, group.buffer);
+              cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+              for (const GpuSubmesh& submesh : mesh->submeshes) {
+                if (submesh.blend) continue;
+                const PipelineHandle pipeline = shadow_.instanced_pipeline(submesh.alpha_mask);
+                if (!(pipeline == bound_pipeline)) {
+                  cmd.BindPipeline(pipeline);
+                  bound_pipeline = pipeline;
+                }
+                if (submesh.alpha_mask) {
+                  const BindingSetHandle material = material_system_->set(submesh.material);
+                  if (!(material == bound_material)) {
+                    cmd.BindSet(0, material);
+                    bound_material = material;
+                  }
+                }
+                cmd.DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
+                                submesh.index_offset, 0, 0);
               }
             }
           });
@@ -2945,6 +3099,39 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                     cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
                   }
                 }
+                for (const InstanceStore::Group& group : instances_.groups()) {
+                  if (!group.alive) continue;
+                  const GpuMesh* mesh = meshes_.find(group.mesh);
+                  if (!mesh || mesh->all_blend || mesh->no_rt) continue;
+                  const Vec3 delta = group.bounds_center - face.light_pos;
+                  const f32 reach = face.light_radius + group.bounds_radius;
+                  if (group.cullable && Dot(delta, delta) > reach * reach) continue;
+                  f32 face_planes[5][4];
+                  ExtractFrustumPlanes(face.view_proj, face_planes);
+                  if (group.cullable &&
+                      SphereOutsideFrustum(face_planes, group.bounds_center, group.bounds_radius))
+                    continue;
+                  cmd.BindVertexBuffer(0, mesh->vertices);
+                  cmd.BindVertexBuffer(1, group.buffer);
+                  cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+                  for (const GpuSubmesh& submesh : mesh->submeshes) {
+                    if (submesh.blend) continue;
+                    const PipelineHandle pipeline = shadow_.instanced_pipeline(submesh.alpha_mask);
+                    if (!(pipeline == bound_pipeline)) {
+                      cmd.BindPipeline(pipeline);
+                      bound_pipeline = pipeline;
+                    }
+                    if (submesh.alpha_mask) {
+                      const BindingSetHandle material = material_system_->set(submesh.material);
+                      if (!(material == bound_material)) {
+                        cmd.BindSet(0, material);
+                        bound_material = material;
+                      }
+                    }
+                    cmd.DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
+                                    submesh.index_offset, 0, 0);
+                  }
+                }
               });
         });
   }
@@ -2983,7 +3170,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       // built from lod 0). The submesh count matches lod 0 so the prepass/scene
       // draw loops issue one indirect per submesh.
       bool fixed_lod = !settings_.distance_lod || mesh->skinned ||
-                       mesh->morph_target_count > 0 || (tlas_shaded && !mesh->no_rt);
+                        mesh->morph_target_count > 0 || (force_lod0_for_tlas && !mesh->no_rt);
       u32 lod = 0;
       if (!fixed_lod) {
         Vec3 wc = TransformPoint(item.transform, {mesh->bounds_center[0], mesh->bounds_center[1],
@@ -3105,7 +3292,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       },
       [this, geom_normals, geom_motion, geom_depth_export, geom_depth, cull_commands, &frame,
        &view, ms_active, ms_occlude, cull_hiz, globals_set, update_globals_set, frame_slot,
-       draw_meshlet_instances](PassContext& ctx) {
+       draw_meshlet_instances, view_proj, force_lod0_for_tlas](PassContext& ctx) {
         // First globals-set user this frame: write uniform + tlas + hi-z once.
         update_globals_set(ctx, ms_occlude ? cull_hiz : kInvalidResource, ms_active,
                            /*want_tlas=*/true);
@@ -3190,6 +3377,37 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                                            GpuCull::kCommandStride);
             }
             ++cull_cmd_index;
+          }
+        }
+        f32 instance_planes[5][4];
+        ExtractFrustumPlanes(view_proj, instance_planes);
+        for (const InstanceStore::Group& group : instances_.groups()) {
+          if (!group.alive ||
+              (group.cullable &&
+               SphereOutsideFrustum(instance_planes, group.bounds_center, group.bounds_radius))) {
+            continue;
+          }
+          const GpuMesh* mesh = meshes_.find(group.mesh);
+          if (!mesh || mesh->all_blend) continue;
+          const u32 lod = !settings_.distance_lod || (force_lod0_for_tlas && !mesh->no_rt)
+                              ? 0
+                              : SelectLod(*mesh, InstanceGroupDistance(group, view.camera.eye));
+          const base::Vector<GpuSubmesh>& submeshes =
+              lod == 0 ? mesh->submeshes : mesh->lods[lod - 1].submeshes;
+          const i32 vertex_offset =
+              lod == 0 ? 0 : static_cast<i32>(mesh->lods[lod - 1].vertex_offset);
+          MeshPushConstants push{};
+          mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, push);
+          for (const GpuSubmesh& submesh : submeshes) {
+            if (submesh.blend) continue;
+            mesh_pipeline_->SetInstancedPrepass(*ctx.cmd, submesh.alpha_mask);
+            const BindingSetHandle material = material_system_->set(submesh.material);
+            if (!(material == bound_material)) {
+              mesh_pipeline_->BindMaterial(*ctx.cmd, material);
+              bound_material = material;
+            }
+            ctx.cmd->DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
+                                 submesh.index_offset, vertex_offset, 0);
           }
         }
         ctx.cmd->EndRendering();
@@ -3554,7 +3772,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       [this, geom_scene, geom_motion, geom_skin, geom_depth, msaa, ao, sun_shadow, spec_refl,
        rcgi_irr, use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands,
        ms_active, globals_set, frame_slot, restir_active, restir_out, &frame, &view,
-       draw_meshlet_instances](PassContext& ctx) {
+       draw_meshlet_instances, view_proj, force_lod0_for_tlas](PassContext& ctx) {
         BindingSetHandle env_set = env_scene_sets_[frame_slot];
         TextureView ao_view =
             ao != kInvalidResource ? ctx.graph->image(ao).view : TextureView{};
@@ -3660,8 +3878,36 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             ++cull_cmd_index;
           }
         }
-        if (skinned_bound) {
-          mesh_pipeline_->SetSkinned(*ctx.cmd, false, use_rt_frag, settings_.wireframe);
+        f32 instance_planes[5][4];
+        ExtractFrustumPlanes(view_proj, instance_planes);
+        for (const InstanceStore::Group& group : instances_.groups()) {
+          if (!group.alive ||
+              (group.cullable &&
+               SphereOutsideFrustum(instance_planes, group.bounds_center, group.bounds_radius))) {
+            continue;
+          }
+          const GpuMesh* mesh = meshes_.find(group.mesh);
+          if (!mesh || mesh->all_blend) continue;
+          const u32 lod = !settings_.distance_lod || (force_lod0_for_tlas && !mesh->no_rt)
+                              ? 0
+                              : SelectLod(*mesh, InstanceGroupDistance(group, view.camera.eye));
+          const base::Vector<GpuSubmesh>& submeshes =
+              lod == 0 ? mesh->submeshes : mesh->lods[lod - 1].submeshes;
+          const i32 vertex_offset =
+              lod == 0 ? 0 : static_cast<i32>(mesh->lods[lod - 1].vertex_offset);
+          mesh_pipeline_->SetInstanced(*ctx.cmd, use_rt_frag, settings_.wireframe);
+          MeshPushConstants push{};
+          mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, push);
+          for (const GpuSubmesh& submesh : submeshes) {
+            if (submesh.blend) continue;
+            const BindingSetHandle material = material_system_->set(submesh.material);
+            if (!(material == bound_material)) {
+              mesh_pipeline_->BindMaterial(*ctx.cmd, material);
+              bound_material = material;
+            }
+            ctx.cmd->DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
+                                 submesh.index_offset, vertex_offset, 0);
+          }
         }
         // The sky pipeline is single-sampled; under kMsaa it draws in its own
         // pass right after the resolve instead (same attachments at 1x).
@@ -4178,7 +4424,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         [this, lit, view_proj, &view](PassContext& ctx) {
           overdraw_.Render(
               *ctx.cmd, ctx.graph->image(lit).view, {render_width_, render_height_}, view_proj,
-              [this, &view](CommandList& cmd) {
+              [this, &view, view_proj](CommandList& cmd) {
                 for (const DrawItem& item : view.draws) {
                   const GpuMesh* mesh = meshes_.find(item.mesh);
                   if (!mesh || !mesh->indices) continue;
@@ -4189,6 +4435,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                   cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
                   for (const GpuSubmesh& submesh : mesh->submeshes) {
                     cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
+                  }
+                }
+                overdraw_.BindInstanced(cmd, view_proj);
+                for (const InstanceStore::Group& group : instances_.groups()) {
+                  if (!group.alive) continue;
+                  const GpuMesh* mesh = meshes_.find(group.mesh);
+                  if (!mesh || !mesh->indices) continue;
+                  cmd.BindVertexBuffer(0, mesh->vertices);
+                  cmd.BindVertexBuffer(1, group.buffer);
+                  cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+                  for (const GpuSubmesh& submesh : mesh->submeshes) {
+                    cmd.DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
+                                    submesh.index_offset, 0, 0);
                   }
                 }
               });
@@ -4256,7 +4515,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           builder.Write(pt_depth, ResourceUsage::kDepthAttachment);
         },
         [this, pt_normals, pt_motion, pt_depth_export, pt_depth, globals_set, update_globals_set,
-         frame_slot, &frame, &view](PassContext& ctx) {
+         frame_slot, &frame, &view, view_proj](PassContext& ctx) {
           // First globals-set user on the path-traced frame: uniform + tlas (the
           // transparent pass right after wants the tlas for water reflections).
           update_globals_set(ctx, kInvalidResource, false, /*want_tlas=*/true);
@@ -4315,6 +4574,30 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                 bound_material = material;
               }
               mesh_pipeline_->DrawSubmesh(*ctx.cmd, submesh);
+            }
+          }
+          f32 instance_planes[5][4];
+          ExtractFrustumPlanes(view_proj, instance_planes);
+          for (const InstanceStore::Group& group : instances_.groups()) {
+            if (!group.alive ||
+                (group.cullable &&
+                 SphereOutsideFrustum(instance_planes, group.bounds_center, group.bounds_radius))) {
+              continue;
+            }
+            const GpuMesh* mesh = meshes_.find(group.mesh);
+            if (!mesh || mesh->all_blend) continue;
+            MeshPushConstants push{};
+            mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, push);
+            for (const GpuSubmesh& submesh : mesh->submeshes) {
+              if (submesh.blend) continue;
+              mesh_pipeline_->SetInstancedPrepass(*ctx.cmd, submesh.alpha_mask);
+              const BindingSetHandle material = material_system_->set(submesh.material);
+              if (!(material == bound_material)) {
+                mesh_pipeline_->BindMaterial(*ctx.cmd, material);
+                bound_material = material;
+              }
+              ctx.cmd->DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
+                                   submesh.index_offset, 0, 0);
             }
           }
           ctx.cmd->EndRendering();
@@ -4660,6 +4943,7 @@ void Renderer::Shutdown() {
   if (device_ && !device_->is_stub()) {
     device_->WaitIdle();
     DestroyFrameResources();
+    instances_.Shutdown(*device_);
     for (auto kv : meshes_) {
       device_->DestroyBuffer(kv.value.vertices);
       device_->DestroyBuffer(kv.value.indices);

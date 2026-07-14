@@ -140,6 +140,7 @@ class MaterialSystem {
   // rest the alpha one (mist). Unknown hashes are neither.
   bool is_effect(u64 material_hash) const;
   bool is_effect_additive(u64 material_hash) const;
+  bool is_normal_model_space(u64 material_hash) const;
 
   // Bindless material record index for ray hit shading; 0 (the default
   // material) for unknown hashes.
@@ -270,6 +271,7 @@ class MaterialSystem {
   base::UnorderedMap<u64, u8> blend_modes_;  // asset::AlphaMode per material
   base::UnorderedMap<u64, u8> water_;        // material hash -> is_water
   base::UnorderedMap<u64, u8> effects_;      // 0 none, 1 alpha effect, 2 additive effect
+  base::UnorderedMap<u64, u8> normal_model_space_;
   base::UnorderedMap<u64, u32> bindless_materials_;  // material hash -> registry index
   base::UnorderedMap<u64, MaterialColor> colors_;    // material hash -> flat colour factors
   BindingLayoutHandle set_layout_;

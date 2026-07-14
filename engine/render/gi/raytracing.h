@@ -63,6 +63,7 @@ class RayTracingContext {
   // The mesh buffers must have been created with acceleration structure
   // build input usage.
   bool BuildBlas(u64 mesh_key, const GpuMesh& mesh);
+  void RemoveBlas(u64 mesh_key);
 
   // Whether a blas already exists for this mesh (BuildBlas is idempotent, but
   // callers re-registering bindless geometry need to skip already-built meshes).

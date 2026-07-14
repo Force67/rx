@@ -133,6 +133,7 @@ void LocalShadows::Render(CommandList& cmd, PipelineHandle pipeline,
   cmd.BeginRendering({.extent = atlas_.extent, .depth = &depth});
   cmd.BindPipeline(pipeline);  // push constants resolve against the bound pipeline
   for (u32 i = 0; i < face_count_; ++i) {
+    cmd.BindPipeline(pipeline);
     const Face& face = faces_[i];
     f32 x = static_cast<f32>((face.slot % kFacesX) * kFaceRes);
     f32 y = static_cast<f32>((face.slot / kFacesX) * kFaceRes);

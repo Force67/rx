@@ -57,7 +57,7 @@ class ShadowPass {
   // opaque draws inside, binding pipeline() for static and skinned_pipeline()
   // for animated casters (both share one binding/push interface).
   void Render(CommandList& cmd, TextureView atlas_view,
-              const std::function<void(CommandList&)>& draw);
+              const std::function<void(CommandList&, const Mat4&)>& draw);
 
   const GpuBuffer& cascade_buffer(u32 frame_slot) const { return cascades_[frame_slot]; }
   u64 cascade_buffer_size() const { return sizeof(CascadeData); }
@@ -70,6 +70,9 @@ class ShadowPass {
   PipelineHandle skinned_pipeline(bool masked = true) const {
     return masked || !skinned_opaque_pipeline_ ? skinned_pipeline_ : skinned_opaque_pipeline_;
   }
+  PipelineHandle instanced_pipeline(bool masked = true) const {
+    return masked || !instanced_opaque_pipeline_ ? instanced_pipeline_ : instanced_opaque_pipeline_;
+  }
 
  private:
   static constexpr u32 kFramesInFlight = 2;
@@ -79,6 +82,8 @@ class ShadowPass {
   PipelineHandle skinned_pipeline_;
   PipelineHandle opaque_pipeline_;  // depth-only, no fragment stage
   PipelineHandle skinned_opaque_pipeline_;
+  PipelineHandle instanced_pipeline_;
+  PipelineHandle instanced_opaque_pipeline_;
   GpuBuffer cascades_[kFramesInFlight];
   CascadeData current_{};
 };

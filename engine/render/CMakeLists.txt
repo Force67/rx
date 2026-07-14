@@ -47,6 +47,7 @@ rx_add_module(render
   geometry/hair_strands.cc
   geometry/ocean_fft.cc
   geometry/imposters.cc
+  geometry/instance_store.cc
   post/depth_of_field.cc
   post/upscaler.cc
   geometry/water.cc
@@ -189,8 +190,10 @@ set(RX_RENDER_SHADERS
   shaders/util/pick_id.vs.hlsl
   shaders/util/pick_id.ps.hlsl
   shaders/pipeline/mesh.vs.hlsl
+  shaders/pipeline/mesh_instance.vs.hlsl
   shaders/pipeline/mesh_skin.vs.hlsl
   shaders/gi/shadow.vs.hlsl
+  shaders/gi/shadow_instance.vs.hlsl
   shaders/gi/shadow_skin.vs.hlsl
   shaders/gi/shadow.ps.hlsl
   shaders/geometry/particle.vs.hlsl
@@ -351,9 +354,11 @@ endif()
 # (rec_bone_palette root SRV on DXIL).
 # Wrapper-shader include dependencies (see cmake/shaders.cmake).
 set(RX_SHADER_DEPS_mesh_vs_hlsl shaders/pipeline/morph.hlsli)
+set(RX_SHADER_DEPS_mesh_instance_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_skin_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl)
+set(RX_SHADER_DEPS_shadow_instance_vs_hlsl shaders/gi/shadow.vs.hlsl)
 set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl)
 set(RX_SHADER_DEPS_vgeo_cull_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_args_cs_hlsl shaders/pipeline/vgeo_common.hlsli)

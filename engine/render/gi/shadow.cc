@@ -7,6 +7,7 @@
 
 #include "asset/mesh.h"
 #include "core/log.h"
+#include "shaders/shadow_instance_vs_hlsl.h"
 #include "shaders/shadow_ps_hlsl.h"
 #include "shaders/shadow_skin_vs_hlsl.h"
 #include "shaders/shadow_vs_hlsl.h"
@@ -32,8 +33,16 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout)
       .stride = sizeof(asset::SkinnedVertexExtra),
       .attributes = {{5, Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
                      {6, Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
+  VertexBufferLayout instance_stream{
+      .stride = sizeof(Mat4),
+      .per_instance = true,
+      .attributes = {{7, Format::kRGBA32Float, 0},
+                     {8, Format::kRGBA32Float, 16},
+                     {9, Format::kRGBA32Float, 32},
+                     {10, Format::kRGBA32Float, 48}}};
 
-  auto make_pipeline = [&](ShaderBlob vertex, bool skinned, bool masked, const char* name) {
+  auto make_pipeline = [&](ShaderBlob vertex, bool skinned, bool instanced, bool masked,
+                           const char* name) {
     GraphicsPipelineDesc desc{
         .vertex = vertex,
         // Masked casters alpha-test in the fragment; opaque ones run with no
@@ -57,16 +66,23 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout)
     };
     desc.vertex_buffers.push_back(position_stream);
     if (skinned) desc.vertex_buffers.push_back(skin_stream);
+    if (instanced) desc.vertex_buffers.push_back(instance_stream);
     return device.CreateGraphicsPipeline(desc);
   };
 
-  pipeline_ = make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, true, "shadow");
+  pipeline_ = make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, false, true, "shadow");
   skinned_pipeline_ =
-      make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, true, "shadow_skinned");
-  opaque_pipeline_ = make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, false, "shadow_opaque");
-  skinned_opaque_pipeline_ =
-      make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, false, "shadow_skinned_opaque");
-  if (!pipeline_ || !skinned_pipeline_ || !opaque_pipeline_ || !skinned_opaque_pipeline_) {
+      make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, false, true, "shadow_skinned");
+  opaque_pipeline_ =
+      make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, false, false, "shadow_opaque");
+  skinned_opaque_pipeline_ = make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, false, false,
+                                           "shadow_skinned_opaque");
+  instanced_pipeline_ = make_pipeline(RX_SHADER(k_shadow_instance_vs_hlsl), false, true, true,
+                                      "shadow_instanced");
+  instanced_opaque_pipeline_ = make_pipeline(RX_SHADER(k_shadow_instance_vs_hlsl), false, true,
+                                             false, "shadow_instanced_opaque");
+  if (!pipeline_ || !skinned_pipeline_ || !opaque_pipeline_ || !skinned_opaque_pipeline_ ||
+      !instanced_pipeline_ || !instanced_opaque_pipeline_) {
     RX_ERROR("shadow pipeline creation failed");
     return false;
   }
@@ -162,7 +178,7 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
 }
 
 void ShadowPass::Render(CommandList& cmd, TextureView atlas_view,
-                        const std::function<void(CommandList&)>& draw) {
+                        const std::function<void(CommandList&, const Mat4&)>& draw) {
   const u32 res = settings_.resolution;
 
   // The graph already put the atlas in the depth-target state for this write.
@@ -176,10 +192,11 @@ void ShadowPass::Render(CommandList& cmd, TextureView atlas_view,
   cmd.BindPipeline(pipeline_);
 
   for (u32 i = 0; i < settings_.cascade_count; ++i) {
+    cmd.BindPipeline(pipeline_);
     cmd.SetViewport(static_cast<f32>(i * res), 0.0f, static_cast<f32>(res), static_cast<f32>(res));
     cmd.SetScissor(static_cast<i32>(i * res), 0, res, res);
     cmd.PushConstants(&current_.light_view_proj[i], sizeof(Mat4));
-    draw(cmd);
+    draw(cmd, current_.light_view_proj[i]);
   }
   cmd.EndRendering();
 }
@@ -189,6 +206,8 @@ void ShadowPass::Destroy(Device& device) {
   device.DestroyPipeline(skinned_pipeline_);
   device.DestroyPipeline(opaque_pipeline_);
   device.DestroyPipeline(skinned_opaque_pipeline_);
+  device.DestroyPipeline(instanced_pipeline_);
+  device.DestroyPipeline(instanced_opaque_pipeline_);
   for (u32 i = 0; i < kFramesInFlight; ++i) device.DestroyBuffer(cascades_[i]);
   pipeline_ = {};
   skinned_pipeline_ = {};

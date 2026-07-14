@@ -131,6 +131,13 @@ bool RayTracingContext::BuildBlas(u64 mesh_key, const GpuMesh& mesh) {
   return true;
 }
 
+void RayTracingContext::RemoveBlas(u64 mesh_key) {
+  Blas* blas = blas_.find(mesh_key);
+  if (!blas) return;
+  if (blas->handle) device_.DestroyAccelStruct(blas->handle);
+  blas_.erase(mesh_key);
+}
+
 bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
   if (tlas.handle && tlas.capacity >= instance_count) return true;
 

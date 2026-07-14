@@ -23,6 +23,12 @@ struct VsIn {
   [[vk::location(5)]] uint4 bone_indices : BLENDINDICES0;
   [[vk::location(6)]] float4 bone_weights : BLENDWEIGHT0;  // unorm 0..1
 #endif
+#ifdef RX_INSTANCED
+  [[vk::location(7)]] float4 instance_col0 : INSTANCE_MODEL0;
+  [[vk::location(8)]] float4 instance_col1 : INSTANCE_MODEL1;
+  [[vk::location(9)]] float4 instance_col2 : INSTANCE_MODEL2;
+  [[vk::location(10)]] float4 instance_col3 : INSTANCE_MODEL3;
+#endif
 };
 
 struct VsOut {
@@ -69,7 +75,13 @@ VsOut main(VsIn input) {
 #ifdef RX_SKINNED
   local_pos = SkinPosition(input);
 #endif
-  float4 world = mul(push.model, float4(local_pos, 1.0));
+#ifdef RX_INSTANCED
+  const float4x4 model = transpose(float4x4(input.instance_col0, input.instance_col1,
+                                            input.instance_col2, input.instance_col3));
+#else
+  const float4x4 model = push.model;
+#endif
+  float4 world = mul(model, float4(local_pos, 1.0));
   VsOut o;
   o.pos = mul(push.light_view_proj, world);
   o.uv = input.uv;

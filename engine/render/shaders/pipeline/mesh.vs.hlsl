@@ -79,6 +79,12 @@ struct VsIn {
   [[vk::location(5)]] uint4 bone_indices : BLENDINDICES0;
   [[vk::location(6)]] float4 bone_weights : BLENDWEIGHT0;  // unorm 0..1
 #endif
+#ifdef RX_INSTANCED
+  [[vk::location(7)]] float4 instance_col0 : INSTANCE_MODEL0;
+  [[vk::location(8)]] float4 instance_col1 : INSTANCE_MODEL1;
+  [[vk::location(9)]] float4 instance_col2 : INSTANCE_MODEL2;
+  [[vk::location(10)]] float4 instance_col3 : INSTANCE_MODEL3;
+#endif
   // Indexes the morph delta buffer. Morphed meshes always draw lod 0 with
   // base vertex 0, where SPIR-V and DXIL vertex-id semantics agree.
   uint vertex_id : SV_VertexID;
@@ -158,7 +164,13 @@ VsOut main(VsIn input) {
 #ifdef RX_SKINNED
   SkinVertex(input, local_pos, local_normal, local_tangent);
 #endif
-  float4 world = mul(push.model, float4(local_pos, 1.0));
+#ifdef RX_INSTANCED
+  const float4x4 model = transpose(float4x4(input.instance_col0, input.instance_col1,
+                                            input.instance_col2, input.instance_col3));
+#else
+  const float4x4 model = push.model;
+#endif
+  float4 world = mul(model, float4(local_pos, 1.0));
   // Wind sway for cloth/foliage: layered gusts along the global wind vector,
   // weighted by uv.y (0 = pinned edge). Spatial phase decorrelates instances;
   // prev reuses the displaced position, so the sway reads as static to the
@@ -189,7 +201,11 @@ VsOut main(VsIn input) {
       world.xyz += GerstnerWave(world.xz, frame.time, wave_n, wave_crest);
     }
   }
+#ifdef RX_INSTANCED
+  float4 prev_world = world;
+#else
   float4 prev_world = mul(push.prev_model, float4(local_pos, 1.0));
+#endif
   // Distant terrain LOD: sink vertices inside the full-detail streamed rect so
   // the coarse proxy never bridges above the real land there (level-32 quads
   // span valleys and would cut through buildings). Boundary triangles slope
@@ -207,8 +223,8 @@ VsOut main(VsIn input) {
   output.curr_clip = clip;
   output.prev_clip = mul(frame.prev_view_proj, prev_world);
   output.sv_position = clip + float4(frame.jitter * clip.w, 0.0, 0.0);
-  output.normal = mul((float3x3)push.model, local_normal);
-  output.tangent = float4(mul((float3x3)push.model, local_tangent), input.tangent.w);
+  output.normal = mul((float3x3)model, local_normal);
+  output.tangent = float4(mul((float3x3)model, local_tangent), input.tangent.w);
   output.uv = input.uv;
   output.color = input.color;
   // Modulate the albedo by the packed per-instance tint so otherwise identical
