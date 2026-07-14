@@ -6,6 +6,10 @@ rx_add_module(core
   window.cc
   input_bindings.cc
   feature_registry.cc
+  memory/memory_tracker.cc
+  memory/frame_arena.cc
+  memory/chunk_pool.cc
+  memory/memory_config.cc
 )
 
 # equilibrium's base library; linking it here makes base:: containers and
