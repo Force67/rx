@@ -100,13 +100,99 @@ Real GPU (`vkrun`), as always:
 - Off / RT-path regression: `RX_RCGI=1` without sw flags must be
   screenshot-identical to before; RX_RCGI unset unchanged.
 
-## Findings (fill in at the end)
+## Findings (S2 — measured on NVIDIA GB10, vkrun, 1920×1011)
 
-- Memory actuals per tier, SDF gen times, composition + trace costs.
-- Image comparison sw vs hw probes-only.
-- Leak/artifact inventory (thin walls, open meshes, non-uniform scale).
-- Go/no-go recommendation for productionizing (incl. what a software final
-  gather would additionally need).
+**Headline: `--no-rt RX_RCGI=1 --demo cornell` works.** The device comes up
+`rt=false rayquery=false`; RCGI's world side runs entirely through the SDF
+clipmap tracer (the sw pipelines carry zero RayQuery capability in their SPIR-V,
+verified via `spirv-dis`), and the classic red-left / green-right Cornell colour
+bleed is present on the floor and both boxes. No crash, no NaN/speckle,
+converged. `RX_DEBUG_VIEW=6` isolates the indirect channel and shows the bounce
+clearly.
+
+### Memory actuals
+
+- **Global clipmap (constant, scene-independent, `kRes=128`)**: distance R16Float
+  16 MiB + albedo RGBA8 32 MiB + emissive RGBA8 32 MiB = **~80 MiB**. Tier knobs:
+  96³/clip ≈ 34 MiB, 64³/clip ≈ 10 MiB (one code constant).
+- **Mesh SDFs (per-scene, float32 buffers)**: cornell 6 meshes **2.30 MB**;
+  materials 27 meshes **6.75 MB**; sponza single 262k-tri mesh 84 KB (clamped res).
+
+### Generation times (CPU, at load — from S1, re-confirmed)
+
+- cornell 6 meshes **154 ms** total; materials 27 meshes **1.15 s** (the two
+  1-box floor/wall meshes are cheap, the 3072-tri spheres ~30–40 ms each); sponza
+  262k-tri mesh 238 ms. Well inside a load budget; not yet disk-cached.
+
+### Compose + trace costs (cornell, `RX_GPU_TIMINGS=1`, steady state)
+
+| Pass                                  | hw (TLAS, probes-only) | sw (SDF clipmap) |
+|---------------------------------------|:----------------------:|:----------------:|
+| `rcgi` world (trace+shade+blend+border) | **0.29 ms**            | **0.22 ms**      |
+| `sdf_compose` (one clip / frame)      | — (not built)          | **0.25 ms**      |
+| combined world side                   | **0.29 ms**            | **~0.47 ms**     |
+
+Notable: the SDF sphere-trace of a coarse Cornell field is *cheaper* than TLAS
+traversal + bindless normal fetch (0.22 vs 0.29 ms), but software additionally
+pays the ~0.25 ms `sdf_compose` (one clip re-composited per frame) that hardware
+avoids. `RX_RCGI_SW=1` on RT hardware measures identically to `--no-rt`
+(rcgi 0.22, compose 0.26) — the tracer is the same, the TLAS is simply ignored.
+Materials `sdf_compose` is the scaling concern (S1: 1.3–1.8 ms; whole-clip-per-
+instance doesn't cull — see below).
+
+### Image comparison
+
+- **(a) hw probes-only vs (b) sw (both probes-only)**: same red/green bleed,
+  same directional character. Software is slightly *stronger* and *blockier* —
+  the clipmap voxelisation rounds the box silhouettes and the albedo proxy is a
+  flat per-mesh colour, so the bleed reads as coarser bands. Exactly the "differ
+  only by SDF geometric rounding" prediction.
+- **(b) RX_RCGI_SW on RT vs (c) sw via --no-rt**: near-identical (pixel-level
+  differences only from the RT-present frame timing, not the GI). Confirms the
+  software path is self-contained and TLAS-independent.
+- **materials --no-rt**: plausible ambient across the sphere grid, no crash, no
+  speckle. Albedo is per-mesh-averaged (flat), so material variety is muted vs a
+  texture-aware gather.
+
+### Artifact / leak inventory
+
+- **Texture-averaged (really factor-averaged) albedo**: the colour proxy is the
+  material `base_color_factor`, not a texture average — textured surfaces bleed a
+  flat colour. Most visible in materials/sponza; invisible in the flat-coloured
+  Cornell.
+- **Voxel rounding**: coarse clips round corners and inflate thin silhouettes;
+  the bleed bands are blockier than the hardware triangle hit. Expected.
+- **Binary SDF sun shadow**: the sw cache shade traces one occlusion ray against
+  the clipmap (hit ⇒ fully shadowed). No penumbra; coarse-clip self-occlusion is
+  mitigated by a ~1.5-voxel start bias but can still over-darken near thin
+  geometry.
+- **Cornell demo walls render translucent** in every mode (hw and sw alike) —
+  that is the demo's wall material, not an S2 artifact.
+- **Thin/open geometry SDF sign leaks** (S1's ray-parity failure class) and the
+  single-mesh-sponza blobbing are unchanged from S1.
+
+### Go / no-go recommendation
+
+**GO for a low-tier / non-ray-query GI fallback** — the milestone (Cornell bounce
+with `--no-rt`) is met, the world side is trace-agnostic behind a clean seam, and
+the sw cost is competitive. It is a *probes-only* tier: the M2 final gather stays
+hardware-only. First fixes, in priority order, before this is production-grade:
+
+1. **Software final gather.** Replace the M2 gather's `RayQuery` with a
+   `TraceGlobalSdf` gather ray + the existing screen-cache / world-cache /
+   irradiance three-level fallback. This is the single biggest quality lever
+   (per-pixel contact GI vs the flat probes-only resolve) and the seam already
+   exists — it is the obvious S3.
+2. **Scalable clipmap compose.** Whole-clip-per-instance is O(instances·128³)
+   and does not cull (materials 1.3–1.8 ms, sponza worse). A bindless mesh-SDF
+   atlas + single dispatch, or a jump-flood, is the replacement.
+3. **Texture-averaged albedo.** Bake a per-mesh average from the base-colour
+   texture (not just the factor) so bleed carries real surface colour.
+4. **Disk-cache mesh SDFs.** Materials' 1.15 s load-time gen should be cached
+   (keyed by mesh hash) so it is paid once.
+5. **Softer sun occlusion.** Distance-attenuated (cone/penumbra) SDF shadow
+   instead of binary, and an emissive HDR scale (the proxy is RGBA8 LDR, so
+   emissive magnitude is clamped to 0..1 today).
 
 ---
 
@@ -271,3 +357,161 @@ acceptance test). Primary standalone verification tool.
 - **No true resource leak**: `SdfScene`/`SdfClipmap` free their buffers/images/
   pipelines in `Renderer::Shutdown` (the validation leak reports are the pre-existing
   abrupt-screenshot-exit path, identical count with SDF off).
+
+---
+
+## S2 implementation notes (landed, GPU-verified on NVIDIA GB10 / vkrun)
+
+S2 wires the S1 clipmap tracer into RCGI so the world side runs without hardware
+ray query. `--no-rt RX_RCGI=1` brings up the SDF clipmap and traces it in place
+of the TLAS; `RX_RCGI_SW=1` forces the same path on RT hardware for A/B.
+
+### Variant / seam mechanics
+
+- The two RayQuery-using world shaders were refactored into shared bodies with a
+  compile-time trace seam (`RCGI_TRACE_SDF`), following the mesh.ps/mesh_sss.ps
+  thin-entry pattern:
+  - `shaders/gi/rcgi_probe_trace_body.hlsli` + thin entries
+    `rcgi_probe_trace.cs.hlsl` (hw, `RCGI_TRACE_SDF` undefined) and
+    `rcgi_probe_trace_sw.cs.hlsl` (`#define RCGI_TRACE_SDF 1`).
+  - `shaders/gi/rcgi_cache_shade_body.hlsli` + `rcgi_cache_shade.cs.hlsl` /
+    `rcgi_cache_shade_sw.cs.hlsl`.
+- The `#ifndef RCGI_TRACE_SDF` guards drop the `RaytracingAccelerationStructure`
+  binding, the bindless scene tables, and every `RayQuery` in the software build,
+  so the sw SPIR-V declares **no RayQuery/accel-struct capability** (confirmed:
+  `spirv-dis rcgi_probe_trace_sw.cs.hlsl.spv | grep -c RayQuery` == 0, vs 12 for
+  the hw variant). This is why the sw pipeline creates on `rayquery=false`
+  devices where a RayQuery module would fail pipeline/device creation.
+- Hardware variants are behaviourally unchanged: the hw path is the same code
+  (the `RcgiClaimCell` / `RcgiQueueIfStale` helpers are verbatim extractions of
+  the original inline cache-insert). RT regression verified (hw probes-only
+  Cornell bleed intact).
+- The clipmap tracer itself is the S1 seam `shaders/gi/sdf_trace.hlsli`
+  (`TraceGlobalSdf`), unchanged and shared by both `sdf_debug` and the two sw
+  variants. SDF resources bind as **set 1**: `{0 SdfGlobals UBO, 1..3
+  distance/albedo/emissive Texture3D (InGeneral), 4 sampler}` — mirrors
+  sdf_debug's wiring.
+
+### Cache-entry packing (software mode)
+
+An SDF hit has no instance/primitive/barycentric to re-resolve, so the sw probe
+trace repurposes the triangle-ref slots (documented next to the layout in
+`rcgi_common.hlsli`):
+
+- slot 1 (`kRcgiOffHit0`) = albedo, 8-bit RGB in bits 0..23 (`RcgiPackColor8`).
+- slot 2 (`kRcgiOffHit1`) = emissive, 8-bit RGB in bits 0..23, `| kRcgiSwEntryBit`
+  (bit 31) tagging a software entry.
+- slot 3 (`kRcgiOffHit2`) = free (0).
+- slots 4..8 (world pos, oct normal, hitT) and 9/10 (frame stamps) keep their
+  hardware meaning.
+
+`rcgi_cache_shade_sw` reads albedo/emissive straight back from slots 1/2 instead
+of the bindless material path, then lights: sun (a **binary** `TraceGlobalSdf`
+occlusion ray toward the sun, ~1.5-voxel start bias, tmax = coarsest-clip extent)
++ light-grid point/spot loop (identical, no ray query) + previous-frame cascade
+bounce (identical) + emissive. Same outputs (radiance buffer + stamps).
+
+### Gating logic (renderer.cc + rcgi.{h,cc})
+
+- `RcgiSystem::Create(..., bool rt_available)`: `CreatePipelines(rt_available)`
+  always builds the sw pair + the shared/probes-only pipelines (args, blend,
+  border, resolve); it builds the hw RayQuery pair (probe trace, cache shade) and
+  the M2 gather chain (gather/denoise/upscale/history) **only when
+  `rt_available`**. On RT hardware both pairs exist so `RX_RCGI_SW` A/B is free.
+- RCGI is created **lazily** on first activation (in `ApplySettings`, not
+  `Initialize` — a device that never enables it pays nothing, and creation
+  failure is non-fatal). The lazy trigger is `settings_.rcgi && (rt_available_ ||
+  (settings_.sdf && sdf_clipmap_)) && bindless_ && environment_ && !rcgi_ &&
+  !rcgi_create_failed_`, so it fires for both the RT and the software-only path
+  once the SDF clipmap is up. (This subsumes the merge with PR #12's review-fix
+  lazy-init: the sw variant is lazy + non-fatal too.)
+- Active predicate: `rcgi_active = rcgi_ && settings_.rcgi && settings_.ibl &&
+  bindless_ && (rt_available_ || sdf_ready)`. New state
+  `rcgi_software = rcgi_active && sdf_ready && (!rt_available_ ||
+  rcgi_force_software_)`, and `rcgi_probes_only = RX_RCGI_PROBES_ONLY ||
+  rcgi_software`.
+- **SDF auto-enable**: in `Initialize`, `if (settings_.rcgi && (!rt_available_ ||
+  rcgi_force_software_)) settings_.sdf = true;` — so `--no-rt RX_RCGI=1` seeds the
+  clipmap (RCGI-software implies the SDF cost). Carried through the preset by the
+  existing `tuned.sdf = env.sdf` / `tuned.rcgi = env.rcgi` lines in
+  host.cc::ApplyRenderPreset (mandatory; the preset overwrites settings_
+  wholesale). `rcgi_force_software_` is a renderer member (not a settings field),
+  so it survives the preset independently.
+- **Compose ordering**: the `sdf_compose` pass is now recorded *before* the RCGI
+  world pass (S1 anchored it after `tlas_build`, which does not run in software
+  mode). Both use the kGeneral manual-barrier discipline on the main timeline, so
+  submission order is execution order; the compose's trailing
+  `kComputeWrite→kComputeRead` barrier makes the volumes visible to the sw trace.
+- **What software mode turns off**: `rcgi_async` is forced false (main timeline);
+  the resolve is forced to the probes-only path (`AddResolvePass`, not the
+  RayQuery `AddGatherChain`); `AddHistoryCopy` is skipped (only the gather chain
+  consumes it); `tlas_shaded` excludes `rcgi_software`. Every other RT pass
+  (rt shadows/AO/reflections, fog, the M2 gather) is already `rt_available_`-gated
+  by `--no-rt`, so nothing extra to guard.
+- `AddToGraph` gained a `const SdfClipmap* sdf` parameter (non-null ⇒ software)
+  and takes `RayTracingContext*` (nullable) instead of a reference; the pass
+  lambda binds the sw pipelines + SDF set when `sdf != nullptr`.
+
+### Env matrix
+
+- `RX_RCGI=1` — enable RCGI. On RT: hardware TLAS path (M2 gather). On non-RT:
+  auto-enables `RX_SDF` and runs the software tracer (probes-only resolve).
+- `RX_RCGI_SW=1` — force the software tracer even on RT hardware (A/B). Auto-
+  enables `RX_SDF`. Same frame as hw except the tracer; resolve forced to
+  probes-only.
+- `RX_RCGI_PROBES_ONLY=1` — M1 per-pixel cascade resolve instead of the M2
+  gather. Implied by software mode. Orthogonal to `RX_RCGI_SW` on hw (hw
+  probes-only is the A reference).
+- `RX_SDF=1` / `RX_SDF_DEBUG=1|2` — the standalone S1 path (clipmap build +
+  raymarch debug), unchanged. `RX_SDF` is auto-set when RCGI-software needs it,
+  but can still be set explicitly for the debug view.
+
+## Rebase onto merged RCGI (PR #12) + review-fix port
+
+This branch was rebased onto `main` after RCGI merged (commits c0d9521..eb15aaa,
+the last being the RCGI review fixes: shutdown order, TLAS gating, cache atomics,
+barrier scopes, cascade reset, eviction, lazy init). The S2 commit had extracted
+the two world-side shaders into thin hw/`_sw` entry files plus shared
+`rcgi_probe_trace_body.hlsli` / `rcgi_cache_shade_body.hlsli` (compile switch
+`RCGI_TRACE_SDF`) from the **pre-fix** originals, so the review-fix behaviours had
+to be ported into the shared bodies — covering the software path too — rather than
+left behind in the (now deleted) monolithic shaders.
+
+What landed in the shared bodies (identical for hw and sw unless noted):
+
+- **Stamp encoding**: frame stamps are `RcgiStampEncode(frame)` = frame+1 (0 =
+  never / cleared slot). `RcgiClaimCell` takes the encoded stamp.
+- **Age eviction** (`RcgiClaimCell`): a probed slot owned by a different cell with
+  a queued stamp older than `kRcgiEvictAge` (256) is reclaimed via a second
+  key `InterlockedCompareExchange`; the winner zeroes the shaded stamp (slot 9)
+  before use so the previous occupant's radiance cannot leak through
+  `RcgiCacheLookup`.
+- **Single-owner payload write**: after claiming the slot, one
+  `InterlockedExchange` on the queued stamp (slot 10) elects the per-cell,
+  per-frame owner; losers return without writing. **This now gates the software
+  payload too** (albedo slot 1, emissive|`kRcgiSwEntryBit` slot 2, pos/normal) —
+  the pre-fix sw path wrote those every ray, with the same tearing exposure the
+  fix closed for the hw triangle refs. Only the triangle-ref slots differ between
+  variants; pos/normal/hitT and the active-list append are shared.
+- **Owner-only active-list append** (`RcgiAppendIfStale`), gated on staleness
+  (shaded stamp 0 or age ≥ 4).
+- **cache_shade**: hw branch gains defensive `GetDimensions` bounds checks on the
+  instance / geometry-slot / material index before the bindless fetches. The sw
+  branch does **no** bindless fetches (surface colour comes from the packed
+  entry), so there is nothing to bound there. The shaded-stamp write uses the +1
+  encoding.
+
+**Entry packing is unchanged by the port.** The sw entry still uses slots 1/2/3
+for albedo / emissive+`kRcgiSwEntryBit` / free; the fixes only touch slots 9/10
+(stamps) and the active list, so `kRcgiSwEntryBit` (bit 31 of slot 2) does not
+collide with anything the review fix added.
+
+**Behavioural equivalence with main's fixed shaders** was established by direct
+line-by-line reading: the hw entry+body expands to the same claim loop (with
+eviction), single-owner `InterlockedExchange`, payload writes, and stale append,
+in the same order, as `origin/main`'s fixed `rcgi_probe_trace.cs.hlsl` /
+`rcgi_cache_shade.cs.hlsl`. The only deltas are the extraction into
+`RcgiClaimCell` / `RcgiAppendIfStale` helpers, the `RCGI_TRACE_SDF` seam, and
+hoisting `stamp`/`pos`/`n` above the seam — all side-effect-free, so no behavioural
+change vs the merged fixes. GPU A/B (hw probes-only vs `RX_RCGI_SW` vs `--no-rt`)
+renders equivalent bounce with no speckle.

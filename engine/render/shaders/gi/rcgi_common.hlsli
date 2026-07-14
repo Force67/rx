@@ -115,6 +115,26 @@ float3 RcgiUnpackRadiance(uint2 p) {
   return float3(f16tof32(p.x & 0xffffu), f16tof32(p.x >> 16u), f16tof32(p.y & 0xffffu));
 }
 
+// ---- software (SDF-traced) cache entries ----
+// The SDF probe trace has no instance/primitive/barycentric to re-resolve, so
+// the software variant repurposes the triangle-reference slots (1..3, unused in
+// software mode) to carry the surface colour the SDF gives it directly:
+//   slot kRcgiOffHit0 (1) = albedo, 8-bit RGB packed in bits 0..23.
+//   slot kRcgiOffHit1 (2) = emissive, 8-bit RGB packed in bits 0..23, with
+//                           kRcgiSwEntryBit (bit 31) set to tag a software entry.
+//   slot kRcgiOffHit2 (3) = free (left 0).
+// World pos (4..6), oct normal (7), hitT (8), and the frame stamps (9/10) keep
+// their hardware meaning. rcgi_cache_shade_sw reads albedo/emissive back from
+// slots 1/2 instead of the bindless material path.
+static const uint kRcgiSwEntryBit = 0x80000000u;
+uint RcgiPackColor8(float3 c) {
+  uint3 u = (uint3)round(saturate(c) * 255.0);
+  return u.x | (u.y << 8u) | (u.z << 16u);
+}
+float3 RcgiUnpackColor8(uint p) {
+  return float3(p & 0xffu, (p >> 8u) & 0xffu, (p >> 16u) & 0xffu) * (1.0 / 255.0);
+}
+
 // ---- fibonacci ray directions (rotated per frame like DDGI) ----
 float3 RcgiFibonacci(uint i, uint n) {
   float phi = 2.0 * kRcgiPi * frac(i * 0.61803398875);

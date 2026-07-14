@@ -645,6 +645,7 @@ class RX_RENDER_EXPORT Renderer {
   f64 time_seconds_ = 0;
   bool has_prev_frame_ = false;
   bool rt_available_ = false;
+  bool rcgi_force_software_ = false;  // RX_RCGI_SW: force the SDF software tracer
   u32 frame_index_ = 0;
   u32 cull_total_commands_ = 0;  // opaque indirect draws this frame
   u32 cull_visible_ = 0;         // survivors from the last completed cull (fence-safe)
