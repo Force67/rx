@@ -35,6 +35,9 @@ class DemoScenes {
   // Appends the live demo effects (particles, gaussians, oit, lights, fur, gpu
   // particles) into this frame's render view.
   void EmitToView(f32 dt, render::FrameView& view);
+  // Reapplies demo-specific renderer constraints after the debug UI changes
+  // settings. Most demos have none; cloth requires the raster skinning path.
+  void ApplyRenderPolicy();
 
   // Releases demo-owned GPU resources (the scenehook demo's raw pipelines) while
   // the renderer's device is still alive. Call from the app's OnShutdown.
@@ -61,6 +64,8 @@ class DemoScenes {
   void CreateVirtualTextureDemoScene();
   void CreateVirtualGeometryDemoScene();
   void CreateStrandHairDemoScene();
+  void CreateClothDemoScene();
+  void EmitCloth(render::FrameView& view);
   void CreateImposterDemoScene();
   void CreateSssDemoScene();
   void CreateLocomotionDemoScene();
@@ -127,6 +132,16 @@ class DemoScenes {
   physics::StrandGroomId hair_orbit_strands_ = 0;
   Vec3 hair_orbit_center_{0, 0, 0};
   f32 hair_time_ = 0;
+
+  // --demo cloth: the simulation cage is uploaded once as a skinned mesh;
+  // per-vertex palette frames pose it from PhysicsWorld readback each frame.
+  physics::ClothId cloth_ = 0;
+  u64 cloth_mesh_ = 0;
+  u32 cloth_width_ = 0;
+  base::Vector<u32> cloth_indices_;
+  base::Vector<Vec3> cloth_positions_;
+  base::Vector<Vec3> cloth_normals_;
+  base::Vector<render::DebugLine> cloth_lines_;
 
   // Locomotion demo: a kinema-driven skinned biped. The archetype graph is
   // shared; the rig player + foot placement hold this one character's state. The

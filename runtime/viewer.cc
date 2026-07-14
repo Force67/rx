@@ -241,6 +241,7 @@ void Viewer::OnBuildView(f32 frame_delta, render::FrameView& view) {
   demos_->EmitToView(frame_delta, view);
   EmitMorphedInstances(frame_delta, view);
   debug_ui_.Build(*renderer_, camera_, frame_delta, &view);
+  demos_->ApplyRenderPolicy();
 }
 
 void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {

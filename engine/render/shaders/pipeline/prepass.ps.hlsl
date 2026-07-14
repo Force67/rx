@@ -56,7 +56,7 @@ struct PsOut {
   float depth : SV_Target2;
 };
 
-PsOut main(PsIn input) {
+PsOut main(PsIn input, bool is_front_face : SV_IsFrontFace) {
 #if defined(RX_PREPASS_MASKED)
   if ((material.flags & kFlagAlphaMask) != 0u) {
     float4 base = base_color_map.Sample(base_color_sampler, input.uv) *
@@ -64,6 +64,7 @@ PsOut main(PsIn input) {
     if (base.a < material.alpha_cutoff) discard;
   }
 #endif
+  if (!is_front_face) input.normal = -input.normal;
   float3 n = normalize(input.normal);
   if ((material.flags & kFlagHasNormalMap) != 0u) {
     float3 t = input.tangent.xyz - n * dot(input.tangent.xyz, n);

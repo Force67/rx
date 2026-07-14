@@ -40,7 +40,7 @@ viewer runtime in place of the game.
   for using rx as the engine of your own game.
 - **runtime/** - the `rx` viewer (the reference `app::Application`):
   `--gltf <scene>` or `--demo <id>` (water,
-  materials, cornell, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
+  materials, cornell, cloth, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
   meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx),
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`
