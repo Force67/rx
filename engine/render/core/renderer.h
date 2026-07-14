@@ -24,6 +24,8 @@
 #include "render/gi/ddgi.h"
 #include "render/gi/light_grid.h"
 #include "render/gi/rcgi.h"
+#include "render/gi/sdf_clipmap.h"
+#include "render/gi/sdf_scene.h"
 #include "render/gi/denoiser_nrd.h"
 #include "render/gi/denoiser_rr.h"
 #include "render/post/exposure.h"
@@ -452,6 +454,10 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI), lazily created
   bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
   LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
+  // SDF software-trace infrastructure (RX_SDF): per-mesh SDFs + global clipmap.
+  // Both null unless RX_SDF is set, so with it off nothing is generated/allocated.
+  std::unique_ptr<SdfScene> sdf_scene_;
+  std::unique_ptr<SdfClipmap> sdf_clipmap_;
   std::unique_ptr<WaterPass> water_;
   std::unique_ptr<MeshPipeline> mesh_pipeline_;
   std::unique_ptr<PostPass> post_;

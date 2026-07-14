@@ -127,6 +127,11 @@ struct RenderSettings {
   // default), RX_RCGI=1.
   bool rcgi = false;
   f32 rcgi_intensity = 1.0f;
+  // SDF software-trace infrastructure (mesh SDFs + global SDF clipmap + surface
+  // colour proxy), the software ray path RCGI will use on hardware without ray
+  // query. Off by default; RX_SDF=1. Standalone in S1 (no RCGI coupling yet) —
+  // RX_SDF_DEBUG raymarches the clipmap for verification.
+  bool sdf = false;
 
   bool water_reflections = true;  // raytraced; off falls back to sky only
   // Persistent compute-tessellated ocean geometry. Only the largest planar

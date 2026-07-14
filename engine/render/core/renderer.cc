@@ -67,6 +67,10 @@ base::Option<bool> RestirDiOpt{"restir.di", false, "RX_RESTIR_DI"};
 base::Option<bool> RcgiOpt{"rcgi", false, "RX_RCGI"};
 // A/B debug: use the M1 per-pixel cascade resolve instead of the M2 gather chain.
 base::Option<bool> RcgiProbesOnlyOpt{"rcgi.probes_only", false, "RX_RCGI_PROBES_ONLY"};
+// SDF software-trace infrastructure (S1): mesh SDFs + global SDF clipmap. Off by
+// default; RX_SDF_DEBUG raymarches the clipmap (1 = distance field, 2 = albedo).
+base::Option<bool> SdfOpt{"sdf", false, "RX_SDF"};
+base::Option<int> SdfDebugOpt{"sdf.debug", 0, "RX_SDF_DEBUG"};
 base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
 // 0 shaded, 1 cluster tint, 2 lod tint, 3 sw/hw raster path.
 base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
@@ -636,6 +640,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (VrsThreshold.overridden()) settings_.vrs_threshold = static_cast<f32>(double(VrsThreshold));
   if (RestirDiOpt.overridden()) settings_.restir_di = RestirDiOpt;
   if (RcgiOpt.overridden()) settings_.rcgi = RcgiOpt;
+  if (SdfOpt.overridden()) settings_.sdf = SdfOpt;
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
@@ -659,6 +664,21 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (Precip.overridden()) settings_.precipitation = Precip.get();
   if (Snow.overridden()) settings_.precip_snow = Snow;
   if (Aurora.overridden()) settings_.aurora = Aurora;
+
+  // SDF software-trace infrastructure (RX_SDF). Created only when enabled, so
+  // with it off no SDF is generated and nothing is allocated. The clipmap owns
+  // large 3D volumes; if the device lacks 3D storage images it degrades to no
+  // SDF path rather than failing renderer init.
+  if (settings_.sdf) {
+    sdf_scene_ = std::make_unique<SdfScene>(*device_);
+    sdf_clipmap_ = std::make_unique<SdfClipmap>(*device_);
+    if (!sdf_clipmap_->Initialize()) {
+      RX_WARN("sdf: clipmap unavailable, disabling the SDF path");
+      sdf_clipmap_.reset();
+      sdf_scene_.reset();
+      settings_.sdf = false;
+    }
+  }
 
   auto t_batch1 = std::chrono::steady_clock::now();
   if (!pipeline_batch.End()) {
@@ -1317,6 +1337,37 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // Pure transparency never enters the tlas: water occluding rtao and
   // shadow rays would black out everything under it.
   if (raytracing_ && !gpu.all_blend && include_rt) raytracing_->BuildBlas(mesh_key, gpu);
+  // SDF: generate a per-mesh signed distance field from the same lod-0 CPU
+  // geometry (opaque meshes only; pure transparency has no useful SDF surface).
+  // Average albedo/emissive from the submesh materials weighted by index count.
+  if (sdf_scene_ && !gpu.all_blend) {
+    SdfScene::MeshInput in{};
+    in.positions = lod.vertices.empty() ? nullptr : lod.vertices[0].position;
+    in.position_stride = static_cast<u32>(sizeof(asset::Vertex));
+    in.vertex_count = static_cast<u32>(lod.vertices.size());
+    in.indices = lod.indices.empty() ? nullptr : lod.indices.data();
+    in.index_count = static_cast<u32>(lod.indices.size());
+    f32 albedo[3] = {0, 0, 0}, emissive[3] = {0, 0, 0};
+    u64 weight = 0;
+    if (material_system_) {
+      for (const GpuSubmesh& sm : gpu.submeshes) {
+        MaterialSystem::MaterialColor mc = material_system_->material_color(sm.material);
+        u64 w = std::max<u64>(sm.index_count, 1);
+        for (int k = 0; k < 3; ++k) {
+          albedo[k] += mc.albedo[k] * static_cast<f32>(w);
+          emissive[k] += mc.emissive[k] * static_cast<f32>(w);
+        }
+        weight += w;
+      }
+    }
+    if (weight > 0) {
+      for (int k = 0; k < 3; ++k) {
+        in.albedo[k] = albedo[k] / static_cast<f32>(weight);
+        in.emissive[k] = emissive[k] / static_cast<f32>(weight);
+      }
+    }
+    if (in.positions) sdf_scene_->RegisterMesh(mesh_key, in);
+  }
   // Foliage uploaded while path tracing was off got no blas/geometry above; flag a
   // catch-up so toggling path tracing on later still pulls it into the tlas
   // (BuildFrameGraph runs EnsureRayTracingGeometry on the next path-traced frame).
@@ -2488,6 +2539,20 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     rcgi_->AddToGraph(graph_, *raytracing_, tlas_slot, light_grid_, frame.lights, view.camera.eye,
                       applied_sun_direction_, applied_sun_intensity_, applied_sun_color_,
                       frame_index_, rcgi_async);
+  }
+
+  // SDF clipmap composition (RX_SDF): min-blend the frame's instance SDFs into
+  // the camera-following clipmap. This is the software-trace world side and is
+  // independent of ray tracing (the whole point). One clip recomposited per
+  // frame plus any clip that snapped this frame; S2 consumes the clipmap.
+  if (sdf_clipmap_ && settings_.sdf) {
+    base::Vector<SdfClipmap::Instance> sdf_instances;
+    sdf_instances.reserve(view.draws.size());
+    for (const DrawItem& item : view.draws) {
+      if (sdf_scene_->Find(item.mesh)) sdf_instances.push_back({item.mesh, item.transform});
+    }
+    sdf_clipmap_->AddComposeToGraph(graph_, *sdf_scene_, std::move(sdf_instances), view.camera.eye,
+                                    frame_index_);
   }
 
   // The path tracer takes over the whole frame: it writes scene_color directly
@@ -4057,6 +4122,15 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           ctx.cmd->EndRendering();
         });
   }
+
+  // SDF clipmap debug raymarch (RX_SDF_DEBUG): replace the lit scene with a view
+  // built purely from the SDF clipmap (1 = distance field tinted by clip,
+  // 2 = hit albedo + gradient-normal shading). Standalone S1 verification.
+  if (sdf_clipmap_ && settings_.sdf && SdfDebugOpt) {
+    sdf_clipmap_->AddDebugPass(graph_, lit, {render_width_, render_height_}, globals.inv_view_proj,
+                               view.camera.eye, static_cast<u32>(static_cast<int>(SdfDebugOpt)),
+                               frame_index_);
+  }
   }  // end raster path
 
   // Water has no place in the path tracer (blend geometry never enters the tlas),
@@ -4506,6 +4580,10 @@ void Renderer::Shutdown() {
     ssr_.Destroy(*device_);
     ssgi_.Destroy(*device_);
     if (rcgi_) light_grid_.Destroy(*device_);  // rcgi_ (unique_ptr) frees itself
+    // Free SDF GPU resources while the device is still valid (the unique_ptr
+    // destructors call DestroyImage/DestroyBuffer/DestroyPipeline).
+    sdf_clipmap_.reset();
+    sdf_scene_.reset();
     device_->DestroyPipeline(hdr_pipeline_);
     hdr_pipeline_ = {};
     device_->DestroyBuffer(hdr_readback_);
