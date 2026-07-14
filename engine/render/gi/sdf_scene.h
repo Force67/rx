@@ -67,10 +67,13 @@ class SdfScene {
   // existing renderer mesh key loses SDF eligibility (the replacement became all-
   // blend / no_rt, or has no opaque indexed geometry) and so never reaches
   // RegisterMesh -- without this the previous field would stay a permanent stale
-  // occluder in the clipmap. No-op for an unregistered key. The buffer retires
-  // through the device's deferred graveyard (an in-flight compose may still read
-  // it), like RegisterMesh's replace path -- no device stall, safe to call any
-  // time, not just at load.
+  // occluder in the clipmap. No-op for an unregistered key. Destroys the buffer
+  // IMMEDIATELY, like RegisterMesh's replace path: both are reached only from
+  // Renderer::UploadMesh's same-key replacement flow, which has already done
+  // device_->WaitIdle() (renderer.cc:1372), so no in-flight compose can read the
+  // buffer and immediate destruction avoids graveyard accumulation during load
+  // bursts. Precondition: call only under that idle guarantee (load-time upload),
+  // not from an arbitrary mid-frame point.
   void Remove(u64 mesh_key);
   const MeshSdf* Find(u64 mesh_key) const { return meshes_.find(mesh_key); }
 

@@ -129,12 +129,16 @@ SdfScene::~SdfScene() {
 void SdfScene::Remove(u64 mesh_key) {
   MeshSdf* existing = meshes_.find(mesh_key);
   if (!existing) return;
-  // Frame-safe: an in-flight compose may still read the buffer, so retire it
-  // through the per-frame graveyard instead of stalling the whole device. The
-  // map entry goes away now, so no new frame can bind it.
+  // Immediate destroy is safe: Remove is reached ONLY from Renderer::UploadMesh's
+  // same-key replacement flow, which has already called device_->WaitIdle()
+  // (renderer.cc:1372) before touching the SDF, so no in-flight frame can still be
+  // reading this buffer. Destroying now (rather than parking it in the deferred
+  // graveyard) avoids retired-SDF accumulation during a load burst -- the outer
+  // stall makes the graveyard pointless here, it would only keep the old
+  // allocation resident until a frame slot cycles.
   if (existing->sdf) {
     total_bytes_ -= existing->sdf.size;
-    device_.DestroyBufferDeferred(existing->sdf);
+    device_.DestroyBuffer(existing->sdf);
   }
   meshes_.erase(mesh_key);
 }
@@ -143,14 +147,17 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   // Re-uploading under an existing key replaces the geometry (Renderer::UploadMesh
   // destroys and rebuilds the GPU buffers), so the old SDF is stale and must be
   // regenerated -- keeping the first one (an early return) would permanently pin
-  // a bind-pose / previous mesh. Retire the previous buffer through the deferred
-  // graveyard (an in-flight compose may still read it; no device stall needed),
-  // then fall through and rebuild below.
+  // a bind-pose / previous mesh. Immediate destroy is safe here: this replace path
+  // is reached ONLY from Renderer::UploadMesh's same-key flow, which has already
+  // called device_->WaitIdle() (renderer.cc:1372) before regenerating the SDF -- so
+  // no in-flight compose can still read the old buffer. Destroying now (not via the
+  // deferred graveyard) avoids retired-SDF accumulation across repeated load-time
+  // replacements before a frame slot cycles. Then fall through and rebuild below.
   if (MeshSdf* existing = meshes_.find(mesh_key)) {
     if (input.vertex_count == 0) return true;  // nothing to replace it with; keep the current SDF
     if (existing->sdf) {
       total_bytes_ -= existing->sdf.size;
-      device_.DestroyBufferDeferred(existing->sdf);
+      device_.DestroyBuffer(existing->sdf);
     }
     meshes_.erase(mesh_key);
   }

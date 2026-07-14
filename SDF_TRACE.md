@@ -204,6 +204,14 @@ hardware-only. First fixes, in priority order, before this is production-grade:
 5. **Softer sun occlusion.** Distance-attenuated (cone/penumbra) SDF shadow
    instead of binary, and an emissive HDR scale (the proxy is RGBA8 LDR, so
    emissive magnitude is clamped to 0..1 today).
+6. **Deferred replaced-resource retirement for streaming.** Today same-key SDF
+   replacement/removal destroys immediately, relying on `UploadMesh`'s load-time
+   `device_->WaitIdle()` (renderer.cc:1372). When that stall is someday removed so
+   meshes can stream in per frame, the whole replaced resource set (mesh vertex/
+   index buffers + BLAS + SDF) must move to the deferred graveyard together --
+   option 2 of the PR #13 review, deliberately not done piecemeal here (reverting
+   `UploadMesh`'s own WaitIdle-based replacement discipline is engine-wide work that
+   predates this PR).
 
 ---
 
@@ -612,8 +620,11 @@ affect codegen).
 8. **Same-key mesh re-upload regenerates the SDF.** `SdfScene::RegisterMesh` no
    longer early-returns on an existing key (which permanently pinned the first,
    now-stale SDF). It destroys the previous buffer (accounting the memory) and
-   regenerates from the new geometry. The old buffer retires through the RHI's
-   deferred graveyard (`DestroyBufferDeferred`) -- frame-safe, no device stall.
+   regenerates from the new geometry. The destroy is **immediate**
+   (`DestroyBuffer`) under the caller's idle guarantee: `Renderer::UploadMesh`
+   already `device_->WaitIdle()`s (renderer.cc:1372) before the SDF regenerates on
+   a same-key replacement, so no in-flight compose can read the old buffer and an
+   immediate free avoids retired-SDF accumulation across load-burst replacements.
 
 ### Verification (GB10, vkrun, 1920×1011)
 
@@ -690,9 +701,14 @@ includes).
 5. **An ineligible same-key re-upload removes the stale SDF.** Replacements that
    became all-blend / `no_rt` / lost their opaque indices never called
    `RegisterMesh`, so the old field lingered as a permanent stale occluder. New
-   `SdfScene::Remove(mesh_key)` (deferred-graveyard destroy, memory accounted,
-   no-op for an unregistered key; frame-safe, callable outside load time). `UploadMesh` now calls `RegisterMesh` on the eligible path
-   and `Remove` on **every** ineligible replacement path.
+   `SdfScene::Remove(mesh_key)` (immediate `DestroyBuffer`, memory accounted, no-op
+   for an unregistered key). Both `Remove` and `RegisterMesh`'s replace path are
+   reached only from `UploadMesh`'s same-key flow, which has already
+   `device_->WaitIdle()`d (renderer.cc:1372), so immediate destruction is safe and
+   avoids graveyard accumulation during load bursts -- call under that idle
+   guarantee, not from an arbitrary mid-frame point. `UploadMesh` now calls
+   `RegisterMesh` on the eligible path and `Remove` on **every** ineligible
+   replacement path.
 
 ### Re-review verification (GB10, vkrun, 1920×1011)
 
@@ -712,3 +728,97 @@ includes).
 > Note: a hw-probes-only A/B against the sw path could not be run on GB10 (this
 > device reports `rt=false rayquery=false`, so no hardware RT path exists here);
 > the sw path is the one exercised.
+
+## PR #13 final review fixes (2 residual threads)
+
+A further re-review verified all earlier findings and left two threads. Both are
+correctness/robustness refinements to the software path; the hw
+`rcgi_probe_trace` / `rcgi_cache_shade` `.spv` + `.dxil` remain **byte-identical**
+before/after (re-verified by sha256, including a forced clean recompile: every
+edit is in `sdf_trace.hlsli`/`sdf_clipmap.cc`, neither of which the hw variant
+compiles -- the body's `#include "gi/sdf_trace.hlsli"` sits in the `#else` of
+`#ifndef RCGI_TRACE_SDF`, so the hw entry never pulls it in).
+
+**A. Deferred SDF destroy under an already-idled device → immediate destroy.**
+`SdfScene::Remove` and `RegisterMesh`'s same-key replace path parked the old
+buffer in the RHI deferred graveyard, but both are reached ONLY from
+`Renderer::UploadMesh`'s same-key replacement flow, which has already called
+`device_->WaitIdle()` (renderer.cc:1372) before touching the SDF. The stall
+already guarantees no in-flight compose reads the old buffer, so the graveyard
+removed no stall -- it only kept the old allocation resident and let repeated
+load-time replacements accumulate retired SDF buffers (avoidable allocation
+pressure). Both paths now `DestroyBuffer` immediately, with the precondition
+stated in the code and the `Remove` doc comment. The alternative (option 2 of the
+review -- remove `UploadMesh`'s stall and defer the *whole* replaced resource set
+mesh buffers + BLAS + SDF together) is engine-wide work that predates this PR and
+is left as follow-up #6 above, deliberately not done piecemeal.
+
+**B. Outer-probe origin classification at the coarsest clip boundary.** Three
+coordinated changes so an outer RCGI probe enclosed by geometry is classified as
+inside/backface (matching the hardware backface case) rather than leaking a false
+front hit or injecting sky:
+
+1. **Zero-margin origin classification in the physical volume**
+   (`sdf_trace.hlsli`). `SdfSelectClip` guard-bands by one voxel, so an origin in
+   the coarsest clip's guard shell -- or exactly on a clip face -- is rejected even
+   when the clip's data encloses it, and the old code then declared it not-inside.
+   New `SdfInsidePhysical` tests the coarsest clip's PHYSICAL voxel extent (local
+   `[0,res]`, no guard inset); an origin there is classified against a coarsest-clip
+   sample clamped to the trilinear interior (`SdfClipUvw` clamps to `[0.5,res-0.5]`),
+   so a negative value returns inside/backface at `t=0`. Finer clips keep their
+   normal guarded sample -- the physical fallback fires only for the guard-shell /
+   boundary case.
+
+2. **Clipmap snap aligned to the RCGI cascade probe spacing**
+   (`sdf_clipmap.cc SnapOrigin`). RCGI snaps each cascade origin to its PROBE
+   SPACING (`rcgi.cc`: `floor((cam-half)/spacing)*spacing`, cascade 3 = 16 m) while
+   the clip snapped to its own voxel (clip 3 = 2 m); the 8× granularity mismatch let
+   the two origins drift by up to a probe spacing, pushing outer cascade-3 probes
+   several metres past the coarsest clip. The clip now snaps on **8 voxels** (=
+   cascade N's probe spacing = `kBaseSpacing·2^N`, since RCGI base spacing 2 m is 8×
+   the clip voxel 0.25 m). **Formula check:** both use the same camera eye
+   (`view.camera.eye`, renderer.cc:2630 vs 2645), `std::floor`, per-axis; they
+   differ only in the half offset (clip `extent/2` = 8 snaps vs RCGI
+   `(kProbesPerAxis-1)·spacing/2` = 7.5 spacings), so with `snap == spacing` the two
+   shared origins differ by only 0 or +1 snap and every cascade probe -- including
+   the outer faces -- lands within `[origin, origin+16·spacing]`, the clip's 256 m
+   physical extent (240 m cascade span ⊂ 256 m clip). The +1-snap case parks the
+   outer probe exactly on a clip face, handled by change 1. The two update on
+   different cadences (RCGI re-snaps only the round-robin *current* cascade each
+   frame -- its blended origin lags for the other three -- while the clipmap re-snaps
+   every clip that moved), so during fast motion the origins can transiently
+   disagree by up to one snap; change 3 is the backstop for that window (documented
+   in the `SnapOrigin` comment).
+
+3. **Backstop: first-sample-after-entry negative = backface, not a bisected hit**
+   (`sdf_trace.hlsli`). A new `real_anchor` flag distinguishes a proven-outside
+   FIELD sample (the classified origin, or a positive march step) from the merely
+   geometric slab-entry boundary. If the first real in-volume sample is already
+   negative and the only anchor is that entry boundary (entry epsilon = 1% of a
+   voxel), the entry point is itself inside geometry → return inside/backface, not a
+   front hit. A genuine front surface at the boundary reads near-zero POSITIVE at
+   entry+1% voxel, so this cannot swallow legitimate front hits; ordinary mid-march
+   crossings (after a real positive sample) still resolve as front hits via the
+   existing bisection.
+
+### Final-fix verification (GB10, vkrun, 1920×1011)
+
+- Build green; `ctest` 13/13.
+- hw `rcgi_probe_trace` / `rcgi_cache_shade` `.spv` + `.dxil` sha256 **unchanged**,
+  including after `rm`-ing the artifacts and a forced clean recompile.
+- `--no-rt RX_RCGI=1 --demo cornell` (`rayquery=false` → real sw path): indirect
+  channel (`RX_DEBUG_VIEW=6`) shows clean red/green bleed, no sky poisoning, no new
+  dark rings. A/B vs the pre-change branch: full-frame indirect RMSE **0.14 %**
+  (max 2/255) -- within temporal noise; the boundary changes touch only the outer
+  probes, invisible on this static view.
+- `--no-rt RX_RCGI=1` sponza: whole stack renders; indirect channel free of
+  boundary artifacts (uniform sky-ambient fill through the openings, enclosed arches
+  dark not sky-poisoned). A/B vs pre-change: indirect RMSE **0.01 %** (max 4/255).
+- `--validation` sw: no new SDF/RCGI VUIDs (only the pre-existing `caustic_out` /
+  `cur_ring` storage-image-format warnings + unused-vertex-attribute warnings, all
+  present with the SDF path off).
+- `RX_RCGI` unset: zero SDF/RCGI allocations.
+
+> Note: the `RX_RCGI_SW` vs hw-probes-only A/B and the hw-path screenshot check
+> could not be run on GB10 (`rt=false rayquery=false`, no hardware RT path); the sw
+> path is the one exercised. Hw byte-equivalence is proven at the shader level.

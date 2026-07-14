@@ -48,6 +48,16 @@ bool SdfInsideClip(SdfGlobals g, uint c, float3 world, float margin) {
   return all(l >= margin) && all(l <= res - margin);
 }
 
+// true when `world` sits inside clip c's PHYSICAL voxel volume (local [0,res], no
+// guard inset). Zero-margin variant of SdfInsideClip: used to classify origins that
+// fall in the coarsest clip's one-voxel guard shell (where SdfSelectClip rejects
+// them) but are still enclosed by the clip's data.
+bool SdfInsidePhysical(SdfGlobals g, uint c, float3 world) {
+  float3 l = SdfLocal(g, c, world);
+  float res = g.clip_params.x;
+  return all(l >= 0.0) && all(l <= res);
+}
+
 // finest (smallest) clip that contains `world` with a 1-voxel guard band; returns
 // kSdfClips when the point is outside every clip.
 uint SdfSelectClip(SdfGlobals g, float3 world) {
@@ -122,13 +132,27 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
   // a probe/point that starts just outside a surface firing inward (it can cross
   // in within start_t and read negative -> false backface) or just inside firing
   // outward (it can cross out before start_t and never see the negative -> false
-  // miss). So sample the origin itself: if it sits inside the clipmap's selectable
-  // bounds and the field is negative, the ray starts inside closed geometry ->
-  // mirror the hardware backface case immediately. Origins outside every clip are
-  // by definition not inside geometry; fall through to the slab-entry march.
+  // miss). So sample the origin itself: if the field is negative there, the ray
+  // starts inside closed geometry -> mirror the hardware backface case immediately.
+  //
+  // SdfSelectClip guard-bands by one voxel, so an OUTER probe sitting in the
+  // coarsest clip's guard shell -- or exactly on a clip face, where the RCGI-
+  // aligned clip snap (sdf_clipmap.cc) parks cascade-3 outer probes -- is rejected
+  // by it even when the clip's data encloses the probe. For that case fall back to
+  // the coarsest clip's PHYSICAL voxel extent (local [0,res], no guard inset) and
+  // sample it with coords clamped to the valid trilinear interior (SdfClipUvw
+  // clamps to [0.5,res-0.5]); a negative there is still inside/backface. Finer
+  // clips keep their normal guarded sample -- the physical fallback is only for the
+  // guard shell / boundary. Origins outside the coarsest physical extent are by
+  // definition not inside geometry; fall through to the slab-entry march.
   uint c0 = SdfSelectClip(g, origin);
-  bool origin_in_clip = c0 < kSdfClips;
-  if (origin_in_clip && SdfDistance(g, c0, origin, sdf_distance, sdf_sampler) < 0.0) {
+  uint classify_clip = c0;
+  if (c0 >= kSdfClips && SdfInsidePhysical(g, kSdfClips - 1u, origin)) {
+    classify_clip = kSdfClips - 1u;
+  }
+  bool origin_classified = classify_clip < kSdfClips;
+  if (origin_classified &&
+      SdfDistance(g, classify_clip, origin, sdf_distance, sdf_sampler) < 0.0) {
     hit.inside = true;
     hit.miss = false;
     hit.hitT = 0.0;
@@ -137,12 +161,15 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
   }
 
   float t = start_t;         // march bias, applied only after origin classification
-  // Last known non-negative (outside-geometry) sample along the ray -- the lower
-  // bound for bisecting a crossing. The origin at t=0 is one such anchor when it is
-  // in-clip (just proven >= 0), which lets a crossing within the very first march
-  // step still resolve to a surface position rather than snapping to start_t.
+  // Lower bound for bisecting a front crossing. `real_anchor` marks t_anchor as a
+  // proven-outside FIELD sample (the classified origin here, just shown >= 0, or a
+  // later positive march step) as opposed to the merely geometric slab-entry
+  // boundary. Only a real anchor makes a subsequent negative a front-surface
+  // crossing to bisect; a negative reached with the slab boundary as the only
+  // anchor means the entry point is itself inside geometry -> backface.
   float t_anchor = 0.0;
-  bool has_anchor = origin_in_clip;
+  bool has_anchor = origin_classified;   // origin fell through as >= 0
+  bool real_anchor = origin_classified;
   bool sampled = false;      // whether we have taken a real (in-clipmap) sample yet
 
   [loop]
@@ -170,8 +197,15 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
         // (2 m in clip 3) and could stride past a front surface in it. 1% of the
         // coarsest voxel clears the float boundary without skipping geometry.
         t = t_near + cvoxel * 0.01;
-        t_anchor = t;         // the entry boundary is an outside-geometry anchor
-        has_anchor = true;
+        if (!has_anchor) {
+          // The slab entry boundary is only a geometric guess, not a field sample:
+          // record it as the anchor but leave real_anchor false, so a negative on
+          // the first in-volume sample trips the backface backstop below rather
+          // than bisecting to a fake front hit. (If the origin already gave a real
+          // anchor -- an outer probe in the guard shell that read >= 0 -- keep it.)
+          t_anchor = t;
+          has_anchor = true;
+        }
         continue;
       }
       break;  // never enters the clipmap: a true miss
@@ -184,11 +218,25 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
 
     if (d < eps) {  // surface hit (d<0 too: crossed since the origin was outside)
       float t_hit = t;
-      // A negative sample AFTER origin classification means the surface lies
-      // between the last outside anchor and here -- a front-surface crossing, never
-      // an inside/backface (the origin already excluded that). Bisect toward the
+      if (d < 0.0 && !real_anchor) {
+        // Backstop: the first real in-volume sample is already negative and the
+        // only anchor is the slab entry boundary (entry epsilon is 1% of a voxel).
+        // The entry point is itself inside geometry, so this is the hardware
+        // backface case -- NOT a front hit. A genuine front surface at the boundary
+        // reads near-zero POSITIVE at entry + 1% voxel, so this never swallows a
+        // legitimate front hit; ordinary mid-march crossings (after a real positive
+        // sample) still resolve as front hits via the bisection below.
+        hit.inside = true;
+        hit.miss = false;
+        hit.hitT = 0.0;
+        hit.pos = origin;
+        return hit;
+      }
+      // A negative sample AFTER a proven-outside (real) anchor means the surface
+      // lies between that anchor and here -- a front-surface crossing, never an
+      // inside/backface (the origin already excluded that). Bisect toward the
       // crossing for a hit position/normal on the surface rather than inside it.
-      if (d < 0.0 && has_anchor) {
+      if (d < 0.0 && real_anchor) {
         float lo = t_anchor, hi = t;
         [unroll]
         for (int b = 0; b < 4; ++b) {
@@ -224,9 +272,11 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
       break;
     }
     // Sphere-trace step, floored to keep progress through coarse/flat regions.
-    // This sample was non-negative (d >= eps > 0), so it is a fresh outside anchor.
+    // This sample was non-negative (d >= eps > 0), so it is a fresh, real
+    // outside-geometry anchor for a later crossing's bisection.
     t_anchor = t;
     has_anchor = true;
+    real_anchor = true;
     t += max(d, eps * 0.5);
   }
   return hit;
