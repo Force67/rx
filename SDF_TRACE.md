@@ -153,6 +153,15 @@ instance doesn't cull — see below).
 - **materials --no-rt**: plausible ambient across the sphere grid, no crash, no
   speckle. Albedo is per-mesh-averaged (flat), so material variety is muted vs a
   texture-aware gather.
+- **Whole-stack `--no-rt` vs RT (post-rebase, quantified)**: full-frame RMSE
+  between the RT final (M2 gather + all RT features) and the `--no-rt` software
+  final is **2.2 %** on cornell and **8.7 %** on sponza — the sponza delta is
+  dominated by the RT-gated volumetric-fog haze (absent under `--no-rt` by
+  design), not by the GI: bounce lighting, banner colour response and vault
+  shading match. Indirect-channel RMSE across the A/B trio (hw probes-only vs
+  `RX_RCGI_SW` vs `--no-rt`) is ~3.3 %, the predicted voxel-rounding delta.
+  Frame-to-frame RMSE at steady state is ~1.6 % (animated clouds + moving sun),
+  with no speckle or divergence — the software tier converges temporally.
 
 ### Artifact / leak inventory
 
