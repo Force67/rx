@@ -645,7 +645,6 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (VrsThreshold.overridden()) settings_.vrs_threshold = static_cast<f32>(double(VrsThreshold));
   if (RestirDiOpt.overridden()) settings_.restir_di = RestirDiOpt;
   if (RcgiOpt.overridden()) settings_.rcgi = RcgiOpt;
-  if (SdfOpt.overridden()) settings_.sdf = SdfOpt;
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
@@ -672,17 +671,20 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
 
   // RCGI software mode: on a device without ray query (or when RX_RCGI_SW forces
   // it for A/B on RT hardware), RCGI's world side runs through the SDF clipmap
-  // tracer, which needs the SDF infrastructure. SDF availability is a STARTUP
-  // decision (option b): the CPU mesh positions/indices used to voxelise mesh
-  // SDFs are not retained after upload, so there is no way to backfill the field
-  // on a later false->true rcgi toggle. Seed the SDF path now if the software
-  // tracer could be wanted this session -- `--no-rt RX_RCGI=1`, or RX_RCGI_SW
-  // forcing software on RT hardware -- and once seeded it stays available.
-  // RCGI-software therefore implies the SDF memory + compose cost documented in
-  // SDF_TRACE.md. (A late programmatic rcgi enable on a non-RT device that set no
-  // SDF-implying env gets no software path; ApplySettings logs that once.)
+  // tracer, which needs the SDF infrastructure. SDF availability is an IMMUTABLE
+  // STARTUP decision, NOT a live settings bit: the CPU mesh positions/indices used
+  // to voxelise mesh SDFs are not retained after upload, so there is no way to
+  // backfill the field on a later toggle, and a quality preset applied live must
+  // not be able to turn a seeded path off. Decide want_sdf once here from the
+  // startup desc flag, the SDF-implying envs (RX_SDF / RX_RCGI_SW), or a non-RT
+  // RCGI request; it is gated on creation success into `sdf_available_` below and
+  // stays fixed for the session. RCGI-software therefore implies the SDF memory +
+  // compose cost documented in SDF_TRACE.md. (A late programmatic rcgi enable on a
+  // non-RT device that seeded nothing at startup gets no software path;
+  // ApplySettings logs that once.)
   if (RcgiSwOpt.overridden()) rcgi_force_software_ = RcgiSwOpt;
-  if ((settings_.rcgi && !rt_available_) || rcgi_force_software_) settings_.sdf = true;
+  const bool want_sdf = desc.software_gi || SdfOpt.get() || rcgi_force_software_ ||
+                        (settings_.rcgi && !rt_available_);
 
   // RCGI is created lazily on first activation (ApplySettings), covering both
   // the RT (hw + sw pipelines, so RX_RCGI_SW A/B works) and the non-ray-query
@@ -710,14 +712,15 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   // _sw pipelines are likewise created outside any batch -- lazily in
   // ApplySettings during RenderFrame -- so a failure there returns a null system
   // and is handled non-fatally at that call site too.)
-  if (settings_.sdf) {
+  if (want_sdf) {
     sdf_scene_ = std::make_unique<SdfScene>(*device_);
     sdf_clipmap_ = std::make_unique<SdfClipmap>(*device_);
     if (!sdf_clipmap_->Initialize()) {
       RX_WARN("sdf: clipmap unavailable, disabling the SDF path");
       sdf_clipmap_.reset();
       sdf_scene_.reset();
-      settings_.sdf = false;
+    } else {
+      sdf_available_ = true;  // immutable for the session once creation succeeds
     }
   }
   return true;
@@ -1011,7 +1014,7 @@ void Renderer::ApplySettings() {
   // shading. Available on RT hardware (hw + sw pipelines so RX_RCGI_SW A/B works)
   // OR on a non-ray-query device once the SDF clipmap is up (software-only
   // pipelines); `rt_available_` selects which pipelines are built.
-  bool rcgi_sw_possible = settings_.sdf && sdf_clipmap_ != nullptr;
+  bool rcgi_sw_possible = sdf_available_ && sdf_clipmap_ != nullptr;
   // Honest failure for a late/programmatic rcgi enable on a non-RT device that
   // never seeded the SDF path at startup: the software tracer cannot come up
   // (SDF availability is a startup decision -- see Initialize / SDF_TRACE.md), so
@@ -1389,7 +1392,13 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // submesh triangle ranges (blended submeshes -- glass/water/effects -- are
   // excluded from the tlas and must not turn the SDF opaque). Average albedo /
   // emissive over the opaque submeshes only, matching the geometry that fed it.
-  if (sdf_scene_ && !gpu.all_blend && !gpu.no_rt) {
+  // Eligibility can flip on a same-key re-upload (opaque mesh replaced by an all-
+  // blend / no_rt one, or one that lost its opaque submeshes). When it does the
+  // block below never calls RegisterMesh, so the previous field must be dropped
+  // explicitly or it lingers as a stale occluder -- Remove covers every such
+  // replacement path (no-op when nothing was registered).
+  bool sdf_eligible = sdf_scene_ && !gpu.all_blend && !gpu.no_rt;
+  if (sdf_eligible) {
     SdfScene::MeshInput in{};
     in.positions = lod.vertices.empty() ? nullptr : lod.vertices[0].position;
     in.position_stride = static_cast<u32>(sizeof(asset::Vertex));
@@ -1427,9 +1436,15 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     }
     // Only register when there is opaque indexed geometry to voxelise (an all-
     // blend mesh is already excluded above; a non-indexed opaque mesh is not a
-    // shape we generate SDFs for here).
-    if (in.positions && in.index_count > 0) sdf_scene_->RegisterMesh(mesh_key, in);
+    // shape we generate SDFs for here). If there is none, this is not eligible
+    // after all -- drop any prior field below.
+    if (in.positions && in.index_count > 0)
+      sdf_scene_->RegisterMesh(mesh_key, in);
+    else
+      sdf_eligible = false;
   }
+  // Any ineligible replacement (or first upload) removes a stale SDF for this key.
+  if (sdf_scene_ && !sdf_eligible) sdf_scene_->Remove(mesh_key);
   // Foliage uploaded while path tracing was off got no blas/geometry above; flag a
   // catch-up so toggling path tracing on later still pulls it into the tlas
   // (BuildFrameGraph runs EnsureRayTracingGeometry on the next path-traced frame).
@@ -1915,7 +1930,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   bool rtao_active = rt_available_ && settings_.rtao;
   // RCGI takes over the indirect-diffuse path (DDGI + SSGI) when on. It is
   // available with hardware ray query OR the software SDF clipmap tracer.
-  bool sdf_ready = sdf_clipmap_ && sdf_clipmap_->ready() && settings_.sdf;
+  bool sdf_ready = sdf_clipmap_ && sdf_clipmap_->ready() && sdf_available_;
   bool rcgi_active = rcgi_ && settings_.rcgi && settings_.ibl && bindless_ != nullptr &&
                      (rt_available_ || sdf_ready);
   // Software mode: forced by a non-ray-query device or RX_RCGI_SW (A/B on RT
@@ -2606,7 +2621,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // pass so the software probe trace reads this frame's clipmap (there is no
   // tlas_build to anchor after in software mode). Both use the kGeneral manual-
   // barrier discipline, so submission order is execution order on the queue.
-  if (sdf_clipmap_ && settings_.sdf) {
+  if (sdf_clipmap_ && sdf_available_) {
     base::Vector<SdfClipmap::Instance> sdf_instances;
     sdf_instances.reserve(view.draws.size());
     for (const DrawItem& item : view.draws) {
@@ -4206,7 +4221,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // SDF clipmap debug raymarch (RX_SDF_DEBUG): replace the lit scene with a view
   // built purely from the SDF clipmap (1 = distance field tinted by clip,
   // 2 = hit albedo + gradient-normal shading). Standalone S1 verification.
-  if (sdf_clipmap_ && settings_.sdf && SdfDebugOpt) {
+  if (sdf_clipmap_ && sdf_available_ && SdfDebugOpt) {
     sdf_clipmap_->AddDebugPass(graph_, lit, {render_width_, render_height_}, globals.inv_view_proj,
                                view.camera.eye, static_cast<u32>(static_cast<int>(SdfDebugOpt)),
                                frame_index_);

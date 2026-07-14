@@ -63,6 +63,14 @@ class SdfScene {
   // Generates + uploads the SDF for one mesh, keyed like BLASes (u64 mesh key).
   // Idempotent per key; returns false if the mesh has no triangles.
   bool RegisterMesh(u64 mesh_key, const MeshInput& input);
+  // Drops the SDF for a key if one exists. Called when a re-upload under an
+  // existing renderer mesh key loses SDF eligibility (the replacement became all-
+  // blend / no_rt, or has no opaque indexed geometry) and so never reaches
+  // RegisterMesh -- without this the previous field would stay a permanent stale
+  // occluder in the clipmap. No-op for an unregistered key; WaitIdle-then-destroy
+  // like RegisterMesh's replace path (registration/removal are load-time, not
+  // per-frame).
+  void Remove(u64 mesh_key);
   const MeshSdf* Find(u64 mesh_key) const { return meshes_.find(mesh_key); }
 
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }

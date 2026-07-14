@@ -99,6 +99,13 @@ struct RendererDesc {
   UpscalerKind upscaler = UpscalerKind::kNone;
   RayTracingSettings raytracing;
   bool enable_raytracing = true;
+  // Build the software-GI (SDF clipmap trace) infrastructure at startup. This is
+  // an IMMUTABLE availability decision that MUST be set before Initialize: the CPU
+  // mesh geometry that voxelises the SDFs is not retained past upload, so the path
+  // cannot be backfilled by a later live toggle. Env RX_SDF / RX_RCGI_SW, or a
+  // non-RT RX_RCGI request, force it on too; hosted apps use this field for the
+  // programmatic equivalent (OnInitialize runs after renderer init, too late).
+  bool software_gi = false;
   VulkanDeviceExtras vulkan;
 };
 
@@ -455,8 +462,13 @@ class RX_RENDER_EXPORT Renderer {
   bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
   bool rcgi_sw_unavailable_logged_ = false;  // logged the "no startup SDF path" notice once
   LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
-  // SDF software-trace infrastructure (RX_SDF): per-mesh SDFs + global clipmap.
-  // Both null unless RX_SDF is set, so with it off nothing is generated/allocated.
+  // SDF software-trace infrastructure (RX_SDF / software_gi): per-mesh SDFs +
+  // global clipmap. Both null unless the path was enabled at startup, so with it
+  // off nothing is generated/allocated. `sdf_available_` is the IMMUTABLE startup
+  // availability bit, decided once in Initialize and gated on creation success --
+  // separate from any live RenderSettings toggle, so applying a quality preset can
+  // never turn the seeded software path off (see RendererDesc::software_gi).
+  bool sdf_available_ = false;
   std::unique_ptr<SdfScene> sdf_scene_;
   std::unique_ptr<SdfClipmap> sdf_clipmap_;
   std::unique_ptr<WaterPass> water_;

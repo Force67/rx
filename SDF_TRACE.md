@@ -173,9 +173,10 @@ instance doesn't cull — see below).
   the bleed bands are blockier than the hardware triangle hit. Expected.
 - **Binary SDF sun shadow**: the sw cache shade traces one occlusion ray against
   the clipmap (hit ⇒ fully shadowed). No penumbra; coarse-clip self-occlusion is
-  mitigated by a **clip-scaled** start bias (normal offset + trace initial step
-  both scaled by the hit clip's voxel — see the PR #13 review-fix section) but can
-  still over-darken near thin geometry.
+  mitigated by a **single clip-scaled self-bias** — the origin is pushed ~1.5
+  voxels of the hit's clip along the normal, then marched from a tiny `start_t`
+  epsilon (re-review fix 4, superseding the earlier normal-offset-plus-voxel-step
+  stack) — but can still over-darken near thin geometry.
 - **Cornell demo walls render translucent** in every mode (hw and sw alike) —
   that is the demo's wall material, not an S2 artifact.
 - **Thin/open geometry SDF sign leaks** (S1's ray-parity failure class) and the
@@ -211,7 +212,9 @@ hardware-only. First fixes, in priority order, before this is production-grade:
 S1 is implemented and verified standalone (no RCGI coupling). `RX_SDF=1` builds
 per-mesh SDFs at upload and composes a camera-following global SDF clipmap with a
 surface-colour proxy every frame; `RX_SDF_DEBUG=1|2` raymarches it onto the scene
-colour. Off by default (`RenderSettings::sdf`), zero behaviour change when unset.
+colour. Off by default; availability is the immutable `Renderer::sdf_available_`
+(startup only, see the re-review fixes below — **not** a `RenderSettings` field),
+zero behaviour change when unset.
 
 ### Source map
 
@@ -223,12 +226,13 @@ colour. Off by default (`RenderSettings::sdf`), zero behaviour change when unset
   clip sampling helpers (the S2 seam; dependency-free, no RayQuery/bindless).
 - `engine/render/shaders/gi/sdf_clear.cs.hlsl`, `sdf_compose.cs.hlsl`,
   `sdf_debug.cs.hlsl`.
-- Wiring: `core/renderer.{h,cc}` (members `sdf_scene_`/`sdf_clipmap_`, `RX_SDF`/
-  `RX_SDF_DEBUG` options, seed `settings_.sdf`, `RegisterMesh` hook in `UploadMesh`,
-  compose pass after `tlas_build`, debug pass after `debug_lines`, teardown in
-  `Shutdown`), `core/settings.h` (`sdf`), `app/host.cc` (carry `RX_SDF` through the
-  preset — this is mandatory; `ApplyRenderPreset` overwrites `settings_` wholesale),
-  `pipeline/material_system.{h,cc}` (`material_color()` + a CPU factor map).
+- Wiring: `core/renderer.{h,cc}` (members `sdf_scene_`/`sdf_clipmap_`, immutable
+  `sdf_available_`, `RX_SDF`/`RX_SDF_DEBUG` options, `want_sdf` startup decision,
+  `RegisterMesh`/`Remove` hooks in `UploadMesh`, compose pass after `tlas_build`,
+  debug pass after `debug_lines`, teardown in `Shutdown`), `core/renderer.h`
+  (`RendererDesc::software_gi` startup field), `pipeline/material_system.{h,cc}`
+  (`material_color()` + a CPU factor map). (SDF availability is no longer a
+  `RenderSettings` field, so `app/host.cc` needs no preset carry.)
 
 ### Mesh SDFs (`SdfScene`)
 
@@ -291,19 +295,24 @@ colour. Off by default (`RenderSettings::sdf`), zero behaviour change when unset
 ### Trace seam (`sdf_trace.hlsli`) — the S2 interface
 
 ```
-SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax,
+SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t,
                       SdfGlobals sdf,
                       Texture3D<float>  sdf_distance,
                       Texture3D<float4> sdf_albedo,
                       Texture3D<float4> sdf_emissive,
                       SamplerState      sdf_sampler);
-// SdfHit { float3 pos, normal, albedo, emissive; float hitT; bool miss; }
+// SdfHit { float3 pos, normal, albedo, emissive; float hitT; bool miss, inside; }
 ```
 
-Sphere-traces the finest clip containing the ray, stepping up clips on exit; hit when
-distance < 0.75·voxel; 6-tap central-difference gradient normal; ~1-voxel start bias;
-step floored to `0.5·eps` for progress. Clip sampling clamps to the clip's z-slab to
-avoid cross-clip bleed. **S2 must bind (any slots, passed as params):**
+Classifies the **origin** at t=0 first (negative field inside the clipmap bounds ⇒
+`inside` / backface, `hitT=0`, returns immediately — re-review fix 3), then
+sphere-traces from `start_t` through the finest clip containing the ray, stepping
+up clips on exit; hit when distance < 0.75·voxel (a mid-march negative is a
+front-surface crossing, resolved by bisection, never `inside`); 6-tap
+central-difference gradient normal; `start_t` is a pure march offset (callers bias
+their own origin); step floored to `0.5·eps` for progress. Clip sampling clamps to
+the clip's z-slab to avoid cross-clip bleed. **S2 must bind (any slots, passed as
+params):**
 
 - `ConstantBuffer<SdfGlobals>` — get it from `SdfClipmap::globals(frame_index)`
   (host-visible, ping-pong by frame parity; layout: `float4 clip_origin[4]`
@@ -417,8 +426,10 @@ trace repurposes the triangle-ref slots (documented next to the layout in
 
 `rcgi_cache_shade_sw` reads albedo/emissive straight back from slots 1/2 instead
 of the bindless material path, then lights: sun (a **binary** `TraceGlobalSdf`
-occlusion ray toward the sun, ~1.5-voxel start bias, tmax = coarsest-clip extent)
-+ light-grid point/spot loop (identical, no ray query) + previous-frame cascade
+occlusion ray toward the sun with a single clip-scaled self-bias — origin pushed
+~1.5 voxels along the normal, then a tiny `start_t` epsilon; tmax = coarsest-clip
+extent; both a hit and an `inside` result shadow — see re-review fix 4) +
+light-grid point/spot loop (identical, no ray query) + previous-frame cascade
 bounce (identical) + emissive. Same outputs (radiance buffer + stamps).
 
 ### Gating logic (renderer.cc + rcgi.{h,cc})
@@ -431,7 +442,7 @@ bounce (identical) + emissive. Same outputs (radiance buffer + stamps).
 - RCGI is created **lazily** on first activation (in `ApplySettings`, not
   `Initialize` — a device that never enables it pays nothing, and creation
   failure is non-fatal). The lazy trigger is `settings_.rcgi && (rt_available_ ||
-  (settings_.sdf && sdf_clipmap_)) && bindless_ && environment_ && !rcgi_ &&
+  (sdf_available_ && sdf_clipmap_)) && bindless_ && environment_ && !rcgi_ &&
   !rcgi_create_failed_`, so it fires for both the RT and the software-only path
   once the SDF clipmap is up. (This subsumes the merge with PR #12's review-fix
   lazy-init: the sw variant is lazy + non-fatal too.)
@@ -440,16 +451,15 @@ bounce (identical) + emissive. Same outputs (radiance buffer + stamps).
   `rcgi_software = rcgi_active && sdf_ready && (!rt_available_ ||
   rcgi_force_software_)`, and `rcgi_probes_only = RX_RCGI_PROBES_ONLY ||
   rcgi_software`.
-- **SDF auto-enable**: in `Initialize`, `if ((settings_.rcgi && !rt_available_) ||
-  rcgi_force_software_) settings_.sdf = true;` — so `--no-rt RX_RCGI=1` (and
-  `RX_RCGI_SW` alone on RT) seeds the clipmap (RCGI-software implies the SDF cost).
-  SDF availability is a **startup** decision — see the PR #13 review-fix section
-  (finding 2) for the contract and why late/programmatic enables cannot backfill.
-  Carried through the preset by the
-  existing `tuned.sdf = env.sdf` / `tuned.rcgi = env.rcgi` lines in
-  host.cc::ApplyRenderPreset (mandatory; the preset overwrites settings_
-  wholesale). `rcgi_force_software_` is a renderer member (not a settings field),
-  so it survives the preset independently.
+- **SDF startup availability**: in `Initialize`, `const bool want_sdf =
+  desc.software_gi || RX_SDF || RX_RCGI_SW || (settings_.rcgi && !rt_available_);`
+  seeds the clipmap; success latches the immutable `sdf_available_` (RCGI-software
+  implies the SDF cost). This is a **startup, not a settings** decision — see the
+  re-review fix 1 for the contract, the `RendererDesc::software_gi` programmatic
+  path, and why late/programmatic enables cannot backfill. Because availability is
+  no longer a settings field, no preset carry is needed; a wholesale preset replace
+  cannot disable it. `rcgi_force_software_` (the RT A/B force) is likewise a
+  renderer member, not a settings field.
 - **Compose ordering**: the `sdf_compose` pass is now recorded *before* the RCGI
   world pass (S1 anchored it after `tlas_build`, which does not run in software
   mode). Both use the kGeneral manual-barrier discipline on the main timeline, so
@@ -621,3 +631,84 @@ affect codegen).
   startup.
 - `--validation` sw + off: only the pre-existing texture-format warning; hw: only
   the known pre-existing async `rcgi_args` indirect-barrier error. No new errors.
+
+## PR #13 re-review fixes (5 residual threads)
+
+A re-review verified findings 1/3/4 (of the eight above) as satisfied and left
+five threads open. All are correctness refinements to the software path; the hw
+`rcgi_probe_trace` / `rcgi_cache_shade` SPIR-V + DXIL remain **byte-identical**
+before/after (re-verified by sha256 — every edit is inside the `#ifdef
+RCGI_TRACE_SDF` seam or in `sdf_trace.hlsli`, which the hw variant never
+includes).
+
+1. **Startup availability is separated from the (now-removed) live toggle.**
+   `RenderSettings::sdf` is **gone**. Availability is an immutable renderer member
+   `Renderer::sdf_available_`, decided once in `Initialize` from
+   `desc.software_gi || RX_SDF || RX_RCGI_SW || (RX_RCGI && !rt_available)` and
+   gated on clipmap-creation success. Because it is no longer a settings field, a
+   live quality preset (which wholesale-replaces `RenderSettings`) can never turn a
+   seeded software path off — the former `host.cc` `tuned.sdf = env.sdf` carry is
+   deleted as unnecessary. Hosted apps get the programmatic startup path via the
+   new **`RendererDesc::software_gi`** field (must be set before `Initialize`;
+   `OnInitialize` runs too late). `RX_SDF_DEBUG`, the compose/trace gates, and the
+   RCGI-software predicate all read `sdf_available_` now. (Verified: with the "low"
+   preset applied at startup — a full `renderer_.settings() = tuned` replacement —
+   `--no-rt RX_RCGI=1 --demo cornell` still generates mesh SDFs, creates RCGI, and
+   shows color bleed.)
+
+2. **Clip re-entry starts at the entry boundary, not a voxel beyond it.** The
+   slab-jump landing was `t = t_near + cvoxel`, skipping an entire first valid
+   voxel (2 m in clip 3) and any front surface within it. The guard boundary (local
+   coordinate 1) is accepted inclusively, so only a numerical nudge is needed:
+   `t = t_near + cvoxel * 0.01`.
+
+3. **Inside is classified at the ray origin (t=0), before the march bias.** The
+   old code tested "inside" at `t = start_t` (0.25 m down a probe ray), mislabeling
+   a probe just outside a surface firing inward (crosses in → false backface) or
+   just inside firing outward (crosses out before the first sample → false miss).
+   `TraceGlobalSdf` now samples the **origin** first: if it is inside the clipmap's
+   selectable bounds and the field is negative, it returns the `inside`/backface
+   status immediately (`hitT = 0`); only then does it advance to `start_t` and
+   march. A negative sample encountered *during* the march is a front-surface
+   crossing (the origin already excluded inside), resolved as a HIT with one 4-step
+   bisection between the last outside sample and the crossing for a surface-side hit
+   position/normal — never inside/backface.
+
+4. **The sun-occlusion trace uses exactly one clip-scaled self-bias.** It stacked a
+   ~1.5-voxel normal offset **and** a voxel-sized `start_t` (5 m of blind segment in
+   clip 3 when the sun aligns with the normal), skipping blockers there, and left a
+   point lit when the first sample landed inside a blocker (`!occ.inside`). Now: one
+   normal offset of `hit_voxel * 1.5`, then `start_t = hit_voxel * 0.01` (the same
+   tiny epsilon as fix 2 — no second voxel step). With origin classification (fix 3)
+   an `inside` result at the biased origin means the point sits inside a real
+   blocker (self-hit already paid by the normal offset) → **occluded**; the test is
+   `if (!occ.miss) shadow = 0.0` (hit or inside both shadow). Sun shadowing in the
+   software cache improves: blockers in the formerly-blind segment now occlude and
+   points inside blockers go dark (verified: cornell box contact shadows under both
+   boxes; Sponza no-RT lit + indirect channels clean, no new sky bleed).
+
+5. **An ineligible same-key re-upload removes the stale SDF.** Replacements that
+   became all-blend / `no_rt` / lost their opaque indices never called
+   `RegisterMesh`, so the old field lingered as a permanent stale occluder. New
+   `SdfScene::Remove(mesh_key)` (WaitIdle-then-destroy, memory accounted, no-op for
+   an unregistered key). `UploadMesh` now calls `RegisterMesh` on the eligible path
+   and `Remove` on **every** ineligible replacement path.
+
+### Re-review verification (GB10, vkrun, 1920×1011)
+
+- Build green; `ctest` 13/13; `git diff --check` clean.
+- hw `rcgi_probe_trace` / `rcgi_cache_shade` `.spv` + `.dxil` sha256 unchanged.
+- `--no-rt RX_RCGI=1 --demo cornell` (device: GB10, `rayquery=false` → real sw
+  path): indirect channel (`RX_DEBUG_VIEW=6`) shows clean red/green bleed, no black
+  patches / sky bleed; lit view shows crisp sun contact shadows under both boxes.
+- Sponza `--no-rt`: whole stack renders; indirect + lit both artifact-free at cell
+  boundaries (fixes 2/3).
+- Preset lifecycle: startup "low" preset (full settings replacement) leaves the
+  software path active — `sdf_available_` is written only once in `Initialize`.
+- `RX_RCGI` unset: zero SDF/RCGI allocations. `--validation`: no new SDF/RCGI VUIDs
+  (only the pre-existing `water_caustics` / `water_field` storage-image-format
+  warnings, which are unrelated to this path).
+
+> Note: a hw-probes-only A/B against the sw path could not be run on GB10 (this
+> device reports `rt=false rayquery=false`, so no hardware RT path exists here);
+> the sw path is the one exercised.

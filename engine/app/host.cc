@@ -174,7 +174,9 @@ void Host::ApplyRenderPreset() {
   tuned.restir_di = env.restir_di;  // honor RX_RESTIR_DI
   tuned.rcgi = env.rcgi;            // honor RX_RCGI over the preset
   tuned.rcgi_intensity = env.rcgi_intensity;
-  tuned.sdf = env.sdf;              // honor RX_SDF over the preset
+  // SDF software-trace availability is a startup decision on Renderer::sdf_available_,
+  // not a RenderSettings field, so it survives this wholesale preset replacement
+  // with no carry needed (see RendererDesc::software_gi / settings.h note).
   tuned.fft_ocean = env.fft_ocean;  // honor RX_FFT_OCEAN
   tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;
