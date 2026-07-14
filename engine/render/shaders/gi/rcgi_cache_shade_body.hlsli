@@ -159,10 +159,18 @@ void main(uint3 id : SV_DispatchThreadID) {
 #ifdef RCGI_TRACE_SDF
     // Binary sun occlusion via an SDF sphere trace. The clipmap reaches the
     // coarsest clip's extent; a hit before the ray leaves the clipmap shadows.
-    SdfHit occ = TraceGlobalSdf(pos + n * (sdf.clip_origin[0].w * 1.5), to_sun,
-                                sdf.clip_origin[3].w * kSdfRes, sdf, sdf_distance, sdf_albedo,
-                                sdf_emissive, sdf_sampler);
-    if (!occ.miss) shadow = 0.0;
+    // Scale the self-hit bias (both the normal offset AND the trace's initial
+    // step) by the voxel size of the clip the HIT sits in -- a coarse-cascade
+    // surface accepts any distance below ~1.5 voxels as a hit, so a fixed finest-
+    // clip bias self-intersects and drops direct sun. One coherent, clip-scaled
+    // bias, not a finest-clip offset stacked on a finest-clip initial step.
+    uint hit_clip = SdfSelectClip(sdf, pos);
+    if (hit_clip >= kSdfClips) hit_clip = kSdfClips - 1u;  // pos is a hit; clamp defensively
+    float hit_voxel = sdf.clip_origin[hit_clip].w;
+    SdfHit occ = TraceGlobalSdf(pos + n * (hit_voxel * 1.5), to_sun,
+                                sdf.clip_origin[3].w * kSdfRes, hit_voxel, sdf, sdf_distance,
+                                sdf_albedo, sdf_emissive, sdf_sampler);
+    if (!occ.miss && !occ.inside) shadow = 0.0;
 #else
     RayDesc sray;
     sray.Origin = pos + n * 0.02;

@@ -672,33 +672,23 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
 
   // RCGI software mode: on a device without ray query (or when RX_RCGI_SW forces
   // it for A/B on RT hardware), RCGI's world side runs through the SDF clipmap
-  // tracer, which needs the SDF infrastructure. Seed RX_SDF so `--no-rt
-  // RX_RCGI=1` brings up the clipmap. RCGI-software therefore implies the SDF
-  // memory + compose cost documented in SDF_TRACE.md.
+  // tracer, which needs the SDF infrastructure. SDF availability is a STARTUP
+  // decision (option b): the CPU mesh positions/indices used to voxelise mesh
+  // SDFs are not retained after upload, so there is no way to backfill the field
+  // on a later false->true rcgi toggle. Seed the SDF path now if the software
+  // tracer could be wanted this session -- `--no-rt RX_RCGI=1`, or RX_RCGI_SW
+  // forcing software on RT hardware -- and once seeded it stays available.
+  // RCGI-software therefore implies the SDF memory + compose cost documented in
+  // SDF_TRACE.md. (A late programmatic rcgi enable on a non-RT device that set no
+  // SDF-implying env gets no software path; ApplySettings logs that once.)
   if (RcgiSwOpt.overridden()) rcgi_force_software_ = RcgiSwOpt;
-  if (settings_.rcgi && (!rt_available_ || rcgi_force_software_)) settings_.sdf = true;
-
-  // SDF software-trace infrastructure (RX_SDF). Created only when enabled, so
-  // with it off no SDF is generated and nothing is allocated. The clipmap owns
-  // large 3D volumes; if the device lacks 3D storage images it degrades to no
-  // SDF path rather than failing renderer init.
-  if (settings_.sdf) {
-    sdf_scene_ = std::make_unique<SdfScene>(*device_);
-    sdf_clipmap_ = std::make_unique<SdfClipmap>(*device_);
-    if (!sdf_clipmap_->Initialize()) {
-      RX_WARN("sdf: clipmap unavailable, disabling the SDF path");
-      sdf_clipmap_.reset();
-      sdf_scene_.reset();
-      settings_.sdf = false;
-    }
-  }
+  if ((settings_.rcgi && !rt_available_) || rcgi_force_software_) settings_.sdf = true;
 
   // RCGI is created lazily on first activation (ApplySettings), covering both
   // the RT (hw + sw pipelines, so RX_RCGI_SW A/B works) and the non-ray-query
-  // software-only path once the SDF clipmap is up. The SDF infrastructure above
-  // is seeded eagerly (it is what makes the software path possible), but the
-  // ~85 MiB RCGI cache itself is deferred so a device that never enables it pays
-  // nothing.
+  // software-only path once the SDF clipmap is up. The SDF infrastructure below
+  // is what makes the software path possible, but the ~85 MiB RCGI cache itself
+  // is deferred so a device that never enables it pays nothing.
 
   auto t_batch1 = std::chrono::steady_clock::now();
   if (!pipeline_batch.End()) {
@@ -709,6 +699,27 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   RX_INFO("renderer init: {} ms (pipeline batch joined in {} ms)",
            std::chrono::duration_cast<std::chrono::milliseconds>(t_batch1 - t_batch0).count(),
            std::chrono::duration_cast<std::chrono::milliseconds>(t_batch2 - t_batch1).count());
+
+  // SDF software-trace infrastructure (RX_SDF) is created AFTER the pipeline
+  // batch is joined, on purpose: it is an OPTIONAL, non-fatal path, but inside a
+  // batch Create*Pipeline returns a placeholder handle that only fails at
+  // EndPipelineBatch -- a failed SDF pipeline would then abort the whole renderer
+  // above instead of degrading. Built immediately here, a pipeline (or 3D-storage
+  // -image) failure surfaces at this call site and is handled non-fatally: log,
+  // tear the SDF systems down, leave the software path unavailable. (RcgiSystem's
+  // _sw pipelines are likewise created outside any batch -- lazily in
+  // ApplySettings during RenderFrame -- so a failure there returns a null system
+  // and is handled non-fatally at that call site too.)
+  if (settings_.sdf) {
+    sdf_scene_ = std::make_unique<SdfScene>(*device_);
+    sdf_clipmap_ = std::make_unique<SdfClipmap>(*device_);
+    if (!sdf_clipmap_->Initialize()) {
+      RX_WARN("sdf: clipmap unavailable, disabling the SDF path");
+      sdf_clipmap_.reset();
+      sdf_scene_.reset();
+      settings_.sdf = false;
+    }
+  }
   return true;
 }
 
@@ -1001,6 +1012,16 @@ void Renderer::ApplySettings() {
   // OR on a non-ray-query device once the SDF clipmap is up (software-only
   // pipelines); `rt_available_` selects which pipelines are built.
   bool rcgi_sw_possible = settings_.sdf && sdf_clipmap_ != nullptr;
+  // Honest failure for a late/programmatic rcgi enable on a non-RT device that
+  // never seeded the SDF path at startup: the software tracer cannot come up
+  // (SDF availability is a startup decision -- see Initialize / SDF_TRACE.md), so
+  // say so once rather than silently leaving rcgi doing nothing. (The debug-UI
+  // rcgi toggle is already greyed out when the device lacks ray query.)
+  if (settings_.rcgi && !rt_available_ && !rcgi_sw_possible && !rcgi_sw_unavailable_logged_) {
+    RX_WARN("rcgi: requested but the software SDF path was not enabled at startup; set RX_RCGI "
+            "(or RX_SDF) before launch on a non-ray-query device. Ignoring.");
+    rcgi_sw_unavailable_logged_ = true;
+  }
   if (settings_.rcgi && (rt_available_ || rcgi_sw_possible) && bindless_ && environment_ &&
       !rcgi_ && !rcgi_create_failed_) {
     rcgi_ = RcgiSystem::Create(*device_, environment_->sky_view(), environment_->sampler(),
@@ -1361,20 +1382,32 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // Pure transparency never enters the tlas: water occluding rtao and
   // shadow rays would black out everything under it.
   if (raytracing_ && !gpu.all_blend && include_rt) raytracing_->BuildBlas(mesh_key, gpu);
-  // SDF: generate a per-mesh signed distance field from the same lod-0 CPU
-  // geometry (opaque meshes only; pure transparency has no useful SDF surface).
-  // Average albedo/emissive from the submesh materials weighted by index count.
-  if (sdf_scene_ && !gpu.all_blend) {
+  // SDF: generate a per-mesh signed distance field from the lod-0 CPU geometry.
+  // The SDF stands in for RCGI's realtime visibility rays (RX_RAY_MASK_REALTIME),
+  // so it must mirror that TLAS set exactly: skip no_rt fill geometry entirely
+  // (never in the realtime tlas), and build the field from only the OPAQUE
+  // submesh triangle ranges (blended submeshes -- glass/water/effects -- are
+  // excluded from the tlas and must not turn the SDF opaque). Average albedo /
+  // emissive over the opaque submeshes only, matching the geometry that fed it.
+  if (sdf_scene_ && !gpu.all_blend && !gpu.no_rt) {
     SdfScene::MeshInput in{};
     in.positions = lod.vertices.empty() ? nullptr : lod.vertices[0].position;
     in.position_stride = static_cast<u32>(sizeof(asset::Vertex));
     in.vertex_count = static_cast<u32>(lod.vertices.size());
-    in.indices = lod.indices.empty() ? nullptr : lod.indices.data();
-    in.index_count = static_cast<u32>(lod.indices.size());
+    // Concatenate the opaque submeshes' index ranges (their index_offset is
+    // absolute in the shared buffer; lod 0's base is 0, so it indexes lod.indices).
+    base::Vector<u32> opaque_indices;
     f32 albedo[3] = {0, 0, 0}, emissive[3] = {0, 0, 0};
     u64 weight = 0;
-    if (material_system_) {
-      for (const GpuSubmesh& sm : gpu.submeshes) {
+    for (const GpuSubmesh& sm : gpu.submeshes) {
+      if (sm.blend || sm.index_count == 0) continue;
+      if (!lod.indices.empty()) {
+        for (u32 e = 0; e < sm.index_count; ++e) {
+          u32 gi = sm.index_offset + e;
+          if (gi < lod.indices.size()) opaque_indices.push_back(lod.indices[gi]);
+        }
+      }
+      if (material_system_) {
         MaterialSystem::MaterialColor mc = material_system_->material_color(sm.material);
         u64 w = std::max<u64>(sm.index_count, 1);
         for (int k = 0; k < 3; ++k) {
@@ -1384,13 +1417,18 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
         weight += w;
       }
     }
+    in.indices = opaque_indices.empty() ? nullptr : opaque_indices.data();
+    in.index_count = static_cast<u32>(opaque_indices.size());
     if (weight > 0) {
       for (int k = 0; k < 3; ++k) {
         in.albedo[k] = albedo[k] / static_cast<f32>(weight);
         in.emissive[k] = emissive[k] / static_cast<f32>(weight);
       }
     }
-    if (in.positions) sdf_scene_->RegisterMesh(mesh_key, in);
+    // Only register when there is opaque indexed geometry to voxelise (an all-
+    // blend mesh is already excluded above; a non-indexed opaque mesh is not a
+    // shape we generate SDFs for here).
+    if (in.positions && in.index_count > 0) sdf_scene_->RegisterMesh(mesh_key, in);
   }
   // Foliage uploaded while path tracing was off got no blas/geometry above; flag a
   // catch-up so toggling path tracing on later still pulls it into the tlas

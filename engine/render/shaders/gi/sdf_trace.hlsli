@@ -74,6 +74,20 @@ float SdfDistance(SdfGlobals g, uint c, float3 world, Texture3D<float> vol, Samp
   return vol.SampleLevel(smp, SdfClipUvw(g, c, world), 0.0).r;
 }
 
+// Ray/AABB slab test. Returns true when [origin+dir*t] enters [bmin,bmax] with
+// the near/far parameters in t_near/t_far (t_near may be negative when origin is
+// already inside the box).
+bool SdfRayBox(float3 origin, float3 dir, float3 bmin, float3 bmax, out float t_near,
+               out float t_far) {
+  float3 inv = 1.0 / dir;  // dir is normalized; a zero component yields +/-inf, folded by min/max
+  float3 t0 = (bmin - origin) * inv;
+  float3 t1 = (bmax - origin) * inv;
+  float3 tsmall = min(t0, t1), tbig = max(t0, t1);
+  t_near = max(max(tsmall.x, tsmall.y), tsmall.z);
+  t_far = min(min(tbig.x, tbig.y), tbig.z);
+  return t_far >= max(t_near, 0.0);
+}
+
 struct SdfHit {
   float3 pos;
   float3 normal;
@@ -81,9 +95,16 @@ struct SdfHit {
   float3 emissive;
   float hitT;
   bool miss;
+  bool inside;  // ray origin sits inside closed geometry (SDF<0 at the start) -->
+                // the hardware "backface" case; the caller must skip cache insertion.
 };
 
-SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, SdfGlobals g,
+// `start_t` is the self-hit start bias / initial step. Scale it with the voxel
+// size of the clip the ray origin sits in: a fixed finest-clip bias self-
+// intersects a coarse-cascade surface (whose hit epsilon is much larger), which
+// is why the sun-occlusion trace passes the hit clip's voxel here rather than
+// clip 0's (see rcgi_cache_shade_body.hlsli).
+SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfGlobals g,
                       Texture3D<float> sdf_distance, Texture3D<float4> sdf_albedo,
                       Texture3D<float4> sdf_emissive, SamplerState sdf_sampler) {
   SdfHit hit;
@@ -93,22 +114,53 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, SdfGlobals g,
   hit.emissive = float3(0, 0, 0);
   hit.hitT = tmax;
   hit.miss = true;
+  hit.inside = false;
 
-  const float finest_voxel = g.clip_origin[0].w;
-  float t = finest_voxel;  // start bias ~1 voxel to dodge self-hits
+  float t = start_t;  // start bias ~1 voxel of the origin's clip, to dodge self-hits
+  bool sampled = false;  // whether we have taken a real (in-clipmap) distance sample yet
 
   [loop]
   for (int i = 0; i < 256; ++i) {
     if (t > tmax) break;
     float3 p = origin + dir * t;
     uint c = SdfSelectClip(g, p);
-    if (c >= kSdfClips) break;  // ray left the clipmap
+    if (c >= kSdfClips) {
+      // Outside every clip's guarded volume. An outer RCGI probe can sit on the
+      // coarsest clip boundary, and the small initial step cannot bridge the
+      // coarse voxel gap to the guard band; slab-test the coarsest guarded AABB
+      // and jump to the entry point rather than reporting a false miss. Clips are
+      // nested (coarser fully contains finer), so once we have been inside, an
+      // exit past the coarsest bound is final.
+      if (sampled) break;
+      uint cc = kSdfClips - 1u;
+      float cvoxel = g.clip_origin[cc].w;
+      float3 bmin = g.clip_origin[cc].xyz + cvoxel;                        // 1-voxel guard inset
+      float3 bmax = g.clip_origin[cc].xyz + cvoxel * (g.clip_params.x - 1.0);
+      float t_near, t_far;
+      if (SdfRayBox(origin, dir, bmin, bmax, t_near, t_far) && t_near > t && t_near < tmax) {
+        t = t_near + cvoxel;  // step a voxel inside so SdfSelectClip's guard band accepts it
+        continue;
+      }
+      break;  // never enters the clipmap: a true miss
+    }
 
     float voxel = g.clip_origin[c].w;
     float d = SdfDistance(g, c, p, sdf_distance, sdf_sampler);
     float eps = voxel * 0.75;
 
-    if (d < eps) {  // surface hit (or started inside geometry: d < 0)
+    // The very first in-clipmap sample being negative means the ray started
+    // inside closed geometry: mirror the hardware backface case (no hit, no cache
+    // insertion) instead of returning a spurious positive-distance hit.
+    if (!sampled && d < 0.0) {
+      hit.inside = true;
+      hit.miss = false;
+      hit.hitT = t;
+      hit.pos = p;
+      return hit;
+    }
+    sampled = true;
+
+    if (d < eps) {  // surface hit
       hit.miss = false;
       hit.hitT = t;
       hit.pos = p;

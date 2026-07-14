@@ -120,12 +120,20 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   // ---- visibility trace (variant): resolve hit_pos + normal (+ payload data) ----
 #ifdef RCGI_TRACE_SDF
-  // Software: sphere-trace the global SDF clipmap.
-  SdfHit sh = TraceGlobalSdf(origin, dir, rcgi.params.x, sdf, sdf_distance, sdf_albedo,
-                             sdf_emissive, sdf_sampler);
+  // Software: sphere-trace the global SDF clipmap. Start bias = clip 0's voxel
+  // (probes originate in free space / the finer clips).
+  SdfHit sh = TraceGlobalSdf(origin, dir, rcgi.params.x, sdf.clip_origin[0].w, sdf, sdf_distance,
+                             sdf_albedo, sdf_emissive, sdf_sampler);
   if (sh.miss) {
     float3 sky_rad = sky.SampleLevel(sky_sampler, dir, 0).rgb;
     rays_out[id.xy] = float4(sky_rad, -rcgi.params.x);  // miss
+    return;
+  }
+  if (sh.inside) {
+    // Ray started inside closed geometry: match the hardware backface case
+    // (rays-buffer w == 0, no cache insertion; the blend pass reads it as a
+    // visibility-only shortening ray).
+    rays_out[id.xy] = float4(0, 0, 0, 0);
     return;
   }
   float distance = sh.hitT;

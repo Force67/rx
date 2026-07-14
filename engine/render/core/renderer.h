@@ -453,6 +453,7 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<DdgiSystem> ddgi_;
   std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI), lazily created
   bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
+  bool rcgi_sw_unavailable_logged_ = false;  // logged the "no startup SDF path" notice once
   LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
   // SDF software-trace infrastructure (RX_SDF): per-mesh SDFs + global clipmap.
   // Both null unless RX_SDF is set, so with it off nothing is generated/allocated.

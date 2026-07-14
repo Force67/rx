@@ -71,13 +71,20 @@ void main(uint3 id : SV_DispatchThreadID) {
   if (all(mc >= 0.0) && all(mc <= res_f)) {
     d_local = SampleMesh(mc);
   } else {
-    // Outside the volume box: distance to the box (local units) plus the clamped
-    // edge value, so the field increases monotonically outward with no false
-    // zero-crossing at the box surface.
+    // Outside the volume box: a PROVEN lower bound on the distance to the mesh
+    // surface, so the sphere trace never overshoots (the previous box_dist+edge
+    // was an upper bound and could step through geometry). Two lower bounds,
+    // take the larger:
+    //  (a) box_dist -- the surface lies inside the mesh AABB, so the distance
+    //      from p to the box is <= the distance from p to the surface.
+    //  (b) 1-Lipschitz SDF: d(p) >= d(q) - |p-q| for any q. Clamping to the AABB
+    //      makes q the closest box point, and |p-q| == box_dist exactly, so
+    //      d(p) >= SampleMesh(q) - box_dist (may be negative; (a) covers that).
     float3 clamped = clamp(mc, 0.0, res_f);
-    float3 diff = (mc - clamped) * mesh_voxel;  // local-space offset to the box
+    float3 diff = (mc - clamped) * mesh_voxel;  // local-space offset p - q
     float box_dist = length(diff);
-    d_local = box_dist + SampleMesh(clamped);
+    float edge = SampleMesh(clamped);           // d(q)
+    d_local = max(box_dist, edge - box_dist);
   }
 
   float d_world = d_local * pc.misc.x;  // conservative local->world scale

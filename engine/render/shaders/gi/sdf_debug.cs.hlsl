@@ -45,8 +45,8 @@ void main(uint3 id : SV_DispatchThreadID) {
   // Diagnostic modes: 3 = raw distance field sampled along the ray at a fixed
   // world distance (green = positive, red = negative, brightness = |d|/2 m);
   // 4 = clip selection at that point (tinted) or black outside all clips.
-  SdfHit hit = TraceGlobalSdf(origin, dir, pc.params.z, sdf, sdf_distance, sdf_albedo, sdf_emissive,
-                              sdf_sampler);
+  SdfHit hit = TraceGlobalSdf(origin, dir, pc.params.z, sdf.clip_origin[0].w, sdf, sdf_distance,
+                              sdf_albedo, sdf_emissive, sdf_sampler);
 
   float3 color;
   if (hit.miss) {

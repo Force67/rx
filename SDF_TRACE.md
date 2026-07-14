@@ -173,8 +173,9 @@ instance doesn't cull — see below).
   the bleed bands are blockier than the hardware triangle hit. Expected.
 - **Binary SDF sun shadow**: the sw cache shade traces one occlusion ray against
   the clipmap (hit ⇒ fully shadowed). No penumbra; coarse-clip self-occlusion is
-  mitigated by a ~1.5-voxel start bias but can still over-darken near thin
-  geometry.
+  mitigated by a **clip-scaled** start bias (normal offset + trace initial step
+  both scaled by the hit clip's voxel — see the PR #13 review-fix section) but can
+  still over-darken near thin geometry.
 - **Cornell demo walls render translucent** in every mode (hw and sw alike) —
   that is the demo's wall material, not an S2 artifact.
 - **Thin/open geometry SDF sign leaks** (S1's ray-parity failure class) and the
@@ -439,9 +440,12 @@ bounce (identical) + emissive. Same outputs (radiance buffer + stamps).
   `rcgi_software = rcgi_active && sdf_ready && (!rt_available_ ||
   rcgi_force_software_)`, and `rcgi_probes_only = RX_RCGI_PROBES_ONLY ||
   rcgi_software`.
-- **SDF auto-enable**: in `Initialize`, `if (settings_.rcgi && (!rt_available_ ||
-  rcgi_force_software_)) settings_.sdf = true;` — so `--no-rt RX_RCGI=1` seeds the
-  clipmap (RCGI-software implies the SDF cost). Carried through the preset by the
+- **SDF auto-enable**: in `Initialize`, `if ((settings_.rcgi && !rt_available_) ||
+  rcgi_force_software_) settings_.sdf = true;` — so `--no-rt RX_RCGI=1` (and
+  `RX_RCGI_SW` alone on RT) seeds the clipmap (RCGI-software implies the SDF cost).
+  SDF availability is a **startup** decision — see the PR #13 review-fix section
+  (finding 2) for the contract and why late/programmatic enables cannot backfill.
+  Carried through the preset by the
   existing `tuned.sdf = env.sdf` / `tuned.rcgi = env.rcgi` lines in
   host.cc::ApplyRenderPreset (mandatory; the preset overwrites settings_
   wholesale). `rcgi_force_software_` is a renderer member (not a settings field),
@@ -524,3 +528,96 @@ in the same order, as `origin/main`'s fixed `rcgi_probe_trace.cs.hlsl` /
 hoisting `stamp`/`pos`/`n` above the seam — all side-effect-free, so no behavioural
 change vs the merged fixes. GPU A/B (hw probes-only vs `RX_RCGI_SW` vs `--no-rt`)
 renders equivalent bounce with no speckle.
+
+## PR #13 review fixes (correctness, GPU-verified on NVIDIA GB10 / vkrun)
+
+Eight review findings addressed. The hardware RCGI path is untouched: every
+shared-body edit lives inside the `#ifdef RCGI_TRACE_SDF` seam, so the hw
+`rcgi_probe_trace` / `rcgi_cache_shade` SPIR-V is **byte-identical** before/after
+(verified by sha256 of the compiled `.spv` and a `dxc -P` preprocess diff of the
+hw entry points — the only difference is shifted `#line` markers, which do not
+affect codegen).
+
+1. **Optional SDF pipelines are created outside the pipeline batch.** Inside a
+   batch, `Create*Pipeline` returns a placeholder handle that only fails at
+   `EndPipelineBatch`, so a failed SDF pipeline aborted the whole renderer instead
+   of degrading. `SdfScene`/`SdfClipmap` are now built **after** `pipeline_batch.
+   End()` in `Renderer::Initialize`, so a pipeline (or 3D-storage-image) failure
+   surfaces at the call site and is handled non-fatally (log, tear down, leave the
+   path unavailable). `RcgiSystem`'s `_sw` pipelines were already outside any batch
+   (created lazily in `ApplySettings` during `RenderFrame`), so a null system there
+   is likewise non-fatal.
+
+2. **SDF availability is an explicit startup decision (option b).** The CPU mesh
+   positions/indices used to voxelise mesh SDFs are not retained after upload
+   (`GpuMesh` holds only GPU buffers), so there is no way to backfill the field on a
+   late false→true `rcgi` toggle without retaining large CPU copies. Contract:
+   set `RX_RCGI` (non-RT) / `RX_RCGI_SW` (RT A/B) / `RX_SDF` **at startup** to get
+   the software path; `Initialize` seeds it via `if ((settings_.rcgi &&
+   !rt_available_) || rcgi_force_software_) settings_.sdf = true;` (RX_RCGI_SW alone
+   now seeds it too, independent of a later rcgi enable). A late programmatic rcgi
+   enable on a non-RT device that seeded no SDF path is refused with a one-shot
+   `RX_WARN` in `ApplySettings` rather than silently doing nothing; the debug-UI
+   rcgi toggle is already greyed out when the device lacks ray query. RT hardware
+   live toggles (hardware path) and `RX_RCGI_SW` at startup are unaffected.
+
+3. **The SDF visibility set mirrors the realtime TLAS set.** `Renderer::UploadMesh`
+   now skips `gpu.no_rt` meshes entirely (never in the realtime tlas — foliage,
+   `exclude_from_rt` skinned actors) and builds the field from **only the opaque
+   submesh index ranges** (blended submeshes — glass/water/effects — are excluded,
+   so software RCGI no longer makes them occlude like opaque). The per-mesh average
+   albedo/emissive is averaged over the opaque submeshes only. (Verified: the
+   locomotion demo's `exclude_from_rt` biped is no longer registered as a bind-pose
+   SDF; cornell/materials mesh counts are unchanged because those are opaque.)
+
+4. **`sdf_compose` off-volume distance is a proven lower bound.** The previous
+   `box_dist + SampleMesh(clamped)` was an upper bound and could let the tracer step
+   through geometry. Replaced with `max(box_dist, SampleMesh(q) - box_dist)`, the
+   max of two lower bounds: (a) the surface lies inside the mesh AABB so `box_dist ≤`
+   distance-to-surface; (b) the 1-Lipschitz property `d(p) ≥ d(q) - |p-q|` with
+   `|p-q| == box_dist` for an AABB clamp. Strictly conservative — may legitimately
+   *tighten* geometry (fewer leaks).
+
+5. **Rays starting just outside the guarded clip volume re-enter instead of
+   missing.** An outer RCGI probe can sit on the coarsest clip boundary, and the
+   small fixed initial step cannot bridge the ~2 m coarse-voxel gap to the 1-voxel
+   guard band, so every direction read as a miss and injected sky into that cascade.
+   `TraceGlobalSdf` now slab-tests the coarsest guarded AABB when the origin selects
+   no clip and advances `t` to the entry point (clips are nested, so a mid-trace exit
+   past the coarsest bound is still final).
+
+6. **Inside/backface behaviour matches the hardware path.** A negative SDF sample at
+   the ray start (ray began inside closed geometry) now returns a distinct `inside`
+   status from `TraceGlobalSdf` instead of a spurious positive-distance hit; the sw
+   probe trace maps it to the hardware backface case (rays-buffer `w == 0`, **no**
+   cache insertion), which the blend pass reads as a visibility-only shortening ray.
+
+7. **Sun-shadow bias scales with the hit's clip.** Both the normal offset and the
+   trace's initial step previously used clip 0's 0.25 m voxel; a clip-3 surface
+   (1.5 m hit epsilon) then self-intersected and set `shadow = 0`, dropping direct
+   sun from coarse-cascade cache entries. The sw sun-occlusion trace now selects the
+   clip containing the hit and scales **one coherent bias** (normal offset + the
+   trace's `start_t` initial step) by that clip's voxel size.
+
+8. **Same-key mesh re-upload regenerates the SDF.** `SdfScene::RegisterMesh` no
+   longer early-returns on an existing key (which permanently pinned the first,
+   now-stale SDF). It destroys the previous buffer (accounting the memory) and
+   regenerates from the new geometry, mirroring `UploadMesh`'s WaitIdle-then-destroy
+   discipline (registration is load-time, never per frame).
+
+### Verification (GB10, vkrun, 1920×1011)
+
+- Build green; `ctest` 13/13.
+- `--no-rt RX_RCGI=1 --demo cornell`: red/green bounce present, converged; the
+  indirect channel (`RX_DEBUG_VIEW=6`) shows the bleed with no sky poisoning.
+- `RX_RCGI=1 RX_RCGI_SW=1` (RT) vs `RX_RCGI_PROBES_ONLY=1` (RT): equivalent modulo
+  voxel rounding (sw slightly stronger/blockier, as before); the fix-4 lower bound
+  visibly tightens the near-box shadow (fewer leaks).
+- `--no-rt RX_RCGI=1 --demo materials` and Sponza `--gltf`: whole stack renders,
+  bounce present, no crash/speckle.
+- `RX_RCGI=1` (hw path): renders the full M2 gather; hw SPIR-V byte-identical to
+  pre-fix (see above).
+- `RX_RCGI` unset: zero SDF allocations. `RX_RCGI_SW=1` alone on RT: SDF seeded at
+  startup.
+- `--validation` sw + off: only the pre-existing texture-format warning; hw: only
+  the known pre-existing async `rcgi_args` indirect-barrier error. No new errors.

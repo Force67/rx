@@ -127,7 +127,21 @@ SdfScene::~SdfScene() {
 }
 
 bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
-  if (meshes_.find(mesh_key)) return true;
+  // Re-uploading under an existing key replaces the geometry (Renderer::UploadMesh
+  // destroys and rebuilds the GPU buffers), so the old SDF is stale and must be
+  // regenerated -- keeping the first one (an early return) would permanently pin
+  // a bind-pose / previous mesh. Drop the previous buffer here, mirroring
+  // UploadMesh's WaitIdle-then-destroy discipline (registration happens at load
+  // time, never per frame), then fall through and rebuild below.
+  if (MeshSdf* existing = meshes_.find(mesh_key)) {
+    if (input.vertex_count == 0) return true;  // nothing to replace it with; keep the current SDF
+    device_.WaitIdle();
+    if (existing->sdf) {
+      total_bytes_ -= existing->sdf.size;
+      device_.DestroyBuffer(existing->sdf);
+    }
+    meshes_.erase(mesh_key);
+  }
   if (input.vertex_count == 0) return false;
 
   const auto t0 = std::chrono::steady_clock::now();
