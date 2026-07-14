@@ -13,7 +13,7 @@ rhi/          public backend-agnostic API (the ONLY thing passes may use)
 vulkan/ d3d12/ null/   backends; each translates rhi/ in its own directory
 core/         renderer orchestration, render graph, bindless, settings, presets
 pipeline/     opaque geometry path: mesh pipeline, materials, culling, meshlets
-gi/           shadows, DDGI, ReSTIR, path tracers, denoisers, RT context
+gi/           shadows, DDGI, RCGI (light grid + radiance cache + cascades, RCGI.md), ReSTIR, path tracers, denoisers, RT context
 screenspace/  raster fallbacks: SSAO, SSR, SSGI, contact shadows
 atmosphere/   sky, clouds, froxel fog, weather, IBL
 geometry/     water, ocean FFT, hair, fur, particles, imposters, WBOIT
