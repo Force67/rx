@@ -37,10 +37,15 @@ struct CameraMode {
 };
 
 enum class CameraEasing : u8 { kLinear, kSmoothStep, kSmootherStep };
+// Applies to destination discontinuities observed after activation. Resolve a
+// mode's producer before PushCameraMode when that frame's cut belongs to the
+// incoming setup rather than to the transition itself.
+enum class CameraDiscontinuityPolicy : u8 { kCut, kRetarget };
 
 struct CameraTransitionSpec {
   f32 duration = 0.35f;
   CameraEasing easing = CameraEasing::kSmoothStep;
+  CameraDiscontinuityPolicy discontinuity = CameraDiscontinuityPolicy::kRetarget;
 };
 
 struct CameraActivation {
@@ -60,6 +65,7 @@ struct CameraTransition {
   f32 elapsed = 0;
   f32 duration = 0;
   CameraEasing easing = CameraEasing::kSmoothStep;
+  CameraDiscontinuityPolicy discontinuity = CameraDiscontinuityPolicy::kRetarget;
   bool active = false;
 };
 
@@ -110,7 +116,7 @@ RX_SCENE_EXPORT CameraStackResult ReleaseCameraMode(ecs::World& world, CameraAct
 RX_SCENE_EXPORT bool IsCameraModeTop(ecs::World& world, CameraActivation activation);
 
 // Increment after a teleport, replay seek or other discontinuous pose change.
-// The active output cuts to the new pose and advances its history revision.
+// An active output cuts unless its in-flight transition chose kRetarget.
 RX_SCENE_EXPORT void InvalidateCameraMode(ecs::World& world, ecs::Entity mode);
 
 RX_SCENE_EXPORT CameraView InterpolateCameraView(const CameraView& source,

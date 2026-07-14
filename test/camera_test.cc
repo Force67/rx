@@ -155,6 +155,45 @@ void TestCutsAndStaleModes() {
         "explicit invalidation advances camera history");
 }
 
+void TestTransitionDiscontinuityPolicy() {
+  World world;
+  Entity base_mode = MakeMode(world, 0);
+  Entity output = MakeOutput(world, base_mode);
+  Entity overlay = MakeMode(world, 10);
+  CameraPushResult pushed =
+      PushCameraMode(world, output, overlay, {.duration = 1.0f, .easing = CameraEasing::kLinear});
+  const rx::u64 history = world.Get<CameraOutput>(output)->history_revision;
+  InvalidateCameraMode(world, overlay);
+  ResolveCameraStacks(world, 0.5f);
+  Near(world.Get<CameraOutput>(output)->view.position.x, 5.0f,
+       "retarget policy preserves an explicit transition");
+  Check(world.Get<CameraStack>(output)->transition.active,
+        "destination discontinuity does not cancel retarget transition");
+  Check(world.Get<CameraOutput>(output)->history_revision == history,
+        "retarget transition does not invalidate render history");
+
+  PopCameraMode(world, pushed.activation, {.duration = 0});
+  Entity cut_mode = MakeMode(world, 20);
+  InvalidateCameraMode(world, cut_mode);
+  PushCameraMode(world, output, cut_mode,
+                 {.duration = 1.0f,
+                  .easing = CameraEasing::kLinear,
+                  .discontinuity = CameraDiscontinuityPolicy::kCut});
+  ResolveCameraStacks(world, 0.25f);
+  Near(world.Get<CameraOutput>(output)->view.position.x, 5.0f,
+       "cut observed before activation belongs to the incoming setup");
+  Check(world.Get<CameraStack>(output)->transition.active,
+        "pre-activation cut does not cancel a new transition");
+  const rx::u64 before_cut = world.Get<CameraOutput>(output)->history_revision;
+  InvalidateCameraMode(world, cut_mode);
+  ResolveCameraStacks(world, 0.25f);
+  Near(world.Get<CameraOutput>(output)->view.position.x, 20.0f,
+       "cut policy snaps to a discontinuous destination");
+  Check(!world.Get<CameraStack>(output)->transition.active, "cut policy ends the transition");
+  Check(world.Get<CameraOutput>(output)->history_revision == before_cut + 1,
+        "cut policy advances render history");
+}
+
 void TestLensAndOrientationInterpolation() {
   CameraView source;
   source.lens.fov_y = 1.0471975512f;
@@ -189,6 +228,7 @@ int main() {
   TestInterruptedTransitionStartsAtResolvedPose();
   TestActivationOwnership();
   TestCutsAndStaleModes();
+  TestTransitionDiscontinuityPolicy();
   TestLensAndOrientationInterpolation();
 
   if (failures != 0) {
