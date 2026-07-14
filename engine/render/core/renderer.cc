@@ -13,6 +13,7 @@
 
 #include "asset/primitives.h"
 #include "core/log.h"
+#include "core/memory/memory_tracker.h"
 #include "render/util/exr_write.h"
 #include "shaders/hdr_capture_cs_hlsl.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
@@ -1583,6 +1584,8 @@ bool Renderer::UploadMaterial(const asset::Material& material, u64 id_salt) {
 }
 
 void Renderer::RenderFrame(const FrameView& view) {
+  static const mem::Category kRenderCategory = mem::RegisterCategory("render");
+  mem::CategoryScope mem_scope(kRenderCategory);
   if (!device_ || device_->is_stub() || !swapchain_) return;
 
   // Wayland surfaces report an undefined currentExtent, so the driver never

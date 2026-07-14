@@ -2,6 +2,8 @@
 
 #include <new>
 
+#include "core/memory/memory_tracker.h"
+
 namespace rx::mem {
 
 ChunkPool::~ChunkPool() {
@@ -9,6 +11,8 @@ ChunkPool::~ChunkPool() {
 }
 
 void ChunkPool::AddSlabLocked() {
+  static const Category kCategory = RegisterCategory("chunk-pool");
+  CategoryScope scope(kCategory);
   void* slab = ::operator new(kChunksPerSlab * kChunkSize, std::align_val_t{kChunkAlign});
   slabs_.push_back(slab);
   for (size_t i = 0; i < kChunksPerSlab; ++i) {

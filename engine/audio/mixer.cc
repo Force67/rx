@@ -1,5 +1,6 @@
 #include "audio/mixer.h"
 
+#include "core/memory/memory_tracker.h"
 #include <algorithm>
 #include <cmath>
 
@@ -165,6 +166,8 @@ bool Mixer::FillSource(Voice& voice, size_t frames) {
 }
 
 void Mixer::MixInto(float* out, u32 frames) {
+  static const mem::Category kAudioCategory = mem::RegisterCategory("audio");
+  mem::CategoryScope mem_scope(kAudioCategory);
   ApplyCommands();
   std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
 

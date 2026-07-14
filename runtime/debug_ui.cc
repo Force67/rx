@@ -20,6 +20,9 @@
 #include <imgui_impl_sdl3.h>
 
 #include "core/log.h"
+#include "core/memory/chunk_pool.h"
+#include "core/memory/frame_arena.h"
+#include "core/memory/memory_tracker.h"
 #include "render/core/presets.h"
 #include "render/core/settings_ini.h"
 
@@ -152,6 +155,9 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
     gpu_timings_latched_ = true;
   }
   renderer.settings().gpu_pass_timings = visible_ || gpu_timings_forced_;
+  // Same idea for the frame-graph stats snapshot (string copies per pass per
+  // frame): collected only while the overlay is up and able to show it.
+  renderer.set_graph_stats_enabled(visible_);
 
   if (visible_) {
     render::RenderSettings& settings = renderer.settings();
@@ -607,6 +613,61 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, FlyCamera& camera,
     if (renderer.meshlets_total() > 0) {
       ImGui::Text("meshlets: %u / %u drawn (cluster cull)", renderer.meshlets_visible(),
                   renderer.meshlets_total());
+    }
+  }
+
+  if (ImGui::CollapsingHeader("CPU memory")) {
+    const f64 mb = 1.0 / (1024.0 * 1024.0);
+    if (rx::mem::TrackingActive()) {
+      rx::mem::CategoryStats stats[rx::mem::kMaxCategories];
+      const u32 count = rx::mem::SnapshotCategories(stats, rx::mem::kMaxCategories);
+      if (ImGui::BeginTable("mem_categories", 4,
+                            ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Now", ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn("Peak", ImGuiTableColumnFlags_WidthFixed, 70);
+        ImGui::TableSetupColumn("Budget", ImGuiTableColumnFlags_WidthFixed, 110);
+        ImGui::TableHeadersRow();
+        for (u32 i = 0; i < count; ++i) {
+          const rx::mem::CategoryStats& c = stats[i];
+          const f64 now = c.current_bytes > 0 ? c.current_bytes * mb : 0.0;
+          ImGui::TableNextRow();
+          ImGui::TableNextColumn();
+          ImGui::TextUnformatted(c.name);
+          ImGui::TableNextColumn();
+          ImGui::Text("%.1f MB", now);
+          ImGui::TableNextColumn();
+          ImGui::Text("%.1f MB", c.peak_bytes * mb);
+          ImGui::TableNextColumn();
+          if (c.budget_bytes) {
+            const f32 fill = static_cast<f32>(now / (c.budget_bytes * mb));
+            if (fill > 1.0f) {
+              ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.9f, 0.25f, 0.2f, 1.0f));
+            }
+            char overlay[32];
+            std::snprintf(overlay, sizeof overlay, "%.0f MB", c.budget_bytes * mb);
+            ImGui::ProgressBar(fill, {-1, 0}, overlay);
+            if (fill > 1.0f) ImGui::PopStyleColor();
+          } else {
+            ImGui::TextDisabled("-");
+          }
+        }
+        ImGui::EndTable();
+      }
+    } else {
+      ImGui::TextDisabled("build with RX_MIMALLOC=ON for category tracking");
+    }
+    const rx::mem::ChunkPool::Stats pool = rx::mem::GlobalChunkPool().stats();
+    ImGui::Text("chunk pool: %zu / %zu chunks in use (%.1f MB reserved)",
+                pool.total_chunks - pool.free_chunks, pool.total_chunks,
+                pool.total_chunks * rx::mem::ChunkPool::kChunkSize * mb);
+    const rx::mem::FrameArena::Stats arena = rx::mem::MainFrameArena().stats();
+    ImGui::Text("frame arena: %.2f / %.2f MB high water", arena.high_water_bytes * mb,
+                arena.capacity_bytes * mb);
+    if (arena.overflow_allocs) {
+      ImGui::TextColored(ImVec4(0.9f, 0.25f, 0.2f, 1.0f),
+                         "arena overflowed %llu times - raise [arena] frame_mb",
+                         static_cast<unsigned long long>(arena.overflow_allocs));
     }
   }
 
