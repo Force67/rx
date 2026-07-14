@@ -129,10 +129,12 @@ SdfScene::~SdfScene() {
 void SdfScene::Remove(u64 mesh_key) {
   MeshSdf* existing = meshes_.find(mesh_key);
   if (!existing) return;
-  device_.WaitIdle();  // removal happens at load time, never per frame
+  // Frame-safe: an in-flight compose may still read the buffer, so retire it
+  // through the per-frame graveyard instead of stalling the whole device. The
+  // map entry goes away now, so no new frame can bind it.
   if (existing->sdf) {
     total_bytes_ -= existing->sdf.size;
-    device_.DestroyBuffer(existing->sdf);
+    device_.DestroyBufferDeferred(existing->sdf);
   }
   meshes_.erase(mesh_key);
 }
@@ -141,15 +143,14 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   // Re-uploading under an existing key replaces the geometry (Renderer::UploadMesh
   // destroys and rebuilds the GPU buffers), so the old SDF is stale and must be
   // regenerated -- keeping the first one (an early return) would permanently pin
-  // a bind-pose / previous mesh. Drop the previous buffer here, mirroring
-  // UploadMesh's WaitIdle-then-destroy discipline (registration happens at load
-  // time, never per frame), then fall through and rebuild below.
+  // a bind-pose / previous mesh. Retire the previous buffer through the deferred
+  // graveyard (an in-flight compose may still read it; no device stall needed),
+  // then fall through and rebuild below.
   if (MeshSdf* existing = meshes_.find(mesh_key)) {
     if (input.vertex_count == 0) return true;  // nothing to replace it with; keep the current SDF
-    device_.WaitIdle();
     if (existing->sdf) {
       total_bytes_ -= existing->sdf.size;
-      device_.DestroyBuffer(existing->sdf);
+      device_.DestroyBufferDeferred(existing->sdf);
     }
     meshes_.erase(mesh_key);
   }

@@ -612,8 +612,8 @@ affect codegen).
 8. **Same-key mesh re-upload regenerates the SDF.** `SdfScene::RegisterMesh` no
    longer early-returns on an existing key (which permanently pinned the first,
    now-stale SDF). It destroys the previous buffer (accounting the memory) and
-   regenerates from the new geometry, mirroring `UploadMesh`'s WaitIdle-then-destroy
-   discipline (registration is load-time, never per frame).
+   regenerates from the new geometry. The old buffer retires through the RHI's
+   deferred graveyard (`DestroyBufferDeferred`) -- frame-safe, no device stall.
 
 ### Verification (GB10, vkrun, 1920×1011)
 
@@ -690,8 +690,8 @@ includes).
 5. **An ineligible same-key re-upload removes the stale SDF.** Replacements that
    became all-blend / `no_rt` / lost their opaque indices never called
    `RegisterMesh`, so the old field lingered as a permanent stale occluder. New
-   `SdfScene::Remove(mesh_key)` (WaitIdle-then-destroy, memory accounted, no-op for
-   an unregistered key). `UploadMesh` now calls `RegisterMesh` on the eligible path
+   `SdfScene::Remove(mesh_key)` (deferred-graveyard destroy, memory accounted,
+   no-op for an unregistered key; frame-safe, callable outside load time). `UploadMesh` now calls `RegisterMesh` on the eligible path
    and `Remove` on **every** ineligible replacement path.
 
 ### Re-review verification (GB10, vkrun, 1920×1011)
