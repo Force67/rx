@@ -87,7 +87,7 @@ class RX_ECS_EXPORT Archetype {
     u32 stride;
     u32 align;
     u8* data = nullptr;
-    u32 capacity = 0;
+    size_t capacity = 0;
   };
 
   Signature signature_;
