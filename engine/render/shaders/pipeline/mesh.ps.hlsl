@@ -1220,8 +1220,7 @@ float4 EffectColor(PsIn input) {
   return float4(emissive, saturate(coverage));
 }
 
-PsOut main(PsIn input, bool is_front_face : SV_IsFrontFace) {
-  if (!is_front_face) input.normal = -input.normal;
+PsOut main(PsIn input) {
   // Animated scroll (waterfalls, rivers, lava): shift the uv before anything
   // samples it.
   input.uv += frame.time * material.uv_scroll;

@@ -1,6 +1,7 @@
 #include "physics/cloth_collision.h"
 
 #include <algorithm>
+#include <cassert>
 #include <cmath>
 #include <limits>
 #include <numeric>
@@ -542,6 +543,8 @@ template <typename CandidateFn>
 void QueryBvh(const Bounds& query, const ClothSelfCollisionScratch& scratch,
               CandidateFn candidate_fn) {
   if (scratch.bvh.empty()) return;
+  // Median splits halve a u32-sized primitive range, so traversal depth stays
+  // below 32; 128 leaves ample slack if leaf size changes.
   u32 stack[128];
   u32 stack_size = 1;
   stack[0] = 0;
@@ -553,6 +556,7 @@ void QueryBvh(const Bounds& query, const ClothSelfCollisionScratch& scratch,
         candidate_fn(scratch.primitives[i]);
       }
     } else {
+      assert(stack_size <= 126);
       stack[stack_size++] = node.left;
       stack[stack_size++] = node.right;
     }

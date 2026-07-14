@@ -20,6 +20,10 @@ and writes only bounded velocity corrections before Jolt's update. Broad phase
 remains `O(n log n)` without voxel blowups on irregular or fast-moving cages,
 and Jolt's internal solver stays untouched.
 
+`tools/get_jolt.sh` requires an exact, clean `v5.6.0` checkout. Keep local Jolt
+patches in a separate checkout; the helper rejects modified or differently
+tagged sources instead of silently producing a non-reproducible engine build.
+
 Use a coarse, well-shaped simulation cage and bind the detailed render mesh to
 its triangles offline. This is both faster and more stable than simulating UV
 seams and every render vertex. Material UVs on the cage orient warp and weft;

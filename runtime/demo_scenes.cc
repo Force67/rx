@@ -1360,6 +1360,7 @@ void DemoScenes::CreateClothDemoScene() {
   camera_.speed = 3.0f;
   RX_INFO("cloth demo: {} vertices, {} triangles, wind + rigid contact",
           kVertexCount, cloth_indices_.size() / 3);
+  RX_INFO("cloth demo: raster-only AA/RT/upscaler controls are locked");
 }
 
 void DemoScenes::EmitCloth(render::FrameView& view) {
@@ -1389,6 +1390,9 @@ void DemoScenes::EmitCloth(render::FrameView& view) {
   for (u32 i = 0; i < cloth_positions_.size(); ++i) {
     Vec3 normal = Normalize(cloth_normals_[i]);
     if (Length(normal) < 1.0e-5f) normal = {0, 0, 1};
+    if (Dot(normal, view.camera.eye - cloth_positions_[i]) < 0) {
+      normal = normal * -1.0f;
+    }
     const u32 x = i % cloth_width_;
     const u32 left = x > 0 ? i - 1 : i;
     const u32 right = x + 1 < cloth_width_ ? i + 1 : i;

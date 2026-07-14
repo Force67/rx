@@ -68,7 +68,7 @@ u32 PhysicsWorld::StrandGroomPositionCount(StrandGroomId) const { return 0; }
 bool PhysicsWorld::GetStrandGroomPositions(StrandGroomId, f32*, u32) const { return false; }
 void PhysicsWorld::RemoveStrandGroom(StrandGroomId) {}
 ClothId PhysicsWorld::CreateCloth(const ClothDesc&, const Mat4&) { return 0; }
-void PhysicsWorld::SetClothTransform(ClothId, const Mat4&, f32) {}
+bool PhysicsWorld::SetClothTransform(ClothId, const Mat4&, f32) { return false; }
 bool PhysicsWorld::SetClothPinTargets(ClothId, const Vec3*, u32, f32) { return false; }
 bool PhysicsWorld::SetClothJointTransforms(ClothId, const Mat4*, u32, bool) { return false; }
 void PhysicsWorld::SetClothWind(ClothId, const Vec3&) {}

@@ -138,6 +138,7 @@ struct PhysicsWorld::Impl {
   ObjectVsBroadPhase object_vs_broad_phase;
   ObjectLayerPair object_layer_pair;
   std::unique_ptr<JPH::TempAllocator> temp_allocator;
+  JPH::TempAllocatorImplWithMallocFallback skin_allocator{1024 * 1024};
   std::unique_ptr<JPH::JobSystemThreadPool> job_system;
   std::unique_ptr<JPH::PhysicsSystem> system;
   base::Vector<JPH::BodyID> dynamic_bodies;
@@ -185,7 +186,8 @@ struct PhysicsWorld::Impl {
   };
   base::Vector<StrandGroomEntry> strand_grooms;
   // Triangle cloth; ClothId is index + 1 and dead slots are retained so
-  // handles never alias a later instance.
+  // handles never alias a later instance. TODO: pack generation + index into
+  // ClothId so dead slots can be reused without accepting stale handles.
   struct ClothEntry {
     JPH::BodyID body;
     bool alive = false;
@@ -1945,19 +1947,19 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   return impl_->cloth.size();
 }
 
-void PhysicsWorld::SetClothTransform(ClothId id, const Mat4& transform, f32 dt) {
+bool PhysicsWorld::SetClothTransform(ClothId id, const Mat4& transform, f32 dt) {
   if (!impl_ || id == 0 || id > impl_->cloth.size() || !IsFinite(transform) ||
       !std::isfinite(dt) || dt < 0) {
-    return;
+    return false;
   }
   Impl::ClothEntry& entry = impl_->cloth[id - 1];
-  if (!entry.alive) return;
+  if (!entry.alive || entry.pinned.empty()) return false;
   entry.target_scratch.resize(entry.pinned_rest.size());
   for (size_t i = 0; i < entry.pinned_rest.size(); ++i) {
     entry.target_scratch[i] = TransformPoint(transform, entry.pinned_rest[i]);
   }
-  SetClothPinTargets(id, entry.target_scratch.data(),
-                     static_cast<u32>(entry.target_scratch.size()), dt);
+  return SetClothPinTargets(id, entry.target_scratch.data(),
+                            static_cast<u32>(entry.target_scratch.size()), dt);
 }
 
 bool PhysicsWorld::SetClothPinTargets(ClothId id, const Vec3* targets, u32 target_count, f32 dt) {
@@ -2029,10 +2031,9 @@ bool PhysicsWorld::SetClothJointTransforms(ClothId id, const Mat4* world_joints,
       entry.skin_pose.push_back(to_local * ToJolt(world_joints[i]));
     }
     auto* soft = static_cast<JPH::SoftBodyMotionProperties*>(body.GetMotionProperties());
-    thread_local JPH::TempAllocatorImplWithMallocFallback allocator(1024 * 1024);
     const bool initialize_skin = entry.last_joint_transforms.empty();
     soft->SkinVertices(center_of_mass, entry.skin_pose.data(), entry.joint_count,
-                       hard_reset || initialize_skin, allocator);
+                        hard_reset || initialize_skin, impl_->skin_allocator);
     soft->SetEnableSkinConstraints(true);
   }
   entry.last_joint_transforms.assign(world_joints, world_joints + entry.joint_count);

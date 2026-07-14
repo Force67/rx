@@ -365,11 +365,13 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // vertex/triangle and edge/edge self-collision. The same path handles open curtains,
   // cylindrical skirts and consistently wound closed inflatables.
   ClothId CreateCloth(const ClothDesc& desc, const Mat4& transform);
-  // Retargets descriptor pins through a new object transform. dt <= 0 is an
-  // intentional teleport/reset; positive dt preserves attachment velocity.
-  void SetClothTransform(ClothId id, const Mat4& transform, f32 dt);
+  // Retargets descriptor pins through a new object transform. Returns false
+  // for invalid or unpinned cloth. dt <= 0 is an intentional teleport/reset;
+  // positive dt preserves attachment velocity.
+  bool SetClothTransform(ClothId id, const Mat4& transform, f32 dt);
   // Retargets pins directly in descriptor pin order, for rails/hooks whose
-  // motion is not represented by one transform. Targets are world-space.
+  // motion is not represented by one transform. Targets are world-space. Fast
+  // retargets are limited by max_linear_velocity; use dt = 0 to teleport.
   bool SetClothPinTargets(ClothId id, const Vec3* targets, u32 target_count, f32 dt);
   // Updates native Jolt skin targets. `hard_reset` snaps every skinned vertex
   // to animation and is intended for spawn/teleport, not ordinary motion.

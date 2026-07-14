@@ -187,7 +187,9 @@ int TestCurtain(physics::PhysicsWorld& world) {
 
   world.SetClothWind(cloth, {});
   Mat4 moved = MakeTranslation({0.3f, 1.8f, 0});
-  world.SetClothTransform(cloth, moved, 0.5f);
+  if (!world.SetClothTransform(cloth, moved, 0.5f)) {
+    return Fail("retarget pinned curtain transform");
+  }
   for (u32 step = 0; step < 90; ++step) world.Update(kDt);
   if (!ReadCloth(world, cloth, &positions))
     return Fail("moved curtain readback");
@@ -277,6 +279,9 @@ int TestSkinning(physics::PhysicsWorld& world) {
   }
   const physics::ClothId cloth = world.CreateCloth(desc, spawn);
   if (cloth == 0) return Fail("CreateCloth skinned panel");
+  if (world.SetClothTransform(cloth, spawn, kDt)) {
+    return Fail("unpinned cloth transform was accepted");
+  }
   world.Update(kDt);
   base::Vector<Vec3> positions;
   if (!ReadCloth(world, cloth, &positions)) {
