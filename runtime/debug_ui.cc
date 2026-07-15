@@ -23,6 +23,16 @@
 #include "render/core/presets.h"
 #include "render/core/settings_ini.h"
 
+#ifndef RX_BUILD_ID
+#define RX_BUILD_ID "unknown"
+#endif
+#ifndef RX_BUILD_CONFIG
+#define RX_BUILD_CONFIG "unknown"
+#endif
+#ifndef RX_VERSION
+#define RX_VERSION "unknown"
+#endif
+
 namespace rx {
 namespace {
 
@@ -59,6 +69,14 @@ const char* kDebugViews[] = {"Off",         "Base color",   "World normal",
 // once it slips below playable.
 constexpr f32 kFpsGood = 60.0f;
 constexpr f32 kFpsWarn = 30.0f;
+constexpr f32 kStatusBarHeight = 42.0f;
+constexpr f32 kStatusGraphMaxFps = 120.0f;
+
+#if defined(NDEBUG)
+constexpr const char* kBuildMode = "RELEASE";
+#else
+constexpr const char* kBuildMode = "DEBUG";
+#endif
 
 // Row 0 is "Custom" (hand-tuned); the rest map to QualityPreset below.
 const char* kPresets[] = {"Custom",  "Auto-detect", "Android", "Steam Deck", "Low end",
@@ -142,6 +160,7 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
 
   frame_times_[frame_time_cursor_] = frame_delta * 1000.0f;
   frame_time_cursor_ = (frame_time_cursor_ + 1) % IM_ARRAYSIZE(frame_times_);
+  frame_time_count_ = std::min<u32>(frame_time_count_ + 1, IM_ARRAYSIZE(frame_times_));
 
   // Per-pass GPU timestamps cost real frame time (barriers per pass), so the
   // renderer only records them while this overlay displays them (the GPU
@@ -171,8 +190,11 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
       ImGui::Text("%.2f ms", frame_delta * 1000.0f);
       ImGui::SameLine();
       ImGui::TextColored(fps_col, "(%.0f fps)", fps);
-      ImGui::PlotLines("##frametimes", frame_times_, IM_ARRAYSIZE(frame_times_),
-                       static_cast<int>(frame_time_cursor_), nullptr, 0.0f, 33.3f,
+      const int history_offset = frame_time_count_ == IM_ARRAYSIZE(frame_times_)
+                                     ? static_cast<int>(frame_time_cursor_)
+                                     : 0;
+      ImGui::PlotLines("##frametimes", frame_times_, static_cast<int>(frame_time_count_),
+                       history_offset, nullptr, 0.0f, 33.3f,
                        {ImGui::GetContentRegionAvail().x, 48});
 
       // One-click hardware tier: overwrites every feature toggle below. Touching
@@ -263,7 +285,8 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
     }
     ImGui::End();
 
-    DrawStageChart(renderer);
+    DrawStageChart(renderer, kStatusBarHeight);
+    DrawStatusBar(frame_delta, *view);
 
     if (show_demo_) ImGui::ShowDemoWindow(&show_demo_);
   }
@@ -657,7 +680,114 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, FlyCamera& camera,
   }
 }
 
-void DebugUi::DrawStageChart(render::Renderer& renderer) {
+void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
+  ImGuiViewport* viewport = ImGui::GetMainViewport();
+  const ImVec2 bar_min = {viewport->WorkPos.x,
+                          viewport->WorkPos.y + viewport->WorkSize.y - kStatusBarHeight};
+  const ImVec2 bar_max = {viewport->WorkPos.x + viewport->WorkSize.x,
+                          viewport->WorkPos.y + viewport->WorkSize.y};
+  ImDrawList* dl = ImGui::GetForegroundDrawList(viewport);
+  dl->AddRectFilled(bar_min, bar_max, IM_COL32(0, 0, 0, 255));
+  dl->AddLine(bar_min, {bar_max.x, bar_min.y}, IM_COL32(255, 255, 255, 42));
+
+  constexpr f32 kPadding = 12.0f;
+  const bool compact = viewport->WorkSize.x < 900.0f;
+  const bool two_rows = viewport->WorkSize.x < 600.0f;
+  const f32 section_gap = compact ? 8.0f : 18.0f;
+  const f32 graph_width = std::clamp(viewport->WorkSize.x * 0.22f, 72.0f, 280.0f);
+  const ImVec2 graph_min = {bar_max.x - kPadding - graph_width, bar_min.y + 6.0f};
+  const ImVec2 graph_max = {bar_max.x - kPadding, bar_max.y - 6.0f};
+
+  char fps_text[48];
+  const f32 fps = frame_delta > 0.0f ? 1.0f / frame_delta : 0.0f;
+  if (compact)
+    std::snprintf(fps_text, sizeof(fps_text), "%.0f FPS", fps);
+  else
+    std::snprintf(fps_text, sizeof(fps_text), "FPS %.0f  %.2f ms", fps,
+                  frame_delta * 1000.0f);
+  char location_text[80];
+  if (compact)
+    std::snprintf(location_text, sizeof(location_text), "XYZ %.1f %.1f %.1f", view.camera.eye.x,
+                  view.camera.eye.y, view.camera.eye.z);
+  else
+    std::snprintf(location_text, sizeof(location_text), "XYZ %.2f  %.2f  %.2f",
+                  view.camera.eye.x, view.camera.eye.y, view.camera.eye.z);
+  char build_text[96];
+  if (compact)
+    std::snprintf(build_text, sizeof(build_text), "%s@%.8s", RX_VERSION, RX_BUILD_ID);
+  else
+    std::snprintf(build_text, sizeof(build_text), "BUILD %s (%s)", RX_VERSION, RX_BUILD_ID);
+  char config_text[64];
+  std::snprintf(config_text, sizeof(config_text), compact ? "%s/%s" : "%s / %s",
+                RX_BUILD_CONFIG, kBuildMode);
+
+  const f32 text_start = bar_min.x + kPadding;
+  const f32 text_limit = graph_min.x - section_gap;
+  auto draw_section = [&](f32* text_x, f32 text_y, const char* text) {
+    const f32 width = ImGui::CalcTextSize(text).x;
+    const bool has_previous = *text_x > text_start;
+    const f32 draw_x = *text_x + (has_previous ? section_gap : 0.0f);
+    if (draw_x + width > text_limit) return;
+    if (has_previous) {
+      const f32 separator_x = *text_x + section_gap * 0.5f;
+      dl->AddLine({separator_x, text_y}, {separator_x, text_y + ImGui::GetFontSize()},
+                  IM_COL32(255, 255, 255, 64));
+    }
+    dl->AddText({draw_x, text_y}, IM_COL32(255, 255, 255, 255), text);
+    *text_x = draw_x + width;
+  };
+
+  if (two_rows) {
+    char build_mode_text[128];
+    if (viewport->WorkSize.x < 300.0f)
+      std::snprintf(build_mode_text, sizeof(build_mode_text), "%.8s %s", RX_BUILD_ID, kBuildMode);
+    else
+      std::snprintf(build_mode_text, sizeof(build_mode_text), "%s %s", build_text, kBuildMode);
+    f32 first_row_x = text_start;
+    f32 second_row_x = text_start;
+    draw_section(&first_row_x, bar_min.y + 5.0f, fps_text);
+    draw_section(&first_row_x, bar_min.y + 5.0f, build_mode_text);
+    draw_section(&second_row_x, bar_min.y + 22.0f, location_text);
+    draw_section(&second_row_x, bar_min.y + 22.0f, RX_BUILD_CONFIG);
+  } else {
+    f32 text_x = text_start;
+    const f32 text_y = bar_min.y + (kStatusBarHeight - ImGui::GetFontSize()) * 0.5f;
+    draw_section(&text_x, text_y, fps_text);
+    draw_section(&text_x, text_y, location_text);
+    draw_section(&text_x, text_y, build_text);
+    draw_section(&text_x, text_y, config_text);
+  }
+
+  // A fixed 0-120 FPS scale keeps changes visually comparable across frames.
+  // Samples grow in from the right until the ring is full.
+  dl->AddRect(graph_min, graph_max, IM_COL32(255, 255, 255, 52));
+  const f32 graph_height = graph_max.y - graph_min.y;
+  for (f32 guide_fps : {30.0f, 60.0f}) {
+    const f32 y = graph_max.y - graph_height * (guide_fps / kStatusGraphMaxFps);
+    dl->AddLine({graph_min.x, y}, {graph_max.x, y}, IM_COL32(255, 255, 255, 28));
+  }
+
+  if (frame_time_count_ > 1) {
+    ImVec2 points[IM_ARRAYSIZE(frame_times_)];
+    const u32 capacity = IM_ARRAYSIZE(frame_times_);
+    const u32 oldest = (frame_time_cursor_ + capacity - frame_time_count_) % capacity;
+    const f32 sample_step = graph_width / static_cast<f32>(capacity - 1);
+    const f32 first_x = graph_max.x - sample_step * static_cast<f32>(frame_time_count_ - 1);
+    for (u32 i = 0; i < frame_time_count_; ++i) {
+      const f32 frame_ms = frame_times_[(oldest + i) % capacity];
+      const f32 sample_fps = frame_ms > 0.0f ? 1000.0f / frame_ms : 0.0f;
+      const f32 normalized = std::clamp(sample_fps / kStatusGraphMaxFps, 0.0f, 1.0f);
+      points[i] = {first_x + sample_step * static_cast<f32>(i),
+                   graph_max.y - graph_height * normalized};
+    }
+    dl->PushClipRect(graph_min, graph_max, true);
+    dl->AddPolyline(points, static_cast<int>(frame_time_count_), IM_COL32(255, 255, 255, 255),
+                    1.5f);
+    dl->PopClipRect();
+  }
+}
+
+void DebugUi::DrawStageChart(render::Renderer& renderer, f32 bottom_offset) {
   const auto& timings = renderer.pass_timings();
   if (timings.empty()) return;
 
@@ -695,8 +825,8 @@ void DebugUi::DrawStageChart(render::Renderer& renderer) {
   const int rows = static_cast<int>(bars.size());
   const f32 panel_h = pad + header_h + rows * row_h + (rows - 1) * row_gap + pad;
 
-  const ImVec2 p0 = {margin, screen.y - margin - panel_h};
-  const ImVec2 p1 = {p0.x + panel_w, screen.y - margin};
+  const ImVec2 p0 = {margin, screen.y - bottom_offset - margin - panel_h};
+  const ImVec2 p1 = {p0.x + panel_w, screen.y - bottom_offset - margin};
   ImDrawList* dl = ImGui::GetForegroundDrawList();
 
   // Dark glass panel with a hairline border.

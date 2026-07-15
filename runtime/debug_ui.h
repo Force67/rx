@@ -71,7 +71,10 @@ class DebugUi {
 
   // Window-less GPU-stage bar chart pinned to the bottom-left, drawn straight
   // onto the foreground draw list from the renderer's per-pass timings.
-  void DrawStageChart(render::Renderer& renderer);
+  void DrawStageChart(render::Renderer& renderer, f32 bottom_offset);
+
+  // Passive full-width build/performance strip pinned to the viewport bottom.
+  void DrawStatusBar(f32 frame_delta, const render::FrameView& view);
 
   bool initialized_ = false;
   bool visible_ = true;
@@ -97,6 +100,7 @@ class DebugUi {
   f32 render_scale_ui_ = 1.0f;  // in-progress render-scale slider; committed on release
   f32 frame_times_[150] = {};
   u32 frame_time_cursor_ = 0;
+  u32 frame_time_count_ = 0;
 };
 
 }  // namespace rx
