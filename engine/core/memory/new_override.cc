@@ -62,6 +62,12 @@ void* Allocate(std::size_t size, std::size_t alignment, bool aligned, bool nothr
     throw std::bad_alloc();
   }
 
+  // _FORTIFY_SOURCE sizes the block from mi_new's alloc_size attribute (the
+  // requested total), but the footer sits at the end of the *usable* block,
+  // which size-class rounding can push past that bound. Hide the pointer's
+  // provenance so __memcpy_chk cannot derive the too-small bound.
+  __asm__("" : "+r"(pointer));
+
   const std::size_t usable_size = mi_usable_size(pointer);
   const rx::mem::Category category = rx::mem::CurrentCategory();
   const std::uintptr_t cookie = FooterCookie(pointer, usable_size, category);
