@@ -23,9 +23,11 @@ class OverdrawPass {
   // issues the draws. view_proj is also pushed up front.
   void Render(CommandList& cmd, TextureView color_view, Extent2D extent, const Mat4& view_proj,
               const std::function<void(CommandList&)>& draw);
+  void BindInstanced(CommandList& cmd, const Mat4& view_proj);
 
  private:
   PipelineHandle pipeline_;
+  PipelineHandle instanced_pipeline_;
 };
 
 }  // namespace rx::render

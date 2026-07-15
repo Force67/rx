@@ -16,9 +16,10 @@ class SdfScene;
 // Camera-following global SDF clipmap with a surface-colour proxy, mirroring the
 // RCGI cascade geometry. Four clips double in extent (clip 0 = 32 m ... clip 3 =
 // 256 m), each a kRes^3 voxel volume, camera-snapped. Per clip the composition
-// pass min-blends the mesh SDFs of overlapping instances into a distance volume,
-// and the winning instance writes its flat albedo/emissive into two colour
-// proxies. S2 sphere-traces this via shaders/gi/sdf_trace.hlsli.
+// pass min-blends selected overlapping mesh SDFs into a distance volume, and the
+// winner writes its flat albedo/emissive into two colour proxies. Instances are
+// unbounded by default; bounded-quality instances explicitly accept nearest-N
+// omission. S2 sphere-traces this via shaders/gi/sdf_trace.hlsli.
 //
 // The three volumes are one stacked-Z atlas (kRes, kRes, kRes*kClips): clip c
 // occupies z in [c*kRes, (c+1)*kRes). They live permanently in kGeneral and are
@@ -34,6 +35,10 @@ class SdfClipmap {
   struct Instance {
     u64 mesh_key = 0;
     Mat4 transform = Mat4::Identity();
+    // Opts this instance into the intentional nearest-N bounded-quality policy
+    // after clip-overlap testing. Such instances may be omitted from a clip;
+    // ordinary frame instances leave this false and remain unbounded.
+    bool bounded_quality = false;
   };
 
   explicit SdfClipmap(Device& device) : device_(device) {}

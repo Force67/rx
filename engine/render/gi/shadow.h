@@ -39,7 +39,7 @@ class ShadowPass {
 
   // material_layout is set 0 here (the mesh pipeline's material set), bound per
   // submesh so the fragment stage can alpha-test masked casters.
-  bool Initialize(Device& device, BindingLayoutHandle material_layout);
+  bool Initialize(Device& device, BindingLayoutHandle material_layout, Format local_depth_format);
   void Destroy(Device& device);
   void Configure(const Settings& settings);
 
@@ -57,7 +57,7 @@ class ShadowPass {
   // opaque draws inside, binding pipeline() for static and skinned_pipeline()
   // for animated casters (both share one binding/push interface).
   void Render(CommandList& cmd, TextureView atlas_view,
-              const std::function<void(CommandList&)>& draw);
+              const std::function<void(CommandList&, const Mat4&)>& draw);
 
   const GpuBuffer& cascade_buffer(u32 frame_slot) const { return cascades_[frame_slot]; }
   u64 cascade_buffer_size() const { return sizeof(CascadeData); }
@@ -70,6 +70,20 @@ class ShadowPass {
   PipelineHandle skinned_pipeline(bool masked = true) const {
     return masked || !skinned_opaque_pipeline_ ? skinned_pipeline_ : skinned_opaque_pipeline_;
   }
+  PipelineHandle instanced_pipeline(bool masked = true) const {
+    return masked || !instanced_opaque_pipeline_ ? instanced_pipeline_ : instanced_opaque_pipeline_;
+  }
+  PipelineHandle local_pipeline(bool masked = true) const {
+    return masked || !local_opaque_pipeline_ ? local_pipeline_ : local_opaque_pipeline_;
+  }
+  PipelineHandle local_skinned_pipeline(bool masked = true) const {
+    return masked || !local_skinned_opaque_pipeline_ ? local_skinned_pipeline_
+                                                     : local_skinned_opaque_pipeline_;
+  }
+  PipelineHandle local_instanced_pipeline(bool masked = true) const {
+    return masked || !local_instanced_opaque_pipeline_ ? local_instanced_pipeline_
+                                                       : local_instanced_opaque_pipeline_;
+  }
 
  private:
   static constexpr u32 kFramesInFlight = 2;
@@ -79,6 +93,14 @@ class ShadowPass {
   PipelineHandle skinned_pipeline_;
   PipelineHandle opaque_pipeline_;  // depth-only, no fragment stage
   PipelineHandle skinned_opaque_pipeline_;
+  PipelineHandle instanced_pipeline_;
+  PipelineHandle instanced_opaque_pipeline_;
+  PipelineHandle local_pipeline_;
+  PipelineHandle local_skinned_pipeline_;
+  PipelineHandle local_opaque_pipeline_;
+  PipelineHandle local_skinned_opaque_pipeline_;
+  PipelineHandle local_instanced_pipeline_;
+  PipelineHandle local_instanced_opaque_pipeline_;
   GpuBuffer cascades_[kFramesInFlight];
   CascadeData current_{};
 };

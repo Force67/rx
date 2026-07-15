@@ -333,6 +333,15 @@ if(RX_BUILD_TESTS)
     engine/physics/cloth_collision.cc)
   target_link_libraries(cloth_collision_test PRIVATE rx::core)
   add_test(NAME cloth_collision_test COMMAND cloth_collision_test)
+
+  add_executable(instance_store_test
+    test/instance_store_test.cc
+    engine/render/geometry/instance_store.cc)
+  target_include_directories(instance_store_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(instance_store_test PRIVATE rx::core)
+  add_test(NAME instance_store_test COMMAND instance_store_test)
 endif()
 
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a

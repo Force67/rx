@@ -3,6 +3,7 @@
 #include "asset/mesh.h"
 #include "core/log.h"
 #include "shaders/overdraw_ps_hlsl.h"
+#include "shaders/shadow_instance_vs_hlsl.h"
 #include "shaders/shadow_vs_hlsl.h"
 
 namespace rx::render {
@@ -13,25 +14,44 @@ bool OverdrawPass::Initialize(Device& device, Format color_format) {
   // TODO(rhi): blend preset mismatch: old alpha factors were srcAlpha=ZERO,
   // dstAlpha=ONE (keep dst alpha); kAdditive is ONE/ONE on alpha too. Color
   // factors (ONE/ONE) match; the heatmap only reads rgb.
-  pipeline_ = device.CreateGraphicsPipeline({
+  VertexBufferLayout position_stream{
+      .stride = sizeof(asset::Vertex),
+      .attributes = {{.location = 0,
+                      .format = Format::kRGB32Float,
+                      .offset = offsetof(asset::Vertex, position)},
+                     {.location = 3,
+                      .format = Format::kRG32Float,
+                      .offset = offsetof(asset::Vertex, uv)}}};
+  GraphicsPipelineDesc desc{
       .vertex = RX_SHADER(k_shadow_vs_hlsl),
       .fragment = RX_SHADER(k_overdraw_ps_hlsl),
-      .vertex_buffers = {{.stride = sizeof(asset::Vertex),
-                          .attributes = {{.location = 0,
-                                          .format = Format::kRGB32Float,
-                                          .offset = offsetof(asset::Vertex, position)},
-                                         {.location = 3,
-                                          .format = Format::kRG32Float,
-                                          .offset = offsetof(asset::Vertex, uv)}}}},
+      .vertex_buffers = {position_stream},
       .raster = {.cull = CullMode::kNone},  // count every overlapping layer
       .depth = {},                          // no test/write, no depth attachment
       .color_formats = {color_format},
       .blend = {BlendMode::kAdditive},  // additive accumulation
       .push_constant_size = 2 * sizeof(Mat4),
       .debug_name = "overdraw",
-  });
-  if (!pipeline_) {
+  };
+  pipeline_ = device.CreateGraphicsPipeline(desc);
+
+  VertexBufferLayout instance_stream{.stride = sizeof(Mat4),
+                                     .per_instance = true,
+                                     .attributes = {{7, Format::kRGBA32Float, 0},
+                                                    {8, Format::kRGBA32Float, 16},
+                                                    {9, Format::kRGBA32Float, 32},
+                                                    {10, Format::kRGBA32Float, 48}}};
+  desc.vertex = RX_SHADER(k_shadow_instance_vs_hlsl);
+  desc.vertex_buffers = {position_stream, instance_stream};
+  desc.debug_name = "overdraw_instanced";
+  instanced_pipeline_ = device.CreateGraphicsPipeline(desc);
+
+  if (!pipeline_ || !instanced_pipeline_) {
     RX_ERROR("overdraw pipeline creation failed");
+    if (pipeline_) device.DestroyPipeline(pipeline_);
+    if (instanced_pipeline_) device.DestroyPipeline(instanced_pipeline_);
+    pipeline_ = {};
+    instanced_pipeline_ = {};
     return false;
   }
   return true;
@@ -51,9 +71,16 @@ void OverdrawPass::Render(CommandList& cmd, TextureView color_view, Extent2D ext
   cmd.EndRendering();
 }
 
+void OverdrawPass::BindInstanced(CommandList& cmd, const Mat4& view_proj) {
+  cmd.BindPipeline(instanced_pipeline_);
+  cmd.PushConstants(&view_proj, sizeof(Mat4));
+}
+
 void OverdrawPass::Destroy(Device& device) {
   device.DestroyPipeline(pipeline_);
+  device.DestroyPipeline(instanced_pipeline_);
   pipeline_ = {};
+  instanced_pipeline_ = {};
 }
 
 }  // namespace rx::render

@@ -52,6 +52,7 @@
 #include "render/geometry/shore_wetting.h"
 #include "render/geometry/water_caustics.h"
 #include "render/geometry/imposters.h"
+#include "render/geometry/instance_store.h"
 #include "render/atmosphere/volumetric_fog.h"
 #include "render/pipeline/material_system.h"
 #include "render/pipeline/mesh_pipeline.h"
@@ -324,6 +325,15 @@ class RX_RENDER_EXPORT Renderer {
   // other; entities must carry the salted id in their Renderable. Zero (the
   // default/primary domain) leaves the key unchanged.
   bool UploadMesh(const asset::Mesh& mesh, u64 id_salt = 0);
+  // Persistent, opaque static instance groups. A group is mesh-homogeneous and
+  // should cover one spatial streaming unit (for example one world cell), which
+  // gives the renderer group-level frustum culling and one hardware-instanced
+  // draw per material/LOD instead of one draw and ECS entity per placement.
+  // Updates preserve object motion by treating overlapping array indices as
+  // stable identities; newly appended indices spawn with zero object velocity.
+  InstanceGroupHandle CreateInstanceGroup(u64 mesh, std::span<const Mat4> transforms);
+  bool UpdateInstanceGroup(InstanceGroupHandle handle, std::span<const Mat4> transforms);
+  void DestroyInstanceGroup(InstanceGroupHandle handle);
   // Same per-domain salt as UploadMesh; it must match so a mesh's submesh
   // material references resolve to this domain's materials/textures.
   bool UploadTexture(const asset::Texture& texture, u64 id_salt = 0);
@@ -378,6 +388,8 @@ class RX_RENDER_EXPORT Renderer {
   u32 output_height() const { return output_height_; }
   bool upscaler_active() const { return upscaler_ != nullptr; }
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }
+  size_t instance_group_count() const { return instances_.group_count(); }
+  size_t instance_count() const { return instances_.instance_count(); }
   const MaterialSystem* materials() const { return material_system_.get(); }
 
   // Per-pass GPU timings from the last resolved frame, for the debug overlay.
@@ -564,6 +576,7 @@ class RX_RENDER_EXPORT Renderer {
   ShoreWetting shore_wetting_;
   WaterCaustics water_caustics_;
   ImposterPass imposters_;
+  InstanceStore instances_;
   bool fft_ocean_active_ = false;  // maps valid + flag set this frame
   bool water_field_active_ = false;  // ring field valid + flag set this frame
   bool shore_wetting_active_ = false;  // shore wetting field valid this frame
@@ -571,6 +584,8 @@ class RX_RENDER_EXPORT Renderer {
   GpuImage ms_dummy_hiz_;  // 1x1 fallback bound to the mesh-shader cull when occlusion is off
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
   f32 pt_prev_sig_ = 0;  // lighting signature; change resets accumulation
+  u64 scene_revision_ = 0;
+  u64 pt_prev_scene_revision_ = 0;
   bool pt_was_active_ = false;
   // Which path-trace mode ran last frame (0 reference, 1 nrd-denoised, 2 recon,
   // -1 none). Switching mode must reset accumulation: each mode reprojects its

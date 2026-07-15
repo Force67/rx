@@ -21,10 +21,11 @@
 // Entry point:
 //   SdfHit TraceGlobalSdf(origin, dir, tmax, sdf, sdf_distance, sdf_albedo,
 //                         sdf_emissive, sdf_sampler)
-//   -> sphere-traces the finest clip containing the ray, stepping up clips as
-//      the ray leaves them; hit when distance < surface epsilon (voxel-scaled);
-//      6-tap central-difference gradient normal; ~1-voxel start bias. Returns
-//      hit position, normal, albedo, emissive, hitT, and a miss flag.
+//   -> sphere-traces the finest clip containing the ray, capping each step at
+//      that clip's guarded exit before sampling a coarser field; hit when
+//      distance < surface epsilon (voxel-scaled); 6-tap central-difference
+//      gradient normal; ~1-voxel start bias. Returns hit position, normal,
+//      albedo, emissive, hitT, and a miss flag.
 // =============================================================================
 
 static const uint kSdfClips = 4u;
@@ -171,6 +172,8 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
   bool has_anchor = origin_classified;   // origin fell through as >= 0
   bool real_anchor = origin_classified;
   bool sampled = false;      // whether we have taken a real (in-clipmap) sample yet
+  uint step_clip = kSdfClips;
+  float step_clip_exit_t = 0.0;
 
   [loop]
   for (int i = 0; i < 256; ++i) {
@@ -277,7 +280,18 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
     t_anchor = t;
     has_anchor = true;
     real_anchor = true;
-    t += max(d, eps * 0.5);
+    if (c != step_clip) {
+      float3 bmin = g.clip_origin[c].xyz + voxel;
+      float3 bmax = g.clip_origin[c].xyz + voxel * (g.clip_params.x - 1.0);
+      float unused_near;
+      SdfRayBox(origin, dir, bmin, bmax, unused_near, step_clip_exit_t);
+      step_clip = c;
+    }
+    // A clip can omit mesh volumes outside its physical extent. Cross its
+    // guarded selector boundary before trusting a coarser field's distance.
+    float march_step = max(d, eps * 0.5);
+    float boundary_step = max(step_clip_exit_t - t, 0.0) + voxel * 0.01;
+    t += min(march_step, boundary_step);
   }
   return hit;
 }

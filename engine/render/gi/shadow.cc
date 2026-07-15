@@ -7,6 +7,7 @@
 
 #include "asset/mesh.h"
 #include "core/log.h"
+#include "shaders/shadow_instance_vs_hlsl.h"
 #include "shaders/shadow_ps_hlsl.h"
 #include "shaders/shadow_skin_vs_hlsl.h"
 #include "shaders/shadow_vs_hlsl.h"
@@ -19,7 +20,8 @@ Vec3 Mul(const Vec3& v, f32 s) { return {v.x * s, v.y * s, v.z * s}; }
 
 }  // namespace
 
-bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout) {
+bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout,
+                            Format local_depth_format) {
   // Position (binding 0) + uv for alpha test; the skinned variant adds the bone
   // index/weight stream (binding 1) so it skins in the vertex stage. The push
   // block covers the skinned permutation's trailing bone_address + skin_offset;
@@ -32,8 +34,16 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout)
       .stride = sizeof(asset::SkinnedVertexExtra),
       .attributes = {{5, Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
                      {6, Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
+  VertexBufferLayout instance_stream{
+      .stride = sizeof(Mat4),
+      .per_instance = true,
+      .attributes = {{7, Format::kRGBA32Float, 0},
+                     {8, Format::kRGBA32Float, 16},
+                     {9, Format::kRGBA32Float, 32},
+                     {10, Format::kRGBA32Float, 48}}};
 
-  auto make_pipeline = [&](ShaderBlob vertex, bool skinned, bool masked, const char* name) {
+  auto make_pipeline = [&](ShaderBlob vertex, bool skinned, bool instanced, bool masked,
+                           Format depth_format, const char* name) {
     GraphicsPipelineDesc desc{
         .vertex = vertex,
         // Masked casters alpha-test in the fragment; opaque ones run with no
@@ -42,13 +52,12 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout)
         // Thin geometry must cast from both sides.
         .raster = {.cull = CullMode::kNone, .front = FrontFace::kCounterClockwise},
         // Standard depth, nearest occluder wins; slope-scaled bias kills most
-        // shadow acne. D16: each cascade's ortho range is tightened to its
-        // frustum slice, where 16 bits resolve fine and cost half the
-        // bandwidth of D32 (shadow pixel cost scales with resolution^2).
+        // shadow acne. Attachment format is fixed in the PSO, so cascades and
+        // local shadows need separate families for their D16/D32 atlases.
         .depth = {.test = true,
                   .write = true,
                   .compare = CompareOp::kLess,
-                  .format = kAtlasFormat,
+                  .format = depth_format,
                   .bias_constant = 1.25f,
                   .bias_slope = 2.0f},
         .sets = {{.shared = material_layout}},  // set 0: alpha-test inputs
@@ -57,16 +66,41 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout)
     };
     desc.vertex_buffers.push_back(position_stream);
     if (skinned) desc.vertex_buffers.push_back(skin_stream);
+    if (instanced) desc.vertex_buffers.push_back(instance_stream);
     return device.CreateGraphicsPipeline(desc);
   };
 
-  pipeline_ = make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, true, "shadow");
-  skinned_pipeline_ =
-      make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, true, "shadow_skinned");
-  opaque_pipeline_ = make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, false, "shadow_opaque");
-  skinned_opaque_pipeline_ =
-      make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, false, "shadow_skinned_opaque");
-  if (!pipeline_ || !skinned_pipeline_ || !opaque_pipeline_ || !skinned_opaque_pipeline_) {
+  pipeline_ =
+      make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, false, true, kAtlasFormat, "shadow");
+  skinned_pipeline_ = make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, false, true,
+                                    kAtlasFormat, "shadow_skinned");
+  opaque_pipeline_ = make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, false, false, kAtlasFormat,
+                                   "shadow_opaque");
+  skinned_opaque_pipeline_ = make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, false, false,
+                                           kAtlasFormat, "shadow_skinned_opaque");
+  instanced_pipeline_ = make_pipeline(RX_SHADER(k_shadow_instance_vs_hlsl), false, true, true,
+                                      kAtlasFormat, "shadow_instanced");
+  instanced_opaque_pipeline_ = make_pipeline(RX_SHADER(k_shadow_instance_vs_hlsl), false, true,
+                                             false, kAtlasFormat, "shadow_instanced_opaque");
+  local_pipeline_ = make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, false, true,
+                                  local_depth_format, "shadow_local");
+  local_skinned_pipeline_ = make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, false, true,
+                                          local_depth_format, "shadow_local_skinned");
+  local_opaque_pipeline_ = make_pipeline(RX_SHADER(k_shadow_vs_hlsl), false, false, false,
+                                         local_depth_format, "shadow_local_opaque");
+  local_skinned_opaque_pipeline_ =
+      make_pipeline(RX_SHADER(k_shadow_skin_vs_hlsl), true, false, false, local_depth_format,
+                    "shadow_local_skinned_opaque");
+  local_instanced_pipeline_ =
+      make_pipeline(RX_SHADER(k_shadow_instance_vs_hlsl), false, true, true, local_depth_format,
+                    "shadow_local_instanced");
+  local_instanced_opaque_pipeline_ =
+      make_pipeline(RX_SHADER(k_shadow_instance_vs_hlsl), false, true, false, local_depth_format,
+                    "shadow_local_instanced_opaque");
+  if (!pipeline_ || !skinned_pipeline_ || !opaque_pipeline_ || !skinned_opaque_pipeline_ ||
+      !instanced_pipeline_ || !instanced_opaque_pipeline_ || !local_pipeline_ ||
+      !local_skinned_pipeline_ || !local_opaque_pipeline_ || !local_skinned_opaque_pipeline_ ||
+      !local_instanced_pipeline_ || !local_instanced_opaque_pipeline_) {
     RX_ERROR("shadow pipeline creation failed");
     return false;
   }
@@ -162,7 +196,7 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
 }
 
 void ShadowPass::Render(CommandList& cmd, TextureView atlas_view,
-                        const std::function<void(CommandList&)>& draw) {
+                        const std::function<void(CommandList&, const Mat4&)>& draw) {
   const u32 res = settings_.resolution;
 
   // The graph already put the atlas in the depth-target state for this write.
@@ -176,10 +210,11 @@ void ShadowPass::Render(CommandList& cmd, TextureView atlas_view,
   cmd.BindPipeline(pipeline_);
 
   for (u32 i = 0; i < settings_.cascade_count; ++i) {
+    cmd.BindPipeline(pipeline_);
     cmd.SetViewport(static_cast<f32>(i * res), 0.0f, static_cast<f32>(res), static_cast<f32>(res));
     cmd.SetScissor(static_cast<i32>(i * res), 0, res, res);
     cmd.PushConstants(&current_.light_view_proj[i], sizeof(Mat4));
-    draw(cmd);
+    draw(cmd, current_.light_view_proj[i]);
   }
   cmd.EndRendering();
 }
@@ -189,9 +224,27 @@ void ShadowPass::Destroy(Device& device) {
   device.DestroyPipeline(skinned_pipeline_);
   device.DestroyPipeline(opaque_pipeline_);
   device.DestroyPipeline(skinned_opaque_pipeline_);
+  device.DestroyPipeline(instanced_pipeline_);
+  device.DestroyPipeline(instanced_opaque_pipeline_);
+  device.DestroyPipeline(local_pipeline_);
+  device.DestroyPipeline(local_skinned_pipeline_);
+  device.DestroyPipeline(local_opaque_pipeline_);
+  device.DestroyPipeline(local_skinned_opaque_pipeline_);
+  device.DestroyPipeline(local_instanced_pipeline_);
+  device.DestroyPipeline(local_instanced_opaque_pipeline_);
   for (u32 i = 0; i < kFramesInFlight; ++i) device.DestroyBuffer(cascades_[i]);
   pipeline_ = {};
   skinned_pipeline_ = {};
+  opaque_pipeline_ = {};
+  skinned_opaque_pipeline_ = {};
+  instanced_pipeline_ = {};
+  instanced_opaque_pipeline_ = {};
+  local_pipeline_ = {};
+  local_skinned_pipeline_ = {};
+  local_opaque_pipeline_ = {};
+  local_skinned_opaque_pipeline_ = {};
+  local_instanced_pipeline_ = {};
+  local_instanced_opaque_pipeline_ = {};
 }
 
 }  // namespace rx::render

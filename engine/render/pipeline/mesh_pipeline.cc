@@ -2,6 +2,7 @@
 
 #include "asset/mesh.h"
 #include "core/log.h"
+#include "shaders/mesh_instance_vs_hlsl.h"
 #include "shaders/mesh_ps_hlsl.h"
 #include "shaders/mesh_rt_ps_hlsl.h"
 #include "shaders/mesh_rt_sss_ps_hlsl.h"
@@ -61,6 +62,20 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
       .stride = sizeof(asset::SkinnedVertexExtra),
       .attributes = {{5, Format::kRGBA8Uint, offsetof(asset::SkinnedVertexExtra, bone_indices)},
                      {6, Format::kRGBA8Unorm, offsetof(asset::SkinnedVertexExtra, bone_weights)}}};
+  VertexBufferLayout instance_stream{
+      .stride = sizeof(Mat4),
+      .per_instance = true,
+      .attributes = {{7, Format::kRGBA32Float, 0},
+                     {8, Format::kRGBA32Float, 16},
+                     {9, Format::kRGBA32Float, 32},
+                     {10, Format::kRGBA32Float, 48}}};
+  VertexBufferLayout previous_instance_stream{
+      .stride = sizeof(Mat4),
+      .per_instance = true,
+      .attributes = {{11, Format::kRGBA32Float, 0},
+                     {12, Format::kRGBA32Float, 16},
+                     {13, Format::kRGBA32Float, 32},
+                     {14, Format::kRGBA32Float, 48}}};
 
   // The prepass owns depth; main variants test EQUAL against it and leave
   // motion alone (the prepass already wrote it).
@@ -98,6 +113,26 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
     pipeline->pipelines_[variant] = device.CreateGraphicsPipeline(desc);
     if (!pipeline->pipelines_[variant]) {
       RX_ERROR("mesh pipeline creation failed (variant {})", variant);
+    }
+  }
+
+  // Persistent static instance groups: identical scene state and fragment
+  // variants, with a second vertex stream supplying one model matrix per prop.
+  {
+    GraphicsPipelineDesc desc = scene;
+    desc.vertex = RX_SHADER(k_mesh_instance_vs_hlsl);
+    desc.vertex_buffers = {static_stream, instance_stream, previous_instance_stream};
+    desc.debug_name = "mesh_scene_instanced";
+    for (u32 variant = 0; variant < 4; ++variant) {
+      if ((variant & kRt) && !rt) continue;
+      if ((variant & kWire) && !wire_capable) continue;
+      desc.fragment =
+          (variant & kRt) ? RX_SHADER(k_mesh_rt_sss_ps_hlsl) : RX_SHADER(k_mesh_sss_ps_hlsl);
+      desc.raster.polygon = (variant & kWire) ? PolygonMode::kLine : PolygonMode::kFill;
+      pipeline->instanced_pipelines_[variant] = device.CreateGraphicsPipeline(desc);
+      if (!pipeline->instanced_pipelines_[variant]) {
+        RX_ERROR("mesh instanced pipeline creation failed (variant {})", variant);
+      }
     }
   }
 
@@ -182,6 +217,21 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
       RX_ERROR("mesh masked prepass pipeline creation failed");
     }
 
+    desc.vertex = RX_SHADER(k_mesh_instance_vs_hlsl);
+    desc.vertex_buffers = {static_stream, instance_stream, previous_instance_stream};
+    desc.fragment = RX_SHADER(k_prepass_ps_hlsl);
+    desc.debug_name = "mesh_prepass_instanced";
+    pipeline->instanced_prepass_pipeline_ = device.CreateGraphicsPipeline(desc);
+    if (!pipeline->instanced_prepass_pipeline_) {
+      RX_ERROR("mesh instanced prepass pipeline creation failed");
+    }
+    desc.fragment = RX_SHADER(k_prepass_masked_ps_hlsl);
+    desc.debug_name = "mesh_prepass_instanced_masked";
+    pipeline->instanced_prepass_masked_pipeline_ = device.CreateGraphicsPipeline(desc);
+    if (!pipeline->instanced_prepass_masked_pipeline_) {
+      RX_ERROR("mesh instanced masked prepass pipeline creation failed");
+    }
+
     // Skinned prepass: must match the skinned main pose so the EQUAL depth test
     // passes.
     desc.vertex = RX_SHADER(k_mesh_skin_vs_hlsl);
@@ -257,7 +307,8 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   }
 
   if (!pipeline->pipelines_[0] || !pipeline->prepass_pipeline_ ||
-      !pipeline->blend_pipelines_[0]) {
+      !pipeline->blend_pipelines_[0] || !pipeline->instanced_pipelines_[0] ||
+      !pipeline->instanced_prepass_pipeline_ || !pipeline->instanced_prepass_masked_pipeline_) {
     return nullptr;
   }
   return pipeline;
@@ -276,10 +327,16 @@ MeshPipeline::~MeshPipeline() {
   for (PipelineHandle pipeline : skinned_pipelines_) {
     if (pipeline) device_.DestroyPipeline(pipeline);
   }
+  for (PipelineHandle pipeline : instanced_pipelines_) {
+    if (pipeline) device_.DestroyPipeline(pipeline);
+  }
   if (skinned_prepass_pipeline_) device_.DestroyPipeline(skinned_prepass_pipeline_);
   if (skinned_prepass_masked_pipeline_) device_.DestroyPipeline(skinned_prepass_masked_pipeline_);
   if (prepass_pipeline_) device_.DestroyPipeline(prepass_pipeline_);
   if (prepass_masked_pipeline_) device_.DestroyPipeline(prepass_masked_pipeline_);
+  if (instanced_prepass_pipeline_) device_.DestroyPipeline(instanced_prepass_pipeline_);
+  if (instanced_prepass_masked_pipeline_)
+    device_.DestroyPipeline(instanced_prepass_masked_pipeline_);
   for (PipelineHandle pipeline : ms_scene_) {
     if (pipeline) device_.DestroyPipeline(pipeline);
   }
@@ -373,6 +430,30 @@ void MeshPipeline::Draw(CommandList& cmd, const GpuMesh& mesh, const MeshPushCon
 
 void MeshPipeline::DrawSubmesh(CommandList& cmd, const GpuSubmesh& submesh) {
   cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
+}
+
+void MeshPipeline::SetInstanced(CommandList& cmd, bool use_rt, bool wireframe) {
+  u32 variant = (use_rt ? kRt : 0) | (wireframe ? kWire : 0);
+  if (!instanced_pipelines_[variant]) variant &= ~kWire;
+  if (!instanced_pipelines_[variant]) variant = 0;
+  cmd.BindPipeline(instanced_pipelines_[variant]);
+}
+
+void MeshPipeline::SetInstancedPrepass(CommandList& cmd, bool masked) {
+  PipelineHandle pipeline = masked && instanced_prepass_masked_pipeline_
+                                ? instanced_prepass_masked_pipeline_
+                                : instanced_prepass_pipeline_;
+  cmd.BindPipeline(pipeline);
+}
+
+void MeshPipeline::DrawInstances(CommandList& cmd, const GpuMesh& mesh,
+                                 const GpuBuffer& instances, const GpuBuffer& previous_instances,
+                                 const MeshPushConstants& push) {
+  cmd.Push(push);
+  cmd.BindVertexBuffer(0, mesh.vertices);
+  cmd.BindVertexBuffer(1, instances);
+  cmd.BindVertexBuffer(2, previous_instances);
+  cmd.BindIndexBuffer(mesh.indices, 0, IndexType::kUint32);
 }
 
 void MeshPipeline::BindMeshScene(CommandList& cmd, BindingSetHandle globals,
