@@ -46,26 +46,33 @@ class RX_ECS_EXPORT World {
 
   // Calls fn(Entity, Ts&...) for every entity that has all of Ts.
   // Allocation-free: the required set lives on the stack and iteration walks
-  // each archetype chunk by chunk.
+  // each archetype chunk by chunk. Structural changes from fn are memory-safe,
+  // but can skip or revisit entities; defer them when snapshot semantics matter.
   template <typename... Ts, typename Fn>
   void Each(Fn&& fn) {
     static_assert(sizeof...(Ts) > 0);
     ComponentId required[sizeof...(Ts)] = {GetComponentId<Ts>()...};
     std::sort(std::begin(required), std::end(required));
-    for (auto& archetype : archetypes_) {
+    // Archetypes themselves are stable, but structural changes in a callback
+    // may reallocate archetypes_ or shrink the current chunk. Iterate the
+    // original archetype set by pointer and revalidate the row each time.
+    const size_t archetype_count = archetypes_.size();
+    for (size_t archetype_index = 0; archetype_index < archetype_count; ++archetype_index) {
+      Archetype* archetype =
+          archetypes_[archetype_index].Get_UseOnlyIfYouKnowWhatYouareDoing();
       if (!SignatureContainsAll(archetype->signature(), required, sizeof...(Ts))) continue;
-      const u32 count = archetype->row_count();
       const u32 rows_per_chunk = archetype->rows_per_chunk();
+      const u32 initial_row_count = archetype->row_count();
       int indices[sizeof...(Ts)] = {archetype->ColumnIndex(GetComponentId<Ts>())...};
-      u32 row = 0;
-      for (u32 chunk = 0; row < count; ++chunk) {
-        size_t next_index = 0;
-        std::tuple<Ts*...> columns{
-            static_cast<Ts*>(archetype->ChunkColumnData(chunk, indices[next_index++]))...};
-        const u32 in_chunk = archetype->ChunkRowCount(chunk);
-        for (u32 i = 0; i < in_chunk; ++i, ++row) {
-          fn(archetype->entity_at(row), std::get<Ts*>(columns)[i]...);
-        }
+      for (u32 row = 0;
+           row < initial_row_count && row < archetype->row_count(); ++row) {
+        const u32 chunk = row / rows_per_chunk;
+        const u32 in_chunk = row % rows_per_chunk;
+        std::tuple<Ts*...> columns = [&]<size_t... Is>(std::index_sequence<Is...>) {
+          return std::tuple<Ts*...>{
+              static_cast<Ts*>(archetype->ChunkColumnData(chunk, indices[Is]))...};
+        }(std::index_sequence_for<Ts...>{});
+        fn(archetype->entity_at(row), std::get<Ts*>(columns)[in_chunk]...);
       }
     }
   }

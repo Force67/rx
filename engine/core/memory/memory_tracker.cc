@@ -47,7 +47,15 @@ Category CurrentCategory() { return t_current; }
 void SetCurrentCategory(Category category) { t_current = category; }
 
 void TrackAlloc(size_t bytes) {
-  Slot& slot = g_slots[t_current];
+  detail::TrackAlloc(t_current, bytes);
+}
+
+void TrackFree(size_t bytes) { detail::TrackFree(t_current, bytes); }
+
+namespace detail {
+
+void TrackAlloc(Category category, size_t bytes) {
+  Slot& slot = g_slots[category];
   const i64 current = slot.current.fetch_add(static_cast<i64>(bytes), std::memory_order_relaxed) +
                       static_cast<i64>(bytes);
   slot.allocs.fetch_add(1, std::memory_order_relaxed);
@@ -58,9 +66,11 @@ void TrackAlloc(size_t bytes) {
   }
 }
 
-void TrackFree(size_t bytes) {
-  g_slots[t_current].current.fetch_sub(static_cast<i64>(bytes), std::memory_order_relaxed);
+void TrackFree(Category category, size_t bytes) {
+  g_slots[category].current.fetch_sub(static_cast<i64>(bytes), std::memory_order_relaxed);
 }
+
+}  // namespace detail
 
 void SetCategoryBudget(const char* name, u64 bytes) {
   const Category category = RegisterCategory(name);

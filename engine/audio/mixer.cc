@@ -13,6 +13,7 @@ constexpr size_t kDecodeChunkFrames = 1024;
 // Compact a voice's source buffer once this many frames have been consumed, so a
 // long-running loop does not grow the buffer unbounded.
 constexpr size_t kCompactThreshold = 8192;
+const mem::Category kAudioCategory = mem::RegisterCategory("audio");
 
 f32 RampStep(f32 seconds, u32 rate) {
   if (seconds <= 0.0f || rate == 0) return 1.0f;  // immediate
@@ -166,7 +167,6 @@ bool Mixer::FillSource(Voice& voice, size_t frames) {
 }
 
 void Mixer::MixInto(float* out, u32 frames) {
-  static const mem::Category kAudioCategory = mem::RegisterCategory("audio");
   mem::CategoryScope mem_scope(kAudioCategory);
   ApplyCommands();
   std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);

@@ -261,7 +261,7 @@ class MaterialSystem {
   // create + destroy a VMA allocation per streamed texture, fragmenting the
   // GPU heap over long sessions. Safe to reuse because uploads go through the
   // synchronous ImmediateSubmit.
-  GpuBuffer& AcquireStaging(u64 bytes);
+  GpuBuffer* AcquireStaging(u64 bytes);
 
   Device& device_;
   BindlessRegistry* registry_ = nullptr;

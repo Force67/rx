@@ -164,6 +164,44 @@ void TestAddRemoveOverwrite() {
   CHECK(world.Get<Position>(entity)->x == 7);
 }
 
+void TestStructuralMutationDuringIteration() {
+  rx::ecs::World world;
+  rx::ecs::Entity first = world.Create();
+  rx::ecs::Entity second = world.Create();
+  world.Add(first, SelfRef(1));
+  world.Add(second, SelfRef(2));
+
+  int calls = 0;
+  world.Each<SelfRef>([&](rx::ecs::Entity entity, SelfRef&) {
+    ++calls;
+    if (calls == 1) world.Destroy(entity);
+  });
+  // Swap-removal shrinks the archetype under the iterator. The moved-in row is
+  // skipped this pass, but destroyed tail storage must never be visited.
+  CHECK(calls == 1);
+  CHECK(world.entity_count() == 1);
+
+  int survivors = 0;
+  world.Each<SelfRef>([&](rx::ecs::Entity, SelfRef& ref) {
+    CHECK(ref.valid());
+    ++survivors;
+  });
+  CHECK(survivors == 1);
+
+  calls = 0;
+  bool added = false;
+  world.Each<SelfRef>([&](rx::ecs::Entity, SelfRef&) {
+    ++calls;
+    if (!added) {
+      added = true;
+      rx::ecs::Entity appended = world.Create();
+      world.Add(appended, SelfRef(3));
+    }
+  });
+  CHECK(calls == 1);  // a pure tail append waits until the next pass
+  CHECK(world.entity_count() == 2);
+}
+
 }  // namespace
 
 int main() {
@@ -172,6 +210,7 @@ int main() {
   TestComponentAlignment();
   TestChunkReclamation();
   TestAddRemoveOverwrite();
+  TestStructuralMutationDuringIteration();
   if (g_failures) {
     std::fprintf(stderr, "ecs_test: %d failure(s)\n", g_failures);
     return 1;

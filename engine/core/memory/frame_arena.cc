@@ -1,6 +1,7 @@
 #include "core/memory/frame_arena.h"
 
 #include <cassert>
+#include <cstdint>
 #include <new>
 
 namespace rx::mem {
@@ -29,11 +30,14 @@ void FrameArena::Shutdown() {
 
 void* FrameArena::Alloc(size_t size, size_t align) {
   assert(align != 0 && (align & (align - 1)) == 0);
-  const size_t aligned = AlignUp(offset_, align);
-  if (base_ && aligned + size <= capacity_) {
+  const uintptr_t base_address = reinterpret_cast<uintptr_t>(base_);
+  const uintptr_t current = base_address + offset_;
+  const uintptr_t aligned_address = AlignUp(current, align);
+  const size_t aligned = static_cast<size_t>(aligned_address - base_address);
+  if (base_ && aligned <= capacity_ && size <= capacity_ - aligned) {
     offset_ = aligned + size;
     if (offset_ > high_water_) high_water_ = offset_;
-    return base_ + aligned;
+    return reinterpret_cast<void*>(aligned_address);
   }
   const size_t overflow_align = align > kArenaAlign ? align : kArenaAlign;
   void* block = ::operator new(size, std::align_val_t{overflow_align});

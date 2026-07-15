@@ -355,6 +355,10 @@ void Host::Shutdown() {
   // might still be streaming go away.
   if (audio_) audio_->Shutdown();
   if (!config_.headless) renderer_.WaitIdle();
+  // Destroy app-provided frame callbacks while the renderer and application
+  // resources they may own are still alive.
+  renderer_.ClearFrameCallbacks();
+  frame_view_.Clear();
   // The renderer is idle but alive: the application drops its GPU-dependent
   // resources (UI backends etc.) before the device goes away.
   if (app_) app_->OnShutdown();

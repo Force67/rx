@@ -4,6 +4,12 @@
 // (RX_MIMALLOC=ON); otherwise they are skipped so the test still passes.
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
+#include <string>
+
+#if defined(RX_MIMALLOC)
+#include <mimalloc.h>
+#endif
 
 #include "core/memory/chunk_pool.h"
 #include "core/memory/frame_arena.h"
@@ -46,19 +52,27 @@ void TestTracker() {
   void* block = nullptr;
   {
     rx::mem::CategoryScope scope(category);
-    block = ::operator new(1 << 16);
+    block = ::operator new(1 << 16, std::align_val_t{256});
   }
+  CHECK(reinterpret_cast<uintptr_t>(block) % 256 == 0);
   const rx::mem::CategoryStats held = FindCategory("test-cat");
   CHECK(held.current_bytes - before.current_bytes >= 1 << 16);
   CHECK(held.peak_bytes >= static_cast<rx::u64>(held.current_bytes));
   CHECK(held.alloc_count > before.alloc_count);
 
-  {
-    rx::mem::CategoryScope scope(category);
-    ::operator delete(block);
-  }
+  // Freeing from another scope/thread must still debit the owning category.
+  ::operator delete(block, std::align_val_t{256});
   const rx::mem::CategoryStats released = FindCategory("test-cat");
   CHECK(released.current_bytes == before.current_bytes);  // exact: mi_usable_size both sides
+
+#if defined(RX_MIMALLOC)
+  // Simulate a pointer crossing from a shared module whose local new routed
+  // straight to mimalloc and therefore has no rx category footer.
+  const rx::mem::CategoryStats general_before = FindCategory("<general>");
+  void* untracked = mi_new(256);
+  ::operator delete(untracked);
+  CHECK(FindCategory("<general>").current_bytes == general_before.current_bytes);
+#endif
 
   rx::mem::SetCategoryBudget("test-cat", 123);
   CHECK(FindCategory("test-cat").budget_bytes == 123);
@@ -70,9 +84,11 @@ void TestFrameArena() {
 
   void* a = arena.Alloc(100, 8);
   void* b = arena.Alloc(100, 64);
-  CHECK(a != nullptr && b != nullptr && a != b);
+  void* c = arena.Alloc(100, 256);
+  CHECK(a != nullptr && b != nullptr && c != nullptr && a != b && b != c);
   CHECK(reinterpret_cast<uintptr_t>(b) % 64 == 0);
-  CHECK(arena.stats().offset_bytes >= 200);
+  CHECK(reinterpret_cast<uintptr_t>(c) % 256 == 0);
+  CHECK(arena.stats().offset_bytes >= 300);
   CHECK(arena.stats().overflow_allocs == 0);
 
   // Larger than capacity: falls back to the heap, flagged in stats.
@@ -121,6 +137,24 @@ struct Probe {
   ~Probe() { --live; }
 };
 
+struct ThrowingProbe {
+  static inline int live = 0;
+  static inline bool throw_on_construct = false;
+  static inline bool throw_on_move = false;
+  int value = 0;
+
+  explicit ThrowingProbe(int v) : value(v) {
+    if (throw_on_construct) throw std::runtime_error("construct");
+    ++live;
+  }
+  ThrowingProbe(ThrowingProbe&& other) : value(other.value) {
+    if (throw_on_move) throw std::runtime_error("move");
+    ++live;
+  }
+  ThrowingProbe(const ThrowingProbe&) = delete;
+  ~ThrowingProbe() { --live; }
+};
+
 void TestSmallVector() {
   {
     rx::mem::SmallVector<Probe, 4> vec;
@@ -143,6 +177,37 @@ void TestSmallVector() {
   CHECK(ints.capacity() == 8);  // still inline at exactly N
   ints.clear();
   CHECK(ints.empty());
+
+  rx::mem::SmallVector<std::string, 2> strings;
+  strings.emplace_back("alpha");
+  strings.emplace_back("beta");
+  strings.emplace_back(strings[0]);  // aliased argument across growth
+  CHECK(strings.size() == 3);
+  CHECK(strings[0] == "alpha" && strings[2] == "alpha");
+
+  {
+    rx::mem::SmallVector<ThrowingProbe, 1> throwing;
+    throwing.emplace_back(7);
+    ThrowingProbe::throw_on_construct = true;
+    try {
+      throwing.emplace_back(8);
+      CHECK(false);
+    } catch (const std::runtime_error&) {
+    }
+    ThrowingProbe::throw_on_construct = false;
+    CHECK(throwing.size() == 1 && ThrowingProbe::live == 1);
+
+    ThrowingProbe::throw_on_move = true;
+    try {
+      throwing.emplace_back(9);
+      CHECK(false);
+    } catch (const std::runtime_error&) {
+    }
+    ThrowingProbe::throw_on_move = false;
+    CHECK(throwing.size() == 1 && ThrowingProbe::live == 1);
+    CHECK(throwing[0].value == 7);
+  }
+  CHECK(ThrowingProbe::live == 0);
 }
 
 void TestConfig() {

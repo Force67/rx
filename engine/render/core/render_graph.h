@@ -4,7 +4,6 @@
 #include <functional>
 #include <string>
 
-#include <base/containers/static_function.h>
 #include <base/containers/vector.h>
 
 #include "core/types.h"
@@ -102,14 +101,10 @@ class RenderGraph {
     bool join_async = false;
   };
 
-  // Inline-storage closures: ~63 passes are added per frame, and std::function
-  // heap-allocated every capture bigger than its tiny SBO. Setup runs (and
-  // dies) inside AddPass; execute closures live in passes_ until Reset. A
-  // capture larger than the inline budget is a compile error — restructure it
-  // (capture pointers/handles, move big payloads into a member) or bump the
-  // budget deliberately.
-  using SetupFn = base::StaticFunction<void(PassBuilder&), 256>;
-  using ExecuteFn = base::StaticFunction<void(PassContext&), 768>;
+  // These callbacks accept arbitrary application captures, including
+  // non-trivially relocatable types such as std::string and std::function.
+  using SetupFn = std::function<void(PassBuilder&)>;
+  using ExecuteFn = std::function<void(PassContext&)>;
 
   ResourceHandle CreateTexture(const TransientTextureDesc& desc);
 
@@ -170,7 +165,10 @@ class RenderGraph {
 
   // The Stats snapshot copies every pass/resource name each Compile; only the
   // debug inspector reads it, so it stays off until the inspector is open.
-  void set_stats_enabled(bool enabled) { stats_enabled_ = enabled; }
+  void set_stats_enabled(bool enabled) {
+    if (stats_enabled_ && !enabled) stats_ = Stats{};
+    stats_enabled_ = enabled;
+  }
 
  private:
   struct Resource {

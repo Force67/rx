@@ -2,6 +2,7 @@
 #define RX_CORE_MEMORY_SMALL_VECTOR_H_
 
 #include <cstddef>
+#include <limits>
 #include <new>
 #include <type_traits>
 #include <utility>
@@ -23,9 +24,11 @@ class SmallVector {
  public:
   SmallVector() = default;
 
-  SmallVector(SmallVector&& other) noexcept { MoveFrom(std::move(other)); }
+  SmallVector(SmallVector&& other) noexcept(std::is_nothrow_move_constructible_v<T>) {
+    MoveFrom(std::move(other));
+  }
 
-  SmallVector& operator=(SmallVector&& other) noexcept {
+  SmallVector& operator=(SmallVector&& other) noexcept(std::is_nothrow_move_constructible_v<T>) {
     if (this != &other) {
       Destroy();
       MoveFrom(std::move(other));
@@ -61,15 +64,21 @@ class SmallVector {
 
   template <typename... Args>
   T& emplace_back(Args&&... args) {
-    if (size_ == capacity_) Grow(capacity_ * 2);
-    return *new (data_ + size_++) T(std::forward<Args>(args)...);
+    if (size_ == capacity_) return GrowAndEmplace(std::forward<Args>(args)...);
+    T* slot = data_ + size_;
+    new (slot) T(std::forward<Args>(args)...);
+    ++size_;
+    return *slot;
   }
 
   void pop_back() { data_[--size_].~T(); }
 
   void resize(size_t new_size) {
     reserve(new_size);
-    while (size_ < new_size) new (data_ + size_++) T();
+    while (size_ < new_size) {
+      new (data_ + size_) T();
+      ++size_;
+    }
     while (size_ > new_size) pop_back();
   }
 
@@ -81,27 +90,100 @@ class SmallVector {
  private:
   bool IsInline() const { return data_ == reinterpret_cast<const T*>(inline_storage_); }
 
-  void Grow(size_t new_capacity) {
-    if (new_capacity < capacity_ * 2) new_capacity = capacity_ * 2;
-    T* block = static_cast<T*>(::operator new(new_capacity * sizeof(T), std::align_val_t{alignof(T)}));
-    for (size_t i = 0; i < size_; ++i) {
-      new (block + i) T(std::move(data_[i]));
-      data_[i].~T();
+  static constexpr size_t MaxCapacity() {
+    return std::numeric_limits<size_t>::max() / sizeof(T);
+  }
+
+  static T* Allocate(size_t capacity) {
+    if (capacity > MaxCapacity()) throw std::bad_array_new_length();
+    const size_t bytes = capacity * sizeof(T);
+    if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
+      return static_cast<T*>(::operator new(bytes, std::align_val_t{alignof(T)}));
+    } else {
+      return static_cast<T*>(::operator new(bytes));
     }
-    if (!IsInline()) ::operator delete(data_, std::align_val_t{alignof(T)});
+  }
+
+  static void Deallocate(T* pointer) {
+    if constexpr (alignof(T) > __STDCPP_DEFAULT_NEW_ALIGNMENT__) {
+      ::operator delete(pointer, std::align_val_t{alignof(T)});
+    } else {
+      ::operator delete(pointer);
+    }
+  }
+
+  size_t GrowthCapacity(size_t requested) const {
+    if (requested > MaxCapacity()) throw std::bad_array_new_length();
+    const size_t doubled = capacity_ > MaxCapacity() / 2 ? MaxCapacity() : capacity_ * 2;
+    return requested < doubled ? doubled : requested;
+  }
+
+  void Grow(size_t new_capacity) {
+    new_capacity = GrowthCapacity(new_capacity);
+    T* block = Allocate(new_capacity);
+    size_t constructed = 0;
+    try {
+      for (; constructed < size_; ++constructed) {
+        new (block + constructed) T(std::move_if_noexcept(data_[constructed]));
+      }
+    } catch (...) {
+      for (size_t i = 0; i < constructed; ++i) block[i].~T();
+      Deallocate(block);
+      throw;
+    }
+    for (size_t i = 0; i < size_; ++i) data_[i].~T();
+    if (!IsInline()) Deallocate(data_);
     data_ = block;
     capacity_ = new_capacity;
+  }
+
+  template <typename... Args>
+  T& GrowAndEmplace(Args&&... args) {
+    if (capacity_ == MaxCapacity()) throw std::bad_array_new_length();
+    const size_t new_capacity = GrowthCapacity(capacity_ + 1);
+    T* block = Allocate(new_capacity);
+
+    // Construct the appended value while aliased arguments still refer to the
+    // old storage, then relocate the existing prefix.
+    try {
+      new (block + size_) T(std::forward<Args>(args)...);
+    } catch (...) {
+      Deallocate(block);
+      throw;
+    }
+    size_t constructed = 0;
+    try {
+      for (; constructed < size_; ++constructed) {
+        new (block + constructed) T(std::move_if_noexcept(data_[constructed]));
+      }
+    } catch (...) {
+      for (size_t i = 0; i < constructed; ++i) block[i].~T();
+      block[size_].~T();
+      Deallocate(block);
+      throw;
+    }
+
+    for (size_t i = 0; i < size_; ++i) data_[i].~T();
+    if (!IsInline()) Deallocate(data_);
+    data_ = block;
+    capacity_ = new_capacity;
+    return data_[size_++];
   }
 
   void MoveFrom(SmallVector&& other) {
     if (other.IsInline()) {
       data_ = reinterpret_cast<T*>(inline_storage_);
       capacity_ = N;
-      size_ = other.size_;
-      for (size_t i = 0; i < size_; ++i) {
-        new (data_ + i) T(std::move(other.data_[i]));
-        other.data_[i].~T();
+      size_ = 0;
+      try {
+        for (; size_ < other.size_; ++size_) {
+          new (data_ + size_) T(std::move(other.data_[size_]));
+        }
+      } catch (...) {
+        clear();
+        throw;
       }
+      for (size_t i = 0; i < other.size_; ++i) other.data_[i].~T();
       other.size_ = 0;
     } else {
       data_ = other.data_;
@@ -115,7 +197,7 @@ class SmallVector {
 
   void Destroy() {
     clear();
-    if (!IsInline()) ::operator delete(data_, std::align_val_t{alignof(T)});
+    if (!IsInline()) Deallocate(data_);
     data_ = reinterpret_cast<T*>(inline_storage_);
     capacity_ = N;
   }

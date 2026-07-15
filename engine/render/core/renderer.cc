@@ -5059,6 +5059,8 @@ void Renderer::Shutdown() {
 
 const DeviceCaps* Renderer::caps() const { return device_ ? &device_->caps() : nullptr; }
 
+void Renderer::ClearFrameCallbacks() { graph_.Reset(); }
+
 Format Renderer::swapchain_format() const {
   return swapchain_ ? swapchain_->format() : Format::kUnknown;
 }

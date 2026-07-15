@@ -11,11 +11,8 @@ namespace rx::mem {
 // Category tokens label heap allocations by subsystem ("ecs", "assets", ...).
 // A thread-local current category is set with CategoryScope around a
 // subsystem's entry points; the operator new/delete override (new_override.cc,
-// active when RX_MIMALLOC is on) charges every allocation to it. Frees are
-// charged to the category current at free time, so a block freed under a
-// different scope than it was allocated drifts two counters by its size;
-// totals stay exact and per-category values stay accurate for the common
-// alloc-and-free-in-scope pattern. Display code should clamp negatives.
+// active when RX_MIMALLOC is on) stores that category with each allocation so
+// a later free is charged back to the category that owns the block.
 using Category = u8;
 
 constexpr Category kGeneralCategory = 0;
@@ -52,6 +49,13 @@ class CategoryScope {
 RX_CORE_EXPORT void TrackAlloc(size_t bytes);
 RX_CORE_EXPORT void TrackFree(size_t bytes);
 
+namespace detail {
+// Explicit-category variants used by the allocation override, which remembers
+// the allocation category in its per-block footer.
+RX_CORE_EXPORT void TrackAlloc(Category category, size_t bytes);
+RX_CORE_EXPORT void TrackFree(Category category, size_t bytes);
+}
+
 // Soft budget for the category registered under `name` (registering it if
 // new); 0 means no budget. Budgets only drive the debug HUD, nothing is
 // enforced.
@@ -59,7 +63,7 @@ RX_CORE_EXPORT void SetCategoryBudget(const char* name, u64 bytes);
 
 struct CategoryStats {
   const char* name = nullptr;
-  i64 current_bytes = 0;  // signed: see the cross-scope free note above
+  i64 current_bytes = 0;
   u64 peak_bytes = 0;
   u64 budget_bytes = 0;   // 0 = no budget
   u64 alloc_count = 0;    // allocations charged since start (monotonic)

@@ -430,6 +430,9 @@ class RX_RENDER_EXPORT Renderer {
   // Stats collection costs per-pass string copies each frame; the debug UI
   // turns it on only while its inspector is visible.
   void set_graph_stats_enabled(bool enabled) { graph_.set_stats_enabled(enabled); }
+  // Drops app-provided pass callbacks retained by the last compiled frame.
+  // Call only after the device is idle.
+  void ClearFrameCallbacks();
 
   // Opaque indirect draw counts for the debug overlay: total submitted vs the
   // count that survived gpu frustum culling (one frame stale).
