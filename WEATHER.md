@@ -67,3 +67,15 @@ apply; `RX_GAME_HOUR=0` for night.
 
 Cost on a 1080p frame (NVIDIA GB10): ~0.3–0.7 ms for heavy volumetric rain
 with splashes; the bolt pass is noise-level during a strike.
+
+## Screenshots
+
+| | |
+| --- | --- |
+| ![rain](docs/weather/rain.jpg) | ![snow](docs/weather/snow.jpg) |
+| storm rain, splashes, wet sheen, dry zone under the shelter | volumetric snowfall with settled cover |
+| ![lightning](docs/weather/lightning.jpg) | ![aurora](docs/weather/aurora_sky.jpg) |
+| a strike frame: branched bolt, cloud flash, lit rain | raymarched aurora curtains |
+
+![aurora ibl](docs/weather/aurora_ibl.jpg)
+*the aurora lights the world: green IBL on the ground, curtains in every reflection*
