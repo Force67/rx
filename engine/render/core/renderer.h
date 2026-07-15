@@ -39,6 +39,7 @@
 #include "render/atmosphere/clouds.h"
 #include "render/gi/path_tracer.h"
 #include "render/gi/recon_path_tracer.h"
+#include "render/atmosphere/lightning.h"
 #include "render/atmosphere/precip_occlusion.h"
 #include "render/atmosphere/precip_volume.h"
 #include "render/atmosphere/precipitation.h"
@@ -615,6 +616,7 @@ class RX_RENDER_EXPORT Renderer {
   Precipitation precipitation_;
   PrecipOcclusion precip_occlusion_;
   PrecipVolume precip_volume_;
+  LightningSystem lightning_;
   bool precip_occlusion_active_ = false;  // sky map valid + consumers may sample it
   SurfaceWeather surface_weather_;
   ParticleSystem particles_;

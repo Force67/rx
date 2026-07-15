@@ -641,6 +641,9 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (!precip_volume_.Initialize(*device_, kSceneColorFormat, rt_available_)) {
     RX_WARN("volumetric precipitation unavailable");  // screen-space streaks remain
   }
+  if (!lightning_.Initialize(*device_, kSceneColorFormat)) {
+    RX_WARN("lightning bolts unavailable");  // the global flash scalar remains
+  }
 
   UpdateRenderResolution();
   vrs_.Resize(*device_, {render_width_, render_height_});
@@ -2876,6 +2879,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (light_count > 0) {
     std::memcpy(frame.lights.mapped, view.lights.data(), light_count * sizeof(PointLight));
   }
+  // Active lightning strike: append the positioned flash light after the copy
+  // so it clusters, claims local-shadow faces and fills the froxel volumetrics
+  // like any other light (and ReSTIR/clustered reflections see the flash even
+  // though the bolt itself is a raster overlay). The GLOBAL weather.lightning
+  // sun/ambient boost above is separate; this adds locality on top.
+  if (!interior && !path_trace) {
+    light_count += lightning_.AppendLights(
+        static_cast<PointLight*>(frame.lights.mapped) + light_count,
+        kMaxFrameLights - light_count, settings_.weather);
+  }
   // Local light shadows: the nearest casters claim atlas faces (writes each
   // claimed light's params.w in the mapped buffer, so it must follow the copy).
   local_shadows_active_ = false;
@@ -4742,6 +4755,25 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     lit = clouds_.AddToGraph(graph_, lit, depth_export, {render_width_, render_height_}, cf);
   }
 
+  // Lightning bolt: the procedural branched channel, drawn after the clouds
+  // (the bolt overlays the deck) and before the froxel composite + precip
+  // volume (fog scatters over it, rain streaks cross in front of it). Drawn
+  // pre-resolve with a zero-motion core so TAA treats the flash as static.
+  if (settings_.weather.strike_age >= 0.0f && lightning_.available() && !path_trace &&
+      !interior && depth_export != kInvalidResource && motion != kInvalidResource) {
+    LightningSystem::Frame lf;
+    lf.view_proj = view_proj;
+    lf.cam_pos = view.camera.eye;
+    lf.time = static_cast<f32>(time_seconds_);
+    lf.strike_pos = settings_.weather.strike_pos;
+    lf.strike_age = settings_.weather.strike_age;
+    lf.strike_seed = settings_.weather.strike_seed;
+    lf.strike_energy = settings_.weather.strike_energy;
+    lf.jitter[0] = globals.jitter[0];
+    lf.jitter[1] = globals.jitter[1];
+    lightning_.AddToGraph(graph_, lit, depth_export, motion, lf);
+  }
+
   // Note: screen-space precipitation (rain/snow streaks) is composited after the
   // temporal/upscale resolve below, so TAA's history accumulation does not smear
   // the high-frequency streaks. Surface wetness (above) stays pre-resolve since
@@ -5651,6 +5683,7 @@ void Renderer::Shutdown() {
     precipitation_.Destroy(*device_);
     precip_occlusion_.Destroy(*device_);
     precip_volume_.Destroy(*device_);
+    lightning_.Destroy(*device_);
     surface_weather_.Destroy(*device_);
     water_.reset();
     ddgi_.reset();

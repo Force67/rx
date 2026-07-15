@@ -34,6 +34,7 @@ rx_add_module(render
   atmosphere/precipitation.cc
   atmosphere/precip_occlusion.cc
   atmosphere/precip_volume.cc
+  atmosphere/lightning.cc
   atmosphere/surface_weather.cc
   post/post.cc
   post/bloom.cc
@@ -235,6 +236,8 @@ set(RX_RENDER_SHADERS
   shaders/atmosphere/precip_volume.ps.hlsl
   shaders/atmosphere/precip_splash.vs.hlsl
   shaders/atmosphere/precip_splash.ps.hlsl
+  shaders/atmosphere/lightning_bolt.vs.hlsl
+  shaders/atmosphere/lightning_bolt.ps.hlsl
   shaders/atmosphere/surface_weather.cs.hlsl
   shaders/atmosphere/sky.cs.hlsl
   shaders/atmosphere/sky.ps.hlsl
@@ -387,6 +390,8 @@ set(RX_SHADER_DEPS_precip_volume_rt_vs_hlsl shaders/atmosphere/precip_volume.vs.
 set(RX_SHADER_DEPS_precip_volume_ps_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_splash_vs_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_splash_ps_hlsl shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_lightning_bolt_vs_hlsl shaders/atmosphere/lightning_common.hlsli shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_lightning_bolt_ps_hlsl shaders/atmosphere/lightning_common.hlsli shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_light_grid_cs_hlsl shaders/gi/light_grid.hlsli)
 set(RX_SHADER_DEPS_rcgi_probe_trace_cs_hlsl shaders/gi/rcgi_probe_trace_body.hlsli shaders/gi/rcgi_common.hlsli shaders/rt_geometry.hlsli)
 set(RX_SHADER_DEPS_rcgi_probe_trace_sw_cs_hlsl shaders/gi/rcgi_probe_trace_body.hlsli shaders/gi/rcgi_common.hlsli shaders/gi/sdf_trace.hlsli)
