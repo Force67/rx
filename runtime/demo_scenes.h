@@ -46,6 +46,9 @@ class DemoScenes {
 
  private:
   void CreateWaterDemoScene();
+  // Weather demo: shelter + blocks scene for volumetric precipitation, sky
+  // occlusion (dry under the roof) and surface wetness / snow cover.
+  void CreateWeatherDemoScene();
   void CreateMaterialDemoScene();
   void CreateGaussianDemoScene();
   void CreateLodDemoScene();

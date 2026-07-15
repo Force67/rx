@@ -2579,6 +2579,137 @@ void DemoScenes::CreatePointLightDemoScene() {
   RX_INFO("point-light demo: {} dynamic omni lights", demo_lights_.size());
 }
 
+// Weather demo defaults, routed through the same envs the renderer honours so
+// RX_PRECIP / RX_SNOW / RX_WIND / RX_WIND_DIR still override the staged storm.
+static base::Option<float> WeatherDemoPrecip{"demo.weather.precip", 0.85f, "RX_PRECIP"};
+static base::Option<bool> WeatherDemoSnow{"demo.weather.snow", false, "RX_SNOW"};
+static base::Option<float> WeatherDemoWind{"demo.weather.wind", 7.0f, "RX_WIND"};
+static base::Option<float> WeatherDemoWindDir{"demo.weather.winddir", 205.0f, "RX_WIND_DIR"};
+
+void DemoScenes::CreateWeatherDemoScene() {
+  // The volumetric-precipitation acceptance scene: a ground plane, varied
+  // boxes/columns, and an open-sided shelter (flat roof on posts) so the
+  // sky-occlusion gating is legible - rain must pour beside the shelter and
+  // visibly stop under its roof, splashes must land ON the roof, and a dry
+  // strip must appear beneath it. Two point lights make night shots readable.
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b, f32 rough) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = rough;
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  // Asphalt-dark ground so wet darkening, puddle sheen and splashes read
+  // against it; mid-tone varied blocks so the streak slant shows on walls.
+  asset::AssetId ground_mat = mat("builtin/weather/ground", 0.21f, 0.21f, 0.23f, 0.9f);
+  asset::AssetId block_mat = mat("builtin/weather/block", 0.45f, 0.38f, 0.32f, 0.7f);
+  asset::AssetId roof_mat = mat("builtin/weather/roof", 0.24f, 0.26f, 0.3f, 0.6f);
+
+  auto add_box = [&](asset::Mesh mesh, asset::AssetId material, Vec3 pos) {
+    asset::MeshLod& lod = mesh.lods[0];  // MakeBox leaves the submesh list empty
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, scene::Renderable{mesh.id});
+  };
+
+  // Ground plane, top face at y = 0.
+  add_box(asset::MakeBox(40.0f, 0.5f, 40.0f, asset::MakeAssetId("builtin/weather/ground_m")),
+          ground_mat, {0, -0.5f, 0});
+
+  // Varied blocks and columns: wet/snowy top faces at several heights, and
+  // vertical faces the wind-slanted rain streaks read against.
+  add_box(asset::MakeBox(1.5f, 1.5f, 1.5f, asset::MakeAssetId("builtin/weather/block_a")),
+          block_mat, {4.0f, 1.5f, -1.0f});
+  add_box(asset::MakeBox(0.8f, 0.8f, 0.8f, asset::MakeAssetId("builtin/weather/block_b")),
+          block_mat, {1.6f, 0.8f, 2.6f});
+  add_box(asset::MakeBox(1.0f, 2.6f, 1.0f, asset::MakeAssetId("builtin/weather/tower")),
+          block_mat, {-1.5f, 2.6f, -7.0f});
+  add_box(asset::MakeBox(0.35f, 2.0f, 0.35f, asset::MakeAssetId("builtin/weather/column_a")),
+          block_mat, {7.5f, 2.0f, 4.0f});
+  add_box(asset::MakeBox(0.35f, 1.4f, 0.35f, asset::MakeAssetId("builtin/weather/column_b")),
+          block_mat, {-8.0f, 1.4f, 3.0f});
+
+  // Open-sided shelter: flat roof on four thin posts. Everything under the
+  // 8 x 6 m roof must stay dry.
+  const Vec3 shelter{-4.0f, 0.0f, -1.0f};
+  add_box(asset::MakeBox(4.0f, 0.15f, 3.0f, asset::MakeAssetId("builtin/weather/roof_m")),
+          roof_mat, {shelter.x, 3.15f, shelter.z});
+  asset::Mesh post = asset::MakeBox(0.12f, 1.5f, 0.12f, asset::MakeAssetId("builtin/weather/post"));
+  post.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(post.lods[0].indices.size()), block_mat});
+  if (!config_.headless) renderer_.UploadMesh(post);
+  const f32 posts[4][2] = {{-3.6f, -2.6f}, {3.6f, -2.6f}, {-3.6f, 2.6f}, {3.6f, 2.6f}};
+  for (auto& pp : posts) {
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {shelter.x + pp[0], 1.5f, shelter.z + pp[1]}});
+    world_.Add(e, scene::Renderable{post.id});
+  }
+
+  // Two warm lamps for night shots: one under the shelter roof (dry pocket in
+  // the rain), one out in the open where drops catch the light.
+  render::PointLight lamp;
+  lamp.pos_radius[0] = shelter.x;
+  lamp.pos_radius[1] = 2.6f;
+  lamp.pos_radius[2] = shelter.z;
+  lamp.pos_radius[3] = 10.0f;
+  lamp.color_intensity[0] = 1.0f;
+  lamp.color_intensity[1] = 0.75f;
+  lamp.color_intensity[2] = 0.45f;
+  lamp.color_intensity[3] = 4.0f;
+  demo_lights_.push_back(lamp);
+  lamp.pos_radius[0] = 4.0f;
+  lamp.pos_radius[1] = 3.6f;
+  lamp.pos_radius[2] = 2.0f;
+  lamp.pos_radius[3] = 9.0f;
+  lamp.color_intensity[0] = 0.85f;
+  lamp.color_intensity[1] = 0.9f;
+  lamp.color_intensity[2] = 1.0f;
+  lamp.color_intensity[3] = 4.5f;
+  demo_lights_.push_back(lamp);
+
+  // The staged storm (env-overridable, see the options above).
+  render::RenderSettings& rs = renderer_.settings();
+  rs.weather.precipitation = WeatherDemoPrecip.get();
+  rs.weather.snow = WeatherDemoSnow;
+  rs.weather.wind_speed = WeatherDemoWind.get();
+  rs.weather.wind_yaw = WeatherDemoWindDir.get() * 3.14159265f / 180.0f;
+  rs.weather.gustiness = 0.45f;
+  rs.cloud_coverage = 0.68f;  // overcast enough to sell the downpour, some light through
+  // Storm light: the cloud deck kills most direct sun, but the IBL/sun path
+  // does not know about clouds - stage it. Fixed exposure keeps the deliberate
+  // gloom (auto exposure would lift the overcast scene back to a bright noon).
+  rs.sun_intensity = 1.3f;
+  rs.ibl_intensity = 0.4f;  // the sky cubemap is clear-sky bright; mute it under the deck
+  // DDGI's probe rays see the clear-sky cubemap, not the cloud deck, and fill
+  // the open ground with blue-white noon bounce; the flat ambient path stages
+  // the gloom correctly here (same reasoning as the water demo).
+  rs.ddgi = false;
+  // ...and the SSGI fallback splats the bright horizon band across the flat
+  // lot the same way. The staged flat ambient carries the overcast fill.
+  rs.ssgi = false;
+  // SSR mirrors the bright horizon over the whole rough lot; the wet-ground
+  // sheen in surface_weather is the reflection story for this scene.
+  rs.ssr = false;
+  // The aerial-perspective haze is tuned for kilometre vistas; over this 80 m
+  // lot it veils the dark wet ground into milk. Keep a trace of it.
+  rs.aerial_perspective = 0.15f;
+  rs.auto_exposure = false;
+  rs.exposure = 0.7f;
+
+  // Wide shot: shelter left, blocks right, plenty of open ground for splashes.
+  camera_.set_position({6.0f, 2.8f, 9.6f});
+  camera_.set_yaw_pitch(-0.62f, -0.16f);
+  camera_.speed = 4.0f;
+  RX_INFO("weather demo: precip {} ({}), wind {} m/s",
+          rs.weather.precipitation, rs.weather.snow ? "snow" : "rain", rs.weather.wind_speed);
+}
+
 void DemoScenes::CreateMeshletDemoScene() {
   // A dense sphere rendered through the mesh-shader meshlet path: the gpu splits
   // it into clusters, frustum/cone-culls them, and tints each a distinct color
@@ -2646,6 +2777,10 @@ void DemoScenes::CreateMaterialXDemoScene() {
 void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "water") {
     CreateWaterDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "weather") {
+    CreateWeatherDemoScene();
     return;
   }
   if (config_.demo_scene == "cornell") {
