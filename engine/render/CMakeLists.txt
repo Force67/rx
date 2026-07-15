@@ -32,6 +32,7 @@ rx_add_module(render
   atmosphere/aerial_perspective.cc
   atmosphere/clouds.cc
   atmosphere/precipitation.cc
+  atmosphere/precip_occlusion.cc
   atmosphere/surface_weather.cc
   post/post.cc
   post/bloom.cc
