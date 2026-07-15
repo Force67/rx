@@ -59,6 +59,10 @@ struct WeatherSettings {
   bool snow = false;          // snow vs rain
   bool volumetric = true;     // 3D particle precipitation (falls back to the
                               // screen-space layer when off or unsupported)
+  // Per-particle sun shadow rays on the volumetric drops/flakes (rain sheets
+  // darken in shadowed alleys, sparkle in sunlit gaps). Only effective when
+  // the device has ray query; the non-rt path draws them unshadowed.
+  bool rt_shadows = true;
   // Wind, shared by precipitation slant/drift and cloud advection. The speed
   // default matches the cloud layer's historical drift (Clouds::Frame::wind).
   f32 wind_yaw = 0.0f;        // radians, direction the wind blows toward (XZ)

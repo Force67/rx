@@ -33,6 +33,7 @@ rx_add_module(render
   atmosphere/clouds.cc
   atmosphere/precipitation.cc
   atmosphere/precip_occlusion.cc
+  atmosphere/precip_volume.cc
   atmosphere/surface_weather.cc
   post/post.cc
   post/bloom.cc
@@ -229,6 +230,11 @@ set(RX_RENDER_SHADERS
   shaders/atmosphere/froxel_integrate.cs.hlsl
   shaders/atmosphere/froxel_apply.cs.hlsl
   shaders/atmosphere/precipitation.cs.hlsl
+  shaders/atmosphere/precip_volume.vs.hlsl
+  shaders/atmosphere/precip_volume_rt.vs.hlsl
+  shaders/atmosphere/precip_volume.ps.hlsl
+  shaders/atmosphere/precip_splash.vs.hlsl
+  shaders/atmosphere/precip_splash.ps.hlsl
   shaders/atmosphere/surface_weather.cs.hlsl
   shaders/atmosphere/sky.cs.hlsl
   shaders/atmosphere/sky.ps.hlsl
@@ -374,6 +380,11 @@ set(RX_SHADER_DEPS_vgeo_vis_ms_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_vis_ps_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_resolve_ps_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_particle_tex_ps_hlsl shaders/geometry/particle.ps.hlsl)
+set(RX_SHADER_DEPS_precip_volume_vs_hlsl shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_precip_volume_rt_vs_hlsl shaders/atmosphere/precip_volume.vs.hlsl shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_precip_volume_ps_hlsl shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_precip_splash_vs_hlsl shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_precip_splash_ps_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_light_grid_cs_hlsl shaders/gi/light_grid.hlsli)
 set(RX_SHADER_DEPS_rcgi_probe_trace_cs_hlsl shaders/gi/rcgi_probe_trace_body.hlsli shaders/gi/rcgi_common.hlsli shaders/rt_geometry.hlsli)
 set(RX_SHADER_DEPS_rcgi_probe_trace_sw_cs_hlsl shaders/gi/rcgi_probe_trace_body.hlsli shaders/gi/rcgi_common.hlsli shaders/gi/sdf_trace.hlsli)

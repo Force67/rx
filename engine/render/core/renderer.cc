@@ -635,6 +635,12 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   clouds_.Initialize(*device_);              // volumetric clouds (no ray tracing)
   precipitation_.Initialize(*device_);       // screen-space rain/snow
   surface_weather_.Initialize(*device_);     // rain wetness / snow accumulation
+  if (!precip_occlusion_.Initialize(*device_)) {
+    RX_WARN("precipitation sky occlusion unavailable");  // volumetric precip gates on it
+  }
+  if (!precip_volume_.Initialize(*device_, kSceneColorFormat, rt_available_)) {
+    RX_WARN("volumetric precipitation unavailable");  // screen-space streaks remain
+  }
 
   UpdateRenderResolution();
   vrs_.Resize(*device_, {render_width_, render_height_});
@@ -2275,6 +2281,89 @@ void Renderer::RenderPickPass(const FrameView& view) {
   pick_result_ready_ = true;
 }
 
+void Renderer::RecordDepthOnlyScene(CommandList& cmd, const Mat4& light_view_proj,
+                                    const FrameResources& frame, const FrameView& view) {
+  BindingSetHandle bound_material{};
+  // All the shadow caster pipelines share one layout, so pushes and set binds
+  // persist across the per-submesh variant switches below. Bind the masked
+  // static permutation up front so the matrix push always has a pipeline.
+  PipelineHandle bound_pipeline = shadow_.pipeline();
+  cmd.BindPipeline(bound_pipeline);
+  cmd.PushConstants(&light_view_proj, sizeof(Mat4));
+  for (const DrawItem& item : view.draws) {
+    const GpuMesh* mesh = meshes_.find(item.mesh);
+    // no_rt skips grass-like fill geometry, but skinned actors are
+    // no_rt only to stay out of the tlas; they still cast shadows.
+    if (!mesh || mesh->all_blend || (mesh->no_rt && !mesh->skinned)) continue;
+    // Skinned casters run the bone-blended vertex stage so the
+    // shadow tracks the animated pose, not the bind pose.
+    bool draw_skinned = mesh->skinned && item.skin_offset >= 0 &&
+                        static_cast<bool>(shadow_.skinned_pipeline());
+    // The light matrix sits at offset 0; the model follows it, skin data after.
+    cmd.PushConstants(&item.transform, sizeof(Mat4), sizeof(Mat4));
+    cmd.BindVertexBuffer(0, mesh->vertices);
+    if (draw_skinned) {
+      cmd.BindVertexBuffer(1, mesh->skinning);
+      struct {
+        u64 bone_address;
+        u32 skin_offset;
+        u32 pad;
+      } skin{frame.bone_palette.address, static_cast<u32>(item.skin_offset), 0};
+      cmd.PushConstants(&skin, sizeof(skin), 2 * sizeof(Mat4));
+    }
+    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+    for (const GpuSubmesh& submesh : mesh->submeshes) {
+      if (submesh.blend) continue;
+      // Opaque casters draw depth-only (no fragment, early-Z stays);
+      // masked ones bind the alpha-test fragment + its material set.
+      PipelineHandle pipeline = draw_skinned ? shadow_.skinned_pipeline(submesh.alpha_mask)
+                                             : shadow_.pipeline(submesh.alpha_mask);
+      if (!(pipeline == bound_pipeline)) {
+        cmd.BindPipeline(pipeline);
+        bound_pipeline = pipeline;
+      }
+      if (submesh.alpha_mask) {
+        BindingSetHandle material = material_system_->set(submesh.material);
+        if (!(material == bound_material)) {
+          cmd.BindSet(0, material);
+          bound_material = material;
+        }
+      }
+      cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
+    }
+  }
+  f32 shadow_planes[5][4];
+  ExtractFrustumPlanes(light_view_proj, shadow_planes);
+  for (const InstanceStore::Group& group : instances_.groups()) {
+    if (!group.alive) continue;
+    if (group.cullable &&
+        SphereOutsideFrustum(shadow_planes, group.bounds_center, group.bounds_radius))
+      continue;
+    const GpuMesh* mesh = meshes_.find(group.mesh);
+    if (!mesh || mesh->all_blend || mesh->no_rt) continue;
+    cmd.BindVertexBuffer(0, mesh->vertices);
+    cmd.BindVertexBuffer(1, group.buffer);
+    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+    for (const GpuSubmesh& submesh : mesh->submeshes) {
+      if (submesh.blend) continue;
+      const PipelineHandle pipeline = shadow_.instanced_pipeline(submesh.alpha_mask);
+      if (!(pipeline == bound_pipeline)) {
+        cmd.BindPipeline(pipeline);
+        bound_pipeline = pipeline;
+      }
+      if (submesh.alpha_mask) {
+        const BindingSetHandle material = material_system_->set(submesh.material);
+        if (!(material == bound_material)) {
+          cmd.BindSet(0, material);
+          bound_material = material;
+        }
+      }
+      cmd.DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
+                      submesh.index_offset, 0, 0);
+    }
+  }
+}
+
 void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const FrameView& view) {
   u32 frame_slot = frame_index_ % kFramesInFlight;
   bool rt_shadows = rt_available_ && settings_.rt_shadows;
@@ -2296,6 +2385,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
   bool rcgi_world = rcgi_active && !path_trace;
   if (rcgi_ && !rcgi_world) rcgi_->RequestReset();
+  // Set by the raster path when the 3D precipitation volume draws; the
+  // post-resolve screen-space streak fallback is skipped that frame.
+  bool precip_volume_drawn = false;
   // kMsaa: the prepass + opaque scene render multisampled and resolve before
   // everything downstream, which then runs single-sampled exactly as kNone.
   // ApplySettings already rebuilt the mesh pipelines at this sample count.
@@ -3365,6 +3457,26 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     pt_was_active_ = false;
     pt_prev_mode_ = -1;
 
+  // Precipitation sky occlusion: a top-down "what can see the sky" depth map
+  // gating the volumetric rain/snow, its splashes and the surface wetness /
+  // snow accumulation (dry under bridges, splashes on roofs). Rendered early
+  // so every consumer this frame samples fresh cover; re-rendered only when
+  // the camera crosses an anchor cell or on a slow cadence.
+  {
+    const WeatherSettings& weather = settings_.weather;
+    const bool weather_marks =
+        weather.precipitation > 0.0f || weather.wetness > 0.0f || weather.snow_cover > 0.0f;
+    precip_occlusion_active_ = weather.volumetric && weather_marks &&
+                               precip_occlusion_.available() && !settings_.interior && !path_trace;
+    if (precip_occlusion_active_) {
+      precip_occlusion_.BeginFrame(view.camera.eye, frame_index_);
+      precip_occlusion_.AddToGraph(
+          graph_, [this, &frame, &view](CommandList& cmd, const Mat4& occl_view_proj) {
+            RecordDepthOnlyScene(cmd, occl_view_proj, frame, view);
+          });
+    }
+  }
+
   u32 shadow_slot = frame_index_ % 2;
   if (csm_active) {
     Vec3 fwd = Normalize(view.camera.target - view.camera.eye);
@@ -3382,85 +3494,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           TextureView atlas = ctx.graph->image(shadow_atlas).view;
           shadow_.Render(*ctx.cmd, atlas,
                          [this, &frame, &view](CommandList& cmd, const Mat4& light_view_proj) {
-            BindingSetHandle bound_material{};
-            // ShadowPass::Render bound the masked static permutation; all four
-            // shadow pipelines share one layout, so pushes and set binds
-            // persist across the per-submesh variant switches below.
-            PipelineHandle bound_pipeline = shadow_.pipeline();
-            for (const DrawItem& item : view.draws) {
-              const GpuMesh* mesh = meshes_.find(item.mesh);
-              // no_rt skips grass-like fill geometry, but skinned actors are
-              // no_rt only to stay out of the tlas; they still cast shadows.
-              if (!mesh || mesh->all_blend || (mesh->no_rt && !mesh->skinned)) continue;
-              // Skinned casters run the bone-blended vertex stage so the
-              // shadow tracks the animated pose, not the bind pose.
-              bool draw_skinned = mesh->skinned && item.skin_offset >= 0 &&
-                                  static_cast<bool>(shadow_.skinned_pipeline());
-              // The per-cascade light matrix sits at offset 0 (pushed by
-              // ShadowPass::Render); the model follows it, skin data after.
-              cmd.PushConstants(&item.transform, sizeof(Mat4), sizeof(Mat4));
-              cmd.BindVertexBuffer(0, mesh->vertices);
-              if (draw_skinned) {
-                cmd.BindVertexBuffer(1, mesh->skinning);
-                struct {
-                  u64 bone_address;
-                  u32 skin_offset;
-                  u32 pad;
-                } skin{frame.bone_palette.address, static_cast<u32>(item.skin_offset), 0};
-                cmd.PushConstants(&skin, sizeof(skin), 2 * sizeof(Mat4));
-              }
-              cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-              for (const GpuSubmesh& submesh : mesh->submeshes) {
-                if (submesh.blend) continue;
-                // Opaque casters draw depth-only (no fragment, early-Z stays);
-                // masked ones bind the alpha-test fragment + its material set.
-                PipelineHandle pipeline = draw_skinned
-                                              ? shadow_.skinned_pipeline(submesh.alpha_mask)
-                                              : shadow_.pipeline(submesh.alpha_mask);
-                if (!(pipeline == bound_pipeline)) {
-                  cmd.BindPipeline(pipeline);
-                  bound_pipeline = pipeline;
-                }
-                if (submesh.alpha_mask) {
-                  BindingSetHandle material = material_system_->set(submesh.material);
-                  if (!(material == bound_material)) {
-                    cmd.BindSet(0, material);
-                    bound_material = material;
-                  }
-                }
-                cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
-              }
-            }
-            f32 shadow_planes[5][4];
-            ExtractFrustumPlanes(light_view_proj, shadow_planes);
-            for (const InstanceStore::Group& group : instances_.groups()) {
-              if (!group.alive) continue;
-              if (group.cullable &&
-                  SphereOutsideFrustum(shadow_planes, group.bounds_center, group.bounds_radius))
-                continue;
-              const GpuMesh* mesh = meshes_.find(group.mesh);
-              if (!mesh || mesh->all_blend || mesh->no_rt) continue;
-              cmd.BindVertexBuffer(0, mesh->vertices);
-              cmd.BindVertexBuffer(1, group.buffer);
-              cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-              for (const GpuSubmesh& submesh : mesh->submeshes) {
-                if (submesh.blend) continue;
-                const PipelineHandle pipeline = shadow_.instanced_pipeline(submesh.alpha_mask);
-                if (!(pipeline == bound_pipeline)) {
-                  cmd.BindPipeline(pipeline);
-                  bound_pipeline = pipeline;
-                }
-                if (submesh.alpha_mask) {
-                  const BindingSetHandle material = material_system_->set(submesh.material);
-                  if (!(material == bound_material)) {
-                    cmd.BindSet(0, material);
-                    bound_material = material;
-                  }
-                }
-                cmd.DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
-                                submesh.index_offset, 0, 0);
-              }
-            }
+            RecordDepthOnlyScene(cmd, light_view_proj, frame, view);
           });
         });
   }
@@ -4080,7 +4114,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               p.coverage = settings_.cloud_coverage;
               p.bottom = 1500.0f;
               p.top = 4200.0f;
-              p.wind = 12.0f;
+              p.wind = settings_.weather.wind_speed;  // cloud drift + shadows stay in sync
               p.strength = 0.75f;
               ctx.cmd->BindPipeline(cloud_shadow_pipeline_);
               ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
@@ -4767,6 +4801,49 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                             render_height_, oit_light);
   }
 
+  // True volumetric precipitation: stateless world-anchored rain streaks /
+  // snow flakes with impact splashes, drawn pre-resolve with motion vectors so
+  // TAA treats them like geometry. Gated by the sky-occlusion map (nothing
+  // falls under the shelter roof). When this runs, the post-resolve
+  // screen-space streak layer is skipped; it remains the volumetric=false and
+  // path-trace fallback.
+  if (precip_occlusion_active_ && settings_.weather.precipitation > 0.0f &&
+      depth_export != kInvalidResource && motion != kInvalidResource) {
+    Vec3 fwd = Normalize(view.camera.target - view.camera.eye);
+    Vec3 right = Normalize(Cross(fwd, Vec3{0, 1, 0}));
+    PrecipVolume::Frame vf;
+    vf.view_proj = view_proj;
+    vf.prev_view_proj = globals.prev_view_proj;
+    vf.cam_right = right;
+    vf.cam_up = Cross(right, fwd);
+    vf.cam_pos = view.camera.eye;
+    vf.sun_direction = applied_sun_direction_;
+    vf.sun_color = applied_sun_color_;
+    vf.sun_intensity = applied_sun_intensity_;
+    vf.ambient = std::max(settings_.ambient, 0.02f);
+    vf.time = static_cast<f32>(time_seconds_);
+    vf.dt = view.frame_delta_seconds;
+    vf.intensity = settings_.weather.precipitation;
+    vf.snow = settings_.weather.snow;
+    // Wind yaw is the direction the wind blows toward; decompose to xz.
+    vf.wind[0] = std::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+    vf.wind[1] = std::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+    vf.gustiness = settings_.weather.gustiness;
+    vf.lightning = settings_.weather.lightning;
+    vf.jitter[0] = globals.jitter[0];
+    vf.jitter[1] = globals.jitter[1];
+    precip_occlusion_.Params(vf.occl);
+    vf.occl_range = PrecipOcclusion::y_range();
+    vf.occlusion = precip_occlusion_.view();
+    vf.occlusion_sampler = precip_occlusion_.sampler();
+    vf.froxel_enabled = froxel_on;
+    vf.froxel_volume = froxel_fog_.integrated().view;
+    vf.froxel_sampler = froxel_fog_.volume_sampler();
+    vf.rt_shadows = settings_.weather.rt_shadows && rt_available_;
+    precip_volume_.AddToGraph(graph_, lit, depth_export, motion, raytracing_.get(), tlas_slot, vf);
+    precip_volume_drawn = true;
+  }
+
   // NIF particle emitters: a cpu pool per placed instance of an emitting mesh,
   // stepped here and appended to the frame's billboard sets (lit smoke/mist
   // plus HDR additive fire).
@@ -5194,7 +5271,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Screen-space precipitation streaks, composited at output resolution after the
   // AA resolve so they stay crisp (TAA would otherwise smear them) and tonemap
   // with the scene. Driven by weather; surface wetness was applied pre-resolve.
-  if (settings_.weather.precipitation > 0.0f && !path_trace) {
+  // The non-volumetric fallback: skipped whenever the 3D particle volume drew.
+  if (settings_.weather.precipitation > 0.0f && !path_trace && !precip_volume_drawn) {
     Precipitation::Frame pf;
     pf.inv_view_proj = globals.inv_view_proj;
     pf.camera_pos = view.camera.eye;
@@ -5538,6 +5616,8 @@ void Renderer::Shutdown() {
     aerial_perspective_.Destroy(*device_);
     clouds_.Destroy(*device_);
     precipitation_.Destroy(*device_);
+    precip_occlusion_.Destroy(*device_);
+    precip_volume_.Destroy(*device_);
     surface_weather_.Destroy(*device_);
     water_.reset();
     ddgi_.reset();
