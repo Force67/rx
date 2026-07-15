@@ -13,6 +13,7 @@
 
 #include "asset/primitives.h"
 #include "core/log.h"
+#include "core/memory/memory_tracker.h"
 #include "render/util/exr_write.h"
 #include "shaders/hdr_capture_cs_hlsl.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
@@ -1583,6 +1584,8 @@ bool Renderer::UploadMaterial(const asset::Material& material, u64 id_salt) {
 }
 
 void Renderer::RenderFrame(const FrameView& view) {
+  static const mem::Category kRenderCategory = mem::RegisterCategory("render");
+  mem::CategoryScope mem_scope(kRenderCategory);
   if (!device_ || device_->is_stub() || !swapchain_) return;
 
   // Wayland surfaces report an undefined currentExtent, so the driver never
@@ -2081,6 +2084,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     f32 distance_sq;
   };
   base::Vector<TransparentDraw> transparent;
+  transparent.reserve(view.draws.size());
   bool any_water = false;
   const DrawItem* adaptive_water_item = nullptr;
   const GpuSubmesh* adaptive_water_submesh = nullptr;
@@ -5054,6 +5058,8 @@ void Renderer::Shutdown() {
 }
 
 const DeviceCaps* Renderer::caps() const { return device_ ? &device_->caps() : nullptr; }
+
+void Renderer::ClearFrameCallbacks() { graph_.Reset(); }
 
 Format Renderer::swapchain_format() const {
   return swapchain_ ? swapchain_->format() : Format::kUnknown;

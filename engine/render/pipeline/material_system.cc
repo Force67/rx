@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 
 #include "core/log.h"
+#include "core/memory/small_vector.h"
 
 namespace rx::render {
 namespace {
@@ -163,18 +165,18 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
     }
   }
   u64 upload_bytes = texture.data.size() - skip;
-  GpuBuffer staging = device_.CreateBuffer(upload_bytes, kBufferUsageTransferSrc, true);
-  if (!staging.mapped) {
+  GpuBuffer* staging = AcquireStaging(upload_bytes);
+  if (!staging) {
     device_.DestroyImage(image);
     return {};
   }
-  std::memcpy(staging.mapped, texture.data.data() + skip, upload_bytes);
+  std::memcpy(staging->mapped, texture.data.data() + skip, upload_bytes);
 
   u32 upload_mips = generate_mips ? 1 : mip_count;
   device_.ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
 
-    base::Vector<BufferTextureCopy> regions;
+    mem::SmallVector<BufferTextureCopy, 16> regions;  // one per mip
     u64 offset = 0;
     u32 width = top_width;
     u32 height = top_height;
@@ -184,7 +186,7 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
       width = std::max(1u, width / 2);
       height = std::max(1u, height / 2);
     }
-    cmd.CopyBufferToTexture(staging, image, {regions.data(), regions.size()});
+    cmd.CopyBufferToTexture(*staging, image, {regions.data(), regions.size()});
 
     if (generate_mips && mip_count > 1) {
       u32 src_width = texture.width;
@@ -221,8 +223,27 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
                    .after = ResourceState::kShaderReadAll});
     }
   });
-  device_.DestroyBuffer(staging);
   return image;
+}
+
+GpuBuffer* MaterialSystem::AcquireStaging(u64 bytes) {
+  if (bytes == 0) return nullptr;
+  if (bytes > staging_bytes_) {
+    // Round up so a stream of slightly-growing textures re-creates the buffer
+    // a handful of times instead of once per texture.
+    constexpr u64 kGranule = 4u << 20;
+    if (bytes > std::numeric_limits<u64>::max() - (kGranule - 1)) return nullptr;
+    const u64 grown_bytes = (bytes + kGranule - 1) / kGranule * kGranule;
+    GpuBuffer grown = device_.CreateBuffer(grown_bytes, kBufferUsageTransferSrc, true);
+    if (!grown.mapped) {
+      if (grown) device_.DestroyBuffer(grown);
+      return nullptr;
+    }
+    if (staging_bytes_) device_.DestroyBuffer(staging_);
+    staging_ = grown;
+    staging_bytes_ = grown_bytes;
+  }
+  return staging_.mapped ? &staging_ : nullptr;
 }
 
 u64 MaterialSystem::BytesForMips(const asset::Texture& texture, u32 first_mip) const {
@@ -788,6 +809,7 @@ MaterialSystem::~MaterialSystem() {
   }
   device_.DestroyImage(white_);
   device_.DestroyImage(flat_normal_);
+  if (staging_bytes_) device_.DestroyBuffer(staging_);
   for (GpuBuffer& buffer : param_buffers_) device_.DestroyBuffer(buffer);
   for (MaterialRuntime& runtime : material_records_) device_.DestroyBindingSet(runtime.set);
   if (default_set_) device_.DestroyBindingSet(default_set_);

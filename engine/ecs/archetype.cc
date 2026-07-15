@@ -1,101 +1,102 @@
 #include "ecs/archetype.h"
 
-#include <algorithm>
-#include <cstring>
+#include <cassert>
 #include <new>
-#include <utility>
+
+#include "core/memory/chunk_pool.h"
 
 namespace rx::ecs {
 
 namespace {
 
-u8* AllocateColumn(size_t byte_size, u32 align) {
-  if (align > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
-    return static_cast<u8*>(::operator new(byte_size, std::align_val_t(align)));
-  return static_cast<u8*>(::operator new(byte_size));
-}
-
-void FreeColumn(u8* data, u32 align) {
-  if (!data) return;
-  if (align > __STDCPP_DEFAULT_NEW_ALIGNMENT__)
-    ::operator delete(data, std::align_val_t(align));
-  else
-    ::operator delete(data);
-}
+u32 AlignUp(u32 value, u32 align) { return (value + align - 1) & ~(align - 1); }
 
 }  // namespace
 
-Archetype::Column::~Column() { FreeColumn(data, align); }
-
-Archetype::Column::Column(Column&& other) noexcept
-    : id(other.id),
-      stride(other.stride),
-      align(other.align),
-      data(std::exchange(other.data, nullptr)),
-      capacity(std::exchange(other.capacity, 0)) {}
-
-Archetype::Column& Archetype::Column::operator=(Column&& other) noexcept {
-  if (this == &other) return *this;
-  FreeColumn(data, align);
-  id = other.id;
-  stride = other.stride;
-  align = other.align;
-  data = std::exchange(other.data, nullptr);
-  capacity = std::exchange(other.capacity, 0);
-  return *this;
-}
-
-void Archetype::Column::Reserve(u32 row_capacity, u32 live_rows) {
-  if (row_capacity <= capacity) return;
-
-  size_t new_capacity = capacity > 0 ? capacity * 2 : 1;
-  if (new_capacity < row_capacity) new_capacity = row_capacity;
-  u8* new_data = AllocateColumn(new_capacity * static_cast<size_t>(stride), align);
-  const ComponentInfo& info = GetComponentInfo(id);
-  for (u32 row = 0; row < live_rows; ++row) {
-    u8* source = data + static_cast<size_t>(row) * stride;
-    info.move_construct(new_data + static_cast<size_t>(row) * stride, source);
-    info.destruct(source);
-  }
-  FreeColumn(data, align);
-  data = new_data;
-  capacity = new_capacity;
-}
-
 Archetype::Archetype(Signature signature) : signature_(std::move(signature)) {
   columns_.reserve(signature_.size());
+  u32 total_stride = 0;
+  u32 max_align = 1;
   for (ComponentId id : signature_) {
     const ComponentInfo& info = GetComponentInfo(id);
-    columns_.emplace_back(id, info.size, info.align);
+    columns_.push_back(Column{.id = id, .stride = info.size, .chunk_offset = 0});
+    total_stride += info.size;
+    if (info.align > max_align) max_align = info.align;
   }
+  if (columns_.empty()) return;  // the empty archetype stores no component data
+
+  // SoA layout within a chunk: find the largest row count whose column arrays
+  // (each aligned to its component) fit the pool chunk. Padding is at most a
+  // few cachelines, so the guess converges in a couple of iterations.
+  const u32 pool_bytes = static_cast<u32>(mem::ChunkPool::kChunkSize);
+  auto layout_bytes = [&](u32 rows) {
+    u32 offset = 0;
+    for (auto& column : columns_) {
+      offset = AlignUp(offset, GetComponentInfo(column.id).align);
+      column.chunk_offset = offset;
+      offset += rows * column.stride;
+    }
+    return offset;
+  };
+
+  u32 rows = pool_bytes / total_stride;
+  while (rows > 1 && layout_bytes(rows) > pool_bytes) --rows;
+  if (rows == 0) rows = 1;
+
+  pooled_ = max_align <= mem::ChunkPool::kChunkAlign && layout_bytes(rows) <= pool_bytes;
+  rows_per_chunk_ = pooled_ ? rows : 1;
+  chunk_bytes_ = pooled_ ? pool_bytes : layout_bytes(1);
+  chunk_align_ = max_align > mem::ChunkPool::kChunkAlign
+                     ? max_align
+                     : static_cast<u32>(mem::ChunkPool::kChunkAlign);
+  layout_bytes(rows_per_chunk_);  // bake the final chunk_offsets
 }
 
 Archetype::~Archetype() {
   for (auto& column : columns_) {
     const ComponentInfo& info = GetComponentInfo(column.id);
     for (u32 row = 0; row < row_count(); ++row) {
-      info.destruct(column.data + static_cast<size_t>(row) * column.stride);
+      info.destruct(RowAddress(column, row));
     }
+  }
+  for (void* chunk : chunks_) ReleaseChunk(chunk);
+}
+
+void* Archetype::AcquireChunk() {
+  if (pooled_) return mem::GlobalChunkPool().Acquire();
+  return ::operator new(chunk_bytes_, std::align_val_t{chunk_align_});
+}
+
+void Archetype::ReleaseChunk(void* chunk) {
+  if (pooled_) {
+    mem::GlobalChunkPool().Release(chunk);
+  } else {
+    ::operator delete(chunk, std::align_val_t{chunk_align_});
   }
 }
 
+u8* Archetype::RowAddress(const Column& column, u32 row) {
+  u8* chunk = static_cast<u8*>(chunks_[row / rows_per_chunk_]);
+  return chunk + column.chunk_offset + static_cast<size_t>(row % rows_per_chunk_) * column.stride;
+}
+
 u32 Archetype::AddRow(Entity entity) {
-  u32 row = row_count();
-  entities_.push_back(entity);
-  for (auto& column : columns_) {
-    column.Reserve(row + 1, row);
+  const u32 row = row_count();
+  if (!columns_.empty() && row == chunk_count() * rows_per_chunk_) {
+    chunks_.push_back(AcquireChunk());
   }
+  entities_.push_back(entity);
   return row;
 }
 
 Entity Archetype::SwapRemoveRow(u32 row) {
-  u32 last = row_count() - 1;
+  const u32 last = row_count() - 1;
   for (auto& column : columns_) {
     const ComponentInfo& info = GetComponentInfo(column.id);
-    u8* dst = column.data + static_cast<size_t>(row) * column.stride;
+    u8* dst = RowAddress(column, row);
     info.destruct(dst);
     if (row != last) {
-      u8* src = column.data + static_cast<size_t>(last) * column.stride;
+      u8* src = RowAddress(column, last);
       info.move_construct(dst, src);
       info.destruct(src);
     }
@@ -106,19 +107,29 @@ Entity Archetype::SwapRemoveRow(u32 row) {
     entities_[row] = moved;
   }
   entities_.pop_back();
+  // Return a fully vacated tail chunk to the pool.
+  if (!columns_.empty() && last % rows_per_chunk_ == 0 && !chunks_.empty()) {
+    ReleaseChunk(chunks_.back());
+    chunks_.pop_back();
+  }
   return moved;
 }
 
 void* Archetype::ComponentAt(ComponentId id, u32 row) {
-  int index = ColumnIndex(id);
+  const int index = ColumnIndex(id);
   if (index < 0) return nullptr;
-  Column& column = columns_[static_cast<size_t>(index)];
-  return column.data + static_cast<size_t>(row) * column.stride;
+  return RowAddress(columns_[static_cast<size_t>(index)], row);
 }
 
-void* Archetype::ColumnData(ComponentId id) {
-  int index = ColumnIndex(id);
-  return index < 0 ? nullptr : columns_[static_cast<size_t>(index)].data;
+void* Archetype::ChunkColumnData(u32 chunk, int column_index) {
+  const Column& column = columns_[static_cast<size_t>(column_index)];
+  return static_cast<u8*>(chunks_[chunk]) + column.chunk_offset;
+}
+
+u32 Archetype::ChunkRowCount(u32 chunk) const {
+  const u32 begin = chunk * rows_per_chunk_;
+  const u32 count = row_count();
+  return count - begin < rows_per_chunk_ ? count - begin : rows_per_chunk_;
 }
 
 int Archetype::ColumnIndex(ComponentId id) const {
@@ -129,9 +140,10 @@ int Archetype::ColumnIndex(ComponentId id) const {
 
 Archetype::StorageStats Archetype::storage_stats() const {
   StorageStats stats;
+  const u64 capacity_rows = static_cast<u64>(chunks_.size()) * rows_per_chunk_;
   for (const Column& column : columns_) {
     stats.live_bytes += static_cast<u64>(row_count()) * column.stride;
-    stats.capacity_bytes += static_cast<u64>(column.capacity) * column.stride;
+    stats.capacity_bytes += capacity_rows * column.stride;
   }
   return stats;
 }

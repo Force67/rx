@@ -97,6 +97,12 @@ class Mixer {
   std::vector<Voice> voices_;
   Listener listener_;
   f32 master_ = 1.0f;
+  // Reusable scratch: the mixer runs on the realtime audio callback, where a
+  // heap allocation can miss the deadline and glitch. Both keep their
+  // capacity across callbacks (commands_scratch_ ping-pongs storage with
+  // pending_ via swap).
+  std::vector<Command> commands_scratch_;
+  std::vector<float> decode_scratch_;
 };
 
 }  // namespace rx::audio

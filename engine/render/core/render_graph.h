@@ -101,6 +101,8 @@ class RenderGraph {
     bool join_async = false;
   };
 
+  // These callbacks accept arbitrary application captures, including
+  // non-trivially relocatable types such as std::string and std::function.
   using SetupFn = std::function<void(PassBuilder&)>;
   using ExecuteFn = std::function<void(PassContext&)>;
 
@@ -161,6 +163,13 @@ class RenderGraph {
   };
   const Stats& stats() const { return stats_; }
 
+  // The Stats snapshot copies every pass/resource name each Compile; only the
+  // debug inspector reads it, so it stays off until the inspector is open.
+  void set_stats_enabled(bool enabled) {
+    if (stats_enabled_ && !enabled) stats_ = Stats{};
+    stats_enabled_ = enabled;
+  }
+
  private:
   struct Resource {
     TransientTextureDesc desc;
@@ -183,7 +192,9 @@ class RenderGraph {
   base::Vector<Resource> resources_;
   base::Vector<Pass> passes_;
   base::Vector<TextureBarrier> final_barriers_;
+  base::Vector<TextureUsageFlags> usage_scratch_;  // reused across Compiles
   Stats stats_;
+  bool stats_enabled_ = false;
   PassBegin pass_begin_;
   PassEnd pass_end_;
 };

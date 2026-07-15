@@ -67,6 +67,33 @@ Optional GPU SDKs (FSR3, DLSS, NRD, Jolt) are not in the tree; run the
 options silently turn off. Forwardable options: `RX_FSR3`, `RX_DLSS`,
 `RX_NRD`, `RX_JOLT`, `RX_AUDIO_FFMPEG`, `RX_SANITIZE`, `RX_MIMALLOC`.
 
+## Memory
+
+`RX_MIMALLOC` (default ON, forced off under `RX_SANITIZE`) routes every
+allocation through mimalloc and enables per-category byte tracking: the
+tracked `operator new/delete` charge a thread-local category set with
+`rx::mem::CategoryScope` (see `engine/core/memory/`). ECS component storage
+lives in 16 KiB chunks from `rx::mem::GlobalChunkPool`; per-frame scratch can
+use `rx::mem::MainFrameArena`, reset at the top of each `Host::RunFrame`.
+
+Pool reservations and soft per-category budgets come from a declarative plan:
+`RX_MEMORY_PRESET` picks the `desktop` (default) / `steamdeck` / `mobile`
+preset and a `memory.ini` (path in `RX_MEMORY_INI`, else `./memory.ini`)
+overlays it:
+
+```ini
+[arena]   ; per-frame linear allocator
+frame_mb = 8
+[pools]
+ecs_chunks = 256       ; 16 KiB chunks to pre-reserve
+[budgets]  ; soft budgets in MiB, drive the debug HUD only
+ecs = 128
+assets = 2048
+```
+
+The viewer's Diagnostics tab shows the live picture: per-category
+current/peak/budget, chunk-pool occupancy and frame-arena high water.
+
 ## The app framework
 
 `rx::app` is the layer a game embeds instead of forking the viewer. The
