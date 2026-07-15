@@ -2858,6 +2858,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows && !interior) globals.flags |= kFrameFlagRtShadows;
   if (settings_.weather.aurora && !interior) globals.flags |= kFrameFlagAurora;
+  // Aurora intensity rides the otherwise-unused pad_wind slot; sky.ps mirrors
+  // it as `aurora.x` and night-gates it itself. Zero keeps the effect off.
+  globals.pad_wind[0] =
+      (settings_.weather.aurora && !interior) ? settings_.weather.aurora_intensity : 0.0f;
   if (nrd_shadow && !interior) globals.flags |= kFrameFlagSigmaShadow;
   if (interior) globals.flags |= kFrameFlagInterior;
   if (reflections_active) globals.flags |= kFrameFlagReflections;
@@ -3071,15 +3075,35 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     water_caustics_.AddToGraph(graph_, cp);
   }
 
+  // Aurora contribution to the environment bake: the CPU-side night factor
+  // (the same smoothstep sky.ps applies to its screen-space copy) zeroes the
+  // term whenever the sun is up, so a daylight scene never re-bakes for it.
+  f32 env_aurora = 0.0f;
+  if (settings_.weather.aurora && !interior) {
+    f32 to_sun_y = -applied_sun_direction_.y;
+    f32 night = std::clamp((0.04f - to_sun_y) / 0.14f, 0.0f, 1.0f);
+    night = night * night * (3.0f - 2.0f * night);
+    env_aurora = settings_.weather.aurora_intensity * night;
+  }
+  // An active aurora writhes: refresh the cubemap whenever its 0.4 s animation
+  // step ticks over, so the curtains also move in the IBL and reflections.
+  constexpr f64 kAuroraBakeStep = 0.4;
+  if (env_aurora > 0.0f &&
+      std::floor(time_seconds_ / kAuroraBakeStep) !=
+          std::floor((time_seconds_ - view.frame_delta_seconds) / kAuroraBakeStep)) {
+    environment_dirty_ = true;
+  }
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
     Vec3 env_sun = applied_sun_direction_;
     f32 env_intensity = applied_sun_intensity_;
     Vec3 env_color = applied_sun_color_;
+    f32 env_time = static_cast<f32>(time_seconds_);
     graph_.AddPass(
         "env_update", [](RenderGraph::PassBuilder&) {},
-        [this, env_sun, env_intensity, env_color](PassContext& ctx) {
-          environment_->RecordUpdate(*ctx.cmd, env_sun, env_intensity, env_color);
+        [this, env_sun, env_intensity, env_color, env_aurora, env_time](PassContext& ctx) {
+          environment_->RecordUpdate(*ctx.cmd, env_sun, env_intensity, env_color, env_aurora,
+                                     env_time);
         });
   }
 

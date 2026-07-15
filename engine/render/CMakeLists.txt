@@ -364,6 +364,8 @@ endif()
 # (rec_bone_palette root SRV on DXIL).
 # Wrapper-shader include dependencies (see cmake/shaders.cmake).
 set(RX_SHADER_DEPS_mesh_vs_hlsl shaders/pipeline/morph.hlsli)
+set(RX_SHADER_DEPS_sky_ps_hlsl shaders/atmosphere/aurora.hlsli)
+set(RX_SHADER_DEPS_sky_cs_hlsl shaders/atmosphere/aurora.hlsli)
 set(RX_SHADER_DEPS_mesh_instance_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_skin_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl)

@@ -41,9 +41,12 @@ class EnvironmentSystem {
   EnvironmentSystem& operator=(const EnvironmentSystem&) = delete;
 
   // Re-renders the sky and both convolutions with internal barriers. Call
-  // from the frame command list when the sun changed.
+  // from the frame command list when the sun changed, or on the aurora's
+  // animation step while a night display is active (aurora_intensity > 0
+  // bakes the curtains into the cubemap so they light the world through the
+  // convolutions; pass 0 to skip them).
   void RecordUpdate(CommandList& cmd, const Vec3& sun_direction, f32 sun_intensity,
-                    const Vec3& sun_color);
+                    const Vec3& sun_color, f32 aurora_intensity, f32 time_seconds);
 
   // Fullscreen sky at the far plane; call inside the scene rendering pass.
   void DrawSky(CommandList& cmd, BindingSetHandle globals);
