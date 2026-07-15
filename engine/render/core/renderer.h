@@ -286,6 +286,28 @@ struct FrameView {
   // Filled by the renderer during the (const) frame record, hence mutable.
   mutable TextureView blur_source;
   mutable SamplerHandle blur_sampler;
+
+  // Back to defaults, but the gather lists keep their capacity: a FrameView
+  // held across frames (app::Host does) stops re-allocating every list every
+  // frame. New container members must be added to the move-dance here.
+  void Clear() {
+    FrameView fresh;
+    fresh.draws = std::move(draws);
+    fresh.decals = std::move(decals);
+    fresh.lights = std::move(lights);
+    fresh.bone_matrices = std::move(bone_matrices);
+    fresh.particles = std::move(particles);
+    fresh.oit = std::move(oit);
+    fresh.gaussians = std::move(gaussians);
+    fresh.draws.clear();
+    fresh.decals.clear();
+    fresh.lights.clear();
+    fresh.bone_matrices.clear();
+    fresh.particles.clear();
+    fresh.oit.clear();
+    fresh.gaussians.clear();
+    *this = std::move(fresh);
+  }
 };
 
 class RX_RENDER_EXPORT Renderer {
@@ -405,6 +427,12 @@ class RX_RENDER_EXPORT Renderer {
   // Last compiled frame graph, for the debug inspector (passes, transient
   // resources, barrier and memory totals).
   const RenderGraph::Stats& graph_stats() const { return graph_.stats(); }
+  // Stats collection costs per-pass string copies each frame; the debug UI
+  // turns it on only while its inspector is visible.
+  void set_graph_stats_enabled(bool enabled) { graph_.set_stats_enabled(enabled); }
+  // Drops app-provided pass callbacks retained by the last compiled frame.
+  // Call only after the device is idle.
+  void ClearFrameCallbacks();
 
   // Opaque indirect draw counts for the debug overlay: total submitted vs the
   // count that survived gpu frustum culling (one frame stale).

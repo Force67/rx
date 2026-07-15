@@ -7,6 +7,7 @@
 
 #include "asset/asset_id.h"
 #include "core/log.h"
+#include "core/memory/memory_tracker.h"
 
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
@@ -158,6 +159,8 @@ void QuatFromMatrix(const f32 m[16], const Vec3& scale, f32 out[4]) {
 }  // namespace
 
 bool LoadGltfScene(const std::string& path, GltfScene* out) {
+  static const mem::Category kAssetCategory = mem::RegisterCategory("assets");
+  mem::CategoryScope mem_scope(kAssetCategory);
   cgltf_options options{};
   cgltf_data* data = nullptr;
   if (cgltf_parse_file(&options, path.c_str(), &data) != cgltf_result_success) {

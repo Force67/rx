@@ -5,6 +5,8 @@
 
 #include <base/check.h>
 
+#include "core/memory/memory_tracker.h"
+
 namespace rx::ecs {
 
 namespace detail {
@@ -62,7 +64,14 @@ World::World() { GetOrCreateArchetype({}); }
 
 World::~World() = default;
 
+namespace {
+// Structural ops charge their heap traffic (records, signatures, archetype
+// bookkeeping) to the ecs category; component chunks show up under chunk-pool.
+const mem::Category kEcsCategory = mem::RegisterCategory("ecs");
+}  // namespace
+
 Entity World::Create() {
+  mem::CategoryScope scope(kEcsCategory);
   u32 index;
   if (!free_indices_.empty()) {
     index = free_indices_.back();
@@ -81,6 +90,7 @@ Entity World::Create() {
 }
 
 void World::Destroy(Entity entity) {
+  mem::CategoryScope scope(kEcsCategory);
   if (!IsAlive(entity)) return;
   EntityRecord& record = records_[entity.index];
   Entity moved = record.archetype->SwapRemoveRow(record.row);
@@ -98,6 +108,7 @@ bool World::IsAlive(Entity entity) const {
 }
 
 void* World::AddRaw(Entity entity, ComponentId id) {
+  mem::CategoryScope scope(kEcsCategory);
   EntityRecord& record = records_[entity.index];
   if (void* existing = record.archetype->ComponentAt(id, record.row)) {
     GetComponentInfo(id).destruct(existing);
@@ -110,6 +121,7 @@ void* World::AddRaw(Entity entity, ComponentId id) {
 }
 
 void World::RemoveRaw(Entity entity, ComponentId id) {
+  mem::CategoryScope scope(kEcsCategory);
   EntityRecord& record = records_[entity.index];
   if (!SignatureContains(record.archetype->signature(), id)) return;
   Signature signature = record.archetype->signature();

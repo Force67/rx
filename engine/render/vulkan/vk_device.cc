@@ -8,6 +8,7 @@
 #include <base/containers/vector.h>
 
 #include "core/log.h"
+#include "core/memory/small_vector.h"
 #include "render/vulkan/vk_backend.h"
 
 #if defined(RX_HAS_DLSS)
@@ -1347,11 +1348,20 @@ void VulkanDevice::DestroyBindingSet(BindingSetHandle set) {
 }
 
 void VulkanDevice::WriteDescriptors(VkDescriptorSet set, std::span<const BindingItem> items) {
-  base::Vector<VkWriteDescriptorSet> writes(items.size());
-  base::Vector<VkDescriptorImageInfo> images(items.size());
-  base::Vector<VkDescriptorBufferInfo> buffers(items.size());
-  base::Vector<VkWriteDescriptorSetAccelerationStructureKHR> accels(items.size());
-  base::Vector<VkAccelerationStructureKHR> accel_handles(items.size());
+  // Hot path: dozens of BindTransient calls per frame, almost always with a
+  // handful of items — inline storage keeps this allocation-free. The write
+  // entries point into the side arrays, which is safe because each is sized
+  // once up front and never grows mid-loop.
+  mem::SmallVector<VkWriteDescriptorSet, 8> writes;
+  mem::SmallVector<VkDescriptorImageInfo, 8> images;
+  mem::SmallVector<VkDescriptorBufferInfo, 8> buffers;
+  mem::SmallVector<VkWriteDescriptorSetAccelerationStructureKHR, 8> accels;
+  mem::SmallVector<VkAccelerationStructureKHR, 8> accel_handles;
+  writes.resize(items.size());
+  images.resize(items.size());
+  buffers.resize(items.size());
+  accels.resize(items.size());
+  accel_handles.resize(items.size());
 
   for (size_t i = 0; i < items.size(); ++i) {
     const BindingItem& item = items[i];

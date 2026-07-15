@@ -1,5 +1,6 @@
 #include "audio/mixer.h"
 
+#include "core/memory/memory_tracker.h"
 #include <algorithm>
 #include <cmath>
 
@@ -12,6 +13,7 @@ constexpr size_t kDecodeChunkFrames = 1024;
 // Compact a voice's source buffer once this many frames have been consumed, so a
 // long-running loop does not grow the buffer unbounded.
 constexpr size_t kCompactThreshold = 8192;
+const mem::Category kAudioCategory = mem::RegisterCategory("audio");
 
 f32 RampStep(f32 seconds, u32 rate) {
   if (seconds <= 0.0f || rate == 0) return 1.0f;  // immediate
@@ -84,7 +86,8 @@ void Mixer::SetMasterGain(f32 gain) {
 }
 
 void Mixer::ApplyCommands() {
-  std::vector<Command> commands;
+  std::vector<Command>& commands = commands_scratch_;
+  commands.clear();
   {
     std::lock_guard<std::mutex> lock(mutex_);
     commands.swap(pending_);
@@ -147,7 +150,8 @@ bool Mixer::FillSource(Voice& voice, size_t frames) {
                     voice.src.begin() + static_cast<std::ptrdiff_t>(voice.head) * ch);
     voice.head = 0;
   }
-  std::vector<float> chunk(kDecodeChunkFrames * ch);
+  std::vector<float>& chunk = decode_scratch_;
+  chunk.resize(static_cast<size_t>(kDecodeChunkFrames) * ch);
   while (voice.src.size() / ch - voice.head < frames) {
     if (voice.ended) return voice.src.size() / ch > voice.head;
     u32 got = voice.decoder->Read(chunk.data(), kDecodeChunkFrames);
@@ -163,6 +167,7 @@ bool Mixer::FillSource(Voice& voice, size_t frames) {
 }
 
 void Mixer::MixInto(float* out, u32 frames) {
+  mem::CategoryScope mem_scope(kAudioCategory);
   ApplyCommands();
   std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
 

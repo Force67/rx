@@ -19,9 +19,10 @@ option(RX_BUILD_TOOLS "Build the asset authoring tools (rxpack)" ON)
 option(RX_AUDIO_FFMPEG "Decode compressed audio via FFmpeg (libav*)" OFF)
 option(RX_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 # Route the engine's allocations through mimalloc for faster, lower-fragmentation
-# heap use. Off by default: opt-in per build, measured before it becomes a
-# default. Incompatible with the sanitizer build (ASan owns the allocator).
-option(RX_MIMALLOC "Route allocations through mimalloc" OFF)
+# heap use; also enables the per-category memory tracker (the new/delete
+# override needs mi_usable_size for exact free accounting). Incompatible with
+# the sanitizer build (ASan owns the allocator), where it is forced off.
+option(RX_MIMALLOC "Route allocations through mimalloc (+memory tracking)" ON)
 
 # install()/find_package(rx) support. Default ON only when rx is the top-level
 # project; an add_subdirectory consumer (recreation) leaves it OFF so its build
@@ -342,6 +343,20 @@ if(RX_BUILD_TESTS)
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
   target_link_libraries(instance_store_test PRIVATE rx::core)
   add_test(NAME instance_store_test COMMAND instance_store_test)
+
+# CPU-side memory infrastructure test (tracker/arena/chunk pool/small vector/
+# config). rx_enable_mimalloc gives it the tracked new/delete override so the
+# tracker assertions run against the real allocation path.
+  add_executable(memory_test test/memory_test.cc)
+  target_link_libraries(memory_test PRIVATE rx::core)
+  rx_enable_mimalloc(memory_test)
+  add_test(NAME memory_test COMMAND memory_test)
+
+  # Chunked ECS storage: spawn storms, non-POD relocation, chunk reclamation.
+  add_executable(ecs_test test/ecs_test.cc)
+  target_link_libraries(ecs_test PRIVATE rx::ecs rx::core)
+  rx_enable_mimalloc(ecs_test)
+  add_test(NAME ecs_test COMMAND ecs_test)
 endif()
 
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a

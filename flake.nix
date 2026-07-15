@@ -101,7 +101,7 @@
 
           nativeBuildInputs = with pkgs; [ cmake ninja directx-shader-compiler pkg-config ];
           # wayland: libwayland-client for the KDE HDR-toggle monitor (linux).
-          buildInputs = with pkgs; [ sdl3 ]
+          buildInputs = with pkgs; [ mimalloc sdl3 ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.wayland ];
 
           cmakeFlags = fetchContentFlags;
