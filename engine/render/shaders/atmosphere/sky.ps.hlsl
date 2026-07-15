@@ -21,7 +21,7 @@ struct FrameGlobals {
   float reflection_cutoff;
   uint ao_ray_count;
   uint light_count;
-  float2 aurora;  // x aurora intensity (the C++ pad_wind slot), y unused
+  float2 aurora;  // x aurora intensity, y explicit night factor (< 0 = derive)
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 static const uint kFrameFlagAurora = 256u;  // 1 << 8, mirrors mesh_pipeline.h
@@ -184,7 +184,11 @@ PsOut main(float4 sv_position : SV_Position,
   PsOut output;
   float3 col = sky.SampleLevel(sky_sampler, dir, 0).rgb;
   float3 to_sun = normalize(-frame.sun_direction.xyz);
-  float night = smoothstep(0.04, -0.10, to_sun.y);  // 1 at night, 0 by day
+  // 1 at night, 0 by day. The app supplies the factor when it drives a moon
+  // light at night (the light then points down and the elevation fallback
+  // would read as day); a real below-horizon sun still derives it here.
+  float night = frame.aurora.y >= 0.0 ? saturate(frame.aurora.y)
+                                      : smoothstep(0.04, -0.10, to_sun.y);
   // Stars first (behind everything), fading out as the sun climbs.
   col += Stars(dir, night);
   // Aurora (when the app enables it, via the frame flag), behind the sun/moon.

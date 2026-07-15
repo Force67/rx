@@ -46,6 +46,9 @@ SkyLighting ComputeSkyLighting(f32 hour) {
   out.sun_intensity = LerpF(kMoonIntensity, kDayIntensity, day);
   out.sun_color = Lerp(moon_color, day_color, day);
   out.ambient = LerpF(0.02f, 0.08f, day);
+  // The true sun elevation, before the moon takes over the light direction;
+  // matches the fade sky.ps derives for a below-horizon sun.
+  out.night = 1.0f - Smoothstep(-0.10f, 0.04f, elev);
   return out;
 }
 

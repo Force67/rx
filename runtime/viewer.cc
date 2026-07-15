@@ -227,6 +227,7 @@ void Viewer::DriveSunFromClock() {
   s.sun_intensity = sky.sun_intensity;
   s.sun_color = sky.sun_color;
   s.ambient = sky.ambient;
+  s.night = sky.night;  // the moon-lit night would otherwise read as day
 }
 
 void Viewer::OnUpdate(f32 frame_delta) {

@@ -333,6 +333,12 @@ struct RenderSettings {
   f32 sun_intensity = 4.0f;
   Vec3 sun_color{1.0f, 0.96f, 0.9f};
   f32 ambient = 0.06f;
+  // How dark the sky is: 0 day .. 1 night, gating the stars/moon/aurora. At
+  // night the app typically swaps sun_direction for a downward moon light, so
+  // the sky can no longer infer darkness from the light direction. Apps that
+  // drive the sun from a clock pass SkyLighting::night here; < 0 keeps the
+  // legacy sun-elevation fallback for a real below-horizon sun.
+  f32 night = -1.0f;
 
   // Authored interior lighting supplied by the application (e.g. resolved from a
   // game's interior/room lighting definition). When `interior` is set the

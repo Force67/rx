@@ -2863,8 +2863,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (settings_.weather.aurora && !interior) globals.flags |= kFrameFlagAurora;
   // Aurora intensity rides the otherwise-unused pad_wind slot; sky.ps mirrors
   // it as `aurora.x` and night-gates it itself. Zero keeps the effect off.
+  // pad_wind[1] carries the app's explicit night factor (moon-lit nights point
+  // the "sun" downward, so the shader's elevation fallback reads as day there).
   globals.pad_wind[0] =
       (settings_.weather.aurora && !interior) ? settings_.weather.aurora_intensity : 0.0f;
+  globals.pad_wind[1] = settings_.night;
   if (nrd_shadow && !interior) globals.flags |= kFrameFlagSigmaShadow;
   if (interior) globals.flags |= kFrameFlagInterior;
   if (reflections_active) globals.flags |= kFrameFlagReflections;
@@ -3093,10 +3096,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // term whenever the sun is up, so a daylight scene never re-bakes for it.
   f32 env_aurora = 0.0f;
   if (settings_.weather.aurora && !interior) {
-    f32 to_sun_y = -applied_sun_direction_.y;
-    f32 night = std::clamp((0.04f - to_sun_y) / 0.14f, 0.0f, 1.0f);
-    night = night * night * (3.0f - 2.0f * night);
-    env_aurora = settings_.weather.aurora_intensity * night;
+    f32 night = settings_.night;
+    if (night < 0.0f) {  // legacy fallback: infer from the sun's elevation
+      f32 to_sun_y = -applied_sun_direction_.y;
+      night = std::clamp((0.04f - to_sun_y) / 0.14f, 0.0f, 1.0f);
+      night = night * night * (3.0f - 2.0f * night);
+    }
+    env_aurora = settings_.weather.aurora_intensity * std::clamp(night, 0.0f, 1.0f);
   }
   // An active aurora writhes: refresh the cubemap whenever its 0.4 s animation
   // step ticks over, so the curtains also move in the IBL and reflections.
