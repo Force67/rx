@@ -90,7 +90,13 @@ class RX_ECS_EXPORT Archetype {
   u32 row_count() const { return static_cast<u32>(entities_.size()); }
   Entity entity_at(u32 row) const { return entities_[row]; }
 
-  private:
+  struct StorageStats {
+    u64 live_bytes = 0;
+    u64 capacity_bytes = 0;
+  };
+  StorageStats storage_stats() const;
+
+ private:
   struct Column {
     ComponentId id;
     u32 stride;

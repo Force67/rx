@@ -52,6 +52,32 @@ struct alignas(32) WideComponent {
   double values[4] = {1, 2, 3, 4};
 };
 
+void TestWorldStatsTrackStoragePressure() {
+  rx::ecs::World world;
+  rx::ecs::Entity first = world.Create();
+  rx::ecs::Entity second = world.Create();
+  world.Add(first, Position{});
+  world.Add(second, Position{});
+
+  rx::ecs::World::Stats stats = world.stats();
+  CHECK(stats.entity_count == 2);
+  CHECK(stats.entity_slots == 2);
+  CHECK(stats.archetype_count == 2);
+  CHECK(stats.live_component_bytes == 2 * sizeof(Position));
+  CHECK(stats.component_capacity_bytes >= stats.live_component_bytes);
+
+  world.Destroy(first);
+  stats = world.stats();
+  CHECK(stats.entity_count == 1);
+  CHECK(stats.entity_slots == 2);
+  CHECK(stats.live_component_bytes == sizeof(Position));
+
+  world.Create();
+  stats = world.stats();
+  CHECK(stats.entity_count == 2);
+  CHECK(stats.entity_slots == 2);
+}
+
 void TestSpawnStormAndIteration() {
   rx::ecs::World world;
   constexpr int kCount = 20000;  // thousands of rows -> many chunks per archetype
@@ -205,6 +231,7 @@ void TestStructuralMutationDuringIteration() {
 }  // namespace
 
 int main() {
+  TestWorldStatsTrackStoragePressure();
   TestSpawnStormAndIteration();
   TestNonPodRelocation();
   TestComponentAlignment();

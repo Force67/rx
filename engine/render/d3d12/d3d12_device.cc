@@ -287,6 +287,17 @@ std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* wind
   device->caps_.debug_utils = false;
   device->caps_.accel_scratch_alignment = 256;
 
+#if defined(_WIN32)
+  IDXGIFactory4* factory = nullptr;
+  if (SUCCEEDED(CreateDXGIFactory2(0, IID_IDXGIFactory4,
+                                   reinterpret_cast<void**>(&factory)))) {
+    const LUID adapter_luid = dev->GetAdapterLuid();
+    factory->EnumAdapterByLuid(adapter_luid, IID_IDXGIAdapter3,
+                               reinterpret_cast<void**>(&device->memory_adapter_));
+    factory->Release();
+  }
+#endif
+
   D3D12_FEATURE_DATA_ARCHITECTURE arch = {};
   if (SUCCEEDED(dev->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE, &arch, sizeof(arch)))) {
     device->caps_.integrated = arch.UMA != FALSE;
@@ -449,6 +460,9 @@ D3D12Device::~D3D12Device() {
   if (device_) {
     WaitIdle();
     ShutdownResources();
+#if defined(_WIN32)
+    SafeRelease(memory_adapter_);
+#endif
     SafeRelease(device5_);
     SafeRelease(device2_);
     SafeRelease(device_);
@@ -477,8 +491,19 @@ std::unique_ptr<Swapchain> D3D12Device::CreateSwapchain(u32 width, u32 height, b
 }
 
 Device::MemoryBudget D3D12Device::memory_budget() const {
-  // No DXGI budget query through vkd3d; the overlay shows zeros on linux.
-  return {};
+  MemoryBudget result;
+#if defined(_WIN32)
+  if (memory_adapter_) {
+    DXGI_QUERY_VIDEO_MEMORY_INFO memory{};
+    if (SUCCEEDED(memory_adapter_->QueryVideoMemoryInfo(
+            0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &memory))) {
+      result.used_bytes = memory.CurrentUsage;
+      result.budget_bytes = memory.Budget;
+    }
+  }
+#endif
+  // Native vkd3d has no DXGI adapter/budget query on Linux.
+  return result;
 }
 
 // --- resources ---
