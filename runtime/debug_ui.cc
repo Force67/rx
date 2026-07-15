@@ -69,13 +69,15 @@ const char* kDebugViews[] = {"Off",         "Base color",   "World normal",
 // once it slips below playable.
 constexpr f32 kFpsGood = 60.0f;
 constexpr f32 kFpsWarn = 30.0f;
-constexpr f32 kStatusBarHeight = 42.0f;
+constexpr f32 kStatusBarHeight = 28.0f;
 constexpr f32 kStatusGraphMaxFps = 120.0f;
 
 #if defined(NDEBUG)
 constexpr const char* kBuildMode = "RELEASE";
+constexpr const char* kBuildModeShort = "REL";
 #else
 constexpr const char* kBuildMode = "DEBUG";
+constexpr const char* kBuildModeShort = "DBG";
 #endif
 
 // Row 0 is "Custom" (hand-tuned); the rest map to QualityPreset below.
@@ -692,11 +694,12 @@ void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
 
   constexpr f32 kPadding = 12.0f;
   const bool compact = viewport->WorkSize.x < 900.0f;
-  const bool two_rows = viewport->WorkSize.x < 600.0f;
-  const f32 section_gap = compact ? 8.0f : 18.0f;
-  const f32 graph_width = std::clamp(viewport->WorkSize.x * 0.22f, 72.0f, 280.0f);
-  const ImVec2 graph_min = {bar_max.x - kPadding - graph_width, bar_min.y + 6.0f};
-  const ImVec2 graph_max = {bar_max.x - kPadding, bar_max.y - 6.0f};
+  const bool narrow = viewport->WorkSize.x < 600.0f;
+  const bool minimal = viewport->WorkSize.x < 480.0f;
+  const f32 section_gap = compact ? 6.0f : 18.0f;
+  const f32 graph_width = std::clamp(viewport->WorkSize.x * 0.22f, 64.0f, 280.0f);
+  const ImVec2 graph_min = {bar_max.x - kPadding - graph_width, bar_min.y + 4.0f};
+  const ImVec2 graph_max = {bar_max.x - kPadding, bar_max.y - 4.0f};
 
   char fps_text[48];
   const f32 fps = frame_delta > 0.0f ? 1.0f / frame_delta : 0.0f;
@@ -706,20 +709,30 @@ void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
     std::snprintf(fps_text, sizeof(fps_text), "FPS %.0f  %.2f ms", fps,
                   frame_delta * 1000.0f);
   char location_text[80];
-  if (compact)
+  if (minimal)
+    std::snprintf(location_text, sizeof(location_text), "XYZ %.0f %.0f %.0f", view.camera.eye.x,
+                  view.camera.eye.y, view.camera.eye.z);
+  else if (compact)
     std::snprintf(location_text, sizeof(location_text), "XYZ %.1f %.1f %.1f", view.camera.eye.x,
                   view.camera.eye.y, view.camera.eye.z);
   else
     std::snprintf(location_text, sizeof(location_text), "XYZ %.2f  %.2f  %.2f",
                   view.camera.eye.x, view.camera.eye.y, view.camera.eye.z);
   char build_text[96];
-  if (compact)
+  if (narrow)
+    std::snprintf(build_text, sizeof(build_text), "%.8s", RX_BUILD_ID);
+  else if (compact)
     std::snprintf(build_text, sizeof(build_text), "%s@%.8s", RX_VERSION, RX_BUILD_ID);
   else
     std::snprintf(build_text, sizeof(build_text), "BUILD %s (%s)", RX_VERSION, RX_BUILD_ID);
   char config_text[64];
-  std::snprintf(config_text, sizeof(config_text), compact ? "%s/%s" : "%s / %s",
-                RX_BUILD_CONFIG, kBuildMode);
+  if (minimal)
+    std::snprintf(config_text, sizeof(config_text), "%s", kBuildModeShort);
+  else if (narrow)
+    std::snprintf(config_text, sizeof(config_text), "%s", kBuildMode);
+  else
+    std::snprintf(config_text, sizeof(config_text), compact ? "%s/%s" : "%s / %s",
+                  RX_BUILD_CONFIG, kBuildMode);
 
   const f32 text_start = bar_min.x + kPadding;
   const f32 text_limit = graph_min.x - section_gap;
@@ -737,52 +750,30 @@ void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
     *text_x = draw_x + width;
   };
 
-  if (two_rows) {
-    char build_mode_text[128];
-    if (viewport->WorkSize.x < 300.0f)
-      std::snprintf(build_mode_text, sizeof(build_mode_text), "%.8s %s", RX_BUILD_ID, kBuildMode);
-    else
-      std::snprintf(build_mode_text, sizeof(build_mode_text), "%s %s", build_text, kBuildMode);
-    f32 first_row_x = text_start;
-    f32 second_row_x = text_start;
-    draw_section(&first_row_x, bar_min.y + 5.0f, fps_text);
-    draw_section(&first_row_x, bar_min.y + 5.0f, build_mode_text);
-    draw_section(&second_row_x, bar_min.y + 22.0f, location_text);
-    draw_section(&second_row_x, bar_min.y + 22.0f, RX_BUILD_CONFIG);
-  } else {
-    f32 text_x = text_start;
-    const f32 text_y = bar_min.y + (kStatusBarHeight - ImGui::GetFontSize()) * 0.5f;
-    draw_section(&text_x, text_y, fps_text);
-    draw_section(&text_x, text_y, location_text);
-    draw_section(&text_x, text_y, build_text);
-    draw_section(&text_x, text_y, config_text);
-  }
+  f32 text_x = text_start;
+  const f32 text_y = bar_min.y + (kStatusBarHeight - ImGui::GetFontSize()) * 0.5f;
+  draw_section(&text_x, text_y, fps_text);
+  draw_section(&text_x, text_y, location_text);
+  draw_section(&text_x, text_y, build_text);
+  draw_section(&text_x, text_y, config_text);
 
   // A fixed 0-120 FPS scale keeps changes visually comparable across frames.
-  // Samples grow in from the right until the ring is full.
-  dl->AddRect(graph_min, graph_max, IM_COL32(255, 255, 255, 52));
   const f32 graph_height = graph_max.y - graph_min.y;
-  for (f32 guide_fps : {30.0f, 60.0f}) {
-    const f32 y = graph_max.y - graph_height * (guide_fps / kStatusGraphMaxFps);
-    dl->AddLine({graph_min.x, y}, {graph_max.x, y}, IM_COL32(255, 255, 255, 28));
-  }
-
   if (frame_time_count_ > 1) {
     ImVec2 points[IM_ARRAYSIZE(frame_times_)];
     const u32 capacity = IM_ARRAYSIZE(frame_times_);
     const u32 oldest = (frame_time_cursor_ + capacity - frame_time_count_) % capacity;
-    const f32 sample_step = graph_width / static_cast<f32>(capacity - 1);
-    const f32 first_x = graph_max.x - sample_step * static_cast<f32>(frame_time_count_ - 1);
+    const f32 sample_step = graph_width / static_cast<f32>(frame_time_count_ - 1);
     for (u32 i = 0; i < frame_time_count_; ++i) {
       const f32 frame_ms = frame_times_[(oldest + i) % capacity];
       const f32 sample_fps = frame_ms > 0.0f ? 1000.0f / frame_ms : 0.0f;
       const f32 normalized = std::clamp(sample_fps / kStatusGraphMaxFps, 0.0f, 1.0f);
-      points[i] = {first_x + sample_step * static_cast<f32>(i),
+      points[i] = {graph_min.x + sample_step * static_cast<f32>(i),
                    graph_max.y - graph_height * normalized};
     }
     dl->PushClipRect(graph_min, graph_max, true);
-    dl->AddPolyline(points, static_cast<int>(frame_time_count_), IM_COL32(255, 255, 255, 255),
-                    1.5f);
+    dl->AddPolyline(points, static_cast<int>(frame_time_count_), IM_COL32(255, 255, 255, 235),
+                    1.75f);
     dl->PopClipRect();
   }
 }
