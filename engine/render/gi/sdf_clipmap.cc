@@ -280,6 +280,8 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             const Vec3 clip_max =
                 clip_min + Vec3{j.voxel * SdfClipmap::kRes, j.voxel * SdfClipmap::kRes,
                                 j.voxel * SdfClipmap::kRes};
+            // TraceGlobalSdf stops at the guarded selector boundary before
+            // trusting a coarser field, so outside volumes can be omitted here.
             if (world_max.x < clip_min.x || world_max.y < clip_min.y || world_max.z < clip_min.z ||
                 world_min.x > clip_max.x || world_min.y > clip_max.y || world_min.z > clip_max.z)
               continue;

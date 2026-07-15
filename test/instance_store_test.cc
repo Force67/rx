@@ -28,6 +28,7 @@ class TestDevice final : public Device {
     return {.handle = {reinterpret_cast<rx::u64>(data)}, .size = size, .mapped = data};
   }
   GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override {
+    ++data_uploads_;
     GpuBuffer buffer = CreateBuffer(data.size(), usage, true);
     std::memcpy(buffer.mapped, data.data(), data.size());
     return buffer;
@@ -70,12 +71,18 @@ class TestDevice final : public Device {
   }
 
   size_t live_buffers() const { return live_buffers_; }
+  size_t data_uploads() const { return data_uploads_; }
 
  private:
   size_t live_buffers_ = 0;
+  size_t data_uploads_ = 0;
 };
 
 bool Near(f32 a, f32 b) { return std::abs(a - b) < 1e-5f; }
+
+f32 TranslationX(const GpuBuffer& buffer, size_t index = 0) {
+  return static_cast<const Mat4*>(buffer.mapped)[index].m[12];
+}
 
 int Fail(const char* message) {
   std::fprintf(stderr, "instance_store_test: FAIL: %s\n", message);
@@ -94,7 +101,8 @@ int main() {
   InstanceGroupHandle first = store.Create(device, 7, transforms, mesh_center, 2.0f);
   if (!first || store.group_count() != 1 || store.instance_count() != 2)
     return Fail("create counters");
-  if (device.live_buffers() != 1) return Fail("create buffer ownership");
+  if (device.live_buffers() != 1 || device.data_uploads() != 1)
+    return Fail("create device-local upload");
 
   const InstanceStore::Group& initial = store.groups()[first.index];
   if (!Near(initial.bounds_center.x, 7.5f) || !Near(initial.bounds_center.y, 0.0f) ||
@@ -112,12 +120,63 @@ int main() {
   const InstanceStore::Group& updated = store.groups()[first.index];
   if (!Near(updated.bounds_center.x, 21.0f) || !Near(updated.bounds_radius, 2.0f))
     return Fail("updated bounds");
+  if (updated.previous_buffer || updated.has_submitted_state)
+    return Fail("pre-submit replacement retained motion history");
+
+  store.OnFrameSubmitted(device);
+  if (!store.groups()[first.index].has_submitted_state)
+    return Fail("submission did not establish instance history");
+
+  Mat4 moved = MakeTranslation({30.0f, 0.0f, 0.0f});
+  if (!store.Replace(device, first, std::span<const Mat4>{&moved, 1}, mesh_center, 2.0f))
+    return Fail("submitted replacement");
+  const InstanceStore::Group& moving = store.groups()[first.index];
+  if (!moving.previous_buffer || device.live_buffers() != 2 ||
+      !Near(TranslationX(moving.previous_buffer), 20.0f) ||
+      !Near(TranslationX(moving.buffer), 30.0f))
+    return Fail("replacement motion streams");
+
+  moved = MakeTranslation({40.0f, 0.0f, 0.0f});
+  if (!store.Replace(device, first, std::span<const Mat4>{&moved, 1}, mesh_center, 2.0f))
+    return Fail("repeated replacement");
+  const InstanceStore::Group& repeated = store.groups()[first.index];
+  if (device.live_buffers() != 2 || !Near(TranslationX(repeated.previous_buffer), 20.0f) ||
+      !Near(TranslationX(repeated.buffer), 40.0f))
+    return Fail("repeated replacement lost submitted baseline");
+
+  store.OnFrameSubmitted(device);
+  const InstanceStore::Group& submitted = store.groups()[first.index];
+  if (submitted.previous_buffer || !submitted.submitted_transforms.empty() ||
+      device.live_buffers() != 1)
+    return Fail("submission did not retire motion stream");
+
+  Mat4 grown[2] = {MakeTranslation({50.0f, 0.0f, 0.0f}),
+                   MakeTranslation({60.0f, 0.0f, 0.0f})};
+  if (!store.Replace(device, first, grown, mesh_center, 2.0f)) return Fail("grow replacement");
+  const InstanceStore::Group& growth = store.groups()[first.index];
+  if (device.live_buffers() != 2 || !Near(TranslationX(growth.previous_buffer, 0), 40.0f) ||
+      !Near(TranslationX(growth.previous_buffer, 1), 60.0f))
+    return Fail("growth previous stream");
+
+  grown[0] = MakeTranslation({70.0f, 0.0f, 0.0f});
+  grown[1] = MakeTranslation({80.0f, 0.0f, 0.0f});
+  if (!store.Replace(device, first, grown, mesh_center, 2.0f))
+    return Fail("repeated growth replacement");
+  const InstanceStore::Group& repeated_growth = store.groups()[first.index];
+  if (device.live_buffers() != 2 ||
+      !Near(TranslationX(repeated_growth.previous_buffer, 0), 40.0f) ||
+      !Near(TranslationX(repeated_growth.previous_buffer, 1), 80.0f))
+    return Fail("repeated growth previous stream");
+
+  store.OnFrameSubmitted(device);
 
   if (!store.Destroy(device, first)) return Fail("destroy");
   if (store.group_count() != 0 || store.instance_count() != 0 || device.live_buffers() != 0)
     return Fail("destroy counters or retirement");
   if (store.groups()[first.index].transforms.capacity() != 0)
     return Fail("destroy retained transform capacity");
+  if (store.groups()[first.index].submitted_transforms.capacity() != 0)
+    return Fail("destroy retained submitted transform capacity");
   if (store.Replace(device, first, replacement_span, mesh_center, 2.0f))
     return Fail("stale handle replaced a dead group");
 

@@ -39,7 +39,7 @@ class ShadowPass {
 
   // material_layout is set 0 here (the mesh pipeline's material set), bound per
   // submesh so the fragment stage can alpha-test masked casters.
-  bool Initialize(Device& device, BindingLayoutHandle material_layout);
+  bool Initialize(Device& device, BindingLayoutHandle material_layout, Format local_depth_format);
   void Destroy(Device& device);
   void Configure(const Settings& settings);
 
@@ -73,6 +73,17 @@ class ShadowPass {
   PipelineHandle instanced_pipeline(bool masked = true) const {
     return masked || !instanced_opaque_pipeline_ ? instanced_pipeline_ : instanced_opaque_pipeline_;
   }
+  PipelineHandle local_pipeline(bool masked = true) const {
+    return masked || !local_opaque_pipeline_ ? local_pipeline_ : local_opaque_pipeline_;
+  }
+  PipelineHandle local_skinned_pipeline(bool masked = true) const {
+    return masked || !local_skinned_opaque_pipeline_ ? local_skinned_pipeline_
+                                                     : local_skinned_opaque_pipeline_;
+  }
+  PipelineHandle local_instanced_pipeline(bool masked = true) const {
+    return masked || !local_instanced_opaque_pipeline_ ? local_instanced_pipeline_
+                                                       : local_instanced_opaque_pipeline_;
+  }
 
  private:
   static constexpr u32 kFramesInFlight = 2;
@@ -84,6 +95,12 @@ class ShadowPass {
   PipelineHandle skinned_opaque_pipeline_;
   PipelineHandle instanced_pipeline_;
   PipelineHandle instanced_opaque_pipeline_;
+  PipelineHandle local_pipeline_;
+  PipelineHandle local_skinned_pipeline_;
+  PipelineHandle local_opaque_pipeline_;
+  PipelineHandle local_skinned_opaque_pipeline_;
+  PipelineHandle local_instanced_pipeline_;
+  PipelineHandle local_instanced_opaque_pipeline_;
   GpuBuffer cascades_[kFramesInFlight];
   CascadeData current_{};
 };

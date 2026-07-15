@@ -25,13 +25,18 @@ class InstanceStore {
   struct Group {
     u64 mesh = 0;
     base::Vector<Mat4> transforms;
+    // Original submitted prefix while an update is waiting for one frame of
+    // motion. Instance indices are stable identities across Replace calls.
+    base::Vector<Mat4> submitted_transforms;
     GpuBuffer buffer;
+    GpuBuffer previous_buffer;
     Vec3 bounds_center{};
     f32 bounds_radius = 0;
     f32 lod_scale = 1;
     bool cullable = false;
     u32 generation = 1;
     bool alive = false;
+    bool has_submitted_state = false;
   };
 
   InstanceGroupHandle Create(Device &device, u64 mesh, std::span<const Mat4> transforms,
@@ -41,6 +46,7 @@ class InstanceStore {
   bool Destroy(Device &device, InstanceGroupHandle handle);
   void RefreshMesh(Device &device, u64 mesh, const f32 mesh_center[3], f32 mesh_radius,
                    bool compatible);
+  void OnFrameSubmitted(Device &device);
   void Shutdown(Device &device);
 
   const base::Vector<Group> &groups() const { return groups_; }

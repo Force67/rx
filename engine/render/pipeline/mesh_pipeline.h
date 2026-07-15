@@ -209,13 +209,13 @@ class MeshPipeline {
   void BindMaterial(CommandList& cmd, BindingSetHandle material);
   void Draw(CommandList& cmd, const GpuMesh& mesh, const MeshPushConstants& push);
   void DrawSubmesh(CommandList& cmd, const GpuSubmesh& submesh);
-  // Static streamed props use a persistent per-instance matrix vertex stream.
-  // The instance permutation keeps the same material/frame sets and shaders,
-  // but one indexed draw covers every placement in the group.
+  // Static streamed props use persistent current/previous matrix streams. The
+  // instance permutation keeps the same material/frame sets and shaders, but
+  // one indexed draw covers every placement in the group.
   void SetInstanced(CommandList& cmd, bool use_rt, bool wireframe);
   void SetInstancedPrepass(CommandList& cmd, bool masked);
   void DrawInstances(CommandList& cmd, const GpuMesh& mesh, const GpuBuffer& instances,
-                     const MeshPushConstants& push);
+                     const GpuBuffer& previous_instances, const MeshPushConstants& push);
 
   // Optional mesh-shader opaque path. Built only when the device supports it;
   // the scene/prepass variants reuse the same descriptor sets and fragment

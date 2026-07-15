@@ -69,6 +69,13 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
                      {8, Format::kRGBA32Float, 16},
                      {9, Format::kRGBA32Float, 32},
                      {10, Format::kRGBA32Float, 48}}};
+  VertexBufferLayout previous_instance_stream{
+      .stride = sizeof(Mat4),
+      .per_instance = true,
+      .attributes = {{11, Format::kRGBA32Float, 0},
+                     {12, Format::kRGBA32Float, 16},
+                     {13, Format::kRGBA32Float, 32},
+                     {14, Format::kRGBA32Float, 48}}};
 
   // The prepass owns depth; main variants test EQUAL against it and leave
   // motion alone (the prepass already wrote it).
@@ -114,7 +121,7 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   {
     GraphicsPipelineDesc desc = scene;
     desc.vertex = RX_SHADER(k_mesh_instance_vs_hlsl);
-    desc.vertex_buffers = {static_stream, instance_stream};
+    desc.vertex_buffers = {static_stream, instance_stream, previous_instance_stream};
     desc.debug_name = "mesh_scene_instanced";
     for (u32 variant = 0; variant < 4; ++variant) {
       if ((variant & kRt) && !rt) continue;
@@ -211,7 +218,7 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
     }
 
     desc.vertex = RX_SHADER(k_mesh_instance_vs_hlsl);
-    desc.vertex_buffers = {static_stream, instance_stream};
+    desc.vertex_buffers = {static_stream, instance_stream, previous_instance_stream};
     desc.fragment = RX_SHADER(k_prepass_ps_hlsl);
     desc.debug_name = "mesh_prepass_instanced";
     pipeline->instanced_prepass_pipeline_ = device.CreateGraphicsPipeline(desc);
@@ -440,10 +447,12 @@ void MeshPipeline::SetInstancedPrepass(CommandList& cmd, bool masked) {
 }
 
 void MeshPipeline::DrawInstances(CommandList& cmd, const GpuMesh& mesh,
-                                 const GpuBuffer& instances, const MeshPushConstants& push) {
+                                 const GpuBuffer& instances, const GpuBuffer& previous_instances,
+                                 const MeshPushConstants& push) {
   cmd.Push(push);
   cmd.BindVertexBuffer(0, mesh.vertices);
   cmd.BindVertexBuffer(1, instances);
+  cmd.BindVertexBuffer(2, previous_instances);
   cmd.BindIndexBuffer(mesh.indices, 0, IndexType::kUint32);
 }
 

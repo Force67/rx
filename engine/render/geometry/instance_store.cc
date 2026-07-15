@@ -2,8 +2,9 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 #include <limits>
+
+#include "core/log.h"
 
 namespace rx::render {
 
@@ -21,14 +22,9 @@ f32 MaxScale(const Mat4 &transform) {
 
 GpuBuffer InstanceStore::Upload(Device &device, std::span<const Mat4> transforms) {
   if (transforms.empty()) return {};
-  GpuBuffer buffer =
-      device.CreateBuffer(static_cast<u64>(transforms.size_bytes()), kBufferUsageVertex, true);
-  if (!buffer.mapped) {
-    if (buffer) device.DestroyBuffer(buffer);
-    return {};
-  }
-  std::memcpy(buffer.mapped, transforms.data(), transforms.size_bytes());
-  return buffer;
+  return device.CreateBufferWithData(
+      ByteSpan(reinterpret_cast<const u8 *>(transforms.data()), transforms.size_bytes()),
+      kBufferUsageVertex);
 }
 
 void InstanceStore::ComputeBounds(Group &group, const f32 mesh_center[3], f32 mesh_radius) {
@@ -79,8 +75,11 @@ InstanceGroupHandle InstanceStore::Create(Device &device, u64 mesh,
   Group &group = groups_[index];
   group.mesh = mesh;
   group.transforms.assign(transforms.begin(), transforms.end());
+  group.submitted_transforms.reset();
   group.buffer = buffer;
+  group.previous_buffer = {};
   group.alive = true;
+  group.has_submitted_state = false;
   ComputeBounds(group, mesh_center, mesh_radius);
   ++live_groups_;
   live_instances_ += transforms.size();
@@ -100,8 +99,41 @@ bool InstanceStore::Replace(Device &device, InstanceGroupHandle handle,
   if (!group || transforms.empty()) return false;
   GpuBuffer replacement = Upload(device, transforms);
   if (!replacement) return false;
+
+  if (!group->has_submitted_state) {
+    device.DestroyBufferDeferred(group->buffer);
+  } else {
+    const bool update_pending = static_cast<bool>(group->previous_buffer);
+    const base::Vector<Mat4> &submitted =
+        update_pending ? group->submitted_transforms : group->transforms;
+    if (transforms.size() <= submitted.size()) {
+      if (!update_pending) {
+        group->submitted_transforms.assign(group->transforms.begin(), group->transforms.end());
+        group->previous_buffer = group->buffer;
+        group->buffer = {};
+      }
+    } else {
+      // The previous vertex stream must cover the new draw count. Preserve the
+      // submitted prefix and make newly appended instances spawn in place.
+      base::Vector<Mat4> previous;
+      previous.assign(transforms.begin(), transforms.end());
+      std::copy(submitted.begin(), submitted.end(), previous.begin());
+      GpuBuffer previous_buffer = Upload(device, previous);
+      if (!previous_buffer) {
+        device.DestroyBuffer(replacement);
+        return false;
+      }
+      if (!update_pending)
+        group->submitted_transforms.assign(group->transforms.begin(), group->transforms.end());
+      if (group->previous_buffer) device.DestroyBufferDeferred(group->previous_buffer);
+      device.DestroyBufferDeferred(group->buffer);
+      group->previous_buffer = previous_buffer;
+      group->buffer = {};
+    }
+    if (group->buffer) device.DestroyBufferDeferred(group->buffer);
+  }
+
   const size_t previous_count = group->transforms.size();
-  device.DestroyBufferDeferred(group->buffer);
   group->buffer = replacement;
   group->transforms.assign(transforms.begin(), transforms.end());
   ComputeBounds(*group, mesh_center, mesh_radius);
@@ -115,13 +147,16 @@ bool InstanceStore::Destroy(Device &device, InstanceGroupHandle handle) {
   live_instances_ -= group->transforms.size();
   --live_groups_;
   device.DestroyBufferDeferred(group->buffer);
+  if (group->previous_buffer) device.DestroyBufferDeferred(group->previous_buffer);
   group->mesh = 0;
   group->transforms.reset();
+  group->submitted_transforms.reset();
   group->bounds_center = {};
   group->bounds_radius = 0;
   group->lod_scale = 1;
   group->cullable = false;
   group->alive = false;
+  group->has_submitted_state = false;
   ++group->generation;
   if (group->generation == 0) ++group->generation;
   free_.push_back(handle.index);
@@ -130,20 +165,38 @@ bool InstanceStore::Destroy(Device &device, InstanceGroupHandle handle) {
 
 void InstanceStore::RefreshMesh(Device &device, u64 mesh, const f32 mesh_center[3], f32 mesh_radius,
                                 bool compatible) {
+  size_t invalidated_groups = 0;
+  size_t invalidated_instances = 0;
   for (u32 index = 0; index < groups_.size(); ++index) {
     Group &group = groups_[index];
     if (!group.alive || group.mesh != mesh) continue;
     if (compatible) {
       ComputeBounds(group, mesh_center, mesh_radius);
     } else {
+      ++invalidated_groups;
+      invalidated_instances += group.transforms.size();
       Destroy(device, {index, group.generation});
     }
+  }
+  if (invalidated_groups != 0) {
+    RX_WARN("mesh {:x} replacement invalidated {} instance group(s) and {} instance(s)", mesh,
+            invalidated_groups, invalidated_instances);
+  }
+}
+
+void InstanceStore::OnFrameSubmitted(Device &device) {
+  for (Group &group : groups_) {
+    if (!group.alive) continue;
+    if (group.previous_buffer) device.DestroyBufferDeferred(group.previous_buffer);
+    group.submitted_transforms.reset();
+    group.has_submitted_state = true;
   }
 }
 
 void InstanceStore::Shutdown(Device &device) {
   for (Group &group : groups_) {
     if (group.buffer) device.DestroyBuffer(group.buffer);
+    if (group.previous_buffer) device.DestroyBuffer(group.previous_buffer);
   }
   groups_.clear();
   free_.clear();

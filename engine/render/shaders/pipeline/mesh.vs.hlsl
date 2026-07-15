@@ -84,6 +84,10 @@ struct VsIn {
   [[vk::location(8)]] float4 instance_col1 : INSTANCE_MODEL1;
   [[vk::location(9)]] float4 instance_col2 : INSTANCE_MODEL2;
   [[vk::location(10)]] float4 instance_col3 : INSTANCE_MODEL3;
+  [[vk::location(11)]] float4 prev_instance_col0 : PREV_INSTANCE_MODEL0;
+  [[vk::location(12)]] float4 prev_instance_col1 : PREV_INSTANCE_MODEL1;
+  [[vk::location(13)]] float4 prev_instance_col2 : PREV_INSTANCE_MODEL2;
+  [[vk::location(14)]] float4 prev_instance_col3 : PREV_INSTANCE_MODEL3;
 #endif
   // Indexes the morph delta buffer. Morphed meshes always draw lod 0 with
   // base vertex 0, where SPIR-V and DXIL vertex-id semantics agree.
@@ -166,11 +170,15 @@ VsOut main(VsIn input) {
 #endif
 #ifdef RX_INSTANCED
   const float4x4 model = transpose(float4x4(input.instance_col0, input.instance_col1,
-                                            input.instance_col2, input.instance_col3));
+                                             input.instance_col2, input.instance_col3));
+  const float4x4 prev_model =
+      transpose(float4x4(input.prev_instance_col0, input.prev_instance_col1,
+                         input.prev_instance_col2, input.prev_instance_col3));
 #else
   const float4x4 model = push.model;
 #endif
-  float4 world = mul(model, float4(local_pos, 1.0));
+  float4 model_world = mul(model, float4(local_pos, 1.0));
+  float4 world = model_world;
   // Wind sway for cloth/foliage: layered gusts along the global wind vector,
   // weighted by uv.y (0 = pinned edge). Spatial phase decorrelates instances;
   // prev reuses the displaced position, so the sway reads as static to the
@@ -203,6 +211,7 @@ VsOut main(VsIn input) {
   }
 #ifdef RX_INSTANCED
   float4 prev_world = world;
+  prev_world.xyz += mul(prev_model, float4(local_pos, 1.0)).xyz - model_world.xyz;
 #else
   float4 prev_world = mul(push.prev_model, float4(local_pos, 1.0));
 #endif

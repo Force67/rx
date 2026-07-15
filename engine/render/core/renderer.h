@@ -329,6 +329,8 @@ class RX_RENDER_EXPORT Renderer {
   // should cover one spatial streaming unit (for example one world cell), which
   // gives the renderer group-level frustum culling and one hardware-instanced
   // draw per material/LOD instead of one draw and ECS entity per placement.
+  // Updates preserve object motion by treating overlapping array indices as
+  // stable identities; newly appended indices spawn with zero object velocity.
   InstanceGroupHandle CreateInstanceGroup(u64 mesh, std::span<const Mat4> transforms);
   bool UpdateInstanceGroup(InstanceGroupHandle handle, std::span<const Mat4> transforms);
   void DestroyInstanceGroup(InstanceGroupHandle handle);

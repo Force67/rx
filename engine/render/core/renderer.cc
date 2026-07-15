@@ -466,8 +466,10 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   });
   if (!hdr_pipeline_) return false;
 
-  if (!shadow_.Initialize(*device_, material_system_->set_layout())) return false;  // raster sun shadows
   if (!local_shadows_.Initialize(*device_)) return false;  // clustered light shadows
+  if (!shadow_.Initialize(*device_, material_system_->set_layout(),
+                          local_shadows_.atlas().format))
+    return false;  // raster sun and local-shadow pipelines
   if (!froxel_fog_.Initialize(*device_)) {
     RX_WARN("froxel volumetrics unavailable");  // non-fatal: feature gates on available()
   }
@@ -1444,9 +1446,7 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // Re-uploading under an existing key (the builtin biped goes up once for
   // the test spawn and again for the npc template) must free the previous
   // buffers or they leak until vkDestroyDevice complains.
-  bool grouped_mesh = false;
-  for (const InstanceStore::Group& group : instances_.groups())
-    grouped_mesh |= group.alive && group.mesh == mesh_key;
+  const bool replacing_mesh = meshes_.find(mesh_key) != nullptr;
   if (GpuMesh* previous = meshes_.find(mesh_key)) {
     device_->WaitIdle();  // uploads happen at load time; never per frame
     if (raytracing_) raytracing_->RemoveBlas(mesh_key);
@@ -1535,7 +1535,7 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // catch-up so toggling path tracing on later still pulls it into the tlas
   // (BuildFrameGraph runs EnsureRayTracingGeometry on the next path-traced frame).
   if (raytracing_ && !gpu.all_blend && gpu.no_rt && !include_rt) rt_foliage_dirty_ = true;
-  if (grouped_mesh) ++scene_revision_;
+  if (replacing_mesh) ++scene_revision_;
   return true;
 }
 
@@ -1761,6 +1761,7 @@ void Renderer::RenderFrame(const FrameView& view) {
     framegen_was_active_ = false;
     fg_presents_ += 1;
   }
+  instances_.OnFrameSubmitted(*device_);
 
   // Present-rate accounting: the observable proof that generation runs.
   ++fg_engine_frames_;
@@ -3042,11 +3043,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         "local_shadows", [](RenderGraph::PassBuilder&) {},
         [this, &frame, &view](PassContext& ctx) {
           local_shadows_.Render(
-              *ctx.cmd, shadow_.pipeline(),
+              *ctx.cmd, shadow_.local_pipeline(),
               [this, &frame, &view](CommandList& cmd, const LocalShadows::Face& face) {
                 BindingSetHandle bound_material{};
                 // LocalShadows::Render bound the passed masked static pipeline.
-                PipelineHandle bound_pipeline = shadow_.pipeline();
+                PipelineHandle bound_pipeline = shadow_.local_pipeline();
                 for (const DrawItem& item : view.draws) {
                   const GpuMesh* mesh = meshes_.find(item.mesh);
                   if (!mesh || mesh->all_blend || (mesh->no_rt && !mesh->skinned)) continue;
@@ -3066,7 +3067,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                   if (wr > 0.0f && d.x * d.x + d.y * d.y + d.z * d.z > reach * reach) continue;
 
                   bool draw_skinned = mesh->skinned && item.skin_offset >= 0 &&
-                                      static_cast<bool>(shadow_.skinned_pipeline());
+                                      static_cast<bool>(shadow_.local_skinned_pipeline());
                   cmd.PushConstants(&item.transform, sizeof(Mat4), sizeof(Mat4));
                   cmd.BindVertexBuffer(0, mesh->vertices);
                   if (draw_skinned) {
@@ -3082,9 +3083,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                   for (const GpuSubmesh& submesh : mesh->submeshes) {
                     if (submesh.blend) continue;
                     // Depth-only for opaque casters, alpha-test only for masked.
-                    PipelineHandle pipeline =
-                        draw_skinned ? shadow_.skinned_pipeline(submesh.alpha_mask)
-                                     : shadow_.pipeline(submesh.alpha_mask);
+                    PipelineHandle pipeline = draw_skinned
+                                                  ? shadow_.local_skinned_pipeline(
+                                                        submesh.alpha_mask)
+                                                  : shadow_.local_pipeline(submesh.alpha_mask);
                     if (!(pipeline == bound_pipeline)) {
                       cmd.BindPipeline(pipeline);
                       bound_pipeline = pipeline;
@@ -3116,7 +3118,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                   cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
                   for (const GpuSubmesh& submesh : mesh->submeshes) {
                     if (submesh.blend) continue;
-                    const PipelineHandle pipeline = shadow_.instanced_pipeline(submesh.alpha_mask);
+                    const PipelineHandle pipeline =
+                        shadow_.local_instanced_pipeline(submesh.alpha_mask);
                     if (!(pipeline == bound_pipeline)) {
                       cmd.BindPipeline(pipeline);
                       bound_pipeline = pipeline;
@@ -3397,7 +3400,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           const i32 vertex_offset =
               lod == 0 ? 0 : static_cast<i32>(mesh->lods[lod - 1].vertex_offset);
           MeshPushConstants push{};
-          mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, push);
+          const GpuBuffer& previous =
+              group.previous_buffer ? group.previous_buffer : group.buffer;
+          mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, previous, push);
           for (const GpuSubmesh& submesh : submeshes) {
             if (submesh.blend) continue;
             mesh_pipeline_->SetInstancedPrepass(*ctx.cmd, submesh.alpha_mask);
@@ -3897,7 +3902,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               lod == 0 ? 0 : static_cast<i32>(mesh->lods[lod - 1].vertex_offset);
           mesh_pipeline_->SetInstanced(*ctx.cmd, use_rt_frag, settings_.wireframe);
           MeshPushConstants push{};
-          mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, push);
+          const GpuBuffer& previous =
+              group.previous_buffer ? group.previous_buffer : group.buffer;
+          mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, previous, push);
           for (const GpuSubmesh& submesh : submeshes) {
             if (submesh.blend) continue;
             const BindingSetHandle material = material_system_->set(submesh.material);
@@ -4587,7 +4594,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             const GpuMesh* mesh = meshes_.find(group.mesh);
             if (!mesh || mesh->all_blend) continue;
             MeshPushConstants push{};
-            mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, push);
+            const GpuBuffer& previous =
+                group.previous_buffer ? group.previous_buffer : group.buffer;
+            mesh_pipeline_->DrawInstances(*ctx.cmd, *mesh, group.buffer, previous, push);
             for (const GpuSubmesh& submesh : mesh->submeshes) {
               if (submesh.blend) continue;
               mesh_pipeline_->SetInstancedPrepass(*ctx.cmd, submesh.alpha_mask);
