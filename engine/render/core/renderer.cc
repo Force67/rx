@@ -4655,22 +4655,31 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                     shadow_slot, tlas_slot, /*globals_written=*/true, rcgi_irr);
   }
 
-  // Surface weather: wet/darken (rain) or whiten (snow) the lit surfaces before
-  // the atmosphere/clouds/rain layer over them. Uses the G-buffer normals + the
-  // sky cubemap for the puddle reflection. The game integrates wetness /
-  // snow_cover over time; live precipitation acts as a floor so setting only
+  // Surface weather: wet/darken (rain) and whiten (snow) the lit surfaces
+  // before the atmosphere/clouds/rain layer over them, gated by the sky
+  // occlusion map so cover stays dry. Wetness and snow cover are independent
+  // channels (melting snow over wet ground coexists); the game integrates them
+  // over time, and live precipitation acts as a floor so setting only
   // `precipitation` still wets (or whitens) the ground.
-  const f32 surface_wetness =
-      settings_.weather.snow
-          ? std::max(settings_.weather.snow_cover, settings_.weather.precipitation)
-          : std::max(settings_.weather.wetness, settings_.weather.precipitation);
-  if (surface_wetness > 0.0f && !path_trace && normals != kInvalidResource) {
+  const f32 live_rain = settings_.weather.snow ? 0.0f : settings_.weather.precipitation;
+  const f32 live_snow = settings_.weather.snow ? settings_.weather.precipitation : 0.0f;
+  const f32 surface_wetness = std::max(settings_.weather.wetness, live_rain);
+  const f32 surface_snow = std::max(settings_.weather.snow_cover, live_snow);
+  if ((surface_wetness > 0.0f || surface_snow > 0.0f) && !path_trace &&
+      normals != kInvalidResource) {
     SurfaceWeather::Frame sf;
     sf.inv_view_proj = globals.inv_view_proj;
     sf.camera_pos = view.camera.eye;
     sf.wetness = surface_wetness;
-    sf.snow = settings_.weather.snow;
+    sf.snow_cover = surface_snow;
+    sf.rain = live_rain;
     sf.time = static_cast<f32>(time_seconds_);
+    if (precip_occlusion_active_) {
+      precip_occlusion_.Params(sf.occl);
+      sf.occl_range = PrecipOcclusion::y_range();
+      sf.occlusion = precip_occlusion_.view();
+      sf.occlusion_sampler = precip_occlusion_.sampler();
+    }
     lit = surface_weather_.AddToGraph(graph_, lit, normals, depth_export, environment_->sky_view(),
                                       environment_->sampler(), {render_width_, render_height_}, sf);
   }
