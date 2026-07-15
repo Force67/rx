@@ -127,4 +127,13 @@ int Archetype::ColumnIndex(ComponentId id) const {
   return static_cast<int>(it - signature_.begin());
 }
 
+Archetype::StorageStats Archetype::storage_stats() const {
+  StorageStats stats;
+  for (const Column& column : columns_) {
+    stats.live_bytes += static_cast<u64>(row_count()) * column.stride;
+    stats.capacity_bytes += static_cast<u64>(column.capacity) * column.stride;
+  }
+  return stats;
+}
+
 }  // namespace rx::ecs

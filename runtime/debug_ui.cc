@@ -14,12 +14,14 @@
 #include <vector>
 
 #include <base/option.h>
+#include <base/process/process_metrics.h>
 
 #include <SDL3/SDL.h>
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 
 #include "core/log.h"
+#include "ecs/world.h"
 #include "render/core/presets.h"
 #include "render/core/settings_ini.h"
 
@@ -71,14 +73,34 @@ constexpr f32 kFpsGood = 60.0f;
 constexpr f32 kFpsWarn = 30.0f;
 constexpr f32 kStatusBarHeight = 28.0f;
 constexpr f32 kStatusGraphMaxFps = 120.0f;
+constexpr f64 kMemorySampleInterval = 0.5;
 
 #if defined(NDEBUG)
 constexpr const char* kBuildMode = "RELEASE";
-constexpr const char* kBuildModeShort = "REL";
+constexpr const char* kBuildModeTiny = "R";
 #else
 constexpr const char* kBuildMode = "DEBUG";
-constexpr const char* kBuildModeShort = "DBG";
+constexpr const char* kBuildModeTiny = "D";
 #endif
+
+void FormatMemoryValue(char* out, std::size_t out_size, u64 bytes) {
+  constexpr u64 kMiB = 1024u * 1024u;
+  constexpr u64 kGiB = 1024u * kMiB;
+  if (bytes == 0)
+    std::snprintf(out, out_size, "--");
+  else if (bytes >= kGiB)
+    std::snprintf(out, out_size, "%.1fG", static_cast<f64>(bytes) / kGiB);
+  else
+    std::snprintf(out, out_size, "%.0fM", static_cast<f64>(bytes) / kMiB);
+}
+
+ImU32 PressureColor(u64 used, u64 limit) {
+  if (limit == 0) return IM_COL32(255, 255, 255, 255);
+  const f64 pressure = static_cast<f64>(used) / static_cast<f64>(limit);
+  if (pressure >= 0.9) return IM_COL32(255, 70, 70, 255);
+  if (pressure >= 0.75) return IM_COL32(255, 166, 64, 255);
+  return IM_COL32(255, 255, 255, 255);
+}
 
 // Row 0 is "Custom" (hand-tuned); the rest map to QualityPreset below.
 const char* kPresets[] = {"Custom",  "Auto-detect", "Android", "Steam Deck", "Low end",
@@ -112,6 +134,10 @@ bool DebugUi::Initialize(Window& window, render::Renderer& renderer) {
   ImGui::StyleColorsDark();
 
   io.Fonts->AddFontDefault();
+
+  const int system_ram_mib = SDL_GetSystemRAM();
+  if (system_ram_mib > 0)
+    cpu_memory_limit_bytes_ = static_cast<u64>(system_ram_mib) * 1024u * 1024u;
 
   if (!ImGui_ImplSDL3_InitForVulkan(sdl_window)) return false;
 
@@ -156,8 +182,8 @@ bool DebugUi::wants_keyboard() const {
   return initialized_ && ImGui::GetCurrentContext() && ImGui::GetIO().WantCaptureKeyboard;
 }
 
-void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_delta,
-                    render::FrameView* view) {
+void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::World& world,
+                    f32 frame_delta, render::FrameView* view) {
   if (!initialized_) return;
 
   frame_times_[frame_time_cursor_] = frame_delta * 1000.0f;
@@ -173,6 +199,24 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
     gpu_timings_latched_ = true;
   }
   renderer.settings().gpu_pass_timings = visible_ || gpu_timings_forced_;
+
+  const f64 now = ImGui::GetTime();
+  if (visible_ && status_bar_visible_ && now >= next_memory_sample_time_) {
+    base::ProcessMemoryUsage process_memory;
+    cpu_memory_bytes_ = base::QueryProcessMemoryUsage(base::GetCurrentProcessHandle(),
+                                                       process_memory)
+                            ? static_cast<u64>(process_memory.resident_set_bytes)
+                            : 0;
+    if (render::Device* device = renderer.device()) {
+      const render::Device::MemoryBudget memory = device->memory_budget();
+      gpu_memory_bytes_ = memory.used_bytes;
+      gpu_memory_budget_bytes_ = memory.budget_bytes;
+    } else {
+      gpu_memory_bytes_ = 0;
+      gpu_memory_budget_bytes_ = 0;
+    }
+    next_memory_sample_time_ = now + kMemorySampleInterval;
+  }
 
   if (visible_) {
     render::RenderSettings& settings = renderer.settings();
@@ -287,8 +331,8 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, f32 frame_del
     }
     ImGui::End();
 
-    DrawStageChart(renderer, kStatusBarHeight);
-    DrawStatusBar(frame_delta, *view);
+    DrawStageChart(renderer, status_bar_visible_ ? kStatusBarHeight : 0.0f);
+    if (status_bar_visible_) DrawStatusBar(renderer, world, frame_delta, *view);
 
     if (show_demo_) ImGui::ShowDemoWindow(&show_demo_);
   }
@@ -678,11 +722,13 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, FlyCamera& camera,
       ImGui::Text("materials %u, textures %u", materials->material_count(),
                   materials->texture_count());
     }
+    ImGui::Checkbox("Bottom status bar", &status_bar_visible_);
     ImGui::Checkbox("ImGui demo window", &show_demo_);
   }
 }
 
-void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
+void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
+                            f32 frame_delta, const render::FrameView& view) {
   ImGuiViewport* viewport = ImGui::GetMainViewport();
   const ImVec2 bar_min = {viewport->WorkPos.x,
                           viewport->WorkPos.y + viewport->WorkSize.y - kStatusBarHeight};
@@ -693,9 +739,8 @@ void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
   dl->AddLine(bar_min, {bar_max.x, bar_min.y}, IM_COL32(255, 255, 255, 42));
 
   constexpr f32 kPadding = 12.0f;
-  const bool compact = viewport->WorkSize.x < 900.0f;
-  const bool narrow = viewport->WorkSize.x < 600.0f;
-  const bool minimal = viewport->WorkSize.x < 480.0f;
+  const bool compact = viewport->WorkSize.x < 1440.0f;
+  const bool narrow = viewport->WorkSize.x < 760.0f;
   const f32 section_gap = compact ? 6.0f : 18.0f;
   const f32 graph_width = std::clamp(viewport->WorkSize.x * 0.22f, 64.0f, 280.0f);
   const ImVec2 graph_min = {bar_max.x - kPadding - graph_width, bar_min.y + 4.0f};
@@ -703,14 +748,16 @@ void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
 
   char fps_text[48];
   const f32 fps = frame_delta > 0.0f ? 1.0f / frame_delta : 0.0f;
-  if (compact)
+  if (narrow)
+    std::snprintf(fps_text, sizeof(fps_text), "%.0fF", fps);
+  else if (compact)
     std::snprintf(fps_text, sizeof(fps_text), "%.0f FPS", fps);
   else
     std::snprintf(fps_text, sizeof(fps_text), "FPS %.0f  %.2f ms", fps,
                   frame_delta * 1000.0f);
   char location_text[80];
-  if (minimal)
-    std::snprintf(location_text, sizeof(location_text), "XYZ %.0f %.0f %.0f", view.camera.eye.x,
+  if (narrow)
+    std::snprintf(location_text, sizeof(location_text), "%.0f %.0f %.0f", view.camera.eye.x,
                   view.camera.eye.y, view.camera.eye.z);
   else if (compact)
     std::snprintf(location_text, sizeof(location_text), "XYZ %.1f %.1f %.1f", view.camera.eye.x,
@@ -720,23 +767,82 @@ void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
                   view.camera.eye.x, view.camera.eye.y, view.camera.eye.z);
   char build_text[96];
   if (narrow)
-    std::snprintf(build_text, sizeof(build_text), "%.8s", RX_BUILD_ID);
+    std::snprintf(build_text, sizeof(build_text), "%.6s", RX_BUILD_ID);
   else if (compact)
     std::snprintf(build_text, sizeof(build_text), "%s@%.8s", RX_VERSION, RX_BUILD_ID);
   else
     std::snprintf(build_text, sizeof(build_text), "BUILD %s (%s)", RX_VERSION, RX_BUILD_ID);
   char config_text[64];
-  if (minimal)
-    std::snprintf(config_text, sizeof(config_text), "%s", kBuildModeShort);
-  else if (narrow)
+  if (narrow)
+    std::snprintf(config_text, sizeof(config_text), "%s", kBuildModeTiny);
+  else if (compact)
     std::snprintf(config_text, sizeof(config_text), "%s", kBuildMode);
   else
-    std::snprintf(config_text, sizeof(config_text), compact ? "%s/%s" : "%s / %s",
-                  RX_BUILD_CONFIG, kBuildMode);
+    std::snprintf(config_text, sizeof(config_text), "%s / %s", RX_BUILD_CONFIG, kBuildMode);
+
+  char cpu_memory_value[16];
+  char gpu_memory_value[16];
+  FormatMemoryValue(cpu_memory_value, sizeof(cpu_memory_value), cpu_memory_bytes_);
+  FormatMemoryValue(gpu_memory_value, sizeof(gpu_memory_value), gpu_memory_bytes_);
+  char cpu_memory_text[24];
+  char gpu_memory_text[24];
+  std::snprintf(cpu_memory_text, sizeof(cpu_memory_text), narrow     ? "C%s"
+                                                          : compact ? "C %s"
+                                                                    : "CPU %s",
+                cpu_memory_value);
+  std::snprintf(gpu_memory_text, sizeof(gpu_memory_text), narrow     ? "G%s"
+                                                          : compact ? "G %s"
+                                                                    : "GPU %s",
+                gpu_memory_value);
+
+  const ecs::World::Stats ecs_stats = world.stats();
+  const f64 ecs_pressure = ecs_stats.component_capacity_bytes > 0
+                               ? 100.0 * ecs_stats.live_component_bytes /
+                                     ecs_stats.component_capacity_bytes
+                               : 0.0;
+  char ecs_text[64];
+  if (narrow)
+    std::snprintf(ecs_text, sizeof(ecs_text), "E%u P%.0f", ecs_stats.entity_count, ecs_pressure);
+  else if (compact)
+    std::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u A%u P%.0f", ecs_stats.entity_count,
+                  ecs_stats.entity_slots, ecs_stats.archetype_count, ecs_pressure);
+  else
+    std::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u ent  %u arch  %.0f%% store",
+                  ecs_stats.entity_count, ecs_stats.entity_slots, ecs_stats.archetype_count,
+                  ecs_pressure);
+
+  render::MaterialSystem::StreamingStats streaming;
+  bool streaming_active = false;
+  if (const render::MaterialSystem* materials = renderer.materials()) {
+    streaming_active = materials->streaming_active();
+    streaming = materials->streaming_stats();
+  }
+  char stream_text[80];
+  if (!streaming_active) {
+    std::snprintf(stream_text, sizeof(stream_text), narrow ? "S-OFF" : "STREAM OFF");
+  } else if (streaming.streamable_count == 0) {
+    std::snprintf(stream_text, sizeof(stream_text), narrow     ? "S-IDLE"
+                                                    : compact ? "S IDLE"
+                                                              : "STREAM IDLE");
+  } else {
+    char resident[16];
+    char budget[16];
+    FormatMemoryValue(resident, sizeof(resident), streaming.resident_bytes);
+    FormatMemoryValue(budget, sizeof(budget), streaming.budget_bytes);
+    if (narrow)
+      std::snprintf(stream_text, sizeof(stream_text), "S%s/%s D%u", resident, budget,
+                    streaming.demoted_count);
+    else if (compact)
+      std::snprintf(stream_text, sizeof(stream_text), "STREAM %s/%s D%u", resident, budget,
+                    streaming.demoted_count);
+    else
+      std::snprintf(stream_text, sizeof(stream_text), "STREAM ON %s/%s  %u/%u demoted", resident,
+                    budget, streaming.demoted_count, streaming.streamable_count);
+  }
 
   const f32 text_start = bar_min.x + kPadding;
   const f32 text_limit = graph_min.x - section_gap;
-  auto draw_section = [&](f32* text_x, f32 text_y, const char* text) {
+  auto draw_section = [&](f32* text_x, f32 text_y, const char* text, ImU32 color) {
     const f32 width = ImGui::CalcTextSize(text).x;
     const bool has_previous = *text_x > text_start;
     const f32 draw_x = *text_x + (has_previous ? section_gap : 0.0f);
@@ -746,16 +852,24 @@ void DebugUi::DrawStatusBar(f32 frame_delta, const render::FrameView& view) {
       dl->AddLine({separator_x, text_y}, {separator_x, text_y + ImGui::GetFontSize()},
                   IM_COL32(255, 255, 255, 64));
     }
-    dl->AddText({draw_x, text_y}, IM_COL32(255, 255, 255, 255), text);
+    dl->AddText({draw_x, text_y}, color, text);
     *text_x = draw_x + width;
   };
 
   f32 text_x = text_start;
   const f32 text_y = bar_min.y + (kStatusBarHeight - ImGui::GetFontSize()) * 0.5f;
-  draw_section(&text_x, text_y, fps_text);
-  draw_section(&text_x, text_y, location_text);
-  draw_section(&text_x, text_y, build_text);
-  draw_section(&text_x, text_y, config_text);
+  const ImU32 white = IM_COL32(255, 255, 255, 255);
+  draw_section(&text_x, text_y, fps_text, white);
+  draw_section(&text_x, text_y, location_text, white);
+  draw_section(&text_x, text_y, cpu_memory_text,
+               PressureColor(cpu_memory_bytes_, cpu_memory_limit_bytes_));
+  draw_section(&text_x, text_y, gpu_memory_text,
+               PressureColor(gpu_memory_bytes_, gpu_memory_budget_bytes_));
+  draw_section(&text_x, text_y, ecs_text, white);
+  draw_section(&text_x, text_y, stream_text,
+               PressureColor(streaming.resident_bytes, streaming.budget_bytes));
+  draw_section(&text_x, text_y, build_text, white);
+  draw_section(&text_x, text_y, config_text, white);
 
   // A fixed 0-120 FPS scale keeps changes visually comparable across frames.
   const f32 graph_height = graph_max.y - graph_min.y;
@@ -893,7 +1007,7 @@ DebugUi::~DebugUi() = default;
 bool DebugUi::Initialize(Window&, render::Renderer&) { return false; }
 void DebugUi::Shutdown() {}
 void DebugUi::BeginFrame() {}
-void DebugUi::Build(render::Renderer&, FlyCamera&, f32, render::FrameView*) {}
+void DebugUi::Build(render::Renderer&, FlyCamera&, const ecs::World&, f32, render::FrameView*) {}
 bool DebugUi::wants_mouse() const { return false; }
 bool DebugUi::wants_keyboard() const { return false; }
 

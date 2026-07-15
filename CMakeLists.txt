@@ -320,6 +320,10 @@ if(RX_BUILD_TESTS)
 endif()
 
 if(RX_BUILD_TESTS)
+  add_executable(ecs_test test/ecs_test.cc)
+  target_link_libraries(ecs_test PRIVATE rx::ecs rx::core)
+  add_test(NAME ecs_test COMMAND ecs_test)
+
   add_executable(camera_test test/camera_test.cc)
   target_link_libraries(camera_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME camera_test COMMAND camera_test)

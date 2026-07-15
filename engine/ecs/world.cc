@@ -129,6 +129,19 @@ bool World::HasRaw(Entity entity, ComponentId id) const {
   return SignatureContains(record.archetype->signature(), id);
 }
 
+World::Stats World::stats() const {
+  Stats result;
+  result.entity_count = static_cast<u32>(live_count_);
+  result.entity_slots = static_cast<u32>(records_.size());
+  result.archetype_count = static_cast<u32>(archetypes_.size());
+  for (const auto& archetype : archetypes_) {
+    const Archetype::StorageStats storage = archetype->storage_stats();
+    result.live_component_bytes += storage.live_bytes;
+    result.component_capacity_bytes += storage.capacity_bytes;
+  }
+  return result;
+}
+
 Archetype* World::GetOrCreateArchetype(const Signature& signature) {
   if (Archetype** found = archetype_lookup_.find(signature)) return *found;
   archetypes_.push_back(base::MakeUnique<Archetype>(signature));

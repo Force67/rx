@@ -506,6 +506,9 @@ class D3D12Device final : public Device {
   ID3D12Device* device_ = nullptr;
   ID3D12Device5* device5_ = nullptr;  // raytracing (may be null)
   ID3D12Device2* device2_ = nullptr;  // pipeline state streams (may be null)
+#if defined(_WIN32)
+  IDXGIAdapter3* memory_adapter_ = nullptr;  // local video-memory budget query
+#endif
   ID3D12CommandQueue* queue_ = nullptr;
   void* native_window_ = nullptr;  // SDL_Window*, for the DXGI HWND on windows
 

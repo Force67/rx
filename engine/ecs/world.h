@@ -59,6 +59,15 @@ class RX_ECS_EXPORT World {
 
   size_t entity_count() const { return live_count_; }
 
+  struct Stats {
+    u32 entity_count = 0;
+    u32 entity_slots = 0;
+    u32 archetype_count = 0;
+    u64 live_component_bytes = 0;
+    u64 component_capacity_bytes = 0;
+  };
+  Stats stats() const;
+
   // Untyped access, used by replication and converters.
   void* AddRaw(Entity entity, ComponentId id);
   void RemoveRaw(Entity entity, ComponentId id);
