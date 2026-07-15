@@ -18,6 +18,7 @@
 #include "core/log.h"
 #include "core/math.h"
 #include "physics/water_waves.h"
+#include "render/atmosphere/lightning.h"
 #include "render/geometry/hair_groom.h"
 #include "scene/components.h"
 #include "viewer_input.h"
@@ -228,6 +229,7 @@ void DemoScenes::ApplyRenderPolicy() {
 }
 
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
+  if (storm_enabled_) UpdateStorm(dt);
   if (scene_hook_) scene_hook_->Emit(dt, view);
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   if (ship_) ship_->Emit(dt, view);
@@ -2585,6 +2587,10 @@ static base::Option<float> WeatherDemoPrecip{"demo.weather.precip", 0.85f, "RX_P
 static base::Option<bool> WeatherDemoSnow{"demo.weather.snow", false, "RX_SNOW"};
 static base::Option<float> WeatherDemoWind{"demo.weather.wind", 7.0f, "RX_WIND"};
 static base::Option<float> WeatherDemoWindDir{"demo.weather.winddir", 205.0f, "RX_WIND_DIR"};
+// Deterministic strike hook for tests/screenshots: RX_STRIKE_TEST=<meters>
+// fires a strike 1 s after start directly in front of the camera at that
+// distance, repeating every 4 s. 0 = the random storm scheduler.
+static base::Option<float> WeatherStrikeTest{"demo.weather.striketest", 0.0f, "RX_STRIKE_TEST"};
 
 void DemoScenes::CreateWeatherDemoScene() {
   // The volumetric-precipitation acceptance scene: a ground plane, varied
@@ -2702,12 +2708,70 @@ void DemoScenes::CreateWeatherDemoScene() {
   rs.auto_exposure = false;
   rs.exposure = 0.7f;
 
+  // Rain means a thunderstorm: the demo plays the game's role and schedules
+  // strikes (rx renders everything about them). The test hook fires the first
+  // strike after exactly 1 s; the random storm rolls one every 6-9 s.
+  storm_enabled_ = rs.weather.precipitation > 0.0f && !rs.weather.snow;
+  storm_next_strike_ = WeatherStrikeTest.get() > 0.0f ? 1.0f : 4.0f;
+
   // Wide shot: shelter left, blocks right, plenty of open ground for splashes.
   camera_.set_position({6.0f, 2.8f, 9.6f});
   camera_.set_yaw_pitch(-0.62f, -0.16f);
   camera_.speed = 4.0f;
-  RX_INFO("weather demo: precip {} ({}), wind {} m/s",
-          rs.weather.precipitation, rs.weather.snow ? "snow" : "rain", rs.weather.wind_speed);
+  RX_INFO("weather demo: precip {} ({}), wind {} m/s{}",
+          rs.weather.precipitation, rs.weather.snow ? "snow" : "rain", rs.weather.wind_speed,
+          storm_enabled_ ? ", thunderstorm on" : "");
+}
+
+void DemoScenes::UpdateStorm(f32 dt) {
+  // Demo-side strike scheduler, mirroring what a game does: pick a strike
+  // position/seed/energy, advance strike_age each frame, and drive the GLOBAL
+  // weather.lightning scalar (sun/ambient/cloud boosts) with the same envelope
+  // as the bolt + positioned flash so all three flicker in lockstep. The
+  // global term adds a slower exp(-age*9) afterglow under the stroke flicker.
+  render::WeatherSettings& w = renderer_.settings().weather;
+  storm_time_ += dt;
+
+  if (w.strike_age >= 0.0f) {
+    w.strike_age += dt;
+    f32 env = render::LightningSystem::Envelope(w.strike_age, w.strike_seed);
+    // Peak ~0.35: the global consumers multiply hard (sun +9x, ambient +0.5
+    // at flash 1.0) and would white the staged overcast frame out above that.
+    w.lightning = std::min(
+        1.0f, w.strike_energy * (0.22f * std::exp(-w.strike_age * 9.0f) + 0.35f * env));
+    if (w.strike_age > 1.2f) {  // envelope + afterglow both spent
+      w.strike_age = -1.0f;
+      w.lightning = 0.0f;
+    }
+  }
+
+  if (storm_time_ < storm_next_strike_) return;
+  auto hash01 = [](u32 v) {
+    v = v * 747796405u + 2891336453u;
+    v = ((v >> ((v >> 28u) + 4u)) ^ v) * 277803737u;
+    return static_cast<f32>((v >> 22u) ^ v) * (1.0f / 4294967295.0f);
+  };
+  ++w.strike_seed;
+  w.strike_age = 0.0f;
+  const f32 test_dist = WeatherStrikeTest.get();
+  if (test_dist > 0.0f) {
+    // Deterministic: directly in front of the camera at the given distance.
+    Vec3 fwd = camera_.forward();
+    f32 len = std::sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
+    Vec3 dir = len > 1e-4f ? Vec3{fwd.x / len, 0.0f, fwd.z / len} : Vec3{0, 0, -1};
+    Vec3 eye = camera_.position();
+    w.strike_pos = {eye.x + dir.x * test_dist, 0.0f, eye.z + dir.z * test_dist};
+    w.strike_energy = 1.0f;
+    storm_next_strike_ = storm_time_ + 4.0f;
+  } else {
+    // Random storm: 300-900 m out at a hashed azimuth, every 6-9 s.
+    f32 az = hash01(w.strike_seed * 3u + 1u) * 6.2831853f;
+    f32 dist = 300.0f + 600.0f * hash01(w.strike_seed * 3u + 2u);
+    Vec3 eye = camera_.position();
+    w.strike_pos = {eye.x + std::cos(az) * dist, 0.0f, eye.z + std::sin(az) * dist};
+    w.strike_energy = 0.65f + 0.35f * hash01(w.strike_seed * 3u + 3u);
+    storm_next_strike_ = storm_time_ + 6.0f + 3.0f * hash01(w.strike_seed * 7u + 5u);
+  }
 }
 
 void DemoScenes::CreateMeshletDemoScene() {
