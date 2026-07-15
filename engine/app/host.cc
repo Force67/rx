@@ -155,7 +155,7 @@ void Host::ApplyRenderPreset() {
   tuned.color_grade = env.color_grade;        // presets never set a grade
   tuned.sun_direction = env.sun_direction;    // honor RX_SUN_DIR over the default
   // Sky/weather env overrides (RX_AERIAL / RX_CLOUDS / RX_CLOUD_COVERAGE /
-  // RX_PRECIP / RX_SNOW), so they survive the preset.
+  // RX_PRECIP / RX_SNOW / RX_WIND / RX_WETNESS / ...), so they survive the preset.
   tuned.fog = env.fog;  // honor RX_FOG over the preset (fog params are defaults)
   tuned.motion_blur = env.motion_blur;  // honor RX_MOTION_BLUR over the preset
   tuned.lens_flare = env.lens_flare;    // honor RX_LENS_FLARE over the preset
@@ -198,9 +198,7 @@ void Host::ApplyRenderPreset() {
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;
   tuned.cloud_coverage = env.cloud_coverage;
-  tuned.precipitation = env.precipitation;
-  tuned.precip_snow = env.precip_snow;
-  tuned.aurora = env.aurora;
+  tuned.weather = env.weather;  // live weather state; presets never set it
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
 
   renderer_.settings() = tuned;

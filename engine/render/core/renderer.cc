@@ -158,6 +158,11 @@ base::Option<float> CloudCoverage{"cloud.coverage", 0.46f, "RX_CLOUD_COVERAGE"};
 base::Option<float> Precip{"precip", 0.0f, "RX_PRECIP"};
 base::Option<bool> Snow{"snow", false, "RX_SNOW"};
 base::Option<bool> Aurora{"aurora", false, "RX_AURORA"};
+base::Option<float> Wind{"wind", 12.0f, "RX_WIND"};
+base::Option<float> WindDir{"wind.dir", 0.0f, "RX_WIND_DIR"};
+base::Option<float> Wetness{"wetness", 0.0f, "RX_WETNESS"};
+base::Option<float> SnowCover{"snow.cover", 0.0f, "RX_SNOW_COVER"};
+base::Option<float> AuroraIntensity{"aurora.intensity", 1.0f, "RX_AURORA_INTENSITY"};
 base::Option<const char*> RhiBackend{"rhi.backend", nullptr, "RX_RHI"};
 
 // Distance-based hierarchical lod: coarser geometry the further a mesh is from
@@ -799,9 +804,16 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (CloudCoverage.overridden()) settings_.cloud_coverage = CloudCoverage.get();
   // RX_PRECIP forces precipitation (0..1) and RX_SNOW=1 makes it snow, so the
   // effect is testable without a loaded game's weather.
-  if (Precip.overridden()) settings_.precipitation = Precip.get();
-  if (Snow.overridden()) settings_.precip_snow = Snow;
-  if (Aurora.overridden()) settings_.aurora = Aurora;
+  if (Precip.overridden()) settings_.weather.precipitation = Precip.get();
+  if (Snow.overridden()) settings_.weather.snow = Snow;
+  if (Aurora.overridden()) settings_.weather.aurora = Aurora;
+  // RX_WIND (m/s) / RX_WIND_DIR (degrees) steer precipitation slant and cloud
+  // drift; RX_WETNESS / RX_SNOW_COVER force the surface response directly.
+  if (Wind.overridden()) settings_.weather.wind_speed = Wind.get();
+  if (WindDir.overridden()) settings_.weather.wind_yaw = WindDir.get() * 3.14159265f / 180.0f;
+  if (Wetness.overridden()) settings_.weather.wetness = Wetness.get();
+  if (SnowCover.overridden()) settings_.weather.snow_cover = SnowCover.get();
+  if (AuroraIntensity.overridden()) settings_.weather.aurora_intensity = AuroraIntensity.get();
 
   // RCGI software mode: on a device without ray query (or when RX_RCGI_SW forces
   // it for A/B on RT hardware), RCGI's world side runs through the SDF clipmap
@@ -2707,7 +2719,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Lightning flashes the PER-FRAME direct light only (not settings_, so the
   // sun-change check never rebuilds the IBL cubemap): a brief bright blue-white
   // boost to the directional intensity, colour and ambient fill.
-  const f32 flash = interior ? 0.0f : settings_.lightning;
+  const f32 flash = interior ? 0.0f : settings_.weather.lightning;
   if (interior) {
     globals.sun_direction[3] = settings_.interior_directional_intensity;
     globals.sun_color[0] = settings_.interior_directional_color.x;
@@ -2753,7 +2765,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (rcgi_world && (!interior || RcgiInteriorOpt)) globals.flags |= kFrameFlagRcgi;
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows && !interior) globals.flags |= kFrameFlagRtShadows;
-  if (settings_.aurora && !interior) globals.flags |= kFrameFlagAurora;
+  if (settings_.weather.aurora && !interior) globals.flags |= kFrameFlagAurora;
   if (nrd_shadow && !interior) globals.flags |= kFrameFlagSigmaShadow;
   if (interior) globals.flags |= kFrameFlagInterior;
   if (reflections_active) globals.flags |= kFrameFlagReflections;
@@ -4093,7 +4105,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       rfl.inv_view_proj = globals.inv_view_proj;
       rfl.camera_pos = view.camera.eye;
       rfl.sun_direction = settings_.sun_direction;
-      rfl.sun_intensity = settings_.sun_intensity + settings_.lightning * 9.0f;
+      rfl.sun_intensity = settings_.sun_intensity + settings_.weather.lightning * 9.0f;
       rfl.sun_color = settings_.sun_color;
       rfl.roughness_cutoff = settings_.reflection_roughness_cutoff;
       rfl.frame_index = frame_index_;
@@ -4611,13 +4623,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
 
   // Surface weather: wet/darken (rain) or whiten (snow) the lit surfaces before
   // the atmosphere/clouds/rain layer over them. Uses the G-buffer normals + the
-  // sky cubemap for the puddle reflection.
-  if (settings_.precipitation > 0.0f && !path_trace && normals != kInvalidResource) {
+  // sky cubemap for the puddle reflection. The game integrates wetness /
+  // snow_cover over time; live precipitation acts as a floor so setting only
+  // `precipitation` still wets (or whitens) the ground.
+  const f32 surface_wetness =
+      settings_.weather.snow
+          ? std::max(settings_.weather.snow_cover, settings_.weather.precipitation)
+          : std::max(settings_.weather.wetness, settings_.weather.precipitation);
+  if (surface_wetness > 0.0f && !path_trace && normals != kInvalidResource) {
     SurfaceWeather::Frame sf;
     sf.inv_view_proj = globals.inv_view_proj;
     sf.camera_pos = view.camera.eye;
-    sf.wetness = settings_.precipitation;
-    sf.snow = settings_.precip_snow;
+    sf.wetness = surface_wetness;
+    sf.snow = settings_.weather.snow;
     sf.time = static_cast<f32>(time_seconds_);
     lit = surface_weather_.AddToGraph(graph_, lit, normals, depth_export, environment_->sky_view(),
                                       environment_->sampler(), {render_width_, render_height_}, sf);
@@ -4650,9 +4668,10 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     cf.sun_direction = settings_.sun_direction;
     // Lightning brightens the cloud (its ambient + sun terms scale with intensity),
     // so the storm clouds flash from within.
-    cf.sun_intensity = settings_.sun_intensity + settings_.lightning * 7.0f;
+    cf.sun_intensity = settings_.sun_intensity + settings_.weather.lightning * 7.0f;
     cf.sun_color = settings_.sun_color;
     cf.coverage = settings_.cloud_coverage;
+    cf.wind = settings_.weather.wind_speed;
     lit = clouds_.AddToGraph(graph_, lit, depth_export, {render_width_, render_height_}, cf);
   }
 
@@ -5175,13 +5194,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Screen-space precipitation streaks, composited at output resolution after the
   // AA resolve so they stay crisp (TAA would otherwise smear them) and tonemap
   // with the scene. Driven by weather; surface wetness was applied pre-resolve.
-  if (settings_.precipitation > 0.0f && !path_trace) {
+  if (settings_.weather.precipitation > 0.0f && !path_trace) {
     Precipitation::Frame pf;
     pf.inv_view_proj = globals.inv_view_proj;
     pf.camera_pos = view.camera.eye;
     pf.time = static_cast<f32>(time_seconds_);
-    pf.intensity = settings_.precipitation;
-    pf.snow = settings_.precip_snow;
+    pf.intensity = settings_.weather.precipitation;
+    pf.snow = settings_.weather.snow;
     post_input = precipitation_.AddToGraph(graph_, post_input, {post_width, post_height}, pf);
   }
 
