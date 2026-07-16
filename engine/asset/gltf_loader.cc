@@ -1,9 +1,11 @@
 #include "asset/gltf_loader.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <string_view>
 
 #include "asset/asset_id.h"
 #include "core/log.h"
@@ -248,6 +250,25 @@ bool LoadGltfScene(const std::string& path, GltfScene* out) {
           n.find("flag") != std::string::npos || n.find("cloth") != std::string::npos ||
           n.find("fabric") != std::string::npos || n.find("drape") != std::string::npos) {
         material.wind = true;
+      }
+      // Water heuristic: glTF has no water extension either, so name-tag water
+      // surfaces onto the dedicated water pipeline (waves, refraction, and the
+      // sims/caustics that key off a water submesh being present). Whole-token
+      // matches only, so "watermelon" and "waterfall" stay ordinary materials.
+      auto has_token = [&n](std::string_view token) {
+        size_t pos = 0;
+        while ((pos = n.find(token, pos)) != std::string::npos) {
+          bool starts = pos == 0 || !std::isalpha(static_cast<unsigned char>(n[pos - 1]));
+          size_t end = pos + token.size();
+          bool ends = end >= n.size() || !std::isalpha(static_cast<unsigned char>(n[end]));
+          if (starts && ends) return true;
+          ++pos;
+        }
+        return false;
+      };
+      if (has_token("water") || has_token("ocean") || has_token("sea") || has_token("lake") ||
+          has_token("river")) {
+        material.is_water = true;
       }
     }
   }
