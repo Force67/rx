@@ -120,6 +120,7 @@ class DemoScenes {
   f32 water_time_ = 0;                    // wave clock for the Gerstner proxy
   // Weather demo thunderstorm scheduler state.
   bool storm_enabled_ = false;
+  bool weather_scene_ = false;  // weather demo active: re-clamp its storm sun
   f32 storm_time_ = 0;
   f32 storm_next_strike_ = 0;
   u32 gpu_particle_count_ = 0;  // > 0 selects the gpu-simulated fountain

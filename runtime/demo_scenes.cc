@@ -229,6 +229,13 @@ void DemoScenes::ApplyRenderPolicy() {
 }
 
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
+  // The viewer's clock rewrites the sun on hour steps and would replace the
+  // weather scene's staged overcast gloom with a full noon sun (the clock
+  // keeps driving so RX_GAME_HOUR still turns the demo to night). The deck's
+  // gloom is a cap on the direct light, not an absolute, so re-clamp per frame.
+  if (weather_scene_) {
+    renderer_.settings().sun_intensity = std::min(renderer_.settings().sun_intensity, 1.3f);
+  }
   if (storm_enabled_) UpdateStorm(dt);
   if (scene_hook_) scene_hook_->Emit(dt, view);
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
@@ -2711,6 +2718,7 @@ void DemoScenes::CreateWeatherDemoScene() {
   // Rain means a thunderstorm: the demo plays the game's role and schedules
   // strikes (rx renders everything about them). The test hook fires the first
   // strike after exactly 1 s; the random storm rolls one every 6-9 s.
+  weather_scene_ = true;
   storm_enabled_ = rs.weather.precipitation > 0.0f && !rs.weather.snow;
   storm_next_strike_ = WeatherStrikeTest.get() > 0.0f ? 1.0f : 4.0f;
 
