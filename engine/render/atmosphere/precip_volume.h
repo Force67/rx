@@ -58,7 +58,12 @@ class PrecipVolume {
   // ray_query builds the additional rt vertex variant.
   bool Initialize(Device& device, Format color_format, bool ray_query);
   void Destroy(Device& device);
-  bool available() const { return static_cast<bool>(pipeline_); }
+  // Every mandatory pipeline; the rt variant stays optional (its absence just
+  // falls back to the unshadowed vertex stage at draw time).
+  bool available() const {
+    return static_cast<bool>(pipeline_) && static_cast<bool>(splash_pipeline_) &&
+           static_cast<bool>(froxel_dummy_.view);
+  }
 
   // Draws the rain/snow volume (and splashes when raining) over the lit scene:
   // color is the lit target, depth the prepass depth export (soft fade +
@@ -72,6 +77,10 @@ class PrecipVolume {
   PipelineHandle pipeline_;         // rain/snow, unshadowed vertex stage
   PipelineHandle pipeline_rt_;      // + per-particle sun ray query in the vs
   PipelineHandle splash_pipeline_;  // ripple rings + crown flashes
+  // 1x1x1 stand-in bound when froxel fog never initialized (its Initialize
+  // failure is nonfatal), so the descriptor is always valid; the froxel flag
+  // in the push already zeroes the term.
+  GpuImage froxel_dummy_;
 };
 
 }  // namespace rx::render

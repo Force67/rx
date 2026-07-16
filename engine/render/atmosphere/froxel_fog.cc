@@ -195,7 +195,11 @@ void FroxelFog::AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandl
                                    Bind::Storage(1, scatter_[slot])});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch((kSizeX + 7) / 8, (kSizeY + 7) / 8, 1);
+        // The integrated volume feeds the compute apply AND fragment-stage
+        // samplers (translucents, particles, precipitation), so the write must
+        // be visible to both read scopes.
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
       });
 
   graph.AddPass(

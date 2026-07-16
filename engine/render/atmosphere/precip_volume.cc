@@ -86,6 +86,27 @@ bool PrecipVolume::Initialize(Device& device, Format color_format, bool ray_quer
     RX_ERROR("precip splash pipeline creation failed");
     return false;
   }
+
+  // Froxel fog may never come up (its Initialize failure is nonfatal), yet
+  // slot 2 must always hold a valid Texture3D descriptor. A cleared 1x1x1
+  // stand-in fills it then; the froxel flag in the push zeroes the term.
+  froxel_dummy_ = device.CreateImage3D(
+      Format::kRGBA16Float, 1, 1, 1,
+      kTextureUsageStorage | kTextureUsageSampled | kTextureUsageTransferDst);
+  if (!froxel_dummy_) {
+    RX_ERROR("precip froxel stand-in creation failed");
+    return false;
+  }
+  device.ImmediateSubmit([this](CommandList& cmd) {
+    TextureBarrier to_clear[1] = {
+        Transition(froxel_dummy_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+    cmd.TextureBarriers(to_clear);
+    const f32 zero[4] = {0, 0, 0, 0};
+    cmd.ClearColor(froxel_dummy_, zero);
+    TextureBarrier to_general[1] = {
+        Transition(froxel_dummy_, ResourceState::kCopyDst, ResourceState::kGeneral)};
+    cmd.TextureBarriers(to_general);
+  });
   return true;
 }
 
@@ -96,6 +117,8 @@ void PrecipVolume::Destroy(Device& device) {
   pipeline_rt_ = {};
   device.DestroyPipeline(splash_pipeline_);
   splash_pipeline_ = {};
+  device.DestroyImage(froxel_dummy_);
+  froxel_dummy_ = {};
 }
 
 void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
@@ -162,12 +185,18 @@ void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
         ctx.cmd->BeginRendering({.extent = target.extent, .colors = attachments});
 
         // The occlusion map sits in kShaderReadAll; the froxel volume stays in
-        // GENERAL like every other consumer of it.
+        // GENERAL like every other consumer of it. When froxel fog never
+        // initialized its view is null - the stand-in keeps the descriptor
+        // valid (the push flag already zeroes the term).
+        const TextureView froxel_view =
+            frame.froxel_volume ? frame.froxel_volume : froxel_dummy_.view;
+        const SamplerHandle froxel_sampler =
+            frame.froxel_sampler ? frame.froxel_sampler : frame.occlusion_sampler;
         ctx.cmd->BindPipeline(rt ? pipeline_rt_ : pipeline_);
         base::Vector<BindingItem> items;
         items.push_back(Bind::Combined(0, frame.occlusion, frame.occlusion_sampler));
         items.push_back(Bind::Sampled(1, ctx.graph->image(depth)));
-        items.push_back(InGeneral(Bind::Combined(2, frame.froxel_volume, frame.froxel_sampler)));
+        items.push_back(InGeneral(Bind::Combined(2, froxel_view, froxel_sampler)));
         if (rt) items.push_back(Bind::Accel(3, raytracing->tlas(tlas_slot)));
         ctx.cmd->BindTransient(0, {items.data(), items.size()});
         ctx.cmd->Push(push);
@@ -178,7 +207,7 @@ void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
           ctx.cmd->BindTransient(
               0, {Bind::Combined(0, frame.occlusion, frame.occlusion_sampler),
                   Bind::Sampled(1, ctx.graph->image(depth)),
-                  InGeneral(Bind::Combined(2, frame.froxel_volume, frame.froxel_sampler))});
+                  InGeneral(Bind::Combined(2, froxel_view, froxel_sampler))});
           ctx.cmd->Push(push);
           ctx.cmd->Draw(4, splash_count, 0, 0);
         }

@@ -90,6 +90,10 @@ float Ripples(float2 wpos, float time, float rate) {
 float SkyVisibility(float3 world) {
   if (pc.occl2.x <= 0.0) return 1.0;
   float2 base_uv = (world.xz - pc.occl.xy) * pc.occl.z * 0.5 + 0.5;
+  // The map only covers ~100 m around the camera; beyond it the clamped
+  // sampler would smear the border texel across the world, cutting dry or
+  // snow-free bands into distant terrain. Outside the map, assume open sky.
+  if (any(base_uv < 0.0) || any(base_uv > 1.0)) return 1.0;
   const float texel = 1.0 / 512.0;
   const float2 taps[4] = {float2(-1.2, -0.4), float2(1.2, 0.4),
                           float2(-0.4, 1.2), float2(0.4, -1.2)};
