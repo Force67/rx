@@ -43,11 +43,13 @@ struct FrameGlobals {
   float4 water_absorption;     // rgb Beer coeff (1/m), w overall scale (read for caustic depth fade)
   float4 water_material;       // x transmission, y refl foam gain, z crest-sss intensity, w crest-sss exponent
   float4 water_caustics;       // x intensity, y rest height, z depth-fade (1/m), w unused
+  float4 skin_dynamics;        // x pulse phase (rad), y global perfusion offset, z pulse amp, w tension gain
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 
 #include "geometry/shore_wetting.hlsli"  // ShoreWetness / ApplyShoreWetness (env slot 33)
 #include "geometry/water_caustics.hlsli"  // WaterCaustic (env slot 34)
+#include "sss_profile.hlsli"  // skin subsurface profile + blood-flow perfusion
 
 struct PointLight {
   float4 pos_radius;       // xyz position, w influence radius
@@ -240,6 +242,14 @@ struct MaterialParams {
   // (0xffffffff = flat). Only read when kFlagTerrainV2 is set.
   uint4 terrain_albedo[2];
   uint4 terrain_normal[2];
+  // Skin subsurface scattering (kFlagSkin). Physical coefficients pre-mapped
+  // from artist colour/mfp via Kulla-Conty at upload; see sss_profile.hlsli.
+  float3 sss_sigma_t;
+  float sss_anisotropy_g;
+  float3 sss_sigma_s;
+  float sss_perfusion;
+  float3 sss_scatter_color;
+  float sss_ior;
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
 
@@ -327,6 +337,7 @@ static const uint kFrameRcgi = 65536u;  // 1 << 16, indirect diffuse from the RC
 static const uint kFrameShadowMap = 64u;
 static const uint kFrameRestirDi = 1024u;  // 1 << 10, point/spot lights from ReSTIR DI
 static const uint kFrameInterior = 4096u;  // 1 << 12, authored interior ambient + fog
+static const uint kFrameSkinDynamics = 131072u;  // 1 << 17, skin_dynamics valid (blood flow)
 static const float kPi = 3.14159265359;
 static const float kPrefilterMips = 6.0;
 
@@ -339,6 +350,7 @@ struct PsIn {
   [[vk::location(4)]] float4 tangent : TANGENT;
   [[vk::location(5)]] float2 uv : TEXCOORD0;
   [[vk::location(6)]] float4 color : COLOR0;
+  [[vk::location(7)]] float tension : TEXCOORD4;  // per-vertex skin stretch
 };
 
 struct PsOut {
@@ -1320,9 +1332,28 @@ PsOut main(PsIn input) {
   float2 prev = input.prev_clip.xy / input.prev_clip.w;
   output.motion = (prev - curr) * 0.5;
 #if RX_SSS_MRT
-  output.sss = (material.flags & kFlagSkin) != 0u && frame.debug_view == 0u
-                   ? float4(g_skin_diffuse, 1.0)
-                   : float4(0.0, 0.0, 0.0, 0.0);
+  if ((material.flags & kFlagSkin) != 0u && frame.debug_view == 0u) {
+    // Blood-flow modulation: fold the material baseline perfusion with the
+    // frame dynamics (pulse/emotion) and this vertex's tension, then let the
+    // hemoglobin coupling redden/pale the scattered diffuse and tighten the
+    // scatter radius (more blood = shorter mean free path). The per-pixel world
+    // radius rides the alpha channel so the screen-space blur is per-material.
+    float3 sss_diffuse = g_skin_diffuse;
+    float3 st = material.sss_sigma_t;
+    float3 ss = material.sss_sigma_s;
+    float3 scol = material.sss_scatter_color;
+    float perf = material.sss_perfusion;
+    if ((frame.flags & kFrameSkinDynamics) != 0u)
+      perf = SssEffectivePerfusion(perf, frame.skin_dynamics, input.tension);
+    float3 mod_col = scol;
+    SssApplyPerfusion(st, ss, mod_col, perf);
+    sss_diffuse *= mod_col / max(scol, 1e-3);  // redden on flush, pale on blanch
+    float mfp_r = 1.0 / max(st.r, 1e-3);        // red mean free path (world m)
+    float radius = clamp(mfp_r * 3.0, 0.002, 0.03);
+    output.sss = float4(sss_diffuse, radius);
+  } else {
+    output.sss = float4(0.0, 0.0, 0.0, 0.0);
+  }
 #endif
   return output;
 }

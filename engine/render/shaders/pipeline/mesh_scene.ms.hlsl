@@ -50,6 +50,9 @@ struct VsOut {
   [[vk::location(4)]] float4 tangent : TANGENT;
   [[vk::location(5)]] float2 uv : TEXCOORD0;
   [[vk::location(6)]] float4 color : COLOR0;
+  // Matches mesh.vs VsOut / mesh.ps PsIn. The mesh-shader path is static
+  // geometry, so tension is always 0 here.
+  [[vk::location(7)]] float tension : TEXCOORD4;
 };
 
 static const uint kMeshletStride = 48;
@@ -91,6 +94,7 @@ void main(uint3 gid : SV_GroupID, uint tid : SV_GroupIndex, in payload MeshPaylo
     o.tangent = float4(mul((float3x3)push.model, tan.xyz), tan.w);
     o.uv = uv;
     o.color = float4(cpk & 0xff, (cpk >> 8) & 0xff, (cpk >> 16) & 0xff, (cpk >> 24) & 0xff) / 255.0;
+    o.tension = 0.0;  // static geometry
     verts[v] = o;
   }
   for (uint t = tid; t < triangle_count; t += 128) {

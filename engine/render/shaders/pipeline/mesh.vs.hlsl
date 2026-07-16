@@ -103,6 +103,9 @@ struct VsOut {
   [[vk::location(4)]] float4 tangent : TANGENT;
   [[vk::location(5)]] float2 uv : TEXCOORD0;
   [[vk::location(6)]] float4 color : COLOR0;
+  // Per-vertex skin tension (skinning stretch/compress). 0 on static meshes;
+  // the skin pixel shader turns stretch into blanch / compression into pooling.
+  [[vk::location(7)]] float tension : TEXCOORD4;
 };
 
 #ifdef RX_SKINNED
@@ -236,6 +239,18 @@ VsOut main(VsIn input) {
   output.tangent = float4(mul((float3x3)model, local_tangent), input.tangent.w);
   output.uv = input.uv;
   output.color = input.color;
+  // Skin tension proxy: SkinVertex/ApplyMorphs blend the normal without
+  // renormalizing, so its length shrinks where bone rotations diverge (creases,
+  // joints) or an expression morph deforms the surface - exactly the regions
+  // where blood pools or blanches. Unit (=> 0) on undeformed static geometry.
+  {
+    float deform = saturate(1.0 - length(local_normal));
+#if defined(RX_SKINNED)
+    output.tension = deform;
+#else
+    output.tension = (push.morph_count != 0u) ? deform : 0.0;
+#endif
+  }
   // Modulate the albedo by the packed per-instance tint so otherwise identical
   // instances read apart: team/faction colours on skinned actors, owner
   // colours on tinted props (lower-than-1 factors also tame bright blowout).

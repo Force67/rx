@@ -28,19 +28,8 @@ PUSH_CONSTANTS(PathPush, pc);
 
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
-struct MaterialRecord {
-  float4 base_color_factor;
-  float3 emissive;
-  uint base_color_texture;
-  uint flags;
-  float alpha_cutoff;
-  float roughness;
-  float metallic;
-  uint metallic_roughness_texture;
-  uint pad0;
-  uint pad1;
-  uint pad2;
-};
+#include "material_record.hlsli"
+#include "sss_profile.hlsli"
 [[vk::binding(0, 1)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space1);
 [[vk::binding(1, 1)]] StructuredBuffer<GeometryRecord> geometry_records : register(t1, space1);
 [[vk::binding(2, 1)]] StructuredBuffer<MaterialRecord> material_records : register(t2, space1);
@@ -78,11 +67,19 @@ struct Hit {
   float3 normal;
   float3 albedo;
   float3 emissive;
+  bool skin;
+  float3 sss_sigma_t;
+  float3 sss_sigma_s;
+  float3 sss_scatter_color;
 };
 
 Hit TraceClosest(float3 origin, float3 dir) {
   Hit h;
   h.hit = false;
+  h.skin = false;
+  h.sss_sigma_t = 0.0.xxx;
+  h.sss_sigma_s = 0.0.xxx;
+  h.sss_scatter_color = 0.0.xxx;
   RayDesc ray;
   ray.Origin = origin;
   ray.TMin = 0.001;
@@ -121,6 +118,12 @@ Hit TraceClosest(float3 origin, float3 dir) {
   }
   h.albedo = albedo;
   h.emissive = m.emissive;
+  if ((m.flags & RX_MATERIAL_FLAG_SKIN) != 0u) {
+    h.skin = true;
+    h.sss_sigma_t = m.sss_sigma_t;
+    h.sss_sigma_s = m.sss_sigma_s;
+    h.sss_scatter_color = m.sss_scatter_color;
+  }
   return h;
 }
 
@@ -153,6 +156,42 @@ float3 SunDirection(inout uint rng) {
   return normalize(l + t1 * (cos(a) * r) + t2 * (sin(a) * r));
 }
 
+// Diffusion BSSRDF single- + multiple-scattering at a skin hit (King 2013 disk
+// importance sampling of the Christensen-Burley profile). Samples an entry
+// point on the surface around the exit point, does next-event estimation there,
+// and weights by the profile. One probe ray + one shadow ray per call. This is
+// the diffusion baseline the SIGGRAPH-2025 hybrid and the KIT ReSTIR method
+// build upon; here it runs brute force (the reference path tracer denoises by
+// accumulation).
+float3 SubsurfaceRadiance(Hit h, float3 sun, inout uint rng) {
+  float3 d = SssBurleyScale(h.sss_sigma_t, h.sss_scatter_color);
+  // Hero-wavelength channel selection, then sample a radius from its profile.
+  int ch = min(int(Rand(rng) * 3.0), 2);
+  float dch = (ch == 0) ? d.r : ((ch == 1) ? d.g : d.b);
+  float r = SssSampleRadius(dch, Rand(rng));
+  float phi = 2.0 * kPi * Rand(rng);
+  float3 t, bt;
+  SssBuildFrame(h.normal, t, bt);
+  // Sample a disk around the exit point and project back onto the surface along
+  // the normal to find the light-entry point.
+  float3 disk = (t * cos(phi) + bt * sin(phi)) * r;
+  float3 probe_origin = h.position + disk + h.normal * (r + 0.01);
+  Hit e = TraceClosest(probe_origin, -h.normal);
+  if (!e.hit) return 0.0.xxx;
+  if (length(e.position - h.position) > 4.0 * max(d.r, max(d.g, d.b))) return 0.0.xxx;
+  // Per-channel profile at the sampled radius, MIS pdf across the three channels
+  // (each chosen with prob 1/3; the pdf already carries the disk jacobian).
+  float3 Rd = float3(SssBurley(r, d.r), SssBurley(r, d.g), SssBurley(r, d.b));
+  float pdf = (SssBurleyPdf(r, d.r) + SssBurleyPdf(r, d.g) + SssBurleyPdf(r, d.b)) / 3.0;
+  // NEE toward the sun at the entry point.
+  float3 ldir = SunDirection(rng);
+  float ndl = dot(e.normal, ldir);
+  float3 E = 0.0.xxx;
+  if (ndl > 0.0 && !Occluded(e.position + e.normal * 0.002, ldir, 1000.0))
+    E = sun * ndl;
+  return saturate(h.sss_scatter_color) * Rd * E / max(pdf, 1e-6);
+}
+
 float3 Radiance(float3 origin, float3 dir, inout uint rng) {
   float3 throughput = 1.0.xxx;
   float3 radiance = 0.0.xxx;
@@ -165,17 +204,26 @@ float3 Radiance(float3 origin, float3 dir, inout uint rng) {
     }
     radiance += throughput * h.emissive;
 
-    // Next event estimation toward the (soft) sun disk.
-    float3 ldir = SunDirection(rng);
-    float ndl = dot(h.normal, ldir);
-    if (ndl > 0.0 && !Occluded(h.position + h.normal * 0.002, ldir, 1000.0)) {
-      radiance += throughput * h.albedo / kPi * sun * ndl;
-    }
+    if (h.skin) {
+      // Subsurface: direct light enters nearby and diffuses to the exit point.
+      radiance += throughput * SubsurfaceRadiance(h, sun, rng);
+      // Indirect: continue with a diffuse bounce weighted by the scatter colour.
+      dir = CosineHemisphere(h.normal, rng);
+      origin = h.position + h.normal * 0.002;
+      throughput *= saturate(h.sss_scatter_color);
+    } else {
+      // Next event estimation toward the (soft) sun disk.
+      float3 ldir = SunDirection(rng);
+      float ndl = dot(h.normal, ldir);
+      if (ndl > 0.0 && !Occluded(h.position + h.normal * 0.002, ldir, 1000.0)) {
+        radiance += throughput * h.albedo / kPi * sun * ndl;
+      }
 
-    // Diffuse bounce; the cosine pdf cancels the albedo/pi * ndl factors.
-    dir = CosineHemisphere(h.normal, rng);
-    origin = h.position + h.normal * 0.002;
-    throughput *= h.albedo;
+      // Diffuse bounce; the cosine pdf cancels the albedo/pi * ndl factors.
+      dir = CosineHemisphere(h.normal, rng);
+      origin = h.position + h.normal * 0.002;
+      throughput *= h.albedo;
+    }
 
     // Russian-roulette-free fixed depth; kill near-black paths early.
     if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01) break;

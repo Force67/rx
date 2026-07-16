@@ -48,19 +48,7 @@ struct Light {
 // Bindless scene tables (set 1), full material resolution.
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
-struct MaterialRecord {
-  float4 base_color_factor;
-  float3 emissive;
-  uint base_color_texture;
-  uint flags;
-  float alpha_cutoff;
-  float roughness;
-  float metallic;
-  uint metallic_roughness_texture;
-  uint pad0;
-  uint pad1;
-  uint pad2;
-};
+#include "material_record.hlsli"
 [[vk::binding(0, 1)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space1);
 [[vk::binding(1, 1)]] StructuredBuffer<GeometryRecord> geometry_records : register(t1, space1);
 [[vk::binding(2, 1)]] StructuredBuffer<MaterialRecord> material_records : register(t2, space1);

@@ -59,10 +59,25 @@ class BindlessRegistry {
     u32 terrain_weight_texture = kInvalidIndex;  // terrain per-cell weight/control map
     u32 pad2 = 0;  // pad to 64B: the std430 array stride rounds up to a multiple
                    // of 16 (float4 alignment), so every shader struct must match.
+    // --- Skin subsurface scattering (appended; existing offsets unchanged).
+    // Physical coefficients pre-mapped from artist colour/mfp via Kulla-Conty at
+    // upload; only meaningful when flags has kMaterialSkin. Mirrored by the
+    // shared shaders/material_record.hlsli. sigma_a = sigma_t - sigma_s.
+    f32 sss_sigma_t[3] = {0, 0, 0};  // row 4: extinction (1/world-unit)
+    f32 sss_anisotropy_g = 0.0f;     //        Henyey-Greenstein g
+    f32 sss_sigma_s[3] = {0, 0, 0};  // row 5: scattering coefficient
+    f32 sss_perfusion = 0.0f;        //        dynamic hemoglobin 0..1
+    f32 sss_scatter_color[3] = {0, 0, 0};  // row 6: multiple-scatter tint
+    f32 sss_ior = 1.4f;              //        boundary index of refraction
   };
   static_assert(sizeof(MaterialRecord) % 16 == 0, "bindless material stride must be 16-aligned");
+  static_assert(sizeof(MaterialRecord) == 112, "bindless material record must match shaders/material_record.hlsli");
   static constexpr u32 kMaterialAlphaMask = 1u << 0;
   static constexpr u32 kMaterialTerrain = 1u << 1;
+  // Skin subsurface scattering. Bit value matches MaterialSystem::kFlagSkin and
+  // RX_MATERIAL_FLAG_SKIN in shaders/material_record.hlsli so the raster and RT
+  // flag namespaces agree.
+  static constexpr u32 kMaterialSkin = 1u << 6;
 
   static std::unique_ptr<BindlessRegistry> Create(Device& device);
   ~BindlessRegistry();
