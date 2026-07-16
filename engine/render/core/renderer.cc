@@ -79,6 +79,14 @@ base::Option<int> SdfDebugOpt{"sdf.debug", 0, "RX_SDF_DEBUG"};
 base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
 // 0 shaded, 1 cluster tint, 2 lod tint, 3 sw/hw raster path.
 base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
+// Alpha-tested vegetation in the rays (AC Shadows opaque-approximation).
+// RX_RT_VEG shrinks each masked mesh's realtime stand-in by its baked average
+// opacity so realtime diffuse GI / AO / shadow rays get correct-on-average
+// foliage occlusion; 0 forces the stand-in to full size (today's force-opaque
+// behavior). RX_RT_VEG_ANYHIT switches specular reflections to a bounded
+// real-alpha any-hit test (the approximation reads wrong in sharp reflections).
+base::Option<bool> RtVegOpt{"rt.veg", true, "RX_RT_VEG"};
+base::Option<bool> RtVegAnyHitOpt{"rt.veg.anyhit", true, "RX_RT_VEG_ANYHIT"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true, "RX_ADAPTIVE_WATER"};
 base::Option<bool> WaterFieldOpt{"water.field", true, "RX_WATER_FIELD"};
@@ -210,6 +218,48 @@ bool SphereOutsideFrustum(const f32 planes[5][4], const Vec3& c, f32 r) {
     }
   }
   return false;
+}
+
+// Average opacity of an alpha-masked submesh for the vegetation opaque
+// approximation. Samples the material's baked alpha grid at each triangle's
+// three vertices, edge midpoints and centroid (7 points in barycentric UV
+// space -- a cheap stand-in for integrating covered texels over the footprint)
+// and area-weights across the submesh. Returns 1.0 (no shrink, i.e. today's
+// force-opaque behavior) when the alpha was not decoded: opaque texture, a
+// format without a CPU alpha decoder (BC7), or a missing material.
+f32 MaskedSubmeshOpacity(const base::Vector<asset::Vertex>& verts,
+                         const base::Vector<u32>& indices, const GpuSubmesh& sm,
+                         const MaterialSystem::AlphaCoverage* cov) {
+  if (!cov) return 1.0f;
+  auto S = [&](const f32 uv0[2], const f32 uv1[2], const f32 uv2[2], f32 w0, f32 w1, f32 w2) {
+    return cov->Sample(uv0[0] * w0 + uv1[0] * w1 + uv2[0] * w2,
+                       uv0[1] * w0 + uv1[1] * w1 + uv2[1] * w2);
+  };
+  f64 weighted = 0.0, area_sum = 0.0;
+  for (u32 e = 0; e + 3 <= sm.index_count; e += 3) {
+    u32 i0 = indices[sm.index_offset + e], i1 = indices[sm.index_offset + e + 1],
+        i2 = indices[sm.index_offset + e + 2];
+    if (i0 >= verts.size() || i1 >= verts.size() || i2 >= verts.size()) continue;
+    const asset::Vertex& a = verts[i0];
+    const asset::Vertex& b = verts[i1];
+    const asset::Vertex& c = verts[i2];
+    f32 mean_a = (S(a.uv, b.uv, c.uv, 1, 0, 0) + S(a.uv, b.uv, c.uv, 0, 1, 0) +
+                  S(a.uv, b.uv, c.uv, 0, 0, 1) + S(a.uv, b.uv, c.uv, 0.5f, 0.5f, 0) +
+                  S(a.uv, b.uv, c.uv, 0, 0.5f, 0.5f) + S(a.uv, b.uv, c.uv, 0.5f, 0, 0.5f) +
+                  S(a.uv, b.uv, c.uv, 1.f / 3, 1.f / 3, 1.f / 3)) /
+                 7.0f;
+    f32 e1[3] = {b.position[0] - a.position[0], b.position[1] - a.position[1],
+                 b.position[2] - a.position[2]};
+    f32 e2[3] = {c.position[0] - a.position[0], c.position[1] - a.position[1],
+                 c.position[2] - a.position[2]};
+    f32 cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2],
+        cz = e1[0] * e2[1] - e1[1] * e2[0];
+    f32 area = 0.5f * std::sqrt(cx * cx + cy * cy + cz * cz);
+    weighted += static_cast<f64>(mean_a) * area;
+    area_sum += area;
+  }
+  if (area_sum <= 0.0) return cov->mean;
+  return static_cast<f32>(weighted / area_sum);
 }
 
 }  // namespace
@@ -1444,13 +1494,97 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
                                                  static_cast<u32>(geometries.size()));
     if (gpu.bindless_index == BindlessRegistry::kInvalidIndex) gpu.bindless_index = 0;
   }
+  // Opaque-approximation variant for alpha-masked (vegetation) submeshes. Each
+  // masked triangle is duplicated with its own three vertices, shrunk about its
+  // centroid by sqrt(average opacity) so the stand-in's area matches the average
+  // covered fraction, and flagged OPAQUE. Realtime diffuse GI / AO / shadow rays
+  // hit this via kRayMaskApprox and skip the real (non-opaque) masked geometry,
+  // which the path tracer and reflections keep. RX_RT_VEG=0 forces the shrink
+  // factor to 1 (identical to the real triangles), reproducing today's
+  // force-opaque behavior for A/B. Realtime-tlas meshes only (no_rt fill is
+  // path-trace-only and never hits realtime rays).
+  base::Vector<AccelTriangles> approx_accel;
+  if (bindless_ && raytracing_ && material_system_ && !gpu.all_blend && !gpu.no_rt) {
+    const bool veg = RtVegOpt;
+    base::Vector<asset::Vertex> approx_verts;
+    base::Vector<u32> approx_indices;
+    base::Vector<BindlessRegistry::GeometryRecord> approx_geoms;
+    struct ApproxRange {
+      u32 index_offset;
+      u32 index_count;
+    };
+    base::Vector<ApproxRange> approx_ranges;
+    for (const GpuSubmesh& submesh : gpu.submeshes) {
+      if (!submesh.alpha_mask || submesh.blend || submesh.index_count == 0) continue;
+      f32 opacity =
+          veg ? MaskedSubmeshOpacity(all_verts, all_indices, submesh,
+                                     material_system_->material_base_alpha(submesh.material))
+              : 1.0f;
+      const f32 s = std::sqrt(std::clamp(opacity, 0.02f, 1.0f));
+      const u32 base_index = static_cast<u32>(approx_indices.size());
+      for (u32 e = 0; e + 3 <= submesh.index_count; e += 3) {
+        const u32 idx[3] = {all_indices[submesh.index_offset + e],
+                            all_indices[submesh.index_offset + e + 1],
+                            all_indices[submesh.index_offset + e + 2]};
+        if (idx[0] >= all_verts.size() || idx[1] >= all_verts.size() ||
+            idx[2] >= all_verts.size())
+          continue;
+        f32 cen[3] = {0, 0, 0};
+        for (u32 k = 0; k < 3; ++k)
+          for (u32 c = 0; c < 3; ++c) cen[c] += all_verts[idx[k]].position[c] / 3.0f;
+        for (u32 k = 0; k < 3; ++k) {
+          asset::Vertex v = all_verts[idx[k]];  // keep normal/tangent/uv/color for hit shading
+          for (u32 c = 0; c < 3; ++c) v.position[c] = cen[c] + s * (v.position[c] - cen[c]);
+          approx_indices.push_back(static_cast<u32>(approx_verts.size()));
+          approx_verts.push_back(v);
+        }
+      }
+      const u32 count = static_cast<u32>(approx_indices.size()) - base_index;
+      if (count == 0) continue;
+      approx_geoms.push_back({base_index, material_system_->bindless_material(submesh.material)});
+      approx_ranges.push_back({base_index, count});
+    }
+    if (!approx_verts.empty()) {
+      BufferUsageFlags approx_usage =
+          kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress | kBufferUsageStorage;
+      gpu.rt_approx_vertices = device_->CreateBufferWithData(
+          ByteSpan(reinterpret_cast<const u8*>(approx_verts.data()),
+                   approx_verts.size() * sizeof(asset::Vertex)),
+          kBufferUsageVertex | approx_usage);
+      gpu.rt_approx_indices = device_->CreateBufferWithData(
+          ByteSpan(reinterpret_cast<const u8*>(approx_indices.data()),
+                   approx_indices.size() * sizeof(u32)),
+          kBufferUsageIndex | approx_usage);
+      if (gpu.rt_approx_vertices && gpu.rt_approx_indices) {
+        gpu.rt_approx_bindless =
+            bindless_->RegisterMesh(gpu.rt_approx_vertices, gpu.rt_approx_indices,
+                                    approx_geoms.data(), static_cast<u32>(approx_geoms.size()));
+        if (gpu.rt_approx_bindless == BindlessRegistry::kInvalidIndex) gpu.rt_approx_bindless = 0;
+        for (const ApproxRange& r : approx_ranges) {
+          approx_accel.push_back({.vertex_address = gpu.rt_approx_vertices.address,
+                                  .vertex_stride = sizeof(asset::Vertex),
+                                  .vertex_count = static_cast<u32>(approx_verts.size()),
+                                  .vertex_format = Format::kRGB32Float,
+                                  .index_address =
+                                      gpu.rt_approx_indices.address + r.index_offset * sizeof(u32),
+                                  .index_count = r.index_count,
+                                  .index_type = IndexType::kUint32,
+                                  .opaque = true});
+        }
+        gpu.rt_approx = !approx_accel.empty();
+      }
+    }
+  }
   // Re-uploading under an existing key (the builtin biped goes up once for
   // the test spawn and again for the npc template) must free the previous
   // buffers or they leak until vkDestroyDevice complains.
   const bool replacing_mesh = meshes_.find(mesh_key) != nullptr;
   if (GpuMesh* previous = meshes_.find(mesh_key)) {
     device_->WaitIdle();  // uploads happen at load time; never per frame
-    if (raytracing_) raytracing_->RemoveBlas(mesh_key);
+    if (raytracing_) {
+      raytracing_->RemoveBlas(mesh_key);
+      raytracing_->RemoveApproxBlas(mesh_key);
+    }
     device_->DestroyBuffer(previous->vertices);
     device_->DestroyBuffer(previous->indices);
     if (previous->skinning) device_->DestroyBuffer(previous->skinning);
@@ -1458,6 +1592,8 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     if (previous->meshlets) device_->DestroyBuffer(previous->meshlets);
     if (previous->meshlet_vertices) device_->DestroyBuffer(previous->meshlet_vertices);
     if (previous->meshlet_triangles) device_->DestroyBuffer(previous->meshlet_triangles);
+    if (previous->rt_approx_vertices) device_->DestroyBuffer(previous->rt_approx_vertices);
+    if (previous->rt_approx_indices) device_->DestroyBuffer(previous->rt_approx_indices);
   }
   meshes_[mesh_key] = gpu;
   instances_.RefreshMesh(*device_, mesh_key, gpu.bounds_center, gpu.bounds_radius,
@@ -1472,6 +1608,9 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // Pure transparency never enters the tlas: water occluding rtao and
   // shadow rays would black out everything under it.
   if (raytracing_ && !gpu.all_blend && include_rt) raytracing_->BuildBlas(mesh_key, gpu);
+  // Opaque-approximation BLAS for the shrunk vegetation stand-in (see above).
+  if (raytracing_ && gpu.rt_approx && !approx_accel.empty())
+    raytracing_->BuildApproxBlas(mesh_key, approx_accel);
   // SDF: generate a per-mesh signed distance field from the lod-0 CPU geometry.
   // The SDF stands in for RCGI's realtime visibility rays (RX_RAY_MASK_REALTIME),
   // so it must mirror that TLAS set exactly: skip no_rt fill geometry entirely
@@ -2697,6 +2836,15 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                            .custom_index = mesh->bindless_index,
                            .mask = mask,
                            .transform = item.transform});
+      // Vegetation stand-in: a second instance on the opaque-approximation BLAS,
+      // masked kRayMaskApprox so only the realtime diffuse/AO/shadow rays hit it.
+      if (mesh->rt_approx) {
+        instances.push_back({.mesh_key = item.mesh,
+                             .custom_index = mesh->rt_approx_bindless,
+                             .mask = static_cast<u8>(kRayMaskApprox),
+                             .approx = true,
+                             .transform = item.transform});
+      }
     }
     for (const InstanceStore::Group& group : instances_.groups()) {
       if (!group.alive) continue;
@@ -2709,6 +2857,13 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                              .custom_index = mesh->bindless_index,
                              .mask = mask,
                              .transform = transform});
+        if (mesh->rt_approx) {
+          instances.push_back({.mesh_key = group.mesh,
+                               .custom_index = mesh->rt_approx_bindless,
+                               .mask = static_cast<u8>(kRayMaskApprox),
+                               .approx = true,
+                               .transform = transform});
+        }
       }
     }
     // Grow the TLAS now, on the build thread, so the record-time BuildTlas never
@@ -3643,6 +3798,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       rfl.near_plane = 0.1f;
       rfl.hit_dist_params = NrdDenoiser::kHitDistParams;
       rfl.ddgi = ddgi_active;
+      // Real-alpha any-hit only when the vegetation feature is on overall.
+      rfl.veg_anyhit = RtVegOpt && RtVegAnyHitOpt;
       ResourceHandle raw = reflection_trace_.AddToGraph(
           graph_, *raytracing_, tlas_slot, bindless_->set(), depth_export, normals,
           environment_->prefiltered_view(),
@@ -4965,6 +5122,8 @@ void Renderer::Shutdown() {
       if (kv.value.meshlets) device_->DestroyBuffer(kv.value.meshlets);
       if (kv.value.meshlet_vertices) device_->DestroyBuffer(kv.value.meshlet_vertices);
       if (kv.value.meshlet_triangles) device_->DestroyBuffer(kv.value.meshlet_triangles);
+      if (kv.value.rt_approx_vertices) device_->DestroyBuffer(kv.value.rt_approx_vertices);
+      if (kv.value.rt_approx_indices) device_->DestroyBuffer(kv.value.rt_approx_indices);
     }
     meshes_.clear();
     taa_.Destroy(*device_);

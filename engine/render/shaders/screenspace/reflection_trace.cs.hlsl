@@ -81,6 +81,31 @@ struct MaterialRecord {
 
 static const float kPi = 3.14159265359;
 static const uint kFlagDdgi = 1u;
+// RX_RT_VEG_ANYHIT: evaluate the real alpha texture on masked (vegetation) hits
+// via a bounded any-hit loop instead of the force-opaque approximation, which
+// is visibly wrong in sharp reflections (AC Shadows finding). Capped at
+// kMaxAlphaTests candidate evaluations; beyond that the next candidate commits.
+static const uint kFlagVegAnyHit = 2u;
+static const uint kMaxAlphaTests = 4u;
+
+// Whether a non-opaque (masked) candidate hit survives its alpha test: the
+// material's base-color alpha at the interpolated UV vs the material cutoff.
+bool CandidateAlphaPasses(uint instance_id, uint geometry_index, uint primitive_index,
+                          float2 bary) {
+  MeshRecord mesh = mesh_records[NonUniformResourceIndex(instance_id)];
+  GeometryRecord geometry = geometry_records[mesh.geometry_offset + geometry_index];
+  uint3 tri = RxLoadTriangle(mesh, geometry.index_offset + primitive_index * 3);
+  float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
+  float2 huv = RxLoadUv(mesh, tri[0]) * w[0] + RxLoadUv(mesh, tri[1]) * w[1] +
+               RxLoadUv(mesh, tri[2]) * w[2];
+  MaterialRecord m = material_records[NonUniformResourceIndex(geometry.material_index)];
+  float alpha = m.base_color_factor.a;
+  if (m.base_color_texture != 0xffffffffu) {
+    alpha *= bindless_textures[NonUniformResourceIndex(m.base_color_texture)]
+                 .SampleLevel(bindless_sampler, huv, 0.0).a;
+  }
+  return alpha >= m.alpha_cutoff;
+}
 
 float3 OctDecode(float2 o) {
   float3 d = float3(o.x, 1.0 - abs(o.x) - abs(o.y), o.y);
@@ -198,9 +223,28 @@ void main(uint3 id : SV_DispatchThreadID) {
   ray.TMin = 0.02;
   ray.Direction = dir;
   ray.TMax = 200.0;
-  RayQuery<RAY_FLAG_FORCE_OPAQUE> rq;
+  // Specular reflections keep the real masked (vegetation) geometry -- the
+  // opaque approximation reads wrong in sharp reflections. Masked triangles are
+  // non-opaque in the tlas; run the RayQuery candidate loop and alpha-test them
+  // against the real texture, capped at kMaxAlphaTests evaluations. With the
+  // any-hit path off (RX_RT_VEG_ANYHIT=0 or RX_RT_VEG=0) every candidate commits
+  // immediately, reproducing the old force-opaque behavior.
+  bool veg_anyhit = (pc.flags & kFlagVegAnyHit) != 0u;
+  RayQuery<RAY_FLAG_NONE> rq;
   rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
-  rq.Proceed();
+  uint alpha_tests = 0u;
+  while (rq.Proceed()) {
+    if (rq.CandidateType() == CANDIDATE_NON_OPAQUE_TRIANGLE) {
+      bool commit = true;
+      if (veg_anyhit && alpha_tests < kMaxAlphaTests) {
+        ++alpha_tests;
+        commit = CandidateAlphaPasses(rq.CandidateInstanceID(), rq.CandidateGeometryIndex(),
+                                      rq.CandidatePrimitiveIndex(),
+                                      rq.CandidateTriangleBarycentrics());
+      }
+      if (commit) rq.CommitNonOpaqueTriangleHit();
+    }
+  }
 
   float3 radiance;
   float hit_t = 200.0;

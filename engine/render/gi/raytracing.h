@@ -27,9 +27,17 @@ struct RayTracingSettings {
 // kRayMaskRealtime; the path-tracer family traces with kRayMaskPathTrace,
 // which additionally sees no_rt fill geometry (grass-like meshes that are
 // too dense for realtime rays but wanted for ground-truth light transport).
+//
+// kRayMaskApprox tags the opaque-approximation variant of alpha-masked
+// vegetation (see the shrunk-triangle "opaque approximation" BLAS built by
+// BuildApproxBlas). Realtime diffuse GI / AO / shadow rays trace
+// kRayMaskRealtime|kRayMaskApprox with RAY_FLAG_CULL_NON_OPAQUE and hit the
+// stand-in instead of the real (non-opaque) masked geometry; reflections and
+// the path tracer never carry the approx bit, so no ray sees both variants.
 enum RayMask : u8 {
   kRayMaskRealtime = 0x01,
   kRayMaskPathTrace = 0x02,
+  kRayMaskApprox = 0x04,
   kRayMaskAll = 0xff,
 };
 
@@ -47,6 +55,10 @@ class RayTracingContext {
     u32 custom_index = 0;  // shader-visible instanceCustomIndex (bindless mesh record)
     u8 mask = kRayMaskAll;  // RayMask bits; rays only hit instances whose mask
                             // intersects the query's InstanceInclusionMask
+    // Points the instance at this mesh's opaque-approximation BLAS (built by
+    // BuildApproxBlas) instead of its regular BLAS. Used with kRayMaskApprox
+    // to route realtime diffuse/AO/shadow rays to the vegetation stand-in.
+    bool approx = false;
     Mat4 transform = Mat4::Identity();
   };
 
@@ -64,6 +76,15 @@ class RayTracingContext {
   // build input usage.
   bool BuildBlas(u64 mesh_key, const GpuMesh& mesh);
   void RemoveBlas(u64 mesh_key);
+
+  // Builds the opaque-approximation BLAS for an alpha-masked mesh: a fully
+  // OPAQUE structure over the caller-provided (already centroid-shrunk)
+  // vegetation geometry. Keyed like BuildBlas; the caller owns the vertex/
+  // index buffers (they must outlive the BLAS and carry accel-build-input
+  // usage). Instances with Instance::approx set resolve to this structure.
+  bool BuildApproxBlas(u64 mesh_key, const base::Vector<AccelTriangles>& geometries);
+  void RemoveApproxBlas(u64 mesh_key);
+  bool HasApproxBlas(u64 mesh_key) const { return approx_blas_.contains(mesh_key); }
 
   // Whether a blas already exists for this mesh (BuildBlas is idempotent, but
   // callers re-registering bindless geometry need to skip already-built meshes).
@@ -101,6 +122,8 @@ class RayTracingContext {
 
   explicit RayTracingContext(Device& device) : device_(device) {}
 
+  // Shared build path for BuildBlas / BuildApproxBlas (create, build, compact).
+  bool BuildBlasFromGeometries(const base::Vector<AccelTriangles>& geometries, Blas& out);
   bool EnsureTlasCapacity(Tlas& tlas, u32 instance_count);
   bool EnsureBlasScratch(u64 size);
   void DestroyTlas(Tlas& tlas);
@@ -108,6 +131,8 @@ class RayTracingContext {
   Device& device_;
   RayTracingSettings settings_;
   base::UnorderedMap<u64, Blas> blas_;
+  // Opaque-approximation BLASes for alpha-masked vegetation, keyed like blas_.
+  base::UnorderedMap<u64, Blas> approx_blas_;
   // Reused across builds. Freeing scratch right after the fence tripped
   // lavapipe, whose build workers can outlive the signal; a persistent
   // arena avoids both that and the per-build allocation.

@@ -107,7 +107,7 @@ ResourceHandle ReflectionTrace::AddToGraph(RenderGraph& graph, RayTracingContext
         p.hit_b = frame.hit_dist_params[1];
         p.hit_c = frame.hit_dist_params[2];
         p.frame_index = static_cast<f32>(frame.frame_index % 64u);
-        p.flags = frame.ddgi ? 1u : 0u;
+        p.flags = (frame.ddgi ? 1u : 0u) | (frame.veg_anyhit ? 2u : 0u);
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(0, {items.data(), items.size()});
         ctx.cmd->BindSet(1, bindless_set);

@@ -50,6 +50,7 @@ std::unique_ptr<RayTracingContext> RayTracingContext::Create(Device& device) {
 
 RayTracingContext::~RayTracingContext() {
   for (auto kv : blas_) device_.DestroyAccelStruct(kv.value.handle);
+  for (auto kv : approx_blas_) device_.DestroyAccelStruct(kv.value.handle);
   device_.DestroyBuffer(blas_scratch_);
   for (Tlas& tlas : tlas_) DestroyTlas(tlas);
 }
@@ -69,12 +70,8 @@ void RayTracingContext::DestroyTlas(Tlas& tlas) {
   tlas = {};
 }
 
-bool RayTracingContext::BuildBlas(u64 mesh_key, const GpuMesh& mesh) {
-  if (blas_.contains(mesh_key)) return true;
-  if (mesh.vertex_count == 0 || mesh.index_count == 0) return false;
-  if (mesh.vertices.address == 0 || mesh.indices.address == 0) return false;
-
-  base::Vector<AccelTriangles> geometries = BlasGeometries(mesh);
+bool RayTracingContext::BuildBlasFromGeometries(
+    const base::Vector<AccelTriangles>& geometries, Blas& out) {
   if (geometries.empty()) return false;
 
   // Compaction runs when the backend has the size query (vulkan; d3d12 stubs
@@ -126,8 +123,28 @@ bool RayTracingContext::BuildBlas(u64 mesh_key, const GpuMesh& mesh) {
     device_.DestroyCompactionQuery(query);
   }
   blas.address = device_.accel_address(blas.handle);
+  out = blas;
+  return true;
+}
 
+bool RayTracingContext::BuildBlas(u64 mesh_key, const GpuMesh& mesh) {
+  if (blas_.contains(mesh_key)) return true;
+  if (mesh.vertex_count == 0 || mesh.index_count == 0) return false;
+  if (mesh.vertices.address == 0 || mesh.indices.address == 0) return false;
+
+  base::Vector<AccelTriangles> geometries = BlasGeometries(mesh);
+  Blas blas;
+  if (!BuildBlasFromGeometries(geometries, blas)) return false;
   blas_.emplace(mesh_key, blas);
+  return true;
+}
+
+bool RayTracingContext::BuildApproxBlas(u64 mesh_key,
+                                        const base::Vector<AccelTriangles>& geometries) {
+  if (approx_blas_.contains(mesh_key)) return true;
+  Blas blas;
+  if (!BuildBlasFromGeometries(geometries, blas)) return false;
+  approx_blas_.emplace(mesh_key, blas);
   return true;
 }
 
@@ -136,6 +153,13 @@ void RayTracingContext::RemoveBlas(u64 mesh_key) {
   if (!blas) return;
   if (blas->handle) device_.DestroyAccelStruct(blas->handle);
   blas_.erase(mesh_key);
+}
+
+void RayTracingContext::RemoveApproxBlas(u64 mesh_key) {
+  Blas* blas = approx_blas_.find(mesh_key);
+  if (!blas) return;
+  if (blas->handle) device_.DestroyAccelStruct(blas->handle);
+  approx_blas_.erase(mesh_key);
 }
 
 bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
@@ -175,7 +199,8 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot,
   base::Vector<TlasInstance> gpu_instances;
   gpu_instances.reserve(instances.size());
   for (const Instance& instance : instances) {
-    const Blas* blas = blas_.find(instance.mesh_key);
+    const Blas* blas =
+        instance.approx ? approx_blas_.find(instance.mesh_key) : blas_.find(instance.mesh_key);
     if (!blas) continue;
     TlasInstance gpu{};
     ToInstanceTransform(instance.transform, gpu.transform);

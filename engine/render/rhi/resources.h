@@ -87,6 +87,17 @@ struct GpuMesh {
   base::Vector<GpuSubmesh> submeshes;  // lod 0
   base::Vector<GpuLod> lods;           // extra lods (1+), selected by distance
 
+  // Opaque-approximation variant of this mesh's alpha-masked (vegetation)
+  // submeshes: each masked triangle duplicated and shrunk about its centroid by
+  // the baked average opacity, then flagged OPAQUE. Realtime diffuse GI / AO /
+  // shadow rays hit this stand-in (RX_RAY_MASK_APPROX / kRayMaskApprox) rather
+  // than the real masked geometry, which stays non-opaque for the path tracer
+  // and specular reflections. Empty when the mesh has no masked submeshes.
+  GpuBuffer rt_approx_vertices;
+  GpuBuffer rt_approx_indices;
+  u32 rt_approx_bindless = 0;  // bindless mesh record for approx hit shading
+  bool rt_approx = false;      // an approx BLAS/instance exists for this mesh
+
   // Mesh-shader path: lod 0 split into meshlets, read in the mesh shader via
   // buffer device address, so the GpuBuffer::address fields are what the push
   // constants carry. Empty when mesh shaders are unavailable or the mesh is

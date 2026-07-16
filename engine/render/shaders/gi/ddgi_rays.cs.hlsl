@@ -121,8 +121,10 @@ void main(uint3 id : SV_DispatchThreadID) {
   ray.TMin = 0.0;
   ray.Direction = dir;
   ray.TMax = volume.params.z;
-  RayQuery<RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
+  // Vegetation: cull real (non-opaque) masked geometry and hit its shrunk
+  // opaque-approximation stand-in (RX_RAY_MASK_APPROX) instead.
+  RayQuery<RAY_FLAG_CULL_NON_OPAQUE> rq;
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_DIFFUSE, ray);
   rq.Proceed();
 
   float3 radiance;
@@ -174,8 +176,9 @@ void main(uint3 id : SV_DispatchThreadID) {
       shadow_ray.TMin = 0.001;
       shadow_ray.Direction = to_sun;
       shadow_ray.TMax = 1000.0;
-      RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> srq;
-      srq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, shadow_ray);
+      // Vegetation: cull real masked geometry, hit the opaque-approx stand-in.
+      RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_CULL_NON_OPAQUE> srq;
+      srq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_DIFFUSE, shadow_ray);
       srq.Proceed();
       if (srq.CommittedStatus() == COMMITTED_TRIANGLE_HIT) shadow = 0.0;
     }

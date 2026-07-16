@@ -87,8 +87,9 @@ void main(uint3 id : SV_DispatchThreadID) {
     ray.TMin = 0.001;
     ray.Direction = dir;
     ray.TMax = push.radius;
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> rq;
-    rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
+    // Vegetation: cull real masked geometry, hit the opaque-approx stand-in.
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_CULL_NON_OPAQUE> rq;
+    rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_DIFFUSE, ray);
     rq.Proceed();
     // Misses contribute the full radius (no occluder), so the average tracks
     // how close blockers are.

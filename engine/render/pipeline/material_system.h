@@ -155,6 +155,26 @@ class MaterialSystem {
     f32 emissive[3] = {0, 0, 0};
   };
   MaterialColor material_color(u64 material_hash) const;
+
+  // A coarse average-opacity map of an alpha-bearing color texture, baked at
+  // upload from the mip-0 alpha channel. `mean` is the whole-texture average
+  // opacity (1 = fully opaque). `alpha` is a width*height grid of per-cell mean
+  // opacity (row major, 0..255), empty when the texture is effectively opaque.
+  // Feeds the ray-traced vegetation "opaque approximation": masked meshes shrink
+  // their realtime BLAS stand-in triangles by the average opacity over their UV
+  // footprint (see Renderer mesh upload).
+  struct AlphaCoverage {
+    u32 width = 0;
+    u32 height = 0;
+    f32 mean = 1.0f;
+    base::Vector<u8> alpha;
+    // Bilinear opacity (0..1) at wrapped uv; falls back to `mean` with no grid.
+    f32 Sample(f32 u, f32 v) const;
+  };
+  // Average-opacity map of a material's base-color texture, or null when the
+  // material / texture is unknown or was uploaded fully opaque.
+  const AlphaCoverage* material_base_alpha(u64 material_hash) const;
+
   // Bindless texture-table index for an uploaded (sRGB) texture, or
   // BindlessRegistry::kInvalidIndex when absent. Used to texture particles.
   u32 bindless_texture(u64 texture_hash) const;
@@ -282,6 +302,7 @@ class MaterialSystem {
   base::UnorderedMap<u64, u8> normal_model_space_;
   base::UnorderedMap<u64, u32> bindless_materials_;  // material hash -> registry index
   base::UnorderedMap<u64, MaterialColor> colors_;    // material hash -> flat colour factors
+  base::UnorderedMap<u64, AlphaCoverage> texture_alpha_;  // texture key -> baked opacity map
   BindingLayoutHandle set_layout_;
   BindingSetHandle default_set_;
   u64 budget_bytes_ = 0;    // 0 = unlimited

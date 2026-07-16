@@ -28,6 +28,9 @@ class ReflectionTrace {
     f32 near_plane = 0.1f;
     const f32* hit_dist_params = nullptr;  // NrdDenoiser::kHitDistParams
     bool ddgi = false;
+    // Evaluate the real alpha texture on masked (vegetation) hits via a bounded
+    // any-hit loop (RX_RT_VEG_ANYHIT). Off = the old force-opaque approximation.
+    bool veg_anyhit = false;
   };
 
   bool Initialize(Device& device, BindingLayoutHandle bindless_layout);

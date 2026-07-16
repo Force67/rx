@@ -183,8 +183,9 @@ void main(uint3 id : SV_DispatchThreadID) {
     sray.TMin = 0.001;
     sray.Direction = to_sun;
     sray.TMax = 1000.0;
-    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> srq;
-    srq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, sray);
+    // Vegetation: cull real masked geometry, hit the opaque-approx stand-in.
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_CULL_NON_OPAQUE> srq;
+    srq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_DIFFUSE, sray);
     srq.Proceed();
     if (srq.CommittedStatus() == COMMITTED_TRIANGLE_HIT) shadow = 0.0;
 #endif

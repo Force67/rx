@@ -102,8 +102,10 @@ void main(uint3 id : SV_DispatchThreadID) {
   ray.TMin = 0.0;
   ray.Direction = dir;
   ray.TMax = ray_max;
-  RayQuery<RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
+  // Vegetation: cull real (non-opaque) masked geometry and hit its shrunk
+  // opaque-approximation stand-in (RX_RAY_MASK_APPROX) instead.
+  RayQuery<RAY_FLAG_CULL_NON_OPAQUE> rq;
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_DIFFUSE, ray);
   rq.Proceed();
 
   float3 radiance;

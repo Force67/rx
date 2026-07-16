@@ -1,6 +1,7 @@
 #include "render/pipeline/material_system.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -52,6 +53,123 @@ u32 FullMipChainLength(u32 width, u32 height) {
     ++levels;
   }
   return levels;
+}
+
+// --- Average-opacity bake (AC Shadows vegetation opaque approximation) ---
+//
+// The bake reads the mip-0 alpha channel of a color texture and reduces it to a
+// small per-cell mean-opacity grid plus a whole-texture mean. It decodes alpha
+// for the formats masked (cutout) content ships in -- RGBA8 and BC1/BC2/BC3.
+// BC7 (and anything else) is treated as opaque here: the mesh-side bake then
+// leaves the vegetation stand-in at full size, i.e. today's behavior, rather
+// than guessing (documented limitation; BC7 alpha decode is a follow-up).
+constexpr u32 kAlphaGridDim = 64;
+// A texture whose mean opacity is at (or above) this needs no per-cell grid:
+// masking it would not shrink the stand-in, so we keep only the scalar mean.
+constexpr f32 kOpaqueMeanThreshold = 0.995f;
+
+// BC4-style 8-entry interpolated alpha palette from two endpoints.
+void Bc4AlphaPalette(u8 a0, u8 a1, u32 out[8]) {
+  out[0] = a0;
+  out[1] = a1;
+  if (a0 > a1) {
+    for (u32 i = 2; i < 8; ++i) out[i] = ((8 - i) * a0 + (i - 1) * a1) / 7;
+  } else {
+    for (u32 i = 2; i < 6; ++i) out[i] = ((6 - i) * a0 + (i - 1) * a1) / 5;
+    out[6] = 0;
+    out[7] = 255;
+  }
+}
+
+// Decodes the mip-0 alpha into an AlphaCoverage grid. Returns false (leaving
+// `out` at its opaque default) for formats without a CPU alpha decoder.
+bool DecodeAlphaGrid(const asset::Texture& tex, MaterialSystem::AlphaCoverage& out) {
+  using asset::TextureFormat;
+  const u32 w = tex.width, h = tex.height;
+  if (w == 0 || h == 0 || tex.data.empty()) return false;
+  const u8* src = tex.data.data();
+  const u32 gw = std::min(w, kAlphaGridDim);
+  const u32 gh = std::min(h, kAlphaGridDim);
+  base::Vector<u64> sum(static_cast<size_t>(gw) * gh);  // value-initialized to 0
+  base::Vector<u32> cnt(static_cast<size_t>(gw) * gh);
+  auto add = [&](u32 x, u32 y, u32 a) {
+    u32 cx = std::min(gw - 1, x * gw / w);
+    u32 cy = std::min(gh - 1, y * gh / h);
+    size_t c = static_cast<size_t>(cy) * gw + cx;
+    sum[c] += a;
+    ++cnt[c];
+  };
+
+  auto decode_blocks = [&](u32 block_bytes, auto texel_alpha) -> bool {
+    const u32 bx_count = (w + 3) / 4, by_count = (h + 3) / 4;
+    if (static_cast<u64>(bx_count) * by_count * block_bytes > tex.data.size()) return false;
+    for (u32 by = 0; by < by_count; ++by) {
+      for (u32 bx = 0; bx < bx_count; ++bx) {
+        const u8* blk = src + (static_cast<u64>(by) * bx_count + bx) * block_bytes;
+        for (u32 ty = 0; ty < 4; ++ty) {
+          for (u32 tx = 0; tx < 4; ++tx) {
+            u32 px = bx * 4 + tx, py = by * 4 + ty;
+            if (px >= w || py >= h) continue;
+            add(px, py, texel_alpha(blk, ty * 4 + tx));
+          }
+        }
+      }
+    }
+    return true;
+  };
+
+  bool decoded = false;
+  switch (tex.format) {
+    case TextureFormat::kRgba8: {
+      if (static_cast<u64>(w) * h * 4 > tex.data.size()) return false;
+      for (u32 y = 0; y < h; ++y)
+        for (u32 x = 0; x < w; ++x) add(x, y, src[(static_cast<u64>(y) * w + x) * 4 + 3]);
+      decoded = true;
+      break;
+    }
+    case TextureFormat::kBc1: {
+      decoded = decode_blocks(8, [](const u8* blk, u32 t) -> u32 {
+        u32 c0 = blk[0] | (blk[1] << 8), c1 = blk[2] | (blk[3] << 8);
+        if (c0 > c1) return 255;  // opaque BC1 block
+        u32 idx = blk[4] | (blk[5] << 8) | (blk[6] << 16) | (blk[7] << 24);
+        return ((idx >> (t * 2)) & 0x3u) == 0x3u ? 0u : 255u;  // 1-bit punch-through
+      });
+      break;
+    }
+    case TextureFormat::kBc2: {
+      decoded = decode_blocks(16, [](const u8* blk, u32 t) -> u32 {
+        u32 nib = (blk[t / 2] >> ((t & 1u) * 4)) & 0xfu;
+        return nib * 17u;  // 4-bit explicit alpha
+      });
+      break;
+    }
+    case TextureFormat::kBc3: {
+      decoded = decode_blocks(16, [](const u8* blk, u32 t) -> u32 {
+        u32 pal[8];
+        Bc4AlphaPalette(blk[0], blk[1], pal);
+        u64 bits = 0;
+        for (u32 i = 0; i < 6; ++i) bits |= static_cast<u64>(blk[2 + i]) << (i * 8);
+        return pal[(bits >> (t * 3)) & 0x7u];
+      });
+      break;
+    }
+    default:
+      return false;  // BC7 / BC4 / BC5 / unknown: no CPU alpha decoder
+  }
+  if (!decoded) return false;
+
+  out.width = gw;
+  out.height = gh;
+  out.alpha.resize(static_cast<size_t>(gw) * gh);
+  u64 total = 0, total_cnt = 0;
+  for (size_t c = 0; c < out.alpha.size(); ++c) {
+    u32 mean = cnt[c] ? static_cast<u32>(sum[c] / cnt[c]) : 255;
+    out.alpha[c] = static_cast<u8>(mean);
+    total += sum[c];
+    total_cnt += cnt[c];
+  }
+  out.mean = total_cnt ? static_cast<f32>(total) / (static_cast<f32>(total_cnt) * 255.0f) : 1.0f;
+  return true;
 }
 
 }  // namespace
@@ -288,6 +406,14 @@ bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
   if (registry_ && texture.is_srgb) {
     // Only color textures matter for ray hit shading.
     record->bindless = registry_->RegisterTexture(image.view);
+    // Bake the average-opacity map for the vegetation opaque approximation.
+    // Only color textures carry a meaningful cutout alpha, and only actually
+    // transparent ones are worth a map: a masked mesh with no entry falls back
+    // to a full-size (opacity 1) stand-in, i.e. today's behavior.
+    AlphaCoverage cov;
+    if (DecodeAlphaGrid(texture, cov) && cov.mean < kOpaqueMeanThreshold) {
+      texture_alpha_.insert(key, std::move(cov));
+    }
   }
   resident_bytes_ += record->resident_bytes;
   u32 index = static_cast<u32>(texture_records_.size());
@@ -757,6 +883,30 @@ u32 MaterialSystem::bindless_material(u64 material_hash) const {
 MaterialSystem::MaterialColor MaterialSystem::material_color(u64 material_hash) const {
   if (const MaterialColor* color = colors_.find(material_hash)) return *color;
   return {};
+}
+
+f32 MaterialSystem::AlphaCoverage::Sample(f32 u, f32 v) const {
+  if (alpha.empty() || width == 0 || height == 0) return mean;
+  u -= std::floor(u);  // wrap into [0,1)
+  v -= std::floor(v);
+  f32 fx = u * static_cast<f32>(width) - 0.5f;
+  f32 fy = v * static_cast<f32>(height) - 0.5f;
+  i32 x0 = static_cast<i32>(std::floor(fx)), y0 = static_cast<i32>(std::floor(fy));
+  f32 tx = fx - static_cast<f32>(x0), ty = fy - static_cast<f32>(y0);
+  auto at = [&](i32 x, i32 y) -> f32 {
+    x = ((x % static_cast<i32>(width)) + static_cast<i32>(width)) % static_cast<i32>(width);
+    y = ((y % static_cast<i32>(height)) + static_cast<i32>(height)) % static_cast<i32>(height);
+    return static_cast<f32>(alpha[static_cast<size_t>(y) * width + x]) / 255.0f;
+  };
+  f32 top = at(x0, y0) * (1.0f - tx) + at(x0 + 1, y0) * tx;
+  f32 bot = at(x0, y0 + 1) * (1.0f - tx) + at(x0 + 1, y0 + 1) * tx;
+  return top * (1.0f - ty) + bot * ty;
+}
+
+const MaterialSystem::AlphaCoverage* MaterialSystem::material_base_alpha(u64 material_hash) const {
+  const u32* idx = sets_.find(material_hash);
+  if (!idx) return nullptr;
+  return texture_alpha_.find(material_records_[*idx].map_keys[0]);
 }
 
 u32 MaterialSystem::bindless_texture(u64 texture_hash) const {

@@ -20,5 +20,18 @@
 // TLAS instance masks; mirror render::RayMask (gi/raytracing.h). Realtime
 // effects trace RX_RAY_MASK_REALTIME and never see no_rt fill geometry; the
 // path-tracer family traces RX_RAY_MASK_PATHTRACE, which includes it.
+//
+// RX_RAY_MASK_APPROX tags the "opaque approximation" of alpha-masked
+// vegetation (AC Shadows technique): a duplicate of each masked mesh whose
+// triangles are shrunk about their centroid by the baked average opacity and
+// flagged OPAQUE. Realtime diffuse GI / AO / shadow rays trace
+// RX_RAY_MASK_DIFFUSE (realtime + approx) with RAY_FLAG_CULL_NON_OPAQUE, so
+// they hit the shrunk opaque stand-in and skip the real (non-opaque) masked
+// geometry entirely -- correct-on-average foliage occlusion at ~60% cost.
+// The path tracer (PATHTRACE) and specular reflections (REALTIME, via a
+// bounded any-hit alpha test) still see only the real masked geometry; the
+// approx instance carries neither bit, so no ray ever sees both variants.
 #define RX_RAY_MASK_REALTIME 0x01
 #define RX_RAY_MASK_PATHTRACE 0x02
+#define RX_RAY_MASK_APPROX 0x04
+#define RX_RAY_MASK_DIFFUSE (RX_RAY_MASK_REALTIME | RX_RAY_MASK_APPROX)
