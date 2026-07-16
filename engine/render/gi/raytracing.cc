@@ -213,6 +213,27 @@ void RayTracingContext::RemoveBlasDeferred(u64 mesh_key) {
   if (!blas) return;
   if (blas->handle) device_.DestroyAccelStructDeferred(blas->handle);
   blas_.erase(mesh_key);
+  // Async TLAS slots pre-built for the next frame embed this BLAS address;
+  // without the revision bump they still read as Valid and the next frame
+  // traces through the (deferred-)destroyed structure.
+  slot_tracker_.InvalidateBuilds();
+}
+
+void RayTracingContext::RemoveApproxBlasDeferred(u64 mesh_key) {
+  Blas* blas = approx_blas_.find(mesh_key);
+  if (!blas) return;
+  if (blas->handle) device_.DestroyAccelStructDeferred(blas->handle);
+  approx_blas_.erase(mesh_key);
+  slot_tracker_.InvalidateBuilds();
+}
+
+void RayTracingContext::RemoveLodBlasDeferred(u64 mesh_key) {
+  base::Vector<Blas>* lods = lod_blas_.find(mesh_key);
+  if (!lods) return;
+  for (Blas& blas : *lods)
+    if (blas.handle) device_.DestroyAccelStructDeferred(blas.handle);
+  lod_blas_.erase(mesh_key);
+  slot_tracker_.InvalidateBuilds();
 }
 
 bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {

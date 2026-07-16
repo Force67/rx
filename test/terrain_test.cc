@@ -181,6 +181,59 @@ void TestNeighborInvalidation() {
         "same shared edge still invalidates the adjacent derived normals");
 }
 
+void TestDiagonalAndNegativeInvalidation() {
+  // Negative-key cardinal border: adding {0,0} after {-1,0} synchronizes the
+  // shared column through the FloorDiv/PositiveMod signed-coordinate paths.
+  Terrain terrain(BasicDesc());
+  const std::array<f32, 9> west = {1, 2, 3, 1, 2, 3, 1, 2, 3};
+  const std::array<f32, 9> flat = {};
+  Check(terrain.AddOrReplaceTile({-1, 0}, west), "negative west tile is added");
+  Check(terrain.AddOrReplaceTile({0, 0}, flat), "origin tile is added");
+  const TerrainTile *west_tile = terrain.FindTile({-1, 0});
+  const TerrainTile *origin_tile = terrain.FindTile({0, 0});
+  Check(west_tile && origin_tile, "negative-key tiles can be found");
+  if (!west_tile || !origin_tile)
+    return;
+  for (u32 z = 0; z < 3; ++z) {
+    Near(west_tile->heights[z * 3 + 2], origin_tile->heights[z * 3],
+         "adding across a negative boundary synchronizes the shared column");
+  }
+
+  // Diagonal revision: replacing {0,0} with the shared corner value unchanged
+  // but an edge-adjacent sample changed must still bump {-1,-1} -- its corner
+  // normal reads the new tile's samples (1,0)/(0,1) through GridHeight.
+  Check(terrain.AddOrReplaceTile({-1, -1}, flat), "diagonal tile is added");
+  const u64 diagonal_revision = terrain.FindTile({-1, -1})->revision;
+  const std::array<f32, 9> edge_changed = {0, 5, 0, 5, 0, 0, 0, 0, 0};
+  Check(terrain.AddOrReplaceTile({0, 0}, edge_changed),
+        "origin tile is replaced with the corner sample unchanged");
+  Check(terrain.FindTile({-1, -1})->revision > diagonal_revision,
+        "an unchanged shared corner still invalidates the diagonal's normals");
+
+  // Sparse layout: {0,0} and {-1,-1} exist, {0,-1}/{-1,0} do not. A brush on
+  // {0,0}'s sample (1,0) changes the diagonal's corner normal, so the change
+  // must list {-1,-1} as dirty even though none of its samples moved -- the
+  // usual indirection through the cardinal neighbor's border copy is absent.
+  Terrain sparse(BasicDesc());
+  Check(sparse.AddOrReplaceTile({0, 0}, flat), "sparse origin tile is added");
+  Check(sparse.AddOrReplaceTile({-1, -1}, flat),
+        "sparse diagonal tile is added");
+  TerrainBrush poke;
+  poke.mode = TerrainBrushMode::kRaise;
+  poke.center_x = 1;
+  poke.center_z = 0;
+  poke.radius = 0.2f;
+  poke.strength = 2;
+  poke.falloff = 0;
+  const TerrainChange change = sparse.ApplyBrush(poke);
+  Check(!change.empty(), "sparse corner brush applies");
+  bool diagonal_dirty = false;
+  for (const TerrainTileKey &key : change.dirty_tiles)
+    diagonal_dirty |= key.x == -1 && key.z == -1;
+  Check(diagonal_dirty,
+        "sparse corner brush marks the diagonal normal-dependent dirty");
+}
+
 void TestMeshAndRaycast() {
   TerrainDesc desc = BasicDesc();
   Terrain terrain(desc);
@@ -490,6 +543,7 @@ void TestSerialization() {
 int main() {
   TestSeamsAndBrushes();
   TestNeighborInvalidation();
+  TestDiagonalAndNegativeInvalidation();
   TestMeshAndRaycast();
   TestStreaming();
   TestSerialization();

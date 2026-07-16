@@ -45,11 +45,20 @@ class TerrainCommand final : public edit::Command {
         refresh_(std::move(refresh)) {}
 
   void Apply(ecs::World&) override {
-    if (target_->ApplyChange(change_)) RefreshTiles();
+    // A failed apply means the terrain no longer matches the recorded
+    // expected state; the undo cursor moves regardless (Command::Apply cannot
+    // fail), so at least make the desync loud instead of silent.
+    if (target_->ApplyChange(change_))
+      RefreshTiles();
+    else
+      RX_ERROR("terrain redo '{}' rejected; undo history is out of sync", label_);
   }
 
   void Revert(ecs::World&) override {
-    if (target_->RevertChange(change_)) RefreshTiles();
+    if (target_->RevertChange(change_))
+      RefreshTiles();
+    else
+      RX_ERROR("terrain undo '{}' rejected; undo history is out of sync", label_);
   }
 
   const char* label() const override { return label_.c_str(); }
@@ -88,6 +97,9 @@ void Editor::SetupDefaultTerrain() {
 
   ClearTerrainVisuals();
   terrain_ = terrain::Terrain(std::move(desc));
+  // The previous terrain may have had more layers; a stale out-of-range
+  // selection makes every paint dab silently no-op.
+  terrain_brush_layer_ = 0;
   const u32 side = terrain_.samples_per_side();
   const u32 quads = terrain_.desc().tile_quads;
   const f32 spacing = terrain_.desc().sample_spacing;

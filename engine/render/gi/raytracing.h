@@ -96,6 +96,7 @@ class RayTracingContext {
   // usage). Instances with Instance::approx set resolve to this structure.
   bool BuildApproxBlas(u64 mesh_key, const base::Vector<AccelTriangles>& geometries);
   void RemoveApproxBlas(u64 mesh_key);
+  void RemoveApproxBlasDeferred(u64 mesh_key);
   bool HasApproxBlas(u64 mesh_key) const { return approx_blas_.contains(mesh_key); }
 
   // Builds (once) the BLAS for a non-zero distance LOD of an already-uploaded
@@ -107,6 +108,7 @@ class RayTracingContext {
   bool BuildLodBlas(u64 mesh_key, u32 lod, const base::Vector<AccelTriangles>& geometries);
   bool HasLodBlas(u64 mesh_key, u32 lod) const;
   void RemoveLodBlas(u64 mesh_key);
+  void RemoveLodBlasDeferred(u64 mesh_key);
 
   // Whether a blas already exists for this mesh (BuildBlas is idempotent, but
   // callers re-registering bindless geometry need to skip already-built meshes).

@@ -360,7 +360,9 @@ public:
   // Replaces only lod-0 vertices for a mesh uploaded with dynamic_vertices.
   // Topology and vertex count must match. The old buffer retires after
   // in-flight frames finish, so terrain brushes do not force a device-wide
-  // idle.
+  // idle. Like RemoveDynamicMesh, MUST be called between frames (app update),
+  // never from inside RenderFrame: the retirement ring slot math assumes
+  // frame_index_ has not yet advanced past the frame being recorded.
   bool UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt = 0);
   // Restores RT participation after a batch of live dynamic updates. This can
   // submit a BLAS build, so editors call it once at stroke boundaries.

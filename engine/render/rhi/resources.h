@@ -105,6 +105,9 @@ struct GpuMesh {
   GpuBuffer rt_approx_vertices;
   GpuBuffer rt_approx_indices;
   u32 rt_approx_bindless = 0;  // bindless mesh record for approx hit shading
+  // rt_approx_bindless holds fallback slot 0 when registration failed, which is
+  // also a legitimate index -- this flag records whether a release is owed.
+  bool rt_approx_bindless_valid = false;
   bool rt_approx = false;      // an approx BLAS/instance exists for this mesh
 
   // Distance-LOD ray-tracing geometry (RX_RT_LOD_NEAR), parallel to `lods`:

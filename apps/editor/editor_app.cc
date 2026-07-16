@@ -674,10 +674,19 @@ void Editor::DoSave(const std::string &path) {
                       move(scene_path, scene_backup, &scene_error);
     if (fs::exists(scene_path) && !scene_backed_up)
       scene_saved = false;
-    terrain_backed_up = fs::exists(terrain_path) &&
-                        move(terrain_path, terrain_backup, &terrain_error);
-    if (fs::exists(terrain_path) && !terrain_backed_up)
-      terrain_saved = false;
+    // Only a document that owns terrain may touch the sidecar. Without this
+    // gate a no-terrain document saved onto a stem with an existing sidecar
+    // would move it to the backup, then delete the backup on success --
+    // silently destroying the user's terrain.
+    if (has_terrain) {
+      terrain_backed_up = fs::exists(terrain_path) &&
+                          move(terrain_path, terrain_backup, &terrain_error);
+      if (fs::exists(terrain_path) && !terrain_backed_up)
+        terrain_saved = false;
+    } else if (fs::exists(terrain_path)) {
+      RX_WARN("editor: leaving unrelated terrain sidecar untouched: {}",
+              terrain_path.string());
+    }
   }
   if (scene_saved && terrain_saved) {
     scene_committed = move(scene_stage, scene_path, &scene_error);

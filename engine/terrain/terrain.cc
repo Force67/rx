@@ -378,13 +378,16 @@ bool Terrain::AddOrReplaceTile(TerrainTileKey key, std::span<const f32> heights,
     for (u32 x = 0; x <= quads; ++x)
       copy(x, quads, x, 0);
   });
-  synchronize_offset(-1, -1, false,
+  // Diagonals are normal-dependent too: the corner vertex normal reads the
+  // new tile's edge-adjacent samples through GridHeight, so it can change
+  // even when the single shared corner sample keeps its value.
+  synchronize_offset(-1, -1, true,
                      [&](auto copy) { copy(0, 0, quads, quads); });
-  synchronize_offset(1, -1, false,
+  synchronize_offset(1, -1, true,
                      [&](auto copy) { copy(quads, 0, 0, quads); });
-  synchronize_offset(-1, 1, false,
+  synchronize_offset(-1, 1, true,
                      [&](auto copy) { copy(0, quads, quads, 0); });
-  synchronize_offset(1, 1, false,
+  synchronize_offset(1, 1, true,
                      [&](auto copy) { copy(quads, quads, 0, 0); });
   return true;
 }
@@ -882,6 +885,30 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
     if (local_x + 1 == quads && east && FindTile(*east)) normal_dependents.push_back(*east);
     if (local_z == 1 && south && FindTile(*south)) normal_dependents.push_back(*south);
     if (local_z + 1 == quads && north && FindTile(*north)) normal_dependents.push_back(*north);
+    // A diagonal neighbor's corner normal reads this tile's two edge-adjacent
+    // samples through GridHeight. When the shared cardinal tile exists its own
+    // border copy reaches the diagonal through the pushes above, but in sparse
+    // layouts (corner tile present, edge tile missing) that indirection breaks
+    // -- so mark the diagonal directly.
+    const std::optional<TerrainTileKey> southwest = neighbor(sample.tile, -1, -1);
+    const std::optional<TerrainTileKey> southeast = neighbor(sample.tile, 1, -1);
+    const std::optional<TerrainTileKey> northwest = neighbor(sample.tile, -1, 1);
+    const std::optional<TerrainTileKey> northeast = neighbor(sample.tile, 1, 1);
+    if (((local_x == 1 && local_z == 0) || (local_x == 0 && local_z == 1)) &&
+        southwest && FindTile(*southwest))
+      normal_dependents.push_back(*southwest);
+    if (((local_x + 1 == quads && local_z == 0) ||
+         (local_x == quads && local_z == 1)) &&
+        southeast && FindTile(*southeast))
+      normal_dependents.push_back(*southeast);
+    if (((local_x == 1 && local_z == quads) ||
+         (local_x == 0 && local_z + 1 == quads)) &&
+        northwest && FindTile(*northwest))
+      normal_dependents.push_back(*northwest);
+    if (((local_x + 1 == quads && local_z == quads) ||
+         (local_x == quads && local_z + 1 == quads)) &&
+        northeast && FindTile(*northeast))
+      normal_dependents.push_back(*northeast);
   }
   for (TerrainTileKey key : normal_dependents) change.dirty_tiles.push_back(key);
   std::sort(change.dirty_tiles.begin(), change.dirty_tiles.end(), KeyLess);

@@ -45,7 +45,7 @@ planner still performs final demand evaluation.
 ## Editing
 
 Brush centers and radii are world XZ values. Raise and lower interpret strength
-as world height per dab. Smooth and flatten clamp `strength * falloff` to a
+as world height per dab. Smooth and flatten clamp `strength * influence` to a
 blend fraction; flatten's target is an explicit world y. Paint blends toward
 one palette layer and redistributes the remaining channels while preserving an
 integer sum of 255. `falloff` is the exponent applied to

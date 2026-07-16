@@ -1966,7 +1966,9 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
         gpu.rt_approx_bindless = bindless_->RegisterMesh(
             gpu.rt_approx_vertices, gpu.rt_approx_indices, approx_geoms.data(),
             static_cast<u32>(approx_geoms.size()));
-        if (gpu.rt_approx_bindless == BindlessRegistry::kInvalidIndex)
+        gpu.rt_approx_bindless_valid =
+            gpu.rt_approx_bindless != BindlessRegistry::kInvalidIndex;
+        if (!gpu.rt_approx_bindless_valid)
           gpu.rt_approx_bindless = 0;
         for (const ApproxRange &r : approx_ranges) {
           approx_accel.push_back(
@@ -1997,9 +1999,16 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     }
     if (bindless_ && previous->bindless_geometry)
       bindless_->ReleaseMesh(previous->bindless_index);
-    for (GpuMesh::LodRt &rt : previous->lod_rt)
+    for (GpuMesh::LodRt &rt : previous->lod_rt) {
       if (rt.indices)
         device_->DestroyBuffer(rt.indices);
+      // Now that mesh-table slots recycle, the per-LOD and approx records must
+      // come back too or every same-key re-upload leaks table entries.
+      if (bindless_ && rt.bindless != BindlessRegistry::kInvalidIndex)
+        bindless_->ReleaseMesh(rt.bindless);
+    }
+    if (bindless_ && previous->rt_approx_bindless_valid)
+      bindless_->ReleaseMesh(previous->rt_approx_bindless);
     device_->DestroyBuffer(previous->vertices);
     device_->DestroyBuffer(previous->indices);
     if (previous->skinning)
@@ -2131,8 +2140,13 @@ bool Renderer::UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt) {
   const asset::MeshLod &lod = mesh.lods[0];
   const u64 key = mesh.id.hash ^ id_salt;
   GpuMesh *gpu = meshes_.find(key);
+  // rt_approx meshes are rejected: the opaque-approx stand-in duplicates the
+  // masked geometry into its own buffers/BLAS, which this fast path does not
+  // rebuild -- realtime rays would keep hitting the pre-edit shape. Callers
+  // fall back to a full UploadMesh, which rebuilds the stand-in.
   if (!gpu || gpu->skinned || gpu->morph_target_count != 0 ||
-      !gpu->lods.empty() || lod.vertices.size() != gpu->vertex_count ||
+      !gpu->lods.empty() || gpu->rt_approx ||
+      lod.vertices.size() != gpu->vertex_count ||
       lod.indices.size() != gpu->index_count) {
     return false;
   }
@@ -2252,11 +2266,36 @@ bool Renderer::RemoveDynamicMesh(asset::AssetId mesh, u64 id_salt) {
     device_->DestroyBufferDeferred(gpu->skinning);
   if (gpu->morph_deltas)
     device_->DestroyBufferDeferred(gpu->morph_deltas);
+  // Per-LOD RT and opaque-approx side state: without these a later UploadMesh
+  // under the same asset id would find (and silently reuse) the stale
+  // approx/LOD BLAS entries, and the bindless records would leak for good.
+  for (GpuMesh::LodRt &rt : gpu->lod_rt) {
+    if (rt.indices)
+      device_->DestroyBufferDeferred(rt.indices);
+    if (bindless_ && rt.bindless != BindlessRegistry::kInvalidIndex) {
+      retired_bindless_meshes_[(frame_index_ + 1) % kFramesInFlight].push_back(
+          rt.bindless);
+    }
+  }
+  if (gpu->rt_approx_vertices)
+    device_->DestroyBufferDeferred(gpu->rt_approx_vertices);
+  if (gpu->rt_approx_indices)
+    device_->DestroyBufferDeferred(gpu->rt_approx_indices);
+  if (bindless_ && gpu->rt_approx_bindless_valid) {
+    retired_bindless_meshes_[(frame_index_ + 1) % kFramesInFlight].push_back(
+        gpu->rt_approx_bindless);
+  }
   mesh_emitters_.erase(key);
+  // A dynamic mesh can never have a registered SDF (sdf_eligible excludes
+  // dynamic_vertices), but keep the frame-safe variant so that stays true by
+  // construction rather than by argument.
   if (sdf_scene_)
-    sdf_scene_->Remove(key);
-  if (raytracing_)
+    sdf_scene_->RemoveDeferred(key);
+  if (raytracing_) {
     raytracing_->RemoveBlasDeferred(key);
+    raytracing_->RemoveApproxBlasDeferred(key);
+    raytracing_->RemoveLodBlasDeferred(key);
+  }
   meshes_.erase(key);
   ++scene_revision_;
   return true;
@@ -2867,7 +2906,7 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
     const GpuMesh *mesh = meshes_.find(item.mesh);
     // no_rt skips grass-like fill geometry, but skinned actors are
     // no_rt only to stay out of the tlas; they still cast shadows.
-    // dynamic_vertices meshes (terrain) also stay no_rt yet must cast.
+    // dynamic_vertices meshes always cast, even if a game marks them no_rt.
     if (!mesh || mesh->all_blend ||
         (mesh->no_rt && !mesh->skinned && !mesh->dynamic_vertices))
       continue;
