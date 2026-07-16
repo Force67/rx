@@ -224,6 +224,7 @@ if(NOT DEFINED RX_MODULES)
     audio
     rpc
     net
+    nav
     app
   )
 endif()
@@ -285,6 +286,15 @@ if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
   add_executable(net_test test/net_test.cc)
   target_link_libraries(net_test PRIVATE rx::net rx::core)
   add_test(NAME net_test COMMAND net_test)
+endif()
+
+# rx::nav unit tests: pure CPU logic over a synthetic terrain sampler (costed
+# A*, entry-cost commitment, funnel, event repathing, position scoring), so
+# plain `ctest` runs them everywhere.
+if(RX_BUILD_TESTS AND "nav" IN_LIST RX_MODULES)
+  add_executable(nav_test test/nav_test.cc)
+  target_link_libraries(nav_test PRIVATE rx::nav rx::scene rx::ecs rx::core)
+  add_test(NAME nav_test COMMAND nav_test)
 endif()
 
 if(RX_BUILD_RUNTIME)
