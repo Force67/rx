@@ -7,6 +7,7 @@
 // space in sky.ps.hlsl, so this holds scattered radiance only.
 
 #include "atmosphere.hlsli"
+#include "aurora.hlsli"
 
 [[vk::image_format("rgba16f")]] [[vk::binding(0, 0)]] RWTexture2DArray<float4> sky_out : register(u0, space0);
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] Texture2D<float4> transmittance : register(t1, space0);
@@ -19,6 +20,8 @@ struct PushData {
   float intensity;
   float3 sun_color;
   float face_size;
+  float aurora_intensity;  // premultiplied by the CPU night factor; 0 skips
+  float time;              // seconds, drives the curtain animation
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -96,5 +99,14 @@ void main(uint3 id : SV_DispatchThreadID) {
   }
 
   L *= push.sun_color * push.intensity;
+
+  // Aurora: the curtains sit above the atmosphere, so their light arrives
+  // attenuated by the full view-path transmittance accumulated in the march,
+  // and only on rays that escape to space (a ground hit occludes the shell).
+  // Baking them into the cubemap is what feeds the irradiance/prefilter
+  // convolutions, so an active display genuinely lights the world at night.
+  if (push.aurora_intensity > 0.0 && t_ground < 0.0) {
+    L += throughput * AuroraRadiance(view, push.time, push.aurora_intensity);
+  }
   sky_out[id] = float4(L, 1.0);
 }

@@ -18,6 +18,7 @@
 #include "core/log.h"
 #include "core/math.h"
 #include "physics/water_waves.h"
+#include "render/atmosphere/lightning.h"
 #include "render/geometry/hair_groom.h"
 #include "scene/components.h"
 #include "viewer_input.h"
@@ -228,6 +229,14 @@ void DemoScenes::ApplyRenderPolicy() {
 }
 
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
+  // The viewer's clock rewrites the sun on hour steps and would replace the
+  // weather scene's staged overcast gloom with a full noon sun (the clock
+  // keeps driving so RX_GAME_HOUR still turns the demo to night). The deck's
+  // gloom is a cap on the direct light, not an absolute, so re-clamp per frame.
+  if (weather_scene_) {
+    renderer_.settings().sun_intensity = std::min(renderer_.settings().sun_intensity, 1.3f);
+  }
+  if (storm_enabled_) UpdateStorm(dt);
   if (scene_hook_) scene_hook_->Emit(dt, view);
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   if (ship_) ship_->Emit(dt, view);
@@ -2579,6 +2588,200 @@ void DemoScenes::CreatePointLightDemoScene() {
   RX_INFO("point-light demo: {} dynamic omni lights", demo_lights_.size());
 }
 
+// Weather demo defaults, routed through the same envs the renderer honours so
+// RX_PRECIP / RX_SNOW / RX_WIND / RX_WIND_DIR still override the staged storm.
+static base::Option<float> WeatherDemoPrecip{"demo.weather.precip", 0.85f, "RX_PRECIP"};
+static base::Option<bool> WeatherDemoSnow{"demo.weather.snow", false, "RX_SNOW"};
+static base::Option<float> WeatherDemoWind{"demo.weather.wind", 7.0f, "RX_WIND"};
+static base::Option<float> WeatherDemoWindDir{"demo.weather.winddir", 205.0f, "RX_WIND_DIR"};
+// Deterministic strike hook for tests/screenshots: RX_STRIKE_TEST=<meters>
+// fires a strike 1 s after start directly in front of the camera at that
+// distance, repeating every 4 s. 0 = the random storm scheduler.
+static base::Option<float> WeatherStrikeTest{"demo.weather.striketest", 0.0f, "RX_STRIKE_TEST"};
+
+void DemoScenes::CreateWeatherDemoScene() {
+  // The volumetric-precipitation acceptance scene: a ground plane, varied
+  // boxes/columns, and an open-sided shelter (flat roof on posts) so the
+  // sky-occlusion gating is legible - rain must pour beside the shelter and
+  // visibly stop under its roof, splashes must land ON the roof, and a dry
+  // strip must appear beneath it. Two point lights make night shots readable.
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b, f32 rough) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = rough;
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  // Asphalt-dark ground so wet darkening, puddle sheen and splashes read
+  // against it; mid-tone varied blocks so the streak slant shows on walls.
+  asset::AssetId ground_mat = mat("builtin/weather/ground", 0.21f, 0.21f, 0.23f, 0.9f);
+  asset::AssetId block_mat = mat("builtin/weather/block", 0.45f, 0.38f, 0.32f, 0.7f);
+  asset::AssetId roof_mat = mat("builtin/weather/roof", 0.24f, 0.26f, 0.3f, 0.6f);
+
+  auto add_box = [&](asset::Mesh mesh, asset::AssetId material, Vec3 pos) {
+    asset::MeshLod& lod = mesh.lods[0];  // MakeBox leaves the submesh list empty
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, scene::Renderable{mesh.id});
+  };
+
+  // Ground plane, top face at y = 0.
+  add_box(asset::MakeBox(40.0f, 0.5f, 40.0f, asset::MakeAssetId("builtin/weather/ground_m")),
+          ground_mat, {0, -0.5f, 0});
+
+  // Varied blocks and columns: wet/snowy top faces at several heights, and
+  // vertical faces the wind-slanted rain streaks read against.
+  add_box(asset::MakeBox(1.5f, 1.5f, 1.5f, asset::MakeAssetId("builtin/weather/block_a")),
+          block_mat, {4.0f, 1.5f, -1.0f});
+  add_box(asset::MakeBox(0.8f, 0.8f, 0.8f, asset::MakeAssetId("builtin/weather/block_b")),
+          block_mat, {1.6f, 0.8f, 2.6f});
+  add_box(asset::MakeBox(1.0f, 2.6f, 1.0f, asset::MakeAssetId("builtin/weather/tower")),
+          block_mat, {-1.5f, 2.6f, -7.0f});
+  add_box(asset::MakeBox(0.35f, 2.0f, 0.35f, asset::MakeAssetId("builtin/weather/column_a")),
+          block_mat, {7.5f, 2.0f, 4.0f});
+  add_box(asset::MakeBox(0.35f, 1.4f, 0.35f, asset::MakeAssetId("builtin/weather/column_b")),
+          block_mat, {-8.0f, 1.4f, 3.0f});
+
+  // Open-sided shelter: flat roof on four thin posts. Everything under the
+  // 8 x 6 m roof must stay dry.
+  const Vec3 shelter{-4.0f, 0.0f, -1.0f};
+  add_box(asset::MakeBox(4.0f, 0.15f, 3.0f, asset::MakeAssetId("builtin/weather/roof_m")),
+          roof_mat, {shelter.x, 3.15f, shelter.z});
+  asset::Mesh post = asset::MakeBox(0.12f, 1.5f, 0.12f, asset::MakeAssetId("builtin/weather/post"));
+  post.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(post.lods[0].indices.size()), block_mat});
+  if (!config_.headless) renderer_.UploadMesh(post);
+  const f32 posts[4][2] = {{-3.6f, -2.6f}, {3.6f, -2.6f}, {-3.6f, 2.6f}, {3.6f, 2.6f}};
+  for (auto& pp : posts) {
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {shelter.x + pp[0], 1.5f, shelter.z + pp[1]}});
+    world_.Add(e, scene::Renderable{post.id});
+  }
+
+  // Two warm lamps for night shots: one under the shelter roof (dry pocket in
+  // the rain), one out in the open where drops catch the light.
+  render::PointLight lamp;
+  lamp.pos_radius[0] = shelter.x;
+  lamp.pos_radius[1] = 2.6f;
+  lamp.pos_radius[2] = shelter.z;
+  lamp.pos_radius[3] = 10.0f;
+  lamp.color_intensity[0] = 1.0f;
+  lamp.color_intensity[1] = 0.75f;
+  lamp.color_intensity[2] = 0.45f;
+  lamp.color_intensity[3] = 4.0f;
+  demo_lights_.push_back(lamp);
+  lamp.pos_radius[0] = 4.0f;
+  lamp.pos_radius[1] = 3.6f;
+  lamp.pos_radius[2] = 2.0f;
+  lamp.pos_radius[3] = 9.0f;
+  lamp.color_intensity[0] = 0.85f;
+  lamp.color_intensity[1] = 0.9f;
+  lamp.color_intensity[2] = 1.0f;
+  lamp.color_intensity[3] = 4.5f;
+  demo_lights_.push_back(lamp);
+
+  // The staged storm (env-overridable, see the options above).
+  render::RenderSettings& rs = renderer_.settings();
+  rs.weather.precipitation = WeatherDemoPrecip.get();
+  rs.weather.snow = WeatherDemoSnow;
+  rs.weather.wind_speed = WeatherDemoWind.get();
+  rs.weather.wind_yaw = WeatherDemoWindDir.get() * 3.14159265f / 180.0f;
+  rs.weather.gustiness = 0.45f;
+  rs.cloud_coverage = 0.68f;  // overcast enough to sell the downpour, some light through
+  // Storm light: the cloud deck kills most direct sun, but the IBL/sun path
+  // does not know about clouds - stage it. Fixed exposure keeps the deliberate
+  // gloom (auto exposure would lift the overcast scene back to a bright noon).
+  rs.sun_intensity = 1.3f;
+  rs.ibl_intensity = 0.4f;  // the sky cubemap is clear-sky bright; mute it under the deck
+  // DDGI's probe rays see the clear-sky cubemap, not the cloud deck, and fill
+  // the open ground with blue-white noon bounce; the flat ambient path stages
+  // the gloom correctly here (same reasoning as the water demo).
+  rs.ddgi = false;
+  // ...and the SSGI fallback splats the bright horizon band across the flat
+  // lot the same way. The staged flat ambient carries the overcast fill.
+  rs.ssgi = false;
+  // SSR mirrors the bright horizon over the whole rough lot; the wet-ground
+  // sheen in surface_weather is the reflection story for this scene.
+  rs.ssr = false;
+  // The aerial-perspective haze is tuned for kilometre vistas; over this 80 m
+  // lot it veils the dark wet ground into milk. Keep a trace of it.
+  rs.aerial_perspective = 0.15f;
+  rs.auto_exposure = false;
+  rs.exposure = 0.7f;
+
+  // Rain means a thunderstorm: the demo plays the game's role and schedules
+  // strikes (rx renders everything about them). The test hook fires the first
+  // strike after exactly 1 s; the random storm rolls one every 6-9 s.
+  weather_scene_ = true;
+  storm_enabled_ = rs.weather.precipitation > 0.0f && !rs.weather.snow;
+  storm_next_strike_ = WeatherStrikeTest.get() > 0.0f ? 1.0f : 4.0f;
+
+  // Wide shot: shelter left, blocks right, plenty of open ground for splashes.
+  camera_.set_position({6.0f, 2.8f, 9.6f});
+  camera_.set_yaw_pitch(-0.62f, -0.16f);
+  camera_.speed = 4.0f;
+  RX_INFO("weather demo: precip {} ({}), wind {} m/s{}",
+          rs.weather.precipitation, rs.weather.snow ? "snow" : "rain", rs.weather.wind_speed,
+          storm_enabled_ ? ", thunderstorm on" : "");
+}
+
+void DemoScenes::UpdateStorm(f32 dt) {
+  // Demo-side strike scheduler, mirroring what a game does: pick a strike
+  // position/seed/energy, advance strike_age each frame, and drive the GLOBAL
+  // weather.lightning scalar (sun/ambient/cloud boosts) with the same envelope
+  // as the bolt + positioned flash so all three flicker in lockstep. The
+  // global term adds a slower exp(-age*9) afterglow under the stroke flicker.
+  render::WeatherSettings& w = renderer_.settings().weather;
+  storm_time_ += dt;
+
+  if (w.strike_age >= 0.0f) {
+    w.strike_age += dt;
+    f32 env = render::LightningSystem::Envelope(w.strike_age, w.strike_seed);
+    // Peak ~0.35: the global consumers multiply hard (sun +9x, ambient +0.5
+    // at flash 1.0) and would white the staged overcast frame out above that.
+    w.lightning = std::min(
+        1.0f, w.strike_energy * (0.22f * std::exp(-w.strike_age * 9.0f) + 0.35f * env));
+    if (w.strike_age > 1.2f) {  // envelope + afterglow both spent
+      w.strike_age = -1.0f;
+      w.lightning = 0.0f;
+    }
+  }
+
+  if (storm_time_ < storm_next_strike_) return;
+  auto hash01 = [](u32 v) {
+    v = v * 747796405u + 2891336453u;
+    v = ((v >> ((v >> 28u) + 4u)) ^ v) * 277803737u;
+    return static_cast<f32>((v >> 22u) ^ v) * (1.0f / 4294967295.0f);
+  };
+  ++w.strike_seed;
+  w.strike_age = 0.0f;
+  const f32 test_dist = WeatherStrikeTest.get();
+  if (test_dist > 0.0f) {
+    // Deterministic: directly in front of the camera at the given distance.
+    Vec3 fwd = camera_.forward();
+    f32 len = std::sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
+    Vec3 dir = len > 1e-4f ? Vec3{fwd.x / len, 0.0f, fwd.z / len} : Vec3{0, 0, -1};
+    Vec3 eye = camera_.position();
+    w.strike_pos = {eye.x + dir.x * test_dist, 0.0f, eye.z + dir.z * test_dist};
+    w.strike_energy = 1.0f;
+    storm_next_strike_ = storm_time_ + 4.0f;
+  } else {
+    // Random storm: 300-900 m out at a hashed azimuth, every 6-9 s.
+    f32 az = hash01(w.strike_seed * 3u + 1u) * 6.2831853f;
+    f32 dist = 300.0f + 600.0f * hash01(w.strike_seed * 3u + 2u);
+    Vec3 eye = camera_.position();
+    w.strike_pos = {eye.x + std::cos(az) * dist, 0.0f, eye.z + std::sin(az) * dist};
+    w.strike_energy = 0.65f + 0.35f * hash01(w.strike_seed * 3u + 3u);
+    storm_next_strike_ = storm_time_ + 6.0f + 3.0f * hash01(w.strike_seed * 7u + 5u);
+  }
+}
+
 void DemoScenes::CreateMeshletDemoScene() {
   // A dense sphere rendered through the mesh-shader meshlet path: the gpu splits
   // it into clusters, frustum/cone-culls them, and tints each a distinct color
@@ -2646,6 +2849,10 @@ void DemoScenes::CreateMaterialXDemoScene() {
 void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "water") {
     CreateWaterDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "weather") {
+    CreateWeatherDemoScene();
     return;
   }
   if (config_.demo_scene == "cornell") {

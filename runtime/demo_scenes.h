@@ -46,6 +46,9 @@ class DemoScenes {
 
  private:
   void CreateWaterDemoScene();
+  // Weather demo: shelter + blocks scene for volumetric precipitation, sky
+  // occlusion (dry under the roof) and surface wetness / snow cover.
+  void CreateWeatherDemoScene();
   void CreateMaterialDemoScene();
   void CreateGaussianDemoScene();
   void CreateLodDemoScene();
@@ -81,6 +84,10 @@ class DemoScenes {
   // by their owning peer, wire spheres via the net_viz visualizer.
   void CreateBubbleDemoScene();
   void EmitBubbles(render::FrameView& view);
+  // Weather demo thunderstorm: schedules lightning strikes (the game's role;
+  // rx renders the bolt + flash light) and drives the global flash scalar with
+  // the strike envelope so global and positioned flash agree.
+  void UpdateStorm(f32 dt);
   // Water demo: each floating cube pushes a wake ripple + foam splat into the
   // persistent water field, scaled by its physics velocity.
   void EmitWaterDisturbances(f32 dt, render::FrameView& view);
@@ -111,6 +118,11 @@ class DemoScenes {
   base::Vector<Vec3> water_cube_prev_;
   base::Vector<f32> water_cube_slam_cd_;  // per-cube splash cooldown (s)
   f32 water_time_ = 0;                    // wave clock for the Gerstner proxy
+  // Weather demo thunderstorm scheduler state.
+  bool storm_enabled_ = false;
+  bool weather_scene_ = false;  // weather demo active: re-clamp its storm sun
+  f32 storm_time_ = 0;
+  f32 storm_next_strike_ = 0;
   u32 gpu_particle_count_ = 0;  // > 0 selects the gpu-simulated fountain
   Vec3 gpu_particle_emitter_{0, 0, 0};
   base::Vector<render::Decal> demo_decals_;

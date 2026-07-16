@@ -26,7 +26,10 @@ class Clouds {
     f32 bottom = 1500.0f;   // layer base, metres above sea level
     f32 top = 4200.0f;      // layer top
     f32 density = 1.0f;
-    f32 wind = 12.0f;       // metres/second
+    // Wind velocity advecting the layer, metres/second on xz. The defaults
+    // reproduce the legacy hardcoded drift (12 m/s along (1, 0, 0.3)).
+    f32 wind_x = 12.0f;
+    f32 wind_z = 3.6f;
     u32 steps = 32;
     u32 light_steps = 6;
   };

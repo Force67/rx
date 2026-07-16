@@ -50,6 +50,44 @@ inline f32 UpscalerScale(UpscalerQuality quality) {
   return 1.5f;
 }
 
+// The renderer-facing weather state: one value struct the application (or its
+// weather system) writes each frame. Precipitation/lightning/aurora rendering
+// and surface response all read from here.
+struct WeatherSettings {
+  // Live precipitation falling right now.
+  f32 precipitation = 0.0f;   // 0 none .. 1 heavy
+  bool snow = false;          // snow vs rain
+  bool volumetric = true;     // 3D particle precipitation (falls back to the
+                              // screen-space layer when off or unsupported)
+  // Per-particle sun shadow rays on the volumetric drops/flakes (rain sheets
+  // darken in shadowed alleys, sparkle in sunlit gaps). Only effective when
+  // the device has ray query; the non-rt path draws them unshadowed.
+  bool rt_shadows = true;
+  // Wind, shared by precipitation slant/drift and cloud advection. The speed
+  // default matches the cloud layer's historical drift (Clouds::Frame::wind).
+  // Direction the wind blows toward (radians on XZ) and its speed. The
+  // defaults reproduce the cloud layer's legacy hardcoded drift, 12 m/s along
+  // (1, 0, 0.3), so a default scene keeps its exact cloud motion.
+  f32 wind_yaw = 0.29146f;    // atan2(0.3, 1.0)
+  f32 wind_speed = 12.53f;    // m/s, 12 * sqrt(1 + 0.09)
+  f32 gustiness = 0.3f;       // 0 steady .. 1 squally
+  // Surface response, integrated over time by the game (rain soaks in and
+  // dries; snow builds and melts). The renderer treats live precipitation as
+  // a floor so setting only `precipitation` still wets/whitens the ground.
+  f32 wetness = 0.0f;         // 0 dry .. 1 soaked
+  f32 snow_cover = 0.0f;      // 0 bare .. 1 blanketed
+  // Lightning: the global flash level plus the active strike (bolt render +
+  // positioned flash light). strike_age < 0 means no strike is active.
+  f32 lightning = 0.0f;       // flash 0..1, decays over ~a second
+  Vec3 strike_pos{0, 0, 0};   // world position of the bolt's ground end
+  f32 strike_age = -1.0f;     // seconds since the strike began
+  u32 strike_seed = 0;        // varies the bolt shape per strike
+  f32 strike_energy = 1.0f;   // 0..1 scales bolt brightness + flash light
+  // Aurora borealis (night sky curtains).
+  bool aurora = false;
+  f32 aurora_intensity = 1.0f;  // 0..1
+};
+
 // Everything the debug ui can flip at runtime. The renderer diffs this
 // against the applied state each frame and reconfigures what changed;
 // expensive transitions (upscaler swaps, vsync) go through a device idle.
@@ -225,17 +263,9 @@ struct RenderSettings {
   bool clouds = true;
   f32 cloud_coverage = 0.46f;  // 0 clear .. 1 overcast
 
-  // Screen-space precipitation, driven by the weather system (0 disables).
-  f32 precipitation = 0.0f;  // 0 none .. 1 heavy
-  bool precip_snow = false;  // snow flakes vs rain streaks
-
-  // Procedural night-sky aurora (undulating polar-light curtains). Off by
-  // default; the application enables it for worlds that want an aurora.
-  bool aurora = false;
-
-  // Lightning flash intensity this frame (0 none .. 1 peak), driven by the engine
-  // during thunderstorms. Boosts the per-frame direct light + clouds.
-  f32 lightning = 0.0f;
+  // Weather state (precipitation, wind, surface wetness/snow cover, lightning,
+  // aurora), written by the application's weather system each frame.
+  WeatherSettings weather;
 
   // Per-object + camera motion blur (tile-max gather on the prepass velocity).
   bool motion_blur = true;
@@ -306,6 +336,12 @@ struct RenderSettings {
   f32 sun_intensity = 4.0f;
   Vec3 sun_color{1.0f, 0.96f, 0.9f};
   f32 ambient = 0.06f;
+  // How dark the sky is: 0 day .. 1 night, gating the stars/moon/aurora. At
+  // night the app typically swaps sun_direction for a downward moon light, so
+  // the sky can no longer infer darkness from the light direction. Apps that
+  // drive the sun from a clock pass SkyLighting::night here; < 0 keeps the
+  // legacy sun-elevation fallback for a real below-horizon sun.
+  f32 night = -1.0f;
 
   // Authored interior lighting supplied by the application (e.g. resolved from a
   // game's interior/room lighting definition). When `interior` is set the

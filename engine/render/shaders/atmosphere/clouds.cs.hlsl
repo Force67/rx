@@ -16,10 +16,12 @@ struct PushData {
   float4 camera_pos;     // xyz eye (m), w time (s)
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb, w coverage [0..1]
-  float4 params;         // x bottom(m), y top(m), z density, w wind speed
+  float4 params;         // x bottom(m), y top(m), z density, w wind velocity x
   uint2 size;
   uint steps;
   uint light_steps;
+  float wind_z;          // z component of the drift velocity
+  float3 pad;
 };
 PUSH_CONSTANTS(PushData, pc);
 
@@ -57,7 +59,7 @@ float CloudDensity(float3 p, float time) {
   // Rounded height gradient: bottom-weighted, fading to the top (cumulus-ish).
   float grad = saturate(h * 6.0) * saturate((1.0 - h) * 2.5);
 
-  float3 wind = float3(time * pc.params.w, 0.0, time * pc.params.w * 0.3);
+  float3 wind = float3(time * pc.params.w, 0.0, time * pc.wind_z);
   float3 wp = (p + wind) * 0.00035;
   // Low-frequency domain warp: breaks the fbm's blobby isotropy into
   // billowing cauliflower masses.

@@ -39,6 +39,9 @@
 #include "render/atmosphere/clouds.h"
 #include "render/gi/path_tracer.h"
 #include "render/gi/recon_path_tracer.h"
+#include "render/atmosphere/lightning.h"
+#include "render/atmosphere/precip_occlusion.h"
+#include "render/atmosphere/precip_volume.h"
 #include "render/atmosphere/precipitation.h"
 #include "render/atmosphere/surface_weather.h"
 #include "render/atmosphere/froxel_fog.h"
@@ -490,6 +493,11 @@ class RX_RENDER_EXPORT Renderer {
   void ApplySettings();
   bool CreateUpscalerForSettings();
   void BuildFrameGraph(FrameResources& frame, u32 image_index, const FrameView& view);
+  // Records the frame's opaque casters depth-only with ShadowPass's caster
+  // pipelines (static/skinned/instanced, masked + opaque variants). Shared by
+  // the sun cascade render and the precipitation sky-occlusion map.
+  void RecordDepthOnlyScene(CommandList& cmd, const Mat4& light_view_proj,
+                            const FrameResources& frame, const FrameView& view);
   // Builds the blas + bindless geometry for grass-like (no_rt) meshes uploaded
   // while path tracing was off, so enabling it later still gets the alpha-tested
   // foliage into the tlas. Idempotent (skips already-built meshes).
@@ -606,6 +614,10 @@ class RX_RENDER_EXPORT Renderer {
   AerialPerspective aerial_perspective_;
   Clouds clouds_;
   Precipitation precipitation_;
+  PrecipOcclusion precip_occlusion_;
+  PrecipVolume precip_volume_;
+  LightningSystem lightning_;
+  bool precip_occlusion_active_ = false;  // sky map valid + consumers may sample it
   SurfaceWeather surface_weather_;
   ParticleSystem particles_;
   // CPU pools for the NIF particle emitters (fires, smoke, mist), fed from
@@ -666,6 +678,9 @@ class RX_RENDER_EXPORT Renderer {
   f32 applied_sun_intensity_ = -1;
   Vec3 applied_sun_color_{};
   bool environment_dirty_ = true;
+  // Last frame's aurora bake strength; a fade to zero re-bakes once so the
+  // sky/IBL do not keep the final green cubemap after the aurora turns off.
+  f32 prev_env_aurora_ = 0.0f;
 
   // Editor debug-line pass: a line-list pipeline (lazily built) drawing
   // FrameView::debug_lines/overlay from per-frame host-visible vertex buffers.

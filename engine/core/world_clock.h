@@ -85,6 +85,11 @@ struct SkyLighting {
   f32 sun_intensity = 0;  // directional light strength
   Vec3 sun_color;         // light tint (warm at the horizon, cool at night)
   f32 ambient = 0;        // flat fill so shadows are not crushed black
+  // 0 by day, 1 at night. Feed RenderSettings::night so the sky knows it is
+  // dark: at night sun_direction hands over to the moon (pointing down), so
+  // the renderer cannot infer night from the light direction alone, and the
+  // stars/moon/aurora would otherwise never fade in.
+  f32 night = 0;
 };
 RX_CORE_EXPORT SkyLighting ComputeSkyLighting(f32 hour);
 

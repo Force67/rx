@@ -130,6 +130,22 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "clouds = " << Bool(s.clouds) << "\n";
   o << "cloud_coverage = " << s.cloud_coverage << "\n\n";
 
+  o << "[weather]\n";
+  o << "precipitation = " << s.weather.precipitation << "\n";
+  o << "precip_snow = " << Bool(s.weather.snow) << "\n";
+  o << "volumetric = " << Bool(s.weather.volumetric) << "\n";
+  o << "wind_speed = " << s.weather.wind_speed << "\n";
+  o << "wind_yaw = " << s.weather.wind_yaw << "\n";
+  o << "gustiness = " << s.weather.gustiness << "\n";
+  o << "wetness = " << s.weather.wetness << "\n";
+  o << "snow_cover = " << s.weather.snow_cover << "\n";
+  o << "lightning = " << s.weather.lightning << "\n";
+  // Not "rt_shadows": the parser ignores sections and that key is already the
+  // [shadows] ray-traced sun toggle.
+  o << "precip_rt_shadows = " << Bool(s.weather.rt_shadows) << "\n";
+  o << "aurora = " << Bool(s.weather.aurora) << "\n";
+  o << "aurora_intensity = " << s.weather.aurora_intensity << "\n\n";
+
   o << "[ambient_occlusion]\n";
   o << "rtao = " << Bool(s.rtao) << "\n";
   o << "ssao = " << Bool(s.ssao) << "\n";
@@ -261,6 +277,19 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   fl("aerial_perspective", s.aerial_perspective);
   b("clouds", s.clouds);
   fl("cloud_coverage", s.cloud_coverage);
+
+  fl("precipitation", s.weather.precipitation);
+  b("precip_snow", s.weather.snow);
+  b("volumetric", s.weather.volumetric);
+  fl("wind_speed", s.weather.wind_speed);
+  fl("wind_yaw", s.weather.wind_yaw);
+  fl("gustiness", s.weather.gustiness);
+  fl("wetness", s.weather.wetness);
+  fl("snow_cover", s.weather.snow_cover);
+  fl("lightning", s.weather.lightning);
+  b("precip_rt_shadows", s.weather.rt_shadows);
+  b("aurora", s.weather.aurora);
+  fl("aurora_intensity", s.weather.aurora_intensity);
 
   b("rtao", s.rtao);
   b("ssao", s.ssao);

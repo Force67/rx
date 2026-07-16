@@ -15,10 +15,11 @@ namespace rx::render {
 // This backs the editable platform presets in engine/render/presets and the
 // load/save controls in the debug ui.
 //
-// Only persistent quality/performance knobs are covered. Scene state owned by
-// other systems is deliberately excluded so a preset never fights them:
+// The persistent quality/performance knobs and the [weather] group (so a saved
+// file round-trips a weather look for testing) are covered. Scene state owned
+// by other systems is deliberately excluded so a preset never fights them:
 //   - sun_direction / sun_intensity / sun_color / ambient  (day/night clock)
-//   - precipitation / precip_snow / aurora / lightning      (weather system)
+//   - weather strike_* fields                (transient per-strike lightning)
 //   - color_grade                                           (artistic / env)
 //   - debug_view / wireframe / path_trace_recon_debug       (debug overlays)
 // ApplyIni leaves any field whose key is absent untouched, so partial files and

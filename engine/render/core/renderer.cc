@@ -158,6 +158,11 @@ base::Option<float> CloudCoverage{"cloud.coverage", 0.46f, "RX_CLOUD_COVERAGE"};
 base::Option<float> Precip{"precip", 0.0f, "RX_PRECIP"};
 base::Option<bool> Snow{"snow", false, "RX_SNOW"};
 base::Option<bool> Aurora{"aurora", false, "RX_AURORA"};
+base::Option<float> Wind{"wind", 12.0f, "RX_WIND"};
+base::Option<float> WindDir{"wind.dir", 0.0f, "RX_WIND_DIR"};
+base::Option<float> Wetness{"wetness", 0.0f, "RX_WETNESS"};
+base::Option<float> SnowCover{"snow.cover", 0.0f, "RX_SNOW_COVER"};
+base::Option<float> AuroraIntensity{"aurora.intensity", 1.0f, "RX_AURORA_INTENSITY"};
 base::Option<const char*> RhiBackend{"rhi.backend", nullptr, "RX_RHI"};
 
 // Distance-based hierarchical lod: coarser geometry the further a mesh is from
@@ -481,6 +486,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
       f32 top;
       f32 wind;
       f32 strength;
+      f32 wind_z;  // z drift velocity, matches cloud_shadow.cs (and clouds.cs)
+      f32 pad[3];
     };
     cloud_shadow_pipeline_ = device_->CreateComputePipeline({
         .shader = RX_SHADER(k_cloud_shadow_cs_hlsl),
@@ -630,6 +637,15 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   clouds_.Initialize(*device_);              // volumetric clouds (no ray tracing)
   precipitation_.Initialize(*device_);       // screen-space rain/snow
   surface_weather_.Initialize(*device_);     // rain wetness / snow accumulation
+  if (!precip_occlusion_.Initialize(*device_)) {
+    RX_WARN("precipitation sky occlusion unavailable");  // volumetric precip gates on it
+  }
+  if (!precip_volume_.Initialize(*device_, kSceneColorFormat, rt_available_)) {
+    RX_WARN("volumetric precipitation unavailable");  // screen-space streaks remain
+  }
+  if (!lightning_.Initialize(*device_, kSceneColorFormat)) {
+    RX_WARN("lightning bolts unavailable");  // the global flash scalar remains
+  }
 
   UpdateRenderResolution();
   vrs_.Resize(*device_, {render_width_, render_height_});
@@ -799,9 +815,16 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (CloudCoverage.overridden()) settings_.cloud_coverage = CloudCoverage.get();
   // RX_PRECIP forces precipitation (0..1) and RX_SNOW=1 makes it snow, so the
   // effect is testable without a loaded game's weather.
-  if (Precip.overridden()) settings_.precipitation = Precip.get();
-  if (Snow.overridden()) settings_.precip_snow = Snow;
-  if (Aurora.overridden()) settings_.aurora = Aurora;
+  if (Precip.overridden()) settings_.weather.precipitation = Precip.get();
+  if (Snow.overridden()) settings_.weather.snow = Snow;
+  if (Aurora.overridden()) settings_.weather.aurora = Aurora;
+  // RX_WIND (m/s) / RX_WIND_DIR (degrees) steer precipitation slant and cloud
+  // drift; RX_WETNESS / RX_SNOW_COVER force the surface response directly.
+  if (Wind.overridden()) settings_.weather.wind_speed = Wind.get();
+  if (WindDir.overridden()) settings_.weather.wind_yaw = WindDir.get() * 3.14159265f / 180.0f;
+  if (Wetness.overridden()) settings_.weather.wetness = Wetness.get();
+  if (SnowCover.overridden()) settings_.weather.snow_cover = SnowCover.get();
+  if (AuroraIntensity.overridden()) settings_.weather.aurora_intensity = AuroraIntensity.get();
 
   // RCGI software mode: on a device without ray query (or when RX_RCGI_SW forces
   // it for A/B on RT hardware), RCGI's world side runs through the SDF clipmap
@@ -2263,6 +2286,89 @@ void Renderer::RenderPickPass(const FrameView& view) {
   pick_result_ready_ = true;
 }
 
+void Renderer::RecordDepthOnlyScene(CommandList& cmd, const Mat4& light_view_proj,
+                                    const FrameResources& frame, const FrameView& view) {
+  BindingSetHandle bound_material{};
+  // All the shadow caster pipelines share one layout, so pushes and set binds
+  // persist across the per-submesh variant switches below. Bind the masked
+  // static permutation up front so the matrix push always has a pipeline.
+  PipelineHandle bound_pipeline = shadow_.pipeline();
+  cmd.BindPipeline(bound_pipeline);
+  cmd.PushConstants(&light_view_proj, sizeof(Mat4));
+  for (const DrawItem& item : view.draws) {
+    const GpuMesh* mesh = meshes_.find(item.mesh);
+    // no_rt skips grass-like fill geometry, but skinned actors are
+    // no_rt only to stay out of the tlas; they still cast shadows.
+    if (!mesh || mesh->all_blend || (mesh->no_rt && !mesh->skinned)) continue;
+    // Skinned casters run the bone-blended vertex stage so the
+    // shadow tracks the animated pose, not the bind pose.
+    bool draw_skinned = mesh->skinned && item.skin_offset >= 0 &&
+                        static_cast<bool>(shadow_.skinned_pipeline());
+    // The light matrix sits at offset 0; the model follows it, skin data after.
+    cmd.PushConstants(&item.transform, sizeof(Mat4), sizeof(Mat4));
+    cmd.BindVertexBuffer(0, mesh->vertices);
+    if (draw_skinned) {
+      cmd.BindVertexBuffer(1, mesh->skinning);
+      struct {
+        u64 bone_address;
+        u32 skin_offset;
+        u32 pad;
+      } skin{frame.bone_palette.address, static_cast<u32>(item.skin_offset), 0};
+      cmd.PushConstants(&skin, sizeof(skin), 2 * sizeof(Mat4));
+    }
+    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+    for (const GpuSubmesh& submesh : mesh->submeshes) {
+      if (submesh.blend) continue;
+      // Opaque casters draw depth-only (no fragment, early-Z stays);
+      // masked ones bind the alpha-test fragment + its material set.
+      PipelineHandle pipeline = draw_skinned ? shadow_.skinned_pipeline(submesh.alpha_mask)
+                                             : shadow_.pipeline(submesh.alpha_mask);
+      if (!(pipeline == bound_pipeline)) {
+        cmd.BindPipeline(pipeline);
+        bound_pipeline = pipeline;
+      }
+      if (submesh.alpha_mask) {
+        BindingSetHandle material = material_system_->set(submesh.material);
+        if (!(material == bound_material)) {
+          cmd.BindSet(0, material);
+          bound_material = material;
+        }
+      }
+      cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
+    }
+  }
+  f32 shadow_planes[5][4];
+  ExtractFrustumPlanes(light_view_proj, shadow_planes);
+  for (const InstanceStore::Group& group : instances_.groups()) {
+    if (!group.alive) continue;
+    if (group.cullable &&
+        SphereOutsideFrustum(shadow_planes, group.bounds_center, group.bounds_radius))
+      continue;
+    const GpuMesh* mesh = meshes_.find(group.mesh);
+    if (!mesh || mesh->all_blend || mesh->no_rt) continue;
+    cmd.BindVertexBuffer(0, mesh->vertices);
+    cmd.BindVertexBuffer(1, group.buffer);
+    cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
+    for (const GpuSubmesh& submesh : mesh->submeshes) {
+      if (submesh.blend) continue;
+      const PipelineHandle pipeline = shadow_.instanced_pipeline(submesh.alpha_mask);
+      if (!(pipeline == bound_pipeline)) {
+        cmd.BindPipeline(pipeline);
+        bound_pipeline = pipeline;
+      }
+      if (submesh.alpha_mask) {
+        const BindingSetHandle material = material_system_->set(submesh.material);
+        if (!(material == bound_material)) {
+          cmd.BindSet(0, material);
+          bound_material = material;
+        }
+      }
+      cmd.DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
+                      submesh.index_offset, 0, 0);
+    }
+  }
+}
+
 void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const FrameView& view) {
   u32 frame_slot = frame_index_ % kFramesInFlight;
   bool rt_shadows = rt_available_ && settings_.rt_shadows;
@@ -2284,6 +2390,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
   bool rcgi_world = rcgi_active && !path_trace;
   if (rcgi_ && !rcgi_world) rcgi_->RequestReset();
+  // Set by the raster path when the 3D precipitation volume draws; the
+  // post-resolve screen-space streak fallback is skipped that frame.
+  bool precip_volume_drawn = false;
   // kMsaa: the prepass + opaque scene render multisampled and resolve before
   // everything downstream, which then runs single-sampled exactly as kNone.
   // ApplySettings already rebuilt the mesh pipelines at this sample count.
@@ -2364,13 +2473,22 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     }
   }
   bool water_pipeline_active = any_water && water_ != nullptr;
+  // Volumetric precipitation's optional per-particle sun rays consult the TLAS
+  // from its vertex shader, so an active rainstorm must keep the TLAS built
+  // and current even when every other ray-traced effect is disabled.
+  const bool precip_volume_ready = settings_.weather.volumetric &&
+                                   settings_.weather.precipitation > 0.0f &&
+                                   !settings_.interior && precip_volume_.available();
+  const bool precip_rt = precip_volume_ready && settings_.weather.rt_shadows && rt_available_ &&
+                         !path_trace;
   // When the tlas is consulted for shading, the rasterized surface must match the
   // blas (built at lod 0), or rays can hit geometry that the selected raster lod
   // did not draw. This includes water reflections and volumetric-fog visibility,
   // not only the opaque scene's ray-traced effects.
   bool force_lod0_for_tlas = rt_shadows || rtao_active || ddgi_active ||
                              (rcgi_active && !rcgi_software) || reflections_active || path_trace ||
-                             (water_pipeline_active && settings_.water_reflections) || fog_active;
+                             (water_pipeline_active && settings_.water_reflections) || fog_active ||
+                             precip_rt;
 
   // Async TLAS build (RX_RT_ASYNC_TLAS): build this frame's slot on the compute
   // queue while the graphics timeline consumes the slot built last frame -- the
@@ -2707,7 +2825,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Lightning flashes the PER-FRAME direct light only (not settings_, so the
   // sun-change check never rebuilds the IBL cubemap): a brief bright blue-white
   // boost to the directional intensity, colour and ambient fill.
-  const f32 flash = interior ? 0.0f : settings_.lightning;
+  const f32 flash = interior ? 0.0f : settings_.weather.lightning;
   if (interior) {
     globals.sun_direction[3] = settings_.interior_directional_intensity;
     globals.sun_color[0] = settings_.interior_directional_color.x;
@@ -2753,7 +2871,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (rcgi_world && (!interior || RcgiInteriorOpt)) globals.flags |= kFrameFlagRcgi;
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows && !interior) globals.flags |= kFrameFlagRtShadows;
-  if (settings_.aurora && !interior) globals.flags |= kFrameFlagAurora;
+  if (settings_.weather.aurora && !interior) globals.flags |= kFrameFlagAurora;
+  // Aurora intensity rides the otherwise-unused pad_wind slot; sky.ps mirrors
+  // it as `aurora.x` and night-gates it itself. Zero keeps the effect off.
+  // pad_wind[1] carries the app's explicit night factor (moon-lit nights point
+  // the "sun" downward, so the shader's elevation fallback reads as day there).
+  globals.pad_wind[0] =
+      (settings_.weather.aurora && !interior) ? settings_.weather.aurora_intensity : 0.0f;
+  globals.pad_wind[1] = settings_.night;
   if (nrd_shadow && !interior) globals.flags |= kFrameFlagSigmaShadow;
   if (interior) globals.flags |= kFrameFlagInterior;
   if (reflections_active) globals.flags |= kFrameFlagReflections;
@@ -2767,6 +2892,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   u32 light_count = std::min<u32>(static_cast<u32>(view.lights.size()), kMaxFrameLights);
   if (light_count > 0) {
     std::memcpy(frame.lights.mapped, view.lights.data(), light_count * sizeof(PointLight));
+  }
+  // Active lightning strike: append the positioned flash light after the copy
+  // so it clusters, claims local-shadow faces and fills the froxel volumetrics
+  // like any other light (and ReSTIR/clustered reflections see the flash even
+  // though the bolt itself is a raster overlay). The GLOBAL weather.lightning
+  // sun/ambient boost above is separate; this adds locality on top.
+  if (!interior && !path_trace) {
+    light_count += lightning_.AppendLights(
+        static_cast<PointLight*>(frame.lights.mapped) + light_count,
+        kMaxFrameLights - light_count, settings_.weather);
   }
   // Local light shadows: the nearest casters claim atlas faces (writes each
   // claimed light's params.w in the mapped buffer, so it must follow the copy).
@@ -2967,22 +3102,49 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     water_caustics_.AddToGraph(graph_, cp);
   }
 
+  // Aurora contribution to the environment bake: the CPU-side night factor
+  // (the same smoothstep sky.ps applies to its screen-space copy) zeroes the
+  // term whenever the sun is up, so a daylight scene never re-bakes for it.
+  f32 env_aurora = 0.0f;
+  if (settings_.weather.aurora && !interior) {
+    f32 night = settings_.night;
+    if (night < 0.0f) {  // legacy fallback: infer from the sun's elevation
+      f32 to_sun_y = -applied_sun_direction_.y;
+      night = std::clamp((0.04f - to_sun_y) / 0.14f, 0.0f, 1.0f);
+      night = night * night * (3.0f - 2.0f * night);
+    }
+    env_aurora = settings_.weather.aurora_intensity * std::clamp(night, 0.0f, 1.0f);
+  }
+  // An active aurora writhes: refresh the cubemap whenever its 0.4 s animation
+  // step ticks over, so the curtains also move in the IBL and reflections. The
+  // moment it fades to zero the environment re-bakes once more, so switching
+  // the aurora off does not leave the last green bake in the IBL forever.
+  constexpr f64 kAuroraBakeStep = 0.4;
+  if (env_aurora > 0.0f &&
+      std::floor(time_seconds_ / kAuroraBakeStep) !=
+          std::floor((time_seconds_ - view.frame_delta_seconds) / kAuroraBakeStep)) {
+    environment_dirty_ = true;
+  }
+  if (env_aurora <= 0.0f && prev_env_aurora_ > 0.0f) environment_dirty_ = true;
+  prev_env_aurora_ = env_aurora;
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
     Vec3 env_sun = applied_sun_direction_;
     f32 env_intensity = applied_sun_intensity_;
     Vec3 env_color = applied_sun_color_;
+    f32 env_time = static_cast<f32>(time_seconds_);
     graph_.AddPass(
         "env_update", [](RenderGraph::PassBuilder&) {},
-        [this, env_sun, env_intensity, env_color](PassContext& ctx) {
-          environment_->RecordUpdate(*ctx.cmd, env_sun, env_intensity, env_color);
+        [this, env_sun, env_intensity, env_color, env_aurora, env_time](PassContext& ctx) {
+          environment_->RecordUpdate(*ctx.cmd, env_sun, env_intensity, env_color, env_aurora,
+                                     env_time);
         });
   }
 
   // RCGI contributes to the TLAS build only in hardware mode; the software SDF
   // path has no ray query and (on non-ray-query devices) no raytracing context.
   if (rt_shadows || rtao_active || ddgi_active || (rcgi_active && !rcgi_software) ||
-      water_pipeline_active || reflections_active || path_trace || fog_active) {
+      water_pipeline_active || reflections_active || path_trace || fog_active || precip_rt) {
     // Solid-angle instance culling + distance LOD are realtime-only shaping of
     // the ray-traced scene; the path tracer keeps every instance at LOD0 for
     // reference correctness. RX_RT_CULL / RX_RT_LOD_NEAR gate them independently.
@@ -3353,6 +3515,29 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     pt_was_active_ = false;
     pt_prev_mode_ = -1;
 
+  // Precipitation sky occlusion: a top-down "what can see the sky" depth map
+  // gating the volumetric rain/snow, its splashes and the surface wetness /
+  // snow accumulation (dry under bridges, splashes on roofs). Rendered early
+  // so every consumer this frame samples fresh cover; re-rendered only when
+  // the camera crosses an anchor cell or on a slow cadence.
+  {
+    const WeatherSettings& weather = settings_.weather;
+    const bool weather_marks =
+        weather.precipitation > 0.0f || weather.wetness > 0.0f || weather.snow_cover > 0.0f;
+    // Not gated on `volumetric`: that flag only picks 3D versus screen-space
+    // falling precipitation, while the surface wetness / snow passes need the
+    // sky-visibility map either way (dry strips under bridges).
+    precip_occlusion_active_ = weather_marks && precip_occlusion_.available() &&
+                               !settings_.interior && !path_trace;
+    if (precip_occlusion_active_) {
+      precip_occlusion_.BeginFrame(view.camera.eye, frame_index_);
+      precip_occlusion_.AddToGraph(
+          graph_, [this, &frame, &view](CommandList& cmd, const Mat4& occl_view_proj) {
+            RecordDepthOnlyScene(cmd, occl_view_proj, frame, view);
+          });
+    }
+  }
+
   u32 shadow_slot = frame_index_ % 2;
   if (csm_active) {
     Vec3 fwd = Normalize(view.camera.target - view.camera.eye);
@@ -3370,85 +3555,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
           TextureView atlas = ctx.graph->image(shadow_atlas).view;
           shadow_.Render(*ctx.cmd, atlas,
                          [this, &frame, &view](CommandList& cmd, const Mat4& light_view_proj) {
-            BindingSetHandle bound_material{};
-            // ShadowPass::Render bound the masked static permutation; all four
-            // shadow pipelines share one layout, so pushes and set binds
-            // persist across the per-submesh variant switches below.
-            PipelineHandle bound_pipeline = shadow_.pipeline();
-            for (const DrawItem& item : view.draws) {
-              const GpuMesh* mesh = meshes_.find(item.mesh);
-              // no_rt skips grass-like fill geometry, but skinned actors are
-              // no_rt only to stay out of the tlas; they still cast shadows.
-              if (!mesh || mesh->all_blend || (mesh->no_rt && !mesh->skinned)) continue;
-              // Skinned casters run the bone-blended vertex stage so the
-              // shadow tracks the animated pose, not the bind pose.
-              bool draw_skinned = mesh->skinned && item.skin_offset >= 0 &&
-                                  static_cast<bool>(shadow_.skinned_pipeline());
-              // The per-cascade light matrix sits at offset 0 (pushed by
-              // ShadowPass::Render); the model follows it, skin data after.
-              cmd.PushConstants(&item.transform, sizeof(Mat4), sizeof(Mat4));
-              cmd.BindVertexBuffer(0, mesh->vertices);
-              if (draw_skinned) {
-                cmd.BindVertexBuffer(1, mesh->skinning);
-                struct {
-                  u64 bone_address;
-                  u32 skin_offset;
-                  u32 pad;
-                } skin{frame.bone_palette.address, static_cast<u32>(item.skin_offset), 0};
-                cmd.PushConstants(&skin, sizeof(skin), 2 * sizeof(Mat4));
-              }
-              cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-              for (const GpuSubmesh& submesh : mesh->submeshes) {
-                if (submesh.blend) continue;
-                // Opaque casters draw depth-only (no fragment, early-Z stays);
-                // masked ones bind the alpha-test fragment + its material set.
-                PipelineHandle pipeline = draw_skinned
-                                              ? shadow_.skinned_pipeline(submesh.alpha_mask)
-                                              : shadow_.pipeline(submesh.alpha_mask);
-                if (!(pipeline == bound_pipeline)) {
-                  cmd.BindPipeline(pipeline);
-                  bound_pipeline = pipeline;
-                }
-                if (submesh.alpha_mask) {
-                  BindingSetHandle material = material_system_->set(submesh.material);
-                  if (!(material == bound_material)) {
-                    cmd.BindSet(0, material);
-                    bound_material = material;
-                  }
-                }
-                cmd.DrawIndexed(submesh.index_count, 1, submesh.index_offset, 0, 0);
-              }
-            }
-            f32 shadow_planes[5][4];
-            ExtractFrustumPlanes(light_view_proj, shadow_planes);
-            for (const InstanceStore::Group& group : instances_.groups()) {
-              if (!group.alive) continue;
-              if (group.cullable &&
-                  SphereOutsideFrustum(shadow_planes, group.bounds_center, group.bounds_radius))
-                continue;
-              const GpuMesh* mesh = meshes_.find(group.mesh);
-              if (!mesh || mesh->all_blend || mesh->no_rt) continue;
-              cmd.BindVertexBuffer(0, mesh->vertices);
-              cmd.BindVertexBuffer(1, group.buffer);
-              cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
-              for (const GpuSubmesh& submesh : mesh->submeshes) {
-                if (submesh.blend) continue;
-                const PipelineHandle pipeline = shadow_.instanced_pipeline(submesh.alpha_mask);
-                if (!(pipeline == bound_pipeline)) {
-                  cmd.BindPipeline(pipeline);
-                  bound_pipeline = pipeline;
-                }
-                if (submesh.alpha_mask) {
-                  const BindingSetHandle material = material_system_->set(submesh.material);
-                  if (!(material == bound_material)) {
-                    cmd.BindSet(0, material);
-                    bound_material = material;
-                  }
-                }
-                cmd.DrawIndexed(submesh.index_count, static_cast<u32>(group.transforms.size()),
-                                submesh.index_offset, 0, 0);
-              }
-            }
+            RecordDepthOnlyScene(cmd, light_view_proj, frame, view);
           });
         });
   }
@@ -4059,6 +4166,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                 f32 top;
                 f32 wind;
                 f32 strength;
+                f32 wind_z;  // z drift velocity, matches cloud_shadow.cs
+                f32 pad[3];
               } p{};
               p.inv_view_proj = inv_view_proj;
               p.sun_dir[0] = sun.x; p.sun_dir[1] = sun.y; p.sun_dir[2] = sun.z;
@@ -4068,7 +4177,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               p.coverage = settings_.cloud_coverage;
               p.bottom = 1500.0f;
               p.top = 4200.0f;
-              p.wind = 12.0f;
+              // Same drift velocity as clouds.cs, so the shadows track the deck.
+              p.wind = std::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+              p.wind_z = std::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
               p.strength = 0.75f;
               ctx.cmd->BindPipeline(cloud_shadow_pipeline_);
               ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
@@ -4093,7 +4204,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       rfl.inv_view_proj = globals.inv_view_proj;
       rfl.camera_pos = view.camera.eye;
       rfl.sun_direction = settings_.sun_direction;
-      rfl.sun_intensity = settings_.sun_intensity + settings_.lightning * 9.0f;
+      rfl.sun_intensity = settings_.sun_intensity + settings_.weather.lightning * 9.0f;
       rfl.sun_color = settings_.sun_color;
       rfl.roughness_cutoff = settings_.reflection_roughness_cutoff;
       rfl.frame_index = frame_index_;
@@ -4609,16 +4720,31 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                     shadow_slot, tlas_slot, /*globals_written=*/true, rcgi_irr);
   }
 
-  // Surface weather: wet/darken (rain) or whiten (snow) the lit surfaces before
-  // the atmosphere/clouds/rain layer over them. Uses the G-buffer normals + the
-  // sky cubemap for the puddle reflection.
-  if (settings_.precipitation > 0.0f && !path_trace && normals != kInvalidResource) {
+  // Surface weather: wet/darken (rain) and whiten (snow) the lit surfaces
+  // before the atmosphere/clouds/rain layer over them, gated by the sky
+  // occlusion map so cover stays dry. Wetness and snow cover are independent
+  // channels (melting snow over wet ground coexists); the game integrates them
+  // over time, and live precipitation acts as a floor so setting only
+  // `precipitation` still wets (or whitens) the ground.
+  const f32 live_rain = settings_.weather.snow ? 0.0f : settings_.weather.precipitation;
+  const f32 live_snow = settings_.weather.snow ? settings_.weather.precipitation : 0.0f;
+  const f32 surface_wetness = std::max(settings_.weather.wetness, live_rain);
+  const f32 surface_snow = std::max(settings_.weather.snow_cover, live_snow);
+  if ((surface_wetness > 0.0f || surface_snow > 0.0f) && !path_trace &&
+      normals != kInvalidResource) {
     SurfaceWeather::Frame sf;
     sf.inv_view_proj = globals.inv_view_proj;
     sf.camera_pos = view.camera.eye;
-    sf.wetness = settings_.precipitation;
-    sf.snow = settings_.precip_snow;
+    sf.wetness = surface_wetness;
+    sf.snow_cover = surface_snow;
+    sf.rain = live_rain;
     sf.time = static_cast<f32>(time_seconds_);
+    if (precip_occlusion_active_) {
+      precip_occlusion_.Params(sf.occl);
+      sf.occl_range = PrecipOcclusion::y_range();
+      sf.occlusion = precip_occlusion_.view();
+      sf.occlusion_sampler = precip_occlusion_.sampler();
+    }
     lit = surface_weather_.AddToGraph(graph_, lit, normals, depth_export, environment_->sky_view(),
                                       environment_->sampler(), {render_width_, render_height_}, sf);
   }
@@ -4650,10 +4776,31 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     cf.sun_direction = settings_.sun_direction;
     // Lightning brightens the cloud (its ambient + sun terms scale with intensity),
     // so the storm clouds flash from within.
-    cf.sun_intensity = settings_.sun_intensity + settings_.lightning * 7.0f;
+    cf.sun_intensity = settings_.sun_intensity + settings_.weather.lightning * 7.0f;
     cf.sun_color = settings_.sun_color;
     cf.coverage = settings_.cloud_coverage;
+    cf.wind_x = std::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+    cf.wind_z = std::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
     lit = clouds_.AddToGraph(graph_, lit, depth_export, {render_width_, render_height_}, cf);
+  }
+
+  // Lightning bolt: the procedural branched channel, drawn after the clouds
+  // (the bolt overlays the deck) and before the froxel composite + precip
+  // volume (fog scatters over it, rain streaks cross in front of it). Drawn
+  // pre-resolve with a zero-motion core so TAA treats the flash as static.
+  if (settings_.weather.strike_age >= 0.0f && lightning_.available() && !path_trace &&
+      !interior && depth_export != kInvalidResource && motion != kInvalidResource) {
+    LightningSystem::Frame lf;
+    lf.view_proj = view_proj;
+    lf.cam_pos = view.camera.eye;
+    lf.time = static_cast<f32>(time_seconds_);
+    lf.strike_pos = settings_.weather.strike_pos;
+    lf.strike_age = settings_.weather.strike_age;
+    lf.strike_seed = settings_.weather.strike_seed;
+    lf.strike_energy = settings_.weather.strike_energy;
+    lf.jitter[0] = globals.jitter[0];
+    lf.jitter[1] = globals.jitter[1];
+    lightning_.AddToGraph(graph_, lit, depth_export, motion, lf);
   }
 
   // Note: screen-space precipitation (rain/snow streaks) is composited after the
@@ -4746,6 +4893,49 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     lit = wboit_.AddToGraph(graph_, lit, depth, view.oit, view_proj, applied_sun_direction_,
                             sun_col, std::max(settings_.ambient, 0.12f), render_width_,
                             render_height_, oit_light);
+  }
+
+  // True volumetric precipitation: stateless world-anchored rain streaks /
+  // snow flakes with impact splashes, drawn pre-resolve with motion vectors so
+  // TAA treats them like geometry. Gated by the sky-occlusion map (nothing
+  // falls under the shelter roof). When this runs, the post-resolve
+  // screen-space streak layer is skipped; it remains the volumetric=false and
+  // path-trace fallback.
+  if (precip_occlusion_active_ && precip_volume_ready && depth_export != kInvalidResource &&
+      motion != kInvalidResource) {
+    Vec3 fwd = Normalize(view.camera.target - view.camera.eye);
+    Vec3 right = Normalize(Cross(fwd, Vec3{0, 1, 0}));
+    PrecipVolume::Frame vf;
+    vf.view_proj = view_proj;
+    vf.prev_view_proj = globals.prev_view_proj;
+    vf.cam_right = right;
+    vf.cam_up = Cross(right, fwd);
+    vf.cam_pos = view.camera.eye;
+    vf.sun_direction = applied_sun_direction_;
+    vf.sun_color = applied_sun_color_;
+    vf.sun_intensity = applied_sun_intensity_;
+    vf.ambient = std::max(settings_.ambient, 0.02f);
+    vf.time = static_cast<f32>(time_seconds_);
+    vf.dt = view.frame_delta_seconds;
+    vf.intensity = settings_.weather.precipitation;
+    vf.snow = settings_.weather.snow;
+    // Wind yaw is the direction the wind blows toward; decompose to xz.
+    vf.wind[0] = std::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+    vf.wind[1] = std::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+    vf.gustiness = settings_.weather.gustiness;
+    vf.lightning = settings_.weather.lightning;
+    vf.jitter[0] = globals.jitter[0];
+    vf.jitter[1] = globals.jitter[1];
+    precip_occlusion_.Params(vf.occl);
+    vf.occl_range = PrecipOcclusion::y_range();
+    vf.occlusion = precip_occlusion_.view();
+    vf.occlusion_sampler = precip_occlusion_.sampler();
+    vf.froxel_enabled = froxel_on;
+    vf.froxel_volume = froxel_fog_.integrated().view;
+    vf.froxel_sampler = froxel_fog_.volume_sampler();
+    vf.rt_shadows = precip_rt;  // matched to the TLAS build request above
+    precip_volume_.AddToGraph(graph_, lit, depth_export, motion, raytracing_.get(), tlas_slot, vf);
+    precip_volume_drawn = true;
   }
 
   // NIF particle emitters: a cpu pool per placed instance of an emitting mesh,
@@ -5175,13 +5365,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // Screen-space precipitation streaks, composited at output resolution after the
   // AA resolve so they stay crisp (TAA would otherwise smear them) and tonemap
   // with the scene. Driven by weather; surface wetness was applied pre-resolve.
-  if (settings_.precipitation > 0.0f && !path_trace) {
+  // The non-volumetric fallback: skipped whenever the 3D particle volume drew.
+  if (settings_.weather.precipitation > 0.0f && !path_trace && !precip_volume_drawn) {
     Precipitation::Frame pf;
     pf.inv_view_proj = globals.inv_view_proj;
     pf.camera_pos = view.camera.eye;
     pf.time = static_cast<f32>(time_seconds_);
-    pf.intensity = settings_.precipitation;
-    pf.snow = settings_.precip_snow;
+    pf.intensity = settings_.weather.precipitation;
+    pf.snow = settings_.weather.snow;
     post_input = precipitation_.AddToGraph(graph_, post_input, {post_width, post_height}, pf);
   }
 
@@ -5519,6 +5710,9 @@ void Renderer::Shutdown() {
     aerial_perspective_.Destroy(*device_);
     clouds_.Destroy(*device_);
     precipitation_.Destroy(*device_);
+    precip_occlusion_.Destroy(*device_);
+    precip_volume_.Destroy(*device_);
+    lightning_.Destroy(*device_);
     surface_weather_.Destroy(*device_);
     water_.reset();
     ddgi_.reset();

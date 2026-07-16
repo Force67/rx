@@ -23,6 +23,8 @@ struct SkyPush {
   f32 intensity;
   f32 sun_color[3];
   f32 face_size;
+  f32 aurora_intensity;  // premultiplied by the CPU night factor; 0 skips
+  f32 time;              // seconds, drives the aurora curtain animation
 };
 
 struct SizePush {
@@ -379,7 +381,8 @@ bool EnvironmentSystem::BakeLuts() {
 }
 
 void EnvironmentSystem::RecordUpdate(CommandList& cmd, const Vec3& sun_direction,
-                                     f32 sun_intensity, const Vec3& sun_color) {
+                                     f32 sun_intensity, const Vec3& sun_color,
+                                     f32 aurora_intensity, f32 time_seconds) {
   // The sky is sampled in both compute (convolutions, path tracers) and
   // fragment (sky draw); the convolutions only in fragment (mesh IBL).
   ResourceState sky_old =
@@ -400,6 +403,8 @@ void EnvironmentSystem::RecordUpdate(CommandList& cmd, const Vec3& sun_direction
   sky_push.sun_color[1] = sun_color.y;
   sky_push.sun_color[2] = sun_color.z;
   sky_push.face_size = static_cast<f32>(kSkySize);
+  sky_push.aurora_intensity = aurora_intensity;
+  sky_push.time = time_seconds;
   cmd.BindPipeline(sky_gen_);
   cmd.BindTransient(0, {Bind::StorageView(0, sky_storage_view_),
                         Bind::Combined(1, transmittance_lut_.view, sampler_),
