@@ -795,6 +795,7 @@ ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle dep
                                           ResourceHandle normals, Extent2D extent,
                                           const Mat4& inv_view_proj, const Vec3& camera,
                                           f32 intensity, u32 frame_index) {
+  denoised_sh_valid_ = false;  // probes-only path produces no SH for the ray-skip
   ResourceHandle out = graph.CreateTexture({.name = "rcgi_irradiance",
                                             .format = Format::kRGBA16Float,
                                             .width = extent.width,
@@ -990,6 +991,13 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
 
   // Next frame's gather may trust the screen cache once this frame fills it.
   screen_history_valid_ = true;
+  // Expose the final denoised SH (the vertical pass wrote it back into A) to the
+  // specular ray-skip; these transient handles are valid for this graph only.
+  denoised_sh_[0] = a_r;
+  denoised_sh_[1] = a_g;
+  denoised_sh_[2] = a_b;
+  denoised_sh_extent_ = gather;
+  denoised_sh_valid_ = true;
   return out;
 }
 

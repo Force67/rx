@@ -92,6 +92,11 @@ base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 // real-alpha any-hit test (the approximation reads wrong in sharp reflections).
 base::Option<bool> RtVegOpt{"rt.veg", true, "RX_RT_VEG"};
 base::Option<bool> RtVegAnyHitOpt{"rt.veg.anyhit", true, "RX_RT_VEG_ANYHIT"};
+// Phase 4 specular reflection quality/perf levers (AC Shadows adoption).
+base::Option<bool> ReflHalfOpt{"refl.half", true, "RX_REFL_HALF"};
+base::Option<bool> ReflShSkipOpt{"refl.sh_skip", true, "RX_REFL_SH_SKIP"};
+base::Option<float> ReflShSkipRough{"refl.sh_skip.rough", 0.45f, "RX_REFL_SH_SKIP_ROUGH"};
+base::Option<bool> ReflFogOpt{"refl.fog", true, "RX_REFL_FOG"};
 // RT scene scalability (AC Shadows §2). RX_RT_CULL drops small distant
 // instances from the realtime TLAS by projected solid angle beyond
 // RX_RT_CULL_START metres, threshold RX_RT_CULL_ANGLE (angular radius). RX_RT_
@@ -3860,6 +3865,50 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   ResourceHandle sun_shadow = kInvalidResource;
   ResourceHandle spec_refl = kInvalidResource;
   ResourceHandle rcgi_irr = kInvalidResource;
+
+  // RCGI screen side runs BEFORE the reflection trace so the reflection ray-skip
+  // (item 16) can read the gather's denoised per-pixel diffuse SH. M2 half-res SH
+  // final gather -> bilateral denoise -> full-res upscale + temporal filter,
+  // writing the "rcgi_irradiance" transient the forward pass folds in.
+  // `RX_RCGI_PROBES_ONLY=1` (and always in software mode) swaps in the M1
+  // per-pixel cascade resolve. The gather is the first consumer of the
+  // (optionally async) world passes, so join the compute queue before it.
+  // RCGI and DDGI are mutually exclusive, so this never races the DDGI join used
+  // by the reflection/DDGI path below.
+#if defined(RX_HAS_NRD)
+  // The gather's denoised SH, captured for the specular ray-skip (reflections are
+  // NRD-gated, so this is only consumed under RX_HAS_NRD).
+  ResourceHandle refl_sh[3] = {kInvalidResource, kInvalidResource, kInvalidResource};
+  Extent2D refl_sh_extent{};
+#endif
+  if (rcgi_world && depth_export != kInvalidResource && normals != kInvalidResource) {
+    if (rcgi_async) {
+      graph_.AddPass(
+          "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
+          [](PassContext&) {});
+    }
+    if (rcgi_probes_only ||
+        !rcgi_->EnsureScreenResources({render_width_, render_height_})) {
+      rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
+                                       {render_width_, render_height_}, globals.inv_view_proj,
+                                       view.camera.eye, settings_.rcgi_intensity, frame_index_);
+    } else {
+      rcgi_irr = rcgi_->AddGatherChain(
+          graph_, *raytracing_, tlas_slot, depth_export, normals, motion,
+          {render_width_, render_height_}, globals.inv_view_proj, globals.prev_view_proj,
+          view.camera.eye, settings_.rcgi_intensity, frame_index_, first_frame);
+#if defined(RX_HAS_NRD)
+      ResourceHandle sh[3];
+      Extent2D e{};
+      if (rcgi_->denoised_sh(sh, e)) {
+        refl_sh[0] = sh[0];
+        refl_sh[1] = sh[1];
+        refl_sh[2] = sh[2];
+        refl_sh_extent = e;
+      }
+#endif
+    }
+  }
 #if defined(RX_HAS_NRD)
   if (nrd_ao || nrd_shadow) {
     // Shared NRD guides (normal+roughness, viewZ) and per-frame camera state for
@@ -3997,13 +4046,22 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       rfl.ddgi = ddgi_active;
       // Real-alpha any-hit only when the vegetation feature is on overall.
       rfl.veg_anyhit = RtVegOpt && RtVegAnyHitOpt;
+      // Phase 4: half-res trace + upscale, roughness-scaled reach, one-step fog,
+      // and diffuse-SH ray-skip (only when the RCGI gather SH is available).
+      rfl.half_res = ReflHalfOpt;
+      rfl.fog = ReflFogOpt && fog_active;
+      rfl.fog_density = settings_.fog_density;
+      rfl.fog_height_falloff = settings_.fog_height_falloff;
+      rfl.fog_base_height = settings_.fog_base_height;
+      rfl.sh_skip = ReflShSkipOpt && refl_sh[0] != kInvalidResource;
+      rfl.sh_skip_roughness = ReflShSkipRough;
       ResourceHandle raw = reflection_trace_.AddToGraph(
           graph_, *raytracing_, tlas_slot, bindless_->set(), depth_export, normals,
           environment_->prefiltered_view(),
           ddgi_active ? refl_ddgi.irradiance : environment_->black_array_view(), ddgi_active,
           ddgi_active ? refl_ddgi.volume : environment_->dummy_volume(),
           ddgi_active ? refl_ddgi.volume_size : 256, environment_->sampler(),
-          {render_width_, render_height_}, rfl);
+          {render_width_, render_height_}, refl_sh[0], refl_sh[1], refl_sh[2], refl_sh_extent, rfl);
       spec_refl = nrd_.DenoiseSpecular(graph_, nrd_inputs.normal_roughness, nrd_inputs.view_z,
                                        motion, raw);
     }
@@ -4017,35 +4075,6 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     const f32 proj_scale[2] = {proj.m[0], proj.m[5]};
     ao = ssao_.AddToGraph(graph_, depth_export, normals, globals.inv_view_proj, proj_scale, 0.1f,
                           frame_index_);
-  }
-
-  // RCGI screen side: M2 half-res SH final gather -> bilateral denoise -> full-res
-  // upscale + temporal filter, writing the same "rcgi_irradiance" transient the
-  // forward pass folds in. `RX_RCGI_PROBES_ONLY=1` (and always in software mode,
-  // where the M2 gather is ray-query) swaps in the M1 per-pixel cascade resolve.
-  // The gather is the first consumer of the (optionally async) world passes, so
-  // join the compute queue before it.
-  if (rcgi_world && depth_export != kInvalidResource && normals != kInvalidResource) {
-    if (rcgi_async) {
-      graph_.AddPass(
-          "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
-          [](PassContext&) {});
-    }
-    // Probes-only A/B (and always in software mode, where the M2 gather is
-    // ray-query), or fall back to it if the gather's screen-history images
-    // failed to (re)create this frame (so we never import null images). The
-    // short-circuit also means software mode never touches screen resources.
-    if (rcgi_probes_only ||
-        !rcgi_->EnsureScreenResources({render_width_, render_height_})) {
-      rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
-                                       {render_width_, render_height_}, globals.inv_view_proj,
-                                       view.camera.eye, settings_.rcgi_intensity, frame_index_);
-    } else {
-      rcgi_irr = rcgi_->AddGatherChain(
-          graph_, *raytracing_, tlas_slot, depth_export, normals, motion,
-          {render_width_, render_height_}, globals.inv_view_proj, globals.prev_view_proj,
-          view.camera.eye, settings_.rcgi_intensity, frame_index_, first_frame);
-    }
   }
 
   // Hybrid ReSTIR DI: reservoir-resampled point/spot lights with one shadow

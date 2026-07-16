@@ -465,3 +465,141 @@ lights from the lamp with leak-free interior ambient (measurably so vs
 `RX_RCGI_INTERIOR=0`), `--demo cornell` GI color-bleed is unchanged, software
 (`RX_RCGI_SW`) runs, and validation is clean apart from the pre-existing async
 indirect-args VUID. CPU unit test: `rcgi_interior_test`.
+
+---
+
+## Phase 4 — specular quality & perf (AC Shadows adoption, items 14-19)
+
+Reflection-pass levers on top of the existing full-res VNDF specular trace
+(`engine/render/screenspace/reflection_trace.{h,cc}` +
+`shaders/screenspace/reflection_trace.cs.hlsl`, denoised by NRD REBLUR_SPECULAR).
+Each has its own env for A/B, all default on. The reflection pass is NRD-gated
+(`spec_refl_active` needs `nrd_.available()`), so everything here is inert
+without NRD. Landed: **14, 16, 17, 19**. Deferred with specs below: **15, 18**.
+
+### 14. Half-res reflections + bilateral upscale (`RX_REFL_HALF`, default on)
+
+- The trace runs at **half × half** resolution (quarter the rays -- the dominant
+  reflection cost is the TLAS ray, not the denoise), then a depth/normal-weighted
+  **bilateral upscale** (`reflection_upscale.cs.hlsl`, the RCGI-upscale weighting
+  pattern) reconstructs full res before NRD consumes it.
+- **NRD stays full-res.** REBLUR's resolution is fixed at instance creation
+  (render res) and the vendored integration does not expose REBLUR's
+  checkerboard/half-res mode, so the honest choice is: trace half, upscale to full
+  (edge-aware, so reflections do not bleed across silhouettes), then denoise full
+  as before. NRD guides (normal_roughness, viewZ, motion) stay full-res and
+  consistent. The perf win is the 4× ray reduction; the upscale is one cheap pass.
+- **Half×half over half-width**: NRD's temporal/spatial reuse handles the extra
+  noise from a 1-spp quarter-density input well, and half×half is the larger ray
+  saving. The guides are full-res; the shader maps each half-res output pixel to a
+  full-res guide texel by a per-frame-jittered `step` so the half-res selection
+  does not lock onto one quadrant.
+- Verified `--demo materials` on NVIDIA GB10: half-res is visually
+  indistinguishable from full-res (`RX_REFL_HALF=0`) -- chrome spheres reflect
+  sharply, glossy blur is preserved, no edge smear.
+
+### 16. Specular ray-skip via diffuse SH (`RX_REFL_SH_SKIP`, default on)
+
+- Before tracing, if `roughness > sh_skip_rough` (`RX_REFL_SH_SKIP_ROUGH`, 0.45)
+  **or** `dot(rayDir, mirrorDir) < 0.5`, the trace is replaced by evaluating the
+  **RCGI gather's per-pixel denoised diffuse SH** along the ray direction
+  (`ShEvaluate` in `sh.hlsli` -- the raw radiance reconstruction, not the
+  cosine-convolved `ShIrradiance`, clamped non-negative). The hard
+  `roughness_cutoff` (0.6) stays as the outer bound; this is the softer,
+  directionally-aware cull inside it.
+- **Requires the RCGI gather chain.** `RcgiSystem::AddGatherChain` now stashes its
+  final denoised SH triple (`a_r/a_g/a_b`, gather res) and exposes them via
+  `RcgiSystem::denoised_sh()`; the probes-only/software resolve produces none
+  (returns false). The renderer was **reordered** so the RCGI screen side runs
+  *before* the NRD/reflection block (RCGI and DDGI are mutually exclusive, so this
+  never races the DDGI async join the reflection path uses). When RCGI is off the
+  SH slots bind a harmless placeholder and the flag stays clear -> current
+  behaviour (full trace, DDGI indirect).
+- The reflection pass reads the SH via full-res uv -> gather texel, robust to any
+  output/gather ratio (with item 14 both are render/2, a near 1:1 map).
+- Verified `--demo materials` + `RX_RCGI=1`: SH-skip on vs `RX_REFL_SH_SKIP=0` is
+  indistinguishable -- no darkening of mirror/glossy surfaces.
+
+### 17. Roughness-scaled ray length
+
+- `ray.TMax = maxDist * ((1-roughness)^2 + 0.1)` (their formula; `maxDist` = 200,
+  `Frame::max_ray_dist`). Rough surfaces reflect only the near neighbourhood, so
+  the ray shortens and the miss (sky/SH) fills the far field the blur swallows
+  anyway. The same reach seeds the SH-skip's normalised hit distance.
+
+### 19. One-step fog on specular hits (`RX_REFL_FOG`, default on)
+
+- On a world-trace **hit**, an analytic exponential-height-fog transmittance is
+  integrated **once** over the reflected segment `[origin, hitPos]`
+  (`HeightFogTransmittance`; closed form `d0·(1-e^{-b·dir.y·L})/(b·dir.y)`), and
+  the hit radiance is faded toward the horizon inscatter colour (the prefiltered
+  sky cube along the ray at a blurry mip, the same colour a miss samples). This
+  removes the hard cut where distant reflections would meet the raster fog line.
+- **Consistent with the raster fog**: gated on `fog_active` (RX_FOG) and reuses
+  `settings_.fog_density / fog_height_falloff / fog_base_height`. The segment
+  starts at the reflected surface, so eye->surface fog (already applied on the
+  primary) is not double-counted -- near-camera fog is skipped by construction.
+- Verified `--demo water RX_FOG=1`: fog renders, reflections fade to horizon, no
+  artifacts (subtle -- the effect only touches reflected-ray hit segments).
+
+### Files
+
+- `shaders/screenspace/reflection_trace.cs.hlsl` (half-res mapping, ray-skip,
+  roughness reach, hit fog; push grew to 208 B), new
+  `shaders/screenspace/reflection_upscale.cs.hlsl`, `shaders/gi/sh.hlsli`
+  (`ShEvaluate`), `screenspace/reflection_trace.{h,cc}` (upscale pipeline, SH +
+  half + fog Frame fields, static_asserts on push size), `gi/rcgi.{h,cc}`
+  (`denoised_sh` accessor + stash), `core/renderer.cc` (RCGI-before-reflections
+  reorder, `RX_REFL_*` envs, wiring), `engine/render/CMakeLists.txt`.
+
+### Verification
+
+Built with NRD (`tools/get_nrd.sh`), `cmake --preset linux`, zero new warnings,
+`ctest` 19/19. GPU smoke on NVIDIA GB10 (`vkrun`, `--demo materials` /
+`--demo water`): reflections correct with every `RX_REFL_*` env on/off and with
+RCGI on/off; validation clean apart from the pre-existing async indirect-args
+VUID. Per-pass frame-time delta (half vs full) is within the capture-frame
+readback-stall noise in these small demos -- not reliably measurable here; the
+saving is the 4× ray-count reduction.
+
+### Deferred — 15 (screen-space-first hybrid) and 18 (far scene cubemap)
+
+Both are the L-effort items; deferred to keep 14/16 landing verified. Specs:
+
+**15. Screen-space-first hybrid tracing (`RX_REFL_SS_FIRST`).** Before the TLAS
+ray in `reflection_trace`, ray-march the depth buffer along `dir` (adapt the SSR
+marcher `ssr.cs.hlsl`: 16-24 linear steps + binary refinement). On a valid hit
+(ray depth vs z-buffer within a world-space thickness) shade from the
+**previous-frame lit HDR** at that pixel (matches RCGI's screen cache; cheaper
+than a gbuffer relight) and skip the TLAS ray. If the march leaves the screen or
+passes behind geometry beyond threshold, **backtrack** to the last valid position
+and start the TLAS ray from there (AC Shadows' key trick -- avoids the
+raster-depth vs coarse-RT self-intersection disparity). Their numbers: ~38% of
+rays resolve on screen. Plumbing needed: bind a prev-frame lit HDR colour + depth
+to the reflection pass. RCGI already owns `screen_color_hist_`/`screen_depth_hist_`
+(render res, written by `AddHistoryCopy`), but they are RCGI-owned and only valid
+under RCGI; a general path wants a renderer-owned prev-lit-colour history (or gate
+SS-first on RCGI, as SH-skip does). *Risk*: the backtrack + thickness tuning and
+the RCGI-ownership of the history are why it is deferred rather than the marcher
+itself. The same SS-first march would help the RCGI **gather** ray more (bigger
+win), but the gather already has a screen radiance cache for HIT reprojection, so
+add it there only after the reflections version is tuned.
+
+**18. Far scene cubemap (`RX_FAR_CUBE`).** A 128² RGBA16F cubemap centred on the
+camera, **one face/frame round-robin**, rasterising the real scene coarsely (sky +
+geometry beyond the near range, lowest LODs, tiny instances culled by the Phase 2
+solid-angle culler at a much more aggressive threshold; recreation's `.btr/.bto`
+distant-LOD proxies are the geometry to render into it). Cheapest shading that
+reads plausibly: depth + albedo·(ambient + sun N·L), no shadows. It replaces the
+atmosphere-only prefiltered cube as the reflection **miss** fallback, sampled with
+the distance-warped direction `normalize((rayOrigin + rayDir*fakeHitDist) -
+cubemapPos)` so distant mountains/buildings appear in water/mirror reflections
+instead of vanishing; also the RCGI probe-trace/gather miss (but the Phase 3
+interior mode still wins indoors -- `RcgiSkyMiss` must branch interior first).
+Plumbing needed: a persistent cube target + 6 face-view matrices, a minimal
+per-face raster pass (its own small pipeline reusing the mesh vertex path), a
+round-robin face index in the frame state, and the reflection/RCGI miss sample
+sites swapped from `prefiltered_cube` to the far cube. *Risk*: the new raster
+target + per-face pass + frame-graph placement is the M-effort plumbing that
+pushes it past this phase's verified budget; the sampling-site swap itself is
+small.

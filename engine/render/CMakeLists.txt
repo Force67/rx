@@ -241,6 +241,7 @@ set(RX_RENDER_SHADERS
   shaders/screenspace/ssr.cs.hlsl
   shaders/screenspace/ssgi.cs.hlsl
   shaders/screenspace/reflection_trace.cs.hlsl
+  shaders/screenspace/reflection_upscale.cs.hlsl
   shaders/screenspace/contact_shadow.cs.hlsl
   shaders/screenspace/sss_blur.cs.hlsl
   shaders/pipeline/cull.cs.hlsl
@@ -382,6 +383,7 @@ set(RX_SHADER_DEPS_rcgi_resolve_cs_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_rcgi_gather_cs_hlsl shaders/gi/rcgi_common.hlsli shaders/gi/sh.hlsli)
 set(RX_SHADER_DEPS_rcgi_denoise_cs_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_rcgi_upscale_cs_hlsl shaders/gi/rcgi_common.hlsli shaders/gi/sh.hlsli)
+set(RX_SHADER_DEPS_reflection_trace_cs_hlsl shaders/rt_geometry.hlsli shaders/gi/sh.hlsli)
 set(RX_SHADER_DEPS_sdf_clear_cs_hlsl shaders/gi/sdf_trace.hlsli)
 set(RX_SHADER_DEPS_sdf_compose_cs_hlsl shaders/gi/sdf_trace.hlsli)
 set(RX_SHADER_DEPS_sdf_debug_cs_hlsl shaders/gi/sdf_trace.hlsli)

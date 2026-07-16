@@ -132,6 +132,20 @@ class RcgiSystem {
   // resolve) for this frame; the cleared extent lets a later frame retry.
   bool EnsureScreenResources(Extent2D extent);
 
+  // The gather's denoised per-pixel diffuse SH (3x RGBA16F: R,G,B channel SH
+  // vectors, gather resolution), valid for the CURRENT frame's graph only after
+  // AddGatherChain ran (not the probes-only AddResolvePass). Consumed by the
+  // specular ray-skip (reflection_trace) to replace TLAS rays on rough /
+  // off-mirror pixels. Returns false when no SH was produced this frame.
+  bool denoised_sh(ResourceHandle out_sh[3], Extent2D& extent) const {
+    if (!denoised_sh_valid_) return false;
+    out_sh[0] = denoised_sh_[0];
+    out_sh[1] = denoised_sh_[1];
+    out_sh[2] = denoised_sh_[2];
+    extent = denoised_sh_extent_;
+    return true;
+  }
+
   // Zero the hash on the next update (camera teleports / big jumps).
   void RequestReset() {
     clear_hash_ = true;
@@ -207,6 +221,10 @@ class RcgiSystem {
   // Handles imported this frame in AddGatherChain, reused by AddHistoryCopy.
   ResourceHandle screen_color_handle_{};
   ResourceHandle screen_depth_handle_{};
+  // Denoised per-pixel SH triple exposed to the specular ray-skip (this frame).
+  ResourceHandle denoised_sh_[3]{};
+  Extent2D denoised_sh_extent_{};
+  bool denoised_sh_valid_ = false;
 
   bool rt_pipelines_ = false;  // hardware ray-query pipelines were created
   bool atlas_initialized_ = false;
