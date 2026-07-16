@@ -65,9 +65,15 @@ struct Corridor {
   Vec3 goal{};                      // requested world goal at path time
   CellRef goal_cell;                // CellAt(goal) at path time
   CellRef clamped_goal;             // walkable cell the goal resolved to
+  f32 clamp_radius = 4.0f;          // request's clamp radius, for validation
   PathStatus status = PathStatus::kFailed;
   f32 cost = 0;                     // weighted cost of the corridor
   u32 progress = 0;                 // corridor index the agent last occupied
+  // Whether the agent has been on the corridor at least once. Until then an
+  // off-corridor position is an approach (the clamped start can be up to
+  // clamp_radius away), not a departure -- no kLeftCorridor, and NextCorner
+  // steers at the corridor start instead of failing.
+  bool entered = false;
 
   bool valid() const { return status != PathStatus::kFailed && !cells.empty(); }
 };
@@ -81,6 +87,7 @@ struct PathScratch {
     f32 g = 0;       // weighted cost from start
     f32 h = 0;       // octile heuristic to goal
     i32 parent = -1;
+    bool closed = false;  // popped once; later heap duplicates are skipped
   };
   base::Vector<Node> nodes;
   base::Vector<u32> heap;                  // node indices, min-ordered by g+h
@@ -106,9 +113,11 @@ RX_NAV_EXPORT void FunnelCorners(const NavMesh& mesh, const Corridor& corridor, 
                                  base::Vector<Vec3>* out_corners);
 
 // The per-frame steering query: advances corridor->progress to the agent's
-// position, re-runs the funnel from there and returns the first corner more
-// than `min_advance` meters away (the goal itself when arrived). Returns false
-// when the agent is no longer on the corridor (caller should repath).
+// position, re-runs the funnel from there and returns the next corner (the
+// goal itself when arrived). While the agent has never been on the corridor
+// (fresh plan from a clamped start), returns the corridor start so off-mesh
+// agents walk back onto it. Returns false only when the agent WAS on the
+// corridor and drifted off (caller should repath).
 RX_NAV_EXPORT bool NextCorner(const NavMesh& mesh, Corridor* corridor, const Vec3& agent_pos,
                               f32 radius, Vec3* out_corner);
 

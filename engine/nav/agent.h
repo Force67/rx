@@ -12,8 +12,10 @@
 //
 // Every frame each agent validates its corridor (event-based repathing: no
 // timers), replans at most `max_repaths` corridors per tick across the whole
-// world (round-robin via the shared budget; agents that miss the budget keep
-// steering along their stale corridor -- incremental progress beats stalling),
+// world (first come, first served in iteration order; agents that miss the
+// budget keep steering along their stale corridor and usually catch up next
+// tick, since handled events do not fire again -- incremental progress beats
+// stalling),
 // re-runs the funnel from its live position and writes the desired planar
 // velocity. With `move` set it also integrates the Transform and snaps it to
 // the surface, which is all a demo or a simple game needs; games with their
@@ -38,7 +40,8 @@ struct NavAgent {
   f32 arrive_radius = 0.4f;  // planar distance that counts as "there"
   bool active = false;       // set with goal; cleared on arrival
   // outputs, written by UpdateAgents each tick
-  Vec3 velocity{};           // desired planar velocity (y = surface delta)
+  Vec3 velocity{};           // desired planar velocity (y stays 0; height comes
+                             // from the surface snap when `move` is set)
   Vec3 corner{};             // the corner currently steered at
   AgentStatus status = AgentStatus::kIdle;
   RepathReason last_repath = RepathReason::kNone;  // why the last replan ran

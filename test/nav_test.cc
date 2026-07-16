@@ -308,17 +308,97 @@ void TestEcsAgents(NavMesh& mesh) {
         "steady walk repaths a handful of times, not per tick");
 }
 
+void TestOffMeshAgentRecovers(NavMesh& mesh) {
+  // Agent standing in the middle of the hole, more than one cell from any
+  // walkable ground: the plan starts from a clamped cell it is not on. It
+  // must walk back onto the corridor and arrive -- not freeze in kWaiting
+  // while burning a replan every tick on a corridor it cannot attach to.
+  ecs::World world;
+  ecs::Entity entity = world.Create();
+  world.Add(entity, scene::Transform{.position = {5, 0, 5}});
+  NavAgent agent;
+  agent.goal = {10, 0, 5};
+  agent.speed = 4.0f;
+  agent.active = true;
+  world.Add(entity, agent);
+
+  AgentUpdateConfig config;
+  const f32 dt = 1.0f / 60.0f;
+  int ticks = 0;
+  for (; ticks < 60 * 20; ++ticks) {
+    UpdateAgents(world, mesh, config, dt);
+    if (!world.Get<NavAgent>(entity)->active) break;
+  }
+  const scene::Transform* t = world.Get<scene::Transform>(entity);
+  Check(world.Get<NavAgent>(entity)->status == AgentStatus::kIdle,
+        "off-mesh agent reached its goal");
+  Near(t->position[0], 10.0f, "off-mesh agent arrived at goal x", 0.6f);
+  Near(t->position[2], 5.0f, "off-mesh agent arrived at goal z", 0.6f);
+  Check(world.Get<NavAgent>(entity)->repath_count <= 3,
+        "approach does not replan every tick");
+}
+
+void TestTileRemoval(NavMesh& mesh) {
+  PathScratch scratch;
+  Corridor corridor;
+  PathRequest request;
+  request.start = {2, 0, 20};
+  request.goal = {10, 0, 20};
+  request.max_iterations = 4000;
+  Check(FindPath(mesh, request, scratch, &corridor) == PathStatus::kComplete,
+        "path before tile removal completes");
+
+  // Drop everything but the tiles right around the start: a corridor tile
+  // now reads version 0 and validation must notice.
+  const u32 before = mesh.tile_count();
+  const u32 dropped = mesh.RemoveTilesBeyond({2, 0, 20}, 4.0f);
+  Check(dropped > 0 && mesh.tile_count() < before, "far tiles were dropped");
+  Check(ValidateCorridor(mesh, &corridor, {2, 0, 20}, request.goal) ==
+            RepathReason::kTileInvalidated,
+        "corridor over a dropped tile triggers repath");
+}
+
 }  // namespace
 
 int main() {
-  NavMesh mesh = MakeWorld();
-  TestBuildAndQueries(mesh);
-  TestCostedAstar(mesh);
-  TestEntryCostCommitment(mesh);
-  TestFunnelAndShortcut(mesh);
-  TestEventRepathing(mesh);
-  TestPositionQuery(mesh);
-  TestEcsAgents(mesh);
+  // Fresh world per test: several tests mutate the mesh (area costs, paint,
+  // tile removal) and must not leak state into each other.
+  {
+    NavMesh mesh = MakeWorld();
+    TestBuildAndQueries(mesh);
+  }
+  {
+    NavMesh mesh = MakeWorld();
+    TestCostedAstar(mesh);
+  }
+  {
+    NavMesh mesh = MakeWorld();
+    TestEntryCostCommitment(mesh);
+  }
+  {
+    NavMesh mesh = MakeWorld();
+    TestFunnelAndShortcut(mesh);
+  }
+  {
+    NavMesh mesh = MakeWorld();
+    TestEventRepathing(mesh);
+  }
+  {
+    NavMesh mesh = MakeWorld();
+    TestPositionQuery(mesh);
+  }
+  {
+    NavMesh mesh = MakeWorld();
+    TestEcsAgents(mesh);
+  }
+  {
+    NavMesh mesh = MakeWorld();
+    TestOffMeshAgentRecovers(mesh);
+  }
+  {
+    NavMesh mesh = MakeWorld();
+    TestTileRemoval(mesh);
+  }
   if (failures == 0) std::printf("nav_test: all checks passed\n");
   return failures;
 }

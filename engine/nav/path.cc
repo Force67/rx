@@ -165,6 +165,11 @@ void ShortcutPass(const NavMesh& mesh, base::Vector<CellRef>* cells, u32 max_spa
         const Vec3 b = mesh.CellCenter((*cells)[j]);
         const NavRaycast ray = mesh.Raycast(a, b);
         if (!ray.clear) continue;
+        // Approximate comparison: Raycast prices each segment at the cell it
+        // crosses, StepCost blends both cells' multipliers, so near area
+        // boundaries the two models disagree by up to ~half a cell times the
+        // multiplier delta. The epsilon only settles exact ties; a splice may
+        // be accepted that is pricier by that discretization margin.
         if (ray.cost > prefix[j - i] + 1e-3f) continue;  // straight but pricier: keep corridor
         if (!TraceCells(mesh, a, b, scratch_line)) continue;
         for (u32 k = 1; k < scratch_line->size(); ++k) out.push_back((*scratch_line)[k]);
@@ -205,9 +210,11 @@ Portal MakePortal(const NavMesh& mesh, CellRef from, CellRef to, f32 radius) {
     a = {static_cast<f32>(from.x) * cs, y, pz};
     b = {(static_cast<f32>(from.x) + 1.0f) * cs, y, pz};
   }
-  // Orient the pair for the funnel's update conditions: its "left" is the
-  // endpoint with NEGATIVE TriArea2 against the travel direction (the +z side
-  // when walking +x).
+  // Orient the pair for the funnel's update conditions. The funnel's "left"
+  // is the endpoint on the NEGATIVE TriArea2 side of the travel direction --
+  // the +z side when walking +x, which by TriArea2's convention is the
+  // geometric RIGHT. The label is the funnel's, not the compass's: only
+  // consistency between this orientation and the update conditions matters.
   const Vec3 dir{static_cast<f32>(dx), 0, static_cast<f32>(dz)};
   const Vec3 mid = (a + b) * 0.5f;
   Portal portal;
@@ -264,6 +271,7 @@ bool AdvanceProgress(const NavMesh& mesh, Corridor* corridor, const Vec3& agent_
   }
   if (best == UINT32_MAX) return false;
   corridor->progress = std::max(corridor->progress, best);
+  corridor->entered = true;
   return true;
 }
 
@@ -276,9 +284,11 @@ PathStatus FindPath(const NavMesh& mesh, const PathRequest& request, PathScratch
   out->goal = request.goal;
   out->goal_cell = mesh.CellAt(request.goal);
   out->clamped_goal = {};
+  out->clamp_radius = request.clamp_radius;
   out->status = PathStatus::kFailed;
   out->cost = 0;
   out->progress = 0;
+  out->entered = false;
 
   const CellRef start = mesh.ClampToWalkable(request.start, request.clamp_radius);
   if (!start.valid()) return PathStatus::kFailed;
@@ -303,8 +313,10 @@ PathStatus FindPath(const NavMesh& mesh, const PathRequest& request, PathScratch
   u32 best_partial = 0;  // node nearest the goal by heuristic, g breaks ties
   u32 iterations = 0;
   while (!scratch.heap.empty() && iterations < request.max_iterations) {
-    ++iterations;
     const u32 current = HeapPop(scratch);
+    if (scratch.nodes[current].closed) continue;  // stale duplicate of a decrease-key re-push
+    scratch.nodes[current].closed = true;
+    ++iterations;  // only real expansions count against the budget
     const PathScratch::Node node = scratch.nodes[current];  // copy: nodes grows below
     if (target.valid() && node.cell == target) {
       end_node = static_cast<i32>(current);
@@ -325,10 +337,14 @@ PathStatus FindPath(const NavMesh& mesh, const PathRequest& request, PathScratch
         u32* seen = scratch.visited.find(key);
         if (seen) {
           PathScratch::Node& other = scratch.nodes[*seen];
-          if (g >= other.g) continue;
+          // Closed nodes stay closed: with per-meter multipliers >= 1 the
+          // octile heuristic is consistent and they cannot improve; below 1
+          // reopening could re-parent an ancestor and knot the parent chain.
+          if (other.closed || g >= other.g) continue;
           other.g = g;
           other.parent = static_cast<i32>(current);
-          HeapPush(scratch, *seen);  // decrease-key via re-push; stale dups skip
+          HeapPush(scratch, *seen);  // decrease-key via re-push; the stale
+                                     // duplicate is skipped at pop via closed
         } else {
           const u32 index = static_cast<u32>(scratch.nodes.size());
           scratch.nodes.push_back(
@@ -445,7 +461,15 @@ void FunnelCorners(const NavMesh& mesh, const Corridor& corridor, const Vec3& fr
 bool NextCorner(const NavMesh& mesh, Corridor* corridor, const Vec3& agent_pos, f32 radius,
                 Vec3* out_corner) {
   if (!corridor->valid()) return false;
-  if (!AdvanceProgress(mesh, corridor, agent_pos)) return false;
+  if (!AdvanceProgress(mesh, corridor, agent_pos)) {
+    // Never been on this corridor: the clamped start can sit up to
+    // clamp_radius away (agent off-mesh, tile not streamed yet). Steer at the
+    // corridor start instead of failing, or the agent freezes while every
+    // tick replans the same corridor it cannot attach to.
+    if (corridor->entered) return false;
+    *out_corner = mesh.CellCenter(corridor->cells[corridor->progress]);
+    return true;
+  }
   base::Vector<Vec3> corners;
   FunnelCorners(mesh, *corridor, agent_pos, corridor->progress, radius, 8, &corners);
   for (const Vec3& corner : corners) {
@@ -469,8 +493,12 @@ RepathReason ValidateCorridor(const NavMesh& mesh, Corridor* corridor, const Vec
     }
   }
 
-  // 2. The agent is no longer inside the corridor.
-  if (!AdvanceProgress(mesh, corridor, agent_pos)) return RepathReason::kLeftCorridor;
+  // 2. The agent is no longer inside the corridor. Only a departure counts:
+  // an agent that has never attached (fresh plan from a clamped start) is
+  // approaching, and NextCorner steers it at the corridor start meanwhile.
+  if (!AdvanceProgress(mesh, corridor, agent_pos) && corridor->entered) {
+    return RepathReason::kLeftCorridor;
+  }
 
   // 3/4. The destination moved: outside its planned cell when on-mesh, or its
   // nearest-walkable clamp changed when off-mesh. Same-cell drift only
@@ -478,7 +506,7 @@ RepathReason ValidateCorridor(const NavMesh& mesh, Corridor* corridor, const Vec
   const CellRef goal_cell = mesh.CellAt(goal);
   if (!(goal_cell == corridor->goal_cell)) {
     if (mesh.Walkable(goal_cell)) return RepathReason::kGoalCellChanged;
-    const CellRef clamp = mesh.ClampToWalkable(goal, 4.0f);
+    const CellRef clamp = mesh.ClampToWalkable(goal, corridor->clamp_radius);
     if (!(clamp == corridor->clamped_goal)) return RepathReason::kClampedGoalChanged;
     corridor->goal_cell = goal_cell;  // moved off-mesh, same clamp: keep going
   }

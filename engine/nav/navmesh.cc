@@ -100,6 +100,10 @@ void NavMesh::PaintDisc(const Vec3& center, f32 radius, AreaId area) {
   const i32 n = static_cast<i32>(config_.tile_cells);
   u64 last_tile = ~0ull;
   Tile* tile = nullptr;
+  // Versions bump only for tiles where a cell actually changed (once per
+  // call, even when the disc revisits the tile across rows): a grazed but
+  // untouched tile must not invalidate every corridor over it.
+  base::Vector<u64> bumped;
   for (i32 cz = c0z; cz <= c1z; ++cz) {
     for (i32 cx = c0x; cx <= c1x; ++cx) {
       const f32 wx = (static_cast<f32>(cx) + 0.5f) * cs - center.x;
@@ -109,13 +113,25 @@ void NavMesh::PaintDisc(const Vec3& center, f32 radius, AreaId area) {
       if (key != last_tile) {
         tile = tiles_.find(key);
         last_tile = key;
-        if (tile) tile->version = ++version_counter_;
       }
       if (!tile) continue;
       const u32 lx = static_cast<u32>(cx - FloorDiv(cx, n) * n);
       const u32 lz = static_cast<u32>(cz - FloorDiv(cz, n) * n);
       AreaId& cell = tile->area[lz * static_cast<u32>(n) + lx];
-      if (cell != kAreaNone) cell = area;  // paint changes desirability, not holes
+      // Paint changes desirability, not holes; a no-op write is no change.
+      if (cell == kAreaNone || cell == area) continue;
+      cell = area;
+      bool seen = false;
+      for (u64 k : bumped) {
+        if (k == key) {
+          seen = true;
+          break;
+        }
+      }
+      if (!seen) {
+        tile->version = ++version_counter_;
+        bumped.push_back(key);
+      }
     }
   }
 }
