@@ -32,7 +32,9 @@ struct PushData {
 PUSH_CONSTANTS(PushData, push);
 
 [[vk::binding(0, 0)]] RWStructuredBuffer<uint> accum : register(u0, space0);
-[[vk::binding(1, 0)]] RWTexture2D<float2> caustic_out : register(u1, space0);
+// rg16f matches the RG16Float image (water_caustics.cc); the inferred rg32f
+// made every store undefined values per the Vulkan spec.
+[[vk::image_format("rg16f")]] [[vk::binding(1, 0)]] RWTexture2D<float2> caustic_out : register(u1, space0);
 // FFT ocean maps (env-owned, GENERAL layout), bound here as our own inputs so
 // this pass does not depend on the mesh env set. 1x1 dummies when the ocean is
 // off; the Gerstner branch never samples them.

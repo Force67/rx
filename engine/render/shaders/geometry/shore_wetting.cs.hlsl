@@ -18,7 +18,9 @@ struct PushData {
 };
 PUSH_CONSTANTS(PushData, push);
 
-[[vk::binding(0, 0)]] RWTexture2D<float> wetness_out : register(u0, space0);
+// r16f matches the R16Float field image (shore_wetting.cc); the inferred r32f
+// made every store undefined values per the Vulkan spec.
+[[vk::image_format("r16f")]] [[vk::binding(0, 0)]] RWTexture2D<float> wetness_out : register(u0, space0);
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] Texture2D<float> wetness_prev : register(t1, space0);
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] SamplerState wetness_prev_sampler : register(s1, space0);
 // FFT ocean displacement (env-owned, GENERAL layout): sampled for the water

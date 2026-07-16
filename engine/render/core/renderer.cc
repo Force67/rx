@@ -2491,15 +2491,25 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     std::memcpy(frame.decals.mapped, view.decals.data(), decal_count * sizeof(Decal));
   }
   globals.light_count = light_count;
-  fft_ocean_active_ = settings_.fft_ocean && ocean_.available() && !path_trace && !interior;
+  // The FFT ocean, interaction field, shoreline wetting and caustics all
+  // describe a water surface, and every water surface (sea, CBT sheet, lake)
+  // reaches the renderer as a water-material submesh, so gate the whole family
+  // on one being submitted. These features default on, and "available()" only
+  // means the pipelines exist -- without this gate every scene paid for the
+  // sims, and worse, caustics modulated the sun on everything below the rest
+  // height (y=0 by default): wavy grey mottling across dry ground.
+  const bool scene_has_water = water_pipeline_active;
+  fft_ocean_active_ =
+      settings_.fft_ocean && ocean_.available() && !path_trace && !interior && scene_has_water;
   const bool fft_ocean_active = fft_ocean_active_;
   if (fft_ocean_active) globals.flags |= kFrameFlagFftOcean;
-  water_field_active_ = settings_.water_field && water_field_.available() && !path_trace && !interior;
+  water_field_active_ = settings_.water_field && water_field_.available() && !path_trace &&
+                        !interior && scene_has_water;
   if (water_field_active_) globals.flags |= kFrameFlagWaterField;
   // Shoreline wetting: snap the field to the camera and hand the shader its
   // origin/extent before the globals upload; the compute pass records below.
-  shore_wetting_active_ =
-      settings_.shore_wetting && shore_wetting_.available() && !path_trace && !interior;
+  shore_wetting_active_ = settings_.shore_wetting && shore_wetting_.available() && !path_trace &&
+                          !interior && scene_has_water;
   if (shore_wetting_active_) {
     shore_wetting_.BeginFrame(view.camera.eye);
     shore_wetting_.FieldParams(globals.shore_field);
@@ -2516,10 +2526,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   globals.water_caustics[0] = settings_.water_caustic_intensity;
   globals.water_caustics[1] = settings_.water_rest_height;
   globals.water_caustics[2] = settings_.water_caustic_depth_fade;
-  // Underwater caustics: only worthwhile with a water surface in the scene (the
-  // demo/water path enables the field); fall back to no-op when unavailable.
+  // Underwater caustics: gated on an actual water surface (scene_has_water), not
+  // on the interaction field -- the field defaults on in every scene, and keying
+  // caustics off it painted the sun modulation onto dry ground below y=0.
   water_caustics_active_ = settings_.water_caustics && water_caustics_.available() &&
-                           !path_trace && !interior && (fft_ocean_active_ || water_field_active_);
+                           !path_trace && !interior && scene_has_water;
   if (water_caustics_active_) globals.flags |= kFrameFlagWaterCaustics;
   // Hybrid ReSTIR DI decision happens before the globals upload below; the
   // graph passes record later under the same flag.
