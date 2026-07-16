@@ -51,18 +51,23 @@ void RtInstanceCuller::BeginFrame(const Vec3& camera_eye) {
   have_eye_ = true;
 }
 
-const base::Vector<u8>& RtInstanceCuller::UpdateGroup(u32 group_id, u32 generation,
+const base::Vector<u8>& RtInstanceCuller::UpdateGroup(u32 group_id, u32 generation, u32 revision,
                                                       std::span<const Mat4> transforms,
                                                       const Vec3& mesh_center, f32 mesh_radius) {
   if (group_id >= groups_.size()) groups_.resize(group_id + 1);
   GroupState& gs = groups_[group_id];
   const u32 n = static_cast<u32>(transforms.size());
 
-  // A fresh or reused slot, or a resized group, starts accept-all so a group
-  // that just streamed in is fully present before its first sweep refines it.
+  // A fresh or reused slot, a resized group, or an in-place transform update
+  // (revision bump) starts accept-all so a group that just streamed in -- or an
+  // instance that just moved next to the camera -- is fully present before the
+  // next sweep refines it. Without the revision check a same-count Replace keeps
+  // the stale bitmask until the moved instance's sweep index is revisited.
   bool fresh = false;
-  if (!gs.valid || gs.generation != generation || gs.visible.size() != n) {
+  if (!gs.valid || gs.generation != generation || gs.revision != revision ||
+      gs.visible.size() != n) {
     gs.generation = generation;
+    gs.revision = revision;
     gs.cursor = 0;
     gs.valid = true;
     gs.visible.assign(n, u8{1});

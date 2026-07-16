@@ -281,6 +281,12 @@ class RcgiSystem {
   bool cascade_valid_[kCascades] = {};
   Vec3 blended_origin_[kCascades] = {};
   Vec3 last_camera_{};
+  // Interior-lighting state last seen in AddToGraph. A transition (entering or
+  // leaving an interior) invalidates every RCGI history -- world cache radiance,
+  // probe-atlas hysteresis and the temporal screen history all carry the old
+  // lighting otherwise. `have_interior_state_` suppresses a reset on first use.
+  bool last_interior_ = false;
+  bool have_interior_state_ = false;
 };
 
 }  // namespace rx::render

@@ -156,6 +156,7 @@ void RayTracingContext::RemoveBlas(u64 mesh_key) {
   if (!blas) return;
   if (blas->handle) device_.DestroyAccelStruct(blas->handle);
   blas_.erase(mesh_key);
+  slot_tracker_.InvalidateBuilds();  // TLAS slots built before this now stale
 }
 
 void RayTracingContext::RemoveApproxBlas(u64 mesh_key) {
@@ -163,6 +164,7 @@ void RayTracingContext::RemoveApproxBlas(u64 mesh_key) {
   if (!blas) return;
   if (blas->handle) device_.DestroyAccelStruct(blas->handle);
   approx_blas_.erase(mesh_key);
+  slot_tracker_.InvalidateBuilds();
 }
 
 bool RayTracingContext::BuildLodBlas(u64 mesh_key, u32 lod,
@@ -193,6 +195,7 @@ void RayTracingContext::RemoveLodBlas(u64 mesh_key) {
   for (Blas& blas : *lods)
     if (blas.handle) device_.DestroyAccelStruct(blas.handle);
   lod_blas_.erase(mesh_key);
+  slot_tracker_.InvalidateBuilds();
 }
 
 bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
@@ -263,6 +266,10 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot,
 
   cmd.BuildTlas(tlas.handle, tlas.instances, count, tlas.scratch);
   cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelRead);
+  // The slot now holds a valid build against the current BLAS set; consumers may
+  // read it next frame (async) or this frame (sync). Marked after the successful
+  // record so the allocation-failure early-out above leaves the slot invalid.
+  slot_tracker_.MarkBuilt(slot);
 }
 
 }  // namespace rx::render

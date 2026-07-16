@@ -494,6 +494,20 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
   }
   last_camera_ = camera;
 
+  // Interior transition: the sun, ambient and occlusion all change discontinuously
+  // between an interior cell and the outdoors, so every RCGI history retains the
+  // wrong radiance across the boundary. Invalidate the world hash cache, force
+  // each cascade's probe atlas to re-converge (reset, like a cascade snap) and
+  // drop the temporal screen history (via the gather's screen_reset_ path).
+  if (have_interior_state_ && config.interior != last_interior_) {
+    clear_hash_ = true;
+    for (u32 c = 0; c < kCascades; ++c) cascade_valid_[c] = false;
+    screen_history_valid_ = false;
+    screen_reset_ = true;
+  }
+  last_interior_ = config.interior;
+  have_interior_state_ = true;
+
   if (!history_valid_) {
     for (u32 c = 0; c < kCascades; ++c) {
       blended_origin_[c] = SnapOrigin(camera, c);

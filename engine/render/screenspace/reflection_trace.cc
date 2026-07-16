@@ -232,6 +232,10 @@ ResourceHandle ReflectionTrace::AddToGraph(
         p.dims[2] = trace.width;
         p.dims[3] = trace.height;
         p.params[0] = frame.near_plane;
+        // Match the trace's per-frame subpixel selection so the upscale samples
+        // the identical full-res guides (finding: half-res guide mismatch).
+        p.params[1] = static_cast<f32>(frame.frame_index % 64u);
+        p.params[2] = static_cast<f32>(frame.half_res ? 2u : 1u);
         ctx.cmd->BindPipeline(upscale_pipeline_);
         ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(full)),
                                    Bind::Sampled(1, ctx.graph->image(raw)),

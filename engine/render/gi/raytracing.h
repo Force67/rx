@@ -8,6 +8,7 @@
 
 #include "core/math.h"
 #include "core/types.h"
+#include "render/gi/rt_slot_tracker.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/resources.h"
 
@@ -54,6 +55,7 @@ class RayTracingContext {
   // frame later, then rewritten a frame after that -- three live slots at two
   // frames in flight. The synchronous path builds and consumes one slot.
   static constexpr u32 kSlots = 3;
+  static_assert(TlasSlotTracker::kSlots == kSlots, "slot tracker must mirror kSlots");
 
   struct Instance {
     u64 mesh_key = 0;
@@ -122,6 +124,19 @@ class RayTracingContext {
 
   AccelStructHandle tlas(u32 slot) const { return tlas_[slot].handle; }
 
+  // Whether `slot` currently holds a valid TLAS build (built this session and
+  // against the live BLAS set). False for a never-built slot or one retired by a
+  // RemoveBlas/replace -- consumers must not bind such a slot.
+  bool TlasValid(u32 slot) const { return slot_tracker_.Valid(slot); }
+
+  // Pick this frame's build/read slots and whether the async (build-ahead) path
+  // is safe. The async read slot is the previous frame's build; when it is not
+  // valid (RT just enabled, or a BLAS was replaced) this returns a synchronous
+  // build+read of the current slot instead of binding an unbuilt/stale one.
+  TlasSlotTracker::Selection SelectTlasSlots(u32 frame_index, bool want_async) const {
+    return slot_tracker_.Select(frame_index, want_async);
+  }
+
   // Total BLAS bytes reclaimed by compaction so far (0 on backends without
   // the compacted-size query).
   u64 compacted_saved_bytes() const { return compacted_saved_bytes_; }
@@ -161,6 +176,8 @@ class RayTracingContext {
   GpuBuffer blas_scratch_;
   u64 compacted_saved_bytes_ = 0;
   Tlas tlas_[kSlots];
+  // Per-slot build validity + BLAS-set revision (pure logic; see the header).
+  TlasSlotTracker slot_tracker_;
 };
 
 }  // namespace rx::render

@@ -260,7 +260,12 @@ void main(uint3 id : SV_DispatchThreadID) {
   uint step = max(pc.misc.x, 1u);
   uint2 sub = (step > 1u) ? uint2(uint(pc.frame_index) & 1u, (uint(pc.frame_index) >> 1) & 1u)
                           : uint2(0, 0);
-  int2 fp = int2(id.xy * step + sub);
+  // Clamp to the full-res guide extent: on odd render dimensions id.xy*step+sub
+  // can step one texel past the edge, an out-of-bounds Load. The upscale carries
+  // this same subpixel so both passes weight against the identical guide texel.
+  uint gw, gh;
+  depth_map.GetDimensions(gw, gh);
+  int2 fp = clamp(int2(id.xy * step + sub), int2(0, 0), int2(gw, gh) - 1);
   int3 p = int3(fp, 0);
 
   float depth = depth_map.Load(p);

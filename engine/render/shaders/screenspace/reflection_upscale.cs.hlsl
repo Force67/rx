@@ -14,7 +14,7 @@
 
 struct PushData {
   uint4 dims;    // full_w, full_h, half_w, half_h
-  float4 params; // near_plane, ...
+  float4 params; // x near_plane, y frame_index (matches the trace), z guide step
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -52,14 +52,22 @@ void main(uint3 id : SV_DispatchThreadID) {
   float bw[4] = {(1.0 - fr.x) * (1.0 - fr.y), fr.x * (1.0 - fr.y), (1.0 - fr.x) * fr.y,
                  fr.x * fr.y};
 
+  // The trace rotates its full-res guide texel through 4 subpixels per frame
+  // (id*step + sub). Reconstruct the SAME subpixel here so each half-res tap is
+  // weighted against the exact guide it traced with, not the cell center (which
+  // matched only 1 frame in 4).
+  uint gstep = max(uint(push.params.z), 1u);
+  uint2 gsub = (gstep > 1u)
+                   ? uint2(uint(push.params.y) & 1u, (uint(push.params.y) >> 1) & 1u)
+                   : uint2(0, 0);
+
   float4 sum = 0.0.xxxx;
   float wsum = 0.0;
   [unroll]
   for (uint i = 0; i < 4; ++i) {
     int2 q = clamp(base + taps[i], int2(0, 0), int2(hsz) - 1);
-    // reconstruct the half-res tap's full-res representative for the guide test
-    float2 quv = (float2(q) + 0.5) / float2(hsz);
-    int2 qfp = clamp(int2(quv * float2(full)), int2(0, 0), int2(full) - 1);
+    // the half-res tap's full-res guide texel (same mapping the trace used)
+    int2 qfp = clamp(int2(q) * int(gstep) + int2(gsub), int2(0, 0), int2(full) - 1);
     float qd = depth_map.Load(int3(qfp, 0));
     if (qd <= 0.0) continue;
     float4 qnr = normal_map.Load(int3(qfp, 0));

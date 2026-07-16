@@ -2379,12 +2379,20 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // slot build for reference correctness. Three ping-pong slots keep a slot
   // safe to rebuild while one frame still reads the previous one at two frames
   // in flight (see RayTracingContext::kSlots).
-  bool async_tlas = RtAsyncTlasOpt && device_->caps().async_compute &&
-                    settings_.async_compute && !path_trace && frame_index_ > 0;
-  u32 tlas_build_slot = frame_index_ % RayTracingContext::kSlots;
-  u32 tlas_slot = async_tlas ? (frame_index_ + RayTracingContext::kSlots - 1) %
-                                   RayTracingContext::kSlots
-                             : tlas_build_slot;
+  // The async read slot is the previous frame's build. It is only safe when that
+  // slot actually holds a current build: RT enabled after raster-only frames
+  // leaves it unbuilt, and a mesh replace (WaitIdle + RemoveBlas) retires every
+  // slot whose instances still point at the freed BLAS. TlasSlotTracker tracks
+  // both and falls the selection back to a synchronous build+read of the current
+  // slot when the previous one is invalid.
+  bool want_async_tlas = RtAsyncTlasOpt && device_->caps().async_compute &&
+                         settings_.async_compute && !path_trace && frame_index_ > 0;
+  TlasSlotTracker::Selection tlas_sel =
+      raytracing_ ? raytracing_->SelectTlasSlots(frame_index_, want_async_tlas)
+                  : TlasSlotTracker{}.Select(frame_index_, false);
+  bool async_tlas = tlas_sel.async;
+  u32 tlas_build_slot = tlas_sel.build_slot;
+  u32 tlas_slot = tlas_sel.read_slot;
 
   // The frame's globals set (uniform + optional tlas + optional hi-z) is
   // rewritten once per frame, from the first pass that needs it. The slot's
@@ -3043,7 +3051,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       // culling never applies to it (path tracing disables culling).
       const bool group_cull = rt_cull_on && !mesh->no_rt;
       const base::Vector<u8>* visible =
-          group_cull ? &rt_cull_.UpdateGroup(gi, group.generation,
+          group_cull ? &rt_cull_.UpdateGroup(gi, group.generation, group.revision,
                                              {group.transforms.data(), group.transforms.size()},
                                              mesh_center(*mesh), mesh->bounds_radius)
                      : nullptr;
@@ -3134,10 +3142,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     rcgi_cfg.relocate = RcgiRelocateOpt;
     rcgi_cfg.classify = RcgiInteriorOpt;  // volume classification shares the interior gate
     rcgi_cfg.probe_ao = RcgiProbeAoOpt;
+    // Interior cells author their own directional (XCLL/LGTM) and suppress the
+    // sky sun; feed RCGI the same authored interior sun the raster path selected
+    // (above) instead of applied_sun_*, or an outdoor sun leaks bounce onto an
+    // interior with zero directional intensity.
+    Vec3 rcgi_sun_dir =
+        settings_.interior ? Normalize(settings_.interior_directional_dir) : applied_sun_direction_;
+    f32 rcgi_sun_int =
+        settings_.interior ? settings_.interior_directional_intensity : applied_sun_intensity_;
+    Vec3 rcgi_sun_col =
+        settings_.interior ? settings_.interior_directional_color : applied_sun_color_;
     rcgi_->AddToGraph(graph_, raytracing_.get(), tlas_slot, light_grid_, frame.lights,
-                      view.camera.eye, applied_sun_direction_, applied_sun_intensity_,
-                      applied_sun_color_, frame_index_, rcgi_cfg, rcgi_async,
-                      rcgi_software ? sdf_clipmap_.get() : nullptr);
+                      view.camera.eye, rcgi_sun_dir, rcgi_sun_int, rcgi_sun_col, frame_index_,
+                      rcgi_cfg, rcgi_async, rcgi_software ? sdf_clipmap_.get() : nullptr);
   }
 
   // The path tracer takes over the whole frame: it writes scene_color directly
@@ -4197,8 +4214,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         if (ms_occlude) builder.Read(cull_hiz, ResourceUsage::kSampledTaskMesh);
       },
       [this, geom_scene, geom_motion, geom_skin, geom_depth, msaa, ao, sun_shadow, spec_refl,
-       rcgi_irr, use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands,
-       ms_active, globals_set, frame_slot, restir_active, restir_out, &frame, &view,
+       rcgi_irr, rcgi_active, use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas,
+       cull_commands, ms_active, globals_set, frame_slot, restir_active, restir_out, &frame, &view,
        draw_meshlet_instances, view_proj, force_lod0_for_tlas](PassContext& ctx) {
         BindingSetHandle env_set = env_scene_sets_[frame_slot];
         TextureView ao_view =
@@ -4211,6 +4228,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             spec_refl != kInvalidResource ? ctx.graph->image(spec_refl).view : TextureView{};
         EnvironmentSystem::DdgiBinding ddgi_binding;
         if (ddgi_active) ddgi_binding = ddgi_->binding(frame_index_);
+        // Inline reflection bounce reads the RCGI world cascades when RCGI is
+        // active (matches the NRD reflection path and the kFrameFlagRcgi gate);
+        // null -> placeholders. The atlases stay in GENERAL between frames.
+        EnvironmentSystem::RcgiWorldBinding rcgi_world_binding;
+        RcgiSystem::IrradianceBinding rcgi_world_src;
+        if (rcgi_active) rcgi_world_src = rcgi_->irradiance_binding(frame_index_);
+        if (rcgi_world_src.valid) {
+          rcgi_world_binding.irradiance = rcgi_world_src.irradiance;
+          rcgi_world_binding.visibility = rcgi_world_src.visibility;
+          rcgi_world_binding.globals = rcgi_world_src.globals;
+          rcgi_world_binding.probe_meta = rcgi_world_src.probe_meta;
+          rcgi_world_binding.interior_vols = rcgi_world_src.interior_vols;
+        }
         environment_->WriteEnvSet(
             env_set, ao_view, ddgi_active ? &ddgi_binding : nullptr,
             csm_active ? ctx.graph->image(shadow_atlas).view : TextureView{},
@@ -4230,7 +4260,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
             TextureView{}, TextureView{}, GpuBuffer{},  // water field rings: transparent pass only
             shore_wetting_active_ ? shore_wetting_.current_view() : TextureView{},
-            water_caustics_active_ ? water_caustics_.current_view() : TextureView{}, rcgi_irr_view);
+            water_caustics_active_ ? water_caustics_.current_view() : TextureView{}, rcgi_irr_view,
+            rcgi_world_src.valid ? &rcgi_world_binding : nullptr);
 
         ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(geom_scene).view,

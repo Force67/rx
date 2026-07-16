@@ -365,6 +365,15 @@ if(RX_BUILD_TESTS)
   target_link_libraries(rcgi_interior_test PRIVATE rx::core)
   add_test(NAME rcgi_interior_test COMMAND rcgi_interior_test)
 
+  # Async-TLAS slot validity bookkeeping: build/read slot selection, unbuilt-slot
+  # fallback, and BLAS-revision invalidation. Header-only pure logic (no GPU).
+  add_executable(rt_slot_tracker_test test/rt_slot_tracker_test.cc)
+  target_include_directories(rt_slot_tracker_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(rt_slot_tracker_test PRIVATE rx::core)
+  add_test(NAME rt_slot_tracker_test COMMAND rt_slot_tracker_test)
+
 # CPU-side memory infrastructure test (tracker/arena/chunk pool/small vector/
 # config). rx_enable_mimalloc gives it the tracked new/delete override so the
 # tracker assertions run against the real allocation path.

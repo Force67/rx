@@ -137,6 +137,9 @@ bool InstanceStore::Replace(Device &device, InstanceGroupHandle handle,
   group->buffer = replacement;
   group->transforms.assign(transforms.begin(), transforms.end());
   ComputeBounds(*group, mesh_center, mesh_radius);
+  // Transforms changed in place: bump the revision so transform-keyed consumers
+  // (the RT instance culler) re-evaluate rather than trust a stale sweep result.
+  ++group->revision;
   live_instances_ = live_instances_ - previous_count + transforms.size();
   return true;
 }

@@ -61,15 +61,19 @@ class RtInstanceCuller {
   // Advances the time-sliced sweep for one static instance group and returns
   // its persistent visibility bitmask (1 = keep instance i). group_id indexes
   // the caller's dense group array; generation invalidates stale state when a
-  // slot is reused for a different group. transforms are the per-instance world
+  // slot is reused for a different group. revision invalidates it when the same
+  // group's transforms change in place (InstanceStore::Replace keeps generation
+  // stable, so without this a moved-but-same-count instance stays culled until
+  // its sweep index comes back around). transforms are the per-instance world
   // transforms; (mesh_center, mesh_radius) is the mesh's model-space sphere.
-  const base::Vector<u8>& UpdateGroup(u32 group_id, u32 generation,
+  const base::Vector<u8>& UpdateGroup(u32 group_id, u32 generation, u32 revision,
                                       std::span<const Mat4> transforms,
                                       const Vec3& mesh_center, f32 mesh_radius);
 
  private:
   struct GroupState {
     u32 generation = 0;
+    u32 revision = 0;
     u32 cursor = 0;  // next instance index the sweep will (re)test
     bool valid = false;
     base::Vector<u8> visible;  // one byte per instance, 1 = keep

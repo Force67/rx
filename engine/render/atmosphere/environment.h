@@ -75,6 +75,17 @@ class EnvironmentSystem {
     ResourceState layout = ResourceState::kShaderReadFragment;
   };
 
+  // RCGI world irradiance cascades for the inline reflection bounce (env slots
+  // 36-40). Null -> placeholders (kFrameRcgi stays clear, never sampled). The
+  // atlases are storage-written each frame and stay in GENERAL.
+  struct RcgiWorldBinding {
+    TextureView irradiance;
+    TextureView visibility;
+    const GpuBuffer* globals = nullptr;
+    const GpuBuffer* probe_meta = nullptr;
+    const GpuBuffer* interior_vols = nullptr;
+  };
+
   // Fills a freshly allocated set 2. Null ao view, ddgi binding, shadow view or
   // sun-shadow view fall back to the neutral dummies (white ao, black ddgi, lit
   // cascade shadow, fully-lit sun shadow).
@@ -101,7 +112,8 @@ class EnvironmentSystem {
                    const GpuBuffer& water_field_params = {},
                    TextureView shore_wetness = {},
                    TextureView caustics = {},
-                   TextureView rcgi_irradiance = {}) const;
+                   TextureView rcgi_irradiance = {},
+                   const RcgiWorldBinding* rcgi_world = nullptr) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}

@@ -62,7 +62,7 @@ int main() {
     CHECK(c.DrawVisible(At(Vec3{0, 0, 5000}), Vec3{0, 0, 0}, 0.001f));
     base::Vector<Mat4> xf;
     for (int i = 0; i < 10; ++i) xf.push_back(At(Vec3{0, 0, 5000.0f + i}));
-    const auto& vis = c.UpdateGroup(0, 1, {xf.data(), xf.size()}, Vec3{0, 0, 0}, 0.01f);
+    const auto& vis = c.UpdateGroup(0, 1, 0, {xf.data(), xf.size()}, Vec3{0, 0, 0}, 0.01f);
     CHECK(CountVisible(vis) == xf.size());
   }
 
@@ -79,7 +79,7 @@ int main() {
 
     c.BeginFrame(eye);
     // First frame is accept-all (group just appeared): no holes.
-    const auto& first = c.UpdateGroup(0, 1, {xf.data(), xf.size()}, Vec3{0, 0, 0}, mesh_radius);
+    const auto& first = c.UpdateGroup(0, 1, 0, {xf.data(), xf.size()}, Vec3{0, 0, 0}, mesh_radius);
     CHECK(CountVisible(first) == kN);
 
     // Per-frame slice is bounded (never a full re-test of a huge group).
@@ -91,7 +91,7 @@ int main() {
     u32 visible = kN;
     for (u32 f = 0; f < RtInstanceCuller::kSweepFrames + 2; ++f) {
       c.BeginFrame(eye);
-      const auto& v = c.UpdateGroup(0, 1, {xf.data(), xf.size()}, Vec3{0, 0, 0}, mesh_radius);
+      const auto& v = c.UpdateGroup(0, 1, 0, {xf.data(), xf.size()}, Vec3{0, 0, 0}, mesh_radius);
       visible = CountVisible(v);
     }
     CHECK(visible == 0);
@@ -109,11 +109,11 @@ int main() {
     // Converge to fully culled first.
     for (u32 f = 0; f < RtInstanceCuller::kSweepFrames + 2; ++f) {
       c.BeginFrame(eye);
-      c.UpdateGroup(0, 1, {xf.data(), xf.size()}, Vec3{0, 0, 0}, 0.05f);
+      c.UpdateGroup(0, 1, 0, {xf.data(), xf.size()}, Vec3{0, 0, 0}, 0.05f);
     }
     // Now teleport far away in a single frame -> accept-all restored.
     c.BeginFrame(Vec3{10000, 0, 0});
-    const auto& v = c.UpdateGroup(0, 1, {xf.data(), xf.size()}, Vec3{0, 0, 0}, 0.05f);
+    const auto& v = c.UpdateGroup(0, 1, 0, {xf.data(), xf.size()}, Vec3{0, 0, 0}, 0.05f);
     CHECK(CountVisible(v) == kN);
   }
 
@@ -126,14 +126,39 @@ int main() {
     const Vec3 eye{0, 0, 0};
     for (u32 f = 0; f < RtInstanceCuller::kSweepFrames + 2; ++f) {
       c.BeginFrame(eye);
-      c.UpdateGroup(3, 1, {a.data(), a.size()}, Vec3{0, 0, 0}, 0.05f);
+      c.UpdateGroup(3, 1, 0, {a.data(), a.size()}, Vec3{0, 0, 0}, 0.05f);
     }
     // Slot 3 reused for a new group (generation bumped): starts accept-all.
     base::Vector<Mat4> b;
     for (u32 i = 0; i < 100; ++i) b.push_back(At(Vec3{0, 0, 500.0f + f32(i)}));
     c.BeginFrame(eye);
-    const auto& v = c.UpdateGroup(3, 2, {b.data(), b.size()}, Vec3{0, 0, 0}, 0.05f);
+    const auto& v = c.UpdateGroup(3, 2, 0, {b.data(), b.size()}, Vec3{0, 0, 0}, 0.05f);
     CHECK(CountVisible(v) == b.size());
+  }
+
+  // --- in-place transform update (revision bump) re-admits a moved instance ---
+  {
+    RtInstanceCuller c;
+    c.Configure(true, start, angle);
+    // One tiny prop far away plus filler; converge it to culled.
+    base::Vector<Mat4> xf;
+    const u32 kN = 200;
+    for (u32 i = 0; i < kN; ++i) xf.push_back(At(Vec3{0, 0, 500.0f + f32(i)}));
+    const Vec3 eye{0, 0, 0};
+    for (u32 f = 0; f < RtInstanceCuller::kSweepFrames + 2; ++f) {
+      c.BeginFrame(eye);
+      c.UpdateGroup(7, 1, 0, {xf.data(), xf.size()}, Vec3{0, 0, 0}, 0.05f);
+    }
+    // Move instance 0 right next to the camera. Same group_id, same generation,
+    // same count -- only the transforms (and the store's revision) change.
+    xf[0] = At(Vec3{0, 0, 5});
+    c.BeginFrame(eye);
+    // Without the revision bump the stale bitmask still hides instance 0 (its
+    // sweep index has not come back around); with it the group re-admits all.
+    const auto& moved = c.UpdateGroup(7, 1, /*revision=*/1, {xf.data(), xf.size()},
+                                      Vec3{0, 0, 0}, 0.05f);
+    CHECK(moved[0] == 1);
+    CHECK(CountVisible(moved) == kN);  // revision bump restarts accept-all
   }
 
   if (g_failures == 0) {

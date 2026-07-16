@@ -193,9 +193,15 @@ uint RcgiMetaIndex(uint cascade, uint3 probe) {
 uint RcgiPackOffset(float3 frac) {
   float3 n = clamp(frac / kRcgiRelocMaxOffset, -1.0.xxx, 1.0.xxx);
   uint3 q = (uint3)clamp(round(n * 511.0) + 512.0, 0.0.xxx, 1023.0.xxx);
-  return q.x | (q.y << 10u) | (q.z << 20u);
+  uint packed = q.x | (q.y << 10u) | (q.z << 20u);
+  // Raw word 0 is reserved as the "no offset" sentinel (RcgiUnpackOffset below),
+  // so a zero-cleared meta buffer reads as unrelocated rather than the maximum
+  // negative corner. Nudge the all-min-negative offset (the only real value that
+  // packs to 0) off the sentinel; the ~1/1022-cell shift is imperceptible.
+  return packed == 0u ? 1u : packed;
 }
 float3 RcgiUnpackOffset(uint p) {
+  if (p == 0u) return 0.0.xxx;  // zero-cleared meta == no offset (not (-0.45)^3)
   uint3 q = uint3(p & 1023u, (p >> 10u) & 1023u, (p >> 20u) & 1023u);
   float3 n = clamp((float3(q) - 512.0) / 511.0, -1.0.xxx, 1.0.xxx);
   return n * kRcgiRelocMaxOffset;  // fraction of spacing
@@ -315,6 +321,11 @@ float3 SampleRcgiIrradiance(RcgiGlobals g, Texture2D irr_atlas, SamplerState irr
 
   float3 sum = 0.0.xxx;
   float weight_sum = 0.0;
+  // Weight from same-class probes only (before the cross-class attenuation). When
+  // every nearby probe is the opposite class this stays ~0, which flags that the
+  // renormalized result below is pure cross-wall bleed (finding: cross-class
+  // rejection cancels under renormalization).
+  float match_weight_sum = 0.0;
   [unroll]
   for (uint i = 0; i < 8; ++i) {
     uint3 off = uint3(i & 1u, (i >> 1) & 1u, (i >> 2) & 1u);
@@ -329,11 +340,13 @@ float3 SampleRcgiIrradiance(RcgiGlobals g, Texture2D irr_atlas, SamplerState irr
     // A probe drowning in backfaces even after relocation contributes nothing.
     if (RcgiProbeDisabledMeta(g, meta, c, probe)) continue;
     // Cross-class probes bleed light across interior walls: near-zero weight.
-    if (classify && RcgiPointInInterior(g, vols, probe_pos) != sample_indoor) weight *= 0.02;
+    bool cross_class = classify && RcgiPointInInterior(g, vols, probe_pos) != sample_indoor;
+    if (cross_class) weight *= 0.02;
 
     float3 to_probe = normalize(probe_pos - world_pos);
     float facing = (dot(to_probe, n) + 1.0) * 0.5;
     weight *= facing * facing + 0.2;
+    if (!cross_class) match_weight_sum += weight;
 
     float3 from_probe = biased - probe_pos;
     float dist = length(from_probe);
@@ -352,6 +365,11 @@ float3 SampleRcgiIrradiance(RcgiGlobals g, Texture2D irr_atlas, SamplerState irr
     sum += irr * weight;  // atlas is perceptually (sqrt) encoded
     weight_sum += weight;
   }
+  // No same-class probe contributed: the 8 taps are all the opposite class and
+  // renormalizing their 0.02 weights would restore full cross-wall irradiance
+  // (e.g. a small interior lit by outdoor probes only). Return no indirect --
+  // conservative, and the sample's own class re-converges as its probes fill in.
+  if (classify && match_weight_sum <= 1e-4) return 0.0.xxx;
   float3 mean = sum / max(weight_sum, 1e-4);
   return mean * mean * g.params.z;  // decode + energy scale
 }

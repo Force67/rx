@@ -2,6 +2,10 @@
 // penumbras that the temporal passes integrate.
 
 #include "rhi_bindings.hlsli"
+// RCGI world-cascade sampling for the inline reflection bounce (finding: the
+// inline path lost indirect reflection light without NRD). Parameterized helpers
+// only; bindings are declared below (env slots 36-40).
+#include "gi/rcgi_common.hlsli"
 
 // Object->world transform, read only for the model-space (_msn) normal path.
 // Mirrors the vertex MeshPushConstants layout; only `model` is used here (the
@@ -282,6 +286,17 @@ struct MaterialParams {
 // RCGI resolved full-res indirect diffuse (env slot 35, replaces DDGI + SSGI).
 [[vk::combinedImageSampler]] [[vk::binding(35, 2)]] Texture2D rcgi_irradiance : register(t35, space2);
 [[vk::combinedImageSampler]] [[vk::binding(35, 2)]] SamplerState rcgi_irradiance_sampler : register(s35, space2);
+// RCGI world irradiance cascades (env slots 36-40). The resolved texture above is
+// screen-space (primary surface only); the inline reflection bounce hits arbitrary
+// world points, so it samples these world cascades instead -- the same source the
+// NRD reflection_trace path uses. Placeholders when RCGI is off (kFrameRcgi clear).
+[[vk::binding(36, 2)]] ConstantBuffer<RcgiGlobals> rcgi_world_globals : register(b36, space2);
+[[vk::combinedImageSampler]] [[vk::binding(37, 2)]] Texture2D rcgi_world_irr : register(t37, space2);
+[[vk::combinedImageSampler]] [[vk::binding(37, 2)]] SamplerState rcgi_world_irr_smp : register(s37, space2);
+[[vk::combinedImageSampler]] [[vk::binding(38, 2)]] Texture2D rcgi_world_vis : register(t38, space2);
+[[vk::combinedImageSampler]] [[vk::binding(38, 2)]] SamplerState rcgi_world_vis_smp : register(s38, space2);
+[[vk::binding(39, 2)]] StructuredBuffer<uint2> rcgi_world_meta : register(t39, space2);
+[[vk::binding(40, 2)]] StructuredBuffer<float4> rcgi_world_vols : register(t40, space2);
 
 struct DdgiVolume {
   float4 origin;          // xyz grid origin, w probe spacing
@@ -547,8 +562,18 @@ float3 TraceReflection(float3 origin, float3 dir) {
   float3 to_sun = normalize(-frame.sun_direction.xyz);
   float3 sun = frame.sun_color.rgb * frame.sun_direction.w;
   float ndl = max(dot(hit_n, to_sun), 0.0);
-  return albedo / kPi * sun * ndl + albedo * SampleDdgiNearest(hit_pos, hit_n) +
-         hit_material.emissive;
+  // Indirect diffuse at the reflected hit. Under RCGI the DDGI atlas is empty, so
+  // sample the RCGI world cascades (leak-hardened, matches the NRD path); v points
+  // back toward the reflection ray origin (-dir).
+  float3 indirect;
+  if ((frame.flags & kFrameRcgi) != 0u) {
+    indirect = SampleRcgiIrradiance(rcgi_world_globals, rcgi_world_irr, rcgi_world_irr_smp,
+                                    rcgi_world_vis, rcgi_world_vis_smp, rcgi_world_meta,
+                                    rcgi_world_vols, hit_pos, hit_n, -dir);
+  } else {
+    indirect = SampleDdgiNearest(hit_pos, hit_n);
+  }
+  return albedo / kPi * sun * ndl + albedo * indirect + hit_material.emissive;
 }
 
 // --- BRDF lobes shared by the base, clearcoat, sheen and anisotropy paths ---

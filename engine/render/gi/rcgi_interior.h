@@ -59,11 +59,17 @@ inline u32 RcgiPackOffset(const Vec3& frac) {
     if (q > 1023) q = 1023;
     return static_cast<u32>(q);
   };
-  return lane(frac.x) | (lane(frac.y) << 10) | (lane(frac.z) << 20);
+  u32 packed = lane(frac.x) | (lane(frac.y) << 10) | (lane(frac.z) << 20);
+  // Raw word 0 is reserved as the "no offset" sentinel so a zero-cleared meta
+  // buffer reads as unrelocated, not the max negative corner (mirror of the
+  // shader RcgiPackOffset). Nudge the all-min-negative offset off the sentinel.
+  return packed == 0u ? 1u : packed;
 }
 
-// Inverse of RcgiPackOffset: returns the per-axis fraction of spacing.
+// Inverse of RcgiPackOffset: returns the per-axis fraction of spacing. Raw word 0
+// decodes as no offset (the zero-cleared-buffer default), mirroring the shader.
 inline Vec3 RcgiUnpackOffset(u32 p) {
+  if (p == 0u) return Vec3{0.0f, 0.0f, 0.0f};
   auto lane = [](u32 q) -> f32 {
     f32 n = (static_cast<f32>(q & 1023u) - 512.0f) / 511.0f;
     n = n < -1.0f ? -1.0f : (n > 1.0f ? 1.0f : n);
