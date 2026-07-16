@@ -230,6 +230,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (scene_hook_) scene_hook_->Emit(dt, view);
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   if (ship_) ship_->Emit(dt, view);
+  if (nav_) nav_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
   if (cloth_ != 0) EmitCloth(view);
   UpdateParticles(dt, view);
@@ -2668,6 +2669,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "ship") {
     ship_ = std::make_unique<ShipDemo>(ctx_);
     ship_->Create();
+    return;
+  }
+  if (config_.demo_scene == "nav") {
+    nav_ = std::make_unique<NavDemo>(ctx_);
+    nav_->Create();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));
