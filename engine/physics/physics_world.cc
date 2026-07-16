@@ -16,6 +16,8 @@
 #include <Jolt/Physics/Body/BodyLockInterface.h>
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/CastResult.h>
+#include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
 #include <Jolt/Physics/Collision/RayCast.h>
@@ -146,7 +148,8 @@ struct PhysicsWorld::Impl {
   base::Vector<JPH::Ref<JPH::GroupFilterTable>> filter_groups;
   struct CharacterEntry {
     JPH::Ref<JPH::CharacterVirtual> character;
-    f32 vy = 0;  // tracked vertical velocity (gravity + jump)
+    f32 vy = 0;           // tracked vertical velocity (gravity + jump)
+    f32 step_height = 0.4f;  // stair-walk lift honoured by the Move* calls
   };
   base::Vector<CharacterEntry> characters;
   // Typed handles to created joints so the motor/pose API can address them;
@@ -899,6 +902,7 @@ void PhysicsWorld::MoveCharacter(CharacterId id, const Vec3& horizontal_velocity
 
   character->SetLinearVelocity({horizontal_velocity.x, entry.vy, horizontal_velocity.z});
   JPH::CharacterVirtual::ExtendedUpdateSettings update;
+  update.mWalkStairsStepUp = JPH::Vec3(0, entry.step_height, 0);
   character->ExtendedUpdate(dt, impl_->system->GetGravity(), update,
                             impl_->system->GetDefaultBroadPhaseLayerFilter(layers::kDynamic),
                             impl_->system->GetDefaultLayerFilter(layers::kDynamic), {}, {},
@@ -917,10 +921,12 @@ void PhysicsWorld::MoveCharacterVelocity(CharacterId id, const Vec3& velocity, f
                                          Vec3* out_position, bool* out_grounded,
                                          Vec3* out_ground_velocity) {
   if (!impl_ || id == 0 || id > impl_->characters.size()) return;
-  JPH::CharacterVirtual* character = impl_->characters[id - 1].character;
+  Impl::CharacterEntry& entry = impl_->characters[id - 1];
+  JPH::CharacterVirtual* character = entry.character;
 
   character->SetLinearVelocity(ToJolt(velocity));
   JPH::CharacterVirtual::ExtendedUpdateSettings update;
+  update.mWalkStairsStepUp = JPH::Vec3(0, entry.step_height, 0);
   character->ExtendedUpdate(dt, impl_->system->GetGravity(), update,
                             impl_->system->GetDefaultBroadPhaseLayerFilter(layers::kDynamic),
                             impl_->system->GetDefaultLayerFilter(layers::kDynamic), {}, {},
@@ -946,6 +952,59 @@ void PhysicsWorld::MoveCharacterVelocity(CharacterId id, const Vec3& velocity, f
 void PhysicsWorld::SetCharacterPosition(CharacterId id, const Vec3& position) {
   if (!impl_ || id == 0 || id > impl_->characters.size()) return;
   impl_->characters[id - 1].character->SetPosition(ToJolt(position));
+}
+
+bool PhysicsWorld::GetCharacterPosition(CharacterId id, Vec3* out_position) const {
+  if (!impl_ || id == 0 || id > impl_->characters.size()) return false;
+  JPH::RVec3 p = impl_->characters[id - 1].character->GetPosition();
+  if (out_position) {
+    *out_position = {static_cast<f32>(p.GetX()), static_cast<f32>(p.GetY()),
+                     static_cast<f32>(p.GetZ())};
+  }
+  return true;
+}
+
+void PhysicsWorld::ConfigureCharacter(CharacterId id, f32 max_slope_angle, f32 step_height) {
+  if (!impl_ || id == 0 || id > impl_->characters.size()) return;
+  Impl::CharacterEntry& entry = impl_->characters[id - 1];
+  entry.character->SetMaxSlopeAngle(max_slope_angle);
+  entry.step_height = std::max(step_height, 0.0f);
+}
+
+bool PhysicsWorld::SetCharacterShape(CharacterId id, f32 radius, f32 half_height) {
+  if (!impl_ || id == 0 || id > impl_->characters.size()) return false;
+  JPH::CharacterVirtual* character = impl_->characters[id - 1].character;
+  JPH::Ref<JPH::CapsuleShape> shape = new JPH::CapsuleShape(std::max(half_height, 0.0f), radius);
+  // A small penetration tolerance keeps a graze from vetoing an otherwise-clear
+  // stand-up; a genuinely blocked capsule overlaps far deeper than this.
+  return character->SetShape(
+      shape, 0.05f, impl_->system->GetDefaultBroadPhaseLayerFilter(layers::kDynamic),
+      impl_->system->GetDefaultLayerFilter(layers::kDynamic), {}, {}, *impl_->temp_allocator);
+}
+
+bool PhysicsWorld::SphereCast(const Vec3& origin, const Vec3& direction, f32 max_distance,
+                              f32 radius, RayHit* out) const {
+  if (!impl_) return false;
+  Vec3 dir = Normalize(direction);
+  JPH::Ref<JPH::SphereShape> sphere = new JPH::SphereShape(std::max(radius, 1e-3f));
+  JPH::RShapeCast shape_cast(sphere, JPH::Vec3::sReplicate(1.0f),
+                             JPH::RMat44::sTranslation(ToJolt(origin)),
+                             ToJolt(dir) * max_distance);
+  JPH::ShapeCastSettings settings;
+  // Treat back-facing triangles as solid so a sphere starting just inside a wall
+  // still reports the near surface (camera pulls forward reliably).
+  settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
+  JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
+  impl_->system->GetNarrowPhaseQuery().CastShape(shape_cast, settings, JPH::RVec3::sZero(),
+                                                 collector);
+  if (!collector.HadHit()) return false;
+  const f32 distance = collector.mHit.mFraction * max_distance;
+  out->distance = distance;
+  out->position = {origin.x + dir.x * distance, origin.y + dir.y * distance,
+                   origin.z + dir.z * distance};
+  const JPH::Vec3 n = -collector.mHit.mPenetrationAxis.Normalized();
+  out->normal = {n.GetX(), n.GetY(), n.GetZ()};
+  return true;
 }
 
 BodyId PhysicsWorld::AddKinematicCapsule(const Vec3& position, f32 radius, f32 half_height) {
