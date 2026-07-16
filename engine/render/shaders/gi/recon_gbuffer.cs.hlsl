@@ -50,19 +50,7 @@ PUSH_CONSTANTS(PathGbufferPush, pc);
 
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
-struct MaterialRecord {
-  float4 base_color_factor;
-  float3 emissive;
-  uint base_color_texture;
-  uint flags;
-  float alpha_cutoff;
-  float roughness;
-  float metallic;
-  uint metallic_roughness_texture;  // terrain: land layer 2
-  uint terrain_layer1_texture;      // terrain: land layer 1
-  uint terrain_weight_texture;      // terrain: per-cell weight map
-  uint pad2;
-};
+#include "material_record.hlsli"
 static const uint kMaterialAlphaMask = 1u;
 static const uint kMaterialTerrain = 2u;
 [[vk::binding(0, 1)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space1);

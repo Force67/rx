@@ -102,6 +102,28 @@ struct Material {
   // subsurface buffer and the screen-space SSS blur diffuses it (red bleed at
   // shadow edges). Independent of `subsurface` (the analytic transmission term).
   bool skin = false;
+  // Physically based skin subsurface scattering (unified across the raster,
+  // hybrid-RT and path-traced paths; see render/shaders/sss_profile.hlsli).
+  // Artist authors a diffuse scatter colour and a per-channel mean free path
+  // (mm); Kulla-Conty 2017 maps these to single-scattering albedo and the
+  // engine derives sigma_t / sigma_s at upload. Defaults approximate the
+  // classic 3-layer caucasian skin dmfp. Only consumed when `skin` is set.
+  struct SkinParams {
+    // Multiple-scattering (diffuse) colour the artist wants to see.
+    f32 scatter_color[3] = {0.85f, 0.55f, 0.40f};
+    // Per-channel mean free path in millimetres (red travels furthest).
+    f32 mfp[3] = {1.0f, 0.35f, 0.20f};
+    // Uniform scale on the mean free path (thicker/thinner skin, tuning).
+    f32 scatter_scale = 1.0f;
+    // Henyey-Greenstein phase anisotropy (skin is mildly forward, ~0.0-0.3).
+    f32 anisotropy_g = 0.0f;
+    // Boundary index of refraction (skin ~1.4).
+    f32 ior = 1.4f;
+    // Baseline hemoglobin perfusion 0..1; the dynamic blood-flow system drives
+    // it up (flush) or down (blanch) at runtime. 0.5 = resting.
+    f32 perfusion = 0.5f;
+  };
+  SkinParams skin_params;
   // Hair: dual-lobe Kajiya-Kay strand specular along the vertex tangent
   // (strand direction) replaces the GGX sun response; roughness drives the
   // highlight width. Pair with alpha-masked cards for real hair.

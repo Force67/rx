@@ -51,6 +51,11 @@ base::Option<double> DofFocus{"dof.focus", 0.0, "RX_DOF_FOCUS"};
 base::Option<double> DofAperture{"dof.aperture", 2.8, "RX_DOF_APERTURE"};
 base::Option<bool> SssOpt{"sss", true, "RX_SSS"};
 base::Option<double> SssWidth{"sss.width", 0.012, "RX_SSS_WIDTH"};
+base::Option<bool> SkinDynamicsOpt{"skin.dynamics", true, "RX_SKIN_DYNAMICS"};
+base::Option<double> SkinHeartRateOpt{"skin.heart_rate", 1.1, "RX_SKIN_HEART_RATE"};
+base::Option<double> SkinPerfusionOpt{"skin.perfusion", 0.0, "RX_SKIN_PERFUSION"};
+base::Option<double> SkinPulseAmpOpt{"skin.pulse", 0.03, "RX_SKIN_PULSE"};
+base::Option<double> SkinTensionGainOpt{"skin.tension", 0.35, "RX_SKIN_TENSION"};
 base::Option<bool> AsyncComputeOpt{"async.compute", true, "RX_ASYNC_COMPUTE"};
 base::Option<bool> FrameGenOpt{"framegen", false, "RX_FRAMEGEN"};
 base::Option<bool> LocalShadowsOpt{"local.shadows", true, "RX_LOCAL_SHADOWS"};
@@ -927,6 +932,16 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     settings_.sss = SssOpt;
   if (SssWidth.overridden())
     settings_.sss_width = static_cast<f32>(double(SssWidth));
+  if (SkinDynamicsOpt.overridden())
+    settings_.skin_dynamics = SkinDynamicsOpt;
+  if (SkinHeartRateOpt.overridden())
+    settings_.skin_heart_rate = static_cast<f32>(double(SkinHeartRateOpt));
+  if (SkinPerfusionOpt.overridden())
+    settings_.skin_perfusion = static_cast<f32>(double(SkinPerfusionOpt));
+  if (SkinPulseAmpOpt.overridden())
+    settings_.skin_pulse_amplitude = static_cast<f32>(double(SkinPulseAmpOpt));
+  if (SkinTensionGainOpt.overridden())
+    settings_.skin_tension_gain = static_cast<f32>(double(SkinTensionGainOpt));
   if (AsyncComputeOpt.overridden())
     settings_.async_compute = AsyncComputeOpt;
   if (FrameGenOpt.overridden())
@@ -3693,6 +3708,18 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                            !interior && scene_has_water;
   if (water_caustics_active_)
     globals.flags |= kFrameFlagWaterCaustics;
+  // Skin blood-flow dynamics: advance the arterial pulse phase from the clock
+  // and hand the perfusion/tension drivers to the skin pixel shader. The app
+  // sets heart rate / global perfusion (exertion, blush, pallor) via settings.
+  if (settings_.skin_dynamics) {
+    constexpr f32 kTwoPi = 6.28318530718f;
+    f32 phase = static_cast<f32>(time_seconds_) * settings_.skin_heart_rate * kTwoPi;
+    globals.skin_dynamics[0] = std::fmod(phase, kTwoPi);
+    globals.skin_dynamics[1] = std::clamp(settings_.skin_perfusion, -0.5f, 0.5f);
+    globals.skin_dynamics[2] = settings_.skin_pulse_amplitude;
+    globals.skin_dynamics[3] = settings_.skin_tension_gain;
+    globals.flags |= kFrameFlagSkinDynamics;
+  }
   // Hybrid ReSTIR DI decision happens before the globals upload below; the
   // graph passes record later under the same flag.
   bool restir_active = settings_.restir_di && rt_available_ &&
@@ -5676,7 +5703,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         p.inv_size[0] = 1.0f / static_cast<f32>(render_width_);
         p.inv_size[1] = 1.0f / static_cast<f32>(render_height_);
         p.near_plane = 0.1f;
-        p.width = settings_.sss_width;
+        // The per-pixel scatter radius now rides the skin-diffuse alpha (derived
+        // from each material's mean free path); width is a global artist
+        // multiplier. 0.012 m is the historical reference radius = 1x.
+        p.width = settings_.sss_width / 0.012f;
         // Pixels per meter at view depth 1. The projection bakes the vulkan
         // y-flip into m[5], so it is negative - take the magnitude.
         p.proj_scale =

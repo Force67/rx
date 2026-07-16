@@ -68,6 +68,13 @@ struct FrameGlobals {
   // Underwater caustics (kFrameFlagWaterCaustics): x intensity (0..1 lerp),
   // y water rest height (m), z extra depth-fade (1/m), w unused.
   f32 water_caustics[4] = {0.6f, 0.0f, 0.15f, 0.0f};
+  // Skin blood-flow dynamics (kFrameFlagSkinDynamics), read by the skin branch
+  // of mesh.ps/mesh_rt.ps: x arterial pulse phase (radians), y global perfusion
+  // offset added to each skin material's baseline (-0.5 blanch .. +0.5 flush),
+  // z pulse amplitude (perfusion swing), w tension gain (per-vertex stretch ->
+  // perfusion; positive = stretch/crease blanches). Driven by the app from
+  // heart rate / exertion / emotion.
+  f32 skin_dynamics[4] = {0.0f, 0.0f, 0.03f, 0.35f};
 };
 
 // A projected decal: an oriented box whose -z face carries an atlas region,
@@ -112,6 +119,7 @@ inline constexpr u32 kFrameFlagWaterField = 1u << 13;    // water samples the pe
 inline constexpr u32 kFrameFlagShoreWetting = 1u << 14;  // sample the shoreline wetting field (env slot 33)
 inline constexpr u32 kFrameFlagWaterCaustics = 1u << 15;  // modulate sun on submerged surfaces by the caustic map (env slot 34)
 inline constexpr u32 kFrameFlagRcgi = 1u << 16;  // indirect diffuse from the RCGI resolve texture (env slot 35), replaces DDGI + SSGI
+inline constexpr u32 kFrameFlagSkinDynamics = 1u << 17;  // skin reads frame.skin_dynamics (blood-flow pulse/perfusion/tension)
 
 // One active morph target on a draw: index into the mesh's target list and
 // its weight. FrameView::morph_weights concatenates every morphed draw's

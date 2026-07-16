@@ -80,6 +80,16 @@ class MaterialSystem {
     // streaming.
     u32 terrain_albedo[8] = {~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~0u};
     u32 terrain_normal[8] = {~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~0u, ~0u};
+    // Skin subsurface scattering (kFlagSkin). Physical coefficients pre-mapped
+    // from asset SkinParams via Kulla-Conty at upload; std140 rows (float3+float
+    // pack into one 16-byte slot). Mirrors the tail of MaterialParams in
+    // mesh.ps.hlsl. See render/shaders/sss_profile.hlsli.
+    f32 sss_sigma_t[3] = {0, 0, 0};
+    f32 sss_anisotropy_g = 0;
+    f32 sss_sigma_s[3] = {0, 0, 0};
+    f32 sss_perfusion = 0;
+    f32 sss_scatter_color[3] = {0, 0, 0};
+    f32 sss_ior = 1.4f;
   };
   static constexpr u32 kFlagAlphaMask = 1u << 0;
   static constexpr u32 kFlagHasNormalMap = 1u << 1;
