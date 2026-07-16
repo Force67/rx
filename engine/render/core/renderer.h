@@ -62,6 +62,7 @@
 #include "render/post/post.h"
 #include "render/post/ui_blur.h"
 #include "render/gi/raytracing.h"
+#include "render/gi/rt_instance_cull.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 #include "render/rhi/swapchain.h"
@@ -372,6 +373,12 @@ class RX_RENDER_EXPORT Renderer {
   // Planar world-xz-projected albedo for the virtual-geometry resolve: a full
   // RGBA8 mip chain (size x size at mip 0, levels concatenated).
   void SetVirtualGeometryAlbedo(ByteSpan rgba_mips, u32 size, f32 world_to_uv);
+  // Interior volumes for RCGI leak hardening (Phase 3 item 9b): world-space AABBs
+  // the game forwards (interior cell bounds / building interiors). RCGI classifies
+  // probes and gather samples indoor/outdoor against these and refuses to blend
+  // across the boundary, killing the outdoor-probe-through-a-doorway leak. Cheap;
+  // forward every frame or on change. Empty span disables classification.
+  void SetInteriorVolumes(std::span<const InteriorVolume> volumes);
   // Seeds simulated hair strands on a head sphere (--demo strands).
   void SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 strands, f32 length);
   // Builds simulated guide strands from a real hair mesh and places the groom
@@ -409,6 +416,9 @@ class RX_RENDER_EXPORT Renderer {
   u32 output_width() const { return output_width_; }
   u32 output_height() const { return output_height_; }
   bool upscaler_active() const { return upscaler_ != nullptr; }
+  // True when RX_RCGI was set on the command line/env: hosted presets must let
+  // it win in both directions (force on OR force off) over the tier default.
+  bool rcgi_env_overridden() const { return rcgi_env_overridden_; }
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }
   size_t instance_group_count() const { return instances_.group_count(); }
   size_t instance_count() const { return instances_.instance_count(); }
@@ -484,6 +494,12 @@ class RX_RENDER_EXPORT Renderer {
   // while path tracing was off, so enabling it later still gets the alpha-tested
   // foliage into the tlas. Idempotent (skips already-built meshes).
   void EnsureRayTracingGeometry();
+  // Lazily builds the BLAS + bindless mesh record for a non-zero distance LOD
+  // of an already-uploaded RT mesh (RX_RT_LOD_NEAR). Idempotent; returns the
+  // LOD's bindless index (custom_index for the TLAS instance) or kInvalidIndex
+  // when the LOD has no RT geometry / cannot be built (caller falls back to
+  // LOD0). Called at frame-build time, so a one-time build stall is acceptable.
+  u32 EnsureLodRtGeometry(u64 mesh_key, GpuMesh& mesh, u32 lod);
 
   RendererDesc desc_;
   RenderSettings settings_;
@@ -501,7 +517,9 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI), lazily created
   bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
   bool rcgi_sw_unavailable_logged_ = false;  // logged the "no startup SDF path" notice once
+  bool rcgi_env_overridden_ = false;  // RX_RCGI was set explicitly (wins over preset both ways)
   LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
+  base::Vector<InteriorVolume> interior_volumes_;  // forwarded to rcgi each active frame (item 9b)
   // SDF software-trace infrastructure (RX_SDF / software_gi): per-mesh SDFs +
   // global clipmap. Both null unless the path was enabled at startup, so with it
   // off nothing is generated/allocated. `sdf_available_` is the IMMUTABLE startup
@@ -536,6 +554,9 @@ class RX_RENDER_EXPORT Renderer {
   u32 fg_engine_frames_ = 0;
   f64 fg_log_time_ = 0.0;
   std::unique_ptr<RayTracingContext> raytracing_;
+  // Solid-angle + distance culling of realtime TLAS instances, persistent
+  // across frames (time-sliced sweep state per instance group).
+  RtInstanceCuller rt_cull_;
   RenderGraph graph_;
   TaaPass taa_;
   RtaoPass rtao_;

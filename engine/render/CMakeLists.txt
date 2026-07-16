@@ -18,6 +18,7 @@ rx_add_module(render
   gi/sdf_scene.cc
   gi/sdf_clipmap.cc
   gi/raytracing.cc
+  gi/rt_instance_cull.cc
   gi/path_tracer.cc
   gi/recon_path_tracer.cc
   screenspace/ambient_occlusion.cc
@@ -240,6 +241,7 @@ set(RX_RENDER_SHADERS
   shaders/screenspace/ssr.cs.hlsl
   shaders/screenspace/ssgi.cs.hlsl
   shaders/screenspace/reflection_trace.cs.hlsl
+  shaders/screenspace/reflection_upscale.cs.hlsl
   shaders/screenspace/contact_shadow.cs.hlsl
   shaders/screenspace/sss_blur.cs.hlsl
   shaders/pipeline/cull.cs.hlsl
@@ -288,6 +290,7 @@ set(RX_RENDER_SHADERS
   shaders/gi/rcgi_cache_shade_sw.cs.hlsl
   shaders/gi/rcgi_blend.cs.hlsl
   shaders/gi/rcgi_border.cs.hlsl
+  shaders/gi/rcgi_probe_meta.cs.hlsl
   shaders/gi/rcgi_resolve.cs.hlsl
   shaders/gi/rcgi_gather.cs.hlsl
   shaders/gi/rcgi_denoise.cs.hlsl
@@ -357,9 +360,10 @@ set(RX_SHADER_DEPS_mesh_vs_hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_instance_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_skin_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl)
+set(RX_SHADER_DEPS_mesh_rt_ps_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl)
 set(RX_SHADER_DEPS_shadow_instance_vs_hlsl shaders/gi/shadow.vs.hlsl)
-set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl)
+set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_cull_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_args_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_clear_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
@@ -375,10 +379,12 @@ set(RX_SHADER_DEPS_rcgi_probe_trace_sw_cs_hlsl shaders/gi/rcgi_probe_trace_body.
 set(RX_SHADER_DEPS_rcgi_cache_shade_cs_hlsl shaders/gi/rcgi_cache_shade_body.hlsli shaders/gi/rcgi_common.hlsli shaders/gi/light_grid.hlsli shaders/rt_geometry.hlsli)
 set(RX_SHADER_DEPS_rcgi_cache_shade_sw_cs_hlsl shaders/gi/rcgi_cache_shade_body.hlsli shaders/gi/rcgi_common.hlsli shaders/gi/light_grid.hlsli shaders/gi/sdf_trace.hlsli)
 set(RX_SHADER_DEPS_rcgi_blend_cs_hlsl shaders/gi/rcgi_common.hlsli)
+set(RX_SHADER_DEPS_rcgi_probe_meta_cs_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_rcgi_resolve_cs_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_rcgi_gather_cs_hlsl shaders/gi/rcgi_common.hlsli shaders/gi/sh.hlsli)
 set(RX_SHADER_DEPS_rcgi_denoise_cs_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_rcgi_upscale_cs_hlsl shaders/gi/rcgi_common.hlsli shaders/gi/sh.hlsli)
+set(RX_SHADER_DEPS_reflection_trace_cs_hlsl shaders/rt_geometry.hlsli shaders/gi/sh.hlsli shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_sdf_clear_cs_hlsl shaders/gi/sdf_trace.hlsli)
 set(RX_SHADER_DEPS_sdf_compose_cs_hlsl shaders/gi/sdf_trace.hlsli)
 set(RX_SHADER_DEPS_sdf_debug_cs_hlsl shaders/gi/sdf_trace.hlsli)

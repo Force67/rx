@@ -348,6 +348,43 @@ if(RX_BUILD_TESTS)
   target_link_libraries(instance_store_test PRIVATE rx::core)
   add_test(NAME instance_store_test COMMAND instance_store_test)
 
+  # Solid-angle TLAS instance culler: the distance/angle predicate, the
+  # time-sliced group sweep, teleport accept-all and generation invalidation.
+  # Pure CPU logic (no GPU), so it always runs under plain ctest.
+  add_executable(rt_instance_cull_test
+    test/rt_instance_cull_test.cc
+    engine/render/gi/rt_instance_cull.cc)
+  target_include_directories(rt_instance_cull_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(rt_instance_cull_test PRIVATE rx::core)
+  add_test(NAME rt_instance_cull_test COMMAND rt_instance_cull_test)
+
+  # RCGI leak/occlusion hardening helpers: interior-volume classification and the
+  # probe-relocation offset packing round trip (header-only, mirrors the shader).
+  add_executable(rcgi_interior_test test/rcgi_interior_test.cc)
+  target_include_directories(rcgi_interior_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(rcgi_interior_test PRIVATE rx::core)
+  add_test(NAME rcgi_interior_test COMMAND rcgi_interior_test)
+
+  add_executable(rcgi_history_test test/rcgi_history_test.cc)
+  target_include_directories(rcgi_history_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(rcgi_history_test PRIVATE rx::core)
+  add_test(NAME rcgi_history_test COMMAND rcgi_history_test)
+
+  # Async-TLAS slot validity bookkeeping: build/read slot selection, unbuilt-slot
+  # fallback, and BLAS-revision invalidation. Header-only pure logic (no GPU).
+  add_executable(rt_slot_tracker_test test/rt_slot_tracker_test.cc)
+  target_include_directories(rt_slot_tracker_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(rt_slot_tracker_test PRIVATE rx::core)
+  add_test(NAME rt_slot_tracker_test COMMAND rt_slot_tracker_test)
+
 # CPU-side memory infrastructure test (tracker/arena/chunk pool/small vector/
 # config). rx_enable_mimalloc gives it the tracked new/delete override so the
 # tracker assertions run against the real allocation path.

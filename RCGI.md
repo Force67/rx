@@ -217,13 +217,16 @@ Pipeline: `light_grid` → `rcgi` pass (probe trace → `rcgi_args` → cache sh
   bases and `rcgi` runs.
 - **Cache hit0 packs geometry index in 8 bits** (≤255 geometries/mesh) and
   instance in 24 bits (≤16M) — fine for current content.
-- **Blend fallback** on a cache miss (hash overflow / eviction) is black rather
-  than a probe/sky fallback; rare in practice, mild darkening only.
+- **Blend fallback** on a cache miss (hash overflow / eviction) — **CLOSED**
+  (Phase 5 item 20b): the blend pass now falls back to `RcgiSkyMiss` (sky
+  outdoors, interior ambient indoors) instead of black, so an un-shaded hit no
+  longer darkens the cascade. `rcgi_blend.cs.hlsl` gained the sky cube (slot 6).
 - **Transparent surfaces** get no RCGI in M1 (only the opaque scene env-set is
   wired); DDGI wired transparents, so this is a small gap under RCGI. Easy
-  follow-up (add the trailing arg to the transparent `WriteEnvSet`).
-- Reflections/spec-refl bounce still reads the DDGI atlas (black under RCGI);
-  not wired to the cache yet.
+  follow-up (add the trailing arg to the transparent `WriteEnvSet`). *(Closed in
+  the M2 "transparent gap closed" note below.)*
+- Reflections/spec-refl bounce reading the DDGI atlas (black under RCGI) —
+  **CLOSED** (Phase 5 item 20b); see the Phase 5 section.
 
 ### (d) Measured GPU cost (1920×1011, `RX_GPU_TIMINGS=1`, GB10)
 
@@ -331,10 +334,12 @@ gather, no history copies — all gated on `rcgi_world`).
 
 ### Known limitations / TODOs
 
-- **Reflection/spec-refl bounce** still reads the DDGI atlas (black under RCGI) —
-  unchanged from M1, not wired to the cache/gather yet.
-- **Quarter-res gather** is a one-constant change (`kGatherDivisor = 4`) but not
-  exposed as a user setting; not yet tuned/verified.
+- **Reflection/spec-refl bounce** reading the DDGI atlas (black under RCGI) —
+  **CLOSED** (Phase 5 item 20b): the reflection hit's indirect-diffuse term now
+  samples the RCGI irradiance cascades when RCGI is active. See Phase 5.
+- **Quarter-res gather** — **CLOSED** (Phase 5 item 23): exposed as
+  `RX_RCGI_GATHER_SCALE` (2 = half default, 4 = quarter), denoise radius widens
+  automatically at quarter. See Phase 5.
 - **RGB9E5** irradiance storage still deferred (RGBA16F throughout).
 - **Screen-cache validation** uses a linearised `near/d` reversed-Z depth
   compare (no prev-frame inverse matrix in the push budget); robust in practice
@@ -403,3 +408,370 @@ updated inline where they described the old behavior.
 - **Shutdown order.** `Renderer::Shutdown` resets `rcgi_` (and destroys
   `light_grid_`) before `device_` teardown, next to `ddgi_`, so `~RcgiSystem`
   no longer runs against a destroyed `Device&`.
+
+---
+
+## Phase 3 — leak & occlusion hardening (AC Shadows adoption, items 9-11)
+
+Three additions that stop RCGI leaking light where the sparse cascades cannot
+see occlusion. All default on, each behind its own env for A/B, and all no-ops
+for existing scenes (zero cost when their inputs are absent).
+
+### 9. Indoor/outdoor classification (`RX_RCGI_INTERIOR`, default on)
+
+- **(a) Global interior mode.** When the app sets `RenderSettings::interior`,
+  RCGI's ray misses (`RcgiSkyMiss` in `rcgi_common.hlsli`) now return the
+  authored `interior_ambient` instead of the sky cubemap, in the probe trace and
+  the gather alike. The probe cascades stop being fed skylight through
+  ceiling/doorway gaps. The interior flag + ambient ride the globals UBO
+  (`RcgiGlobals::interior`/`gi_flags`), set from `FrameConfig` in `AddToGraph`.
+  The forward pass gained an interior+RCGI branch (`mesh.ps`/`mesh_rt.ps`): with
+  RCGI on indoors it lights the interior with leak-free bounce rather than the
+  flat authored term (gated so RCGI-off scenes are unchanged).
+- **(b) Interior volume list.** `Renderer::SetInteriorVolumes(span<InteriorVolume>)`
+  uploads <=64 world AABBs to a small host-visible buffer. `SampleRcgiIrradiance`
+  classifies the sample position and each of the 8 blend probes indoor/outdoor
+  (`RcgiPointInInterior`) and near-zeroes the weight of cross-class probes,
+  killing the outdoor-probe-through-a-doorway leak for mixed indoor/outdoor
+  scenes (and future Skyrim room bounds). Costs nothing when no volumes are set.
+
+### 10. Probe relocation + backface disable (`RX_RCGI_RELOCATE`, default on)
+
+- Per (cascade, probe) metadata buffer `probe_meta_` (uint2: packed +-0.45-cell
+  offset + a disabled flag). The new `rcgi_probe_meta.cs.hlsl` pass runs after the
+  border pass, reads back this frame's rays, and nudges each probe toward the open
+  hemisphere (away from backface directions, weighted by ray openness) when the
+  backface fraction exceeds ~25%, disabling it past ~60%. The offset is applied
+  identically in the probe trace (ray origins), the blend (cache-key
+  reconstruction) and `SampleRcgiIrradiance` (interpolation), so world positions
+  agree; the offset is reset when a cascade snaps (its cells reassign). Offset
+  packing has a CPU mirror in `render/gi/rcgi_interior.h` (unit-tested).
+
+### 11. Probe AO (`RX_RCGI_PROBE_AO`, default on)
+
+- In the gather, an irradiance-cascade fallback hit is attenuated by
+  `saturate(hitT / cascadeSpacing * scale + bias)` (defaults 0.6 / 0.4),
+  recovering contact occlusion the sparse probes cannot represent. Applies only
+  to the cascade fallback -- screen-cache and hash-cache hits carry their own
+  occlusion.
+
+### Not landed
+
+- **12 (RTAO from the gather hitT)** and **13 (secondary sun shadow map for the
+  SW tier)** are deferred; see the commit/PR notes for the plumbing plan (item 12
+  needs the gather hoisted above the NRD AO block, or a persisted previous-frame
+  hitT, to resolve the ordering).
+
+### Verification
+
+`--demo interior` (an enclosed room + door gap + lamp, flagged interior and
+forwarded as a volume) exercises all three on NVIDIA GB10 (`vkrun`): the room
+lights from the lamp with leak-free interior ambient (measurably so vs
+`RX_RCGI_INTERIOR=0`), `--demo cornell` GI color-bleed is unchanged, software
+(`RX_RCGI_SW`) runs, and validation is clean apart from the pre-existing async
+indirect-args VUID. CPU unit test: `rcgi_interior_test`.
+
+---
+
+## Phase 4 — specular quality & perf (AC Shadows adoption, items 14-19)
+
+Reflection-pass levers on top of the existing full-res VNDF specular trace
+(`engine/render/screenspace/reflection_trace.{h,cc}` +
+`shaders/screenspace/reflection_trace.cs.hlsl`, denoised by NRD REBLUR_SPECULAR).
+Each has its own env for A/B, all default on. The reflection pass is NRD-gated
+(`spec_refl_active` needs `nrd_.available()`), so everything here is inert
+without NRD. Landed: **14, 16, 17, 19**. Deferred with specs below: **15, 18**.
+
+### 14. Half-res reflections + bilateral upscale (`RX_REFL_HALF`, default on)
+
+- The trace runs at **half × half** resolution (quarter the rays -- the dominant
+  reflection cost is the TLAS ray, not the denoise), then a depth/normal-weighted
+  **bilateral upscale** (`reflection_upscale.cs.hlsl`, the RCGI-upscale weighting
+  pattern) reconstructs full res before NRD consumes it.
+- **NRD stays full-res.** REBLUR's resolution is fixed at instance creation
+  (render res) and the vendored integration does not expose REBLUR's
+  checkerboard/half-res mode, so the honest choice is: trace half, upscale to full
+  (edge-aware, so reflections do not bleed across silhouettes), then denoise full
+  as before. NRD guides (normal_roughness, viewZ, motion) stay full-res and
+  consistent. The perf win is the 4× ray reduction; the upscale is one cheap pass.
+- **Half×half over half-width**: NRD's temporal/spatial reuse handles the extra
+  noise from a 1-spp quarter-density input well, and half×half is the larger ray
+  saving. The guides are full-res; the shader maps each half-res output pixel to a
+  full-res guide texel by a per-frame-jittered `step` so the half-res selection
+  does not lock onto one quadrant.
+- Verified `--demo materials` on NVIDIA GB10: half-res is visually
+  indistinguishable from full-res (`RX_REFL_HALF=0`) -- chrome spheres reflect
+  sharply, glossy blur is preserved, no edge smear.
+
+### 16. Specular ray-skip via diffuse SH (`RX_REFL_SH_SKIP`, default on)
+
+- Before tracing, if `roughness > sh_skip_rough` (`RX_REFL_SH_SKIP_ROUGH`, 0.45)
+  **or** `dot(rayDir, mirrorDir) < 0.5`, the trace is replaced by evaluating the
+  **RCGI gather's per-pixel denoised diffuse SH** along the ray direction
+  (`ShEvaluate` in `sh.hlsli` -- the raw radiance reconstruction, not the
+  cosine-convolved `ShIrradiance`, clamped non-negative). The hard
+  `roughness_cutoff` (0.6) stays as the outer bound; this is the softer,
+  directionally-aware cull inside it.
+- **Requires the RCGI gather chain.** `RcgiSystem::AddGatherChain` now stashes its
+  final denoised SH triple (`a_r/a_g/a_b`, gather res) and exposes them via
+  `RcgiSystem::denoised_sh()`; the probes-only/software resolve produces none
+  (returns false). The renderer was **reordered** so the RCGI screen side runs
+  *before* the NRD/reflection block (RCGI and DDGI are mutually exclusive, so this
+  never races the DDGI async join the reflection path uses). When RCGI is off the
+  SH slots bind a harmless placeholder and the flag stays clear -> current
+  behaviour (full trace, DDGI indirect).
+- The reflection pass reads the SH via full-res uv -> gather texel, robust to any
+  output/gather ratio (with item 14 both are render/2, a near 1:1 map).
+- Verified `--demo materials` + `RX_RCGI=1`: SH-skip on vs `RX_REFL_SH_SKIP=0` is
+  indistinguishable -- no darkening of mirror/glossy surfaces.
+
+### 17. Roughness-scaled ray length
+
+- `ray.TMax = maxDist * ((1-roughness)^2 + 0.1)` (their formula; `maxDist` = 200,
+  `Frame::max_ray_dist`). Rough surfaces reflect only the near neighbourhood, so
+  the ray shortens and the miss (sky/SH) fills the far field the blur swallows
+  anyway. The same reach seeds the SH-skip's normalised hit distance.
+
+### 19. One-step fog on specular hits (`RX_REFL_FOG`, default on)
+
+- On a world-trace **hit**, an analytic exponential-height-fog transmittance is
+  integrated **once** over the reflected segment `[origin, hitPos]`
+  (`HeightFogTransmittance`; closed form `d0·(1-e^{-b·dir.y·L})/(b·dir.y)`), and
+  the hit radiance is faded toward the horizon inscatter colour (the prefiltered
+  sky cube along the ray at a blurry mip, the same colour a miss samples). This
+  removes the hard cut where distant reflections would meet the raster fog line.
+- **Consistent with the raster fog**: gated on `fog_active` (RX_FOG) and reuses
+  `settings_.fog_density / fog_height_falloff / fog_base_height`. The segment
+  starts at the reflected surface, so eye->surface fog (already applied on the
+  primary) is not double-counted -- near-camera fog is skipped by construction.
+- Verified `--demo water RX_FOG=1`: fog renders, reflections fade to horizon, no
+  artifacts (subtle -- the effect only touches reflected-ray hit segments).
+
+### Files
+
+- `shaders/screenspace/reflection_trace.cs.hlsl` (half-res mapping, ray-skip,
+  roughness reach, hit fog; push grew to 208 B), new
+  `shaders/screenspace/reflection_upscale.cs.hlsl`, `shaders/gi/sh.hlsli`
+  (`ShEvaluate`), `screenspace/reflection_trace.{h,cc}` (upscale pipeline, SH +
+  half + fog Frame fields, static_asserts on push size), `gi/rcgi.{h,cc}`
+  (`denoised_sh` accessor + stash), `core/renderer.cc` (RCGI-before-reflections
+  reorder, `RX_REFL_*` envs, wiring), `engine/render/CMakeLists.txt`.
+
+### Verification
+
+Built with NRD (`tools/get_nrd.sh`), `cmake --preset linux`, zero new warnings,
+`ctest` 19/19. GPU smoke on NVIDIA GB10 (`vkrun`, `--demo materials` /
+`--demo water`): reflections correct with every `RX_REFL_*` env on/off and with
+RCGI on/off; validation clean apart from the pre-existing async indirect-args
+VUID. Per-pass frame-time delta (half vs full) is within the capture-frame
+readback-stall noise in these small demos -- not reliably measurable here; the
+saving is the 4× ray-count reduction.
+
+### Deferred — 15 (screen-space-first hybrid) and 18 (far scene cubemap)
+
+Both are the L-effort items; deferred to keep 14/16 landing verified. Specs:
+
+**15. Screen-space-first hybrid tracing (`RX_REFL_SS_FIRST`).** Before the TLAS
+ray in `reflection_trace`, ray-march the depth buffer along `dir` (adapt the SSR
+marcher `ssr.cs.hlsl`: 16-24 linear steps + binary refinement). On a valid hit
+(ray depth vs z-buffer within a world-space thickness) shade from the
+**previous-frame lit HDR** at that pixel (matches RCGI's screen cache; cheaper
+than a gbuffer relight) and skip the TLAS ray. If the march leaves the screen or
+passes behind geometry beyond threshold, **backtrack** to the last valid position
+and start the TLAS ray from there (AC Shadows' key trick -- avoids the
+raster-depth vs coarse-RT self-intersection disparity). Their numbers: ~38% of
+rays resolve on screen. Plumbing needed: bind a prev-frame lit HDR colour + depth
+to the reflection pass. RCGI already owns `screen_color_hist_`/`screen_depth_hist_`
+(render res, written by `AddHistoryCopy`), but they are RCGI-owned and only valid
+under RCGI; a general path wants a renderer-owned prev-lit-colour history (or gate
+SS-first on RCGI, as SH-skip does). *Risk*: the backtrack + thickness tuning and
+the RCGI-ownership of the history are why it is deferred rather than the marcher
+itself. The same SS-first march would help the RCGI **gather** ray more (bigger
+win), but the gather already has a screen radiance cache for HIT reprojection, so
+add it there only after the reflections version is tuned.
+
+**18. Far scene cubemap (`RX_FAR_CUBE`).** A 128² RGBA16F cubemap centred on the
+camera, **one face/frame round-robin**, rasterising the real scene coarsely (sky +
+geometry beyond the near range, lowest LODs, tiny instances culled by the Phase 2
+solid-angle culler at a much more aggressive threshold; recreation's `.btr/.bto`
+distant-LOD proxies are the geometry to render into it). Cheapest shading that
+reads plausibly: depth + albedo·(ambient + sun N·L), no shadows. It replaces the
+atmosphere-only prefiltered cube as the reflection **miss** fallback, sampled with
+the distance-warped direction `normalize((rayOrigin + rayDir*fakeHitDist) -
+cubemapPos)` so distant mountains/buildings appear in water/mirror reflections
+instead of vanishing; also the RCGI probe-trace/gather miss (but the Phase 3
+interior mode still wins indoors -- `RcgiSkyMiss` must branch interior first).
+Plumbing needed: a persistent cube target + 6 face-view matrices, a minimal
+per-face raster pass (its own small pipeline reusing the mesh vertex path), a
+round-robin face index in the frame state, and the reflection/RCGI miss sample
+sites swapped from `prefiltered_cube` to the far cube. *Risk*: the new raster
+target + per-face pass + frame-graph placement is the M-effort plumbing that
+pushes it past this phase's verified budget; the sampling-site swap itself is
+small.
+
+---
+
+## Phase 5 — ship it in recreation (AC Shadows adoption, items 20-23)
+
+RCGI becomes a shippable default GI: it is wired into the high/ultra quality
+presets and recreation's ray-traced trailer mode, the two "black under RCGI"
+TODOs are closed, denoiser material-ID masks land, and the gather gains a
+quarter-res knob. **Landed & GPU-verified: 20, 22, 23.** **Deferred with spec
+below: 21 (thin translucency).**
+
+### 20. RCGI as the quality-preset GI
+
+- **(a) Presets** (`engine/render/core/presets.cc`). `kUltra` and `kHigh` now set
+  `s.rcgi = true`; `s.ddgi = true` stays as the automatic fallback (the renderer's
+  `rcgi_active` predicate picks whichever is available, and the two are mutually
+  exclusive). `kMedium`/`kConsole` remain ddgi, low tiers ssgi — mirroring the
+  AC Shadows platform ladder. `s.rcgi = false` is forced in the no-ray-query
+  clamp. **RX_RCGI wins in both directions** but only when explicitly set:
+  `host.cc` now guards the env carry with `Renderer::rcgi_env_overridden()`
+  (`RcgiOpt.overridden()`), so an unset env no longer clobbers a preset that
+  enabled rcgi. Set on ultra/high because the measured gather chain is ~1.2-1.4 ms
+  on GB10 — within those tiers' budget.
+- **(b) Spec-bounce reads RCGI** (was "black under RCGI"). The reflection hit's
+  indirect-diffuse term (`reflection_trace.cs.hlsl`, `SampleHitIndirect`) samples
+  the RCGI irradiance cascades (`SampleRcgiIrradiance`, leak-hardened
+  classification) when `kFlagRcgi` is set, else the nearest DDGI probe as before.
+  `RcgiSystem::irradiance_binding(frame_index)` bundles the cascade atlases +
+  globals + probe-meta + interior-volume buffers; the renderer binds the real
+  resources when RCGI is active (`in_general`, atlases live in kGeneral) and
+  environment placeholders (`black_view`/`dummy_volume`/`dummy_storage`) otherwise
+  so the descriptor set is always complete. Slots 10-14 added to the reflection
+  pipeline. Verified `--demo materials RX_RCGI=1`: reflective spheres show lit,
+  coloured inter-sphere bounce (was black indirect).
+- **(b) Cache-miss blend fallback** (was "black not sky/probe"). `rcgi_blend`
+  gained the sky cube (slot 6); a probe-ray hit whose radiance is not cached yet
+  falls back to `RcgiSkyMiss` (sky outdoors, interior ambient indoors) instead of
+  black. The gather already fell through to the cascades on a cache miss, so this
+  closes the remaining darkening path (the multi-bounce feed). Reading the
+  written irradiance atlas back was rejected as a WAR hazard; the sky/interior
+  fallback is the hazard-free choice the TODO endorsed.
+- **(c) recreation** (`runtime/camera_input.cc`, `runtime/debug_ui.cc`). The
+  trailer `kRayTracing` mode sets `s.rcgi = true` alongside `s.ddgi = true`
+  (fallback); `kPathTracing` sets it too (inert while `path_trace` gates
+  `rcgi_world` off); `kRaster` clears both `rcgi`/`ddgi`. A "RCGI
+  (radiance-cached GI)" checkbox + intensity slider sit above the DDGI checkbox
+  in the debug UI's IBL section (both ray-query/IBL gated).
+
+### 22. Denoiser masks & vegetation disocclusion
+
+- **(a) Material-ID mask.** The prepass (`prepass.ps.hlsl`, shared by the masked
+  variant) writes a per-pixel class into the otherwise-unused normal `.a`
+  channel: opaque (0), vegetation (1, `kFlagWind`), character (2,
+  `kFlagSkin`/`kFlagHair`). Translucent (3) is reserved (blend materials are not
+  in the opaque prepass). Shared decode in `shaders/gi/material_class.hlsli`.
+  `rcgi_denoise` and `reflection_upscale` reject cross-class neighbours as a hard
+  bilateral weight (`RxMatClassMatch`), so wind/character indirect no longer
+  smears onto opaque surfaces during spatial filtering. Gated by
+  `RX_RCGI_DENOISE_MASK` (default on) for A/B.
+- **(b) Vegetation disocclusion** (`rcgi_upscale` temporal filter). Vegetation
+  pixels soften the spatial normal weight (wind normals vary), search a 16-tap
+  history neighbourhood (picking the most-converged sample) before declaring a
+  disocclusion, and loosen the temporal clamp; on a genuine disocclusion one
+  extra 8-tap poisson spatial pass (`VegDisoccFill`, same-class only) knocks down
+  the single-frame noise.
+- **(c) NRD material ID.** `nrd_pack.cs.hlsl` forwards the class into
+  `NRD_FrontEnd_PackNormalAndRoughness`'s material-ID slot (the vendored REBLUR
+  builds with `NRD_NORMAL_ENCODING=2` = R10_G10_B10_A2_UNORM, which carries the
+  2-bit id 1:1). It is **harmless while the material test is disabled** (REBLUR's
+  `minMaterialForSpecular`/`Diffuse` default to 4.0 ≥ the max class 3, so all
+  comparisons pass) and ready to enable if cross-material spec bleed needs it —
+  enabling is a one-line settings change left off pending an A/B, per the item's
+  "skip and note if not trivial".
+- The demos carry no wind/skinned materials, so the mask is a no-op there (all
+  class 0); it renders clean on/off. The visible win needs a vegetation/character
+  scene (recreation forest / NPCs) — flagged as the standing test for a later
+  screenshot pass.
+
+### 23. Quarter-res gather
+
+- `RX_RCGI_GATHER_SCALE` (setting `rcgi.gather_scale`): 2 = half res (default),
+  4 = quarter. `RcgiSystem::set_gather_scale` drives the runtime `gather_divisor_`
+  (replacing the compile-time `kGatherDivisor`). At quarter the separable denoise
+  radius widens 5 → 9 (its gaussian sigma tracks the radius) to compensate for the
+  ~4× fewer rays per full-res pixel; the 4-tap bilinear upscale is a correct
+  reconstruction and needs no change. A/B on GB10 (`--demo cornell`/`interior`):
+  quarter preserves the colour bleed with **no visible splotching**, at a lower
+  `rcgi` gather cost (the `rcgi_upscale`/full-res passes are unchanged). Default
+  stays half; quarter is the opt-in console knob.
+
+### Envs added
+
+- `RX_RCGI_GATHER_SCALE` (2/4) — gather resolution (item 23).
+- `RX_RCGI_DENOISE_MASK` (0/1, default 1) — material-ID denoiser mask (item 22).
+
+### Files
+
+- rx: `core/presets.cc`, `app/host.cc`, `core/renderer.{h,cc}`,
+  `gi/rcgi.{h,cc}`, `atmosphere/environment.h`,
+  `screenspace/reflection_trace.{h,cc}`, shaders
+  `screenspace/reflection_trace.cs.hlsl`, `screenspace/reflection_upscale.cs.hlsl`,
+  `gi/rcgi_blend.cs.hlsl`, `gi/rcgi_denoise.cs.hlsl`, `gi/rcgi_upscale.cs.hlsl`,
+  `gi/nrd_pack.cs.hlsl`, `pipeline/prepass.ps.hlsl`, new
+  `gi/material_class.hlsli`.
+- recreation: `runtime/camera_input.cc`, `runtime/debug_ui.cc`.
+
+### Verification
+
+Built inside `nix develop` (`cmake --preset linux`, NRD via `tools/get_nrd.sh`),
+zero new warnings, `ctest` 19/19. GPU smoke on NVIDIA GB10 (`vkrun`):
+`--demo cornell`/`interior`/`materials` with `RX_RCGI=1`, `RX_RCGI_GATHER_SCALE`
+2/4 and `RX_RCGI_DENOISE_MASK` 0/1 — colour bleed correct, reflections show lit
+RCGI bounce, interior leak-hardened with no cache-miss over-bright, quarter-res
+clean. No new validation errors (the async indirect-args VUID is pre-existing).
+recreation `camera_input.cc`/`debug_ui.cc` object-compile clean against the rx
+worktree.
+
+### 21. Thin translucency at RT hits — DEFERRED (spec)
+
+Genuinely L-effort; deferred because it cannot be GPU-verified in this budget
+without a thin-translucency test scene (the shipped demos have none, and a
+Skyrim barred-window interior needs game data). The mask-matrix interaction and
+the probabilistic front/back pdf rebalance are exactly the parts that need a
+reference A/B, so landing it unverified would be worse than a precise spec.
+Scope is **thin** translucency only (shoji/paper/leaves), not thick glass.
+
+**Predicate.** A conservative "thin translucent" test: blend alpha mode **and**
+double-sided **and** a transmission/translucency hint (`> 0`), or an explicit
+`is_thin` material flag. Add `kFlagThin` (material_system) + a `translucency`
+scalar `t` (0..1) to the simplified `MaterialRecord`.
+
+**BLAS routing (mind the Phase 1/2 mask matrix).** Thin materials are currently
+excluded from the BLAS entirely; blend geometry is not in any realtime ray path
+(diffuse rays trace `RX_RAY_MASK_REALTIME|APPROX` with `CULL_NON_OPAQUE +
+FORCE_OPAQUE`). Add a new mask bit `RX_RAY_MASK_THIN` and include thin submeshes
+as **non-opaque** geometry on that bit only (never on REALTIME/APPROX, so the
+existing force-opaque diffuse rays skip them). The simplest correct consumer is a
+**translucency-aware gather variant**: the gather ray traces
+`REALTIME|APPROX|THIN` **without** `FORCE_OPAQUE` and runs an any-hit/`RayQuery`
+candidate loop so thin hits are transmissive rather than solid walls. Keep the
+path tracer on the real (non-approx) geometry as today.
+
+**Primary surface (gather).** Requires knowing the primary pixel is thin —
+blend materials are not in the opaque prepass, so either (a) tag thin geometry
+into the prepass gbuffer with material class 3 (needs the prepass to admit thin
+draws — the larger sub-change), or (b) restrict the primary-surface split to the
+secondary path and treat primary thin surfaces via the existing transparent
+forward pass. With the class available: at a thin primary surface pick the
+front/back hemisphere with probability `p = t / (1 + t)` (back) vs `1 - p`
+(front), trace the chosen hemisphere, and **divide the result by the pdf**
+(`1/p` or `1/(1-p)`); for a back-hemisphere ray, **flip the ray direction when
+projecting into SH** so the encoded lobe matches the shaded (front) normal —
+their exact scheme.
+
+**Secondary hits (`cache_shade`).** At a thin-geometry hit, light **both faces**:
+shade with the geometric normal and again with `-normal` (backface), and
+attenuate the back contribution by `t · albedo` (the transmitted fraction). This
+is the interior-window-light win — sun/skylight leaks through shoji/paper into
+the room's cache radiance.
+
+**Plumbing.** `raytracing.{h,cc}`/`material_system` (predicate, `kFlagThin`,
+`t`, THIN BLAS variant on the new mask bit), `rt_geometry.hlsli` (unchanged),
+`rcgi_gather` (THIN ray + pdf rebalance + backface SH flip), `rcgi_cache_shade`
+(both-face lighting), a gather-variant pipeline or a push flag. **Risk**: the
+pdf rebalance and the primary-surface thin detection are the parts most likely
+to need reference-A/B tuning; validate in a Skyrim interior with barred windows
+(their slide-91 scene) before enabling by default. Gate behind `RX_RCGI_THIN`.

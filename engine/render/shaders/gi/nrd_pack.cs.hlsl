@@ -36,6 +36,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float3 n;
   float viewz;
   float roughness = 1.0;
+  float mat_id = 0.0;  // material class (opaque default; sky stays 0)
   if (depth <= 0.0) {  // reversed z far plane: sky, kept out of the denoising range
     n = float3(0.0, 0.0, 1.0);
     viewz = push.denoising_range;
@@ -44,8 +45,12 @@ void main(uint3 id : SV_DispatchThreadID) {
     n = OctDecode(nr.rg);
     roughness = nr.b;  // material roughness exported by the prepass
     viewz = push.near_plane / depth;  // reversed infinite z: ndc = near / dist
+    mat_id = nr.a;     // material class (item 22c): vegetation/character/opaque
   }
 
   viewz_out[id.xy] = viewz;
-  normal_roughness_out[id.xy] = NRD_FrontEnd_PackNormalAndRoughness(n, roughness, 0.0);
+  // material id rides NRD's 2-bit A2 slot (NormalEncoding::R10_G10_B10_A2_UNORM);
+  // harmless while REBLUR's material test is disabled (minMaterial default 4 >=
+  // 3), and ready to enable if cross-material spec bleed needs it.
+  normal_roughness_out[id.xy] = NRD_FrontEnd_PackNormalAndRoughness(n, roughness, mat_id);
 }

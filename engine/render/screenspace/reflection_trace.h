@@ -28,22 +28,68 @@ class ReflectionTrace {
     f32 near_plane = 0.1f;
     const f32* hit_dist_params = nullptr;  // NrdDenoiser::kHitDistParams
     bool ddgi = false;
+    // Evaluate the real alpha texture on masked (vegetation) hits via a bounded
+    // any-hit loop (RX_RT_VEG_ANYHIT). Off = the old force-opaque approximation.
+    bool veg_anyhit = false;
+    // Trace + light at half resolution, then bilateral-upscale to full res before
+    // NRD (RX_REFL_HALF). The dominant reflection cost is the TLAS ray; this
+    // quarters the ray count.
+    bool half_res = false;
+    // Roughness-scaled reflection reach: maxDist*((1-r)^2+0.1) (AC Shadows).
+    f32 max_ray_dist = 200.0f;
+    // One-step exponential-height-fog on hits (RX_REFL_FOG); applied only when
+    // fog_density > 0 (i.e. the raster fog is active), so it stays consistent.
+    bool fog = false;
+    f32 fog_density = 0.0f;
+    f32 fog_height_falloff = 0.0f;
+    f32 fog_base_height = 0.0f;
+    // Specular ray-skip: on rough / off-mirror rays evaluate the RCGI per-pixel
+    // diffuse SH instead of tracing (RX_REFL_SH_SKIP). Needs the gather SH bound
+    // (sh_* handles valid); ignored otherwise.
+    bool sh_skip = false;
+    f32 sh_skip_roughness = 0.45f;
+    f32 sh_dir_threshold = 0.5f;
+  };
+
+  // RCGI irradiance-cascade resources for the spec-bounce indirect term. When
+  // `active`, the diffuse GI at a reflection hit reads the RCGI cascades
+  // (kFlagRcgi) instead of the DDGI atlas, which is empty under RCGI. The
+  // renderer always supplies valid handles -- the real RCGI images when the
+  // system is up, otherwise environment placeholders -- so the descriptor set is
+  // always complete; `active` alone gates the sampling. `in_general` marks the
+  // atlases as living in kGeneral (true only for the real RCGI images).
+  struct RcgiBinding {
+    TextureView irradiance{};
+    TextureView visibility{};
+    const GpuBuffer* globals = nullptr;
+    const GpuBuffer* probe_meta = nullptr;
+    const GpuBuffer* interior_vols = nullptr;
+    SamplerHandle sampler{};
+    bool in_general = false;
+    bool active = false;
   };
 
   bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
   void Destroy(Device& device);
   bool available() const { return static_cast<bool>(pipeline_); }
 
-  // Returns the packed radiance+hitdist target (rgba16f) for DenoiseSpecular.
+  // Returns the full-res packed radiance+hitdist target (rgba16f) for
+  // DenoiseSpecular. When frame.half_res the trace runs at half `extent` and an
+  // extra bilateral upscale pass reconstructs full res. sh_r/g/b are the RCGI
+  // gather's denoised per-pixel SH (kInvalidResource when RCGI is off); sh_extent
+  // is their (gather) resolution.
   ResourceHandle AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
                             BindingSetHandle bindless_set, ResourceHandle depth,
                             ResourceHandle normals, TextureView prefiltered,
                             TextureView ddgi_irradiance, bool ddgi_in_general,
                             const GpuBuffer& ddgi_volume, u64 ddgi_volume_size,
-                            SamplerHandle sampler, Extent2D extent, const Frame& frame);
+                            SamplerHandle sampler, Extent2D extent, ResourceHandle sh_r,
+                            ResourceHandle sh_g, ResourceHandle sh_b, Extent2D sh_extent,
+                            const RcgiBinding& rcgi, const Frame& frame);
 
  private:
   PipelineHandle pipeline_;
+  PipelineHandle upscale_pipeline_;  // half-res -> full-res bilateral upscale
 };
 
 }  // namespace rx::render

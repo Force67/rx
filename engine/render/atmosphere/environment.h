@@ -58,6 +58,10 @@ class EnvironmentSystem {
   TextureView black_array_view() const { return black_array_view_; }
   const GpuBuffer& dummy_volume() const { return dummy_volume_; }
   const GpuBuffer& dummy_storage() const { return dummy_storage_; }
+  // 1x1 black Texture2D (shader-read) for passes that statically bind a 2D
+  // texture slot they may not use this frame (e.g. the RCGI cascade atlases in
+  // reflection_trace when RCGI is off).
+  TextureView black_view() const { return black_.view; }
   TextureView shadow_dummy_view() const { return shadow_dummy_.view; }
   SamplerHandle comparison_sampler() const { return shadow_sampler_; }
 
@@ -69,6 +73,17 @@ class EnvironmentSystem {
     // Kept for callers that tracked the atlas layout; the RHI backend derives
     // image layouts from the binding type, so this is no longer consumed.
     ResourceState layout = ResourceState::kShaderReadFragment;
+  };
+
+  // RCGI world irradiance cascades for the inline reflection bounce (env slots
+  // 36-40). Null -> placeholders (kFrameRcgi stays clear, never sampled). The
+  // atlases are storage-written each frame and stay in GENERAL.
+  struct RcgiWorldBinding {
+    TextureView irradiance;
+    TextureView visibility;
+    const GpuBuffer* globals = nullptr;
+    const GpuBuffer* probe_meta = nullptr;
+    const GpuBuffer* interior_vols = nullptr;
   };
 
   // Fills a freshly allocated set 2. Null ao view, ddgi binding, shadow view or
@@ -97,7 +112,8 @@ class EnvironmentSystem {
                    const GpuBuffer& water_field_params = {},
                    TextureView shore_wetness = {},
                    TextureView caustics = {},
-                   TextureView rcgi_irradiance = {}) const;
+                   TextureView rcgi_irradiance = {},
+                   const RcgiWorldBinding* rcgi_world = nullptr) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}

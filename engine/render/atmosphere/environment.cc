@@ -283,6 +283,15 @@ bool EnvironmentSystem::CreatePipelines() {
   // screen-space; the forward pass adds it when kFrameFlagRcgi is set). Black
   // when RCGI is off.
   env_desc.slots.push_back({35, BindingType::kCombinedTextureSampler});
+  // 36-40: RCGI world irradiance cascades for the inline reflection bounce
+  // (mesh_rt TraceReflection when NRD reflections are unavailable). 36 globals
+  // UBO, 37 irradiance atlas, 38 visibility atlas, 39 probe-relocation metadata,
+  // 40 interior volumes. Placeholders when RCGI is off.
+  env_desc.slots.push_back({36, BindingType::kUniformBuffer});
+  env_desc.slots.push_back({37, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({38, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({39, BindingType::kStorageBuffer});
+  env_desc.slots.push_back({40, BindingType::kStorageBuffer});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -458,7 +467,8 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     TextureView water_field_ring1,
                                     const GpuBuffer& water_field_params,
                                     TextureView shore_wetness, TextureView caustics,
-                                    TextureView rcgi_irradiance) const {
+                                    TextureView rcgi_irradiance,
+                                    const RcgiWorldBinding* rcgi_world) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -530,7 +540,29 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                 : Bind::Combined(34, black_.view, wrap_sampler_),
        // RCGI resolved irradiance is a transient the frame graph moves to
        // shader-read for the scene pass; black (no indirect) when off.
-       Bind::Combined(35, rcgi_irradiance ? rcgi_irradiance : black_.view, sampler_)});
+       Bind::Combined(35, rcgi_irradiance ? rcgi_irradiance : black_.view, sampler_),
+       // RCGI world cascades for the inline reflection bounce. The live atlases
+       // are storage-written and stay in GENERAL; placeholders (dummy UBO/SB,
+       // black atlas) when RCGI is off keep the descriptor set complete.
+       Bind::Uniform(36, rcgi_world && rcgi_world->globals ? *rcgi_world->globals : dummy_volume_,
+                     0, rcgi_world && rcgi_world->globals ? rcgi_world->globals->size : 256),
+       rcgi_world && rcgi_world->irradiance
+           ? InGeneral(Bind::Combined(37, rcgi_world->irradiance, sampler_))
+           : Bind::Combined(37, black_.view, sampler_),
+       rcgi_world && rcgi_world->visibility
+           ? InGeneral(Bind::Combined(38, rcgi_world->visibility, sampler_))
+           : Bind::Combined(38, black_.view, sampler_),
+       Bind::StorageBuffer(39,
+                           rcgi_world && rcgi_world->probe_meta ? *rcgi_world->probe_meta
+                                                                : dummy_storage_,
+                           0, rcgi_world && rcgi_world->probe_meta ? rcgi_world->probe_meta->size
+                                                                   : 256),
+       Bind::StorageBuffer(40,
+                           rcgi_world && rcgi_world->interior_vols ? *rcgi_world->interior_vols
+                                                                   : dummy_storage_,
+                           0, rcgi_world && rcgi_world->interior_vols
+                                  ? rcgi_world->interior_vols->size
+                                  : 256)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

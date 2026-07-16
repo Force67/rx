@@ -35,6 +35,11 @@ class InstanceStore {
     f32 lod_scale = 1;
     bool cullable = false;
     u32 generation = 1;
+    // Bumps on every in-place Replace (transforms changed). Generation stays
+    // stable so outstanding handles keep resolving, so consumers that cache
+    // per-group results keyed on transforms (the RT instance culler) watch this
+    // instead. Distinct from `generation`, which only changes on Destroy/reuse.
+    u32 revision = 0;
     bool alive = false;
     bool has_submitted_state = false;
   };

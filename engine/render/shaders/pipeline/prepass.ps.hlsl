@@ -29,6 +29,11 @@ struct MaterialParams {
 static const uint kFlagAlphaMask = 1u;
 static const uint kFlagHasNormalMap = 2u;
 static const uint kFlagTerrain = 4u;  // mr slot holds a land layer, not m/r
+static const uint kFlagWind = 8u;     // vertex wind sway (foliage/cloth) -> vegetation class
+static const uint kFlagSkin = 64u;    // screen-space sss (skinned characters) -> character class
+static const uint kFlagHair = 128u;   // kajiya-kay strands (characters) -> character class
+
+#include "gi/material_class.hlsli"
 
 struct PsIn {
   float4 sv_position : SV_Position;
@@ -80,8 +85,19 @@ PsOut main(PsIn input) {
                                     .Sample(metallic_roughness_sampler, input.uv).g *
                                     material.roughness_factor,
                                 0.045, 1.0);
+  // Material class for the RCGI/reflection denoiser masks (AC Shadows item 22):
+  // wind-swayed foliage and skinned characters carry noisy indirect light that
+  // must not bleed onto opaque neighbours during spatial filtering. Packed into
+  // the otherwise-unused normal .a channel; decoded by rcgi_denoise /
+  // rcgi_upscale / reflection_upscale (and forwarded to NRD's material id).
+  float mat_class = kMatClassOpaque;
+  if ((material.flags & kFlagWind) != 0u) {
+    mat_class = kMatClassVegetation;
+  } else if ((material.flags & (kFlagSkin | kFlagHair)) != 0u) {
+    mat_class = kMatClassCharacter;
+  }
   PsOut output;
-  output.normal = float4(OctEncode(n), roughness, 0.0);
+  output.normal = float4(OctEncode(n), roughness, mat_class);
   float2 curr = input.curr_clip.xy / input.curr_clip.w;
   float2 prev = input.prev_clip.xy / input.prev_clip.w;
   output.motion = (prev - curr) * 0.5;

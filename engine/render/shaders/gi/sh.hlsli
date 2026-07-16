@@ -43,6 +43,16 @@ void ShProjectAdd(inout Sh2 sh, float3 dir, float3 radiance, float weight) {
   sh.b += basis * radiance.b;
 }
 
+// Evaluate the raw (non-cosine-convolved) radiance the SH reconstructs along a
+// direction. Unlike ShIrradiance this is the incident radiance L(dir), used by
+// the specular ray-skip path (AC Shadows: reuse the diffuse SH for rough /
+// off-mirror reflection rays instead of tracing). Low-order SH rings, so the
+// caller should clamp the result to non-negative.
+float3 ShEvaluate(Sh2 sh, float3 dir) {
+  float4 basis = ShBasis(dir);
+  return float3(dot(sh.r, basis), dot(sh.g, basis), dot(sh.b, basis));
+}
+
 // Evaluate the cosine-convolved irradiance for a surface normal. Returns the
 // Lambert-ready irradiance (already divided by pi).
 float3 ShIrradiance(Sh2 sh, float3 n) {

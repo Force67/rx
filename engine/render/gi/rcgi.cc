@@ -1,5 +1,6 @@
 #include "render/gi/rcgi.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -15,6 +16,7 @@
 #include "shaders/rcgi_denoise_cs_hlsl.h"
 #include "shaders/rcgi_gather_cs_hlsl.h"
 #include "shaders/rcgi_history_cs_hlsl.h"
+#include "shaders/rcgi_probe_meta_cs_hlsl.h"
 #include "shaders/rcgi_probe_trace_cs_hlsl.h"
 #include "shaders/rcgi_probe_trace_sw_cs_hlsl.h"
 #include "shaders/rcgi_resolve_cs_hlsl.h"
@@ -25,6 +27,10 @@ namespace {
 
 constexpr u32 kProbeCount =
     RcgiSystem::kProbesPerAxis * RcgiSystem::kProbesPerAxis * RcgiSystem::kProbesPerAxis;
+// Per-probe relocation metadata (item 10): uint2 per (cascade, probe).
+constexpr u32 kProbeMetaCount = kProbeCount * RcgiSystem::kCascades;
+// Interior-volume UBO/SSBO: two float4 (min, max) per volume (item 9b).
+constexpr u32 kInteriorVolFloat4s = kMaxInteriorVolumes * 2;
 constexpr u32 kAtlasStride = RcgiSystem::kIrradianceTexels + 2;  // == visibility stride
 constexpr u32 kAtlasWidth =
     kAtlasStride * RcgiSystem::kProbesPerAxis * RcgiSystem::kProbesPerAxis;
@@ -45,6 +51,11 @@ struct BorderPush {
   u32 probes_x;
   u32 probes_y;
   u32 y_base;
+};
+struct MetaPush {
+  f32 rotation[12];  // three float4 rows (same as the trace, to recompute dirs)
+  u32 reset;
+  u32 pad[3];
 };
 struct ResolvePush {
   f32 inv_view_proj[16];
@@ -181,6 +192,25 @@ bool RcgiSystem::CreateResources() {
       device_.CreateBuffer(4 * sizeof(u32), kBufferUsageStorage | kBufferUsageIndirect);
   if (!state_ || !radiance_ || !active_list_ || !active_meta_ || !dispatch_args_) return false;
 
+  // Per-probe relocation metadata. FillBuffer-cleared on reset, so needs
+  // TRANSFER_DST; zeroed now so an unrelocated read is a no-op (offset 0, not
+  // disabled) even before the meta pass first runs.
+  probe_meta_ = device_.CreateBuffer(static_cast<u64>(kProbeMetaCount) * 2 * sizeof(u32),
+                                     kBufferUsageStorage | kBufferUsageTransferDst);
+  // Interior volumes: host-visible, updated by SetInteriorVolumes. Zeroed so a
+  // stale slot never classifies as inside before the game forwards volumes.
+  for (GpuBuffer& volumes : interior_volumes_) {
+    volumes = device_.CreateBuffer(static_cast<u64>(kInteriorVolFloat4s) * 4 * sizeof(f32),
+                                   kBufferUsageStorage, true);
+    if (!volumes.mapped) return false;
+    std::memset(volumes.mapped, 0,
+                static_cast<size_t>(kInteriorVolFloat4s) * 4 * sizeof(f32));
+  }
+  if (!probe_meta_) return false;
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    cmd.FillBuffer(probe_meta_, 0, probe_meta_.size, 0);
+  });
+
   for (GpuBuffer& b : globals_buffers_) {
     b = device_.CreateBuffer(sizeof(RcgiGlobals), kBufferUsageUniform, true);
     if (!b.mapped) return false;
@@ -206,7 +236,8 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {3, BindingType::kStorageBuffer},
                           {4, BindingType::kStorageBuffer},
                           {5, BindingType::kStorageBuffer},
-                          {6, BindingType::kCombinedTextureSampler}}},
+                          {6, BindingType::kCombinedTextureSampler},
+                          {7, BindingType::kStorageBuffer}}},
                kSdfSet},
       .push_constant_size = sizeof(RotationPush),
       .debug_name = "rcgi_probe_trace_sw",
@@ -225,7 +256,9 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {8, BindingType::kStorageBuffer},
                           {9, BindingType::kUniformBuffer},
                           {10, BindingType::kCombinedTextureSampler},
-                          {11, BindingType::kCombinedTextureSampler}}},
+                          {11, BindingType::kCombinedTextureSampler},
+                          {12, BindingType::kStorageBuffer},
+                          {13, BindingType::kStorageBuffer}}},
                kSdfSet},
       .push_constant_size = 0,
       .debug_name = "rcgi_cache_shade_sw",
@@ -244,7 +277,8 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {3, BindingType::kStorageBuffer},
                           {4, BindingType::kStorageBuffer},
                           {5, BindingType::kStorageBuffer},
-                          {6, BindingType::kCombinedTextureSampler}}},
+                          {6, BindingType::kCombinedTextureSampler},
+                          {7, BindingType::kStorageBuffer}}},
                {.shared = bindless_->set_layout()}},
       .push_constant_size = sizeof(RotationPush),
       .debug_name = "rcgi_probe_trace",
@@ -271,7 +305,9 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {8, BindingType::kStorageBuffer},
                           {9, BindingType::kUniformBuffer},
                           {10, BindingType::kCombinedTextureSampler},
-                          {11, BindingType::kCombinedTextureSampler}}},
+                          {11, BindingType::kCombinedTextureSampler},
+                          {12, BindingType::kStorageBuffer},
+                          {13, BindingType::kStorageBuffer}}},
                {.shared = bindless_->set_layout()}},
       .push_constant_size = 0,
       .debug_name = "rcgi_cache_shade",
@@ -283,9 +319,20 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kUniformBuffer},
                           {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer}}}},
+                          {4, BindingType::kStorageBuffer},
+                          {5, BindingType::kStorageBuffer},
+                          {6, BindingType::kCombinedTextureSampler}}}},  // sky (cache-miss fallback)
       .push_constant_size = sizeof(BlendPush),
       .debug_name = "rcgi_blend",
+  });
+  // Per-probe relocation (item 10): reads this frame's rays, writes probe_meta.
+  probe_meta_pipeline_ = device_.CreateComputePipeline({
+      .shader = RX_SHADER(k_rcgi_probe_meta_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kStorageImage},
+                          {1, BindingType::kUniformBuffer},
+                          {2, BindingType::kStorageBuffer}}}},
+      .push_constant_size = sizeof(MetaPush),
+      .debug_name = "rcgi_probe_meta",
   });
   border_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_border_cs_hlsl),
@@ -300,7 +347,9 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kUniformBuffer},
                           {4, BindingType::kCombinedTextureSampler},
-                          {5, BindingType::kCombinedTextureSampler}}}},
+                          {5, BindingType::kCombinedTextureSampler},
+                          {6, BindingType::kStorageBuffer},
+                          {7, BindingType::kStorageBuffer}}}},
       .push_constant_size = sizeof(ResolvePush),
       .debug_name = "rcgi_resolve",
   });
@@ -324,7 +373,9 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {11, BindingType::kCombinedTextureSampler},
                           {12, BindingType::kCombinedTextureSampler},
                           {13, BindingType::kCombinedTextureSampler},
-                          {14, BindingType::kCombinedTextureSampler}}}},
+                          {14, BindingType::kCombinedTextureSampler},
+                          {15, BindingType::kStorageBuffer},
+                          {16, BindingType::kStorageBuffer}}}},
       .push_constant_size = sizeof(GatherPush),
       .debug_name = "rcgi_gather",
   });
@@ -366,7 +417,8 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
       .debug_name = "rcgi_history",
   });
   }  // rt_available (gather chain)
-  bool shared_ok = args_pipeline_ && blend_pipeline_ && border_pipeline_ && resolve_pipeline_;
+  bool shared_ok = args_pipeline_ && blend_pipeline_ && border_pipeline_ && resolve_pipeline_ &&
+                   probe_meta_pipeline_;
   bool hw_ok = !rt_available || (probe_trace_pipeline_ && cache_shade_pipeline_ &&
                                  gather_pipeline_ && denoise_pipeline_ && upscale_pipeline_ &&
                                  history_pipeline_);
@@ -431,8 +483,8 @@ bool RcgiSystem::EnsureScreenResources(Extent2D extent) {
 void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u32 tlas_slot,
                             const LightGrid& light_grid, const GpuBuffer& lights,
                             const Vec3& camera, const Vec3& sun_direction, f32 sun_intensity,
-                            const Vec3& sun_color, u32 frame_index, bool async,
-                            const SdfClipmap* sdf) {
+                            const Vec3& sun_color, u32 frame_index, const FrameConfig& config,
+                            bool async, const SdfClipmap* sdf) {
   // A camera teleport (bigger than cascade 0's extent) invalidates the whole
   // world cache; zero it before this frame's inserts.
   f32 jump = std::sqrt((camera.x - last_camera_.x) * (camera.x - last_camera_.x) +
@@ -445,6 +497,26 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
     for (u32 c = 0; c < kCascades; ++c) cascade_valid_[c] = false;
   }
   last_camera_ = camera;
+
+  Vec3 sun = Normalize(sun_direction);
+  RcgiHistoryLighting history_lighting{.authored_interior = config.authored_interior,
+                                       .interior_miss = config.interior,
+                                       .interior_ambient = config.interior_ambient,
+                                       .sun_direction = sun,
+                                       .sun_intensity = sun_intensity,
+                                       .sun_color = sun_color};
+  // Authored interior lighting changes discontinuously at cell boundaries. The
+  // raw mode remains part of the key even when RX_RCGI_INTERIOR disables the
+  // miss/classification shader path.
+  if (have_history_lighting_ &&
+      ShouldInvalidateRcgiHistory(last_history_lighting_, history_lighting)) {
+    clear_hash_ = true;
+    for (u32 c = 0; c < kCascades; ++c) cascade_valid_[c] = false;
+    screen_history_valid_ = false;
+    screen_reset_ = true;
+  }
+  last_history_lighting_ = history_lighting;
+  have_history_lighting_ = true;
 
   if (!history_valid_) {
     for (u32 c = 0; c < kCascades; ++c) {
@@ -464,7 +536,6 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                new_origin.z != blended_origin_[current].z;
   blended_origin_[current] = new_origin;
   history_valid_ = true;
-  cascade_valid_[current] = true;  // blended this frame -> valid from here on
 
   f32 current_spacing = kBaseSpacing * static_cast<f32>(1u << current);
 
@@ -480,7 +551,6 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
   g.camera_pos[1] = camera.y;
   g.camera_pos[2] = camera.z;
   g.camera_pos[3] = kLodDistance;
-  Vec3 sun = Normalize(sun_direction);
   g.sun_direction[0] = sun.x;
   g.sun_direction[1] = sun.y;
   g.sun_direction[2] = sun.z;
@@ -501,19 +571,35 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
   g.params[1] = settings_.hysteresis;
   g.params[2] = settings_.energy_scale;
   g.params[3] = kBaseCell;
-  // Per-cascade validity mask consumed by the bounce/resolve/gather sampling
-  // (RcgiCascadeValid): a cascade contributes only once blended at least once.
-  // The current cascade is included here (it blends this frame); its pre-blend
-  // reads in the same frame land on the black-cleared atlas, so 0, not garbage.
-  u32 valid_mask = 0;
+  // Cache shade runs before this frame's blend. A reset cascade must therefore
+  // stay out of its bounce mask until the new rays overwrite the stale slab.
+  u32 previous_valid_mask = 0;
   for (u32 c = 0; c < kCascades; ++c)
-    if (cascade_valid_[c]) valid_mask |= (1u << c);
-  g.valid[0] = valid_mask;
-  g.valid[1] = 0;
+    if (cascade_valid_[c]) previous_valid_mask |= (1u << c);
+  RcgiCascadeValidity validity =
+      ComputeRcgiCascadeValidity(previous_valid_mask, current, reset);
+  g.valid[0] = validity.after_blend;
+  g.valid[1] = validity.before_blend;
   g.valid[2] = 0;
   g.valid[3] = 0;
-  GpuBuffer& globals = globals_buffers_[frame_index % 2];
-  std::memcpy(globals.mapped, &g, sizeof(g));
+  cascade_valid_[current] = true;  // the blend recorded below primes future frames
+  // Phase 3 leak/occlusion hardening state. Classification is only meaningful
+  // with volumes present; fold that into the flag so the shaders can early-out.
+  const bool classify = config.classify && interior_volume_count_ > 0;
+  u32 gi_bits = 0;
+  if (config.interior) gi_bits |= 1u;   // kRcgiFlagInterior
+  if (config.relocate) gi_bits |= 2u;   // kRcgiFlagRelocate
+  if (config.probe_ao) gi_bits |= 4u;   // kRcgiFlagProbeAo
+  if (classify) gi_bits |= 8u;          // kRcgiFlagClassify
+  g.interior[0] = config.interior_ambient.x;
+  g.interior[1] = config.interior_ambient.y;
+  g.interior[2] = config.interior_ambient.z;
+  g.interior[3] = config.probe_ao_scale;
+  g.gi_flags[0] = gi_bits;
+  g.gi_flags[1] = interior_volume_count_;
+  std::memcpy(&g.gi_flags[2], &config.probe_ao_bias, sizeof(f32));
+  g.gi_flags[3] = 0;
+  std::memcpy(globals_buffers_[frame_index % 2].mapped, &g, sizeof(g));
 
   RotationPush trace_push{};
   FrameRotation(frame_index, trace_push.rotation);
@@ -522,10 +608,12 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
   clear_hash_ = false;
 
   const bool software = sdf != nullptr;
+  const bool relocate = config.relocate;
+  const GpuBuffer interior_volumes = interior_volumes_[frame_index % 2];
   graph.AddPass(
       "rcgi", [async](RenderGraph::PassBuilder& b) { if (async) b.Async(); },
       [this, raytracing, tlas_slot, &light_grid, &lights, trace_push, frame_index, current, reset,
-       do_clear, software, sdf](PassContext& ctx) {
+       do_clear, software, sdf, relocate, interior_volumes](PassContext& ctx) {
         const GpuBuffer& globals = globals_buffers_[frame_index % 2];
         // Software mode binds the SDF clipmap resources into set 1 for both the
         // probe trace and cache shade sw variants (mirrors sdf_debug's wiring).
@@ -548,7 +636,9 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
               Transition(rays_, ResourceState::kUndefined, ResourceState::kGeneral)};
           ctx.cmd->TextureBarriers(barriers);
         } else {
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeRead, BarrierScope::kComputeWrite);
+          // Persistent world resources can be sampled by both compute gathers
+          // and forward fragment shaders in the preceding frame.
+          ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeWrite);
         }
 
         // Zero the hash on first frame / teleport (garbage keys = false hits).
@@ -563,6 +653,17 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
         ctx.cmd->FillBuffer(active_meta_, 0, active_meta_.size, 0);
         ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeReadWrite);
 
+        // Cascade (re)snapped: its cells now cover different world space, so any
+        // carried relocation offset is meaningless. Zero the current cascade's
+        // slice before the trace reads it (item 10). The trace reads probe_meta
+        // (InterlockedCompareExchange-free, plain load), so a plain compute-read
+        // hazard barrier suffices.
+        const u64 meta_slice = static_cast<u64>(kProbeCount) * 2 * sizeof(u32);
+        if (relocate && reset) {
+          ctx.cmd->FillBuffer(probe_meta_, current * meta_slice, meta_slice, 0);
+          ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeRead);
+        }
+
         // Probe trace: register hits into the cache, sky into the rays buffer.
         // Software mode sphere-traces the SDF clipmap (no TLAS, no bindless).
         if (software) {
@@ -572,7 +673,8 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                   Bind::StorageBuffer(3, state_, 0, state_.size),
                   Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
                   Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
-                  Bind::Combined(6, sky_view_, sky_sampler_)});
+                  Bind::Combined(6, sky_view_, sky_sampler_),
+                  Bind::StorageBuffer(7, probe_meta_, 0, probe_meta_.size)});
           bind_sdf(1);
         } else {
           ctx.cmd->BindPipeline(probe_trace_pipeline_);
@@ -582,7 +684,8 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                   Bind::StorageBuffer(3, state_, 0, state_.size),
                   Bind::StorageBuffer(4, active_list_, 0, active_list_.size),
                   Bind::StorageBuffer(5, active_meta_, 0, active_meta_.size),
-                  Bind::Combined(6, sky_view_, sky_sampler_)});
+                  Bind::Combined(6, sky_view_, sky_sampler_),
+                  Bind::StorageBuffer(7, probe_meta_, 0, probe_meta_.size)});
           ctx.cmd->BindSet(1, bindless_->set());
         }
         ctx.cmd->Push(trace_push);
@@ -615,7 +718,9 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                   Bind::Uniform(9, light_grid.params_buffer(frame_index), 0,
                                 LightGrid::params_size()),
                   InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
-                  InGeneral(Bind::Combined(11, visibility_.view, sampler_))});
+                  InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
+                  Bind::StorageBuffer(12, probe_meta_, 0, probe_meta_.size),
+                  Bind::StorageBuffer(13, interior_volumes, 0, interior_volumes.size)});
           bind_sdf(1);
         } else {
           ctx.cmd->BindPipeline(cache_shade_pipeline_);
@@ -633,7 +738,9 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                   Bind::Uniform(9, light_grid.params_buffer(frame_index), 0,
                                 LightGrid::params_size()),
                   InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
-                  InGeneral(Bind::Combined(11, visibility_.view, sampler_))});
+                  InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
+                  Bind::StorageBuffer(12, probe_meta_, 0, probe_meta_.size),
+                  Bind::StorageBuffer(13, interior_volumes, 0, interior_volumes.size)});
           ctx.cmd->BindSet(1, bindless_->set());
         }
         ctx.cmd->DispatchIndirect(dispatch_args_, 0);
@@ -651,7 +758,9 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                                      InGeneral(Bind::Combined(1, rays_.view, sampler_)),
                                      Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
                                      Bind::StorageBuffer(3, state_, 0, state_.size),
-                                     Bind::StorageBuffer(4, radiance_, 0, radiance_.size)});
+                                     Bind::StorageBuffer(4, radiance_, 0, radiance_.size),
+                                     Bind::StorageBuffer(5, probe_meta_, 0, probe_meta_.size),
+                                     Bind::Combined(6, sky_view_, sky_sampler_)});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch2D({kAtlasWidth, kSlabHeight});
         };
@@ -673,13 +782,52 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
         border(visibility_, kVisibilityTexels);
 
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+
+        // Probe relocation (item 10): read back this frame's rays and refresh the
+        // current cascade's per-probe offset/disable metadata, consumed by next
+        // frame's trace/blend and this frame's downstream irradiance samples.
+        if (relocate) {
+          MetaPush mp{};
+          std::memcpy(mp.rotation, trace_push.rotation, sizeof(mp.rotation));
+          mp.reset = reset ? 1u : 0u;
+          ctx.cmd->BindPipeline(probe_meta_pipeline_);
+          ctx.cmd->BindTransient(0, {Bind::Storage(0, rays_),
+                                     Bind::Uniform(1, globals, 0, sizeof(RcgiGlobals)),
+                                     Bind::StorageBuffer(2, probe_meta_, 0, probe_meta_.size)});
+          ctx.cmd->Push(mp);
+          ctx.cmd->Dispatch((kProbeCount + 63) / 64, 1, 1);
+          ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
+        }
+        // Inline reflection hit shading samples these persistent resources from
+        // the forward fragment shader later in this frame.
+        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
       });
+}
+
+void RcgiSystem::SetInteriorVolumes(std::span<const InteriorVolume> volumes, u32 frame_index) {
+  u32 count = static_cast<u32>(std::min<size_t>(volumes.size(), kMaxInteriorVolumes));
+  interior_volume_count_ = count;
+  GpuBuffer& buffer = interior_volumes_[frame_index % 2];
+  if (!buffer.mapped) return;
+  // Layout: two float4 per volume (min.xyz, max.xyz); w padding unused.
+  f32* dst = static_cast<f32*>(buffer.mapped);
+  for (u32 i = 0; i < count; ++i) {
+    dst[i * 8 + 0] = volumes[i].min.x;
+    dst[i * 8 + 1] = volumes[i].min.y;
+    dst[i * 8 + 2] = volumes[i].min.z;
+    dst[i * 8 + 3] = 0.0f;
+    dst[i * 8 + 4] = volumes[i].max.x;
+    dst[i * 8 + 5] = volumes[i].max.y;
+    dst[i * 8 + 6] = volumes[i].max.z;
+    dst[i * 8 + 7] = 0.0f;
+  }
 }
 
 ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle depth_export,
                                           ResourceHandle normals, Extent2D extent,
                                           const Mat4& inv_view_proj, const Vec3& camera,
                                           f32 intensity, u32 frame_index) {
+  denoised_sh_valid_ = false;  // probes-only path produces no SH for the ray-skip
   ResourceHandle out = graph.CreateTexture({.name = "rcgi_irradiance",
                                             .format = Format::kRGBA16Float,
                                             .width = extent.width,
@@ -709,7 +857,10 @@ ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle dep
                 Bind::Sampled(2, ctx.graph->image(normals)),
                 Bind::Uniform(3, globals, 0, sizeof(RcgiGlobals)),
                 InGeneral(Bind::Combined(4, irradiance_.view, sampler_)),
-                InGeneral(Bind::Combined(5, visibility_.view, sampler_))});
+                InGeneral(Bind::Combined(5, visibility_.view, sampler_)),
+                Bind::StorageBuffer(6, probe_meta_, 0, probe_meta_.size),
+                Bind::StorageBuffer(7, interior_volumes_[frame_index % 2], 0,
+                                    interior_volumes_[frame_index % 2].size)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(out_img.extent);
       });
@@ -722,8 +873,14 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
                                           Extent2D extent, const Mat4& inv_view_proj,
                                           const Mat4& prev_view_proj, const Vec3& camera,
                                           f32 intensity, u32 frame_index, bool reset) {
-  Extent2D gather{(extent.width + kGatherDivisor - 1) / kGatherDivisor,
-                  (extent.height + kGatherDivisor - 1) / kGatherDivisor};
+  const u32 divisor = gather_divisor_;  // 2 half (default), 4 quarter (RX_RCGI_GATHER_SCALE)
+  Extent2D gather{(extent.width + divisor - 1) / divisor,
+                  (extent.height + divisor - 1) / divisor};
+  // Quarter-res carries ~4x fewer rays per full-res pixel, so the spatial filter
+  // needs a wider footprint to avoid splotching; scale the separable radius with
+  // the divisor (half=5, quarter=9). The gaussian sigma tracks the radius, so it
+  // stays a proper low-pass rather than a boxier blur.
+  const u32 denoise_radius = divisor >= 4u ? 9u : 5u;
   reset = reset || screen_reset_;  // freshly (re)created history must not be read
   screen_reset_ = false;
   bool screen_valid = screen_history_valid_ && !reset;
@@ -794,7 +951,10 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
                 InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
                 Bind::Combined(12, sky_view_, sky_sampler_),
                 Bind::Combined(13, ctx.graph->image(screen_color).view, linear_sampler_),
-                Bind::Combined(14, ctx.graph->image(screen_depth).view, sampler_)});
+                Bind::Combined(14, ctx.graph->image(screen_depth).view, sampler_),
+                Bind::StorageBuffer(15, probe_meta_, 0, probe_meta_.size),
+                Bind::StorageBuffer(16, interior_volumes_[frame_index % 2], 0,
+                                    interior_volumes_[frame_index % 2].size)});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(gather);
       });
@@ -811,11 +971,13 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
             pb.Read(h, ResourceUsage::kSampledCompute);
         },
         [this, in_r, in_g, in_b, out_r, out_g, out_b, hitt, depth_export, normals, gather, extent,
-         dx, dy, near_plane](PassContext& ctx) {
+         dx, dy, near_plane, denoise_radius](PassContext& ctx) {
           DenoisePush p{};
           p.dims[0] = extent.width; p.dims[1] = extent.height;
           p.dims[2] = gather.width; p.dims[3] = gather.height;
-          p.misc[0] = static_cast<u32>(dx); p.misc[1] = static_cast<u32>(dy); p.misc[2] = 5u;
+          p.misc[0] = static_cast<u32>(dx); p.misc[1] = static_cast<u32>(dy);
+          p.misc[2] = denoise_radius;
+          p.misc[3] = denoise_mask_ ? 1u : 0u;  // item 22a: cross-class rejection
           p.params[0] = near_plane;
           ctx.cmd->BindPipeline(denoise_pipeline_);
           ctx.cmd->BindTransient(
@@ -854,6 +1016,7 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
         p.params[2] = 48.0f;  // temporal history cap (GI is low-freq; stability > lag)
         p.params[3] = reset ? 1.0f : 0.0f;
         p.misc[0] = frame_index;
+        p.misc[1] = denoise_mask_ ? 1u : 0u;  // item 22b: vegetation disocclusion handling
         ctx.cmd->BindPipeline(upscale_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(out)),
@@ -871,6 +1034,13 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
 
   // Next frame's gather may trust the screen cache once this frame fills it.
   screen_history_valid_ = true;
+  // Expose the final denoised SH (the vertical pass wrote it back into A) to the
+  // specular ray-skip; these transient handles are valid for this graph only.
+  denoised_sh_[0] = a_r;
+  denoised_sh_[1] = a_g;
+  denoised_sh_[2] = a_b;
+  denoised_sh_extent_ = gather;
+  denoised_sh_valid_ = true;
   return out;
 }
 
@@ -907,8 +1077,9 @@ RcgiSystem::~RcgiSystem() {
   DestroyScreenResources();
   for (PipelineHandle* p : {&probe_trace_pipeline_, &probe_trace_sw_pipeline_, &args_pipeline_,
                             &cache_shade_pipeline_, &cache_shade_sw_pipeline_, &blend_pipeline_,
-                            &border_pipeline_, &resolve_pipeline_, &gather_pipeline_,
-                            &denoise_pipeline_, &upscale_pipeline_, &history_pipeline_}) {
+                            &border_pipeline_, &probe_meta_pipeline_, &resolve_pipeline_,
+                            &gather_pipeline_, &denoise_pipeline_, &upscale_pipeline_,
+                            &history_pipeline_}) {
     if (*p) device_.DestroyPipeline(*p);
     *p = {};
   }
@@ -920,6 +1091,8 @@ RcgiSystem::~RcgiSystem() {
   device_.DestroyBuffer(active_list_);
   device_.DestroyBuffer(active_meta_);
   device_.DestroyBuffer(dispatch_args_);
+  device_.DestroyBuffer(probe_meta_);
+  for (GpuBuffer& volumes : interior_volumes_) device_.DestroyBuffer(volumes);
   for (GpuBuffer& b : globals_buffers_) device_.DestroyBuffer(b);
 }
 

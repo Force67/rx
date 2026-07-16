@@ -127,8 +127,14 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.sun_angular_radius = Degrees(0.5f);
       s.rtao = true;
       s.ao_rays = 4;
+      // High/ultra ship RCGI (idTech8-style radiance-cached GI, the AC-Shadows
+      // adoption) as the indirect-diffuse GI; ddgi stays enabled as the
+      // automatic fallback when rcgi is unavailable (no ray query / creation
+      // failed -- the renderer's rcgi_active predicate gates which one runs).
+      // Measured gather chain ~1.2-1.4 ms on GB10, within this tier's budget.
       s.ddgi = true;
       s.ddgi_spacing = 1.0f;
+      s.rcgi = true;
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.6f;
       s.water_reflections = true;
@@ -145,8 +151,9 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       s.sun_angular_radius = Degrees(0.5f);
       s.rtao = true;
       s.ao_rays = 6;
-      s.ddgi = true;
+      s.ddgi = true;  // fallback GI when rcgi is unavailable (see kHigh note)
       s.ddgi_spacing = 1.0f;
+      s.rcgi = true;  // radiance-cached GI is the ultra-tier indirect diffuse
       s.rt_reflections = true;
       s.reflection_roughness_cutoff = 0.85f;
       s.water_reflections = true;
@@ -167,6 +174,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
     s.rt_shadows = false;
     s.rtao = false;
     s.ddgi = false;
+    s.rcgi = false;  // needs ray query (or a startup-seeded SDF software path)
     s.rt_reflections = false;
     s.water_reflections = false;
     s.fog = false;

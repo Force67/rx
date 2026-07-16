@@ -28,6 +28,8 @@
 [[vk::binding(5, 0)]] RWStructuredBuffer<uint> active_meta : register(u5, space0);
 [[vk::combinedImageSampler]] [[vk::binding(6, 0)]] TextureCube sky : register(t6, space0);
 [[vk::combinedImageSampler]] [[vk::binding(6, 0)]] SamplerState sky_sampler : register(s6, space0);
+// Per-probe relocation metadata (read-only here; refreshed by rcgi_probe_meta).
+[[vk::binding(7, 0)]] StructuredBuffer<uint2> probe_meta : register(t7, space0);
 
 #ifndef RCGI_TRACE_SDF
 // Bindless scene tables (set 1) - just enough to fetch the hit normal.
@@ -112,7 +114,10 @@ void main(uint3 id : SV_DispatchThreadID) {
   uint cascade = rcgi.misc.x;
   uint frame = rcgi.misc.y;
   uint3 probe = RcgiProbeFromIndex(id.y);
-  float3 origin = RcgiProbePosition(rcgi, cascade, probe);
+  // Trace from the relocated probe position (item 10): moved out of nearby
+  // geometry so fewer rays start inside a wall. The blend reconstructs hit_pos
+  // from the same relocated origin, so the cache keys line up.
+  float3 origin = RcgiProbePositionMeta(rcgi, probe_meta, cascade, probe);
   float3 fib = RcgiFibonacci(id.x, ray_count);
   float3 dir = normalize(float3(dot(push.rotation_x.xyz, fib), dot(push.rotation_y.xyz, fib),
                                 dot(push.rotation_z.xyz, fib)));
@@ -125,7 +130,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   SdfHit sh = TraceGlobalSdf(origin, dir, rcgi.params.x, sdf.clip_origin[0].w, sdf, sdf_distance,
                              sdf_albedo, sdf_emissive, sdf_sampler);
   if (sh.miss) {
-    float3 sky_rad = sky.SampleLevel(sky_sampler, dir, 0).rgb;
+    float3 sky_rad = RcgiSkyMiss(rcgi, sky.SampleLevel(sky_sampler, dir, 0).rgb);
     rays_out[id.xy] = float4(sky_rad, -rcgi.params.x);  // miss
     return;
   }
@@ -148,12 +153,14 @@ void main(uint3 id : SV_DispatchThreadID) {
   ray.TMin = 0.0;
   ray.Direction = dir;
   ray.TMax = rcgi.params.x;
-  RayQuery<RAY_FLAG_FORCE_OPAQUE> rq;
-  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
+  // Vegetation: cull real (non-opaque) masked geometry and hit its shrunk
+  // opaque-approximation stand-in (RX_RAY_MASK_APPROX) instead.
+  RayQuery<RAY_FLAG_CULL_NON_OPAQUE> rq;
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_DIFFUSE, ray);
   rq.Proceed();
 
   if (rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
-    float3 sky_rad = sky.SampleLevel(sky_sampler, dir, 0).rgb;
+    float3 sky_rad = RcgiSkyMiss(rcgi, sky.SampleLevel(sky_sampler, dir, 0).rgb);
     rays_out[id.xy] = float4(sky_rad, -rcgi.params.x);  // miss
     return;
   }

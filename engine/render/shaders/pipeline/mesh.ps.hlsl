@@ -1032,7 +1032,14 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     ambient = (fss_ess * radiance + (fms_ems + k_d) * irradiance) * frame.camera_position.w;
     g_skin_diffuse += (fms_ems + k_d) * irradiance * frame.camera_position.w * ao;
   } else if ((frame.flags & kFrameInterior) != 0u) {
-    ambient = albedo * frame.interior_ambient.rgb;
+    if ((frame.flags & kFrameRcgi) != 0u) {
+      // RCGI lights the interior: its ray misses fall back to the interior
+      // ambient (RX_RCGI_INTERIOR), so this carries true indoor bounce instead
+      // of a flat term and no leaked skylight. Replaces the authored ambient.
+      ambient = albedo * rcgi_irradiance.Load(int3(input.sv_position.xy, 0)).rgb;
+    } else {
+      ambient = albedo * frame.interior_ambient.rgb;
+    }
     g_skin_diffuse += ambient * ao;
   } else {
     ambient = albedo * frame.sun_color.w;

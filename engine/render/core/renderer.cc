@@ -72,6 +72,18 @@ base::Option<bool> RcgiProbesOnlyOpt{"rcgi.probes_only", false, "RX_RCGI_PROBES_
 // on non-ray-query devices; on RT hardware this is the A/B toggle vs the TLAS
 // path. Implies the SDF clipmap cost (RX_SDF is auto-enabled when RCGI needs it).
 base::Option<bool> RcgiSwOpt{"rcgi.software", false, "RX_RCGI_SW"};
+// Phase 3 leak/occlusion hardening. All default on; each isolates one fix for
+// A/B (interior ambient miss + volume classify; probe relocation; probe AO).
+base::Option<bool> RcgiInteriorOpt{"rcgi.interior", true, "RX_RCGI_INTERIOR"};
+base::Option<bool> RcgiRelocateOpt{"rcgi.relocate", true, "RX_RCGI_RELOCATE"};
+base::Option<bool> RcgiProbeAoOpt{"rcgi.probe_ao", true, "RX_RCGI_PROBE_AO"};
+// RCGI final-gather resolution scale: 2 = half res (default), 4 = quarter res
+// (opt-in; AC Shadows shipped quarter-res diffuse on consoles). The denoise
+// radius widens automatically at quarter to keep the cornell/interior clean.
+base::Option<int> RcgiGatherScaleOpt{"rcgi.gather_scale", 2, "RX_RCGI_GATHER_SCALE"};
+// Material-ID denoiser mask (item 22): reject cross-class neighbours in the
+// RCGI spatial/temporal filters. On by default; env for A/B.
+base::Option<bool> RcgiDenoiseMaskOpt{"rcgi.denoise_mask", true, "RX_RCGI_DENOISE_MASK"};
 // SDF software-trace infrastructure (S1): mesh SDFs + global SDF clipmap. Off by
 // default; RX_SDF_DEBUG raymarches the clipmap (1 = distance field, 2 = albedo).
 base::Option<bool> SdfOpt{"sdf", false, "RX_SDF"};
@@ -79,6 +91,31 @@ base::Option<int> SdfDebugOpt{"sdf.debug", 0, "RX_SDF_DEBUG"};
 base::Option<float> VgeoError{"vgeo.error", 1.0f, "RX_VGEO_ERROR"};
 // 0 shaded, 1 cluster tint, 2 lod tint, 3 sw/hw raster path.
 base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
+// Alpha-tested vegetation in the rays (AC Shadows opaque-approximation).
+// RX_RT_VEG shrinks each masked mesh's realtime stand-in by its baked average
+// opacity so realtime diffuse GI / AO / shadow rays get correct-on-average
+// foliage occlusion; 0 forces the stand-in to full size (today's force-opaque
+// behavior). RX_RT_VEG_ANYHIT switches specular reflections to a bounded
+// real-alpha any-hit test (the approximation reads wrong in sharp reflections).
+base::Option<bool> RtVegOpt{"rt.veg", true, "RX_RT_VEG"};
+base::Option<bool> RtVegAnyHitOpt{"rt.veg.anyhit", true, "RX_RT_VEG_ANYHIT"};
+// Phase 4 specular reflection quality/perf levers (AC Shadows adoption).
+base::Option<bool> ReflHalfOpt{"refl.half", true, "RX_REFL_HALF"};
+base::Option<bool> ReflShSkipOpt{"refl.sh_skip", true, "RX_REFL_SH_SKIP"};
+base::Option<float> ReflShSkipRough{"refl.sh_skip.rough", 0.45f, "RX_REFL_SH_SKIP_ROUGH"};
+base::Option<bool> ReflFogOpt{"refl.fog", true, "RX_REFL_FOG"};
+// RT scene scalability (AC Shadows §2). RX_RT_CULL drops small distant
+// instances from the realtime TLAS by projected solid angle beyond
+// RX_RT_CULL_START metres, threshold RX_RT_CULL_ANGLE (angular radius). RX_RT_
+// LOD_NEAR keeps LOD0 in the rays within that radius (raster/RT agree in the
+// screen-trace range) and lets distance LODs into the BLAS past it. RX_RT_
+// ASYNC_TLAS builds the per-frame TLAS on the async compute queue. All are
+// realtime-only: the path tracer keeps every instance at LOD0.
+base::Option<bool> RtCullOpt{"rt.cull", true, "RX_RT_CULL"};
+base::Option<float> RtCullAngle{"rt.cull.angle", 0.004f, "RX_RT_CULL_ANGLE"};
+base::Option<float> RtCullStart{"rt.cull.start", 40.0f, "RX_RT_CULL_START"};
+base::Option<float> RtLodNear{"rt.lod.near", 64.0f, "RX_RT_LOD_NEAR"};
+base::Option<bool> RtAsyncTlasOpt{"rt.async.tlas", true, "RX_RT_ASYNC_TLAS"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true, "RX_ADAPTIVE_WATER"};
 base::Option<bool> WaterFieldOpt{"water.field", true, "RX_WATER_FIELD"};
@@ -212,6 +249,48 @@ bool SphereOutsideFrustum(const f32 planes[5][4], const Vec3& c, f32 r) {
   return false;
 }
 
+// Average opacity of an alpha-masked submesh for the vegetation opaque
+// approximation. Samples the material's baked alpha grid at each triangle's
+// three vertices, edge midpoints and centroid (7 points in barycentric UV
+// space -- a cheap stand-in for integrating covered texels over the footprint)
+// and area-weights across the submesh. Returns 1.0 (no shrink, i.e. today's
+// force-opaque behavior) when the alpha was not decoded: opaque texture, a
+// format without a CPU alpha decoder (BC7), or a missing material.
+f32 MaskedSubmeshOpacity(const base::Vector<asset::Vertex>& verts,
+                         const base::Vector<u32>& indices, const GpuSubmesh& sm,
+                         const MaterialSystem::AlphaCoverage* cov) {
+  if (!cov) return 1.0f;
+  auto S = [&](const f32 uv0[2], const f32 uv1[2], const f32 uv2[2], f32 w0, f32 w1, f32 w2) {
+    return cov->Sample(uv0[0] * w0 + uv1[0] * w1 + uv2[0] * w2,
+                       uv0[1] * w0 + uv1[1] * w1 + uv2[1] * w2);
+  };
+  f64 weighted = 0.0, area_sum = 0.0;
+  for (u32 e = 0; e + 3 <= sm.index_count; e += 3) {
+    u32 i0 = indices[sm.index_offset + e], i1 = indices[sm.index_offset + e + 1],
+        i2 = indices[sm.index_offset + e + 2];
+    if (i0 >= verts.size() || i1 >= verts.size() || i2 >= verts.size()) continue;
+    const asset::Vertex& a = verts[i0];
+    const asset::Vertex& b = verts[i1];
+    const asset::Vertex& c = verts[i2];
+    f32 mean_a = (S(a.uv, b.uv, c.uv, 1, 0, 0) + S(a.uv, b.uv, c.uv, 0, 1, 0) +
+                  S(a.uv, b.uv, c.uv, 0, 0, 1) + S(a.uv, b.uv, c.uv, 0.5f, 0.5f, 0) +
+                  S(a.uv, b.uv, c.uv, 0, 0.5f, 0.5f) + S(a.uv, b.uv, c.uv, 0.5f, 0, 0.5f) +
+                  S(a.uv, b.uv, c.uv, 1.f / 3, 1.f / 3, 1.f / 3)) /
+                 7.0f;
+    f32 e1[3] = {b.position[0] - a.position[0], b.position[1] - a.position[1],
+                 b.position[2] - a.position[2]};
+    f32 e2[3] = {c.position[0] - a.position[0], c.position[1] - a.position[1],
+                 c.position[2] - a.position[2]};
+    f32 cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2],
+        cz = e1[0] * e2[1] - e1[1] * e2[0];
+    f32 area = 0.5f * std::sqrt(cx * cx + cy * cy + cz * cz);
+    weighted += static_cast<f64>(mean_a) * area;
+    area_sum += area;
+  }
+  if (area_sum <= 0.0) return cov->mean;
+  return static_cast<f32>(weighted / area_sum);
+}
+
 }  // namespace
 
 Renderer::Renderer() = default;
@@ -293,7 +372,10 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
 
   if (desc.enable_raytracing && device_->caps().raytracing) {
     raytracing_ = RayTracingContext::Create(*device_);
-    raytracing_->Configure(desc.raytracing);
+    if (raytracing_)
+      raytracing_->Configure(desc.raytracing);
+    else
+      RX_WARN("ray tracing disabled: fallback tlas creation failed");
   }
   rt_available_ = raytracing_ && device_->caps().ray_query;
 
@@ -696,6 +778,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (VrsThreshold.overridden()) settings_.vrs_threshold = static_cast<f32>(double(VrsThreshold));
   if (RestirDiOpt.overridden()) settings_.restir_di = RestirDiOpt;
   if (RcgiOpt.overridden()) settings_.rcgi = RcgiOpt;
+  rcgi_env_overridden_ = RcgiOpt.overridden();
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
@@ -1120,6 +1203,10 @@ void Renderer::SetVirtualGeometryInstances(std::span<const Mat4> transforms) {
   vgeo_.SetInstances(transforms);
 }
 
+void Renderer::SetInteriorVolumes(std::span<const InteriorVolume> volumes) {
+  interior_volumes_.assign(volumes.begin(), volumes.end());
+}
+
 void Renderer::SetVirtualGeometryAlbedo(ByteSpan rgba_mips, u32 size, f32 world_to_uv) {
   if (!device_ || device_->is_stub()) return;
   vgeo_.SetAlbedo(*device_, rgba_mips, size, world_to_uv);
@@ -1444,13 +1531,141 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
                                                  static_cast<u32>(geometries.size()));
     if (gpu.bindless_index == BindlessRegistry::kInvalidIndex) gpu.bindless_index = 0;
   }
+  // Distance-LOD ray-tracing geometry (RX_RT_LOD_NEAR). For each extra LOD,
+  // build an index buffer whose values are rebased to absolute indices into the
+  // shared (all-lods-concatenated) vertex buffer, plus a bindless record, so a
+  // TLAS instance can point at a coarser LOD past the near radius. Every
+  // non-blend submesh is force-OPAQUE here: past the LOD switch the opaque-
+  // approximation shrink is imperceptible, so distant masked foliage stays a
+  // solid stand-in (no separate approx variant, matching the RAY_FLAG_CULL_NON_
+  // OPAQUE realtime paths which would otherwise skip non-opaque geometry). The
+  // BLAS is deferred to EnsureLodRtGeometry (first selection); only the cheap
+  // index buffer + record are made here, where the CPU geometry is in hand.
+  if (bindless_ && raytracing_ && !gpu.all_blend && include_rt && !gpu.lods.empty()) {
+    const u32 total_verts = static_cast<u32>(all_verts.size());
+    gpu.lod_rt.resize(gpu.lods.size());
+    for (size_t li = 0; li < gpu.lods.size(); ++li) {
+      const u32 vertex_base = vertex_bases[li + 1];  // vertex_bases[0] = lod0
+      base::Vector<u32> lod_indices;
+      base::Vector<BindlessRegistry::GeometryRecord> lod_geoms;
+      GpuMesh::LodRt& rt = gpu.lod_rt[li];
+      for (const GpuSubmesh& submesh : gpu.lods[li].submeshes) {
+        if (submesh.blend || submesh.index_count == 0) continue;
+        const u32 offset = static_cast<u32>(lod_indices.size());
+        for (u32 e = 0; e < submesh.index_count; ++e)
+          lod_indices.push_back(all_indices[submesh.index_offset + e] + vertex_base);
+        rt.geoms.push_back({offset, submesh.index_count});
+        lod_geoms.push_back({offset, material_system_->bindless_material(submesh.material)});
+      }
+      if (lod_indices.empty()) continue;
+      rt.vertex_count = total_verts;
+      rt.indices = device_->CreateBufferWithData(
+          ByteSpan(reinterpret_cast<const u8*>(lod_indices.data()),
+                   lod_indices.size() * sizeof(u32)),
+          kBufferUsageIndex | kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress |
+              kBufferUsageStorage);
+      if (!rt.indices) {
+        rt.geoms.clear();
+        continue;
+      }
+      rt.bindless = bindless_->RegisterMesh(gpu.vertices, rt.indices, lod_geoms.data(),
+                                            static_cast<u32>(lod_geoms.size()));
+    }
+  }
+  // Opaque-approximation variant for alpha-masked (vegetation) submeshes. Each
+  // masked triangle is duplicated with its own three vertices, shrunk about its
+  // centroid by sqrt(average opacity) so the stand-in's area matches the average
+  // covered fraction, and flagged OPAQUE. Realtime diffuse GI / AO / shadow rays
+  // hit this via kRayMaskApprox and skip the real (non-opaque) masked geometry,
+  // which the path tracer and reflections keep. RX_RT_VEG=0 forces the shrink
+  // factor to 1 (identical to the real triangles), reproducing today's
+  // force-opaque behavior for A/B. Realtime-tlas meshes only (no_rt fill is
+  // path-trace-only and never hits realtime rays).
+  base::Vector<AccelTriangles> approx_accel;
+  if (bindless_ && raytracing_ && material_system_ && !gpu.all_blend && !gpu.no_rt) {
+    const bool veg = RtVegOpt;
+    base::Vector<asset::Vertex> approx_verts;
+    base::Vector<u32> approx_indices;
+    base::Vector<BindlessRegistry::GeometryRecord> approx_geoms;
+    struct ApproxRange {
+      u32 index_offset;
+      u32 index_count;
+    };
+    base::Vector<ApproxRange> approx_ranges;
+    for (const GpuSubmesh& submesh : gpu.submeshes) {
+      if (!submesh.alpha_mask || submesh.blend || submesh.index_count == 0) continue;
+      f32 opacity =
+          veg ? MaskedSubmeshOpacity(all_verts, all_indices, submesh,
+                                     material_system_->material_base_alpha(submesh.material))
+              : 1.0f;
+      const f32 s = std::sqrt(std::clamp(opacity, 0.02f, 1.0f));
+      const u32 base_index = static_cast<u32>(approx_indices.size());
+      for (u32 e = 0; e + 3 <= submesh.index_count; e += 3) {
+        const u32 idx[3] = {all_indices[submesh.index_offset + e],
+                            all_indices[submesh.index_offset + e + 1],
+                            all_indices[submesh.index_offset + e + 2]};
+        if (idx[0] >= all_verts.size() || idx[1] >= all_verts.size() ||
+            idx[2] >= all_verts.size())
+          continue;
+        f32 cen[3] = {0, 0, 0};
+        for (u32 k = 0; k < 3; ++k)
+          for (u32 c = 0; c < 3; ++c) cen[c] += all_verts[idx[k]].position[c] / 3.0f;
+        for (u32 k = 0; k < 3; ++k) {
+          asset::Vertex v = all_verts[idx[k]];  // keep normal/tangent/uv/color for hit shading
+          for (u32 c = 0; c < 3; ++c) v.position[c] = cen[c] + s * (v.position[c] - cen[c]);
+          approx_indices.push_back(static_cast<u32>(approx_verts.size()));
+          approx_verts.push_back(v);
+        }
+      }
+      const u32 count = static_cast<u32>(approx_indices.size()) - base_index;
+      if (count == 0) continue;
+      approx_geoms.push_back({base_index, material_system_->bindless_material(submesh.material)});
+      approx_ranges.push_back({base_index, count});
+    }
+    if (!approx_verts.empty()) {
+      BufferUsageFlags approx_usage =
+          kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress | kBufferUsageStorage;
+      gpu.rt_approx_vertices = device_->CreateBufferWithData(
+          ByteSpan(reinterpret_cast<const u8*>(approx_verts.data()),
+                   approx_verts.size() * sizeof(asset::Vertex)),
+          kBufferUsageVertex | approx_usage);
+      gpu.rt_approx_indices = device_->CreateBufferWithData(
+          ByteSpan(reinterpret_cast<const u8*>(approx_indices.data()),
+                   approx_indices.size() * sizeof(u32)),
+          kBufferUsageIndex | approx_usage);
+      if (gpu.rt_approx_vertices && gpu.rt_approx_indices) {
+        gpu.rt_approx_bindless =
+            bindless_->RegisterMesh(gpu.rt_approx_vertices, gpu.rt_approx_indices,
+                                    approx_geoms.data(), static_cast<u32>(approx_geoms.size()));
+        if (gpu.rt_approx_bindless == BindlessRegistry::kInvalidIndex) gpu.rt_approx_bindless = 0;
+        for (const ApproxRange& r : approx_ranges) {
+          approx_accel.push_back({.vertex_address = gpu.rt_approx_vertices.address,
+                                  .vertex_stride = sizeof(asset::Vertex),
+                                  .vertex_count = static_cast<u32>(approx_verts.size()),
+                                  .vertex_format = Format::kRGB32Float,
+                                  .index_address =
+                                      gpu.rt_approx_indices.address + r.index_offset * sizeof(u32),
+                                  .index_count = r.index_count,
+                                  .index_type = IndexType::kUint32,
+                                  .opaque = true});
+        }
+        gpu.rt_approx = !approx_accel.empty();
+      }
+    }
+  }
   // Re-uploading under an existing key (the builtin biped goes up once for
   // the test spawn and again for the npc template) must free the previous
   // buffers or they leak until vkDestroyDevice complains.
   const bool replacing_mesh = meshes_.find(mesh_key) != nullptr;
   if (GpuMesh* previous = meshes_.find(mesh_key)) {
     device_->WaitIdle();  // uploads happen at load time; never per frame
-    if (raytracing_) raytracing_->RemoveBlas(mesh_key);
+    if (raytracing_) {
+      raytracing_->RemoveBlas(mesh_key);
+      raytracing_->RemoveApproxBlas(mesh_key);
+      raytracing_->RemoveLodBlas(mesh_key);
+    }
+    for (GpuMesh::LodRt& rt : previous->lod_rt)
+      if (rt.indices) device_->DestroyBuffer(rt.indices);
     device_->DestroyBuffer(previous->vertices);
     device_->DestroyBuffer(previous->indices);
     if (previous->skinning) device_->DestroyBuffer(previous->skinning);
@@ -1458,6 +1673,8 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     if (previous->meshlets) device_->DestroyBuffer(previous->meshlets);
     if (previous->meshlet_vertices) device_->DestroyBuffer(previous->meshlet_vertices);
     if (previous->meshlet_triangles) device_->DestroyBuffer(previous->meshlet_triangles);
+    if (previous->rt_approx_vertices) device_->DestroyBuffer(previous->rt_approx_vertices);
+    if (previous->rt_approx_indices) device_->DestroyBuffer(previous->rt_approx_indices);
   }
   meshes_[mesh_key] = gpu;
   instances_.RefreshMesh(*device_, mesh_key, gpu.bounds_center, gpu.bounds_radius,
@@ -1472,6 +1689,9 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
   // Pure transparency never enters the tlas: water occluding rtao and
   // shadow rays would black out everything under it.
   if (raytracing_ && !gpu.all_blend && include_rt) raytracing_->BuildBlas(mesh_key, gpu);
+  // Opaque-approximation BLAS for the shrunk vegetation stand-in (see above).
+  if (raytracing_ && gpu.rt_approx && !approx_accel.empty())
+    raytracing_->BuildApproxBlas(mesh_key, approx_accel);
   // SDF: generate a per-mesh signed distance field from the lod-0 CPU geometry.
   // The SDF stands in for RCGI's realtime visibility rays (RX_RAY_MASK_REALTIME),
   // so it must mirror that TLAS set exactly: skip no_rt fill geometry entirely
@@ -1559,6 +1779,34 @@ void Renderer::EnsureRayTracingGeometry() {
     if (gpu.bindless_index == BindlessRegistry::kInvalidIndex) gpu.bindless_index = 0;
     raytracing_->BuildBlas(entry.key, gpu);
   }
+}
+
+u32 Renderer::EnsureLodRtGeometry(u64 mesh_key, GpuMesh& mesh, u32 lod) {
+  if (lod == 0 || lod > mesh.lod_rt.size()) return BindlessRegistry::kInvalidIndex;
+  GpuMesh::LodRt& rt = mesh.lod_rt[lod - 1];
+  if (rt.bindless == BindlessRegistry::kInvalidIndex || rt.geoms.empty())
+    return BindlessRegistry::kInvalidIndex;  // no RT geometry at this LOD
+  if (!rt.blas_built) {
+    // Reconstruct the accel geometry from the eagerly-built (absolute-indexed,
+    // force-opaque) LOD index buffer and build the BLAS once. The build blocks
+    // (ImmediateSubmit), but only the first time this LOD is needed.
+    base::Vector<AccelTriangles> geometries;
+    geometries.reserve(rt.geoms.size());
+    for (const GpuMesh::LodRt::Geom& g : rt.geoms) {
+      geometries.push_back({.vertex_address = mesh.vertices.address,
+                            .vertex_stride = sizeof(asset::Vertex),
+                            .vertex_count = rt.vertex_count,
+                            .vertex_format = Format::kRGB32Float,
+                            .index_address = rt.indices.address + g.index_offset * sizeof(u32),
+                            .index_count = g.index_count,
+                            .index_type = IndexType::kUint32,
+                            .opaque = true});
+    }
+    if (!raytracing_->BuildLodBlas(mesh_key, lod, geometries))
+      return BindlessRegistry::kInvalidIndex;
+    rt.blas_built = true;
+  }
+  return rt.bindless;
 }
 
 void Renderer::SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas) {
@@ -2034,6 +2282,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
   bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
+  bool rcgi_world = rcgi_active && !path_trace;
+  if (rcgi_ && !rcgi_world) rcgi_->RequestReset();
   // kMsaa: the prepass + opaque scene render multisampled and resolve before
   // everything downstream, which then runs single-sampled exactly as kNone.
   // ApplySettings already rebuilt the mesh pipelines at this sample count.
@@ -2122,7 +2372,32 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                              (rcgi_active && !rcgi_software) || reflections_active || path_trace ||
                              (water_pipeline_active && settings_.water_reflections) || fog_active;
 
-  u32 tlas_slot = frame_index_ % RayTracingContext::kSlots;
+  // Async TLAS build (RX_RT_ASYNC_TLAS): build this frame's slot on the compute
+  // queue while the graphics timeline consumes the slot built last frame -- the
+  // slot being built is never the slot being read this frame, so there is no
+  // same-frame cross-queue hazard on the acceleration structure at all; the
+  // async submit is waited by SubmitFrame and a full frame elapses before the
+  // slot is read, which the frame fence already guarantees. This rides the same
+  // async-fork discipline the DDGI/RCGI world passes already use to read the
+  // TLAS across queues (validated clean). Needs a second queue and one prior
+  // frame to have primed a slot; the path tracer keeps the synchronous same-
+  // slot build for reference correctness. Three ping-pong slots keep a slot
+  // safe to rebuild while one frame still reads the previous one at two frames
+  // in flight (see RayTracingContext::kSlots).
+  // The async read slot is the previous frame's build. It is only safe when that
+  // slot actually holds a current build: RT enabled after raster-only frames
+  // leaves it unbuilt, and a mesh replace (WaitIdle + RemoveBlas) retires every
+  // slot whose instances still point at the freed BLAS. TlasSlotTracker tracks
+  // both and falls the selection back to a synchronous build+read of the current
+  // slot when the previous one is invalid.
+  bool want_async_tlas = RtAsyncTlasOpt && device_->caps().async_compute &&
+                         settings_.async_compute && !path_trace && frame_index_ > 0;
+  TlasSlotTracker::Selection tlas_sel =
+      raytracing_ ? raytracing_->SelectTlasSlots(frame_index_, want_async_tlas)
+                  : TlasSlotTracker{}.Select(frame_index_, false);
+  bool async_tlas = tlas_sel.async;
+  u32 tlas_build_slot = tlas_sel.build_slot;
+  u32 tlas_slot = tlas_sel.read_slot;
 
   // The frame's globals set (uniform + optional tlas + optional hi-z) is
   // rewritten once per frame, from the first pass that needs it. The slot's
@@ -2195,7 +2470,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
          use_rt_frag, ddgi_active, water_pipeline_active, csm_on, shadow_slot, shadow_atlas,
          globals_set, globals_written, update_globals_set, frame_slot,
          adaptive_water_item, adaptive_water_submesh, transparent = std::move(transparent),
-         rcgi_irr, &frame, &view](PassContext& ctx) {
+          rcgi_irr, rcgi_world, &frame, &view](PassContext& ctx) {
           if (!globals_written) {
             update_globals_set(ctx, kInvalidResource, false, /*want_tlas=*/true);
           }
@@ -2207,6 +2482,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               sun_shadow != kInvalidResource ? ctx.graph->image(sun_shadow).view : TextureView{};
           TextureView rcgi_irr_view =
               rcgi_irr != kInvalidResource ? ctx.graph->image(rcgi_irr).view : TextureView{};
+          EnvironmentSystem::RcgiWorldBinding rcgi_world_binding;
+          RcgiSystem::IrradianceBinding rcgi_world_src;
+          if (rcgi_world) rcgi_world_src = rcgi_->irradiance_binding(frame_index_);
+          if (rcgi_world_src.valid) {
+            rcgi_world_binding.irradiance = rcgi_world_src.irradiance;
+            rcgi_world_binding.visibility = rcgi_world_src.visibility;
+            rcgi_world_binding.globals = rcgi_world_src.globals;
+            rcgi_world_binding.probe_meta = rcgi_world_src.probe_meta;
+            rcgi_world_binding.interior_vols = rcgi_world_src.interior_vols;
+          }
           environment_->WriteEnvSet(
               env_set, TextureView{}, ddgi_active ? &ddgi_binding : nullptr,
               csm_on ? ctx.graph->image(shadow_atlas).view : TextureView{},
@@ -2223,7 +2508,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               water_field_active_ ? water_field_.ring_view(0) : TextureView{},
               water_field_active_ ? water_field_.ring_view(1) : TextureView{},
               water_field_active_ ? water_field_.params_buffer(frame_slot) : GpuBuffer{},
-              TextureView{}, TextureView{}, rcgi_irr_view);
+              TextureView{}, TextureView{}, rcgi_irr_view,
+              rcgi_world_src.valid ? &rcgi_world_binding : nullptr);
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
@@ -2460,7 +2746,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (nrd_ao || ss_ao) globals.flags |= kFrameFlagAoValid;
   if (csm_active && !interior) globals.flags |= kFrameFlagShadowMap;
   if (ddgi_active && !interior) globals.flags |= kFrameFlagDdgi;
-  if (rcgi_active && !interior) globals.flags |= kFrameFlagRcgi;
+  // RCGI composites in the IBL branch outdoors; indoors it now feeds the interior
+  // branch instead (mesh.ps), lighting interiors with leak-free bounce (its ray
+  // misses fall back to interior ambient) rather than a flat authored term. Gated
+  // by RX_RCGI_INTERIOR so recreation's default (RCGI off) is unchanged.
+  if (rcgi_world && (!interior || RcgiInteriorOpt)) globals.flags |= kFrameFlagRcgi;
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows && !interior) globals.flags |= kFrameFlagRtShadows;
   if (settings_.aurora && !interior) globals.flags |= kFrameFlagAurora;
@@ -2682,44 +2972,138 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // path has no ray query and (on non-ray-query devices) no raytracing context.
   if (rt_shadows || rtao_active || ddgi_active || (rcgi_active && !rcgi_software) ||
       water_pipeline_active || reflections_active || path_trace || fog_active) {
+    // Solid-angle instance culling + distance LOD are realtime-only shaping of
+    // the ray-traced scene; the path tracer keeps every instance at LOD0 for
+    // reference correctness. RX_RT_CULL / RX_RT_LOD_NEAR gate them independently.
+    const bool rt_cull_on = RtCullOpt && !path_trace;
+    // RT LOD is independent of the raster force_lod0_for_tlas knob (which keeps
+    // the rasterizer at LOD0 so screen-referenced rays self-intersect cleanly):
+    // rays get LOD0 inside RX_RT_LOD_NEAR and coarsen past it. Path tracing
+    // keeps LOD0 everywhere. RX_RT_LOD_NEAR <= 0 disables coarsening.
+    const bool rt_lod_on = !path_trace && RtLodNear > 0.0f;
+    const f32 lod_near = RtLodNear;
+    rt_cull_.Configure(rt_cull_on, RtCullStart, RtCullAngle);
+    rt_cull_.BeginFrame(view.camera.eye);
+    const Vec3 eye = view.camera.eye;
+    // Model-space bounding sphere of a mesh as a Vec3 center.
+    auto mesh_center = [](const GpuMesh& m) {
+      return Vec3{m.bounds_center[0], m.bounds_center[1], m.bounds_center[2]};
+    };
+    // Distance from the camera to an instance's world-space bounding centre.
+    auto center_distance = [&](const GpuMesh& m, const Mat4& t) {
+      const Vec3 c = mesh_center(m);
+      const f32* mm = t.m;
+      const f32 wx = mm[0] * c.x + mm[4] * c.y + mm[8] * c.z + mm[12];
+      const f32 wy = mm[1] * c.x + mm[5] * c.y + mm[9] * c.z + mm[13];
+      const f32 wz = mm[2] * c.x + mm[6] * c.y + mm[10] * c.z + mm[14];
+      const f32 dx = wx - eye.x, dy = wy - eye.y, dz = wz - eye.z;
+      return std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
+    // Resolves the RT LOD for one instance: LOD0 inside the near radius (raster
+    // and rays agree there, avoiding the self-intersection disparity the AC
+    // Shadows team calls out), a coarser LOD past it. Fills custom_index/lod for
+    // the TLAS instance, lazily building the LOD BLAS + record on first need and
+    // falling back to LOD0 when the mesh has no usable geometry at that LOD.
+    auto select_rt = [&](u64 key, GpuMesh& m, const Mat4& t, u32& out_lod, u32& out_index) {
+      out_lod = 0;
+      out_index = m.bindless_index;
+      if (!rt_lod_on || m.lods.empty()) return;
+      const f32 dist = center_distance(m, t);
+      if (dist <= lod_near) return;
+      const u32 lod = SelectLod(m, dist);
+      if (lod == 0) return;
+      const u32 idx = EnsureLodRtGeometry(key, m, lod);
+      if (idx == BindlessRegistry::kInvalidIndex) return;  // keep LOD0
+      out_lod = lod;
+      out_index = idx;
+    };
+
     base::Vector<RayTracingContext::Instance> instances;
     instances.reserve(view.draws.size() + instances_.instance_count());
     for (const DrawItem& item : view.draws) {
-      const GpuMesh* mesh = meshes_.find(item.mesh);
+      GpuMesh* mesh = meshes_.find(item.mesh);
       // no_rt grass-like fill stays out of the realtime tlas; when the path
       // tracer is active it joins with a path-trace-only instance mask, so
       // realtime rays (shadows/RTAO/reflections/fog/water) skip it either way:
       // they trace with RX_RAY_MASK_REALTIME.
       if (!mesh || mesh->all_blend || (mesh->no_rt && !path_trace)) continue;
+      // Per-draw instances are frustum-culled and few, so test solid angle
+      // inline. no_rt fill is path-trace-only (never culled: culling is off
+      // under the path tracer).
+      if (rt_cull_on && !mesh->no_rt &&
+          !rt_cull_.DrawVisible(item.transform, mesh_center(*mesh), mesh->bounds_radius))
+        continue;
       u8 mask = mesh->no_rt ? static_cast<u8>(kRayMaskPathTrace)
                             : static_cast<u8>(kRayMaskRealtime | kRayMaskPathTrace);
+      u32 lod = 0, index = mesh->bindless_index;
+      if (!mesh->no_rt) select_rt(item.mesh, *mesh, item.transform, lod, index);
       instances.push_back({.mesh_key = item.mesh,
-                           .custom_index = mesh->bindless_index,
+                           .custom_index = index,
                            .mask = mask,
+                           .lod = lod,
                            .transform = item.transform});
+      // Vegetation stand-in: a second instance on the opaque-approximation BLAS,
+      // masked kRayMaskApprox so only the realtime diffuse/AO/shadow rays hit it.
+      // Only at LOD0: distant LODs are built force-opaque and need no stand-in.
+      if (mesh->rt_approx && lod == 0) {
+        instances.push_back({.mesh_key = item.mesh,
+                             .custom_index = mesh->rt_approx_bindless,
+                             .mask = static_cast<u8>(kRayMaskApprox),
+                             .approx = true,
+                             .transform = item.transform});
+      }
     }
-    for (const InstanceStore::Group& group : instances_.groups()) {
+    const base::Vector<InstanceStore::Group>& groups = instances_.groups();
+    for (u32 gi = 0; gi < groups.size(); ++gi) {
+      const InstanceStore::Group& group = groups[gi];
       if (!group.alive) continue;
-      const GpuMesh* mesh = meshes_.find(group.mesh);
+      GpuMesh* mesh = meshes_.find(group.mesh);
       if (!mesh || mesh->all_blend || (mesh->no_rt && !path_trace)) continue;
       const u8 mask = mesh->no_rt ? static_cast<u8>(kRayMaskPathTrace)
                                   : static_cast<u8>(kRayMaskRealtime | kRayMaskPathTrace);
-      for (const Mat4& transform : group.transforms) {
+      // Time-sliced solid-angle sweep for the (potentially thousands of) static
+      // instances in this group; the persistent bitmask drives inclusion every
+      // frame while only a slice is re-tested. no_rt fill is path-trace-only, so
+      // culling never applies to it (path tracing disables culling).
+      const bool group_cull = rt_cull_on && !mesh->no_rt;
+      const base::Vector<u8>* visible =
+          group_cull ? &rt_cull_.UpdateGroup(gi, group.generation, group.revision,
+                                             {group.transforms.data(), group.transforms.size()},
+                                             mesh_center(*mesh), mesh->bounds_radius)
+                     : nullptr;
+      for (u32 ii = 0; ii < group.transforms.size(); ++ii) {
+        if (visible && !(*visible)[ii]) continue;
+        const Mat4& transform = group.transforms[ii];
+        u32 lod = 0, index = mesh->bindless_index;
+        if (!mesh->no_rt) select_rt(group.mesh, *mesh, transform, lod, index);
         instances.push_back({.mesh_key = group.mesh,
-                             .custom_index = mesh->bindless_index,
+                             .custom_index = index,
                              .mask = mask,
+                             .lod = lod,
                              .transform = transform});
+        if (mesh->rt_approx && lod == 0) {
+          instances.push_back({.mesh_key = group.mesh,
+                               .custom_index = mesh->rt_approx_bindless,
+                               .mask = static_cast<u8>(kRayMaskApprox),
+                               .approx = true,
+                               .transform = transform});
+        }
       }
     }
     // Grow the TLAS now, on the build thread, so the record-time BuildTlas never
     // stalls the device or frees buffers mid command list (which races the
     // frame ring and corrupts the image). Spikes here when two worlds stream in.
-    raytracing_->ReserveTlas(tlas_slot, static_cast<u32>(instances.size()));
-    graph_.AddPass(
-        "tlas_build", [](RenderGraph::PassBuilder&) {},
-        [this, tlas_slot, instances = std::move(instances)](PassContext& ctx) {
-          raytracing_->BuildTlas(*ctx.cmd, tlas_slot, instances);
-        });
+    if (raytracing_->ReserveTlas(tlas_build_slot, static_cast<u32>(instances.size()))) {
+      graph_.AddPass(
+          "tlas_build",
+          [async_tlas](RenderGraph::PassBuilder& b) {
+            if (async_tlas) b.Async();  // build next frame's slot on the compute queue
+          },
+          [this, tlas_build_slot, frame_index = frame_index_,
+           instances = std::move(instances)](PassContext& ctx) {
+            raytracing_->BuildTlas(*ctx.cmd, tlas_build_slot, frame_index, instances);
+          });
+    }
   }
 
   // DDGI right after the TLAS (its only same-frame dependency): flagged async
@@ -2761,16 +3145,34 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // irradiance cascades. On RT hardware it can fork onto the async compute queue
   // and overlap up to the JoinAsync before its first consumer (the M2 gather).
   // In software mode it traces the SDF clipmap (no tlas) on the main timeline.
-  bool rcgi_world = rcgi_active && !path_trace;
   bool rcgi_async =
       rcgi_world && !rcgi_software && settings_.async_compute && device_->caps().async_compute;
   if (rcgi_world) {
     light_grid_.AddToGraph(graph_, frame.lights, light_count, view.camera.eye, frame_index_,
                            rcgi_async);
+    rcgi_->SetInteriorVolumes(interior_volumes_, frame_index_);  // game interior bounds
+    rcgi_->set_gather_scale(static_cast<u32>(RcgiGatherScaleOpt));  // item 23: half/quarter res
+    rcgi_->set_denoise_mask(RcgiDenoiseMaskOpt);                    // item 22: cross-class mask
+    RcgiSystem::FrameConfig rcgi_cfg;
+    rcgi_cfg.authored_interior = settings_.interior;
+    rcgi_cfg.interior = settings_.interior && RcgiInteriorOpt;
+    rcgi_cfg.interior_ambient = settings_.interior_ambient;
+    rcgi_cfg.relocate = RcgiRelocateOpt;
+    rcgi_cfg.classify = RcgiInteriorOpt;  // volume classification shares the interior gate
+    rcgi_cfg.probe_ao = RcgiProbeAoOpt;
+    // Interior cells author their own directional (XCLL/LGTM) and suppress the
+    // sky sun; feed RCGI the same authored interior sun the raster path selected
+    // (above) instead of applied_sun_*, or an outdoor sun leaks bounce onto an
+    // interior with zero directional intensity.
+    Vec3 rcgi_sun_dir =
+        settings_.interior ? Normalize(settings_.interior_directional_dir) : applied_sun_direction_;
+    f32 rcgi_sun_int =
+        settings_.interior ? settings_.interior_directional_intensity : applied_sun_intensity_;
+    Vec3 rcgi_sun_col =
+        settings_.interior ? settings_.interior_directional_color : applied_sun_color_;
     rcgi_->AddToGraph(graph_, raytracing_.get(), tlas_slot, light_grid_, frame.lights,
-                      view.camera.eye, applied_sun_direction_, applied_sun_intensity_,
-                      applied_sun_color_, frame_index_, rcgi_async,
-                      rcgi_software ? sdf_clipmap_.get() : nullptr);
+                      view.camera.eye, rcgi_sun_dir, rcgi_sun_int, rcgi_sun_col, frame_index_,
+                      rcgi_cfg, rcgi_async, rcgi_software ? sdf_clipmap_.get() : nullptr);
   }
 
   // The path tracer takes over the whole frame: it writes scene_color directly
@@ -3508,6 +3910,50 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   ResourceHandle sun_shadow = kInvalidResource;
   ResourceHandle spec_refl = kInvalidResource;
   ResourceHandle rcgi_irr = kInvalidResource;
+
+  // RCGI screen side runs BEFORE the reflection trace so the reflection ray-skip
+  // (item 16) can read the gather's denoised per-pixel diffuse SH. M2 half-res SH
+  // final gather -> bilateral denoise -> full-res upscale + temporal filter,
+  // writing the "rcgi_irradiance" transient the forward pass folds in.
+  // `RX_RCGI_PROBES_ONLY=1` (and always in software mode) swaps in the M1
+  // per-pixel cascade resolve. The gather is the first consumer of the
+  // (optionally async) world passes, so join the compute queue before it.
+  // RCGI and DDGI are mutually exclusive, so this never races the DDGI join used
+  // by the reflection/DDGI path below.
+#if defined(RX_HAS_NRD)
+  // The gather's denoised SH, captured for the specular ray-skip (reflections are
+  // NRD-gated, so this is only consumed under RX_HAS_NRD).
+  ResourceHandle refl_sh[3] = {kInvalidResource, kInvalidResource, kInvalidResource};
+  Extent2D refl_sh_extent{};
+#endif
+  if (rcgi_world && depth_export != kInvalidResource && normals != kInvalidResource) {
+    if (rcgi_async) {
+      graph_.AddPass(
+          "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
+          [](PassContext&) {});
+    }
+    if (rcgi_probes_only ||
+        !rcgi_->EnsureScreenResources({render_width_, render_height_})) {
+      rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
+                                       {render_width_, render_height_}, globals.inv_view_proj,
+                                       view.camera.eye, settings_.rcgi_intensity, frame_index_);
+    } else {
+      rcgi_irr = rcgi_->AddGatherChain(
+          graph_, *raytracing_, tlas_slot, depth_export, normals, motion,
+          {render_width_, render_height_}, globals.inv_view_proj, globals.prev_view_proj,
+          view.camera.eye, settings_.rcgi_intensity, frame_index_, first_frame);
+#if defined(RX_HAS_NRD)
+      ResourceHandle sh[3];
+      Extent2D e{};
+      if (rcgi_->denoised_sh(sh, e)) {
+        refl_sh[0] = sh[0];
+        refl_sh[1] = sh[1];
+        refl_sh[2] = sh[2];
+        refl_sh_extent = e;
+      }
+#endif
+    }
+  }
 #if defined(RX_HAS_NRD)
   if (nrd_ao || nrd_shadow) {
     // Shared NRD guides (normal+roughness, viewZ) and per-frame camera state for
@@ -3643,13 +4089,49 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       rfl.near_plane = 0.1f;
       rfl.hit_dist_params = NrdDenoiser::kHitDistParams;
       rfl.ddgi = ddgi_active;
+      // Real-alpha any-hit only when the vegetation feature is on overall.
+      rfl.veg_anyhit = RtVegOpt && RtVegAnyHitOpt;
+      // Phase 4: half-res trace + upscale, roughness-scaled reach, one-step fog,
+      // and diffuse-SH ray-skip (only when the RCGI gather SH is available).
+      rfl.half_res = ReflHalfOpt;
+      rfl.fog = ReflFogOpt && fog_active;
+      rfl.fog_density = settings_.fog_density;
+      rfl.fog_height_falloff = settings_.fog_height_falloff;
+      rfl.fog_base_height = settings_.fog_base_height;
+      rfl.sh_skip = ReflShSkipOpt && refl_sh[0] != kInvalidResource;
+      rfl.sh_skip_roughness = ReflShSkipRough;
+      // Spec-bounce indirect diffuse: under RCGI the DDGI atlas is empty, so the
+      // reflection hit reads the RCGI irradiance cascades (item 20b). Bind the
+      // real cascades when RCGI is active, else environment placeholders so the
+      // descriptor set is complete (kFlagRcgi stays clear -> never sampled).
+      ReflectionTrace::RcgiBinding refl_rcgi;
+      RcgiSystem::IrradianceBinding rcgi_irr_bind;
+      if (rcgi_active) rcgi_irr_bind = rcgi_->irradiance_binding(frame_index_);
+      if (rcgi_irr_bind.valid) {
+        refl_rcgi.irradiance = rcgi_irr_bind.irradiance;
+        refl_rcgi.visibility = rcgi_irr_bind.visibility;
+        refl_rcgi.globals = rcgi_irr_bind.globals;
+        refl_rcgi.probe_meta = rcgi_irr_bind.probe_meta;
+        refl_rcgi.interior_vols = rcgi_irr_bind.interior_vols;
+        refl_rcgi.sampler = rcgi_irr_bind.sampler;
+        refl_rcgi.in_general = true;
+        refl_rcgi.active = true;
+      } else {
+        refl_rcgi.irradiance = environment_->black_view();
+        refl_rcgi.visibility = environment_->black_view();
+        refl_rcgi.globals = &environment_->dummy_volume();
+        refl_rcgi.probe_meta = &environment_->dummy_storage();
+        refl_rcgi.interior_vols = &environment_->dummy_storage();
+        refl_rcgi.sampler = environment_->sampler();
+      }
       ResourceHandle raw = reflection_trace_.AddToGraph(
           graph_, *raytracing_, tlas_slot, bindless_->set(), depth_export, normals,
           environment_->prefiltered_view(),
           ddgi_active ? refl_ddgi.irradiance : environment_->black_array_view(), ddgi_active,
           ddgi_active ? refl_ddgi.volume : environment_->dummy_volume(),
           ddgi_active ? refl_ddgi.volume_size : 256, environment_->sampler(),
-          {render_width_, render_height_}, rfl);
+          {render_width_, render_height_}, refl_sh[0], refl_sh[1], refl_sh[2], refl_sh_extent,
+          refl_rcgi, rfl);
       spec_refl = nrd_.DenoiseSpecular(graph_, nrd_inputs.normal_roughness, nrd_inputs.view_z,
                                        motion, raw);
     }
@@ -3663,35 +4145,6 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     const f32 proj_scale[2] = {proj.m[0], proj.m[5]};
     ao = ssao_.AddToGraph(graph_, depth_export, normals, globals.inv_view_proj, proj_scale, 0.1f,
                           frame_index_);
-  }
-
-  // RCGI screen side: M2 half-res SH final gather -> bilateral denoise -> full-res
-  // upscale + temporal filter, writing the same "rcgi_irradiance" transient the
-  // forward pass folds in. `RX_RCGI_PROBES_ONLY=1` (and always in software mode,
-  // where the M2 gather is ray-query) swaps in the M1 per-pixel cascade resolve.
-  // The gather is the first consumer of the (optionally async) world passes, so
-  // join the compute queue before it.
-  if (rcgi_world && depth_export != kInvalidResource && normals != kInvalidResource) {
-    if (rcgi_async) {
-      graph_.AddPass(
-          "async_join", [](RenderGraph::PassBuilder& b) { b.JoinAsync(); },
-          [](PassContext&) {});
-    }
-    // Probes-only A/B (and always in software mode, where the M2 gather is
-    // ray-query), or fall back to it if the gather's screen-history images
-    // failed to (re)create this frame (so we never import null images). The
-    // short-circuit also means software mode never touches screen resources.
-    if (rcgi_probes_only ||
-        !rcgi_->EnsureScreenResources({render_width_, render_height_})) {
-      rcgi_irr = rcgi_->AddResolvePass(graph_, depth_export, normals,
-                                       {render_width_, render_height_}, globals.inv_view_proj,
-                                       view.camera.eye, settings_.rcgi_intensity, frame_index_);
-    } else {
-      rcgi_irr = rcgi_->AddGatherChain(
-          graph_, *raytracing_, tlas_slot, depth_export, normals, motion,
-          {render_width_, render_height_}, globals.inv_view_proj, globals.prev_view_proj,
-          view.camera.eye, settings_.rcgi_intensity, frame_index_, first_frame);
-    }
   }
 
   // Hybrid ReSTIR DI: reservoir-resampled point/spot lights with one shadow
@@ -3779,8 +4232,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         if (ms_occlude) builder.Read(cull_hiz, ResourceUsage::kSampledTaskMesh);
       },
       [this, geom_scene, geom_motion, geom_skin, geom_depth, msaa, ao, sun_shadow, spec_refl,
-       rcgi_irr, use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas, cull_commands,
-       ms_active, globals_set, frame_slot, restir_active, restir_out, &frame, &view,
+       rcgi_irr, rcgi_world, use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas,
+       cull_commands, ms_active, globals_set, frame_slot, restir_active, restir_out, &frame, &view,
        draw_meshlet_instances, view_proj, force_lod0_for_tlas](PassContext& ctx) {
         BindingSetHandle env_set = env_scene_sets_[frame_slot];
         TextureView ao_view =
@@ -3793,6 +4246,19 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             spec_refl != kInvalidResource ? ctx.graph->image(spec_refl).view : TextureView{};
         EnvironmentSystem::DdgiBinding ddgi_binding;
         if (ddgi_active) ddgi_binding = ddgi_->binding(frame_index_);
+        // Inline reflection bounce reads the RCGI world cascades when RCGI is
+        // active (matches the NRD reflection path and the kFrameFlagRcgi gate);
+        // null -> placeholders. The atlases stay in GENERAL between frames.
+        EnvironmentSystem::RcgiWorldBinding rcgi_world_binding;
+        RcgiSystem::IrradianceBinding rcgi_world_src;
+        if (rcgi_world) rcgi_world_src = rcgi_->irradiance_binding(frame_index_);
+        if (rcgi_world_src.valid) {
+          rcgi_world_binding.irradiance = rcgi_world_src.irradiance;
+          rcgi_world_binding.visibility = rcgi_world_src.visibility;
+          rcgi_world_binding.globals = rcgi_world_src.globals;
+          rcgi_world_binding.probe_meta = rcgi_world_src.probe_meta;
+          rcgi_world_binding.interior_vols = rcgi_world_src.interior_vols;
+        }
         environment_->WriteEnvSet(
             env_set, ao_view, ddgi_active ? &ddgi_binding : nullptr,
             csm_active ? ctx.graph->image(shadow_atlas).view : TextureView{},
@@ -3812,7 +4278,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
             fft_ocean_active_ ? ocean_.normal_foam_view() : TextureView{},
             TextureView{}, TextureView{}, GpuBuffer{},  // water field rings: transparent pass only
             shore_wetting_active_ ? shore_wetting_.current_view() : TextureView{},
-            water_caustics_active_ ? water_caustics_.current_view() : TextureView{}, rcgi_irr_view);
+            water_caustics_active_ ? water_caustics_.current_view() : TextureView{}, rcgi_irr_view,
+            rcgi_world_src.valid ? &rcgi_world_binding : nullptr);
 
         ColorAttachment colors[3];
         colors[0] = {.view = ctx.graph->image(geom_scene).view,
@@ -4965,6 +5432,10 @@ void Renderer::Shutdown() {
       if (kv.value.meshlets) device_->DestroyBuffer(kv.value.meshlets);
       if (kv.value.meshlet_vertices) device_->DestroyBuffer(kv.value.meshlet_vertices);
       if (kv.value.meshlet_triangles) device_->DestroyBuffer(kv.value.meshlet_triangles);
+      if (kv.value.rt_approx_vertices) device_->DestroyBuffer(kv.value.rt_approx_vertices);
+      if (kv.value.rt_approx_indices) device_->DestroyBuffer(kv.value.rt_approx_indices);
+      for (GpuMesh::LodRt& rt : kv.value.lod_rt)
+        if (rt.indices) device_->DestroyBuffer(rt.indices);
     }
     meshes_.clear();
     taa_.Destroy(*device_);

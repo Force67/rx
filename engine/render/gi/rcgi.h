@@ -2,11 +2,14 @@
 #define RX_RENDER_RCGI_H_
 
 #include <memory>
+#include <span>
 
 #include "core/math.h"
 #include "render/core/bindless.h"
 #include "render/core/render_graph.h"
 #include "render/gi/light_grid.h"
+#include "render/gi/rcgi_history.h"
+#include "render/gi/rcgi_interior.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {
@@ -44,6 +47,21 @@ class RcgiSystem {
     f32 energy_scale = 1.0f;
   };
 
+  // Per-frame leak/occlusion-hardening state (Phase 3), uploaded into the globals
+  // UBO by AddToGraph and read by every RCGI pass. Each toggle has its own env in
+  // the renderer (RX_RCGI_INTERIOR / RX_RCGI_RELOCATE / RX_RCGI_PROBE_AO); the
+  // interior-volume count is owned by the system (SetInteriorVolumes).
+  struct FrameConfig {
+    bool authored_interior = false;  // raw lighting mode, independent of feature gates
+    bool interior = false;           // ray misses fall back to interior_ambient, not sky
+    Vec3 interior_ambient{0, 0, 0};  // authored indoor ambient
+    bool relocate = true;            // per-probe backface relocation + disable
+    bool classify = true;            // interior-volume cross-class probe rejection
+    bool probe_ao = true;            // attenuate cascade fallback by relative hit distance
+    f32 probe_ao_scale = 0.6f;
+    f32 probe_ao_bias = 0.4f;
+  };
+
   // `rt_available` selects which trace pipelines are built. When true, the
   // hardware ray-query pipelines (probe trace, cache shade, gather chain) plus
   // the software SDF variants are all created (so RX_RCGI_SW A/B works on RT
@@ -73,7 +91,15 @@ class RcgiSystem {
   void AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u32 tlas_slot,
                   const LightGrid& light_grid, const GpuBuffer& lights, const Vec3& camera,
                   const Vec3& sun_direction, f32 sun_intensity, const Vec3& sun_color,
-                  u32 frame_index, bool async = false, const SdfClipmap* sdf = nullptr);
+                  u32 frame_index, const FrameConfig& config, bool async = false,
+                  const SdfClipmap* sdf = nullptr);
+
+  // Upload the active interior volumes (<= kMaxInteriorVolumes; extras dropped).
+  // AABBs in world space; probes/samples inside a volume classify as indoor and
+  // do not blend with outdoor probes (item 9b). Empty span disables classify.
+  // Cheap: just repacks a small host-visible buffer, so it may be called each
+  // frame from the game's forwarding path.
+  void SetInteriorVolumes(std::span<const InteriorVolume> volumes, u32 frame_index);
 
   // M1 filler: full-res irradiance from the cascades, sampled per screen pixel.
   // Reads the prepass depth + oct normals; returns the "rcgi_irradiance"
@@ -108,11 +134,68 @@ class RcgiSystem {
   // resolve) for this frame; the cleared extent lets a later frame retry.
   bool EnsureScreenResources(Extent2D extent);
 
+  // The gather's denoised per-pixel diffuse SH (3x RGBA16F: R,G,B channel SH
+  // vectors, gather resolution), valid for the CURRENT frame's graph only after
+  // AddGatherChain ran (not the probes-only AddResolvePass). Consumed by the
+  // specular ray-skip (reflection_trace) to replace TLAS rays on rough /
+  // off-mirror pixels. Returns false when no SH was produced this frame.
+  bool denoised_sh(ResourceHandle out_sh[3], Extent2D& extent) const {
+    if (!denoised_sh_valid_) return false;
+    out_sh[0] = denoised_sh_[0];
+    out_sh[1] = denoised_sh_[1];
+    out_sh[2] = denoised_sh_[2];
+    extent = denoised_sh_extent_;
+    return true;
+  }
+
+  // Bundle of the RCGI irradiance-cascade resources needed to call
+  // SampleRcgiIrradiance from a pass outside the gather. The specular bounce in
+  // reflection_trace samples DDGI's probe atlas, which is empty under RCGI
+  // (black indirect at reflection hits); with this it reads the RCGI cascades
+  // instead. The atlases live in kGeneral once the world side is built; the
+  // globals UBO must be the one already uploaded for the current frame (the
+  // reflection pass records after AddToGraph, so `frame_index % 2` is valid).
+  struct IrradianceBinding {
+    TextureView irradiance{};
+    TextureView visibility{};
+    const GpuBuffer* globals = nullptr;
+    const GpuBuffer* probe_meta = nullptr;
+    const GpuBuffer* interior_vols = nullptr;
+    SamplerHandle sampler{};
+    bool valid = false;
+  };
+  IrradianceBinding irradiance_binding(u32 frame_index) const {
+    IrradianceBinding b;
+    if (!irradiance_ || !visibility_) return b;
+    b.irradiance = irradiance_.view;
+    b.visibility = visibility_.view;
+    b.globals = &globals_buffers_[frame_index % 2];
+    b.probe_meta = &probe_meta_;
+    b.interior_vols = &interior_volumes_[frame_index % 2];
+    b.sampler = sampler_;
+    b.valid = true;
+    return b;
+  }
+
   // Zero the hash on the next update (camera teleports / big jumps).
   void RequestReset() {
     clear_hash_ = true;
+    for (u32 c = 0; c < kCascades; ++c) cascade_valid_[c] = false;
     screen_history_valid_ = false;
+    screen_reset_ = true;
   }
+
+  // Gather resolution scale (RX_RCGI_GATHER_SCALE): 2 = half res (default),
+  // 4 = quarter res (opt-in; AC Shadows shipped quarter-res diffuse on consoles).
+  // The denoise radius widens automatically at quarter to avoid splotching.
+  void set_gather_scale(u32 scale) { gather_divisor_ = (scale >= 4u) ? 4u : 2u; }
+  u32 gather_scale() const { return gather_divisor_; }
+
+  // Material-ID denoiser mask (RX_RCGI_DENOISE_MASK, item 22a/b): reject
+  // cross-class neighbours in the spatial denoise + temporal reprojection so
+  // vegetation/character indirect does not bleed onto opaque surfaces. On by
+  // default; the setter exposes an A/B toggle.
+  void set_denoise_mask(bool on) { denoise_mask_ = on; }
 
  private:
   struct RcgiGlobals {
@@ -123,7 +206,9 @@ class RcgiSystem {
     u32 counts[4];                     // probes x,y,z, irradiance texels
     u32 misc[4];                       // x current cascade, y frame, z cascades, w hash capacity
     f32 params[4];                     // x max ray dist, y hysteresis, z energy, w base cell
-    u32 valid[4];                      // x per-cascade "blended since (re)creation" bitmask
+    u32 valid[4];                      // x post-blend mask, y cache-shade pre-blend mask
+    f32 interior[4];                   // xyz interior ambient (miss fallback), w probe-AO scale
+    u32 gi_flags[4];                   // x feature bits, y volume count, z asuint(probe-AO bias), w pad
   };
 
   explicit RcgiSystem(Device& device) : device_(device) {}
@@ -149,6 +234,9 @@ class RcgiSystem {
   GpuBuffer active_meta_; // [0] = active count
   GpuBuffer dispatch_args_;      // indirect args for cache shade
   GpuBuffer globals_buffers_[2]; // host visible, ping-pong by frame parity
+  GpuBuffer probe_meta_;         // uint2 per (cascade, probe): packed reloc offset + flags
+  GpuBuffer interior_volumes_[2];  // frame-parity: 2 float4 (min,max) per volume
+  u32 interior_volume_count_ = 0;
 
   PipelineHandle probe_trace_pipeline_;
   PipelineHandle probe_trace_sw_pipeline_;   // SDF-clipmap software variant
@@ -157,6 +245,7 @@ class RcgiSystem {
   PipelineHandle cache_shade_sw_pipeline_;   // SDF-clipmap software variant
   PipelineHandle blend_pipeline_;
   PipelineHandle border_pipeline_;
+  PipelineHandle probe_meta_pipeline_;  // per-probe relocation (Phase 3 item 10)
   PipelineHandle resolve_pipeline_;
   PipelineHandle gather_pipeline_;
   PipelineHandle denoise_pipeline_;
@@ -166,7 +255,9 @@ class RcgiSystem {
   // M2 screen-side persistent images (render resolution). Screen-cache history is
   // written late (AddHistoryCopy) and read early next frame (gather); the
   // irradiance temporal history ping-pongs by frame parity.
-  static constexpr u32 kGatherDivisor = 2;  // half res (2), quarter-res ready (4)
+  static constexpr u32 kGatherDivisor = 2;  // default gather scale: half res
+  u32 gather_divisor_ = kGatherDivisor;      // live scale (RX_RCGI_GATHER_SCALE: 2/4)
+  bool denoise_mask_ = true;                  // material-id denoiser mask (RX_RCGI_DENOISE_MASK)
   Extent2D screen_extent_{};
   GpuImage screen_color_hist_;               // rgba16f lit HDR snapshot
   GpuImage screen_depth_hist_;               // r32f depth snapshot
@@ -177,6 +268,10 @@ class RcgiSystem {
   // Handles imported this frame in AddGatherChain, reused by AddHistoryCopy.
   ResourceHandle screen_color_handle_{};
   ResourceHandle screen_depth_handle_{};
+  // Denoised per-pixel SH triple exposed to the specular ray-skip (this frame).
+  ResourceHandle denoised_sh_[3]{};
+  Extent2D denoised_sh_extent_{};
+  bool denoised_sh_valid_ = false;
 
   bool rt_pipelines_ = false;  // hardware ray-query pipelines were created
   bool atlas_initialized_ = false;
@@ -190,6 +285,11 @@ class RcgiSystem {
   bool cascade_valid_[kCascades] = {};
   Vec3 blended_origin_[kCascades] = {};
   Vec3 last_camera_{};
+  // Effective authored interior lighting last seen by AddToGraph. Raw mode is
+  // tracked separately from the RX_RCGI_INTERIOR shader gate so toggles and
+  // cell-to-cell authored-light changes invalidate every retained history.
+  RcgiHistoryLighting last_history_lighting_{};
+  bool have_history_lighting_ = false;
 };
 
 }  // namespace rx::render

@@ -177,7 +177,10 @@ void Host::ApplyRenderPreset() {
   tuned.dynamic_target_ms = env.dynamic_target_ms;
   tuned.dynamic_min_scale = env.dynamic_min_scale;
   tuned.restir_di = env.restir_di;  // honor RX_RESTIR_DI
-  tuned.rcgi = env.rcgi;            // honor RX_RCGI over the preset
+  // RCGI is now a preset default (ultra/high). RX_RCGI still wins in both
+  // directions, but only when explicitly set -- otherwise the preset decides,
+  // so an unset env must not clobber a tier that enabled rcgi.
+  if (renderer_.rcgi_env_overridden()) tuned.rcgi = env.rcgi;
   tuned.rcgi_intensity = env.rcgi_intensity;
   // SDF software-trace availability is a startup decision on Renderer::sdf_available_,
   // not a RenderSettings field, so it survives this wholesale preset replacement
