@@ -316,6 +316,22 @@ void TestUndo() {
   CHECK_NEAR(before.position[2], after.position[2], 1e-3f);
   CHECK(stack.Undo(world));
   CHECK(!world.Has<scene::Parent>(again));
+
+  // Regression: the create command must not retain the caller's out pointer.
+  // Callers pass stack addresses, so only the initial Apply inside Push may
+  // write through it — undoing/redoing the creation must leave it untouched.
+  {
+    ecs::World w2;
+    UndoStack s2;
+    ecs::Entity created;
+    s2.Push(w2, MakeCreateEntity({{transform, {}}}, &created));
+    const ecs::Entity first = created;
+    CHECK(w2.IsAlive(first));
+    CHECK(s2.Undo(w2));
+    CHECK(created == first);  // Revert must not clear it.
+    CHECK(s2.Redo(w2));
+    CHECK(created == first);  // Re-Apply must not write the new handle.
+  }
 }
 
 void TestHierarchy() {

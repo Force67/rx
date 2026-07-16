@@ -131,14 +131,18 @@ public:
       for (const auto &[prop, value] : props)
         SetProp(world, e, *comp, *prop, value);
     }
-    if (out_)
+    // Only the first Apply (which runs inside UndoStack::Push, while the
+    // caller's pointer is still valid) reports the handle. Callers routinely
+    // pass a stack address, so the command must never write through it again
+    // on later undo/redo.
+    if (out_) {
       *out_ = e;
+      out_ = nullptr;
+    }
   }
   void Revert(ecs::World &world) override {
     if (ecs::Entity e = FindByGuid(world, guid_))
       world.Destroy(e);
-    if (out_)
-      *out_ = ecs::kInvalidEntity;
   }
   const char *label() const override { return "Create entity"; }
 
