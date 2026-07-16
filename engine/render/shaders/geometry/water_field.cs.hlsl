@@ -36,7 +36,9 @@ struct PushData {
 // Previous frame's ring (sampled at the old origin) and this frame's target.
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] Texture2D<float4> prev_ring : register(t0, space0);
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] SamplerState prev_sampler : register(s0, space0);
-[[vk::binding(1, 0)]] RWTexture2D<float4> cur_ring : register(u1, space0);
+// rgba16f matches the RGBA16Float ring images (water_field.cc); the inferred
+// rgba32f made every store undefined values per the Vulkan spec.
+[[vk::image_format("rgba16f")]] [[vk::binding(1, 0)]] RWTexture2D<float4> cur_ring : register(u1, space0);
 // FFT normal/foam map (.w foam), wrap-sampled over the 64 m ocean tile.
 [[vk::combinedImageSampler]] [[vk::binding(2, 0)]] Texture2D<float4> ocean_foam : register(t2, space0);
 [[vk::combinedImageSampler]] [[vk::binding(2, 0)]] SamplerState ocean_sampler : register(s2, space0);

@@ -186,6 +186,14 @@ void Host::ApplyRenderPreset() {
   // not a RenderSettings field, so it survives this wholesale preset replacement
   // with no carry needed (see RendererDesc::software_gi / settings.h note).
   tuned.fft_ocean = env.fft_ocean;  // honor RX_FFT_OCEAN
+  // Water feature env overrides (RX_ADAPTIVE_WATER / RX_WATER_FIELD /
+  // RX_WATER_INTERACTION / RX_SHORE_WETTING / RX_WATER_CAUSTICS); presets never
+  // tune these, so the wholesale replacement was silently discarding the envs.
+  tuned.adaptive_water = env.adaptive_water;
+  tuned.water_field = env.water_field;
+  tuned.water_interaction = env.water_interaction;
+  tuned.shore_wetting = env.shore_wetting;
+  tuned.water_caustics = env.water_caustics;
   tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;

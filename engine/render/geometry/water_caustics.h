@@ -22,7 +22,10 @@ namespace rx::render {
 
 class WaterCaustics {
  public:
-  static constexpr u32 kSize = 512;    // texels per side (power of two: wrap masking)
+  static constexpr u32 kSize = 1024;   // texels per side (power of two: wrap masking).
+                                       // 16 texels/m over the 64 m tile: the caustic web
+                                       // stays a fine filament lattice instead of chunky
+                                       // half-metre blobs when magnified at shallow depth.
   static constexpr f32 kTile = 64.0f;  // world tiling (m); mirrors the shader kTile / kCausticTile
 
   struct Params {
