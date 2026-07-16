@@ -96,6 +96,18 @@
 #  define RX_NET_VIZ_EXPORT RX_DSO_IMPORT
 #endif
 
+#if defined(RX_NAV_IMPLEMENTATION)
+#  define RX_NAV_EXPORT RX_DSO_EXPORT
+#else
+#  define RX_NAV_EXPORT RX_DSO_IMPORT
+#endif
+
+#if defined(RX_NAV_VIZ_IMPLEMENTATION)
+#  define RX_NAV_VIZ_EXPORT RX_DSO_EXPORT
+#else
+#  define RX_NAV_VIZ_EXPORT RX_DSO_IMPORT
+#endif
+
 #if defined(RX_APP_IMPLEMENTATION)
 #  define RX_APP_EXPORT RX_DSO_EXPORT
 #else

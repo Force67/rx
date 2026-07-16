@@ -7,6 +7,7 @@ set(RX_RUNTIME_SOURCES
   camera_input.cc
   viewer_input.cc
   demo_scenes.cc
+  demo_nav.cc
   demo_ship.cc
   scene_hook_demo.cc
   scene_hook_rhi_demo.cc
@@ -27,6 +28,8 @@ set(RX_RUNTIME_MODULES
   rx::anim
   rx::net
   rx::net_viz
+  rx::nav
+  rx::nav_viz
 )
 
 # CI/release builds can provide a stable identifier with -DRX_BUILD_ID=... .

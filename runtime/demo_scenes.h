@@ -16,6 +16,7 @@
 #include "net/bubble.h"
 #include "net/bubble_debug.h"
 #include "render/core/renderer.h"
+#include "demo_nav.h"
 #include "demo_ship.h"
 #include "scene_hook_demo.h"
 #include "scene_hook_rhi_demo.h"
@@ -174,6 +175,10 @@ class DemoScenes {
   // --demo ship: the procedural sailing-ship slice (hull/sails/rigging/cannons
   // on the ocean stack). Non-null only for that demo.
   std::unique_ptr<ShipDemo> ship_;
+
+  // --demo nav: the navigation chase slice (cost-aware pathfinding over rough
+  // terrain, porter vs mule pack). Non-null only for that demo.
+  std::unique_ptr<NavDemo> nav_;
 
   // --demo bubbles: the streaming-bubble interest map driven locally (no
   // transport), plus its wire-sphere visualizer. Non-null only for that demo.
