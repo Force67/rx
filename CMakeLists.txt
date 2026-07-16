@@ -227,6 +227,7 @@ if(NOT DEFINED RX_MODULES)
     net
     nav
     character
+    inventory
     app
   )
 endif()
@@ -495,6 +496,16 @@ if(RX_BUILD_TESTS AND RX_JOLT)
   add_test(NAME cloth_sim_test COMMAND cloth_sim_test)
   add_test(NAME cloth_feature_off_test COMMAND cloth_sim_test --feature-off)
   set_tests_properties(cloth_feature_off_test PROPERTIES ENVIRONMENT "RX_FEATURES=-physics.cloth")
+endif()
+
+# rx::inventory: stacking/capacity/weight, transfer, equip/unequip, then the
+# world-item lifecycle on real Jolt (drop -> settle -> pick up / hibernate /
+# wake) and save/load roundtrips for inventories AND world items. Headless.
+if(RX_BUILD_TESTS AND RX_JOLT AND "inventory" IN_LIST RX_MODULES)
+  add_executable(inventory_test test/inventory_test.cc)
+  target_link_libraries(inventory_test PRIVATE
+    rx::inventory rx::inventory_world rx::physics rx::scene rx::ecs rx::core)
+  add_test(NAME inventory_test COMMAND inventory_test)
 endif()
 
 # rx::character locomotion + view modes over the real Jolt character controller:
