@@ -2,10 +2,13 @@
 #define RX_EDITOR_APP_H_
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "app/application.h"
@@ -20,6 +23,7 @@
 #include "edit/selection.h"
 #include "edit/undo.h"
 #include "fly_camera.h"
+#include "terrain/terrain.h"
 #include "ugui_backend.h"
 #include "ugui_platform.h"
 
@@ -36,16 +40,18 @@ struct Vec2 {
 };
 
 enum class GizmoMode { kTranslate, kRotate, kScale };
+enum class EditorMode { kSelect, kTerrain, kPlace };
 
 // A content-browser entry discovered by scanning the mounted asset dir.
 struct AssetEntry {
-  std::string path;   // e.g. "assets://meshes/cube.mesh" (display)
-  std::string name;   // basename
-  std::string kind;   // "mesh" / "texture" / "material" / "audio" / "scene"
+  std::string path; // built-in URI or source filesystem path
+  std::string name; // basename
+  std::string
+      kind; // "mesh" / "terrain" / "texture" / "material" / "audio" / "scene"
 };
 
-// A CPU copy of an uploaded mesh, kept for ray-vs-triangle picking (the renderer
-// does not read geometry back).
+// A CPU copy of an uploaded mesh, kept for ray-vs-triangle picking (the
+// renderer does not read geometry back).
 struct MeshRecord {
   asset::Mesh mesh;
   std::string name;
@@ -55,63 +61,112 @@ struct MeshRecord {
 struct Scrub {
   bool active = false;
   ecs::Entity entity;
-  const edit::ComponentDesc* comp = nullptr;
-  const edit::PropDesc* prop = nullptr;
-  int axis = 0;          // 0..3 vector component
-  f32 start_mouse = 0;   // mouse_x at grab
-  f32 base_value = 0;    // value at grab
-  f32 base_euler[3] = {0, 0, 0};  // for quat (rotation) scrubbing
+  const edit::ComponentDesc *comp = nullptr;
+  const edit::PropDesc *prop = nullptr;
+  int axis = 0;                  // 0..3 vector component
+  f32 start_mouse = 0;           // mouse_x at grab
+  f32 base_value = 0;            // value at grab
+  f32 base_euler[3] = {0, 0, 0}; // for quat (rotation) scrubbing
   f32 step = 0.01f;
 };
 
 // Active gizmo drag.
 struct GizmoDrag {
   bool active = false;
-  int axis = -1;         // 0=x,1=y,2=z
+  int axis = -1; // 0=x,1=y,2=z
   Vec3 base_pos{};
   f32 grab_mouse_x = 0, grab_mouse_y = 0;
-  Vec2 axis_screen_dir{};  // normalized screen-space direction of the world axis
+  Vec2 axis_screen_dir{}; // normalized screen-space direction of the world axis
   f32 world_per_pixel = 0.01f;
 };
 
+struct TerrainTileVisual {
+  terrain::TerrainTileKey key;
+  ecs::Entity entity;
+  asset::AssetId mesh;
+};
+
+struct TerrainStroke {
+  bool active = false;
+  terrain::TerrainChange change;
+  Vec3 last_dab{};
+  f32 flatten_target = 0;
+  std::string label;
+};
+
+struct PlacementBrush {
+  bool armed = false;
+  bool dragging = false;
+  asset::AssetId mesh;
+  std::string name;
+  f32 spacing = 1.5f;
+  Vec3 last_position{};
+};
+
 class Editor final : public app::Application {
- public:
+public:
   explicit Editor(std::string open_path) : open_path_(std::move(open_path)) {}
 
-  bool OnInitialize(app::Services& services) override;
+  bool OnInitialize(app::Services &services) override;
   void OnUpdate(f32 dt) override;
-  void OnBuildView(f32 dt, render::FrameView& view) override;
+  void OnBuildView(f32 dt, render::FrameView &view) override;
   void OnFrameEnd() override;
   void OnShutdown() override;
 
- private:
+private:
   // --- scene / assets (editor_app.cc) ---
   void SetupDefaultScene();
-  asset::AssetId UploadPrimitive(const std::string& name, const asset::Mesh& mesh);
-  ecs::Entity SpawnMesh(const std::string& mesh_name, asset::AssetId mesh, const Vec3& pos,
-                        const std::string& label);
+  asset::AssetId UploadPrimitive(const std::string &name,
+                                 const asset::Mesh &mesh);
+  ecs::Entity SpawnMesh(const std::string &mesh_name, asset::AssetId mesh,
+                        const Vec3 &pos, const std::string &label);
   void ScanAssets();
 
   // --- interaction (editor_app.cc) ---
   void UpdateCamera(f32 dt);
   bool CursorOverViewport() const;
-  ecs::Entity PickAt(f32 mx, f32 my) const;  // CPU raycast fallback
-  void BeginScenePick(f32 mx, f32 my);       // engine GPU pick (async) or CPU
-  void PollScenePick();                      // applies an arrived GPU result
+  ecs::Entity PickAt(f32 mx, f32 my) const; // CPU raycast fallback
+  void BeginScenePick(f32 mx, f32 my);      // engine GPU pick (async) or CPU
+  void PollScenePick();                     // applies an arrived GPU result
   void FocusSelection();
   void UpdateScrub();
-  bool TryStartScrub(f32 mx);  // begin a number-field drag (editor_ui.cc)
+  bool TryStartScrub(f32 mx); // begin a number-field drag (editor_ui.cc)
   void UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge);
-  Vec2 ProjectToScreen(const Vec3& world, bool* in_front) const;
+  Vec2 ProjectToScreen(const Vec3 &world, bool *in_front) const;
   Mat4 ViewMatrix() const;
   Mat4 ProjMatrix() const;
+  void PerformUndo();
+  void PerformRedo();
+
+  // --- terrain and surface placement (editor_terrain.cc) ---
+  void SetupDefaultTerrain();
+  void ClearTerrainVisuals();
+  void RebuildTerrainVisuals();
+  void RebuildTerrainTiles(std::span<const terrain::TerrainTileKey> keys,
+                           bool live);
+  ecs::Entity SpawnTerrainTile(terrain::TerrainTileKey key,
+                               asset::AssetId mesh);
+  bool IsTerrainVisual(ecs::Entity entity) const;
+  std::pair<Vec3, Vec3> ViewportCameraRay(f32 mx, f32 my) const;
+  void UpdateModeInteraction(bool lmb_down, bool lmb_edge);
+  void FinishTerrainStroke();
+  void FinishPlacementDrag();
+  void SetEditorMode(EditorMode mode);
+  void AppendInteractionPreview(std::vector<render::DebugLine> *lines) const;
+  void LoadTerrainAsset(const std::string &path);
+  void ArmPlacement(const AssetEntry &asset);
+  asset::AssetId ResolvePlacementMesh(const AssetEntry &asset);
+  void RecordTerrainChange(terrain::TerrainChange change,
+                           const std::string &label);
+  void OnTerrainCommandReplayed(std::span<const terrain::TerrainTileKey> keys);
+  void SyncTerrainRayTracing(std::span<const terrain::TerrainTileKey> keys);
 
   // --- file ops (editor_app.cc) ---
   void NewScene();
-  void DoSave(const std::string& path);
-  void DoLoad(const std::string& path);
+  void DoSave(const std::string &path);
+  void DoLoad(const std::string &path);
   void OpenFileDialog();
-  void RunAutopilot();  // RX_EDITOR_AUTOPILOT smoke driver
+  void RunAutopilot(); // RX_EDITOR_AUTOPILOT smoke driver
 
   // --- ui (editor_ui.cc) ---
   bool UiInit();
@@ -124,43 +179,52 @@ class Editor final : public app::Application {
   std::string BuildInspector();
   std::string BuildContent();
   std::string BuildDialog();
+  std::string BuildModeToolbar();
+  std::string BuildInspectorTabs();
+  std::string BuildTerrainInspector();
+  std::string BuildPlacementInspector();
   void UiHotReloadCheck(f32 dt);
   void UpdateGizmoWidgets();
   void OnUiClick(ugui::wid w, ugui::MouseButton btn);
-  void OnUiTextSubmit(const std::string& widget, const std::string& value);
-  bool RouteClick(const std::string& name, ugui::MouseButton btn);
+  void OnUiTextSubmit(const std::string &widget, const std::string &value);
+  bool RouteClick(const std::string &name, ugui::MouseButton btn);
   void MarkDirty() { ui_dirty_ = true; }
   void SetDocDirty(bool d) { doc_dirty_ = d; }
 
   // helpers
-  const MeshRecord* FindMesh(u64 hash) const;
+  const MeshRecord *FindMesh(u64 hash) const;
   std::string EntityLabel(ecs::Entity e) const;
 
   // --- services ---
-  app::Services* services_ = nullptr;
-  app::Host* host_ = nullptr;
-  Window* window_ = nullptr;
-  render::Renderer* renderer_ = nullptr;
-  ecs::World* world_ = nullptr;
-  InputMap* input_map_ = nullptr;
-  const ActionState* actions_ = nullptr;
-  asset::Vfs* vfs_ = nullptr;
+  app::Services *services_ = nullptr;
+  app::Host *host_ = nullptr;
+  Window *window_ = nullptr;
+  render::Renderer *renderer_ = nullptr;
+  ecs::World *world_ = nullptr;
+  InputMap *input_map_ = nullptr;
+  const ActionState *actions_ = nullptr;
+  asset::Vfs *vfs_ = nullptr;
   bool headless_ = false;
 
-  std::string open_path_;  // scene/gltf passed on argv
+  std::string open_path_; // scene/gltf passed on argv
 
   // --- editor state ---
   FlyCamera camera_;
   edit::Selection selection_;
   edit::UndoStack undo_;
-  std::optional<asset::AssetDatabase> assets_;  // constructed once vfs is known
+  std::optional<asset::AssetDatabase> assets_; // constructed once vfs is known
   GizmoMode gizmo_mode_ = GizmoMode::kTranslate;
+  EditorMode editor_mode_ = EditorMode::kSelect;
   Scrub scrub_;
   GizmoDrag gizmo_drag_;
 
   std::string scene_path_ = "untitled.rxscene";
+  std::string terrain_path_ = "untitled.rxterrain";
   std::string asset_root_ = "assets";
-  bool doc_dirty_ = false;  // scene has unsaved changes
+  bool doc_dirty_ = false; // scene has unsaved changes
+  bool terrain_dirty_ = false;
+  bool terrain_command_replayed_ = false;
+  std::string status_message_;
   bool playing_ = false;
   bool material_tab_ = false;
   bool add_menu_open_ = false;
@@ -171,15 +235,29 @@ class Editor final : public app::Application {
   std::string content_filter_;
 
   std::unordered_map<uint64_t, MeshRecord> meshes_;
-  asset::AssetId cube_mesh_, sphere_mesh_, plane_mesh_;
+  asset::AssetId cube_mesh_, sphere_mesh_, plane_mesh_, terrain_material_;
   std::vector<AssetEntry> assets_list_;
+  std::unordered_map<std::string, asset::AssetId> placement_meshes_;
+
+  terrain::Terrain terrain_;
+  std::map<terrain::TerrainTileKey, TerrainTileVisual> terrain_tiles_;
+  terrain::TerrainBrushMode terrain_brush_mode_ =
+      terrain::TerrainBrushMode::kRaise;
+  f32 terrain_brush_radius_ = 2.0f;
+  f32 terrain_brush_strength_ = 0.18f;
+  f32 terrain_brush_falloff_ = 1.5f;
+  u32 terrain_brush_layer_ = 0;
+  TerrainStroke terrain_stroke_;
+  PlacementBrush placement_;
+  std::optional<terrain::TerrainRayHit> terrain_cursor_hit_;
+  std::optional<Vec3> placement_preview_;
 
   // per-entity tint override (0 = none), for material-tint editing.
   std::unordered_map<uint64_t, uint32_t> tints_;
 
   // Display names live in scene::Name components (the ECS column-relocation
   // bug that corrupted std::string components is fixed on feature/editor-core).
-  void SetName(ecs::Entity e, const std::string& name);
+  void SetName(ecs::Entity e, const std::string &name);
   std::string GetName(ecs::Entity e) const;
 
   // Engine GPU picking: pick_id -> entity map rebuilt each gather, plus the
@@ -204,14 +282,14 @@ class Editor final : public app::Application {
   ui::UguiHostState host_state_;
   ugui::FontHandle font_ = static_cast<ugui::FontHandle>(~0u);
   uint32_t font_revision_ = ~0u;
-  const ugui::DrawData* draw_data_ = nullptr;
+  const ugui::DrawData *draw_data_ = nullptr;
   bool ui_ready_ = false;
-  bool ui_dirty_ = true;    // widget tree needs a rebuild
+  bool ui_dirty_ = true; // widget tree needs a rebuild
   std::string ui_dir_;
   int64_t ui_mtime_ = 0;
   f32 reload_timer_ = 0;
 };
 
-}  // namespace rx::editor
+} // namespace rx::editor
 
-#endif  // RX_EDITOR_APP_H_
+#endif // RX_EDITOR_APP_H_

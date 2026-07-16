@@ -122,9 +122,7 @@ panel root {
 
     panel sep1 { width: 1; height: 22; background: #34373d; margin: 0 8; }
 
-    button tool_translate { class: tool_btn_on; text: "Move"; }
-    button tool_rotate { class: tool_btn; text: "Rot"; }
-    button tool_scale { class: tool_btn; text: "Scl"; }
+    //@@MODES@@
 
     panel spacer { flex-grow: 1; }
 
@@ -213,8 +211,7 @@ panel root {
       panel inspector_tabs {
         class: panel_header;
         padding: 0;
-        button tab_inspector { text: "INSPECTOR"; class: header_label; color: #e6e8ec; padding: 0 16; height: 32; layout: row; align: center; border-color: #5a8dee; border-width: 0 0 2 0; cursor: pointer; }
-        button tab_material { text: "MATERIAL"; class: header_label; padding: 0 16; height: 32; layout: row; align: center; cursor: pointer; :hover { color: #c9ccd2; } }
+        //@@INSPECTOR_TABS@@
       }
       scroll inspector_scroll {
         layout: column; flex-grow: 1; overflow: scroll;
@@ -264,6 +261,7 @@ panel root {
     border-color: #101113; border-width: 1 0 0 0;
     text status_path { text: "untitled.rxscene"; font-size: 11; color: #8a8d93; }
     text status_dirty { text: ""; font-size: 11; color: #e0a05a; }
+    text status_message { text: ""; font-size: 11; color: #d9857e; }
     panel status_spacer { flex-grow: 1; }
     text status_count { text: "0 entities"; font-size: 11; color: #8a8d93; }
     text status_fps { text: "0 FPS"; font-size: 11; color: #63d18a; }

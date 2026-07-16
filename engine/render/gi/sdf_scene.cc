@@ -143,6 +143,16 @@ void SdfScene::Remove(u64 mesh_key) {
   meshes_.erase(mesh_key);
 }
 
+void SdfScene::RemoveDeferred(u64 mesh_key) {
+  MeshSdf* existing = meshes_.find(mesh_key);
+  if (!existing) return;
+  if (existing->sdf) {
+    total_bytes_ -= existing->sdf.size;
+    device_.DestroyBufferDeferred(existing->sdf);
+  }
+  meshes_.erase(mesh_key);
+}
+
 bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   // Re-uploading under an existing key replaces the geometry (Renderer::UploadMesh
   // destroys and rebuilds the GPU buffers), so the old SDF is stale and must be

@@ -18,19 +18,20 @@ using TextureHandle = RhiHandle<struct TextureTag>;
 struct GpuBuffer {
   BufferHandle handle;
   u64 size = 0;
-  void* mapped = nullptr;  // set for host visible buffers
-  u64 address = 0;         // device address, set when created with kBufferUsageDeviceAddress
+  void *mapped = nullptr; // set for host visible buffers
+  u64 address =
+      0; // device address, set when created with kBufferUsageDeviceAddress
 
   explicit operator bool() const { return static_cast<bool>(handle); }
 };
 
 struct GpuImage {
   TextureHandle handle;
-  TextureView view;  // whole-image default view
+  TextureView view; // whole-image default view
   Format format = Format::kUnknown;
   Extent2D extent{};
   u32 mip_levels = 1;
-  u32 samples = 1;  // >1 = multisampled (MSAA geometry targets)
+  u32 samples = 1; // >1 = multisampled (MSAA geometry targets)
 
   explicit operator bool() const { return static_cast<bool>(handle); }
 };
@@ -40,15 +41,16 @@ struct GpuImage {
 struct GpuSubmesh {
   u32 index_offset = 0;
   u32 index_count = 0;
-  u64 material = 0;  // material asset hash, 0 = default material
-  bool blend = false;  // alpha blended: drawn sorted after opaque
-  bool water = false;  // routed to the water pipeline
-  bool alpha_mask = false;  // cutout: non-opaque blas geometry for ray alpha tests
-  bool effect = false;  // unlit emissive vfx (torch flames, glow planes, mist)
-  bool effect_additive = false;  // effect drawn with the additive blend pipeline
+  u64 material = 0;   // material asset hash, 0 = default material
+  bool blend = false; // alpha blended: drawn sorted after opaque
+  bool water = false; // routed to the water pipeline
+  bool alpha_mask =
+      false;           // cutout: non-opaque blas geometry for ray alpha tests
+  bool effect = false; // unlit emissive vfx (torch flames, glow planes, mist)
+  bool effect_additive = false; // effect drawn with the additive blend pipeline
   // lod 0 meshlet range in GpuMesh's meshlet buffers, for the mesh-shader path.
   u32 meshlet_offset = 0;
-  u32 meshlet_count = 0;  // 0 = no meshlets built (skinned / mesh shaders off)
+  u32 meshlet_count = 0; // 0 = no meshlets built (skinned / mesh shaders off)
 };
 
 // An extra level of detail (lods 1+) inside the mesh's concatenated vertex and
@@ -61,31 +63,38 @@ struct GpuLod {
 };
 
 struct GpuMesh {
-  GpuBuffer vertices;  // all lods concatenated
-  GpuBuffer indices;   // all lods concatenated
-  GpuBuffer skinning;      // per-vertex bone indices/weights, set when skinned
+  GpuBuffer vertices; // all lods concatenated
+  GpuBuffer indices;  // all lods concatenated
+  GpuBuffer skinning; // per-vertex bone indices/weights, set when skinned
   // Morph target deltas, read by device address in the mesh vertex shaders:
   // one 36-byte {position, normal, tangent} float3 triple per lod 0 vertex,
   // targets concatenated ([target][vertex]). Empty for unmorphed meshes.
   GpuBuffer morph_deltas;
   u32 morph_target_count = 0;
-  u32 index_count = 0;     // lod 0 index count (shadow / overdraw / blas use lod 0)
-  u32 vertex_count = 0;    // lod 0 vertex count
-  bool all_blend = false;  // pure transparency (water): stays out of the tlas
-  bool no_rt = false;      // grass-like fill geometry, excluded from the tlas
-  bool terrain_lod = false;  // distant terrain proxy, sunk inside the streamed rect
-  bool skinned = false;    // drawn with the skinned pipeline against a bone palette
-  u32 bindless_index = 0;  // mesh record in the bindless registry
-  f32 bounds_center[3] = {0, 0, 0};  // model-space bounding sphere, for gpu culling
-  f32 bounds_radius = 0;             // 0 = unknown, treated as never-culled
+  u32 index_count = 0; // lod 0 index count (shadow / overdraw / blas use lod 0)
+  u32 vertex_count = 0;   // lod 0 vertex count
+  bool all_blend = false; // pure transparency (water): stays out of the tlas
+  bool no_rt = false;     // grass-like fill geometry, excluded from the tlas
+  bool terrain_lod =
+      false; // distant terrain proxy, sunk inside the streamed rect
+  // Vertex-only edits may replace this mesh's vertex buffer without rebuilding
+  // topology, meshlets, or material state. RT geometry is rebuilt when active.
+  bool dynamic_vertices = false;
+  bool skinned =
+      false; // drawn with the skinned pipeline against a bone palette
+  u32 bindless_index = 0; // mesh record in the bindless registry
+  bool bindless_geometry = false;
+  f32 bounds_center[3] = {0, 0,
+                          0}; // model-space bounding sphere, for gpu culling
+  f32 bounds_radius = 0;      // 0 = unknown, treated as never-culled
   // Planar water bounds discovered at upload time. The adaptive ocean path
   // replaces only meshes that are flat in local Y; irregular rivers and
   // waterfalls keep their authored triangles.
   bool planar_water = false;
-  f32 water_bounds[4] = {0, 0, 0, 0};  // local min xz, max xz
+  f32 water_bounds[4] = {0, 0, 0, 0}; // local min xz, max xz
   f32 water_height = 0;
-  base::Vector<GpuSubmesh> submeshes;  // lod 0
-  base::Vector<GpuLod> lods;           // extra lods (1+), selected by distance
+  base::Vector<GpuSubmesh> submeshes; // lod 0
+  base::Vector<GpuLod> lods;          // extra lods (1+), selected by distance
 
   // Opaque-approximation variant of this mesh's alpha-masked (vegetation)
   // submeshes: each masked triangle duplicated and shrunk about its centroid by
@@ -128,6 +137,6 @@ struct GpuMesh {
   bool has_meshlets = false;
 };
 
-}  // namespace rx::render
+} // namespace rx::render
 
-#endif  // RX_RENDER_RHI_RESOURCES_H_
+#endif // RX_RENDER_RHI_RESOURCES_H_

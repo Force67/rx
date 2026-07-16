@@ -87,6 +87,7 @@ class RayTracingContext {
   // build input usage.
   bool BuildBlas(u64 mesh_key, const GpuMesh& mesh);
   void RemoveBlas(u64 mesh_key);
+  void RemoveBlasDeferred(u64 mesh_key);
 
   // Builds the opaque-approximation BLAS for an alpha-masked mesh: a fully
   // OPAQUE structure over the caller-provided (already centroid-shrunk)
@@ -163,7 +164,10 @@ class RayTracingContext {
   explicit RayTracingContext(Device& device) : device_(device) {}
 
   // Shared build path for BuildBlas / BuildApproxBlas (create, build, compact).
-  bool BuildBlasFromGeometries(const base::Vector<AccelTriangles>& geometries, Blas& out);
+  // skip_compaction: dynamic meshes rebuild at stroke boundaries, so the
+  // second blocking compaction submit is wasted work there.
+  bool BuildBlasFromGeometries(const base::Vector<AccelTriangles>& geometries, Blas& out,
+                               bool skip_compaction = false);
   bool EnsureTlasCapacity(Tlas& tlas, u32 instance_count);
   bool EnsureBlasScratch(u64 size);
   void DestroyTlas(Tlas& tlas);

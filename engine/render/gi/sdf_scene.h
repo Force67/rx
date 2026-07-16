@@ -75,6 +75,9 @@ class SdfScene {
   // bursts. Precondition: call only under that idle guarantee (load-time upload),
   // not from an arbitrary mid-frame point.
   void Remove(u64 mesh_key);
+  // Mid-frame variant for dynamic transitions; retires the buffer after
+  // in-flight compose passes complete.
+  void RemoveDeferred(u64 mesh_key);
   const MeshSdf* Find(u64 mesh_key) const { return meshes_.find(mesh_key); }
 
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }

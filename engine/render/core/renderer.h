@@ -14,83 +14,84 @@
 #include "core/export.h"
 #include "core/math.h"
 #include "core/window.h"
-#include "render/screenspace/ambient_occlusion.h"
-#include "render/post/depth_of_field.h"
-#include "render/post/motion_blur.h"
-#include "render/screenspace/reflection_trace.h"
-#include "render/post/antialiasing.h"
-#include "render/core/bindless.h"
-#include "render/post/bloom.h"
-#include "render/gi/ddgi.h"
-#include "render/gi/light_grid.h"
-#include "render/gi/rcgi.h"
-#include "render/gi/sdf_clipmap.h"
-#include "render/gi/sdf_scene.h"
-#include "render/gi/denoiser_nrd.h"
-#include "render/gi/denoiser_rr.h"
-#include "render/post/exposure.h"
-#include "render/atmosphere/environment.h"
-#include "render/geometry/gaussian.h"
-#include "render/pipeline/gpu_cull.h"
-#include "render/core/dynamic_resolution.h"
-#include "render/util/gpu_profiler.h"
-#include "render/pipeline/meshlet.h"
 #include "render/atmosphere/aerial_perspective.h"
 #include "render/atmosphere/clouds.h"
-#include "render/gi/path_tracer.h"
-#include "render/gi/recon_path_tracer.h"
+#include "render/atmosphere/environment.h"
+#include "render/atmosphere/froxel_fog.h"
 #include "render/atmosphere/lightning.h"
 #include "render/atmosphere/precip_occlusion.h"
 #include "render/atmosphere/precip_volume.h"
 #include "render/atmosphere/precipitation.h"
 #include "render/atmosphere/surface_weather.h"
-#include "render/atmosphere/froxel_fog.h"
-#include "render/post/vrs_rate.h"
-#include "render/gi/restir_di.h"
-#include "render/texturing/virtual_texture.h"
-#include "render/pipeline/virtual_geometry.h"
-#include "render/geometry/hair_strands.h"
-#include "render/geometry/ocean_fft.h"
-#include "render/geometry/water_field.h"
-#include "render/geometry/shore_wetting.h"
-#include "render/geometry/water_caustics.h"
-#include "render/geometry/imposters.h"
-#include "render/geometry/instance_store.h"
 #include "render/atmosphere/volumetric_fog.h"
-#include "render/pipeline/material_system.h"
-#include "render/pipeline/mesh_pipeline.h"
-#include "render/post/overdraw.h"
-#include "render/geometry/particle_emitters.h"
-#include "render/geometry/particles.h"
-#include "render/post/post.h"
-#include "render/post/ui_blur.h"
-#include "render/gi/raytracing.h"
-#include "render/gi/rt_instance_cull.h"
+#include "render/core/bindless.h"
+#include "render/core/dynamic_resolution.h"
 #include "render/core/render_graph.h"
-#include "render/rhi/device.h"
-#include "render/rhi/swapchain.h"
 #include "render/core/settings.h"
 #include "render/geometry/fur.h"
+#include "render/geometry/gaussian.h"
+#include "render/geometry/hair_strands.h"
+#include "render/geometry/imposters.h"
+#include "render/geometry/instance_store.h"
+#include "render/geometry/ocean_fft.h"
+#include "render/geometry/particle_emitters.h"
+#include "render/geometry/particles.h"
+#include "render/geometry/shore_wetting.h"
+#include "render/geometry/water.h"
+#include "render/geometry/water_caustics.h"
+#include "render/geometry/water_field.h"
+#include "render/geometry/wboit.h"
+#include "render/gi/ddgi.h"
+#include "render/gi/denoiser_nrd.h"
+#include "render/gi/denoiser_rr.h"
+#include "render/gi/light_grid.h"
 #include "render/gi/local_shadows.h"
+#include "render/gi/path_tracer.h"
+#include "render/gi/raytracing.h"
+#include "render/gi/rcgi.h"
+#include "render/gi/recon_path_tracer.h"
+#include "render/gi/restir_di.h"
+#include "render/gi/rt_instance_cull.h"
+#include "render/gi/sdf_clipmap.h"
+#include "render/gi/sdf_scene.h"
 #include "render/gi/shadow.h"
 #include "render/gi/shadow_trace.h"
-#include "render/geometry/wboit.h"
+#include "render/pipeline/gpu_cull.h"
+#include "render/pipeline/material_system.h"
+#include "render/pipeline/mesh_pipeline.h"
+#include "render/pipeline/meshlet.h"
+#include "render/pipeline/virtual_geometry.h"
+#include "render/post/antialiasing.h"
+#include "render/post/bloom.h"
+#include "render/post/depth_of_field.h"
+#include "render/post/exposure.h"
+#include "render/post/frame_generation.h"
+#include "render/post/motion_blur.h"
+#include "render/post/overdraw.h"
+#include "render/post/post.h"
+#include "render/post/ui_blur.h"
+#include "render/post/upscaler.h"
+#include "render/post/vrs_rate.h"
+#include "render/rhi/device.h"
+#include "render/rhi/swapchain.h"
+#include "render/screenspace/ambient_occlusion.h"
+#include "render/screenspace/reflection_trace.h"
 #include "render/screenspace/ssao.h"
 #include "render/screenspace/ssgi.h"
 #include "render/screenspace/ssr.h"
-#include "render/post/frame_generation.h"
-#include "render/post/upscaler.h"
-#include "render/geometry/water.h"
+#include "render/texturing/virtual_texture.h"
+#include "render/util/gpu_profiler.h"
 
 namespace rx::render {
 
 // Backend-specific device requests for apps that record their own GPU passes
 // through the FrameView scene hooks. Ignored on non-Vulkan backends. rx already
 // enables the whole core / Vulkan 1.1-1.3 feature set the driver reports (so
-// shaderInt8/16/64, storage 8/16-bit, scalar block layout, shaderDrawParameters,
-// multiDrawIndirect, drawIndirectCount, fragmentStoresAndAtomics, samplerAniso
-// are on when supported) plus mesh-shader and ray-query when present; this only
-// covers extra device extensions rx does not itself request.
+// shaderInt8/16/64, storage 8/16-bit, scalar block layout,
+// shaderDrawParameters, multiDrawIndirect, drawIndirectCount,
+// fragmentStoresAndAtomics, samplerAniso are on when supported) plus
+// mesh-shader and ray-query when present; this only covers extra device
+// extensions rx does not itself request.
 struct VulkanDeviceExtras {
   // Enabled if the adapter advertises them; the granted set is reported in
   // Renderer::caps()->extra_extensions.
@@ -104,12 +105,13 @@ struct RendererDesc {
   UpscalerKind upscaler = UpscalerKind::kNone;
   RayTracingSettings raytracing;
   bool enable_raytracing = true;
-  // Build the software-GI (SDF clipmap trace) infrastructure at startup. This is
-  // an IMMUTABLE availability decision that MUST be set before Initialize: the CPU
-  // mesh geometry that voxelises the SDFs is not retained past upload, so the path
-  // cannot be backfilled by a later live toggle. Env RX_SDF / RX_RCGI_SW, or a
-  // non-RT RX_RCGI request, force it on too; hosted apps use this field for the
-  // programmatic equivalent (OnInitialize runs after renderer init, too late).
+  // Build the software-GI (SDF clipmap trace) infrastructure at startup. This
+  // is an IMMUTABLE availability decision that MUST be set before Initialize:
+  // the CPU mesh geometry that voxelises the SDFs is not retained past upload,
+  // so the path cannot be backfilled by a later live toggle. Env RX_SDF /
+  // RX_RCGI_SW, or a non-RT RX_RCGI request, force it on too; hosted apps use
+  // this field for the programmatic equivalent (OnInitialize runs after
+  // renderer init, too late).
   bool software_gi = false;
   VulkanDeviceExtras vulkan;
 };
@@ -117,8 +119,8 @@ struct RendererDesc {
 // Phase at which an app's own GPU pass is recorded into rx's frame. Selects the
 // FrameView hook and the state guarantees the SceneHookContext documents.
 enum class ScenePhase : u8 {
-  kOpaque,       // after rx opaque+sky, before transparency/atmosphere resolve
-  kTransparent,  // after rx transparency, before post/tonemap
+  kOpaque,      // after rx opaque+sky, before transparency/atmosphere resolve
+  kTransparent, // after rx transparency, before post/tonemap
 };
 
 // Handed to a FrameView scene hook. Everything is at RENDER resolution (before
@@ -133,18 +135,18 @@ enum class ScenePhase : u8 {
 // only.
 struct SceneHookContext {
   ScenePhase phase = ScenePhase::kOpaque;
-  CommandList* cmd = nullptr;
-  Device* device = nullptr;
+  CommandList *cmd = nullptr;
+  Device *device = nullptr;
 
   // Color target. kOpaque: rx's scene color (opaque + sky), HDR-linear RGBA16F.
   // kTransparent: the composited scene the app blends its translucents over.
-  const GpuImage* color = nullptr;
+  const GpuImage *color = nullptr;
   TextureView color_view;
   Format color_format = Format::kRGBA16Float;
   // Reversed-Z hardware depth (D32, clear 0 = far) with rx geometry already in
   // it. Depth-test GREATER_OR_EQUAL to interleave with rx geometry; writing it
   // (kOpaque) lets the app's geometry occlude rx's downstream draws too.
-  const GpuImage* depth = nullptr;
+  const GpuImage *depth = nullptr;
   TextureView depth_view;
   Format depth_format = Format::kD32Float;
   // kOpaque only (null in kTransparent): the R32F depth copy rx's depth-aware
@@ -152,12 +154,12 @@ struct SceneHookContext {
   // never sampled (nvidia compression). Write it as a second color attachment
   // (SV_Position.z) so those passes respect the app's opaque geometry; skip it
   // and rx treats those pixels as background behind the effects.
-  const GpuImage* depth_export = nullptr;
+  const GpuImage *depth_export = nullptr;
   TextureView depth_export_view;
   Format depth_export_format = Format::kR32Float;
 
-  Extent2D extent{};        // render resolution
-  u32 frame_slot = 0;       // 0..frames_in_flight-1, index per-slot resources
+  Extent2D extent{};  // render resolution
+  u32 frame_slot = 0; // 0..frames_in_flight-1, index per-slot resources
   u32 frames_in_flight = 1;
 
   // Exactly the matrices rx uses this frame, column-major, UN-jittered (jitter
@@ -167,15 +169,15 @@ struct SceneHookContext {
   Mat4 view = Mat4::Identity();
   Mat4 proj = Mat4::Identity();
   Mat4 view_proj = Mat4::Identity();
-  f32 jitter[2] = {0, 0};   // NDC units (already 2*pixel/dimension)
-  f32 near_plane = 0.1f;    // reversed-Z, infinite far
+  f32 jitter[2] = {0, 0}; // NDC units (already 2*pixel/dimension)
+  f32 near_plane = 0.1f;  // reversed-Z, infinite far
   Vec3 camera_pos{};
 };
 
 struct CameraPose {
   Vec3 eye{0, 0, 3};
   Vec3 target{};
-  f32 fov_y = 1.0472f;  // 60 degrees
+  f32 fov_y = 1.0472f; // 60 degrees
 };
 
 // What the simulation hands the renderer each frame. The engine extracts
@@ -183,7 +185,7 @@ struct CameraPose {
 // previous frame's transform feeds motion vectors; for static or newly
 // spawned objects it equals transform.
 struct DrawItem {
-  u64 mesh = 0;  // AssetId hash of an uploaded mesh
+  u64 mesh = 0; // AssetId hash of an uploaded mesh
   Mat4 transform = Mat4::Identity();
   Mat4 prev_transform = Mat4::Identity();
   // Index of this mesh's first bone in FrameView::bone_matrices, -1 = static.
@@ -221,7 +223,7 @@ struct PickResult {
 
 struct FrameView {
   CameraPose camera;
-  f32 frame_delta_seconds = 1.0f / 60.0f;  // upscalers want real frame time
+  f32 frame_delta_seconds = 1.0f / 60.0f; // upscalers want real frame time
   // World-space rect (min_x, min_z, max_x, max_z) covering the fully streamed
   // terrain cells. Distant terrain-LOD draws sink their vertices inside it so
   // the coarse proxy never bridges above the real land. All zeros = disabled.
@@ -240,7 +242,8 @@ struct FrameView {
   // Live billboard particles for this frame (engine-simulated). Drawn lit and
   // soft-faded over the resolved scene before reconstruction.
   base::Vector<ParticleInstance> particles;
-  bool particles_emissive = false;  // route the set through HDR additive blending
+  bool particles_emissive =
+      false; // route the set through HDR additive blending
   // gpu-simulated particle fountain: when count > 0, the renderer steps the
   // simulation on the gpu (compute) and draws it, instead of the cpu particles.
   u32 gpu_particle_count = 0;
@@ -263,29 +266,32 @@ struct FrameView {
   // Recorded inside the final ui pass with the backbuffer bound as the
   // color attachment. hud_draw (the libultragui HUD/menu) records first, then
   // ui_draw (the debug ImGui overlay) on top.
-  std::function<void(CommandList&)> hud_draw;
-  std::function<void(CommandList&)> ui_draw;
+  std::function<void(CommandList &)> hud_draw;
+  std::function<void(CommandList &)> ui_draw;
 
-  // App-provided GPU passes recorded into the scene, depth-interleaved with rx's
-  // own geometry (a game with its own GPU-driven pipeline: compute cull, multi-
-  // draw-indirect, mesh/ray-query passes, ...). scene_opaque fires after rx's
-  // opaque+sky and before transparency/atmosphere; scene_transparent after rx
-  // transparency and before post/tonemap. Each runs inside a first-class render-
-  // graph pass (so barriers are handled) and only when set, on the Vulkan
-  // backend. Zero cost when unset: no pass is added. See SceneHookContext.
-  std::function<void(const SceneHookContext&)> scene_opaque;
-  std::function<void(const SceneHookContext&)> scene_transparent;
+  // App-provided GPU passes recorded into the scene, depth-interleaved with
+  // rx's own geometry (a game with its own GPU-driven pipeline: compute cull,
+  // multi- draw-indirect, mesh/ray-query passes, ...). scene_opaque fires after
+  // rx's opaque+sky and before transparency/atmosphere; scene_transparent after
+  // rx transparency and before post/tonemap. Each runs inside a first-class
+  // render- graph pass (so barriers are handled) and only when set, on the
+  // Vulkan backend. Zero cost when unset: no pass is added. See
+  // SceneHookContext.
+  std::function<void(const SceneHookContext &)> scene_opaque;
+  std::function<void(const SceneHookContext &)> scene_transparent;
 
-  // Debug line lists for this frame (non-owning; valid for the RenderFrame call).
-  // debug_lines are depth-tested against the resolved scene depth; overlay lines
-  // draw on top. Both are drawn just before the UI pass. Empty = no line pass.
+  // Debug line lists for this frame (non-owning; valid for the RenderFrame
+  // call). debug_lines are depth-tested against the resolved scene depth;
+  // overlay lines draw on top. Both are drawn just before the UI pass. Empty =
+  // no line pass.
   std::span<const DebugLine> debug_lines;
   std::span<const DebugLine> debug_lines_overlay;
 
-  // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI sets
-  // needs_blur so the renderer captures + blurs the backbuffer before the ui
-  // pass and writes the result here for hud_draw to bind. blur_source/sampler
-  // are filled by the renderer inside the ui pass, just before hud_draw runs.
+  // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI
+  // sets needs_blur so the renderer captures + blurs the backbuffer before the
+  // ui pass and writes the result here for hud_draw to bind.
+  // blur_source/sampler are filled by the renderer inside the ui pass, just
+  // before hud_draw runs.
   bool needs_blur = false;
   // Filled by the renderer during the (const) frame record, hence mutable.
   mutable TextureView blur_source;
@@ -315,12 +321,12 @@ struct FrameView {
 };
 
 class RX_RENDER_EXPORT Renderer {
- public:
+public:
   Renderer();
   ~Renderer();
 
-  bool Initialize(const RendererDesc& desc, Window& window);
-  void RenderFrame(const FrameView& view);
+  bool Initialize(const RendererDesc &desc, Window &window);
+  void RenderFrame(const FrameView &view);
   void Shutdown();
   void WaitIdle();
 
@@ -334,7 +340,7 @@ class RX_RENDER_EXPORT Renderer {
 
   // Saves the next presented frame as png. Also armed by the
   // RX_SCREENSHOT env var ("path.png:seconds") for headless captures.
-  void CaptureScreenshot(const std::string& path);
+  void CaptureScreenshot(const std::string &path);
 
   // Editor picking. RequestPick arms an entity-id pass for the next frame that
   // rasterizes the opaque draw list into an R32_UINT target and reads back the
@@ -350,26 +356,39 @@ class RX_RENDER_EXPORT Renderer {
   // paths (e.g. two games that both ship "meshes/...") do not overwrite each
   // other; entities must carry the salted id in their Renderable. Zero (the
   // default/primary domain) leaves the key unchanged.
-  bool UploadMesh(const asset::Mesh& mesh, u64 id_salt = 0);
+  bool UploadMesh(const asset::Mesh &mesh, u64 id_salt = 0);
+  // Replaces only lod-0 vertices for a mesh uploaded with dynamic_vertices.
+  // Topology and vertex count must match. The old buffer retires after
+  // in-flight frames finish, so terrain brushes do not force a device-wide
+  // idle.
+  bool UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt = 0);
+  // Restores RT participation after a batch of live dynamic updates. This can
+  // submit a BLAS build, so editors call it once at stroke boundaries.
+  bool SyncDynamicMeshRayTracing(const asset::Mesh &mesh, u64 id_salt = 0);
+  // Retires a dynamic mesh's GPU buffers after in-flight frames complete.
+  // Static meshes may own RT/SDF registrations and are intentionally rejected.
+  bool RemoveDynamicMesh(asset::AssetId mesh, u64 id_salt = 0);
   // Persistent, opaque static instance groups. A group is mesh-homogeneous and
   // should cover one spatial streaming unit (for example one world cell), which
   // gives the renderer group-level frustum culling and one hardware-instanced
   // draw per material/LOD instead of one draw and ECS entity per placement.
   // Updates preserve object motion by treating overlapping array indices as
   // stable identities; newly appended indices spawn with zero object velocity.
-  InstanceGroupHandle CreateInstanceGroup(u64 mesh, std::span<const Mat4> transforms);
-  bool UpdateInstanceGroup(InstanceGroupHandle handle, std::span<const Mat4> transforms);
+  InstanceGroupHandle CreateInstanceGroup(u64 mesh,
+                                          std::span<const Mat4> transforms);
+  bool UpdateInstanceGroup(InstanceGroupHandle handle,
+                           std::span<const Mat4> transforms);
   void DestroyInstanceGroup(InstanceGroupHandle handle);
   // Same per-domain salt as UploadMesh; it must match so a mesh's submesh
   // material references resolve to this domain's materials/textures.
-  bool UploadTexture(const asset::Texture& texture, u64 id_salt = 0);
-  bool UploadMaterial(const asset::Material& material, u64 id_salt = 0);
-  // Builds + uploads a mesh for the mesh-shader meshlet path (the --demo meshlet
-  // scene draws it instead of the normal raster geometry).
-  void UploadMeshletMesh(const asset::Mesh& mesh);
+  bool UploadTexture(const asset::Texture &texture, u64 id_salt = 0);
+  bool UploadMaterial(const asset::Material &material, u64 id_salt = 0);
+  // Builds + uploads a mesh for the mesh-shader meshlet path (the --demo
+  // meshlet scene draws it instead of the normal raster geometry).
+  void UploadMeshletMesh(const asset::Mesh &mesh);
   // Builds the cluster-DAG LOD hierarchy and activates the virtual-geometry
   // demo pass (--demo vgeo).
-  void UploadVirtualGeometryMesh(const asset::Mesh& mesh);
+  void UploadVirtualGeometryMesh(const asset::Mesh &mesh);
   // World transforms the virtual-geometry mesh draws with (default: one
   // identity instance). The gpu culls every cluster of every instance.
   void SetVirtualGeometryInstances(std::span<const Mat4> transforms);
@@ -383,35 +402,38 @@ class RX_RENDER_EXPORT Renderer {
   // forward every frame or on change. Empty span disables classification.
   void SetInteriorVolumes(std::span<const InteriorVolume> volumes);
   // Seeds simulated hair strands on a head sphere (--demo strands).
-  void SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 strands, f32 length);
+  void SeedHairStrands(const Vec3 &head_center, f32 head_radius, u32 strands,
+                       f32 length);
   // Builds simulated guide strands from a real hair mesh and places the groom
   // via `transform` (later: a head bone). Returns a handle (0 = failure). The
   // groom-local frame has the scalp at the origin, engine units, Y-up.
-  u32 CreateHairGroom(const asset::Mesh& hair_mesh, const GroomParams& params,
-                      const Mat4& transform);
+  u32 CreateHairGroom(const asset::Mesh &hair_mesh, const GroomParams &params,
+                      const Mat4 &transform);
   // Same, from an already-built groom (procedural test grooms, callers that
   // also feed the groom data to the physics strand sim).
-  u32 CreateHairGroom(const GroomData& data, const GroomParams& params, const Mat4& transform);
-  void SetHairGroomTransform(u32 id, const Mat4& transform);
+  u32 CreateHairGroom(const GroomData &data, const GroomParams &params,
+                      const Mat4 &transform);
+  void SetHairGroomTransform(u32 id, const Mat4 &transform);
   // This frame's simulated node positions (world xyz, strand-major), read
   // back from the physics strand groom; see app::HairStrandBinding.
-  void SetHairGroomPoints(u32 id, const f32* positions, u32 count);
-  void SetHairGroomTint(u32 id, const Vec3& tint);
+  void SetHairGroomPoints(u32 id, const f32 *positions, u32 count);
+  void SetHairGroomTint(u32 id, const Vec3 &tint);
   void DestroyHairGroom(u32 id);
   // World-space head collision sphere of a groom, for aligning a head mesh.
-  bool HairGroomHead(u32 id, Vec3* center, f32* radius);
+  bool HairGroomHead(u32 id, Vec3 *center, f32 *radius);
   // Bakes an octahedral imposter of the mesh and sets the distant instances
   // drawn as billboards (--demo imposters).
-  void BakeImposter(const asset::Mesh& mesh, std::span<const ImposterPass::Instance> instances);
+  void BakeImposter(const asset::Mesh &mesh,
+                    std::span<const ImposterPass::Instance> instances);
 
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.
-  RenderSettings& settings() { return settings_; }
+  RenderSettings &settings() { return settings_; }
   // Points the clustered decal system at an uploaded texture (the atlas).
   void SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas = {});
 
-  const DeviceCaps* caps() const;
-  Device* device() { return device_.get(); }
+  const DeviceCaps *caps() const;
+  Device *device() { return device_.get(); }
   Format swapchain_format() const;
   u32 swapchain_image_count() const;
   u32 render_width() const { return render_width_; }
@@ -425,10 +447,10 @@ class RX_RENDER_EXPORT Renderer {
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }
   size_t instance_group_count() const { return instances_.group_count(); }
   size_t instance_count() const { return instances_.instance_count(); }
-  const MaterialSystem* materials() const { return material_system_.get(); }
+  const MaterialSystem *materials() const { return material_system_.get(); }
 
   // Per-pass GPU timings from the last resolved frame, for the debug overlay.
-  const base::Vector<GpuProfiler::PassTiming>& pass_timings() const {
+  const base::Vector<GpuProfiler::PassTiming> &pass_timings() const {
     return profiler_.results();
   }
   f32 gpu_frame_ms() const { return profiler_.total_ms(); }
@@ -439,10 +461,12 @@ class RX_RENDER_EXPORT Renderer {
 
   // Last compiled frame graph, for the debug inspector (passes, transient
   // resources, barrier and memory totals).
-  const RenderGraph::Stats& graph_stats() const { return graph_.stats(); }
+  const RenderGraph::Stats &graph_stats() const { return graph_.stats(); }
   // Stats collection costs per-pass string copies each frame; the debug UI
   // turns it on only while its inspector is visible.
-  void set_graph_stats_enabled(bool enabled) { graph_.set_stats_enabled(enabled); }
+  void set_graph_stats_enabled(bool enabled) {
+    graph_.set_stats_enabled(enabled);
+  }
   // Drops app-provided pass callbacks retained by the last compiled frame.
   // Call only after the device is idle.
   void ClearFrameCallbacks();
@@ -457,7 +481,7 @@ class RX_RENDER_EXPORT Renderer {
   u32 meshlets_total() const { return meshlet_.meshlet_count(); }
   u32 meshlets_visible() const { return meshlet_visible_; }
 
- private:
+private:
   static constexpr u32 kFramesInFlight = Device::kMaxFramesInFlight;
   static constexpr Format kSceneColorFormat = Format::kRGBA16Float;
   static constexpr Format kMotionFormat = Format::kRG16Float;
@@ -469,11 +493,13 @@ class RX_RENDER_EXPORT Renderer {
   // Per frame-in-flight host-visible buffers. Command recording, sync and the
   // transient descriptor pools live inside the rhi Device's frame ring.
   struct FrameResources {
-    GpuBuffer globals;       // host visible FrameGlobals
-    GpuBuffer bone_palette;  // host visible skinning matrices, read by device address
-    GpuBuffer morph_weights;  // host visible MorphWeight pairs, read by device address
-    GpuBuffer lights;        // host visible PointLight array
-    GpuBuffer decals;        // host visible Decal array
+    GpuBuffer globals; // host visible FrameGlobals
+    GpuBuffer
+        bone_palette; // host visible skinning matrices, read by device address
+    GpuBuffer
+        morph_weights; // host visible MorphWeight pairs, read by device address
+    GpuBuffer lights;  // host visible PointLight array
+    GpuBuffer decals;  // host visible Decal array
   };
   // Max bones across all skinned draws in one frame.
   static constexpr u32 kMaxFrameBones = 8192;
@@ -492,26 +518,28 @@ class RX_RENDER_EXPORT Renderer {
   void ResizeSizedPasses();
   void ApplySettings();
   bool CreateUpscalerForSettings();
-  void BuildFrameGraph(FrameResources& frame, u32 image_index, const FrameView& view);
+  void BuildFrameGraph(FrameResources &frame, u32 image_index,
+                       const FrameView &view);
   // Records the frame's opaque casters depth-only with ShadowPass's caster
   // pipelines (static/skinned/instanced, masked + opaque variants). Shared by
   // the sun cascade render and the precipitation sky-occlusion map.
-  void RecordDepthOnlyScene(CommandList& cmd, const Mat4& light_view_proj,
-                            const FrameResources& frame, const FrameView& view);
+  void RecordDepthOnlyScene(CommandList &cmd, const Mat4 &light_view_proj,
+                            const FrameResources &frame, const FrameView &view);
   // Builds the blas + bindless geometry for grass-like (no_rt) meshes uploaded
-  // while path tracing was off, so enabling it later still gets the alpha-tested
-  // foliage into the tlas. Idempotent (skips already-built meshes).
-  void EnsureRayTracingGeometry();
+  // while path tracing was off, so enabling it later still gets the
+  // alpha-tested foliage into the tlas. Idempotent (skips already-built
+  // meshes).
+  bool EnsureRayTracingGeometry();
   // Lazily builds the BLAS + bindless mesh record for a non-zero distance LOD
   // of an already-uploaded RT mesh (RX_RT_LOD_NEAR). Idempotent; returns the
   // LOD's bindless index (custom_index for the TLAS instance) or kInvalidIndex
   // when the LOD has no RT geometry / cannot be built (caller falls back to
   // LOD0). Called at frame-build time, so a one-time build stall is acceptable.
-  u32 EnsureLodRtGeometry(u64 mesh_key, GpuMesh& mesh, u32 lod);
+  u32 EnsureLodRtGeometry(u64 mesh_key, GpuMesh &mesh, u32 lod);
 
   RendererDesc desc_;
   RenderSettings settings_;
-  Window* window_ = nullptr;
+  Window *window_ = nullptr;
   // The HDR request the current swapchain was built with; when WantHdrSwapchain
   // diverges (OS toggle flipped, setting changed) the frame loop rebuilds.
   bool swapchain_hdr_request_ = false;
@@ -519,28 +547,35 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<Swapchain> swapchain_;
   std::unique_ptr<TransientPool> transient_pool_;
   std::unique_ptr<BindlessRegistry> bindless_;
+  base::Vector<u32> retired_bindless_meshes_[kFramesInFlight];
   std::unique_ptr<MaterialSystem> material_system_;
   std::unique_ptr<EnvironmentSystem> environment_;
   std::unique_ptr<DdgiSystem> ddgi_;
-  std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI), lazily created
-  bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
-  bool rcgi_sw_unavailable_logged_ = false;  // logged the "no startup SDF path" notice once
-  bool rcgi_env_overridden_ = false;  // RX_RCGI was set explicitly (wins over preset both ways)
-  LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
-  base::Vector<InteriorVolume> interior_volumes_;  // forwarded to rcgi each active frame (item 9b)
+  std::unique_ptr<RcgiSystem>
+      rcgi_; // idTech8-style radiance-cached GI (RX_RCGI), lazily created
+  bool rcgi_create_failed_ = false; // lazy creation failed once; do not retry
+  bool rcgi_sw_unavailable_logged_ =
+      false; // logged the "no startup SDF path" notice once
+  bool rcgi_env_overridden_ =
+      false;             // RX_RCGI was set explicitly (wins over preset both ways)
+  LightGrid light_grid_; // world-space light grid feeding the rcgi cache
+  base::Vector<InteriorVolume>
+      interior_volumes_; // forwarded to rcgi each active frame (item 9b)
   // SDF software-trace infrastructure (RX_SDF / software_gi): per-mesh SDFs +
-  // global clipmap. Both null unless the path was enabled at startup, so with it
-  // off nothing is generated/allocated. `sdf_available_` is the IMMUTABLE startup
-  // availability bit, decided once in Initialize and gated on creation success --
-  // separate from any live RenderSettings toggle, so applying a quality preset can
-  // never turn the seeded software path off (see RendererDesc::software_gi).
+  // global clipmap. Both null unless the path was enabled at startup, so with
+  // it off nothing is generated/allocated. `sdf_available_` is the IMMUTABLE
+  // startup availability bit, decided once in Initialize and gated on creation
+  // success -- separate from any live RenderSettings toggle, so applying a
+  // quality preset can never turn the seeded software path off (see
+  // RendererDesc::software_gi).
   bool sdf_available_ = false;
   std::unique_ptr<SdfScene> sdf_scene_;
   std::unique_ptr<SdfClipmap> sdf_clipmap_;
   std::unique_ptr<WaterPass> water_;
   std::unique_ptr<MeshPipeline> mesh_pipeline_;
   std::unique_ptr<PostPass> post_;
-  std::unique_ptr<UiBlurPass> ui_blur_;  // frosted-glass backdrop blur for the UI
+  std::unique_ptr<UiBlurPass>
+      ui_blur_; // frosted-glass backdrop blur for the UI
   base::UnorderedMap<u64, GpuMesh> meshes_;
   FrameResources frames_[kFramesInFlight];
   // Per-slot persistent sets, rewritten each frame once the slot's fence fired:
@@ -549,7 +584,7 @@ class RX_RENDER_EXPORT Renderer {
   BindingSetHandle globals_sets_[kFramesInFlight];
   BindingSetHandle env_scene_sets_[kFramesInFlight];
   BindingSetHandle env_transparent_sets_[kFramesInFlight];
-  BindingSetHandle env_prepass_sets_[kFramesInFlight];  // dummies + ocean maps
+  BindingSetHandle env_prepass_sets_[kFramesInFlight]; // dummies + ocean maps
   std::unique_ptr<Upscaler> upscaler_;
   // FSR3 frame generation (RX_FRAMEGEN): lazily created when the FSR3
   // upscaler is active (its dilated guides are reused); the present-rate
@@ -557,7 +592,8 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<FrameGenerator> framegen_;
   bool framegen_attempted_ = false;
   bool framegen_was_active_ = false;
-  bool fg_active_frame_ = false;  // this frame interpolates; BuildFrameGraph adds the hudless copy
+  bool fg_active_frame_ =
+      false; // this frame interpolates; BuildFrameGraph adds the hudless copy
   u32 fg_presents_ = 0;
   u32 fg_engine_frames_ = 0;
   f64 fg_log_time_ = 0.0;
@@ -573,11 +609,11 @@ class RX_RENDER_EXPORT Renderer {
   DepthOfFieldPass dof_;
   LocalShadows local_shadows_;
   FroxelFog froxel_fog_;
-  bool local_shadows_active_ = false;  // faces assigned this frame
+  bool local_shadows_active_ = false; // faces assigned this frame
   VrsRatePass vrs_;
   RestirDi restir_di_;
   VirtualTexture virtual_texture_;
-  bool vrs_active_ = false;  // rate image attached to this frame's scene pass
+  bool vrs_active_ = false; // rate image attached to this frame's scene pass
   PipelineHandle light_cluster_pipeline_;
   PipelineHandle contact_shadow_pipeline_;
   PipelineHandle cloud_shadow_pipeline_;
@@ -638,13 +674,15 @@ class RX_RENDER_EXPORT Renderer {
   WaterCaustics water_caustics_;
   ImposterPass imposters_;
   InstanceStore instances_;
-  bool fft_ocean_active_ = false;  // maps valid + flag set this frame
-  bool water_field_active_ = false;  // ring field valid + flag set this frame
-  bool shore_wetting_active_ = false;  // shore wetting field valid this frame
-  bool water_caustics_active_ = false;  // caustic map valid + flag set this frame
-  GpuImage ms_dummy_hiz_;  // 1x1 fallback bound to the mesh-shader cull when occlusion is off
+  bool fft_ocean_active_ = false;     // maps valid + flag set this frame
+  bool water_field_active_ = false;   // ring field valid + flag set this frame
+  bool shore_wetting_active_ = false; // shore wetting field valid this frame
+  bool water_caustics_active_ =
+      false;              // caustic map valid + flag set this frame
+  GpuImage ms_dummy_hiz_; // 1x1 fallback bound to the mesh-shader cull when
+                          // occlusion is off
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
-  f32 pt_prev_sig_ = 0;  // lighting signature; change resets accumulation
+  f32 pt_prev_sig_ = 0; // lighting signature; change resets accumulation
   u64 scene_revision_ = 0;
   u64 pt_prev_scene_revision_ = 0;
   bool pt_was_active_ = false;
@@ -652,9 +690,11 @@ class RX_RENDER_EXPORT Renderer {
   // -1 none). Switching mode must reset accumulation: each mode reprojects its
   // own history buffers, which the other modes never wrote.
   int pt_prev_mode_ = -1;
-  // A no_rt (foliage) mesh was uploaded while path tracing was off, so it has no
-  // blas yet; EnsureRayTracingGeometry catches it up when path tracing turns on.
+  // A no_rt (foliage) mesh was uploaded while path tracing was off, so it has
+  // no blas yet; EnsureRayTracingGeometry catches it up when path tracing turns
+  // on.
   bool rt_foliage_dirty_ = false;
+  bool rt_geometry_dirty_ = false;
 
   // Settings already in effect, diffed against settings_ each frame.
   UpscalerKind applied_upscaler_ = UpscalerKind::kNone;
@@ -669,8 +709,8 @@ class RX_RENDER_EXPORT Renderer {
   // standard single-sampled path). Diverging from the settings-derived value
   // rebuilds them through a device idle, like an upscaler swap.
   u32 applied_msaa_samples_ = 1;
-  PipelineHandle msaa_resolve_pipeline_;  // sample-0 guide resolve (compute)
-  PipelineHandle depth_copy_pipeline_;    // rebuilds 1x hw depth post-resolve
+  PipelineHandle msaa_resolve_pipeline_; // sample-0 guide resolve (compute)
+  PipelineHandle depth_copy_pipeline_;   // rebuilds 1x hw depth post-resolve
   AntiAliasingMode applied_aa_ = AntiAliasingMode::kTaa;
   bool applied_vsync_ = false;
   // Sun state baked into the environment maps; differing means regenerate.
@@ -685,34 +725,35 @@ class RX_RENDER_EXPORT Renderer {
   // Editor debug-line pass: a line-list pipeline (lazily built) drawing
   // FrameView::debug_lines/overlay from per-frame host-visible vertex buffers.
   void BuildDebugLinePipelines();
-  void DrawDebugLines(CommandList& cmd, const FrameView& view, const Mat4& view_proj,
-                      Extent2D extent);
-  PipelineHandle debug_line_pipeline_;          // depth-tested
-  PipelineHandle debug_line_overlay_pipeline_;  // always on top
-  GpuBuffer debug_line_vbo_[kFramesInFlight];   // host-visible, one per slot
-  u32 debug_line_vbo_capacity_[kFramesInFlight] = {};  // in vertices
+  void DrawDebugLines(CommandList &cmd, const FrameView &view,
+                      const Mat4 &view_proj, Extent2D extent);
+  PipelineHandle debug_line_pipeline_;         // depth-tested
+  PipelineHandle debug_line_overlay_pipeline_; // always on top
+  GpuBuffer debug_line_vbo_[kFramesInFlight];  // host-visible, one per slot
+  u32 debug_line_vbo_capacity_[kFramesInFlight] = {}; // in vertices
 
   // Editor picking: an R32_UINT id pass over the opaque draws, read back at the
-  // requested pixel. A request arms the id pass for the next rendered frame; the
-  // readback is synchronous within that frame and the result is queued for
+  // requested pixel. A request arms the id pass for the next rendered frame;
+  // the readback is synchronous within that frame and the result is queued for
   // TakePickResult (a rare editor operation, so the stall is acceptable).
-  void RenderPickPass(const FrameView& view);
+  void RenderPickPass(const FrameView &view);
   bool pick_requested_ = false;
   u32 pick_x_ = 0, pick_y_ = 0;
   bool pick_result_ready_ = false;
   u32 pick_result_id_ = 0;
   PipelineHandle pick_pipeline_;
-  GpuImage pick_id_image_;     // R32_UINT, render resolution
-  GpuImage pick_depth_image_;  // D32, render resolution
+  GpuImage pick_id_image_;    // R32_UINT, render resolution
+  GpuImage pick_depth_image_; // D32, render resolution
   u32 pick_image_w_ = 0, pick_image_h_ = 0;
 
-  void WriteBackbufferPng(const std::string& path, u32 image_index);
+  void WriteBackbufferPng(const std::string &path, u32 image_index);
   void WriteScreenshot(u32 image_index);
-  void DumpFgImage(const GpuImage& image, ResourceState state, bool bgra, const char* path);
-  void WriteHdr();  // reads back the captured linear hdr buffer to a .hdr file
+  void DumpFgImage(const GpuImage &image, ResourceState state, bool bgra,
+                   const char *path);
+  void WriteHdr(); // reads back the captured linear hdr buffer to a .hdr file
 
   std::string screenshot_path_;
-  f64 screenshot_at_ = -1;  // seconds; <0 means immediately when armed
+  f64 screenshot_at_ = -1; // seconds; <0 means immediately when armed
 
   // Frame-burst capture (RX_SEQ=prefix:startsec:count[:stride]) for stitching
   // an animation clip from the inbuilt framebuffer capture.
@@ -726,9 +767,10 @@ class RX_RENDER_EXPORT Renderer {
   // Linear-hdr frame export (radiance .hdr). RX_HDR=<path>[:seconds].
   std::string hdr_path_;
   f64 hdr_at_ = -1;
-  bool hdr_pending_ = false;  // the copy pass ran this frame; read it back after submit
+  bool hdr_pending_ =
+      false; // the copy pass ran this frame; read it back after submit
   u32 hdr_width_ = 0, hdr_height_ = 0;
-  GpuBuffer hdr_readback_;  // host-visible rgba32f, one float4 per pixel
+  GpuBuffer hdr_readback_; // host-visible rgba32f, one float4 per pixel
   PipelineHandle hdr_pipeline_;
   Mat4 prev_view_proj_ = Mat4::Identity();
   Mat4 prev_view_ = Mat4::Identity();
@@ -737,17 +779,19 @@ class RX_RENDER_EXPORT Renderer {
   f64 time_seconds_ = 0;
   bool has_prev_frame_ = false;
   bool rt_available_ = false;
-  bool rcgi_force_software_ = false;  // RX_RCGI_SW: force the SDF software tracer
+  bool rcgi_force_software_ =
+      false; // RX_RCGI_SW: force the SDF software tracer
   u32 frame_index_ = 0;
-  u32 cull_total_commands_ = 0;  // opaque indirect draws this frame
-  u32 cull_visible_ = 0;         // survivors from the last completed cull (fence-safe)
-  u32 meshlet_visible_ = 0;      // survivors of the last meshlet cluster cull (fence-safe)
+  u32 cull_total_commands_ = 0; // opaque indirect draws this frame
+  u32 cull_visible_ = 0; // survivors from the last completed cull (fence-safe)
+  u32 meshlet_visible_ =
+      0; // survivors of the last meshlet cluster cull (fence-safe)
   u32 render_width_ = 0;
   u32 render_height_ = 0;
   u32 output_width_ = 0;
   u32 output_height_ = 0;
 };
 
-}  // namespace rx::render
+} // namespace rx::render
 
-#endif  // RX_RENDER_RENDERER_H_
+#endif // RX_RENDER_RENDERER_H_

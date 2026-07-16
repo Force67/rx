@@ -85,14 +85,13 @@ void RayTracingContext::DestroyTlas(Tlas& tlas) {
 }
 
 bool RayTracingContext::BuildBlasFromGeometries(
-    const base::Vector<AccelTriangles>& geometries, Blas& out) {
+    const base::Vector<AccelTriangles>& geometries, Blas& out, bool skip_compaction) {
   if (geometries.empty()) return false;
 
-  // Compaction runs when the backend has the size query (vulkan; d3d12 stubs
-  // it and keeps the full-size structure). Meshes upload once, so the extra
-  // blocking submit happens at load time, and static BLAS memory typically
-  // shrinks to roughly half.
-  AccelCompactionQueryHandle query = device_.CreateCompactionQuery(1);
+  // Static meshes compact once after upload. Dynamic terrain is rebuilt at
+  // stroke boundaries, so avoid a second blocking submit for compaction there.
+  AccelCompactionQueryHandle query =
+      skip_compaction ? AccelCompactionQueryHandle{} : device_.CreateCompactionQuery(1);
   BlasBuildDesc desc{.geometries = {geometries.data(), geometries.size()},
                      .allow_compaction = static_cast<bool>(query)};
   AccelSizes sizes = device_.GetBlasSizes(desc);
@@ -148,7 +147,7 @@ bool RayTracingContext::BuildBlas(u64 mesh_key, const GpuMesh& mesh) {
 
   base::Vector<AccelTriangles> geometries = BlasGeometries(mesh);
   Blas blas;
-  if (!BuildBlasFromGeometries(geometries, blas)) return false;
+  if (!BuildBlasFromGeometries(geometries, blas, mesh.dynamic_vertices)) return false;
   blas_.emplace(mesh_key, blas);
   return true;
 }
@@ -207,6 +206,13 @@ void RayTracingContext::RemoveLodBlas(u64 mesh_key) {
     if (blas.handle) device_.DestroyAccelStruct(blas.handle);
   lod_blas_.erase(mesh_key);
   slot_tracker_.InvalidateBuilds();
+}
+
+void RayTracingContext::RemoveBlasDeferred(u64 mesh_key) {
+  Blas* blas = blas_.find(mesh_key);
+  if (!blas) return;
+  if (blas->handle) device_.DestroyAccelStructDeferred(blas->handle);
+  blas_.erase(mesh_key);
 }
 
 bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {

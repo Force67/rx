@@ -12,6 +12,7 @@
 #include "asset/mesh.h"
 #include "asset/texture.h"
 #include "asset/vfs.h"
+#include "core/export.h"
 
 namespace rx::asset {
 
@@ -19,46 +20,53 @@ namespace rx::asset {
 // registers converters for its formats (e.g. a Bethesda module registers .nif,
 // .dds, .bgsm and friends). Keyed by extension so new formats plug in without
 // touching this module. The normalized source path rides along for converters
-// that key behavior off naming conventions (e.g. _n.dds normal maps stay linear).
-using MeshConverter =
-    std::function<base::UniquePointer<Mesh>(ByteSpan, AssetId, std::string_view path)>;
-using TextureConverter =
-    std::function<base::UniquePointer<Texture>(ByteSpan, AssetId, std::string_view path)>;
-using MaterialConverter =
-    std::function<base::UniquePointer<Material>(ByteSpan, AssetId, std::string_view path)>;
+// that key behavior off naming conventions (e.g. _n.dds normal maps stay
+// linear).
+using MeshConverter = std::function<base::UniquePointer<Mesh>(
+    ByteSpan, AssetId, std::string_view path)>;
+using TextureConverter = std::function<base::UniquePointer<Texture>(
+    ByteSpan, AssetId, std::string_view path)>;
+using MaterialConverter = std::function<base::UniquePointer<Material>(
+    ByteSpan, AssetId, std::string_view path)>;
 
-class AssetDatabase {
- public:
-  explicit AssetDatabase(Vfs& vfs) : vfs_(vfs) {}
+class RX_ASSET_EXPORT AssetDatabase {
+public:
+  explicit AssetDatabase(Vfs &vfs) : vfs_(vfs) {}
 
   void RegisterMeshConverter(base::String extension, MeshConverter converter);
-  void RegisterTextureConverter(base::String extension, TextureConverter converter);
-  void RegisterMaterialConverter(base::String extension, MaterialConverter converter);
+  void RegisterTextureConverter(base::String extension,
+                                TextureConverter converter);
+  void RegisterMaterialConverter(base::String extension,
+                                 MaterialConverter converter);
 
   // Loads (converting on first use) or returns the cached asset. Synchronous
   // for now, the streaming path will move conversion onto the job system.
   // Failures cache as null so missing files are only probed once.
-  const Mesh* LoadMesh(std::string_view path);
-  const Texture* LoadTexture(std::string_view path);
-  const Material* LoadMaterial(std::string_view path);
+  const Mesh *LoadMesh(std::string_view path);
+  const Texture *LoadTexture(std::string_view path);
+  const Material *LoadMaterial(std::string_view path);
 
   // Side channel for converters that synthesize assets while converting
   // another (NIF shader properties become materials) and for procedurally
   // built meshes/textures (terrain). Keyed by their id.
-  void AddMaterial(const Material& material);
-  const Mesh* AddMesh(Mesh mesh);
-  const Texture* AddTexture(Texture texture);
-  const Material* FindMaterial(AssetId id) const;
+  void AddMaterial(const Material &material);
+  const Mesh *AddMesh(Mesh mesh);
+  // Explicit mutation path for authored procedural assets. Replaces in place
+  // when present, preserving pointers held by streaming shells.
+  const Mesh *ReplaceMesh(Mesh mesh);
+  bool RemoveMesh(AssetId id);
+  const Texture *AddTexture(Texture texture);
+  const Material *FindMaterial(AssetId id) const;
   // Mutable handle for late tweaks to a synthesized material before it uploads
   // (e.g. flagging a grass model's materials for vertex wind).
-  Material* FindMaterialMutable(AssetId id);
-  const Texture* FindTexture(AssetId id) const;
-  const Mesh* FindMesh(AssetId id) const;
+  Material *FindMaterialMutable(AssetId id);
+  const Texture *FindTexture(AssetId id) const;
+  const Mesh *FindMesh(AssetId id) const;
 
-  Vfs& vfs() { return vfs_; }
+  Vfs &vfs() { return vfs_; }
 
- private:
-  Vfs& vfs_;
+private:
+  Vfs &vfs_;
   base::UnorderedMap<base::String, MeshConverter> mesh_converters_;
   base::UnorderedMap<base::String, TextureConverter> texture_converters_;
   base::UnorderedMap<base::String, MaterialConverter> material_converters_;
@@ -67,6 +75,6 @@ class AssetDatabase {
   base::UnorderedMap<u64, base::UniquePointer<Material>> materials_;
 };
 
-}  // namespace rx::asset
+} // namespace rx::asset
 
-#endif  // RX_ASSET_ASSET_DATABASE_H_
+#endif // RX_ASSET_ASSET_DATABASE_H_
