@@ -1,4 +1,5 @@
 #include "scene/world_streaming.h"
+#include "scene/world_streaming_ecs.h"
 
 #include <algorithm>
 #include <cmath>
@@ -363,18 +364,23 @@ void TestDeterminismAndMultipleObservers() {
 
   WorldStreamPlan plan;
   WorldStreamObservation observers[] = {Observer({-100, 0, 0}, 5, 8), Observer({100, 0, 0}, 5, 8)};
-  WorldStreamRegion regions[] = {Region(1, -100, 0, -99, 1), Region(2, 99, 0, 100, 1),
-                                 Region(3, 0, 0, 1, 1)};
+  observers[0].channels = 1;
+  observers[1].channels = 2;
+  WorldStreamRegion regions[] = {Region(1, -100, 0, -99, 1, 0, 1),
+                                 Region(2, 99, 0, 100, 1, 0, 2),
+                                 Region(3, -100, 0, -99, 1, 0, 2),
+                                 Region(4, 0, 0, 1, 1, 0, 3)};
   WorldStreamFrameBudget budget;
-  budget.maximum_prepare_starts = 3;
-  budget.maximum_pending = 3;
+  budget.maximum_prepare_starts = 4;
+  budget.maximum_pending = 4;
   base::Vector<WorldStreamAction> actions;
   AdvanceWorldStreaming(plan, observers, regions, budget, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, 1) != nullptr &&
             FindAction(actions, WorldStreamActionKind::kPrepare, 2) != nullptr,
-        "multiple observers contribute union demand");
-  Check(FindAction(actions, WorldStreamActionKind::kPrepare, 3) == nullptr,
-        "regions outside every observer remain absent");
+        "observers with disjoint channels contribute union demand");
+  Check(FindAction(actions, WorldStreamActionKind::kPrepare, 3) == nullptr &&
+            FindAction(actions, WorldStreamActionKind::kPrepare, 4) == nullptr,
+        "channel mismatches and regions outside every observer remain absent");
 
   WorldStreamPlan cleanup;
   WorldStreamFrameBudget cleanup_budget;
@@ -418,6 +424,16 @@ void TestRetryResetAndGather() {
   Check(GetWorldStreamStats(plan).retiring == 1, "reset waits for shell cleanup acknowledgement");
   Check(ApplyWorldStreamRetireResult(plan, retry_ticket), "reset retirement is acknowledged");
   Check(GetWorldStreamStats(plan).retiring == 0, "acknowledged reset clears plan state");
+
+  WorldStreamPlan resident_plan;
+  const WorldStreamTicket resident_ticket = PrepareOne(resident_plan, observer, region);
+  MakeResident(resident_plan, observer, region, resident_ticket);
+  ResetWorldStreaming(resident_plan, &actions);
+  Check(FindAction(actions, WorldStreamActionKind::kUnload, region.id) != nullptr &&
+            FindAction(actions, WorldStreamActionKind::kCancel, region.id) == nullptr,
+        "reset unloads resident work instead of canceling it");
+  Check(ApplyWorldStreamRetireResult(resident_plan, resident_ticket),
+        "resident reset retirement is acknowledged");
 
   rx::ecs::World world;
   const rx::ecs::Entity entity = world.Create();

@@ -7,8 +7,6 @@
 
 #include "core/export.h"
 #include "core/math.h"
-#include "ecs/world.h"
-#include "scene/components.h"
 
 namespace rx::scene {
 
@@ -18,20 +16,6 @@ enum WorldStreamAxis : u8 {
   kWorldStreamZ = 1 << 2,
   kWorldStreamXZ = kWorldStreamX | kWorldStreamZ,
   kWorldStreamXYZ = kWorldStreamX | kWorldStreamY | kWorldStreamZ,
-};
-
-// Attach to a parent-free Transform to make an entity a streaming source.
-// Content enters at load_distance and remains requested or resident until it
-// leaves the larger retain_distance. Prediction adds a conservative swept
-// volume ahead of velocity; it never removes the omnidirectional baseline.
-struct WorldStreamObserver {
-  Vec3 velocity;
-  f32 load_distance = 0;
-  f32 retain_distance = 0;
-  f32 prediction_seconds = 0;
-  f32 maximum_prediction_distance = 0;
-  u32 channels = ~u32{0};
-  u8 axes = kWorldStreamXYZ;
 };
 
 struct WorldStreamObservation {
@@ -171,6 +155,21 @@ class WorldStreamPlan {
     u64 since_tick = 0;
   };
 
+  struct ScoredRegion {
+    WorldStreamRegion region;
+    WorldStreamDemand demand;
+    u8 urgency = 2;
+    u64 last_prepare_tick = 0;
+    u64 last_commit_tick = 0;
+  };
+
+  struct ResidentRetirement {
+    u64 id = 0;
+    u64 request_tick = 0;
+    bool retry_after = false;
+    bool retry_within_retain = false;
+  };
+
   WorldStreamSettings settings_;
   // Sorted by region id. Observer bubbles contain tens or hundreds of regions;
   // compact iteration is preferable to a churn-sensitive hash table.
@@ -178,6 +177,15 @@ class WorldStreamPlan {
   // Demand that has not yet acquired a pending slot. Keeping first-seen age
   // prevents continual arrivals from starving an older request.
   base::Vector<WaitingRegion> waiting_;
+  // Per-tick scratch retains capacity across frames.
+  base::Vector<WorldStreamObservation> observers_scratch_;
+  base::Vector<Vec3> predictions_scratch_;
+  base::Vector<WorldStreamRegion> canonical_scratch_;
+  base::Vector<ScoredRegion> scored_scratch_;
+  base::Vector<ScoredRegion> prepare_scratch_;
+  base::Vector<ScoredRegion> commit_scratch_;
+  base::Vector<u64> erase_ids_scratch_;
+  base::Vector<ResidentRetirement> resident_retirements_scratch_;
   u64 tick_ = 0;
   u64 next_generation_ = 1;
   bool resetting_ = false;
@@ -204,15 +212,9 @@ class WorldStreamPlan {
   friend void ResetWorldStreaming(WorldStreamPlan&, base::Vector<WorldStreamAction>*);
 };
 
-RX_SCENE_EXPORT WorldStreamObservation
-MakeWorldStreamObservation(const Transform& transform, const WorldStreamObserver& observer);
 RX_SCENE_EXPORT WorldStreamQuery BuildWorldStreamQuery(const WorldStreamObservation& observer);
 RX_SCENE_EXPORT WorldStreamDemand EvaluateWorldStreamDemand(const WorldStreamObservation& observer,
                                                             const WorldStreamRegion& region);
-
-// Gathers observer values without structurally mutating the ECS world.
-RX_SCENE_EXPORT void GatherWorldStreamObservers(ecs::World& world,
-                                                base::Vector<WorldStreamObservation>* observations);
 
 RX_SCENE_EXPORT void ConfigureWorldStreaming(WorldStreamPlan& plan,
                                              const WorldStreamSettings& settings);
