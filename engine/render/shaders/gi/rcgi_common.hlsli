@@ -73,7 +73,28 @@ struct RcgiGlobals {
   uint4 misc;                            // x current cascade, y frame, z cascades, w hash capacity
   float4 params;                         // x max ray dist, y hysteresis, z energy scale, w base cell
   uint4 valid;                           // x = per-cascade "blended since (re)creation" bitmask
+  // ---- Phase 3 (leak & occlusion hardening) ----
+  float4 interior;   // xyz interior ambient (ray-miss fallback when interior), w probe-AO scale
+  uint4 gi_flags;    // x feature bits (below), y interior volume count, z asfloat probe-AO bias, w pad
 };
+
+// gi_flags.x feature bits. Each gated by its own env in the renderer.
+static const uint kRcgiFlagInterior = 1u;  // ray misses fall back to interior ambient, not sky
+static const uint kRcgiFlagRelocate = 2u;  // apply per-probe relocation offset from probe_meta
+static const uint kRcgiFlagProbeAo = 4u;   // attenuate cascade-fallback by relative hit distance
+static const uint kRcgiFlagClassify = 8u;  // downweight cross-class probes via interior volumes
+
+bool RcgiInteriorMode(RcgiGlobals g) { return (g.gi_flags.x & kRcgiFlagInterior) != 0u; }
+bool RcgiRelocateOn(RcgiGlobals g) { return (g.gi_flags.x & kRcgiFlagRelocate) != 0u; }
+bool RcgiClassifyOn(RcgiGlobals g) { return (g.gi_flags.x & kRcgiFlagClassify) != 0u && g.gi_flags.y > 0u; }
+
+// Ray-miss radiance for the visibility rays (probe trace) and gather rays: the
+// sky cubemap outdoors, the authored interior ambient when interior mode is on
+// (RX_RCGI_INTERIOR). This is the root skylight-leak fix -- an interior scene's
+// probe cascades stop being fed sky through ceiling/doorway gaps.
+float3 RcgiSkyMiss(RcgiGlobals g, float3 sky_radiance) {
+  return RcgiInteriorMode(g) ? g.interior.xyz : sky_radiance;
+}
 
 // A cascade contributes only once it has actually been blended at least once
 // since creation/teleport; until then its atlas slab is undefined (or freshly
@@ -157,6 +178,54 @@ float3 RcgiProbePosition(RcgiGlobals g, uint cascade, uint3 probe) {
   return g.cascade_origin[cascade].xyz + float3(probe) * g.cascade_origin[cascade].w;
 }
 
+// ---- probe relocation metadata (Phase 3 item 10) ----
+// Per (cascade, probe) uint2: .x = packed world-space offset (fraction of
+// spacing), .y = flags (bit0 = disabled: drowning in backfaces even relocated).
+static const uint kRcgiMetaDisabled = 1u;
+static const float kRcgiRelocMaxOffset = 0.45;  // <= 0.45 cell (never leaves the cell)
+
+uint RcgiMetaIndex(uint cascade, uint3 probe) {
+  uint per_cascade = kRcgiProbesPerAxis * kRcgiProbesPerAxis * kRcgiProbesPerAxis;
+  return cascade * per_cascade + RcgiProbeIndex(probe);
+}
+// Pack a per-axis offset (fraction of spacing, clamped to +-kRcgiRelocMaxOffset)
+// into three 10-bit signed lanes. CPU mirror: render/gi/rcgi_interior.h.
+uint RcgiPackOffset(float3 frac) {
+  float3 n = clamp(frac / kRcgiRelocMaxOffset, -1.0.xxx, 1.0.xxx);
+  uint3 q = (uint3)clamp(round(n * 511.0) + 512.0, 0.0.xxx, 1023.0.xxx);
+  return q.x | (q.y << 10u) | (q.z << 20u);
+}
+float3 RcgiUnpackOffset(uint p) {
+  uint3 q = uint3(p & 1023u, (p >> 10u) & 1023u, (p >> 20u) & 1023u);
+  float3 n = clamp((float3(q) - 512.0) / 511.0, -1.0.xxx, 1.0.xxx);
+  return n * kRcgiRelocMaxOffset;  // fraction of spacing
+}
+// Relocated probe world position (base position when relocation is off). Used
+// identically by the probe trace (ray origins), the blend (cache-key
+// reconstruction) and the irradiance sample so their world positions agree.
+float3 RcgiProbePositionMeta(RcgiGlobals g, StructuredBuffer<uint2> meta, uint cascade, uint3 probe) {
+  float3 base = RcgiProbePosition(g, cascade, probe);
+  if (!RcgiRelocateOn(g)) return base;
+  return base + RcgiUnpackOffset(meta[RcgiMetaIndex(cascade, probe)].x) * g.cascade_origin[cascade].w;
+}
+bool RcgiProbeDisabledMeta(RcgiGlobals g, StructuredBuffer<uint2> meta, uint cascade, uint3 probe) {
+  if (!RcgiRelocateOn(g)) return false;
+  return (meta[RcgiMetaIndex(cascade, probe)].y & kRcgiMetaDisabled) != 0u;
+}
+
+// ---- interior-volume classification (Phase 3 item 9b) ----
+// Volumes buffer: two float4 per box (min.xyz, max.xyz), g.gi_flags.y boxes.
+bool RcgiPointInInterior(RcgiGlobals g, StructuredBuffer<float4> vols, float3 p) {
+  uint n = min(g.gi_flags.y, 64u);
+  [loop]
+  for (uint i = 0u; i < n; ++i) {
+    float3 lo = vols[i * 2u].xyz;
+    float3 hi = vols[i * 2u + 1u].xyz;
+    if (all(p >= lo) && all(p <= hi)) return true;
+  }
+  return false;
+}
+
 // Atlas dimensions: (texels+2)*probesX*probesZ wide; per-cascade slab
 // (texels+2)*probesY tall; kRcgiCascades slabs stacked vertically.
 float2 RcgiAtlasSize(uint texels) {
@@ -218,8 +287,9 @@ void RcgiCacheCell(RcgiGlobals g, float3 pos, out int3 q, out uint lod_exp, out 
 // Trilinear 8-probe blend with chebyshev visibility (the DDGI estimator) inside
 // the smallest cascade containing `world_pos`. Returns the Lambert irradiance.
 float3 SampleRcgiIrradiance(RcgiGlobals g, Texture2D irr_atlas, SamplerState irr_smp,
-                            Texture2D vis_atlas, SamplerState vis_smp, float3 world_pos,
-                            float3 n, float3 v) {
+                            Texture2D vis_atlas, SamplerState vis_smp,
+                            StructuredBuffer<uint2> meta, StructuredBuffer<float4> vols,
+                            float3 world_pos, float3 n, float3 v) {
   uint c;
   if (!RcgiSelectCascade(g, world_pos, c)) return 0.0.xxx;
   // A not-yet-blended cascade holds undefined (or black) atlas data; skip it so
@@ -227,6 +297,12 @@ float3 SampleRcgiIrradiance(RcgiGlobals g, Texture2D irr_atlas, SamplerState irr
   if (!RcgiCascadeValid(g, c)) return 0.0.xxx;
   float spacing = g.cascade_origin[c].w;
   float3 origin = g.cascade_origin[c].xyz;
+
+  // Interior classification (item 9b): the sample's indoor/outdoor class; probes
+  // of the opposite class are heavily downweighted so an outdoor probe cannot
+  // bleed through a doorway onto an indoor surface (and vice versa).
+  bool classify = RcgiClassifyOn(g);
+  bool sample_indoor = classify ? RcgiPointInInterior(g, vols, world_pos) : false;
 
   float3 biased = world_pos + (n * 0.2 + v * 0.8) * spacing * 0.25;
   float3 local = clamp((biased - origin) / spacing, 0.0.xxx,
@@ -243,10 +319,17 @@ float3 SampleRcgiIrradiance(RcgiGlobals g, Texture2D irr_atlas, SamplerState irr
   for (uint i = 0; i < 8; ++i) {
     uint3 off = uint3(i & 1u, (i >> 1) & 1u, (i >> 2) & 1u);
     uint3 probe = min(base_probe + off, (kRcgiProbesPerAxis - 1u).xxx);
-    float3 probe_pos = origin + float3(probe) * spacing;
+    // Relocated probe position: keeps interpolation weights and the visibility
+    // direction consistent with the (relocated) origin the probe traced from.
+    float3 probe_pos = RcgiProbePositionMeta(g, meta, c, probe);
 
     float3 tri = lerp(1.0 - alpha, alpha, float3(off));
     float weight = tri.x * tri.y * tri.z;
+
+    // A probe drowning in backfaces even after relocation contributes nothing.
+    if (RcgiProbeDisabledMeta(g, meta, c, probe)) continue;
+    // Cross-class probes bleed light across interior walls: near-zero weight.
+    if (classify && RcgiPointInInterior(g, vols, probe_pos) != sample_indoor) weight *= 0.02;
 
     float3 to_probe = normalize(probe_pos - world_pos);
     float facing = (dot(to_probe, n) + 1.0) * 0.5;

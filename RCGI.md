@@ -403,3 +403,65 @@ updated inline where they described the old behavior.
 - **Shutdown order.** `Renderer::Shutdown` resets `rcgi_` (and destroys
   `light_grid_`) before `device_` teardown, next to `ddgi_`, so `~RcgiSystem`
   no longer runs against a destroyed `Device&`.
+
+---
+
+## Phase 3 — leak & occlusion hardening (AC Shadows adoption, items 9-11)
+
+Three additions that stop RCGI leaking light where the sparse cascades cannot
+see occlusion. All default on, each behind its own env for A/B, and all no-ops
+for existing scenes (zero cost when their inputs are absent).
+
+### 9. Indoor/outdoor classification (`RX_RCGI_INTERIOR`, default on)
+
+- **(a) Global interior mode.** When the app sets `RenderSettings::interior`,
+  RCGI's ray misses (`RcgiSkyMiss` in `rcgi_common.hlsli`) now return the
+  authored `interior_ambient` instead of the sky cubemap, in the probe trace and
+  the gather alike. The probe cascades stop being fed skylight through
+  ceiling/doorway gaps. The interior flag + ambient ride the globals UBO
+  (`RcgiGlobals::interior`/`gi_flags`), set from `FrameConfig` in `AddToGraph`.
+  The forward pass gained an interior+RCGI branch (`mesh.ps`/`mesh_rt.ps`): with
+  RCGI on indoors it lights the interior with leak-free bounce rather than the
+  flat authored term (gated so RCGI-off scenes are unchanged).
+- **(b) Interior volume list.** `Renderer::SetInteriorVolumes(span<InteriorVolume>)`
+  uploads <=64 world AABBs to a small host-visible buffer. `SampleRcgiIrradiance`
+  classifies the sample position and each of the 8 blend probes indoor/outdoor
+  (`RcgiPointInInterior`) and near-zeroes the weight of cross-class probes,
+  killing the outdoor-probe-through-a-doorway leak for mixed indoor/outdoor
+  scenes (and future Skyrim room bounds). Costs nothing when no volumes are set.
+
+### 10. Probe relocation + backface disable (`RX_RCGI_RELOCATE`, default on)
+
+- Per (cascade, probe) metadata buffer `probe_meta_` (uint2: packed +-0.45-cell
+  offset + a disabled flag). The new `rcgi_probe_meta.cs.hlsl` pass runs after the
+  border pass, reads back this frame's rays, and nudges each probe toward the open
+  hemisphere (away from backface directions, weighted by ray openness) when the
+  backface fraction exceeds ~25%, disabling it past ~60%. The offset is applied
+  identically in the probe trace (ray origins), the blend (cache-key
+  reconstruction) and `SampleRcgiIrradiance` (interpolation), so world positions
+  agree; the offset is reset when a cascade snaps (its cells reassign). Offset
+  packing has a CPU mirror in `render/gi/rcgi_interior.h` (unit-tested).
+
+### 11. Probe AO (`RX_RCGI_PROBE_AO`, default on)
+
+- In the gather, an irradiance-cascade fallback hit is attenuated by
+  `saturate(hitT / cascadeSpacing * scale + bias)` (defaults 0.6 / 0.4),
+  recovering contact occlusion the sparse probes cannot represent. Applies only
+  to the cascade fallback -- screen-cache and hash-cache hits carry their own
+  occlusion.
+
+### Not landed
+
+- **12 (RTAO from the gather hitT)** and **13 (secondary sun shadow map for the
+  SW tier)** are deferred; see the commit/PR notes for the plumbing plan (item 12
+  needs the gather hoisted above the NRD AO block, or a persisted previous-frame
+  hitT, to resolve the ordering).
+
+### Verification
+
+`--demo interior` (an enclosed room + door gap + lamp, flagged interior and
+forwarded as a volume) exercises all three on NVIDIA GB10 (`vkrun`): the room
+lights from the lamp with leak-free interior ambient (measurably so vs
+`RX_RCGI_INTERIOR=0`), `--demo cornell` GI color-bleed is unchanged, software
+(`RX_RCGI_SW`) runs, and validation is clean apart from the pre-existing async
+indirect-args VUID. CPU unit test: `rcgi_interior_test`.

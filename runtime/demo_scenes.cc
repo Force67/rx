@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <string>
 
 #include <base/option.h>
@@ -910,6 +911,87 @@ void DemoScenes::CreateCornellDemoScene() {
   camera_.set_yaw_pitch(0.0f, -0.12f);
   camera_.speed = 3.0f;
   RX_INFO("cornell box: gi color-bleed test (red/green walls)");
+}
+
+void DemoScenes::CreateInteriorDemoScene() {
+  // A fully enclosed room (floor, ceiling, four walls) with one door-sized gap in
+  // the front wall and a single warm lamp inside. The scene is flagged interior
+  // (RenderSettings::interior), so the sun/sky are suppressed in raster and the
+  // only correct light is the lamp plus a dim authored ambient. It is exactly the
+  // configuration that exposes RCGI's skylight leak: with RX_RCGI_INTERIOR=0 the
+  // GI probe/gather rays that escape through the doorway sample the sky cubemap
+  // and flood the room; with it on (default) they fall back to the interior
+  // ambient and the room stays dark and lamp-lit. The room is also forwarded as
+  // an interior volume so the classification (item 9b), relocation (item 10) and
+  // probe AO (item 11) all exercise here. Run with RX_RCGI=1.
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b, f32 rough) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = rough;
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  asset::AssetId white = mat("builtin/interior/white", 0.78f, 0.78f, 0.76f, 0.95f);
+  asset::AssetId warm = mat("builtin/interior/warm", 0.80f, 0.35f, 0.12f, 0.9f);   // red-ish wall
+  asset::AssetId cool = mat("builtin/interior/cool", 0.12f, 0.30f, 0.80f, 0.9f);   // blue-ish wall
+
+  int counter = 0;
+  auto add = [&](asset::Mesh mesh, asset::AssetId material, Vec3 pos) {
+    asset::MeshLod& lod = mesh.lods[0];  // MakeBox leaves the submesh list empty
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, scene::Renderable{mesh.id});
+  };
+  auto box = [&](f32 hx, f32 hy, f32 hz) {
+    return asset::MakeBox(hx, hy, hz,
+                          asset::MakeAssetId("builtin/interior/" + std::to_string(counter++)));
+  };
+
+  // Shell: 4 m x 3 m x 4 m interior (half-extents 2, 1.5, 2).
+  add(box(2.0f, 0.1f, 2.0f), white, {0, -0.1f, 0});   // floor (top at y = 0)
+  add(box(2.0f, 0.1f, 2.0f), white, {0, 3.1f, 0});    // ceiling (bottom at y = 3)
+  add(box(2.0f, 1.6f, 0.1f), white, {0, 1.5f, -2.0f});  // back wall
+  add(box(0.1f, 1.6f, 2.0f), warm, {-2.0f, 1.5f, 0});   // left wall (warm)
+  add(box(0.1f, 1.6f, 2.0f), cool, {2.0f, 1.5f, 0});    // right wall (cool)
+  // Front wall (z = +2) with a ~1.2 m central door gap: two side segments.
+  add(box(0.7f, 1.6f, 0.1f), white, {-1.3f, 1.5f, 2.0f});
+  add(box(0.7f, 1.6f, 0.1f), white, {1.3f, 1.5f, 2.0f});
+  // A short pillar so relocation/probe-AO have contact geometry to occlude.
+  add(box(0.35f, 0.9f, 0.35f), white, {-0.6f, 0.9f, -0.5f});
+
+  // The lamp: a warm omni light near the ceiling. This is the only legitimate
+  // light indoors (interior mode zeroes the sun), so any extra brightness is a
+  // leak. Colored bounce onto the white floor/pillar reads the GI is working.
+  render::PointLight lamp;
+  lamp.pos_radius[0] = 0.4f;
+  lamp.pos_radius[1] = 2.4f;
+  lamp.pos_radius[2] = -0.3f;
+  lamp.pos_radius[3] = 7.0f;   // influence radius
+  lamp.color_intensity[0] = 1.0f;
+  lamp.color_intensity[1] = 0.72f;
+  lamp.color_intensity[2] = 0.42f;
+  lamp.color_intensity[3] = 6.0f;
+  demo_lights_.push_back(lamp);
+
+  // Flag interior + author a dim indoor ambient (the RCGI ray-miss fallback), and
+  // forward the room as an interior volume for cross-class rejection.
+  auto& s = renderer_.settings();
+  s.interior = true;
+  s.interior_ambient = {0.015f, 0.015f, 0.02f};
+  s.interior_directional_intensity = 0.0f;  // no fill: isolate the lamp + GI
+  const render::InteriorVolume room{Vec3{-2.0f, 0.0f, -2.0f}, Vec3{2.0f, 3.0f, 2.0f}};
+  renderer_.SetInteriorVolumes(std::span<const render::InteriorVolume>(&room, 1));
+
+  camera_.set_position({0.0f, 1.4f, 1.3f});
+  camera_.set_yaw_pitch(0.0f, -0.05f);  // face the back wall from just inside the door
+  camera_.speed = 2.5f;
+  RX_INFO("interior room: RCGI skylight-leak test (RX_RCGI=1; toggle RX_RCGI_INTERIOR)");
 }
 
 void DemoScenes::CreateGpuParticleDemoScene() {
@@ -2567,6 +2649,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "cornell") {
     CreateCornellDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "interior") {
+    CreateInteriorDemoScene();
     return;
   }
   if (config_.demo_scene == "fur") {

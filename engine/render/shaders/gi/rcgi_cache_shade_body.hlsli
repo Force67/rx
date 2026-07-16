@@ -43,6 +43,10 @@ struct Light {
 [[vk::combinedImageSampler]] [[vk::binding(10, 0)]] SamplerState rcgi_irr_sampler : register(s10, space0);
 [[vk::combinedImageSampler]] [[vk::binding(11, 0)]] Texture2D rcgi_vis_atlas : register(t11, space0);
 [[vk::combinedImageSampler]] [[vk::binding(11, 0)]] SamplerState rcgi_vis_sampler : register(s11, space0);
+// Phase 3: probe relocation metadata + interior volumes for the multi-bounce
+// irradiance sample below.
+[[vk::binding(12, 0)]] StructuredBuffer<uint2> probe_meta : register(t12, space0);
+[[vk::binding(13, 0)]] StructuredBuffer<float4> interior_vols : register(t13, space0);
 
 #ifndef RCGI_TRACE_SDF
 // Bindless scene tables (set 1), full material resolution.
@@ -205,7 +209,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   // Previous-frame bounce from the irradiance cascades (multi-bounce).
   radiance += albedo * SampleRcgiIrradiance(rcgi, rcgi_irr_atlas, rcgi_irr_sampler, rcgi_vis_atlas,
-                                            rcgi_vis_sampler, pos, n, n);
+                                            rcgi_vis_sampler, probe_meta, interior_vols, pos, n, n);
 
   rcgi_radiance_rw[idx] = RcgiPackRadiance(radiance);
   // +1 encoded (0 = never shaded) so RcgiCacheLookup can reject unshaded entries.

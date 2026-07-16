@@ -29,6 +29,9 @@
 [[vk::combinedImageSampler]] [[vk::binding(13, 0)]] SamplerState prev_color_sampler : register(s13, space0);
 [[vk::combinedImageSampler]] [[vk::binding(14, 0)]] Texture2D<float> prev_depth : register(t14, space0);
 [[vk::combinedImageSampler]] [[vk::binding(14, 0)]] SamplerState prev_depth_sampler : register(s14, space0);
+// Phase 3: probe relocation metadata + interior volumes (irradiance fallback).
+[[vk::binding(15, 0)]] StructuredBuffer<uint2> probe_meta : register(t15, space0);
+[[vk::binding(16, 0)]] StructuredBuffer<float4> interior_vols : register(t16, space0);
 
 struct PushData {
   column_major float4x4 inv_view_proj;   // current, unjittered
@@ -111,12 +114,14 @@ void main(uint3 id : SV_DispatchThreadID) {
   float3 radiance;
   float hit_t;
   if (rq.CommittedStatus() != COMMITTED_TRIANGLE_HIT) {
-    radiance = sky.SampleLevel(sky_sampler, dir, 0).rgb;
+    // Interior mode: escaped rays sample interior ambient, not the sky (item 9a).
+    radiance = RcgiSkyMiss(rcgi, sky.SampleLevel(sky_sampler, dir, 0).rgb);
     hit_t = ray_max;
   } else {
     hit_t = rq.CommittedRayT();
     float3 hit_pos = ray.Origin + dir * hit_t;
     bool resolved = false;
+    bool used_cascade = false;  // item 11: probe AO applies only to the cascade fallback
 
     // (a) Screen cache: was this hit surface lit and visible last frame?
     if (push.misc.y != 0u) {
@@ -149,7 +154,21 @@ void main(uint3 id : SV_DispatchThreadID) {
     // (c) Irradiance cascades (geometric normal approximated by -dir).
     if (!resolved) {
       radiance = SampleRcgiIrradiance(rcgi, irr_atlas, irr_sampler, vis_atlas, vis_sampler,
-                                      hit_pos, -dir, -dir);
+                                      probe_meta, interior_vols, hit_pos, -dir, -dir);
+      used_cascade = true;
+    }
+
+    // Probe AO (item 11): a short ray that fell back to the sparse cascades
+    // missed contact occlusion the probes cannot resolve. Attenuate by the
+    // relative hit distance (their saturate(hitT/spacing*scale + bias)); the
+    // screen/hash-cache hits already carry their own occlusion, so skip those.
+    if (used_cascade && (rcgi.gi_flags.x & kRcgiFlagProbeAo) != 0u) {
+      uint hc;
+      float spacing = RcgiSelectCascade(rcgi, hit_pos, hc) ? rcgi.cascade_origin[hc].w
+                                                           : rcgi.cascade_origin[0].w;
+      float ao_scale = rcgi.interior.w;
+      float ao_bias = asfloat(rcgi.gi_flags.z);
+      radiance *= saturate(hit_t / max(spacing, 1e-3) * ao_scale + ao_bias);
     }
   }
 

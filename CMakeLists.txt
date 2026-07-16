@@ -356,6 +356,15 @@ if(RX_BUILD_TESTS)
   target_link_libraries(rt_instance_cull_test PRIVATE rx::core)
   add_test(NAME rt_instance_cull_test COMMAND rt_instance_cull_test)
 
+  # RCGI leak/occlusion hardening helpers: interior-volume classification and the
+  # probe-relocation offset packing round trip (header-only, mirrors the shader).
+  add_executable(rcgi_interior_test test/rcgi_interior_test.cc)
+  target_include_directories(rcgi_interior_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(rcgi_interior_test PRIVATE rx::core)
+  add_test(NAME rcgi_interior_test COMMAND rcgi_interior_test)
+
 # CPU-side memory infrastructure test (tracker/arena/chunk pool/small vector/
 # config). rx_enable_mimalloc gives it the tracked new/delete override so the
 # tracker assertions run against the real allocation path.

@@ -2,11 +2,13 @@
 #define RX_RENDER_RCGI_H_
 
 #include <memory>
+#include <span>
 
 #include "core/math.h"
 #include "render/core/bindless.h"
 #include "render/core/render_graph.h"
 #include "render/gi/light_grid.h"
+#include "render/gi/rcgi_interior.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {
@@ -44,6 +46,20 @@ class RcgiSystem {
     f32 energy_scale = 1.0f;
   };
 
+  // Per-frame leak/occlusion-hardening state (Phase 3), uploaded into the globals
+  // UBO by AddToGraph and read by every RCGI pass. Each toggle has its own env in
+  // the renderer (RX_RCGI_INTERIOR / RX_RCGI_RELOCATE / RX_RCGI_PROBE_AO); the
+  // interior-volume count is owned by the system (SetInteriorVolumes).
+  struct FrameConfig {
+    bool interior = false;           // ray misses fall back to interior_ambient, not sky
+    Vec3 interior_ambient{0, 0, 0};  // authored indoor ambient
+    bool relocate = true;            // per-probe backface relocation + disable
+    bool classify = true;            // interior-volume cross-class probe rejection
+    bool probe_ao = true;            // attenuate cascade fallback by relative hit distance
+    f32 probe_ao_scale = 0.6f;
+    f32 probe_ao_bias = 0.4f;
+  };
+
   // `rt_available` selects which trace pipelines are built. When true, the
   // hardware ray-query pipelines (probe trace, cache shade, gather chain) plus
   // the software SDF variants are all created (so RX_RCGI_SW A/B works on RT
@@ -73,7 +89,15 @@ class RcgiSystem {
   void AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u32 tlas_slot,
                   const LightGrid& light_grid, const GpuBuffer& lights, const Vec3& camera,
                   const Vec3& sun_direction, f32 sun_intensity, const Vec3& sun_color,
-                  u32 frame_index, bool async = false, const SdfClipmap* sdf = nullptr);
+                  u32 frame_index, const FrameConfig& config, bool async = false,
+                  const SdfClipmap* sdf = nullptr);
+
+  // Upload the active interior volumes (<= kMaxInteriorVolumes; extras dropped).
+  // AABBs in world space; probes/samples inside a volume classify as indoor and
+  // do not blend with outdoor probes (item 9b). Empty span disables classify.
+  // Cheap: just repacks a small host-visible buffer, so it may be called each
+  // frame from the game's forwarding path.
+  void SetInteriorVolumes(std::span<const InteriorVolume> volumes);
 
   // M1 filler: full-res irradiance from the cascades, sampled per screen pixel.
   // Reads the prepass depth + oct normals; returns the "rcgi_irradiance"
@@ -124,6 +148,8 @@ class RcgiSystem {
     u32 misc[4];                       // x current cascade, y frame, z cascades, w hash capacity
     f32 params[4];                     // x max ray dist, y hysteresis, z energy, w base cell
     u32 valid[4];                      // x per-cascade "blended since (re)creation" bitmask
+    f32 interior[4];                   // xyz interior ambient (miss fallback), w probe-AO scale
+    u32 gi_flags[4];                   // x feature bits, y volume count, z asuint(probe-AO bias), w pad
   };
 
   explicit RcgiSystem(Device& device) : device_(device) {}
@@ -149,6 +175,9 @@ class RcgiSystem {
   GpuBuffer active_meta_; // [0] = active count
   GpuBuffer dispatch_args_;      // indirect args for cache shade
   GpuBuffer globals_buffers_[2]; // host visible, ping-pong by frame parity
+  GpuBuffer probe_meta_;         // uint2 per (cascade, probe): packed reloc offset + flags
+  GpuBuffer interior_volumes_;   // host-visible: 2 float4 (min,max) per interior volume
+  u32 interior_volume_count_ = 0;
 
   PipelineHandle probe_trace_pipeline_;
   PipelineHandle probe_trace_sw_pipeline_;   // SDF-clipmap software variant
@@ -157,6 +186,7 @@ class RcgiSystem {
   PipelineHandle cache_shade_sw_pipeline_;   // SDF-clipmap software variant
   PipelineHandle blend_pipeline_;
   PipelineHandle border_pipeline_;
+  PipelineHandle probe_meta_pipeline_;  // per-probe relocation (Phase 3 item 10)
   PipelineHandle resolve_pipeline_;
   PipelineHandle gather_pipeline_;
   PipelineHandle denoise_pipeline_;

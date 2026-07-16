@@ -49,6 +49,7 @@ class DemoScenes {
   void CreateGaussianDemoScene();
   void CreateLodDemoScene();
   void CreateCornellDemoScene();
+  void CreateInteriorDemoScene();
   void CreateGpuParticleDemoScene();
   void CreateFurDemoScene();
   void CreateAutoLodDemoScene();

@@ -14,6 +14,8 @@
 [[vk::combinedImageSampler]] [[vk::binding(4, 0)]] SamplerState rcgi_irr_sampler : register(s4, space0);
 [[vk::combinedImageSampler]] [[vk::binding(5, 0)]] Texture2D rcgi_vis_atlas : register(t5, space0);
 [[vk::combinedImageSampler]] [[vk::binding(5, 0)]] SamplerState rcgi_vis_sampler : register(s5, space0);
+[[vk::binding(6, 0)]] StructuredBuffer<uint2> probe_meta : register(t6, space0);
+[[vk::binding(7, 0)]] StructuredBuffer<float4> interior_vols : register(t7, space0);
 
 struct PushData {
   column_major float4x4 inv_view_proj;  // unjittered
@@ -43,6 +45,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float3 v = normalize(push.camera_pos.xyz - pos);
 
   float3 irr = SampleRcgiIrradiance(rcgi, rcgi_irr_atlas, rcgi_irr_sampler, rcgi_vis_atlas,
-                                    rcgi_vis_sampler, pos, n, v) * push.camera_pos.w;
+                                    rcgi_vis_sampler, probe_meta, interior_vols, pos, n, v) *
+               push.camera_pos.w;
   irradiance_out[id.xy] = float4(irr, 1.0);
 }

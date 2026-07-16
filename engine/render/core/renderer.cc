@@ -72,6 +72,11 @@ base::Option<bool> RcgiProbesOnlyOpt{"rcgi.probes_only", false, "RX_RCGI_PROBES_
 // on non-ray-query devices; on RT hardware this is the A/B toggle vs the TLAS
 // path. Implies the SDF clipmap cost (RX_SDF is auto-enabled when RCGI needs it).
 base::Option<bool> RcgiSwOpt{"rcgi.software", false, "RX_RCGI_SW"};
+// Phase 3 leak/occlusion hardening. All default on; each isolates one fix for
+// A/B (interior ambient miss + volume classify; probe relocation; probe AO).
+base::Option<bool> RcgiInteriorOpt{"rcgi.interior", true, "RX_RCGI_INTERIOR"};
+base::Option<bool> RcgiRelocateOpt{"rcgi.relocate", true, "RX_RCGI_RELOCATE"};
+base::Option<bool> RcgiProbeAoOpt{"rcgi.probe_ao", true, "RX_RCGI_PROBE_AO"};
 // SDF software-trace infrastructure (S1): mesh SDFs + global SDF clipmap. Off by
 // default; RX_SDF_DEBUG raymarches the clipmap (1 = distance field, 2 = albedo).
 base::Option<bool> SdfOpt{"sdf", false, "RX_SDF"};
@@ -1180,6 +1185,10 @@ void Renderer::UploadVirtualGeometryMesh(const asset::Mesh& mesh) {
 
 void Renderer::SetVirtualGeometryInstances(std::span<const Mat4> transforms) {
   vgeo_.SetInstances(transforms);
+}
+
+void Renderer::SetInteriorVolumes(std::span<const InteriorVolume> volumes) {
+  interior_volumes_.assign(volumes.begin(), volumes.end());
 }
 
 void Renderer::SetVirtualGeometryAlbedo(ByteSpan rgba_mips, u32 size, f32 world_to_uv) {
@@ -2700,7 +2709,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (nrd_ao || ss_ao) globals.flags |= kFrameFlagAoValid;
   if (csm_active && !interior) globals.flags |= kFrameFlagShadowMap;
   if (ddgi_active && !interior) globals.flags |= kFrameFlagDdgi;
-  if (rcgi_active && !interior) globals.flags |= kFrameFlagRcgi;
+  // RCGI composites in the IBL branch outdoors; indoors it now feeds the interior
+  // branch instead (mesh.ps), lighting interiors with leak-free bounce (its ray
+  // misses fall back to interior ambient) rather than a flat authored term. Gated
+  // by RX_RCGI_INTERIOR so recreation's default (RCGI off) is unchanged.
+  if (rcgi_active && (!interior || RcgiInteriorOpt)) globals.flags |= kFrameFlagRcgi;
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows && !interior) globals.flags |= kFrameFlagRtShadows;
   if (settings_.aurora && !interior) globals.flags |= kFrameFlagAurora;
@@ -3099,9 +3112,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   if (rcgi_world) {
     light_grid_.AddToGraph(graph_, frame.lights, light_count, view.camera.eye, frame_index_,
                            rcgi_async);
+    rcgi_->SetInteriorVolumes(interior_volumes_);  // item 9b: forward game interior bounds
+    RcgiSystem::FrameConfig rcgi_cfg;
+    rcgi_cfg.interior = settings_.interior && RcgiInteriorOpt;
+    rcgi_cfg.interior_ambient = settings_.interior_ambient;
+    rcgi_cfg.relocate = RcgiRelocateOpt;
+    rcgi_cfg.classify = RcgiInteriorOpt;  // volume classification shares the interior gate
+    rcgi_cfg.probe_ao = RcgiProbeAoOpt;
     rcgi_->AddToGraph(graph_, raytracing_.get(), tlas_slot, light_grid_, frame.lights,
                       view.camera.eye, applied_sun_direction_, applied_sun_intensity_,
-                      applied_sun_color_, frame_index_, rcgi_async,
+                      applied_sun_color_, frame_index_, rcgi_cfg, rcgi_async,
                       rcgi_software ? sdf_clipmap_.get() : nullptr);
   }
 

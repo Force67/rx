@@ -373,6 +373,12 @@ class RX_RENDER_EXPORT Renderer {
   // Planar world-xz-projected albedo for the virtual-geometry resolve: a full
   // RGBA8 mip chain (size x size at mip 0, levels concatenated).
   void SetVirtualGeometryAlbedo(ByteSpan rgba_mips, u32 size, f32 world_to_uv);
+  // Interior volumes for RCGI leak hardening (Phase 3 item 9b): world-space AABBs
+  // the game forwards (interior cell bounds / building interiors). RCGI classifies
+  // probes and gather samples indoor/outdoor against these and refuses to blend
+  // across the boundary, killing the outdoor-probe-through-a-doorway leak. Cheap;
+  // forward every frame or on change. Empty span disables classification.
+  void SetInteriorVolumes(std::span<const InteriorVolume> volumes);
   // Seeds simulated hair strands on a head sphere (--demo strands).
   void SeedHairStrands(const Vec3& head_center, f32 head_radius, u32 strands, f32 length);
   // Builds simulated guide strands from a real hair mesh and places the groom
@@ -509,6 +515,7 @@ class RX_RENDER_EXPORT Renderer {
   bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
   bool rcgi_sw_unavailable_logged_ = false;  // logged the "no startup SDF path" notice once
   LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
+  base::Vector<InteriorVolume> interior_volumes_;  // forwarded to rcgi each active frame (item 9b)
   // SDF software-trace infrastructure (RX_SDF / software_gi): per-mesh SDFs +
   // global clipmap. Both null unless the path was enabled at startup, so with it
   // off nothing is generated/allocated. `sdf_available_` is the IMMUTABLE startup

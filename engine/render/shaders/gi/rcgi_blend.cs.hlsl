@@ -12,6 +12,7 @@
 [[vk::binding(2, 0)]] ConstantBuffer<RcgiGlobals> rcgi : register(b2, space0);
 [[vk::binding(3, 0)]] StructuredBuffer<uint> rcgi_state : register(t3, space0);
 [[vk::binding(4, 0)]] StructuredBuffer<uint2> rcgi_radiance : register(t4, space0);
+[[vk::binding(5, 0)]] StructuredBuffer<uint2> probe_meta : register(t5, space0);
 
 struct PushData {
   float4 rotation_x;
@@ -40,7 +41,9 @@ void main(uint3 id : SV_DispatchThreadID) {
   uint3 probe = uint3(probe_xy.x % kRcgiProbesPerAxis, probe_xy.y,
                       probe_xy.x / kRcgiProbesPerAxis);
   uint probe_index = RcgiProbeIndex(probe);
-  float3 origin = RcgiProbePosition(rcgi, cascade, probe);
+  // Same relocated origin the probe trace used, so hit_pos re-hashes to the cell
+  // the trace inserted (item 10).
+  float3 origin = RcgiProbePositionMeta(rcgi, probe_meta, cascade, probe);
 
   float2 oct = (float2(in_probe) - 1.0 + 0.5) / float(texels) * 2.0 - 1.0;
   float3 texel_dir = RcgiOctDecode(oct);

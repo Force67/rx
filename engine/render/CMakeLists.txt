@@ -289,6 +289,7 @@ set(RX_RENDER_SHADERS
   shaders/gi/rcgi_cache_shade_sw.cs.hlsl
   shaders/gi/rcgi_blend.cs.hlsl
   shaders/gi/rcgi_border.cs.hlsl
+  shaders/gi/rcgi_probe_meta.cs.hlsl
   shaders/gi/rcgi_resolve.cs.hlsl
   shaders/gi/rcgi_gather.cs.hlsl
   shaders/gi/rcgi_denoise.cs.hlsl
@@ -376,6 +377,7 @@ set(RX_SHADER_DEPS_rcgi_probe_trace_sw_cs_hlsl shaders/gi/rcgi_probe_trace_body.
 set(RX_SHADER_DEPS_rcgi_cache_shade_cs_hlsl shaders/gi/rcgi_cache_shade_body.hlsli shaders/gi/rcgi_common.hlsli shaders/gi/light_grid.hlsli shaders/rt_geometry.hlsli)
 set(RX_SHADER_DEPS_rcgi_cache_shade_sw_cs_hlsl shaders/gi/rcgi_cache_shade_body.hlsli shaders/gi/rcgi_common.hlsli shaders/gi/light_grid.hlsli shaders/gi/sdf_trace.hlsli)
 set(RX_SHADER_DEPS_rcgi_blend_cs_hlsl shaders/gi/rcgi_common.hlsli)
+set(RX_SHADER_DEPS_rcgi_probe_meta_cs_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_rcgi_resolve_cs_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_rcgi_gather_cs_hlsl shaders/gi/rcgi_common.hlsli shaders/gi/sh.hlsli)
 set(RX_SHADER_DEPS_rcgi_denoise_cs_hlsl shaders/gi/rcgi_common.hlsli)
