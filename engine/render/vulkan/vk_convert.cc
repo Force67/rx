@@ -237,7 +237,10 @@ ScopeInfo ScopeInfoOf(BarrierScope scope, bool as_source) {
               VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
                   VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR};
     case BarrierScope::kAccelRead:
-      return {VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+      // Vertex stage included: the precipitation volume ray-queries the TLAS
+      // per particle from its vertex shader, not only compute/fragment.
+      return {VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
+                  VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
               VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR};
     case BarrierScope::kHostRead:
       return {VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_HOST_READ_BIT};
