@@ -486,6 +486,8 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
       f32 top;
       f32 wind;
       f32 strength;
+      f32 wind_z;  // z drift velocity, matches cloud_shadow.cs (and clouds.cs)
+      f32 pad[3];
     };
     cloud_shadow_pipeline_ = device_->CreateComputePipeline({
         .shader = RX_SHADER(k_cloud_shadow_cs_hlsl),
@@ -2471,13 +2473,22 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     }
   }
   bool water_pipeline_active = any_water && water_ != nullptr;
+  // Volumetric precipitation's optional per-particle sun rays consult the TLAS
+  // from its vertex shader, so an active rainstorm must keep the TLAS built
+  // and current even when every other ray-traced effect is disabled.
+  const bool precip_volume_ready = settings_.weather.volumetric &&
+                                   settings_.weather.precipitation > 0.0f &&
+                                   !settings_.interior && precip_volume_.available();
+  const bool precip_rt = precip_volume_ready && settings_.weather.rt_shadows && rt_available_ &&
+                         !path_trace;
   // When the tlas is consulted for shading, the rasterized surface must match the
   // blas (built at lod 0), or rays can hit geometry that the selected raster lod
   // did not draw. This includes water reflections and volumetric-fog visibility,
   // not only the opaque scene's ray-traced effects.
   bool force_lod0_for_tlas = rt_shadows || rtao_active || ddgi_active ||
                              (rcgi_active && !rcgi_software) || reflections_active || path_trace ||
-                             (water_pipeline_active && settings_.water_reflections) || fog_active;
+                             (water_pipeline_active && settings_.water_reflections) || fog_active ||
+                             precip_rt;
 
   // Async TLAS build (RX_RT_ASYNC_TLAS): build this frame's slot on the compute
   // queue while the graphics timeline consumes the slot built last frame -- the
@@ -3105,13 +3116,17 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     env_aurora = settings_.weather.aurora_intensity * std::clamp(night, 0.0f, 1.0f);
   }
   // An active aurora writhes: refresh the cubemap whenever its 0.4 s animation
-  // step ticks over, so the curtains also move in the IBL and reflections.
+  // step ticks over, so the curtains also move in the IBL and reflections. The
+  // moment it fades to zero the environment re-bakes once more, so switching
+  // the aurora off does not leave the last green bake in the IBL forever.
   constexpr f64 kAuroraBakeStep = 0.4;
   if (env_aurora > 0.0f &&
       std::floor(time_seconds_ / kAuroraBakeStep) !=
           std::floor((time_seconds_ - view.frame_delta_seconds) / kAuroraBakeStep)) {
     environment_dirty_ = true;
   }
+  if (env_aurora <= 0.0f && prev_env_aurora_ > 0.0f) environment_dirty_ = true;
+  prev_env_aurora_ = env_aurora;
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
     Vec3 env_sun = applied_sun_direction_;
@@ -3129,7 +3144,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // RCGI contributes to the TLAS build only in hardware mode; the software SDF
   // path has no ray query and (on non-ray-query devices) no raytracing context.
   if (rt_shadows || rtao_active || ddgi_active || (rcgi_active && !rcgi_software) ||
-      water_pipeline_active || reflections_active || path_trace || fog_active) {
+      water_pipeline_active || reflections_active || path_trace || fog_active || precip_rt) {
     // Solid-angle instance culling + distance LOD are realtime-only shaping of
     // the ray-traced scene; the path tracer keeps every instance at LOD0 for
     // reference correctness. RX_RT_CULL / RX_RT_LOD_NEAR gate them independently.
@@ -3509,8 +3524,11 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     const WeatherSettings& weather = settings_.weather;
     const bool weather_marks =
         weather.precipitation > 0.0f || weather.wetness > 0.0f || weather.snow_cover > 0.0f;
-    precip_occlusion_active_ = weather.volumetric && weather_marks &&
-                               precip_occlusion_.available() && !settings_.interior && !path_trace;
+    // Not gated on `volumetric`: that flag only picks 3D versus screen-space
+    // falling precipitation, while the surface wetness / snow passes need the
+    // sky-visibility map either way (dry strips under bridges).
+    precip_occlusion_active_ = weather_marks && precip_occlusion_.available() &&
+                               !settings_.interior && !path_trace;
     if (precip_occlusion_active_) {
       precip_occlusion_.BeginFrame(view.camera.eye, frame_index_);
       precip_occlusion_.AddToGraph(
@@ -4148,6 +4166,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                 f32 top;
                 f32 wind;
                 f32 strength;
+                f32 wind_z;  // z drift velocity, matches cloud_shadow.cs
+                f32 pad[3];
               } p{};
               p.inv_view_proj = inv_view_proj;
               p.sun_dir[0] = sun.x; p.sun_dir[1] = sun.y; p.sun_dir[2] = sun.z;
@@ -4157,7 +4177,9 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               p.coverage = settings_.cloud_coverage;
               p.bottom = 1500.0f;
               p.top = 4200.0f;
-              p.wind = settings_.weather.wind_speed;  // cloud drift + shadows stay in sync
+              // Same drift velocity as clouds.cs, so the shadows track the deck.
+              p.wind = std::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+              p.wind_z = std::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
               p.strength = 0.75f;
               ctx.cmd->BindPipeline(cloud_shadow_pipeline_);
               ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
@@ -4757,7 +4779,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     cf.sun_intensity = settings_.sun_intensity + settings_.weather.lightning * 7.0f;
     cf.sun_color = settings_.sun_color;
     cf.coverage = settings_.cloud_coverage;
-    cf.wind = settings_.weather.wind_speed;
+    cf.wind_x = std::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+    cf.wind_z = std::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
     lit = clouds_.AddToGraph(graph_, lit, depth_export, {render_width_, render_height_}, cf);
   }
 
@@ -4878,8 +4901,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // falls under the shelter roof). When this runs, the post-resolve
   // screen-space streak layer is skipped; it remains the volumetric=false and
   // path-trace fallback.
-  if (precip_occlusion_active_ && settings_.weather.precipitation > 0.0f &&
-      depth_export != kInvalidResource && motion != kInvalidResource) {
+  if (precip_occlusion_active_ && precip_volume_ready && depth_export != kInvalidResource &&
+      motion != kInvalidResource) {
     Vec3 fwd = Normalize(view.camera.target - view.camera.eye);
     Vec3 right = Normalize(Cross(fwd, Vec3{0, 1, 0}));
     PrecipVolume::Frame vf;
@@ -4910,7 +4933,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     vf.froxel_enabled = froxel_on;
     vf.froxel_volume = froxel_fog_.integrated().view;
     vf.froxel_sampler = froxel_fog_.volume_sampler();
-    vf.rt_shadows = settings_.weather.rt_shadows && rt_available_;
+    vf.rt_shadows = precip_rt;  // matched to the TLAS build request above
     precip_volume_.AddToGraph(graph_, lit, depth_export, motion, raytracing_.get(), tlas_slot, vf);
     precip_volume_drawn = true;
   }

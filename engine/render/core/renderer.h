@@ -678,6 +678,9 @@ class RX_RENDER_EXPORT Renderer {
   f32 applied_sun_intensity_ = -1;
   Vec3 applied_sun_color_{};
   bool environment_dirty_ = true;
+  // Last frame's aurora bake strength; a fade to zero re-bakes once so the
+  // sky/IBL do not keep the final green cubemap after the aurora turns off.
+  f32 prev_env_aurora_ = 0.0f;
 
   // Editor debug-line pass: a line-list pipeline (lazily built) drawing
   // FrameView::debug_lines/overlay from per-frame host-visible vertex buffers.
