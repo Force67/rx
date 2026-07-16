@@ -329,6 +329,10 @@ if(RX_BUILD_TESTS)
   target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME camera_rig_test COMMAND camera_rig_test)
 
+  add_executable(world_streaming_test test/world_streaming_test.cc)
+  target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
+  add_test(NAME world_streaming_test COMMAND world_streaming_test)
+
   add_executable(cloth_collision_test
     test/cloth_collision_test.cc
     engine/physics/cloth_collision.cc)
