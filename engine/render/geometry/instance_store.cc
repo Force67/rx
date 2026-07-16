@@ -175,6 +175,10 @@ void InstanceStore::RefreshMesh(Device &device, u64 mesh, const f32 mesh_center[
     if (!group.alive || group.mesh != mesh) continue;
     if (compatible) {
       ComputeBounds(group, mesh_center, mesh_radius);
+      // The RT culler caches decisions made from the mesh-space center/radius as
+      // well as transforms. A compatible re-upload can still change those
+      // bounds, so retire the old visibility sweep.
+      ++group.revision;
     } else {
       ++invalidated_groups;
       invalidated_instances += group.transforms.size();

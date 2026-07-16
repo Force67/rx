@@ -72,7 +72,7 @@ struct RcgiGlobals {
   uint4 counts;                          // probes x,y,z, irradiance texels
   uint4 misc;                            // x current cascade, y frame, z cascades, w hash capacity
   float4 params;                         // x max ray dist, y hysteresis, z energy scale, w base cell
-  uint4 valid;                           // x = per-cascade "blended since (re)creation" bitmask
+  uint4 valid;                           // x post-blend mask, y cache-shade pre-blend mask
   // ---- Phase 3 (leak & occlusion hardening) ----
   float4 interior;   // xyz interior ambient (ray-miss fallback when interior), w probe-AO scale
   uint4 gi_flags;    // x feature bits (below), y interior volume count, z asfloat probe-AO bias, w pad

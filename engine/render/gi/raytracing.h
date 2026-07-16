@@ -45,16 +45,16 @@ enum RayMask : u8 {
 // Owns acceleration structures. Only constructed when DeviceCaps::raytracing
 // is true; every effect it feeds degrades to the raster path otherwise.
 // BLASes build once per uploaded mesh, the TLAS rebuilds every frame from
-// the visible instances. Two TLAS slots ping pong so a rebuild never races
-// the frame still in flight.
+// the visible instances. TLAS slots rotate so a rebuild never races the frame
+// still in flight.
 class RayTracingContext {
  public:
-  // Three ping-pong slots (not two): the async-TLAS path (RX_RT_ASYNC_TLAS)
+  // Four ping-pong slots (not two): the async-TLAS path (RX_RT_ASYNC_TLAS)
   // builds slot N on the compute queue for the *next* frame while this frame's
   // consumers read the slot built last frame, so a slot is written, then read a
-  // frame later, then rewritten a frame after that -- three live slots at two
-  // frames in flight. The synchronous path builds and consumes one slot.
-  static constexpr u32 kSlots = 3;
+  // frame later, then rewritten several frames after that. The fourth slot also
+  // makes the modulo sequence continuous when the u32 frame counter wraps.
+  static constexpr u32 kSlots = 4;
   static_assert(TlasSlotTracker::kSlots == kSlots, "slot tracker must mirror kSlots");
 
   struct Instance {
@@ -115,14 +115,20 @@ class RayTracingContext {
   // stall (device idle) and reallocate, so it MUST be called during the CPU
   // frame-build phase, never while a command list is recording. Doing the
   // growth here keeps BuildTlas allocation-free at record time.
-  void ReserveTlas(u32 slot, u32 instance_count);
+  bool ReserveTlas(u32 slot, u32 instance_count);
 
   // Records a full TLAS rebuild into cmd, including the barrier that makes
   // it visible to shader ray queries. Instances without a BLAS are skipped.
   // Capacity must already cover the instances (see ReserveTlas).
-  void BuildTlas(CommandList& cmd, u32 slot, const base::Vector<Instance>& instances);
+  void BuildTlas(CommandList& cmd, u32 slot, u32 frame_index,
+                 const base::Vector<Instance>& instances);
 
-  AccelStructHandle tlas(u32 slot) const { return tlas_[slot].handle; }
+  // Invalid/unbuilt slots resolve to a permanently built empty TLAS, so an
+  // allocation failure degrades ray queries to misses instead of binding null or
+  // a structure that references retired BLAS addresses.
+  AccelStructHandle tlas(u32 slot) const {
+    return slot_tracker_.Valid(slot) ? tlas_[slot].handle : fallback_tlas_.handle;
+  }
 
   // Whether `slot` currently holds a valid TLAS build (built this session and
   // against the live BLAS set). False for a never-built slot or one retired by a
@@ -133,7 +139,7 @@ class RayTracingContext {
   // is safe. The async read slot is the previous frame's build; when it is not
   // valid (RT just enabled, or a BLAS was replaced) this returns a synchronous
   // build+read of the current slot instead of binding an unbuilt/stale one.
-  TlasSlotTracker::Selection SelectTlasSlots(u32 frame_index, bool want_async) const {
+  TlasSlotTracker::Selection SelectTlasSlots(u32 frame_index, bool want_async) {
     return slot_tracker_.Select(frame_index, want_async);
   }
 
@@ -176,6 +182,7 @@ class RayTracingContext {
   GpuBuffer blas_scratch_;
   u64 compacted_saved_bytes_ = 0;
   Tlas tlas_[kSlots];
+  Tlas fallback_tlas_;
   // Per-slot build validity + BLAS-set revision (pure logic; see the header).
   TlasSlotTracker slot_tracker_;
 };

@@ -199,10 +199,14 @@ bool RcgiSystem::CreateResources() {
                                      kBufferUsageStorage | kBufferUsageTransferDst);
   // Interior volumes: host-visible, updated by SetInteriorVolumes. Zeroed so a
   // stale slot never classifies as inside before the game forwards volumes.
-  interior_volumes_ = device_.CreateBuffer(
-      static_cast<u64>(kInteriorVolFloat4s) * 4 * sizeof(f32), kBufferUsageStorage, true);
-  if (!probe_meta_ || !interior_volumes_ || !interior_volumes_.mapped) return false;
-  std::memset(interior_volumes_.mapped, 0, static_cast<size_t>(kInteriorVolFloat4s) * 4 * sizeof(f32));
+  for (GpuBuffer& volumes : interior_volumes_) {
+    volumes = device_.CreateBuffer(static_cast<u64>(kInteriorVolFloat4s) * 4 * sizeof(f32),
+                                   kBufferUsageStorage, true);
+    if (!volumes.mapped) return false;
+    std::memset(volumes.mapped, 0,
+                static_cast<size_t>(kInteriorVolFloat4s) * 4 * sizeof(f32));
+  }
+  if (!probe_meta_) return false;
   device_.ImmediateSubmit([&](CommandList& cmd) {
     cmd.FillBuffer(probe_meta_, 0, probe_meta_.size, 0);
   });
@@ -494,19 +498,25 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
   }
   last_camera_ = camera;
 
-  // Interior transition: the sun, ambient and occlusion all change discontinuously
-  // between an interior cell and the outdoors, so every RCGI history retains the
-  // wrong radiance across the boundary. Invalidate the world hash cache, force
-  // each cascade's probe atlas to re-converge (reset, like a cascade snap) and
-  // drop the temporal screen history (via the gather's screen_reset_ path).
-  if (have_interior_state_ && config.interior != last_interior_) {
+  Vec3 sun = Normalize(sun_direction);
+  RcgiHistoryLighting history_lighting{.authored_interior = config.authored_interior,
+                                       .interior_miss = config.interior,
+                                       .interior_ambient = config.interior_ambient,
+                                       .sun_direction = sun,
+                                       .sun_intensity = sun_intensity,
+                                       .sun_color = sun_color};
+  // Authored interior lighting changes discontinuously at cell boundaries. The
+  // raw mode remains part of the key even when RX_RCGI_INTERIOR disables the
+  // miss/classification shader path.
+  if (have_history_lighting_ &&
+      ShouldInvalidateRcgiHistory(last_history_lighting_, history_lighting)) {
     clear_hash_ = true;
     for (u32 c = 0; c < kCascades; ++c) cascade_valid_[c] = false;
     screen_history_valid_ = false;
     screen_reset_ = true;
   }
-  last_interior_ = config.interior;
-  have_interior_state_ = true;
+  last_history_lighting_ = history_lighting;
+  have_history_lighting_ = true;
 
   if (!history_valid_) {
     for (u32 c = 0; c < kCascades; ++c) {
@@ -526,7 +536,6 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                new_origin.z != blended_origin_[current].z;
   blended_origin_[current] = new_origin;
   history_valid_ = true;
-  cascade_valid_[current] = true;  // blended this frame -> valid from here on
 
   f32 current_spacing = kBaseSpacing * static_cast<f32>(1u << current);
 
@@ -542,7 +551,6 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
   g.camera_pos[1] = camera.y;
   g.camera_pos[2] = camera.z;
   g.camera_pos[3] = kLodDistance;
-  Vec3 sun = Normalize(sun_direction);
   g.sun_direction[0] = sun.x;
   g.sun_direction[1] = sun.y;
   g.sun_direction[2] = sun.z;
@@ -563,17 +571,18 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
   g.params[1] = settings_.hysteresis;
   g.params[2] = settings_.energy_scale;
   g.params[3] = kBaseCell;
-  // Per-cascade validity mask consumed by the bounce/resolve/gather sampling
-  // (RcgiCascadeValid): a cascade contributes only once blended at least once.
-  // The current cascade is included here (it blends this frame); its pre-blend
-  // reads in the same frame land on the black-cleared atlas, so 0, not garbage.
-  u32 valid_mask = 0;
+  // Cache shade runs before this frame's blend. A reset cascade must therefore
+  // stay out of its bounce mask until the new rays overwrite the stale slab.
+  u32 previous_valid_mask = 0;
   for (u32 c = 0; c < kCascades; ++c)
-    if (cascade_valid_[c]) valid_mask |= (1u << c);
-  g.valid[0] = valid_mask;
-  g.valid[1] = 0;
+    if (cascade_valid_[c]) previous_valid_mask |= (1u << c);
+  RcgiCascadeValidity validity =
+      ComputeRcgiCascadeValidity(previous_valid_mask, current, reset);
+  g.valid[0] = validity.after_blend;
+  g.valid[1] = validity.before_blend;
   g.valid[2] = 0;
   g.valid[3] = 0;
+  cascade_valid_[current] = true;  // the blend recorded below primes future frames
   // Phase 3 leak/occlusion hardening state. Classification is only meaningful
   // with volumes present; fold that into the flag so the shaders can early-out.
   const bool classify = config.classify && interior_volume_count_ > 0;
@@ -600,10 +609,11 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
 
   const bool software = sdf != nullptr;
   const bool relocate = config.relocate;
+  const GpuBuffer interior_volumes = interior_volumes_[frame_index % 2];
   graph.AddPass(
       "rcgi", [async](RenderGraph::PassBuilder& b) { if (async) b.Async(); },
       [this, raytracing, tlas_slot, &light_grid, &lights, trace_push, frame_index, current, reset,
-       do_clear, software, sdf, relocate](PassContext& ctx) {
+       do_clear, software, sdf, relocate, interior_volumes](PassContext& ctx) {
         const GpuBuffer& globals = globals_buffers_[frame_index % 2];
         // Software mode binds the SDF clipmap resources into set 1 for both the
         // probe trace and cache shade sw variants (mirrors sdf_debug's wiring).
@@ -626,7 +636,9 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
               Transition(rays_, ResourceState::kUndefined, ResourceState::kGeneral)};
           ctx.cmd->TextureBarriers(barriers);
         } else {
-          ctx.cmd->MemoryBarrier(BarrierScope::kComputeRead, BarrierScope::kComputeWrite);
+          // Persistent world resources can be sampled by both compute gathers
+          // and forward fragment shaders in the preceding frame.
+          ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeWrite);
         }
 
         // Zero the hash on first frame / teleport (garbage keys = false hits).
@@ -708,7 +720,7 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                   InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
                   InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
                   Bind::StorageBuffer(12, probe_meta_, 0, probe_meta_.size),
-                  Bind::StorageBuffer(13, interior_volumes_, 0, interior_volumes_.size)});
+                  Bind::StorageBuffer(13, interior_volumes, 0, interior_volumes.size)});
           bind_sdf(1);
         } else {
           ctx.cmd->BindPipeline(cache_shade_pipeline_);
@@ -728,7 +740,7 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                   InGeneral(Bind::Combined(10, irradiance_.view, sampler_)),
                   InGeneral(Bind::Combined(11, visibility_.view, sampler_)),
                   Bind::StorageBuffer(12, probe_meta_, 0, probe_meta_.size),
-                  Bind::StorageBuffer(13, interior_volumes_, 0, interior_volumes_.size)});
+                  Bind::StorageBuffer(13, interior_volumes, 0, interior_volumes.size)});
           ctx.cmd->BindSet(1, bindless_->set());
         }
         ctx.cmd->DispatchIndirect(dispatch_args_, 0);
@@ -786,15 +798,19 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
           ctx.cmd->Dispatch((kProbeCount + 63) / 64, 1, 1);
           ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
         }
+        // Inline reflection hit shading samples these persistent resources from
+        // the forward fragment shader later in this frame.
+        ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
       });
 }
 
-void RcgiSystem::SetInteriorVolumes(std::span<const InteriorVolume> volumes) {
+void RcgiSystem::SetInteriorVolumes(std::span<const InteriorVolume> volumes, u32 frame_index) {
   u32 count = static_cast<u32>(std::min<size_t>(volumes.size(), kMaxInteriorVolumes));
   interior_volume_count_ = count;
-  if (!interior_volumes_.mapped) return;
+  GpuBuffer& buffer = interior_volumes_[frame_index % 2];
+  if (!buffer.mapped) return;
   // Layout: two float4 per volume (min.xyz, max.xyz); w padding unused.
-  f32* dst = static_cast<f32*>(interior_volumes_.mapped);
+  f32* dst = static_cast<f32*>(buffer.mapped);
   for (u32 i = 0; i < count; ++i) {
     dst[i * 8 + 0] = volumes[i].min.x;
     dst[i * 8 + 1] = volumes[i].min.y;
@@ -843,7 +859,8 @@ ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle dep
                 InGeneral(Bind::Combined(4, irradiance_.view, sampler_)),
                 InGeneral(Bind::Combined(5, visibility_.view, sampler_)),
                 Bind::StorageBuffer(6, probe_meta_, 0, probe_meta_.size),
-                Bind::StorageBuffer(7, interior_volumes_, 0, interior_volumes_.size)});
+                Bind::StorageBuffer(7, interior_volumes_[frame_index % 2], 0,
+                                    interior_volumes_[frame_index % 2].size)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(out_img.extent);
       });
@@ -936,7 +953,8 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
                 Bind::Combined(13, ctx.graph->image(screen_color).view, linear_sampler_),
                 Bind::Combined(14, ctx.graph->image(screen_depth).view, sampler_),
                 Bind::StorageBuffer(15, probe_meta_, 0, probe_meta_.size),
-                Bind::StorageBuffer(16, interior_volumes_, 0, interior_volumes_.size)});
+                Bind::StorageBuffer(16, interior_volumes_[frame_index % 2], 0,
+                                    interior_volumes_[frame_index % 2].size)});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(gather);
       });
@@ -1074,7 +1092,7 @@ RcgiSystem::~RcgiSystem() {
   device_.DestroyBuffer(active_meta_);
   device_.DestroyBuffer(dispatch_args_);
   device_.DestroyBuffer(probe_meta_);
-  device_.DestroyBuffer(interior_volumes_);
+  for (GpuBuffer& volumes : interior_volumes_) device_.DestroyBuffer(volumes);
   for (GpuBuffer& b : globals_buffers_) device_.DestroyBuffer(b);
 }
 

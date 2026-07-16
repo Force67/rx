@@ -170,6 +170,13 @@ int main() {
 
   store.OnFrameSubmitted(device);
 
+  const u32 revision_before_refresh = store.groups()[first.index].revision;
+  const f32 refreshed_center[3] = {3.0f, 0.0f, 0.0f};
+  store.RefreshMesh(device, 7, refreshed_center, 5.0f, /*compatible=*/true);
+  const InstanceStore::Group& refreshed = store.groups()[first.index];
+  if (refreshed.revision != revision_before_refresh + 1 || refreshed.bounds_radius <= 5.0f)
+    return Fail("compatible mesh refresh did not invalidate bounds consumers");
+
   if (!store.Destroy(device, first)) return Fail("destroy");
   if (store.group_count() != 0 || store.instance_count() != 0 || device.live_buffers() != 0)
     return Fail("destroy counters or retirement");

@@ -8,6 +8,7 @@
 #include "render/core/bindless.h"
 #include "render/core/render_graph.h"
 #include "render/gi/light_grid.h"
+#include "render/gi/rcgi_history.h"
 #include "render/gi/rcgi_interior.h"
 #include "render/rhi/device.h"
 
@@ -51,6 +52,7 @@ class RcgiSystem {
   // the renderer (RX_RCGI_INTERIOR / RX_RCGI_RELOCATE / RX_RCGI_PROBE_AO); the
   // interior-volume count is owned by the system (SetInteriorVolumes).
   struct FrameConfig {
+    bool authored_interior = false;  // raw lighting mode, independent of feature gates
     bool interior = false;           // ray misses fall back to interior_ambient, not sky
     Vec3 interior_ambient{0, 0, 0};  // authored indoor ambient
     bool relocate = true;            // per-probe backface relocation + disable
@@ -97,7 +99,7 @@ class RcgiSystem {
   // do not blend with outdoor probes (item 9b). Empty span disables classify.
   // Cheap: just repacks a small host-visible buffer, so it may be called each
   // frame from the game's forwarding path.
-  void SetInteriorVolumes(std::span<const InteriorVolume> volumes);
+  void SetInteriorVolumes(std::span<const InteriorVolume> volumes, u32 frame_index);
 
   // M1 filler: full-res irradiance from the cascades, sampled per screen pixel.
   // Reads the prepass depth + oct normals; returns the "rcgi_irradiance"
@@ -169,7 +171,7 @@ class RcgiSystem {
     b.visibility = visibility_.view;
     b.globals = &globals_buffers_[frame_index % 2];
     b.probe_meta = &probe_meta_;
-    b.interior_vols = &interior_volumes_;
+    b.interior_vols = &interior_volumes_[frame_index % 2];
     b.sampler = sampler_;
     b.valid = true;
     return b;
@@ -178,7 +180,9 @@ class RcgiSystem {
   // Zero the hash on the next update (camera teleports / big jumps).
   void RequestReset() {
     clear_hash_ = true;
+    for (u32 c = 0; c < kCascades; ++c) cascade_valid_[c] = false;
     screen_history_valid_ = false;
+    screen_reset_ = true;
   }
 
   // Gather resolution scale (RX_RCGI_GATHER_SCALE): 2 = half res (default),
@@ -202,7 +206,7 @@ class RcgiSystem {
     u32 counts[4];                     // probes x,y,z, irradiance texels
     u32 misc[4];                       // x current cascade, y frame, z cascades, w hash capacity
     f32 params[4];                     // x max ray dist, y hysteresis, z energy, w base cell
-    u32 valid[4];                      // x per-cascade "blended since (re)creation" bitmask
+    u32 valid[4];                      // x post-blend mask, y cache-shade pre-blend mask
     f32 interior[4];                   // xyz interior ambient (miss fallback), w probe-AO scale
     u32 gi_flags[4];                   // x feature bits, y volume count, z asuint(probe-AO bias), w pad
   };
@@ -231,7 +235,7 @@ class RcgiSystem {
   GpuBuffer dispatch_args_;      // indirect args for cache shade
   GpuBuffer globals_buffers_[2]; // host visible, ping-pong by frame parity
   GpuBuffer probe_meta_;         // uint2 per (cascade, probe): packed reloc offset + flags
-  GpuBuffer interior_volumes_;   // host-visible: 2 float4 (min,max) per interior volume
+  GpuBuffer interior_volumes_[2];  // frame-parity: 2 float4 (min,max) per volume
   u32 interior_volume_count_ = 0;
 
   PipelineHandle probe_trace_pipeline_;
@@ -281,12 +285,11 @@ class RcgiSystem {
   bool cascade_valid_[kCascades] = {};
   Vec3 blended_origin_[kCascades] = {};
   Vec3 last_camera_{};
-  // Interior-lighting state last seen in AddToGraph. A transition (entering or
-  // leaving an interior) invalidates every RCGI history -- world cache radiance,
-  // probe-atlas hysteresis and the temporal screen history all carry the old
-  // lighting otherwise. `have_interior_state_` suppresses a reset on first use.
-  bool last_interior_ = false;
-  bool have_interior_state_ = false;
+  // Effective authored interior lighting last seen by AddToGraph. Raw mode is
+  // tracked separately from the RX_RCGI_INTERIOR shader gate so toggles and
+  // cell-to-cell authored-light changes invalidate every retained history.
+  RcgiHistoryLighting last_history_lighting_{};
+  bool have_history_lighting_ = false;
 };
 
 }  // namespace rx::render

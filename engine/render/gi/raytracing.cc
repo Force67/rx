@@ -45,7 +45,17 @@ base::Vector<AccelTriangles> BlasGeometries(const GpuMesh& mesh) {
 }  // namespace
 
 std::unique_ptr<RayTracingContext> RayTracingContext::Create(Device& device) {
-  return std::unique_ptr<RayTracingContext>(new RayTracingContext(device));
+  auto context = std::unique_ptr<RayTracingContext>(new RayTracingContext(device));
+  if (!context->EnsureTlasCapacity(context->fallback_tlas_, 1)) {
+    RX_ERROR("fallback tlas allocation failed");
+    return nullptr;
+  }
+  device.ImmediateSubmit([&](CommandList& cmd) {
+    cmd.BuildTlas(context->fallback_tlas_.handle, context->fallback_tlas_.instances, 0,
+                  context->fallback_tlas_.scratch);
+    cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelRead);
+  });
+  return context;
 }
 
 RayTracingContext::~RayTracingContext() {
@@ -56,6 +66,7 @@ RayTracingContext::~RayTracingContext() {
       if (blas.handle) device_.DestroyAccelStruct(blas.handle);
   device_.DestroyBuffer(blas_scratch_);
   for (Tlas& tlas : tlas_) DestroyTlas(tlas);
+  DestroyTlas(fallback_tlas_);
 }
 
 bool RayTracingContext::EnsureBlasScratch(u64 size) {
@@ -201,34 +212,46 @@ void RayTracingContext::RemoveLodBlas(u64 mesh_key) {
 bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
   if (tlas.handle && tlas.capacity >= instance_count) return true;
 
-  // Growth recreates everything. Rare in practice (entity count spikes),
-  // so a full stall beats juggling retired buffers.
-  device_.WaitIdle();
-  DestroyTlas(tlas);
-
   u32 capacity = 64;
   while (capacity < instance_count) capacity *= 2;
 
-  tlas.instances = device_.CreateBuffer(capacity * sizeof(TlasInstance),
-                                        kBufferUsageAccelBuildInput, true);
-  if (!tlas.instances.mapped) return false;
+  // Build the replacement transactionally. Allocation failure preserves the
+  // old resources; the slot tracker decides whether they are safe to read.
+  Tlas replacement;
+  replacement.instances = device_.CreateBuffer(capacity * sizeof(TlasInstance),
+                                                kBufferUsageAccelBuildInput, true);
+  if (!replacement.instances.mapped) {
+    DestroyTlas(replacement);
+    return false;
+  }
 
   AccelSizes sizes = device_.GetTlasSizes(capacity);
-  tlas.handle = device_.CreateAccelStruct(AccelStructType::kTlas, sizes.accel_bytes);
+  replacement.handle = device_.CreateAccelStruct(AccelStructType::kTlas, sizes.accel_bytes);
   u32 alignment = device_.caps().accel_scratch_alignment;
-  tlas.scratch = device_.CreateBuffer(sizes.scratch_bytes + alignment, kBufferUsageAccelScratch);
-  if (!tlas.handle || !tlas.scratch) return false;
-  tlas.capacity = capacity;
+  replacement.scratch =
+      device_.CreateBuffer(sizes.scratch_bytes + alignment, kBufferUsageAccelScratch);
+  if (!replacement.handle || !replacement.scratch) {
+    DestroyTlas(replacement);
+    return false;
+  }
+  replacement.capacity = capacity;
+
+  if (tlas.handle) device_.WaitIdle();
+  DestroyTlas(tlas);
+  tlas = replacement;
   return true;
 }
 
-void RayTracingContext::ReserveTlas(u32 slot, u32 instance_count) {
+bool RayTracingContext::ReserveTlas(u32 slot, u32 instance_count) {
   // Reserve for the upper bound (some instances may lack a BLAS and drop out in
   // BuildTlas, but never more than this); a stall/realloc here is safe.
-  EnsureTlasCapacity(tlas_[slot], std::max(instance_count, 1u));
+  if (EnsureTlasCapacity(tlas_[slot], std::max(instance_count, 1u))) return true;
+  slot_tracker_.Invalidate(slot);
+  RX_ERROR("tlas slot {} allocation failed; using the empty fallback", slot);
+  return false;
 }
 
-void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot,
+void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot, u32 frame_index,
                                   const base::Vector<Instance>& instances) {
   Tlas& tlas = tlas_[slot];
 
@@ -256,8 +279,10 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot,
   }
 
   u32 count = static_cast<u32>(gpu_instances.size());
-  if (!EnsureTlasCapacity(tlas, std::max(count, 1u))) {
-    RX_ERROR("tlas allocation failed");
+  if (!tlas.handle || !tlas.instances.mapped || !tlas.scratch ||
+      tlas.capacity < std::max(count, 1u)) {
+    slot_tracker_.Invalidate(slot);
+    RX_ERROR("tlas slot {} was not reserved; using the empty fallback", slot);
     return;
   }
   if (count > 0) {
@@ -269,7 +294,7 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot,
   // The slot now holds a valid build against the current BLAS set; consumers may
   // read it next frame (async) or this frame (sync). Marked after the successful
   // record so the allocation-failure early-out above leaves the slot invalid.
-  slot_tracker_.MarkBuilt(slot);
+  slot_tracker_.MarkBuilt(slot, frame_index);
 }
 
 }  // namespace rx::render

@@ -25,7 +25,7 @@ int g_failures = 0;
 // `frame`, then record the build (MarkBuilt) exactly as BuildTlas does.
 TlasSlotTracker::Selection RunFrame(TlasSlotTracker& t, u32 frame, bool want_async) {
   TlasSlotTracker::Selection s = t.Select(frame, want_async);
-  t.MarkBuilt(s.build_slot);  // BuildTlas always builds the current slot
+  t.MarkBuilt(s.build_slot, frame);  // BuildTlas always builds the current slot
   return s;
 }
 
@@ -81,6 +81,29 @@ int main() {
     CHECK(s2.read_slot == enable_frame % kSlots);
   }
 
+  // --- a previously used tracker must not accept an old pre-inactivity slot ---
+  {
+    TlasSlotTracker t;
+    RunFrame(t, 0, false);
+    // Frames 1..4 have no RT work. Slot 0 is physically valid but was not built
+    // on frame 4, so frame 5 cannot consume it as the async previous slot.
+    TlasSlotTracker::Selection s = t.Select(5, true);
+    CHECK(!s.async);
+    CHECK(s.read_slot == s.build_slot);
+  }
+
+  // --- a failed build leaves the following frame on the sync fallback ---
+  {
+    TlasSlotTracker t;
+    RunFrame(t, 0, false);
+    TlasSlotTracker::Selection s1 = t.Select(1, true);
+    CHECK(s1.async);
+    // Simulate BuildTlas failing: do not mark build slot 1.
+    TlasSlotTracker::Selection s2 = t.Select(2, true);
+    CHECK(!s2.async);
+    CHECK(s2.read_slot == s2.build_slot);
+  }
+
   // --- BLAS replaced (RemoveBlas) invalidates every prior slot ---
   {
     TlasSlotTracker t;
@@ -103,12 +126,42 @@ int main() {
   // --- a slot built under an older revision never reads as valid ---
   {
     TlasSlotTracker t;
-    t.MarkBuilt(0);
+    t.MarkBuilt(0, 0);
     CHECK(t.Valid(0));
     t.InvalidateBuilds();  // BLAS set changed
     CHECK(!t.Valid(0));    // slot 0's build predates the current revision
-    t.MarkBuilt(0);        // rebuilt against the new set
+    t.MarkBuilt(0, 1);     // rebuilt against the new set
     CHECK(t.Valid(0));
+  }
+
+  // --- one-slot invalidation routes consumers to the fallback until rebuilt ---
+  {
+    TlasSlotTracker t;
+    t.MarkBuilt(2, 9);
+    CHECK(t.ValidForFrame(2, 9));
+    t.Invalidate(2);
+    CHECK(!t.Valid(2));
+    t.MarkBuilt(2, 10);
+    CHECK(t.ValidForFrame(2, 10));
+  }
+
+  // Four slots divide the u32 period, so rollover advances to a different build
+  // slot and conservatively uses a synchronous frame.
+  {
+    TlasSlotTracker t;
+    // Seed the exact alias: slot 0 carries a frame-0 stamp from the old epoch.
+    t.MarkBuilt(0, 0);
+    TlasSlotTracker::Selection before = t.Select(~0u, false);
+    CHECK(before.build_slot == 3);
+    t.MarkBuilt(before.build_slot, ~0u);
+    TlasSlotTracker::Selection s = t.Select(0, true);
+    CHECK(!s.async);
+    CHECK(s.build_slot == 0 && s.read_slot == 0);
+    // If frame 0 has no RT build, frame 1 must not mistake the previous epoch's
+    // frame-0 stamp for a fresh build.
+    TlasSlotTracker::Selection next = t.Select(1, true);
+    CHECK(!next.async);
+    CHECK(next.read_slot == next.build_slot);
   }
 
   if (g_failures == 0) {

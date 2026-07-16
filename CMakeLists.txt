@@ -365,6 +365,13 @@ if(RX_BUILD_TESTS)
   target_link_libraries(rcgi_interior_test PRIVATE rx::core)
   add_test(NAME rcgi_interior_test COMMAND rcgi_interior_test)
 
+  add_executable(rcgi_history_test test/rcgi_history_test.cc)
+  target_include_directories(rcgi_history_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(rcgi_history_test PRIVATE rx::core)
+  add_test(NAME rcgi_history_test COMMAND rcgi_history_test)
+
   # Async-TLAS slot validity bookkeeping: build/read slot selection, unbuilt-slot
   # fallback, and BLAS-revision invalidation. Header-only pure logic (no GPU).
   add_executable(rt_slot_tracker_test test/rt_slot_tracker_test.cc)

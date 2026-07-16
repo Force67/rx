@@ -372,7 +372,10 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
 
   if (desc.enable_raytracing && device_->caps().raytracing) {
     raytracing_ = RayTracingContext::Create(*device_);
-    raytracing_->Configure(desc.raytracing);
+    if (raytracing_)
+      raytracing_->Configure(desc.raytracing);
+    else
+      RX_WARN("ray tracing disabled: fallback tlas creation failed");
   }
   rt_available_ = raytracing_ && device_->caps().ray_query;
 
@@ -2279,6 +2282,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
   bool path_trace = rt_available_ && bindless_ != nullptr && settings_.path_trace;
+  bool rcgi_world = rcgi_active && !path_trace;
+  if (rcgi_ && !rcgi_world) rcgi_->RequestReset();
   // kMsaa: the prepass + opaque scene render multisampled and resolve before
   // everything downstream, which then runs single-sampled exactly as kNone.
   // ApplySettings already rebuilt the mesh pipelines at this sample count.
@@ -2465,7 +2470,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
          use_rt_frag, ddgi_active, water_pipeline_active, csm_on, shadow_slot, shadow_atlas,
          globals_set, globals_written, update_globals_set, frame_slot,
          adaptive_water_item, adaptive_water_submesh, transparent = std::move(transparent),
-         rcgi_irr, &frame, &view](PassContext& ctx) {
+          rcgi_irr, rcgi_world, &frame, &view](PassContext& ctx) {
           if (!globals_written) {
             update_globals_set(ctx, kInvalidResource, false, /*want_tlas=*/true);
           }
@@ -2477,6 +2482,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               sun_shadow != kInvalidResource ? ctx.graph->image(sun_shadow).view : TextureView{};
           TextureView rcgi_irr_view =
               rcgi_irr != kInvalidResource ? ctx.graph->image(rcgi_irr).view : TextureView{};
+          EnvironmentSystem::RcgiWorldBinding rcgi_world_binding;
+          RcgiSystem::IrradianceBinding rcgi_world_src;
+          if (rcgi_world) rcgi_world_src = rcgi_->irradiance_binding(frame_index_);
+          if (rcgi_world_src.valid) {
+            rcgi_world_binding.irradiance = rcgi_world_src.irradiance;
+            rcgi_world_binding.visibility = rcgi_world_src.visibility;
+            rcgi_world_binding.globals = rcgi_world_src.globals;
+            rcgi_world_binding.probe_meta = rcgi_world_src.probe_meta;
+            rcgi_world_binding.interior_vols = rcgi_world_src.interior_vols;
+          }
           environment_->WriteEnvSet(
               env_set, TextureView{}, ddgi_active ? &ddgi_binding : nullptr,
               csm_on ? ctx.graph->image(shadow_atlas).view : TextureView{},
@@ -2493,7 +2508,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
               water_field_active_ ? water_field_.ring_view(0) : TextureView{},
               water_field_active_ ? water_field_.ring_view(1) : TextureView{},
               water_field_active_ ? water_field_.params_buffer(frame_slot) : GpuBuffer{},
-              TextureView{}, TextureView{}, rcgi_irr_view);
+              TextureView{}, TextureView{}, rcgi_irr_view,
+              rcgi_world_src.valid ? &rcgi_world_binding : nullptr);
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
@@ -2734,7 +2750,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // branch instead (mesh.ps), lighting interiors with leak-free bounce (its ray
   // misses fall back to interior ambient) rather than a flat authored term. Gated
   // by RX_RCGI_INTERIOR so recreation's default (RCGI off) is unchanged.
-  if (rcgi_active && (!interior || RcgiInteriorOpt)) globals.flags |= kFrameFlagRcgi;
+  if (rcgi_world && (!interior || RcgiInteriorOpt)) globals.flags |= kFrameFlagRcgi;
   if (water_pipeline_active && settings_.water_reflections) globals.flags |= kFrameFlagWaterRt;
   if (rt_shadows && !interior) globals.flags |= kFrameFlagRtShadows;
   if (settings_.aurora && !interior) globals.flags |= kFrameFlagAurora;
@@ -3077,15 +3093,17 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     // Grow the TLAS now, on the build thread, so the record-time BuildTlas never
     // stalls the device or frees buffers mid command list (which races the
     // frame ring and corrupts the image). Spikes here when two worlds stream in.
-    raytracing_->ReserveTlas(tlas_build_slot, static_cast<u32>(instances.size()));
-    graph_.AddPass(
-        "tlas_build",
-        [async_tlas](RenderGraph::PassBuilder& b) {
-          if (async_tlas) b.Async();  // build next frame's slot on the compute queue
-        },
-        [this, tlas_build_slot, instances = std::move(instances)](PassContext& ctx) {
-          raytracing_->BuildTlas(*ctx.cmd, tlas_build_slot, instances);
-        });
+    if (raytracing_->ReserveTlas(tlas_build_slot, static_cast<u32>(instances.size()))) {
+      graph_.AddPass(
+          "tlas_build",
+          [async_tlas](RenderGraph::PassBuilder& b) {
+            if (async_tlas) b.Async();  // build next frame's slot on the compute queue
+          },
+          [this, tlas_build_slot, frame_index = frame_index_,
+           instances = std::move(instances)](PassContext& ctx) {
+            raytracing_->BuildTlas(*ctx.cmd, tlas_build_slot, frame_index, instances);
+          });
+    }
   }
 
   // DDGI right after the TLAS (its only same-frame dependency): flagged async
@@ -3127,16 +3145,16 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // irradiance cascades. On RT hardware it can fork onto the async compute queue
   // and overlap up to the JoinAsync before its first consumer (the M2 gather).
   // In software mode it traces the SDF clipmap (no tlas) on the main timeline.
-  bool rcgi_world = rcgi_active && !path_trace;
   bool rcgi_async =
       rcgi_world && !rcgi_software && settings_.async_compute && device_->caps().async_compute;
   if (rcgi_world) {
     light_grid_.AddToGraph(graph_, frame.lights, light_count, view.camera.eye, frame_index_,
                            rcgi_async);
-    rcgi_->SetInteriorVolumes(interior_volumes_);  // item 9b: forward game interior bounds
+    rcgi_->SetInteriorVolumes(interior_volumes_, frame_index_);  // game interior bounds
     rcgi_->set_gather_scale(static_cast<u32>(RcgiGatherScaleOpt));  // item 23: half/quarter res
     rcgi_->set_denoise_mask(RcgiDenoiseMaskOpt);                    // item 22: cross-class mask
     RcgiSystem::FrameConfig rcgi_cfg;
+    rcgi_cfg.authored_interior = settings_.interior;
     rcgi_cfg.interior = settings_.interior && RcgiInteriorOpt;
     rcgi_cfg.interior_ambient = settings_.interior_ambient;
     rcgi_cfg.relocate = RcgiRelocateOpt;
@@ -4214,7 +4232,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         if (ms_occlude) builder.Read(cull_hiz, ResourceUsage::kSampledTaskMesh);
       },
       [this, geom_scene, geom_motion, geom_skin, geom_depth, msaa, ao, sun_shadow, spec_refl,
-       rcgi_irr, rcgi_active, use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas,
+       rcgi_irr, rcgi_world, use_rt_frag, ddgi_active, csm_active, shadow_slot, shadow_atlas,
        cull_commands, ms_active, globals_set, frame_slot, restir_active, restir_out, &frame, &view,
        draw_meshlet_instances, view_proj, force_lod0_for_tlas](PassContext& ctx) {
         BindingSetHandle env_set = env_scene_sets_[frame_slot];
@@ -4233,7 +4251,7 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
         // null -> placeholders. The atlases stay in GENERAL between frames.
         EnvironmentSystem::RcgiWorldBinding rcgi_world_binding;
         RcgiSystem::IrradianceBinding rcgi_world_src;
-        if (rcgi_active) rcgi_world_src = rcgi_->irradiance_binding(frame_index_);
+        if (rcgi_world) rcgi_world_src = rcgi_->irradiance_binding(frame_index_);
         if (rcgi_world_src.valid) {
           rcgi_world_binding.irradiance = rcgi_world_src.irradiance;
           rcgi_world_binding.visibility = rcgi_world_src.visibility;

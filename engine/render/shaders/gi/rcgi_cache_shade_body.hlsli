@@ -208,8 +208,14 @@ void main(uint3 id : SV_DispatchThreadID) {
   }
 
   // Previous-frame bounce from the irradiance cascades (multi-bounce).
-  radiance += albedo * SampleRcgiIrradiance(rcgi, rcgi_irr_atlas, rcgi_irr_sampler, rcgi_vis_atlas,
-                                            rcgi_vis_sampler, probe_meta, interior_vols, pos, n, n);
+  // During a cascade reset its old slab must not seed the freshly cleared world
+  // cache before the blend pass overwrites it. Other consumers run after blend
+  // and use valid.x; cache shade uses the pre-blend mask carried in valid.y.
+  RcgiGlobals bounce_rcgi = rcgi;
+  bounce_rcgi.valid.x = rcgi.valid.y;
+  radiance += albedo * SampleRcgiIrradiance(bounce_rcgi, rcgi_irr_atlas, rcgi_irr_sampler,
+                                            rcgi_vis_atlas, rcgi_vis_sampler, probe_meta,
+                                            interior_vols, pos, n, n);
 
   rcgi_radiance_rw[idx] = RcgiPackRadiance(radiance);
   // +1 encoded (0 = never shaded) so RcgiCacheLookup can reject unshaded entries.
