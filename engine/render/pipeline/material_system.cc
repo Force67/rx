@@ -1,12 +1,49 @@
 #include "render/pipeline/material_system.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "core/log.h"
 
 namespace rx::render {
 namespace {
+
+// Physical skin scattering coefficients derived from artist-authored SkinParams.
+// Shared by the raster uniform Params and the RT MaterialRecord so both paths
+// shade skin identically. See render/shaders/sss_profile.hlsli.
+struct SkinCoeffs {
+  f32 sigma_t[3];
+  f32 sigma_s[3];
+  f32 scatter_color[3];
+  f32 g;
+  f32 ior;
+  f32 perfusion;
+};
+
+SkinCoeffs ComputeSkinCoeffs(const asset::Material::SkinParams& p) {
+  SkinCoeffs c;
+  c.g = p.anisotropy_g;
+  c.ior = p.ior;
+  c.perfusion = std::clamp(p.perfusion, 0.0f, 1.0f);
+  const f32 scale = std::max(p.scatter_scale, 1e-4f);
+  for (int i = 0; i < 3; ++i) {
+    const f32 col = std::clamp(p.scatter_color[i], 0.0f, 1.0f);
+    c.scatter_color[i] = col;
+    // Kulla-Conty 2017: invert the multiple-scattering albedo so the authored
+    // colour is what's seen. Per channel; s is the surface-albedo scale factor.
+    const f32 s = 4.09712f + 4.20863f * col -
+                  std::sqrt(std::max(0.0f, 9.59217f + 41.6808f * col +
+                                              17.7126f * col * col));
+    const f32 s2 = s * s;
+    const f32 alpha = std::clamp((1.0f - s2) / (1.0f - c.g * s2), 0.0f, 0.999f);
+    // mfp authored in mm; the renderer's world unit is metres (1 mm = 0.001 m).
+    const f32 mfp_world = std::max(p.mfp[i] * scale * 0.001f, 1e-6f);
+    c.sigma_t[i] = 1.0f / mfp_world;
+    c.sigma_s[i] = alpha * c.sigma_t[i];
+  }
+  return c;
+}
 
 struct FormatInfo {
   Format format = Format::kUnknown;
@@ -378,7 +415,16 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   if (material.alpha_mode == asset::AlphaMode::kMask) params.flags |= kFlagAlphaMask;
   if (material.wind) params.flags |= kFlagWind;
   if (material.is_water) params.flags |= kFlagWater;
-  if (material.skin) params.flags |= kFlagSkin;
+  if (material.skin) {
+    params.flags |= kFlagSkin;
+    const SkinCoeffs c = ComputeSkinCoeffs(material.skin_params);
+    std::memcpy(params.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
+    std::memcpy(params.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
+    std::memcpy(params.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
+    params.sss_anisotropy_g = c.g;
+    params.sss_perfusion = c.perfusion;
+    params.sss_ior = c.ior;
+  }
   if (material.hair) params.flags |= kFlagHair;
   if (material.virtual_albedo) params.flags |= kFlagVirtualAlbedo;
   // Terrain reuses the normal slot as a land layer, so the normal-map path must
@@ -506,6 +552,16 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
     if (mode == asset::AlphaMode::kMask) {
       record.flags |= BindlessRegistry::kMaterialAlphaMask;
       record.alpha_cutoff = material.alpha_cutoff;
+    }
+    if (material.skin) {
+      record.flags |= BindlessRegistry::kMaterialSkin;
+      const SkinCoeffs c = ComputeSkinCoeffs(material.skin_params);
+      std::memcpy(record.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
+      std::memcpy(record.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
+      std::memcpy(record.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
+      record.sss_anisotropy_g = c.g;
+      record.sss_perfusion = c.perfusion;
+      record.sss_ior = c.ior;
     }
     // Terrain splat: the rasterizer reuses the normal/emissive slots as land
     // layer 1 and the per-cell weight map. Mirror that into the bindless record

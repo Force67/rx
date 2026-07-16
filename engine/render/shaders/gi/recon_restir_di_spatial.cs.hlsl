@@ -52,19 +52,7 @@ struct PointLight {
 // recon gbuffer; foliage cutouts must keep casting correct shadows).
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
-struct MaterialRecord {
-  float4 base_color_factor;
-  float3 emissive;
-  uint base_color_texture;
-  uint flags;
-  float alpha_cutoff;
-  float roughness;
-  float metallic;
-  uint metallic_roughness_texture;
-  uint terrain_layer1_texture;
-  uint terrain_weight_texture;
-  uint pad2;
-};
+#include "material_record.hlsli"
 static const uint kMaterialAlphaMask = 1u;
 [[vk::binding(0, 1)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space1);
 [[vk::binding(1, 1)]] StructuredBuffer<GeometryRecord> geometry_records : register(t1, space1);

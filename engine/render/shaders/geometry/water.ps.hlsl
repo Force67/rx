@@ -72,19 +72,7 @@ struct DdgiVolume {
 
 #define RX_GEOMETRY_SPACE space3
 #include "rt_geometry.hlsli"
-struct MaterialRecord {
-  float4 base_color_factor;
-  float3 emissive;
-  uint base_color_texture;
-  uint flags;
-  float alpha_cutoff;
-  float roughness;
-  float metallic;
-  uint metallic_roughness_texture;
-  uint pad0;
-  uint pad1;
-  uint pad2;
-};
+#include "material_record.hlsli"
 [[vk::binding(0, 3)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space3);
 [[vk::binding(1, 3)]] StructuredBuffer<GeometryRecord> geometry_records : register(t1, space3);
 [[vk::binding(2, 3)]] StructuredBuffer<MaterialRecord> material_records : register(t2, space3);

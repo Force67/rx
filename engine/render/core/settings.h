@@ -260,6 +260,15 @@ struct RenderSettings {
   bool sss = true;
   f32 sss_width = 0.012f;  // world scattering radius, meters
 
+  // Dynamic blood flow (hemoglobin perfusion) for skin. The app normally drives
+  // these from gameplay (heart rate, exertion, emotion); the defaults give a
+  // gentle resting pulse so skin is never fully static.
+  bool skin_dynamics = true;
+  f32 skin_heart_rate = 1.1f;      // Hz (~66 bpm) - arterial pulse frequency
+  f32 skin_perfusion = 0.0f;       // global perfusion offset added to material baseline (-0.5..+0.5)
+  f32 skin_pulse_amplitude = 0.03f; // perfusion swing over one heartbeat
+  f32 skin_tension_gain = 0.35f;   // per-vertex stretch/crease -> perfusion (blanch) gain
+
   // Unified froxel volumetric lighting: a 3D scattering volume lit by the sun
   // and every clustered light (with local shadows), sampled by the fog
   // composite and translucents. Density is the subtle always-on base haze.
