@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "gi/material_class.hlsli"
 // Bilateral upscale of the half-res reflection trace (RX_REFL_HALF) to full
 // render resolution before NRD REBLUR_SPECULAR consumes it. The trace runs at
 // half res (quarter the rays -- the dominant reflection cost); this reconstructs
@@ -38,7 +39,9 @@ void main(uint3 id : SV_DispatchThreadID) {
   }
   float near = push.params.x;
   float cz = near / depth;
-  float3 cn = OctDecode(normal_map.Load(int3(id.xy, 0)).rg);
+  float4 cnr = normal_map.Load(int3(id.xy, 0));
+  float3 cn = OctDecode(cnr.rg);
+  float c_class = cnr.a;  // material class (item 22a): reject cross-class taps
 
   uint2 hsz = push.dims.zw;
   float2 uv = (float2(id.xy) + 0.5) / float2(full);
@@ -59,11 +62,13 @@ void main(uint3 id : SV_DispatchThreadID) {
     int2 qfp = clamp(int2(quv * float2(full)), int2(0, 0), int2(full) - 1);
     float qd = depth_map.Load(int3(qfp, 0));
     if (qd <= 0.0) continue;
+    float4 qnr = normal_map.Load(int3(qfp, 0));
     float qz = near / qd;
-    float3 qn = OctDecode(normal_map.Load(int3(qfp, 0)).rg);
+    float3 qn = OctDecode(qnr.rg);
     float wz = exp(-abs(cz - qz) / max(cz, 0.1) * 8.0);
     float wn = pow(saturate(dot(cn, qn)), 8.0);
-    float w = max(bw[i], 1e-3) * wz * wn;
+    float wc = RxMatClassMatch(c_class, qnr.a);  // reject cross-class neighbours
+    float w = max(bw[i], 1e-3) * wz * wn * wc;
     sum += in_half.Load(int3(q, 0)) * w;
     wsum += w;
   }

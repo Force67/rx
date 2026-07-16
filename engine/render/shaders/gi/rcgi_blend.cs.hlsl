@@ -13,6 +13,12 @@
 [[vk::binding(3, 0)]] StructuredBuffer<uint> rcgi_state : register(t3, space0);
 [[vk::binding(4, 0)]] StructuredBuffer<uint2> rcgi_radiance : register(t4, space0);
 [[vk::binding(5, 0)]] StructuredBuffer<uint2> probe_meta : register(t5, space0);
+// Sky cube for the cache-miss fallback (item 20b): a probe ray that hit geometry
+// whose radiance is not cached yet (hash overflow / just-registered / evicted)
+// used to feed black, darkening the cascades. Fall back to the same sky /
+// interior-ambient a miss ray would carry (RcgiSkyMiss respects interior mode).
+[[vk::combinedImageSampler]] [[vk::binding(6, 0)]] TextureCube sky : register(t6, space0);
+[[vk::combinedImageSampler]] [[vk::binding(6, 0)]] SamplerState sky_sampler : register(s6, space0);
 
 struct PushData {
   float4 rotation_x;
@@ -66,7 +72,11 @@ void main(uint3 id : SV_DispatchThreadID) {
         radiance = ray.rgb;  // miss: sky
       } else {
         float3 hit_pos = origin + dir * hitw;
-        if (!RcgiCacheLookup(rcgi, rcgi_state, rcgi_radiance, hit_pos, radiance)) radiance = 0.0.xxx;
+        if (!RcgiCacheLookup(rcgi, rcgi_state, rcgi_radiance, hit_pos, radiance)) {
+          // Cache miss: fall back to sky (or interior ambient) instead of black,
+          // so an un-shaded hit does not darken the cascade (item 20b).
+          radiance = RcgiSkyMiss(rcgi, sky.SampleLevel(sky_sampler, dir, 0).rgb);
+        }
       }
       sum.rgb += radiance * weight;
       weight_sum += weight;

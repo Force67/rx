@@ -316,7 +316,8 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {2, BindingType::kUniformBuffer},
                           {3, BindingType::kStorageBuffer},
                           {4, BindingType::kStorageBuffer},
-                          {5, BindingType::kStorageBuffer}}}},
+                          {5, BindingType::kStorageBuffer},
+                          {6, BindingType::kCombinedTextureSampler}}}},  // sky (cache-miss fallback)
       .push_constant_size = sizeof(BlendPush),
       .debug_name = "rcgi_blend",
   });
@@ -732,7 +733,8 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                                      Bind::Uniform(2, globals, 0, sizeof(RcgiGlobals)),
                                      Bind::StorageBuffer(3, state_, 0, state_.size),
                                      Bind::StorageBuffer(4, radiance_, 0, radiance_.size),
-                                     Bind::StorageBuffer(5, probe_meta_, 0, probe_meta_.size)});
+                                     Bind::StorageBuffer(5, probe_meta_, 0, probe_meta_.size),
+                                     Bind::Combined(6, sky_view_, sky_sampler_)});
           ctx.cmd->Push(push);
           ctx.cmd->Dispatch2D({kAtlasWidth, kSlabHeight});
         };
@@ -840,8 +842,14 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
                                           Extent2D extent, const Mat4& inv_view_proj,
                                           const Mat4& prev_view_proj, const Vec3& camera,
                                           f32 intensity, u32 frame_index, bool reset) {
-  Extent2D gather{(extent.width + kGatherDivisor - 1) / kGatherDivisor,
-                  (extent.height + kGatherDivisor - 1) / kGatherDivisor};
+  const u32 divisor = gather_divisor_;  // 2 half (default), 4 quarter (RX_RCGI_GATHER_SCALE)
+  Extent2D gather{(extent.width + divisor - 1) / divisor,
+                  (extent.height + divisor - 1) / divisor};
+  // Quarter-res carries ~4x fewer rays per full-res pixel, so the spatial filter
+  // needs a wider footprint to avoid splotching; scale the separable radius with
+  // the divisor (half=5, quarter=9). The gaussian sigma tracks the radius, so it
+  // stays a proper low-pass rather than a boxier blur.
+  const u32 denoise_radius = divisor >= 4u ? 9u : 5u;
   reset = reset || screen_reset_;  // freshly (re)created history must not be read
   screen_reset_ = false;
   bool screen_valid = screen_history_valid_ && !reset;
@@ -931,11 +939,13 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
             pb.Read(h, ResourceUsage::kSampledCompute);
         },
         [this, in_r, in_g, in_b, out_r, out_g, out_b, hitt, depth_export, normals, gather, extent,
-         dx, dy, near_plane](PassContext& ctx) {
+         dx, dy, near_plane, denoise_radius](PassContext& ctx) {
           DenoisePush p{};
           p.dims[0] = extent.width; p.dims[1] = extent.height;
           p.dims[2] = gather.width; p.dims[3] = gather.height;
-          p.misc[0] = static_cast<u32>(dx); p.misc[1] = static_cast<u32>(dy); p.misc[2] = 5u;
+          p.misc[0] = static_cast<u32>(dx); p.misc[1] = static_cast<u32>(dy);
+          p.misc[2] = denoise_radius;
+          p.misc[3] = denoise_mask_ ? 1u : 0u;  // item 22a: cross-class rejection
           p.params[0] = near_plane;
           ctx.cmd->BindPipeline(denoise_pipeline_);
           ctx.cmd->BindTransient(
@@ -974,6 +984,7 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
         p.params[2] = 48.0f;  // temporal history cap (GI is low-freq; stability > lag)
         p.params[3] = reset ? 1.0f : 0.0f;
         p.misc[0] = frame_index;
+        p.misc[1] = denoise_mask_ ? 1u : 0u;  // item 22b: vegetation disocclusion handling
         ctx.cmd->BindPipeline(upscale_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(out)),

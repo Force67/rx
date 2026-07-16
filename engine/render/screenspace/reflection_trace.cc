@@ -39,6 +39,7 @@ constexpr u32 kFlagDdgi = 1u;
 constexpr u32 kFlagVegAnyHit = 2u;
 constexpr u32 kFlagFog = 4u;
 constexpr u32 kFlagShSkip = 8u;
+constexpr u32 kFlagRcgi = 16u;
 
 // The push blocks must fit the guaranteed 128-byte range on every backend plus
 // the engine's 256-byte cap, and stay 16-byte aligned so the HLSL cbuffer layout
@@ -61,7 +62,12 @@ bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_la
                           {6, BindingType::kUniformBuffer},
                           {7, BindingType::kSampledImage},
                           {8, BindingType::kSampledImage},
-                          {9, BindingType::kSampledImage}}},
+                          {9, BindingType::kSampledImage},
+                          {10, BindingType::kUniformBuffer},           // RcgiGlobals
+                          {11, BindingType::kCombinedTextureSampler},  // rcgi irradiance atlas
+                          {12, BindingType::kCombinedTextureSampler},  // rcgi visibility atlas
+                          {13, BindingType::kStorageBuffer},           // rcgi probe meta
+                          {14, BindingType::kStorageBuffer}}},         // rcgi interior volumes
                {.shared = bindless_layout}},
       .push_constant_size = sizeof(ReflectionPush),
       .debug_name = "reflection_trace",
@@ -102,7 +108,8 @@ ResourceHandle ReflectionTrace::AddToGraph(
     ResourceHandle depth, ResourceHandle normals, TextureView prefiltered,
     TextureView ddgi_irradiance, bool ddgi_in_general, const GpuBuffer& ddgi_volume,
     u64 ddgi_volume_size, SamplerHandle sampler, Extent2D extent, ResourceHandle sh_r,
-    ResourceHandle sh_g, ResourceHandle sh_b, Extent2D sh_extent, const Frame& frame) {
+    ResourceHandle sh_g, ResourceHandle sh_b, Extent2D sh_extent, const RcgiBinding& rcgi,
+    const Frame& frame) {
   // Trace at half resolution when requested (quarters the ray count). Guides
   // stay full-res; the shader maps each half-res pixel to a full-res texel.
   const u32 step = frame.half_res ? 2u : 1u;
@@ -132,9 +139,15 @@ ResourceHandle ReflectionTrace::AddToGraph(
       },
       [this, &raytracing, tlas_slot, bindless_set, raw, depth, normals, prefiltered, ddgi_irradiance,
        ddgi_in_general, ddgi_volume, ddgi_volume_size, sampler, extent, trace, step, sh_valid, sh0,
-       sh1, sh2, sh_extent, frame](PassContext& ctx) {
+       sh1, sh2, sh_extent, rcgi, frame](PassContext& ctx) {
         BindingItem ddgi_item = Bind::Combined(5, ddgi_irradiance, sampler);
         if (ddgi_in_general) ddgi_item = InGeneral(ddgi_item);
+        BindingItem rcgi_irr = Bind::Combined(11, rcgi.irradiance, rcgi.sampler);
+        BindingItem rcgi_vis = Bind::Combined(12, rcgi.visibility, rcgi.sampler);
+        if (rcgi.in_general) {
+          rcgi_irr = InGeneral(rcgi_irr);
+          rcgi_vis = InGeneral(rcgi_vis);
+        }
         base::Vector<BindingItem> items;
         items.push_back(Bind::Storage(0, ctx.graph->image(raw)));
         items.push_back(Bind::Sampled(1, ctx.graph->image(depth)));
@@ -146,6 +159,11 @@ ResourceHandle ReflectionTrace::AddToGraph(
         items.push_back(Bind::Sampled(7, ctx.graph->image(sh0)));
         items.push_back(Bind::Sampled(8, ctx.graph->image(sh1)));
         items.push_back(Bind::Sampled(9, ctx.graph->image(sh2)));
+        items.push_back(Bind::Uniform(10, *rcgi.globals));
+        items.push_back(rcgi_irr);
+        items.push_back(rcgi_vis);
+        items.push_back(Bind::StorageBuffer(13, *rcgi.probe_meta));
+        items.push_back(Bind::StorageBuffer(14, *rcgi.interior_vols));
 
         ReflectionPush p{};
         p.inv_view_proj = frame.inv_view_proj;
@@ -183,7 +201,8 @@ ResourceHandle ReflectionTrace::AddToGraph(
         p.dims[3] = sh_extent.height;
         p.misc[0] = step;
         p.misc[1] = (frame.ddgi ? kFlagDdgi : 0u) | (frame.veg_anyhit ? kFlagVegAnyHit : 0u) |
-                    (fog_on ? kFlagFog : 0u) | (sh_valid ? kFlagShSkip : 0u);
+                    (fog_on ? kFlagFog : 0u) | (sh_valid ? kFlagShSkip : 0u) |
+                    (rcgi.active ? kFlagRcgi : 0u);
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(0, {items.data(), items.size()});
         ctx.cmd->BindSet(1, bindless_set);

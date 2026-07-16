@@ -1,5 +1,6 @@
 #include "rhi_bindings.hlsli"
 #include "gi/rcgi_common.hlsli"
+#include "gi/material_class.hlsli"
 // RCGI M2 spatial denoise (gather resolution). Separable bilateral gaussian run
 // twice (horizontal then vertical) over the SH triple. Bilateral weights come
 // from linear-depth delta, normal agreement, and hit-distance delta; contact
@@ -31,6 +32,15 @@ float3 DecodeN(int2 gp) {
   return RcgiOctDecode(normal_map.Load(int3(fp, 0)).xy);
 }
 
+// Material class packed into the prepass normal .a (item 22a).
+float ClassAt(int2 gp) {
+  uint2 full = push.dims.xy;
+  uint2 gsz = push.dims.zw;
+  float2 uv = (float2(gp) + 0.5) / float2(gsz);
+  int2 fp = clamp(int2(uv * float2(full)), int2(0, 0), int2(full) - 1);
+  return normal_map.Load(int3(fp, 0)).a;
+}
+
 float LinearZ(int2 gp) {
   uint2 full = push.dims.xy;
   uint2 gsz = push.dims.zw;
@@ -49,6 +59,12 @@ void main(uint3 id : SV_DispatchThreadID) {
   float cz = LinearZ(p);
   float3 cn = DecodeN(p);
   float c_hit = hit_t_in.Load(int3(p, 0));
+  bool mask_on = push.misc.w != 0u;  // RX_RCGI_DENOISE_MASK (item 22a A/B)
+  float c_class = ClassAt(p);
+  // Wind-blown foliage has high normal variance frame-to-frame, so its own
+  // same-class neighbours would be over-rejected by a tight normal weight;
+  // soften the normal exponent for vegetation centres (item 22b spatial).
+  bool c_veg = mask_on && RxIsVegetation(c_class);
   int2 dir = int2(push.misc.xy);
   int radius = int(push.misc.z);
 
@@ -78,10 +94,15 @@ void main(uint3 id : SV_DispatchThreadID) {
 
     float wg = exp(-float(i * i) / (2.0 * float(radius * radius) * 0.25 + 1e-3));
     float wz = exp(-abs(cz - qz) / max(cz, 0.1) * 8.0);
-    float wn = pow(saturate(dot(cn, qn)), 8.0);
+    // Softer normal weight on vegetation (wind normals vary) so same-class veg
+    // neighbours are not rejected; opaque keeps the sharp exponent.
+    float wn = pow(saturate(dot(cn, qn)), c_veg ? 2.0 : 8.0);
     float rel = abs(c_hit - q_hit) / (max(c_hit, q_hit) + 0.25);
     float wh = exp(-rel * rel * (2.0 + contact * 18.0));
-    float w = wg * wz * wn * wh;
+    // Hard cross-class rejection (item 22a): a vegetation/character neighbour
+    // must not smear its noisy indirect onto an opaque pixel and vice-versa.
+    float wc = mask_on ? RxMatClassMatch(c_class, ClassAt(q)) : 1.0;
+    float w = wg * wz * wn * wh * wc;
 
     acc_r += sh_r_in.Load(int3(q, 0)) * w;
     acc_g += sh_g_in.Load(int3(q, 0)) * w;

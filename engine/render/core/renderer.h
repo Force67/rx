@@ -416,6 +416,9 @@ class RX_RENDER_EXPORT Renderer {
   u32 output_width() const { return output_width_; }
   u32 output_height() const { return output_height_; }
   bool upscaler_active() const { return upscaler_ != nullptr; }
+  // True when RX_RCGI was set on the command line/env: hosted presets must let
+  // it win in both directions (force on OR force off) over the tier default.
+  bool rcgi_env_overridden() const { return rcgi_env_overridden_; }
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }
   size_t instance_group_count() const { return instances_.group_count(); }
   size_t instance_count() const { return instances_.instance_count(); }
@@ -514,6 +517,7 @@ class RX_RENDER_EXPORT Renderer {
   std::unique_ptr<RcgiSystem> rcgi_;  // idTech8-style radiance-cached GI (RX_RCGI), lazily created
   bool rcgi_create_failed_ = false;   // lazy creation failed once; do not retry
   bool rcgi_sw_unavailable_logged_ = false;  // logged the "no startup SDF path" notice once
+  bool rcgi_env_overridden_ = false;  // RX_RCGI was set explicitly (wins over preset both ways)
   LightGrid light_grid_;              // world-space light grid feeding the rcgi cache
   base::Vector<InteriorVolume> interior_volumes_;  // forwarded to rcgi each active frame (item 9b)
   // SDF software-trace infrastructure (RX_SDF / software_gi): per-mesh SDFs +

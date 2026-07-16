@@ -146,11 +146,52 @@ class RcgiSystem {
     return true;
   }
 
+  // Bundle of the RCGI irradiance-cascade resources needed to call
+  // SampleRcgiIrradiance from a pass outside the gather. The specular bounce in
+  // reflection_trace samples DDGI's probe atlas, which is empty under RCGI
+  // (black indirect at reflection hits); with this it reads the RCGI cascades
+  // instead. The atlases live in kGeneral once the world side is built; the
+  // globals UBO must be the one already uploaded for the current frame (the
+  // reflection pass records after AddToGraph, so `frame_index % 2` is valid).
+  struct IrradianceBinding {
+    TextureView irradiance{};
+    TextureView visibility{};
+    const GpuBuffer* globals = nullptr;
+    const GpuBuffer* probe_meta = nullptr;
+    const GpuBuffer* interior_vols = nullptr;
+    SamplerHandle sampler{};
+    bool valid = false;
+  };
+  IrradianceBinding irradiance_binding(u32 frame_index) const {
+    IrradianceBinding b;
+    if (!irradiance_ || !visibility_) return b;
+    b.irradiance = irradiance_.view;
+    b.visibility = visibility_.view;
+    b.globals = &globals_buffers_[frame_index % 2];
+    b.probe_meta = &probe_meta_;
+    b.interior_vols = &interior_volumes_;
+    b.sampler = sampler_;
+    b.valid = true;
+    return b;
+  }
+
   // Zero the hash on the next update (camera teleports / big jumps).
   void RequestReset() {
     clear_hash_ = true;
     screen_history_valid_ = false;
   }
+
+  // Gather resolution scale (RX_RCGI_GATHER_SCALE): 2 = half res (default),
+  // 4 = quarter res (opt-in; AC Shadows shipped quarter-res diffuse on consoles).
+  // The denoise radius widens automatically at quarter to avoid splotching.
+  void set_gather_scale(u32 scale) { gather_divisor_ = (scale >= 4u) ? 4u : 2u; }
+  u32 gather_scale() const { return gather_divisor_; }
+
+  // Material-ID denoiser mask (RX_RCGI_DENOISE_MASK, item 22a/b): reject
+  // cross-class neighbours in the spatial denoise + temporal reprojection so
+  // vegetation/character indirect does not bleed onto opaque surfaces. On by
+  // default; the setter exposes an A/B toggle.
+  void set_denoise_mask(bool on) { denoise_mask_ = on; }
 
  private:
   struct RcgiGlobals {
@@ -210,7 +251,9 @@ class RcgiSystem {
   // M2 screen-side persistent images (render resolution). Screen-cache history is
   // written late (AddHistoryCopy) and read early next frame (gather); the
   // irradiance temporal history ping-pongs by frame parity.
-  static constexpr u32 kGatherDivisor = 2;  // half res (2), quarter-res ready (4)
+  static constexpr u32 kGatherDivisor = 2;  // default gather scale: half res
+  u32 gather_divisor_ = kGatherDivisor;      // live scale (RX_RCGI_GATHER_SCALE: 2/4)
+  bool denoise_mask_ = true;                  // material-id denoiser mask (RX_RCGI_DENOISE_MASK)
   Extent2D screen_extent_{};
   GpuImage screen_color_hist_;               // rgba16f lit HDR snapshot
   GpuImage screen_depth_hist_;               // r32f depth snapshot

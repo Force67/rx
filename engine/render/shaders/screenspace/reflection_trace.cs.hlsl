@@ -66,6 +66,18 @@ struct DdgiVolume {
 [[vk::binding(8, 0)]] Texture2D<float4> rcgi_sh_g : register(t8, space0);
 [[vk::binding(9, 0)]] Texture2D<float4> rcgi_sh_b : register(t9, space0);
 #include "gi/sh.hlsli"
+#include "gi/rcgi_common.hlsli"
+// RCGI irradiance cascades for the spec-bounce indirect term (kFlagRcgi): under
+// RCGI the DDGI atlas is empty, so the diffuse bounce at a reflection hit reads
+// the RCGI cascades instead (SampleRcgiIrradiance). Bound to harmless
+// placeholders when RCGI is off (flag stays clear, never sampled).
+[[vk::binding(10, 0)]] ConstantBuffer<RcgiGlobals> rcgi_globals : register(b10, space0);
+[[vk::combinedImageSampler]] [[vk::binding(11, 0)]] Texture2D rcgi_irr : register(t11, space0);
+[[vk::combinedImageSampler]] [[vk::binding(11, 0)]] SamplerState rcgi_irr_smp : register(s11, space0);
+[[vk::combinedImageSampler]] [[vk::binding(12, 0)]] Texture2D rcgi_vis : register(t12, space0);
+[[vk::combinedImageSampler]] [[vk::binding(12, 0)]] SamplerState rcgi_vis_smp : register(s12, space0);
+[[vk::binding(13, 0)]] StructuredBuffer<uint2> rcgi_probe_meta : register(t13, space0);
+[[vk::binding(14, 0)]] StructuredBuffer<float4> rcgi_interior_vols : register(t14, space0);
 
 // Bindless scene tables (set 1, shared layout with the forward rt variant).
 #define RX_GEOMETRY_SPACE space1
@@ -102,6 +114,9 @@ static const uint kFlagFog = 4u;
 // RX_REFL_SH_SKIP: replace the TLAS trace with the RCGI per-pixel diffuse SH on
 // rough / off-mirror rays (evaluated along the ray dir). Requires RCGI active.
 static const uint kFlagShSkip = 8u;
+// RCGI active: read the spec-bounce indirect-diffuse term from the RCGI
+// irradiance cascades instead of the DDGI atlas (empty under RCGI).
+static const uint kFlagRcgi = 16u;
 
 // Whether a non-opaque (masked) candidate hit survives its alpha test: the
 // material's base-color alpha at the interpolated UV vs the material cutoff.
@@ -185,6 +200,17 @@ float3 SampleDdgiNearest(float3 world_pos, float3 n) {
       .SampleLevel(ddgi_irradiance_sampler,
                    float3(ProbeAtlasUv(probe, n, texels, atlas), 0.0), 0.0).rgb;
   return irr * irr * ddgi.params.w;
+}
+
+// Indirect diffuse irradiance at a reflection hit point. Under RCGI the DDGI
+// atlas is empty, so read the RCGI cascades (leak-hardened classification, item
+// 20b); otherwise fall back to the nearest DDGI probe.
+float3 SampleHitIndirect(float3 world_pos, float3 n, float3 v) {
+  if ((pc.misc.y & kFlagRcgi) != 0u) {
+    return SampleRcgiIrradiance(rcgi_globals, rcgi_irr, rcgi_irr_smp, rcgi_vis, rcgi_vis_smp,
+                                rcgi_probe_meta, rcgi_interior_vols, world_pos, n, v);
+  }
+  return SampleDdgiNearest(world_pos, n);
 }
 
 bool SunOccluded(float3 origin, float3 dir) {
@@ -354,7 +380,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     // reflects as if sunlit.
     float visible = (ndl > 0.0 && !SunOccluded(hit_pos + hit_n * 0.02, to_sun)) ? 1.0 : 0.0;
     radiance = albedo / kPi * sun * ndl * visible +
-               albedo * SampleDdgiNearest(hit_pos, hit_n) + hit_material.emissive;
+               albedo * SampleHitIndirect(hit_pos, hit_n, -dir) + hit_material.emissive;
   }
 
   // One-step fog on the reflected segment (RX_REFL_FOG): fade the hit radiance

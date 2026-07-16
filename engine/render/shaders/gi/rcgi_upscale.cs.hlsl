@@ -1,6 +1,7 @@
 #include "rhi_bindings.hlsli"
 #include "gi/rcgi_common.hlsli"
 #include "gi/sh.hlsli"
+#include "gi/material_class.hlsli"
 // RCGI M2 upscale + temporal + SH resolve (full render resolution). Writes the
 // `rcgi_irradiance` transient (env set 2 slot 35) the forward pass folds into
 // the indirect-diffuse term. Steps:
@@ -30,6 +31,37 @@ struct PushData {
 PUSH_CONSTANTS(PushData, push);
 
 float Luma(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+
+// Vegetation genuine-disocclusion fill (item 22b): no converged history exists,
+// so one extra poisson spatial pass over the denoised gather-res SH (8 taps,
+// same-class only) smooths the single noisy frame before it shows. Evaluated
+// with the full-res normal like the main upsample; falls back to `cur`.
+static const int2 kPoisson8[8] = {int2(2, 0), int2(-2, 0), int2(0, 2), int2(0, -2),
+                                  int2(1, 1), int2(-1, -1), int2(1, -1), int2(-1, 1)};
+float3 VegDisoccFill(uint2 pix, float3 cn, float c_class, float3 cur,
+                     Texture2D<float4> sr, Texture2D<float4> sg, Texture2D<float4> sb,
+                     Texture2D<float4> nrm) {
+  uint2 full = push.dims.xy;
+  uint2 gsz = push.dims.zw;
+  float2 uv = (float2(pix) + 0.5) / float2(full);
+  int2 g = int2(round(uv * float2(gsz) - 0.5));
+  float3 acc = cur;
+  float wsum = 1.0;
+  [unroll]
+  for (uint i = 0; i < 8; ++i) {
+    int2 q = clamp(g + kPoisson8[i], int2(0, 0), int2(gsz) - 1);
+    float2 quv = (float2(q) + 0.5) / float2(gsz);
+    int2 qfp = clamp(int2(quv * float2(full)), int2(0, 0), int2(full) - 1);
+    if (RxMatClassMatch(c_class, nrm.Load(int3(qfp, 0)).a) < 0.5) continue;
+    Sh2 s;
+    s.r = sr.Load(int3(q, 0));
+    s.g = sg.Load(int3(q, 0));
+    s.b = sb.Load(int3(q, 0));
+    acc += max(ShIrradiance(s, cn), 0.0.xxx);
+    wsum += 1.0;
+  }
+  return acc / wsum;
+}
 
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
@@ -103,24 +135,58 @@ void main(uint3 id : SV_DispatchThreadID) {
   // Evaluate with the full-res normal -> irradiance (restores normal detail).
   float3 cur = max(ShIrradiance(sh, cn), 0.0.xxx);
 
+  // Material class (item 22b): wind-blown vegetation gets disocclusion-relaxed
+  // temporal reprojection (RX_RCGI_DENOISE_MASK gates it for A/B).
+  bool mask_on = push.misc.y != 0u;
+  float c_class = normal_map.Load(int3(id.xy, 0)).a;
+  bool veg = mask_on && RxIsVegetation(c_class);
+
   // Temporal filter: reproject through the motion vector, per-pixel counter in
   // history alpha, neighborhood clamp against the upsample taps to kill ghosts.
   float2 prev_uv = uv + motion_map.Load(int3(id.xy, 0));
-  bool valid = push.params.w == 0.0 && all(prev_uv > 0.0) && all(prev_uv < 1.0);
+  bool in_bounds = push.params.w == 0.0 && all(prev_uv > 0.0) && all(prev_uv < 1.0);
   float3 accum = cur;
   float n = 1.0;
-  if (valid) {
+
+  // Fetch history. Opaque: the single reprojected tap. Vegetation: wind jitters
+  // the motion vector and normals, so a single tap frequently misses valid
+  // history and flags a false disocclusion; search a 16-tap neighbourhood and
+  // take the most-converged sample (their vegetation trick) before declaring one.
+  float4 h = 0.0.xxxx;
+  bool found = false;
+  if (in_bounds) {
     int2 pp = clamp(int2(prev_uv * float2(full)), int2(0, 0), int2(full) - 1);
-    float4 h = hist_in.Load(int3(pp, 0));
+    if (!veg) {
+      h = hist_in.Load(int3(pp, 0));
+      found = true;
+    } else {
+      [unroll]
+      for (int j = 0; j < 16; ++j) {
+        int2 off = int2((j & 3) - 1, (j >> 2) - 1) * 2;  // 4x4 grid, step 2 (+-4 px)
+        int2 sp = clamp(pp + off, int2(0, 0), int2(full) - 1);
+        float4 hs = hist_in.Load(int3(sp, 0));
+        if (hs.a > h.a) { h = hs; found = true; }
+      }
+    }
+  }
+
+  if (found && (!veg || h.a >= 1.0)) {
     // Neighborhood clamp with a generous margin: the taps come from the same
     // denoised frame (a tight box would pin history to the noisy current sample
     // and defeat temporal integration), so widen it — GI is low frequency and
     // TAA still runs after us. Bounds gross ghosts without killing convergence.
-    float3 margin = (mx - mn) * 0.5 + mx * 0.6 + 0.03;
+    // Vegetation loosens it further (wind normals => higher spatial variance).
+    float3 margin = ((mx - mn) * 0.5 + mx * 0.6 + 0.03) * (veg ? 1.6 : 1.0);
     float3 hist_c = clamp(h.rgb, mn - margin, mx + margin);
     n = min(h.a + 1.0, push.params.z);
     float w = 1.0 / n;
     accum = lerp(hist_c, cur, w);
+  } else if (veg) {
+    // Genuine vegetation disocclusion: no converged history at all. One extra
+    // poisson spatial pass over the denoised SH knocks the single-frame noise
+    // down before the temporal filter starts fresh here.
+    accum = VegDisoccFill(id.xy, cn, c_class, cur, sh_r_in, sh_g_in, sh_b_in, normal_map);
+    n = 1.0;
   }
 
   // Final guard: history must never go non-finite (a single NaN/Inf would

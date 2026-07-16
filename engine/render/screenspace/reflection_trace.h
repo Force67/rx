@@ -51,6 +51,24 @@ class ReflectionTrace {
     f32 sh_dir_threshold = 0.5f;
   };
 
+  // RCGI irradiance-cascade resources for the spec-bounce indirect term. When
+  // `active`, the diffuse GI at a reflection hit reads the RCGI cascades
+  // (kFlagRcgi) instead of the DDGI atlas, which is empty under RCGI. The
+  // renderer always supplies valid handles -- the real RCGI images when the
+  // system is up, otherwise environment placeholders -- so the descriptor set is
+  // always complete; `active` alone gates the sampling. `in_general` marks the
+  // atlases as living in kGeneral (true only for the real RCGI images).
+  struct RcgiBinding {
+    TextureView irradiance{};
+    TextureView visibility{};
+    const GpuBuffer* globals = nullptr;
+    const GpuBuffer* probe_meta = nullptr;
+    const GpuBuffer* interior_vols = nullptr;
+    SamplerHandle sampler{};
+    bool in_general = false;
+    bool active = false;
+  };
+
   bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
   void Destroy(Device& device);
   bool available() const { return static_cast<bool>(pipeline_); }
@@ -67,7 +85,7 @@ class ReflectionTrace {
                             const GpuBuffer& ddgi_volume, u64 ddgi_volume_size,
                             SamplerHandle sampler, Extent2D extent, ResourceHandle sh_r,
                             ResourceHandle sh_g, ResourceHandle sh_b, Extent2D sh_extent,
-                            const Frame& frame);
+                            const RcgiBinding& rcgi, const Frame& frame);
 
  private:
   PipelineHandle pipeline_;

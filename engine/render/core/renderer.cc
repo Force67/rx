@@ -77,6 +77,13 @@ base::Option<bool> RcgiSwOpt{"rcgi.software", false, "RX_RCGI_SW"};
 base::Option<bool> RcgiInteriorOpt{"rcgi.interior", true, "RX_RCGI_INTERIOR"};
 base::Option<bool> RcgiRelocateOpt{"rcgi.relocate", true, "RX_RCGI_RELOCATE"};
 base::Option<bool> RcgiProbeAoOpt{"rcgi.probe_ao", true, "RX_RCGI_PROBE_AO"};
+// RCGI final-gather resolution scale: 2 = half res (default), 4 = quarter res
+// (opt-in; AC Shadows shipped quarter-res diffuse on consoles). The denoise
+// radius widens automatically at quarter to keep the cornell/interior clean.
+base::Option<int> RcgiGatherScaleOpt{"rcgi.gather_scale", 2, "RX_RCGI_GATHER_SCALE"};
+// Material-ID denoiser mask (item 22): reject cross-class neighbours in the
+// RCGI spatial/temporal filters. On by default; env for A/B.
+base::Option<bool> RcgiDenoiseMaskOpt{"rcgi.denoise_mask", true, "RX_RCGI_DENOISE_MASK"};
 // SDF software-trace infrastructure (S1): mesh SDFs + global SDF clipmap. Off by
 // default; RX_SDF_DEBUG raymarches the clipmap (1 = distance field, 2 = albedo).
 base::Option<bool> SdfOpt{"sdf", false, "RX_SDF"};
@@ -768,6 +775,7 @@ bool Renderer::Initialize(const RendererDesc& desc, Window& window) {
   if (VrsThreshold.overridden()) settings_.vrs_threshold = static_cast<f32>(double(VrsThreshold));
   if (RestirDiOpt.overridden()) settings_.restir_di = RestirDiOpt;
   if (RcgiOpt.overridden()) settings_.rcgi = RcgiOpt;
+  rcgi_env_overridden_ = RcgiOpt.overridden();
   if (FftOceanOpt.overridden()) settings_.fft_ocean = FftOceanOpt;
   if (AdaptiveWaterOpt.overridden()) settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden()) settings_.water_field = WaterFieldOpt;
@@ -3118,6 +3126,8 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     light_grid_.AddToGraph(graph_, frame.lights, light_count, view.camera.eye, frame_index_,
                            rcgi_async);
     rcgi_->SetInteriorVolumes(interior_volumes_);  // item 9b: forward game interior bounds
+    rcgi_->set_gather_scale(static_cast<u32>(RcgiGatherScaleOpt));  // item 23: half/quarter res
+    rcgi_->set_denoise_mask(RcgiDenoiseMaskOpt);                    // item 22: cross-class mask
     RcgiSystem::FrameConfig rcgi_cfg;
     rcgi_cfg.interior = settings_.interior && RcgiInteriorOpt;
     rcgi_cfg.interior_ambient = settings_.interior_ambient;
@@ -4055,13 +4065,38 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
       rfl.fog_base_height = settings_.fog_base_height;
       rfl.sh_skip = ReflShSkipOpt && refl_sh[0] != kInvalidResource;
       rfl.sh_skip_roughness = ReflShSkipRough;
+      // Spec-bounce indirect diffuse: under RCGI the DDGI atlas is empty, so the
+      // reflection hit reads the RCGI irradiance cascades (item 20b). Bind the
+      // real cascades when RCGI is active, else environment placeholders so the
+      // descriptor set is complete (kFlagRcgi stays clear -> never sampled).
+      ReflectionTrace::RcgiBinding refl_rcgi;
+      RcgiSystem::IrradianceBinding rcgi_irr_bind;
+      if (rcgi_active) rcgi_irr_bind = rcgi_->irradiance_binding(frame_index_);
+      if (rcgi_irr_bind.valid) {
+        refl_rcgi.irradiance = rcgi_irr_bind.irradiance;
+        refl_rcgi.visibility = rcgi_irr_bind.visibility;
+        refl_rcgi.globals = rcgi_irr_bind.globals;
+        refl_rcgi.probe_meta = rcgi_irr_bind.probe_meta;
+        refl_rcgi.interior_vols = rcgi_irr_bind.interior_vols;
+        refl_rcgi.sampler = rcgi_irr_bind.sampler;
+        refl_rcgi.in_general = true;
+        refl_rcgi.active = true;
+      } else {
+        refl_rcgi.irradiance = environment_->black_view();
+        refl_rcgi.visibility = environment_->black_view();
+        refl_rcgi.globals = &environment_->dummy_volume();
+        refl_rcgi.probe_meta = &environment_->dummy_storage();
+        refl_rcgi.interior_vols = &environment_->dummy_storage();
+        refl_rcgi.sampler = environment_->sampler();
+      }
       ResourceHandle raw = reflection_trace_.AddToGraph(
           graph_, *raytracing_, tlas_slot, bindless_->set(), depth_export, normals,
           environment_->prefiltered_view(),
           ddgi_active ? refl_ddgi.irradiance : environment_->black_array_view(), ddgi_active,
           ddgi_active ? refl_ddgi.volume : environment_->dummy_volume(),
           ddgi_active ? refl_ddgi.volume_size : 256, environment_->sampler(),
-          {render_width_, render_height_}, refl_sh[0], refl_sh[1], refl_sh[2], refl_sh_extent, rfl);
+          {render_width_, render_height_}, refl_sh[0], refl_sh[1], refl_sh[2], refl_sh_extent,
+          refl_rcgi, rfl);
       spec_refl = nrd_.DenoiseSpecular(graph_, nrd_inputs.normal_roughness, nrd_inputs.view_z,
                                        motion, raw);
     }
