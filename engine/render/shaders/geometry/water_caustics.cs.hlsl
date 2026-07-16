@@ -43,7 +43,7 @@ PUSH_CONSTANTS(PushData, push);
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] Texture2D<float4> ocean_norm : register(t3, space0);
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] SamplerState ocean_norm_sampler : register(s3, space0);
 
-static const uint kRes = 512u;   // mirrors WaterCaustics::kSize; power of two for wrap masking
+static const uint kRes = 1024u;  // mirrors WaterCaustics::kSize; power of two for wrap masking
 static const uint kMask = kRes - 1u;
 
 // Fine capillary ripple detail below the Gerstner/FFT resolution. The coarse
@@ -100,7 +100,10 @@ void SurfaceAt(float2 xz, float t, bool fft, out float3 n, out float h) {
     float3 off = GerstnerWave(xz, t, n, crest);
     h = off.y;
   }
-  float3 rn = RippleNormal(xz * 2.6, t * 0.7, 0.45);
+  // Finer capillary scale: real caustic cells at swimming-pool depths are
+  // 10-30 cm filaments, not half-metre blobs; the higher base frequency (and the
+  // 1024 map that can hold it) tightens the web to that scale.
+  float3 rn = RippleNormal(xz * 3.8, t * 0.7, 0.5);
   n = normalize(float3(n.xz + rn.xz, n.y).xzy);
 }
 
@@ -151,8 +154,21 @@ void main(uint3 id : SV_DispatchThreadID) {
   }
 
   // phase 2: resolve. Photon count == texel count, each deposits unit energy, so
-  // the map already has mean 1; just undo the fixed-point scale.
-  float density = float(accum[lin_idx]) / max(push.misc.x, 1.0);
+  // the map already has mean 1. A 3x3 tent over the wrapped accumulation removes
+  // the one-photon-per-texel shot noise that read as hard blobs when the map is
+  // magnified at shallow depth; the kernel weights sum to 1, so the mean (and the
+  // energy-conserving contract) is untouched. Then undo the fixed-point scale.
+  float photons = 0.0;
+  [unroll]
+  for (int fy = -1; fy <= 1; ++fy) {
+    [unroll]
+    for (int fx = -1; fx <= 1; ++fx) {
+      uint2 p = uint2((int2(id.xy) + int2(fx, fy)) & int2(kMask, kMask));
+      float w = (fx == 0 ? 2.0 : 1.0) * (fy == 0 ? 2.0 : 1.0);
+      photons += w * float(accum[p.y * kRes + p.x]);
+    }
+  }
+  float density = (photons / 16.0) / max(push.misc.x, 1.0);
 
   // Wave shadow: Fresnel transmission of the sun through the surface above this
   // texel. Grazing (steep) surface -> more reflected, less transmitted -> darker.
