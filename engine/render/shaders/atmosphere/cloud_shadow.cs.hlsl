@@ -13,8 +13,10 @@ struct CloudShadowPush {
   float coverage;
   float bottom;    // slab altitudes, metres
   float top;
-  float wind;
+  float wind;      // drift velocity x, m/s
   float strength;  // max darkening (0..1)
+  float wind_z;    // drift velocity z, m/s (matches clouds.cs)
+  float3 pad;
 };
 PUSH_CONSTANTS(CloudShadowPush, pc);
 
@@ -51,7 +53,7 @@ float Fbm3(float3 p, int octaves) {
 
 float CloudDensityAt(float3 p, float h01) {
   float grad = saturate(h01 * 6.0) * saturate((1.0 - h01) * 2.5);
-  float3 wind = float3(pc.time * pc.wind, 0.0, pc.time * pc.wind * 0.3);
+  float3 wind = float3(pc.time * pc.wind, 0.0, pc.time * pc.wind_z);
   float3 wp = (p + wind) * 0.00035;
   float warp = Fbm3(wp * 0.4 + 13.7, 2);
   wp += (warp - 0.5) * 0.9;

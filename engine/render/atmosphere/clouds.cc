@@ -12,10 +12,12 @@ struct CloudPush {
   f32 camera_pos[4];     // xyz eye, w time
   f32 sun_direction[4];  // xyz travel dir, w intensity
   f32 sun_color[4];      // rgb, w coverage
-  f32 params[4];         // bottom, top, density, wind
+  f32 params[4];         // bottom, top, density, wind_x
   u32 size[2];
   u32 steps;
   u32 light_steps;
+  f32 wind_z;            // z component of the drift velocity
+  f32 pad[3];
 };
 
 }  // namespace
@@ -73,11 +75,12 @@ ResourceHandle Clouds::AddToGraph(RenderGraph& graph, ResourceHandle color, Reso
         push.params[0] = frame.bottom;
         push.params[1] = frame.top;
         push.params[2] = frame.density;
-        push.params[3] = frame.wind;
+        push.params[3] = frame.wind_x;
         push.size[0] = extent.width;
         push.size[1] = extent.height;
         push.steps = frame.steps;
         push.light_steps = frame.light_steps;
+        push.wind_z = frame.wind_z;
 
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),

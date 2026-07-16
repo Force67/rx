@@ -65,8 +65,11 @@ struct WeatherSettings {
   bool rt_shadows = true;
   // Wind, shared by precipitation slant/drift and cloud advection. The speed
   // default matches the cloud layer's historical drift (Clouds::Frame::wind).
-  f32 wind_yaw = 0.0f;        // radians, direction the wind blows toward (XZ)
-  f32 wind_speed = 12.0f;     // m/s
+  // Direction the wind blows toward (radians on XZ) and its speed. The
+  // defaults reproduce the cloud layer's legacy hardcoded drift, 12 m/s along
+  // (1, 0, 0.3), so a default scene keeps its exact cloud motion.
+  f32 wind_yaw = 0.29146f;    // atan2(0.3, 1.0)
+  f32 wind_speed = 12.53f;    // m/s, 12 * sqrt(1 + 0.09)
   f32 gustiness = 0.3f;       // 0 steady .. 1 squally
   // Surface response, integrated over time by the game (rain soaks in and
   // dries; snow builds and melts). The renderer treats live precipitation as
