@@ -98,7 +98,8 @@ class RX_ASSET_EXPORT Vfs {
   base::Vector<MountEntry> mounts_;
 };
 
-base::UniquePointer<FileProvider> MakeLooseFileProvider(std::string root_directory);
+RX_ASSET_EXPORT base::UniquePointer<FileProvider> MakeLooseFileProvider(
+    std::string root_directory);
 
 }  // namespace rx::asset
 

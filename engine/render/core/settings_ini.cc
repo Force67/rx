@@ -140,6 +140,9 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "wetness = " << s.weather.wetness << "\n";
   o << "snow_cover = " << s.weather.snow_cover << "\n";
   o << "lightning = " << s.weather.lightning << "\n";
+  // Not "rt_shadows": the parser ignores sections and that key is already the
+  // [shadows] ray-traced sun toggle.
+  o << "precip_rt_shadows = " << Bool(s.weather.rt_shadows) << "\n";
   o << "aurora = " << Bool(s.weather.aurora) << "\n";
   o << "aurora_intensity = " << s.weather.aurora_intensity << "\n\n";
 
@@ -284,6 +287,7 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   fl("wetness", s.weather.wetness);
   fl("snow_cover", s.weather.snow_cover);
   fl("lightning", s.weather.lightning);
+  b("precip_rt_shadows", s.weather.rt_shadows);
   b("aurora", s.weather.aurora);
   fl("aurora_intensity", s.weather.aurora_intensity);
 

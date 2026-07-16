@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_LIGHTNING_H_
 #define RX_RENDER_LIGHTNING_H_
 
+#include "core/export.h"
 #include "core/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
@@ -20,7 +21,7 @@ struct WeatherSettings;
 // reflections all bloom from the bolt's position. The global
 // `weather.lightning` scalar keeps its existing sun/ambient/cloud boosts; the
 // bolt and the flash light add locality on top.
-class LightningSystem {
+class RX_RENDER_EXPORT LightningSystem {
  public:
   // A strike renders for this long: an instant main stroke plus up to two
   // deterministic re-strokes (the classic flicker) inside the window.
