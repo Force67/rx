@@ -226,6 +226,7 @@ if(NOT DEFINED RX_MODULES)
     rpc
     net
     nav
+    character
     app
   )
 endif()
@@ -494,6 +495,16 @@ if(RX_BUILD_TESTS AND RX_JOLT)
   add_test(NAME cloth_sim_test COMMAND cloth_sim_test)
   add_test(NAME cloth_feature_off_test COMMAND cloth_sim_test --feature-off)
   set_tests_properties(cloth_feature_off_test PROPERTIES ENVIRONMENT "RX_FEATURES=-physics.cloth")
+endif()
+
+# rx::character locomotion + view modes over the real Jolt character controller:
+# gait acceleration, crouch capsule/eye blend, ceiling-blocked uncrouch, jump +
+# land, step-up vs blocked, third-person camera obstruction pull-in and the
+# FP<->TP view-mode stack transition. Headless (no GPU), needs Jolt.
+if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
+  add_executable(character_test test/character_test.cc)
+  target_link_libraries(character_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
+  add_test(NAME character_test COMMAND character_test)
 endif()
 
 # install()/export rules, generated last so every module target (and the
