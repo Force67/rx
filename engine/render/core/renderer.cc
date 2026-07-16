@@ -87,6 +87,18 @@ base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 // real-alpha any-hit test (the approximation reads wrong in sharp reflections).
 base::Option<bool> RtVegOpt{"rt.veg", true, "RX_RT_VEG"};
 base::Option<bool> RtVegAnyHitOpt{"rt.veg.anyhit", true, "RX_RT_VEG_ANYHIT"};
+// RT scene scalability (AC Shadows §2). RX_RT_CULL drops small distant
+// instances from the realtime TLAS by projected solid angle beyond
+// RX_RT_CULL_START metres, threshold RX_RT_CULL_ANGLE (angular radius). RX_RT_
+// LOD_NEAR keeps LOD0 in the rays within that radius (raster/RT agree in the
+// screen-trace range) and lets distance LODs into the BLAS past it. RX_RT_
+// ASYNC_TLAS builds the per-frame TLAS on the async compute queue. All are
+// realtime-only: the path tracer keeps every instance at LOD0.
+base::Option<bool> RtCullOpt{"rt.cull", true, "RX_RT_CULL"};
+base::Option<float> RtCullAngle{"rt.cull.angle", 0.004f, "RX_RT_CULL_ANGLE"};
+base::Option<float> RtCullStart{"rt.cull.start", 40.0f, "RX_RT_CULL_START"};
+base::Option<float> RtLodNear{"rt.lod.near", 64.0f, "RX_RT_LOD_NEAR"};
+base::Option<bool> RtAsyncTlasOpt{"rt.async.tlas", true, "RX_RT_ASYNC_TLAS"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true, "RX_ADAPTIVE_WATER"};
 base::Option<bool> WaterFieldOpt{"water.field", true, "RX_WATER_FIELD"};
@@ -1494,6 +1506,47 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
                                                  static_cast<u32>(geometries.size()));
     if (gpu.bindless_index == BindlessRegistry::kInvalidIndex) gpu.bindless_index = 0;
   }
+  // Distance-LOD ray-tracing geometry (RX_RT_LOD_NEAR). For each extra LOD,
+  // build an index buffer whose values are rebased to absolute indices into the
+  // shared (all-lods-concatenated) vertex buffer, plus a bindless record, so a
+  // TLAS instance can point at a coarser LOD past the near radius. Every
+  // non-blend submesh is force-OPAQUE here: past the LOD switch the opaque-
+  // approximation shrink is imperceptible, so distant masked foliage stays a
+  // solid stand-in (no separate approx variant, matching the RAY_FLAG_CULL_NON_
+  // OPAQUE realtime paths which would otherwise skip non-opaque geometry). The
+  // BLAS is deferred to EnsureLodRtGeometry (first selection); only the cheap
+  // index buffer + record are made here, where the CPU geometry is in hand.
+  if (bindless_ && raytracing_ && !gpu.all_blend && include_rt && !gpu.lods.empty()) {
+    const u32 total_verts = static_cast<u32>(all_verts.size());
+    gpu.lod_rt.resize(gpu.lods.size());
+    for (size_t li = 0; li < gpu.lods.size(); ++li) {
+      const u32 vertex_base = vertex_bases[li + 1];  // vertex_bases[0] = lod0
+      base::Vector<u32> lod_indices;
+      base::Vector<BindlessRegistry::GeometryRecord> lod_geoms;
+      GpuMesh::LodRt& rt = gpu.lod_rt[li];
+      for (const GpuSubmesh& submesh : gpu.lods[li].submeshes) {
+        if (submesh.blend || submesh.index_count == 0) continue;
+        const u32 offset = static_cast<u32>(lod_indices.size());
+        for (u32 e = 0; e < submesh.index_count; ++e)
+          lod_indices.push_back(all_indices[submesh.index_offset + e] + vertex_base);
+        rt.geoms.push_back({offset, submesh.index_count});
+        lod_geoms.push_back({offset, material_system_->bindless_material(submesh.material)});
+      }
+      if (lod_indices.empty()) continue;
+      rt.vertex_count = total_verts;
+      rt.indices = device_->CreateBufferWithData(
+          ByteSpan(reinterpret_cast<const u8*>(lod_indices.data()),
+                   lod_indices.size() * sizeof(u32)),
+          kBufferUsageIndex | kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress |
+              kBufferUsageStorage);
+      if (!rt.indices) {
+        rt.geoms.clear();
+        continue;
+      }
+      rt.bindless = bindless_->RegisterMesh(gpu.vertices, rt.indices, lod_geoms.data(),
+                                            static_cast<u32>(lod_geoms.size()));
+    }
+  }
   // Opaque-approximation variant for alpha-masked (vegetation) submeshes. Each
   // masked triangle is duplicated with its own three vertices, shrunk about its
   // centroid by sqrt(average opacity) so the stand-in's area matches the average
@@ -1584,7 +1637,10 @@ bool Renderer::UploadMesh(const asset::Mesh& mesh, u64 id_salt) {
     if (raytracing_) {
       raytracing_->RemoveBlas(mesh_key);
       raytracing_->RemoveApproxBlas(mesh_key);
+      raytracing_->RemoveLodBlas(mesh_key);
     }
+    for (GpuMesh::LodRt& rt : previous->lod_rt)
+      if (rt.indices) device_->DestroyBuffer(rt.indices);
     device_->DestroyBuffer(previous->vertices);
     device_->DestroyBuffer(previous->indices);
     if (previous->skinning) device_->DestroyBuffer(previous->skinning);
@@ -1698,6 +1754,34 @@ void Renderer::EnsureRayTracingGeometry() {
     if (gpu.bindless_index == BindlessRegistry::kInvalidIndex) gpu.bindless_index = 0;
     raytracing_->BuildBlas(entry.key, gpu);
   }
+}
+
+u32 Renderer::EnsureLodRtGeometry(u64 mesh_key, GpuMesh& mesh, u32 lod) {
+  if (lod == 0 || lod > mesh.lod_rt.size()) return BindlessRegistry::kInvalidIndex;
+  GpuMesh::LodRt& rt = mesh.lod_rt[lod - 1];
+  if (rt.bindless == BindlessRegistry::kInvalidIndex || rt.geoms.empty())
+    return BindlessRegistry::kInvalidIndex;  // no RT geometry at this LOD
+  if (!rt.blas_built) {
+    // Reconstruct the accel geometry from the eagerly-built (absolute-indexed,
+    // force-opaque) LOD index buffer and build the BLAS once. The build blocks
+    // (ImmediateSubmit), but only the first time this LOD is needed.
+    base::Vector<AccelTriangles> geometries;
+    geometries.reserve(rt.geoms.size());
+    for (const GpuMesh::LodRt::Geom& g : rt.geoms) {
+      geometries.push_back({.vertex_address = mesh.vertices.address,
+                            .vertex_stride = sizeof(asset::Vertex),
+                            .vertex_count = rt.vertex_count,
+                            .vertex_format = Format::kRGB32Float,
+                            .index_address = rt.indices.address + g.index_offset * sizeof(u32),
+                            .index_count = g.index_count,
+                            .index_type = IndexType::kUint32,
+                            .opaque = true});
+    }
+    if (!raytracing_->BuildLodBlas(mesh_key, lod, geometries))
+      return BindlessRegistry::kInvalidIndex;
+    rt.blas_built = true;
+  }
+  return rt.bindless;
 }
 
 void Renderer::SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas) {
@@ -2261,7 +2345,24 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                              (rcgi_active && !rcgi_software) || reflections_active || path_trace ||
                              (water_pipeline_active && settings_.water_reflections) || fog_active;
 
-  u32 tlas_slot = frame_index_ % RayTracingContext::kSlots;
+  // Async TLAS build (RX_RT_ASYNC_TLAS): build this frame's slot on the compute
+  // queue while the graphics timeline consumes the slot built last frame -- the
+  // slot being built is never the slot being read this frame, so there is no
+  // same-frame cross-queue hazard on the acceleration structure at all; the
+  // async submit is waited by SubmitFrame and a full frame elapses before the
+  // slot is read, which the frame fence already guarantees. This rides the same
+  // async-fork discipline the DDGI/RCGI world passes already use to read the
+  // TLAS across queues (validated clean). Needs a second queue and one prior
+  // frame to have primed a slot; the path tracer keeps the synchronous same-
+  // slot build for reference correctness. Three ping-pong slots keep a slot
+  // safe to rebuild while one frame still reads the previous one at two frames
+  // in flight (see RayTracingContext::kSlots).
+  bool async_tlas = RtAsyncTlasOpt && device_->caps().async_compute &&
+                    settings_.async_compute && !path_trace && frame_index_ > 0;
+  u32 tlas_build_slot = frame_index_ % RayTracingContext::kSlots;
+  u32 tlas_slot = async_tlas ? (frame_index_ + RayTracingContext::kSlots - 1) %
+                                   RayTracingContext::kSlots
+                             : tlas_build_slot;
 
   // The frame's globals set (uniform + optional tlas + optional hi-z) is
   // rewritten once per frame, from the first pass that needs it. The slot's
@@ -2821,24 +2922,80 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
   // path has no ray query and (on non-ray-query devices) no raytracing context.
   if (rt_shadows || rtao_active || ddgi_active || (rcgi_active && !rcgi_software) ||
       water_pipeline_active || reflections_active || path_trace || fog_active) {
+    // Solid-angle instance culling + distance LOD are realtime-only shaping of
+    // the ray-traced scene; the path tracer keeps every instance at LOD0 for
+    // reference correctness. RX_RT_CULL / RX_RT_LOD_NEAR gate them independently.
+    const bool rt_cull_on = RtCullOpt && !path_trace;
+    // RT LOD is independent of the raster force_lod0_for_tlas knob (which keeps
+    // the rasterizer at LOD0 so screen-referenced rays self-intersect cleanly):
+    // rays get LOD0 inside RX_RT_LOD_NEAR and coarsen past it. Path tracing
+    // keeps LOD0 everywhere. RX_RT_LOD_NEAR <= 0 disables coarsening.
+    const bool rt_lod_on = !path_trace && RtLodNear > 0.0f;
+    const f32 lod_near = RtLodNear;
+    rt_cull_.Configure(rt_cull_on, RtCullStart, RtCullAngle);
+    rt_cull_.BeginFrame(view.camera.eye);
+    const Vec3 eye = view.camera.eye;
+    // Model-space bounding sphere of a mesh as a Vec3 center.
+    auto mesh_center = [](const GpuMesh& m) {
+      return Vec3{m.bounds_center[0], m.bounds_center[1], m.bounds_center[2]};
+    };
+    // Distance from the camera to an instance's world-space bounding centre.
+    auto center_distance = [&](const GpuMesh& m, const Mat4& t) {
+      const Vec3 c = mesh_center(m);
+      const f32* mm = t.m;
+      const f32 wx = mm[0] * c.x + mm[4] * c.y + mm[8] * c.z + mm[12];
+      const f32 wy = mm[1] * c.x + mm[5] * c.y + mm[9] * c.z + mm[13];
+      const f32 wz = mm[2] * c.x + mm[6] * c.y + mm[10] * c.z + mm[14];
+      const f32 dx = wx - eye.x, dy = wy - eye.y, dz = wz - eye.z;
+      return std::sqrt(dx * dx + dy * dy + dz * dz);
+    };
+    // Resolves the RT LOD for one instance: LOD0 inside the near radius (raster
+    // and rays agree there, avoiding the self-intersection disparity the AC
+    // Shadows team calls out), a coarser LOD past it. Fills custom_index/lod for
+    // the TLAS instance, lazily building the LOD BLAS + record on first need and
+    // falling back to LOD0 when the mesh has no usable geometry at that LOD.
+    auto select_rt = [&](u64 key, GpuMesh& m, const Mat4& t, u32& out_lod, u32& out_index) {
+      out_lod = 0;
+      out_index = m.bindless_index;
+      if (!rt_lod_on || m.lods.empty()) return;
+      const f32 dist = center_distance(m, t);
+      if (dist <= lod_near) return;
+      const u32 lod = SelectLod(m, dist);
+      if (lod == 0) return;
+      const u32 idx = EnsureLodRtGeometry(key, m, lod);
+      if (idx == BindlessRegistry::kInvalidIndex) return;  // keep LOD0
+      out_lod = lod;
+      out_index = idx;
+    };
+
     base::Vector<RayTracingContext::Instance> instances;
     instances.reserve(view.draws.size() + instances_.instance_count());
     for (const DrawItem& item : view.draws) {
-      const GpuMesh* mesh = meshes_.find(item.mesh);
+      GpuMesh* mesh = meshes_.find(item.mesh);
       // no_rt grass-like fill stays out of the realtime tlas; when the path
       // tracer is active it joins with a path-trace-only instance mask, so
       // realtime rays (shadows/RTAO/reflections/fog/water) skip it either way:
       // they trace with RX_RAY_MASK_REALTIME.
       if (!mesh || mesh->all_blend || (mesh->no_rt && !path_trace)) continue;
+      // Per-draw instances are frustum-culled and few, so test solid angle
+      // inline. no_rt fill is path-trace-only (never culled: culling is off
+      // under the path tracer).
+      if (rt_cull_on && !mesh->no_rt &&
+          !rt_cull_.DrawVisible(item.transform, mesh_center(*mesh), mesh->bounds_radius))
+        continue;
       u8 mask = mesh->no_rt ? static_cast<u8>(kRayMaskPathTrace)
                             : static_cast<u8>(kRayMaskRealtime | kRayMaskPathTrace);
+      u32 lod = 0, index = mesh->bindless_index;
+      if (!mesh->no_rt) select_rt(item.mesh, *mesh, item.transform, lod, index);
       instances.push_back({.mesh_key = item.mesh,
-                           .custom_index = mesh->bindless_index,
+                           .custom_index = index,
                            .mask = mask,
+                           .lod = lod,
                            .transform = item.transform});
       // Vegetation stand-in: a second instance on the opaque-approximation BLAS,
       // masked kRayMaskApprox so only the realtime diffuse/AO/shadow rays hit it.
-      if (mesh->rt_approx) {
+      // Only at LOD0: distant LODs are built force-opaque and need no stand-in.
+      if (mesh->rt_approx && lod == 0) {
         instances.push_back({.mesh_key = item.mesh,
                              .custom_index = mesh->rt_approx_bindless,
                              .mask = static_cast<u8>(kRayMaskApprox),
@@ -2846,18 +3003,35 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
                              .transform = item.transform});
       }
     }
-    for (const InstanceStore::Group& group : instances_.groups()) {
+    const base::Vector<InstanceStore::Group>& groups = instances_.groups();
+    for (u32 gi = 0; gi < groups.size(); ++gi) {
+      const InstanceStore::Group& group = groups[gi];
       if (!group.alive) continue;
-      const GpuMesh* mesh = meshes_.find(group.mesh);
+      GpuMesh* mesh = meshes_.find(group.mesh);
       if (!mesh || mesh->all_blend || (mesh->no_rt && !path_trace)) continue;
       const u8 mask = mesh->no_rt ? static_cast<u8>(kRayMaskPathTrace)
                                   : static_cast<u8>(kRayMaskRealtime | kRayMaskPathTrace);
-      for (const Mat4& transform : group.transforms) {
+      // Time-sliced solid-angle sweep for the (potentially thousands of) static
+      // instances in this group; the persistent bitmask drives inclusion every
+      // frame while only a slice is re-tested. no_rt fill is path-trace-only, so
+      // culling never applies to it (path tracing disables culling).
+      const bool group_cull = rt_cull_on && !mesh->no_rt;
+      const base::Vector<u8>* visible =
+          group_cull ? &rt_cull_.UpdateGroup(gi, group.generation,
+                                             {group.transforms.data(), group.transforms.size()},
+                                             mesh_center(*mesh), mesh->bounds_radius)
+                     : nullptr;
+      for (u32 ii = 0; ii < group.transforms.size(); ++ii) {
+        if (visible && !(*visible)[ii]) continue;
+        const Mat4& transform = group.transforms[ii];
+        u32 lod = 0, index = mesh->bindless_index;
+        if (!mesh->no_rt) select_rt(group.mesh, *mesh, transform, lod, index);
         instances.push_back({.mesh_key = group.mesh,
-                             .custom_index = mesh->bindless_index,
+                             .custom_index = index,
                              .mask = mask,
+                             .lod = lod,
                              .transform = transform});
-        if (mesh->rt_approx) {
+        if (mesh->rt_approx && lod == 0) {
           instances.push_back({.mesh_key = group.mesh,
                                .custom_index = mesh->rt_approx_bindless,
                                .mask = static_cast<u8>(kRayMaskApprox),
@@ -2869,11 +3043,14 @@ void Renderer::BuildFrameGraph(FrameResources& frame, u32 image_index, const Fra
     // Grow the TLAS now, on the build thread, so the record-time BuildTlas never
     // stalls the device or frees buffers mid command list (which races the
     // frame ring and corrupts the image). Spikes here when two worlds stream in.
-    raytracing_->ReserveTlas(tlas_slot, static_cast<u32>(instances.size()));
+    raytracing_->ReserveTlas(tlas_build_slot, static_cast<u32>(instances.size()));
     graph_.AddPass(
-        "tlas_build", [](RenderGraph::PassBuilder&) {},
-        [this, tlas_slot, instances = std::move(instances)](PassContext& ctx) {
-          raytracing_->BuildTlas(*ctx.cmd, tlas_slot, instances);
+        "tlas_build",
+        [async_tlas](RenderGraph::PassBuilder& b) {
+          if (async_tlas) b.Async();  // build next frame's slot on the compute queue
+        },
+        [this, tlas_build_slot, instances = std::move(instances)](PassContext& ctx) {
+          raytracing_->BuildTlas(*ctx.cmd, tlas_build_slot, instances);
         });
   }
 
@@ -5124,6 +5301,8 @@ void Renderer::Shutdown() {
       if (kv.value.meshlet_triangles) device_->DestroyBuffer(kv.value.meshlet_triangles);
       if (kv.value.rt_approx_vertices) device_->DestroyBuffer(kv.value.rt_approx_vertices);
       if (kv.value.rt_approx_indices) device_->DestroyBuffer(kv.value.rt_approx_indices);
+      for (GpuMesh::LodRt& rt : kv.value.lod_rt)
+        if (rt.indices) device_->DestroyBuffer(rt.indices);
     }
     meshes_.clear();
     taa_.Destroy(*device_);

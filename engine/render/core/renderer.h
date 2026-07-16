@@ -62,6 +62,7 @@
 #include "render/post/post.h"
 #include "render/post/ui_blur.h"
 #include "render/gi/raytracing.h"
+#include "render/gi/rt_instance_cull.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 #include "render/rhi/swapchain.h"
@@ -484,6 +485,12 @@ class RX_RENDER_EXPORT Renderer {
   // while path tracing was off, so enabling it later still gets the alpha-tested
   // foliage into the tlas. Idempotent (skips already-built meshes).
   void EnsureRayTracingGeometry();
+  // Lazily builds the BLAS + bindless mesh record for a non-zero distance LOD
+  // of an already-uploaded RT mesh (RX_RT_LOD_NEAR). Idempotent; returns the
+  // LOD's bindless index (custom_index for the TLAS instance) or kInvalidIndex
+  // when the LOD has no RT geometry / cannot be built (caller falls back to
+  // LOD0). Called at frame-build time, so a one-time build stall is acceptable.
+  u32 EnsureLodRtGeometry(u64 mesh_key, GpuMesh& mesh, u32 lod);
 
   RendererDesc desc_;
   RenderSettings settings_;
@@ -536,6 +543,9 @@ class RX_RENDER_EXPORT Renderer {
   u32 fg_engine_frames_ = 0;
   f64 fg_log_time_ = 0.0;
   std::unique_ptr<RayTracingContext> raytracing_;
+  // Solid-angle + distance culling of realtime TLAS instances, persistent
+  // across frames (time-sliced sweep state per instance group).
+  RtInstanceCuller rt_cull_;
   RenderGraph graph_;
   TaaPass taa_;
   RtaoPass rtao_;

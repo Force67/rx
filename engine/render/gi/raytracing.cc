@@ -51,6 +51,9 @@ std::unique_ptr<RayTracingContext> RayTracingContext::Create(Device& device) {
 RayTracingContext::~RayTracingContext() {
   for (auto kv : blas_) device_.DestroyAccelStruct(kv.value.handle);
   for (auto kv : approx_blas_) device_.DestroyAccelStruct(kv.value.handle);
+  for (auto kv : lod_blas_)
+    for (Blas& blas : kv.value)
+      if (blas.handle) device_.DestroyAccelStruct(blas.handle);
   device_.DestroyBuffer(blas_scratch_);
   for (Tlas& tlas : tlas_) DestroyTlas(tlas);
 }
@@ -162,6 +165,36 @@ void RayTracingContext::RemoveApproxBlas(u64 mesh_key) {
   approx_blas_.erase(mesh_key);
 }
 
+bool RayTracingContext::BuildLodBlas(u64 mesh_key, u32 lod,
+                                     const base::Vector<AccelTriangles>& geometries) {
+  if (lod == 0) return false;
+  base::Vector<Blas>* lods = lod_blas_.find(mesh_key);
+  if (!lods) {
+    lod_blas_.emplace(mesh_key, base::Vector<Blas>{});
+    lods = lod_blas_.find(mesh_key);
+  }
+  if (lods->size() < lod) lods->resize(lod);
+  if ((*lods)[lod - 1].handle) return true;  // already built
+  Blas blas;
+  if (!BuildBlasFromGeometries(geometries, blas)) return false;
+  (*lods)[lod - 1] = blas;
+  return true;
+}
+
+bool RayTracingContext::HasLodBlas(u64 mesh_key, u32 lod) const {
+  if (lod == 0) return false;
+  const base::Vector<Blas>* lods = lod_blas_.find(mesh_key);
+  return lods && lods->size() >= lod && (*lods)[lod - 1].handle;
+}
+
+void RayTracingContext::RemoveLodBlas(u64 mesh_key) {
+  base::Vector<Blas>* lods = lod_blas_.find(mesh_key);
+  if (!lods) return;
+  for (Blas& blas : *lods)
+    if (blas.handle) device_.DestroyAccelStruct(blas.handle);
+  lod_blas_.erase(mesh_key);
+}
+
 bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
   if (tlas.handle && tlas.capacity >= instance_count) return true;
 
@@ -199,9 +232,17 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot,
   base::Vector<TlasInstance> gpu_instances;
   gpu_instances.reserve(instances.size());
   for (const Instance& instance : instances) {
-    const Blas* blas =
-        instance.approx ? approx_blas_.find(instance.mesh_key) : blas_.find(instance.mesh_key);
-    if (!blas) continue;
+    const Blas* blas = nullptr;
+    if (instance.approx) {
+      blas = approx_blas_.find(instance.mesh_key);
+    } else if (instance.lod > 0) {
+      const base::Vector<Blas>* lods = lod_blas_.find(instance.mesh_key);
+      if (lods && lods->size() >= instance.lod && (*lods)[instance.lod - 1].handle)
+        blas = &(*lods)[instance.lod - 1];
+    } else {
+      blas = blas_.find(instance.mesh_key);
+    }
+    if (!blas || !blas->handle) continue;
     TlasInstance gpu{};
     ToInstanceTransform(instance.transform, gpu.transform);
     gpu.custom_index = instance.custom_index & 0xffffffu;

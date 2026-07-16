@@ -98,6 +98,26 @@ struct GpuMesh {
   u32 rt_approx_bindless = 0;  // bindless mesh record for approx hit shading
   bool rt_approx = false;      // an approx BLAS/instance exists for this mesh
 
+  // Distance-LOD ray-tracing geometry (RX_RT_LOD_NEAR), parallel to `lods`:
+  // entry [lod-1] describes LOD N's opaque RT stand-in. The rebased index
+  // buffer and bindless record are prepared eagerly at upload (cheap, and the
+  // CPU geometry is only in hand there); its `indices` are rebased to index the
+  // shared LOD0-onward vertex buffer directly, so hit shading needs no per-LOD
+  // vertex offset. The BLAS itself (the expensive blocking build) is created
+  // lazily by the renderer the first time an instance selects the LOD.
+  struct LodRt {
+    GpuBuffer indices;      // absolute-indexed opaque geometry for this LOD
+    u32 vertex_count = 0;   // maxVertex bound for the BLAS (shared vertex count)
+    struct Geom {
+      u32 index_offset = 0;  // first index (u32 elements) into `indices`
+      u32 index_count = 0;
+    };
+    base::Vector<Geom> geoms;   // one per opaque submesh, BLAS-geometry order
+    u32 bindless = 0xffffffffu;  // bindless mesh record, kInvalidIndex until set
+    bool blas_built = false;     // BLAS built lazily on first RT selection
+  };
+  base::Vector<LodRt> lod_rt;
+
   // Mesh-shader path: lod 0 split into meshlets, read in the mesh shader via
   // buffer device address, so the GpuBuffer::address fields are what the push
   // constants carry. Empty when mesh shaders are unavailable or the mesh is

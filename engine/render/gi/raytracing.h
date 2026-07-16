@@ -48,7 +48,12 @@ enum RayMask : u8 {
 // the frame still in flight.
 class RayTracingContext {
  public:
-  static constexpr u32 kSlots = 2;
+  // Three ping-pong slots (not two): the async-TLAS path (RX_RT_ASYNC_TLAS)
+  // builds slot N on the compute queue for the *next* frame while this frame's
+  // consumers read the slot built last frame, so a slot is written, then read a
+  // frame later, then rewritten a frame after that -- three live slots at two
+  // frames in flight. The synchronous path builds and consumes one slot.
+  static constexpr u32 kSlots = 3;
 
   struct Instance {
     u64 mesh_key = 0;
@@ -59,6 +64,10 @@ class RayTracingContext {
     // BuildApproxBlas) instead of its regular BLAS. Used with kRayMaskApprox
     // to route realtime diffuse/AO/shadow rays to the vegetation stand-in.
     bool approx = false;
+    // Selects a distance LOD's BLAS (built by BuildLodBlas) instead of the LOD0
+    // structure. 0 = LOD0 (blas_), N>0 = lods_[N-1]. Mutually exclusive with
+    // approx (distant LODs stay force-opaque; see BuildLodBlas).
+    u32 lod = 0;
     Mat4 transform = Mat4::Identity();
   };
 
@@ -85,6 +94,16 @@ class RayTracingContext {
   bool BuildApproxBlas(u64 mesh_key, const base::Vector<AccelTriangles>& geometries);
   void RemoveApproxBlas(u64 mesh_key);
   bool HasApproxBlas(u64 mesh_key) const { return approx_blas_.contains(mesh_key); }
+
+  // Builds (once) the BLAS for a non-zero distance LOD of an already-uploaded
+  // mesh, keyed by mesh_key + lod. lod is 1-based here (lod 1 = lods_[0]); the
+  // renderer builds these lazily the first time an instance selects the LOD.
+  // Distant LODs are built fully OPAQUE (masked foliage stays force-opaque --
+  // the opaque-approximation shrink is imperceptible past the LOD switch
+  // distance), so no separate approx variant is needed for them.
+  bool BuildLodBlas(u64 mesh_key, u32 lod, const base::Vector<AccelTriangles>& geometries);
+  bool HasLodBlas(u64 mesh_key, u32 lod) const;
+  void RemoveLodBlas(u64 mesh_key);
 
   // Whether a blas already exists for this mesh (BuildBlas is idempotent, but
   // callers re-registering bindless geometry need to skip already-built meshes).
@@ -133,6 +152,9 @@ class RayTracingContext {
   base::UnorderedMap<u64, Blas> blas_;
   // Opaque-approximation BLASes for alpha-masked vegetation, keyed like blas_.
   base::UnorderedMap<u64, Blas> approx_blas_;
+  // Distance-LOD BLASes, keyed by mesh_key; the vector is indexed by lod-1
+  // (lod 1 = [0]) and grown lazily as LODs are first selected.
+  base::UnorderedMap<u64, base::Vector<Blas>> lod_blas_;
   // Reused across builds. Freeing scratch right after the fence tripped
   // lavapipe, whose build workers can outlive the signal; a persistent
   // arena avoids both that and the per-build allocation.

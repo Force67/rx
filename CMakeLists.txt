@@ -344,6 +344,18 @@ if(RX_BUILD_TESTS)
   target_link_libraries(instance_store_test PRIVATE rx::core)
   add_test(NAME instance_store_test COMMAND instance_store_test)
 
+  # Solid-angle TLAS instance culler: the distance/angle predicate, the
+  # time-sliced group sweep, teleport accept-all and generation invalidation.
+  # Pure CPU logic (no GPU), so it always runs under plain ctest.
+  add_executable(rt_instance_cull_test
+    test/rt_instance_cull_test.cc
+    engine/render/gi/rt_instance_cull.cc)
+  target_include_directories(rt_instance_cull_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(rt_instance_cull_test PRIVATE rx::core)
+  add_test(NAME rt_instance_cull_test COMMAND rt_instance_cull_test)
+
 # CPU-side memory infrastructure test (tracker/arena/chunk pool/small vector/
 # config). rx_enable_mimalloc gives it the tracked new/delete override so the
 # tracker assertions run against the real allocation path.

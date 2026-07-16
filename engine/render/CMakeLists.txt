@@ -18,6 +18,7 @@ rx_add_module(render
   gi/sdf_scene.cc
   gi/sdf_clipmap.cc
   gi/raytracing.cc
+  gi/rt_instance_cull.cc
   gi/path_tracer.cc
   gi/recon_path_tracer.cc
   screenspace/ambient_occlusion.cc
