@@ -5,7 +5,7 @@
 namespace rx::nav {
 namespace {
 
-constexpr f32 kLift = 0.06f;  // meters above the surface so lines never z-fight
+constexpr f32 kLift = 0.1f;  // meters above the surface so lines never z-fight
 
 // Area palette, 0xRRGGBBAA. Index 0 unused (holes draw nothing).
 constexpr u32 kAreaColors[8] = {
@@ -28,6 +28,13 @@ void AppendNavMeshLines(const NavMesh& mesh, const Vec3& center, f32 radius,
   const f32 cs = mesh.config().cell_size;
   const i32 r = static_cast<i32>(std::ceil(radius / cs));
   const CellRef mid = mesh.CellAt(center);
+  // Line endpoints take the interpolated surface height so edges hug slopes
+  // instead of burying their downhill half in the ground.
+  auto at = [&](f32 x, f32 z, f32 fallback) {
+    f32 h = fallback;
+    mesh.HeightAt(x, z, &h);
+    return Vec3{x, h + kLift, z};
+  };
   for (i32 dz = -r; dz <= r; ++dz) {
     for (i32 dx = -r; dx <= r; ++dx) {
       const CellRef cell{mid.x + dx, mid.z + dz};
@@ -36,15 +43,15 @@ void AppendNavMeshLines(const NavMesh& mesh, const Vec3& center, f32 radius,
       const u32 color = AreaColor(area);
       const f32 x0 = static_cast<f32>(cell.x) * cs;
       const f32 z0 = static_cast<f32>(cell.z) * cs;
-      const f32 y = mesh.CellCenter(cell).y + kLift;
+      const f32 y = mesh.CellCenter(cell).y;
       // Two edges per cell (west + south); neighbors complete the grid. The
       // outer rim misses two edges, invisible in practice and half the lines.
-      out->push_back({{x0, y, z0}, {x0, y, z0 + cs}, color});
-      out->push_back({{x0, y, z0}, {x0 + cs, y, z0}, color});
+      out->push_back({at(x0, z0, y), at(x0, z0 + cs, y), color});
+      out->push_back({at(x0, z0, y), at(x0 + cs, z0, y), color});
       // Cross-hatch cells whose area differs from plain ground so cost paint
       // reads at a glance even where colors blend.
       if (area != kAreaGround) {
-        out->push_back({{x0, y, z0}, {x0 + cs, y, z0 + cs}, color});
+        out->push_back({at(x0, z0, y), at(x0 + cs, z0 + cs, y), color});
       }
     }
   }
