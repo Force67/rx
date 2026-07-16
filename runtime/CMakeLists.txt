@@ -9,6 +9,7 @@ set(RX_RUNTIME_SOURCES
   demo_scenes.cc
   demo_nav.cc
   demo_ship.cc
+  demo_gym.cc
   scene_hook_demo.cc
   scene_hook_rhi_demo.cc
   fly_camera.cc
@@ -30,6 +31,9 @@ set(RX_RUNTIME_MODULES
   rx::net_viz
   rx::nav
   rx::nav_viz
+  rx::character
+  rx::inventory
+  rx::inventory_world
 )
 
 # CI/release builds can provide a stable identifier with -DRX_BUILD_ID=... .

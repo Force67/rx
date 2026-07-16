@@ -233,6 +233,16 @@ void Viewer::DriveSunFromClock() {
 void Viewer::OnUpdate(f32 frame_delta) {
   DriveSunFromClock();
   debug_ui_.BeginFrame();
+  // The gym owns its camera + input: route input to the character controller
+  // instead of the free-fly camera and let it capture the cursor for mouse look.
+  if (GymDemo* gym = demos_->gym(); gym && window_) {
+    const bool allow_keyboard = !debug_ui_.wants_keyboard();
+    const bool allow_mouse = !debug_ui_.wants_mouse();
+    gym->Update(frame_delta, window_->input(), *actions_, allow_keyboard, allow_mouse);
+    window_->SetRelativeMouseMode(gym->wants_mouse_capture());
+    if (actions_->pressed(Action::kToggleDebug) && allow_keyboard) debug_ui_.ToggleVisible();
+    return;
+  }
   UpdateCamera(frame_delta);
 }
 
