@@ -47,7 +47,12 @@ apply to the **live** components every frame:
   flow through `StepCharacters`' feet-planted resize path (`SetCharacterShape`).
 - **Speeds & jump:** per-gait speeds (walk / run / sprint / crouch), jump height,
   step height, max slope (deg; re-pushed to the controller via
-  `ConfigureCharacter`).
+  `ConfigureCharacter`), gravity.
+- **Feel (never robotic):** turn / pivot half-life + pivot angle (body-facing turn
+  smoothing), gait speed-blend + stop epsilon + air control, jump buffer + coyote
+  time, eye step-smoothing half-life and landing-dip scale / cap / recovery. The
+  top readout shows live `look` vs `facing` yaw (with a `(pivot)` marker), the
+  blended `gait tgt` speed, and the current buffer / coyote / dip values.
 - **Third-person camera:** boom distance, shoulder / height offsets, min / max
   distance, obstruction radius — written straight onto the rig's `CameraBoom` /
   `CameraObstruction` / `CameraDamping` / `CameraOrbit` components.
@@ -108,7 +113,7 @@ a capture at frame N is frame-rate independent, and the cursor is not grabbed.
 | `RX_GYM_YAW=<radians>` | Initial heading (0 faces −Z). |
 | `RX_GYM_PITCH=<radians>` | Initial camera pitch (negative looks down). |
 | `RX_GYM_VIEW=fp\|tp` | Initial view mode. |
-| `RX_GYM_SCRIPT="t:token,..."` | Timed intent: `fwd`/`back`/`left`/`right`/`stop`, `sprint`/`run`, `crouch`/`stand`, `jump`, `view`, `drop`, `pickup`. |
+| `RX_GYM_SCRIPT="t:token,..."` | Timed intent: `fwd`/`fwdhalf` (analog half-stick)/`back`/`left`/`right`/`stop`, `sprint`/`run`, `crouch`/`stand`, `jump`, `view`, `drop`, `pickup`. |
 
 Pair with the viewer's `RX_UI_SHOT=<path>` / `RX_UI_SHOT_FRAMES` and
 `RX_WIN_W`/`RX_WIN_H` for a timed swapchain capture.

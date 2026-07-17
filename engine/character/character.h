@@ -46,10 +46,36 @@ struct CharacterMovementSettings {
   f32 air_control = 0.35f;          // [0..1] scales ground_acceleration while airborne
 
   f32 jump_height = 1.1f;  // apex height in metres; impulse = sqrt(2*gravity*height)
-  f32 gravity = 9.81f;     // m/s^2, integrated by the controller (velocity is game-owned)
+  f32 gravity = 16.0f;     // m/s^2, integrated by the controller (~1.6g: brisk, non-floaty arc)
 
   f32 step_height = 0.4f;              // tallest ledge the controller steps over
   f32 max_slope_angle = 0.9599311f;    // ~55 deg, steepest walkable ground
+
+  // --- Game-feel: turn smoothing (never robotic) ------------------------------
+  // The body facing yaw (visible mesh / Transform rotation) eases toward the
+  // movement direction instead of snapping. Only active in third person; first
+  // person hard-locks facing to the raw look yaw (see StepCharacters). A near-180
+  // input reversal past `pivot_angle` uses the faster `pivot_turn_half_life` so a
+  // reversal spins on the spot instead of arcing mushily. Half-life = seconds to
+  // close half the remaining angle; 0 snaps (old instant behaviour).
+  f32 turn_half_life = 0.09f;         // s, eased facing chase (fast, responsive)
+  f32 pivot_turn_half_life = 0.05f;   // s, faster chase for reversals past pivot_angle
+  f32 pivot_angle = 2.4434610f;       // rad (~140 deg): beyond this the pivot rate applies
+
+  // --- Game-feel: gait target-speed blend -------------------------------------
+  // The *target* speed eases across gait changes (walk<->run<->sprint) over
+  // `speed_blend_time` (time to traverse the full walk..sprint span; partial
+  // changes are proportionally quicker) so speed does not step. Ground
+  // acceleration itself stays snappy. 0 steps instantly (old behaviour).
+  f32 speed_blend_time = 0.18f;       // s
+  f32 stop_speed_epsilon = 0.05f;     // m/s: below this with no input, velocity zeroes exactly
+
+  // --- Game-feel: jump forgiveness --------------------------------------------
+  // Jump buffer: a jump pressed up to `jump_buffer_time` before touchdown still
+  // fires on landing. Coyote time: a jump within `coyote_time` after walking off
+  // a ledge still fires. Both 0 disable the window (jump only when grounded).
+  f32 jump_buffer_time = 0.12f;       // s
+  f32 coyote_time = 0.12f;            // s
 };
 
 // The capsule + eye geometry for each stance. Heights are TOTAL capsule heights
@@ -65,6 +91,22 @@ struct CharacterShape {
   f32 crouched_eye_height = 0.95f;
 
   f32 crouch_blend_speed = 9.0f;  // crouch fraction change per second
+
+  // --- Game-feel: eye/anchor vertical smoothing -------------------------------
+  // The camera anchor's *vertical* component eases over sudden ground-height
+  // changes (step-up / step-down / stairs) so the eye glides instead of popping;
+  // horizontal stays 1:1 raw (smoothing horizontal reads as lag). Active only
+  // while grounded — airborne (jumps) snap so the arc is not damped. Half-life in
+  // seconds; 0 disables (raw eye, old behaviour).
+  f32 eye_step_half_life = 0.06f;
+
+  // --- Game-feel: landing recoil ----------------------------------------------
+  // On touchdown after a real fall, a small fast-recovering eye-height dip scaled
+  // by impact speed. No screen shake. `landing_dip_scale` 0 disables it.
+  f32 landing_dip_min_speed = 2.5f;   // m/s impact below which no dip
+  f32 landing_dip_scale = 0.03f;      // metres of dip per (m/s) of impact over the min
+  f32 landing_dip_max = 0.14f;        // metres, hard cap (kept subtle)
+  f32 landing_dip_half_life = 0.09f;  // s, recovery half-life
 };
 
 enum class CharacterGait : u8 { kWalk, kRun, kSprint };
@@ -102,8 +144,20 @@ struct CharacterState {
   f32 crouch_blend = 0;       // [0..1], 0 standing, 1 fully crouched
   f32 eye_height = 1.62f;     // current, blended, measured from the feet
   f32 time_since_grounded = 0;  // seconds airborne (coyote-time friendly)
-  f32 yaw = 0;                  // heading, radians; feeds the camera anchor
+  f32 yaw = 0;                  // LOOK yaw, radians; raw (never smoothed) — feeds the camera anchor
   bool teleported = false;      // set by TeleportCharacter; bumps the anchor revision once
+
+  // --- Game-feel state (written by StepCharacters) ----------------------------
+  f32 facing_yaw = 0;      // BODY facing, radians; drives Transform. Eases toward the
+                           // movement dir in third person, hard-locked to `yaw` in first.
+  bool pivoting = false;   // in a quick-pivot (near-180 reversal): holds the faster turn rate
+  f32 gait_speed = 0;      // smoothed target gait speed (m/s), blended across gait changes
+  f32 jump_buffer_timer = 0;   // seconds of remaining buffered-jump window
+  bool jump_consumed = false;  // a jump fired this airborne stint (blocks coyote double-jumps)
+  f32 eye_base_y = 0;      // step-smoothed world-space eye Y (before landing dip)
+  f32 anchor_eye_y = 0;    // eye_base_y minus landing dip — the value the camera anchor reads
+  f32 landing_dip = 0;     // current landing-recoil dip in metres (>= 0), decays to 0
+  bool view_initialized = false;  // facing_yaw / eye Y primed (cleared on teleport to snap)
 };
 
 // Links the entity to its Jolt CharacterVirtual and tracks the live capsule

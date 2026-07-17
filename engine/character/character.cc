@@ -24,6 +24,26 @@ f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
   return current + (d > 0 ? max_delta : -max_delta);
 }
 
+// Frame-rate-independent exponential approach: closes half the gap every
+// `half_life` seconds. Converges without overshoot; half_life <= 0 snaps.
+f32 ExpApproach(f32 current, f32 target, f32 half_life, f32 dt) {
+  if (half_life <= 0.0f) return target;
+  const f32 t = 1.0f - std::exp2(-dt / half_life);
+  return current + (target - current) * t;
+}
+
+// Same, on the shortest signed angular arc (handles wrap; no overshoot).
+f32 ExpApproachAngle(f32 current, f32 target, f32 half_life, f32 dt) {
+  const f32 diff = WrapAngle(target - current);
+  if (half_life <= 0.0f) return WrapAngle(current + diff);
+  const f32 t = 1.0f - std::exp2(-dt / half_life);
+  return WrapAngle(current + diff * t);
+}
+
+// Heading yaw for a horizontal world direction, inverse of HeadingQuat's forward
+// (forward at yaw 0 is -Z, yaw increases toward +X): forward = (sin y, 0, -cos y).
+f32 YawFromDir(const Vec3& d) { return std::atan2(d.x, -d.z); }
+
 Vec3 MoveTowardVec(const Vec3& current, const Vec3& target, f32 max_delta) {
   const Vec3 d = target - current;
   const f32 len = Length(d);
@@ -147,26 +167,79 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         state.eye_height =
             std::lerp(shape.standing_eye_height, shape.crouched_eye_height, blend);
 
-        // --- Horizontal velocity ---------------------------------------------
-        const f32 gait_speed = stance == CharacterStance::kCrouching
-                                   ? settings.crouch_speed
-                                   : GaitSpeed(settings, intent.gait);
+        // --- Analog move intent ----------------------------------------------
         const Vec3 move_h{intent.move.x, 0, intent.move.z};
         const f32 throttle = std::clamp(Length(move_h), 0.0f, 1.0f);
         const Vec3 dir = throttle > 1e-4f ? Normalize(move_h) : Vec3{0, 0, 0};
-        const Vec3 target_h = dir * (gait_speed * throttle);
 
+        // --- Body facing (turn smoothing) ------------------------------------
+        // First person hard-locks the body to the RAW look yaw (no damping ever
+        // touches look input); third person eases the facing toward the movement
+        // direction, using the faster pivot half-life for near-180 reversals.
+        bool face_look = true;
+        if (const CharacterViewMode* vm = world.Get<CharacterViewMode>(entity))
+          face_look = vm->kind == CharacterViewKind::kFirstPerson;
+        if (!state.view_initialized) state.facing_yaw = state.yaw;
+        if (face_look) {
+          state.facing_yaw = state.yaw;  // locked, raw
+        } else if (throttle > 1e-3f) {
+          const f32 target_yaw = YawFromDir(dir);
+          const f32 gap = std::abs(WrapAngle(target_yaw - state.facing_yaw));
+          // Sticky pivot: a reversal past pivot_angle latches the faster rate and
+          // holds it through the bulk of the turn (released near completion), so a
+          // 180 spins on the spot instead of arcing then stalling.
+          if (gap > settings.pivot_angle) state.pivoting = true;
+          else if (gap < 0.15f) state.pivoting = false;
+          const f32 hl =
+              state.pivoting ? settings.pivot_turn_half_life : settings.turn_half_life;
+          state.facing_yaw = ExpApproachAngle(state.facing_yaw, target_yaw, hl, dt);
+        }  // third person, not moving: hold facing
+
+        // --- Gait target-speed blend (smooth target, snappy accel) -----------
+        const f32 raw_gait = stance == CharacterStance::kCrouching
+                                 ? settings.crouch_speed
+                                 : GaitSpeed(settings, intent.gait);
+        const f32 span = std::max(settings.sprint_speed - settings.walk_speed, 0.0f);
+        if (settings.speed_blend_time > 0.0f && span > 1e-4f) {
+          state.gait_speed =
+              MoveTowardScalar(state.gait_speed, raw_gait, (span / settings.speed_blend_time) * dt);
+        } else {
+          state.gait_speed = raw_gait;
+        }
+        const Vec3 target_h = dir * (state.gait_speed * throttle);
+
+        // --- Horizontal velocity ---------------------------------------------
         Vec3 horizontal{state.velocity.x, 0, state.velocity.z};
         f32 accel = throttle > 1e-4f ? settings.ground_acceleration : settings.ground_deceleration;
         if (!state.grounded) accel = settings.ground_acceleration * settings.air_control;
         horizontal = MoveTowardVec(horizontal, target_h, std::max(accel, 0.0f) * dt);
+        // Crisp stop: no ice-skate tail below the epsilon when input is released.
+        if (throttle <= 1e-4f && Length(horizontal) < settings.stop_speed_epsilon)
+          horizontal = {0, 0, 0};
 
-        // --- Vertical velocity + jump ----------------------------------------
+        // --- Vertical velocity + jump (buffer + coyote) ----------------------
+        const bool grounded_prev = state.grounded;  // last step's result
+        if (grounded_prev) state.jump_consumed = false;
+
+        // Jump buffer: a fresh press refills the window; otherwise it drains.
+        const bool jump_pressed = intent.jump;
+        if (jump_pressed) {
+          state.jump_buffer_timer = std::max(settings.jump_buffer_time, 0.0f);
+        } else {
+          state.jump_buffer_timer = std::max(0.0f, state.jump_buffer_timer - dt);
+        }
+        const bool jump_wanted = jump_pressed || state.jump_buffer_timer > 0.0f;
+        const bool coyote_ok =
+            grounded_prev || (!state.jump_consumed && settings.coyote_time > 0.0f &&
+                              state.time_since_grounded <= settings.coyote_time);
+
         f32 vy = state.velocity.y;
-        if (state.grounded) {
-          if (vy < 0) vy = 0;
-          if (intent.jump) vy = std::sqrt(2.0f * std::max(settings.gravity, 0.0f) *
-                                          std::max(settings.jump_height, 0.0f));
+        if (grounded_prev && vy < 0) vy = 0;
+        if (jump_wanted && coyote_ok) {
+          vy = std::sqrt(2.0f * std::max(settings.gravity, 0.0f) *
+                         std::max(settings.jump_height, 0.0f));
+          state.jump_buffer_timer = 0;
+          state.jump_consumed = true;
         }
         vy -= settings.gravity * dt;
 
@@ -177,6 +250,8 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         bool grounded = false;
         physics.MoveCharacterVelocity(body.id, velocity, dt, &out_pos, &grounded, nullptr);
 
+        const bool just_landed = !grounded_prev && grounded;
+        const f32 impact_speed = std::max(0.0f, -velocity.y);  // pre-ground-clamp descent speed
         state.grounded = grounded;
         if (grounded && velocity.y < 0) velocity.y = 0;
         state.velocity = velocity;
@@ -186,11 +261,34 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         transform.position[0] = out_feet.x;
         transform.position[1] = out_feet.y;
         transform.position[2] = out_feet.z;
-        const Quat q = HeadingQuat(state.yaw);
+        const Quat q = HeadingQuat(state.facing_yaw);
         transform.rotation[0] = q.x;
         transform.rotation[1] = q.y;
         transform.rotation[2] = q.z;
         transform.rotation[3] = q.w;
+
+        // --- Camera-anchor eye Y: step smoothing + landing dip ---------------
+        // Vertical only; horizontal follows the feet 1:1 in SyncCharacterCameraAnchors.
+        const f32 raw_eye_y = out_feet.y + state.eye_height;
+        if (!state.view_initialized) {
+          state.eye_base_y = raw_eye_y;
+        } else if (grounded && shape.eye_step_half_life > 0.0f) {
+          state.eye_base_y = ExpApproach(state.eye_base_y, raw_eye_y, shape.eye_step_half_life, dt);
+        } else {
+          state.eye_base_y = raw_eye_y;  // airborne: snap so the jump arc is not damped
+        }
+        if (just_landed && shape.landing_dip_scale > 0.0f &&
+            impact_speed > shape.landing_dip_min_speed) {
+          const f32 dip = std::min((impact_speed - shape.landing_dip_min_speed) *
+                                       shape.landing_dip_scale,
+                                   std::max(shape.landing_dip_max, 0.0f));
+          state.landing_dip = std::max(state.landing_dip, dip);
+        }
+        state.landing_dip = shape.landing_dip_half_life > 0.0f
+                                ? state.landing_dip * std::exp2(-dt / shape.landing_dip_half_life)
+                                : 0.0f;
+        state.anchor_eye_y = state.eye_base_y - state.landing_dip;
+        state.view_initialized = true;
 
         // Consume edge/delta inputs; held state (move/gait/crouch) persists.
         intent.jump = false;
@@ -204,7 +302,11 @@ void SyncCharacterCameraAnchors(ecs::World& world) {
       [&](ecs::Entity entity, CharacterState& state, scene::CameraAnchor& anchor) {
         Vec3 feet = anchor.position;
         if (scene::Transform* t = world.Get<scene::Transform>(entity)) feet = TransformFeet(*t);
-        anchor.position = feet + Vec3{0, state.eye_height, 0};
+        // Horizontal follows the feet 1:1 (raw); the vertical is the step-smoothed,
+        // landing-dipped eye Y once StepCharacters has primed it.
+        const f32 eye_y = state.view_initialized ? state.anchor_eye_y : feet.y + state.eye_height;
+        anchor.position = {feet.x, eye_y, feet.z};
+        // Camera heading is the RAW look yaw (never the smoothed body facing).
         anchor.orientation = HeadingQuat(state.yaw);
         anchor.velocity = state.velocity;
         if (state.teleported) {
@@ -348,6 +450,13 @@ void TeleportCharacter(ecs::World& world, physics::PhysicsWorld& physics, ecs::E
     state->velocity = {0, 0, 0};
     state->time_since_grounded = 0;
     state->teleported = true;
+    // Snap the feel smoothers across the discontinuity: no eye lag, no stale dip
+    // or buffered jump carries over the cut.
+    state->view_initialized = false;
+    state->landing_dip = 0;
+    state->jump_buffer_timer = 0;
+    state->jump_consumed = false;
+    state->gait_speed = 0;
   }
   if (scene::Transform* t = world.Get<scene::Transform>(entity)) {
     t->position[0] = feet_position.x;

@@ -595,6 +595,7 @@ void GymDemo::RunScript(f32 dt) {
     const std::string& t = script_[script_cursor_].token;
     ++script_cursor_;
     if (t == "fwd") { script_move_fwd_ = 1; script_move_right_ = 0; }
+    else if (t == "fwdhalf") { script_move_fwd_ = 0.5f; script_move_right_ = 0; }  // analog: half stick
     else if (t == "back") { script_move_fwd_ = -1; script_move_right_ = 0; }
     else if (t == "left") { script_move_fwd_ = 0; script_move_right_ = -1; }
     else if (t == "right") { script_move_fwd_ = 0; script_move_right_ = 1; }
@@ -774,7 +775,9 @@ void GymDemo::Emit(f32 dt, render::FrameView& view) {
     const f32 cyl_len = std::max(2.0f * body->half_height, 0.01f);
     const Vec3 feet{tr->position[0], tr->position[1], tr->position[2]};
     const f32 center_y = feet.y + radius + cyl_len * 0.5f;
-    const Mat4 rot = MakeFromQuat(HeadingQuat(st->yaw));
+    // Body faces the smoothed facing yaw (turn smoothing) — in third person it
+    // eases toward the movement direction rather than snapping to the look yaw.
+    const Mat4 rot = MakeFromQuat(HeadingQuat(st->facing_yaw));
     const u32 tint = 0x4a90d0;  // cool blue so it reads against the gray checker
 
     Mat4 body_m =
@@ -812,7 +815,7 @@ void GymDemo::DrawPanel() {
   auto* inv = world.Get<inventory::Inventory>(player_);
   if (!shape || !move || !state) return;
 
-  ImGui::SetNextWindowSize(ImVec2(340, 640), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(340, 820), ImGuiCond_FirstUseEver);
   const f32 panel_x = std::max(20.0f, ImGui::GetIO().DisplaySize.x - 360.0f);
   ImGui::SetNextWindowPos(ImVec2(panel_x, 20), ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Gym - character tuning")) {
@@ -824,6 +827,13 @@ void GymDemo::DrawPanel() {
                                 state->velocity.z * state->velocity.z);
     ImGui::Text("speed: %.2f m/s   eye: %.2f m   crouch: %.0f%%", speed, state->eye_height,
                 state->crouch_blend * 100.0f);
+    // Feel readout: body facing vs raw look, buffered-jump/coyote windows, dip.
+    const f32 look_deg = state->yaw * 180.0f / kPi;
+    const f32 face_deg = state->facing_yaw * 180.0f / kPi;
+    ImGui::Text("look %+.0f  facing %+.0f%s   gait tgt %.2f m/s", look_deg, face_deg,
+                state->pivoting ? " (pivot)" : "", state->gait_speed);
+    ImGui::Text("buffer %.02fs  coyote %.02fs  dip %.03f m", state->jump_buffer_timer,
+                state->time_since_grounded, state->landing_dip);
     if (body) ImGui::Text("capsule: r %.2f  half %.2f m", body->radius, body->half_height);
     ImGui::Text("cursor: %s (Tab)   inventory crates: %u", mouse_captured_ ? "captured" : "free",
                 inv ? inventory::InventoryCount(*inv, crate_def_) : 0);
@@ -859,6 +869,27 @@ void GymDemo::DrawPanel() {
       if (ImGui::SliderFloat("max slope", &slope_deg, 20.0f, 80.0f, "%.0f deg"))
         move->max_slope_angle = slope_deg * kPi / 180.0f;
       if (body) body->configured = false;  // re-push slope/step next step
+      ImGui::SliderFloat("gravity", &move->gravity, 6.0f, 30.0f, "%.1f m/s2");
+    }
+    if (ImGui::CollapsingHeader("Feel (never robotic)", ImGuiTreeNodeFlags_DefaultOpen)) {
+      ImGui::TextDisabled("turn smoothing (third person)");
+      ImGui::SliderFloat("turn half-life", &move->turn_half_life, 0.0f, 0.4f, "%.03f s");
+      ImGui::SliderFloat("pivot half-life", &move->pivot_turn_half_life, 0.0f, 0.4f, "%.03f s");
+      f32 pivot_deg = move->pivot_angle * 180.0f / kPi;
+      if (ImGui::SliderFloat("pivot angle", &pivot_deg, 60.0f, 180.0f, "%.0f deg"))
+        move->pivot_angle = pivot_deg * kPi / 180.0f;
+      ImGui::TextDisabled("gait + stop");
+      ImGui::SliderFloat("speed blend", &move->speed_blend_time, 0.0f, 0.5f, "%.03f s");
+      ImGui::SliderFloat("stop epsilon", &move->stop_speed_epsilon, 0.0f, 0.25f, "%.03f m/s");
+      ImGui::SliderFloat("air control", &move->air_control, 0.0f, 1.0f, "%.02f");
+      ImGui::TextDisabled("jump forgiveness");
+      ImGui::SliderFloat("jump buffer", &move->jump_buffer_time, 0.0f, 0.3f, "%.03f s");
+      ImGui::SliderFloat("coyote time", &move->coyote_time, 0.0f, 0.3f, "%.03f s");
+      ImGui::TextDisabled("eye step smoothing + landing dip");
+      ImGui::SliderFloat("eye step half-life", &shape->eye_step_half_life, 0.0f, 0.25f, "%.03f s");
+      ImGui::SliderFloat("dip scale", &shape->landing_dip_scale, 0.0f, 0.1f, "%.03f m per m/s");
+      ImGui::SliderFloat("dip max", &shape->landing_dip_max, 0.0f, 0.4f, "%.02f m");
+      ImGui::SliderFloat("dip recover", &shape->landing_dip_half_life, 0.01f, 0.3f, "%.03f s");
     }
     if (ImGui::CollapsingHeader("Third-person camera", ImGuiTreeNodeFlags_DefaultOpen)) {
       if (auto* boom = world.Get<scene::CameraBoom>(player_))

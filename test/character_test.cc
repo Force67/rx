@@ -250,6 +250,261 @@ void TestFirstPersonEyeFollowsCrouch() {
        "first-person eye tracks the crouched eye height", 0.05f);
 }
 
+void TestAnalogGait() {
+  Scene s;
+  if (!s.Init()) return;
+  s.Settle();
+
+  // Half stick deflection walks at half the gait target speed (continuous).
+  s.intent().move = {0, 0, -0.5f};
+  s.intent().gait = CharacterGait::kRun;
+  s.Step(120);
+  Near(HorizontalSpeed(s.state()), CharacterMovementSettings{}.run_speed * 0.5f,
+       "half-deflected move throttles to half speed", 0.05f);
+
+  // Full deflection returns to full run speed.
+  s.intent().move = {0, 0, -1.0f};
+  s.Step(120);
+  Near(HorizontalSpeed(s.state()), CharacterMovementSettings{}.run_speed,
+       "full deflection reaches full speed", 0.05f);
+}
+
+void TestGaitSpeedBlend() {
+  Scene s;
+  if (!s.Init()) return;
+  s.Settle();
+
+  // At a full run, the smoothed gait target speed sits at run speed.
+  s.intent().move = {0, 0, -1};
+  s.intent().gait = CharacterGait::kRun;
+  s.Step(120);
+  Near(s.state().gait_speed, CharacterMovementSettings{}.run_speed, "gait speed settles at run",
+       0.05f);
+
+  // Switch to sprint: the target speed must climb monotonically (no step) and
+  // reach sprint speed, not jump to it in one frame.
+  s.intent().gait = CharacterGait::kSprint;
+  f32 prev = s.state().gait_speed;
+  bool monotonic = true, stepped = false;
+  const f32 run = CharacterMovementSettings{}.run_speed;
+  const f32 sprint = CharacterMovementSettings{}.sprint_speed;
+  for (int i = 0; i < 60; ++i) {
+    StepCharacters(s.world, s.physics, kDt);
+    s.physics.Update(kDt);
+    const f32 g = s.state().gait_speed;
+    if (g < prev - 1e-4f) monotonic = false;
+    if (i == 0 && g >= sprint - 1e-3f) stepped = true;  // reached sprint in one frame == stepped
+    prev = g;
+  }
+  Check(monotonic, "gait target speed blends monotonically upward");
+  Check(!stepped, "gait target speed does not step to sprint in one frame");
+  Near(s.state().gait_speed, sprint, "gait target speed reaches sprint", 0.05f);
+  (void)run;
+}
+
+void TestCrispStop() {
+  Scene s;
+  if (!s.Init()) return;
+  s.Settle();
+  s.intent().move = {0, 0, -1};
+  s.intent().gait = CharacterGait::kSprint;
+  s.Step(120);
+  Check(HorizontalSpeed(s.state()) > 5.0f, "sprinting before the stop");
+
+  s.intent().move = {0, 0, 0};
+  s.Step(60);
+  Check(s.state().velocity.x == 0.0f && s.state().velocity.z == 0.0f,
+        "crisp stop: horizontal velocity is exactly zero (no ice-skate tail)");
+}
+
+void TestTurnSmoothingConverges() {
+  Scene s;
+  if (!s.Init()) return;
+  CharacterViewMode vm;
+  vm.kind = CharacterViewKind::kThirdPerson;  // third person eases facing to movement dir
+  s.world.Add(s.player, vm);
+  auto* move = s.world.Get<CharacterMovementSettings>(s.player);
+  move->turn_half_life = 0.1f;
+  s.Settle();
+
+  // Movement direction with heading yaw ~1.0 rad.
+  const f32 theta = 1.0f;
+  s.intent().move = {std::sin(theta), 0, -std::cos(theta)};
+  s.intent().gait = CharacterGait::kRun;
+
+  f32 prev = s.state().facing_yaw;
+  bool monotonic = true, overshoot = false;
+  for (int i = 0; i < 300; ++i) {
+    StepCharacters(s.world, s.physics, kDt);
+    s.physics.Update(kDt);
+    const f32 f = s.state().facing_yaw;
+    if (f < prev - 1e-4f) monotonic = false;   // only turns toward the target
+    if (f > theta + 2e-3f) overshoot = true;    // never past it
+    prev = f;
+  }
+  Check(monotonic, "facing turns monotonically toward the movement direction");
+  Check(!overshoot, "facing does not overshoot the movement direction");
+  Near(s.state().facing_yaw, theta, "facing converges to the movement direction", 0.02f);
+}
+
+void TestQuickPivotIsFaster() {
+  // Same large (near-reversal) target under an enabled pivot vs a disabled one;
+  // the pivot must close much more of the turn in the same time.
+  auto facing_after = [](f32 pivot_angle, int steps) -> f32 {
+    Scene s;
+    if (!s.Init()) return 0;
+    CharacterViewMode vm;
+    vm.kind = CharacterViewKind::kThirdPerson;
+    s.world.Add(s.player, vm);
+    auto* move = s.world.Get<CharacterMovementSettings>(s.player);
+    move->turn_half_life = 0.5f;        // slow ordinary turn
+    move->pivot_turn_half_life = 0.03f;  // fast pivot
+    move->pivot_angle = pivot_angle;
+    s.Settle();
+    const f32 theta = 2.6f;  // ~149 deg from the +? forward: a near reversal
+    s.intent().move = {std::sin(theta), 0, -std::cos(theta)};
+    s.intent().gait = CharacterGait::kRun;
+    for (int i = 0; i < steps; ++i) {
+      StepCharacters(s.world, s.physics, kDt);
+      s.physics.Update(kDt);
+    }
+    return s.state().facing_yaw;
+  };
+  const f32 with_pivot = facing_after(2.0f, 3);    // 2.6 > 2.0 -> pivot latches
+  const f32 without_pivot = facing_after(10.0f, 3);  // never pivots -> slow
+  Check(with_pivot > without_pivot + 0.3f,
+        "a near-180 reversal pivots faster than an ordinary turn");
+}
+
+void TestJumpBufferOnLanding() {
+  Scene s;
+  if (!s.Init()) return;
+  s.Settle();
+  Check(s.state().grounded, "grounded before the jump");
+
+  s.intent().jump = true;  // first jump
+  s.Step(1);
+  Check(!s.state().grounded, "airborne after the first jump");
+
+  // While descending near the ground, buffer a jump ONE time and stop pressing.
+  bool primed = false, rejumped = false;
+  for (int i = 0; i < 400; ++i) {
+    if (!primed && !s.state().grounded && s.state().velocity.y < 0 &&
+        s.transform().position[1] < 0.25f) {
+      s.intent().jump = true;
+      primed = true;
+    }
+    s.Step(1);
+    if (primed && s.state().velocity.y > 1.0f) {  // a fresh upward launch == buffered jump fired
+      rejumped = true;
+      break;
+    }
+  }
+  Check(rejumped, "a jump buffered before touchdown fires on landing");
+}
+
+void TestCoyoteJump() {
+  // Positive: a jump within the coyote window after walking off a ledge fires.
+  {
+    Scene s;
+    if (!s.Init()) return;
+    s.physics.AddStaticBox({-1.0f, 1.0f, 0}, {1.0f, 1.0f, 3.0f});  // top at y=2, x in [-2,0]
+    TeleportCharacter(s.world, s.physics, s.player, {-0.8f, 2.0f, 0});
+    s.Settle();
+    Check(s.state().grounded, "standing on the ledge");
+
+    s.intent().move = {1, 0, 0};  // walk +x off the edge (edge at x=0)
+    s.intent().gait = CharacterGait::kRun;
+    int i = 0;
+    for (; i < 180 && s.state().grounded; ++i) s.Step(1);
+    Check(!s.state().grounded, "walked off the ledge into the air");
+    Check(s.state().time_since_grounded <= CharacterMovementSettings{}.coyote_time,
+          "still inside the coyote window right after leaving");
+
+    s.intent().jump = true;
+    s.Step(1);
+    Check(s.state().velocity.y > 0.0f, "coyote jump fires within the window");
+  }
+  // Negative: past the window the jump is refused.
+  {
+    Scene s;
+    if (!s.Init()) return;
+    s.physics.AddStaticBox({-1.0f, 1.0f, 0}, {1.0f, 1.0f, 3.0f});
+    TeleportCharacter(s.world, s.physics, s.player, {-0.8f, 2.0f, 0});
+    s.Settle();
+    s.intent().move = {1, 0, 0};
+    s.intent().gait = CharacterGait::kRun;
+    for (int i = 0; i < 180 && s.state().grounded; ++i) s.Step(1);
+    Check(!s.state().grounded, "walked off the ledge (negative case)");
+    // Let the coyote window lapse while falling.
+    for (int i = 0; i < 20; ++i) s.Step(1);
+    Check(s.state().time_since_grounded > CharacterMovementSettings{}.coyote_time,
+          "coyote window has lapsed");
+    Check(!s.state().grounded, "still airborne past the window");
+    s.intent().jump = true;
+    s.Step(1);
+    Check(s.state().velocity.y < 0.0f, "jump refused past the coyote window (still falling)");
+  }
+}
+
+void TestAnchorVerticalSmoothing() {
+  Scene s;
+  if (!s.Init()) return;
+  auto* shape = s.world.Get<CharacterShape>(s.player);
+  shape->eye_step_half_life = 0.15f;  // exaggerate so the lag is unambiguous
+  // A 0.30 m step up onto a deep raised platform (top at y = 0.30, within step
+  // height) that the character climbs onto and stays on.
+  s.physics.AddStaticBox({0, 0.15f, -10.0f}, {1.5f, 0.15f, 9.0f});  // top y=0.30, z in [-19,-1]
+  s.world.Add(s.player, scene::CameraAnchor{});
+  s.Settle();
+
+  s.intent().move = {0, 0, -1};
+  s.intent().gait = CharacterGait::kRun;
+  f32 max_lag = 0;
+  for (int i = 0; i < 200; ++i) {
+    StepCharacters(s.world, s.physics, kDt);
+    s.physics.Update(kDt);
+    SyncCharacterCameraAnchors(s.world);
+    const CharacterState& st = s.state();
+    const f32 raw_eye = s.transform().position[1] + st.eye_height;
+    max_lag = std::max(max_lag, raw_eye - st.anchor_eye_y);  // smoothed lags a rising step
+  }
+  Check(s.transform().position[1] > 0.25f, "character climbed the step");
+  Check(max_lag > 0.05f, "anchor eye Y lags a sudden step-up (glide, not pop)");
+  // After settling on the step, the smoothed eye converges back to the raw eye.
+  s.intent().move = {0, 0, 0};
+  s.Step(60);
+  const f32 raw_eye = s.transform().position[1] + s.state().eye_height;
+  Near(s.state().anchor_eye_y, raw_eye, "anchor eye Y converges once the step is done", 0.01f);
+}
+
+void TestLandingDip() {
+  Scene s;
+  if (!s.Init()) return;
+  s.Settle();
+  Near(s.state().landing_dip, 0.0f, "no dip while standing", 1e-3f);
+
+  s.intent().jump = true;
+  s.Step(1);
+  // Fall back down; capture the dip at touchdown.
+  f32 peak_dip = 0;
+  bool landed = false;
+  for (int i = 0; i < 400; ++i) {
+    s.Step(1);
+    peak_dip = std::max(peak_dip, s.state().landing_dip);
+    if (s.state().grounded && i > 2) {
+      landed = true;
+      break;
+    }
+  }
+  Check(landed, "character lands");
+  Check(peak_dip > 0.0f, "landing after a fall dips the eye height");
+  // The dip is capped subtle and recovers.
+  Check(peak_dip <= CharacterShape{}.landing_dip_max + 1e-3f, "landing dip is capped");
+  s.Step(60);
+  Near(s.state().landing_dip, 0.0f, "landing dip recovers to zero", 5e-3f);
+}
+
 void TestViewModeToggleTransition() {
   Scene s;
   if (!s.Init()) return;
@@ -288,6 +543,15 @@ int main() {
   TestStepOverAndBlocked();
   TestCameraObstruction();
   TestFirstPersonEyeFollowsCrouch();
+  TestAnalogGait();
+  TestGaitSpeedBlend();
+  TestCrispStop();
+  TestTurnSmoothingConverges();
+  TestQuickPivotIsFaster();
+  TestJumpBufferOnLanding();
+  TestCoyoteJump();
+  TestAnchorVerticalSmoothing();
+  TestLandingDip();
   TestViewModeToggleTransition();
 
   if (failures == 0) {
