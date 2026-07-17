@@ -245,6 +245,15 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
 
         Vec3 velocity{horizontal.x, vy, horizontal.z};
 
+        // --- external per-step acceleration (jetpack thrust, dashes) ----------
+        // Integrated on top of gravity + locomotion, before the mover consumes
+        // the velocity. Its vertical part competes with gravity (a jetpack must
+        // out-thrust weight to lift off) and the ground clamp below still stops
+        // any downward component, so this never bypasses fall/land handling.
+        const Vec3& ext = intent.external_acceleration;
+        if (std::isfinite(ext.x) && std::isfinite(ext.y) && std::isfinite(ext.z))
+          velocity += ext * dt;
+
         // --- Drive the controller --------------------------------------------
         Vec3 out_pos = center;
         bool grounded = false;
@@ -301,6 +310,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         intent.jump = false;
         intent.look_yaw_delta = 0;
         intent.look_pitch_delta = 0;
+        intent.external_acceleration = {0, 0, 0};  // re-staged each step by the game
       });
 }
 

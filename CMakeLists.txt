@@ -408,6 +408,16 @@ if(RX_BUILD_TESTS)
     add_test(NAME boat_profiles_test COMMAND boat_profiles_test)
   endif()
 
+  # Physics-driven tethered kite over the force-based flat-plate sail model:
+  # launch + stable overhead equilibrium in steady wind, descent + settle in dead
+  # air, left/right steering displacement, reel-in altitude change, tow-launch on
+  # apparent wind and NaN-free / tension-capped gusting. Headless, needs Jolt.
+  if(RX_JOLT)
+    add_executable(kite_test test/kite_test.cc)
+    target_link_libraries(kite_test PRIVATE rx::physics rx::core)
+    add_test(NAME kite_test COMMAND kite_test)
+  endif()
+
   add_executable(world_streaming_test test/world_streaming_test.cc)
   target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME world_streaming_test COMMAND world_streaming_test)
@@ -582,6 +592,16 @@ if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
   add_executable(character_test test/character_test.cc)
   target_link_libraries(character_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
   add_test(NAME character_test COMMAND character_test)
+endif()
+
+# rx::character jetpack over the character controller's velocity seam: full-burn
+# climb, fuel burn to empty + dead-stick fall, grounded-only refuel, spool lag to
+# 90%, airborne lateral thrust-vector authority and NaN-free / jump-still-works.
+# Headless (no GPU), needs Jolt.
+if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
+  add_executable(jetpack_test test/jetpack_test.cc)
+  target_link_libraries(jetpack_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
+  add_test(NAME jetpack_test COMMAND jetpack_test)
 endif()
 
 # install()/export rules, generated last so every module target (and the

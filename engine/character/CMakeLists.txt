@@ -6,5 +6,6 @@
 # drives — no game-specific policy lives here.
 rx_add_module(character
   character.cc
+  jetpack.cc
 )
 target_link_libraries(rx_character PUBLIC rx::core rx::ecs rx::scene rx::physics)

@@ -312,6 +312,7 @@ void DriveDemo::Create() {
   BuildWater();
   BuildWheelMesh();
   BuildBoatHull();
+  BuildKite();
 
   // Vendor models: the driveable car + plane visuals, and the parked showcase.
   LoadModel("assets/vehicles/CesiumMilkTruck.glb", /*skip_mesh_index=*/0, &car_model_);
@@ -364,6 +365,8 @@ void DriveDemo::Create() {
       active_ = Vehicle::kBoat;
     else if (!std::strcmp(v, "plane"))
       active_ = Vehicle::kPlane;
+    else if (!std::strcmp(v, "kite"))
+      active_ = Vehicle::kKite;
   } else if (StartBoat.get() || StartCargo.get() > 0.0f) {
     active_ = Vehicle::kBoat;  // a boat-capture env implies the boat is the subject
   }
@@ -377,11 +380,11 @@ void DriveDemo::Create() {
   }
 
   RX_INFO(
-      "drive demo: Tab cycle car/boat/plane, 1-6 car handling profile "
+      "drive demo: Tab cycle car/boat/plane/kite, 1-6 car handling profile "
       "(sports/muscle/hatch/suv/van/semi) or 1-5 boat profile "
       "(dinghy/speedboat/jetski/fishing/barge) + L cargo when the boat is active, "
-      "WASD drive/steer, arrows fly, Space handbrake/brakes, M manual, Shift/Ctrl shift, "
-      "F flaps, J rain, R reset, C chase/free camera");
+      "WASD drive/steer, arrows fly, kite A/D steer + W/S reel, Space handbrake/brakes, "
+      "M manual, Shift/Ctrl shift, F flaps, J rain, R reset, C chase/free camera");
 }
 
 void DriveDemo::BuildTerrain() {
@@ -625,6 +628,53 @@ void DriveDemo::BuildBoatHull() {
   boat_mesh_ = hull.id.hash;
 }
 
+void DriveDemo::BuildKite() {
+  // Bright delta/diamond sail in the body X-Y plane (belly normal +Z), authored
+  // double-sided so it reads from any angle overhead. Unit-ish diamond ~1.5 wide
+  // x 1.2 tall to match the KiteDesc sail.
+  asset::Material sail = SolidMaterial(ctx_, "drive/kite_sail", {0.92f, 0.30f, 0.10f}, 0.5f);
+  MeshBuild kb;
+  constexpr f32 hw = 0.75f, ht = 0.6f;  // half span (X), half height (Y)
+  const u32 nose = kb.Add({0.0f, ht, 0.0f}, 0.5f, 0.0f);
+  const u32 left = kb.Add({-hw, 0.1f, 0.0f}, 0.0f, 0.5f);
+  const u32 right = kb.Add({hw, 0.1f, 0.0f}, 1.0f, 0.5f);
+  const u32 tail = kb.Add({0.0f, -ht, 0.0f}, 0.5f, 1.0f);
+  kb.Tri(nose, right, tail);
+  kb.Tri(nose, tail, left);
+  kb.Tri(nose, tail, right);  // back faces (double-sided)
+  kb.Tri(nose, left, tail);
+  asset::Mesh mesh = FinishMesh(kb, "drive/kite_sail_mesh", sail.id);
+  if (!ctx_.config->headless) ctx_.renderer->UploadMesh(mesh);
+  kite_sail_mesh_ = mesh.id.hash;
+
+  // A plain unit cube (tinted per draw) stretched into the tail ribbon, the
+  // tether segment (a thin box chain is fine here) and the anchor post.
+  asset::Material rib = SolidMaterial(ctx_, "drive/kite_rib", {0.85f, 0.85f, 0.88f}, 0.6f);
+  asset::Mesh cube = asset::MakeCube(1.0f, asset::MakeAssetId("drive/kite_rib_mesh"));
+  for (asset::MeshLod& l : cube.lods) {
+    if (l.submeshes.empty())
+      l.submeshes.push_back({0, static_cast<u32>(l.indices.size()), rib.id});
+    else
+      l.submeshes[0].material = rib.id;
+  }
+  if (!ctx_.config->headless) ctx_.renderer->UploadMesh(cube);
+  kite_tail_mesh_ = cube.id.hash;
+
+  // Anchor the kite to a post on the sand ring, spawned near-taut a little
+  // downwind and low so the wind fills it and it climbs off the sand. The default
+  // wind (set below) blows +Z, the direction the launch attitude presents to.
+  const f32 gy = HeightAt(kite_anchor_.x, kite_anchor_.z);
+  kite_anchor_.y = gy + 1.6f;  // top of the post
+  kite_spawn_.y = gy + 0.6f;   // on the sand, downwind of the post
+  physics::KiteDesc kd;
+  kite_ = std::make_unique<physics::Kite>(*ctx_.physics, kd, kite_anchor_, kite_spawn_, 0.0f);
+
+  // A steady breeze so the kite auto-launches (and a gentle push on the boat's
+  // topsides / the plane's airmass; the J key still cycles rain wetness, which is
+  // unrelated). Along +Z, over the sand ring.
+  ctx_.physics->set_wind({0.0f, 0.0f, 7.0f});
+}
+
 bool DriveDemo::LoadModel(const std::string& path, i32 skip_mesh_index, Model* out) {
   asset::GltfScene scene;
   if (!asset::LoadGltfScene(path, &scene)) {
@@ -751,6 +801,7 @@ void DriveDemo::StepVehicles(f32 dt) {
   const bool car_on = active_ == Vehicle::kCar;
   const bool boat_on = active_ == Vehicle::kBoat;
   const bool plane_on = active_ == Vehicle::kPlane;
+  const bool kite_on = active_ == Vehicle::kKite;
 
   if (car_) {
     physics::PhysicsWorld::VehicleInput in;
@@ -790,6 +841,18 @@ void DriveDemo::StepVehicles(f32 dt) {
     }
     aircraft_->Update(ai, dt);
   }
+
+  // The kite keeps flying in the wind whether or not it is the active vehicle
+  // (like the idle boat keeps floating); only its control input is gated.
+  if (kite_ && kite_->valid()) {
+    physics::KiteInput ki;
+    if (kite_on) {
+      ki.steer = kite_steer_;
+      ki.reel = kite_reel_;
+    }
+    kite_->set_anchor(kite_anchor_);  // a fixed post
+    kite_->Update(ki, dt);
+  }
 }
 
 void DriveDemo::ResetActive() {
@@ -805,6 +868,11 @@ void DriveDemo::ResetActive() {
     ctx_.physics->SetBodyPosition(boat_->body(), boat_spawn_, up);
   } else if (active_ == Vehicle::kPlane && aircraft_ && aircraft_->valid()) {
     ctx_.physics->SetBodyPosition(aircraft_->body(), plane_spawn_, up);
+  } else if (active_ == Vehicle::kKite) {
+    // The Kite has no in-place reset; respawn it near-taut and low to re-launch.
+    if (kite_ && kite_->valid()) ctx_.physics->RemoveBody(kite_->body());
+    physics::KiteDesc kd;
+    kite_ = std::make_unique<physics::Kite>(*ctx_.physics, kd, kite_anchor_, kite_spawn_, 0.0f);
   }
   cam_init_ = false;
 }
@@ -886,7 +954,8 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
   // Discrete verbs (key edges, render cadence).
   if (allow_keyboard) {
     if (input.key_pressed(Key::kTab)) {
-      active_ = static_cast<Vehicle>((static_cast<u32>(active_) + 1) % 3);
+      active_ = static_cast<Vehicle>((static_cast<u32>(active_) + 1) %
+                                     static_cast<u32>(Vehicle::kCount));
       cam_init_ = false;
     }
     if (input.key_pressed(Key::kC)) free_cam_ = !free_cam_;
@@ -935,6 +1004,7 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
   car_throttle_ = car_steer_ = car_brake_ = car_handbrake_ = 0;
   boat_throttle_ = boat_steer_ = 0;
   plane_pitch_ = plane_roll_ = plane_rudder_ = plane_brakes_ = 0;
+  kite_steer_ = kite_reel_ = 0;
 
   if (active_ == Vehicle::kCar) {
     if (held(Key::kW)) car_throttle_ = 1.0f;
@@ -958,6 +1028,9 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     plane_roll_ = (held(Key::kArrowRight) ? 1.0f : 0.0f) - (held(Key::kArrowLeft) ? 1.0f : 0.0f);
     plane_rudder_ = (held(Key::kD) ? 1.0f : 0.0f) - (held(Key::kA) ? 1.0f : 0.0f);
     if (held(Key::kSpace)) plane_brakes_ = 1.0f;
+  } else if (active_ == Vehicle::kKite) {
+    kite_steer_ = (held(Key::kD) ? 1.0f : 0.0f) - (held(Key::kA) ? 1.0f : 0.0f);
+    kite_reel_ = (held(Key::kW) ? 1.0f : 0.0f) - (held(Key::kS) ? 1.0f : 0.0f);  // out / in
   }
 
   if (AutoThrottle) {
@@ -1056,6 +1129,26 @@ void DriveDemo::UpdateChaseCamera(f32 dt, const InputState& input, const ActionS
     rot = aircraft_->state().rotation;
     dist = 18.0f;
     height = 6.0f;
+  } else if (active_ == Vehicle::kKite && kite_ && kite_->valid()) {
+    // Frame BOTH the post and the (up to ~40 m high) kite: look at the midpoint
+    // from the upwind (-Z) side, backing off with the anchor->kite span so both
+    // stay in shot. Bespoke framing, then return (the vehicle chase math below
+    // assumes a forward-facing body, which a kite has not).
+    const Vec3 kp = kite_->state().position;
+    const Vec3 mid = (kite_anchor_ + kp) * 0.5f;
+    const f32 span = std::max(Length(kp - kite_anchor_), 6.0f);
+    const Vec3 desired_eye = mid + Vec3{span * 0.6f + 8.0f, span * 0.15f + 3.0f, -(span + 12.0f)};
+    const Vec3 desired_target = mid;
+    if (!cam_init_) {
+      cam_eye_ = desired_eye;
+      cam_target_ = desired_target;
+      cam_init_ = true;
+    } else {
+      const f32 a = 1.0f - std::exp(-dt / 0.2f);
+      cam_eye_ = Lerp(cam_eye_, desired_eye, a);
+      cam_target_ = Lerp(cam_target_, desired_target, a);
+    }
+    return;
   }
 
   const Vec3 fwd = Rotate(rot, {0, 0, 1});
@@ -1157,6 +1250,43 @@ void DriveDemo::Emit(f32 dt, render::FrameView& view) {
     }
   }
 
+  // Kite: the sail at its pose, a rendered tether from the post to the bridle, a
+  // short tail off the trailing edge, and the anchor post. The tether/tail/post
+  // are the unit ribbon cube stretched between two world points.
+  if (kite_ && kite_->valid()) {
+    // Draws kite_tail_mesh_ (a unit cube) as a `radius`-thick segment A->B.
+    auto segment = [&](const Vec3& a, const Vec3& b, f32 radius, u32 tint) {
+      const Vec3 d = b - a;
+      const f32 len = Length(d);
+      if (len < 1e-4f) return;
+      const Quat q = QuatBetween({0, 1, 0}, d * (1.0f / len));
+      render::DrawItem it{};
+      it.mesh = kite_tail_mesh_;
+      it.transform = MakeTransform((a + b) * 0.5f, q, 1.0f) * ScaleMat({radius, len, radius});
+      it.prev_transform = it.transform;
+      it.tint = tint;
+      view.draws.push_back(it);
+    };
+
+    const physics::KiteState& ks = kite_->state();
+    const Mat4 sail = MakeTransform(ks.position, ks.rotation, 1.0f);
+    render::DrawItem d{};
+    d.mesh = kite_sail_mesh_;
+    d.transform = sail;
+    d.prev_transform = sail;
+    view.draws.push_back(d);
+
+    // Tether: post top -> bridle point on the sail.
+    const Vec3 bridle = ks.position + Rotate(ks.rotation, kite_->desc().bridle_point);
+    segment(kite_anchor_, bridle, 0.03f, 0xDDDDDD);
+    // Short tail off the trailing edge (down body -Y).
+    const Vec3 tail_root = ks.position + Rotate(ks.rotation, {0.0f, -0.6f, 0.0f});
+    const Vec3 tail_tip = ks.position + Rotate(ks.rotation, {0.0f, -1.5f, 0.0f});
+    segment(tail_root, tail_tip, 0.05f, 0xF0C020);
+    // Anchor post: from the sand up to the post top.
+    segment({kite_anchor_.x, kite_anchor_.y - 1.6f, kite_anchor_.z}, kite_anchor_, 0.08f, 0x6B4A2B);
+  }
+
   // Parked material-showcase pieces.
   for (const auto& piece : showcase_) EmitModel(view, piece.first, piece.second);
 
@@ -1169,7 +1299,7 @@ void DriveDemo::DrawPanel() {
   ImGui::SetNextWindowSize(ImVec2(330, 340), ImGuiCond_FirstUseEver);
   ImGui::SetNextWindowPos(ImVec2(20, 20), ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Drive - vehicle gym")) {
-    const char* names[3] = {"CAR", "BOAT", "PLANE"};
+    const char* names[4] = {"CAR", "BOAT", "PLANE", "KITE"};
     ImGui::Text("active: %s   (Tab to cycle)", names[static_cast<u32>(active_)]);
     ImGui::Text("camera: %s (C)   wetness: %.0f%% (J)", free_cam_ ? "free-fly" : "chase",
                 wetness_ * 100.0f);
@@ -1220,6 +1350,14 @@ void DriveDemo::DrawPanel() {
       }
       if (as.over_mtom) ImGui::TextColored(ImVec4(1, 0.7f, 0.2f, 1), "OVERWEIGHT");
       ImGui::TextDisabled("W/S throttle  arrows pitch/roll  A/D rudder  F flaps  Space brakes");
+    } else if (active_ == Vehicle::kKite && kite_ && kite_->valid()) {
+      const physics::KiteState& ks = kite_->state();
+      const Vec3 w = ctx_.physics->wind();
+      ImGui::Text("altitude %.1f m   line %.1f m", ks.altitude_m, ks.line_length_m);
+      ImGui::Text("tension %.0f N   %s", ks.tension_n, ks.taut ? "taut" : "slack");
+      ImGui::Text("airspeed %.1f m/s   alpha %.0f deg", ks.airspeed_mps, ks.alpha_deg);
+      ImGui::Text("wind %.1f m/s", std::sqrt(w.x * w.x + w.y * w.y + w.z * w.z));
+      ImGui::TextDisabled("A/D steer   W/S reel out/in");
     }
   }
   ImGui::End();

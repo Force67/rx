@@ -7,6 +7,7 @@ if(RX_JOLT)
     boat_profiles.cc
     kinema_jolt.cc
     aircraft.cc
+    kite.cc
   )
   target_link_libraries(rx_physics PUBLIC rx::core rx::asset)
   # PRIVATE static archives, needed at final link. Wrapped in BUILD_INTERFACE so

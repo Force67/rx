@@ -13,6 +13,7 @@
 #include "engine_context.h"
 #include "physics/aircraft.h"
 #include "physics/boat.h"
+#include "physics/kite.h"
 #include "physics/physics_world.h"
 #include "render/core/renderer.h"
 
@@ -54,7 +55,7 @@ class DriveDemo {
   bool wants_mouse_capture() const { return false; }
 
  private:
-  enum class Vehicle : u32 { kCar, kBoat, kPlane, kCount };
+  enum class Vehicle : u32 { kCar, kBoat, kPlane, kKite, kCount };
 
   // A loaded vendor model flattened to (mesh hash, model-local transform) parts,
   // plus its model-space AABB for scale-to-fit framing. `loaded` is false when
@@ -70,6 +71,7 @@ class DriveDemo {
   void BuildWater();
   void BuildBoatHull();
   void BuildWheelMesh();
+  void BuildKite();  // sail + tether + post meshes, and the Kite itself
   void SpawnVehicles();
   void SetupAudio();
 
@@ -112,6 +114,7 @@ class DriveDemo {
   physics::VehicleId car_ = 0;
   std::unique_ptr<physics::Boat> boat_;
   std::unique_ptr<physics::Aircraft> aircraft_;
+  std::unique_ptr<physics::Kite> kite_;
   Vehicle active_ = Vehicle::kCar;
 
   // Active handling profile (0..5: sports/muscle/hatch/suv/van/semi) and the
@@ -157,6 +160,13 @@ class DriveDemo {
   u32 flap_step_ = 0;  // 0/1/2 -> 0 / 0.5 / 1
   f32 plane_flaps_ = 0;
 
+  // Kite: a tethered sail anchored to a fixed beach post on the sand ring. The
+  // demo sets a default wind so it auto-launches and climbs overhead.
+  f32 kite_steer_ = 0;   // -1..1 (A/D), two-line warp
+  f32 kite_reel_ = 0;    // -1..1 (W/S), reel out/in the line
+  Vec3 kite_anchor_{40, 0, 120};  // post top, world (y set to the sand at Create)
+  Vec3 kite_spawn_{40, 0, 144};   // near-taut downwind, low (y set at Create)
+
   u32 wetness_step_ = 0;  // 0/1/2 -> 0 / 0.5 / 1
   f32 wetness_ = 0;
 
@@ -173,6 +183,8 @@ class DriveDemo {
   Mat4 plane_norm_ = Mat4::Identity();
   u64 wheel_mesh_ = 0;    // engine-drawn suspension wheel cylinder
   u64 boat_mesh_ = 0;     // procedural painted hull (demo_ship style)
+  u64 kite_sail_mesh_ = 0;  // procedural coloured delta/diamond sail
+  u64 kite_tail_mesh_ = 0;  // thin ribbon segment for the tail + tether/post
   u64 graybox_car_ = 0;   // fallback chassis box when the truck .glb is absent
   u64 graybox_plane_ = 0;  // fallback fuselage box when the air .glb is absent
   f32 car_wheel_radius_ = 0.34f;

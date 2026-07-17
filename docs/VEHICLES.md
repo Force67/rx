@@ -392,6 +392,113 @@ the nose.
 
 ---
 
+## Kite
+
+![kite on the beach post](media/vehicles/drive_kite.jpg)
+
+
+`rx::physics::Kite` (`engine/physics/kite.{h,cc}`) — a force-based **tethered**
+kite simulator over one light dynamic sail body, layered on the same public
+`PhysicsWorld` primitives (`AddForceAtPoint` / `AddTorque` / `GetPointVelocity`)
+as the boat and aircraft. Unlike the boat it is **heavier-than-air**: the sail
+gets ordinary Jolt gravity with no buoyancy exemption, flying purely on
+aerodynamic lift. One `Kite` owns one sail body; the game moves an **anchor**
+world point each frame — a hand, a fixed post, or a towing vehicle — and drives
+the kite with a two-axis input (steer + reel), reading telemetry back for
+HUD/camera. Sail frame: it lies in the body X-Y plane, span along body X, nose
+toward +Y, tail toward −Y, belly normal along +Z. `KiteInput` is `steer`
+(`-1..1`) and `reel` (`-1..1`, `+` out / `−` in).
+
+### Aero model (`KiteDesc`)
+
+Flat-plate **normal-force** decomposition, chosen because it stays robust at
+every incidence — a kite trims at high alpha and has to survive tumbling and
+violent gusts without a lift/drag-direction singularity. The relative wind
+`w = wind − aero-centre point velocity` is split into a normal component
+(`wn = w·n`) and a tangential one; the pressure force is
+`F_n = 0.5·rho·A·cn·(w·n)·|w|` along the belly normal, so the effective
+coefficient `CN = cn·sin(alpha)` grows with incidence. Its vertical part is
+lift and its downwind part is drag — one inclined pressure force giving both,
+exactly like a sail (`normal_coeff` = `cn`). A small `tangential_coeff`
+skin/edge drag and a **tail** — a bluff `tail_drag` patch on a long `tail_length_m`
+lever down −Y — add the rest; the tail weathervanes the nose into the wind and
+damps yaw/roll/pitch oscillation.
+
+- **Attitude trim (why it flies belly-to-wind at high, not zero, alpha)** — a
+  real kite's bridle and camber hold the sail at a fixed high angle of attack
+  belly-*into*-the-wind instead of feathering or flipping. Modelled as a
+  restoring torque that aligns the belly normal (`+Z`) to a target computed each
+  step from a **low-pass of the apparent wind** (`wind_ref`): the direction that
+  sits at `trim_alpha_rad` (~23°) incidence belly-up — an unambiguous,
+  non-flippable target (a symmetric pitch-only trim has a second belly-down
+  equilibrium the tether could knock it into). The torque scales with
+  `attitude_stiffness · q_dyn`, so it is firm in wind and fades to nothing in
+  dead air (the sail goes limp and falls). It leaves rotation about the normal
+  free — that is what steering and the tail act on. Aiming the target off the
+  *mean* airmass rather than the instantaneous wind keeps the sail from chasing
+  its own fast motion and flipping during a launch.
+- **Bridle + pendulum** — `bridle_point` (the tether attach) is kept close to,
+  slightly below, the CoM: the attitude trim owns stability, and a long bridle
+  lever would let a tension spike (a taut-line snap, a fast tow) torque the sail
+  hard enough to flip it. `linear_damping` (whole-sail form drag on the body
+  velocity) bleeds the tangential swing as the kite arcs from launch up to its
+  equilibrium — zero at a stationary equilibrium, so it costs nothing in steady
+  flight and only kills the transient whip.
+
+### Tether
+
+A stiff **one-sided** spring (`tether_stiffness`, N/m — a string only pulls,
+never pushes) from the bridle point to the anchor, damped along the line
+(`tether_damping`, near-critical for the tiny sail mass so a taut line does not
+ring at 60 Hz). The rest length is reeled within `[min_line_m, max_line_m]`
+(`6..60` m, default `25`) at `reel_rate` (`2.5` m/s — modest, so the sail can
+physically follow the shortening line). Tension is **hard-capped** at
+`tether_max_tension` (`1500` N, sized well above the few-tens-of-N of steady
+flight): a one-sided spring against a fast-moving or towed anchor would
+otherwise inject an explosive impulse — this is the documented blow-up guard
+that keeps the kitesurf/tow case bounded and NaN-free.
+
+### Two-line steering
+
+`steer` models the stunt-kite line-warp as a moment about the **line-of-sight**
+(anchor→kite) axis, banking the sail so its lift vector carves a turn. It is
+scaled by dynamic pressure (`steer_authority` reads as an effective lever arm,
+m), so control authority vanishes as the wind dies — emergent loops and dives
+under steer in a good breeze, a limp fall in dead air.
+
+### Update-ordering & telemetry — `KiteState`
+
+Like the other force simulators, `Kite::Update(input, dt)` only stages this
+step's forces and **must** run before `PhysicsWorld::Update(dt)`, with
+`set_anchor()` already pointing at this step's anchor (call it every frame the
+anchor moves). Telemetry is refreshed from the pose sampled at the start of the
+step: `position`, `rotation`, `altitude_m` (sail height above the anchor),
+`tension_n` (`0` when slack), `taut`, `airspeed_mps` (`|relative wind|`),
+`alpha_deg` (incidence to the relative wind) and `line_length_m` (the current
+reel-adjustable rest length).
+
+### Measured behaviour
+
+From `test/kite_test.cc` (headless, ~1.5 m sport-kite defaults, flat ground,
+steady `set_wind`):
+
+| Scenario | Result |
+| --- | --- |
+| 8 m/s wind, 25 m line | Launches off the ground and climbs to a stable **overhead** equilibrium: altitude ~17–19 m (elevation ~50°), alpha ~26°, tension ~27–32 N, airspeed ~8 m/s, line taut. No oscillation — settles within ~15–20 s and holds a tight `[17.4, 19.1]` m band over 30 s. |
+| Wind → 0 | Sinks (form-drag damped) and settles on the ground (~0 m). |
+| Steer left vs right | ±4.1 m lateral displacement in 2 s, in opposite directions. |
+| Reel in (25 → 12.5 m line) | Altitude follows 17.4 → 11.5 m; the kite stays aloft. |
+| Anchor towed at 8 m/s in dead calm | Flies on apparent wind: altitude ~14.8 m, tension ~37 N. |
+| 60 s violent gusting + a jerked anchor | NaN-free throughout; tension never exceeds the 1500 N cap. |
+
+### Live in the demo
+
+**Tab** cycles to the kite as the 4th vehicle ("KITE" in the HUD). The demo
+sets a default ~7 m/s wind so it launches on its own. **A / D** steer, **W / S**
+reel in / out. `RX_DRIVE_VEHICLE=kite` picks it for headless captures.
+
+---
+
 ## Audio
 
 Procedural, headless-capable, NaN-free and bounded. The DSP is float, render-
