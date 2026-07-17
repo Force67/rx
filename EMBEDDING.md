@@ -40,6 +40,7 @@ Dependencies form a strict DAG - nothing links upward.
 | `rx::scene` | transform/renderable components (header-only) | core, asset |
 | `rx::render` | the renderer behind the RHI | core, asset |
 | `rx::physics` | Jolt-backed rigid bodies | core, asset |
+| `rx::character` | player-character locomotion + FP/TP camera modes | core, ecs, scene, physics |
 | `rx::anim` | pose + locomotion helpers | core, asset |
 | `rx::audio` | mixer + decoders + SDL output | core, asset |
 | `rx::app` | composition root: subsystem bringup + frame loop | all of the above |

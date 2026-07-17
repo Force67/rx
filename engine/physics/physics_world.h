@@ -159,6 +159,20 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   void MoveCharacterVelocity(CharacterId id, const Vec3& velocity, f32 dt, Vec3* out_position,
                              bool* out_grounded, Vec3* out_ground_velocity = nullptr);
   void SetCharacterPosition(CharacterId id, const Vec3& position);
+  // Capsule-centre position of a live controller. False for a dead handle.
+  bool GetCharacterPosition(CharacterId id, Vec3* out_position) const;
+  // Stair/slope locomotion tuning honoured by the Move* calls above.
+  // `max_slope_angle` (radians) is the steepest ground the controller treats as
+  // walkable (steeper contacts push it back instead of supporting it);
+  // `step_height` (metres) is the tallest ledge the stair-walking pass lifts
+  // over. Defaults match Jolt's stock controller (~50 deg, 0.4 m).
+  void ConfigureCharacter(CharacterId id, f32 max_slope_angle, f32 step_height);
+  // Swaps the controller's capsule to new dimensions in place. Returns false
+  // (leaving the old shape) when the new capsule would start out interpenetrating
+  // world geometry by more than a small margin, so a game can keep a taller
+  // stance until there is headroom. The capsule stays centred on the same
+  // position; callers that want feet-planted resizing adjust the position first.
+  bool SetCharacterShape(CharacterId id, f32 radius, f32 half_height);
 
   // Wheeled vehicle (Jolt VehicleConstraint + WheeledVehicleController): a
   // dynamic chassis box with four suspension wheels and an automatic
@@ -393,6 +407,14 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     f32 distance = 0;
   };
   bool Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out) const;
+
+  // Closest hit of a swept sphere of `radius` from `origin` along `direction`
+  // for up to `max_distance` metres. Used by third-person camera collision and
+  // the character controller's uncrouch headroom probe. `out->distance` is the
+  // travelled distance to first contact (0 when the sphere already overlaps at
+  // the origin); false when nothing is hit.
+  bool SphereCast(const Vec3& origin, const Vec3& direction, f32 max_distance, f32 radius,
+                  RayHit* out) const;
 
   // Pose of a (dynamic) body for ECS sync.
   bool GetBodyTransform(BodyId id, Vec3* position, f32 rotation[4]) const;

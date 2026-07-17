@@ -36,9 +36,16 @@ set(RX_DEPS_LIBDIR ${CMAKE_INSTALL_LIBDIR}/rx)
 set(RX_DEPS_INCDIR ${CMAKE_INSTALL_INCLUDEDIR}/rx-deps)
 
 # --- rx module targets + export set -----------------------------------------
-set(RX_MODULE_NAMES core ecs asset scene terrain render physics anim audio rpc app)
+set(RX_MODULE_NAMES core ecs asset scene terrain render physics anim audio rpc
+    character inventory inventory_world app)
 set(RX_INSTALL_TARGETS)
 foreach(_m ${RX_MODULE_NAMES})
+  # Some modules are conditional (inventory_world only when rx_physics exists);
+  # skip any whose target a given slice did not build so install() never
+  # references a missing target.
+  if(NOT TARGET rx_${_m})
+    continue()
+  endif()
   list(APPEND RX_INSTALL_TARGETS rx_${_m})
   # Export as rx::<m> (matching the in-tree rx::<m> alias) rather than the
   # default rx::rx_<m>.
