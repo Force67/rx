@@ -88,6 +88,9 @@ class BindlessRegistry {
   // The buffers must have been created with kBufferUsageDeviceAddress.
   u32 RegisterMesh(const GpuBuffer& vertices, const GpuBuffer& indices,
                    const GeometryRecord* geometries, u32 geometry_count);
+  // Returns a mesh/geometry table allocation to the free lists. The caller
+  // must wait until in-flight TLAS users of the index have completed.
+  void ReleaseMesh(u32 index);
 
   BindingLayoutHandle set_layout() const { return set_layout_; }
   BindingSetHandle set() const { return set_; }
@@ -103,10 +106,18 @@ class BindlessRegistry {
   GpuBuffer mesh_table_;      // host visible MeshRecord[]
   GpuBuffer geometry_table_;  // host visible GeometryRecord[]
   GpuBuffer material_table_;  // host visible MaterialRecord[]
+  struct GeometryRange {
+    u32 offset = 0;
+    u32 count = 0;
+  };
   u32 mesh_count_ = 0;
   u32 geometry_count_ = 0;
   u32 material_count_ = 0;
   u32 texture_count_ = 0;
+  base::Vector<u32> free_meshes_;
+  base::Vector<u8> active_meshes_;
+  base::Vector<u32> mesh_geometry_counts_;
+  base::Vector<GeometryRange> free_geometry_ranges_;
   base::Vector<u32> free_textures_;  // released slots, reused by RegisterTexture
 };
 

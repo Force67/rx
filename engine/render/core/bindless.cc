@@ -1,5 +1,6 @@
 #include "render/core/bindless.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "core/log.h"
@@ -95,30 +96,92 @@ u32 BindlessRegistry::RegisterMaterial(const MaterialRecord& record) {
 
 u32 BindlessRegistry::RegisterMesh(const GpuBuffer& vertices, const GpuBuffer& indices,
                                    const GeometryRecord* geometries, u32 geometry_count) {
-  if (mesh_count_ >= kMaxMeshes || geometry_count_ + geometry_count > kMaxGeometries) {
+  if ((free_meshes_.empty() && mesh_count_ >= kMaxMeshes) ||
+      geometry_count > kMaxGeometries) {
     RX_WARN("bindless mesh tables full");
     return kInvalidIndex;
+  }
+  u32 geometry_offset = geometry_count_;
+  size_t free_range = free_geometry_ranges_.size();
+  for (size_t i = 0; i < free_geometry_ranges_.size(); ++i) {
+    if (free_geometry_ranges_[i].count >= geometry_count) {
+      geometry_offset = free_geometry_ranges_[i].offset;
+      free_range = i;
+      break;
+    }
+  }
+  if (free_range == free_geometry_ranges_.size() &&
+      geometry_count_ + geometry_count > kMaxGeometries) {
+    RX_WARN("bindless geometry table full");
+    return kInvalidIndex;
+  }
+  if (free_range != free_geometry_ranges_.size()) {
+    GeometryRange& range = free_geometry_ranges_[free_range];
+    range.offset += geometry_count;
+    range.count -= geometry_count;
+    if (range.count == 0) free_geometry_ranges_.erase(free_range);
+  } else {
+    geometry_count_ += geometry_count;
+  }
+  u32 index = 0;
+  if (!free_meshes_.empty()) {
+    index = free_meshes_.back();
+    free_meshes_.pop_back();
+  } else {
+    index = mesh_count_++;
+    active_meshes_.resize(mesh_count_);
+    mesh_geometry_counts_.resize(mesh_count_);
   }
   MeshRecord record;
   record.vertex_address = vertices.address;
   record.index_address = indices.address;
-  record.geometry_offset = geometry_count_;
+  record.geometry_offset = geometry_offset;
   // Mirror the buffers into the geometry buffer array for the DXIL readers.
-  record.vertex_srv = 2 * mesh_count_;
-  record.index_srv = 2 * mesh_count_ + 1;
+  record.vertex_srv = 2 * index;
+  record.index_srv = 2 * index + 1;
   BindingItem vertex_srv = Bind::ByteBuffer(kGeometryBufferBinding, vertices);
   vertex_srv.array_index = record.vertex_srv;
   BindingItem index_srv = Bind::ByteBuffer(kGeometryBufferBinding, indices);
   index_srv.array_index = record.index_srv;
   device_.UpdateBindingSet(set_, {vertex_srv, index_srv});
-  std::memcpy(static_cast<u8*>(geometry_table_.mapped) +
-                  geometry_count_ * sizeof(GeometryRecord),
-              geometries, geometry_count * sizeof(GeometryRecord));
-  geometry_count_ += geometry_count;
-  u32 index = mesh_count_++;
+  if (geometry_count != 0) {
+    std::memcpy(static_cast<u8*>(geometry_table_.mapped) +
+                    geometry_offset * sizeof(GeometryRecord),
+                geometries, geometry_count * sizeof(GeometryRecord));
+  }
   std::memcpy(static_cast<u8*>(mesh_table_.mapped) + index * sizeof(MeshRecord), &record,
               sizeof(record));
+  active_meshes_[index] = 1;
+  mesh_geometry_counts_[index] = geometry_count;
   return index;
+}
+
+void BindlessRegistry::ReleaseMesh(u32 index) {
+  if (index >= mesh_count_ || !active_meshes_[index]) return;
+  auto* record = reinterpret_cast<MeshRecord*>(
+      static_cast<u8*>(mesh_table_.mapped) + index * sizeof(MeshRecord));
+  const u32 geometry_count = mesh_geometry_counts_[index];
+  if (geometry_count != 0) {
+    free_geometry_ranges_.push_back({record->geometry_offset, geometry_count});
+    std::sort(free_geometry_ranges_.begin(), free_geometry_ranges_.end(),
+              [](const GeometryRange& a, const GeometryRange& b) {
+                return a.offset < b.offset;
+              });
+    for (size_t i = 1; i < free_geometry_ranges_.size();) {
+      GeometryRange& previous = free_geometry_ranges_[i - 1];
+      const GeometryRange current = free_geometry_ranges_[i];
+      if (previous.offset + previous.count == current.offset) {
+        previous.count += current.count;
+        free_geometry_ranges_.erase(i);
+      } else {
+        ++i;
+      }
+    }
+  }
+  *record = {};
+  active_meshes_[index] = 0;
+  mesh_geometry_counts_[index] = 0;
+  free_meshes_.push_back(index);
 }
 
 BindlessRegistry::~BindlessRegistry() {

@@ -36,7 +36,7 @@ set(RX_DEPS_LIBDIR ${CMAKE_INSTALL_LIBDIR}/rx)
 set(RX_DEPS_INCDIR ${CMAKE_INSTALL_INCLUDEDIR}/rx-deps)
 
 # --- rx module targets + export set -----------------------------------------
-set(RX_MODULE_NAMES core ecs asset scene render physics anim audio rpc app)
+set(RX_MODULE_NAMES core ecs asset scene terrain render physics anim audio rpc app)
 set(RX_INSTALL_TARGETS)
 foreach(_m ${RX_MODULE_NAMES})
   list(APPEND RX_INSTALL_TARGETS rx_${_m})

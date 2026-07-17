@@ -31,13 +31,14 @@ endif()
 add_executable(rx_editor
   main.cc
   editor_app.cc
+  editor_terrain.cc
   editor_ui.cc
   editor_input.cc
   fly_camera.cc
   ugui_backend.cc)
 
 target_link_libraries(rx_editor PRIVATE
-  rx::app rx::edit rx::render rx::asset rx::scene rx::ecs rx::core
+  rx::app rx::edit rx::terrain rx::render rx::asset rx::scene rx::ecs rx::core
   ultragui)
 
 target_compile_definitions(rx_editor PRIVATE

@@ -32,21 +32,21 @@ struct SkinnedVertexExtra {
 // Position deltas are always present; normal/tangent deltas are empty when the
 // source carries none. Deltas apply before skinning, in mesh space.
 struct MorphTarget {
-  std::string name;   // source target name (e.g. "jawOpen"), empty if unnamed
-  u64 name_hash = 0;  // MakeAssetId(name).hash, 0 when unnamed
-  base::Vector<f32> position_deltas;  // 3 floats per lod 0 vertex
-  base::Vector<f32> normal_deltas;    // 3 floats per vertex, or empty
-  base::Vector<f32> tangent_deltas;   // 3 floats per vertex, or empty
+  std::string name;  // source target name (e.g. "jawOpen"), empty if unnamed
+  u64 name_hash = 0; // MakeAssetId(name).hash, 0 when unnamed
+  base::Vector<f32> position_deltas; // 3 floats per lod 0 vertex
+  base::Vector<f32> normal_deltas;   // 3 floats per vertex, or empty
+  base::Vector<f32> tangent_deltas;  // 3 floats per vertex, or empty
 };
 
 // Keyframed weight animation over a mesh's morph targets (a glTF "weights"
 // channel). weights holds one row of morph_targets.size() values per key.
 struct MorphAnimation {
   std::string name;
-  f32 duration = 0;   // seconds, last key time
-  bool step = false;  // hold each key instead of lerping (STEP interpolation)
+  f32 duration = 0;  // seconds, last key time
+  bool step = false; // hold each key instead of lerping (STEP interpolation)
   base::Vector<f32> times;
-  base::Vector<f32> weights;  // times.size() * target count
+  base::Vector<f32> weights; // times.size() * target count
 };
 
 struct Submesh {
@@ -67,19 +67,19 @@ struct MeshLod {
 // simulation per placed instance and draws camera-facing billboards; an
 // instance's transform maps positions/velocities into engine world space.
 struct ParticleEmitter {
-  f32 position[3] = {0, 0, 0};  // emit volume center
-  f32 velocity[3] = {0, 0, 0};  // mean birth velocity, units/sec
-  f32 extent[3] = {0, 0, 0};    // emit volume half extents (axis aligned)
-  f32 gravity[3] = {0, 0, 0};   // acceleration, units/sec^2
-  f32 spread = 0;               // birth direction cone half angle, radians
-  f32 speed_variation = 0;      // +- units/sec around |velocity|
-  f32 rate = 12;                // births/sec
-  f32 life = 1;                 // seconds
+  f32 position[3] = {0, 0, 0}; // emit volume center
+  f32 velocity[3] = {0, 0, 0}; // mean birth velocity, units/sec
+  f32 extent[3] = {0, 0, 0};   // emit volume half extents (axis aligned)
+  f32 gravity[3] = {0, 0, 0};  // acceleration, units/sec^2
+  f32 spread = 0;              // birth direction cone half angle, radians
+  f32 speed_variation = 0;     // +- units/sec around |velocity|
+  f32 rate = 12;               // births/sec
+  f32 life = 1;                // seconds
   f32 life_variation = 0;
-  f32 size = 8;                 // billboard radius at birth
-  f32 color[4] = {1, 1, 1, 1};  // additive: radiance; alpha: tint + opacity
+  f32 size = 8;                // billboard radius at birth
+  f32 color[4] = {1, 1, 1, 1}; // additive: radiance; alpha: tint + opacity
   u32 max_particles = 64;
-  bool additive = false;  // additive blend (fire/glow) vs lit alpha (smoke)
+  bool additive = false; // additive blend (fire/glow) vs lit alpha (smoke)
   // Effect texture bound on the billboards. At parse time this is the texture
   // asset hash; the renderer rewrites it to a bindless index at upload. 0 = the
   // procedural (untextured) billboard look.
@@ -93,7 +93,8 @@ struct ParticleEmitter {
   // BSPSysSimpleColorModifier: three colours across the particle's life plus an
   // alpha fade in/out. When set, the sim tints/fades by this instead of the
   // fixed class colour. keys are life fractions (0 birth .. 1 death): fade-in
-  // end, fade-out start, colour1 end, colour2 start, colour2 end, colour3 start.
+  // end, fade-out start, colour1 end, colour2 start, colour2 end, colour3
+  // start.
   bool has_color_ramp = false;
   f32 ramp_color[3][4] = {{1, 1, 1, 1}, {1, 1, 1, 1}, {1, 1, 1, 1}};
   f32 ramp_key[6] = {0, 1, 0.33f, 0.33f, 0.66f, 0.66f};
@@ -107,6 +108,8 @@ struct Mesh {
   // Kept out of acceleration structures: dense fill geometry like grass
   // would bloat the tlas and add ray noise without visual benefit.
   bool exclude_from_rt = false;
+  // Vertex positions may be replaced after upload without changing topology.
+  bool dynamic_vertices = false;
   // Distant terrain LOD proxy (.btr): sunk under the full-detail land where
   // cells are streamed in, so the coarse grid never bridges above it.
   bool terrain_lod = false;
@@ -123,12 +126,13 @@ struct Mesh {
 
   i32 FindMorphTarget(u64 name_hash) const {
     for (u32 i = 0; i < morph_targets.size(); ++i) {
-      if (morph_targets[i].name_hash == name_hash) return static_cast<i32>(i);
+      if (morph_targets[i].name_hash == name_hash)
+        return static_cast<i32>(i);
     }
     return -1;
   }
 };
 
-}  // namespace rx::asset
+} // namespace rx::asset
 
-#endif  // RX_ASSET_MESH_H_
+#endif // RX_ASSET_MESH_H_

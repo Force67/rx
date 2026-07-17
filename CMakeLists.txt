@@ -217,6 +217,7 @@ if(NOT DEFINED RX_MODULES)
     ecs
     asset
     scene
+    terrain
     edit
     render
     physics
@@ -342,6 +343,12 @@ if(RX_BUILD_TESTS)
   add_executable(world_streaming_test test/world_streaming_test.cc)
   target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME world_streaming_test COMMAND world_streaming_test)
+
+  if("terrain" IN_LIST RX_MODULES)
+    add_executable(terrain_test test/terrain_test.cc)
+    target_link_libraries(terrain_test PRIVATE rx::terrain rx::asset rx::scene rx::core)
+    add_test(NAME terrain_test COMMAND terrain_test)
+  endif()
 
   add_executable(cloth_collision_test
     test/cloth_collision_test.cc
