@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+
+#include <base/option.h>
 
 #include "asset/asset_id.h"
 #include "asset/gltf_loader.h"
@@ -28,6 +31,12 @@ namespace {
 
 constexpr f32 kPi = 3.14159265358979f;
 constexpr f32 kHalfPi = kPi * 0.5f;
+
+// Capture hooks for headless screenshots / CI runs: pick the initially active
+// vehicle ("car"/"boat"/"plane") and optionally hold full throttle (rotating
+// the plane past Vr) so motion shots need no live input.
+base::Option<const char*> StartVehicle{"drive.vehicle", nullptr, "RX_DRIVE_VEHICLE"};
+base::Option<bool> AutoThrottle{"drive.auto", false, "RX_DRIVE_AUTO"};
 
 // --- terrain layout (world XZ, metres) -------------------------------------
 constexpr f32 kTerrainSize = 400.0f;
@@ -269,6 +278,13 @@ void DriveDemo::Create() {
 
   SpawnVehicles();
   SetupAudio();
+
+  if (const char* v = StartVehicle.get()) {
+    if (!std::strcmp(v, "boat"))
+      active_ = Vehicle::kBoat;
+    else if (!std::strcmp(v, "plane"))
+      active_ = Vehicle::kPlane;
+  }
 
   // Physics-coupled vehicle stepping: stage this step's inputs/forces BEFORE the
   // world advances (kPreSim runs ahead of the host's kSim physics system).
@@ -606,9 +622,13 @@ void DriveDemo::SpawnVehicles() {
 
   // Plane at the runway threshold; spawn ~0.25 m above rest and let the gear
   // settle. The default 220 kg payload leaves too little excess power (the plane
-  // barely climbs and porpoises), so lighten it for a clean demo climb.
+  // barely climbs and porpoises), so lighten it for a clean demo climb, and give
+  // it a C182-class engine: the default 180 hp needs ~340 m of ground roll even
+  // with flaps, more than the runway leaves past the spawn point.
   physics::AircraftDesc ad;
   ad.payload_kg = 120.0f;
+  ad.prop_max_power_w = 175000.0f;
+  ad.prop_static_thrust_cap_n = 3400.0f;
   plane_spawn_.y = HeightAt(plane_spawn_.x, plane_spawn_.z) + 1.4f;
   aircraft_ = std::make_unique<physics::Aircraft>(phys, ad, plane_spawn_, plane_yaw_);
 }
@@ -757,6 +777,27 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     plane_roll_ = (held(Key::kArrowRight) ? 1.0f : 0.0f) - (held(Key::kArrowLeft) ? 1.0f : 0.0f);
     plane_rudder_ = (held(Key::kD) ? 1.0f : 0.0f) - (held(Key::kA) ? 1.0f : 0.0f);
     if (held(Key::kSpace)) plane_brakes_ = 1.0f;
+  }
+
+  if (AutoThrottle) {
+    if (active_ == Vehicle::kCar) {
+      car_throttle_ = 1.0f;
+    } else if (active_ == Vehicle::kBoat) {
+      boat_throttle_ = 1.0f;
+    } else if (active_ == Vehicle::kPlane) {
+      plane_throttle_ = 1.0f;
+      plane_flaps_ = 0.5f;  // takeoff flaps shorten the roll to fit the runway
+      if (aircraft_ && aircraft_->valid()) {
+        // Rotate firmly, then ease to light back pressure once airborne so the
+        // capture climbs out shallow instead of pulling into a stall.
+        const physics::AircraftState& st = aircraft_->state();
+        if (st.on_ground) {
+          if (st.airspeed_mps > 28.0f) plane_pitch_ = 0.5f;
+        } else {
+          plane_pitch_ = st.vertical_speed_mps > 4.0f ? 0.0f : 0.15f;
+        }
+      }
+    }
   }
 
   UpdateChaseCamera(dt, input, actions, allow_keyboard, allow_mouse);

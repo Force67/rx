@@ -271,6 +271,10 @@ telemetry inside the physics loop.
 
 ## The demo (`--demo drive`)
 
+![Milk truck sliding across the ice patch](media/vehicles/drive_car.jpg)
+![Boat planing across the lake](media/vehicles/drive_boat.jpg)
+![Plane airborne after an auto-throttle takeoff](media/vehicles/drive_plane.jpg)
+
 A graybox showcase of all three simulators and the surface system in one scene.
 
 **Scene** — a ~400 × 400 m heightfield, grass by default, with:
@@ -300,6 +304,14 @@ when the assets are absent.
 | **J** | Cycle rain wetness 0 / 0.5 / 1 |
 | **R** | Reset the active vehicle |
 | **C** | Chase / free camera |
+
+### Headless captures
+
+`RX_DRIVE_VEHICLE=car|boat|plane` picks the initially active vehicle and
+`RX_DRIVE_AUTO=1` holds full throttle on it (takeoff flaps + a rotate/ease
+elevator schedule for the plane), so screenshot/CI runs show motion without
+input. Combine with `RX_HIDE_DEBUG_UI=1` and the usual `RX_UI_SHOT` /
+`RX_UI_SHOT_FRAMES` to take the shots above.
 
 ---
 
