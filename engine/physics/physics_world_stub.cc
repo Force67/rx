@@ -37,8 +37,19 @@ JointId PhysicsWorld::AddHingeJoint(BodyId, BodyId, const f32[12], const f32[12]
 void PhysicsWorld::EnableJointMotors(JointId, f32, f32) {}
 void PhysicsWorld::SetJointMotorTarget(JointId, const f32[4]) {}
 bool PhysicsWorld::GetJointOrientation(JointId, f32[4]) const { return false; }
+void PhysicsWorld::SetJointMotorTorqueLimit(JointId, f32) {}
+void PhysicsWorld::DisableJointMotors(JointId) {}
 void PhysicsWorld::ApplyImpulse(BodyId, const Vec3&) {}
 void PhysicsWorld::SetBodyKinematic(BodyId) {}
+bool PhysicsWorld::GetBodyVelocity(BodyId, Vec3*, Vec3*) const { return false; }
+f32 PhysicsWorld::GetBodyMass(BodyId) const { return 0; }
+bool PhysicsWorld::GetBodyCenterOfMass(BodyId, Vec3*) const { return false; }
+void PhysicsWorld::ApplyForce(BodyId, const Vec3&) {}
+void PhysicsWorld::ApplyTorque(BodyId, const Vec3&) {}
+Vec3 PhysicsWorld::gravity() const { return {0, -9.81f, 0}; }
+void PhysicsWorld::WatchBodyContacts(BodyId) {}
+void PhysicsWorld::UnwatchBodyContacts(BodyId) {}
+u32 PhysicsWorld::GetBodyContacts(BodyId, BodyContact*, u32) const { return 0; }
 BodyId PhysicsWorld::AddDynamicSphere(const Vec3&, f32, f32, const Vec3&) { return 0; }
 BodyId PhysicsWorld::AddKinematicCapsule(const Vec3&, f32, f32) { return 0; }
 BodyId PhysicsWorld::AddKinematicBox(const Vec3&, const Vec3&) { return 0; }

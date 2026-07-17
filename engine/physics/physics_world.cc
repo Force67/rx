@@ -5,6 +5,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <limits>
+#include <mutex>
 
 #include <Jolt/Jolt.h>
 
@@ -17,6 +18,8 @@
 #include <Jolt/Physics/Character/CharacterVirtual.h>
 #include <Jolt/Physics/Collision/CastResult.h>
 #include <Jolt/Physics/Collision/CollisionCollectorImpl.h>
+#include <Jolt/Physics/Collision/ContactListener.h>
+#include <Jolt/Physics/Collision/EstimateCollisionResponse.h>
 #include <Jolt/Physics/Collision/ShapeCast.h>
 #include <Jolt/Physics/Collision/Shape/CapsuleShape.h>
 #include <Jolt/Physics/Collision/NarrowPhaseQuery.h>
@@ -217,6 +220,87 @@ struct PhysicsWorld::Impl {
     base::Vector<f32> collision_inverse_masses;
   };
   base::Vector<ClothEntry> cloth;
+
+  // Recorded contacts for a watched body, buffer reused across steps.
+  struct WatchedContacts {
+    JPH::BodyID body;
+    base::Vector<PhysicsWorld::BodyContact> contacts;
+  };
+  // Jolt contact listener that records manifolds touching any watched body.
+  // Callbacks fire concurrently from the physics job threads, so every access
+  // to `watched` (recording, clearing, watch/unwatch, reading) takes `mutex`.
+  struct ContactRecorder final : public JPH::ContactListener {
+    std::mutex mutex;
+    base::Vector<WatchedContacts> watched;
+
+    // Caller must hold `mutex`.
+    WatchedContacts* Find(JPH::BodyID id) {
+      for (WatchedContacts& w : watched) {
+        if (w.body == id) return &w;
+      }
+      return nullptr;
+    }
+
+    void Record(const JPH::Body& body1, const JPH::Body& body2,
+                const JPH::ContactManifold& manifold, const JPH::ContactSettings& settings) {
+      std::lock_guard<std::mutex> guard(mutex);
+      if (watched.empty()) return;
+      WatchedContacts* w1 = Find(body1.GetID());
+      WatchedContacts* w2 = Find(body2.GetID());
+      if (!w1 && !w2) return;
+
+      // World contact point: average of the manifold points on body 1's
+      // surface (they coincide with body 2's when there is no penetration).
+      const JPH::uint count = manifold.mRelativeContactPointsOn1.size();
+      JPH::RVec3 accum = JPH::RVec3::sZero();
+      for (JPH::uint i = 0; i < count; ++i) accum += manifold.GetWorldSpaceContactPointOn1(i);
+      if (count > 0) accum /= static_cast<f32>(count);
+      const Vec3 position{static_cast<f32>(accum.GetX()), static_cast<f32>(accum.GetY()),
+                          static_cast<f32>(accum.GetZ())};
+
+      // mWorldSpaceNormal points from body 1 toward body 2. We store a normal
+      // pointing INTO the watched body: keep it for the watched body 2, flip it
+      // for the watched body 1 (so a foot resting on the floor reads +Y).
+      const JPH::Vec3 normal = manifold.mWorldSpaceNormal;
+
+      // Estimated normal impulse (kg*m/s), summed over the manifold points.
+      JPH::CollisionEstimationResult estimate;
+      JPH::EstimateCollisionResponse(body1, body2, manifold, estimate, settings.mCombinedFriction,
+                                     settings.mCombinedRestitution);
+      f32 impulse = 0;
+      for (f32 point_impulse : estimate.mContactImpulse) impulse += point_impulse;
+      impulse = std::abs(impulse);
+
+      if (w1) {
+        PhysicsWorld::BodyContact contact;
+        contact.position = position;
+        contact.normal = {-normal.GetX(), -normal.GetY(), -normal.GetZ()};
+        contact.impulse = impulse;
+        contact.other = body2.GetID().GetIndexAndSequenceNumber() + 1;
+        w1->contacts.push_back(contact);
+      }
+      if (w2) {
+        PhysicsWorld::BodyContact contact;
+        contact.position = position;
+        contact.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
+        contact.impulse = impulse;
+        contact.other = body1.GetID().GetIndexAndSequenceNumber() + 1;
+        w2->contacts.push_back(contact);
+      }
+    }
+
+    void OnContactAdded(const JPH::Body& body1, const JPH::Body& body2,
+                        const JPH::ContactManifold& manifold,
+                        JPH::ContactSettings& settings) override {
+      Record(body1, body2, manifold, settings);
+    }
+    void OnContactPersisted(const JPH::Body& body1, const JPH::Body& body2,
+                            const JPH::ContactManifold& manifold,
+                            JPH::ContactSettings& settings) override {
+      Record(body1, body2, manifold, settings);
+    }
+  };
+  ContactRecorder contacts;
 };
 
 PhysicsWorld::PhysicsWorld() = default;
@@ -238,7 +322,8 @@ bool PhysicsWorld::Initialize() {
 
   impl_ = std::make_unique<Impl>();
   // Large cloth batches can exceed the fixed arena. The normal path remains a
-  // lock-free stack allocation; exceptional peaks fall back instead of aborting.
+  // lock-free stack allocation; exceptional peaks fall back instead of
+  // aborting.
   impl_->temp_allocator =
       std::make_unique<JPH::TempAllocatorImplWithMallocFallback>(32 * 1024 * 1024);
   impl_->job_system = std::make_unique<JPH::JobSystemThreadPool>(
@@ -249,12 +334,21 @@ bool PhysicsWorld::Initialize() {
   impl_->system->Init(65536, 0, 65536, 10240, impl_->broad_phase_layers,
                       impl_->object_vs_broad_phase, impl_->object_layer_pair);
   impl_->system->SetGravity({0, -9.81f, 0});
+  // Records contacts for watched bodies (feet) into impl_->contacts.
+  impl_->system->SetContactListener(&impl_->contacts);
   RX_INFO("jolt physics initialized");
   return true;
 }
 
 void PhysicsWorld::Update(f32 dt) {
   if (!impl_) return;
+
+  // Drop last step's recorded contacts before the listener refills them during
+  // this step's collision detection; the buffers keep their capacity.
+  {
+    std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+    for (Impl::WatchedContacts& entry : impl_->contacts.watched) entry.contacts.clear();
+  }
 
   // Buoyancy before the step, the Jolt water sample scheme: any awake
   // dynamic body below its local water surface gets buoyancy + drag.
@@ -832,6 +926,32 @@ bool PhysicsWorld::GetJointOrientation(JointId joint, f32 out_quat[4]) const {
   return true;
 }
 
+void PhysicsWorld::SetJointMotorTorqueLimit(JointId joint, f32 max_torque) {
+  if (!impl_ || joint == 0 || joint > impl_->joints.size()) return;
+  Impl::JointEntry& entry = impl_->joints[joint - 1];
+  if (entry.hinge) {
+    auto* hinge = static_cast<JPH::HingeConstraint*>(entry.constraint.GetPtr());
+    hinge->GetMotorSettings().SetTorqueLimit(max_torque);
+  } else {
+    auto* st = static_cast<JPH::SwingTwistConstraint*>(entry.constraint.GetPtr());
+    st->GetSwingMotorSettings().SetTorqueLimit(max_torque);
+    st->GetTwistMotorSettings().SetTorqueLimit(max_torque);
+  }
+}
+
+void PhysicsWorld::DisableJointMotors(JointId joint) {
+  if (!impl_ || joint == 0 || joint > impl_->joints.size()) return;
+  Impl::JointEntry& entry = impl_->joints[joint - 1];
+  if (entry.hinge) {
+    static_cast<JPH::HingeConstraint*>(entry.constraint.GetPtr())
+        ->SetMotorState(JPH::EMotorState::Off);
+  } else {
+    auto* st = static_cast<JPH::SwingTwistConstraint*>(entry.constraint.GetPtr());
+    st->SetSwingMotorState(JPH::EMotorState::Off);
+    st->SetTwistMotorState(JPH::EMotorState::Off);
+  }
+}
+
 void PhysicsWorld::ApplyImpulse(BodyId id, const Vec3& impulse) {
   if (!impl_ || id == 0) return;
   JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
@@ -845,6 +965,69 @@ void PhysicsWorld::SetBodyKinematic(BodyId id) {
   JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
   impl_->system->GetBodyInterface().SetMotionType(body, JPH::EMotionType::Kinematic,
                                                   JPH::EActivation::Activate);
+}
+
+bool PhysicsWorld::GetBodyVelocity(BodyId id, Vec3* linear, Vec3* angular) const {
+  if (!impl_ || id == 0) return false;
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  if (!bodies.IsAdded(body)) return false;
+  if (linear) {
+    const JPH::Vec3 v = bodies.GetLinearVelocity(body);
+    *linear = {v.GetX(), v.GetY(), v.GetZ()};
+  }
+  if (angular) {
+    const JPH::Vec3 v = bodies.GetAngularVelocity(body);
+    *angular = {v.GetX(), v.GetY(), v.GetZ()};
+  }
+  return true;
+}
+
+f32 PhysicsWorld::GetBodyMass(BodyId id) const {
+  if (!impl_ || id == 0) return 0;
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  JPH::BodyLockRead lock(impl_->system->GetBodyLockInterface(), body);
+  if (!lock.Succeeded()) return 0;
+  // Static bodies have no motion properties; kinematic bodies report inverse
+  // mass 0. Both are "infinite mass" and read back as 0.
+  const JPH::MotionProperties* motion = lock.GetBody().GetMotionProperties();
+  if (!motion) return 0;
+  const f32 inverse_mass = motion->GetInverseMass();
+  return inverse_mass > 0 ? 1.0f / inverse_mass : 0;
+}
+
+bool PhysicsWorld::GetBodyCenterOfMass(BodyId id, Vec3* out) const {
+  if (!impl_ || id == 0) return false;
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  if (!bodies.IsAdded(body)) return false;
+  if (out) {
+    const JPH::RVec3 c = bodies.GetCenterOfMassPosition(body);
+    *out = {static_cast<f32>(c.GetX()), static_cast<f32>(c.GetY()), static_cast<f32>(c.GetZ())};
+  }
+  return true;
+}
+
+void PhysicsWorld::ApplyForce(BodyId id, const Vec3& force) {
+  if (!impl_ || id == 0) return;
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  bodies.ActivateBody(body);
+  bodies.AddForce(body, ToJolt(force));
+}
+
+void PhysicsWorld::ApplyTorque(BodyId id, const Vec3& torque) {
+  if (!impl_ || id == 0) return;
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  bodies.ActivateBody(body);
+  bodies.AddTorque(body, ToJolt(torque));
+}
+
+Vec3 PhysicsWorld::gravity() const {
+  if (!impl_) return {0, -9.81f, 0};
+  const JPH::Vec3 g = impl_->system->GetGravity();
+  return {g.GetX(), g.GetY(), g.GetZ()};
 }
 
 BodyId PhysicsWorld::AddDynamicBox(const Vec3& position, const Vec3& half_extent, f32 density,
@@ -991,8 +1174,8 @@ bool PhysicsWorld::SphereCast(const Vec3& origin, const Vec3& direction, f32 max
                              JPH::RMat44::sTranslation(ToJolt(origin)),
                              ToJolt(dir) * max_distance);
   JPH::ShapeCastSettings settings;
-  // Treat back-facing triangles as solid so a sphere starting just inside a wall
-  // still reports the near surface (camera pulls forward reliably).
+  // Treat back-facing triangles as solid so a sphere starting just inside a
+  // wall still reports the near surface (camera pulls forward reliably).
   settings.mBackFaceModeTriangles = JPH::EBackFaceMode::CollideWithBackFaces;
   JPH::ClosestHitCollisionCollector<JPH::CastShapeCollector> collector;
   impl_->system->GetNarrowPhaseQuery().CastShape(shape_cast, settings, JPH::RVec3::sZero(),
@@ -1707,7 +1890,9 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   detail::ClothTopology topology;
   if (!detail::BuildClothTopology(positions.data(), desc.vertex_count, desc.indices,
                                   desc.index_count, &topology)) {
-    RX_WARN("cloth rejected: topology is degenerate, duplicated, non-manifold or mis-wound");
+    RX_WARN(
+        "cloth rejected: topology is degenerate, duplicated, non-manifold "
+        "or mis-wound");
     return 0;
   }
   const bool pressure_capable = topology.closed && topology.component_count == 1 &&
@@ -2196,6 +2381,41 @@ bool PhysicsWorld::GetBodyTransform(BodyId id, Vec3* position, f32 rotation[4]) 
   rotation[2] = q.GetZ();
   rotation[3] = q.GetW();
   return true;
+}
+
+void PhysicsWorld::WatchBodyContacts(BodyId id) {
+  if (!impl_ || id == 0) return;
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+  if (impl_->contacts.Find(body)) return;
+  Impl::WatchedContacts entry;
+  entry.body = body;
+  impl_->contacts.watched.push_back(std::move(entry));
+}
+
+void PhysicsWorld::UnwatchBodyContacts(BodyId id) {
+  if (!impl_ || id == 0) return;
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+  base::Vector<Impl::WatchedContacts>& watched = impl_->contacts.watched;
+  for (size_t i = 0; i < watched.size(); ++i) {
+    if (watched[i].body == body) {
+      watched[i] = std::move(watched.back());
+      watched.pop_back();
+      break;
+    }
+  }
+}
+
+u32 PhysicsWorld::GetBodyContacts(BodyId id, BodyContact* out, u32 max_contacts) const {
+  if (!impl_ || id == 0 || out == nullptr) return 0;
+  JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+  Impl::WatchedContacts* entry = impl_->contacts.Find(body);
+  if (!entry) return 0;
+  const u32 count = std::min<u32>(max_contacts, static_cast<u32>(entry->contacts.size()));
+  for (u32 i = 0; i < count; ++i) out[i] = entry->contacts[i];
+  return count;
 }
 
 }  // namespace rx::physics

@@ -108,6 +108,17 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // by their current angle. Used to snapshot the bind-pose target and to
   // measure motor tracking error. False on an invalid handle.
   bool GetJointOrientation(JointId joint, f32 out_quat[4]) const;
+  // Caps the torque a joint's position motors may apply (N*m); the min limit is
+  // set to -max_torque so the motor pushes and pulls symmetrically. Applies to
+  // both the swing and twist motors of a swing-twist joint and to the single
+  // motor of a hinge. Only meaningful once EnableJointMotors has switched the
+  // motors on; a no-op on an invalid handle.
+  void SetJointMotorTorqueLimit(JointId joint, f32 max_torque);
+  // Switches a joint's motors back off (EMotorState::Off), returning it to the
+  // unpowered-ragdoll state so gravity/contacts move it freely. Both swing and
+  // twist motors for a swing-twist joint, the single motor for a hinge. A no-op
+  // on an invalid handle.
+  void DisableJointMotors(JointId joint);
 
   // Applies an instantaneous impulse (kg*m/s) at a body's centre of mass and
   // wakes it. Drives the "get hit" disturbance for the powered-ragdoll test.
@@ -116,6 +127,31 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // gravity/forces) while keeping its layer and collision group. Used to pin
   // a ragdoll's root so the figure hangs from it like a puppet.
   void SetBodyKinematic(BodyId id);
+
+  // --- feedback-controller adapter surface ---
+  // These read back and drive individual bodies for a physics-first locomotion
+  // controller that closes a loop around measured body state.
+
+  // World-space linear (m/s) and angular (rad/s) velocity of a body. Either
+  // output pointer may be null. False for a dead handle (a body that was never
+  // added or has been removed), leaving the outputs untouched.
+  bool GetBodyVelocity(BodyId id, Vec3* linear, Vec3* angular) const;
+  // Mass in kg. 0 for static or kinematic bodies (infinite mass) and for an
+  // invalid handle.
+  f32 GetBodyMass(BodyId id) const;
+  // World-space centre of mass (not the body origin). False for a dead handle,
+  // leaving `out` untouched.
+  bool GetBodyCenterOfMass(BodyId id, Vec3* out) const;
+  // Accumulates a world-space force (N) at the centre of mass, applied over the
+  // next Update step; wakes the body. Forces do not persist across steps, so a
+  // feedback controller re-applies each tick. A no-op on an invalid handle.
+  void ApplyForce(BodyId id, const Vec3& force);
+  // Accumulates a world-space torque (N*m) for the next Update step; wakes the
+  // body. Like ApplyForce it is consumed by the step, not retained. A no-op on
+  // an invalid handle.
+  void ApplyTorque(BodyId id, const Vec3& torque);
+  // World gravity vector (m/s^2); {0, -9.81, 0} before Initialize.
+  Vec3 gravity() const;
 
   // Dynamic bodies; density in kg/m^3 (wood floats, stone sinks).
   BodyId AddDynamicBox(const Vec3& position, const Vec3& half_extent, f32 density,
@@ -168,10 +204,11 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // over. Defaults match Jolt's stock controller (~50 deg, 0.4 m).
   void ConfigureCharacter(CharacterId id, f32 max_slope_angle, f32 step_height);
   // Swaps the controller's capsule to new dimensions in place. Returns false
-  // (leaving the old shape) when the new capsule would start out interpenetrating
-  // world geometry by more than a small margin, so a game can keep a taller
-  // stance until there is headroom. The capsule stays centred on the same
-  // position; callers that want feet-planted resizing adjust the position first.
+  // (leaving the old shape) when the new capsule would start out
+  // interpenetrating world geometry by more than a small margin, so a game can
+  // keep a taller stance until there is headroom. The capsule stays centred on
+  // the same position; callers that want feet-planted resizing adjust the
+  // position first.
   bool SetCharacterShape(CharacterId id, f32 radius, f32 half_height);
 
   // Wheeled vehicle (Jolt VehicleConstraint + WheeledVehicleController): a
@@ -376,8 +413,8 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
 
   // Arbitrary triangle cloth. Jolt owns structural XPBD constraints, skeletal
   // skinning, pressure and rigid collision; rx adds swept-BVH continuous
-  // vertex/triangle and edge/edge self-collision. The same path handles open curtains,
-  // cylindrical skirts and consistently wound closed inflatables.
+  // vertex/triangle and edge/edge self-collision. The same path handles open
+  // curtains, cylindrical skirts and consistently wound closed inflatables.
   ClothId CreateCloth(const ClothDesc& desc, const Mat4& transform);
   // Retargets descriptor pins through a new object transform. Returns false
   // for invalid or unpinned cloth. dt <= 0 is an intentional teleport/reset;
@@ -418,6 +455,33 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
 
   // Pose of a (dynamic) body for ECS sync.
   bool GetBodyTransform(BodyId id, Vec3* position, f32 rotation[4]) const;
+
+  // Contact recording for a small set of watched bodies (a locomotion
+  // controller watches the feet to detect ground contact and its location).
+  // Contacts are recorded by a Jolt contact listener during Update and stay
+  // readable until the next Update clears them.
+  struct BodyContact {
+    Vec3 position;         // world-space contact point (average of the
+                           // manifold points on the watched body's surface)
+    Vec3 normal{0, 1, 0};  // world-space unit normal pointing INTO the watched
+                           // body (Jolt's manifold normal, body1->body2,
+                           // flipped as needed): +Y for a foot on the floor
+    f32 impulse = 0;       // estimated normal impulse this step (kg*m/s) from
+                           // Jolt's EstimateCollisionResponse; ~0 for a settled
+                           // resting contact, and 0 if it could not be estimated
+    BodyId other = 0;      // the other body's handle (always one of ours, since
+                           // every body comes from this API); 0 only if unknown
+  };
+  // Starts recording contacts for `id`. Idempotent; cheap to call for a handful
+  // of bodies (feet). A no-op on an invalid handle.
+  void WatchBodyContacts(BodyId id);
+  // Stops recording and drops any buffered contacts for `id`. After this,
+  // GetBodyContacts returns 0. A no-op on an unwatched or invalid handle.
+  void UnwatchBodyContacts(BodyId id);
+  // Copies up to `max_contacts` contacts recorded for `id` during the last
+  // Update into `out`, returning the number copied. 0 for an unwatched or
+  // invalid handle, or when no contact occurred last step.
+  u32 GetBodyContacts(BodyId id, BodyContact* out, u32 max_contacts) const;
 
   u32 dynamic_body_count() const { return dynamic_count_; }
   bool initialized() const { return impl_ != nullptr; }
