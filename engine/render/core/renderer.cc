@@ -128,6 +128,7 @@ base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true,
                                     "RX_ADAPTIVE_WATER"};
 base::Option<bool> WaterFieldOpt{"water.field", true, "RX_WATER_FIELD"};
+base::Option<bool> FluidSimOpt{"fluid.sim", false, "RX_FLUID_SIM"};
 base::Option<bool> WaterInteractionOpt{"water.interaction", true,
                                        "RX_WATER_INTERACTION"};
 // Debug/verification only: force the ripple obstacle boundary off while leaving
@@ -690,6 +691,9 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     RX_WARN(
         "water foam field unavailable"); // non-fatal: instantaneous crest foam
   }
+  if (!fluid_sim_.Initialize(*device_)) {
+    RX_WARN("fluid sim unavailable"); // non-fatal: optional feature, off by default
+  }
   if (!shore_wetting_.Initialize(*device_)) {
     RX_WARN("shoreline wetting unavailable"); // non-fatal: feature stays off
   }
@@ -723,6 +727,15 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     if (!water_)
       return false;
   }
+  // Fluid surface renderer: independent of ray tracing (the sim runs on any
+  // device), so it is created outside the rt gate. Non-fatal: the optional
+  // solver simply draws nothing if this fails.
+  fluid_surface_ = FluidSurfacePass::Create(
+      *device_, kSceneColorFormat, kMotionFormat, kDepthFormat,
+      mesh_pipeline_->set_layout(), environment_->env_set_layout(),
+      bindless_ ? bindless_->set_layout() : BindingLayoutHandle{});
+  if (!fluid_surface_)
+    RX_WARN("fluid surface renderer unavailable"); // optional feature stays off
   if (!environment_->CreateSkyPipeline(mesh_pipeline_->set_layout(),
                                        kSceneColorFormat, kMotionFormat,
                                        kDepthFormat)) {
@@ -960,6 +973,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     settings_.adaptive_water = AdaptiveWaterOpt;
   if (WaterFieldOpt.overridden())
     settings_.water_field = WaterFieldOpt;
+  if (FluidSimOpt.overridden())
+    settings_.fluid_sim = FluidSimOpt;
   if (WaterInteractionOpt.overridden())
     settings_.water_interaction = WaterInteractionOpt;
   if (ShoreWettingOpt.overridden())
@@ -3407,6 +3422,18 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               mesh_pipeline_->DrawSubmesh(*ctx.cmd, *draw.submesh);
             }
           }
+
+          // Heightfield fluid surface (flowing water + lava). Drawn last in the
+          // transparent pass over the same color+motion+depth targets: it binds
+          // its own pipeline and a transient set wrapping the solver's GENERAL
+          // images, so the mesh/water bindings above do not need restoring. The
+          // solver's final barrier (fluid_sim.cc) made the state graphics-
+          // readable. Depth write + reversed-z Greater resolve the lava-under-
+          // water ordering regardless of instance raster order.
+          if (fluid_sim_active_ && fluid_sim_.active() && fluid_surface_) {
+            fluid_surface_->Draw(ctx, globals_set, env_set, fluid_sim_,
+                                 frame_slot, static_cast<f32>(time_seconds_));
+          }
           ctx.cmd->EndRendering();
         });
     return composite;
@@ -3626,6 +3653,15 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                         !path_trace && !interior && scene_has_water;
   if (water_field_active_)
     globals.flags |= kFrameFlagWaterField;
+  // The optional fluid solver runs whenever a domain is submitted; it is NOT
+  // gated on scene_has_water (a lava-only scene carries no water material). It
+  // IS gated on the surface draw being reachable: the fluid draws inside the
+  // transparent pass, which needs water_ (only created with ray query) — on a
+  // non-RT device the solver would otherwise burn GPU every frame with no
+  // visual output.
+  fluid_sim_active_ = settings_.fluid_sim && fluid_sim_.available() &&
+                      water_ != nullptr && fluid_surface_ != nullptr &&
+                      !path_trace && view.fluid_domain != nullptr;
   // Shoreline wetting: snap the field to the camera and hand the shader its
   // origin/extent before the globals upload; the compute pass records below.
   shore_wetting_active_ = settings_.shore_wetting &&
@@ -4913,6 +4949,20 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           depth_export);
     }
 
+    // Optional heightfield fluid solver (flowing water + lava). Scheduled here
+    // alongside the water field; it steps its own domain textures and the
+    // surface renderer samples them downstream. Sources bounded at 64.
+    if (fluid_sim_active_) {
+      FluidSim::UpdateParams fp{};
+      fp.domain = view.fluid_domain;
+      fp.dt = std::min(view.frame_delta_seconds, 1.0f / 30.0f);
+      fp.frame_slot = frame_slot;
+      fp.sources = view.fluid_sources.data();
+      fp.source_count =
+          std::min<u32>(static_cast<u32>(view.fluid_sources.size()), FluidSim::kMaxSources);
+      fluid_sim_.AddToGraph(graph_, fp);
+    }
+
     ResourceHandle ao = kInvalidResource;
     ResourceHandle sun_shadow = kInvalidResource;
     ResourceHandle spec_refl = kInvalidResource;
@@ -5717,7 +5767,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       lit = reflected;
     }
 
-    if (!transparent.empty() && water_) {
+    // The fluid surface draws inside the transparent pass, so a live fluid
+    // domain must open it even when the scene submits no transparent meshes
+    // (a lava-only or flood scene has nothing else to draw there).
+    const bool fluid_draw =
+        fluid_sim_active_ && fluid_sim_.active() && fluid_surface_ != nullptr;
+    if ((!transparent.empty() || fluid_draw) && water_) {
       lit = add_water(scene_color, depth, depth_export, motion, sun_shadow,
                       shadow_atlas, csm_active, shadow_slot, tlas_slot,
                       /*globals_written=*/true, rcgi_irr);
@@ -6866,6 +6921,7 @@ void Renderer::Shutdown() {
     hair_.Destroy(*device_);
     ocean_.Destroy(*device_);
     water_field_.Destroy(*device_);
+    fluid_sim_.Destroy(*device_);
     shore_wetting_.Destroy(*device_);
     water_caustics_.Destroy(*device_);
     imposters_.Destroy(*device_);
@@ -6881,6 +6937,7 @@ void Renderer::Shutdown() {
     lightning_.Destroy(*device_);
     surface_weather_.Destroy(*device_);
     water_.reset();
+    fluid_surface_.reset();
     ddgi_.reset();
     rcgi_.reset(); // owns GPU resources through device_; destroy before device
                    // teardown

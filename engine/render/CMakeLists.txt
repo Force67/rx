@@ -57,6 +57,8 @@ rx_add_module(render
   geometry/water.cc
   geometry/adaptive_water.cc
   geometry/water_field.cc
+  geometry/fluid_sim.cc
+  geometry/fluid_surface.cc
   geometry/shore_wetting.cc
   geometry/water_caustics.cc
   geometry/particles.cc
@@ -312,6 +314,9 @@ set(RX_RENDER_SHADERS
   shaders/geometry/water.ps.hlsl
   shaders/geometry/adaptive_water.cs.hlsl
   shaders/geometry/water_field.cs.hlsl
+  shaders/geometry/fluid_sim.cs.hlsl
+  shaders/geometry/fluid_surface.vs.hlsl
+  shaders/geometry/fluid_surface.ps.hlsl
   shaders/geometry/shore_wetting.cs.hlsl
   shaders/geometry/water_caustics.cs.hlsl
   shaders/geometry/copy.cs.hlsl
