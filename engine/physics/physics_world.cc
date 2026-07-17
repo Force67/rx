@@ -1455,32 +1455,39 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
 
   // Driven axles by drivetrain; limited slip differentials throughout (the
   // Jolt default 1.4 ratio) - RWD gives throttle oversteer, AWD splits by
-  // awd_front_split.
+  // awd_front_split. A free-rolling chassis has no differential at all, so no
+  // engine torque reaches any wheel and all four wheels coast on their
+  // suspension and tire friction (a towed trailer / carriage); steering and
+  // the handbrake still work per wheel.
   const f32 final_drive = desc.final_drive > 0 ? desc.final_drive : 3.42f;
-  switch (desc.drivetrain) {
-    case Drivetrain::kRWD:
-      controller->mDifferentials.resize(1);
-      controller->mDifferentials[0].mLeftWheel = 2;
-      controller->mDifferentials[0].mRightWheel = 3;
-      controller->mDifferentials[0].mDifferentialRatio = final_drive;
-      break;
-    case Drivetrain::kFWD:
-      controller->mDifferentials.resize(1);
-      controller->mDifferentials[0].mLeftWheel = 0;
-      controller->mDifferentials[0].mRightWheel = 1;
-      controller->mDifferentials[0].mDifferentialRatio = final_drive;
-      break;
-    case Drivetrain::kAWD:
-      controller->mDifferentials.resize(2);
-      controller->mDifferentials[0].mLeftWheel = 0;
-      controller->mDifferentials[0].mRightWheel = 1;
-      controller->mDifferentials[0].mDifferentialRatio = final_drive;
-      controller->mDifferentials[0].mEngineTorqueRatio = desc.awd_front_split;
-      controller->mDifferentials[1].mLeftWheel = 2;
-      controller->mDifferentials[1].mRightWheel = 3;
-      controller->mDifferentials[1].mDifferentialRatio = final_drive;
-      controller->mDifferentials[1].mEngineTorqueRatio = 1.0f - desc.awd_front_split;
-      break;
+  // A free-rolling chassis keeps an empty differential list, so the engine is
+  // disconnected from every wheel and they coast on suspension + tire friction.
+  if (!desc.free_rolling) {
+    switch (desc.drivetrain) {
+      case Drivetrain::kRWD:
+        controller->mDifferentials.resize(1);
+        controller->mDifferentials[0].mLeftWheel = 2;
+        controller->mDifferentials[0].mRightWheel = 3;
+        controller->mDifferentials[0].mDifferentialRatio = final_drive;
+        break;
+      case Drivetrain::kFWD:
+        controller->mDifferentials.resize(1);
+        controller->mDifferentials[0].mLeftWheel = 0;
+        controller->mDifferentials[0].mRightWheel = 1;
+        controller->mDifferentials[0].mDifferentialRatio = final_drive;
+        break;
+      case Drivetrain::kAWD:
+        controller->mDifferentials.resize(2);
+        controller->mDifferentials[0].mLeftWheel = 0;
+        controller->mDifferentials[0].mRightWheel = 1;
+        controller->mDifferentials[0].mDifferentialRatio = final_drive;
+        controller->mDifferentials[0].mEngineTorqueRatio = desc.awd_front_split;
+        controller->mDifferentials[1].mLeftWheel = 2;
+        controller->mDifferentials[1].mRightWheel = 3;
+        controller->mDifferentials[1].mDifferentialRatio = final_drive;
+        controller->mDifferentials[1].mEngineTorqueRatio = 1.0f - desc.awd_front_split;
+        break;
+    }
   }
   vehicle.mController = controller;
 
@@ -1810,6 +1817,13 @@ f32 PhysicsWorld::VehicleForwardSpeed(VehicleId id) const {
   const JPH::Vec3 velocity = bodies.GetLinearVelocity(entry.body);
   const JPH::Vec3 forward = bodies.GetRotation(entry.body) * JPH::Vec3::sAxisZ();
   return velocity.Dot(forward);
+}
+
+BodyId PhysicsWorld::GetVehicleBody(VehicleId id) const {
+  if (!impl_ || id == 0 || id > impl_->vehicles.size()) return 0;
+  const Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
+  if (!entry.alive) return 0;
+  return entry.body.GetIndexAndSequenceNumber() + 1;
 }
 
 bool PhysicsWorld::GetVehicleState(VehicleId id, VehicleState* out) const {

@@ -73,6 +73,7 @@ void PhysicsWorld::DriveVehicle(VehicleId, const VehicleInput&) {}
 bool PhysicsWorld::GetVehicleTransform(VehicleId, Vec3*, f32[4]) const { return false; }
 bool PhysicsWorld::GetVehicleWheel(VehicleId, u32, Vec3*, f32[4]) const { return false; }
 f32 PhysicsWorld::VehicleForwardSpeed(VehicleId) const { return 0; }
+BodyId PhysicsWorld::GetVehicleBody(VehicleId) const { return 0; }
 CharacterId PhysicsWorld::CreateCharacter(const Vec3&, f32, f32) { return 0; }
 void PhysicsWorld::MoveCharacter(CharacterId, const Vec3&, bool, f32, Vec3*, bool*) {}
 void PhysicsWorld::MoveCharacterVelocity(CharacterId, const Vec3&, f32, Vec3*, bool* grounded,

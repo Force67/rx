@@ -329,6 +329,13 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // ~8%, holding the tire near its grip peak (and letting the automatic
     // box shift, which Jolt gates on slip). Off = raw throttle.
     bool traction_control = false;
+    // Free-rolling (unpowered) chassis: no engine torque reaches any wheel, so
+    // all four wheels roll purely on their suspension and tire friction, the
+    // way a trailer or a horse-drawn carriage pulled through an external hitch
+    // does. The front axle still steers from DriveVehicle's steer input (a
+    // turntable front axle) and the rear axle still takes the handbrake as a
+    // parking brake. Off by default (an ordinary engine-driven car).
+    bool free_rolling = false;
   };
   // Spawns the chassis at `position` (chassis center) yawed around +Y. Spawn
   // slightly high and let the suspension settle. 0 on failure.
@@ -417,6 +424,12 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   bool GetVehicleWheel(VehicleId id, u32 wheel, Vec3* position, f32 rotation[4]) const;
   // Signed speed along the chassis forward axis, m/s.
   f32 VehicleForwardSpeed(VehicleId id) const;
+  // The dynamic chassis body backing a vehicle, as a BodyId usable with the
+  // rigid-body force primitives above (AddForceAtPoint / GetPointVelocity /
+  // GetBodyMass). Lets a caller stage external forces on the chassis, e.g. a
+  // tow hitch pulling a free-rolling carriage toward the horse. 0 for a dead
+  // handle.
+  BodyId GetVehicleBody(VehicleId id) const;
 
   // Drivetrain + per-wheel telemetry for HUDs, audio and effects.
   struct VehicleState {
