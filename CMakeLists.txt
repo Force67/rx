@@ -343,6 +343,16 @@ if(RX_BUILD_TESTS AND RX_JOLT)
   add_test(NAME aircraft_test COMMAND aircraft_test)
 endif()
 
+# Cross-system vehicle integration: one PhysicsWorld hosts a car, a boat and an
+# aircraft at once for 30 s over a shared heightfield + Gerstner lake, with every
+# vehicle's telemetry driving a real EngineSynth. Headless (no GPU/device), needs
+# Jolt for the physics path (like aircraft_test/vehicle_test/boat_test).
+if(RX_BUILD_TESTS AND RX_JOLT)
+  add_executable(vehicle_integration_test test/vehicle_integration_test.cc)
+  target_link_libraries(vehicle_integration_test PRIVATE rx::physics rx::audio rx::core)
+  add_test(NAME vehicle_integration_test COMMAND vehicle_integration_test)
+endif()
+
 # Editor foundations test: reflection, scene round-trip, undo/redo and hierarchy
 # composition. Fully headless (no GPU), so it always runs under plain ctest.
 if(RX_BUILD_TESTS)

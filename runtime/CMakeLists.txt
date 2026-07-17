@@ -10,6 +10,7 @@ set(RX_RUNTIME_SOURCES
   demo_nav.cc
   demo_ship.cc
   demo_gym.cc
+  demo_drive.cc
   scene_hook_demo.cc
   scene_hook_rhi_demo.cc
   fly_camera.cc
