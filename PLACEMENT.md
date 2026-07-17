@@ -108,6 +108,9 @@ edit produces a local response.
 
 ## Demo
 
+![Forest interior at spawn](docs/images/placement-forest.png)
+![Autopilot flythrough along the road](docs/images/placement-flythrough.png)
+
 ```sh
 vkrun ./build/linux/runtime/rx --demo placement
 ```
