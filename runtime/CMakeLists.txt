@@ -8,6 +8,8 @@ set(RX_RUNTIME_SOURCES
   viewer_input.cc
   demo_scenes.cc
   demo_nav.cc
+  demo_placement.cc
+  placement_demo_assets.cc
   demo_ship.cc
   demo_gym.cc
   scene_hook_demo.cc
@@ -31,6 +33,8 @@ set(RX_RUNTIME_MODULES
   rx::net_viz
   rx::nav
   rx::nav_viz
+  rx::placement
+  rx::placement_gpu
   rx::character
   rx::inventory
   rx::inventory_world
