@@ -28,6 +28,7 @@ BodyId PhysicsWorld::AddStaticShape(const ShapeDesc&, const Vec3&, const f32[4],
   return 0;
 }
 bool PhysicsWorld::SampleWater(const Vec3&, f32*, Vec3*) const { return false; }
+void PhysicsWorld::set_buoyancy_exempt(BodyId, bool) {}
 void PhysicsWorld::AddForce(BodyId, const Vec3&) {}
 void PhysicsWorld::AddForceAtPoint(BodyId, const Vec3&, const Vec3&) {}
 void PhysicsWorld::AddTorque(BodyId, const Vec3&) {}

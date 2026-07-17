@@ -2,7 +2,9 @@ if(RX_JOLT)
   rx_add_module(physics
     cloth_collision.cc
     physics_world.cc
+    boat.cc
     kinema_jolt.cc
+    aircraft.cc
   )
   target_link_libraries(rx_physics PUBLIC rx::core rx::asset)
   # PRIVATE static archives, needed at final link. Wrapped in BUILD_INTERFACE so

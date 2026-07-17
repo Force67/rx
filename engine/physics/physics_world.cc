@@ -238,6 +238,9 @@ struct PhysicsWorld::Impl {
   // Per-body surface for shared-shape instances (AddStaticMeshInstance), whose
   // shape can't carry a per-instance material; keyed by BodyID index+sequence.
   base::UnorderedMap<u32, SurfaceType> body_surface;
+  // Bodies opted out of the generic Update buoyancy (force-based hulls that run
+  // their own multi-point model); keyed by BodyID index+sequence.
+  base::UnorderedMap<u32, bool> buoyancy_exempt;
 
   // Lazily builds and returns the material for `surface`; null for asphalt so
   // untagged/asphalt colliders keep the stock (materialless) shape.
@@ -385,6 +388,9 @@ void PhysicsWorld::Update(f32 dt) {
   if (water_height_) {
     JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
     for (JPH::BodyID id : impl_->dynamic_bodies) {
+      // Force-based hulls (boats) run their own multi-point buoyancy; skip the
+      // generic scheme for them so the two don't stack.
+      if (impl_->buoyancy_exempt.find(id.GetIndexAndSequenceNumber())) continue;
       JPH::RVec3 position = bodies.GetCenterOfMassPosition(id);
       f32 surface = 0;
       Vec3 flow{};
@@ -1055,6 +1061,16 @@ bool PhysicsWorld::SampleWater(const Vec3& position, f32* out_height, Vec3* out_
   if (out_height) *out_height = height;
   if (out_flow) *out_flow = flow;
   return true;
+}
+
+void PhysicsWorld::set_buoyancy_exempt(BodyId id, bool exempt) {
+  if (!impl_ || id == 0) return;
+  const u32 key = JPH::BodyID(static_cast<JPH::uint32>(id - 1)).GetIndexAndSequenceNumber();
+  if (exempt) {
+    impl_->buoyancy_exempt.insert(key, true);
+  } else {
+    impl_->buoyancy_exempt.erase(key);
+  }
 }
 
 void PhysicsWorld::AddForce(BodyId id, const Vec3& force) {

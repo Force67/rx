@@ -71,6 +71,13 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // boats/aircraft in later waves) sample the swell through.
   bool SampleWater(const Vec3& position, f32* out_height, Vec3* out_flow) const;
 
+  // Excludes a dynamic body from the generic whole-body buoyancy+drag applied
+  // in Update (the Jolt water sample scheme above). A force-based hull that
+  // does its own multi-point buoyancy (the boat simulator) opts out here so the
+  // two schemes don't stack. No effect when true is set twice; false restores
+  // the generic path. Off by default, so ordinary floaters are unchanged.
+  void set_buoyancy_exempt(BodyId id, bool exempt);
+
   // --- rigid-body force primitives (thin Jolt wrappers) ---
   // Continuous force (N) / torque (Nm) accumulated for the next step and
   // cleared by Jolt after it; call every step while the force applies. Point

@@ -333,6 +333,16 @@ if(RX_BUILD_TESTS)
   add_test(NAME vehicle_audio_test COMMAND vehicle_audio_test)
 endif()
 
+# Physics-driven fixed-wing aircraft over the public PhysicsWorld force API:
+# ground roll + rotation + climb, overloaded (over-MTOM) degradation, stall
+# sink, flap-shortened takeoff, braking, rudder yaw, and NaN-free tumbling.
+# Headless (no GPU), needs the Jolt-enabled physics build like vehicle_test.
+if(RX_BUILD_TESTS AND RX_JOLT)
+  add_executable(aircraft_test test/aircraft_test.cc)
+  target_link_libraries(aircraft_test PRIVATE rx::physics rx::core)
+  add_test(NAME aircraft_test COMMAND aircraft_test)
+endif()
+
 # Editor foundations test: reflection, scene round-trip, undo/redo and hierarchy
 # composition. Fully headless (no GPU), so it always runs under plain ctest.
 if(RX_BUILD_TESTS)
@@ -357,6 +367,15 @@ if(RX_BUILD_TESTS)
     add_executable(vehicle_test test/vehicle_test.cc)
     target_link_libraries(vehicle_test PRIVATE rx::physics rx::core)
     add_test(NAME vehicle_test COMMAND vehicle_test)
+  endif()
+
+  # Physics-driven boat over the force-based hull model: floating draft,
+  # acceleration, steering, drag decay, planing, river drift, self-righting,
+  # buoyancy-exemption and NaN-free chop. Headless (no GPU), needs Jolt.
+  if(RX_JOLT)
+    add_executable(boat_test test/boat_test.cc)
+    target_link_libraries(boat_test PRIVATE rx::physics rx::core)
+    add_test(NAME boat_test COMMAND boat_test)
   endif()
 
   add_executable(world_streaming_test test/world_streaming_test.cc)
