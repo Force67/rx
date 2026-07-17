@@ -229,11 +229,11 @@ void PuppetDemo::Create() {
 }
 
 locomotion::LocomotionIntent PuppetDemo::ScriptedIntent() const {
-  // stand 3s -> walk -Z at 0.6 m/s 8s -> turn 90 deg and walk -X 6s -> stop 3s.
-  // 0.6 m/s is the honest stable walking regime for this ragdoll (docs).
+  // stand 3s -> walk -Z at 0.5 m/s 8s -> turn 90 deg and walk -X 6s -> stop 3s.
+  // 0.5 m/s is the portable stable walking regime for this ragdoll (docs).
   locomotion::LocomotionIntent intent;
   const f32 t = script_time_;
-  const f32 kSpeed = 0.6f;
+  const f32 kSpeed = 0.5f;
   if (t < 3.0f) {
     intent.desired_facing = {0, 0, -1};
   } else if (t < 11.0f) {

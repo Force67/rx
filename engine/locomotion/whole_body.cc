@@ -166,7 +166,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   // Acceleration lean about the pelvis-right axis, plus a partial ground tilt.
   Vec3 a_des = Planar(intent.desired_velocity) - Planar(m.com_velocity);
   a_des = ClampLength(a_des, params.max_acceleration);
-  const f32 lean_angle = Clampf(0.06f * Dot(a_des, f), -0.20f, 0.20f);  // k_lean s^2/m
+  const f32 lean_angle = Clampf(-0.03f * Dot(a_des, f), -0.20f, 0.20f);  // k_lean s^2/m
 
   Quat q_d = QuatFromAxisAngle(right, lean_angle) * q_yaw;
   Vec3 ground_normal = FiniteV(m.ground_normal) && Length(m.ground_normal) > 1e-6f
@@ -186,15 +186,28 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
     const Vec3 sole_world = p.swinging ? p.swing_position : p.target;
     const Vec3 hip_world = pelvis_pos + Rotate(q_d, rig.hip_local[i]);
     const Vec3 hip_to_sole = Rotate(q_d_inv, sole_world - hip_world);
-    const Vec3 sole_normal_parent = Rotate(q_d_inv, Rotate(p.foot_orientation, up_y));
+    const Quat desired_foot_parent = Normalize(q_d_inv * p.foot_orientation);
+    const Vec3 sole_normal_parent = Rotate(desired_foot_parent, up_y);
 
     const LegIkResult leg = SolveLegIk(hip_to_sole, sole_normal_parent, rig.upper_leg_length,
                                        rig.lower_leg_length, rig.foot_height);
+    const Quat knee = QuatFromAxisAngle({-1, 0, 0}, leg.knee_flexion);
+    Quat ankle = leg.ankle;
+    const Quat solved_foot_parent = leg.hip * knee * ankle;
+    Vec3 solved_forward = Planar(Rotate(solved_foot_parent, {0, 0, -1}));
+    Vec3 desired_forward = Planar(Rotate(desired_foot_parent, {0, 0, -1}));
+    if (Length(solved_forward) > 1e-4f && Length(desired_forward) > 1e-4f) {
+      solved_forward = Normalize(solved_forward);
+      desired_forward = Normalize(desired_forward);
+      const f32 yaw_error =
+          std::atan2(Cross(solved_forward, desired_forward).y,
+                     Clampf(Dot(solved_forward, desired_forward), -1.0f, 1.0f));
+      ankle = ClampCone(ankle * QuatFromAxisAngle(up_y, yaw_error), 0.5f);
+    }
 
     out->joint_target[static_cast<u32>(hip_joint[i])] = leg.hip;
-    out->joint_target[static_cast<u32>(knee_joint[i])] =
-        QuatFromAxisAngle({-1, 0, 0}, leg.knee_flexion);
-    out->joint_target[static_cast<u32>(ankle_joint[i])] = leg.ankle;
+    out->joint_target[static_cast<u32>(knee_joint[i])] = knee;
+    out->joint_target[static_cast<u32>(ankle_joint[i])] = ankle;
 
     const f32 leg_scale = p.swinging ? 0.75f : 1.0f;
     out->joint_drive_scale[static_cast<u32>(hip_joint[i])] = leg_scale * strength;

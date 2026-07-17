@@ -148,9 +148,11 @@ void FootstepPlanner::Update(const CharacterMeasurements& m, const ContactEstima
         reject = validate(target);
       }
     }
-    // Vertical: land on the probed ground, or hold the lift-off height.
-    target.y = got ? hit.position.y : swing_start_[foot].y;
-    const Vec3 land_normal = got ? hit.normal : kUp;
+    // Only an accepted hit is terrain. A ray may still hit a surface that all
+    // retries rejected as too steep or high.
+    const bool accepted = reject == StepReject::kNone;
+    target.y = accepted ? hit.position.y : swing_start_[foot].y;
+    const Vec3 land_normal = accepted ? hit.normal : kUp;
 
     // Live swing pose.
     const f32 t = GaitClock::SwingProgress(gait, foot);

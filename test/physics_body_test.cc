@@ -101,6 +101,11 @@ void TestVelocityMassCom() {
   // A static body has no mass.
   physics::BodyId floor = w.AddStaticBox({0, -0.5f, 0}, {5, 0.5f, 5});
   Near(w.GetBodyMass(floor), 0.0f, "static body reports 0 mass");
+
+  physics::BodyId pinned = w.AddDynamicBox({2, 10, 0}, {kHalf, kHalf, kHalf}, kDensity, {});
+  Check(w.GetBodyMass(pinned) > 0, "dynamic body has finite mass before pinning");
+  w.SetBodyKinematic(pinned);
+  Near(w.GetBodyMass(pinned), 0.0f, "kinematic body reports 0 mass");
 }
 
 void TestApplyForce() {
@@ -165,6 +170,28 @@ void TestGravity() {
   Near(g.x, 0.0f, "gravity has no x");
   Near(g.z, 0.0f, "gravity has no z");
   Near(g.y, -kGravity, "gravity magnitude on -y", 0.05f);
+}
+
+void TestRaycastIgnoresMultipleBodies() {
+  physics::PhysicsWorld w;
+  if (!MakeWorld(w, "ray ignore: physics init")) return;
+
+  w.AddStaticBox({0, -0.5f, 0}, {5, 0.5f, 5});
+  const physics::BodyId lower = w.AddKinematicBox({0, 1.0f, 0}, {0.5f, 0.5f, 0.5f});
+  const physics::BodyId upper = w.AddKinematicBox({0, 3.0f, 0}, {0.5f, 0.5f, 0.5f});
+  Check(lower != 0 && upper != 0, "ray-ignore bodies created");
+
+  physics::PhysicsWorld::RayHit hit;
+  Check(w.Raycast({0, 5, 0}, {0, -1, 0}, 10, &hit), "unfiltered ray hits upper body");
+  Near(hit.position.y, 3.5f, "unfiltered ray returns upper body", 0.05f);
+
+  Check(w.Raycast({0, 5, 0}, {0, -1, 0}, 10, &hit, upper), "single-ignore ray hits lower body");
+  Near(hit.position.y, 1.5f, "single-ignore ray returns lower body", 0.05f);
+
+  const physics::BodyId ignored[] = {upper, lower};
+  Check(w.Raycast({0, 5, 0}, {0, -1, 0}, 10, &hit, ignored, 2),
+        "multi-ignore ray reaches floor");
+  Near(hit.position.y, 0.0f, "multi-ignore ray excludes every listed body", 0.05f);
 }
 
 void TestContacts() {
@@ -360,6 +387,7 @@ int main() {
   TestApplyForce();
   TestApplyTorque();
   TestGravity();
+  TestRaycastIgnoresMultipleBodies();
   TestContacts();
   TestMotors();
   TestRemoveJoint();

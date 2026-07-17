@@ -69,6 +69,13 @@ struct RX_LOCOMOTION_EXPORT BipedRig {
   Vec3 SolePosition(const physics::PhysicsWorld& physics, u32 foot) const;
 
   bool valid() const { return body[0] != 0; }
+  bool ContainsBody(physics::BodyId id) const {
+    if (id == 0) return false;
+    for (physics::BodyId part : body) {
+      if (part == id) return true;
+    }
+    return false;
+  }
 };
 
 // Fixed anthropometric mass fractions used by Build (sum ~1); exposed for the

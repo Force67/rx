@@ -80,12 +80,13 @@ void StateEstimator::Measure(const physics::PhysicsWorld& physics, const BipedRi
       ok = false;
     }
 
-    physics::PhysicsWorld::BodyContact contacts[4];
-    const u32 n = physics.GetBodyContacts(foot_id, contacts, 4);
+    physics::PhysicsWorld::BodyContact contacts[kBodyPartCount + 4];
+    const u32 n = physics.GetBodyContacts(foot_id, contacts, kBodyPartCount + 4);
     Vec3 normal_sum{};
     f32 impulse_sum = 0;
     bool up_contact = false;
     for (u32 c = 0; c < n; ++c) {
+      if (rig.ContainsBody(contacts[c].other)) continue;
       if (contacts[c].normal.y > 0.5f) {
         up_contact = true;
         const f32 w = contacts[c].impulse > 0 ? contacts[c].impulse : 1.0f;

@@ -125,6 +125,17 @@ struct CharacterIntent {
   // to a co-located scene::CameraIntent for the camera rig to accumulate/clamp.
   f32 look_yaw_delta = 0;
   f32 look_pitch_delta = 0;
+
+  // World-space acceleration (m/s^2) the game stages this step ON TOP of the
+  // controller's own gravity + locomotion integration, folded into the velocity
+  // just before the mover consumes it and cleared on consume (an edge input like
+  // `jump`). The seam for external thrusters — a jetpack, a dash, a wind gust —
+  // that add to the character's motion without the controller knowing about them:
+  // the result is kept in the integration velocity, so momentum carries. The
+  // vertical component competes with gravity honestly (thrust must beat weight to
+  // climb) and the ground clamp still stops downward motion, so it never bypasses
+  // the existing fall/land handling. Default zero (no external force).
+  Vec3 external_acceleration = {0, 0, 0};
 };
 
 enum class CharacterStance : u8 {

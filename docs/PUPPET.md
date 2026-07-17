@@ -40,11 +40,11 @@ still shows locomotion:
 | Phase | Duration | Intent |
 | --- | --- | --- |
 | Stand | 3 s | zero velocity, face −Z |
-| Walk forward | 8 s | 0.6 m/s along −Z |
-| Turn & walk | 6 s | heading eased −Z → −X over 3 s, 0.6 m/s along it |
+| Walk forward | 8 s | 0.5 m/s along −Z |
+| Turn & walk | 6 s | heading eased −Z → −X over 3 s, 0.5 m/s along it |
 | Stop | 3 s | zero velocity, face −X |
 
-0.6 m/s is the honest stable-walking regime for this ragdoll (LOCOMOTION.md's
+0.5 m/s is the portable stable-walking regime for this ragdoll (LOCOMOTION.md's
 walk test documents that higher commands out-run the step controller). At the
 end of the loop the puppet is **reset** (`Destroy` + `Initialize` at spawn) so it
 recentres cleanly rather than teleporting — which also demonstrates the reset
@@ -96,7 +96,7 @@ collision capsules.
 - **Push recovery**: shrugs off a small (40) torso impulse back to `kStable`; a
   big (200) impulse drives a **controlled fall** that grounds cleanly and then
   attempts a procedural get-up.
-- **Slow walking** (~0.5–0.6 m/s command, tracking a fraction of it) as genuine
+- **Slow walking** (~0.5 m/s command, tracking a fraction of it) as genuine
   physics-driven stepping, not an animation.
 - Fast walking / running and robust turning-while-walking are **future work** —
   higher speed commands out-run the step controller and tip the trunk over the

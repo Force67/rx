@@ -22,6 +22,7 @@
 
 #include "locomotion/controller.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -48,17 +49,13 @@ bool LocomotionController::GroundProbe(void* context, const Vec3& probe_start, f
   auto* self = static_cast<LocomotionController*>(context);
   if (!self || !self->physics_) return false;
   physics::PhysicsWorld::RayHit hit;
-  if (!self->physics_->Raycast(probe_start, {0, -1, 0}, max_depth, &hit)) return false;
+  if (!self->physics_->Raycast(probe_start, {0, -1, 0}, max_depth, &hit, self->rig_.body,
+                               kBodyPartCount)) {
+    return false;
+  }
   out->position = hit.position;
   out->normal = hit.normal;
   return true;
-}
-
-bool LocomotionController::IsRigBody(physics::BodyId id) const {
-  if (id == 0) return false;
-  for (u32 i = 0; i < kBodyPartCount; ++i)
-    if (rig_.body[i] == id) return true;
-  return false;
 }
 
 Vec3 LocomotionController::AnkleWorld(u32 foot) const {
@@ -85,6 +82,26 @@ void LocomotionController::ApplyJointDrive(RigJoint j, f32 torque) {
   }
 }
 
+void LocomotionController::ResetDebugState() {
+  debug_.desired_velocity = {};
+  debug_.controlled_facing = controlled_facing_;
+  debug_.measured_velocity = {};
+  debug_.com_position = {};
+  debug_.com_velocity = {};
+  debug_.capture_point = {};
+  debug_.support_center = {};
+  debug_.support_count = 0;
+  for (u32 foot = 0; foot < kFootCount; ++foot) {
+    debug_.foot_target[foot] = {};
+    debug_.swing_position[foot] = {};
+    debug_.step_reject[foot] = StepReject::kNone;
+  }
+  debug_.gait_phase = 0;
+  debug_.max_torque_saturation = 0;
+  debug_.mode = ControlMode::kStable;
+  debug_.mode_time = 0;
+}
+
 bool LocomotionController::HasEnvironmentContact(physics::BodyId watched) const {
   physics::PhysicsWorld::BodyContact contacts[8];
   const u32 n = physics_->GetBodyContacts(watched, contacts, 8);
@@ -92,7 +109,7 @@ bool LocomotionController::HasEnvironmentContact(physics::BodyId watched) const 
     // `other == 0` means the counterpart could not be identified (the static
     // floor is not one of our handles); either way it is the environment, not
     // another rig limb.
-    if (!IsRigBody(contacts[c].other)) return true;
+    if (!rig_.ContainsBody(contacts[c].other)) return true;
   }
   return false;
 }
@@ -117,7 +134,11 @@ bool LocomotionController::Initialize(physics::PhysicsWorld* physics,
   contacts_ = ContactEstimate{};
   gait_ = GaitState{};
   targets_ = WholeBodyTargets{};
-  debug_ = DebugState{};
+  controlled_facing_ = Rotate(QuatFromAxisAngle({0, -1, 0}, yaw), {0, 0, -1});
+  controlled_facing_ = Normalize(Planar(controlled_facing_));
+  if (!FiniteV(controlled_facing_) || Length(controlled_facing_) < 1e-4f)
+    controlled_facing_ = {0, 0, -1};
+  ResetDebugState();
 
   mode_ = ControlMode::kStable;
   mode_time_ = 0;
@@ -156,6 +177,21 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   const f32 balance = (FiniteScalar(modifiers.balance) && modifiers.balance > 0) ? modifiers.balance
                                                                                  : 1.0f;
 
+  LocomotionIntent resolved_intent = intent;
+  Vec3 requested_facing = Planar(intent.desired_facing);
+  if (FiniteV(requested_facing) && Length(requested_facing) > 1e-4f) {
+    requested_facing = Normalize(requested_facing);
+    const f32 turn_error =
+        std::atan2(Cross(controlled_facing_, requested_facing).y,
+                   Clampf(Dot(controlled_facing_, requested_facing), -1.0f, 1.0f));
+    const f32 turn_rate = FiniteScalar(params_.max_turn_rate) ? std::max(params_.max_turn_rate, 0.0f)
+                                                              : 0.0f;
+    const f32 turn_step = Clampf(turn_error, -turn_rate * dt, turn_rate * dt);
+    controlled_facing_ =
+        Normalize(Planar(Rotate(QuatFromAxisAngle({0, 1, 0}, turn_step), controlled_facing_)));
+  }
+  resolved_intent.desired_facing = controlled_facing_;
+
   // --- Step 1: MEASURE ----------------------------------------------------
   state_estimator_.Measure(*physics_, rig_, modifiers, &measurements_);
   const CharacterMeasurements& m = measurements_;
@@ -174,8 +210,9 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
     } else {
       mode_time_ += dt;
     }
-    debug_ = DebugState{};
-    debug_.desired_velocity = intent.desired_velocity;
+    ResetDebugState();
+    debug_.desired_velocity = resolved_intent.desired_velocity;
+    debug_.controlled_facing = controlled_facing_;
     debug_.mode = mode_;
     debug_.mode_time = mode_time_;
     return;
@@ -193,7 +230,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   // locomotion, not a fall); subtracting that lead keeps `margin` near zero while
   // walking and only grows on genuine, uncommanded imbalance.
   const f32 omega = std::sqrt(m.gravity / com_height);
-  const Vec3 expected_lead = Planar(intent.desired_velocity) * (1.0f / omega);
+  const Vec3 expected_lead = Planar(resolved_intent.desired_velocity) * (1.0f / omega);
   const f32 margin =
       PlanarLength(Planar(cp) - Planar(contacts_.support_center) - expected_lead);
 
@@ -256,7 +293,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
       break;
     }
     case ControlMode::kGrounded: {
-      if (intent.allow_recovery) next = ControlMode::kRecovering;
+      if (resolved_intent.allow_recovery) next = ControlMode::kRecovering;
       break;
     }
     case ControlMode::kRecovering: {
@@ -265,7 +302,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
           m.com_position.y > 0.7f * rig_.pelvis_height + contacts_.support_center.y;
       if (recovered)
         next = ControlMode::kStable;
-      else if (!intent.allow_recovery || mode_time_ > 3.0f)
+      else if (!resolved_intent.allow_recovery || mode_time_ > 3.0f)
         next = ControlMode::kGrounded;  // give up this attempt, retry from grounded
       break;
     }
@@ -310,11 +347,12 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
 
   if (control_mode) {
     const bool need_step = mode_ == ControlMode::kCorrectiveStep;
-    gait_clock_.Update(m, intent, params_, need_step, dt);
+    gait_clock_.Update(m, resolved_intent, params_, need_step, dt);
     gait_ = gait_clock_.state();
-    footstep_planner_.Update(m, contacts_, gait_, intent, params_, &GroundProbe, this, dt);
+    footstep_planner_.Update(m, contacts_, gait_, resolved_intent, params_, &GroundProbe, this, dt);
     const FootPlan plan[kFootCount] = {footstep_planner_.plan(0), footstep_planner_.plan(1)};
-    BuildWholeBodyTargets(m, contacts_, gait_, plan, intent, modifiers, params_, rig_, &targets_);
+    BuildWholeBodyTargets(m, contacts_, gait_, plan, resolved_intent, modifiers, params_, rig_,
+                          &targets_);
 
     // Ankle-strategy balance assist. The whole-body root force only DAMPS planar
     // velocity; a damper alone lets the COM drift off the base and topple. Anchor
@@ -335,8 +373,8 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
       const Vec3 offset = Planar(base) - Planar(m.com_position);  // toward the base
       const Vec3 com_v = Planar(m.com_velocity);
 
-      const f32 desired_speed = PlanarLength(intent.desired_velocity);
-      Vec3 fdir = desired_speed > 0.05f ? Planar(intent.desired_velocity)
+      const f32 desired_speed = PlanarLength(resolved_intent.desired_velocity);
+      Vec3 fdir = desired_speed > 0.05f ? Planar(resolved_intent.desired_velocity)
                                         : Planar(Rotate(m.root_rotation, Vec3{0, 0, -1}));
       fdir = Length(fdir) > 1e-4f ? Normalize(fdir) : Vec3{0, 0, -1};
       const Vec3 perp = Normalize(Cross(Vec3{0, 1, 0}, fdir));  // horizontal, side axis
@@ -457,7 +495,8 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   }
 
   // --- Step 6: DEBUG (filled completely every tick) -----------------------
-  debug_.desired_velocity = intent.desired_velocity;
+  debug_.desired_velocity = resolved_intent.desired_velocity;
+  debug_.controlled_facing = controlled_facing_;
   debug_.measured_velocity = m.com_velocity;
   debug_.com_position = m.com_position;
   debug_.com_velocity = m.com_velocity;

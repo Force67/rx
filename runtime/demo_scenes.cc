@@ -198,10 +198,20 @@ void DemoScenes::EmitBubbles(render::FrameView& view) {
 }
 
 void DemoScenes::Shutdown() {
+  if (placement_) {
+    placement_->Shutdown();
+    placement_.reset();
+  }
   if (cloth_ != 0) {
     physics_.RemoveCloth(cloth_);
     cloth_ = 0;
   }
+  // Retire service-owning demos while the host's physics and audio systems are
+  // still alive. main.cc destroys Host before Viewer, so leaving these until the
+  // DemoScenes destructor would make their teardown call through dead services.
+  puppet_.reset();
+  drive_.reset();
+  gym_.reset();
   scene_hook_.reset();
   scene_hook_rhi_.reset();
   bubble_viz_.reset();
@@ -241,8 +251,10 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   if (ship_) ship_->Emit(dt, view);
   if (nav_) nav_->Emit(dt, view);
+  if (placement_) placement_->Emit(dt, view);
   if (gym_) gym_->Emit(dt, view);
   if (puppet_) puppet_->Emit(dt, view);
+  if (drive_) drive_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
   if (cloth_ != 0) EmitCloth(view);
   UpdateParticles(dt, view);
@@ -2971,6 +2983,11 @@ void DemoScenes::CreateDemoScene() {
     nav_->Create();
     return;
   }
+  if (config_.demo_scene == "placement") {
+    placement_ = std::make_unique<PlacementDemo>(ctx_);
+    placement_->Create();
+    return;
+  }
   if (config_.demo_scene == "gym") {
     gym_ = std::make_unique<GymDemo>(ctx_);
     gym_->Create();
@@ -2979,6 +2996,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "puppet") {
     puppet_ = std::make_unique<PuppetDemo>(ctx_);
     puppet_->Create();
+    return;
+  }
+  if (config_.demo_scene == "drive") {
+    drive_ = std::make_unique<DriveDemo>(ctx_);
+    drive_->Create();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));

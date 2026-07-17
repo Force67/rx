@@ -62,7 +62,6 @@ class RX_LOCOMOTION_EXPORT LocomotionController {
 
   // True when `watched` (pelvis/torso) touches something that is not part of the
   // rig this tick — used by the grounded detection.
-  bool IsRigBody(physics::BodyId id) const;
   bool HasEnvironmentContact(physics::BodyId watched) const;
 
   // World-space ankle pivot of a foot (0 = left, 1 = right), reconstructed from
@@ -76,6 +75,7 @@ class RX_LOCOMOTION_EXPORT LocomotionController {
   // both the normal and safety-stop actuation paths use, so SetJointDrive (which
   // walks Jolt constraint settings) is re-issued only when the budget moved.
   void ApplyJointDrive(RigJoint j, f32 torque);
+  void ResetDebugState();
 
   physics::PhysicsWorld* physics_ = nullptr;
   ControllerParameters params_{};
@@ -91,6 +91,7 @@ class RX_LOCOMOTION_EXPORT LocomotionController {
   GaitState gait_{};
   WholeBodyTargets targets_{};
   DebugState debug_{};
+  Vec3 controlled_facing_{0, 0, -1};
 
   ControlMode mode_ = ControlMode::kStable;
   f32 mode_time_ = 0;

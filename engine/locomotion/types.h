@@ -239,6 +239,7 @@ enum class ControlMode : u8 {
 // diagnosable from this without a debugger (docs/LOCOMOTION.md).
 struct DebugState {
   Vec3 desired_velocity{};
+  Vec3 controlled_facing{0, 0, -1};
   Vec3 measured_velocity{};
   Vec3 com_position{};
   Vec3 com_velocity{};

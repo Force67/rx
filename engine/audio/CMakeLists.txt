@@ -5,6 +5,10 @@ rx_add_module(audio
   mixer.cc
   audio_device.cc
   audio_system.cc
+  synth_voice.cc
+  engine_synth.cc
+  aux_synth.cc
+  vehicle_audio.cc
 )
 
 # Sound bytes come from the application's Vfs; the mixer math and decoders only

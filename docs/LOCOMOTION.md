@@ -91,9 +91,10 @@ Measured v1 capabilities (all asserted by `test/locomotion_test.cc` on real Jolt
   to `kStable` within 2 s.
 - **Controlled falls**: overwhelming pushes enter `kControlledFall` and settle
   into `kGrounded` without motor energy injection; everything stays finite.
-- **Walking** is real but slow and fragile: the stable regime lives around
-  commanded 0.5–0.7 m/s with modest net translation; faster commands are
-  handled by falling gracefully rather than exploding. This is a genuine
+- **Walking** is real but slow and fragile: the portable acceptance point is a
+  0.5 m/s command over a three-second window. A 0.7 m/s command is the upper
+  edge of the observed tuning envelope, not a cross-platform guarantee; faster
+  commands are handled by falling gracefully rather than exploding. This is a genuine
   dynamic ceiling of the current rig + 60 Hz single-step position-motor
   control, established across two dedicated tuning passes (≈80 measured
   configurations of Raibert placement, capture-error correction, toe-off,

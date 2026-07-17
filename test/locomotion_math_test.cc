@@ -61,7 +61,7 @@ bool FlatProbe(void* context, const Vec3& probe_start, f32 max_depth, GroundHit*
 // Always hits, but on a slope steeper than the default max_ground_slope (0.7
 // rad): acos(0.6) ~= 0.93 rad.
 bool SteepProbe(void*, const Vec3& probe_start, f32, GroundHit* out) {
-  out->position = {probe_start.x, 0, probe_start.z};
+  out->position = {probe_start.x, -0.25f, probe_start.z};
   out->normal = Normalize(Vec3{0.8f, 0.6f, 0});
   return true;
 }
@@ -355,6 +355,10 @@ void TestFootstepPlanner() {
   Check(steep.rejected == StepReject::kTooSteep, "steep terrain sets kTooSteep");
   Near(steep.target.x, m.foot[0].position.x, "steep step lands at swing start x", 1e-3f);
   Near(steep.target.z, m.foot[0].position.z, "steep step lands at swing start z", 1e-3f);
+  Near(steep.target.y, m.foot[0].position.y, "steep step keeps its lift-off height", 1e-3f);
+  const Vec3 steep_up = Rotate(steep.foot_orientation, {0, 1, 0});
+  Near(steep_up.x, 0.0f, "steep rejection does not reuse the hit normal x", 1e-3f);
+  Near(steep_up.y, 1.0f, "steep rejection keeps the sole upright", 1e-3f);
   Check(Finite(steep.target) && Finite(steep.swing_position), "steep outputs finite");
 
   // Missing terrain: rejected as kNoGroundHit, stepped in place.
@@ -592,6 +596,22 @@ void TestWholeBodyStanding() {
     Near(out.root_assist_torque.y, 0.0f, "airborne torque y zero");
     Near(out.root_assist_torque.z, 0.0f, "airborne torque z zero");
   }
+
+  // (d) Planned foot yaw survives the leg solve instead of being reduced to
+  // only the sole normal.
+  {
+    FootPlan yawed[kFootCount] = {plan[0], plan[1]};
+    yawed[0].foot_orientation = QuatFromAxisAngle({0, 1, 0}, 0.2f);
+    const CharacterMeasurements m = MakeStanding(rig, params, rig.pelvis_height);
+    WholeBodyTargets out;
+    BuildWholeBodyTargets(m, contacts, gait, yawed, intent, modifiers, params, rig, &out);
+    const Quat chain = out.joint_target[static_cast<u32>(RigJoint::kHipL)] *
+                       out.joint_target[static_cast<u32>(RigJoint::kKneeL)] *
+                       out.joint_target[static_cast<u32>(RigJoint::kAnkleL)];
+    const Vec3 actual_forward = Rotate(chain, {0, 0, -1});
+    const Vec3 desired_forward = Rotate(yawed[0].foot_orientation, {0, 0, -1});
+    Check(Dot(actual_forward, desired_forward) > 0.995f, "leg targets preserve planned foot yaw");
+  }
 }
 
 void TestWholeBodyLean() {
@@ -631,6 +651,13 @@ void TestWholeBodyLean() {
 
   // A forward velocity error drives a forward planar assist (-Z).
   Check(out_move.root_assist_force.z < 0.0f, "forward velocity error assists forward");
+  Check(out_move.root_assist_torque.x < 0.0f, "forward velocity error leans toward -Z");
+
+  LocomotionIntent reverse = moving;
+  reverse.desired_velocity = {0, 0, 3.0f};
+  WholeBodyTargets out_reverse;
+  BuildWholeBodyTargets(m, contacts, gait, plan, reverse, modifiers, params, rig, &out_reverse);
+  Check(out_reverse.root_assist_torque.x > 0.0f, "backward velocity error reverses lean direction");
 }
 
 }  // namespace
