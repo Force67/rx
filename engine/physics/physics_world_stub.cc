@@ -37,6 +37,7 @@ Vec3 PhysicsWorld::GetAngularVelocity(BodyId) const { return {}; }
 Vec3 PhysicsWorld::GetPointVelocity(BodyId, const Vec3&) const { return {}; }
 f32 PhysicsWorld::GetBodyMass(BodyId) const { return 0; }
 void PhysicsWorld::SetBodyInertia(BodyId, const Vec3&) {}
+void PhysicsWorld::SetBodyMass(BodyId, f32) {}
 void PhysicsWorld::InstallVehicleFriction(u32) {}
 BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc&, const Vec3&, const f32[4], f32, f32, f32,
                                      f32, i32, u32) {

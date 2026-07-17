@@ -244,7 +244,82 @@ Force models (`BoatDesc`):
 
 `rpm`, `engine_load` (`0..1`, spool-limited thrust fraction), `throttle`,
 `speed_mps`, `forward_speed` (signed, hull axis), `planing` (`0..1`), `wetted`
-(`0..1` submerged-sample fraction), `prop_submerged`, `position`, `rotation`.
+(`0..1` submerged-sample fraction), `draft_m` (submerged hull depth, waterline −
+hull bottom, from the grid's submerged fraction so it tracks load and swell),
+`freeboard_m` (hull depth left above the waterline), `cargo_kg` (current load),
+`prop_submerged`, `position`, `rotation`.
+
+### Boat profiles & cargo
+
+![empty barge](media/vehicles/barge_empty.jpg)
+![overloaded barge](media/vehicles/barge_laden.jpg)
+
+
+`engine/physics/boat_profiles.h` ships five fully-tuned `BoatDesc` presets so a
+dinghy handles like a dinghy and a work barge like a barge straight out of the
+`Boat` constructor — the boat-side mirror of the [handling profiles](#handling-profiles).
+Each is a free function returning a complete desc (hull dims, mass, engine/prop,
+drag/planing/righting tune and cargo capacity) with a one-line signature comment.
+
+| Profile | Length | Mass | Cargo cap. | Signature |
+| --- | --- | --- | --- | --- |
+| `DinghyProfile` | ~3 m | 220 kg | 200 kg | light, twitchy, planes early, low top speed; shallow ballast → capsizes far more easily |
+| `SpeedboatProfile` | ~6 m | 1400 kg | 1600 kg | fast, planes hard, agile — the benchmark (equals the `BoatDesc` defaults) |
+| `JetskiProfile` | ~2.2 m | 350 kg | 120 kg | extreme thrust-to-weight, planes almost at once, spins on a dime, easily flipped but self-rights |
+| `FishingBoatProfile` | ~9 m | 6500 kg | 5000 kg | heavy displacement hull, high drag, very stable (strong ballast); barely planes even empty |
+| `WorkBargeProfile` | ~12 m | 12000 kg | 31000 kg | very heavy, huge capacity, enormous draft when laden, slow big-torque engine, wide turning; never planes |
+
+**Cargo / draft model.** `BoatDesc` gains `max_cargo_kg`, a `cargo_overload_fraction`
+(SetCargo clamps to `max_cargo_kg × fraction`, so an overloaded boat still floats
+— like the aircraft's over-MTOM spawn — with little reserve) and a
+`cargo_com_offset`. `Boat::SetCargo(kg)` applies the load at runtime through the
+new `PhysicsWorld::SetBodyMass(BodyId, kg)` primitive (Jolt inverse-mass +
+proportionally scaled inverse-inertia, stub-mirrored). Every consequence is
+**emergent, not scripted**: the buoyancy grid displaces the same volume, so more
+weight settles the hull deeper (draft) until it rebalances; the extra mass *and*
+inertia slow acceleration and turning; the deeper hull stays wetted so it planes
+later or never; and `cargo_com_offset.y` (cargo above the centre) shrinks the
+effective ballast lever, cutting the self-righting margin. The structural limit
+sits close to unstable by design — a `1.25×` barge floats in calm water with its
+deck near awash and feels precarious in chop.
+
+**Measured behaviour** (from `test/boat_profiles_test.cc`, headless, flat water,
+real Jolt path — the test asserts the *orderings*, not the absolutes):
+
+| Profile | Draft empty → full | Sustained top speed | Turn rate | Planing |
+| --- | --- | --- | --- | --- |
+| Dinghy | 0.059 → 0.113 m | 9.1 m/s | 0.283 rad/s | early |
+| Speedboat | 0.134 → 0.287 m | 16.0 m/s (laden 11.8) | 0.512 rad/s | empty wetted 0.59 (up on plane), laden 1.00 (plows) |
+| Jetski | 0.159 → 0.214 m | 8.5 m/s¹ | 0.495 rad/s | almost immediately |
+| Fishing | 0.274 → 0.481 m | 4.0 m/s | 0.076 (laden 0.060) | barely |
+| Barge | 0.303 → 1.083 m | 3.8 m/s | 0.056 rad/s | never (0.00) |
+
+¹ The jetski's top speed is limited by its light hull porpoising at the ragged
+edge of the plane (its "easily flipped" character); its class is the agility and
+launch, not outright speed.
+
+Further proven: the **empty-draft ordering** dinghy < speedboat < fishing < barge
+holds and every profile's **laden draft exceeds its empty draft** by a material
+margin (the barge by 0.78 m — tens of cm). Under an identical knock-down the
+**laden dinghy capsizes** (uprightness −1.0, stays inverted) while the **fishing
+boat self-rights** (1.0); at the structural overload the fishing boat still rights
+but **~2.8× slower** (2.65 s vs 0.95 s to recover). An **overloaded barge's deck
+sits near awash** — freeboard 1.10 m empty → 0.12 m at `1.25×` — while its draft
+goes 0.30 → 1.27 m. All five profiles and every load state are NaN-free over a
+minute of Gerstner chop, including a mid-run `SetCargo` load transfer.
+
+### Live in the demo
+
+While the **boat** is the active vehicle, number keys **1–5** swap the boat-type
+profile (dinghy/speedboat/jetski/fishing/barge) — the boat respawns on the lake
+at its current pose and the audio voice swaps to the profile's engine — and key
+**L** cycles the cargo load `0% → 50% → 100% → 125%` (structural overload) via
+`SetCargo`, so the hull **visibly settles deeper** each step (GPU-verified: an
+empty barge floats high at 0.30 m draft / 1.10 m freeboard, a `125%`-laden barge
+sits buried to the deck rail at 1.27 m / 0.13 m). The HUD shows the profile name,
+cargo/capacity, draft and freeboard. `RX_DRIVE_BOAT=dinghy|speed|jetski|fishing|
+barge` and `RX_DRIVE_CARGO=<0..1.25>` force the initial profile and load for
+headless captures.
 
 ---
 
@@ -420,7 +495,8 @@ when the assets are absent.
 | Input | Action |
 | --- | --- |
 | **Tab** | Cycle the active vehicle |
-| **1–6** | Swap the car's handling profile (sports/muscle/hatch/SUV/van/semi) |
+| **1–6 / 1–5** | Car active: swap the handling profile (sports/muscle/hatch/SUV/van/semi). Boat active: swap the boat-type profile (dinghy/speedboat/jetski/fishing/barge) |
+| **L** | Boat active: cycle cargo load 0% / 50% / 100% / 125% (overload) — the hull settles deeper |
 | **W / S** | Throttle / brake-reverse (car + boat) or throttle up / down (plane) |
 | **A / D** | Steer (car) or rudder (boat / plane) |
 | **Arrows** | Plane pitch / roll |
@@ -438,7 +514,10 @@ when the assets are absent.
 `RX_DRIVE_AUTO=1` holds full throttle on it (takeoff flaps + a rotate/ease
 elevator schedule for the plane), so screenshot/CI runs show motion without
 input. `RX_DRIVE_PROFILE=sports|muscle|hatch|suv|van|semi` forces the car's
-initial handling profile. Combine with `RX_HIDE_DEBUG_UI=1` and the usual
+initial handling profile; `RX_DRIVE_BOAT=dinghy|speed|jetski|fishing|barge` and
+`RX_DRIVE_CARGO=<0..1.25>` force the boat's profile and cargo fraction (either one
+also makes the boat the initial vehicle), so a capture can show an empty barge vs
+a laden one sitting deep. Combine with `RX_HIDE_DEBUG_UI=1` and the usual
 `RX_UI_SHOT` / `RX_UI_SHOT_FRAMES` to take the shots above.
 
 ---

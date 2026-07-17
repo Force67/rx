@@ -110,6 +110,27 @@ struct BoatDesc {
   // Air is ~1.225 kg/m^3 and the box topside areas are modest, so this is a
   // conservative nudge, not a capsizing force. 0 disables it.
   f32 wind_drag = 0.8f;
+
+  // --- cargo load (see Boat::SetCargo) ---
+  // Rated cargo capacity, kg. SetCargo adds this mass to the hull at runtime, so
+  // a laden boat displaces more water and settles measurably DEEPER (draft is
+  // emergent from the buoyancy grid, not scripted), accelerates and turns more
+  // sluggishly (mass AND inertia grow via SetBodyMass) and planes later or never
+  // as its wetted area stays large. 0 disables cargo.
+  f32 max_cargo_kg = 600.0f;
+  // Structural overload margin: SetCargo clamps to max_cargo_kg * this factor, so
+  // an overloaded boat still floats (like the aircraft's over-MTOM spawn) but
+  // with little reserve buoyancy and a reduced righting margin - it survives calm
+  // water and feels precarious in chop. Must be >= 1 (a value below 1 is treated
+  // as 1, i.e. no overload headroom).
+  f32 cargo_overload_fraction = 1.25f;
+  // Where the cargo mass sits, boat-local, relative to the geometric hull centre
+  // (x = beam, y = up, z = fwd). A positive y raises the combined centre of mass
+  // toward/above the waterline, SHRINKING the effective ballast lever (com_drop)
+  // and so the self-righting margin - an overloaded boat is closer to unstable.
+  // The fore/aft (z) component trims the hull down by the bow/stern as a static
+  // couple the buoyancy grid settles against. Default: slightly above centre.
+  Vec3 cargo_com_offset{0.0f, 0.35f, -0.1f};
 };
 
 // Per-frame driver input. throttle and steer are -1..1; trim is -1..1 and
@@ -131,6 +152,13 @@ struct BoatState {
   f32 forward_speed = 0.0f; // signed speed along the hull forward axis, m/s
   f32 planing = 0.0f;       // 0..1, planing fraction
   f32 wetted = 0.0f;        // 0..1, fraction of buoyancy samples submerged
+  // Draft: the submerged hull depth in metres (waterline minus hull bottom),
+  // measured honestly from the buoyancy grid's submerged fraction so it tracks
+  // load and chop. freeboard_m is the hull depth left above the waterline (deck
+  // minus waterline); it falls toward 0 as cargo swamps the reserve buoyancy.
+  f32 draft_m = 0.0f;
+  f32 freeboard_m = 0.0f;
+  f32 cargo_kg = 0.0f;      // current cargo load (SetCargo), kg
   bool prop_submerged = false;
   Vec3 position{};          // hull body centre, world
   Quat rotation{};          // hull orientation, world (x,y,z,w)
@@ -151,6 +179,23 @@ class RX_PHYSICS_EXPORT Boat {
   // BEFORE PhysicsWorld::Update(dt). dt seconds must be the world's fixed step.
   void Update(const BoatInput& input, f32 dt);
 
+  // Sets the cargo load in kg, applied to the hull body at runtime. Clamped to
+  // [0, max_cargo_kg * cargo_overload_fraction]: any value above max_cargo_kg is
+  // a structural overload that still floats but with reduced reserve buoyancy and
+  // righting margin. The added mass makes the hull sit deeper (emergent draft),
+  // accelerate and turn more sluggishly and plane later; cargo_com_offset raises
+  // the effective centre of mass, cutting the self-righting margin. Cheap and
+  // safe to call every frame or mid-run (a load transfer). No-op on a stub body.
+  void SetCargo(f32 kg);
+  f32 cargo_kg() const { return cargo_kg_; }
+  f32 loaded_mass_kg() const { return loaded_mass_; }  // hull mass + cargo, kg
+  // Rated capacity and the structural overload ceiling SetCargo clamps to.
+  f32 max_cargo_kg() const { return desc_.max_cargo_kg; }
+  f32 cargo_limit_kg() const {
+    const f32 f = desc_.cargo_overload_fraction < 1.0f ? 1.0f : desc_.cargo_overload_fraction;
+    return desc_.max_cargo_kg * f;
+  }
+
   const BoatState& state() const { return state_; }
   BodyId body() const { return body_; }
   const BoatDesc& desc() const { return desc_; }
@@ -160,7 +205,11 @@ class RX_PHYSICS_EXPORT Boat {
   PhysicsWorld& world_;
   BoatDesc desc_;
   BodyId body_ = 0;
-  f32 rpm_ = 0.0f;  // engine speed, spooled toward the throttle target
+  f32 rpm_ = 0.0f;         // engine speed, spooled toward the throttle target
+  f32 base_mass_ = 0.0f;   // hull mass at spawn (desc_.mass), kg
+  f32 cargo_kg_ = 0.0f;    // current cargo, kg
+  f32 loaded_mass_ = 0.0f; // base_mass_ + cargo_kg_, the body's live mass
+  f32 eff_com_drop_ = 0.0f;  // ballast lever after the cargo CoM shift, m
   BoatState state_;
 };
 

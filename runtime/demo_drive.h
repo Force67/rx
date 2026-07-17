@@ -92,6 +92,13 @@ class DriveDemo {
   // Despawns the car and respawns it with handling profile `index` (0..5) at its
   // current position/heading (stationary). Number keys 1-6 call this live.
   void SetCarProfile(u32 index);
+  // Despawns the boat and respawns it with boat-type profile `index` (0..4) at
+  // its current pose (re-settling on the lake), re-applying the current cargo and
+  // swapping the audio voice. Keys 1-5 call this live while the boat is active.
+  void SetBoatProfile(u32 index);
+  // Applies cargo `frac` (of the profile's max_cargo_kg; > 1 overloads) to the
+  // live boat via Boat::SetCargo, so it visibly settles deeper. Key L cycles it.
+  void SetBoatCargo(f32 frac);
   void UpdateChaseCamera(f32 dt, const InputState& input, const ActionState& actions,
                          bool allow_keyboard, bool allow_mouse);
   void DrawPanel();
@@ -133,6 +140,14 @@ class DriveDemo {
 
   f32 boat_throttle_ = 0;
   f32 boat_steer_ = 0;
+
+  // Active boat-type profile (0..4: dinghy/speedboat/jetski/fishing/barge), the
+  // desc it resolved to (for the hull-scale + HUD) and the current cargo fraction
+  // cycled by key L (0 / 0.5 / 1.0 / 1.25-overload).
+  u32 boat_profile_ = 1;  // speedboat by default (the BoatDesc defaults)
+  physics::BoatDesc boat_desc_{};
+  u32 boat_cargo_step_ = 0;  // 0/1/2/3 -> 0 / 0.5 / 1.0 / 1.25
+  f32 boat_cargo_frac_ = 0;
 
   f32 plane_throttle_ = 0;  // persistent 0..1
   f32 plane_pitch_ = 0;

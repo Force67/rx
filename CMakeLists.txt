@@ -397,6 +397,17 @@ if(RX_BUILD_TESTS)
     add_test(NAME boat_test COMMAND boat_test)
   endif()
 
+  # Boat-type profiles + cargo load: measured, ordered proof that the five presets
+  # (engine/physics/boat_profiles.h) float and handle differently and that cargo
+  # sinks the hull deeper, slows accel/turning, delays planing and eats freeboard
+  # - settle-draft/top-speed/turn-rate orderings, capsize vs self-right, an
+  # overloaded barge near awash, and NaN-free chop. Headless, needs Jolt.
+  if(RX_JOLT)
+    add_executable(boat_profiles_test test/boat_profiles_test.cc)
+    target_link_libraries(boat_profiles_test PRIVATE rx::physics rx::core)
+    add_test(NAME boat_profiles_test COMMAND boat_profiles_test)
+  endif()
+
   add_executable(world_streaming_test test/world_streaming_test.cc)
   target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME world_streaming_test COMMAND world_streaming_test)

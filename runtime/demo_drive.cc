@@ -14,6 +14,7 @@
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "ecs/world.h"
+#include "physics/boat_profiles.h"
 #include "physics/vehicle_profiles.h"
 #include "scene/components.h"
 
@@ -41,6 +42,11 @@ base::Option<bool> AutoThrottle{"drive.auto", false, "RX_DRIVE_AUTO"};
 // RX_DRIVE_PROFILE=sports|muscle|hatch|suv|van|semi forces the car's initial
 // handling profile for headless captures (pair with RX_DRIVE_VEHICLE=car).
 base::Option<const char*> StartProfile{"drive.profile", nullptr, "RX_DRIVE_PROFILE"};
+// RX_DRIVE_BOAT=dinghy|speed|jetski|fishing|barge forces the initial boat-type
+// profile and RX_DRIVE_CARGO=<0..1.25> its cargo load fraction (of max_cargo_kg;
+// > 1 overloads), so a headless capture can show a laden barge sitting deep.
+base::Option<const char*> StartBoat{"drive.boat", nullptr, "RX_DRIVE_BOAT"};
+base::Option<float> StartCargo{"drive.cargo", 0.0f, "RX_DRIVE_CARGO"};
 
 // The six handling profiles (engine/physics/vehicle_profiles.h), keyed 1-6.
 constexpr u32 kProfileCount = 6;
@@ -74,6 +80,42 @@ u32 ProfileFromName(const char* s, u32 fallback) {
     if (std::strstr(s, keys[i])) return i;
   return fallback;
 }
+
+// The five boat-type profiles (engine/physics/boat_profiles.h), keyed 1-5 while
+// the boat is the active vehicle.
+constexpr u32 kBoatProfileCount = 5;
+const char* BoatProfileName(u32 i) {
+  static const char* kNames[kBoatProfileCount] = {"DINGHY", "SPEEDBOAT", "JETSKI", "FISHING BOAT",
+                                                  "WORK BARGE"};
+  return kNames[i % kBoatProfileCount];
+}
+physics::BoatDesc BoatProfileDesc(u32 i) {
+  switch (i % kBoatProfileCount) {
+    case 0: return physics::DinghyProfile();
+    case 1: return physics::SpeedboatProfile();
+    case 2: return physics::JetskiProfile();
+    case 3: return physics::FishingBoatProfile();
+    default: return physics::WorkBargeProfile();
+  }
+}
+// Audio voice per profile: the big displacement hulls run a low inboard diesel;
+// the light outboard dinghy a buzzier four; the jetski a high-revving twin.
+audio::EnginePreset BoatEnginePreset(u32 i) {
+  switch (i % kBoatProfileCount) {
+    case 0: return audio::InlineFourCarPreset();   // dinghy outboard
+    case 2: return audio::MotorcycleTwinPreset();  // jetski
+    default: return audio::InboardBoatPreset();    // speedboat / fishing / barge
+  }
+}
+u32 BoatProfileFromName(const char* s, u32 fallback) {
+  if (!s) return fallback;
+  const char* keys[kBoatProfileCount] = {"dinghy", "speed", "jetski", "fishing", "barge"};
+  for (u32 i = 0; i < kBoatProfileCount; ++i)
+    if (std::strstr(s, keys[i])) return i;
+  return fallback;
+}
+// Cargo cycle L: 0% -> 50% -> 100% -> 125% (structural overload).
+constexpr f32 kCargoSteps[4] = {0.0f, 0.5f, 1.0f, 1.25f};
 
 // --- terrain layout (world XZ, metres) -------------------------------------
 constexpr f32 kTerrainSize = 400.0f;
@@ -322,6 +364,8 @@ void DriveDemo::Create() {
       active_ = Vehicle::kBoat;
     else if (!std::strcmp(v, "plane"))
       active_ = Vehicle::kPlane;
+  } else if (StartBoat.get() || StartCargo.get() > 0.0f) {
+    active_ = Vehicle::kBoat;  // a boat-capture env implies the boat is the subject
   }
 
   // Physics-coupled vehicle stepping: stage this step's inputs/forces BEFORE the
@@ -334,8 +378,10 @@ void DriveDemo::Create() {
 
   RX_INFO(
       "drive demo: Tab cycle car/boat/plane, 1-6 car handling profile "
-      "(sports/muscle/hatch/suv/van/semi), WASD drive/steer, arrows fly, Space handbrake/brakes, "
-      "M manual, Shift/Ctrl shift, F flaps, J rain, R reset, C chase/free camera");
+      "(sports/muscle/hatch/suv/van/semi) or 1-5 boat profile "
+      "(dinghy/speedboat/jetski/fishing/barge) + L cargo when the boat is active, "
+      "WASD drive/steer, arrows fly, Space handbrake/brakes, M manual, Shift/Ctrl shift, "
+      "F flaps, J rain, R reset, C chase/free camera");
 }
 
 void DriveDemo::BuildTerrain() {
@@ -656,8 +702,18 @@ void DriveDemo::SpawnVehicles() {
   car_spawn_.y = HeightAt(car_spawn_.x, car_spawn_.z) + clearance;
   car_ = phys.CreateVehicle(car_desc_, car_spawn_, car_yaw_);
 
-  // Boat on the lake (BoatDesc defaults).
-  boat_ = std::make_unique<physics::Boat>(phys, physics::BoatDesc{}, boat_spawn_, boat_yaw_);
+  // Boat on the lake: one of the five boat-type profiles (keys 1-5 swap live),
+  // optionally overridden + pre-loaded with cargo for headless captures.
+  boat_profile_ = BoatProfileFromName(StartBoat.get(), boat_profile_);  // RX_DRIVE_BOAT
+  boat_desc_ = BoatProfileDesc(boat_profile_);
+  boat_ = std::make_unique<physics::Boat>(phys, boat_desc_, boat_spawn_, boat_yaw_);
+  {
+    const f32 frac = std::clamp(StartCargo.get(), 0.0f, boat_desc_.cargo_overload_fraction);
+    // Snap the cargo cycle step to the nearest preset step for key-L cycling.
+    boat_cargo_step_ = frac >= 1.13f ? 3 : (frac >= 0.75f ? 2 : (frac >= 0.25f ? 1 : 0));
+    boat_cargo_frac_ = frac;
+    boat_->SetCargo(frac * boat_desc_.max_cargo_kg);
+  }
 
   // Plane at the runway threshold; spawn ~0.25 m above rest and let the gear
   // settle. The default 220 kg payload leaves too little excess power (the plane
@@ -676,7 +732,7 @@ void DriveDemo::SetupAudio() {
   if (!ctx_.audio) return;
   audio::Mixer& mix = ctx_.audio->mixer();
   car_audio_ = std::make_unique<audio::VehicleAudio>(mix, audio::V8Preset());
-  boat_audio_ = std::make_unique<audio::VehicleAudio>(mix, audio::InboardBoatPreset());
+  boat_audio_ = std::make_unique<audio::VehicleAudio>(mix, BoatEnginePreset(boat_profile_));
   plane_audio_ = std::make_unique<audio::VehicleAudio>(mix, audio::SinglePropPlanePreset());
 }
 
@@ -784,6 +840,44 @@ void DriveDemo::SetCarProfile(u32 index) {
           static_cast<i32>(car_desc_.mass));
 }
 
+void DriveDemo::SetBoatProfile(u32 index) {
+  index %= kBoatProfileCount;
+  boat_profile_ = index;
+  boat_desc_ = BoatProfileDesc(index);
+
+  // Respawn on the lake at the current pose (re-settling from a small height);
+  // the force-based Boat has no velocity setter, so like the car it respawns
+  // stationary. Fall back to the spawn pose when there is no live boat yet.
+  Vec3 pos = boat_spawn_;
+  f32 yaw = boat_yaw_;
+  if (boat_ && boat_->valid()) {
+    const physics::BoatState& s = boat_->state();
+    const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
+    pos = {s.position.x, boat_spawn_.y, s.position.z};
+    yaw = std::atan2(fwd.x, fwd.z);
+    ctx_.physics->RemoveBody(boat_->body());  // Boat has no dtor cleanup
+  }
+  boat_ = std::make_unique<physics::Boat>(*ctx_.physics, boat_desc_, pos, yaw);
+  boat_->SetCargo(boat_cargo_frac_ * boat_desc_.max_cargo_kg);
+
+  // Swap the audio voice to this profile's engine (dinghy outboard / inboard /
+  // jetski twin).
+  if (ctx_.audio)
+    boat_audio_ = std::make_unique<audio::VehicleAudio>(ctx_.audio->mixer(), BoatEnginePreset(index));
+
+  cam_init_ = false;
+  RX_INFO("drive: boat profile -> {} ({} kg, cargo cap {} kg)", BoatProfileName(index),
+          static_cast<i32>(boat_desc_.mass), static_cast<i32>(boat_desc_.max_cargo_kg));
+}
+
+void DriveDemo::SetBoatCargo(f32 frac) {
+  boat_cargo_frac_ = std::clamp(frac, 0.0f, boat_desc_.cargo_overload_fraction);
+  if (boat_ && boat_->valid()) boat_->SetCargo(boat_cargo_frac_ * boat_desc_.max_cargo_kg);
+  RX_INFO("drive: boat cargo -> {} kg ({:.0f}% of {} kg)",
+          static_cast<i32>(boat_cargo_frac_ * boat_desc_.max_cargo_kg), boat_cargo_frac_ * 100.0f,
+          static_cast<i32>(boat_desc_.max_cargo_kg));
+}
+
 void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actions,
                        bool allow_keyboard, bool allow_mouse) {
   if (dt <= 0) return;
@@ -797,12 +891,23 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     }
     if (input.key_pressed(Key::kC)) free_cam_ = !free_cam_;
     if (input.key_pressed(Key::kR)) ResetActive();
-    // Number keys 1-6 swap the car's handling profile live.
-    const Key kProfileKeys[6] = {Key::k1, Key::k2, Key::k3, Key::k4, Key::k5, Key::k6};
-    for (u32 i = 0; i < 6; ++i) {
-      if (input.key_pressed(kProfileKeys[i])) {
-        active_ = Vehicle::kCar;
-        SetCarProfile(i);
+    // Number keys are context-sensitive: while the boat is active, 1-5 swap the
+    // boat-type profile; otherwise 1-6 swap the car's handling profile (and make
+    // the car active). Key L cycles the boat's cargo load when it is active.
+    const Key kNumKeys[6] = {Key::k1, Key::k2, Key::k3, Key::k4, Key::k5, Key::k6};
+    if (active_ == Vehicle::kBoat) {
+      for (u32 i = 0; i < kBoatProfileCount; ++i)
+        if (input.key_pressed(kNumKeys[i])) SetBoatProfile(i);
+      if (input.key_pressed(Key::kL)) {
+        boat_cargo_step_ = (boat_cargo_step_ + 1) % 4;
+        SetBoatCargo(kCargoSteps[boat_cargo_step_]);
+      }
+    } else {
+      for (u32 i = 0; i < 6; ++i) {
+        if (input.key_pressed(kNumKeys[i])) {
+          active_ = Vehicle::kCar;
+          SetCarProfile(i);
+        }
       }
     }
     if (input.key_pressed(Key::kM) && car_) {
@@ -1013,13 +1118,23 @@ void DriveDemo::Emit(f32 dt, render::FrameView& view) {
     }
   }
 
-  // Boat: procedural hull at the hull pose. The physics box displaces 1400 kg
-  // over its full 10.4 m^2 footprint, an honest but visually tiny 0.13 m draft;
-  // a real V-bottom boat of this mass sits much deeper. Sink the visual hull
-  // along boat-local up so the waterline reads through the bilge, not under it.
+  // Boat: procedural hull scaled to the active profile's hull box, at the hull
+  // pose. The hull mesh is authored for the default (speedboat) 0.9x0.5x2.9 box,
+  // so scale it per profile; the physics box already floats at the emergent draft
+  // (deeper when laden), so the waterline cuts the drawn hull at the true draft.
+  // A small PROPORTIONAL artistic sink (0.56 x hull half-height, = the old 0.28 m
+  // for the default hull) settles the empty hull so it reads through the bilge,
+  // clamped so a laden hull whose deck is genuinely near awash is never pushed
+  // further under than the physics says.
   if (boat_ && boat_->valid()) {
+    const Vec3& he = boat_desc_.hull_half_extent;
+    const Vec3 hull_scale{he.x / 0.9f, he.y / 0.5f, he.z / 2.9f};
+    const f32 box_center_y = boat_->state().position.y;
+    const f32 art_sink = 0.56f * he.y;              // 0.28 m for the default hull
+    const f32 max_sink = box_center_y + he.y + 0.05f;  // keep drawn deck ~ at/above awash
+    const f32 sink = std::clamp(art_sink, 0.0f, std::max(0.0f, max_sink));
     const Mat4 t = MakeTransform(boat_->state().position, boat_->state().rotation, 1.0f) *
-                   MakeTranslation({0.0f, -0.28f, 0.0f});
+                   MakeTranslation({0.0f, -sink, 0.0f}) * ScaleMat(hull_scale);
     render::DrawItem d{};
     d.mesh = boat_mesh_;
     d.transform = t;
@@ -1081,11 +1196,17 @@ void DriveDemo::DrawPanel() {
       ImGui::TextDisabled("W throttle  S brake/reverse  A/D steer  Space handbrake  1-6 profile");
     } else if (active_ == Vehicle::kBoat && boat_ && boat_->valid()) {
       const physics::BoatState& bs = boat_->state();
+      ImGui::Text("profile: %s  %d kg  (1-5)", BoatProfileName(boat_profile_),
+                  static_cast<int>(boat_desc_.mass));
+      const bool overload = bs.cargo_kg > boat_desc_.max_cargo_kg + 1.0f;
+      ImGui::Text("cargo: %.0f / %.0f kg  (L)%s", bs.cargo_kg, boat_desc_.max_cargo_kg,
+                  overload ? "   OVERLOAD" : "");
+      ImGui::Text("draft %.2f m   freeboard %.2f m", bs.draft_m, bs.freeboard_m);
       ImGui::Text("speed %.0f km/h   rpm %.0f   load %.0f%%", bs.speed_mps * 3.6f, bs.rpm,
                   bs.engine_load * 100.0f);
       ImGui::Text("planing: %s (%.0f%%)   prop %s", bs.planing > 0.5f ? "YES" : "no",
                   bs.planing * 100.0f, bs.prop_submerged ? "wet" : "ventilated");
-      ImGui::TextDisabled("W/S throttle  A/D steer");
+      ImGui::TextDisabled("W/S throttle  A/D steer  1-5 profile  L cargo");
     } else if (active_ == Vehicle::kPlane && aircraft_ && aircraft_->valid()) {
       const physics::AircraftState& as = aircraft_->state();
       ImGui::Text("IAS %.0f km/h   alt %.0f m   VS %+.1f m/s", as.airspeed_mps * 3.6f,

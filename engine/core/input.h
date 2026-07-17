@@ -52,6 +52,7 @@ enum class Key : u8 {
   kM,
   k5,
   k6,
+  kL,
   kCount,
 };
 

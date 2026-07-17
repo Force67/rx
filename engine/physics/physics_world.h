@@ -111,6 +111,16 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // <= 0 leave that axis free (inverse inertia 0 = no angular response about
   // it); pass positive values. No-op on a static/kinematic body or dead handle.
   void SetBodyInertia(BodyId id, const Vec3& diagonal_kgm2);
+  // Rescales a dynamic body's mass to `kg` at runtime, scaling its inertia
+  // tensor by the same factor so the shape's mass DISTRIBUTION (its principal
+  // moments about the centre of mass) is preserved - the moving counterpart to
+  // spawning a box at a given density. A force-based simulator whose payload
+  // changes (the boat taking on cargo) makes its hull heavier this way instead
+  // of respawning it: the extra mass makes it accelerate and turn more slowly
+  // (mass AND inertia grow) and, for a buoyant hull, settle deeper. Mirrors
+  // SetBodyInertia's inverse-quantity conventions (inertia scales as old/new
+  // mass). kg <= 0, a static/kinematic body or a dead handle are ignored.
+  void SetBodyMass(BodyId id, f32 kg);
 
   // Static colliders. The trailing `surface` tags the collider so tire grip
   // and surface FX know what a wheel touches; it defaults to asphalt so

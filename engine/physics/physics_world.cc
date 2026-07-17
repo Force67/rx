@@ -1170,6 +1170,27 @@ void PhysicsWorld::SetBodyInertia(BodyId id, const Vec3& diagonal_kgm2) {
       JPH::Quat::sIdentity());
 }
 
+void PhysicsWorld::SetBodyMass(BodyId id, f32 kg) {
+  if (!impl_ || id == 0 || kg <= 0.0f) return;
+  JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(),
+                          JPH::BodyID(static_cast<JPH::uint32>(id - 1)));
+  if (!lock.Succeeded()) return;
+  JPH::Body& body = lock.GetBody();
+  if (body.IsStatic() || !body.GetMotionProperties()) return;
+  JPH::MotionProperties* mp = body.GetMotionProperties();
+  const f32 inv_mass = mp->GetInverseMassUnchecked();
+  if (inv_mass <= 0.0f) return;  // pinned to infinite mass; leave it be
+  // Jolt stores inverse mass and an inverse inertia diagonal. Inertia scales
+  // linearly with mass for a fixed distribution, so the inverse inertia scales
+  // by old_mass/new_mass; that keeps the body's rotational feel consistent with
+  // the new mass instead of leaving a box's old (lighter) inertia behind.
+  const f32 old_mass = 1.0f / inv_mass;
+  const f32 inertia_scale = old_mass / kg;
+  mp->SetInverseMass(1.0f / kg);
+  mp->SetInverseInertia(mp->GetInverseInertiaDiagonal() * inertia_scale,
+                        mp->GetInertiaRotation());
+}
+
 void PhysicsWorld::SetBodyKinematic(BodyId id) {
   if (!impl_ || id == 0) return;
   JPH::BodyID body(static_cast<JPH::uint32>(id - 1));

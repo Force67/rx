@@ -23,6 +23,7 @@ constexpr const char* kKeyTokens[] = {
     "LShift", "LCtrl",  "Escape",    "F1",    "F2",     "F3",    "F4",    "F5",
     "Delete", "Backspace", "Return", "1",     "2",      "3",     "4",     "J",
     "Up",     "Down",   "Left",      "Right", "Tab",   "M",     "5",     "6",
+    "L",
 };
 static_assert(sizeof(kKeyTokens) / sizeof(kKeyTokens[0]) == static_cast<int>(Key::kCount),
               "kKeyTokens must match the Key enum");

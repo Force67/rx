@@ -54,8 +54,28 @@ Boat::Boat(PhysicsWorld& world, const BoatDesc& desc, const Vec3& position, f32 
   // buoyancy; opting out keeps it from being applied twice.
   world_.set_buoyancy_exempt(body_, true);
   rpm_ = desc_.idle_rpm;
+  // Cargo bookkeeping: the body spawns at desc_.mass (density above), so that is
+  // the unladen hull mass and the effective ballast lever starts at com_drop.
+  base_mass_ = desc_.mass;
+  loaded_mass_ = desc_.mass;
+  eff_com_drop_ = desc_.com_drop;
   state_.position = position;
   state_.rotation = q;
+  state_.cargo_kg = 0.0f;
+}
+
+void Boat::SetCargo(f32 kg) {
+  cargo_kg_ = Clamp(kg, 0.0f, cargo_limit_kg());
+  loaded_mass_ = base_mass_ + cargo_kg_;
+  // Combined centre of mass along boat-local up: the hull sits com_drop below the
+  // geometric centre; the cargo sits at cargo_com_offset.y (typically above it).
+  // The mass-weighted average is the effective ballast lever the righting couple
+  // uses - as load grows above the centre it shrinks (and can go negative), so
+  // the self-righting margin falls and the hull nears instability.
+  const f32 denom = loaded_mass_ > 1e-3f ? loaded_mass_ : 1e-3f;
+  eff_com_drop_ = (base_mass_ * desc_.com_drop - cargo_kg_ * desc_.cargo_com_offset.y) / denom;
+  if (body_ != 0) world_.SetBodyMass(body_, loaded_mass_);
+  state_.cargo_kg = cargo_kg_;
 }
 
 void Boat::Update(const BoatInput& input, f32 dt) {
@@ -73,7 +93,10 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   const Vec3 forward = Rotate(q, Vec3{0, 0, 1});
   const Vec3 right = Rotate(q, Vec3{1, 0, 0});
   const Vec3 up = Rotate(q, Vec3{0, 1, 0});
-  const f32 weight = desc_.mass * kGravity;
+  // Weight uses the LOADED mass (hull + cargo); the buoyancy grid below is
+  // unchanged (it displaces by geometry), so more weight settles the hull deeper
+  // until displacement rebalances it - the emergent laden draft.
+  const f32 weight = loaded_mass_ * kGravity;
 
   // --- engine spool: rpm chases the throttle target with a first-order lag ---
   const f32 target_rpm =
@@ -232,14 +255,27 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   }
 
   // --- ballast keel righting couple (emulated lowered CoM) ---
-  // Relocating the weight to a point com_drop below the geometric centre adds a
-  // couple torque = r_ballast x (m*g down). Zero when upright, righting when
-  // heeled; the dominant self-righting term from a knock-down.
-  if (desc_.com_drop != 0.0f) {
-    const Vec3 r_ballast = up * (-desc_.com_drop);
+  // Relocating the weight to a point eff_com_drop below the geometric centre adds
+  // a couple torque = r_ballast x (m*g down). Zero when upright, righting when
+  // heeled; the dominant self-righting term from a knock-down. eff_com_drop is
+  // com_drop shrunk by any cargo sitting above the centre (SetCargo), so a laden
+  // hull rights weakly and an overload can go marginal.
+  if (eff_com_drop_ != 0.0f) {
+    const Vec3 r_ballast = up * (-eff_com_drop_);
     const Vec3 gravity_force{0.0f, -weight, 0.0f};
     const Vec3 righting = Cross(r_ballast, gravity_force);
     if (Finite(righting)) world_.AddTorque(body_, righting);
+  }
+  // --- cargo fore/aft trim couple ---
+  // Cargo offset along the hull axis (cargo_com_offset.z) hangs its weight fore
+  // or aft of the centre, a static pitch couple = r_cargo x (m_cargo*g down) that
+  // the buoyancy grid settles against (the loaded end sits deeper). Self-limiting
+  // like the ballast couple, so it trims rather than diverges.
+  if (cargo_kg_ > 0.0f && desc_.cargo_com_offset.z != 0.0f) {
+    const Vec3 r_cargo = Rotate(q, Vec3{0.0f, 0.0f, desc_.cargo_com_offset.z});
+    const Vec3 cargo_grav{0.0f, -cargo_kg_ * kGravity, 0.0f};
+    const Vec3 trim = Cross(r_cargo, cargo_grav);
+    if (Finite(trim)) world_.AddTorque(body_, trim);
   }
 
   // --- yaw-rate damping + trim ---
@@ -256,6 +292,14 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   state_.forward_speed = v_fwd;
   state_.planing = planing;
   state_.wetted = wetted;
+  // Draft from the honest submerged-volume fraction over the hull height, so it
+  // tracks load and swell; freeboard is the depth left above the waterline.
+  const f32 hull_height = 2.0f * he.y;
+  const f32 sub_frac =
+      total_samples > 0 ? Clamp(submerged_vol / static_cast<f32>(total_samples), 0.0f, 1.0f) : 0.0f;
+  state_.draft_m = sub_frac * hull_height;
+  state_.freeboard_m = hull_height - state_.draft_m;
+  state_.cargo_kg = cargo_kg_;
   state_.prop_submerged = prop_submerged;
   state_.position = pos;
   state_.rotation = q;
