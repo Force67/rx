@@ -242,6 +242,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (ship_) ship_->Emit(dt, view);
   if (nav_) nav_->Emit(dt, view);
   if (gym_) gym_->Emit(dt, view);
+  if (puppet_) puppet_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
   if (cloth_ != 0) EmitCloth(view);
   UpdateParticles(dt, view);
@@ -2973,6 +2974,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "gym") {
     gym_ = std::make_unique<GymDemo>(ctx_);
     gym_->Create();
+    return;
+  }
+  if (config_.demo_scene == "puppet") {
+    puppet_ = std::make_unique<PuppetDemo>(ctx_);
+    puppet_->Create();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));

@@ -244,6 +244,11 @@ void Viewer::OnUpdate(f32 frame_delta) {
     return;
   }
   UpdateCamera(frame_delta);
+  // The puppet keeps the free-fly camera; it only wants raw number keys
+  // (1/2/3 -> push / big-push / reset), forwarded without an early return.
+  if (PuppetDemo* puppet = demos_->puppet(); puppet && window_) {
+    puppet->OnInput(window_->input(), !debug_ui_.wants_keyboard());
+  }
 }
 
 void Viewer::OnBuildView(f32 frame_delta, render::FrameView& view) {

@@ -10,6 +10,7 @@ set(RX_RUNTIME_SOURCES
   demo_nav.cc
   demo_ship.cc
   demo_gym.cc
+  demo_puppet.cc
   scene_hook_demo.cc
   scene_hook_rhi_demo.cc
   fly_camera.cc
@@ -27,6 +28,7 @@ set(RX_RUNTIME_MODULES
   rx::render
   rx::physics
   rx::anim
+  rx::locomotion
   rx::net
   rx::net_viz
   rx::nav
