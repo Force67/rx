@@ -30,9 +30,15 @@ struct RX_LOCOMOTION_EXPORT BipedRig {
 
   // Derived geometry the controller reads back (metres).
   f32 leg_length = 0;      // hip pivot to sole
+  f32 upper_leg_length = 0;  // hip pivot to knee pivot
+  f32 lower_leg_length = 0;  // knee pivot to ankle pivot
+  f32 foot_height = 0;       // ankle pivot above the sole
   f32 foot_length = 0;
+  f32 upper_arm_length = 0;
+  f32 lower_arm_length = 0;
   f32 pelvis_height = 0;   // pelvis body origin above the soles at bind
   f32 sole_offset = 0;     // foot body origin to sole along body -Y
+  Vec3 hip_local[kFootCount] = {};  // hip pivots in pelvis-body local space
 
   // Builds the ragdoll standing with its soles at `feet_position`, facing yaw
   // radians (yaw 0 faces -Z). All bodies share one collision filter group with
@@ -53,6 +59,10 @@ struct RX_LOCOMOTION_EXPORT BipedRig {
   // step them, when changing control regimes).
   void SetJointDrive(physics::PhysicsWorld& physics, RigJoint j, f32 frequency, f32 damping,
                      f32 max_torque) const;
+
+  // World-space sole centre of a foot (0 = left, 1 = right) from the live
+  // foot-body transform.
+  Vec3 SolePosition(const physics::PhysicsWorld& physics, u32 foot) const;
 
   bool valid() const { return body[0] != 0; }
 };
