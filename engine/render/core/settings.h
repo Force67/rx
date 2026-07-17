@@ -182,6 +182,10 @@ struct RenderSettings {
   // advects with the waves and streaks/decays instead of flickering in place,
   // plus object wakes. Off falls back to the per-frame instantaneous crest foam.
   bool water_field = true;
+  // Optional GPU heightfield fluid solver (flowing water + lava over a
+  // world-anchored domain). Default off; only runs when the frame carries a
+  // FrameView::fluid_domain. See render/geometry/FLUID_SIM.md.
+  bool fluid_sim = false;
   // Local water interaction: depth-buffer ripple impulses (any geometry
   // crossing the waterline rings, no CPU disturbances needed) plus obstacle
   // boundaries (ripples reflect off the analytic island beach instead of

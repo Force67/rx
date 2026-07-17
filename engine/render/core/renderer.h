@@ -36,6 +36,8 @@
 #include "render/geometry/ocean_fft.h"
 #include "render/geometry/particle_emitters.h"
 #include "render/geometry/particles.h"
+#include "render/geometry/fluid_sim.h"
+#include "render/geometry/fluid_surface.h"
 #include "render/geometry/shore_wetting.h"
 #include "render/geometry/water.h"
 #include "render/geometry/water_caustics.h"
@@ -263,6 +265,12 @@ struct FrameView {
   // boat wakes, bobbing props. Each injects a ripple impulse + foam splat at a
   // world position, scaled by the object's motion. Bounded; empty = no-op.
   base::Vector<WaterDisturbance> water_disturbances;
+  // Optional heightfield fluid solver (settings.fluid_sim). When fluid_domain
+  // is set the renderer steps the GPU water+lava sim over it this frame;
+  // fluid_sources feeds springs/vents/drains (bounded, capped at 64). Null
+  // domain leaves the sim idle. Non-owning: valid for the RenderFrame call.
+  const FluidDomainDesc *fluid_domain = nullptr;
+  base::Vector<FluidSource> fluid_sources;
   // Recorded inside the final ui pass with the backbuffer bound as the
   // color attachment. hud_draw (the libultragui HUD/menu) records first, then
   // ui_draw (the debug ImGui overlay) on top.
@@ -574,6 +582,7 @@ private:
   std::unique_ptr<SdfScene> sdf_scene_;
   std::unique_ptr<SdfClipmap> sdf_clipmap_;
   std::unique_ptr<WaterPass> water_;
+  std::unique_ptr<FluidSurfacePass> fluid_surface_;
   std::unique_ptr<MeshPipeline> mesh_pipeline_;
   std::unique_ptr<PostPass> post_;
   std::unique_ptr<UiBlurPass>
@@ -672,12 +681,14 @@ private:
   HairStrands hair_;
   OceanFft ocean_;
   WaterField water_field_;
+  FluidSim fluid_sim_;
   ShoreWetting shore_wetting_;
   WaterCaustics water_caustics_;
   ImposterPass imposters_;
   InstanceStore instances_;
   bool fft_ocean_active_ = false;     // maps valid + flag set this frame
   bool water_field_active_ = false;   // ring field valid + flag set this frame
+  bool fluid_sim_active_ = false;     // fluid solver configured + domain this frame
   bool shore_wetting_active_ = false; // shore wetting field valid this frame
   bool water_caustics_active_ =
       false;              // caustic map valid + flag set this frame
