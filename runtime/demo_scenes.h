@@ -17,6 +17,7 @@
 #include "net/bubble_debug.h"
 #include "render/core/renderer.h"
 #include "demo_nav.h"
+#include "demo_placement.h"
 #include "demo_ship.h"
 #include "demo_gym.h"
 #include "demo_drive.h"
@@ -200,6 +201,11 @@ class DemoScenes {
   // --demo nav: the navigation chase slice (cost-aware pathfinding over rough
   // terrain, porter vs mule pack). Non-null only for that demo.
   std::unique_ptr<NavDemo> nav_;
+
+  // --demo placement: GPU procedural placement (density programs + ordered
+  // dithering streaming a forest around the camera). Non-null only for that
+  // demo.
+  std::unique_ptr<PlacementDemo> placement_;
 
   // --demo gym: the character/inventory reference gym (graybox + tuning panel).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.

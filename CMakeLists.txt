@@ -220,6 +220,7 @@ if(NOT DEFINED RX_MODULES)
     terrain
     edit
     render
+    placement
     physics
     anim
     audio
@@ -428,6 +429,12 @@ if(RX_BUILD_TESTS)
     add_test(NAME terrain_test COMMAND terrain_test)
   endif()
 
+  if("placement" IN_LIST RX_MODULES)
+    add_executable(placement_test test/placement_test.cc)
+    target_link_libraries(placement_test PRIVATE rx::placement rx::core)
+    add_test(NAME placement_test COMMAND placement_test)
+  endif()
+
   add_executable(cloth_collision_test
     test/cloth_collision_test.cc
     engine/physics/cloth_collision.cc)
@@ -513,6 +520,16 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
     test/shaders/offscreen_tri.vs.hlsl
     test/shaders/offscreen_tri.ps.hlsl)
   add_test(NAME offscreen_test COMMAND offscreen_test)
+
+  # Procedural placement: runs the DENSITYMAP/GENERATE/PLACEMENT compute
+  # pipeline offscreen and compares the resulting instances against the CPU
+  # reference generator (same tiles, same seeds). Skips without a driver.
+  if("placement" IN_LIST RX_MODULES)
+    add_executable(placement_gpu_test test/placement_gpu_test.cc)
+    target_link_libraries(placement_gpu_test PRIVATE rx::placement_gpu rx::placement
+      rx::render rx::core)
+    add_test(NAME placement_gpu_test COMMAND placement_gpu_test)
+  endif()
 
   # Acceleration-structure compaction: builds a BLAS with allow_compaction,
   # queries the compacted size across a submit boundary, compact-copies into a

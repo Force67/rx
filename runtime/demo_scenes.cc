@@ -198,6 +198,10 @@ void DemoScenes::EmitBubbles(render::FrameView& view) {
 }
 
 void DemoScenes::Shutdown() {
+  if (placement_) {
+    placement_->Shutdown();
+    placement_.reset();
+  }
   if (cloth_ != 0) {
     physics_.RemoveCloth(cloth_);
     cloth_ = 0;
@@ -250,6 +254,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   if (ship_) ship_->Emit(dt, view);
   if (nav_) nav_->Emit(dt, view);
+  if (placement_) placement_->Emit(dt, view);
   if (gym_) gym_->Emit(dt, view);
   if (drive_) drive_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
@@ -2978,6 +2983,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "nav") {
     nav_ = std::make_unique<NavDemo>(ctx_);
     nav_->Create();
+    return;
+  }
+  if (config_.demo_scene == "placement") {
+    placement_ = std::make_unique<PlacementDemo>(ctx_);
+    placement_->Create();
     return;
   }
   if (config_.demo_scene == "gym") {
