@@ -270,6 +270,33 @@ int main() {
                  boat.state().speed_mps, boat.state().rpm);
   }
 
+  // (j) A strong beam wind pushes a drifting (idle) boat downwind, where in
+  // calm air it barely moves. (Uprightness is printed for information: the wind
+  // heels the hull only slightly - the buoyancy grid + ballast righting is
+  // stiff - so it is not asserted.)
+  {
+    auto drift = [](f32 wind_x, f32* dx, f32* up) {
+      PhysicsWorld world;
+      world.Initialize();
+      InstallFlatWater(world);
+      BoatDesc desc;
+      Boat boat(world, desc, Vec3{0, 0.5f, 0}, 0.0f);
+      Run(world, boat, {}, 60 * 3);        // settle
+      world.set_wind(Vec3{wind_x, 0, 0});  // beam wind toward +X (hull faces +Z)
+      const f32 x0 = boat.state().position.x;
+      const BoatState s = Run(world, boat, {}, 60 * 8);
+      *dx = s.position.x - x0;
+      *up = Uprightness(s);
+    };
+    f32 calm_dx = 0, calm_up = 0, wind_dx = 0, wind_up = 0;
+    drift(0.0f, &calm_dx, &calm_up);
+    drift(25.0f, &wind_dx, &wind_up);
+    std::fprintf(stderr, "(j) calm dx=%.2f up=%.4f | beam wind(25 m/s) dx=%.2f up=%.4f\n", calm_dx,
+                 calm_up, wind_dx, wind_up);
+    if (wind_dx < 1.5f) return Fail("(j) beam wind did not push the boat downwind");
+    if (wind_dx <= std::fabs(calm_dx) + 1.0f) return Fail("(j) wind drift not distinct from calm");
+  }
+
   std::fprintf(stderr, "boat_test: all checks passed\n");
   return 0;
 }

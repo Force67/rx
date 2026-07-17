@@ -20,6 +20,33 @@ struct SynthParams {
   f32 throttle = 0.0f;   // 0..1 driver pedal; gates intake noise and burble
   f32 speed_mps = 0.0f;  // ground speed, drives wind and scales skid
   f32 slip = 0.0f;       // 0..1 tyre slip ratio, gates the skid layer
+
+  // --- additive, default-inert fields (added for the vehicle-realism pass) ---
+  // Each defaults to a value that reproduces the pre-existing behaviour exactly,
+  // so a caller that fills only the block above is unchanged.
+
+  // 0..1 output muffle: as it rises the EngineSynth tightens its output low-pass
+  // and ducks level, so a submerged/occluded engine reads as underwater or behind
+  // a wall. 0 = dry, the preset's own voice. Smoothed here so a ventilating boat
+  // prop toggling it every frame never clicks.
+  f32 muffle = 0.0f;
+
+  // Turbine (LightJet) roar level, 0..1, decoupled from spool. <0 (the default)
+  // means "derive the roar from rpm/N1 as before"; >=0 lets thrust lag the spool
+  // so the whine (pitched by rpm) climbs before the roar catches up. Ignored by
+  // the piston path.
+  f32 thrust = -1.0f;
+
+  // One-shot gear-shift flare request, edge-triggered inside EngineSynth: <0 asks
+  // for a brief upshift throttle-cut dip, >0 for a small downshift blip, 0 idles.
+  // Passed through UNSMOOTHED (the synth owns the sample-accurate envelope), so
+  // the rising edge is preserved; re-asserting while a flare runs does not retrig.
+  f32 gear_shift = 0.0f;
+
+  // Longitudinal slip bias for the skid band, -1 (rear axle slipping) .. +1
+  // (front axle). Subtly lifts the SkidSynth band centre toward the front so a
+  // front-end wash reads a touch brighter than a rear break-away. 0 = neutral.
+  f32 skid_bias = 0.0f;
 };
 
 // A pull-model synthesis model that renders mono float at a fixed rate. Each
@@ -85,6 +112,9 @@ class RX_AUDIO_EXPORT SynthVoice final : public Decoder {
   f32 a_throttle_ = 1.0f;
   f32 a_speed_ = 1.0f;
   f32 a_slip_ = 1.0f;
+  f32 a_muffle_ = 1.0f;
+  f32 a_thrust_ = 1.0f;
+  f32 a_skid_bias_ = 1.0f;
 };
 
 }  // namespace rx::audio

@@ -8,6 +8,7 @@ namespace rx::physics {
 namespace {
 
 constexpr f32 kWaterDensity = 1000.0f;  // kg/m^3, fresh water
+constexpr f32 kAirDensity = 1.225f;     // kg/m^3, sea-level ISA (wind load)
 constexpr f32 kGravity = 9.81f;         // m/s^2
 
 f32 Clamp(f32 v, f32 lo, f32 hi) { return v < lo ? lo : (v > hi ? hi : v); }
@@ -104,6 +105,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   const f32 buoy_per_sample = kWaterDensity * kGravity * subvol;
   u32 bottom_wet = 0;  // submerged samples in the bottom layer -> wetted/planing
   const u32 bottom_total = nx * nz;
+  f32 submerged_vol = 0.0f;  // sum of per-sample submerged fractions (whole grid)
   for (u32 iy = 0; iy < ny; ++iy) {
     const f32 ty = ny > 1 ? (static_cast<f32>(iy) / (ny - 1)) * 2.0f - 1.0f : -1.0f;
     for (u32 iz = 0; iz < nz; ++iz) {
@@ -119,6 +121,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
         const f32 depth = surface_h - world.y;
         if (depth <= 0.0f) continue;
         const f32 frac = Clamp(depth / layer_thickness, 0.0f, 1.0f);
+        submerged_vol += frac;      // whole-grid submerged volume -> exposed area
         if (iy == 0) ++bottom_wet;  // bottom layer feeds the wetted fraction
         const f32 buoyancy = buoy_per_sample * frac;
         const Vec3 point_vel = world_.GetPointVelocity(body_, world);
@@ -134,6 +137,12 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   }
   const f32 wetted =
       bottom_total > 0 ? static_cast<f32>(bottom_wet) / static_cast<f32>(bottom_total) : 0.0f;
+  // Above-water fraction of the hull volume (1 = flying clear, 0 = awash), used
+  // to scale the wind load onto the exposed topsides.
+  const u32 total_samples = nx * ny * nz;
+  const f32 exposed =
+      total_samples > 0 ? Clamp(1.0f - submerged_vol / static_cast<f32>(total_samples), 0.0f, 1.0f)
+                        : 0.0f;
 
   // --- hull drag, relative to the water flow (rivers carry the hull) ---
   Vec3 vel = world_.GetLinearVelocity(body_);
@@ -197,6 +206,29 @@ void Boat::Update(const BoatInput& input, f32 dt) {
     const Vec3 rudder_pt = pos + Rotate(q, desc_.rudder_offset);
     const Vec3 rudder_force = right * rudder_mag;
     if (Finite(rudder_force)) world_.AddForceAtPoint(body_, rudder_force, rudder_pt);
+  }
+
+  // --- wind load on the exposed topsides ---
+  // The global wind pushes on the above-water hull. Force is quadratic in the
+  // wind speed relative to the hull, scaled by the exposed fraction and the
+  // above-water box area the wind sees (a directional blend of the side and bow
+  // profiles), and applied ABOVE the waterline so a beam wind heels the boat a
+  // little as it shoves it downwind. Conservative coefficient (see wind_drag).
+  if (desc_.wind_drag > 0.0f && exposed > 0.0f) {
+    const Vec3 vrel_wind = world_.wind() - vel;  // air velocity relative to hull
+    const f32 wind_speed = std::sqrt(Dot(vrel_wind, vrel_wind));
+    if (wind_speed > 1e-3f) {
+      const Vec3 wdir = vrel_wind * (1.0f / wind_speed);
+      const f32 side_area = (2.0f * he.z) * (2.0f * he.y);   // beam-on profile
+      const f32 front_area = (2.0f * he.x) * (2.0f * he.y);  // head-on profile
+      const f32 area =
+          std::fabs(Dot(wdir, right)) * side_area + std::fabs(Dot(wdir, forward)) * front_area;
+      const f32 mag =
+          0.5f * kAirDensity * desc_.wind_drag * area * exposed * wind_speed * wind_speed;
+      const Vec3 wind_force = wdir * mag;
+      const Vec3 wind_pt = pos + up * (0.5f * he.y);  // topside centroid, above the CoM
+      if (Finite(wind_force)) world_.AddForceAtPoint(body_, wind_force, wind_pt);
+    }
   }
 
   // --- ballast keel righting couple (emulated lowered CoM) ---

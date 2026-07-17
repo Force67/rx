@@ -101,6 +101,15 @@ struct BoatDesc {
   // Bow-attitude trim from BoatInput::trim, as a pitch torque (Nm) at trim=1.
   // Positive trim pitches the bow up (e.g. trim tabs / outdrive out).
   f32 trim_torque = 3000.0f;
+
+  // --- wind load on the exposed topsides ---
+  // Drag coefficient of the above-water hull. The global PhysicsWorld::wind()
+  // pushes on the exposed (above-water) topside area with a force quadratic in
+  // the wind speed relative to the hull, scaled by the exposed fraction, and
+  // applied above the waterline so a strong beam wind heels the boat slightly.
+  // Air is ~1.225 kg/m^3 and the box topside areas are modest, so this is a
+  // conservative nudge, not a capsizing force. 0 disables it.
+  f32 wind_drag = 0.8f;
 };
 
 // Per-frame driver input. throttle and steer are -1..1; trim is -1..1 and

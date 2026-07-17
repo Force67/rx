@@ -364,6 +364,89 @@ int main() {
     a->~Aircraft();
   }
 
+  // (i) Headwind shortens the ground roll: with the airmass moving toward the
+  // plane it reaches flying airspeed at a lower ground speed, so it leaves the
+  // ground in a shorter distance than in calm air. Settle calm, then set the
+  // world wind and roll.
+  {
+    auto ground_roll = [&](f32 headwind) -> f32 {
+      PhysicsWorld world;
+      world.Initialize();
+      AddRunway(world);
+      Aircraft* a = SpawnSettled(world, AircraftDesc{}, reinterpret_cast<Aircraft*>(storage));
+      world.set_wind(Vec3{0, 0, -headwind});  // blowing toward -Z, opposing +Z travel
+      const f32 ground_y = a->state().position.y;
+      const f32 start_z = a->state().position.z;
+      f32 dist = -1;
+      for (int i = 0; i < 60 * 45; ++i) {
+        AircraftInput in;
+        in.throttle = 1.0f;
+        in.pitch = a->state().airspeed_mps > 26.0f ? 0.7f : 0.0f;
+        a->Update(in, kDt);
+        world.Update(kDt);
+        const AircraftState& s = a->state();
+        if (!StateFinite(s)) return -2;
+        if (!s.on_ground && s.position.y - ground_y > 0.5f) {
+          dist = s.position.z - start_z;
+          break;
+        }
+      }
+      a->~Aircraft();
+      return dist;
+    };
+    const f32 calm = ground_roll(0.0f);
+    const f32 head = ground_roll(10.0f);
+    std::fprintf(stderr, "(i) calm roll=%.0fm  headwind(10 m/s) roll=%.0fm\n", calm, head);
+    if (calm <= 0 || head <= 0) return Fail("(i) a config never lifted off");
+    if (head >= calm * 0.85f) return Fail("(i) headwind did not shorten the ground roll");
+  }
+
+  // (ii) A steady crosswind in flight weathervanes the nose: the aero is
+  // measured relative to the airmass, so the crosswind is felt as sideslip and
+  // the fin yaws the nose toward the relative wind - a heading change a
+  // calm-air plane holding identical controls does not develop. (dx, the
+  // lateral ground drift, is reported for information; over this short window
+  // the nose swings rather than the track translating far.)
+  {
+    auto fly = [&](f32 crosswind, f32* dx, f32* dyaw) {
+      PhysicsWorld world;
+      world.Initialize();
+      AddRunway(world);
+      Aircraft* a = new (storage) Aircraft(world, AircraftDesc{}, Vec3{0, 300.0f, 0}, 0.0f);
+      for (int i = 0; i < 60 * 6; ++i) {  // establish level flight
+        AircraftInput in;
+        in.throttle = 1.0f;
+        in.pitch = 0.05f;
+        a->Update(in, kDt);
+        world.Update(kDt);
+      }
+      const f32 x0 = a->state().position.x;
+      const f32 h0 = Heading(*a);
+      world.set_wind(Vec3{crosswind, 0, 0});  // steady wind toward +X
+      for (int i = 0; i < 90; ++i) {  // 1.5 s: the initial weathervane response
+        AircraftInput in;
+        in.throttle = 1.0f;
+        in.pitch = 0.05f;
+        a->Update(in, kDt);
+        world.Update(kDt);
+        if (!StateFinite(a->state())) return Fail("(ii) NaN in crosswind");
+      }
+      *dx = a->state().position.x - x0;
+      *dyaw = Heading(*a) - h0;
+      a->~Aircraft();
+      return 0;
+    };
+    f32 calm_dx = 0, calm_yaw = 0, cross_dx = 0, cross_yaw = 0;
+    if (fly(0.0f, &calm_dx, &calm_yaw)) return 1;
+    if (fly(12.0f, &cross_dx, &cross_yaw)) return 1;
+    std::fprintf(stderr, "(ii) calm dx=%.1f yaw=%.2f | crosswind dx=%.1f yaw=%.2f deg\n", calm_dx,
+                 calm_yaw * 57.2958f, cross_dx, cross_yaw * 57.2958f);
+    if (std::fabs(cross_yaw) < 0.15f)
+      return Fail("(ii) crosswind did not weathervane the nose");
+    if (std::fabs(cross_yaw) <= std::fabs(calm_yaw) + 0.1f)
+      return Fail("(ii) crosswind weathervane not distinct from calm");
+  }
+
   std::fprintf(stderr, "aircraft_test: all checks passed\n");
   return 0;
 }

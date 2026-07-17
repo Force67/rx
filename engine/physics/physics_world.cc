@@ -1125,6 +1125,22 @@ f32 PhysicsWorld::GetBodyMass(BodyId id) const {
   return inv_mass > 0 ? 1.0f / inv_mass : 0;
 }
 
+void PhysicsWorld::SetBodyInertia(BodyId id, const Vec3& diagonal_kgm2) {
+  if (!impl_ || id == 0) return;
+  JPH::BodyLockWrite lock(impl_->system->GetBodyLockInterface(),
+                          JPH::BodyID(static_cast<JPH::uint32>(id - 1)));
+  if (!lock.Succeeded()) return;
+  JPH::Body& body = lock.GetBody();
+  if (body.IsStatic() || !body.GetMotionProperties()) return;
+  // Jolt stores the INVERSE inertia diagonal; a non-positive component leaves
+  // that axis free (inverse 0). Principal axes are the body axes (identity
+  // rotation), so diagonal maps straight onto (body x, y, z).
+  auto inv = [](f32 v) { return v > 0.0f ? 1.0f / v : 0.0f; };
+  body.GetMotionProperties()->SetInverseInertia(
+      JPH::Vec3(inv(diagonal_kgm2.x), inv(diagonal_kgm2.y), inv(diagonal_kgm2.z)),
+      JPH::Quat::sIdentity());
+}
+
 void PhysicsWorld::SetBodyKinematic(BodyId id) {
   if (!impl_ || id == 0) return;
   JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
@@ -2592,11 +2608,18 @@ void PhysicsWorld::RemoveCloth(ClothId id) {
 
 bool PhysicsWorld::Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance,
                            RayHit* out) const {
+  return Raycast(origin, direction, max_distance, out, 0);
+}
+
+bool PhysicsWorld::Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out,
+                           BodyId ignore) const {
   if (!impl_) return false;
   Vec3 dir = Normalize(direction);
   JPH::RRayCast ray{ToJolt(origin), ToJolt(dir) * max_distance};
   JPH::RayCastResult result;
-  if (!impl_->system->GetNarrowPhaseQuery().CastRay(ray, result)) return false;
+  // ignore == 0 maps to the invalid body id, so the filter skips nothing.
+  JPH::IgnoreSingleBodyFilter body_filter(JPH::BodyID(static_cast<JPH::uint32>(ignore - 1)));
+  if (!impl_->system->GetNarrowPhaseQuery().CastRay(ray, result, {}, {}, body_filter)) return false;
   JPH::RVec3 hit = ray.GetPointOnRay(result.mFraction);
   out->position = {static_cast<f32>(hit.GetX()), static_cast<f32>(hit.GetY()),
                    static_cast<f32>(hit.GetZ())};

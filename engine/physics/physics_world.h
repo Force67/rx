@@ -64,6 +64,14 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   void Update(f32 dt);
 
   void set_water_height(WaterHeightFn fn) { water_height_ = std::move(fn); }
+
+  // Global uniform wind velocity (m/s, world space) the force-based aero
+  // simulators sample as their ambient airmass. Default zero (still air). Cars
+  // ignore it (negligible at this fidelity); the aircraft treats it as the
+  // airmass its airspeed/aero are measured against and the boat as a push on
+  // its exposed topsides. This is a plain global, not a spatial field.
+  void set_wind(const Vec3& wind) { wind_ = wind; }
+  Vec3 wind() const { return wind_; }
   // Evaluates the installed water-height callback at `position`. Returns true
   // with the surface height (world Y) and horizontal flow when the point is
   // over water, false when no callback is installed or the point is not over
@@ -94,6 +102,15 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   Vec3 GetPointVelocity(BodyId id, const Vec3& world_point) const;
   // Mass in kg; 0 for a static/kinematic body or a dead handle.
   f32 GetBodyMass(BodyId id) const;
+  // Overrides a dynamic body's inertia tensor with an explicit diagonal
+  // (kg*m^2) about the centre of mass, its principal axes aligned to the body
+  // axes (no rotation). Replaces the collision-shape-derived tensor, so a
+  // force-based simulator whose collision box does not represent the true mass
+  // distribution (e.g. an aircraft fuselage box that excludes the wings) gets
+  // an honest roll/pitch/yaw response instead of a box-derived one. Components
+  // <= 0 leave that axis free (inverse inertia 0 = no angular response about
+  // it); pass positive values. No-op on a static/kinematic body or dead handle.
+  void SetBodyInertia(BodyId id, const Vec3& diagonal_kgm2);
 
   // Static colliders. The trailing `surface` tags the collider so tire grip
   // and surface FX know what a wheel touches; it defaults to asphalt so
@@ -526,6 +543,14 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     f32 distance = 0;
   };
   bool Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out) const;
+  // Same closest-hit ray, but skipping the body `ignore` (its whole shape).
+  // Lets a force-based simulator cast from a point INSIDE its own collision
+  // shape without hitting itself - the aircraft's gear suspension rays start
+  // at real hardpoints on the fuselage and would otherwise register the plane's
+  // own underside. `ignore` == 0 skips nothing (identical to the overload
+  // above). Jolt IgnoreSingleBodyFilter.
+  bool Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out,
+               BodyId ignore) const;
 
   // Closest hit of a swept sphere of `radius` from `origin` along `direction`
   // for up to `max_distance` metres. Used by third-person camera collision and
@@ -549,6 +574,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   struct Impl;
   std::unique_ptr<Impl> impl_;
   WaterHeightFn water_height_;
+  Vec3 wind_{};              // global uniform wind velocity, m/s, world space
   f32 surface_wetness_ = 0;  // global rain wetness, 0..1
   u32 dynamic_count_ = 0;
 };

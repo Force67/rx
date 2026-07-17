@@ -93,6 +93,16 @@ class RX_AUDIO_EXPORT EngineSynth final : public Synth {
   f32 roar_lp_ = 0.0f;
   f32 out_lp_ = 0.0f;
 
+  // Gear-shift flare: a sample-accurate one-shot level envelope owned here (not
+  // in the smoothed param block) so its timing is frame-rate-independent and a
+  // headless caller driving the synth directly can trigger it too. A rising edge
+  // on SynthParams.gear_shift arms it; `sign` selects an upshift cut (<0) or a
+  // downshift blip (>0). `left`/`total` count down the raised-cosine bump.
+  f32 shift_prev_ = 0.0f;
+  i32 shift_left_ = 0;
+  i32 shift_total_ = 0;
+  f32 shift_sign_ = 0.0f;
+
   // xorshift noise state (never zero).
   u32 rng_ = 0x1234567u;
 

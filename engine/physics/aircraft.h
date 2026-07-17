@@ -19,8 +19,9 @@ namespace rx::physics {
 // Frame: engine convention, +Z forward, +Y up, right-handed, so the RIGHT wing
 // is along -X and the LEFT wing along +X (right = forward x up = +Z x +Y = -X).
 // Units are SI throughout (m, kg, s, N, Nm, rad). Air density is a constant
-// 1.225 kg/m^3 (sea level, ISA); there is no wind field yet, only a settable
-// uniform wind velocity hook that defaults to zero.
+// 1.225 kg/m^3 (sea level, ISA). Airspeed and aero are measured relative to the
+// airmass: the world's global wind (PhysicsWorld::wind()) plus this aircraft's
+// local set_wind() bias (both default to still air).
 //
 // Update ordering contract: call Update(input, dt) for every aircraft BEFORE
 // PhysicsWorld::Update(dt) each fixed step, with the same dt. Update only
@@ -49,6 +50,9 @@ struct RX_PHYSICS_EXPORT AircraftDesc {
   // One landing-gear leg: a downward suspension raycast from `local_pos` (a
   // CoM-relative body-frame attach point) plus a wheel of `radius`. The strut
   // extends `travel` metres; the spring/damper act along the contact normal.
+  // `local_pos` is the REAL hardpoint (at/inside the fuselage collision box);
+  // the suspension ray casts with self-exclusion so it clears the plane's own
+  // underside (see AircraftDesc() and the gear loop in aircraft.cc).
   struct Wheel {
     Vec3 local_pos{};              // attach point, body frame (CoM-relative)
     f32 radius = 0.35f;            // wheel radius, m
@@ -115,11 +119,17 @@ struct RX_PHYSICS_EXPORT AircraftDesc {
   f32 fuselage_side_area_m2 = 6.5f;
 
   // --- rotational aerodynamic damping (per unit dynamic pressure) ---
-  // Real airframes damp their own rotation strongly; without wings in the
-  // collision box Jolt's inertia is small, so these keep roll/pitch/yaw rates
-  // physical and post-stall tumbling bounded. Nm per (rad/s), scaled by dynamic
-  // pressure relative to a 35 m/s reference.
-  f32 roll_damp = 500.0f;
+  // Real airframes damp their own rotation; the strip-theory wing/tail/fin
+  // forces already supply most of it (each surface is sampled at its own point
+  // velocity). The body inertia is now set honestly from the airframe geometry
+  // (Aircraft's ctor overrides Jolt's slim-box tensor), so these are a light
+  // safety net that keeps post-stall tumbling bounded rather than a fudge
+  // compensating a too-small inertia. roll_damp is the one reduced from the
+  // old box-inertia tune: honest roll inertia is ~6x the box's, and the wings'
+  // own strip-theory roll damping scales with it, so far less net is needed.
+  // pitch/yaw are kept as a light net over the strong tail/fin. Nm per (rad/s),
+  // scaled by dynamic pressure relative to a 35 m/s reference.
+  f32 roll_damp = 300.0f;
   f32 pitch_damp = 1800.0f;
   f32 yaw_damp = 1400.0f;
 
@@ -190,8 +200,11 @@ class RX_PHYSICS_EXPORT Aircraft {
   f32 total_mass() const { return total_mass_; }
   bool over_mtom() const { return total_mass_ > desc_.max_takeoff_mass_kg; }
 
-  // Uniform wind (world m/s) added to the airmass; the one-line hook for a
-  // future wind field. Defaults to zero (still air).
+  // Local wind override (world m/s), ADDED on top of the world's global wind
+  // (PhysicsWorld::wind()). The aircraft samples the world wind as its ambient
+  // airmass each step; this is a per-aircraft bias on top of it (e.g. a local
+  // gust or rotor), so effective airmass = world.wind() + this. Defaults to
+  // zero, so by default the plane just flies in the world wind.
   void set_wind(const Vec3& wind) { wind_ = wind; }
   Vec3 wind() const { return wind_; }
 

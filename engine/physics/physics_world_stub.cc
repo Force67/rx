@@ -36,6 +36,7 @@ Vec3 PhysicsWorld::GetLinearVelocity(BodyId) const { return {}; }
 Vec3 PhysicsWorld::GetAngularVelocity(BodyId) const { return {}; }
 Vec3 PhysicsWorld::GetPointVelocity(BodyId, const Vec3&) const { return {}; }
 f32 PhysicsWorld::GetBodyMass(BodyId) const { return 0; }
+void PhysicsWorld::SetBodyInertia(BodyId, const Vec3&) {}
 void PhysicsWorld::InstallVehicleFriction(u32) {}
 BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc&, const Vec3&, const f32[4], f32, f32, f32,
                                      f32, i32, u32) {
@@ -100,6 +101,7 @@ u32 PhysicsWorld::ClothVertexCount(ClothId) const { return 0; }
 bool PhysicsWorld::GetClothPositions(ClothId, Vec3*, u32) const { return false; }
 void PhysicsWorld::RemoveCloth(ClothId) {}
 bool PhysicsWorld::Raycast(const Vec3&, const Vec3&, f32, RayHit*) const { return false; }
+bool PhysicsWorld::Raycast(const Vec3&, const Vec3&, f32, RayHit*, BodyId) const { return false; }
 bool PhysicsWorld::GetBodyTransform(BodyId, Vec3*, f32[4]) const { return false; }
 
 }  // namespace rx::physics

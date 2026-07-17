@@ -6,6 +6,7 @@
 namespace rx::audio {
 namespace {
 
+constexpr f32 kPi = 3.14159265359f;
 constexpr f32 kTwoPi = 6.28318530718f;
 // Upper bound on the piston bank so the per-block gain table is a fixed stack
 // array; presets clamp to it.
@@ -33,6 +34,8 @@ f32 Smoothstep(f32 edge0, f32 edge1, f32 x) {
   const f32 t = std::clamp((x - edge0) / std::max(1e-4f, edge1 - edge0), 0.0f, 1.0f);
   return t * t * (3.0f - 2.0f * t);
 }
+
+f32 Lerp(f32 a, f32 b, f32 t) { return a + (b - a) * t; }
 
 }  // namespace
 
@@ -146,15 +149,51 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
   const f32 load = std::clamp(p.load, 0.0f, 1.0f);
   const f32 throttle = std::clamp(p.throttle, 0.0f, 1.0f);
 
+  // Output muffle (submersion/occlusion): tighten the final low-pass toward a
+  // dark 500 Hz and duck up to ~6 dB as it rises. This makes the InboardBoat
+  // preset's water-muffled character dynamic, so any consumer rendering the synth
+  // directly (a headless tool, the integration test) can express "underwater"
+  // without VehicleAudio's mixer-gain duck. Smoothed upstream, so it is
+  // click-free even when a ventilating boat prop toggles it every frame.
+  const f32 muffle = std::clamp(p.muffle, 0.0f, 1.0f);
+  const f32 out_cut_hz = Lerp(preset_.exhaust_lowpass_hz, 500.0f, muffle);
+  const f32 muffle_gain = 1.0f - 0.5f * muffle;
+
+  // Arm the gear-shift flare on the rising edge of the (unsmoothed) request. The
+  // envelope lives here, on the sample clock, so its length is independent of the
+  // caller's frame rate and re-asserting mid-flare does not retrigger it.
+  const f32 shift_req = p.gear_shift;
+  if (shift_req != 0.0f && shift_prev_ == 0.0f) {
+    shift_total_ = std::max(1, static_cast<i32>(rate * 0.18f));  // ~180 ms
+    shift_left_ = shift_total_;
+    shift_sign_ = shift_req;
+  }
+  shift_prev_ = shift_req;
+  // Advances the flare one sample and returns its level multiplier. A raised-
+  // cosine bump that starts and ends at exactly 1.0 (click-free): an upshift
+  // (<0) cuts the level like a lifted throttle, a downshift (>0) blips it up.
+  auto flare_gain = [&]() -> f32 {
+    if (shift_left_ <= 0) return 1.0f;
+    const f32 phase =
+        static_cast<f32>(shift_total_ - shift_left_) / static_cast<f32>(std::max(1, shift_total_));
+    const f32 bump = std::sin(kPi * std::clamp(phase, 0.0f, 1.0f));
+    --shift_left_;
+    return shift_sign_ < 0.0f ? (1.0f - 0.55f * bump) : (1.0f + 0.30f * bump);
+  };
+
   // ---- Turbine path: no piston bank, a spool-tracking whine + exhaust roar ---
   if (preset_.turbine) {
     const f32 spool = std::clamp(p.rpm * 0.01f, 0.0f, 1.05f);  // rpm is N1 %
+    // Whine pitch/level tracks spool (rpm/N1); roar level tracks thrust when it is
+    // supplied (>=0), else derives from spool as before. Split lets a spool-up
+    // sound right: the whine climbs before the roar catches up.
+    const f32 roar_in = p.thrust >= 0.0f ? std::clamp(p.thrust, 0.0f, 1.0f) : spool;
     const f32 whine_hz =
         preset_.turbine_min_hz + spool * (preset_.turbine_max_hz - preset_.turbine_min_hz);
-    const f32 roar_alpha = LowpassAlpha(400.0f + spool * 2500.0f, rate);
-    const f32 out_alpha = LowpassAlpha(preset_.exhaust_lowpass_hz, rate);
+    const f32 roar_alpha = LowpassAlpha(400.0f + roar_in * 2500.0f, rate);
+    const f32 out_alpha = LowpassAlpha(out_cut_hz, rate);
     const f32 whine_gain = 0.42f * spool;
-    const f32 roar_gain = 0.30f * std::pow(spool, 1.4f);
+    const f32 roar_gain = 0.30f * std::pow(roar_in, 1.4f);
     for (u32 i = 0; i < frames; ++i) {
       f32 tone = SinPhase(whine_phase_);
       // A couple of harmonics of the whine, dropped if they alias.
@@ -165,7 +204,7 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
       const f32 roar = 0.5f * roar_lp_ + 0.5f * (Noise() * 0.4f);
       f32 s = tone * whine_gain + roar * roar_gain;
       out_lp_ += out_alpha * (s - out_lp_);
-      s = std::tanh(out_lp_);
+      s = std::tanh(out_lp_) * muffle_gain * flare_gain();
       out[i] = std::isfinite(s) ? s : 0.0f;
       whine_phase_ = Advance(whine_phase_, whine_hz, inv_rate);
     }
@@ -212,7 +251,7 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
   const f32 exhaust_alpha = LowpassAlpha(500.0f + rev_frac * 3500.0f, rate);
   const f32 exhaust_level = (0.05f + 0.18f * load) * preset_.intake_level;
   const f32 intake_level = throttle * preset_.intake_level;
-  const f32 out_alpha = LowpassAlpha(preset_.exhaust_lowpass_hz, rate);
+  const f32 out_alpha = LowpassAlpha(out_cut_hz, rate);
 
   // Optional propeller blade-passing tone (single-prop aircraft).
   const f32 prop_rpm = std::max(0.0f, p.rpm) * preset_.prop_gear_ratio;
@@ -249,8 +288,10 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
       s += (SinPhase(prop_phase_) + 0.4f * SinPhase(prop_phase_ * 2.0f)) * prop_gain * 0.25f;
 
     // Water-muffle / exhaust low-pass, then a soft limiter keeps peaks in range.
+    // The muffle duck and the gear-shift flare ride on the limited output so both
+    // stay bounded and click-free.
     out_lp_ += out_alpha * (s - out_lp_);
-    f32 y = std::tanh(out_lp_ * 1.3f);
+    f32 y = std::tanh(out_lp_ * 1.3f) * muffle_gain * flare_gain();
     out[i] = std::isfinite(y) ? y : 0.0f;
 
     base_phase_ = Advance(base_phase_, base_freq, inv_rate);

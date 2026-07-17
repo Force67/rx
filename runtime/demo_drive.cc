@@ -813,6 +813,11 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
       st.rpm = vs.rpm;
       st.load = vs.engine_load;
       st.speed_mps = std::fabs(vs.forward_speed);
+      st.gear = vs.gear;
+      st.is_shifting = vs.is_shifting;
+      st.wheel_count = vs.wheel_count;
+      for (u32 i = 0; i < vs.wheel_count && i < 4; ++i)
+        st.wheel_slip[i] = vs.wheels[i].longitudinal_slip;
     }
     st.throttle = std::fabs(car_throttle_);
     st.slip = CarMaxSlip();
@@ -824,7 +829,7 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     audio::VehicleAudioState st;
     st.rpm = bs.rpm;
     st.load = bs.engine_load;
-    st.throttle = std::fabs(bs.throttle);
+    st.throttle = bs.throttle;  // signed; VehicleAudio revs on |throttle| astern too
     st.speed_mps = bs.speed_mps;
     st.submerged = !bs.prop_submerged;
     st.position = bs.position;
@@ -925,9 +930,13 @@ void DriveDemo::Emit(f32 dt, render::FrameView& view) {
     }
   }
 
-  // Boat: procedural hull at the hull pose.
+  // Boat: procedural hull at the hull pose. The physics box displaces 1400 kg
+  // over its full 10.4 m^2 footprint, an honest but visually tiny 0.13 m draft;
+  // a real V-bottom boat of this mass sits much deeper. Sink the visual hull
+  // along boat-local up so the waterline reads through the bilge, not under it.
   if (boat_ && boat_->valid()) {
-    const Mat4 t = MakeTransform(boat_->state().position, boat_->state().rotation, 1.0f);
+    const Mat4 t = MakeTransform(boat_->state().position, boat_->state().rotation, 1.0f) *
+                   MakeTranslation({0.0f, -0.28f, 0.0f});
     render::DrawItem d{};
     d.mesh = boat_mesh_;
     d.transform = t;

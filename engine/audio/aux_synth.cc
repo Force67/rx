@@ -48,8 +48,12 @@ void SkidSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     return;
   }
 
-  // Band-pass centre climbs a little with speed; a fast slide squeals higher.
-  const f32 centre_hz = std::clamp(900.0f + speed * 25.0f, 300.0f, rate_ * 0.4f);
+  // Band-pass centre climbs a little with speed; a fast slide squeals higher. A
+  // front/rear slip bias (skid_bias, -1 rear .. +1 front) nudges it subtly (up to
+  // ~12%) so a front-end wash reads a touch brighter than a rear break-away.
+  const f32 bias = std::clamp(p.skid_bias, -1.0f, 1.0f);
+  const f32 centre_hz =
+      std::clamp((900.0f + speed * 25.0f) * (1.0f + 0.12f * bias), 300.0f, rate_ * 0.4f);
   const f32 f = std::clamp(2.0f * std::sin(kPi * centre_hz / rate_), 0.0f, 1.0f);
   const f32 q = 0.28f;  // moderate resonance: a band, not a whistle
 

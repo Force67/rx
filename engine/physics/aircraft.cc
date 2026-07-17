@@ -38,20 +38,22 @@ f32 StallBlend(f32 alpha, f32 stall_alpha, f32 half_width) {
 AircraftDesc::AircraftDesc() {
   // Nose gear (steerable) forward under the firewall; mains just aft of the CoM
   // and out on the track so the plane rests nose-light and rotates about the
-  // mains. y is the fuselage-bottom attach height (CoM-relative). Right = -X.
-  // Attach points sit just BELOW the fuselage collision box (box half-height
-  // 0.6), because the public Raycast has no ignore-self filter: a strut-top ray
-  // started inside the box would hit the plane's own underside. The nose leg is
-  // on the centreline (inside the box footprint), so this matters for it.
-  wheels[0].local_pos = Vec3{0.0f, -0.7f, 1.2f};   // nose
+  // mains. Right = -X. These are the REAL hardpoints: y = -0.5 sits at the
+  // fuselage belly, just inside the collision box (half-height 0.6), where a
+  // C172's legs actually attach - not the old below-the-box workaround. The
+  // suspension rays cast with self-exclusion (see the gear loop) so a strut-top
+  // ray starting inside the box no longer hits the plane's own underside. The
+  // strut then reaches down travel+radius (0.85 m) to plant the wheel, leaving
+  // the CoM ~1.3 m up: a nose-light tricycle stance that rotates about the mains.
+  wheels[0].local_pos = Vec3{0.0f, -0.5f, 1.2f};   // nose
   wheels[0].steerable = true;
   wheels[0].braked = false;
   wheels[0].spring = 34000.0f;
 
-  wheels[1].local_pos = Vec3{1.1f, -0.7f, -0.5f};  // left main (+X)
+  wheels[1].local_pos = Vec3{1.1f, -0.5f, -0.5f};  // left main (+X)
   wheels[1].braked = true;
 
-  wheels[2].local_pos = Vec3{-1.1f, -0.7f, -0.5f};  // right main (-X)
+  wheels[2].local_pos = Vec3{-1.1f, -0.5f, -0.5f};  // right main (-X)
   wheels[2].braked = true;
 }
 
@@ -76,6 +78,32 @@ Aircraft::Aircraft(PhysicsWorld& world, const AircraftDesc& desc, const Vec3& po
   const f32 rot[4] = {q.x, q.y, q.z, q.w};
   body_ = world_.AddDynamicShape(box, position, rot, 1.0f, total_mass_, 0.4f, 0.0f);
 
+  // Override Jolt's collision-box inertia with an honest airframe tensor. The
+  // slim fuselage box excludes the wings, so its roll inertia is several times
+  // too small (a C172 is ~1300 kg m^2 in roll where the box gives ~200); the
+  // rotational aero damping used to paper over that. Estimate the tensor from
+  // the airframe geometry with published radii of gyration for a single-engine
+  // GA aeroplane (Roskam, Airplane Flight Dynamics, GA-single non-dimensional
+  // radii of gyration k = R/reference):
+  //   roll  (about +Z): k = 0.22 of the semi-span     -> I = m (0.22 b/2)^2
+  //   pitch (about +X): k = 0.34 of the semi-length   -> I = m (0.34 L/2)^2
+  //   yaw   (about +Y): I ~ 0.85 (I_roll + I_pitch), the perpendicular-axis sum
+  //                     trimmed (the airframe is not a flat lamina), preserving
+  //                     the real I_yaw > I_pitch > I_roll ordering.
+  // L is the overall length, ~1.8x the tail moment arm for this layout. The
+  // engine frame is +Z fwd / +Y up / +X lateral, so the body-space diagonal is
+  // (about x, y, z) = (pitch, yaw, roll).
+  if (body_ != 0) {
+    const f32 b = desc_.wing_span_m;
+    const f32 length = 1.8f * desc_.tail_arm_m;
+    const f32 kx = 0.22f * 0.5f * b;
+    const f32 ky = 0.34f * 0.5f * length;
+    const f32 i_roll = total_mass_ * kx * kx;
+    const f32 i_pitch = total_mass_ * ky * ky;
+    const f32 i_yaw = 0.85f * (i_roll + i_pitch);
+    world_.SetBodyInertia(body_, Vec3{i_pitch, i_yaw, i_roll});
+  }
+
   // Prime telemetry so a read before the first Update is sane.
   state_.total_mass_kg = total_mass_;
   state_.over_mtom = total_mass_ > desc_.max_takeoff_mass_kg;
@@ -98,7 +126,10 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
 
   const Vec3 vel = world_.GetLinearVelocity(body_);
   const Vec3 omega = world_.GetAngularVelocity(body_);
-  const Vec3 vair_com = vel - wind_;
+  // Airmass = the world's global wind plus this aircraft's local bias; airspeed
+  // and every aero force below are taken relative to it (see the frame notes).
+  const Vec3 wind = world_.wind() + wind_;
+  const Vec3 vair_com = vel - wind;
   const f32 speed = Length(vair_com);
 
   // Blend all aerodynamics out below ~1 m/s so the direction singularities
@@ -138,7 +169,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   auto apply_wing_half = [&](f32 span_x, f32 cl_bias, bool* stalled) {
     const Vec3 ac_local{span_x, 0.15f, 0.0f};
     const Vec3 ac_world = pos + Rotate(q, ac_local);
-    const Vec3 v = world_.GetPointVelocity(body_, ac_world) - wind_;
+    const Vec3 v = world_.GetPointVelocity(body_, ac_world) - wind;
     const f32 vlen = Length(v);
     if (vlen < 1e-3f) {
       *stalled = false;
@@ -204,7 +235,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   {
     const Vec3 tail_local{0.0f, 0.25f, -desc_.tail_arm_m};
     const Vec3 tail_world = pos + Rotate(q, tail_local);
-    const Vec3 v = world_.GetPointVelocity(body_, tail_world) - wind_;
+    const Vec3 v = world_.GetPointVelocity(body_, tail_world) - wind;
     const f32 vlen = Length(v);
     if (vlen > 1e-3f) {
       const f32 fc = Dot(v, fwd);
@@ -224,7 +255,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   {
     const Vec3 fin_local{0.0f, 0.45f, -desc_.fin_arm_m};
     const Vec3 fin_world = pos + Rotate(q, fin_local);
-    const Vec3 v = world_.GetPointVelocity(body_, fin_world) - wind_;
+    const Vec3 v = world_.GetPointVelocity(body_, fin_world) - wind;
     const f32 vlen = Length(v);
     if (vlen > 1e-3f) {
       const f32 fc = Dot(v, fwd);
@@ -288,7 +319,9 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     const Vec3 down{0, -1, 0};  // suspension travels along world down (gravity)
     const f32 reach = w.travel + w.radius;
     PhysicsWorld::RayHit hit;
-    if (!world_.Raycast(attach, down, reach + 0.02f, &hit)) continue;
+    // Exclude our own fuselage: the hardpoint sits inside the collision box, so
+    // an un-filtered ray would hit the plane's underside instead of the ground.
+    if (!world_.Raycast(attach, down, reach + 0.02f, &hit, body_)) continue;
 
     const f32 compression = reach - hit.distance;  // >0 when the tire touches
     if (compression <= 0.0f) continue;

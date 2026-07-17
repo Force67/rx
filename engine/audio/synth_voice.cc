@@ -35,6 +35,11 @@ SynthVoice::SynthVoice(u32 output_rate, std::unique_ptr<Synth> synth)
   a_throttle_ = ChunkAlpha(0.020f, rate_);
   a_speed_ = ChunkAlpha(0.080f, rate_);
   a_slip_ = ChunkAlpha(0.025f, rate_);
+  // Muffle should swell like a ducking envelope, not flutter; thrust and the skid
+  // bias track at roughly the pedal's pace.
+  a_muffle_ = ChunkAlpha(0.060f, rate_);
+  a_thrust_ = ChunkAlpha(0.050f, rate_);
+  a_skid_bias_ = ChunkAlpha(0.050f, rate_);
 }
 
 void SynthVoice::SetParams(const SynthParams& p) {
@@ -44,6 +49,13 @@ void SynthVoice::SetParams(const SynthParams& p) {
   clean.throttle = std::clamp(Sane(p.throttle), 0.0f, 1.0f);
   clean.speed_mps = Sane(p.speed_mps);
   clean.slip = std::clamp(Sane(p.slip), 0.0f, 1.0f);
+  clean.muffle = std::clamp(Sane(p.muffle), 0.0f, 1.0f);
+  // thrust keeps its <0 "derive from rpm" sentinel; only a real request is
+  // clamped into 0..1 (a NaN degrades to the sentinel, i.e. old behaviour).
+  clean.thrust = std::isfinite(p.thrust) ? (p.thrust < 0.0f ? -1.0f : std::clamp(p.thrust, 0.0f, 1.0f))
+                                         : -1.0f;
+  clean.gear_shift = std::clamp(Sane(p.gear_shift), -1.0f, 1.0f);
+  clean.skid_bias = std::clamp(Sane(p.skid_bias), -1.0f, 1.0f);
 
   // Seqlock write: bump to odd (write in flight), store, bump to even (done).
   const u32 s = seq_.load(std::memory_order_relaxed);
@@ -79,6 +91,20 @@ u32 SynthVoice::Read(f32* out, u32 frames) {
     smoothed_.throttle += (target.throttle - smoothed_.throttle) * a_throttle_;
     smoothed_.speed_mps += (target.speed_mps - smoothed_.speed_mps) * a_speed_;
     smoothed_.slip += (target.slip - smoothed_.slip) * a_slip_;
+    smoothed_.muffle += (target.muffle - smoothed_.muffle) * a_muffle_;
+    smoothed_.skid_bias += (target.skid_bias - smoothed_.skid_bias) * a_skid_bias_;
+    // Thrust: ramp only within the real 0..1 range. A <0 target is the "derive
+    // from rpm" sentinel and snaps (no meaningful value to ramp toward); leaving
+    // the sentinel starts the ramp from 0 so it never sweeps up through negatives.
+    if (target.thrust < 0.0f) {
+      smoothed_.thrust = target.thrust;
+    } else {
+      if (smoothed_.thrust < 0.0f) smoothed_.thrust = 0.0f;
+      smoothed_.thrust += (target.thrust - smoothed_.thrust) * a_thrust_;
+    }
+    // Gear-shift request is an edge, not a level: hand the raw target through so
+    // the synth sees the rising edge and owns the flare's sample-accurate shape.
+    smoothed_.gear_shift = target.gear_shift;
     synth_->Render(out + done, n, smoothed_);
     done += n;
   }
