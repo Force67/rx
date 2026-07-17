@@ -23,7 +23,11 @@ struct FluidSurfacePush {
   f32 foam_speed_lo = 0.55f;   // m/s: foam onset (calm/settled water stays clear)
   f32 foam_speed_hi = 2.6f;    // m/s: full white water at the dam-break front
   f32 lava_emissive = 7.0f;    // HDR scale: hot core blooms without whiting out
+  u32 grid = 0;                // cells per side of THIS draw (VS cell decode
+                               // must match Draw()'s vertex count exactly)
+  u32 pad[3] = {};
 };
+static_assert(sizeof(FluidSurfacePush) == 64);
 
 // Grid resolution the surface rasterises at. The solver texture may be up to
 // 1024^2, but 512^2 cells (~1.5M verts, x2 instances) already over-tessellates
@@ -103,6 +107,7 @@ void FluidSurfacePass::Draw(PassContext& ctx, BindingSetHandle globals,
 
   FluidSurfacePush push;
   push.time = time;
+  push.grid = grid;
   ctx.cmd->PushConstants(&push, sizeof(push));
 
   // Two triangles per cell, N*N cells, x2 instances (water then lava). Dry cells

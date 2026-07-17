@@ -59,6 +59,8 @@ struct FluidSurfacePush {
   float foam_speed_lo;
   float foam_speed_hi;
   float lava_emissive;
+  uint grid;  // VS cell decode; unused here but the struct must mirror the CPU
+  uint3 pad;
 };
 PUSH_CONSTANTS(FluidSurfacePush, push);
 

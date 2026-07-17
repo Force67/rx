@@ -37,7 +37,7 @@ struct FluidSource {
 struct FluidDomainDesc {
   f32 origin[2] = {0, 0};              // world XZ of the min corner
   f32 extent = 128.0f;                 // meters (square)
-  u32 resolution = 512;                // cells per side (pow2, <= 1024)
+  u32 resolution = 512;                // cells per side (any value <= 1024)
   const f32* bed = nullptr;            // resolution^2 row-major heights (world Y); required
   const f32* initial_water = nullptr;  // optional resolution^2 initial water depth
   u64 bed_version = 0;                 // bump to re-upload bed (obstacle added/removed)
@@ -110,6 +110,7 @@ class FluidSim {
   u32 read_ = 0;              // authoritative state slot (see AddToGraph)
   f32 accum_ = 0;             // substep remainder carried across frames
   bool configured_ = false;
+  bool disabled_ = false;     // latched on allocation failure; cleared by Destroy
   bool have_domain_ = false;  // last AddToGraph was handed a domain
 };
 

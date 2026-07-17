@@ -49,6 +49,8 @@ struct FluidSurfacePush {
   float foam_speed_lo;
   float foam_speed_hi;
   float lava_emissive;
+  uint grid;  // cells per side of this draw (matches the CPU vertex count)
+  uint3 pad;
 };
 PUSH_CONSTANTS(FluidSurfacePush, push);
 
@@ -69,13 +71,10 @@ static const float2 kCorners[6] = {
 };
 
 VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
-  uint n = (uint)max(params.resolution, 1.0);
-  // Render grid may be coarser than the solver texture (capped at 512 on the
-  // CPU side); recover it from the draw's vertex count via the params instead of
-  // assuming it equals the solver resolution.
-  // The CPU issues 6*grid*grid verts; grid is min(resolution, 512). Recompute it
-  // the same way so cell decode matches the draw.
-  uint grid = min(n, 512u);
+  // The render grid may be coarser than the solver texture; the CPU pushes the
+  // exact cells-per-side of this draw so the cell decode always matches the
+  // issued vertex count.
+  uint grid = max(push.grid, 1u);
 
   uint cell = vid / 6u;
   uint corner = vid % 6u;
@@ -108,8 +107,10 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   o.uv = uv;
   o.depth = depth;
   if (depth < push.eps) {
-    // Dry cell for this fluid: emit a degenerate, off-screen position. All the
-    // triangle's verts collapse so nothing rasterises.
+    // Dry vertex for this fluid: emit a degenerate position. Note this kills
+    // any triangle with a mixed wet/dry corner set, so the rendered surface
+    // retreats up to one cell from the true wetting front — the PS depth fade
+    // hides the resulting edge.
     o.sv_position = float4(0, 0, 0, 0);
     o.world_pos = float3(world_xz.x, surf, world_xz.y);
     o.curr_clip = float4(0, 0, 0, 1);

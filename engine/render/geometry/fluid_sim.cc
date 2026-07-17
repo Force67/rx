@@ -90,21 +90,28 @@ void FluidSim::Destroy(Device& device) {
     device.DestroyBuffer(sources_[f]);
   }
   configured_ = false;
+  have_domain_ = false;
+  disabled_ = false;
+  accum_ = 0;
+  bed_version_ = ~0ull;
   device_ = nullptr;
 }
 
 void FluidSim::DestroyImages(Device& device) {
-  if (bed_) device.DestroyImage(bed_);
+  // Deferred: a reconfigure of a live domain runs while the previous frame's
+  // transparent pass may still sample these images; immediate destruction
+  // would pull them out from under in-flight work.
+  if (bed_) device.DestroyImageDeferred(bed_);
   bed_ = {};
   for (GpuImage& s : state_) {
-    if (s) device.DestroyImage(s);
+    if (s) device.DestroyImageDeferred(s);
     s = {};
   }
-  if (flux_water_) device.DestroyImage(flux_water_);
+  if (flux_water_) device.DestroyImageDeferred(flux_water_);
   flux_water_ = {};
-  if (flux_lava_) device.DestroyImage(flux_lava_);
+  if (flux_lava_) device.DestroyImageDeferred(flux_lava_);
   flux_lava_ = {};
-  if (velocity_) device.DestroyImage(velocity_);
+  if (velocity_) device.DestroyImageDeferred(velocity_);
   velocity_ = {};
 }
 
@@ -126,9 +133,10 @@ void FluidSim::Configure(Device& device, const FluidDomainDesc& desc) {
   velocity_ = device.CreateImage2D(Format::kRGBA16Float, ext,
                                    kBase | kTextureUsageTransferDst | kTextureUsageTransferSrc);
   if (!bed_ || !state_[0] || !state_[1] || !flux_water_ || !flux_lava_ || !velocity_) {
-    RX_WARN("fluid sim image allocation failed; feature disabled");
+    RX_WARN("fluid sim image allocation failed; feature disabled until Destroy");
     DestroyImages(device);
     configured_ = false;
+    disabled_ = true;  // latch: do not retry the allocation (and warn) every frame
     return;
   }
 
@@ -143,10 +151,19 @@ void FluidSim::Configure(Device& device, const FluidDomainDesc& desc) {
       device.CreateBuffer(static_cast<u64>(cells) * sizeof(f32), kBufferUsageTransferSrc, true);
   GpuBuffer state_stage =
       device.CreateBuffer(init.size() * sizeof(f32), kBufferUsageTransferSrc, true);
-  if (bed_stage.mapped && desc.bed)
-    std::memcpy(bed_stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
-  if (state_stage.mapped)
-    std::memcpy(state_stage.mapped, init.data(), init.size() * sizeof(f32));
+  if (!bed_stage.mapped || !state_stage.mapped) {
+    // Recording a copy from an invalid/unmapped staging buffer is a backend
+    // crash; treat it like the image-allocation failure above.
+    RX_WARN("fluid sim staging allocation failed; feature disabled until Destroy");
+    device.DestroyBuffer(bed_stage);
+    device.DestroyBuffer(state_stage);
+    DestroyImages(device);
+    configured_ = false;
+    disabled_ = true;
+    return;
+  }
+  std::memcpy(bed_stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
+  std::memcpy(state_stage.mapped, init.data(), init.size() * sizeof(f32));
 
   device.ImmediateSubmit([&](CommandList& cmd) {
     const f32 zero[4] = {0, 0, 0, 0};
@@ -185,11 +202,21 @@ void FluidSim::UploadBed(Device& device, const FluidDomainDesc& desc) {
   const u32 cells = desc.resolution * desc.resolution;
   GpuBuffer stage =
       device.CreateBuffer(static_cast<u64>(cells) * sizeof(f32), kBufferUsageTransferSrc, true);
-  if (stage.mapped && desc.bed)
-    std::memcpy(stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
+  if (!stage.mapped) {
+    RX_WARN("fluid sim bed staging failed; keeping the previous bed");
+    device.DestroyBuffer(stage);
+    bed_version_ = desc.bed_version;  // consume the bump; do not retry-spam
+    return;
+  }
+  std::memcpy(stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
   device.ImmediateSubmit([&](CommandList& cmd) {
     BufferTextureCopy copy;
-    cmd.Barrier(Transition(bed_, ResourceState::kGeneral, ResourceState::kCopyDst));
+    // kUndefined-as-source orders behind ALL prior work (the engine's
+    // convention for full-image rewrites): the previous frame's vertex and
+    // fragment stages sample bed_, and a kGeneral-source transition would only
+    // wait on compute. Contents are discarded, but the copy rewrites the whole
+    // image.
+    cmd.Barrier(Transition(bed_, ResourceState::kUndefined, ResourceState::kCopyDst));
     cmd.CopyBufferToTexture(stage, bed_, {&copy, 1});
     cmd.Barrier(Transition(bed_, ResourceState::kCopyDst, ResourceState::kGeneral));
   });
@@ -199,7 +226,7 @@ void FluidSim::UploadBed(Device& device, const FluidDomainDesc& desc) {
 
 void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
   have_domain_ = false;
-  if (!available() || !params.domain || !device_) return;
+  if (!available() || disabled_ || !params.domain || !device_) return;
   const FluidDomainDesc& desc = *params.domain;
   if (!desc.bed || desc.resolution == 0 || desc.resolution > kMaxResolution) return;
 
@@ -228,9 +255,11 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
   gp.resolution = static_cast<f32>(desc.resolution);
   std::memcpy(params_[slot].mapped, &gp, sizeof(gp));
 
-  // Bounded per-frame sources, packed for the shader.
-  u32 source_count = std::min(params.source_count, kMaxSources);
-  if (source_count > 0 && params.sources) {
+  // Bounded per-frame sources, packed for the shader. A null pointer means no
+  // sources regardless of the count — the shader must never consume the slot's
+  // stale records from a previous frame.
+  u32 source_count = params.sources ? std::min(params.source_count, kMaxSources) : 0u;
+  if (source_count > 0) {
     GpuSource* dst = static_cast<GpuSource*>(sources_[slot].mapped);
     for (u32 i = 0; i < source_count; ++i) {
       const FluidSource& s = params.sources[i];
@@ -251,6 +280,10 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
   u32 substeps = static_cast<u32>(accum_ / kSubstepDt);
   substeps = std::min(substeps, kMaxSubsteps);
   accum_ -= static_cast<f32>(substeps) * kSubstepDt;
+  // A dt larger than the per-frame substep budget must not accumulate as time
+  // debt (it would spiral: every later frame runs the cap and never catches
+  // up). Drop the excess — the sim slows down instead of death-spiralling.
+  accum_ = std::min(accum_, kSubstepDt);
   if (substeps == 0) return;  // read side unchanged; renderer still has state
 
   FluidPush push{};
@@ -280,6 +313,12 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
       "fluid_sim", [](RenderGraph::PassBuilder&) {},
       [this, push, groups, read, slot, substeps](PassContext& ctx) mutable {
         ctx.cmd->BindPipeline(pipeline_);
+        // Order this frame's solver behind the PREVIOUS frame's use of these
+        // images: its compute wrote state/flux (read-after-write) and its
+        // vertex/fragment stages sampled state/bed/velocity (write-after-read).
+        // The frame fence only covers frame N-2 and this pass declares no graph
+        // resources, so without this barrier adjacent frames' GPU work overlaps.
+        ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeReadWrite);
         const u32 a = read;        // input / final output slot
         const u32 b = read ^ 1u;   // lava scratch slot
 

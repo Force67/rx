@@ -48,10 +48,13 @@ wetting/drying front falls out of the volume clamp. A mild edge-overshoot damp
 (Chentanez & Müller) suppresses the ringing a steep dam-break front leaves
 behind.
 
-**Stability**: gravity waves travel at `√(g·d)`, so the substep obeys
-`dt ≤ 0.3 · l / (|u|max + √(g·d_max))`. The sim runs fixed substeps (default
-1/120 s, per-frame cap) — deterministic and frame-rate independent — with the
-volume clamp, velocity clamp and drag bounding transients.
+**Stability**: gravity waves travel at `√(g·d)`, so the explicit scheme wants
+`dt ≤ ~0.3 · l / (|u|max + √(g·d_max))`. The sim runs a FIXED substep (1/120 s,
+per-frame cap, remainder carried) — deterministic and frame-rate independent —
+which sits inside that bound for the default grid (0.25 m cells, a few metres
+of head). There is no runtime CFL clamp: much finer cells or much deeper water
+need a smaller `kSubstepDt`; the volume clamp, velocity clamp and drag keep
+out-of-bound configurations non-exploding (ringing, not NaNs).
 
 ## Lava
 
@@ -83,8 +86,9 @@ The game (or demo) drives the sim through the frame:
   its footprint, removing one restores the terrain underneath — the water that
   was held back floods through on the next substeps. That is the core
   "remove the hindrance and the water flows" mechanic.
-* **Sources/sinks**: bounded per-frame list (position, radius, rate m³/s,
-  fluid type, temperature) — springs, vents, drains.
+* **Sources/sinks**: bounded per-frame list (position, radius, rate in metres
+  of depth per second within the radius, fluid type, temperature) — springs,
+  vents, drains.
 * **Region fill**: initial-condition helper to pre-fill a basin/reservoir.
 
 One domain is active at a time in v1 (world-anchored origin/extent/resolution;
@@ -110,6 +114,9 @@ the VS samples `B + C + d`, the PS shades from the height-gradient normal plus:
 Cells with `d` below a small threshold fade/discard, so the surface only exists
 where fluid is. The FFT ocean / WaterField stack is untouched — this module is
 for *bounded dynamic* water (floods, pools, channels, lava), not the ocean.
+The surface draws inside the transparent pass, which currently exists only when
+the ray-query water pipeline is available — on a non-RT device the whole
+feature (solver included) stays inactive rather than simulating invisibly.
 
 ## Verification
 

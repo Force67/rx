@@ -3654,9 +3654,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   if (water_field_active_)
     globals.flags |= kFrameFlagWaterField;
   // The optional fluid solver runs whenever a domain is submitted; it is NOT
-  // gated on scene_has_water (a lava-only scene carries no water material). The
-  // solver only produces fields here; a surface renderer draws them separately.
+  // gated on scene_has_water (a lava-only scene carries no water material). It
+  // IS gated on the surface draw being reachable: the fluid draws inside the
+  // transparent pass, which needs water_ (only created with ray query) — on a
+  // non-RT device the solver would otherwise burn GPU every frame with no
+  // visual output.
   fluid_sim_active_ = settings_.fluid_sim && fluid_sim_.available() &&
+                      water_ != nullptr && fluid_surface_ != nullptr &&
                       !path_trace && view.fluid_domain != nullptr;
   // Shoreline wetting: snap the field to the camera and hand the shader its
   // origin/extent before the globals upload; the compute pass records below.
