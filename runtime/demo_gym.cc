@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
@@ -531,6 +532,15 @@ void GymDemo::BuildPlayer() {
   physics::CharacterId cid = phys.CreateCharacter(center, radius, half_height);
   world.Add(player_, character::CharacterBody{cid, radius, half_height, false});
 
+  // Jetpack (off until toggled with J): engine-default desc + its input/telemetry
+  // components, plus a LightJetPreset voice positioned at the player.
+  world.Add(player_, character::JetpackDesc{});
+  world.Add(player_, character::JetpackInput{});
+  world.Add(player_, character::JetpackState{});
+  if (ctx_.audio)
+    jetpack_audio_ = std::make_unique<audio::VehicleAudio>(ctx_.audio->mixer(),
+                                                           audio::LightJetPreset());
+
   // Inventory with a handful of crates to drop.
   inventory::Inventory inv;
   inv.max_entries = 16;
@@ -720,6 +730,9 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
     if (input.key_pressed(Key::kG)) DropCrate();
     if (input.key_pressed(Key::kF) || input.key_pressed(Key::kT)) PickUpNearest();
     if (input.key_pressed(Key::kR)) ResetPlayer();
+    if (input.key_pressed(Key::kJ)) {  // toggle the jetpack on / off
+      if (auto* ji = world.Get<character::JetpackInput>(player_)) ji->enabled = !ji->enabled;
+    }
     if (input.wheel != 0.0f)
       character::ApplyCharacterZoom(world, player_, input.wheel * 0.4f, false, view_settings_);
   }
@@ -730,6 +743,17 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
   // deterministic regardless of the windowed frame rate.
   FillIntent(input, actions, allow_keyboard, allow_mouse, script_.empty() ? dt : fixed);
   SyncViewSettingsToRig();
+
+  // Jetpack control: with the pack ON, holding the jump input (Space) thrusts and
+  // the ordinary jump is suppressed; with it OFF, Space stays the normal jump.
+  if (auto* jin = world.Get<character::JetpackInput>(player_)) {
+    if (jin->enabled) {
+      jin->thrust = allow_keyboard && actions.down(Action::kJump);
+      if (auto* ci = world.Get<character::CharacterIntent>(player_)) ci->jump = false;
+    } else {
+      jin->thrust = false;
+    }
+  }
 
   int steps;
   if (!script_.empty()) {
@@ -748,6 +772,9 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
   }
 
   for (int i = 0; i < steps; ++i) {
+    // Jetpack BEFORE the character step: it writes CharacterIntent's external
+    // acceleration, which StepCharacters then folds into the velocity.
+    character::StepJetpacks(world, fixed);
     // Character + camera-rig pipeline (README staged order).
     character::StepCharacters(world, phys, fixed);
     character::SyncCharacterCameraAnchors(world);
@@ -791,6 +818,24 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
     cam_target_ = v.position + Rotate(v.orientation, Vec3{0, 0, -1});
     cam_fov_ = v.lens.fov_y;
     cam_valid_ = out->valid;
+  }
+
+  // Jetpack voice: N1 (rpm) tracks the spooled thrust (turbine whine), the roar
+  // tracks the burn demand, and an empty tank ducks/muffles it (the sputter-out).
+  if (jetpack_audio_) {
+    auto* jst = world.Get<character::JetpackState>(player_);
+    auto* jin = world.Get<character::JetpackInput>(player_);
+    audio::VehicleAudioState st;
+    if (jst) {
+      st.rpm = jst->thrust * 100.0f;  // N1 %
+      st.load = jst->thrust;
+      st.thrust = (jin && jin->enabled && jin->thrust) ? 1.0f : 0.0f;  // roar <- demand
+      st.throttle = st.thrust;
+      st.submerged = jst->fuel <= 0.0f;  // dry tank: duck + muffle
+    }
+    if (auto* tr = world.Get<scene::Transform>(player_))
+      st.position = {tr->position[0], tr->position[1], tr->position[2]};
+    jetpack_audio_->Update(st);
   }
 }
 
@@ -882,6 +927,19 @@ void GymDemo::DrawPanel() {
     if (body) ImGui::Text("capsule: r %.2f  half %.2f m", body->radius, body->half_height);
     ImGui::Text("cursor: %s (Tab)   inventory crates: %u", mouse_captured_ ? "captured" : "free",
                 inv ? inventory::InventoryCount(*inv, crate_def_) : 0);
+
+    // Jetpack: on/off, a fuel bar and the actual (spooled) thrust. No auto-hover —
+    // matching thrust to weight to hang still is the player's finesse.
+    if (auto* jst = world.Get<character::JetpackState>(player_)) {
+      auto* jin = world.Get<character::JetpackInput>(player_);
+      const bool on = jin && jin->enabled;
+      const char* tag = jst->refueling ? "  refuel" : (jst->burning ? "  BURN" : "");
+      ImGui::Text("jetpack: %s%s   (J toggle, hold Space to burn)", on ? "ON" : "off", tag);
+      char label[32];
+      std::snprintf(label, sizeof(label), "fuel %.0f%%", jst->fuel * 100.0f);
+      ImGui::ProgressBar(jst->fuel, ImVec2(-1.0f, 0.0f), label);
+      ImGui::Text("thrust %.0f%%", jst->thrust * 100.0f);
+    }
     ImGui::Separator();
 
     if (ImGui::Button("Reset (R)")) ResetPlayer();

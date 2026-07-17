@@ -27,7 +27,8 @@ DISPLAY=:10 vkrun ./build/linux/runtime/rx --demo gym
 | **Mouse** / right stick | Look |
 | **Shift** | Sprint (hold) |
 | **Ctrl** | Crouch (hold) |
-| **Space** | Jump |
+| **Space** | Jump — or, with the jetpack **on**, hold to thrust (the normal jump is suppressed while the pack is on) |
+| **J** | Toggle the jetpack on / off |
 | **V** | Toggle first / third person (smooth stack transition) |
 | **Scroll** | Zoom the third-person boom (`ApplyCharacterZoom`) |
 | **G** | Drop a crate from the inventory (forward impulse) |
@@ -100,6 +101,50 @@ One `ItemDef` — a 0.25 m checker-cube "crate" — is registered in a gym-owned
 `WorldItem` via `PickUpItem`. `SyncWorldItems` / `HibernateDistantWorldItems` /
 `WakeWorldItemsNear` run each frame in the README's per-tick order. The panel
 shows the live crate count.
+
+## Jetpack
+
+`engine/character/jetpack.{h,cc}` in the module's idiom: plain-data components
+(**`JetpackDesc`**, **`JetpackInput`**, **`JetpackState`**) plus one
+free-function system, **`StepJetpacks(world, dt)`**, staged **before**
+`StepCharacters` each fixed step. **J** toggles the pack; with it on, hold
+**Space** to burn.
+
+The controller seam is the interesting part. The character controller is a
+kinematic, velocity-based mover with no mass to push, so the pack works in
+**acceleration** units and injects thrust through the new
+**`CharacterIntent::external_acceleration`** field, which `StepCharacters` folds
+into the velocity just before the mover consumes it. That lets thrust compete
+with gravity honestly, and because the ground clamp still stops downward motion
+the pack never bypasses the existing fall/land handling.
+
+Fuel / spool / refuel model:
+
+- Thrust lags demand through a first-order spool (**`spool_time`** ≈ 0.3 s ≈ 90%
+  rise time), so a stab of the button does not snap to full thrust.
+- Fuel drains proportional to the *actual* (spooled) thrust
+  (**`fuel_capacity_s`** = 4 s of full burn); an empty tank is a dead stick —
+  thrust forced to zero, normal gravity fall.
+- Refuel **only while grounded** (**`refuel_rate`** = 0.5 tank/s → full in 2 s);
+  airborne never refuels.
+- **`thrust_to_weight`** = 1.45 — the pack climbs but does not hover on its own.
+  There is **no auto-hover**: matching thrust to weight to hang still is the
+  player's finesse (intended).
+- **`lateral_accel`** = 24 m/s² of thrust-vector authority scaled by the actual
+  thrust, applied along the move intent so airborne WASD accelerates faster with
+  the pack burning than a free-fall drift.
+
+**Measured behaviour** (from `test/jetpack_test.cc`, headless, over the real
+Jolt character controller):
+
+| Scenario | Result |
+| --- | --- |
+| Full burn from rest | Leaves the ground and climbs ~27 m over a 3 s burn. |
+| Fuel drain | Empties in ~4.1 s (≈ capacity); thrust dies and the character descends. |
+| Refuel | Grounded restores the tank (0.2 → 1.0); airborne never refuels (stays 0.5). |
+| Spool lag | Thrust ~0.59 at `spool_time`/3, ~0.91 at `spool_time` (target 0.90). |
+| Airborne lateral | WASD reaches ~6.5 m/s horizontal burning vs ~4.2 m/s free-fall drift. |
+| Robustness | NaN-free under random input; the plain jump still works (~1.05 m) with the pack off. |
 
 ## Env-gated staging (for captures)
 

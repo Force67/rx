@@ -75,6 +75,17 @@ nothing - no lightmaps, no probe bakes, no per-level GI data on disk):
 Both probe modes need ray query; the path tracer modes (`RX_PATHTRACE*`)
 remain the ground-truth reference.
 
+## Vehicles
+
+Three vehicle simulators sit over the Jolt physics world: cars and motorcycles
+(Jolt's wheeled/motorcycle controllers with a manual gearbox, torque curve, and
+a surface-material grip table driving rain wetness and tyre aquaplaning), and
+force-based boats (volumetric buoyancy, planing, prop ventilation) and aircraft
+(strip-theory wings with stall, MTOM-honest performance, raycast landing gear).
+Each feeds a procedural audio stack that synthesizes the engine, skid and wind
+from telemetry - no samples. The `--demo drive` scene shows all three over a
+painted material heightfield with a lake. See [docs/VEHICLES.md](docs/VEHICLES.md).
+
 ## Building
 
 ```sh

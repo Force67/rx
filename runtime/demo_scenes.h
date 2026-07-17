@@ -20,6 +20,7 @@
 #include "demo_placement.h"
 #include "demo_ship.h"
 #include "demo_gym.h"
+#include "demo_drive.h"
 #include "scene_hook_demo.h"
 #include "scene_hook_rhi_demo.h"
 
@@ -42,6 +43,9 @@ class DemoScenes {
   // The character/inventory gym (--demo gym), or null for any other scene. The
   // gym drives its own camera + input, so the Viewer routes OnUpdate to it.
   GymDemo* gym() { return gym_.get(); }
+  // The driving gym (--demo drive), or null for any other scene. Like the gym it
+  // owns its camera + input, so the Viewer routes OnUpdate to it.
+  DriveDemo* drive() { return drive_.get(); }
   // Reapplies demo-specific renderer constraints after the debug UI changes
   // settings. Most demos have none; cloth requires the raster skinning path.
   void ApplyRenderPolicy();
@@ -206,6 +210,10 @@ class DemoScenes {
   // --demo gym: the character/inventory reference gym (graybox + tuning panel).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
   std::unique_ptr<GymDemo> gym_;
+
+  // --demo drive: the GTA-style driving gym (car/boat/plane on mixed terrain).
+  // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
+  std::unique_ptr<DriveDemo> drive_;
 
   // --demo bubbles: the streaming-bubble interest map driven locally (no
   // transport), plus its wire-sphere visualizer. Non-null only for that demo.

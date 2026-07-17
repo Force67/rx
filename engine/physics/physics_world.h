@@ -24,6 +24,25 @@ using VehicleId = u64;
 // Opaque strand-groom handle; 0 is invalid.
 using StrandGroomId = u64;
 
+// Ground surface a static collider presents to tires. Drives per-surface tire
+// grip (the coupling table in physics_world.cc) and gives audio/FX a surface
+// cue per wheel. Asphalt is the default so untagged world geometry keeps full
+// street grip and the legacy behaviour. kCount is a sentinel, not a surface.
+enum class SurfaceType : u8 {
+  kAsphalt,
+  kConcrete,
+  kDirt,
+  kGravel,
+  kGrass,
+  kSand,
+  kSnow,
+  kIce,
+  kMud,
+  kWood,
+  kMetal,
+  kCount,
+};
+
 // Jolt-backed rigid body world. Fixed-step simulation driven from the sim
 // stage; dynamic bodies report their transforms back for ECS sync. Bodies
 // below a water surface get buoyancy and drag impulses each step (the Jolt
@@ -44,20 +63,97 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   bool Initialize();
   void Update(f32 dt);
 
+  // Installs the water-height callback. THREADING: the callback is invoked only
+  // on the game thread - inside Update (before the Jolt step) and from the
+  // SampleWater entry below - never from a Jolt worker thread. The vehicle
+  // tire-friction path samples each wheel's water into a per-vehicle cache on
+  // the game thread and the in-step friction callback reads that cache, so a
+  // callback touching thread-affine terrain data or physics queries is safe.
   void set_water_height(WaterHeightFn fn) { water_height_ = std::move(fn); }
 
-  // Static colliders.
-  BodyId AddStaticBox(const Vec3& position, const Vec3& half_extent);
+  // Global uniform wind velocity (m/s, world space) the force-based aero
+  // simulators sample as their ambient airmass. Default zero (still air). Cars
+  // ignore it (negligible at this fidelity); the aircraft treats it as the
+  // airmass its airspeed/aero are measured against and the boat as a push on
+  // its exposed topsides. This is a plain global, not a spatial field.
+  void set_wind(const Vec3& wind) { wind_ = wind; }
+  Vec3 wind() const { return wind_; }
+  // Evaluates the installed water-height callback at `position`. Returns true
+  // with the surface height (world Y) and horizontal flow when the point is
+  // over water, false when no callback is installed or the point is not over
+  // water. The public entry the force-based simulators (tire aquaplaning here,
+  // boats/aircraft in later waves) sample the swell through.
+  bool SampleWater(const Vec3& position, f32* out_height, Vec3* out_flow) const;
+
+  // Excludes a dynamic body from the generic whole-body buoyancy+drag applied
+  // in Update (the Jolt water sample scheme above). A force-based hull that
+  // does its own multi-point buoyancy (the boat simulator) opts out here so the
+  // two schemes don't stack. No effect when true is set twice; false restores
+  // the generic path. Off by default, so ordinary floaters are unchanged.
+  void set_buoyancy_exempt(BodyId id, bool exempt);
+
+  // --- rigid-body force primitives (thin Jolt wrappers) ---
+  // Continuous force (N) / torque (Nm) accumulated for the next step and
+  // cleared by Jolt after it; call every step while the force applies. Point
+  // variants take a WORLD-space application point. These wake the body. The
+  // building blocks the later force-based boat/aircraft simulators integrate
+  // their hydro/aero models on top of.
+  void AddForce(BodyId id, const Vec3& force);
+  void AddForceAtPoint(BodyId id, const Vec3& force, const Vec3& world_point);
+  void AddTorque(BodyId id, const Vec3& torque);
+  Vec3 GetLinearVelocity(BodyId id) const;   // m/s, world space
+  Vec3 GetAngularVelocity(BodyId id) const;  // rad/s, world space
+  // World-space velocity of the world-space point `world_point` rigidly
+  // attached to the body (linear + angular contribution).
+  Vec3 GetPointVelocity(BodyId id, const Vec3& world_point) const;
+  // Mass in kg; 0 for a static/kinematic body or a dead handle.
+  f32 GetBodyMass(BodyId id) const;
+  // Overrides a dynamic body's inertia tensor with an explicit diagonal
+  // (kg*m^2) about the centre of mass, its principal axes aligned to the body
+  // axes (no rotation). Replaces the collision-shape-derived tensor, so a
+  // force-based simulator whose collision box does not represent the true mass
+  // distribution (e.g. an aircraft fuselage box that excludes the wings) gets
+  // an honest roll/pitch/yaw response instead of a box-derived one. Components
+  // <= 0 leave that axis free (inverse inertia 0 = no angular response about
+  // it); pass positive values. No-op on a static/kinematic body or dead handle.
+  void SetBodyInertia(BodyId id, const Vec3& diagonal_kgm2);
+  // Rescales a dynamic body's mass to `kg` at runtime, scaling its inertia
+  // tensor by the same factor so the shape's mass DISTRIBUTION (its principal
+  // moments about the centre of mass) is preserved - the moving counterpart to
+  // spawning a box at a given density. A force-based simulator whose payload
+  // changes (the boat taking on cargo) makes its hull heavier this way instead
+  // of respawning it: the extra mass makes it accelerate and turn more slowly
+  // (mass AND inertia grow) and, for a buoyant hull, settle deeper. Mirrors
+  // SetBodyInertia's inverse-quantity conventions (inertia scales as old/new
+  // mass). kg <= 0, a static/kinematic body or a dead handle are ignored.
+  void SetBodyMass(BodyId id, f32 kg);
+
+  // Static colliders. The trailing `surface` tags the collider so tire grip
+  // and surface FX know what a wheel touches; it defaults to asphalt so
+  // existing callers and the physics feel are unchanged (asphalt = full grip,
+  // no material installed on the shape).
+  BodyId AddStaticBox(const Vec3& position, const Vec3& half_extent,
+                      SurfaceType surface = SurfaceType::kAsphalt);
   BodyId AddStaticMesh(const asset::Mesh& mesh, const Vec3& position, const f32 rotation[4],
-                       f32 scale);
+                       f32 scale, SurfaceType surface = SurfaceType::kAsphalt);
   // Shared-shape path for streamed instances: the mesh bakes once per key,
-  // every placement reuses it through a scale wrapper.
+  // every placement reuses it through a scale wrapper. Because the shape (and
+  // so its material) is shared, `surface` is recorded per body on the side and
+  // resolved at tire contact, not baked into the shared shape.
   bool RegisterMeshShape(u64 key, const asset::Mesh& mesh);
   bool has_mesh_shape(u64 key) const;
-  BodyId AddStaticMeshInstance(u64 key, const Vec3& position, const f32 rotation[4], f32 scale);
+  BodyId AddStaticMeshInstance(u64 key, const Vec3& position, const f32 rotation[4], f32 scale,
+                               SurfaceType surface = SurfaceType::kAsphalt);
   // Heightfield grid of sample*sample values covering size x size meters,
   // anchored at `origin` (min corner). For streamed terrain cells.
-  BodyId AddHeightField(const Vec3& origin, const f32* heights, u32 samples, f32 size);
+  BodyId AddHeightField(const Vec3& origin, const f32* heights, u32 samples, f32 size,
+                        SurfaceType surface = SurfaceType::kAsphalt);
+  // Heightfield with a mixed surface: `material_indices` is (samples-1)^2
+  // per-quad indices into `palette` (row-major, matching Jolt's height-field
+  // quad layout), so one terrain cell can carry an asphalt road over grass.
+  // Falls back to the single-surface path when the palette is empty.
+  BodyId AddHeightField(const Vec3& origin, const f32* heights, u32 samples, f32 size,
+                        const u8* material_indices, const SurfaceType* palette, u32 palette_count);
 
   // Generic shape-tree bodies (authored collision from the havok decoder or
   // other producers). `scale` converts the desc's units into meters (pass
@@ -65,7 +161,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // take an explicit
   // mass in kg; 0 falls back to Jolt's density-derived mass.
   BodyId AddStaticShape(const ShapeDesc& desc, const Vec3& position, const f32 rotation[4],
-                        f32 scale);
+                        f32 scale, SurfaceType surface = SurfaceType::kAsphalt);
   // filter_group/subgroup: bodies sharing a filter group collide unless the
   // pair of subgroups was disabled - how a ragdoll's jointed limbs overlap
   // at the hips/shoulders without fighting their constraints.
@@ -199,6 +295,12 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // Center of mass dropped below the chassis center: arcade stability (hard
     // to roll in normal cornering, still flippable off ramps).
     f32 com_drop = 0.4f;
+    // Center of mass shifted along the body +Z (forward) axis, metres; negative
+    // = rearward. 0 = centred (legacy). A rearward CoM (loaded van/truck) puts
+    // weight over the rear axle, lightens the steer and drops the nose under
+    // braking; used by the van's cargo-load parameter. Mapped straight onto the
+    // chassis OffsetCenterOfMass Z with com_drop's Y.
+    f32 com_fore = 0;
 
     // --- racing-sim extensions ---
     Drivetrain drivetrain = Drivetrain::kRWD;
@@ -217,6 +319,22 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // mass, so light vehicles want a realistic (small) value.
     f32 engine_inertia = 0;
     f32 clutch_strength = 0;  // 0 = legacy (10)
+    // Engine braking: angular damping of the engine (dw/dt = -c*w), the drag
+    // felt off-throttle. 0 = Jolt default (0.2); raise for a diesel-like
+    // trailing-throttle deceleration. max_rpm above doubles as the rev limiter
+    // (Jolt hard-clamps engine RPM to it).
+    f32 engine_braking = 0;
+    // Normalized engine torque curve: `torque_curve[i]` = (rpm fraction 0..1 of
+    // max_rpm, torque fraction 0..1 of max_engine_torque), ascending in x.
+    // Mapped onto Jolt's VehicleEngineSettings normalized torque curve. Leave
+    // torque_curve_count 0 to keep Jolt's stock curve (0.8 / 1.0 / 0.8); a
+    // count above the array size is clamped to it at use.
+    struct TorquePoint {
+      f32 rpm_fraction = 0;
+      f32 torque_fraction = 0;
+    };
+    TorquePoint torque_curve[8] = {};
+    u32 torque_curve_count = 0;
     // Tire grip: scales Jolt's default longitudinal/lateral slip curves
     // (1 = stock street tire, ~1.5+ slicks). 0 = default (1).
     f32 tire_long_friction = 0;
@@ -234,6 +352,55 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // ~8%, holding the tire near its grip peak (and letting the automatic
     // box shift, which Jolt gates on slip). Off = raw throttle.
     bool traction_control = false;
+    // --- handling-profile extensions (all default to current behaviour) ---
+    // Limited-slip differential: Jolt's mLimitedSlipRatio (max/min driven-wheel
+    // speed before all torque routes to the slower wheel). Lower = tighter lock
+    // (a spinning inside wheel still drives the car out of a corner, adds
+    // throttle-on oversteer); large (>=100) approaches an open diff. 0 = Jolt
+    // default (1.4). Applied to every driven differential.
+    f32 limited_slip_ratio = 0;
+    // High-speed steering fade: the effective steer command scales from 1 at
+    // rest down to steer_high_speed_fraction as forward speed reaches
+    // steer_fade_speed (m/s), then holds. Models the rack calming down at speed
+    // so a full flick doesn't spin the car on the motorway. fraction >= 1 or
+    // fade_speed <= 0 = no fade (legacy full-angle steering at any speed).
+    f32 steer_high_speed_fraction = 1.0f;
+    f32 steer_fade_speed = 0;
+    // Anti-roll bar stiffness per axle, N/m (Jolt VehicleAntiRollBar). 0 on an
+    // axle falls back to anti_roll_stiffness, then to Jolt's default (1000).
+    // More front bar than rear pushes the balance toward understeer, more rear
+    // bar toward oversteer.
+    f32 anti_roll_front = 0;
+    f32 anti_roll_rear = 0;
+    // Brake bias: fraction of the per-wheel brake torque sent to the FRONT axle
+    // (0.5 = even, road cars ~0.6). max_brake_torque stays the per-wheel base;
+    // each front wheel receives 2*bias of it and each rear 2*(1-bias). Left at
+    // 0.5 with max_brake_torque 0, the Jolt default even braking is unchanged.
+    f32 brake_bias_front = 0.5f;
+    // Aero downforce balance: fraction of `downforce` pressed at the FRONT axle
+    // (the rest at the rear), each applied at its axle instead of the CoM. The
+    // split loads the axles asymmetrically (front-biased downforce grows front
+    // grip) and adds a slight aero pitch. 0.5 keeps the legacy single CoM force.
+    f32 downforce_balance = 0.5f;
+    // Per-axle lateral tyre grip scalars (like tire_lat_friction, but per axle):
+    // 0 on an axle falls back to tire_lat_friction, then to 1 (stock). Front
+    // below rear = understeer (the nose washes wide); rear below front =
+    // throttle-on oversteer (the tail steps out). The key knob behind the
+    // muscle car's tail-happiness and the hatchback's safe understeer.
+    f32 front_lat_friction = 0;
+    f32 rear_lat_friction = 0;
+    // Per-axle suspension spring frequency, Hz: 0 on an axle falls back to
+    // suspension_frequency, then to Jolt's default (1.5). A softer rear lets a
+    // muscle car squat and hook up; soft on both axles gives a wallowy SUV/van.
+    f32 front_suspension_frequency = 0;
+    f32 rear_suspension_frequency = 0;
+    // Free-rolling (unpowered) chassis: no engine torque reaches any wheel, so
+    // all four wheels roll purely on their suspension and tire friction, the
+    // way a trailer or a horse-drawn carriage pulled through an external hitch
+    // does. The front axle still steers from DriveVehicle's steer input (a
+    // turntable front axle) and the rear axle still takes the handbrake as a
+    // parking brake. Off by default (an ordinary engine-driven car).
+    bool free_rolling = false;
   };
   // Spawns the chassis at `position` (chassis center) yawed around +Y. Spawn
   // slightly high and let the suspension settle. 0 on failure.
@@ -265,6 +432,10 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // ~13:1 reduction reflects as ~4x the whole bike's mass and eats the
     // torque as engine spin-up.
     f32 engine_inertia = 0.08f;
+    f32 engine_braking = 0;  // engine angular damping; 0 = Jolt default (0.2)
+    // Normalized torque curve, like VehicleDesc::torque_curve. 0 = stock curve.
+    VehicleDesc::TorquePoint torque_curve[8] = {};
+    u32 torque_curve_count = 0;
     u32 gear_count = 0;  // 0 = a stock 6-speed bike box
     f32 gear_ratios[8] = {};
     f32 final_drive = 4.8f;  // primary + sprocket combined
@@ -283,28 +454,72 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   VehicleId CreateMotorcycle(const MotorcycleDesc& desc, const Vec3& position, f32 yaw_radians);
 
   void RemoveVehicle(VehicleId id);
+  // Global rain wetness, 0 (dry) .. 1 (soaked), scaling tire grip down per
+  // surface (wet asphalt ~0.7 of dry at 1.0; loose dirt turns mud-like). Off
+  // (0) by default so dry-road behaviour is unchanged.
+  void set_surface_wetness(f32 wetness);
+  // Manual transmission: gears change only on the shift_up/shift_down edges of
+  // the VehicleInput overload and the clutch input is honoured (auto mode
+  // otherwise). Ignored until a vehicle is created; both cars and bikes accept
+  // it. Off by default (automatic box, auto clutch), matching the 4-float
+  // DriveVehicle below.
+  void SetManualTransmission(VehicleId id, bool manual);
   // Driver input, each -1..1 (forward: throttle vs reverse; right: steer) or
   // 0..1 (brake, handbrake). Wakes the body while any input is non-zero.
+  // Automatic box + auto clutch.
   void DriveVehicle(VehicleId id, f32 forward, f32 right, f32 brake, f32 handbrake);
+  // Full driver input. throttle/steer are -1..1, brake/handbrake/clutch are
+  // 0..1 (clutch: 1 = fully disengaged). shift_up/shift_down are edges honoured
+  // only in manual mode (SetManualTransmission), where a rising edge changes one
+  // gear; they are ignored by the automatic box. In automatic mode clutch is
+  // ignored (the box works the clutch itself).
+  struct VehicleInput {
+    f32 throttle = 0;    // -1..1, forward vs reverse gas
+    f32 steer = 0;       // -1..1, right positive
+    f32 brake = 0;       // 0..1
+    f32 handbrake = 0;   // 0..1 (rear axle; ignored by bikes)
+    f32 clutch = 0;      // 0..1, 1 = fully disengaged (manual only)
+    bool shift_up = false;
+    bool shift_down = false;
+  };
+  void DriveVehicle(VehicleId id, const VehicleInput& input);
   bool GetVehicleTransform(VehicleId id, Vec3* position, f32 rotation[4]) const;
   // World transform of a wheel (cars 0..3 = FL FR RL RR, bikes 0..1 =
   // front/rear), suspension and steering applied.
   bool GetVehicleWheel(VehicleId id, u32 wheel, Vec3* position, f32 rotation[4]) const;
   // Signed speed along the chassis forward axis, m/s.
   f32 VehicleForwardSpeed(VehicleId id) const;
+  // The dynamic chassis body backing a vehicle, as a BodyId usable with the
+  // rigid-body force primitives above (AddForceAtPoint / GetPointVelocity /
+  // GetBodyMass). Lets a caller stage external forces on the chassis, e.g. a
+  // tow hitch pulling a free-rolling carriage toward the horse. 0 for a dead
+  // handle.
+  BodyId GetVehicleBody(VehicleId id) const;
 
   // Drivetrain + per-wheel telemetry for HUDs, audio and effects.
   struct VehicleState {
     f32 rpm = 0;
     i32 gear = 0;  // Jolt convention: -1 reverse, 0 neutral, 1..N forward
     f32 forward_speed = 0;  // m/s, signed
+    // Engine load 0..1: actual delivered torque / max torque available at the
+    // current rpm (the throttle the box is actually letting through, after the
+    // clutch). engine_torque is that delivered torque in Nm. is_shifting is
+    // true while the clutch is slipping through a gear change.
+    f32 engine_load = 0;
+    f32 engine_torque = 0;  // Nm
+    bool is_shifting = false;
     u32 wheel_count = 0;
     struct WheelState {
       bool contact = false;
       f32 suspension_length = 0;   // current, meters
+      f32 suspension_compression = 0;  // 0 = fully extended, 1 = fully compressed
       f32 longitudinal_slip = 0;   // 0 = full traction, 1 = locked/spinning
+      f32 lateral_slip = 0;        // radians: slip angle between ground and wheel
       f32 angular_velocity = 0;    // rad/s around the axle
       f32 rotation_angle = 0;      // accumulated spin, radians
+      SurfaceType surface = SurfaceType::kAsphalt;  // ground in contact
+      bool submerged = false;      // contact point below the water surface
+      f32 wading_depth = 0;        // meters of water over the contact patch
     } wheels[4];
   };
   bool GetVehicleState(VehicleId id, VehicleState* out) const;
@@ -407,6 +622,14 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     f32 distance = 0;
   };
   bool Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out) const;
+  // Same closest-hit ray, but skipping the body `ignore` (its whole shape).
+  // Lets a force-based simulator cast from a point INSIDE its own collision
+  // shape without hitting itself - the aircraft's gear suspension rays start
+  // at real hardpoints on the fuselage and would otherwise register the plane's
+  // own underside. `ignore` == 0 skips nothing (identical to the overload
+  // above). Jolt IgnoreSingleBodyFilter.
+  bool Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out,
+               BodyId ignore) const;
 
   // Closest hit of a swept sphere of `radius` from `origin` along `direction`
   // for up to `max_distance` metres. Used by third-person camera collision and
@@ -423,9 +646,20 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   bool initialized() const { return impl_ != nullptr; }
 
  private:
+  // Installs the surface-aware tire-friction combine callback on a freshly
+  // created vehicle (index into impl_->vehicles). Both cars and bikes share it.
+  void InstallVehicleFriction(u32 vehicle_index);
+  // Traction-control throttle shaping (governs the driven-wheel slip toward the
+  // grip peak), shared by the automatic and manual driver-input paths so manual
+  // mode gets the same aid. Returns the shaped throttle; a no-op when the
+  // vehicle has no traction control or `forward` is zero.
+  f32 TractionControlThrottle(u32 vehicle_index, f32 forward);
+
   struct Impl;
   std::unique_ptr<Impl> impl_;
   WaterHeightFn water_height_;
+  Vec3 wind_{};              // global uniform wind velocity, m/s, world space
+  f32 surface_wetness_ = 0;  // global rain wetness, 0..1
   u32 dynamic_count_ = 0;
 };
 

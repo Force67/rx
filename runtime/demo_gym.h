@@ -1,14 +1,17 @@
 #ifndef RX_RUNTIME_DEMO_GYM_H_
 #define RX_RUNTIME_DEMO_GYM_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
+#include "audio/vehicle_audio.h"
 #include "core/input.h"
 #include "core/input_actions.h"
 #include "core/math.h"
 #include "engine_context.h"
 #include "character/character.h"
+#include "character/jetpack.h"
 #include "inventory/item_catalog.h"
 #include "inventory/world_item.h"
 #include "render/core/renderer.h"
@@ -90,6 +93,10 @@ class GymDemo {
   Vec3 platform_center_{0, 0, 0};
   f32 platform_span_ = 3.0f;
   f32 platform_time_ = 0;
+
+  // Jetpack: a LightJetPreset voice at the player, N1 tracking the spooled thrust
+  // and the roar the burn demand; ducked/muffled when the tank runs dry.
+  std::unique_ptr<audio::VehicleAudio> jetpack_audio_;
 
   Vec3 spawn_feet_{0, 0, 8};
   f32 spawn_yaw_ = 0;

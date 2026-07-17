@@ -326,6 +326,34 @@ if(RX_BUILD_TESTS)
   add_test(NAME vfs_test COMMAND vfs_test)
 endif()
 
+# Procedural vehicle audio: engine/skid/wind synthesis, the SynthVoice seam and
+# the VehicleAudio driver through the mixer. Pure CPU (no device), always runs.
+if(RX_BUILD_TESTS)
+  add_executable(vehicle_audio_test test/vehicle_audio_test.cc)
+  target_link_libraries(vehicle_audio_test PRIVATE rx::audio rx::core)
+  add_test(NAME vehicle_audio_test COMMAND vehicle_audio_test)
+endif()
+
+# Physics-driven fixed-wing aircraft over the public PhysicsWorld force API:
+# ground roll + rotation + climb, overloaded (over-MTOM) degradation, stall
+# sink, flap-shortened takeoff, braking, rudder yaw, and NaN-free tumbling.
+# Headless (no GPU), needs the Jolt-enabled physics build like vehicle_test.
+if(RX_BUILD_TESTS AND RX_JOLT)
+  add_executable(aircraft_test test/aircraft_test.cc)
+  target_link_libraries(aircraft_test PRIVATE rx::physics rx::core)
+  add_test(NAME aircraft_test COMMAND aircraft_test)
+endif()
+
+# Cross-system vehicle integration: one PhysicsWorld hosts a car, a boat and an
+# aircraft at once for 30 s over a shared heightfield + Gerstner lake, with every
+# vehicle's telemetry driving a real EngineSynth. Headless (no GPU/device), needs
+# Jolt for the physics path (like aircraft_test/vehicle_test/boat_test).
+if(RX_BUILD_TESTS AND RX_JOLT)
+  add_executable(vehicle_integration_test test/vehicle_integration_test.cc)
+  target_link_libraries(vehicle_integration_test PRIVATE rx::physics rx::audio rx::core)
+  add_test(NAME vehicle_integration_test COMMAND vehicle_integration_test)
+endif()
+
 # Editor foundations test: reflection, scene round-trip, undo/redo and hierarchy
 # composition. Fully headless (no GPU), so it always runs under plain ctest.
 if(RX_BUILD_TESTS)
@@ -342,6 +370,54 @@ if(RX_BUILD_TESTS)
   add_executable(camera_rig_test test/camera_rig_test.cc)
   target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME camera_rig_test COMMAND camera_rig_test)
+
+  # Vehicle realism over the real Jolt vehicle path: acceleration + auto-shift,
+  # surface-dependent braking (ice vs asphalt), rain wetness, manual gearbox,
+  # telemetry ranges and water aquaplaning. Headless (no GPU), needs Jolt.
+  if(RX_JOLT)
+    add_executable(vehicle_test test/vehicle_test.cc)
+    target_link_libraries(vehicle_test PRIVATE rx::physics rx::core)
+    add_test(NAME vehicle_test COMMAND vehicle_test)
+  endif()
+
+  # Handling profiles: measured, ordered proof that the six presets
+  # (engine/physics/vehicle_profiles.h) drive differently - 0-100, braking,
+  # roll, grass launch, under/oversteer and downforce. Headless, needs Jolt.
+  if(RX_JOLT)
+    add_executable(handling_test test/handling_test.cc)
+    target_link_libraries(handling_test PRIVATE rx::physics rx::core)
+    add_test(NAME handling_test COMMAND handling_test)
+  endif()
+
+  # Physics-driven boat over the force-based hull model: floating draft,
+  # acceleration, steering, drag decay, planing, river drift, self-righting,
+  # buoyancy-exemption and NaN-free chop. Headless (no GPU), needs Jolt.
+  if(RX_JOLT)
+    add_executable(boat_test test/boat_test.cc)
+    target_link_libraries(boat_test PRIVATE rx::physics rx::core)
+    add_test(NAME boat_test COMMAND boat_test)
+  endif()
+
+  # Boat-type profiles + cargo load: measured, ordered proof that the five presets
+  # (engine/physics/boat_profiles.h) float and handle differently and that cargo
+  # sinks the hull deeper, slows accel/turning, delays planing and eats freeboard
+  # - settle-draft/top-speed/turn-rate orderings, capsize vs self-right, an
+  # overloaded barge near awash, and NaN-free chop. Headless, needs Jolt.
+  if(RX_JOLT)
+    add_executable(boat_profiles_test test/boat_profiles_test.cc)
+    target_link_libraries(boat_profiles_test PRIVATE rx::physics rx::core)
+    add_test(NAME boat_profiles_test COMMAND boat_profiles_test)
+  endif()
+
+  # Physics-driven tethered kite over the force-based flat-plate sail model:
+  # launch + stable overhead equilibrium in steady wind, descent + settle in dead
+  # air, left/right steering displacement, reel-in altitude change, tow-launch on
+  # apparent wind and NaN-free / tension-capped gusting. Headless, needs Jolt.
+  if(RX_JOLT)
+    add_executable(kite_test test/kite_test.cc)
+    target_link_libraries(kite_test PRIVATE rx::physics rx::core)
+    add_test(NAME kite_test COMMAND kite_test)
+  endif()
 
   add_executable(world_streaming_test test/world_streaming_test.cc)
   target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
@@ -533,6 +609,16 @@ if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
   add_executable(character_test test/character_test.cc)
   target_link_libraries(character_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
   add_test(NAME character_test COMMAND character_test)
+endif()
+
+# rx::character jetpack over the character controller's velocity seam: full-burn
+# climb, fuel burn to empty + dead-stick fall, grounded-only refuel, spool lag to
+# 90%, airborne lateral thrust-vector authority and NaN-free / jump-still-works.
+# Headless (no GPU), needs Jolt.
+if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
+  add_executable(jetpack_test test/jetpack_test.cc)
+  target_link_libraries(jetpack_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
+  add_test(NAME jetpack_test COMMAND jetpack_test)
 endif()
 
 # install()/export rules, generated last so every module target (and the

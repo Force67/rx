@@ -9,18 +9,36 @@ PhysicsWorld::PhysicsWorld() = default;
 PhysicsWorld::~PhysicsWorld() = default;
 bool PhysicsWorld::Initialize() { return false; }
 void PhysicsWorld::Update(f32) {}
-BodyId PhysicsWorld::AddStaticBox(const Vec3&, const Vec3&) { return 0; }
-BodyId PhysicsWorld::AddStaticMesh(const asset::Mesh&, const Vec3&, const f32[4], f32) {
+BodyId PhysicsWorld::AddStaticBox(const Vec3&, const Vec3&, SurfaceType) { return 0; }
+BodyId PhysicsWorld::AddStaticMesh(const asset::Mesh&, const Vec3&, const f32[4], f32, SurfaceType) {
   return 0;
 }
-BodyId PhysicsWorld::AddHeightField(const Vec3&, const f32*, u32, f32) { return 0; }
+BodyId PhysicsWorld::AddHeightField(const Vec3&, const f32*, u32, f32, SurfaceType) { return 0; }
+BodyId PhysicsWorld::AddHeightField(const Vec3&, const f32*, u32, f32, const u8*, const SurfaceType*,
+                                    u32) {
+  return 0;
+}
 bool PhysicsWorld::RegisterMeshShape(u64, const asset::Mesh&) { return false; }
 bool PhysicsWorld::has_mesh_shape(u64) const { return false; }
-BodyId PhysicsWorld::AddStaticMeshInstance(u64, const Vec3&, const f32[4], f32) { return 0; }
-BodyId PhysicsWorld::AddDynamicBox(const Vec3&, const Vec3&, f32, const Vec3&) { return 0; }
-BodyId PhysicsWorld::AddStaticShape(const ShapeDesc&, const Vec3&, const f32[4], f32) {
+BodyId PhysicsWorld::AddStaticMeshInstance(u64, const Vec3&, const f32[4], f32, SurfaceType) {
   return 0;
 }
+BodyId PhysicsWorld::AddDynamicBox(const Vec3&, const Vec3&, f32, const Vec3&) { return 0; }
+BodyId PhysicsWorld::AddStaticShape(const ShapeDesc&, const Vec3&, const f32[4], f32, SurfaceType) {
+  return 0;
+}
+bool PhysicsWorld::SampleWater(const Vec3&, f32*, Vec3*) const { return false; }
+void PhysicsWorld::set_buoyancy_exempt(BodyId, bool) {}
+void PhysicsWorld::AddForce(BodyId, const Vec3&) {}
+void PhysicsWorld::AddForceAtPoint(BodyId, const Vec3&, const Vec3&) {}
+void PhysicsWorld::AddTorque(BodyId, const Vec3&) {}
+Vec3 PhysicsWorld::GetLinearVelocity(BodyId) const { return {}; }
+Vec3 PhysicsWorld::GetAngularVelocity(BodyId) const { return {}; }
+Vec3 PhysicsWorld::GetPointVelocity(BodyId, const Vec3&) const { return {}; }
+f32 PhysicsWorld::GetBodyMass(BodyId) const { return 0; }
+void PhysicsWorld::SetBodyInertia(BodyId, const Vec3&) {}
+void PhysicsWorld::SetBodyMass(BodyId, f32) {}
+void PhysicsWorld::InstallVehicleFriction(u32) {}
 BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc&, const Vec3&, const f32[4], f32, f32, f32,
                                      f32, i32, u32) {
   return 0;
@@ -49,10 +67,14 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc&, const Vec3&, f32) { re
 VehicleId PhysicsWorld::CreateMotorcycle(const MotorcycleDesc&, const Vec3&, f32) { return 0; }
 bool PhysicsWorld::GetVehicleState(VehicleId, VehicleState*) const { return false; }
 void PhysicsWorld::RemoveVehicle(VehicleId) {}
+void PhysicsWorld::set_surface_wetness(f32) {}
+void PhysicsWorld::SetManualTransmission(VehicleId, bool) {}
 void PhysicsWorld::DriveVehicle(VehicleId, f32, f32, f32, f32) {}
+void PhysicsWorld::DriveVehicle(VehicleId, const VehicleInput&) {}
 bool PhysicsWorld::GetVehicleTransform(VehicleId, Vec3*, f32[4]) const { return false; }
 bool PhysicsWorld::GetVehicleWheel(VehicleId, u32, Vec3*, f32[4]) const { return false; }
 f32 PhysicsWorld::VehicleForwardSpeed(VehicleId) const { return 0; }
+BodyId PhysicsWorld::GetVehicleBody(VehicleId) const { return 0; }
 CharacterId PhysicsWorld::CreateCharacter(const Vec3&, f32, f32) { return 0; }
 void PhysicsWorld::MoveCharacter(CharacterId, const Vec3&, bool, f32, Vec3*, bool*) {}
 void PhysicsWorld::MoveCharacterVelocity(CharacterId, const Vec3&, f32, Vec3*, bool* grounded,
@@ -81,6 +103,7 @@ u32 PhysicsWorld::ClothVertexCount(ClothId) const { return 0; }
 bool PhysicsWorld::GetClothPositions(ClothId, Vec3*, u32) const { return false; }
 void PhysicsWorld::RemoveCloth(ClothId) {}
 bool PhysicsWorld::Raycast(const Vec3&, const Vec3&, f32, RayHit*) const { return false; }
+bool PhysicsWorld::Raycast(const Vec3&, const Vec3&, f32, RayHit*, BodyId) const { return false; }
 bool PhysicsWorld::GetBodyTransform(BodyId, Vec3*, f32[4]) const { return false; }
 
 }  // namespace rx::physics
