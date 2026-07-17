@@ -15,6 +15,9 @@
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
+#include "locomotion/estimator.h"
+#include "locomotion/footstep.h"
+#include "locomotion/gait.h"
 #include "locomotion/rig.h"
 #include "locomotion/types.h"
 
@@ -52,9 +55,31 @@ class RX_LOCOMOTION_EXPORT LocomotionController {
   bool initialized() const { return physics_ != nullptr && rig_.valid(); }
 
  private:
+  // Downward terrain probe wrapping physics_->Raycast, passed to the footstep
+  // planner. `context` is the controller (this), so it reaches physics_ without
+  // a std::function or captured state.
+  static bool GroundProbe(void* context, const Vec3& probe_start, f32 max_depth, GroundHit* out);
+
+  // True when `watched` (pelvis/torso) touches something that is not part of the
+  // rig this tick — used by the grounded detection.
+  bool IsRigBody(physics::BodyId id) const;
+  bool HasEnvironmentContact(physics::BodyId watched) const;
+
+  // World-space ankle pivot of a foot (0 = left, 1 = right), reconstructed from
+  // the live foot-body transform. The measured "sole" the estimator reports is
+  // the foot-box centre, which sits forward of the ankle by the box offset; the
+  // ankle is the true standing pivot and the reference the balance controller
+  // keeps the centre of mass over.
+  Vec3 AnkleWorld(u32 foot) const;
+
   physics::PhysicsWorld* physics_ = nullptr;
   ControllerParameters params_{};
   BipedRig rig_{};
+
+  StateEstimator state_estimator_{};
+  ContactEstimator contact_estimator_{};
+  GaitClock gait_clock_{};
+  FootstepPlanner footstep_planner_{};
 
   CharacterMeasurements measurements_{};
   ContactEstimate contacts_{};
@@ -65,6 +90,18 @@ class RX_LOCOMOTION_EXPORT LocomotionController {
   ControlMode mode_ = ControlMode::kStable;
   f32 mode_time_ = 0;
   f32 drive_blend_ = 1;  // motor-strength blend across mode changes [0..1]
+  u64 tick_count_ = 0;   // fixed steps since Initialize (env-gated trace only)
+
+  // Last torque budget actually pushed to each joint motor, so SetJointDrive is
+  // re-issued only when the effective drive changes materially (> 1%).
+  f32 applied_torque_[kRigJointCount] = {};
+
+  // Mode-machine hysteresis timers (seconds unless noted).
+  f32 prev_tilt_ = 0;         // torso tilt last tick (for "tilt rising")
+  u32 fall_ticks_ = 0;        // consecutive ticks the fall condition held
+  f32 tilt_over_time_ = 0;    // time tilt has stayed past fall_pitch_limit
+  f32 no_support_time_ = 0;   // time with zero supporting feet
+  f32 grounded_low_time_ = 0; // time grounded conditions have held in kControlledFall
 };
 
 }  // namespace rx::locomotion

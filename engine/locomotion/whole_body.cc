@@ -161,8 +161,16 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   // --- 2. Desired pelvis pose (the IK frame) ------------------------------
   Vec3 support_center =
       FiniteV(contacts.support_center) ? contacts.support_center : m.root_position;
-  const Vec3 planar_pos =
-      Planar(m.root_position) * 0.5f + Planar(support_center) * 0.5f;  // carry toward support
+  // The IK frame sits at the MEASURED pelvis planar position. Averaging it toward
+  // support_center (as an earlier revision did) biases the frame by the foot-box
+  // forward offset the estimator reports as the sole, and since no horizontal
+  // pelvis-position force enforces that target, the leg IK resolves the mismatch
+  // by walking the real pelvis toward it — a standing forward creep. Balance is
+  // instead handled by the capture-point footstep planner and the planar
+  // velocity assist below, which do not fight a stationary stance. (Both math
+  // tests place the root and support_center at the origin, so this term is
+  // exercised only in the integrated controller.)
+  const Vec3 planar_pos = Planar(m.root_position);
 
   f32 pelvis_h = rig.pelvis_height;
   if (intent.desired_body_height > 0.0f && params.body_height > 0.0f)
@@ -175,7 +183,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   // Acceleration lean about the pelvis-right axis, plus a partial ground tilt.
   Vec3 a_des = Planar(intent.desired_velocity) - Planar(m.com_velocity);
   a_des = ClampLength(a_des, params.max_acceleration);
-  const f32 lean_angle = Clamp(0.04f * Dot(a_des, f), -0.25f, 0.25f);  // k_lean = 0.04 s^2/m
+  const f32 lean_angle = Clamp(0.06f * Dot(a_des, f), -0.20f, 0.20f);  // k_lean s^2/m
 
   Quat q_d = QuatFromAxisAngle(right, lean_angle) * q_yaw;
   Vec3 ground_normal = FiniteV(m.ground_normal) && Length(m.ground_normal) > 1e-6f
@@ -253,18 +261,25 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
     const f32 height_error = desired_pelvis_y - m.root_position.y;
     f32 f_y = mass * (params.pelvis_position_gain * height_error +
                       params.pelvis_velocity_gain * (-m.com_velocity.y));
-    const f32 f_y_cap = 0.30f * mass * gravity;
+    const f32 f_y_cap = 0.45f * mass * gravity;
     f_y = Clamp(f_y, -f_y_cap, f_y_cap);
 
-    Vec3 f_planar = (Planar(intent.desired_velocity) - Planar(m.com_velocity)) * (mass * 2.0f);
-    f_planar = ClampLength(f_planar, 0.25f * mass * gravity);
+    Vec3 f_planar = (Planar(intent.desired_velocity) - Planar(m.com_velocity)) * (mass * 1.1f);
+    f_planar = ClampLength(f_planar, 0.15f * mass * gravity);
     assist_force = f_planar + up_y * f_y;
 
-    // Upright torque: rotate the pelvis up axis onto the ground normal.
+    // Upright torque: rotate the pelvis up axis onto the DESIRED trunk up (from
+    // q_d), not pure vertical. Righting strictly to vertical would cancel the
+    // acceleration lean that drives inverted-pendulum walking, leaving only a
+    // pelvis-force shove that pitches the body over its feet. Targeting the
+    // desired (leaned) up keeps the intended forward lean while still resisting
+    // any excess tilt beyond it. (Standing: q_d is upright, so this reduces to
+    // the vertical target.)
     const Vec3 up_world = Rotate(q_p, up_y);
-    const Vec3 cross = Cross(up_world, ground_normal);
+    const Vec3 up_target = Rotate(q_d, up_y);
+    const Vec3 cross = Cross(up_world, up_target);
     const f32 sin_a = Length(cross);
-    const f32 angle = std::acos(Clamp(Dot(up_world, ground_normal), -1.0f, 1.0f));
+    const f32 angle = std::acos(Clamp(Dot(up_world, up_target), -1.0f, 1.0f));
     const Vec3 axis = sin_a > 1e-6f ? cross * (1.0f / sin_a) : Vec3{0, 0, 0};
     assist_torque = axis * (params.torso_orientation_gain * angle) -
                     m.root_angular_velocity * params.torso_angular_damping;

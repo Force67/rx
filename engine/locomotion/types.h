@@ -106,27 +106,27 @@ struct ControllerParameters {
   // Step geometry.
   f32 step_height = 0.12f;      // swing apex clearance above the chord
   f32 foot_clearance = 0.02f;   // minimum sole clearance during swing
-  f32 max_step_length = 0.85f;
+  f32 max_step_length = 0.6f;
   f32 max_step_width = 0.5f;
   f32 max_step_up = 0.35f;      // tallest accepted terrain rise for one step
   f32 max_step_down = 0.5f;
   f32 max_ground_slope = 0.7f;  // radians; steeper probe hits reject the step
 
   // Balance / task-space gains.
-  f32 pelvis_position_gain = 40;   // 1/s^2 on pelvis-height error
-  f32 pelvis_velocity_gain = 8;    // 1/s on pelvis vertical velocity
-  f32 torso_orientation_gain = 60; // N·m/rad equivalent drive scale
-  f32 torso_angular_damping = 8;
+  f32 pelvis_position_gain = 70;   // 1/s^2 on pelvis-height error
+  f32 pelvis_velocity_gain = 12;   // 1/s on pelvis vertical velocity
+  f32 torso_orientation_gain = 320; // N·m/rad equivalent drive scale
+  f32 torso_angular_damping = 18;
   f32 capture_gain = 1.0f;         // scales the capture-point step correction
-  f32 step_velocity_gain = 0.25f;  // scales (desired - measured) velocity into the step
-  f32 lookahead_time = 0.22f;      // s of desired velocity baked into a step target
+  f32 step_velocity_gain = 0.12f;  // scales (desired - measured) velocity into the step
+  f32 lookahead_time = 0.18f;      // s of desired velocity baked into a step target
 
   // Joint drive (motor springs). Frequency in Hz, damping ratio ~1 critical.
-  f32 joint_frequency = 7;
+  f32 joint_frequency = 10;
   f32 joint_damping = 1;
-  f32 max_joint_torque = 240;   // N·m budget for stance legs; groups scale down
+  f32 max_joint_torque = 400;   // N·m budget for stance legs; groups scale down
   f32 arm_drive_scale = 0.25f;  // arms and spine run softer than stance legs
-  f32 root_assist_torque = 160; // N·m upright-assist budget applied at the pelvis
+  f32 root_assist_torque = 320; // N·m upright-assist budget applied at the pelvis
 
   // Recovery thresholds.
   f32 recovery_margin = 0.22f;     // m the capture point may leave the support region

@@ -119,7 +119,12 @@ void FootstepPlanner::Update(const CharacterMeasurements& m, const ContactEstima
     const f32 com_height = m.com_position.y - contacts.support_center.y;
     const Vec3 capture = CapturePoint(m.com_position, m.com_velocity, kGravity, com_height);
     Vec3 capture_off = Planar(capture - contacts.support_center) * params.capture_gain;
-    capture_off = ClampLength(capture_off, params.recovery_margin * 2.0f);
+    // The capture term is a CORRECTION on top of the desired-velocity look-ahead
+    // reach, not the whole step: letting it run to the full capture excursion
+    // double-counts the forward lead and over-steps, pole-vaulting a walking body
+    // backward. Cap it to ~2.5x the recovery margin — enough to reach out and
+    // catch a real disturbance, small enough not to over-stride a steady walk.
+    capture_off = ClampLength(capture_off, params.recovery_margin * 2.5f);
 
     Vec3 target = Vec3{m.root_position.x, contacts.support_center.y, m.root_position.z} +
                   desired_v * params.lookahead_time + lateral +
