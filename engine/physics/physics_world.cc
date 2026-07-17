@@ -220,6 +220,14 @@ void ApplyTorqueCurve(JPH::VehicleEngineSettings& engine, const Point* curve, u3
   engine.mNormalizedTorque.Sort();
 }
 
+// High-speed steering fade: 1 at rest, easing to `fraction` as |speed| reaches
+// `fade_speed` (m/s), then held. fraction >= 1 or fade_speed <= 0 = no fade.
+f32 SteerFadeScale(f32 fraction, f32 fade_speed, f32 speed) {
+  if (fade_speed <= 0.0f || fraction >= 1.0f) return 1.0f;
+  const f32 t = std::clamp(std::fabs(speed) / fade_speed, 0.0f, 1.0f);
+  return 1.0f - (1.0f - fraction) * t;
+}
+
 }  // namespace
 
 struct PhysicsWorld::Impl {
@@ -286,6 +294,14 @@ struct PhysicsWorld::Impl {
     bool alive = false;
     u32 wheel_count = 4;
     f32 downforce = 0;  // N per (m/s)^2, applied along body -Y
+    // Downforce balance + axle offsets so the aero load can be split front/rear
+    // at the axles rather than all at the CoM (0.5 = the legacy single force).
+    f32 downforce_balance = 0.5f;
+    f32 front_z = 0;
+    f32 rear_z = 0;
+    // High-speed steering fade applied to the steer command in DriveVehicle.
+    f32 steer_high_speed_fraction = 1.0f;
+    f32 steer_fade_speed = 0;
     bool traction_control = false;
     f32 tc_scale = 1;  // smoothed traction-control throttle authority
     // Manual transmission state: gears change only on the shift edges of the
@@ -433,7 +449,20 @@ void PhysicsWorld::Update(f32 dt) {
       const JPH::Vec3 forward = rotation * JPH::Vec3::sAxisZ();
       const JPH::Vec3 up = rotation * JPH::Vec3::sAxisY();
       const f32 v = bodies.GetLinearVelocity(entry.body).Dot(forward);
-      bodies.AddForce(entry.body, up * (-entry.downforce * v * v));
+      const JPH::Vec3 press = up * (-entry.downforce * v * v);
+      // An even balance keeps the legacy single force at the CoM; a front/rear
+      // split presses each axle so front-biased downforce grows front grip and
+      // the asymmetry adds a small aero pitch. The force is vertical, so only
+      // the fore/aft (Z) arm produces a couple - the axle height is irrelevant.
+      if (entry.downforce_balance == 0.5f || (entry.front_z == 0 && entry.rear_z == 0)) {
+        bodies.AddForce(entry.body, press);
+      } else {
+        const JPH::RVec3 com = bodies.GetCenterOfMassPosition(entry.body);
+        const f32 fb = std::clamp(entry.downforce_balance, 0.0f, 1.0f);
+        bodies.AddForce(entry.body, press * fb, com + rotation * JPH::Vec3(0, 0, entry.front_z));
+        bodies.AddForce(entry.body, press * (1.0f - fb),
+                        com + rotation * JPH::Vec3(0, 0, entry.rear_z));
+      }
     }
   }
 
@@ -1376,7 +1405,7 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
   // Chassis: a box with the center of mass dropped for arcade stability.
   JPH::RefConst<JPH::Shape> box = new JPH::BoxShape(ToJolt(desc.half_extent));
   JPH::ShapeSettings::ShapeResult chassis_result =
-      JPH::OffsetCenterOfMassShapeSettings(JPH::Vec3(0, -desc.com_drop, 0),
+      JPH::OffsetCenterOfMassShapeSettings(JPH::Vec3(0, -desc.com_drop, desc.com_fore),
                                            new JPH::BoxShapeSettings(ToJolt(desc.half_extent)))
           .Create();
   if (chassis_result.HasError()) {
@@ -1416,16 +1445,31 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
     // Handbrake locks the rear axle only: the drift lever.
     const f32 handbrake = desc.max_handbrake_torque < 0 ? 8000.0f : desc.max_handbrake_torque;
     w->mMaxHandBrakeTorque = front ? 0.0f : handbrake;
-    if (desc.max_brake_torque > 0) w->mMaxBrakeTorque = desc.max_brake_torque;
-    if (desc.suspension_frequency > 0) w->mSuspensionSpring.mFrequency = desc.suspension_frequency;
+    // Brake bias: split the per-wheel base brake torque front/rear. At the even
+    // 0.5 default with no explicit base this is the untouched Jolt default; any
+    // bias or an explicit base sets each wheel to base * 2 * (its axle share).
+    if (desc.max_brake_torque > 0 || desc.brake_bias_front != 0.5f) {
+      const f32 base = desc.max_brake_torque > 0 ? desc.max_brake_torque : 1500.0f;
+      const f32 share = front ? desc.brake_bias_front : (1.0f - desc.brake_bias_front);
+      w->mMaxBrakeTorque = base * 2.0f * std::clamp(share, 0.0f, 1.0f);
+    }
+    // Suspension spring: per-axle frequency (falls back to the shared value,
+    // then Jolt's default); shared damping.
+    const f32 axle_freq = front ? desc.front_suspension_frequency : desc.rear_suspension_frequency;
+    const f32 freq = axle_freq > 0 ? axle_freq : desc.suspension_frequency;
+    if (freq > 0) w->mSuspensionSpring.mFrequency = freq;
     if (desc.suspension_damping > 0) w->mSuspensionSpring.mDamping = desc.suspension_damping;
-    // Tire grip: scale Jolt's default slip curves.
+    // Tire grip: scale Jolt's default slip curves. Longitudinal is shared;
+    // lateral takes a per-axle scalar (fall back to the shared one, then 1) so a
+    // profile can bias the balance toward under- or oversteer.
     if (desc.tire_long_friction > 0) {
       for (JPH::LinearCurve::Point& p : w->mLongitudinalFriction.mPoints)
         p.mY *= desc.tire_long_friction;
     }
-    if (desc.tire_lat_friction > 0) {
-      for (JPH::LinearCurve::Point& p : w->mLateralFriction.mPoints) p.mY *= desc.tire_lat_friction;
+    const f32 axle_lat = front ? desc.front_lat_friction : desc.rear_lat_friction;
+    const f32 lat = axle_lat > 0 ? axle_lat : desc.tire_lat_friction;
+    if (lat > 0) {
+      for (JPH::LinearCurve::Point& p : w->mLateralFriction.mPoints) p.mY *= lat;
     }
     return w;
   };
@@ -1489,18 +1533,25 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
         break;
     }
   }
+  // Limited-slip differential: tighten (or open) every driven differential.
+  if (desc.limited_slip_ratio > 0) {
+    for (JPH::VehicleDifferentialSettings& diff : controller->mDifferentials)
+      diff.mLimitedSlipRatio = desc.limited_slip_ratio;
+  }
   vehicle.mController = controller;
 
-  // Anti-roll bars per axle, like the Jolt vehicle sample.
+  // Anti-roll bars per axle, like the Jolt vehicle sample. Front and rear
+  // stiffness are independent; each falls back to the shared anti_roll_stiffness
+  // then to Jolt's default, so a profile can bias roll stiffness fore/aft.
   vehicle.mAntiRollBars.resize(2);
   vehicle.mAntiRollBars[0].mLeftWheel = 0;
   vehicle.mAntiRollBars[0].mRightWheel = 1;
   vehicle.mAntiRollBars[1].mLeftWheel = 2;
   vehicle.mAntiRollBars[1].mRightWheel = 3;
-  if (desc.anti_roll_stiffness > 0) {
-    vehicle.mAntiRollBars[0].mStiffness = desc.anti_roll_stiffness;
-    vehicle.mAntiRollBars[1].mStiffness = desc.anti_roll_stiffness;
-  }
+  const f32 arb_front = desc.anti_roll_front > 0 ? desc.anti_roll_front : desc.anti_roll_stiffness;
+  const f32 arb_rear = desc.anti_roll_rear > 0 ? desc.anti_roll_rear : desc.anti_roll_stiffness;
+  if (arb_front > 0) vehicle.mAntiRollBars[0].mStiffness = arb_front;
+  if (arb_rear > 0) vehicle.mAntiRollBars[1].mStiffness = arb_rear;
 
   JPH::Ref<JPH::VehicleConstraint> constraint = new JPH::VehicleConstraint(*body, vehicle);
   constraint->SetVehicleCollisionTester(
@@ -1508,8 +1559,14 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
   impl_->system->AddConstraint(constraint);
   impl_->system->AddStepListener(constraint);
 
-  impl_->vehicles.push_back(
-      {body->GetID(), constraint, true, 4, desc.downforce, desc.traction_control});
+  impl_->vehicles.push_back({body->GetID(), constraint, true, 4, desc.downforce});
+  Impl::VehicleEntry& entry = impl_->vehicles.back();
+  entry.downforce_balance = desc.downforce_balance;
+  entry.front_z = desc.front_z;
+  entry.rear_z = desc.rear_z;
+  entry.steer_high_speed_fraction = desc.steer_high_speed_fraction;
+  entry.steer_fade_speed = desc.steer_fade_speed;
+  entry.traction_control = desc.traction_control;
   InstallVehicleFriction(static_cast<u32>(impl_->vehicles.size() - 1));
   return impl_->vehicles.size();
 }
@@ -1622,8 +1679,8 @@ VehicleId PhysicsWorld::CreateMotorcycle(const MotorcycleDesc& desc, const Vec3&
   impl_->system->AddConstraint(constraint);
   impl_->system->AddStepListener(constraint);
 
-  impl_->vehicles.push_back(
-      {body->GetID(), constraint, true, 2, desc.downforce, desc.traction_control});
+  impl_->vehicles.push_back({body->GetID(), constraint, true, 2, desc.downforce});
+  impl_->vehicles.back().traction_control = desc.traction_control;
   InstallVehicleFriction(static_cast<u32>(impl_->vehicles.size() - 1));
   return impl_->vehicles.size();
 }
@@ -1730,7 +1787,11 @@ void PhysicsWorld::DriveVehicle(VehicleId id, const VehicleInput& input) {
   // Clutch: 1 = fully disengaged -> 0 friction, so the engine spins free of the
   // wheels. Applied every step so the pedal tracks continuously between shifts.
   trans.Set(gear, std::clamp(1.0f - input.clutch, 0.0f, 1.0f));
-  controller->SetDriverInput(input.throttle, input.steer, input.brake, input.handbrake);
+  controller->SetDriverInput(
+      input.throttle,
+      input.steer * SteerFadeScale(entry.steer_high_speed_fraction, entry.steer_fade_speed,
+                                   entry.cached_speed),
+      input.brake, input.handbrake);
   if (input.throttle != 0 || input.steer != 0 || input.brake != 0 || input.handbrake != 0) {
     impl_->system->GetBodyInterface().ActivateBody(entry.body);
   }
@@ -1741,6 +1802,8 @@ void PhysicsWorld::DriveVehicle(VehicleId id, f32 forward, f32 right, f32 brake,
   Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
   if (!entry.alive) return;
   auto* controller = static_cast<JPH::WheeledVehicleController*>(entry.constraint->GetController());
+  right *= SteerFadeScale(entry.steer_high_speed_fraction, entry.steer_fade_speed,
+                          entry.cached_speed);
   // Traction control: govern the throttle toward ~8% longitudinal slip on
   // the contact wheels, keeping the tire near its friction peak instead of
   // lighting it up (and unblocking Jolt's slip-gated automatic upshift).
@@ -1866,6 +1929,7 @@ bool PhysicsWorld::GetVehicleState(VehicleId id, VehicleState* out) const {
                          0.0f, 1.0f)
             : 0.0f;
     ws.longitudinal_slip = wheel->mLongitudinalSlip;
+    ws.lateral_slip = wheel->mLateralSlip;
     ws.angular_velocity = wheel->GetAngularVelocity();
     ws.rotation_angle = wheel->GetRotationAngle();
     ws.surface = SurfaceType::kAsphalt;

@@ -89,6 +89,9 @@ class DriveDemo {
   // hull/aero forces (their Update contract is "before the world step").
   void StepVehicles(f32 dt);
   void ResetActive();
+  // Despawns the car and respawns it with handling profile `index` (0..5) at its
+  // current position/heading (stationary). Number keys 1-6 call this live.
+  void SetCarProfile(u32 index);
   void UpdateChaseCamera(f32 dt, const InputState& input, const ActionState& actions,
                          bool allow_keyboard, bool allow_mouse);
   void DrawPanel();
@@ -103,6 +106,14 @@ class DriveDemo {
   std::unique_ptr<physics::Boat> boat_;
   std::unique_ptr<physics::Aircraft> aircraft_;
   Vehicle active_ = Vehicle::kCar;
+
+  // Active handling profile (0..5: sports/muscle/hatch/suv/van/semi) and the
+  // desc it resolved to, kept so a reset respawns the same profile and Emit can
+  // scale the graybox chassis to the desc dimensions.
+  u32 car_profile_ = 0;
+  physics::PhysicsWorld::VehicleDesc car_desc_{};
+  bool car_truckish_ = false;  // draw the milk-truck glTF (van/semi) vs a box
+  u32 car_tint_ = 0xC03828;    // graybox chassis tint for car-shaped profiles
 
   Vec3 car_spawn_{48, 1, -30};
   f32 car_yaw_ = 0;

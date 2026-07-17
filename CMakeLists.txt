@@ -379,6 +379,15 @@ if(RX_BUILD_TESTS)
     add_test(NAME vehicle_test COMMAND vehicle_test)
   endif()
 
+  # Handling profiles: measured, ordered proof that the six presets
+  # (engine/physics/vehicle_profiles.h) drive differently - 0-100, braking,
+  # roll, grass launch, under/oversteer and downforce. Headless, needs Jolt.
+  if(RX_JOLT)
+    add_executable(handling_test test/handling_test.cc)
+    target_link_libraries(handling_test PRIVATE rx::physics rx::core)
+    add_test(NAME handling_test COMMAND handling_test)
+  endif()
+
   # Physics-driven boat over the force-based hull model: floating draft,
   # acceleration, steering, drag decay, planing, river drift, self-righting,
   # buoyancy-exemption and NaN-free chop. Headless (no GPU), needs Jolt.

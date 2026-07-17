@@ -2,6 +2,7 @@ if(RX_JOLT)
   rx_add_module(physics
     cloth_collision.cc
     physics_world.cc
+    vehicle_profiles.cc
     boat.cc
     kinema_jolt.cc
     aircraft.cc
@@ -16,6 +17,7 @@ if(RX_JOLT)
 else()
   rx_add_module(physics
     physics_world_stub.cc
+    vehicle_profiles.cc
   )
   target_link_libraries(rx_physics PUBLIC rx::core rx::asset)
 endif()

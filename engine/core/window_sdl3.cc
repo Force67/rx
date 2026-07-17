@@ -49,6 +49,8 @@ Key TranslateKey(SDL_Scancode code) {
     case SDL_SCANCODE_2: return Key::k2;
     case SDL_SCANCODE_3: return Key::k3;
     case SDL_SCANCODE_4: return Key::k4;
+    case SDL_SCANCODE_5: return Key::k5;
+    case SDL_SCANCODE_6: return Key::k6;
     case SDL_SCANCODE_J: return Key::kJ;
     case SDL_SCANCODE_UP: return Key::kArrowUp;
     case SDL_SCANCODE_DOWN: return Key::kArrowDown;

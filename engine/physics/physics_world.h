@@ -279,6 +279,12 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // Center of mass dropped below the chassis center: arcade stability (hard
     // to roll in normal cornering, still flippable off ramps).
     f32 com_drop = 0.4f;
+    // Center of mass shifted along the body +Z (forward) axis, metres; negative
+    // = rearward. 0 = centred (legacy). A rearward CoM (loaded van/truck) puts
+    // weight over the rear axle, lightens the steer and drops the nose under
+    // braking; used by the van's cargo-load parameter. Mapped straight onto the
+    // chassis OffsetCenterOfMass Z with com_drop's Y.
+    f32 com_fore = 0;
 
     // --- racing-sim extensions ---
     Drivetrain drivetrain = Drivetrain::kRWD;
@@ -329,6 +335,48 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // ~8%, holding the tire near its grip peak (and letting the automatic
     // box shift, which Jolt gates on slip). Off = raw throttle.
     bool traction_control = false;
+    // --- handling-profile extensions (all default to current behaviour) ---
+    // Limited-slip differential: Jolt's mLimitedSlipRatio (max/min driven-wheel
+    // speed before all torque routes to the slower wheel). Lower = tighter lock
+    // (a spinning inside wheel still drives the car out of a corner, adds
+    // throttle-on oversteer); large (>=100) approaches an open diff. 0 = Jolt
+    // default (1.4). Applied to every driven differential.
+    f32 limited_slip_ratio = 0;
+    // High-speed steering fade: the effective steer command scales from 1 at
+    // rest down to steer_high_speed_fraction as forward speed reaches
+    // steer_fade_speed (m/s), then holds. Models the rack calming down at speed
+    // so a full flick doesn't spin the car on the motorway. fraction >= 1 or
+    // fade_speed <= 0 = no fade (legacy full-angle steering at any speed).
+    f32 steer_high_speed_fraction = 1.0f;
+    f32 steer_fade_speed = 0;
+    // Anti-roll bar stiffness per axle, N/m (Jolt VehicleAntiRollBar). 0 on an
+    // axle falls back to anti_roll_stiffness, then to Jolt's default (1000).
+    // More front bar than rear pushes the balance toward understeer, more rear
+    // bar toward oversteer.
+    f32 anti_roll_front = 0;
+    f32 anti_roll_rear = 0;
+    // Brake bias: fraction of the per-wheel brake torque sent to the FRONT axle
+    // (0.5 = even, road cars ~0.6). max_brake_torque stays the per-wheel base;
+    // each front wheel receives 2*bias of it and each rear 2*(1-bias). Left at
+    // 0.5 with max_brake_torque 0, the Jolt default even braking is unchanged.
+    f32 brake_bias_front = 0.5f;
+    // Aero downforce balance: fraction of `downforce` pressed at the FRONT axle
+    // (the rest at the rear), each applied at its axle instead of the CoM. The
+    // split loads the axles asymmetrically (front-biased downforce grows front
+    // grip) and adds a slight aero pitch. 0.5 keeps the legacy single CoM force.
+    f32 downforce_balance = 0.5f;
+    // Per-axle lateral tyre grip scalars (like tire_lat_friction, but per axle):
+    // 0 on an axle falls back to tire_lat_friction, then to 1 (stock). Front
+    // below rear = understeer (the nose washes wide); rear below front =
+    // throttle-on oversteer (the tail steps out). The key knob behind the
+    // muscle car's tail-happiness and the hatchback's safe understeer.
+    f32 front_lat_friction = 0;
+    f32 rear_lat_friction = 0;
+    // Per-axle suspension spring frequency, Hz: 0 on an axle falls back to
+    // suspension_frequency, then to Jolt's default (1.5). A softer rear lets a
+    // muscle car squat and hook up; soft on both axles gives a wallowy SUV/van.
+    f32 front_suspension_frequency = 0;
+    f32 rear_suspension_frequency = 0;
     // Free-rolling (unpowered) chassis: no engine torque reaches any wheel, so
     // all four wheels roll purely on their suspension and tire friction, the
     // way a trailer or a horse-drawn carriage pulled through an external hitch
@@ -449,6 +497,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
       f32 suspension_length = 0;   // current, meters
       f32 suspension_compression = 0;  // 0 = fully extended, 1 = fully compressed
       f32 longitudinal_slip = 0;   // 0 = full traction, 1 = locked/spinning
+      f32 lateral_slip = 0;        // radians: slip angle between ground and wheel
       f32 angular_velocity = 0;    // rad/s around the axle
       f32 rotation_angle = 0;      // accumulated spin, radians
       SurfaceType surface = SurfaceType::kAsphalt;  // ground in contact

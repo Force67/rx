@@ -14,6 +14,7 @@
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "ecs/world.h"
+#include "physics/vehicle_profiles.h"
 #include "scene/components.h"
 
 #if defined(RX_HAS_IMGUI)
@@ -37,6 +38,42 @@ constexpr f32 kHalfPi = kPi * 0.5f;
 // the plane past Vr) so motion shots need no live input.
 base::Option<const char*> StartVehicle{"drive.vehicle", nullptr, "RX_DRIVE_VEHICLE"};
 base::Option<bool> AutoThrottle{"drive.auto", false, "RX_DRIVE_AUTO"};
+// RX_DRIVE_PROFILE=sports|muscle|hatch|suv|van|semi forces the car's initial
+// handling profile for headless captures (pair with RX_DRIVE_VEHICLE=car).
+base::Option<const char*> StartProfile{"drive.profile", nullptr, "RX_DRIVE_PROFILE"};
+
+// The six handling profiles (engine/physics/vehicle_profiles.h), keyed 1-6.
+constexpr u32 kProfileCount = 6;
+const char* ProfileName(u32 i) {
+  static const char* kNames[kProfileCount] = {"SPORTS",  "MUSCLE", "HATCHBACK",
+                                              "SUV",     "VAN",    "SEMI TRUCK"};
+  return kNames[i % kProfileCount];
+}
+physics::PhysicsWorld::VehicleDesc ProfileDesc(u32 i) {
+  switch (i % kProfileCount) {
+    case 0: return physics::SportsCarProfile();
+    case 1: return physics::MuscleCarProfile();
+    case 2: return physics::HatchbackProfile();
+    case 3: return physics::SuvProfile();
+    case 4: return physics::VanProfile(1.0f);  // fully laden
+    default: return physics::SemiTruckProfile();
+  }
+}
+// The box-shaped van/semi wear the milk-truck glTF; the sportier profiles get a
+// tinted graybox scaled to the desc (a milk truck would look absurd as a coupe).
+bool ProfileTruckish(u32 i) { return (i % kProfileCount) >= 4; }
+u32 ProfileTint(u32 i) {
+  static const u32 kTints[kProfileCount] = {0xD11E1E, 0xC06010, 0x1E5AC0,
+                                            0x2E6E44, 0xC9C9CF, 0xE8E8E8};
+  return kTints[i % kProfileCount];
+}
+u32 ProfileFromName(const char* s, u32 fallback) {
+  if (!s) return fallback;
+  const char* keys[kProfileCount] = {"sports", "muscle", "hatch", "suv", "van", "semi"};
+  for (u32 i = 0; i < kProfileCount; ++i)
+    if (std::strstr(s, keys[i])) return i;
+  return fallback;
+}
 
 // --- terrain layout (world XZ, metres) -------------------------------------
 constexpr f32 kTerrainSize = 400.0f;
@@ -276,6 +313,7 @@ void DriveDemo::Create() {
     showcase_.push_back({std::move(m), place * norm});
   }
 
+  car_profile_ = ProfileFromName(StartProfile.get(), 0);  // RX_DRIVE_PROFILE
   SpawnVehicles();
   SetupAudio();
 
@@ -295,7 +333,8 @@ void DriveDemo::Create() {
   }
 
   RX_INFO(
-      "drive demo: Tab cycle car/boat/plane, WASD drive/steer, arrows fly, Space handbrake/brakes, "
+      "drive demo: Tab cycle car/boat/plane, 1-6 car handling profile "
+      "(sports/muscle/hatch/suv/van/semi), WASD drive/steer, arrows fly, Space handbrake/brakes, "
       "M manual, Shift/Ctrl shift, F flaps, J rain, R reset, C chase/free camera");
 }
 
@@ -605,17 +644,17 @@ void DriveDemo::EmitModel(render::FrameView& view, const Model& m, const Mat4& x
 void DriveDemo::SpawnVehicles() {
   physics::PhysicsWorld& phys = *ctx_.physics;
 
-  // Car: VehicleDesc defaults + a trivial torque curve. Spawn a touch high so the
-  // suspension settles onto the flattened road.
-  physics::PhysicsWorld::VehicleDesc d;
-  d.torque_curve[0] = {0.15f, 0.65f};
-  d.torque_curve[1] = {0.5f, 1.0f};
-  d.torque_curve[2] = {1.0f, 0.82f};
-  d.torque_curve_count = 3;
-  car_wheel_radius_ = d.wheel_radius;
-  car_wheel_width_ = d.wheel_width;
-  car_spawn_.y = HeightAt(car_spawn_.x, car_spawn_.z) + 1.0f;
-  car_ = phys.CreateVehicle(d, car_spawn_, car_yaw_);
+  // Car: one of the six handling profiles (keys 1-6 swap live). Spawn a touch
+  // above the settle height so the suspension drops onto the flattened road.
+  car_desc_ = ProfileDesc(car_profile_);
+  car_truckish_ = ProfileTruckish(car_profile_);
+  car_tint_ = ProfileTint(car_profile_);
+  car_wheel_radius_ = car_desc_.wheel_radius;
+  car_wheel_width_ = car_desc_.wheel_width;
+  const f32 clearance =
+      car_desc_.half_extent.y + car_desc_.suspension_max + car_desc_.wheel_radius + 0.3f;
+  car_spawn_.y = HeightAt(car_spawn_.x, car_spawn_.z) + clearance;
+  car_ = phys.CreateVehicle(car_desc_, car_spawn_, car_yaw_);
 
   // Boat on the lake (BoatDesc defaults).
   boat_ = std::make_unique<physics::Boat>(phys, physics::BoatDesc{}, boat_spawn_, boat_yaw_);
@@ -701,12 +740,10 @@ void DriveDemo::ResetActive() {
   const f32 up[4] = {0, 0, 0, 1};
   if (active_ == Vehicle::kCar && car_) {
     ctx_.physics->RemoveVehicle(car_);
-    physics::PhysicsWorld::VehicleDesc d;
-    d.torque_curve[0] = {0.15f, 0.65f};
-    d.torque_curve[1] = {0.5f, 1.0f};
-    d.torque_curve[2] = {1.0f, 0.82f};
-    d.torque_curve_count = 3;
-    car_ = ctx_.physics->CreateVehicle(d, car_spawn_, car_yaw_);
+    const f32 clearance =
+        car_desc_.half_extent.y + car_desc_.suspension_max + car_desc_.wheel_radius + 0.3f;
+    car_spawn_.y = HeightAt(car_spawn_.x, car_spawn_.z) + clearance;
+    car_ = ctx_.physics->CreateVehicle(car_desc_, car_spawn_, car_yaw_);
     if (car_) ctx_.physics->SetManualTransmission(car_, car_manual_);
   } else if (active_ == Vehicle::kBoat && boat_ && boat_->valid()) {
     ctx_.physics->SetBodyPosition(boat_->body(), boat_spawn_, up);
@@ -714,6 +751,37 @@ void DriveDemo::ResetActive() {
     ctx_.physics->SetBodyPosition(aircraft_->body(), plane_spawn_, up);
   }
   cam_init_ = false;
+}
+
+void DriveDemo::SetCarProfile(u32 index) {
+  index %= kProfileCount;
+  car_profile_ = index;
+  car_desc_ = ProfileDesc(index);
+  car_truckish_ = ProfileTruckish(index);
+  car_tint_ = ProfileTint(index);
+  car_wheel_radius_ = car_desc_.wheel_radius;
+  car_wheel_width_ = car_desc_.wheel_width;
+
+  // Respawn at the current position/heading (stationary - keeping momentum would
+  // need a velocity setter the vehicle API doesn't expose). Fall back to the
+  // spawn point when there is no live car yet.
+  Vec3 pos = car_spawn_;
+  f32 yaw = car_yaw_;
+  if (car_) {
+    f32 rot[4];
+    if (ctx_.physics->GetVehicleTransform(car_, &pos, rot)) {
+      const Vec3 fwd = Rotate(Quat{rot[0], rot[1], rot[2], rot[3]}, Vec3{0, 0, 1});
+      yaw = std::atan2(fwd.x, fwd.z);
+    }
+    ctx_.physics->RemoveVehicle(car_);
+  }
+  pos.y = HeightAt(pos.x, pos.z) + car_desc_.half_extent.y + car_desc_.suspension_max +
+          car_desc_.wheel_radius + 0.3f;
+  car_ = ctx_.physics->CreateVehicle(car_desc_, pos, yaw);
+  if (car_ && car_manual_) ctx_.physics->SetManualTransmission(car_, car_manual_);
+  cam_init_ = false;
+  RX_INFO("drive: car profile -> {} ({} kg)", ProfileName(index),
+          static_cast<i32>(car_desc_.mass));
 }
 
 void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actions,
@@ -729,6 +797,14 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     }
     if (input.key_pressed(Key::kC)) free_cam_ = !free_cam_;
     if (input.key_pressed(Key::kR)) ResetActive();
+    // Number keys 1-6 swap the car's handling profile live.
+    const Key kProfileKeys[6] = {Key::k1, Key::k2, Key::k3, Key::k4, Key::k5, Key::k6};
+    for (u32 i = 0; i < 6; ++i) {
+      if (input.key_pressed(kProfileKeys[i])) {
+        active_ = Vehicle::kCar;
+        SetCarProfile(i);
+      }
+    }
     if (input.key_pressed(Key::kM) && car_) {
       car_manual_ = !car_manual_;
       ctx_.physics->SetManualTransmission(car_, car_manual_);
@@ -903,14 +979,21 @@ void DriveDemo::Emit(f32 dt, render::FrameView& view) {
     f32 cr[4];
     if (ctx_.physics->GetVehicleTransform(car_, &cp, cr)) {
       const Mat4 chassis = MakeTransform(cp, {cr[0], cr[1], cr[2], cr[3]}, 1.0f);
-      if (car_model_.loaded) {
-        EmitModel(view, car_model_, chassis * car_norm_);
+      if (car_truckish_ && car_model_.loaded) {
+        // Van/semi: the boxy milk-truck glTF, scaled from its 4 m normalization
+        // up to this profile's chassis length so a long van/tractor reads big.
+        const f32 s = (2.0f * car_desc_.half_extent.z) / 4.0f;
+        EmitModel(view, car_model_, chassis * ScaleMat({s, s, s}) * car_norm_);
       } else {
+        // Car-shaped profiles: a tinted graybox scaled to the desc dimensions
+        // (a milk truck would look absurd as a sports car).
         render::DrawItem d{};
         d.mesh = graybox_car_;
-        d.transform = chassis * ScaleMat({1.8f, 1.0f, 4.0f});
+        d.transform = chassis * ScaleMat({2.0f * car_desc_.half_extent.x,
+                                          2.0f * car_desc_.half_extent.y,
+                                          2.0f * car_desc_.half_extent.z});
         d.prev_transform = d.transform;
-        d.tint = 0xC03828;
+        d.tint = car_tint_;
         view.draws.push_back(d);
       }
       // Wheels at their live (suspension + steer) transforms. The unit cylinder
@@ -978,6 +1061,8 @@ void DriveDemo::DrawPanel() {
     ImGui::Separator();
 
     if (active_ == Vehicle::kCar && car_) {
+      ImGui::Text("profile: %s  %d kg  (1-6)", ProfileName(car_profile_),
+                  static_cast<int>(car_desc_.mass));
       physics::PhysicsWorld::VehicleState vs;
       if (ctx_.physics->GetVehicleState(car_, &vs)) {
         const f32 kmh = std::fabs(vs.forward_speed) * 3.6f;
@@ -993,7 +1078,7 @@ void DriveDemo::DrawPanel() {
             vs.wheel_count > 2 ? vs.wheels[2].surface : physics::SurfaceType::kAsphalt;
         ImGui::Text("surface: %s   slip %.2f", SurfaceName(surf), CarMaxSlip());
       }
-      ImGui::TextDisabled("W throttle  S brake/reverse  A/D steer  Space handbrake");
+      ImGui::TextDisabled("W throttle  S brake/reverse  A/D steer  Space handbrake  1-6 profile");
     } else if (active_ == Vehicle::kBoat && boat_ && boat_->valid()) {
       const physics::BoatState& bs = boat_->state();
       ImGui::Text("speed %.0f km/h   rpm %.0f   load %.0f%%", bs.speed_mps * 3.6f, bs.rpm,

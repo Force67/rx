@@ -70,8 +70,21 @@ are unchanged.
 | `engine_braking` | off-throttle engine angular damping (trailing-throttle decel) |
 | `torque_curve[8]`, `torque_curve_count` | normalized (rpm-frac, torque-frac) curve; `0` = Jolt's stock 0.8/1.0/0.8 |
 | `tire_long_friction`, `tire_lat_friction` | scale the tyre slip-curve peaks (`~1.5` = slicks) |
-| `downforce` | `F = downforce · v²` at the CoM along −Y |
+| `front_lat_friction`, `rear_lat_friction` | per-axle lateral grip (`0` = fall back to `tire_lat_friction`); front < rear = understeer, rear < front = oversteer |
+| `front_suspension_frequency`, `rear_suspension_frequency` | per-axle spring rate (`0` = `suspension_frequency` then Jolt default) |
+| `downforce`, `downforce_balance` | `F = downforce · v²`; `balance` (`0.5` = at the CoM) presses that fraction at the front axle, the rest at the rear |
+| `limited_slip_ratio` | Jolt LSD max/min driven-wheel speed ratio on every driven diff (`0` = default `1.4`, lower = tighter lock) |
+| `anti_roll_front`, `anti_roll_rear` | per-axle anti-roll bar stiffness (N/m); each falls back to `anti_roll_stiffness` then Jolt's default |
+| `brake_bias_front` | fraction of the per-wheel brake torque to the front axle (`0.5` = even; road cars ~`0.6`) |
+| `steer_high_speed_fraction`, `steer_fade_speed` | steering slows from full at rest to `fraction` by `fade_speed` m/s (`fraction ≥ 1` or `fade_speed ≤ 0` = no fade) |
+| `com_fore` | CoM shift along +Z (forward); negative = rearward (laden van/truck) |
 | `traction_control` | cuts throttle past ~8% driven-wheel slip |
+
+Each new field is additive with a default that reproduces the previous
+behaviour, and each maps to a real Jolt vehicle knob (`VehicleDifferentialSettings`,
+`VehicleAntiRollBar`, per-wheel `mMaxBrakeTorque`, `OffsetCenterOfMass`); the
+steering fade and the axle-split downforce are applied in the rx layer around the
+constraint.
 
 `MotorcycleDesc` adds a lean spring (`lean_spring` / `lean_damping` /
 `max_lean_angle`) and a speed-aware steer limit so the bike banks into corners
@@ -138,6 +151,71 @@ and speed builds a water wedge the tread can't clear:
 `grip ·= 1 − 0.9 · depth_frac · speed_frac`, where a patch is "fully awash" at
 half the wheel radius of water, onset is ~8 m/s and full hydroplaning ~25 m/s.
 Below onset or on a dry patch it is a no-op.
+
+---
+
+## Handling profiles
+
+`engine/physics/vehicle_profiles.h` ships six fully-tuned `VehicleDesc` presets
+so a truck handles like a truck and a sports car like a sports car out of
+`CreateVehicle`, GTA-style. Each is a free function returning a complete desc
+(dimensions, mass, wheel geometry, drivetrain, engine, gearbox, suspension,
+tyres, aero and the handling-profile fields above); its doc comment states the
+intended signature in one line.
+
+| Profile | Mass | Layout | Signature |
+| --- | --- | --- | --- |
+| `SportsCarProfile` | 1300 kg | RWD | low CG, stiff + strong front anti-roll, fast steering with a hard high-speed fade, sticky tyres, downforce, short gears — eager, planted at speed |
+| `MuscleCarProfile` | 1650 kg | RWD | big low-end torque, softer rear, modest anti-roll, rear grip below front — tail-happy power oversteer |
+| `HatchbackProfile` | 1150 kg | FWD | economical, understeer bias (front grip below rear), soft-ish, light — safe and nose-led |
+| `SuvProfile` | 2100 kg | AWD 30/70 | tall body, soft long-travel suspension, mild anti-roll, all-terrain tyres — sure-footed launch, leans in corners |
+| `VanProfile(cargo_load)` | 2000–2400 kg | RWD | high CG over a narrow-ish track, slow steering; `cargo_load` (0..1) adds mass and shifts the CoM rearward/up (`com_fore`) |
+| `SemiTruckProfile` | 8500 kg | RWD | enormous torque geared tall, very slow steering, weak per-kg brakes (long stops), pronounced roll, gearing-capped top speed |
+
+A Jolt-auto-box note: with these masses and gearings the automatic transmission
+will refuse to upshift out of a gear pinned at its redline (it only shifts while
+the engine is still revving up and the driven wheels grip). The presets work
+around it with revvier redlines than a real diesel and, on the FWD hatch, a hard
+top-end torque taper — so every profile reaches 100 km/h under the stock
+automatic box.
+
+### Measured behaviour
+
+From `test/handling_test.cc` (headless, flat asphalt, real Jolt path — the test
+asserts the *orderings*, not the absolute numbers):
+
+| Profile | 0–100 km/h | 100–0 km/h | step-steer roll¹ |
+| --- | --- | --- | --- |
+| Sports | 5.98 s | 25.4 m | 0.2° |
+| Muscle | 8.83 s | 53.4 m | — |
+| Hatchback | 17.20 s | 36.4 m | — |
+| SUV | 21.33 s | 40.8 m | 0.5° |
+| Van (laden) | 36.33 s | 41.8 m | 3.5° |
+| Semi | 80.43 s | 75.6 m | 1.2° |
+
+¹ Peak body-lean in a gentle step-steer at ~55 km/h. At 80 km/h the soft, tall
+profiles roll fully onto their side (a saturated ~60°), so the graded lean
+ordering (sports < SUV < van/semi) is only measurable below the rollover regime.
+
+Further proven orderings: on **Grass** the AWD SUV reaches 40 km/h in 4.23 s vs
+the RWD muscle car's 5.05 s (traction); at full-throttle mid-corner the **FWD
+hatch's front axle slips more than its rear** (understeer: 0.307 vs 0.146 rad)
+while the **RWD muscle car's rear exceeds its front** (oversteer: 1.457 vs 1.421
+rad); and the sports car's achievable lateral grip **grows with speed** thanks to
+downforce (×1.67 from 60→120 km/h) where the hatch's barely moves (×1.30). All
+six are NaN-free, settle at rest, and still respect the surface/wetness grip
+table.
+
+### Live in the demo
+
+Number keys **1–6** swap the active car's handling profile
+(sports/muscle/hatchback/SUV/van/semi) — the car despawns and respawns with the
+new desc at its current position and heading (stationary), the HUD shows the
+profile name and mass, and the visual switches per profile: the box-shaped
+**van/semi wear the milk-truck glTF** (scaled to the desc length) while the
+sportier profiles get a **tinted graybox chassis** scaled to the desc dimensions
+(a milk truck would look absurd as a coupe). `RX_DRIVE_PROFILE=sports|muscle|
+hatch|suv|van|semi` forces the initial profile for headless captures.
 
 ---
 
@@ -342,6 +420,7 @@ when the assets are absent.
 | Input | Action |
 | --- | --- |
 | **Tab** | Cycle the active vehicle |
+| **1–6** | Swap the car's handling profile (sports/muscle/hatch/SUV/van/semi) |
 | **W / S** | Throttle / brake-reverse (car + boat) or throttle up / down (plane) |
 | **A / D** | Steer (car) or rudder (boat / plane) |
 | **Arrows** | Plane pitch / roll |
@@ -358,8 +437,9 @@ when the assets are absent.
 `RX_DRIVE_VEHICLE=car|boat|plane` picks the initially active vehicle and
 `RX_DRIVE_AUTO=1` holds full throttle on it (takeoff flaps + a rotate/ease
 elevator schedule for the plane), so screenshot/CI runs show motion without
-input. Combine with `RX_HIDE_DEBUG_UI=1` and the usual `RX_UI_SHOT` /
-`RX_UI_SHOT_FRAMES` to take the shots above.
+input. `RX_DRIVE_PROFILE=sports|muscle|hatch|suv|van|semi` forces the car's
+initial handling profile. Combine with `RX_HIDE_DEBUG_UI=1` and the usual
+`RX_UI_SHOT` / `RX_UI_SHOT_FRAMES` to take the shots above.
 
 ---
 
