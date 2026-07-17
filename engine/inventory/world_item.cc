@@ -18,9 +18,15 @@ using namespace detail;
 // reconciled against loaded ids via ReserveWorldItemId.
 std::atomic<u64> g_next_world_item_id{1};
 
-// ~1 cm of movement between syncs counts as "still". A sleeping Jolt body
-// reports an unchanged transform, so this reliably latches once it settles.
-constexpr f32 kRestEpsilonSq = 1e-4f;
+// The physics layer exposes no body sleep-state or velocity query, so rest is
+// inferred from how little the body moves between syncs. A settled/sleeping
+// Jolt body reports an essentially unchanged transform, so the thresholds are
+// kept tight (near float noise) rather than at a coarse per-call delta: at
+// 60 Hz a 1 cm/call linear gate would latch anything moving below 0.6 m/s, and
+// pure spin (unchanged position) would latch regardless. We gate on BOTH a
+// small translation AND a small rotation change, sustained for kRestFrames.
+constexpr f32 kRestLinearEpsilonSq = 1e-6f;  // ~1 mm of translation per call
+constexpr f32 kRestAngularEpsilon = 1e-5f;   // 1 - |dot(q0, q1)|; ~0.5 deg/call
 constexpr u16 kRestFrames = 6;
 
 physics::BodyId SpawnBody(physics::PhysicsWorld& physics, const ItemDef& def,
@@ -36,9 +42,42 @@ void SeedLastPos(WorldItem& wi, const scene::Transform& t) {
   wi.last_pos[2] = t.position[2];
 }
 
+// Transactionally materialises a live world-item entity backed by a confirmed
+// physics body. Creates NOTHING and returns kInvalidEntity when the def is
+// unknown or the body could not be created (stub/uninitialised physics), so
+// callers can roll back (leave the inventory or store untouched) instead of
+// leaving a bodyless entity that never settles or hibernates.
+ecs::Entity MaterializeWorldItem(ecs::World& world, physics::PhysicsWorld& physics,
+                                 const ItemDef* def, const scene::Transform& t, ItemDefId item,
+                                 u32 count, u64 payload, u64 persistent_id) {
+  if (!def) return ecs::kInvalidEntity;
+  physics::BodyId body = SpawnBody(physics, *def, t);
+  if (body == 0) return ecs::kInvalidEntity;
+
+  ecs::Entity e = world.Create();
+  world.Add(e, t);
+  if (def->world_mesh) world.Add(e, scene::Renderable{def->world_mesh});
+  WorldItem wi;
+  wi.item = item;
+  wi.count = count;
+  wi.payload = payload;
+  wi.body = body;
+  wi.persistent_id = persistent_id;
+  SeedLastPos(wi, t);
+  world.Add(e, wi);
+  return e;
+}
+
 // "RXWI" v1.
 constexpr u8 kMagic0 = 'R', kMagic1 = 'X', kMagic2 = 'W', kMagic3 = 'I';
 constexpr u32 kVersion = 1;
+
+// On-wire size of a serialized transform, and the minimum size of each record
+// kind. Used to reject an implausible count before it is reserved so a corrupt
+// blob fails cleanly instead of triggering an enormous allocation.
+constexpr u32 kTransformBytes = 12 + 16 + 4;                     // pos, rot, scale
+constexpr u32 kLiveRecordBytes = 8 + 4 + 4 + 8 + kTransformBytes + 1;  // + at_rest flag
+constexpr u32 kDormantRecordBytes = 8 + 4 + 4 + 8 + kTransformBytes;
 
 void WriteTransform(std::vector<u8>& b, const scene::Transform& t) {
   for (int i = 0; i < 3; ++i) PutF32(b, t.position[i]);
@@ -136,6 +175,14 @@ ecs::Entity DropItem(ecs::World& world, physics::PhysicsWorld& physics, const It
 
   const ItemDefId item = entry.item;
   const u64 payload = entry.payload;
+
+  // Materialise (and confirm) the world body BEFORE debiting the inventory: if
+  // the body can't be created the drop fails with the inventory untouched,
+  // rather than losing the item into a bodyless entity.
+  ecs::Entity e =
+      MaterializeWorldItem(world, physics, def, spawn, item, n, payload, NextWorldItemId());
+  if (e == ecs::kInvalidEntity) return ecs::kInvalidEntity;
+
   entry.count -= n;
   if (entry.count == 0) {
     entry.item = kInvalidItemDef;
@@ -143,22 +190,8 @@ ecs::Entity DropItem(ecs::World& world, physics::PhysicsWorld& physics, const It
   }
   ++inv->revision;
 
-  ecs::Entity e = world.Create();
-  world.Add(e, spawn);
-  if (def->world_mesh) world.Add(e, scene::Renderable{def->world_mesh});
-
-  physics::BodyId body = SpawnBody(physics, *def, spawn);
-  if (body != 0 && (impulse.x != 0 || impulse.y != 0 || impulse.z != 0))
-    physics.ApplyImpulse(body, impulse);
-
-  WorldItem wi;
-  wi.item = item;
-  wi.count = n;
-  wi.payload = payload;
-  wi.body = body;
-  wi.persistent_id = NextWorldItemId();
-  SeedLastPos(wi, spawn);
-  world.Add(e, wi);
+  if (impulse.x != 0 || impulse.y != 0 || impulse.z != 0)
+    physics.ApplyImpulse(world.Get<WorldItem>(e)->body, impulse);
   return e;
 }
 
@@ -188,6 +221,14 @@ void SyncWorldItems(ecs::World& world, physics::PhysicsWorld& physics) {
     Vec3 pos;
     f32 rot[4];
     if (!physics.GetBodyTransform(wi.body, &pos, rot)) return;
+
+    // Angular change since the previous sync: t.rotation still holds last call's
+    // orientation until we overwrite it below. 1 - |dot| grows with the rotation
+    // between the two unit quaternions (|dot| handles the double-cover sign).
+    const f32 rdot = t.rotation[0] * rot[0] + t.rotation[1] * rot[1] + t.rotation[2] * rot[2] +
+                     t.rotation[3] * rot[3];
+    const f32 ang_delta = 1.0f - std::fabs(rdot);
+
     t.position[0] = pos.x;
     t.position[1] = pos.y;
     t.position[2] = pos.z;
@@ -196,7 +237,9 @@ void SyncWorldItems(ecs::World& world, physics::PhysicsWorld& physics) {
     const f32 dx = pos.x - wi.last_pos[0];
     const f32 dy = pos.y - wi.last_pos[1];
     const f32 dz = pos.z - wi.last_pos[2];
-    if (dx * dx + dy * dy + dz * dz < kRestEpsilonSq) {
+    const bool still =
+        dx * dx + dy * dy + dz * dz < kRestLinearEpsilonSq && ang_delta < kRestAngularEpsilon;
+    if (still) {
       if (wi.still_frames < 0xffff) ++wi.still_frames;
       if (wi.still_frames >= kRestFrames) wi.at_rest = true;
     } else {
@@ -240,17 +283,12 @@ void WakeWorldItemsNear(ecs::World& world, physics::PhysicsWorld& physics,
   std::vector<WorldItemRecord> woken = store.TakeNear(center, radius);
   for (const auto& rec : woken) {
     const ItemDef* def = catalog.Find(rec.item);
-    ecs::Entity e = world.Create();
-    world.Add(e, rec.transform);
-    if (def && def->world_mesh) world.Add(e, scene::Renderable{def->world_mesh});
-    WorldItem wi;
-    wi.item = rec.item;
-    wi.count = rec.count;
-    wi.payload = rec.payload;
-    wi.persistent_id = rec.persistent_id;
-    SeedLastPos(wi, rec.transform);
-    if (def) wi.body = SpawnBody(physics, *def, rec.transform);
-    world.Add(e, wi);
+    ecs::Entity e = MaterializeWorldItem(world, physics, def, rec.transform, rec.item, rec.count,
+                                         rec.payload, rec.persistent_id);
+    // Couldn't re-materialise a functioning body: keep the item dormant rather
+    // than dropping the record on the floor, so it can be retried on a later
+    // wake (and is never lost).
+    if (e == ecs::kInvalidEntity) store.Insert(rec);
   }
 }
 
@@ -305,32 +343,30 @@ bool LoadWorldItems(ecs::World& world, physics::PhysicsWorld& physics, const Ite
   if (r.U8() != kMagic0 || r.U8() != kMagic1 || r.U8() != kMagic2 || r.U8() != kMagic3) return false;
   if (r.U32() != kVersion) return false;
 
+  // Parse+validate the WHOLE blob into bounded temporaries first, and only
+  // commit (mint ids, create entities/bodies, insert store records) once it is
+  // known good. A valid record followed by truncation or trailing garbage must
+  // leave the world and store untouched, not half-loaded.
   u32 live = r.U32();
+  if (!r.ok || live > r.Remaining() / kLiveRecordBytes) return false;
+  std::vector<WorldItemRecord> live_recs;
+  live_recs.reserve(live);
   for (u32 i = 0; i < live && r.ok; ++i) {
-    u64 pid = r.U64();
-    ItemDefId item = r.U32();
-    u32 count = r.U32();
-    u64 payload = r.U64();
-    scene::Transform t = ReadTransform(r);
+    WorldItemRecord rec;
+    rec.persistent_id = r.U64();
+    rec.item = r.U32();
+    rec.count = r.U32();
+    rec.payload = r.U64();
+    rec.transform = ReadTransform(r);
     r.U8();  // at_rest flag: woken items re-settle, so it is not restored live
     if (!r.ok) break;
-    ReserveWorldItemId(pid);
-
-    const ItemDef* def = catalog.Find(item);
-    ecs::Entity e = world.Create();
-    world.Add(e, t);
-    if (def && def->world_mesh) world.Add(e, scene::Renderable{def->world_mesh});
-    WorldItem wi;
-    wi.item = item;
-    wi.count = count;
-    wi.payload = payload;
-    wi.persistent_id = pid;
-    SeedLastPos(wi, t);
-    if (def) wi.body = SpawnBody(physics, *def, t);
-    world.Add(e, wi);
+    live_recs.push_back(rec);
   }
 
   u32 dormant = r.U32();
+  if (!r.ok || dormant > r.Remaining() / kDormantRecordBytes) return false;
+  std::vector<WorldItemRecord> dorm_recs;
+  dorm_recs.reserve(dormant);
   for (u32 i = 0; i < dormant && r.ok; ++i) {
     WorldItemRecord rec;
     rec.persistent_id = r.U64();
@@ -339,10 +375,24 @@ bool LoadWorldItems(ecs::World& world, physics::PhysicsWorld& physics, const Ite
     rec.payload = r.U64();
     rec.transform = ReadTransform(r);
     if (!r.ok) break;
+    dorm_recs.push_back(rec);
+  }
+  if (!r.ok || r.Remaining() != 0) return false;
+
+  for (const auto& rec : live_recs) {
+    ReserveWorldItemId(rec.persistent_id);
+    const ItemDef* def = catalog.Find(rec.item);
+    ecs::Entity e = MaterializeWorldItem(world, physics, def, rec.transform, rec.item, rec.count,
+                                         rec.payload, rec.persistent_id);
+    // No functioning body (stub physics / unknown def): keep the item as a
+    // dormant record instead of losing it or leaving a bodyless entity.
+    if (e == ecs::kInvalidEntity) store.Insert(rec);
+  }
+  for (const auto& rec : dorm_recs) {
     ReserveWorldItemId(rec.persistent_id);
     store.Insert(rec);
   }
-  return r.ok;
+  return true;
 }
 
 }  // namespace rx::inventory

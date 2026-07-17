@@ -531,6 +531,34 @@ void TestViewModeToggleTransition() {
   Check(s.world.Get<scene::CameraStack>(output)->transition.active,
         "view-mode toggle drives a camera-stack transition");
   Check(s.world.Has<scene::CameraBoom>(s.player), "third-person recipe installs a boom");
+
+  // Regression (F1): each toggle retires the previous pushed mode by writing
+  // the freshly re-acquired CharacterViewMode::transition. Before the fix that
+  // write went through a component pointer invalidated by the toggle's own
+  // add/remove churn, so the live activation stayed empty, the next toggle
+  // could never release the prior push, and CameraStack::entries grew without
+  // bound. Drive many toggles, settling the transition each time, and assert
+  // the stack stays bounded rather than growing per toggle.
+  auto resolve_frame = [&] {
+    SyncCharacterCameraAnchors(s.world);
+    scene::BuildCameraRigs(s.world, kDt);
+    scene::PrepareCameraRigConstraints(s.world, kDt);
+    scene::ResolveCameraRigs(s.world, kDt);
+    scene::ResolveCameraStacks(s.world, kDt);
+  };
+  auto settle_stack = [&] {
+    for (int i = 0; i < 60; ++i) resolve_frame();  // > the 0.3s transition
+  };
+  settle_stack();
+  const size_t bounded = s.world.Get<scene::CameraStack>(output)->entries.size();
+  for (int i = 0; i < 12; ++i) {
+    scene::CameraStackResult tr = ToggleCharacterViewMode(s.world, s.player, output,
+                                                          s.player, {}, {.duration = 0.3f});
+    Check(tr == scene::CameraStackResult::kSuccess, "repeated view-mode toggle succeeds");
+    settle_stack();
+    Check(s.world.Get<scene::CameraStack>(output)->entries.size() == bounded,
+          "camera stack stays bounded across repeated toggles");
+  }
 }
 
 }  // namespace

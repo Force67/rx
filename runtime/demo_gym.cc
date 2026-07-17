@@ -227,6 +227,19 @@ Mat4 ScaleMat(const Vec3& s) {
 
 Quat HeadingQuat(f32 yaw) { return QuatFromAxisAngle({0, -1, 0}, yaw); }
 
+// The character/platform/item update is physics-coupled, so it must advance on
+// the same fixed cadence app::Host steps Jolt at, not the variable render frame
+// delta (hitches / a varying refresh rate otherwise desync the controller from
+// physics). Mirror the Host's fixed step: RX_FIXED_DT when set, else the
+// FrameTimer default of 1/60 s.
+f32 GymFixedStep() {
+  if (const char* env = std::getenv("RX_FIXED_DT")) {
+    const f32 v = std::strtof(env, nullptr);
+    if (v > 0.0f) return v;
+  }
+  return 1.0f / 60.0f;
+}
+
 }  // namespace
 
 GymDemo::GymDemo(EngineContext& ctx) : ctx_(ctx) {}
@@ -585,8 +598,12 @@ void GymDemo::FillIntent(const InputState& input, const ActionState& actions, bo
   intent->gait = sprint ? character::CharacterGait::kSprint : character::CharacterGait::kRun;
   intent->crouch = crouch;
   if (jump) intent->jump = true;
-  intent->look_yaw_delta = yaw_delta;
-  intent->look_pitch_delta = pitch_delta;
+  // Accumulate look (and jump, above) rather than overwrite: FillIntent runs once
+  // per render frame but StepCharacters runs on the fixed accumulator, so on a
+  // frame that steps zero times this frame's mouse motion must survive to the
+  // next step instead of being clobbered. StepCharacters zeroes both on consume.
+  intent->look_yaw_delta += yaw_delta;
+  intent->look_pitch_delta += pitch_delta;
 }
 
 void GymDemo::RunScript(f32 dt) {
@@ -688,16 +705,14 @@ void GymDemo::PickUpNearest() {
 void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions,
                      bool allow_keyboard, bool allow_mouse) {
   if (!player_ || dt <= 0) return;
-  // Scripted staging advances on a fixed step so a capture at frame N is
-  // deterministic regardless of the windowed frame rate.
-  if (!script_.empty()) dt = 1.0f / 60.0f;
   ecs::World& world = *ctx_.world;
   physics::PhysicsWorld& phys = *ctx_.physics;
 
   // Cursor release toggle (Tab), so the tuning panel is clickable.
   if (allow_keyboard && input.key_pressed(Key::kTab)) mouse_captured_ = !mouse_captured_;
 
-  // Discrete verbs (raw keys; edges from InputState).
+  // Discrete verbs (raw keys; edges from InputState) stay on render cadence: one
+  // edge per input pump.
   if (script_.empty() && mouse_captured_ && allow_keyboard) {
     if (input.key_pressed(Key::kV))
       character::ToggleCharacterViewMode(world, player_, camera_output_, player_, view_settings_,
@@ -709,33 +724,58 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
       character::ApplyCharacterZoom(world, player_, input.wheel * 0.4f, false, view_settings_);
   }
 
-  FillIntent(input, actions, allow_keyboard, allow_mouse, dt);
+  const f32 fixed = GymFixedStep();
+  // Gather this render frame's input once. Scripted staging advances exactly one
+  // fixed step per render frame so a capture at frame N stays frame-index
+  // deterministic regardless of the windowed frame rate.
+  FillIntent(input, actions, allow_keyboard, allow_mouse, script_.empty() ? dt : fixed);
   SyncViewSettingsToRig();
 
-  // Character + camera-rig pipeline (README staged order).
-  character::StepCharacters(world, phys, dt);
-  character::SyncCharacterCameraAnchors(world);
-  scene::BuildCameraRigs(world, dt);
-  scene::PrepareCameraRigConstraints(world, dt);
-  character::AnswerCameraObstructions(world, phys);
-  scene::ResolveCameraRigs(world, dt);
-  scene::ResolveCameraStacks(world, dt);
-
-  if (auto* out = world.Get<scene::CameraOutput>(camera_output_)) {
-    const scene::CameraView& v = out->view;
-    cam_eye_ = v.position;
-    cam_target_ = v.position + Rotate(v.orientation, Vec3{0, 0, -1});
-    cam_fov_ = v.lens.fov_y;
-    cam_valid_ = out->valid;
+  int steps;
+  if (!script_.empty()) {
+    steps = 1;
+  } else {
+    // Mirror app::Host's fixed-step accumulator (same 0.25 s clamp against a
+    // spiral of death) so the physics-coupled update advances on the engine's
+    // Jolt cadence rather than the raw render frame delta.
+    static f32 sim_accum = 0.0f;
+    sim_accum += std::min(dt, 0.25f);
+    steps = 0;
+    while (sim_accum >= fixed) {
+      sim_accum -= fixed;
+      ++steps;
+    }
   }
 
-  // Moving platform: ping-pong along X, driven kinematically so a standing body
-  // could ride it (character platform-riding is not yet folded into the module).
-  platform_time_ += dt;
-  const f32 offset = std::sin(platform_time_ * 0.6f) * platform_span_;
-  const Vec3 target{platform_center_.x + offset, platform_center_.y, platform_center_.z};
-  const f32 identity_rot[4] = {0, 0, 0, 1};
-  if (platform_body_) phys.MoveBodyKinematic(platform_body_, target, identity_rot, dt);
+  for (int i = 0; i < steps; ++i) {
+    // Character + camera-rig pipeline (README staged order).
+    character::StepCharacters(world, phys, fixed);
+    character::SyncCharacterCameraAnchors(world);
+    scene::BuildCameraRigs(world, fixed);
+    scene::PrepareCameraRigConstraints(world, fixed);
+    character::AnswerCameraObstructions(world, phys);
+    scene::ResolveCameraRigs(world, fixed);
+    scene::ResolveCameraStacks(world, fixed);
+
+    // Moving platform: ping-pong along X, driven kinematically so a standing body
+    // could ride it (character platform-riding is not yet folded into the module).
+    platform_time_ += fixed;
+    const f32 offset = std::sin(platform_time_ * 0.6f) * platform_span_;
+    const Vec3 target{platform_center_.x + offset, platform_center_.y, platform_center_.z};
+    const f32 identity_rot[4] = {0, 0, 0, 1};
+    if (platform_body_) phys.MoveBodyKinematic(platform_body_, target, identity_rot, fixed);
+
+    // Dropped-item lifecycle (README per-tick order).
+    Vec3 player_pos = spawn_feet_;
+    if (auto* tr = world.Get<scene::Transform>(player_))
+      player_pos = {tr->position[0], tr->position[1], tr->position[2]};
+    inventory::SyncWorldItems(world, phys);
+    inventory::HibernateDistantWorldItems(world, phys, store_, player_pos, 40.0f);
+    inventory::WakeWorldItemsNear(world, phys, catalog_, store_, player_pos, 30.0f);
+  }
+
+  // Read the resolved platform transform + camera back for this render frame
+  // (last simulated state; purely visual, so render cadence is fine).
   if (auto* pt = world.Get<scene::Transform>(platform_)) {
     Vec3 pos;
     f32 rot[4];
@@ -745,14 +785,13 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
       pt->position[2] = pos.z;
     }
   }
-
-  // Dropped-item lifecycle (README per-tick order).
-  Vec3 player_pos = spawn_feet_;
-  if (auto* tr = world.Get<scene::Transform>(player_))
-    player_pos = {tr->position[0], tr->position[1], tr->position[2]};
-  inventory::SyncWorldItems(world, phys);
-  inventory::HibernateDistantWorldItems(world, phys, store_, player_pos, 40.0f);
-  inventory::WakeWorldItemsNear(world, phys, catalog_, store_, player_pos, 30.0f);
+  if (auto* out = world.Get<scene::CameraOutput>(camera_output_)) {
+    const scene::CameraView& v = out->view;
+    cam_eye_ = v.position;
+    cam_target_ = v.position + Rotate(v.orientation, Vec3{0, 0, -1});
+    cam_fov_ = v.lens.fov_y;
+    cam_valid_ = out->valid;
+  }
 }
 
 void GymDemo::Emit(f32 dt, render::FrameView& view) {
@@ -806,6 +845,12 @@ void GymDemo::Emit(f32 dt, render::FrameView& view) {
 
 void GymDemo::DrawPanel() {
 #if defined(RX_HAS_IMGUI)
+  // The compile guard only proves imgui is available, not that a live context /
+  // frame exists. The Viewer keeps running when DebugUi init fails (renderer stub
+  // or UI-init failure) and only starts the imgui frame while initialized, so
+  // with no context ImGui::Begin below would assert — bail at runtime too. (Same
+  // GetCurrentContext() guard DebugUi::wants_mouse/keyboard use.)
+  if (ImGui::GetCurrentContext() == nullptr) return;
   ecs::World& world = *ctx_.world;
   auto* shape = world.Get<character::CharacterShape>(player_);
   auto* move = world.Get<character::CharacterMovementSettings>(player_);

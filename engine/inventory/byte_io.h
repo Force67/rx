@@ -41,6 +41,10 @@ struct Reader {
 
   explicit Reader(const std::vector<u8>& b) : p(b.data()), end(b.data() + b.size()) {}
 
+  // Bytes not yet consumed. Lets callers bound a serialized count against the
+  // input before reserving/allocating, and check for full consumption.
+  size_t Remaining() const { return size_t(end - p); }
+
   u8 U8() {
     if (p + 1 > end) {
       ok = false;

@@ -140,7 +140,9 @@ enum class CharacterStance : u8 {
 struct CharacterState {
   CharacterStance stance = CharacterStance::kStanding;
   bool grounded = false;
-  Vec3 velocity = {0, 0, 0};  // full world-space velocity (horizontal + vertical)
+  Vec3 velocity = {0, 0, 0};  // world-space velocity from the *resolved* feet
+                              // displacement (collision-clamped): the speed a wall or
+                              // ceiling actually allowed. Feeds animation, gameplay, camera.
   f32 crouch_blend = 0;       // [0..1], 0 standing, 1 fully crouched
   f32 eye_height = 1.62f;     // current, blended, measured from the feet
   f32 time_since_grounded = 0;  // seconds airborne (coyote-time friendly)
@@ -158,6 +160,12 @@ struct CharacterState {
   f32 anchor_eye_y = 0;    // eye_base_y minus landing dip — the value the camera anchor reads
   f32 landing_dip = 0;     // current landing-recoil dip in metres (>= 0), decays to 0
   bool view_initialized = false;  // facing_yaw / eye Y primed (cleared on teleport to snap)
+
+  // The stepper's own pre-collision velocity: the gravity/accel/jump integration
+  // it reads back and advances each step. Distinct from the resolved `velocity`
+  // above so consumers see the collision-clamped speed while the integrator keeps
+  // its bookkeeping.
+  Vec3 integration_velocity = {0, 0, 0};
 };
 
 // Links the entity to its Jolt CharacterVirtual and tracks the live capsule

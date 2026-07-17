@@ -16,6 +16,13 @@ using namespace detail;
 constexpr u8 kMagic0 = 'R', kMagic1 = 'X', kMagic2 = 'I', kMagic3 = 'N';
 constexpr u32 kVersion = 1;
 
+// Smallest possible on-wire size of a serialized record, used to reject an
+// implausible count before it is reserved (so a corrupt UINT32_MAX count fails
+// cleanly instead of triggering an enormous allocation).
+constexpr u32 kInventoryEntryBytes = 4 + 4 + 8;       // item, count, payload
+constexpr u32 kEquipmentSlotBytes = 4 + 4 + 8 + 1;    // tag, item, payload, occupied
+constexpr u32 kInventoryRecordMinBytes = 8 + 16 + 1;  // guid, inventory header, has_eq
+
 void WriteInventory(std::vector<u8>& b, const Inventory& inv) {
   PutF32(b, inv.max_weight);
   PutU32(b, inv.max_entries);
@@ -39,6 +46,10 @@ Inventory ReadInventory(Reader& r) {
   inv.max_entries = r.U32();
   inv.revision = r.U32();
   u32 n = r.U32();
+  if (!r.ok || n > r.Remaining() / kInventoryEntryBytes) {
+    r.ok = false;
+    return inv;
+  }
   inv.entries.reserve(n);
   for (u32 i = 0; i < n && r.ok; ++i) {
     InventoryEntry e;
@@ -65,6 +76,10 @@ Equipment ReadEquipment(Reader& r) {
   Equipment eq;
   eq.revision = r.U32();
   u32 n = r.U32();
+  if (!r.ok || n > r.Remaining() / kEquipmentSlotBytes) {
+    r.ok = false;
+    return eq;
+  }
   eq.slots.reserve(n);
   for (u32 i = 0; i < n && r.ok; ++i) {
     EquipmentSlot s;
@@ -118,39 +133,56 @@ bool LoadInventories(ecs::World& world, const std::vector<u8>& blob) {
   if (r.U8() != kMagic0 || r.U8() != kMagic1 || r.U8() != kMagic2 || r.U8() != kMagic3) return false;
   if (r.U32() != kVersion) return false;
 
+  u32 count = r.U32();
+  if (!r.ok || count > r.Remaining() / kInventoryRecordMinBytes) return false;
+
+  // Parse+validate fully into temporaries first; only commit to the world once
+  // the whole blob is known good (no truncation, no trailing garbage). This
+  // keeps a corrupt blob from leaving half the records applied.
+  struct Parsed {
+    u64 guid;
+    Inventory inv;
+    bool has_eq;
+    Equipment eq;
+  };
+  std::vector<Parsed> parsed;
+  parsed.reserve(count);
+  for (u32 i = 0; i < count && r.ok; ++i) {
+    Parsed p;
+    p.guid = r.U64();
+    p.inv = ReadInventory(r);
+    p.has_eq = r.U8() != 0;
+    if (p.has_eq) p.eq = ReadEquipment(r);
+    if (!r.ok) break;
+    parsed.push_back(std::move(p));
+  }
+  if (!r.ok || r.Remaining() != 0) return false;
+
   std::unordered_map<u64, ecs::Entity> by_guid;
   world.Each<scene::Guid>([&](ecs::Entity e, scene::Guid& g) { by_guid[g.value] = e; });
 
-  u32 count = r.U32();
-  for (u32 i = 0; i < count && r.ok; ++i) {
-    u64 guid = r.U64();
-    Inventory inv = ReadInventory(r);
-    bool has_eq = r.U8() != 0;
-    Equipment eq;
-    if (has_eq) eq = ReadEquipment(r);
-    if (!r.ok) break;
-
+  for (auto& rec : parsed) {
     ecs::Entity e;
-    auto it = by_guid.find(guid);
+    auto it = by_guid.find(rec.guid);
     if (it != by_guid.end()) {
       e = it->second;
     } else {
       e = world.Create();
-      world.Add(e, scene::Guid{guid});
-      by_guid[guid] = e;
+      world.Add(e, scene::Guid{rec.guid});
+      by_guid[rec.guid] = e;
     }
     if (world.Has<Inventory>(e))
-      *world.Get<Inventory>(e) = std::move(inv);
+      *world.Get<Inventory>(e) = std::move(rec.inv);
     else
-      world.Add(e, std::move(inv));
-    if (has_eq) {
+      world.Add(e, std::move(rec.inv));
+    if (rec.has_eq) {
       if (world.Has<Equipment>(e))
-        *world.Get<Equipment>(e) = std::move(eq);
+        *world.Get<Equipment>(e) = std::move(rec.eq);
       else
-        world.Add(e, std::move(eq));
+        world.Add(e, std::move(rec.eq));
     }
   }
-  return r.ok;
+  return true;
 }
 
 }  // namespace rx::inventory

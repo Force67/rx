@@ -316,6 +316,52 @@ void TestHibernateWakeAndWorldSave() {
   CHECK(LoadWorldItems(reload, physics, catalog, reload_store, {9, 9, 9}) == false);
 }
 
+// Regression: a blob that is valid up to a point and then truncated must be
+// rejected with NO partial state applied -- pre-fix the loader committed each
+// record as it parsed, so the first live item's entity + physics body survived
+// a later failure, and an out-of-range serialized count reserved a huge buffer
+// before failing.
+void TestCorruptWorldItemRejection() {
+  physics::PhysicsWorld physics;
+  CHECK(physics.Initialize());
+  physics.AddStaticBox(Vec3{0, 0, 0}, Vec3{10, 0.5f, 10});
+  ItemCatalog catalog;
+  ItemDefId rock = catalog.Register(3, MakeBoxDef(1.0f, 10, 1.0f));
+
+  // Build a valid two-live-item blob.
+  ecs::World src;
+  ecs::Entity dropper = src.Create();
+  Inventory inv;
+  src.Add(dropper, inv);
+  AddItem(*src.Get<Inventory>(dropper), catalog, rock, 2);
+  scene::Transform s;
+  s.position[1] = 2.0f;
+  DropItem(src, physics, catalog, dropper, 0, 1, s, Vec3{0, 0, 0});
+  DropItem(src, physics, catalog, dropper, 0, 1, s, Vec3{0, 0, 0});
+  WorldItemStore empty;
+  std::vector<u8> blob = SaveWorldItems(src, empty);
+  CHECK(blob.size() > 16);
+
+  const u32 bodies_before = physics.dynamic_body_count();
+  // Truncate at every offset past the magic+version header (8 bytes) -- this
+  // spans a chopped record count (which must fail the reserve bound instead of
+  // allocating for the declared-but-absent records) and a chopped record body
+  // (which must fail after full parse, before any commit). Every case must be
+  // rejected with no entity and no store record created.
+  for (size_t cut = 8; cut < blob.size(); ++cut) {
+    std::vector<u8> truncated(blob.begin(), blob.begin() + cut);
+    ecs::World dst;
+    WorldItemStore store;
+    CHECK(LoadWorldItems(dst, physics, catalog, store, truncated) == false);
+    int live = 0;
+    dst.Each<WorldItem>([&](ecs::Entity, WorldItem&) { ++live; });
+    CHECK(live == 0);
+    CHECK(store.size() == 0);
+  }
+  // No dynamic body leaked from any rejected load.
+  CHECK(physics.dynamic_body_count() == bodies_before);
+}
+
 }  // namespace
 
 int main() {
@@ -325,6 +371,7 @@ int main() {
   TestInventorySaveLoad();
   TestWorldItemLifecycle();
   TestHibernateWakeAndWorldSave();
+  TestCorruptWorldItemRejection();
 
   if (g_failures == 0) {
     std::printf("inventory_test: all checks passed\n");

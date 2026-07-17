@@ -209,7 +209,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         const Vec3 target_h = dir * (state.gait_speed * throttle);
 
         // --- Horizontal velocity ---------------------------------------------
-        Vec3 horizontal{state.velocity.x, 0, state.velocity.z};
+        Vec3 horizontal{state.integration_velocity.x, 0, state.integration_velocity.z};
         f32 accel = throttle > 1e-4f ? settings.ground_acceleration : settings.ground_deceleration;
         if (!state.grounded) accel = settings.ground_acceleration * settings.air_control;
         horizontal = MoveTowardVec(horizontal, target_h, std::max(accel, 0.0f) * dt);
@@ -233,7 +233,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
             grounded_prev || (!state.jump_consumed && settings.coyote_time > 0.0f &&
                               state.time_since_grounded <= settings.coyote_time);
 
-        f32 vy = state.velocity.y;
+        f32 vy = state.integration_velocity.y;
         if (grounded_prev && vy < 0) vy = 0;
         if (jump_wanted && coyote_ok) {
           vy = std::sqrt(2.0f * std::max(settings.gravity, 0.0f) *
@@ -250,14 +250,21 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         bool grounded = false;
         physics.MoveCharacterVelocity(body.id, velocity, dt, &out_pos, &grounded, nullptr);
 
+        const Vec3 out_feet = out_pos - up * (body.half_height + body.radius);
+
         const bool just_landed = !grounded_prev && grounded;
         const f32 impact_speed = std::max(0.0f, -velocity.y);  // pre-ground-clamp descent speed
         state.grounded = grounded;
         if (grounded && velocity.y < 0) velocity.y = 0;
-        state.velocity = velocity;
+        // Keep the integrated (requested) velocity as the stepper's own
+        // gravity/accel bookkeeping for next step, but publish the velocity the
+        // resolved feet displacement actually realized (dt > 0 is guaranteed at
+        // entry). A wall then reports the clamped speed and a ceiling stops
+        // reporting upward motion, instead of the pre-collision request.
+        state.integration_velocity = velocity;
+        state.velocity = (out_feet - feet) * (1.0f / dt);
         state.time_since_grounded = grounded ? 0.0f : state.time_since_grounded + dt;
 
-        const Vec3 out_feet = out_pos - up * (body.half_height + body.radius);
         transform.position[0] = out_feet.x;
         transform.position[1] = out_feet.y;
         transform.position[2] = out_feet.z;
@@ -341,6 +348,10 @@ void ApplyCharacterViewMode(ecs::World& world, ecs::Entity entity,
                             const CharacterViewSettings& settings) {
   CharacterViewMode* view = world.Get<CharacterViewMode>(entity);
   if (!view) return;
+  // Copy the scalar we need before the Ensure/RemoveIfPresent calls below: each
+  // add/remove moves the entity between archetypes and invalidates `view`, so
+  // reading view->kind after the scaffolding would read stale storage.
+  const CharacterViewKind kind = view->kind;
 
   // Shared scaffolding: the entity is its own camera-mode + rig + anchor source.
   Ensure<scene::CameraAnchor>(world, entity);
@@ -351,7 +362,7 @@ void ApplyCharacterViewMode(ecs::World& world, ecs::Entity entity,
   orbit.space = scene::CameraOrbitSpace::kAnchor;
   orbit.yaw = 0;  // yaw comes from the anchor heading; the orbit owns only pitch
 
-  if (view->kind == CharacterViewKind::kFirstPerson) {
+  if (kind == CharacterViewKind::kFirstPerson) {
     orbit.min_pitch = -settings.fp_pitch_limit;
     orbit.max_pitch = settings.fp_pitch_limit;
     orbit.pitch = std::clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch);
@@ -391,18 +402,28 @@ scene::CameraStackResult ToggleCharacterViewMode(ecs::World& world, ecs::Entity 
   view->kind = view->kind == CharacterViewKind::kFirstPerson ? CharacterViewKind::kThirdPerson
                                                              : CharacterViewKind::kFirstPerson;
 
+  // Snapshot the previous activation before any structural change: the
+  // ReleaseCameraMode / ApplyCharacterViewMode / PushCameraMode calls below add
+  // and remove components, moving the entity between archetypes and invalidating
+  // `view`. Writing view->transition through the stale pointer would leave the
+  // live component's activation empty, so the next toggle could never retire the
+  // pushed mode and the camera stack would grow unbounded.
+  const scene::CameraActivation prev = view->transition;
+
   // Retire a previous toggle's duplicate stack entry with a silent cut (same
   // view, so invisible) so the stack stays bounded to base + one pushed mode.
-  if (view->transition) {
-    scene::ReleaseCameraMode(world, view->transition, {.duration = 0});
-    view->transition = {};
-  }
+  if (prev) scene::ReleaseCameraMode(world, prev, {.duration = 0});
   ApplyCharacterViewMode(world, entity, settings);
 
   // Push the reconfigured mode; BeginTransition captures the pre-switch output
   // view as the source and blends toward the new recipe's live view.
   scene::CameraPushResult pushed = scene::PushCameraMode(world, output, mode, transition);
-  if (pushed.result == scene::CameraStackResult::kSuccess) view->transition = pushed.activation;
+  // Re-acquire after the structural churn before writing through the pointer.
+  if (CharacterViewMode* fresh = world.Get<CharacterViewMode>(entity)) {
+    fresh->transition = pushed.result == scene::CameraStackResult::kSuccess
+                            ? pushed.activation
+                            : scene::CameraActivation{};
+  }
   return pushed.result;
 }
 
@@ -448,6 +469,7 @@ void TeleportCharacter(ecs::World& world, physics::PhysicsWorld& physics, ecs::E
   physics.SetCharacterPosition(body->id, center);
   if (state) {
     state->velocity = {0, 0, 0};
+    state->integration_velocity = {0, 0, 0};
     state->time_since_grounded = 0;
     state->teleported = true;
     // Snap the feel smoothers across the discontinuity: no eye lag, no stale dip
