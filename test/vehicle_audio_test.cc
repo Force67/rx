@@ -4,8 +4,10 @@
 // the dominant frequency, that load changes the sound, that the skid layer gates
 // on slip, and that a mid-render parameter jump does not click.
 
+#include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <thread>
 #include <vector>
 
 #include "audio/aux_synth.h"
@@ -535,6 +537,104 @@ void TestJetSpoolSplit() {
   CHECK(roar_low < roar_derive * 0.7f);  // whine climbs before the roar catches up
 }
 
+// (6) After the mixer deletes a vehicle's voices (StopAll, then the fade-out
+// completes on the device thread), a still-live VehicleAudio must keep updating
+// safely. Before the mailbox fix VehicleAudio held raw SynthVoice pointers and
+// dereferenced freed memory here (ASan heap-use-after-free); now the parameter
+// endpoint outlives the voice through shared ownership, so Update is a no-op on
+// the retired voices rather than a fault.
+void TestUpdateAfterStopAllIsSafe() {
+  Mixer mixer;
+  mixer.Configure(kRate);
+  VehicleAudio va(mixer, V8Preset());
+
+  VehicleAudioState st;
+  st.rpm = 4000.0f;
+  st.load = 0.6f;
+  st.throttle = 0.7f;
+  st.speed_mps = 25.0f;
+  st.slip = 0.4f;
+  va.Update(st);
+
+  std::vector<f32> out(1024 * 2, 0.0f);
+  // Get the voices live in the mixer.
+  for (int i = 0; i < 4; ++i) mixer.MixInto(out.data(), 1024);
+
+  // Yank every voice out from under VehicleAudio, then run the mix long enough
+  // for the StopAll fade to complete and the mixer to delete each SynthVoice.
+  mixer.StopAll();
+  for (int i = 0; i < 40; ++i) mixer.MixInto(out.data(), 1024);
+
+  // Keep feeding telemetry: the voices are gone but VehicleAudio does not know.
+  // This must not touch freed memory (the pre-fix bug) and must stay finite.
+  for (int frame = 0; frame < 200; ++frame) {
+    st.rpm = 3000.0f + 40.0f * frame;
+    st.slip = 0.5f;
+    va.Update(st);
+    mixer.MixInto(out.data(), 1024);
+    for (f32 v : out) CHECK(std::isfinite(v));
+  }
+  va.Stop();  // idempotent, also safe after the voices are gone
+}
+
+// (7) The parameter hand-off is a legal, wait-free single-producer/single-consumer
+// exchange (replacing the old UB seqlock). Hammer it: one thread spins SetParams
+// through a real jump range while this thread renders through Read (the device
+// path), then confirm the render stayed finite, bounded and click-free the whole
+// time. A torn read of the shared struct would surface as a NaN, an out-of-range
+// value blowing past the soft limit, or a click.
+void TestParamMailboxThreadedHammer() {
+  SynthVoice voice(kRate, std::unique_ptr<Synth>(new EngineSynth(InlineFourCarPreset(), kRate)));
+  SynthParams warm;
+  warm.rpm = 1200.0f;
+  warm.load = 0.3f;
+  warm.throttle = 0.3f;
+  voice.SetParams(warm);
+
+  std::atomic<bool> done{false};
+  std::atomic<u64> writes{0};
+  // Writer: slam the parameters across the full authored range as fast as it can,
+  // so a torn snapshot would mix low-rpm fields with high-rpm fields.
+  std::thread writer([&] {
+    u32 n = 0;
+    while (!done.load(std::memory_order_relaxed)) {
+      SynthParams p;
+      const f32 phase = static_cast<f32>((n++ % 100)) / 100.0f;
+      p.rpm = 800.0f + phase * 6200.0f;
+      p.load = phase;
+      p.throttle = phase;
+      p.speed_mps = phase * 60.0f;
+      p.slip = phase;
+      p.muffle = (n & 1) ? 1.0f : 0.0f;
+      p.gear_shift = (n % 7 == 0) ? 1.0f : 0.0f;
+      voice.SetParams(p);
+      writes.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+
+  const u32 block = 256;
+  std::vector<f32> buf(block, 0.0f);
+  f32 worst = 0.0f, peak = 0.0f;
+  bool finite = true;
+  // Bounded, finite render loop on the consumer (device) side.
+  for (int blk = 0; blk < 4000; ++blk) {
+    voice.Read(buf.data(), block);
+    if (!AllFinite(buf)) finite = false;
+    worst = std::max(worst, MaxDelta(buf));
+    peak = std::max(peak, MaxAbs(buf));
+  }
+  done.store(true, std::memory_order_relaxed);
+  writer.join();
+
+  std::fprintf(stderr,
+               "vehicle_audio_test: mailbox hammer writes=%llu peak=%.4f worst-delta=%.4f\n",
+               static_cast<unsigned long long>(writes.load()), peak, worst);
+  CHECK(finite);           // no torn read ever produced a NaN
+  CHECK(peak <= 1.001f);   // no torn read blew past the soft limit
+  CHECK(worst < 0.15f);    // the ramp still declicks across every jump
+  CHECK(writes.load() > 0);  // the writer actually ran concurrently
+}
+
 }  // namespace
 
 int main() {
@@ -549,6 +649,8 @@ int main() {
   TestPerWheelSlipPansSkid();
   TestShiftFlare();
   TestJetSpoolSplit();
+  TestUpdateAfterStopAllIsSafe();
+  TestParamMailboxThreadedHammer();
   if (failures == 0) std::printf("vehicle_audio_test: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

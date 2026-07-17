@@ -26,6 +26,39 @@ f32 Sane(f32 v) { return std::isfinite(v) ? v : 0.0f; }
 
 }  // namespace
 
+void ParamMailbox::Publish(const SynthParams& p) {
+  SynthParams& clean = slot_[write_];
+  clean.rpm = Sane(p.rpm);
+  clean.load = std::clamp(Sane(p.load), 0.0f, 1.0f);
+  clean.throttle = std::clamp(Sane(p.throttle), 0.0f, 1.0f);
+  clean.speed_mps = Sane(p.speed_mps);
+  clean.slip = std::clamp(Sane(p.slip), 0.0f, 1.0f);
+  clean.muffle = std::clamp(Sane(p.muffle), 0.0f, 1.0f);
+  // thrust keeps its <0 "derive from rpm" sentinel; only a real request is
+  // clamped into 0..1 (a NaN degrades to the sentinel, i.e. old behaviour).
+  clean.thrust = std::isfinite(p.thrust) ? (p.thrust < 0.0f ? -1.0f : std::clamp(p.thrust, 0.0f, 1.0f))
+                                         : -1.0f;
+  clean.gear_shift = std::clamp(Sane(p.gear_shift), -1.0f, 1.0f);
+  clean.skid_bias = std::clamp(Sane(p.skid_bias), -1.0f, 1.0f);
+
+  // Publish: atomically swap our filled slot in as the latest and take back the
+  // slot the consumer last released. release so the slot writes above are visible
+  // to the Fetch that acquires this index. write_ now names a slot the consumer
+  // is not reading (the three indices stay a permutation of {0,1,2}).
+  const u32 prev = shared_.exchange(write_ | kDirty, std::memory_order_release);
+  write_ = prev & kIndexMask;
+}
+
+bool ParamMailbox::Fetch(SynthParams* out) {
+  if (!(shared_.load(std::memory_order_acquire) & kDirty)) return false;
+  // Hand our old read slot back and take the freshly published one. acquire pairs
+  // with the Publish release so the slot's contents are visible before we read.
+  const u32 prev = shared_.exchange(read_, std::memory_order_acquire);
+  read_ = prev & kIndexMask;
+  *out = slot_[read_];
+  return true;
+}
+
 SynthVoice::SynthVoice(u32 output_rate, std::unique_ptr<Synth> synth)
     : rate_(output_rate ? output_rate : 48000), synth_(std::move(synth)) {
   // Time constants tuned per field: rpm fast (rev-limiter bounce), pedal/slip
@@ -42,42 +75,10 @@ SynthVoice::SynthVoice(u32 output_rate, std::unique_ptr<Synth> synth)
   a_skid_bias_ = ChunkAlpha(0.050f, rate_);
 }
 
-void SynthVoice::SetParams(const SynthParams& p) {
-  SynthParams clean;
-  clean.rpm = Sane(p.rpm);
-  clean.load = std::clamp(Sane(p.load), 0.0f, 1.0f);
-  clean.throttle = std::clamp(Sane(p.throttle), 0.0f, 1.0f);
-  clean.speed_mps = Sane(p.speed_mps);
-  clean.slip = std::clamp(Sane(p.slip), 0.0f, 1.0f);
-  clean.muffle = std::clamp(Sane(p.muffle), 0.0f, 1.0f);
-  // thrust keeps its <0 "derive from rpm" sentinel; only a real request is
-  // clamped into 0..1 (a NaN degrades to the sentinel, i.e. old behaviour).
-  clean.thrust = std::isfinite(p.thrust) ? (p.thrust < 0.0f ? -1.0f : std::clamp(p.thrust, 0.0f, 1.0f))
-                                         : -1.0f;
-  clean.gear_shift = std::clamp(Sane(p.gear_shift), -1.0f, 1.0f);
-  clean.skid_bias = std::clamp(Sane(p.skid_bias), -1.0f, 1.0f);
-
-  // Seqlock write: bump to odd (write in flight), store, bump to even (done).
-  const u32 s = seq_.load(std::memory_order_relaxed);
-  seq_.store(s + 1, std::memory_order_release);
-  std::atomic_thread_fence(std::memory_order_release);
-  shared_ = clean;
-  std::atomic_thread_fence(std::memory_order_release);
-  seq_.store(s + 2, std::memory_order_release);
-}
-
-SynthParams SynthVoice::LoadTarget() const {
-  for (;;) {
-    const u32 s0 = seq_.load(std::memory_order_acquire);
-    if (s0 & 1u) continue;  // writer mid-update, retry
-    SynthParams p = shared_;
-    std::atomic_thread_fence(std::memory_order_acquire);
-    if (seq_.load(std::memory_order_acquire) == s0) return p;
-  }
-}
-
 u32 SynthVoice::Read(f32* out, u32 frames) {
-  const SynthParams target = LoadTarget();
+  // Pick up the latest published telemetry if any; otherwise hold the last value.
+  params_->Fetch(&target_);
+  const SynthParams target = target_;
   if (!primed_) {
     smoothed_ = target;  // start at the real operating point, not from silence
     primed_ = true;

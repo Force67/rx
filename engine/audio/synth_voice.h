@@ -49,6 +49,43 @@ struct SynthParams {
   f32 skid_bias = 0.0f;
 };
 
+// Wait-free single-producer / single-consumer hand-off of the latest SynthParams
+// from the engine thread to the audio (device) thread. This replaces a seqlock:
+// concurrent non-atomic reads and writes of a shared struct are undefined
+// behaviour no matter how the sequence counter is fenced, so the transfer is done
+// by an atomic exchange of *ownership* of one of three slots instead of a racing
+// copy. At all times the producer's write slot, the consumer's read slot and the
+// last-published slot are three distinct buffers, so neither side ever touches a
+// slot the other holds; the only shared mutation is one atomic exchange per
+// Publish / Fetch, which makes both sides wait-free (no spin, no retry).
+//
+// It is reference-counted (held by shared_ptr) so the writer may outlive the
+// reader: when the mixer retires and deletes a SynthVoice, a VehicleAudio still
+// feeding telemetry publishes into a mailbox that is still alive, never freed
+// memory. Publish sanitises the telemetry (NaN -> 0, ranges clamped) so the audio
+// thread always fetches values the oscillators can trust.
+class RX_AUDIO_EXPORT ParamMailbox {
+ public:
+  // Engine thread: sanitise `raw` and make it the latest value. Wait-free.
+  void Publish(const SynthParams& raw);
+  // Audio thread: if a newer value was published since the last Fetch, copy it
+  // into `out` and return true; otherwise leave `out` untouched and return false.
+  // Wait-free.
+  bool Fetch(SynthParams* out);
+
+ private:
+  static constexpr u32 kIndexMask = 0x3u;  // low bits hold a slot index (0..2)
+  static constexpr u32 kDirty = 0x4u;      // set on Publish, cleared on Fetch
+
+  SynthParams slot_[3];
+  // Holds the index of the last-published slot plus the dirty flag. Starts on
+  // slot 2 (default-constructed, not dirty); the producer owns slot 0 and the
+  // consumer owns slot 1 to begin with, keeping all three roles disjoint.
+  std::atomic<u32> shared_{2};
+  u32 write_ = 0;  // producer-private slot index
+  u32 read_ = 1;   // consumer-private slot index
+};
+
 // A pull-model synthesis model that renders mono float at a fixed rate. Each
 // vehicle layer (engine, skid, wind) implements it. It is stateful and phase-
 // continuous, so only the render (device) thread ever touches it; parameter
@@ -66,9 +103,10 @@ class Synth {
 
 // The procedural voice seam: a Decoder that renders from a Synth model instead
 // of a file, endlessly, directly at the mixer's output rate so the mixer never
-// resamples it. Parameters are updated from the engine thread with SetParams
-// while the device thread renders through Read; a seqlock hands over a coherent
-// snapshot and per-sub-block one-pole smoothing keeps updates click-free.
+// resamples it. Parameters are updated from the engine thread with SetParams (or
+// straight through the shared ParamMailbox) while the device thread renders
+// through Read; the mailbox hands over a coherent snapshot wait-free and per-sub-
+// block one-pole smoothing keeps updates click-free.
 class RX_AUDIO_EXPORT SynthVoice final : public Decoder {
  public:
   // `output_rate` must be the mixer's mix rate (Mixer::output_rate) so Read
@@ -86,23 +124,25 @@ class RX_AUDIO_EXPORT SynthVoice final : public Decoder {
   bool Rewind() override { return true; }
 
   // --- engine thread ---------------------------------------------------------
-  // Publishes the latest telemetry. Lock-free against Read; the render thread
+  // Publishes the latest telemetry. Wait-free against Read; the render thread
   // ramps toward it so even a large jump never clicks.
-  void SetParams(const SynthParams& p);
+  void SetParams(const SynthParams& p) { params_->Publish(p); }
+
+  // The parameter endpoint. A caller that outlives this voice (VehicleAudio,
+  // whose voices the mixer may retire and delete first) keeps its own shared_ptr
+  // and publishes through that, so a late update never touches a freed voice.
+  const std::shared_ptr<ParamMailbox>& params() const { return params_; }
 
  private:
-  SynthParams LoadTarget() const;
-
   u32 rate_;
   std::unique_ptr<Synth> synth_;
 
-  // Seqlock: exactly one writer (engine thread) and one reader (device thread).
-  // Odd sequence = a write is in flight; the reader retries until it reads an
-  // even count unchanged across the copy.
-  mutable std::atomic<u32> seq_{0};
-  SynthParams shared_{};  // guarded by seq_
+  // Shared parameter hand-off (see ParamMailbox). Owned jointly with whoever
+  // feeds this voice, so the writer may outlive the reader.
+  std::shared_ptr<ParamMailbox> params_ = std::make_shared<ParamMailbox>();
 
   // Device-thread-only smoothing state.
+  SynthParams target_{};  // latest fetched value, held between Fetches
   SynthParams smoothed_{};
   bool primed_ = false;  // first block snaps to target (no ramp up from silence)
   // Per-field one-pole coefficients for one smoothing sub-block. rpm tracks

@@ -111,6 +111,10 @@ Aircraft::Aircraft(PhysicsWorld& world, const AircraftDesc& desc, const Vec3& po
   state_.rotation = q;
 }
 
+Aircraft::~Aircraft() {
+  if (body_ != 0) world_.RemoveBody(body_);
+}
+
 void Aircraft::Update(const AircraftInput& input, f32 dt) {
   if (body_ == 0 || dt <= 0.0f) return;
 
@@ -261,9 +265,13 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
       const f32 fc = Dot(v, fwd);
       const f32 sc = Dot(v, right);
       const f32 beta_f = std::atan2(sc, std::max(std::fabs(fc), 1e-3f));
-      // Side force opposes sideslip (weathervane) and responds to rudder. + yaw
-      // input yaws the nose right.
-      const f32 cy = -desc_.fin_cl_beta * beta_f + desc_.rudder_authority * input.yaw;
+      // Side force opposes sideslip (weathervane) and responds to rudder. +yaw
+      // input yaws the nose right (toward body -X): with +Z fwd / +Y up / +X
+      // left, a nose-right yaw is a NEGATIVE rotation about +Y, which the fin
+      // makes by pushing the tail toward +X (the `left` axis), i.e. a negative
+      // force along `right`. So the rudder term carries a minus sign; the
+      // weathervane term (which already reduces sideslip) is unchanged.
+      const f32 cy = -desc_.fin_cl_beta * beta_f - desc_.rudder_authority * input.yaw;
       const f32 qf = 0.5f * kAirDensity * vlen * vlen;
       const f32 side = qf * desc_.fin_area_m2 * cy;
       world_.AddForceAtPoint(body_, right * (side * aero_fade), fin_world);
@@ -351,7 +359,11 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     roll_dir = Normalize(roll_dir);
     if (w.steerable) {
       const f32 speed_scale = 1.0f - SmoothStep(3.0f, 25.0f, speed) * 0.85f;
-      const f32 steer = input.yaw * desc_.nose_steer_angle_rad * speed_scale;
+      // +yaw input steers the nose right (toward body -X). The steer rotates the
+      // roll direction about the contact normal (~+Y): a positive rotation about
+      // +Y turns +Z toward +X (left), so +yaw needs a NEGATIVE angle to steer
+      // right, matching the rudder convention above.
+      const f32 steer = -input.yaw * desc_.nose_steer_angle_rad * speed_scale;
       roll_dir = Normalize(Rotate(QuatFromAxisAngle(n, steer), roll_dir));
     }
     Vec3 lat_dir = Cross(n, roll_dir);

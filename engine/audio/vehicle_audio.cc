@@ -47,7 +47,10 @@ VehicleAudio::VehicleAudio(Mixer& mixer, const EnginePreset& preset) : mixer_(&m
 
   auto start = [&](Layer& layer, std::unique_ptr<Synth> model, const Attenuation& atten) {
     auto voice = std::make_unique<SynthVoice>(rate, std::move(model));
-    layer.synth = voice.get();  // valid until the mixer retires the voice
+    // Share the parameter mailbox before handing the voice to the mixer: the
+    // mailbox outlives the voice, so Update can keep publishing after the mixer
+    // retires and deletes the SynthVoice (no dangling pointer to dereference).
+    layer.params = voice->params();
     PlayParams params;
     params.positional = true;
     params.gain = 0.0f;  // rise in from silence as Update feeds telemetry
@@ -124,9 +127,12 @@ void VehicleAudio::Update(const VehicleAudioState& state) {
   params.thrust = state.thrust;
   params.gear_shift = gear_shift;
   params.skid_bias = skid_bias;
-  if (engine_.synth) engine_.synth->SetParams(params);
-  if (skid_.synth) skid_.synth->SetParams(params);
-  if (wind_.synth) wind_.synth->SetParams(params);
+  // Publish through the shared mailbox. Safe even after the mixer retired a
+  // voice: the mailbox is still alive (shared ownership), the write is just
+  // unheard. The mailbox sanitises the telemetry on the way in.
+  if (engine_.params) engine_.params->Publish(params);
+  if (skid_.params) skid_.params->Publish(params);
+  if (wind_.params) wind_.params->Publish(params);
 
   // Gains, including the underwater duck. The synth voices smooth their own
   // parameters; the mixer ramps gain, so these need no smoothing here. The
@@ -167,7 +173,7 @@ void VehicleAudio::Stop() {
   if (engine_.voice) mixer_->Stop(engine_.voice, 0.08f);
   if (skid_.voice) mixer_->Stop(skid_.voice, 0.08f);
   if (wind_.voice) mixer_->Stop(wind_.voice, 0.08f);
-  engine_.synth = skid_.synth = wind_.synth = nullptr;
+  engine_.params = skid_.params = wind_.params = nullptr;
   engine_.voice = skid_.voice = wind_.voice = 0;
   stopped_ = true;
 }

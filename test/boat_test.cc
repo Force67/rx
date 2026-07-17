@@ -297,6 +297,29 @@ int main() {
     if (wind_dx <= std::fabs(calm_dx) + 1.0f) return Fail("(j) wind drift not distinct from calm");
   }
 
+  // (k) Lifecycle: destroying a Boat removes its hull body and clears the
+  // buoyancy exemption. A downward ray through where the hull floated hits it
+  // before destruction and nothing after, and the world keeps stepping cleanly.
+  {
+    PhysicsWorld world;
+    world.Initialize();
+    InstallFlatWater(world);
+    bool before = false;
+    {
+      BoatDesc desc;
+      Boat boat(world, desc, Vec3{0, 0.5f, 0}, 0.0f);
+      Run(world, boat, {}, 60 * 2);  // settle at the waterline
+      PhysicsWorld::RayHit hit;
+      before = world.Raycast(Vec3{0, 5.0f, 0}, Vec3{0, -1, 0}, 6.0f, &hit);
+    }  // ~Boat() removes the hull body here
+    for (int i = 0; i < 30; ++i) world.Update(kDt);  // crash-free after removal
+    PhysicsWorld::RayHit hit;
+    const bool after = world.Raycast(Vec3{0, 5.0f, 0}, Vec3{0, -1, 0}, 6.0f, &hit);
+    std::fprintf(stderr, "(k) hull ray before destroy=%d after=%d\n", before, after);
+    if (!before) return Fail("(k) hull body not present before destroy");
+    if (after) return Fail("(k) hull body still present after destroy");
+  }
+
   std::fprintf(stderr, "boat_test: all checks passed\n");
   return 0;
 }

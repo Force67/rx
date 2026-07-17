@@ -33,7 +33,7 @@ namespace rx::physics {
 // (Jolt clears them after its own step), so ordering matters: forces staged
 // this frame are consumed by the very next PhysicsWorld::Update. dt must match
 // the world's fixed step (~1/60 s).
-struct BoatDesc {
+struct RX_PHYSICS_EXPORT BoatDesc {
   // Hull box half extents, boat-local: x = half beam (to +X), y = half height
   // (to +Y), z = half length (+Z forward). Default ~ a 6 m motorboat: 1.8 m
   // beam, 1.0 m tall hull, 5.8 m long.
@@ -171,6 +171,8 @@ class RX_PHYSICS_EXPORT Boat {
   // buoyancy so only this model's hull forces act on it. `world` must outlive
   // the Boat. Check valid() for spawn success (false when physics is a stub).
   Boat(PhysicsWorld& world, const BoatDesc& desc, const Vec3& position, f32 yaw_radians);
+  // Clears the hull's buoyancy exemption and removes its body from the world.
+  ~Boat();
 
   Boat(const Boat&) = delete;
   Boat& operator=(const Boat&) = delete;

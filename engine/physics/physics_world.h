@@ -63,6 +63,12 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   bool Initialize();
   void Update(f32 dt);
 
+  // Installs the water-height callback. THREADING: the callback is invoked only
+  // on the game thread - inside Update (before the Jolt step) and from the
+  // SampleWater entry below - never from a Jolt worker thread. The vehicle
+  // tire-friction path samples each wheel's water into a per-vehicle cache on
+  // the game thread and the in-step friction callback reads that cache, so a
+  // callback touching thread-affine terrain data or physics queries is safe.
   void set_water_height(WaterHeightFn fn) { water_height_ = std::move(fn); }
 
   // Global uniform wind velocity (m/s, world space) the force-based aero
@@ -321,7 +327,8 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // Normalized engine torque curve: `torque_curve[i]` = (rpm fraction 0..1 of
     // max_rpm, torque fraction 0..1 of max_engine_torque), ascending in x.
     // Mapped onto Jolt's VehicleEngineSettings normalized torque curve. Leave
-    // torque_curve_count 0 to keep Jolt's stock curve (0.8 / 1.0 / 0.8).
+    // torque_curve_count 0 to keep Jolt's stock curve (0.8 / 1.0 / 0.8); a
+    // count above the array size is clamped to it at use.
     struct TorquePoint {
       f32 rpm_fraction = 0;
       f32 torque_fraction = 0;
@@ -642,6 +649,11 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // Installs the surface-aware tire-friction combine callback on a freshly
   // created vehicle (index into impl_->vehicles). Both cars and bikes share it.
   void InstallVehicleFriction(u32 vehicle_index);
+  // Traction-control throttle shaping (governs the driven-wheel slip toward the
+  // grip peak), shared by the automatic and manual driver-input paths so manual
+  // mode gets the same aid. Returns the shaped throttle; a no-op when the
+  // vehicle has no traction control or `forward` is zero.
+  f32 TractionControlThrottle(u32 vehicle_index, f32 forward);
 
   struct Impl;
   std::unique_ptr<Impl> impl_;

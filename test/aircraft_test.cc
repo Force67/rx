@@ -67,6 +67,14 @@ f32 Heading(const Aircraft& a) {
   return std::atan2(fwd.x, fwd.z);
 }
 
+// Wrap a heading delta into (-pi, pi] so a signed turn reads correctly even if
+// the plane swings past the branch cut.
+f32 WrapPi(f32 a) {
+  while (a > 3.14159265f) a -= 6.2831853f;
+  while (a < -3.14159265f) a += 6.2831853f;
+  return a;
+}
+
 }  // namespace
 
 int main() {
@@ -297,7 +305,10 @@ int main() {
     world.Initialize();
     AddRunway(world);
     Aircraft* a = SpawnSettled(world, AircraftDesc{}, reinterpret_cast<Aircraft*>(storage));
-    const f32 h0 = Heading(*a);
+    // Accumulate per-step wrapped deltas so a long swing past +/-180 deg does not
+    // alias the sign (a full-rudder turn easily exceeds a half turn).
+    f32 ground_yaw = 0;
+    f32 gprev = Heading(*a);
     for (int i = 0; i < 60 * 8; ++i) {
       AircraftInput in;
       in.throttle = 0.35f;
@@ -305,8 +316,14 @@ int main() {
       a->Update(in, kDt);
       world.Update(kDt);
       if (!StateFinite(a->state())) return Fail("(g) NaN during ground steer");
+      const f32 h = Heading(*a);
+      ground_yaw += WrapPi(h - gprev);
+      gprev = h;
     }
-    const f32 ground_yaw = std::fabs(Heading(*a) - h0);
+    // +yaw commands the nose RIGHT. Right is body -X here, and Heading is
+    // atan2(fwd.x, fwd.z), so a nose-right swing drives the heading NEGATIVE.
+    // Assert the SIGNED turn, not just that it moved (which hid the reversed
+    // sign the old fabs let through).
     a->~Aircraft();
 
     // Air: trim in level fast flight, apply full rudder, measure heading change.
@@ -322,8 +339,11 @@ int main() {
       b->Update(in, kDt);
       air.Update(kDt);
     }
-    const f32 ah0 = Heading(*b);
-    for (int i = 0; i < 60 * 4; ++i) {
+    // Measure the initial rudder yaw response over ~1.5 s (before the uncoordinated
+    // input spirals the plane far past a half turn), accumulating wrapped deltas.
+    f32 air_yaw = 0;
+    f32 aprev = Heading(*b);
+    for (int i = 0; i < 90; ++i) {
       AircraftInput in;
       in.throttle = 1.0f;
       in.pitch = 0.05f;
@@ -331,13 +351,16 @@ int main() {
       b->Update(in, kDt);
       air.Update(kDt);
       if (!StateFinite(b->state())) return Fail("(g) NaN during air yaw");
+      const f32 h = Heading(*b);
+      air_yaw += WrapPi(h - aprev);
+      aprev = h;
     }
-    const f32 air_yaw = std::fabs(Heading(*b) - ah0);
-    std::fprintf(stderr, "(g) ground yaw=%.1f deg  air yaw=%.1f deg\n", ground_yaw * 57.2958f,
-                 air_yaw * 57.2958f);
+    std::fprintf(stderr, "(g) ground yaw=%.1f deg  air yaw=%.1f deg (signed; -ve = nose right)\n",
+                 ground_yaw * 57.2958f, air_yaw * 57.2958f);
     b->~Aircraft();
-    if (ground_yaw < 0.15f) return Fail("(g) rudder/nose-wheel did not steer on the ground");
-    if (air_yaw < 0.05f) return Fail("(g) rudder did not yaw in flight");
+    if (ground_yaw > -0.15f)
+      return Fail("(g) +yaw did not steer the nose right on the ground");
+    if (air_yaw > -0.05f) return Fail("(g) +yaw rudder did not yaw the nose right in flight");
   }
 
   // (h) No NaNs after minutes of abusive sim: full deflections, throttle
@@ -445,6 +468,25 @@ int main() {
       return Fail("(ii) crosswind did not weathervane the nose");
     if (std::fabs(cross_yaw) <= std::fabs(calm_yaw) + 0.1f)
       return Fail("(ii) crosswind weathervane not distinct from calm");
+  }
+
+  // (jj) Lifecycle: destroying an Aircraft removes its body. A downward ray
+  // through where the fuselage sat hits it before destruction and nothing after,
+  // and the world keeps stepping without a crash (no dangling body/constraint).
+  {
+    PhysicsWorld world;
+    world.Initialize();
+    AddRunway(world);
+    Aircraft* a = new (storage) Aircraft(world, AircraftDesc{}, Vec3{0, 5.0f, 0}, 0.0f);
+    world.Update(kDt);
+    PhysicsWorld::RayHit hit;
+    const bool before = world.Raycast(Vec3{0, 8.0f, 0}, Vec3{0, -1, 0}, 6.0f, &hit);
+    a->~Aircraft();
+    for (int i = 0; i < 5; ++i) world.Update(kDt);  // crash-free after removal
+    const bool after = world.Raycast(Vec3{0, 8.0f, 0}, Vec3{0, -1, 0}, 6.0f, &hit);
+    std::fprintf(stderr, "(jj) hull ray before destroy=%d after=%d\n", before, after);
+    if (!before) return Fail("(jj) fuselage body not present before destroy");
+    if (after) return Fail("(jj) fuselage body still present after destroy");
   }
 
   std::fprintf(stderr, "aircraft_test: all checks passed\n");

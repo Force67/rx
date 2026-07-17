@@ -187,6 +187,13 @@ class RX_PHYSICS_EXPORT Aircraft {
   // outlive the Aircraft. valid() is false if the body could not be created
   // (e.g. against the physics stub).
   Aircraft(PhysicsWorld& world, const AircraftDesc& desc, const Vec3& position, f32 yaw_radians);
+  // Removes the fuselage body from the world.
+  ~Aircraft();
+
+  // Owns one physics body; copying would alias (and double-free) it. Non-movable
+  // too: the held PhysicsWorld& cannot be rebound and there is no defaulted move.
+  Aircraft(const Aircraft&) = delete;
+  Aircraft& operator=(const Aircraft&) = delete;
 
   // Accumulates one fixed step of aero + thrust + gear forces on the body and
   // refreshes state(). Call once per step, BEFORE PhysicsWorld::Update(dt).

@@ -264,14 +264,24 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         const bool just_landed = !grounded_prev && grounded;
         const f32 impact_speed = std::max(0.0f, -velocity.y);  // pre-ground-clamp descent speed
         state.grounded = grounded;
+        // The velocity the resolved feet displacement actually realized (dt > 0 is
+        // guaranteed at entry): the speed a wall or ceiling actually allowed.
+        const Vec3 realized_velocity = (out_feet - feet) * (1.0f / dt);
         if (grounded && velocity.y < 0) velocity.y = 0;
-        // Keep the integrated (requested) velocity as the stepper's own
-        // gravity/accel bookkeeping for next step, but publish the velocity the
-        // resolved feet displacement actually realized (dt > 0 is guaranteed at
-        // entry). A wall then reports the clamped speed and a ceiling stops
-        // reporting upward motion, instead of the pre-collision request.
+        // Reconcile a ceiling-blocked ASCENT into the stepper's bookkeeping: if
+        // the mover resolved an overhead collision the body rose less than
+        // requested, so carry the realized vertical speed forward instead of the
+        // pre-collision request. Otherwise thrust (a jetpack) held against a
+        // ceiling banks hidden upward speed in integration_velocity and launches
+        // the character the instant the obstruction clears. The grounded clamp
+        // above covers the blocked-descent case.
+        if (velocity.y > 0.0f && realized_velocity.y < velocity.y)
+          velocity.y = std::max(realized_velocity.y, 0.0f);
+        // Keep the integrated (requested, now collision-reconciled) velocity as
+        // the stepper's own gravity/accel bookkeeping for next step, and publish
+        // the realized velocity for consumers (animation, camera, gameplay).
         state.integration_velocity = velocity;
-        state.velocity = (out_feet - feet) * (1.0f / dt);
+        state.velocity = realized_velocity;
         state.time_since_grounded = grounded ? 0.0f : state.time_since_grounded + dt;
 
         transform.position[0] = out_feet.x;

@@ -1,6 +1,7 @@
 #ifndef RX_PHYSICS_VEHICLE_PROFILES_H_
 #define RX_PHYSICS_VEHICLE_PROFILES_H_
 
+#include "core/export.h"
 #include "physics/physics_world.h"
 
 namespace rx::physics {
@@ -20,32 +21,32 @@ namespace rx::physics {
 // roll bar, quick steering with a hard high-speed fade, sticky tyres and real
 // downforce: eager turn-in, planted at speed, ~1300 kg. Quick to rev, short
 // gears. The benchmark for 0-100 and braking.
-PhysicsWorld::VehicleDesc SportsCarProfile();
+RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc SportsCarProfile();
 
 // Rear-wheel drive with a big low-end torque hit and a rear grip a notch below
 // the front, softer rear springs and modest anti-roll: tail-happy, lights up
 // the rears on throttle, ~1650 kg. Fast in a straight line, loose in a bend.
-PhysicsWorld::VehicleDesc MuscleCarProfile();
+RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc MuscleCarProfile();
 
 // Front-wheel drive, economical torque, a built-in understeer bias (front grip
 // below rear so the nose washes wide under power), soft-ish and light
 // (~1150 kg). Safe, forgiving, nose-led.
-PhysicsWorld::VehicleDesc HatchbackProfile();
+RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc HatchbackProfile();
 
 // All-wheel drive split 40/60 front/rear, a tall centre of mass (little CoM
 // drop), soft long-travel suspension and mild anti-roll, all-terrain tyres that
 // keep more grip on dirt/grass, ~2100 kg. Sure-footed launch, leans in corners.
-PhysicsWorld::VehicleDesc SuvProfile();
+RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc SuvProfile();
 
 // Rear-wheel drive, high CG over a narrow-ish track, slow steering and a soft
 // tall body that rolls a lot; `cargo_load` (0..1) adds mass and shifts the CoM
 // rearward and up (empty ~2000 kg, laden ~2400 kg). Ponderous, top-heavy.
-PhysicsWorld::VehicleDesc VanProfile(f32 cargo_load = 0.0f);
+RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc VanProfile(f32 cargo_load = 0.0f);
 
 // Heavy tractor unit (~8500 kg) with enormous torque geared very tall, very
 // slow steering, weak per-kilogram brakes (long stops), a high CG and
 // pronounced roll, top speed capped by the gearing. Unstoppable, unturnable.
-PhysicsWorld::VehicleDesc SemiTruckProfile();
+RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc SemiTruckProfile();
 
 }  // namespace rx::physics
 

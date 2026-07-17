@@ -237,6 +237,32 @@ int main() {
       return Fail("(f) tension exceeded the documented cap");
   }
 
+  // (g) Lifecycle: destroying a Kite removes its sail body. A sphere-cast through
+  // where the sail hung hits it before destruction and nothing after (this world
+  // has no ground on purpose), and the world keeps stepping cleanly. A sphere
+  // cast is used because the sail is a thin plate a thin ray could slip past.
+  {
+    PhysicsWorld world;
+    world.Initialize();
+    const Vec3 anchor{0, 5.0f, 0};  // elevated anchor: the kite hangs in open air
+    bool before = false;
+    Vec3 p{};
+    {
+      KiteDesc desc;
+      Kite kite(world, desc, anchor, Vec3{0, 4.5f, 0.5f}, 0.0f);
+      Run(world, kite, {}, 60 * 2);  // let it settle on the tether
+      p = kite.state().position;
+      PhysicsWorld::RayHit hit;
+      before = world.SphereCast(Vec3{p.x, p.y + 3.0f, p.z}, Vec3{0, -1, 0}, 6.0f, 0.6f, &hit);
+    }  // ~Kite() removes the sail body here
+    for (int i = 0; i < 30; ++i) world.Update(kDt);  // crash-free after removal
+    PhysicsWorld::RayHit hit;
+    const bool after = world.SphereCast(Vec3{p.x, p.y + 3.0f, p.z}, Vec3{0, -1, 0}, 6.0f, 0.6f, &hit);
+    std::fprintf(stderr, "(g) sail cast before destroy=%d after=%d\n", before, after);
+    if (!before) return Fail("(g) sail body not present before destroy");
+    if (after) return Fail("(g) sail body still present after destroy");
+  }
+
   std::fprintf(stderr, "kite_test: all checks passed\n");
   return 0;
 }

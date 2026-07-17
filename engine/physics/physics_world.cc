@@ -207,9 +207,12 @@ f32 AquaplaneGrip(f32 wading_depth, f32 wheel_radius, f32 speed) {
 }
 
 // Maps normalized (rpm-fraction, torque-fraction) points onto Jolt's engine
-// torque curve. `count` 0 leaves Jolt's stock curve untouched.
-template <class Point>
-void ApplyTorqueCurve(JPH::VehicleEngineSettings& engine, const Point* curve, u32 count) {
+// torque curve. `count` 0 leaves Jolt's stock curve untouched. Taking the
+// fixed-size descriptor array by reference bounds `count` to its capacity `N`,
+// so a caller-supplied count above the array size can never read past its end.
+template <class Point, size_t N>
+void ApplyTorqueCurve(JPH::VehicleEngineSettings& engine, const Point (&curve)[N], u32 count) {
+  count = std::min(count, static_cast<u32>(N));
   if (count == 0) return;
   engine.mNormalizedTorque.Clear();
   engine.mNormalizedTorque.Reserve(count);
@@ -305,14 +308,25 @@ struct PhysicsWorld::Impl {
     bool traction_control = false;
     f32 tc_scale = 1;  // smoothed traction-control throttle authority
     // Manual transmission state: gears change only on the shift edges of the
-    // VehicleInput overload; prev_* debounce those edges.
+    // VehicleInput overload; prev_* debounce those edges. manual_shifting is set
+    // on the step a shift edge actually changes the ratio, so telemetry reports
+    // is_shifting only during a real manual gear change (not while the clutch
+    // pedal is simply held).
     bool manual = false;
     bool prev_shift_up = false;
     bool prev_shift_down = false;
-    // Chassis speed cached at the top of each Update, read by the tire-friction
-    // combine callback (which runs inside the step and can't safely re-lock the
-    // body). One step of lag is irrelevant to the aquaplaning ramp.
+    bool manual_shifting = false;
+    // Chassis speed AND per-wheel water sample cached at the top of each Update,
+    // read by the tire-friction combine callback (which runs inside the step, on
+    // Jolt worker threads, and can neither re-lock the body nor call the
+    // game-thread-only water callback). Wheel positions are from the previous
+    // step; one step of lag is irrelevant to the slow aquaplaning ramp.
     f32 cached_speed = 0;
+    struct WheelWater {
+      bool submerged = false;  // contact patch below the water surface
+      f32 depth = 0;           // metres of water over the contact patch
+    };
+    WheelWater wheel_water[4];
   };
   base::Vector<VehicleEntry> vehicles;
   // Strand grooms (soft-body Cosserat rods); StrandGroomId is index + 1, dead
@@ -430,12 +444,31 @@ void PhysicsWorld::Update(f32 dt) {
     }
   }
 
-  // Cache each vehicle's chassis speed for the in-step tire-friction callback.
+  // Cache each vehicle's chassis speed and per-wheel water sample for the in-step
+  // tire-friction callback. SampleWater is game-thread-only and the callback runs
+  // on Jolt worker threads, so the wheels are sampled here (game thread) into the
+  // cache the callback reads. Wheel contact positions are from the previous step.
   {
     JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
     for (Impl::VehicleEntry& entry : impl_->vehicles) {
       if (!entry.alive) continue;
       entry.cached_speed = bodies.GetLinearVelocity(entry.body).Length();
+      for (u32 i = 0; i < entry.wheel_count && i < 4; ++i) {
+        Impl::VehicleEntry::WheelWater& ww = entry.wheel_water[i];
+        ww.submerged = false;
+        ww.depth = 0;
+        if (!water_height_) continue;
+        const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(i));
+        if (!wheel->HasContact()) continue;
+        const JPH::RVec3 cp = wheel->GetContactPosition();
+        const Vec3 p{static_cast<f32>(cp.GetX()), static_cast<f32>(cp.GetY()),
+                     static_cast<f32>(cp.GetZ())};
+        f32 surface_h = 0;
+        if (SampleWater(p, &surface_h, nullptr) && p.y < surface_h) {
+          ww.submerged = true;
+          ww.depth = surface_h - p.y;
+        }
+      }
     }
   }
 
@@ -489,7 +522,11 @@ void PhysicsWorld::Update(f32 dt) {
         Vec3 flow{};
         if (!SampleWater(p, &surface_h, &flow) || p.y >= surface_h) continue;
         const f32 depth = std::min(surface_h - p.y, 2.0f * wheel->GetSettings()->mRadius);
-        const JPH::Vec3 point_vel = wheel->GetContactPointVelocity();
+        // The VEHICLE's velocity at the contact point (the chassis ploughing
+        // through the water), not Wheel::GetContactPointVelocity() - that is the
+        // velocity of the contacted GROUND body, which is zero on a static road
+        // and would leave the drag near zero exactly where it should bite.
+        const JPH::Vec3 point_vel = bodies.GetPointVelocity(entry.body, cp);
         JPH::Vec3 rel(point_vel.GetX() - flow.x, 0.0f, point_vel.GetZ() - flow.z);
         const f32 speed = rel.Length();
         if (speed < 0.1f) continue;
@@ -1520,14 +1557,27 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
 
   // Driven axles by drivetrain; limited slip differentials throughout (the
   // Jolt default 1.4 ratio) - RWD gives throttle oversteer, AWD splits by
-  // awd_front_split. A free-rolling chassis has no differential at all, so no
-  // engine torque reaches any wheel and all four wheels coast on their
-  // suspension and tire friction (a towed trailer / carriage); steering and
-  // the handbrake still work per wheel.
+  // awd_front_split.
   const f32 final_drive = desc.final_drive > 0 ? desc.final_drive : 3.42f;
-  // A free-rolling chassis keeps an empty differential list, so the engine is
-  // disconnected from every wheel and they coast on suspension + tire friction.
-  if (!desc.free_rolling) {
+  // A free-rolling chassis coasts on suspension + tire friction alone (a towed
+  // trailer / carriage). Jolt requires the driven differentials' engine-torque
+  // fractions to sum to 1, so an EMPTY differential list trips an assertion on
+  // the first step; instead we keep a valid (RWD) differential but make the
+  // engine inert: zero max torque so no drive torque reaches the wheels, zero
+  // engine braking so no trailing-throttle drag does, and zero idle RPM so the
+  // engaged clutch has no idle angular momentum to spin the wheels with (Jolt
+  // idles the engine at mMinRPM and couples that through the clutch, which would
+  // otherwise creep the "unpowered" chassis forward under throttle). Steering
+  // (front axle) and the handbrake (rear axle) still work per wheel.
+  if (desc.free_rolling) {
+    controller->mEngine.mMaxTorque = 0.0f;
+    controller->mEngine.mAngularDamping = 0.0f;
+    controller->mEngine.mMinRPM = 0.0f;
+    controller->mDifferentials.resize(1);
+    controller->mDifferentials[0].mLeftWheel = 2;
+    controller->mDifferentials[0].mRightWheel = 3;
+    controller->mDifferentials[0].mDifferentialRatio = final_drive;
+  } else {
     switch (desc.drivetrain) {
       case Drivetrain::kRWD:
         controller->mDifferentials.resize(1);
@@ -1750,19 +1800,16 @@ void PhysicsWorld::InstallVehicleFriction(u32 vehicle_index) {
     f32 grip_long = g.longitudinal * wet;
     f32 grip_lat = g.lateral * wet;
 
+    // Aquaplaning from the per-wheel water cache filled on the game thread at the
+    // top of Update; SampleWater is never called here (this runs on a Jolt worker
+    // thread). One step of latency on the wading depth, immaterial to the ramp.
     const Impl::VehicleEntry& entry = impl_->vehicles[vehicle_index];
-    const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(wheel_index));
-    if (water_height_ && wheel->HasContact()) {
-      const JPH::RVec3 cp = wheel->GetContactPosition();
-      const Vec3 p{static_cast<f32>(cp.GetX()), static_cast<f32>(cp.GetY()),
-                   static_cast<f32>(cp.GetZ())};
-      f32 surface_h = 0;
-      if (SampleWater(p, &surface_h, nullptr) && p.y < surface_h) {
-        const f32 aqua =
-            AquaplaneGrip(surface_h - p.y, wheel->GetSettings()->mRadius, entry.cached_speed);
-        grip_long *= aqua;
-        grip_lat *= aqua;
-      }
+    if (wheel_index < 4 && entry.wheel_water[wheel_index].submerged) {
+      const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(wheel_index));
+      const f32 aqua = AquaplaneGrip(entry.wheel_water[wheel_index].depth,
+                                     wheel->GetSettings()->mRadius, entry.cached_speed);
+      grip_long *= aqua;
+      grip_lat *= aqua;
     }
     io_long *= grip_long;
     io_lat *= grip_lat;
@@ -1801,21 +1848,63 @@ void PhysicsWorld::DriveVehicle(VehicleId id, const VehicleInput& input) {
   int gear = trans.GetCurrentGear();
   const int max_forward = static_cast<int>(trans.mGearRatios.size());
   const int min_gear = -static_cast<int>(trans.mReverseGearRatios.size());
-  if (input.shift_up && !entry.prev_shift_up && gear < max_forward) ++gear;
-  if (input.shift_down && !entry.prev_shift_down && gear > min_gear) --gear;
+  bool shifted = false;
+  if (input.shift_up && !entry.prev_shift_up && gear < max_forward) {
+    ++gear;
+    shifted = true;
+  }
+  if (input.shift_down && !entry.prev_shift_down && gear > min_gear) {
+    --gear;
+    shifted = true;
+  }
   entry.prev_shift_up = input.shift_up;
   entry.prev_shift_down = input.shift_down;
+  entry.manual_shifting = shifted;
   // Clutch: 1 = fully disengaged -> 0 friction, so the engine spins free of the
   // wheels. Applied every step so the pedal tracks continuously between shifts.
   trans.Set(gear, std::clamp(1.0f - input.clutch, 0.0f, 1.0f));
+  // Route the throttle through the same traction-control shaping as the
+  // automatic path so manual mode keeps the driver aid instead of bypassing it.
+  const f32 throttle = TractionControlThrottle(id - 1, input.throttle);
   controller->SetDriverInput(
-      input.throttle,
+      throttle,
       input.steer * SteerFadeScale(entry.steer_high_speed_fraction, entry.steer_fade_speed,
                                    entry.cached_speed),
       input.brake, input.handbrake);
   if (input.throttle != 0 || input.steer != 0 || input.brake != 0 || input.handbrake != 0) {
     impl_->system->GetBodyInterface().ActivateBody(entry.body);
   }
+}
+
+f32 PhysicsWorld::TractionControlThrottle(u32 vehicle_index, f32 forward) {
+  Impl::VehicleEntry& entry = impl_->vehicles[vehicle_index];
+  // Traction control: govern the throttle toward ~8% longitudinal slip on the
+  // contact wheels, keeping the tire near its friction peak instead of lighting
+  // it up (and unblocking Jolt's slip-gated automatic upshift). Disengaged below
+  // ~5 m/s like a real TC: the slip ratio's |v| denominator makes launch slip
+  // read enormous, and killing the launch is worse than a little wheelspin off
+  // the line.
+  if (!entry.traction_control || forward == 0) return forward;
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+  const JPH::Vec3 velocity = bodies.GetLinearVelocity(entry.body);
+  const JPH::Vec3 fwd_axis = bodies.GetRotation(entry.body) * JPH::Vec3::sAxisZ();
+  if (std::fabs(velocity.Dot(fwd_axis)) > 5.0f) {
+    f32 max_slip = 0;
+    for (u32 i = 0; i < entry.wheel_count; ++i) {
+      const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(i));
+      if (wheel->HasContact()) max_slip = std::max(max_slip, wheel->mLongitudinalSlip);
+    }
+    // Proportional tracker: aim the throttle at the fraction that would put the
+    // worst wheel on the slip target, smoothed so cut and recovery move at the
+    // same rate (a ratcheting governor parks at its floor).
+    constexpr f32 kSlipTarget = 0.09f;
+    const f32 target = max_slip > kSlipTarget ? std::max(0.12f, kSlipTarget / max_slip) : 1.0f;
+    entry.tc_scale += (target - entry.tc_scale) * 0.25f;
+    forward *= std::min(1.0f, std::max(0.12f, entry.tc_scale));
+  } else {
+    entry.tc_scale = 1;
+  }
+  return forward;
 }
 
 void PhysicsWorld::DriveVehicle(VehicleId id, f32 forward, f32 right, f32 brake, f32 handbrake) {
@@ -1825,34 +1914,7 @@ void PhysicsWorld::DriveVehicle(VehicleId id, f32 forward, f32 right, f32 brake,
   auto* controller = static_cast<JPH::WheeledVehicleController*>(entry.constraint->GetController());
   right *= SteerFadeScale(entry.steer_high_speed_fraction, entry.steer_fade_speed,
                           entry.cached_speed);
-  // Traction control: govern the throttle toward ~8% longitudinal slip on
-  // the contact wheels, keeping the tire near its friction peak instead of
-  // lighting it up (and unblocking Jolt's slip-gated automatic upshift).
-  // Disengaged below ~5 m/s like a real TC: the slip ratio's |v| denominator
-  // makes launch slip read enormous, and killing the launch is worse than a
-  // little wheelspin off the line.
-  if (entry.traction_control && forward != 0) {
-    JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
-    const JPH::Vec3 velocity = bodies.GetLinearVelocity(entry.body);
-    const JPH::Vec3 fwd_axis = bodies.GetRotation(entry.body) * JPH::Vec3::sAxisZ();
-    if (std::fabs(velocity.Dot(fwd_axis)) > 5.0f) {
-      f32 max_slip = 0;
-      for (u32 i = 0; i < entry.wheel_count; ++i) {
-        const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(i));
-        if (wheel->HasContact()) max_slip = std::max(max_slip, wheel->mLongitudinalSlip);
-      }
-      // Proportional tracker: aim the throttle at the fraction that would put
-      // the worst wheel on the slip target, smoothed so cut and recovery move
-      // at the same rate (a ratcheting governor parks at its floor).
-      constexpr f32 kSlipTarget = 0.09f;
-      const f32 target =
-          max_slip > kSlipTarget ? std::max(0.12f, kSlipTarget / max_slip) : 1.0f;
-      entry.tc_scale += (target - entry.tc_scale) * 0.25f;
-      forward *= std::min(1.0f, std::max(0.12f, entry.tc_scale));
-    } else {
-      entry.tc_scale = 1;
-    }
-  }
+  forward = TractionControlThrottle(id - 1, forward);
   controller->SetDriverInput(forward, right, brake, handbrake);
   if (forward != 0 || right != 0 || brake != 0 || handbrake != 0) {
     impl_->system->GetBodyInterface().ActivateBody(entry.body);
@@ -1922,18 +1984,24 @@ bool PhysicsWorld::GetVehicleState(VehicleId id, VehicleState* out) const {
   out->rpm = engine.GetCurrentRPM();
   out->gear = trans.GetCurrentGear();
   out->forward_speed = VehicleForwardSpeed(id);
-  // Engine load: the throttle the box actually lets reach the engine (auto mode
-  // multiplies by clutch friction, matching WheeledVehicleController). Since
-  // GetTorque is linear in that input, load == delivered/max at this rpm.
+  // Engine load: the torque actually DELIVERED to the wheels / the max available
+  // at this rpm. The clutch couples the engine to the drivetrain in BOTH modes,
+  // so a disengaged clutch (auto mid-shift, or the manual pedal held in) delivers
+  // ~0 to the wheels even though the engine still revs. GetTorque is linear in
+  // its input, so load == delivered/max at this rpm.
   const f32 clutch = trans.GetClutchFriction();
-  const f32 applied = std::fabs(controller->GetForwardInput()) *
-                      (trans.mMode == JPH::ETransmissionMode::Auto ? clutch : 1.0f);
+  const f32 applied = std::fabs(controller->GetForwardInput()) * clutch;
   const f32 max_torque_at_rpm = engine.GetTorque(1.0f);
   out->engine_torque = engine.GetTorque(applied);
   out->engine_load =
       max_torque_at_rpm > 1.0e-3f ? std::clamp(out->engine_torque / max_torque_at_rpm, 0.0f, 1.0f)
                                   : 0.0f;
-  out->is_shifting = clutch < 0.99f;
+  // is_shifting means a ratio change is in progress. The automatic box slips its
+  // clutch through a change (clutch < 1 flags it); manual mode's clutch is the
+  // player's pedal, not a shift signal, so a real manual ratio change is flagged
+  // explicitly on the step it happens.
+  out->is_shifting =
+      trans.mMode == JPH::ETransmissionMode::Auto ? clutch < 0.99f : entry.manual_shifting;
   out->wheel_count = entry.wheel_count;
 
   JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();

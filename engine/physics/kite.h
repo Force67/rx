@@ -172,6 +172,8 @@ class RX_PHYSICS_EXPORT Kite {
   // could not be created (physics stub).
   Kite(PhysicsWorld& world, const KiteDesc& desc, const Vec3& anchor, const Vec3& position,
        f32 yaw_radians);
+  // Removes the sail body from the world.
+  ~Kite();
 
   Kite(const Kite&) = delete;
   Kite& operator=(const Kite&) = delete;

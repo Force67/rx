@@ -202,6 +202,15 @@ void DemoScenes::Shutdown() {
     physics_.RemoveCloth(cloth_);
     cloth_ = 0;
   }
+  // Retire the vehicle/character demos here, while the audio mixer is still
+  // alive. Their VehicleAudio voices fade out through the mixer in the dtor
+  // (Stop -> Mixer::Stop); if they instead lived until the Viewer is destroyed,
+  // that runs after the Host has already torn down the AudioSystem (main.cc
+  // destroys the Host before the Viewer), so the fade would call through a
+  // freed mixer. Called from Viewer::OnShutdown, inside Host::Shutdown, so the
+  // mixer is guaranteed live. reset() is idempotent (null for other scenes).
+  drive_.reset();
+  gym_.reset();
   scene_hook_.reset();
   scene_hook_rhi_.reset();
   bubble_viz_.reset();

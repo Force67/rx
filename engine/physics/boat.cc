@@ -64,6 +64,14 @@ Boat::Boat(PhysicsWorld& world, const BoatDesc& desc, const Vec3& position, f32 
   state_.cargo_kg = 0.0f;
 }
 
+Boat::~Boat() {
+  if (body_ == 0) return;
+  // Undo the buoyancy exemption before the body id is freed so a later body that
+  // reuses the id/sequence slot is not silently left exempt, then remove it.
+  world_.set_buoyancy_exempt(body_, false);
+  world_.RemoveBody(body_);
+}
+
 void Boat::SetCargo(f32 kg) {
   cargo_kg_ = Clamp(kg, 0.0f, cargo_limit_kg());
   loaded_mass_ = base_mass_ + cargo_kg_;

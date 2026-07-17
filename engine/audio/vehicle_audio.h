@@ -2,6 +2,7 @@
 #define RX_AUDIO_VEHICLE_AUDIO_H_
 
 #include <climits>
+#include <memory>
 
 #include "audio/engine_synth.h"
 #include "audio/synth_voice.h"
@@ -73,9 +74,13 @@ class RX_AUDIO_EXPORT VehicleAudio {
 
  private:
   struct Layer {
-    u32 voice = 0;         // mixer voice id (0 = not started)
-    SynthVoice* synth = nullptr;  // non-owning: the mixer owns the decoder
-    f32 sent_gain = -1.0f;        // last gain pushed, to suppress no-op commands
+    u32 voice = 0;  // mixer voice id (0 = not started)
+    // Parameter endpoint, shared with the SynthVoice. Held by shared_ptr rather
+    // than a raw voice pointer so publishing survives the mixer retiring and
+    // deleting the voice: a late Update lands in a still-live mailbox, not freed
+    // memory.
+    std::shared_ptr<ParamMailbox> params;
+    f32 sent_gain = -1.0f;  // last gain pushed, to suppress no-op commands
   };
 
   void SetLayerGain(Layer& layer, f32 gain);

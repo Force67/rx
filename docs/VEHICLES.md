@@ -78,7 +78,8 @@ are unchanged.
 | `brake_bias_front` | fraction of the per-wheel brake torque to the front axle (`0.5` = even; road cars ~`0.6`) |
 | `steer_high_speed_fraction`, `steer_fade_speed` | steering slows from full at rest to `fraction` by `fade_speed` m/s (`fraction ≥ 1` or `fade_speed ≤ 0` = no fade) |
 | `com_fore` | CoM shift along +Z (forward); negative = rearward (laden van/truck) |
-| `traction_control` | cuts throttle past ~8% driven-wheel slip |
+| `traction_control` | cuts throttle past ~8% driven-wheel slip; applied in both the automatic and manual (`DriveVehicle(VehicleInput)`) paths |
+| `free_rolling` | unpowered coasting chassis (a towed trailer/carriage): the engine is disconnected (zero max torque, zero engine braking, zero idle RPM) while a valid differential is kept so Jolt's driven-torque-sum-to-1 invariant holds. Throttle does nothing; the front axle still steers and the rear still takes the handbrake. Tow it with `AddForceAtPoint` on `GetVehicleBody` |
 
 Each new field is additive with a default that reproduces the previous
 behaviour, and each maps to a real Jolt vehicle knob (`VehicleDifferentialSettings`,
@@ -151,6 +152,14 @@ and speed builds a water wedge the tread can't clear:
 `grip ·= 1 − 0.9 · depth_frac · speed_frac`, where a patch is "fully awash" at
 half the wheel radius of water, onset is ~8 m/s and full hydroplaning ~25 m/s.
 Below onset or on a dry patch it is a no-op.
+
+The `set_water_height` callback is **game-thread only**: it is evaluated inside
+`Update` (before the Jolt step) and from `SampleWater`, never from a Jolt worker
+thread. Each wheel's water is sampled on the game thread into a per-vehicle cache
+that the in-step tyre-friction callback reads, so a callback backed by
+thread-affine terrain data or physics queries is safe. The cache uses the
+previous step's wheel positions — one step of latency on the slow aquaplaning
+ramp.
 
 ---
 
@@ -331,6 +340,8 @@ and three-wheel landing gear. Air density is a constant 1.225 kg/m³ (ISA sea
 level). Defaults describe a Cessna-172-class light single. `AircraftInput`:
 `throttle` `0..1`, `pitch` / `roll` / `yaw` `-1..1` (command axes, not
 deflection angles), `flaps` `0..1` (quantized to `flap_steps`), `brakes` `0..1`.
+Positive `yaw` yaws the nose **right** — both the rudder in the air and the
+nose-wheel steering on the ground (right is body `-X` in this engine).
 
 ### Aero model (`AircraftDesc`)
 

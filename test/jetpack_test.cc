@@ -273,6 +273,45 @@ int main() {
     if (!j.state().grounded) return Fail("(f) character never landed after the jump");
   }
 
+  // (g) No ceiling super-jump: holding thrust against a low static ceiling must
+  // not bank hidden upward speed. Burn 3 s under a ceiling (the mover clamps the
+  // rise), then remove the ceiling with thrust CUT: only retained velocity can
+  // lift the body. The old code stored the collision-blocked request in
+  // integration_velocity, so ~3 s of net thrust (~20 m/s) launched it metres up.
+  {
+    Scene s;
+    if (!s.Init()) return Fail("(g) init");
+    s.Step(20);  // settle on the ground
+    // Ceiling bottom at y = 2.8 (box centre 3.0, half 0.2). The 1.8 m capsule's
+    // head hits it with the feet ~1.0 m up.
+    const physics::BodyId ceiling = s.physics.AddStaticBox({0, 3.0f, 0}, {200, 0.2f, 200});
+    for (int i = 0; i < 60 * 3; ++i) {
+      s.jin().enabled = true;
+      s.jin().thrust = true;
+      s.Step(1);
+    }
+    const f32 blocked_y = s.feet_y();
+    // Remove the ceiling and cut thrust; gravity should win almost immediately.
+    s.physics.RemoveBody(ceiling);
+    s.jin().enabled = false;
+    s.jin().thrust = false;
+    f32 peak_after = blocked_y;
+    f32 vmax_after = 0;
+    for (int i = 0; i < 60 * 2; ++i) {
+      s.Step(1);
+      peak_after = std::max(peak_after, s.feet_y());
+      vmax_after = std::max(vmax_after, s.state().velocity.y);
+    }
+    std::fprintf(stderr,
+                 "(g) ceiling: blocked_y=%.2f post-removal peak=%.2f (gain %.2f) vmax_up=%.2f\n",
+                 blocked_y, peak_after, peak_after - blocked_y, vmax_after);
+    if (blocked_y < 0.5f) return Fail("(g) thrust did not press the character up under the ceiling");
+    // One tick of thrust adds only ~0.12 m/s; a super-jump would be ~20 m/s and
+    // several metres. Bounds well between the two.
+    if (peak_after - blocked_y > 1.0f) return Fail("(g) super-jump: launched after ceiling cleared");
+    if (vmax_after > 3.0f) return Fail("(g) super-jump: retained upward velocity too high");
+  }
+
   std::fprintf(stderr, "jetpack_test: all checks passed\n");
   return 0;
 }

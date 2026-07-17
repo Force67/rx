@@ -64,6 +64,10 @@ Kite::Kite(PhysicsWorld& world, const KiteDesc& desc, const Vec3& anchor, const 
   state_.line_length_m = line_length_;
 }
 
+Kite::~Kite() {
+  if (body_ != 0) world_.RemoveBody(body_);
+}
+
 void Kite::Update(const KiteInput& input, f32 dt) {
   if (body_ == 0 || dt <= 0.0f) return;
 

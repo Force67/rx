@@ -51,13 +51,14 @@ struct EnginePreset {
 };
 
 // Shipped presets. Each documents what it should sound like; the DSP notes on
-// the class explain how the numbers get there.
-EnginePreset InlineFourCarPreset();   // buzzy, even, wide rev range
-EnginePreset V8Preset();              // cross-plane rumble, uneven fire emphasis
-EnginePreset MotorcycleTwinPreset();  // high redline, hard uneven-fire pulse
-EnginePreset InboardBoatPreset();     // low rpm, water-muffled exhaust
-EnginePreset SinglePropPlanePreset(); // engine drone + propeller blade tone
-EnginePreset LightJetPreset();        // turbine whine + exhaust roar
+// the class explain how the numbers get there. Exported: the demo/game layer in
+// another DSO builds VehicleAudio from these.
+RX_AUDIO_EXPORT EnginePreset InlineFourCarPreset();   // buzzy, even, wide rev range
+RX_AUDIO_EXPORT EnginePreset V8Preset();              // cross-plane rumble, uneven fire emphasis
+RX_AUDIO_EXPORT EnginePreset MotorcycleTwinPreset();  // high redline, hard uneven-fire pulse
+RX_AUDIO_EXPORT EnginePreset InboardBoatPreset();     // low rpm, water-muffled exhaust
+RX_AUDIO_EXPORT EnginePreset SinglePropPlanePreset(); // engine drone + propeller blade tone
+RX_AUDIO_EXPORT EnginePreset LightJetPreset();        // turbine whine + exhaust roar
 
 // A physically-flavoured four-stroke (or turbine) engine model. It sums a bank
 // of harmonics and half-order subharmonics of the firing frequency, shapes their
