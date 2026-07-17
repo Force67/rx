@@ -35,6 +35,7 @@
 #include <Jolt/Physics/Constraints/SwingTwistConstraint.h>
 #include <Jolt/Physics/Collision/Shape/SphereShape.h>
 #include <Jolt/Physics/Collision/Shape/OffsetCenterOfMassShape.h>
+#include <Jolt/Physics/Collision/PhysicsMaterialSimple.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
 #include <Jolt/Physics/SoftBody/SoftBodyCreationSettings.h>
@@ -130,8 +131,94 @@ bool IsFinite(const Mat4& value) {
 
 // Friction of static world geometry (ground, roads, walls). Jolt's default
 // of 0.2 is ice: vehicle tires combine as sqrt(tire * body), so the body
-// side must carry a real asphalt/concrete-grade value.
+// side must carry a real asphalt/concrete-grade value. (For tire contacts the
+// surface-grip table below supersedes this; it still governs box/character
+// contacts.)
 constexpr f32 kStaticFriction = 0.9f;
+
+constexpr u32 kSurfaceCount = static_cast<u32>(SurfaceType::kCount);
+
+// Each SurfaceType is backed by one PhysicsMaterialSimple instance (the palette
+// in Impl), installed on tagged colliders. The tire-friction combine callback
+// resolves the material back to a SurfaceType by pointer identity against that
+// palette (Jolt is built without C++ RTTI, so no dynamic_cast). A plain
+// PhysicsMaterialSimple avoids emitting a typeinfo reference Jolt can't satisfy.
+
+// Per-surface tire grip. `longitudinal`/`lateral` scale the tire's own
+// friction-curve peak (1 = full street-tire grip on dry asphalt). `wet` is the
+// grip multiplier at full rain wetness (lerped from 1 at dry): asphalt loses
+// ~30%, loose dirt drops toward mud, ice/snow change little. Documented tune,
+// not measured: tune here, not per game.
+struct SurfaceGripEntry {
+  f32 longitudinal;
+  f32 lateral;
+  f32 wet;
+};
+constexpr SurfaceGripEntry kSurfaceGrip[kSurfaceCount] = {
+    /* kAsphalt  */ {1.00f, 1.00f, 0.70f},
+    /* kConcrete */ {0.98f, 0.98f, 0.75f},
+    /* kDirt     */ {0.75f, 0.72f, 0.55f},
+    /* kGravel   */ {0.80f, 0.75f, 0.70f},
+    /* kGrass    */ {0.65f, 0.60f, 0.55f},
+    /* kSand     */ {0.55f, 0.50f, 0.60f},
+    /* kSnow     */ {0.45f, 0.40f, 0.80f},
+    /* kIce      */ {0.15f, 0.12f, 0.70f},
+    /* kMud      */ {0.45f, 0.40f, 0.85f},
+    /* kWood     */ {0.85f, 0.82f, 0.65f},
+    /* kMetal    */ {0.70f, 0.65f, 0.55f},
+};
+
+const char* SurfaceName(SurfaceType s) {
+  switch (s) {
+    case SurfaceType::kAsphalt: return "asphalt";
+    case SurfaceType::kConcrete: return "concrete";
+    case SurfaceType::kDirt: return "dirt";
+    case SurfaceType::kGravel: return "gravel";
+    case SurfaceType::kGrass: return "grass";
+    case SurfaceType::kSand: return "sand";
+    case SurfaceType::kSnow: return "snow";
+    case SurfaceType::kIce: return "ice";
+    case SurfaceType::kMud: return "mud";
+    case SurfaceType::kWood: return "wood";
+    case SurfaceType::kMetal: return "metal";
+    case SurfaceType::kCount: break;
+  }
+  return "asphalt";
+}
+
+// Rain wetness (0..1) scaling of a surface's grip, lerped toward its wet value.
+f32 WetGripMultiplier(SurfaceType s, f32 wetness) {
+  const f32 wet = kSurfaceGrip[static_cast<u32>(s)].wet;
+  return 1.0f + (wet - 1.0f) * std::clamp(wetness, 0.0f, 1.0f);
+}
+
+// Aquaplaning: grip fades as the contact patch floods (depth relative to the
+// wheel) and as speed builds a water wedge the tread can't clear. Returns a
+// 0.1..1 grip multiplier. Onset ~8 m/s, full hydroplaning ~25 m/s; a patch is
+// "fully awash" at half the wheel radius of standing water. Below the water
+// onset speed or on a dry patch this is a no-op (returns 1).
+f32 AquaplaneGrip(f32 wading_depth, f32 wheel_radius, f32 speed) {
+  if (wading_depth <= 0.0f || wheel_radius <= 0.0f) return 1.0f;
+  const f32 depth_frac = std::min(wading_depth / (0.5f * wheel_radius), 1.0f);
+  constexpr f32 kOnset = 8.0f;
+  constexpr f32 kFull = 25.0f;
+  const f32 speed_frac = std::clamp((speed - kOnset) / (kFull - kOnset), 0.0f, 1.0f);
+  return 1.0f - 0.9f * depth_frac * speed_frac;
+}
+
+// Maps normalized (rpm-fraction, torque-fraction) points onto Jolt's engine
+// torque curve. `count` 0 leaves Jolt's stock curve untouched.
+template <class Point>
+void ApplyTorqueCurve(JPH::VehicleEngineSettings& engine, const Point* curve, u32 count) {
+  if (count == 0) return;
+  engine.mNormalizedTorque.Clear();
+  engine.mNormalizedTorque.Reserve(count);
+  for (u32 i = 0; i < count; ++i) {
+    engine.mNormalizedTorque.AddPoint(std::clamp(curve[i].rpm_fraction, 0.0f, 1.0f),
+                                      std::max(curve[i].torque_fraction, 0.0f));
+  }
+  engine.mNormalizedTorque.Sort();
+}
 
 }  // namespace
 
@@ -145,6 +232,34 @@ struct PhysicsWorld::Impl {
   std::unique_ptr<JPH::PhysicsSystem> system;
   base::Vector<JPH::BodyID> dynamic_bodies;
   base::UnorderedMap<u64, JPH::RefConst<JPH::Shape>> mesh_shapes;
+  // One PhysicsMaterial per SurfaceType, created lazily. Installed on tagged
+  // static colliders so the tire-friction callback can resolve a surface.
+  JPH::RefConst<JPH::PhysicsMaterial> surface_materials[kSurfaceCount];
+  // Per-body surface for shared-shape instances (AddStaticMeshInstance), whose
+  // shape can't carry a per-instance material; keyed by BodyID index+sequence.
+  base::UnorderedMap<u32, SurfaceType> body_surface;
+
+  // Lazily builds and returns the material for `surface`; null for asphalt so
+  // untagged/asphalt colliders keep the stock (materialless) shape.
+  const JPH::PhysicsMaterial* material_for(SurfaceType surface) {
+    if (surface == SurfaceType::kAsphalt) return nullptr;
+    const u32 i = static_cast<u32>(surface);
+    if (i >= kSurfaceCount) return nullptr;
+    if (!surface_materials[i]) {
+      surface_materials[i] = new JPH::PhysicsMaterialSimple(SurfaceName(surface), JPH::Color::sGrey);
+    }
+    return surface_materials[i].GetPtr();
+  }
+  // Resolves a shape's material back to a SurfaceType by pointer identity
+  // against the palette (no RTTI); asphalt when untagged or unknown.
+  SurfaceType surface_of(const JPH::PhysicsMaterial* m) const {
+    if (m) {
+      for (u32 i = 0; i < kSurfaceCount; ++i) {
+        if (surface_materials[i].GetPtr() == m) return static_cast<SurfaceType>(i);
+      }
+    }
+    return SurfaceType::kAsphalt;
+  }
   base::Vector<JPH::Ref<JPH::GroupFilterTable>> filter_groups;
   struct CharacterEntry {
     JPH::Ref<JPH::CharacterVirtual> character;
@@ -170,6 +285,15 @@ struct PhysicsWorld::Impl {
     f32 downforce = 0;  // N per (m/s)^2, applied along body -Y
     bool traction_control = false;
     f32 tc_scale = 1;  // smoothed traction-control throttle authority
+    // Manual transmission state: gears change only on the shift edges of the
+    // VehicleInput overload; prev_* debounce those edges.
+    bool manual = false;
+    bool prev_shift_up = false;
+    bool prev_shift_down = false;
+    // Chassis speed cached at the top of each Update, read by the tire-friction
+    // combine callback (which runs inside the step and can't safely re-lock the
+    // body). One step of lag is irrelevant to the aquaplaning ramp.
+    f32 cached_speed = 0;
   };
   base::Vector<VehicleEntry> vehicles;
   // Strand grooms (soft-body Cosserat rods); StrandGroomId is index + 1, dead
@@ -284,6 +408,15 @@ void PhysicsWorld::Update(f32 dt) {
     }
   }
 
+  // Cache each vehicle's chassis speed for the in-step tire-friction callback.
+  {
+    JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+    for (Impl::VehicleEntry& entry : impl_->vehicles) {
+      if (!entry.alive) continue;
+      entry.cached_speed = bodies.GetLinearVelocity(entry.body).Length();
+    }
+  }
+
   // Aero downforce: presses racing vehicles into the road along their body
   // -Y (so banked corners keep the full benefit), quadratic in forward speed.
   {
@@ -295,6 +428,42 @@ void PhysicsWorld::Update(f32 dt) {
       const JPH::Vec3 up = rotation * JPH::Vec3::sAxisY();
       const f32 v = bodies.GetLinearVelocity(entry.body).Dot(forward);
       bodies.AddForce(entry.body, up * (-entry.downforce * v * v));
+    }
+  }
+
+  // Wheel water drag: a wheel whose contact patch is under the water surface
+  // drags against the water it has to plough through. Force ~ 0.5*rho*Cd*A*v^2
+  // opposing the contact point's motion relative to the flow, with A the
+  // submerged frontal area (width * wading depth, capped at the wheel), applied
+  // at the contact point. Horizontal only and magnitude-capped so hitting a
+  // ford decelerates the car without exploding the solver. Grip loss itself is
+  // handled in the tire-friction combine (aquaplaning); this is the bulk drag.
+  if (water_height_) {
+    JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
+    constexpr f32 kWaterDensity = 1000.0f;
+    constexpr f32 kWheelDragCd = 1.0f;
+    for (const Impl::VehicleEntry& entry : impl_->vehicles) {
+      if (!entry.alive || !bodies.IsActive(entry.body)) continue;
+      for (u32 i = 0; i < entry.wheel_count; ++i) {
+        const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(i));
+        if (!wheel->HasContact()) continue;
+        const JPH::RVec3 cp = wheel->GetContactPosition();
+        const Vec3 p{static_cast<f32>(cp.GetX()), static_cast<f32>(cp.GetY()),
+                     static_cast<f32>(cp.GetZ())};
+        f32 surface_h = 0;
+        Vec3 flow{};
+        if (!SampleWater(p, &surface_h, &flow) || p.y >= surface_h) continue;
+        const f32 depth = std::min(surface_h - p.y, 2.0f * wheel->GetSettings()->mRadius);
+        const JPH::Vec3 point_vel = wheel->GetContactPointVelocity();
+        JPH::Vec3 rel(point_vel.GetX() - flow.x, 0.0f, point_vel.GetZ() - flow.z);
+        const f32 speed = rel.Length();
+        if (speed < 0.1f) continue;
+        const f32 area = wheel->GetSettings()->mWidth * depth;
+        f32 mag = 0.5f * kWaterDensity * kWheelDragCd * area * speed * speed;
+        mag = std::min(mag, 8000.0f);  // per-wheel cap keeps a deep, fast entry stable
+        const JPH::Vec3 force = rel * (-mag / speed);
+        bodies.AddForce(entry.body, force, cp);
+      }
     }
   }
 
@@ -420,11 +589,13 @@ void PhysicsWorld::Update(f32 dt) {
   }
 }
 
-BodyId PhysicsWorld::AddStaticBox(const Vec3& position, const Vec3& half_extent) {
+BodyId PhysicsWorld::AddStaticBox(const Vec3& position, const Vec3& half_extent,
+                                  SurfaceType surface) {
   if (!impl_) return 0;
-  JPH::BodyCreationSettings settings(new JPH::BoxShape(ToJolt(half_extent)), ToJolt(position),
-                                     JPH::Quat::sIdentity(), JPH::EMotionType::Static,
-                                     layers::kStatic);
+  JPH::Ref<JPH::BoxShape> box = new JPH::BoxShape(ToJolt(half_extent));
+  box->SetMaterial(impl_->material_for(surface));
+  JPH::BodyCreationSettings settings(box, ToJolt(position), JPH::Quat::sIdentity(),
+                                     JPH::EMotionType::Static, layers::kStatic);
   settings.mFriction = kStaticFriction;
   JPH::BodyID id = impl_->system->GetBodyInterface().CreateAndAddBody(
       settings, JPH::EActivation::DontActivate);
@@ -432,7 +603,7 @@ BodyId PhysicsWorld::AddStaticBox(const Vec3& position, const Vec3& half_extent)
 }
 
 BodyId PhysicsWorld::AddStaticMesh(const asset::Mesh& mesh, const Vec3& position,
-                                   const f32 rotation[4], f32 scale) {
+                                   const f32 rotation[4], f32 scale, SurfaceType surface) {
   if (!impl_ || mesh.lods.empty()) return 0;
   const asset::MeshLod& lod = mesh.lods[0];
   if (lod.indices.size() < 3) return 0;
@@ -447,8 +618,10 @@ BodyId PhysicsWorld::AddStaticMesh(const asset::Mesh& mesh, const Vec3& position
   for (size_t i = 0; i + 2 < lod.indices.size(); i += 3) {
     triangles.push_back({lod.indices[i], lod.indices[i + 1], lod.indices[i + 2], 0});
   }
+  JPH::PhysicsMaterialList materials;
+  if (const JPH::PhysicsMaterial* m = impl_->material_for(surface)) materials.push_back(m);
   JPH::Ref<JPH::ShapeSettings> shape_settings =
-      new JPH::MeshShapeSettings(std::move(vertices), std::move(triangles));
+      new JPH::MeshShapeSettings(std::move(vertices), std::move(triangles), std::move(materials));
   if (scale != 1.0f) {
     shape_settings = new JPH::ScaledShapeSettings(shape_settings, JPH::Vec3::sReplicate(scale));
   }
@@ -494,7 +667,7 @@ bool PhysicsWorld::has_mesh_shape(u64 key) const {
 }
 
 BodyId PhysicsWorld::AddStaticMeshInstance(u64 key, const Vec3& position, const f32 rotation[4],
-                                           f32 scale) {
+                                           f32 scale, SurfaceType surface) {
   if (!impl_) return 0;
   const JPH::RefConst<JPH::Shape>* shape = impl_->mesh_shapes.find(key);
   if (!shape) return 0;
@@ -508,16 +681,49 @@ BodyId PhysicsWorld::AddStaticMeshInstance(u64 key, const Vec3& position, const 
   settings.mFriction = kStaticFriction;
   JPH::BodyID id = impl_->system->GetBodyInterface().CreateAndAddBody(
       settings, JPH::EActivation::DontActivate);
+  // The mesh shape is shared across instances, so a per-instance material can't
+  // ride on it; record the surface per body for the tire callback instead.
+  if (surface != SurfaceType::kAsphalt) {
+    impl_->body_surface.insert(id.GetIndexAndSequenceNumber(), surface);
+  }
   return id.GetIndexAndSequenceNumber() + 1;
 }
 
-BodyId PhysicsWorld::AddHeightField(const Vec3& origin, const f32* heights, u32 samples,
-                                    f32 size) {
+BodyId PhysicsWorld::AddHeightField(const Vec3& origin, const f32* heights, u32 samples, f32 size,
+                                    SurfaceType surface) {
+  return AddHeightField(origin, heights, samples, size, nullptr,
+                        surface == SurfaceType::kAsphalt ? nullptr : &surface,
+                        surface == SurfaceType::kAsphalt ? 0 : 1);
+}
+
+BodyId PhysicsWorld::AddHeightField(const Vec3& origin, const f32* heights, u32 samples, f32 size,
+                                    const u8* material_indices, const SurfaceType* palette,
+                                    u32 palette_count) {
   if (!impl_ || samples < 2) return 0;
   JPH::HeightFieldShapeSettings shape(heights, ToJolt(origin),
                                       {size / static_cast<f32>(samples - 1), 1.0f,
                                        size / static_cast<f32>(samples - 1)},
                                       samples);
+  // Build the material palette + per-quad indices so a cell can mix surfaces
+  // (asphalt road over grass). A single non-asphalt surface with no explicit
+  // index map paints the whole cell. Asphalt-only stays materialless (stock).
+  if (palette && palette_count > 0) {
+    for (u32 i = 0; i < palette_count; ++i) {
+      const JPH::PhysicsMaterial* m = impl_->material_for(palette[i]);
+      // The palette must stay index-aligned; asphalt yields no material, so
+      // give it a real (grey) material entry to hold its slot.
+      shape.mMaterials.push_back(
+          m ? JPH::RefConst<JPH::PhysicsMaterial>(m)
+            : JPH::RefConst<JPH::PhysicsMaterial>(
+                  new JPH::PhysicsMaterialSimple(SurfaceName(SurfaceType::kAsphalt), JPH::Color::sGrey)));
+    }
+    const u32 quads = (samples - 1) * (samples - 1);
+    if (material_indices) {
+      shape.mMaterialIndices.assign(material_indices, material_indices + quads);
+    } else {
+      shape.mMaterialIndices.resize(quads, 0);  // single-surface fill
+    }
+  }
   JPH::ShapeSettings::ShapeResult result = shape.Create();
   if (result.HasError()) {
     RX_WARN("heightfield collider failed: {}", result.GetError().c_str());
@@ -546,12 +752,13 @@ JPH::Quat QuatFromColumns(const f32* t) {
 // Lowers a ShapeDesc tree into a Jolt shape, scaling all metrics into
 // meters. Returns null on unconvertible input (empty hulls, degenerate
 // primitives), which callers surface as a failed body.
-JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale) {
+JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale,
+                                const JPH::PhysicsMaterial* material = nullptr) {
   using Kind = rx::physics::ShapeDesc::Kind;
   switch (desc.kind) {
     case Kind::kSphere: {
       if (desc.radius * scale < 1e-4f) return nullptr;
-      return new JPH::SphereShape(desc.radius * scale);
+      return new JPH::SphereShape(desc.radius * scale, material);
     }
     case Kind::kCapsule: {
       // Havok capsules are arbitrary segments; Jolt's are Y-centered, so
@@ -563,8 +770,8 @@ JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale) {
       f32 radius = desc.radius * scale;
       f32 half_height = (b - a).Length() * 0.5f;
       if (radius < 1e-4f) return nullptr;
-      if (half_height < 1e-4f) return new JPH::SphereShape(radius);
-      JPH::Ref<JPH::Shape> capsule = new JPH::CapsuleShape(half_height, radius);
+      if (half_height < 1e-4f) return new JPH::SphereShape(radius, material);
+      JPH::Ref<JPH::Shape> capsule = new JPH::CapsuleShape(half_height, radius, material);
       JPH::Vec3 axis = (b - a).Normalized();
       JPH::Quat align = JPH::Quat::sFromTo(JPH::Vec3::sAxisY(), axis);
       JPH::RotatedTranslatedShapeSettings placed((a + b) * 0.5f, align, capsule);
@@ -576,7 +783,7 @@ JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale) {
       half *= scale;
       f32 min_extent = half.ReduceMin();
       if (min_extent < 1e-4f) return nullptr;
-      return new JPH::BoxShape(half, JPH::min(0.05f, min_extent * 0.5f));
+      return new JPH::BoxShape(half, JPH::min(0.05f, min_extent * 0.5f), material);
     }
     case Kind::kConvexHull: {
       if (desc.vertices.size() < 4) return nullptr;
@@ -584,7 +791,7 @@ JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale) {
       points.reserve(desc.vertices.size());
       for (const auto& v : desc.vertices) points.emplace_back(v.x * scale, v.y * scale,
                                                               v.z * scale);
-      JPH::ConvexHullShapeSettings hull(points);
+      JPH::ConvexHullShapeSettings hull(points, JPH::cDefaultConvexRadius, material);
       auto result = hull.Create();
       return result.IsValid() ? result.Get() : JPH::Ref<JPH::Shape>();
     }
@@ -593,12 +800,12 @@ JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale) {
       u32 added = 0;
       for (const auto& child : desc.children) {
         if (child.kind == Kind::kPlaced && !child.children.empty()) {
-          JPH::Ref<JPH::Shape> inner = BuildShape(child.children[0], scale);
+          JPH::Ref<JPH::Shape> inner = BuildShape(child.children[0], scale, material);
           if (!inner) continue;
           JPH::Vec3 origin(child.transform[12], child.transform[13], child.transform[14]);
           compound.AddShape(origin * scale, QuatFromColumns(child.transform), inner);
           ++added;
-        } else if (JPH::Ref<JPH::Shape> inner = BuildShape(child, scale)) {
+        } else if (JPH::Ref<JPH::Shape> inner = BuildShape(child, scale, material)) {
           compound.AddShape(JPH::Vec3::sZero(), JPH::Quat::sIdentity(), inner);
           ++added;
         }
@@ -606,14 +813,14 @@ JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale) {
       if (added == 0) return nullptr;
       if (added == 1 && desc.children.size() == 1 &&
           desc.children[0].kind != Kind::kPlaced) {
-        return BuildShape(desc.children[0], scale);  // trivial list
+        return BuildShape(desc.children[0], scale, material);  // trivial list
       }
       auto result = compound.Create();
       return result.IsValid() ? result.Get() : JPH::Ref<JPH::Shape>();
     }
     case Kind::kPlaced: {
       if (desc.children.empty()) return nullptr;
-      JPH::Ref<JPH::Shape> inner = BuildShape(desc.children[0], scale);
+      JPH::Ref<JPH::Shape> inner = BuildShape(desc.children[0], scale, material);
       if (!inner) return nullptr;
       JPH::Vec3 origin(desc.transform[12], desc.transform[13], desc.transform[14]);
       JPH::RotatedTranslatedShapeSettings placed(origin * scale, QuatFromColumns(desc.transform),
@@ -630,9 +837,9 @@ JPH::Ref<JPH::Shape> BuildShape(const rx::physics::ShapeDesc& desc, f32 scale) {
 }  // namespace
 
 BodyId PhysicsWorld::AddStaticShape(const ShapeDesc& desc, const Vec3& position,
-                                    const f32 rotation[4], f32 scale) {
+                                    const f32 rotation[4], f32 scale, SurfaceType surface) {
   if (!impl_) return 0;
-  JPH::Ref<JPH::Shape> shape = BuildShape(desc, scale);
+  JPH::Ref<JPH::Shape> shape = BuildShape(desc, scale, impl_->material_for(surface));
   if (!shape) return 0;
   JPH::Quat rot(rotation[0], rotation[1], rotation[2], rotation[3]);
   if (rot.LengthSq() < 1e-6f) rot = JPH::Quat::sIdentity();
@@ -838,6 +1045,68 @@ void PhysicsWorld::ApplyImpulse(BodyId id, const Vec3& impulse) {
   JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
   bodies.ActivateBody(body);
   bodies.AddImpulse(body, ToJolt(impulse));
+}
+
+bool PhysicsWorld::SampleWater(const Vec3& position, f32* out_height, Vec3* out_flow) const {
+  if (!water_height_) return false;
+  f32 height = 0;
+  Vec3 flow{};
+  if (!water_height_(position, &height, &flow)) return false;
+  if (out_height) *out_height = height;
+  if (out_flow) *out_flow = flow;
+  return true;
+}
+
+void PhysicsWorld::AddForce(BodyId id, const Vec3& force) {
+  if (!impl_ || id == 0) return;
+  impl_->system->GetBodyInterface().AddForce(JPH::BodyID(static_cast<JPH::uint32>(id - 1)),
+                                             ToJolt(force));
+}
+
+void PhysicsWorld::AddForceAtPoint(BodyId id, const Vec3& force, const Vec3& world_point) {
+  if (!impl_ || id == 0) return;
+  impl_->system->GetBodyInterface().AddForce(JPH::BodyID(static_cast<JPH::uint32>(id - 1)),
+                                             ToJolt(force),
+                                             JPH::RVec3(world_point.x, world_point.y, world_point.z));
+}
+
+void PhysicsWorld::AddTorque(BodyId id, const Vec3& torque) {
+  if (!impl_ || id == 0) return;
+  impl_->system->GetBodyInterface().AddTorque(JPH::BodyID(static_cast<JPH::uint32>(id - 1)),
+                                              ToJolt(torque));
+}
+
+Vec3 PhysicsWorld::GetLinearVelocity(BodyId id) const {
+  if (!impl_ || id == 0) return {};
+  const JPH::Vec3 v =
+      impl_->system->GetBodyInterface().GetLinearVelocity(JPH::BodyID(static_cast<JPH::uint32>(id - 1)));
+  return {v.GetX(), v.GetY(), v.GetZ()};
+}
+
+Vec3 PhysicsWorld::GetAngularVelocity(BodyId id) const {
+  if (!impl_ || id == 0) return {};
+  const JPH::Vec3 v = impl_->system->GetBodyInterface().GetAngularVelocity(
+      JPH::BodyID(static_cast<JPH::uint32>(id - 1)));
+  return {v.GetX(), v.GetY(), v.GetZ()};
+}
+
+Vec3 PhysicsWorld::GetPointVelocity(BodyId id, const Vec3& world_point) const {
+  if (!impl_ || id == 0) return {};
+  const JPH::Vec3 v = impl_->system->GetBodyInterface().GetPointVelocity(
+      JPH::BodyID(static_cast<JPH::uint32>(id - 1)),
+      JPH::RVec3(world_point.x, world_point.y, world_point.z));
+  return {v.GetX(), v.GetY(), v.GetZ()};
+}
+
+f32 PhysicsWorld::GetBodyMass(BodyId id) const {
+  if (!impl_ || id == 0) return 0;
+  JPH::BodyLockRead lock(impl_->system->GetBodyLockInterface(),
+                         JPH::BodyID(static_cast<JPH::uint32>(id - 1)));
+  if (!lock.Succeeded()) return 0;
+  const JPH::Body& body = lock.GetBody();
+  if (body.IsStatic() || !body.GetMotionProperties()) return 0;
+  const f32 inv_mass = body.GetMotionProperties()->GetInverseMassUnchecked();
+  return inv_mass > 0 ? 1.0f / inv_mass : 0;
 }
 
 void PhysicsWorld::SetBodyKinematic(BodyId id) {
@@ -1054,6 +1323,7 @@ void PhysicsWorld::SetBodyPosition(BodyId id, const Vec3& position, const f32 ro
 void PhysicsWorld::RemoveBody(BodyId id) {
   if (!impl_ || id == 0) return;
   JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
+  impl_->body_surface.erase(body.GetIndexAndSequenceNumber());
   JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
   bodies.RemoveBody(body);
   bodies.DestroyBody(body);
@@ -1139,6 +1409,8 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
   if (desc.max_rpm > 0) controller->mEngine.mMaxRPM = desc.max_rpm;
   if (desc.min_rpm > 0) controller->mEngine.mMinRPM = desc.min_rpm;
   if (desc.engine_inertia > 0) controller->mEngine.mInertia = desc.engine_inertia;
+  if (desc.engine_braking > 0) controller->mEngine.mAngularDamping = desc.engine_braking;
+  ApplyTorqueCurve(controller->mEngine, desc.torque_curve, desc.torque_curve_count);
   controller->mTransmission.mClutchStrength =
       desc.clutch_strength > 0 ? desc.clutch_strength : 10.0f;
   if (desc.gear_count > 0) {
@@ -1199,6 +1471,7 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
 
   impl_->vehicles.push_back(
       {body->GetID(), constraint, true, 4, desc.downforce, desc.traction_control});
+  InstallVehicleFriction(static_cast<u32>(impl_->vehicles.size() - 1));
   return impl_->vehicles.size();
 }
 
@@ -1278,6 +1551,8 @@ VehicleId PhysicsWorld::CreateMotorcycle(const MotorcycleDesc& desc, const Vec3&
   controller->mEngine.mMaxRPM = desc.max_rpm;
   controller->mEngine.mMinRPM = desc.min_rpm;
   if (desc.engine_inertia > 0) controller->mEngine.mInertia = desc.engine_inertia;
+  if (desc.engine_braking > 0) controller->mEngine.mAngularDamping = desc.engine_braking;
+  ApplyTorqueCurve(controller->mEngine, desc.torque_curve, desc.torque_curve_count);
   controller->mTransmission.mShiftUpRPM = desc.shift_up_rpm;
   controller->mTransmission.mShiftDownRPM = desc.shift_down_rpm;
   controller->mTransmission.mClutchStrength = 2.0f;
@@ -1310,6 +1585,7 @@ VehicleId PhysicsWorld::CreateMotorcycle(const MotorcycleDesc& desc, const Vec3&
 
   impl_->vehicles.push_back(
       {body->GetID(), constraint, true, 2, desc.downforce, desc.traction_control});
+  InstallVehicleFriction(static_cast<u32>(impl_->vehicles.size() - 1));
   return impl_->vehicles.size();
 }
 
@@ -1330,6 +1606,95 @@ void PhysicsWorld::RemoveVehicle(VehicleId id) {
     }
   }
   entry.alive = false;
+}
+
+void PhysicsWorld::InstallVehicleFriction(u32 vehicle_index) {
+  if (!impl_ || vehicle_index >= impl_->vehicles.size()) return;
+  JPH::VehicleConstraint* constraint = impl_->vehicles[vehicle_index].constraint.GetPtr();
+  if (!constraint) return;
+  // Surface-aware tire friction: instead of Jolt's default sqrt(tire, body)
+  // combine, scale the tire's own longitudinal/lateral grip by the contact
+  // surface's grip table, global rain wetness, and per-wheel aquaplaning. This
+  // supersedes the ground body's mFriction for tire contacts.
+  constraint->SetCombineFriction([this, vehicle_index](JPH::uint wheel_index, float& io_long,
+                                                       float& io_lat, const JPH::Body& body2,
+                                                       const JPH::SubShapeID& sub) {
+    // Resolve the surface: the contact shape's material, else the per-body side
+    // map (shared-shape instances), else asphalt.
+    SurfaceType surf = impl_->surface_of(body2.GetShape()->GetMaterial(sub));
+    if (surf == SurfaceType::kAsphalt) {
+      if (const SurfaceType* mapped =
+              impl_->body_surface.find(body2.GetID().GetIndexAndSequenceNumber())) {
+        surf = *mapped;
+      }
+    }
+    const SurfaceGripEntry& g = kSurfaceGrip[static_cast<u32>(surf)];
+    const f32 wet = WetGripMultiplier(surf, surface_wetness_);
+    f32 grip_long = g.longitudinal * wet;
+    f32 grip_lat = g.lateral * wet;
+
+    const Impl::VehicleEntry& entry = impl_->vehicles[vehicle_index];
+    const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(wheel_index));
+    if (water_height_ && wheel->HasContact()) {
+      const JPH::RVec3 cp = wheel->GetContactPosition();
+      const Vec3 p{static_cast<f32>(cp.GetX()), static_cast<f32>(cp.GetY()),
+                   static_cast<f32>(cp.GetZ())};
+      f32 surface_h = 0;
+      if (SampleWater(p, &surface_h, nullptr) && p.y < surface_h) {
+        const f32 aqua =
+            AquaplaneGrip(surface_h - p.y, wheel->GetSettings()->mRadius, entry.cached_speed);
+        grip_long *= aqua;
+        grip_lat *= aqua;
+      }
+    }
+    io_long *= grip_long;
+    io_lat *= grip_lat;
+  });
+}
+
+void PhysicsWorld::set_surface_wetness(f32 wetness) {
+  surface_wetness_ = std::clamp(wetness, 0.0f, 1.0f);
+}
+
+void PhysicsWorld::SetManualTransmission(VehicleId id, bool manual) {
+  if (!impl_ || id == 0 || id > impl_->vehicles.size()) return;
+  Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
+  if (!entry.alive) return;
+  entry.manual = manual;
+  auto* controller = static_cast<JPH::WheeledVehicleController*>(entry.constraint->GetController());
+  JPH::VehicleTransmission& trans = controller->GetTransmission();
+  trans.mMode = manual ? JPH::ETransmissionMode::Manual : JPH::ETransmissionMode::Auto;
+  // Manual mode won't auto-select a gear; drop it into 1st (clutch engaged) so
+  // the first throttle drives, matching how you'd start off in a manual car.
+  if (manual && trans.GetCurrentGear() == 0) trans.Set(1, 1.0f);
+}
+
+void PhysicsWorld::DriveVehicle(VehicleId id, const VehicleInput& input) {
+  if (!impl_ || id == 0 || id > impl_->vehicles.size()) return;
+  Impl::VehicleEntry& entry = impl_->vehicles[id - 1];
+  if (!entry.alive) return;
+  if (!entry.manual) {
+    // Automatic box: reuse the 4-float path (traction control, auto clutch);
+    // clutch and shift edges are ignored.
+    DriveVehicle(id, input.throttle, input.steer, input.brake, input.handbrake);
+    return;
+  }
+  auto* controller = static_cast<JPH::WheeledVehicleController*>(entry.constraint->GetController());
+  JPH::VehicleTransmission& trans = controller->GetTransmission();
+  int gear = trans.GetCurrentGear();
+  const int max_forward = static_cast<int>(trans.mGearRatios.size());
+  const int min_gear = -static_cast<int>(trans.mReverseGearRatios.size());
+  if (input.shift_up && !entry.prev_shift_up && gear < max_forward) ++gear;
+  if (input.shift_down && !entry.prev_shift_down && gear > min_gear) --gear;
+  entry.prev_shift_up = input.shift_up;
+  entry.prev_shift_down = input.shift_down;
+  // Clutch: 1 = fully disengaged -> 0 friction, so the engine spins free of the
+  // wheels. Applied every step so the pedal tracks continuously between shifts.
+  trans.Set(gear, std::clamp(1.0f - input.clutch, 0.0f, 1.0f));
+  controller->SetDriverInput(input.throttle, input.steer, input.brake, input.handbrake);
+  if (input.throttle != 0 || input.steer != 0 || input.brake != 0 || input.handbrake != 0) {
+    impl_->system->GetBodyInterface().ActivateBody(entry.body);
+  }
 }
 
 void PhysicsWorld::DriveVehicle(VehicleId id, f32 forward, f32 right, f32 brake, f32 handbrake) {
@@ -1422,18 +1787,65 @@ bool PhysicsWorld::GetVehicleState(VehicleId id, VehicleState* out) const {
 
   const auto* controller =
       static_cast<const JPH::WheeledVehicleController*>(entry.constraint->GetController());
-  out->rpm = controller->GetEngine().GetCurrentRPM();
-  out->gear = controller->GetTransmission().GetCurrentGear();
+  const JPH::VehicleEngine& engine = controller->GetEngine();
+  const JPH::VehicleTransmission& trans = controller->GetTransmission();
+  out->rpm = engine.GetCurrentRPM();
+  out->gear = trans.GetCurrentGear();
   out->forward_speed = VehicleForwardSpeed(id);
+  // Engine load: the throttle the box actually lets reach the engine (auto mode
+  // multiplies by clutch friction, matching WheeledVehicleController). Since
+  // GetTorque is linear in that input, load == delivered/max at this rpm.
+  const f32 clutch = trans.GetClutchFriction();
+  const f32 applied = std::fabs(controller->GetForwardInput()) *
+                      (trans.mMode == JPH::ETransmissionMode::Auto ? clutch : 1.0f);
+  const f32 max_torque_at_rpm = engine.GetTorque(1.0f);
+  out->engine_torque = engine.GetTorque(applied);
+  out->engine_load =
+      max_torque_at_rpm > 1.0e-3f ? std::clamp(out->engine_torque / max_torque_at_rpm, 0.0f, 1.0f)
+                                  : 0.0f;
+  out->is_shifting = clutch < 0.99f;
   out->wheel_count = entry.wheel_count;
+
+  JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
   for (u32 i = 0; i < entry.wheel_count && i < 4; ++i) {
     const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(i));
+    const JPH::WheelSettings* settings = wheel->GetSettings();
     VehicleState::WheelState& ws = out->wheels[i];
     ws.contact = wheel->HasContact();
     ws.suspension_length = wheel->GetSuspensionLength();
+    const f32 travel = settings->mSuspensionMaxLength - settings->mSuspensionMinLength;
+    ws.suspension_compression =
+        travel > 1.0e-4f
+            ? std::clamp((settings->mSuspensionMaxLength - wheel->GetSuspensionLength()) / travel,
+                         0.0f, 1.0f)
+            : 0.0f;
     ws.longitudinal_slip = wheel->mLongitudinalSlip;
     ws.angular_velocity = wheel->GetAngularVelocity();
     ws.rotation_angle = wheel->GetRotationAngle();
+    ws.surface = SurfaceType::kAsphalt;
+    ws.submerged = false;
+    ws.wading_depth = 0;
+    if (wheel->HasContact()) {
+      if (JPH::RefConst<JPH::Shape> shape = bodies.GetShape(wheel->GetContactBodyID())) {
+        ws.surface = impl_->surface_of(shape->GetMaterial(wheel->GetContactSubShapeID()));
+      }
+      if (ws.surface == SurfaceType::kAsphalt) {
+        if (const SurfaceType* mapped = impl_->body_surface.find(
+                wheel->GetContactBodyID().GetIndexAndSequenceNumber())) {
+          ws.surface = *mapped;
+        }
+      }
+      if (water_height_) {
+        const JPH::RVec3 cp = wheel->GetContactPosition();
+        const Vec3 p{static_cast<f32>(cp.GetX()), static_cast<f32>(cp.GetY()),
+                     static_cast<f32>(cp.GetZ())};
+        f32 surface_h = 0;
+        if (SampleWater(p, &surface_h, nullptr) && p.y < surface_h) {
+          ws.submerged = true;
+          ws.wading_depth = surface_h - p.y;
+        }
+      }
+    }
   }
   return true;
 }

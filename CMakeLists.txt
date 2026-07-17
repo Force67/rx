@@ -325,6 +325,14 @@ if(RX_BUILD_TESTS)
   add_test(NAME vfs_test COMMAND vfs_test)
 endif()
 
+# Procedural vehicle audio: engine/skid/wind synthesis, the SynthVoice seam and
+# the VehicleAudio driver through the mixer. Pure CPU (no device), always runs.
+if(RX_BUILD_TESTS)
+  add_executable(vehicle_audio_test test/vehicle_audio_test.cc)
+  target_link_libraries(vehicle_audio_test PRIVATE rx::audio rx::core)
+  add_test(NAME vehicle_audio_test COMMAND vehicle_audio_test)
+endif()
+
 # Editor foundations test: reflection, scene round-trip, undo/redo and hierarchy
 # composition. Fully headless (no GPU), so it always runs under plain ctest.
 if(RX_BUILD_TESTS)
@@ -341,6 +349,15 @@ if(RX_BUILD_TESTS)
   add_executable(camera_rig_test test/camera_rig_test.cc)
   target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME camera_rig_test COMMAND camera_rig_test)
+
+  # Vehicle realism over the real Jolt vehicle path: acceleration + auto-shift,
+  # surface-dependent braking (ice vs asphalt), rain wetness, manual gearbox,
+  # telemetry ranges and water aquaplaning. Headless (no GPU), needs Jolt.
+  if(RX_JOLT)
+    add_executable(vehicle_test test/vehicle_test.cc)
+    target_link_libraries(vehicle_test PRIVATE rx::physics rx::core)
+    add_test(NAME vehicle_test COMMAND vehicle_test)
+  endif()
 
   add_executable(world_streaming_test test/world_streaming_test.cc)
   target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
