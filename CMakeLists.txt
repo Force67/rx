@@ -532,6 +532,14 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
     add_test(NAME placement_gpu_test COMMAND placement_gpu_test)
   endif()
 
+  # Heightfield fluid solver: fills a bowl behind a ridge, steps the GPU sim,
+  # checks volume conservation + no NaNs, then removes the ridge and asserts the
+  # dam-break flood settles level. Skips (null backend) with no driver; the real
+  # GPU path runs under vkrun.
+  add_executable(fluid_sim_test test/fluid_sim_test.cc)
+  target_link_libraries(fluid_sim_test PRIVATE rx::render rx::core)
+  add_test(NAME fluid_sim_test COMMAND fluid_sim_test)
+
   # Acceleration-structure compaction: builds a BLAS with allow_compaction,
   # queries the compacted size across a submit boundary, compact-copies into a
   # tight structure and builds a TLAS over it. Skips (exit 0) with no driver or

@@ -60,6 +60,16 @@ class DemoScenes {
 
  private:
   void CreateWaterDemoScene();
+  // Heightfield fluid solver demo (--demo fluid): a reservoir held by a dam of
+  // gray boxes, released on a timer to flood a lower basin, plus a lava vent
+  // whose flow runs downhill and solidifies. Drives renderer.fluid_domain.
+  void CreateFluidDemoScene();
+  // Regenerates the CPU-authoritative sim bed from the analytic FluidDemoBed,
+  // adding the channel-plugging dam strip only while dam_up_. Bumps the pointer.
+  void RebuildFluidBed();
+  // Feeds the fluid domain + lava source into the frame and runs the dam-break
+  // trigger (timer or RX_FLUID_DAM_FRAME) with the box-sinking animation.
+  void EmitFluid(f32 dt, render::FrameView& view);
   // Weather demo: shelter + blocks scene for volumetric precipitation, sky
   // occlusion (dry under the roof) and surface wetness / snow cover.
   void CreateWeatherDemoScene();
@@ -132,6 +142,19 @@ class DemoScenes {
   base::Vector<Vec3> water_cube_prev_;
   base::Vector<f32> water_cube_slam_cd_;  // per-cube splash cooldown (s)
   f32 water_time_ = 0;                    // wave clock for the Gerstner proxy
+  // --demo fluid: the GPU heightfield solver's world domain. The bed and
+  // initial-water arrays are CPU-authoritative and live in these members (the
+  // FluidDomainDesc holds pointers into them, so they must outlive it).
+  std::vector<f32> fluid_bed_;
+  std::vector<f32> fluid_initial_water_;
+  render::FluidDomainDesc fluid_domain_{};
+  bool fluid_scene_ = false;
+  bool dam_up_ = true;
+  f32 fluid_time_ = 0;                     // scene-local clock (dam-break timer)
+  u64 fluid_frame_ = 0;                    // frame counter (RX_FLUID_DAM_FRAME)
+  base::Vector<ecs::Entity> fluid_dam_boxes_;  // the visible dam slabs
+  f32 fluid_dam_box_y0_ = 0;               // rest Y of the dam boxes
+  f32 fluid_dam_sink_ = -1.0f;             // >=0 once breaking: seconds elapsed
   // Weather demo thunderstorm scheduler state.
   bool storm_enabled_ = false;
   bool weather_scene_ = false;  // weather demo active: re-clamp its storm sun

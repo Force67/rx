@@ -256,6 +256,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (puppet_) puppet_->Emit(dt, view);
   if (drive_) drive_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
+  if (fluid_scene_) EmitFluid(dt, view);
   if (cloth_ != 0) EmitCloth(view);
   UpdateParticles(dt, view);
   if (gpu_particle_count_ > 0) {
@@ -424,6 +425,59 @@ struct Spin {
   f32 angle = 0;
   f32 speed = 0.9f;
 };
+
+// Hermite smoothstep. Robust to reversed edges (e0 > e1), so a feature can ramp
+// in either direction of z below.
+inline f32 SmoothStep(f32 e0, f32 e1, f32 x) {
+  f32 t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+
+// Analytic terrain bed for --demo fluid, world meters (XZ) -> world-Y height.
+// Kept a free function so the sim's CPU bed array and the visual terrain mesh
+// evaluate the SAME surface. All features are smoothsteps/gaussians (C1, no
+// step steeper than ~45 deg) — heightfield solvers ring on near-vertical beds.
+// The dam strip is NOT part of this function (the visible dam is boxes, and the
+// sim's dam is stamped in RebuildFluidBed only while dam_up_).
+f32 FluidDemoBed(f32 x, f32 z) {
+  // Lower basin is the datum (~0). Everything is built up from here.
+  // Domain-edge rim: the outer ~12 m rises to ~2.5 m on every side so the flood
+  // can't visibly spill out of the 128 m domain.
+  f32 edge = std::max(std::fabs(x), std::fabs(z));
+  f32 h = 2.5f * SmoothStep(52.0f, 64.0f, edge);
+
+  // Upper reservoir plateau (~6 m), gated to the central x band so it walls the
+  // bowl without reaching under the lava hill off to +x. The z ramp reaches
+  // full height by z = -19 — UPSTREAM of the dam band — so the rim beside the
+  // channel throat stays above the 5.2 m fill level; a longer ramp (the first
+  // cut used -12..-24) leaves a ~4 m shoulder the reservoir quietly drains
+  // around, dam or no dam.
+  f32 plateau_x = 1.0f - SmoothStep(22.0f, 32.0f, std::fabs(x));
+  f32 plateau = 6.0f * SmoothStep(-13.0f, -19.0f, z) * plateau_x;
+
+  // Carve the reservoir bowl into the plateau: floor ~3.5 m, centred (0,-40),
+  // radius ~18 m (a smooth radial depression).
+  f32 rb = std::sqrt(x * x + (z + 40.0f) * (z + 40.0f));
+  f32 bowl = 2.5f * (1.0f - SmoothStep(6.0f, 18.0f, rb));
+  h = std::max(h, plateau - bowl);
+
+  // Channel notch: the reservoir's only outlet. A 10 m gap at x in [-5,5] whose
+  // floor descends 3.5 m -> 0.5 m as z runs -24 -> -12, min-blended through the
+  // plateau lip (1 m feather in x, ramps in/out over ~1 m in z).
+  f32 channel_floor = 3.5f - 3.0f * SmoothStep(-24.0f, -12.0f, z);
+  f32 cmask = (1.0f - SmoothStep(5.0f, 6.0f, std::fabs(x))) *
+              SmoothStep(-25.0f, -24.0f, z) * (1.0f - SmoothStep(-13.0f, -12.0f, z));
+  h -= std::max(0.0f, h - channel_floor) * cmask;
+
+  // Lava hill on the +x side: a smooth ridge ~8 m peaking near (35,-30). Its +z
+  // flank runs ~30+ m downhill into the lower basin (slope ~15 deg), so the vent
+  // near its top feeds a flow that runs, slows and solidifies before pooling.
+  f32 hx = x - 35.0f, hz = z + 30.0f;
+  f32 hill = 8.0f * std::exp(-(hx * hx + hz * hz) / (2.0f * 12.0f * 12.0f));
+  h = std::max(h, hill);
+
+  return h;
+}
 
 }  // namespace
 
@@ -630,6 +684,231 @@ void DemoScenes::CreateWaterDemoScene() {
   camera_.set_position({-14.0f, 3.0f, 0.0f});
   camera_.set_yaw_pitch(1.5708f, -0.25f);
   RX_INFO("water demo scene");
+}
+
+void DemoScenes::RebuildFluidBed() {
+  // (Re)fill the CPU-authoritative bed from FluidDemoBed at cell centres. While
+  // dam_up_, stamp the channel-plugging wall (raise to 7 m over x in [-5.5,5.5],
+  // z in [-17,-15] with a ~1 m feather); on break we omit the strip and the
+  // reservoir floods out through the notch. A 512^2 R32F re-upload is trivial.
+  const u32 res = fluid_domain_.resolution;
+  const f32 l = fluid_domain_.extent / static_cast<f32>(res);
+  fluid_bed_.resize(static_cast<size_t>(res) * res);
+  for (u32 j = 0; j < res; ++j) {
+    f32 z = fluid_domain_.origin[1] + (static_cast<f32>(j) + 0.5f) * l;
+    for (u32 i = 0; i < res; ++i) {
+      f32 x = fluid_domain_.origin[0] + (static_cast<f32>(i) + 0.5f) * l;
+      f32 h = FluidDemoBed(x, z);
+      if (dam_up_) {
+        // The wall's flat top must run past the notch shoulders (bed ~5.2-5.9 m
+        // at |x| 5.5-6.5): the startup slosh piles water ~1 m above the rest
+        // level and spills over anything lower than ~6.5 m there.
+        f32 dmx = 1.0f - SmoothStep(7.0f, 8.5f, std::fabs(x));
+        f32 dmz = SmoothStep(-18.5f, -17.5f, z) * (1.0f - SmoothStep(-14.5f, -13.5f, z));
+        h = std::max(h, 8.5f * dmx * dmz);
+      }
+      fluid_bed_[static_cast<size_t>(j) * res + i] = h;
+    }
+  }
+  fluid_domain_.bed = fluid_bed_.data();  // resize keeps size; re-point defensively
+}
+
+void DemoScenes::CreateFluidDemoScene() {
+  // Opt into the optional solver (default off): a 128 m, 512^2 world domain
+  // centred on the origin (cell l = 0.25 m).
+  renderer_.settings().fluid_sim = true;
+  fluid_scene_ = true;
+  fluid_domain_.origin[0] = -64.0f;
+  fluid_domain_.origin[1] = -64.0f;
+  fluid_domain_.extent = 128.0f;
+  fluid_domain_.resolution = 512;
+  fluid_domain_.ambient_temperature = 20.0f;
+  fluid_domain_.bed_version = 1;
+
+  // Bed (with the dam in) + a reservoir pre-filled to level 5.2 m behind it. The
+  // initial water is computed from the dam-free bed and confined to the bowl and
+  // the channel throat upstream of the dam, so the lower basin starts DRY (the
+  // payoff is the flood arriving). max(0, 5.2 - bed) leaves the ~1.7 m pool over
+  // the 3.5 m bowl floor and zeroes the walls automatically.
+  RebuildFluidBed();
+  const u32 res = fluid_domain_.resolution;
+  const f32 l = fluid_domain_.extent / static_cast<f32>(res);
+  fluid_initial_water_.assign(static_cast<size_t>(res) * res, 0.0f);
+  for (u32 j = 0; j < res; ++j) {
+    f32 z = fluid_domain_.origin[1] + (static_cast<f32>(j) + 0.5f) * l;
+    for (u32 i = 0; i < res; ++i) {
+      f32 x = fluid_domain_.origin[0] + (static_cast<f32>(i) + 0.5f) * l;
+      f32 rb = std::sqrt(x * x + (z + 40.0f) * (z + 40.0f));
+      bool in_reservoir = rb < 19.0f || (std::fabs(x) < 6.0f && z < -18.0f && z > -25.0f);
+      if (!in_reservoir) continue;
+      f32 depth = 5.2f - FluidDemoBed(x, z);
+      if (depth > 0.0f) fluid_initial_water_[static_cast<size_t>(j) * res + i] = depth;
+    }
+  }
+  fluid_domain_.initial_water = fluid_initial_water_.data();
+
+  // Visual terrain mesh over the domain plus a skirt out to +/-80 m (positions
+  // beyond the domain clamp to the rim, so the world reads as bounded without a
+  // hard edge). Same FluidDemoBed as the sim, WITHOUT the dam strip. NOTE: the
+  // lava crust the sim grows (solidified flow raising the fluid-visible surface)
+  // is NOT reflected in this static mesh — the fluid surface renderer draws the
+  // crust; the terrain is just the bed.
+  constexpr f32 kSkirt = 80.0f;
+  constexpr u32 kGrid = 288;  // ~0.56 m spacing across the 160 m span
+  constexpr f32 kEps = 0.5f;  // central-difference step for normals
+  asset::Material rock_material;
+  rock_material.id = asset::MakeAssetId("demo/fluid_rock");
+  rock_material.base_color_factor[0] = 0.30f;  // brownish-gray, matte
+  rock_material.base_color_factor[1] = 0.27f;
+  rock_material.base_color_factor[2] = 0.23f;
+  rock_material.base_color_factor[3] = 1.0f;
+  rock_material.metallic_factor = 0.0f;
+  rock_material.roughness_factor = 0.95f;
+
+  asset::Mesh terrain;
+  terrain.id = asset::MakeAssetId("demo/fluid_terrain");
+  terrain.lods.emplace_back();
+  asset::MeshLod& tlod = terrain.lods[0];
+  for (u32 gy = 0; gy <= kGrid; ++gy) {
+    for (u32 gx = 0; gx <= kGrid; ++gx) {
+      f32 x = -kSkirt + 2.0f * kSkirt * static_cast<f32>(gx) / kGrid;
+      f32 z = -kSkirt + 2.0f * kSkirt * static_cast<f32>(gy) / kGrid;
+      f32 sx = std::clamp(x, -64.0f, 64.0f);  // skirt clamps to the domain edge
+      f32 sz = std::clamp(z, -64.0f, 64.0f);
+      f32 y = FluidDemoBed(sx, sz);
+      Vec3 n = Normalize(Vec3{FluidDemoBed(sx - kEps, sz) - FluidDemoBed(sx + kEps, sz),
+                              2.0f * kEps,
+                              FluidDemoBed(sx, sz - kEps) - FluidDemoBed(sx, sz + kEps)});
+      asset::Vertex v{};
+      v.position[0] = x;
+      v.position[1] = y;
+      v.position[2] = z;
+      v.normal[0] = n.x;
+      v.normal[1] = n.y;
+      v.normal[2] = n.z;
+      v.tangent[0] = 1;
+      v.tangent[3] = 1;
+      v.uv[0] = x / 8.0f;
+      v.uv[1] = z / 8.0f;
+      v.color = 0xffffffff;
+      tlod.vertices.push_back(v);
+    }
+  }
+  for (u32 gy = 0; gy < kGrid; ++gy) {
+    for (u32 gx = 0; gx < kGrid; ++gx) {
+      u32 a = gy * (kGrid + 1) + gx;
+      u32 b = a + 1;
+      u32 c = a + (kGrid + 1);
+      u32 d = c + 1;
+      for (u32 index : {a, b, c, b, d, c}) tlod.indices.push_back(index);
+    }
+  }
+  asset::Submesh tsub;
+  tsub.index_count = static_cast<u32>(tlod.indices.size());
+  tsub.material = rock_material.id;
+  tlod.submeshes.push_back(tsub);
+  terrain.bounds_radius = kSkirt * 1.6f;
+
+  // The visible dam: gray box slabs spanning the channel throat. MakeBox leaves
+  // its submesh list empty (the mayorhem MakeBox-no-submesh pitfall), so append
+  // one carrying the gray material explicitly. Static entities (no physics).
+  asset::Material dam_material;
+  dam_material.id = asset::MakeAssetId("demo/fluid_dam");
+  dam_material.base_color_factor[0] = 0.40f;
+  dam_material.base_color_factor[1] = 0.40f;
+  dam_material.base_color_factor[2] = 0.42f;
+  dam_material.base_color_factor[3] = 1.0f;
+  dam_material.metallic_factor = 0.0f;
+  dam_material.roughness_factor = 0.8f;
+  asset::Mesh dam_box = asset::MakeBox(1.45f, 3.5f, 1.2f, asset::MakeAssetId("demo/fluid_dam_box"));
+  dam_box.lods[0].submeshes.push_back(
+      {0, static_cast<u32>(dam_box.lods[0].indices.size()), dam_material.id});
+
+  if (!config_.headless) {
+    renderer_.UploadMaterial(rock_material);
+    renderer_.UploadMesh(terrain);
+    renderer_.UploadMaterial(dam_material);
+    renderer_.UploadMesh(dam_box);
+  }
+
+  ecs::Entity terrain_entity = world_.Create();
+  world_.Add(terrain_entity, scene::Transform{});
+  world_.Add(terrain_entity, scene::Renderable{terrain.id});
+
+  // Four slabs across x in [-5.6, 5.6] at z = -16, sitting on the channel floor
+  // and rising to ~7 m (box half-height 3.5, centre y ~3.2). Tracked so they can
+  // sink out of sight when the dam breaks.
+  fluid_dam_box_y0_ = 3.2f;
+  const f32 box_x[4] = {-4.2f, -1.4f, 1.4f, 4.2f};
+  for (f32 bx : box_x) {
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {bx, fluid_dam_box_y0_, -16.0f}});
+    world_.Add(e, scene::Renderable{dam_box.id});
+    fluid_dam_boxes_.push_back(e);
+  }
+
+  // Sun/sky matching the other outdoor demos.
+  renderer_.settings().sun_direction = Normalize(Vec3{-0.6f, -0.55f, -0.58f});
+  renderer_.settings().sun_intensity = 3.2f;
+  renderer_.settings().sun_color = {1.0f, 0.95f, 0.88f};
+
+  // Camera at the channel mouth: reservoir + dam + lower basin all in frame,
+  // the lava hill visible off to the right. yaw/pitch aim toward (0, ~2, -15).
+  // From the basin's west rim: reservoir + dam center-frame, the flood runs
+  // toward the camera, the lava hill on the right edge. (forward() is
+  // (sin yaw, sin pitch, -cos yaw), so yaw = atan2(dx, -dz).)
+  camera_.set_position({-38.0f, 26.0f, 18.0f});
+  camera_.set_yaw_pitch(0.90f, -0.36f);
+  camera_.speed = 12.0f;
+  RX_INFO("fluid demo scene: dam-break reservoir + lava vent");
+}
+
+void DemoScenes::EmitFluid(f32 dt, render::FrameView& view) {
+  fluid_time_ += dt;
+
+  // Dam-break trigger: frame RX_FLUID_DAM_FRAME if set (deterministic captures),
+  // else the scene-local 10 s mark. On break, rebuild the bed without the strip,
+  // bump bed_version so the solver re-uploads, and start sinking the boxes.
+  if (dam_up_) {
+    bool trigger = false;
+    const char* frame_env = std::getenv("RX_FLUID_DAM_FRAME");
+    if (frame_env && frame_env[0]) {
+      trigger = fluid_frame_ >= static_cast<u64>(std::strtoull(frame_env, nullptr, 10));
+    } else {
+      trigger = fluid_time_ >= 10.0f;
+    }
+    if (trigger) {
+      dam_up_ = false;
+      RebuildFluidBed();
+      ++fluid_domain_.bed_version;
+      fluid_dam_sink_ = 0.0f;
+      RX_INFO("fluid demo: dam break (frame {}, t={:.2f}s)", fluid_frame_, fluid_time_);
+    }
+  }
+
+  // Sink the visible slabs ~10 m below the bed over ~1.5 s (eased) so the wall
+  // drops out of the way as the flood front arrives.
+  if (fluid_dam_sink_ >= 0.0f) {
+    fluid_dam_sink_ += dt;
+    f32 drop = 10.0f * SmoothStep(0.0f, 1.5f, fluid_dam_sink_);
+    for (ecs::Entity e : fluid_dam_boxes_) {
+      if (auto* t = world_.Get<scene::Transform>(e)) t->position[1] = fluid_dam_box_y0_ - drop;
+    }
+  }
+
+  // Feed the domain + a persistent lava vent near the hilltop every frame. The
+  // rate pulses +/-30% on a slow sine for an organic feel. (initial_water only
+  // applies on (re)configure, so leaving the pointer set is harmless.)
+  view.fluid_domain = &fluid_domain_;
+  render::FluidSource lava;
+  lava.position = {35.0f, 0.0f, -30.0f};
+  lava.radius = 2.5f;
+  lava.rate = 0.35f * (1.0f + 0.3f * std::sin(fluid_time_ * 0.7f));
+  lava.fluid = 1;
+  lava.temperature = 1250.0f;
+  view.fluid_sources.push_back(lava);
+
+  ++fluid_frame_;
 }
 
 void DemoScenes::CreateMaterialDemoScene() {
@@ -2863,6 +3142,10 @@ void DemoScenes::CreateMaterialXDemoScene() {
 void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "water") {
     CreateWaterDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "fluid") {
+    CreateFluidDemoScene();
     return;
   }
   if (config_.demo_scene == "weather") {

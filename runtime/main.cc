@@ -12,7 +12,7 @@ namespace {
 void PrintUsage() {
   RX_INFO("usage: rx [options]");
   RX_INFO("  --gltf <path>         load a gltf/glb scene (e.g. assets/sponza/Sponza.gltf)");
-  RX_INFO("  --demo <id>           builtin scene: water | weather | materials | gaussian | cornell |");
+  RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");
   RX_INFO("                        cloth | locomotion | ship | nav | gym | puppet | drive | placement | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
   RX_INFO("  --headless            no window, no renderer");
   RX_INFO("  --preset <tier>       auto (default) | android | steamdeck | low |");
