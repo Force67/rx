@@ -6,20 +6,10 @@
 
 #include <cmath>
 
+#include "locomotion/internal_math.h"
+
 namespace rx::locomotion {
-namespace {
-
-bool Finite(const Vec3& v) {
-  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-}
-
-bool Finite(const Quat& q) {
-  return std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w);
-}
-
-f32 PlanarSpeed(const Vec3& v) { return std::sqrt(v.x * v.x + v.z * v.z); }
-
-}  // namespace
+using namespace internal;
 
 void StateEstimator::Measure(const physics::PhysicsWorld& physics, const BipedRig& rig,
                              const PhysicalModifiers& modifiers, CharacterMeasurements* out) const {
@@ -42,7 +32,10 @@ void StateEstimator::Measure(const physics::PhysicsWorld& physics, const BipedRi
   f32 mass_sum = 0;
   for (u32 i = 0; i < kBodyPartCount; ++i) {
     const physics::BodyId id = rig.body[i];
-    const f32 m = physics.GetBodyMass(id);
+    // Masses were resolved at build (rig.body_mass[]); no need to take a Jolt
+    // body lock per body per tick. A failed COM/velocity read below still marks
+    // the measurement invalid, so a dead body cannot slip through.
+    const f32 m = rig.body_mass[i];
     Vec3 com;
     Vec3 lin;
     if (m <= 0 || !physics.GetBodyCenterOfMass(id, &com) ||
@@ -104,7 +97,7 @@ void StateEstimator::Measure(const physics::PhysicsWorld& physics, const BipedRi
     if (up_contact) {
       fm.contact_normal = Length(normal_sum) > 0 ? Normalize(normal_sum) : Vec3{0, 1, 0};
       fm.contact_impulse = impulse_sum;
-      fm.slip_speed = PlanarSpeed(fm.velocity);
+      fm.slip_speed = PlanarLength(fm.velocity);
       normal_accum += fm.contact_normal;
       ++ground_feet;
     } else {
@@ -122,30 +115,28 @@ void StateEstimator::Measure(const physics::PhysicsWorld& physics, const BipedRi
   out->ground_normal = ground_feet > 0 && Length(normal_accum) > 0 ? Normalize(normal_accum)
                                                                    : Vec3{0, 1, 0};
 
-  // Crown height: the head body carries no stored radius, so approximate it from
-  // the rig proportions. r_pelvis = pelvis_height - leg_length and the head
-  // radius is 0.9 * r_pelvis (0.09 vs 0.10 * height scale), so crown = head COM
-  // y + 0.9 * (pelvis_height - leg_length).
+  // Crown height: the head sphere's radius comes straight from the rig geometry
+  // (rig.head_radius), so crown = head COM y + head_radius.
   Vec3 head_com;
   if (physics.GetBodyCenterOfMass(rig.body[static_cast<u32>(BodyPart::kHead)], &head_com)) {
-    const f32 head_radius = 0.9f * (rig.pelvis_height - rig.leg_length);
-    out->estimated_body_height = (head_com.y + head_radius) - min_sole_y;
+    out->estimated_body_height = (head_com.y + rig.head_radius) - min_sole_y;
   } else {
     ok = false;
   }
 
   // Finite sweep over everything stored.
-  bool finite = Finite(out->root_position) && Finite(out->root_rotation) &&
-                Finite(out->root_linear_velocity) && Finite(out->root_angular_velocity) &&
-                Finite(out->com_position) && Finite(out->com_velocity) &&
-                Finite(out->ground_normal) && std::isfinite(out->estimated_body_height);
+  bool finite = FiniteV(out->root_position) && FiniteQ(out->root_rotation) &&
+                FiniteV(out->root_linear_velocity) && FiniteV(out->root_angular_velocity) &&
+                FiniteV(out->com_position) && FiniteV(out->com_velocity) &&
+                FiniteV(out->ground_normal) && std::isfinite(out->estimated_body_height);
   for (u32 f = 0; f < kFootCount; ++f) {
     const FootMeasurement& fm = out->foot[f];
-    finite = finite && Finite(fm.position) && Finite(fm.velocity) && Finite(fm.contact_normal) &&
+    finite = finite && FiniteV(fm.position) && FiniteV(fm.velocity) && FiniteV(fm.contact_normal) &&
              std::isfinite(fm.contact_impulse) && std::isfinite(fm.slip_speed);
   }
 
   if (ok && finite) {
+    out->gravity = Length(physics.gravity());  // measured |world gravity|, m/s^2
     out->valid = true;
   } else {
     *out = CharacterMeasurements{};

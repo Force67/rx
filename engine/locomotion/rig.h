@@ -27,6 +27,7 @@ struct RX_LOCOMOTION_EXPORT BipedRig {
   f32 body_mass[kBodyPartCount] = {};        // kg, resolved at build
   Quat bind_constraint[kRigJointCount] = {}; // constraint-space bind snapshot
   f32 total_mass = 0;
+  i32 filter_group = -1;  // shared collision filter group; released in Destroy
 
   // Derived geometry the controller reads back (metres).
   f32 leg_length = 0;      // hip pivot to sole
@@ -38,13 +39,16 @@ struct RX_LOCOMOTION_EXPORT BipedRig {
   f32 lower_arm_length = 0;
   f32 pelvis_height = 0;   // pelvis body origin above the soles at bind
   f32 sole_offset = 0;     // foot body origin to sole along body -Y
+  f32 head_radius = 0;     // head sphere radius (crown = head COM + this)
   Vec3 hip_local[kFootCount] = {};  // hip pivots in pelvis-body local space
 
   // Builds the ragdoll standing with its soles at `feet_position`, facing yaw
-  // radians (yaw 0 faces -Z). All bodies share one collision filter group with
-  // adjacent-pair collisions disabled. Motors are enabled on every joint at
-  // the parameter drive and hold the bind pose. False (and no bodies) when the
-  // physics world rejects any piece.
+  // radians (yaw 0 faces -Z). Spawn yaw uses the SAME convention as
+  // rx::character::HeadingQuat (rotation about -Y), so a rig and a character
+  // spawned at one yaw face the same way. All bodies share one collision filter
+  // group with adjacent-pair collisions disabled. Motors are enabled on every
+  // joint at the parameter drive and hold the bind pose. False (and no bodies)
+  // when the physics world rejects any piece.
   static bool Build(physics::PhysicsWorld& physics, const ControllerParameters& params,
                     const Vec3& feet_position, f32 yaw, BipedRig* out);
   void Destroy(physics::PhysicsWorld& physics);

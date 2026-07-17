@@ -1,6 +1,7 @@
 #include "physics/physics_world.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -227,11 +228,15 @@ struct PhysicsWorld::Impl {
     base::Vector<PhysicsWorld::BodyContact> contacts;
   };
   // Jolt contact listener that records manifolds touching any watched body.
-  // Callbacks fire concurrently from the physics job threads, so every access
-  // to `watched` (recording, clearing, watch/unwatch, reading) takes `mutex`.
+  // Callbacks fire concurrently from the physics job threads. `watched_count`
+  // mirrors watched.size() so the common (nothing watched) case bails without
+  // locking; every access to `watched` itself (recording, clearing,
+  // watch/unwatch, reading) still takes `mutex`, and `watched_count` is only
+  // written while holding it.
   struct ContactRecorder final : public JPH::ContactListener {
     std::mutex mutex;
     base::Vector<WatchedContacts> watched;
+    std::atomic<u32> watched_count{0};
 
     // Caller must hold `mutex`.
     WatchedContacts* Find(JPH::BodyID id) {
@@ -241,13 +246,25 @@ struct PhysicsWorld::Impl {
       return nullptr;
     }
 
+    // Two-phase locking so the parallel narrowphase is not serialized on one
+    // global mutex per contact: (1) bail lock-free when nothing is watched;
+    // (2) take the lock only to test which body is watched; (3) do the heavy
+    // manifold math and EstimateCollisionResponse OUTSIDE the lock (the manifold
+    // is callback-local); (4) re-lock, re-Find by BodyID (entries may have moved
+    // since step 2) and push. Behavior is identical to a single-lock version.
     void Record(const JPH::Body& body1, const JPH::Body& body2,
                 const JPH::ContactManifold& manifold, const JPH::ContactSettings& settings) {
-      std::lock_guard<std::mutex> guard(mutex);
-      if (watched.empty()) return;
-      WatchedContacts* w1 = Find(body1.GetID());
-      WatchedContacts* w2 = Find(body2.GetID());
-      if (!w1 && !w2) return;
+      if (watched_count.load(std::memory_order_acquire) == 0) return;
+      const JPH::BodyID id1 = body1.GetID();
+      const JPH::BodyID id2 = body2.GetID();
+      bool watch1;
+      bool watch2;
+      {
+        std::lock_guard<std::mutex> guard(mutex);
+        watch1 = Find(id1) != nullptr;
+        watch2 = Find(id2) != nullptr;
+      }
+      if (!watch1 && !watch2) return;
 
       // World contact point: average of the manifold points on body 1's
       // surface (they coincide with body 2's when there is no penetration).
@@ -271,21 +288,26 @@ struct PhysicsWorld::Impl {
       for (f32 point_impulse : estimate.mContactImpulse) impulse += point_impulse;
       impulse = std::abs(impulse);
 
-      if (w1) {
-        PhysicsWorld::BodyContact contact;
-        contact.position = position;
-        contact.normal = {-normal.GetX(), -normal.GetY(), -normal.GetZ()};
-        contact.impulse = impulse;
-        contact.other = body2.GetID().GetIndexAndSequenceNumber() + 1;
-        w1->contacts.push_back(contact);
+      std::lock_guard<std::mutex> guard(mutex);
+      if (watch1) {
+        if (WatchedContacts* w1 = Find(id1)) {
+          PhysicsWorld::BodyContact contact;
+          contact.position = position;
+          contact.normal = {-normal.GetX(), -normal.GetY(), -normal.GetZ()};
+          contact.impulse = impulse;
+          contact.other = id2.GetIndexAndSequenceNumber() + 1;
+          w1->contacts.push_back(contact);
+        }
       }
-      if (w2) {
-        PhysicsWorld::BodyContact contact;
-        contact.position = position;
-        contact.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
-        contact.impulse = impulse;
-        contact.other = body1.GetID().GetIndexAndSequenceNumber() + 1;
-        w2->contacts.push_back(contact);
+      if (watch2) {
+        if (WatchedContacts* w2 = Find(id2)) {
+          PhysicsWorld::BodyContact contact;
+          contact.position = position;
+          contact.normal = {normal.GetX(), normal.GetY(), normal.GetZ()};
+          contact.impulse = impulse;
+          contact.other = id1.GetIndexAndSequenceNumber() + 1;
+          w2->contacts.push_back(contact);
+        }
       }
     }
 
@@ -745,7 +767,16 @@ i32 PhysicsWorld::CreateBodyFilterGroup(u32 subgroup_count) {
 
 void PhysicsWorld::DisableFilterPair(i32 group, u32 sub_a, u32 sub_b) {
   if (!impl_ || group < 0 || group >= static_cast<i32>(impl_->filter_groups.size())) return;
+  if (!impl_->filter_groups[group]) return;  // released slot: treat as invalid
   impl_->filter_groups[group]->DisableCollision(sub_a, sub_b);
+}
+
+void PhysicsWorld::ReleaseBodyFilterGroup(i32 group) {
+  if (!impl_ || group < 0 || group >= static_cast<i32>(impl_->filter_groups.size())) return;
+  // Drop our reference but keep the slot so later indices stay stable. The
+  // bodies still holding this group each own a RefConst to the table, so it
+  // survives until the last of them is removed.
+  impl_->filter_groups[group] = nullptr;
 }
 
 BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc& desc, const Vec3& position,
@@ -760,7 +791,8 @@ BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc& desc, const Vec3& position
                                      JPH::EMotionType::Dynamic, layers::kDynamic);
   settings.mFriction = friction;
   settings.mRestitution = restitution;
-  if (filter_group >= 0 && filter_group < static_cast<i32>(impl_->filter_groups.size())) {
+  if (filter_group >= 0 && filter_group < static_cast<i32>(impl_->filter_groups.size()) &&
+      impl_->filter_groups[filter_group]) {
     settings.mCollisionGroup = JPH::CollisionGroup(
         impl_->filter_groups[filter_group], static_cast<JPH::CollisionGroup::GroupID>(filter_group),
         static_cast<JPH::CollisionGroup::SubGroupID>(subgroup));
@@ -877,6 +909,7 @@ JointId PhysicsWorld::AddHingeJoint(BodyId a, BodyId b, const f32 frame_a[12],
 void PhysicsWorld::EnableJointMotors(JointId joint, f32 frequency, f32 damping) {
   if (!impl_ || joint == 0 || joint > impl_->joints.size()) return;
   Impl::JointEntry& entry = impl_->joints[joint - 1];
+  if (!entry.constraint) return;
   JPH::SpringSettings spring(JPH::ESpringMode::FrequencyAndDamping, frequency, damping);
   if (entry.hinge) {
     auto* hinge = static_cast<JPH::HingeConstraint*>(entry.constraint.GetPtr());
@@ -894,6 +927,7 @@ void PhysicsWorld::EnableJointMotors(JointId joint, f32 frequency, f32 damping) 
 void PhysicsWorld::SetJointMotorTarget(JointId joint, const f32 target_quat[4]) {
   if (!impl_ || joint == 0 || joint > impl_->joints.size()) return;
   Impl::JointEntry& entry = impl_->joints[joint - 1];
+  if (!entry.constraint) return;
   JPH::Quat q(target_quat[0], target_quat[1], target_quat[2], target_quat[3]);
   if (q.LengthSq() < 1e-8f) q = JPH::Quat::sIdentity();
   q = q.Normalized();
@@ -911,6 +945,7 @@ void PhysicsWorld::SetJointMotorTarget(JointId joint, const f32 target_quat[4]) 
 bool PhysicsWorld::GetJointOrientation(JointId joint, f32 out_quat[4]) const {
   if (!impl_ || joint == 0 || joint > impl_->joints.size()) return false;
   Impl::JointEntry& entry = impl_->joints[joint - 1];
+  if (!entry.constraint) return false;
   JPH::Quat q;
   if (entry.hinge) {
     auto* hinge = static_cast<JPH::HingeConstraint*>(entry.constraint.GetPtr());
@@ -929,6 +964,7 @@ bool PhysicsWorld::GetJointOrientation(JointId joint, f32 out_quat[4]) const {
 void PhysicsWorld::SetJointMotorTorqueLimit(JointId joint, f32 max_torque) {
   if (!impl_ || joint == 0 || joint > impl_->joints.size()) return;
   Impl::JointEntry& entry = impl_->joints[joint - 1];
+  if (!entry.constraint) return;
   if (entry.hinge) {
     auto* hinge = static_cast<JPH::HingeConstraint*>(entry.constraint.GetPtr());
     hinge->GetMotorSettings().SetTorqueLimit(max_torque);
@@ -942,6 +978,7 @@ void PhysicsWorld::SetJointMotorTorqueLimit(JointId joint, f32 max_torque) {
 void PhysicsWorld::DisableJointMotors(JointId joint) {
   if (!impl_ || joint == 0 || joint > impl_->joints.size()) return;
   Impl::JointEntry& entry = impl_->joints[joint - 1];
+  if (!entry.constraint) return;
   if (entry.hinge) {
     static_cast<JPH::HingeConstraint*>(entry.constraint.GetPtr())
         ->SetMotorState(JPH::EMotorState::Off);
@@ -950,6 +987,14 @@ void PhysicsWorld::DisableJointMotors(JointId joint) {
     st->SetSwingMotorState(JPH::EMotorState::Off);
     st->SetTwistMotorState(JPH::EMotorState::Off);
   }
+}
+
+void PhysicsWorld::RemoveJoint(JointId joint) {
+  if (!impl_ || joint == 0 || joint > impl_->joints.size()) return;
+  Impl::JointEntry& entry = impl_->joints[joint - 1];
+  if (!entry.constraint) return;
+  impl_->system->RemoveConstraint(entry.constraint.GetPtr());
+  entry.constraint = nullptr;  // keep the slot: JointId is index + 1
 }
 
 void PhysicsWorld::ApplyImpulse(BodyId id, const Vec3& impulse) {
@@ -1246,6 +1291,21 @@ void PhysicsWorld::RemoveBody(BodyId id) {
       impl_->dynamic_bodies.pop_back();
       --dynamic_count_;
       break;
+    }
+  }
+  // Drop any watched-contact entry for this body so the recorder's list does not
+  // grow forever (and a later body reusing the BodyID sequence cannot alias it).
+  {
+    std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+    base::Vector<Impl::WatchedContacts>& watched = impl_->contacts.watched;
+    for (size_t i = 0; i < watched.size(); ++i) {
+      if (watched[i].body == body) {
+        watched[i] = std::move(watched.back());
+        watched.pop_back();
+        impl_->contacts.watched_count.store(static_cast<u32>(watched.size()),
+                                            std::memory_order_release);
+        break;
+      }
     }
   }
 }
@@ -2391,6 +2451,8 @@ void PhysicsWorld::WatchBodyContacts(BodyId id) {
   Impl::WatchedContacts entry;
   entry.body = body;
   impl_->contacts.watched.push_back(std::move(entry));
+  impl_->contacts.watched_count.store(static_cast<u32>(impl_->contacts.watched.size()),
+                                      std::memory_order_release);
 }
 
 void PhysicsWorld::UnwatchBodyContacts(BodyId id) {
@@ -2405,6 +2467,8 @@ void PhysicsWorld::UnwatchBodyContacts(BodyId id) {
       break;
     }
   }
+  impl_->contacts.watched_count.store(static_cast<u32>(watched.size()),
+                                      std::memory_order_release);
 }
 
 u32 PhysicsWorld::GetBodyContacts(BodyId id, BodyContact* out, u32 max_contacts) const {

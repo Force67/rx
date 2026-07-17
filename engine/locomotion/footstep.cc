@@ -7,27 +7,14 @@
 #include <cmath>
 
 #include "locomotion/gait.h"
+#include "locomotion/internal_math.h"
 
 namespace rx::locomotion {
+using namespace internal;
 namespace {
 
-constexpr f32 kGravity = 9.81f;      // positive magnitude, m/s^2
 constexpr f32 kMaxFootTilt = 0.35f;  // rad the sole may tilt off the vertical
 const Vec3 kUp{0, 1, 0};
-
-f32 Clampf(f32 x, f32 lo, f32 hi) { return x < lo ? lo : (x > hi ? hi : x); }
-
-f32 Lerpf(f32 a, f32 b, f32 t) { return a + (b - a) * t; }
-
-// Drop the vertical component of a world vector.
-Vec3 Planar(const Vec3& v) { return {v.x, 0, v.z}; }
-
-// Clamp a vector's length to `max_len` (no-op below it; safe for the zero vec).
-Vec3 ClampLength(const Vec3& v, f32 max_len) {
-  const f32 len = Length(v);
-  if (len <= max_len || len <= 0) return v;
-  return v * (max_len / len);
-}
 
 // Planar facing direction: prefer intent, fall back to the root's forward, then
 // to -Z, so a zero/degenerate facing never poisons the lateral offset.
@@ -59,7 +46,7 @@ Quat FootOrientation(const Vec3& normal, const Vec3& facing) {
 
 Vec3 CapturePoint(const Vec3& com_position, const Vec3& com_velocity, f32 gravity, f32 com_height) {
   const f32 h = com_height < 0.1f ? 0.1f : com_height;
-  const f32 omega = std::sqrt((gravity > 0 ? gravity : kGravity) / h);
+  const f32 omega = std::sqrt((gravity > 0 ? gravity : 9.81f) / h);
   if (!(omega > 0)) return com_position;
   return com_position + com_velocity * (1.0f / omega);
 }
@@ -117,7 +104,7 @@ void FootstepPlanner::Update(const CharacterMeasurements& m, const ContactEstima
     const Vec3 lateral = right * (0.5f * params.hip_width * (foot == 1 ? 1.0f : -1.0f));
 
     const f32 com_height = m.com_position.y - contacts.support_center.y;
-    const Vec3 capture = CapturePoint(m.com_position, m.com_velocity, kGravity, com_height);
+    const Vec3 capture = CapturePoint(m.com_position, m.com_velocity, m.gravity, com_height);
     Vec3 capture_off = Planar(capture - contacts.support_center) * params.capture_gain;
     // The capture term is a CORRECTION on top of the desired-velocity look-ahead
     // reach, not the whole step: letting it run to the full capture excursion

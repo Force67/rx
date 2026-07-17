@@ -26,38 +26,13 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include "locomotion/internal_math.h"
 #include "locomotion/whole_body.h"
 #include "physics/physics_world.h"
 
 namespace rx::locomotion {
+using namespace internal;
 namespace {
-
-constexpr f32 kGravity = 9.81f;
-
-bool FiniteScalar(f32 x) { return std::isfinite(x); }
-bool FiniteV(const Vec3& v) {
-  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-}
-bool FiniteQ(const Quat& q) {
-  return std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w);
-}
-
-f32 Clampf(f32 x, f32 lo, f32 hi) { return x < lo ? lo : (x > hi ? hi : x); }
-
-Vec3 Planar(const Vec3& v) { return {v.x, 0.0f, v.z}; }
-f32 PlanarLength(const Vec3& v) { return std::sqrt(v.x * v.x + v.z * v.z); }
-
-Vec3 ClampLength(const Vec3& v, f32 max_len) {
-  const f32 len = Length(v);
-  if (len <= max_len || len <= 0) return v;
-  return v * (max_len / len);
-}
-
-// Exponential smoothing coefficient for a first-order lag (tau seconds) over dt.
-f32 SmoothingAlpha(f32 dt, f32 tau) {
-  if (!(dt > 0) || !(tau > 0)) return 0;
-  return 1.0f - std::exp(-dt / tau);
-}
 
 // Angle (rad) between two directions, both assumed roughly unit-length.
 f32 AngleBetween(const Vec3& a, const Vec3& b) {
@@ -97,6 +72,17 @@ Vec3 LocomotionController::AnkleWorld(u32 foot) const {
   // forward of the ankle in rig.cc).
   const Vec3 local{0, rig_.sole_offset, 0.2f * rig_.foot_length};
   return p + Rotate(q, local);
+}
+
+void LocomotionController::ApplyJointDrive(RigJoint j, f32 torque) {
+  const u32 idx = static_cast<u32>(j);
+  // SetJointDrive walks Jolt constraint settings, so re-issue it only when the
+  // effective torque budget moved > 1%.
+  const f32 ref = applied_torque_[idx] > 1e-3f ? applied_torque_[idx] : 1.0f;
+  if (std::fabs(torque - applied_torque_[idx]) > 0.01f * ref) {
+    rig_.SetJointDrive(*physics_, j, params_.joint_frequency, params_.joint_damping, torque);
+    applied_torque_[idx] = torque;
+  }
 }
 
 bool LocomotionController::HasEnvironmentContact(physics::BodyId watched) const {
@@ -180,10 +166,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
     // joints are in. Never snap to a limp ragdoll.
     drive_blend_ += (0.05f - drive_blend_) * blend_alpha;
     for (u32 j = 0; j < kRigJointCount; ++j) {
-      const RigJoint rj = static_cast<RigJoint>(j);
-      const f32 torque = params_.max_joint_torque * drive_blend_;
-      rig_.SetJointDrive(*physics_, rj, params_.joint_frequency, params_.joint_damping, torque);
-      applied_torque_[j] = torque;
+      ApplyJointDrive(static_cast<RigJoint>(j), params_.max_joint_torque * drive_blend_);
     }
     if (mode_ != ControlMode::kControlledFall) {
       mode_ = ControlMode::kControlledFall;
@@ -203,13 +186,13 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
 
   // --- Step 3: MODE MACHINE (from measured physics only) ------------------
   const f32 com_height = Clampf(m.com_position.y - contacts_.support_center.y, 0.3f, 1e4f);
-  const Vec3 cp = CapturePoint(m.com_position, m.com_velocity, kGravity, com_height);
+  const Vec3 cp = CapturePoint(m.com_position, m.com_velocity, m.gravity, com_height);
   // Balance error = how far the capture point strays from where a body moving at
   // the COMMANDED velocity should carry it. A steady walk keeps the capture point
   // a lead of ~desired_velocity/omega ahead of the support (that IS forward
   // locomotion, not a fall); subtracting that lead keeps `margin` near zero while
   // walking and only grows on genuine, uncommanded imbalance.
-  const f32 omega = std::sqrt(kGravity / com_height);
+  const f32 omega = std::sqrt(m.gravity / com_height);
   const Vec3 expected_lead = Planar(intent.desired_velocity) * (1.0f / omega);
   const f32 margin =
       PlanarLength(Planar(cp) - Planar(contacts_.support_center) - expected_lead);
@@ -365,7 +348,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
       const f32 fwd_vel = Dot(com_v, fdir);
       Vec3 balance = perp * (mass * (45.0f * lat_off - 8.0f * lat_vel)) +
                      fdir * (mass * fade * (45.0f * fwd_off - 6.0f * fwd_vel));
-      balance = ClampLength(balance, 0.35f * mass * kGravity);
+      balance = ClampLength(balance, 0.35f * mass * m.gravity);
       targets_.root_assist_force += balance;
     }
   } else {
@@ -430,17 +413,12 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
 
   if (all_finite) {
     // Joint motors, common to every mode. SetJointTarget is cheap (one motor
-    // write); SetJointDrive walks Jolt constraint settings, so re-issue it only
-    // when the effective torque budget moved > 1%.
+    // write); ApplyJointDrive gates the heavier SetJointDrive on a >1% budget
+    // change (same gate the safety-stop path uses).
     for (u32 j = 0; j < kRigJointCount; ++j) {
       const RigJoint rj = static_cast<RigJoint>(j);
       rig_.SetJointTarget(*physics_, rj, targets_.joint_target[j]);
-      const f32 torque = params_.max_joint_torque * targets_.joint_drive_scale[j] * drive_blend_;
-      const f32 ref = applied_torque_[j] > 1e-3f ? applied_torque_[j] : 1.0f;
-      if (std::fabs(torque - applied_torque_[j]) > 0.01f * ref) {
-        rig_.SetJointDrive(*physics_, rj, params_.joint_frequency, params_.joint_damping, torque);
-        applied_torque_[j] = torque;
-      }
+      ApplyJointDrive(rj, params_.max_joint_torque * targets_.joint_drive_scale[j] * drive_blend_);
     }
 
     // Root assists, distributed per mode.
@@ -504,7 +482,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   debug_.mode_time = mode_time_;
 
   // Optional env-gated trace (cheap, matches the debug-visibility requirement).
-  static const bool kTrace = std::getenv("LOCO_DEBUG") != nullptr;
+  static const bool kTrace = std::getenv("RX_LOCO_DEBUG") != nullptr;
   if (kTrace && tick_count_ % 10 == 0) {
     std::fprintf(stderr,
                  "[loco] t=%llu mode=%d blend=%.2f pelvis_y=%.3f com=(%.2f,%.2f,%.2f) vz=%.2f "

@@ -282,6 +282,77 @@ void TestMotors() {
   Check(moved < 0.999f, "disabled motors let the joint swing free");
 }
 
+// Tearing a joint down before its bodies must not leave a dangling constraint
+// that the next Update dereferences. Removing the joint clears the entry so the
+// joint APIs no-op on the stale handle.
+void TestRemoveJoint() {
+  physics::PhysicsWorld w;
+  if (!MakeWorld(w, "RemoveJoint: physics init")) return;
+
+  const Vec3 half{kHalf, kHalf, kHalf};
+  physics::BodyId a = w.AddDynamicBox({0.0f, 5.0f, 0.0f}, half, kDensity, {});
+  physics::BodyId b = w.AddDynamicBox({0.8f, 5.0f, 0.0f}, half, kDensity, {});
+  Check(a != 0 && b != 0, "RemoveJoint bodies created");
+
+  const f32 frame_a[12] = {1, 0, 0, 0.4f, 0, 1, 0, 0, 0, 0, 1, 0};
+  const f32 frame_b[12] = {1, 0, 0, -0.4f, 0, 1, 0, 0, 0, 0, 1, 0};
+  physics::JointId joint =
+      w.AddSwingTwistJoint(a, b, frame_a, frame_b, 1.0f, -3.14f, 3.14f, 3.0f, -3.0f, 3.0f);
+  Check(joint != 0, "RemoveJoint joint created");
+  w.EnableJointMotors(joint, 20.0f, 1.0f);
+
+  f32 q[4] = {0, 0, 0, 1};
+  Check(w.GetJointOrientation(joint, q), "joint orientation readable before removal");
+
+  // Drop the constraint FIRST, then both bodies — the previously-crashing order
+  // (bodies removed while the constraint stayed registered) left the next Update
+  // dereferencing freed body pointers.
+  w.RemoveJoint(joint);
+  Check(!w.GetJointOrientation(joint, q), "GetJointOrientation is false after RemoveJoint");
+  // Every joint motor API no-ops on the cleared handle (no crash, no effect).
+  w.EnableJointMotors(joint, 20.0f, 1.0f);
+  w.SetJointMotorTarget(joint, q);
+  w.SetJointMotorTorqueLimit(joint, 1.0f);
+  w.DisableJointMotors(joint);
+  w.RemoveJoint(joint);  // idempotent
+
+  w.RemoveBody(a);
+  w.RemoveBody(b);
+
+  // Stepping after the joint + bodies are gone must not crash (exercises the
+  // constraint-vs-freed-body path that used to fault).
+  for (int i = 0; i < 10; ++i) w.Update(kDt);
+  Check(true, "world steps cleanly after RemoveJoint + RemoveBody");
+}
+
+// RemoveBody must drop a body's watched-contact entry so the recorder's list
+// does not leak, and a fresh body watched afterward still records contacts.
+void TestWatchedContactReuse() {
+  physics::PhysicsWorld w;
+  if (!MakeWorld(w, "watched reuse: physics init")) return;
+
+  w.AddStaticBox({0, -0.5f, 0}, {10, 0.5f, 10});  // floor top at y = 0
+
+  physics::BodyId first = w.AddDynamicBox({0, 1.0f, 0}, {kHalf, kHalf, kHalf}, kDensity, {});
+  Check(first != 0, "first watched body created");
+  w.WatchBodyContacts(first);
+  w.RemoveBody(first);  // drops the watched entry (else it leaks / can alias)
+
+  physics::BodyId second = w.AddDynamicBox({0, 1.0f, 0}, {kHalf, kHalf, kHalf}, kDensity, {});
+  Check(second != 0, "second watched body created");
+  physics::PhysicsWorld::BodyContact stale[8];
+  Check(w.GetBodyContacts(first, stale, 8) == 0, "removed body reports no contacts");
+  w.WatchBodyContacts(second);
+
+  bool saw_contact = false;
+  for (int i = 0; i < 120; ++i) {
+    w.Update(kDt);
+    physics::PhysicsWorld::BodyContact contacts[8];
+    if (w.GetBodyContacts(second, contacts, 8) >= 1) saw_contact = true;
+  }
+  Check(saw_contact, "a new body watched after a removal still records contacts");
+}
+
 }  // namespace
 
 int main() {
@@ -291,6 +362,8 @@ int main() {
   TestGravity();
   TestContacts();
   TestMotors();
+  TestRemoveJoint();
+  TestWatchedContactReuse();
 
   if (failures == 0) {
     std::printf("physics_body_test: all checks passed\n");

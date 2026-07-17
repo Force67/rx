@@ -27,6 +27,7 @@ BodyId PhysicsWorld::AddDynamicShape(const ShapeDesc&, const Vec3&, const f32[4]
 }
 i32 PhysicsWorld::CreateBodyFilterGroup(u32) { return -1; }
 void PhysicsWorld::DisableFilterPair(i32, u32, u32) {}
+void PhysicsWorld::ReleaseBodyFilterGroup(i32) {}
 JointId PhysicsWorld::AddSwingTwistJoint(BodyId, BodyId, const f32[12], const f32[12], f32, f32,
                                          f32, f32, f32, f32) {
   return 0;
@@ -39,6 +40,7 @@ void PhysicsWorld::SetJointMotorTarget(JointId, const f32[4]) {}
 bool PhysicsWorld::GetJointOrientation(JointId, f32[4]) const { return false; }
 void PhysicsWorld::SetJointMotorTorqueLimit(JointId, f32) {}
 void PhysicsWorld::DisableJointMotors(JointId) {}
+void PhysicsWorld::RemoveJoint(JointId) {}
 void PhysicsWorld::ApplyImpulse(BodyId, const Vec3&) {}
 void PhysicsWorld::SetBodyKinematic(BodyId) {}
 bool PhysicsWorld::GetBodyVelocity(BodyId, Vec3*, Vec3*) const { return false; }

@@ -7,37 +7,20 @@
 
 #include <cmath>
 
+#include "locomotion/internal_math.h"
+
 namespace rx::locomotion {
+using namespace internal;
 
 namespace {
 
 constexpr f32 kPi = 3.14159265358979f;
 
-bool FiniteScalar(f32 x) { return std::isfinite(x); }
-bool FiniteV(const Vec3& v) {
-  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
-}
-bool FiniteQ(const Quat& q) {
-  return std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w);
-}
-
-f32 Clamp(f32 x, f32 lo, f32 hi) { return x < lo ? lo : (x > hi ? hi : x); }
-
-// Drop the vertical component (facing/velocity math is planar).
-Vec3 Planar(const Vec3& v) { return {v.x, 0.0f, v.z}; }
-
-// Clamp a vector to a maximum length, preserving direction.
-Vec3 ClampLength(const Vec3& v, f32 max_length) {
-  f32 len = Length(v);
-  if (len > max_length && len > 0.0f) return v * (max_length / len);
-  return v;
-}
-
 // Clamp a rotation to a maximum cone angle (radians), shortest-arc.
 Quat ClampCone(Quat q, f32 max_angle) {
   q = Normalize(q);
   if (q.w < 0.0f) q = {-q.x, -q.y, -q.z, -q.w};  // pick the shortest hemisphere
-  f32 angle = 2.0f * std::acos(Clamp(q.w, -1.0f, 1.0f));
+  f32 angle = 2.0f * std::acos(Clampf(q.w, -1.0f, 1.0f));
   if (angle <= max_angle) return q;
   Vec3 axis{q.x, q.y, q.z};
   if (Length(axis) < 1e-6f) return {0, 0, 0, 1};
@@ -107,7 +90,7 @@ LegIkResult SolveLegIk(const Vec3& hip_to_sole, const Vec3& sole_normal_parent, 
   // Knee flexion from the law of cosines. Straight leg (d = u+l) -> 0, fully
   // folded (d = |u-l|) -> pi. Never negative.
   f32 cos_knee = (u * u + l * l - d * d) / (2.0f * u * l);
-  cos_knee = Clamp(cos_knee, -1.0f, 1.0f);
+  cos_knee = Clampf(cos_knee, -1.0f, 1.0f);
   r.knee_flexion = kPi - std::acos(cos_knee);
   if (r.knee_flexion < 0.0f) r.knee_flexion = 0.0f;
 
@@ -120,7 +103,7 @@ LegIkResult SolveLegIk(const Vec3& hip_to_sole, const Vec3& sole_normal_parent, 
   // FK-verified (test/locomotion_math_test.cc): Rotate(hip, V0) == ankle_target
   // where V0 is the bent chain's ankle in the pre-hip frame.
   f32 cos_alpha = (u * u + d * d - l * l) / (2.0f * u * d);
-  cos_alpha = Clamp(cos_alpha, -1.0f, 1.0f);
+  cos_alpha = Clampf(cos_alpha, -1.0f, 1.0f);
   const f32 alpha = std::acos(cos_alpha);
   r.hip = QuatBetween(down_y, a_hat) * QuatFromAxisAngle(knee_axis, -alpha);
 
@@ -143,7 +126,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
                            const ControllerParameters& params, const BipedRig& rig,
                            WholeBodyTargets* out) {
   const Vec3 up_y{0, 1, 0};
-  const f32 gravity = 9.81f;
+  const f32 gravity = m.gravity;
   const f32 strength = FiniteScalar(modifiers.strength) ? modifiers.strength : 1.0f;
   const f32 balance = FiniteScalar(modifiers.balance) ? modifiers.balance : 1.0f;
 
@@ -183,7 +166,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   // Acceleration lean about the pelvis-right axis, plus a partial ground tilt.
   Vec3 a_des = Planar(intent.desired_velocity) - Planar(m.com_velocity);
   a_des = ClampLength(a_des, params.max_acceleration);
-  const f32 lean_angle = Clamp(0.06f * Dot(a_des, f), -0.20f, 0.20f);  // k_lean s^2/m
+  const f32 lean_angle = Clampf(0.06f * Dot(a_des, f), -0.20f, 0.20f);  // k_lean s^2/m
 
   Quat q_d = QuatFromAxisAngle(right, lean_angle) * q_yaw;
   Vec3 ground_normal = FiniteV(m.ground_normal) && Length(m.ground_normal) > 1e-6f
@@ -232,7 +215,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   out->joint_drive_scale[static_cast<u32>(RigJoint::kNeck)] = 0.4f * strength;
 
   // --- 5. Arms: gait-phase counter-swing (arm opposes the same-side leg) ---
-  const f32 speed_ratio = Clamp(gait.speed_ratio, 0.0f, 4.0f);
+  const f32 speed_ratio = Clampf(gait.speed_ratio, 0.0f, 4.0f);
   const f32 swing_l = 0.45f * speed_ratio * std::cos(2.0f * kPi * GaitClock::FootPhase(gait, 1));
   const f32 swing_r = 0.45f * speed_ratio * std::cos(2.0f * kPi * GaitClock::FootPhase(gait, 0));
   const f32 elbow_flex = 0.25f + 0.25f * speed_ratio;
@@ -262,7 +245,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
     f32 f_y = mass * (params.pelvis_position_gain * height_error +
                       params.pelvis_velocity_gain * (-m.com_velocity.y));
     const f32 f_y_cap = 0.45f * mass * gravity;
-    f_y = Clamp(f_y, -f_y_cap, f_y_cap);
+    f_y = Clampf(f_y, -f_y_cap, f_y_cap);
 
     Vec3 f_planar = (Planar(intent.desired_velocity) - Planar(m.com_velocity)) * (mass * 1.1f);
     f_planar = ClampLength(f_planar, 0.15f * mass * gravity);
@@ -279,7 +262,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
     const Vec3 up_target = Rotate(q_d, up_y);
     const Vec3 cross = Cross(up_world, up_target);
     const f32 sin_a = Length(cross);
-    const f32 angle = std::acos(Clamp(Dot(up_world, up_target), -1.0f, 1.0f));
+    const f32 angle = std::acos(Clampf(Dot(up_world, up_target), -1.0f, 1.0f));
     const Vec3 axis = sin_a > 1e-6f ? cross * (1.0f / sin_a) : Vec3{0, 0, 0};
     assist_torque = axis * (params.torso_orientation_gain * angle) -
                     m.root_angular_velocity * params.torso_angular_damping;

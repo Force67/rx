@@ -4,9 +4,10 @@
 // Everything is derived from ControllerParameters; there is no authored
 // content. Conventions (fixed): right-handed, +Y up, the character faces -Z at
 // yaw 0 so character-right is +X and character-LEFT is -X. Metres, kg, radians.
-// Every body spawns AXIS-ALIGNED (local axes == character axes rotated by the
-// spawn yaw about +Y), so a joint's twist/plane axes are identical constants in
-// the parent and child local frames.
+// Spawn yaw follows rx::character::HeadingQuat (rotation about -Y). Every body
+// spawns AXIS-ALIGNED (local axes == character axes rotated by the spawn yaw),
+// so a joint's twist/plane axes are identical constants in the parent and child
+// local frames.
 //
 // Geometry proportions (all off ControllerParameters L=leg_length,
 // W=hip_width, H=body_height, M=total_mass), chosen so the three leg segments
@@ -201,18 +202,22 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
   out->lower_arm_length = lower_arm;
   out->pelvis_height = pelvis_y;
   out->sole_offset = foot_h * 0.5f;
+  out->head_radius = r_head;
   out->hip_local[0] = {-half_w, hip_y - pelvis_y, 0};  // left (-X)
   out->hip_local[1] = {+half_w, hip_y - pelvis_y, 0};  // right (+X)
 
+  // Yaw about -Y, matching rx::character::HeadingQuat(yaw) =
+  // QuatFromAxisAngle({0, -1, 0}, yaw) = {0, -sin(yaw/2), 0, cos(yaw/2)}.
   const f32 hy = std::sin(yaw * 0.5f);
   const f32 hcw = std::cos(yaw * 0.5f);
-  const Quat yawq{0, hy, 0, hcw};
-  const f32 rot[4] = {0, hy, 0, hcw};
+  const Quat yawq{0, -hy, 0, hcw};
+  const f32 rot[4] = {0, -hy, 0, hcw};
   auto world = [&](const Vec3& local) { return feet_position + Rotate(yawq, local); };
 
   // --- bodies ---
   const i32 group = physics.CreateBodyFilterGroup(kBodyPartCount);
   if (group < 0) return false;
+  out->filter_group = group;
 
   auto capsule_y = [](f32 half_len, f32 radius) {
     physics::ShapeDesc d;
@@ -269,9 +274,15 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
   };
 
   auto rollback = [&]() {
+    // Joints before bodies (a live constraint dangles onto a freed body), then
+    // release the filter group once its bodies are gone.
+    for (u32 j = 0; j < kRigJointCount; ++j) {
+      if (out->joint[j]) physics.RemoveJoint(out->joint[j]);
+    }
     for (u32 i = 0; i < kBodyPartCount; ++i) {
       if (out->body[i]) physics.RemoveBody(out->body[i]);
     }
+    physics.ReleaseBodyFilterGroup(group);
     *out = BipedRig{};
   };
 
@@ -377,11 +388,17 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
 }
 
 void BipedRig::Destroy(physics::PhysicsWorld& physics) {
-  // PhysicsWorld exposes no RemoveJoint; in Jolt a constraint is dropped when a
-  // constrained body is removed, so removing every body tears the joints down.
+  // Drop the constraints BEFORE their bodies: a joint still registered in the
+  // PhysicsSystem holds raw pointers to its two bodies, so the next Update would
+  // dereference freed memory if the bodies went first.
+  for (u32 j = 0; j < kRigJointCount; ++j) {
+    if (joint[j]) physics.RemoveJoint(joint[j]);
+  }
   for (u32 i = 0; i < kBodyPartCount; ++i) {
     if (body[i]) physics.RemoveBody(body[i]);
   }
+  // Release the shared filter group once its bodies are gone.
+  physics.ReleaseBodyFilterGroup(filter_group);
   *this = BipedRig{};
 }
 

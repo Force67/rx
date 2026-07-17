@@ -163,6 +163,7 @@ struct CharacterMeasurements {
 
   Vec3 ground_normal{0, 1, 0};  // blended from supporting foot contacts
   f32 estimated_body_height = 0;  // sole-to-crown along the ground normal
+  f32 gravity = 9.81f;            // measured |world gravity|, m/s^2
   bool valid = false;             // false when any body read failed or non-finite
 };
 

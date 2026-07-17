@@ -350,6 +350,45 @@ void TestContactHysteresis() {
   }
 }
 
+// The rig's spawn yaw must match rx::character::HeadingQuat (rotation about -Y),
+// so a rig and a character spawned at the same yaw face the same way. The
+// expected forward is derived from the same formula the character module uses
+// (HeadingQuat(yaw) = QuatFromAxisAngle({0,-1,0}, yaw)), so the assertion is
+// convention-locked rather than a hand-typed vector.
+void TestSpawnYaw() {
+  Scene s;
+  if (!s.Init()) {
+    Check(false, "physics init (spawn yaw)");
+    return;
+  }
+  const f32 yaw = 3.14159265358979f * 0.5f;  // 90 degrees
+  BipedRig rig;
+  if (!BipedRig::Build(s.physics, StiffParams(), {0, 0.02f, 0}, yaw, &rig)) {
+    Check(false, "rig builds for spawn yaw");
+    return;
+  }
+
+  // Character-module forward for this yaw (yaw 0 faces -Z; forward rotates about
+  // -Y). Same math the controller reads back from the measured root_rotation.
+  const Quat heading = QuatFromAxisAngle({0, -1, 0}, yaw);
+  const Vec3 expected_forward = Rotate(heading, {0, 0, -1});
+
+  // Measured pelvis forward straight from the spawn transform.
+  const physics::BodyId pelvis = rig.body[static_cast<u32>(BodyPart::kPelvis)];
+  Vec3 p;
+  f32 r[4] = {0, 0, 0, 1};
+  s.physics.GetBodyTransform(pelvis, &p, r);
+  const Quat root_rotation{r[0], r[1], r[2], r[3]};
+  const Vec3 forward = Rotate(root_rotation, {0, 0, -1});
+
+  Near(forward.x, expected_forward.x, "spawn-yaw pelvis forward x matches HeadingQuat", 0.02f);
+  Near(forward.y, expected_forward.y, "spawn-yaw pelvis forward y matches HeadingQuat", 0.02f);
+  Near(forward.z, expected_forward.z, "spawn-yaw pelvis forward z matches HeadingQuat", 0.02f);
+  // At yaw = pi/2, HeadingQuat forward is +X (sanity anchor for the convention).
+  Check(expected_forward.x > 0.99f, "yaw pi/2 faces +X (HeadingQuat convention)");
+  rig.Destroy(s.physics);
+}
+
 void TestEstimatorFinite() {
   Scene s;
   if (!s.Init()) return;
@@ -819,6 +858,35 @@ void TestDebugState() {
   CheckFinite(s.physics, c, "debug");
 }
 
+// H. RESET PATH (the --demo puppet reset). Controller Initialize, a few ticks,
+// Destroy, then keep stepping the physics world (a stale constraint pointing at
+// a freed body would fault here), then re-Initialize on the SAME world and tick
+// again. Everything finite, no crash.
+void TestControllerResetPath() {
+  Scene s;
+  if (!s.Init()) {
+    Check(false, "physics init (reset path)");
+    return;
+  }
+  LocomotionController c;
+  Check(c.Initialize(&s.physics, ControllerParameters{}, {0, 0.02f, 0}, 0.0f),
+        "controller initializes (reset path)");
+  const LocomotionIntent intent;
+  const PhysicalModifiers mods;
+  StepN(s, c, intent, mods, 20);
+
+  c.Destroy();
+  Check(!c.initialized(), "controller uninitialized after Destroy");
+  for (int i = 0; i < 30; ++i) s.physics.Update(kDt);  // world runs on without the rig
+
+  Check(c.Initialize(&s.physics, ControllerParameters{}, {0, 0.02f, 0}, 0.0f),
+        "controller re-initializes on the same world");
+  StepN(s, c, intent, mods, 30);
+  Check(c.measurements().valid, "measurements valid after re-init");
+  CheckFinite(s.physics, c, "reset path");
+  c.Destroy();
+}
+
 }  // namespace
 
 int main() {
@@ -828,6 +896,7 @@ int main() {
   TestKneeSign();
   TestUnpoweredCollapse();
   TestContactHysteresis();
+  TestSpawnYaw();
   TestEstimatorFinite();
   TestStand();
   TestPushes();
@@ -836,6 +905,7 @@ int main() {
   TestTurn();
   TestUnrecoverablePush();
   TestDebugState();
+  TestControllerResetPath();
 
   if (failures == 0) {
     std::printf("locomotion_test: all checks passed\n");

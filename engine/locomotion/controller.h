@@ -72,6 +72,11 @@ class RX_LOCOMOTION_EXPORT LocomotionController {
   // keeps the centre of mass over.
   Vec3 AnkleWorld(u32 foot) const;
 
+  // Drives joint `j`'s motor to `torque` (N*m) through the same >1% change gate
+  // both the normal and safety-stop actuation paths use, so SetJointDrive (which
+  // walks Jolt constraint settings) is re-issued only when the budget moved.
+  void ApplyJointDrive(RigJoint j, f32 torque);
+
   physics::PhysicsWorld* physics_ = nullptr;
   ControllerParameters params_{};
   BipedRig rig_{};

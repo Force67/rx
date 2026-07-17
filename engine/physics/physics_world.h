@@ -74,6 +74,14 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
                          i32 filter_group = -1, u32 subgroup = 0);
   i32 CreateBodyFilterGroup(u32 subgroup_count);
   void DisableFilterPair(i32 group, u32 sub_a, u32 sub_b);
+  // Releases the group's filter-table reference. The i32 slot is retained so
+  // group indices stay stable (CreateBodyFilterGroup keeps handing out later
+  // indices), and DisableFilterPair / AddDynamicShape treat a released slot as
+  // invalid. Safe to call after the group's bodies are gone: each body's Jolt
+  // CollisionGroup holds its own RefConst to the table, so the table survives
+  // until the last body referencing it is removed, and this only drops our copy
+  // of the reference. A no-op on an invalid or already-released slot.
+  void ReleaseBodyFilterGroup(i32 group);
 
   // Ragdoll joints between two dynamic bodies. Frames are 3x4 row-major
   // (basis rows + origin column) in each body's LOCAL space, column 0 = the
@@ -119,6 +127,17 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // twist motors for a swing-twist joint, the single motor for a hinge. A no-op
   // on an invalid handle.
   void DisableJointMotors(JointId joint);
+  // Removes a joint: unregisters its constraint from the PhysicsSystem and
+  // clears the entry, after which every joint API above no-ops (or returns
+  // false) on the stale handle. The JointId slot is retained (handles are index
+  // based and must stay stable), so other joints keep their handles.
+  //
+  // LIFETIME: a live constraint holds raw pointers to its two bodies, which the
+  // next Update dereferences (TwoBodyConstraint::IsActive reads mBody1/mBody2),
+  // so a body may be removed only AFTER the joints referencing it are gone.
+  // Call RemoveJoint on every joint touching a body before RemoveBody on that
+  // body. A no-op on an invalid or already-removed handle.
+  void RemoveJoint(JointId joint);
 
   // Applies an instantaneous impulse (kg*m/s) at a body's centre of mass and
   // wakes it. Drives the "get hit" disturbance for the powered-ragdoll test.

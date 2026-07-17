@@ -6,22 +6,11 @@
 
 #include <cmath>
 
+#include "locomotion/internal_math.h"
+
 namespace rx::locomotion {
+using namespace internal;
 namespace {
-
-f32 Clampf(f32 x, f32 lo, f32 hi) { return x < lo ? lo : (x > hi ? hi : x); }
-
-f32 Lerpf(f32 a, f32 b, f32 t) { return a + (b - a) * t; }
-
-// Planar (x,z) speed of a world velocity, ignoring the vertical component.
-f32 PlanarSpeed(const Vec3& v) { return std::sqrt(v.x * v.x + v.z * v.z); }
-
-// Exponential smoothing coefficient for a first-order lag with time constant
-// `tau` over `dt`. 0 for dt <= 0 (holds the current value), -> 1 for large dt.
-f32 SmoothingAlpha(f32 dt, f32 tau) {
-  if (!(dt > 0) || !(tau > 0)) return 0;
-  return 1.0f - std::exp(-dt / tau);
-}
 
 // Time constant (s) for the gait-frequency lag so the stride rate doesn't step.
 constexpr f32 kSpeedRatioTau = 0.15f;
@@ -38,8 +27,8 @@ f32 Wrap01(f32 x) {
 
 void GaitClock::Update(const CharacterMeasurements& measurements, const LocomotionIntent& intent,
                        const ControllerParameters& params, bool need_step, f32 dt) {
-  const f32 desired_speed = PlanarSpeed(intent.desired_velocity);
-  const f32 measured_speed = PlanarSpeed(measurements.com_velocity);
+  const f32 desired_speed = PlanarLength(intent.desired_velocity);
+  const f32 measured_speed = PlanarLength(measurements.com_velocity);
 
   // Smooth the normalized speed toward its target so the phase rate ramps.
   const f32 target_ratio =
