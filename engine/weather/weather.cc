@@ -175,7 +175,11 @@ render::CloudscapeMapState WeatherSystem::MapOf(const WeatherState& s) const {
   m.seed = s.map_seed;
   m.coverage = s.coverage;
   m.cloud_type = s.cloud_type;
-  m.precipitation = s.precipitation;
+  // The map's precipitation channel means "rain falling over there", which is
+  // not the same thing as WeatherSettings::precipitation ("rain falling on the
+  // player"). A stormy state whose rain stays kilometres away still needs its
+  // storm cells in the deck, so storminess floors the map channel.
+  m.precipitation = std::max(s.precipitation, s.storminess * 0.7f);
   return m;
 }
 
@@ -233,7 +237,11 @@ void WeatherSystem::IntegrateSurface(f32 dt, f32 precip, bool snow) {
 }
 
 void WeatherSystem::IntegrateLightning(f32 dt, const Vec3& player_pos, f32 precip, f32 anvil) {
-  bool stormy = precip >= kStormPrecip && anvil >= kStormAnvil;
+  // A state spawns lightning when it is anvil-topped AND either rain reaches
+  // the player or the deck is authored menacing (a distant front: its rain
+  // stays out there, but its cells must still discharge).
+  bool stormy = anvil >= kStormAnvil &&
+                (precip >= kStormPrecip || cloudscape_.darkness >= 0.5f);
 
   // Advance and retire the active strike (the renderer draws the bolt + flash
   // light; we only own the schedule, the strike parameters and the age clock).
@@ -245,12 +253,19 @@ void WeatherSystem::IntegrateLightning(f32 dt, const Vec3& player_pos, f32 preci
   }
 
   // Schedule new strikes only while the blended state is stormy, and only one
-  // at a time. strike_timer_ is an exponential inter-arrival draw.
+  // at a time. strike_timer_ is an exponential inter-arrival draw. The ring
+  // the strike lands in is authored per state (blended through transitions),
+  // so a distant-front state keeps its bolts kilometres out.
   if (stormy) {
     strike_timer_ -= dt;
     if (strike_timer_ <= 0.0f && weather_.strike_age < 0.0f) {
+      const WeatherState& sa = states_[from_];
+      const WeatherState& sb = states_[to_];
+      f32 s = from_ == to_ ? 0.0f : blend_;
+      f32 min_r = Lerpf(sa.strike_min_range, sb.strike_min_range, s);
+      f32 max_r = Lerpf(sa.strike_max_range, sb.strike_max_range, s);
       f32 ang = RandomRange(0.0f, kTwoPi);
-      f32 range = RandomRange(kStrikeMinRange, kStrikeMaxRange);
+      f32 range = RandomRange(min_r, max_r);
       f32 sx = player_pos.x + std::cos(ang) * range;
       f32 sz = player_pos.z + std::sin(ang) * range;
       weather_.strike_pos = Vec3{sx, ground_(sx, sz), sz};
@@ -264,11 +279,20 @@ void WeatherSystem::IntegrateLightning(f32 dt, const Vec3& player_pos, f32 preci
   }
 
   // Global flash follows the shared strike envelope so the sun/ambient/cloud
-  // boost agrees with the rendered bolt; no strike -> no flash.
+  // boost agrees with the rendered bolt; no strike -> no flash. Distance
+  // attenuates it: a far strike barely lifts the light where the player
+  // stands (its own corner of the sky glows via the directional term and the
+  // positioned flash light instead), so a distant Unwetter never relights the
+  // whole scene.
   if (weather_.strike_age >= 0.0f) {
+    f32 dx = weather_.strike_pos.x - player_pos.x;
+    f32 dz = weather_.strike_pos.z - player_pos.z;
+    f32 dist = std::sqrt(dx * dx + dz * dz);
+    f32 near_w = 600.0f / (600.0f + dist);
+    f32 falloff = 0.08f + 0.92f * near_w * near_w;
     weather_.lightning =
         render::LightningSystem::Envelope(weather_.strike_age, weather_.strike_seed) *
-        weather_.strike_energy;
+        weather_.strike_energy * falloff;
   } else {
     weather_.lightning = 0.0f;
   }

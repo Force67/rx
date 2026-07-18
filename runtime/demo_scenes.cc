@@ -3136,9 +3136,28 @@ void DemoScenes::CreateSkyDemoScene() {
   storm.base_altitude = 1500.0f;
   storm.top_altitude = 12000.0f;
   weather_sys_->AddState(tune(storm));
+  // A distant front: the Unwetter sits kilometres off. No rain reaches the
+  // player, the menace rides the far storm cells only (local deck keeps its
+  // daylight), and strikes land in a far ring -- their flash glows on that
+  // horizon and the thunder arrives many seconds late and muffled.
+  weather::WeatherState front;
+  front.name = "distant front";
+  front.coverage = 0.52f;
+  front.cloud_type = 0.85f;
+  front.precipitation = 0.0f;
+  front.storminess = 0.8f;
+  front.darkness = 0.85f;
+  front.map_seed = 71u;
+  front.wind_speed = 17.0f;
+  front.turbulence = 1.2f;
+  front.base_altitude = 1700.0f;
+  front.top_altitude = 10500.0f;
+  front.strike_min_range = 2500.0f;
+  front.strike_max_range = 7000.0f;
+  weather_sys_->AddState(tune(front));
 
   int pinned = SkyState.get();
-  if (pinned >= 0 && pinned < 4) {
+  if (pinned >= 0 && pinned < 5) {
     weather_sys_->ForceState(static_cast<u32>(pinned), 0.0f);
   }
 
@@ -3150,7 +3169,7 @@ void DemoScenes::CreateSkyDemoScene() {
   camera_.set_position({0.0f, 3.0f, 46.0f});
   camera_.set_yaw_pitch(0.0f, 0.12f);
   camera_.speed = 14.0f;
-  RX_INFO("sky demo: cloudscape on, {} weather states{}", 4,
+  RX_INFO("sky demo: cloudscape on, {} weather states{}", 5,
           pinned >= 0 ? " (pinned)" : "");
 }
 

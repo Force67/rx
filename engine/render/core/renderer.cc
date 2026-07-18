@@ -5125,11 +5125,22 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               ctx.cmd->Push(p);
               ctx.cmd->Dispatch2D({render_width_, render_height_});
             });
-        if (settings_.clouds || settings_.cloudscape) {
+        if (settings_.cloudscape && cloudscape_ready_) {
+          // Cloudscape ground shadows: the same textured density field the
+          // march renders, so the shade tracks the formations that actually
+          // occlude the sun (gaps stay lit, cores darken, wind advects both).
+          Cloudscape::Frame sf;
+          sf.inv_view_proj = globals.inv_view_proj;
+          sf.sun_direction = settings_.sun_direction;
+          sf.time = static_cast<f32>(time_seconds_);
+          sf.controls = settings_.cloudscape_controls;
+          sf.controls.wind_yaw = settings_.weather.wind_yaw;
+          sf.controls.wind_speed = settings_.weather.wind_speed;
+          cloudscape_.AddShadowToGraph(graph_, sun_shadow, depth_export,
+                                       {render_width_, render_height_}, sf, 0.75f);
+        } else if (settings_.clouds && !settings_.cloudscape) {
           // Cloud shadows: the layer's optical depth along the sun ray darkens
-          // the same denoised shadow the shading samples. The cloudscape model
-          // reuses this approximate layer with its blended map coverage; exact
-          // per-formation shadows are not worth a second march here.
+          // the same denoised shadow the shading samples.
           graph_.AddPass(
               "cloud_shadow",
               [&](RenderGraph::PassBuilder &b) {
@@ -5160,17 +5171,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 p.size[0] = render_width_;
                 p.size[1] = render_height_;
                 p.time = static_cast<f32>(time_seconds_);
-                if (settings_.cloudscape) {
-                  const CloudscapeControls &cc = settings_.cloudscape_controls;
-                  p.coverage = cc.map_a.coverage +
-                               (cc.map_b.coverage - cc.map_a.coverage) * cc.map_blend;
-                  p.bottom = cc.bottom;
-                  p.top = cc.top;
-                } else {
-                  p.coverage = settings_.cloud_coverage;
-                  p.bottom = 1500.0f;
-                  p.top = 4200.0f;
-                }
+                p.coverage = settings_.cloud_coverage;
+                p.bottom = 1500.0f;
+                p.top = 4200.0f;
                 // Same drift velocity as clouds.cs, so the shadows track the
                 // deck.
                 p.wind = std::cos(settings_.weather.wind_yaw) *
@@ -5891,10 +5894,19 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       cf.sun_direction = settings_.sun_direction;
       // Lightning floods the deck from within via the full-res composite
       // (Frame::flash); the amortized march itself stays flash-free so the
-      // temporal history never bakes a bright frame in.
+      // temporal history never bakes a bright frame in. The damped global
+      // level comes from the weather layer; the raw envelope drives the
+      // directional glow a distant strike throws on its own horizon.
       cf.sun_intensity = settings_.sun_intensity;
       cf.sun_color = settings_.sun_color;
       cf.flash = settings_.weather.lightning;
+      if (settings_.weather.strike_age >= 0.0f) {
+        cf.strike_active = true;
+        cf.strike_pos = settings_.weather.strike_pos;
+        cf.flash_raw = LightningSystem::Envelope(settings_.weather.strike_age,
+                                                settings_.weather.strike_seed) *
+                       settings_.weather.strike_energy;
+      }
       cf.steps = settings_.cloudscape_steps;
       cf.controls = settings_.cloudscape_controls;
       // The weather struct owns the live wind; keep the deck advecting with it

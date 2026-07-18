@@ -74,6 +74,14 @@ struct WeatherState {
   bool snow = false;   // precipitation falls as snow (whitens instead of wetting)
   bool aurora = false;  // night-sky curtains up in this state
 
+  // --- Lightning placement ---
+  // Strikes land in this ring around the player. The defaults put the storm
+  // overhead; a distant-front state pushes the ring kilometres out, and the
+  // global flash then attenuates with strike distance so only the far cell's
+  // corner of the sky flickers (plus its delayed, muffled thunder).
+  f32 strike_min_range = 100.0f;
+  f32 strike_max_range = 300.0f;
+
   // --- Scheduling ---
   f32 transition_seconds = 20.0f;  // cross-fade duration when this state becomes the target
   f32 min_dwell = 40.0f;           // shortest time to remain once settled (seconds)

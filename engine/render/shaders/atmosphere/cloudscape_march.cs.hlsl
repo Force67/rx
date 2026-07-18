@@ -163,13 +163,16 @@ float LightEnergy(float3 p, float3 to_sun, float4 weather, float cos_angle, floa
 
   // Precipitating cells absorb harder: rain cores go graphite instead of
   // white. Kept moderate -- a deck that clamps to black under rain stops
-  // reading as cloud at all. Menace stacks on top for the authored version.
-  float absorb = 0.035 * (1.0 + weather.g * 1.1) * (1.0 + pc.darkness * 2.0);
+  // reading as cloud at all. Menace stacks on top for the authored version,
+  // gated by the LOCAL precip cell: a distant storm blackens its own corner
+  // of the sky while the deck over the camera keeps its daylight.
+  float dark = pc.darkness * saturate(weather.g * 1.8);
+  float absorb = 0.035 * (1.0 + weather.g * 1.1) * (1.0 + dark * 2.0);
   // Three-scale Beer floor stands in for multiple scattering: even a deep
   // overcast deck keeps the bright diffuse glow a real one transmits. Rain
   // RAISES the widest floor (a soaked deck scatters more, which is what keeps
   // it legible against the precipitation haze); menace collapses all of it.
-  float floor_gain = (1.0 - 0.65 * pc.darkness);
+  float floor_gain = (1.0 - 0.65 * dark);
   float beer = max(max(exp(-optical * absorb), exp(-optical * absorb * 0.2) * 0.28 * floor_gain),
                    exp(-optical * absorb * 0.06) * 0.14 * (1.0 + weather.g * 0.9) * floor_gain);
   // Powder: freshly entered thin edges under-collect in-scattered light, so
@@ -230,7 +233,15 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
 
   float3 to_sun = normalize(-pc.sun_direction.xyz);
   float3 sun_col = pc.sun_color.rgb * pc.sun_direction.w;
-  float3 ambient_base = float3(0.50, 0.62, 0.88) * 0.38 * pc.sun_direction.w * pc.sun_color.w;
+  // The ambient the deck bathes in follows the sky: cool blue under a high
+  // sun, and as the sun drops toward the horizon it hands over to the warm
+  // band of a low atmosphere -- multiplied by the sun colour (which the clock
+  // already reddens at dusk), this is what sets evening decks on fire instead
+  // of leaving them grey-blue at sunset.
+  float sun_elev = saturate(to_sun.y * 2.2 + 0.08);
+  float3 sky_tint = lerp(float3(1.0, 0.42, 0.26), float3(0.50, 0.62, 0.88), sun_elev);
+  float3 warm_sun = lerp(pc.sun_color.rgb, float3(1, 1, 1), 0.35);  // keep some neutral fill
+  float3 ambient_base = sky_tint * warm_sun * 0.5 * pc.sun_direction.w * pc.sun_color.w;
   float cos_angle = dot(view, to_sun);
 
   // More potential samples toward the horizon, where the slab is thickest.
@@ -290,7 +301,8 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
     // mid-curve, so the mottle actually varies instead of saturating.
     float sky_vis = exp(-up_od * 0.004);
     float3 ambient = ambient_base * (0.35 + 0.65 * h) * (1.0 - 0.28 * weather.g) *
-                     (0.2 + 0.8 * sky_vis) * (1.0 - 0.8 * pc.darkness);
+                     (0.2 + 0.8 * sky_vis) *
+                     (1.0 - 0.8 * pc.darkness * saturate(weather.g * 1.8));
     float3 lit = sun_col * light + ambient * 0.3;
 
     // Rain thickens the view extinction: soaked decks cut harder silhouettes
