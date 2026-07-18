@@ -17,13 +17,13 @@ struct HazePush {
   float4 camera_pos;     // xyz eye (m), w time (s)
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb, w flash 0..1
-  float4 wind;           // xy blow direction (unit XZ), z speed m/s, w darkness
+  float4 wind;           // xy blow direction, z vertical skew (m), w darkness
   float4 fog;            // x density 0..1, y falloff height (m), z ground (m), w anvil
   float4 map;            // xy map offset (m), z map extent (m), w churn 0..1
   uint2 size;
   float2 shell;          // deck bottom / top altitudes (m), for god-ray occlusion
 };
-PUSH_CONSTANTS(HazePush, pc);
+[[vk::binding(6, 0)]] ConstantBuffer<HazePush> pc : register(b6, space0);
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> out_image : register(u0, space0);
 [[vk::binding(1, 0)]] Texture2D<float4> color_in : register(t1, space0);
@@ -56,11 +56,11 @@ float HeightProfile(float h, float cloud_type, float anvil) {
 float DeckDensity(float3 wp) {
   float h = (wp.y - pc.shell.x) / max(pc.shell.y - pc.shell.x, 1.0);
   if (h <= 0.0 || h >= 1.0) return 0.0;
-  float4 weather = weather_map.SampleLevel(weather_sampler, (wp.xz + pc.map.xy) / pc.map.z, 0.0);
+  float4 weather = weather_map.SampleLevel(weather_sampler, (wp.xz - pc.map.xy) / pc.map.z, 0.0);
   float coverage = weather.r;
   if (coverage <= 0.005) return 0.0;
-  float2 drift = pc.wind.xy * (pc.wind.z * pc.camera_pos.w);
-  float3 sp = (wp + float3(drift.x, 0.0, drift.y)) * kBaseScale;
+  float2 drift = pc.map.xy + pc.wind.xy * (pc.wind.z * h);
+  float3 sp = (wp - float3(drift.x, 0.0, drift.y)) * kBaseScale;
   float4 nse = base_noise.SampleLevel(base_sampler, sp, 0.0);
   float worley_fbm = nse.g * 0.625 + nse.b * 0.25 + nse.a * 0.125;
   float base = Remap(nse.r, worley_fbm - 1.0, 1.0, 0.0, 1.0);
@@ -75,6 +75,7 @@ float HG(float c, float g) {
 
 // Closed-form optical depth of sigma0 * exp(-(y - ground)/H) along a segment.
 float HeightFogOd(float y0, float dy_ds, float dist, float sigma0, float H, float ground) {
+  H = max(H, 0.1);
   float e0 = exp(-max(y0 - ground, 0.0) / H);
   if (abs(dy_ds) < 1e-4) return sigma0 * e0 * dist;
   float y1 = y0 + dy_ds * dist;
@@ -92,6 +93,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float4 nh = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));  // reversed-z near
   float3 cam = pc.camera_pos.xyz;
   float3 view = normalize(nh.xyz / nh.w - cam);
+  float fog_height = max(pc.fog.y, 0.1);
 
   float depth = depth_in.Load(int3(px, 0));
   float dist;
@@ -105,7 +107,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   }
   // Cap the integral at the layer's practical ceiling so a mountain top far
   // above the fog never accumulates from the empty air between.
-  float ceiling = pc.fog.z + pc.fog.y * 7.0;
+  float ceiling = pc.fog.z + fog_height * 7.0;
   if (view.y > 1e-3) {
     float t_top = (ceiling - cam.y) / view.y;
     if (t_top > 0.0) dist = min(dist, t_top);
@@ -121,9 +123,9 @@ void main(uint3 id : SV_DispatchThreadID) {
   // Humidity and mist banks: the weather map's cells and two wind-advected
   // noise taps modulate the analytic depth, so the fog sits in patches that
   // drift downwind instead of one uniform veil.
-  float2 drift = pc.wind.xy * (pc.wind.z * pc.camera_pos.w * 0.6);
-  float2 mid1 = cam.xz + view.xz * (dist * 0.25) + drift;
-  float2 mid2 = cam.xz + view.xz * (dist * 0.7) + drift;
+  float2 drift = pc.map.xy * 0.6;
+  float2 mid1 = cam.xz + view.xz * (dist * 0.25) - drift;
+  float2 mid2 = cam.xz + view.xz * (dist * 0.7) - drift;
   // Churn scrolls the 3D noise through its third axis (two taps at different
   // rates so they slide against each other): the banks stop being a frozen
   // pattern that merely translates and start roiling -- vapour rising off the
@@ -137,11 +139,11 @@ void main(uint3 id : SV_DispatchThreadID) {
   // settled morning layer.
   float amp = 0.9 + 0.5 * pc.map.w;
   float banks = max(1.0 - amp * 0.5, 0.05) + amp * (n1 * 0.6 + n2 * 0.4);
-  float2 wuv = (cam.xz + view.xz * (dist * 0.4) + pc.map.xy) / pc.map.z;
+  float2 wuv = (cam.xz + view.xz * (dist * 0.4) - pc.map.xy) / pc.map.z;
   float4 weather = weather_map.SampleLevel(weather_sampler, wuv, 0.0);
   float humidity = 0.75 + 0.5 * weather.g + 0.25 * weather.r;
 
-  float od = HeightFogOd(cam.y, view.y, dist, sigma0, pc.fog.y, pc.fog.z) * banks * humidity;
+  float od = HeightFogOd(cam.y, view.y, dist, sigma0, fog_height, pc.fog.z) * banks * humidity;
 
   // Steam: a second, shin-high layer boiling directly off the surface. The
   // main banks live at kilometre scale and read as a veil; this one uses
@@ -195,13 +197,13 @@ void main(uint3 id : SV_DispatchThreadID) {
     float march_len = min(dist, 9000.0);
     float step = march_len / 8.0;
     float local_trans = 1.0;
-    float shell_mid = lerp(pc.shell.x, pc.shell.y, 0.35);
+    float shell_mid = lerp(pc.shell.x, pc.shell.y, 0.16);
     float thick = (pc.shell.y - pc.shell.x);
     float vis = 1.0;
     [unroll]
     for (int i = 0; i < 8; ++i) {
       float3 pi = cam + view * ((float(i) + 0.5) * step);
-      float sig_i = sigma0 * exp(-max(pi.y - pc.fog.z, 0.0) / pc.fog.y) * banks * humidity;
+      float sig_i = sigma0 * exp(-max(pi.y - pc.fog.z, 0.0) / fog_height) * banks * humidity;
       if (to_sun.y > 0.06) {
         float3 ps = pi + to_sun * ((shell_mid - pi.y) / to_sun.y);
         vis = exp(-DeckDensity(ps) * thick * 0.02);

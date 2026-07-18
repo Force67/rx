@@ -5125,12 +5125,19 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               ctx.cmd->Push(p);
               ctx.cmd->Dispatch2D({render_width_, render_height_});
             });
+        if (settings_.cloudscape && !cloudscape_init_tried_) {
+          cloudscape_init_tried_ = true;
+          cloudscape_ready_ = cloudscape_.Initialize(*device_);
+          if (!cloudscape_ready_)
+            RX_ERROR("cloudscape init failed, keeping procedural clouds");
+        }
         if (settings_.cloudscape && cloudscape_ready_) {
           // Cloudscape ground shadows: the same textured density field the
           // march renders, so the shade tracks the formations that actually
           // occlude the sun (gaps stay lit, cores darken, wind advects both).
           Cloudscape::Frame sf;
           sf.inv_view_proj = globals.inv_view_proj;
+          sf.frame_index = frame_index_;
           sf.sun_direction = settings_.sun_direction;
           sf.time = static_cast<f32>(time_seconds_);
           sf.controls = settings_.cloudscape_controls;
@@ -5138,7 +5145,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           sf.controls.wind_speed = settings_.weather.wind_speed;
           cloudscape_.AddShadowToGraph(graph_, sun_shadow, depth_export,
                                        {render_width_, render_height_}, sf, 0.75f);
-        } else if (settings_.clouds && !settings_.cloudscape) {
+        } else if (settings_.clouds) {
           // Cloud shadows: the layer's optical depth along the sun ray darkens
           // the same denoised shadow the shading samples.
           graph_.AddPass(
@@ -5884,8 +5891,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         RX_ERROR("cloudscape init failed, keeping procedural clouds");
     }
     bool cloudscape_on = settings_.cloudscape && cloudscape_ready_ && !path_trace && !interior;
+    Cloudscape::Frame cloudscape_frame;
+    bool cloudscape_haze_pending = false;
     if (cloudscape_on) {
-      Cloudscape::Frame cf;
+      Cloudscape::Frame &cf = cloudscape_frame;
       cf.inv_view_proj = globals.inv_view_proj;
       cf.prev_view_proj = globals.prev_view_proj;
       cf.camera_pos = view.camera.eye;
@@ -5899,6 +5908,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // directional glow a distant strike throws on its own horizon.
       cf.sun_intensity = settings_.sun_intensity;
       cf.sun_color = settings_.sun_color;
+      cf.ambient = settings_.ambient;
       cf.flash = settings_.weather.lightning;
       if (settings_.weather.strike_age >= 0.0f) {
         cf.strike_active = true;
@@ -5921,10 +5931,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // haze veils both.
       lit = cloudscape_.AddFunnelToGraph(graph_, lit, depth_export,
                                          {render_width_, render_height_}, cf);
-      // Ground haze last: the nearest scattering medium veils both the scene
-      // and the deck it sits under.
-      lit = cloudscape_.AddHazeToGraph(graph_, lit, depth_export,
-                                       {render_width_, render_height_}, cf);
+      cloudscape_haze_pending = true;
     }
     if (!cloudscape_on && settings_.clouds && !path_trace && !interior) {
       Clouds::Frame cf;
@@ -5964,6 +5971,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       lf.jitter[0] = globals.jitter[0];
       lf.jitter[1] = globals.jitter[1];
       lightning_.AddToGraph(graph_, lit, depth_export, motion, lf);
+    }
+
+    if (cloudscape_haze_pending) {
+      // Ground haze is the nearest medium, so it also veils the lightning
+      // channel instead of letting the bolt draw crisply over thick murk.
+      lit = cloudscape_.AddHazeToGraph(graph_, lit, depth_export,
+                                       {render_width_, render_height_}, cloudscape_frame);
     }
 
     // Note: screen-space precipitation (rain/snow streaks) is composited after

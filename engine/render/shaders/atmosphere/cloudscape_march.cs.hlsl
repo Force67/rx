@@ -41,7 +41,7 @@ struct PushData {
   uint flags;            // bit 0: history valid
   float darkness;        // menace 0..1: blackens the deck (severe-storm skies)
 };
-PUSH_CONSTANTS(PushData, pc);
+[[vk::binding(9, 0)]] ConstantBuffer<PushData> pc : register(b9, space0);
 
 static const float kBaseScale = 1.0 / 9600.0;    // base noise tiles every ~9.6 km
 static const float kDetailScale = 1.0 / 1100.0;  // erosion texture tile
@@ -69,7 +69,7 @@ float HeightProfile(float h, float cloud_type, float anvil) {
 
 // Weather map: R coverage, G precipitation, B cloud type. World XZ, wrapped.
 float4 SampleWeather(float2 world_xz) {
-  float2 uv = (world_xz + pc.map.xy) / pc.map.z;
+  float2 uv = (world_xz - pc.map.xy) / pc.map.z;
   return weather_map.SampleLevel(weather_sampler, uv, 0.0);
 }
 
@@ -88,8 +88,8 @@ float3 WorldUnwrap(float3 p) {
 // Wind advection: the whole field drifts downwind, and the layer top leads the
 // base (vertical skew) so towers lean the way real shear pushes them.
 float3 Advect(float3 wp, float h) {
-  float2 drift = pc.wind.xy * (pc.wind.z * pc.camera_pos.w) + pc.wind.xy * (pc.wind.w * h);
-  return wp + float3(drift.x, 0.0, drift.y);
+  float2 drift = pc.map.xy + pc.wind.xy * (pc.wind.w * h);
+  return wp - float3(drift.x, 0.0, drift.y);
 }
 
 // Cheap density: base texture, profile and coverage only. Used to skip empty
@@ -248,6 +248,7 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
     if (tb > 0.0) t_end = min(t_end, tb);
   }
   bool occluded = scene_dist < t_start;
+  bool geometry_clipped_shell = scene_dist < t_end;
   t_end = min(t_end, scene_dist);
   if (t_start < 0.0 || t_end <= t_start || t_start > 180000.0) {
     // No shell interval: valid "no cloud" unless geometry hid the sky.
@@ -350,7 +351,7 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
     if (t_ci > 0.0 && t_ci < min(scene_dist, 260000.0)) {
       float2 cxz = cam.xz + view.xz * t_ci;
       float4 wci = SampleWeather(cxz);
-      float2 cuv = cxz * 0.000045 + pc.wind.xy * (pc.camera_pos.w * pc.wind.z * 0.00002);
+      float2 cuv = (cxz - pc.map.xy) * 0.000045;
       float3 cp = float3(cuv.x * 2.6, cuv.y * 1.2, 3.1);
       float wisp = base_noise.SampleLevel(base_sampler, cp * 0.13, 0.0).g * 0.7 +
                    base_noise.SampleLevel(base_sampler, cp * 0.31, 0.0).b * 0.3;
@@ -358,7 +359,10 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
       if (ci > 0.001) {
         float ci_phase = max(HG(cos_angle, 0.55), 0.4 * HG(cos_angle, -0.1));
         float3 ci_lit = sun_col * ci_phase * 0.9 + ambient_base * 0.8;
+        float ci_opacity = r.transmittance * (1.0 - exp(-ci * 0.3));
         r.scatter += r.transmittance * ci_lit * ci * 0.14;
+        weighted_t += ci_opacity * t_ci;
+        weight_sum += ci_opacity;
         r.transmittance *= exp(-ci * 0.3);
       }
     }
@@ -367,7 +371,7 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
   if (weight_sum > 1e-4) {
     r.dist = weighted_t / weight_sum;
   } else {
-    r.dist = occluded ? -1.0 : (t_start + t_end) * 0.5;
+    r.dist = (occluded || geometry_clipped_shell) ? -1.0 : (t_start + t_end) * 0.5;
   }
   return r;
 }
@@ -383,11 +387,13 @@ void main(uint3 id : SV_DispatchThreadID) {
   float3 view = normalize(nh.xyz / nh.w - cam);
 
   // Scene distance from the full-res depth (point tap at our center).
-  uint2 fpx = min(px * pc.full_size / pc.size, pc.full_size - 1);
+  uint2 fpx = min(uint2((float2(px) + 0.5) * float2(pc.full_size) / float2(pc.size)),
+                  pc.full_size - 1);
   float depth = depth_in.Load(int3(fpx, 0));
   float scene_dist = 1e12;
   if (depth > 0.0) {
-    float4 wh = mul(pc.inv_view_proj, float4(ndc, depth, 1.0));
+    float2 depth_ndc = (float2(fpx) + 0.5) / float2(pc.full_size) * 2.0 - 1.0;
+    float4 wh = mul(pc.inv_view_proj, float4(depth_ndc, depth, 1.0));
     scene_dist = length(wh.xyz / wh.w - cam);
   }
 
@@ -429,6 +435,9 @@ void main(uint3 id : SV_DispatchThreadID) {
       }
     }
   }
+
+  // Current geometry wins over history generated when this ray still saw sky.
+  if (hist_dist > scene_dist) hist_dist = -1.0;
 
   if (!fresh && hist_dist > 0.0) {
     out_cloud[px] = hist_cloud;

@@ -220,8 +220,30 @@ void DemoScenes::Shutdown() {
 }
 
 void DemoScenes::ApplyRenderPolicy() {
-  if (cloth_ == 0) return;
   render::RenderSettings& settings = renderer_.settings();
+  if (sky_scene_) {
+    settings.cloudscape = true;
+    settings.clouds = true;  // retained as the initialization-failure fallback
+    settings.cloudscape_controls = sky_controls_;
+    settings.weather = sky_weather_;
+    const render::CloudscapeControls &c = settings.cloudscape_controls;
+    settings.cloud_coverage = c.map_a.coverage +
+                              (c.map_b.coverage - c.map_a.coverage) * c.map_blend;
+  }
+  if (weather_scene_) {
+    settings.weather = weather_demo_weather_;
+    settings.cloud_coverage = 0.68f;
+    settings.cloudscape_controls = weather_demo_controls_;
+    settings.sun_intensity = std::min(settings.sun_intensity, 1.3f);
+    settings.ibl_intensity = 0.4f;
+    settings.ddgi = false;
+    settings.ssgi = false;
+    settings.ssr = false;
+    settings.aerial_perspective = 0.15f;
+    settings.auto_exposure = false;
+    settings.exposure = 0.7f;
+  }
+  if (cloth_ == 0) return;
   settings.aa_mode = render::AntiAliasingMode::kNone;
   settings.upscaler = render::UpscalerKind::kNone;
   settings.dynamic_resolution = false;
@@ -247,8 +269,16 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // gloom is a cap on the direct light, not an absolute, so re-clamp per frame.
   if (weather_scene_) {
     renderer_.settings().sun_intensity = std::min(renderer_.settings().sun_intensity, 1.3f);
+    const render::WeatherSettings &weather = renderer_.settings().weather;
+    weather_map_offset_ +=
+        Vec2{std::cos(weather.wind_yaw), std::sin(weather.wind_yaw)} * (weather.wind_speed * dt);
+    renderer_.settings().cloudscape_controls.map_offset = weather_map_offset_;
   }
   if (storm_enabled_) UpdateStorm(dt);
+  if (weather_scene_) {
+    weather_demo_weather_ = renderer_.settings().weather;
+    weather_demo_controls_ = renderer_.settings().cloudscape_controls;
+  }
   if (scene_hook_) scene_hook_->Emit(dt, view);
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   if (ship_) ship_->Emit(dt, view);
@@ -600,6 +630,7 @@ void DemoScenes::CreateWaterDemoScene() {
   particles_enabled_ = true;
   particle_emitter_ = {-7.0f, 0.8f, 0.0f};
   renderer_.settings().clouds = false;
+  renderer_.settings().cloudscape = false;
   // DDGI's low-resolution probe volume can imprint its lattice on the large
   // untextured floaters. This scene validates water geometry, so use the
   // stable environment-lighting path here.
@@ -1742,6 +1773,7 @@ void DemoScenes::CreateClothDemoScene() {
   renderer_.settings().ambient = 0.09f;
   renderer_.settings().dof = false;
   renderer_.settings().clouds = false;
+  renderer_.settings().cloudscape = false;
   renderer_.settings().aerial_perspective = 0.0f;
   camera_.set_position({3.2f, 2.15f, 2.6f});
   camera_.set_yaw_pitch(-0.89f, -0.08f);
@@ -3001,6 +3033,18 @@ void DemoScenes::CreateWeatherDemoScene() {
   rs.weather.wind_yaw = WeatherDemoWindDir.get() * 3.14159265f / 180.0f;
   rs.weather.gustiness = 0.45f;
   rs.cloud_coverage = 0.68f;  // overcast enough to sell the downpour, some light through
+  rs.cloudscape_controls.map_a = {
+      .seed = 61u, .coverage = 0.68f, .cloud_type = 0.9f,
+      .precipitation = rs.weather.precipitation};
+  rs.cloudscape_controls.map_b = rs.cloudscape_controls.map_a;
+  rs.cloudscape_controls.map_blend = 0.0f;
+  rs.cloudscape_controls.bottom = 1300.0f;
+  rs.cloudscape_controls.top = 10500.0f;
+  rs.cloudscape_controls.anvil = 0.85f;
+  rs.cloudscape_controls.darkness = 0.45f;
+  rs.cloudscape_controls.density = 1.1f;
+  rs.cloudscape_controls.fog_density = 0.22f;
+  rs.cloudscape_controls.fog_height = 120.0f;
   // Storm light: the cloud deck kills most direct sun, but the IBL/sun path
   // does not know about clouds - stage it. Fixed exposure keeps the deliberate
   // gloom (auto exposure would lift the overcast scene back to a bright noon).
@@ -3080,13 +3124,13 @@ void DemoScenes::CreateSkyDemoScene() {
     world_.Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
     world_.Add(e, scene::Renderable{mesh.id});
   };
-  add_box(asset::MakeBox(400.0f, 0.5f, 400.0f, asset::MakeAssetId("builtin/sky/ground_m")),
+  add_box(asset::MakeBox(3200.0f, 0.5f, 3200.0f, asset::MakeAssetId("builtin/sky/ground_m")),
           ground_mat, {0, -0.5f, 0});
-  add_box(asset::MakeBox(3.0f, 24.0f, 3.0f, asset::MakeAssetId("builtin/sky/tower_a")),
+  add_box(asset::MakeBox(3.0f, 12.0f, 3.0f, asset::MakeAssetId("builtin/sky/tower_a")),
           block_mat, {26.0f, 12.0f, -18.0f});
-  add_box(asset::MakeBox(2.0f, 12.0f, 2.0f, asset::MakeAssetId("builtin/sky/tower_b")),
+  add_box(asset::MakeBox(2.0f, 6.0f, 2.0f, asset::MakeAssetId("builtin/sky/tower_b")),
           block_mat, {-30.0f, 6.0f, 8.0f});
-  add_box(asset::MakeBox(6.0f, 3.0f, 6.0f, asset::MakeAssetId("builtin/sky/slab")),
+  add_box(asset::MakeBox(6.0f, 1.5f, 6.0f, asset::MakeAssetId("builtin/sky/slab")),
           block_mat, {-6.0f, 1.5f, -34.0f});
 
   // The weather layer: four states spanning the model's range. Dwell and
@@ -3200,7 +3244,7 @@ void DemoScenes::CreateSkyDemoScene() {
 
   auto& rs = renderer_.settings();
   rs.cloudscape = true;
-  rs.clouds = false;
+  rs.clouds = true;
 
   sky_scene_ = true;
   camera_.set_position({0.0f, 3.0f, 46.0f});
@@ -3211,7 +3255,7 @@ void DemoScenes::CreateSkyDemoScene() {
   }
   camera_.speed = 14.0f;
   RX_INFO("sky demo: cloudscape on, {} weather states{}", 6,
-          pinned >= 0 ? " (pinned)" : "");
+          pinned >= 0 && pinned < 6 ? " (pinned)" : "");
 }
 
 void DemoScenes::CreateSwampDemoScene() {
@@ -3236,7 +3280,7 @@ void DemoScenes::CreateSwampDemoScene() {
 
   auto add_box = [&](const char* tag, f32 w, f32 h, f32 d, asset::AssetId material, Vec3 pos,
                      f32 tilt_x, f32 tilt_z) {
-    asset::Mesh mesh = asset::MakeBox(w, h, d, asset::MakeAssetId(tag));
+    asset::Mesh mesh = asset::MakeBox(w * 0.5f, h * 0.5f, d * 0.5f, asset::MakeAssetId(tag));
     asset::MeshLod& lod = mesh.lods[0];
     lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
     if (!config_.headless) renderer_.UploadMesh(mesh);
@@ -3255,7 +3299,7 @@ void DemoScenes::CreateSwampDemoScene() {
     world_.Add(e, scene::Renderable{mesh.id});
   };
 
-  add_box("builtin/swamp/ground", 300.0f, 0.5f, 300.0f, mud_mat, {0, -0.5f, 0}, 0, 0);
+  add_box("builtin/swamp/ground", 300.0f, 0.5f, 300.0f, mud_mat, {0, -0.25f, 0}, 0, 0);
   // Hummocks: low mossy mounds breaking the plane.
   u32 rng = 0x51ab7u;
   auto next01 = [&rng]() {
@@ -3270,8 +3314,8 @@ void DemoScenes::CreateSwampDemoScene() {
     f32 w = 2.5f + next01() * 4.0f;
     char tag[64];
     std::snprintf(tag, sizeof(tag), "builtin/swamp/hummock_%d", i);
-    add_box(tag, w, 0.5f + next01() * 0.5f, w * (0.7f + next01() * 0.6f), moss_mat,
-            {x, 0.15f, z}, 0, 0);
+    f32 h = 0.5f + next01() * 0.5f;
+    add_box(tag, w, h, w * (0.7f + next01() * 0.6f), moss_mat, {x, h * 0.5f, z}, 0, 0);
   }
   // Dead snags: tall thin trunks with a drunken lean, some snapped short.
   for (int i = 0; i < 26; ++i) {
@@ -3306,7 +3350,7 @@ void DemoScenes::CreateSwampDemoScene() {
 
   auto& rs = renderer_.settings();
   rs.cloudscape = true;
-  rs.clouds = false;
+  rs.clouds = true;
 
   sky_scene_ = true;
   swamp_scene_ = true;
@@ -3327,6 +3371,10 @@ void DemoScenes::EmitSky(f32 dt) {
   auto& rs = renderer_.settings();
   rs.cloudscape_controls = weather_sys_->cloudscape();
   rs.weather = weather_sys_->weather();
+  rs.cloud_coverage = rs.cloudscape_controls.map_a.coverage +
+                      (rs.cloudscape_controls.map_b.coverage -
+                       rs.cloudscape_controls.map_a.coverage) *
+                          rs.cloudscape_controls.map_blend;
   if (SkyFog.get() >= 0.0f) rs.cloudscape_controls.fog_density = SkyFog.get();
   if (SkyFogH.get() > 0.0f) rs.cloudscape_controls.fog_height = SkyFogH.get();
   if (swamp_scene_) {
@@ -3334,6 +3382,8 @@ void DemoScenes::EmitSky(f32 dt) {
     // its puddle sheen without any rain falling.
     rs.weather.wetness = std::max(rs.weather.wetness, 0.8f);
   }
+  sky_controls_ = rs.cloudscape_controls;
+  sky_weather_ = rs.weather;
   // Touchdown breadcrumb: aim RX_CAM at the funnel for deterministic shots.
   const render::CloudscapeControls& cc = rs.cloudscape_controls;
   if (bool(SkyTrack) && cc.tornado_strength > 0.02f) {
@@ -3362,8 +3412,9 @@ void DemoScenes::EmitSky(f32 dt) {
   sky_prev_strike_age_ = w.strike_age;
   if (new_strike) {
     Vec3 cam = camera_.position();
-    f32 dx = w.strike_pos.x - cam.x, dz = w.strike_pos.z - cam.z;
-    f32 dist = std::sqrt(dx * dx + dz * dz);
+    f32 dx = w.strike_pos.x - cam.x, dy = w.strike_pos.y + 400.0f - cam.y;
+    f32 dz = w.strike_pos.z - cam.z;
+    f32 dist = std::sqrt(dx * dx + dy * dy + dz * dz);
     sky_thunder_.push_back({dist / 343.0f, w.strike_pos, w.strike_seed, w.strike_energy, dist});
   }
   for (u32 i = 0; i < sky_thunder_.size();) {

@@ -48,8 +48,8 @@ class CloudscapeTextures {
   PipelineHandle curl_pipeline_;
   PipelineHandle weather_pipeline_;
 
-  // Persistent storage images: written by the compute bakes and then left in
-  // kGeneral so the raymarcher samples them straight out of the storage state.
+  // Persistent storage images: bake passes transition them to kGeneral for the
+  // write and back to sampled-compute state for every consumer.
   GpuImage base_noise_;
   GpuImage detail_noise_;
   GpuImage curl_;

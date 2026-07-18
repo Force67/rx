@@ -40,7 +40,10 @@ float3 WeatherState(float2 uv, uint seed, float coverage, float cloud_type, floa
   // inverted-Worley cell field, then thresholded so the map's mean tracks the
   // coverage scalar. A threshold (not a multiply) is what turns a smooth field
   // into separated cloud masses at mid coverage.
-  float warp = cs_perlin2_fbm(p * 0.5 + 5.1, 2.0, 3);
+  // Keep every domain multiplier and lattice period integral. The wrapped
+  // noise is periodic over one UV tile only when uv + 1 advances an integer
+  // number of wrapped lattice cells.
+  float warp = cs_perlin2_fbm(p + 5.1, 1.0, 3);
   float2 wp = p + (warp - 0.5) * 0.4;
   float n = cs_perlin2_fbm(wp, 3.0, 5);
   float cells = cs_worley2_fbm(p, 3.0);
@@ -57,15 +60,15 @@ float3 WeatherState(float2 uv, uint seed, float coverage, float cloud_type, floa
 
   // Precipitation: sparser, larger cells; area fraction tracks the precip
   // scalar and the cells are masked to where coverage is already thick.
-  float pn = cs_perlin2_fbm(p * 0.45 + 21.3, 2.0, 3);
-  float pcells = cs_worley2_fbm(p * 0.5 + 8.0, 1.5);
+  float pn = cs_perlin2_fbm(p + 21.3, 1.0, 3);
+  float pcells = cs_worley2_fbm(p + 8.0, 2.0);
   float precip_f = saturate((pn * pcells - (1.0 - precip)) / 0.18 + 0.35);
   precip_f *= smoothstep(0.45, 0.8, cov);
   precip_f *= smoothstep(0.0, 0.05, precip);
 
   // Cloud type: a broad low-frequency field around the type scalar, driven to
   // cumulus (1) inside the storm cells so precipitating decks build towers.
-  float tn = cs_perlin2_fbm(p * 0.6 + 44.2, 2.0, 2);
+  float tn = cs_perlin2_fbm(p + 44.2, 1.0, 2);
   float typ = saturate(cloud_type + (tn - 0.5) * 0.5);
   typ = max(typ, precip_f);
 
@@ -80,7 +83,12 @@ void main(uint3 id : SV_DispatchThreadID) {
   float2 uv = (float2(id.xy) + 0.5) / float2(dims);
 
   float3 a = WeatherState(uv, pc.seed_a, pc.coverage_a, pc.cloud_type_a, pc.precip_a);
-  float3 b = WeatherState(uv, pc.seed_b, pc.coverage_b, pc.cloud_type_b, pc.precip_b);
+  float3 b = a;
+  bool same_state = pc.seed_a == pc.seed_b && pc.coverage_a == pc.coverage_b &&
+                    pc.cloud_type_a == pc.cloud_type_b && pc.precip_a == pc.precip_b;
+  if (!same_state && pc.blend > 0.0) {
+    b = WeatherState(uv, pc.seed_b, pc.coverage_b, pc.cloud_type_b, pc.precip_b);
+  }
   float3 rgb = lerp(a, b, saturate(pc.blend));
   out_map[id.xy] = float4(rgb, 1.0);
 }

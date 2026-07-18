@@ -77,7 +77,10 @@ public:
                                   ResourceHandle depth, Extent2D extent,
                                   const Frame &frame);
 
-  bool available() const { return textures_.ready(); }
+  bool available() const {
+    return textures_.ready() && march_pipeline_ && apply_pipeline_ && shadow_pipeline_ &&
+           haze_pipeline_ && funnel_pipeline_ && screen_sampler_;
+  }
 
 private:
   void EnsureBuffers(Device &device, Extent2D half);
@@ -90,6 +93,13 @@ private:
   PipelineHandle shadow_pipeline_;
   PipelineHandle haze_pipeline_;
   PipelineHandle funnel_pipeline_;
+  SamplerHandle screen_sampler_;
+
+  static constexpr u32 kFramesInFlight = 2;
+  GpuBuffer march_params_[kFramesInFlight];
+  GpuBuffer shadow_params_[kFramesInFlight];
+  GpuBuffer haze_params_[kFramesInFlight];
+  GpuBuffer funnel_params_[kFramesInFlight];
 
   // Persistent half-res ping-pong: (scatter, transmittance) + marched mean
   // cloud distance, reprojected across the refresh cycle.
@@ -102,6 +112,8 @@ private:
   Extent2D half_extent_{};
   u32 slot_ = 0;
   bool history_valid_ = false;
+  u32 last_frame_index_ = 0;
+  bool has_last_frame_ = false;
 };
 
 } // namespace rx::render

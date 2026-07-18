@@ -18,7 +18,8 @@
 // metres, m/s, radians. Wind yaw is the direction the wind blows TOWARD on the
 // XZ plane and matches render::WeatherSettings::wind_yaw. All randomness comes
 // from one seeded integer PRNG owned here (no <random> distributions), so a
-// given seed and Update() call sequence reproduce bit-for-bit on any platform.
+// given seed and Update() call sequence reproduce the same schedule on a given
+// floating-point implementation.
 
 #include <base/containers/vector.h>
 

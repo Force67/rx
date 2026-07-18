@@ -170,6 +170,8 @@ class DemoScenes {
   bool swamp_scene_ = false;  // pins surface wetness (standing water)
   bool sky_tornado_seen_ = false;  // touchdown log edge detector
   f32 sky_time_ = 0;  // scene clock, drives a slow synthetic day phase
+  render::CloudscapeControls sky_controls_;
+  render::WeatherSettings sky_weather_;
   // Thunder claps in flight: queued on each new strike, played after the
   // speed-of-sound delay.
   struct PendingThunder {
@@ -184,6 +186,9 @@ class DemoScenes {
   // Weather demo thunderstorm scheduler state.
   bool storm_enabled_ = false;
   bool weather_scene_ = false;  // weather demo active: re-clamp its storm sun
+  Vec2 weather_map_offset_{0, 0};
+  render::CloudscapeControls weather_demo_controls_;
+  render::WeatherSettings weather_demo_weather_;
   f32 storm_time_ = 0;
   f32 storm_next_strike_ = 0;
   u32 gpu_particle_count_ = 0;  // > 0 selects the gpu-simulated fountain

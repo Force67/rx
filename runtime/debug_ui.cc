@@ -254,7 +254,19 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
       if (ImGui::Combo("Quality preset", &preset_choice_, kPresets, IM_ARRAYSIZE(kPresets)) &&
           preset_choice_ > 0 && caps) {
         render::QualityPreset preset = kPresetValues[preset_choice_];
+        const bool clouds = settings.clouds;
+        const bool cloudscape = settings.cloudscape;
+        const u32 cloudscape_steps = settings.cloudscape_steps;
+        const f32 cloud_coverage = settings.cloud_coverage;
+        const render::CloudscapeControls cloudscape_controls = settings.cloudscape_controls;
+        const render::WeatherSettings weather = settings.weather;
         settings = render::PresetSettings(preset, *caps);
+        settings.clouds = clouds;
+        settings.cloudscape = cloudscape;
+        settings.cloudscape_steps = cloudscape_steps;
+        settings.cloud_coverage = cloud_coverage;
+        settings.cloudscape_controls = cloudscape_controls;
+        settings.weather = weather;
         if (preset == render::QualityPreset::kAuto) {
           RX_INFO("preset: auto -> {}", render::PresetName(render::DetectPreset(*caps)));
         }

@@ -18,7 +18,7 @@ struct ShadowPush {
   float time;
   float strength;  // max darkening (0..1)
 };
-PUSH_CONSTANTS(ShadowPush, pc);
+[[vk::binding(4, 0)]] ConstantBuffer<ShadowPush> pc : register(b4, space0);
 
 [[vk::image_format("r8")]] [[vk::binding(0, 0)]] RWTexture2D<float> sun_shadow : register(u0, space0);
 [[vk::binding(1, 0)]] Texture2D<float> depth_map : register(t1, space0);
@@ -48,11 +48,11 @@ float HeightProfile(float h, float cloud_type, float anvil) {
 float DensityCheap(float3 wp) {
   float h = (wp.y - pc.shape.x) / max(pc.shape.y - pc.shape.x, 1.0);
   if (h <= 0.0 || h >= 1.0) return 0.0;
-  float4 weather = weather_map.SampleLevel(weather_sampler, (wp.xz + pc.map.xy) / pc.map.z, 0.0);
+  float4 weather = weather_map.SampleLevel(weather_sampler, (wp.xz - pc.map.xy) / pc.map.z, 0.0);
   float coverage = weather.r;
   if (coverage <= 0.005) return 0.0;
-  float2 drift = pc.wind.xy * (pc.wind.z * pc.time) + pc.wind.xy * (pc.wind.w * h);
-  float3 sp = (wp + float3(drift.x, 0.0, drift.y)) * kBaseScale;
+  float2 drift = pc.map.xy + pc.wind.xy * (pc.wind.w * h);
+  float3 sp = (wp - float3(drift.x, 0.0, drift.y)) * kBaseScale;
   float4 nse = base_noise.SampleLevel(base_sampler, sp, 0.0);
   float worley_fbm = nse.g * 0.625 + nse.b * 0.25 + nse.a * 0.125;
   float base = Remap(nse.r, worley_fbm - 1.0, 1.0, 0.0, 1.0);
@@ -85,7 +85,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float span = (t1 - t0);
   // Two taps weighted by the path length; menace deepens the occlusion the
   // way it deepens the deck's own absorption.
-  float d = DensityCheap(lerp(p0, p1, 0.3)) + DensityCheap(lerp(p0, p1, 0.7));
+  float d = DensityCheap(lerp(p0, p1, 0.16)) + DensityCheap(lerp(p0, p1, 0.65));
   float shade = exp(-d * span * 0.0016 * (1.0 + pc.shape.w * 1.5));
   float factor = lerp(1.0 - pc.strength, 1.0, shade);
   sun_shadow[id.xy] = existing * factor;

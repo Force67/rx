@@ -202,6 +202,9 @@ void TestForcedOverride() {
   sys.Update(0.1f, Vec3{0, 0, 0}, 0.5f);
   sys.ForceState(2, 0.0f);  // snap to the storm
   Check(sys.active_state() == 2 && sys.target_state() == 2, "instant force snaps active+target");
+  Near(sys.weather().precipitation, 1.0f, "instant force composes renderer weather immediately");
+  Near(sys.cloudscape().darkness, never.darkness,
+       "instant force composes cloudscape controls immediately");
 
   bool stayed = true;
   for (int i = 0; i < 400; ++i) {  // far longer than any dwell
@@ -226,13 +229,64 @@ void TestSurfaceResponse() {
   sys.AddState(Clear(2));   // 1: dry
   sys.ForceState(0, 0.0f);
 
-  for (int i = 0; i < 40; ++i) sys.Update(0.5f, Vec3{0, 0, 0}, 0.5f);  // 20s of rain
+  sys.Update(1.0f, Vec3{0, 0, 0}, 0.5f);
+  Near(sys.weather().wetness, 0.1f, "surface integration is visible in the same update");
+
+  for (int i = 0; i < 38; ++i) sys.Update(0.5f, Vec3{0, 0, 0}, 0.5f);  // 20s of rain
   f32 wet = sys.weather().wetness;
   Check(wet > 0.2f, "wetness rises under rain");
 
   sys.ForceState(1, 0.0f);  // dry state
   for (int i = 0; i < 80; ++i) sys.Update(0.5f, Vec3{0, 0, 0}, 0.5f);  // 40s dry
   Check(sys.weather().wetness < wet, "wetness dries after the rain stops");
+}
+
+// --- Wind interpolation follows the short arc across the +/-pi wrap. --
+void TestWindYawWrap() {
+  WeatherSystem sys(8u);
+  WeatherState a = Clear(1);
+  WeatherState b = Clear(2);
+  a.wind_yaw = 3.13f;
+  b.wind_yaw = -3.13f;
+  sys.AddState(a);
+  sys.AddState(b);
+  sys.ForceState(0, 0.0f);
+  sys.ForceState(1, 4.0f);
+  sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
+  Check(std::fabs(sys.cloudscape().wind_yaw) > 3.0f,
+        "wind yaw crosses the wrap without reversing through zero");
+}
+
+// --- A default/degenerate region never captures the world origin. --
+void TestDegenerateRegion() {
+  WeatherSystem sys(11u);
+  WeatherState allowed = Clear(1);
+  allowed.weight = 1.0f;
+  WeatherState blocked = Storm(2);
+  blocked.weight = 0.0f;
+  sys.AddState(allowed);
+  sys.AddState(blocked);
+  WeatherRegion point;
+  point.states.push_back(1u);
+  sys.AddRegion(point);
+  sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.active_state() == 0, "degenerate regions do not contain their single point");
+}
+
+void TestInvalidRegionState() {
+  WeatherSystem sys(12u);
+  WeatherState disabled = Clear(1);
+  disabled.weight = 0.0f;
+  sys.AddState(disabled);
+  sys.AddState(Clear(2));
+  WeatherRegion bad;
+  bad.min_xz = {-1.0f, -1.0f};
+  bad.max_xz = {1.0f, 1.0f};
+  bad.states.push_back(99u);
+  sys.AddRegion(bad);
+  sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.active_state() == 1,
+        "regions without valid state indices fall back to global scheduling");
 }
 
 // --- Wind advection: map_offset integrates wind * dt, across a state change. --
@@ -306,6 +360,9 @@ int main() {
   TestForcedOverride();
   TestSurfaceResponse();
   TestWindAdvection();
+  TestWindYawWrap();
+  TestDegenerateRegion();
+  TestInvalidRegionState();
   TestLightning();
 
   if (failures == 0) {

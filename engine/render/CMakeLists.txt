@@ -413,6 +413,7 @@ set(RX_SHADER_DEPS_cloudscape_detail_noise_cs_hlsl shaders/atmosphere/cloudscape
 set(RX_SHADER_DEPS_cloudscape_curl_cs_hlsl shaders/atmosphere/cloudscape_noise.hlsli)
 set(RX_SHADER_DEPS_cloudscape_weather_map_cs_hlsl shaders/atmosphere/cloudscape_noise.hlsli)
 set(RX_SHADER_DEPS_cloudscape_march_cs_hlsl shaders/atmosphere/atmosphere.hlsli)
+set(RX_SHADER_DEPS_cloudscape_haze_cs_hlsl shaders/atmosphere/atmosphere.hlsli)
 set(RX_SHADER_DEPS_light_grid_cs_hlsl shaders/gi/light_grid.hlsli)
 set(RX_SHADER_DEPS_rcgi_probe_trace_cs_hlsl shaders/gi/rcgi_probe_trace_body.hlsli shaders/gi/rcgi_common.hlsli shaders/rt_geometry.hlsli)
 set(RX_SHADER_DEPS_rcgi_probe_trace_sw_cs_hlsl shaders/gi/rcgi_probe_trace_body.hlsli shaders/gi/rcgi_common.hlsli shaders/gi/sdf_trace.hlsli)

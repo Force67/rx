@@ -17,7 +17,7 @@ struct FunnelPush {
   uint2 size;
   float2 _pad;
 };
-PUSH_CONSTANTS(FunnelPush, pc);
+[[vk::binding(4, 0)]] ConstantBuffer<FunnelPush> pc : register(b4, space0);
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> out_image : register(u0, space0);
 [[vk::binding(1, 0)]] Texture2D<float4> color_in : register(t1, space0);
@@ -79,6 +79,9 @@ void main(uint3 id : SV_DispatchThreadID) {
     float tb = (base_y + 120.0 - cam.y) / view.y;
     t0 = max(t0, min(ta, tb));
     t1 = min(t1, max(ta, tb));
+  } else if (cam.y < ground || cam.y > base_y + 120.0) {
+    out_image[px] = float4(scene, 1.0);
+    return;
   }
   t1 = min(t1, scene_dist);
   if (t1 <= t0 || strength <= 0.01) {

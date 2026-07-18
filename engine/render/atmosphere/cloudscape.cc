@@ -1,6 +1,7 @@
 #include "render/atmosphere/cloudscape.h"
 
 #include <cmath>
+#include <cstring>
 
 #include "core/log.h"
 #include "render/rhi/device.h"
@@ -29,7 +30,6 @@ struct MarchPush {
   u32 flags;
   f32 darkness;
 };
-static_assert(sizeof(MarchPush) <= 256, "march push must fit the 256B budget");
 
 struct ShadowPush {
   Mat4 inv_view_proj;
@@ -48,7 +48,7 @@ struct HazePush {
   f32 camera_pos[4];    // xyz eye, w time
   f32 sun_direction[4]; // xyz travel dir, w intensity
   f32 sun_color[4];     // rgb, w flash
-  f32 wind[4];          // xy blow dir, z speed, w darkness
+  f32 wind[4];          // xy blow dir, z vertical skew, w darkness
   f32 fog[4];           // density, height, ground, anvil
   f32 map[4];           // xy offset, z extent, w churn
   u32 size[2];
@@ -79,8 +79,33 @@ struct ApplyPush {
 
 bool Cloudscape::Initialize(Device &device) {
   device_ = &device;
-  if (!textures_.Initialize(device))
+  if (!textures_.Initialize(device)) {
+    device_ = nullptr;
     return false;
+  }
+  screen_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
+                                       .mag_filter = Filter::kLinear,
+                                       .mip_filter = Filter::kLinear,
+                                       .address_u = AddressMode::kClampToEdge,
+                                       .address_v = AddressMode::kClampToEdge,
+                                       .address_w = AddressMode::kClampToEdge});
+  if (!screen_sampler_) {
+    RX_ERROR("cloudscape screen sampler creation failed");
+    Destroy(device);
+    return false;
+  }
+  for (u32 i = 0; i < kFramesInFlight; ++i) {
+    march_params_[i] = device.CreateBuffer(sizeof(MarchPush), kBufferUsageUniform, true);
+    shadow_params_[i] = device.CreateBuffer(sizeof(ShadowPush), kBufferUsageUniform, true);
+    haze_params_[i] = device.CreateBuffer(sizeof(HazePush), kBufferUsageUniform, true);
+    funnel_params_[i] = device.CreateBuffer(sizeof(FunnelPush), kBufferUsageUniform, true);
+    if (!march_params_[i].mapped || !shadow_params_[i].mapped || !haze_params_[i].mapped ||
+        !funnel_params_[i].mapped) {
+      RX_ERROR("cloudscape parameter buffer creation failed");
+      Destroy(device);
+      return false;
+    }
+  }
   march_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_march_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
@@ -91,8 +116,8 @@ bool Cloudscape::Initialize(Device &device) {
                           {5, BindingType::kCombinedTextureSampler},
                           {6, BindingType::kCombinedTextureSampler},
                           {7, BindingType::kCombinedTextureSampler},
-                          {8, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(MarchPush),
+                          {8, BindingType::kCombinedTextureSampler},
+                          {9, BindingType::kUniformBuffer}}}},
       .debug_name = "cloudscape_march",
   });
   apply_pipeline_ = device.CreateComputePipeline({
@@ -110,8 +135,8 @@ bool Cloudscape::Initialize(Device &device) {
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kCombinedTextureSampler},
                           {4, BindingType::kCombinedTextureSampler},
-                          {5, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(HazePush),
+                          {5, BindingType::kCombinedTextureSampler},
+                          {6, BindingType::kUniformBuffer}}}},
       .debug_name = "cloudscape_haze",
   });
   funnel_pipeline_ = device.CreateComputePipeline({
@@ -119,8 +144,8 @@ bool Cloudscape::Initialize(Device &device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kSampledImage},
-                          {3, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(FunnelPush),
+                          {3, BindingType::kCombinedTextureSampler},
+                          {4, BindingType::kUniformBuffer}}}},
       .debug_name = "cloudscape_funnel",
   });
   shadow_pipeline_ = device.CreateComputePipeline({
@@ -128,13 +153,14 @@ bool Cloudscape::Initialize(Device &device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kCombinedTextureSampler},
-                          {3, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(ShadowPush),
+                          {3, BindingType::kCombinedTextureSampler},
+                          {4, BindingType::kUniformBuffer}}}},
       .debug_name = "cloudscape_shadow",
   });
   if (!march_pipeline_ || !apply_pipeline_ || !shadow_pipeline_ ||
       !haze_pipeline_ || !funnel_pipeline_) {
     RX_ERROR("cloudscape pipeline creation failed");
+    Destroy(device);
     return false;
   }
   return true;
@@ -151,6 +177,29 @@ ResourceHandle Cloudscape::AddFunnelToGraph(RenderGraph &graph,
                                             .format = Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
+  FunnelPush push{};
+  push.inv_view_proj = frame.inv_view_proj;
+  push.camera_pos[0] = frame.camera_pos.x;
+  push.camera_pos[1] = frame.camera_pos.y;
+  push.camera_pos[2] = frame.camera_pos.z;
+  push.camera_pos[3] = frame.time;
+  push.sun_color[0] = frame.sun_color.x;
+  push.sun_color[1] = frame.sun_color.y;
+  push.sun_color[2] = frame.sun_color.z;
+  push.sun_color[3] = frame.flash;
+  const CloudscapeControls &c = frame.controls;
+  push.funnel[0] = c.tornado_pos.x;
+  push.funnel[1] = c.tornado_pos.y;
+  push.funnel[2] = c.tornado_radius;
+  push.funnel[3] = c.tornado_strength;
+  push.bounds[0] = c.fog_ground;
+  push.bounds[1] = c.bottom;
+  push.bounds[2] = frame.sun_intensity;
+  push.bounds[3] = c.darkness;
+  push.size[0] = extent.width;
+  push.size[1] = extent.height;
+  const u32 param_slot = frame.frame_index % kFramesInFlight;
+  std::memcpy(funnel_params_[param_slot].mapped, &push, sizeof(push));
   graph.AddPass(
       "cloudscape_funnel",
       [&](RenderGraph::PassBuilder &b) {
@@ -158,36 +207,14 @@ ResourceHandle Cloudscape::AddFunnelToGraph(RenderGraph &graph,
         b.Read(color, ResourceUsage::kSampledCompute);
         b.Read(depth, ResourceUsage::kSampledCompute);
       },
-      [this, out, color, depth, extent, frame](PassContext &ctx) {
-        FunnelPush push{};
-        push.inv_view_proj = frame.inv_view_proj;
-        push.camera_pos[0] = frame.camera_pos.x;
-        push.camera_pos[1] = frame.camera_pos.y;
-        push.camera_pos[2] = frame.camera_pos.z;
-        push.camera_pos[3] = frame.time;
-        push.sun_color[0] = frame.sun_color.x;
-        push.sun_color[1] = frame.sun_color.y;
-        push.sun_color[2] = frame.sun_color.z;
-        push.sun_color[3] = frame.flash;
-        const CloudscapeControls &c = frame.controls;
-        push.funnel[0] = c.tornado_pos.x;
-        push.funnel[1] = c.tornado_pos.y;
-        push.funnel[2] = c.tornado_radius;
-        push.funnel[3] = c.tornado_strength;
-        push.bounds[0] = c.fog_ground;
-        push.bounds[1] = c.bottom;
-        push.bounds[2] = frame.sun_intensity;
-        push.bounds[3] = c.darkness;
-        push.size[0] = extent.width;
-        push.size[1] = extent.height;
+      [this, out, color, depth, extent, param_slot](PassContext &ctx) {
         ctx.cmd->BindPipeline(funnel_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(out)),
                 Bind::Sampled(1, ctx.graph->image(color)),
                 Bind::Sampled(2, ctx.graph->image(depth)),
-                InGeneral(Bind::Combined(3, textures_.base_noise_view(),
-                                         textures_.sampler()))});
-        ctx.cmd->Push(push);
+                Bind::Combined(3, textures_.base_noise_view(), textures_.sampler()),
+                Bind::Uniform(4, funnel_params_[param_slot], 0, sizeof(FunnelPush))});
         ctx.cmd->Dispatch2D(extent);
       });
   return out;
@@ -203,6 +230,40 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
                                             .format = Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
+  HazePush push{};
+  push.inv_view_proj = frame.inv_view_proj;
+  push.camera_pos[0] = frame.camera_pos.x;
+  push.camera_pos[1] = frame.camera_pos.y;
+  push.camera_pos[2] = frame.camera_pos.z;
+  push.camera_pos[3] = frame.time;
+  Vec3 sun = Normalize(frame.sun_direction);
+  push.sun_direction[0] = sun.x;
+  push.sun_direction[1] = sun.y;
+  push.sun_direction[2] = sun.z;
+  push.sun_direction[3] = frame.sun_intensity;
+  push.sun_color[0] = frame.sun_color.x;
+  push.sun_color[1] = frame.sun_color.y;
+  push.sun_color[2] = frame.sun_color.z;
+  push.sun_color[3] = frame.flash;
+  const CloudscapeControls &c = frame.controls;
+  push.wind[0] = std::cos(c.wind_yaw);
+  push.wind[1] = std::sin(c.wind_yaw);
+  push.wind[2] = c.vertical_skew;
+  push.wind[3] = c.darkness;
+  push.fog[0] = c.fog_density;
+  push.fog[1] = std::max(c.fog_height, 0.1f);
+  push.fog[2] = c.fog_ground;
+  push.fog[3] = c.anvil;
+  push.map[0] = c.map_offset.x;
+  push.map[1] = c.map_offset.y;
+  push.map[2] = textures_.weather_map_extent();
+  push.map[3] = c.fog_churn;
+  push.size[0] = extent.width;
+  push.size[1] = extent.height;
+  push.shell[0] = c.bottom;
+  push.shell[1] = c.top;
+  const u32 param_slot = frame.frame_index % kFramesInFlight;
+  std::memcpy(haze_params_[param_slot].mapped, &push, sizeof(push));
   graph.AddPass(
       "cloudscape_haze",
       [&](RenderGraph::PassBuilder &b) {
@@ -210,50 +271,16 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
         b.Read(color, ResourceUsage::kSampledCompute);
         b.Read(depth, ResourceUsage::kSampledCompute);
       },
-      [this, out, color, depth, extent, frame](PassContext &ctx) {
-        HazePush push{};
-        push.inv_view_proj = frame.inv_view_proj;
-        push.camera_pos[0] = frame.camera_pos.x;
-        push.camera_pos[1] = frame.camera_pos.y;
-        push.camera_pos[2] = frame.camera_pos.z;
-        push.camera_pos[3] = frame.time;
-        Vec3 sun = Normalize(frame.sun_direction);
-        push.sun_direction[0] = sun.x;
-        push.sun_direction[1] = sun.y;
-        push.sun_direction[2] = sun.z;
-        push.sun_direction[3] = frame.sun_intensity;
-        push.sun_color[0] = frame.sun_color.x;
-        push.sun_color[1] = frame.sun_color.y;
-        push.sun_color[2] = frame.sun_color.z;
-        push.sun_color[3] = frame.flash;
-        const CloudscapeControls &c = frame.controls;
-        push.wind[0] = std::cos(c.wind_yaw);
-        push.wind[1] = std::sin(c.wind_yaw);
-        push.wind[2] = c.wind_speed;
-        push.wind[3] = c.darkness;
-        push.fog[0] = c.fog_density;
-        push.fog[1] = c.fog_height;
-        push.fog[2] = c.fog_ground;
-        push.fog[3] = c.anvil;
-        push.map[0] = c.map_offset.x;
-        push.map[1] = c.map_offset.y;
-        push.map[2] = textures_.weather_map_extent();
-        push.map[3] = c.fog_churn;
-        push.size[0] = extent.width;
-        push.size[1] = extent.height;
-        push.shell[0] = c.bottom;
-        push.shell[1] = c.top;
+      [this, out, color, depth, extent, frame, param_slot](PassContext &ctx) {
         ctx.cmd->BindPipeline(haze_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(out)),
                 Bind::Sampled(1, ctx.graph->image(color)),
                 Bind::Sampled(2, ctx.graph->image(depth)),
-                InGeneral(Bind::Combined(3, textures_.base_noise_view(),
-                                         textures_.sampler())),
-                InGeneral(Bind::Combined(4, textures_.weather_map_view(),
-                                         textures_.sampler())),
-                Bind::Combined(5, frame.transmittance_lut, frame.lut_sampler)});
-        ctx.cmd->Push(push);
+                Bind::Combined(3, textures_.base_noise_view(), textures_.sampler()),
+                Bind::Combined(4, textures_.weather_map_view(), textures_.sampler()),
+                Bind::Combined(5, frame.transmittance_lut, frame.lut_sampler),
+                Bind::Uniform(6, haze_params_[param_slot], 0, sizeof(HazePush))});
         ctx.cmd->Dispatch2D(extent);
       });
   return out;
@@ -271,54 +298,65 @@ void Cloudscape::Destroy(Device &device) {
   shadow_pipeline_ = {};
   haze_pipeline_ = {};
   funnel_pipeline_ = {};
+  for (u32 i = 0; i < kFramesInFlight; ++i) {
+    for (GpuBuffer *buffer : {&march_params_[i], &shadow_params_[i], &haze_params_[i],
+                              &funnel_params_[i]}) {
+      if (*buffer)
+        device.DestroyBuffer(*buffer);
+      *buffer = {};
+    }
+  }
+  screen_sampler_ = {};
   textures_.Destroy(device);
+  device_ = nullptr;
 }
 
 void Cloudscape::AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
                                   ResourceHandle depth, Extent2D extent,
                                   const Frame &frame, f32 strength) {
+  textures_.AddToGraph(graph, frame.controls);
   if (!textures_.ready())
     return;
+  ShadowPush push{};
+  push.inv_view_proj = frame.inv_view_proj;
+  Vec3 sun = Normalize(frame.sun_direction);
+  push.sun_dir[0] = sun.x;
+  push.sun_dir[1] = sun.y;
+  push.sun_dir[2] = sun.z;
+  push.near_plane = 0.1f;
+  const CloudscapeControls &c = frame.controls;
+  push.wind[0] = std::cos(c.wind_yaw);
+  push.wind[1] = std::sin(c.wind_yaw);
+  push.wind[2] = c.wind_speed;
+  push.wind[3] = c.vertical_skew;
+  push.shape[0] = c.bottom;
+  push.shape[1] = c.top;
+  push.shape[2] = c.density;
+  push.shape[3] = c.darkness;
+  push.map[0] = c.map_offset.x;
+  push.map[1] = c.map_offset.y;
+  push.map[2] = textures_.weather_map_extent();
+  push.map[3] = c.anvil;
+  push.size[0] = extent.width;
+  push.size[1] = extent.height;
+  push.time = frame.time;
+  push.strength = strength;
+  const u32 param_slot = frame.frame_index % kFramesInFlight;
+  std::memcpy(shadow_params_[param_slot].mapped, &push, sizeof(push));
   graph.AddPass(
       "cloudscape_shadow",
       [&](RenderGraph::PassBuilder &b) {
         b.Write(sun_shadow, ResourceUsage::kStorageWrite);
         b.Read(depth, ResourceUsage::kSampledCompute);
       },
-      [this, sun_shadow, depth, extent, frame, strength](PassContext &ctx) {
-        ShadowPush push{};
-        push.inv_view_proj = frame.inv_view_proj;
-        Vec3 sun = Normalize(frame.sun_direction);
-        push.sun_dir[0] = sun.x;
-        push.sun_dir[1] = sun.y;
-        push.sun_dir[2] = sun.z;
-        push.near_plane = 0.1f;
-        const CloudscapeControls &c = frame.controls;
-        push.wind[0] = std::cos(c.wind_yaw);
-        push.wind[1] = std::sin(c.wind_yaw);
-        push.wind[2] = c.wind_speed;
-        push.wind[3] = c.vertical_skew;
-        push.shape[0] = c.bottom;
-        push.shape[1] = c.top;
-        push.shape[2] = c.density;
-        push.shape[3] = c.darkness;
-        push.map[0] = c.map_offset.x;
-        push.map[1] = c.map_offset.y;
-        push.map[2] = textures_.weather_map_extent();
-        push.map[3] = c.anvil;
-        push.size[0] = extent.width;
-        push.size[1] = extent.height;
-        push.time = frame.time;
-        push.strength = strength;
+      [this, sun_shadow, depth, extent, param_slot](PassContext &ctx) {
         ctx.cmd->BindPipeline(shadow_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
                 Bind::Sampled(1, ctx.graph->image(depth)),
-                InGeneral(Bind::Combined(2, textures_.base_noise_view(),
-                                         textures_.sampler())),
-                InGeneral(Bind::Combined(3, textures_.weather_map_view(),
-                                         textures_.sampler()))});
-        ctx.cmd->Push(push);
+                Bind::Combined(2, textures_.base_noise_view(), textures_.sampler()),
+                Bind::Combined(3, textures_.weather_map_view(), textures_.sampler()),
+                Bind::Uniform(4, shadow_params_[param_slot], 0, sizeof(ShadowPush))});
         ctx.cmd->Dispatch2D(extent);
       });
 }
@@ -336,6 +374,7 @@ void Cloudscape::ReleaseBuffers(Device &device) {
   }
   half_extent_ = {};
   history_valid_ = false;
+  has_last_frame_ = false;
 }
 
 void Cloudscape::EnsureBuffers(Device &device, Extent2D half) {
@@ -383,7 +422,47 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
   ResourceHandle prv_dist =
       graph.ImportImage("cloudscape_prv_d", dist_[prv], &dist_state_[prv]);
 
-  bool history = history_valid_;
+  bool contiguous = has_last_frame_ && frame.frame_index == last_frame_index_ + 1u;
+  bool history = history_valid_ && contiguous;
+  MarchPush march_push{};
+  march_push.inv_view_proj = frame.inv_view_proj;
+  march_push.prev_view_proj = frame.prev_view_proj;
+  march_push.camera_pos[0] = frame.camera_pos.x;
+  march_push.camera_pos[1] = frame.camera_pos.y;
+  march_push.camera_pos[2] = frame.camera_pos.z;
+  march_push.camera_pos[3] = frame.time;
+  Vec3 sun = Normalize(frame.sun_direction);
+  march_push.sun_direction[0] = sun.x;
+  march_push.sun_direction[1] = sun.y;
+  march_push.sun_direction[2] = sun.z;
+  march_push.sun_direction[3] = frame.sun_intensity;
+  march_push.sun_color[0] = frame.sun_color.x;
+  march_push.sun_color[1] = frame.sun_color.y;
+  march_push.sun_color[2] = frame.sun_color.z;
+  march_push.sun_color[3] = frame.ambient;
+  const CloudscapeControls &c = frame.controls;
+  march_push.wind[0] = std::cos(c.wind_yaw);
+  march_push.wind[1] = std::sin(c.wind_yaw);
+  march_push.wind[2] = c.wind_speed;
+  march_push.wind[3] = c.vertical_skew;
+  march_push.shape[0] = c.bottom;
+  march_push.shape[1] = c.top;
+  march_push.shape[2] = c.density;
+  march_push.shape[3] = c.turbulence;
+  march_push.map[0] = c.map_offset.x;
+  march_push.map[1] = c.map_offset.y;
+  march_push.map[2] = textures_.weather_map_extent();
+  march_push.map[3] = c.anvil;
+  march_push.size[0] = half.width;
+  march_push.size[1] = half.height;
+  march_push.full_size[0] = extent.width;
+  march_push.full_size[1] = extent.height;
+  march_push.frame_index = frame.frame_index;
+  march_push.steps = frame.steps;
+  march_push.flags = history ? 1u : 0u;
+  march_push.darkness = c.darkness;
+  const u32 param_slot = frame.frame_index % kFramesInFlight;
+  std::memcpy(march_params_[param_slot].mapped, &march_push, sizeof(march_push));
   graph.AddPass(
       "cloudscape_march",
       [&](RenderGraph::PassBuilder &b) {
@@ -392,49 +471,11 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
         b.Read(prv_cloud, ResourceUsage::kSampledCompute);
         b.Read(prv_dist, ResourceUsage::kSampledCompute);
         b.Read(depth, ResourceUsage::kSampledCompute);
-        // The noise/weather textures live permanently in kGeneral with their
-        // own barriers (CloudscapeTextures), so they are not declared here.
+        // CloudscapeTextures owns the external textures and their explicit
+        // bake-write/sample-read transitions, so they are not graph resources.
       },
-      [this, cur_cloud, cur_dist, prv_cloud, prv_dist, depth, half, extent,
-       frame, history](PassContext &ctx) {
-        MarchPush push{};
-        push.inv_view_proj = frame.inv_view_proj;
-        push.prev_view_proj = frame.prev_view_proj;
-        push.camera_pos[0] = frame.camera_pos.x;
-        push.camera_pos[1] = frame.camera_pos.y;
-        push.camera_pos[2] = frame.camera_pos.z;
-        push.camera_pos[3] = frame.time;
-        Vec3 sun = Normalize(frame.sun_direction);
-        push.sun_direction[0] = sun.x;
-        push.sun_direction[1] = sun.y;
-        push.sun_direction[2] = sun.z;
-        push.sun_direction[3] = frame.sun_intensity;
-        push.sun_color[0] = frame.sun_color.x;
-        push.sun_color[1] = frame.sun_color.y;
-        push.sun_color[2] = frame.sun_color.z;
-        push.sun_color[3] = frame.ambient;
-        const CloudscapeControls &c = frame.controls;
-        push.wind[0] = std::cos(c.wind_yaw);
-        push.wind[1] = std::sin(c.wind_yaw);
-        push.wind[2] = c.wind_speed;
-        push.wind[3] = c.vertical_skew;
-        push.shape[0] = c.bottom;
-        push.shape[1] = c.top;
-        push.shape[2] = c.density;
-        push.shape[3] = c.turbulence;
-        push.map[0] = c.map_offset.x;
-        push.map[1] = c.map_offset.y;
-        push.map[2] = textures_.weather_map_extent();
-        push.map[3] = c.anvil;
-        push.size[0] = half.width;
-        push.size[1] = half.height;
-        push.full_size[0] = extent.width;
-        push.full_size[1] = extent.height;
-        push.frame_index = frame.frame_index;
-        push.steps = frame.steps;
-        push.flags = history ? 1u : 0u;
-        push.darkness = c.darkness;
-
+      [this, cur_cloud, cur_dist, prv_cloud, prv_dist, depth, half,
+       param_slot](PassContext &ctx) {
         ctx.cmd->BindPipeline(march_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(cur_cloud)),
@@ -442,15 +483,11 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
                 Bind::Sampled(2, ctx.graph->image(prv_cloud)),
                 Bind::Sampled(3, ctx.graph->image(prv_dist)),
                 Bind::Sampled(4, ctx.graph->image(depth)),
-                InGeneral(Bind::Combined(5, textures_.base_noise_view(),
-                                         textures_.sampler())),
-                InGeneral(Bind::Combined(6, textures_.detail_noise_view(),
-                                         textures_.sampler())),
-                InGeneral(Bind::Combined(7, textures_.curl_view(),
-                                         textures_.sampler())),
-                InGeneral(Bind::Combined(8, textures_.weather_map_view(),
-                                         textures_.sampler()))});
-        ctx.cmd->Push(push);
+                Bind::Combined(5, textures_.base_noise_view(), textures_.sampler()),
+                Bind::Combined(6, textures_.detail_noise_view(), textures_.sampler()),
+                Bind::Combined(7, textures_.curl_view(), textures_.sampler()),
+                Bind::Combined(8, textures_.weather_map_view(), textures_.sampler()),
+                Bind::Uniform(9, march_params_[param_slot], 0, sizeof(MarchPush))});
         ctx.cmd->Dispatch2D(half);
       });
 
@@ -486,13 +523,15 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
             0, {Bind::Storage(0, ctx.graph->image(out)),
                 Bind::Sampled(1, ctx.graph->image(color)),
                 Bind::Combined(2, ctx.graph->image(cur_cloud).view,
-                               textures_.sampler())});
+                               screen_sampler_)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });
 
   slot_ ^= 1u;
   history_valid_ = true;
+  last_frame_index_ = frame.frame_index;
+  has_last_frame_ = true;
   return out;
 }
 

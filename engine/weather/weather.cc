@@ -9,6 +9,7 @@ namespace rx::weather {
 namespace {
 
 constexpr f32 kTwoPi = 6.28318530717958648f;
+constexpr f32 kPi = kTwoPi * 0.5f;
 
 // Surface-response rates (per second, scaled by precipitation for
 // accumulation). Soak is fast, drying slow -- a soaked street stays dark for a
@@ -37,6 +38,12 @@ constexpr f32 kStrikeMaxRange = 300.0f;
 
 f32 Clamp01(f32 v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v); }
 f32 Lerpf(f32 a, f32 b, f32 t) { return a + (b - a) * t; }
+f32 LerpAngle(f32 a, f32 b, f32 t) {
+  f32 delta = std::fmod(b - a + kPi, kTwoPi);
+  if (delta < 0.0f)
+    delta += kTwoPi;
+  return a + (delta - kPi) * t;
+}
 f32 Smoothstep(f32 t) {
   t = Clamp01(t);
   return t * t * (3.0f - 2.0f * t);
@@ -70,6 +77,8 @@ void WeatherSystem::ForceState(u32 state_index, f32 transition_seconds) {
     from_ = to_ = state_index;
     blend_ = 0.0f;
     blend_dur_ = 0.0f;
+    if (!states_.empty())
+      Compose();
   } else {
     to_ = state_index;
     blend_ = 0.0f;
@@ -116,6 +125,17 @@ const WeatherRegion *WeatherSystem::ActiveRegion(const Vec3 &p) const {
   for (const WeatherRegion &r : regions_) {
     if (r.states.empty())
       continue; // an empty region cannot own the schedule
+    bool has_valid_state = false;
+    for (u32 state : r.states) {
+      if (state < states_.size()) {
+        has_valid_state = true;
+        break;
+      }
+    }
+    if (!has_valid_state)
+      continue;
+    if (r.min_xz.x >= r.max_xz.x || r.min_xz.y >= r.max_xz.y)
+      continue;
     if (p.x < r.min_xz.x || p.x > r.max_xz.x)
       continue;
     if (p.z < r.min_xz.y || p.z > r.max_xz.y)
@@ -146,6 +166,8 @@ u32 WeatherSystem::PickNext(const Vec3 &player_pos, f32 time_of_day01) {
   f32 total = 0.0f;
   if (r) {
     for (u32 k = 0; k < r->states.size(); ++k) {
+      if (r->states[k] >= states_.size())
+        continue;
       f32 base = k < r->weights.size() ? r->weights[k] : 1.0f;
       total += effective_weight(r->states[k], base);
     }
@@ -153,12 +175,14 @@ u32 WeatherSystem::PickNext(const Vec3 &player_pos, f32 time_of_day01) {
       return from_;
     f32 pick = NextF32() * total, acc = 0.0f;
     for (u32 k = 0; k < r->states.size(); ++k) {
+      if (r->states[k] >= states_.size())
+        continue;
       f32 base = k < r->weights.size() ? r->weights[k] : 1.0f;
       acc += effective_weight(r->states[k], base);
       if (pick < acc)
         return r->states[k];
     }
-    return r->states[r->states.size() - 1];
+    return from_;
   }
 
   // Global fallback: every state at its own base weight.
@@ -214,7 +238,7 @@ void WeatherSystem::Compose() {
   cloudscape_.map_a = MapOf(a);
   cloudscape_.map_b = MapOf(b);
   cloudscape_.map_blend = ms; // 0 (and map_a == map_b) once settled
-  cloudscape_.wind_yaw = Lerpf(a.wind_yaw, b.wind_yaw, s);
+  cloudscape_.wind_yaw = LerpAngle(a.wind_yaw, b.wind_yaw, s);
   cloudscape_.wind_speed = Lerpf(a.wind_speed, b.wind_speed, s);
   cloudscape_.vertical_skew = Lerpf(a.vertical_skew, b.vertical_skew, s);
   cloudscape_.turbulence = Lerpf(a.turbulence, b.turbulence, s);
@@ -427,6 +451,9 @@ void WeatherSystem::Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01) {
   cloudscape_.map_offset = map_offset_;
 
   IntegrateSurface(dt, weather_.precipitation, weather_.snow);
+  // Surface integration affects public wetness/snow and post-rain mist in this
+  // same update, not one frame later.
+  Compose();
   IntegrateLightning(dt, player_pos, weather_.precipitation, cloudscape_.anvil);
   IntegrateTornado(dt, player_pos, cloudscape_.anvil);
   // The fog floor follows the local terrain (same sampler the lightning
