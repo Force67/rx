@@ -3102,6 +3102,7 @@ void DemoScenes::CreateSkyDemoScene() {
   clear.wind_speed = 9.0f;
   clear.base_altitude = 2200.0f;
   clear.top_altitude = 4600.0f;
+  clear.fog_density = 0.04f;
   weather_sys_->AddState(tune(clear));
   weather::WeatherState scattered;
   scattered.name = "scattered";
@@ -3111,6 +3112,7 @@ void DemoScenes::CreateSkyDemoScene() {
   scattered.wind_speed = 13.0f;
   scattered.base_altitude = 2000.0f;
   scattered.top_altitude = 6200.0f;
+  scattered.fog_density = 0.1f;
   weather_sys_->AddState(tune(scattered));
   weather::WeatherState overcast;
   overcast.name = "overcast";
@@ -3121,6 +3123,8 @@ void DemoScenes::CreateSkyDemoScene() {
   overcast.wind_speed = 16.0f;
   overcast.base_altitude = 1100.0f;
   overcast.top_altitude = 2800.0f;
+  overcast.fog_density = 0.28f;  // damp grey day: the ceiling breathes down
+  overcast.fog_height = 120.0f;
   weather_sys_->AddState(tune(overcast));
   weather::WeatherState storm;
   storm.name = "storm";
@@ -3135,6 +3139,8 @@ void DemoScenes::CreateSkyDemoScene() {
   storm.turbulence = 1.4f;
   storm.base_altitude = 1500.0f;
   storm.top_altitude = 12000.0f;
+  storm.fog_density = 0.34f;  // storm murk (post-rain mist rises on top)
+  storm.fog_height = 140.0f;
   weather_sys_->AddState(tune(storm));
   // A distant front: the Unwetter sits kilometres off. No rain reaches the
   // player, the menace rides the far storm cells only (local deck keeps its
@@ -3152,6 +3158,7 @@ void DemoScenes::CreateSkyDemoScene() {
   front.turbulence = 1.2f;
   front.base_altitude = 1700.0f;
   front.top_altitude = 10500.0f;
+  front.fog_density = 0.12f;  // pre-storm stillness, light haze
   front.strike_min_range = 2500.0f;
   front.strike_max_range = 7000.0f;
   weather_sys_->AddState(tune(front));

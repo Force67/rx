@@ -112,6 +112,21 @@ knob: 0 leaves physics alone, 1 collapses the ambient and multiple-scatter
 floors while sun absorption climbs, so severe-storm skies go genuinely black
 instead of merely grey.
 
+## Ground haze
+
+`fog_density` / `fog_height` (per weather state, blended like everything
+else) drive an analytic exponential height-fog layer that shares the deck's
+weather instead of being a flat screen effect: the optical depth is
+closed-form (no marching), then the weather map's humid cells fog up harder,
+two wind-advected taps of the baked base noise drift mist banks through it,
+the in-scatter uses the same sun-elevation ambient the clouds use (evening
+haze glows warm), the deck's coverage shades the fog beneath it, menace murks
+it, and the lightning flash breathes through it. The weather layer also
+raises fog automatically while the ground is still wet after rain stops —
+post-rain mist that fades as the surface dries. Composited after the cloud
+pass so the nearest medium correctly veils both the scene and the distant
+deck.
+
 ## Knobs
 
 - `RX_CLOUDSCAPE=1` — enable the model (or `cloudscape = true` in render.ini).

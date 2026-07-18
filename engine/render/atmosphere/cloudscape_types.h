@@ -35,11 +35,11 @@ struct CloudscapeControls {
   // Wind advection of the density field itself. Direction the wind blows
   // toward, radians on XZ (matches WeatherSettings::wind_yaw).
   f32 wind_yaw = 0.29146f;
-  f32 wind_speed = 12.53f;   // m/s
-  f32 vertical_skew = 700.0f;  // metres of extra downwind drift at the layer top
+  f32 wind_speed = 12.53f;    // m/s
+  f32 vertical_skew = 700.0f; // metres of extra downwind drift at the layer top
 
-  f32 turbulence = 1.0f;     // curl-noise distortion of the erosion detail
-  f32 density = 1.0f;        // global density multiplier
+  f32 turbulence = 1.0f; // curl-noise distortion of the erosion detail
+  f32 density = 1.0f;    // global density multiplier
   // Shell altitudes, metres ASL, authored per weather state to match the real
   // vertical structure of each cloud class: stratus ceilings sit near the
   // surface and stay thin (base up to ~1.2 km, a few hundred metres deep),
@@ -48,8 +48,8 @@ struct CloudscapeControls {
   // dry climates) with fair-weather tops a further 1-3 km up, and
   // cumulonimbus towers climb from a low base to a 10-16 km anvil. Defaults
   // describe a dry-climate cumulus deck.
-  f32 bottom = 1800.0f;      // layer base
-  f32 top = 6000.0f;         // layer top
+  f32 bottom = 1800.0f; // layer base
+  f32 top = 6000.0f;    // layer top
   // Storminess 0..1: flattens tops toward an anvil profile and raises the
   // sun absorption so precipitating decks go dark-bottomed.
   f32 anvil = 0.0f;
@@ -57,8 +57,17 @@ struct CloudscapeControls {
   // absorption climbs and the ambient/multi-scatter floors collapse, so a
   // severe-storm sky reads genuinely threatening instead of merely grey.
   f32 darkness = 0.0f;
+
+  // Ground haze: an exponential height-fog layer that shares the deck's
+  // weather. Density modulates with the weather map (humid cells fog up), the
+  // baked noise drifts mist banks with the wind, the in-scatter takes the
+  // same sunset-tinted ambient the clouds use and dims under thick decks.
+  // The weather layer raises it automatically for post-rain mist.
+  f32 fog_density = 0.0f; // 0 clear .. 1 thick murk
+  f32 fog_height = 90.0f; // exponential falloff scale, metres
+  f32 fog_ground = 0.0f;  // the layer's floor altitude, metres ASL
 };
 
-}  // namespace rx::render
+} // namespace rx::render
 
-#endif  // RX_RENDER_CLOUDSCAPE_TYPES_H_
+#endif // RX_RENDER_CLOUDSCAPE_TYPES_H_

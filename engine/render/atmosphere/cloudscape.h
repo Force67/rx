@@ -58,6 +58,14 @@ public:
                         ResourceHandle depth, Extent2D extent,
                         const Frame &frame, f32 strength);
 
+  // Weather-driven ground haze: analytic height fog whose density, banks,
+  // shading and colour all come from the same weather the deck renders.
+  // Composites over `color` (call after AddToGraph so the fog veils the deck
+  // too); no-op while the state's fog is effectively zero.
+  ResourceHandle AddHazeToGraph(RenderGraph &graph, ResourceHandle color,
+                                ResourceHandle depth, Extent2D extent,
+                                const Frame &frame);
+
   bool available() const { return textures_.ready(); }
 
 private:
@@ -69,6 +77,7 @@ private:
   PipelineHandle march_pipeline_;
   PipelineHandle apply_pipeline_;
   PipelineHandle shadow_pipeline_;
+  PipelineHandle haze_pipeline_;
 
   // Persistent half-res ping-pong: (scatter, transmittance) + marched mean
   // cloud distance, reprojected across the refresh cycle.

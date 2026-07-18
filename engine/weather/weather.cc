@@ -10,9 +10,10 @@ namespace {
 
 constexpr f32 kTwoPi = 6.28318530717958648f;
 
-// Surface-response rates (per second, scaled by precipitation for accumulation).
-// Soak is fast, drying slow -- a soaked street stays dark for a while after the
-// rain stops; snow blankets steadily and melts even slower than roads dry.
+// Surface-response rates (per second, scaled by precipitation for
+// accumulation). Soak is fast, drying slow -- a soaked street stays dark for a
+// while after the rain stops; snow blankets steadily and melts even slower than
+// roads dry.
 constexpr f32 kSoakRate = 0.10f;
 constexpr f32 kDryRate = 0.02f;
 constexpr f32 kBlanketRate = 0.06f;
@@ -22,7 +23,8 @@ constexpr f32 kMeltRate = 0.012f;
 // precipitating and anvil-topped; a drizzle under flat stratus stays quiet.
 constexpr f32 kStormPrecip = 0.5f;
 constexpr f32 kStormAnvil = 0.5f;
-constexpr f32 kStrikeMeanInterval = 4.0f;  // seconds between strikes, exponential
+constexpr f32 kStrikeMeanInterval =
+    4.0f; // seconds between strikes, exponential
 
 // Lightning strikes land on a ring around the player: close enough to matter,
 // far enough not to be on top of the camera.
@@ -36,16 +38,16 @@ f32 Smoothstep(f32 t) {
   return t * t * (3.0f - 2.0f * t);
 }
 
-}  // namespace
+} // namespace
 
 WeatherSystem::WeatherSystem(u32 rng_seed) : rng_(rng_seed ? rng_seed : 1u) {}
 
-u32 WeatherSystem::AddState(const WeatherState& state) {
+u32 WeatherSystem::AddState(const WeatherState &state) {
   states_.push_back(state);
   return static_cast<u32>(states_.size() - 1);
 }
 
-u32 WeatherSystem::AddRegion(const WeatherRegion& region) {
+u32 WeatherSystem::AddRegion(const WeatherRegion &region) {
   regions_.push_back(region);
   return static_cast<u32>(regions_.size() - 1);
 }
@@ -59,7 +61,7 @@ void WeatherSystem::ForceState(u32 state_index, f32 transition_seconds) {
     state_index = static_cast<u32>(states_.size() - 1);
   }
   forced_ = true;
-  started_ = true;  // a forced state suppresses the first-frame region auto-pick
+  started_ = true; // a forced state suppresses the first-frame region auto-pick
   if (transition_seconds <= 0.0f || state_index == from_) {
     from_ = to_ = state_index;
     blend_ = 0.0f;
@@ -75,7 +77,8 @@ void WeatherSystem::ClearForced() {
   forced_ = false;
   // Resume scheduling from wherever we are: if settled, arm a fresh dwell; if
   // mid-transition the dwell is armed when the transition settles.
-  if (from_ == to_ && !states_.empty()) dwell_left_ = RandomDwell(from_);
+  if (from_ == to_ && !states_.empty())
+    dwell_left_ = RandomDwell(from_);
 }
 
 u32 WeatherSystem::NextU32() {
@@ -92,40 +95,47 @@ f32 WeatherSystem::NextF32() {
   return static_cast<f32>(NextU32() >> 8) * (1.0f / 16777216.0f);
 }
 
-f32 WeatherSystem::RandomRange(f32 lo, f32 hi) { return lo + (hi - lo) * NextF32(); }
+f32 WeatherSystem::RandomRange(f32 lo, f32 hi) {
+  return lo + (hi - lo) * NextF32();
+}
 
 f32 WeatherSystem::RandomDwell(u32 state) {
-  const WeatherState& s = states_[state];
+  const WeatherState &s = states_[state];
   f32 lo = s.min_dwell, hi = s.max_dwell;
-  if (hi < lo) hi = lo;
+  if (hi < lo)
+    hi = lo;
   return RandomRange(lo, hi);
 }
 
-const WeatherRegion* WeatherSystem::ActiveRegion(const Vec3& p) const {
-  const WeatherRegion* best = nullptr;
-  for (const WeatherRegion& r : regions_) {
-    if (r.states.empty()) continue;  // an empty region cannot own the schedule
-    if (p.x < r.min_xz.x || p.x > r.max_xz.x) continue;
-    if (p.z < r.min_xz.y || p.z > r.max_xz.y) continue;
-    if (!best || r.priority > best->priority) best = &r;
+const WeatherRegion *WeatherSystem::ActiveRegion(const Vec3 &p) const {
+  const WeatherRegion *best = nullptr;
+  for (const WeatherRegion &r : regions_) {
+    if (r.states.empty())
+      continue; // an empty region cannot own the schedule
+    if (p.x < r.min_xz.x || p.x > r.max_xz.x)
+      continue;
+    if (p.z < r.min_xz.y || p.z > r.max_xz.y)
+      continue;
+    if (!best || r.priority > best->priority)
+      best = &r;
   }
-  return best;  // nullptr -> the implicit global fallback (all states)
+  return best; // nullptr -> the implicit global fallback (all states)
 }
 
-u32 WeatherSystem::PickNext(const Vec3& player_pos, f32 time_of_day01) {
+u32 WeatherSystem::PickNext(const Vec3 &player_pos, f32 time_of_day01) {
   // Day phase in [0,1]: 0 at midnight (fully night), 1 at noon (fully day),
   // smoothly through dawn/dusk. Biases each candidate's weight toward its
   // day_weight or night_weight.
   f32 dayness = 0.5f - 0.5f * std::cos(kTwoPi * time_of_day01);
 
   auto effective_weight = [&](u32 idx, f32 base) -> f32 {
-    const WeatherState& s = states_[idx];
+    const WeatherState &s = states_[idx];
     f32 mult = Lerpf(s.night_weight, s.day_weight, dayness);
     f32 w = base * mult;
     return w > 0.0f ? w : 0.0f;
   };
 
-  const WeatherRegion* r = ActiveRegion(player_pos);
+  const WeatherRegion *r = ActiveRegion(player_pos);
 
   // Total weight, then a single walk over the same ordering with a draw in
   // [0,total). Two passes avoid any scratch allocation.
@@ -135,23 +145,28 @@ u32 WeatherSystem::PickNext(const Vec3& player_pos, f32 time_of_day01) {
       f32 base = k < r->weights.size() ? r->weights[k] : 1.0f;
       total += effective_weight(r->states[k], base);
     }
-    if (total <= 0.0f) return from_;
+    if (total <= 0.0f)
+      return from_;
     f32 pick = NextF32() * total, acc = 0.0f;
     for (u32 k = 0; k < r->states.size(); ++k) {
       f32 base = k < r->weights.size() ? r->weights[k] : 1.0f;
       acc += effective_weight(r->states[k], base);
-      if (pick < acc) return r->states[k];
+      if (pick < acc)
+        return r->states[k];
     }
     return r->states[r->states.size() - 1];
   }
 
   // Global fallback: every state at its own base weight.
-  for (u32 i = 0; i < states_.size(); ++i) total += effective_weight(i, states_[i].weight);
-  if (total <= 0.0f) return from_;
+  for (u32 i = 0; i < states_.size(); ++i)
+    total += effective_weight(i, states_[i].weight);
+  if (total <= 0.0f)
+    return from_;
   f32 pick = NextF32() * total, acc = 0.0f;
   for (u32 i = 0; i < states_.size(); ++i) {
     acc += effective_weight(i, states_[i].weight);
-    if (pick < acc) return i;
+    if (pick < acc)
+      return i;
   }
   return static_cast<u32>(states_.size() - 1);
 }
@@ -160,7 +175,8 @@ void WeatherSystem::BeginTransition(u32 next) {
   to_ = next;
   blend_ = 0.0f;
   blend_dur_ = states_[next].transition_seconds;
-  if (blend_dur_ <= 0.0f) Settle();  // instant cross-fade
+  if (blend_dur_ <= 0.0f)
+    Settle(); // instant cross-fade
 }
 
 void WeatherSystem::Settle() {
@@ -170,7 +186,7 @@ void WeatherSystem::Settle() {
   dwell_left_ = RandomDwell(from_);
 }
 
-render::CloudscapeMapState WeatherSystem::MapOf(const WeatherState& s) const {
+render::CloudscapeMapState WeatherSystem::MapOf(const WeatherState &s) const {
   render::CloudscapeMapState m;
   m.seed = s.map_seed;
   m.coverage = s.coverage;
@@ -184,16 +200,16 @@ render::CloudscapeMapState WeatherSystem::MapOf(const WeatherState& s) const {
 }
 
 void WeatherSystem::Compose() {
-  const WeatherState& a = states_[from_];
-  const WeatherState& b = states_[to_];
+  const WeatherState &a = states_[from_];
+  const WeatherState &b = states_[to_];
   bool settled = from_ == to_;
-  f32 s = settled ? 0.0f : blend_;             // linear blend for scalar controls
-  f32 ms = settled ? 0.0f : Smoothstep(blend_);  // eased cross-fade for the map
+  f32 s = settled ? 0.0f : blend_; // linear blend for scalar controls
+  f32 ms = settled ? 0.0f : Smoothstep(blend_); // eased cross-fade for the map
 
   // Cloud deck controls.
   cloudscape_.map_a = MapOf(a);
   cloudscape_.map_b = MapOf(b);
-  cloudscape_.map_blend = ms;  // 0 (and map_a == map_b) once settled
+  cloudscape_.map_blend = ms; // 0 (and map_a == map_b) once settled
   cloudscape_.wind_yaw = Lerpf(a.wind_yaw, b.wind_yaw, s);
   cloudscape_.wind_speed = Lerpf(a.wind_speed, b.wind_speed, s);
   cloudscape_.vertical_skew = Lerpf(a.vertical_skew, b.vertical_skew, s);
@@ -201,6 +217,14 @@ void WeatherSystem::Compose() {
   cloudscape_.density = Lerpf(a.density, b.density, s);
   cloudscape_.anvil = Lerpf(a.storminess, b.storminess, s);
   cloudscape_.darkness = Lerpf(a.darkness, b.darkness, s);
+  // Haze blends like everything else, and drying ground breathes mist: while
+  // the surface is still wet after the rain has stopped, fog rises on top of
+  // whatever the state authors, then fades as the ground dries.
+  f32 authored_fog = Lerpf(a.fog_density, b.fog_density, s);
+  f32 precip_now = Lerpf(a.precipitation, b.precipitation, s);
+  f32 mist = wetness_ * 0.35f * Clamp01(1.0f - precip_now * 2.0f);
+  cloudscape_.fog_density = Clamp01(std::max(authored_fog, mist));
+  cloudscape_.fog_height = Lerpf(a.fog_height, b.fog_height, s);
   // The shell tracks the class each state represents (a stratus ceiling is
   // genuinely low and thin, a storm tower genuinely enormous), so altitude
   // cross-fades with the rest of the transition.
@@ -209,7 +233,7 @@ void WeatherSystem::Compose() {
 
   // Renderer weather state.
   weather_.precipitation = Lerpf(a.precipitation, b.precipitation, s);
-  weather_.snow = (s < 0.5f) ? a.snow : b.snow;      // discrete: no half-snow
+  weather_.snow = (s < 0.5f) ? a.snow : b.snow; // discrete: no half-snow
   weather_.aurora = (s < 0.5f) ? a.aurora : b.aurora;
   weather_.wind_yaw = cloudscape_.wind_yaw;
   weather_.wind_speed = cloudscape_.wind_speed;
@@ -236,7 +260,8 @@ void WeatherSystem::IntegrateSurface(f32 dt, f32 precip, bool snow) {
   snow_cover_ = Clamp01(snow_cover_);
 }
 
-void WeatherSystem::IntegrateLightning(f32 dt, const Vec3& player_pos, f32 precip, f32 anvil) {
+void WeatherSystem::IntegrateLightning(f32 dt, const Vec3 &player_pos,
+                                       f32 precip, f32 anvil) {
   // A state spawns lightning when it is anvil-topped AND either rain reaches
   // the player or the deck is authored menacing (a distant front: its rain
   // stays out there, but its cells must still discharge).
@@ -259,8 +284,8 @@ void WeatherSystem::IntegrateLightning(f32 dt, const Vec3& player_pos, f32 preci
   if (stormy) {
     strike_timer_ -= dt;
     if (strike_timer_ <= 0.0f && weather_.strike_age < 0.0f) {
-      const WeatherState& sa = states_[from_];
-      const WeatherState& sb = states_[to_];
+      const WeatherState &sa = states_[from_];
+      const WeatherState &sb = states_[to_];
       f32 s = from_ == to_ ? 0.0f : blend_;
       f32 min_r = Lerpf(sa.strike_min_range, sb.strike_min_range, s);
       f32 max_r = Lerpf(sa.strike_max_range, sb.strike_max_range, s);
@@ -273,7 +298,8 @@ void WeatherSystem::IntegrateLightning(f32 dt, const Vec3& player_pos, f32 preci
       weather_.strike_energy = RandomRange(0.6f, 1.0f);
       weather_.strike_age = 0.0f;
       f32 u = NextF32();
-      if (u < 1e-4f) u = 1e-4f;
+      if (u < 1e-4f)
+        u = 1e-4f;
       strike_timer_ = -kStrikeMeanInterval * std::log(u);
     }
   }
@@ -290,16 +316,17 @@ void WeatherSystem::IntegrateLightning(f32 dt, const Vec3& player_pos, f32 preci
     f32 dist = std::sqrt(dx * dx + dz * dz);
     f32 near_w = 600.0f / (600.0f + dist);
     f32 falloff = 0.08f + 0.92f * near_w * near_w;
-    weather_.lightning =
-        render::LightningSystem::Envelope(weather_.strike_age, weather_.strike_seed) *
-        weather_.strike_energy * falloff;
+    weather_.lightning = render::LightningSystem::Envelope(
+                             weather_.strike_age, weather_.strike_seed) *
+                         weather_.strike_energy * falloff;
   } else {
     weather_.lightning = 0.0f;
   }
 }
 
-void WeatherSystem::Update(f32 dt, const Vec3& player_pos, f32 time_of_day01) {
-  if (states_.empty()) return;  // no states: leave the default outputs untouched
+void WeatherSystem::Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01) {
+  if (states_.empty())
+    return; // no states: leave the default outputs untouched
 
   // First frame settles onto a region-valid state (unless a script forced one).
   if (!started_) {
@@ -318,7 +345,8 @@ void WeatherSystem::Update(f32 dt, const Vec3& player_pos, f32 time_of_day01) {
       Settle();
     } else {
       blend_ += dt / blend_dur_;
-      if (blend_ >= 1.0f) Settle();
+      if (blend_ >= 1.0f)
+        Settle();
     }
   } else if (!forced_) {
     // Settled and scheduling: dwell down, then pick the next state.
@@ -328,7 +356,7 @@ void WeatherSystem::Update(f32 dt, const Vec3& player_pos, f32 time_of_day01) {
       if (next != from_) {
         BeginTransition(next);
       } else {
-        dwell_left_ = RandomDwell(from_);  // re-roll the dwell, same weather
+        dwell_left_ = RandomDwell(from_); // re-roll the dwell, same weather
       }
     }
   }
@@ -346,4 +374,4 @@ void WeatherSystem::Update(f32 dt, const Vec3& player_pos, f32 time_of_day01) {
   IntegrateLightning(dt, player_pos, weather_.precipitation, cloudscape_.anvil);
 }
 
-}  // namespace rx::weather
+} // namespace rx::weather

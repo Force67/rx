@@ -5915,6 +5915,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       cf.controls.wind_speed = settings_.weather.wind_speed;
       lit = cloudscape_.AddToGraph(graph_, lit, depth_export,
                                    {render_width_, render_height_}, cf);
+      // Ground haze last: the nearest scattering medium veils both the scene
+      // and the deck it sits under.
+      lit = cloudscape_.AddHazeToGraph(graph_, lit, depth_export,
+                                       {render_width_, render_height_}, cf);
     }
     if (!cloudscape_on && settings_.clouds && !path_trace && !interior) {
       Clouds::Frame cf;
