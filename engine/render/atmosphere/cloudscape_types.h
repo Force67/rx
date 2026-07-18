@@ -66,6 +66,10 @@ struct CloudscapeControls {
   f32 fog_density = 0.0f; // 0 clear .. 1 thick murk
   f32 fog_height = 90.0f; // exponential falloff scale, metres
   f32 fog_ground = 0.0f;  // the layer's floor altitude, metres ASL
+  // Vertical churn 0..1: scrolls the mist banks' noise upward so the layer
+  // roils like rising vapour instead of only sliding downwind. Low for a
+  // settled morning layer, high over warm standing water.
+  f32 fog_churn = 0.15f;
 };
 
 } // namespace rx::render

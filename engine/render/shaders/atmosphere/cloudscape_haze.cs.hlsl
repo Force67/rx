@@ -17,7 +17,7 @@ struct HazePush {
   float4 sun_color;      // rgb, w flash 0..1
   float4 wind;           // xy blow direction (unit XZ), z speed m/s, w darkness
   float4 fog;            // x density 0..1, y falloff height (m), z ground (m), w anvil
-  float4 map;            // xy map offset (m), z map extent (m)
+  float4 map;            // xy map offset (m), z map extent (m), w churn 0..1
   uint2 size;
   float2 _pad;
 };
@@ -89,9 +89,19 @@ void main(uint3 id : SV_DispatchThreadID) {
   float2 drift = pc.wind.xy * (pc.wind.z * pc.camera_pos.w * 0.6);
   float2 mid1 = cam.xz + view.xz * (dist * 0.25) + drift;
   float2 mid2 = cam.xz + view.xz * (dist * 0.7) + drift;
-  float n1 = base_noise.SampleLevel(base_sampler, float3(mid1 * (1.0 / 1700.0), 0.31), 0.0).g;
-  float n2 = base_noise.SampleLevel(base_sampler, float3(mid2 * (1.0 / 1700.0), 0.63), 0.0).b;
-  float banks = 0.55 + 0.9 * (n1 * 0.6 + n2 * 0.4);
+  // Churn scrolls the 3D noise through its third axis (two taps at different
+  // rates so they slide against each other): the banks stop being a frozen
+  // pattern that merely translates and start roiling -- vapour rising off the
+  // water rather than a printed veil.
+  float churn = pc.map.w * pc.camera_pos.w;
+  float s1 = 0.31 - churn * 0.011;
+  float s2 = 0.63 - churn * 0.019;
+  float n1 = base_noise.SampleLevel(base_sampler, float3(mid1 * (1.0 / 1700.0), s1), 0.0).g;
+  float n2 = base_noise.SampleLevel(base_sampler, float3(mid2 * (1.0 / 1700.0), s2), 0.0).b;
+  // High churn also sharpens the contrast: boiling vapour is patchier than a
+  // settled morning layer.
+  float amp = 0.9 + 0.5 * pc.map.w;
+  float banks = max(1.0 - amp * 0.5, 0.05) + amp * (n1 * 0.6 + n2 * 0.4);
   float2 wuv = (cam.xz + view.xz * (dist * 0.4) + pc.map.xy) / pc.map.z;
   float4 weather = weather_map.SampleLevel(weather_sampler, wuv, 0.0);
   float humidity = 0.75 + 0.5 * weather.g + 0.25 * weather.r;

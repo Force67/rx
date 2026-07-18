@@ -3278,6 +3278,7 @@ void DemoScenes::CreateSwampDemoScene() {
   swamp.top_altitude = 2000.0f;
   swamp.fog_density = SkyFog.get() >= 0.0f ? SkyFog.get() : 0.55f;
   swamp.fog_height = SkyFogH.get() > 0.0f ? SkyFogH.get() : 13.0f;
+  swamp.fog_churn = 0.8f;  // vapour boiling off the standing water
   weather_sys_->AddState(swamp);
   weather_sys_->ForceState(0, 0.0f);
 

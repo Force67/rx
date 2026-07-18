@@ -164,6 +164,7 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
         push.map[0] = c.map_offset.x;
         push.map[1] = c.map_offset.y;
         push.map[2] = textures_.weather_map_extent();
+        push.map[3] = c.fog_churn;
         push.size[0] = extent.width;
         push.size[1] = extent.height;
         ctx.cmd->BindPipeline(haze_pipeline_);

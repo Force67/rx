@@ -75,6 +75,7 @@ struct WeatherState {
   f32 fog_density =
       0.03f; // 0 clear .. 1 thick murk (post-rain mist adds on top)
   f32 fog_height = 90.0f; // exponential falloff scale, metres
+  f32 fog_churn = 0.15f;  // 0 still .. 1 boiling (vapour rising off warm water)
 
   // --- Surface / sky flags ---
   bool snow = false; // precipitation falls as snow (whitens instead of wetting)

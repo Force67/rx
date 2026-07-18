@@ -225,6 +225,7 @@ void WeatherSystem::Compose() {
   f32 mist = wetness_ * 0.35f * Clamp01(1.0f - precip_now * 2.0f);
   cloudscape_.fog_density = Clamp01(std::max(authored_fog, mist));
   cloudscape_.fog_height = Lerpf(a.fog_height, b.fog_height, s);
+  cloudscape_.fog_churn = Lerpf(a.fog_churn, b.fog_churn, s);
   // The shell tracks the class each state represents (a stratus ceiling is
   // genuinely low and thin, a storm tower genuinely enormous), so altitude
   // cross-fades with the rest of the transition.

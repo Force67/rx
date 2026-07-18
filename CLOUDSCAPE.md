@@ -123,7 +123,9 @@ the in-scatter uses the same sun-elevation ambient the clouds use (evening
 haze glows warm), the deck's coverage shades the fog beneath it, menace murks
 it, and the lightning flash breathes through it. The weather layer also
 raises fog automatically while the ground is still wet after rain stops —
-post-rain mist that fades as the surface dries. Composited after the cloud
+post-rain mist that fades as the surface dries. `fog_churn` scrolls the banks'
+noise vertically so the layer roils like rising vapour (high over warm
+standing water, low for a settled morning layer). Composited after the cloud
 pass so the nearest medium correctly veils both the scene and the distant
 deck.
 
