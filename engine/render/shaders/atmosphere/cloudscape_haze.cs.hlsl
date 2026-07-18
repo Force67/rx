@@ -107,6 +107,26 @@ void main(uint3 id : SV_DispatchThreadID) {
   float humidity = 0.75 + 0.5 * weather.g + 0.25 * weather.r;
 
   float od = HeightFogOd(cam.y, view.y, dist, sigma0, pc.fog.y, pc.fog.z) * banks * humidity;
+
+  // Steam: a second, shin-high layer boiling directly off the surface. The
+  // main banks live at kilometre scale and read as a veil; this one uses
+  // metre-scale noise with a fast upward scroll and a hard threshold, so
+  // individual wisps with gaps between them crawl over the water. Gated by
+  // churn: a settled morning layer has none, a warm swamp smokes.
+  if (pc.map.w > 0.05) {
+    float steam_h = 3.0;
+    float steam_sigma = pc.fog.x * 0.030;
+    float near_dist = min(dist, 220.0);
+    float od_steam = HeightFogOd(cam.y, view.y, near_dist, steam_sigma, steam_h, pc.fog.z);
+    float t = pc.camera_pos.w;
+    float2 sp1 = cam.xz + view.xz * min(near_dist * 0.2, 14.0);
+    float2 sp2 = cam.xz + view.xz * min(near_dist * 0.55, 48.0);
+    float sn1 = base_noise.SampleLevel(base_sampler, float3(sp1 * (1.0 / 11.0), -t * 0.10), 0.0).g;
+    float sn2 = base_noise.SampleLevel(base_sampler, float3(sp2 * (1.0 / 23.0), -t * 0.06), 0.0).b;
+    float wisps = saturate(sn1 * 0.75 + sn2 * 0.55 - 0.32) * 2.2;
+    od += od_steam * wisps * saturate(pc.map.w * 1.4);
+  }
+
   float trans = exp(-max(od, 0.0));
   if (trans > 0.999) {
     out_image[px] = float4(scene, 1.0);
