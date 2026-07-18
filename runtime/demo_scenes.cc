@@ -257,6 +257,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (drive_) drive_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
   if (fluid_scene_) EmitFluid(dt, view);
+  if (sky_scene_) EmitSky(dt);
   if (cloth_ != 0) EmitCloth(view);
   UpdateParticles(dt, view);
   if (gpu_particle_count_ > 0) {
@@ -3035,6 +3036,121 @@ void DemoScenes::CreateWeatherDemoScene() {
           storm_enabled_ ? ", thunderstorm on" : "");
 }
 
+// --demo sky: pin one weather state (-1 = free-running scheduler).
+static base::Option<int> SkyState{"demo.sky.state", -1, "RX_SKY_STATE"};
+// Short dwell/transitions so the scheduler's state changes fit a capture.
+static base::Option<bool> SkyFast{"demo.sky.fast", false, "RX_SKY_FAST"};
+
+void DemoScenes::CreateSkyDemoScene() {
+  // Cloudscape acceptance scene: a wide flat lot with a few tall blocks for
+  // scale/shadow reference; everything interesting happens in the sky. The
+  // weather layer owns all atmospheric settings from here on (EmitSky).
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b, f32 rough) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = rough;
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  asset::AssetId ground_mat = mat("builtin/sky/ground", 0.30f, 0.34f, 0.26f, 0.95f);
+  asset::AssetId block_mat = mat("builtin/sky/block", 0.42f, 0.40f, 0.38f, 0.8f);
+
+  auto add_box = [&](asset::Mesh mesh, asset::AssetId material, Vec3 pos) {
+    asset::MeshLod& lod = mesh.lods[0];  // MakeBox leaves the submesh list empty
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, scene::Renderable{mesh.id});
+  };
+  add_box(asset::MakeBox(400.0f, 0.5f, 400.0f, asset::MakeAssetId("builtin/sky/ground_m")),
+          ground_mat, {0, -0.5f, 0});
+  add_box(asset::MakeBox(3.0f, 24.0f, 3.0f, asset::MakeAssetId("builtin/sky/tower_a")),
+          block_mat, {26.0f, 12.0f, -18.0f});
+  add_box(asset::MakeBox(2.0f, 12.0f, 2.0f, asset::MakeAssetId("builtin/sky/tower_b")),
+          block_mat, {-30.0f, 6.0f, 8.0f});
+  add_box(asset::MakeBox(6.0f, 3.0f, 6.0f, asset::MakeAssetId("builtin/sky/slab")),
+          block_mat, {-6.0f, 1.5f, -34.0f});
+
+  // The weather layer: four states spanning the model's range. Dwell and
+  // transition times shrink under RX_SKY_FAST so a capture sees a change.
+  weather_sys_ = std::make_unique<weather::WeatherSystem>(7u);
+  const bool fast = bool(SkyFast);
+  auto tune = [&](weather::WeatherState s) {
+    if (fast) {
+      s.transition_seconds = 6.0f;
+      s.min_dwell = 8.0f;
+      s.max_dwell = 16.0f;
+    }
+    return s;
+  };
+  weather::WeatherState clear;
+  clear.name = "clear";
+  clear.coverage = 0.26f;
+  clear.cloud_type = 0.72f;
+  clear.map_seed = 11u;
+  clear.wind_speed = 9.0f;
+  weather_sys_->AddState(tune(clear));
+  weather::WeatherState scattered;
+  scattered.name = "scattered";
+  scattered.coverage = 0.48f;
+  scattered.cloud_type = 0.78f;
+  scattered.map_seed = 23u;
+  scattered.wind_speed = 13.0f;
+  weather_sys_->AddState(tune(scattered));
+  weather::WeatherState overcast;
+  overcast.name = "overcast";
+  overcast.coverage = 0.72f;
+  overcast.cloud_type = 0.24f;
+  overcast.density = 1.15f;
+  overcast.map_seed = 37u;
+  overcast.wind_speed = 16.0f;
+  weather_sys_->AddState(tune(overcast));
+  weather::WeatherState storm;
+  storm.name = "storm";
+  storm.coverage = 0.92f;
+  storm.cloud_type = 0.95f;
+  storm.precipitation = 0.85f;
+  storm.storminess = 0.9f;
+  storm.density = 1.3f;
+  storm.map_seed = 53u;
+  storm.wind_speed = 22.0f;
+  storm.turbulence = 1.4f;
+  weather_sys_->AddState(tune(storm));
+
+  int pinned = SkyState.get();
+  if (pinned >= 0 && pinned < 4) {
+    weather_sys_->ForceState(static_cast<u32>(pinned), 0.0f);
+  }
+
+  auto& rs = renderer_.settings();
+  rs.cloudscape = true;
+  rs.clouds = false;
+
+  sky_scene_ = true;
+  camera_.set_position({0.0f, 3.0f, 46.0f});
+  camera_.set_yaw_pitch(0.0f, 0.12f);
+  camera_.speed = 14.0f;
+  RX_INFO("sky demo: cloudscape on, {} weather states{}", 4,
+          pinned >= 0 ? " (pinned)" : "");
+}
+
+void DemoScenes::EmitSky(f32 dt) {
+  if (!weather_sys_) return;
+  sky_time_ += dt;
+  // The viewer's world clock drives the sun; the layer only needs a rough day
+  // phase for its day/night weight bias. A fixed early afternoon keeps the
+  // demo deterministic.
+  weather_sys_->Update(dt, camera_.position(), 0.45f);
+  auto& rs = renderer_.settings();
+  rs.cloudscape_controls = weather_sys_->cloudscape();
+  rs.weather = weather_sys_->weather();
+}
+
 void DemoScenes::UpdateStorm(f32 dt) {
   // Demo-side strike scheduler, mirroring what a game does: pick a strike
   // position/seed/energy, advance strike_age each frame, and drive the GLOBAL
@@ -3157,6 +3273,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "fluid") {
     CreateFluidDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "sky") {
+    CreateSkyDemoScene();
     return;
   }
   if (config_.demo_scene == "weather") {

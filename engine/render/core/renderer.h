@@ -16,6 +16,7 @@
 #include "core/window.h"
 #include "render/atmosphere/aerial_perspective.h"
 #include "render/atmosphere/clouds.h"
+#include "render/atmosphere/cloudscape.h"
 #include "render/atmosphere/environment.h"
 #include "render/atmosphere/froxel_fog.h"
 #include "render/atmosphere/lightning.h"
@@ -660,6 +661,12 @@ private:
   VolumetricFog volumetric_fog_;
   AerialPerspective aerial_perspective_;
   Clouds clouds_;
+  // The opt-in textured cloud model. Heavier resources (3D noise bakes, the
+  // half-res history) than clouds_, so it initializes lazily on the first
+  // frame RenderSettings::cloudscape is set.
+  Cloudscape cloudscape_;
+  bool cloudscape_init_tried_ = false;
+  bool cloudscape_ready_ = false;
   Precipitation precipitation_;
   PrecipOcclusion precip_occlusion_;
   PrecipVolume precip_volume_;

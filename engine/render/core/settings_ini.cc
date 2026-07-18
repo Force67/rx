@@ -128,7 +128,9 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "ibl_intensity = " << s.ibl_intensity << "\n";
   o << "aerial_perspective = " << s.aerial_perspective << "\n";
   o << "clouds = " << Bool(s.clouds) << "\n";
-  o << "cloud_coverage = " << s.cloud_coverage << "\n\n";
+  o << "cloud_coverage = " << s.cloud_coverage << "\n";
+  o << "cloudscape = " << Bool(s.cloudscape) << "\n";
+  o << "cloudscape_steps = " << s.cloudscape_steps << "\n\n";
 
   o << "[weather]\n";
   o << "precipitation = " << s.weather.precipitation << "\n";
@@ -278,6 +280,8 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   fl("aerial_perspective", s.aerial_perspective);
   b("clouds", s.clouds);
   fl("cloud_coverage", s.cloud_coverage);
+  b("cloudscape", s.cloudscape);
+  u("cloudscape_steps", s.cloudscape_steps);
 
   fl("precipitation", s.weather.precipitation);
   b("precip_snow", s.weather.snow);

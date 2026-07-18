@@ -181,6 +181,7 @@ base::Option<bool> PathtraceRr{"pathtrace.rr", true, "RX_PATHTRACE_RR"};
 base::Option<bool> Fog{"fog", false, "RX_FOG"};
 base::Option<float> Aerial{"aerial", 1.0f, "RX_AERIAL"};
 base::Option<bool> CloudsOpt{"clouds", false, "RX_CLOUDS"};
+base::Option<bool> CloudscapeOpt{"cloudscape", false, "RX_CLOUDSCAPE"};
 base::Option<float> CloudCoverage{"cloud.coverage", 0.46f, "RX_CLOUD_COVERAGE"};
 base::Option<float> Precip{"precip", 0.0f, "RX_PRECIP"};
 base::Option<bool> Snow{"snow", false, "RX_SNOW"};
@@ -1020,6 +1021,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     settings_.aerial_perspective = Aerial.get();
   if (CloudsOpt.overridden())
     settings_.clouds = CloudsOpt;
+  if (CloudscapeOpt.overridden())
+    settings_.cloudscape = CloudscapeOpt;
   if (CloudCoverage.overridden())
     settings_.cloud_coverage = CloudCoverage.get();
   // RX_PRECIP forces precipitation (0..1) and RX_SNOW=1 makes it snow, so the
@@ -5122,9 +5125,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               ctx.cmd->Push(p);
               ctx.cmd->Dispatch2D({render_width_, render_height_});
             });
-        if (settings_.clouds) {
+        if (settings_.clouds || settings_.cloudscape) {
           // Cloud shadows: the layer's optical depth along the sun ray darkens
-          // the same denoised shadow the shading samples.
+          // the same denoised shadow the shading samples. The cloudscape model
+          // reuses this approximate layer with its blended map coverage; exact
+          // per-formation shadows are not worth a second march here.
           graph_.AddPass(
               "cloud_shadow",
               [&](RenderGraph::PassBuilder &b) {
@@ -5155,9 +5160,17 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 p.size[0] = render_width_;
                 p.size[1] = render_height_;
                 p.time = static_cast<f32>(time_seconds_);
-                p.coverage = settings_.cloud_coverage;
-                p.bottom = 1500.0f;
-                p.top = 4200.0f;
+                if (settings_.cloudscape) {
+                  const CloudscapeControls &cc = settings_.cloudscape_controls;
+                  p.coverage = cc.map_a.coverage +
+                               (cc.map_b.coverage - cc.map_a.coverage) * cc.map_blend;
+                  p.bottom = cc.bottom;
+                  p.top = cc.top;
+                } else {
+                  p.coverage = settings_.cloud_coverage;
+                  p.bottom = 1500.0f;
+                  p.top = 4200.0f;
+                }
                 // Same drift velocity as clouds.cs, so the shadows track the
                 // deck.
                 p.wind = std::cos(settings_.weather.wind_yaw) *
@@ -5858,8 +5871,39 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     }
 
     // Volumetric clouds raymarched over the sky, composited against depth so
-    // terrain occludes them. Skipped when path tracing.
-    if (settings_.clouds && !path_trace && !interior) {
+    // terrain occludes them. Skipped when path tracing. The opt-in cloudscape
+    // model replaces the procedural pass outright; if its lazy init fails
+    // (e.g. no 3D-image support) the legacy pass keeps the sky.
+    if (settings_.cloudscape && !path_trace && !interior && !cloudscape_init_tried_) {
+      cloudscape_init_tried_ = true;
+      cloudscape_ready_ = cloudscape_.Initialize(*device_);
+      if (!cloudscape_ready_)
+        RX_ERROR("cloudscape init failed, keeping procedural clouds");
+    }
+    bool cloudscape_on = settings_.cloudscape && cloudscape_ready_ && !path_trace && !interior;
+    if (cloudscape_on) {
+      Cloudscape::Frame cf;
+      cf.inv_view_proj = globals.inv_view_proj;
+      cf.prev_view_proj = globals.prev_view_proj;
+      cf.camera_pos = view.camera.eye;
+      cf.time = static_cast<f32>(time_seconds_);
+      cf.frame_index = frame_index_;
+      cf.sun_direction = settings_.sun_direction;
+      // Lightning brightens the deck from within, like the procedural pass.
+      cf.sun_intensity =
+          settings_.sun_intensity + settings_.weather.lightning * 7.0f;
+      cf.sun_color = settings_.sun_color;
+      cf.ambient = 1.0f + settings_.weather.lightning * 2.0f;
+      cf.steps = settings_.cloudscape_steps;
+      cf.controls = settings_.cloudscape_controls;
+      // The weather struct owns the live wind; keep the deck advecting with it
+      // even when the app writes controls without touching the wind fields.
+      cf.controls.wind_yaw = settings_.weather.wind_yaw;
+      cf.controls.wind_speed = settings_.weather.wind_speed;
+      lit = cloudscape_.AddToGraph(graph_, lit, depth_export,
+                                   {render_width_, render_height_}, cf);
+    }
+    if (!cloudscape_on && settings_.clouds && !path_trace && !interior) {
       Clouds::Frame cf;
       cf.inv_view_proj = globals.inv_view_proj;
       cf.camera_pos = view.camera.eye;
@@ -6961,6 +7005,8 @@ void Renderer::Shutdown() {
     volumetric_fog_.Destroy(*device_);
     aerial_perspective_.Destroy(*device_);
     clouds_.Destroy(*device_);
+    if (cloudscape_ready_)
+      cloudscape_.Destroy(*device_);
     precipitation_.Destroy(*device_);
     precip_occlusion_.Destroy(*device_);
     precip_volume_.Destroy(*device_);

@@ -16,6 +16,7 @@
 #include "net/bubble.h"
 #include "net/bubble_debug.h"
 #include "render/core/renderer.h"
+#include "weather/weather.h"
 #include "demo_nav.h"
 #include "demo_placement.h"
 #include "demo_ship.h"
@@ -112,6 +113,11 @@ class DemoScenes {
   // rx renders the bolt + flash light) and drives the global flash scalar with
   // the strike envelope so global and positioned flash agree.
   void UpdateStorm(f32 dt);
+  // Cloudscape acceptance demo (--demo sky): a wide lot under the opt-in
+  // textured cloud deck, driven by a weather::WeatherSystem scheduling
+  // clear/scattered/overcast/storm states. RX_SKY_STATE pins one state.
+  void CreateSkyDemoScene();
+  void EmitSky(f32 dt);
   // Water demo: each floating cube pushes a wake ripple + foam splat into the
   // persistent water field, scaled by its physics velocity.
   void EmitWaterDisturbances(f32 dt, render::FrameView& view);
@@ -155,6 +161,10 @@ class DemoScenes {
   base::Vector<ecs::Entity> fluid_dam_boxes_;  // the visible dam slabs
   f32 fluid_dam_box_y0_ = 0;               // rest Y of the dam boxes
   f32 fluid_dam_sink_ = -1.0f;             // >=0 once breaking: seconds elapsed
+  // --demo sky: the weather layer scheduling the cloudscape deck.
+  std::unique_ptr<weather::WeatherSystem> weather_sys_;
+  bool sky_scene_ = false;
+  f32 sky_time_ = 0;  // scene clock, drives a slow synthetic day phase
   // Weather demo thunderstorm scheduler state.
   bool storm_enabled_ = false;
   bool weather_scene_ = false;  // weather demo active: re-clamp its storm sun
