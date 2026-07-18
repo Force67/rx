@@ -144,6 +144,8 @@ base::Option<bool> WaterObstacleOpt{"water.obstacle", true,
 base::Option<bool> ShoreWettingOpt{"shore.wetting", false, "RX_SHORE_WETTING"};
 base::Option<bool> WaterCausticsOpt{"water.caustics", true,
                                     "RX_WATER_CAUSTICS"};
+base::Option<bool> ProceduralGrassOpt{"procedural.grass", true,
+                                      "RX_PROCEDURAL_GRASS"};
 // Debug: horizontal fake velocity in pixels, to exercise the blur from a
 // static camera (screenshot testing).
 base::Option<double> MotionBlurDebugVel{"motion.blur.debug.vel", 0.0,
@@ -996,6 +998,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     settings_.shore_wetting = ShoreWettingOpt;
   if (WaterCausticsOpt.overridden())
     settings_.water_caustics = WaterCausticsOpt;
+  if (ProceduralGrassOpt.overridden())
+    settings_.procedural_grass = ProceduralGrassOpt;
   if (PathtraceSpp.overridden())
     settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden())
@@ -1081,6 +1085,18 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
           .count(),
       std::chrono::duration_cast<std::chrono::milliseconds>(t_batch2 - t_batch1)
           .count());
+
+  // Grass is optional and creates nonstandard push-constant layouts. Build its
+  // baseline pipelines outside the startup batch so a device that cannot
+  // support them degrades cleanly instead of invalidating every batched
+  // pipeline. MSAA variants are created lazily when their sample count is used.
+  if (!procedural_grass_.Initialize(*device_, kSceneColorFormat, kMotionFormat,
+                                    kNormalFormat,
+                                    MeshPipeline::kSkinDiffuseFormat,
+                                    kDepthFormat)) {
+    RX_WARN("procedural grass unavailable");
+    procedural_grass_.Destroy(*device_);
+  }
 
   // SDF software-trace infrastructure (RX_SDF) is created AFTER the pipeline
   // batch is joined, on purpose: it is an OPTIONAL, non-fatal path, but inside
@@ -4641,6 +4657,32 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                          settings_.gpu_culling, cull_occlusion, cull_hiz,
                          cull_slot);
 
+    bool grass_active = false;
+    if (settings_.procedural_grass && view.grass_domain &&
+        procedural_grass_.EnsureSampleCount(*device_, msaa_samples)) {
+      ProceduralGrass::Frame grass_frame;
+      grass_frame.view_proj = globals.view_proj;
+      grass_frame.prev_view_proj = globals.prev_view_proj;
+      grass_frame.camera_pos = view.camera.eye;
+      grass_frame.sun_direction = sun;
+      grass_frame.sun_color = {globals.sun_color[0], globals.sun_color[1],
+                               globals.sun_color[2]};
+      grass_frame.sun_intensity = globals.sun_direction[3];
+      grass_frame.ambient = globals.sun_color[3];
+      grass_frame.time = static_cast<f32>(time_seconds_);
+      grass_frame.delta_time = view.frame_delta_seconds;
+      grass_frame.jitter[0] = globals.jitter[0];
+      grass_frame.jitter[1] = globals.jitter[1];
+      grass_frame.wind_speed = settings_.weather.wind_speed;
+      grass_frame.wind_yaw = settings_.weather.wind_yaw;
+      grass_frame.gustiness = settings_.weather.gustiness;
+      grass_active = procedural_grass_.Prepare(
+          *view.grass_domain,
+          {view.grass_interactions.data(), view.grass_interactions.size()},
+          grass_frame, frame_slot);
+      if (grass_active) procedural_grass_.AddGeneration(graph_, frame_slot);
+    }
+
     // Mesh-shader opaque path: drawn this frame if enabled and supported. The
     // task stage reuses the same hi-z the raster cull built (last frame's) for
     // instance occlusion; ms_occ carries the projection scale + hi-z size (z=0
@@ -4732,7 +4774,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         [this, geom_normals, geom_motion, geom_depth_export, geom_depth,
          cull_commands, &frame, &view, ms_active, ms_occlude, cull_hiz,
          globals_set, update_globals_set, frame_slot, draw_meshlet_instances,
-         view_proj, force_lod0_for_tlas](PassContext &ctx) {
+         view_proj, force_lod0_for_tlas, grass_active,
+         msaa_samples](PassContext &ctx) {
           // First globals-set user this frame: write uniform + tlas + hi-z
           // once.
           update_globals_set(ctx, ms_occlude ? cull_hiz : kInvalidResource,
@@ -4881,6 +4924,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                    submesh.index_offset, vertex_offset, 0);
             }
           }
+          if (grass_active)
+            procedural_grass_.DrawPrepass(*ctx.cmd, frame_slot, msaa_samples);
           ctx.cmd->EndRendering();
         });
 
@@ -5362,8 +5407,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
          sun_shadow, spec_refl, rcgi_irr, rcgi_world, use_rt_frag, ddgi_active,
          csm_active, shadow_slot, shadow_atlas, cull_commands, ms_active,
          globals_set, frame_slot, restir_active, restir_out, &frame, &view,
-         draw_meshlet_instances, view_proj,
-         force_lod0_for_tlas](PassContext &ctx) {
+          draw_meshlet_instances, view_proj, force_lod0_for_tlas,
+          grass_active, msaa_samples](PassContext &ctx) {
           BindingSetHandle env_set = env_scene_sets_[frame_slot];
           TextureView ao_view = ao != kInvalidResource
                                     ? ctx.graph->image(ao).view
@@ -5559,6 +5604,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                    submesh.index_offset, vertex_offset, 0);
             }
           }
+          if (grass_active)
+            procedural_grass_.DrawScene(*ctx.cmd, frame_slot, msaa_samples);
           // The sky pipeline is single-sampled; under kMsaa it draws in its own
           // pass right after the resolve instead (same attachments at 1x).
           if (settings_.sky && !settings_.interior && !msaa) {
@@ -6887,6 +6934,7 @@ void Renderer::Shutdown() {
     local_shadows_.Destroy(*device_);
     froxel_fog_.Destroy(*device_);
     particles_.Destroy(*device_);
+    procedural_grass_.Destroy(*device_);
     gaussians_.Destroy(*device_);
     fur_.Destroy(*device_);
     wboit_.Destroy(*device_);

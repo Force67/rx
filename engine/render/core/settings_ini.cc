@@ -120,6 +120,7 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "gpu_occlusion = " << Bool(s.gpu_occlusion) << "\n";
   o << "distance_lod = " << Bool(s.distance_lod) << "\n";
   o << "mesh_shader_lod = " << Bool(s.mesh_shader_lod) << "\n";
+  o << "procedural_grass = " << Bool(s.procedural_grass) << "\n";
   o << "vsync = " << Bool(s.vsync) << "\n\n";
 
   o << "[sky]\n";
@@ -270,6 +271,7 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   b("gpu_occlusion", s.gpu_occlusion);
   b("distance_lod", s.distance_lod);
   b("mesh_shader_lod", s.mesh_shader_lod);
+  b("procedural_grass", s.procedural_grass);
   b("vsync", s.vsync);
 
   b("sky", s.sky);

@@ -202,6 +202,7 @@ void DemoScenes::Shutdown() {
     placement_->Shutdown();
     placement_.reset();
   }
+  grass_.reset();
   if (cloth_ != 0) {
     physics_.RemoveCloth(cloth_);
     cloth_ = 0;
@@ -238,6 +239,10 @@ void DemoScenes::ApplyRenderPolicy() {
   settings.shadow_maps = true;
 }
 
+void DemoScenes::Update(f32 dt) {
+  if (grass_) grass_->Update(dt);
+}
+
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // The viewer's clock rewrites the sun on hour steps and would replace the
   // weather scene's staged overcast gloom with a full noon sun (the clock
@@ -252,6 +257,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (ship_) ship_->Emit(dt, view);
   if (nav_) nav_->Emit(dt, view);
   if (placement_) placement_->Emit(dt, view);
+  if (grass_) grass_->Emit(view);
   if (gym_) gym_->Emit(dt, view);
   if (puppet_) puppet_->Emit(dt, view);
   if (drive_) drive_->Emit(dt, view);
@@ -3280,6 +3286,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "placement") {
     placement_ = std::make_unique<PlacementDemo>(ctx_);
     placement_->Create();
+    return;
+  }
+  if (config_.demo_scene == "grass") {
+    grass_ = std::make_unique<GrassDemo>(ctx_);
+    grass_->Create();
     return;
   }
   if (config_.demo_scene == "gym") {

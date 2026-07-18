@@ -63,6 +63,7 @@ rx_add_module(render
   geometry/water_caustics.cc
   geometry/particles.cc
   geometry/particle_emitters.cc
+  geometry/procedural_grass.cc
   geometry/fur.cc
   geometry/wboit.cc
   geometry/gaussian.cc
@@ -206,6 +207,10 @@ set(RX_RENDER_SHADERS
   shaders/geometry/particle.ps.hlsl
   shaders/geometry/particle_tex.ps.hlsl
   shaders/geometry/particle_sim.cs.hlsl
+  shaders/geometry/procedural_grass_generate.cs.hlsl
+  shaders/geometry/procedural_grass.vs.hlsl
+  shaders/geometry/procedural_grass_prepass.ps.hlsl
+  shaders/geometry/procedural_grass.ps.hlsl
   shaders/geometry/fur.vs.hlsl
   shaders/geometry/fur.ps.hlsl
   shaders/geometry/wboit.vs.hlsl
@@ -390,6 +395,9 @@ set(RX_SHADER_DEPS_vgeo_vis_ms_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_vis_ps_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_resolve_ps_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_particle_tex_ps_hlsl shaders/geometry/particle.ps.hlsl)
+set(RX_SHADER_DEPS_procedural_grass_vs_hlsl shaders/geometry/procedural_grass.hlsli)
+set(RX_SHADER_DEPS_procedural_grass_prepass_ps_hlsl shaders/geometry/procedural_grass.hlsli)
+set(RX_SHADER_DEPS_procedural_grass_ps_hlsl shaders/geometry/procedural_grass.hlsli)
 set(RX_SHADER_DEPS_precip_volume_vs_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_volume_rt_vs_hlsl shaders/atmosphere/precip_volume.vs.hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_volume_ps_hlsl shaders/atmosphere/precip_common.hlsli)

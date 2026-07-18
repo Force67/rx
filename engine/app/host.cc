@@ -194,6 +194,7 @@ void Host::ApplyRenderPreset() {
   tuned.water_interaction = env.water_interaction;
   tuned.shore_wetting = env.shore_wetting;
   tuned.water_caustics = env.water_caustics;
+  tuned.procedural_grass = env.procedural_grass;  // honor RX_PROCEDURAL_GRASS
   tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;

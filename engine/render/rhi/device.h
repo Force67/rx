@@ -147,6 +147,9 @@ class Device {
   // --- resources ---
   virtual GpuBuffer CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible = false) = 0;
   virtual GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) = 0;
+  // Makes writes to a persistently mapped host-visible range available to the
+  // GPU. Coherent backends implement this as a no-op.
+  virtual void FlushBuffer(const GpuBuffer& /*buffer*/, u64 /*offset*/, u64 /*size*/) {}
   // Immediate destruction: the caller guarantees the GPU is done with the
   // resource (no in-flight frame references it). For a resource that may still
   // be read by a submitted-but-unfinished frame use the *Deferred variants.

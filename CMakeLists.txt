@@ -451,6 +451,23 @@ if(RX_BUILD_TESTS)
   target_link_libraries(instance_store_test PRIVATE rx::core)
   add_test(NAME instance_store_test COMMAND instance_store_test)
 
+  add_executable(settings_ini_test
+    test/settings_ini_test.cc
+    engine/render/core/settings_ini.cc)
+  target_include_directories(settings_ini_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_compile_definitions(settings_ini_test PRIVATE RX_RENDER_IMPLEMENTATION)
+  target_link_libraries(settings_ini_test PRIVATE rx::core)
+  add_test(NAME settings_ini_test COMMAND settings_ini_test)
+
+  add_executable(procedural_grass_test test/procedural_grass_test.cc)
+  target_include_directories(procedural_grass_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_link_libraries(procedural_grass_test PRIVATE rx::core)
+  add_test(NAME procedural_grass_test COMMAND procedural_grass_test)
+
   # Solid-angle TLAS instance culler: the distance/angle predicate, the
   # time-sliced group sweep, teleport accept-all and generation invalidation.
   # Pure CPU logic (no GPU), so it always runs under plain ctest.
