@@ -3090,12 +3090,18 @@ void DemoScenes::CreateSkyDemoScene() {
     }
     return s;
   };
+  // Shell altitudes follow the class each state represents: fair-weather
+  // cumulus rides a high dry-climate condensation level, the stratocumulus
+  // overcast is a genuinely low thin ceiling, and the storm is a
+  // cumulonimbus tower running from a low base to a ~12 km anvil.
   weather::WeatherState clear;
   clear.name = "clear";
   clear.coverage = 0.26f;
   clear.cloud_type = 0.72f;
   clear.map_seed = 11u;
   clear.wind_speed = 9.0f;
+  clear.base_altitude = 2200.0f;
+  clear.top_altitude = 4600.0f;
   weather_sys_->AddState(tune(clear));
   weather::WeatherState scattered;
   scattered.name = "scattered";
@@ -3103,6 +3109,8 @@ void DemoScenes::CreateSkyDemoScene() {
   scattered.cloud_type = 0.78f;
   scattered.map_seed = 23u;
   scattered.wind_speed = 13.0f;
+  scattered.base_altitude = 2000.0f;
+  scattered.top_altitude = 6200.0f;
   weather_sys_->AddState(tune(scattered));
   weather::WeatherState overcast;
   overcast.name = "overcast";
@@ -3111,6 +3119,8 @@ void DemoScenes::CreateSkyDemoScene() {
   overcast.density = 1.15f;
   overcast.map_seed = 37u;
   overcast.wind_speed = 16.0f;
+  overcast.base_altitude = 1100.0f;
+  overcast.top_altitude = 2800.0f;
   weather_sys_->AddState(tune(overcast));
   weather::WeatherState storm;
   storm.name = "storm";
@@ -3118,10 +3128,13 @@ void DemoScenes::CreateSkyDemoScene() {
   storm.cloud_type = 0.95f;
   storm.precipitation = 0.85f;
   storm.storminess = 0.9f;
+  storm.darkness = 0.55f;  // menacing, not merely grey
   storm.density = 1.15f;
   storm.map_seed = 53u;
   storm.wind_speed = 22.0f;
   storm.turbulence = 1.4f;
+  storm.base_altitude = 1500.0f;
+  storm.top_altitude = 12000.0f;
   weather_sys_->AddState(tune(storm));
 
   int pinned = SkyState.get();

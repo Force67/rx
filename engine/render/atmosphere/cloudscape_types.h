@@ -40,14 +40,23 @@ struct CloudscapeControls {
 
   f32 turbulence = 1.0f;     // curl-noise distortion of the erosion detail
   f32 density = 1.0f;        // global density multiplier
-  // Shell altitudes. The base sits well above the legacy clouds pass (1500 m)
-  // so the deck reads overhead rather than crowding the horizon, and the top
-  // leaves room for real vertical development on storm towers.
-  f32 bottom = 2600.0f;      // layer base, metres above sea level
-  f32 top = 8200.0f;         // layer top
+  // Shell altitudes, metres ASL, authored per weather state to match the real
+  // vertical structure of each cloud class: stratus ceilings sit near the
+  // surface and stay thin (base up to ~1.2 km, a few hundred metres deep),
+  // stratocumulus decks run ~0.6-1.5 km base with tops near 2.5 km, cumulus
+  // bases lift with the condensation level (~0.5-2 km, approaching 2.7 km in
+  // dry climates) with fair-weather tops a further 1-3 km up, and
+  // cumulonimbus towers climb from a low base to a 10-16 km anvil. Defaults
+  // describe a dry-climate cumulus deck.
+  f32 bottom = 1800.0f;      // layer base
+  f32 top = 6000.0f;         // layer top
   // Storminess 0..1: flattens tops toward an anvil profile and raises the
   // sun absorption so precipitating decks go dark-bottomed.
   f32 anvil = 0.0f;
+  // Menace 0..1: blackens the deck beyond what physics alone gives -- sun
+  // absorption climbs and the ambient/multi-scatter floors collapse, so a
+  // severe-storm sky reads genuinely threatening instead of merely grey.
+  f32 darkness = 0.0f;
 };
 
 }  // namespace rx::render

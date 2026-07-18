@@ -39,7 +39,7 @@ struct PushData {
   uint frame_index;
   uint steps;            // potential full samples toward the zenith
   uint flags;            // bit 0: history valid
-  float _pad;
+  float darkness;        // menace 0..1: blackens the deck (severe-storm skies)
 };
 PUSH_CONSTANTS(PushData, pc);
 
@@ -163,14 +163,15 @@ float LightEnergy(float3 p, float3 to_sun, float4 weather, float cos_angle, floa
 
   // Precipitating cells absorb harder: rain cores go graphite instead of
   // white. Kept moderate -- a deck that clamps to black under rain stops
-  // reading as cloud at all.
-  float absorb = 0.035 * (1.0 + weather.g * 1.1);
-  // Two-scale Beer floor stands in for multiple scattering: deep cloud keeps a
-  // dim interior glow instead of clamping to black.
+  // reading as cloud at all. Menace stacks on top for the authored version.
+  float absorb = 0.035 * (1.0 + weather.g * 1.1) * (1.0 + pc.darkness * 2.0);
   // Three-scale Beer floor stands in for multiple scattering: even a deep
-  // overcast deck keeps the bright diffuse glow a real one transmits.
-  float beer = max(max(exp(-optical * absorb), exp(-optical * absorb * 0.2) * 0.28),
-                   exp(-optical * absorb * 0.06) * 0.14);
+  // overcast deck keeps the bright diffuse glow a real one transmits. Rain
+  // RAISES the widest floor (a soaked deck scatters more, which is what keeps
+  // it legible against the precipitation haze); menace collapses all of it.
+  float floor_gain = (1.0 - 0.65 * pc.darkness);
+  float beer = max(max(exp(-optical * absorb), exp(-optical * absorb * 0.2) * 0.28 * floor_gain),
+                   exp(-optical * absorb * 0.06) * 0.14 * (1.0 + weather.g * 0.9) * floor_gain);
   // Powder: freshly entered thin edges under-collect in-scattered light, so
   // sugary detail survives where beer alone would flatten it.
   float powder = 1.0 - exp(-powder_depth * 2.0);
@@ -277,15 +278,26 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
     float h = saturate(HeightIn(pos));
     float powder_depth = density * dt_full * 0.011;
     float light = LightEnergy(pos, to_sun, weather, cos_angle, powder_depth);
-    // Tops see the whole sky dome, bases the dark ground; rain cells dim it.
-    // The local-density falloff mottles the undersides: dense cores swallow
-    // the sky fill, thin gaps stay bright, so a deck reads as cloud material
-    // instead of a flat painted ceiling.
+    // Away from the sun the ambient term carries the whole image, so it has
+    // to vary or the deck flattens into a painted ceiling. Two cheap taps up
+    // the radial estimate the cloud mass overhead: a sample under a heavy
+    // column loses its sky dome and goes dark, a sample under a thin spot
+    // glows -- exactly the mottled underside a real deck shows from below.
+    float3 up = pos / max(length(pos), 1.0);
+    float up_od = DensityCheap(pos + up * 350.0, weather) * 350.0 +
+                  DensityCheap(pos + up * 950.0, weather) * 650.0;
+    // Scaled like the sun march's absorption: typical overhead columns land
+    // mid-curve, so the mottle actually varies instead of saturating.
+    float sky_vis = exp(-up_od * 0.004);
     float3 ambient = ambient_base * (0.35 + 0.65 * h) * (1.0 - 0.28 * weather.g) *
-                     lerp(1.25, 0.3, saturate(density * 1.8));
+                     (0.2 + 0.8 * sky_vis) * (1.0 - 0.8 * pc.darkness);
     float3 lit = sun_col * light + ambient * 0.3;
 
-    float sigma = density * 0.055;
+    // Rain thickens the view extinction: soaked decks cut harder silhouettes
+    // against the haze instead of dissolving into it. The base coefficient
+    // stays permeable enough that rays reach a little interior before
+    // saturating -- an opaque skin flattens every deck into one grey sheet.
+    float sigma = density * 0.045 * (1.0 + weather.g * 0.6);
     float step_trans = exp(-sigma * dt_full);
     float contrib = r.transmittance * (1.0 - step_trans);
     r.scatter += contrib * lit;

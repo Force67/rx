@@ -24,7 +24,7 @@ struct MarchPush {
   u32 frame_index;
   u32 steps;
   u32 flags;
-  f32 pad;
+  f32 darkness;
 };
 static_assert(sizeof(MarchPush) <= 256, "march push must fit the 256B budget");
 
@@ -175,6 +175,7 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph& graph, ResourceHandle color,
         push.frame_index = frame.frame_index;
         push.steps = frame.steps;
         push.flags = history ? 1u : 0u;
+        push.darkness = c.darkness;
 
         ctx.cmd->BindPipeline(march_pipeline_);
         ctx.cmd->BindTransient(

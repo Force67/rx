@@ -53,8 +53,16 @@ struct WeatherState {
   f32 cloud_type = 0.6f;      // 0 stratus .. 0.5 stratocumulus .. 1 cumulus
   f32 precipitation = 0.0f;   // 0 none .. 1 heavy (also the surface-response driver)
   f32 storminess = 0.0f;      // 0..1 anvil: flattened tops, dark precipitating bases
+  f32 darkness = 0.0f;        // 0..1 menace: blackens the deck (severe-storm skies)
   f32 density = 1.0f;         // global cloud density multiplier
   u32 map_seed = 1u;          // varies the spatial pattern of the weather map
+  // Shell altitudes, metres ASL. Author them to the class this state
+  // represents: real stratus ceilings base below ~1.2 km and stay thin,
+  // stratocumulus ~0.6-1.5 km base / ~2.5 km top, cumulus bases ride the
+  // condensation level (~0.5-2 km, higher in dry air), and cumulonimbus
+  // towers run from a low base to a 10-16 km anvil.
+  f32 base_altitude = 1800.0f;
+  f32 top_altitude = 6000.0f;
 
   // --- Wind (shared by clouds + precipitation slant) ---
   f32 wind_yaw = 0.29146f;    // radians on XZ, direction the wind blows toward

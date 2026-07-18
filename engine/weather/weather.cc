@@ -196,7 +196,12 @@ void WeatherSystem::Compose() {
   cloudscape_.turbulence = Lerpf(a.turbulence, b.turbulence, s);
   cloudscape_.density = Lerpf(a.density, b.density, s);
   cloudscape_.anvil = Lerpf(a.storminess, b.storminess, s);
-  // bottom/top stay at the contract defaults; the layer does not author them.
+  cloudscape_.darkness = Lerpf(a.darkness, b.darkness, s);
+  // The shell tracks the class each state represents (a stratus ceiling is
+  // genuinely low and thin, a storm tower genuinely enormous), so altitude
+  // cross-fades with the rest of the transition.
+  cloudscape_.bottom = Lerpf(a.base_altitude, b.base_altitude, s);
+  cloudscape_.top = Lerpf(a.top_altitude, b.top_altitude, s);
 
   // Renderer weather state.
   weather_.precipitation = Lerpf(a.precipitation, b.precipitation, s);

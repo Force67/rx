@@ -56,6 +56,9 @@ WeatherState Storm(u32 seed) {
   s.cloud_type = 0.9f;
   s.precipitation = 1.0f;
   s.storminess = 1.0f;
+  s.darkness = 0.6f;
+  s.base_altitude = 1200.0f;  // cumulonimbus: low base, towering top
+  s.top_altitude = 12000.0f;
   s.map_seed = seed;
   s.wind_yaw = 0.0f;
   s.wind_speed = 20.0f;
@@ -149,6 +152,18 @@ void TestTransitionBlend() {
 
   sys.ForceState(1, 4.0f);  // cross-fade to the storm over 4s
   Check(sys.target_state() == 1, "ForceState retargets immediately");
+
+  // Mid-transition, the shell altitudes and menace sit strictly between the
+  // endpoints: the deck sinks/darkens WITH the cross-fade, never snapping.
+  sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
+  {
+    const render::CloudscapeControls& mid = sys.cloudscape();
+    f32 lo_b = std::min(s0.base_altitude, s1.base_altitude);
+    f32 hi_b = std::max(s0.base_altitude, s1.base_altitude);
+    Check(mid.bottom > lo_b && mid.bottom < hi_b, "shell base blends through the transition");
+    Check(mid.darkness > s0.darkness && mid.darkness < s1.darkness,
+          "darkness blends through the transition");
+  }
 
   f32 prev = 0.0f, peak = 0.0f;
   bool monotonic = true, settled = false;

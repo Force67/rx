@@ -89,6 +89,29 @@ The march itself:
 Cloud sun-shadowing on the ground reuses the existing `cloud_shadow` layer,
 fed the blended map coverage.
 
+## Vertical structure
+
+Shell altitudes are authored **per weather state** (`WeatherState::base_altitude`
+/ `top_altitude`, cross-faded through transitions like every other control) and
+follow the real vertical structure of each cloud class:
+
+| Class | Base | Top |
+| --- | --- | --- |
+| stratus | near-surface .. ~1.2 km | thin, a few hundred metres |
+| stratocumulus | ~0.6–1.5 km | ~2.5 km |
+| cumulus | ~0.5–2 km (to ~2.7 km in dry climates) | fair-weather +1–3 km |
+| nimbostratus (rain deck) | low base | body 2–7 km (temperate) |
+| cumulonimbus | ~0.3–2 km | 10–16 km anvil |
+
+So the demo's overcast is a genuinely low thin ceiling, the fair-weather states
+ride a high dry-climate condensation level, and the storm is a tower running
+from 1.5 km to a 12 km anvil.
+
+`CloudscapeControls::darkness` (from `WeatherState::darkness`) is the menace
+knob: 0 leaves physics alone, 1 collapses the ambient and multiple-scatter
+floors while sun absorption climbs, so severe-storm skies go genuinely black
+instead of merely grey.
+
 ## Knobs
 
 - `RX_CLOUDSCAPE=1` — enable the model (or `cloudscape = true` in render.ini).

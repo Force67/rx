@@ -49,6 +49,11 @@ float3 WeatherState(float2 uv, uint seed, float coverage, float cloud_type, floa
   float cov = saturate((n - thresh) / 0.22 + 0.5);
   cov *= smoothstep(0.0, 0.06, coverage);           // coverage 0 -> fully clear
   cov = max(cov, smoothstep(0.94, 1.0, coverage));  // coverage 1 -> fully overcast
+  // Even a closed deck is never uniform: thickness keeps riding the
+  // underlying field, so heavy skies hold multi-km light/dark regions (the
+  // only structure that survives grazing view angles) instead of clamping
+  // the whole map to 1 and rendering as one flat sheet.
+  cov *= 0.72 + 0.28 * n;
 
   // Precipitation: sparser, larger cells; area fraction tracks the precip
   // scalar and the cells are masked to where coverage is already thick.
