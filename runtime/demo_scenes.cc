@@ -206,13 +206,10 @@ void DemoScenes::Shutdown() {
     physics_.RemoveCloth(cloth_);
     cloth_ = 0;
   }
-  // Retire the vehicle/character demos here, while the audio mixer is still
-  // alive. Their VehicleAudio voices fade out through the mixer in the dtor
-  // (Stop -> Mixer::Stop); if they instead lived until the Viewer is destroyed,
-  // that runs after the Host has already torn down the AudioSystem (main.cc
-  // destroys the Host before the Viewer), so the fade would call through a
-  // freed mixer. Called from Viewer::OnShutdown, inside Host::Shutdown, so the
-  // mixer is guaranteed live. reset() is idempotent (null for other scenes).
+  // Retire service-owning demos while the host's physics and audio systems are
+  // still alive. main.cc destroys Host before Viewer, so leaving these until the
+  // DemoScenes destructor would make their teardown call through dead services.
+  puppet_.reset();
   drive_.reset();
   gym_.reset();
   scene_hook_.reset();
@@ -256,6 +253,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (nav_) nav_->Emit(dt, view);
   if (placement_) placement_->Emit(dt, view);
   if (gym_) gym_->Emit(dt, view);
+  if (puppet_) puppet_->Emit(dt, view);
   if (drive_) drive_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
   if (fluid_scene_) EmitFluid(dt, view);
@@ -3287,6 +3285,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "gym") {
     gym_ = std::make_unique<GymDemo>(ctx_);
     gym_->Create();
+    return;
+  }
+  if (config_.demo_scene == "puppet") {
+    puppet_ = std::make_unique<PuppetDemo>(ctx_);
+    puppet_->Create();
     return;
   }
   if (config_.demo_scene == "drive") {

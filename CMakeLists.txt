@@ -229,6 +229,7 @@ if(NOT DEFINED RX_MODULES)
     nav
     character
     inventory
+    locomotion
     app
   )
 endif()
@@ -617,6 +618,32 @@ if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
   add_executable(character_test test/character_test.cc)
   target_link_libraries(character_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
   add_test(NAME character_test COMMAND character_test)
+endif()
+
+# rx::locomotion pure math (gait clock, capture point, step clamping, swing
+# trajectory, leg IK): no Jolt, no GPU, plain ctest everywhere.
+if(RX_BUILD_TESTS AND "locomotion" IN_LIST RX_MODULES)
+  add_executable(locomotion_math_test test/locomotion_math_test.cc)
+  target_link_libraries(locomotion_math_test PRIVATE rx::locomotion rx::core)
+  add_test(NAME locomotion_math_test COMMAND locomotion_math_test)
+endif()
+
+# rx::physics body/joint adapter surface the locomotion controller relies on:
+# velocity/mass/COM readback, force + torque application, watched contacts,
+# motor torque limits. Headless, needs Jolt.
+if(RX_BUILD_TESTS AND RX_JOLT)
+  add_executable(physics_body_test test/physics_body_test.cc)
+  target_link_libraries(physics_body_test PRIVATE rx::physics rx::core)
+  add_test(NAME physics_body_test COMMAND physics_body_test)
+endif()
+
+# rx::locomotion over real Jolt: rig build sanity, joint motor target
+# convergence, standing survival, push recovery, walking speed tracking and
+# controlled falls — the acceptance suite of docs/LOCOMOTION.md. Headless.
+if(RX_BUILD_TESTS AND RX_JOLT AND "locomotion" IN_LIST RX_MODULES)
+  add_executable(locomotion_test test/locomotion_test.cc)
+  target_link_libraries(locomotion_test PRIVATE rx::locomotion rx::physics rx::core)
+  add_test(NAME locomotion_test COMMAND locomotion_test)
 endif()
 
 # rx::character jetpack over the character controller's velocity seam: full-burn
