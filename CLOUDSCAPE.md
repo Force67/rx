@@ -134,6 +134,11 @@ deck.
 - `--demo sky` + `RX_SKY_STATE=<n>` — reference scene, optionally pinned to
   one weather state (0 clear, 1 scattered, 2 overcast, 3 storm).
 - `RX_SKY_FAST=1` — short dwell/transitions for watching the scheduler work.
+- `RX_SKY_FOG=<0..1>` / `RX_SKY_FOG_H=<m>` — override the pinned state's
+  ground haze (e.g. `RX_SKY_FOG=0.6 RX_SKY_FOG_H=14` for knee-deep mist).
+- `RX_SKY_CAM_Y=<m>` — start the camera above the mist blanket, looking down.
+- `--demo swamp` — fog showcase: dead snags and mossy hummocks on wet mud
+  under a forced low-stratus state with thick shallow mist and puddle sheen.
 
 ## Thunder
 

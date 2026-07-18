@@ -3040,6 +3040,14 @@ void DemoScenes::CreateWeatherDemoScene() {
 
 // --demo sky: pin one weather state (-1 = free-running scheduler).
 static base::Option<int> SkyState{"demo.sky.state", -1, "RX_SKY_STATE"};
+// Ground-haze overrides on top of the pinned state (<0 = keep the state's
+// values). RX_SKY_FOG=0.55 RX_SKY_FOG_H=18 turns a clear morning into
+// knee-deep valley mist the towers rise out of.
+static base::Option<float> SkyFog{"demo.sky.fog", -1.0f, "RX_SKY_FOG"};
+static base::Option<float> SkyFogH{"demo.sky.fogh", -1.0f, "RX_SKY_FOG_H"};
+// Camera start height override (>0): climb above the mist blanket and look
+// down on the lot for the classic towers-piercing-the-fog framing.
+static base::Option<float> SkyCamY{"demo.sky.camy", -1.0f, "RX_SKY_CAM_Y"};
 // Short dwell/transitions so the scheduler's state changes fit a capture.
 static base::Option<bool> SkyFast{"demo.sky.fast", false, "RX_SKY_FAST"};
 
@@ -3175,9 +3183,115 @@ void DemoScenes::CreateSkyDemoScene() {
   sky_scene_ = true;
   camera_.set_position({0.0f, 3.0f, 46.0f});
   camera_.set_yaw_pitch(0.0f, 0.12f);
+  if (SkyCamY.get() > 0.0f) {
+    camera_.set_position({0.0f, SkyCamY.get(), 110.0f});
+    camera_.set_yaw_pitch(0.0f, -0.22f);
+  }
   camera_.speed = 14.0f;
   RX_INFO("sky demo: cloudscape on, {} weather states{}", 5,
           pinned >= 0 ? " (pinned)" : "");
+}
+
+void DemoScenes::CreateSwampDemoScene() {
+  // A stagnant lowland under a low stratus lid: dark waterlogged ground with
+  // puddle sheen, leaning dead snags, and knee-deep mist drifting between
+  // them. Everything atmospheric comes from one forced swamp weather state --
+  // the scene itself is just wet geometry for the haze to sit in.
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b, f32 rough) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = rough;
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  asset::AssetId mud_mat = mat("builtin/swamp/mud", 0.10f, 0.115f, 0.08f, 0.55f);
+  asset::AssetId snag_mat = mat("builtin/swamp/snag", 0.16f, 0.13f, 0.10f, 0.9f);
+  asset::AssetId moss_mat = mat("builtin/swamp/moss", 0.13f, 0.17f, 0.09f, 0.85f);
+
+  auto add_box = [&](const char* tag, f32 w, f32 h, f32 d, asset::AssetId material, Vec3 pos,
+                     f32 tilt_x, f32 tilt_z) {
+    asset::Mesh mesh = asset::MakeBox(w, h, d, asset::MakeAssetId(tag));
+    asset::MeshLod& lod = mesh.lods[0];
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    scene::Transform t;
+    t.position[0] = pos.x;
+    t.position[1] = pos.y;
+    t.position[2] = pos.z;
+    // Small-angle lean as a quaternion straight from the half-angles: the
+    // snags list drunkenly instead of standing surveyor-straight.
+    f32 hx = tilt_x * 0.5f, hz = tilt_z * 0.5f;
+    t.rotation[0] = std::sin(hx);
+    t.rotation[2] = std::sin(hz);
+    t.rotation[3] = std::cos(hx) * std::cos(hz);
+    world_.Add(e, t);
+    world_.Add(e, scene::Renderable{mesh.id});
+  };
+
+  add_box("builtin/swamp/ground", 300.0f, 0.5f, 300.0f, mud_mat, {0, -0.5f, 0}, 0, 0);
+  // Hummocks: low mossy mounds breaking the plane.
+  u32 rng = 0x51ab7u;
+  auto next01 = [&rng]() {
+    rng ^= rng << 13;
+    rng ^= rng >> 17;
+    rng ^= rng << 5;
+    return static_cast<f32>(rng >> 8) * (1.0f / 16777216.0f);
+  };
+  for (int i = 0; i < 10; ++i) {
+    f32 x = (next01() - 0.5f) * 120.0f;
+    f32 z = (next01() - 0.5f) * 120.0f;
+    f32 w = 2.5f + next01() * 4.0f;
+    char tag[64];
+    std::snprintf(tag, sizeof(tag), "builtin/swamp/hummock_%d", i);
+    add_box(tag, w, 0.5f + next01() * 0.5f, w * (0.7f + next01() * 0.6f), moss_mat,
+            {x, 0.15f, z}, 0, 0);
+  }
+  // Dead snags: tall thin trunks with a drunken lean, some snapped short.
+  for (int i = 0; i < 26; ++i) {
+    f32 x = (next01() - 0.5f) * 140.0f;
+    f32 z = (next01() - 0.5f) * 140.0f;
+    if (std::fabs(x) < 4.0f && std::fabs(z) < 4.0f) continue;  // keep the spawn clear
+    f32 h = next01() < 0.3f ? 3.0f + next01() * 3.0f : 8.0f + next01() * 9.0f;
+    f32 w = 0.25f + next01() * 0.35f;
+    f32 tx = (next01() - 0.5f) * 0.16f;
+    f32 tz = (next01() - 0.5f) * 0.16f;
+    char tag[64];
+    std::snprintf(tag, sizeof(tag), "builtin/swamp/snag_%d", i);
+    add_box(tag, w, h, w, snag_mat, {x, h * 0.5f, z}, tx, tz);
+  }
+
+  // One forced swamp state: low thin stratus lid, still air, thick shallow
+  // mist. Wetness is pinned in EmitSky so the mud keeps its puddle sheen.
+  weather_sys_ = std::make_unique<weather::WeatherSystem>(3u);
+  weather::WeatherState swamp;
+  swamp.name = "swamp";
+  swamp.coverage = 0.68f;
+  swamp.cloud_type = 0.2f;
+  swamp.map_seed = 97u;
+  swamp.wind_speed = 3.5f;   // stagnant air: the mist barely crawls
+  swamp.base_altitude = 800.0f;
+  swamp.top_altitude = 2000.0f;
+  swamp.fog_density = SkyFog.get() >= 0.0f ? SkyFog.get() : 0.55f;
+  swamp.fog_height = SkyFogH.get() > 0.0f ? SkyFogH.get() : 13.0f;
+  weather_sys_->AddState(swamp);
+  weather_sys_->ForceState(0, 0.0f);
+
+  auto& rs = renderer_.settings();
+  rs.cloudscape = true;
+  rs.clouds = false;
+
+  sky_scene_ = true;
+  swamp_scene_ = true;
+  camera_.set_position({2.0f, 2.6f, 34.0f});
+  camera_.set_yaw_pitch(-0.12f, 0.03f);
+  camera_.speed = 8.0f;
+  RX_INFO("swamp demo: forced swamp state, fog {:.2f} H {:.0f} m",
+          weather_sys_->cloudscape().fog_density, weather_sys_->cloudscape().fog_height);
 }
 
 void DemoScenes::EmitSky(f32 dt) {
@@ -3190,6 +3304,13 @@ void DemoScenes::EmitSky(f32 dt) {
   auto& rs = renderer_.settings();
   rs.cloudscape_controls = weather_sys_->cloudscape();
   rs.weather = weather_sys_->weather();
+  if (SkyFog.get() >= 0.0f) rs.cloudscape_controls.fog_density = SkyFog.get();
+  if (SkyFogH.get() > 0.0f) rs.cloudscape_controls.fog_height = SkyFogH.get();
+  if (swamp_scene_) {
+    // Standing water never dries: pin the surface response so the mud keeps
+    // its puddle sheen without any rain falling.
+    rs.weather.wetness = std::max(rs.weather.wetness, 0.8f);
+  }
 
   // Thunder (the game's role, like the strike scheduling itself): each new
   // strike queues a procedural clap delayed by the speed of sound, so the
@@ -3354,6 +3475,10 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "sky") {
     CreateSkyDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "swamp") {
+    CreateSwampDemoScene();
     return;
   }
   if (config_.demo_scene == "weather") {

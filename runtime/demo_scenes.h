@@ -117,6 +117,9 @@ class DemoScenes {
   // textured cloud deck, driven by a weather::WeatherSystem scheduling
   // clear/scattered/overcast/storm states. RX_SKY_STATE pins one state.
   void CreateSkyDemoScene();
+  // Swamp fog showcase (--demo swamp): dead snags and mossy hummocks on wet
+  // mud under a forced low-stratus state with thick shallow mist.
+  void CreateSwampDemoScene();
   void EmitSky(f32 dt);
   // Water demo: each floating cube pushes a wake ripple + foam splat into the
   // persistent water field, scaled by its physics velocity.
@@ -164,6 +167,7 @@ class DemoScenes {
   // --demo sky: the weather layer scheduling the cloudscape deck.
   std::unique_ptr<weather::WeatherSystem> weather_sys_;
   bool sky_scene_ = false;
+  bool swamp_scene_ = false;  // pins surface wetness (standing water)
   f32 sky_time_ = 0;  // scene clock, drives a slow synthetic day phase
   // Thunder claps in flight: queued on each new strike, played after the
   // speed-of-sound delay.
