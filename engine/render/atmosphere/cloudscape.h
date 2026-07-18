@@ -66,6 +66,13 @@ public:
                                 ResourceHandle depth, Extent2D extent,
                                 const Frame &frame);
 
+  // Tornado funnel between ground and cloud base, driven by the weather
+  // layer's vortex lifecycle. Call between AddToGraph and AddHazeToGraph (the
+  // funnel hangs from the deck, the haze veils both). No-op at strength 0.
+  ResourceHandle AddFunnelToGraph(RenderGraph &graph, ResourceHandle color,
+                                  ResourceHandle depth, Extent2D extent,
+                                  const Frame &frame);
+
   bool available() const { return textures_.ready(); }
 
 private:
@@ -78,6 +85,7 @@ private:
   PipelineHandle apply_pipeline_;
   PipelineHandle shadow_pipeline_;
   PipelineHandle haze_pipeline_;
+  PipelineHandle funnel_pipeline_;
 
   // Persistent half-res ping-pong: (scatter, transmittance) + marched mean
   // cloud distance, reprojected across the refresh cycle.

@@ -168,6 +168,7 @@ class DemoScenes {
   std::unique_ptr<weather::WeatherSystem> weather_sys_;
   bool sky_scene_ = false;
   bool swamp_scene_ = false;  // pins surface wetness (standing water)
+  bool sky_tornado_seen_ = false;  // touchdown log edge detector
   f32 sky_time_ = 0;  // scene clock, drives a slow synthetic day phase
   // Thunder claps in flight: queued on each new strike, played after the
   // speed-of-sound delay.

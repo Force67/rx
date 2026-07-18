@@ -3048,6 +3048,9 @@ static base::Option<float> SkyFogH{"demo.sky.fogh", -1.0f, "RX_SKY_FOG_H"};
 // Camera start height override (>0): climb above the mist blanket and look
 // down on the lot for the classic towers-piercing-the-fog framing.
 static base::Option<float> SkyCamY{"demo.sky.camy", -1.0f, "RX_SKY_CAM_Y"};
+// Storm-chaser cam: while a funnel is down, keep the camera aimed at it (the
+// spawn ring is player-relative and random, so captures can't pre-aim).
+static base::Option<bool> SkyTrack{"demo.sky.track", false, "RX_SKY_TRACK"};
 // Short dwell/transitions so the scheduler's state changes fit a capture.
 static base::Option<bool> SkyFast{"demo.sky.fast", false, "RX_SKY_FAST"};
 
@@ -3170,9 +3173,28 @@ void DemoScenes::CreateSkyDemoScene() {
   front.strike_min_range = 2500.0f;
   front.strike_max_range = 7000.0f;
   weather_sys_->AddState(tune(front));
+  // Twister: a supercell-grade storm that spawns vortices. The funnel touches
+  // down upwind, snakes past the lot and ropes out; strikes stay active.
+  weather::WeatherState twister;
+  twister.name = "twister";
+  twister.coverage = 0.85f;
+  twister.cloud_type = 0.95f;
+  twister.precipitation = 0.55f;
+  twister.storminess = 0.95f;
+  twister.darkness = 0.5f;
+  twister.density = 1.2f;
+  twister.map_seed = 89u;
+  twister.wind_speed = 18.0f;
+  twister.turbulence = 1.5f;
+  twister.base_altitude = 1400.0f;
+  twister.top_altitude = 12000.0f;
+  twister.fog_density = 0.18f;
+  twister.tornado_prone = 1.0f;
+  twister.weight = 0.4f;  // rare in the free-running schedule
+  weather_sys_->AddState(tune(twister));
 
   int pinned = SkyState.get();
-  if (pinned >= 0 && pinned < 5) {
+  if (pinned >= 0 && pinned < 6) {
     weather_sys_->ForceState(static_cast<u32>(pinned), 0.0f);
   }
 
@@ -3188,7 +3210,7 @@ void DemoScenes::CreateSkyDemoScene() {
     camera_.set_yaw_pitch(0.0f, -0.22f);
   }
   camera_.speed = 14.0f;
-  RX_INFO("sky demo: cloudscape on, {} weather states{}", 5,
+  RX_INFO("sky demo: cloudscape on, {} weather states{}", 6,
           pinned >= 0 ? " (pinned)" : "");
 }
 
@@ -3311,6 +3333,23 @@ void DemoScenes::EmitSky(f32 dt) {
     // Standing water never dries: pin the surface response so the mud keeps
     // its puddle sheen without any rain falling.
     rs.weather.wetness = std::max(rs.weather.wetness, 0.8f);
+  }
+  // Touchdown breadcrumb: aim RX_CAM at the funnel for deterministic shots.
+  const render::CloudscapeControls& cc = rs.cloudscape_controls;
+  if (bool(SkyTrack) && cc.tornado_strength > 0.02f) {
+    Vec3 cam = camera_.position();
+    f32 dx = cc.tornado_pos.x - cam.x;
+    f32 dz = cc.tornado_pos.y - cam.z;
+    f32 flat = std::sqrt(dx * dx + dz * dz);
+    // forward() is (sin yaw, sin pitch, -cos yaw): aim a third up the funnel.
+    camera_.set_yaw_pitch(std::atan2(dx, -dz), std::atan2(300.0f - cam.y, flat));
+  }
+  if (cc.tornado_strength > 0.05f && !sky_tornado_seen_) {
+    sky_tornado_seen_ = true;
+    RX_INFO("tornado touchdown at ({:.0f}, {:.0f}), radius {:.0f} m", cc.tornado_pos.x,
+            cc.tornado_pos.y, cc.tornado_radius);
+  } else if (cc.tornado_strength <= 0.01f) {
+    sky_tornado_seen_ = false;
   }
 
   // Thunder (the game's role, like the strike scheduling itself): each new

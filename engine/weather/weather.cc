@@ -23,6 +23,10 @@ constexpr f32 kMeltRate = 0.012f;
 // precipitating and anvil-topped; a drizzle under flat stratus stays quiet.
 constexpr f32 kStormPrecip = 0.5f;
 constexpr f32 kStormAnvil = 0.5f;
+// Mean seconds between vortex spawns while a fully tornado-prone state is
+// anvil-heavy (scaled down by partial proneness).
+constexpr f32 kTornadoMeanInterval = 40.0f;
+
 constexpr f32 kStrikeMeanInterval =
     4.0f; // seconds between strikes, exponential
 
@@ -261,6 +265,57 @@ void WeatherSystem::IntegrateSurface(f32 dt, f32 precip, bool snow) {
   snow_cover_ = Clamp01(snow_cover_);
 }
 
+void WeatherSystem::IntegrateTornado(f32 dt, const Vec3 &player_pos,
+                                     f32 anvil) {
+  const WeatherState &a = states_[from_];
+  const WeatherState &b = states_[to_];
+  f32 s = from_ == to_ ? 0.0f : blend_;
+  f32 prone = Lerpf(a.tornado_prone, b.tornado_prone, s);
+
+  if (tornado_active_) {
+    tornado_age_ += dt;
+    // Envelope: touchdown ramp, sustained wander, rope-out. The funnel
+    // travels downwind a little slower than the deck, with a lazy sideways
+    // wobble so its track snakes instead of ruling a straight line.
+    f32 ramp = Smoothstep(tornado_age_ / 8.0f);
+    f32 out = 1.0f - Smoothstep((tornado_age_ - tornado_dur_ + 9.0f) / 9.0f);
+    cloudscape_.tornado_strength = ramp * out;
+    f32 speed = cloudscape_.wind_speed * 0.55f;
+    f32 wob = std::sin(tornado_age_ * 0.31f) * 0.6f;
+    Vec2 dir{std::cos(cloudscape_.wind_yaw), std::sin(cloudscape_.wind_yaw)};
+    tornado_pos_.x += (dir.x - dir.y * wob) * speed * dt;
+    tornado_pos_.y += (dir.y + dir.x * wob) * speed * dt;
+    cloudscape_.tornado_pos = tornado_pos_;
+    if (tornado_age_ >= tornado_dur_ || anvil < 0.4f) {
+      tornado_active_ = false;
+      cloudscape_.tornado_strength = 0.0f;
+      f32 u = NextF32();
+      if (u < 1e-4f)
+        u = 1e-4f;
+      tornado_timer_ = -kTornadoMeanInterval * std::log(u);
+    }
+    return;
+  }
+
+  cloudscape_.tornado_strength = 0.0f;
+  if (prone <= 0.01f || anvil < 0.6f)
+    return;
+  tornado_timer_ -= dt * prone;
+  if (tornado_timer_ > 0.0f)
+    return;
+  // Touch down upwind of the player so the track carries the funnel past.
+  f32 ang = RandomRange(0.0f, kTwoPi);
+  f32 range = RandomRange(400.0f, 1100.0f);
+  Vec2 dir{std::cos(cloudscape_.wind_yaw), std::sin(cloudscape_.wind_yaw)};
+  tornado_pos_ = Vec2{player_pos.x + std::cos(ang) * range - dir.x * 300.0f,
+                      player_pos.z + std::sin(ang) * range - dir.y * 300.0f};
+  tornado_age_ = 0.0f;
+  tornado_dur_ = RandomRange(35.0f, 90.0f);
+  cloudscape_.tornado_radius = RandomRange(45.0f, 85.0f);
+  cloudscape_.tornado_pos = tornado_pos_;
+  tornado_active_ = true;
+}
+
 void WeatherSystem::IntegrateLightning(f32 dt, const Vec3 &player_pos,
                                        f32 precip, f32 anvil) {
   // A state spawns lightning when it is anvil-topped AND either rain reaches
@@ -373,6 +428,7 @@ void WeatherSystem::Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01) {
 
   IntegrateSurface(dt, weather_.precipitation, weather_.snow);
   IntegrateLightning(dt, player_pos, weather_.precipitation, cloudscape_.anvil);
+  IntegrateTornado(dt, player_pos, cloudscape_.anvil);
 }
 
 } // namespace rx::weather

@@ -5,6 +5,7 @@
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "shaders/cloudscape_apply_cs_hlsl.h"
+#include "shaders/cloudscape_funnel_cs_hlsl.h"
 #include "shaders/cloudscape_haze_cs_hlsl.h"
 #include "shaders/cloudscape_march_cs_hlsl.h"
 #include "shaders/cloudscape_shadow_cs_hlsl.h"
@@ -50,6 +51,16 @@ struct HazePush {
   f32 wind[4];          // xy blow dir, z speed, w darkness
   f32 fog[4];           // density, height, ground, anvil
   f32 map[4];           // xy offset, z extent
+  u32 size[2];
+  f32 pad[2];
+};
+
+struct FunnelPush {
+  Mat4 inv_view_proj;
+  f32 camera_pos[4]; // xyz eye, w time
+  f32 sun_color[4];  // rgb, w flash
+  f32 funnel[4];     // xy axis pos, z wall radius, w strength
+  f32 bounds[4];     // ground y, cloud base y, sun intensity, darkness
   u32 size[2];
   f32 pad[2];
 };
@@ -102,6 +113,15 @@ bool Cloudscape::Initialize(Device &device) {
       .push_constant_size = sizeof(HazePush),
       .debug_name = "cloudscape_haze",
   });
+  funnel_pipeline_ = device.CreateComputePipeline({
+      .shader = RX_SHADER(k_cloudscape_funnel_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kStorageImage},
+                          {1, BindingType::kSampledImage},
+                          {2, BindingType::kSampledImage},
+                          {3, BindingType::kCombinedTextureSampler}}}},
+      .push_constant_size = sizeof(FunnelPush),
+      .debug_name = "cloudscape_funnel",
+  });
   shadow_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_shadow_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
@@ -112,11 +132,64 @@ bool Cloudscape::Initialize(Device &device) {
       .debug_name = "cloudscape_shadow",
   });
   if (!march_pipeline_ || !apply_pipeline_ || !shadow_pipeline_ ||
-      !haze_pipeline_) {
+      !haze_pipeline_ || !funnel_pipeline_) {
     RX_ERROR("cloudscape pipeline creation failed");
     return false;
   }
   return true;
+}
+
+ResourceHandle Cloudscape::AddFunnelToGraph(RenderGraph &graph,
+                                            ResourceHandle color,
+                                            ResourceHandle depth,
+                                            Extent2D extent,
+                                            const Frame &frame) {
+  if (!textures_.ready() || frame.controls.tornado_strength <= 0.01f)
+    return color;
+  ResourceHandle out = graph.CreateTexture({.name = "cloudscape_funnel",
+                                            .format = Format::kRGBA16Float,
+                                            .width = extent.width,
+                                            .height = extent.height});
+  graph.AddPass(
+      "cloudscape_funnel",
+      [&](RenderGraph::PassBuilder &b) {
+        b.Write(out, ResourceUsage::kStorageWrite);
+        b.Read(color, ResourceUsage::kSampledCompute);
+        b.Read(depth, ResourceUsage::kSampledCompute);
+      },
+      [this, out, color, depth, extent, frame](PassContext &ctx) {
+        FunnelPush push{};
+        push.inv_view_proj = frame.inv_view_proj;
+        push.camera_pos[0] = frame.camera_pos.x;
+        push.camera_pos[1] = frame.camera_pos.y;
+        push.camera_pos[2] = frame.camera_pos.z;
+        push.camera_pos[3] = frame.time;
+        push.sun_color[0] = frame.sun_color.x;
+        push.sun_color[1] = frame.sun_color.y;
+        push.sun_color[2] = frame.sun_color.z;
+        push.sun_color[3] = frame.flash;
+        const CloudscapeControls &c = frame.controls;
+        push.funnel[0] = c.tornado_pos.x;
+        push.funnel[1] = c.tornado_pos.y;
+        push.funnel[2] = c.tornado_radius;
+        push.funnel[3] = c.tornado_strength;
+        push.bounds[0] = c.fog_ground;
+        push.bounds[1] = c.bottom;
+        push.bounds[2] = frame.sun_intensity;
+        push.bounds[3] = c.darkness;
+        push.size[0] = extent.width;
+        push.size[1] = extent.height;
+        ctx.cmd->BindPipeline(funnel_pipeline_);
+        ctx.cmd->BindTransient(
+            0, {Bind::Storage(0, ctx.graph->image(out)),
+                Bind::Sampled(1, ctx.graph->image(color)),
+                Bind::Sampled(2, ctx.graph->image(depth)),
+                InGeneral(Bind::Combined(3, textures_.base_noise_view(),
+                                         textures_.sampler()))});
+        ctx.cmd->Push(push);
+        ctx.cmd->Dispatch2D(extent);
+      });
+  return out;
 }
 
 ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
@@ -188,10 +261,12 @@ void Cloudscape::Destroy(Device &device) {
   device.DestroyPipeline(apply_pipeline_);
   device.DestroyPipeline(shadow_pipeline_);
   device.DestroyPipeline(haze_pipeline_);
+  device.DestroyPipeline(funnel_pipeline_);
   march_pipeline_ = {};
   apply_pipeline_ = {};
   shadow_pipeline_ = {};
   haze_pipeline_ = {};
+  funnel_pipeline_ = {};
   textures_.Destroy(device);
 }
 

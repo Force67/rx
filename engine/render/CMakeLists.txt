@@ -239,6 +239,7 @@ set(RX_RENDER_SHADERS
   shaders/atmosphere/cloudscape_apply.cs.hlsl
   shaders/atmosphere/cloudscape_shadow.cs.hlsl
   shaders/atmosphere/cloudscape_haze.cs.hlsl
+  shaders/atmosphere/cloudscape_funnel.cs.hlsl
   shaders/atmosphere/froxel_scatter.cs.hlsl
   shaders/atmosphere/froxel_integrate.cs.hlsl
   shaders/atmosphere/froxel_apply.cs.hlsl

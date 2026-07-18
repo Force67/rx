@@ -81,6 +81,12 @@ struct WeatherState {
   bool snow = false; // precipitation falls as snow (whitens instead of wetting)
   bool aurora = false; // night-sky curtains up in this state
 
+  // --- Tornado ---
+  // How prone this state is to spawning a vortex (0 = never). Requires the
+  // blended deck to be anvil-heavy; the layer then runs the whole lifecycle:
+  // touchdown, a wander downwind past the player, rope-out.
+  f32 tornado_prone = 0.0f;
+
   // --- Lightning placement ---
   // Strikes land in this ring around the player. The defaults put the storm
   // overhead; a distant-front state pushes the ring kilometres out, and the
@@ -173,6 +179,7 @@ private:
   void Settle();                  // collapse the transition (from_ == to_)
   void Compose();                 // write cloudscape_/weather_ from the blend
   void IntegrateSurface(f32 dt, f32 precip, bool snow);
+  void IntegrateTornado(f32 dt, const Vec3 &player_pos, f32 anvil);
   void IntegrateLightning(f32 dt, const Vec3 &player_pos, f32 precip,
                           f32 anvil);
 
@@ -198,6 +205,12 @@ private:
   Vec2 map_offset_{0, 0}; // integrated wind advection of the weather map
   f32 wetness_ = 0.0f;
   f32 snow_cover_ = 0.0f;
+  // Vortex lifecycle (see IntegrateTornado): one funnel at a time.
+  bool tornado_active_ = false;
+  f32 tornado_age_ = 0.0f;
+  f32 tornado_dur_ = 0.0f;
+  f32 tornado_timer_ = 20.0f; // seconds until the first possible spawn
+  Vec2 tornado_pos_{0, 0};
   f32 strike_timer_ =
       0.0f; // seconds until the next stochastic strike (stormy only)
 

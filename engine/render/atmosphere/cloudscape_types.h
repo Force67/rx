@@ -70,6 +70,14 @@ struct CloudscapeControls {
   // roils like rising vapour instead of only sliding downwind. Low for a
   // settled morning layer, high over warm standing water.
   f32 fog_churn = 0.15f;
+
+  // Active tornado, written by the weather layer's vortex lifecycle (not
+  // authored directly per state -- states only opt in via tornado proneness).
+  // strength ramps 0 -> 1 on touchdown and back to 0 as the funnel ropes out;
+  // the renderer draws nothing at 0.
+  Vec2 tornado_pos{0.0f, 0.0f}; // funnel axis on the ground, world XZ
+  f32 tornado_strength = 0.0f;  // 0 none .. 1 fully developed
+  f32 tornado_radius = 60.0f;   // wall radius at mid height, metres
 };
 
 } // namespace rx::render

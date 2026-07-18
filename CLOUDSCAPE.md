@@ -142,6 +142,20 @@ deck.
 - `--demo swamp` — fog showcase: dead snags and mossy hummocks on wet mud
   under a forced low-stratus state with thick shallow mist and puddle sheen.
 
+## Tornado
+
+States opt in via `WeatherState::tornado_prone`; while the blended deck is
+anvil-heavy the layer runs a full vortex lifecycle — touchdown upwind of the
+player, a snaking downwind wander, rope-out — writing
+`CloudscapeControls::tornado_pos/strength/radius`. The renderer marches a
+small bounded funnel volume between ground and cloud base: a hollow noise
+cone whose axis snakes with height, whose streaks rotate around the axis, and
+whose contact point churns a dust skirt. Rays that miss the funnel's bounding
+cylinder exit after two dot products, so the pass costs nothing without a
+funnel and very little with one. `--demo sky` state 5 (`RX_SKY_STATE=5`) is a
+supercell that spawns them; `RX_SKY_TRACK=1` keeps the camera aimed at the
+funnel (its spawn ring is player-relative and random).
+
 ## Thunder
 
 `audio::MakeThunder` (engine/audio/thunder_synth.h) renders a one-shot
