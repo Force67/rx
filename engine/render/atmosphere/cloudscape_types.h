@@ -40,8 +40,11 @@ struct CloudscapeControls {
 
   f32 turbulence = 1.0f;     // curl-noise distortion of the erosion detail
   f32 density = 1.0f;        // global density multiplier
-  f32 bottom = 1500.0f;      // layer base, metres above sea level
-  f32 top = 4200.0f;         // layer top
+  // Shell altitudes. The base sits well above the legacy clouds pass (1500 m)
+  // so the deck reads overhead rather than crowding the horizon, and the top
+  // leaves room for real vertical development on storm towers.
+  f32 bottom = 2600.0f;      // layer base, metres above sea level
+  f32 top = 8200.0f;         // layer top
   // Storminess 0..1: flattens tops toward an anvil profile and raises the
   // sun absorption so precipitating decks go dark-bottomed.
   f32 anvil = 0.0f;

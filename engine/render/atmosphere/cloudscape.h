@@ -28,8 +28,12 @@ class Cloudscape {
     Vec3 sun_direction;
     f32 sun_intensity = 4.0f;
     Vec3 sun_color{1, 1, 1};
-    f32 ambient = 1.0f;     // scales the sky-ambient floor (lightning boosts it)
-    u32 steps = 48;         // potential full samples toward the zenith
+    f32 ambient = 1.0f;  // scales the sky-ambient floor
+    // Lightning flash 0..1. Applied in the full-res composite, NOT the march:
+    // the flash is far faster than the refresh cycle, and boosting the
+    // amortized march would print the refresh grid and contaminate history.
+    f32 flash = 0.0f;
+    u32 steps = 48;  // potential full samples toward the zenith
     CloudscapeControls controls;
   };
 

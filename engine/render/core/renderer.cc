@@ -5889,11 +5889,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       cf.time = static_cast<f32>(time_seconds_);
       cf.frame_index = frame_index_;
       cf.sun_direction = settings_.sun_direction;
-      // Lightning brightens the deck from within, like the procedural pass.
-      cf.sun_intensity =
-          settings_.sun_intensity + settings_.weather.lightning * 7.0f;
+      // Lightning floods the deck from within via the full-res composite
+      // (Frame::flash); the amortized march itself stays flash-free so the
+      // temporal history never bakes a bright frame in.
+      cf.sun_intensity = settings_.sun_intensity;
       cf.sun_color = settings_.sun_color;
-      cf.ambient = 1.0f + settings_.weather.lightning * 2.0f;
+      cf.flash = settings_.weather.lightning;
       cf.steps = settings_.cloudscape_steps;
       cf.controls = settings_.cloudscape_controls;
       // The weather struct owns the live wind; keep the deck advecting with it

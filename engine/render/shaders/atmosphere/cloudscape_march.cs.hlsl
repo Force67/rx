@@ -161,8 +161,10 @@ float LightEnergy(float3 p, float3 to_sun, float4 weather, float cos_angle, floa
   float3 fp = p + to_sun * (step_len * 12.0);
   optical += DensityCheap(fp, SampleWeather(fp.xz + pc.camera_pos.xz)) * step_len * 3.0;
 
-  // Precipitating cells absorb harder: rain cores go graphite instead of white.
-  float absorb = 0.035 * (1.0 + weather.g * 2.4);
+  // Precipitating cells absorb harder: rain cores go graphite instead of
+  // white. Kept moderate -- a deck that clamps to black under rain stops
+  // reading as cloud at all.
+  float absorb = 0.035 * (1.0 + weather.g * 1.1);
   // Two-scale Beer floor stands in for multiple scattering: deep cloud keeps a
   // dim interior glow instead of clamping to black.
   // Three-scale Beer floor stands in for multiple scattering: even a deep
@@ -279,8 +281,8 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
     // The local-density falloff mottles the undersides: dense cores swallow
     // the sky fill, thin gaps stay bright, so a deck reads as cloud material
     // instead of a flat painted ceiling.
-    float3 ambient = ambient_base * (0.35 + 0.65 * h) * (1.0 - 0.55 * weather.g) *
-                     lerp(1.0, 0.4, saturate(density * 2.5));
+    float3 ambient = ambient_base * (0.35 + 0.65 * h) * (1.0 - 0.28 * weather.g) *
+                     lerp(1.25, 0.3, saturate(density * 1.8));
     float3 lit = sun_col * light + ambient * 0.3;
 
     float sigma = density * 0.055;

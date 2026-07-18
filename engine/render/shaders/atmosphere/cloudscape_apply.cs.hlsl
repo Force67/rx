@@ -8,6 +8,8 @@
 struct ApplyPush {
   uint2 full_size;
   uint2 half_size;
+  float flash;  // lightning 0..1: boosts the deck's scatter this frame
+  float _pad;
 };
 PUSH_CONSTANTS(ApplyPush, pc);
 
@@ -31,5 +33,12 @@ void main(uint3 id : SV_DispatchThreadID) {
   cloud += cloud_in.SampleLevel(cloud_sampler, uv - float2(texel.x, 0.0), 0.0) * 0.15;
   cloud += cloud_in.SampleLevel(cloud_sampler, uv + float2(0.0, texel.y), 0.0) * 0.15;
   cloud += cloud_in.SampleLevel(cloud_sampler, uv - float2(0.0, texel.y), 0.0) * 0.15;
-  out_image[px] = float4(scene * cloud.a + cloud.rgb, 1.0);
+  // Lightning lives here, not in the march: the flash rises and dies far
+  // faster than the 16-frame refresh cycle, so boosting the amortized march
+  // would print the refresh grid (and bake flash frames into the history).
+  // A full-res scatter boost flashes the whole deck from within, instantly,
+  // slightly blue-white the way the channel actually radiates.
+  float3 flash_tint = float3(0.92, 0.96, 1.1);
+  float3 cloud_rgb = cloud.rgb * (1.0 + pc.flash * 7.0 * flash_tint);
+  out_image[px] = float4(scene * cloud.a + cloud_rgb, 1.0);
 }

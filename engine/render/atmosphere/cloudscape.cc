@@ -31,6 +31,8 @@ static_assert(sizeof(MarchPush) <= 256, "march push must fit the 256B budget");
 struct ApplyPush {
   u32 full_size[2];
   u32 half_size[2];
+  f32 flash;
+  f32 pad;
 };
 
 }  // namespace
@@ -200,12 +202,13 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph& graph, ResourceHandle color,
         b.Read(color, ResourceUsage::kSampledCompute);
         b.Read(cur_cloud, ResourceUsage::kSampledCompute);
       },
-      [this, out, color, cur_cloud, extent, half](PassContext& ctx) {
+      [this, out, color, cur_cloud, extent, half, flash = frame.flash](PassContext& ctx) {
         ApplyPush push{};
         push.full_size[0] = extent.width;
         push.full_size[1] = extent.height;
         push.half_size[0] = half.width;
         push.half_size[1] = half.height;
+        push.flash = flash;
         ctx.cmd->BindPipeline(apply_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(out)),

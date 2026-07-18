@@ -13,6 +13,8 @@
 
 #include "asset/asset_database.h"
 #include "asset/asset_id.h"
+#include "audio/audio_system.h"
+#include "audio/thunder_synth.h"
 #include "asset/materialx.h"
 #include "asset/primitives.h"
 #include "core/log.h"
@@ -3112,11 +3114,11 @@ void DemoScenes::CreateSkyDemoScene() {
   weather_sys_->AddState(tune(overcast));
   weather::WeatherState storm;
   storm.name = "storm";
-  storm.coverage = 0.92f;
+  storm.coverage = 0.8f;
   storm.cloud_type = 0.95f;
   storm.precipitation = 0.85f;
   storm.storminess = 0.9f;
-  storm.density = 1.3f;
+  storm.density = 1.15f;
   storm.map_seed = 53u;
   storm.wind_speed = 22.0f;
   storm.turbulence = 1.4f;
@@ -3149,6 +3151,42 @@ void DemoScenes::EmitSky(f32 dt) {
   auto& rs = renderer_.settings();
   rs.cloudscape_controls = weather_sys_->cloudscape();
   rs.weather = weather_sys_->weather();
+
+  // Thunder (the game's role, like the strike scheduling itself): each new
+  // strike queues a procedural clap delayed by the speed of sound, so the
+  // flash leads the sound the way it does outdoors -- a 340 m strike rumbles
+  // in a second later.
+  const render::WeatherSettings& w = rs.weather;
+  bool new_strike = w.strike_age >= 0.0f &&
+                    (sky_prev_strike_age_ < 0.0f || w.strike_age < sky_prev_strike_age_);
+  sky_prev_strike_age_ = w.strike_age;
+  if (new_strike) {
+    Vec3 cam = camera_.position();
+    f32 dx = w.strike_pos.x - cam.x, dz = w.strike_pos.z - cam.z;
+    f32 dist = std::sqrt(dx * dx + dz * dz);
+    sky_thunder_.push_back({dist / 343.0f, w.strike_pos, w.strike_seed, w.strike_energy, dist});
+  }
+  for (u32 i = 0; i < sky_thunder_.size();) {
+    sky_thunder_[i].delay -= dt;
+    if (sky_thunder_[i].delay > 0.0f) {
+      ++i;
+      continue;
+    }
+    if (ctx_.audio && ctx_.audio->active()) {
+      const PendingThunder& th = sky_thunder_[i];
+      audio::PlayParams params;
+      params.gain = 0.9f + 0.5f * th.energy;
+      params.positional = true;
+      // The rumble comes from the channel and the deck above it, not from the
+      // ground scorch point; raising the source keeps it overhead-ish.
+      params.position = Vec3{th.pos.x, th.pos.y + 400.0f, th.pos.z};
+      params.atten = {200.0f, 9000.0f};
+      u32 rate = ctx_.audio->mixer().output_rate();
+      ctx_.audio->mixer().Play(audio::MakeThunder(rate, th.seed, th.energy, th.dist), params);
+    }
+    sky_thunder_[i] = sky_thunder_.back();
+    sky_thunder_.pop_back();
+  }
 }
 
 void DemoScenes::UpdateStorm(f32 dt) {

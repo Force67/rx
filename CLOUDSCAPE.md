@@ -96,3 +96,12 @@ fed the blended map coverage.
 - `--demo sky` + `RX_SKY_STATE=<n>` — reference scene, optionally pinned to
   one weather state (0 clear, 1 scattered, 2 overcast, 3 storm).
 - `RX_SKY_FAST=1` — short dwell/transitions for watching the scheduler work.
+
+## Thunder
+
+`audio::MakeThunder` (engine/audio/thunder_synth.h) renders a one-shot
+procedural clap: a band-passed crack transient into a brown-noise rumble that
+rolls through seeded echo bumps. Distance shapes it like air does — the crack
+dies within ~1 km and the rumble's lowpass closes down, so far strikes arrive
+as a deep muffled roll. The sky demo queues one per strike, delayed by the
+speed of sound and placed at the channel, so the flash always leads the sound.

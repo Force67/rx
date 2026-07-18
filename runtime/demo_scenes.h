@@ -165,6 +165,17 @@ class DemoScenes {
   std::unique_ptr<weather::WeatherSystem> weather_sys_;
   bool sky_scene_ = false;
   f32 sky_time_ = 0;  // scene clock, drives a slow synthetic day phase
+  // Thunder claps in flight: queued on each new strike, played after the
+  // speed-of-sound delay.
+  struct PendingThunder {
+    f32 delay;
+    Vec3 pos;
+    u32 seed;
+    f32 energy;
+    f32 dist;
+  };
+  base::Vector<PendingThunder> sky_thunder_;
+  f32 sky_prev_strike_age_ = -1.0f;
   // Weather demo thunderstorm scheduler state.
   bool storm_enabled_ = false;
   bool weather_scene_ = false;  // weather demo active: re-clamp its storm sun
