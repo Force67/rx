@@ -5908,6 +5908,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                        settings_.weather.strike_energy;
       }
       cf.steps = settings_.cloudscape_steps;
+      cf.transmittance_lut = environment_->transmittance_view();
+      cf.lut_sampler = environment_->sampler();
       cf.controls = settings_.cloudscape_controls;
       // The weather struct owns the live wind; keep the deck advecting with it
       // even when the app writes controls without touching the wind fields.

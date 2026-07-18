@@ -94,9 +94,28 @@ float3 Advect(float3 wp, float h) {
 
 // Cheap density: base texture, profile and coverage only. Used to skip empty
 // air and for the far light-cone taps; no erosion work.
+// Fraction of the shell thickness the virga skirt hangs below the base.
+static const float kVirgaDepth = 0.22;
+
+// Virga: rain shafts hanging under precipitating cells, evaporating before
+// (or at) the ground. Sampled for h < 0 -- vertically stretched noise gives
+// the streaked curtain look, fading toward the shaft's ragged bottom.
+float VirgaDensity(float3 p, float h, float4 weather) {
+  if (h < -kVirgaDepth) return 0.0;
+  float gate = saturate(weather.g * 1.7 - 0.18);
+  if (gate <= 0.0) return 0.0;
+  float3 wp = Advect(WorldUnwrap(p), 0.0);
+  // Compress y hard so the noise reads as vertical streaks, not blobs.
+  float3 sp = float3(wp.x, wp.y * 0.14, wp.z) * (kBaseScale * 2.4);
+  float n = base_noise.SampleLevel(base_sampler, sp, 0.0).g;
+  float fade = 1.0 + h / kVirgaDepth;  // 1 at the base, 0 at the skirt bottom
+  return gate * saturate(n - 0.42) * 1.6 * fade * fade * 0.10;
+}
+
 float DensityCheap(float3 p, float4 weather) {
   float h = HeightIn(p);
-  if (h <= 0.0 || h >= 1.0) return 0.0;
+  if (h < 0.0) return VirgaDensity(p, h, weather);
+  if (h >= 1.0) return 0.0;
   float coverage = weather.r;
   if (coverage <= 0.005) return 0.0;
   float3 sp = Advect(WorldUnwrap(p), h) * kBaseScale;
@@ -116,7 +135,8 @@ float DensityCheap(float3 p, float4 weather) {
 // detail flips (1-fbm) for the thin foggy underside.
 float DensityFull(float3 p, float4 weather) {
   float h = HeightIn(p);
-  if (h <= 0.0 || h >= 1.0) return 0.0;
+  if (h < 0.0) return VirgaDensity(p, h, weather);  // shafts need no erosion
+  if (h >= 1.0) return 0.0;
   float d = DensityCheap(p, weather);
   if (d <= 0.0) return 0.0;
   float3 ap = Advect(WorldUnwrap(p), h);
@@ -206,7 +226,11 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
 
   // Shell geometry in the planet frame; only the camera altitude matters.
   float3 p0 = float3(0.0, kGroundRadius + max(cam.y, 0.0) + 1.0, 0.0);
-  float Rb = kGroundRadius + pc.shape.x;
+  // The marched interval reaches below the cloud base by the virga depth so
+  // rain shafts under precipitating cells are inside it; the density function
+  // returns 0 there when nothing precipitates and the cheap stride skips it.
+  float Rb = kGroundRadius +
+             max(pc.shape.x - (pc.shape.y - pc.shape.x) * 0.22, 60.0);
   float Rt = kGroundRadius + pc.shape.y;
   float rc = length(p0);
   float t_start, t_end;

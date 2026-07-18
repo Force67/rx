@@ -10,6 +10,8 @@
 // composite so the nearest scattering medium correctly veils both the scene
 // and the distant deck.
 
+#include "atmosphere.hlsli"
+
 struct HazePush {
   column_major float4x4 inv_view_proj;
   float4 camera_pos;     // xyz eye (m), w time (s)
@@ -19,7 +21,7 @@ struct HazePush {
   float4 fog;            // x density 0..1, y falloff height (m), z ground (m), w anvil
   float4 map;            // xy map offset (m), z map extent (m), w churn 0..1
   uint2 size;
-  float2 _pad;
+  float2 shell;          // deck bottom / top altitudes (m), for god-ray occlusion
 };
 PUSH_CONSTANTS(HazePush, pc);
 
@@ -30,8 +32,41 @@ PUSH_CONSTANTS(HazePush, pc);
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] SamplerState base_sampler : register(s3, space0);
 [[vk::combinedImageSampler]] [[vk::binding(4, 0)]] Texture2D<float4> weather_map : register(t4, space0);
 [[vk::combinedImageSampler]] [[vk::binding(4, 0)]] SamplerState weather_sampler : register(s4, space0);
+[[vk::combinedImageSampler]] [[vk::binding(5, 0)]] Texture2D<float4> transmittance_lut : register(t5, space0);
+[[vk::combinedImageSampler]] [[vk::binding(5, 0)]] SamplerState transmittance_sampler : register(s5, space0);
 
-static const float kPi = 3.14159265359;
+static const float kBaseScale = 1.0 / 9600.0;  // matches cloudscape_march
+
+float Remap(float v, float l0, float h0, float l1, float h1) {
+  return l1 + (saturate((v - l0) / max(h0 - l0, 1e-5)) * (h1 - l1));
+}
+
+// Deck density for the god-ray occlusion taps, kept in lockstep with the
+// march's cheap sampler (profile + coverage remap, no erosion).
+float HeightProfile(float h, float cloud_type, float anvil) {
+  float stratus = Remap(h, 0.0, 0.06, 0.0, 1.0) * Remap(h, 0.18, 0.28, 1.0, 0.0);
+  float strato = Remap(h, 0.02, 0.16, 0.0, 1.0) * Remap(h, 0.45, 0.62, 1.0, 0.0);
+  float cumulus = Remap(h, 0.0, 0.12, 0.0, 1.0) * Remap(h, 0.68, 0.95, 1.0, 0.0);
+  float profile = cloud_type < 0.5 ? lerp(stratus, strato, cloud_type * 2.0)
+                                   : lerp(strato, cumulus, cloud_type * 2.0 - 1.0);
+  float top = Remap(h, 0.6, 0.95, 0.0, 1.0);
+  return lerp(profile, max(profile, top * 0.7), anvil * saturate(cloud_type * 2.0));
+}
+
+float DeckDensity(float3 wp) {
+  float h = (wp.y - pc.shell.x) / max(pc.shell.y - pc.shell.x, 1.0);
+  if (h <= 0.0 || h >= 1.0) return 0.0;
+  float4 weather = weather_map.SampleLevel(weather_sampler, (wp.xz + pc.map.xy) / pc.map.z, 0.0);
+  float coverage = weather.r;
+  if (coverage <= 0.005) return 0.0;
+  float2 drift = pc.wind.xy * (pc.wind.z * pc.camera_pos.w);
+  float3 sp = (wp + float3(drift.x, 0.0, drift.y)) * kBaseScale;
+  float4 nse = base_noise.SampleLevel(base_sampler, sp, 0.0);
+  float worley_fbm = nse.g * 0.625 + nse.b * 0.25 + nse.a * 0.125;
+  float base = Remap(nse.r, worley_fbm - 1.0, 1.0, 0.0, 1.0);
+  base *= HeightProfile(h, weather.b, pc.fog.w * weather.g);
+  return Remap(base, 1.0 - coverage, 1.0, 0.0, 1.0) * coverage;
+}
 
 float HG(float c, float g) {
   float g2 = g * g;
@@ -133,19 +168,55 @@ void main(uint3 id : SV_DispatchThreadID) {
     return;
   }
 
-  // In-scatter, sharing the deck's light model: forward-scattered sun (the
-  // hazy glare around a low sun comes free from the phase), the same
-  // sun-elevation ambient band that sets evening decks alight, dimmed where
-  // the deck overhead is thick, murked by menace, lifted by the flash.
+  // In-scatter, sharing the deck's light model: forward-scattered sun, the
+  // same sun-elevation ambient band that sets evening decks alight, murked by
+  // menace, lifted by the flash. The sun colour runs through the sky's own
+  // transmittance LUT, so the fog reddens with exactly the atmosphere the sky
+  // renders instead of an invented tint.
   float3 to_sun = normalize(-pc.sun_direction.xyz);
   float cos_a = dot(view, to_sun);
   float sun_elev = saturate(to_sun.y * 2.2 + 0.08);
   float3 sky_tint = lerp(float3(1.0, 0.42, 0.26), float3(0.50, 0.62, 0.88), sun_elev);
   float3 warm_sun = lerp(pc.sun_color.rgb, float3(1, 1, 1), 0.35);
+  float3 sun_lut = transmittance_lut
+                       .SampleLevel(transmittance_sampler,
+                                    TransmittanceUv(kGroundRadius + 500.0, to_sun.y), 0.0)
+                       .rgb;
   float deck_shade = 1.0 - 0.62 * weather.r * (0.55 + 0.45 * weather.g);
   float dark = pc.wind.w * saturate(weather.g * 1.8);
   float phase = lerp(HG(cos_a, 0.55), 1.0 / (4.0 * kPi), 0.35);
-  float3 sun_part = pc.sun_color.rgb * pc.sun_direction.w * phase * deck_shade;
+
+  // God rays: the sun term is marched so the deck's actual formations gate
+  // it per segment -- fog in a cloud gap glows, fog under a core sits in a
+  // shadow shaft. One cheap deck tap per step at the sun ray's mid-shell
+  // crossing carries the shape; the analytic transmittance stays exact.
+  float sun_amt = 0.0;
+  {
+    float march_len = min(dist, 9000.0);
+    float step = march_len / 8.0;
+    float local_trans = 1.0;
+    float shell_mid = lerp(pc.shell.x, pc.shell.y, 0.35);
+    float thick = (pc.shell.y - pc.shell.x);
+    float vis = 1.0;
+    [unroll]
+    for (int i = 0; i < 8; ++i) {
+      float3 pi = cam + view * ((float(i) + 0.5) * step);
+      float sig_i = sigma0 * exp(-max(pi.y - pc.fog.z, 0.0) / pc.fog.y) * banks * humidity;
+      if (to_sun.y > 0.06) {
+        float3 ps = pi + to_sun * ((shell_mid - pi.y) / to_sun.y);
+        vis = exp(-DeckDensity(ps) * thick * 0.02);
+      }
+      float seg = exp(-sig_i * step);
+      sun_amt += local_trans * vis * (1.0 - seg);
+      local_trans *= seg;
+    }
+    // The tail beyond the marched span keeps the last visibility estimate.
+    sun_amt += max(local_trans - trans, 0.0) * vis;
+    sun_amt /= max(1.0 - trans, 1e-4);  // normalized sun visibility 0..1
+  }
+
+  float3 sun_part =
+      pc.sun_color.rgb * sun_lut * pc.sun_direction.w * phase * sun_amt;
   float3 amb_part = sky_tint * warm_sun * pc.sun_direction.w * 0.055 * (0.6 + 0.4 * deck_shade);
   float3 inscatter = (sun_part + amb_part) * (1.0 - 0.75 * dark) *
                      (1.0 + pc.sun_color.w * 2.5);

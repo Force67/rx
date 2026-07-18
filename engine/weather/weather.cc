@@ -429,6 +429,10 @@ void WeatherSystem::Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01) {
   IntegrateSurface(dt, weather_.precipitation, weather_.snow);
   IntegrateLightning(dt, player_pos, weather_.precipitation, cloudscape_.anvil);
   IntegrateTornado(dt, player_pos, cloudscape_.anvil);
+  // The fog floor follows the local terrain (same sampler the lightning
+  // uses), so valley mist stays in the valley instead of pinning to sea
+  // level when the player climbs.
+  cloudscape_.fog_ground = ground_(player_pos.x, player_pos.z);
 }
 
 } // namespace rx::weather

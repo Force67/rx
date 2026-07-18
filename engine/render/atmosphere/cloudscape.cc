@@ -50,9 +50,9 @@ struct HazePush {
   f32 sun_color[4];     // rgb, w flash
   f32 wind[4];          // xy blow dir, z speed, w darkness
   f32 fog[4];           // density, height, ground, anvil
-  f32 map[4];           // xy offset, z extent
+  f32 map[4];           // xy offset, z extent, w churn
   u32 size[2];
-  f32 pad[2];
+  f32 shell[2]; // deck bottom / top, for god-ray occlusion
 };
 
 struct FunnelPush {
@@ -109,7 +109,8 @@ bool Cloudscape::Initialize(Device &device) {
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kCombinedTextureSampler},
-                          {4, BindingType::kCombinedTextureSampler}}}},
+                          {4, BindingType::kCombinedTextureSampler},
+                          {5, BindingType::kCombinedTextureSampler}}}},
       .push_constant_size = sizeof(HazePush),
       .debug_name = "cloudscape_haze",
   });
@@ -240,6 +241,8 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
         push.map[3] = c.fog_churn;
         push.size[0] = extent.width;
         push.size[1] = extent.height;
+        push.shell[0] = c.bottom;
+        push.shell[1] = c.top;
         ctx.cmd->BindPipeline(haze_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(out)),
@@ -248,7 +251,8 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
                 InGeneral(Bind::Combined(3, textures_.base_noise_view(),
                                          textures_.sampler())),
                 InGeneral(Bind::Combined(4, textures_.weather_map_view(),
-                                         textures_.sampler()))});
+                                         textures_.sampler())),
+                Bind::Combined(5, frame.transmittance_lut, frame.lut_sampler)});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

@@ -39,6 +39,10 @@ public:
     Vec3 strike_pos{0, 0, 0};
     bool strike_active = false;
     u32 steps = 48; // potential full samples toward the zenith
+    // The sky's transmittance LUT + its sampler (Environment), so the haze
+    // reddens with exactly the atmosphere the sky renders.
+    TextureView transmittance_lut{};
+    SamplerHandle lut_sampler{};
     CloudscapeControls controls;
   };
 

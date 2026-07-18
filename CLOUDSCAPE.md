@@ -60,6 +60,9 @@ Density is a pure function of position — no voxel storage. Per sample:
    noise, subtracted at the cloud boundary (silhouette survives, edges shred);
    the detail flips near the base for foggy undersides.
 6. **Wind**: the whole field advects downwind; vertical skew shears tops.
+7. **Virga**: below precipitating cells the marched interval extends under
+   the base, where vertically stretched noise hangs rain curtains that
+   evaporate before the ground.
 
 ## The renderer
 
@@ -127,7 +130,12 @@ post-rain mist that fades as the surface dries. `fog_churn` scrolls the banks'
 noise vertically so the layer roils like rising vapour (high over warm
 standing water, low for a settled morning layer). Composited after the cloud
 pass so the nearest medium correctly veils both the scene and the distant
-deck.
+deck. The sun in-scatter is marched with one cheap deck-density tap per
+segment, so fog in a cloud gap glows while fog under a core sits in a shadow
+shaft (god rays that track the actual formations), and the sun colour runs
+through the sky's transmittance LUT — the fog reddens with exactly the
+atmosphere the sky renders. The fog floor follows the terrain via the same
+ground sampler the lightning uses (`WeatherSystem::SetGroundHeight`).
 
 ## Knobs
 
