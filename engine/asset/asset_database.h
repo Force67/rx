@@ -2,6 +2,7 @@
 #define RX_ASSET_ASSET_DATABASE_H_
 
 #include <functional>
+#include <mutex>
 
 #include <base/containers/unordered_map.h>
 #include <base/memory/unique_pointer.h>
@@ -39,9 +40,12 @@ public:
   void RegisterMaterialConverter(base::String extension,
                                  MaterialConverter converter);
 
-  // Loads (converting on first use) or returns the cached asset. Synchronous
-  // for now, the streaming path will move conversion onto the job system.
-  // Failures cache as null so missing files are only probed once.
+  // Loads (converting on first use) or returns the cached asset. Failures
+  // cache as null so missing files are only probed once. Safe to call from
+  // multiple threads: the caches are mutex-guarded, and conversion runs
+  // outside the lock (converters recurse into LoadTexture/AddMaterial, and a
+  // background prefetch must not stall the main thread for a whole convert).
+  // Concurrent loads of the same key may both convert; the first insert wins.
   const Mesh *LoadMesh(std::string_view path);
   const Texture *LoadTexture(std::string_view path);
   const Material *LoadMaterial(std::string_view path);
@@ -67,9 +71,16 @@ public:
 
 private:
   Vfs &vfs_;
+  // Registration happens at startup before any load; the converter maps are
+  // read-only afterwards and stay unguarded.
   base::UnorderedMap<base::String, MeshConverter> mesh_converters_;
   base::UnorderedMap<base::String, TextureConverter> texture_converters_;
   base::UnorderedMap<base::String, MaterialConverter> material_converters_;
+  // Guards the three asset caches. Handed-out pointers stay valid: values are
+  // heap objects behind UniquePointers, stable across rehash. Invariant:
+  // background prefetch threads only ADD (LoadMesh/LoadTexture); Remove* and
+  // Replace* stay main-thread-only and must not race a convert on the same key.
+  mutable std::mutex mutex_;
   base::UnorderedMap<u64, base::UniquePointer<Mesh>> meshes_;
   base::UnorderedMap<u64, base::UniquePointer<Texture>> textures_;
   base::UnorderedMap<u64, base::UniquePointer<Material>> materials_;
