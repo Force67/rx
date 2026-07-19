@@ -4,7 +4,6 @@
 #include "rhi_bindings.hlsli"
 
 [[vk::binding(0, 0)]] ByteAddressBuffer grass_instances : register(t0, space0);
-[[vk::binding(1, 0)]] ByteAddressBuffer grass_interactions : register(t1, space0);
 [[vk::binding(2, 0)]] ByteAddressBuffer grass_types : register(t2, space0);
 
 struct GrassDrawPush {
@@ -15,7 +14,7 @@ struct GrassDrawPush {
   float4 sun_color_ambient;
   float4 wind;       // speed, yaw, gustiness, delta time
   float4 jitter_lod; // jitter xy, geometry lod start/end
-  uint4 control;     // interaction count, type count, vertices per blade
+  uint4 control;     // unused, type count, segments, far arena base
 };
 PUSH_CONSTANTS(GrassDrawPush, push);
 
@@ -33,11 +32,16 @@ struct GrassInstance {
   float3 surface_normal;
   uint type;
   float4 shape_lod;
+  float4 bend_history;  // current xz, previous xz
 };
 
 float3 SafeNormalize(float3 value, float3 fallback) {
   float length_squared = dot(value, value);
   return length_squared > 1e-8 ? value * rsqrt(length_squared) : fallback;
+}
+
+float2 UnpackHalf2(uint value) {
+  return float2(f16tof32(value & 0xffffu), f16tof32(value >> 16u));
 }
 
 GrassTypeData LoadGrassType(uint type_index) {
@@ -52,7 +56,9 @@ GrassTypeData LoadGrassType(uint type_index) {
 }
 
 GrassInstance LoadGrassInstance(uint instance_index) {
-  uint address = instance_index * 64u;
+  uint arena_index = push.control.z == 3u ? push.control.w - instance_index
+                                          : instance_index;
+  uint address = arena_index * 72u;
   GrassInstance instance;
   instance.position_height = asfloat(grass_instances.Load4(address + 0u));
   instance.facing_width_tint = asfloat(grass_instances.Load4(address + 16u));
@@ -60,6 +66,9 @@ GrassInstance LoadGrassInstance(uint instance_index) {
   instance.surface_normal = asfloat(surface_type.xyz);
   instance.type = surface_type.w;
   instance.shape_lod = asfloat(grass_instances.Load4(address + 48u));
+  uint2 bend_history = grass_instances.Load2(address + 64u);
+  instance.bend_history = float4(UnpackHalf2(bend_history.x),
+                                 UnpackHalf2(bend_history.y));
   return instance;
 }
 
@@ -76,7 +85,8 @@ float3 TangentDirection(float2 xz, float3 surface_normal) {
   return direction;
 }
 
-float3 GrassDisplacement(GrassInstance instance, GrassTypeData type, float time) {
+float3 GrassDisplacement(GrassInstance instance, GrassTypeData type, float time,
+                         float3 persistent_bend) {
   float3 up = SafeNormalize(instance.surface_normal, float3(0.0, 1.0, 0.0));
   float3 wind_world = float3(cos(push.wind.y), 0.0, sin(push.wind.y));
   wind_world -= up * dot(wind_world, up);
@@ -86,48 +96,35 @@ float3 GrassDisplacement(GrassInstance instance, GrassTypeData type, float time)
   float wave1 = sin(dot(xz, float2(-0.047, 0.123)) - time * 1.37 + wave0 * 0.8);
   float gust = saturate(0.55 + wave0 * 0.25 + wave1 * push.wind.z * 0.35);
   float wind_strength = saturate(push.wind.x / 18.0) * type.material.y *
-                        (0.08 + gust * 0.38);
-  float3 displacement = wind_world * wind_strength;
-
-  [loop]
-  for (uint i = 0u; i < push.control.x; ++i) {
-    uint address = i * 32u;
-    float4 position_radius = asfloat(grass_interactions.Load4(address + 0u));
-    float4 direction_strength = asfloat(grass_interactions.Load4(address + 16u));
-    if (!all(isfinite(position_radius)) || !all(isfinite(direction_strength))) continue;
-    float3 delta = instance.position_height.xyz - position_radius.xyz;
-    float distance_to_source = length(delta);
-    float influence = 1.0 - smoothstep(0.0, max(position_radius.w, 0.01),
-                                       distance_to_source);
-    if (influence <= 0.0) continue;
-    float3 source_direction = direction_strength.xyz;
-    float3 direction = source_direction - up * dot(source_direction, up);
-    if (dot(source_direction, source_direction) < 1e-5) {
-      direction = delta - up * dot(delta, up);
-    }
-    else if (dot(direction, direction) < 1e-5) continue;
-    direction = SafeNormalize(direction, TangentDirection(instance.facing_width_tint.xy, up));
-    displacement += direction * direction_strength.w * influence;
-  }
-  return displacement;
+                         (0.08 + gust * 0.38);
+  return wind_world * wind_strength + persistent_bend;
 }
 
 void EvaluateGrassCurve(GrassInstance instance, GrassTypeData type, float t,
-                        float time, out float3 center, out float3 tangent) {
+                         float time, float2 persistent_bend,
+                         out float3 center, out float3 tangent) {
   float3 base = instance.position_height.xyz;
   float height = instance.position_height.w;
   float3 up = SafeNormalize(instance.surface_normal, float3(0.0, 1.0, 0.0));
   float3 bend_direction = TangentDirection(instance.facing_width_tint.xy, up);
   float3 width_direction = SafeNormalize(cross(up, bend_direction),
-                                         TangentDirection(float2(0.0, 1.0), up));
-  float3 displacement = GrassDisplacement(instance, type, time) * height;
+                                          TangentDirection(float2(0.0, 1.0), up));
+  float3 projected_bend = float3(persistent_bend.x, 0.0, persistent_bend.y);
+  projected_bend -= up * dot(projected_bend, up);
+  float3 displacement =
+      GrassDisplacement(instance, type, time, projected_bend) * height;
+  float flatten = saturate(length(projected_bend));
+  float control1_height = lerp(1.0, 0.78, flatten);
+  float control2_height = lerp(1.0, 0.46, flatten);
+  float tip_height = lerp(1.0, 0.16, flatten);
   float3 tip_offset = bend_direction * (instance.shape_lod.x * height) + displacement;
   float3 p0 = base;
-  float3 p1 = base + up * (height * 0.34) + bend_direction * (instance.shape_lod.y * height * 0.12);
-  float3 p2 = base + up * (height * 0.72) + tip_offset * 0.48 +
+  float3 p1 = base + up * (height * 0.34 * control1_height) +
+              bend_direction * (instance.shape_lod.y * height * 0.12);
+  float3 p2 = base + up * (height * 0.72 * control2_height) + tip_offset * 0.48 +
               bend_direction * (instance.shape_lod.y * height * 0.28) +
               width_direction * (instance.shape_lod.z * height * 0.35);
-  float3 p3 = base + up * height + tip_offset +
+  float3 p3 = base + up * (height * tip_height) + tip_offset +
               width_direction * (instance.shape_lod.z * height);
   float omt = 1.0 - t;
   center = p0 * (omt * omt * omt) + p1 * (3.0 * omt * omt * t) +

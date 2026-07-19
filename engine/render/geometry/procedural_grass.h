@@ -2,6 +2,7 @@
 #define RX_RENDER_PROCEDURAL_GRASS_H_
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <span>
@@ -49,8 +50,9 @@ struct alignas(16) GrassSurfaceTriangle {
 };
 static_assert(sizeof(GrassSurfaceTriangle) == 64);
 
-// A bounded local displacement source. Zero direction pushes radially away
-// from position; otherwise direction is projected onto each growing surface.
+// A height-aware local footprint that stamps the persistent bend field. Zero
+// direction pushes radially away from position; otherwise its horizontal
+// direction is projected onto each growing surface.
 struct alignas(16) GrassInteraction {
   f32 position_radius[4] = {0, 0, 0, 1};
   f32 direction_strength[4] = {0, 0, 0, 1};
@@ -71,6 +73,7 @@ struct GrassGenerationSettings {
   f32 fade_start = 72.0f;
   f32 fade_end = 80.0f;
   f32 max_slope_cos = 0.55f;
+  f32 bend_recovery_time = 300.0f;
   u32 max_blades = 131072;
 };
 
@@ -96,6 +99,8 @@ inline GrassGenerationSettings SanitizeGrassSettings(GrassGenerationSettings set
   settings.fade_start = finite_or(settings.fade_start, defaults.fade_start);
   settings.fade_end = finite_or(settings.fade_end, defaults.fade_end);
   settings.max_slope_cos = finite_or(settings.max_slope_cos, defaults.max_slope_cos);
+  settings.bend_recovery_time =
+      finite_or(settings.bend_recovery_time, defaults.bend_recovery_time);
 
   settings.candidate_spacing = std::clamp(settings.candidate_spacing, 0.08f, 8.0f);
   settings.stream_tile_size = std::clamp(settings.stream_tile_size, 1.0f, 512.0f);
@@ -116,6 +121,7 @@ inline GrassGenerationSettings SanitizeGrassSettings(GrassGenerationSettings set
       std::clamp(settings.fade_end, settings.fade_start + settings.candidate_spacing,
                  settings.stream_radius);
   settings.max_slope_cos = std::clamp(settings.max_slope_cos, 0.0f, 1.0f);
+  settings.bend_recovery_time = std::clamp(settings.bend_recovery_time, 0.0f, 3600.0f);
   settings.max_blades = std::clamp(settings.max_blades, 1u, 262144u);
   return settings;
 }
@@ -152,6 +158,11 @@ struct GrassDomain {
   u32 surface_count = 0;
   u32 seed = 1;
   GrassGenerationSettings settings;
+  // Zero keeps the corresponding stream volatile. Nonzero revisions let each
+  // frame slot reuse an unchanged upload; increment after mutating contents.
+  u64 sample_revision = 0;
+  u64 type_revision = 0;
+  u64 surface_revision = 0;
 };
 
 // Compute-generated cubic-Bezier blade field. It owns fixed-capacity per-frame
@@ -180,9 +191,15 @@ class ProceduralGrass {
   static constexpr u32 kMaxTypes = 8;
   static constexpr u32 kMaxInteractions = 16;
   static constexpr u32 kMaxSurfaces = 2048;
+  // Candidate cap for one terrain ring or a surface-only generation phase.
   static constexpr u32 kMaxCandidates = 1u << 20;
   static constexpr u32 kMaxBlades = 1u << 18;
-  static constexpr u32 kVerticesPerBlade = 42;  // seven cubic-curve segments
+  static constexpr u32 kBendResolution = 512;
+  static constexpr u32 kInstanceStride = 72;
+  static constexpr u32 kNearSegments = 7;
+  static constexpr u32 kFarSegments = 3;
+  static constexpr u32 kVerticesPerBlade = kNearSegments * 6;
+  static constexpr u32 kFarVerticesPerBlade = kFarSegments * 6;
 
   bool Initialize(Device& device,
                   Format scene_color,
@@ -191,7 +208,9 @@ class ProceduralGrass {
                   Format skin_diffuse,
                   Format depth);
   void Destroy(Device& device);
-  bool available() const { return static_cast<bool>(generate_pipeline_); }
+  bool available() const {
+    return static_cast<bool>(bend_pipeline_) && static_cast<bool>(generate_pipeline_);
+  }
   bool EnsureSampleCount(Device& device, u32 samples);
 
   bool Prepare(const GrassDomain& domain,
@@ -216,8 +235,17 @@ class ProceduralGrass {
     f32 density_lod[4];
     f32 geometry_fade[4];
     u32 control[4];
+    f32 bend_field[4];
   };
-  static_assert(sizeof(GenerationPush) == 208);
+  static_assert(sizeof(GenerationPush) == 224);
+
+  struct alignas(16) BendPush {
+    f32 field[4];
+    f32 prev_field[4];
+    f32 params[4];
+    f32 height[4];
+  };
+  static_assert(sizeof(BendPush) == 64);
 
   struct alignas(16) DrawPush {
     Mat4 view_proj;
@@ -231,6 +259,36 @@ class ProceduralGrass {
   };
   static_assert(sizeof(DrawPush) == 224);
 
+  struct FieldUploadState {
+    const GrassFieldSample* source = nullptr;
+    u64 revision = 0;
+    u32 width = 0;
+    u32 height = 0;
+    bool valid = false;
+  };
+
+  struct TypeUploadState {
+    const GrassType* source = nullptr;
+    u64 revision = 0;
+    u32 count = 0;
+    bool valid = false;
+  };
+
+  struct SurfaceUploadState {
+    const GrassSurfaceTriangle* source = nullptr;
+    u64 revision = 0;
+    u32 source_count = 0;
+    u32 spacing_bits = 0;
+    u32 reserve_limit = 0;
+    u32 type_count = 0;
+    u32 copied_surfaces = 0;
+    u32 surface_candidates = 0;
+    bool source_valid = false;
+    bool packed_valid = false;
+  };
+
+  static constexpr u32 kMaxGenerationPhases = 6;
+
   struct Slot {
     GpuBuffer field;
     GpuBuffer types;
@@ -239,8 +297,20 @@ class ProceduralGrass {
     GpuBuffer instances;
     GpuBuffer args;
     GpuBuffer counters;
-    GenerationPush generation{};
+    BendPush bend{};
+    u32 bend_write_index = 0;
+    u32 bend_domain_seed = 0;
+    const GrassFieldSample* bend_sample_source = nullptr;
+    const GrassSurfaceTriangle* bend_surface_source = nullptr;
+    f32 bend_update_time = 0.0f;
+    f32 bend_max_strength = 0.0f;
+    bool bend_active = false;
+    std::array<GenerationPush, kMaxGenerationPhases> generation{};
+    u32 generation_count = 0;
     DrawPush draw{};
+    FieldUploadState field_upload;
+    TypeUploadState type_upload;
+    SurfaceUploadState surface_upload;
     bool active = false;
   };
 
@@ -258,8 +328,24 @@ class ProceduralGrass {
   bool allocation_failed_ = false;
   u32 failed_sample_mask_ = 0;
   PipelineHandle generate_pipeline_;
+  PipelineHandle bend_pipeline_;
   PipelineHandle prepass_pipelines_[4] = {};
   PipelineHandle scene_pipelines_[4] = {};
+  GpuImage bend_fields_[2];
+  GpuImage bend_metadata_[2];
+  GpuImage bend_confidence_[2];
+  SamplerHandle bend_sampler_;
+  f32 bend_origin_[2] = {};
+  f32 bend_extent_ = 1.0f;
+  f32 bend_height_origin_ = 0.0f;
+  f32 bend_last_update_time_ = 0.0f;
+  f32 bend_max_strength_ = 0.0f;
+  u32 bend_write_index_ = 0;
+  u32 bend_domain_seed_ = 0;
+  const GrassFieldSample* bend_sample_source_ = nullptr;
+  const GrassSurfaceTriangle* bend_surface_source_ = nullptr;
+  bool bend_history_valid_ = false;
+  bool bend_history_active_ = false;
   Slot slots_[kFramesInFlight];
 };
 

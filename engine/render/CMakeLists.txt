@@ -207,6 +207,7 @@ set(RX_RENDER_SHADERS
   shaders/geometry/particle.ps.hlsl
   shaders/geometry/particle_tex.ps.hlsl
   shaders/geometry/particle_sim.cs.hlsl
+  shaders/geometry/procedural_grass_bend.cs.hlsl
   shaders/geometry/procedural_grass_generate.cs.hlsl
   shaders/geometry/procedural_grass.vs.hlsl
   shaders/geometry/procedural_grass_prepass.ps.hlsl

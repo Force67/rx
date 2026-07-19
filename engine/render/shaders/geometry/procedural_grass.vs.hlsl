@@ -1,8 +1,7 @@
 #include "procedural_grass.hlsli"
 
 // Triangle-list corners for one strip segment: two triangles sharing their
-// centerline rows. Seven segments always draw; far vertices collapse onto the
-// same cubic curve's four-sample layout before rasterization.
+// centerline rows. Near and far instances use separate indirect draws.
 static const uint kUpper[6] = {0u, 1u, 0u, 0u, 1u, 1u};
 static const float kSide[6] = {-1.0, -1.0, 1.0, 1.0, -1.0, 1.0};
 
@@ -12,12 +11,11 @@ GrassVsOut main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) 
   uint segment = vertex_id / 6u;
   uint corner = vertex_id % 6u;
   uint row = segment + kUpper[corner];
-  float t_high = float(row) / 7.0;
-  float t_low = round(t_high * 3.0) / 3.0;
-  float t = lerp(t_high, t_low, smoothstep(0.0, 1.0, instance.shape_lod.w));
+  float t = float(row) / float(push.control.z);
 
   float3 center, tangent;
-  EvaluateGrassCurve(instance, type, t, push.camera_time.w, center, tangent);
+  EvaluateGrassCurve(instance, type, t, push.camera_time.w,
+                     instance.bend_history.xy, center, tangent);
   float3 up = SafeNormalize(instance.surface_normal, float3(0.0, 1.0, 0.0));
   tangent = SafeNormalize(tangent, up);
   float3 plane_normal = TangentDirection(instance.facing_width_tint.xy, up);
@@ -42,7 +40,8 @@ GrassVsOut main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) 
 
   float3 previous_center, previous_tangent;
   EvaluateGrassCurve(instance, type, t, push.camera_time.w - push.wind.w,
-                     previous_center, previous_tangent);
+                     instance.bend_history.zw, previous_center,
+                     previous_tangent);
   previous_tangent = SafeNormalize(previous_tangent, up);
   float3 previous_width = SafeNormalize(cross(previous_tangent, plane_normal), width_direction);
   float3 previous_world = previous_center + previous_width * (kSide[corner] * half_width);

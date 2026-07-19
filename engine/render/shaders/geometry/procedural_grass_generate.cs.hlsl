@@ -1,18 +1,19 @@
 #include "rhi_bindings.hlsli"
 
-// One dispatch serves reset, candidate generation and indirect-finalize phases.
-// Keeping them separate avoids cross-workgroup races on the append counter.
+// One pipeline serves reset, ring/surface generation and indirect-finalize
+// phases. Dispatch boundaries order near-to-far capacity allocation.
 struct PushData {
   column_major float4x4 view_proj;
   float4 field_origin_extent;  // origin xz, extent xz
   uint4 field;                 // width, height, type count, seed
   float4 camera_stream;        // camera xyz, active radius
-  float4 placement;            // candidate spacing, stream tile size
-  int4 grid;                   // absolute min cell xz, active cell counts xz
-  uint4 counts;                // terrain, total candidates, surfaces, blade cap
+  float4 placement;            // spacing, ring inner/outer, refinement start
+  int4 grid;                   // absolute min fine cell xz, coarse grid size xz
+  uint4 counts;                // candidates, surfaces, logical cap, arena cap
   float4 density_lod;          // start, end, far density, minimum up normal
   float4 geometry_fade;        // geometry start/end, fade start/end
-  uint4 control;               // phase
+  uint4 control;               // phase, lattice stride, next stride
+  float4 bend_field;           // min-corner xz, height origin, inverse extent
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -22,6 +23,18 @@ PUSH_CONSTANTS(PushData, push);
 [[vk::binding(3, 0)]] RWByteAddressBuffer instances : register(u3, space0);
 [[vk::binding(4, 0)]] RWByteAddressBuffer draw_args : register(u4, space0);
 [[vk::binding(5, 0)]] RWByteAddressBuffer counters : register(u5, space0);
+[[vk::combinedImageSampler]] [[vk::binding(6, 0)]]
+Texture2D<float4> bend_history : register(t6, space0);
+[[vk::combinedImageSampler]] [[vk::binding(6, 0)]]
+SamplerState bend_history_sampler : register(s6, space0);
+[[vk::combinedImageSampler]] [[vk::binding(7, 0)]]
+Texture2D<float4> bend_metadata : register(t7, space0);
+[[vk::combinedImageSampler]] [[vk::binding(7, 0)]]
+SamplerState bend_metadata_sampler : register(s7, space0);
+[[vk::combinedImageSampler]] [[vk::binding(8, 0)]]
+Texture2D<float2> bend_confidence : register(t8, space0);
+[[vk::combinedImageSampler]] [[vk::binding(8, 0)]]
+SamplerState bend_confidence_sampler : register(s8, space0);
 
 struct GrassTypeData {
   float4 base_color;
@@ -30,6 +43,25 @@ struct GrassTypeData {
   float4 shape;
   float4 material;
 };
+
+struct PackedGrassInstance {
+  uint4 block0;
+  uint4 block1;
+  uint4 block2;
+  uint4 block3;
+  uint2 block4;
+};
+
+groupshared PackedGrassInstance staged_instances[64];
+groupshared uint staged_far_lod[64];
+groupshared uint staged_rank[64];
+groupshared uint live_count;
+groupshared uint accepted_count;
+groupshared uint near_count;
+groupshared uint far_count;
+groupshared uint near_base;
+groupshared uint far_base;
+groupshared uint capacity_open;
 
 uint Hash(uint x) {
   x ^= x >> 16u;
@@ -45,6 +77,10 @@ uint HashCell(int2 p, uint seed) {
 }
 
 float Random01(uint value) { return float(Hash(value) >> 8u) * (1.0 / 16777216.0); }
+
+uint PackHalf2(float2 value) {
+  return f32tof16(value.x) | (f32tof16(value.y) << 16u);
+}
 
 float2 Random2(int2 p, uint seed) {
   uint h = HashCell(p, seed);
@@ -65,19 +101,6 @@ GrassTypeData LoadType(uint type_index) {
 uint4 LoadField(int2 p) {
   p = clamp(p, int2(0, 0), int2(push.field.xy) - 1);
   return field_data.Load4((uint(p.y) * push.field.x + uint(p.x)) * 16u);
-}
-
-float HeightAt(float2 world_xz) {
-  float2 uv = (world_xz - push.field_origin_extent.xy) /
-              max(push.field_origin_extent.zw, float2(1e-4, 1e-4));
-  float2 texel = saturate(uv) * float2(push.field.xy - 1u);
-  int2 p = int2(floor(texel));
-  float2 f = frac(texel);
-  float h00 = asfloat(LoadField(p).x);
-  float h10 = asfloat(LoadField(p + int2(1, 0)).x);
-  float h01 = asfloat(LoadField(p + int2(0, 1)).x);
-  float h11 = asfloat(LoadField(p + int2(1, 1)).x);
-  return lerp(lerp(h00, h10, f.x), lerp(h01, h11, f.x), f.y);
 }
 
 bool SampleHeightfield(float2 world_xz, uint seed, out float3 position,
@@ -118,13 +141,11 @@ bool SampleHeightfield(float2 world_xz, uint seed, out float3 position,
 
   float2 meters_per_texel = push.field_origin_extent.zw /
                             max(float2(push.field.xy - 1u), float2(1.0, 1.0));
-  float hx0 = HeightAt(world_xz - float2(meters_per_texel.x, 0.0));
-  float hx1 = HeightAt(world_xz + float2(meters_per_texel.x, 0.0));
-  float hz0 = HeightAt(world_xz - float2(0.0, meters_per_texel.y));
-  float hz1 = HeightAt(world_xz + float2(0.0, meters_per_texel.y));
-  normal = normalize(float3((hx0 - hx1) / max(meters_per_texel.x, 1e-4),
-                            2.0,
-                            (hz0 - hz1) / max(meters_per_texel.y, 1e-4)));
+  float dhdx = lerp(heights.y - heights.x, heights.w - heights.z, f.y) /
+               max(meters_per_texel.x, 1e-4);
+  float dhdz = lerp(heights.z - heights.x, heights.w - heights.y, f.x) /
+               max(meters_per_texel.y, 1e-4);
+  normal = normalize(float3(-dhdx, 1.0, -dhdz));
   return all(isfinite(position)) && all(isfinite(normal)) &&
          isfinite(density) && isfinite(growth);
 }
@@ -141,11 +162,19 @@ bool SampleSurface(uint surface_candidate, uint seed, out float3 position,
   uint triangle_index = 0xffffffffu;
   uint local_candidate = 0u;
   uint4 meta = 0u;
+  uint lo = 0u;
+  uint hi = push.counts.y;
   [loop]
-  for (uint i = 0u; i < push.counts.z; ++i) {
-    meta = surface_data.Load4(i * 64u + 48u);
-    if (surface_candidate >= meta.x && surface_candidate < meta.x + meta.y) {
-      triangle_index = i;
+  for (uint step = 0u; step < 12u && lo < hi; ++step) {
+    uint mid = lo + (hi - lo) / 2u;
+    uint4 candidate_meta = surface_data.Load4(mid * 64u + 48u);
+    if (surface_candidate < candidate_meta.x) {
+      hi = mid;
+    } else if (surface_candidate >= candidate_meta.x + candidate_meta.y) {
+      lo = mid + 1u;
+    } else {
+      triangle_index = mid;
+      meta = candidate_meta;
       local_candidate = surface_candidate - meta.x;
       break;
     }
@@ -192,41 +221,52 @@ void FindClump(float2 world_xz, float scale, uint seed, out float2 feature,
   }
 }
 
-void Generate(uint candidate) {
+bool Generate(uint candidate, out PackedGrassInstance packed, out uint far_lod) {
+  packed = (PackedGrassInstance)0;
+  far_lod = 0u;
   float3 position, normal;
   float density, growth;
   uint type_index;
   uint stable_seed = Hash(candidate ^ push.field.w);
-  if (candidate < push.counts.x) {
+  if (push.control.x == 1u) {
     uint gx = candidate % uint(push.grid.z);
     uint gz = candidate / uint(push.grid.z);
-    int2 cell = push.grid.xy + int2(gx, gz);
+    int2 cell = push.grid.xy + int2(gx, gz) * int(push.control.y);
     stable_seed = HashCell(cell, push.field.w);
     float2 jitter = (float2(Random01(stable_seed),
                             Random01(stable_seed ^ 0x68bc21ebu)) - 0.5) * 0.86;
     float2 world_xz = (float2(cell) + 0.5 + jitter) * push.placement.x;
+    float ring_distance = distance(world_xz, push.camera_stream.xz);
+    if (ring_distance < push.placement.y || ring_distance >= push.placement.z) return false;
+    if (push.control.z > push.control.y && ring_distance >= push.placement.w) {
+      int next_stride = int(push.control.z);
+      if (cell.x % next_stride == 0 && cell.y % next_stride == 0) return false;
+      float refinement = 1.0 - smoothstep(push.placement.w, push.placement.z,
+                                          ring_distance);
+      if (Random01(stable_seed ^ 0x42f0e1ebu) > refinement) return false;
+    }
     if (!SampleHeightfield(world_xz, stable_seed, position, normal, density,
-                           growth, type_index)) return;
-  } else {
-    if (!SampleSurface(candidate - push.counts.x, push.field.w, position, normal,
-                       density, growth, type_index, stable_seed)) return;
-  }
+                           growth, type_index)) return false;
+  } else if (push.control.x == 2u) {
+    if (!SampleSurface(candidate, push.field.w, position, normal,
+                       density, growth, type_index, stable_seed)) return false;
+  } else return false;
 
-  if (growth <= 0.0 || density <= 0.0 || normal.y < push.density_lod.w) return;
+  if (growth <= 0.0 || density <= 0.0 || normal.y < push.density_lod.w) return false;
   float distance_to_eye = distance(position, push.camera_stream.xyz);
-  if (distance_to_eye > min(push.camera_stream.w, push.geometry_fade.w)) return;
+  if (distance_to_eye > min(push.camera_stream.w, push.geometry_fade.w)) return false;
 
   float density_lod = smoothstep(push.density_lod.x, push.density_lod.y,
                                  distance_to_eye);
   density *= lerp(1.0, push.density_lod.z, density_lod);
-  if (Random01(stable_seed ^ 0x1b56c4e9u) > density) return;
+  if (Random01(stable_seed ^ 0x1b56c4e9u) > density) return false;
 
   // Conservative point-frustum rejection. The margin retains tall blades whose
   // roots are just outside an edge; exact shape expansion happens in the VS.
   float4 clip = mul(push.view_proj, float4(position, 1.0));
   float margin = max(clip.w * 0.08, 0.2);
   if (clip.w <= 0.0 || abs(clip.x) > clip.w + margin ||
-      abs(clip.y) > clip.w + margin || clip.z < -margin || clip.z > clip.w + margin) return;
+      abs(clip.y) > clip.w + margin || clip.z < -margin || clip.z > clip.w + margin) return false;
 
   GrassTypeData type = LoadType(type_index);
   float2 clump_feature;
@@ -248,43 +288,139 @@ void Generate(uint candidate) {
   float tint = 1.0 + (Random01(clump_seed ^ 0x510e527fu) * 2.0 - 1.0) *
                           type.base_color.a;
   if (!all(isfinite(float4(height, width, tilt, bend))) ||
-      !all(isfinite(float4(side, tint, type.material.y, type.material.z)))) return;
+      !all(isfinite(float4(side, tint, type.material.y, type.material.z)))) return false;
   float geometry_lod = smoothstep(push.geometry_fade.x, push.geometry_fade.y,
                                   distance_to_eye);
   float visibility = 1.0 - smoothstep(push.geometry_fade.z,
                                       push.geometry_fade.w, distance_to_eye);
   height *= visibility;
   width *= max(visibility, 0.12);
-  if (height <= 0.01) return;
+  if (height <= 0.01) return false;
 
-  uint slot;
-  counters.InterlockedAdd(4u, 1u, slot);
-  if (slot >= push.counts.w) return;
-  uint address = slot * 64u;
-  instances.Store4(address + 0u, asuint(float4(position, height)));
-  instances.Store4(address + 16u, asuint(float4(facing, width, tint)));
-  instances.Store4(address + 32u,
-                   uint4(asuint(normal.x), asuint(normal.y), asuint(normal.z), type_index));
-  instances.Store4(address + 48u, asuint(float4(tilt, bend, side, geometry_lod)));
+  far_lod = Random01(stable_seed ^ 0x6c8e9cf5u) < geometry_lod ? 1u : 0u;
+  float4 bend_history_value = 0.0;
+  float2 bend_uv = (position.xz - push.bend_field.xy) * push.bend_field.w;
+  if (push.bend_field.w > 0.0 &&
+      all(bend_uv >= 0.0) && all(bend_uv <= 1.0)) {
+    bend_history_value = bend_history.SampleLevel(bend_history_sampler, bend_uv, 0.0);
+    float4 metadata = bend_metadata.SampleLevel(bend_metadata_sampler, bend_uv, 0.0);
+    float2 confidence =
+        bend_confidence.SampleLevel(bend_confidence_sampler, bend_uv, 0.0);
+    if (!all(isfinite(bend_history_value)) || !all(isfinite(metadata)) ||
+        !all(isfinite(confidence))) {
+      bend_history_value = 0.0;
+    } else {
+      float current_confidence = confidence.x;
+      float previous_confidence = confidence.y;
+      if (current_confidence > 1e-4) {
+        float current_height =
+            push.bend_field.z + metadata.x / current_confidence;
+        float current_radius = metadata.y / current_confidence;
+        float current_vertical = 1.0 - smoothstep(
+            current_radius * 0.15, max(current_radius, 0.01),
+            abs(position.y - current_height));
+        bend_history_value.xy *= current_vertical;
+      } else bend_history_value.xy = 0.0;
+      if (previous_confidence > 1e-4) {
+        float previous_height =
+            push.bend_field.z + metadata.z / previous_confidence;
+        float previous_radius = metadata.w / previous_confidence;
+        float previous_vertical = 1.0 - smoothstep(
+            previous_radius * 0.15, max(previous_radius, 0.01),
+            abs(position.y - previous_height));
+        bend_history_value.zw *= previous_vertical;
+      } else bend_history_value.zw = 0.0;
+    }
+  }
+  packed.block0 = asuint(float4(position, height));
+  packed.block1 = asuint(float4(facing, width, tint));
+  packed.block2 = uint4(asuint(normal.x), asuint(normal.y), asuint(normal.z), type_index);
+  packed.block3 = asuint(float4(tilt, bend, side, geometry_lod));
+  packed.block4 = uint2(PackHalf2(bend_history_value.xy),
+                        PackHalf2(bend_history_value.zw));
+  return true;
 }
 
 [numthreads(64, 1, 1)]
-void main(uint3 dispatch_id : SV_DispatchThreadID) {
+void main(uint3 dispatch_id : SV_DispatchThreadID, uint group_index : SV_GroupIndex) {
   if (push.control.x == 0u) {
     if (dispatch_id.x == 0u) {
-      counters.Store(0u, 0u);
-      counters.Store(4u, 0u);
+      counters.Store4(0u, uint4(0u, 0u, 0u, 0u));
+      counters.Store4(16u, uint4(0u, 0u, 0u, 0u));
       draw_args.Store4(0u, uint4(0u, 0u, 0u, 0u));
+      draw_args.Store4(16u, uint4(0u, 0u, 0u, 0u));
     }
     return;
   }
-  if (push.control.x == 1u) {
-    if (dispatch_id.x < push.counts.y) Generate(dispatch_id.x);
+  if (push.control.x == 3u) {
+    if (dispatch_id.x == 0u) {
+      uint4 count = counters.Load4(0u);
+      uint near_blades = min(count.y, push.counts.z);
+      uint far_blades = min(count.z, push.counts.z - near_blades);
+      draw_args.Store4(0u, uint4(42u, near_blades, 0u, 0u));
+      draw_args.Store4(16u, uint4(18u, far_blades, 0u, 0u));
+      counters.Store(16u, near_blades > 0u ? 1u : 0u);
+      counters.Store(20u, far_blades > 0u ? 1u : 0u);
+    }
     return;
   }
-  if (dispatch_id.x == 0u) {
-    uint blade_count = min(counters.Load(4u), push.counts.w);
-    draw_args.Store4(0u, uint4(42u, blade_count, 0u, 0u));
-    counters.Store(0u, blade_count > 0u ? 1u : 0u);
+
+  if (group_index == 0u) {
+    live_count = 0u;
+    uint reserved;
+    counters.InterlockedAdd(0u, 0u, reserved);
+    capacity_open = reserved < push.counts.z ? 1u : 0u;
+  }
+  GroupMemoryBarrierWithGroupSync();
+  if (capacity_open == 0u) return;
+
+  PackedGrassInstance packed;
+  uint far_lod;
+  bool live = dispatch_id.x < push.counts.x &&
+              Generate(dispatch_id.x, packed, far_lod);
+  if (live) {
+    uint local_slot;
+    InterlockedAdd(live_count, 1u, local_slot);
+    staged_instances[local_slot] = packed;
+    staged_far_lod[local_slot] = far_lod;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  if (group_index == 0u) {
+    uint total_base;
+    counters.InterlockedAdd(0u, live_count, total_base);
+    accepted_count = total_base < push.counts.z
+                         ? min(live_count, push.counts.z - total_base)
+                         : 0u;
+    near_count = 0u;
+    far_count = 0u;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  if (group_index < accepted_count) {
+    uint rank;
+    if (staged_far_lod[group_index] != 0u) InterlockedAdd(far_count, 1u, rank);
+    else InterlockedAdd(near_count, 1u, rank);
+    staged_rank[group_index] = rank;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  if (group_index == 0u) {
+    counters.InterlockedAdd(4u, near_count, near_base);
+    counters.InterlockedAdd(8u, far_count, far_base);
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  if (group_index < accepted_count) {
+    PackedGrassInstance instance = staged_instances[group_index];
+    uint slot = staged_far_lod[group_index] != 0u
+                    ? push.counts.w - 1u - (far_base + staged_rank[group_index])
+                    : near_base + staged_rank[group_index];
+    uint address = slot * 72u;
+    instances.Store4(address + 0u, instance.block0);
+    instances.Store4(address + 16u, instance.block1);
+    instances.Store4(address + 32u, instance.block2);
+    instances.Store4(address + 48u, instance.block3);
+    instances.Store2(address + 64u, instance.block4);
   }
 }

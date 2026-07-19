@@ -46,6 +46,7 @@ int main() {
   unsafe.fade_start = 2.0f;
   unsafe.fade_end = 1.0f;
   unsafe.max_slope_cos = -1.0f;
+  unsafe.bend_recovery_time = -4.0f;
   unsafe.max_blades = 0;
   const GrassGenerationSettings safe = SanitizeGrassSettings(unsafe);
   Check(Near(safe.candidate_spacing, 0.08f), "candidate spacing has a safe minimum");
@@ -59,17 +60,21 @@ int main() {
         "geometry LOD range remains ordered");
   Check(safe.fade_end > safe.fade_start, "fade range remains ordered");
   Check(Near(safe.max_slope_cos, 0.0f), "slope threshold is normalized");
+  Check(Near(safe.bend_recovery_time, 0.0f), "bend recovery can be disabled");
   Check(safe.max_blades == 1, "blade capacity has a nonzero minimum");
 
   GrassGenerationSettings non_finite;
   non_finite.candidate_spacing = std::numeric_limits<rx::f32>::quiet_NaN();
   non_finite.stream_radius = std::numeric_limits<rx::f32>::infinity();
   non_finite.fade_end = std::numeric_limits<rx::f32>::quiet_NaN();
+  non_finite.bend_recovery_time = std::numeric_limits<rx::f32>::infinity();
   const GrassGenerationSettings finite = SanitizeGrassSettings(non_finite);
   Check(std::isfinite(finite.candidate_spacing), "non-finite spacing uses a default");
   Check(std::isfinite(finite.stream_radius), "non-finite radius uses a default");
   Check(finite.fade_end <= finite.stream_radius,
         "fade completes inside the stream radius");
+  Check(std::isfinite(finite.bend_recovery_time),
+        "non-finite bend recovery uses a default");
 
   GrassSurfaceTriangle triangle;
   SetPoint(triangle.p0, 0.0f, 0.0f, 0.0f);
@@ -97,6 +102,9 @@ int main() {
   static_assert(ProceduralGrass::kMaxCandidates == 1u << 20);
   static_assert(ProceduralGrass::kMaxBlades == 1u << 18);
   static_assert(ProceduralGrass::kVerticesPerBlade == 42);
+  static_assert(ProceduralGrass::kFarVerticesPerBlade == 18);
+  static_assert(ProceduralGrass::kBendResolution == 512);
+  static_assert(ProceduralGrass::kInstanceStride == 72);
 
   if (failures != 0)
     return 1;

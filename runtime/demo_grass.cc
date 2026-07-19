@@ -140,6 +140,8 @@ void GrassDemo::BuildField() {
   domain_.types = types_.data();
   domain_.type_count = static_cast<u32>(types_.size());
   domain_.seed = 0x7a6b5c4du;
+  domain_.sample_revision = 1;
+  domain_.type_revision = 1;
   domain_.settings.candidate_spacing = std::clamp(GrassSpacing.get(), 0.08f, 1.0f);
   domain_.settings.stream_tile_size = 18.0f;
   domain_.settings.stream_radius = 84.0f;
@@ -283,6 +285,7 @@ void GrassDemo::BuildGrowableStone() {
   second.surface_id = 0x51a8u;
   domain_.surfaces = surfaces_.data();
   domain_.surface_count = static_cast<u32>(surfaces_.size());
+  domain_.surface_revision = 1;
 }
 
 void GrassDemo::Create() {
