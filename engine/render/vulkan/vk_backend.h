@@ -316,6 +316,8 @@ class VulkanDevice final : public Device {
   bool GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, u64* out) override;
 
   void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
+  void BeginUploadBatch() override;
+  void FlushUploadBatch() override;
   bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
                      size_t out_size) override;
   CommandList* BeginFrame(u32 slot) override;
@@ -447,6 +449,20 @@ class VulkanDevice final : public Device {
   VkFence immediate_fence_ = VK_NULL_HANDLE;
   VkDescriptorPool immediate_descriptor_pool_ = VK_NULL_HANDLE;
   FrameRing frames_[kMaxFramesInFlight];
+
+  // Coalesced upload batch (see BeginUploadBatch). While upload_batch_depth_ > 0,
+  // CreateBufferWithData records its copy into upload_batch_cmd_ and parks the
+  // staging buffer in upload_batch_stagings_ instead of doing its own blocking
+  // ImmediateSubmit; the outermost FlushUploadBatch submits them all at once.
+  // Main-thread only, like every other immediate_* member.
+  u32 upload_batch_depth_ = 0;
+  VkCommandBuffer upload_batch_cmd_ = VK_NULL_HANDLE;
+  std::unique_ptr<VulkanCommandList> upload_batch_list_;
+  base::Vector<GpuBuffer> upload_batch_stagings_;
+  // Lazily begins the batch command buffer on the first copy; submits+waits any
+  // pending batch copies (leaving the batch open) before dependent GPU work.
+  VulkanCommandList& EnsureUploadBatchCmd();
+  void SubmitUploadBatchIfPending();
 
   // Frame-safe deferred destruction. A resource retired during frame slot S is
   // parked in graveyard_[S] and freed at the next BeginFrame(S), whose fence

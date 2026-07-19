@@ -263,6 +263,21 @@ class Device {
   // finished. For uploads and one-off transitions, not the frame path.
   virtual void ImmediateSubmit(const std::function<void(CommandList&)>& record) = 0;
 
+  // --- coalesced uploads ---
+  // Opens/closes a transfer batch: while open, CreateBufferWithData records its
+  // staging copy into one shared command buffer and defers its submit, instead
+  // of doing a blocking ImmediateSubmit per buffer. FlushUploadBatch submits the
+  // accumulated copies once and blocks until they finish; the batch is also
+  // flushed implicitly by ImmediateSubmit / BeginFrame / WaitIdle so any GPU
+  // work that reads a just-created buffer (e.g. a BLAS build) sees it uploaded.
+  // Nestable via a depth count (only the outermost FlushUploadBatch submits).
+  // Buffers created inside the batch are valid to use only after the flush.
+  // Default no-op: backends without the optimization just keep submitting per
+  // buffer, which stays correct. Streaming wraps a frame's uploads in one batch
+  // so a burst of new cells no longer pays a blocking round-trip per buffer.
+  virtual void BeginUploadBatch() {}
+  virtual void FlushUploadBatch() {}
+
   // Frame ring: waits for `slot`'s previous submission, resets its command
   // allocator and transient binding pool, begins recording. Slots cycle
   // 0..kMaxFramesInFlight-1.

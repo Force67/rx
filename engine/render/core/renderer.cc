@@ -2420,6 +2420,16 @@ bool Renderer::UploadTexture(const asset::Texture &texture, u64 id_salt) {
   return material_system_->UploadTexture(texture, id_salt);
 }
 
+void Renderer::BeginUploadBatch() {
+  if (device_)
+    device_->BeginUploadBatch();
+}
+
+void Renderer::FlushUploadBatch() {
+  if (device_)
+    device_->FlushUploadBatch();
+}
+
 bool Renderer::UploadMaterial(const asset::Material &material, u64 id_salt) {
   if (!material_system_)
     return false;

@@ -365,6 +365,12 @@ public:
   // other; entities must carry the salted id in their Renderable. Zero (the
   // default/primary domain) leaves the key unchanged.
   bool UploadMesh(const asset::Mesh &mesh, u64 id_salt = 0);
+  // Coalesce a burst of uploads (streaming a frame's worth of new cells) into
+  // one GPU submit instead of a blocking round-trip per created buffer. Wrap the
+  // uploads in Begin/FlushUploadBatch; nestable, and safe to leave unset on
+  // backends that do not implement it (they just keep submitting per buffer).
+  void BeginUploadBatch();
+  void FlushUploadBatch();
   // Replaces only lod-0 vertices for a mesh uploaded with dynamic_vertices.
   // Topology and vertex count must match. The old buffer retires after
   // in-flight frames finish, so terrain brushes do not force a device-wide
