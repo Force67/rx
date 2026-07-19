@@ -278,6 +278,22 @@ class Device {
   virtual void BeginUploadBatch() {}
   virtual void FlushUploadBatch() {}
 
+  // True while a batch (see BeginUploadBatch) is open. Callers that stage their
+  // own uploads (e.g. texture image copies) check this to decide whether their
+  // staging must survive until the batch flush.
+  virtual bool UploadBatchActive() const { return false; }
+  // Records an upload's copy/barrier commands into the open batch's command
+  // buffer, or, with no batch open, runs them through a blocking ImmediateSubmit
+  // (the default). Lets a caller share the coalesced submit without knowing the
+  // backend. `record` runs synchronously (commands are recorded now); the work
+  // completes at the next flush/frame when batched.
+  virtual void RecordUpload(const std::function<void(CommandList&)>& record) {
+    ImmediateSubmit(record);
+  }
+  // Hands a staging buffer to the open batch to free once its copies have run
+  // (only call while UploadBatchActive()); frees immediately otherwise.
+  virtual void ParkBatchStaging(GpuBuffer& buffer) { DestroyBuffer(buffer); }
+
   // Frame ring: waits for `slot`'s previous submission, resets its command
   // allocator and transient binding pool, begins recording. Slots cycle
   // 0..kMaxFramesInFlight-1.

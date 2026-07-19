@@ -319,15 +319,32 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
     }
   }
   u64 upload_bytes = texture.data.size() - skip;
-  GpuBuffer* staging = AcquireStaging(upload_bytes);
-  if (!staging) {
-    device_.DestroyImage(image);
-    return {};
+  // Inside an upload batch the copy is deferred to the flush, so the shared
+  // staging pool would be overwritten by the next texture before it runs; use a
+  // fresh buffer parked with the batch instead. Outside a batch the pooled
+  // staging is fine (ImmediateSubmit completes before the next call reuses it).
+  const bool batched = device_.UploadBatchActive();
+  GpuBuffer fresh{};
+  GpuBuffer* staging;
+  if (batched) {
+    fresh = device_.CreateBuffer(upload_bytes, kBufferUsageTransferSrc, true);
+    if (!fresh.mapped) {
+      if (fresh) device_.DestroyBuffer(fresh);
+      device_.DestroyImage(image);
+      return {};
+    }
+    staging = &fresh;
+  } else {
+    staging = AcquireStaging(upload_bytes);
+    if (!staging) {
+      device_.DestroyImage(image);
+      return {};
+    }
   }
   std::memcpy(staging->mapped, texture.data.data() + skip, upload_bytes);
 
   u32 upload_mips = generate_mips ? 1 : mip_count;
-  device_.ImmediateSubmit([&](CommandList& cmd) {
+  device_.RecordUpload([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
 
     mem::SmallVector<BufferTextureCopy, 16> regions;  // one per mip
@@ -377,6 +394,9 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
                    .after = ResourceState::kShaderReadAll});
     }
   });
+  // The batch reads this staging at flush, so hand it over to free then; the
+  // pooled path already completed synchronously and keeps its buffer.
+  if (batched) device_.ParkBatchStaging(fresh);
   return image;
 }
 

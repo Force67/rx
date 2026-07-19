@@ -933,6 +933,16 @@ void VulkanDevice::FlushUploadBatch() {
   if (upload_batch_depth_ == 0) SubmitUploadBatchIfPending();
 }
 
+void VulkanDevice::RecordUpload(const std::function<void(CommandList&)>& record) {
+  // Batched: record into the shared batch command buffer (submitted at flush).
+  // Otherwise a blocking ImmediateSubmit, exactly as the caller would have done.
+  if (upload_batch_depth_ > 0) {
+    record(EnsureUploadBatchCmd());
+  } else {
+    ImmediateSubmit(record);
+  }
+}
+
 void VulkanDevice::FreeBufferRecord(BufferRecord* record) {
   if (!record) return;
   if (record->buffer) vmaDestroyBuffer(allocator_, record->buffer, record->allocation);

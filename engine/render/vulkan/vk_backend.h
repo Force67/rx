@@ -318,6 +318,9 @@ class VulkanDevice final : public Device {
   void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
   void BeginUploadBatch() override;
   void FlushUploadBatch() override;
+  bool UploadBatchActive() const override { return upload_batch_depth_ > 0; }
+  void RecordUpload(const std::function<void(CommandList&)>& record) override;
+  void ParkBatchStaging(GpuBuffer& buffer) override { upload_batch_stagings_.push_back(buffer); }
   bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
                      size_t out_size) override;
   CommandList* BeginFrame(u32 slot) override;
