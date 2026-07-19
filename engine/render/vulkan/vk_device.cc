@@ -763,6 +763,9 @@ VulkanDevice::~VulkanDevice() {
 
 void VulkanDevice::WaitIdle() {
   if (device_ != VK_NULL_HANDLE) {
+    // Submit pending batch copies first, or a device drain would strand them
+    // recorded-but-never-submitted in the batch command buffer.
+    SubmitUploadBatchIfPending();
     vkDeviceWaitIdle(device_);
     DrainAllGraveyards();
   }
@@ -869,11 +872,75 @@ GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usa
   std::memcpy(staging.mapped, data.data(), data.size());
 
   GpuBuffer buffer = CreateBuffer(data.size(), usage | kBufferUsageTransferDst, false);
-  ImmediateSubmit([&](CommandList& cmd) {
-    cmd.CopyBuffer(staging, 0, buffer, 0, data.size());
-  });
-  DestroyBuffer(staging);
+  if (upload_batch_depth_ > 0) {
+    // Batched: record the copy into the shared batch command buffer and keep
+    // the staging alive until the batch flushes (a fresh staging per call, so
+    // parking them is safe). The blocking submit is deferred, so N buffers cost
+    // one round-trip instead of N.
+    EnsureUploadBatchCmd().CopyBuffer(staging, 0, buffer, 0, data.size());
+    upload_batch_stagings_.push_back(staging);
+  } else {
+    ImmediateSubmit([&](CommandList& cmd) {
+      cmd.CopyBuffer(staging, 0, buffer, 0, data.size());
+    });
+    DestroyBuffer(staging);
+  }
   return buffer;
+}
+
+VulkanCommandList& VulkanDevice::EnsureUploadBatchCmd() {
+  if (upload_batch_cmd_ == VK_NULL_HANDLE) {
+    VkCommandBufferAllocateInfo alloc{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    alloc.commandPool = immediate_pool_;
+    alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc.commandBufferCount = 1;
+    vkAllocateCommandBuffers(device_, &alloc, &upload_batch_cmd_);
+    VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(upload_batch_cmd_, &begin);
+    upload_batch_list_ =
+        std::make_unique<VulkanCommandList>(*this, upload_batch_cmd_, immediate_descriptor_pool_);
+  }
+  return *upload_batch_list_;
+}
+
+// Submits any copies recorded into the batch command buffer and blocks until
+// they finish, then tears the command buffer down (a later CreateBufferWithData
+// lazily re-allocates it). Leaves the batch OPEN (depth unchanged) so more
+// uploads keep coalescing; this is the implicit-flush used before any GPU work
+// that could read a just-created buffer (ImmediateSubmit/BeginFrame/WaitIdle)
+// and by the explicit FlushUploadBatch.
+void VulkanDevice::SubmitUploadBatchIfPending() {
+  if (upload_batch_cmd_ == VK_NULL_HANDLE) return;
+  vkEndCommandBuffer(upload_batch_cmd_);
+  VkSubmitInfo submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &upload_batch_cmd_;
+  vkQueueSubmit(graphics_queue_, 1, &submit, immediate_fence_);
+  vkWaitForFences(device_, 1, &immediate_fence_, VK_TRUE, UINT64_MAX);
+  vkResetFences(device_, 1, &immediate_fence_);
+  vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
+  upload_batch_cmd_ = VK_NULL_HANDLE;
+  upload_batch_list_.reset();
+  for (GpuBuffer& s : upload_batch_stagings_) DestroyBuffer(s);
+  upload_batch_stagings_.clear();
+}
+
+void VulkanDevice::BeginUploadBatch() { ++upload_batch_depth_; }
+
+void VulkanDevice::FlushUploadBatch() {
+  if (upload_batch_depth_ > 0) --upload_batch_depth_;
+  if (upload_batch_depth_ == 0) SubmitUploadBatchIfPending();
+}
+
+void VulkanDevice::RecordUpload(const std::function<void(CommandList&)>& record) {
+  // Batched: record into the shared batch command buffer (submitted at flush).
+  // Otherwise a blocking ImmediateSubmit, exactly as the caller would have done.
+  if (upload_batch_depth_ > 0) {
+    record(EnsureUploadBatchCmd());
+  } else {
+    ImmediateSubmit(record);
+  }
 }
 
 void VulkanDevice::FreeBufferRecord(BufferRecord* record) {
@@ -1944,6 +2011,9 @@ bool VulkanDevice::GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count,
 // --- recording & submission ---
 
 void VulkanDevice::ImmediateSubmit(const std::function<void(CommandList&)>& record) {
+  // A buffer batched but not yet submitted must land before this submit's work,
+  // which may read it (e.g. a BLAS build over just-created vertex/index buffers).
+  SubmitUploadBatchIfPending();
   VkCommandBufferAllocateInfo alloc{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
   alloc.commandPool = immediate_pool_;
   alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -2011,6 +2081,9 @@ bool VulkanDevice::ReadbackImage(const GpuImage& image, ResourceState current, v
 }
 
 CommandList* VulkanDevice::BeginFrame(u32 slot) {
+  // Flush any uploads batched (but not yet flushed) before the frame that will
+  // sample them starts recording.
+  SubmitUploadBatchIfPending();
   FrameRing& frame = frames_[slot];
   vkWaitForFences(device_, 1, &frame.in_flight, VK_TRUE, UINT64_MAX);
   // The fence just proved this slot's previous submission finished, so anything
