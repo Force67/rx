@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/option.h>
+
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "scene/components.h"
@@ -14,6 +16,9 @@ constexpr f32 kOrigin = -110.0f;
 constexpr f32 kExtent = 220.0f;
 constexpr u32 kResolution = 221;
 constexpr f32 kStep = kExtent / static_cast<f32>(kResolution - 1);
+
+base::Option<float> GrassSpacing{"demo.grass.spacing", 0.30f, "RX_GRASS_SPACING"};
+base::Option<int> GrassMaxBlades{"demo.grass.max_blades", 210000, "RX_GRASS_MAX_BLADES"};
 
 u32 PackColor(f32 r, f32 g, f32 b) {
   auto to8 = [](f32 value) {
@@ -135,7 +140,7 @@ void GrassDemo::BuildField() {
   domain_.types = types_.data();
   domain_.type_count = static_cast<u32>(types_.size());
   domain_.seed = 0x7a6b5c4du;
-  domain_.settings.candidate_spacing = 0.30f;
+  domain_.settings.candidate_spacing = std::clamp(GrassSpacing.get(), 0.08f, 1.0f);
   domain_.settings.stream_tile_size = 18.0f;
   domain_.settings.stream_radius = 84.0f;
   domain_.settings.density_lod_start = 40.0f;
@@ -146,7 +151,8 @@ void GrassDemo::BuildField() {
   domain_.settings.fade_start = 76.0f;
   domain_.settings.fade_end = 84.0f;
   domain_.settings.max_slope_cos = 0.50f;
-  domain_.settings.max_blades = 210000;
+  domain_.settings.max_blades =
+      static_cast<u32>(std::clamp(GrassMaxBlades.get(), 1, 262144));
 }
 
 void GrassDemo::BuildTerrain() {
@@ -320,7 +326,8 @@ void GrassDemo::Create() {
   ctx_.camera->set_position({-36.0f, 9.5f, 30.0f});
   ctx_.camera->set_yaw_pitch(0.78f, -0.18f);
   ctx_.camera->speed = 10.0f;
-  RX_INFO("procedural grass demo: semantic hills, growable stone and local interaction");
+  RX_INFO("procedural grass demo: {:.2f} m spacing, {} blade cap",
+          domain_.settings.candidate_spacing, domain_.settings.max_blades);
 }
 
 void GrassDemo::Update(f32 dt) {

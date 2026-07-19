@@ -115,6 +115,8 @@ vkrun ./build/linux/runtime/rx --demo grass --no-rt
 The scene combines a semantic rolling heightfield, three blade families,
 stochastic family boundaries, a winding density-masked path, grass on a
 standalone stone mesh, gusting wind, and a moving local interaction marker.
+`RX_GRASS_SPACING` overrides candidate spacing for density stress tests, and
+`RX_GRASS_MAX_BLADES` overrides the compacted blade cap.
 
 ## Layout
 
