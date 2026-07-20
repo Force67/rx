@@ -192,6 +192,8 @@ sets the distant-ring radius (0 restores the classic stream-bounded field).
 The demo field spans two kilometres so the distant tier reads as unbroken
 grassland to the horizon.
 
+![Kilometre-range grass field](docs/images/procedural-grass-distant.png)
+
 ## Layout
 
 - `engine/render/geometry/procedural_grass.{h,cc}`: public data model, resource
