@@ -13,12 +13,17 @@ deterministic tour selects its own modes where a stop is testing one of them.
 The lighting tour includes RCGI; launch with `--no-rt` or `RX_RCGI_SW=1` to run
 that stop through the software SDF tracer instead of hardware ray queries.
 
-The 28-stop tour also exercises streamed instance-group replacement, split PBR
+The 30-stop tour also exercises streamed instance-group replacement, split PBR
 maps with per-submesh materials, eight-layer terrain splatting, projected virtual
 geometry albedo, Gerstner shoreline buoyancy, Jolt strand grooming, local network
 interest bubbles, and ECS camera-stack transitions. The weather stops cover
 volumetric rain and snow, storm lightning, surface response, and aurora. Strand
 dynamics fall back to the authored groom when Jolt is unavailable.
+
+Two vehicle stops drive the physics stack directly: a car laps a flat asphalt
+oval on its own heightfield south of the physics district, and a force-simulated
+motorboat (hull buoyancy, propeller, rudder) runs a circuit on the water-district
+lake and lays down a wake. Both fall back to static props without Jolt.
 
 Regenerate the binary inputs after changing the generator:
 

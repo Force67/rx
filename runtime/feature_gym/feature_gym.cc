@@ -30,6 +30,8 @@
 #include "core/math.h"
 #include "ecs/scheduler.h"
 #include "ecs/world.h"
+#include "physics/boat.h"
+#include "physics/boat_profiles.h"
 #include "physics/shape_desc.h"
 #include "physics/water_waves.h"
 #include "render/geometry/hair_groom.h"
@@ -99,9 +101,11 @@ enum class TourMode : u8 {
   kWeatherSnowAurora,
   kWaterOcean,
   kGerstnerShorelineBuoyancy,
+  kBoatCruise,
   kEffects,
   kJoltProceduralStrandGroom,
   kPhysics,
+  kVehicleCircuit,
   kTransportFreeNetworkBubbles,
   kAnimation,
   kEcsCameraStackRig,
@@ -368,12 +372,14 @@ Area AreaForMode(TourMode mode) {
       return Area::kAtmosphere;
     case TourMode::kWaterOcean:
     case TourMode::kGerstnerShorelineBuoyancy:
+    case TourMode::kBoatCruise:
       return Area::kWater;
     case TourMode::kEffects:
     case TourMode::kJoltProceduralStrandGroom:
     case TourMode::kTransportFreeNetworkBubbles:
       return Area::kEffects;
     case TourMode::kPhysics:
+    case TourMode::kVehicleCircuit:
       return Area::kPhysics;
     case TourMode::kAnimation:
       return Area::kAnimation;
@@ -568,9 +574,11 @@ struct FeatureGym::Impl {
   void CreateGeometry();
   void CreateAtmosphere();
   void CreateWater();
+  void CreateMarina();
   void CreateEffects();
   void CreateNetworkBubbles();
   void CreatePhysics();
+  void CreateDrivingCircuit();
   void CreateCloth();
   void CreateAnimation();
   void CreatePost();
@@ -585,6 +593,7 @@ struct FeatureGym::Impl {
   void EmitCloth(render::FrameView& view);
   void EmitAnimation(f32 dt, render::FrameView& view);
   void EmitVehicles(render::FrameView& view);
+  void EmitBoat(f32 dt, render::FrameView& view);
   bool BuildTour(ShowcaseCamera& camera);
   void SetTourTime(f32 seconds);
   void ApplyArea(Area area);
@@ -724,6 +733,38 @@ struct FeatureGym::Impl {
   base::Vector<Vec3> water_previous;
   f32 water_height = 0;
   u32 audio_voice = 0;
+
+  // Driving circuit: a dedicated asphalt oval on flat ground south of the
+  // physics district where a second car runs continuous laps. Shares the car
+  // chassis/wheel meshes and the kPhysics render policy, but its own tour stop
+  // frames it in isolation. circuit_time advances only while that stop is live.
+  physics::VehicleId circuit_car = 0;
+  Vec3 circuit_center{-30, 0, -64};
+  f32 circuit_rx = 10.5f;
+  f32 circuit_rz = 6.5f;
+  f32 circuit_time = 0;
+  Mat4 circuit_previous = Mat4::Identity();
+  bool circuit_previous_valid = false;
+  std::array<Mat4, 4> circuit_wheel_previous{};
+  std::array<bool, 4> circuit_wheel_previous_valid{};
+
+  // Marina: a force-simulated physics::Boat that floats on the water-district
+  // lake. Update() must run every fixed step to keep it buoyant (the hull is
+  // exempt from the world's generic buoyancy); it idles at its berth and runs a
+  // slow circuit during the boat stop. Meshes are a hull + cabin box.
+  std::unique_ptr<physics::Boat> boat;
+  u64 boat_hull_mesh = 0;
+  u64 boat_cabin_mesh = 0;
+  Vec3 boat_berth{};
+  Vec3 boat_circuit_center{};
+  f32 boat_circuit_radius = 4.0f;
+  f32 boat_time = 0;
+  bool boat_cruise_active = false;
+  Vec3 boat_previous_pos{};
+  bool boat_previous_pos_valid = false;
+  Mat4 boat_previous = Mat4::Identity();
+  Mat4 boat_cabin_previous = Mat4::Identity();
+  bool boat_previous_valid = false;
 };
 
 FeatureGym::Impl::~Impl() {
@@ -732,8 +773,10 @@ FeatureGym::Impl::~Impl() {
   if (audio_voice && ctx.audio) ctx.audio->Stop(audio_voice, 0);
   if (camera_activation) scene::ReleaseCameraMode(world, camera_activation, {.duration = 0});
   if (cloth_id) physics.RemoveCloth(cloth_id);
+  boat.reset();  // removes the hull body while `physics` is still alive
   if (car) physics.RemoveVehicle(car);
   if (bike) physics.RemoveVehicle(bike);
+  if (circuit_car) physics.RemoveVehicle(circuit_car);
   if (platform_body) physics.RemoveBody(platform_body);
   for (physics::BodyId body : water_bodies) physics.RemoveBody(body);
   if (prop_group) renderer.DestroyInstanceGroup(prop_group);
@@ -844,9 +887,11 @@ void FeatureGym::Impl::Create() {
   CreateGeometry();
   CreateAtmosphere();
   CreateWater();
+  CreateMarina();
   CreateEffects();
   CreateNetworkBubbles();
   CreatePhysics();
+  CreateDrivingCircuit();
   CreateAnimation();
   CreatePost();
   CreateCameraExhibit();
@@ -885,7 +930,9 @@ void FeatureGym::Impl::CreateBase() {
   if (!headless) renderer.UploadMaterial(floor);
   neutral_material = AddMaterial("neutral", {0.46f, 0.49f, 0.54f}, 0.72f);
 
-  SpawnBox("world_floor", {48, 0.25f, 50}, {0, -2.65f, -12}, floor.id, false, true);
+  // Floor spans the 3x3 district grid plus the driving circuit apron to the
+  // south (z down to ~-78).
+  SpawnBox("world_floor", {48, 0.25f, 58}, {0, -2.65f, -20}, floor.id, false, true);
   for (size_t i = 0; i < std::size(kAreas); ++i) {
     const AreaInfo& info = kAreas[i];
     const Vec3 tint{static_cast<f32>((info.color >> 24) & 0xff) / 255.0f,
@@ -1443,6 +1490,44 @@ void FeatureGym::Impl::CreateWater() {
   }
 }
 
+void FeatureGym::Impl::CreateMarina() {
+  const Vec3 c = Info(Area::kWater).center;
+  boat_berth = c + Vec3{-2.0f, water_height + 0.5f, 2.0f};
+  boat_circuit_center = c + Vec3{-2.0f, 0.0f, -1.0f};
+
+  asset::AssetId hull_material = AddMaterial("boat_hull", {0.82f, 0.13f, 0.10f}, 0.30f, 0.10f);
+  asset::AssetId cabin_material = AddMaterial("boat_cabin", {0.90f, 0.91f, 0.95f}, 0.38f);
+  boat_hull_mesh =
+      UploadMesh(asset::MakeBox(0.9f, 0.5f, 2.9f, asset::MakeAssetId("featuregym/mesh/boat_hull")),
+                 hull_material)
+          .hash;
+  boat_cabin_mesh = UploadMesh(asset::MakeBox(0.62f, 0.42f, 1.05f,
+                                              asset::MakeAssetId("featuregym/mesh/boat_cabin")),
+                               cabin_material)
+                        .hash;
+
+  // Force-simulated motorboat (hull buoyancy + propeller + rudder). It samples
+  // the same set_water_height callback CreateWater installed, so it floats
+  // anywhere that returns true. Update() runs every fixed step in AddSimulation;
+  // the cruise runs it gently so a hull that can only turn wide still stays on
+  // the small lake.
+  physics::BoatDesc desc = physics::SpeedboatProfile();
+  boat = std::make_unique<physics::Boat>(physics, desc, boat_berth, 0.0f);
+  if (!boat->valid())
+    RX_WARN("feature gym: marina boat is static; rebuild with Jolt for buoyancy");
+
+  // A jetty and a couple of mooring buoys frame the berth.
+  asset::AssetId dock_material = AddMaterial("boat_dock", {0.34f, 0.26f, 0.17f}, 0.9f);
+  SpawnBox("boat_dock", {0.7f, 0.16f, 3.0f}, c + Vec3{-8.5f, water_height + 0.2f, 3.5f},
+           dock_material, false, false);
+  asset::AssetId buoy_material = AddMaterial("boat_buoy", {0.97f, 0.62f, 0.06f}, 0.5f);
+  const asset::AssetId buoy =
+      UploadMesh(asset::MakeSphere(0.28f, 12, 16, asset::MakeAssetId("featuregym/mesh/buoy")),
+                 buoy_material);
+  Spawn(buoy, c + Vec3{2.6f, water_height + 0.05f, 4.6f});
+  Spawn(buoy, c + Vec3{-7.2f, water_height + 0.05f, -1.2f});
+}
+
 void FeatureGym::Impl::CreateEffects() {
   const Vec3 c = Info(Area::kEffects).center;
   asset::AssetId dark = AddMaterial("effects_floor", {0.08f, 0.09f, 0.12f}, 0.72f);
@@ -1763,6 +1848,60 @@ void FeatureGym::Impl::CreateCloth() {
            frame);
 }
 
+void FeatureGym::Impl::CreateDrivingCircuit() {
+  const Vec3 c = circuit_center;
+
+  // Flat asphalt driving surface. Tires ride suspension raycasts, so the car
+  // needs a heightfield (not the box floor) under the whole oval; a constant
+  // height field is a perfectly flat asphalt pad. AddHeightField defaults to
+  // full-grip asphalt.
+  constexpr u32 kSamples = 33;
+  constexpr f32 kFieldSize = 36.0f;
+  std::array<f32, kSamples * kSamples> flat{};
+  physics.AddHeightField(c + Vec3{-kFieldSize * 0.5f, 0.0f, -kFieldSize * 0.5f}, flat.data(),
+                         kSamples, kFieldSize);
+
+  // Apron + darker tarmac slab, then the painted racing lines and cones.
+  SpawnBox("circuit_apron", {15.5f, 0.04f, 11.0f}, c + Vec3{0, 0.02f, 0},
+           AddMaterial("circuit_apron", {0.15f, 0.16f, 0.18f}, 0.9f), false, false);
+  SpawnBox("circuit_tarmac", {13.5f, 0.05f, 9.0f}, c + Vec3{0, 0.04f, 0},
+           AddMaterial("circuit_tarmac", {0.055f, 0.06f, 0.07f}, 0.82f), false, false);
+
+  constexpr u32 kOvalSegments = 72;
+  auto oval = [&](f32 rx, f32 rz, u32 color) {
+    for (u32 i = 0; i < kOvalSegments; ++i) {
+      const f32 a0 = (static_cast<f32>(i) / kOvalSegments) * 2.0f * kPi;
+      const f32 a1 = (static_cast<f32>(i + 1) / kOvalSegments) * 2.0f * kPi;
+      lines.push_back({c + Vec3{rx * std::cos(a0), 0.09f, rz * std::sin(a0)},
+                       c + Vec3{rx * std::cos(a1), 0.09f, rz * std::sin(a1)}, color});
+    }
+  };
+  oval(circuit_rx, circuit_rz, 0xf4f4f5ff);
+  oval(circuit_rx - 4.5f, circuit_rz - 3.0f, 0xffd24bff);
+  lines.push_back(
+      {c + Vec3{circuit_rx - 4.5f, 0.09f, 0}, c + Vec3{circuit_rx, 0.09f, 0}, 0xf4f4f5ff});
+
+  const asset::AssetId cone =
+      UploadMesh(asset::MakeBox(0.16f, 0.34f, 0.16f, asset::MakeAssetId("featuregym/mesh/cone")),
+                 AddMaterial("circuit_cone", {0.98f, 0.42f, 0.05f}, 0.55f));
+  constexpr u32 kCones = 12;
+  for (u32 i = 0; i < kCones; ++i) {
+    const f32 a = (static_cast<f32>(i) / kCones) * 2.0f * kPi;
+    Spawn(cone,
+          c + Vec3{(circuit_rx + 1.3f) * std::cos(a), 0.36f, (circuit_rz + 1.3f) * std::sin(a)});
+  }
+
+  // The circuit car reuses the chassis + wheel meshes uploaded in
+  // CreatePhysics. It spawns at the oval's east point heading +Z (tangent for
+  // the counter-clockwise lap) and settles on the field before the tour drives
+  // it (AddSimulation).
+  physics::PhysicsWorld::VehicleDesc desc;
+  desc.drivetrain = physics::PhysicsWorld::Drivetrain::kAWD;
+  desc.traction_control = true;
+  desc.downforce = 2.4f;
+  circuit_car = physics.CreateVehicle(desc, c + Vec3{circuit_rx, 1.0f, 0}, 0.0f);
+}
+
 void FeatureGym::Impl::CreateAnimation() {
   const Vec3 c = Info(Area::kAnimation).center;
   asset::Material biped_material;
@@ -2000,8 +2139,81 @@ void FeatureGym::Impl::AddSimulation() {
             physics.DriveVehicle(bike, 0, 0, 1, 0);
           }
         }
+        if (circuit_car) {
+          if (active_mode == TourMode::kVehicleCircuit) {
+            circuit_time += dt;
+            const f32 theta = circuit_time * 0.6f + 0.42f;
+            const Vec3 target = circuit_center + Vec3{circuit_rx * std::cos(theta), 0,
+                                                      circuit_rz * std::sin(theta)};
+            Vec3 pos;
+            f32 rot[4];
+            if (physics.GetVehicleTransform(circuit_car, &pos, rot)) {
+              const Vec3 fwd = Rotate(Quat{rot[0], rot[1], rot[2], rot[3]}, Vec3{0, 0, 1});
+              f32 err = std::atan2(target.x - pos.x, target.z - pos.z) - std::atan2(fwd.x, fwd.z);
+              while (err > kPi) err -= 2.0f * kPi;
+              while (err < -kPi) err += 2.0f * kPi;
+              // +Z forward, right = -X, so steer (positive = right) chases the
+              // target against the sign of the yaw error.
+              physics.DriveVehicle(circuit_car, 0.42f, std::clamp(-err * 1.3f, -1.0f, 1.0f), 0.0f,
+                                   0.0f);
+            }
+          } else {
+            circuit_time = 0;
+            physics.DriveVehicle(circuit_car, 0, 0, 1, 0);
+          }
+        }
         physics_active_time = active == Area::kPhysics ? physics_active_time + dt : 0.0f;
       });
+
+  // Boat forces must stage BEFORE the kSim physics step (Jolt clears
+  // accumulated forces after its own step), and Update() must run every step to
+  // keep the hull afloat (the Boat exempts itself from generic buoyancy).
+  scheduler.AddSystem(ecs::Stage::kPreSim, "feature_gym_marina",
+                      [this, alive = simulation_alive](ecs::World&, f32 dt) {
+                        if (!*alive || !boat || !boat->valid()) return;
+                        physics::BoatInput input;
+                        if (active_mode == TourMode::kBoatCruise) {
+                          if (!boat_cruise_active) {
+                            // Re-berth on entry so the long idle drift (Gerstner
+                            // flow over every prior stop) never starts the run
+                            // off the lake. Idle velocity is ~0, so a teleport is
+                            // clean.
+                            const f32 identity[4] = {0, 0, 0, 1};
+                            physics.SetBodyPosition(boat->body(), boat_berth, identity);
+                            boat_cruise_active = true;
+                            boat_time = 0;
+                          }
+                          boat_time += dt;
+                          const physics::BoatState& s = boat->state();
+                          const f32 theta = boat_time * 0.5f + 0.6f;
+                          Vec3 target = boat_circuit_center +
+                                        Vec3{boat_circuit_radius * std::cos(theta), 0,
+                                             boat_circuit_radius * std::sin(theta)};
+                          // Safety backstop: a heavy hull turns wide, so if it
+                          // drifts past the ring steer straight for the lake
+                          // centre. This bounds the path inside the water region
+                          // no matter the turn radius, so it can never leave the
+                          // surface and drop into the void.
+                          const f32 rx_off = s.position.x - boat_circuit_center.x;
+                          const f32 rz_off = s.position.z - boat_circuit_center.z;
+                          const bool outside = rx_off * rx_off + rz_off * rz_off >
+                                               (boat_circuit_radius + 1.0f) * (boat_circuit_radius + 1.0f);
+                          if (outside) target = boat_circuit_center;
+                          const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
+                          f32 err = std::atan2(target.x - s.position.x, target.z - s.position.z) -
+                                    std::atan2(fwd.x, fwd.z);
+                          while (err > kPi) err -= 2.0f * kPi;
+                          while (err < -kPi) err += 2.0f * kPi;
+                          // Ease off the throttle when steering hard or recovering
+                          // so the hull stays slow enough to answer the helm.
+                          input.steer = std::clamp(-err * 2.2f, -1.0f, 1.0f);
+                          input.throttle = (outside || std::abs(err) > 1.0f) ? 0.12f : 0.22f;
+                        } else {
+                          boat_cruise_active = false;
+                          boat_time = 0;
+                        }
+                        boat->Update(input, dt);
+                      });
 }
 
 void FeatureGym::Impl::EmitCloth(render::FrameView& view) {
@@ -2153,6 +2365,48 @@ void FeatureGym::Impl::EmitVehicles(render::FrameView& view) {
        car_previous_valid);
   emit(bike, bike_mesh, bike_wheel_previous, bike_wheel_previous_valid, bike_previous,
        bike_previous_valid);
+  emit(circuit_car, car_mesh, circuit_wheel_previous, circuit_wheel_previous_valid, circuit_previous,
+       circuit_previous_valid);
+}
+
+void FeatureGym::Impl::EmitBoat(f32 dt, render::FrameView& view) {
+  if (!boat || !boat->valid()) return;
+  const physics::BoatState& s = boat->state();
+  const Mat4 hull_xform = MakeTranslation(s.position) * MakeFromQuat(s.rotation);
+  render::DrawItem hull;
+  hull.mesh = boat_hull_mesh;
+  hull.transform = hull_xform;
+  hull.prev_transform = boat_previous_valid ? boat_previous : hull_xform;
+  view.draws.push_back(hull);
+  boat_previous = hull_xform;
+
+  const Mat4 cabin_xform = hull_xform * MakeTranslation(Vec3{0, 0.72f, -0.55f});
+  render::DrawItem cabin;
+  cabin.mesh = boat_cabin_mesh;
+  cabin.transform = cabin_xform;
+  cabin.prev_transform = boat_previous_valid ? boat_cabin_previous : cabin_xform;
+  view.draws.push_back(cabin);
+  boat_cabin_previous = cabin_xform;
+  boat_previous_valid = true;
+
+  // Wake injected at the submerged stern, scaled by hull speed.
+  const Vec3 velocity = (boat_previous_pos_valid && dt > 1e-5f)
+                            ? (s.position - boat_previous_pos) * (1.0f / dt)
+                            : Vec3{};
+  boat_previous_pos = s.position;
+  boat_previous_pos_valid = true;
+  const Vec3 stern = s.position + Rotate(s.rotation, Vec3{0, 0, -2.6f});
+  const f32 speed = Length(velocity);
+  render::WaterDisturbance wake;
+  wake.position = {stern.x, water_height + physics::GerstnerWaveHeight(stern.x, stern.z, sim_time),
+                   stern.z};
+  wake.radius = 1.4f;
+  wake.ripple_strength = std::min(1.0f, speed * 0.2f);
+  wake.foam_amount = std::min(1.0f, speed * 0.18f);
+  wake.velocity_x = velocity.x;
+  wake.velocity_z = velocity.z;
+  wake.elongation = std::min(4.0f, speed * 0.4f);
+  view.water_disturbances.push_back(wake);
 }
 
 void FeatureGym::Impl::UpdateInstanceExhibit() {
@@ -2254,8 +2508,16 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
   } else {
     car_previous_valid = false;
     bike_previous_valid = false;
+    circuit_previous_valid = false;
     car_wheel_previous_valid.fill(false);
     bike_wheel_previous_valid.fill(false);
+    circuit_wheel_previous_valid.fill(false);
+  }
+  if (active == Area::kWater) {
+    EmitBoat(dt, view);
+  } else {
+    boat_previous_valid = false;
+    boat_previous_pos_valid = false;
   }
   if (active == Area::kAnimation) EmitAnimation(dt, view);
   else biped_previous_valid = false;
@@ -2344,6 +2606,8 @@ bool FeatureGym::Impl::BuildTour(ShowcaseCamera& camera) {
   const Vec3 water = Info(Area::kWater).center;
   add(TourMode::kGerstnerShorelineBuoyancy, water + Vec3{-5, 3.8f, 8.5f},
       water + Vec3{3.0f, 0.1f, -2.0f}, 3.5f, "gerstner_shoreline_buoyancy");
+  add(TourMode::kBoatCruise, water + Vec3{-7.0f, 4.5f, 16.0f}, water + Vec3{-2.0f, 0.4f, 2.0f}, 4.5f,
+      "boat_marina_cruise");
   district(TourMode::kEffects, 4.0f, "particles_transparency_hair");
   const Vec3 effects = Info(Area::kEffects).center;
   add(TourMode::kJoltProceduralStrandGroom, effects + Vec3{10, 4.5f, 10.5f},
@@ -2351,6 +2615,8 @@ bool FeatureGym::Impl::BuildTour(ShowcaseCamera& camera) {
   const Vec3 physics_center = Info(Area::kPhysics).center;
   add(TourMode::kPhysics, physics_center + Vec3{3.0f, 6.4f, 13.5f},
       physics_center + Vec3{3.0f, 1.1f, 0}, 4.0f, "physics_vehicles_character");
+  add(TourMode::kVehicleCircuit, circuit_center + Vec3{0, 9.5f, 18.0f},
+      circuit_center + Vec3{0, 0.6f, -1.0f}, 5.0f, "vehicle_driving_circuit");
   add(TourMode::kTransportFreeNetworkBubbles, effects + Vec3{0, 14.0f, 14.5f},
       effects + Vec3{0, 0.5f, 0}, 3.5f, "transport_free_network_bubbles");
   district(TourMode::kAnimation, 4.0f, "animation_skin_morph_audio");
@@ -2596,9 +2862,11 @@ void FeatureGym::Impl::ApplyTourMode(TourMode mode) {
     case TourMode::kProjectedVirtualGeometryAlbedo:
     case TourMode::kWeatherRain:
     case TourMode::kWaterOcean:
+    case TourMode::kBoatCruise:
     case TourMode::kEffects:
     case TourMode::kJoltProceduralStrandGroom:
     case TourMode::kPhysics:
+    case TourMode::kVehicleCircuit:
     case TourMode::kTransportFreeNetworkBubbles:
     case TourMode::kAnimation:
     case TourMode::kInteriorFog:

@@ -1,9 +1,10 @@
 # Feature-Gym Regression Tour
 
-The tour runs `--demo featuregym` with a fixed timestep, captures all 28 labeled
+The tour runs `--demo featuregym` with a fixed timestep, captures all 30 labeled
 camera stops, and rejects missing, black, or uniform frames. Alongside the nine
 district sweeps, dedicated stops cover recent RX instance streaming, material,
-terrain, virtual-geometry, water, strand, interest-bubble, and camera-stack APIs.
+terrain, virtual-geometry, water, strand, interest-bubble, camera-stack, vehicle
+(a car lapping a driving circuit), and boat (a motorboat cruising the lake) APIs.
 
 ```sh
 python3 tests/feature_gym/tour.py --runner vkrun
