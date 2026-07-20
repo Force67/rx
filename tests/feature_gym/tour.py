@@ -32,6 +32,7 @@ EXPECTED = {
     "jolt_procedural_strand_groom",
     "physics_vehicles_character",
     "vehicle_driving_circuit",
+    "aircraft_flyby",
     "transport_free_network_bubbles",
     "animation_skin_morph_audio",
     "ecs_camera_stack_rig",

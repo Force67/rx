@@ -30,6 +30,7 @@
 #include "core/math.h"
 #include "ecs/scheduler.h"
 #include "ecs/world.h"
+#include "physics/aircraft.h"
 #include "physics/boat.h"
 #include "physics/boat_profiles.h"
 #include "physics/shape_desc.h"
@@ -106,6 +107,7 @@ enum class TourMode : u8 {
   kJoltProceduralStrandGroom,
   kPhysics,
   kVehicleCircuit,
+  kAircraftFlyby,
   kTransportFreeNetworkBubbles,
   kAnimation,
   kEcsCameraStackRig,
@@ -126,11 +128,11 @@ struct AreaInfo {
 };
 
 constexpr AreaInfo kAreas[] = {
-    {"MATERIALS", {-30, 0, 18}, 0xe9a84bff},      {"LIGHTING", {0, 0, 18}, 0xff695dff},
-    {"GEOMETRY", {30, 0, 18}, 0x56bdefff},        {"ATMOSPHERE", {-30, 0, -12}, 0x8e7de8ff},
-    {"WATER", {0, 0, -12}, 0x42d5dfff},           {"EFFECTS", {30, 0, -12}, 0xff66b3ff},
-    {"PHYSICS", {-30, 0, -42}, 0x7ed36fff},       {"ANIMATION", {0, 0, -42}, 0xffca58ff},
-    {"POST + DISPLAY", {30, 0, -42}, 0xeaeef5ff},
+    {"MATERIALS", {-40, 0, 24}, 0xe9a84bff},      {"LIGHTING", {0, 0, 24}, 0xff695dff},
+    {"GEOMETRY", {40, 0, 24}, 0x56bdefff},        {"ATMOSPHERE", {-40, 0, -14}, 0x8e7de8ff},
+    {"WATER", {0, 0, -14}, 0x42d5dfff},           {"EFFECTS", {40, 0, -14}, 0xff66b3ff},
+    {"PHYSICS", {-40, 0, -52}, 0x7ed36fff},       {"ANIMATION", {0, 0, -52}, 0xffca58ff},
+    {"POST + DISPLAY", {40, 0, -52}, 0xeaeef5ff},
 };
 
 const AreaInfo& Info(Area area) {
@@ -158,7 +160,7 @@ const AreaInfo& Info(Area area) {
     case Area::kOverview:
       break;
   }
-  static constexpr AreaInfo overview{"OVERVIEW", {0, 0, -12}, 0xffffffff};
+  static constexpr AreaInfo overview{"OVERVIEW", {0, 0, -14}, 0xffffffff};
   return overview;
 }
 
@@ -380,6 +382,7 @@ Area AreaForMode(TourMode mode) {
       return Area::kEffects;
     case TourMode::kPhysics:
     case TourMode::kVehicleCircuit:
+    case TourMode::kAircraftFlyby:
       return Area::kPhysics;
     case TourMode::kAnimation:
       return Area::kAnimation;
@@ -579,6 +582,7 @@ struct FeatureGym::Impl {
   void CreateNetworkBubbles();
   void CreatePhysics();
   void CreateDrivingCircuit();
+  void CreateAircraft();
   void CreateCloth();
   void CreateAnimation();
   void CreatePost();
@@ -594,6 +598,7 @@ struct FeatureGym::Impl {
   void EmitAnimation(f32 dt, render::FrameView& view);
   void EmitVehicles(render::FrameView& view);
   void EmitBoat(f32 dt, render::FrameView& view);
+  void EmitAircraft(render::FrameView& view);
   bool BuildTour(ShowcaseCamera& camera);
   void SetTourTime(f32 seconds);
   void ApplyArea(Area area);
@@ -739,9 +744,9 @@ struct FeatureGym::Impl {
   // chassis/wheel meshes and the kPhysics render policy, but its own tour stop
   // frames it in isolation. circuit_time advances only while that stop is live.
   physics::VehicleId circuit_car = 0;
-  Vec3 circuit_center{-30, 0, -64};
-  f32 circuit_rx = 10.5f;
-  f32 circuit_rz = 6.5f;
+  Vec3 circuit_center{-40, 0, -78};
+  f32 circuit_rx = 13.0f;
+  f32 circuit_rz = 8.0f;
   f32 circuit_time = 0;
   Mat4 circuit_previous = Mat4::Identity();
   bool circuit_previous_valid = false;
@@ -757,7 +762,7 @@ struct FeatureGym::Impl {
   u64 boat_cabin_mesh = 0;
   Vec3 boat_berth{};
   Vec3 boat_circuit_center{};
-  f32 boat_circuit_radius = 4.0f;
+  f32 boat_circuit_radius = 6.0f;
   f32 boat_time = 0;
   bool boat_cruise_active = false;
   Vec3 boat_previous_pos{};
@@ -765,6 +770,24 @@ struct FeatureGym::Impl {
   Mat4 boat_previous = Mat4::Identity();
   Mat4 boat_cabin_previous = Mat4::Identity();
   bool boat_previous_valid = false;
+
+  // Aircraft flyover: a force-simulated fixed-wing plane parked on the proving-
+  // ground apron. During its stop it is flung up to cruise speed and banks
+  // around a circle at altitude over the circuit (closed-loop heading + altitude
+  // hold), then falls away unseen once the stop ends. Update() runs every step
+  // so the gear holds it on the apron while idle.
+  std::unique_ptr<physics::Aircraft> aircraft;
+  u64 plane_body_mesh = 0;
+  u64 plane_wing_mesh = 0;
+  u64 plane_tail_mesh = 0;
+  u64 plane_fin_mesh = 0;
+  Vec3 plane_orbit_center{};
+  f32 plane_orbit_radius = 26.0f;
+  f32 plane_orbit_alt = 26.0f;
+  f32 plane_time = 0;
+  bool plane_flyby_active = false;
+  Mat4 plane_previous = Mat4::Identity();
+  bool plane_previous_valid = false;
 };
 
 FeatureGym::Impl::~Impl() {
@@ -773,7 +796,8 @@ FeatureGym::Impl::~Impl() {
   if (audio_voice && ctx.audio) ctx.audio->Stop(audio_voice, 0);
   if (camera_activation) scene::ReleaseCameraMode(world, camera_activation, {.duration = 0});
   if (cloth_id) physics.RemoveCloth(cloth_id);
-  boat.reset();  // removes the hull body while `physics` is still alive
+  boat.reset();      // removes the hull body while `physics` is still alive
+  aircraft.reset();  // removes the fuselage body while `physics` is still alive
   if (car) physics.RemoveVehicle(car);
   if (bike) physics.RemoveVehicle(bike);
   if (circuit_car) physics.RemoveVehicle(circuit_car);
@@ -892,6 +916,7 @@ void FeatureGym::Impl::Create() {
   CreateNetworkBubbles();
   CreatePhysics();
   CreateDrivingCircuit();
+  CreateAircraft();
   CreateAnimation();
   CreatePost();
   CreateCameraExhibit();
@@ -910,8 +935,8 @@ void FeatureGym::Impl::Create() {
   settings.rcgi = false;
   baseline = settings;
 
-  ctx.camera->set_position({0, 38, 42});
-  const Vec3 direction = Normalize(Vec3{0, 0, -12} - ctx.camera->position());
+  ctx.camera->set_position({0, 50, 56});
+  const Vec3 direction = Normalize(Vec3{0, 0, -14} - ctx.camera->position());
   ctx.camera->set_yaw_pitch(std::atan2(direction.x, -direction.z), std::asin(direction.y));
   ctx.camera->speed = 15.0f;
   RX_INFO(
@@ -931,8 +956,8 @@ void FeatureGym::Impl::CreateBase() {
   neutral_material = AddMaterial("neutral", {0.46f, 0.49f, 0.54f}, 0.72f);
 
   // Floor spans the 3x3 district grid plus the driving circuit apron to the
-  // south (z down to ~-78).
-  SpawnBox("world_floor", {48, 0.25f, 58}, {0, -2.65f, -20}, floor.id, false, true);
+  // south (z down to ~-100).
+  SpawnBox("world_floor", {62, 0.25f, 72}, {0, -2.65f, -31}, floor.id, false, true);
   for (size_t i = 0; i < std::size(kAreas); ++i) {
     const AreaInfo& info = kAreas[i];
     const Vec3 tint{static_cast<f32>((info.color >> 24) & 0xff) / 255.0f,
@@ -940,15 +965,15 @@ void FeatureGym::Impl::CreateBase() {
                     static_cast<f32>((info.color >> 8) & 0xff) / 255.0f};
     if (static_cast<Area>(i + 1) != Area::kWater) {
       asset::AssetId pad = AddMaterial("pad_" + std::to_string(i), tint * 0.22f, 0.88f);
-      SpawnBox("pad_" + std::to_string(i), {12.5f, 0.08f, 10.5f}, info.center + Vec3{0, 0.02f, 0},
+      SpawnBox("pad_" + std::to_string(i), {16.0f, 0.08f, 13.5f}, info.center + Vec3{0, 0.02f, 0},
                pad, false, true);
-      physics.AddStaticBox(info.center + Vec3{0, -0.25f, 0}, {12.5f, 0.25f, 10.5f});
+      physics.AddStaticBox(info.center + Vec3{0, -0.25f, 0}, {16.0f, 0.25f, 13.5f});
     }
 
-    const f32 x0 = info.center.x - 12.3f;
-    const f32 x1 = info.center.x + 12.3f;
-    const f32 z0 = info.center.z - 10.3f;
-    const f32 z1 = info.center.z + 10.3f;
+    const f32 x0 = info.center.x - 15.8f;
+    const f32 x1 = info.center.x + 15.8f;
+    const f32 z0 = info.center.z - 13.3f;
+    const f32 z1 = info.center.z + 13.3f;
     for (const auto& edge : std::array<std::pair<Vec3, Vec3>, 4>{
              std::pair{Vec3{x0, 0.14f, z0}, Vec3{x1, 0.14f, z0}},
              std::pair{Vec3{x1, 0.14f, z0}, Vec3{x1, 0.14f, z1}},
@@ -957,8 +982,8 @@ void FeatureGym::Impl::CreateBase() {
          })
       lines.push_back({edge.first, edge.second, info.color});
   }
-  lines.push_back({{-47, 0.2f, -12}, {47, 0.2f, -12}, 0x4b5563ff});
-  lines.push_back({{0, 0.2f, -61}, {0, 0.2f, 37}, 0x4b5563ff});
+  lines.push_back({{-60, 0.2f, -14}, {60, 0.2f, -14}, 0x4b5563ff});
+  lines.push_back({{0, 0.2f, -100}, {0, 0.2f, 44}, 0x4b5563ff});
 }
 
 void FeatureGym::Impl::CreateMaterials() {
@@ -1416,18 +1441,18 @@ void FeatureGym::Impl::CreateWater() {
   water.two_sided = true;
   water.is_water = true;
   if (!headless) renderer.UploadMaterial(water);
-  asset::Mesh water_mesh = MakeWaterGrid({c.x, water_height, c.z}, 10.0f, 64,
+  asset::Mesh water_mesh = MakeWaterGrid({c.x, water_height, c.z}, 13.0f, 80,
                                          asset::MakeAssetId("featuregym/mesh/water"), water.id);
   if (!headless) renderer.UploadMesh(water_mesh);
   Spawn(water_mesh.id, {});
 
   asset::AssetId sand = AddMaterial("water_floor", {0.28f, 0.34f, 0.27f}, 0.95f);
-  SpawnBox("water_floor", {10.5f, 0.15f, 10.5f}, c + Vec3{0, -2.3f, 0}, sand, true, true);
-  constexpr f32 kIslandSigma = 2.8f;
-  constexpr f32 kIslandPeak = 0.75f;
-  constexpr f32 kIslandRadius = 5.0f;
-  constexpr u32 kIslandGrid = 40;
-  const Vec3 island_center = c + Vec3{5.0f, 0, -2.0f};
+  SpawnBox("water_floor", {13.5f, 0.15f, 13.5f}, c + Vec3{0, -2.3f, 0}, sand, true, true);
+  constexpr f32 kIslandSigma = 3.2f;
+  constexpr f32 kIslandPeak = 0.85f;
+  constexpr f32 kIslandRadius = 6.0f;
+  constexpr u32 kIslandGrid = 44;
+  const Vec3 island_center = c + Vec3{7.0f, 0, -3.0f};
   asset::Mesh island;
   island.id = asset::MakeAssetId("featuregym/mesh/shore_island");
   asset::MeshLod& island_lod = island.lods.emplace_back();
@@ -1469,7 +1494,7 @@ void FeatureGym::Impl::CreateWater() {
   Spawn(island.id, island_center);
 
   physics.set_water_height([this, c](const Vec3& p, f32* out, Vec3* flow) {
-    if (std::abs(p.x - c.x) > 11 || std::abs(p.z - c.z) > 11) return false;
+    if (std::abs(p.x - c.x) > 14 || std::abs(p.z - c.z) > 14) return false;
     Vec3 orbital_flow{};
     *out = water_height + physics::GerstnerWaveHeight(p.x, p.z, sim_time, &orbital_flow);
     if (flow) *flow = orbital_flow;
@@ -1479,7 +1504,7 @@ void FeatureGym::Impl::CreateWater() {
   const asset::AssetId cube = UploadMesh(
       asset::MakeCube(0.55f, asset::MakeAssetId("featuregym/mesh/floater")), floater_material);
   for (int i = 0; i < 5; ++i) {
-    const Vec3 position = c + Vec3{-5 + i * 2.5f, 1.2f + (i & 1), (i % 3 - 1) * 2.2f};
+    const Vec3 position = c + Vec3{-7 + i * 3.5f, 1.2f + (i & 1), (i % 3 - 1) * 3.0f};
     ecs::Entity entity = Spawn(cube, position);
     physics::BodyId body = physics.AddDynamicBox(position, {0.55f, 0.55f, 0.55f}, 420, {});
     if (body) {
@@ -1492,7 +1517,7 @@ void FeatureGym::Impl::CreateWater() {
 
 void FeatureGym::Impl::CreateMarina() {
   const Vec3 c = Info(Area::kWater).center;
-  boat_berth = c + Vec3{-2.0f, water_height + 0.5f, 2.0f};
+  boat_berth = c + Vec3{-4.0f, water_height + 0.5f, 5.0f};
   boat_circuit_center = c + Vec3{-2.0f, 0.0f, -1.0f};
 
   asset::AssetId hull_material = AddMaterial("boat_hull", {0.82f, 0.13f, 0.10f}, 0.30f, 0.10f);
@@ -1644,6 +1669,7 @@ void FeatureGym::Impl::CreateNetworkBubbles() {
 
 void FeatureGym::Impl::CreatePhysics() {
   const Vec3 c = Info(Area::kPhysics).center;
+  platform_origin = c + Vec3{-5.0f, 0.45f, 4.0f};
   if (!physics.initialized()) {
     RX_WARN(
         "feature gym: physics district is static; rebuild with Jolt for "
@@ -1849,22 +1875,25 @@ void FeatureGym::Impl::CreateCloth() {
 }
 
 void FeatureGym::Impl::CreateDrivingCircuit() {
+  // Sit the proving ground on fresh flat land south of the (enlarged) physics
+  // district.
+  circuit_center = Info(Area::kPhysics).center + Vec3{0, 0, -26};
   const Vec3 c = circuit_center;
 
   // Flat asphalt driving surface. Tires ride suspension raycasts, so the car
   // needs a heightfield (not the box floor) under the whole oval; a constant
   // height field is a perfectly flat asphalt pad. AddHeightField defaults to
   // full-grip asphalt.
-  constexpr u32 kSamples = 33;
-  constexpr f32 kFieldSize = 36.0f;
+  constexpr u32 kSamples = 41;
+  constexpr f32 kFieldSize = 46.0f;
   std::array<f32, kSamples * kSamples> flat{};
   physics.AddHeightField(c + Vec3{-kFieldSize * 0.5f, 0.0f, -kFieldSize * 0.5f}, flat.data(),
                          kSamples, kFieldSize);
 
   // Apron + darker tarmac slab, then the painted racing lines and cones.
-  SpawnBox("circuit_apron", {15.5f, 0.04f, 11.0f}, c + Vec3{0, 0.02f, 0},
+  SpawnBox("circuit_apron", {18.5f, 0.04f, 13.5f}, c + Vec3{0, 0.02f, 0},
            AddMaterial("circuit_apron", {0.15f, 0.16f, 0.18f}, 0.9f), false, false);
-  SpawnBox("circuit_tarmac", {13.5f, 0.05f, 9.0f}, c + Vec3{0, 0.04f, 0},
+  SpawnBox("circuit_tarmac", {16.0f, 0.05f, 11.0f}, c + Vec3{0, 0.04f, 0},
            AddMaterial("circuit_tarmac", {0.055f, 0.06f, 0.07f}, 0.82f), false, false);
 
   constexpr u32 kOvalSegments = 72;
@@ -1900,6 +1929,38 @@ void FeatureGym::Impl::CreateDrivingCircuit() {
   desc.traction_control = true;
   desc.downforce = 2.4f;
   circuit_car = physics.CreateVehicle(desc, c + Vec3{circuit_rx, 1.0f, 0}, 0.0f);
+}
+
+void FeatureGym::Impl::CreateAircraft() {
+  plane_orbit_center = circuit_center;
+
+  // A high-wing single silhouette from a handful of boxes.
+  asset::AssetId body_mat = AddMaterial("plane_body", {0.90f, 0.92f, 0.96f}, 0.34f, 0.05f);
+  asset::AssetId trim_mat = AddMaterial("plane_trim", {0.16f, 0.42f, 0.80f}, 0.4f);
+  plane_body_mesh =
+      UploadMesh(asset::MakeBox(0.42f, 0.46f, 2.7f, asset::MakeAssetId("featuregym/mesh/plane_body")),
+                 body_mat)
+          .hash;
+  plane_wing_mesh =
+      UploadMesh(asset::MakeBox(3.9f, 0.09f, 0.72f, asset::MakeAssetId("featuregym/mesh/plane_wing")),
+                 trim_mat)
+          .hash;
+  plane_tail_mesh =
+      UploadMesh(asset::MakeBox(1.15f, 0.08f, 0.5f, asset::MakeAssetId("featuregym/mesh/plane_tail")),
+                 trim_mat)
+          .hash;
+  plane_fin_mesh =
+      UploadMesh(asset::MakeBox(0.07f, 0.55f, 0.5f, asset::MakeAssetId("featuregym/mesh/plane_fin")),
+                 trim_mat)
+          .hash;
+
+  // Park it on the apron east of the oval; spawn ~1.4 m up and let the gear
+  // settle (zero-input steps in AddSimulation) before the flyby flings it aloft.
+  const Vec3 apron = circuit_center + Vec3{circuit_rx + 6.0f, 1.4f, -circuit_rz - 2.0f};
+  physics::AircraftDesc desc;
+  aircraft = std::make_unique<physics::Aircraft>(physics, desc, apron, 0.0f);
+  if (!aircraft->valid())
+    RX_WARN("feature gym: flyover aircraft is static; rebuild with Jolt for flight");
 }
 
 void FeatureGym::Impl::CreateAnimation() {
@@ -2103,8 +2164,9 @@ void FeatureGym::Impl::AddSimulation() {
           Vec3 ground_velocity{};
           scene::Transform* transform = sim_world.Get<scene::Transform>(character_entity);
           if (transform) {
-            if (transform->position[0] > -22) character_direction = -1;
-            if (transform->position[0] < -39) character_direction = 1;
+            const f32 physics_x = Info(Area::kPhysics).center.x;
+            if (transform->position[0] > physics_x + 8.0f) character_direction = -1;
+            if (transform->position[0] < physics_x - 9.0f) character_direction = 1;
           }
           const int cycle = static_cast<int>(sim_time / 5.0f);
           const bool jump = cycle != jump_cycle && std::fmod(sim_time, 5.0f) < dt * 1.5f;
@@ -2214,6 +2276,50 @@ void FeatureGym::Impl::AddSimulation() {
                         }
                         boat->Update(input, dt);
                       });
+
+  // Aircraft flyover shares the pre-sim staging (aero forces must precede the
+  // physics step, and the plane needs Update every step to hold the gear on the
+  // apron while it waits its turn).
+  scheduler.AddSystem(
+      ecs::Stage::kPreSim, "feature_gym_flyover",
+      [this, alive = simulation_alive](ecs::World&, f32 dt) {
+        if (!*alive || !aircraft || !aircraft->valid()) return;
+        physics::AircraftInput ai;
+        if (active_mode == TourMode::kAircraftFlyby) {
+          if (!plane_flyby_active) {
+            // A light plane cannot bank a tight circle at flying speed without
+            // rolling over, so this is a straight, level pass. Start it far to
+            // the west heading +X and fling it to cruise speed; positioned so it
+            // sweeps to roughly the circuit centre by the time the stop captures.
+            // Yaw +pi/2 -> heading +X: quaternion (0, sin45, 0, cos45).
+            const f32 yaw_east[4] = {0.0f, 0.70710678f, 0.0f, 0.70710678f};
+            const Vec3 start = plane_orbit_center + Vec3{-250.0f, plane_orbit_alt, 0.0f};
+            physics.SetBodyPosition(aircraft->body(), start, yaw_east);
+            physics.ApplyImpulse(aircraft->body(), Vec3{1, 0, 0} * (aircraft->total_mass() * 48.0f));
+            plane_flyby_active = true;
+            plane_time = 0;
+          }
+          plane_time += dt;
+          const physics::AircraftState& s = aircraft->state();
+          const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
+          f32 herr = (kPi * 0.5f) - std::atan2(fwd.x, fwd.z);
+          while (herr > kPi) herr -= 2.0f * kPi;
+          while (herr < -kPi) herr += 2.0f * kPi;
+          // Hold heading +X with a gentle bank + rudder, hold the cruise altitude
+          // with the elevator, full power. Wings stay near level so lift stays
+          // up and the pass is sustainable.
+          ai.throttle = 1.0f;
+          ai.roll = std::clamp(-herr * 0.8f, -0.35f, 0.35f);
+          ai.yaw = std::clamp(-herr * 0.3f, -0.3f, 0.3f);
+          ai.pitch = std::clamp((plane_orbit_alt - s.position.y) * 0.08f -
+                                    s.vertical_speed_mps * 0.06f,
+                                -0.6f, 0.6f);
+        } else {
+          plane_flyby_active = false;
+          plane_time = 0;
+        }
+        aircraft->Update(ai, dt);
+      });
 }
 
 void FeatureGym::Impl::EmitCloth(render::FrameView& view) {
@@ -2409,6 +2515,27 @@ void FeatureGym::Impl::EmitBoat(f32 dt, render::FrameView& view) {
   view.water_disturbances.push_back(wake);
 }
 
+void FeatureGym::Impl::EmitAircraft(render::FrameView& view) {
+  if (!aircraft || !aircraft->valid()) return;
+  const physics::AircraftState& s = aircraft->state();
+  const Mat4 pose = MakeTranslation(s.position) * MakeFromQuat(s.rotation);
+  auto part = [&](u64 mesh, Vec3 offset) {
+    if (!mesh) return;
+    const Mat4 local = MakeTranslation(offset);
+    render::DrawItem d;
+    d.mesh = mesh;
+    d.transform = pose * local;
+    d.prev_transform = plane_previous_valid ? plane_previous * local : d.transform;
+    view.draws.push_back(d);
+  };
+  part(plane_body_mesh, {0, 0, 0});
+  part(plane_wing_mesh, {0, 0.18f, 0.35f});
+  part(plane_tail_mesh, {0, 0.12f, -2.35f});
+  part(plane_fin_mesh, {0, 0.5f, -2.35f});
+  plane_previous = pose;
+  plane_previous_valid = true;
+}
+
 void FeatureGym::Impl::UpdateInstanceExhibit() {
   if (active_mode != TourMode::kStreamedInstanceLifecycle || !prop_mesh || headless) return;
   if (active_mode_elapsed >= 0.65f && prop_lifecycle_phase == 0) {
@@ -2519,6 +2646,8 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
     boat_previous_valid = false;
     boat_previous_pos_valid = false;
   }
+  if (active_mode == TourMode::kAircraftFlyby) EmitAircraft(view);
+  else plane_previous_valid = false;
   if (active == Area::kAnimation) EmitAnimation(dt, view);
   else biped_previous_valid = false;
   if (active == Area::kEffects) {
@@ -2577,13 +2706,13 @@ bool FeatureGym::Impl::BuildTour(ShowcaseCamera& camera) {
     activations.push_back({camera.duration() + delay, mode});
     camera.Add({eye, look, travel, true, label});
   };
-  camera.Add({{-47, 34, 44}, {0, 0, -12}, 0, false, {}});
-  add(TourMode::kOverview, {-47, 34, 44}, {0, 0, -12}, 3.0f, "overview");
+  camera.Add({{-62, 44, 58}, {0, 0, -14}, 0, false, {}});
+  add(TourMode::kOverview, {-62, 44, 58}, {0, 0, -14}, 3.0f, "overview");
 
   auto district = [&](TourMode mode, f32 travel, const char* label) {
     const Area area = AreaForMode(mode);
     const Vec3 center = Info(area).center;
-    add(mode, center + Vec3{0, 6.4f, 13.5f}, center + Vec3{0, 1.1f, 0}, travel, label);
+    add(mode, center + Vec3{0, 8.5f, 18.0f}, center + Vec3{0, 1.3f, 0}, travel, label);
   };
   district(TourMode::kMaterials, 4.0f, "materials");
   const Vec3 materials = Info(Area::kMaterials).center;
@@ -2604,9 +2733,9 @@ bool FeatureGym::Impl::BuildTour(ShowcaseCamera& camera) {
   district(TourMode::kWeatherSnowAurora, 3.0f, "weather_snow_aurora");
   district(TourMode::kWaterOcean, 4.0f, "water_ocean");
   const Vec3 water = Info(Area::kWater).center;
-  add(TourMode::kGerstnerShorelineBuoyancy, water + Vec3{-5, 3.8f, 8.5f},
-      water + Vec3{3.0f, 0.1f, -2.0f}, 3.5f, "gerstner_shoreline_buoyancy");
-  add(TourMode::kBoatCruise, water + Vec3{-7.0f, 4.5f, 16.0f}, water + Vec3{-2.0f, 0.4f, 2.0f}, 4.5f,
+  add(TourMode::kGerstnerShorelineBuoyancy, water + Vec3{-6, 4.5f, 11.0f},
+      water + Vec3{4.0f, 0.1f, -3.0f}, 3.5f, "gerstner_shoreline_buoyancy");
+  add(TourMode::kBoatCruise, water + Vec3{-9.0f, 6.0f, 20.0f}, water + Vec3{-2.0f, 0.5f, 1.0f}, 4.5f,
       "boat_marina_cruise");
   district(TourMode::kEffects, 4.0f, "particles_transparency_hair");
   const Vec3 effects = Info(Area::kEffects).center;
@@ -2615,8 +2744,10 @@ bool FeatureGym::Impl::BuildTour(ShowcaseCamera& camera) {
   const Vec3 physics_center = Info(Area::kPhysics).center;
   add(TourMode::kPhysics, physics_center + Vec3{3.0f, 6.4f, 13.5f},
       physics_center + Vec3{3.0f, 1.1f, 0}, 4.0f, "physics_vehicles_character");
-  add(TourMode::kVehicleCircuit, circuit_center + Vec3{0, 9.5f, 18.0f},
-      circuit_center + Vec3{0, 0.6f, -1.0f}, 5.0f, "vehicle_driving_circuit");
+  add(TourMode::kVehicleCircuit, circuit_center + Vec3{0, 13.0f, 24.0f},
+      circuit_center + Vec3{0, 0.7f, -1.0f}, 5.0f, "vehicle_driving_circuit");
+  add(TourMode::kAircraftFlyby, circuit_center + Vec3{0, plane_orbit_alt + 15.0f, 48.0f},
+      circuit_center + Vec3{0, plane_orbit_alt - 3.0f, 0}, 5.0f, "aircraft_flyby");
   add(TourMode::kTransportFreeNetworkBubbles, effects + Vec3{0, 14.0f, 14.5f},
       effects + Vec3{0, 0.5f, 0}, 3.5f, "transport_free_network_bubbles");
   district(TourMode::kAnimation, 4.0f, "animation_skin_morph_audio");
@@ -2707,10 +2838,10 @@ void FeatureGym::Impl::ApplyArea(Area area) {
       settings.water_reflections = true;
       settings.ssr = true;
       settings.water_rest_height = water_height;
-      settings.shore_island[0] = Info(Area::kWater).center.x + 5.0f;
-      settings.shore_island[1] = Info(Area::kWater).center.z - 2.0f;
-      settings.shore_island[2] = 2.8f;
-      settings.shore_island[3] = 0.75f;
+      settings.shore_island[0] = Info(Area::kWater).center.x + 7.0f;
+      settings.shore_island[1] = Info(Area::kWater).center.z - 3.0f;
+      settings.shore_island[2] = 3.2f;
+      settings.shore_island[3] = 0.85f;
       break;
     case Area::kEffects:
       settings.bloom = true;
@@ -2867,6 +2998,7 @@ void FeatureGym::Impl::ApplyTourMode(TourMode mode) {
     case TourMode::kJoltProceduralStrandGroom:
     case TourMode::kPhysics:
     case TourMode::kVehicleCircuit:
+    case TourMode::kAircraftFlyby:
     case TourMode::kTransportFreeNetworkBubbles:
     case TourMode::kAnimation:
     case TourMode::kInteriorFog:
