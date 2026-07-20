@@ -587,6 +587,8 @@ struct FeatureGym::Impl {
   void CreateAnimation();
   void CreatePost();
   void CreateCameraExhibit();
+  void CreateLabels();
+  void AddLabel(const Vec3& anchor, std::string_view text, f32 height, u32 color);
   void StartAudio();
   void AddSimulation();
   void Emit(f32 dt, render::FrameView& view);
@@ -660,6 +662,7 @@ struct FeatureGym::Impl {
   base::Vector<render::WboitInstance> oit;
   base::Vector<render::GaussianInstance> gaussians;
   base::Vector<render::DebugLine> lines;
+  std::vector<render::WorldText> labels;
 
   u64 morph_mesh = 0;
   Mat4 morph_transform = Mat4::Identity();
@@ -920,6 +923,7 @@ void FeatureGym::Impl::Create() {
   CreateAnimation();
   CreatePost();
   CreateCameraExhibit();
+  CreateLabels();
   AddSimulation();
   StartAudio();
 
@@ -2090,6 +2094,41 @@ void FeatureGym::Impl::CreateCameraExhibit() {
   }
 }
 
+void FeatureGym::Impl::AddLabel(const Vec3& anchor, std::string_view text, f32 height, u32 color) {
+  render::WorldText label;
+  label.position = anchor;
+  label.text = std::string(text);
+  label.size = height;
+  label.rgba = color;
+  labels.push_back(std::move(label));
+}
+
+void FeatureGym::Impl::CreateLabels() {
+  // A floating title + one-line "what it does" caption above each district, plus
+  // captions on the vehicle exhibits. Camera-facing WorldText billboards, so
+  // they stay readable from every tour stop.
+  struct Entry {
+    Area area;
+    const char* text;
+  };
+  const Entry districts[] = {
+      {Area::kMaterials, "MATERIALS\nSPLIT PBR + SSS"},
+      {Area::kLighting, "LIGHTING\nRASTER RT RCGI"},
+      {Area::kGeometry, "GEOMETRY\nLOD + VIRTUAL GEO"},
+      {Area::kAtmosphere, "ATMOSPHERE\nVOLUMETRIC WEATHER"},
+      {Area::kWater, "WATER + MARINA\nOCEAN BOAT WAKE"},
+      {Area::kEffects, "EFFECTS\nPARTICLES HAIR OIT"},
+      {Area::kPhysics, "PHYSICS\nJOLT RIGID + CLOTH"},
+      {Area::kAnimation, "ANIMATION\nSKIN MORPH AUDIO"},
+      {Area::kPost, "POST + DISPLAY\nTAA FSR3 DLSS XESS"},
+  };
+  for (const Entry& e : districts)
+    AddLabel(Info(e.area).center + Vec3{0, 9.5f, 0}, e.text, 1.4f, 0xf2f4f8ff);
+
+  AddLabel(circuit_center + Vec3{0, 9.0f, 0}, "DRIVING CIRCUIT\nJOLT WHEELED VEHICLE", 1.6f,
+           0xffd24bff);
+}
+
 void FeatureGym::Impl::StartAudio() {
   if (headless || !ctx.audio || !ctx.audio->active()) return;
   const std::filesystem::path path = FeatureAssetPath("spatial_tone.wav");
@@ -2670,6 +2709,25 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
   if (active == Area::kMaterials) view.decals = decals;
   EmitNetworkBubbles(view);
   view.debug_lines = std::span<const render::DebugLine>(lines.data(), lines.size());
+  view.world_texts = labels;  // floating district + exhibit captions
+  // Captions that ride the active vehicle exhibit.
+  auto tag = [&](const Vec3& p, const char* text, f32 h, u32 color) {
+    render::WorldText t;
+    t.position = p;
+    t.text = text;
+    t.size = h;
+    t.rgba = color;
+    view.world_texts.push_back(std::move(t));
+  };
+  if (active_mode == TourMode::kVehicleCircuit && circuit_car) {
+    Vec3 p;
+    f32 r[4];
+    if (physics.GetVehicleTransform(circuit_car, &p, r)) tag(p + Vec3{0, 2.2f, 0}, "CAR", 1.1f, 0xffd24bff);
+  }
+  if (active == Area::kWater && boat && boat->valid())
+    tag(boat->state().position + Vec3{0, 2.7f, 0}, "MOTORBOAT", 1.1f, 0xff9a6aff);
+  if (active_mode == TourMode::kAircraftFlyby && aircraft && aircraft->valid())
+    tag(aircraft->state().position + Vec3{0, 2.2f, 0}, "AIRCRAFT", 1.4f, 0x8ac6ffff);
 
   for (size_t i = 0; i < water_bodies.size(); ++i) {
     Vec3 position;

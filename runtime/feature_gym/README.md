@@ -27,6 +27,10 @@ lake and lays down a wake, and a fixed-wing aircraft (strip-theory aero, prop,
 landing gear) is flung off the apron and banks around a circle at altitude over
 the circuit. All three fall back to static props without Jolt.
 
+Every district and the vehicle exhibits carry a floating caption naming what
+they demonstrate, drawn with the engine's `render::WorldText` API (camera-facing
+stroke-font billboards in the debug-line pass, no font atlas).
+
 Regenerate the binary inputs after changing the generator:
 
 ```sh
