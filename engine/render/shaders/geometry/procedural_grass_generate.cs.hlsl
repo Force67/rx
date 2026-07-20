@@ -193,7 +193,7 @@ bool SampleSurface(uint surface_candidate, uint seed, out float3 position,
   normal = normalize(cross(p1.xyz - p0.xyz, p2.xyz - p0.xyz));
   density = saturate(p0.w);
   growth = max(p1.w, 0.0);
-  type_index = min(asuint(p2.w), push.field.z - 1u);
+  type_index = min(meta.w, push.field.z - 1u);
   return all(isfinite(position)) && all(isfinite(normal)) &&
          isfinite(density) && isfinite(growth);
 }

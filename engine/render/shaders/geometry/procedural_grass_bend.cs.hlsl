@@ -88,6 +88,9 @@ void main(uint3 dispatch_id : SV_DispatchThreadID) {
     float4 position_radius = asfloat(interactions.Load4(address + 0u));
     float4 direction_strength = asfloat(interactions.Load4(address + 16u));
     if (!all(isfinite(position_radius)) || !all(isfinite(direction_strength))) continue;
+    // Match Prepare's CPU validation: a nonpositive radius or negligible
+    // strength means no footprint, not a texel-sized one.
+    if (position_radius.w <= 0.0 || abs(direction_strength.w) <= 1e-4) continue;
 
     float texel_world = push.field.z / float(kResolution);
     float radius = clamp(max(position_radius.w, texel_world * 0.75), 0.01,

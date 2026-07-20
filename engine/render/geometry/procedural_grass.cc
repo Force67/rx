@@ -17,8 +17,8 @@ namespace {
 struct alignas(16) GpuSurface {
   f32 p0_density[4];
   f32 p1_growth[4];
-  f32 p2_type[4];
-  u32 meta[4];  // first candidate, candidate count, stable surface id, unused
+  f32 p2_pad[4];
+  u32 meta[4];  // first candidate, candidate count, stable surface id, type
 };
 static_assert(sizeof(GpuSurface) == 64);
 
@@ -560,12 +560,12 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
       dst.p0_density[3] = std::clamp(src.density, 0.0f, 1.0f);
       std::copy_n(src.p1, 3, dst.p1_growth);
       dst.p1_growth[3] = std::max(src.growth, 0.0f);
-      std::copy_n(src.p2, 3, dst.p2_type);
-      dst.p2_type[3] = std::bit_cast<f32>(std::min(src.type, type_count - 1));
+      std::copy_n(src.p2, 3, dst.p2_pad);
+      dst.p2_pad[3] = 0.0f;
       dst.meta[0] = surface_candidates;
       dst.meta[1] = count;
       dst.meta[2] = src.surface_id;
-      dst.meta[3] = 0;
+      dst.meta[3] = std::min(src.type, type_count - 1);
       surface_candidates += count;
       if (surface_candidates >= max_surface_candidates)
         break;

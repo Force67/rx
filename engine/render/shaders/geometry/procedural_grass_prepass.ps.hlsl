@@ -1,5 +1,7 @@
 #include "procedural_grass.hlsli"
 
+#include "gi/material_class.hlsli"
+
 float2 OctEncode(float3 direction) {
   direction /= abs(direction.x) + abs(direction.y) + abs(direction.z);
   float2 encoded = direction.xz;
@@ -25,7 +27,8 @@ PsOut main(GrassVsOut input) {
   float3 stable_normal = normalize(lerp(input.normal, float3(0.0, 1.0, 0.0),
                                         input.lod * 0.55));
   float roughness = lerp(type.material.x, 1.0, input.lod * 0.7);
-  output.normal = float4(OctEncode(stable_normal), clamp(roughness, 0.045, 1.0), 1.0);
+  output.normal = float4(OctEncode(stable_normal), clamp(roughness, 0.045, 1.0),
+                         kMatClassVegetation);
   float2 current = input.curr_clip.xy / input.curr_clip.w;
   float2 previous = input.prev_clip.xy / input.prev_clip.w;
   output.motion = (previous - current) * 0.5;
