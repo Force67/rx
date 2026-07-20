@@ -59,7 +59,8 @@ std::filesystem::path PresetDir() {
 #endif
 }
 
-const char* kAaModes[] = {"None", "TAA", "FSR3 Upscaler", "DLSS Upscaler"};
+const char* kAaModes[] = {"None",     "TAA",      "FSR3 Upscaler", "DLSS Upscaler",
+                          "2x MSAA", "4x MSAA", "8x MSAA"};
 const char* kQualities[] = {"Native AA (1.0x)", "Quality (1.5x)", "Balanced (1.7x)",
                             "Performance (2.0x)"};
 const char* kTonemaps[] = {"ACES", "Reinhard", "None", "AgX"};
@@ -364,10 +365,16 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
 }
 
 void DebugUi::DrawDisplayTab(render::Renderer& renderer, render::RenderSettings& settings) {
-  int aa = settings.aa_mode == render::AntiAliasingMode::kNone   ? 0
-           : settings.aa_mode == render::AntiAliasingMode::kTaa   ? 1
-           : settings.upscaler == render::UpscalerKind::kDlss     ? 3
-                                                                  : 2;
+  int aa = 2;
+  if (settings.aa_mode == render::AntiAliasingMode::kNone) aa = 0;
+  else if (settings.aa_mode == render::AntiAliasingMode::kTaa) aa = 1;
+  else if (settings.aa_mode == render::AntiAliasingMode::kMsaa) {
+    if (settings.msaa_samples >= 8) aa = 6;
+    else if (settings.msaa_samples >= 4) aa = 5;
+    else aa = 4;
+  } else if (settings.upscaler == render::UpscalerKind::kDlss) {
+    aa = 3;
+  }
   if (ImGui::Combo("Mode", &aa, kAaModes, IM_ARRAYSIZE(kAaModes))) {
     switch (aa) {
       case 0:
@@ -385,6 +392,13 @@ void DebugUi::DrawDisplayTab(render::Renderer& renderer, render::RenderSettings&
       case 3:
         settings.upscaler = render::UpscalerKind::kDlss;
         settings.aa_mode = render::AntiAliasingMode::kUpscaler;
+        break;
+      case 4:
+      case 5:
+      case 6:
+        settings.aa_mode = render::AntiAliasingMode::kMsaa;
+        settings.msaa_samples = aa == 6 ? 8u : aa == 5 ? 4u : 2u;
+        settings.upscaler = render::UpscalerKind::kNone;
         break;
     }
   }
@@ -651,6 +665,7 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, FlyCamera& camera,
   ImGui::BeginDisabled(!caps || !caps->fill_mode_non_solid);
   ImGui::Checkbox("Wireframe", &settings.wireframe);
   ImGui::EndDisabled();
+  ImGui::Checkbox("Procedural grass", &settings.procedural_grass);
   ImGui::BeginDisabled(!caps || !caps->mesh_shaders);
   ImGui::Checkbox("Mesh-shader LOD path", &settings.mesh_shader_lod);
   ImGui::EndDisabled();

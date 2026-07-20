@@ -867,6 +867,7 @@ GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usa
   GpuBuffer staging = CreateBuffer(data.size(), kBufferUsageTransferSrc, true);
   if (!staging.mapped) return {};
   std::memcpy(staging.mapped, data.data(), data.size());
+  FlushBuffer(staging, 0, data.size());
 
   GpuBuffer buffer = CreateBuffer(data.size(), usage | kBufferUsageTransferDst, false);
   ImmediateSubmit([&](CommandList& cmd) {
@@ -874,6 +875,14 @@ GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usa
   });
   DestroyBuffer(staging);
   return buffer;
+}
+
+void VulkanDevice::FlushBuffer(const GpuBuffer& buffer, u64 offset, u64 size) {
+  BufferRecord* record = Rec(buffer.handle);
+  if (!record || !record->allocation || size == 0) return;
+  if (vmaFlushAllocation(allocator_, record->allocation, offset, size) != VK_SUCCESS) {
+    RX_ERROR("mapped buffer flush failed ({} bytes at {})", size, offset);
+  }
 }
 
 void VulkanDevice::FreeBufferRecord(BufferRecord* record) {

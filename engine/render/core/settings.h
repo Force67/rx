@@ -140,6 +140,9 @@ struct RenderSettings {
   bool gpu_occlusion = true;  // hi-z occlusion culling against last frame's depth
   bool distance_lod = false;  // pick coarser mesh lods by distance; off = always finest (it's 2026)
   bool mesh_shader_lod = false;  // optional VK_EXT_mesh_shader opaque path (per-meshlet gpu cull)
+  // GPU-generated cubic-Bezier blade fields submitted through FrameView. No
+  // field means zero passes and allocations remain dormant after startup.
+  bool procedural_grass = true;
   DebugView debug_view = DebugView::kOff;  // isolate a shading channel
 
   bool sky = true;  // procedural atmosphere as the background
