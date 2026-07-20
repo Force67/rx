@@ -17,7 +17,8 @@ viewer runtime in place of the game.
   denoising, screen-space SSS, strand hair, virtual textures, virtual geometry
   (cluster-DAG LOD, gpu-driven two-pass hi-z occlusion culling, 64-bit
   visibility buffer with compute + mesh-shader rasterization, instancing),
-  froxel volumetrics, local shadow atlas, decals, lit
+  froxel volumetrics, procedural grass ([design](PROCEDURAL_GRASS.md)), local
+  shadow atlas, decals, lit
   translucency, FFT ocean, gaussian splats, GPU particles, HDR10 output,
   dynamic resolution, texture streaming, async compute, VRS, meshlet path.
 - **engine/asset** - glTF loading (cgltf) including morph targets and weight
@@ -40,7 +41,7 @@ viewer runtime in place of the game.
   for using rx as the engine of your own game.
 - **runtime/** - the `rx` viewer (the reference `app::Application`):
   `--gltf <scene>` or `--demo <id>` (water,
-  materials, cornell, cloth, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
+  materials, cornell, cloth, grass, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
   meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx),
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`

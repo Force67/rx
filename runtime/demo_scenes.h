@@ -16,6 +16,7 @@
 #include "net/bubble.h"
 #include "net/bubble_debug.h"
 #include "render/core/renderer.h"
+#include "demo_grass.h"
 #include "demo_nav.h"
 #include "demo_placement.h"
 #include "demo_ship.h"
@@ -37,6 +38,8 @@ class DemoScenes {
 
   // Dispatches on config.demo_scene; the default spins a cube.
   void CreateDemoScene();
+  // Advances demo-owned state that must be visible to ECS draw gathering.
+  void Update(f32 dt);
   // Appends the live demo effects (particles, gaussians, oit, lights, fur, gpu
   // particles) into this frame's render view.
   void EmitToView(f32 dt, render::FrameView& view);
@@ -233,6 +236,9 @@ class DemoScenes {
   // dithering streaming a forest around the camera). Non-null only for that
   // demo.
   std::unique_ptr<PlacementDemo> placement_;
+
+  // --demo grass: GPU-generated cubic-Bezier blades over semantic hills.
+  std::unique_ptr<GrassDemo> grass_;
 
   // --demo gym: the character/inventory reference gym (graybox + tuning panel).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.

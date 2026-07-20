@@ -233,6 +233,7 @@ void Viewer::DriveSunFromClock() {
 void Viewer::OnUpdate(f32 frame_delta) {
   DriveSunFromClock();
   debug_ui_.BeginFrame();
+  demos_->Update(frame_delta);
   // The gym owns its camera + input: route input to the character controller
   // instead of the free-fly camera and let it capture the cursor for mouse look.
   if (GymDemo* gym = demos_->gym(); gym && window_) {

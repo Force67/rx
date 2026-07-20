@@ -7,6 +7,7 @@ set(RX_RUNTIME_SOURCES
   camera_input.cc
   viewer_input.cc
   demo_scenes.cc
+  demo_grass.cc
   demo_nav.cc
   demo_placement.cc
   placement_demo_assets.cc
