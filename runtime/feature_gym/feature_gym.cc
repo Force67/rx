@@ -196,15 +196,6 @@ struct GymMotion {
   f32 phase = 0;
 };
 
-struct Particle {
-  Vec3 position{};
-  Vec3 velocity{};
-  Vec3 color{1, 1, 1};
-  f32 life = 0;
-  f32 max_life = 1;
-  f32 size = 0.1f;
-};
-
 struct BubbleAgent {
   f32 time = 0;
   f32 rate_x = 0.3f;
@@ -591,7 +582,6 @@ struct FeatureGym::Impl {
   void EmitStrandGroom();
   void EmitNetworkBubbles(render::FrameView& view);
   void EmitCameraExhibit(f32 dt, render::FrameView& view);
-  void UpdateParticles(f32 dt, render::FrameView& view);
   void EmitCloth(render::FrameView& view);
   void EmitAnimation(f32 dt, render::FrameView& view);
   void EmitVehicles(render::FrameView& view);
@@ -656,10 +646,6 @@ struct FeatureGym::Impl {
   base::Vector<render::WboitInstance> oit;
   base::Vector<render::GaussianInstance> gaussians;
   base::Vector<render::DebugLine> lines;
-  base::Vector<Particle> particles;
-  u32 particle_seed = 0x6d2b79f5u;
-  f32 particle_spawn = 0;
-  Vec3 particle_emitter{33, 0.5f, -12};
 
   u64 morph_mesh = 0;
   Mat4 morph_transform = Mat4::Identity();
@@ -2018,58 +2004,6 @@ void FeatureGym::Impl::AddSimulation() {
       });
 }
 
-void FeatureGym::Impl::UpdateParticles(f32 dt, render::FrameView& view) {
-  dt = std::min(dt, 0.05f);
-  auto random = [&]() {
-    particle_seed ^= particle_seed << 13;
-    particle_seed ^= particle_seed >> 17;
-    particle_seed ^= particle_seed << 5;
-    return static_cast<f32>(particle_seed & 0xffffffu) / 16777216.0f;
-  };
-  for (size_t i = 0; i < particles.size();) {
-    Particle& particle = particles[i];
-    particle.life -= dt;
-    if (particle.life <= 0) {
-      particles[i] = particles.back();
-      particles.pop_back();
-      continue;
-    }
-    particle.velocity.y -= 1.2f * dt;
-    particle.position += particle.velocity * dt;
-    ++i;
-  }
-  particle_spawn += dt * 460.0f;
-  const u32 count = static_cast<u32>(particle_spawn);
-  particle_spawn -= count;
-  for (u32 i = 0; i < count && particles.size() < 6000; ++i) {
-    const f32 angle = random() * 2.0f * kPi;
-    Particle particle;
-    particle.position = particle_emitter;
-    particle.velocity = {std::cos(angle) * (0.5f + random()), 2.8f + random() * 2.4f,
-                         std::sin(angle) * (0.5f + random())};
-    particle.max_life = particle.life = 1.4f + random() * 1.2f;
-    particle.size = 0.08f + random() * 0.11f;
-    particle.color = {0.25f + random() * 0.25f, 0.55f + random() * 0.4f, 1.0f};
-    particles.push_back(particle);
-  }
-  for (const Particle& particle : particles) {
-    const f32 life = particle.life / particle.max_life;
-    render::ParticleInstance instance;
-    instance.pos[0] = particle.position.x;
-    instance.pos[1] = particle.position.y;
-    instance.pos[2] = particle.position.z;
-    instance.size = particle.size;
-    instance.color[0] = particle.color.x;
-    instance.color[1] = particle.color.y;
-    instance.color[2] = particle.color.z;
-    instance.color[3] = life * life;
-    instance.prev_pos[0] = particle.position.x - particle.velocity.x * dt;
-    instance.prev_pos[1] = particle.position.y - particle.velocity.y * dt;
-    instance.prev_pos[2] = particle.position.z - particle.velocity.z * dt;
-    view.particles.push_back(instance);
-  }
-}
-
 void FeatureGym::Impl::EmitCloth(render::FrameView& view) {
   if (!cloth_mesh || !cloth_width ||
       !physics.GetClothPositions(cloth_id, cloth_positions.data(),
@@ -2327,7 +2261,10 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
   else biped_previous_valid = false;
   if (active == Area::kEffects) {
     EmitStrandGroom();
-    UpdateParticles(dt, view);
+    // The renderer draws either the cpu billboard set (view.particles) or the
+    // gpu-simulated fountain per frame, never both (renderer.cc: "Either a
+    // cpu-uploaded set or the gpu-simulated fountain"). This district showcases
+    // the gpu fire fountain, so no cpu billboard set is fed here.
     view.gpu_particle_count = 24000;
     view.gpu_particle_emitter = Info(Area::kEffects).center + Vec3{-5.5f, 0.4f, 4.0f};
     view.gpu_particle_mode = 1;
