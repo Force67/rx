@@ -24,6 +24,10 @@ static_assert(sizeof(GpuSurface) == 64);
 
 constexpr u32 kSampleCounts[4] = {1, 2, 4, 8};
 
+// DrawPush control[3]: bit 31 selects a descending arena walk in the vertex
+// shader, the low bits carry the base slot for the draw.
+constexpr u32 kArenaDescendingBit = 1u << 31;
+
 struct CandidateRing {
   i32 min_fine_x = 0;
   i32 min_fine_z = 0;
@@ -956,7 +960,7 @@ void ProceduralGrass::Draw(CommandList& cmd,
   cmd.Push(draw);
   cmd.DrawIndexedIndirectCount(slot.args, 0, slot.counters, 16, 1, 20);
   draw.control[2] = kFarSegments;
-  draw.control[3] = kMaxBlades - 1u;
+  draw.control[3] = (kMaxBlades - 1u) | kArenaDescendingBit;
   cmd.Push(draw);
   cmd.DrawIndexedIndirectCount(slot.args, 20, slot.counters, 20, 1, 20);
   draw.control[2] = kUltraSegments;

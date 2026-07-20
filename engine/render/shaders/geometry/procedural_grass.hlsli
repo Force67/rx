@@ -56,11 +56,13 @@ GrassTypeData LoadGrassType(uint type_index) {
 }
 
 GrassInstance LoadGrassInstance(uint instance_index) {
-  // Near (7 segments) ascends from base 0, far (3) descends from the arena
-  // top, and distant ultra (1) ascends from the region past the shared arena;
-  // control.w carries the base for the current draw.
-  uint arena_index = push.control.z == 3u ? push.control.w - instance_index
-                                          : push.control.w + instance_index;
+  // control.w: bit 31 selects a descending arena walk, the low bits are the
+  // base slot. Near ascends from 0, far descends from the shared arena top,
+  // and distant ultra ascends from the region past it.
+  uint arena_base = push.control.w & 0x7fffffffu;
+  uint arena_index = (push.control.w & 0x80000000u) != 0u
+                         ? arena_base - instance_index
+                         : arena_base + instance_index;
   uint address = arena_index * 72u;
   GrassInstance instance;
   instance.position_height = asfloat(grass_instances.Load4(address + 0u));

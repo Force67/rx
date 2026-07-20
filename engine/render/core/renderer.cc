@@ -4677,10 +4677,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       grass_frame.wind_yaw = settings_.weather.wind_yaw;
       grass_frame.gustiness = settings_.weather.gustiness;
       // World width of one pixel at unit view depth, for the sub-pixel blade
-      // width clamp.
+      // width clamp. m[5] is negative under the reversed-Z Y-flip projection.
       grass_frame.pixel_scale =
-          proj.m[5] > 0.0f ? 2.0f / (proj.m[5] * static_cast<f32>(render_height_))
-                           : 0.0f;
+          proj.m[5] != 0.0f
+              ? 2.0f / (std::fabs(proj.m[5]) * static_cast<f32>(render_height_))
+              : 0.0f;
       grass_active = procedural_grass_.Prepare(
           *view.grass_domain,
           {view.grass_interactions.data(), view.grass_interactions.size()},

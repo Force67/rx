@@ -56,6 +56,13 @@ struct PackedGrassInstance {
 // its own arena region and budget past the shared near/far arena.
 static const uint kMaxUltraBlades = 1u << 17u;
 
+// Mirror ProceduralGrass::kNearIndices / kFarIndices / kUltraIndices (six
+// indices per segment over the shared ribbon index buffer); the CPU values
+// are pinned by procedural_grass_test.cc.
+static const uint kNearIndexCount = 42u;
+static const uint kFarIndexCount = 18u;
+static const uint kUltraIndexCount = 6u;
+
 // Near/far instances stage from slot 0 upward, ultra instances from slot 63
 // downward; a phase only ever produces one of the two families so the regions
 // cannot collide.
@@ -388,11 +395,11 @@ void main(uint3 dispatch_id : SV_DispatchThreadID, uint group_index : SV_GroupIn
       uint near_blades = min(count.y, push.counts.z);
       uint far_blades = min(count.z, push.counts.z - near_blades);
       uint ultra_blades = min(count.w, kMaxUltraBlades);
-      draw_args.Store4(0u, uint4(42u, near_blades, 0u, 0u));
+      draw_args.Store4(0u, uint4(kNearIndexCount, near_blades, 0u, 0u));
       draw_args.Store(16u, 0u);
-      draw_args.Store4(20u, uint4(18u, far_blades, 0u, 0u));
+      draw_args.Store4(20u, uint4(kFarIndexCount, far_blades, 0u, 0u));
       draw_args.Store(36u, 0u);
-      draw_args.Store4(40u, uint4(6u, ultra_blades, 0u, 0u));
+      draw_args.Store4(40u, uint4(kUltraIndexCount, ultra_blades, 0u, 0u));
       draw_args.Store(56u, 0u);
       counters.Store(16u, near_blades > 0u ? 1u : 0u);
       counters.Store(20u, far_blades > 0u ? 1u : 0u);
