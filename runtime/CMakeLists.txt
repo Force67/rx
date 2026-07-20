@@ -14,6 +14,7 @@ set(RX_RUNTIME_SOURCES
   demo_gym.cc
   demo_puppet.cc
   demo_drive.cc
+  feature_gym/feature_gym.cc
   scene_hook_demo.cc
   scene_hook_rhi_demo.cc
   fly_camera.cc
@@ -104,6 +105,21 @@ target_compile_definitions(rx PRIVATE
   RX_VERSION="${PROJECT_VERSION}")
 rx_set_warnings(rx)
 rx_enable_mimalloc(rx)
+
+file(GLOB RX_FEATURE_GYM_ASSETS CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_SOURCE_DIR}/feature_gym/assets/*)
+set_property(TARGET rx APPEND PROPERTY LINK_DEPENDS ${RX_FEATURE_GYM_ASSETS})
+add_custom_command(TARGET rx POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/feature_gym/assets
+    $<TARGET_FILE_DIR:rx>/feature_gym-assets
+  COMMENT "Copying feature-gym assets")
+add_custom_target(rx-feature-gym-assets ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory
+    ${CMAKE_CURRENT_SOURCE_DIR}/feature_gym/assets
+    $<TARGET_FILE_DIR:rx>/feature_gym-assets
+  DEPENDS ${RX_FEATURE_GYM_ASSETS}
+  COMMENT "Refreshing feature-gym assets")
 
 # --demo scenehook: the app builds its own raw-Vulkan pipeline through the render
 # interop, so its shaders embed here instead of in the render module. They read a

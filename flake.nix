@@ -110,6 +110,7 @@
             runHook preInstall
             mkdir -p $out/bin
             cp runtime/rx $out/bin/
+            cp -r runtime/feature_gym-assets $out/bin/
             runHook postInstall
           '';
 

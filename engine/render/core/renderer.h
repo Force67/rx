@@ -115,6 +115,10 @@ struct RendererDesc {
   // this field for the programmatic equivalent (OnInitialize runs after
   // renderer init, too late).
   bool software_gi = false;
+  // Seed software GI only when the selected adapter has no ray-query path.
+  // Useful for apps that enable RCGI later but should not pay the SDF cost on
+  // RT-capable hardware.
+  bool software_gi_fallback = false;
   VulkanDeviceExtras vulkan;
 };
 
@@ -443,6 +447,7 @@ public:
   void SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas = {});
 
   const DeviceCaps *caps() const;
+  bool raytracing_available() const { return rt_available_; }
   Device *device() { return device_.get(); }
   Format swapchain_format() const;
   u32 swapchain_image_count() const;

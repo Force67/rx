@@ -1059,7 +1059,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
   // once.)
   if (RcgiSwOpt.overridden())
     rcgi_force_software_ = RcgiSwOpt;
-  const bool want_sdf = desc.software_gi || SdfOpt.get() ||
+  const bool want_sdf = desc.software_gi || (desc.software_gi_fallback && !rt_available_) ||
+                        SdfOpt.get() ||
                         rcgi_force_software_ ||
                         (settings_.rcgi && !rt_available_);
 
