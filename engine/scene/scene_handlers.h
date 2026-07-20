@@ -1,6 +1,8 @@
 #ifndef RX_SCENE_SCENE_HANDLERS_H_
 #define RX_SCENE_SCENE_HANDLERS_H_
 
+#include "core/export.h"
+
 namespace rx::script {
 class HandlerRegistry;
 }
@@ -12,7 +14,7 @@ namespace rx::scene {
 // no gateway interface. The app calls this (alongside each other system's
 // SetupXxxCommands) once at engine start. The command names use the game-facing
 // "World." namespace, independent of the engine module they live in.
-void SetupSceneCommands(script::HandlerRegistry& reg);
+RX_SCENE_EXPORT void SetupSceneCommands(script::HandlerRegistry& reg);
 
 }  // namespace rx::scene
 

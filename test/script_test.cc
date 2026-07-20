@@ -6,7 +6,10 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
+#include <new>
 #include <string>
+#include <utility>
 
 #include "core/math.h"
 #include "ecs/entity.h"
@@ -57,10 +60,47 @@ void TestScriptString() {
 
   CHECK(script::HashStr("World.Teleport") == script::HashStr("World.Teleport"));
   CHECK(script::HashStr("World.Teleport") != script::HashStr("World.MoveBy"));
+  CHECK(static_cast<rx::u64>(script::HashStr("World.Teleport")) ==
+        rx::Fnv1a("World.Teleport"));
 
   script::ScriptString empty;
   CHECK(empty.empty());
   CHECK(std::string(empty.c_str()).empty());
+
+  bool rejected = false;
+  try {
+    script::ScriptString too_large(
+        script::ScriptStringView(nullptr, std::numeric_limits<rx::u32>::max()));
+  } catch (const std::bad_array_new_length&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+
+  script::ScriptArena arena(16);
+  rejected = false;
+  try {
+    script::ArenaCopy(
+        arena, script::ScriptStringView(nullptr, std::numeric_limits<rx::u32>::max()));
+  } catch (const std::bad_array_new_length&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+
+  rejected = false;
+  try {
+    arena.Alloc(std::numeric_limits<size_t>::max(), alignof(std::max_align_t));
+  } catch (const std::bad_array_new_length&) {
+    rejected = true;
+  }
+  CHECK(rejected);
+
+  rejected = false;
+  try {
+    arena.Alloc(1, 3);
+  } catch (const std::bad_array_new_length&) {
+    rejected = true;
+  }
+  CHECK(rejected);
 }
 
 void TestInterner() {
@@ -143,6 +183,76 @@ void TestDispatch() {
   CHECK(desc->sig.params[0] == script::ScriptType::kEntity);
   CHECK(desc->sig.params[1] == script::ScriptType::kVec3);
   CHECK(desc->name.view() == "World.Teleport");  // stored as a view, not copied
+
+  // Mutating commands must reject stale and malformed entity handles. The ECS
+  // reuses the destroyed slot, so writing through `stale` would corrupt `live`
+  // if the generation were not checked before the Add fallback.
+  ecs::Entity stale = rig.world.Create();
+  rig.world.Destroy(stale);
+  ecs::Entity live = rig.world.Create();
+  CHECK(live.index == stale.index && live.generation != stale.generation);
+  rig.world.Add(live, scene::Transform{{7, 0, 0}});
+  rig.world.Add(live, scene::Name{"live"});
+  rig.Call("World.Teleport", {V::EntityRef(stale), V::Vec(Vec3{99, 0, 0})});
+  rig.Call("World.SetName", {V::EntityRef(stale), V::Str("stale")});
+  rig.Call("World.Teleport", {});
+  CHECK(rig.world.Get<scene::Transform>(live)->position[0] == 7);
+  CHECK(rig.world.Get<scene::Name>(live)->value == "live");
+}
+
+void TestWorldSpaceDispatch() {
+  Rig rig;
+  using V = script::ScriptValue;
+
+  ecs::Entity parent = rig.world.Create();
+  const rx::Quat rz = rx::QuatFromAxisAngle({0, 0, 1}, 3.14159265f * 0.5f);
+  rig.world.Add(parent,
+                scene::Transform{{10, 0, 0}, {rz.x, rz.y, rz.z, rz.w}, 2.0f});
+  ecs::Entity child = rig.world.Create();
+  rig.world.Add(child, scene::Transform{{1, 0, 0}});
+  rig.world.Add(child, scene::Parent{parent});
+
+  V ret = rig.Call("World.GetPosition", {V::EntityRef(child)});
+  CHECK(std::fabs(ret.as_vec3().x - 10.0f) < 1e-4f);
+  CHECK(std::fabs(ret.as_vec3().y - 2.0f) < 1e-4f);
+
+  rig.Call("World.Teleport", {V::EntityRef(child), V::Vec(Vec3{8, 0, 0})});
+  scene::Transform* local = rig.world.Get<scene::Transform>(child);
+  CHECK(std::fabs(local->position[0] - 0.0f) < 1e-4f);
+  CHECK(std::fabs(local->position[1] - 1.0f) < 1e-4f);
+  ret = rig.Call("World.GetPosition", {V::EntityRef(child)});
+  CHECK(std::fabs(ret.as_vec3().x - 8.0f) < 1e-4f);
+  CHECK(std::fabs(ret.as_vec3().y - 0.0f) < 1e-4f);
+
+  ecs::Entity other = rig.world.Create();
+  rig.world.Add(other, scene::Transform{{8, 0, 0}});
+  ret = rig.Call("World.DistanceBetween", {V::EntityRef(child), V::EntityRef(other)});
+  CHECK(std::fabs(ret.as_float()) < 1e-4);
+
+  // Any nonzero parent scale is invertible, even below the editor's normal
+  // range. Teleport must not silently reject it as singular.
+  ecs::Entity tiny_parent = rig.world.Create();
+  rig.world.Add(tiny_parent, scene::Transform{{0, 0, 0}, {0, 0, 0, 1}, 1e-14f});
+  ecs::Entity tiny_child = rig.world.Create();
+  rig.world.Add(tiny_child, scene::Transform{});
+  rig.world.Add(tiny_child, scene::Parent{tiny_parent});
+  rig.Call("World.Teleport", {V::EntityRef(tiny_child), V::Vec(Vec3{1, 0, 0})});
+  ret = rig.Call("World.GetPosition", {V::EntityRef(tiny_child)});
+  CHECK(std::fabs(ret.as_vec3().x - 1.0f) < 1e-4f);
+
+  // Over-depth hierarchies are rejected consistently: reads report no position
+  // and writes leave the local transform untouched.
+  ecs::Entity ancestor = rig.world.Create();
+  for (int i = 0; i < 4097; ++i) {
+    ecs::Entity descendant = rig.world.Create();
+    rig.world.Add(descendant, scene::Parent{ancestor});
+    ancestor = descendant;
+  }
+  rig.world.Add(ancestor, scene::Transform{{3, 0, 0}});
+  ret = rig.Call("World.GetPosition", {V::EntityRef(ancestor)});
+  CHECK(ret.as_vec3().x == 0);
+  rig.Call("World.Teleport", {V::EntityRef(ancestor), V::Vec(Vec3{5, 0, 0})});
+  CHECK(rig.world.Get<scene::Transform>(ancestor)->position[0] == 3);
 }
 
 void TestSymbolsAndArena() {
@@ -150,13 +260,15 @@ void TestSymbolsAndArena() {
   using V = script::ScriptValue;
 
   // World.Spawn(symbol "gold_ingot", pos, scale) -- a symbol arg (never a string
-  // compare) that the handler stamps onto a real scene::Guid.
+  // compare) that the handler records in persistent prefab provenance.
   const script::StrId prefab = rig.symbols.Intern("gold_ingot");
   V ret = rig.Call("World.Spawn", {V::Symbol(prefab), V::Vec(Vec3{5, 6, 7}), V::Float(2.0)});
   CHECK(ret.type() == script::ScriptType::kEntity);
   ecs::Entity spawned = ret.as_entity();
   CHECK(rig.world.IsAlive(spawned));
   CHECK(rig.world.Get<scene::Transform>(spawned)->position[0] == 5);
+  CHECK(rig.world.Get<scene::SpawnedFrom>(spawned)->prefab ==
+        static_cast<rx::u64>(prefab));
 
   // World.FindByPrefab(symbol) -- scans provenance components, finds the spawned one
   // (also verifies the prefab was recorded, without peeking at an internal type).
@@ -191,6 +303,7 @@ int main() {
   TestScriptString();
   TestInterner();
   TestDispatch();
+  TestWorldSpaceDispatch();
   TestSymbolsAndArena();
   if (g_failures == 0) {
     std::printf("script_test: all checks passed\n");

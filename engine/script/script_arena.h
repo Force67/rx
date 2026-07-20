@@ -27,8 +27,10 @@ class ScriptArena {
   ScriptArena(const ScriptArena&) = delete;
   ScriptArena& operator=(const ScriptArena&) = delete;
 
-  // Bump-allocate `bytes` with `align`. Never returns null (throws std::bad_alloc
-  // only if the backing new fails). Lifetime: until the next Reset().
+  // Bump-allocate `bytes` with a nonzero power-of-two `align` no greater than
+  // max_align_t. Never returns null; rejects invalid/overflowing requests with
+  // std::bad_array_new_length and propagates std::bad_alloc from the backing new.
+  // Lifetime: until the next Reset().
   RX_SCRIPT_EXPORT void* Alloc(size_t bytes, size_t align = alignof(std::max_align_t));
 
   // Reclaim everything at once. Blocks are retained for reuse, not freed.

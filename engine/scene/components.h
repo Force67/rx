@@ -44,6 +44,13 @@ struct Guid {
   u64 value = 0;
 };
 
+// Provenance for entities instantiated by a script command. This is separate
+// from Guid: several entities may come from the same prefab, while Guid remains
+// unique per entity for serialization and undo identity.
+struct SpawnedFrom {
+  u64 prefab = 0;
+};
+
 // A parent link. When present, the entity's Transform is expressed in the
 // parent's local space rather than world space; edit::WorldTransform composes
 // the chain. A parent-free entity has no Parent component and its Transform is

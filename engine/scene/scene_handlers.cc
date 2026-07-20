@@ -19,29 +19,95 @@ namespace {
 
 using namespace rx::script;  // ScriptValue, ScriptArgs, HandlerContext, ...
 
-// Provenance of a script-spawned entity: which prefab symbol created it. A
-// dedicated component, NOT scene::Guid -- Guid carries a per-entity-UNIQUE
-// identity the serializer and undo system rely on, so stamping the shared prefab
-// hash into it would collide sibling spawns and misresolve them.
-struct SpawnedFrom {
-  u64 prefab = 0;
-};
-
 // --- small direct helpers over the real components (no gateway) -------------
-Vec3 ReadPos(ecs::World& w, ecs::Entity e) {
-  if (Transform* t = w.Get<Transform>(e)) return {t->position[0], t->position[1], t->position[2]};
-  return {};
+constexpr int kMaxHierarchyDepth = 4096;
+
+Mat4 LocalMatrix(const Transform* t) {
+  if (!t) return Mat4::Identity();
+  return MakeTransform({t->position[0], t->position[1], t->position[2]},
+                       {t->rotation[0], t->rotation[1], t->rotation[2], t->rotation[3]},
+                       t->scale);
 }
+
+Mat4 ReadWorldMatrix(ecs::World& w, ecs::Entity e, bool* complete = nullptr,
+                     int max_parent_links = kMaxHierarchyDepth) {
+  Mat4 result = LocalMatrix(w.Get<Transform>(e));
+  Parent* parent = w.Get<Parent>(e);
+  int guard = 0;
+  while (parent && parent->value && w.IsAlive(parent->value) &&
+         guard < max_parent_links) {
+    e = parent->value;
+    result = LocalMatrix(w.Get<Transform>(e)) * result;
+    parent = w.Get<Parent>(e);
+    ++guard;
+  }
+  if (complete)
+    *complete = !(parent && parent->value && w.IsAlive(parent->value));
+  return result;
+}
+
+Vec3 ReadPos(ecs::World& w, ecs::Entity e) {
+  bool complete = false;
+  const Mat4 world = ReadWorldMatrix(w, e, &complete);
+  return complete ? Translation(world) : Vec3{};
+}
+
+bool InverseTransformPoint(const Mat4& m, Vec3 point, Vec3* result) {
+  const f64 c0x = m.m[0], c0y = m.m[1], c0z = m.m[2];
+  const f64 c1x = m.m[4], c1y = m.m[5], c1z = m.m[6];
+  const f64 c2x = m.m[8], c2y = m.m[9], c2z = m.m[10];
+  const f64 c1xc2x = c1y * c2z - c1z * c2y;
+  const f64 c1xc2y = c1z * c2x - c1x * c2z;
+  const f64 c1xc2z = c1x * c2y - c1y * c2x;
+  const f64 det = c0x * c1xc2x + c0y * c1xc2y + c0z * c1xc2z;
+  if (det == 0 || !std::isfinite(det)) return false;
+
+  const f64 dx = static_cast<f64>(point.x) - m.m[12];
+  const f64 dy = static_cast<f64>(point.y) - m.m[13];
+  const f64 dz = static_cast<f64>(point.z) - m.m[14];
+  const f64 x = (dx * c1xc2x + dy * c1xc2y + dz * c1xc2z) / det;
+  const f64 y = (dx * (c2y * c0z - c2z * c0y) +
+                 dy * (c2z * c0x - c2x * c0z) +
+                 dz * (c2x * c0y - c2y * c0x)) /
+                det;
+  const f64 z = (dx * (c0y * c1z - c0z * c1y) +
+                 dy * (c0z * c1x - c0x * c1z) +
+                 dz * (c0x * c1y - c0y * c1x)) /
+                det;
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
+  const Vec3 local{static_cast<f32>(x), static_cast<f32>(y), static_cast<f32>(z)};
+  if (!std::isfinite(local.x) || !std::isfinite(local.y) || !std::isfinite(local.z))
+    return false;
+  *result = local;
+  return true;
+}
+
+bool WorldToLocalPosition(ecs::World& w, ecs::Entity e, Vec3 position, Vec3* local) {
+  Parent* parent = w.Get<Parent>(e);
+  if (!parent || !parent->value || !w.IsAlive(parent->value)) {
+    *local = position;
+    return true;
+  }
+  bool complete = false;
+  const Mat4 parent_world =
+      ReadWorldMatrix(w, parent->value, &complete, kMaxHierarchyDepth - 1);
+  if (!complete) return false;
+  return InverseTransformPoint(parent_world, position, local);
+}
+
 void WritePos(ecs::World& w, ecs::Entity e, Vec3 p) {
+  if (!w.IsAlive(e)) return;
+  Vec3 local;
+  if (!WorldToLocalPosition(w, e, p, &local)) return;
   if (Transform* t = w.Get<Transform>(e)) {
-    t->position[0] = p.x;
-    t->position[1] = p.y;
-    t->position[2] = p.z;
+    t->position[0] = local.x;
+    t->position[1] = local.y;
+    t->position[2] = local.z;
   } else {
     Transform nt;
-    nt.position[0] = p.x;
-    nt.position[1] = p.y;
-    nt.position[2] = p.z;
+    nt.position[0] = local.x;
+    nt.position[1] = local.y;
+    nt.position[2] = local.z;
     w.Add(e, nt);
   }
 }
@@ -96,6 +162,7 @@ ecs::Entity FindByPrefab(HandlerContext& c, StrId prefab) {
   return found;
 }
 void SetName(HandlerContext& c, ecs::Entity e, ScriptStringView name) {
+  if (!c.Ecs().IsAlive(e)) return;
   std::string value(name.view());
   if (Name* n = c.Ecs().Get<Name>(e))
     n->value = std::move(value);

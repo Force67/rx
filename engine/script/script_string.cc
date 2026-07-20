@@ -1,13 +1,17 @@
 #include "script/script_string.h"
 
 #include <cstring>
+#include <limits>
+#include <new>
 #include <utility>
 
 namespace rx::script {
 
 ScriptString::ScriptString(ScriptStringView s) {
   if (s.size == 0) return;
-  data_ = new char[s.size + 1];
+  if (s.size == std::numeric_limits<u32>::max())
+    throw std::bad_array_new_length();
+  data_ = new char[static_cast<size_t>(s.size) + 1];
   std::memcpy(data_, s.data, s.size);
   data_[s.size] = '\0';
   size_ = s.size;

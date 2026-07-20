@@ -1,6 +1,8 @@
 #ifndef RX_SCRIPT_SCRIPT_STRING_H_
 #define RX_SCRIPT_SCRIPT_STRING_H_
 
+#include <limits>
+#include <new>
 #include <string_view>
 
 #include "core/export.h"
@@ -27,10 +29,20 @@ struct ScriptStringView {
   constexpr ScriptStringView(const char* d, u32 n) : data(d), size(n) {}
   constexpr ScriptStringView(const char* s)  // NOLINT(google-explicit-constructor)
       : data(s), size(0) {
-    while (s && s[size] != '\0') ++size;
+    size_t length = 0;
+    while (s && s[length] != '\0') {
+      if (length == std::numeric_limits<u32>::max())
+        throw std::bad_array_new_length();
+      ++length;
+    }
+    size = static_cast<u32>(length);
   }
   ScriptStringView(std::string_view s)  // NOLINT(google-explicit-constructor)
-      : data(s.data()), size(static_cast<u32>(s.size())) {}
+      : data(s.data()) {
+    if (s.size() > std::numeric_limits<u32>::max())
+      throw std::bad_array_new_length();
+    size = static_cast<u32>(s.size());
+  }
 
   constexpr std::string_view view() const { return {data, size}; }
   constexpr operator std::string_view() const { return view(); }  // NOLINT
@@ -77,12 +89,7 @@ class ScriptString {
 enum class StrId : u64 {};
 
 constexpr StrId HashStr(std::string_view s) {
-  u64 h = 1469598103934665603ull;  // FNV offset basis
-  for (char c : s) {
-    h ^= static_cast<u8>(c);
-    h *= 1099511628211ull;  // FNV prime
-  }
-  return static_cast<StrId>(h);
+  return static_cast<StrId>(Fnv1a(s));
 }
 
 }  // namespace rx::script
