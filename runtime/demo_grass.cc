@@ -12,13 +12,16 @@
 namespace rx {
 namespace {
 
-constexpr f32 kOrigin = -110.0f;
-constexpr f32 kExtent = 220.0f;
-constexpr u32 kResolution = 221;
+// Two kilometres of semantic field at the 256-sample cap: 8 m field texels
+// describe the rolling hills while blade detail stays per-candidate.
+constexpr f32 kOrigin = -1000.0f;
+constexpr f32 kExtent = 2000.0f;
+constexpr u32 kResolution = 251;
 constexpr f32 kStep = kExtent / static_cast<f32>(kResolution - 1);
 
 base::Option<float> GrassSpacing{"demo.grass.spacing", 0.30f, "RX_GRASS_SPACING"};
 base::Option<int> GrassMaxBlades{"demo.grass.max_blades", 210000, "RX_GRASS_MAX_BLADES"};
+base::Option<float> GrassFarRadius{"demo.grass.far_radius", 960.0f, "RX_GRASS_FAR"};
 
 u32 PackColor(f32 r, f32 g, f32 b) {
   auto to8 = [](f32 value) {
@@ -121,7 +124,8 @@ void GrassDemo::BuildField() {
                         0.20f * std::cos(world_x * 0.021f - world_z * 0.069f);
       const f32 path_center = std::sin(world_x * 0.035f) * 7.0f - 4.0f;
       const f32 path_distance = std::fabs(world_z - path_center);
-      const f32 path_mask = SmoothStep(1.2f, 4.5f, path_distance);
+      // Wide enough to survive the coarser kilometre-scale field texels.
+      const f32 path_mask = SmoothStep(3.0f, 14.0f, path_distance);
       sample.density = std::clamp((0.90f + patch * 0.14f) * path_mask, 0.0f, 1.0f);
       sample.growth = 0.90f + patch * 0.34f;
       const bool golden_ridge = sample.height > 4.2f && patch > 0.5f;
@@ -144,14 +148,17 @@ void GrassDemo::BuildField() {
   domain_.type_revision = 1;
   domain_.settings.candidate_spacing = std::clamp(GrassSpacing.get(), 0.08f, 1.0f);
   domain_.settings.stream_tile_size = 18.0f;
-  domain_.settings.stream_radius = 84.0f;
+  domain_.settings.stream_radius = 120.0f;
   domain_.settings.density_lod_start = 40.0f;
   domain_.settings.density_lod_end = 76.0f;
   domain_.settings.far_density = 0.46f;
   domain_.settings.geometry_lod_start = 18.0f;
   domain_.settings.geometry_lod_end = 48.0f;
-  domain_.settings.fade_start = 76.0f;
-  domain_.settings.fade_end = 84.0f;
+  domain_.settings.fade_start = 110.0f;
+  domain_.settings.fade_end = 120.0f;
+  // Distant one-segment rings out to roughly a kilometre (RX_GRASS_FAR=0
+  // restores the classic stream-bounded field).
+  domain_.settings.far_radius = std::clamp(GrassFarRadius.get(), 0.0f, 4096.0f);
   domain_.settings.max_slope_cos = 0.50f;
   domain_.settings.max_blades =
       static_cast<u32>(std::clamp(GrassMaxBlades.get(), 1, 262144));
@@ -329,8 +336,9 @@ void GrassDemo::Create() {
   ctx_.camera->set_position({-36.0f, 9.5f, 30.0f});
   ctx_.camera->set_yaw_pitch(0.78f, -0.18f);
   ctx_.camera->speed = 10.0f;
-  RX_INFO("procedural grass demo: {:.2f} m spacing, {} blade cap",
-          domain_.settings.candidate_spacing, domain_.settings.max_blades);
+  RX_INFO("procedural grass demo: {:.2f} m spacing, {} blade cap, {:.0f} m far radius",
+          domain_.settings.candidate_spacing, domain_.settings.max_blades,
+          domain_.settings.far_radius);
 }
 
 void GrassDemo::Update(f32 dt) {

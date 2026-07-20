@@ -76,6 +76,21 @@ int main() {
   Check(std::isfinite(finite.bend_recovery_time),
         "non-finite bend recovery uses a default");
 
+  GrassGenerationSettings distant;
+  Check(Near(SanitizeGrassSettings(distant).far_radius, 0.0f),
+        "the distant tier stays disabled by default");
+  distant.stream_radius = 120.0f;
+  distant.far_radius = 50000.0f;
+  Check(Near(SanitizeGrassSettings(distant).far_radius, 960.0f),
+        "far radius is bounded by a stream radius multiple");
+  distant.far_radius = 60.0f;
+  Check(Near(SanitizeGrassSettings(distant).far_radius, 0.0f),
+        "a sub-stream far radius disables the distant tier");
+  distant.stream_radius = 512.0f;
+  distant.far_radius = 50000.0f;
+  Check(Near(SanitizeGrassSettings(distant).far_radius, 4096.0f),
+        "far radius has an absolute kilometre cap");
+
   GrassSurfaceTriangle triangle;
   SetPoint(triangle.p0, 0.0f, 0.0f, 0.0f);
   SetPoint(triangle.p1, 2.0f, 0.0f, 0.0f);
@@ -101,8 +116,10 @@ int main() {
 
   static_assert(ProceduralGrass::kMaxCandidates == 1u << 20);
   static_assert(ProceduralGrass::kMaxBlades == 1u << 18);
-  static_assert(ProceduralGrass::kVerticesPerBlade == 42);
-  static_assert(ProceduralGrass::kFarVerticesPerBlade == 18);
+  static_assert(ProceduralGrass::kMaxUltraBlades == 1u << 17);
+  static_assert(ProceduralGrass::kNearIndices == 42);
+  static_assert(ProceduralGrass::kFarIndices == 18);
+  static_assert(ProceduralGrass::kUltraIndices == 6);
   static_assert(ProceduralGrass::kBendResolution == 512);
   static_assert(ProceduralGrass::kInstanceStride == 72);
 

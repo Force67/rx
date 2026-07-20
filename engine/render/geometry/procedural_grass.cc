@@ -34,6 +34,7 @@ struct CandidateRing {
   f32 outer_radius = 0.0f;
   f32 refinement_start = 0.0f;
   u32 next_stride = 0;
+  bool distant = false;  // beyond the stream radius: one-segment ultra tier
 };
 
 bool BuildCandidateRing(const Vec3& camera,
@@ -224,13 +225,37 @@ bool ProceduralGrass::EnsureBuffers() {
   if (!device_ || allocation_failed_)
     return false;
 
+  if (!blade_indices_) {
+    // Two triangles per segment over shared row vertices (row r = vertices
+    // 2r and 2r + 1). Far and ultra draws reuse a prefix of this pattern.
+    u16 indices[kNearIndices];
+    for (u32 s = 0; s < kNearSegments; ++s) {
+      const u16 row = static_cast<u16>(s * 2u);
+      indices[s * 6u + 0u] = row;
+      indices[s * 6u + 1u] = static_cast<u16>(row + 2u);
+      indices[s * 6u + 2u] = static_cast<u16>(row + 1u);
+      indices[s * 6u + 3u] = static_cast<u16>(row + 1u);
+      indices[s * 6u + 4u] = static_cast<u16>(row + 2u);
+      indices[s * 6u + 5u] = static_cast<u16>(row + 3u);
+    }
+    blade_indices_ = device_->CreateBufferWithData(
+        ByteSpan{reinterpret_cast<const u8*>(indices), sizeof(indices)},
+        kBufferUsageIndex);
+    if (!blade_indices_) {
+      RX_ERROR("procedural grass index buffer allocation failed");
+      allocation_failed_ = true;
+      return false;
+    }
+  }
+
   constexpr u64 kFieldBytes = static_cast<u64>(kMaxFieldDimension) * kMaxFieldDimension *
                               sizeof(GrassFieldSample);
   constexpr u64 kTypeBytes = static_cast<u64>(kMaxTypes) * sizeof(GrassType);
   constexpr u64 kSurfaceBytes = static_cast<u64>(kMaxSurfaces) * sizeof(GpuSurface);
   constexpr u64 kInteractionBytes =
       static_cast<u64>(kMaxInteractions) * sizeof(GrassInteraction);
-  constexpr u64 kInstanceBytes = static_cast<u64>(kMaxBlades) * kInstanceStride;
+  constexpr u64 kInstanceBytes =
+      static_cast<u64>(kMaxBlades + kMaxUltraBlades) * kInstanceStride;
   for (Slot& slot : slots_) {
     slot.field = device_->CreateBuffer(kFieldBytes, kBufferUsageStorage, true);
     slot.types = device_->CreateBuffer(kTypeBytes, kBufferUsageStorage, true);
@@ -238,7 +263,7 @@ bool ProceduralGrass::EnsureBuffers() {
     slot.interactions =
         device_->CreateBuffer(kInteractionBytes, kBufferUsageStorage, true);
     slot.instances = device_->CreateBuffer(kInstanceBytes, kBufferUsageStorage);
-    slot.args = device_->CreateBuffer(32, kBufferUsageStorage | kBufferUsageIndirect);
+    slot.args = device_->CreateBuffer(64, kBufferUsageStorage | kBufferUsageIndirect);
     slot.counters = device_->CreateBuffer(32, kBufferUsageStorage | kBufferUsageIndirect);
     if (!slot.field.mapped || !slot.types.mapped || !slot.surfaces.mapped ||
         !slot.interactions.mapped || !slot.instances || !slot.args || !slot.counters) {
@@ -347,6 +372,8 @@ void ProceduralGrass::Destroy(Device& device) {
     device.DestroyImage(field);
     field = {};
   }
+  device.DestroyBuffer(blade_indices_);
+  blade_indices_ = {};
   bend_sampler_ = {};
   bend_origin_[0] = 0.0f;
   bend_origin_[1] = 0.0f;
@@ -401,6 +428,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
       frame.sun_intensity,   frame.ambient,         frame.time,
       frame.delta_time,      frame.jitter[0],       frame.jitter[1],
       frame.wind_speed,      frame.wind_yaw,        frame.gustiness,
+      frame.pixel_scale,
   };
   if (!AllFinite(frame_values,
                  static_cast<u32>(sizeof(frame_values) / sizeof(frame_values[0]))))
@@ -450,10 +478,12 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   const f64 snapped_z =
       std::floor(static_cast<f64>(frame.camera_pos.z) / settings.stream_tile_size + 0.5) *
       settings.stream_tile_size;
-  std::array<CandidateRing, 3> rings{};
+  std::array<CandidateRing, 6> rings{};
   u32 ring_count = 0;
   u32 terrain_candidates = 0;
   f32 terrain_radius = 0.0f;
+  f32 far_edge = 0.0f;
+  bool far_active = false;
   if (valid_field) {
     const f32 lod_start = std::min(settings.density_lod_start, settings.stream_radius);
     const f32 lod_end = std::min(settings.density_lod_end, settings.stream_radius);
@@ -475,6 +505,29 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
       terrain_candidates += ring.candidates;
       covered_radius = ring.outer_radius;
       terrain_radius = covered_radius;
+    }
+    // Distant tier: doubling radius with doubling stride keeps the candidate
+    // count per ring roughly constant, so kilometre coverage costs three more
+    // bounded dispatches. The 0.75x overlap gives the refinement chain a band
+    // to fade fine blades into each coarser lattice.
+    far_edge = terrain_radius;
+    if (settings.far_radius > settings.stream_radius && ring_count > 0) {
+      const u32 distant_strides[3] = {8u, 16u, 32u};
+      for (u32 i = 0; i < 3 && far_edge < settings.far_radius; ++i) {
+        CandidateRing ring;
+        const f32 outer = std::min(settings.far_radius, far_edge * 2.0f);
+        if (!BuildCandidateRing(frame.camera_pos, snapped_x, snapped_z,
+                                 settings.stream_tile_size,
+                                 settings.candidate_spacing, far_edge * 0.75f,
+                                 outer, distant_strides[i], kMaxCandidates,
+                                 &ring))
+          break;
+        ring.distant = true;
+        rings[ring_count++] = ring;
+        terrain_candidates += ring.candidates;
+        far_edge = ring.outer_radius;
+        far_active = true;
+      }
     }
     for (u32 i = 0; i + 1u < ring_count; ++i) {
       rings[i].refinement_start = rings[i + 1u].inner_radius;
@@ -723,7 +776,15 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
     generation.grid[2] = static_cast<i32>(ring.cells);
     generation.grid[3] = static_cast<i32>(ring.cells);
     generation.counts[0] = ring.candidates;
-    if (terrain_radius < settings.fade_end) {
+    if (far_active) {
+      // Distant rings carry the field to far_edge; every terrain ring fades
+      // there instead of at the stream boundary so the handoff between the
+      // detailed and distant tiers has no height seam.
+      generation.camera_stream[3] = far_edge;
+      generation.geometry_fade[2] = std::max(
+          far_edge - std::max(far_edge * 0.08f, settings.candidate_spacing), 0.0f);
+      generation.geometry_fade[3] = far_edge;
+    } else if (terrain_radius < settings.fade_end) {
       const f32 fade_length = settings.fade_end - settings.fade_start;
       generation.geometry_fade[2] = std::max(terrain_radius - fade_length, 0.0f);
       generation.geometry_fade[3] = terrain_radius;
@@ -731,6 +792,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
     generation.control[0] = 1;
     generation.control[1] = ring.stride;
     generation.control[2] = ring.next_stride;
+    generation.control[3] = ring.distant ? 1u : 0u;
     slot.generation[slot.generation_count++] = generation;
   }
   GenerationPush finalize = common;
@@ -760,9 +822,10 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   draw.jitter_lod[1] = frame.jitter[1];
   draw.jitter_lod[2] = settings.geometry_lod_start;
   draw.jitter_lod[3] = settings.geometry_lod_end;
+  draw.control[0] = std::bit_cast<u32>(std::max(frame.pixel_scale, 0.0f));
   draw.control[1] = type_count;
-  draw.control[2] = kNearSegments;
-  draw.control[3] = kMaxBlades - 1u;
+  // control[2] (segment count) and control[3] (arena base) are per-draw; the
+  // three tier draws fill them in Draw().
   slot.draw = draw;
   slot.active = true;
   return true;
@@ -881,15 +944,25 @@ void ProceduralGrass::Draw(CommandList& cmd,
     return;
   const Slot& slot = slots_[frame_slot];
   cmd.BindPipeline(pipeline);
+  cmd.BindIndexBuffer(blade_indices_, 0, IndexType::kUint16);
   cmd.BindTransient(
       0, {Bind::ByteBuffer(0, slot.instances), Bind::ByteBuffer(2, slot.types)});
+  // Near grows up from arena slot 0, far down from the arena top, and the
+  // distant ultra tier up from its own region past kMaxBlades; the base rides
+  // in control[3] so the vertex shader resolves all three with one expression.
   DrawPush draw = slot.draw;
   draw.control[2] = kNearSegments;
+  draw.control[3] = 0;
   cmd.Push(draw);
-  cmd.DrawIndirectCount(slot.args, 0, slot.counters, 16, 1, 16);
+  cmd.DrawIndexedIndirectCount(slot.args, 0, slot.counters, 16, 1, 20);
   draw.control[2] = kFarSegments;
+  draw.control[3] = kMaxBlades - 1u;
   cmd.Push(draw);
-  cmd.DrawIndirectCount(slot.args, 16, slot.counters, 20, 1, 16);
+  cmd.DrawIndexedIndirectCount(slot.args, 20, slot.counters, 20, 1, 20);
+  draw.control[2] = kUltraSegments;
+  draw.control[3] = kMaxBlades;
+  cmd.Push(draw);
+  cmd.DrawIndexedIndirectCount(slot.args, 40, slot.counters, 24, 1, 20);
 }
 
 void ProceduralGrass::DrawPrepass(CommandList& cmd, u32 frame_slot, u32 samples) const {

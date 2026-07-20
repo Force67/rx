@@ -65,6 +65,10 @@ struct GrassGenerationSettings {
   f32 candidate_spacing = 0.42f;
   f32 stream_tile_size = 16.0f;
   f32 stream_radius = 80.0f;
+  // > stream_radius extends coarse one-segment blade rings out to this
+  // distance (clamped to 8x the stream radius and 4 km). Zero disables the
+  // distant tier and keeps the classic fade at the stream boundary.
+  f32 far_radius = 0.0f;
   f32 density_lod_start = 35.0f;
   f32 density_lod_end = 75.0f;
   f32 far_density = 0.28f;
@@ -87,6 +91,7 @@ inline GrassGenerationSettings SanitizeGrassSettings(GrassGenerationSettings set
   settings.stream_tile_size =
       finite_or(settings.stream_tile_size, defaults.stream_tile_size);
   settings.stream_radius = finite_or(settings.stream_radius, defaults.stream_radius);
+  settings.far_radius = finite_or(settings.far_radius, defaults.far_radius);
   settings.density_lod_start =
       finite_or(settings.density_lod_start, defaults.density_lod_start);
   settings.density_lod_end =
@@ -106,6 +111,12 @@ inline GrassGenerationSettings SanitizeGrassSettings(GrassGenerationSettings set
   settings.stream_tile_size = std::clamp(settings.stream_tile_size, 1.0f, 512.0f);
   settings.stream_radius =
       std::clamp(settings.stream_radius, settings.candidate_spacing, 512.0f);
+  if (settings.far_radius > settings.stream_radius) {
+    settings.far_radius =
+        std::min({settings.far_radius, settings.stream_radius * 8.0f, 4096.0f});
+  } else {
+    settings.far_radius = 0.0f;
+  }
   settings.density_lod_start = std::max(settings.density_lod_start, 0.0f);
   settings.density_lod_end = std::max(
       settings.density_lod_end, settings.density_lod_start + settings.candidate_spacing);
@@ -185,6 +196,10 @@ class ProceduralGrass {
     f32 wind_speed = 6.0f;
     f32 wind_yaw = 0.0f;
     f32 gustiness = 0.5f;
+    // World-space width of one pixel at unit view depth (2 * tan(fov_y / 2) /
+    // render height). Ribbons clamp to roughly a pixel so distant blades stay
+    // visible instead of dissolving into sub-pixel raster noise; 0 disables.
+    f32 pixel_scale = 0.0f;
   };
 
   static constexpr u32 kMaxFieldDimension = 256;
@@ -194,12 +209,21 @@ class ProceduralGrass {
   // Candidate cap for one terrain ring or a surface-only generation phase.
   static constexpr u32 kMaxCandidates = 1u << 20;
   static constexpr u32 kMaxBlades = 1u << 18;
+  // Distant one-segment blades use their own arena region and budget so a
+  // kilometre-range field can never starve the detailed foreground tiers.
+  // Mirrored by procedural_grass_generate.cs.hlsl.
+  static constexpr u32 kMaxUltraBlades = 1u << 17;
   static constexpr u32 kBendResolution = 512;
   static constexpr u32 kInstanceStride = 72;
   static constexpr u32 kNearSegments = 7;
   static constexpr u32 kFarSegments = 3;
-  static constexpr u32 kVerticesPerBlade = kNearSegments * 6;
-  static constexpr u32 kFarVerticesPerBlade = kFarSegments * 6;
+  static constexpr u32 kUltraSegments = 1;
+  // Blades draw as indexed ribbons: segments share their two row vertices, so
+  // a blade costs (segments + 1) * 2 vertex invocations while keeping 6
+  // indices per segment.
+  static constexpr u32 kNearIndices = kNearSegments * 6;
+  static constexpr u32 kFarIndices = kFarSegments * 6;
+  static constexpr u32 kUltraIndices = kUltraSegments * 6;
 
   bool Initialize(Device& device,
                   Format scene_color,
@@ -287,7 +311,9 @@ class ProceduralGrass {
     bool packed_valid = false;
   };
 
-  static constexpr u32 kMaxGenerationPhases = 6;
+  // Reset + surfaces + up to six terrain rings (three detailed, three
+  // distant) + finalize.
+  static constexpr u32 kMaxGenerationPhases = 9;
 
   struct Slot {
     GpuBuffer field;
@@ -334,6 +360,9 @@ class ProceduralGrass {
   GpuImage bend_fields_[2];
   GpuImage bend_metadata_[2];
   GpuImage bend_confidence_[2];
+  // Immutable u16 strip pattern shared by all blades; far/ultra draws use a
+  // prefix of the near tier's indices.
+  GpuBuffer blade_indices_;
   SamplerHandle bend_sampler_;
   f32 bend_origin_[2] = {};
   f32 bend_extent_ = 1.0f;

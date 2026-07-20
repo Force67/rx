@@ -1,16 +1,15 @@
 #include "procedural_grass.hlsli"
 
-// Triangle-list corners for one strip segment: two triangles sharing their
-// centerline rows. Near and far instances use separate indirect draws.
-static const uint kUpper[6] = {0u, 1u, 0u, 0u, 1u, 1u};
-static const float kSide[6] = {-1.0, -1.0, 1.0, 1.0, -1.0, 1.0};
+// Indexed ribbon: vertices 2r and 2r + 1 are the left/right edge of curve row
+// r, shared between the segments above and below. Every tier draws a prefix of
+// the same index pattern, so a blade costs (segments + 1) * 2 vertex
+// invocations instead of segments * 6.
 
 GrassVsOut main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) {
   GrassInstance instance = LoadGrassInstance(instance_id);
   GrassTypeData type = LoadGrassType(instance.type);
-  uint segment = vertex_id / 6u;
-  uint corner = vertex_id % 6u;
-  uint row = segment + kUpper[corner];
+  uint row = vertex_id >> 1u;
+  float side = (vertex_id & 1u) != 0u ? 1.0 : -1.0;
   float t = float(row) / float(push.control.z);
 
   float3 center, tangent;
@@ -34,9 +33,18 @@ GrassVsOut main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) 
                                          TangentDirection(float2(0.0, 1.0), up));
   float taper = pow(saturate(1.0 - t), 0.72);
   float half_width = instance.facing_width_tint.z * taper * 0.5;
-  float3 world = center + width_direction * (kSide[corner] * half_width);
+  float pixel_scale = asfloat(push.control.x);
+  if (pixel_scale > 0.0) {
+    // Never let a ribbon collapse below roughly a pixel: distant blades stay
+    // visible instead of dissolving into sub-pixel raster noise. Partial taper
+    // keeps a silhouette on the widened blades.
+    float center_depth = max(mul(push.view_proj, float4(center, 1.0)).w, 0.0);
+    half_width = max(half_width, center_depth * pixel_scale * 0.5 *
+                                     (0.35 + 0.65 * taper));
+  }
+  float3 world = center + width_direction * (side * half_width);
   float3 rounded_normal = SafeNormalize(
-      plane_normal + width_direction * kSide[corner] * 0.28, plane_normal);
+      plane_normal + width_direction * side * 0.28, plane_normal);
 
   float3 previous_center, previous_tangent;
   EvaluateGrassCurve(instance, type, t, push.camera_time.w - push.wind.w,
@@ -44,7 +52,7 @@ GrassVsOut main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) 
                      previous_tangent);
   previous_tangent = SafeNormalize(previous_tangent, up);
   float3 previous_width = SafeNormalize(cross(previous_tangent, plane_normal), width_direction);
-  float3 previous_world = previous_center + previous_width * (kSide[corner] * half_width);
+  float3 previous_world = previous_center + previous_width * (side * half_width);
 
   GrassVsOut output;
   output.curr_clip = mul(push.view_proj, float4(world, 1.0));
@@ -53,7 +61,7 @@ GrassVsOut main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) 
   output.sv_position.xy += push.jitter_lod.xy * output.sv_position.w;
   output.normal = rounded_normal;
   output.world_pos = world;
-  output.blade_uv = float2(t, kSide[corner] * 0.5 + 0.5);
+  output.blade_uv = float2(t, side * 0.5 + 0.5);
   output.type = instance.type;
   output.tint = instance.facing_width_tint.w;
   output.lod = instance.shape_lod.w;

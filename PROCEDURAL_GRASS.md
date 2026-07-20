@@ -53,7 +53,10 @@ view.grass_interactions.push_back(interaction);
    type, and surface uploads; revision zero keeps that input volatile.
 2. The compute pass resets counters, evaluates nested camera-centered lattices
    at strides 1, 2, and 4 plus mesh-surface candidates, and rejects roots by
-   density, slope, distance, and a conservative point-frustum test. Overlapping
+   density, slope, distance, and a conservative point-frustum test. A nonzero
+   `far_radius` appends up to three distant rings at strides 8, 16, and 32
+   whose radius doubles with their stride, carrying the field out to
+   kilometres for a near-constant candidate cost per ring. Overlapping
    refinement bands fade between lattice strides without duplicate roots.
    Terrain height and analytic normal reconstruction use four field reads per
    root.
@@ -65,9 +68,14 @@ view.grass_interactions.push_back(interaction);
    fixed-capacity instance arena. Stable cell and surface IDs seed all jitter,
    dimensions, orientation, tint, and Voronoi clump behavior. Surface records
    are located with a bounded binary search.
-5. Near instances grow upward from the front of the arena and far instances
-   grow downward from its back. Separate indirect draws expand them into
-   seven-segment and three-segment cubic-Bezier ribbons respectively.
+5. Near instances grow upward from the front of the shared arena, far
+   instances grow downward from its back, and distant instances fill a third
+   arena region with its own budget. Three indexed indirect draws expand them
+   into seven-, three-, and one-segment cubic-Bezier ribbons whose segments
+   share row vertices, so a blade costs `(segments + 1) * 2` vertex
+   invocations. Distant blades widen with their lattice stride, and a
+   screen-space clamp keeps every ribbon at roughly a pixel or wider so far
+   fields do not dissolve into sub-pixel raster noise.
 6. Grass participates in the reversed-Z depth/motion prepass and the opaque
    scene pass. Wind deformation is evaluated at current and previous times to
    produce motion vectors.
@@ -83,6 +91,7 @@ controls so content can tune them independently.
 | --- | --- |
 | `candidate_spacing` | World-space root spacing before semantic density rejection |
 | `stream_tile_size`, `stream_radius` | Camera snapping and active generation radius |
+| `far_radius` | Distant one-segment rings past the stream radius, up to 8x the stream radius and 4 km; zero disables |
 | `density_lod_start/end`, `far_density` | Gradual distant candidate thinning |
 | `geometry_lod_start/end` | Transition range between seven- and three-segment blades |
 | `fade_start/end` | Blade height fade before the stream boundary |
@@ -153,10 +162,11 @@ even when the grass domain was temporarily absent.
 - Heightfields are capped at 256 by 256 samples.
 - A domain accepts up to eight blade types, 2,048 surface triangles, and 16
   interactions.
-- Each of the three terrain LOD rings is capped at 1,048,576 candidates. With
-  a heightfield, mesh surfaces receive a separate 262,144-candidate budget;
-  surface-only domains can use 1,048,576 candidates. Generation workgroups
-  stop sampling once the 262,144-blade arena is full.
+- Each terrain LOD ring (three detailed plus up to three distant) is capped at
+  1,048,576 candidates. With a heightfield, mesh surfaces receive a separate
+  262,144-candidate budget; surface-only domains can use 1,048,576 candidates.
+  Generation workgroups stop sampling once the 262,144-blade near/far arena
+  (or the separate 131,072-blade distant arena) is full.
 - GPU arenas are allocated lazily on the first valid grass domain.
 - Persistent bend history uses six fixed 512 by 512 half-float images (10 MiB)
   and follows the active grass stream extent.
@@ -176,8 +186,11 @@ vkrun ./build/linux/runtime/rx --demo grass --no-rt
 The scene combines a semantic rolling heightfield, three blade families,
 stochastic family boundaries, a winding density-masked path, grass on a
 standalone stone mesh, gusting wind, and a moving local interaction marker.
-`RX_GRASS_SPACING` overrides candidate spacing for density stress tests, and
-`RX_GRASS_MAX_BLADES` overrides the compacted blade cap.
+`RX_GRASS_SPACING` overrides candidate spacing for density stress tests,
+`RX_GRASS_MAX_BLADES` overrides the compacted blade cap, and `RX_GRASS_FAR`
+sets the distant-ring radius (0 restores the classic stream-bounded field).
+The demo field spans two kilometres so the distant tier reads as unbroken
+grassland to the horizon.
 
 ## Layout
 

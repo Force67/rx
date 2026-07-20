@@ -14,7 +14,7 @@ struct GrassDrawPush {
   float4 sun_color_ambient;
   float4 wind;       // speed, yaw, gustiness, delta time
   float4 jitter_lod; // jitter xy, geometry lod start/end
-  uint4 control;     // unused, type count, segments, far arena base
+  uint4 control;     // pixel scale bits, type count, segments, arena base
 };
 PUSH_CONSTANTS(GrassDrawPush, push);
 
@@ -56,8 +56,11 @@ GrassTypeData LoadGrassType(uint type_index) {
 }
 
 GrassInstance LoadGrassInstance(uint instance_index) {
+  // Near (7 segments) ascends from base 0, far (3) descends from the arena
+  // top, and distant ultra (1) ascends from the region past the shared arena;
+  // control.w carries the base for the current draw.
   uint arena_index = push.control.z == 3u ? push.control.w - instance_index
-                                          : instance_index;
+                                          : push.control.w + instance_index;
   uint address = arena_index * 72u;
   GrassInstance instance;
   instance.position_height = asfloat(grass_instances.Load4(address + 0u));

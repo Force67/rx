@@ -12,7 +12,7 @@ struct PushData {
   uint4 counts;                // candidates, surfaces, logical cap, arena cap
   float4 density_lod;          // start, end, far density, minimum up normal
   float4 geometry_fade;        // geometry start/end, fade start/end
-  uint4 control;               // phase, lattice stride, next stride
+  uint4 control;               // phase, lattice stride, next stride, distant ring
   float4 bend_field;           // min-corner xz, height origin, inverse extent
 };
 PUSH_CONSTANTS(PushData, push);
@@ -52,15 +52,25 @@ struct PackedGrassInstance {
   uint2 block4;
 };
 
+// Mirrors ProceduralGrass::kMaxUltraBlades: the distant one-segment tier has
+// its own arena region and budget past the shared near/far arena.
+static const uint kMaxUltraBlades = 1u << 17u;
+
+// Near/far instances stage from slot 0 upward, ultra instances from slot 63
+// downward; a phase only ever produces one of the two families so the regions
+// cannot collide.
 groupshared PackedGrassInstance staged_instances[64];
-groupshared uint staged_far_lod[64];
+groupshared uint staged_tier[64];  // 0 near, 1 far, 2 ultra
 groupshared uint staged_rank[64];
-groupshared uint live_count;
+groupshared uint nf_live;
+groupshared uint ultra_live;
 groupshared uint accepted_count;
+groupshared uint ultra_accepted;
 groupshared uint near_count;
 groupshared uint far_count;
 groupshared uint near_base;
 groupshared uint far_base;
+groupshared uint ultra_base;
 groupshared uint capacity_open;
 
 uint Hash(uint x) {
@@ -221,9 +231,9 @@ void FindClump(float2 world_xz, float scale, uint seed, out float2 feature,
   }
 }
 
-bool Generate(uint candidate, out PackedGrassInstance packed, out uint far_lod) {
+bool Generate(uint candidate, out PackedGrassInstance packed, out uint tier) {
   packed = (PackedGrassInstance)0;
-  far_lod = 0u;
+  tier = 0u;
   float3 position, normal;
   float density, growth;
   uint type_index;
@@ -280,6 +290,11 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint far_lod) 
                       Random01(stable_seed ^ 0x369dea0fu)) * growth;
   float width = lerp(type.dimensions.z, type.dimensions.w,
                      Random01(stable_seed ^ 0xdb4f0b91u));
+  if (push.control.w != 0u) {
+    // Sparse distant lattices trade blade count for blade width so ground
+    // coverage survives the density reduction at range.
+    width *= clamp(sqrt(float(push.control.y)) * 0.5, 1.0, 3.0);
+  }
   float tilt = lerp(type.shape.x, type.shape.y,
                     Random01(stable_seed ^ 0xbb67ae85u));
   float bend = type.shape.z * lerp(0.65, 1.35,
@@ -297,7 +312,9 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint far_lod) 
   width *= max(visibility, 0.12);
   if (height <= 0.01) return false;
 
-  far_lod = Random01(stable_seed ^ 0x6c8e9cf5u) < geometry_lod ? 1u : 0u;
+  tier = push.control.w != 0u
+             ? 2u
+             : (Random01(stable_seed ^ 0x6c8e9cf5u) < geometry_lod ? 1u : 0u);
   float4 bend_history_value = 0.0;
   float2 bend_uv = (position.xz - push.bend_field.xy) * push.bend_field.w;
   if (push.bend_field.w > 0.0 &&
@@ -341,6 +358,15 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint far_lod) 
   return true;
 }
 
+void WriteInstance(uint slot, PackedGrassInstance instance) {
+  uint address = slot * 72u;
+  instances.Store4(address + 0u, instance.block0);
+  instances.Store4(address + 16u, instance.block1);
+  instances.Store4(address + 32u, instance.block2);
+  instances.Store4(address + 48u, instance.block3);
+  instances.Store2(address + 64u, instance.block4);
+}
+
 [numthreads(64, 1, 1)]
 void main(uint3 dispatch_id : SV_DispatchThreadID, uint group_index : SV_GroupIndex) {
   if (push.control.x == 0u) {
@@ -349,48 +375,75 @@ void main(uint3 dispatch_id : SV_DispatchThreadID, uint group_index : SV_GroupIn
       counters.Store4(16u, uint4(0u, 0u, 0u, 0u));
       draw_args.Store4(0u, uint4(0u, 0u, 0u, 0u));
       draw_args.Store4(16u, uint4(0u, 0u, 0u, 0u));
+      draw_args.Store4(32u, uint4(0u, 0u, 0u, 0u));
+      draw_args.Store4(48u, uint4(0u, 0u, 0u, 0u));
     }
     return;
   }
   if (push.control.x == 3u) {
     if (dispatch_id.x == 0u) {
-      uint4 count = counters.Load4(0u);
+      // Indexed indirect records, 20 bytes each: index count, instance count,
+      // first index, base vertex, first instance.
+      uint4 count = counters.Load4(0u);  // nf total, near, far, ultra
       uint near_blades = min(count.y, push.counts.z);
       uint far_blades = min(count.z, push.counts.z - near_blades);
+      uint ultra_blades = min(count.w, kMaxUltraBlades);
       draw_args.Store4(0u, uint4(42u, near_blades, 0u, 0u));
-      draw_args.Store4(16u, uint4(18u, far_blades, 0u, 0u));
+      draw_args.Store(16u, 0u);
+      draw_args.Store4(20u, uint4(18u, far_blades, 0u, 0u));
+      draw_args.Store(36u, 0u);
+      draw_args.Store4(40u, uint4(6u, ultra_blades, 0u, 0u));
+      draw_args.Store(56u, 0u);
       counters.Store(16u, near_blades > 0u ? 1u : 0u);
       counters.Store(20u, far_blades > 0u ? 1u : 0u);
+      counters.Store(24u, ultra_blades > 0u ? 1u : 0u);
     }
     return;
   }
 
   if (group_index == 0u) {
-    live_count = 0u;
+    nf_live = 0u;
+    ultra_live = 0u;
     uint reserved;
-    counters.InterlockedAdd(0u, 0u, reserved);
-    capacity_open = reserved < push.counts.z ? 1u : 0u;
+    if (push.control.w != 0u) {
+      counters.InterlockedAdd(12u, 0u, reserved);
+      capacity_open = reserved < kMaxUltraBlades ? 1u : 0u;
+    } else {
+      counters.InterlockedAdd(0u, 0u, reserved);
+      capacity_open = reserved < push.counts.z ? 1u : 0u;
+    }
   }
   GroupMemoryBarrierWithGroupSync();
   if (capacity_open == 0u) return;
 
   PackedGrassInstance packed;
-  uint far_lod;
+  uint tier;
   bool live = dispatch_id.x < push.counts.x &&
-              Generate(dispatch_id.x, packed, far_lod);
+              Generate(dispatch_id.x, packed, tier);
   if (live) {
     uint local_slot;
-    InterlockedAdd(live_count, 1u, local_slot);
+    if (tier == 2u) {
+      InterlockedAdd(ultra_live, 1u, local_slot);
+      local_slot = 63u - local_slot;
+    } else {
+      InterlockedAdd(nf_live, 1u, local_slot);
+    }
     staged_instances[local_slot] = packed;
-    staged_far_lod[local_slot] = far_lod;
+    staged_tier[local_slot] = tier;
   }
   GroupMemoryBarrierWithGroupSync();
 
   if (group_index == 0u) {
     uint total_base;
-    counters.InterlockedAdd(0u, live_count, total_base);
+    counters.InterlockedAdd(0u, nf_live, total_base);
     accepted_count = total_base < push.counts.z
-                         ? min(live_count, push.counts.z - total_base)
+                         ? min(nf_live, push.counts.z - total_base)
+                         : 0u;
+    uint ultra_total;
+    counters.InterlockedAdd(12u, ultra_live, ultra_total);
+    ultra_base = ultra_total;
+    ultra_accepted = ultra_total < kMaxUltraBlades
+                         ? min(ultra_live, kMaxUltraBlades - ultra_total)
                          : 0u;
     near_count = 0u;
     far_count = 0u;
@@ -399,7 +452,7 @@ void main(uint3 dispatch_id : SV_DispatchThreadID, uint group_index : SV_GroupIn
 
   if (group_index < accepted_count) {
     uint rank;
-    if (staged_far_lod[group_index] != 0u) InterlockedAdd(far_count, 1u, rank);
+    if (staged_tier[group_index] != 0u) InterlockedAdd(far_count, 1u, rank);
     else InterlockedAdd(near_count, 1u, rank);
     staged_rank[group_index] = rank;
   }
@@ -413,14 +466,15 @@ void main(uint3 dispatch_id : SV_DispatchThreadID, uint group_index : SV_GroupIn
 
   if (group_index < accepted_count) {
     PackedGrassInstance instance = staged_instances[group_index];
-    uint slot = staged_far_lod[group_index] != 0u
+    uint slot = staged_tier[group_index] != 0u
                     ? push.counts.w - 1u - (far_base + staged_rank[group_index])
                     : near_base + staged_rank[group_index];
-    uint address = slot * 72u;
-    instances.Store4(address + 0u, instance.block0);
-    instances.Store4(address + 16u, instance.block1);
-    instances.Store4(address + 32u, instance.block2);
-    instances.Store4(address + 48u, instance.block3);
-    instances.Store2(address + 64u, instance.block4);
+    WriteInstance(slot, instance);
+  }
+  if (group_index < ultra_accepted) {
+    // Ultra instances staged from the top of groupshared memory land in their
+    // own region past the shared near/far arena.
+    PackedGrassInstance instance = staged_instances[63u - group_index];
+    WriteInstance(push.counts.w + ultra_base + group_index, instance);
   }
 }
