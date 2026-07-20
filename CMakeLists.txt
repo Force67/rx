@@ -215,6 +215,7 @@ if(NOT DEFINED RX_MODULES)
   set(RX_MODULES
     core
     ecs
+    script
     asset
     scene
     terrain
@@ -292,6 +293,15 @@ if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
   add_executable(net_test test/net_test.cc)
   target_link_libraries(net_test PRIVATE rx::net rx::core)
   add_test(NAME net_test COMMAND net_test)
+endif()
+
+# rx::script unit tests: the portable value/string primitives and the handler
+# registry driven end-to-end against a real ecs::World, with no runtime, GPU or
+# transport, so plain `ctest` runs them everywhere.
+if(RX_BUILD_TESTS AND "script" IN_LIST RX_MODULES)
+  add_executable(script_test test/script_test.cc)
+  target_link_libraries(script_test PRIVATE rx::scene rx::script rx::ecs rx::core)
+  add_test(NAME script_test COMMAND script_test)
 endif()
 
 # rx::nav unit tests: pure CPU logic over a synthetic terrain sampler (costed
