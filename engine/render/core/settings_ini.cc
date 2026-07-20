@@ -1,7 +1,10 @@
 #include "render/core/settings_ini.h"
 
+#include <charconv>
 #include <cctype>
+#include <cmath>
 #include <fstream>
+#include <locale>
 #include <map>
 #include <sstream>
 
@@ -81,6 +84,7 @@ const char* Name(TonemapOperator t) {
     case TonemapOperator::kAces: return "aces";
     case TonemapOperator::kReinhard: return "reinhard";
     case TonemapOperator::kNone: return "none";
+    case TonemapOperator::kAgx: return "agx";
   }
   return "aces";
 }
@@ -88,6 +92,7 @@ bool Parse(const std::string& v, TonemapOperator& out) {
   if (v == "aces") out = TonemapOperator::kAces;
   else if (v == "reinhard") out = TonemapOperator::kReinhard;
   else if (v == "none") out = TonemapOperator::kNone;
+  else if (v == "agx") out = TonemapOperator::kAgx;
   else return false;
   return true;
 }
@@ -98,6 +103,7 @@ const char* Bool(bool b) { return b ? "true" : "false"; }
 
 std::string SettingsToIni(const RenderSettings& s) {
   std::ostringstream o;
+  o.imbue(std::locale::classic());
   o << "# Rx render preset. Editable. Load/save it from the debug ui\n"
     << "# (Renderer panel -> Platform preset). Unlisted keys keep their value.\n\n";
 
@@ -120,6 +126,7 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "gpu_occlusion = " << Bool(s.gpu_occlusion) << "\n";
   o << "distance_lod = " << Bool(s.distance_lod) << "\n";
   o << "mesh_shader_lod = " << Bool(s.mesh_shader_lod) << "\n";
+  o << "procedural_grass = " << Bool(s.procedural_grass) << "\n";
   o << "vsync = " << Bool(s.vsync) << "\n\n";
 
   o << "[sky]\n";
@@ -128,7 +135,9 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "ibl_intensity = " << s.ibl_intensity << "\n";
   o << "aerial_perspective = " << s.aerial_perspective << "\n";
   o << "clouds = " << Bool(s.clouds) << "\n";
-  o << "cloud_coverage = " << s.cloud_coverage << "\n\n";
+  o << "cloud_coverage = " << s.cloud_coverage << "\n";
+  o << "cloudscape = " << Bool(s.cloudscape) << "\n";
+  o << "cloudscape_steps = " << s.cloudscape_steps << "\n\n";
 
   o << "[weather]\n";
   o << "precipitation = " << s.weather.precipitation << "\n";
@@ -241,10 +250,19 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
     return false;
   };
   auto as_f32 = [](const std::string& v, f32& out) {
-    try { out = std::stof(v); return true; } catch (...) { return false; }
+    f32 parsed = 0.0f;
+    auto [end, ec] = std::from_chars(v.data(), v.data() + v.size(), parsed);
+    if (ec != std::errc{} || end != v.data() + v.size() || !std::isfinite(parsed)) return false;
+    out = parsed;
+    return true;
   };
   auto as_u32 = [](const std::string& v, u32& out) {
-    try { out = static_cast<u32>(std::stoul(v)); return true; } catch (...) { return false; }
+    if (v.empty() || v.front() == '-') return false;
+    u32 parsed = 0;
+    auto [end, ec] = std::from_chars(v.data(), v.data() + v.size(), parsed);
+    if (ec != std::errc{} || end != v.data() + v.size()) return false;
+    out = parsed;
+    return true;
   };
 
   auto b = [&](const char* k, bool& f) { take(k, [&](const std::string& v) { return as_bool(v, f); }); };
@@ -270,6 +288,7 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   b("gpu_occlusion", s.gpu_occlusion);
   b("distance_lod", s.distance_lod);
   b("mesh_shader_lod", s.mesh_shader_lod);
+  b("procedural_grass", s.procedural_grass);
   b("vsync", s.vsync);
 
   b("sky", s.sky);
@@ -278,6 +297,8 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   fl("aerial_perspective", s.aerial_perspective);
   b("clouds", s.clouds);
   fl("cloud_coverage", s.cloud_coverage);
+  b("cloudscape", s.cloudscape);
+  u("cloudscape_steps", s.cloudscape_steps);
 
   fl("precipitation", s.weather.precipitation);
   b("precip_snow", s.weather.snow);

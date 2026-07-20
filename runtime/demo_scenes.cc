@@ -13,6 +13,8 @@
 
 #include "asset/asset_database.h"
 #include "asset/asset_id.h"
+#include "audio/audio_system.h"
+#include "audio/thunder_synth.h"
 #include "asset/materialx.h"
 #include "asset/primitives.h"
 #include "core/log.h"
@@ -202,6 +204,7 @@ void DemoScenes::Shutdown() {
     placement_->Shutdown();
     placement_.reset();
   }
+  grass_.reset();
   if (cloth_ != 0) {
     physics_.RemoveCloth(cloth_);
     cloth_ = 0;
@@ -227,8 +230,30 @@ void DemoScenes::SetFeatureGymTourTime(f32 seconds) {
 }
 
 void DemoScenes::ApplyRenderPolicy() {
-  if (cloth_ == 0) return;
   render::RenderSettings& settings = renderer_.settings();
+  if (sky_scene_) {
+    settings.cloudscape = true;
+    settings.clouds = true;  // retained as the initialization-failure fallback
+    settings.cloudscape_controls = sky_controls_;
+    settings.weather = sky_weather_;
+    const render::CloudscapeControls &c = settings.cloudscape_controls;
+    settings.cloud_coverage = c.map_a.coverage +
+                              (c.map_b.coverage - c.map_a.coverage) * c.map_blend;
+  }
+  if (weather_scene_) {
+    settings.weather = weather_demo_weather_;
+    settings.cloud_coverage = 0.68f;
+    settings.cloudscape_controls = weather_demo_controls_;
+    settings.sun_intensity = std::min(settings.sun_intensity, 1.3f);
+    settings.ibl_intensity = 0.4f;
+    settings.ddgi = false;
+    settings.ssgi = false;
+    settings.ssr = false;
+    settings.aerial_perspective = 0.15f;
+    settings.auto_exposure = false;
+    settings.exposure = 0.7f;
+  }
+  if (cloth_ == 0) return;
   settings.aa_mode = render::AntiAliasingMode::kNone;
   settings.upscaler = render::UpscalerKind::kNone;
   settings.dynamic_resolution = false;
@@ -247,6 +272,10 @@ void DemoScenes::ApplyRenderPolicy() {
   settings.shadow_maps = true;
 }
 
+void DemoScenes::Update(f32 dt) {
+  if (grass_) grass_->Update(dt);
+}
+
 void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // The viewer's clock rewrites the sun on hour steps and would replace the
   // weather scene's staged overcast gloom with a full noon sun (the clock
@@ -254,19 +283,29 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // gloom is a cap on the direct light, not an absolute, so re-clamp per frame.
   if (weather_scene_) {
     renderer_.settings().sun_intensity = std::min(renderer_.settings().sun_intensity, 1.3f);
+    const render::WeatherSettings &weather = renderer_.settings().weather;
+    weather_map_offset_ +=
+        Vec2{std::cos(weather.wind_yaw), std::sin(weather.wind_yaw)} * (weather.wind_speed * dt);
+    renderer_.settings().cloudscape_controls.map_offset = weather_map_offset_;
   }
   if (storm_enabled_) UpdateStorm(dt);
+  if (weather_scene_) {
+    weather_demo_weather_ = renderer_.settings().weather;
+    weather_demo_controls_ = renderer_.settings().cloudscape_controls;
+  }
   if (scene_hook_) scene_hook_->Emit(dt, view);
   if (scene_hook_rhi_) scene_hook_rhi_->Emit(dt, view);
   if (ship_) ship_->Emit(dt, view);
   if (nav_) nav_->Emit(dt, view);
   if (placement_) placement_->Emit(dt, view);
+  if (grass_) grass_->Emit(view);
   if (gym_) gym_->Emit(dt, view);
   if (puppet_) puppet_->Emit(dt, view);
   if (drive_) drive_->Emit(dt, view);
   if (feature_gym_) feature_gym_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
   if (fluid_scene_) EmitFluid(dt, view);
+  if (sky_scene_) EmitSky(dt);
   if (cloth_ != 0) EmitCloth(view);
   UpdateParticles(dt, view);
   if (gpu_particle_count_ > 0) {
@@ -607,6 +646,7 @@ void DemoScenes::CreateWaterDemoScene() {
   particles_enabled_ = true;
   particle_emitter_ = {-7.0f, 0.8f, 0.0f};
   renderer_.settings().clouds = false;
+  renderer_.settings().cloudscape = false;
   // DDGI's low-resolution probe volume can imprint its lattice on the large
   // untextured floaters. This scene validates water geometry, so use the
   // stable environment-lighting path here.
@@ -1749,6 +1789,7 @@ void DemoScenes::CreateClothDemoScene() {
   renderer_.settings().ambient = 0.09f;
   renderer_.settings().dof = false;
   renderer_.settings().clouds = false;
+  renderer_.settings().cloudscape = false;
   renderer_.settings().aerial_perspective = 0.0f;
   camera_.set_position({3.2f, 2.15f, 2.6f});
   camera_.set_yaw_pitch(-0.89f, -0.08f);
@@ -3008,6 +3049,18 @@ void DemoScenes::CreateWeatherDemoScene() {
   rs.weather.wind_yaw = WeatherDemoWindDir.get() * 3.14159265f / 180.0f;
   rs.weather.gustiness = 0.45f;
   rs.cloud_coverage = 0.68f;  // overcast enough to sell the downpour, some light through
+  rs.cloudscape_controls.map_a = {
+      .seed = 61u, .coverage = 0.68f, .cloud_type = 0.9f,
+      .precipitation = rs.weather.precipitation};
+  rs.cloudscape_controls.map_b = rs.cloudscape_controls.map_a;
+  rs.cloudscape_controls.map_blend = 0.0f;
+  rs.cloudscape_controls.bottom = 1300.0f;
+  rs.cloudscape_controls.top = 10500.0f;
+  rs.cloudscape_controls.anvil = 0.85f;
+  rs.cloudscape_controls.darkness = 0.45f;
+  rs.cloudscape_controls.density = 1.1f;
+  rs.cloudscape_controls.fog_density = 0.22f;
+  rs.cloudscape_controls.fog_height = 120.0f;
   // Storm light: the cloud deck kills most direct sun, but the IBL/sun path
   // does not know about clouds - stage it. Fixed exposure keeps the deliberate
   // gloom (auto exposure would lift the overcast scene back to a bright noon).
@@ -3043,6 +3096,368 @@ void DemoScenes::CreateWeatherDemoScene() {
   RX_INFO("weather demo: precip {} ({}), wind {} m/s{}",
           rs.weather.precipitation, rs.weather.snow ? "snow" : "rain", rs.weather.wind_speed,
           storm_enabled_ ? ", thunderstorm on" : "");
+}
+
+// --demo sky: pin one weather state (-1 = free-running scheduler).
+static base::Option<int> SkyState{"demo.sky.state", -1, "RX_SKY_STATE"};
+// Ground-haze overrides on top of the pinned state (<0 = keep the state's
+// values). RX_SKY_FOG=0.55 RX_SKY_FOG_H=18 turns a clear morning into
+// knee-deep valley mist the towers rise out of.
+static base::Option<float> SkyFog{"demo.sky.fog", -1.0f, "RX_SKY_FOG"};
+static base::Option<float> SkyFogH{"demo.sky.fogh", -1.0f, "RX_SKY_FOG_H"};
+// Camera start height override (>0): climb above the mist blanket and look
+// down on the lot for the classic towers-piercing-the-fog framing.
+static base::Option<float> SkyCamY{"demo.sky.camy", -1.0f, "RX_SKY_CAM_Y"};
+// Storm-chaser cam: while a funnel is down, keep the camera aimed at it (the
+// spawn ring is player-relative and random, so captures can't pre-aim).
+static base::Option<bool> SkyTrack{"demo.sky.track", false, "RX_SKY_TRACK"};
+// Short dwell/transitions so the scheduler's state changes fit a capture.
+static base::Option<bool> SkyFast{"demo.sky.fast", false, "RX_SKY_FAST"};
+
+void DemoScenes::CreateSkyDemoScene() {
+  // Cloudscape acceptance scene: a wide flat lot with a few tall blocks for
+  // scale/shadow reference; everything interesting happens in the sky. The
+  // weather layer owns all atmospheric settings from here on (EmitSky).
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b, f32 rough) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = rough;
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  asset::AssetId ground_mat = mat("builtin/sky/ground", 0.30f, 0.34f, 0.26f, 0.95f);
+  asset::AssetId block_mat = mat("builtin/sky/block", 0.42f, 0.40f, 0.38f, 0.8f);
+
+  auto add_box = [&](asset::Mesh mesh, asset::AssetId material, Vec3 pos) {
+    asset::MeshLod& lod = mesh.lods[0];  // MakeBox leaves the submesh list empty
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    world_.Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
+    world_.Add(e, scene::Renderable{mesh.id});
+  };
+  add_box(asset::MakeBox(3200.0f, 0.5f, 3200.0f, asset::MakeAssetId("builtin/sky/ground_m")),
+          ground_mat, {0, -0.5f, 0});
+  add_box(asset::MakeBox(3.0f, 12.0f, 3.0f, asset::MakeAssetId("builtin/sky/tower_a")),
+          block_mat, {26.0f, 12.0f, -18.0f});
+  add_box(asset::MakeBox(2.0f, 6.0f, 2.0f, asset::MakeAssetId("builtin/sky/tower_b")),
+          block_mat, {-30.0f, 6.0f, 8.0f});
+  add_box(asset::MakeBox(6.0f, 1.5f, 6.0f, asset::MakeAssetId("builtin/sky/slab")),
+          block_mat, {-6.0f, 1.5f, -34.0f});
+
+  // The weather layer: four states spanning the model's range. Dwell and
+  // transition times shrink under RX_SKY_FAST so a capture sees a change.
+  weather_sys_ = std::make_unique<weather::WeatherSystem>(7u);
+  const bool fast = bool(SkyFast);
+  auto tune = [&](weather::WeatherState s) {
+    if (fast) {
+      s.transition_seconds = 6.0f;
+      s.min_dwell = 8.0f;
+      s.max_dwell = 16.0f;
+    }
+    return s;
+  };
+  // Shell altitudes follow the class each state represents: fair-weather
+  // cumulus rides a high dry-climate condensation level, the stratocumulus
+  // overcast is a genuinely low thin ceiling, and the storm is a
+  // cumulonimbus tower running from a low base to a ~12 km anvil.
+  weather::WeatherState clear;
+  clear.name = "clear";
+  clear.coverage = 0.26f;
+  clear.cloud_type = 0.72f;
+  clear.map_seed = 11u;
+  clear.wind_speed = 9.0f;
+  clear.base_altitude = 2200.0f;
+  clear.top_altitude = 4600.0f;
+  clear.fog_density = 0.04f;
+  weather_sys_->AddState(tune(clear));
+  weather::WeatherState scattered;
+  scattered.name = "scattered";
+  scattered.coverage = 0.48f;
+  scattered.cloud_type = 0.78f;
+  scattered.map_seed = 23u;
+  scattered.wind_speed = 13.0f;
+  scattered.base_altitude = 2000.0f;
+  scattered.top_altitude = 6200.0f;
+  scattered.fog_density = 0.1f;
+  weather_sys_->AddState(tune(scattered));
+  weather::WeatherState overcast;
+  overcast.name = "overcast";
+  overcast.coverage = 0.72f;
+  overcast.cloud_type = 0.24f;
+  overcast.density = 1.15f;
+  overcast.map_seed = 37u;
+  overcast.wind_speed = 16.0f;
+  overcast.base_altitude = 1100.0f;
+  overcast.top_altitude = 2800.0f;
+  overcast.fog_density = 0.28f;  // damp grey day: the ceiling breathes down
+  overcast.fog_height = 120.0f;
+  weather_sys_->AddState(tune(overcast));
+  weather::WeatherState storm;
+  storm.name = "storm";
+  storm.coverage = 0.8f;
+  storm.cloud_type = 0.95f;
+  storm.precipitation = 0.85f;
+  storm.storminess = 0.9f;
+  storm.darkness = 0.55f;  // menacing, not merely grey
+  storm.density = 1.15f;
+  storm.map_seed = 53u;
+  storm.wind_speed = 22.0f;
+  storm.turbulence = 1.4f;
+  storm.base_altitude = 1500.0f;
+  storm.top_altitude = 12000.0f;
+  storm.fog_density = 0.34f;  // storm murk (post-rain mist rises on top)
+  storm.fog_height = 140.0f;
+  weather_sys_->AddState(tune(storm));
+  // A distant front: the Unwetter sits kilometres off. No rain reaches the
+  // player, the menace rides the far storm cells only (local deck keeps its
+  // daylight), and strikes land in a far ring -- their flash glows on that
+  // horizon and the thunder arrives many seconds late and muffled.
+  weather::WeatherState front;
+  front.name = "distant front";
+  front.coverage = 0.52f;
+  front.cloud_type = 0.85f;
+  front.precipitation = 0.0f;
+  front.storminess = 0.8f;
+  front.darkness = 0.85f;
+  front.map_seed = 71u;
+  front.wind_speed = 17.0f;
+  front.turbulence = 1.2f;
+  front.base_altitude = 1700.0f;
+  front.top_altitude = 10500.0f;
+  front.fog_density = 0.12f;  // pre-storm stillness, light haze
+  front.strike_min_range = 2500.0f;
+  front.strike_max_range = 7000.0f;
+  weather_sys_->AddState(tune(front));
+  // Twister: a supercell-grade storm that spawns vortices. The funnel touches
+  // down upwind, snakes past the lot and ropes out; strikes stay active.
+  weather::WeatherState twister;
+  twister.name = "twister";
+  twister.coverage = 0.85f;
+  twister.cloud_type = 0.95f;
+  twister.precipitation = 0.55f;
+  twister.storminess = 0.95f;
+  twister.darkness = 0.5f;
+  twister.density = 1.2f;
+  twister.map_seed = 89u;
+  twister.wind_speed = 18.0f;
+  twister.turbulence = 1.5f;
+  twister.base_altitude = 1400.0f;
+  twister.top_altitude = 12000.0f;
+  twister.fog_density = 0.18f;
+  twister.tornado_prone = 1.0f;
+  twister.weight = 0.4f;  // rare in the free-running schedule
+  weather_sys_->AddState(tune(twister));
+
+  int pinned = SkyState.get();
+  if (pinned >= 0 && pinned < 6) {
+    weather_sys_->ForceState(static_cast<u32>(pinned), 0.0f);
+  }
+
+  auto& rs = renderer_.settings();
+  rs.cloudscape = true;
+  rs.clouds = true;
+
+  sky_scene_ = true;
+  camera_.set_position({0.0f, 3.0f, 46.0f});
+  camera_.set_yaw_pitch(0.0f, 0.12f);
+  if (SkyCamY.get() > 0.0f) {
+    camera_.set_position({0.0f, SkyCamY.get(), 110.0f});
+    camera_.set_yaw_pitch(0.0f, -0.22f);
+  }
+  camera_.speed = 14.0f;
+  RX_INFO("sky demo: cloudscape on, {} weather states{}", 6,
+          pinned >= 0 && pinned < 6 ? " (pinned)" : "");
+}
+
+void DemoScenes::CreateSwampDemoScene() {
+  // A stagnant lowland under a low stratus lid: dark waterlogged ground with
+  // puddle sheen, leaning dead snags, and knee-deep mist drifting between
+  // them. Everything atmospheric comes from one forced swamp weather state --
+  // the scene itself is just wet geometry for the haze to sit in.
+  auto mat = [&](const char* tag, f32 r, f32 g, f32 b, f32 rough) {
+    asset::Material m;
+    m.id = asset::MakeAssetId(tag);
+    m.base_color_factor[0] = r;
+    m.base_color_factor[1] = g;
+    m.base_color_factor[2] = b;
+    m.roughness_factor = rough;
+    m.metallic_factor = 0.0f;
+    if (!config_.headless) renderer_.UploadMaterial(m);
+    return m.id;
+  };
+  asset::AssetId mud_mat = mat("builtin/swamp/mud", 0.10f, 0.115f, 0.08f, 0.55f);
+  asset::AssetId snag_mat = mat("builtin/swamp/snag", 0.16f, 0.13f, 0.10f, 0.9f);
+  asset::AssetId moss_mat = mat("builtin/swamp/moss", 0.13f, 0.17f, 0.09f, 0.85f);
+
+  auto add_box = [&](const char* tag, f32 w, f32 h, f32 d, asset::AssetId material, Vec3 pos,
+                     f32 tilt_x, f32 tilt_z) {
+    asset::Mesh mesh = asset::MakeBox(w * 0.5f, h * 0.5f, d * 0.5f, asset::MakeAssetId(tag));
+    asset::MeshLod& lod = mesh.lods[0];
+    lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), material});
+    if (!config_.headless) renderer_.UploadMesh(mesh);
+    ecs::Entity e = world_.Create();
+    scene::Transform t;
+    t.position[0] = pos.x;
+    t.position[1] = pos.y;
+    t.position[2] = pos.z;
+    // Small-angle lean as a quaternion straight from the half-angles: the
+    // snags list drunkenly instead of standing surveyor-straight.
+    f32 hx = tilt_x * 0.5f, hz = tilt_z * 0.5f;
+    t.rotation[0] = std::sin(hx);
+    t.rotation[2] = std::sin(hz);
+    t.rotation[3] = std::cos(hx) * std::cos(hz);
+    world_.Add(e, t);
+    world_.Add(e, scene::Renderable{mesh.id});
+  };
+
+  add_box("builtin/swamp/ground", 300.0f, 0.5f, 300.0f, mud_mat, {0, -0.25f, 0}, 0, 0);
+  // Hummocks: low mossy mounds breaking the plane.
+  u32 rng = 0x51ab7u;
+  auto next01 = [&rng]() {
+    rng ^= rng << 13;
+    rng ^= rng >> 17;
+    rng ^= rng << 5;
+    return static_cast<f32>(rng >> 8) * (1.0f / 16777216.0f);
+  };
+  for (int i = 0; i < 10; ++i) {
+    f32 x = (next01() - 0.5f) * 120.0f;
+    f32 z = (next01() - 0.5f) * 120.0f;
+    f32 w = 2.5f + next01() * 4.0f;
+    char tag[64];
+    std::snprintf(tag, sizeof(tag), "builtin/swamp/hummock_%d", i);
+    f32 h = 0.5f + next01() * 0.5f;
+    add_box(tag, w, h, w * (0.7f + next01() * 0.6f), moss_mat, {x, h * 0.5f, z}, 0, 0);
+  }
+  // Dead snags: tall thin trunks with a drunken lean, some snapped short.
+  for (int i = 0; i < 26; ++i) {
+    f32 x = (next01() - 0.5f) * 140.0f;
+    f32 z = (next01() - 0.5f) * 140.0f;
+    if (std::fabs(x) < 4.0f && std::fabs(z) < 4.0f) continue;  // keep the spawn clear
+    f32 h = next01() < 0.3f ? 3.0f + next01() * 3.0f : 8.0f + next01() * 9.0f;
+    f32 w = 0.25f + next01() * 0.35f;
+    f32 tx = (next01() - 0.5f) * 0.16f;
+    f32 tz = (next01() - 0.5f) * 0.16f;
+    char tag[64];
+    std::snprintf(tag, sizeof(tag), "builtin/swamp/snag_%d", i);
+    add_box(tag, w, h, w, snag_mat, {x, h * 0.5f, z}, tx, tz);
+  }
+
+  // One forced swamp state: low thin stratus lid, still air, thick shallow
+  // mist. Wetness is pinned in EmitSky so the mud keeps its puddle sheen.
+  weather_sys_ = std::make_unique<weather::WeatherSystem>(3u);
+  weather::WeatherState swamp;
+  swamp.name = "swamp";
+  swamp.coverage = 0.68f;
+  swamp.cloud_type = 0.2f;
+  swamp.map_seed = 97u;
+  swamp.wind_speed = 3.5f;   // stagnant air: the mist barely crawls
+  swamp.base_altitude = 800.0f;
+  swamp.top_altitude = 2000.0f;
+  swamp.fog_density = SkyFog.get() >= 0.0f ? SkyFog.get() : 0.55f;
+  swamp.fog_height = SkyFogH.get() > 0.0f ? SkyFogH.get() : 13.0f;
+  swamp.fog_churn = 0.8f;  // vapour boiling off the standing water
+  weather_sys_->AddState(swamp);
+  weather_sys_->ForceState(0, 0.0f);
+
+  auto& rs = renderer_.settings();
+  rs.cloudscape = true;
+  rs.clouds = true;
+
+  sky_scene_ = true;
+  swamp_scene_ = true;
+  camera_.set_position({2.0f, 2.6f, 34.0f});
+  camera_.set_yaw_pitch(-0.12f, 0.03f);
+  camera_.speed = 8.0f;
+  RX_INFO("swamp demo: forced swamp state, fog {:.2f} H {:.0f} m",
+          weather_sys_->cloudscape().fog_density, weather_sys_->cloudscape().fog_height);
+}
+
+void DemoScenes::EmitSky(f32 dt) {
+  if (!weather_sys_) return;
+  sky_time_ += dt;
+  // The viewer's world clock drives the sun; the layer only needs a rough day
+  // phase for its day/night weight bias. A fixed early afternoon keeps the
+  // demo deterministic.
+  weather_sys_->Update(dt, camera_.position(), 0.45f);
+  auto& rs = renderer_.settings();
+  rs.cloudscape_controls = weather_sys_->cloudscape();
+  rs.weather = weather_sys_->weather();
+  rs.cloud_coverage = rs.cloudscape_controls.map_a.coverage +
+                      (rs.cloudscape_controls.map_b.coverage -
+                       rs.cloudscape_controls.map_a.coverage) *
+                          rs.cloudscape_controls.map_blend;
+  if (SkyFog.get() >= 0.0f) rs.cloudscape_controls.fog_density = SkyFog.get();
+  if (SkyFogH.get() > 0.0f) rs.cloudscape_controls.fog_height = SkyFogH.get();
+  if (swamp_scene_) {
+    // Standing water never dries: pin the surface response so the mud keeps
+    // its puddle sheen without any rain falling.
+    rs.weather.wetness = std::max(rs.weather.wetness, 0.8f);
+  }
+  sky_controls_ = rs.cloudscape_controls;
+  sky_weather_ = rs.weather;
+  // Touchdown breadcrumb: aim RX_CAM at the funnel for deterministic shots.
+  const render::CloudscapeControls& cc = rs.cloudscape_controls;
+  if (bool(SkyTrack) && cc.tornado_strength > 0.02f) {
+    Vec3 cam = camera_.position();
+    f32 dx = cc.tornado_pos.x - cam.x;
+    f32 dz = cc.tornado_pos.y - cam.z;
+    f32 flat = std::sqrt(dx * dx + dz * dz);
+    // forward() is (sin yaw, sin pitch, -cos yaw): aim a third up the funnel.
+    camera_.set_yaw_pitch(std::atan2(dx, -dz), std::atan2(300.0f - cam.y, flat));
+  }
+  if (cc.tornado_strength > 0.05f && !sky_tornado_seen_) {
+    sky_tornado_seen_ = true;
+    RX_INFO("tornado touchdown at ({:.0f}, {:.0f}), radius {:.0f} m", cc.tornado_pos.x,
+            cc.tornado_pos.y, cc.tornado_radius);
+  } else if (cc.tornado_strength <= 0.01f) {
+    sky_tornado_seen_ = false;
+  }
+
+  // Thunder (the game's role, like the strike scheduling itself): each new
+  // strike queues a procedural clap delayed by the speed of sound, so the
+  // flash leads the sound the way it does outdoors -- a 340 m strike rumbles
+  // in a second later.
+  const render::WeatherSettings& w = rs.weather;
+  bool new_strike = w.strike_age >= 0.0f &&
+                    (sky_prev_strike_age_ < 0.0f ||
+                     w.strike_age < sky_prev_strike_age_ ||
+                     w.strike_seed != sky_prev_strike_seed_);
+  sky_prev_strike_age_ = w.strike_age;
+  if (w.strike_age >= 0.0f)
+    sky_prev_strike_seed_ = w.strike_seed;
+  if (new_strike) {
+    Vec3 cam = camera_.position();
+    f32 dx = w.strike_pos.x - cam.x, dy = w.strike_pos.y + 400.0f - cam.y;
+    f32 dz = w.strike_pos.z - cam.z;
+    f32 dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    sky_thunder_.push_back({dist / 343.0f, w.strike_pos, w.strike_seed, w.strike_energy, dist});
+  }
+  for (u32 i = 0; i < sky_thunder_.size();) {
+    sky_thunder_[i].delay -= dt;
+    if (sky_thunder_[i].delay > 0.0f) {
+      ++i;
+      continue;
+    }
+    if (ctx_.audio && ctx_.audio->active()) {
+      const PendingThunder& th = sky_thunder_[i];
+      audio::PlayParams params;
+      params.gain = 0.9f + 0.5f * th.energy;
+      params.positional = true;
+      // The rumble comes from the channel and the deck above it, not from the
+      // ground scorch point; raising the source keeps it overhead-ish.
+      params.position = Vec3{th.pos.x, th.pos.y + 400.0f, th.pos.z};
+      params.atten = {200.0f, 9000.0f};
+      u32 rate = ctx_.audio->mixer().output_rate();
+      ctx_.audio->mixer().Play(audio::MakeThunder(rate, th.seed, th.energy, th.dist), params);
+    }
+    sky_thunder_[i] = sky_thunder_.back();
+    sky_thunder_.pop_back();
+  }
 }
 
 void DemoScenes::UpdateStorm(f32 dt) {
@@ -3169,6 +3584,14 @@ void DemoScenes::CreateDemoScene() {
     CreateFluidDemoScene();
     return;
   }
+  if (config_.demo_scene == "sky") {
+    CreateSkyDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "swamp") {
+    CreateSwampDemoScene();
+    return;
+  }
   if (config_.demo_scene == "weather") {
     CreateWeatherDemoScene();
     return;
@@ -3290,6 +3713,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "placement") {
     placement_ = std::make_unique<PlacementDemo>(ctx_);
     placement_->Create();
+    return;
+  }
+  if (config_.demo_scene == "grass") {
+    grass_ = std::make_unique<GrassDemo>(ctx_);
+    grass_->Create();
     return;
   }
   if (config_.demo_scene == "gym") {

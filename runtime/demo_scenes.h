@@ -16,6 +16,8 @@
 #include "net/bubble.h"
 #include "net/bubble_debug.h"
 #include "render/core/renderer.h"
+#include "weather/weather.h"
+#include "demo_grass.h"
 #include "demo_nav.h"
 #include "demo_placement.h"
 #include "demo_ship.h"
@@ -38,6 +40,8 @@ class DemoScenes {
 
   // Dispatches on config.demo_scene; the default spins a cube.
   void CreateDemoScene();
+  // Advances demo-owned state that must be visible to ECS draw gathering.
+  void Update(f32 dt);
   // Appends the live demo effects (particles, gaussians, oit, lights, fur, gpu
   // particles) into this frame's render view.
   void EmitToView(f32 dt, render::FrameView& view);
@@ -115,6 +119,14 @@ class DemoScenes {
   // rx renders the bolt + flash light) and drives the global flash scalar with
   // the strike envelope so global and positioned flash agree.
   void UpdateStorm(f32 dt);
+  // Cloudscape acceptance demo (--demo sky): a wide lot under the opt-in
+  // textured cloud deck, driven by a weather::WeatherSystem scheduling
+  // clear/scattered/overcast/storm states. RX_SKY_STATE pins one state.
+  void CreateSkyDemoScene();
+  // Swamp fog showcase (--demo swamp): dead snags and mossy hummocks on wet
+  // mud under a forced low-stratus state with thick shallow mist.
+  void CreateSwampDemoScene();
+  void EmitSky(f32 dt);
   // Water demo: each floating cube pushes a wake ripple + foam splat into the
   // persistent water field, scaled by its physics velocity.
   void EmitWaterDisturbances(f32 dt, render::FrameView& view);
@@ -158,9 +170,32 @@ class DemoScenes {
   base::Vector<ecs::Entity> fluid_dam_boxes_;  // the visible dam slabs
   f32 fluid_dam_box_y0_ = 0;               // rest Y of the dam boxes
   f32 fluid_dam_sink_ = -1.0f;             // >=0 once breaking: seconds elapsed
+  // --demo sky: the weather layer scheduling the cloudscape deck.
+  std::unique_ptr<weather::WeatherSystem> weather_sys_;
+  bool sky_scene_ = false;
+  bool swamp_scene_ = false;  // pins surface wetness (standing water)
+  bool sky_tornado_seen_ = false;  // touchdown log edge detector
+  f32 sky_time_ = 0;  // scene clock, drives a slow synthetic day phase
+  render::CloudscapeControls sky_controls_;
+  render::WeatherSettings sky_weather_;
+  // Thunder claps in flight: queued on each new strike, played after the
+  // speed-of-sound delay.
+  struct PendingThunder {
+    f32 delay;
+    Vec3 pos;
+    u32 seed;
+    f32 energy;
+    f32 dist;
+  };
+  base::Vector<PendingThunder> sky_thunder_;
+  f32 sky_prev_strike_age_ = -1.0f;
+  u32 sky_prev_strike_seed_ = 0;
   // Weather demo thunderstorm scheduler state.
   bool storm_enabled_ = false;
   bool weather_scene_ = false;  // weather demo active: re-clamp its storm sun
+  Vec2 weather_map_offset_{0, 0};
+  render::CloudscapeControls weather_demo_controls_;
+  render::WeatherSettings weather_demo_weather_;
   f32 storm_time_ = 0;
   f32 storm_next_strike_ = 0;
   u32 gpu_particle_count_ = 0;  // > 0 selects the gpu-simulated fountain
@@ -236,6 +271,9 @@ class DemoScenes {
   // dithering streaming a forest around the camera). Non-null only for that
   // demo.
   std::unique_ptr<PlacementDemo> placement_;
+
+  // --demo grass: GPU-generated cubic-Bezier blades over semantic hills.
+  std::unique_ptr<GrassDemo> grass_;
 
   // --demo gym: the character/inventory reference gym (graybox + tuning panel).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.

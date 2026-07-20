@@ -16,6 +16,7 @@
 #include "core/window.h"
 #include "render/atmosphere/aerial_perspective.h"
 #include "render/atmosphere/clouds.h"
+#include "render/atmosphere/cloudscape.h"
 #include "render/atmosphere/environment.h"
 #include "render/atmosphere/froxel_fog.h"
 #include "render/atmosphere/lightning.h"
@@ -36,6 +37,7 @@
 #include "render/geometry/ocean_fft.h"
 #include "render/geometry/particle_emitters.h"
 #include "render/geometry/particles.h"
+#include "render/geometry/procedural_grass.h"
 #include "render/geometry/fluid_sim.h"
 #include "render/geometry/fluid_surface.h"
 #include "render/geometry/shore_wetting.h"
@@ -275,6 +277,11 @@ struct FrameView {
   // domain leaves the sim idle. Non-owning: valid for the RenderFrame call.
   const FluidDomainDesc *fluid_domain = nullptr;
   base::Vector<FluidSource> fluid_sources;
+  // Optional semantic vegetation field. The renderer generates only this
+  // camera's visible blades; local displacement sources are bounded and copied
+  // into the frame slot before command recording.
+  const GrassDomain* grass_domain = nullptr;
+  base::Vector<GrassInteraction> grass_interactions;
   // Recorded inside the final ui pass with the backbuffer bound as the
   // color attachment. hud_draw (the libultragui HUD/menu) records first, then
   // ui_draw (the debug ImGui overlay) on top.
@@ -319,6 +326,7 @@ struct FrameView {
     fresh.lights = std::move(lights);
     fresh.bone_matrices = std::move(bone_matrices);
     fresh.particles = std::move(particles);
+    fresh.grass_interactions = std::move(grass_interactions);
     fresh.oit = std::move(oit);
     fresh.gaussians = std::move(gaussians);
     fresh.draws.clear();
@@ -326,6 +334,7 @@ struct FrameView {
     fresh.lights.clear();
     fresh.bone_matrices.clear();
     fresh.particles.clear();
+    fresh.grass_interactions.clear();
     fresh.oit.clear();
     fresh.gaussians.clear();
     *this = std::move(fresh);
@@ -665,6 +674,13 @@ private:
   VolumetricFog volumetric_fog_;
   AerialPerspective aerial_perspective_;
   Clouds clouds_;
+  // The opt-in textured cloud model. Heavier resources (3D noise bakes, the
+  // half-res history) than clouds_, so it initializes lazily on the first
+  // frame RenderSettings::cloudscape is set.
+  Cloudscape cloudscape_;
+  bool cloudscape_init_tried_ = false;
+  bool cloudscape_ready_ = false;
+  bool applied_cloudscape_ = false;
   Precipitation precipitation_;
   PrecipOcclusion precip_occlusion_;
   PrecipVolume precip_volume_;
@@ -672,6 +688,7 @@ private:
   bool precip_occlusion_active_ = false;  // sky map valid + consumers may sample it
   SurfaceWeather surface_weather_;
   ParticleSystem particles_;
+  ProceduralGrass procedural_grass_;
   // CPU pools for the NIF particle emitters (fires, smoke, mist), fed from
   // mesh_emitters_ by the draw list each frame. No GPU state to shut down.
   ParticleEmitterSim emitter_sim_;

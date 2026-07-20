@@ -270,6 +270,7 @@ class VulkanDevice final : public Device {
 
   GpuBuffer CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible) override;
   GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override;
+  void FlushBuffer(const GpuBuffer& buffer, u64 offset, u64 size) override;
   void DestroyBuffer(GpuBuffer& buffer) override;
   void DestroyBufferDeferred(GpuBuffer& buffer) override;
   void DestroyImageDeferred(GpuImage& image) override;

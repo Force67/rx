@@ -8,6 +8,7 @@ rx_add_module(audio
   synth_voice.cc
   engine_synth.cc
   aux_synth.cc
+  thunder_synth.cc
   vehicle_audio.cc
 )
 

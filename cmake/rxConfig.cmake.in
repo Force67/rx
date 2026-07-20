@@ -98,42 +98,48 @@ endif()
 include("${CMAKE_CURRENT_LIST_DIR}/rxTargets.cmake")
 
 # --- re-attach the bundled closure to the rx:: targets ----------------------
-set_property(TARGET rx::core APPEND PROPERTY
-  INTERFACE_LINK_LIBRARIES equilibrium::base)
-if(@RX_INSTALL_WAYLAND_KDE_HDR@)
+if(TARGET rx::core)
   set_property(TARGET rx::core APPEND PROPERTY
-    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:PkgConfig::WAYLAND_CLIENT>)
+    INTERFACE_LINK_LIBRARIES equilibrium::base)
+  if(@RX_INSTALL_WAYLAND_KDE_HDR@)
+    set_property(TARGET rx::core APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES $<LINK_ONLY:PkgConfig::WAYLAND_CLIENT>)
+  endif()
 endif()
 
 # volk / VMA are PUBLIC on rx::render (headers propagate), the SDK archives are
 # link-only.
-set_property(TARGET rx::render APPEND PROPERTY
-  INTERFACE_LINK_LIBRARIES volk GPUOpen::VulkanMemoryAllocator)
-if(@RX_INSTALL_RHI_D3D12@)
+if(TARGET rx::render)
   set_property(TARGET rx::render APPEND PROPERTY
-    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:PkgConfig::VKD3D>)
-endif()
-if(@RX_INSTALL_FSR3@)
-  set_property(TARGET rx::render APPEND PROPERTY
-    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::ffx_fsr3>)
-endif()
-if(@RX_INSTALL_DLSS@)
-  set_property(TARGET rx::render APPEND PROPERTY
-    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::dlss>)
-endif()
-if(@RX_INSTALL_NRD@)
-  set_property(TARGET rx::render APPEND PROPERTY
-    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::nrd>)
+    INTERFACE_LINK_LIBRARIES volk GPUOpen::VulkanMemoryAllocator)
+  if(@RX_INSTALL_RHI_D3D12@)
+    set_property(TARGET rx::render APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES $<LINK_ONLY:PkgConfig::VKD3D>)
+  endif()
+  if(@RX_INSTALL_FSR3@)
+    set_property(TARGET rx::render APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::ffx_fsr3>)
+  endif()
+  if(@RX_INSTALL_DLSS@)
+    set_property(TARGET rx::render APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::dlss>)
+  endif()
+  if(@RX_INSTALL_NRD@)
+    set_property(TARGET rx::render APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::nrd>)
+  endif()
 endif()
 
-if(@RX_INSTALL_JOLT@)
+if(@RX_INSTALL_JOLT@ AND TARGET rx::physics)
   set_property(TARGET rx::physics APPEND PROPERTY
     INTERFACE_LINK_LIBRARIES $<LINK_ONLY:Jolt> $<LINK_ONLY:kinema::kinema>)
 endif()
 
 # rx::anim's graph/rig/foot-placement units link kinema (link-only; kinema is
 # always bundled and imported above).
-set_property(TARGET rx::anim APPEND PROPERTY
-  INTERFACE_LINK_LIBRARIES $<LINK_ONLY:kinema::kinema>)
+if(TARGET rx::anim)
+  set_property(TARGET rx::anim APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:kinema::kinema>)
+endif()
 
 check_required_components(rx)

@@ -194,9 +194,13 @@ void Host::ApplyRenderPreset() {
   tuned.water_interaction = env.water_interaction;
   tuned.shore_wetting = env.shore_wetting;
   tuned.water_caustics = env.water_caustics;
+  tuned.procedural_grass = env.procedural_grass;  // honor RX_PROCEDURAL_GRASS
   tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;
+  tuned.cloudscape = env.cloudscape;
+  tuned.cloudscape_steps = env.cloudscape_steps;
+  tuned.cloudscape_controls = env.cloudscape_controls;
   tuned.cloud_coverage = env.cloud_coverage;
   tuned.weather = env.weather;  // live weather state; presets never set it
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline

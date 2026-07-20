@@ -3,6 +3,7 @@
 
 #include "core/math.h"
 #include "core/types.h"
+#include "render/atmosphere/cloudscape_types.h"
 #include "render/post/antialiasing.h"
 #include "render/post/upscaler.h"
 
@@ -139,6 +140,9 @@ struct RenderSettings {
   bool gpu_occlusion = true;  // hi-z occlusion culling against last frame's depth
   bool distance_lod = false;  // pick coarser mesh lods by distance; off = always finest (it's 2026)
   bool mesh_shader_lod = false;  // optional VK_EXT_mesh_shader opaque path (per-meshlet gpu cull)
+  // GPU-generated cubic-Bezier blade fields submitted through FrameView. No
+  // field means zero passes and allocations remain dormant after startup.
+  bool procedural_grass = true;
   DebugView debug_view = DebugView::kOff;  // isolate a shading channel
 
   bool sky = true;  // procedural atmosphere as the background
@@ -266,6 +270,16 @@ struct RenderSettings {
   // Raymarched volumetric clouds over the sky (procedural, depth-composited).
   bool clouds = true;
   f32 cloud_coverage = 0.46f;  // 0 clear .. 1 overcast
+
+  // Opt-in textured cloud model (RX_CLOUDSCAPE): replaces the procedural
+  // clouds pass with a weather-map-driven shell marched from baked tileable
+  // noise, amortized over a 16-frame refresh cycle at half resolution. The
+  // application (typically a weather::WeatherSystem) writes
+  // cloudscape_controls each frame; with no writer the defaults give a steady
+  // scattered-cumulus sky.
+  bool cloudscape = false;
+  u32 cloudscape_steps = 48;  // potential full samples toward the zenith
+  CloudscapeControls cloudscape_controls;
 
   // Weather state (precipitation, wind, surface wetness/snow cover, lightning,
   // aurora), written by the application's weather system each frame.
