@@ -70,8 +70,9 @@ Half-resolution persistent buffer; each frame only 1 pixel of every 4×4 block
 marches fresh (16-frame refresh cycle), the rest reproject last frame through
 the stored per-pixel cloud distance (two-projection parallax). Disocclusions
 and history misses fall back to a fresh march. A full-res pass composites the
-buffer over the lit scene — occluded texels store the identity, so bilinear
-upsampling cannot bleed cloud onto foreground geometry.
+buffer over the lit scene and conservatively checks cloud distance against
+full-resolution scene depth, so filtering cannot bleed cloud onto foreground
+geometry.
 
 The march itself:
 
@@ -79,7 +80,7 @@ The march itself:
   on contact the walk backs up one stride and switches to full-detail samples,
   returning to cheap mode after 6 consecutive empty taps.
 - **Adaptive counts**: `cloudscape_steps` potential full samples toward the
-  zenith, 2× toward the horizon, early exit at 99% opacity.
+  zenith (clamped to 8–128), 2× toward the horizon, early exit at 99% opacity.
 - **Lighting**: 6-tap cone toward the sun (5 near, 1 far for distant tower
   shadows), Beer extinction with a two-scale floor standing in for multiple
   scattering, a two-lobe phase (forward silver lining + back lobe), a powder

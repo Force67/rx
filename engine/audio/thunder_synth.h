@@ -17,7 +17,8 @@ namespace rx::audio {
 // one snaps. The caller owns the arrival delay (distance / ~343 m/s) and the
 // spatial placement; this is just the sound.
 //
-// Returns a finite mono decoder at `output_rate` (no resampling in the mixer);
+// Returns a finite mono decoder at `output_rate` (no resampling in the mixer),
+// or null for a zero rate, a rate above 768 kHz, or non-finite input;
 // the mixer retires the voice at end of stream. `seed` varies the echo timing
 // and roll character per strike, `energy` (0..1) scales length and weight.
 RX_AUDIO_EXPORT std::unique_ptr<Decoder>

@@ -23,6 +23,8 @@ public:
     Mat4 inv_view_proj;
     Mat4 prev_view_proj;
     Vec3 camera_pos;
+    f32 jitter[2] = {0.0f, 0.0f}; // current projection jitter in NDC
+    bool reset_history = false;
     f32 time = 0.0f;
     u32 frame_index = 0;
     Vec3 sun_direction;
@@ -48,6 +50,9 @@ public:
 
   bool Initialize(Device &device);
   void Destroy(Device &device);
+  // Drop only the resolution-dependent temporal allocation. Static procedural
+  // textures and pipelines stay warm so a quick off/on toggle does not rebake.
+  void ReleaseHistory(Device &device);
 
   // Appends the noise bakes / weather-map refresh, the half-res march and the
   // full-res composite. Returns the composited color.
@@ -114,6 +119,14 @@ private:
   bool history_valid_ = false;
   u32 last_frame_index_ = 0;
   bool has_last_frame_ = false;
+  f32 last_jitter_[2] = {0.0f, 0.0f};
+  Vec3 last_camera_pos_{};
+  Vec3 last_sun_direction_{};
+  Vec3 last_sun_color_{};
+  f32 last_sun_intensity_ = 0.0f;
+  f32 last_ambient_ = 0.0f;
+  CloudscapeControls last_controls_{};
+  bool has_last_controls_ = false;
 };
 
 } // namespace rx::render

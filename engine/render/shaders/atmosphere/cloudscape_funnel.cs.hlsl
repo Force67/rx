@@ -14,7 +14,7 @@ struct FunnelPush {
   float4 sun_color;   // rgb sun colour, w flash 0..1
   float4 funnel;      // xy axis ground pos, z wall radius (m), w strength 0..1
   float4 bounds;      // x ground y (m), y cloud base y (m), z sun intensity, w darkness
-  uint2 size;
+  float2 jitter;
   float2 _pad;
 };
 [[vk::binding(4, 0)]] ConstantBuffer<FunnelPush> pc : register(b4, space0);
@@ -29,12 +29,15 @@ static const float kTwoPi = 6.28318530718;
 
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
-  if (id.x >= pc.size.x || id.y >= pc.size.y) return;
+  uint width, height;
+  out_image.GetDimensions(width, height);
+  uint2 size = uint2(width, height);
+  if (id.x >= size.x || id.y >= size.y) return;
   int2 px = int2(id.xy);
   float3 scene = color_in.Load(int3(px, 0)).rgb;
 
   float strength = pc.funnel.w;
-  float2 ndc = (float2(px) + 0.5) / float2(pc.size) * 2.0 - 1.0;
+  float2 ndc = (float2(px) + 0.5) / float2(size) * 2.0 - 1.0 - pc.jitter;
   float4 nh = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));  // reversed-z near
   float3 cam = pc.camera_pos.xyz;
   float3 view = normalize(nh.xyz / nh.w - cam);
@@ -117,12 +120,20 @@ void main(uint3 id : SV_DispatchThreadID) {
     // Wall radius flares from a tight ground contact to the base; the wall
     // itself is a soft hollow shell, filled-in near the top.
     float rw = pc.funnel.z * (0.20 + 1.9 * pow(h, 1.35));
-    float wall = exp(-pow((r - rw) / max(rw * 0.42, 4.0), 2.0));
-    wall = max(wall, exp(-pow(r / max(rw, 4.0), 2.0)) * saturate(h * 1.8 - 0.5));
+    float wall_width = max(rw * 0.42, 4.0);
+    float dust_width = max(rw * 1.3, 8.0);
+    bool near_wall = abs(r - rw) < wall_width * 3.0 ||
+                     (h > 0.28 && r < max(rw, 4.0) * 2.5);
+    bool near_dust = h < 0.15 && abs(r - rw * 2.4) < dust_width * 3.0;
+    if (!near_wall && !near_dust) continue;
+    float wall_q = (r - rw) / wall_width;
+    float core_q = r / max(rw, 4.0);
+    float wall = exp(-wall_q * wall_q);
+    wall = max(wall, exp(-core_q * core_q) * saturate(h * 1.8 - 0.5));
 
     // Rotation: streak the noise around the axis. The angle coordinate maps
     // onto the tileable noise with an integer frequency, so there is no seam.
-    float ang = atan2(d2.y, d2.x) / kTwoPi;
+    float ang = r > 1e-4 ? atan2(d2.y, d2.x) / kTwoPi : 0.0;
     float3 nc = float3(ang * 3.0 + t * 0.55 + h * 2.6, h * 2.3 - t * 0.42, 0.71);
     float streak = base_noise.SampleLevel(base_sampler, nc, 0.0).g;
 
@@ -130,7 +141,8 @@ void main(uint3 id : SV_DispatchThreadID) {
     // the lower half harder or the ground contact dissolves into the haze.
     float dens = strength * wall * (0.45 + 0.75 * streak) * (1.35 - 0.55 * h);
     // Dust skirt: a wider, denser churn hugging the contact point.
-    float dust = exp(-pow((r - rw * 2.4) / max(rw * 1.3, 8.0), 2.0)) *
+    float dust_q = (r - rw * 2.4) / dust_width;
+    float dust = exp(-dust_q * dust_q) *
                  saturate(1.0 - h * 7.0) * strength * (0.6 + 0.8 * streak);
 
     float sigma = (dens * 0.050 + dust * 0.085);

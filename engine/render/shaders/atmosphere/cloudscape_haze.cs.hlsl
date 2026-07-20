@@ -19,8 +19,8 @@ struct HazePush {
   float4 sun_color;      // rgb, w flash 0..1
   float4 wind;           // xy blow direction, z vertical skew (m), w darkness
   float4 fog;            // x density 0..1, y falloff height (m), z ground (m), w anvil
-  float4 map;            // xy map offset (m), z map extent (m), w churn 0..1
-  uint2 size;
+  float4 map;            // xy map offset (m), z cloud density, w churn 0..1
+  float2 jitter;
   float2 shell;          // deck bottom / top altitudes (m), for god-ray occlusion
 };
 [[vk::binding(6, 0)]] ConstantBuffer<HazePush> pc : register(b6, space0);
@@ -36,6 +36,7 @@ struct HazePush {
 [[vk::combinedImageSampler]] [[vk::binding(5, 0)]] SamplerState transmittance_sampler : register(s5, space0);
 
 static const float kBaseScale = 1.0 / 9600.0;  // matches cloudscape_march
+static const float kWeatherExtent = 60000.0;
 
 float Remap(float v, float l0, float h0, float l1, float h1) {
   return l1 + (saturate((v - l0) / max(h0 - l0, 1e-5)) * (h1 - l1));
@@ -56,7 +57,8 @@ float HeightProfile(float h, float cloud_type, float anvil) {
 float DeckDensity(float3 wp) {
   float h = (wp.y - pc.shell.x) / max(pc.shell.y - pc.shell.x, 1.0);
   if (h <= 0.0 || h >= 1.0) return 0.0;
-  float4 weather = weather_map.SampleLevel(weather_sampler, (wp.xz - pc.map.xy) / pc.map.z, 0.0);
+  float4 weather =
+      weather_map.SampleLevel(weather_sampler, (wp.xz - pc.map.xy) / kWeatherExtent, 0.0);
   float coverage = weather.r;
   if (coverage <= 0.005) return 0.0;
   float2 drift = pc.map.xy + pc.wind.xy * (pc.wind.z * h);
@@ -65,7 +67,7 @@ float DeckDensity(float3 wp) {
   float worley_fbm = nse.g * 0.625 + nse.b * 0.25 + nse.a * 0.125;
   float base = Remap(nse.r, worley_fbm - 1.0, 1.0, 0.0, 1.0);
   base *= HeightProfile(h, weather.b, pc.fog.w * weather.g);
-  return Remap(base, 1.0 - coverage, 1.0, 0.0, 1.0) * coverage;
+  return Remap(base, 1.0 - coverage, 1.0, 0.0, 1.0) * coverage * pc.map.z;
 }
 
 float HG(float c, float g) {
@@ -76,20 +78,35 @@ float HG(float c, float g) {
 // Closed-form optical depth of sigma0 * exp(-(y - ground)/H) along a segment.
 float HeightFogOd(float y0, float dy_ds, float dist, float sigma0, float H, float ground) {
   H = max(H, 0.1);
+  if (dist <= 0.0) return 0.0;
   float e0 = exp(-max(y0 - ground, 0.0) / H);
-  if (abs(dy_ds) < 1e-4) return sigma0 * e0 * dist;
+  if (abs(dy_ds) < 1e-8) return sigma0 * e0 * dist;
   float y1 = y0 + dy_ds * dist;
-  float e1 = exp(-max(y1 - ground, 0.0) / H);
-  return sigma0 * (H / dy_ds) * (e0 - e1);
+  if (y0 <= ground && y1 <= ground) return sigma0 * dist;
+  if (y0 >= ground && y1 >= ground) {
+    float e1 = exp(-(y1 - ground) / H);
+    return sigma0 * (H / dy_ds) * (e0 - e1);
+  }
+  float crossing = clamp((ground - y0) / dy_ds, 0.0, dist);
+  if (y0 < ground) {
+    float above_len = dist - crossing;
+    float e1 = exp(-max(y1 - ground, 0.0) / H);
+    return sigma0 * crossing + sigma0 * (H / dy_ds) * (1.0 - e1);
+  }
+  float e_cross = 1.0;
+  return sigma0 * (H / dy_ds) * (e0 - e_cross) + sigma0 * (dist - crossing);
 }
 
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
-  if (id.x >= pc.size.x || id.y >= pc.size.y) return;
+  uint width, height;
+  out_image.GetDimensions(width, height);
+  uint2 size = uint2(width, height);
+  if (id.x >= size.x || id.y >= size.y) return;
   int2 px = int2(id.xy);
   float3 scene = color_in.Load(int3(px, 0)).rgb;
 
-  float2 ndc = (float2(px) + 0.5) / float2(pc.size) * 2.0 - 1.0;
+  float2 ndc = (float2(px) + 0.5) / float2(size) * 2.0 - 1.0 - pc.jitter;
   float4 nh = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));  // reversed-z near
   float3 cam = pc.camera_pos.xyz;
   float3 view = normalize(nh.xyz / nh.w - cam);
@@ -139,7 +156,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   // settled morning layer.
   float amp = 0.9 + 0.5 * pc.map.w;
   float banks = max(1.0 - amp * 0.5, 0.05) + amp * (n1 * 0.6 + n2 * 0.4);
-  float2 wuv = (cam.xz + view.xz * (dist * 0.4) - pc.map.xy) / pc.map.z;
+  float2 wuv = (cam.xz + view.xz * (dist * 0.4) - pc.map.xy) / kWeatherExtent;
   float4 weather = weather_map.SampleLevel(weather_sampler, wuv, 0.0);
   float humidity = 0.75 + 0.5 * weather.g + 0.25 * weather.r;
 
@@ -195,13 +212,14 @@ void main(uint3 id : SV_DispatchThreadID) {
   float sun_amt = 0.0;
   {
     float march_len = min(dist, 9000.0);
-    float step = march_len / 8.0;
+    const int kGodRaySteps = 3;
+    float step = march_len / float(kGodRaySteps);
     float local_trans = 1.0;
     float shell_mid = lerp(pc.shell.x, pc.shell.y, 0.16);
     float thick = (pc.shell.y - pc.shell.x);
     float vis = 1.0;
     [unroll]
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < kGodRaySteps; ++i) {
       float3 pi = cam + view * ((float(i) + 0.5) * step);
       float sig_i = sigma0 * exp(-max(pi.y - pc.fog.z, 0.0) / fog_height) * banks * humidity;
       if (to_sun.y > 0.06) {

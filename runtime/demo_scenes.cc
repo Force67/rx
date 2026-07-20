@@ -3408,8 +3408,12 @@ void DemoScenes::EmitSky(f32 dt) {
   // in a second later.
   const render::WeatherSettings& w = rs.weather;
   bool new_strike = w.strike_age >= 0.0f &&
-                    (sky_prev_strike_age_ < 0.0f || w.strike_age < sky_prev_strike_age_);
+                    (sky_prev_strike_age_ < 0.0f ||
+                     w.strike_age < sky_prev_strike_age_ ||
+                     w.strike_seed != sky_prev_strike_seed_);
   sky_prev_strike_age_ = w.strike_age;
+  if (w.strike_age >= 0.0f)
+    sky_prev_strike_seed_ = w.strike_seed;
   if (new_strike) {
     Vec3 cam = camera_.position();
     f32 dx = w.strike_pos.x - cam.x, dy = w.strike_pos.y + 400.0f - cam.y;

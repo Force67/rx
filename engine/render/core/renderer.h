@@ -667,6 +667,7 @@ private:
   Cloudscape cloudscape_;
   bool cloudscape_init_tried_ = false;
   bool cloudscape_ready_ = false;
+  bool applied_cloudscape_ = false;
   Precipitation precipitation_;
   PrecipOcclusion precip_occlusion_;
   PrecipVolume precip_volume_;

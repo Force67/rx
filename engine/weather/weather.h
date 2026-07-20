@@ -144,7 +144,7 @@ public:
   // Scripted override for story moments: jump toward `state_index` over
   // `transition_seconds` (<= 0 snaps instantly) and stop scheduling. A forced
   // state never dwells out. ClearForced() resumes normal scheduling from the
-  // current state.
+  // current state. Calling this before any state is registered is a no-op.
   void ForceState(u32 state_index, f32 transition_seconds);
   void ClearForced();
 
@@ -181,8 +181,9 @@ private:
   void Compose();                 // write cloudscape_/weather_ from the blend
   void IntegrateSurface(f32 dt, f32 precip, bool snow);
   void IntegrateTornado(f32 dt, const Vec3 &player_pos, f32 anvil);
-  void IntegrateLightning(f32 dt, const Vec3 &player_pos, f32 precip,
+  bool IntegrateLightning(f32 dt, const Vec3 &player_pos, f32 precip,
                           f32 anvil);
+  const WeatherState &TransitionSource() const;
 
   render::CloudscapeMapState MapOf(const WeatherState &s) const;
 
@@ -192,7 +193,8 @@ private:
   base::Vector<WeatherRegion> regions_;
   GroundHeightFn ground_ = [](f32, f32) { return 0.0f; };
 
-  // State machine. Invariant when settled: from_ == to_ and blend_ == 0.
+  // State machine. A reverse retarget can have from_ == to_ while a snapshot
+  // transition is active, so activity is explicit rather than index-derived.
   u32 from_ = 0;
   u32 to_ = 0;
   f32 blend_ = 0.0f;     // 0..1 progress from -> to
@@ -201,6 +203,9 @@ private:
       0.0f; // seconds until the next reschedule (settled + unforced only)
   bool forced_ = false;
   bool started_ = false; // first Update selects a region-valid initial state
+  bool transition_active_ = false;
+  WeatherState transition_source_{};
+  bool has_transition_source_ = false;
 
   // Running integrals that must survive state changes.
   Vec2 map_offset_{0, 0}; // integrated wind advection of the weather map

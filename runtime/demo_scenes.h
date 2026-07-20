@@ -183,6 +183,7 @@ class DemoScenes {
   };
   base::Vector<PendingThunder> sky_thunder_;
   f32 sky_prev_strike_age_ = -1.0f;
+  u32 sky_prev_strike_seed_ = 0;
   // Weather demo thunderstorm scheduler state.
   bool storm_enabled_ = false;
   bool weather_scene_ = false;  // weather demo active: re-clamp its storm sun

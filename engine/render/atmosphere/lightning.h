@@ -3,6 +3,7 @@
 
 #include "core/export.h"
 #include "core/math.h"
+#include "render/atmosphere/lightning_envelope.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 
@@ -25,7 +26,7 @@ class RX_RENDER_EXPORT LightningSystem {
  public:
   // A strike renders for this long: an instant main stroke plus up to two
   // deterministic re-strokes (the classic flicker) inside the window.
-  static constexpr f32 kStrikeDuration = 0.45f;
+  static constexpr f32 kStrikeDuration = kLightningStrikeDuration;
 
   struct Frame {
     Mat4 view_proj;

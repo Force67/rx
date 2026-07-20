@@ -14,9 +14,9 @@ struct ShadowPush {
   float4 wind;   // xy blow direction (unit XZ), z speed m/s, w vertical skew m
   float4 shape;  // x bottom(m), y top(m), z density, w darkness
   float4 map;    // xy map offset (m), z map extent (m), w anvil
-  uint2 size;
-  float time;
+  float2 jitter;
   float strength;  // max darkening (0..1)
+  float pad;
 };
 [[vk::binding(4, 0)]] ConstantBuffer<ShadowPush> pc : register(b4, space0);
 
@@ -63,14 +63,17 @@ float DensityCheap(float3 wp) {
 
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
-  if (id.x >= pc.size.x || id.y >= pc.size.y) return;
+  uint width, height;
+  sun_shadow.GetDimensions(width, height);
+  uint2 size = uint2(width, height);
+  if (id.x >= size.x || id.y >= size.y) return;
   float depth = depth_map.Load(int3(id.xy, 0));
   if (depth <= 0.0) return;  // sky shades itself through the cloud march
   float existing = sun_shadow[id.xy];
   if (existing <= 0.01) return;
 
-  float2 uv = (float2(id.xy) + 0.5) / float2(pc.size);
-  float2 ndc = uv * 2.0 - 1.0;
+  float2 uv = (float2(id.xy) + 0.5) / float2(size);
+  float2 ndc = uv * 2.0 - 1.0 - pc.jitter;
   float4 wh = mul(pc.inv_view_proj, float4(ndc, depth, 1.0));
   float3 world = wh.xyz / wh.w;
   float3 to_sun = normalize(-pc.sun_dir);

@@ -1288,6 +1288,23 @@ void Renderer::ApplySettings() {
     RecreateSwapchain();
   }
 
+  // Create the opt-in cloud resources before BeginFrame: initialization does
+  // one immediate transition submission and must not stall inside frame graph
+  // recording. Keep the static bakes warm across toggles, but release the
+  // resolution-dependent history allocation while disabled.
+  const bool want_cloudscape =
+      settings_.cloudscape && !settings_.interior &&
+      !(settings_.path_trace && rt_available_ && bindless_ != nullptr);
+  if (want_cloudscape && !cloudscape_init_tried_) {
+    cloudscape_init_tried_ = true;
+    cloudscape_ready_ = cloudscape_.Initialize(*device_);
+    if (!cloudscape_ready_)
+      RX_ERROR("cloudscape init failed, keeping procedural clouds");
+  }
+  if (!want_cloudscape && applied_cloudscape_ && cloudscape_ready_)
+    cloudscape_.ReleaseHistory(*device_);
+  applied_cloudscape_ = want_cloudscape;
+
   // kUpscaler is only valid with a live upscaler.
   if (settings_.aa_mode == AntiAliasingMode::kUpscaler &&
       settings_.upscaler == UpscalerKind::kNone) {
@@ -5125,19 +5142,15 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               ctx.cmd->Push(p);
               ctx.cmd->Dispatch2D({render_width_, render_height_});
             });
-        if (settings_.cloudscape && !cloudscape_init_tried_) {
-          cloudscape_init_tried_ = true;
-          cloudscape_ready_ = cloudscape_.Initialize(*device_);
-          if (!cloudscape_ready_)
-            RX_ERROR("cloudscape init failed, keeping procedural clouds");
-        }
-        if (settings_.cloudscape && cloudscape_ready_) {
+        if (settings_.cloudscape && cloudscape_ready_ && !interior) {
           // Cloudscape ground shadows: the same textured density field the
           // march renders, so the shade tracks the formations that actually
           // occlude the sun (gaps stay lit, cores darken, wind advects both).
           Cloudscape::Frame sf;
           sf.inv_view_proj = globals.inv_view_proj;
           sf.frame_index = frame_index_;
+          sf.jitter[0] = globals.jitter[0];
+          sf.jitter[1] = globals.jitter[1];
           sf.sun_direction = settings_.sun_direction;
           sf.time = static_cast<f32>(time_seconds_);
           sf.controls = settings_.cloudscape_controls;
@@ -5145,7 +5158,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           sf.controls.wind_speed = settings_.weather.wind_speed;
           cloudscape_.AddShadowToGraph(graph_, sun_shadow, depth_export,
                                        {render_width_, render_height_}, sf, 0.75f);
-        } else if (settings_.clouds) {
+        } else if (settings_.clouds && !interior) {
           // Cloud shadows: the layer's optical depth along the sun ray darkens
           // the same denoised shadow the shading samples.
           graph_.AddPass(
@@ -5884,12 +5897,6 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // terrain occludes them. Skipped when path tracing. The opt-in cloudscape
     // model replaces the procedural pass outright; if its lazy init fails
     // (e.g. no 3D-image support) the legacy pass keeps the sky.
-    if (settings_.cloudscape && !path_trace && !interior && !cloudscape_init_tried_) {
-      cloudscape_init_tried_ = true;
-      cloudscape_ready_ = cloudscape_.Initialize(*device_);
-      if (!cloudscape_ready_)
-        RX_ERROR("cloudscape init failed, keeping procedural clouds");
-    }
     bool cloudscape_on = settings_.cloudscape && cloudscape_ready_ && !path_trace && !interior;
     Cloudscape::Frame cloudscape_frame;
     bool cloudscape_haze_pending = false;
@@ -5898,6 +5905,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       cf.inv_view_proj = globals.inv_view_proj;
       cf.prev_view_proj = globals.prev_view_proj;
       cf.camera_pos = view.camera.eye;
+      cf.jitter[0] = globals.jitter[0];
+      cf.jitter[1] = globals.jitter[1];
+      cf.reset_history = first_frame;
       cf.time = static_cast<f32>(time_seconds_);
       cf.frame_index = frame_index_;
       cf.sun_direction = settings_.sun_direction;
@@ -7044,6 +7054,9 @@ void Renderer::Shutdown() {
     clouds_.Destroy(*device_);
     if (cloudscape_ready_)
       cloudscape_.Destroy(*device_);
+    cloudscape_ready_ = false;
+    cloudscape_init_tried_ = false;
+    applied_cloudscape_ = false;
     precipitation_.Destroy(*device_);
     precip_occlusion_.Destroy(*device_);
     precip_volume_.Destroy(*device_);

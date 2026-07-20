@@ -33,7 +33,11 @@ PUSH_CONSTANTS(WeatherPush, pc);
 float3 WeatherState(float2 uv, uint seed, float coverage, float cloud_type, float precip) {
   // Seed-derived domain offset: a different constant shift per state re-rolls
   // the field without disturbing the tiling.
-  float2 off = cs_hash22(float2(float(seed), float(seed) * 0.37 + 1.0)) * 37.0;
+  uint3 sq = uint3(seed, seed ^ 0x9e3779b9u, seed * 747796405u + 2891336453u);
+  float2 off =
+      float2(cs_hash_float(cs_hash_u32(sq ^ uint3(0x68bc21ebu, 0x02e5be93u, 0x967a889bu))),
+             cs_hash_float(cs_hash_u32(sq ^ uint3(0x4f1bbcdcu, 0x5c4bcea9u, 0x9e3779b9u)))) *
+      37.0;
   float2 p = uv + off;
 
   // Coverage: a domain-warped Perlin fbm broken into distinct formations by an

@@ -1,7 +1,10 @@
 #include "render/core/settings_ini.h"
 
+#include <charconv>
 #include <cctype>
+#include <cmath>
 #include <fstream>
+#include <locale>
 #include <map>
 #include <sstream>
 
@@ -98,6 +101,7 @@ const char* Bool(bool b) { return b ? "true" : "false"; }
 
 std::string SettingsToIni(const RenderSettings& s) {
   std::ostringstream o;
+  o.imbue(std::locale::classic());
   o << "# Rx render preset. Editable. Load/save it from the debug ui\n"
     << "# (Renderer panel -> Platform preset). Unlisted keys keep their value.\n\n";
 
@@ -243,10 +247,19 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
     return false;
   };
   auto as_f32 = [](const std::string& v, f32& out) {
-    try { out = std::stof(v); return true; } catch (...) { return false; }
+    f32 parsed = 0.0f;
+    auto [end, ec] = std::from_chars(v.data(), v.data() + v.size(), parsed);
+    if (ec != std::errc{} || end != v.data() + v.size() || !std::isfinite(parsed)) return false;
+    out = parsed;
+    return true;
   };
   auto as_u32 = [](const std::string& v, u32& out) {
-    try { out = static_cast<u32>(std::stoul(v)); return true; } catch (...) { return false; }
+    if (v.empty() || v.front() == '-') return false;
+    u32 parsed = 0;
+    auto [end, ec] = std::from_chars(v.data(), v.data() + v.size(), parsed);
+    if (ec != std::errc{} || end != v.data() + v.size()) return false;
+    out = parsed;
+    return true;
   };
 
   auto b = [&](const char* k, bool& f) { take(k, [&](const std::string& v) { return as_bool(v, f); }); };

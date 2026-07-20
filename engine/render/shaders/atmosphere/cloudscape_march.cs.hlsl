@@ -34,8 +34,8 @@ struct PushData {
   float4 wind;           // xy blow direction (unit XZ), z speed m/s, w vertical skew m
   float4 shape;          // x bottom(m), y top(m), z density, w turbulence
   float4 map;            // xy map offset (m), z map extent (m), w anvil
-  uint2 size;            // half-res buffer size
-  uint2 full_size;       // scene color/depth size
+  float2 jitter;         // current NDC projection jitter
+  float2 prev_jitter;    // previous NDC projection jitter
   uint frame_index;
   uint steps;            // potential full samples toward the zenith
   uint flags;            // bit 0: history valid
@@ -112,7 +112,7 @@ float VirgaDensity(float3 p, float h, float4 weather) {
   return gate * saturate(n - 0.42) * 1.6 * fade * fade * 0.10;
 }
 
-float DensityCheap(float3 p, float4 weather) {
+float DensityShape(float3 p, float4 weather) {
   float h = HeightIn(p);
   if (h < 0.0) return VirgaDensity(p, h, weather);
   if (h >= 1.0) return 0.0;
@@ -129,15 +129,19 @@ float DensityCheap(float3 p, float4 weather) {
   return d;
 }
 
+float DensityCheap(float3 p, float4 weather) {
+  return DensityShape(p, weather) * pc.shape.z;
+}
+
 // Full density: cheap shape eroded by the detail texture, whose lookup is
 // swirled by curl noise. Erosion works on the boundary (scaled by 1-d) so the
 // large silhouette survives while edges shred into wisps; near the base the
 // detail flips (1-fbm) for the thin foggy underside.
 float DensityFull(float3 p, float4 weather) {
   float h = HeightIn(p);
-  if (h < 0.0) return VirgaDensity(p, h, weather);  // shafts need no erosion
+  if (h < 0.0) return VirgaDensity(p, h, weather) * pc.shape.z;  // shafts need no erosion
   if (h >= 1.0) return 0.0;
-  float d = DensityCheap(p, weather);
+  float d = DensityShape(p, weather);
   if (d <= 0.0) return 0.0;
   float3 ap = Advect(WorldUnwrap(p), h);
   float2 curl = curl_noise.SampleLevel(curl_sampler, ap.xz * kCurlScale, 0.0).xy;
@@ -212,6 +216,14 @@ float Ign(uint2 px, uint frame) {
 // half-updated block never reads as a sliding seam.
 static const uint kBayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
 
+float RaySphereFar(float3 p, float3 dir, float radius) {
+  float b = dot(p, dir);
+  float c = dot(p, p) - radius * radius;
+  float disc = b * b - c;
+  if (disc < 0.0) return -1.0;
+  return -b + sqrt(disc);
+}
+
 struct MarchResult {
   float3 scatter;
   float transmittance;
@@ -240,7 +252,9 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
   } else if (rc >= Rt) {
     t_start = RaySphere(p0, view, Rt);
     float tb = RaySphere(p0, view, Rb);
-    t_end = tb > 0.0 ? tb : t_start;
+    // A ray can clip the outer shell without reaching the inner sphere. Keep
+    // that valid tangent chord instead of collapsing it to an empty interval.
+    t_end = tb > 0.0 ? tb : RaySphereFar(p0, view, Rt);
   } else {
     t_start = 0.0;
     t_end = RaySphere(p0, view, Rt);
@@ -355,7 +369,8 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
       float3 cp = float3(cuv.x * 2.6, cuv.y * 1.2, 3.1);
       float wisp = base_noise.SampleLevel(base_sampler, cp * 0.13, 0.0).g * 0.7 +
                    base_noise.SampleLevel(base_sampler, cp * 0.31, 0.0).b * 0.3;
-      float ci = saturate(wisp - (0.82 - wci.r * 0.22)) * 1.2 * saturate(wci.r * 3.0);
+       float ci = saturate(wisp - (0.82 - wci.r * 0.22)) * 1.2 *
+                  saturate(wci.r * 3.0) * pc.shape.z;
       if (ci > 0.001) {
         float ci_phase = max(HG(cos_angle, 0.55), 0.4 * HG(cos_angle, -0.1));
         float3 ci_lit = sun_col * ci_phase * 0.9 + ambient_base * 0.8;
@@ -378,21 +393,28 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
 
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
-  if (id.x >= pc.size.x || id.y >= pc.size.y) return;
+  uint width, height;
+  out_cloud.GetDimensions(width, height);
+  uint2 size = uint2(width, height);
+  if (id.x >= size.x || id.y >= size.y) return;
   uint2 px = id.xy;
 
-  float2 ndc = (float2(px) + 0.5) / float2(pc.size) * 2.0 - 1.0;
+  float2 ndc = (float2(px) + 0.5) / float2(size) * 2.0 - 1.0 - pc.jitter;
   float4 nh = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));  // reversed-z near
   float3 cam = pc.camera_pos.xyz;
   float3 view = normalize(nh.xyz / nh.w - cam);
 
   // Scene distance from the full-res depth (point tap at our center).
-  uint2 fpx = min(uint2((float2(px) + 0.5) * float2(pc.full_size) / float2(pc.size)),
-                  pc.full_size - 1);
+  uint full_width, full_height;
+  depth_in.GetDimensions(full_width, full_height);
+  uint2 full_size = uint2(full_width, full_height);
+  uint2 fpx = min(uint2((float2(px) + 0.5) * float2(full_size) / float2(size)),
+                   full_size - 1);
   float depth = depth_in.Load(int3(fpx, 0));
   float scene_dist = 1e12;
   if (depth > 0.0) {
-    float2 depth_ndc = (float2(fpx) + 0.5) / float2(pc.full_size) * 2.0 - 1.0;
+    float2 depth_ndc =
+        (float2(fpx) + 0.5) / float2(full_size) * 2.0 - 1.0 - pc.jitter;
     float4 wh = mul(pc.inv_view_proj, float4(depth_ndc, depth, 1.0));
     scene_dist = length(wh.xyz / wh.w - cam);
   }
@@ -415,15 +437,15 @@ void main(uint3 id : SV_DispatchThreadID) {
     if (far_h.w > 0.0) {
       // Engine convention: uv = ndc * 0.5 + 0.5, no y-flip (the projection
       // already carries the vulkan flip; recon_temporal.cs does the same).
-      float2 far_uv = far_h.xy / far_h.w * 0.5 + 0.5;
+      float2 far_uv = (far_h.xy / far_h.w + pc.prev_jitter) * 0.5 + 0.5;
       if (all(far_uv >= 0.0) && all(far_uv <= 1.0)) {
-        float t_prev = prev_dist.Load(int3(min(uint2(far_uv * float2(pc.size)), pc.size - 1), 0));
+        float t_prev = prev_dist.Load(int3(min(uint2(far_uv * float2(size)), size - 1), 0));
         if (t_prev > 0.0) {
           float4 ph = mul(pc.prev_view_proj, float4(cam + view * t_prev, 1.0));
           if (ph.w > 0.0) {
-            float2 puv = ph.xy / ph.w * 0.5 + 0.5;
+            float2 puv = (ph.xy / ph.w + pc.prev_jitter) * 0.5 + 0.5;
             if (all(puv >= 0.0) && all(puv <= 1.0)) {
-              uint2 ppx = min(uint2(puv * float2(pc.size)), pc.size - 1);
+              uint2 ppx = min(uint2(puv * float2(size)), size - 1);
               float d_hist = prev_dist.Load(int3(ppx, 0));
               if (d_hist > 0.0) {
                 hist_cloud = prev_cloud.Load(int3(ppx, 0));

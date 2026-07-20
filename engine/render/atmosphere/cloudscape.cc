@@ -1,5 +1,6 @@
 #include "render/atmosphere/cloudscape.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -23,8 +24,8 @@ struct MarchPush {
   f32 wind[4];          // xy blow dir, z speed, w vertical skew
   f32 shape[4];         // bottom, top, density, turbulence
   f32 map[4];           // xy offset, z extent, w anvil
-  u32 size[2];
-  u32 full_size[2];
+  f32 jitter[2];        // current NDC projection jitter
+  f32 prev_jitter[2];   // previous NDC projection jitter
   u32 frame_index;
   u32 steps;
   u32 flags;
@@ -38,9 +39,9 @@ struct ShadowPush {
   f32 wind[4];  // xy blow dir, z speed, w vertical skew
   f32 shape[4]; // bottom, top, density, darkness
   f32 map[4];   // xy offset, z extent, w anvil
-  u32 size[2];
-  f32 time;
+  f32 jitter[2];
   f32 strength;
+  f32 pad;
 };
 
 struct HazePush {
@@ -50,8 +51,8 @@ struct HazePush {
   f32 sun_color[4];     // rgb, w flash
   f32 wind[4];          // xy blow dir, z vertical skew, w darkness
   f32 fog[4];           // density, height, ground, anvil
-  f32 map[4];           // xy offset, z extent, w churn
-  u32 size[2];
+  f32 map[4];           // xy offset, z density, w churn
+  f32 jitter[2];
   f32 shell[2]; // deck bottom / top, for god-ray occlusion
 };
 
@@ -61,7 +62,7 @@ struct FunnelPush {
   f32 sun_color[4];  // rgb, w flash
   f32 funnel[4];     // xy axis pos, z wall radius, w strength
   f32 bounds[4];     // ground y, cloud base y, sun intensity, darkness
-  u32 size[2];
+  f32 jitter[2];
   f32 pad[2];
 };
 
@@ -72,8 +73,65 @@ struct ApplyPush {
   u32 full_size[2];
   u32 half_size[2];
   f32 flash;
-  f32 pad[3];
+  f32 jitter[2];
+  f32 pad;
 };
+
+static_assert(sizeof(MarchPush) == 256);
+static_assert(sizeof(ShadowPush) == 144);
+static_assert(sizeof(HazePush) == 176);
+static_assert(sizeof(FunnelPush) == 144);
+static_assert(sizeof(ApplyPush) == 128);
+
+bool SameMapState(const CloudscapeMapState &a, const CloudscapeMapState &b) {
+  return a.seed == b.seed && a.coverage == b.coverage &&
+         a.cloud_type == b.cloud_type && a.precipitation == b.precipitation;
+}
+
+bool MapStateDiscontinuous(const CloudscapeMapState &a,
+                           const CloudscapeMapState &b) {
+  return a.seed != b.seed || std::abs(a.coverage - b.coverage) > 0.25f ||
+         std::abs(a.cloud_type - b.cloud_type) > 0.25f ||
+         std::abs(a.precipitation - b.precipitation) > 0.25f;
+}
+
+bool DensityFieldDiscontinuous(const CloudscapeControls &previous,
+                               const CloudscapeControls &current) {
+  const bool previous_settled = SameMapState(previous.map_a, previous.map_b);
+  const bool current_settled = SameMapState(current.map_a, current.map_b);
+  const bool same_endpoints = SameMapState(previous.map_a, current.map_a) &&
+                              SameMapState(previous.map_b, current.map_b);
+  bool endpoint_relabel = false;
+  if (!same_endpoints) {
+    const bool transition_start = previous_settled &&
+                                  SameMapState(previous.map_a, current.map_a) &&
+                                  current.map_blend == 0.0f;
+    const bool transition_settle = current_settled &&
+                                   SameMapState(previous.map_b, current.map_a) &&
+                                   previous.map_blend > 0.9f;
+    endpoint_relabel = transition_start || transition_settle;
+    if (!endpoint_relabel &&
+        (MapStateDiscontinuous(previous.map_a, current.map_a) ||
+         MapStateDiscontinuous(previous.map_b, current.map_b)))
+      return true;
+  }
+  if (!endpoint_relabel &&
+      std::abs(current.map_blend - previous.map_blend) > 0.25f)
+    return true;
+
+  const f32 thickness = std::max(previous.top - previous.bottom, 1.0f);
+  const Vec2 map_delta = current.map_offset - previous.map_offset;
+  const f32 wind_alignment = std::cos(current.wind_yaw - previous.wind_yaw);
+  return std::abs(current.bottom - previous.bottom) > std::max(250.0f, thickness * 0.15f) ||
+         std::abs(current.top - previous.top) > std::max(500.0f, thickness * 0.15f) ||
+         std::abs(current.density - previous.density) > 0.25f ||
+         std::abs(current.anvil - previous.anvil) > 0.25f ||
+         std::abs(current.darkness - previous.darkness) > 0.25f ||
+         map_delta.x * map_delta.x + map_delta.y * map_delta.y > 250000.0f ||
+         wind_alignment < 0.94f ||
+         std::abs(current.vertical_skew - previous.vertical_skew) > 250.0f ||
+         std::abs(current.turbulence - previous.turbulence) > 0.25f;
+}
 
 } // namespace
 
@@ -124,7 +182,9 @@ bool Cloudscape::Initialize(Device &device) {
       .shader = RX_SHADER(k_cloudscape_apply_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
-                          {2, BindingType::kCombinedTextureSampler}}}},
+                          {2, BindingType::kCombinedTextureSampler},
+                          {3, BindingType::kSampledImage},
+                          {4, BindingType::kSampledImage}}}},
       .push_constant_size = sizeof(ApplyPush),
       .debug_name = "cloudscape_apply",
   });
@@ -196,8 +256,8 @@ ResourceHandle Cloudscape::AddFunnelToGraph(RenderGraph &graph,
   push.bounds[1] = c.bottom;
   push.bounds[2] = frame.sun_intensity;
   push.bounds[3] = c.darkness;
-  push.size[0] = extent.width;
-  push.size[1] = extent.height;
+  push.jitter[0] = frame.jitter[0];
+  push.jitter[1] = frame.jitter[1];
   const u32 param_slot = frame.frame_index % kFramesInFlight;
   std::memcpy(funnel_params_[param_slot].mapped, &push, sizeof(push));
   graph.AddPass(
@@ -256,10 +316,10 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
   push.fog[3] = c.anvil;
   push.map[0] = c.map_offset.x;
   push.map[1] = c.map_offset.y;
-  push.map[2] = textures_.weather_map_extent();
+  push.map[2] = c.density;
   push.map[3] = c.fog_churn;
-  push.size[0] = extent.width;
-  push.size[1] = extent.height;
+  push.jitter[0] = frame.jitter[0];
+  push.jitter[1] = frame.jitter[1];
   push.shell[0] = c.bottom;
   push.shell[1] = c.top;
   const u32 param_slot = frame.frame_index % kFramesInFlight;
@@ -311,6 +371,8 @@ void Cloudscape::Destroy(Device &device) {
   device_ = nullptr;
 }
 
+void Cloudscape::ReleaseHistory(Device &device) { ReleaseBuffers(device); }
+
 void Cloudscape::AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
                                   ResourceHandle depth, Extent2D extent,
                                   const Frame &frame, f32 strength) {
@@ -337,9 +399,8 @@ void Cloudscape::AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
   push.map[1] = c.map_offset.y;
   push.map[2] = textures_.weather_map_extent();
   push.map[3] = c.anvil;
-  push.size[0] = extent.width;
-  push.size[1] = extent.height;
-  push.time = frame.time;
+  push.jitter[0] = frame.jitter[0];
+  push.jitter[1] = frame.jitter[1];
   push.strength = strength;
   const u32 param_slot = frame.frame_index % kFramesInFlight;
   std::memcpy(shadow_params_[param_slot].mapped, &push, sizeof(push));
@@ -375,6 +436,7 @@ void Cloudscape::ReleaseBuffers(Device &device) {
   half_extent_ = {};
   history_valid_ = false;
   has_last_frame_ = false;
+  has_last_controls_ = false;
 }
 
 void Cloudscape::EnsureBuffers(Device &device, Extent2D half) {
@@ -423,7 +485,19 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
       graph.ImportImage("cloudscape_prv_d", dist_[prv], &dist_state_[prv]);
 
   bool contiguous = has_last_frame_ && frame.frame_index == last_frame_index_ + 1u;
-  bool history = history_valid_ && contiguous;
+  Vec3 camera_delta = frame.camera_pos - last_camera_pos_;
+  bool camera_cut = has_last_frame_ && Dot(camera_delta, camera_delta) > 250000.0f;
+  bool density_cut = has_last_controls_ &&
+                     DensityFieldDiscontinuous(last_controls_, frame.controls);
+  Vec3 current_sun = Normalize(frame.sun_direction);
+  bool lighting_cut = has_last_frame_ &&
+                      (Dot(current_sun, last_sun_direction_) < 0.98f ||
+                       std::abs(frame.sun_intensity - last_sun_intensity_) > 0.5f ||
+                       Dot(frame.sun_color - last_sun_color_,
+                           frame.sun_color - last_sun_color_) > 0.04f ||
+                       std::abs(frame.ambient - last_ambient_) > 0.1f);
+  bool history = history_valid_ && contiguous && !frame.reset_history &&
+                 !camera_cut && !density_cut && !lighting_cut;
   MarchPush march_push{};
   march_push.inv_view_proj = frame.inv_view_proj;
   march_push.prev_view_proj = frame.prev_view_proj;
@@ -453,12 +527,12 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
   march_push.map[1] = c.map_offset.y;
   march_push.map[2] = textures_.weather_map_extent();
   march_push.map[3] = c.anvil;
-  march_push.size[0] = half.width;
-  march_push.size[1] = half.height;
-  march_push.full_size[0] = extent.width;
-  march_push.full_size[1] = extent.height;
+  march_push.jitter[0] = frame.jitter[0];
+  march_push.jitter[1] = frame.jitter[1];
+  march_push.prev_jitter[0] = last_jitter_[0];
+  march_push.prev_jitter[1] = last_jitter_[1];
   march_push.frame_index = frame.frame_index;
-  march_push.steps = frame.steps;
+  march_push.steps = std::clamp(frame.steps, 8u, 128u);
   march_push.flags = history ? 1u : 0u;
   march_push.darkness = c.darkness;
   const u32 param_slot = frame.frame_index % kFramesInFlight;
@@ -501,8 +575,11 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
         b.Write(out, ResourceUsage::kStorageWrite);
         b.Read(color, ResourceUsage::kSampledCompute);
         b.Read(cur_cloud, ResourceUsage::kSampledCompute);
+        b.Read(cur_dist, ResourceUsage::kSampledCompute);
+        b.Read(depth, ResourceUsage::kSampledCompute);
       },
-      [this, out, color, cur_cloud, extent, half, frame](PassContext &ctx) {
+      [this, out, color, cur_cloud, cur_dist, depth, extent, half,
+       frame](PassContext &ctx) {
         ApplyPush push{};
         push.inv_view_proj = frame.inv_view_proj;
         push.camera_pos[0] = frame.camera_pos.x;
@@ -518,12 +595,16 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
         push.half_size[0] = half.width;
         push.half_size[1] = half.height;
         push.flash = frame.flash;
+        push.jitter[0] = frame.jitter[0];
+        push.jitter[1] = frame.jitter[1];
         ctx.cmd->BindPipeline(apply_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(out)),
-                Bind::Sampled(1, ctx.graph->image(color)),
-                Bind::Combined(2, ctx.graph->image(cur_cloud).view,
-                               screen_sampler_)});
+                 Bind::Sampled(1, ctx.graph->image(color)),
+                 Bind::Combined(2, ctx.graph->image(cur_cloud).view,
+                                screen_sampler_),
+                 Bind::Sampled(3, ctx.graph->image(cur_dist)),
+                 Bind::Sampled(4, ctx.graph->image(depth))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });
@@ -532,6 +613,15 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
   history_valid_ = true;
   last_frame_index_ = frame.frame_index;
   has_last_frame_ = true;
+  last_jitter_[0] = frame.jitter[0];
+  last_jitter_[1] = frame.jitter[1];
+  last_camera_pos_ = frame.camera_pos;
+  last_sun_direction_ = current_sun;
+  last_sun_color_ = frame.sun_color;
+  last_sun_intensity_ = frame.sun_intensity;
+  last_ambient_ = frame.ambient;
+  last_controls_ = frame.controls;
+  has_last_controls_ = true;
   return out;
 }
 

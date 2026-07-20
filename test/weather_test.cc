@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 namespace {
@@ -289,6 +290,197 @@ void TestInvalidRegionState() {
         "regions without valid state indices fall back to global scheduling");
 }
 
+void TestForceBeforeRegistration() {
+  WeatherSystem sys(13u);
+  sys.ForceState(99u, 0.0f);
+  sys.AddState(Clear(1));
+  sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.active_state() == 0 && sys.target_state() == 0,
+        "forcing an empty system does not retain an invalid state index");
+}
+
+void TestZeroWeightRegion() {
+  WeatherSystem sys(14u);
+  sys.AddState(Clear(1));
+  sys.AddState(Storm(2));
+  WeatherRegion region;
+  region.min_xz = {-10.0f, -10.0f};
+  region.max_xz = {10.0f, 10.0f};
+  region.states.push_back(1u);
+  region.weights.push_back(0.0f);
+  sys.AddRegion(region);
+  sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.active_state() == 1,
+        "a zero-weight region still cannot select a state outside the region");
+}
+
+void TestInvalidRegionInputs() {
+  {
+    WeatherSystem sys(22u);
+    WeatherState global = Clear(1);
+    WeatherState regional = Storm(2);
+    regional.weight = 0.0f;
+    sys.AddState(global);
+    sys.AddState(regional);
+    WeatherRegion invalid;
+    invalid.min_xz = {std::numeric_limits<f32>::quiet_NaN(), -10.0f};
+    invalid.max_xz = {10.0f, 10.0f};
+    invalid.states.push_back(1u);
+    sys.AddRegion(invalid);
+    sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
+    Check(sys.active_state() == 0,
+          "a region with non-finite bounds cannot capture the player");
+  }
+  {
+    WeatherSystem sys(23u);
+    WeatherState outside = Clear(1);
+    outside.min_dwell = outside.max_dwell = 0.01f;
+    WeatherState inside = Storm(2);
+    inside.transition_seconds = 0.0f;
+    sys.AddState(outside);
+    sys.AddState(inside);
+    WeatherRegion region;
+    region.min_xz = {-10.0f, -10.0f};
+    region.max_xz = {10.0f, 10.0f};
+    region.states.push_back(1u);
+    region.weights.push_back(std::numeric_limits<f32>::infinity());
+    sys.AddRegion(region);
+    sys.ForceState(0, 0.0f);
+    sys.ClearForced();
+    sys.Update(0.02f, Vec3{0, 0, 0}, 0.5f);
+    Check(sys.active_state() == 1,
+          "a non-finite regional weight cannot escape the region fallback");
+  }
+}
+
+void TestTransitionRetarget() {
+  WeatherSystem sys(15u);
+  WeatherState a = Clear(1);
+  WeatherState b = Storm(2);
+  WeatherState c = Clear(3);
+  a.density = 0.5f;
+  b.density = 1.5f;
+  c.density = 2.5f;
+  sys.AddState(a);
+  sys.AddState(b);
+  sys.AddState(c);
+  sys.ForceState(0, 0.0f);
+  sys.ForceState(1, 4.0f);
+  sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
+  f32 before = sys.cloudscape().density;
+  sys.ForceState(2, 4.0f);
+  sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
+  Near(sys.cloudscape().density, before,
+       "retargeting a transition preserves its current blended source");
+}
+
+void TestReverseTransitionRetarget() {
+  WeatherSystem sys(20u);
+  WeatherState a = Clear(1);
+  WeatherState b = Storm(2);
+  a.density = 0.5f;
+  b.density = 1.5f;
+  sys.AddState(a);
+  sys.AddState(b);
+  sys.ForceState(0, 0.0f);
+  sys.ForceState(1, 4.0f);
+  sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
+  sys.ForceState(0, 4.0f);
+  sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.transition() > 0.0f,
+        "retargeting to the source remains an active transition");
+  sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
+  Near(sys.transition(), 0.0f, "a reverse retarget completes");
+  Near(sys.cloudscape().density, a.density,
+       "a reverse retarget settles on the requested source state");
+}
+
+void TestSchedulerOvershoot() {
+  WeatherSystem sys(16u);
+  WeatherState a = Clear(1);
+  a.min_dwell = a.max_dwell = 1.0f;
+  WeatherState b = Storm(2);
+  b.transition_seconds = 1.0f;
+  b.min_dwell = b.max_dwell = 10.0f;
+  sys.AddState(a);
+  sys.AddState(b);
+  WeatherRegion region;
+  region.min_xz = {-10.0f, -10.0f};
+  region.max_xz = {10.0f, 10.0f};
+  region.states.push_back(1u);
+  sys.AddRegion(region);
+  sys.ForceState(0, 0.0f);
+  sys.ClearForced();
+  sys.Update(2.5f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.active_state() == 1 && sys.target_state() == 1,
+        "a long update consumes dwell and transition overshoot");
+}
+
+void TestInvalidDeltaTime() {
+  WeatherSystem sys(17u);
+  sys.AddState(Clear(1));
+  sys.ForceState(0, 0.0f);
+  sys.Update(1.0f, Vec3{0, 0, 0}, 0.5f);
+  f32 offset = sys.cloudscape().map_offset.x;
+  sys.Update(-1.0f, Vec3{0, 0, 0}, 0.5f);
+  sys.Update(std::numeric_limits<f32>::quiet_NaN(), Vec3{0, 0, 0}, 0.5f);
+  Near(sys.cloudscape().map_offset.x, offset,
+       "negative and non-finite delta time leave integrals unchanged");
+}
+
+void TestHugeDeltaTimeIsBounded() {
+  WeatherSystem sys(21u);
+  sys.AddState(Clear(1));
+  sys.ForceState(0, 0.0f);
+  sys.Update(std::numeric_limits<f32>::max(), Vec3{0, 0, 0}, 0.5f);
+  Check(std::isfinite(sys.cloudscape().map_offset.x),
+        "a huge finite delta is bounded and returns finite output");
+}
+
+void TestStateValidation() {
+  WeatherSystem sys(18u);
+  WeatherState invalid = Storm(1);
+  invalid.coverage = std::numeric_limits<f32>::quiet_NaN();
+  invalid.density = -2.0f;
+  invalid.base_altitude = 5000.0f;
+  invalid.top_altitude = 1000.0f;
+  invalid.fog_height = -4.0f;
+  sys.AddState(invalid);
+  sys.SetGroundHeight([](f32, f32) {
+    return std::numeric_limits<f32>::quiet_NaN();
+  });
+  sys.ForceState(0, 0.0f);
+  sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
+  const render::CloudscapeControls& controls = sys.cloudscape();
+  Check(std::isfinite(controls.map_a.coverage) && controls.map_a.coverage == 0.0f,
+        "non-finite state controls are sanitized at registration");
+  Check(controls.density == 0.0f, "negative density is clamped");
+  Check(controls.top > controls.bottom, "cloud shell keeps a positive thickness");
+  Check(controls.fog_height >= 0.1f, "fog height keeps a safe denominator");
+  Check(controls.fog_ground == 0.0f, "non-finite terrain samples fall back to zero");
+}
+
+void TestUpdatePartitioning() {
+  auto build = [](WeatherSystem& sys) {
+    WeatherState clear = Clear(1);
+    WeatherState storm = Storm(2);
+    sys.AddState(clear);
+    sys.AddState(storm);
+    sys.ForceState(0, 0.0f);
+    sys.ForceState(1, 4.0f);
+  };
+  WeatherSystem one_step(19u), sliced(19u);
+  build(one_step);
+  build(sliced);
+  one_step.Update(4.0f, Vec3{0, 0, 0}, 0.5f);
+  for (int i = 0; i < 40; ++i)
+    sliced.Update(0.1f, Vec3{0, 0, 0}, 0.5f);
+  Near(one_step.weather().wetness, sliced.weather().wetness,
+       "surface integration is stable across long and sliced updates", 1e-5f);
+  Near(one_step.cloudscape().map_offset.x, sliced.cloudscape().map_offset.x,
+       "wind integration is stable across long and sliced updates", 1e-4f);
+}
+
 // --- Wind advection: map_offset integrates wind * dt, across a state change. --
 void TestWindAdvection() {
   WeatherSystem sys(3u);
@@ -351,6 +543,43 @@ void TestLightning() {
   }
 }
 
+void TestLongUpdatePreservesNewStrike() {
+  WeatherSystem sys(1u);
+  sys.AddState(Storm(1));
+  sys.ForceState(0, 0.0f);
+  sys.Update(1.0f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.weather().strike_age >= 0.0f,
+        "a strike spawned during a long update remains observable");
+}
+
+void TestTornadoLifecycle() {
+  WeatherSystem sys(24u);
+  WeatherState tornado = Storm(1);
+  tornado.precipitation = 0.0f;
+  tornado.darkness = 0.0f;
+  tornado.tornado_prone = 1.0f;
+  WeatherState clear = Clear(2);
+  sys.AddState(tornado);
+  sys.AddState(clear);
+  sys.ForceState(0, 0.0f);
+
+  bool touched_down = false;
+  for (int i = 0; i < 300; ++i) {
+    sys.Update(0.1f, Vec3{0, 0, 0}, 0.5f);
+    touched_down |= sys.cloudscape().tornado_strength > 0.0f;
+    if (touched_down) break;
+  }
+  Check(touched_down, "a tornado-prone anvil state eventually touches down");
+
+  sys.ForceState(1, 0.0f);
+  sys.Update(0.1f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.cloudscape().tornado_strength > 0.0f,
+        "a funnel ropes out instead of disappearing with the anvil");
+  sys.Update(10.0f, Vec3{0, 0, 0}, 0.5f);
+  Check(sys.cloudscape().tornado_strength == 0.0f,
+        "the rope-out envelope retires the funnel");
+}
+
 }  // namespace
 
 int main() {
@@ -363,7 +592,19 @@ int main() {
   TestWindYawWrap();
   TestDegenerateRegion();
   TestInvalidRegionState();
+  TestForceBeforeRegistration();
+  TestZeroWeightRegion();
+  TestInvalidRegionInputs();
+  TestTransitionRetarget();
+  TestReverseTransitionRetarget();
+  TestSchedulerOvershoot();
+  TestInvalidDeltaTime();
+  TestHugeDeltaTimeIsBounded();
+  TestStateValidation();
+  TestUpdatePartitioning();
   TestLightning();
+  TestLongUpdatePreservesNewStrike();
+  TestTornadoLifecycle();
 
   if (failures == 0) {
     std::printf("weather_test: OK\n");

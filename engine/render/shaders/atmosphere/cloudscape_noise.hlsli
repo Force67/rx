@@ -20,18 +20,33 @@ float cs_remap(float v, float l0, float h0, float l1, float h1) {
 float3 cs_mod3(float3 p, float m) { return p - m * floor(p / m); }
 float2 cs_mod2(float2 p, float m) { return p - m * floor(p / m); }
 
-// Hash of an (already wrapped) integer lattice coordinate. Deterministic for
-// identical inputs, which is what makes the wrap tile: the two edges of the
-// period feed bit-identical coordinates and so read back identical gradients.
+// Hash of an already wrapped lattice coordinate. Integer avalanche replaces a
+// transcendental sin hash: the 128^3 bake calls this hundreds of times per
+// voxel, so SFU hashing turns activation into a multi-billion-sin hitch.
+uint cs_hash_u32(uint3 p) {
+  uint h = p.x * 0x8da6b343u ^ p.y * 0xd8163841u ^ p.z * 0xcb1ab31fu;
+  h ^= h >> 16u;
+  h *= 0x7feb352du;
+  h ^= h >> 15u;
+  h *= 0x846ca68bu;
+  return h ^ (h >> 16u);
+}
+
+float cs_hash_float(uint h) {
+  return float(h >> 8u) * (1.0 / 16777216.0);
+}
+
 float3 cs_hash33(float3 p) {
-  p = float3(dot(p, float3(127.1, 311.7, 74.7)),
-             dot(p, float3(269.5, 183.3, 246.1)),
-             dot(p, float3(113.5, 271.9, 124.6)));
-  return frac(sin(p) * 43758.5453123);
+  uint3 q = uint3(p);
+  return float3(cs_hash_float(cs_hash_u32(q ^ uint3(0x68bc21ebu, 0x02e5be93u, 0x967a889bu))),
+                cs_hash_float(cs_hash_u32(q ^ uint3(0x4f1bbcdcu, 0x5c4bcea9u, 0x9e3779b9u))),
+                cs_hash_float(cs_hash_u32(q ^ uint3(0x85ebca6bu, 0xc2b2ae35u, 0x27d4eb2fu))));
 }
 float2 cs_hash22(float2 p) {
-  p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
-  return frac(sin(p) * 43758.5453123);
+  uint2 q = uint2(p);
+  uint3 q3 = uint3(q, q.x ^ q.y);
+  return float2(cs_hash_float(cs_hash_u32(q3 ^ uint3(0x68bc21ebu, 0x02e5be93u, 0x967a889bu))),
+                cs_hash_float(cs_hash_u32(q3 ^ uint3(0x4f1bbcdcu, 0x5c4bcea9u, 0x9e3779b9u))));
 }
 
 // --- tileable 3D Perlin (gradient) noise, period = freq cells ---

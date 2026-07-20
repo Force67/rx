@@ -21,7 +21,7 @@ class CloudscapeTextures {
   static constexpr u32 kDetailNoiseSize = 32;   // 3D erosion volume
   static constexpr u32 kCurlSize = 128;         // 2D curl field
   static constexpr u32 kWeatherSize = 512;      // 2D weather map
-  static constexpr f32 kWeatherExtent = 60000.0f;  // world metres the map tiles over
+  static constexpr f32 kWeatherExtent = kCloudscapeWeatherExtent;
 
   bool Initialize(Device& device);   // create images, pipelines, sampler
   void Destroy(Device& device);

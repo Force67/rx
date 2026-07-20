@@ -6,6 +6,8 @@
 
 namespace rx::render {
 
+inline constexpr f32 kCloudscapeWeatherExtent = 60000.0f;
+
 // One endpoint of the world-space weather map blend. The map is generated on
 // the GPU from these scalars (a seeded field of coverage / precipitation /
 // cloud type), so a weather state is fully described by four numbers and two
