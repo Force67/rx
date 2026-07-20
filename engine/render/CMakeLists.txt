@@ -29,6 +29,8 @@ rx_add_module(render
   atmosphere/environment.cc
   atmosphere/volumetric_fog.cc
   atmosphere/froxel_fog.cc
+  atmosphere/cloudscape_textures.cc
+  atmosphere/cloudscape.cc
   atmosphere/aerial_perspective.cc
   atmosphere/clouds.cc
   atmosphere/precipitation.cc
@@ -235,6 +237,15 @@ set(RX_RENDER_SHADERS
   shaders/atmosphere/aerial_perspective.cs.hlsl
   shaders/atmosphere/clouds.cs.hlsl
   shaders/atmosphere/cloud_shadow.cs.hlsl
+  shaders/atmosphere/cloudscape_base_noise.cs.hlsl
+  shaders/atmosphere/cloudscape_detail_noise.cs.hlsl
+  shaders/atmosphere/cloudscape_curl.cs.hlsl
+  shaders/atmosphere/cloudscape_weather_map.cs.hlsl
+  shaders/atmosphere/cloudscape_march.cs.hlsl
+  shaders/atmosphere/cloudscape_apply.cs.hlsl
+  shaders/atmosphere/cloudscape_shadow.cs.hlsl
+  shaders/atmosphere/cloudscape_haze.cs.hlsl
+  shaders/atmosphere/cloudscape_funnel.cs.hlsl
   shaders/atmosphere/froxel_scatter.cs.hlsl
   shaders/atmosphere/froxel_integrate.cs.hlsl
   shaders/atmosphere/froxel_apply.cs.hlsl
@@ -406,6 +417,15 @@ set(RX_SHADER_DEPS_precip_splash_vs_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_splash_ps_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_lightning_bolt_vs_hlsl shaders/atmosphere/lightning_common.hlsli shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_lightning_bolt_ps_hlsl shaders/atmosphere/lightning_common.hlsli shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_cloudscape_base_noise_cs_hlsl shaders/rhi_bindings.hlsli shaders/atmosphere/cloudscape_noise.hlsli)
+set(RX_SHADER_DEPS_cloudscape_detail_noise_cs_hlsl shaders/rhi_bindings.hlsli shaders/atmosphere/cloudscape_noise.hlsli)
+set(RX_SHADER_DEPS_cloudscape_curl_cs_hlsl shaders/rhi_bindings.hlsli shaders/atmosphere/cloudscape_noise.hlsli)
+set(RX_SHADER_DEPS_cloudscape_weather_map_cs_hlsl shaders/rhi_bindings.hlsli shaders/atmosphere/cloudscape_noise.hlsli)
+set(RX_SHADER_DEPS_cloudscape_march_cs_hlsl shaders/rhi_bindings.hlsli shaders/atmosphere/atmosphere.hlsli)
+set(RX_SHADER_DEPS_cloudscape_apply_cs_hlsl shaders/rhi_bindings.hlsli)
+set(RX_SHADER_DEPS_cloudscape_shadow_cs_hlsl shaders/rhi_bindings.hlsli)
+set(RX_SHADER_DEPS_cloudscape_haze_cs_hlsl shaders/rhi_bindings.hlsli shaders/atmosphere/atmosphere.hlsli)
+set(RX_SHADER_DEPS_cloudscape_funnel_cs_hlsl shaders/rhi_bindings.hlsli)
 set(RX_SHADER_DEPS_light_grid_cs_hlsl shaders/gi/light_grid.hlsli)
 set(RX_SHADER_DEPS_rcgi_probe_trace_cs_hlsl shaders/gi/rcgi_probe_trace_body.hlsli shaders/gi/rcgi_common.hlsli shaders/rt_geometry.hlsli)
 set(RX_SHADER_DEPS_rcgi_probe_trace_sw_cs_hlsl shaders/gi/rcgi_probe_trace_body.hlsli shaders/gi/rcgi_common.hlsli shaders/gi/sdf_trace.hlsli)

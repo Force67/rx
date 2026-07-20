@@ -7,6 +7,24 @@
 
 namespace rx {
 
+// Planar 2D vector (XZ world offsets, uv scrolls, etc). Kept minimal and
+// aggregate so it stays trivially copyable for push constants / value structs.
+struct Vec2 {
+  f32 x = 0;
+  f32 y = 0;
+};
+
+inline Vec2 operator-(const Vec2& a, const Vec2& b) { return {a.x - b.x, a.y - b.y}; }
+
+inline Vec2 operator+(const Vec2& a, const Vec2& b) { return {a.x + b.x, a.y + b.y}; }
+
+inline Vec2 operator*(const Vec2& v, f32 s) { return {v.x * s, v.y * s}; }
+
+inline Vec2& operator+=(Vec2& a, const Vec2& b) {
+  a = a + b;
+  return a;
+}
+
 struct Vec3 {
   f32 x = 0;
   f32 y = 0;

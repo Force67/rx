@@ -37,6 +37,7 @@ set(RX_RUNTIME_MODULES
   rx::net_viz
   rx::nav
   rx::nav_viz
+  rx::weather
   rx::placement
   rx::placement_gpu
   rx::character

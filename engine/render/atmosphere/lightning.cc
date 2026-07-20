@@ -39,34 +39,10 @@ constexpr f32 kFlashHeight = 250.0f;
 constexpr f32 kFlashRadius = 600.0f;
 constexpr f32 kFlashIntensity = 26.0f;
 
-// PcgHash/Hash4 from precip_common.hlsli, mirrored for the CPU envelope.
-u32 PcgHash(u32 v) {
-  v = v * 747796405u + 2891336453u;
-  v = ((v >> ((v >> 28u) + 4u)) ^ v) * 277803737u;
-  return (v >> 22u) ^ v;
-}
-
 }  // namespace
 
 f32 LightningSystem::Envelope(f32 age, u32 seed) {
-  if (age < 0.0f || age >= kStrikeDuration) return 0.0f;
-  // Hash4(seed * 747796405 + 3) in the shader: four chained pcg words.
-  u32 a = PcgHash(seed * 747796405u + 3u);
-  u32 b = PcgHash(a);
-  u32 c = PcgHash(b);
-  u32 d = PcgHash(c);
-  constexpr f32 kInv = 1.0f / 4294967295.0f;
-  f32 hx = static_cast<f32>(a) * kInv, hy = static_cast<f32>(b) * kInv;
-  f32 hz = static_cast<f32>(c) * kInv, hw = static_cast<f32>(d) * kInv;
-
-  f32 env = std::exp(-age * 26.0f);
-  f32 t1 = 0.10f + 0.08f * hx;
-  if (age > t1) env += (0.5f + 0.4f * hy) * std::exp(-(age - t1) * 30.0f);
-  if (hz > 0.35f) {
-    f32 t2 = 0.22f + 0.10f * hw;
-    if (age > t2) env += (0.35f + 0.30f * hx) * std::exp(-(age - t2) * 30.0f);
-  }
-  return env * std::clamp((kStrikeDuration - age) * 20.0f, 0.0f, 1.0f);
+  return LightningEnvelope(age, seed);
 }
 
 bool LightningSystem::Initialize(Device& device, Format color_format) {

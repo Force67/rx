@@ -3,6 +3,7 @@
 
 #include "core/math.h"
 #include "core/types.h"
+#include "render/atmosphere/cloudscape_types.h"
 #include "render/post/antialiasing.h"
 #include "render/post/upscaler.h"
 
@@ -269,6 +270,16 @@ struct RenderSettings {
   // Raymarched volumetric clouds over the sky (procedural, depth-composited).
   bool clouds = true;
   f32 cloud_coverage = 0.46f;  // 0 clear .. 1 overcast
+
+  // Opt-in textured cloud model (RX_CLOUDSCAPE): replaces the procedural
+  // clouds pass with a weather-map-driven shell marched from baked tileable
+  // noise, amortized over a 16-frame refresh cycle at half resolution. The
+  // application (typically a weather::WeatherSystem) writes
+  // cloudscape_controls each frame; with no writer the defaults give a steady
+  // scattered-cumulus sky.
+  bool cloudscape = false;
+  u32 cloudscape_steps = 48;  // potential full samples toward the zenith
+  CloudscapeControls cloudscape_controls;
 
   // Weather state (precipitation, wind, surface wetness/snow cover, lightning,
   // aurora), written by the application's weather system each frame.

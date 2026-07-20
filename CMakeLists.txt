@@ -220,6 +220,7 @@ if(NOT DEFINED RX_MODULES)
     terrain
     edit
     render
+    weather
     placement
     physics
     anim
@@ -302,6 +303,15 @@ if(RX_BUILD_TESTS AND "nav" IN_LIST RX_MODULES)
   add_test(NAME nav_test COMMAND nav_test)
 endif()
 
+# rx::weather unit tests: pure CPU logic (deterministic scheduling, region
+# restriction, transition blending, scripted override, surface + wind + lightning
+# integrals), no GPU, so plain `ctest` runs them everywhere.
+if(RX_BUILD_TESTS AND "weather" IN_LIST RX_MODULES)
+  add_executable(weather_test test/weather_test.cc)
+  target_link_libraries(weather_test PRIVATE rx::weather rx::core)
+  add_test(NAME weather_test COMMAND weather_test)
+endif()
+
 if(RX_BUILD_RUNTIME)
   add_subdirectory(runtime)
 endif()
@@ -333,6 +343,12 @@ if(RX_BUILD_TESTS)
   add_executable(vehicle_audio_test test/vehicle_audio_test.cc)
   target_link_libraries(vehicle_audio_test PRIVATE rx::audio rx::core)
   add_test(NAME vehicle_audio_test COMMAND vehicle_audio_test)
+endif()
+
+if(RX_BUILD_TESTS AND "audio" IN_LIST RX_MODULES)
+  add_executable(thunder_synth_test test/thunder_synth_test.cc)
+  target_link_libraries(thunder_synth_test PRIVATE rx::audio rx::core)
+  add_test(NAME thunder_synth_test COMMAND thunder_synth_test)
 endif()
 
 # Physics-driven fixed-wing aircraft over the public PhysicsWorld force API:

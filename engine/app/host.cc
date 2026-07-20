@@ -198,6 +198,9 @@ void Host::ApplyRenderPreset() {
   tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;
   tuned.clouds = env.clouds;
+  tuned.cloudscape = env.cloudscape;
+  tuned.cloudscape_steps = env.cloudscape_steps;
+  tuned.cloudscape_controls = env.cloudscape_controls;
   tuned.cloud_coverage = env.cloud_coverage;
   tuned.weather = env.weather;  // live weather state; presets never set it
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
