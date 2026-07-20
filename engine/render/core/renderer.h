@@ -6,6 +6,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
@@ -223,6 +224,21 @@ struct DebugLine {
   u32 rgba = 0xffffffff;
 };
 
+// A world-space text label. Rendered in the debug-line pass as a camera-facing
+// billboard of built-in stroke-font glyphs, so it stays upright and readable
+// from any angle. `size` is the glyph cell height in world units; text advances
+// along the camera's right axis. '\n' starts a new line. Only ASCII A-Z, 0-9,
+// space and + - . / : are drawn (letters are upper-cased); other characters are
+// blank. Filled per frame into FrameView::world_texts. No font atlas or asset.
+struct WorldText {
+  Vec3 position{};        // world anchor
+  std::string text;       // label content ('\n' = new line)
+  f32 size = 1.0f;        // glyph height, world units
+  u32 rgba = 0xffffffff;  // packed 0xRRGGBBAA
+  f32 align = 0.5f;       // per-line horizontal anchor: 0 left, 0.5 centre, 1 right
+  bool overlay = false;   // draw on top of the scene (ignore depth) when true
+};
+
 // The entity id under a requested pixel, read back from the pick target. See
 // Renderer::RequestPick / TakePickResult.
 struct PickResult {
@@ -305,6 +321,11 @@ struct FrameView {
   // no line pass.
   std::span<const DebugLine> debug_lines;
   std::span<const DebugLine> debug_lines_overlay;
+
+  // World-space text labels for this frame, drawn as camera-facing stroke-font
+  // billboards in the debug-line pass. Empty = no text. Owned here (unlike the
+  // debug-line spans) so callers can build them from temporaries.
+  std::vector<WorldText> world_texts;
 
   // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI
   // sets needs_blur so the renderer captures + blurs the backbuffer before the
