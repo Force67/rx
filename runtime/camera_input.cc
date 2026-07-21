@@ -4,12 +4,14 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <utility>
 
 #include <base/option.h>
 
 #include "core/log.h"
 #include "core/math.h"
+#include "demo_scenes.h"
 #include "scene/components.h"
 
 // Camera and input: routes per-frame input to the free-fly camera, the
@@ -81,7 +83,16 @@ void Viewer::DriveCamera(f32 dt) {
     if (Showcase) {
       BuildShowcase();
       cam_showcase_ = !showcase_.empty();
-      if (const char* d = ShowcaseShots.get()) showcase_shot_dir_ = d;
+      if (const char* d = ShowcaseShots.get()) {
+        showcase_shot_dir_ = d;
+        std::error_code error;
+        std::filesystem::create_directories(showcase_shot_dir_, error);
+        if (error) {
+          RX_WARN("showcase: cannot create capture directory {}: {}", showcase_shot_dir_,
+                  error.message());
+          showcase_shot_dir_.clear();
+        }
+      }
       showcase_quit_ = bool(ShowcaseQuit);
       if (cam_showcase_) {
         RX_INFO("showcase: {} waypoints, {:.1f}s{}", showcase_.size(), showcase_.duration(),
@@ -93,6 +104,7 @@ void Viewer::DriveCamera(f32 dt) {
 
   if (cam_showcase_) {
     f32 prev = cam_time_ - dt;
+    demos_->SetFeatureGymTourTime(cam_time_);
     ShowcasePose p = showcase_.Sample(cam_time_);
     LookCameraAt(p.eye, p.target);
     if (!showcase_shot_dir_.empty()) {
@@ -162,6 +174,8 @@ void Viewer::DriveCamera(f32 dt) {
 }
 
 void Viewer::BuildShowcase() {
+  if (demos_ && demos_->BuildFeatureGymTour(showcase_)) return;
+
   // A drone pass over the origin-anchored scene: establishing wide, descending
   // push-in, low skim, crane-up reveal. Every waypoint sits at ~zero velocity
   // (smoothstep), so each is a clean, well-framed still.

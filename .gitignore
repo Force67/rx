@@ -3,11 +3,15 @@ scratch/
 out/
 .cache/
 compile_commands.json
+__pycache__/
+*.pyc
 .vs/
 .idea/
 .direnv/
 result
 assets/
+!runtime/feature_gym/assets/
+!runtime/feature_gym/assets/**
 third_party/FidelityFX-SDK/
 third_party/JoltPhysics/
 third_party/DLSS/

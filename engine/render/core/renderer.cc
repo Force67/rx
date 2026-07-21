@@ -1066,7 +1066,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
   // once.)
   if (RcgiSwOpt.overridden())
     rcgi_force_software_ = RcgiSwOpt;
-  const bool want_sdf = desc.software_gi || SdfOpt.get() ||
+  const bool want_sdf = desc.software_gi || (desc.software_gi_fallback && !rt_available_) ||
+                        SdfOpt.get() ||
                         rcgi_force_software_ ||
                         (settings_.rcgi && !rt_available_);
 
@@ -2761,10 +2762,107 @@ void Renderer::BuildDebugLinePipelines() {
   debug_line_overlay_pipeline_ = device_->CreateGraphicsPipeline(desc);
 }
 
+namespace {
+
+// Built-in 4-wide, 6-tall uppercase stroke font for WorldText. Each glyph is a
+// run of segments on that grid, emitted as camera-facing DebugLines (origin +
+// right*x + up*y). Unlisted characters draw nothing.
+void AppendGlyphBillboard(char c, f32 ox, f32 oy, f32 scale, const Vec3 &origin,
+                          const Vec3 &right, const Vec3 &up, u32 rgba,
+                          std::vector<DebugLine> &out) {
+  auto seg = [&](f32 x0, f32 y0, f32 x1, f32 y1) {
+    out.push_back({origin + right * ((ox + x0) * scale) + up * ((oy + y0) * scale),
+                   origin + right * ((ox + x1) * scale) + up * ((oy + y1) * scale), rgba});
+  };
+  switch (c) {
+    case 'A': seg(0,0,2,6); seg(2,6,4,0); seg(1,2,3,2); break;
+    case 'B': seg(0,0,0,6); seg(0,6,3,6); seg(3,6,3,3); seg(3,3,0,3); seg(3,3,3,0); seg(3,0,0,0); break;
+    case 'C': seg(4,6,0,6); seg(0,6,0,0); seg(0,0,4,0); break;
+    case 'D': seg(0,0,0,6); seg(0,6,2,6); seg(2,6,4,4); seg(4,4,4,2); seg(4,2,2,0); seg(2,0,0,0); break;
+    case 'E': seg(4,6,0,6); seg(0,6,0,0); seg(0,0,4,0); seg(0,3,3,3); break;
+    case 'F': seg(4,6,0,6); seg(0,6,0,0); seg(0,3,3,3); break;
+    case 'G': seg(4,6,0,6); seg(0,6,0,0); seg(0,0,4,0); seg(4,0,4,3); seg(4,3,2,3); break;
+    case 'H': seg(0,0,0,6); seg(4,0,4,6); seg(0,3,4,3); break;
+    case 'I': seg(2,0,2,6); seg(1,6,3,6); seg(1,0,3,0); break;
+    case 'J': seg(4,6,4,1); seg(4,1,3,0); seg(3,0,1,0); seg(1,0,0,1); break;
+    case 'K': seg(0,0,0,6); seg(0,3,4,6); seg(0,3,4,0); break;
+    case 'L': seg(0,6,0,0); seg(0,0,4,0); break;
+    case 'M': seg(0,0,0,6); seg(0,6,2,3); seg(2,3,4,6); seg(4,6,4,0); break;
+    case 'N': seg(0,0,0,6); seg(0,6,4,0); seg(4,0,4,6); break;
+    case 'O': seg(0,0,0,6); seg(0,6,4,6); seg(4,6,4,0); seg(4,0,0,0); break;
+    case 'P': seg(0,0,0,6); seg(0,6,3,6); seg(3,6,3,3); seg(3,3,0,3); break;
+    case 'Q': seg(0,0,0,6); seg(0,6,4,6); seg(4,6,4,0); seg(4,0,0,0); seg(2,2,4,0); break;
+    case 'R': seg(0,0,0,6); seg(0,6,3,6); seg(3,6,3,3); seg(3,3,0,3); seg(1,3,4,0); break;
+    case 'S': seg(4,6,0,6); seg(0,6,0,3); seg(0,3,4,3); seg(4,3,4,0); seg(4,0,0,0); break;
+    case 'T': seg(0,6,4,6); seg(2,6,2,0); break;
+    case 'U': seg(0,6,0,0); seg(0,0,4,0); seg(4,0,4,6); break;
+    case 'V': seg(0,6,2,0); seg(2,0,4,6); break;
+    case 'W': seg(0,6,1,0); seg(1,0,2,3); seg(2,3,3,0); seg(3,0,4,6); break;
+    case 'X': seg(0,0,4,6); seg(0,6,4,0); break;
+    case 'Y': seg(0,6,2,3); seg(4,6,2,3); seg(2,3,2,0); break;
+    case 'Z': seg(0,6,4,6); seg(4,6,0,0); seg(0,0,4,0); break;
+    case '0': seg(0,0,0,6); seg(0,6,4,6); seg(4,6,4,0); seg(4,0,0,0); seg(0,0,4,6); break;
+    case '1': seg(1,4,2,6); seg(2,6,2,0); seg(1,0,3,0); break;
+    case '2': seg(0,6,4,6); seg(4,6,4,3); seg(4,3,0,3); seg(0,3,0,0); seg(0,0,4,0); break;
+    case '3': seg(0,6,4,6); seg(4,6,4,0); seg(4,0,0,0); seg(1,3,4,3); break;
+    case '4': seg(0,6,0,3); seg(0,3,4,3); seg(3,6,3,0); break;
+    case '5': seg(4,6,0,6); seg(0,6,0,3); seg(0,3,4,3); seg(4,3,4,0); seg(4,0,0,0); break;
+    case '6': seg(4,6,0,6); seg(0,6,0,0); seg(0,0,4,0); seg(4,0,4,3); seg(4,3,0,3); break;
+    case '7': seg(0,6,4,6); seg(4,6,1,0); break;
+    case '8': seg(0,0,0,6); seg(0,6,4,6); seg(4,6,4,0); seg(4,0,0,0); seg(0,3,4,3); break;
+    case '9': seg(4,0,4,6); seg(4,6,0,6); seg(0,6,0,3); seg(0,3,4,3); break;
+    case '+': seg(2,1,2,5); seg(0,3,4,3); break;
+    case '-': seg(0,3,4,3); break;
+    case '.': seg(1,0,2,0); break;
+    case '/': seg(0,0,4,6); break;
+    case ':': seg(2,1,2,2); seg(2,4,2,5); break;
+    default: break;
+  }
+}
+
+void TessellateWorldText(const WorldText &t, const Vec3 &right, const Vec3 &up,
+                         std::vector<DebugLine> &out) {
+  const f32 scale = t.size / 6.0f;
+  const f32 advance = 5.0f;  // grid units per glyph cell
+  const f32 line_h = 8.0f;   // grid units per line
+  size_t line_index = 0;
+  size_t start = 0;
+  const std::string &s = t.text;
+  for (size_t i = 0; i <= s.size(); ++i) {
+    if (i != s.size() && s[i] != '\n')
+      continue;
+    const size_t len = i - start;
+    const f32 line_width = advance * static_cast<f32>(len);
+    const f32 ox0 = -t.align * line_width;
+    const f32 oy = -static_cast<f32>(line_index) * line_h;
+    for (size_t j = 0; j < len; ++j) {
+      char c = s[start + j];
+      if (c >= 'a' && c <= 'z')
+        c = static_cast<char>(c - 32);
+      AppendGlyphBillboard(c, ox0 + static_cast<f32>(j) * advance, oy, scale, t.position, right, up,
+                           t.rgba, out);
+    }
+    ++line_index;
+    start = i + 1;
+  }
+}
+
+}  // namespace
+
 void Renderer::DrawDebugLines(CommandList &cmd, const FrameView &view,
                               const Mat4 &view_proj, Extent2D extent) {
-  const size_t total =
-      view.debug_lines.size() + view.debug_lines_overlay.size();
+  // Camera-facing basis so WorldText billboards stay upright and readable.
+  Vec3 text_right = Cross(Normalize(view.camera.target - view.camera.eye), Vec3{0, 1, 0});
+  if (Length(text_right) < 1e-4f)
+    text_right = Vec3{1, 0, 0};
+  text_right = Normalize(text_right);
+  const Vec3 text_up = Normalize(Cross(text_right, Normalize(view.camera.target - view.camera.eye)));
+  std::vector<DebugLine> text_depth, text_overlay;
+  for (const WorldText &t : view.world_texts)
+    TessellateWorldText(t, text_right, text_up, t.overlay ? text_overlay : text_depth);
+
+  const size_t total = view.debug_lines.size() + view.debug_lines_overlay.size() +
+                       text_depth.size() + text_overlay.size();
   if (total == 0)
     return;
   BuildDebugLinePipelines();
@@ -2808,9 +2906,13 @@ void Renderer::DrawDebugLines(CommandList &cmd, const FrameView &view,
   const u32 depth_first = count;
   for (const DebugLine &l : view.debug_lines)
     append(l, count);
+  for (const DebugLine &l : text_depth)
+    append(l, count);
   const u32 depth_count = count - depth_first;
   const u32 overlay_first = count;
   for (const DebugLine &l : view.debug_lines_overlay)
+    append(l, count);
+  for (const DebugLine &l : text_overlay)
     append(l, count);
   const u32 overlay_count = count - overlay_first;
 

@@ -24,6 +24,7 @@
 #include "demo_gym.h"
 #include "demo_puppet.h"
 #include "demo_drive.h"
+#include "feature_gym/feature_gym.h"
 #include "scene_hook_demo.h"
 #include "scene_hook_rhi_demo.h"
 
@@ -44,6 +45,8 @@ class DemoScenes {
   // Appends the live demo effects (particles, gaussians, oit, lights, fur, gpu
   // particles) into this frame's render view.
   void EmitToView(f32 dt, render::FrameView& view);
+  bool BuildFeatureGymTour(ShowcaseCamera& camera);
+  void SetFeatureGymTourTime(f32 seconds);
 
   // The character/inventory gym (--demo gym), or null for any other scene. The
   // gym drives its own camera + input, so the Viewer routes OnUpdate to it.
@@ -283,6 +286,7 @@ class DemoScenes {
   // --demo drive: the GTA-style driving gym (car/boat/plane on mixed terrain).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
   std::unique_ptr<DriveDemo> drive_;
+  std::unique_ptr<FeatureGym> feature_gym_;
 
   // --demo bubbles: the streaming-bubble interest map driven locally (no
   // transport), plus its wire-sphere visualizer. Non-null only for that demo.

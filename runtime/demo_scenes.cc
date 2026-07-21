@@ -215,9 +215,18 @@ void DemoScenes::Shutdown() {
   puppet_.reset();
   drive_.reset();
   gym_.reset();
+  feature_gym_.reset();
   scene_hook_.reset();
   scene_hook_rhi_.reset();
   bubble_viz_.reset();
+}
+
+bool DemoScenes::BuildFeatureGymTour(ShowcaseCamera& camera) {
+  return feature_gym_ && feature_gym_->BuildTour(camera);
+}
+
+void DemoScenes::SetFeatureGymTourTime(f32 seconds) {
+  if (feature_gym_) feature_gym_->SetTourTime(seconds);
 }
 
 void DemoScenes::ApplyRenderPolicy() {
@@ -293,6 +302,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (gym_) gym_->Emit(dt, view);
   if (puppet_) puppet_->Emit(dt, view);
   if (drive_) drive_->Emit(dt, view);
+  if (feature_gym_) feature_gym_->Emit(dt, view);
   if (bubbles_enabled_) EmitBubbles(view);
   if (fluid_scene_) EmitFluid(dt, view);
   if (sky_scene_) EmitSky(dt);
@@ -3723,6 +3733,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "drive") {
     drive_ = std::make_unique<DriveDemo>(ctx_);
     drive_->Create();
+    return;
+  }
+  if (config_.demo_scene == "featuregym" || config_.demo_scene == "feature-gym") {
+    feature_gym_ = std::make_unique<FeatureGym>(ctx_);
+    feature_gym_->Create();
     return;
   }
   asset::Mesh cube = asset::MakeCube(0.7f, asset::MakeAssetId("builtin/cube"));
