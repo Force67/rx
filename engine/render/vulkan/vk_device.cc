@@ -879,7 +879,7 @@ GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usa
     // parking them is safe). The blocking submit is deferred, so N buffers cost
     // one round-trip instead of N.
     EnsureUploadBatchCmd().CopyBuffer(staging, 0, buffer, 0, data.size());
-    upload_batch_stagings_.push_back(staging);
+    ParkBatchStaging(staging);
   } else {
     ImmediateSubmit([&](CommandList& cmd) {
       cmd.CopyBuffer(staging, 0, buffer, 0, data.size());
@@ -897,7 +897,16 @@ void VulkanDevice::FlushBuffer(const GpuBuffer& buffer, u64 offset, u64 size) {
   }
 }
 
+void VulkanDevice::CheckUploadBatchThread(const char* what) const {
+  if (std::this_thread::get_id() != upload_batch_thread_) {
+    RX_ERROR("{} called off the device thread; the upload batch is unsynchronized and this "
+             "corrupts it silently. Convert on workers, upload on the device thread.",
+             what);
+  }
+}
+
 VulkanCommandList& VulkanDevice::EnsureUploadBatchCmd() {
+  CheckUploadBatchThread("upload batch recording");
   if (upload_batch_cmd_ == VK_NULL_HANDLE) {
     VkCommandBufferAllocateInfo alloc{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
     alloc.commandPool = immediate_pool_;
@@ -933,13 +942,34 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
   upload_batch_list_.reset();
   for (GpuBuffer& s : upload_batch_stagings_) DestroyBuffer(s);
   upload_batch_stagings_.clear();
+  upload_batch_staging_bytes_ = 0;
 }
 
-void VulkanDevice::BeginUploadBatch() { ++upload_batch_depth_; }
+void VulkanDevice::BeginUploadBatch() {
+  CheckUploadBatchThread("BeginUploadBatch");
+  ++upload_batch_depth_;
+}
 
 void VulkanDevice::FlushUploadBatch() {
+  CheckUploadBatchThread("FlushUploadBatch");
   if (upload_batch_depth_ > 0) --upload_batch_depth_;
   if (upload_batch_depth_ == 0) SubmitUploadBatchIfPending();
+}
+
+void VulkanDevice::ParkBatchStaging(GpuBuffer& buffer) {
+  CheckUploadBatchThread("ParkBatchStaging");
+  if (upload_batch_depth_ == 0) {  // contract misuse; match the base default
+    DestroyBuffer(buffer);
+    return;
+  }
+  upload_batch_stagings_.push_back(buffer);
+  upload_batch_staging_bytes_ += buffer.size;
+  // A large burst would otherwise hold every staging (all geometry + texture
+  // bytes of the burst) host-visible until the flush. Above the budget, submit
+  // what has accumulated (the batch stays open); safe here because the parked
+  // buffer's copies are always recorded before it is parked.
+  constexpr u64 kStagingBudget = 64ull << 20;
+  if (upload_batch_staging_bytes_ >= kStagingBudget) SubmitUploadBatchIfPending();
 }
 
 void VulkanDevice::RecordUpload(const std::function<void(CommandList&)>& record) {
@@ -2113,6 +2143,10 @@ CommandList* VulkanDevice::BeginFrame(u32 slot) {
 }
 
 CommandList* VulkanDevice::SplitFrame(CommandList* cmd, bool signal_fork) {
+  // Uploads batched after BeginFrame must execute before the frame work that
+  // reads them is submitted. Unwritten-but-allocated memory raises no
+  // validation error, so a missed flush here is silent one-frame garbage.
+  SubmitUploadBatchIfPending();
   FrameRing& frame = frames_[current_slot_];
   if (!caps_.async_compute || frame.active_segment + 1 >= FrameRing::kMaxSegments) return cmd;
 
@@ -2153,6 +2187,9 @@ CommandList* VulkanDevice::BeginAsync() {
 }
 
 void VulkanDevice::SubmitAsync(CommandList*) {
+  // Async compute may read batched buffers (e.g. a fresh BLAS's geometry); the
+  // flush blocks until the copies finish, so the compute queue sees them.
+  SubmitUploadBatchIfPending();
   FrameRing& frame = frames_[current_slot_];
   vkEndCommandBuffer(frame.async_cmd);
 
@@ -2184,6 +2221,9 @@ void VulkanDevice::SubmitAsync(CommandList*) {
 }
 
 PresentResult VulkanDevice::SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) {
+  // See SplitFrame: uploads batched mid-frame must land before the frame that
+  // samples them is submitted. No-op when nothing is pending.
+  SubmitUploadBatchIfPending();
   auto& vk_swapchain = static_cast<VulkanSwapchain&>(swapchain);
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
@@ -2245,6 +2285,7 @@ void VulkanDevice::SubmitFrame(CommandList* cmd) {
   // Swapchainless completion of an offscreen (or non-presenting) frame: no
   // acquire wait, no present. Ends recording, signals the slot fence so the
   // next BeginFrame(slot) can reuse it, and joins any async-compute submission.
+  SubmitUploadBatchIfPending();  // see the presenting overload
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
     if (candidate.list.get() == cmd) frame = &candidate;
@@ -2279,6 +2320,7 @@ void VulkanDevice::SubmitFrame(CommandList* cmd) {
 
 PresentResult VulkanDevice::SubmitFrameGen(CommandList* cmd, Swapchain& swapchain,
                                            u32 interp_index, u32 real_index) {
+  SubmitUploadBatchIfPending();  // see SubmitFrame
   auto& vk_swapchain = static_cast<VulkanSwapchain&>(swapchain);
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
