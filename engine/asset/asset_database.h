@@ -45,7 +45,8 @@ public:
   // multiple threads: the caches are mutex-guarded, and conversion runs
   // outside the lock (converters recurse into LoadTexture/AddMaterial, and a
   // background prefetch must not stall the main thread for a whole convert).
-  // Concurrent loads of the same key may both convert; the first insert wins.
+  // Concurrent loads of the same key may both convert; the first insert wins,
+  // except that a successful convert supersedes a concurrently cached failure.
   const Mesh *LoadMesh(std::string_view path);
   const Texture *LoadTexture(std::string_view path);
   const Material *LoadMaterial(std::string_view path);

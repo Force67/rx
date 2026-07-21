@@ -51,6 +51,12 @@ RX_ASSET_EXPORT VirtualPath SplitVirtualPath(std::string_view path);
 // Later mounts win. Mount base game archives first, then DLC, then mod
 // archives in plugin order, then loose files last. This reproduces the
 // override behavior mods rely on.
+//
+// Threading: Read/Contains/Size only read the mount table and are safe to call
+// concurrently (providers guard their own IO), which is what background asset
+// conversion relies on. Mount/Unmount/UnmountByPrefix mutate the table
+// unguarded — quiesce background loads (e.g. a mod reload) before calling them,
+// or a loader thread reads a freed provider.
 class RX_ASSET_EXPORT Vfs {
  public:
   void Mount(std::string_view mount_point, base::UniquePointer<FileProvider> provider);
