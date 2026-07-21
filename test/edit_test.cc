@@ -201,6 +201,7 @@ void TestSceneRoundTrip() {
   ecs::Entity child = src.Create();
   src.Add(child, scene::Transform{{1, 0, 0}, {0, 0, 0, 1}, 1.0f});
   src.Add(child, scene::Name{"Child"});
+  src.Add(child, scene::SpawnedFrom{0x123456789abcdef0ull});
   src.Add(child, scene::Parent{parent});
 
   // One renderable with a known path (exercises the path branch) and one with a
@@ -244,7 +245,10 @@ void TestSceneRoundTrip() {
   // The renderable path resolved back to the same asset id.
   ecs::Entity dchild = FindByGuid(dst, src.Get<scene::Guid>(child)->value);
   CHECK(dchild);
-  if (dchild) CHECK(dst.Get<scene::Renderable>(dchild)->mesh == with_path);
+  if (dchild) {
+    CHECK(dst.Get<scene::Renderable>(dchild)->mesh == with_path);
+    CHECK(dst.Get<scene::SpawnedFrom>(dchild)->prefab == 0x123456789abcdef0ull);
+  }
 
   fs::remove(path);
 }
@@ -286,6 +290,7 @@ void TestUndo() {
   CHECK(stack.Redo(world));
   CHECK(world.Has<scene::Name>(e));
   CHECK(world.Get<scene::Name>(e)->value == "Hero");
+  world.Add(e, scene::SpawnedFrom{0xfeedfaceull});
 
   // Destroy, then undo (entity recreated with same guid), then a stale-handle
   // command must still resolve through the guid.
@@ -296,6 +301,7 @@ void TestUndo() {
   CHECK(recreated);
   CHECK(world.Get<scene::Name>(recreated)->value == "Hero");
   CHECK_NEAR(world.Get<scene::Transform>(recreated)->scale, 5.0f, 1e-6f);
+  CHECK(world.Get<scene::SpawnedFrom>(recreated)->prefab == 0xfeedfaceull);
 
   // A prop command captured against the OLD handle still works after recreation.
   CHECK(stack.Redo(world));  // redo destroy

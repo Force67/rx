@@ -131,6 +131,7 @@ void RegisterBuiltins() {
   ReflectComponent<Hidden>("Hidden");  // tag: no fields
   ReflectComponent<Name>("Name").Prop("value", &Name::value);
   ReflectComponent<Guid>("Guid").Prop("value", &Guid::value);
+  ReflectComponent<SpawnedFrom>("SpawnedFrom").Prop("prefab", &SpawnedFrom::prefab);
   ReflectComponent<Parent>("Parent").Prop("value", &Parent::value);
 }
 
