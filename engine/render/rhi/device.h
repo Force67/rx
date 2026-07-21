@@ -268,8 +268,11 @@ class Device {
   // staging copy into one shared command buffer and defers its submit, instead
   // of doing a blocking ImmediateSubmit per buffer. FlushUploadBatch submits the
   // accumulated copies once and blocks until they finish; the batch is also
-  // flushed implicitly by ImmediateSubmit / BeginFrame / WaitIdle so any GPU
-  // work that reads a just-created buffer (e.g. a BLAS build) sees it uploaded.
+  // flushed implicitly by ImmediateSubmit / BeginFrame / every frame or async
+  // submit / WaitIdle, so any GPU work that could read a just-created buffer
+  // (a BLAS build, the frame that samples it) always sees it uploaded, and
+  // early when the parked staging memory crosses an internal budget (so a big
+  // burst does not hold its whole payload host-visible at once).
   // Nestable via a depth count (only the outermost FlushUploadBatch submits).
   // Buffers created inside the batch are valid to use only after the flush.
   // Default no-op: backends without the optimization just keep submitting per
@@ -286,7 +289,10 @@ class Device {
   // buffer, or, with no batch open, runs them through a blocking ImmediateSubmit
   // (the default). Lets a caller share the coalesced submit without knowing the
   // backend. `record` runs synchronously (commands are recorded now); the work
-  // completes at the next flush/frame when batched.
+  // completes at the next flush/frame when batched. `record` must stick to
+  // transfer work (copies/blits/barriers) and must not allocate binding sets:
+  // the shared immediate descriptor pool is only reset by ImmediateSubmit, so
+  // sets allocated inside a batch would accumulate until it exhausts.
   virtual void RecordUpload(const std::function<void(CommandList&)>& record) {
     ImmediateSubmit(record);
   }

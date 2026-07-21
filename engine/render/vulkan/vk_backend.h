@@ -320,7 +320,7 @@ class VulkanDevice final : public Device {
   void FlushUploadBatch() override;
   bool UploadBatchActive() const override { return upload_batch_depth_ > 0; }
   void RecordUpload(const std::function<void(CommandList&)>& record) override;
-  void ParkBatchStaging(GpuBuffer& buffer) override { upload_batch_stagings_.push_back(buffer); }
+  void ParkBatchStaging(GpuBuffer& buffer) override;
   bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
                      size_t out_size) override;
   CommandList* BeginFrame(u32 slot) override;
@@ -462,6 +462,15 @@ class VulkanDevice final : public Device {
   VkCommandBuffer upload_batch_cmd_ = VK_NULL_HANDLE;
   std::unique_ptr<VulkanCommandList> upload_batch_list_;
   base::Vector<GpuBuffer> upload_batch_stagings_;
+  // Host-visible bytes currently parked in upload_batch_stagings_. When it
+  // crosses the budget the pending copies are submitted early (batch stays
+  // open), bounding the staging high-water mark of a large streaming burst.
+  u64 upload_batch_staging_bytes_ = 0;
+  // The thread the device was created on; the batch state above is
+  // unsynchronized, so every batch entry point checks against it and logs a
+  // loud error on misuse (an off-thread upload silently corrupts the batch).
+  std::thread::id upload_batch_thread_ = std::this_thread::get_id();
+  void CheckUploadBatchThread(const char* what) const;
   // Lazily begins the batch command buffer on the first copy; submits+waits any
   // pending batch copies (leaving the batch open) before dependent GPU work.
   VulkanCommandList& EnsureUploadBatchCmd();
