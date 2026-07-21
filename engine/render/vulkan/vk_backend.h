@@ -471,10 +471,31 @@ class VulkanDevice final : public Device {
   // loud error on misuse (an off-thread upload silently corrupts the batch).
   std::thread::id upload_batch_thread_ = std::this_thread::get_id();
   void CheckUploadBatchThread(const char* what) const;
-  // Lazily begins the batch command buffer on the first copy; submits+waits any
+  // Lazily begins the batch command buffer on the first copy; submits any
   // pending batch copies (leaving the batch open) before dependent GPU work.
   VulkanCommandList& EnsureUploadBatchCmd();
   void SubmitUploadBatchIfPending();
+  // A submitted-but-possibly-still-executing batch: the CPU no longer waits at
+  // flush. A trailing kTransferWrite->kAllCommands barrier in the batch orders
+  // its copies against all later graphics-queue work, and the fence retires the
+  // command buffer + stagings once the GPU is done (RetireCompletedUploadBatches,
+  // non-blocking, called from every flush). Serials let SubmitAsync tell which
+  // batches the fork semaphore already orders against the compute queue.
+  struct UploadBatchInFlight {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    base::Vector<GpuBuffer> stagings;
+    u64 staging_bytes = 0;
+    u64 serial = 0;
+  };
+  base::Vector<UploadBatchInFlight> upload_batches_in_flight_;
+  base::Vector<VkFence> upload_fence_pool_;  // recycled batch fences
+  u64 upload_inflight_staging_bytes_ = 0;
+  u64 upload_batch_serial_ = 0;        // serial of the newest submitted batch
+  u64 upload_fork_covered_serial_ = 0; // newest batch submitted before the fork signal
+  VkFence AcquireUploadBatchFence();
+  void RetireCompletedUploadBatches();  // frees batches whose fence has signaled
+  void DrainUploadBatchesInFlight();    // blocks until every in-flight batch retires
 
   // Frame-safe deferred destruction. A resource retired during frame slot S is
   // parked in graveyard_[S] and freed at the next BeginFrame(S), whose fence

@@ -708,6 +708,20 @@ void VulkanDevice::ShutdownResources() {
   // Free any still-parked deferred resources while the allocator/device are
   // alive (the caller already waited the device idle).
   DrainAllGraveyards();
+  // Upload batches: the idle wait above proves every batch fence signaled, so
+  // this retires them all. A batch recorded but never submitted (app tore down
+  // mid-batch) still holds stagings that must go before the allocator does.
+  DrainUploadBatchesInFlight();
+  for (GpuBuffer& s : upload_batch_stagings_) DestroyBuffer(s);
+  upload_batch_stagings_.clear();
+  upload_batch_staging_bytes_ = 0;
+  if (upload_batch_cmd_ != VK_NULL_HANDLE) {
+    vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
+    upload_batch_cmd_ = VK_NULL_HANDLE;
+    upload_batch_list_.reset();
+  }
+  for (VkFence fence : upload_fence_pool_) vkDestroyFence(device_, fence, nullptr);
+  upload_fence_pool_.clear();
   for (FrameRing& frame : frames_) {
     if (frame.descriptor_pool) vkDestroyDescriptorPool(device_, frame.descriptor_pool, nullptr);
     if (frame.in_flight) vkDestroyFence(device_, frame.in_flight, nullptr);
@@ -767,6 +781,7 @@ void VulkanDevice::WaitIdle() {
     // recorded-but-never-submitted in the batch command buffer.
     SubmitUploadBatchIfPending();
     vkDeviceWaitIdle(device_);
+    DrainUploadBatchesInFlight();  // idle device => fences signaled, frees all
     DrainAllGraveyards();
   }
 }
@@ -913,27 +928,91 @@ VulkanCommandList& VulkanDevice::EnsureUploadBatchCmd() {
   return *upload_batch_list_;
 }
 
-// Submits any copies recorded into the batch command buffer and blocks until
-// they finish, then tears the command buffer down (a later CreateBufferWithData
-// lazily re-allocates it). Leaves the batch OPEN (depth unchanged) so more
-// uploads keep coalescing; this is the implicit-flush used before any GPU work
-// that could read a just-created buffer (ImmediateSubmit/BeginFrame/WaitIdle)
-// and by the explicit FlushUploadBatch.
+VkFence VulkanDevice::AcquireUploadBatchFence() {
+  if (!upload_fence_pool_.empty()) {
+    VkFence fence = upload_fence_pool_.back();
+    upload_fence_pool_.pop_back();
+    return fence;
+  }
+  VkFence fence = VK_NULL_HANDLE;
+  VkFenceCreateInfo info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  vkCreateFence(device_, &info, nullptr, &fence);
+  return fence;
+}
+
+// Frees every in-flight batch whose fence has signaled. Same-queue submissions
+// complete in submission order, so scan from the front and stop at the first
+// still-running batch. Non-blocking; called from every flush so the list stays
+// short (at most a few 64 MiB chunks of a burst).
+void VulkanDevice::RetireCompletedUploadBatches() {
+  size_t retired = 0;
+  while (retired < upload_batches_in_flight_.size()) {
+    UploadBatchInFlight& batch = upload_batches_in_flight_[retired];
+    if (vkGetFenceStatus(device_, batch.fence) != VK_SUCCESS) break;
+    vkResetFences(device_, 1, &batch.fence);
+    upload_fence_pool_.push_back(batch.fence);
+    vkFreeCommandBuffers(device_, immediate_pool_, 1, &batch.cmd);
+    for (GpuBuffer& s : batch.stagings) DestroyBuffer(s);
+    upload_inflight_staging_bytes_ -= batch.staging_bytes;
+    ++retired;
+  }
+  if (retired > 0)
+    upload_batches_in_flight_.erase(upload_batches_in_flight_.begin(),
+                                    upload_batches_in_flight_.begin() + retired);
+}
+
+void VulkanDevice::DrainUploadBatchesInFlight() {
+  if (!upload_batches_in_flight_.empty()) {
+    // In-order completion: the newest fence proves every older batch too.
+    vkWaitForFences(device_, 1, &upload_batches_in_flight_.back().fence, VK_TRUE, UINT64_MAX);
+  }
+  RetireCompletedUploadBatches();
+}
+
+// Submits any copies recorded into the batch command buffer WITHOUT waiting for
+// them: a trailing kTransferWrite->kAllCommands barrier orders the copies
+// against everything later in graphics-queue submission order (the frame, a
+// BLAS build), so the CPU-side fence wait the old blocking flush did is not
+// needed for correctness on this queue. The command buffer and parked stagings
+// retire once the per-batch fence signals. Leaves the batch OPEN (depth
+// unchanged) so more uploads keep coalescing; this is the implicit-flush used
+// before dependent GPU work (ImmediateSubmit/frame + async submits/WaitIdle)
+// and by the explicit FlushUploadBatch. Cross-queue readers cannot rely on the
+// barrier — SubmitAsync handles that case explicitly via batch serials.
 void VulkanDevice::SubmitUploadBatchIfPending() {
+  RetireCompletedUploadBatches();
   if (upload_batch_cmd_ == VK_NULL_HANDLE) return;
+  upload_batch_list_->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kAllCommands);
   vkEndCommandBuffer(upload_batch_cmd_);
+  VkFence fence = AcquireUploadBatchFence();
   VkSubmitInfo submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &upload_batch_cmd_;
-  vkQueueSubmit(graphics_queue_, 1, &submit, immediate_fence_);
-  vkWaitForFences(device_, 1, &immediate_fence_, VK_TRUE, UINT64_MAX);
-  vkResetFences(device_, 1, &immediate_fence_);
-  vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
+  vkQueueSubmit(graphics_queue_, 1, &submit, fence);
+
+  UploadBatchInFlight in_flight;
+  in_flight.cmd = upload_batch_cmd_;
+  in_flight.fence = fence;
+  in_flight.stagings = std::move(upload_batch_stagings_);
+  in_flight.staging_bytes = upload_batch_staging_bytes_;
+  in_flight.serial = ++upload_batch_serial_;
+  upload_inflight_staging_bytes_ += upload_batch_staging_bytes_;
+  upload_batches_in_flight_.push_back(std::move(in_flight));
   upload_batch_cmd_ = VK_NULL_HANDLE;
   upload_batch_list_.reset();
-  for (GpuBuffer& s : upload_batch_stagings_) DestroyBuffer(s);
   upload_batch_stagings_.clear();
   upload_batch_staging_bytes_ = 0;
+
+  // Hard cap on outstanding staging memory: without a wait anywhere, a burst
+  // could submit 64 MiB chunks faster than the GPU copies them and grow the
+  // host-visible high-water without bound. Block on the oldest batch only once
+  // past the cap (rare; the soft budget already spaces the submits out).
+  constexpr u64 kMaxInFlightStagingBytes = 256ull << 20;
+  while (upload_inflight_staging_bytes_ >= kMaxInFlightStagingBytes &&
+         !upload_batches_in_flight_.empty()) {
+    vkWaitForFences(device_, 1, &upload_batches_in_flight_.front().fence, VK_TRUE, UINT64_MAX);
+    RetireCompletedUploadBatches();
+  }
 }
 
 void VulkanDevice::BeginUploadBatch() {
@@ -2157,6 +2236,10 @@ CommandList* VulkanDevice::SplitFrame(CommandList* cmd, bool signal_fork) {
     submit.signalSemaphoreInfoCount = 1;
     submit.pSignalSemaphoreInfos = &signal;
     frame.fork_signaled = true;
+    // The fork signal orders every earlier graphics submission against the
+    // compute queue, including all upload batches submitted so far (the flush
+    // above submitted any pending one). SubmitAsync uses this to skip waiting.
+    upload_fork_covered_serial_ = upload_batch_serial_;
   }
   vkQueueSubmit2(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
 
@@ -2178,10 +2261,20 @@ CommandList* VulkanDevice::BeginAsync() {
 }
 
 void VulkanDevice::SubmitAsync(CommandList*) {
-  // Async compute may read batched buffers (e.g. a fresh BLAS's geometry); the
-  // flush blocks until the copies finish, so the compute queue sees them.
   SubmitUploadBatchIfPending();
+  // Async compute may read batched buffers (e.g. a fresh BLAS's geometry). The
+  // batch's trailing barrier only orders the graphics queue; cross-queue, the
+  // fork semaphore covers every batch submitted before its signal (a semaphore
+  // signal orders all earlier graphics submissions), but a batch submitted
+  // AFTER the fork — or any batch at all when no fork was signaled — must be
+  // complete before the compute queue may read it, so block on those (rare;
+  // uploads between SplitFrame and here are the exception, not the rule).
   FrameRing& frame = frames_[current_slot_];
+  if (!upload_batches_in_flight_.empty()) {
+    const bool covered = frame.fork_signaled &&
+                         upload_batches_in_flight_.back().serial <= upload_fork_covered_serial_;
+    if (!covered) DrainUploadBatchesInFlight();
+  }
   vkEndCommandBuffer(frame.async_cmd);
 
   VkCommandBufferSubmitInfo cmd_info{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};

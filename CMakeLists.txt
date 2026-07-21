@@ -548,6 +548,13 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   target_link_libraries(compaction_test PRIVATE rx::render rx::core)
   add_test(NAME compaction_test COMMAND compaction_test)
 
+  # Upload batch: buffers created inside Begin/FlushUploadBatch (nested scopes,
+  # implicit flush via ImmediateSubmit, soft-budget auto-submit) verified by
+  # readback. Skips (exit 0) with no driver; the real path runs under vkrun.
+  add_executable(upload_batch_test test/upload_batch_test.cc)
+  target_link_libraries(upload_batch_test PRIVATE rx::render rx::core)
+  add_test(NAME upload_batch_test COMMAND upload_batch_test)
+
   # Morph targets: glTF import + weight-track sampling against the committed
   # CC0 Khronos AnimatedMorphCube, and the shared morph.hlsli accumulation
   # replayed in a compute shader against a CPU reference. The GPU section is
