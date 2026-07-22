@@ -6465,10 +6465,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
 
     // App translucents over the fully composited scene (after rx transparency,
     // before post/tonemap). Blends into `lit`, depth-tested against rx
-    // geometry.
+    // geometry. Motion is passed here too: this phase still precedes TAA,
+    // upscaling, and motion blur, and rx's own transparent particles already
+    // alpha-blend velocity into `motion`, so app translucents get the same
+    // target to overwrite it on moving surfaces (no depth_export in this phase).
     if (view.scene_transparent && !path_trace && depth != kInvalidResource) {
       add_scene_hook(view.scene_transparent, ScenePhase::kTransparent, lit,
-                     depth, kInvalidResource, kInvalidResource);
+                     depth, kInvalidResource, motion);
     }
 
     // Overdraw debug view: clear lit and additive-replay all geometry so the
