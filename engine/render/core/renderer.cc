@@ -5821,22 +5821,25 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     auto add_scene_hook =
         [&](const std::function<void(const SceneHookContext &)> &hook,
             ScenePhase phase, ResourceHandle color_h, ResourceHandle depth_h,
-            ResourceHandle export_h) {
+            ResourceHandle export_h, ResourceHandle motion_h) {
           const f32 jx = globals.jitter[0], jy = globals.jitter[1];
+          const Mat4 prev_vp = globals.prev_view_proj;
           graph_.AddPass(
               phase == ScenePhase::kOpaque ? "app_scene_opaque"
                                            : "app_scene_transparent",
-              [color_h, depth_h, export_h](RenderGraph::PassBuilder &b) {
+              [color_h, depth_h, export_h, motion_h](RenderGraph::PassBuilder &b) {
                 b.Write(color_h, ResourceUsage::kColorAttachment);
                 b.Write(depth_h, ResourceUsage::kDepthAttachment);
                 if (export_h != kInvalidResource)
                   b.Write(export_h, ResourceUsage::kColorAttachment);
+                if (motion_h != kInvalidResource)
+                  b.Write(motion_h, ResourceUsage::kColorAttachment);
               },
               // `hook` is copied into the closure (the graph executes this
               // after add_scene_hook returns, so a reference to the parameter
               // would dangle).
-              [this, hook, phase, color_h, depth_h, export_h, proj, view_mat,
-               view_proj, jx, jy, &view](PassContext &ctx) {
+              [this, hook, phase, color_h, depth_h, export_h, motion_h, proj,
+               view_mat, view_proj, prev_vp, jx, jy, &view](PassContext &ctx) {
                 SceneHookContext hc;
                 hc.phase = phase;
                 hc.cmd = ctx.cmd;
@@ -5855,12 +5858,19 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                   hc.depth_export_view = export_img.view;
                   hc.depth_export_format = export_img.format;
                 }
+                if (motion_h != kInvalidResource) {
+                  const GpuImage &motion_img = ctx.graph->image(motion_h);
+                  hc.motion = &motion_img;
+                  hc.motion_view = motion_img.view;
+                  hc.motion_format = motion_img.format;
+                }
                 hc.extent = {render_width_, render_height_};
                 hc.frame_slot = frame_index_ % kFramesInFlight;
                 hc.frames_in_flight = kFramesInFlight;
                 hc.view = view_mat;
                 hc.proj = proj;
                 hc.view_proj = view_proj;
+                hc.prev_view_proj = prev_vp;
                 hc.jitter[0] = jx;
                 hc.jitter[1] = jy;
                 hc.near_plane = 0.1f;
@@ -5870,7 +5880,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         };
     if (view.scene_opaque && !path_trace && depth != kInvalidResource) {
       add_scene_hook(view.scene_opaque, ScenePhase::kOpaque, scene_color, depth,
-                     depth_export);
+                     depth_export, motion);
     }
 
     // Screen-space subsurface scattering: separable per-channel diffusion of
@@ -6458,7 +6468,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // geometry.
     if (view.scene_transparent && !path_trace && depth != kInvalidResource) {
       add_scene_hook(view.scene_transparent, ScenePhase::kTransparent, lit,
-                     depth, kInvalidResource);
+                     depth, kInvalidResource, kInvalidResource);
     }
 
     // Overdraw debug view: clear lit and additive-replay all geometry so the

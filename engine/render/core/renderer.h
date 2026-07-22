@@ -166,6 +166,17 @@ struct SceneHookContext {
   const GpuImage *depth_export = nullptr;
   TextureView depth_export_view;
   Format depth_export_format = Format::kR32Float;
+  // kOpaque only (null in kTransparent): rx's screen-space motion-vector
+  // target (RG16F), the same buffer rx's own prepass/sky write and TAA / the
+  // upscalers / motion blur consume. Under TAA the app writes it as a third
+  // color attachment with rx's convention: mv = (prev_ndc.xy - curr_ndc.xy) *
+  // 0.5 (a UV-space delta; TAA samples history at uv + mv), both positions
+  // UN-jittered, prev from prev_view_proj below. Skip it and the app's pixels
+  // keep whatever motion rx wrote beneath (zero / sky), ghosting under camera
+  // motion.
+  const GpuImage *motion = nullptr;
+  TextureView motion_view;
+  Format motion_format = Format::kRG16Float;
 
   Extent2D extent{};  // render resolution
   u32 frame_slot = 0; // 0..frames_in_flight-1, index per-slot resources
@@ -178,6 +189,9 @@ struct SceneHookContext {
   Mat4 view = Mat4::Identity();
   Mat4 proj = Mat4::Identity();
   Mat4 view_proj = Mat4::Identity();
+  // Last frame's un-jittered view_proj (== view_proj on the first frame), the
+  // exact matrix rx's own geometry reprojects with for its motion vectors.
+  Mat4 prev_view_proj = Mat4::Identity();
   f32 jitter[2] = {0, 0}; // NDC units (already 2*pixel/dimension)
   f32 near_plane = 0.1f;  // reversed-Z, infinite far
   Vec3 camera_pos{};
