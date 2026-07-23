@@ -3,7 +3,7 @@
 #include <algorithm>
 
 #include "core/log.h"
-#include "shaders/fullscreen_vs_hlsl.h"
+#include "shaders/fullscreen_vs_slang.h"
 #include "shaders/ui_blur_ps_hlsl.h"
 
 namespace rx::render {
@@ -23,7 +23,7 @@ std::unique_ptr<UiBlurPass> UiBlurPass::Create(Device& device) {
                                       .address_w = AddressMode::kClampToEdge});
 
   pass->pipeline_ = device.CreateGraphicsPipeline({
-      .vertex = RX_SHADER(k_fullscreen_vs_hlsl),
+      .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_ui_blur_ps_hlsl),
       .raster = {.cull = CullMode::kNone},
       .color_formats = {kFrostFormat},

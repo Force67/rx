@@ -9,8 +9,9 @@ viewer runtime in place of the game.
 ## What's here
 
 - **engine/render** - the renderer, behind a backend-agnostic RHI
-  (`engine/render/rhi/`: vulkan, d3d12-via-vkd3d, null). HLSL shaders compiled
-  to SPIR-V at build time with dxc. Feature set includes: TAA / MSAA /
+  (`engine/render/rhi/`: vulkan, d3d12-via-vkd3d, null). HLSL and
+  [Slang](docs/SLANG.md) shaders compiled to SPIR-V at build time (dxc /
+  slangc). Feature set includes: TAA / MSAA /
   FSR3 / DLSS upscaling + FSR3 frame generation, hardware ray tracing (RT
   shadows/AO/reflections, DDGI, RCGI radiance-cache GI, ReSTIR DI), a
   reference path tracer, NRD
@@ -102,6 +103,7 @@ build/linux/runtime/rx --demo cornell
 ```
 
 Requirements: CMake 3.24+, a C++23 compiler, dxc (DirectXShaderCompiler),
+slangc (shader-slang, for the `.slang` shaders — see docs/SLANG.md),
 SDL3. Vulkan headers/volk/VMA are pinned and fetched by CMake. On NixOS just
 use the dev shell: `nix develop`, which also provides `vkrun` (host NVIDIA
 driver bridging) and `swrun` (headless lavapipe + Xvfb software path).

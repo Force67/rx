@@ -159,11 +159,14 @@ if(NOT TARGET volk)
   endif()
 endif()
 
-# Shaders are hlsl, compiled to spirv at build time with dxc and embedded.
+# Shaders are hlsl or slang, compiled to spirv at build time (dxc respectively
+# slangc) and embedded. slangc is only required when a .slang shader is
+# actually registered; rx_embed_shaders errors at that point if it is missing.
 find_program(RX_DXC dxc)
 if(NOT RX_DXC)
   message(FATAL_ERROR "dxc (DirectXShaderCompiler) is required to compile hlsl to spirv")
 endif()
+find_program(RX_SLANGC slangc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/shaders.cmake)
 
 find_package(SDL3 QUIET)
@@ -570,8 +573,8 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_executable(offscreen_test test/offscreen_test.cc)
   target_link_libraries(offscreen_test PRIVATE rx::render rx::core)
   rx_embed_shaders(offscreen_test
-    test/shaders/offscreen_tri.vs.hlsl
-    test/shaders/offscreen_tri.ps.hlsl)
+    test/shaders/offscreen_tri.vs.slang
+    test/shaders/offscreen_tri.ps.slang)
   add_test(NAME offscreen_test COMMAND offscreen_test)
 
   # Procedural placement: runs the DENSITYMAP/GENERATE/PLACEMENT compute

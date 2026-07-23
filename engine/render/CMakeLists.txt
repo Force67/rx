@@ -226,8 +226,8 @@ set(RX_RENDER_SHADERS
   shaders/pipeline/mesh_rt.ps.hlsl
   shaders/pipeline/mesh_sss.ps.hlsl
   shaders/pipeline/mesh_rt_sss.ps.hlsl
-  shaders/util/fullscreen.vs.hlsl
-  shaders/util/blit.ps.hlsl
+  shaders/util/fullscreen.vs.slang
+  shaders/util/blit.ps.slang
   shaders/util/msaa_resolve.cs.hlsl
   shaders/util/depth_copy.ps.hlsl
   shaders/post/tonemap.ps.hlsl
