@@ -7,7 +7,7 @@
 #include "render/atmosphere/ltc_tables.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "shaders/brdf_lut_cs_hlsl.h"
-#include "shaders/fullscreen_vs_hlsl.h"
+#include "shaders/fullscreen_vs_slang.h"
 #include "shaders/irradiance_cs_hlsl.h"
 #include "shaders/multiscatter_lut_cs_hlsl.h"
 #include "shaders/prefilter_cs_hlsl.h"
@@ -310,7 +310,7 @@ bool EnvironmentSystem::CreateSkyPipeline(BindingLayoutHandle globals_layout, Fo
   // masked attachment 1 (motion) writes to RG only, equivalent on the
   // two-channel motion format.
   sky_draw_pipeline_ = device_.CreateGraphicsPipeline({
-      .vertex = RX_SHADER(k_fullscreen_vs_hlsl),
+      .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_sky_ps_hlsl),
       .raster = {.cull = CullMode::kNone},
       .depth = {.test = true, .write = false, .compare = CompareOp::kEqual,
