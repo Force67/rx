@@ -202,20 +202,26 @@ struct SceneHookContext {
   Mat4 prev_view_proj = Mat4::Identity();
 };
 
+// A color-only HDR overlay recorded after temporal/depth-aware effects and
+// before exposure, bloom and tonemapping. The callback opens its own dynamic
+// rendering section with LoadOp::kLoad. Its extent is the resolved render size
+// (output size when an upscaler is active), so overlays stay crisp and require
+// neither depth nor motion-vector output.
+struct HdrOverlayContext {
+  CommandList* cmd = nullptr;
+  Device* device = nullptr;
+  const GpuImage* color = nullptr;
+  TextureView color_view;
+  Format color_format = Format::kRGBA16Float;
+  Extent2D extent{};
+  u32 frame_slot = 0;
+  u32 frames_in_flight = 1;
+};
+
 struct CameraPose {
   Vec3 eye{0, 0, 3};
   Vec3 target{};
-  f32 fov_y = 1.0472f;  // 60 degrees (perspective vertical field of view)
-  // Orthographic override for isometric / top-down / 2.5D presentations. When
-  // > 0 the main view uses an orthographic projection whose vertical extent is
-  // `ortho_height` world units (the horizontal extent follows from the aspect
-  // ratio) instead of the perspective `fov_y`; eye/target still define where
-  // the camera sits and looks. 0 (the default) leaves the perspective path
-  // untouched, so existing consumers are unaffected. ortho_near/ortho_far bound
-  // the reversed-z depth range (finite, unlike the perspective infinite far).
-  f32 ortho_height = 0.0f;
-  f32 ortho_near = 0.1f;
-  f32 ortho_far = 1000.0f;
+  f32 fov_y = 1.0472f; // 60 degrees
 };
 
 // What the simulation hands the renderer each frame. The engine extracts
@@ -343,6 +349,12 @@ struct FrameView {
   // SceneHookContext.
   std::function<void(const SceneHookContext &)> scene_opaque;
   std::function<void(const SceneHookContext &)> scene_transparent;
+
+  // Color-only resolved HDR content. Unlike the scene hooks this runs after
+  // temporal/depth-aware effects, making it suitable for sprites that should
+  // remain crisp without producing motion vectors. Exposure, bloom and
+  // tonemapping still run afterward.
+  std::function<void(const HdrOverlayContext&)> hdr_overlay;
 
   // Debug line lists for this frame (non-owning; valid for the RenderFrame
   // call). debug_lines are depth-tested against the resolved scene depth;
@@ -796,6 +808,8 @@ private:
   u32 applied_msaa_samples_ = 1;
   PipelineHandle msaa_resolve_pipeline_; // sample-0 guide resolve (compute)
   PipelineHandle depth_copy_pipeline_;   // rebuilds 1x hw depth post-resolve
+  PipelineHandle hdr_overlay_copy_pipeline_;
+  SamplerHandle hdr_overlay_sampler_;
   AntiAliasingMode applied_aa_ = AntiAliasingMode::kTaa;
   bool applied_vsync_ = false;
   // Sun state baked into the environment maps; differing means regenerate.

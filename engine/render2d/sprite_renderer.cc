@@ -1,7 +1,9 @@
 #include "render2d/sprite_renderer.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
+#include <utility>
 
 #include "core/log.h"
 #include "render/rhi/bindings.h"
@@ -22,33 +24,30 @@ static_assert(sizeof(GpuLight) == 48, "GpuLight must match the light2d.vs std430
 
 namespace {
 constexpr Format kTargetFormat = Format::kRGBA16Float;
-
-ShaderBlob Spirv(const unsigned char* data, size_t size) {
-  return ShaderBlob{data, size, ShaderFormat::kSpirv};
-}
 }  // namespace
 
 bool SpriteRenderer::Init(render::Renderer& renderer) {
+  if (ready_ && renderer_ == &renderer) return true;
+  if (device_) Shutdown();
+
   renderer_ = &renderer;
   device_ = renderer.device();
   if (!device_ || device_->is_stub()) {
     RX_WARN("render2d: no device (headless/stub); staying inert");
-    return false;
-  }
-  // The 2D content composites through the scene-opaque hook, which fires on the
-  // Vulkan backend only.
-  if (device_->caps().backend != Backend::kVulkan) {
-    RX_WARN("render2d: not on the vulkan backend; staying inert");
+    renderer_ = nullptr;
+    device_ = nullptr;
     return false;
   }
 
-  SamplerDesc sd;
-  sd.min_filter = sd.mag_filter = sd.mip_filter = Filter::kLinear;
-  sd.address_u = sd.address_v = sd.address_w = AddressMode::kClampToEdge;
-  sampler_ = device_->GetSampler(sd);
+  if (!UpdateSampler()) {
+    RX_ERROR("render2d: sampler creation failed");
+    Shutdown();
+    return false;
+  }
 
   if (!CreatePipelines()) {
     RX_ERROR("render2d: pipeline creation failed");
+    Shutdown();
     return false;
   }
 
@@ -58,12 +57,25 @@ bool SpriteRenderer::Init(render::Renderer& renderer) {
   TextureId w = CreateTexture(1, 1, white, "render2d_white");
   if (w != kWhiteTexture) {
     RX_ERROR("render2d: unexpected white texture id {}", w);
+    Shutdown();
     return false;
   }
 
   ready_ = true;
-  RX_INFO("render2d ready (sprite/tilemap/2d-lighting, backend={})",
-          BackendName(device_->caps().backend));
+  RX_INFO("render2d ready (sprite/tilemap/2d-lighting)");
+  return true;
+}
+
+bool SpriteRenderer::UpdateSampler() {
+  if (!device_) return false;
+  SamplerDesc sd;
+  const Filter filter = sampling_mode_ == SamplingMode::kNearest ? Filter::kNearest
+                                                                 : Filter::kLinear;
+  sd.min_filter = sd.mag_filter = sd.mip_filter = filter;
+  sd.address_u = sd.address_v = sd.address_w = AddressMode::kClampToEdge;
+  SamplerHandle sampler = device_->GetSampler(sd);
+  if (!sampler) return false;
+  sampler_ = sampler;
   return true;
 }
 
@@ -75,8 +87,8 @@ bool SpriteRenderer::CreatePipelines() {
     sets.push_back({.slots = {{0, BindingType::kStorageBuffer},
                               {1, BindingType::kCombinedTextureSampler}}});
     GraphicsPipelineDesc desc{
-        .vertex = Spirv(k_sprite_vs_hlsl, sizeof(k_sprite_vs_hlsl)),
-        .fragment = Spirv(k_sprite_ps_hlsl, sizeof(k_sprite_ps_hlsl)),
+        .vertex = RX_SHADER(k_sprite_vs_hlsl),
+        .fragment = RX_SHADER(k_sprite_ps_hlsl),
         .topology = PrimitiveTopology::kTriangleList,
         .raster = {.cull = CullMode::kNone},
         .depth = {},
@@ -94,8 +106,8 @@ bool SpriteRenderer::CreatePipelines() {
     base::Vector<PipelineBindings> sets;
     sets.push_back({.slots = {{0, BindingType::kStorageBuffer}}});
     GraphicsPipelineDesc desc{
-        .vertex = Spirv(k_light2d_vs_hlsl, sizeof(k_light2d_vs_hlsl)),
-        .fragment = Spirv(k_light2d_ps_hlsl, sizeof(k_light2d_ps_hlsl)),
+        .vertex = RX_SHADER(k_light2d_vs_hlsl),
+        .fragment = RX_SHADER(k_light2d_ps_hlsl),
         .topology = PrimitiveTopology::kTriangleList,
         .raster = {.cull = CullMode::kNone},
         .depth = {},
@@ -114,13 +126,13 @@ bool SpriteRenderer::CreatePipelines() {
     sets.push_back({.slots = {{0, BindingType::kCombinedTextureSampler},
                               {1, BindingType::kCombinedTextureSampler}}});
     GraphicsPipelineDesc desc{
-        .vertex = Spirv(k_composite_vs_hlsl, sizeof(k_composite_vs_hlsl)),
-        .fragment = Spirv(k_composite_ps_hlsl, sizeof(k_composite_ps_hlsl)),
+        .vertex = RX_SHADER(k_composite_vs_hlsl),
+        .fragment = RX_SHADER(k_composite_ps_hlsl),
         .topology = PrimitiveTopology::kTriangleList,
         .raster = {.cull = CullMode::kNone},
         .depth = {},
         .color_formats = {kTargetFormat},
-        .blend = {BlendMode::kAlpha},
+        .blend = {BlendMode::kPremultiplied},
         .sets = sets,
         .push_constant_size = 0,
         .debug_name = "render2d_composite",
@@ -150,6 +162,7 @@ TextureId SpriteRenderer::CreateTexture(u32 width, u32 height, const u8* rgba,
     return 0;
   }
   std::memcpy(staging.mapped, rgba, bytes);
+  device_->FlushBuffer(staging, 0, bytes);
 
   device_->ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
@@ -166,10 +179,20 @@ TextureId SpriteRenderer::CreateTexture(u32 width, u32 height, const u8* rgba,
 }
 
 void SpriteRenderer::DestroyTexture(TextureId id) {
-  if (id == 0 || id >= textures_.size() || !textures_[id].valid) return;
+  if (id <= kWhiteTexture || id >= textures_.size() || !textures_[id].valid) return;
   device_->WaitIdle();
   device_->DestroyImage(textures_[id].image);
   textures_[id].valid = false;
+}
+
+void SpriteRenderer::SetSamplingMode(SamplingMode mode) {
+  if (sampling_mode_ == mode) return;
+  SamplingMode previous = sampling_mode_;
+  sampling_mode_ = mode;
+  if (device_ && !UpdateSampler()) {
+    sampling_mode_ = previous;
+    RX_WARN("render2d: sampler update failed");
+  }
 }
 
 void SpriteRenderer::Begin(const Camera2D& camera) {
@@ -192,29 +215,28 @@ void SpriteRenderer::DrawSprite(const SpriteParams& s) {
   q.gpu.color[1] = s.color.g;
   q.gpu.color[2] = s.color.b;
   q.gpu.color[3] = s.color.a;
-  q.gpu.depth = s.depth;
   q.gpu.rotation = s.rotation;
-  q.gpu.pad[0] = q.gpu.pad[1] = 0;
+  q.gpu.pad[0] = q.gpu.pad[1] = q.gpu.pad[2] = 0;
   q.texture = (s.texture != 0 && s.texture < textures_.size() && textures_[s.texture].valid)
                   ? s.texture
                   : kWhiteTexture;
-  q.sort_key = s.sort_key;
+  q.sort_key = std::isfinite(s.sort_key) ? s.sort_key : 0.0f;
   queue_.push_back(q);
 }
 
-void SpriteRenderer::DrawQuad(Vec2 pos, Vec2 size, Color color, f32 sort_key, f32 depth) {
+void SpriteRenderer::DrawQuad(Vec2 pos, Vec2 size, Color color, f32 sort_key) {
   SpriteParams s;
   s.pos = pos;
   s.size = size;
   s.color = color;
   s.sort_key = sort_key;
-  s.depth = depth;
   s.texture = kWhiteTexture;
   DrawSprite(s);
 }
 
 void SpriteRenderer::DrawTileMap(TextureId tileset_texture, const TileMap& map,
                                  const Camera2D& camera) {
+  if (!(map.tile_size > 0.0f) || !std::isfinite(map.tile_size)) return;
   Rect view = camera.VisibleRect();
   for (const TileLayer& layer : map.layers) {
     // Parallax shifts a distant layer so it scrolls slower than the camera.
@@ -232,15 +254,14 @@ void SpriteRenderer::DrawTileMap(TextureId tileset_texture, const TileMap& map,
     for (i32 ty = ty0; ty <= ty1; ++ty) {
       for (i32 tx = tx0; tx <= tx1; ++tx) {
         i32 id = layer.At(tx, ty);
-        if (id < 0) continue;
+        if (!map.tileset.HasTile(id)) continue;
         SpriteParams s;
         s.pos = {static_cast<f32>(tx) * map.tile_size + offset.x,
                  static_cast<f32>(ty) * map.tile_size + offset.y};
         s.size = {map.tile_size, map.tile_size};
         s.uv = map.tileset.TileUv(id);
         s.texture = tileset_texture;
-        s.sort_key = layer.depth;
-        s.depth = layer.depth;
+        s.sort_key = layer.sort_key;
         DrawSprite(s);
       }
     }
@@ -268,7 +289,15 @@ void SpriteRenderer::AddLight(const Light2D& l) {
 
 void SpriteRenderer::InstallInto(render::FrameView& view) {
   if (!ready_) return;
-  view.scene_opaque = [this](const SceneHookContext& ctx) { Record(ctx); };
+  auto previous = std::move(view.hdr_overlay);
+  view.hdr_overlay = [this, previous = std::move(previous)](const HdrOverlayContext& ctx) {
+    if (previous) {
+      previous(ctx);
+      ctx.cmd->Barrier(Transition(*ctx.color, ResourceState::kColorTarget,
+                                  ResourceState::kColorTarget));
+    }
+    Record(ctx);
+  };
 }
 
 bool SpriteRenderer::EnsureSprites(FrameSlot& slot, u32 count) {
@@ -307,16 +336,16 @@ bool SpriteRenderer::EnsureLitTargets(FrameSlot& slot, render::Extent2D extent) 
 u32 SpriteRenderer::UploadSprites(FrameSlot& slot) {
   u32 count = static_cast<u32>(queue_.size());
   if (count == 0) return 0;
-  // Painter's order by sort_key; group by texture within a band so runs of the
-  // same atlas collapse to one instanced draw.
+  // Stable painter's order. DrawSpriteRuns still batches adjacent sprites that
+  // use the same atlas without changing the caller's order for equal keys.
   std::stable_sort(queue_.data(), queue_.data() + count,
                    [](const QueuedSprite& a, const QueuedSprite& b) {
-                     if (a.sort_key != b.sort_key) return a.sort_key < b.sort_key;
-                     return a.texture < b.texture;
+                     return a.sort_key < b.sort_key;
                    });
   if (!EnsureSprites(slot, count)) return 0;
   GpuSprite* dst = static_cast<GpuSprite*>(slot.sprites.mapped);
   for (u32 i = 0; i < count; ++i) dst[i] = queue_[i].gpu;
+  device_->FlushBuffer(slot.sprites, 0, static_cast<u64>(count) * sizeof(GpuSprite));
   return count;
 }
 
@@ -336,9 +365,8 @@ void SpriteRenderer::DrawSpriteRuns(render::CommandList& cmd, FrameSlot& slot, u
   }
 }
 
-void SpriteRenderer::Record(const SceneHookContext& ctx) {
-  if (ctx.phase != ScenePhase::kOpaque) return;
-  FrameSlot& slot = slots_[ctx.frame_slot % 2];
+void SpriteRenderer::Record(const HdrOverlayContext& ctx) {
+  FrameSlot& slot = slots_[ctx.frame_slot % Device::kMaxFramesInFlight];
   if (lighting_ == LightingMode::kLit) {
     RecordLit(ctx, slot);
   } else {
@@ -346,7 +374,7 @@ void SpriteRenderer::Record(const SceneHookContext& ctx) {
   }
 }
 
-void SpriteRenderer::RecordUnlit(const SceneHookContext& ctx, FrameSlot& slot) {
+void SpriteRenderer::RecordUnlit(const HdrOverlayContext& ctx, FrameSlot& slot) {
   u32 count = UploadSprites(slot);
   ColorAttachment color{.view = ctx.color_view,
                         .load = clear_scene_ ? LoadOp::kClear : LoadOp::kLoad};
@@ -361,7 +389,7 @@ void SpriteRenderer::RecordUnlit(const SceneHookContext& ctx, FrameSlot& slot) {
   ctx.cmd->EndRendering();
 }
 
-void SpriteRenderer::RecordLit(const SceneHookContext& ctx, FrameSlot& slot) {
+void SpriteRenderer::RecordLit(const HdrOverlayContext& ctx, FrameSlot& slot) {
   if (!EnsureLitTargets(slot, ctx.extent)) {
     RecordUnlit(ctx, slot);  // fall back if the offscreen targets failed
     return;
@@ -370,6 +398,7 @@ void SpriteRenderer::RecordLit(const SceneHookContext& ctx, FrameSlot& slot) {
   u32 light_count = static_cast<u32>(lights_.size());
   if (light_count > 0 && EnsureLights(slot, light_count)) {
     std::memcpy(slot.lights.mapped, lights_.data(), light_count * sizeof(GpuLight));
+    device_->FlushBuffer(slot.lights, 0, static_cast<u64>(light_count) * sizeof(GpuLight));
   } else {
     light_count = 0;
   }

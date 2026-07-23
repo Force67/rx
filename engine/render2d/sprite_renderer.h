@@ -3,6 +3,7 @@
 
 #include <base/containers/vector.h>
 
+#include "core/export.h"
 #include "core/math.h"
 #include "render/core/renderer.h"
 #include "render/rhi/device.h"
@@ -38,12 +39,12 @@ struct SpriteParams {
   Rect uv{0, 0, 1, 1};
   Color color = Color::White();
   f32 rotation = 0.0f;
-  f32 depth = 0.5f;
   TextureId texture = kWhiteTexture;
   f32 sort_key = 0.0f;
 };
 
 enum class LightingMode : u8 { kOff, kLit };
+enum class SamplingMode : u8 { kNearest, kLinear };
 
 // GPU-facing instance layouts. Field order/size mirror the HLSL structs
 // (std430); the static_asserts in the .cc guard the match.
@@ -53,9 +54,8 @@ struct GpuSprite {
   f32 uv_min[2];
   f32 uv_max[2];
   f32 color[4];
-  f32 depth;
   f32 rotation;
-  f32 pad[2];
+  f32 pad[3];
 };
 
 struct GpuLight {
@@ -69,11 +69,12 @@ struct GpuLight {
 };
 
 // The reusable 2D sprite / tilemap / lighting renderer. It records into rx's
-// frame through the scene-opaque hook using its own orthographic matrices, so
-// the 2D content is depth-interleaved with (and post-processed by) rx: bloom,
-// tonemap and the rest of rx's post chain run over it. Own one per game/scene;
-// drive it each frame: Begin(camera) -> Draw*() -> InstallInto(view).
-class SpriteRenderer {
+// resolved HDR overlay phase using its own orthographic matrix. Temporal and
+// depth-aware effects have already run, while exposure, bloom and tonemapping
+// still process the result. Own one per game/scene; drive it each frame:
+// Begin(camera) -> Draw*() -> InstallInto(view).
+// Call Shutdown before the owning render::Renderer is shut down or destroyed.
+class RX_RENDER2D_EXPORT SpriteRenderer {
  public:
   SpriteRenderer() = default;
   ~SpriteRenderer() { Shutdown(); }
@@ -82,7 +83,7 @@ class SpriteRenderer {
   SpriteRenderer& operator=(const SpriteRenderer&) = delete;
 
   // Creates pipelines/samplers/built-in textures. Returns false (and stays
-  // inert) on a headless / stub / non-Vulkan device.
+  // inert) on a headless / stub device.
   bool Init(render::Renderer& renderer);
   void Shutdown();
   bool ready() const { return ready_; }
@@ -92,10 +93,15 @@ class SpriteRenderer {
   TextureId CreateTexture(u32 width, u32 height, const u8* rgba, const char* debug_name = nullptr);
   void DestroyTexture(TextureId id);
 
+  // Global texture filtering. Nearest is intended for pixel art; linear is the
+  // default for smoothly scaled or rotated sprites.
+  void SetSamplingMode(SamplingMode mode);
+  SamplingMode sampling_mode() const { return sampling_mode_; }
+
   // --- per frame (call in OnBuildView) ---
   void Begin(const Camera2D& camera);
   void DrawSprite(const SpriteParams& s);
-  void DrawQuad(Vec2 pos, Vec2 size, Color color, f32 sort_key = 0.0f, f32 depth = 0.5f);
+  void DrawQuad(Vec2 pos, Vec2 size, Color color, f32 sort_key = 0.0f);
   // Emits every visible non-empty tile of every layer (parallax-aware).
   void DrawTileMap(TextureId tileset_texture, const TileMap& map, const Camera2D& camera);
 
@@ -115,7 +121,7 @@ class SpriteRenderer {
   }
   void ClearSceneClear() { clear_scene_ = false; }
 
-  // Installs this frame's queued content as view.scene_opaque.
+  // Composes this frame's queued content into view.hdr_overlay.
   void InstallInto(render::FrameView& view);
 
  private:
@@ -138,10 +144,11 @@ class SpriteRenderer {
     f32 sort_key;
   };
 
+  bool UpdateSampler();
   bool CreatePipelines();
-  void Record(const render::SceneHookContext& ctx);
-  void RecordUnlit(const render::SceneHookContext& ctx, FrameSlot& slot);
-  void RecordLit(const render::SceneHookContext& ctx, FrameSlot& slot);
+  void Record(const render::HdrOverlayContext& ctx);
+  void RecordUnlit(const render::HdrOverlayContext& ctx, FrameSlot& slot);
+  void RecordLit(const render::HdrOverlayContext& ctx, FrameSlot& slot);
   bool EnsureSprites(FrameSlot& slot, u32 count);
   bool EnsureLights(FrameSlot& slot, u32 count);
   bool EnsureLitTargets(FrameSlot& slot, render::Extent2D extent);
@@ -155,7 +162,8 @@ class SpriteRenderer {
   render::PipelineHandle sprite_pipeline_;
   render::PipelineHandle light_pipeline_;
   render::PipelineHandle composite_pipeline_;
-  render::SamplerHandle sampler_;  // linear clamp
+  render::SamplerHandle sampler_;
+  SamplingMode sampling_mode_ = SamplingMode::kLinear;
 
   base::Vector<Texture> textures_;  // index 0 unused, 1 = white
 
@@ -167,7 +175,7 @@ class SpriteRenderer {
   bool clear_scene_ = false;
   Color scene_clear_ = Color::Black();
 
-  FrameSlot slots_[2];
+  FrameSlot slots_[render::Device::kMaxFramesInFlight];
 };
 
 }  // namespace rx::render2d

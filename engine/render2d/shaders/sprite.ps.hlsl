@@ -3,7 +3,7 @@
 // tint, and writes straight into the target (rx's HDR scene colour on the
 // direct path, or the module's albedo target on the lit path). Alpha-blended by
 // the pipeline; fully transparent texels are discarded so overlapping sprites
-// never leave a depth/coverage smear.
+// never leave a coverage smear.
 
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]]
 Texture2D atlas : register(t1, space0);

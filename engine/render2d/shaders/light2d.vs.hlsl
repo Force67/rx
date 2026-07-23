@@ -3,6 +3,8 @@
 // gets the interpolated world position plus the light's parameters and shapes
 // the falloff; the pipeline blends the result additively into the light target.
 
+#include "rhi_bindings.hlsli"
+
 struct Light2D {
   float2 center;     // world position
   float  radius;     // reach, world units
@@ -16,7 +18,7 @@ struct Light2D {
 struct Push {
   column_major float4x4 view_proj;
 };
-[[vk::push_constant]] Push pc;
+PUSH_CONSTANTS(Push, pc);
 
 [[vk::binding(0, 0)]] StructuredBuffer<Light2D> lights : register(t0, space0);
 

@@ -1,6 +1,8 @@
 #ifndef RX_RENDER2D_CAMERA2D_H_
 #define RX_RENDER2D_CAMERA2D_H_
 
+#include <cmath>
+
 #include "core/math.h"
 #include "render2d/types2d.h"
 
@@ -12,23 +14,24 @@ namespace rx::render2d {
 // the sprite pipeline consumes and the world<->screen mapping gameplay and
 // picking need - so it is unit-testable without a device.
 //
-// The projection maps the visible world rect onto Vulkan clip space (x,y in
-// [-1,1], y increasing downward, so +y world is down on screen). Depth is left
-// to the caller: the sprite vertex shader writes each instance's own [0,1]
-// depth, and the 2D pass runs with the depth test off (painter's order) by
-// default, so the projection carries no z term.
+// The projection maps the visible world rect onto clip space (x,y in [-1,1], y
+// increasing downward, so +y world is down on screen). The pass uses painter's
+// order and carries no depth term.
 class Camera2D {
  public:
   Camera2D() = default;
 
   // viewport is the render target size in pixels.
   void SetViewport(u32 width, u32 height) {
-    viewport_ = {static_cast<f32>(width), static_cast<f32>(height)};
+    viewport_ = {static_cast<f32>(width > 0 ? width : 1),
+                 static_cast<f32>(height > 0 ? height : 1)};
   }
   void SetCenter(Vec2 center) { center_ = center; }
   void MoveBy(Vec2 delta) { center_ += delta; }
   // Pixels per world unit. Clamped positive so the mapping stays invertible.
-  void SetZoom(f32 zoom) { zoom_ = zoom > 1e-3f ? zoom : 1e-3f; }
+  void SetZoom(f32 zoom) {
+    zoom_ = std::isfinite(zoom) && zoom > 1e-3f ? zoom : 1e-3f;
+  }
 
   Vec2 center() const { return center_; }
   f32 zoom() const { return zoom_; }
@@ -46,8 +49,7 @@ class Camera2D {
   }
 
   // The column-major view-projection handed to the sprite pipeline. Maps world
-  // (x,y) to clip (x,y) in [-1,1]; z is 0 (the shader supplies per-instance
-  // depth) and w is 1.
+  // (x,y) to clip (x,y) in [-1,1]; z is 0 and w is 1.
   Mat4 ViewProj() const {
     f32 half_w = visible_width() * 0.5f;
     f32 half_h = visible_height() * 0.5f;

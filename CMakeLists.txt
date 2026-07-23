@@ -287,6 +287,14 @@ foreach(module ${RX_MODULES})
   add_subdirectory(engine/${module})
 endforeach()
 
+# rx::render2d CPU tests: camera transforms, isometric picking and tilemap data
+# rules need no GPU or window, so they run on every build host.
+if(RX_BUILD_TESTS AND "render2d" IN_LIST RX_MODULES)
+  add_executable(render2d_test test/render2d_test.cc)
+  target_link_libraries(render2d_test PRIVATE rx::render2d)
+  add_test(NAME render2d_test COMMAND render2d_test)
+endif()
+
 # rx::net unit tests: pure logic (wire codec, per-peer delta streams, bubble
 # membership + ownership), no GPU, driver or transport needed, so plain
 # `ctest` runs them everywhere.

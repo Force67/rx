@@ -1,8 +1,10 @@
 // render2d sprite pass - vertex stage. Six vertices per instance from
 // SV_VertexID (two triangles, no vertex buffer); per-sprite transform, atlas uv
-// rect, tint and depth read from a StructuredBuffer indexed by SV_InstanceID.
+// rect and tint read from a StructuredBuffer indexed by SV_InstanceID.
 // The camera hands its ortho view-proj through push constants; world space is
 // y-down so +y is down on screen.
+
+#include "rhi_bindings.hlsli"
 
 struct SpriteInstance {
   float2 pos;       // top-left corner, world units
@@ -10,15 +12,14 @@ struct SpriteInstance {
   float2 uv_min;    // atlas uv of the top-left corner
   float2 uv_max;    // atlas uv of the bottom-right corner
   float4 color;     // linear rgba tint, multiplied into the texel
-  float  depth;     // [0,1] clip depth (used only when the depth test is on)
   float  rotation;  // radians, about the sprite centre
-  float2 pad;
+  float3 pad;
 };
 
 struct Push {
   column_major float4x4 view_proj;
 };
-[[vk::push_constant]] Push pc;
+PUSH_CONSTANTS(Push, pc);
 
 [[vk::binding(0, 0)]] StructuredBuffer<SpriteInstance> instances : register(t0, space0);
 
@@ -42,7 +43,6 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   float2 rot = float2(local.x * c - local.y * sn, local.x * sn + local.y * c);
   float2 world = s.pos + s.size * 0.5 + rot;
   float4 clip = mul(pc.view_proj, float4(world, 0.0, 1.0));
-  clip.z = s.depth * clip.w;
 
   VsOut o;
   o.pos = clip;

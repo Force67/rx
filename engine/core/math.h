@@ -326,27 +326,6 @@ inline Mat4 PerspectiveShadow(f32 fov_y_radians, f32 aspect, f32 near_plane, f32
   return r;
 }
 
-// Reversed-z orthographic projection matching the main camera's clip space
-// (near -> depth 1, far -> depth 0, GREATER depth test) with the y flip for
-// vulkan clip space. Unlike Orthographic below (a self-consistent shadow-map
-// helper with a [0,1] range and no y flip) this is what a game hands the main
-// view for an isometric / top-down / 2.5D presentation, so rx's reversed-z
-// depth-aware passes (sky, fog, ssao, ssr) stay correct. Symmetric bounds
-// (left=-right, bottom=-top) make the translation terms vanish; the general
-// form is kept so an off-center ortho frustum also composes correctly.
-inline Mat4 OrthographicReversedZ(f32 left, f32 right, f32 bottom, f32 top, f32 near_plane,
-                                  f32 far_plane) {
-  Mat4 r;  // zero initialized
-  r.m[0] = 2.0f / (right - left);
-  r.m[5] = -2.0f / (top - bottom);  // y flip for vulkan clip space
-  r.m[10] = 1.0f / (far_plane - near_plane);
-  r.m[12] = -(right + left) / (right - left);
-  r.m[13] = (top + bottom) / (top - bottom);  // sign follows the y flip
-  r.m[14] = far_plane / (far_plane - near_plane);
-  r.m[15] = 1.0f;
-  return r;
-}
-
 // Right-handed orthographic projection with a [0,1] depth range (Vulkan), no y
 // flip. Used for shadow cascades: the map is rendered and sampled with the same
 // matrix, so it stays self-consistent without matching the camera's clip space.

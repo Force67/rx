@@ -36,8 +36,8 @@ set(RX_DEPS_LIBDIR ${CMAKE_INSTALL_LIBDIR}/rx)
 set(RX_DEPS_INCDIR ${CMAKE_INSTALL_INCLUDEDIR}/rx-deps)
 
 # --- rx module targets + export set -----------------------------------------
-set(RX_MODULE_NAMES core ecs script asset scene terrain render physics locomotion anim audio weather rpc
-    character inventory inventory_world app)
+set(RX_MODULE_NAMES core ecs script asset scene terrain render render2d physics locomotion anim audio
+    weather rpc character inventory inventory_world app)
 set(RX_INSTALL_TARGETS)
 foreach(_m ${RX_MODULE_NAMES})
   # Some modules are conditional (inventory_world only when rx_physics exists);
