@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 
+#include <base/check.h>
 #include <base/option.h>
 
 #include <stb_image_write.h>
@@ -3601,6 +3602,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // passes below are unchanged.
   Mat4 proj;
   if (view.camera.ortho_height > 0.0f) {
+    // A degenerate depth range collapses the reversed-z ortho matrix; catch the
+    // camera-setup misuse in dev builds before it produces a silently broken view.
+    BASE_DCHECK(view.camera.ortho_far > view.camera.ortho_near,
+                "ortho camera requires ortho_far > ortho_near");
     f32 half_h = view.camera.ortho_height * 0.5f;
     f32 half_w = half_h * aspect;
     proj = OrthographicReversedZ(-half_w, half_w, -half_h, half_h, view.camera.ortho_near,
