@@ -15,6 +15,7 @@
 #include "core/log.h"
 #include "core/memory/memory_tracker.h"
 #include "render/util/exr_write.h"
+#include "shaders/blit_ps_hlsl.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
 #include "shaders/contact_shadow_cs_hlsl.h"
 #include "shaders/debug_line_ps_hlsl.h"
@@ -503,7 +504,22 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
       .sets = {{.slots = {{0, BindingType::kSampledImage}}}},
       .debug_name = "msaa_depth_copy",
   });
-  if (!msaa_resolve_pipeline_ || !depth_copy_pipeline_)
+  hdr_overlay_copy_pipeline_ = device_->CreateGraphicsPipeline({
+      .vertex = RX_SHADER(k_fullscreen_vs_hlsl),
+      .fragment = RX_SHADER(k_blit_ps_hlsl),
+      .raster = {.cull = CullMode::kNone},
+      .color_formats = {kSceneColorFormat},
+      .blend = {BlendMode::kOpaque},
+      .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler}},
+                .stages = kShaderStageFragment}},
+      .debug_name = "hdr_overlay_copy",
+  });
+  hdr_overlay_sampler_ =
+      device_->GetSampler({.address_u = AddressMode::kClampToEdge,
+                           .address_v = AddressMode::kClampToEdge,
+                           .address_w = AddressMode::kClampToEdge});
+  if (!msaa_resolve_pipeline_ || !depth_copy_pipeline_ ||
+      !hdr_overlay_copy_pipeline_ || !hdr_overlay_sampler_)
     return false;
   ui_blur_ = UiBlurPass::Create(*device_); // optional: frosted-glass UI blur
   if (rt_available_ && !rtao_.Initialize(*device_))
@@ -6808,6 +6824,60 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                            {post_width, post_height}, pf);
   }
 
+  // Color-only app overlays run after temporal/depth-aware effects so they do
+  // not need scene depth or motion vectors, but before exposure, bloom and
+  // tonemapping so HDR sprites still participate in the presentation stack.
+  if (view.hdr_overlay && post_input != kInvalidResource) {
+    auto overlay = view.hdr_overlay;
+    ResourceHandle overlay_source = post_input;
+    ResourceHandle overlay_target = graph_.CreateTexture(
+        {.name = "app_hdr_overlay",
+         .format = kSceneColorFormat,
+         .width = post_width,
+         .height = post_height});
+    graph_.AddPass(
+        "app_hdr_overlay_copy",
+        [overlay_source, overlay_target](RenderGraph::PassBuilder& builder) {
+          builder.Read(overlay_source, ResourceUsage::kSampledFragment);
+          builder.Write(overlay_target, ResourceUsage::kColorAttachment);
+        },
+        [this, overlay_source, overlay_target, post_width,
+         post_height](PassContext& ctx) {
+          const GpuImage& source = ctx.graph->image(overlay_source);
+          const GpuImage& color = ctx.graph->image(overlay_target);
+          ColorAttachment copy{.view = color.view,
+                               .load = LoadOp::kDontCare,
+                               .store = StoreOp::kStore};
+          ctx.cmd->BeginRendering(
+              {.extent = {post_width, post_height}, .colors = {&copy, 1}});
+          ctx.cmd->BindPipeline(hdr_overlay_copy_pipeline_);
+          ctx.cmd->BindTransient(
+              0, {Bind::Combined(0, source.view, hdr_overlay_sampler_)});
+          ctx.cmd->Draw(3);
+          ctx.cmd->EndRendering();
+        });
+    graph_.AddPass(
+        "app_hdr_overlay",
+        [overlay_target](RenderGraph::PassBuilder& builder) {
+          builder.Write(overlay_target, ResourceUsage::kColorAttachment);
+        },
+        [this, overlay = std::move(overlay), overlay_target, post_width,
+         post_height](PassContext& ctx) {
+          const GpuImage& color = ctx.graph->image(overlay_target);
+          HdrOverlayContext hc;
+          hc.cmd = ctx.cmd;
+          hc.device = ctx.device;
+          hc.color = &color;
+          hc.color_view = color.view;
+          hc.color_format = color.format;
+          hc.extent = {post_width, post_height};
+          hc.frame_slot = frame_index_ % kFramesInFlight;
+          hc.frames_in_flight = kFramesInFlight;
+          overlay(hc);
+        });
+    post_input = overlay_target;
+  }
+
   // Linear-hdr export: copy the resolved scene (pre-tonemap) into a host
   // buffer.
   hdr_pending_ = false;
@@ -7167,6 +7237,8 @@ void Renderer::Shutdown() {
       device_->DestroyPipeline(msaa_resolve_pipeline_);
     if (depth_copy_pipeline_)
       device_->DestroyPipeline(depth_copy_pipeline_);
+    if (hdr_overlay_copy_pipeline_)
+      device_->DestroyPipeline(hdr_overlay_copy_pipeline_);
     if (contact_shadow_pipeline_)
       device_->DestroyPipeline(contact_shadow_pipeline_);
     if (cloud_shadow_pipeline_)
