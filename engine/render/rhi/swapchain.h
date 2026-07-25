@@ -20,6 +20,7 @@ enum class AcquireResult : u8 {
   kOk,
   kSuboptimal,  // usable this frame; recreate when convenient
   kOutOfDate,   // recreate before rendering
+  kTimeout,     // no image within the deadline; skip the frame and retry
   kFailed,
 };
 
