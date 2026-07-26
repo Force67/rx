@@ -705,8 +705,17 @@ bool VulkanDevice::InitResources() {
 }
 
 void VulkanDevice::ShutdownResources() {
+  // Upload batches first: the caller already waited the device idle so every
+  // batch fence has signaled, and the graveyard drain below refuses to free
+  // anything a batch might still be reading. A batch recorded but never
+  // submitted (app tore down mid-batch) is discarded, which also rolls back the
+  // park serial its copies would have carried.
+  DrainUploadBatchesInFlight();
+  DiscardPendingUploadBatch();
+  for (VkFence fence : upload_fence_pool_) vkDestroyFence(device_, fence, nullptr);
+  upload_fence_pool_.clear();
   // Free any still-parked deferred resources while the allocator/device are
-  // alive (the caller already waited the device idle).
+  // alive.
   DrainAllGraveyards();
   for (FrameRing& frame : frames_) {
     if (frame.descriptor_pool) vkDestroyDescriptorPool(device_, frame.descriptor_pool, nullptr);
@@ -763,7 +772,11 @@ VulkanDevice::~VulkanDevice() {
 
 void VulkanDevice::WaitIdle() {
   if (device_ != VK_NULL_HANDLE) {
+    // Submit pending batch copies first, or a device drain would strand them
+    // recorded-but-never-submitted in the batch command buffer.
+    SubmitUploadBatchIfPending();
     vkDeviceWaitIdle(device_);
+    DrainUploadBatchesInFlight();  // idle device => fences signaled, frees all
     DrainAllGraveyards();
   }
 }
@@ -864,16 +877,31 @@ GpuBuffer VulkanDevice::CreateBuffer(u64 size, BufferUsageFlags usage, bool host
 }
 
 GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) {
+  CheckUploadBatchThread("CreateBufferWithData");
   GpuBuffer staging = CreateBuffer(data.size(), kBufferUsageTransferSrc, true);
   if (!staging.mapped) return {};
   std::memcpy(staging.mapped, data.data(), data.size());
   FlushBuffer(staging, 0, data.size());
 
   GpuBuffer buffer = CreateBuffer(data.size(), usage | kBufferUsageTransferDst, false);
-  ImmediateSubmit([&](CommandList& cmd) {
-    cmd.CopyBuffer(staging, 0, buffer, 0, data.size());
-  });
-  DestroyBuffer(staging);
+  if (!buffer) {
+    DestroyBuffer(staging);
+    return {};
+  }
+  VulkanCommandList* batch = upload_batch_depth_ > 0 ? EnsureUploadBatchCmd() : nullptr;
+  if (batch) {
+    // Batched: record the copy into the shared batch command buffer and keep
+    // the staging alive until the batch flushes (a fresh staging per call, so
+    // parking them is safe). The blocking submit is deferred, so N buffers cost
+    // one round-trip instead of N.
+    batch->CopyBuffer(staging, 0, buffer, 0, data.size());
+    ParkBatchStaging(staging);
+  } else {
+    ImmediateSubmit([&](CommandList& cmd) {
+      cmd.CopyBuffer(staging, 0, buffer, 0, data.size());
+    });
+    DestroyBuffer(staging);
+  }
   return buffer;
 }
 
@@ -882,6 +910,292 @@ void VulkanDevice::FlushBuffer(const GpuBuffer& buffer, u64 offset, u64 size) {
   if (!record || !record->allocation || size == 0) return;
   if (vmaFlushAllocation(allocator_, record->allocation, offset, size) != VK_SUCCESS) {
     RX_ERROR("mapped buffer flush failed ({} bytes at {})", size, offset);
+  }
+}
+
+void VulkanDevice::InvalidateBuffer(const GpuBuffer& buffer, u64 offset, u64 size) {
+  BufferRecord* record = Rec(buffer.handle);
+  if (!record || !record->allocation || size == 0) return;
+  if (vmaInvalidateAllocation(allocator_, record->allocation, offset, size) != VK_SUCCESS) {
+    RX_ERROR("mapped buffer invalidation failed ({} bytes at {})", size, offset);
+  }
+}
+
+void VulkanDevice::CheckUploadBatchThread(const char* what) const {
+  if (std::this_thread::get_id() != upload_batch_thread_) {
+    RX_ERROR("{} called off the device thread; the upload batch is unsynchronized and this "
+             "would corrupt it. Convert on workers, upload on the device thread.",
+             what);
+    std::abort();
+  }
+}
+
+// Null when the command buffer could not be opened; the caller then falls back
+// to a per-upload ImmediateSubmit, which is what a backend without the batch
+// does anyway. Only the batch bookkeeping is unrecoverable enough to abort on.
+VulkanCommandList* VulkanDevice::EnsureUploadBatchCmd() {
+  CheckUploadBatchThread("upload batch recording");
+  if (upload_batch_cmd_ == VK_NULL_HANDLE) {
+    VkCommandBufferAllocateInfo alloc{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    alloc.commandPool = immediate_pool_;
+    alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc.commandBufferCount = 1;
+    if (vkAllocateCommandBuffers(device_, &alloc, &upload_batch_cmd_) != VK_SUCCESS) {
+      RX_ERROR("upload batch command-buffer allocation failed; uploading unbatched");
+      upload_batch_cmd_ = VK_NULL_HANDLE;
+      return nullptr;
+    }
+    VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    if (vkBeginCommandBuffer(upload_batch_cmd_, &begin) != VK_SUCCESS) {
+      RX_ERROR("upload batch command-buffer begin failed; uploading unbatched");
+      vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
+      upload_batch_cmd_ = VK_NULL_HANDLE;
+      return nullptr;
+    }
+    upload_batch_list_ =
+        std::make_unique<VulkanCommandList>(*this, upload_batch_cmd_, immediate_descriptor_pool_);
+    // Anything retired from here on may be read by this batch, which will carry
+    // the next serial.
+    upload_park_serial_.store(upload_batch_serial_ + 1, std::memory_order_release);
+  }
+  ++upload_batch_records_;  // one recorded upload per call; reported if the batch is dropped
+  return upload_batch_list_.get();
+}
+
+VkFence VulkanDevice::AcquireUploadBatchFence() {
+  if (!upload_fence_pool_.empty()) {
+    VkFence fence = upload_fence_pool_.back();
+    upload_fence_pool_.pop_back();
+    return fence;
+  }
+  VkFence fence = VK_NULL_HANDLE;
+  VkFenceCreateInfo info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+  if (vkCreateFence(device_, &info, nullptr, &fence) != VK_SUCCESS) {
+    RX_ERROR("upload batch fence creation failed; falling back to a queue drain");
+  }
+  return fence;
+}
+
+// Losing a batch means its copies never execute, but the buffers they were
+// going to fill were already handed to callers and look valid, so the failure
+// surfaces as wrong geometry/pixels rather than an error. Say how much went.
+void VulkanDevice::ReportDroppedUploadBatch(const char* what) {
+  RX_ERROR("upload batch {}; dropping {} recorded upload(s) / {} KiB staged - the buffers they "
+           "would have filled keep undefined contents",
+           what, upload_batch_records_, upload_batch_staging_bytes_ >> 10);
+}
+
+void VulkanDevice::ResetPendingUploadBatch() {
+  if (upload_batch_cmd_ != VK_NULL_HANDLE) {
+    vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
+    upload_batch_cmd_ = VK_NULL_HANDLE;
+  }
+  upload_batch_list_.reset();
+  for (GpuBuffer& staging : upload_batch_stagings_) DestroyBuffer(staging);
+  upload_batch_stagings_.clear();
+  upload_batch_staging_bytes_ = 0;
+  upload_batch_records_ = 0;
+}
+
+void VulkanDevice::DiscardPendingUploadBatch() {
+  // The discarded copies never run, so the projected serial they would have
+  // carried must be removed from both future and already-parked resources.
+  const u64 canceled = upload_batch_serial_ + 1;
+  upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    for (Graveyard& graveyard : graveyard_) {
+      if (graveyard.upload_serial == canceled) graveyard.upload_serial = upload_batch_serial_;
+    }
+  }
+  ResetPendingUploadBatch();
+}
+
+// Frees every in-flight batch whose fence has signaled. Same-queue submissions
+// complete in submission order, so scan from the front and stop at the first
+// still-running batch. Non-blocking; called from every flush so the list stays
+// short (at most a few 64 MiB chunks of a burst).
+void VulkanDevice::RetireCompletedUploadBatches() {
+  size_t retired = 0;
+  while (retired < upload_batches_in_flight_.size()) {
+    UploadBatchInFlight& batch = upload_batches_in_flight_[retired];
+    const VkResult status = vkGetFenceStatus(device_, batch.fence);
+    if (status == VK_NOT_READY) break;
+    if (status != VK_SUCCESS) {
+      RX_ERROR("upload batch fence query failed ({})", static_cast<int>(status));
+      break;
+    }
+    vkResetFences(device_, 1, &batch.fence);
+    upload_fence_pool_.push_back(batch.fence);
+    vkFreeCommandBuffers(device_, immediate_pool_, 1, &batch.cmd);
+    for (GpuBuffer& s : batch.stagings) DestroyBuffer(s);
+    upload_inflight_staging_bytes_ -= batch.staging_bytes;
+    if (batch.serial > upload_retired_serial_) upload_retired_serial_ = batch.serial;
+    ++retired;
+  }
+  if (retired > 0)
+    upload_batches_in_flight_.erase(upload_batches_in_flight_.begin(),
+                                    upload_batches_in_flight_.begin() + retired);
+}
+
+void VulkanDevice::DrainUploadBatchesInFlight() {
+  if (!upload_batches_in_flight_.empty()) {
+    // In-order completion: the newest fence proves every older batch too.
+    const VkResult waited =
+        vkWaitForFences(device_, 1, &upload_batches_in_flight_.back().fence, VK_TRUE, UINT64_MAX);
+    if (waited != VK_SUCCESS) {
+      RX_ERROR("upload batch fence wait failed ({})", static_cast<int>(waited));
+      return;
+    }
+  }
+  RetireCompletedUploadBatches();
+}
+
+// Submits any copies recorded into the batch command buffer WITHOUT waiting for
+// them: a trailing kTransferWrite->kAllCommands barrier orders the copies
+// against everything later in graphics-queue submission order (the frame, a
+// BLAS build), so the CPU-side fence wait the old blocking flush did is not
+// needed for correctness on this queue. The command buffer and parked stagings
+// retire once the per-batch fence signals. Leaves the batch OPEN (depth
+// unchanged) so more uploads keep coalescing; this is the implicit-flush used
+// before dependent GPU work (ImmediateSubmit/frame + async submits/WaitIdle)
+// and by the explicit FlushUploadBatch. Cross-queue readers cannot rely on the
+// barrier — SubmitAsync handles that case explicitly via batch serials.
+void VulkanDevice::SubmitUploadBatchIfPending() {
+  RetireCompletedUploadBatches();
+  if (upload_batch_cmd_ == VK_NULL_HANDLE) return;
+  upload_batch_list_->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kAllCommands);
+  if (vkEndCommandBuffer(upload_batch_cmd_) != VK_SUCCESS) {
+    ReportDroppedUploadBatch("command-buffer end failed");
+    DiscardPendingUploadBatch();
+    return;
+  }
+  VkFence fence = AcquireUploadBatchFence();
+  VkSubmitInfo submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
+  submit.commandBufferCount = 1;
+  submit.pCommandBuffers = &upload_batch_cmd_;
+  if (fence == VK_NULL_HANDLE) {
+    const VkResult submitted = vkQueueSubmit(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
+    if (submitted != VK_SUCCESS) {
+      ReportDroppedUploadBatch("fallback submit failed");
+      DiscardPendingUploadBatch();
+      return;
+    }
+    if (const VkResult waited = vkQueueWaitIdle(graphics_queue_); waited != VK_SUCCESS) {
+      // Submitted but unproven. The command buffer is still pending and the
+      // stagings are still being read, so freeing either is illegal — leak both
+      // (this is device-lost) and leave the serial unretired. Resources already
+      // parked against it stay parked until a later batch on this queue
+      // retires, which proves this one did too by submission order.
+      ReportDroppedUploadBatch("fallback drain failed");
+      upload_batch_cmd_ = VK_NULL_HANDLE;
+      upload_batch_list_.reset();  // wrapper only; the VkCommandBuffer stays alive
+      upload_batch_stagings_.clear();
+      upload_batch_staging_bytes_ = 0;
+      upload_batch_records_ = 0;
+      upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+      return;
+    }
+    // The queue drain is the completion proof a fence would normally provide.
+    upload_retired_serial_ = ++upload_batch_serial_;
+    upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+    ResetPendingUploadBatch();
+    return;
+  }
+  const VkResult submitted = vkQueueSubmit(graphics_queue_, 1, &submit, fence);
+  if (submitted != VK_SUCCESS) {
+    ReportDroppedUploadBatch("submit failed");
+    vkDestroyFence(device_, fence, nullptr);
+    DiscardPendingUploadBatch();
+    return;
+  }
+
+  UploadBatchInFlight in_flight;
+  in_flight.cmd = upload_batch_cmd_;
+  in_flight.fence = fence;
+  in_flight.stagings = std::move(upload_batch_stagings_);
+  in_flight.staging_bytes = upload_batch_staging_bytes_;
+  in_flight.serial = ++upload_batch_serial_;
+  upload_inflight_staging_bytes_ += upload_batch_staging_bytes_;
+  upload_batches_in_flight_.push_back(std::move(in_flight));
+  upload_batch_cmd_ = VK_NULL_HANDLE;
+  upload_batch_list_.reset();
+  upload_batch_stagings_.clear();
+  upload_batch_staging_bytes_ = 0;
+  upload_batch_records_ = 0;
+  // Nothing is recording now, so a retire from here on is only covered by the
+  // batch just submitted.
+  upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+
+  // Hard cap on outstanding staging memory: without a wait anywhere, a burst
+  // could submit 64 MiB chunks faster than the GPU copies them and grow the
+  // host-visible high-water without bound. Block on the oldest batch only once
+  // past the cap (rare; the soft budget already spaces the submits out).
+  constexpr u64 kMaxInFlightStagingBytes = 256ull << 20;
+  while (upload_inflight_staging_bytes_ >= kMaxInFlightStagingBytes &&
+         !upload_batches_in_flight_.empty()) {
+    const VkResult waited = vkWaitForFences(
+        device_, 1, &upload_batches_in_flight_.front().fence, VK_TRUE, UINT64_MAX);
+    if (waited != VK_SUCCESS) {
+      RX_ERROR("upload batch staging-cap wait failed ({})", static_cast<int>(waited));
+      break;
+    }
+    RetireCompletedUploadBatches();
+  }
+}
+
+void VulkanDevice::BeginUploadBatch() {
+  CheckUploadBatchThread("BeginUploadBatch");
+  ++upload_batch_depth_;
+}
+
+void VulkanDevice::FlushUploadBatch() {
+  CheckUploadBatchThread("FlushUploadBatch");
+  if (upload_batch_depth_ == 0) {
+    // Unbalanced. Silently ignoring it hides the mirror bug (a Begin without a
+    // Flush), which leaves the batch open forever: UploadBatchActive() then
+    // stays true and every texture upload takes the per-call staging path
+    // instead of the pool for the rest of the process.
+    RX_ERROR("FlushUploadBatch with no batch open; Begin/FlushUploadBatch are unbalanced");
+    return;
+  }
+  if (--upload_batch_depth_ == 0) SubmitUploadBatchIfPending();
+}
+
+void VulkanDevice::ParkBatchStaging(GpuBuffer& buffer) {
+  CheckUploadBatchThread("ParkBatchStaging");
+  // Park only what a pending batch command buffer actually references. No batch
+  // (contract misuse), or a batch whose recording fell back to a blocking
+  // ImmediateSubmit, means the copy has already run: freeing now instead of
+  // parking keeps the staging out of upload_batch_staging_bytes_, which nothing
+  // would ever drain (SubmitUploadBatchIfPending bails before moving the
+  // stagings when there is no command buffer to submit).
+  if (upload_batch_depth_ == 0 || upload_batch_cmd_ == VK_NULL_HANDLE) {
+    DestroyBuffer(buffer);
+    return;
+  }
+  const u64 size = buffer.size;
+  upload_batch_stagings_.push_back(buffer);
+  buffer = {};
+  upload_batch_staging_bytes_ += size;
+  // A large burst would otherwise hold every staging (all geometry + texture
+  // bytes of the burst) host-visible until the flush. Above the budget, submit
+  // what has accumulated (the batch stays open); safe here because the parked
+  // buffer's copies are always recorded before it is parked.
+  constexpr u64 kStagingBudget = 64ull << 20;
+  if (upload_batch_staging_bytes_ >= kStagingBudget) SubmitUploadBatchIfPending();
+}
+
+void VulkanDevice::RecordUpload(const std::function<void(CommandList&)>& record) {
+  CheckUploadBatchThread("RecordUpload");
+  // Batched: record into the shared batch command buffer (submitted at flush).
+  // Otherwise a blocking ImmediateSubmit, exactly as the caller would have done.
+  VulkanCommandList* batch = upload_batch_depth_ > 0 ? EnsureUploadBatchCmd() : nullptr;
+  if (batch) {
+    record(*batch);
+  } else {
+    ImmediateSubmit(record);
   }
 }
 
@@ -896,10 +1210,19 @@ void VulkanDevice::DestroyBuffer(GpuBuffer& buffer) {
   buffer = {};
 }
 
+// Records the upload batch that may still be reading whatever is being parked.
+// Call with graveyard_mutex_ held.
+void VulkanDevice::NoteGraveyardUploadSerial(u32 slot) {
+  const u64 serial = upload_park_serial_.load(std::memory_order_acquire);
+  if (serial > graveyard_[slot].upload_serial) graveyard_[slot].upload_serial = serial;
+}
+
 void VulkanDevice::DestroyBufferDeferred(GpuBuffer& buffer) {
   if (BufferRecord* record = Rec(buffer.handle)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
-    graveyard_[current_slot_].buffers.push_back(record);
+    const u32 slot = current_slot_;
+    graveyard_[slot].buffers.push_back(record);
+    NoteGraveyardUploadSerial(slot);
   }
   buffer = {};
 }
@@ -907,7 +1230,9 @@ void VulkanDevice::DestroyBufferDeferred(GpuBuffer& buffer) {
 void VulkanDevice::DestroyImageDeferred(GpuImage& image) {
   if (TextureRecord* record = Rec(image.handle)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
-    graveyard_[current_slot_].images.push_back(record);
+    const u32 slot = current_slot_;
+    graveyard_[slot].images.push_back(record);
+    NoteGraveyardUploadSerial(slot);
   }
   image = {};
 }
@@ -915,14 +1240,22 @@ void VulkanDevice::DestroyImageDeferred(GpuImage& image) {
 void VulkanDevice::DestroyAccelStructDeferred(AccelStructHandle accel) {
   if (AccelStructRecord* record = Rec(accel)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
-    graveyard_[current_slot_].accels.push_back(record);
+    const u32 slot = current_slot_;
+    graveyard_[slot].accels.push_back(record);
+    NoteGraveyardUploadSerial(slot);
   }
 }
 
 void VulkanDevice::DrainGraveyard(u32 slot) {
+  // The caller's fence wait proves the frame is done; the batch a parked
+  // resource was still being copied into needs its own proof, so refresh the
+  // retired serial and leave the slot alone until it catches up (at worst one
+  // more trip round the frame ring).
+  RetireCompletedUploadBatches();
   Graveyard drained;
   {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    if (graveyard_[slot].upload_serial > upload_retired_serial_) return;
     std::swap(drained, graveyard_[slot]);
   }
   for (BufferRecord* record : drained.buffers) FreeBufferRecord(record);
@@ -1953,6 +2286,9 @@ bool VulkanDevice::GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count,
 // --- recording & submission ---
 
 void VulkanDevice::ImmediateSubmit(const std::function<void(CommandList&)>& record) {
+  // A buffer batched but not yet submitted must land before this submit's work,
+  // which may read it (e.g. a BLAS build over just-created vertex/index buffers).
+  SubmitUploadBatchIfPending();
   VkCommandBufferAllocateInfo alloc{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
   alloc.commandPool = immediate_pool_;
   alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -2020,6 +2356,9 @@ bool VulkanDevice::ReadbackImage(const GpuImage& image, ResourceState current, v
 }
 
 CommandList* VulkanDevice::BeginFrame(u32 slot) {
+  // Flush any uploads batched (but not yet flushed) before the frame that will
+  // sample them starts recording.
+  SubmitUploadBatchIfPending();
   FrameRing& frame = frames_[slot];
   vkWaitForFences(device_, 1, &frame.in_flight, VK_TRUE, UINT64_MAX);
   // The fence just proved this slot's previous submission finished, so anything
@@ -2028,7 +2367,10 @@ CommandList* VulkanDevice::BeginFrame(u32 slot) {
   vkResetCommandPool(device_, frame.pool, 0);
   if (frame.async_pool) vkResetCommandPool(device_, frame.async_pool, 0);
   vkResetDescriptorPool(device_, frame.descriptor_pool, 0);
-  current_slot_ = slot;
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    current_slot_ = slot;
+  }
   frame.active_segment = 0;
   frame.fork_signaled = false;
   frame.async_submitted = false;
@@ -2040,6 +2382,10 @@ CommandList* VulkanDevice::BeginFrame(u32 slot) {
 }
 
 CommandList* VulkanDevice::SplitFrame(CommandList* cmd, bool signal_fork) {
+  // Uploads batched after BeginFrame must execute before the frame work that
+  // reads them is submitted. Unwritten-but-allocated memory raises no
+  // validation error, so a missed flush here is silent one-frame garbage.
+  SubmitUploadBatchIfPending();
   FrameRing& frame = frames_[current_slot_];
   if (!caps_.async_compute || frame.active_segment + 1 >= FrameRing::kMaxSegments) return cmd;
 
@@ -2059,6 +2405,10 @@ CommandList* VulkanDevice::SplitFrame(CommandList* cmd, bool signal_fork) {
     submit.signalSemaphoreInfoCount = 1;
     submit.pSignalSemaphoreInfos = &signal;
     frame.fork_signaled = true;
+    // The fork signal orders every earlier graphics submission against the
+    // compute queue, including all upload batches submitted so far (the flush
+    // above submitted any pending one). SubmitAsync uses this to skip waiting.
+    upload_fork_covered_serial_ = upload_batch_serial_;
   }
   vkQueueSubmit2(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
 
@@ -2080,7 +2430,20 @@ CommandList* VulkanDevice::BeginAsync() {
 }
 
 void VulkanDevice::SubmitAsync(CommandList*) {
+  SubmitUploadBatchIfPending();
+  // Async compute may read batched buffers (e.g. a fresh BLAS's geometry). The
+  // batch's trailing barrier only orders the graphics queue; cross-queue, the
+  // fork semaphore covers every batch submitted before its signal (a semaphore
+  // signal orders all earlier graphics submissions), but a batch submitted
+  // AFTER the fork — or any batch at all when no fork was signaled — must be
+  // complete before the compute queue may read it, so block on those (rare;
+  // uploads between SplitFrame and here are the exception, not the rule).
   FrameRing& frame = frames_[current_slot_];
+  if (!upload_batches_in_flight_.empty()) {
+    const bool covered = frame.fork_signaled &&
+                         upload_batches_in_flight_.back().serial <= upload_fork_covered_serial_;
+    if (!covered) DrainUploadBatchesInFlight();
+  }
   vkEndCommandBuffer(frame.async_cmd);
 
   VkCommandBufferSubmitInfo cmd_info{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
@@ -2111,6 +2474,9 @@ void VulkanDevice::SubmitAsync(CommandList*) {
 }
 
 PresentResult VulkanDevice::SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) {
+  // See SplitFrame: uploads batched mid-frame must land before the frame that
+  // samples them is submitted. No-op when nothing is pending.
+  SubmitUploadBatchIfPending();
   auto& vk_swapchain = static_cast<VulkanSwapchain&>(swapchain);
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
@@ -2172,6 +2538,7 @@ void VulkanDevice::SubmitFrame(CommandList* cmd) {
   // Swapchainless completion of an offscreen (or non-presenting) frame: no
   // acquire wait, no present. Ends recording, signals the slot fence so the
   // next BeginFrame(slot) can reuse it, and joins any async-compute submission.
+  SubmitUploadBatchIfPending();  // see the presenting overload
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
     if (candidate.list.get() == cmd) frame = &candidate;
@@ -2206,6 +2573,7 @@ void VulkanDevice::SubmitFrame(CommandList* cmd) {
 
 PresentResult VulkanDevice::SubmitFrameGen(CommandList* cmd, Swapchain& swapchain,
                                            u32 interp_index, u32 real_index) {
+  SubmitUploadBatchIfPending();  // see SubmitFrame
   auto& vk_swapchain = static_cast<VulkanSwapchain&>(swapchain);
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {

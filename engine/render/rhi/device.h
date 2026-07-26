@@ -150,6 +150,10 @@ class Device {
   // Makes writes to a persistently mapped host-visible range available to the
   // GPU. Coherent backends implement this as a no-op.
   virtual void FlushBuffer(const GpuBuffer& /*buffer*/, u64 /*offset*/, u64 /*size*/) {}
+  // Makes GPU writes to a persistently mapped host-visible range visible to the
+  // CPU after the submission has completed. Coherent backends implement this as
+  // a no-op.
+  virtual void InvalidateBuffer(const GpuBuffer& /*buffer*/, u64 /*offset*/, u64 /*size*/) {}
   // Immediate destruction: the caller guarantees the GPU is done with the
   // resource (no in-flight frame references it). For a resource that may still
   // be read by a submitted-but-unfinished frame use the *Deferred variants.
@@ -265,6 +269,52 @@ class Device {
   // Records into a transient command list and blocks until execution
   // finished. For uploads and one-off transitions, not the frame path.
   virtual void ImmediateSubmit(const std::function<void(CommandList&)>& record) = 0;
+
+  // --- coalesced uploads ---
+  // Opens/closes a transfer batch: while open, CreateBufferWithData records its
+  // staging copy into one shared command buffer and defers its submit, instead
+  // of doing a blocking ImmediateSubmit per buffer. FlushUploadBatch submits the
+  // accumulated copies once, WITHOUT blocking the CPU: the device orders them
+  // against all later GPU work itself, and the stagings retire once the copies
+  // finish. The batch is also flushed implicitly by ImmediateSubmit / BeginFrame
+  // / every frame or async submit / WaitIdle, so any GPU work that could read a
+  // just-created buffer (a BLAS build, the frame that samples it) always sees
+  // it uploaded, and early when the parked staging memory crosses an internal
+  // budget (so a big burst does not hold its whole payload host-visible at
+  // once; a hard cap on in-flight staging bounds it even across flushes).
+  // Nestable via a depth count (only the outermost FlushUploadBatch submits).
+  // Buffers created inside the batch are valid for GPU use only after the
+  // flush; there is no point at which the CPU may assume the copy has executed
+  // short of WaitIdle.
+  // Default no-op: backends without the optimization just keep submitting per
+  // buffer, which stays correct. Streaming wraps a frame's uploads in one batch
+  // so a burst of new cells no longer pays a blocking round-trip per buffer.
+  virtual void BeginUploadBatch() {}
+  virtual void FlushUploadBatch() {}
+
+  // True while a batch (see BeginUploadBatch) is open. Callers that stage their
+  // own uploads (e.g. texture image copies) check this to decide whether their
+  // staging must survive until the batch flush. It answers "is a batch open",
+  // not "will the next RecordUpload defer": a backend may still fall back to a
+  // blocking submit. Pairing it with ParkBatchStaging stays correct either way
+  // (the park frees immediately when nothing deferred), it just over-allocates a
+  // per-call staging on the fallback path.
+  virtual bool UploadBatchActive() const { return false; }
+  // Records an upload's copy/barrier commands into the open batch's command
+  // buffer, or, with no batch open, runs them through a blocking ImmediateSubmit
+  // (the default). Lets a caller share the coalesced submit without knowing the
+  // backend. `record` runs synchronously (commands are recorded now); the work
+  // completes at the next flush/frame when batched. `record` must stick to
+  // transfer work (copies/blits/barriers) and must not allocate binding sets:
+  // the shared immediate descriptor pool is only reset by ImmediateSubmit, so
+  // sets allocated inside a batch would accumulate until it exhausts.
+  virtual void RecordUpload(const std::function<void(CommandList&)>& record) {
+    ImmediateSubmit(record);
+  }
+  // Hands a staging buffer to the open batch to free once its copies have run
+  // (only call while UploadBatchActive()); frees immediately otherwise, which
+  // also covers a batch that ran the copies through a blocking submit.
+  virtual void ParkBatchStaging(GpuBuffer& buffer) { DestroyBuffer(buffer); }
 
   // Frame ring: waits for `slot`'s previous submission, resets its command
   // allocator and transient binding pool, begins recording. Slots cycle

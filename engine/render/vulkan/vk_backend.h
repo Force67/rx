@@ -271,6 +271,7 @@ class VulkanDevice final : public Device {
   GpuBuffer CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible) override;
   GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override;
   void FlushBuffer(const GpuBuffer& buffer, u64 offset, u64 size) override;
+  void InvalidateBuffer(const GpuBuffer& buffer, u64 offset, u64 size) override;
   void DestroyBuffer(GpuBuffer& buffer) override;
   void DestroyBufferDeferred(GpuBuffer& buffer) override;
   void DestroyImageDeferred(GpuImage& image) override;
@@ -317,6 +318,14 @@ class VulkanDevice final : public Device {
   bool GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, u64* out) override;
 
   void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
+  void BeginUploadBatch() override;
+  void FlushUploadBatch() override;
+  bool UploadBatchActive() const override {
+    CheckUploadBatchThread("UploadBatchActive");
+    return upload_batch_depth_ > 0;
+  }
+  void RecordUpload(const std::function<void(CommandList&)>& record) override;
+  void ParkBatchStaging(GpuBuffer& buffer) override;
   bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
                      size_t out_size) override;
   CommandList* BeginFrame(u32 slot) override;
@@ -449,6 +458,64 @@ class VulkanDevice final : public Device {
   VkDescriptorPool immediate_descriptor_pool_ = VK_NULL_HANDLE;
   FrameRing frames_[kMaxFramesInFlight];
 
+  // Coalesced upload batch (see BeginUploadBatch). While upload_batch_depth_ > 0,
+  // CreateBufferWithData records its copy into upload_batch_cmd_ and parks the
+  // staging buffer in upload_batch_stagings_ instead of doing its own blocking
+  // ImmediateSubmit; the outermost FlushUploadBatch submits them all at once.
+  // Main-thread only, like every other immediate_* member.
+  u32 upload_batch_depth_ = 0;
+  VkCommandBuffer upload_batch_cmd_ = VK_NULL_HANDLE;
+  std::unique_ptr<VulkanCommandList> upload_batch_list_;
+  base::Vector<GpuBuffer> upload_batch_stagings_;
+  // Host-visible bytes currently parked in upload_batch_stagings_. When it
+  // crosses the budget the pending copies are submitted early (batch stays
+  // open), bounding the staging high-water mark of a large streaming burst.
+  u64 upload_batch_staging_bytes_ = 0;
+  // Uploads recorded into the open batch, reported if the batch has to be
+  // dropped (their destination buffers are already out in the wild).
+  u32 upload_batch_records_ = 0;
+  // The thread the device was created on; the batch state above is
+  // unsynchronized, so every batch entry point enforces thread affinity.
+  std::thread::id upload_batch_thread_ = std::this_thread::get_id();
+  void CheckUploadBatchThread(const char* what) const;
+  // Lazily begins the batch command buffer on the first copy (null if that
+  // fails: the caller falls back to an unbatched ImmediateSubmit); submits any
+  // pending batch copies (leaving the batch open) before dependent GPU work.
+  VulkanCommandList* EnsureUploadBatchCmd();
+  void SubmitUploadBatchIfPending();
+  void ReportDroppedUploadBatch(const char* what);
+  void ResetPendingUploadBatch();
+  void DiscardPendingUploadBatch();
+  // A submitted-but-possibly-still-executing batch: the CPU no longer waits at
+  // flush. A trailing kTransferWrite->kAllCommands barrier in the batch orders
+  // its copies against all later graphics-queue work, and the fence retires the
+  // command buffer + stagings once the GPU is done (RetireCompletedUploadBatches,
+  // non-blocking, called from every flush). Serials let SubmitAsync tell which
+  // batches the fork semaphore already orders against the compute queue.
+  struct UploadBatchInFlight {
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    base::Vector<GpuBuffer> stagings;
+    u64 staging_bytes = 0;
+    u64 serial = 0;
+  };
+  base::Vector<UploadBatchInFlight> upload_batches_in_flight_;
+  base::Vector<VkFence> upload_fence_pool_;  // recycled batch fences
+  u64 upload_inflight_staging_bytes_ = 0;
+  u64 upload_batch_serial_ = 0;        // serial of the newest submitted batch
+  u64 upload_fork_covered_serial_ = 0; // newest batch submitted before the fork signal
+  u64 upload_retired_serial_ = 0;      // newest batch whose fence has signaled
+  // The batch serial that covers anything recorded right now: the serial the
+  // open batch will get once submitted, or the newest submitted one when
+  // nothing is recording. A deferred destroy latches this so the graveyard can
+  // tell whether a batch might still reference what it is about to free.
+  // Atomic because deferred destroys run off the device thread; the device
+  // thread is the only writer.
+  std::atomic<u64> upload_park_serial_{0};
+  VkFence AcquireUploadBatchFence();
+  void RetireCompletedUploadBatches();  // frees batches whose fence has signaled
+  void DrainUploadBatchesInFlight();    // blocks until every in-flight batch retires
+
   // Frame-safe deferred destruction. A resource retired during frame slot S is
   // parked in graveyard_[S] and freed at the next BeginFrame(S), whose fence
   // wait proves S's (and every earlier) submission finished. Guarded because a
@@ -457,9 +524,16 @@ class VulkanDevice final : public Device {
     base::Vector<BufferRecord*> buffers;
     base::Vector<TextureRecord*> images;
     base::Vector<AccelStructRecord*> accels;
+    // Newest upload batch that may still reference something parked here. The
+    // slot's frame fence only proves submissions up to that frame finished, so
+    // it says nothing about a batch submitted afterwards (a retire from outside
+    // the frame loop, e.g. MaterialSystem::SwapResident via Renderer::Pin,
+    // parks under the previous frame's slot). The drain waits for both.
+    u64 upload_serial = 0;
   };
   Graveyard graveyard_[kMaxFramesInFlight];
   std::mutex graveyard_mutex_;
+  void NoteGraveyardUploadSerial(u32 slot);  // graveyard_mutex_ held
 
   // Caches, keyed by content hash; entries live for the device's lifetime.
   // The layout caches are shared with pipeline-batch worker threads.

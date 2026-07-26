@@ -75,9 +75,9 @@ FormatInfo FormatFor(asset::TextureFormat format, bool srgb) {
   return {};
 }
 
-u32 MipSizeBytes(const FormatInfo& info, u32 width, u32 height) {
-  u32 blocks_x = (width + info.block_dim - 1) / info.block_dim;
-  u32 blocks_y = (height + info.block_dim - 1) / info.block_dim;
+u64 MipSizeBytes(const FormatInfo& info, u32 width, u32 height) {
+  u64 blocks_x = (static_cast<u64>(width) + info.block_dim - 1) / info.block_dim;
+  u64 blocks_y = (static_cast<u64>(height) + info.block_dim - 1) / info.block_dim;
   return blocks_x * blocks_y * info.block_bytes;
 }
 
@@ -300,12 +300,7 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
   u32 top_height = std::max(1u, texture.height >> first_mip);
   u32 mip_count = generate_mips ? FullMipChainLength(texture.width, texture.height)
                                 : texture.mip_count - first_mip;
-
-  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageTransferDst;
-  if (generate_mips) usage |= kTextureUsageTransferSrc;
-  GpuImage image =
-      device_.CreateImage2D(info.format, {top_width, top_height}, usage, mip_count);
-  if (!image) return {};
+  u32 upload_mips = generate_mips ? 1 : mip_count;
 
   // Skip past the source mips above the resident range.
   u64 skip = 0;
@@ -318,16 +313,56 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
       height = std::max(1u, height / 2);
     }
   }
-  u64 upload_bytes = texture.data.size() - skip;
-  GpuBuffer* staging = AcquireStaging(upload_bytes);
-  if (!staging) {
-    device_.DestroyImage(image);
+  u64 upload_bytes = 0;
+  {
+    u32 width = top_width;
+    u32 height = top_height;
+    for (u32 mip = 0; mip < upload_mips; ++mip) {
+      upload_bytes += MipSizeBytes(info, width, height);
+      width = std::max(1u, width / 2);
+      height = std::max(1u, height / 2);
+    }
+  }
+  // upload_bytes is always positive here: every mip is at least one block of a
+  // known format, and upload_mips is at least 1.
+  if (skip > texture.data.size() || upload_bytes > texture.data.size() - skip) {
+    RX_WARN("texture upload skipped, mip data is truncated ({} mips from {} need {} bytes, "
+            "{} available)",
+            upload_mips, first_mip, upload_bytes, texture.data.size());
     return {};
   }
-  std::memcpy(staging->mapped, texture.data.data() + skip, upload_bytes);
 
-  u32 upload_mips = generate_mips ? 1 : mip_count;
-  device_.ImmediateSubmit([&](CommandList& cmd) {
+  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageTransferDst;
+  if (generate_mips) usage |= kTextureUsageTransferSrc;
+  GpuImage image =
+      device_.CreateImage2D(info.format, {top_width, top_height}, usage, mip_count);
+  if (!image) return {};
+  // Inside an upload batch the copy is deferred to the flush, so the shared
+  // staging pool would be overwritten by the next texture before it runs; use a
+  // fresh buffer parked with the batch instead. Outside a batch the pooled
+  // staging is fine (ImmediateSubmit completes before the next call reuses it).
+  const bool batched = device_.UploadBatchActive();
+  GpuBuffer fresh{};
+  GpuBuffer* staging;
+  if (batched) {
+    fresh = device_.CreateBuffer(upload_bytes, kBufferUsageTransferSrc, true);
+    if (!fresh.mapped) {
+      if (fresh) device_.DestroyBuffer(fresh);
+      device_.DestroyImage(image);
+      return {};
+    }
+    staging = &fresh;
+  } else {
+    staging = AcquireStaging(upload_bytes);
+    if (!staging) {
+      device_.DestroyImage(image);
+      return {};
+    }
+  }
+  std::memcpy(staging->mapped, texture.data.data() + skip, upload_bytes);
+  device_.FlushBuffer(*staging, 0, upload_bytes);
+
+  device_.RecordUpload([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
 
     mem::SmallVector<BufferTextureCopy, 16> regions;  // one per mip
@@ -377,6 +412,9 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
                    .after = ResourceState::kShaderReadAll});
     }
   });
+  // The batch reads this staging at flush, so hand it over to free then; the
+  // pooled path already completed synchronously and keeps its buffer.
+  if (batched) device_.ParkBatchStaging(fresh);
   return image;
 }
 
@@ -792,6 +830,11 @@ void MaterialSystem::BeginFrame(u32 frame_index) {
 bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 frame_index) {
   GpuImage next = UploadTextureImage(record.source, first_mip);
   if (!next) return false;
+  // Deferred, not immediate: inside an upload batch the copy into `next` is
+  // still pending, and SwapResident runs mid-frame (streaming), where a device
+  // drain would also free the current frame's graveyard under its own command
+  // list. The next BeginFrame(slot) fence proves the batch landed.
+  auto destroy_next = [&] { device_.DestroyImageDeferred(next); };
 
   u32 old_slot = record.bindless;
   u32 new_slot = BindlessRegistry::kInvalidIndex;
@@ -800,7 +843,7 @@ bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 fram
     // update-after-bind only allows us to leave alone, not rewrite.
     new_slot = registry_->RegisterTexture(next.view);
     if (new_slot == BindlessRegistry::kInvalidIndex) {
-      device_.DestroyImage(next);
+      destroy_next();
       return false;
     }
   }
@@ -816,7 +859,7 @@ bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 fram
       if (registry_ && new_slot != BindlessRegistry::kInvalidIndex) {
         registry_->ReleaseTexture(new_slot);
       }
-      device_.DestroyImage(next);
+      destroy_next();
       return false;
     }
     fresh_sets.push_back(fresh);
