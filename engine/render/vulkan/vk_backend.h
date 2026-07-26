@@ -484,6 +484,7 @@ class VulkanDevice final : public Device {
   VulkanCommandList* EnsureUploadBatchCmd();
   void SubmitUploadBatchIfPending();
   void ReportDroppedUploadBatch(const char* what);
+  void ResetPendingUploadBatch();
   void DiscardPendingUploadBatch();
   // A submitted-but-possibly-still-executing batch: the CPU no longer waits at
   // flush. A trailing kTransferWrite->kAllCommands barrier in the batch orders

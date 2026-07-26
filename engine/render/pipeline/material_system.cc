@@ -75,9 +75,9 @@ FormatInfo FormatFor(asset::TextureFormat format, bool srgb) {
   return {};
 }
 
-u32 MipSizeBytes(const FormatInfo& info, u32 width, u32 height) {
-  u32 blocks_x = (width + info.block_dim - 1) / info.block_dim;
-  u32 blocks_y = (height + info.block_dim - 1) / info.block_dim;
+u64 MipSizeBytes(const FormatInfo& info, u32 width, u32 height) {
+  u64 blocks_x = (static_cast<u64>(width) + info.block_dim - 1) / info.block_dim;
+  u64 blocks_y = (static_cast<u64>(height) + info.block_dim - 1) / info.block_dim;
   return blocks_x * blocks_y * info.block_bytes;
 }
 
@@ -300,12 +300,7 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
   u32 top_height = std::max(1u, texture.height >> first_mip);
   u32 mip_count = generate_mips ? FullMipChainLength(texture.width, texture.height)
                                 : texture.mip_count - first_mip;
-
-  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageTransferDst;
-  if (generate_mips) usage |= kTextureUsageTransferSrc;
-  GpuImage image =
-      device_.CreateImage2D(info.format, {top_width, top_height}, usage, mip_count);
-  if (!image) return {};
+  u32 upload_mips = generate_mips ? 1 : mip_count;
 
   // Skip past the source mips above the resident range.
   u64 skip = 0;
@@ -318,11 +313,27 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
       height = std::max(1u, height / 2);
     }
   }
-  u64 upload_bytes = texture.data.size() - skip;
-  if (upload_bytes == 0) {  // nothing to copy; a zero-size staging buffer is illegal
-    device_.DestroyImage(image);
+  u64 upload_bytes = 0;
+  {
+    u32 width = top_width;
+    u32 height = top_height;
+    for (u32 mip = 0; mip < upload_mips; ++mip) {
+      upload_bytes += MipSizeBytes(info, width, height);
+      width = std::max(1u, width / 2);
+      height = std::max(1u, height / 2);
+    }
+  }
+  if (upload_bytes == 0 || skip > texture.data.size() ||
+      upload_bytes > texture.data.size() - skip) {
+    RX_WARN("texture upload skipped, mip data is truncated");
     return {};
   }
+
+  TextureUsageFlags usage = kTextureUsageSampled | kTextureUsageTransferDst;
+  if (generate_mips) usage |= kTextureUsageTransferSrc;
+  GpuImage image =
+      device_.CreateImage2D(info.format, {top_width, top_height}, usage, mip_count);
+  if (!image) return {};
   // Inside an upload batch the copy is deferred to the flush, so the shared
   // staging pool would be overwritten by the next texture before it runs; use a
   // fresh buffer parked with the batch instead. Outside a batch the pooled
@@ -348,7 +359,6 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
   std::memcpy(staging->mapped, texture.data.data() + skip, upload_bytes);
   device_.FlushBuffer(*staging, 0, upload_bytes);
 
-  u32 upload_mips = generate_mips ? 1 : mip_count;
   device_.RecordUpload([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
 

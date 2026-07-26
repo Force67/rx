@@ -14,16 +14,20 @@
 //
 // Skips cleanly (exit 0) when no Vulkan driver is present (null backend).
 
+#include <barrier>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <thread>
 #include <vector>
 
+#include "render/pipeline/material_system.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
 
 using namespace rx::render;
+namespace asset = rx::asset;
 
 namespace {
 
@@ -165,6 +169,31 @@ int main() {
   if (std::memcmp(got_tex.data(), expect_tex.data(), expect_tex.size()) != 0)
     return Fail("batched texture contents wrong after flush");
   device->DestroyImage(image);
+
+  // Malformed texture data must fail before staging or recording a copy whose
+  // regions extend beyond the source buffer.
+  auto materials = MaterialSystem::Create(*device, nullptr);
+  if (!materials) return Fail("MaterialSystem creation failed");
+  asset::Texture truncated;
+  truncated.id = asset::MakeAssetId("truncated.rgba");
+  truncated.format = asset::TextureFormat::kRgba8;
+  truncated.width = 4;
+  truncated.height = 4;
+  truncated.data.resize(4 * 4 * 4 - 1);
+  if (materials->UploadTexture(truncated)) return Fail("truncated texture upload succeeded");
+
+  GpuBuffer off_thread = device->CreateBuffer(16, kBufferUsageStorage, true);
+  if (!off_thread) return Fail("CreateBuffer returned null (off-thread destroy case)");
+  std::barrier start(2);
+  std::jthread retire([&] {
+    start.arrive_and_wait();
+    device->DestroyBufferDeferred(off_thread);
+  });
+  start.arrive_and_wait();
+  CommandList* concurrent_frame = device->BeginFrame(0);
+  retire.join();
+  if (!concurrent_frame) return Fail("BeginFrame returned null (off-thread destroy case)");
+  device->SubmitFrame(concurrent_frame);
 
   // --- deferred destroy of a resource a submitted-but-unfinished batch is
   // still copying into. Retiring from outside the frame loop parks under the

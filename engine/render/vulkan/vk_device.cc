@@ -986,7 +986,7 @@ void VulkanDevice::ReportDroppedUploadBatch(const char* what) {
            what, upload_batch_records_, upload_batch_staging_bytes_ >> 10);
 }
 
-void VulkanDevice::DiscardPendingUploadBatch() {
+void VulkanDevice::ResetPendingUploadBatch() {
   if (upload_batch_cmd_ != VK_NULL_HANDLE) {
     vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
     upload_batch_cmd_ = VK_NULL_HANDLE;
@@ -996,9 +996,20 @@ void VulkanDevice::DiscardPendingUploadBatch() {
   upload_batch_stagings_.clear();
   upload_batch_staging_bytes_ = 0;
   upload_batch_records_ = 0;
-  // The discarded copies never run, so the serial they would have carried never
-  // retires; roll back or a graveyard slot that latched it would never drain.
+}
+
+void VulkanDevice::DiscardPendingUploadBatch() {
+  // The discarded copies never run, so the projected serial they would have
+  // carried must be removed from both future and already-parked resources.
+  const u64 canceled = upload_batch_serial_ + 1;
   upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    for (Graveyard& graveyard : graveyard_) {
+      if (graveyard.upload_serial == canceled) graveyard.upload_serial = upload_batch_serial_;
+    }
+  }
+  ResetPendingUploadBatch();
 }
 
 // Frees every in-flight batch whose fence has signaled. Same-queue submissions
@@ -1068,9 +1079,14 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
     const VkResult submitted = vkQueueSubmit(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
     const VkResult waited = submitted == VK_SUCCESS ? vkQueueWaitIdle(graphics_queue_) : submitted;
     if (waited != VK_SUCCESS) {
-      RX_ERROR("upload batch fallback submit failed ({})", static_cast<int>(waited));
+      ReportDroppedUploadBatch("fallback submit failed");
+      DiscardPendingUploadBatch();
+      return;
     }
-    DiscardPendingUploadBatch();
+    // The queue drain is the completion proof a fence would normally provide.
+    upload_retired_serial_ = ++upload_batch_serial_;
+    upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+    ResetPendingUploadBatch();
     return;
   }
   const VkResult submitted = vkQueueSubmit(graphics_queue_, 1, &submit, fence);
@@ -1190,8 +1206,9 @@ void VulkanDevice::NoteGraveyardUploadSerial(u32 slot) {
 void VulkanDevice::DestroyBufferDeferred(GpuBuffer& buffer) {
   if (BufferRecord* record = Rec(buffer.handle)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
-    graveyard_[current_slot_].buffers.push_back(record);
-    NoteGraveyardUploadSerial(current_slot_);
+    const u32 slot = current_slot_;
+    graveyard_[slot].buffers.push_back(record);
+    NoteGraveyardUploadSerial(slot);
   }
   buffer = {};
 }
@@ -1199,8 +1216,9 @@ void VulkanDevice::DestroyBufferDeferred(GpuBuffer& buffer) {
 void VulkanDevice::DestroyImageDeferred(GpuImage& image) {
   if (TextureRecord* record = Rec(image.handle)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
-    graveyard_[current_slot_].images.push_back(record);
-    NoteGraveyardUploadSerial(current_slot_);
+    const u32 slot = current_slot_;
+    graveyard_[slot].images.push_back(record);
+    NoteGraveyardUploadSerial(slot);
   }
   image = {};
 }
@@ -1208,8 +1226,9 @@ void VulkanDevice::DestroyImageDeferred(GpuImage& image) {
 void VulkanDevice::DestroyAccelStructDeferred(AccelStructHandle accel) {
   if (AccelStructRecord* record = Rec(accel)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
-    graveyard_[current_slot_].accels.push_back(record);
-    NoteGraveyardUploadSerial(current_slot_);
+    const u32 slot = current_slot_;
+    graveyard_[slot].accels.push_back(record);
+    NoteGraveyardUploadSerial(slot);
   }
 }
 
@@ -2334,7 +2353,10 @@ CommandList* VulkanDevice::BeginFrame(u32 slot) {
   vkResetCommandPool(device_, frame.pool, 0);
   if (frame.async_pool) vkResetCommandPool(device_, frame.async_pool, 0);
   vkResetDescriptorPool(device_, frame.descriptor_pool, 0);
-  current_slot_ = slot;
+  {
+    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    current_slot_ = slot;
+  }
   frame.active_segment = 0;
   frame.fork_signaled = false;
   frame.async_submitted = false;
