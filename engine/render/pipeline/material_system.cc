@@ -319,6 +319,10 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
     }
   }
   u64 upload_bytes = texture.data.size() - skip;
+  if (upload_bytes == 0) {  // nothing to copy; a zero-size staging buffer is illegal
+    device_.DestroyImage(image);
+    return {};
+  }
   // Inside an upload batch the copy is deferred to the flush, so the shared
   // staging pool would be overwritten by the next texture before it runs; use a
   // fresh buffer parked with the batch instead. Outside a batch the pooled
@@ -813,10 +817,11 @@ void MaterialSystem::BeginFrame(u32 frame_index) {
 bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 frame_index) {
   GpuImage next = UploadTextureImage(record.source, first_mip);
   if (!next) return false;
-  auto destroy_next = [&] {
-    if (device_.UploadBatchActive()) device_.WaitIdle();
-    device_.DestroyImage(next);
-  };
+  // Deferred, not immediate: inside an upload batch the copy into `next` is
+  // still pending, and SwapResident runs mid-frame (streaming), where a device
+  // drain would also free the current frame's graveyard under its own command
+  // list. The next BeginFrame(slot) fence proves the batch landed.
+  auto destroy_next = [&] { device_.DestroyImageDeferred(next); };
 
   u32 old_slot = record.bindless;
   u32 new_slot = BindlessRegistry::kInvalidIndex;

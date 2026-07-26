@@ -475,9 +475,10 @@ class VulkanDevice final : public Device {
   // unsynchronized, so every batch entry point enforces thread affinity.
   std::thread::id upload_batch_thread_ = std::this_thread::get_id();
   void CheckUploadBatchThread(const char* what) const;
-  // Lazily begins the batch command buffer on the first copy; submits any
+  // Lazily begins the batch command buffer on the first copy (null if that
+  // fails: the caller falls back to an unbatched ImmediateSubmit); submits any
   // pending batch copies (leaving the batch open) before dependent GPU work.
-  VulkanCommandList& EnsureUploadBatchCmd();
+  VulkanCommandList* EnsureUploadBatchCmd();
   void SubmitUploadBatchIfPending();
   void DiscardPendingUploadBatch();
   // A submitted-but-possibly-still-executing batch: the CPU no longer waits at

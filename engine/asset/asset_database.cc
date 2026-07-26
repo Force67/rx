@@ -55,6 +55,10 @@ LoadWith(std::mutex &mutex, Vfs &vfs, std::string_view path,
   // succeeded, in which case our asset supersedes the null (a transient read
   // failure on one thread must not pin a permanent miss over a good convert).
   // Failures cache a null entry so repeated lookups stay cheap.
+  // base::UnorderedMap::emplace only constructs the value on the insert branch,
+  // so `asset` still holds ours when the key was taken; the `asset` test keeps
+  // this honest for a container that moves first (it would just mean the
+  // existing entry always wins, never a use-after-move).
   std::scoped_lock lock(mutex);
   auto result = cache.emplace(id.hash, std::move(asset));
   if (!result.second && asset && !*result.first) *result.first = std::move(asset);

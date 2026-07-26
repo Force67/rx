@@ -893,12 +893,13 @@ GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usa
     DestroyBuffer(staging);
     return {};
   }
-  if (upload_batch_depth_ > 0) {
+  VulkanCommandList* batch = upload_batch_depth_ > 0 ? EnsureUploadBatchCmd() : nullptr;
+  if (batch) {
     // Batched: record the copy into the shared batch command buffer and keep
     // the staging alive until the batch flushes (a fresh staging per call, so
     // parking them is safe). The blocking submit is deferred, so N buffers cost
     // one round-trip instead of N.
-    EnsureUploadBatchCmd().CopyBuffer(staging, 0, buffer, 0, data.size());
+    batch->CopyBuffer(staging, 0, buffer, 0, data.size());
     ParkBatchStaging(staging);
   } else {
     ImmediateSubmit([&](CommandList& cmd) {
@@ -934,7 +935,10 @@ void VulkanDevice::CheckUploadBatchThread(const char* what) const {
   }
 }
 
-VulkanCommandList& VulkanDevice::EnsureUploadBatchCmd() {
+// Null when the command buffer could not be opened; the caller then falls back
+// to a per-upload ImmediateSubmit, which is what a backend without the batch
+// does anyway. Only the batch bookkeeping is unrecoverable enough to abort on.
+VulkanCommandList* VulkanDevice::EnsureUploadBatchCmd() {
   CheckUploadBatchThread("upload batch recording");
   if (upload_batch_cmd_ == VK_NULL_HANDLE) {
     VkCommandBufferAllocateInfo alloc{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -942,19 +946,22 @@ VulkanCommandList& VulkanDevice::EnsureUploadBatchCmd() {
     alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc.commandBufferCount = 1;
     if (vkAllocateCommandBuffers(device_, &alloc, &upload_batch_cmd_) != VK_SUCCESS) {
-      RX_ERROR("upload batch command-buffer allocation failed");
-      std::abort();
+      RX_ERROR("upload batch command-buffer allocation failed; uploading unbatched");
+      upload_batch_cmd_ = VK_NULL_HANDLE;
+      return nullptr;
     }
     VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     if (vkBeginCommandBuffer(upload_batch_cmd_, &begin) != VK_SUCCESS) {
-      RX_ERROR("upload batch command-buffer begin failed");
-      std::abort();
+      RX_ERROR("upload batch command-buffer begin failed; uploading unbatched");
+      vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
+      upload_batch_cmd_ = VK_NULL_HANDLE;
+      return nullptr;
     }
     upload_batch_list_ =
         std::make_unique<VulkanCommandList>(*this, upload_batch_cmd_, immediate_descriptor_pool_);
   }
-  return *upload_batch_list_;
+  return upload_batch_list_.get();
 }
 
 VkFence VulkanDevice::AcquireUploadBatchFence() {
@@ -1124,8 +1131,9 @@ void VulkanDevice::RecordUpload(const std::function<void(CommandList&)>& record)
   CheckUploadBatchThread("RecordUpload");
   // Batched: record into the shared batch command buffer (submitted at flush).
   // Otherwise a blocking ImmediateSubmit, exactly as the caller would have done.
-  if (upload_batch_depth_ > 0) {
-    record(EnsureUploadBatchCmd());
+  VulkanCommandList* batch = upload_batch_depth_ > 0 ? EnsureUploadBatchCmd() : nullptr;
+  if (batch) {
+    record(*batch);
   } else {
     ImmediateSubmit(record);
   }
