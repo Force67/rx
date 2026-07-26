@@ -18,6 +18,10 @@ option(RX_BUILD_EDITOR "Build the rx editor application (apps/editor, needs libu
 option(RX_BUILD_TOOLS "Build the asset authoring tools (rxpack)" ON)
 option(RX_AUDIO_FFMPEG "Decode compressed audio via FFmpeg (libav*)" OFF)
 option(RX_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+# ThreadSanitizer, for the cross-thread paths (deferred destruction from a
+# streaming worker, the asset cache). Mutually exclusive with RX_SANITIZE: TSan
+# and ASan cannot be linked together.
+option(RX_SANITIZE_THREAD "Build with ThreadSanitizer" OFF)
 # Route the engine's allocations through mimalloc for faster, lower-fragmentation
 # heap use; also enables the per-category memory tracker (the new/delete
 # override needs mi_usable_size for exact free accounting). Incompatible with
@@ -80,9 +84,16 @@ if(APPLE)
   set(RX_NRD OFF CACHE BOOL "" FORCE)
 endif()
 
+if(RX_SANITIZE AND RX_SANITIZE_THREAD)
+  message(FATAL_ERROR "RX_SANITIZE and RX_SANITIZE_THREAD are mutually exclusive")
+endif()
 if(RX_SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
+endif()
+if(RX_SANITIZE_THREAD)
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
 endif()
 
 if(RX_FSR3 AND NOT EXISTS
@@ -191,8 +202,8 @@ endif()
 # Optional mimalloc allocator (defines rx_enable_mimalloc(); no-op when the
 # option is off). Included here so the helper exists before the runtime
 # executable is declared.
-if(RX_MIMALLOC AND RX_SANITIZE)
-  message(STATUS "mimalloc disabled: RX_SANITIZE owns the allocator")
+if(RX_MIMALLOC AND (RX_SANITIZE OR RX_SANITIZE_THREAD))
+  message(STATUS "mimalloc disabled: the sanitizer owns the allocator")
   set(RX_MIMALLOC OFF CACHE BOOL "" FORCE)
 endif()
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/mimalloc.cmake)

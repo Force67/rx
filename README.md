@@ -120,4 +120,7 @@ build/linux/runtime/rx --gltf assets/sponza/Sponza.gltf
   the full set.
 - `engine/render/presets/` holds editable .ini quality presets, loadable live
   from the debug overlay.
+- `-DRX_SANITIZE=ON` builds with ASan+UBSan, `-DRX_SANITIZE_THREAD=ON` with
+  TSan (mutually exclusive). Run TSan builds under `swrun`, not `vkrun`: the
+  NVIDIA driver segfaults inside ThreadSanitizer, lavapipe does not.
 - History predating the extraction lives in the recreation repository.

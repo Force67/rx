@@ -182,18 +182,37 @@ int main() {
   truncated.data.resize(4 * 4 * 4 - 1);
   if (materials->UploadTexture(truncated)) return Fail("truncated texture upload succeeded");
 
-  GpuBuffer off_thread = device->CreateBuffer(16, kBufferUsageStorage, true);
-  if (!off_thread) return Fail("CreateBuffer returned null (off-thread destroy case)");
+  // A streaming worker retiring a resource while BeginFrame moves current_slot_.
+  // A plain run cannot fail on the race itself (an unsynchronized current_slot_
+  // passes just as happily) - it only reports through ThreadSanitizer, so build
+  // with -DRX_SANITIZE_THREAD=ON to make this case mean anything. Repeated
+  // because one barrier-aligned pass hits the window maybe a third of the time:
+  // BeginFrame waits a fence and resets three pools before touching
+  // current_slot_, so the worker usually gets there and back first.
+  constexpr int kRaceIterations = 16;
+  GpuBuffer race_buffers[kRaceIterations];
+  for (GpuBuffer& buffer : race_buffers) {
+    buffer = device->CreateBuffer(16, kBufferUsageStorage, true);
+    if (!buffer) return Fail("CreateBuffer returned null (off-thread destroy case)");
+  }
   std::barrier start(2);
   std::jthread retire([&] {
-    start.arrive_and_wait();
-    device->DestroyBufferDeferred(off_thread);
+    for (GpuBuffer& buffer : race_buffers) {
+      start.arrive_and_wait();
+      device->DestroyBufferDeferred(buffer);
+    }
   });
-  start.arrive_and_wait();
-  CommandList* concurrent_frame = device->BeginFrame(0);
+  bool race_frames_ok = true;
+  for (int i = 0; i < kRaceIterations; ++i) {
+    start.arrive_and_wait();  // every iteration must arrive, or the worker hangs
+    if (CommandList* frame_cmd = device->BeginFrame(i % Device::kMaxFramesInFlight)) {
+      device->SubmitFrame(frame_cmd);
+    } else {
+      race_frames_ok = false;
+    }
+  }
   retire.join();
-  if (!concurrent_frame) return Fail("BeginFrame returned null (off-thread destroy case)");
-  device->SubmitFrame(concurrent_frame);
+  if (!race_frames_ok) return Fail("BeginFrame returned null (off-thread destroy case)");
 
   // --- deferred destroy of a resource a submitted-but-unfinished batch is
   // still copying into. Retiring from outside the frame loop parks under the
