@@ -690,6 +690,24 @@ private:
   u32 fg_presents_ = 0;
   u32 fg_engine_frames_ = 0;
   f64 fg_log_time_ = 0.0;
+  // Rate-limits the "acquire timed out" warning while a compositor starves us.
+  f64 acquire_timeout_log_time_ = 0.0;
+  // Offscreen stand-in for the backbuffer, used only to keep captures working
+  // when the compositor is not releasing swapchain images. Allocated on first
+  // need and reused; the frame renders into it and is submitted without a
+  // present. See RenderFrame.
+  GpuImage capture_image_;
+  bool capture_offscreen_ = false;  // this frame targets capture_image_
+  // Latched when an acquire times out during a capture run, so the rest of the
+  // run stops paying the timeout per frame. Cleared once the captures are
+  // written, and on every swapchain recreate.
+  bool swapchain_starved_ = false;
+  // True while a capture is configured but not yet written, whether or not it
+  // is due. A starved swapchain keeps rendering offscreen for these runs.
+  bool CaptureArmed() const;
+  // Allocates capture_image_ at the swapchain's format/extent on first use.
+  // False if the image cannot be created, so the caller skips the frame.
+  bool EnsureCaptureImage();
   std::unique_ptr<RayTracingContext> raytracing_;
   // Solid-angle + distance culling of realtime TLAS instances, persistent
   // across frames (time-sliced sweep state per instance group).

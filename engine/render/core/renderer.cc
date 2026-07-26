@@ -37,6 +37,12 @@ namespace {
 // ColorGrade options take an Opt suffix to avoid shadowing the enums of the
 // same name used in the casts below.
 base::Option<const char *> Screenshot{"screenshot", nullptr, "RX_SCREENSHOT"};
+// Render timed captures into an offscreen image instead of the presented
+// backbuffer. Forced on automatically when the compositor starves the
+// swapchain; set explicitly for deterministic captures on a headless or
+// unattended desktop, where the window may never be composited.
+base::Option<bool> CaptureOffscreen{"screenshot.offscreen", false,
+                                    "RX_CAPTURE_OFFSCREEN"};
 // RX_SEQ=prefix:startsec:count[:stride] dumps a burst of `count` composited
 // frames (every `stride`-th presented frame, default 1) starting at startsec,
 // named prefix_0000.png ... for stitching into a clip. Inbuilt framebuffer
@@ -1220,13 +1226,20 @@ void Renderer::WriteBackbufferPng(const std::string &path, u32 image_index) {
   if (!staging.mapped)
     return;
 
-  const GpuImage &backbuffer = swapchain_->image(image_index);
+  // The offscreen capture path renders into capture_image_ and the graph
+  // already left it in kCopySrc, so only the swapchain image needs the
+  // present<->copy round trip.
+  const bool offscreen = capture_offscreen_;
+  const GpuImage &backbuffer =
+      offscreen ? capture_image_ : swapchain_->image(image_index);
   device_->ImmediateSubmit([&](CommandList &cmd) {
-    cmd.Barrier(Transition(backbuffer, ResourceState::kPresent,
-                           ResourceState::kCopySrc));
+    if (!offscreen)
+      cmd.Barrier(Transition(backbuffer, ResourceState::kPresent,
+                             ResourceState::kCopySrc));
     cmd.CopyTextureToBuffer(backbuffer, staging, {});
-    cmd.Barrier(Transition(backbuffer, ResourceState::kCopySrc,
-                           ResourceState::kPresent));
+    if (!offscreen)
+      cmd.Barrier(Transition(backbuffer, ResourceState::kCopySrc,
+                             ResourceState::kPresent));
   });
 
   // Swapchain is bgra; png wants rgb.
@@ -1252,6 +1265,33 @@ void Renderer::WriteBackbufferPng(const std::string &path, u32 image_index) {
 void Renderer::WriteScreenshot(u32 image_index) {
   WriteBackbufferPng(screenshot_path_, image_index);
   screenshot_path_.clear();
+}
+
+bool Renderer::CaptureArmed() const {
+  return !screenshot_path_.empty() ||
+         (!seq_prefix_.empty() && seq_written_ < seq_count_);
+}
+
+bool Renderer::EnsureCaptureImage() {
+  Extent2D extent = swapchain_->extent();
+  if (capture_image_.handle && capture_image_.extent.width == extent.width &&
+      capture_image_.extent.height == extent.height)
+    return true;
+  // Deferred: the frame that last rendered into it completes without a fence
+  // wait, so it can still be in flight when a resize lands mid capture run.
+  if (capture_image_.handle)
+    device_->DestroyImageDeferred(capture_image_);
+  // Same format as the backbuffer so every pass that writes it (post, UI)
+  // behaves identically; TransferSrc is what the png readback copies from.
+  capture_image_ = device_->CreateImage2D(
+      swapchain_->format(), extent,
+      kTextureUsageColorTarget | kTextureUsageTransferSrc |
+          kTextureUsageTransferDst | kTextureUsageSampled);
+  if (!capture_image_.handle) {
+    RX_WARN("offscreen capture image allocation failed");
+    return false;
+  }
+  return true;
 }
 
 bool Renderer::CreateUpscalerForSettings() {
@@ -2495,6 +2535,12 @@ void Renderer::RenderFrame(const FrameView &view) {
   if (!device_ || device_->is_stub() || !swapchain_)
     return;
 
+  // Advance the frame clock before anything can bail out of the frame. The
+  // timed captures and the rate-limited logs below key off it, so leaving it
+  // until after the acquire froze time whenever frames were skipped -- a
+  // screenshot armed for t=45s then never came due.
+  time_seconds_ += view.frame_delta_seconds;
+
   // Wayland surfaces report an undefined currentExtent, so the driver never
   // flags the swapchain out-of-date on a window resize (unlike X11). Poll the
   // window each frame and recreate when it no longer matches the swapchain, so
@@ -2527,10 +2573,40 @@ void Renderer::RenderFrame(const FrameView &view) {
   }
 
   u32 image_index = 0;
-  AcquireResult acquired = swapchain_->Acquire(slot, &image_index);
+  // Offscreen: drive the whole capture run off the swapchain, so the result
+  // never depends on the compositor ever showing the window. Requested up
+  // front, or latched once an acquire timed out below -- retrying it every
+  // frame would burn the full timeout each time, and the run needs its
+  // warm-up frames. Acquiring here would be wrong as well as pointless:
+  // nothing presents the image back, so the swapchain would run dry.
+  if ((CaptureOffscreen.get() || swapchain_starved_) && CaptureArmed() &&
+      EnsureCaptureImage())
+    capture_offscreen_ = true;
+  AcquireResult acquired =
+      capture_offscreen_ ? AcquireResult::kOk : swapchain_->Acquire(slot, &image_index);
   if (acquired == AcquireResult::kOutOfDate) {
     RecreateSwapchain();
     return;
+  }
+  if (acquired == AcquireResult::kTimeout) {
+    // The compositor is holding every image (window unmapped/occluded). With a
+    // capture armed, keep driving the whole frame offscreen instead of just
+    // the one frame the capture is due on: the engine needs its warm-up frames
+    // (sky/atmosphere bakes, temporal history, streamed uploads) or the
+    // capture comes out black. Without one, skip the frame rather than wedging
+    // the loop on an unbounded wait -- and do not burn the GPU on a window
+    // nobody is compositing.
+    if (!CaptureArmed() || !EnsureCaptureImage()) {
+      if (time_seconds_ - acquire_timeout_log_time_ >= 1.0) {
+        RX_WARN("swapchain acquire timed out; the compositor is not releasing "
+                "images (window unmapped or occluded) - skipping frames");
+        acquire_timeout_log_time_ = time_seconds_;
+      }
+      return;
+    }
+    capture_offscreen_ = true;
+    swapchain_starved_ = true;
+    acquired = AcquireResult::kOk;  // render this frame, offscreen
   }
   if (acquired != AcquireResult::kOk && acquired != AcquireResult::kSuboptimal)
     return;
@@ -2539,7 +2615,10 @@ void Renderer::RenderFrame(const FrameView &view) {
   bool fg_frame = false;
   u32 interp_index = 0;
 #if defined(RX_HAS_FSR3)
-  if (settings_.frame_generation && !settings_.path_trace &&
+  // Frame generation presents a second swapchain image, which the offscreen
+  // capture path has not acquired; skip it for that frame.
+  if (!capture_offscreen_ && settings_.frame_generation &&
+      !settings_.path_trace &&
       swapchain_->color_space() == ColorSpace::kSrgbNonlinear && upscaler_ &&
       upscaler_->kind() == UpscalerKind::kFsr3) {
     if (!framegen_ && !framegen_attempted_) {
@@ -2691,7 +2770,14 @@ void Renderer::RenderFrame(const FrameView &view) {
     }
   } else
 #endif
-  {
+  if (capture_offscreen_) {
+    // No image was acquired, so there is nothing to present: complete the
+    // frame through the swapchainless overload (signals the slot fence) and
+    // let the capture below read the offscreen image.
+    device_->SubmitFrame(final_cmd);
+    presented = PresentResult::kOk;
+    framegen_was_active_ = false;
+  } else {
     presented = device_->SubmitFrame(final_cmd, *swapchain_, image_index);
     framegen_was_active_ = false;
     fg_presents_ += 1;
@@ -2729,6 +2815,12 @@ void Renderer::RenderFrame(const FrameView &view) {
     WriteHdr();
     hdr_pending_ = false;
   }
+
+  capture_offscreen_ = false;
+  // With the run's captures written, go back to presenting: a still-starved
+  // swapchain then just skips frames instead of rendering for nobody.
+  if (!CaptureArmed())
+    swapchain_starved_ = false;
 
   if (presented == PresentResult::kOutOfDate) {
     RecreateSwapchain();
@@ -3257,7 +3349,6 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // Screen-space gi stands in for the ddgi probe volume on raster tiers.
   bool ssgi_active =
       settings_.ssgi && !path_trace && !ddgi_active && !rcgi_active;
-  time_seconds_ += view.frame_delta_seconds;
 
   // Transparent work is gathered up front: water forces a tlas (the water
   // pipeline statically binds it) and an opaque snapshot pass.
@@ -6931,7 +7022,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   }
 
   ResourceHandle backbuffer =
-      graph_.ImportBackbuffer(swapchain_->image(image_index));
+      capture_offscreen_
+          ? graph_.ImportBackbuffer(capture_image_, ResourceState::kCopySrc)
+          : graph_.ImportBackbuffer(swapchain_->image(image_index));
 
   post_->SetGrade(
       settings_.color_grade); // rebakes the lut only when it changes
@@ -7128,6 +7221,7 @@ void Renderer::RecreateSwapchain() {
     return; // minimized
   device_->WaitIdle();
   swapchain_.reset();
+  swapchain_starved_ = false; // a fresh swapchain is worth probing again
   swapchain_hdr_request_ = WantHdrSwapchain();
   swapchain_ = device_->CreateSwapchain(width, height, settings_.vsync,
                                         swapchain_hdr_request_);
@@ -7324,6 +7418,8 @@ void Renderer::Shutdown() {
     transient_pool_.reset();
   }
   graph_.Reset();
+  if (capture_image_.handle)
+    device_->DestroyImage(capture_image_); // before device_ goes away
   post_.reset();
   ui_blur_.reset(); // holds a Device& + backend handles; destroy before device_
   mesh_pipeline_.reset();

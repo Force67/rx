@@ -114,13 +114,14 @@ ResourceHandle RenderGraph::ImportImage(std::string name, const GpuImage& image,
   return static_cast<ResourceHandle>(resources_.size());
 }
 
-ResourceHandle RenderGraph::ImportBackbuffer(const GpuImage& image) {
+ResourceHandle RenderGraph::ImportBackbuffer(const GpuImage& image, ResourceState final_state) {
   Resource resource;
   resource.desc.name = "backbuffer";
   resource.desc.format = image.format;
   resource.image = image;
   resource.imported = true;
   resource.is_backbuffer = true;
+  resource.backbuffer_final_state = final_state;
   resource.state = ResourceState::kUndefined;
   resource.last_was_write = true;
   resources_.push_back(resource);
@@ -177,7 +178,7 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
     if (resource.is_backbuffer) {
       final_barriers_.push_back({.texture = resource.image.handle,
                                  .before = resource.state,
-                                 .after = ResourceState::kPresent});
+                                 .after = resource.backbuffer_final_state});
     }
     if (resource.external_state) *resource.external_state = resource.state;
   }

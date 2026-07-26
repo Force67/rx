@@ -114,8 +114,11 @@ class RenderGraph {
   ResourceHandle ImportImage(std::string name, const GpuImage& image, ResourceState* state);
 
   // Imported swapchain image. Contents are discarded on first use and the
-  // graph appends a transition to kPresent after the last pass.
-  ResourceHandle ImportBackbuffer(const GpuImage& image);
+  // graph appends a transition to `final_state` after the last pass. Override
+  // it when the "backbuffer" is an offscreen capture image that is copied from
+  // rather than presented (PRESENT_SRC is only legal for swapchain images).
+  ResourceHandle ImportBackbuffer(const GpuImage& image,
+                                  ResourceState final_state = ResourceState::kPresent);
 
   void AddPass(std::string name, SetupFn setup, ExecuteFn execute);
 
@@ -176,6 +179,9 @@ class RenderGraph {
     GpuImage image;
     bool imported = false;
     bool is_backbuffer = false;
+    // Where the graph leaves a backbuffer after the last pass. kPresent for a
+    // real swapchain image; an offscreen stand-in must not enter PRESENT_SRC.
+    ResourceState backbuffer_final_state = ResourceState::kPresent;
     ResourceState* external_state = nullptr;
     // Walked during Compile to derive barriers.
     ResourceState state = ResourceState::kUndefined;

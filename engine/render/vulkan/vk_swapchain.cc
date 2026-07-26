@@ -189,14 +189,23 @@ VulkanSwapchain::~VulkanSwapchain() {
   if (swapchain_ != VK_NULL_HANDLE) vkDestroySwapchainKHR(device_.device(), swapchain_, nullptr);
 }
 
+// A compositor that stops presenting our surface (an unfocused or unmapped
+// window on Wayland, another virtual desktop) never releases swapchain images,
+// so an unbounded wait here wedges the whole render loop: no frames, no input
+// pump, and any pending capture stays unwritten. Bound the wait and let the
+// caller skip the frame and retry instead.
+constexpr u64 kAcquireTimeoutNs = 1'000'000'000ull;  // 1s, ~60x a normal frame
+
 AcquireResult VulkanSwapchain::Acquire(u32 slot, u32* out_image_index) {
-  VkResult result = vkAcquireNextImageKHR(device_.device(), swapchain_, UINT64_MAX,
+  VkResult result = vkAcquireNextImageKHR(device_.device(), swapchain_, kAcquireTimeoutNs,
                                           device_.frames_[slot].image_available, VK_NULL_HANDLE,
                                           out_image_index);
   switch (result) {
     case VK_SUCCESS: return AcquireResult::kOk;
     case VK_SUBOPTIMAL_KHR: return AcquireResult::kSuboptimal;
     case VK_ERROR_OUT_OF_DATE_KHR: return AcquireResult::kOutOfDate;
+    case VK_TIMEOUT:
+    case VK_NOT_READY: return AcquireResult::kTimeout;
     default: return AcquireResult::kFailed;
   }
 }
