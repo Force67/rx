@@ -689,12 +689,13 @@ private:
   // Offscreen stand-in for the backbuffer, used only to keep captures working
   // when the compositor is not releasing swapchain images. Allocated on first
   // need and reused; the frame renders into it and is submitted without a
-  // present. See CapturePending / RenderFrame.
+  // present. See RenderFrame.
   GpuImage capture_image_;
   bool capture_offscreen_ = false;  // this frame targets capture_image_
-  // True when a screenshot or sequence frame is due this frame, so a starved
-  // acquire is worth rendering offscreen for instead of skipping.
-  bool CapturePending() const;
+  // Latched when an acquire times out during a capture run, so the rest of the
+  // run stops paying the timeout per frame. Cleared once the captures are
+  // written, and on every swapchain recreate.
+  bool swapchain_starved_ = false;
   // True while a capture is configured but not yet written, whether or not it
   // is due. A starved swapchain keeps rendering offscreen for these runs.
   bool CaptureArmed() const;

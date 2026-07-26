@@ -1267,13 +1267,6 @@ void Renderer::WriteScreenshot(u32 image_index) {
   screenshot_path_.clear();
 }
 
-bool Renderer::CapturePending() const {
-  if (!screenshot_path_.empty() && time_seconds_ >= screenshot_at_)
-    return true;
-  return !seq_prefix_.empty() && seq_written_ < seq_count_ &&
-         time_seconds_ >= seq_at_;
-}
-
 bool Renderer::CaptureArmed() const {
   return !screenshot_path_.empty() ||
          (!seq_prefix_.empty() && seq_written_ < seq_count_);
@@ -1284,8 +1277,10 @@ bool Renderer::EnsureCaptureImage() {
   if (capture_image_.handle && capture_image_.extent.width == extent.width &&
       capture_image_.extent.height == extent.height)
     return true;
+  // Deferred: the frame that last rendered into it completes without a fence
+  // wait, so it can still be in flight when a resize lands mid capture run.
   if (capture_image_.handle)
-    device_->DestroyImage(capture_image_);
+    device_->DestroyImageDeferred(capture_image_);
   // Same format as the backbuffer so every pass that writes it (post, UI)
   // behaves identically; TransferSrc is what the png readback copies from.
   capture_image_ = device_->CreateImage2D(
@@ -2568,11 +2563,14 @@ void Renderer::RenderFrame(const FrameView &view) {
   }
 
   u32 image_index = 0;
-  // Forced offscreen: drive the entire capture run off the swapchain, so the
-  // result never depends on the compositor ever showing the window. Acquiring
-  // here would be wrong as well as pointless -- nothing presents the image
-  // back, so the swapchain would run dry after a few frames.
-  if (CaptureOffscreen.get() && CaptureArmed() && EnsureCaptureImage())
+  // Offscreen: drive the whole capture run off the swapchain, so the result
+  // never depends on the compositor ever showing the window. Requested up
+  // front, or latched once an acquire timed out below -- retrying it every
+  // frame would burn the full timeout each time, and the run needs its
+  // warm-up frames. Acquiring here would be wrong as well as pointless:
+  // nothing presents the image back, so the swapchain would run dry.
+  if ((CaptureOffscreen.get() || swapchain_starved_) && CaptureArmed() &&
+      EnsureCaptureImage())
     capture_offscreen_ = true;
   AcquireResult acquired =
       capture_offscreen_ ? AcquireResult::kOk : swapchain_->Acquire(slot, &image_index);
@@ -2597,6 +2595,8 @@ void Renderer::RenderFrame(const FrameView &view) {
       return;
     }
     capture_offscreen_ = true;
+    swapchain_starved_ = true;
+    acquired = AcquireResult::kOk;  // render this frame, offscreen
   }
   if (acquired != AcquireResult::kOk && acquired != AcquireResult::kSuboptimal)
     return;
@@ -2807,6 +2807,10 @@ void Renderer::RenderFrame(const FrameView &view) {
   }
 
   capture_offscreen_ = false;
+  // With the run's captures written, go back to presenting: a still-starved
+  // swapchain then just skips frames instead of rendering for nobody.
+  if (!CaptureArmed())
+    swapchain_starved_ = false;
 
   if (presented == PresentResult::kOutOfDate) {
     RecreateSwapchain();
@@ -7207,6 +7211,7 @@ void Renderer::RecreateSwapchain() {
     return; // minimized
   device_->WaitIdle();
   swapchain_.reset();
+  swapchain_starved_ = false; // a fresh swapchain is worth probing again
   swapchain_hdr_request_ = WantHdrSwapchain();
   swapchain_ = device_->CreateSwapchain(width, height, settings_.vsync,
                                         swapchain_hdr_request_);
