@@ -705,23 +705,18 @@ bool VulkanDevice::InitResources() {
 }
 
 void VulkanDevice::ShutdownResources() {
-  // Free any still-parked deferred resources while the allocator/device are
-  // alive (the caller already waited the device idle).
-  DrainAllGraveyards();
-  // Upload batches: the idle wait above proves every batch fence signaled, so
-  // this retires them all. A batch recorded but never submitted (app tore down
-  // mid-batch) still holds stagings that must go before the allocator does.
+  // Upload batches first: the caller already waited the device idle so every
+  // batch fence has signaled, and the graveyard drain below refuses to free
+  // anything a batch might still be reading. A batch recorded but never
+  // submitted (app tore down mid-batch) is discarded, which also rolls back the
+  // park serial its copies would have carried.
   DrainUploadBatchesInFlight();
-  for (GpuBuffer& s : upload_batch_stagings_) DestroyBuffer(s);
-  upload_batch_stagings_.clear();
-  upload_batch_staging_bytes_ = 0;
-  if (upload_batch_cmd_ != VK_NULL_HANDLE) {
-    vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
-    upload_batch_cmd_ = VK_NULL_HANDLE;
-    upload_batch_list_.reset();
-  }
+  DiscardPendingUploadBatch();
   for (VkFence fence : upload_fence_pool_) vkDestroyFence(device_, fence, nullptr);
   upload_fence_pool_.clear();
+  // Free any still-parked deferred resources while the allocator/device are
+  // alive.
+  DrainAllGraveyards();
   for (FrameRing& frame : frames_) {
     if (frame.descriptor_pool) vkDestroyDescriptorPool(device_, frame.descriptor_pool, nullptr);
     if (frame.in_flight) vkDestroyFence(device_, frame.in_flight, nullptr);
@@ -960,7 +955,11 @@ VulkanCommandList* VulkanDevice::EnsureUploadBatchCmd() {
     }
     upload_batch_list_ =
         std::make_unique<VulkanCommandList>(*this, upload_batch_cmd_, immediate_descriptor_pool_);
+    // Anything retired from here on may be read by this batch, which will carry
+    // the next serial.
+    upload_park_serial_.store(upload_batch_serial_ + 1, std::memory_order_release);
   }
+  ++upload_batch_records_;  // one recorded upload per call; reported if the batch is dropped
   return upload_batch_list_.get();
 }
 
@@ -978,6 +977,15 @@ VkFence VulkanDevice::AcquireUploadBatchFence() {
   return fence;
 }
 
+// Losing a batch means its copies never execute, but the buffers they were
+// going to fill were already handed to callers and look valid, so the failure
+// surfaces as wrong geometry/pixels rather than an error. Say how much went.
+void VulkanDevice::ReportDroppedUploadBatch(const char* what) {
+  RX_ERROR("upload batch {}; dropping {} recorded upload(s) / {} KiB staged - the buffers they "
+           "would have filled keep undefined contents",
+           what, upload_batch_records_, upload_batch_staging_bytes_ >> 10);
+}
+
 void VulkanDevice::DiscardPendingUploadBatch() {
   if (upload_batch_cmd_ != VK_NULL_HANDLE) {
     vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
@@ -987,6 +995,10 @@ void VulkanDevice::DiscardPendingUploadBatch() {
   for (GpuBuffer& staging : upload_batch_stagings_) DestroyBuffer(staging);
   upload_batch_stagings_.clear();
   upload_batch_staging_bytes_ = 0;
+  upload_batch_records_ = 0;
+  // The discarded copies never run, so the serial they would have carried never
+  // retires; roll back or a graveyard slot that latched it would never drain.
+  upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
 }
 
 // Frees every in-flight batch whose fence has signaled. Same-queue submissions
@@ -1008,6 +1020,7 @@ void VulkanDevice::RetireCompletedUploadBatches() {
     vkFreeCommandBuffers(device_, immediate_pool_, 1, &batch.cmd);
     for (GpuBuffer& s : batch.stagings) DestroyBuffer(s);
     upload_inflight_staging_bytes_ -= batch.staging_bytes;
+    if (batch.serial > upload_retired_serial_) upload_retired_serial_ = batch.serial;
     ++retired;
   }
   if (retired > 0)
@@ -1043,7 +1056,7 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
   if (upload_batch_cmd_ == VK_NULL_HANDLE) return;
   upload_batch_list_->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kAllCommands);
   if (vkEndCommandBuffer(upload_batch_cmd_) != VK_SUCCESS) {
-    RX_ERROR("upload batch command-buffer end failed");
+    ReportDroppedUploadBatch("command-buffer end failed");
     DiscardPendingUploadBatch();
     return;
   }
@@ -1062,7 +1075,7 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
   }
   const VkResult submitted = vkQueueSubmit(graphics_queue_, 1, &submit, fence);
   if (submitted != VK_SUCCESS) {
-    RX_ERROR("upload batch submit failed ({})", static_cast<int>(submitted));
+    ReportDroppedUploadBatch("submit failed");
     vkDestroyFence(device_, fence, nullptr);
     DiscardPendingUploadBatch();
     return;
@@ -1080,6 +1093,10 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
   upload_batch_list_.reset();
   upload_batch_stagings_.clear();
   upload_batch_staging_bytes_ = 0;
+  upload_batch_records_ = 0;
+  // Nothing is recording now, so a retire from here on is only covered by the
+  // batch just submitted.
+  upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
 
   // Hard cap on outstanding staging memory: without a wait anywhere, a burst
   // could submit 64 MiB chunks faster than the GPU copies them and grow the
@@ -1105,8 +1122,15 @@ void VulkanDevice::BeginUploadBatch() {
 
 void VulkanDevice::FlushUploadBatch() {
   CheckUploadBatchThread("FlushUploadBatch");
-  if (upload_batch_depth_ > 0) --upload_batch_depth_;
-  if (upload_batch_depth_ == 0) SubmitUploadBatchIfPending();
+  if (upload_batch_depth_ == 0) {
+    // Unbalanced. Silently ignoring it hides the mirror bug (a Begin without a
+    // Flush), which leaves the batch open forever: UploadBatchActive() then
+    // stays true and every texture upload takes the per-call staging path
+    // instead of the pool for the rest of the process.
+    RX_ERROR("FlushUploadBatch with no batch open; Begin/FlushUploadBatch are unbalanced");
+    return;
+  }
+  if (--upload_batch_depth_ == 0) SubmitUploadBatchIfPending();
 }
 
 void VulkanDevice::ParkBatchStaging(GpuBuffer& buffer) {
@@ -1156,10 +1180,18 @@ void VulkanDevice::DestroyBuffer(GpuBuffer& buffer) {
   buffer = {};
 }
 
+// Records the upload batch that may still be reading whatever is being parked.
+// Call with graveyard_mutex_ held.
+void VulkanDevice::NoteGraveyardUploadSerial(u32 slot) {
+  const u64 serial = upload_park_serial_.load(std::memory_order_acquire);
+  if (serial > graveyard_[slot].upload_serial) graveyard_[slot].upload_serial = serial;
+}
+
 void VulkanDevice::DestroyBufferDeferred(GpuBuffer& buffer) {
   if (BufferRecord* record = Rec(buffer.handle)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
     graveyard_[current_slot_].buffers.push_back(record);
+    NoteGraveyardUploadSerial(current_slot_);
   }
   buffer = {};
 }
@@ -1168,6 +1200,7 @@ void VulkanDevice::DestroyImageDeferred(GpuImage& image) {
   if (TextureRecord* record = Rec(image.handle)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
     graveyard_[current_slot_].images.push_back(record);
+    NoteGraveyardUploadSerial(current_slot_);
   }
   image = {};
 }
@@ -1176,13 +1209,20 @@ void VulkanDevice::DestroyAccelStructDeferred(AccelStructHandle accel) {
   if (AccelStructRecord* record = Rec(accel)) {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
     graveyard_[current_slot_].accels.push_back(record);
+    NoteGraveyardUploadSerial(current_slot_);
   }
 }
 
 void VulkanDevice::DrainGraveyard(u32 slot) {
+  // The caller's fence wait proves the frame is done; the batch a parked
+  // resource was still being copied into needs its own proof, so refresh the
+  // retired serial and leave the slot alone until it catches up (at worst one
+  // more trip round the frame ring).
+  RetireCompletedUploadBatches();
   Graveyard drained;
   {
     std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    if (graveyard_[slot].upload_serial > upload_retired_serial_) return;
     std::swap(drained, graveyard_[slot]);
   }
   for (BufferRecord* record : drained.buffers) FreeBufferRecord(record);
