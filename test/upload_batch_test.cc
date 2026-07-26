@@ -7,6 +7,11 @@
 // readback buffer; ImmediateSubmit's fence wait proves the async batch
 // submissions retired, so the mapped reads are safe.
 //
+// Also covers the two paths the batch is actually used through: a frame that
+// reads a buffer still batched when BeginFrame ran (the only ordering is the
+// implicit flush plus the batch's trailing barrier), and RecordUpload +
+// ParkBatchStaging with an image, as MaterialSystem uploads textures.
+//
 // Skips cleanly (exit 0) when no Vulkan driver is present (null backend).
 
 #include <cstdio>
@@ -106,7 +111,62 @@ int main() {
       return Fail("large buffer contents wrong across budget auto-submit");
   }
 
-  for (GpuBuffer* buffer : {&a, &b, &c, &big[0], &big[1], &big[2]})
+  // --- the frame path: a batched buffer read by the frame that follows, with
+  // no explicit flush. BeginFrame's implicit flush plus the batch's trailing
+  // transfer->all barrier are the only things ordering the copy against the
+  // frame, which is what streaming mid-frame relies on. ---
+  device->BeginUploadBatch();
+  std::vector<u8> expect_d;
+  GpuBuffer d = UploadPattern(*device, 128 * 1024, 4, expect_d);
+  if (!d) return Fail("batched buffer creation failed (frame case)");
+  GpuBuffer frame_readback =
+      device->CreateBuffer(expect_d.size(), kBufferUsageTransferDst, /*host_visible=*/true);
+  if (!frame_readback.mapped) return Fail("frame readback buffer creation failed");
+  CommandList* frame = device->BeginFrame(0);
+  if (!frame) return Fail("BeginFrame returned null");
+  frame->CopyBuffer(d, 0, frame_readback, 0, expect_d.size());
+  frame->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kHostRead);
+  device->SubmitFrame(frame);
+  device->WaitIdle();
+  device->InvalidateBuffer(frame_readback, 0, expect_d.size());
+  if (std::memcmp(frame_readback.mapped, expect_d.data(), expect_d.size()) != 0)
+    return Fail("frame read a batched buffer before its copy landed");
+  device->FlushUploadBatch();
+
+  // --- the texture path: RecordUpload + ParkBatchStaging, as MaterialSystem
+  // does it. The staging must survive to the flush and the image must come out
+  // in kShaderReadAll with the right pixels. ---
+  constexpr u32 kDim = 64;
+  std::vector<u8> expect_tex(kDim * kDim * 4);
+  for (size_t i = 0; i < expect_tex.size(); ++i) expect_tex[i] = static_cast<u8>(i * 7 + 3);
+  device->BeginUploadBatch();
+  GpuImage image = device->CreateImage2D(
+      Format::kRGBA8Unorm, {kDim, kDim},
+      kTextureUsageSampled | kTextureUsageTransferDst | kTextureUsageTransferSrc);
+  if (!image) return Fail("CreateImage2D returned null");
+  GpuBuffer tex_staging =
+      device->CreateBuffer(expect_tex.size(), kBufferUsageTransferSrc, /*host_visible=*/true);
+  if (!tex_staging.mapped) return Fail("texture staging creation failed");
+  std::memcpy(tex_staging.mapped, expect_tex.data(), expect_tex.size());
+  device->FlushBuffer(tex_staging, 0, expect_tex.size());
+  if (!device->UploadBatchActive()) return Fail("batch not active for the texture case");
+  device->RecordUpload([&](CommandList& cmd) {
+    cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
+    BufferTextureCopy region{.mip = 0, .extent = {kDim, kDim}};
+    cmd.CopyBufferToTexture(tex_staging, image, {&region, 1});
+    cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+  });
+  device->ParkBatchStaging(tex_staging);
+  if (tex_staging) return Fail("ParkBatchStaging left the caller's handle live");
+  device->FlushUploadBatch();
+  std::vector<u8> got_tex(expect_tex.size());
+  if (!device->ReadbackImage(image, ResourceState::kShaderReadAll, got_tex.data(), got_tex.size()))
+    return Fail("ReadbackImage failed");
+  if (std::memcmp(got_tex.data(), expect_tex.data(), expect_tex.size()) != 0)
+    return Fail("batched texture contents wrong after flush");
+  device->DestroyImage(image);
+
+  for (GpuBuffer* buffer : {&a, &b, &c, &d, &frame_readback, &big[0], &big[1], &big[2]})
     device->DestroyBuffer(*buffer);
   device->WaitIdle();
   std::printf("upload_batch_test: PASS\n");
