@@ -100,15 +100,20 @@ const Material *AssetDatabase::LoadMaterial(std::string_view path) {
 
 void AssetDatabase::AddMaterial(const Material &material) {
   std::scoped_lock lock(mutex_);
-  if (materials_.contains(material.id.hash))
+  if (auto *existing = materials_.find(material.id.hash)) {
+    if (!*existing)
+      *existing = base::MakeUnique<Material>(material);
     return;
+  }
   materials_.emplace(material.id.hash, base::MakeUnique<Material>(material));
 }
 
 const Mesh *AssetDatabase::AddMesh(Mesh mesh) {
   u64 hash = mesh.id.hash;
   std::scoped_lock lock(mutex_);
-  if (const auto *existing = meshes_.find(hash)) {
+  if (auto *existing = meshes_.find(hash)) {
+    if (!*existing)
+      *existing = base::MakeUnique<Mesh>(std::move(mesh));
     return existing->Get_UseOnlyIfYouKnowWhatYouareDoing();
   }
   return meshes_.emplace(hash, base::MakeUnique<Mesh>(std::move(mesh)))
@@ -138,7 +143,9 @@ bool AssetDatabase::RemoveMesh(AssetId id) {
 const Texture *AssetDatabase::AddTexture(Texture texture) {
   u64 hash = texture.id.hash;
   std::scoped_lock lock(mutex_);
-  if (const auto *existing = textures_.find(hash)) {
+  if (auto *existing = textures_.find(hash)) {
+    if (!*existing)
+      *existing = base::MakeUnique<Texture>(std::move(texture));
     return existing->Get_UseOnlyIfYouKnowWhatYouareDoing();
   }
   return textures_.emplace(hash, base::MakeUnique<Texture>(std::move(texture)))

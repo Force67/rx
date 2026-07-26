@@ -357,6 +357,10 @@ if(RX_BUILD_TESTS)
   add_executable(vfs_test test/vfs_test.cc)
   target_link_libraries(vfs_test PRIVATE rx::asset rx::core)
   add_test(NAME vfs_test COMMAND vfs_test)
+
+  add_executable(asset_database_test test/asset_database_test.cc)
+  target_link_libraries(asset_database_test PRIVATE rx::asset rx::core)
+  add_test(NAME asset_database_test COMMAND asset_database_test)
 endif()
 
 # Procedural vehicle audio: engine/skid/wind synthesis, the SynthVoice seam and
