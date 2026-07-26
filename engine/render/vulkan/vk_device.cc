@@ -1111,7 +1111,13 @@ void VulkanDevice::FlushUploadBatch() {
 
 void VulkanDevice::ParkBatchStaging(GpuBuffer& buffer) {
   CheckUploadBatchThread("ParkBatchStaging");
-  if (upload_batch_depth_ == 0) {  // contract misuse; match the base default
+  // Park only what a pending batch command buffer actually references. No batch
+  // (contract misuse), or a batch whose recording fell back to a blocking
+  // ImmediateSubmit, means the copy has already run: freeing now instead of
+  // parking keeps the staging out of upload_batch_staging_bytes_, which nothing
+  // would ever drain (SubmitUploadBatchIfPending bails before moving the
+  // stagings when there is no command buffer to submit).
+  if (upload_batch_depth_ == 0 || upload_batch_cmd_ == VK_NULL_HANDLE) {
     DestroyBuffer(buffer);
     return;
   }

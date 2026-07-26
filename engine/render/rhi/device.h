@@ -294,7 +294,11 @@ class Device {
 
   // True while a batch (see BeginUploadBatch) is open. Callers that stage their
   // own uploads (e.g. texture image copies) check this to decide whether their
-  // staging must survive until the batch flush.
+  // staging must survive until the batch flush. It answers "is a batch open",
+  // not "will the next RecordUpload defer": a backend may still fall back to a
+  // blocking submit. Pairing it with ParkBatchStaging stays correct either way
+  // (the park frees immediately when nothing deferred), it just over-allocates a
+  // per-call staging on the fallback path.
   virtual bool UploadBatchActive() const { return false; }
   // Records an upload's copy/barrier commands into the open batch's command
   // buffer, or, with no batch open, runs them through a blocking ImmediateSubmit
@@ -308,7 +312,8 @@ class Device {
     ImmediateSubmit(record);
   }
   // Hands a staging buffer to the open batch to free once its copies have run
-  // (only call while UploadBatchActive()); frees immediately otherwise.
+  // (only call while UploadBatchActive()); frees immediately otherwise, which
+  // also covers a batch that ran the copies through a blocking submit.
   virtual void ParkBatchStaging(GpuBuffer& buffer) { DestroyBuffer(buffer); }
 
   // Frame ring: waits for `slot`'s previous submission, resets its command
