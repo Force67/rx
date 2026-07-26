@@ -45,6 +45,7 @@ bool VerifyContents(Device& device, const GpuBuffer& buffer, const std::vector<u
     cmd.CopyBuffer(buffer, 0, readback, 0, expect.size());
     cmd.MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kHostRead);
   });
+  device.InvalidateBuffer(readback, 0, expect.size());
   const bool ok = std::memcmp(readback.mapped, expect.data(), expect.size()) == 0;
   GpuBuffer retire = readback;
   device.DestroyBuffer(retire);

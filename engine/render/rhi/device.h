@@ -150,6 +150,10 @@ class Device {
   // Makes writes to a persistently mapped host-visible range available to the
   // GPU. Coherent backends implement this as a no-op.
   virtual void FlushBuffer(const GpuBuffer& /*buffer*/, u64 /*offset*/, u64 /*size*/) {}
+  // Makes GPU writes to a persistently mapped host-visible range visible to the
+  // CPU after the submission has completed. Coherent backends implement this as
+  // a no-op.
+  virtual void InvalidateBuffer(const GpuBuffer& /*buffer*/, u64 /*offset*/, u64 /*size*/) {}
   // Immediate destruction: the caller guarantees the GPU is done with the
   // resource (no in-flight frame references it). For a resource that may still
   // be read by a submitted-but-unfinished frame use the *Deferred variants.

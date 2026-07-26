@@ -271,6 +271,7 @@ class VulkanDevice final : public Device {
   GpuBuffer CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible) override;
   GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override;
   void FlushBuffer(const GpuBuffer& buffer, u64 offset, u64 size) override;
+  void InvalidateBuffer(const GpuBuffer& buffer, u64 offset, u64 size) override;
   void DestroyBuffer(GpuBuffer& buffer) override;
   void DestroyBufferDeferred(GpuBuffer& buffer) override;
   void DestroyImageDeferred(GpuImage& image) override;
@@ -319,7 +320,10 @@ class VulkanDevice final : public Device {
   void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
   void BeginUploadBatch() override;
   void FlushUploadBatch() override;
-  bool UploadBatchActive() const override { return upload_batch_depth_ > 0; }
+  bool UploadBatchActive() const override {
+    CheckUploadBatchThread("UploadBatchActive");
+    return upload_batch_depth_ > 0;
+  }
   void RecordUpload(const std::function<void(CommandList&)>& record) override;
   void ParkBatchStaging(GpuBuffer& buffer) override;
   bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
@@ -468,14 +472,14 @@ class VulkanDevice final : public Device {
   // open), bounding the staging high-water mark of a large streaming burst.
   u64 upload_batch_staging_bytes_ = 0;
   // The thread the device was created on; the batch state above is
-  // unsynchronized, so every batch entry point checks against it and logs a
-  // loud error on misuse (an off-thread upload silently corrupts the batch).
+  // unsynchronized, so every batch entry point enforces thread affinity.
   std::thread::id upload_batch_thread_ = std::this_thread::get_id();
   void CheckUploadBatchThread(const char* what) const;
   // Lazily begins the batch command buffer on the first copy; submits any
   // pending batch copies (leaving the batch open) before dependent GPU work.
   VulkanCommandList& EnsureUploadBatchCmd();
   void SubmitUploadBatchIfPending();
+  void DiscardPendingUploadBatch();
   // A submitted-but-possibly-still-executing batch: the CPU no longer waits at
   // flush. A trailing kTransferWrite->kAllCommands barrier in the batch orders
   // its copies against all later graphics-queue work, and the fence retires the

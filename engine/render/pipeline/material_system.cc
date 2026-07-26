@@ -342,6 +342,7 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
     }
   }
   std::memcpy(staging->mapped, texture.data.data() + skip, upload_bytes);
+  device_.FlushBuffer(*staging, 0, upload_bytes);
 
   u32 upload_mips = generate_mips ? 1 : mip_count;
   device_.RecordUpload([&](CommandList& cmd) {
@@ -812,6 +813,10 @@ void MaterialSystem::BeginFrame(u32 frame_index) {
 bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 frame_index) {
   GpuImage next = UploadTextureImage(record.source, first_mip);
   if (!next) return false;
+  auto destroy_next = [&] {
+    if (device_.UploadBatchActive()) device_.WaitIdle();
+    device_.DestroyImage(next);
+  };
 
   u32 old_slot = record.bindless;
   u32 new_slot = BindlessRegistry::kInvalidIndex;
@@ -820,7 +825,7 @@ bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 fram
     // update-after-bind only allows us to leave alone, not rewrite.
     new_slot = registry_->RegisterTexture(next.view);
     if (new_slot == BindlessRegistry::kInvalidIndex) {
-      device_.DestroyImage(next);
+      destroy_next();
       return false;
     }
   }
@@ -836,7 +841,7 @@ bool MaterialSystem::SwapResident(TextureRecord& record, u32 first_mip, u32 fram
       if (registry_ && new_slot != BindlessRegistry::kInvalidIndex) {
         registry_->ReleaseTexture(new_slot);
       }
-      device_.DestroyImage(next);
+      destroy_next();
       return false;
     }
     fresh_sets.push_back(fresh);

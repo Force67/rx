@@ -882,12 +882,17 @@ GpuBuffer VulkanDevice::CreateBuffer(u64 size, BufferUsageFlags usage, bool host
 }
 
 GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) {
+  CheckUploadBatchThread("CreateBufferWithData");
   GpuBuffer staging = CreateBuffer(data.size(), kBufferUsageTransferSrc, true);
   if (!staging.mapped) return {};
   std::memcpy(staging.mapped, data.data(), data.size());
   FlushBuffer(staging, 0, data.size());
 
   GpuBuffer buffer = CreateBuffer(data.size(), usage | kBufferUsageTransferDst, false);
+  if (!buffer) {
+    DestroyBuffer(staging);
+    return {};
+  }
   if (upload_batch_depth_ > 0) {
     // Batched: record the copy into the shared batch command buffer and keep
     // the staging alive until the batch flushes (a fresh staging per call, so
@@ -912,11 +917,20 @@ void VulkanDevice::FlushBuffer(const GpuBuffer& buffer, u64 offset, u64 size) {
   }
 }
 
+void VulkanDevice::InvalidateBuffer(const GpuBuffer& buffer, u64 offset, u64 size) {
+  BufferRecord* record = Rec(buffer.handle);
+  if (!record || !record->allocation || size == 0) return;
+  if (vmaInvalidateAllocation(allocator_, record->allocation, offset, size) != VK_SUCCESS) {
+    RX_ERROR("mapped buffer invalidation failed ({} bytes at {})", size, offset);
+  }
+}
+
 void VulkanDevice::CheckUploadBatchThread(const char* what) const {
   if (std::this_thread::get_id() != upload_batch_thread_) {
     RX_ERROR("{} called off the device thread; the upload batch is unsynchronized and this "
-             "corrupts it silently. Convert on workers, upload on the device thread.",
+             "would corrupt it. Convert on workers, upload on the device thread.",
              what);
+    std::abort();
   }
 }
 
@@ -927,10 +941,16 @@ VulkanCommandList& VulkanDevice::EnsureUploadBatchCmd() {
     alloc.commandPool = immediate_pool_;
     alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc.commandBufferCount = 1;
-    vkAllocateCommandBuffers(device_, &alloc, &upload_batch_cmd_);
+    if (vkAllocateCommandBuffers(device_, &alloc, &upload_batch_cmd_) != VK_SUCCESS) {
+      RX_ERROR("upload batch command-buffer allocation failed");
+      std::abort();
+    }
     VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(upload_batch_cmd_, &begin);
+    if (vkBeginCommandBuffer(upload_batch_cmd_, &begin) != VK_SUCCESS) {
+      RX_ERROR("upload batch command-buffer begin failed");
+      std::abort();
+    }
     upload_batch_list_ =
         std::make_unique<VulkanCommandList>(*this, upload_batch_cmd_, immediate_descriptor_pool_);
   }
@@ -945,8 +965,21 @@ VkFence VulkanDevice::AcquireUploadBatchFence() {
   }
   VkFence fence = VK_NULL_HANDLE;
   VkFenceCreateInfo info{.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-  vkCreateFence(device_, &info, nullptr, &fence);
+  if (vkCreateFence(device_, &info, nullptr, &fence) != VK_SUCCESS) {
+    RX_ERROR("upload batch fence creation failed; falling back to a queue drain");
+  }
   return fence;
+}
+
+void VulkanDevice::DiscardPendingUploadBatch() {
+  if (upload_batch_cmd_ != VK_NULL_HANDLE) {
+    vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
+    upload_batch_cmd_ = VK_NULL_HANDLE;
+  }
+  upload_batch_list_.reset();
+  for (GpuBuffer& staging : upload_batch_stagings_) DestroyBuffer(staging);
+  upload_batch_stagings_.clear();
+  upload_batch_staging_bytes_ = 0;
 }
 
 // Frees every in-flight batch whose fence has signaled. Same-queue submissions
@@ -957,7 +990,12 @@ void VulkanDevice::RetireCompletedUploadBatches() {
   size_t retired = 0;
   while (retired < upload_batches_in_flight_.size()) {
     UploadBatchInFlight& batch = upload_batches_in_flight_[retired];
-    if (vkGetFenceStatus(device_, batch.fence) != VK_SUCCESS) break;
+    const VkResult status = vkGetFenceStatus(device_, batch.fence);
+    if (status == VK_NOT_READY) break;
+    if (status != VK_SUCCESS) {
+      RX_ERROR("upload batch fence query failed ({})", static_cast<int>(status));
+      break;
+    }
     vkResetFences(device_, 1, &batch.fence);
     upload_fence_pool_.push_back(batch.fence);
     vkFreeCommandBuffers(device_, immediate_pool_, 1, &batch.cmd);
@@ -973,7 +1011,12 @@ void VulkanDevice::RetireCompletedUploadBatches() {
 void VulkanDevice::DrainUploadBatchesInFlight() {
   if (!upload_batches_in_flight_.empty()) {
     // In-order completion: the newest fence proves every older batch too.
-    vkWaitForFences(device_, 1, &upload_batches_in_flight_.back().fence, VK_TRUE, UINT64_MAX);
+    const VkResult waited =
+        vkWaitForFences(device_, 1, &upload_batches_in_flight_.back().fence, VK_TRUE, UINT64_MAX);
+    if (waited != VK_SUCCESS) {
+      RX_ERROR("upload batch fence wait failed ({})", static_cast<int>(waited));
+      return;
+    }
   }
   RetireCompletedUploadBatches();
 }
@@ -992,12 +1035,31 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
   RetireCompletedUploadBatches();
   if (upload_batch_cmd_ == VK_NULL_HANDLE) return;
   upload_batch_list_->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kAllCommands);
-  vkEndCommandBuffer(upload_batch_cmd_);
+  if (vkEndCommandBuffer(upload_batch_cmd_) != VK_SUCCESS) {
+    RX_ERROR("upload batch command-buffer end failed");
+    DiscardPendingUploadBatch();
+    return;
+  }
   VkFence fence = AcquireUploadBatchFence();
   VkSubmitInfo submit{.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &upload_batch_cmd_;
-  vkQueueSubmit(graphics_queue_, 1, &submit, fence);
+  if (fence == VK_NULL_HANDLE) {
+    const VkResult submitted = vkQueueSubmit(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
+    const VkResult waited = submitted == VK_SUCCESS ? vkQueueWaitIdle(graphics_queue_) : submitted;
+    if (waited != VK_SUCCESS) {
+      RX_ERROR("upload batch fallback submit failed ({})", static_cast<int>(waited));
+    }
+    DiscardPendingUploadBatch();
+    return;
+  }
+  const VkResult submitted = vkQueueSubmit(graphics_queue_, 1, &submit, fence);
+  if (submitted != VK_SUCCESS) {
+    RX_ERROR("upload batch submit failed ({})", static_cast<int>(submitted));
+    vkDestroyFence(device_, fence, nullptr);
+    DiscardPendingUploadBatch();
+    return;
+  }
 
   UploadBatchInFlight in_flight;
   in_flight.cmd = upload_batch_cmd_;
@@ -1019,7 +1081,12 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
   constexpr u64 kMaxInFlightStagingBytes = 256ull << 20;
   while (upload_inflight_staging_bytes_ >= kMaxInFlightStagingBytes &&
          !upload_batches_in_flight_.empty()) {
-    vkWaitForFences(device_, 1, &upload_batches_in_flight_.front().fence, VK_TRUE, UINT64_MAX);
+    const VkResult waited = vkWaitForFences(
+        device_, 1, &upload_batches_in_flight_.front().fence, VK_TRUE, UINT64_MAX);
+    if (waited != VK_SUCCESS) {
+      RX_ERROR("upload batch staging-cap wait failed ({})", static_cast<int>(waited));
+      break;
+    }
     RetireCompletedUploadBatches();
   }
 }
@@ -1041,8 +1108,10 @@ void VulkanDevice::ParkBatchStaging(GpuBuffer& buffer) {
     DestroyBuffer(buffer);
     return;
   }
+  const u64 size = buffer.size;
   upload_batch_stagings_.push_back(buffer);
-  upload_batch_staging_bytes_ += buffer.size;
+  buffer = {};
+  upload_batch_staging_bytes_ += size;
   // A large burst would otherwise hold every staging (all geometry + texture
   // bytes of the burst) host-visible until the flush. Above the budget, submit
   // what has accumulated (the batch stays open); safe here because the parked
@@ -1052,6 +1121,7 @@ void VulkanDevice::ParkBatchStaging(GpuBuffer& buffer) {
 }
 
 void VulkanDevice::RecordUpload(const std::function<void(CommandList&)>& record) {
+  CheckUploadBatchThread("RecordUpload");
   // Batched: record into the shared batch command buffer (submitted at flush).
   // Otherwise a blocking ImmediateSubmit, exactly as the caller would have done.
   if (upload_batch_depth_ > 0) {
