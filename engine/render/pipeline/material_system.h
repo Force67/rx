@@ -225,7 +225,14 @@ class MaterialSystem {
 
  private:
   static constexpr u32 kMaterialsPerPool = 256;
-  static constexpr u32 kParamStride = 256;  // covers minUniformBufferOffsetAlignment
+  // Must hold a whole Params and stay a multiple of the worst-case
+  // minUniformBufferOffsetAlignment (256), so it steps in 256s. Params outgrew
+  // 256 bytes when the skin sss rows landed: every write then spilled 16 bytes
+  // into the next material's slot and the last slot of each pool ran off the end
+  // of the mapped buffer (VUID-VkDescriptorBufferInfo-range-00342).
+  static constexpr u32 kParamStride = 512;
+  static_assert(sizeof(Params) <= kParamStride,
+                "kParamStride must cover sizeof(Params); bump it by 256");
   // Streaming tuning. Tail = the always-resident low mips (top mip at most
   // kTailMaxDim). A texture is hot while a material using it was drawn within
   // kHotWindow frames; only textures cold for kColdWindow are demoted to make

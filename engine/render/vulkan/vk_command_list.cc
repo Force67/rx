@@ -167,6 +167,10 @@ VkPipelineStageFlags2 VulkanCommandList::FilterStages(VkPipelineStageFlags2 stag
       VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT |
       VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT |
       VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_HOST_BIT |
+      // Legal on a compute queue (it is the stage DispatchIndirect reads its
+      // args in), and FilterAccess keeps INDIRECT_COMMAND_READ, so dropping it
+      // here left that access bit with no stage that permits it.
+      VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT |
       VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR |
       VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR;
   VkPipelineStageFlags2 filtered = stages & kComputeLegal;
