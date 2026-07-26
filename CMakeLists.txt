@@ -613,6 +613,11 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_executable(upload_batch_test test/upload_batch_test.cc)
   target_link_libraries(upload_batch_test PRIVATE rx::render rx::core)
   add_test(NAME upload_batch_test COMMAND upload_batch_test)
+  # Validation on, and any VUID fails the test: the deferred-destroy case can
+  # only report an early free as "destroyed while in use", not as a bad readback.
+  set_tests_properties(upload_batch_test PROPERTIES
+    ENVIRONMENT "RX_VALIDATION=1"
+    FAIL_REGULAR_EXPRESSION "VUID")
 
   # Morph targets: glTF import + weight-track sampling against the committed
   # CC0 Khronos AnimatedMorphCube, and the shared morph.hlsli accumulation

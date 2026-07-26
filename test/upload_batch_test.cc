@@ -166,6 +166,38 @@ int main() {
     return Fail("batched texture contents wrong after flush");
   device->DestroyImage(image);
 
+  // --- deferred destroy of a resource a submitted-but-unfinished batch is
+  // still copying into. Retiring from outside the frame loop parks under the
+  // previous frame's slot, whose fence predates the batch, so only the batch
+  // serial keeps the free honest. Under validation an early free shows up as
+  // "destroyed while in use" (the ctest FAIL_REGULAR_EXPRESSION catches it). ---
+  device->BeginUploadBatch();
+  GpuImage doomed = device->CreateImage2D(Format::kRGBA8Unorm, {kDim, kDim},
+                                         kTextureUsageSampled | kTextureUsageTransferDst);
+  if (!doomed) return Fail("CreateImage2D returned null (deferred-destroy case)");
+  GpuBuffer doomed_staging =
+      device->CreateBuffer(expect_tex.size(), kBufferUsageTransferSrc, /*host_visible=*/true);
+  if (!doomed_staging.mapped) return Fail("staging creation failed (deferred-destroy case)");
+  std::memcpy(doomed_staging.mapped, expect_tex.data(), expect_tex.size());
+  device->FlushBuffer(doomed_staging, 0, expect_tex.size());
+  device->RecordUpload([&](CommandList& cmd) {
+    cmd.Barrier(Transition(doomed, ResourceState::kUndefined, ResourceState::kCopyDst));
+    BufferTextureCopy region{.mip = 0, .extent = {kDim, kDim}};
+    cmd.CopyBufferToTexture(doomed_staging, doomed, {&region, 1});
+    cmd.Barrier(Transition(doomed, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+  });
+  device->ParkBatchStaging(doomed_staging);
+  device->DestroyImageDeferred(doomed);  // batch still pending, copy not submitted yet
+  device->FlushUploadBatch();            // submits, does NOT wait
+  // Cycle the frame ring so every slot's graveyard gets a drain attempt while
+  // the batch may still be running.
+  for (u32 i = 0; i < Device::kMaxFramesInFlight + 1; ++i) {
+    CommandList* spin = device->BeginFrame(i % Device::kMaxFramesInFlight);
+    if (!spin) return Fail("BeginFrame returned null (deferred-destroy case)");
+    device->SubmitFrame(spin);
+  }
+  device->WaitIdle();
+
   for (GpuBuffer* buffer : {&a, &b, &c, &d, &frame_readback, &big[0], &big[1], &big[2]})
     device->DestroyBuffer(*buffer);
   device->WaitIdle();
