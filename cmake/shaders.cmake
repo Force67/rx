@@ -69,16 +69,19 @@ function(rx_embed_shaders target)
                 -entry main -stage ${RX_SLANG_STAGE_${stage}}
                 -matrix-layout-column-major ${include_flags}
                 -depfile ${spv}.d -o ${spv}
+        BYPRODUCTS ${spv}.d
         DEPFILE ${spv}.d
         DEPENDS ${src} ${extra_deps}
-        COMMENT "slang ${name}")
+        COMMENT "slang ${name}"
+        VERBATIM)
     else()
       add_custom_command(OUTPUT ${spv}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
         COMMAND ${RX_DXC} -spirv -fspv-target-env=vulkan1.3 -T ${stage}_6_6 -E main
                 ${include_flags} -Fo ${spv} ${src}
         DEPENDS ${src} ${extra_deps}
-        COMMENT "hlsl ${name}")
+        COMMENT "hlsl ${name}"
+        VERBATIM)
     endif()
     set(embed_args)
     set(embed_deps ${spv})
@@ -93,24 +96,31 @@ function(rx_embed_shaders target)
       set(dxil ${CMAKE_CURRENT_BINARY_DIR}/shaders/${name}.dxil)
       if(lang STREQUAL "slang")
         set(gen_hlsl ${CMAKE_CURRENT_BINARY_DIR}/shaders/${name}.dxil.hlsl)
-        add_custom_command(OUTPUT ${dxil}
+        add_custom_command(OUTPUT ${gen_hlsl}
           COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
           COMMAND ${RX_SLANGC} ${src} -target hlsl
                   -entry main -stage ${RX_SLANG_STAGE_${stage}}
                   -matrix-layout-column-major ${include_flags}
-                  -depfile ${dxil}.d -o ${gen_hlsl}
+                  -depfile ${gen_hlsl}.d -o ${gen_hlsl}
+          BYPRODUCTS ${gen_hlsl}.d
+          DEPFILE ${gen_hlsl}.d
+          DEPENDS ${src} ${extra_deps}
+          COMMENT "slang hlsl ${name}"
+          VERBATIM)
+        add_custom_command(OUTPUT ${dxil}
           COMMAND ${RX_DXC} -T ${stage}_6_5 -E main -Qstrip_reflect
                   -Fo ${dxil} ${gen_hlsl}
-          DEPFILE ${dxil}.d
-          DEPENDS ${src} ${extra_deps}
-          COMMENT "dxil ${name}")
+          DEPENDS ${gen_hlsl}
+          COMMENT "dxil ${name}"
+          VERBATIM)
       else()
         add_custom_command(OUTPUT ${dxil}
           COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
           COMMAND ${RX_DXC} -T ${stage}_6_5 -E main -Qstrip_reflect
                   ${include_flags} -Fo ${dxil} ${src}
           DEPENDS ${src} ${extra_deps}
-          COMMENT "dxil ${name}")
+          COMMENT "dxil ${name}"
+          VERBATIM)
       endif()
       list(APPEND embed_args -DDXIL=${dxil})
       list(APPEND embed_deps ${dxil})
@@ -119,7 +129,8 @@ function(rx_embed_shaders target)
       COMMAND ${CMAKE_COMMAND} -DSPV=${spv} -DHEADER=${header} -DSYMBOL=${symbol}
               ${embed_args} -P ${PROJECT_SOURCE_DIR}/cmake/embed_spv.cmake
       DEPENDS ${embed_deps} ${PROJECT_SOURCE_DIR}/cmake/embed_spv.cmake
-      COMMENT "embed ${name}")
+      COMMENT "embed ${name}"
+      VERBATIM)
     list(APPEND headers ${header})
   endforeach()
   add_custom_target(${target}_shaders DEPENDS ${headers})
