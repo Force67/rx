@@ -323,9 +323,12 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
       height = std::max(1u, height / 2);
     }
   }
-  if (upload_bytes == 0 || skip > texture.data.size() ||
-      upload_bytes > texture.data.size() - skip) {
-    RX_WARN("texture upload skipped, mip data is truncated");
+  // upload_bytes is always positive here: every mip is at least one block of a
+  // known format, and upload_mips is at least 1.
+  if (skip > texture.data.size() || upload_bytes > texture.data.size() - skip) {
+    RX_WARN("texture upload skipped, mip data is truncated ({} mips from {} need {} bytes, "
+            "{} available)",
+            upload_mips, first_mip, upload_bytes, texture.data.size());
     return {};
   }
 

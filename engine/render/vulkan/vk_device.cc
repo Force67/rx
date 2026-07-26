@@ -1077,10 +1077,24 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
   submit.pCommandBuffers = &upload_batch_cmd_;
   if (fence == VK_NULL_HANDLE) {
     const VkResult submitted = vkQueueSubmit(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
-    const VkResult waited = submitted == VK_SUCCESS ? vkQueueWaitIdle(graphics_queue_) : submitted;
-    if (waited != VK_SUCCESS) {
+    if (submitted != VK_SUCCESS) {
       ReportDroppedUploadBatch("fallback submit failed");
       DiscardPendingUploadBatch();
+      return;
+    }
+    if (const VkResult waited = vkQueueWaitIdle(graphics_queue_); waited != VK_SUCCESS) {
+      // Submitted but unproven. The command buffer is still pending and the
+      // stagings are still being read, so freeing either is illegal — leak both
+      // (this is device-lost) and leave the serial unretired. Resources already
+      // parked against it stay parked until a later batch on this queue
+      // retires, which proves this one did too by submission order.
+      ReportDroppedUploadBatch("fallback drain failed");
+      upload_batch_cmd_ = VK_NULL_HANDLE;
+      upload_batch_list_.reset();  // wrapper only; the VkCommandBuffer stays alive
+      upload_batch_stagings_.clear();
+      upload_batch_staging_bytes_ = 0;
+      upload_batch_records_ = 0;
+      upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
       return;
     }
     // The queue drain is the completion proof a fence would normally provide.
