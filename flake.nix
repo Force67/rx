@@ -99,7 +99,7 @@
           version = "0.1.0";
           src = self;
 
-          nativeBuildInputs = with pkgs; [ cmake ninja directx-shader-compiler pkg-config ];
+          nativeBuildInputs = with pkgs; [ cmake ninja directx-shader-compiler shader-slang pkg-config ];
           # wayland: libwayland-client for the KDE HDR-toggle monitor (linux).
           buildInputs = with pkgs; [ mimalloc sdl3 ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux [ pkgs.wayland ];
@@ -199,7 +199,8 @@
               cmake
               ninja
               gdb
-              directx-shader-compiler  # dxc, hlsl -> spirv
+              directx-shader-compiler  # dxc, hlsl -> spirv (also slang's dxil sidecar)
+              shader-slang             # slangc, slang -> spirv
               glslang                  # FidelityFX shader permutations
               pkg-config
               sdl3

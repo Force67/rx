@@ -469,7 +469,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   vkGetPhysicalDeviceFeatures2(device->physical_device_, &features);
 
   if (!f13.dynamicRendering || !f13.synchronization2 || !f12.bufferDeviceAddress ||
-      !f12.timelineSemaphore || !f12.descriptorIndexing) {
+      !f12.timelineSemaphore || !f12.descriptorIndexing || !f11.shaderDrawParameters) {
     RX_ERROR("{} lacks the required vulkan 1.3 baseline", device->caps_.adapter_name);
     return nullptr;
   }

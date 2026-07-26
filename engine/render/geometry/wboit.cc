@@ -5,7 +5,7 @@
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
-#include "shaders/fullscreen_vs_hlsl.h"
+#include "shaders/fullscreen_vs_slang.h"
 #include "shaders/wboit_ps_hlsl.h"
 #include "shaders/wboit_resolve_ps_hlsl.h"
 #include "shaders/wboit_vs_hlsl.h"
@@ -82,7 +82,7 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
                                 .address_w = AddressMode::kClampToEdge});
 
   resolve_pipeline_ = device.CreateGraphicsPipeline({
-      .vertex = RX_SHADER(k_fullscreen_vs_hlsl),
+      .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_wboit_resolve_ps_hlsl),
       .raster = {.cull = CullMode::kNone, .front = FrontFace::kCounterClockwise},
       .color_formats = {color_format_},

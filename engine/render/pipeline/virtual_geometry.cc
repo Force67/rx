@@ -10,7 +10,7 @@
 #include "asset/simplify.h"
 #include "core/log.h"
 #include "render/pipeline/meshlet.h"
-#include "shaders/fullscreen_vs_hlsl.h"
+#include "shaders/fullscreen_vs_slang.h"
 #include "shaders/meshlet_ps_hlsl.h"
 #include "shaders/vgeo_args_cs_hlsl.h"
 #include "shaders/vgeo_clear_cs_hlsl.h"
@@ -169,7 +169,7 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
       .debug_name = "vgeo_vis",
   });
   resolve_pipeline_ = device.CreateGraphicsPipeline({
-      .vertex = RX_SHADER(k_fullscreen_vs_hlsl),
+      .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_vgeo_resolve_ps_hlsl),
       .raster = {.cull = CullMode::kNone},
       .depth = {.test = true, .write = true, .compare = CompareOp::kGreaterEqual,

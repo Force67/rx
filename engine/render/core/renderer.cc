@@ -15,13 +15,13 @@
 #include "core/log.h"
 #include "core/memory/memory_tracker.h"
 #include "render/util/exr_write.h"
-#include "shaders/blit_ps_hlsl.h"
+#include "shaders/blit_ps_slang.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
 #include "shaders/contact_shadow_cs_hlsl.h"
 #include "shaders/debug_line_ps_hlsl.h"
 #include "shaders/debug_line_vs_hlsl.h"
 #include "shaders/depth_copy_ps_hlsl.h"
-#include "shaders/fullscreen_vs_hlsl.h"
+#include "shaders/fullscreen_vs_slang.h"
 #include "shaders/hdr_capture_cs_hlsl.h"
 #include "shaders/light_cluster_cs_hlsl.h"
 #include "shaders/msaa_resolve_cs_hlsl.h"
@@ -494,7 +494,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
       .debug_name = "msaa_resolve",
   });
   depth_copy_pipeline_ = device_->CreateGraphicsPipeline({
-      .vertex = RX_SHADER(k_fullscreen_vs_hlsl),
+      .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_depth_copy_ps_hlsl),
       .raster = {.cull = CullMode::kNone},
       .depth = {.test = true,
@@ -505,8 +505,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
       .debug_name = "msaa_depth_copy",
   });
   hdr_overlay_copy_pipeline_ = device_->CreateGraphicsPipeline({
-      .vertex = RX_SHADER(k_fullscreen_vs_hlsl),
-      .fragment = RX_SHADER(k_blit_ps_hlsl),
+      .vertex = RX_SHADER(k_fullscreen_vs_slang),
+      .fragment = RX_SHADER(k_blit_ps_slang),
       .raster = {.cull = CullMode::kNone},
       .color_formats = {kSceneColorFormat},
       .blend = {BlendMode::kOpaque},

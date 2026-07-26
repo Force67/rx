@@ -7,7 +7,7 @@
 #include <base/containers/vector.h>
 
 #include "core/log.h"
-#include "shaders/fullscreen_vs_hlsl.h"
+#include "shaders/fullscreen_vs_slang.h"
 #include "shaders/tonemap_ps_hlsl.h"
 
 namespace rx::render {
@@ -20,7 +20,7 @@ std::unique_ptr<PostPass> PostPass::Create(Device& device, Format output_format)
                                       .address_w = AddressMode::kClampToEdge});
 
   pass->pipeline_ = device.CreateGraphicsPipeline({
-      .vertex = RX_SHADER(k_fullscreen_vs_hlsl),
+      .vertex = RX_SHADER(k_fullscreen_vs_slang),
       .fragment = RX_SHADER(k_tonemap_ps_hlsl),
       .raster = {.cull = CullMode::kNone},
       .color_formats = {output_format},

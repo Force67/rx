@@ -4,6 +4,7 @@ struct VsOut {
 };
 
 // Single triangle covering the screen, no vertex buffer.
+[shader("vertex")]
 VsOut main(uint vertex_id : SV_VertexID) {
   VsOut output;
   output.uv = float2((vertex_id << 1) & 2, vertex_id & 2);

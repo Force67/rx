@@ -15,9 +15,9 @@
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
 
-// Build-embedded test shaders (test/shaders/*.hlsl -> generated/shaders/*.h).
-#include "shaders/offscreen_tri_vs_hlsl.h"
-#include "shaders/offscreen_tri_ps_hlsl.h"
+// Build-embedded test shaders (test/shaders/*.slang -> generated/shaders/*.h).
+#include "shaders/offscreen_tri_vs_slang.h"
+#include "shaders/offscreen_tri_ps_slang.h"
 
 using namespace rx::render;
 
@@ -57,8 +57,8 @@ int main() {
   if (!image) return Fail("CreateImage2D returned null");
 
   GraphicsPipelineDesc pd;
-  pd.vertex = RX_SHADER(k_offscreen_tri_vs_hlsl);
-  pd.fragment = RX_SHADER(k_offscreen_tri_ps_hlsl);
+  pd.vertex = RX_SHADER(k_offscreen_tri_vs_slang);
+  pd.fragment = RX_SHADER(k_offscreen_tri_ps_slang);
   pd.color_formats.push_back(kFmt);
   pd.raster.cull = CullMode::kNone;  // winding-agnostic
   pd.debug_name = "offscreen_tri";

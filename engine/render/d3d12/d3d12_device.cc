@@ -16,8 +16,8 @@
 
 // Internal blit shaders (BlitMip lowers to a fullscreen draw; D3D12 has no
 // filtered copy). Embedded by the build like every pass shader.
-#include "shaders/fullscreen_vs_hlsl.h"
-#include "shaders/blit_ps_hlsl.h"
+#include "shaders/fullscreen_vs_slang.h"
+#include "shaders/blit_ps_slang.h"
 
 namespace rx::render::d3d12 {
 namespace {
@@ -1693,8 +1693,8 @@ PipelineHandle D3D12Device::GetBlitPipeline(Format format) {
   u64 key = static_cast<u64>(format);
   if (PipelineHandle* cached = blit_pipeline_cache_.find(key)) return *cached;
   GraphicsPipelineDesc desc;
-  desc.vertex = RX_SHADER(k_fullscreen_vs_hlsl);
-  desc.fragment = RX_SHADER(k_blit_ps_hlsl);
+  desc.vertex = RX_SHADER(k_fullscreen_vs_slang);
+  desc.fragment = RX_SHADER(k_blit_ps_slang);
   desc.raster.cull = CullMode::kNone;
   desc.color_formats.push_back(format);
   PipelineBindings set;
