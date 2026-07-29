@@ -376,7 +376,7 @@ endif()
 
 # Procedural vehicle audio: engine/skid/wind synthesis, the SynthVoice seam and
 # the VehicleAudio driver through the mixer. Pure CPU (no device), always runs.
-if(RX_BUILD_TESTS)
+if(RX_BUILD_TESTS AND "audio" IN_LIST RX_MODULES)
   add_executable(vehicle_audio_test test/vehicle_audio_test.cc)
   target_link_libraries(vehicle_audio_test PRIVATE rx::audio rx::core)
   add_test(NAME vehicle_audio_test COMMAND vehicle_audio_test)
@@ -392,7 +392,7 @@ endif()
 # ground roll + rotation + climb, overloaded (over-MTOM) degradation, stall
 # sink, flap-shortened takeoff, braking, rudder yaw, and NaN-free tumbling.
 # Headless (no GPU), needs the Jolt-enabled physics build like vehicle_test.
-if(RX_BUILD_TESTS AND RX_JOLT)
+if(RX_BUILD_TESTS AND RX_JOLT AND "physics" IN_LIST RX_MODULES)
   add_executable(aircraft_test test/aircraft_test.cc)
   target_link_libraries(aircraft_test PRIVATE rx::physics rx::core)
   add_test(NAME aircraft_test COMMAND aircraft_test)
@@ -402,7 +402,8 @@ endif()
 # aircraft at once for 30 s over a shared heightfield + Gerstner lake, with every
 # vehicle's telemetry driving a real EngineSynth. Headless (no GPU/device), needs
 # Jolt for the physics path (like aircraft_test/vehicle_test/boat_test).
-if(RX_BUILD_TESTS AND RX_JOLT)
+if(RX_BUILD_TESTS AND RX_JOLT AND "physics" IN_LIST RX_MODULES
+   AND "audio" IN_LIST RX_MODULES)
   add_executable(vehicle_integration_test test/vehicle_integration_test.cc)
   target_link_libraries(vehicle_integration_test PRIVATE rx::physics rx::audio rx::core)
   add_test(NAME vehicle_integration_test COMMAND vehicle_integration_test)
@@ -410,25 +411,27 @@ endif()
 
 # Editor foundations test: reflection, scene round-trip, undo/redo and hierarchy
 # composition. Fully headless (no GPU), so it always runs under plain ctest.
-if(RX_BUILD_TESTS)
+if(RX_BUILD_TESTS AND "edit" IN_LIST RX_MODULES)
   add_executable(edit_test test/edit_test.cc)
   target_link_libraries(edit_test PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::core)
   add_test(NAME edit_test COMMAND edit_test)
 endif()
 
 if(RX_BUILD_TESTS)
-  add_executable(camera_test test/camera_test.cc)
-  target_link_libraries(camera_test PRIVATE rx::scene rx::ecs rx::core)
-  add_test(NAME camera_test COMMAND camera_test)
+  if("scene" IN_LIST RX_MODULES)
+    add_executable(camera_test test/camera_test.cc)
+    target_link_libraries(camera_test PRIVATE rx::scene rx::ecs rx::core)
+    add_test(NAME camera_test COMMAND camera_test)
 
-  add_executable(camera_rig_test test/camera_rig_test.cc)
-  target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::core)
-  add_test(NAME camera_rig_test COMMAND camera_rig_test)
+    add_executable(camera_rig_test test/camera_rig_test.cc)
+    target_link_libraries(camera_rig_test PRIVATE rx::scene rx::ecs rx::core)
+    add_test(NAME camera_rig_test COMMAND camera_rig_test)
+  endif()
 
   # Vehicle realism over the real Jolt vehicle path: acceleration + auto-shift,
   # surface-dependent braking (ice vs asphalt), rain wetness, manual gearbox,
   # telemetry ranges and water aquaplaning. Headless (no GPU), needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "physics" IN_LIST RX_MODULES)
     add_executable(vehicle_test test/vehicle_test.cc)
     target_link_libraries(vehicle_test PRIVATE rx::physics rx::core)
     add_test(NAME vehicle_test COMMAND vehicle_test)
@@ -437,7 +440,7 @@ if(RX_BUILD_TESTS)
   # Handling profiles: measured, ordered proof that the six presets
   # (engine/physics/vehicle_profiles.h) drive differently - 0-100, braking,
   # roll, grass launch, under/oversteer and downforce. Headless, needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "physics" IN_LIST RX_MODULES)
     add_executable(handling_test test/handling_test.cc)
     target_link_libraries(handling_test PRIVATE rx::physics rx::core)
     add_test(NAME handling_test COMMAND handling_test)
@@ -446,7 +449,7 @@ if(RX_BUILD_TESTS)
   # Physics-driven boat over the force-based hull model: floating draft,
   # acceleration, steering, drag decay, planing, river drift, self-righting,
   # buoyancy-exemption and NaN-free chop. Headless (no GPU), needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "physics" IN_LIST RX_MODULES)
     add_executable(boat_test test/boat_test.cc)
     target_link_libraries(boat_test PRIVATE rx::physics rx::core)
     add_test(NAME boat_test COMMAND boat_test)
@@ -457,7 +460,7 @@ if(RX_BUILD_TESTS)
   # sinks the hull deeper, slows accel/turning, delays planing and eats freeboard
   # - settle-draft/top-speed/turn-rate orderings, capsize vs self-right, an
   # overloaded barge near awash, and NaN-free chop. Headless, needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "physics" IN_LIST RX_MODULES)
     add_executable(boat_profiles_test test/boat_profiles_test.cc)
     target_link_libraries(boat_profiles_test PRIVATE rx::physics rx::core)
     add_test(NAME boat_profiles_test COMMAND boat_profiles_test)
@@ -467,15 +470,17 @@ if(RX_BUILD_TESTS)
   # launch + stable overhead equilibrium in steady wind, descent + settle in dead
   # air, left/right steering displacement, reel-in altitude change, tow-launch on
   # apparent wind and NaN-free / tension-capped gusting. Headless, needs Jolt.
-  if(RX_JOLT)
+  if(RX_JOLT AND "physics" IN_LIST RX_MODULES)
     add_executable(kite_test test/kite_test.cc)
     target_link_libraries(kite_test PRIVATE rx::physics rx::core)
     add_test(NAME kite_test COMMAND kite_test)
   endif()
 
-  add_executable(world_streaming_test test/world_streaming_test.cc)
-  target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
-  add_test(NAME world_streaming_test COMMAND world_streaming_test)
+  if("scene" IN_LIST RX_MODULES)
+    add_executable(world_streaming_test test/world_streaming_test.cc)
+    target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
+    add_test(NAME world_streaming_test COMMAND world_streaming_test)
+  endif()
 
   if("terrain" IN_LIST RX_MODULES)
     add_executable(terrain_test test/terrain_test.cc)
@@ -567,10 +572,12 @@ if(RX_BUILD_TESTS)
   add_test(NAME memory_test COMMAND memory_test)
 
   # Chunked ECS storage: spawn storms, non-POD relocation, chunk reclamation.
-  add_executable(ecs_test test/ecs_test.cc)
-  target_link_libraries(ecs_test PRIVATE rx::ecs rx::core)
-  rx_enable_mimalloc(ecs_test)
-  add_test(NAME ecs_test COMMAND ecs_test)
+  if("ecs" IN_LIST RX_MODULES)
+    add_executable(ecs_test test/ecs_test.cc)
+    target_link_libraries(ecs_test PRIVATE rx::ecs rx::core)
+    rx_enable_mimalloc(ecs_test)
+    add_test(NAME ecs_test COMMAND ecs_test)
+  endif()
 endif()
 
 # Offscreen RHI acceptance test: a surfaceless Vulkan device that clears+draws a
@@ -635,26 +642,28 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # replayed in a compute shader against a CPU reference. The GPU section is
   # Vulkan-only (buffer-device-address reads, like the skinned path) and skips
   # without a driver.
-  add_executable(morph_test test/morph_test.cc)
-  target_link_libraries(morph_test PRIVATE rx::render rx::anim rx::asset rx::core)
-  set(RX_SHADER_INCLUDE_DIRS
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders/pipeline)
-  set(RX_SHADER_NO_DXIL morph_apply.cs.hlsl)
-  set(RX_SHADER_DEPS_morph_apply_cs_hlsl engine/render/shaders/pipeline/morph.hlsli)
-  rx_embed_shaders(morph_test test/shaders/morph_apply.cs.hlsl)
-  unset(RX_SHADER_INCLUDE_DIRS)
-  unset(RX_SHADER_NO_DXIL)
-  add_test(NAME morph_test
-           COMMAND morph_test ${CMAKE_CURRENT_SOURCE_DIR}/test/data/AnimatedMorphCube.glb)
+  if("anim" IN_LIST RX_MODULES)
+    add_executable(morph_test test/morph_test.cc)
+    target_link_libraries(morph_test PRIVATE rx::render rx::anim rx::asset rx::core)
+    set(RX_SHADER_INCLUDE_DIRS
+      ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders
+      ${CMAKE_CURRENT_SOURCE_DIR}/engine/render/shaders/pipeline)
+    set(RX_SHADER_NO_DXIL morph_apply.cs.hlsl)
+    set(RX_SHADER_DEPS_morph_apply_cs_hlsl engine/render/shaders/pipeline/morph.hlsli)
+    rx_embed_shaders(morph_test test/shaders/morph_apply.cs.hlsl)
+    unset(RX_SHADER_INCLUDE_DIRS)
+    unset(RX_SHADER_NO_DXIL)
+    add_test(NAME morph_test
+             COMMAND morph_test ${CMAKE_CURRENT_SOURCE_DIR}/test/data/AnimatedMorphCube.glb)
 
-  # Expression controller: pose transitions converge and stay C1 through a
-  # mid-flight retarget, outputs stay clamped, seeded blinks land inside their
-  # window (and are absorbed by a closed-eyes pose) and a fixed seed replays
-  # bit-identically. Pure CPU.
-  add_executable(expression_test test/expression_test.cc)
-  target_link_libraries(expression_test PRIVATE rx::anim rx::asset rx::core)
-  add_test(NAME expression_test COMMAND expression_test)
+    # Expression controller: pose transitions converge and stay C1 through a
+    # mid-flight retarget, outputs stay clamped, seeded blinks land inside their
+    # window (and are absorbed by a closed-eyes pose) and a fixed seed replays
+    # bit-identically. Pure CPU.
+    add_executable(expression_test test/expression_test.cc)
+    target_link_libraries(expression_test PRIVATE rx::anim rx::asset rx::core)
+    add_test(NAME expression_test COMMAND expression_test)
+  endif()
 
   # The same acceptance tests against the d3d12 backend (vkd3d on linux). The
   # tests read RX_RHI to pick the backend and skip cleanly when the driver or
@@ -664,13 +673,15 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
     set_tests_properties(offscreen_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
     add_test(NAME compaction_test_d3d12 COMMAND compaction_test)
     set_tests_properties(compaction_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
+    add_test(NAME fluid_sim_test_d3d12 COMMAND fluid_sim_test)
+    set_tests_properties(fluid_sim_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
   endif()
 endif()
 
 # Strand-hair simulation: builds the braid + ponytail test grooms, steps the
 # Jolt soft-body strand sim under a static and a moving head transform, and
 # asserts pins, cross-strand binds and head collision hold. Headless, no GPU.
-if(RX_BUILD_TESTS AND RX_JOLT)
+if(RX_BUILD_TESTS AND RX_JOLT AND "physics" IN_LIST RX_MODULES)
   add_executable(hair_sim_test test/hair_sim_test.cc)
   target_link_libraries(hair_sim_test PRIVATE rx::render rx::physics rx::core)
   add_test(NAME hair_sim_test COMMAND hair_sim_test)
@@ -713,7 +724,7 @@ endif()
 # rx::physics body/joint adapter surface the locomotion controller relies on:
 # velocity/mass/COM readback, force + torque application, watched contacts,
 # motor torque limits. Headless, needs Jolt.
-if(RX_BUILD_TESTS AND RX_JOLT)
+if(RX_BUILD_TESTS AND RX_JOLT AND "physics" IN_LIST RX_MODULES)
   add_executable(physics_body_test test/physics_body_test.cc)
   target_link_libraries(physics_body_test PRIVATE rx::physics rx::core)
   add_test(NAME physics_body_test COMMAND physics_body_test)
