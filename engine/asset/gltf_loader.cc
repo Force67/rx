@@ -244,6 +244,7 @@ bool LoadGltfScene(const std::string& path, GltfScene* out) {
     // Sway weight follows the uv.y-away-from-attachment convention, which
     // holds for typical hanging drapery unwraps.
     if (src.name) {
+      material.name = src.name;
       std::string n = src.name;
       for (char& c : n) c = static_cast<char>(std::tolower(c));
       if (n.find("curtain") != std::string::npos || n.find("banner") != std::string::npos ||
