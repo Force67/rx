@@ -302,6 +302,15 @@ void Editor::UiPerFrameText() {
                       : terrain_dirty_ ? "* terrain modified"
                                        : "");
   set("status_message", status_message_);
+  if (imported_models_.empty()) {
+    set("vp_walk", "");
+  } else {
+    const char *active =
+        anim::WalkStyleName(imported_models_.front().active_walk_style);
+    set("vp_walk", walk_preview_mode_ == WalkPreviewMode::kAuto
+                       ? F("Walk: Auto (%s)", active)
+                       : F("Walk: %s", active));
+  }
   const size_t scene_entities =
       world_->entity_count() >= terrain_tiles_.size()
           ? world_->entity_count() - terrain_tiles_.size()
@@ -666,6 +675,16 @@ std::string Editor::BuildModeToolbar() {
                      editor_mode_ == EditorMode::kSelect &&
                          gizmo_mode_ == GizmoMode::kScale,
                      34);
+  if (!imported_models_.empty()) {
+    out += "panel walk_sep { width: 1; height: 22; background: #34373d; "
+           "margin: 0 5; }\n";
+    out += mode_button("walk_auto", "Walk Auto",
+                       walk_preview_mode_ == WalkPreviewMode::kAuto, 72);
+    out += mode_button("walk_hip_sway", "Hip Sway",
+                       walk_preview_mode_ == WalkPreviewMode::kHipSway, 68);
+    out += mode_button("walk_march", "March",
+                       walk_preview_mode_ == WalkPreviewMode::kMarch, 54);
+  }
   return out;
 }
 
@@ -978,6 +997,21 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
   }
   if (name == "btn_stop") {
     playing_ = false;
+    return true;
+  }
+  if (name == "walk_auto" || name == "walk_hip_sway" ||
+      name == "walk_march") {
+    walk_preview_mode_ = name == "walk_auto"
+                             ? WalkPreviewMode::kAuto
+                         : name == "walk_hip_sway"
+                             ? WalkPreviewMode::kHipSway
+                             : WalkPreviewMode::kMarch;
+    status_message_ = name == "walk_auto"
+                          ? "Walk preview cycles Hip Sway and March"
+                      : name == "walk_hip_sway"
+                          ? "Walk preview: Hip Sway"
+                          : "Walk preview: March";
+    MarkDirty();
     return true;
   }
   if (name == "mode_select") {

@@ -4,6 +4,7 @@
 #include <string>
 
 #include "anim/body_dynamics.h"
+#include "anim/locomotion.h"
 #include "anim/pose.h"
 #include "asset/asset_id.h"
 #include "asset/blend_import.h"
@@ -24,6 +25,11 @@ f32 MatrixDifference(const Mat4 &a, const Mat4 &b) {
   for (u32 i = 0; i < 16; ++i)
     difference = std::max(difference, std::fabs(a.m[i] - b.m[i]));
   return difference;
+}
+
+f32 RotationDifference(const Quat &a, const Quat &b) {
+  const f32 dot = std::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
+  return 1.0f - std::min(dot, 1.0f);
 }
 
 int TestBlend(const std::string &blend_path, const std::string &script) {
@@ -64,10 +70,39 @@ int TestBlend(const std::string &blend_path, const std::string &script) {
       return 1;
   }
 
+  const i32 hip = skeleton.Find("hip");
+  const i32 left_thigh = skeleton.Find("thigh.bend.L");
+  if (!Check(hip >= 0 && left_thigh >= 0,
+             "Lara rig exposes Genesis walk-style bones"))
+    return 1;
+  anim::SkeletonPose hip_sway_pose;
+  anim::SkeletonPose march_pose;
+  anim::Locomotion hip_sway;
+  hip_sway.phase = 0.125f;
+  hip_sway.style = anim::MakeWalkStylePreset(anim::WalkStyleKind::kHipSway);
+  hip_sway.Apply(skeleton, 1.35f, &hip_sway_pose);
+  anim::Locomotion march;
+  march.phase = hip_sway.phase;
+  march.style = anim::MakeWalkStylePreset(anim::WalkStyleKind::kMarch);
+  march.Apply(skeleton, 1.35f, &march_pose);
+  if (!Check(RotationDifference(skeleton.bones[hip].bind_rotation,
+                                hip_sway_pose.rotation[hip]) >
+                 RotationDifference(skeleton.bones[hip].bind_rotation,
+                                    march_pose.rotation[hip]) *
+                     2.0f,
+             "Hip Sway produces more hip rotation on Lara"))
+    return 1;
+  if (!Check(RotationDifference(skeleton.bones[left_thigh].bind_rotation,
+                                march_pose.rotation[left_thigh]) >
+                 RotationDifference(skeleton.bones[left_thigh].bind_rotation,
+                                    hip_sway_pose.rotation[left_thigh]),
+             "March produces a longer stride on Lara"))
+    return 1;
+
   const asset::Mesh *body_mesh = nullptr;
   for (const asset::Mesh &mesh : scene.meshes) {
-    if (mesh.FindMorphTarget(
-            asset::MakeAssetId("pPBMlBreastsFlatten").hash) >= 0 &&
+    if (mesh.FindMorphTarget(asset::MakeAssetId("pPBMlBreastsFlatten").hash) >=
+            0 &&
         mesh.FindMorphTarget(
             asset::MakeAssetId("pPBMrBreastsHangForward").hash) >= 0) {
       body_mesh = &mesh;
@@ -136,9 +171,10 @@ int TestBlend(const std::string &blend_path, const std::string &script) {
   anim::ComputeModelMatrices(skeleton, pose, &moved_model);
   anim::BuildSkinPalette(moved_model, body_mesh->skin, remap, &moved_palette);
 
-  const i32 left_palette = static_cast<i32>(std::find(
-      body_mesh->skin.bones.begin(), body_mesh->skin.bones.end(),
-      std::string("pectoral.L")) - body_mesh->skin.bones.begin());
+  const i32 left_palette = static_cast<i32>(
+      std::find(body_mesh->skin.bones.begin(), body_mesh->skin.bones.end(),
+                std::string("pectoral.L")) -
+      body_mesh->skin.bones.begin());
   if (!Check(left_palette >= 0 &&
                  left_palette < static_cast<i32>(moved_palette.size()),
              "body skin references the left chest deformation bone"))
@@ -163,13 +199,13 @@ int TestBlend(const std::string &blend_path, const std::string &script) {
 
   std::printf(
       "blend_jiggle_test: PASS: %llu meshes, %llu instances, %llu bones, "
-      "%llu body vertices, palette delta %.6f, flatten weight %.4f%s\n",
+      "%llu body vertices, palette delta %.6f, flatten weight %.4f, "
+      "walk styles Hip Sway/March%s\n",
       static_cast<unsigned long long>(scene.meshes.size()),
       static_cast<unsigned long long>(scene.instances.size()),
       static_cast<unsigned long long>(skeleton.bones.size()),
       static_cast<unsigned long long>(body_mesh->lods[0].vertices.size()),
-      palette_motion,
-      dense_morphs[flatten_index],
+      palette_motion, dense_morphs[flatten_index],
       converted.reused_cache ? ", cached conversion" : "");
   return 0;
 }
@@ -178,8 +214,7 @@ int TestBlend(const std::string &blend_path, const std::string &script) {
 
 int main(int argc, char **argv) {
   if (argc > 1) {
-    const std::string script =
-        argc > 2 ? argv[2] : RX_BLEND_CONVERTER_SCRIPT;
+    const std::string script = argc > 2 ? argv[2] : RX_BLEND_CONVERTER_SCRIPT;
     return TestBlend(argv[1], script);
   }
 
@@ -189,8 +224,9 @@ int main(int argc, char **argv) {
   options.converter_script = RX_BLEND_CONVERTER_SCRIPT;
   asset::BlendImportResult result;
   std::string error;
-  if (!Check(!asset::ConvertBlendScene("missing.blend", options, &result, &error),
-             "missing .blend is rejected"))
+  if (!Check(
+          !asset::ConvertBlendScene("missing.blend", options, &result, &error),
+          "missing .blend is rejected"))
     return 1;
   if (!Check(!error.empty(), "missing .blend reports a useful error"))
     return 1;

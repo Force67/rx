@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "anim/body_dynamics.h"
+#include "anim/locomotion.h"
 #include "anim/pose.h"
 #include "app/application.h"
 #include "asset/asset_database.h"
@@ -43,6 +44,7 @@ struct Vec2 {
 
 enum class GizmoMode { kTranslate, kRotate, kScale };
 enum class EditorMode { kSelect, kTerrain, kPlace };
+enum class WalkPreviewMode { kAuto, kHipSway, kMarch };
 
 // A content-browser entry discovered by scanning the mounted asset dir.
 struct AssetEntry {
@@ -85,6 +87,8 @@ struct ImportedModel {
   ecs::Entity turntable_entity;
   Vec3 turntable_center;
   f32 preview_time = 0;
+  f32 walk_phase = 0;
+  anim::WalkStyleKind active_walk_style = anim::WalkStyleKind::kHipSway;
   i32 force_event = -1;
 };
 
@@ -261,6 +265,7 @@ private:
   bool terrain_command_replayed_ = false;
   std::string status_message_;
   bool playing_ = false;
+  WalkPreviewMode walk_preview_mode_ = WalkPreviewMode::kAuto;
   bool material_tab_ = false;
   bool add_menu_open_ = false;
   bool dialog_open_ = false;

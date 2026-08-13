@@ -625,7 +625,47 @@ bool Editor::LoadModelDocument(const std::string &path) {
 
 void Editor::UpdateImportedModels(f32 dt) {
   for (ImportedModel &model : imported_models_) {
-    model.preview_time += playing_ ? std::max(dt, 0.0f) : 0.0f;
+    const f32 preview_dt = playing_ ? std::max(dt, 0.0f) : 0.0f;
+    model.preview_time += preview_dt;
+
+    // Auto preview holds each style for five seconds and crossfades for one,
+    // making their different silhouettes easy to compare without a pose pop.
+    const anim::WalkStyle hip_sway =
+        anim::MakeWalkStylePreset(anim::WalkStyleKind::kHipSway);
+    const anim::WalkStyle march =
+        anim::MakeWalkStylePreset(anim::WalkStyleKind::kMarch);
+    anim::WalkStyle walk_style;
+    if (walk_preview_mode_ == WalkPreviewMode::kHipSway) {
+      model.active_walk_style = anim::WalkStyleKind::kHipSway;
+      walk_style = hip_sway;
+    } else if (walk_preview_mode_ == WalkPreviewMode::kMarch) {
+      model.active_walk_style = anim::WalkStyleKind::kMarch;
+      walk_style = march;
+    } else {
+      const f32 cycle = std::fmod(model.preview_time, 12.0f);
+      if (cycle < 5.0f) {
+        model.active_walk_style = anim::WalkStyleKind::kHipSway;
+        walk_style = hip_sway;
+      } else if (cycle < 6.0f) {
+        const f32 blend = cycle - 5.0f;
+        model.active_walk_style = blend < 0.5f
+                                      ? anim::WalkStyleKind::kHipSway
+                                      : anim::WalkStyleKind::kMarch;
+        walk_style = anim::BlendWalkStyles(hip_sway, march, blend);
+      } else if (cycle < 11.0f) {
+        model.active_walk_style = anim::WalkStyleKind::kMarch;
+        walk_style = march;
+      } else {
+        const f32 blend = cycle - 11.0f;
+        model.active_walk_style = blend < 0.5f
+                                      ? anim::WalkStyleKind::kMarch
+                                      : anim::WalkStyleKind::kHipSway;
+        walk_style = anim::BlendWalkStyles(march, hip_sway, blend);
+      }
+    }
+    model.walk_phase = anim::AdvancePhase(model.walk_phase, 1.35f, preview_dt,
+                                          walk_style);
+
     const f32 turntable_angle = model.preview_time * 0.62f;
     const Quat turntable_rotation =
         QuatFromAxisAngle({0, 1, 0}, turntable_angle);
@@ -664,7 +704,14 @@ void Editor::UpdateImportedModels(f32 dt) {
     const i32 event_kind = event % 3;
     const bool fire_event = playing_ && event != model.force_event;
     for (ImportedSkin &skin : model.skins) {
-      skin.pose.ResetToBind(skin.skeleton);
+      if (playing_) {
+        anim::Locomotion walk;
+        walk.phase = model.walk_phase;
+        walk.style = walk_style;
+        walk.Apply(skin.skeleton, 1.35f, &skin.pose);
+      } else {
+        skin.pose.ResetToBind(skin.skeleton);
+      }
       anim::BodyDynamicsFrame frame;
       if (playing_) {
         frame.linear_acceleration = {

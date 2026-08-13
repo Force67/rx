@@ -192,6 +192,7 @@ panel root {
         border-color: #101113; border-width: 0 0 1 0;
         text vp_mode { text: "Perspective"; font-size: 11; color: #8a8d93; }
         text vp_shade { text: "Shaded"; font-size: 11; color: #8a8d93; }
+        text vp_walk { text: ""; font-size: 11; color: #8fb5ea; }
         panel vp_spacer { flex-grow: 1; }
         text vp_gizmo { text: "Gizmo: Move"; font-size: 11; color: #6a6d73; }
       }

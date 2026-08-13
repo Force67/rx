@@ -30,8 +30,10 @@ viewer runtime in place of the game.
 - **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** - entity
   storage and scheduling, scene components, Jolt-backed rigid bodies and
   arbitrary-mesh cloth (native XPBD/skinning/pressure plus fast self-collision;
-  see `engine/physics/README.md`), pose and locomotion helpers, extensible
-  [body dynamics and soft-tissue deformation](docs/BODY_DYNAMICS.md), a facial expression controller (damped per-region
+  see `engine/physics/README.md`), pose and locomotion helpers including
+  configurable [procedural walk styles](docs/WALK_STYLES.md), extensible
+  [body dynamics and soft-tissue deformation](docs/BODY_DYNAMICS.md), a facial
+  expression controller (damped per-region
   transitions between named morph poses, plus a blink/micro-motion life
   layer), an SDL mixer with wav/xwma decoding, and a small RPC value/registry
   layer. Skeletal animation sampling comes from
@@ -52,7 +54,7 @@ viewer runtime in place of the game.
   `.blend` documents. Blend files are converted by Blender in background mode
   into a cached GLB, retaining visible meshes, deform bones, skin weights, and
   body-deformation morphs. Compatible chest-helper/Genesis rigs automatically
-  get a live jiggle preview.
+  get a live jiggle preview plus selectable Hip Sway and March walk profiles.
 
 ## Global illumination
 

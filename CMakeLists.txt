@@ -677,6 +677,10 @@ endif()
 # bone layering, source-unit conversion, region presets, and additive
 # deformation morph output. Pure CPU and independent of Jolt/the render backend.
 if(RX_BUILD_TESTS AND "anim" IN_LIST RX_MODULES)
+  add_executable(walk_style_test test/walk_style_test.cc)
+  target_link_libraries(walk_style_test PRIVATE rx::anim rx::asset rx::core)
+  add_test(NAME walk_style_test COMMAND walk_style_test)
+
   add_executable(body_dynamics_test test/body_dynamics_test.cc)
   target_link_libraries(body_dynamics_test PRIVATE rx::anim rx::asset rx::core)
   add_test(NAME body_dynamics_test COMMAND body_dynamics_test)
