@@ -30,7 +30,8 @@ viewer runtime in place of the game.
 - **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** - entity
   storage and scheduling, scene components, Jolt-backed rigid bodies and
   arbitrary-mesh cloth (native XPBD/skinning/pressure plus fast self-collision;
-  see `engine/physics/README.md`), pose and locomotion helpers, a facial expression controller (damped per-region
+  see `engine/physics/README.md`), pose and locomotion helpers, extensible
+  [body dynamics and soft-tissue deformation](docs/BODY_DYNAMICS.md), a facial expression controller (damped per-region
   transitions between named morph poses, plus a blink/micro-motion life
   layer), an SDL mixer with wav/xwma decoding, and a small RPC value/registry
   layer. Skeletal animation sampling comes from
@@ -47,6 +48,11 @@ viewer runtime in place of the game.
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`
   / `RX_SHOWCASE`), frame capture (`RX_UI_SHOT`).
+- **apps/editor** - the scene editor. It opens `.rxscene`, `.gltf`, `.glb`, and
+  `.blend` documents. Blend files are converted by Blender in background mode
+  into a cached GLB, retaining visible meshes, deform bones, skin weights, and
+  body-deformation morphs. Compatible chest-helper/Genesis rigs automatically
+  get a live jiggle preview.
 
 ## Global illumination
 
@@ -107,6 +113,20 @@ slangc (shader-slang, for the `.slang` shaders — see docs/SLANG.md),
 SDL3. Vulkan headers/volk/VMA are pinned and fetched by CMake. On NixOS just
 use the dev shell: `nix develop`, which also provides `vkrun` (host NVIDIA
 driver bridging) and `swrun` (headless lavapipe + Xvfb software path).
+
+For a small headless body-jiggle sample, configure with
+`-DRX_BUILD_EXAMPLES=ON` and run `build/linux/examples/body_jiggle_example`.
+
+To open an authoring scene directly in the editor, build with
+`-DRX_BUILD_EDITOR=ON` and run:
+
+```sh
+build/linux/apps/editor/rx_editor character.blend
+```
+
+Blender must be available on `PATH`. The first open performs a background
+conversion; subsequent opens use `$XDG_CACHE_HOME/rx/blend` (or
+`~/.cache/rx/blend` on Linux) until the source or converter changes.
 
 ```sh
 tools/get_sponza.sh

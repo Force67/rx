@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include "anim/body_dynamics.h"
+#include "anim/pose.h"
 #include "app/application.h"
 #include "asset/asset_database.h"
 #include "asset/mesh.h"
@@ -46,8 +48,7 @@ enum class EditorMode { kSelect, kTerrain, kPlace };
 struct AssetEntry {
   std::string path; // built-in URI or source filesystem path
   std::string name; // basename
-  std::string
-      kind; // "mesh" / "terrain" / "texture" / "material" / "audio" / "scene"
+  std::string kind; // mesh/terrain/texture/material/audio/scene/model
 };
 
 // A CPU copy of an uploaded mesh, kept for ray-vs-triangle picking (the
@@ -55,6 +56,36 @@ struct AssetEntry {
 struct MeshRecord {
   asset::Mesh mesh;
   std::string name;
+};
+
+struct ImportedSkin {
+  asset::Skeleton skeleton;
+  anim::SkeletonPose pose;
+  anim::BodyDynamics dynamics;
+  base::Vector<anim::BodyMorphWeight> morphs;
+  base::Vector<Mat4> model_matrices;
+};
+
+struct ImportedInstance {
+  ecs::Entity entity;
+  u64 mesh = 0;
+  i32 skin = -1;
+  Vec3 turntable_position;
+  Quat turntable_rotation;
+  bool rotates_with_turntable = false;
+  base::Vector<i32> remap;
+  base::Vector<Mat4> palette;
+  base::Vector<f32> morph_weights;
+};
+
+struct ImportedModel {
+  std::string source_path;
+  std::vector<ImportedSkin> skins;
+  std::vector<ImportedInstance> instances;
+  ecs::Entity turntable_entity;
+  Vec3 turntable_center;
+  f32 preview_time = 0;
+  i32 force_event = -1;
 };
 
 // Active number-scrub (draggable field) state.
@@ -121,6 +152,9 @@ private:
   ecs::Entity SpawnMesh(const std::string &mesh_name, asset::AssetId mesh,
                         const Vec3 &pos, const std::string &label);
   void ScanAssets();
+  bool LoadModelDocument(const std::string &path);
+  void UpdateImportedModels(f32 dt);
+  u32 ConfigureImportedBody(ImportedSkin *skin);
 
   // --- interaction (editor_app.cc) ---
   void UpdateCamera(f32 dt);
@@ -165,6 +199,7 @@ private:
   void NewScene();
   void DoSave(const std::string &path);
   void DoLoad(const std::string &path);
+  void OpenDocument(const std::string &path);
   void OpenFileDialog();
   void RunAutopilot(); // RX_EDITOR_AUTOPILOT smoke driver
 
@@ -238,6 +273,9 @@ private:
   asset::AssetId cube_mesh_, sphere_mesh_, plane_mesh_, terrain_material_;
   std::vector<AssetEntry> assets_list_;
   std::unordered_map<std::string, asset::AssetId> placement_meshes_;
+  std::vector<ImportedModel> imported_models_;
+  // entity index -> (model index, instance index)
+  std::unordered_map<u32, std::pair<u32, u32>> imported_entities_;
 
   terrain::Terrain terrain_;
   std::map<terrain::TerrainTileKey, TerrainTileVisual> terrain_tiles_;

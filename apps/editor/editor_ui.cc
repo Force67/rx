@@ -22,6 +22,8 @@
 #include "core/log.h"
 #include "edit/hierarchy.h"
 #include "editor_app.h"
+
+#include "anim/morph.h"
 #include "render/rhi/vulkan_interop.h"
 #include "scene/components.h"
 
@@ -76,12 +78,23 @@ std::string EscapeUguiString(std::string_view value) {
   escaped.reserve(value.size());
   for (char c : value) {
     switch (c) {
-      case '\\': escaped += "\\\\"; break;
-      case '"': escaped += "\\\""; break;
-      case '\n': escaped += "\\n"; break;
-      case '\r': break;
-      case '\t': escaped += "\\t"; break;
-      default: escaped += static_cast<unsigned char>(c) < 0x20 ? '?' : c; break;
+    case '\\':
+      escaped += "\\\\";
+      break;
+    case '"':
+      escaped += "\\\"";
+      break;
+    case '\n':
+      escaped += "\\n";
+      break;
+    case '\r':
+      break;
+    case '\t':
+      escaped += "\\t";
+      break;
+    default:
+      escaped += static_cast<unsigned char>(c) < 0x20 ? '?' : c;
+      break;
     }
   }
   return escaped;
@@ -422,7 +435,7 @@ std::string Editor::BuildHierarchy() {
       return;
     std::string label = EntityLabel(e);
     bool match = search_filter_.empty() ||
-                  label.find(search_filter_) != std::string::npos;
+                 label.find(search_filter_) != std::string::npos;
     if (match) {
       const std::string escaped_label = EscapeUguiString(label);
       bool sel = selection_.Contains(e);
@@ -440,7 +453,7 @@ std::string Editor::BuildHierarchy() {
                "%s; }\n",
                icon);
       out += F("  text l { text: \"%s\"; font-size: 13; color: %s; }\n",
-                escaped_label.c_str(), sel ? "#ffffff" : "#c9ccd2");
+               escaped_label.c_str(), sel ? "#ffffff" : "#c9ccd2");
       out += "}\n";
     }
     // children
@@ -481,7 +494,7 @@ std::string Editor::BuildInspector() {
       "background: #191a1d; corner-radius: 6; border-color: #33363c; "
       "border-width: 1; "
       "padding: 6 10; flex-grow: 1; tab-index: 5; }\n",
-       escaped_entity_label.c_str());
+      escaped_entity_label.c_str());
   out += "}\n";
 
   if (material_tab_) {
@@ -504,7 +517,7 @@ std::string Editor::BuildInspector() {
              "class: row_label; text: \"Submeshes\"; } "
              "panel sv { class: field; text svv { class: field_val; text: "
              "\"%d\"; } } }\n",
-              escaped_mesh_name.c_str(), subs);
+             escaped_mesh_name.c_str(), subs);
     uint32_t tint = tints_.count(e.index) ? tints_[e.index] : 0xffffff;
     out += F("  panel trow { layout: row; gap: 8; align:center; text tl { "
              "class: row_label; text: \"Tint\"; }\n"
@@ -559,8 +572,8 @@ std::string Editor::BuildInspector() {
       if (v.type == edit::PropType::kString) {
         const std::string escaped_value = EscapeUguiString(v.s);
         out += F("    panel fv { class: field; text vv { class: field_val; "
-                  "text: \"%s\"; } }\n",
-                  escaped_value.c_str());
+                 "text: \"%s\"; } }\n",
+                 escaped_value.c_str());
       } else if (v.type == edit::PropType::kBool) {
         out += F("    button field_%u_%u_0 { width: 18; height: 18; "
                  "corner-radius: 4; "
@@ -705,7 +718,7 @@ std::string Editor::BuildTerrainInspector() {
          "} }\n";
   const std::string escaped_path = EscapeUguiString(terrain_path_);
   out += F("  text ta_path { text: \"%s\"; font-size: 11; color: #8e9b8a; }\n",
-            escaped_path.c_str());
+           escaped_path.c_str());
   out += F("  text ta_state { text: \"%s\"; font-size: 11; color: %s; }\n",
            terrain_dirty_ ? "Unsaved terrain edits" : "Saved terrain asset",
            terrain_dirty_ ? "#e0a05a" : "#72bc83");
@@ -762,7 +775,7 @@ std::string Editor::BuildTerrainInspector() {
              "text nm { text: \"%s\"; font-size: 12; color: %s; } }\n",
              i, i == terrain_brush_layer_ ? "#2c3830" : "#24262a",
              i == terrain_brush_layer_ ? "#78a86c" : "#34373d", c[0], c[1],
-              c[2], escaped_name.c_str(),
+             c[2], escaped_name.c_str(),
              i == terrain_brush_layer_ ? "#eef4ea" : "#b7bac0");
   }
   out += "}\n";
@@ -789,7 +802,7 @@ std::string Editor::BuildPlacementInspector() {
          "#c9ad76; }\n";
   out += F("  text pa_n { text: \"%s\"; font-size: 16; font-weight: bold; "
            "color: #f0e6d1; }\n",
-            escaped_name.c_str());
+           escaped_name.c_str());
   out += "  text pa_s { text: \"Persistent surface placement\"; font-size: 11; "
          "color: #9b907c; }\n"
          "}\n";
@@ -840,7 +853,7 @@ std::string Editor::BuildContent() {
              KindColor(a.kind).c_str());
     const std::string escaped_name = EscapeUguiString(a.name);
     out += F("  text cn { text: \"%s\"; font-size: 11; color: #b7bac0; }\n",
-              escaped_name.c_str());
+             escaped_name.c_str());
     out += "}\n";
     ++idx;
   }
@@ -872,7 +885,7 @@ std::string Editor::BuildDialog() {
     out += F("      button dlg_%zu { text: \"%s\"; font-size: 13; "
              "color:#c9ccd2; padding: 8 10; corner-radius: 5; "
              "cursor: pointer; :hover { background:#2f4368; color:#fff; } }\n",
-              i, escaped_path.c_str());
+             i, escaped_path.c_str());
   }
   out += "    }\n";
   out += "    panel df { layout: row; justify: end; padding: 10; gap: 8; "
@@ -1171,6 +1184,8 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
       const AssetEntry &a = assets_list_[i];
       if (a.kind == "scene") {
         DoLoad(a.path);
+      } else if (a.kind == "model") {
+        OpenDocument(a.path);
       } else if (a.kind == "terrain") {
         LoadTerrainAsset(a.path);
       } else if (a.kind == "mesh") {
@@ -1187,7 +1202,7 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
   if (starts("dlg_")) {
     unsigned i = tail_u("dlg_");
     if (i < dialog_files_.size()) {
-      DoLoad(dialog_files_[i]);
+      OpenDocument(dialog_files_[i]);
       dialog_open_ = false;
     }
     return true;
@@ -1213,6 +1228,7 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
   view.camera.eye = camera_.position();
   view.camera.target = camera_.target();
   view.frame_delta_seconds = dt > 0 ? dt : 1.0f / 60.0f;
+  UpdateImportedModels(view.frame_delta_seconds);
 
   // Manual gather so we can apply parent transforms, per-entity/selection tint
   // and the pick ids the GPU pick pass writes.
@@ -1234,6 +1250,36 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
         if (!terrain_visual && e == primary)
           tint = 0xffa64d; // selection highlight
         d.tint = tint;
+        auto imported = imported_entities_.find(e.index);
+        if (imported != imported_entities_.end()) {
+          const auto [model_index, instance_index] = imported->second;
+          if (model_index < imported_models_.size() &&
+              instance_index < imported_models_[model_index].instances.size()) {
+            ImportedModel &model = imported_models_[model_index];
+            ImportedInstance &instance = model.instances[instance_index];
+            const MeshRecord *record = FindMesh(instance.mesh);
+            if (record && instance.skin >= 0 &&
+                instance.skin < static_cast<i32>(model.skins.size())) {
+              ImportedSkin &skin = model.skins[instance.skin];
+              anim::BuildSkinPalette(skin.model_matrices, record->mesh.skin,
+                                     instance.remap, &instance.palette);
+              d.skin_offset = static_cast<i32>(view.bone_matrices.size());
+              for (const Mat4 &matrix : instance.palette)
+                view.bone_matrices.push_back(matrix);
+
+              instance.morph_weights.resize(record->mesh.morph_targets.size());
+              std::fill(instance.morph_weights.begin(),
+                        instance.morph_weights.end(), 0.0f);
+              anim::ApplyBodyMorphWeights(record->mesh, skin.morphs,
+                                          &instance.morph_weights);
+              d.morph_offset = static_cast<i32>(view.morph_weights.size());
+              d.morph_count = anim::AppendActiveMorphWeights(
+                  instance.morph_weights, &view.morph_weights);
+              if (d.morph_count == 0)
+                d.morph_offset = -1;
+            }
+          }
+        }
         if (!terrain_visual) {
           d.pick_id = next_pick_id;
           pick_map_[next_pick_id] = e;

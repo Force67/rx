@@ -21,12 +21,16 @@ struct GltfScene {
   base::Vector<Texture> textures;
   base::Vector<Material> materials;
   base::Vector<Mesh> meshes;
+  // One runtime skeleton per glTF skin. Bone order is the skin's joint order,
+  // matching Mesh::skin and the JOINTS_0 vertex stream.
+  base::Vector<Skeleton> skeletons;
 
   struct Instance {
     u32 mesh_index = 0;
+    i32 skeleton_index = -1; // index into skeletons, -1 for a static mesh
     Vec3 position{};
-    f32 rotation[4] = {0, 0, 0, 1};  // quaternion x y z w
-    f32 scale = 1.0f;                // uniform; non uniform scale is averaged
+    f32 rotation[4] = {0, 0, 0, 1}; // quaternion x y z w
+    f32 scale = 1.0f;               // uniform; non uniform scale is averaged
   };
   base::Vector<Instance> instances;
 };
@@ -34,8 +38,8 @@ struct GltfScene {
 // Loads .gltf or .glb including external buffers and images. Generates
 // tangents from uv derivatives when the source has none. Returns false and
 // logs on malformed input.
-RX_ASSET_EXPORT bool LoadGltfScene(const std::string& path, GltfScene* out);
+RX_ASSET_EXPORT bool LoadGltfScene(const std::string &path, GltfScene *out);
 
-}  // namespace rx::asset
+} // namespace rx::asset
 
-#endif  // RX_ASSET_GLTF_LOADER_H_
+#endif // RX_ASSET_GLTF_LOADER_H_

@@ -1,5 +1,5 @@
 // rx editor entry point. Boots app::Host with the editor Application. An
-// optional .rxscene (or .gltf, partial) path may be passed to open on start;
+// optional .rxscene, .gltf/.glb, or .blend path may be passed to open on start;
 // otherwise a small built-in default scene keeps the editor from being empty.
 #include <string>
 
