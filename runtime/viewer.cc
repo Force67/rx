@@ -41,6 +41,17 @@ base::Option<bool> UiShotSeq{"ui.shot.seq", false, "RX_UI_SHOT_SEQ"};
 // fixed weights on every morphed instance (unmatched names are skipped per
 // mesh), instead of the imported track / scripted sweep.
 base::Option<const char*> MorphWeights{"morph.weights", nullptr, "RX_MORPH_WEIGHTS"};
+// Capture hook: RX_TATTOO="fx,fy,fz,size[;...]" bakes decal layers onto the
+// heaviest mesh of a --gltf scene. Anchors are fractions of that mesh's local
+// bounds (0.5,0.75,0.5 is chest height, centred); each tattoo aims along the
+// nearest vertex's normal, and the receiver is biased onto that vertex's UDIM
+// tile so a multi-tile character body maps one zone across the whole layer.
+// Exists to validate the texture-space decal path against imported characters.
+base::Option<const char*> Tattoo{"tattoo", nullptr, "RX_TATTOO"};
+// The ink page the tattoos sample: a raw square RGBA8 blob (side derived from
+// the file size), uploaded as the decal atlas. Without one the stamps paint the
+// projector's own footprint in flat colour.
+base::Option<const char*> TattooAtlas{"tattoo.atlas", nullptr, "RX_TATTOO_ATLAS"};
 }  // namespace
 
 Viewer::Viewer(const EngineConfig& config) : config_(config) {}
@@ -137,6 +148,7 @@ bool Viewer::LoadGltfScene() {
     for (const asset::Mesh& mesh : scene.meshes) renderer_->UploadMesh(mesh);
   }
 
+  base::Vector<std::pair<u32, ecs::Entity>> instance_entities;
   for (const asset::GltfScene::Instance& instance : scene.instances) {
     const asset::Mesh& mesh = scene.meshes[instance.mesh_index];
     // Morphed instances stay out of the ECS gather; EmitMorphedInstances
@@ -202,7 +214,9 @@ bool Viewer::LoadGltfScene() {
     transform.scale = instance.scale;
     world_->Add(entity, transform);
     world_->Add(entity, scene::Renderable{scene.meshes[instance.mesh_index].id});
+    instance_entities.push_back({instance.mesh_index, entity});
   }
+  StampTattoos(scene, instance_entities);
   if (!morphed_.empty()) {
     RX_INFO("gltf: {} morphed instance(s) animated by the viewer", morphed_.size());
   }
@@ -212,6 +226,184 @@ bool Viewer::LoadGltfScene() {
   camera_.set_yaw_pitch(1.5708f, 0.0f);
   camera_.speed = 4.0f;
   return true;
+}
+
+// RX_TATTOO: bake decals onto the heaviest mesh in a --gltf scene. Anchors are
+// fractions of that mesh's local bounds; each one snaps to the nearest vertex,
+// so the projector sits on the surface and points along its normal without the
+// caller knowing anything about the model. That vertex's uv also picks the UDIM
+// tile the receiver is biased onto - a Genesis-style body lays its zones out
+// across u in [0,7), and only the anchored zone can take the decal.
+void Viewer::StampTattoos(const asset::GltfScene& scene,
+                          std::span<const std::pair<u32, ecs::Entity>> instances) {
+  const char* spec = Tattoo.get();
+  if (!spec || config_.headless || instances.empty()) return;
+
+  // Heaviest mesh: on a character import that is the body, which is what a
+  // tattoo wants and what carries the interesting uv layout.
+  size_t best = 0;
+  size_t best_vertices = 0;
+  for (size_t i = 0; i < instances.size(); ++i) {
+    const asset::Mesh& mesh = scene.meshes[instances[i].first];
+    if (mesh.lods.empty()) continue;
+    if (mesh.lods[0].vertices.size() > best_vertices) {
+      best_vertices = mesh.lods[0].vertices.size();
+      best = i;
+    }
+  }
+  if (best_vertices == 0) return;
+  const asset::Mesh& mesh = scene.meshes[instances[best].first];
+  const auto& vertices = mesh.lods[0].vertices;
+  // Anchors and vertices are mesh-local, but the bake rasterizes world space
+  // (push.model * local). Everything below is therefore lifted through the
+  // instance's world matrix; skipping that silently misses on any import whose
+  // node is not identity, which is every Y-up / cm-scaled character.
+  const scene::Transform* placement = world_->Get<scene::Transform>(instances[best].second);
+  const Mat4 to_world = placement ? MakeTranslation({placement->position[0], placement->position[1],
+                                                     placement->position[2]}) *
+                                        MakeFromQuat(placement->rotation[0], placement->rotation[1],
+                                                     placement->rotation[2], placement->rotation[3]) *
+                                        MakeScale(placement->scale)
+                                  : Mat4::Identity();
+
+  Vec3 lo{vertices[0].position[0], vertices[0].position[1], vertices[0].position[2]};
+  Vec3 hi = lo;
+  for (const asset::Vertex& v : vertices) {
+    lo = {std::min(lo.x, v.position[0]), std::min(lo.y, v.position[1]),
+          std::min(lo.z, v.position[2])};
+    hi = {std::max(hi.x, v.position[0]), std::max(hi.y, v.position[1]),
+          std::max(hi.z, v.position[2])};
+  }
+
+  if (const char* atlas_path = TattooAtlas.get()) {
+    std::FILE* file = std::fopen(atlas_path, "rb");
+    if (!file) {
+      RX_WARN("RX_TATTOO_ATLAS: cannot open {}", atlas_path);
+    } else {
+      std::fseek(file, 0, SEEK_END);
+      const long bytes = std::ftell(file);
+      std::fseek(file, 0, SEEK_SET);
+      const u64 texels = bytes > 0 ? static_cast<u64>(bytes) / 4 : 0;
+      const u64 side = static_cast<u64>(std::lround(std::sqrt(static_cast<f64>(texels))));
+      if (bytes <= 0 || side * side * 4 != static_cast<u64>(bytes)) {
+        RX_WARN("RX_TATTOO_ATLAS: {} is {} bytes, not a square rgba8 image", atlas_path, bytes);
+      } else {
+        asset::Texture ink;
+        ink.id = asset::MakeAssetId("viewer/tattoo/ink");
+        ink.format = asset::TextureFormat::kRgba8;
+        ink.width = static_cast<u32>(side);
+        ink.height = static_cast<u32>(side);
+        ink.is_srgb = true;
+        ink.data.resize(static_cast<size_t>(bytes));
+        if (std::fread(ink.data.data(), 1, static_cast<size_t>(bytes), file) ==
+            static_cast<size_t>(bytes)) {
+          renderer_->UploadTexture(ink);
+          renderer_->SetDecalAtlas(ink.id);
+        } else {
+          RX_WARN("RX_TATTOO_ATLAS: short read on {}; stamps fall back to the flat page",
+                  atlas_path);
+        }
+      }
+      std::fclose(file);
+    }
+  }
+
+  const f32 placement_scale = placement ? placement->scale : 1.0f;
+
+  const u32 receiver = renderer_->AcquireDecalReceiver();
+  if (receiver == 0) {
+    RX_WARN("RX_TATTOO: the decal baker is unavailable");
+    return;
+  }
+
+  bool tile_chosen = false;
+  i32 tile_u = 0, tile_v = 0;
+  u32 stamped = 0;
+  std::string s(spec);
+  size_t pos = 0;
+  while (pos < s.size()) {
+    size_t end = s.find(';', pos);
+    if (end == std::string::npos) end = s.size();
+    const std::string entry = s.substr(pos, end - pos);
+    pos = end + 1;
+    f32 f[4] = {0.5f, 0.5f, 0.5f, 0.08f};
+    u32 parsed = 0;
+    const char* cursor = entry.c_str();
+    while (parsed < 4 && *cursor) {
+      char* next = nullptr;
+      // strtof returns 0 on failure, so only commit the value once the parse is
+      // known good: a trailing space would otherwise zero the size and build a
+      // degenerate projector (all-zero rows, NaN facing test).
+      const f32 value = std::strtof(cursor, &next);
+      if (next == cursor) break;
+      f[parsed] = value;
+      ++parsed;
+      cursor = *next == ',' ? next + 1 : next;
+    }
+    if (parsed < 3) continue;
+
+    const Vec3 anchor{lo.x + (hi.x - lo.x) * f[0], lo.y + (hi.y - lo.y) * f[1],
+                      lo.z + (hi.z - lo.z) * f[2]};
+    const asset::Vertex* nearest = nullptr;
+    f32 nearest_distance = 0;
+    for (const asset::Vertex& v : vertices) {
+      const Vec3 delta{v.position[0] - anchor.x, v.position[1] - anchor.y,
+                       v.position[2] - anchor.z};
+      const f32 distance = Dot(delta, delta);
+      if (!nearest || distance < nearest_distance) {
+        nearest = &v;
+        nearest_distance = distance;
+      }
+    }
+    if (!nearest) continue;
+
+    // One draw carries one layer tile, so every tattoo has to live in the zone
+    // the first anchor picked; a later anchor on another zone would bake
+    // outside the tile and shade nothing.
+    const i32 anchor_tile_u = static_cast<i32>(std::floor(nearest->uv[0]));
+    const i32 anchor_tile_v = static_cast<i32>(std::floor(nearest->uv[1]));
+    if (!tile_chosen) {
+      tile_u = anchor_tile_u;
+      tile_v = anchor_tile_v;
+      tile_chosen = true;
+      renderer_->SetDecalReceiverUv(receiver, 1.0f, 1.0f, -static_cast<f32>(tile_u),
+                                    -static_cast<f32>(tile_v));
+    } else if (anchor_tile_u != tile_u || anchor_tile_v != tile_v) {
+      RX_WARN("RX_TATTOO: anchor {},{},{} is on uv tile {},{}, not the receiver's {},{}; skipped",
+              f[0], f[1], f[2], anchor_tile_u, anchor_tile_v, tile_u, tile_v);
+      continue;
+    }
+
+    const Vec3 position = TransformPoint(
+        to_world, {nearest->position[0], nearest->position[1], nearest->position[2]});
+    const Vec3 normal = Normalize(TransformDir(
+        to_world, {nearest->normal[0], nearest->normal[1], nearest->normal[2]}));
+    Vec3 up{0, 1, 0};
+    if (std::abs(Dot(up, normal)) > 0.9f) up = {0, 0, 1};
+    render::DecalStamp tattoo;
+    tattoo.receiver = receiver;
+    const f32 world_size = f[3] * placement_scale;
+    tattoo.projector = render::MakeDecalProjector(position, normal, up, world_size, world_size,
+                                                  world_size * 2.0f);
+    // Flat 2d ink: albedo only, no normal or roughness change.
+    tattoo.projector.tint_blend[0] = 1.0f;
+    tattoo.projector.tint_blend[1] = 1.0f;
+    tattoo.projector.tint_blend[2] = 1.0f;
+    tattoo.projector.tint_blend[3] = 0.95f;
+    tattoo.projector.params2[0] = 0.0f;
+    tattoo.projector.params2[1] = 1.0f;
+    renderer_->StampDecal(tattoo);
+    ++stamped;
+  }
+
+  if (stamped == 0) {
+    renderer_->ReleaseDecalReceiver(receiver);
+    return;
+  }
+  world_->Add(instances[best].second, scene::DecalReceiver{receiver});
+  tattoo_receiver_ = receiver;
+  RX_INFO("RX_TATTOO: {} tattoo(s) on '{}' ({} verts), uv tile {},{}", stamped,
+          mesh.id.hash, best_vertices, tile_u, tile_v);
 }
 
 void Viewer::DriveSunFromClock() {
@@ -355,6 +547,10 @@ void Viewer::OnFrameEnd() {
 void Viewer::OnShutdown() {
   // Release demo GPU resources (scenehook raw pipelines) before the host tears
   // the renderer's device down.
+  if (tattoo_receiver_ != 0 && renderer_) {
+    renderer_->ReleaseDecalReceiver(tattoo_receiver_);
+    tattoo_receiver_ = 0;
+  }
   if (demos_) demos_->Shutdown();
   if (!config_.headless) debug_ui_.Shutdown();
 }

@@ -48,6 +48,7 @@ rx_add_module(render
   post/vrs_rate.cc
   gi/restir_di.cc
   texturing/virtual_texture.cc
+  texturing/decal_bake.cc
   pipeline/virtual_geometry.cc
   geometry/hair_groom.cc
   geometry/hair_strands.cc
@@ -336,6 +337,10 @@ set(RX_RENDER_SHADERS
   shaders/geometry/fluid_surface.ps.hlsl
   shaders/geometry/shore_wetting.cs.hlsl
   shaders/geometry/water_caustics.cs.hlsl
+  shaders/texturing/decal_bake.vs.hlsl
+  shaders/texturing/decal_bake_skin.vs.hlsl
+  shaders/texturing/decal_bake.ps.hlsl
+  shaders/texturing/decal_dilate.cs.hlsl
   shaders/geometry/copy.cs.hlsl
   shaders/util/hdr_capture.cs.hlsl
   shaders/gi/pathtrace.cs.hlsl
@@ -373,6 +378,7 @@ list(APPEND RX_SHADER_INCLUDE_DIRS
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/geometry
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/pipeline
+  ${CMAKE_CURRENT_SOURCE_DIR}/shaders/texturing
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gi)
 if(RX_NRD)
   list(APPEND RX_RENDER_SHADERS shaders/gi/nrd_pack.cs.hlsl shaders/gi/shadow_trace.cs.hlsl
@@ -393,6 +399,7 @@ set(RX_SHADER_DEPS_sky_ps_hlsl shaders/atmosphere/aurora.hlsli)
 set(RX_SHADER_DEPS_sky_cs_hlsl shaders/atmosphere/aurora.hlsli)
 set(RX_SHADER_DEPS_mesh_instance_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_skin_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
+set(RX_SHADER_DEPS_decal_bake_skin_vs_hlsl shaders/texturing/decal_bake.vs.hlsl)
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl)
 set(RX_SHADER_DEPS_mesh_rt_ps_hlsl shaders/gi/rcgi_common.hlsli)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl)

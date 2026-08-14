@@ -84,6 +84,7 @@
 #include "render/screenspace/ssao.h"
 #include "render/screenspace/ssgi.h"
 #include "render/screenspace/ssr.h"
+#include "render/texturing/decal_bake.h"
 #include "render/texturing/virtual_texture.h"
 #include "render/util/gpu_profiler.h"
 
@@ -247,6 +248,10 @@ struct DrawItem {
   // Entity id written to the pick target on a RequestPick frame. 0 = not
   // pickable (the id readback returns 0 for background and unpickable draws).
   u32 pick_id = 0;
+  // Baked decal-layer receiver (Renderer::AcquireDecalReceiver), 0 = none.
+  // Stamps queued against this handle bake into the draw's UV space and shade
+  // as part of the material from then on. See render/texturing/decal_bake.h.
+  u32 decal_receiver = 0;
 };
 
 // A world-space debug line segment with a packed rgba8 (0xRRGGBBAA) color.
@@ -290,6 +295,10 @@ struct FrameView {
   base::Vector<DrawItem> draws;
   // Projected decals this frame (world-space boxes, clustered with the lights).
   base::Vector<Decal> decals;
+  // Decals to BAKE into their receivers' texture space this frame. Unlike the
+  // list above these are one-shot events, not per-frame state: submit a stamp
+  // on the frame the splat happens and it stays until the receiver is cleared.
+  base::Vector<DecalStamp> decal_stamps;
   // Dynamic omni lights this frame, accumulated in the forward lighting pass.
   base::Vector<PointLight> lights;
   // Bone palette for every skinned draw this frame, concatenated; each skinned
@@ -385,6 +394,7 @@ struct FrameView {
     FrameView fresh;
     fresh.draws = std::move(draws);
     fresh.decals = std::move(decals);
+    fresh.decal_stamps = std::move(decal_stamps);
     fresh.lights = std::move(lights);
     fresh.bone_matrices = std::move(bone_matrices);
     fresh.particles = std::move(particles);
@@ -393,6 +403,7 @@ struct FrameView {
     fresh.gaussians = std::move(gaussians);
     fresh.draws.clear();
     fresh.decals.clear();
+    fresh.decal_stamps.clear();
     fresh.lights.clear();
     fresh.bone_matrices.clear();
     fresh.particles.clear();
@@ -520,8 +531,32 @@ public:
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.
   RenderSettings &settings() { return settings_; }
-  // Points the clustered decal system at an uploaded texture (the atlas).
+  // Points the decal systems at an uploaded texture (the atlas). Both the
+  // clustered projectors and the baked texture-space layers read it.
   void SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas = {});
+
+  // --- baked texture-space decals (render/texturing/decal_bake.h) ---
+  // A receiver is a persistent handle an actor keeps for its lifetime; put it
+  // on the actor's DrawItem::decal_receiver and stamp against it. Decals
+  // accumulate into one small per-receiver tile instead of costing per-pixel
+  // work per decal, and survive tile eviction through a CPU-side journal.
+  // Returns 0 when the baker is unavailable (no GPU / allocation failure), in
+  // which case every call below is a safe no-op.
+  u32 AcquireDecalReceiver();
+  void ReleaseDecalReceiver(u32 receiver);
+  // Queues a stamp for the next frame the receiver draws. Equivalent to
+  // pushing onto FrameView::decal_stamps; use whichever suits the call site.
+  bool StampDecal(const DecalStamp &stamp);
+  // Maps a receiver's uvs into its layer tile (layer = uv * scale + bias),
+  // identity by default. A UDIM character body biases the zone it wants onto
+  // the tile; see render/texturing/decal_bake.h.
+  void SetDecalReceiverUv(u32 receiver, f32 scale_u, f32 scale_v, f32 bias_u,
+                          f32 bias_v);
+  // Washes a receiver clean (drops its decal history and repaints its tile).
+  void ClearDecals(u32 receiver);
+  const DecalBaker::Stats &decal_layer_stats() const {
+    return decal_baker_.stats();
+  }
 
   const DeviceCaps *caps() const;
   bool raytracing_available() const { return rt_available_; }
@@ -724,6 +759,10 @@ private:
   VrsRatePass vrs_;
   RestirDi restir_di_;
   VirtualTexture virtual_texture_;
+  DecalBaker decal_baker_;
+  // Receivers drawn this frame, rebuilt each RenderFrame from view.draws so the
+  // baker can pose its bakes against the geometry that is actually on screen.
+  base::Vector<DecalBaker::Target> decal_targets_;
   bool vrs_active_ = false; // rate image attached to this frame's scene pass
   PipelineHandle light_cluster_pipeline_;
   PipelineHandle contact_shadow_pipeline_;

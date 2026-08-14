@@ -692,6 +692,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
   if (rt_available_)
     restir_di_.Initialize(*device_);     // non-fatal: gates on available()
   virtual_texture_.Initialize(*device_); // non-fatal: gates on available()
+  decal_baker_.Initialize(*device_);     // non-fatal: gates on available()
   if (!particles_.Initialize(*device_, kSceneColorFormat,
                              bindless_ ? bindless_->set_layout()
                                        : BindingLayoutHandle{}))
@@ -2507,6 +2508,23 @@ void Renderer::SetDecalAtlas(asset::AssetId texture,
   decal_normal_atlas_view_ = normal_img ? normal_img->view : TextureView{};
 }
 
+u32 Renderer::AcquireDecalReceiver() { return decal_baker_.AcquireReceiver(); }
+
+void Renderer::ReleaseDecalReceiver(u32 receiver) {
+  decal_baker_.ReleaseReceiver(receiver);
+}
+
+bool Renderer::StampDecal(const DecalStamp &stamp) {
+  return decal_baker_.Stamp(stamp);
+}
+
+void Renderer::SetDecalReceiverUv(u32 receiver, f32 scale_u, f32 scale_v,
+                                  f32 bias_u, f32 bias_v) {
+  decal_baker_.SetReceiverUv(receiver, scale_u, scale_v, bias_u, bias_v);
+}
+
+void Renderer::ClearDecals(u32 receiver) { decal_baker_.ClearReceiver(receiver); }
+
 bool Renderer::UploadTexture(const asset::Texture &texture, u64 id_salt) {
   if (!material_system_)
     return false;
@@ -2540,6 +2558,14 @@ void Renderer::RenderFrame(const FrameView &view) {
   // until after the acquire froze time whenever frames were skipped -- a
   // screenshot armed for t=45s then never came due.
   time_seconds_ += view.frame_delta_seconds;
+
+  // Queue the frame's decal stamps before anything can bail out too. Unlike the
+  // other FrameView lists these are one-shot EVENTS, not per-frame state: the
+  // app will not resubmit them, so a stamp landing on a frame that skips
+  // (swapchain out of date, acquire timeout) would be lost for good. Queuing
+  // only appends to the receiver's journal; the bake still happens in the graph.
+  for (const DecalStamp &stamp : view.decal_stamps)
+    decal_baker_.Stamp(stamp);
 
   // Wayland surfaces report an undefined currentExtent, so the driver never
   // flags the swapchain out-of-date on a window resize (unlike X11). Poll the
@@ -3568,7 +3594,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               water_field_active_ ? water_field_.params_buffer(frame_slot)
                                   : GpuBuffer{},
               TextureView{}, TextureView{}, rcgi_irr_view,
-              rcgi_world_src.valid ? &rcgi_world_binding : nullptr);
+              rcgi_world_src.valid ? &rcgi_world_binding : nullptr,
+              decal_baker_.available() ? decal_baker_.albedo_view()
+                                       : TextureView{},
+              decal_baker_.available() ? decal_baker_.fx_view()
+                                       : TextureView{},
+              decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
+                                       : GpuBuffer{});
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
@@ -3647,6 +3679,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             if (draw.item != bound_item) {
               MeshPushConstants push{.model = draw.item->transform,
                                      .prev_model = draw.item->prev_transform};
+              // Same packing as the opaque site: low 24 bits the per-draw
+              // tint, top byte the baked decal-layer tile.
+              push.tint_packed =
+                  (draw.item->tint & 0xffffffu) |
+                  (decal_baker_.tile_slot(draw.item->decal_receiver) << 24);
               // The blend pipelines run the static vertex path, which still
               // applies morphs (only skinning needs the extra vertex stream).
               if (mesh->morph_target_count > 0 &&
@@ -3906,6 +3943,30 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 decal_count * sizeof(Decal));
   }
   globals.light_count = light_count;
+  // Baked decal layers: queue this frame's stamps and gather the receivers that
+  // are actually drawing, which is what the bake needs geometry and a pose from.
+  decal_targets_.clear();
+  if (decal_baker_.available()) {
+    for (const DrawItem &item : view.draws) {
+      if (item.decal_receiver == 0)
+        continue;
+      const GpuMesh *mesh = meshes_.find(item.mesh);
+      if (!mesh)
+        continue;
+      DecalBaker::Target target;
+      target.receiver = item.decal_receiver;
+      target.mesh = mesh;
+      target.transform = item.transform;
+      if (mesh->skinned && item.skin_offset >= 0) {
+        target.bones = &frame.bone_palette;
+        target.skin_offset = static_cast<u32>(item.skin_offset);
+      }
+      decal_targets_.push_back(target);
+    }
+    globals.decal_layer[0] = decal_baker_.tiles_per_row();
+    globals.decal_layer[1] = decal_baker_.tile_uv();
+    globals.decal_layer[2] = decal_baker_.tile_guard_uv();
+  }
   // The FFT ocean, interaction field, shoreline wetting and caustics all
   // describe a water surface, and every water surface (sea, CBT sheet, lake)
   // reaches the renderer as a water-material submesh, so gate the whole family
@@ -4107,6 +4168,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // record this frame's atlas/indirection uploads + the feedback copy/reset.
   if (!path_trace)
     virtual_texture_.AddToGraph(graph_, frame_index_);
+
+  // Baked decal layers: assign tiles to the receivers on screen and record the
+  // stamps queued for them. Records nothing in a frame where nothing changed.
+  decal_baker_.AddToGraph(graph_, {decal_targets_.data(), decal_targets_.size()},
+                          frame_slot, frame_index_, decal_atlas_view_,
+                          decal_normal_atlas_view_);
 
   // FFT ocean: evolve the spectrum and rebuild the displacement/normal maps
   // the water shaders sample this frame.
@@ -5733,7 +5800,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               water_caustics_active_ ? water_caustics_.current_view()
                                      : TextureView{},
               rcgi_irr_view,
-              rcgi_world_src.valid ? &rcgi_world_binding : nullptr);
+              rcgi_world_src.valid ? &rcgi_world_binding : nullptr,
+              decal_baker_.available() ? decal_baker_.albedo_view()
+                                       : TextureView{},
+              decal_baker_.available() ? decal_baker_.fx_view()
+                                       : TextureView{},
+              decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
+                                       : GpuBuffer{});
 
           ColorAttachment colors[3];
           colors[0] = {.view = ctx.graph->image(geom_scene).view,
@@ -5799,8 +5872,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 push.morph_count = item.morph_count;
                 push.morph_vertex_count = mesh->vertex_count;
               }
+              // Low 24 bits the faction/team colour, top byte the draw's
+              // baked decal-layer tile (0 = none). See MeshPushConstants.
               push.tint_packed =
-                  item.tint; // faction/team colour for skinned actors
+                  (item.tint & 0xffffffu) |
+                  (decal_baker_.tile_slot(item.decal_receiver) << 24);
               mesh_pipeline_->Draw(*ctx.cmd, *mesh, push);
             }
             for (const GpuSubmesh &submesh : mesh->submeshes) {
@@ -7383,6 +7459,7 @@ void Renderer::Shutdown() {
     vrs_.Destroy(*device_);
     restir_di_.Destroy(*device_);
     virtual_texture_.Destroy(*device_);
+    decal_baker_.Destroy(*device_);
     vgeo_.Destroy(*device_);
     hair_.Destroy(*device_);
     ocean_.Destroy(*device_);

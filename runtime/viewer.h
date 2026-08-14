@@ -3,13 +3,16 @@
 
 #include <cstdio>
 #include <memory>
+#include <span>
 #include <string>
+#include <utility>
 
 #include <base/containers/vector.h>
 
 #include "anim/expression.h"
 #include "app/application.h"
 #include "app/host.h"
+#include "asset/gltf_loader.h"
 #include "asset/mesh.h"
 
 #include "debug_ui.h"
@@ -39,6 +42,13 @@ class Viewer : public app::Application {
 
  private:
   bool LoadGltfScene();
+  // RX_TATTOO capture hook: bakes decal layers onto the heaviest imported mesh.
+  void StampTattoos(const asset::GltfScene& scene,
+                    std::span<const std::pair<u32, ecs::Entity>> instances);
+  // Held for the session so OnShutdown can hand it back; DecalBaker reuses
+  // handles with no generation counter, so a leaked one would be handed to the
+  // next acquirer complete with this scene's baked decals.
+  u32 tattoo_receiver_ = 0;
   // Registers the small wooden cube every scene can throw around (F key).
   void CreatePhysicsCubeAsset();
   void ThrowPhysicsCube();

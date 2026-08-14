@@ -11,7 +11,9 @@ struct MeshPush {
   column_major float4x4 prev_model;
   uint2 pad_bone;
   uint pad_skin;
-  uint pad_tint;
+  // low 24b rgb8 tint (applied in the vertex stage), high 8b are
+  // 1 + this draw's baked decal-layer tile, 0 = none.
+  uint tint_packed;
   float4 detail_rect;
 };
 PUSH_CONSTANTS(MeshPush, push);
@@ -44,6 +46,7 @@ struct FrameGlobals {
   float4 water_material;       // x transmission, y refl foam gain, z crest-sss intensity, w crest-sss exponent
   float4 water_caustics;       // x intensity, y rest height, z depth-fade (1/m), w unused
   float4 skin_dynamics;        // x pulse phase (rad), y global perfusion offset, z pulse amp, w tension gain
+  float4 decal_layer;          // x tiles per atlas row, y tile edge in atlas uv (0 = baker off), z tile-edge guard band
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 
@@ -208,6 +211,63 @@ void ApplyDecals(inout float3 albedo, inout float3 n, inout float rough_mult,
     }
     rough_mult = lerp(rough_mult, d.params2.y, w);
     emissive += decal_color * d.params2.z * w;
+  }
+}
+
+// Baked texture-space decal layers (env slots 41/42). Every stamp a receiver
+// ever took is already composited into ONE tile of these atlases, so this costs
+// two fetches whether the character carries one splat or two hundred - the
+// clustered loop above pays per decal, this does not. The tile index rides the
+// top byte of the push tint word; 0 means the draw has no layer.
+[[vk::combinedImageSampler]] [[vk::binding(41, 2)]] Texture2D decal_layer_albedo : register(t41, space2);
+[[vk::combinedImageSampler]] [[vk::binding(41, 2)]] SamplerState decal_layer_albedo_sampler : register(s41, space2);
+[[vk::combinedImageSampler]] [[vk::binding(42, 2)]] Texture2D decal_layer_fx : register(t42, space2);
+[[vk::combinedImageSampler]] [[vk::binding(42, 2)]] SamplerState decal_layer_fx_sampler : register(s42, space2);
+// Per-tile uv mapping (scale.xy, bias.zw). A receiver whose uvs are not a plain
+// 0..1 square - a UDIM character body, say - biases the zone it cares about into
+// its tile, and the bake used exactly this transform.
+[[vk::binding(43, 2)]] StructuredBuffer<float4> decal_layer_xform : register(t43, space2);
+
+void ApplyDecalLayer(inout float3 albedo, inout float3 n, inout float rough_mult, float2 uv,
+                     float4 tangent) {
+  uint tile = push.tint_packed >> 24;
+  if (tile == 0u || frame.decal_layer.y <= 0.0) return;
+  tile -= 1u;
+  float per_row = max(frame.decal_layer.x, 1.0);
+  float tile_uv = frame.decal_layer.y;
+  float row = floor(float(tile) / per_row);
+  float2 origin = float2(float(tile) - row * per_row, row) * tile_uv;
+  float4 xform = decal_layer_xform[tile];
+  float2 mapped = uv * xform.xy + xform.zw;
+  // Derivatives BEFORE the reject: it is per-pixel, so a quad straddling a uv
+  // zone boundary is divergent and gradients taken past it are undefined.
+  float2 dx = ddx(uv) * xform.xy * tile_uv;
+  float2 dy = ddy(uv) * xform.xy * tile_uv;
+  // Outside the mapped square this receiver simply has no layer - the same
+  // geometry the bake's scissor dropped, so the two always agree.
+  if (any(mapped < 0.0) || any(mapped > 1.0)) return;
+  // Keep the filter footprint inside this tile. The bake can only write texel
+  // CENTRES, but a bilinear tap (and much more at a coarse mip) reaches past
+  // the edge into whichever receiver owns the neighbouring tile.
+  float2 layer_uv = clamp(origin + mapped * tile_uv, origin + frame.decal_layer.z,
+                          origin + tile_uv - frame.decal_layer.z);
+  float4 layer = decal_layer_albedo.SampleGrad(decal_layer_albedo_sampler, layer_uv, dx, dy);
+  if (layer.a <= 0.002) return;
+  albedo = albedo * (1.0 - layer.a) + layer.rgb;  // premultiplied over
+
+  // 3d fx: a tangent-space normal perturbation and a roughness multiplier, both
+  // stored around a neutral 0.5 so an untouched texel changes nothing.
+  float4 fx = decal_layer_fx.SampleGrad(decal_layer_fx_sampler, layer_uv, dx, dy);
+  rough_mult *= saturate(fx.b * 2.0);
+  float2 detail = fx.rg * 2.0 - 1.0;
+  if (dot(detail, detail) > 1e-6) {
+    float3 t = tangent.xyz - n * dot(n, tangent.xyz);
+    float t_len = length(t);
+    if (t_len > 1e-5) {
+      t /= t_len;
+      float3 b = cross(n, t) * (tangent.w != 0.0 ? tangent.w : 1.0);
+      n = normalize(n + t * detail.x + b * detail.y);
+    }
   }
 }
 
@@ -760,6 +820,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   if (dot(n, v) < 0.0) n = -n;  // shade double sided geometry from both sides
   float decal_rough_mult = 1.0;
   float3 decal_emissive = float3(0.0, 0.0, 0.0);
+  ApplyDecalLayer(albedo, n, decal_rough_mult, input.uv, input.tangent);
   ApplyDecals(albedo, n, decal_rough_mult, decal_emissive, input.world_pos,
               input.sv_position.xy, 0.1 / max(input.sv_position.z, 1e-6));
 

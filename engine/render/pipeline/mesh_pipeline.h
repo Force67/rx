@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_MESH_PIPELINE_H_
 #define RX_RENDER_MESH_PIPELINE_H_
 
+#include <cstddef>
 #include <memory>
 
 #include "core/math.h"
@@ -75,6 +76,9 @@ struct FrameGlobals {
   // perfusion; positive = stretch/crease blanches). Driven by the app from
   // heart rate / exertion / emotion.
   f32 skin_dynamics[4] = {0.0f, 0.0f, 0.03f, 0.35f};
+  // Baked decal layers (env slots 41/42): x tiles per atlas row, y tile edge in
+  // atlas uv, zw unused. Zero disables the layer fetch outright.
+  f32 decal_layer[4] = {0, 0, 0, 0};
 };
 
 // A projected decal: an oriented box whose -z face carries an atlas region,
@@ -138,7 +142,11 @@ struct MeshPushConstants {
   Mat4 prev_model;
   u64 bone_address = 0;  // device address of the frame bone palette, 0 = none
   u32 skin_offset = 0;   // first bone of this mesh in the palette
-  u32 tint_packed = 0;   // per-draw rgb8 tint (0xRRGGBB) modulating albedo, 0 = none
+  // Bits 0-23: per-draw rgb8 tint (0xRRGGBB) modulating albedo, 0 = untinted.
+  // Bits 24-31: 1 + the draw's baked decal-layer tile (DecalBaker), 0 = none.
+  // The two share a word because the tint only ever needed three bytes and the
+  // push block is the sole per-draw channel the fragment stage can read.
+  u32 tint_packed = 0;
   // World-space rect (min_x, min_z, max_x, max_z) where full-detail terrain is
   // streamed in. Set only on distant terrain-LOD draws: the vertex shader sinks
   // vertices inside it so the coarse proxy never bridges above the real land
@@ -160,6 +168,14 @@ struct MeshPushConstants {
 struct MeshShaderPush {
   Mat4 model;
   Mat4 prev_model;
+  // The mesh-shader path shares its FRAGMENT stage (and therefore its push
+  // range) with the raster path, so the first 144 bytes must mirror
+  // MeshPushConstants exactly. Anything else here would be read as the tint /
+  // decal-tile word: bounds.w used to land on it, and the pixel shader decoded
+  // the bounding radius as a layer tile.
+  u64 pad_bone = 0;
+  u32 pad_skin = 0;
+  u32 tint_packed = 0;  // meshlet draws carry no decal layer, so the tile is 0
   f32 bounds[4] = {0, 0, 0, 0};  // xyz model-space center, w radius (task-stage cull)
   f32 occlusion[4] = {0, 0, 0, 0};  // proj.m00, proj.m11, hiz w, hiz h (w==0 disables)
   u64 meshlets_address = 0;
@@ -169,6 +185,10 @@ struct MeshShaderPush {
   u32 meshlet_offset = 0;
   u32 meshlet_count = 0;
 };
+// The shared fragment stage reads the tile from ONE offset; both push blocks
+// have to agree on it or a meshlet draw feeds it whatever else lives there.
+static_assert(offsetof(MeshShaderPush, tint_packed) == offsetof(MeshPushConstants, tint_packed),
+              "mesh-shader and raster push blocks must agree on tint_packed");
 
 // Forward pbr pipeline: classic vertex buffer, metallic roughness shading,
 // reversed z depth. Outputs hdr color and motion vectors. Set 0 is the frame

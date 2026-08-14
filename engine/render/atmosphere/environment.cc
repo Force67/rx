@@ -294,6 +294,15 @@ bool EnvironmentSystem::CreatePipelines() {
   env_desc.slots.push_back({38, BindingType::kCombinedTextureSampler});
   env_desc.slots.push_back({39, BindingType::kStorageBuffer});
   env_desc.slots.push_back({40, BindingType::kStorageBuffer});
+  // 41/42: baked texture-space decal layers (DecalBaker). 41 premultiplied
+  // colour + coverage, 42 tangent-space normal xy + roughness multiplier. The
+  // per-draw tile arrives in the push block; black/neutral when the baker is
+  // off, which the forward pass never samples (tile 0 = no layer).
+  env_desc.slots.push_back({41, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({42, BindingType::kCombinedTextureSampler});
+  // 43: per-tile uv scale/bias, so the forward pass reproduces the mapping the
+  // bake used (UDIM character bodies need one).
+  env_desc.slots.push_back({43, BindingType::kStorageBuffer});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -473,7 +482,10 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     const GpuBuffer& water_field_params,
                                     TextureView shore_wetness, TextureView caustics,
                                     TextureView rcgi_irradiance,
-                                    const RcgiWorldBinding* rcgi_world) const {
+                                    const RcgiWorldBinding* rcgi_world,
+                                    TextureView decal_layer_albedo,
+                                    TextureView decal_layer_fx,
+                                    const GpuBuffer& decal_layer_xform) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -567,7 +579,16 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                                                    : dummy_storage_,
                            0, rcgi_world && rcgi_world->interior_vols
                                   ? rcgi_world->interior_vols->size
-                                  : 256)});
+                                  : 256),
+       // Baked decal layers. The stand-ins must read as "no decal": a
+       // single-channel dummy would expand to alpha 1 and composite the surface
+       // to black, so use the RGBA8 white (coverage 1, colour white is never
+       // sampled because the baker being off leaves decal_layer.y at 0) and the
+       // flat normal for the fx layer's neutral.
+       Bind::Combined(41, decal_layer_albedo ? decal_layer_albedo : white_.view, sampler_),
+       Bind::Combined(42, decal_layer_fx ? decal_layer_fx : flat_normal_.view, sampler_),
+       Bind::StorageBuffer(43, decal_layer_xform ? decal_layer_xform : dummy_storage_, 0,
+                           decal_layer_xform ? decal_layer_xform.size : 256)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {
