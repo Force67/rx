@@ -320,23 +320,37 @@ bool LoadGltfScene(const std::string &path, GltfScene *out) {
   // inverse(inverse_bind[j]) is the joint's bind model transform. Rebuilding
   // the palette from this skeleton therefore produces identity at rest.
   out->skeletons.resize(data->skins_count);
+  out->skin_bindings.resize(data->skins_count);
   for (size_t i = 0; i < data->skins_count; ++i) {
     const cgltf_skin &src = data->skins[i];
     Skeleton &skeleton = out->skeletons[i];
+    SkinBinding &binding = out->skin_bindings[i];
     skeleton.id = ScopedId(path, "skin", i);
+    binding.bones.reserve(src.joints_count);
+    binding.inverse_bind.resize(src.joints_count);
     base::Vector<Mat4> bind_model(src.joints_count);
     base::Vector<i32> source_parent(src.joints_count);
     std::fill(source_parent.begin(), source_parent.end(), -1);
     for (size_t joint = 0; joint < src.joints_count; ++joint) {
       Mat4 inverse_bind = Mat4::Identity();
-      if (src.inverse_bind_matrices &&
-          joint < src.inverse_bind_matrices->count) {
+      const bool has_inverse_bind =
+          src.inverse_bind_matrices &&
+          joint < src.inverse_bind_matrices->count;
+      binding.bones.push_back(src.joints[joint]->name
+                                  ? src.joints[joint]->name
+                                  : "joint_" + std::to_string(joint));
+      if (has_inverse_bind) {
         cgltf_accessor_read_float(src.inverse_bind_matrices, joint,
                                   inverse_bind.m, 16);
-        bind_model[joint] = Inverse(inverse_bind);
+        binding.inverse_bind[joint] = inverse_bind;
       } else {
-        cgltf_node_transform_world(src.joints[joint], bind_model[joint].m);
+        binding.inverse_bind[joint] = Mat4::Identity();
       }
+      bind_model[joint] = has_inverse_bind
+                              ? Inverse(binding.inverse_bind[joint])
+                              : Mat4::Identity();
+      if (!has_inverse_bind)
+        cgltf_node_transform_world(src.joints[joint], bind_model[joint].m);
       cgltf_node *parent = src.joints[joint]->parent;
       while (parent && source_parent[joint] < 0) {
         for (size_t candidate = 0; candidate < src.joints_count; ++candidate) {
@@ -392,8 +406,9 @@ bool LoadGltfScene(const std::string &path, GltfScene *out) {
     }
   }
 
-  // glTF nodes, rather than meshes, own skin associations. Record the first
-  // binding for each source mesh; incompatible reuse is diagnosed explicitly.
+  // glTF nodes, rather than meshes, own skin associations. Mesh::skin keeps the
+  // first binding for compatibility with mesh-only consumers; GltfScene users
+  // use Instance::skeleton_index with skin_bindings for the exact binding.
   base::Vector<i32> mesh_skin(data->meshes_count);
   std::fill(mesh_skin.begin(), mesh_skin.end(), -1);
   for (size_t node_index = 0; node_index < data->nodes_count; ++node_index) {
@@ -402,12 +417,8 @@ bool LoadGltfScene(const std::string &path, GltfScene *out) {
       continue;
     const u32 mesh_index = static_cast<u32>(node.mesh - data->meshes);
     const i32 skin_index = static_cast<i32>(node.skin - data->skins);
-    if (mesh_skin[mesh_index] < 0) {
+    if (mesh_skin[mesh_index] < 0)
       mesh_skin[mesh_index] = skin_index;
-    } else if (mesh_skin[mesh_index] != skin_index) {
-      RX_WARN("gltf mesh {} is instantiated with multiple skins; using skin {}",
-              mesh_index, mesh_skin[mesh_index]);
-    }
   }
 
   out->meshes.resize(data->meshes_count);
@@ -418,21 +429,8 @@ bool LoadGltfScene(const std::string &path, GltfScene *out) {
     mesh.id = ScopedId(path, "mesh", i);
     const i32 skin_index = mesh_skin[i];
     if (skin_index >= 0) {
-      const cgltf_skin &skin = data->skins[skin_index];
       mesh.skinned = true;
-      mesh.skin.bones.reserve(skin.joints_count);
-      mesh.skin.inverse_bind.resize(skin.joints_count);
-      for (size_t joint = 0; joint < skin.joints_count; ++joint) {
-        mesh.skin.bones.push_back(skin.joints[joint]->name
-                                      ? skin.joints[joint]->name
-                                      : "joint_" + std::to_string(joint));
-        mesh.skin.inverse_bind[joint] = Mat4::Identity();
-        if (skin.inverse_bind_matrices &&
-            joint < skin.inverse_bind_matrices->count) {
-          cgltf_accessor_read_float(skin.inverse_bind_matrices, joint,
-                                    mesh.skin.inverse_bind[joint].m, 16);
-        }
-      }
+      mesh.skin = out->skin_bindings[static_cast<u32>(skin_index)];
     }
     mesh.lods.resize(1);
     MeshLod &lod = mesh.lods[0];
@@ -710,22 +708,23 @@ bool LoadGltfScene(const std::string &path, GltfScene *out) {
     const cgltf_node &node = data->nodes[i];
     if (!node.mesh)
       continue;
-    f32 world[16];
-    cgltf_node_transform_world(&node, world);
-
     GltfScene::Instance instance;
     instance.mesh_index = static_cast<u32>(node.mesh - data->meshes);
     instance.skeleton_index =
         node.skin ? static_cast<i32>(node.skin - data->skins) : -1;
-    instance.position = {world[12], world[13], world[14]};
-    Vec3 scale{std::sqrt(world[0] * world[0] + world[1] * world[1] +
-                         world[2] * world[2]),
-               std::sqrt(world[4] * world[4] + world[5] * world[5] +
-                         world[6] * world[6]),
-               std::sqrt(world[8] * world[8] + world[9] * world[9] +
-                         world[10] * world[10])};
-    instance.scale = (scale.x + scale.y + scale.z) / 3.0f;
-    QuatFromMatrix(world, scale, instance.rotation);
+    if (!node.skin) {
+      f32 world[16];
+      cgltf_node_transform_world(&node, world);
+      instance.position = {world[12], world[13], world[14]};
+      Vec3 scale{std::sqrt(world[0] * world[0] + world[1] * world[1] +
+                           world[2] * world[2]),
+                 std::sqrt(world[4] * world[4] + world[5] * world[5] +
+                           world[6] * world[6]),
+                 std::sqrt(world[8] * world[8] + world[9] * world[9] +
+                           world[10] * world[10])};
+      instance.scale = (scale.x + scale.y + scale.z) / 3.0f;
+      QuatFromMatrix(world, scale, instance.rotation);
+    }
     out->instances.push_back(instance);
   }
 

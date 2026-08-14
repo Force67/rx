@@ -1284,7 +1284,7 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
         if (!terrain_visual && e == primary)
           tint = 0xffa64d; // selection highlight
         d.tint = tint;
-        auto imported = imported_entities_.find(e.index);
+        auto imported = imported_entities_.find(ImportedEntityKey(e));
         if (imported != imported_entities_.end()) {
           const auto [model_index, instance_index] = imported->second;
           if (model_index < imported_models_.size() &&
@@ -1295,7 +1295,7 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
             if (record && instance.skin >= 0 &&
                 instance.skin < static_cast<i32>(model.skins.size())) {
               ImportedSkin &skin = model.skins[instance.skin];
-              anim::BuildSkinPalette(skin.model_matrices, record->mesh.skin,
+              anim::BuildSkinPalette(skin.model_matrices, skin.binding,
                                      instance.remap, &instance.palette);
               d.skin_offset = static_cast<i32>(view.bone_matrices.size());
               for (const Mat4 &matrix : instance.palette)

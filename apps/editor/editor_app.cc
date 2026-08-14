@@ -445,6 +445,8 @@ bool Editor::LoadModelDocument(const std::string &path) {
   for (u32 i = 0; i < imported_scene.skeletons.size(); ++i) {
     ImportedSkin &skin = model.skins[i];
     skin.skeleton = std::move(imported_scene.skeletons[i]);
+    if (i < imported_scene.skin_bindings.size())
+      skin.binding = std::move(imported_scene.skin_bindings[i]);
     skin.pose.ResetToBind(skin.skeleton);
     region_count += ConfigureImportedBody(&skin);
   }
@@ -464,7 +466,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
     world_->Add(entity, transform);
     world_->Add(entity,
                 scene::Renderable{imported_scene.meshes[source.mesh_index].id});
-    edit::EnsureGuid(*world_, entity);
+    world_->Add(entity, scene::Transient{});
     SetName(entity, fs::path(path).stem().string() + " " +
                         std::to_string(model.instances.size() + 1));
 
@@ -480,11 +482,12 @@ bool Editor::LoadModelDocument(const std::string &path) {
         instance.skin < static_cast<i32>(model.skins.size())) {
       instance.remap =
           anim::BuildBoneRemap(model.skins[instance.skin].skeleton,
-                               imported_scene.meshes[source.mesh_index].skin);
+                               model.skins[instance.skin].binding);
     }
     const u32 instance_index = static_cast<u32>(model.instances.size());
     model.instances.push_back(std::move(instance));
-    imported_entities_[entity.index] = {model_index, instance_index};
+    imported_entities_[ImportedEntityKey(entity)] = {model_index,
+                                                     instance_index};
   }
   imported_models_.push_back(std::move(model));
 
@@ -603,7 +606,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
     world_->Add(stored_model.turntable_entity, plate_transform);
     world_->Add(stored_model.turntable_entity,
                 scene::Renderable{plate_mesh});
-    edit::EnsureGuid(*world_, stored_model.turntable_entity);
+    world_->Add(stored_model.turntable_entity, scene::Transient{});
     SetName(stored_model.turntable_entity, "Jiggle turntable");
   }
   stored_model.turntable_center = center;
@@ -617,7 +620,6 @@ bool Editor::LoadModelDocument(const std::string &path) {
                     std::to_string(region_count) + " jiggle regions" +
                     (reused_cache ? " (cached)" : "");
   RX_INFO("editor: {}", status_message_);
-  doc_dirty_ = true;
   playing_ = region_count > 0; // imported characters preview immediately
   MarkDirty();
   return true;
@@ -670,6 +672,10 @@ void Editor::UpdateImportedModels(f32 dt) {
     const Quat turntable_rotation =
         QuatFromAxisAngle({0, 1, 0}, turntable_angle);
     for (ImportedInstance &instance : model.instances) {
+      if (!world_->IsAlive(instance.entity)) {
+        imported_entities_.erase(ImportedEntityKey(instance.entity));
+        continue;
+      }
       if (!instance.rotates_with_turntable)
         continue;
       scene::Transform *transform = world_->Get<scene::Transform>(instance.entity);

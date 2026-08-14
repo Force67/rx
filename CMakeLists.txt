@@ -379,6 +379,12 @@ if(RX_BUILD_TESTS)
   add_test(NAME asset_database_test COMMAND asset_database_test)
 endif()
 
+if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
+  add_executable(gltf_skin_test test/gltf_skin_test.cc)
+  target_link_libraries(gltf_skin_test PRIVATE rx::asset rx::core)
+  add_test(NAME gltf_skin_test COMMAND gltf_skin_test)
+endif()
+
 # Procedural vehicle audio: engine/skid/wind synthesis, the SynthVoice seam and
 # the VehicleAudio driver through the mixer. Pure CPU (no device), always runs.
 if(RX_BUILD_TESTS)

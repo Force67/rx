@@ -13,17 +13,21 @@
 
 namespace rx::asset {
 
-// A flattened glTF scene: node transforms baked to world space, one engine
-// Mesh per glTF mesh (primitives become submeshes), textures decoded to
-// rgba8. Asset ids derive from "<path>#<kind><index>" so scenes from
-// different files never collide.
+// A flattened glTF scene: static node transforms baked to world space (skinned
+// mesh-node transforms are ignored as required by glTF), one engine Mesh per
+// glTF mesh (primitives become submeshes), textures decoded to rgba8. Asset ids
+// derive from "<path>#<kind><index>" so scenes from different files never
+// collide.
 struct GltfScene {
   base::Vector<Texture> textures;
   base::Vector<Material> materials;
   base::Vector<Mesh> meshes;
-  // One runtime skeleton per glTF skin. Bone order is the skin's joint order,
-  // matching Mesh::skin and the JOINTS_0 vertex stream.
+  // One runtime skeleton and exact palette binding per glTF skin. Skeleton
+  // bones are topologically ordered; skin_bindings retain the source palette
+  // order used by JOINTS_0 and inverse bind matrices. A mesh may be instanced
+  // with more than one of these bindings.
   base::Vector<Skeleton> skeletons;
+  base::Vector<SkinBinding> skin_bindings;
 
   struct Instance {
     u32 mesh_index = 0;

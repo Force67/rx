@@ -129,6 +129,7 @@ void RegisterBuiltins() {
       .Range(0.0001f, 10000.f);
   ReflectComponent<Renderable>("Renderable").Prop("mesh", &Renderable::mesh);
   ReflectComponent<Hidden>("Hidden");  // tag: no fields
+  ReflectComponent<Transient>("Transient");  // SaveScene skips the entity
   ReflectComponent<Name>("Name").Prop("value", &Name::value);
   ReflectComponent<Guid>("Guid").Prop("value", &Guid::value);
   ReflectComponent<SpawnedFrom>("SpawnedFrom").Prop("prefab", &SpawnedFrom::prefab);

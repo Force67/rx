@@ -62,11 +62,16 @@ struct MeshRecord {
 
 struct ImportedSkin {
   asset::Skeleton skeleton;
+  asset::SkinBinding binding;
   anim::SkeletonPose pose;
   anim::BodyDynamics dynamics;
   base::Vector<anim::BodyMorphWeight> morphs;
   base::Vector<Mat4> model_matrices;
 };
+
+inline u64 ImportedEntityKey(ecs::Entity entity) {
+  return static_cast<u64>(entity.generation) << 32 | entity.index;
+}
 
 struct ImportedInstance {
   ecs::Entity entity;
@@ -279,8 +284,9 @@ private:
   std::vector<AssetEntry> assets_list_;
   std::unordered_map<std::string, asset::AssetId> placement_meshes_;
   std::vector<ImportedModel> imported_models_;
-  // entity index -> (model index, instance index)
-  std::unordered_map<u32, std::pair<u32, u32>> imported_entities_;
+  // Full entity handle -> (model index, instance index). Including the
+  // generation prevents a reused ECS slot from inheriting stale skin state.
+  std::unordered_map<u64, std::pair<u32, u32>> imported_entities_;
 
   terrain::Terrain terrain_;
   std::map<terrain::TerrainTileKey, TerrainTileVisual> terrain_tiles_;
