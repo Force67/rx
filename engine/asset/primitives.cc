@@ -127,9 +127,29 @@ const BipedBone kBiped[] = {
     {"NPC R Forearm [RLar]", 14, {-0.28f, 0, 0}, kHand},
 };
 
+// Where one box's six faces live in the mesh's uv space. The boxes tile a
+// square grid of cells and each face takes a 3x2 sub-cell of its own, inset by a
+// gutter so filtering never crosses a chart boundary. Unique (non-overlapping)
+// uvs are what make the body a valid texture-space decal receiver - with every
+// face on the same 0..1 square a splat would land on all of them at once.
+struct UvCell {
+  f32 min[2] = {0, 0};
+  f32 size = 1.0f;
+};
+
+UvCell BoxUvCell(u32 box_index, u32 box_count) {
+  u32 cols = 1;
+  while (cols * cols < box_count) ++cols;
+  UvCell cell;
+  cell.size = 1.0f / static_cast<f32>(cols);
+  cell.min[0] = static_cast<f32>(box_index % cols) * cell.size;
+  cell.min[1] = static_cast<f32>(box_index / cols) * cell.size;
+  return cell;
+}
+
 // Append an axis-aligned box spanning a..b inflated by `thick`, all vertices
-// weighted fully to `bone`.
-void AddBox(MeshLod* lod, const Vec3& a, const Vec3& b, f32 thick, u8 bone) {
+// weighted fully to `bone`, with its faces packed into `cell` of the uv atlas.
+void AddBox(MeshLod* lod, const Vec3& a, const Vec3& b, f32 thick, u8 bone, const UvCell& cell) {
   f32 lo[3] = {std::min(a.x, b.x) - thick, std::min(a.y, b.y) - thick, std::min(a.z, b.z) - thick};
   f32 hi[3] = {std::max(a.x, b.x) + thick, std::max(a.y, b.y) + thick, std::max(a.z, b.z) + thick};
   static constexpr int kFace[6][3] = {{0, 1, 2}, {0, 1, 2}, {1, 0, 2},
@@ -150,8 +170,14 @@ void AddBox(MeshLod* lod, const Vec3& a, const Vec3& b, f32 thick, u8 bone) {
       vertex.normal[n] = kSign[f];
       vertex.tangent[u] = 1.0f;
       vertex.tangent[3] = 1.0f;
-      vertex.uv[0] = cu;
-      vertex.uv[1] = cv;
+      // 3x2 sub-cells inside this box's atlas cell, inset by a gutter.
+      const f32 face_w = cell.size / 3.0f;
+      const f32 face_h = cell.size / 2.0f;
+      const f32 inset = cell.size * 0.02f;
+      vertex.uv[0] = cell.min[0] + static_cast<f32>(f % 3) * face_w + inset +
+                     cu * (face_w - 2.0f * inset);
+      vertex.uv[1] = cell.min[1] + static_cast<f32>(f / 3) * face_h + inset +
+                     cv * (face_h - 2.0f * inset);
       lod->vertices.push_back(vertex);
       SkinnedVertexExtra extra;
       extra.bone_indices[0] = bone;
@@ -334,23 +360,33 @@ void MakeSkinnedBiped(AssetId mesh_id, Skeleton* out_skeleton, Mesh* out_mesh) {
     out_mesh->skin.inverse_bind.push_back(MakeTranslation({-world[i].x, -world[i].y, -world[i].z}));
   }
 
+  // Two passes so every box knows the uv grid it has to share.
+  u32 box_count = 0;
+  for (u32 i = 0; i < count; ++i) {
+    if (kBiped[i].parent >= 0) ++box_count;
+    if (kBiped[i].cap != kNone) ++box_count;
+  }
   MeshLod& lod = out_mesh->lods.emplace_back();
+  u32 box = 0;
   for (u32 i = 0; i < count; ++i) {
     // Limb box from the parent joint to this joint, weighted to the parent.
     if (kBiped[i].parent >= 0) {
       f32 thick = i >= 6 ? 0.06f : 0.09f;  // limbs thinner than the torso
       AddBox(&lod, world[kBiped[i].parent], world[i], thick,
-             static_cast<u8>(kBiped[i].parent));
+             static_cast<u8>(kBiped[i].parent), BoxUvCell(box++, box_count));
     }
     // Cap boxes for leaves.
     Vec3 tip = world[i];
     if (kBiped[i].cap == kHead) {
-      AddBox(&lod, tip, tip + Vec3{0, 0.12f, 0}, 0.12f, static_cast<u8>(i));
+      AddBox(&lod, tip, tip + Vec3{0, 0.12f, 0}, 0.12f, static_cast<u8>(i),
+             BoxUvCell(box++, box_count));
     } else if (kBiped[i].cap == kFoot) {
-      AddBox(&lod, tip, tip + Vec3{0, -0.02f, 0.18f}, 0.06f, static_cast<u8>(i));
+      AddBox(&lod, tip, tip + Vec3{0, -0.02f, 0.18f}, 0.06f, static_cast<u8>(i),
+             BoxUvCell(box++, box_count));
     } else if (kBiped[i].cap == kHand) {
       Vec3 dir = world[i] - world[kBiped[i].parent];
-      AddBox(&lod, tip, tip + Vec3{dir.x > 0 ? 0.08f : -0.08f, 0, 0}, 0.05f, static_cast<u8>(i));
+      AddBox(&lod, tip, tip + Vec3{dir.x > 0 ? 0.08f : -0.08f, 0, 0}, 0.05f,
+             static_cast<u8>(i), BoxUvCell(box++, box_count));
     }
   }
   lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), AssetId{}});
