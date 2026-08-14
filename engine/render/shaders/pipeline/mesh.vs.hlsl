@@ -42,11 +42,11 @@ struct PushData {
 #ifdef RX_SKINNED
   uint64_t bone_address;  // device address of the frame bone palette
   uint skin_offset;       // first bone of this mesh in the palette
-  uint tint_packed;       // rgb8 (0xRRGGBB) albedo tint, 0 = none (team colour)
+  uint tint_packed;       // low 24b rgb8 tint (team colour), high 8b decal tile
 #else
   uint2 pad_bone;  // layout mirrors the skinned block (MeshPushConstants)
   uint pad_skin;
-  uint tint_packed;  // rgb8 (0xRRGGBB) albedo tint, 0 = none
+  uint tint_packed;  // low 24b rgb8 tint, high 8b decal tile
 #endif
   // World-space rect (min_x, min_z, max_x, max_z) of the fully streamed
   // terrain cells; set only on distant terrain-LOD draws, zeros otherwise.
@@ -254,7 +254,9 @@ VsOut main(VsIn input) {
   // Modulate the albedo by the packed per-instance tint so otherwise identical
   // instances read apart: team/faction colours on skinned actors, owner
   // colours on tinted props (lower-than-1 factors also tame bright blowout).
-  if (push.tint_packed != 0u) {
+  // Only the low three bytes are the tint; the top byte carries the baked
+  // decal-layer tile the pixel shader reads (see MeshPushConstants).
+  if ((push.tint_packed & 0xffffffu) != 0u) {
     float3 t = float3(float((push.tint_packed >> 16) & 0xffu),
                       float((push.tint_packed >> 8) & 0xffu),
                       float(push.tint_packed & 0xffu)) /

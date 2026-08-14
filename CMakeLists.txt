@@ -596,6 +596,13 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   target_link_libraries(adaptive_water_test PRIVATE rx::core)
   add_test(NAME adaptive_water_test COMMAND adaptive_water_test)
 
+  # Texture-space decal baking: bake a stamp into a receiver's tile, read the
+  # atlas back, then evict the tile and prove the journal replays it. Skips the
+  # GPU half without a driver (the projector math still runs).
+  add_executable(decal_bake_test test/decal_bake_test.cc)
+  target_link_libraries(decal_bake_test PRIVATE rx::render rx::core)
+  add_test(NAME decal_bake_test COMMAND decal_bake_test)
+
   add_executable(offscreen_test test/offscreen_test.cc)
   target_link_libraries(offscreen_test PRIVATE rx::render rx::core)
   rx_embed_shaders(offscreen_test

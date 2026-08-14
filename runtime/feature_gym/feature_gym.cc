@@ -712,6 +712,13 @@ struct FeatureGym::Impl {
   Mat4 biped_previous = Mat4::Identity();
   bool biped_previous_valid = false;
   f32 biped_time = 0;
+  // Baked texture-space decals on the walking actor: one receiver handle for
+  // its lifetime, a tattoo stamped once and fluid splatter thrown at it on a
+  // timer. Every splat composites into the same tile, so the hundredth costs
+  // the shading pass exactly what the first did.
+  u32 biped_decal_receiver = 0;
+  f32 splat_timer = 0;
+  u32 splat_index = 0;
 
   physics::BodyId platform_body = 0;
   ecs::Entity platform_entity{};
@@ -2460,9 +2467,52 @@ void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
   draw.transform = actor;
   draw.prev_transform = biped_previous_valid ? biped_previous : actor;
   draw.skin_offset = offset;
+  if (biped_decal_receiver == 0) {
+    biped_decal_receiver = renderer.AcquireDecalReceiver();
+    if (biped_decal_receiver != 0) {
+      // A flat 2d mark on the chest: albedo only, no normal or gloss change.
+      render::DecalStamp tattoo;
+      tattoo.receiver = biped_decal_receiver;
+      tattoo.projector = render::MakeDecalProjector(biped_position + Vec3{0, 1.24f, 0},
+                                                    {0, 0, 1}, {0, 1, 0}, 0.26f, 0.26f, 0.6f);
+      tattoo.projector.tint_blend[0] = 0.06f;
+      tattoo.projector.tint_blend[1] = 0.07f;
+      tattoo.projector.tint_blend[2] = 0.14f;
+      tattoo.projector.tint_blend[3] = 0.85f;
+      tattoo.projector.params2[0] = 0.0f;
+      tattoo.projector.params2[1] = 1.0f;
+      view.decal_stamps.push_back(tattoo);
+    }
+  }
+  draw.decal_receiver = biped_decal_receiver;
   view.draws.push_back(draw);
   biped_previous = actor;
   biped_previous_valid = true;
+
+  // Fluid splatter, thrown from a different angle each time. The bake resolves
+  // which texels the projector box actually covers against the CURRENT pose, so
+  // a splat lands where it hit and then rides the walk cycle.
+  if (biped_decal_receiver != 0) {
+    splat_timer += animation_dt;
+    if (splat_timer > 0.8f) {
+      splat_timer = 0;
+      const f32 angle = static_cast<f32>(splat_index) * 2.39996f;  // golden angle
+      const Vec3 dir{std::cos(angle), 0.0f, std::sin(angle)};
+      const f32 height = 0.55f + 0.28f * static_cast<f32>(splat_index % 4);
+      render::DecalStamp splat;
+      splat.receiver = biped_decal_receiver;
+      splat.projector = render::MakeDecalProjector(biped_position + Vec3{0, height, 0}, dir,
+                                                   {0, 1, 0}, 0.32f, 0.32f, 0.7f);
+      splat.projector.tint_blend[0] = 0.62f;
+      splat.projector.tint_blend[1] = 0.07f;
+      splat.projector.tint_blend[2] = 0.05f;
+      splat.projector.tint_blend[3] = 0.9f;
+      splat.projector.params2[0] = 0.9f;   // 3d fx: raise a rim in the normal
+      splat.projector.params2[1] = 0.25f;  // and drop the roughness: wet gloss
+      view.decal_stamps.push_back(splat);
+      ++splat_index;
+    }
+  }
 
   render::DrawItem morph;
   morph.mesh = morph_mesh;

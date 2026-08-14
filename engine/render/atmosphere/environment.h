@@ -116,7 +116,9 @@ class EnvironmentSystem {
                    TextureView shore_wetness = {},
                    TextureView caustics = {},
                    TextureView rcgi_irradiance = {},
-                   const RcgiWorldBinding* rcgi_world = nullptr) const;
+                   const RcgiWorldBinding* rcgi_world = nullptr,
+                   TextureView decal_layer_albedo = {},
+                   TextureView decal_layer_fx = {}) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}

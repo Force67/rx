@@ -19,7 +19,8 @@ viewer runtime in place of the game.
   (cluster-DAG LOD, gpu-driven two-pass hi-z occlusion culling, 64-bit
   visibility buffer with compute + mesh-shader rasterization, instancing),
   froxel volumetrics, procedural grass ([design](PROCEDURAL_GRASS.md)), local
-  shadow atlas, decals, lit
+  shadow atlas, clustered + baked texture-space decals
+  ([design](DECALS.md)), lit
   translucency, FFT ocean, gaussian splats, GPU particles, HDR10 output,
   dynamic resolution, texture streaming, async compute, VRS, meshlet path.
 - **engine/asset** - glTF loading (cgltf) including morph targets and weight

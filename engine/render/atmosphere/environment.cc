@@ -294,6 +294,12 @@ bool EnvironmentSystem::CreatePipelines() {
   env_desc.slots.push_back({38, BindingType::kCombinedTextureSampler});
   env_desc.slots.push_back({39, BindingType::kStorageBuffer});
   env_desc.slots.push_back({40, BindingType::kStorageBuffer});
+  // 41/42: baked texture-space decal layers (DecalBaker). 41 premultiplied
+  // colour + coverage, 42 tangent-space normal xy + roughness multiplier. The
+  // per-draw tile arrives in the push block; black/neutral when the baker is
+  // off, which the forward pass never samples (tile 0 = no layer).
+  env_desc.slots.push_back({41, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({42, BindingType::kCombinedTextureSampler});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -473,7 +479,9 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     const GpuBuffer& water_field_params,
                                     TextureView shore_wetness, TextureView caustics,
                                     TextureView rcgi_irradiance,
-                                    const RcgiWorldBinding* rcgi_world) const {
+                                    const RcgiWorldBinding* rcgi_world,
+                                    TextureView decal_layer_albedo,
+                                    TextureView decal_layer_fx) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -567,7 +575,12 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                                                    : dummy_storage_,
                            0, rcgi_world && rcgi_world->interior_vols
                                   ? rcgi_world->interior_vols->size
-                                  : 256)});
+                                  : 256),
+       // Baked decal layers. Black = no colour and zero coverage; the flat
+       // normal stands in for the fx layer's neutral (0.5, 0.5, ...) so a draw
+       // that somehow carries a tile while the baker is off shades unchanged.
+       Bind::Combined(41, decal_layer_albedo ? decal_layer_albedo : black_.view, sampler_),
+       Bind::Combined(42, decal_layer_fx ? decal_layer_fx : flat_normal_.view, sampler_)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

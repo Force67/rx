@@ -75,6 +75,9 @@ struct FrameGlobals {
   // perfusion; positive = stretch/crease blanches). Driven by the app from
   // heart rate / exertion / emotion.
   f32 skin_dynamics[4] = {0.0f, 0.0f, 0.03f, 0.35f};
+  // Baked decal layers (env slots 41/42): x tiles per atlas row, y tile edge in
+  // atlas uv, zw unused. Zero disables the layer fetch outright.
+  f32 decal_layer[4] = {0, 0, 0, 0};
 };
 
 // A projected decal: an oriented box whose -z face carries an atlas region,
@@ -138,7 +141,11 @@ struct MeshPushConstants {
   Mat4 prev_model;
   u64 bone_address = 0;  // device address of the frame bone palette, 0 = none
   u32 skin_offset = 0;   // first bone of this mesh in the palette
-  u32 tint_packed = 0;   // per-draw rgb8 tint (0xRRGGBB) modulating albedo, 0 = none
+  // Bits 0-23: per-draw rgb8 tint (0xRRGGBB) modulating albedo, 0 = untinted.
+  // Bits 24-31: 1 + the draw's baked decal-layer tile (DecalBaker), 0 = none.
+  // The two share a word because the tint only ever needed three bytes and the
+  // push block is the sole per-draw channel the fragment stage can read.
+  u32 tint_packed = 0;
   // World-space rect (min_x, min_z, max_x, max_z) where full-detail terrain is
   // streamed in. Set only on distant terrain-LOD draws: the vertex shader sinks
   // vertices inside it so the coarse proxy never bridges above the real land
