@@ -312,7 +312,13 @@ class Sdl3Window final : public Window {
 
  private:
   // SDL reports fingers normalized to the window; the rest of the input layer
-  // speaks window pixels. TouchState owns the lifecycle, this only translates.
+  // speaks window coordinates. TouchState owns the lifecycle, this only
+  // translates.
+  //
+  // Scaling by SDL_GetWindowSize, not width()/height(): those are
+  // SDL_GetWindowSizeInPixels, and on a pixel-dense display the two differ.
+  // Mouse events arrive in window coordinates, so pixels here would put a
+  // finger and the cursor in different spaces for the same spot on screen.
   void HandleFinger(const SDL_TouchFingerEvent& f) {
     TouchState::Phase phase = TouchState::Phase::kMove;
     if (f.type == SDL_EVENT_FINGER_DOWN)
@@ -320,8 +326,10 @@ class Sdl3Window final : public Window {
     else if (f.type == SDL_EVENT_FINGER_UP || f.type == SDL_EVENT_FINGER_CANCELED)
       phase = TouchState::Phase::kUp;
 
-    touch_.Apply(static_cast<i64>(f.fingerID), f.x * static_cast<f32>(width()),
-                 f.y * static_cast<f32>(height()), f.pressure, phase);
+    int w = 0, h = 0;
+    SDL_GetWindowSize(window_, &w, &h);
+    touch_.Apply(static_cast<i64>(f.fingerID), f.x * static_cast<f32>(w),
+                 f.y * static_cast<f32>(h), f.pressure, phase);
   }
 
   void OpenGamepad(SDL_JoystickID id) {

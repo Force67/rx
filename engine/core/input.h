@@ -116,9 +116,11 @@ struct TriggerEffect {
   u8 strength = 0;  // 0-255: resistance / vibration amplitude
 };
 
-// One active contact on a touch screen. Positions are window pixels, matching
-// InputState's mouse_x/mouse_y (SDL reports fingers normalized; the backend
-// scales them), and deltas cover one pump.
+// One active contact on a touch screen. Positions are window coordinates,
+// matching InputState's mouse_x/mouse_y (SDL reports fingers normalized; the
+// backend scales them), and deltas cover one pump. Window coordinates, not
+// pixels: on a pixel-dense display Window::width()/height() are larger, and a
+// finger has to land where the cursor would for the same spot on screen.
 struct TouchPoint {
   i64 id = -1;  // stable while the finger stays down, reused after it lifts
   f32 x = 0;
@@ -198,7 +200,7 @@ struct TouchState {
     return nullptr;
   }
 
-  // Applies one contact update, positions in window pixels. A kDown past
+  // Applies one contact update, positions in window coordinates. A kDown past
   // kMaxPoints is dropped; a kMove/kUp for an id with no slot is ignored (the
   // finger went down before this window had focus, so there is nothing to
   // update).
