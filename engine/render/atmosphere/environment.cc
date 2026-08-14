@@ -580,10 +580,12 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                            0, rcgi_world && rcgi_world->interior_vols
                                   ? rcgi_world->interior_vols->size
                                   : 256),
-       // Baked decal layers. Black = no colour and zero coverage; the flat
-       // normal stands in for the fx layer's neutral (0.5, 0.5, ...) so a draw
-       // that somehow carries a tile while the baker is off shades unchanged.
-       Bind::Combined(41, decal_layer_albedo ? decal_layer_albedo : black_.view, sampler_),
+       // Baked decal layers. The stand-ins must read as "no decal": a
+       // single-channel dummy would expand to alpha 1 and composite the surface
+       // to black, so use the RGBA8 white (coverage 1, colour white is never
+       // sampled because the baker being off leaves decal_layer.y at 0) and the
+       // flat normal for the fx layer's neutral.
+       Bind::Combined(41, decal_layer_albedo ? decal_layer_albedo : white_.view, sampler_),
        Bind::Combined(42, decal_layer_fx ? decal_layer_fx : flat_normal_.view, sampler_),
        Bind::StorageBuffer(43, decal_layer_xform ? decal_layer_xform : dummy_storage_, 0,
                            decal_layer_xform ? decal_layer_xform.size : 256)});

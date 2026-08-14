@@ -93,11 +93,24 @@ bool DecalBaker::Initialize(Device& device, const Desc& desc) {
   // The forward pass binds the atlases every frame whether or not anything has
   // ever been stamped, so they have to leave startup shader-readable rather
   // than waiting for a first bake that may never come.
+  // Content, not just a layout: a draw that reaches the atlas before any tile
+  // has been baked (a stale tile index, a clamped uv) would otherwise sample
+  // uninitialized VRAM, and an arbitrary alpha defeats the coverage early-out.
+  const f32 zero[4] = {0, 0, 0, 0};
+  const f32 neutral[4] = {0.5f, 0.5f, 0.5f, 0};
   device.ImmediateSubmit([&](CommandList& cmd) {
+    TextureBarrier to_clear[3] = {
+        Transition(albedo_, ResourceState::kUndefined, ResourceState::kCopyDst),
+        Transition(fx_, ResourceState::kUndefined, ResourceState::kCopyDst),
+        Transition(chart_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+    cmd.TextureBarriers(to_clear);
+    cmd.ClearColor(albedo_, zero);
+    cmd.ClearColor(fx_, neutral);
+    cmd.ClearColor(chart_, zero);
     TextureBarrier ready[3] = {
-        Transition(albedo_, ResourceState::kUndefined, ResourceState::kShaderReadFragment),
-        Transition(fx_, ResourceState::kUndefined, ResourceState::kShaderReadFragment),
-        Transition(chart_, ResourceState::kUndefined, ResourceState::kShaderReadFragment)};
+        Transition(albedo_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment),
+        Transition(fx_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment),
+        Transition(chart_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment)};
     cmd.TextureBarriers(ready);
   });
   atlas_state_ = ResourceState::kShaderReadFragment;
@@ -158,17 +171,20 @@ bool DecalBaker::CreateAtlases(Device& device) {
 
   // Per-tile uv mapping, read by the forward pass to reproduce what the bake
   // did. Identity until a receiver claims the tile and says otherwise.
-  tile_uv_xform_ = device.CreateBuffer(kMaxTiles * 4 * sizeof(f32), kBufferUsageStorage, true);
-  if (!tile_uv_xform_.mapped) {
-    RX_WARN("decal baker: tile transform buffer mapping failed; texture-space decals disabled");
-    return false;
-  }
-  for (u32 i = 0; i < kMaxTiles; ++i) {
-    f32* row = static_cast<f32*>(tile_uv_xform_.mapped) + i * 4;
-    row[0] = 1;
-    row[1] = 1;
-    row[2] = 0;
-    row[3] = 0;
+  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
+    tile_uv_xform_[f] =
+        device.CreateBuffer(kMaxTiles * 4 * sizeof(f32), kBufferUsageStorage, true);
+    if (!tile_uv_xform_[f].mapped) {
+      RX_WARN("decal baker: tile transform buffer mapping failed; texture-space decals disabled");
+      return false;
+    }
+    for (u32 i = 0; i < kMaxTiles; ++i) {
+      f32* row = static_cast<f32*>(tile_uv_xform_[f].mapped) + i * 4;
+      row[0] = 1;
+      row[1] = 1;
+      row[2] = 0;
+      row[3] = 0;
+    }
   }
 
   white_ = device.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
@@ -288,7 +304,9 @@ void DecalBaker::Destroy(Device& device) {
   if (fx_) device.DestroyImage(fx_);
   if (chart_) device.DestroyImage(chart_);
   if (clear_staging_) device.DestroyBuffer(clear_staging_);
-  if (tile_uv_xform_) device.DestroyBuffer(tile_uv_xform_);
+  for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
+    if (tile_uv_xform_[f]) device.DestroyBuffer(tile_uv_xform_[f]);
+  }
   for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
     if (stamps_[f]) device.DestroyBuffer(stamps_[f]);
   }
@@ -297,6 +315,7 @@ void DecalBaker::Destroy(Device& device) {
   tile_owner_.clear();
   atlas_state_ = ResourceState::kUndefined;
   chart_state_ = ResourceState::kUndefined;
+  stats_ = Stats{};
 }
 
 DecalBaker::Receiver* DecalBaker::find(u32 receiver) {
@@ -452,30 +471,55 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
   GpuStamp* mapped = static_cast<GpuStamp*>(stamps_[frame_slot].mapped);
   u32 cursor = 0;
 
+  // The forward pass reads the uv mapping per TILE, so every resident receiver
+  // has to republish into this frame's slot: the buffer is per-frame-slot (the
+  // previous frame may still be sampling the other one) and therefore stale.
+  f32* xforms = static_cast<f32*>(tile_uv_xform_[frame_slot].mapped);
+  for (const Receiver& receiver : receivers_) {
+    if (!receiver.alive || receiver.tile == kNoTile) continue;
+    f32* row = xforms + receiver.tile * 4;
+    row[0] = receiver.uv_scale[0];
+    row[1] = receiver.uv_scale[1];
+    row[2] = receiver.uv_bias[0];
+    row[3] = receiver.uv_bias[1];
+  }
+
   for (const Target& target : targets) {
     Receiver* r = find(target.receiver);
     if (!r || !target.mesh || target.mesh->index_count == 0) continue;
-    const bool wants = r->repaint || !r->pending.empty();
-    if (!wants) continue;
+    // A repaint only means something once there is a tile to repaint or a
+    // history to replay. Without that guard, ClearReceiver / SetReceiverUv on an
+    // un-stamped receiver would take (and evict for) a tile just to clear it.
+    const bool holds_tile = r->tile != kNoTile;
+    const bool wants =
+        !r->pending.empty() || (r->repaint && (holds_tile || !r->journal.empty()));
+    if (!wants) {
+      r->repaint = r->repaint && holds_tile;
+      continue;
+    }
 
     const bool skinned = target.mesh->skinned && target.mesh->skinning && target.bones;
     if (target.mesh->skinned && (!skinned || !stamp_skin_pipeline_)) continue;
 
-    if (r->tile == kNoTile) {
+    // A tile the receiver does not hold yet always replays the journal. Size the
+    // run and check the frame budget BEFORE acquiring: bailing afterwards would
+    // leave the receiver owning a tile it never cleared, and the forward pass
+    // would shade it with the evicted owner's decals.
+    const bool repaint = r->repaint || !holds_tile;
+    const u32 count = static_cast<u32>((repaint ? r->journal : r->pending).size());
+    if (cursor + count > kMaxFrameStamps) continue;  // budget spent; next frame
+
+    if (!holds_tile) {
       r->tile = AcquireTile(target.receiver, frame_index);
       if (r->tile == kNoTile) continue;  // every tile belongs to a live receiver
       r->repaint = true;
+      f32* row = xforms + r->tile * 4;
+      row[0] = r->uv_scale[0];
+      row[1] = r->uv_scale[1];
+      row[2] = r->uv_bias[0];
+      row[3] = r->uv_bias[1];
     }
-    // The forward pass reads the mapping per tile, so it has to follow the
-    // receiver into whichever tile it landed in.
-    f32* xform = static_cast<f32*>(tile_uv_xform_.mapped) + r->tile * 4;
-    xform[0] = r->uv_scale[0];
-    xform[1] = r->uv_scale[1];
-    xform[2] = r->uv_bias[0];
-    xform[3] = r->uv_bias[1];
-    const base::Vector<GpuStamp>& run = r->repaint ? r->journal : r->pending;
-    const u32 count = static_cast<u32>(run.size());
-    if (cursor + count > kMaxFrameStamps) continue;  // budget spent; next frame
+    const base::Vector<GpuStamp>& run = repaint ? r->journal : r->pending;
 
     BakeDraw draw;
     draw.tile = r->tile;

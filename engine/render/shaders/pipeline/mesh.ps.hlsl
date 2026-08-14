@@ -46,7 +46,7 @@ struct FrameGlobals {
   float4 water_material;       // x transmission, y refl foam gain, z crest-sss intensity, w crest-sss exponent
   float4 water_caustics;       // x intensity, y rest height, z depth-fade (1/m), w unused
   float4 skin_dynamics;        // x pulse phase (rad), y global perfusion offset, z pulse amp, w tension gain
-  float4 decal_layer;          // x tiles per atlas row, y tile edge in atlas uv (0 = baker off)
+  float4 decal_layer;          // x tiles per atlas row, y tile edge in atlas uv (0 = baker off), z tile-edge guard band
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 
@@ -239,12 +239,18 @@ void ApplyDecalLayer(inout float3 albedo, inout float3 n, inout float rough_mult
   float2 origin = float2(float(tile) - row * per_row, row) * tile_uv;
   float4 xform = decal_layer_xform[tile];
   float2 mapped = uv * xform.xy + xform.zw;
+  // Derivatives BEFORE the reject: it is per-pixel, so a quad straddling a uv
+  // zone boundary is divergent and gradients taken past it are undefined.
+  float2 dx = ddx(uv) * xform.xy * tile_uv;
+  float2 dy = ddy(uv) * xform.xy * tile_uv;
   // Outside the mapped square this receiver simply has no layer - the same
   // geometry the bake's scissor dropped, so the two always agree.
   if (any(mapped < 0.0) || any(mapped > 1.0)) return;
-  float2 layer_uv = origin + mapped * tile_uv;
-  float2 dx = ddx(uv) * xform.xy * tile_uv;
-  float2 dy = ddy(uv) * xform.xy * tile_uv;
+  // Keep the filter footprint inside this tile. The bake can only write texel
+  // CENTRES, but a bilinear tap (and much more at a coarse mip) reaches past
+  // the edge into whichever receiver owns the neighbouring tile.
+  float2 layer_uv = clamp(origin + mapped * tile_uv, origin + frame.decal_layer.z,
+                          origin + tile_uv - frame.decal_layer.z);
   float4 layer = decal_layer_albedo.SampleGrad(decal_layer_albedo_sampler, layer_uv, dx, dy);
   if (layer.a <= 0.002) return;
   albedo = albedo * (1.0 - layer.a) + layer.rgb;  // premultiplied over

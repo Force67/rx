@@ -226,38 +226,73 @@ int main() {
   read_atlas();
   Check(coverage_at(mid, mid) == 0, "clearing a receiver repaints its tile empty");
 
-  baker.ReleaseReceiver(first);
-  baker.ReleaseReceiver(second);
-  Check(baker.stats().receivers == 0, "released receivers are gone");
+  // --- an empty receiver must not take a tile ---
+  // ClearReceiver / SetReceiverUv set repaint, but a receiver with no tile and
+  // no history has nothing to repaint: allocating for it would evict a receiver
+  // that does have decals, to display nothing.
+  {
+    const u32 idle = baker.AcquireReceiver();
+    baker.SetReceiverUv(idle, 1.0f, 1.0f, 0.0f, 0.0f);
+    baker.ClearReceiver(idle);
+    const u32 evictions_before = baker.stats().evictions;
+    target.receiver = idle;
+    target.mesh = &quad;
+    RunBake(*device, baker, pool, target, 7, source.view);
+    Check(baker.tile_slot(idle) == 0, "a receiver with no decals takes no tile");
+    Check(baker.stats().evictions == evictions_before,
+          "an empty receiver evicts nobody");
+    baker.ReleaseReceiver(idle);
+  }
 
-  // --- UDIM: a receiver whose uvs live on tile 2 ---
-  // Real character bodies (Daz/Genesis) lay their zones out across u in [0,7).
-  // Without a bias the whole mesh sits outside 0..1 and nothing may bake; with
-  // one, the addressed zone gets the entire layer.
-  GpuMesh udim_quad = CreateQuad(*device, 2.0f);
-  const u32 shifted = baker.AcquireReceiver();
-  target.receiver = shifted;
-  target.mesh = &udim_quad;
-  stamp.receiver = shifted;
-  Check(baker.Stamp(stamp), "the udim receiver takes a stamp");
-  RunBake(*device, baker, pool, target, 5, source.view);
-  read_atlas();
-  Check(coverage_at(mid, mid) == 0, "un-biased uvs off the 0..1 square bake nothing");
-
-  baker.SetReceiverUv(shifted, 1.0f, 1.0f, -2.0f, 0.0f);
-  RunBake(*device, baker, pool, target, 6, source.view);
-  read_atlas();
-  std::printf("decal_bake_test: udim centre coverage %u\n", coverage_at(mid, mid));
-  Check(coverage_at(mid, mid) > 240, "biasing onto the uv tile bakes the decal");
-  Check(coverage_at(2, 2) == 0, "the tile corner is still outside the projector");
-  baker.ReleaseReceiver(shifted);
-  device->DestroyBuffer(udim_quad.vertices);
-  device->DestroyBuffer(udim_quad.indices);
-
-  baker.Destroy(*device);
-  device->DestroyImage(source);
-  device->DestroyBuffer(quad.vertices);
-  device->DestroyBuffer(quad.indices);
+  // --- the frame stamp budget must not strand a half-claimed tile ---
+  // Bailing on the budget AFTER acquiring would leave the receiver owning a
+  // tile it never cleared, and the forward pass would shade it with the
+  // evicted owner's decals.
+  {
+    DecalBaker budget;
+    DecalBaker::Desc bd3;
+    bd3.atlas_size = 128;
+    bd3.tile_size = 64;  // 4 tiles
+    bd3.journal_limit = DecalBaker::kMaxFrameStamps;
+    if (!budget.Initialize(*device, bd3)) {
+      Check(false, "budget baker initialize");
+    } else {
+      GpuMesh quad3 = CreateQuad(*device);
+      // Two receivers, each with a journal as long as the whole frame budget:
+      // the first fits, the second cannot and must be left untouched.
+      u32 handles[2] = {budget.AcquireReceiver(), budget.AcquireReceiver()};
+      for (u32 h = 0; h < 2; ++h) {
+        for (u32 i = 0; i < DecalBaker::kMaxFrameStamps; ++i) {
+          DecalStamp one;
+          one.receiver = handles[h];
+          one.projector = MakeDecalProjector({0, 0, 0}, {0, 1, 0}, {0, 0, 1}, 1.0f, 1.0f, 1.0f);
+          budget.Stamp(one);
+        }
+      }
+      DecalBaker::Target t3[2];
+      for (u32 h = 0; h < 2; ++h) {
+        t3[h].receiver = handles[h];
+        t3[h].mesh = &quad3;
+      }
+      RenderGraph graph;
+      pool.BeginFrame();
+      budget.AddToGraph(graph, {t3, 2}, 0, 1, source.view, source.view);
+      CommandList* cmd = device->BeginFrame(0);
+      if (cmd && graph.Compile(*device, pool)) {
+        PassContext ctx;
+        ctx.cmd = cmd;
+        ctx.device = device.get();
+        device->SubmitFrame(graph.Execute(ctx));
+        device->WaitIdle();
+      }
+      Check(budget.stats().bakes == 1, "only the receiver that fits the budget bakes");
+      Check(budget.tile_slot(handles[1]) == 0,
+            "the receiver that did not fit claims no tile");
+      budget.Destroy(*device);
+      device->DestroyBuffer(quad3.vertices);
+      device->DestroyBuffer(quad3.indices);
+    }
+  }
 
   // --- burst past the journal limit ---
   // A run of stamps landing before any bake is capped by journal_limit: the
@@ -312,6 +347,39 @@ int main() {
       device->DestroyBuffer(quad2.indices);
     }
   }
+
+  baker.ReleaseReceiver(first);
+  baker.ReleaseReceiver(second);
+  Check(baker.stats().receivers == 0, "released receivers are gone");
+
+  // --- UDIM: a receiver whose uvs live on tile 2 ---
+  // Real character bodies (Daz/Genesis) lay their zones out across u in [0,7).
+  // Without a bias the whole mesh sits outside 0..1 and nothing may bake; with
+  // one, the addressed zone gets the entire layer.
+  GpuMesh udim_quad = CreateQuad(*device, 2.0f);
+  const u32 shifted = baker.AcquireReceiver();
+  target.receiver = shifted;
+  target.mesh = &udim_quad;
+  stamp.receiver = shifted;
+  Check(baker.Stamp(stamp), "the udim receiver takes a stamp");
+  RunBake(*device, baker, pool, target, 5, source.view);
+  read_atlas();
+  Check(coverage_at(mid, mid) == 0, "un-biased uvs off the 0..1 square bake nothing");
+
+  baker.SetReceiverUv(shifted, 1.0f, 1.0f, -2.0f, 0.0f);
+  RunBake(*device, baker, pool, target, 6, source.view);
+  read_atlas();
+  std::printf("decal_bake_test: udim centre coverage %u\n", coverage_at(mid, mid));
+  Check(coverage_at(mid, mid) > 240, "biasing onto the uv tile bakes the decal");
+  Check(coverage_at(2, 2) == 0, "the tile corner is still outside the projector");
+  baker.ReleaseReceiver(shifted);
+  device->DestroyBuffer(udim_quad.vertices);
+  device->DestroyBuffer(udim_quad.indices);
+
+  baker.Destroy(*device);
+  device->DestroyImage(source);
+  device->DestroyBuffer(quad.vertices);
+  device->DestroyBuffer(quad.indices);
 
   std::printf("decal_bake_test: %s\n", failures == 0 ? "PASS" : "FAIL");
   return failures == 0 ? 0 : 1;

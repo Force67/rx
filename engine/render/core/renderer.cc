@@ -2559,6 +2559,14 @@ void Renderer::RenderFrame(const FrameView &view) {
   // screenshot armed for t=45s then never came due.
   time_seconds_ += view.frame_delta_seconds;
 
+  // Queue the frame's decal stamps before anything can bail out too. Unlike the
+  // other FrameView lists these are one-shot EVENTS, not per-frame state: the
+  // app will not resubmit them, so a stamp landing on a frame that skips
+  // (swapchain out of date, acquire timeout) would be lost for good. Queuing
+  // only appends to the receiver's journal; the bake still happens in the graph.
+  for (const DecalStamp &stamp : view.decal_stamps)
+    decal_baker_.Stamp(stamp);
+
   // Wayland surfaces report an undefined currentExtent, so the driver never
   // flags the swapchain out-of-date on a window resize (unlike X11). Poll the
   // window each frame and recreate when it no longer matches the swapchain, so
@@ -3591,7 +3599,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                        : TextureView{},
               decal_baker_.available() ? decal_baker_.fx_view()
                                        : TextureView{},
-              decal_baker_.available() ? decal_baker_.tile_uv_buffer()
+              decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
                                        : GpuBuffer{});
 
           // Update the dominant planar surface before beginning rasterization.
@@ -3936,8 +3944,6 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // are actually drawing, which is what the bake needs geometry and a pose from.
   decal_targets_.clear();
   if (decal_baker_.available()) {
-    for (const DecalStamp &stamp : view.decal_stamps)
-      decal_baker_.Stamp(stamp);
     for (const DrawItem &item : view.draws) {
       if (item.decal_receiver == 0)
         continue;
@@ -3956,6 +3962,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     }
     globals.decal_layer[0] = decal_baker_.tiles_per_row();
     globals.decal_layer[1] = decal_baker_.tile_uv();
+    globals.decal_layer[2] = decal_baker_.tile_guard_uv();
   }
   // The FFT ocean, interaction field, shoreline wetting and caustics all
   // describe a water surface, and every water surface (sea, CBT sheet, lake)
@@ -5795,7 +5802,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                        : TextureView{},
               decal_baker_.available() ? decal_baker_.fx_view()
                                        : TextureView{},
-              decal_baker_.available() ? decal_baker_.tile_uv_buffer()
+              decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
                                        : GpuBuffer{});
 
           ColorAttachment colors[3];

@@ -254,6 +254,17 @@ void Viewer::StampTattoos(const asset::GltfScene& scene,
   if (best_vertices == 0) return;
   const asset::Mesh& mesh = scene.meshes[instances[best].first];
   const auto& vertices = mesh.lods[0].vertices;
+  // Anchors and vertices are mesh-local, but the bake rasterizes world space
+  // (push.model * local). Everything below is therefore lifted through the
+  // instance's world matrix; skipping that silently misses on any import whose
+  // node is not identity, which is every Y-up / cm-scaled character.
+  const scene::Transform* placement = world_->Get<scene::Transform>(instances[best].second);
+  const Mat4 to_world = placement ? MakeTranslation({placement->position[0], placement->position[1],
+                                                     placement->position[2]}) *
+                                        MakeFromQuat(placement->rotation[0], placement->rotation[1],
+                                                     placement->rotation[2], placement->rotation[3]) *
+                                        MakeScale(placement->scale)
+                                  : Mat4::Identity();
 
   Vec3 lo{vertices[0].position[0], vertices[0].position[1], vertices[0].position[2]};
   Vec3 hi = lo;
@@ -272,15 +283,16 @@ void Viewer::StampTattoos(const asset::GltfScene& scene,
       std::fseek(file, 0, SEEK_END);
       const long bytes = std::ftell(file);
       std::fseek(file, 0, SEEK_SET);
-      const u32 side = static_cast<u32>(std::lround(std::sqrt(bytes / 4.0)));
-      if (bytes <= 0 || side * side * 4 != static_cast<u32>(bytes)) {
+      const u64 texels = bytes > 0 ? static_cast<u64>(bytes) / 4 : 0;
+      const u64 side = static_cast<u64>(std::lround(std::sqrt(static_cast<f64>(texels))));
+      if (bytes <= 0 || side * side * 4 != static_cast<u64>(bytes)) {
         RX_WARN("RX_TATTOO_ATLAS: {} is {} bytes, not a square rgba8 image", atlas_path, bytes);
       } else {
         asset::Texture ink;
         ink.id = asset::MakeAssetId("viewer/tattoo/ink");
         ink.format = asset::TextureFormat::kRgba8;
-        ink.width = side;
-        ink.height = side;
+        ink.width = static_cast<u32>(side);
+        ink.height = static_cast<u32>(side);
         ink.is_srgb = true;
         ink.data.resize(static_cast<size_t>(bytes));
         if (std::fread(ink.data.data(), 1, static_cast<size_t>(bytes), file) ==
@@ -292,6 +304,8 @@ void Viewer::StampTattoos(const asset::GltfScene& scene,
       std::fclose(file);
     }
   }
+
+  const f32 placement_scale = placement ? placement->scale : 1.0f;
 
   const u32 receiver = renderer_->AcquireDecalReceiver();
   if (receiver == 0) {
@@ -314,8 +328,12 @@ void Viewer::StampTattoos(const asset::GltfScene& scene,
     const char* cursor = entry.c_str();
     while (parsed < 4 && *cursor) {
       char* next = nullptr;
-      f[parsed] = std::strtof(cursor, &next);
+      // strtof returns 0 on failure, so only commit the value once the parse is
+      // known good: a trailing space would otherwise zero the size and build a
+      // degenerate projector (all-zero rows, NaN facing test).
+      const f32 value = std::strtof(cursor, &next);
       if (next == cursor) break;
+      f[parsed] = value;
       ++parsed;
       cursor = *next == ',' ? next + 1 : next;
     }
@@ -353,15 +371,17 @@ void Viewer::StampTattoos(const asset::GltfScene& scene,
       continue;
     }
 
-    const Vec3 position{nearest->position[0], nearest->position[1], nearest->position[2]};
-    const Vec3 normal =
-        Normalize(Vec3{nearest->normal[0], nearest->normal[1], nearest->normal[2]});
+    const Vec3 position = TransformPoint(
+        to_world, {nearest->position[0], nearest->position[1], nearest->position[2]});
+    const Vec3 normal = Normalize(TransformDir(
+        to_world, {nearest->normal[0], nearest->normal[1], nearest->normal[2]}));
     Vec3 up{0, 1, 0};
     if (std::abs(Dot(up, normal)) > 0.9f) up = {0, 0, 1};
     render::DecalStamp tattoo;
     tattoo.receiver = receiver;
-    tattoo.projector =
-        render::MakeDecalProjector(position, normal, up, f[3], f[3], f[3] * 2.0f);
+    const f32 world_size = f[3] * placement_scale;
+    tattoo.projector = render::MakeDecalProjector(position, normal, up, world_size, world_size,
+                                                  world_size * 2.0f);
     // Flat 2d ink: albedo only, no normal or roughness change.
     tattoo.projector.tint_blend[0] = 1.0f;
     tattoo.projector.tint_blend[1] = 1.0f;

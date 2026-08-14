@@ -25,6 +25,11 @@ struct FrameGlobals {
 struct PushData {
   column_major float4x4 model;
   column_major float4x4 prev_model;
+  // Mirrors MeshPushConstants' head: the fragment stage shares this range and
+  // reads the tint / decal-tile word at byte 140.
+  uint2 pad_bone;
+  uint pad_skin;
+  uint tint_packed;
   float4 bounds;                    // instance bounds (used by the task stage)
   float4 occlusion;                 // hi-z cull params (used by the task stage)
   uint64_t meshlets_addr;           // array of 48-byte Meshlet

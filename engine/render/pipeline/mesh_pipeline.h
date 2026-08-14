@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_MESH_PIPELINE_H_
 #define RX_RENDER_MESH_PIPELINE_H_
 
+#include <cstddef>
 #include <memory>
 
 #include "core/math.h"
@@ -167,6 +168,14 @@ struct MeshPushConstants {
 struct MeshShaderPush {
   Mat4 model;
   Mat4 prev_model;
+  // The mesh-shader path shares its FRAGMENT stage (and therefore its push
+  // range) with the raster path, so the first 144 bytes must mirror
+  // MeshPushConstants exactly. Anything else here would be read as the tint /
+  // decal-tile word: bounds.w used to land on it, and the pixel shader decoded
+  // the bounding radius as a layer tile.
+  u64 pad_bone = 0;
+  u32 pad_skin = 0;
+  u32 tint_packed = 0;  // meshlet draws carry no decal layer, so the tile is 0
   f32 bounds[4] = {0, 0, 0, 0};  // xyz model-space center, w radius (task-stage cull)
   f32 occlusion[4] = {0, 0, 0, 0};  // proj.m00, proj.m11, hiz w, hiz h (w==0 disables)
   u64 meshlets_address = 0;
@@ -176,6 +185,10 @@ struct MeshShaderPush {
   u32 meshlet_offset = 0;
   u32 meshlet_count = 0;
 };
+// The shared fragment stage reads the tile from ONE offset; both push blocks
+// have to agree on it or a meshlet draw feeds it whatever else lives there.
+static_assert(offsetof(MeshShaderPush, tint_packed) == offsetof(MeshPushConstants, tint_packed),
+              "mesh-shader and raster push blocks must agree on tint_packed");
 
 // Forward pbr pipeline: classic vertex buffer, metallic roughness shading,
 // reversed z depth. Outputs hdr color and motion vectors. Set 0 is the frame

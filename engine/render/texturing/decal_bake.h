@@ -146,7 +146,9 @@ class DecalBaker {
   TextureView fx_view() const { return fx_.view; }
   // Per-tile uv scale+bias (float4 each), indexed by tile. The forward pass
   // needs it to reproduce the mapping the bake used.
-  const GpuBuffer& tile_uv_buffer() const { return tile_uv_xform_; }
+  const GpuBuffer& tile_uv_buffer(u32 frame_slot) const {
+    return tile_uv_xform_[frame_slot];
+  }
   // The backing atlas, for readback and debug views. Left in
   // kShaderReadFragment by every bake.
   const GpuImage& albedo_atlas() const { return albedo_; }
@@ -154,6 +156,11 @@ class DecalBaker {
   // FrameGlobals::decal_layer: x tiles per atlas row, y tile edge in atlas uv.
   f32 tiles_per_row() const { return static_cast<f32>(tiles_per_row_); }
   f32 tile_uv() const { return tile_uv_; }
+  // Inset the forward pass must keep from a tile edge so no filter tap reaches
+  // the neighbour: half a texel at the coarsest mip, in atlas uv.
+  f32 tile_guard_uv() const {
+    return 0.5f * static_cast<f32>(1u << (mip_count_ - 1)) / static_cast<f32>(desc_.atlas_size);
+  }
   const Stats& stats() const { return stats_; }
 
  private:
@@ -227,7 +234,8 @@ class DecalBaker {
   // null descriptor.
   GpuImage white_;
   GpuImage flat_normal_;
-  GpuBuffer tile_uv_xform_;  // host visible float4[kMaxTiles], scale.xy bias.zw
+  // Per frame slot: the forward pass samples it while the next frame records.
+  GpuBuffer tile_uv_xform_[Device::kMaxFramesInFlight];
 
   PipelineHandle stamp_pipeline_;
   PipelineHandle stamp_skin_pipeline_;

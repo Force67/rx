@@ -97,6 +97,8 @@ splat.projector.tint_blend[3] = 0.95f;  // opacity
 splat.projector.params2[0] = 0.9f;   // 3d fx: normal perturbation strength
 splat.projector.params2[1] = 0.25f;  // 3d fx: roughness multiplier (wet gloss)
 view.decal_stamps.push_back(splat);  // or renderer.StampDecal(splat)
+// Both are equivalent: RenderFrame queues the list before it can bail out on a
+// skipped frame, since a stamp is a one-shot event the app will not resubmit.
 
 renderer.ClearDecals(actor.decal_receiver);    // wash it off
 renderer.ReleaseDecalReceiver(actor.decal_receiver);  // actor died
@@ -152,8 +154,12 @@ Genesis torso zone a full 1024² to itself.
 - **One tile per mesh.** Submeshes that each re-use the full 0..1 square share a
   tile, and a decal on one shows on the others.
 - **Raster and mesh-shader paths.** The tile index rides the top byte of the
-  push-constant tint word, which the meshlet path does not carry; static props
-  drawn through the mesh-shader path do not receive layers.
+  push-constant tint word. The mesh-shader path shares the FRAGMENT stage, and
+  therefore the push range, with the raster path, so `MeshShaderPush` mirrors
+  the first 144 bytes of `MeshPushConstants` and leaves the tile at 0: meshlet
+  props take no layer. A `static_assert` ties the two offsets together, because
+  anything else landing on that word is read as a tile (`bounds.w` used to, and
+  the pixel shader decoded a bounding radius as tile 63).
 - **Skinning is posed, morphs are not.** The bake poses vertices through the
   same bone palette as the scene vertex shader, so a splat lands where it hit
   and then rides the animation. Morph-target deltas are not applied at bake
@@ -182,8 +188,10 @@ changed. When it does have work:
    reads ones it calls inside, so it is idempotent — repeated bakes cannot make
    the gutter creep outward.
 4. **Mips.** A blit chain over the whole atlas. A mip texel never spans two
-   tiles (the chain stops far short of a tile edge), so tiles cannot bleed into
-   each other.
+   tiles (the chain stops far short of a tile edge), so the downsample cannot
+   bleed between them. The forward pass additionally clamps its sample to a
+   guard band of half a texel at the coarsest mip, because a filter TAP reaches
+   past the tile edge even when the texels themselves do not.
 
 ## Testing
 
