@@ -323,6 +323,23 @@ if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
   add_test(NAME net_test COMMAND net_test)
 endif()
 
+# Touch contact state machine: header-only logic over core/input.h, so it needs
+# no window or panel and covers the lifecycle rules a touchscreen would
+# otherwise be the only way to exercise.
+if(RX_BUILD_TESTS)
+  add_executable(input_touch_test test/input_touch_test.cc)
+  target_link_libraries(input_touch_test PRIVATE rx::core)
+  add_test(NAME input_touch_test COMMAND input_touch_test)
+
+  # The other half: SDL's own event queue driven through the real backend, so
+  # the normalized-to-pixel translation is covered too. Skips without a display.
+  if(TARGET SDL3::SDL3)
+    add_executable(input_touch_sdl_test test/input_touch_sdl_test.cc)
+    target_link_libraries(input_touch_sdl_test PRIVATE rx::core SDL3::SDL3)
+    add_test(NAME input_touch_sdl_test COMMAND input_touch_sdl_test)
+  endif()
+endif()
+
 # rx::script unit tests: the portable value/string primitives and the handler
 # registry driven end-to-end against a real ecs::World, with no runtime, GPU or
 # transport, so plain `ctest` runs them everywhere.

@@ -135,6 +135,7 @@ class Sdl3Window final : public Window {
     input_.text[0] = '\0';
     std::memset(input_.pressed, 0, sizeof(input_.pressed));
     std::memset(gamepad_.pressed, 0, sizeof(gamepad_.pressed));
+    touch_.BeginPump();
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -180,6 +181,12 @@ class Sdl3Window final : public Window {
           input_.text[input_.text_len] = '\0';
           break;
         }
+        case SDL_EVENT_FINGER_DOWN:
+        case SDL_EVENT_FINGER_MOTION:
+        case SDL_EVENT_FINGER_UP:
+        case SDL_EVENT_FINGER_CANCELED:
+          HandleFinger(event.tfinger);
+          break;
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
           focused_ = true;
           break;
@@ -304,6 +311,19 @@ class Sdl3Window final : public Window {
   }
 
  private:
+  // SDL reports fingers normalized to the window; the rest of the input layer
+  // speaks window pixels. TouchState owns the lifecycle, this only translates.
+  void HandleFinger(const SDL_TouchFingerEvent& f) {
+    TouchState::Phase phase = TouchState::Phase::kMove;
+    if (f.type == SDL_EVENT_FINGER_DOWN)
+      phase = TouchState::Phase::kDown;
+    else if (f.type == SDL_EVENT_FINGER_UP || f.type == SDL_EVENT_FINGER_CANCELED)
+      phase = TouchState::Phase::kUp;
+
+    touch_.Apply(static_cast<i64>(f.fingerID), f.x * static_cast<f32>(width()),
+                 f.y * static_cast<f32>(height()), f.pressure, phase);
+  }
+
   void OpenGamepad(SDL_JoystickID id) {
     if (pad_) return;  // first pad wins; ignore additional controllers
     SDL_Gamepad* pad = SDL_OpenGamepad(id);
@@ -365,6 +385,10 @@ class Sdl3Window final : public Window {
 }  // namespace
 
 std::unique_ptr<Window> CreateSdl3Window(const WindowDesc& desc) {
+  // Must be set before the video subsystem starts synthesizing. Off means the
+  // panel only feeds Window::touch(), so mouse look cannot be dragged by a
+  // thumb resting on the screen.
+  if (!desc.touch_emits_mouse) SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
   if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
     RX_ERROR("sdl init failed: {}", SDL_GetError());
     return nullptr;

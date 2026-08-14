@@ -21,6 +21,11 @@ struct WindowDesc {
   u32 width = 1920;
   u32 height = 1080;
   bool fullscreen = false;
+  // When true (the platform default) a touch also emits synthetic mouse events,
+  // so mouse-only UI keeps working under a finger. Handhelds want it off: with
+  // mouse look in relative mode a stray thumb on the panel drags the camera.
+  // Games that read touch() directly should turn it off.
+  bool touch_emits_mouse = true;
 };
 
 // Opaque handles the renderer needs to create a surface. With the SDL3
@@ -42,6 +47,7 @@ class RX_CORE_EXPORT Window {
   // Input collected by the last PumpEvents.
   const InputState& input() const { return input_; }
   const GamepadState& gamepad() const { return gamepad_; }
+  const TouchState& touch() const { return touch_; }
 
   // Gamepad haptics. No-ops unless a pad is connected; the DualSense-only
   // effects (trigger resistance, lightbar) silently do nothing on other pads,
@@ -90,6 +96,7 @@ class RX_CORE_EXPORT Window {
  protected:
   InputState input_;
   GamepadState gamepad_;
+  TouchState touch_;
   std::function<void(const void*)> event_hook_;
 };
 

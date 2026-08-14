@@ -304,7 +304,8 @@ f32 InputMap::AxisValue(const Binding& b, const GamepadState& pad) const {
   return std::copysign(s, v);
 }
 
-void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, ActionState* out) {
+void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const TouchState& touch,
+                       ActionState* out) {
   // Analog axes from their gamepad sources (summed, then clamped).
   for (int a = 0; a < axis_count_; ++a) {
     f32 v = 0;
@@ -351,7 +352,15 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, ActionSta
       if (std::fabs(pad.axes[x]) > thr) pad_active = true;
     }
   }
-  if (pad_active) last_device_ = InputDevice::kGamepad;
+  // A finger landing wins over a stale pointer position: on a handheld the
+  // touchscreen and the pad are both live, so only a fresh press should flip
+  // the prompt glyphs.
+  bool touch_active = false;
+  for (u32 t = 0; !touch_active && t < touch.count; ++t)
+    if (touch.points[t].pressed) touch_active = true;
+
+  if (touch_active) last_device_ = InputDevice::kTouch;
+  else if (pad_active) last_device_ = InputDevice::kGamepad;
   else if (kbm_active) last_device_ = InputDevice::kKeyboardMouse;
   out->last_device = last_device_;
 }
