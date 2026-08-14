@@ -45,6 +45,10 @@ class Viewer : public app::Application {
   // RX_TATTOO capture hook: bakes decal layers onto the heaviest imported mesh.
   void StampTattoos(const asset::GltfScene& scene,
                     std::span<const std::pair<u32, ecs::Entity>> instances);
+  // Held for the session so OnShutdown can hand it back; DecalBaker reuses
+  // handles with no generation counter, so a leaked one would be handed to the
+  // next acquirer complete with this scene's baked decals.
+  u32 tattoo_receiver_ = 0;
   // Registers the small wooden cube every scene can throw around (F key).
   void CreatePhysicsCubeAsset();
   void ThrowPhysicsCube();

@@ -299,6 +299,9 @@ void Viewer::StampTattoos(const asset::GltfScene& scene,
             static_cast<size_t>(bytes)) {
           renderer_->UploadTexture(ink);
           renderer_->SetDecalAtlas(ink.id);
+        } else {
+          RX_WARN("RX_TATTOO_ATLAS: short read on {}; stamps fall back to the flat page",
+                  atlas_path);
         }
       }
       std::fclose(file);
@@ -398,6 +401,7 @@ void Viewer::StampTattoos(const asset::GltfScene& scene,
     return;
   }
   world_->Add(instances[best].second, scene::DecalReceiver{receiver});
+  tattoo_receiver_ = receiver;
   RX_INFO("RX_TATTOO: {} tattoo(s) on '{}' ({} verts), uv tile {},{}", stamped,
           mesh.id.hash, best_vertices, tile_u, tile_v);
 }
@@ -543,6 +547,10 @@ void Viewer::OnFrameEnd() {
 void Viewer::OnShutdown() {
   // Release demo GPU resources (scenehook raw pipelines) before the host tears
   // the renderer's device down.
+  if (tattoo_receiver_ != 0 && renderer_) {
+    renderer_->ReleaseDecalReceiver(tattoo_receiver_);
+    tattoo_receiver_ = 0;
+  }
   if (demos_) demos_->Shutdown();
   if (!config_.headless) debug_ui_.Shutdown();
 }

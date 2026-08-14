@@ -3679,8 +3679,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             if (draw.item != bound_item) {
               MeshPushConstants push{.model = draw.item->transform,
                                      .prev_model = draw.item->prev_transform};
+              // Same packing as the opaque site: low 24 bits the per-draw
+              // tint, top byte the baked decal-layer tile.
               push.tint_packed =
-                  decal_baker_.tile_slot(draw.item->decal_receiver) << 24;
+                  (draw.item->tint & 0xffffffu) |
+                  (decal_baker_.tile_slot(draw.item->decal_receiver) << 24);
               // The blend pipelines run the static vertex path, which still
               // applies morphs (only skinning needs the extra vertex stream).
               if (mesh->morph_target_count > 0 &&

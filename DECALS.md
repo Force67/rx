@@ -150,7 +150,13 @@ Genesis torso zone a full 1024² to itself.
   UV atlas for exactly this reason.
 - **One zone per draw.** The tile index is per-draw, so a receiver addresses one
   uv zone. A character wanting decals on torso AND arms needs a receiver per
-  zone, which today means a draw per zone.
+  zone, which today means a draw per zone. A receiver submitted twice in one
+  frame bakes against the first draw's geometry only.
+- **Chart density.** The whole receiver shares one tile, so a mesh split into
+  many small charts gets few texels each. `MakeSkinnedBiped`'s 20 boxes are 120
+  charts in one tile: fine for splatter at 512+, coarse at the 256 default, and
+  the gutter fill covers a chart border at mip 0 but not at the coarsest mip.
+  Real characters have far fewer, far larger charts.
 - **One tile per mesh.** Submeshes that each re-use the full 0..1 square share a
   tile, and a decal on one shows on the others.
 - **Raster and mesh-shader paths.** The tile index rides the top byte of the
@@ -159,7 +165,8 @@ Genesis torso zone a full 1024² to itself.
   the first 144 bytes of `MeshPushConstants` and leaves the tile at 0: meshlet
   props take no layer. A `static_assert` ties the two offsets together, because
   anything else landing on that word is read as a tile (`bounds.w` used to, and
-  the pixel shader decoded a bounding radius as tile 63).
+  the pixel shader decoded a bounding radius as tile 63). Persistent instanced
+  groups push a zeroed block and so take no layer either.
 - **Skinning is posed, morphs are not.** The bake poses vertices through the
   same bone palette as the scene vertex shader, so a splat lands where it hit
   and then rides the animation. Morph-target deltas are not applied at bake
