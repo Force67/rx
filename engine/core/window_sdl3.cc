@@ -137,6 +137,13 @@ class Sdl3Window final : public Window {
     std::memset(gamepad_.pressed, 0, sizeof(gamepad_.pressed));
     touch_.BeginPump();
 
+    // SDL reports pointers in the units the desktop lays the window out in,
+    // which are smaller than pixels once the window has a high pixel density
+    // backbuffer. Everything downstream (the swapchain, picking, the editor
+    // canvas, width()/height()) is pixels, so the conversion happens here, at
+    // the one place events enter, rather than at each consumer.
+    const f32 density = pixel_density();
+
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       if (event_hook_) event_hook_(&event);
@@ -156,18 +163,18 @@ class Sdl3Window final : public Window {
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP: {
-          input_.mouse_x = event.button.x;
-          input_.mouse_y = event.button.y;
+          input_.mouse_x = event.button.x * density;
+          input_.mouse_y = event.button.y * density;
           MouseButton button = TranslateButton(event.button.button);
           if (button == MouseButton::kCount) break;
           input_.mouse[static_cast<u8>(button)] = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
           break;
         }
         case SDL_EVENT_MOUSE_MOTION:
-          input_.mouse_dx += event.motion.xrel;
-          input_.mouse_dy += event.motion.yrel;
-          input_.mouse_x = event.motion.x;
-          input_.mouse_y = event.motion.y;
+          input_.mouse_dx += event.motion.xrel * density;
+          input_.mouse_dy += event.motion.yrel * density;
+          input_.mouse_x = event.motion.x * density;
+          input_.mouse_y = event.motion.y * density;
           break;
         case SDL_EVENT_MOUSE_WHEEL:
           input_.wheel += event.wheel.y;
@@ -313,14 +320,9 @@ class Sdl3Window final : public Window {
   }
 
  private:
-  // SDL reports fingers normalized to the window; the rest of the input layer
-  // speaks window coordinates. TouchState owns the lifecycle, this only
-  // translates.
-  //
-  // Scaling by SDL_GetWindowSize, not width()/height(): those are
-  // SDL_GetWindowSizeInPixels, and on a pixel-dense display the two differ.
-  // Mouse events arrive in window coordinates, so pixels here would put a
-  // finger and the cursor in different spaces for the same spot on screen.
+  // SDL reports fingers normalized to the window, so the pixel size is the
+  // scale that lands them in the same space as the mouse. TouchState owns the
+  // lifecycle, this only translates.
   void HandleFinger(const SDL_TouchFingerEvent& f) {
     TouchState::Phase phase = TouchState::Phase::kMove;
     if (f.type == SDL_EVENT_FINGER_DOWN)
@@ -328,10 +330,8 @@ class Sdl3Window final : public Window {
     else if (f.type == SDL_EVENT_FINGER_UP || f.type == SDL_EVENT_FINGER_CANCELED)
       phase = TouchState::Phase::kUp;
 
-    int w = 0, h = 0;
-    SDL_GetWindowSize(window_, &w, &h);
-    touch_.Apply(static_cast<i64>(f.fingerID), f.x * static_cast<f32>(w),
-                 f.y * static_cast<f32>(h), f.pressure, phase);
+    touch_.Apply(static_cast<i64>(f.fingerID), f.x * static_cast<f32>(width()),
+                 f.y * static_cast<f32>(height()), f.pressure, phase);
   }
 
   void OpenGamepad(SDL_JoystickID id) {
@@ -405,6 +405,7 @@ std::unique_ptr<Window> CreateSdl3Window(const WindowDesc& desc) {
   }
   SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
   if (desc.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+  if (desc.high_pixel_density) flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
   SDL_Window* window = SDL_CreateWindow(desc.title.c_str(), static_cast<int>(desc.width),
                                         static_cast<int>(desc.height), flags);
   if (!window) {

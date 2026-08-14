@@ -116,11 +116,10 @@ struct TriggerEffect {
   u8 strength = 0;  // 0-255: resistance / vibration amplitude
 };
 
-// One active contact on a touch screen. Positions are window coordinates,
-// matching InputState's mouse_x/mouse_y (SDL reports fingers normalized; the
-// backend scales them), and deltas cover one pump. Window coordinates, not
-// pixels: on a pixel-dense display Window::width()/height() are larger, and a
-// finger has to land where the cursor would for the same spot on screen.
+// One active contact on a touch screen. Positions are window pixels, the same
+// space as InputState's mouse_x/mouse_y and Window::width()/height() (SDL
+// reports fingers normalized; the backend scales them), and deltas cover one
+// pump.
 struct TouchPoint {
   i64 id = -1;  // stable while the finger stays down, reused after it lifts
   f32 x = 0;
@@ -200,7 +199,7 @@ struct TouchState {
     return nullptr;
   }
 
-  // Applies one contact update, positions in window coordinates. A kDown past
+  // Applies one contact update, positions in window pixels. A kDown past
   // kMaxPoints is dropped; a kMove/kUp for an id with no slot is ignored (the
   // finger went down before this window had focus, so there is nothing to
   // update).
@@ -253,6 +252,10 @@ struct InputState {
   bool keys[static_cast<u8>(Key::kCount)] = {};
   bool pressed[static_cast<u8>(Key::kCount)] = {};  // went down this pump
   bool mouse[static_cast<u8>(MouseButton::kCount)] = {};
+  // Pointer motion this pump, in pixels like the position below. Pixels rather
+  // than the units the desktop lays the window out in so that look speed does
+  // not change with the display's scaling factor: the same sweep across the
+  // same panel yields the same number either way.
   f32 mouse_dx = 0;
   f32 mouse_dy = 0;
   // Absolute cursor position in window pixels, persisted across pumps. Used by

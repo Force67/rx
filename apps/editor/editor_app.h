@@ -167,7 +167,6 @@ private:
 
   // --- interaction (editor_app.cc) ---
   void UpdateCamera(f32 dt);
-  Vec2 CursorPixels() const; // cursor in canvas pixels, not window coordinates
   bool CursorOverViewport() const;
   ecs::Entity PickAt(f32 mx, f32 my) const; // CPU raycast fallback
   void BeginScenePick(f32 mx, f32 my);      // engine GPU pick (async) or CPU

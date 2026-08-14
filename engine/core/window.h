@@ -21,6 +21,12 @@ struct WindowDesc {
   u32 width = 1920;
   u32 height = 1080;
   bool fullscreen = false;
+  // Render at the panel's real pixel count rather than letting the compositor
+  // upscale a smaller buffer. Off is blurry on any scaled display; on means
+  // width()/height() exceed the size the desktop lays the window out at, and
+  // UI sized in pixels has to scale by pixel_density() to keep its physical
+  // size.
+  bool high_pixel_density = true;
   // When true (the platform default) a touch also emits synthetic mouse events,
   // so mouse-only UI keeps working under a finger. Handhelds want it off: with
   // mouse look in relative mode a stray thumb on the panel drags the camera.
@@ -44,11 +50,13 @@ class RX_CORE_EXPORT Window {
   virtual u32 width() const = 0;
   virtual u32 height() const = 0;
 
-  // Pixels per window coordinate. width()/height() are pixels, while input
-  // positions (mouse and touch alike) are window coordinates; UI or picking
-  // laid out against the pixel size has to scale the cursor by this. It is 1
-  // unless the window uses a high pixel density backbuffer, which rx does not
-  // ask for today, so this is a no-op until it does.
+  // Pixels per unit of the size the desktop lays this window out at, i.e. the
+  // display's scaling factor when high_pixel_density is on, otherwise 1.
+  //
+  // Input is already in pixels, converted by the backend, so nothing needs this
+  // to hit-test. What needs it is anything whose size is authored in pixels and
+  // must keep its physical size as the buffer grows: fonts, panel widths, hit
+  // boxes drawn to match them. Multiply those by this.
   virtual f32 pixel_density() const { return 1.0f; }
 
   // Input collected by the last PumpEvents.
