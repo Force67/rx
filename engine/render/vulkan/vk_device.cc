@@ -604,12 +604,30 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     return nullptr;
   }
 
+  // This used to be integrated-or-discrete, which printed a CPU rasterizer as
+  // "discrete" and so hid a driver mismatch that had fallen back to llvmpipe.
+  const char* kind = "discrete";
+  switch (props.deviceType) {
+    case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU: kind = "integrated"; break;
+    case VK_PHYSICAL_DEVICE_TYPE_CPU: kind = "software"; break;
+    case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU: kind = "virtual"; break;
+    case VK_PHYSICAL_DEVICE_TYPE_OTHER: kind = "other"; break;
+    default: break;
+  }
   RX_INFO("gpu: {} ({}{}, {} MB, vk {}.{}, rt={} rayquery={} mesh={} vrs={})",
-           device->caps_.adapter_name, device->caps_.integrated ? "integrated" : "discrete",
+           device->caps_.adapter_name, kind,
            window ? "" : ", offscreen", device->caps_.device_local_bytes >> 20,
            VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
            device->caps_.raytracing, device->caps_.ray_query, device->caps_.mesh_shaders,
            device->caps_.fragment_shading_rate);
+  // Loud because nothing fails: it renders correctly, just orders of magnitude
+  // slower, so it reads as the engine being slow rather than as a broken driver.
+  if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) {
+    RX_WARN("gpu: this is a SOFTWARE rasterizer, not a GPU. No hardware device was enumerated, "
+            "so everything will be very slow. On Linux, check that the graphics driver's kernel "
+            "module and userspace libraries are the same version (a reboot after a driver update "
+            "is the usual fix).");
+  }
   return device;
 }
 
