@@ -5,7 +5,9 @@
 // must compact so a long session does not leak them, per-pump deltas must
 // accumulate within a pump and reset across one, and updates for ids we never
 // saw (a finger that went down before the window had focus) must be ignored
-// rather than corrupt a slot. Needs no window, so it runs in the ctest gate.
+// rather than corrupt a slot, and a repeated down for an id already on the
+// panel must not open a slot nothing can ever release. Needs no window, so it
+// runs in the ctest gate.
 
 #include <cmath>
 #include <cstdio>
@@ -144,6 +146,51 @@ void TestCancelEndsContact() {
   Check("cancelled slot is reclaimed", t.count == 0);
 }
 
+// A repeated down for a finger already on the panel must not open a second slot
+// for the same id. The duplicate would be unreachable (every later move and
+// lift resolves to the first slot) and so never released, and BeginPump only
+// reclaims released slots, so it would sit there claiming a finger forever.
+void TestDuplicateDownDoesNotStrand() {
+  std::printf("duplicate down does not strand a contact\n");
+  TouchState t;
+
+  t.BeginPump();
+  t.Apply(9, 10.0f, 10.0f, 1.0f, Phase::kDown);
+  t.Apply(9, 20.0f, 20.0f, 1.0f, Phase::kDown);  // platform repeats itself
+  Check("duplicate opens no second slot", t.count == 1 && t.contacts() == 1);
+  Check("the slot re-arms at the new position",
+        Near(t.points[0].x, 20.0f) && Near(t.points[0].y, 20.0f));
+  Check("a re-arm carries no delta", Near(t.points[0].dx, 0.0f) && Near(t.points[0].dy, 0.0f));
+
+  // The one lift the platform will send has to end the contact for good.
+  t.Apply(9, 20.0f, 20.0f, 0.0f, Phase::kUp);
+  t.BeginPump();
+  Check("the lift reclaimed everything", t.count == 0 && !t.active());
+}
+
+// A finger that lifts and comes back on the same id inside one pump: the tap
+// end still has to be visible, and the new contact must get that pump's motion
+// rather than have it applied to the slot that already ended.
+void TestRedownWithinAPump() {
+  std::printf("re-down within one pump\n");
+  TouchState t;
+
+  t.BeginPump();
+  t.Apply(5, 10.0f, 10.0f, 1.0f, Phase::kDown);
+  t.BeginPump();
+  t.Apply(5, 10.0f, 10.0f, 0.0f, Phase::kUp);
+  t.Apply(5, 50.0f, 50.0f, 1.0f, Phase::kDown);
+  Check("the tap end is still visible", t.count == 2 && t.points[0].released);
+  Check("the new contact is live", t.contacts() == 1 && !t.points[1].released);
+
+  t.Apply(5, 60.0f, 50.0f, 1.0f, Phase::kMove);
+  Check("motion went to the live contact", Near(t.points[1].x, 60.0f));
+  Check("motion left the ended one alone", Near(t.points[0].x, 10.0f));
+
+  t.BeginPump();
+  Check("only the live contact survives", t.count == 1 && Near(t.points[0].x, 60.0f));
+}
+
 }  // namespace
 
 int main() {
@@ -153,6 +200,8 @@ int main() {
   TestUnknownIdsIgnored();
   TestOverflowDropsCleanly();
   TestCancelEndsContact();
+  TestDuplicateDownDoesNotStrand();
+  TestRedownWithinAPump();
 
   if (g_failures != 0) {
     std::printf("%d check(s) failed\n", g_failures);

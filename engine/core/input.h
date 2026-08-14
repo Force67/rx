@@ -188,12 +188,37 @@ struct TouchState {
     count = kept;
   }
 
+  // The slot a backend event resolves to: the contact still down under this id.
+  // A released slot is a tombstone for one pump and must not swallow the events
+  // of a finger that came back on the same id within that pump.
+  TouchPoint* LiveSlot(i64 id) {
+    for (u32 i = 0; i < count; ++i) {
+      if (points[i].id == id && !points[i].released) return &points[i];
+    }
+    return nullptr;
+  }
+
   // Applies one contact update, positions in window pixels. A kDown past
   // kMaxPoints is dropped; a kMove/kUp for an id with no slot is ignored (the
   // finger went down before this window had focus, so there is nothing to
   // update).
   void Apply(i64 id, f32 x, f32 y, f32 pressure, Phase phase) {
     if (phase == Phase::kDown) {
+      // A second down for an id already on the panel is the platform repeating
+      // itself, or two panels colliding on a finger index (SDL only promises
+      // the id is unique among the fingers one device currently has down).
+      // Re-arm that slot: a duplicate would be a contact nothing can release,
+      // since every later move and lift resolves to the first one, and it
+      // survives every BeginPump because it never goes released.
+      if (TouchPoint* live = LiveSlot(id)) {
+        live->x = x;
+        live->y = y;
+        live->dx = 0;
+        live->dy = 0;
+        live->pressure = pressure;
+        live->pressed = true;
+        return;
+      }
       if (count == kMaxPoints) return;
       TouchPoint& p = points[count++];
       p = {};
@@ -205,13 +230,7 @@ struct TouchState {
       return;
     }
 
-    TouchPoint* p = nullptr;
-    for (u32 i = 0; i < count; ++i) {
-      if (points[i].id == id) {
-        p = &points[i];
-        break;
-      }
-    }
+    TouchPoint* p = LiveSlot(id);
     if (!p) return;
 
     p->dx += x - p->x;
