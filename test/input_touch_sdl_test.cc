@@ -2,16 +2,15 @@
 //
 // input_touch_test covers the TouchState state machine directly. This covers
 // the piece it cannot: the backend translation in window_sdl3.cc, where SDL's
-// normalized (0..1) finger coordinates become the window coordinates the rest
-// of the input layer speaks, and where FINGER_UP/FINGER_CANCELED collapse into
-// one end state. Getting that conversion wrong (swapped axes, forgotten scale,
-// using the pixel size instead of the window size) is invisible to a pure logic
-// test and would put every tap in the wrong place on a handheld.
+// normalized (0..1) finger coordinates become the window pixels the rest of the
+// input layer speaks, and where FINGER_UP/FINGER_CANCELED collapse into one end
+// state. Getting that conversion wrong (swapped axes, forgotten scale, using
+// the size the desktop lays the window out at instead of the pixel size) is
+// invisible to a pure logic test and would put every tap in the wrong place.
 //
-// The pixel-size mistake is latent for now: it needs the two sizes to differ,
-// and SDL keeps them equal until a window asks for a high pixel density
-// backbuffer, which rx does not. The check for it skips itself while they
-// agree, and starts biting the day that flag goes in.
+// With high_pixel_density on, the two sizes differ on any scaled display, so
+// the wrong one is a different number and the check for it bites. It skips
+// itself on an unscaled display, where nothing can tell them apart.
 //
 // Real SDL_Event structs are pushed through SDL's own queue, so PumpEvents
 // polls them exactly as it would from a panel. No touchscreen and no uinput
@@ -79,16 +78,17 @@ int main() {
     return 0;
   }
 
-  // Window coordinates, which is what touch reports and what the mouse arrives
-  // in. Window::width()/height() are the pixel size, which is the same number
-  // until a window asks for a high pixel density backbuffer.
+  // Pixels, which is what touch reports and what the mouse arrives in. The
+  // size the desktop lays the window out at is the smaller one on a scaled
+  // display, and is the number this must not be using.
   SDL_Window* sdl = static_cast<SDL_Window*>(window->native_handles().window);
-  int lw = 0, lh = 0;
-  SDL_GetWindowSize(sdl, &lw, &lh);
-  const rx::f32 w = static_cast<rx::f32>(lw);
-  const rx::f32 h = static_cast<rx::f32>(lh);
-  const rx::f32 pw = static_cast<rx::f32>(window->width());
-  std::printf("  window is %.0fx%.0f, %ux%u pixels\n", w, h, window->width(), window->height());
+  int layout_w = 0, layout_h = 0;
+  SDL_GetWindowSize(sdl, &layout_w, &layout_h);
+  const rx::f32 w = static_cast<rx::f32>(window->width());
+  const rx::f32 h = static_cast<rx::f32>(window->height());
+  const rx::f32 lw = static_cast<rx::f32>(layout_w);
+  std::printf("  window is %.0fx%.0f pixels, laid out at %dx%d (density %.2f)\n", w, h, layout_w,
+              layout_h, static_cast<double>(window->pixel_density()));
   if (w <= 0 || h <= 0) {
     std::printf("  degenerate window, skipping\n");
     return 0;
@@ -101,15 +101,15 @@ int main() {
   const rx::TouchState& t = window->touch();
   Check("a contact appeared", t.count == 1);
   if (t.count == 1) {
-    Check("x scaled from normalized to window coords", Near(t.points[0].x, 0.25f * w));
-    Check("y scaled from normalized to window coords", Near(t.points[0].y, 0.5f * h));
+    Check("x scaled from normalized to pixels", Near(t.points[0].x, 0.25f * w));
+    Check("y scaled from normalized to pixels", Near(t.points[0].y, 0.5f * h));
     Check("axes are not swapped", !Near(t.points[0].x, 0.25f * h) || Near(w, h));
-    // Only decides anything once the two sizes differ, which needs a high
-    // pixel density backbuffer. Says so rather than passing on a tautology.
-    if (!Near(pw, w))
-      Check("scaled by the window size, not the pixel size", !Near(t.points[0].x, 0.25f * pw));
+    // Only decides anything on a scaled display, where the wrong size is a
+    // different number. Says so rather than passing on a tautology.
+    if (!Near(lw, w))
+      Check("scaled by the pixel size, not the layout size", !Near(t.points[0].x, 0.25f * lw));
     else
-      std::printf("  [--] window and pixel size agree, the two cannot be told apart here\n");
+      std::printf("  [--] unscaled display, the two sizes cannot be told apart here\n");
     Check("press edge reported", t.points[0].pressed);
     Check("pressure carried through", Near(t.points[0].pressure, 1.0f, 0.01f));
     Check("id carried through", t.points[0].id == static_cast<rx::i64>(kFinger));
@@ -126,7 +126,7 @@ int main() {
   if (window->touch().count == 1) {
     const rx::TouchPoint& p = window->touch().points[0];
     Check("motion moved to the new position", Near(p.x, 0.5f * w) && Near(p.y, 0.25f * h));
-    Check("motion delta is the travel in window coords",
+    Check("motion delta is the pixel travel",
           Near(p.dx, 0.25f * w) && Near(p.dy, -0.25f * h));
     Check("press edge cleared on the next pump", !p.pressed);
   }

@@ -173,6 +173,7 @@ bool Editor::UiInit() {
   cfg.external_window = &host_state_;
   cfg.width = window_->width();
   cfg.height = window_->height();
+  ui_.set_ui_scale(window_->pixel_density());  // before Init: it scales too
   if (!ui_.Init(cfg))
     return false;
 
@@ -226,10 +227,14 @@ void Editor::UiFeedInput(f32) {
   const InputState &in = window_->input();
   host_state_.window_width = (f32)window_->width();
   host_state_.window_height = (f32)window_->height();
+  // The canvas above is pixels, so every px size in the .ugui documents has to
+  // grow by the same factor or the whole UI shrinks to the ratio between the
+  // buffer and the size the desktop lays the window out at. Re-set each frame
+  // because dragging the window to a differently scaled monitor changes it.
+  ui_.set_ui_scale(window_->pixel_density());
 
   ugui::InputQueue &q = ui_.platform()->input_queue();
-  Vec2 cursor = CursorPixels();  // ugui's canvas is window_width/height above
-  q.PushMove({cursor.x, cursor.y});
+  q.PushMove({in.mouse_x, in.mouse_y});
 
   const ugui::MouseButton ub[3] = {ugui::MouseButton::kLeft,
                                    ugui::MouseButton::kRight,
@@ -1442,7 +1447,8 @@ bool Editor::TryStartScrub(f32 mx) {
 void Editor::UpdateScrub() {
   if (!scrub_.active)
     return;
-  f32 dx = CursorPixels().x - scrub_.start_mouse;
+  const InputState &in = window_->input();
+  f32 dx = in.mouse_x - scrub_.start_mouse;
   f32 nv = scrub_.base_value + dx * scrub_.step;
 
   if (!scrub_.comp) { // tint live edit
