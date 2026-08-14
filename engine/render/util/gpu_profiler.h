@@ -17,6 +17,11 @@ class Device;
 // pass boundaries show up in capture tools. One query pool per frame in
 // flight: a frame's results are read back the next time that slot is reused,
 // which the in-flight fence already guarantees is complete.
+//
+// Every pass is timed. A frame with more passes than its pool holds still
+// reports the count, and each slot grows to that size the next time it comes
+// round (a pool can only be replaced where its last submission has retired),
+// so the miss lasts at most one cycle through the slots.
 class GpuProfiler {
  public:
   struct PassTiming {
@@ -56,13 +61,16 @@ class GpuProfiler {
   f32 total_ms() const { return total_ms_; }
 
  private:
-  static constexpr u32 kMaxPasses = 48;
-  static constexpr u32 kQueriesPerFrame = kMaxPasses * 2;
+  static constexpr u32 kQueriesPerPass = 2;  // top-of-pipe + bottom-of-pipe
+  // Pool size a slot starts at; enough for a heavy frame, so the growth path
+  // below normally never runs.
+  static constexpr u32 kInitialPasses = 64;
 
   struct FramePool {
     TimestampPoolHandle pool;
     base::Vector<std::string> names;  // one per pass, in record order
     u32 pass_count = 0;
+    u32 capacity = 0;  // passes the pool holds
     bool recorded = false;
   };
 
@@ -72,6 +80,10 @@ class GpuProfiler {
   u32 current_ = 0;
   bool detail_ = false;
   bool frame_detail_ = false;  // latched at BeginFrame so brackets stay paired
+  // Passes bracketed this frame (whether or not the pool had room) and the
+  // most any frame has asked for, which every slot's pool grows to.
+  u32 requested_ = 0;
+  u32 high_water_ = kInitialPasses;
 
   base::Vector<PassTiming> results_;
   f32 total_ms_ = 0.0f;

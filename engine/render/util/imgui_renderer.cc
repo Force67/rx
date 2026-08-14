@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <utility>
 
 #include <imgui.h>
 
@@ -21,7 +22,14 @@ namespace {
 struct ImGuiPush {
   f32 scale[2];
   f32 translate[2];
+  f32 inv_target_size[2];
+  f32 frost;
 };
+
+// How hard a widget's own opacity pulls in the frosted backdrop. Above 1 so a
+// panel body (imgui's translucent WindowBg) frosts fully while the thin
+// antialiasing ramp at its rounded corners still fades the blur out with it.
+constexpr f32 kFrostStrength = 1.6f;
 
 // Backing GPU resource behind an ImTextureData (stashed in BackendUserData).
 struct BackendTexture {
@@ -59,13 +67,17 @@ bool ImGuiRenderer::Initialize(Device& device, Format target_format) {
   pd.vertex_buffers.push_back(std::move(vb));
 
   pd.color_formats.push_back(target_format);
-  pd.blend.push_back(BlendMode::kAlpha);
+  // Premultiplied, not straight alpha: the pixel stage resolves the widget tint
+  // against the frosted backdrop itself (they carry different alphas). Without a
+  // backdrop it produces exactly what srcAlpha/oneMinusSrcAlpha would.
+  pd.blend.push_back(BlendMode::kPremultiplied);
   pd.raster.cull = CullMode::kNone;
   pd.depth.format = Format::kUnknown;  // no depth
 
   PipelineBindings set0;
   set0.stages = kShaderStageFragment;
   set0.slots.push_back({.binding = 0, .type = BindingType::kCombinedTextureSampler});
+  set0.slots.push_back({.binding = 1, .type = BindingType::kCombinedTextureSampler});
   pd.sets.push_back(std::move(set0));
 
   pd.push_constant_size = sizeof(ImGuiPush);
@@ -77,6 +89,11 @@ bool ImGuiRenderer::Initialize(Device& device, Format target_format) {
     return false;
   }
   return true;
+}
+
+void ImGuiRenderer::SetBackdrop(TextureView blur, SamplerHandle sampler) {
+  backdrop_ = blur;
+  backdrop_sampler_ = sampler ? sampler : sampler_;
 }
 
 void ImGuiRenderer::DestroyTexture(ImTextureData* tex) {
@@ -138,6 +155,11 @@ void ImGuiRenderer::UpdateTexture(ImTextureData* tex) {
 void ImGuiRenderer::Render(ImDrawData* draw_data, CommandList& cmd) {
   if (!device_ || !pipeline_) return;
 
+  // One backdrop per Render, so a frame that sets none cannot resample the
+  // previous frame's blur texture (a render-graph transient, long recycled).
+  const TextureView backdrop = std::exchange(backdrop_, TextureView{});
+  const SamplerHandle backdrop_sampler = backdrop_sampler_ ? backdrop_sampler_ : sampler_;
+
   // Service texture create/update/destroy requests before drawing.
   if (draw_data->Textures != nullptr) {
     for (ImTextureData* tex : *draw_data->Textures)
@@ -185,6 +207,9 @@ void ImGuiRenderer::Render(ImDrawData* draw_data, CommandList& cmd) {
   push.scale[1] = 2.0f / draw_data->DisplaySize.y;
   push.translate[0] = -1.0f - draw_data->DisplayPos.x * push.scale[0];
   push.translate[1] = -1.0f - draw_data->DisplayPos.y * push.scale[1];
+  push.inv_target_size[0] = 1.0f / static_cast<f32>(fb_width);
+  push.inv_target_size[1] = 1.0f / static_cast<f32>(fb_height);
+  push.frost = backdrop ? kFrostStrength : 0.0f;
   cmd.Push(push);
 
   const ImVec2 clip_off = draw_data->DisplayPos;
@@ -210,9 +235,14 @@ void ImGuiRenderer::Render(ImDrawData* draw_data, CommandList& cmd) {
 
       // Bind the draw's texture (font atlas or user texture); the id is the
       // TextureView value stashed by UpdateTexture. Skip redundant rebinds.
+      // Slot 1 is the frosted backdrop; with none set it repeats the draw's own
+      // texture, since the descriptor has to be filled either way (push.frost is
+      // 0, so the pixel stage never reads it).
       const u64 texid = static_cast<u64>(pcmd.GetTexID());
       if (texid != last_texid) {
-        cmd.BindTransient(0, {Bind::Combined(0, TextureView{texid}, sampler_)});
+        const TextureView frost = backdrop ? backdrop : TextureView{texid};
+        cmd.BindTransient(0, {Bind::Combined(0, TextureView{texid}, sampler_),
+                              Bind::Combined(1, frost, backdrop_sampler)});
         last_texid = texid;
       }
 

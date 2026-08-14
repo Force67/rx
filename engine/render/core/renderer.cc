@@ -7190,8 +7190,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // sample the backbuffer), capture + Gaussian-blur the post-tonemap frame
     // into ui_frost; the UI backend samples it for frosted panels.
     ResourceHandle ui_frost = kInvalidResource;
-    if (view.hud_draw && view.needs_blur && ui_blur_ &&
-        swapchain_->can_sample()) {
+    if (view.needs_blur && ui_blur_ && swapchain_->can_sample()) {
       ui_frost = ui_blur_->AddToGraph(graph_, backbuffer, output_width_,
                                       output_height_);
     }

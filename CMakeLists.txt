@@ -384,6 +384,21 @@ if(RX_BUILD_TOOLS)
   rx_set_warnings(rxpack)
 endif()
 
+# The engine's own archives, packed from engine/assets with the tool above and
+# mounted by asset::MountEngineArchives (one namespace each). Cross builds skip
+# this: rxpack would be built for the target and cannot run here.
+if(RX_BUILD_TOOLS AND NOT CMAKE_CROSSCOMPILING)
+  file(GLOB_RECURSE RX_ENGINE_FONT_FILES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts/*)
+  add_custom_command(
+    OUTPUT ${PROJECT_BINARY_DIR}/rx_fonts.rxp
+    COMMAND rxpack create ${PROJECT_BINARY_DIR}/rx_fonts.rxp
+            ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts
+    DEPENDS rxpack ${RX_ENGINE_FONT_FILES}
+    COMMENT "Packing rx_fonts.rxp")
+  add_custom_target(rx_engine_archives ALL DEPENDS ${PROJECT_BINARY_DIR}/rx_fonts.rxp)
+endif()
+
 # Vfs mount points + .rxp pack round trip, pure CPU: no driver or window
 # needed, runs everywhere plain `ctest` runs.
 if(RX_BUILD_TESTS)
