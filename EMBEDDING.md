@@ -248,6 +248,31 @@ each is enabled when the adapter advertises it and the granted set is reported i
 `DrawIndexedIndirectCount` (Vulkan 1.2 core) are available for GPU-driven draw
 counts.
 
+## Compiling your own shaders
+
+A game with its own passes (see [Bring your own GPU passes](#bring-your-own-gpu-passes))
+can reuse rx's shader build: `rx_embed_shaders` is defined by
+`cmake/shaders.cmake`, which the `add_subdirectory` consumer inherits, so it is
+callable from the game's own `CMakeLists.txt`. HLSL (dxc) and Slang (slangc)
+both work, the stage comes from the filename, and each shader embeds as a
+`k_<name>_<stage>_<lang>` C array included as `shaders/<symbol>.h`:
+
+```cmake
+add_library(mygame_passes STATIC toon.cc)
+target_link_libraries(mygame_passes PRIVATE rx::render)
+
+# rhi_bindings.hlsli (the PUSH_CONSTANTS macro) lives in rx's shader root.
+set(RX_SHADER_INCLUDE_DIRS ${CEL_RX_DIR}/engine/render/shaders)
+set(RX_SHADER_DEPS_toon_ps_hlsl ../../shared.hlsli)   # non-tracked #includes
+rx_embed_shaders(mygame_passes shaders/toon.vs.hlsl shaders/toon.ps.hlsl)
+```
+
+The DXIL sidecar follows the parent build's `RX_RHI_D3D12` automatically, which
+is what keeps `RX_SHADER()` (whose expansion depends on that same define, PUBLIC
+on `rx::render`) matching what was embedded. Generated headers land in one
+shared `${CMAKE_BINARY_DIR}/generated/shaders/`, so give your shaders names that
+do not collide with rx's own.
+
 ## Install / find_package
 
 As an alternative to `add_subdirectory`, rx can be built and installed once,

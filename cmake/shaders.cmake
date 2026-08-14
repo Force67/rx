@@ -20,6 +20,12 @@
 # where we can see it. -matrix-layout-column-major pins slang to dxc's default
 # so both languages agree with the CPU-side constant layout.
 
+# Resolved against this file, not PROJECT_SOURCE_DIR: an add_subdirectory
+# consumer calling rx_embed_shaders for its own passes has its own project
+# root, and the embed script lives next to this one.
+set(RX_EMBED_SPV_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/embed_spv.cmake"
+  CACHE INTERNAL "rx spirv embed script")
+
 # Slang spells stages out; the short file-suffix forms are dxc profiles.
 set(RX_SLANG_STAGE_vs vertex)
 set(RX_SLANG_STAGE_ps fragment)
@@ -127,8 +133,8 @@ function(rx_embed_shaders target)
     endif()
     add_custom_command(OUTPUT ${header}
       COMMAND ${CMAKE_COMMAND} -DSPV=${spv} -DHEADER=${header} -DSYMBOL=${symbol}
-              ${embed_args} -P ${PROJECT_SOURCE_DIR}/cmake/embed_spv.cmake
-      DEPENDS ${embed_deps} ${PROJECT_SOURCE_DIR}/cmake/embed_spv.cmake
+              ${embed_args} -P ${RX_EMBED_SPV_SCRIPT}
+      DEPENDS ${embed_deps} ${RX_EMBED_SPV_SCRIPT}
       COMMENT "embed ${name}"
       VERBATIM)
     list(APPEND headers ${header})
