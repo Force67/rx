@@ -229,6 +229,10 @@ void ApplyDecals(inout float3 albedo, inout float3 n, inout float rough_mult,
 [[vk::combinedImageSampler]] [[vk::binding(41, 2)]] SamplerState decal_layer_albedo_sampler : register(s41, space2);
 [[vk::combinedImageSampler]] [[vk::binding(42, 2)]] Texture2D decal_layer_fx : register(t42, space2);
 [[vk::combinedImageSampler]] [[vk::binding(42, 2)]] SamplerState decal_layer_fx_sampler : register(s42, space2);
+// Per-tile uv mapping (scale.xy, bias.zw). A receiver whose uvs are not a plain
+// 0..1 square - a UDIM character body, say - biases the zone it cares about into
+// its tile, and the bake used exactly this transform.
+[[vk::binding(43, 2)]] StructuredBuffer<float4> decal_layer_xform : register(t43, space2);
 
 void ApplyDecalLayer(inout float3 albedo, inout float3 n, inout float rough_mult, float2 uv,
                      float4 tangent) {
@@ -239,12 +243,14 @@ void ApplyDecalLayer(inout float3 albedo, inout float3 n, inout float rough_mult
   float tile_uv = frame.decal_layer.y;
   float row = floor(float(tile) / per_row);
   float2 origin = float2(float(tile) - row * per_row, row) * tile_uv;
-  // frac keeps a receiver whose uvs stray outside 0..1 inside its own tile; the
-  // gradients come from the UNWRAPPED uv so the wrap seam does not collapse to
-  // the coarsest mip.
-  float2 layer_uv = origin + frac(uv) * tile_uv;
-  float2 dx = ddx(uv) * tile_uv;
-  float2 dy = ddy(uv) * tile_uv;
+  float4 xform = decal_layer_xform[tile];
+  float2 mapped = uv * xform.xy + xform.zw;
+  // Outside the mapped square this receiver simply has no layer - the same
+  // geometry the bake's scissor dropped, so the two always agree.
+  if (any(mapped < 0.0) || any(mapped > 1.0)) return;
+  float2 layer_uv = origin + mapped * tile_uv;
+  float2 dx = ddx(uv) * xform.xy * tile_uv;
+  float2 dy = ddy(uv) * xform.xy * tile_uv;
   float4 layer = decal_layer_albedo.SampleGrad(decal_layer_albedo_sampler, layer_uv, dx, dy);
   if (layer.a <= 0.002) return;
   albedo = albedo * (1.0 - layer.a) + layer.rgb;  // premultiplied over

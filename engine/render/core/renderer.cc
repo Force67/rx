@@ -2518,6 +2518,11 @@ bool Renderer::StampDecal(const DecalStamp &stamp) {
   return decal_baker_.Stamp(stamp);
 }
 
+void Renderer::SetDecalReceiverUv(u32 receiver, f32 scale_u, f32 scale_v,
+                                  f32 bias_u, f32 bias_v) {
+  decal_baker_.SetReceiverUv(receiver, scale_u, scale_v, bias_u, bias_v);
+}
+
 void Renderer::ClearDecals(u32 receiver) { decal_baker_.ClearReceiver(receiver); }
 
 bool Renderer::UploadTexture(const asset::Texture &texture, u64 id_salt) {
@@ -3585,7 +3590,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               decal_baker_.available() ? decal_baker_.albedo_view()
                                        : TextureView{},
               decal_baker_.available() ? decal_baker_.fx_view()
-                                       : TextureView{});
+                                       : TextureView{},
+              decal_baker_.available() ? decal_baker_.tile_uv_buffer()
+                                       : GpuBuffer{});
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
@@ -5787,7 +5794,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               decal_baker_.available() ? decal_baker_.albedo_view()
                                        : TextureView{},
               decal_baker_.available() ? decal_baker_.fx_view()
-                                       : TextureView{});
+                                       : TextureView{},
+              decal_baker_.available() ? decal_baker_.tile_uv_buffer()
+                                       : GpuBuffer{});
 
           ColorAttachment colors[3];
           colors[0] = {.view = ctx.graph->image(geom_scene).view,

@@ -29,6 +29,13 @@
 // architecture UVs are not, and a decal stamped on one would repeat across
 // every tile. One tile covers the whole mesh, so submeshes that each re-use the
 // full 0..1 UV space share it.
+//
+// A receiver's uvs do not have to BE 0..1, though. SetReceiverUv applies a
+// scale+bias first, which is what makes UDIM content work: a Daz/Genesis figure
+// lays its body zones out across u in [0,7), and a receiver biased onto one of
+// those tiles gets the whole layer to itself at full resolution. Geometry that
+// falls outside 0..1 after the transform takes no decal at all, in the bake and
+// in the forward pass alike.
 
 #include <span>
 
@@ -69,6 +76,7 @@ class DecalBaker {
     // Atlas edge in texels; tile_size must divide it. atlas_size/tile_size
     // squared tiles fit, capped at kMaxTiles. The default holds 16 receivers at
     // 256^2 each for ~11 MB; a character-heavy game wants 2048/512 (~47 MB).
+    // RX_DECAL_ATLAS / RX_DECAL_TILE override both without a rebuild.
     u32 atlas_size = 1024;
     u32 tile_size = 256;
     // Stamps replayed when a tile is rebaked. Older stamps past this fall off
@@ -100,13 +108,21 @@ class DecalBaker {
     u64 bytes = 0;          // atlas footprint, mip 0
   };
 
+  // A Desc with the RX_DECAL_ATLAS / RX_DECAL_TILE overrides applied. Only the
+  // no-desc Initialize consults them: code that sizes the layers explicitly
+  // means it.
+  static Desc EnvDesc();
   bool Initialize(Device& device, const Desc& desc);
-  bool Initialize(Device& device) { return Initialize(device, Desc{}); }
+  bool Initialize(Device& device) { return Initialize(device, EnvDesc()); }
   void Destroy(Device& device);
   bool available() const { return static_cast<bool>(stamp_pipeline_); }
 
   u32 AcquireReceiver();
   void ReleaseReceiver(u32 receiver);
+  // Maps the receiver's uvs into its layer tile: layer = uv * scale + bias.
+  // Identity by default. Repaints the tile, since the mapping changes where
+  // every already-baked stamp lands.
+  void SetReceiverUv(u32 receiver, f32 scale_u, f32 scale_v, f32 bias_u, f32 bias_v);
   // Queues a stamp against a receiver; it bakes the next frame the receiver
   // draws. False when the handle is unknown.
   bool Stamp(const DecalStamp& stamp);
@@ -120,11 +136,17 @@ class DecalBaker {
   // Assigns tiles and records this frame's bakes. `targets` are the receivers
   // drawn this frame (the renderer collects them from the draw list); a
   // receiver that is not drawn keeps its queued stamps until it is.
+  // `source_albedo` / `source_normal` are the authored decal atlas the stamps'
+  // uv_rect indexes; either may be null, and a built-in white / flat page
+  // stands in.
   void AddToGraph(RenderGraph& graph, std::span<const Target> targets, u32 frame_slot,
                   u64 frame_index, TextureView source_albedo, TextureView source_normal);
 
   TextureView albedo_view() const { return albedo_.view; }
   TextureView fx_view() const { return fx_.view; }
+  // Per-tile uv scale+bias (float4 each), indexed by tile. The forward pass
+  // needs it to reproduce the mapping the bake used.
+  const GpuBuffer& tile_uv_buffer() const { return tile_uv_xform_; }
   // The backing atlas, for readback and debug views. Left in
   // kShaderReadFragment by every bake.
   const GpuImage& albedo_atlas() const { return albedo_; }
@@ -154,12 +176,16 @@ class DecalBaker {
     u32 stamp_count = 0;
     u32 skin_offset = 0;
     u32 pad = 0;
+    f32 uv_scale[2] = {1, 1};
+    f32 uv_bias[2] = {0, 0};
   };
 
   struct Receiver {
     bool alive = false;
     u32 tile = kNoTile;
     u64 last_used = 0;
+    f32 uv_scale[2] = {1, 1};
+    f32 uv_bias[2] = {0, 0};
     // Stamps not yet in the tile. A rebake moves the whole journal here.
     base::Vector<GpuStamp> pending;
     base::Vector<GpuStamp> journal;
@@ -196,6 +222,12 @@ class DecalBaker {
   u64 clear_fx_offset_ = 0;
   u64 clear_chart_offset_ = 0;
   GpuBuffer stamps_[Device::kMaxFramesInFlight];
+  // Stand-ins for a caller with no authored decal atlas: a stamp then paints
+  // the projector's own footprint, which is a usable solid decal rather than a
+  // null descriptor.
+  GpuImage white_;
+  GpuImage flat_normal_;
+  GpuBuffer tile_uv_xform_;  // host visible float4[kMaxTiles], scale.xy bias.zw
 
   PipelineHandle stamp_pipeline_;
   PipelineHandle stamp_skin_pipeline_;

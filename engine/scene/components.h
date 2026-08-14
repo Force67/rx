@@ -35,6 +35,14 @@ struct Tint {
   u32 rgb = 0;
 };
 
+// Baked texture-space decal receiver (Renderer::AcquireDecalReceiver).
+// Host::GatherEntityDraws copies it into the DrawItem, so stamps thrown at the
+// handle bake into this entity's uv space. Runtime-only: the handle belongs to
+// a live renderer, so it is not serialized into a scene file.
+struct DecalReceiver {
+  u32 handle = 0;
+};
+
 // A human-readable label for an entity (editor outliner, scene text). Optional:
 // unnamed entities simply lack it.
 struct Name {

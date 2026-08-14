@@ -300,6 +300,9 @@ bool EnvironmentSystem::CreatePipelines() {
   // off, which the forward pass never samples (tile 0 = no layer).
   env_desc.slots.push_back({41, BindingType::kCombinedTextureSampler});
   env_desc.slots.push_back({42, BindingType::kCombinedTextureSampler});
+  // 43: per-tile uv scale/bias, so the forward pass reproduces the mapping the
+  // bake used (UDIM character bodies need one).
+  env_desc.slots.push_back({43, BindingType::kStorageBuffer});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -481,7 +484,8 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     TextureView rcgi_irradiance,
                                     const RcgiWorldBinding* rcgi_world,
                                     TextureView decal_layer_albedo,
-                                    TextureView decal_layer_fx) const {
+                                    TextureView decal_layer_fx,
+                                    const GpuBuffer& decal_layer_xform) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -580,7 +584,9 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        // normal stands in for the fx layer's neutral (0.5, 0.5, ...) so a draw
        // that somehow carries a tile while the baker is off shades unchanged.
        Bind::Combined(41, decal_layer_albedo ? decal_layer_albedo : black_.view, sampler_),
-       Bind::Combined(42, decal_layer_fx ? decal_layer_fx : flat_normal_.view, sampler_)});
+       Bind::Combined(42, decal_layer_fx ? decal_layer_fx : flat_normal_.view, sampler_),
+       Bind::StorageBuffer(43, decal_layer_xform ? decal_layer_xform : dummy_storage_, 0,
+                           decal_layer_xform ? decal_layer_xform.size : 256)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {

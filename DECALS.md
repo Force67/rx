@@ -104,7 +104,13 @@ renderer.ReleaseDecalReceiver(actor.decal_receiver);  // actor died
 
 The projector is the same oriented box the clustered path uses and it samples
 the same authored atlas (`Renderer::SetDecalAtlas`), so a game can throw one
-decal either way without re-authoring it.
+decal either way without re-authoring it. With no atlas bound the baker
+substitutes a built-in white page, and a stamp paints its own footprint in flat
+colour — useful on its own, and it keeps the pass valid in a scene that never
+loaded decal art.
+
+ECS apps skip the manual `DrawItem` field: put a `scene::DecalReceiver` on the
+entity and `Host::GatherEntityDraws` carries it, exactly like `scene::Tint`.
 
 **2D vs 3D fx.** `params2[0] = 0` gives a flat decal that only replaces albedo —
 a tattoo, a painted marking, a logo. Non-zero adds the source normal map (rotated
@@ -114,12 +120,35 @@ real wet fluid. Emissive decals stay on the projector path: the layer's four
 channels per atlas are fully spoken for, and a handful of glowing runes is what
 the clustered loop is good at.
 
+## UDIM and other uv layouts
+
+A receiver's uvs do not have to be a 0..1 square. `SetDecalReceiverUv` applies
+`layer = uv * scale + bias` before anything else, and geometry that lands
+outside 0..1 after that transform takes no decal at all — in the bake (the
+scissor drops it) and in the forward pass (an explicit reject), so the two can
+never disagree.
+
+That is what makes imported characters work. A Daz/Genesis figure is UDIM: the
+body's zones are laid out across `u` in `[0, 7)`, one integer tile each. Biasing
+a receiver by `-2` addresses the torso zone and hands it the whole layer at full
+resolution; the arms, legs and face keep their skin because their uvs fall
+outside the mapped square. Without this the `frac()` fallback would wrap every
+zone onto the same tile and one chest tattoo would print on all seven.
+
+Sizing follows from that: the layer tile has to hold a whole uv zone, so
+tattoo-grade detail wants a bigger tile than splatter does. `RX_DECAL_ATLAS`
+and `RX_DECAL_TILE` override `Desc` without a rebuild — 2048/1024 gives a
+Genesis torso zone a full 1024² to itself.
+
 ## Requirements and limits
 
 - **Unique UV0.** Charts must not overlap. Character and prop UVs normally
   qualify; tiling architecture UVs do not, and a decal stamped on one would
   repeat across every tile. `asset::MakeSkinnedBiped` packs its boxes into a
   UV atlas for exactly this reason.
+- **One zone per draw.** The tile index is per-draw, so a receiver addresses one
+  uv zone. A character wanting decals on torso AND arms needs a receiver per
+  zone, which today means a draw per zone.
 - **One tile per mesh.** Submeshes that each re-use the full 0..1 square share a
   tile, and a decal on one shows on the others.
 - **Raster and mesh-shader paths.** The tile index rides the top byte of the
@@ -167,9 +196,34 @@ vkrun ./build/linux/decal_bake_test
 RX_VALIDATION=1 vkrun ./build/linux/decal_bake_test
 ```
 
+It also covers the UDIM case: a quad whose uvs sit on tile 2 bakes nothing until
+the receiver is biased onto that tile, then bakes normally.
+
 The feature gym's animation district throws splatter at the walking actor every
 0.8 s and stamps a flat tattoo on its chest at spawn:
 
 ```
 DISPLAY=:10 vkrun ./build/linux/runtime/rx --demo featuregym
 ```
+
+### On an imported character
+
+`RX_TATTOO="fx,fy,fz,size[;...]"` bakes tattoos onto the heaviest mesh of a
+`--gltf` scene. Anchors are fractions of that mesh's local bounds; each snaps to
+the nearest vertex, so the projector sits on the skin along its normal, and that
+vertex's uv picks the UDIM tile the receiver is biased onto.
+`RX_TATTOO_ATLAS=<file>` supplies the ink as a raw square RGBA8 blob.
+
+```
+blender --background character.blend --python tools/blend_to_glb.py -- \
+    --output character.glb --manifest character.manifest
+
+RX_DECAL_ATLAS=2048 RX_DECAL_TILE=1024 RX_TATTOO_ATLAS=ink.rgba \
+  RX_TATTOO="0.50,0.755,0.95,0.16;0.435,0.63,0.95,0.10" \
+  vkrun ./build/linux/runtime/rx --gltf character.glb
+```
+
+Note that `tools/blend_to_glb.py` exports skins, and the viewer's `--gltf` path
+supplies no bone palette for them: the skinned vertex shader then reads a null
+palette address and the GPU stops presenting. Export the body with
+`export_skins=False` (bind pose) until that is fixed.

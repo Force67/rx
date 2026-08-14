@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstring>
 
+#include <base/option.h>
+
 #include "asset/mesh.h"
 #include "core/log.h"
 #include "shaders/decal_bake_ps_hlsl.h"
@@ -12,6 +14,13 @@
 
 namespace rx::render {
 namespace {
+
+// Layer sizing. A character's uv zone has to fit in one tile, so tattoo-grade
+// detail wants 512 or 1024 where a splatter-only game is fine at the default.
+// Env knobs rather than a build constant: the right size is content-dependent
+// and worth trying without a rebuild.
+base::Option<int> AtlasSize{"decal.atlas", 0, "RX_DECAL_ATLAS"};
+base::Option<int> TileSize{"decal.tile", 0, "RX_DECAL_TILE"};
 
 // Tile edges below this are not worth a mip chain; above it the chain stops at
 // 16 texels a side, which is as small as a decal layer stays meaningful.
@@ -52,6 +61,13 @@ Decal MakeDecalProjector(const Vec3& position, const Vec3& normal, const Vec3& u
   WriteRow(bitangent, height * 0.5f, position, decal.row1);
   WriteRow(n, depth * 0.5f, position, decal.row2);
   return decal;
+}
+
+DecalBaker::Desc DecalBaker::EnvDesc() {
+  Desc desc;
+  if (AtlasSize.get() > 0) desc.atlas_size = static_cast<u32>(AtlasSize.get());
+  if (TileSize.get() > 0) desc.tile_size = static_cast<u32>(TileSize.get());
+  return desc;
 }
 
 bool DecalBaker::Initialize(Device& device, const Desc& desc) {
@@ -137,6 +153,44 @@ bool DecalBaker::CreateAtlases(Device& device) {
     fx[3] = 0;
   }
   std::memset(bytes + clear_chart_offset_, 0, texels);
+
+  // Per-tile uv mapping, read by the forward pass to reproduce what the bake
+  // did. Identity until a receiver claims the tile and says otherwise.
+  tile_uv_xform_ = device.CreateBuffer(kMaxTiles * 4 * sizeof(f32), kBufferUsageStorage, true);
+  if (!tile_uv_xform_.mapped) {
+    RX_WARN("decal baker: tile transform buffer mapping failed; texture-space decals disabled");
+    return false;
+  }
+  for (u32 i = 0; i < kMaxTiles; ++i) {
+    f32* row = static_cast<f32*>(tile_uv_xform_.mapped) + i * 4;
+    row[0] = 1;
+    row[1] = 1;
+    row[2] = 0;
+    row[3] = 0;
+  }
+
+  white_ = device.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
+                                kTextureUsageSampled | kTextureUsageTransferDst);
+  flat_normal_ = device.CreateImage2D(Format::kRGBA8Unorm, {1, 1},
+                                      kTextureUsageSampled | kTextureUsageTransferDst);
+  if (!white_ || !flat_normal_) {
+    RX_WARN("decal baker: fallback page allocation failed; texture-space decals disabled");
+    return false;
+  }
+  const f32 opaque_white[4] = {1, 1, 1, 1};
+  const f32 flat[4] = {0.5f, 0.5f, 1.0f, 1.0f};
+  device.ImmediateSubmit([&](CommandList& cmd) {
+    TextureBarrier to_copy[2] = {
+        Transition(white_, ResourceState::kUndefined, ResourceState::kCopyDst),
+        Transition(flat_normal_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+    cmd.TextureBarriers(to_copy);
+    cmd.ClearColor(white_, opaque_white);
+    cmd.ClearColor(flat_normal_, flat);
+    TextureBarrier to_read[2] = {
+        Transition(white_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment),
+        Transition(flat_normal_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment)};
+    cmd.TextureBarriers(to_read);
+  });
 
   for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
     stamps_[f] = device.CreateBuffer(kMaxFrameStamps * sizeof(GpuStamp), kBufferUsageStorage, true);
@@ -226,10 +280,13 @@ void DecalBaker::Destroy(Device& device) {
   if (fx_mip0_) device.DestroyView(fx_mip0_);
   albedo_mip0_ = {};
   fx_mip0_ = {};
+  if (white_) device.DestroyImage(white_);
+  if (flat_normal_) device.DestroyImage(flat_normal_);
   if (albedo_) device.DestroyImage(albedo_);
   if (fx_) device.DestroyImage(fx_);
   if (chart_) device.DestroyImage(chart_);
   if (clear_staging_) device.DestroyBuffer(clear_staging_);
+  if (tile_uv_xform_) device.DestroyBuffer(tile_uv_xform_);
   for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
     if (stamps_[f]) device.DestroyBuffer(stamps_[f]);
   }
@@ -308,6 +365,16 @@ bool DecalBaker::Stamp(const DecalStamp& stamp) {
   return true;
 }
 
+void DecalBaker::SetReceiverUv(u32 receiver, f32 scale_u, f32 scale_v, f32 bias_u, f32 bias_v) {
+  Receiver* r = find(receiver);
+  if (!r) return;
+  r->uv_scale[0] = scale_u;
+  r->uv_scale[1] = scale_v;
+  r->uv_bias[0] = bias_u;
+  r->uv_bias[1] = bias_v;
+  r->repaint = true;
+}
+
 void DecalBaker::ClearReceiver(u32 receiver) {
   Receiver* r = find(receiver);
   if (!r) return;
@@ -376,6 +443,8 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
     u32 first_stamp = 0;
     u32 stamp_count = 0;
     bool clear = false;
+    f32 uv_scale[2] = {1, 1};
+    f32 uv_bias[2] = {0, 0};
   };
   base::Vector<BakeDraw> draws;
   GpuStamp* mapped = static_cast<GpuStamp*>(stamps_[frame_slot].mapped);
@@ -395,6 +464,13 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
       if (r->tile == kNoTile) continue;  // every tile belongs to a live receiver
       r->repaint = true;
     }
+    // The forward pass reads the mapping per tile, so it has to follow the
+    // receiver into whichever tile it landed in.
+    f32* xform = static_cast<f32*>(tile_uv_xform_.mapped) + r->tile * 4;
+    xform[0] = r->uv_scale[0];
+    xform[1] = r->uv_scale[1];
+    xform[2] = r->uv_bias[0];
+    xform[3] = r->uv_bias[1];
     const base::Vector<GpuStamp>& run = r->repaint ? r->journal : r->pending;
     const u32 count = static_cast<u32>(run.size());
     if (cursor + count > kMaxFrameStamps) continue;  // budget spent; next frame
@@ -408,6 +484,10 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
     draw.first_stamp = cursor;
     draw.stamp_count = count;
     draw.clear = r->repaint;
+    draw.uv_scale[0] = r->uv_scale[0];
+    draw.uv_scale[1] = r->uv_scale[1];
+    draw.uv_bias[0] = r->uv_bias[0];
+    draw.uv_bias[1] = r->uv_bias[1];
     if (count > 0) {
       std::memcpy(mapped + cursor, run.data(), count * sizeof(GpuStamp));
       cursor += count;
@@ -481,8 +561,9 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
               0, {Bind::StorageBuffer(0, stamps_[frame_slot], 0, stamps_[frame_slot].size),
                   Bind::StorageBuffer(1, draw.bones ? *draw.bones : stamps_[frame_slot], 0,
                                       draw.bones ? draw.bones->size : stamps_[frame_slot].size),
-                  Bind::Combined(2, source_albedo, sampler_),
-                  Bind::Combined(3, source_normal, sampler_)});
+                  Bind::Combined(2, source_albedo ? source_albedo : white_.view, sampler_),
+                  Bind::Combined(3, source_normal ? source_normal : flat_normal_.view,
+                                 sampler_)});
           const f32 x = static_cast<f32>((draw.tile % tiles_per_row_) * desc_.tile_size);
           const f32 y = static_cast<f32>((draw.tile / tiles_per_row_) * desc_.tile_size);
           cmd.SetViewport(x, y, static_cast<f32>(desc_.tile_size),
@@ -494,6 +575,10 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
           push.first_stamp = draw.first_stamp;
           push.stamp_count = draw.stamp_count;
           push.skin_offset = draw.skin_offset;
+          push.uv_scale[0] = draw.uv_scale[0];
+          push.uv_scale[1] = draw.uv_scale[1];
+          push.uv_bias[0] = draw.uv_bias[0];
+          push.uv_bias[1] = draw.uv_bias[1];
           cmd.Push(push);
           cmd.BindVertexBuffer(0, draw.mesh->vertices);
           if (draw.bones) cmd.BindVertexBuffer(1, draw.mesh->skinning);

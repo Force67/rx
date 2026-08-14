@@ -19,6 +19,8 @@ struct BakePush {
   uint stamp_count;
   uint skin_offset;
   uint pad;
+  float2 uv_scale;
+  float2 uv_bias;
 };
 PUSH_CONSTANTS(BakePush, push);
 

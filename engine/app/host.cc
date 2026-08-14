@@ -310,6 +310,8 @@ void Host::GatherEntityDraws(render::FrameView& view) {
     const Mat4* prev = prev_transforms_.find(key);
     render::DrawItem item{mesh.hash, current, prev ? *prev : current};
     if (const auto* tint = world_.Get<scene::Tint>(entity)) item.tint = tint->rgb;
+    if (const auto* decal = world_.Get<scene::DecalReceiver>(entity))
+      item.decal_receiver = decal->handle;
     view.draws.push_back(item);
     transforms.insert(key, current);
   };

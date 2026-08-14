@@ -547,6 +547,11 @@ public:
   // Queues a stamp for the next frame the receiver draws. Equivalent to
   // pushing onto FrameView::decal_stamps; use whichever suits the call site.
   bool StampDecal(const DecalStamp &stamp);
+  // Maps a receiver's uvs into its layer tile (layer = uv * scale + bias),
+  // identity by default. A UDIM character body biases the zone it wants onto
+  // the tile; see render/texturing/decal_bake.h.
+  void SetDecalReceiverUv(u32 receiver, f32 scale_u, f32 scale_v, f32 bias_u,
+                          f32 bias_v);
   // Washes a receiver clean (drops its decal history and repaints its tile).
   void ClearDecals(u32 receiver);
   const DecalBaker::Stats &decal_layer_stats() const {

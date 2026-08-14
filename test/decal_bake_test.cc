@@ -46,12 +46,14 @@ bool Near(f32 a, f32 b) { return std::fabs(a - b) < 1e-4f; }
 // A unit quad in the XZ plane, uv0 covering the full 0..1 chart. World x maps to
 // u and world z to v, so a projector at the origin lands in the middle of the
 // tile and the tile corners stay outside it.
-GpuMesh CreateQuad(Device& device) {
+GpuMesh CreateQuad(Device& device, f32 udim_u = 0) {
+  const f32 u0 = udim_u;
+  const f32 u1 = udim_u + 1.0f;
   const Vertex vertices[4] = {
-      {{-1, 0, -1}, {0, 1, 0}, {1, 0, 0, 1}, {0, 0}, 0xffffffff},
-      {{1, 0, -1}, {0, 1, 0}, {1, 0, 0, 1}, {1, 0}, 0xffffffff},
-      {{1, 0, 1}, {0, 1, 0}, {1, 0, 0, 1}, {1, 1}, 0xffffffff},
-      {{-1, 0, 1}, {0, 1, 0}, {1, 0, 0, 1}, {0, 1}, 0xffffffff},
+      {{-1, 0, -1}, {0, 1, 0}, {1, 0, 0, 1}, {u0, 0}, 0xffffffff},
+      {{1, 0, -1}, {0, 1, 0}, {1, 0, 0, 1}, {u1, 0}, 0xffffffff},
+      {{1, 0, 1}, {0, 1, 0}, {1, 0, 0, 1}, {u1, 1}, 0xffffffff},
+      {{-1, 0, 1}, {0, 1, 0}, {1, 0, 0, 1}, {u0, 1}, 0xffffffff},
   };
   const u32 indices[6] = {0, 1, 2, 0, 2, 3};
   GpuMesh mesh;
@@ -227,6 +229,30 @@ int main() {
   baker.ReleaseReceiver(first);
   baker.ReleaseReceiver(second);
   Check(baker.stats().receivers == 0, "released receivers are gone");
+
+  // --- UDIM: a receiver whose uvs live on tile 2 ---
+  // Real character bodies (Daz/Genesis) lay their zones out across u in [0,7).
+  // Without a bias the whole mesh sits outside 0..1 and nothing may bake; with
+  // one, the addressed zone gets the entire layer.
+  GpuMesh udim_quad = CreateQuad(*device, 2.0f);
+  const u32 shifted = baker.AcquireReceiver();
+  target.receiver = shifted;
+  target.mesh = &udim_quad;
+  stamp.receiver = shifted;
+  Check(baker.Stamp(stamp), "the udim receiver takes a stamp");
+  RunBake(*device, baker, pool, target, 5, source.view);
+  read_atlas();
+  Check(coverage_at(mid, mid) == 0, "un-biased uvs off the 0..1 square bake nothing");
+
+  baker.SetReceiverUv(shifted, 1.0f, 1.0f, -2.0f, 0.0f);
+  RunBake(*device, baker, pool, target, 6, source.view);
+  read_atlas();
+  std::printf("decal_bake_test: udim centre coverage %u\n", coverage_at(mid, mid));
+  Check(coverage_at(mid, mid) > 240, "biasing onto the uv tile bakes the decal");
+  Check(coverage_at(2, 2) == 0, "the tile corner is still outside the projector");
+  baker.ReleaseReceiver(shifted);
+  device->DestroyBuffer(udim_quad.vertices);
+  device->DestroyBuffer(udim_quad.indices);
 
   baker.Destroy(*device);
   device->DestroyImage(source);

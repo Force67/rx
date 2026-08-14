@@ -16,6 +16,8 @@ struct BakePush {
   uint stamp_count;
   uint skin_offset;
   uint pad;
+  float2 uv_scale;  // layer uv = uv * scale + bias; identity for plain 0..1 meshes
+  float2 uv_bias;
 };
 PUSH_CONSTANTS(BakePush, push);
 
@@ -71,6 +73,10 @@ VsOut main(VsIn input) {
   output.normal = mul((float3x3)push.model, local_normal);
   output.tangent = float4(mul((float3x3)push.model, local_tangent), input.tangent.w);
   // uv space IS clip space here. Depth 0 with no depth attachment bound.
-  output.sv_position = float4(input.uv * 2.0 - 1.0, 0.0, 1.0);
+  // Geometry whose mapped uv leaves 0..1 (another UDIM tile, say) lands outside
+  // the tile viewport and the scissor drops it - which is exactly what the
+  // forward pass does with the same transform.
+  const float2 layer_uv = input.uv * push.uv_scale + push.uv_bias;
+  output.sv_position = float4(layer_uv * 2.0 - 1.0, 0.0, 1.0);
   return output;
 }
