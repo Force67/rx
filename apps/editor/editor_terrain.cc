@@ -315,7 +315,8 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
   if (editor_mode_ == EditorMode::kTerrain) {
     terrain_cursor_hit_.reset();
     if (over_viewport) {
-      auto [origin, direction] = ViewportCameraRay(input.mouse_x, input.mouse_y);
+      Vec2 cursor = CursorPixels();
+      auto [origin, direction] = ViewportCameraRay(cursor.x, cursor.y);
       terrain_cursor_hit_ = terrain_.Raycast(origin, direction, 1000.0f);
     }
     if (!lmb_down) {
@@ -405,7 +406,8 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
     vertical_offset = -min_y;
   }
   if (over_viewport) {
-    auto [origin, direction] = ViewportCameraRay(input.mouse_x, input.mouse_y);
+    Vec2 cursor = CursorPixels();
+    auto [origin, direction] = ViewportCameraRay(cursor.x, cursor.y);
     terrain_cursor_hit_ = terrain_.Raycast(origin, direction, 1000.0f);
     Vec3 position;
     if (terrain_cursor_hit_) {

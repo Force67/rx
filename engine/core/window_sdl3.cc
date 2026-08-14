@@ -298,6 +298,8 @@ class Sdl3Window final : public Window {
     return static_cast<u32>(h);
   }
 
+  f32 pixel_density() const override { return SDL_GetWindowPixelDensity(window_); }
+
   std::vector<const char*> vulkan_instance_extensions() const override {
     Uint32 count = 0;
     const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);

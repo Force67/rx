@@ -788,11 +788,12 @@ void Editor::OnUpdate(f32 dt) {
   bool lmb = in.button(MouseButton::kLeft);
   bool lmb_edge = lmb && !prev_lmb_;
   bool over_vp = CursorOverViewport();
+  Vec2 cursor = CursorPixels();
 
   static const bool input_log = std::getenv("RX_EDITOR_INPUT_LOG") != nullptr;
   if (input_log && lmb_edge)
-    RX_INFO("editor: lmb down at {:.0f},{:.0f} over_vp={}", in.mouse_x,
-            in.mouse_y, over_vp);
+    RX_INFO("editor: lmb down at {:.0f},{:.0f} over_vp={}", cursor.x, cursor.y,
+            over_vp);
 
   UpdateModeInteraction(lmb, lmb_edge);
 
@@ -802,7 +803,7 @@ void Editor::OnUpdate(f32 dt) {
     if (editor_mode_ == EditorMode::kSelect && lmb_edge && !scrub_.active &&
         !gizmo_drag_.active) {
       TryStartScrub(
-          in.mouse_x); // begins a scrub if the cursor is over a number field
+          cursor.x); // begins a scrub if the cursor is over a number field
     }
     if (scrub_.active) {
       if (lmb)
@@ -814,12 +815,12 @@ void Editor::OnUpdate(f32 dt) {
     }
 
     if (editor_mode_ == EditorMode::kSelect && over_vp && !scrub_.active)
-      UpdateGizmo(in.mouse_x, in.mouse_y, lmb, lmb_edge && !gizmo_drag_.active);
+      UpdateGizmo(cursor.x, cursor.y, lmb, lmb_edge && !gizmo_drag_.active);
 
     // Pick when clicking empty viewport (no gizmo handle grabbed this click).
     if (editor_mode_ == EditorMode::kSelect && lmb_edge && over_vp &&
         !gizmo_drag_.active && !scrub_.active)
-      BeginScenePick(in.mouse_x, in.mouse_y);
+      BeginScenePick(cursor.x, cursor.y);
     if (editor_mode_ == EditorMode::kSelect)
       PollScenePick();
   }
@@ -882,13 +883,26 @@ void Editor::UpdateCamera(f32 dt) {
   window_->SetRelativeMouseMode(camera_.looking());
 }
 
+// Everything the editor hit-tests against is sized in pixels: the ugui canvas,
+// the viewport ray, the gizmo's projection, the panel constants below. Mouse
+// positions arrive in window coordinates, which is the same number until the
+// window uses a high pixel density backbuffer, so they are converted here once
+// rather than at each of those call sites.
+Vec2 Editor::CursorPixels() const {
+  if (!window_)
+    return {0, 0};
+  const InputState &in = window_->input();
+  const f32 s = window_->pixel_density();
+  return {in.mouse_x * s, in.mouse_y * s};
+}
+
 bool Editor::CursorOverViewport() const {
   if (!window_)
     return false;
-  const InputState &in = window_->input();
+  Vec2 c = CursorPixels();
   f32 W = (f32)window_->width(), H = (f32)window_->height();
-  return in.mouse_x >= kLeftPanel && in.mouse_x <= W - kRightPanel &&
-         in.mouse_y >= kViewportTop && in.mouse_y <= H - kBottomPanels;
+  return c.x >= kLeftPanel && c.x <= W - kRightPanel &&
+         c.y >= kViewportTop && c.y <= H - kBottomPanels;
 }
 
 void Editor::FocusSelection() {

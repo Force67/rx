@@ -228,7 +228,8 @@ void Editor::UiFeedInput(f32) {
   host_state_.window_height = (f32)window_->height();
 
   ugui::InputQueue &q = ui_.platform()->input_queue();
-  q.PushMove({in.mouse_x, in.mouse_y});
+  Vec2 cursor = CursorPixels();  // ugui's canvas is window_width/height above
+  q.PushMove({cursor.x, cursor.y});
 
   const ugui::MouseButton ub[3] = {ugui::MouseButton::kLeft,
                                    ugui::MouseButton::kRight,
@@ -1441,8 +1442,7 @@ bool Editor::TryStartScrub(f32 mx) {
 void Editor::UpdateScrub() {
   if (!scrub_.active)
     return;
-  const InputState &in = window_->input();
-  f32 dx = in.mouse_x - scrub_.start_mouse;
+  f32 dx = CursorPixels().x - scrub_.start_mouse;
   f32 nv = scrub_.base_value + dx * scrub_.step;
 
   if (!scrub_.comp) { // tint live edit

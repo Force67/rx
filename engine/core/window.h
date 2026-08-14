@@ -44,6 +44,13 @@ class RX_CORE_EXPORT Window {
   virtual u32 width() const = 0;
   virtual u32 height() const = 0;
 
+  // Pixels per window coordinate. width()/height() are pixels, while input
+  // positions (mouse and touch alike) are window coordinates; UI or picking
+  // laid out against the pixel size has to scale the cursor by this. It is 1
+  // unless the window uses a high pixel density backbuffer, which rx does not
+  // ask for today, so this is a no-op until it does.
+  virtual f32 pixel_density() const { return 1.0f; }
+
   // Input collected by the last PumpEvents.
   const InputState& input() const { return input_; }
   const GamepadState& gamepad() const { return gamepad_; }
