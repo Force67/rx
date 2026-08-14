@@ -25,7 +25,7 @@ using AxisId = u16;
 inline constexpr int kMaxActions = 64;
 inline constexpr int kMaxAxes = 8;
 
-enum class InputDevice : u8 { kKeyboardMouse, kGamepad };
+enum class InputDevice : u8 { kKeyboardMouse, kGamepad, kTouch };
 
 // Resolved per pump from InputState + GamepadState through an InputMap. Indexed
 // by the application's action/axis ids (its enum values cast to an integer).

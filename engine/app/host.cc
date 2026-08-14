@@ -7,6 +7,7 @@
 
 #include <base/option.h>
 
+#include "asset/engine_archives.h"
 #include "core/feature_registry.h"
 #include "core/log.h"
 #include "core/math.h"
@@ -27,6 +28,10 @@ namespace {
 base::Option<int> WinW{"win.width", 0, "RX_WIN_W"};
 base::Option<int> WinH{"win.height", 0, "RX_WIN_H"};
 base::Option<bool> NoOcclusion{"no.occlusion", false, "RX_NO_OCCLUSION"};
+// Touch doubling as the mouse is the SDL default and keeps mouse-only UI usable
+// under a finger. Handhelds turn it off: with mouse look in relative mode a
+// thumb resting on the panel drags the camera.
+base::Option<bool> TouchMouse{"touch.emits_mouse", true, "RX_TOUCH_MOUSE"};
 // Timescale (0 freezes time) overrides the default day/night speed; GameHour
 // overrides the mid-morning start the world boots lit at.
 base::Option<float> Timescale{"timescale", 0.0f, "RX_TIMESCALE"};
@@ -48,10 +53,15 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   jobs_ = std::make_unique<JobSystem>();
   ConfigureClock(20.0f);
 
+  // rx's own content (fonts://, ...) mounts first, so anything the application
+  // mounts later overrides it.
+  asset::MountEngineArchives(vfs_);
+
   if (!config_.headless) {
     WindowDesc desc;
     if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
     if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
+    desc.touch_emits_mouse = TouchMouse;
     window_ = window ? std::move(window) : Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
     ApplyRenderPreset();
@@ -205,6 +215,10 @@ void Host::ApplyRenderPreset() {
   tuned.weather = env.weather;  // live weather state; presets never set it
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
 
+  // The app profile runs last, after the tier and every env carry-through, so
+  // nothing above can silently undo it.
+  if (config_.tune_settings) config_.tune_settings(tuned);
+
   renderer_.settings() = tuned;
   RX_INFO("render preset: {} ({})", render::PresetName(resolved),
           config_.preset == render::QualityPreset::kAuto ? "auto" : "forced");
@@ -225,7 +239,8 @@ bool Host::RunFrame() {
   if (window_ && !window_->PumpEvents()) return false;
   // Resolve this pump's raw keyboard/mouse + gamepad state into semantic
   // actions for the application to read.
-  if (window_) input_map_.Resolve(window_->input(), window_->gamepad(), &actions_);
+  if (window_)
+    input_map_.Resolve(window_->input(), window_->gamepad(), window_->touch(), &actions_);
 
   int steps = timer_.Tick();
   f32 dt = static_cast<f32>(timer_.fixed_step());

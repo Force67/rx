@@ -12,6 +12,8 @@ result
 assets/
 !runtime/feature_gym/assets/
 !runtime/feature_gym/assets/**
+!engine/assets/
+!engine/assets/**
 third_party/FidelityFX-SDK/
 third_party/JoltPhysics/
 third_party/DLSS/

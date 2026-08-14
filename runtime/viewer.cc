@@ -82,7 +82,7 @@ bool Viewer::OnInitialize(app::Services& services) {
   drive_sun_from_clock_ = SunDir.get() == nullptr;
 
   if (!config_.headless) {
-    if (!debug_ui_.Initialize(*window_, *renderer_)) {
+    if (!debug_ui_.Initialize(*window_, *renderer_, services.vfs)) {
       RX_WARN("debug ui unavailable");
     }
     debug_ui_.set_clock(clock_);  // Lighting panel scrubs the day/night cycle

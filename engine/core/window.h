@@ -21,6 +21,17 @@ struct WindowDesc {
   u32 width = 1920;
   u32 height = 1080;
   bool fullscreen = false;
+  // Render at the panel's real pixel count rather than letting the compositor
+  // upscale a smaller buffer. Off is blurry on any scaled display; on means
+  // width()/height() exceed the size the desktop lays the window out at, and
+  // UI sized in pixels has to scale by pixel_density() to keep its physical
+  // size.
+  bool high_pixel_density = true;
+  // When true (the platform default) a touch also emits synthetic mouse events,
+  // so mouse-only UI keeps working under a finger. Handhelds want it off: with
+  // mouse look in relative mode a stray thumb on the panel drags the camera.
+  // Games that read touch() directly should turn it off.
+  bool touch_emits_mouse = true;
 };
 
 // Opaque handles the renderer needs to create a surface. With the SDL3
@@ -39,9 +50,19 @@ class RX_CORE_EXPORT Window {
   virtual u32 width() const = 0;
   virtual u32 height() const = 0;
 
+  // Pixels per unit of the size the desktop lays this window out at, i.e. the
+  // display's scaling factor when high_pixel_density is on, otherwise 1.
+  //
+  // Input is already in pixels, converted by the backend, so nothing needs this
+  // to hit-test. What needs it is anything whose size is authored in pixels and
+  // must keep its physical size as the buffer grows: fonts, panel widths, hit
+  // boxes drawn to match them. Multiply those by this.
+  virtual f32 pixel_density() const { return 1.0f; }
+
   // Input collected by the last PumpEvents.
   const InputState& input() const { return input_; }
   const GamepadState& gamepad() const { return gamepad_; }
+  const TouchState& touch() const { return touch_; }
 
   // Gamepad haptics. No-ops unless a pad is connected; the DualSense-only
   // effects (trigger resistance, lightbar) silently do nothing on other pads,
@@ -90,6 +111,7 @@ class RX_CORE_EXPORT Window {
  protected:
   InputState input_;
   GamepadState gamepad_;
+  TouchState touch_;
   std::function<void(const void*)> event_hook_;
 };
 

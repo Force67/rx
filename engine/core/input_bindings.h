@@ -74,7 +74,8 @@ class RX_CORE_EXPORT InputMap {
 
   // Builds `out` from this pump's raw input. Non-const: tracks press edges and
   // the last active device across calls.
-  void Resolve(const InputState& kbm, const GamepadState& pad, ActionState* out);
+  void Resolve(const InputState& kbm, const GamepadState& pad, const TouchState& touch,
+               ActionState* out);
 
   // --- Rebinding (used by the settings UI) ---
   template <class A>

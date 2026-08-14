@@ -1,6 +1,8 @@
 #ifndef RX_ENGINE_APP_APPLICATION_H_
 #define RX_ENGINE_APP_APPLICATION_H_
 
+#include <functional>
+
 #include "app/services.h"
 #include "render/core/presets.h"
 
@@ -21,6 +23,12 @@ struct AppConfig {
   // or that needs a bespoke gather (skinned draws, decals, per-entity tint),
   // sets this false and appends every draw itself in OnBuildView.
   bool gather_entity_draws = true;
+  // Last word on the resolved RenderSettings. ApplyRenderPreset replaces the
+  // settings wholesale from the tier, then re-applies each env override by
+  // hand; anything an app tuned earlier is lost in that replacement. This runs
+  // after all of it, so an app-level profile (recreation's platform .ini)
+  // cannot be clobbered by the preset it sits on top of.
+  std::function<void(render::RenderSettings&)> tune_settings;
 };
 
 // The game's side of the host contract. Host::RunFrame drives these in order:

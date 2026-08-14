@@ -33,7 +33,11 @@ if(SDL3_FOUND)
   if(UNIX AND NOT APPLE AND NOT ANDROID)
     find_package(PkgConfig QUIET)
     if(PkgConfig_FOUND)
-      pkg_check_modules(WAYLAND_CLIENT QUIET IMPORTED_TARGET wayland-client)
+      # >= 1.20 for wl_proxy_marshal_flags, which the generated
+      # kde_output_device_v2 stubs call. Older wayland-client (Steam Runtime 3
+      # sniper ships 1.18) still satisfies a bare wayland-client and then fails
+      # to compile, so the version floor belongs in the probe.
+      pkg_check_modules(WAYLAND_CLIENT QUIET IMPORTED_TARGET wayland-client>=1.20)
     endif()
     if(WAYLAND_CLIENT_FOUND)
       target_sources(rx_core PRIVATE

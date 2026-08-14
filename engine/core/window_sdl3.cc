@@ -135,6 +135,14 @@ class Sdl3Window final : public Window {
     input_.text[0] = '\0';
     std::memset(input_.pressed, 0, sizeof(input_.pressed));
     std::memset(gamepad_.pressed, 0, sizeof(gamepad_.pressed));
+    touch_.BeginPump();
+
+    // SDL reports pointers in the units the desktop lays the window out in,
+    // which are smaller than pixels once the window has a high pixel density
+    // backbuffer. Everything downstream (the swapchain, picking, the editor
+    // canvas, width()/height()) is pixels, so the conversion happens here, at
+    // the one place events enter, rather than at each consumer.
+    const f32 density = pixel_density();
 
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
@@ -155,18 +163,18 @@ class Sdl3Window final : public Window {
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
         case SDL_EVENT_MOUSE_BUTTON_UP: {
-          input_.mouse_x = event.button.x;
-          input_.mouse_y = event.button.y;
+          input_.mouse_x = event.button.x * density;
+          input_.mouse_y = event.button.y * density;
           MouseButton button = TranslateButton(event.button.button);
           if (button == MouseButton::kCount) break;
           input_.mouse[static_cast<u8>(button)] = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
           break;
         }
         case SDL_EVENT_MOUSE_MOTION:
-          input_.mouse_dx += event.motion.xrel;
-          input_.mouse_dy += event.motion.yrel;
-          input_.mouse_x = event.motion.x;
-          input_.mouse_y = event.motion.y;
+          input_.mouse_dx += event.motion.xrel * density;
+          input_.mouse_dy += event.motion.yrel * density;
+          input_.mouse_x = event.motion.x * density;
+          input_.mouse_y = event.motion.y * density;
           break;
         case SDL_EVENT_MOUSE_WHEEL:
           input_.wheel += event.wheel.y;
@@ -180,6 +188,12 @@ class Sdl3Window final : public Window {
           input_.text[input_.text_len] = '\0';
           break;
         }
+        case SDL_EVENT_FINGER_DOWN:
+        case SDL_EVENT_FINGER_MOTION:
+        case SDL_EVENT_FINGER_UP:
+        case SDL_EVENT_FINGER_CANCELED:
+          HandleFinger(event.tfinger);
+          break;
         case SDL_EVENT_WINDOW_FOCUS_GAINED:
           focused_ = true;
           break;
@@ -291,6 +305,8 @@ class Sdl3Window final : public Window {
     return static_cast<u32>(h);
   }
 
+  f32 pixel_density() const override { return SDL_GetWindowPixelDensity(window_); }
+
   std::vector<const char*> vulkan_instance_extensions() const override {
     Uint32 count = 0;
     const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);
@@ -304,6 +320,20 @@ class Sdl3Window final : public Window {
   }
 
  private:
+  // SDL reports fingers normalized to the window, so the pixel size is the
+  // scale that lands them in the same space as the mouse. TouchState owns the
+  // lifecycle, this only translates.
+  void HandleFinger(const SDL_TouchFingerEvent& f) {
+    TouchState::Phase phase = TouchState::Phase::kMove;
+    if (f.type == SDL_EVENT_FINGER_DOWN)
+      phase = TouchState::Phase::kDown;
+    else if (f.type == SDL_EVENT_FINGER_UP || f.type == SDL_EVENT_FINGER_CANCELED)
+      phase = TouchState::Phase::kUp;
+
+    touch_.Apply(static_cast<i64>(f.fingerID), f.x * static_cast<f32>(width()),
+                 f.y * static_cast<f32>(height()), f.pressure, phase);
+  }
+
   void OpenGamepad(SDL_JoystickID id) {
     if (pad_) return;  // first pad wins; ignore additional controllers
     SDL_Gamepad* pad = SDL_OpenGamepad(id);
@@ -365,12 +395,17 @@ class Sdl3Window final : public Window {
 }  // namespace
 
 std::unique_ptr<Window> CreateSdl3Window(const WindowDesc& desc) {
+  // Must be set before the video subsystem starts synthesizing. Off means the
+  // panel only feeds Window::touch(), so mouse look cannot be dragged by a
+  // thumb resting on the screen.
+  if (!desc.touch_emits_mouse) SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
   if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
     RX_ERROR("sdl init failed: {}", SDL_GetError());
     return nullptr;
   }
   SDL_WindowFlags flags = SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE;
   if (desc.fullscreen) flags |= SDL_WINDOW_FULLSCREEN;
+  if (desc.high_pixel_density) flags |= SDL_WINDOW_HIGH_PIXEL_DENSITY;
   SDL_Window* window = SDL_CreateWindow(desc.title.c_str(), static_cast<int>(desc.width),
                                         static_cast<int>(desc.height), flags);
   if (!window) {

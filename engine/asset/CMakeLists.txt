@@ -1,6 +1,7 @@
 rx_add_module(asset
   vfs.cc
   pack.cc
+  engine_archives.cc
   asset_database.cc
   primitives.cc
   simplify.cc
@@ -14,6 +15,11 @@ rx_add_module(asset
 )
 
 target_link_libraries(rx_asset PUBLIC rx::core)
+# Last-resort search directory for the engine's own .rxp archives (the CMake
+# target that builds them writes them here); RX_ENGINE_ARCHIVES and the working
+# directory come first. See engine_archives.cc.
+target_compile_definitions(rx_asset PRIVATE
+  RX_ENGINE_ARCHIVES_DIR_DEFAULT="${PROJECT_BINARY_DIR}")
 # Header-only, PRIVATE: only needed to compile rx_asset itself. Wrapped in
 # BUILD_INTERFACE so they never reach the installed export (find_package
 # consumers neither include nor link them).

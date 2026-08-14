@@ -173,6 +173,7 @@ bool Editor::UiInit() {
   cfg.external_window = &host_state_;
   cfg.width = window_->width();
   cfg.height = window_->height();
+  ui_.set_ui_scale(window_->pixel_density());  // before Init: it scales too
   if (!ui_.Init(cfg))
     return false;
 
@@ -226,6 +227,11 @@ void Editor::UiFeedInput(f32) {
   const InputState &in = window_->input();
   host_state_.window_width = (f32)window_->width();
   host_state_.window_height = (f32)window_->height();
+  // The canvas above is pixels, so every px size in the .ugui documents has to
+  // grow by the same factor or the whole UI shrinks to the ratio between the
+  // buffer and the size the desktop lays the window out at. Re-set each frame
+  // because dragging the window to a differently scaled monitor changes it.
+  ui_.set_ui_scale(window_->pixel_density());
 
   ugui::InputQueue &q = ui_.platform()->input_queue();
   q.PushMove({in.mouse_x, in.mouse_y});

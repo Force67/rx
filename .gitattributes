@@ -1,3 +1,4 @@
+engine/assets/fonts/**/*.ttf binary
 runtime/feature_gym/assets/*.rgba binary
 runtime/feature_gym/assets/*.wav binary
 runtime/feature_gym/screenshots/*.jpg binary

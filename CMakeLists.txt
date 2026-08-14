@@ -323,6 +323,23 @@ if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
   add_test(NAME net_test COMMAND net_test)
 endif()
 
+# Touch contact state machine: header-only logic over core/input.h, so it needs
+# no window or panel and covers the lifecycle rules a touchscreen would
+# otherwise be the only way to exercise.
+if(RX_BUILD_TESTS)
+  add_executable(input_touch_test test/input_touch_test.cc)
+  target_link_libraries(input_touch_test PRIVATE rx::core)
+  add_test(NAME input_touch_test COMMAND input_touch_test)
+
+  # The other half: SDL's own event queue driven through the real backend, so
+  # the normalized-to-pixel translation is covered too. Skips without a display.
+  if(TARGET SDL3::SDL3)
+    add_executable(input_touch_sdl_test test/input_touch_sdl_test.cc)
+    target_link_libraries(input_touch_sdl_test PRIVATE rx::core SDL3::SDL3)
+    add_test(NAME input_touch_sdl_test COMMAND input_touch_sdl_test)
+  endif()
+endif()
+
 # rx::script unit tests: the portable value/string primitives and the handler
 # registry driven end-to-end against a real ecs::World, with no runtime, GPU or
 # transport, so plain `ctest` runs them everywhere.
@@ -365,6 +382,21 @@ if(RX_BUILD_TOOLS)
   add_executable(rxpack tools/rxpack.cc)
   target_link_libraries(rxpack PRIVATE rx::asset rx::core)
   rx_set_warnings(rxpack)
+endif()
+
+# The engine's own archives, packed from engine/assets with the tool above and
+# mounted by asset::MountEngineArchives (one namespace each). Cross builds skip
+# this: rxpack would be built for the target and cannot run here.
+if(RX_BUILD_TOOLS AND NOT CMAKE_CROSSCOMPILING)
+  file(GLOB_RECURSE RX_ENGINE_FONT_FILES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts/*)
+  add_custom_command(
+    OUTPUT ${PROJECT_BINARY_DIR}/rx_fonts.rxp
+    COMMAND rxpack create ${PROJECT_BINARY_DIR}/rx_fonts.rxp
+            ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts
+    DEPENDS rxpack ${RX_ENGINE_FONT_FILES}
+    COMMENT "Packing rx_fonts.rxp")
+  add_custom_target(rx_engine_archives ALL DEPENDS ${PROJECT_BINARY_DIR}/rx_fonts.rxp)
 endif()
 
 # Vfs mount points + .rxp pack round trip, pure CPU: no driver or window

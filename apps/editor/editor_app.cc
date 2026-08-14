@@ -882,13 +882,17 @@ void Editor::UpdateCamera(f32 dt) {
   window_->SetRelativeMouseMode(camera_.looking());
 }
 
+// The cursor is already in pixels; the panel constants are authored at 1x and
+// ugui scales its own pixel sizes by the same density, so they have to be
+// scaled to stay on top of what was actually drawn.
 bool Editor::CursorOverViewport() const {
   if (!window_)
     return false;
   const InputState &in = window_->input();
+  const f32 s = window_->pixel_density();
   f32 W = (f32)window_->width(), H = (f32)window_->height();
-  return in.mouse_x >= kLeftPanel && in.mouse_x <= W - kRightPanel &&
-         in.mouse_y >= kViewportTop && in.mouse_y <= H - kBottomPanels;
+  return in.mouse_x >= kLeftPanel * s && in.mouse_x <= W - kRightPanel * s &&
+         in.mouse_y >= kViewportTop * s && in.mouse_y <= H - kBottomPanels * s;
 }
 
 void Editor::FocusSelection() {
@@ -1096,9 +1100,11 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
       Vec2 s1 = ProjectToScreen(origin + axis * len, &f1);
       if (!f1)
         continue;
-      // distance from cursor to the handle tip
+      // distance from cursor to the handle tip. The tolerance is authored at
+      // 1x and both operands are pixels, so it scales with the buffer or the
+      // handle gets relatively harder to grab the denser the display.
       f32 d = std::hypot(mx - s1.x, my - s1.y);
-      if (d < 14.0f) {
+      if (d < 14.0f * window_->pixel_density()) {
         gizmo_drag_.active = true;
         gizmo_drag_.axis = a;
         gizmo_drag_.base_pos =
