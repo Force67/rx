@@ -6,6 +6,7 @@ rx_add_module(asset
   simplify.cc
   subdivide.cc
   gltf_loader.cc
+  blend_import.cc
   materialx.cc
   # miniz compiles straight into the module (hidden visibility keeps its
   # symbols internal); no separate archive to bundle for installed consumers.

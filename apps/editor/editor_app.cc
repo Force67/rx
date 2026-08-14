@@ -4,8 +4,12 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <limits>
 
+#include "anim/morph.h"
 #include "app/host.h"
+#include "asset/blend_import.h"
+#include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "asset/vfs.h"
 #include "core/log.h"
@@ -29,6 +33,83 @@ constexpr f32 kViewportTop = 74.0f; // topbar + viewport bar
 constexpr f32 kLeftPanel = 300.0f;
 constexpr f32 kRightPanel = 360.0f;
 constexpr f32 kBottomPanels = 186.0f + 26.0f; // content + statusbar
+
+asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
+                          asset::AssetId material) {
+  constexpr u32 kSegments = 64;
+  asset::Mesh mesh;
+  mesh.id = id;
+  mesh.lods.resize(1);
+  asset::MeshLod &lod = mesh.lods[0];
+  auto vertex = [](Vec3 position, Vec3 normal, f32 u, f32 v) {
+    asset::Vertex out{};
+    out.position[0] = position.x;
+    out.position[1] = position.y;
+    out.position[2] = position.z;
+    out.normal[0] = normal.x;
+    out.normal[1] = normal.y;
+    out.normal[2] = normal.z;
+    out.tangent[0] = 1;
+    out.tangent[3] = 1;
+    out.uv[0] = u;
+    out.uv[1] = v;
+    return out;
+  };
+
+  // Separate cap and rim vertices keep the top crisp while the outer wall is
+  // smoothly shaded. A subtle bevel would cost more geometry without helping
+  // this preview prop.
+  const u32 top_center = static_cast<u32>(lod.vertices.size());
+  lod.vertices.push_back(vertex({0, half_height, 0}, {0, 1, 0}, 0.5f, 0.5f));
+  const u32 top_ring = static_cast<u32>(lod.vertices.size());
+  for (u32 i = 0; i <= kSegments; ++i) {
+    const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
+    const f32 x = std::cos(angle), z = std::sin(angle);
+    lod.vertices.push_back(vertex({x * radius, half_height, z * radius},
+                                  {0, 1, 0}, x * 0.5f + 0.5f,
+                                  z * 0.5f + 0.5f));
+  }
+  const u32 bottom_center = static_cast<u32>(lod.vertices.size());
+  lod.vertices.push_back(vertex({0, -half_height, 0}, {0, -1, 0}, 0.5f, 0.5f));
+  const u32 bottom_ring = static_cast<u32>(lod.vertices.size());
+  for (u32 i = 0; i <= kSegments; ++i) {
+    const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
+    const f32 x = std::cos(angle), z = std::sin(angle);
+    lod.vertices.push_back(vertex({x * radius, -half_height, z * radius},
+                                  {0, -1, 0}, x * 0.5f + 0.5f,
+                                  z * 0.5f + 0.5f));
+  }
+  const u32 side_ring = static_cast<u32>(lod.vertices.size());
+  for (u32 i = 0; i <= kSegments; ++i) {
+    const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
+    const f32 x = std::cos(angle), z = std::sin(angle);
+    lod.vertices.push_back(
+        vertex({x * radius, half_height, z * radius}, {x, 0, z},
+               static_cast<f32>(i) / kSegments, 0));
+    lod.vertices.push_back(
+        vertex({x * radius, -half_height, z * radius}, {x, 0, z},
+               static_cast<f32>(i) / kSegments, 1));
+  }
+  for (u32 i = 0; i < kSegments; ++i) {
+    lod.indices.push_back(top_center);
+    lod.indices.push_back(top_ring + i + 1);
+    lod.indices.push_back(top_ring + i);
+    lod.indices.push_back(bottom_center);
+    lod.indices.push_back(bottom_ring + i);
+    lod.indices.push_back(bottom_ring + i + 1);
+    const u32 side = side_ring + i * 2;
+    lod.indices.push_back(side);
+    lod.indices.push_back(side + 2);
+    lod.indices.push_back(side + 1);
+    lod.indices.push_back(side + 1);
+    lod.indices.push_back(side + 2);
+    lod.indices.push_back(side + 3);
+  }
+  lod.submeshes.push_back(
+      {0, static_cast<u32>(lod.indices.size()), material});
+  mesh.bounds_radius = std::sqrt(radius * radius + half_height * half_height);
+  return mesh;
+}
 } // namespace
 
 // ===========================================================================
@@ -58,20 +139,15 @@ bool Editor::OnInitialize(app::Services &s) {
 
   SetupDefaultScene();
 
-  // Load a scene passed on argv, if any (.rxscene only; .gltf is a known gap).
-  if (!open_path_.empty()) {
-    if (open_path_.size() > 8 &&
-        open_path_.substr(open_path_.size() - 8) == ".rxscene") {
-      DoLoad(open_path_);
-    } else {
-      RX_WARN("editor: only .rxscene load is implemented (got {})", open_path_);
-    }
-  }
-
   camera_.set_position({6.0f, 4.5f, 6.0f});
   Vec3 d = Normalize(Vec3{0, 1.0f, 0} - camera_.position());
   camera_.set_yaw_pitch(std::atan2(d.x, -d.z),
                         std::asin(std::clamp(d.y, -1.0f, 1.0f)));
+
+  // Load a scene or authoring model passed on argv.
+  if (!open_path_.empty()) {
+    OpenDocument(open_path_);
+  }
 
   ScanAssets();
 
@@ -197,6 +273,9 @@ void Editor::ScanAssets() {
       if (!p.is_regular_file())
         continue;
       std::string ext = p.path().extension().string();
+      std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+      });
       std::string kind;
       if (ext == ".rxscene")
         kind = "scene";
@@ -204,6 +283,8 @@ void Editor::ScanAssets() {
         kind = "terrain";
       else if (ext == ".gltf" || ext == ".glb")
         kind = "mesh";
+      else if (ext == ".blend")
+        kind = "model";
       else if (ext == ".png" || ext == ".jpg" || ext == ".dds" || ext == ".ktx")
         kind = "texture";
       else if (ext == ".mtl" || ext == ".mtlx" || ext == ".material")
@@ -215,6 +296,462 @@ void Editor::ScanAssets() {
       assets_list_.push_back(
           {p.path().string(), p.path().filename().string(), kind});
     }
+  }
+}
+
+u32 Editor::ConfigureImportedBody(ImportedSkin *skin) {
+  if (!skin)
+    return 0;
+  const asset::Skeleton &skeleton = skin->skeleton;
+  u32 count = 0;
+  auto available = [&](std::string_view name) {
+    return skeleton.Find(name) >= 0;
+  };
+  auto add_chest = [&](const char *side, const char *driven,
+                       const char *flatten, const char *hang) {
+    if (!available(driven))
+      return;
+    const char *driver = available("chest.twk") ? "chest.twk" : driven;
+    anim::BodyRegionConfig region = anim::MakeBodyRegionPreset(
+        anim::BodyRegionKind::kChest, std::string("chest.") + side, driver,
+        driven);
+    // On this Genesis rig the chest bones are true deformation helpers.
+    // Gravity/inertial displacement drives them, while source-authored shapes
+    // preserve volume on compression and forward hang.
+    region.frequency_hz = 2.45f;
+    region.damping_ratio = 0.48f;
+    region.max_translation = {0.04f, 0.06f, 0.075f};
+    region.translation_gain = {1.2f, 1.2f, 1.2f};
+    region.rotation_gain = {1.15f, 1.15f, 1.15f};
+    region.deformation_axis = {0, -1, 0};
+    region.morphs.push_back(
+        {flatten, anim::BodyDeformationSignal::kImpact, 0.55f});
+    region.morphs.push_back(
+        {hang, anim::BodyDeformationSignal::kStretch, 0.35f});
+    skin->dynamics.AddRegion(region);
+    ++count;
+  };
+  add_chest("left", "pectoral.L", "pPBMlBreastsFlatten",
+            "pPBMlBreastsHangForward");
+  add_chest("right", "pectoral.R", "pPBMrBreastsFlatten",
+            "pPBMrBreastsHangForward");
+
+  // Morph-only abdomen and glutes regions use a real animated driver but do
+  // not perturb the central skeleton. This lets authoring correctives respond
+  // to landings without moving the whole torso/pelvis as a helper bone would.
+  auto add_morph_mass = [&](anim::BodyRegionKind kind, const char *name,
+                            const char *bone, const char *impact_morph,
+                            const char *soft_morph) {
+    if (!available(bone))
+      return;
+    anim::BodyRegionConfig region =
+        anim::MakeBodyRegionPreset(kind, name, bone, bone);
+    region.translation_gain = {};
+    region.rotation_gain = {};
+    region.frequency_hz *= 0.86f;
+    region.damping_ratio = std::max(0.5f, region.damping_ratio - 0.16f);
+    region.morphs.push_back(
+        {impact_morph, anim::BodyDeformationSignal::kImpact, 0.38f});
+    region.morphs.push_back(
+        {soft_morph, anim::BodyDeformationSignal::kSpeed, 0.14f});
+    skin->dynamics.AddRegion(region);
+    ++count;
+  };
+  add_morph_mass(anim::BodyRegionKind::kAbdomen, "abdomen", "spine-1.twk",
+                 "pJCMAbdomenFwd_35", "PBMStomachSoften");
+  add_morph_mass(anim::BodyRegionKind::kGlutes, "glutes.left", "pelvis.twk",
+                 "pJCMFlexGluteClench_L", "PBMGluteCreaseL");
+  add_morph_mass(anim::BodyRegionKind::kGlutes, "glutes.right", "pelvis.twk",
+                 "pJCMFlexGluteClench_R", "PBMGluteCreaseR");
+
+  // Genesis exposes deforming tweak bones for the fleshy parts of each limb.
+  // They are safe secondary-motion targets: unlike rotating the main thigh or
+  // arm, moving them does not drag the entire downstream limb off its pose.
+  auto add_limb = [&](anim::BodyRegionKind kind, const char *name,
+                      const char *bone, const char *morph) {
+    if (!available(bone))
+      return;
+    anim::BodyRegionConfig region =
+        anim::MakeBodyRegionPreset(kind, name, bone, bone);
+    // Preview tuning is intentionally readable at turntable distance while
+    // remaining inside the anatomical clamps supplied by each preset.
+    region.frequency_hz *= 0.82f;
+    region.damping_ratio = std::max(0.52f, region.damping_ratio - 0.17f);
+    region.translation_gain = {1.25f, 1.25f, 1.25f};
+    region.rotation_gain = {1.2f, 1.2f, 1.2f};
+    if (morph && *morph) {
+      region.morphs.push_back(
+          {morph, anim::BodyDeformationSignal::kImpact, 0.28f});
+    }
+    skin->dynamics.AddRegion(region);
+    ++count;
+  };
+  add_limb(anim::BodyRegionKind::kThigh, "thigh.left",
+           "thigh.bend.twk.L", "pJCMThighBack_35_L");
+  add_limb(anim::BodyRegionKind::kThigh, "thigh.right",
+           "thigh.bend.twk.R", "pJCMThighBack_35_R");
+  add_limb(anim::BodyRegionKind::kCalf, "calf.left", "shin.bend.twk.L",
+           "pJCMFlexCalf_L");
+  add_limb(anim::BodyRegionKind::kCalf, "calf.right", "shin.bend.twk.R",
+           "pJCMFlexCalf_R");
+  add_limb(anim::BodyRegionKind::kUpperArm, "upper-arm.left",
+           "upper_arm.bend.twk.L", "pJCMFlexBiceps_L");
+  add_limb(anim::BodyRegionKind::kUpperArm, "upper-arm.right",
+           "upper_arm.bend.twk.R", "pJCMFlexBiceps_R");
+  return count;
+}
+
+bool Editor::LoadModelDocument(const std::string &path) {
+  std::string load_path = path;
+  bool reused_cache = false;
+  if (fs::path(path).extension() == ".blend") {
+    asset::BlendImportOptions options;
+    options.converter_script = RX_BLEND_CONVERTER_SCRIPT;
+    asset::BlendImportResult converted;
+    std::string error;
+    if (!asset::ConvertBlendScene(path, options, &converted, &error)) {
+      status_message_ = "Blend import failed: " + error;
+      RX_WARN("editor: {}", status_message_);
+      MarkDirty();
+      return false;
+    }
+    load_path = converted.glb_path;
+    reused_cache = converted.reused_cache;
+  }
+
+  asset::GltfScene imported_scene;
+  if (!asset::LoadGltfScene(load_path, &imported_scene)) {
+    status_message_ = "Model load failed: " + path;
+    MarkDirty();
+    return false;
+  }
+  if (renderer_) {
+    for (const asset::Texture &texture : imported_scene.textures)
+      if (texture.id)
+        renderer_->UploadTexture(texture);
+    for (const asset::Material &material : imported_scene.materials)
+      renderer_->UploadMaterial(material);
+  }
+  for (u32 i = 0; i < imported_scene.meshes.size(); ++i) {
+    UploadPrimitive(fs::path(path).filename().string() + "#" +
+                        std::to_string(i),
+                    imported_scene.meshes[i]);
+  }
+
+  ImportedModel model;
+  model.source_path = path;
+  model.skins.resize(imported_scene.skeletons.size());
+  u32 region_count = 0;
+  for (u32 i = 0; i < imported_scene.skeletons.size(); ++i) {
+    ImportedSkin &skin = model.skins[i];
+    skin.skeleton = std::move(imported_scene.skeletons[i]);
+    if (i < imported_scene.skin_bindings.size())
+      skin.binding = std::move(imported_scene.skin_bindings[i]);
+    skin.pose.ResetToBind(skin.skeleton);
+    region_count += ConfigureImportedBody(&skin);
+  }
+
+  const u32 model_index = static_cast<u32>(imported_models_.size());
+  for (const asset::GltfScene::Instance &source : imported_scene.instances) {
+    if (source.mesh_index >= imported_scene.meshes.size())
+      continue;
+    scene::Transform transform;
+    transform.position[0] = source.position.x;
+    transform.position[1] = source.position.y;
+    transform.position[2] = source.position.z;
+    std::copy(std::begin(source.rotation), std::end(source.rotation),
+              transform.rotation);
+    transform.scale = source.scale;
+    ecs::Entity entity = world_->Create();
+    world_->Add(entity, transform);
+    world_->Add(entity,
+                scene::Renderable{imported_scene.meshes[source.mesh_index].id});
+    world_->Add(entity, scene::Transient{});
+    SetName(entity, fs::path(path).stem().string() + " " +
+                        std::to_string(model.instances.size() + 1));
+
+    ImportedInstance instance;
+    instance.entity = entity;
+    instance.mesh = imported_scene.meshes[source.mesh_index].id.hash;
+    instance.skin = source.skeleton_index;
+    instance.turntable_position = source.position;
+    instance.turntable_rotation = {source.rotation[0], source.rotation[1],
+                                   source.rotation[2], source.rotation[3]};
+    instance.rotates_with_turntable = source.skeleton_index >= 0;
+    if (instance.skin >= 0 &&
+        instance.skin < static_cast<i32>(model.skins.size())) {
+      instance.remap =
+          anim::BuildBoneRemap(model.skins[instance.skin].skeleton,
+                               model.skins[instance.skin].binding);
+    }
+    const u32 instance_index = static_cast<u32>(model.instances.size());
+    model.instances.push_back(std::move(instance));
+    imported_entities_[ImportedEntityKey(entity)] = {model_index,
+                                                     instance_index};
+  }
+  imported_models_.push_back(std::move(model));
+
+  // Frame character imports from the skinned pieces. Authoring scenes often
+  // include a huge cyclorama or ground plane; including those static props in
+  // the focus bounds makes the actual character microscopic in the viewport.
+  const bool has_skinned_instances = std::any_of(
+      imported_scene.instances.begin(), imported_scene.instances.end(),
+      [](const asset::GltfScene::Instance &instance) {
+        return instance.skeleton_index >= 0;
+      });
+  Vec3 center{};
+  u32 centers = 0;
+  for (const asset::GltfScene::Instance &instance : imported_scene.instances) {
+    if (instance.mesh_index >= imported_scene.meshes.size())
+      continue;
+    if (has_skinned_instances && instance.skeleton_index < 0)
+      continue;
+    const asset::Mesh &mesh = imported_scene.meshes[instance.mesh_index];
+    const Mat4 transform = MakeTransform(
+        instance.position,
+        {instance.rotation[0], instance.rotation[1], instance.rotation[2],
+         instance.rotation[3]},
+        instance.scale);
+    center += TransformPoint(
+        transform,
+        {mesh.bounds_center[0], mesh.bounds_center[1], mesh.bounds_center[2]});
+    ++centers;
+  }
+  if (centers > 0)
+    center = center * (1.0f / centers);
+  f32 radius = 1;
+  for (const asset::GltfScene::Instance &instance : imported_scene.instances) {
+    if (instance.mesh_index >= imported_scene.meshes.size())
+      continue;
+    if (has_skinned_instances && instance.skeleton_index < 0)
+      continue;
+    const asset::Mesh &mesh = imported_scene.meshes[instance.mesh_index];
+    const Mat4 transform = MakeTransform(
+        instance.position,
+        {instance.rotation[0], instance.rotation[1], instance.rotation[2],
+         instance.rotation[3]},
+        instance.scale);
+    const Vec3 instance_center = TransformPoint(
+        transform,
+        {mesh.bounds_center[0], mesh.bounds_center[1], mesh.bounds_center[2]});
+    radius = std::max(radius, Length(instance_center - center) +
+                                  mesh.bounds_radius * instance.scale);
+  }
+  ImportedModel &stored_model = imported_models_.back();
+
+  // Give character imports a dedicated studio turntable. Its top sits at the
+  // lowest skinned bound and it rotates in lockstep with every skinned piece.
+  if (has_skinned_instances) {
+    f32 floor_y = std::numeric_limits<f32>::max();
+    for (const asset::GltfScene::Instance &instance : imported_scene.instances) {
+      if (instance.mesh_index >= imported_scene.meshes.size() ||
+          instance.skeleton_index < 0)
+        continue;
+      const asset::Mesh &mesh = imported_scene.meshes[instance.mesh_index];
+      const Mat4 transform = MakeTransform(
+          instance.position,
+          {instance.rotation[0], instance.rotation[1], instance.rotation[2],
+           instance.rotation[3]},
+          instance.scale);
+      if (mesh.lods.empty())
+        continue;
+      for (const asset::Vertex &vertex : mesh.lods[0].vertices) {
+        floor_y = std::min(
+            floor_y,
+            TransformPoint(transform, {vertex.position[0], vertex.position[1],
+                                       vertex.position[2]})
+                .y);
+      }
+    }
+    if (!std::isfinite(floor_y))
+      floor_y = center.y - radius;
+    constexpr f32 kPlateHalfHeight = 0.055f;
+    const f32 surface_y =
+        terrain_.SampleHeight(center.x, center.z).value_or(floor_y);
+    const f32 plate_top = std::max(floor_y, surface_y + 0.035f);
+    const f32 character_lift = plate_top - floor_y;
+    center.y += character_lift;
+    for (ImportedInstance &instance : stored_model.instances) {
+      if (!instance.rotates_with_turntable)
+        continue;
+      instance.turntable_position.y += character_lift;
+      if (scene::Transform *transform =
+              world_->Get<scene::Transform>(instance.entity)) {
+        transform->position[1] += character_lift;
+      }
+    }
+    const f32 plate_radius = std::max(0.9f, radius * 0.72f);
+    const asset::AssetId plate_material = asset::MakeAssetId(
+        path + "#editor-turntable-material-" + std::to_string(model_index));
+    asset::Material material;
+    material.id = plate_material;
+    material.base_color_factor[0] = 0.055f;
+    material.base_color_factor[1] = 0.12f;
+    material.base_color_factor[2] = 0.16f;
+    material.base_color_factor[3] = 1;
+    material.metallic_factor = 0.72f;
+    material.roughness_factor = 0.24f;
+    if (renderer_)
+      renderer_->UploadMaterial(material);
+    const asset::AssetId plate_mesh = asset::MakeAssetId(
+        path + "#editor-turntable-mesh-" + std::to_string(model_index));
+    UploadPrimitive("turntable.mesh",
+                    MakeTurntable(plate_radius, kPlateHalfHeight, plate_mesh,
+                                  plate_material));
+    stored_model.turntable_entity = world_->Create();
+    scene::Transform plate_transform;
+    plate_transform.position[0] = center.x;
+    plate_transform.position[1] = plate_top - kPlateHalfHeight;
+    plate_transform.position[2] = center.z;
+    world_->Add(stored_model.turntable_entity, plate_transform);
+    world_->Add(stored_model.turntable_entity,
+                scene::Renderable{plate_mesh});
+    world_->Add(stored_model.turntable_entity, scene::Transient{});
+    SetName(stored_model.turntable_entity, "Jiggle turntable");
+  }
+  stored_model.turntable_center = center;
+  camera_.set_position(center +
+                       Vec3{radius * 1.4f, radius * 0.75f, radius * 1.8f});
+  Vec3 direction = Normalize(center - camera_.position());
+  camera_.set_yaw_pitch(std::atan2(direction.x, -direction.z),
+                        std::asin(std::clamp(direction.y, -1.0f, 1.0f)));
+  status_message_ = "Imported " + fs::path(path).filename().string() + ": " +
+                    std::to_string(imported_scene.meshes.size()) + " meshes, " +
+                    std::to_string(region_count) + " jiggle regions" +
+                    (reused_cache ? " (cached)" : "");
+  RX_INFO("editor: {}", status_message_);
+  playing_ = region_count > 0; // imported characters preview immediately
+  MarkDirty();
+  return true;
+}
+
+void Editor::UpdateImportedModels(f32 dt) {
+  for (ImportedModel &model : imported_models_) {
+    const f32 preview_dt = playing_ ? std::max(dt, 0.0f) : 0.0f;
+    model.preview_time += preview_dt;
+
+    // Auto preview holds each style for five seconds and crossfades for one,
+    // making their different silhouettes easy to compare without a pose pop.
+    const anim::WalkStyle hip_sway =
+        anim::MakeWalkStylePreset(anim::WalkStyleKind::kHipSway);
+    const anim::WalkStyle march =
+        anim::MakeWalkStylePreset(anim::WalkStyleKind::kMarch);
+    anim::WalkStyle walk_style;
+    if (walk_preview_mode_ == WalkPreviewMode::kHipSway) {
+      model.active_walk_style = anim::WalkStyleKind::kHipSway;
+      walk_style = hip_sway;
+    } else if (walk_preview_mode_ == WalkPreviewMode::kMarch) {
+      model.active_walk_style = anim::WalkStyleKind::kMarch;
+      walk_style = march;
+    } else {
+      const f32 cycle = std::fmod(model.preview_time, 12.0f);
+      if (cycle < 5.0f) {
+        model.active_walk_style = anim::WalkStyleKind::kHipSway;
+        walk_style = hip_sway;
+      } else if (cycle < 6.0f) {
+        const f32 blend = cycle - 5.0f;
+        model.active_walk_style = blend < 0.5f
+                                      ? anim::WalkStyleKind::kHipSway
+                                      : anim::WalkStyleKind::kMarch;
+        walk_style = anim::BlendWalkStyles(hip_sway, march, blend);
+      } else if (cycle < 11.0f) {
+        model.active_walk_style = anim::WalkStyleKind::kMarch;
+        walk_style = march;
+      } else {
+        const f32 blend = cycle - 11.0f;
+        model.active_walk_style = blend < 0.5f
+                                      ? anim::WalkStyleKind::kMarch
+                                      : anim::WalkStyleKind::kHipSway;
+        walk_style = anim::BlendWalkStyles(march, hip_sway, blend);
+      }
+    }
+    model.walk_phase = anim::AdvancePhase(model.walk_phase, 1.35f, preview_dt,
+                                          walk_style);
+
+    const f32 turntable_angle = model.preview_time * 0.62f;
+    const Quat turntable_rotation =
+        QuatFromAxisAngle({0, 1, 0}, turntable_angle);
+    for (ImportedInstance &instance : model.instances) {
+      if (!world_->IsAlive(instance.entity)) {
+        imported_entities_.erase(ImportedEntityKey(instance.entity));
+        continue;
+      }
+      if (!instance.rotates_with_turntable)
+        continue;
+      scene::Transform *transform = world_->Get<scene::Transform>(instance.entity);
+      if (!transform)
+        continue;
+      const Vec3 position =
+          model.turntable_center +
+          Rotate(turntable_rotation,
+                 instance.turntable_position - model.turntable_center);
+      transform->position[0] = position.x;
+      transform->position[1] = position.y;
+      transform->position[2] = position.z;
+      const Quat rotation =
+          Normalize(turntable_rotation * instance.turntable_rotation);
+      transform->rotation[0] = rotation.x;
+      transform->rotation[1] = rotation.y;
+      transform->rotation[2] = rotation.z;
+      transform->rotation[3] = rotation.w;
+    }
+    if (scene::Transform *plate =
+            world_->Get<scene::Transform>(model.turntable_entity)) {
+      plate->rotation[0] = turntable_rotation.x;
+      plate->rotation[1] = turntable_rotation.y;
+      plate->rotation[2] = turntable_rotation.z;
+      plate->rotation[3] = turntable_rotation.w;
+    }
+    // A repeating force-demo rig: sustained multidirectional acceleration plus
+    // a distinct shove every 0.8 seconds (left, right, then a landing). This is
+    // deliberately stronger than ordinary locomotion so every configured soft
+    // region is easy to inspect from the editor camera.
+    const i32 event = static_cast<i32>(model.preview_time / 0.8f);
+    const i32 event_kind = event % 3;
+    const bool fire_event = playing_ && event != model.force_event;
+    for (ImportedSkin &skin : model.skins) {
+      if (playing_) {
+        anim::Locomotion walk;
+        walk.phase = model.walk_phase;
+        walk.style = walk_style;
+        walk.Apply(skin.skeleton, 1.35f, &skin.pose);
+      } else {
+        skin.pose.ResetToBind(skin.skeleton);
+      }
+      anim::BodyDynamicsFrame frame;
+      if (playing_) {
+        frame.linear_acceleration = {
+            std::sin(model.preview_time * 2.7f) * 7.0f,
+            std::sin(model.preview_time * 5.4f) * 5.5f,
+            std::cos(model.preview_time * 2.1f) * 6.0f,
+        };
+        frame.angular_acceleration = {
+            std::sin(model.preview_time * 2.3f) * 2.8f,
+            std::cos(model.preview_time * 1.7f) * 3.5f,
+            std::sin(model.preview_time * 3.2f) * 3.0f,
+        };
+        if (fire_event) {
+          if (event_kind == 0)
+            frame.linear_impulse = {1.15f, 0.18f, -0.35f};
+          else if (event_kind == 1)
+            frame.linear_impulse = {-1.15f, 0.12f, 0.45f};
+          else
+            frame.linear_impulse = {0.25f, -1.75f, -0.25f};
+          frame.angular_impulse =
+              event_kind == 2 ? Vec3{0.35f, 0, -0.28f}
+                              : Vec3{0, event_kind == 0 ? 0.55f : -0.55f,
+                                     event_kind == 0 ? 0.25f : -0.25f};
+        }
+      } else {
+        frame.gravity = {};
+        frame.teleport = true;
+      }
+      skin.dynamics.Update(skin.skeleton, frame, dt, &skin.pose, &skin.morphs);
+      anim::ComputeModelMatrices(skin.skeleton, skin.pose,
+                                 &skin.model_matrices);
+    }
+    if (fire_event)
+      model.force_event = event;
   }
 }
 
@@ -597,6 +1134,8 @@ void Editor::NewScene() {
       [&](ecs::Entity e, scene::Transform &) { all.push_back(e); });
   for (ecs::Entity e : all)
     world_->Destroy(e);
+  imported_models_.clear();
+  imported_entities_.clear();
   undo_.Clear();
   selection_.Clear();
   tints_.clear();
@@ -609,6 +1148,23 @@ void Editor::NewScene() {
   placement_ = {};
   status_message_ = "New scene";
   MarkDirty();
+}
+
+void Editor::OpenDocument(const std::string &path) {
+  std::string extension = fs::path(path).extension().string();
+  std::transform(
+      extension.begin(), extension.end(), extension.begin(),
+      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  if (extension == ".rxscene") {
+    DoLoad(path);
+  } else if (extension == ".gltf" || extension == ".glb" ||
+             extension == ".blend") {
+    LoadModelDocument(path);
+  } else {
+    status_message_ = "Unsupported document: " + path;
+    RX_WARN("editor: {}", status_message_);
+    MarkDirty();
+  }
 }
 
 void Editor::DoSave(const std::string &path) {
@@ -624,17 +1180,16 @@ void Editor::DoSave(const std::string &path) {
   const fs::path terrain_path = fs::path(path).replace_extension(".rxterrain");
   const fs::path scene_stage = scene_path.string() + ".editor-stage";
   const fs::path terrain_stage = terrain_path.string() + ".editor-stage";
-  auto backup_path = [](const fs::path& target) {
+  auto backup_path = [](const fs::path &target) {
     fs::path candidate = target.string() + ".editor-backup";
     for (u32 suffix = 1; fs::exists(candidate); ++suffix)
-      candidate = target.string() + ".editor-backup." +
-                  std::to_string(suffix);
+      candidate = target.string() + ".editor-backup." + std::to_string(suffix);
     return candidate;
   };
   const fs::path scene_backup = backup_path(scene_path);
   const fs::path terrain_backup = backup_path(terrain_path);
   std::error_code ignored;
-  for (const fs::path& temporary : {scene_stage, terrain_stage}) {
+  for (const fs::path &temporary : {scene_stage, terrain_stage}) {
     fs::remove(temporary, ignored);
   }
 
@@ -646,18 +1201,18 @@ void Editor::DoSave(const std::string &path) {
       world_->Destroy(visual.entity);
   }
   std::string scene_error;
-  bool scene_saved = edit::SaveScene(*world_, scene_stage.string(), &scene_error);
+  bool scene_saved =
+      edit::SaveScene(*world_, scene_stage.string(), &scene_error);
   for (auto &[key, visual] : terrain_tiles_)
     visual.entity = SpawnTerrainTile(key, visual.mesh);
 
   const bool has_terrain = static_cast<bool>(terrain_.desc().id);
   std::string terrain_error;
   bool terrain_saved =
-      !has_terrain || terrain::SaveTerrain(terrain_, terrain_stage.string(),
-                                           &terrain_error);
+      !has_terrain ||
+      terrain::SaveTerrain(terrain_, terrain_stage.string(), &terrain_error);
 
-  auto move = [](const fs::path& from, const fs::path& to,
-                 std::string* error) {
+  auto move = [](const fs::path &from, const fs::path &to, std::string *error) {
     std::error_code filesystem_error;
     fs::rename(from, to, filesystem_error);
     if (!filesystem_error)
@@ -670,8 +1225,8 @@ void Editor::DoSave(const std::string &path) {
   bool terrain_backed_up = false;
   bool scene_committed = false;
   if (scene_saved && terrain_saved) {
-    scene_backed_up = fs::exists(scene_path) &&
-                      move(scene_path, scene_backup, &scene_error);
+    scene_backed_up =
+        fs::exists(scene_path) && move(scene_path, scene_backup, &scene_error);
     if (fs::exists(scene_path) && !scene_backed_up)
       scene_saved = false;
     // Only a document that owns terrain may touch the sidecar. Without this
@@ -701,8 +1256,8 @@ void Editor::DoSave(const std::string &path) {
       fs::remove(scene_path, remove_error);
       if (remove_error) {
         scene_saved = false;
-        scene_error = "rollback could not remove new scene: " +
-                      remove_error.message();
+        scene_error =
+            "rollback could not remove new scene: " + remove_error.message();
       }
     }
     if (has_terrain && fs::exists(terrain_path) && terrain_backed_up) {
@@ -710,8 +1265,8 @@ void Editor::DoSave(const std::string &path) {
       fs::remove(terrain_path, remove_error);
       if (remove_error) {
         terrain_saved = false;
-        terrain_error = "rollback could not remove new terrain: " +
-                        remove_error.message();
+        terrain_error =
+            "rollback could not remove new terrain: " + remove_error.message();
       }
     }
     if (scene_backed_up && !move(scene_backup, scene_path, &scene_error)) {
@@ -726,7 +1281,7 @@ void Editor::DoSave(const std::string &path) {
                       terrain_backup.string() + ": " + terrain_error;
     }
   }
-  for (const fs::path& temporary : {scene_stage, terrain_stage}) {
+  for (const fs::path &temporary : {scene_stage, terrain_stage}) {
     fs::remove(temporary, ignored);
   }
   if (scene_saved && terrain_saved) {
@@ -804,6 +1359,8 @@ void Editor::DoLoad(const std::string &path) {
     });
     for (ecs::Entity e : old)
       world_->Destroy(e);
+    imported_models_.clear();
+    imported_entities_.clear();
     ClearTerrainVisuals();
     terrain_ = has_terrain ? std::move(loaded_terrain) : terrain::Terrain{};
     terrain_brush_layer_ = 0;
@@ -864,14 +1421,22 @@ void Editor::PerformRedo() {
 
 void Editor::OpenFileDialog() {
   dialog_files_.clear();
+  auto supported = [](const fs::path &path) {
+    std::string extension = path.extension().string();
+    std::transform(
+        extension.begin(), extension.end(), extension.begin(),
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return extension == ".rxscene" || extension == ".gltf" ||
+           extension == ".glb" || extension == ".blend";
+  };
   if (fs::exists(asset_root_)) {
     for (auto &p : fs::recursive_directory_iterator(asset_root_))
-      if (p.is_regular_file() && p.path().extension() == ".rxscene")
+      if (p.is_regular_file() && supported(p.path()))
         dialog_files_.push_back(p.path().string());
   }
-  // Also any .rxscene in the working dir.
+  // Also supported documents in the working dir.
   for (auto &p : fs::directory_iterator(fs::current_path()))
-    if (p.is_regular_file() && p.path().extension() == ".rxscene")
+    if (p.is_regular_file() && supported(p.path()))
       dialog_files_.push_back(p.path().filename().string());
   dialog_open_ = true;
   MarkDirty();

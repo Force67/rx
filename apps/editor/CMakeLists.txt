@@ -38,11 +38,12 @@ add_executable(rx_editor
   ugui_backend.cc)
 
 target_link_libraries(rx_editor PRIVATE
-  rx::app rx::edit rx::terrain rx::render rx::asset rx::scene rx::ecs rx::core
+  rx::app rx::edit rx::terrain rx::render rx::anim rx::asset rx::scene rx::ecs rx::core
   ultragui)
 
 target_compile_definitions(rx_editor PRIVATE
-  RX_EDITOR_UI_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ui")
+  RX_EDITOR_UI_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ui"
+  RX_BLEND_CONVERTER_SCRIPT="${PROJECT_SOURCE_DIR}/tools/blend_to_glb.py")
 
 # ugui pipeline shaders (SDF quads, glyphs, frosted glass), hlsl -> embedded spirv.
 rx_embed_shaders(rx_editor

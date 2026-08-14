@@ -16,6 +16,7 @@ option(RX_BUILD_TESTS "Build library test suites" ON)
 option(RX_BUILD_RUNTIME "Build the rx viewer executable" ON)
 option(RX_BUILD_EDITOR "Build the rx editor application (apps/editor, needs libultragui)" OFF)
 option(RX_BUILD_TOOLS "Build the asset authoring tools (rxpack)" ON)
+option(RX_BUILD_EXAMPLES "Build small standalone engine examples" OFF)
 option(RX_AUDIO_FFMPEG "Decode compressed audio via FFmpeg (libav*)" OFF)
 option(RX_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 # ThreadSanitizer, for the cross-thread paths (deferred destruction from a
@@ -301,6 +302,10 @@ foreach(module ${RX_MODULES})
   add_subdirectory(engine/${module})
 endforeach()
 
+if(RX_BUILD_EXAMPLES AND "anim" IN_LIST RX_MODULES)
+  add_subdirectory(examples)
+endif()
+
 # rx::render2d CPU tests: camera transforms, isometric picking and tilemap data
 # rules need no GPU or window, so they run on every build host.
 if(RX_BUILD_TESTS AND "render2d" IN_LIST RX_MODULES)
@@ -372,6 +377,12 @@ if(RX_BUILD_TESTS)
   add_executable(asset_database_test test/asset_database_test.cc)
   target_link_libraries(asset_database_test PRIVATE rx::asset rx::core)
   add_test(NAME asset_database_test COMMAND asset_database_test)
+endif()
+
+if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
+  add_executable(gltf_skin_test test/gltf_skin_test.cc)
+  target_link_libraries(gltf_skin_test PRIVATE rx::asset rx::core)
+  add_test(NAME gltf_skin_test COMMAND gltf_skin_test)
 endif()
 
 # Procedural vehicle audio: engine/skid/wind synthesis, the SynthVoice seam and
@@ -665,6 +676,29 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
     add_test(NAME compaction_test_d3d12 COMMAND compaction_test)
     set_tests_properties(compaction_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
   endif()
+endif()
+
+# Extensible soft-tissue body dynamics: physical equilibrium/inertial lag,
+# analytical frame-rate independence, anatomical clamps + teleport reset,
+# bone layering, source-unit conversion, region presets, and additive
+# deformation morph output. Pure CPU and independent of Jolt/the render backend.
+if(RX_BUILD_TESTS AND "anim" IN_LIST RX_MODULES)
+  add_executable(walk_style_test test/walk_style_test.cc)
+  target_link_libraries(walk_style_test PRIVATE rx::anim rx::asset rx::core)
+  add_test(NAME walk_style_test COMMAND walk_style_test)
+
+  add_executable(body_dynamics_test test/body_dynamics_test.cc)
+  target_link_libraries(body_dynamics_test PRIVATE rx::anim rx::asset rx::core)
+  add_test(NAME body_dynamics_test COMMAND body_dynamics_test)
+
+  # Optional end-to-end authoring import test. The normal CTest invocation
+  # checks error handling without requiring Blender; pass a .blend path to the
+  # executable to convert it and verify its real skin + jiggle response.
+  add_executable(blend_jiggle_test test/blend_jiggle_test.cc)
+  target_link_libraries(blend_jiggle_test PRIVATE rx::anim rx::asset rx::core)
+  target_compile_definitions(blend_jiggle_test PRIVATE
+    RX_BLEND_CONVERTER_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/tools/blend_to_glb.py")
+  add_test(NAME blend_jiggle_api_test COMMAND blend_jiggle_test)
 endif()
 
 # Strand-hair simulation: builds the braid + ponytail test grooms, steps the

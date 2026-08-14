@@ -13,20 +13,28 @@
 
 namespace rx::asset {
 
-// A flattened glTF scene: node transforms baked to world space, one engine
-// Mesh per glTF mesh (primitives become submeshes), textures decoded to
-// rgba8. Asset ids derive from "<path>#<kind><index>" so scenes from
-// different files never collide.
+// A flattened glTF scene: static node transforms baked to world space (skinned
+// mesh-node transforms are ignored as required by glTF), one engine Mesh per
+// glTF mesh (primitives become submeshes), textures decoded to rgba8. Asset ids
+// derive from "<path>#<kind><index>" so scenes from different files never
+// collide.
 struct GltfScene {
   base::Vector<Texture> textures;
   base::Vector<Material> materials;
   base::Vector<Mesh> meshes;
+  // One runtime skeleton and exact palette binding per glTF skin. Skeleton
+  // bones are topologically ordered; skin_bindings retain the source palette
+  // order used by JOINTS_0 and inverse bind matrices. A mesh may be instanced
+  // with more than one of these bindings.
+  base::Vector<Skeleton> skeletons;
+  base::Vector<SkinBinding> skin_bindings;
 
   struct Instance {
     u32 mesh_index = 0;
+    i32 skeleton_index = -1; // index into skeletons, -1 for a static mesh
     Vec3 position{};
-    f32 rotation[4] = {0, 0, 0, 1};  // quaternion x y z w
-    f32 scale = 1.0f;                // uniform; non uniform scale is averaged
+    f32 rotation[4] = {0, 0, 0, 1}; // quaternion x y z w
+    f32 scale = 1.0f;               // uniform; non uniform scale is averaged
   };
   base::Vector<Instance> instances;
 };
@@ -34,8 +42,8 @@ struct GltfScene {
 // Loads .gltf or .glb including external buffers and images. Generates
 // tangents from uv derivatives when the source has none. Returns false and
 // logs on malformed input.
-RX_ASSET_EXPORT bool LoadGltfScene(const std::string& path, GltfScene* out);
+RX_ASSET_EXPORT bool LoadGltfScene(const std::string &path, GltfScene *out);
 
-}  // namespace rx::asset
+} // namespace rx::asset
 
-#endif  // RX_ASSET_GLTF_LOADER_H_
+#endif // RX_ASSET_GLTF_LOADER_H_

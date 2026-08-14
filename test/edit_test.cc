@@ -215,6 +215,13 @@ void TestSceneRoundTrip() {
   src.Add(loose, scene::Renderable{asset::AssetId{0x12345678}});  // no recorded path
   src.Add(loose, scene::Hidden{});
 
+  // Preview/session entities use ordinary scene components but are omitted
+  // entirely from authored scene files.
+  ecs::Entity transient = src.Create();
+  src.Add(transient, scene::Transform{});
+  src.Add(transient, scene::Name{"Editor preview"});
+  src.Add(transient, scene::Transient{});
+
   std::string err;
   CHECK(SaveScene(src, path.string(), &err));
   if (!err.empty()) std::printf("save error: %s\n", err.c_str());
@@ -234,6 +241,7 @@ void TestSceneRoundTrip() {
   dst.Each<scene::Guid>([&](ecs::Entity, scene::Guid&) { ++dst_count; });
   CHECK(src_count == 3);
   CHECK(dst_count == 3);
+  CHECK(!src.Has<scene::Guid>(transient));
 
   bool all_matched = true;
   src.Each<scene::Guid>([&](ecs::Entity se, scene::Guid& g) {

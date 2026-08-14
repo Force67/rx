@@ -23,6 +23,11 @@ struct Renderable {
 // data, its presence is the state.
 struct Hidden {};
 
+// Editor/runtime-only entity that must not be written to an rxscene. Preview
+// models, helper geometry, and other session state can still use normal scene
+// components for rendering and selection without becoming authored content.
+struct Transient {};
+
 // Packed rgb8 tint (0xRRGGBB) modulating the entity's albedo, 0 = untinted.
 // Host::GatherEntityDraws copies it into the DrawItem, so apps can color
 // otherwise-identical entities (teams, owners, debug states) per instance.

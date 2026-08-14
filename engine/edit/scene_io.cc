@@ -117,6 +117,7 @@ bool SaveScene(ecs::World& world, const std::string& file_path, std::string* err
   std::unordered_set<u64> seen;
   std::vector<ecs::Entity> entities;
   auto collect = [&](ecs::Entity e) {
+    if (world.Has<scene::Transient>(e)) return;
     if (seen.insert(PackKey(e)).second) entities.push_back(e);
   };
   world.Each<scene::Guid>([&](ecs::Entity e, scene::Guid&) { collect(e); });
