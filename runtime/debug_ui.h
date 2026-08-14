@@ -20,6 +20,9 @@
 namespace rx {
 
 class FlyCamera;
+namespace asset {
+class Vfs;
+}
 namespace ecs {
 class World;
 }
@@ -35,7 +38,9 @@ class DebugUi {
   DebugUi(const DebugUi&) = delete;
   DebugUi& operator=(const DebugUi&) = delete;
 
-  bool Initialize(Window& window, render::Renderer& renderer);
+  // `vfs` supplies the default UI font from the engine's fonts:// archive; a
+  // null one (or a missing archive) falls back to imgui's built-in font.
+  bool Initialize(Window& window, render::Renderer& renderer, asset::Vfs* vfs);
   // Call between renderer WaitIdle and renderer Shutdown.
   void Shutdown();
 

@@ -7,6 +7,7 @@
 
 #include <base/option.h>
 
+#include "asset/engine_archives.h"
 #include "core/feature_registry.h"
 #include "core/log.h"
 #include "core/math.h"
@@ -51,6 +52,10 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   mem::ApplyMemoryConfig(mem::LoadMemoryConfig());
   jobs_ = std::make_unique<JobSystem>();
   ConfigureClock(20.0f);
+
+  // rx's own content (fonts://, ...) mounts first, so anything the application
+  // mounts later overrides it.
+  asset::MountEngineArchives(vfs_);
 
   if (!config_.headless) {
     WindowDesc desc;

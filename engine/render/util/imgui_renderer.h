@@ -4,8 +4,9 @@
 // A generic, reusable Dear ImGui *render* backend built entirely on the RHI
 // (engine/render/rhi). It replaces the raw imgui_impl_vulkan backend for any
 // RHI-based app: font-atlas + user textures via CreateImage2D, a per-frame
-// vertex/index ring, one alpha-blended pipeline from the engine's embedded imgui
-// shaders, and scissored indexed draws per ImDrawCmd. Dynamic textures
+// vertex/index ring, one blended pipeline from the engine's embedded imgui
+// shaders (with an optional frosted-glass backdrop, see SetBackdrop), and
+// scissored indexed draws per ImDrawCmd. Dynamic textures
 // (ImGuiBackendFlags_RendererHasTextures) and large-mesh vertex offsets are
 // honored.
 //
@@ -49,6 +50,13 @@ class RX_RENDER_EXPORT ImGuiRenderer {
   // the pipeline fails to build.
   bool Initialize(Device& device, Format target_format);
 
+  // Frosted-glass backdrop: the pre-blurred copy of the scene behind the UI
+  // (FrameView::blur_source / blur_sampler, produced by the renderer's ui_blur
+  // pass when FrameView::needs_blur is set). Translucent widgets composite over
+  // it instead of over the sharp frame. Call inside the ui_draw closure, before
+  // Render; an invalid view turns the effect off for that frame.
+  void SetBackdrop(TextureView blur, SamplerHandle sampler);
+
   // Records draw_data into cmd. Call inside an open dynamic-rendering pass whose
   // single color attachment matches target_format, and between the device's
   // BeginFrame and SubmitFrame (per-draw texture binds use the frame's transient
@@ -73,6 +81,10 @@ class RX_RENDER_EXPORT ImGuiRenderer {
   Format target_format_ = Format::kUnknown;
   PipelineHandle pipeline_;
   SamplerHandle sampler_;
+  // Frosted backdrop for the next Render, which consumes it: a frame that sets
+  // none falls back to plain alpha blending rather than reusing a stale one.
+  TextureView backdrop_;
+  SamplerHandle backdrop_sampler_;
   FrameBuffers frames_[Device::kMaxFramesInFlight];
   u32 frame_index_ = 0;
   // Textures this backend created (owns the GPU backing behind BackendUserData),

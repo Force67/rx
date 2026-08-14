@@ -25,7 +25,8 @@ viewer runtime in place of the game.
   dynamic resolution, texture streaming, async compute, VRS, meshlet path.
 - **engine/asset** - glTF loading (cgltf) including morph targets and weight
   animations, MaterialX, primitives, LOD simplification, Loop subdivision,
-  virtual filesystem.
+  virtual filesystem with `.rxp` archives (rx ships its own under
+  `engine/assets`, mounted at boot: `fonts://` holds the default UI font).
 - **engine/core** - SDL3 windowing (+ KDE HDR monitor), job system, input
   action layer with gamepad support, math, logging, feature registry.
 - **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** - entity

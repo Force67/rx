@@ -379,9 +379,9 @@ struct FrameView {
 
   // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI
   // sets needs_blur so the renderer captures + blurs the backbuffer before the
-  // ui pass and writes the result here for hud_draw to bind.
+  // ui pass and writes the result here for hud_draw / ui_draw to bind.
   // blur_source/sampler are filled by the renderer inside the ui pass, just
-  // before hud_draw runs.
+  // before those closures run.
   bool needs_blur = false;
   // Filled by the renderer during the (const) frame record, hence mutable.
   mutable TextureView blur_source;

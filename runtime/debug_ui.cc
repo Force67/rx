@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,7 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 
+#include "asset/vfs.h"
 #include "core/log.h"
 #include "core/memory/chunk_pool.h"
 #include "core/memory/frame_arena.h"
@@ -27,6 +29,7 @@
 #include "ecs/world.h"
 #include "render/core/presets.h"
 #include "render/core/settings_ini.h"
+#include "render/util/imgui_theme.h"
 
 #ifndef RX_BUILD_ID
 #define RX_BUILD_ID "unknown"
@@ -121,7 +124,7 @@ const render::QualityPreset kPresetValues[] = {
 DebugUi::DebugUi() = default;
 DebugUi::~DebugUi() { Shutdown(); }
 
-bool DebugUi::Initialize(Window& window, render::Renderer& renderer) {
+bool DebugUi::Initialize(Window& window, render::Renderer& renderer, asset::Vfs* vfs) {
   SDL_Window* sdl_window = static_cast<SDL_Window*>(window.native_handles().window);
   render::Device* device = renderer.device();
   if (!sdl_window || !device || device->is_stub()) return false;
@@ -135,9 +138,17 @@ bool DebugUi::Initialize(Window& window, render::Renderer& renderer) {
   // offsets; it sets no imgui globals itself (RX_SHARED keeps one context in
   // this app DSO), so the flags are the app's to set.
   io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset;
-  ImGui::StyleColorsDark();
+  render::ApplyRxImGuiStyle();
 
-  io.Fonts->AddFontDefault();
+  // Roboto out of the engine's fonts:// archive. imgui's built-in font is the
+  // fallback when the archive is absent (an unpacked source tree, say).
+  std::optional<base::Vector<u8>> ttf;
+  if (vfs) ttf = vfs->Read(render::kRxDefaultFontPath);
+  if (!ttf || !render::LoadRxImGuiFont(ttf->data(), ttf->size())) {
+    RX_WARN("debug ui: {} unavailable, using the built-in font",
+            render::kRxDefaultFontPath);
+    io.Fonts->AddFontDefault();
+  }
 
   const int system_ram_mib = SDL_GetSystemRAM();
   if (system_ram_mib > 0)
@@ -358,7 +369,12 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
 
   ImGui::Render();
   if (visible_ || ImGui::GetDrawData()->TotalVtxCount > 0) {
-    view->ui_draw = [this](render::CommandList& cmd) {
+    // Every panel in this overlay is translucent, so ask for the blurred
+    // backbuffer; the backend binds it inside the ui pass, where the renderer
+    // has filled blur_source in.
+    view->needs_blur = true;
+    view->ui_draw = [this, view](render::CommandList& cmd) {
+      imgui_renderer_.SetBackdrop(view->blur_source, view->blur_sampler);
       imgui_renderer_.Render(ImGui::GetDrawData(), cmd);
     };
   }
@@ -823,8 +839,8 @@ void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
   const ImVec2 bar_max = {viewport->WorkPos.x + viewport->WorkSize.x,
                           viewport->WorkPos.y + viewport->WorkSize.y};
   ImDrawList* dl = ImGui::GetForegroundDrawList(viewport);
-  dl->AddRectFilled(bar_min, bar_max, IM_COL32(0, 0, 0, 255));
-  dl->AddLine(bar_min, {bar_max.x, bar_min.y}, IM_COL32(255, 255, 255, 42));
+  dl->AddRectFilled(bar_min, bar_max, IM_COL32(10, 8, 18, 205));
+  dl->AddLine(bar_min, {bar_max.x, bar_min.y}, IM_COL32(165, 90, 250, 90));
 
   constexpr f32 kPadding = 12.0f;
   const bool compact = viewport->WorkSize.x < 1440.0f;
@@ -1036,8 +1052,8 @@ void DebugUi::DrawStageChart(render::Renderer& renderer, f32 bottom_offset) {
   ImDrawList* dl = ImGui::GetForegroundDrawList();
 
   // Dark glass panel with a hairline border.
-  dl->AddRectFilled(p0, p1, IM_COL32(14, 16, 22, 214), 9.0f);
-  dl->AddRect(p0, p1, IM_COL32(255, 255, 255, 26), 9.0f, 0, 1.0f);
+  dl->AddRectFilled(p0, p1, IM_COL32(12, 10, 20, 205), 9.0f);
+  dl->AddRect(p0, p1, IM_COL32(165, 90, 250, 70), 9.0f, 0, 1.0f);
 
   const f32 content_x = p0.x + pad;
   const f32 content_w = panel_w - 2.0f * pad;
@@ -1061,13 +1077,13 @@ void DebugUi::DrawStageChart(render::Renderer& renderer, f32 bottom_offset) {
     const f32 frac = bar.ms / max_ms;
     const f32 fclamp = frac < 0.0f ? 0.0f : (frac > 1.0f ? 1.0f : frac);
 
-    // Track, then a cost-graded fill (teal when cheap, coral when it dominates).
+    // Track, then a cost-graded fill (violet when cheap, rose when it dominates).
     dl->AddRectFilled({content_x, y}, {content_x + content_w, y + row_h},
                       IM_COL32(255, 255, 255, 16), 3.5f);
     const f32 fill_w = content_w * fclamp;
     if (fill_w > 1.0f) {
-      const ImU32 col = IM_COL32(lerp8(78, 240, fclamp), lerp8(201, 104, fclamp),
-                                 lerp8(176, 82, fclamp), 235);
+      const ImU32 col = IM_COL32(lerp8(139, 255, fclamp), lerp8(92, 92, fclamp),
+                                 lerp8(246, 138, fclamp), 235);
       dl->AddRectFilled({content_x, y}, {content_x + fill_w, y + row_h}, col, 3.5f);
     }
 
@@ -1105,7 +1121,7 @@ namespace rx {
 
 DebugUi::DebugUi() = default;
 DebugUi::~DebugUi() = default;
-bool DebugUi::Initialize(Window&, render::Renderer&) { return false; }
+bool DebugUi::Initialize(Window&, render::Renderer&, asset::Vfs*) { return false; }
 void DebugUi::Shutdown() {}
 void DebugUi::BeginFrame() {}
 void DebugUi::Build(render::Renderer&, FlyCamera&, const ecs::World&, f32, render::FrameView*) {}

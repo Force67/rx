@@ -168,3 +168,11 @@ install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/rxConfig.cmake
   ${CMAKE_CURRENT_BINARY_DIR}/rxConfigVersion.cmake
   DESTINATION ${RX_INSTALL_CMAKEDIR})
+
+# --- engine archives --------------------------------------------------------
+# rx's own content (engine/assets, packed by the rx_engine_archives target).
+# They go next to the binaries; asset::MountEngineArchives picks them up from
+# the working directory, or from wherever RX_ENGINE_ARCHIVES points.
+if(TARGET rx_engine_archives)
+  install(FILES ${PROJECT_BINARY_DIR}/rx_fonts.rxp DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()
