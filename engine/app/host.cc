@@ -205,6 +205,10 @@ void Host::ApplyRenderPreset() {
   tuned.weather = env.weather;  // live weather state; presets never set it
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
 
+  // The app profile runs last, after the tier and every env carry-through, so
+  // nothing above can silently undo it.
+  if (config_.tune_settings) config_.tune_settings(tuned);
+
   renderer_.settings() = tuned;
   RX_INFO("render preset: {} ({})", render::PresetName(resolved),
           config_.preset == render::QualityPreset::kAuto ? "auto" : "forced");
