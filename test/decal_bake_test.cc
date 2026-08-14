@@ -259,6 +259,60 @@ int main() {
   device->DestroyBuffer(quad.vertices);
   device->DestroyBuffer(quad.indices);
 
+  // --- burst past the journal limit ---
+  // A run of stamps landing before any bake is capped by journal_limit: the
+  // journal is what a repaint replays, and overflowing it drops the OLDEST. A
+  // caller that dumps a hundred decals in one frame keeps the last N.
+  {
+    DecalBaker burst;
+    DecalBaker::Desc bd2;
+    bd2.atlas_size = 256;
+    bd2.tile_size = 256;
+    bd2.journal_limit = 8;
+    if (!burst.Initialize(*device, bd2)) {
+      Check(false, "burst baker initialize");
+    } else {
+      GpuMesh quad2 = CreateQuad(*device);
+      const u32 many = burst.AcquireReceiver();
+      // 12 projectors in a row across the quad, oldest first.
+      constexpr u32 kSpots = 12;
+      for (u32 i = 0; i < kSpots; ++i) {
+        const f32 x = -0.85f + 1.7f * (static_cast<f32>(i) / (kSpots - 1));
+        DecalStamp one;
+        one.receiver = many;
+        one.projector = MakeDecalProjector({x, 0, 0}, {0, 1, 0}, {0, 0, 1}, 0.1f, 0.1f, 1.0f);
+        burst.Stamp(one);
+      }
+      DecalBaker::Target t2;
+      t2.receiver = many;
+      t2.mesh = &quad2;
+      RunBake(*device, burst, pool, t2, 1, source.view);
+
+      std::vector<u8> tile(256ull * 256 * 4);
+      Check(device->ReadbackImage(burst.albedo_atlas(), ResourceState::kShaderReadFragment,
+                                  tile.data(), tile.size()),
+            "reading the burst atlas back");
+      u32 landed = 0;
+      u32 first_landed = kSpots;
+      for (u32 i = 0; i < kSpots; ++i) {
+        const f32 x = -0.85f + 1.7f * (static_cast<f32>(i) / (kSpots - 1));
+        const u32 tx = static_cast<u32>((x * 0.5f + 0.5f) * 255.0f);
+        const u32 alpha = tile[(128ull * 256 + tx) * 4 + 3];
+        if (alpha > 128) {
+          ++landed;
+          if (first_landed == kSpots) first_landed = i;
+        }
+      }
+      std::printf("decal_bake_test: burst of %u with journal_limit 8 -> %u landed, first index %u\n",
+                  kSpots, landed, first_landed);
+      Check(landed == bd2.journal_limit, "a burst keeps exactly journal_limit stamps");
+      Check(first_landed == kSpots - bd2.journal_limit, "the OLDEST stamps are the ones dropped");
+      burst.Destroy(*device);
+      device->DestroyBuffer(quad2.vertices);
+      device->DestroyBuffer(quad2.indices);
+    }
+  }
+
   std::printf("decal_bake_test: %s\n", failures == 0 ? "PASS" : "FAIL");
   return failures == 0 ? 0 : 1;
 }

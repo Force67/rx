@@ -82,7 +82,9 @@ bool DecalBaker::Initialize(Device& device, const Desc& desc) {
   tile_count_ = std::min(tiles_per_row_ * tiles_per_row_, kMaxTiles);
   tile_uv_ = static_cast<f32>(desc_.tile_size) / static_cast<f32>(desc_.atlas_size);
   mip_count_ = MipCountFor(desc_.tile_size);
-  if (desc_.journal_limit == 0) desc_.journal_limit = 1;
+  // A rebake replays the whole journal in one frame, so a journal longer than
+  // the frame budget could never fit and that receiver would defer forever.
+  desc_.journal_limit = std::clamp(desc_.journal_limit, 1u, kMaxFrameStamps);
 
   if (!CreateAtlases(device) || !CreatePipelines(device)) {
     Destroy(device);
