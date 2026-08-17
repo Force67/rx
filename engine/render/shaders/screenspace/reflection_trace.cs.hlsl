@@ -24,8 +24,6 @@ float4 REBLUR_FrontEnd_PackRadianceAndNormHitDist(float3 radiance, float norm_hi
 #endif
 
 struct ReflectionPush {
-  column_major float4x4 inv_view_proj;  // unjittered
-  float4 camera_pos;     // xyz eye
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb
   float4 fog;            // x density, y height falloff, z base height, w unused
@@ -78,6 +76,13 @@ struct DdgiVolume {
 [[vk::combinedImageSampler]] [[vk::binding(12, 0)]] SamplerState rcgi_vis_smp : register(s12, space0);
 [[vk::binding(13, 0)]] StructuredBuffer<uint2> rcgi_probe_meta : register(t13, space0);
 [[vk::binding(14, 0)]] StructuredBuffer<float4> rcgi_interior_vols : register(t14, space0);
+// The ray-origin reconstruction inputs, which alone would be most of the push
+// budget (see ReflectionCamera in reflection_trace.cc).
+struct ReflectionCamera {
+  column_major float4x4 inv_view_proj;  // unjittered
+  float4 camera_pos;                    // xyz eye
+};
+[[vk::binding(15, 0)]] ConstantBuffer<ReflectionCamera> camera : register(b15, space0);
 
 // Bindless scene tables (set 1, shared layout with the forward rt variant).
 #define RX_GEOMETRY_SPACE space1
@@ -266,12 +271,12 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   float2 uv = (float2(fp) + 0.5) * pc.inv_size;
   float2 ndc = uv * 2.0 - 1.0;  // vulkan y-down clip, matches rtao/fog
-  float4 world_h = mul(pc.inv_view_proj, float4(ndc, depth, 1.0));
+  float4 world_h = mul(camera.inv_view_proj, float4(ndc, depth, 1.0));
   float3 world = world_h.xyz / world_h.w;
   float view_z = pc.near_plane / depth;
 
   float3 n = OctDecode(nr.rg);
-  float3 v = normalize(pc.camera_pos.xyz - world);
+  float3 v = normalize(camera.camera_pos.xyz - world);
   // Double-sided foliage: the prepass exports the geometric facing, which
   // points away from the camera on back faces; VNDF sampling needs v above
   // the surface or it degenerates into fireflies.

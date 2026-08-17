@@ -17,8 +17,13 @@ namespace {
 constexpr u32 kMaxVerts = 64;
 constexpr u32 kMaxTris = 124;  // cone-bounded growth usually finalizes a cluster first
 
-struct MeshletPush {
+// The frustum planes already fill most of the 128 bytes vulkan guarantees for a
+// push block, so view_proj rides in a per-frame uniform buffer instead.
+struct MeshletCamera {
   Mat4 view_proj;
+};
+
+struct MeshletPush {
   f32 planes[5][4];
   f32 camera[4];
 };
@@ -208,9 +213,10 @@ bool MeshletPass::Initialize(Device& device, Format color_format, Format depth_f
                           {1, BindingType::kStorageBuffer},
                           {2, BindingType::kStorageBuffer},
                           {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer}},
+                          {4, BindingType::kStorageBuffer},
+                          {5, BindingType::kUniformBuffer}},  // MeshletCamera
                 .stages = kShaderStageMesh}},
-      .push_constant_size = sizeof(MeshletPush),
+      .push_constant_size = PushSize<MeshletPush>(),
       .debug_name = "meshlet",
   });
   if (!pipeline_) {
@@ -224,6 +230,10 @@ bool MeshletPass::Initialize(Device& device, Format color_format, Format depth_f
 
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     counters_[i] = device.CreateBuffer(16, kBufferUsageStorage, true);
+    // One per in-flight frame: the pass rewrites it while the previous frame
+    // may still be reading its own copy.
+    camera_[i] = device.CreateBuffer(sizeof(MeshletCamera), kBufferUsageUniform, true);
+    if (!camera_[i].mapped) return false;
   }
   return true;
 }
@@ -276,13 +286,16 @@ void MeshletPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
   slot %= kFramesInFlight;
   if (counters_[slot].mapped) *static_cast<u32*>(counters_[slot].mapped) = 0;
 
+  const MeshletCamera cam{view_proj};
+  std::memcpy(camera_[slot].mapped, &cam, sizeof(cam));
+
   MeshletPush push{};
-  push.view_proj = view_proj;
   std::memcpy(push.planes, planes, sizeof(push.planes));
   push.camera[0] = camera.x;
   push.camera[1] = camera.y;
   push.camera[2] = camera.z;
   GpuBuffer counter = counters_[slot];
+  GpuBuffer cam_buffer = camera_[slot];
 
   graph.AddPass(
       "meshlet",
@@ -290,7 +303,7 @@ void MeshletPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
         builder.Write(color, ResourceUsage::kColorAttachment);
         builder.Write(depth, ResourceUsage::kDepthAttachment);
       },
-      [this, color, depth, push, counter](PassContext& ctx) {
+      [this, color, depth, push, counter, cam_buffer](PassContext& ctx) {
         const GpuImage& target = ctx.graph->image(color);
         ColorAttachment color_att{.view = target.view, .load = LoadOp::kLoad};
         DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
@@ -301,7 +314,8 @@ void MeshletPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
                                    Bind::StorageBuffer(1, meshlet_vertices_),
                                    Bind::StorageBuffer(2, meshlet_triangles_),
                                    Bind::StorageBuffer(3, vertices_),
-                                   Bind::StorageBuffer(4, counter)});
+                                   Bind::StorageBuffer(4, counter),
+                                   Bind::Uniform(5, cam_buffer, 0, sizeof(MeshletCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->DrawMeshTasks(meshlet_count_, 1, 1);
         ctx.cmd->EndRendering();
@@ -314,7 +328,10 @@ void MeshletPass::Destroy(Device& device) {
   device.DestroyBuffer(meshlet_vertices_);
   device.DestroyBuffer(meshlet_triangles_);
   device.DestroyBuffer(vertices_);
-  for (u32 i = 0; i < kFramesInFlight; ++i) device.DestroyBuffer(counters_[i]);
+  for (u32 i = 0; i < kFramesInFlight; ++i) {
+    device.DestroyBuffer(counters_[i]);
+    device.DestroyBuffer(camera_[i]);
+  }
 }
 
 }  // namespace rx::render

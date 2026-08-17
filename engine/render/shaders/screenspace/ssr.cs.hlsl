@@ -11,10 +11,15 @@
 [[vk::binding(2, 0)]] Texture2D<float2> normal_map : register(t2, space0);
 [[vk::binding(3, 0)]] Texture2D<float4> scene_color : register(t3, space0);
 
-struct PushData {
+// The march matrices, which alone would be the whole push budget.
+struct SsrCamera {
   column_major float4x4 view_proj;      // world -> clip (unjittered)
   column_major float4x4 inv_view_proj;  // clip -> world (unjittered)
-  float4 camera_pos;                    // xyz eye, w unused
+};
+[[vk::binding(4, 0)]] ConstantBuffer<SsrCamera> camera : register(b4, space0);
+
+struct PushData {
+  float4 camera_pos;     // xyz eye, w unused
   float2 inv_size;
   float intensity;       // reflection strength multiplier
   float max_distance;    // world-space march range, meters
@@ -40,7 +45,7 @@ float Ign(float2 pixel, float offset) {
 }
 
 float3 WorldFromUv(float2 uv, float depth) {
-  float4 world = mul(push.inv_view_proj, float4(uv * 2.0 - 1.0, depth, 1.0));
+  float4 world = mul(camera.inv_view_proj, float4(uv * 2.0 - 1.0, depth, 1.0));
   return world.xyz / world.w;
 }
 
@@ -76,7 +81,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   for (uint i = 0; i < push.step_count; ++i) {
     float t = (float(i) + jitter + 1.0) * step;
     float3 wp = start + r * t;
-    float4 clip = mul(push.view_proj, float4(wp, 1.0));
+    float4 clip = mul(camera.view_proj, float4(wp, 1.0));
     if (clip.w <= 0.0) break;
     float3 ndc = clip.xyz / clip.w;
     if (abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0) break;  // left the screen

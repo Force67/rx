@@ -224,14 +224,14 @@ bool EnvironmentSystem::CreatePipelines() {
     return static_cast<bool>(*pipeline);
   };
 
-  if (!make_compute(&sky_gen_, RX_SHADER(k_sky_cs_hlsl), 2, sizeof(SkyPush), "sky_gen") ||
-      !make_compute(&envmap_gen_, RX_SHADER(k_envmap_cs_hlsl), 1, sizeof(EnvmapPush),
+  if (!make_compute(&sky_gen_, RX_SHADER(k_sky_cs_hlsl), 2, PushSize<SkyPush>(), "sky_gen") ||
+      !make_compute(&envmap_gen_, RX_SHADER(k_envmap_cs_hlsl), 1, PushSize<EnvmapPush>(),
                     "envmap_gen") ||
-      !make_compute(&irradiance_gen_, RX_SHADER(k_irradiance_cs_hlsl), 1, sizeof(SizePush),
+      !make_compute(&irradiance_gen_, RX_SHADER(k_irradiance_cs_hlsl), 1, PushSize<SizePush>(),
                     "irradiance_gen") ||
-      !make_compute(&prefilter_gen_, RX_SHADER(k_prefilter_cs_hlsl), 1, sizeof(PrefilterPush),
+      !make_compute(&prefilter_gen_, RX_SHADER(k_prefilter_cs_hlsl), 1, PushSize<PrefilterPush>(),
                     "prefilter_gen") ||
-      !make_compute(&brdf_gen_, RX_SHADER(k_brdf_lut_cs_hlsl), 0, sizeof(SizePush),
+      !make_compute(&brdf_gen_, RX_SHADER(k_brdf_lut_cs_hlsl), 0, PushSize<SizePush>(),
                     "brdf_gen") ||
       !make_compute(&transmittance_gen_, RX_SHADER(k_transmittance_lut_cs_hlsl), 0,
                     sizeof(LutPush), "transmittance_gen") ||

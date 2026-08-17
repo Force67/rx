@@ -36,7 +36,7 @@ bool MotionBlurPass::Initialize(Device& device) {
       .shader = RX_SHADER(k_motion_tilemax_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(TileMaxPush),
+      .push_constant_size = PushSize<TileMaxPush>(),
       .debug_name = "motion_tilemax",
   });
   blur_pipeline_ = device.CreateComputePipeline({
@@ -45,7 +45,7 @@ bool MotionBlurPass::Initialize(Device& device) {
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kCombinedTextureSampler},
                           {3, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(BlurPush),
+      .push_constant_size = PushSize<BlurPush>(),
       .debug_name = "motion_blur",
   });
   if (!tilemax_pipeline_ || !blur_pipeline_) {

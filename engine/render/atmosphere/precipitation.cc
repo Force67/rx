@@ -22,7 +22,7 @@ bool Precipitation::Initialize(Device& device) {
       .shader = RX_SHADER(k_precipitation_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(PrecipPush),
+      .push_constant_size = PushSize<PrecipPush>(),
       .debug_name = "precipitation",
   });
   if (!pipeline_) {

@@ -42,6 +42,8 @@ class Clouds {
 
  private:
   PipelineHandle pipeline_;
+  GpuBuffer camera_[2];      // inv_view_proj, too big for the push block
+  u32 uniform_slot_ = 0;     // flips per pass; the other copy may still be in flight
 };
 
 }  // namespace rx::render

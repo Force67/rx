@@ -12,8 +12,6 @@
 // froxel, and an interior fills with a flat glow instead of the shafts the
 // windows should cut.
 struct ScatterPush {
-  column_major float4x4 inv_view_proj;   // unjittered
-  column_major float4x4 prev_view_proj;
   float4 camera_pos;      // xyz eye, w frame index
   float4 sun_dir_g;       // xyz travel dir, w henyey-greenstein g
   float4 sun_color;       // rgb * intensity, w ambient strength
@@ -24,8 +22,8 @@ struct ScatterPush {
 };
 
 // Where the fog's sun visibility comes from. Packed into volume_params.w rather
-// than a tenth float4: push constants are only guaranteed to 128 bytes and this
-// block is already well past that, so it does not get to grow further.
+// than an eighth float4: push constants are only guaranteed to 128 bytes and
+// this block is at 112, so it has room for one more field at most.
 static const uint kSunShadowNone = 0u;      // no source; sun is unoccluded
 static const uint kSunShadowCascade = 1u;
 static const uint kSunShadowRayQuery = 2u;
@@ -61,6 +59,13 @@ struct CascadeData {
 [[vk::binding(7, 0)]] ConstantBuffer<CascadeData> cascades : register(b7, space0);
 [[vk::combinedImageSampler]] [[vk::binding(8, 0)]] Texture2D cascade_atlas : register(t8, space0);
 [[vk::combinedImageSampler]] [[vk::binding(8, 0)]] SamplerComparisonState cascade_sampler : register(s8, space0);
+// The reprojection matrices, which alone would be the whole push budget.
+struct ScatterCamera {
+  column_major float4x4 inv_view_proj;  // unjittered
+  column_major float4x4 prev_view_proj;
+};
+[[vk::binding(10, 0)]] ConstantBuffer<ScatterCamera> camera : register(b10, space0);
+
 #ifdef RX_FROXEL_RT
 [[vk::binding(9, 0)]] RaytracingAccelerationStructure tlas : register(t9, space0);
 #endif
@@ -173,7 +178,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   // Reversed-infinite projection: ndc depth = near / view_z.
   float2 ndc = uv * 2.0 - 1.0;
-  float4 wh = mul(pc.inv_view_proj, float4(ndc, near / view_z, 1.0));
+  float4 wh = mul(camera.inv_view_proj, float4(ndc, near / view_z, 1.0));
   float3 world = wh.xyz / wh.w;
   float3 view_dir = normalize(world - pc.camera_pos.xyz);
 
@@ -269,7 +274,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float4 result = float4(inscatter * density, density);
 
   // Temporal: reproject the froxel's world position into last frame's volume.
-  float4 prev_clip = mul(pc.prev_view_proj, float4(world, 1.0));
+  float4 prev_clip = mul(camera.prev_view_proj, float4(world, 1.0));
   if (prev_clip.w > 0.0) {
     float3 prev_ndc = prev_clip.xyz / prev_clip.w;
     float2 prev_uv = prev_ndc.xy * 0.5 + 0.5;

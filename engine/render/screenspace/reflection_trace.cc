@@ -1,5 +1,7 @@
 #include "render/screenspace/reflection_trace.h"
 
+#include <cstring>
+
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
@@ -9,9 +11,15 @@
 namespace rx::render {
 namespace {
 
+// The ray-origin reconstruction inputs: the matrix alone is half the 128 bytes
+// vulkan guarantees for a push block, so it and the eye it pairs with ride in a
+// per-frame uniform buffer and the push keeps the scalars.
+struct ReflectionCamera {
+  Mat4 inv_view_proj;  // unjittered
+  f32 camera_pos[4];   // xyz eye
+};
+
 struct ReflectionPush {
-  Mat4 inv_view_proj;
-  f32 camera_pos[4];
   f32 sun_direction[4];
   f32 sun_color[4];
   f32 fog[4];  // density, height falloff, base height, unused
@@ -41,11 +49,11 @@ constexpr u32 kFlagFog = 4u;
 constexpr u32 kFlagShSkip = 8u;
 constexpr u32 kFlagRcgi = 16u;
 
-// The push blocks must fit the guaranteed 128-byte range on every backend plus
-// the engine's 256-byte cap, and stay 16-byte aligned so the HLSL cbuffer layout
-// matches the C++ layout field-for-field.
-static_assert(sizeof(ReflectionPush) == 208, "ReflectionPush must match the shader layout");
-static_assert(sizeof(ReflectionPush) <= 256, "ReflectionPush exceeds the push-constant cap");
+// The push blocks must fit the 128 bytes guaranteed on every backend, and stay
+// 16-byte aligned so the HLSL cbuffer layout matches the C++ layout
+// field-for-field.
+static_assert(sizeof(ReflectionCamera) == 80, "ReflectionCamera must match the shader layout");
+static_assert(sizeof(ReflectionPush) == 128, "ReflectionPush must match the shader layout");
 static_assert(sizeof(UpscalePush) == 32, "UpscalePush must match the shader layout");
 
 }  // namespace
@@ -67,14 +75,21 @@ bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_la
                           {11, BindingType::kCombinedTextureSampler},  // rcgi irradiance atlas
                           {12, BindingType::kCombinedTextureSampler},  // rcgi visibility atlas
                           {13, BindingType::kStorageBuffer},           // rcgi probe meta
-                          {14, BindingType::kStorageBuffer}}},         // rcgi interior volumes
+                          {14, BindingType::kStorageBuffer},           // rcgi interior volumes
+                          {15, BindingType::kUniformBuffer}}},         // ReflectionCamera
                {.shared = bindless_layout}},
-      .push_constant_size = sizeof(ReflectionPush),
+      .push_constant_size = PushSize<ReflectionPush>(),
       .debug_name = "reflection_trace",
   });
   if (!pipeline_) {
     RX_ERROR("reflection trace pipeline creation failed");
     return false;
+  }
+  // One per in-flight frame: the pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(ReflectionCamera), kBufferUsageUniform, true);
+    if (!camera.mapped) return false;
   }
   upscale_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_reflection_upscale_cs_hlsl),
@@ -82,7 +97,7 @@ bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_la
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(UpscalePush),
+      .push_constant_size = PushSize<UpscalePush>(),
       .debug_name = "reflection_upscale",
   });
   if (!upscale_pipeline_) {
@@ -101,6 +116,10 @@ void ReflectionTrace::Destroy(Device& device) {
     device.DestroyPipeline(upscale_pipeline_);
     upscale_pipeline_ = {};
   }
+  for (GpuBuffer& camera : camera_) {
+    if (camera) device.DestroyBuffer(camera);
+    camera = {};
+  }
 }
 
 ResourceHandle ReflectionTrace::AddToGraph(
@@ -113,6 +132,7 @@ ResourceHandle ReflectionTrace::AddToGraph(
   // Trace at half resolution when requested (quarters the ray count). Guides
   // stay full-res; the shader maps each half-res pixel to a full-res texel.
   const u32 step = frame.half_res ? 2u : 1u;
+  const u32 slot = frame.frame_index % 2;  // in-flight parity for the camera buffer
   Extent2D trace{(extent.width + step - 1) / step, (extent.height + step - 1) / step};
   const bool sh_valid = sh_r != kInvalidResource && sh_g != kInvalidResource &&
                         sh_b != kInvalidResource && frame.sh_skip;
@@ -138,8 +158,8 @@ ResourceHandle ReflectionTrace::AddToGraph(
         }
       },
       [this, &raytracing, tlas_slot, bindless_set, raw, depth, normals, prefiltered, ddgi_irradiance,
-       ddgi_in_general, ddgi_volume, ddgi_volume_size, sampler, extent, trace, step, sh_valid, sh0,
-       sh1, sh2, sh_extent, rcgi, frame](PassContext& ctx) {
+       ddgi_in_general, ddgi_volume, ddgi_volume_size, sampler, extent, trace, step, slot, sh_valid,
+       sh0, sh1, sh2, sh_extent, rcgi, frame](PassContext& ctx) {
         BindingItem ddgi_item = Bind::Combined(5, ddgi_irradiance, sampler);
         if (ddgi_in_general) ddgi_item = InGeneral(ddgi_item);
         BindingItem rcgi_irr = Bind::Combined(11, rcgi.irradiance, rcgi.sampler);
@@ -148,6 +168,13 @@ ResourceHandle ReflectionTrace::AddToGraph(
           rcgi_irr = InGeneral(rcgi_irr);
           rcgi_vis = InGeneral(rcgi_vis);
         }
+        ReflectionCamera camera{};
+        camera.inv_view_proj = frame.inv_view_proj;
+        camera.camera_pos[0] = frame.camera_pos.x;
+        camera.camera_pos[1] = frame.camera_pos.y;
+        camera.camera_pos[2] = frame.camera_pos.z;
+        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+
         base::Vector<BindingItem> items;
         items.push_back(Bind::Storage(0, ctx.graph->image(raw)));
         items.push_back(Bind::Sampled(1, ctx.graph->image(depth)));
@@ -164,12 +191,9 @@ ResourceHandle ReflectionTrace::AddToGraph(
         items.push_back(rcgi_vis);
         items.push_back(Bind::StorageBuffer(13, *rcgi.probe_meta));
         items.push_back(Bind::StorageBuffer(14, *rcgi.interior_vols));
+        items.push_back(Bind::Uniform(15, camera_[slot], 0, sizeof(ReflectionCamera)));
 
         ReflectionPush p{};
-        p.inv_view_proj = frame.inv_view_proj;
-        p.camera_pos[0] = frame.camera_pos.x;
-        p.camera_pos[1] = frame.camera_pos.y;
-        p.camera_pos[2] = frame.camera_pos.z;
         Vec3 sun = Normalize(frame.sun_direction);
         p.sun_direction[0] = sun.x;
         p.sun_direction[1] = sun.y;

@@ -33,7 +33,7 @@ bool BloomPass::Initialize(Device& device) {
         .shader = shader,
         .sets = {{.slots = {{0, BindingType::kStorageImage},
                             {1, BindingType::kCombinedTextureSampler}}}},
-        .push_constant_size = sizeof(DownPush),
+        .push_constant_size = PushSize<DownPush>(),
         .debug_name = name,
     });
     return static_cast<bool>(*pipeline);

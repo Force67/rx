@@ -7,8 +7,17 @@
 // its own noise with a motion-reprojected EMA (the recon pipeline runs
 // without TAA, so unlike the raster pass nothing downstream would absorb the
 // jitter). The composite applies scene * transmittance + inscatter.
-struct ReconFogPush {
+
+// Shared with the gbuffer pass (recon_gbuffer.cs.hlsl declares the same block):
+// the matrices alone overrun the push budget, so they come from a uniform
+// buffer. Only inv_view_proj is used here; the layout must stay identical.
+struct ReconCamera {
   column_major float4x4 inv_view_proj;
+  column_major float4x4 view_proj;
+  column_major float4x4 prev_view_proj;
+};
+
+struct ReconFogPush {
   float4 camera_pos;     // xyz eye
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb, w anisotropy g
@@ -28,6 +37,7 @@ PUSH_CONSTANTS(ReconFogPush, pc);
 [[vk::binding(2, 0)]] Texture2D<float4> p_pos : register(t2, space0);   // primary pos (.w 0 = sky)
 [[vk::binding(3, 0)]] Texture2D<float2> motion : register(t3, space0);  // uv current -> previous
 [[vk::binding(4, 0)]] RaytracingAccelerationStructure tlas : register(t4, space0);
+[[vk::binding(5, 0)]] ConstantBuffer<ReconCamera> camera : register(b5, space0);
 
 static const float kPi = 3.14159265359;
 static const float kBlend = 0.12;  // EMA weight of the current frame
@@ -69,7 +79,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   int2 fp = min(int2(id.xy) * 2, int2(pc.full_size) - 1);
 
   float2 ndc = uv * 2.0 - 1.0;
-  float4 near_h = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));
+  float4 near_h = mul(camera.inv_view_proj, float4(ndc, 1.0, 1.0));
   float3 ro = pc.camera_pos.xyz;
   float3 rd = normalize(near_h.xyz / near_h.w - ro);
 

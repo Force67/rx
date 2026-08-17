@@ -29,7 +29,7 @@ bool RtaoPass::Initialize(Device& device) {
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kAccelStruct}}}},
-      .push_constant_size = sizeof(TracePush),
+      .push_constant_size = PushSize<TracePush>(),
       .debug_name = "rtao_trace",
   });
   if (!pipeline_) {

@@ -138,6 +138,14 @@ struct MorphWeight {
 // buffer device address and this mesh's offset into it (needs a 144 byte push
 // range, available on every desktop GPU). Morphed draws use the trailing block
 // (192 bytes total). Shaders ignore the tails they do not read.
+//
+// This is the one block that knowingly overruns the 128 bytes vulkan
+// guarantees (see PushSizeOverGuarantee). Every field here varies per draw and
+// the push range is the sole per-draw channel the vertex and fragment stages
+// share, so there is nothing to lift into a per-frame uniform: fitting it means
+// moving transforms into an indexed buffer and giving every draw an index,
+// which is the GPU-driven path, not a repack of this one. A spec-minimum
+// adapter therefore fails these pipelines at startup, by name.
 struct MeshPushConstants {
   Mat4 model;
   Mat4 prev_model;

@@ -11,10 +11,15 @@
 // bindless geometry/material tables at set 1, matching path_tracer.cc.
 #include "NRD.hlsli"
 
-struct PathGbufferPush {
+// The three matrices are past the whole push budget on their own, so they come
+// from a uniform buffer (shared block with pathtrace.cs.hlsl).
+struct PathCamera {
   column_major float4x4 inv_view_proj;   // unjittered, for primary ray gen
   column_major float4x4 view_proj;       // unjittered, for viewZ
   column_major float4x4 prev_view_proj;  // unjittered, for camera-motion vectors
+};
+
+struct PathGbufferPush {
   float4 camera_pos;     // xyz eye
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb, w sun angular radius (radians)
@@ -34,6 +39,7 @@ PUSH_CONSTANTS(PathGbufferPush, pc);
 [[vk::binding(6, 0)]] RaytracingAccelerationStructure tlas : register(t6, space0);
 [[vk::combinedImageSampler]] [[vk::binding(7, 0)]] TextureCube sky_cube : register(t7, space0);
 [[vk::combinedImageSampler]] [[vk::binding(7, 0)]] SamplerState sky_sampler : register(s7, space0);
+[[vk::binding(8, 0)]] ConstantBuffer<PathCamera> camera : register(b8, space0);
 
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
@@ -259,7 +265,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   uint rng = (id.y * size.x + id.x) * 9781u + pc.frame_index * 26699u + 1u;
 
   float2 ndc = (float2(id.xy) + 0.5) / float2(size) * 2.0 - 1.0;
-  float4 near_h = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));
+  float4 near_h = mul(camera.inv_view_proj, float4(ndc, 1.0, 1.0));
   float3 ro = pc.camera_pos.xyz;
   float3 primary_dir = normalize(near_h.xyz / near_h.w - ro);
 
@@ -329,11 +335,11 @@ void main(uint3 id : SV_DispatchThreadID) {
   float2 motion = 0.0.xx;
   if (primary_hit) {
     // Reversed infinite z: ndc depth = near / viewZ, so viewZ = near / depth.
-    float4 clip = mul(pc.view_proj, float4(prim_pos, 1.0));
+    float4 clip = mul(camera.view_proj, float4(prim_pos, 1.0));
     float depth = clip.z / clip.w;
     viewz = depth > 0.0 ? kNearPlane / depth : kDenoisingRange;
     // Camera-only motion (static geometry): current ndc is this pixel's ndc.
-    float4 prev_clip = mul(pc.prev_view_proj, float4(prim_pos, 1.0));
+    float4 prev_clip = mul(camera.prev_view_proj, float4(prim_pos, 1.0));
     float2 prev_ndc = prev_clip.xy / prev_clip.w;
     motion = (prev_ndc - ndc) * 0.5;  // uv-space delta, matches the taa motion pass
   }

@@ -135,7 +135,7 @@ bool ProceduralGrass::Initialize(Device& device,
                           {4, BindingType::kStorageImage},
                           {5, BindingType::kCombinedTextureSampler},
                           {6, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(BendPush),
+      .push_constant_size = PushSize<BendPush>(),
       .debug_name = "procedural_grass_bend",
   });
   bend_sampler_ = device.GetSampler({.min_filter = Filter::kNearest,
@@ -152,8 +152,9 @@ bool ProceduralGrass::Initialize(Device& device,
                            {5, BindingType::kStorageBuffer},
                            {6, BindingType::kCombinedTextureSampler},
                            {7, BindingType::kCombinedTextureSampler},
-                           {8, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(GenerationPush),
+                           {8, BindingType::kCombinedTextureSampler},
+                           {9, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<GenerationPush>(),
       .debug_name = "procedural_grass_generate",
   });
   if (!bend_pipeline_ || !bend_sampler_ || !generate_pipeline_) {
@@ -172,6 +173,7 @@ bool ProceduralGrass::CreateDrawPipelines(Device& device, u32 samples) {
 
   samples = kSampleCounts[index];
   const PipelineBindings draw_set{.slots = {{0, BindingType::kByteBuffer},
+                                             {1, BindingType::kUniformBuffer},
                                              {2, BindingType::kByteBuffer}}};
 
   PipelineHandle prepass = device.CreateGraphicsPipeline({
@@ -186,7 +188,7 @@ bool ProceduralGrass::CreateDrawPipelines(Device& device, u32 samples) {
       .color_formats = {normal_format_, motion_format_, Format::kR32Float},
       .blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque},
       .sets = {draw_set},
-      .push_constant_size = sizeof(DrawPush),
+      .push_constant_size = PushSize<DrawPush>(),
       .samples = samples,
       .debug_name = "procedural_grass_prepass",
   });
@@ -202,7 +204,7 @@ bool ProceduralGrass::CreateDrawPipelines(Device& device, u32 samples) {
       .color_formats = {scene_color_format_, motion_format_, skin_diffuse_format_},
       .blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque},
       .sets = {draw_set},
-      .push_constant_size = sizeof(DrawPush),
+      .push_constant_size = PushSize<DrawPush>(),
       .samples = samples,
       .debug_name = "procedural_grass_scene",
   });
@@ -269,8 +271,13 @@ bool ProceduralGrass::EnsureBuffers() {
     slot.instances = device_->CreateBuffer(kInstanceBytes, kBufferUsageStorage);
     slot.args = device_->CreateBuffer(64, kBufferUsageStorage | kBufferUsageIndirect);
     slot.counters = device_->CreateBuffer(32, kBufferUsageStorage | kBufferUsageIndirect);
+    slot.generation_domain =
+        device_->CreateBuffer(sizeof(GenerationDomain), kBufferUsageUniform, true);
+    slot.draw_camera =
+        device_->CreateBuffer(sizeof(DrawCamera), kBufferUsageUniform, true);
     if (!slot.field.mapped || !slot.types.mapped || !slot.surfaces.mapped ||
-        !slot.interactions.mapped || !slot.instances || !slot.args || !slot.counters) {
+        !slot.interactions.mapped || !slot.instances || !slot.args || !slot.counters ||
+        !slot.generation_domain.mapped || !slot.draw_camera.mapped) {
       RX_ERROR("procedural grass buffer allocation failed");
       allocation_failed_ = true;
       for (Slot& allocated : slots_) {
@@ -281,6 +288,8 @@ bool ProceduralGrass::EnsureBuffers() {
         device_->DestroyBuffer(allocated.instances);
         device_->DestroyBuffer(allocated.args);
         device_->DestroyBuffer(allocated.counters);
+        device_->DestroyBuffer(allocated.generation_domain);
+        device_->DestroyBuffer(allocated.draw_camera);
         allocated = {};
       }
       return false;
@@ -318,6 +327,8 @@ bool ProceduralGrass::EnsureBuffers() {
         device_->DestroyBuffer(allocated.instances);
         device_->DestroyBuffer(allocated.args);
         device_->DestroyBuffer(allocated.counters);
+        device_->DestroyBuffer(allocated.generation_domain);
+        device_->DestroyBuffer(allocated.draw_camera);
         allocated = {};
       }
       return false;
@@ -362,6 +373,8 @@ void ProceduralGrass::Destroy(Device& device) {
     device.DestroyBuffer(slot.instances);
     device.DestroyBuffer(slot.args);
     device.DestroyBuffer(slot.counters);
+    device.DestroyBuffer(slot.generation_domain);
+    device.DestroyBuffer(slot.draw_camera);
     slot = {};
   }
   for (GpuImage& field : bend_fields_) {
@@ -725,16 +738,30 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   slot.bend_max_strength = bend_max_strength;
   slot.bend_active = bend_active;
 
+  // The domain description is identical for every phase, so it goes to the
+  // uniform buffer once instead of riding in each phase's push block.
+  GenerationDomain generation_domain{};
+  generation_domain.view_proj = frame.view_proj;
+  generation_domain.field_origin_extent[0] = domain.origin_x;
+  generation_domain.field_origin_extent[1] = domain.origin_z;
+  generation_domain.field_origin_extent[2] = domain.extent_x;
+  generation_domain.field_origin_extent[3] = domain.extent_z;
+  generation_domain.field[0] = valid_field ? domain.sample_width : 0;
+  generation_domain.field[1] = valid_field ? domain.sample_height : 0;
+  generation_domain.field[2] = type_count;
+  generation_domain.field[3] = domain.seed;
+  generation_domain.density_lod[0] = settings.density_lod_start;
+  generation_domain.density_lod[1] = settings.density_lod_end;
+  generation_domain.density_lod[2] = settings.far_density;
+  generation_domain.density_lod[3] = settings.max_slope_cos;
+  generation_domain.bend_field[0] = bend.field[0];
+  generation_domain.bend_field[1] = bend.field[1];
+  generation_domain.bend_field[2] = bend.height[0];
+  generation_domain.bend_field[3] = bend_active ? bend.field[3] : 0.0f;
+  std::memcpy(slot.generation_domain.mapped, &generation_domain,
+              sizeof(generation_domain));
+
   GenerationPush common{};
-  common.view_proj = frame.view_proj;
-  common.field_origin_extent[0] = domain.origin_x;
-  common.field_origin_extent[1] = domain.origin_z;
-  common.field_origin_extent[2] = domain.extent_x;
-  common.field_origin_extent[3] = domain.extent_z;
-  common.field[0] = valid_field ? domain.sample_width : 0;
-  common.field[1] = valid_field ? domain.sample_height : 0;
-  common.field[2] = type_count;
-  common.field[3] = domain.seed;
   common.camera_stream[0] = frame.camera_pos.x;
   common.camera_stream[1] = frame.camera_pos.y;
   common.camera_stream[2] = frame.camera_pos.z;
@@ -743,18 +770,10 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   common.counts[1] = copied_surfaces;
   common.counts[2] = std::min(settings.max_blades, kMaxBlades);
   common.counts[3] = kMaxBlades;
-  common.density_lod[0] = settings.density_lod_start;
-  common.density_lod[1] = settings.density_lod_end;
-  common.density_lod[2] = settings.far_density;
-  common.density_lod[3] = settings.max_slope_cos;
   common.geometry_fade[0] = settings.geometry_lod_start;
   common.geometry_fade[1] = settings.geometry_lod_end;
   common.geometry_fade[2] = settings.fade_start;
   common.geometry_fade[3] = settings.fade_end;
-  common.bend_field[0] = bend.field[0];
-  common.bend_field[1] = bend.field[1];
-  common.bend_field[2] = bend.height[0];
-  common.bend_field[3] = bend_active ? bend.field[3] : 0.0f;
 
   slot.generation_count = 0;
   GenerationPush reset = common;
@@ -803,9 +822,10 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   finalize.control[0] = 3;
   slot.generation[slot.generation_count++] = finalize;
 
+  const DrawCamera draw_camera{frame.view_proj, frame.prev_view_proj};
+  std::memcpy(slot.draw_camera.mapped, &draw_camera, sizeof(draw_camera));
+
   DrawPush draw{};
-  draw.view_proj = frame.view_proj;
-  draw.prev_view_proj = frame.prev_view_proj;
   draw.camera_time[0] = frame.camera_pos.x;
   draw.camera_time[1] = frame.camera_pos.y;
   draw.camera_time[2] = frame.camera_pos.z;
@@ -902,7 +922,9 @@ void ProceduralGrass::AddGeneration(RenderGraph& graph, u32 frame_slot) {
                  Bind::StorageBuffer(5, current.counters),
                  Bind::Combined(6, bend_current.view, bend_sampler_),
                  Bind::Combined(7, metadata_current.view, bend_sampler_),
-                 Bind::Combined(8, confidence_current.view, bend_sampler_)});
+                 Bind::Combined(8, confidence_current.view, bend_sampler_),
+                 Bind::Uniform(9, current.generation_domain, 0,
+                               sizeof(GenerationDomain))});
 
         for (u32 i = 0; i < phase_count; ++i) {
           const GenerationPush& phase = phases[i];
@@ -950,7 +972,9 @@ void ProceduralGrass::Draw(CommandList& cmd,
   cmd.BindPipeline(pipeline);
   cmd.BindIndexBuffer(blade_indices_, 0, IndexType::kUint16);
   cmd.BindTransient(
-      0, {Bind::ByteBuffer(0, slot.instances), Bind::ByteBuffer(2, slot.types)});
+      0, {Bind::ByteBuffer(0, slot.instances),
+          Bind::Uniform(1, slot.draw_camera, 0, sizeof(DrawCamera)),
+          Bind::ByteBuffer(2, slot.types)});
   // Near grows up from arena slot 0, far down from the arena top, and the
   // distant ultra tier up from its own region past kMaxBlades; the base rides
   // in control[3] so the vertex shader resolves all three with one expression.

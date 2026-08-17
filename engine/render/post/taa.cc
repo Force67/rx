@@ -47,7 +47,7 @@ bool TaaPass::Initialize(Device& device) {
                           {2, BindingType::kCombinedTextureSampler},
                           {3, BindingType::kCombinedTextureSampler},
                           {4, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(TaaPushConstants),
+      .push_constant_size = PushSize<TaaPushConstants>(),
       .debug_name = "taa",
   });
   if (!pipeline_) {

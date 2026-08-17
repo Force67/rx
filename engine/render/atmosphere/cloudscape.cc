@@ -185,7 +185,7 @@ bool Cloudscape::Initialize(Device &device) {
                           {2, BindingType::kCombinedTextureSampler},
                           {3, BindingType::kSampledImage},
                           {4, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(ApplyPush),
+      .push_constant_size = PushSize<ApplyPush>(),
       .debug_name = "cloudscape_apply",
   });
   haze_pipeline_ = device.CreateComputePipeline({

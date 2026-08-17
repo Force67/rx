@@ -146,6 +146,9 @@ class ReconPathTracer {
   // frame by the sky_cdf pass; layout documented in recon_sky_cdf.cs.hlsl.
   GpuBuffer sky_cdf_;
   PingPong fog_;  // rgba16f inscatter + transmittance, EMA history
+  // Camera matrices shared by the gbuffer and fog passes; three Mat4 are twice
+  // the push budget on their own. Ping-pongs with the frame parity.
+  GpuBuffer camera_[2];
 
 };
 

@@ -379,8 +379,11 @@ class VulkanDevice final : public Device {
     return MakeHandle<PipelineHandle>(record);
   }
 
+  // Fails (and says why) when push_size is past the adapter's
+  // maxPushConstantsSize instead of letting the driver reject the layout.
   VkPipelineLayout GetOrCreatePipelineLayout(std::span<const VkDescriptorSetLayout> sets,
-                                             VkShaderStageFlags push_stages, u32 push_size);
+                                             VkShaderStageFlags push_stages, u32 push_size,
+                                             const char* debug_name);
   VkDescriptorSetLayout GetOrCreateSetLayout(const BindingLayoutDesc& desc);
 
  private:

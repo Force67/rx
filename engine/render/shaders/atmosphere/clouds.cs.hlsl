@@ -11,8 +11,13 @@
 [[vk::binding(1, 0)]] Texture2D color_in : register(t1, space0);
 [[vk::binding(2, 0)]] Texture2D depth_in : register(t2, space0);
 
-struct PushData {
+// The unprojection matrix, which alone would be half the push budget.
+struct CloudCamera {
   column_major float4x4 inv_view_proj;
+};
+[[vk::binding(3, 0)]] ConstantBuffer<CloudCamera> camera : register(b3, space0);
+
+struct PushData {
   float4 camera_pos;     // xyz eye (m), w time (s)
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb, w coverage [0..1]
@@ -103,14 +108,14 @@ void main(uint3 id : SV_DispatchThreadID) {
   float depth = depth_in.Load(int3(px, 0)).r;
 
   float2 ndc = (float2(px) + 0.5) / float2(pc.size) * 2.0 - 1.0;
-  float4 nh = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));  // reversed-z near
+  float4 nh = mul(camera.inv_view_proj, float4(ndc, 1.0, 1.0));  // reversed-z near
   float3 cam = pc.camera_pos.xyz;
   float3 view = normalize(nh.xyz / nh.w - cam);
 
   // Distance to the scene surface (sky pixels = infinite).
   float scene_dist = 1e12;
   if (depth > 0.0) {
-    float4 wh = mul(pc.inv_view_proj, float4(ndc, depth, 1.0));
+    float4 wh = mul(camera.inv_view_proj, float4(ndc, depth, 1.0));
     scene_dist = length(wh.xyz / wh.w - cam);
   }
 

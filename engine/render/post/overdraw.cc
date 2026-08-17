@@ -8,6 +8,16 @@
 
 namespace rx::render {
 
+namespace {
+// view_proj then model, the two matrices the overdraw vs pushes per draw.
+// Named so the size goes through the same guard as every other pass.
+struct OverdrawPush {
+  Mat4 view_proj;
+  Mat4 model;
+};
+}  // namespace
+
+
 bool OverdrawPass::Initialize(Device& device, Format color_format) {
   // shadow.vs pushes {view_proj, model}; this pass reuses that 128-byte range.
   // shadow.vs reads position (0) and uv (3); supply both from the vertex buffer.
@@ -30,7 +40,7 @@ bool OverdrawPass::Initialize(Device& device, Format color_format) {
       .depth = {},                          // no test/write, no depth attachment
       .color_formats = {color_format},
       .blend = {BlendMode::kAdditive},  // additive accumulation
-      .push_constant_size = 2 * sizeof(Mat4),
+      .push_constant_size = PushSize<OverdrawPush>(),
       .debug_name = "overdraw",
   };
   pipeline_ = device.CreateGraphicsPipeline(desc);

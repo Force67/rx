@@ -9,6 +9,37 @@
 
 namespace rx::render {
 
+// Vulkan guarantees maxPushConstantsSize is *at least* this and nothing more.
+// Desktop drivers hand out far more (256 on NVIDIA, 128 KiB on AMD), so a
+// bigger block runs fine here and then fails pipeline-layout creation on a
+// spec-minimum device, silently costing the whole pass.
+inline constexpr u32 kGuaranteedPushConstantBytes = 128;
+
+// Every desc states its push block through this, so an oversized struct is a
+// build error at the pipeline that asks for it rather than a runtime failure
+// on hardware we do not own. The device still re-checks against the adapter's
+// real limit, for the handful of sizes that are only known at runtime.
+template <typename T>
+consteval u32 PushSize() {
+  static_assert(sizeof(T) <= kGuaranteedPushConstantBytes,
+                "push constant block is larger than the 128 bytes vulkan guarantees; "
+                "move the overflow (usually the matrices) into a uniform buffer");
+  return sizeof(T);
+}
+
+// Deliberate exception, for a block whose every field is genuinely per-draw:
+// there is nothing to lift into a per-frame uniform, so fitting it means
+// routing the per-draw data through an indexed buffer - a redesign of the pass,
+// not a repack. Named rather than a bare sizeof so the exception stays
+// greppable and cannot be reached by accident; the device still refuses the
+// layout (and says which pipeline) on an adapter that cannot serve it.
+template <typename T>
+consteval u32 PushSizeOverGuarantee() {
+  static_assert(sizeof(T) > kGuaranteedPushConstantBytes,
+                "block fits the guarantee - use PushSize<> instead");
+  return sizeof(T);
+}
+
 // A pipeline's descriptor-set interface. Most passes declare their slots
 // inline and let the device derive (and cache) the layout; sets shared across
 // pipelines (bindless registry, frame globals) pass the existing layout

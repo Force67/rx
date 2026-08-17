@@ -48,7 +48,7 @@ bool GaussianSplat::Initialize(Device& device, Format color_format) {
       .color_formats = {color_format},
       .blend = {BlendMode::kAlpha},
       .sets = {{.slots = {{0, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(GaussianPush),
+      .push_constant_size = PushSize<GaussianPush>(),
       .debug_name = "gaussian_splat",
   });
   if (!pipeline_) {

@@ -73,7 +73,7 @@ std::unique_ptr<FluidSurfacePass> FluidSurfacePass::Create(
                           {3, BindingType::kUniformBuffer}},           // params CB
                 .stages = kShaderStageVertex | kShaderStageFragment},
                {.shared = environment_layout}},
-      .push_constant_size = sizeof(FluidSurfacePush),
+      .push_constant_size = PushSize<FluidSurfacePush>(),
       .debug_name = "fluid_surface",
   });
   if (!pass->pipeline_) {

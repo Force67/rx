@@ -1,5 +1,7 @@
 #include "render/geometry/fur.h"
 
+#include <cstring>
+
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
@@ -9,8 +11,14 @@
 namespace rx::render {
 namespace {
 
-struct FurPush {
+// The view projection alone is half the 128 bytes vulkan guarantees for a push
+// block, and it is the same for every shell, so it rides in a uniform buffer
+// and the push keeps the per-draw model and the scalars.
+struct FurCamera {
   Mat4 view_proj;
+};
+
+struct FurPush {
   Mat4 model;
   f32 sun_dir[3];
   f32 fur_length;
@@ -51,12 +59,24 @@ bool FurPass::Initialize(Device& device, Format color_format, Format depth_forma
                 .format = depth_format},
       .color_formats = {color_format},
       .blend = {BlendMode::kAlpha},
-      .push_constant_size = sizeof(FurPush),
+      .sets = {{.slots = {{0, BindingType::kUniformBuffer}},
+                .stages = kShaderStageVertex}},
+      .push_constant_size = PushSize<FurPush>(),
       .debug_name = "fur",
   });
   if (!pipeline_) {
     RX_ERROR("fur pipeline creation failed");
     return false;
+  }
+
+  // One per in-flight frame: the pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(FurCamera), kBufferUsageUniform, true);
+    if (!camera.mapped) {
+      RX_ERROR("fur camera uniform allocation failed");
+      return false;
+    }
   }
   return true;
 }
@@ -64,22 +84,28 @@ bool FurPass::Initialize(Device& device, Format color_format, Format depth_forma
 void FurPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
                          const Mat4& model, const Mat4& view_proj, const Vec3& sun_dir,
                          const Vec3& sun_color, f32 ambient, const Params& params) {
+  camera_slot_ ^= 1u;
+  const u32 slot = camera_slot_;
   graph.AddPass(
       "fur",
       [&](RenderGraph::PassBuilder& builder) {
         builder.Write(color, ResourceUsage::kColorAttachment);
         builder.Write(depth, ResourceUsage::kDepthAttachment);
       },
-      [this, color, depth, model, view_proj, sun_dir, sun_color, ambient, params](PassContext& ctx) {
+      [this, slot, color, depth, model, view_proj, sun_dir, sun_color, ambient,
+       params](PassContext& ctx) {
         const GpuImage& target = ctx.graph->image(color);
         ColorAttachment col[] = {{.view = target.view, .load = LoadOp::kLoad}};
         DepthAttachment dep{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = target.extent, .colors = col, .depth = &dep});
 
         ctx.cmd->BindPipeline(pipeline_);
+        const FurCamera camera{view_proj};
+        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        ctx.cmd->BindTransient(0,
+                               {Bind::Uniform(0, camera_[slot], 0, sizeof(FurCamera))});
 
         FurPush push{};
-        push.view_proj = view_proj;
         push.model = model;
         push.sun_dir[0] = sun_dir.x;
         push.sun_dir[1] = sun_dir.y;
@@ -106,6 +132,10 @@ void FurPass::Destroy(Device& device) {
   device.DestroyPipeline(pipeline_);
   device.DestroyBuffer(vertices_);
   device.DestroyBuffer(indices_);
+  for (GpuBuffer& camera : camera_) {
+    if (camera) device.DestroyBuffer(camera);
+    camera = {};
+  }
   pipeline_ = {};
 }
 

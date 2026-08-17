@@ -12,9 +12,14 @@
 namespace rx::render {
 namespace {
 
-struct ScatterPush {
-  Mat4 inv_view_proj;
+// The two matrices on their own are the entire 128 bytes vulkan guarantees for
+// a push block, so they ride in a per-frame uniform buffer and the push keeps
+// the scalars.
+struct ScatterCamera {
+  Mat4 inv_view_proj;  // unjittered
   Mat4 prev_view_proj;
+};
+struct ScatterPush {
   f32 camera_pos[4];
   f32 sun_dir_g[4];
   f32 sun_color[4];
@@ -48,8 +53,9 @@ bool FroxelFog::Initialize(Device& device, bool ray_query) {
                           {5, BindingType::kStorageBuffer},
                           {6, BindingType::kCombinedTextureSampler},
                           {7, BindingType::kUniformBuffer},
-                          {8, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(ScatterPush),
+                          {8, BindingType::kCombinedTextureSampler},
+                          {10, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<ScatterPush>(),
       .debug_name = "froxel_scatter",
   });
   if (ray_query) {
@@ -66,8 +72,9 @@ bool FroxelFog::Initialize(Device& device, bool ray_query) {
                             {6, BindingType::kCombinedTextureSampler},
                             {7, BindingType::kUniformBuffer},
                             {8, BindingType::kCombinedTextureSampler},
-                            {9, BindingType::kAccelStruct}}}},
-        .push_constant_size = sizeof(ScatterPush),
+                            {9, BindingType::kAccelStruct},
+                            {10, BindingType::kUniformBuffer}}}},
+        .push_constant_size = PushSize<ScatterPush>(),
         .debug_name = "froxel_scatter_rt",
     });
     if (!scatter_pipeline_rt_)
@@ -77,7 +84,7 @@ bool FroxelFog::Initialize(Device& device, bool ray_query) {
       .shader = RX_SHADER(k_froxel_integrate_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(IntegratePush),
+      .push_constant_size = PushSize<IntegratePush>(),
       .debug_name = "froxel_integrate",
   });
   apply_pipeline_ = device.CreateComputePipeline({
@@ -85,7 +92,7 @@ bool FroxelFog::Initialize(Device& device, bool ray_query) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(ApplyPush),
+      .push_constant_size = PushSize<ApplyPush>(),
       .debug_name = "froxel_apply",
   });
   if (!scatter_pipeline_ || !integrate_pipeline_ || !apply_pipeline_) {
@@ -113,6 +120,13 @@ bool FroxelFog::Initialize(Device& device, bool ray_query) {
   dummy_uniform_ = device.CreateBuffer(512, kBufferUsageUniform, true);
   if (!dummy_uniform_.mapped) return false;
   std::memset(dummy_uniform_.mapped, 0, 512);
+
+  // One per in-flight frame: the pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(ScatterCamera), kBufferUsageUniform, true);
+    if (!camera.mapped) return false;
+  }
 
   device.ImmediateSubmit([this](CommandList& cmd) {
     // Clear the ping-pong volumes in the copy state, then settle everything in
@@ -147,6 +161,10 @@ void FroxelFog::Destroy(Device& device) {
   if (integrated_) device.DestroyImage(integrated_);
   integrated_ = {};
   if (dummy_uniform_) device.DestroyBuffer(dummy_uniform_);
+  for (GpuBuffer& camera : camera_) {
+    if (camera) device.DestroyBuffer(camera);
+    camera = {};
+  }
 }
 
 void FroxelFog::AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandle depth_export,
@@ -163,9 +181,10 @@ void FroxelFog::AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandl
           b.Read(cascade_atlas_handle, ResourceUsage::kSampledCompute);
       },
       [this, slot, cascade_atlas_handle, raytracing, tlas_slot, rt, frame](PassContext& ctx) {
+        const ScatterCamera camera{frame.inv_view_proj, frame.prev_view_proj};
+        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+
         ScatterPush push{};
-        push.inv_view_proj = frame.inv_view_proj;
-        push.prev_view_proj = frame.prev_view_proj;
         push.camera_pos[0] = frame.camera_pos.x;
         push.camera_pos[1] = frame.camera_pos.y;
         push.camera_pos[2] = frame.camera_pos.z;
@@ -209,6 +228,7 @@ void FroxelFog::AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandl
                           frame.cascade_buffer ? frame.cascade_size : 512),
             Bind::Combined(8, cascade_view, frame.comparison_sampler)};
         if (rt) items.push_back(Bind::Accel(9, raytracing->tlas(tlas_slot)));
+        items.push_back(Bind::Uniform(10, camera_[slot], 0, sizeof(ScatterCamera)));
         ctx.cmd->BindTransient(0, {items.data(), items.size()});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch((kSizeX + 3) / 4, (kSizeY + 3) / 4, (kSizeZ + 3) / 4);

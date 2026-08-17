@@ -26,7 +26,7 @@ bool WaterCaustics::Initialize(Device& device) {
                           {1, BindingType::kStorageImage},
                           {2, BindingType::kCombinedTextureSampler},
                           {3, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(CausticPush),
+      .push_constant_size = PushSize<CausticPush>(),
       .debug_name = "water_caustics",
   });
   if (!pipeline_) return false;

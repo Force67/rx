@@ -1,5 +1,7 @@
 #include "render/atmosphere/volumetric_fog.h"
 
+#include <cstring>
+
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
@@ -8,8 +10,13 @@
 namespace rx::render {
 namespace {
 
-struct FogPush {
+// Half of the 128 bytes vulkan guarantees for a push block would go to this one
+// matrix, so it rides in a per-frame uniform buffer and the push keeps the
+// scalars.
+struct FogCamera {
   Mat4 inv_view_proj;
+};
+struct FogPush {
   f32 camera_pos[4];
   f32 sun_direction[4];
   f32 sun_color[4];
@@ -27,13 +34,20 @@ bool VolumetricFog::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kSampledImage},
-                          {3, BindingType::kAccelStruct}}}},
-      .push_constant_size = sizeof(FogPush),
+                          {3, BindingType::kAccelStruct},
+                          {4, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<FogPush>(),
       .debug_name = "volumetric_fog",
   });
   if (!pipeline_) {
     RX_ERROR("volumetric fog pipeline creation failed");
     return false;
+  }
+  // One per in-flight frame: the pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(FogCamera), kBufferUsageUniform, true);
+    if (!camera.mapped) return false;
   }
   return true;
 }
@@ -41,6 +55,10 @@ bool VolumetricFog::Initialize(Device& device) {
 void VolumetricFog::Destroy(Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
+  for (GpuBuffer& camera : camera_) {
+    if (camera) device.DestroyBuffer(camera);
+    camera = {};
+  }
 }
 
 ResourceHandle VolumetricFog::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing,
@@ -49,6 +67,7 @@ ResourceHandle VolumetricFog::AddToGraph(RenderGraph& graph, RayTracingContext& 
   ResourceHandle fogged = graph.CreateTexture({.name = "fogged",
                                                .format = Format::kRGBA16Float,
                                                .width = extent.width, .height = extent.height});
+  const u32 slot = frame.frame_index % 2;
   graph.AddPass(
       "volumetric_fog",
       [&](RenderGraph::PassBuilder& builder) {
@@ -56,9 +75,11 @@ ResourceHandle VolumetricFog::AddToGraph(RenderGraph& graph, RayTracingContext& 
         builder.Read(depth, ResourceUsage::kSampledCompute);
         builder.Write(fogged, ResourceUsage::kStorageWrite);
       },
-      [this, &raytracing, tlas_slot, color, depth, fogged, extent, frame](PassContext& ctx) {
+      [this, &raytracing, tlas_slot, color, depth, fogged, extent, frame, slot](PassContext& ctx) {
+        const FogCamera camera{frame.inv_view_proj};
+        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+
         FogPush push{};
-        push.inv_view_proj = frame.inv_view_proj;
         push.camera_pos[0] = frame.camera_pos.x;
         push.camera_pos[1] = frame.camera_pos.y;
         push.camera_pos[2] = frame.camera_pos.z;
@@ -84,7 +105,8 @@ ResourceHandle VolumetricFog::AddToGraph(RenderGraph& graph, RayTracingContext& 
         ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(fogged)),
                                    Bind::Sampled(1, ctx.graph->image(color)),
                                    Bind::Sampled(2, ctx.graph->image(depth)),
-                                   Bind::Accel(3, raytracing.tlas(tlas_slot))});
+                                   Bind::Accel(3, raytracing.tlas(tlas_slot)),
+                                   Bind::Uniform(4, camera_[slot], 0, sizeof(FogCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

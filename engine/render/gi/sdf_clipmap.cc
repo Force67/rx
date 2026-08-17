@@ -27,14 +27,17 @@ struct ClearPush {
   f32 params[4];  // x far distance
 };
 
+// Exactly the 128 bytes vulkan guarantees for a push block. inv_transform is
+// per instance dispatch, so unlike the other passes it cannot move into a
+// per-frame uniform buffer; the block was trimmed instead. The clip origin came
+// out (it is already in SdfGlobals, indexed by mesh_res.w) and the conservative
+// world scale moved into the spare albedo.w lane.
 struct ComposePush {
   Mat4 inv_transform;
-  f32 box_min[4];      // xyz mesh-local volume min, w mesh voxel size
-  u32 mesh_res[4];     // xyz mesh resolution, w clip index
-  f32 clip_origin[4];  // xyz clip world min, w clip voxel size
-  f32 albedo[4];
+  f32 box_min[4];   // xyz mesh-local volume min, w mesh voxel size
+  u32 mesh_res[4];  // xyz mesh resolution, w clip index
+  f32 albedo[4];    // xyz flat albedo, w conservative world scale
   f32 emissive[4];
-  f32 misc[4];  // x conservative world scale
 };
 
 struct DebugPush {
@@ -113,7 +116,7 @@ bool SdfClipmap::Initialize() {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kStorageImage},
                           {2, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(ClearPush),
+      .push_constant_size = PushSize<ClearPush>(),
       .debug_name = "sdf_clear",
   });
   compose_pipeline_ = device_.CreateComputePipeline({
@@ -121,8 +124,9 @@ bool SdfClipmap::Initialize() {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kStorageImage},
                           {2, BindingType::kStorageImage},
-                          {3, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(ComposePush),
+                          {3, BindingType::kStorageBuffer},
+                          {4, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<ComposePush>(),
       .debug_name = "sdf_compose",
   });
   debug_pipeline_ = device_.CreateComputePipeline({
@@ -133,7 +137,7 @@ bool SdfClipmap::Initialize() {
                           {3, BindingType::kSampledImage},
                           {4, BindingType::kSampledImage},
                           {5, BindingType::kSampler}}}},
-      .push_constant_size = sizeof(DebugPush),
+      .push_constant_size = PushSize<DebugPush>(),
       .debug_name = "sdf_debug",
   });
   if (!clear_pipeline_ || !compose_pipeline_ || !debug_pipeline_) {
@@ -232,8 +236,8 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
   const SdfScene* scene_ptr = &scene;
   graph.AddPass(
       "sdf_compose", [](RenderGraph::PassBuilder&) {},
-      [this, scene_ptr, jobs = std::move(jobs), instances = std::move(instances),
-       camera](PassContext& ctx) {
+      [this, scene_ptr, jobs = std::move(jobs), instances = std::move(instances), camera,
+       frame_index](PassContext& ctx) {
         CommandList* cmd = ctx.cmd;
         // Order this frame's writes after any prior-frame reads of the volumes.
         cmd->MemoryBarrier(BarrierScope::kComputeRead, BarrierScope::kComputeWrite);
@@ -327,18 +331,18 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             pp.mesh_res[1] = mesh->res[1];
             pp.mesh_res[2] = mesh->res[2];
             pp.mesh_res[3] = j.clip;
-            pp.clip_origin[0] = j.origin[0];
-            pp.clip_origin[1] = j.origin[1];
-            pp.clip_origin[2] = j.origin[2];
-            pp.clip_origin[3] = j.voxel;
             std::memcpy(pp.albedo, mesh->albedo, sizeof(f32) * 3);
             std::memcpy(pp.emissive, mesh->emissive, sizeof(f32) * 3);
-            pp.misc[0] = min_scale;
+            pp.albedo[3] = min_scale;
 
             cmd->BindPipeline(compose_pipeline_);
+            // The clip origin/voxel the shader needs is SdfGlobals::clip_origin
+            // for this dispatch's clip, written above for this frame.
             cmd->BindTransient(0, {Bind::Storage(0, distance_), Bind::Storage(1, albedo_),
                                    Bind::Storage(2, emissive_),
-                                   Bind::StorageBuffer(3, mesh->sdf, 0, mesh->sdf.size)});
+                                   Bind::StorageBuffer(3, mesh->sdf, 0, mesh->sdf.size),
+                                   Bind::Uniform(4, globals_buffers_[frame_index % 2], 0,
+                                                 sizeof(SdfGlobals))});
             cmd->Push(pp);
             cmd->Dispatch(groups, groups, groups);
             // RMW ordering across overlapping instance dispatches.

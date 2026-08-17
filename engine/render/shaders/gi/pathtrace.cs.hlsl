@@ -5,8 +5,17 @@
 // Accumulates one frame's samples into a persistent buffer that resets when
 // the camera moves, so a still view converges to a ground-truth image.
 
-struct PathPush {
+// Shared with the denoised gbuffer pass (pathtrace_gbuffer.cs.hlsl declares the
+// same block): a float4x4 is half the push budget on its own, so the matrices
+// come from a uniform buffer. Only inv_view_proj is used here; the layout must
+// stay identical.
+struct PathCamera {
   column_major float4x4 inv_view_proj;
+  column_major float4x4 view_proj;
+  column_major float4x4 prev_view_proj;
+};
+
+struct PathPush {
   float4 camera_pos;     // xyz eye
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb, w sun angular radius (radians)
@@ -25,6 +34,7 @@ PUSH_CONSTANTS(PathPush, pc);
 [[vk::binding(2, 0)]] RaytracingAccelerationStructure tlas : register(t2, space0);
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] TextureCube sky_cube : register(t3, space0);
 [[vk::combinedImageSampler]] [[vk::binding(3, 0)]] SamplerState sky_sampler : register(s3, space0);
+[[vk::binding(4, 0)]] ConstantBuffer<PathCamera> camera : register(b4, space0);
 
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
@@ -242,7 +252,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     float2 ndc = (float2(id.xy) + jitter) / float2(pc.size) * 2.0 - 1.0;
     // Reversed infinite z: depth 1 is the near plane (finite w), depth 0 is at
     // infinity (w -> 0), so reconstruct the near point and aim from the eye.
-    float4 near_h = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));
+    float4 near_h = mul(camera.inv_view_proj, float4(ndc, 1.0, 1.0));
     float3 p_near = near_h.xyz / near_h.w;
     float3 ro = pc.camera_pos.xyz;
     float3 rd = normalize(p_near - ro);

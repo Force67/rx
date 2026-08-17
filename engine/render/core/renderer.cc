@@ -376,6 +376,13 @@ f32 MaskedSubmeshOpacity(const base::Vector<asset::Vertex> &verts,
   return static_cast<f32>(weighted / area_sum);
 }
 
+// Mirrors ContactCamera in contact_shadow.cs: the march's two unjittered
+// camera matrices, which on their own would exhaust the push budget.
+struct ContactCamera {
+  Mat4 view_proj;
+  Mat4 inv_view_proj;
+};
+
 } // namespace
 
 Renderer::Renderer() = default;
@@ -567,14 +574,15 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
                             {2, BindingType::kStorageBuffer},
                             {3, BindingType::kStorageBuffer},
                             {4, BindingType::kStorageBuffer}}}},
-        .push_constant_size = sizeof(ClusterPush),
+        .push_constant_size = PushSize<ClusterPush>(),
         .debug_name = "light_cluster",
     });
     if (!light_cluster_pipeline_)
       return false;
+    // The two matrices alone are the whole 128 bytes vulkan guarantees for a
+    // push block, so they ride in a per-frame uniform buffer (binding 2) and
+    // the push keeps the scalars.
     struct ContactPush {
-      Mat4 view_proj;
-      Mat4 inv_view_proj;
       f32 sun_dir[3];
       f32 near_plane;
       u32 size[2];
@@ -587,8 +595,9 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     contact_shadow_pipeline_ = device_->CreateComputePipeline({
         .shader = RX_SHADER(k_contact_shadow_cs_hlsl),
         .sets = {{.slots = {{0, BindingType::kStorageImage},
-                            {1, BindingType::kSampledImage}}}},
-        .push_constant_size = sizeof(ContactPush),
+                            {1, BindingType::kSampledImage},
+                            {2, BindingType::kUniformBuffer}}}},
+        .push_constant_size = PushSize<ContactPush>(),
         .debug_name = "contact_shadow",
     });
     if (!contact_shadow_pipeline_)
@@ -611,7 +620,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
         .shader = RX_SHADER(k_cloud_shadow_cs_hlsl),
         .sets = {{.slots = {{0, BindingType::kStorageImage},
                             {1, BindingType::kSampledImage}}}},
-        .push_constant_size = sizeof(CloudShadowPush),
+        .push_constant_size = PushSize<CloudShadowPush>(),
         .debug_name = "cloud_shadow",
     });
     if (!cloud_shadow_pipeline_)
@@ -633,7 +642,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
                             {1, BindingType::kCombinedTextureSampler},
                             {2, BindingType::kCombinedTextureSampler},
                             {3, BindingType::kCombinedTextureSampler}}}},
-        .push_constant_size = sizeof(SssPush),
+        .push_constant_size = PushSize<SssPush>(),
         .debug_name = "sss_blur",
     });
     if (!sss_pipeline_)
@@ -651,6 +660,14 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
         kBufferUsageStorage);
     if (!cluster_counts_ || !cluster_indices_ || !decal_cluster_indices_)
       return false;
+    // One per in-flight frame: the contact-shadow pass rewrites it while the
+    // previous frame may still be reading its own copy.
+    for (GpuBuffer &camera : contact_camera_) {
+      camera = device_->CreateBuffer(sizeof(ContactCamera), kBufferUsageUniform,
+                                     true);
+      if (!camera.mapped)
+        return false;
+    }
   }
   if (!ssao_.Initialize(*device_))
     return false; // raster ao fallback, no rt needed
@@ -678,11 +695,17 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
 
   // Linear-hdr export: a compute copy from the resolved scene into a host
   // buffer.
+// Width and height of the captured image. Named so its size goes through
+  // the same guard as every other push block.
+  struct HdrCapturePush {
+    u32 width;
+    u32 height;
+  };
   hdr_pipeline_ = device_->CreateComputePipeline({
       .shader = RX_SHADER(k_hdr_capture_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
                           {1, BindingType::kSampledImage}}}},
-      .push_constant_size = 2 * sizeof(u32),
+      .push_constant_size = PushSize<HdrCapturePush>(),
       .debug_name = "hdr_capture",
   });
   if (!hdr_pipeline_)
@@ -2928,7 +2951,7 @@ void Renderer::BuildDebugLinePipelines() {
                 .format = kDepthFormat},
       .color_formats = {kSceneColorFormat},
       .blend = {BlendMode::kAlpha},
-      .push_constant_size = sizeof(DebugLinePush),
+      .push_constant_size = PushSize<DebugLinePush>(),
       .debug_name = "debug_line",
   };
   debug_line_pipeline_ = device_->CreateGraphicsPipeline(desc);
@@ -3171,7 +3194,7 @@ void Renderer::RenderPickPass(const FrameView &view) {
                   .compare = CompareOp::kGreaterEqual,
                   .format = Format::kD32Float},
         .color_formats = {Format::kR32Uint},
-        .push_constant_size = sizeof(PickPush),
+        .push_constant_size = PushSize<PickPush>(),
         .debug_name = "pick_id",
     });
   }
@@ -5482,11 +5505,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               b.Write(sun_shadow, ResourceUsage::kStorageWrite);
               b.Read(depth_export, ResourceUsage::kSampledCompute);
             },
-            [this, sun_shadow, depth_export, sun, view_proj = globals.view_proj,
+            [this, sun_shadow, depth_export, sun, frame_slot,
+             view_proj = globals.view_proj,
              inv_view_proj = globals.inv_view_proj](PassContext &ctx) {
+              const ContactCamera camera{view_proj, inv_view_proj};
+              std::memcpy(contact_camera_[frame_slot].mapped, &camera,
+                          sizeof(camera));
               struct ContactPush {
-                Mat4 view_proj;
-                Mat4 inv_view_proj;
                 f32 sun_dir[3];
                 f32 near_plane;
                 u32 size[2];
@@ -5496,8 +5521,6 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 u32 frame_index;
                 f32 pad[2];
               } p{};
-              p.view_proj = view_proj;
-              p.inv_view_proj = inv_view_proj;
               p.sun_dir[0] = sun.x;
               p.sun_dir[1] = sun.y;
               p.sun_dir[2] = sun.z;
@@ -5511,7 +5534,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               ctx.cmd->BindPipeline(contact_shadow_pipeline_);
               ctx.cmd->BindTransient(
                   0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
-                      Bind::Sampled(1, ctx.graph->image(depth_export))});
+                      Bind::Sampled(1, ctx.graph->image(depth_export)),
+                      Bind::Uniform(2, contact_camera_[frame_slot], 0,
+                                    sizeof(ContactCamera))});
               ctx.cmd->Push(p);
               ctx.cmd->Dispatch2D({render_width_, render_height_});
             });
@@ -7497,6 +7522,11 @@ void Renderer::Shutdown() {
       device_->DestroyBuffer(cluster_indices_);
     if (decal_cluster_indices_)
       device_->DestroyBuffer(decal_cluster_indices_);
+    for (GpuBuffer &camera : contact_camera_) {
+      if (camera)
+        device_->DestroyBuffer(camera);
+      camera = {};
+    }
 #if defined(RX_HAS_NRD)
     if (rt_available_)
       nrd_.Destroy(*device_);

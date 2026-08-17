@@ -43,7 +43,7 @@ bool RestirDi::Initialize(Device& device) {
                           {5, BindingType::kSampledImage},
                           {6, BindingType::kSampledImage},
                           {7, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(TemporalPush),
+      .push_constant_size = PushSize<TemporalPush>(),
       .debug_name = "restir_di_temporal",
   });
   spatial_pipeline_ = device.CreateComputePipeline({
@@ -58,7 +58,7 @@ bool RestirDi::Initialize(Device& device) {
                           {7, BindingType::kStorageImage},
                           {8, BindingType::kStorageImage},
                           {9, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(SpatialPush),
+      .push_constant_size = PushSize<SpatialPush>(),
       .debug_name = "restir_di_spatial",
   });
   if (!temporal_pipeline_ || !spatial_pipeline_) {

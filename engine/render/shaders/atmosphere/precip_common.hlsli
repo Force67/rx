@@ -5,9 +5,16 @@
 #ifndef RX_PRECIP_COMMON_HLSLI_
 #define RX_PRECIP_COMMON_HLSLI_
 
-struct PrecipPush {
+// The reprojection matrices, which alone would be the whole push budget, so
+// they come from a uniform buffer instead. Only the vertex stages need them,
+// and this header is shared with the lightning shaders (whose set has no such
+// slot), so each vertex shader declares the binding itself.
+struct PrecipCamera {
   column_major float4x4 view_proj;
   column_major float4x4 prev_view_proj;
+};
+
+struct PrecipPush {
   float3 cam_right; float time;       // seconds
   float3 cam_up;    float intensity;  // precipitation 0..1
   float3 cam_pos;   uint flags;       // 1 snow, 2 froxel volume valid

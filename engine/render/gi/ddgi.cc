@@ -132,7 +132,7 @@ bool DdgiSystem::CreatePipelines() {
                           {3, BindingType::kAccelStruct},
                           {4, BindingType::kUniformBuffer}}},
                {.shared = bindless_->set_layout()}},
-      .push_constant_size = sizeof(RaysPush),
+      .push_constant_size = PushSize<RaysPush>(),
       .debug_name = "ddgi_rays",
   });
   blend_pipeline_ = device_.CreateComputePipeline({
@@ -140,13 +140,13 @@ bool DdgiSystem::CreatePipelines() {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kUniformBuffer}}}},
-      .push_constant_size = sizeof(BlendPush),
+      .push_constant_size = PushSize<BlendPush>(),
       .debug_name = "ddgi_blend",
   });
   border_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_ddgi_border_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(BorderPush),
+      .push_constant_size = PushSize<BorderPush>(),
       .debug_name = "ddgi_border",
   });
   if (!rays_pipeline_ || !blend_pipeline_ || !border_pipeline_) {

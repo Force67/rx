@@ -50,14 +50,14 @@ bool ExposurePass::Initialize(Device& device) {
       .shader = RX_SHADER(k_histogram_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
                           {1, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(HistogramPush),
+      .push_constant_size = PushSize<HistogramPush>(),
       .debug_name = "exposure_histogram",
   });
   resolve_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_exposure_resolve_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
                           {1, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(ResolvePush),
+      .push_constant_size = PushSize<ResolvePush>(),
       .debug_name = "exposure_resolve",
   });
   if (!histogram_pipeline_ || !resolve_pipeline_) {

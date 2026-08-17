@@ -337,6 +337,15 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   device->caps_.adapter_name = props.deviceName;
   device->caps_.api_version = props.apiVersion;
   device->caps_.integrated = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
+  device->caps_.max_push_constant_bytes = props.limits.maxPushConstantsSize;
+  // Desktop adapters hand out 256 bytes and up, so a block that only fits here
+  // stays invisible until someone runs on a spec-minimum device. Setting
+  // RX_MAX_PUSH_CONSTANTS=128 pretends to be one, and the layout check below
+  // then names every pipeline that would have been lost.
+  if (const char* push_limit = std::getenv("RX_MAX_PUSH_CONSTANTS")) {
+    device->caps_.max_push_constant_bytes = std::min<u32>(
+        device->caps_.max_push_constant_bytes, std::strtoul(push_limit, nullptr, 10));
+  }
 
   VkPhysicalDeviceMemoryProperties mem;
   vkGetPhysicalDeviceMemoryProperties(device->physical_device_, &mem);
@@ -1627,7 +1636,20 @@ VkDescriptorSetLayout VulkanDevice::GetOrCreateSetLayout(const BindingLayoutDesc
 }
 
 VkPipelineLayout VulkanDevice::GetOrCreatePipelineLayout(
-    std::span<const VkDescriptorSetLayout> sets, VkShaderStageFlags push_stages, u32 push_size) {
+    std::span<const VkDescriptorSetLayout> sets, VkShaderStageFlags push_stages, u32 push_size,
+    const char* debug_name) {
+  // The one place a push block reaches the driver, so the one place worth
+  // checking it. Over the limit the layout is invalid and the pass would be
+  // lost; say which pipeline and by how much rather than leaving a bare
+  // "pipeline layout creation failed" on a device we cannot reproduce on.
+  if (push_size > caps_.max_push_constant_bytes) {
+    RX_ERROR("pipeline '{}' asks for {} bytes of push constants, this device allows {} "
+             "(vulkan only guarantees {}); move the overflow into a uniform buffer",
+             debug_name ? debug_name : "?", push_size, caps_.max_push_constant_bytes,
+             kGuaranteedPushConstantBytes);
+    return VK_NULL_HANDLE;
+  }
+
   std::lock_guard lock(layout_cache_mutex_);
   u64 key = HashBytes(sets.data(), sets.size() * sizeof(VkDescriptorSetLayout));
   key = HashBytes(&push_stages, sizeof(push_stages), key);
@@ -1867,7 +1889,7 @@ bool VulkanDevice::BuildComputePipeline(const ComputePipelineDesc& desc,
 
   VkPipelineLayout layout = GetOrCreatePipelineLayout(
       {set_layouts.data(), set_layouts.size()}, VK_SHADER_STAGE_COMPUTE_BIT,
-      desc.push_constant_size);
+      desc.push_constant_size, desc.debug_name);
   if (layout == VK_NULL_HANDLE) return false;
 
   VkShaderModule module = CreateModule(device_, desc.shader);
@@ -1919,7 +1941,8 @@ bool VulkanDevice::BuildGraphicsPipeline(const GraphicsPipelineDesc& desc,
 
   VkShaderStageFlags push_stages = ToVkStages(all_stages);
   VkPipelineLayout layout = GetOrCreatePipelineLayout(
-      {set_layouts.data(), set_layouts.size()}, push_stages, desc.push_constant_size);
+      {set_layouts.data(), set_layouts.size()}, push_stages, desc.push_constant_size,
+      desc.debug_name);
   if (layout == VK_NULL_HANDLE) return false;
 
   VkPipelineShaderStageCreateInfo stages[3];

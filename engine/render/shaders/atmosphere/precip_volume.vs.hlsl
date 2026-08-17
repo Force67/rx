@@ -15,6 +15,7 @@ PUSH_CONSTANTS(PrecipPush, push);
 
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] Texture2D<float> occlusion_map : register(t0, space0);
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] SamplerState occlusion_sampler : register(s0, space0);
+[[vk::binding(4, 0)]] ConstantBuffer<PrecipCamera> camera : register(b4, space0);
 #ifdef RX_PRECIP_RT
 [[vk::binding(3, 0)]] RaytracingAccelerationStructure tlas : register(t3, space0);
 #endif
@@ -141,7 +142,7 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   }
 #endif
 
-  o.pos = mul(push.view_proj, float4(world, 1.0));
+  o.pos = mul(camera.view_proj, float4(world, 1.0));
   // Rasterize with the frame's temporal jitter, like every geometry pass;
   // unjittered billboards swim against the jittered resolve (see particle.vs).
   o.pos.xy += push.jitter * o.pos.w;
@@ -153,8 +154,8 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   float3 prev_vel;
   float3 prev_center = DropCenter(push.time - push.dt, h, g, snow, prev_vel);
   if (length(prev_center - center) > 2.0) prev_center = center;
-  float4 cc = mul(push.view_proj, float4(center, 1.0));
-  float4 pc = mul(push.prev_view_proj, float4(prev_center, 1.0));
+  float4 cc = mul(camera.view_proj, float4(center, 1.0));
+  float4 pc = mul(camera.prev_view_proj, float4(prev_center, 1.0));
   o.motion = (pc.xy / pc.w - cc.xy / cc.w) * 0.5;
   return o;
 }

@@ -33,9 +33,14 @@
 [[vk::binding(15, 0)]] StructuredBuffer<uint2> probe_meta : register(t15, space0);
 [[vk::binding(16, 0)]] StructuredBuffer<float4> interior_vols : register(t16, space0);
 
-struct PushData {
+// The reprojection matrices, which alone would be the whole push budget.
+struct GatherCamera {
   column_major float4x4 inv_view_proj;   // current, unjittered
   column_major float4x4 prev_view_proj;  // last frame, unjittered
+};
+[[vk::binding(17, 0)]] ConstantBuffer<GatherCamera> camera : register(b17, space0);
+
+struct PushData {
   float4 camera_pos;                     // xyz eye, w near plane
   uint4 dims;                            // full_w, full_h, gather_w, gather_h
   uint4 misc;                            // frame_index, screen_valid, asuint(ray_max), pad
@@ -60,7 +65,7 @@ void OrthoBasis(float3 n, out float3 t, out float3 b) {
 }
 
 float3 WorldFromDepth(float2 uv, float depth) {
-  float4 world = mul(push.inv_view_proj, float4(uv * 2.0 - 1.0, depth, 1.0));
+  float4 world = mul(camera.inv_view_proj, float4(uv * 2.0 - 1.0, depth, 1.0));
   return world.xyz / world.w;
 }
 
@@ -125,7 +130,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
     // (a) Screen cache: was this hit surface lit and visible last frame?
     if (push.misc.y != 0u) {
-      float4 clip = mul(push.prev_view_proj, float4(hit_pos, 1.0));
+      float4 clip = mul(camera.prev_view_proj, float4(hit_pos, 1.0));
       if (clip.w > 1e-4) {
         float2 puv = (clip.xy / clip.w) * 0.5 + 0.5;  // engine convention, no y-flip
         float d_expect = clip.z / clip.w;             // reversed-Z NDC depth

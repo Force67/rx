@@ -4,7 +4,6 @@
 // shader carves hair strands out of each shell with an alpha mask so the stack
 // of shells reads as fur. Lengyel's classic real-time fur, on the raster path.
 struct PushData {
-  column_major float4x4 view_proj;
   column_major float4x4 model;
   float3 sun_dir;     // travel direction
   float fur_length;   // total fur height in model units
@@ -14,6 +13,12 @@ struct PushData {
   float ambient;
 };
 PUSH_CONSTANTS(PushData, push);
+
+// The view projection, which alone is half the push budget.
+struct FurCamera {
+  column_major float4x4 view_proj;
+};
+[[vk::binding(0, 0)]] ConstantBuffer<FurCamera> camera : register(b0, space0);
 
 struct VsIn {
   [[vk::location(0)]] float3 position : POSITION;
@@ -33,7 +38,7 @@ VsOut main(VsIn input, uint iid : SV_InstanceID) {
   float3 local = input.position + input.normal * (layer * push.fur_length);
   float4 world = mul(push.model, float4(local, 1.0));
   VsOut o;
-  o.pos = mul(push.view_proj, world);
+  o.pos = mul(camera.view_proj, world);
   o.normal = mul((float3x3)push.model, input.normal);
   o.uv = input.uv;
   o.layer = layer;

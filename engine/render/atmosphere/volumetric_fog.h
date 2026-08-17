@@ -40,6 +40,7 @@ class VolumetricFog {
 
  private:
   PipelineHandle pipeline_;
+  GpuBuffer camera_[2];  // inv_view_proj, too big for the push block
 };
 
 }  // namespace rx::render

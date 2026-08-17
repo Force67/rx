@@ -96,7 +96,7 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   // RGBA. Closest is kOpaque.
   scene.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
   scene.sets = sets;
-  scene.push_constant_size = sizeof(MeshPushConstants);
+  scene.push_constant_size = PushSizeOverGuarantee<MeshPushConstants>();
   // kMsaa mode: opaque scene + prepass raster multisampled; the blend
   // pipelines below stay at 1 sample (the transparent pass runs post-resolve).
   scene.samples = samples;
@@ -261,7 +261,7 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
     ms.mesh = RX_SHADER(k_mesh_scene_ms_hlsl);
     ms.raster = {.cull = CullMode::kNone};  // matches the raster path's winding policy
     ms.sets = sets;
-    ms.push_constant_size = sizeof(MeshShaderPush);
+    ms.push_constant_size = PushSizeOverGuarantee<MeshShaderPush>();
 
     // Scene variants: depth EQUAL against the prepass, lit color + masked
     // motion target, like the raster main variants.

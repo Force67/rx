@@ -90,6 +90,7 @@ class FroxelFog {
   GpuImage integrated_;
   SamplerHandle sampler_;
   GpuBuffer dummy_uniform_;
+  GpuBuffer camera_[2];  // scatter matrices, too big for the push block
   bool volumes_initialized_ = false;
 };
 

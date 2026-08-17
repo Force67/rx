@@ -31,7 +31,7 @@ std::unique_ptr<PostPass> PostPass::Create(Device& device, Format output_format)
                           {3, BindingType::kCombinedTextureSampler},  // grading strip lut
                           {4, BindingType::kCombinedTextureSampler}},  // tight flare source
                 .stages = kShaderStageFragment}},
-      .push_constant_size = sizeof(Params),
+      .push_constant_size = PushSize<Params>(),
       .debug_name = "post_tonemap",
   });
   if (!pass->pipeline_) {

@@ -3,9 +3,13 @@
 // folded into the SIGMA-denoised sun shadow in place. Catches the sub-30cm
 // occlusion (feet, props, ledges) that a 1-spp denoised shadow ray blurs away,
 // at grounding-detail scale only - the long-range shadow stays NRD's.
-struct ContactPush {
+
+// The march's camera matrices, which alone would be the whole push budget.
+struct ContactCamera {
   column_major float4x4 view_proj;      // unjittered
   column_major float4x4 inv_view_proj;  // unjittered
+};
+struct ContactPush {
   float3 sun_dir;  // travel direction
   float near_plane;
   uint2 size;
@@ -20,6 +24,7 @@ PUSH_CONSTANTS(ContactPush, pc);
 
 [[vk::image_format("r8")]] [[vk::binding(0, 0)]] RWTexture2D<float> sun_shadow : register(u0, space0);
 [[vk::binding(1, 0)]] Texture2D<float> depth_map : register(t1, space0);
+[[vk::binding(2, 0)]] ConstantBuffer<ContactCamera> camera : register(b2, space0);
 
 float Ign(float2 p, uint frame) {
   p += float(frame & 63u) * 5.588238;
@@ -36,7 +41,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   float2 uv = (float2(id.xy) + 0.5) / float2(pc.size);
   float2 ndc = uv * 2.0 - 1.0;
-  float4 wh = mul(pc.inv_view_proj, float4(ndc, depth, 1.0));
+  float4 wh = mul(camera.inv_view_proj, float4(ndc, depth, 1.0));
   float3 world = wh.xyz / wh.w;
   float3 to_sun = normalize(-pc.sun_dir);
 
@@ -46,7 +51,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   for (uint i = 0; i < pc.steps; ++i) {
     float t = (float(i) + jitter) / float(pc.steps) * pc.range;
     float3 p = world + to_sun * t;
-    float4 clip = mul(pc.view_proj, float4(p, 1.0));
+    float4 clip = mul(camera.view_proj, float4(p, 1.0));
     if (clip.w <= 0.0) break;
     float3 sndc = clip.xyz / clip.w;
     float2 suv = sndc.xy * 0.5 + 0.5;

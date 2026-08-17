@@ -25,8 +25,6 @@ struct PushData {
   float4 prev_origin;  // old origin xz (advection source frame), unused zw
   float4 drift_time;   // wave-drift xz (m/s), dt, time
   uint4 control;       // ring index, phase, flags (bit0 fft,bit1 interact,bit2 obstacle), disturbance count
-  column_major float4x4 view_proj;      // world -> clip, projecting the texel column to screen
-  column_major float4x4 inv_view_proj;  // clip -> world, reconstructing geometry from depth
   float4 island;       // analytic beach: center xz, gaussian sigma (m), peak (m)
   float4 idepth0;      // standing-displacement depth (m), waterline band (m), foam scale, water rest level
   float4 idepth1;      // render width, render height, xz proximity (m), ripple gain
@@ -67,6 +65,14 @@ struct Disturbance {
 // the FFT ocean is off.
 [[vk::combinedImageSampler]] [[vk::binding(7, 0)]] Texture2D<float4> ocean_disp : register(t7, space0);
 [[vk::combinedImageSampler]] [[vk::binding(7, 0)]] SamplerState ocean_disp_sampler : register(s7, space0);
+
+// The interaction matrices, which alone would be the whole push budget. Same
+// for every ring and phase, so they ride in a per-frame CB instead.
+struct WaterFieldCamera {
+  column_major float4x4 view_proj;      // world -> clip, projecting the texel column to screen
+  column_major float4x4 inv_view_proj;  // clip -> world, reconstructing geometry from depth
+};
+[[vk::binding(8, 0)]] ConstantBuffer<WaterFieldCamera> camera : register(b8, space0);
 
 static const uint kSize = 512u;
 static const float kOceanPatchSize = 64.0;  // mirrors OceanFft::kPatchSize
@@ -276,7 +282,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     float mask_now = 0.0;
 
     float3 col = float3(world.x, surface, world.y);
-    float4 clip = mul(push.view_proj, float4(col, 1.0));
+    float4 clip = mul(camera.view_proj, float4(col, 1.0));
     if (clip.w > 1e-4) {
       float2 suv = (clip.xy / clip.w) * 0.5 + 0.5;
       if (all(suv >= 0.0) && all(suv <= 1.0)) {
@@ -284,7 +290,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
         float d = opaque_depth.Load(int3(px, 0));
         if (d > 0.0) {  // not sky
           float2 ndc = suv * 2.0 - 1.0;
-          float4 wh = mul(push.inv_view_proj, float4(ndc, d, 1.0));
+          float4 wh = mul(camera.inv_view_proj, float4(ndc, d, 1.0));
           float3 gworld = wh.xyz / wh.w;
           float dv = abs(gworld.y - surface);
           float dxz = length(gworld.xz - world);

@@ -63,7 +63,7 @@ bool FluidSim::Initialize(Device& device) {
                           {3, BindingType::kStorageImage},
                           {4, BindingType::kStorageImage},
                           {5, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(FluidPush),
+      .push_constant_size = PushSize<FluidPush>(),
       .debug_name = "fluid_sim",
   });
   if (!pipeline_) return false;

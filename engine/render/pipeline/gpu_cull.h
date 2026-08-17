@@ -93,6 +93,8 @@ class GpuCull {
   GpuBuffer instances_[kFramesInFlight];
   GpuBuffer commands_[kFramesInFlight];
   GpuBuffer counts_[kFramesInFlight];
+  // prev_view_proj: the frustum planes leave no room for it in the push block.
+  GpuBuffer reproject_[kFramesInFlight];
 
   // Occlusion culling: ping-pong full-res depth snapshots + a coarse hi-z reduce.
   static constexpr u32 kHizDownsample = 8;

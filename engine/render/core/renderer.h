@@ -786,6 +786,9 @@ private:
   GpuBuffer cluster_counts_;
   GpuBuffer cluster_indices_;
   GpuBuffer decal_cluster_indices_;
+  // Contact-shadow camera matrices, too big for the push block; one per
+  // in-flight frame since the pass rewrites it while the previous frame reads.
+  GpuBuffer contact_camera_[kFramesInFlight];
   // Decal atlas: set once by the engine/demo via SetDecalAtlas (asset id of an
   // uploaded texture); empty binds white.
   TextureView decal_atlas_view_;

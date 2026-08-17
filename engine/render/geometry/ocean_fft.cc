@@ -63,13 +63,13 @@ bool OceanFft::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kSampledImage},
                           {1, BindingType::kStorageImage},
                           {2, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(SpectrumPush),
+      .push_constant_size = PushSize<SpectrumPush>(),
       .debug_name = "ocean_spectrum",
   });
   fft_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_ocean_fft_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(FftPush),
+      .push_constant_size = PushSize<FftPush>(),
       .debug_name = "ocean_fft",
   });
   finalize_pipeline_ = device.CreateComputePipeline({
@@ -77,14 +77,14 @@ bool OceanFft::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kStorageImage},
                           {2, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(FinalizePush),
+      .push_constant_size = PushSize<FinalizePush>(),
       .debug_name = "ocean_finalize",
   });
   normals_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_ocean_normals_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(NormalsPush),
+      .push_constant_size = PushSize<NormalsPush>(),
       .debug_name = "ocean_normals",
   });
   if (!spectrum_pipeline_ || !fft_pipeline_ || !finalize_pipeline_ || !normals_pipeline_) {

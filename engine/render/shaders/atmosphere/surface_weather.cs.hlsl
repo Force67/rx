@@ -18,8 +18,13 @@
 [[vk::combinedImageSampler]] [[vk::binding(5, 0)]] Texture2D<float> occlusion_map : register(t5, space0);
 [[vk::combinedImageSampler]] [[vk::binding(5, 0)]] SamplerState occlusion_sampler : register(s5, space0);
 
-struct PushData {
+// The unprojection matrix, which alone would be half the push budget.
+struct SurfaceCamera {
   column_major float4x4 inv_view_proj;
+};
+[[vk::binding(6, 0)]] ConstantBuffer<SurfaceCamera> camera : register(b6, space0);
+
+struct PushData {
   float4 camera_pos;  // xyz eye
   float4 params;      // x wetness 0..1, y snow cover 0..1, z time s, w live rain 0..1
   float4 occl;        // sky-occlusion: center xz, 1/half extent, top_y
@@ -124,7 +129,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float up = saturate(n.y);  // horizontal surfaces collect water / snow
 
   float2 uv = (float2(id.xy) + 0.5) / float2(pc.size);
-  float4 wp = mul(pc.inv_view_proj, float4(uv * 2.0 - 1.0, depth, 1.0));
+  float4 wp = mul(camera.inv_view_proj, float4(uv * 2.0 - 1.0, depth, 1.0));
   float3 world = wp.xyz / wp.w;
   float3 view = normalize(world - pc.camera_pos.xyz);
 

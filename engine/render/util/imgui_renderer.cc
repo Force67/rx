@@ -80,7 +80,7 @@ bool ImGuiRenderer::Initialize(Device& device, Format target_format) {
   set0.slots.push_back({.binding = 1, .type = BindingType::kCombinedTextureSampler});
   pd.sets.push_back(std::move(set0));
 
-  pd.push_constant_size = sizeof(ImGuiPush);
+  pd.push_constant_size = PushSize<ImGuiPush>();
   pd.debug_name = "imgui";
   pipeline_ = device.CreateGraphicsPipeline(pd);
   if (!pipeline_) {

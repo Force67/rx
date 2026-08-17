@@ -7,8 +7,6 @@
 [[vk::binding(2, 0)]] ByteAddressBuffer grass_types : register(t2, space0);
 
 struct GrassDrawPush {
-  column_major float4x4 view_proj;
-  column_major float4x4 prev_view_proj;
   float4 camera_time;
   float4 sun_direction_intensity;
   float4 sun_color_ambient;
@@ -17,6 +15,14 @@ struct GrassDrawPush {
   uint4 control;     // pixel scale bits, type count, segments, arena base
 };
 PUSH_CONSTANTS(GrassDrawPush, push);
+
+// The reprojection matrices are the whole push budget on their own, and the
+// tier draws all share one pair, so they arrive through a uniform buffer.
+struct GrassDrawCamera {
+  column_major float4x4 view_proj;
+  column_major float4x4 prev_view_proj;
+};
+[[vk::binding(1, 0)]] ConstantBuffer<GrassDrawCamera> grass_camera : register(b1, space0);
 
 struct GrassTypeData {
   float4 base_color;

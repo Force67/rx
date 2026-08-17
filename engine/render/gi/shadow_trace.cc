@@ -36,7 +36,7 @@ bool ShadowTracePass::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kAccelStruct}}}},
-      .push_constant_size = sizeof(ShadowTracePush),
+      .push_constant_size = PushSize<ShadowTracePush>(),
       .debug_name = "shadow_trace",
   });
   if (!pipeline_) {

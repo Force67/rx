@@ -3,19 +3,25 @@
 // One pipeline serves reset, ring/surface generation and indirect-finalize
 // phases. Dispatch boundaries order near-to-far capacity allocation.
 struct PushData {
-  column_major float4x4 view_proj;
-  float4 field_origin_extent;  // origin xz, extent xz
-  uint4 field;                 // width, height, type count, seed
   float4 camera_stream;        // camera xyz, active radius
   float4 placement;            // spacing, ring inner/outer, refinement start
   int4 grid;                   // absolute min fine cell xz, coarse grid size xz
   uint4 counts;                // candidates, surfaces, logical cap, arena cap
-  float4 density_lod;          // start, end, far density, minimum up normal
   float4 geometry_fade;        // geometry start/end, fade start/end
   uint4 control;               // phase, lattice stride, next stride, distant ring
-  float4 bend_field;           // min-corner xz, height origin, inverse extent
 };
 PUSH_CONSTANTS(PushData, push);
+
+// The half of the constants no phase varies. It is the whole push budget on
+// its own, so it arrives through a uniform buffer written once per frame.
+struct GenerationDomain {
+  column_major float4x4 view_proj;
+  float4 field_origin_extent;  // origin xz, extent xz
+  uint4 field;                 // width, height, type count, seed
+  float4 density_lod;          // start, end, far density, minimum up normal
+  float4 bend_field;           // min-corner xz, height origin, inverse extent
+};
+[[vk::binding(9, 0)]] ConstantBuffer<GenerationDomain> domain : register(b9, space0);
 
 [[vk::binding(0, 0)]] ByteAddressBuffer field_data : register(t0, space0);
 [[vk::binding(1, 0)]] ByteAddressBuffer type_data : register(t1, space0);
@@ -116,8 +122,8 @@ GrassTypeData LoadType(uint type_index) {
 }
 
 uint4 LoadField(int2 p) {
-  p = clamp(p, int2(0, 0), int2(push.field.xy) - 1);
-  return field_data.Load4((uint(p.y) * push.field.x + uint(p.x)) * 16u);
+  p = clamp(p, int2(0, 0), int2(domain.field.xy) - 1);
+  return field_data.Load4((uint(p.y) * domain.field.x + uint(p.x)) * 16u);
 }
 
 bool SampleHeightfield(float2 world_xz, uint seed, out float3 position,
@@ -128,10 +134,10 @@ bool SampleHeightfield(float2 world_xz, uint seed, out float3 position,
   density = 0.0;
   growth = 0.0;
   type_index = 0u;
-  float2 uv = (world_xz - push.field_origin_extent.xy) /
-              max(push.field_origin_extent.zw, float2(1e-4, 1e-4));
+  float2 uv = (world_xz - domain.field_origin_extent.xy) /
+              max(domain.field_origin_extent.zw, float2(1e-4, 1e-4));
   if (any(uv < 0.0) || any(uv > 1.0)) return false;
-  float2 texel = uv * float2(push.field.xy - 1u);
+  float2 texel = uv * float2(domain.field.xy - 1u);
   int2 p = int2(floor(texel));
   float2 f = frac(texel);
   uint4 s00 = LoadField(p);
@@ -154,10 +160,10 @@ bool SampleHeightfield(float2 world_xz, uint seed, out float3 position,
   else if (choose < weights.x + weights.y) type_index = s10.z;
   else if (choose < weights.x + weights.y + weights.z) type_index = s01.z;
   else type_index = s11.z;
-  type_index = min(type_index, push.field.z - 1u);
+  type_index = min(type_index, domain.field.z - 1u);
 
-  float2 meters_per_texel = push.field_origin_extent.zw /
-                            max(float2(push.field.xy - 1u), float2(1.0, 1.0));
+  float2 meters_per_texel = domain.field_origin_extent.zw /
+                            max(float2(domain.field.xy - 1u), float2(1.0, 1.0));
   float dhdx = lerp(heights.y - heights.x, heights.w - heights.z, f.y) /
                max(meters_per_texel.x, 1e-4);
   float dhdz = lerp(heights.z - heights.x, heights.w - heights.y, f.x) /
@@ -210,7 +216,7 @@ bool SampleSurface(uint surface_candidate, uint seed, out float3 position,
   normal = normalize(cross(p1.xyz - p0.xyz, p2.xyz - p0.xyz));
   density = saturate(p0.w);
   growth = max(p1.w, 0.0);
-  type_index = min(meta.w, push.field.z - 1u);
+  type_index = min(meta.w, domain.field.z - 1u);
   return all(isfinite(position)) && all(isfinite(normal)) &&
          isfinite(density) && isfinite(growth);
 }
@@ -244,12 +250,12 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint tier) {
   float3 position, normal;
   float density, growth;
   uint type_index;
-  uint stable_seed = Hash(candidate ^ push.field.w);
+  uint stable_seed = Hash(candidate ^ domain.field.w);
   if (push.control.x == 1u) {
     uint gx = candidate % uint(push.grid.z);
     uint gz = candidate / uint(push.grid.z);
     int2 cell = push.grid.xy + int2(gx, gz) * int(push.control.y);
-    stable_seed = HashCell(cell, push.field.w);
+    stable_seed = HashCell(cell, domain.field.w);
     float2 jitter = (float2(Random01(stable_seed),
                             Random01(stable_seed ^ 0x68bc21ebu)) - 0.5) * 0.86;
     float2 world_xz = (float2(cell) + 0.5 + jitter) * push.placement.x;
@@ -265,22 +271,22 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint tier) {
     if (!SampleHeightfield(world_xz, stable_seed, position, normal, density,
                            growth, type_index)) return false;
   } else if (push.control.x == 2u) {
-    if (!SampleSurface(candidate, push.field.w, position, normal,
+    if (!SampleSurface(candidate, domain.field.w, position, normal,
                        density, growth, type_index, stable_seed)) return false;
   } else return false;
 
-  if (growth <= 0.0 || density <= 0.0 || normal.y < push.density_lod.w) return false;
+  if (growth <= 0.0 || density <= 0.0 || normal.y < domain.density_lod.w) return false;
   float distance_to_eye = distance(position, push.camera_stream.xyz);
   if (distance_to_eye > min(push.camera_stream.w, push.geometry_fade.w)) return false;
 
-  float density_lod = smoothstep(push.density_lod.x, push.density_lod.y,
+  float density_lod = smoothstep(domain.density_lod.x, domain.density_lod.y,
                                  distance_to_eye);
-  density *= lerp(1.0, push.density_lod.z, density_lod);
+  density *= lerp(1.0, domain.density_lod.z, density_lod);
   if (Random01(stable_seed ^ 0x1b56c4e9u) > density) return false;
 
   // Conservative point-frustum rejection. The margin retains tall blades whose
   // roots are just outside an edge; exact shape expansion happens in the VS.
-  float4 clip = mul(push.view_proj, float4(position, 1.0));
+  float4 clip = mul(domain.view_proj, float4(position, 1.0));
   float margin = max(clip.w * 0.08, 0.2);
   if (clip.w <= 0.0 || abs(clip.x) > clip.w + margin ||
       abs(clip.y) > clip.w + margin || clip.z < -margin || clip.z > clip.w + margin) return false;
@@ -288,7 +294,7 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint tier) {
   GrassTypeData type = LoadType(type_index);
   float2 clump_feature;
   uint clump_seed;
-  FindClump(position.xz, type.material.z, push.field.w, clump_feature, clump_seed);
+  FindClump(position.xz, type.material.z, domain.field.w, clump_feature, clump_seed);
   float clump_angle = Random01(clump_seed) * 6.28318530718;
   float blade_angle = clump_angle +
                       (Random01(stable_seed ^ 0x94d049bbu) - 0.5) * 0.9;
@@ -323,8 +329,8 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint tier) {
              ? 2u
              : (Random01(stable_seed ^ 0x6c8e9cf5u) < geometry_lod ? 1u : 0u);
   float4 bend_history_value = 0.0;
-  float2 bend_uv = (position.xz - push.bend_field.xy) * push.bend_field.w;
-  if (push.bend_field.w > 0.0 &&
+  float2 bend_uv = (position.xz - domain.bend_field.xy) * domain.bend_field.w;
+  if (domain.bend_field.w > 0.0 &&
       all(bend_uv >= 0.0) && all(bend_uv <= 1.0)) {
     bend_history_value = bend_history.SampleLevel(bend_history_sampler, bend_uv, 0.0);
     float4 metadata = bend_metadata.SampleLevel(bend_metadata_sampler, bend_uv, 0.0);
@@ -338,7 +344,7 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint tier) {
       float previous_confidence = confidence.y;
       if (current_confidence > 1e-4) {
         float current_height =
-            push.bend_field.z + metadata.x / current_confidence;
+            domain.bend_field.z + metadata.x / current_confidence;
         float current_radius = metadata.y / current_confidence;
         float current_vertical = 1.0 - smoothstep(
             current_radius * 0.15, max(current_radius, 0.01),
@@ -347,7 +353,7 @@ bool Generate(uint candidate, out PackedGrassInstance packed, out uint tier) {
       } else bend_history_value.xy = 0.0;
       if (previous_confidence > 1e-4) {
         float previous_height =
-            push.bend_field.z + metadata.z / previous_confidence;
+            domain.bend_field.z + metadata.z / previous_confidence;
         float previous_radius = metadata.w / previous_confidence;
         float previous_vertical = 1.0 - smoothstep(
             previous_radius * 0.15, max(previous_radius, 0.01),

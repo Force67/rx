@@ -38,7 +38,7 @@ GrassVsOut main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) 
     // Never let a ribbon collapse below roughly a pixel: distant blades stay
     // visible instead of dissolving into sub-pixel raster noise. Partial taper
     // keeps a silhouette on the widened blades.
-    float center_depth = max(mul(push.view_proj, float4(center, 1.0)).w, 0.0);
+    float center_depth = max(mul(grass_camera.view_proj, float4(center, 1.0)).w, 0.0);
     half_width = max(half_width, center_depth * pixel_scale * 0.5 *
                                      (0.35 + 0.65 * taper));
   }
@@ -55,8 +55,8 @@ GrassVsOut main(uint vertex_id : SV_VertexID, uint instance_id : SV_InstanceID) 
   float3 previous_world = previous_center + previous_width * (side * half_width);
 
   GrassVsOut output;
-  output.curr_clip = mul(push.view_proj, float4(world, 1.0));
-  output.prev_clip = mul(push.prev_view_proj, float4(previous_world, 1.0));
+  output.curr_clip = mul(grass_camera.view_proj, float4(world, 1.0));
+  output.prev_clip = mul(grass_camera.prev_view_proj, float4(previous_world, 1.0));
   output.sv_position = output.curr_clip;
   output.sv_position.xy += push.jitter_lod.xy * output.sv_position.w;
   output.normal = rounded_normal;

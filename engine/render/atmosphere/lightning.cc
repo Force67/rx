@@ -60,7 +60,7 @@ bool LightningSystem::Initialize(Device& device, Format color_format) {
       .color_formats = {color_format, kLightningMotionFormat},
       .blend = {BlendMode::kAdditive, BlendMode::kAlpha},
       .sets = sets,
-      .push_constant_size = sizeof(LightningPush),
+      .push_constant_size = PushSize<LightningPush>(),
       .debug_name = "lightning_bolt",
   };
   pipeline_ = device.CreateGraphicsPipeline(desc);

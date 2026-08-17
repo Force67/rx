@@ -18,10 +18,15 @@ struct Instance {
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> commands : register(u1, space0);  // 5 u32 per draw command
 [[vk::binding(2, 0)]] RWStructuredBuffer<uint> visible_count : register(u2, space0);  // [0]
 [[vk::binding(3, 0)]] Texture2D<float> hiz : register(t3, space0);  // last frame, farthest depth
+// The occlusion test's reprojection matrix; the frustum planes leave no room
+// for it in the push block.
+struct CullReproject {
+  column_major float4x4 prev_view_proj;
+};
+[[vk::binding(4, 0)]] ConstantBuffer<CullReproject> reproject : register(b4, space0);
 
 struct PushData {
   float4 planes[5];  // left, right, bottom, top, near (normalized, inside >= 0)
-  column_major float4x4 prev_view_proj;
   float4 eye_pad;   // xyz camera eye
   float4 proj_hiz;  // proj.m00, proj.m11, hiz width, hiz height
   uint4 misc;       // instance_count, frustum_enabled, occlusion_enabled, pad
@@ -56,13 +61,13 @@ void main(uint3 id : SV_DispatchThreadID) {
   // point against the farthest occluder over its screen footprint. Only small
   // footprints are tested (the coarse hi-z cannot bound large objects safely).
   if (push.misc.z != 0u && visible != 0u && testable) {
-    float4 cc = mul(push.prev_view_proj, float4(center, 1.0));
+    float4 cc = mul(reproject.prev_view_proj, float4(center, 1.0));
     if (cc.w > 1e-4) {
       float3 ndc = cc.xyz / cc.w;
       float dist = max(length(center - push.eye_pad.xyz), 1e-3);
       float sr = radius * max(push.proj_hiz.x, push.proj_hiz.y) / dist;  // ndc radius
       float3 near_pt = center + normalize(push.eye_pad.xyz - center) * radius;
-      float4 nc = mul(push.prev_view_proj, float4(near_pt, 1.0));
+      float4 nc = mul(reproject.prev_view_proj, float4(near_pt, 1.0));
       float nearest_z = nc.z / max(nc.w, 1e-4);  // reversed z: larger = closer
 
       float2 hiz_size = push.proj_hiz.zw;

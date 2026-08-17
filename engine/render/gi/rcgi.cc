@@ -63,9 +63,13 @@ struct ResolvePush {
   f32 pad[2];
   f32 camera_pos[4];
 };
-struct GatherPush {
+// The two matrices are the entire 128 bytes vulkan guarantees for a push block,
+// so they ride in a per-frame uniform buffer and the push keeps the scalars.
+struct GatherCamera {
   f32 inv_view_proj[16];
   f32 prev_view_proj[16];
+};
+struct GatherPush {
   f32 camera_pos[4];  // xyz eye, w near plane
   u32 dims[4];        // full_w, full_h, gather_w, gather_h
   u32 misc[4];        // frame_index, screen_valid, asuint(ray_max), pad
@@ -215,6 +219,12 @@ bool RcgiSystem::CreateResources() {
     b = device_.CreateBuffer(sizeof(RcgiGlobals), kBufferUsageUniform, true);
     if (!b.mapped) return false;
   }
+  // One per in-flight frame: the gather rewrites it while the previous frame
+  // may still be reading its own copy.
+  for (GpuBuffer& b : gather_camera_) {
+    b = device_.CreateBuffer(sizeof(GatherCamera), kBufferUsageUniform, true);
+    if (!b.mapped) return false;
+  }
   return true;
 }
 
@@ -239,7 +249,7 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {6, BindingType::kCombinedTextureSampler},
                           {7, BindingType::kStorageBuffer}}},
                kSdfSet},
-      .push_constant_size = sizeof(RotationPush),
+      .push_constant_size = PushSize<RotationPush>(),
       .debug_name = "rcgi_probe_trace_sw",
   });
   // Software cache shade: hardware set 0 minus the accel-struct slot (5), plus
@@ -280,7 +290,7 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {6, BindingType::kCombinedTextureSampler},
                           {7, BindingType::kStorageBuffer}}},
                {.shared = bindless_->set_layout()}},
-      .push_constant_size = sizeof(RotationPush),
+      .push_constant_size = PushSize<RotationPush>(),
       .debug_name = "rcgi_probe_trace",
   });
   }
@@ -322,7 +332,7 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {4, BindingType::kStorageBuffer},
                           {5, BindingType::kStorageBuffer},
                           {6, BindingType::kCombinedTextureSampler}}}},  // sky (cache-miss fallback)
-      .push_constant_size = sizeof(BlendPush),
+      .push_constant_size = PushSize<BlendPush>(),
       .debug_name = "rcgi_blend",
   });
   // Per-probe relocation (item 10): reads this frame's rays, writes probe_meta.
@@ -331,13 +341,13 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kUniformBuffer},
                           {2, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(MetaPush),
+      .push_constant_size = PushSize<MetaPush>(),
       .debug_name = "rcgi_probe_meta",
   });
   border_pipeline_ = device_.CreateComputePipeline({
       .shader = RX_SHADER(k_rcgi_border_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(BorderPush),
+      .push_constant_size = PushSize<BorderPush>(),
       .debug_name = "rcgi_border",
   });
   resolve_pipeline_ = device_.CreateComputePipeline({
@@ -350,7 +360,7 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {5, BindingType::kCombinedTextureSampler},
                           {6, BindingType::kStorageBuffer},
                           {7, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(ResolvePush),
+      .push_constant_size = PushSize<ResolvePush>(),
       .debug_name = "rcgi_resolve",
   });
   // M2 gather chain (ray-query gather + its denoise/upscale/history filters):
@@ -375,8 +385,9 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {13, BindingType::kCombinedTextureSampler},
                           {14, BindingType::kCombinedTextureSampler},
                           {15, BindingType::kStorageBuffer},
-                          {16, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(GatherPush),
+                          {16, BindingType::kStorageBuffer},
+                          {17, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<GatherPush>(),
       .debug_name = "rcgi_gather",
   });
   denoise_pipeline_ = device_.CreateComputePipeline({
@@ -390,7 +401,7 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {6, BindingType::kSampledImage},
                           {7, BindingType::kSampledImage},
                           {8, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(DenoisePush),
+      .push_constant_size = PushSize<DenoisePush>(),
       .debug_name = "rcgi_denoise",
   });
   upscale_pipeline_ = device_.CreateComputePipeline({
@@ -404,7 +415,7 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {6, BindingType::kSampledImage},
                           {7, BindingType::kSampledImage},
                           {8, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(UpscalePush),
+      .push_constant_size = PushSize<UpscalePush>(),
       .debug_name = "rcgi_upscale",
   });
   history_pipeline_ = device_.CreateComputePipeline({
@@ -413,7 +424,7 @@ bool RcgiSystem::CreatePipelines(bool rt_available) {
                           {1, BindingType::kStorageImage},
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(HistoryPush),
+      .push_constant_size = PushSize<HistoryPush>(),
       .debug_name = "rcgi_history",
   });
   }  // rt_available (gather chain)
@@ -927,9 +938,13 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
        screen_depth, gather, extent, inv_view_proj, prev_view_proj, camera, frame_index,
        screen_valid, ray_max, near_plane](PassContext& ctx) {
         const GpuBuffer& globals = globals_buffers_[frame_index % 2];
+        const GpuBuffer& gather_camera = gather_camera_[frame_index % 2];
+        GatherCamera gc{};
+        std::memcpy(gc.inv_view_proj, &inv_view_proj, sizeof(gc.inv_view_proj));
+        std::memcpy(gc.prev_view_proj, &prev_view_proj, sizeof(gc.prev_view_proj));
+        std::memcpy(gather_camera.mapped, &gc, sizeof(gc));
+
         GatherPush p{};
-        std::memcpy(p.inv_view_proj, &inv_view_proj, sizeof(p.inv_view_proj));
-        std::memcpy(p.prev_view_proj, &prev_view_proj, sizeof(p.prev_view_proj));
         p.camera_pos[0] = camera.x; p.camera_pos[1] = camera.y; p.camera_pos[2] = camera.z;
         p.camera_pos[3] = near_plane;
         p.dims[0] = extent.width; p.dims[1] = extent.height;
@@ -954,7 +969,8 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
                 Bind::Combined(14, ctx.graph->image(screen_depth).view, sampler_),
                 Bind::StorageBuffer(15, probe_meta_, 0, probe_meta_.size),
                 Bind::StorageBuffer(16, interior_volumes_[frame_index % 2], 0,
-                                    interior_volumes_[frame_index % 2].size)});
+                                    interior_volumes_[frame_index % 2].size),
+                Bind::Uniform(17, gather_camera, 0, sizeof(GatherCamera))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(gather);
       });
@@ -1094,6 +1110,7 @@ RcgiSystem::~RcgiSystem() {
   device_.DestroyBuffer(probe_meta_);
   for (GpuBuffer& volumes : interior_volumes_) device_.DestroyBuffer(volumes);
   for (GpuBuffer& b : globals_buffers_) device_.DestroyBuffer(b);
+  for (GpuBuffer& b : gather_camera_) device_.DestroyBuffer(b);
 }
 
 }  // namespace rx::render

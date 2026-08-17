@@ -4,17 +4,23 @@
 // one target and the product of (1 - alpha) into another, so the result is
 // independent of draw order. One instance per draw, parameters in the push.
 struct PushData {
-  column_major float4x4 view_proj;
   column_major float4x4 model;
   float4 color;  // rgb tint, a = alpha
   float3 sun_dir;
   float pad0;
   float3 sun_color;
   float ambient;
+};
+PUSH_CONSTANTS(PushData, push);
+
+// Pass constants: identical for every instance, and together more than the
+// push budget, so they arrive through a uniform buffer instead.
+struct WboitFrame {
+  column_major float4x4 view_proj;
   float4 cluster_params;  // x slice scale, y slice bias, zw tile size px
   float4 froxel_params;   // x near, y far, z enabled
 };
-PUSH_CONSTANTS(PushData, push);
+[[vk::binding(4, 0)]] ConstantBuffer<WboitFrame> frame : register(b4, space0);
 
 struct VsIn {
   [[vk::location(0)]] float3 position : POSITION;
@@ -30,7 +36,7 @@ struct VsOut {
 
 VsOut main(VsIn input) {
   float4 world = mul(push.model, float4(input.position, 1.0));
-  float4 clip = mul(push.view_proj, world);
+  float4 clip = mul(frame.view_proj, world);
   VsOut o;
   o.pos = clip;
   o.normal = mul((float3x3)push.model, input.normal);

@@ -12,7 +12,6 @@ struct Particle {
 [[vk::binding(0, 0)]] StructuredBuffer<Particle> particles : register(t0, space0);
 
 struct PushData {
-  column_major float4x4 view_proj;
   float3 cam_right;
   float near_plane;
   float3 cam_up;
@@ -21,11 +20,17 @@ struct PushData {
   float sun_intensity;
   float3 sun_color;
   float ambient;
-  column_major float4x4 prev_view_proj;
   uint emissive;
   float2 jitter;  // ndc units, applied on top of the unjittered clip pos
 };
 PUSH_CONSTANTS(PushData, push);
+
+// The reprojection matrices, which alone would be the whole push budget.
+struct CameraData {
+  column_major float4x4 view_proj;
+  column_major float4x4 prev_view_proj;
+};
+[[vk::binding(8, 0)]] ConstantBuffer<CameraData> camera : register(b8, space0);
 
 struct VsOut {
   float4 pos : SV_Position;
@@ -43,7 +48,7 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   float2 c = kCorners[vid];
   float3 world = p.pos + push.cam_right * (c.x * p.size) + push.cam_up * (c.y * p.size);
   VsOut o;
-  o.pos = mul(push.view_proj, float4(world, 1.0));
+  o.pos = mul(camera.view_proj, float4(world, 1.0));
   // Rasterize with the frame's temporal jitter, like every geometry pass:
   // an unjittered billboard swims against the jittered depth/resolve grid,
   // which flickers pixel-sized sprites and their silhouette-edge soft fade.
@@ -53,8 +58,8 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   o.color = p.color;
   o.tex = p.tex;
   // Centre motion, matching the prepass convention (prev - curr) * 0.5 in uv.
-  float4 cc = mul(push.view_proj, float4(p.pos, 1.0));
-  float4 pc = mul(push.prev_view_proj, float4(p.prev_pos, 1.0));
+  float4 cc = mul(camera.view_proj, float4(p.pos, 1.0));
+  float4 pc = mul(camera.prev_view_proj, float4(p.prev_pos, 1.0));
   o.motion = (pc.xy / pc.w - cc.xy / cc.w) * 0.5;
   return o;
 }

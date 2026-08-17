@@ -108,12 +108,13 @@ class ParticleSystem {
  private:
   static constexpr u32 kFramesInFlight = 2;
   void RecordDraw(PassContext& ctx, ResourceHandle color, ResourceHandle depth,
-                  ResourceHandle motion, const GpuBuffer& instances, u32 count, const Frame& frame,
-                  BindingSetHandle bindless);
+                  ResourceHandle motion, const GpuBuffer& instances, const GpuBuffer& camera,
+                  u32 count, const Frame& frame, BindingSetHandle bindless);
   // One pipeline + bind + draw inside an open rendering pass; offset is the
   // byte offset of this set's instances in the shared buffer.
-  void RecordSet(PassContext& ctx, ResourceHandle depth, const GpuBuffer& instances, u64 offset,
-                 u32 count, const Frame& frame, bool emissive, BindingSetHandle bindless);
+  void RecordSet(PassContext& ctx, ResourceHandle depth, const GpuBuffer& instances,
+                 const GpuBuffer& camera, u64 offset, u32 count, const Frame& frame, bool emissive,
+                 BindingSetHandle bindless);
 
   Device* device_ = nullptr;
   BindingLayoutHandle bindless_layout_;  // engine bindless texture table (set 1)
@@ -121,6 +122,7 @@ class ParticleSystem {
   PipelineHandle pipeline_additive_;
   PipelineHandle sim_pipeline_;
   GpuBuffer buffers_[kFramesInFlight];  // host-visible billboard storage
+  GpuBuffer camera_[kFramesInFlight];   // draw matrices, too big for the push block
   GpuBuffer sim_state_;                 // persistent gpu particle state
 };
 

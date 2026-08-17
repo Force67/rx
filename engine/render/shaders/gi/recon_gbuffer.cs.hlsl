@@ -7,10 +7,15 @@
 // Inline ray queries in a compute shader (no DXR raygen/closest-hit), the engine
 // path. Self-contained scene access; mirrors pathtrace_gbuffer.cs.hlsl.
 
-struct PathGbufferPush {
+// The three matrices, which alone are past the whole push budget (they ride in
+// a uniform buffer the fog pass shares; see recon_path_tracer.cc).
+struct ReconCamera {
   column_major float4x4 inv_view_proj;
   column_major float4x4 view_proj;
   column_major float4x4 prev_view_proj;
+};
+
+struct PathGbufferPush {
   float4 camera_pos;     // xyz eye
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb, w sun angular radius (radians)
@@ -19,8 +24,8 @@ struct PathGbufferPush {
   uint frame_index;
   uint bounces;          // bits 0..7 indirect diffuse bounces (>=1);
                          // bit 8: ReSTIR GI (emit an initial sample instead of
-                         // integrating indirect inline). Packed because the
-                         // push block already sits at the 256-byte limit.
+                         // integrating indirect inline); bit 9 rr guides;
+                         // bit 10 ReSTIR DI.
 };
 PUSH_CONSTANTS(PathGbufferPush, pc);
 
@@ -47,6 +52,7 @@ PUSH_CONSTANTS(PathGbufferPush, pc);
 [[vk::binding(14, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> spec_albedo_out : register(u14, space0);
 [[vk::binding(15, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> rr_normals_out : register(u15, space0);
 [[vk::binding(16, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> rr_depth_out : register(u16, space0);
+[[vk::binding(17, 0)]] ConstantBuffer<ReconCamera> camera : register(b17, space0);
 
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
@@ -370,7 +376,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   float2 uv = (float2(id.xy) + 0.5) / float2(size);
   float2 ndc = uv * 2.0 - 1.0;
-  float4 near_h = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));
+  float4 near_h = mul(camera.inv_view_proj, float4(ndc, 1.0, 1.0));
   float3 ro = pc.camera_pos.xyz;
   float3 primary_dir = normalize(near_h.xyz / near_h.w - ro);
 
@@ -383,7 +389,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   if (!prim.hit) {
     // Sky: irradiance 0, sky goes to emissive (composite adds it). Far reprojection
     // so motion is valid for the temporal pass.
-    float4 prev_clip = mul(pc.prev_view_proj, float4(ro + primary_dir * 1.0e6, 1.0));
+    float4 prev_clip = mul(camera.prev_view_proj, float4(ro + primary_dir * 1.0e6, 1.0));
     float2 prev_ndc = prev_clip.xy / prev_clip.w;
     irradiance_out[id.xy] = 0.0.xxxx;
     normal_rough_out[id.xy] = float4(0.5, 0.5, 1.0, 1.0);
@@ -502,12 +508,12 @@ void main(uint3 id : SV_DispatchThreadID) {
   irradiance = min(irradiance, 1.0e4.xxx);
 
   // viewZ from reversed-infinite-z depth (positive, == nrd_pack convention).
-  float4 clip = mul(pc.view_proj, float4(prim.position, 1.0));
+  float4 clip = mul(camera.view_proj, float4(prim.position, 1.0));
   float depth = clip.z / clip.w;
   float viewz = depth > 0.0 ? kNearPlane / depth : kDenoisingRange;
 
   // Jitter-free camera motion (static geometry): prevUV - currUV.
-  float4 prev_clip = mul(pc.prev_view_proj, float4(prim.position, 1.0));
+  float4 prev_clip = mul(camera.prev_view_proj, float4(prim.position, 1.0));
   float2 prev_ndc = prev_clip.xy / prev_clip.w;
   float2 motion = (prev_ndc - ndc) * 0.5;  // engine convention, no y-flip
 

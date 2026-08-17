@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <initializer_list>
 
@@ -17,6 +18,30 @@ namespace {
 
 Vec3 Add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 Vec3 Mul(const Vec3& v, f32 s) { return {v.x * s, v.y * s, v.z * s}; }
+
+// Mirrors PushData in shadow.vs, and it is over the 128 bytes vulkan
+// guarantees. It stays that way deliberately: nothing here is per-frame.
+// light_view_proj changes per cascade (Render below) and per cube face
+// (LocalShadows), model and the skin fields change per draw, and every writer
+// pokes its own slice at a fixed byte offset (0 / 64 / 128) rather than pushing
+// the whole block. Byte 128 in particular is a cross-backend contract: the
+// d3d12 backend binds the t998 bone-palette root SRV from the u64 it finds
+// there, shared with mesh.vs, and only for blocks >= 136 bytes. Fitting 128
+// would mean routing the per-cascade matrix through an indexed buffer bound in
+// set 0 - which here is the shared material layout - and re-agreeing the BDA
+// offset with mesh.vs across both backends. That is a redesign of shadow
+// rendering, not a repack, so the size is declared as an explicit exception;
+// the device still refuses the layout (and names the pipeline) on an adapter
+// that cannot serve it.
+struct ShadowPush {
+  Mat4 light_view_proj;  // per cascade / per cube face
+  Mat4 model;            // per draw
+  u64 bone_address;      // skinned permutation only; d3d12 reads it from here
+  u32 skin_offset;
+  u32 pad;
+};
+static_assert(offsetof(ShadowPush, model) == 64, "shadow model push offset");
+static_assert(offsetof(ShadowPush, bone_address) == 128, "shadow BDA push offset");
 
 }  // namespace
 
@@ -61,7 +86,7 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout,
                   .bias_constant = 1.25f,
                   .bias_slope = 2.0f},
         .sets = {{.shared = material_layout}},  // set 0: alpha-test inputs
-        .push_constant_size = 2 * sizeof(Mat4) + 16,
+        .push_constant_size = PushSizeOverGuarantee<ShadowPush>(),
         .debug_name = name,
     };
     desc.vertex_buffers.push_back(position_stream);

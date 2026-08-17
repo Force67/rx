@@ -286,6 +286,10 @@ std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* wind
   device->caps_.max_anisotropy = 16.0f;
   device->caps_.debug_utils = false;
   device->caps_.accel_scratch_alignment = 256;
+  // D3D12 has no push-constant ceiling to report: blocks past
+  // kMaxRootConstantBytes spill into the per-frame upload ring behind a root
+  // CBV, so the real bound is the 64 KiB a constant buffer can hold.
+  device->caps_.max_push_constant_bytes = 64 * 1024;
 
 #if defined(_WIN32)
   IDXGIFactory4* factory = nullptr;
