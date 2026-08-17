@@ -72,7 +72,6 @@ rx_add_module(render
   geometry/gaussian.cc
   util/exr_write.cc
   util/gpu_profiler.cc
-  util/stb_impl.cc
   rhi/rhi.cc
   null/null_device.cc
 )
@@ -156,7 +155,7 @@ endif()
 target_link_libraries(rx_render
   PUBLIC rx::core rx::asset
          $<BUILD_INTERFACE:volk> $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)
-target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::stb>)
+target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::stb_impl>)
 
 if(RX_FSR3)
   target_sources(rx_render PRIVATE
@@ -191,7 +190,7 @@ if(RX_NRD)
 endif()
 
 if(NOT MSVC)
-  set_source_files_properties(vulkan/vma_impl.cc util/stb_impl.cc PROPERTIES COMPILE_OPTIONS -w)
+  set_source_files_properties(vulkan/vma_impl.cc PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
 set(RX_RENDER_SHADERS

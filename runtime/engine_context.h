@@ -24,7 +24,7 @@ namespace rx {
 // The viewer's boot configuration: the app::AppConfig fields plus the
 // front-door content selection (main.cc maps the overlap into AppConfig).
 struct EngineConfig {
-  std::string gltf_path;   // standalone gltf/glb scene (e.g. sponza)
+  std::string scene_path;  // standalone gltf/glb or usd scene (e.g. sponza)
   std::string demo_scene;  // builtin demo scene id ("water", "materials", ...)
   render::RendererDesc renderer;
   // Hardware quality tier. kAuto picks one from the gpu at startup; the rest

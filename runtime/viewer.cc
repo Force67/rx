@@ -105,8 +105,8 @@ bool Viewer::OnInitialize(app::Services& services) {
 
   if (physics_->initialized()) CreatePhysicsCubeAsset();
 
-  if (!config_.gltf_path.empty()) {
-    if (!LoadGltfScene()) return false;
+  if (!config_.scene_path.empty()) {
+    if (!LoadSceneFile()) return false;
   } else {
     demos_->CreateDemoScene();
   }
@@ -136,9 +136,12 @@ void Viewer::CreatePhysicsCubeAsset() {
   }
 }
 
-bool Viewer::LoadGltfScene() {
-  asset::GltfScene scene;
-  if (!asset::LoadGltfScene(config_.gltf_path, &scene)) return false;
+bool Viewer::LoadSceneFile() {
+  asset::ImportedScene scene;
+  const bool loaded = asset::IsUsdPath(config_.scene_path)
+                          ? asset::LoadUsdScene(config_.scene_path, &scene)
+                          : asset::LoadGltfScene(config_.scene_path, &scene);
+  if (!loaded) return false;
 
   if (!config_.headless) {
     for (const asset::Texture& texture : scene.textures) {
@@ -149,7 +152,7 @@ bool Viewer::LoadGltfScene() {
   }
 
   base::Vector<std::pair<u32, ecs::Entity>> instance_entities;
-  for (const asset::GltfScene::Instance& instance : scene.instances) {
+  for (const asset::ImportedScene::Instance& instance : scene.instances) {
     const asset::Mesh& mesh = scene.meshes[instance.mesh_index];
     // Morphed instances stay out of the ECS gather; EmitMorphedInstances
     // draws them with live weights (imported track or scripted sweep).
@@ -234,7 +237,7 @@ bool Viewer::LoadGltfScene() {
 // caller knowing anything about the model. That vertex's uv also picks the UDIM
 // tile the receiver is biased onto - a Genesis-style body lays its zones out
 // across u in [0,7), and only the anchored zone can take the decal.
-void Viewer::StampTattoos(const asset::GltfScene& scene,
+void Viewer::StampTattoos(const asset::ImportedScene& scene,
                           std::span<const std::pair<u32, ecs::Entity>> instances) {
   const char* spec = Tattoo.get();
   if (!spec || config_.headless || instances.empty()) return;

@@ -13,6 +13,7 @@
 #include "app/application.h"
 #include "app/host.h"
 #include "asset/gltf_loader.h"
+#include "asset/usd_loader.h"
 #include "asset/mesh.h"
 
 #include "debug_ui.h"
@@ -41,9 +42,9 @@ class Viewer : public app::Application {
   void OnShutdown() override;
 
  private:
-  bool LoadGltfScene();
+  bool LoadSceneFile();
   // RX_TATTOO capture hook: bakes decal layers onto the heaviest imported mesh.
-  void StampTattoos(const asset::GltfScene& scene,
+  void StampTattoos(const asset::ImportedScene& scene,
                     std::span<const std::pair<u32, ecs::Entity>> instances);
   // Held for the session so OnShutdown can hand it back; DecalBaker reuses
   // handles with no generation counter, so a leaked one would be handed to the

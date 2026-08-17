@@ -24,7 +24,10 @@ viewer runtime in place of the game.
   translucency, FFT ocean, gaussian splats, GPU particles, HDR10 output,
   dynamic resolution, texture streaming, async compute, VRS, meshlet path.
 - **engine/asset** - glTF loading (cgltf) including morph targets and weight
-  animations, MaterialX, primitives, LOD simplification, Loop subdivision,
+  animations, OpenUSD stage loading ([tinyusdz](https://github.com/lighttransport/tinyusdz):
+  `.usd`/`.usda`/`.usdc`/`.usdz` with composition, GeomSubsets and
+  UsdPreviewSurface; see [USD.md](docs/USD.md)),
+  MaterialX, primitives, LOD simplification, Loop subdivision,
   virtual filesystem with `.rxp` archives (rx ships its own under
   `engine/assets`, mounted at boot: `fonts://` holds the default UI font).
 - **engine/core** - SDL3 windowing (+ KDE HDR monitor), job system, input
@@ -46,14 +49,14 @@ viewer runtime in place of the game.
   drives a game-implemented `app::Application`. See [EMBEDDING.md](EMBEDDING.md)
   for using rx as the engine of your own game.
 - **runtime/** - the `rx` viewer (the reference `app::Application`):
-  `--gltf <scene>` or `--demo <id>` (water,
+  `--gltf <scene>`, `--usd <stage>` or `--demo <id>` (water,
   materials, cornell, cloth, grass, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
   meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx),
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`
   / `RX_SHOWCASE`), frame capture (`RX_UI_SHOT`).
-- **apps/editor** - the scene editor. It opens `.rxscene`, `.gltf`, `.glb`, and
-  `.blend` documents. Blend files are converted by Blender in background mode
+- **apps/editor** - the scene editor. It opens `.rxscene`, `.gltf`, `.glb`,
+  `.usd`/`.usda`/`.usdc`/`.usdz` and `.blend` documents. Blend files are converted by Blender in background mode
   into a cached GLB, retaining visible meshes, deform bones, skin weights, and
   body-deformation morphs. Compatible chest-helper/Genesis rigs automatically
   get a live jiggle preview plus selectable Hip Sway and March walk profiles.

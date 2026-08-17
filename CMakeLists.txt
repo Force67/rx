@@ -12,6 +12,7 @@ option(RX_FSR3 "Enable the AMD FSR 3.1 upscaler backend" ON)
 option(RX_DLSS "Enable the NVIDIA DLSS upscaler backend" ON)
 option(RX_NRD "Enable the NVIDIA NRD ray tracing denoiser" ON)
 option(RX_JOLT "Enable Jolt physics" ON)
+option(RX_USD "Enable OpenUSD scene loading (needs tools/get_tinyusdz.sh)" ON)
 option(RX_BUILD_TESTS "Build library test suites" ON)
 option(RX_BUILD_RUNTIME "Build the rx viewer executable" ON)
 option(RX_BUILD_EDITOR "Build the rx editor application (apps/editor, needs libultragui)" OFF)
@@ -119,6 +120,12 @@ if(RX_JOLT AND NOT EXISTS
    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/JoltPhysics/Jolt/Jolt.cmake)
   message(STATUS "JoltPhysics not found, physics disabled (run tools/get_jolt.sh)")
   set(RX_JOLT OFF)
+endif()
+
+if(RX_USD AND NOT EXISTS
+   ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyusdz/src/tinyusdz.hh)
+  message(STATUS "tinyusdz not found, usd loading disabled (run tools/get_tinyusdz.sh)")
+  set(RX_USD OFF)
 endif()
 
 # Helpers are included by path, never via CMAKE_MODULE_PATH: a parent project
@@ -415,6 +422,15 @@ if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
   add_executable(gltf_skin_test test/gltf_skin_test.cc)
   target_link_libraries(gltf_skin_test PRIVATE rx::asset rx::core)
   add_test(NAME gltf_skin_test COMMAND gltf_skin_test)
+endif()
+
+# USD import: composition (a reference arc into a second layer), the z-up /
+# metersPerUnit normalization and the UsdPreviewSurface mapping, on a usda
+# fixture the test writes itself.
+if(RX_BUILD_TESTS AND RX_USD AND "asset" IN_LIST RX_MODULES)
+  add_executable(usd_scene_test test/usd_scene_test.cc)
+  target_link_libraries(usd_scene_test PRIVATE rx::asset rx::core)
+  add_test(NAME usd_scene_test COMMAND usd_scene_test)
 endif()
 
 # Procedural vehicle audio: engine/skid/wind synthesis, the SynthVoice seam and

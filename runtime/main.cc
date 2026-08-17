@@ -12,6 +12,7 @@ namespace {
 void PrintUsage() {
   RX_INFO("usage: rx [options]");
   RX_INFO("  --gltf <path>         load a gltf/glb scene (e.g. assets/sponza/Sponza.gltf)");
+  RX_INFO("  --usd <path>          load a usd/usda/usdc/usdz stage");
   RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");
   RX_INFO("                        featuregym | cloth | locomotion | ship | nav | gym | puppet | drive |");
   RX_INFO("                        placement | grass | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
@@ -40,7 +41,7 @@ int main(int argc, char** argv) {
     std::string arg = argv[i];
     auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
 
-    if (arg == "--gltf") config.gltf_path = next();
+    if (arg == "--gltf" || arg == "--usd") config.scene_path = next();
     else if (arg == "--demo") config.demo_scene = next();
     else if (arg == "--headless") config.headless = true;
     else if (arg == "--preset") config.preset = rx::render::ParsePreset(next());

@@ -51,7 +51,7 @@ void Check(bool condition, const char *message) {
   ++failures;
 }
 
-bool IdentityTransform(const asset::GltfScene::Instance &instance) {
+bool IdentityTransform(const asset::ImportedScene::Instance &instance) {
   return Length(instance.position) < 1e-7f &&
          std::fabs(instance.rotation[0]) < 1e-7f &&
          std::fabs(instance.rotation[1]) < 1e-7f &&
@@ -73,7 +73,7 @@ int main() {
   std::fwrite(kSharedMeshSkins, 1, sizeof(kSharedMeshSkins) - 1, file);
   std::fclose(file);
 
-  asset::GltfScene scene;
+  asset::ImportedScene scene;
   const bool loaded = asset::LoadGltfScene(path.string(), &scene);
   std::filesystem::remove(path);
   Check(loaded, "generated glTF loads");

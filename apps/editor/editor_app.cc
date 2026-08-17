@@ -10,6 +10,7 @@
 #include "app/host.h"
 #include "asset/blend_import.h"
 #include "asset/gltf_loader.h"
+#include "asset/usd_loader.h"
 #include "asset/primitives.h"
 #include "asset/vfs.h"
 #include "core/log.h"
@@ -283,6 +284,8 @@ void Editor::ScanAssets() {
         kind = "terrain";
       else if (ext == ".gltf" || ext == ".glb")
         kind = "mesh";
+      else if (asset::IsUsdPath(ext))
+        kind = "stage";
       else if (ext == ".blend")
         kind = "model";
       else if (ext == ".png" || ext == ".jpg" || ext == ".dds" || ext == ".ktx")
@@ -419,8 +422,11 @@ bool Editor::LoadModelDocument(const std::string &path) {
     reused_cache = converted.reused_cache;
   }
 
-  asset::GltfScene imported_scene;
-  if (!asset::LoadGltfScene(load_path, &imported_scene)) {
+  asset::ImportedScene imported_scene;
+  const bool imported = asset::IsUsdPath(load_path)
+                            ? asset::LoadUsdScene(load_path, &imported_scene)
+                            : asset::LoadGltfScene(load_path, &imported_scene);
+  if (!imported) {
     status_message_ = "Model load failed: " + path;
     MarkDirty();
     return false;
@@ -452,7 +458,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
   }
 
   const u32 model_index = static_cast<u32>(imported_models_.size());
-  for (const asset::GltfScene::Instance &source : imported_scene.instances) {
+  for (const asset::ImportedScene::Instance &source : imported_scene.instances) {
     if (source.mesh_index >= imported_scene.meshes.size())
       continue;
     scene::Transform transform;
@@ -496,12 +502,12 @@ bool Editor::LoadModelDocument(const std::string &path) {
   // the focus bounds makes the actual character microscopic in the viewport.
   const bool has_skinned_instances = std::any_of(
       imported_scene.instances.begin(), imported_scene.instances.end(),
-      [](const asset::GltfScene::Instance &instance) {
+      [](const asset::ImportedScene::Instance &instance) {
         return instance.skeleton_index >= 0;
       });
   Vec3 center{};
   u32 centers = 0;
-  for (const asset::GltfScene::Instance &instance : imported_scene.instances) {
+  for (const asset::ImportedScene::Instance &instance : imported_scene.instances) {
     if (instance.mesh_index >= imported_scene.meshes.size())
       continue;
     if (has_skinned_instances && instance.skeleton_index < 0)
@@ -520,7 +526,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
   if (centers > 0)
     center = center * (1.0f / centers);
   f32 radius = 1;
-  for (const asset::GltfScene::Instance &instance : imported_scene.instances) {
+  for (const asset::ImportedScene::Instance &instance : imported_scene.instances) {
     if (instance.mesh_index >= imported_scene.meshes.size())
       continue;
     if (has_skinned_instances && instance.skeleton_index < 0)
@@ -543,7 +549,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
   // lowest skinned bound and it rotates in lockstep with every skinned piece.
   if (has_skinned_instances) {
     f32 floor_y = std::numeric_limits<f32>::max();
-    for (const asset::GltfScene::Instance &instance : imported_scene.instances) {
+    for (const asset::ImportedScene::Instance &instance : imported_scene.instances) {
       if (instance.mesh_index >= imported_scene.meshes.size() ||
           instance.skeleton_index < 0)
         continue;
@@ -1164,7 +1170,7 @@ void Editor::OpenDocument(const std::string &path) {
   if (extension == ".rxscene") {
     DoLoad(path);
   } else if (extension == ".gltf" || extension == ".glb" ||
-             extension == ".blend") {
+             extension == ".blend" || asset::IsUsdPath(path)) {
     LoadModelDocument(path);
   } else {
     status_message_ = "Unsupported document: " + path;
@@ -1433,7 +1439,8 @@ void Editor::OpenFileDialog() {
         extension.begin(), extension.end(), extension.begin(),
         [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return extension == ".rxscene" || extension == ".gltf" ||
-           extension == ".glb" || extension == ".blend";
+           extension == ".glb" || extension == ".blend" ||
+           asset::IsUsdPath(path.string());
   };
   if (fs::exists(asset_root_)) {
     for (auto &p : fs::recursive_directory_iterator(asset_root_))
