@@ -25,6 +25,7 @@ struct FrameGlobals {
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 static const uint kFrameFlagAurora = 256u;  // 1 << 8, mirrors mesh_pipeline.h
+static const uint kFrameFlagAuthoredSky = 262144u;  // 1 << 18, mirrors mesh_pipeline.h
 
 [[vk::combinedImageSampler]] [[vk::binding(0, 1)]] TextureCube sky : register(t0, space1);
 [[vk::combinedImageSampler]] [[vk::binding(0, 1)]] SamplerState sky_sampler : register(s0, space1);
@@ -189,8 +190,11 @@ PsOut main(float4 sv_position : SV_Position,
   // would read as day); a real below-horizon sun still derives it here.
   float night = frame.aurora.y >= 0.0 ? saturate(frame.aurora.y)
                                       : smoothstep(0.04, -0.10, to_sun.y);
+  // An authored environment map already contains whatever sky it depicts; the
+  // procedural stars/sun/moon would be a second, unrelated sky drawn over it.
+  bool authored_sky = (frame.flags & kFrameFlagAuthoredSky) != 0u;
   // Stars first (behind everything), fading out as the sun climbs.
-  col += Stars(dir, night);
+  if (!authored_sky) col += Stars(dir, night);
   // Aurora (when the app enables it, via the frame flag), behind the sun/moon.
   // The cubemap already carries a 128^2-blurred copy of the same curtains for
   // the IBL; this draws them crisp at screen resolution, night-gated so the
@@ -199,9 +203,11 @@ PsOut main(float4 sv_position : SV_Position,
     col += AuroraRadiance(dir, frame.time, frame.aurora.x) * night;
   }
   // Crisp limb-darkened sun disk on top of the cubemap's scattered glow.
-  col += SunDisk(dir, to_sun, frame.misc.z, frame.sun_color.rgb, frame.sun_direction.w);
-  // Phased moon, anti-solar so it rides high at night.
-  col += Moon(dir, to_sun, frame.sun_color.rgb, frame.sun_direction.w);
+  if (!authored_sky) {
+    col += SunDisk(dir, to_sun, frame.misc.z, frame.sun_color.rgb, frame.sun_direction.w);
+    // Phased moon, anti-solar so it rides high at night.
+    col += Moon(dir, to_sun, frame.sun_color.rgb, frame.sun_direction.w);
+  }
   output.color = float4(col, 1.0);
 
   // Reproject a point far along the ray; translation is negligible there.

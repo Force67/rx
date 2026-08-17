@@ -7,6 +7,9 @@
 #define STBI_ONLY_PNG
 #define STBI_ONLY_BMP
 #define STBI_ONLY_TGA
+// Radiance .hdr, the format environment maps ship in: a UsdLux DomeLight points
+// at one, and without this every imported sky is undecodable.
+#define STBI_ONLY_HDR
 #include <stb_image.h>
 
 #define STB_IMAGE_WRITE_IMPLEMENTATION

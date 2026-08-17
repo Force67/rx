@@ -258,6 +258,7 @@ set(RX_RENDER_SHADERS
   shaders/atmosphere/lightning_bolt.vs.hlsl
   shaders/atmosphere/lightning_bolt.ps.hlsl
   shaders/atmosphere/surface_weather.cs.hlsl
+  shaders/atmosphere/envmap.cs.hlsl
   shaders/atmosphere/sky.cs.hlsl
   shaders/atmosphere/sky.ps.hlsl
   shaders/atmosphere/irradiance.cs.hlsl

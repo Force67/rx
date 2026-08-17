@@ -7,6 +7,7 @@
 #include "render/atmosphere/ltc_tables.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "shaders/brdf_lut_cs_hlsl.h"
+#include "shaders/envmap_cs_hlsl.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/irradiance_cs_hlsl.h"
 #include "shaders/multiscatter_lut_cs_hlsl.h"
@@ -17,6 +18,14 @@
 
 namespace rx::render {
 namespace {
+
+struct EnvmapPush {
+  f32 tint[3];
+  f32 face_size;
+  f32 intensity;
+  f32 rotation;
+  f32 pad[2];
+};
 
 struct SkyPush {
   f32 sun_direction[3];
@@ -56,6 +65,12 @@ std::unique_ptr<EnvironmentSystem> EnvironmentSystem::Create(Device& device) {
                                            .mip_filter = Filter::kNearest,
                                            .address_u = AddressMode::kClampToEdge,
                                            .address_v = AddressMode::kClampToEdge});
+  env->envmap_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
+                                            .mag_filter = Filter::kLinear,
+                                            .mip_filter = Filter::kLinear,
+                                            .address_u = AddressMode::kRepeat,
+                                            .address_v = AddressMode::kClampToEdge,
+                                            .address_w = AddressMode::kClampToEdge});
   env->wrap_sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
                                           .mag_filter = Filter::kLinear,
                                           .address_u = AddressMode::kRepeat,
@@ -210,6 +225,8 @@ bool EnvironmentSystem::CreatePipelines() {
   };
 
   if (!make_compute(&sky_gen_, RX_SHADER(k_sky_cs_hlsl), 2, sizeof(SkyPush), "sky_gen") ||
+      !make_compute(&envmap_gen_, RX_SHADER(k_envmap_cs_hlsl), 1, sizeof(EnvmapPush),
+                    "envmap_gen") ||
       !make_compute(&irradiance_gen_, RX_SHADER(k_irradiance_cs_hlsl), 1, sizeof(SizePush),
                     "irradiance_gen") ||
       !make_compute(&prefilter_gen_, RX_SHADER(k_prefilter_cs_hlsl), 1, sizeof(PrefilterPush),
@@ -402,6 +419,27 @@ void EnvironmentSystem::RecordUpdate(CommandList& cmd, const Vec3& sun_direction
 
   cmd.Barrier(Transition(sky_, sky_old, ResourceState::kGeneral));
 
+  if (has_envmap_) {
+    // An authored dome replaces the atmosphere outright: the convolutions below
+    // are unchanged, so the scene picks up real directional sky lighting rather
+    // than a flat ambient stand-in.
+    EnvmapPush push{};
+    push.tint[0] = envmap_tint_.x;
+    push.tint[1] = envmap_tint_.y;
+    push.tint[2] = envmap_tint_.z;
+    push.face_size = static_cast<f32>(kSkySize);
+    push.intensity = envmap_intensity_;
+    push.rotation = envmap_rotation_;
+    cmd.BindPipeline(envmap_gen_);
+    cmd.BindTransient(0, {Bind::StorageView(0, sky_storage_view_),
+                          Bind::Combined(1, envmap_.view, envmap_sampler_)});
+    cmd.Push(push);
+    cmd.Dispatch(kSkySize / 8, kSkySize / 8, 6);
+    cmd.Barrier(Transition(sky_, ResourceState::kGeneral, ResourceState::kShaderReadAll));
+    RecordConvolutions(cmd, conv_old);
+    return;
+  }
+
   SkyPush sky_push{};
   Vec3 dir = Normalize(sun_direction);
   sky_push.sun_direction[0] = dir.x;
@@ -422,7 +460,59 @@ void EnvironmentSystem::RecordUpdate(CommandList& cmd, const Vec3& sun_direction
   cmd.Dispatch(kSkySize / 8, kSkySize / 8, 6);
 
   cmd.Barrier(Transition(sky_, ResourceState::kGeneral, ResourceState::kShaderReadAll));
+  RecordConvolutions(cmd, conv_old);
+}
 
+bool EnvironmentSystem::SetEnvironmentMap(const f32* rgba, u32 width, u32 height,
+                                          const Vec3& tint, f32 intensity,
+                                          f32 rotation_radians) {
+  if (!rgba || width == 0 || height == 0) return false;
+
+  // A new map may differ in size from the last one, so the old image goes.
+  if (envmap_) {
+    device_.WaitIdle();
+    device_.DestroyImage(envmap_);
+  }
+  envmap_ = device_.CreateImage2D(Format::kRGBA32Float, {width, height},
+                                  kTextureUsageSampled | kTextureUsageTransferDst);
+  if (!envmap_) {
+    has_envmap_ = false;
+    return false;
+  }
+
+  const u64 bytes = static_cast<u64>(width) * height * 4 * sizeof(f32);
+  GpuBuffer staging = device_.CreateBuffer(bytes, kBufferUsageTransferSrc, true);
+  if (!staging.mapped) {
+    device_.DestroyImage(envmap_);
+    envmap_ = {};
+    has_envmap_ = false;
+    return false;
+  }
+  std::memcpy(staging.mapped, rgba, bytes);
+  // Host-visible memory is not guaranteed coherent, so the write has to be
+  // flushed before the copy reads it; the other staging uploads in the engine
+  // (material_system, vk_device) do the same.
+  device_.FlushBuffer(staging, 0, bytes);
+  device_.ImmediateSubmit([&](CommandList& cmd) {
+    BufferTextureCopy region{.buffer_offset = 0, .mip = 0, .extent = {width, height}};
+    cmd.Barrier(Transition(envmap_, ResourceState::kUndefined, ResourceState::kCopyDst));
+    cmd.CopyBufferToTexture(staging, envmap_, {&region, 1});
+    cmd.Barrier(Transition(envmap_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
+  });
+  device_.DestroyBuffer(staging);
+
+  envmap_tint_ = tint;
+  envmap_intensity_ = intensity;
+  envmap_rotation_ = rotation_radians;
+  has_envmap_ = true;
+  return true;
+}
+
+void EnvironmentSystem::ClearEnvironmentMap() { has_envmap_ = false; }
+
+// Diffuse irradiance + ggx prefilter off the sky cubemap, whatever produced it.
+void EnvironmentSystem::RecordConvolutions(CommandList& cmd,
+                                           ResourceState conv_old) {
   cmd.Barrier(Transition(irradiance_, conv_old, ResourceState::kGeneral));
   cmd.Barrier(Transition(prefiltered_, conv_old, ResourceState::kGeneral));
 
@@ -594,7 +684,7 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
 EnvironmentSystem::~EnvironmentSystem() {
   device_.DestroyPipeline(sky_draw_pipeline_);
   device_.DestroyBindingLayout(env_set_layout_);
-  for (PipelineHandle* pipeline : {&sky_gen_, &irradiance_gen_, &prefilter_gen_, &brdf_gen_,
+  for (PipelineHandle* pipeline : {&sky_gen_, &envmap_gen_, &irradiance_gen_, &prefilter_gen_, &brdf_gen_,
                                    &transmittance_gen_, &multiscatter_gen_}) {
     device_.DestroyPipeline(*pipeline);
     *pipeline = {};
@@ -611,6 +701,7 @@ EnvironmentSystem::~EnvironmentSystem() {
   device_.DestroyImage(brdf_lut_);
   device_.DestroyImage(transmittance_lut_);
   device_.DestroyImage(multiscatter_lut_);
+  device_.DestroyImage(envmap_);
   device_.DestroyImage(white_);
   device_.DestroyImage(black_array_);
   device_.DestroyImage(shadow_dummy_);

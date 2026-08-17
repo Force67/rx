@@ -67,6 +67,9 @@ base::Option<bool> AsyncComputeOpt{"async.compute", true, "RX_ASYNC_COMPUTE"};
 base::Option<bool> FrameGenOpt{"framegen", false, "RX_FRAMEGEN"};
 base::Option<bool> LocalShadowsOpt{"local.shadows", true, "RX_LOCAL_SHADOWS"};
 base::Option<bool> FroxelOpt{"froxel.fog", true, "RX_FROXEL"};
+// Probe-based diffuse GI, on by default; an override makes it bisectable
+// when indirect light is suspected of tinting a scene.
+base::Option<bool> DdgiOpt{"ddgi", true, "RX_DDGI"};
 base::Option<double> FroxelDensity{"froxel.density", 0.005,
                                    "RX_FROXEL_DENSITY"};
 base::Option<int> TexBudgetMb{"tex.budget.mb", -1, "RX_TEX_BUDGET_MB"};
@@ -119,6 +122,10 @@ base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 base::Option<bool> RtVegOpt{"rt.veg", true, "RX_RT_VEG"};
 base::Option<bool> RtVegAnyHitOpt{"rt.veg.anyhit", true, "RX_RT_VEG_ANYHIT"};
 // Phase 4 specular reflection quality/perf levers (AC Shadows adoption).
+// Raytraced specular for opaque surfaces; overridable so it can be bisected
+// against the rest of the ray tracing path.
+base::Option<bool> ReflOpt{"refl", true, "RX_REFL"};
+base::Option<bool> RtaoOpt{"rtao", true, "RX_RTAO"};
 base::Option<bool> ReflHalfOpt{"refl.half", true, "RX_REFL_HALF"};
 base::Option<bool> ReflShSkipOpt{"refl.sh_skip", true, "RX_REFL_SH_SKIP"};
 base::Option<float> ReflShSkipRough{"refl.sh_skip.rough", 0.45f,
@@ -1147,6 +1154,23 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     }
   }
   return true;
+}
+
+bool Renderer::SetEnvironmentMap(const f32 *rgba, u32 width, u32 height,
+                                 const Vec3 &tint, f32 intensity,
+                                 f32 rotation_radians) {
+  if (!environment_) return false;
+  // The cubemap is only re-convolved when the sun moves; an authored dome does
+  // not move, so nudge the cached sun so the next frame rebuilds it.
+  applied_sun_intensity_ = -1.0f;
+  return environment_->SetEnvironmentMap(rgba, width, height, tint, intensity,
+                                         rotation_radians);
+}
+
+void Renderer::ClearEnvironmentMap() {
+  if (!environment_) return;
+  applied_sun_intensity_ = -1.0f;
+  environment_->ClearEnvironmentMap();
 }
 
 void Renderer::CaptureScreenshot(const std::string &path) {
@@ -3304,7 +3328,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                const FrameView &view) {
   u32 frame_slot = frame_index_ % kFramesInFlight;
   bool rt_shadows = rt_available_ && settings_.rt_shadows;
-  bool rtao_active = rt_available_ && settings_.rtao;
+  bool rtao_active = rt_available_ && settings_.rtao && RtaoOpt.get();
   // RCGI takes over the indirect-diffuse path (DDGI + SSGI) when on. It is
   // available with hardware ray query OR the software SDF clipmap tracer.
   bool sdf_ready = sdf_clipmap_ && sdf_clipmap_->ready() && sdf_available_;
@@ -3317,9 +3341,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   bool rcgi_software =
       rcgi_active && sdf_ready && (!rt_available_ || rcgi_force_software_);
   bool rcgi_probes_only = RcgiProbesOnlyOpt || rcgi_software;
-  bool ddgi_active = ddgi_ && settings_.ddgi && settings_.ibl && !rcgi_active;
+  bool ddgi_active = ddgi_ && settings_.ddgi && DdgiOpt.get() && settings_.ibl && !rcgi_active;
   bool reflections_active =
-      rt_available_ && settings_.rt_reflections && bindless_ != nullptr;
+      rt_available_ && settings_.rt_reflections && ReflOpt.get() && bindless_ != nullptr;
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
   bool path_trace =
@@ -3870,6 +3894,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   globals.misc[3] = static_cast<f32>(frame_index_ % 4096);
   if (settings_.ibl && !interior)
     globals.flags |= kFrameFlagIbl;
+  // With an authored dome the cubemap is a photograph of a real sky; the
+  // procedural sun/moon/stars in sky.ps would sit on top of it as a second sky.
+  if (environment_ && environment_->has_environment_map())
+    globals.flags |= kFrameFlagAuthoredSky;
   if (nrd_ao || ss_ao)
     globals.flags |= kFrameFlagAoValid;
   if (csm_active && !interior)

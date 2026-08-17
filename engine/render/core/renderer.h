@@ -531,6 +531,13 @@ public:
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.
   RenderSettings &settings() { return settings_; }
+
+  // Installs an authored equirectangular HDR as the sky, so IBL comes from the
+  // scene's own environment map instead of the procedural atmosphere. Feeds a
+  // UsdLux DomeLight through to the lighting; see EnvironmentSystem.
+  bool SetEnvironmentMap(const f32 *rgba, u32 width, u32 height, const Vec3 &tint,
+                         f32 intensity, f32 rotation_radians);
+  void ClearEnvironmentMap();
   // Points the decal systems at an uploaded texture (the atlas). Both the
   // clustered projectors and the baked texture-space layers read it.
   void SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas = {});

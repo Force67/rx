@@ -123,6 +123,7 @@ inline constexpr u32 kFrameFlagWaterField = 1u << 13;    // water samples the pe
 inline constexpr u32 kFrameFlagShoreWetting = 1u << 14;  // sample the shoreline wetting field (env slot 33)
 inline constexpr u32 kFrameFlagWaterCaustics = 1u << 15;  // modulate sun on submerged surfaces by the caustic map (env slot 34)
 inline constexpr u32 kFrameFlagRcgi = 1u << 16;  // indirect diffuse from the RCGI resolve texture (env slot 35), replaces DDGI + SSGI
+inline constexpr u32 kFrameFlagAuthoredSky = 1u << 18;  // sky cubemap is an authored envmap: no procedural sun/moon/stars
 inline constexpr u32 kFrameFlagSkinDynamics = 1u << 17;  // skin reads frame.skin_dynamics (blood-flow pulse/perfusion/tension)
 
 // One active morph target on a draw: index into the mesh's target list and
