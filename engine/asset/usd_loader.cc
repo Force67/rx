@@ -40,7 +40,8 @@ bool IsUsdPath(std::string_view path) {
 
 #if !defined(RX_HAVE_USD)
 
-bool LoadUsdScene(const std::string &path, ImportedScene *) {
+bool LoadUsdScene(const std::string &path, ImportedScene *,
+                  const UsdLoadOptions &) {
   RX_ERROR("usd {}: this build has no USD support, reconfigure with RX_USD=ON",
            path);
   return false;
@@ -168,6 +169,15 @@ void ConvertMaterial(const tt::RenderScene &scene, const tt::RenderMaterial &src
       out->metallic_roughness = out->metallic_map;
   } else if (metallic_image >= 0 && roughness_image < 0) {
     out->metallic_roughness = image_ids[static_cast<u32>(metallic_image)];
+  } else if (roughness_image >= 0) {
+    // Roughness map, no metallic map. The combined slot is roughness-only, but
+    // the glTF packing the shader assumes reads metallic from its `.b` - and a
+    // greyscale roughness map expands to rgb, so `.b` is the roughness value.
+    // Matte cloth with a non-zero `metallic` scalar then shades as tinted
+    // metal. kFlagSeparateMetallic switches the shader to metallic_map.r, whose
+    // white default makes metallic == metallic_factor: exactly the
+    // UsdPreviewSurface meaning of a scalar metallic with no texture.
+    out->separate_metallic = true;
   }
 
   switch (src.materialTag) {
@@ -213,6 +223,23 @@ bool ConvertMesh(const tt::RenderMesh &src,
   const f32 *binormals = AttributeFloats(src.binormals, vertex_count, 3);
   const f32 *colors = AttributeFloats(src.vertex_colors, vertex_count, 3);
   const f32 *opacities = AttributeFloats(src.vertex_opacities, vertex_count, 1);
+  // `primvars:displayColor` is Hydra's *preview* color: Storm shades with it
+  // only when a prim has no material bound, and the MDL/RTX renderers ignore
+  // it outright. The engine multiplies vertex color into base color (the glTF
+  // COLOR_0 contract), so baking displayColor under a bound material would
+  // tint the whole object with a value the source renderer never used -
+  // NVIDIA's Attic authors a leftover constant red (1,0,0) on its wall,
+  // window and beam meshes exactly this way. Keep it only as the unlit
+  // fallback for materially unbound meshes, and never when it carries the
+  // negative "unauthored" sentinel some exporters write.
+  bool material_bound = src.material_id >= 0;
+  for (const auto &[subset_name, subset] : src.material_subsetMap)
+    material_bound = material_bound || subset.material_id >= 0;
+  if (colors && (material_bound || colors[0] < 0.0f || colors[1] < 0.0f ||
+                 colors[2] < 0.0f)) {
+    colors = nullptr;
+    opacities = nullptr;
+  }
   const f32 *uvs = nullptr;
   if (const auto it = src.texcoords.find(0); it != src.texcoords.end())
     uvs = AttributeFloats(it->second, vertex_count, 2);
@@ -492,12 +519,306 @@ u32 NormalizeColorSpaceTokens(tinyusdz::PrimSpec &spec) {
   return changed;
 }
 
+Vec3 TransformDirectionNormalized(const Mat4 &m, const Vec3 &v) {
+  Vec3 d = TransformDir(m, v);
+  const f32 len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+  if (len > 1e-8f) {
+    d.x /= len;
+    d.y /= len;
+    d.z /= len;
+  }
+  return d;
+}
+
+// A light's texture (dome envmap) is authored relative to the layer that
+// declares it, which for a lighting rig kept in a subdirectory is one level
+// below the root stage. Try the authored spelling, then the stage directory,
+// then the stage directory with the leading parent hops folded away.
+std::string ResolveLightTexture(const std::string &asset,
+                                const std::string &base_dir) {
+  if (asset.empty())
+    return {};
+  namespace fs = std::filesystem;
+  if (fs::exists(asset))
+    return asset;
+  if (!base_dir.empty()) {
+    const fs::path direct = fs::path(base_dir) / asset;
+    if (fs::exists(direct))
+      return direct.string();
+    std::string trimmed = asset;
+    while (trimmed.rfind("../", 0) == 0)
+      trimmed = trimmed.substr(3);
+    const fs::path folded = fs::path(base_dir) / trimmed;
+    if (fs::exists(folded))
+      return folded.string();
+  }
+  return {};
+}
+
+// Solid-angle averaged chromaticity of an equirectangular environment map,
+// normalized to unit luminance. Rows are weighted by sin(theta) because an
+// equirect image oversamples the poles; without that a bright horizon sun reads
+// as far less of the average than it really is.
+bool AverageEnvmapColor(const std::string &path, f32 out_rgb[3]) {
+  int width = 0, height = 0, channels = 0;
+  f32 *pixels = stbi_loadf(path.c_str(), &width, &height, &channels, 3);
+  if (!pixels)
+    return false;
+
+  f64 sum[3] = {0, 0, 0};
+  f64 weight_total = 0;
+  // A few hundred rows is plenty for an average and keeps a 4k map cheap.
+  const int row_step = std::max(1, height / 256);
+  const int col_step = std::max(1, width / 512);
+  for (int y = 0; y < height; y += row_step) {
+    const f64 theta = (static_cast<f64>(y) + 0.5) / height * 3.14159265358979;
+    const f64 weight = std::sin(theta);
+    for (int x = 0; x < width; x += col_step) {
+      const f32 *p = pixels + (static_cast<size_t>(y) * width + x) * 3;
+      // Guard against inf/nan, which show up in the wild in exr-sourced hdr.
+      for (int c = 0; c < 3; ++c) {
+        const f32 v = p[c];
+        if (std::isfinite(v) && v > 0.0f) sum[c] += weight * v;
+      }
+      weight_total += weight;
+    }
+  }
+  stbi_image_free(pixels);
+  if (weight_total <= 0)
+    return false;
+
+  f64 rgb[3];
+  for (int c = 0; c < 3; ++c) rgb[c] = sum[c] / weight_total;
+  const f64 luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  if (!(luminance > 1e-9))
+    return false;
+  for (int c = 0; c < 3; ++c)
+    out_rgb[c] = static_cast<f32>(rgb[c] / luminance);
+  return true;
+}
+
+// UsdLux moved every light attribute into the `inputs:` namespace in USD
+// 21.02. Scenes authored before that - which is most published USD content,
+// NVIDIA's own samples included - spell them bare (`intensity`, `color`,
+// `texture:file`). tinyusdz binds its typed schema to the modern names only, so
+// on a legacy stage every light silently reconstructs as struct defaults: white,
+// intensity 1, and the whole authored rig is lost. Renaming here, before the
+// stage is built, lets the stock Tydra light conversion see them.
+//
+// The reverse never needs handling: a modern stage already carries `inputs:`,
+// and an already-namespaced property wins over a bare one of the same name.
+const char *const kLuxLegacyInputs[] = {
+    "intensity",       "exposure",         "diffuse",
+    "specular",        "normalize",        "color",
+    "enableColorTemperature",              "colorTemperature",
+    "radius",          "width",            "height",
+    "length",          "angle",            "treatAsPoint",
+    "treatAsLine",     "texture:file",     "texture:format",
+    "shaping:cone:angle",                  "shaping:cone:softness",
+    "shaping:focus",   "shaping:focusTint","shaping:ies:file",
+    "shaping:ies:angleScale",              "shaping:ies:normalize",
+};
+
+bool IsLightTypeName(const std::string &type_name) {
+  // UsdLuxDomeLight, SphereLight, RectLight, DiskLight, CylinderLight,
+  // DistantLight, GeometryLight, PortalLight - all end in "Light".
+  return type_name.size() > 5 &&
+         type_name.compare(type_name.size() - 5, 5, "Light") == 0;
+}
+
+// Renames legacy light attributes and records prims hidden by `visibility`.
+// Visibility is inherited, so an invisible ancestor hides the whole subtree;
+// the Attic keeps a full second lighting rig and a 500-bulb string-light strand
+// switched off exactly this way, and importing them would double-light it.
+u32 NormalizeLuxSchema(tinyusdz::PrimSpec &spec, const std::string &parent_path,
+                       bool parent_hidden,
+                       base::Vector<std::string> *hidden_paths) {
+  const std::string path = parent_path + "/" + spec.name();
+
+  bool hidden = parent_hidden;
+  if (!hidden) {
+    auto vis = spec.props().find("visibility");
+    if (vis != spec.props().end() && vis->second.is_attribute()) {
+      tinyusdz::value::token token;
+      if (vis->second.get_attribute().get_value(&token) &&
+          token.str() == "invisible") {
+        hidden = true;
+      }
+    }
+  }
+  if (hidden && !parent_hidden) hidden_paths->push_back(path);
+
+  u32 renamed = 0;
+  if (IsLightTypeName(spec.typeName())) {
+    for (const char *legacy : kLuxLegacyInputs) {
+      auto it = spec.props().find(legacy);
+      if (it == spec.props().end()) continue;
+      const std::string modern = std::string("inputs:") + legacy;
+      if (spec.props().count(modern)) continue; // authored both ways: keep new
+      tinyusdz::Property moved = it->second;
+      spec.props().erase(it);
+      spec.props().emplace(modern, std::move(moved));
+      ++renamed;
+    }
+  }
+
+  for (tinyusdz::PrimSpec &child : spec.children())
+    renamed += NormalizeLuxSchema(child, path, hidden, hidden_paths);
+  return renamed;
+}
+
+bool CoveredBy(const std::string &abs_path,
+               const base::Vector<std::string> &prefixes) {
+  for (const std::string &prefix : prefixes) {
+    if (abs_path.size() >= prefix.size() &&
+        abs_path.compare(0, prefix.size(), prefix) == 0 &&
+        (abs_path.size() == prefix.size() || abs_path[prefix.size()] == '/'))
+      return true;
+  }
+  return false;
+}
+
+bool IsHidden(const std::string &abs_path,
+              const base::Vector<std::string> &hidden_paths,
+              const UsdLoadOptions &options) {
+  if (CoveredBy(abs_path, options.hide)) return true;
+  if (CoveredBy(abs_path, options.show)) return false;
+  return CoveredBy(abs_path, hidden_paths);
+}
+
+void ConvertLights(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
+                   f32 meters_per_unit,
+                   const base::Vector<std::string> &hidden_paths,
+                   const UsdLoadOptions &options, const std::string &base_dir,
+                   ImportedScene *out) {
+  using Kind = ImportedScene::Light::Kind;
+  u32 skipped = 0;
+  for (const tt::RenderLight &src : scene.lights) {
+    if (IsHidden(src.abs_path, hidden_paths, options)) {
+      ++skipped;
+      continue;
+    }
+    ImportedScene::Light light;
+    switch (src.type) {
+    case tt::RenderLight::Type::Distant: light.kind = Kind::kDistant; break;
+    case tt::RenderLight::Type::Dome: light.kind = Kind::kDome; break;
+    case tt::RenderLight::Type::Rect: light.kind = Kind::kRect; break;
+    case tt::RenderLight::Type::Disk: light.kind = Kind::kDisk; break;
+    case tt::RenderLight::Type::Cylinder: light.kind = Kind::kCylinder; break;
+    case tt::RenderLight::Type::Point:
+    case tt::RenderLight::Type::Sphere: light.kind = Kind::kSphere; break;
+    default:
+      // Geometry and portal lights have no engine equivalent.
+      ++skipped;
+      continue;
+    }
+
+    light.position = TransformPoint(
+        stage_to_engine, {src.position[0], src.position[1], src.position[2]});
+    light.direction = TransformDirectionNormalized(
+        stage_to_engine, {src.direction[0], src.direction[1], src.direction[2]});
+    light.color[0] = src.color[0];
+    light.color[1] = src.color[1];
+    light.color[2] = src.color[2];
+    light.intensity = src.intensity;
+    light.exposure = src.exposure;
+    // Shape extents are authored in stage units like everything else.
+    light.radius = src.radius * meters_per_unit;
+    light.width = src.width * meters_per_unit;
+    light.height = src.height * meters_per_unit;
+    light.length = src.length * meters_per_unit;
+    light.cone_angle = src.shapingConeAngle;
+    light.cone_softness = src.shapingConeSoftness;
+    light.normalize = src.normalize;
+    light.texture = ResolveLightTexture(src.textureFile, base_dir);
+    if (!light.texture.empty())
+      AverageEnvmapColor(light.texture, light.texture_average);
+
+    // UsdLux colorTemperature overrides the authored color when enabled.
+    if (src.enableColorTemperature) {
+      // Planckian locus, Krystek's rational fit, good to ~1% over 1667-25000K.
+      const f32 t = src.colorTemperature;
+      const f32 u = (0.860117757f + 1.54118254e-4f * t + 1.28641212e-7f * t * t) /
+                    (1.0f + 8.42420235e-4f * t + 7.08145163e-7f * t * t);
+      const f32 v = (0.317398726f + 4.22806245e-5f * t + 4.20481691e-8f * t * t) /
+                    (1.0f - 2.89741816e-5f * t + 1.61456053e-7f * t * t);
+      const f32 d = 2.0f * u - 8.0f * v + 4.0f;
+      const f32 x = 3.0f * u / d, y = 2.0f * v / d;
+      const f32 Y = 1.0f, X = (y > 1e-6f) ? (x * Y / y) : 0.0f;
+      const f32 Z = (y > 1e-6f) ? ((1.0f - x - y) * Y / y) : 0.0f;
+      f32 rgb[3] = {3.2406f * X - 1.5372f * Y - 0.4986f * Z,
+                    -0.9689f * X + 1.8758f * Y + 0.0415f * Z,
+                    0.0557f * X - 0.2040f * Y + 1.0570f * Z};
+      f32 peak = std::max(rgb[0], std::max(rgb[1], rgb[2]));
+      if (peak <= 0.0f) peak = 1.0f;
+      // UsdLux multiplies the blackbody colour into `inputs:color`; it does not
+      // replace it (see tinyusdz usdLux.cc GetColorTemperatureRGB callers).
+      for (int c = 0; c < 3; ++c)
+        light.color[c] *= std::max(0.0f, rgb[c] / peak);
+    }
+
+    out->lights.push_back(std::move(light));
+  }
+  if (skipped)
+    RX_DEBUG("usd: skipped {} hidden or unsupported light(s)", skipped);
+}
+
+void ConvertCameras(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
+                    const base::Vector<std::string> &hidden_paths,
+                    const UsdLoadOptions &options, ImportedScene *out) {
+  // RenderCamera carries no transform of its own - Tydra keeps it on the node -
+  // so pair each camera with the node that addresses it.
+  base::Vector<Mat4> node_matrices;
+  node_matrices.resize(static_cast<u32>(scene.cameras.size()));
+  base::Vector<bool> found;
+  found.resize(static_cast<u32>(scene.cameras.size()));
+  for (u32 i = 0; i < found.size(); ++i) found[i] = false;
+
+  struct Finder {
+    const tt::RenderScene &scene;
+    base::Vector<Mat4> &matrices;
+    base::Vector<bool> &found;
+    void Visit(const tt::Node &node) {
+      if (node.nodeType == tt::NodeType::Camera && node.id >= 0 &&
+          static_cast<u32>(node.id) < matrices.size()) {
+        matrices[static_cast<u32>(node.id)] = ToMat4(node.global_matrix);
+        found[static_cast<u32>(node.id)] = true;
+      }
+      for (const tt::Node &child : node.children) Visit(child);
+    }
+  } finder{scene, node_matrices, found};
+  for (const tt::Node &node : scene.nodes) finder.Visit(node);
+
+  for (u32 i = 0; i < scene.cameras.size(); ++i) {
+    const tt::RenderCamera &src = scene.cameras[i];
+    // A hidden camera must not become the viewpoint the scene opens on.
+    if (IsHidden(src.abs_path, hidden_paths, options))
+      continue;
+    ImportedScene::Camera camera;
+    // USD cameras look down -Z with +Y up, which is the engine's convention too.
+    const Mat4 world = stage_to_engine * (found[i] ? node_matrices[i] : Mat4{});
+    camera.position = {world.m[12], world.m[13], world.m[14]};
+    const Quat rotation = QuatFromMat4(world);
+    camera.rotation[0] = rotation.x;
+    camera.rotation[1] = rotation.y;
+    camera.rotation[2] = rotation.z;
+    camera.rotation[3] = rotation.w;
+    if (src.focalLength > 1e-6f) {
+      camera.yfov = 2.0f * std::atan(0.5f * src.verticalAperture / src.focalLength);
+    }
+    camera.znear = src.znear;
+    camera.zfar = src.zfar;
+    out->cameras.push_back(camera);
+  }
+}
+
 // Opening a layer only parses it; nothing composes until asked. This walks
 // LIVRPS in strength order and reconstructs a stage from the result. Each arc
 // is driven separately rather than through CompositeAllArcs, which hardcodes
 // default options and so rejects the parent-relative asset paths below.
 bool ComposeStage(const std::string &path, const std::string &base_dir,
-                  tinyusdz::Stage *stage) {
+                  tinyusdz::Stage *stage,
+                  base::Vector<std::string> *hidden_paths) {
   std::string warn, err;
   tinyusdz::Layer layer;
   if (!tinyusdz::LoadLayerFromFile(path, &layer, &warn, &err)) {
@@ -616,6 +937,13 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
   if (recased > 0)
     RX_DEBUG("usd {}: normalized {} colorSpace token(s)", path, recased);
 
+  u32 relux = 0;
+  for (auto &[name, spec] : layer.primspecs())
+    relux += NormalizeLuxSchema(spec, "", false, hidden_paths);
+  if (relux > 0)
+    RX_DEBUG("usd {}: moved {} pre-21.02 light attribute(s) into `inputs:`",
+             path, relux);
+
   if (!warn.empty())
     RX_WARN("usd {}: {}", path, warn);
 
@@ -629,22 +957,20 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
 
 } // namespace
 
-bool LoadUsdScene(const std::string &path, ImportedScene *out) {
+bool LoadUsdScene(const std::string &path, ImportedScene *out,
+                  const UsdLoadOptions &options) {
   std::string warn, err;
   tinyusdz::Stage stage;
+  base::Vector<std::string> hidden_paths;
   const std::string base_dir = tinyusdz::io::GetBaseDir(path);
   const bool is_usdz = tinyusdz::IsUSDZ(path);
-  if (is_usdz) {
-    // A usdz package selects its own root layer (first .usdc, else first
-    // .usda), which only tinyusdz's package reader knows how to pick. Packages
-    // are self-contained by spec, so they arrive effectively flattened.
-    if (!tinyusdz::LoadUSDFromFile(path, &stage, &warn, &err)) {
-      RX_ERROR("usd {}: {}", path, err.empty() ? "failed to open stage" : err);
-      return false;
-    }
-    if (!warn.empty())
-      RX_WARN("usd {}: {}", path, warn);
-  } else if (!ComposeStage(path, base_dir, &stage)) {
+  // usdz goes through the same path as a loose stage: a package selects its own
+  // root layer (first .usdc, else first .usda), and tinyusdz's layer reader
+  // picks it the same way its stage reader does. Reading it as a layer is what
+  // gives a package the legacy-UsdLux normalization and the visibility pass
+  // below - loading it straight to a Stage skips both, so packaged legacy
+  // lights reconstruct as defaults and authored-invisible prims stay lit.
+  if (!ComposeStage(path, base_dir, &stage, &hidden_paths)) {
     return false;
   }
 
@@ -656,6 +982,9 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out) {
   env.mesh_config.build_vertex_indices = true;
   env.mesh_config.compute_tangents_and_binormals = true;
   env.scene_config.load_texture_assets = true;
+  // EXPERIMENT (not part of the PR): without this Tydra widens every 8-bit
+  // sRGB texture to fp32, which ConvertImage's UInt8-only gate then rejects.
+  env.material_config.preserve_texel_bitdepth = true;
   if (!is_usdz) {
     // Inside a usdz package the stock loader reads through the package
     // resolver, which is the only thing that can see those entries.
@@ -741,6 +1070,10 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out) {
         MakeFromQuat(QuatFromAxisAngle({1, 0, 0}, -3.14159265358979f * 0.5f));
   }
 
+  ConvertLights(render_scene, stage_to_engine, meters_per_unit, hidden_paths,
+                options, base_dir, out);
+  ConvertCameras(render_scene, stage_to_engine, hidden_paths, options, out);
+
   NodeWalk walk{render_scene, stage_to_engine, out};
   for (const tt::Node &node : render_scene.nodes)
     walk.Visit(node);
@@ -753,11 +1086,11 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out) {
     }
   }
 
-  RX_INFO("usd {}: {} meshes, {} materials, {} textures, {} instances "
-          "(upAxis {}, {} m/unit)",
+  RX_INFO("usd {}: {} meshes, {} materials, {} textures, {} instances, "
+          "{} lights, {} cameras (upAxis {}, {} m/unit)",
           path, out->meshes.size() - skipped_meshes, out->materials.size(),
-          out->textures.size(), out->instances.size(),
-          render_scene.meta.upAxis, meters_per_unit);
+          out->textures.size(), out->instances.size(), out->lights.size(),
+          out->cameras.size(), render_scene.meta.upAxis, meters_per_unit);
   if (skipped_meshes || undecoded || unsupported_shaders || walk.mirrored) {
     RX_WARN("usd {}: {} mesh(es) not representable, {} image(s) not decoded, "
             "{} material(s) without a UsdPreviewSurface, {} mirrored instance(s)",
