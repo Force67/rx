@@ -13,6 +13,8 @@ void PrintUsage() {
   RX_INFO("usage: rx [options]");
   RX_INFO("  --gltf <path>         load a gltf/glb scene (e.g. assets/sponza/Sponza.gltf)");
   RX_INFO("  --usd <path>          load a usd/usda/usdc/usdz stage");
+  RX_INFO("  --usd-show <prim>     force a usd prim subtree visible (repeatable)");
+  RX_INFO("  --usd-hide <prim>     force a usd prim subtree hidden (repeatable)");
   RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");
   RX_INFO("                        featuregym | cloth | locomotion | ship | nav | gym | puppet | drive |");
   RX_INFO("                        placement | grass | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
@@ -43,6 +45,8 @@ int main(int argc, char** argv) {
 
     if (arg == "--gltf" || arg == "--usd") config.scene_path = next();
     else if (arg == "--demo") config.demo_scene = next();
+    else if (arg == "--usd-show") config.usd_visibility.show.push_back(next());
+    else if (arg == "--usd-hide") config.usd_visibility.hide.push_back(next());
     else if (arg == "--headless") config.headless = true;
     else if (arg == "--preset") config.preset = rx::render::ParsePreset(next());
     else if (arg == "--no-taa") config.renderer.aa_mode = rx::render::AntiAliasingMode::kNone;

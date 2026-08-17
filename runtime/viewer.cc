@@ -12,6 +12,9 @@
 #include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "core/log.h"
+
+// Radiance .hdr decode for imported dome environment maps.
+#include <stb_image.h>
 #include "scene/components.h"
 
 #include "demo_scenes.h"
@@ -41,6 +44,34 @@ base::Option<bool> UiShotSeq{"ui.shot.seq", false, "RX_UI_SHOT_SEQ"};
 // fixed weights on every morphed instance (unmatched names are skipped per
 // mesh), instead of the imported track / scripted sweep.
 base::Option<const char*> MorphWeights{"morph.weights", nullptr, "RX_MORPH_WEIGHTS"};
+
+// UsdLux intensities are photometric and their absolute scale is a per-DCC
+// convention rather than anything the spec pins down - Omniverse authors a
+// daylight sun at 15000 and a practical bulb in the millions - while the engine
+// works in a small linear range (a demo campfire sits at 9). These map one to
+// the other. They are options because the only way to judge them is to look at
+// the result, and content varies by an order of magnitude between authoring
+// tools.
+base::Option<float> UsdSunScale{"usd.sun.scale", 2.7e-4f, "RX_USD_SUN_SCALE"};
+base::Option<float> UsdDomeScale{"usd.dome.scale", 1.0e-5f, "RX_USD_DOME_SCALE"};
+base::Option<float> UsdLightScale{"usd.light.scale", 4.0e-3f, "RX_USD_LIGHT_SCALE"};
+// Cap on a single imported punctual light, so one absurd authored value cannot
+// blow out the whole frame.
+base::Option<float> UsdLightMax{"usd.light.max", 40.0f, "RX_USD_LIGHT_MAX"};
+// Imported scenes are lit by their own rig, so the sky/atmosphere is off by
+// default; set 0 to keep the procedural sky (an exterior stage wants it).
+base::Option<bool> UsdInterior{"usd.interior", true, "RX_USD_INTERIOR"};
+// Start from the stage's authored camera when it has one.
+base::Option<bool> UsdUseCamera{"usd.camera", true, "RX_USD_CAMERA"};
+// Yaw of an imported dome environment map. UsdLux does not pin which way a
+// latlong map faces, so matching the source can need a turn.
+base::Option<float> UsdDomeRotation{"usd.dome.rotation", 0.0f, "RX_USD_DOME_ROTATION"};
+// Camera/filmic effects that add light the authored rig never described. Both
+// halo hard in a dark interior with bright windows: lens flare mirrors the
+// windows through screen centre as cool ghosts, and bloom blows a practical
+// like the star ball into a white disc that swallows its own geometry. Off by
+// default when a scene brings its own lighting; set 1 to get them back.
+base::Option<bool> UsdCameraFx{"usd.camerafx", false, "RX_USD_CAMERAFX"};
 // Capture hook: RX_TATTOO="fx,fy,fz,size[;...]" bakes decal layers onto the
 // heaviest mesh of a --gltf scene. Anchors are fractions of that mesh's local
 // bounds (0.5,0.75,0.5 is chest height, centred); each tattoo aims along the
@@ -139,7 +170,8 @@ void Viewer::CreatePhysicsCubeAsset() {
 bool Viewer::LoadSceneFile() {
   asset::ImportedScene scene;
   const bool loaded = asset::IsUsdPath(config_.scene_path)
-                          ? asset::LoadUsdScene(config_.scene_path, &scene)
+                          ? asset::LoadUsdScene(config_.scene_path, &scene,
+                                                config_.usd_visibility)
                           : asset::LoadGltfScene(config_.scene_path, &scene);
   if (!loaded) return false;
 
@@ -228,6 +260,11 @@ bool Viewer::LoadSceneFile() {
   camera_.set_position({-7.0f, 1.7f, 0.0f});
   camera_.set_yaw_pitch(1.5708f, 0.0f);
   camera_.speed = 4.0f;
+
+  if (!config_.headless) {
+    ApplySceneLighting(scene);
+    ApplySceneCamera(scene);  // after the default, so an authored one wins
+  }
   return true;
 }
 
@@ -409,6 +446,226 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
           mesh.id.hash, best_vertices, tile_u, tile_v);
 }
 
+// World-space area of an emitter, used only to undo UsdLux `normalize` (which
+// divides emitted power by area). The engine's area lights take a radiance and
+// integrate the emitter's solid angle in the shader, so area is otherwise not
+// part of the conversion.
+static f32 EmitterArea(const asset::ImportedScene::Light& light) {
+  using Kind = asset::ImportedScene::Light::Kind;
+  constexpr f32 kPi = 3.14159265358979f;
+  switch (light.kind) {
+    case Kind::kSphere: return 4.0f * kPi * light.radius * light.radius;
+    case Kind::kDisk: return kPi * light.radius * light.radius;
+    case Kind::kRect: return light.width * light.height;
+    case Kind::kCylinder: return 2.0f * kPi * light.radius * light.length;
+    default: return 1.0f;
+  }
+}
+
+void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
+  if (scene.lights.empty()) return;
+  using Kind = asset::ImportedScene::Light::Kind;
+  auto& s = renderer_->settings();
+
+  const asset::ImportedScene::Light* sun = nullptr;
+  const asset::ImportedScene::Light* dome = nullptr;
+  u32 punctual = 0, dropped = 0, distant_count = 0, dome_count = 0;
+
+  for (const asset::ImportedScene::Light& light : scene.lights) {
+    const f32 gain = light.intensity * std::exp2(light.exposure);
+    if (light.kind == Kind::kDistant) {
+      // Brightest distant light wins: a rig may carry a fill as well as a key.
+      ++distant_count;
+      if (!sun || gain > sun->intensity * std::exp2(sun->exposure)) sun = &light;
+      continue;
+    }
+    if (light.kind == Kind::kDome) {
+      ++dome_count;
+      if (!dome || gain > dome->intensity * std::exp2(dome->exposure)) dome = &light;
+      continue;
+    }
+    render::PointLight pl;
+    pl.pos_radius[0] = light.position.x;
+    pl.pos_radius[1] = light.position.y;
+    pl.pos_radius[2] = light.position.z;
+    // color_intensity.w is a radiance: the LTC area-light path in mesh.ps
+    // integrates the emitter's solid angle itself, so multiplying by area here
+    // would count it twice. UsdLux `normalize` divides emitted power by area,
+    // which in radiance terms is the only case that scales by 1/area.
+    const f32 area = EmitterArea(light);
+    const f32 radiance =
+        (light.normalize && area > 1e-6f) ? gain / area : gain;
+    f32 intensity = radiance * UsdLightScale.get();
+    if (intensity > UsdLightMax.get()) intensity = UsdLightMax.get();
+    if (intensity <= 1e-4f) {
+      ++dropped;
+      continue;
+    }
+    // Influence radius from an inverse-square falloff down to a ~1/255 cutoff,
+    // clamped so a bright practical does not light the entire stage.
+    pl.pos_radius[3] = std::min(30.0f, std::max(1.0f, std::sqrt(intensity * 255.0f)));
+    pl.color_intensity[0] = light.color[0];
+    pl.color_intensity[1] = light.color[1];
+    pl.color_intensity[2] = light.color[2];
+    pl.color_intensity[3] = intensity;
+    pl.direction_type[0] = light.direction.x;
+    pl.direction_type[1] = light.direction.y;
+    pl.direction_type[2] = light.direction.z;
+    switch (light.kind) {
+      case Kind::kRect:
+        pl.direction_type[3] = 3.0f;
+        pl.params[0] = 0.5f * light.width;
+        pl.params[1] = 0.5f * light.height;
+        break;
+      case Kind::kSphere:
+      case Kind::kDisk:
+      case Kind::kCylinder:
+        pl.direction_type[3] = 2.0f;  // sphere area light
+        pl.params[0] = std::max(0.01f, light.radius);
+        break;
+      default:
+        pl.direction_type[3] = 0.0f;
+        break;
+    }
+    // A ShapingAPI cone narrower than the hemisphere is a spot.
+    if (light.cone_angle < 89.9f && light.kind != Kind::kRect) {
+      pl.direction_type[3] = 1.0f;
+      const f32 outer = light.cone_angle * 3.14159265358979f / 180.0f;
+      const f32 inner = outer * (1.0f - std::clamp(light.cone_softness, 0.0f, 1.0f));
+      pl.params[0] = std::cos(inner);
+      pl.params[1] = std::cos(outer);
+    }
+    scene_lights_.push_back(pl);
+    ++punctual;
+  }
+
+  // The renderer uploads only the first kMaxFrameLights and clusters only the
+  // first few per cluster, both silently. Ordering brightest-first means what
+  // survives a truncation is what matters most, and the count is reported.
+  std::sort(scene_lights_.begin(), scene_lights_.end(),
+            [](const render::PointLight &a, const render::PointLight &b) {
+              return a.color_intensity[3] > b.color_intensity[3];
+            });
+  if (scene_lights_.size() > 256) {
+    RX_WARN("usd lighting: {} punctual lights imported but the renderer uploads "
+            "256 per frame; the dimmest {} will not light the scene",
+            scene_lights_.size(), scene_lights_.size() - 256);
+  }
+
+  if (sun) {
+    s.sun_direction = sun->direction;
+    s.sun_color = {sun->color[0], sun->color[1], sun->color[2]};
+    s.sun_intensity =
+        sun->intensity * std::exp2(sun->exposure) * UsdSunScale.get();
+    ctx_.scene_owns_sun = true;
+    drive_sun_from_clock_ = false;
+  }
+
+  // A dome with an environment map becomes the actual sky: the convolutions
+  // then light the scene from every direction with the map's own colour, which
+  // is what balances a warm key against a cool fill. A flat ambient cannot -
+  // raise it enough to lift the shadows and it flattens the whole image.
+  bool dome_ibl = false;
+  if (dome && !dome->texture.empty()) {
+    int w = 0, h = 0, channels = 0;
+    if (f32* pixels = stbi_loadf(dome->texture.c_str(), &w, &h, &channels, 4)) {
+      const Vec3 tint{dome->color[0], dome->color[1], dome->color[2]};
+      const f32 gain =
+          dome->intensity * std::exp2(dome->exposure) * UsdDomeScale.get();
+      dome_ibl = renderer_->SetEnvironmentMap(pixels, static_cast<u32>(w),
+                                              static_cast<u32>(h), tint, gain,
+                                              UsdDomeRotation.get());
+      stbi_image_free(pixels);
+      if (dome_ibl) {
+        RX_INFO("usd lighting: dome envmap '{}' ({}x{}) drives ibl",
+                dome->texture, w, h);
+      }
+    } else {
+      RX_WARN("usd lighting: could not decode dome envmap '{}'", dome->texture);
+    }
+  }
+
+  // A stage viewed against its authored look wants the light its rig describes
+  // and nothing painted on top. RX_LENS_FLARE / the bloom settings still win if
+  // set explicitly (the renderer applies those options only when overridden).
+  if (!UsdCameraFx.get()) {
+    s.lens_flare = 0.0f;
+    s.bloom = false;
+  }
+
+  if (dome_ibl) {
+    // Keep the sky/IBL path, but the atmosphere model no longer applies: the
+    // background is the authored map and aerial perspective would haze an
+    // interior that has no atmosphere between camera and wall.
+    s.interior = false;
+    s.sky = true;
+    s.ibl = true;
+    s.clouds = false;
+    s.aerial_perspective = 0.0f;
+  } else if (UsdInterior.get()) {
+    // The rig is the whole lighting environment: a procedural sky behind it
+    // double-lights the stage and hazes interiors with aerial perspective.
+    s.interior = true;
+    s.sky = false;
+    s.clouds = false;
+    s.aerial_perspective = 0.0f;
+    const f32 dome_gain =
+        dome ? dome->intensity * std::exp2(dome->exposure) * UsdDomeScale.get()
+             : 0.05f;
+    // The dome's tint multiplies its environment map, so the fill colour is
+    // both together - the tint alone is not the colour of the sky.
+    const Vec3 dome_color =
+        dome ? Vec3{dome->color[0] * dome->texture_average[0],
+                    dome->color[1] * dome->texture_average[1],
+                    dome->color[2] * dome->texture_average[2]}
+             : Vec3{1.0f, 1.0f, 1.0f};
+    s.interior_ambient = {dome_color.x * dome_gain, dome_color.y * dome_gain,
+                          dome_color.z * dome_gain};
+    s.ambient = dome_gain;
+    if (sun) {
+      s.interior_directional_dir = sun->direction;
+      s.interior_directional_color = s.sun_color;
+      s.interior_directional_intensity = s.sun_intensity;
+    }
+  }
+
+  if (distant_count > 1 || dome_count > 1) {
+    RX_WARN("usd lighting: {} distant and {} dome light(s) authored; USD adds "
+            "them, this takes only the brightest of each",
+            distant_count, dome_count);
+  }
+  RX_INFO(
+      "usd lighting: sun {} (intensity {:.2f}), dome {} (ambient {:.3f}), "
+      "{} punctual light(s){}",
+      sun ? "authored" : "none", sun ? s.sun_intensity : 0.0f,
+      dome ? "authored" : "none", s.ambient, punctual,
+      dropped ? ", some below the visibility floor" : "");
+  if (dome && !dome->texture.empty() && !dome_ibl) {
+    RX_WARN("usd lighting: dome envmap '{}' could not be installed; the flat "
+            "ambient above stands in for it",
+            dome->texture);
+  }
+}
+
+void Viewer::ApplySceneCamera(const asset::ImportedScene& scene) {
+  if (!UsdUseCamera.get() || scene.cameras.empty()) return;
+  const asset::ImportedScene::Camera& camera = scene.cameras[0];
+  // The stored rotation is the camera's world basis; USD looks down -Z.
+  const Mat4 basis = MakeFromQuat(camera.rotation[0], camera.rotation[1],
+                                  camera.rotation[2], camera.rotation[3]);
+  const Vec3 forward = TransformDir(basis, {0.0f, 0.0f, -1.0f});
+  camera_.set_position(camera.position);
+  camera_.set_yaw_pitch(std::atan2(forward.x, -forward.z),
+                        std::asin(std::clamp(forward.y, -1.0f, 1.0f)));
+  camera_.speed = 4.0f;
+  // Framing is the lens as much as the pose: a 18mm wide-angle stage camera
+  // shows a different scene through the engine's default 60 degrees.
+  scene_camera_fov_ = camera.yfov;
+  RX_INFO("usd camera: eye ({:.2f} {:.2f} {:.2f}), {:.0f} deg vfov",
+          camera.position.x, camera.position.y, camera.position.z,
+          camera.yfov * 57.2957795f);
+}
+
 void Viewer::DriveSunFromClock() {
   // Throttled to ~0.02-hour steps so the IBL environment is not rebuilt every
   // frame for sub-degree motion.
@@ -460,6 +717,11 @@ void Viewer::OnUpdate(f32 frame_delta) {
 void Viewer::OnBuildView(f32 frame_delta, render::FrameView& view) {
   view.camera.eye = camera_.position();
   view.camera.target = camera_.target();
+  // The imported rig is static, so it is rebuilt into the frame view rather
+  // than re-derived; the demo scenes assign view.lights outright, so this goes
+  // in first and they win on a demo (which never has an imported rig anyway).
+  if (!scene_lights_.empty()) view.lights = scene_lights_;
+  if (scene_camera_fov_ > 0.0f) view.camera.fov_y = scene_camera_fov_;
   demos_->EmitToView(frame_delta, view);
   EmitMorphedInstances(frame_delta, view);
   debug_ui_.Build(*renderer_, camera_, *world_, frame_delta, &view);

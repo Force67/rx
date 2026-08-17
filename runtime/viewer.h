@@ -105,6 +105,14 @@ class Viewer : public app::Application {
   };
   void EmitMorphedInstances(f32 frame_delta, render::FrameView& view);
   base::Vector<MorphedInstance> morphed_;
+
+  // A scene file that ships its own lighting rig takes the sun, the ambient and
+  // the punctual lights over from the viewer's procedural sky; without that the
+  // stage is lit by a clock-driven sun it was never authored for.
+  void ApplySceneLighting(const asset::ImportedScene& scene);
+  void ApplySceneCamera(const asset::ImportedScene& scene);
+  base::Vector<render::PointLight> scene_lights_;
+  f32 scene_camera_fov_ = 0.0f;  // authored vertical fov, 0 = engine default
   f32 morph_time_ = 0;
 
   // Expression demo: faces the controller recognizes cycle through the stock

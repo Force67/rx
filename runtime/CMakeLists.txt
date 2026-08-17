@@ -101,6 +101,8 @@ endif()
 
 add_executable(rx main.cc ${RX_RUNTIME_SOURCES})
 target_link_libraries(rx PRIVATE ${RX_RUNTIME_MODULES})
+# Radiance .hdr decode for imported UsdLux dome environment maps (viewer.cc).
+target_link_libraries(rx PRIVATE rx::stb_impl)
 target_compile_definitions(rx PRIVATE
   RX_BUILD_CONFIG="$<CONFIG>"
   RX_BUILD_ID="${RX_BUILD_ID}"
