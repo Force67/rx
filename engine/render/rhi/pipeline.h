@@ -9,10 +9,13 @@
 
 namespace rx::render {
 
-// Vulkan guarantees maxPushConstantsSize is *at least* this and nothing more.
-// Desktop drivers hand out far more (256 on NVIDIA, 128 KiB on AMD), so a
-// bigger block runs fine here and then fails pipeline-layout creation on a
-// spec-minimum device, silently costing the whole pass.
+// The portability floor for the Vulkan 1.0-1.3 devices rx targets, Android
+// included: maxPushConstantsSize is guaranteed to be *at least* this and
+// nothing more. It is not a mobile-only concern and the split is not
+// desktop-versus-mobile - plenty of desktop AMD parts report exactly 128,
+// while several Adreno and Mali report 256. A bigger block runs fine on
+// whatever adapter it was written against and then fails pipeline-layout
+// creation elsewhere, silently costing the whole pass.
 inline constexpr u32 kGuaranteedPushConstantBytes = 128;
 
 // Every desc states its push block through this, so an oversized struct is a
@@ -22,7 +25,7 @@ inline constexpr u32 kGuaranteedPushConstantBytes = 128;
 template <typename T>
 consteval u32 PushSize() {
   static_assert(sizeof(T) <= kGuaranteedPushConstantBytes,
-                "push constant block is larger than the 128 bytes vulkan guarantees; "
+                "push constant block is over the 128-byte portability floor; "
                 "move the overflow (usually the matrices) into a uniform buffer");
   return sizeof(T);
 }
