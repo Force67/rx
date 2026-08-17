@@ -103,3 +103,79 @@ Both are handled in `usd_loader.cc`, and both cost whole scenes if they are not:
   resolver serving remote assets). Authored scenes use them constantly for
   sibling texture and prop directories, so composition is configured to allow
   them and texture loading goes through rx's own resolver.
+
+## Lighting: a stage brings its own rig
+
+A scene lit by the viewer's procedural sun instead of the rig it shipped with
+does not resemble its source, so the importer takes lights, cameras and the
+authoring tool's render settings over from the stage.
+
+- **DistantLight** becomes the sun, **DomeLight** becomes the sky (its HDR is
+  installed as the environment map, so IBL comes from the scene's own sky rather
+  than the procedural atmosphere), and sphere/rect/disk/cylinder lights become
+  the engine's punctual area lights.
+- **The authored camera** supplies position, orientation and vertical fov. A
+  stage camera is a lens as much as a pose: the Attic's is 18 mm, which frames
+  nothing like the engine's default 60 degrees.
+- **Inherited `visibility` is honoured.** This matters more than it sounds -
+  see below.
+
+UsdLux intensity is photometric and its absolute scale is a per-DCC convention
+rather than anything the spec pins down (Omniverse writes a daylight sun at
+15000 and a practical bulb in the millions, against an engine range where a
+campfire is 9). The mapping is therefore tunable rather than hard-coded:
+
+    RX_USD_SUN_SCALE      sun            (default 2.7e-4)
+    RX_USD_DOME_SCALE     dome / ibl     (default 1e-5)
+    RX_USD_LIGHT_SCALE    punctual       (default 4e-3)
+    RX_USD_LIGHT_MAX      per-light cap  (default 40)
+    RX_USD_DOME_ROTATION  dome yaw, radians
+    RX_USD_CAMERA=0       ignore the authored camera
+    RX_USD_INTERIOR=0     keep the procedural sky (an exterior stage wants it)
+    RX_USD_CAMERAFX=1     restore lens flare and bloom (off for imported scenes,
+                          because both halo hard in a dark interior with bright
+                          windows)
+
+### Picking between rigs a stage ships
+
+Scenes routinely carry several mutually exclusive configurations in one file and
+switch between them with `visibility`. The Attic ships a **day** rig and a
+**night** rig plus a 500-bulb string-light strand that is switched off; its
+`subLayers` are `[Night, Day, ...]`, and USD resolves the earlier sublayer as
+the stronger one, so **night is the file's authored default** and that is what
+rx renders with no flags.
+
+NVIDIA's marketing images of this scene are the *day* rig - the warm golden one.
+To get it, override visibility:
+
+    rx --usd assets/usd/attic/Attic_NVIDIA.usd \
+       --usd-show /Root/Lights --usd-hide /Root/LightsNight
+
+`--usd-show` / `--usd-hide` take absolute prim paths, cover their subtrees, are
+repeatable, and `--usd-hide` wins over `--usd-show`. They override authored
+visibility only; nothing in the stage is modified.
+
+## Render settings
+
+USD has no standard schema for renderer configuration - UsdRender describes
+outputs, not light transport, and the Attic authors no UsdRender prims at all.
+Omniverse instead records its renderer's state as an `rtx:` dictionary in the
+layer's `customLayerData`, and rx reads the parts that map onto engine features.
+It is vendor metadata rather than something portable, so every field is
+advisory: unauthored settings leave the engine default alone.
+
+| authored | used for |
+| --- | --- |
+| `rtx:indirectDiffuse:scalingFactor` | indirect diffuse (GI) intensity |
+| `rtx:sceneDb:ambientLight*` | flat ambient, only when no dome drives IBL |
+| `rtx:fog:*` | froxel fog density and start distance |
+| `rtx:post:lensFlares:*` | lens flare scale, when camera effects are enabled |
+
+The indirect scale is the one that changes the picture. A path-traced interior
+is mostly bounce light - the Attic asks for **7x** - and at 1x the same geometry
+reads as an unlit box with a bright window in it.
+
+Fog is authored as distance fog with the near field kept clear (the Attic starts
+at 10 m, about the width of the room), which is what lets shafts read as beams
+across the space instead of haze sitting on the lens. `RX_FROXEL_DENSITY` and
+`RX_FROXEL_START` override the authored values independently.
