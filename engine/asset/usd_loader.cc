@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstring>
+#include <map>
 #include <string>
 
 #include "core/log.h"
@@ -812,13 +813,86 @@ void ConvertCameras(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
   }
 }
 
+// Omniverse records its renderer's configuration as an `rtx:` dictionary under
+// the layer's customLayerData. None of it is standard USD, so it is read
+// defensively: anything missing or of an unexpected type simply leaves the
+// engine default in place.
+// `fog_start` comes out in stage units; LoadUsdScene converts it once
+// metersPerUnit is known.
+void ParseRenderSettings(const tinyusdz::Layer &layer,
+                         ImportedScene::RenderSettings *out) {
+  const auto &custom = layer.metas().customLayerData;
+  const auto it = custom.find("renderSettings");
+  if (it == custom.end())
+    return;
+  std::map<std::string, tinyusdz::MetaVariable> settings;
+  if (!it->second.get_value(&settings))
+    return;
+
+  const auto get_f32 = [&](const char *key, f32 *dst) {
+    const auto e = settings.find(key);
+    if (e == settings.end())
+      return false;
+    // Omniverse writes these as float, but a hand-edited stage may carry a
+    // double or an int for the same key.
+    float f;
+    double d;
+    int i;
+    if (e->second.get_value(&f)) *dst = f;
+    else if (e->second.get_value(&d)) *dst = static_cast<f32>(d);
+    else if (e->second.get_value(&i)) *dst = static_cast<f32>(i);
+    else return false;
+    return true;
+  };
+  const auto get_bool = [&](const char *key, bool *dst) {
+    const auto e = settings.find(key);
+    if (e == settings.end())
+      return false;
+    return e->second.get_value(dst);
+  };
+  const auto get_rgb = [&](const char *key, f32 *dst) {
+    const auto e = settings.find(key);
+    if (e == settings.end())
+      return false;
+    tinyusdz::value::float3 v;
+    if (!e->second.get_value(&v))
+      return false;
+    dst[0] = v[0];
+    dst[1] = v[1];
+    dst[2] = v[2];
+    return true;
+  };
+
+  out->has_indirect_scale =
+      get_f32("rtx:indirectDiffuse:scalingFactor", &out->indirect_scale);
+  get_bool("rtx:indirectDiffuse:enabled", &out->indirect_enabled);
+
+  const bool ambient_color =
+      get_rgb("rtx:sceneDb:ambientLightColor", out->ambient_color);
+  const bool ambient_intensity =
+      get_f32("rtx:sceneDb:ambientLightIntensity", &out->ambient_intensity);
+  out->has_ambient = ambient_color || ambient_intensity;
+
+  const bool fog_on = get_bool("rtx:fog:enabled", &out->fog_enabled);
+  const bool fog_density = get_f32("rtx:fog:fogDistanceDensity", &out->fog_density);
+  get_rgb("rtx:fog:fogColor", out->fog_color);
+  get_f32("rtx:fog:fogColorIntensity", &out->fog_color_intensity);
+  get_f32("rtx:fog:fogStartDist", &out->fog_start);  // stage units for now
+  out->has_fog = fog_on || fog_density;
+
+  out->has_lens_flare =
+      get_bool("rtx:post:lensFlares:enabled", &out->lens_flare_enabled);
+  get_f32("rtx:post:lensFlares:flareScale", &out->lens_flare_scale);
+}
+
 // Opening a layer only parses it; nothing composes until asked. This walks
 // LIVRPS in strength order and reconstructs a stage from the result. Each arc
 // is driven separately rather than through CompositeAllArcs, which hardcodes
 // default options and so rejects the parent-relative asset paths below.
 bool ComposeStage(const std::string &path, const std::string &base_dir,
                   tinyusdz::Stage *stage,
-                  base::Vector<std::string> *hidden_paths) {
+                  base::Vector<std::string> *hidden_paths,
+                  ImportedScene::RenderSettings *render_settings) {
   std::string warn, err;
   tinyusdz::Layer layer;
   if (!tinyusdz::LoadLayerFromFile(path, &layer, &warn, &err)) {
@@ -947,6 +1021,9 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
   if (!warn.empty())
     RX_WARN("usd {}: {}", path, warn);
 
+  // Read before LayerToStage: the layer is moved from there.
+  ParseRenderSettings(layer, render_settings);
+
   if (!tinyusdz::LayerToStage(std::move(layer), stage, &warn, &err)) {
     RX_ERROR("usd {}: could not build a stage from the composed layer: {}",
              path, err);
@@ -970,7 +1047,8 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
   // gives a package the legacy-UsdLux normalization and the visibility pass
   // below - loading it straight to a Stage skips both, so packaged legacy
   // lights reconstruct as defaults and authored-invisible prims stay lit.
-  if (!ComposeStage(path, base_dir, &stage, &hidden_paths)) {
+  if (!ComposeStage(path, base_dir, &stage, &hidden_paths,
+                    &out->render_settings)) {
     return false;
   }
 
@@ -1069,6 +1147,8 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
         stage_to_engine *
         MakeFromQuat(QuatFromAxisAngle({1, 0, 0}, -3.14159265358979f * 0.5f));
   }
+
+  out->render_settings.fog_start *= meters_per_unit;
 
   ConvertLights(render_scene, stage_to_engine, meters_per_unit, hidden_paths,
                 options, base_dir, out);

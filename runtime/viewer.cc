@@ -585,12 +585,21 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     }
   }
 
+  ApplySceneRenderSettings(scene, dome_ibl);
+
   // A stage viewed against its authored look wants the light its rig describes
   // and nothing painted on top. RX_LENS_FLARE / the bloom settings still win if
   // set explicitly (the renderer applies those options only when overridden).
   if (!UsdCameraFx.get()) {
     s.lens_flare = 0.0f;
     s.bloom = false;
+  } else if (scene.render_settings.has_lens_flare) {
+    // The source's own view on the effect, which is far subtler than the
+    // engine default (0.1 against 0.06 on a very different scale).
+    s.lens_flare =
+        scene.render_settings.lens_flare_enabled
+            ? scene.render_settings.lens_flare_scale
+            : 0.0f;
   }
 
   if (dome_ibl) {
@@ -644,6 +653,51 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     RX_WARN("usd lighting: dome envmap '{}' could not be installed; the flat "
             "ambient above stands in for it",
             dome->texture);
+  }
+}
+
+void Viewer::ApplySceneRenderSettings(const asset::ImportedScene& scene,
+                                      bool dome_ibl) {
+  const asset::ImportedScene::RenderSettings& rs = scene.render_settings;
+  auto& s = renderer_->settings();
+
+  // Indirect diffuse is the one that changes the picture most. A stage authored
+  // around a heavily boosted bounce - NVIDIA's Attic asks for 7x - reads as a
+  // flat, unlit box at 1x, because in a path-traced interior most of what
+  // reaches the room is bounce rather than direct light.
+  if (rs.has_indirect_scale) {
+    const f32 scale = rs.indirect_enabled ? rs.indirect_scale : 0.0f;
+    s.rcgi_intensity = scale;
+    s.ddgi_intensity = scale;
+  }
+
+  // The flat ambient is an additive term in the source renderer. With an
+  // authored dome driving real IBL the sky fill is already accounted for, so
+  // adding it again would double the indirect; it stands in only when there is
+  // no dome to convolve.
+  if (rs.has_ambient && !dome_ibl) {
+    s.ambient = rs.ambient_intensity;
+    s.interior_ambient = {rs.ambient_color[0] * rs.ambient_intensity,
+                          rs.ambient_color[1] * rs.ambient_intensity,
+                          rs.ambient_color[2] * rs.ambient_intensity};
+  }
+
+  if (rs.has_indirect_scale || rs.has_ambient) {
+    RX_INFO("usd render settings: indirect x{:.2f}{}, ambient {}",
+            rs.has_indirect_scale ? s.rcgi_intensity : 1.0f,
+            rs.indirect_enabled ? "" : " (disabled)",
+            (rs.has_ambient && !dome_ibl) ? "applied" : "from the dome");
+  }
+
+  // Authored fog is distance-based and starts well away from the camera (the
+  // Attic's begins at 10 m, about the width of the room). The engine's froxel
+  // fog is uniform from the near plane with no start distance, so applying the
+  // authored density here fills the room with the haze the source puts only in
+  // the far distance. Reported rather than silently ignored or wrongly applied.
+  if (rs.has_fog && rs.fog_enabled && rs.fog_density > 0.0f) {
+    RX_WARN("usd render settings: distance fog authored (density {:.3f} from "
+            "{:.1f} m) but not applied; the froxel fog has no start distance",
+            rs.fog_density, rs.fog_start);
   }
 }
 

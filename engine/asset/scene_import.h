@@ -85,6 +85,40 @@ struct ImportedScene {
     f32 zfar = 10000.0f;
   };
   base::Vector<Camera> cameras;
+
+  // Renderer intent the authoring tool recorded alongside the scene. USD has no
+  // standard schema for this - UsdRender describes outputs, not light transport
+  // - so it arrives as vendor metadata (Omniverse writes an `rtx:` dictionary
+  // into layer customLayerData). It is advisory rather than portable, but it is
+  // the only statement of how the scene was meant to be lit, and a stage built
+  // around 7x indirect looks nothing like itself at 1x. Each field carries a
+  // `has_` flag so an unauthored setting leaves the engine default alone.
+  struct RenderSettings {
+    // rtx:indirectDiffuse - multiplier on indirect diffuse (GI).
+    bool has_indirect_scale = false;
+    f32 indirect_scale = 1.0f;
+    bool indirect_enabled = true;
+
+    // rtx:sceneDb:ambientLight* - a flat ambient term.
+    bool has_ambient = false;
+    f32 ambient_color[3] = {1, 1, 1};
+    f32 ambient_intensity = 0.0f;
+
+    // rtx:fog:* - distance fog. `fog_start` is in metres (the authored value is
+    // in stage units and is converted on import).
+    bool has_fog = false;
+    bool fog_enabled = false;
+    f32 fog_color[3] = {1, 1, 1};
+    f32 fog_color_intensity = 1.0f;
+    f32 fog_density = 0.0f;
+    f32 fog_start = 0.0f;
+
+    // rtx:post:lensFlares:* - the source's own view on the effect.
+    bool has_lens_flare = false;
+    bool lens_flare_enabled = false;
+    f32 lens_flare_scale = 0.0f;
+  };
+  RenderSettings render_settings;
 };
 
 } // namespace rx::asset

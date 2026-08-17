@@ -110,6 +110,7 @@ class Viewer : public app::Application {
   // the punctual lights over from the viewer's procedural sky; without that the
   // stage is lit by a clock-driven sun it was never authored for.
   void ApplySceneLighting(const asset::ImportedScene& scene);
+  void ApplySceneRenderSettings(const asset::ImportedScene& scene, bool dome_ibl);
   void ApplySceneCamera(const asset::ImportedScene& scene);
   base::Vector<render::PointLight> scene_lights_;
   f32 scene_camera_fov_ = 0.0f;  // authored vertical fov, 0 = engine default
