@@ -1,10 +1,16 @@
 #include "rhi_bindings.hlsli"
 // Froxel volumetric lighting, pass 1: per-froxel inscatter. Every froxel gets
-// height-fog density, then light from the sun (cascade-shadowed when the csm
-// runs), the ambient term, and every clustered light in its cell - including
-// their local shadow maps, which is the whole point: a lamp behind a wall
-// must not light the fog in the next room. Temporally jittered inside the
-// froxel and blended against last frame's reprojected volume.
+// height-fog density, then light from the sun (shadowed by the cascades, or by
+// an inline ray query when RX_FROXEL_RT is compiled in), the ambient term, and
+// every clustered light in its cell - including their local shadow maps, which
+// is the whole point: a lamp behind a wall must not light the fog in the next
+// room. Temporally jittered inside the froxel and blended against last frame's
+// reprojected volume.
+//
+// The ray-query variant exists because the ray-traced sun-shadow tier turns the
+// cascades off entirely. Without it the fog sees an unoccluded sun in every
+// froxel, and an interior fills with a flat glow instead of the shafts the
+// windows should cut.
 struct ScatterPush {
   column_major float4x4 inv_view_proj;   // unjittered
   column_major float4x4 prev_view_proj;
@@ -12,10 +18,17 @@ struct ScatterPush {
   float4 sun_dir_g;       // xyz travel dir, w henyey-greenstein g
   float4 sun_color;       // rgb * intensity, w ambient strength
   float4 density_params;  // x base density, y height falloff, z base height, w temporal alpha
-  float4 volume_params;   // x near, y far, z slices, w csm active (0/1)
+  float4 volume_params;   // x near, y far, z slices, w sun shadow source
   float4 cluster_params;  // x slice scale, y slice bias, zw tile size px
-  float4 screen_size;     // xy render size, z light count, w unused
+  float4 screen_size;     // xy render size, z light count, w fog start distance m
 };
+
+// Where the fog's sun visibility comes from. Packed into volume_params.w rather
+// than a tenth float4: push constants are only guaranteed to 128 bytes and this
+// block is already well past that, so it does not get to grow further.
+static const uint kSunShadowNone = 0u;      // no source; sun is unoccluded
+static const uint kSunShadowCascade = 1u;
+static const uint kSunShadowRayQuery = 2u;
 PUSH_CONSTANTS(ScatterPush, pc);
 
 [[vk::image_format("rgba16f")]] [[vk::binding(0, 0)]] RWTexture3D<float4> out_scatter : register(u0, space0);
@@ -48,6 +61,9 @@ struct CascadeData {
 [[vk::binding(7, 0)]] ConstantBuffer<CascadeData> cascades : register(b7, space0);
 [[vk::combinedImageSampler]] [[vk::binding(8, 0)]] Texture2D cascade_atlas : register(t8, space0);
 [[vk::combinedImageSampler]] [[vk::binding(8, 0)]] SamplerComparisonState cascade_sampler : register(s8, space0);
+#ifdef RX_FROXEL_RT
+[[vk::binding(9, 0)]] RaytracingAccelerationStructure tlas : register(t9, space0);
+#endif
 
 static const uint kClusterTilesX = 16;
 static const uint kClusterTilesY = 9;
@@ -103,6 +119,37 @@ float CascadeShadow(float3 world_pos) {
   return 1.0;
 }
 
+// Solid angle of the spherical triangle spanned by three unit directions
+// (van Oosterom & Strackee 1983).
+float SphericalTriangleArea(float3 a, float3 b, float3 c) {
+  float num = abs(dot(a, cross(b, c)));
+  float den = 1.0 + dot(a, b) + dot(b, c) + dot(c, a);
+  return 2.0 * atan2(num, max(den, 1e-9));
+}
+
+// Sun visibility from one inline ray. Binary, not filtered: the froxel jitter
+// plus the temporal blend already average the volume, so a soft edge here would
+// only blur shafts that the reprojection re-sharpens anyway.
+float SunVisibility(float3 world_pos) {
+#ifdef RX_FROXEL_RT
+  if (uint(pc.volume_params.w + 0.5) == kSunShadowRayQuery) {
+    RayDesc ray;
+    ray.Origin = world_pos;
+    ray.Direction = -pc.sun_dir_g.xyz;
+    ray.TMin = 0.01;
+    ray.TMax = 1000.0;  // must clear the building, not just the froxel volume
+    // Vegetation: cull real (non-opaque) masked geometry and hit its shrunk
+    // opaque-approximation stand-in, like every other realtime shadow ray.
+    RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_CULL_NON_OPAQUE> rq;
+    rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_DIFFUSE, ray);
+    rq.Proceed();
+    return rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
+  }
+#endif
+  if (uint(pc.volume_params.w + 0.5) != kSunShadowCascade) return 1.0;
+  return CascadeShadow(world_pos);
+}
+
 float PhaseHG(float cos_theta, float g) {
   float g2 = g * g;
   return (1.0 - g2) / (4.0 * kPi * pow(max(1.0 + g2 - 2.0 * g * cos_theta, 1e-3), 1.5));
@@ -134,12 +181,20 @@ void main(uint3 id : SV_DispatchThreadID) {
   float density = pc.density_params.x *
                   exp(-pc.density_params.y * max(world.y - pc.density_params.z, 0.0));
 
+  // Distance fog start: content is authored with the near field kept clear (the
+  // attic ships a 10 m start, about the width of the room) so shafts read as
+  // beams across the space instead of a haze sitting on the lens. Soft knee over
+  // the last quarter of the distance so the ramp itself never draws an edge.
+  float fog_start = pc.screen_size.w;
+  if (fog_start > 0.0)
+    density *= smoothstep(fog_start, fog_start + max(fog_start * 0.25, 0.5), view_z);
+
   float3 inscatter = pc.sun_color.rgb * pc.sun_color.w;  // ambient term
 
-  // Sun, cascade-shadowed on the raster tier.
+  // Sun, shadowed by the cascades or by an inline ray, whichever tier is live.
   float3 to_sun = -pc.sun_dir_g.xyz;
   inscatter += pc.sun_color.rgb * PhaseHG(dot(view_dir, to_sun), pc.sun_dir_g.w) *
-               CascadeShadow(world);
+               SunVisibility(world);
 
   // Clustered lights, with their local shadow maps.
   float2 px = uv * pc.screen_size.xy;
@@ -164,6 +219,42 @@ void main(uint3 id : SV_DispatchThreadID) {
       float att = saturate((cd - pl.params.y) / max(pl.params.x - pl.params.y, 1e-4));
       falloff *= att * att;
       if (falloff <= 0.0) continue;
+    } else if (ltype >= 2u) {
+      // Area lights carry a radiance, not a point intensity - the surface path
+      // gets its solid angle from the ltc form factor. Without the same solid
+      // angle here a rect emitter lights every froxel inside its radius at full
+      // radiance, which drowns an interior in a flat veil that no amount of sun
+      // shadowing can cut through.
+      float d2 = max(dist2, 1e-6);
+      float omega;
+      if (ltype == 3u) {  // rect: exact solid angle of the quad
+        // A/d^2 only holds in the far field; at a froxel a room's width from a
+        // panel it overestimates by ~2x, which is the difference between a beam
+        // and a wash. Two spherical triangles (van Oosterom-Strackee) are exact
+        // and cheap enough here.
+        float3 axis = pl.direction_type.xyz;
+        float axis_len = length(axis);
+        if (axis_len < 1e-6) continue;  // degenerate emitter: normalize() = NaN
+        float3 emitter_n = axis / axis_len;
+        // One-sided, like the raster path, which rejects points behind the
+        // panel outright. -pl_l points from the emitter toward this froxel.
+        if (dot(emitter_n, -pl_l) <= 0.0) continue;
+        float3 t = normalize(cross(abs(emitter_n.y) < 0.99 ? float3(0, 1, 0)
+                                                           : float3(1, 0, 0), emitter_n));
+        float3 b = cross(emitter_n, t);
+        float3 ex = t * pl.params.x;
+        float3 ey = b * pl.params.y;
+        float3 c0 = normalize(pl.pos_radius.xyz - ex - ey - world);
+        float3 c1 = normalize(pl.pos_radius.xyz + ex - ey - world);
+        float3 c2 = normalize(pl.pos_radius.xyz + ex + ey - world);
+        float3 c3 = normalize(pl.pos_radius.xyz - ex + ey - world);
+        omega = SphericalTriangleArea(c0, c1, c2) + SphericalTriangleArea(c0, c2, c3);
+      } else {  // sphere/disk/cylinder stand-in: exact spherical cap
+        float r2 = pl.params.x * pl.params.x;
+        omega = 2.0 * kPi * (1.0 - sqrt(saturate(1.0 - min(r2 / d2, 1.0))));
+      }
+      falloff *= min(omega, 2.0 * kPi);
+      if (falloff <= 0.0) continue;
     }
     uint shadow_face = uint(pl.params.w + 0.5);
     if (shadow_face != 0u && ltype <= 1u) {
@@ -186,7 +277,12 @@ void main(uint3 id : SV_DispatchThreadID) {
     float prev_slice = log2(prev_z / near) / log2(far / near);
     if (all(prev_uv >= 0.0) && all(prev_uv <= 1.0) && prev_slice >= 0.0 && prev_slice <= 1.0) {
       float4 prev = prev_scatter.SampleLevel(prev_sampler, float3(prev_uv, prev_slice), 0.0);
-      result = lerp(result, prev, pc.density_params.w);
+      // History carries the density this world point had when it was farther
+      // from the camera. Moving forward would drag fog into the region the
+      // start ramp keeps clear, so the blend is dropped where it just cleared.
+      float alpha = pc.density_params.w;
+      if (density <= 1e-6 && prev.a > 1e-6) alpha = 0.0;
+      result = lerp(result, prev, alpha);
     }
   }
   out_scatter[id] = result;

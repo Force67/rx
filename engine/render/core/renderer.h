@@ -578,6 +578,11 @@ public:
   // True when RX_RCGI was set on the command line/env: hosted presets must let
   // it win in both directions (force on OR force off) over the tier default.
   bool rcgi_env_overridden() const { return rcgi_env_overridden_; }
+  // Same for RX_FROXEL_DENSITY / RX_FROXEL_START: a stage that authors its own
+  // fog must not overwrite a value the operator dialled in by hand. Tracked
+  // per field, so setting one does not suppress the other's authored value.
+  bool froxel_density_overridden() const { return froxel_density_overridden_; }
+  bool froxel_start_overridden() const { return froxel_start_overridden_; }
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }
   size_t instance_group_count() const { return instances_.group_count(); }
   size_t instance_count() const { return instances_.instance_count(); }
@@ -692,6 +697,8 @@ private:
       false; // logged the "no startup SDF path" notice once
   bool rcgi_env_overridden_ =
       false;             // RX_RCGI was set explicitly (wins over preset both ways)
+  bool froxel_density_overridden_ = false;  // RX_FROXEL_DENSITY set explicitly
+  bool froxel_start_overridden_ = false;    // RX_FROXEL_START set explicitly
   LightGrid light_grid_; // world-space light grid feeding the rcgi cache
   base::Vector<InteriorVolume>
       interior_volumes_; // forwarded to rcgi each active frame (item 9b)

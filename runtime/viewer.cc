@@ -690,13 +690,14 @@ void Viewer::ApplySceneRenderSettings(const asset::ImportedScene& scene,
   }
 
   // Authored fog is distance-based and starts well away from the camera (the
-  // Attic's begins at 10 m, about the width of the room). The engine's froxel
-  // fog is uniform from the near plane with no start distance, so applying the
-  // authored density here fills the room with the haze the source puts only in
-  // the far distance. Reported rather than silently ignored or wrongly applied.
+  // Attic's begins at 10 m, about the width of the room). Both halves map onto
+  // the froxel fog: the authored value is an extinction per metre like the
+  // engine's, and the start distance is what keeps the haze off the near field
+  // instead of veiling the whole room.
   if (rs.has_fog && rs.fog_enabled && rs.fog_density > 0.0f) {
-    RX_WARN("usd render settings: distance fog authored (density {:.3f} from "
-            "{:.1f} m) but not applied; the froxel fog has no start distance",
+    if (!renderer_->froxel_density_overridden()) s.froxel_density = rs.fog_density;
+    if (!renderer_->froxel_start_overridden()) s.froxel_start_distance = rs.fog_start;
+    RX_INFO("usd render settings: distance fog density {:.3f} from {:.1f} m",
             rs.fog_density, rs.fog_start);
   }
 }

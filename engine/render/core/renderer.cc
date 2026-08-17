@@ -72,6 +72,8 @@ base::Option<bool> FroxelOpt{"froxel.fog", true, "RX_FROXEL"};
 base::Option<bool> DdgiOpt{"ddgi", true, "RX_DDGI"};
 base::Option<double> FroxelDensity{"froxel.density", 0.005,
                                    "RX_FROXEL_DENSITY"};
+base::Option<double> FroxelStartDistance{"froxel.start", 0.0,
+                                         "RX_FROXEL_START"};
 base::Option<int> TexBudgetMb{"tex.budget.mb", -1, "RX_TEX_BUDGET_MB"};
 base::Option<bool> GpuTimings{"gpu.timings", false, "RX_GPU_TIMINGS"};
 base::Option<int> MsaaOpt{"msaa", 0, "RX_MSAA"};
@@ -691,7 +693,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
   if (!shadow_.Initialize(*device_, material_system_->set_layout(),
                           local_shadows_.atlas().format))
     return false; // raster sun and local-shadow pipelines
-  if (!froxel_fog_.Initialize(*device_)) {
+  if (!froxel_fog_.Initialize(*device_, rt_available_)) {
     RX_WARN("froxel volumetrics unavailable"); // non-fatal: feature gates on
                                                // available()
   }
@@ -985,6 +987,12 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     settings_.froxel_fog = FroxelOpt;
   if (FroxelDensity.overridden())
     settings_.froxel_density = static_cast<f32>(double(FroxelDensity));
+  if (FroxelStartDistance.overridden())
+    settings_.froxel_start_distance = static_cast<f32>(double(FroxelStartDistance));
+  // Tracked separately: overriding one must not suppress the other's authored
+  // value, which would silently zero a stage's fog start.
+  froxel_density_overridden_ = FroxelDensity.overridden();
+  froxel_start_overridden_ = FroxelStartDistance.overridden();
   // RX_TEX_BUDGET_MB caps resident material-texture memory (mip streaming);
   // -1 auto (half of vram), 0 unlimited.
   if (TexBudgetMb.overridden())
@@ -6399,11 +6407,27 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       ff.density = settings_.froxel_density;
       ff.height_falloff = settings_.fog_height_falloff;
       ff.base_height = settings_.fog_base_height;
+      ff.start_distance = settings_.froxel_start_distance;
       std::memcpy(ff.cluster_params, globals.cluster_params,
                   sizeof(ff.cluster_params));
       ff.screen_size[0] = static_cast<f32>(render_width_);
       ff.screen_size[1] = static_cast<f32>(render_height_);
       ff.csm_active = csm_active;
+      // The rt sun-shadow tier switches the cascades off, which leaves the fog
+      // lighting every froxel with an unoccluded sun: interiors fill with a
+      // flat glow and window shafts never form. Trace the sun instead - keyed
+      // on the selected shadow mode, not merely on the hardware being capable,
+      // so turning sun shadows off does not silently buy 1M rays a frame.
+      ff.ray_query_sun = rt_shadows && !csm_active;
+      // Neither source available while rt shadows are the selected mode means
+      // the tlas is still building or failed. An unoccluded sun would light the
+      // whole volume for those frames, which reads as a flash of flat glow; the
+      // fog keeps its local lights and drops the sun until the rays are there.
+      const bool ray_query_fog_ready =
+          froxel_fog_.ray_query_available() && raytracing_ &&
+          raytracing_->TlasValid(tlas_slot);
+      if (ff.ray_query_sun && !ray_query_fog_ready)
+        ff.sun_color = Vec3{0.0f, 0.0f, 0.0f};
       ff.lights = frame.lights;
       ff.cluster_counts = cluster_counts_;
       ff.cluster_indices = cluster_indices_;
@@ -6419,6 +6443,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       ff.comparison_sampler = environment_->comparison_sampler();
       froxel_fog_.AddToGraph(graph_, lit, depth_export,
                              csm_active ? shadow_atlas : kInvalidResource,
+                             raytracing_.get(), tlas_slot,
                              {render_width_, render_height_}, ff);
     }
 

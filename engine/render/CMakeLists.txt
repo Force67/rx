@@ -247,6 +247,7 @@ set(RX_RENDER_SHADERS
   shaders/atmosphere/cloudscape_haze.cs.hlsl
   shaders/atmosphere/cloudscape_funnel.cs.hlsl
   shaders/atmosphere/froxel_scatter.cs.hlsl
+  shaders/atmosphere/froxel_scatter_rt.cs.hlsl
   shaders/atmosphere/froxel_integrate.cs.hlsl
   shaders/atmosphere/froxel_apply.cs.hlsl
   shaders/atmosphere/precipitation.cs.hlsl
@@ -419,6 +420,7 @@ set(RX_SHADER_DEPS_procedural_grass_prepass_ps_hlsl shaders/geometry/procedural_
 set(RX_SHADER_DEPS_procedural_grass_ps_hlsl shaders/geometry/procedural_grass.hlsli)
 set(RX_SHADER_DEPS_precip_volume_vs_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_volume_rt_vs_hlsl shaders/atmosphere/precip_volume.vs.hlsl shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_froxel_scatter_rt_cs_hlsl shaders/atmosphere/froxel_scatter.cs.hlsl shaders/rhi_bindings.hlsli)
 set(RX_SHADER_DEPS_precip_volume_ps_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_splash_vs_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_splash_ps_hlsl shaders/atmosphere/precip_common.hlsli)

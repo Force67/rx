@@ -322,6 +322,11 @@ struct RenderSettings {
   // composite and translucents. Density is the subtle always-on base haze.
   bool froxel_fog = true;
   f32 froxel_density = 0.005f;
+  // Metres of clear air before the fog ramps in. Interiors are authored this
+  // way (the attic ships ~10 m, about the width of the room) so light shafts
+  // read as beams across the space instead of a haze over the whole view.
+  // 0 = fog from the near plane.
+  f32 froxel_start_distance = 0.0f;
 
   // Local light shadows: a depth-atlas of faces for the nearest clustered
   // spot/point lights (the raster tier's answer to light leaking; the rt
