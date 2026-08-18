@@ -454,6 +454,9 @@ class VulkanDevice final : public Device {
   // The api version the device was created at, which is the adapter's own
   // clamped by RX_VK_MAX_VERSION - not what the adapter reports (caps_ keeps
   // that). Decides core-vs-KHR entry points and what VMA is told.
+  // What rx spends on push constants, which RX_MAX_PUSH_CONSTANTS can lower
+  // below what the adapter reports; caps_ keeps the adapter's own figure.
+  u32 push_constant_budget_ = 128;
   u32 api_version_ = VK_API_VERSION_1_3;
   VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
   std::string pipeline_cache_path_;

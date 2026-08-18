@@ -113,6 +113,12 @@ if(RX_RHI_VULKAN)
   # PUBLIC: interop consumers (gui backend, thumbnailer, upscalers) gate their
   # Vulkan paths on this define.
   target_compile_definitions(rx_render PUBLIC RX_RHI_VULKAN)
+  # The device floor is a property of the shaders, not a taste: a driver that
+  # cannot load the SPIR-V this build emits must be rejected at enumeration
+  # rather than accepted and then failing every pipeline.
+  if(RX_SPIRV_1_4)
+    target_compile_definitions(rx_render PUBLIC RX_SPIRV_1_4=1)
+  endif()
 endif()
 
 if(RX_RHI_D3D12)

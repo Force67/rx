@@ -69,7 +69,16 @@ bool HasInstanceExtension(const char* name) {
 // feature set and not a version number: android's CDD only mandates 1.1, and
 // whether a phone's driver reports more is entirely the SoC vendor's choice.
 constexpr u32 kMaxApiVersion = VK_API_VERSION_1_3;
+// Vulkan 1.1 accepts SPIR-V up to 1.3 core (1.4 with VK_KHR_spirv_1_4) and 1.2
+// up to 1.5, so the floor cannot be lower than the modules this build emits.
+// Without RX_SPIRV_1_4 the shaders are SPIR-V 1.6 and only 1.3 will load them;
+// accepting a 1.1 adapter then would enumerate a device that fails every
+// pipeline, which is worse than declining it.
+#if defined(RX_SPIRV_1_4)
 constexpr u32 kMinApiVersion = VK_API_VERSION_1_1;
+#else
+constexpr u32 kMinApiVersion = VK_API_VERSION_1_3;
+#endif
 
 // Features rx cannot run without, and the core version that absorbed each. Below
 // that version the extension supplies the same thing; the remaining links of
@@ -95,6 +104,12 @@ constexpr PromotedExtension kPromotedExtensions[] = {
     // VK_KHR_dynamic_rendering's own dependencies, only unmet below 1.2.
     {VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME, VK_API_VERSION_1_2},
     {VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME, VK_API_VERSION_1_2},
+#if defined(RX_SPIRV_1_4)
+    // Every module in this build is SPIR-V 1.4, so below 1.2 the extension that
+    // permits it is required outright rather than a ray-tracing prerequisite.
+    {VK_KHR_SPIRV_1_4_EXTENSION_NAME, VK_API_VERSION_1_2},
+    {VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME, VK_API_VERSION_1_2},
+#endif
 };
 
 // RX_VK_MAX_VERSION=1.1 is a budget, not a claim about the driver: the adapter
@@ -447,11 +462,20 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   device->caps_.max_push_constant_bytes = props.limits.maxPushConstantsSize;
   // Desktop adapters hand out 256 bytes and up, so a block that only fits here
   // stays invisible until someone runs on a spec-minimum device. Setting
-  // RX_MAX_PUSH_CONSTANTS=128 pretends to be one, and the layout check below
-  // then names every pipeline that would have been lost.
+  // RX_MAX_PUSH_CONSTANTS=128 spends as if on one, and the layout check names
+  // every pipeline that would have been lost. It is a budget, not a claim about
+  // the adapter: caps_ keeps reporting what the driver said, so nothing else
+  // concludes the hardware is smaller than it is.
+  device->push_constant_budget_ = device->caps_.max_push_constant_bytes;
   if (const char* push_limit = std::getenv("RX_MAX_PUSH_CONSTANTS")) {
-    device->caps_.max_push_constant_bytes = std::min<u32>(
-        device->caps_.max_push_constant_bytes, std::strtoul(push_limit, nullptr, 10));
+    char* end = nullptr;
+    const unsigned long parsed = std::strtoul(push_limit, &end, 10);
+    if (end == push_limit || *end != '\0' || parsed < 4) {
+      RX_WARN("RX_MAX_PUSH_CONSTANTS='{}' is not a byte count; ignoring", push_limit);
+    } else {
+      device->push_constant_budget_ =
+          std::min<u32>(device->push_constant_budget_, static_cast<u32>(parsed));
+    }
   }
 
   VkPhysicalDeviceMemoryProperties mem;
@@ -694,9 +718,24 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
       {"bufferDeviceAddress",
        core12 ? f12.bufferDeviceAddress : buffer_address.bufferDeviceAddress},
       {"timelineSemaphore", core12 ? f12.timelineSemaphore : timeline.timelineSemaphore},
+      // Buffer device addresses reach the shaders as uint64_t, so the modules
+      // declare OpCapability Int64 (morph_apply and the scene-hook pipelines
+      // among them). bufferDeviceAddress does not imply it.
+      {"shaderInt64", static_cast<bool>(features.features.shaderInt64)},
+      // vkCmdDrawIndirectCount is core from 1.2 but the feature can still be
+      // false there; below 1.2 the extension in kPromotedExtensions supplies it.
+      {"drawIndirectCount", core12 ? static_cast<bool>(f12.drawIndirectCount) : true},
       {"descriptorIndexing",
-       core12 ? f12.descriptorIndexing
-              // The umbrella `descriptorIndexing` bit does not exist below 1.2,
+       core12 ? (f12.descriptorIndexing && f12.runtimeDescriptorArray &&
+                 f12.descriptorBindingPartiallyBound &&
+                 f12.shaderSampledImageArrayNonUniformIndexing &&
+                 f12.descriptorBindingSampledImageUpdateAfterBind &&
+                 f12.shaderStorageBufferArrayNonUniformIndexing &&
+                 f12.descriptorBindingStorageBufferUpdateAfterBind)
+              // `descriptorIndexing` is its own bit, not the conjunction of the
+              // sub-features, so an implementation may report it while lacking
+              // one rx uses - the same named set is therefore checked on both
+              // branches. Below 1.2 there is no umbrella bit at all;
               // so the sub-features have to be named. These are exactly what
               // the bindless set asks the driver for: a partially bound,
               // update-after-bind array of textures and one of byte buffers
@@ -1898,10 +1937,10 @@ VkPipelineLayout VulkanDevice::GetOrCreatePipelineLayout(
   // checking it. Over the limit the layout is invalid and the pass would be
   // lost; say which pipeline and by how much rather than leaving a bare
   // "pipeline layout creation failed" on a device we cannot reproduce on.
-  if (push_size > caps_.max_push_constant_bytes) {
+  if (push_size > push_constant_budget_) {
     RX_ERROR("pipeline '{}' asks for {} bytes of push constants, this device allows {} "
              "(vulkan only guarantees {}); move the overflow into a uniform buffer",
-             debug_name ? debug_name : "?", push_size, caps_.max_push_constant_bytes,
+             debug_name ? debug_name : "?", push_size, push_constant_budget_,
              kGuaranteedPushConstantBytes);
     return VK_NULL_HANDLE;
   }
