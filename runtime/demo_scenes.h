@@ -23,6 +23,7 @@
 #include "demo_ship.h"
 #include "demo_gym.h"
 #include "demo_puppet.h"
+#include "demo_shooter.h"
 #include "demo_drive.h"
 #include "feature_gym/feature_gym.h"
 #include "scene_hook_demo.h"
@@ -51,6 +52,9 @@ class DemoScenes {
   // The character/inventory gym (--demo gym), or null for any other scene. The
   // gym drives its own camera + input, so the Viewer routes OnUpdate to it.
   GymDemo* gym() { return gym_.get(); }
+  // The FPS range (--demo shooter), or null. Owns its camera + input like the
+  // gym, so the Viewer routes OnUpdate to it.
+  ShooterDemo* shooter() { return shooter_.get(); }
   // The locomotion puppet (--demo puppet), or null. Keeps the free-fly camera;
   // the Viewer forwards raw keys to it (1/2/3) without an early return.
   PuppetDemo* puppet() { return puppet_.get(); }
@@ -278,6 +282,10 @@ class DemoScenes {
   // --demo gym: the character/inventory reference gym (graybox + tuning panel).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
   std::unique_ptr<GymDemo> gym_;
+
+  // --demo shooter: the FPS range over engine/combat (weapons, targets, HUD).
+  // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
+  std::unique_ptr<ShooterDemo> shooter_;
 
   // --demo puppet: the physics-first locomotion proving ground (graybox arena +
   // rx::locomotion ragdoll + debug overlay). Non-null only for that demo.

@@ -41,7 +41,12 @@ viewer runtime in place of the game.
   expression controller (damped per-region
   transitions between named morph poses, plus a blink/micro-motion life
   layer), an SDL mixer with wav/xwma decoding, and a small RPC value/registry
-  layer. Skeletal animation sampling comes from
+  layer. **engine/combat** adds the shooter half of a first-person game -
+  weapon definitions as data, fire modes, spread bloom, view recoil, reloading,
+  aim-down-sights, hitscan with falloff and penetration, ballistic projectiles,
+  explosions and health/armor/teams
+  ([design](engine/combat/README.md), [range demo](docs/SHOOTER.md)).
+  Skeletal animation sampling comes from
   [kinema](https://github.com/Force67/kinema), a reusable SoA animation
   runtime consumed as a sibling checkout.
 - **engine/app** - the composition root a game embeds instead of forking the
@@ -51,7 +56,8 @@ viewer runtime in place of the game.
 - **runtime/** - the `rx` viewer (the reference `app::Application`):
   `--gltf <scene>`, `--usd <stage>` or `--demo <id>` (water,
   materials, cornell, cloth, grass, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
-  meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx),
+  meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx,
+  gym, shooter),
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`
   / `RX_SHOWCASE`), frame capture (`RX_UI_SHOT`).
