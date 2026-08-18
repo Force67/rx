@@ -13,6 +13,12 @@ option(RX_DLSS "Enable the NVIDIA DLSS upscaler backend" ON)
 option(RX_NRD "Enable the NVIDIA NRD ray tracing denoiser" ON)
 option(RX_JOLT "Enable Jolt physics" ON)
 option(RX_USD "Enable OpenUSD scene loading (needs tools/get_tinyusdz.sh)" ON)
+# Vulkan 1.1 accepts SPIR-V 1.3, or 1.4 with VK_KHR_spirv_1_4; the default
+# shader target emits 1.6, which a conformant 1.1 driver rejects outright (only
+# NVIDIA's is lenient enough to load it anyway). Turning this on retargets both
+# shader toolchains so the modules load on a real 1.1 device. Off by default:
+# the desktop build stays on the newer target env.
+option(RX_SPIRV_1_4 "Emit SPIR-V 1.4 modules (loadable on Vulkan 1.1)" OFF)
 option(RX_BUILD_TESTS "Build library test suites" ON)
 option(RX_BUILD_RUNTIME "Build the rx viewer executable" ON)
 option(RX_BUILD_EDITOR "Build the rx editor application (apps/editor, needs libultragui)" OFF)
@@ -68,11 +74,14 @@ endif()
 # DLSS/FSR3/NRD ship x86_64 host libraries (and Adreno has no HW ray tracing or
 # mesh shaders, so the raster path is the real path), and SDL3 is replaced by a
 # native ANativeWindow backend. Force them off so an Android configure is clean.
+# Mobile drivers are also the ones that hold Vulkan to 1.1, so the SPIR-V 1.4
+# shader target comes on here too.
 if(ANDROID)
   set(RX_DLSS OFF CACHE BOOL "" FORCE)
   set(RX_FSR3 OFF CACHE BOOL "" FORCE)
   set(RX_NRD OFF CACHE BOOL "" FORCE)
   set(RX_FETCH_SDL3 OFF CACHE BOOL "" FORCE)
+  set(RX_SPIRV_1_4 ON CACHE BOOL "" FORCE)
 endif()
 
 # macOS runs Vulkan through MoltenVK (Vulkan-on-Metal). The three GPU-vendor
@@ -81,6 +90,19 @@ endif()
 # raster path is the real path here, so force them off for a clean Apple
 # configure; windowing (SDL3/Metal), physics (Jolt) and the rest stay on.
 if(APPLE)
+  set(RX_DLSS OFF CACHE BOOL "" FORCE)
+  set(RX_FSR3 OFF CACHE BOOL "" FORCE)
+  set(RX_NRD OFF CACHE BOOL "" FORCE)
+endif()
+
+# The three vendored GPU-vendor backends cannot honour RX_SPIRV_1_4: NRD's
+# ShaderMake and FSR3's glslang both compile their permutations for Vulkan 1.2,
+# so their embedded blobs are SPIR-V 1.5, and DLSS ships as a prebuilt binary
+# with no shader step at all. They are gitignored downloads, so there is no
+# target-env knob to turn either. Force them off for the same reason Android
+# does: they are desktop-vendor features, and no card that runs them is held to
+# Vulkan 1.1 in the first place.
+if(RX_SPIRV_1_4)
   set(RX_DLSS OFF CACHE BOOL "" FORCE)
   set(RX_FSR3 OFF CACHE BOOL "" FORCE)
   set(RX_NRD OFF CACHE BOOL "" FORCE)

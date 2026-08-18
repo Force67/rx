@@ -26,6 +26,19 @@
 set(RX_EMBED_SPV_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/embed_spv.cmake"
   CACHE INTERNAL "rx spirv embed script")
 
+# The SPIR-V target env. Vulkan 1.3 (SPIR-V 1.6) is the desktop default;
+# RX_SPIRV_1_4 drops both toolchains to SPIR-V 1.4, the newest a Vulkan 1.1
+# driver can load (via VK_KHR_spirv_1_4). Cached like the embed script above so
+# an add_subdirectory consumer calling rx_embed_shaders from its own directory
+# scope compiles its passes for the same environment as the engine's.
+if(RX_SPIRV_1_4)
+  set(RX_DXC_TARGET_ENV vulkan1.1spirv1.4 CACHE INTERNAL "rx dxc spirv target env")
+  set(RX_SLANG_PROFILE sm_6_6+spirv_1_4 CACHE INTERNAL "rx slangc spirv profile")
+else()
+  set(RX_DXC_TARGET_ENV vulkan1.3 CACHE INTERNAL "rx dxc spirv target env")
+  set(RX_SLANG_PROFILE sm_6_6+spirv_1_6 CACHE INTERNAL "rx slangc spirv profile")
+endif()
+
 # Slang spells stages out; the short file-suffix forms are dxc profiles.
 set(RX_SLANG_STAGE_vs vertex)
 set(RX_SLANG_STAGE_ps fragment)
@@ -71,7 +84,7 @@ function(rx_embed_shaders target)
     if(lang STREQUAL "slang")
       add_custom_command(OUTPUT ${spv}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
-        COMMAND ${RX_SLANGC} ${src} -target spirv -profile sm_6_6+spirv_1_6
+        COMMAND ${RX_SLANGC} ${src} -target spirv -profile ${RX_SLANG_PROFILE}
                 -entry main -stage ${RX_SLANG_STAGE_${stage}}
                 -matrix-layout-column-major ${include_flags}
                 -depfile ${spv}.d -o ${spv}
@@ -83,7 +96,7 @@ function(rx_embed_shaders target)
     else()
       add_custom_command(OUTPUT ${spv}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
-        COMMAND ${RX_DXC} -spirv -fspv-target-env=vulkan1.3 -T ${stage}_6_6 -E main
+        COMMAND ${RX_DXC} -spirv -fspv-target-env=${RX_DXC_TARGET_ENV} -T ${stage}_6_6 -E main
                 ${include_flags} -Fo ${spv} ${src}
         DEPENDS ${src} ${extra_deps}
         COMMENT "hlsl ${name}"

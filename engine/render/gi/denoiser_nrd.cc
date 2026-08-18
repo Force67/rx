@@ -638,7 +638,7 @@ ResourceHandle NrdDenoiser::AddDenoisePass(RenderGraph& graph, u32 identifier, c
           VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
           dep.imageMemoryBarrierCount = barrier_count;
           dep.pImageMemoryBarriers = barriers;
-          vkCmdPipelineBarrier2(GetVkCommandBuffer(*ctx.cmd), &dep);
+          VulkanApi().cmd_pipeline_barrier2(GetVkCommandBuffer(*ctx.cmd), &dep);
         }
       });
   return out_handle;
@@ -758,7 +758,7 @@ void NrdDenoiser::RecordDispatches(PassContext& ctx, u32 identifier) {
       VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
       dep.imageMemoryBarrierCount = barrier_count;
       dep.pImageMemoryBarriers = barriers;
-      vkCmdPipelineBarrier2(vk_cmd, &dep);
+      VulkanApi().cmd_pipeline_barrier2(vk_cmd, &dep);
     }
     if (write_count) vkUpdateDescriptorSets(dev, write_count, writes, 0, nullptr);
 

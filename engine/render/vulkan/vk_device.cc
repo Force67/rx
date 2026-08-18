@@ -64,6 +64,87 @@ bool HasInstanceExtension(const char* name) {
   return HasExtension(extensions, name);
 }
 
+// The highest Vulkan version rx knows how to drive. Everything it needs beyond
+// 1.1 is reachable through kPromotedExtensions, so the real floor is that
+// feature set and not a version number: android's CDD only mandates 1.1, and
+// whether a phone's driver reports more is entirely the SoC vendor's choice.
+constexpr u32 kMaxApiVersion = VK_API_VERSION_1_3;
+constexpr u32 kMinApiVersion = VK_API_VERSION_1_1;
+
+// Features rx cannot run without, and the core version that absorbed each. Below
+// that version the extension supplies the same thing; the remaining links of
+// their dependency chains (multiview, maintenance2, maintenance3) are already
+// core in 1.1, so none of those appear here.
+struct PromotedExtension {
+  const char* name;
+  u32 core_since;
+};
+constexpr PromotedExtension kPromotedExtensions[] = {
+    {VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, VK_API_VERSION_1_3},
+    {VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, VK_API_VERSION_1_3},
+    // dxc lowers every `discard` to OpDemoteToHelperInvocation, so this carries
+    // as much of the shader set as dynamic rendering does.
+    {VK_EXT_SHADER_DEMOTE_TO_HELPER_INVOCATION_EXTENSION_NAME, VK_API_VERSION_1_3},
+    {VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, VK_API_VERSION_1_2},
+    {VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME, VK_API_VERSION_1_2},
+    {VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, VK_API_VERSION_1_2},
+    {VK_KHR_DRAW_INDIRECT_COUNT_EXTENSION_NAME, VK_API_VERSION_1_2},
+    // Depth targets are transitioned to DEPTH_ATTACHMENT_OPTIMAL, which is a
+    // separate-layouts thing rather than a dynamic-rendering thing.
+    {VK_KHR_SEPARATE_DEPTH_STENCIL_LAYOUTS_EXTENSION_NAME, VK_API_VERSION_1_2},
+    // VK_KHR_dynamic_rendering's own dependencies, only unmet below 1.2.
+    {VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME, VK_API_VERSION_1_2},
+    {VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME, VK_API_VERSION_1_2},
+};
+
+// RX_VK_MAX_VERSION=1.1 is a budget, not a claim about the driver: the adapter
+// keeps reporting whatever it reports, rx just refuses to spend anything above
+// this. It exists because the extension path is otherwise unreachable on any
+// hardware we have, and dead code that nobody runs is code that does not work.
+u32 ApiVersionBudget() {
+  const char* env = std::getenv("RX_VK_MAX_VERSION");
+  if (!env) return kMaxApiVersion;
+  char* end = nullptr;
+  const unsigned long major = std::strtoul(env, &end, 10);
+  if (end == env || *end != '.') {
+    RX_WARN("RX_VK_MAX_VERSION=\"{}\" is not major.minor, ignoring", env);
+    return kMaxApiVersion;
+  }
+  const unsigned long minor = std::strtoul(end + 1, nullptr, 10);
+  const u32 budget = VK_MAKE_API_VERSION(0, major, minor, 0);
+  if (budget < kMinApiVersion) {
+    RX_WARN("RX_VK_MAX_VERSION={} is below the 1.1 floor, using 1.1", env);
+    return kMinApiVersion;
+  }
+  return std::min(kMaxApiVersion, budget);
+}
+
+// Promoted extensions `available` still has to supply at `api_version`; the
+// ones it does not advertise come back in `missing`.
+base::Vector<const char*> PromotedExtensionsFor(
+    const base::Vector<VkExtensionProperties>& available, u32 api_version,
+    base::Vector<const char*>* missing = nullptr) {
+  base::Vector<const char*> needed;
+  for (const PromotedExtension& promoted : kPromotedExtensions) {
+    if (api_version >= promoted.core_since) continue;
+    if (HasExtension(available, promoted.name)) {
+      needed.push_back(promoted.name);
+    } else if (missing) {
+      missing->push_back(promoted.name);
+    }
+  }
+  return needed;
+}
+
+std::string JoinNames(const base::Vector<const char*>& names) {
+  std::string joined;
+  for (const char* name : names) {
+    if (!joined.empty()) joined += ", ";
+    joined += name;
+  }
+  return joined;
+}
+
 // Graphics family that can also present, or - when `surface` is VK_NULL_HANDLE
 // (an offscreen device) - simply the first graphics family. Async compute and
 // transfer queues come later, one universal queue is enough for bringup.
@@ -83,8 +164,10 @@ int FindGraphicsFamily(VkPhysicalDevice physical, VkSurfaceKHR surface) {
 }
 
 // `surface` is VK_NULL_HANDLE for an offscreen device: the present-support and
-// swapchain-extension requirements are then dropped.
-VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface) {
+// swapchain-extension requirements are then dropped. `budget` is the highest
+// api version rx will drive an adapter at, so a candidate is judged on what it
+// can supply at that version rather than on what it reports.
+VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, u32 budget) {
   u32 count = 0;
   vkEnumeratePhysicalDevices(instance, &count, nullptr);
   base::Vector<VkPhysicalDevice> devices(count);
@@ -96,10 +179,22 @@ VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface) {
   for (VkPhysicalDevice candidate : devices) {
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(candidate, &props);
-    if (props.apiVersion < VK_API_VERSION_1_3) continue;
-    if (FindGraphicsFamily(candidate, surface) < 0) continue;
-    if (need_present && !HasExtension(DeviceExtensions(candidate), VK_KHR_SWAPCHAIN_EXTENSION_NAME))
+    if (props.apiVersion < kMinApiVersion) {
+      RX_WARN("{}: vulkan {}.{}, rx needs 1.1", props.deviceName,
+              VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion));
       continue;
+    }
+    if (FindGraphicsFamily(candidate, surface) < 0) continue;
+    auto available = DeviceExtensions(candidate);
+    if (need_present && !HasExtension(available, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
+    base::Vector<const char*> missing;
+    PromotedExtensionsFor(available, std::min(props.apiVersion, budget), &missing);
+    if (!missing.empty()) {
+      RX_WARN("{}: vulkan {}.{} without {}", props.deviceName,
+              VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
+              JoinNames(missing));
+      continue;
+    }
 
     int score = 0;
     if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) score += 1000;
@@ -228,11 +323,20 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     RX_WARN("no vulkan loader on this system, vulkan backend unavailable");
     return nullptr;
   }
-  if (volkGetInstanceVersion() < VK_API_VERSION_1_3) {
-    RX_ERROR("vulkan 1.3 required, loader reports {}.{}",
+  if (volkGetInstanceVersion() < kMinApiVersion) {
+    RX_ERROR("vulkan 1.1 required, loader reports {}.{}",
               VK_API_VERSION_MAJOR(volkGetInstanceVersion()),
               VK_API_VERSION_MINOR(volkGetInstanceVersion()));
     return nullptr;
+  }
+  // Never ask the instance for more than the loader has or the budget allows:
+  // the promoted core entry points are only legal up to this version, and
+  // LoadVulkanEntryPoints picks the KHR spelling for everything above it.
+  const u32 api_budget = std::min(volkGetInstanceVersion(), ApiVersionBudget());
+  if (api_budget < kMaxApiVersion) {
+    RX_INFO("vulkan: capped to {}.{} (loader {}.{})", VK_API_VERSION_MAJOR(api_budget),
+             VK_API_VERSION_MINOR(api_budget), VK_API_VERSION_MAJOR(volkGetInstanceVersion()),
+             VK_API_VERSION_MINOR(volkGetInstanceVersion()));
   }
 
   base::Vector<const char*> instance_extensions;
@@ -288,7 +392,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
 
   VkApplicationInfo app_info{.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO};
   app_info.pApplicationName = "rx";
-  app_info.apiVersion = VK_API_VERSION_1_3;
+  app_info.apiVersion = api_budget;
 
   VkInstanceCreateInfo instance_info{.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   instance_info.flags = instance_flags;
@@ -325,9 +429,9 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
 
   // surface_ is VK_NULL_HANDLE for an offscreen device; PickPhysicalDevice /
   // FindGraphicsFamily then drop the present-support and swapchain requirements.
-  device->physical_device_ = PickPhysicalDevice(device->instance_, device->surface_);
+  device->physical_device_ = PickPhysicalDevice(device->instance_, device->surface_, api_budget);
   if (device->physical_device_ == VK_NULL_HANDLE) {
-    RX_ERROR("no vulkan 1.3 capable gpu found");
+    RX_ERROR("no gpu found that can supply rx's vulkan feature set");
     return nullptr;
   }
 
@@ -336,6 +440,9 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   device->caps_.backend = Backend::kVulkan;
   device->caps_.adapter_name = props.deviceName;
   device->caps_.api_version = props.apiVersion;
+  // caps_.api_version stays the adapter's own report; this is only what rx
+  // spends of it, and it is what decides core-vs-extension everywhere below.
+  device->api_version_ = std::min(props.apiVersion, api_budget);
   device->caps_.integrated = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
   device->caps_.max_push_constant_bytes = props.limits.maxPushConstantsSize;
   // Desktop adapters hand out 256 bytes and up, so a block that only fits here
@@ -361,6 +468,13 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   // The swapchain extension is only needed by a windowed device that presents.
   base::Vector<const char*> device_extensions;
   if (window) device_extensions.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
+  // Below 1.3 the same features arrive as extensions. PickPhysicalDevice
+  // already refused any adapter that cannot supply them at this version.
+  const bool core13 = device->api_version_ >= VK_API_VERSION_1_3;
+  const bool core12 = device->api_version_ >= VK_API_VERSION_1_2;
+  for (const char* name : PromotedExtensionsFor(available, device->api_version_)) {
+    device_extensions.push_back(name);
+  }
 
   // A portability-subset device (MoltenVK) must have this extension enabled when
   // it advertises it, otherwise vkCreateDevice fails. The name macro lives
@@ -373,18 +487,36 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   }
 #endif
 
-  bool want_raytracing = desc.request_raytracing &&
+  // Ray query, ray tracing pipelines and mesh shaders are all spirv 1.4
+  // consumers, which a device driven below 1.2 only accepts through this pair;
+  // without it those three stay off rather than failing device creation.
+  const bool want_spirv_1_4 = HasExtension(available, VK_KHR_SPIRV_1_4_EXTENSION_NAME) &&
+                              HasExtension(available, VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
+  const bool has_spirv_1_4 = core12 || want_spirv_1_4;
+
+  bool want_raytracing = desc.request_raytracing && has_spirv_1_4 &&
                          HasExtension(available, VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) &&
                          HasExtension(available, VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME) &&
                          HasExtension(available, VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
   bool want_ray_query =
       want_raytracing && HasExtension(available, VK_KHR_RAY_QUERY_EXTENSION_NAME);
-  bool want_mesh_shaders = HasExtension(available, VK_EXT_MESH_SHADER_EXTENSION_NAME);
+  bool want_mesh_shaders =
+      has_spirv_1_4 && HasExtension(available, VK_EXT_MESH_SHADER_EXTENSION_NAME);
   bool want_shading_rate = HasExtension(available, VK_KHR_FRAGMENT_SHADING_RATE_EXTENSION_NAME);
   // Some compute shaders (hi-z aware passes) declare quad derivatives; enable
   // the extension whenever the driver has it so their modules validate.
   bool want_compute_derivatives =
       HasExtension(available, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME);
+  // Below 1.2 these are extensions rather than VkPhysicalDeviceVulkan12Features
+  // members, so each has to be asked for by name. None is part of the baseline:
+  // 64-bit atomics only gate the gpu-driven virtual-geometry path, and half
+  // floats only appear in the vendor SDK shaders (NRD, FSR3).
+  const bool want_atomic_int64 =
+      !core12 && HasExtension(available, VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
+  const bool want_float16_int8 =
+      !core12 && HasExtension(available, VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+  const bool want_8bit_storage =
+      !core12 && HasExtension(available, VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
 
   // Feature query chain. Optional structs join the chain only when their
   // extension exists, then whatever the driver reports gets enabled.
@@ -395,6 +527,40 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
   VkPhysicalDeviceVulkan13Features f13{
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+  // Pre-1.3 halves of the same set. VkPhysicalDeviceVulkan1xFeatures were
+  // themselves added in 1.2 and 1.3, so a device driven below that must be
+  // asked through these instead - chaining a struct the api version predates is
+  // undefined, not merely ignored.
+  VkPhysicalDeviceShaderDrawParametersFeatures draw_params{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES};
+  VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR};
+  VkPhysicalDeviceSynchronization2FeaturesKHR sync2{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR};
+  VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT demote{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES_EXT};
+  VkPhysicalDeviceBufferDeviceAddressFeaturesKHR buffer_address{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR};
+  VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timeline{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR};
+  VkPhysicalDeviceDescriptorIndexingFeaturesEXT descriptor_indexing{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT};
+  VkPhysicalDeviceSeparateDepthStencilLayoutsFeaturesKHR separate_depth_stencil{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES_KHR};
+  VkPhysicalDeviceShaderAtomicInt64FeaturesKHR atomic_int64{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_INT64_FEATURES_KHR};
+  VkPhysicalDeviceShaderFloat16Int8FeaturesKHR float16_int8{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES_KHR};
+  VkPhysicalDevice8BitStorageFeaturesKHR storage8{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_8BIT_STORAGE_FEATURES_KHR};
+  // Both are 1.1 structs, so they only need naming when the 1.1/1.2 roll-up is
+  // out of reach. multiview is not optional there: VkPhysicalDeviceMeshShader-
+  // FeaturesEXT reports multiviewMeshShader, and enabling that without multiview
+  // is invalid.
+  VkPhysicalDeviceMultiviewFeatures multiview{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES};
+  VkPhysicalDevice16BitStorageFeatures storage16{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_16BIT_STORAGE_FEATURES};
   VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{
       .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt_pipeline{
@@ -413,9 +579,46 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     *tail = node;
     tail = &node->pNext;
   };
-  chain(&f11);
-  chain(&f12);
-  chain(&f13);
+  // A roll-up struct and the per-extension struct it absorbed must not both be
+  // in the chain, so each version gets the widest set it is allowed to use.
+  if (core13) {
+    chain(&f11);
+    chain(&f12);
+    chain(&f13);
+  } else if (core12) {
+    chain(&f11);
+    chain(&f12);
+    chain(&dynamic_rendering);
+    chain(&sync2);
+    chain(&demote);
+  } else {
+    chain(&draw_params);
+    chain(&dynamic_rendering);
+    chain(&sync2);
+    chain(&demote);
+    chain(&buffer_address);
+    chain(&timeline);
+    chain(&descriptor_indexing);
+    chain(&separate_depth_stencil);
+    chain(&multiview);
+    chain(&storage16);
+    if (want_atomic_int64) {
+      chain(&atomic_int64);
+      device_extensions.push_back(VK_KHR_SHADER_ATOMIC_INT64_EXTENSION_NAME);
+    }
+    if (want_float16_int8) {
+      chain(&float16_int8);
+      device_extensions.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
+    }
+    if (want_8bit_storage) {
+      chain(&storage8);
+      device_extensions.push_back(VK_KHR_8BIT_STORAGE_EXTENSION_NAME);
+    }
+    if (want_spirv_1_4) {
+      device_extensions.push_back(VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME);
+      device_extensions.push_back(VK_KHR_SPIRV_1_4_EXTENSION_NAME);
+    }
+  }
   if (want_raytracing) {
     chain(&accel);
     chain(&rt_pipeline);
@@ -477,9 +680,39 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
 
   vkGetPhysicalDeviceFeatures2(device->physical_device_, &features);
 
-  if (!f13.dynamicRendering || !f13.synchronization2 || !f12.bufferDeviceAddress ||
-      !f12.timelineSemaphore || !f12.descriptorIndexing || !f11.shaderDrawParameters) {
-    RX_ERROR("{} lacks the required vulkan 1.3 baseline", device->caps_.adapter_name);
+  // Same baseline whatever version reported it, just read out of whichever
+  // struct is legal here. 1.2 rolled descriptor indexing up into a single bit;
+  // below that, name the bits the bindless set and its shaders actually need.
+  const struct {
+    const char* name;
+    bool present;
+  } kBaseline[] = {
+      {"dynamicRendering", core13 ? f13.dynamicRendering : dynamic_rendering.dynamicRendering},
+      {"synchronization2", core13 ? f13.synchronization2 : sync2.synchronization2},
+      {"shaderDemoteToHelperInvocation",
+       core13 ? f13.shaderDemoteToHelperInvocation : demote.shaderDemoteToHelperInvocation},
+      {"bufferDeviceAddress",
+       core12 ? f12.bufferDeviceAddress : buffer_address.bufferDeviceAddress},
+      {"timelineSemaphore", core12 ? f12.timelineSemaphore : timeline.timelineSemaphore},
+      {"descriptorIndexing",
+       core12 ? f12.descriptorIndexing
+              : descriptor_indexing.runtimeDescriptorArray &&
+                    descriptor_indexing.descriptorBindingPartiallyBound &&
+                    descriptor_indexing.shaderSampledImageArrayNonUniformIndexing},
+      {"separateDepthStencilLayouts",
+       core12 ? f12.separateDepthStencilLayouts
+              : separate_depth_stencil.separateDepthStencilLayouts},
+      {"shaderDrawParameters",
+       core12 ? f11.shaderDrawParameters : draw_params.shaderDrawParameters},
+  };
+  base::Vector<const char*> unmet;
+  for (const auto& feature : kBaseline) {
+    if (!feature.present) unmet.push_back(feature.name);
+  }
+  if (!unmet.empty()) {
+    RX_ERROR("{} (vulkan {}.{}) does not support {}", device->caps_.adapter_name,
+             VK_API_VERSION_MAJOR(device->api_version_),
+             VK_API_VERSION_MINOR(device->api_version_), JoinNames(unmet));
     return nullptr;
   }
   // Costs measurable bandwidth and the engine does its own bounds discipline.
@@ -502,7 +735,8 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   }
   device->caps_.fill_mode_non_solid = features.features.fillModeNonSolid;
   // Enabled by the full-features query below whenever the driver reports it.
-  device->caps_.buffer_atomics64 = f12.shaderBufferInt64Atomics;
+  device->caps_.buffer_atomics64 =
+      core12 ? f12.shaderBufferInt64Atomics : atomic_int64.shaderBufferInt64Atomics;
   if (features.features.samplerAnisotropy) {
     device->caps_.max_anisotropy = props.limits.maxSamplerAnisotropy;
   }
@@ -574,6 +808,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     return nullptr;
   }
   volkLoadDevice(device->device_);
+  LoadVulkanEntryPoints(device->api_version_);
   vkGetDeviceQueue(device->device_, device->graphics_family_, 0, &device->graphics_queue_);
   if (device->caps_.async_compute) {
     if (dedicated_compute) {
@@ -623,10 +858,17 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     case VK_PHYSICAL_DEVICE_TYPE_OTHER: kind = "other"; break;
     default: break;
   }
-  RX_INFO("gpu: {} ({}{}, {} MB, vk {}.{}, rt={} rayquery={} mesh={} vrs={})",
+  // Two versions when they differ: what the adapter reports, then what rx is
+  // actually driving it at, so a capped run cannot be mistaken for the default.
+  std::string api = std::format("{}.{}", VK_API_VERSION_MAJOR(props.apiVersion),
+                                VK_API_VERSION_MINOR(props.apiVersion));
+  if (device->api_version_ != props.apiVersion) {
+    api += std::format(" driven as {}.{}", VK_API_VERSION_MAJOR(device->api_version_),
+                       VK_API_VERSION_MINOR(device->api_version_));
+  }
+  RX_INFO("gpu: {} ({}{}, {} MB, vk {}, rt={} rayquery={} mesh={} vrs={})",
            device->caps_.adapter_name, kind,
-           window ? "" : ", offscreen", device->caps_.device_local_bytes >> 20,
-           VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
+           window ? "" : ", offscreen", device->caps_.device_local_bytes >> 20, api,
            device->caps_.raytracing, device->caps_.ray_query, device->caps_.mesh_shaders,
            device->caps_.fragment_shading_rate);
   // Loud because nothing fails: it renders correctly, just orders of magnitude
@@ -657,7 +899,7 @@ bool VulkanDevice::InitResources() {
   info.instance = instance_;
   info.physicalDevice = physical_device_;
   info.device = device_;
-  info.vulkanApiVersion = VK_API_VERSION_1_3;
+  info.vulkanApiVersion = api_version_;
   info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
   info.pVulkanFunctions = &functions;
   if (vmaCreateAllocator(&info, &allocator_) != VK_SUCCESS) {
@@ -893,7 +1135,7 @@ GpuBuffer VulkanDevice::CreateBuffer(u64 size, BufferUsageFlags usage, bool host
   if (buffer_info.usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT) {
     VkBufferDeviceAddressInfo address_info{.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO};
     address_info.buffer = buffer;
-    address = vkGetBufferDeviceAddress(device_, &address_info);
+    address = VulkanApi().get_buffer_device_address(device_, &address_info);
   }
 
   auto* record = new BufferRecord{buffer, allocation};
@@ -2451,7 +2693,7 @@ CommandList* VulkanDevice::SplitFrame(CommandList* cmd, bool signal_fork) {
     // above submitted any pending one). SubmitAsync uses this to skip waiting.
     upload_fork_covered_serial_ = upload_batch_serial_;
   }
-  vkQueueSubmit2(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
+  VulkanApi().queue_submit2(graphics_queue_, 1, &submit, VK_NULL_HANDLE);
 
   VkCommandBuffer next = frame.seg_cmds[frame.active_segment];
   ++frame.active_segment;
@@ -2505,7 +2747,7 @@ void VulkanDevice::SubmitAsync(CommandList*) {
   submit.pCommandBufferInfos = &cmd_info;
   submit.signalSemaphoreInfoCount = 1;
   submit.pSignalSemaphoreInfos = &signal;
-  vkQueueSubmit2(compute_queue_, 1, &submit, VK_NULL_HANDLE);
+  VulkanApi().queue_submit2(compute_queue_, 1, &submit, VK_NULL_HANDLE);
   frame.async_submitted = true;
   static bool logged = false;
   if (!logged) {
@@ -2561,7 +2803,7 @@ PresentResult VulkanDevice::SubmitFrame(CommandList* cmd, Swapchain& swapchain, 
   submit.pCommandBufferInfos = &cmd_info;
   submit.signalSemaphoreInfoCount = 1;
   submit.pSignalSemaphoreInfos = &signal;
-  vkQueueSubmit2(graphics_queue_, 1, &submit, frame->in_flight);
+  VulkanApi().queue_submit2(graphics_queue_, 1, &submit, frame->in_flight);
 
   VkSemaphore present_wait = vk_swapchain.render_finished(image_index);
   VkPresentInfoKHR present{.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
@@ -2609,7 +2851,7 @@ void VulkanDevice::SubmitFrame(CommandList* cmd) {
   submit.pWaitSemaphoreInfos = &wait;
   submit.commandBufferInfoCount = 1;
   submit.pCommandBufferInfos = &cmd_info;
-  vkQueueSubmit2(graphics_queue_, 1, &submit, frame->in_flight);
+  VulkanApi().queue_submit2(graphics_queue_, 1, &submit, frame->in_flight);
 }
 
 PresentResult VulkanDevice::SubmitFrameGen(CommandList* cmd, Swapchain& swapchain,
@@ -2666,7 +2908,7 @@ PresentResult VulkanDevice::SubmitFrameGen(CommandList* cmd, Swapchain& swapchai
   submit.pCommandBufferInfos = &cmd_info;
   submit.signalSemaphoreInfoCount = 2;
   submit.pSignalSemaphoreInfos = signals;
-  vkQueueSubmit2(graphics_queue_, 1, &submit, frame->in_flight);
+  VulkanApi().queue_submit2(graphics_queue_, 1, &submit, frame->in_flight);
 
   // Interpolated (the older midpoint) first, then the fresh frame; FIFO paces
   // them one vblank apart.
