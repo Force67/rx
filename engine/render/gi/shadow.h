@@ -5,6 +5,7 @@
 
 #include "core/math.h"
 #include "render/rhi/device.h"
+#include "render/pipeline/mesh_pipeline.h"
 
 namespace rx::render {
 
@@ -30,7 +31,7 @@ class ShadowPass {
   // order is a cross-backend contract: the d3d12 backend binds the t998
   // bone-palette root SRV from the address at kPushBdaBoneOffset.
   struct Push {
-    u32 draw_index = 0;    // this caster's record in the frame arena
+    u32 draw_index = kNoDrawRecord;  // this caster's record in the frame arena
     u32 skin_offset = 0;   // first bone of this mesh, skinned permutation only
     u64 bone_address = 0;  // frame bone palette, 0 = static caster
     Mat4 light_view_proj;

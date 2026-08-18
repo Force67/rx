@@ -178,6 +178,107 @@ int FindGraphicsFamily(VkPhysicalDevice physical, VkSurfaceKHR surface) {
   return -1;
 }
 
+// The features rx cannot run without, read out of whichever structs are legal
+// at `api_version`. Shared by adapter selection and device creation so the two
+// cannot drift: the selection loop skipping a candidate on a feature the
+// creation path would later have rejected is the whole point of having it.
+void BaselineFeatures(VkPhysicalDevice candidate, u32 api_version,
+                      base::Vector<const char*>* unmet) {
+  const bool core13 = api_version >= VK_API_VERSION_1_3;
+  const bool core12 = api_version >= VK_API_VERSION_1_2;
+
+  VkPhysicalDeviceFeatures2 features{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
+  VkPhysicalDeviceVulkan11Features f11{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES};
+  VkPhysicalDeviceVulkan12Features f12{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+  VkPhysicalDeviceVulkan13Features f13{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+  VkPhysicalDeviceShaderDrawParametersFeatures draw_params{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES};
+  VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR};
+  VkPhysicalDeviceSynchronization2FeaturesKHR sync2{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES_KHR};
+  VkPhysicalDeviceShaderDemoteToHelperInvocationFeaturesEXT demote{
+      .sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DEMOTE_TO_HELPER_INVOCATION_FEATURES_EXT};
+  VkPhysicalDeviceBufferDeviceAddressFeaturesKHR buffer_address{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_KHR};
+  VkPhysicalDeviceTimelineSemaphoreFeaturesKHR timeline{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES_KHR};
+  VkPhysicalDeviceDescriptorIndexingFeaturesEXT descriptor_indexing{
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT};
+  VkPhysicalDeviceSeparateDepthStencilLayoutsFeaturesKHR separate_depth_stencil{
+      .sType =
+          VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SEPARATE_DEPTH_STENCIL_LAYOUTS_FEATURES_KHR};
+
+  void** tail = &features.pNext;
+  auto chain = [&tail](auto* node) {
+    *tail = node;
+    tail = &node->pNext;
+  };
+  // Same rule as device creation: a roll-up struct and one it absorbed must
+  // never both be in the chain, and none may predate the version being asked.
+  if (core13) {
+    chain(&f11);
+    chain(&f12);
+    chain(&f13);
+  } else if (core12) {
+    chain(&f11);
+    chain(&f12);
+    chain(&dynamic_rendering);
+    chain(&sync2);
+    chain(&demote);
+  } else {
+    chain(&draw_params);
+    chain(&dynamic_rendering);
+    chain(&sync2);
+    chain(&demote);
+    chain(&buffer_address);
+    chain(&timeline);
+    chain(&descriptor_indexing);
+    chain(&separate_depth_stencil);
+  }
+  vkGetPhysicalDeviceFeatures2(candidate, &features);
+
+  const struct {
+    const char* name;
+    bool present;
+  } kBaseline[] = {
+      {"dynamicRendering", core13 ? f13.dynamicRendering : dynamic_rendering.dynamicRendering},
+      {"synchronization2", core13 ? f13.synchronization2 : sync2.synchronization2},
+      {"shaderDemoteToHelperInvocation",
+       core13 ? f13.shaderDemoteToHelperInvocation : demote.shaderDemoteToHelperInvocation},
+      {"bufferDeviceAddress",
+       core12 ? f12.bufferDeviceAddress : buffer_address.bufferDeviceAddress},
+      {"timelineSemaphore", core12 ? f12.timelineSemaphore : timeline.timelineSemaphore},
+      {"shaderInt64", static_cast<bool>(features.features.shaderInt64)},
+      {"drawIndirectCount", core12 ? static_cast<bool>(f12.drawIndirectCount) : true},
+      {"descriptorIndexing",
+       core12 ? (f12.descriptorIndexing && f12.runtimeDescriptorArray &&
+                 f12.descriptorBindingPartiallyBound &&
+                 f12.shaderSampledImageArrayNonUniformIndexing &&
+                 f12.descriptorBindingSampledImageUpdateAfterBind &&
+                 f12.shaderStorageBufferArrayNonUniformIndexing &&
+                 f12.descriptorBindingStorageBufferUpdateAfterBind)
+              : (descriptor_indexing.runtimeDescriptorArray &&
+                 descriptor_indexing.descriptorBindingPartiallyBound &&
+                 descriptor_indexing.shaderSampledImageArrayNonUniformIndexing &&
+                 descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind &&
+                 descriptor_indexing.shaderStorageBufferArrayNonUniformIndexing &&
+                 descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind)},
+      {"separateDepthStencilLayouts",
+       core12 ? f12.separateDepthStencilLayouts
+              : separate_depth_stencil.separateDepthStencilLayouts},
+      {"shaderDrawParameters",
+       core12 ? f11.shaderDrawParameters : draw_params.shaderDrawParameters},
+  };
+  for (const auto& feature : kBaseline) {
+    if (!feature.present) unmet->push_back(feature.name);
+  }
+}
+
 // `surface` is VK_NULL_HANDLE for an offscreen device: the present-support and
 // swapchain-extension requirements are then dropped. `budget` is the highest
 // api version rx will drive an adapter at, so a candidate is judged on what it
@@ -208,6 +309,15 @@ VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, u
       RX_WARN("{}: vulkan {}.{} without {}", props.deviceName,
               VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
               JoinNames(missing));
+      continue;
+    }
+
+    base::Vector<const char*> unmet;
+    BaselineFeatures(candidate, std::min(props.apiVersion, budget), &unmet);
+    if (!unmet.empty()) {
+      RX_WARN("{}: vulkan {}.{} without {}", props.deviceName,
+              VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
+              JoinNames(unmet));
       continue;
     }
 
@@ -704,64 +814,10 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
 
   vkGetPhysicalDeviceFeatures2(device->physical_device_, &features);
 
-  // Same baseline whatever version reported it, just read out of whichever
-  // struct is legal here. 1.2 rolled descriptor indexing up into a single bit;
-  // below that, name the bits the bindless set and its shaders actually need.
-  const struct {
-    const char* name;
-    bool present;
-  } kBaseline[] = {
-      {"dynamicRendering", core13 ? f13.dynamicRendering : dynamic_rendering.dynamicRendering},
-      {"synchronization2", core13 ? f13.synchronization2 : sync2.synchronization2},
-      {"shaderDemoteToHelperInvocation",
-       core13 ? f13.shaderDemoteToHelperInvocation : demote.shaderDemoteToHelperInvocation},
-      {"bufferDeviceAddress",
-       core12 ? f12.bufferDeviceAddress : buffer_address.bufferDeviceAddress},
-      {"timelineSemaphore", core12 ? f12.timelineSemaphore : timeline.timelineSemaphore},
-      // Buffer device addresses reach the shaders as uint64_t, so the modules
-      // declare OpCapability Int64 (morph_apply and the scene-hook pipelines
-      // among them). bufferDeviceAddress does not imply it.
-      {"shaderInt64", static_cast<bool>(features.features.shaderInt64)},
-      // vkCmdDrawIndirectCount is core from 1.2 but the feature can still be
-      // false there; below 1.2 the extension in kPromotedExtensions supplies it.
-      {"drawIndirectCount", core12 ? static_cast<bool>(f12.drawIndirectCount) : true},
-      {"descriptorIndexing",
-       core12 ? (f12.descriptorIndexing && f12.runtimeDescriptorArray &&
-                 f12.descriptorBindingPartiallyBound &&
-                 f12.shaderSampledImageArrayNonUniformIndexing &&
-                 f12.descriptorBindingSampledImageUpdateAfterBind &&
-                 f12.shaderStorageBufferArrayNonUniformIndexing &&
-                 f12.descriptorBindingStorageBufferUpdateAfterBind)
-              // `descriptorIndexing` is its own bit, not the conjunction of the
-              // sub-features, so an implementation may report it while lacking
-              // one rx uses - the same named set is therefore checked on both
-              // branches. Below 1.2 there is no umbrella bit at all;
-              // so the sub-features have to be named. These are exactly what
-              // the bindless set asks the driver for: a partially bound,
-              // update-after-bind array of textures and one of byte buffers
-              // (CreateBindingLayout tags both with PARTIALLY_BOUND |
-              // UPDATE_AFTER_BIND), and shaders index both with
-              // NonUniformResourceIndex - the texture array everywhere, the
-              // geometry buffers through rt_geometry.hlsli. Checking only the
-              // sampled-image half let an adapter pass here and then fail at
-              // pipeline creation, which is the failure this baseline exists
-              // to turn into an honest rejection.
-              : descriptor_indexing.runtimeDescriptorArray &&
-                    descriptor_indexing.descriptorBindingPartiallyBound &&
-                    descriptor_indexing.shaderSampledImageArrayNonUniformIndexing &&
-                    descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind &&
-                    descriptor_indexing.shaderStorageBufferArrayNonUniformIndexing &&
-                    descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind},
-      {"separateDepthStencilLayouts",
-       core12 ? f12.separateDepthStencilLayouts
-              : separate_depth_stencil.separateDepthStencilLayouts},
-      {"shaderDrawParameters",
-       core12 ? f11.shaderDrawParameters : draw_params.shaderDrawParameters},
-  };
+  // One source of truth with the selection loop, so an adapter cannot be picked
+  // on a baseline this path then judges differently.
   base::Vector<const char*> unmet;
-  for (const auto& feature : kBaseline) {
-    if (!feature.present) unmet.push_back(feature.name);
-  }
+  BaselineFeatures(device->physical_device_, device->api_version_, &unmet);
   if (!unmet.empty()) {
     RX_ERROR("{} (vulkan {}.{}) does not support {}", device->caps_.adapter_name,
              VK_API_VERSION_MAJOR(device->api_version_),

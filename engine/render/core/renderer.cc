@@ -7372,8 +7372,8 @@ bool Renderer::CreateFrameResources() {
 
 const GpuBuffer &Renderer::UploadDrawRecords(FrameResources &frame,
                                              const FrameView &view) {
-  // Record 0 is the zeroed "no per-draw transform" slot, so the arena is one
-  // longer than the draw list and every draw's record is 1 + its index.
+  // Record 0 is the kNoDrawRecord slot an instanced draw points at, so the arena
+  // is one longer than the draw list and every draw's record is 1 + its index.
   const u32 needed = static_cast<u32>(view.draws.size()) + 1;
   if (frame.draw_record_capacity < needed) {
     // The slot's fence fired in BeginFrame, so nothing still reads the old
@@ -7390,7 +7390,7 @@ const GpuBuffer &Renderer::UploadDrawRecords(FrameResources &frame,
   if (!frame.draw_records.mapped)
     return frame.draw_records;
   auto *records = static_cast<DrawRecord *>(frame.draw_records.mapped);
-  records[0] = DrawRecord{};
+  records[0] = {Mat4::Identity(), Mat4::Identity()};
   for (size_t i = 0; i < view.draws.size(); ++i) {
     records[i + 1] = {view.draws[i].transform, view.draws[i].prev_transform};
   }

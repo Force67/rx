@@ -136,8 +136,8 @@ struct MorphWeight {
 
 // One draw's transforms, in the per-frame arena the mesh, shadow and water
 // pipelines index instead of pushing 128 bytes of matrices per draw. The
-// renderer fills one record per FrameView draw (record 0 stays zeroed, which is
-// what an instanced draw's unused model used to be), every pass over that draw
+// renderer fills one record per FrameView draw (record 0 is kNoDrawRecord, see
+// below), every pass over that draw
 // list indexes the same arena, and the vertex / task / mesh / fragment stages
 // read it through binding 3 of the frame-globals set. Mirrors DrawRecord in
 // mesh.vs / mesh.ps / mesh_scene.as / mesh_scene.ms / shadow.vs.
@@ -145,6 +145,15 @@ struct DrawRecord {
   Mat4 model;
   Mat4 prev_model;
 };
+
+// The record an instanced draw points at, since it takes its transform from the
+// instance buffer and never reads record.model. It holds identity rather than
+// zeroes: a non-instanced draw that reaches a pipeline without its index set is
+// a bug either way, but identity draws it at the origin where it can be seen and
+// keeps its motion vectors finite, where a zero matrix collapsed it to a point
+// and fed garbage to the temporal passes - a corruption that looked like nothing
+// at all.
+inline constexpr u32 kNoDrawRecord = 0;
 
 // The per-draw scalars that stayed in the push range, plus the arena index the
 // matrices moved to. Everything here fits the 128 bytes vulkan guarantees with
@@ -158,7 +167,7 @@ struct DrawRecord {
 // one record. A flat index is also what lets the fragment stage - which has no
 // DrawIndex at all - read the same record its vertex stage did.
 struct MeshPushConstants {
-  u32 draw_index = 0;  // this draw's record in the frame arena
+  u32 draw_index = kNoDrawRecord;  // this draw's record in the frame arena
   // Bits 0-23: per-draw rgb8 tint (0xRRGGBB) modulating albedo, 0 = untinted.
   // Bits 24-31: 1 + the draw's baked decal-layer tile (DecalBaker), 0 = none.
   // The two share a word because the tint only ever needed three bytes and the
