@@ -1181,6 +1181,11 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   }
 
   float3 ambient;
+  // Mirror radiance along the view reflection, resolved once: the env-reflect
+  // layer below reflects whatever the base material reflects (traced here, not
+  // the probe), instead of sampling the cube a second time. Each branch applies
+  // its own intensity scale, so the layer must not apply one again.
+  float3 spec_radiance = 0.0.xxx;
   if ((frame.flags & kFrameIbl) != 0u) {
     float2 f_ab = brdf_lut.Sample(brdf_lut_sampler, float2(ndv, roughness)).rg;
     float3 r = reflect(-v, n);
@@ -1203,6 +1208,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       float3 traced = TraceReflection(input.world_pos + n * 0.02, r);
       radiance = lerp(traced, radiance, blend);
     }
+    spec_radiance = radiance * frame.camera_position.w;
     float3 irradiance = irradiance_cube.Sample(irradiance_sampler, n).rgb;
     if ((frame.flags & kFrameRcgi) != 0u) {
       // RCGI replaces the DDGI + SSGI indirect-diffuse path with the resolved
@@ -1221,37 +1227,44 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     ambient = (fss_ess * radiance + (fms_ems + k_d) * irradiance) * frame.camera_position.w;
     g_skin_diffuse += (fms_ems + k_d) * irradiance * frame.camera_position.w * ao;
   } else if ((frame.flags & kFrameInterior) != 0u) {
-    if ((frame.flags & kFrameRcgi) != 0u) {
-      // RCGI lights the interior: its ray misses fall back to the interior
-      // ambient (RX_RCGI_INTERIOR), so this carries true indoor bounce instead
-      // of a flat term and no leaked skylight. Replaces the authored ambient.
-      ambient = albedo * rcgi_irradiance.Load(int3(input.sv_position.xy, 0)).rgb;
-    } else {
-      ambient = albedo * frame.interior_ambient.rgb;
+    // RCGI lights the interior: its ray misses fall back to the interior
+    // ambient (RX_RCGI_INTERIOR), so this carries true indoor bounce instead
+    // of a flat term and no leaked skylight. Replaces the authored ambient.
+    float3 indoor = (frame.flags & kFrameRcgi) != 0u
+                        ? rcgi_irradiance.Load(int3(input.sv_position.xy, 0)).rgb
+                        : frame.interior_ambient.rgb;
+    ambient = albedo * indoor;
+    // Indoors there is no probe to reflect, so env-mapped metal takes the traced
+    // reflection when the denoised target is up (a candlestick in an inn then
+    // reflects the room it is standing in), and the room ambient otherwise.
+    spec_radiance = indoor;
+    if ((frame.flags & kFrameSpecReflTex) != 0u && roughness < frame.reflection_cutoff) {
+      spec_radiance = spec_refl_map
+                          .SampleLevel(spec_refl_sampler,
+                                       input.sv_position.xy / frame.misc.xy, 0.0)
+                          .rgb;
     }
     g_skin_diffuse += ambient * ao;
   } else {
     ambient = albedo * frame.sun_color.w;
+    spec_radiance = frame.sun_color.w.xxx;
     g_skin_diffuse += ambient * ao;
   }
   ambient *= ao;
 
   // Environment reflection layer: what the original games get from an authored
-  // cubemap scaled by Environment Map Scale, taken here off the engine's own
-  // environment so the reflection actually contains the scene. The authored
-  // scale is the facing-view reflectance and schlick carries it to a mirror at
-  // grazing angles; the mask decides which texels reflect at all (the metal
-  // parts of an armour, the ice, the eye).
-  if (material.env_reflect > 0.001 && (frame.flags & kFrameIbl) != 0u) {
+  // cubemap scaled by Environment Map Scale, taken here off the reflection this
+  // pixel already resolved - the ray traced one on the hybrid path, so ebony
+  // armour reflects the room it stands in and not a probe of the sky. The
+  // authored scale is the facing-view reflectance and schlick carries it to a
+  // mirror at grazing angles; the mask decides which texels reflect at all (the
+  // metal parts of an armour, the ice, the eye).
+  if (material.env_reflect > 0.001) {
     float env_mask = (material.flags & kFlagEnvMask) != 0u
                          ? env_mask_map.Sample(env_mask_sampler, input.uv).r
                          : spec_mask;
-    float3 env = prefiltered_cube
-                     .SampleLevel(prefiltered_sampler, reflect(-v, n),
-                                  roughness * (kPrefilterMips - 1.0))
-                     .rgb;
     float env_f = material.env_reflect + (1.0 - material.env_reflect) * pow(1.0 - ndv, 5.0);
-    ambient += env * env_f * env_mask * ao * frame.camera_position.w;
+    ambient += spec_radiance * env_f * env_mask * ao;
   }
 
   // Clearcoat reflects the environment through its smooth coat as well.
