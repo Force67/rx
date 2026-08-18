@@ -19,7 +19,13 @@ float REBLUR_FrontEnd_GetNormHitDist(float hit_dist, float view_z, float3 params
 }
 float4 REBLUR_FrontEnd_PackRadianceAndNormHitDist(float3 radiance, float norm_hit_dist,
                                                   bool sanitize) {
-  return float4(radiance, norm_hit_dist);
+  // Must match the real NRD, which packs to YCoCg (REBLUR_USE_YCOCG). An
+  // identity stand-in here would leave this build's producer disagreeing with
+  // the UnpackSpecRefl in mesh_rt.ps, which is how the reflection target came
+  // to be read raw and wash every glossy surface red.
+  return float4(dot(radiance, float3(0.25, 0.5, 0.25)),
+                dot(radiance, float3(0.5, 0.0, -0.5)),
+                dot(radiance, float3(-0.25, 0.5, -0.25)), norm_hit_dist);
 }
 #endif
 

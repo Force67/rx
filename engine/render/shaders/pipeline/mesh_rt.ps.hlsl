@@ -283,10 +283,33 @@ void ApplyDecalLayer(inout float3 albedo, inout float3 n, inout float rough_mult
   }
 }
 
-// NRD REBLUR-denoised stochastic reflections (radiance in rgb); replaces the
-// inline mirror trace when kFrameSpecReflTex is set.
+// NRD REBLUR-denoised stochastic reflections; replaces the inline mirror trace
+// when kFrameSpecReflTex is set.
 [[vk::combinedImageSampler]] [[vk::binding(12, 2)]] Texture2D spec_refl_map : register(t12, space2);
 [[vk::combinedImageSampler]] [[vk::binding(12, 2)]] SamplerState spec_refl_sampler : register(s12, space2);
+
+// REBLUR carries radiance in YCoCg (REBLUR_USE_YCOCG), so OUT_SPEC_RADIANCE_HITDIST
+// has to be decoded before use - read raw, a neutral reflection lands on
+// (Y,0,0) and every glossy surface washes red.
+//
+// Use NRD's own unpack so this can never drift from whatever REBLUR actually
+// encodes, which is how the raw read survived in the first place.
+// pathtrace_composite.cs.hlsl can include NRD.hlsli outright because it is
+// inside the RX_NRD block; this shader is always built, so the include is
+// conditional. The fallback only ever compiles in a tree without NRD vendored,
+// where this path is unreachable anyway: kFrameSpecReflTex is set only when
+// spec_refl_active, which requires nrd_.available().
+#if __has_include("NRD.hlsli")
+#include "NRD.hlsli"
+float3 UnpackSpecRefl(float4 data) {
+  return REBLUR_BackEnd_UnpackRadianceAndNormHitDist(data).rgb;
+}
+#else
+float3 UnpackSpecRefl(float4 data) {
+  float t = data.x - data.z;
+  return max(float3(t + data.y, data.x + data.z, t - data.y), 0.0);
+}
+#endif
 
 struct MaterialParams {
   float4 base_color_factor;
@@ -1143,8 +1166,8 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       // lobe, so the texture already carries the roughness-matched blur - no
       // crossfade to the cube needed until the cutoff.
       float3 traced =
-          spec_refl_map.SampleLevel(spec_refl_sampler,
-                                    input.sv_position.xy / frame.misc.xy, 0.0).rgb;
+          UnpackSpecRefl(spec_refl_map.SampleLevel(spec_refl_sampler,
+                                                   input.sv_position.xy / frame.misc.xy, 0.0));
       float blend = smoothstep(0.75, 1.0, roughness / max(frame.reflection_cutoff, 1e-3));
       radiance = lerp(traced, radiance, blend);
     } else if ((frame.flags & kFrameReflections) != 0u && roughness < frame.reflection_cutoff) {
@@ -1209,8 +1232,8 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     case 8: return emissive;
     case 9:  // raw reflection: the denoised target when present, else traced
       if ((frame.flags & kFrameSpecReflTex) != 0u) {
-        return spec_refl_map.SampleLevel(spec_refl_sampler,
-                                         input.sv_position.xy / frame.misc.xy, 0.0).rgb;
+        return UnpackSpecRefl(spec_refl_map.SampleLevel(
+            spec_refl_sampler, input.sv_position.xy / frame.misc.xy, 0.0));
       }
       return TraceReflection(input.world_pos + n * 0.02, reflect(-v, n));
     case 14: {  // ray-count heatmap: shadow + ao + reflection rays this pixel casts
