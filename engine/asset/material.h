@@ -57,6 +57,31 @@ struct Material {
   // Subsurface scattering: wrap + back-scatter translucency for skin/wax/leaves.
   f32 subsurface_color[3] = {0.9f, 0.3f, 0.2f};
   f32 subsurface = 0.0f;  // 0 = off
+  // Per-texel specular masking, the way the Bethesda lighting shader authors it:
+  // the normal map's alpha channel is a specular mask (matte leather and
+  // polished steel share one texture) and the material carries the highlight's
+  // colour and strength instead of a roughness map. glTF normal maps have no
+  // meaningful alpha, so the mask is opt-in; the colour/strength defaults are
+  // neutral, so a material that sets neither shades exactly as before.
+  bool specular_mask_in_normal_alpha = false;
+  f32 specular_color[3] = {1, 1, 1};
+  f32 specular_strength = 1.0f;  // 0 = matte (no direct specular lobe)
+  // Environment reflection layer over the base material: armour, ice, gems and
+  // eyes in the Bethesda games get their shine from a cubemap the material
+  // scales and masks, not from being metal. The engine reflects its own
+  // environment, so the material only carries the strength (the property's
+  // Environment Map Scale) and the mask; the reflection is fresnel weighted,
+  // reaching a mirror at grazing angles. 0 = off.
+  f32 env_reflect = 0.0f;
+  AssetId env_mask;  // r scales env_reflect; falls back to the specular mask
+  // Wrap-around light fills, the vanilla "lighting effect" terms. Soft lighting
+  // spills the key light past the terminator (leaves, cloth, skin), rim lighting
+  // rides the edge of a backlit surface (the value is its falloff exponent), and
+  // back lighting transmits straight through. All tint by subsurface_color and
+  // are added to the light response, so they show where N.L is 0. 0 = off.
+  f32 soft_lighting = 0.0f;
+  f32 rim_lighting = 0.0f;
+  f32 back_lighting = 0.0f;
   // Thin-film interference (KHR_materials_iridescence): a view-angle dependent
   // rainbow on the specular, for soap bubbles, oil, beetle shells.
   f32 iridescence = 0.0f;

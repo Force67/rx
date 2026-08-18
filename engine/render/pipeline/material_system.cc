@@ -233,7 +233,8 @@ std::unique_ptr<MaterialSystem> MaterialSystem::Create(Device& device,
                 {4, BindingType::kCombinedTextureSampler},
                 {5, BindingType::kCombinedTextureSampler},
                 {6, BindingType::kCombinedTextureSampler},   // metallic (separate)
-                {7, BindingType::kCombinedTextureSampler}},  // occlusion
+                {7, BindingType::kCombinedTextureSampler},   // occlusion
+                {8, BindingType::kCombinedTextureSampler}},  // env mask
   });
   if (!system->set_layout_) return nullptr;
 
@@ -275,7 +276,7 @@ bool MaterialSystem::CreateDefaults() {
   }
   default_set_ = AllocateSet();
   if (!default_set_) return false;
-  u64 map_keys[7];
+  u64 map_keys[8];
   return WriteSet(default_set_, static_cast<u32>(param_buffers_.size()) - 1,
                   sets_in_last_pool_ - 1, default_material, 0, map_keys);
 }
@@ -538,7 +539,7 @@ u32 MaterialSystem::EnsureBindless(u64 key) {
 }
 
 void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime) {
-  const GpuImage* maps[7] = {
+  const GpuImage* maps[8] = {
       texture_or(runtime.map_keys[0], white_),
       texture_or(runtime.map_keys[1], flat_normal_),
       texture_or(runtime.map_keys[2], white_),
@@ -546,6 +547,7 @@ void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntim
       texture_or(runtime.map_keys[4], white_),  // white = surface level
       texture_or(runtime.map_keys[5], white_),  // white metallic = mr map alone
       texture_or(runtime.map_keys[6], white_),  // white occlusion = no AO
+      texture_or(runtime.map_keys[7], white_),  // white env mask = reflect everywhere
   };
   GpuBuffer& buffer = param_buffers_[runtime.pool];
   u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
@@ -556,12 +558,13 @@ void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntim
                                  Bind::Combined(4, maps[3]->view, sampler_),
                                  Bind::Combined(5, maps[4]->view, sampler_),
                                  Bind::Combined(6, maps[5]->view, sampler_),
-                                 Bind::Combined(7, maps[6]->view, sampler_)});
+                                 Bind::Combined(7, maps[6]->view, sampler_),
+                                 Bind::Combined(8, maps[7]->view, sampler_)});
 }
 
 bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
                               const asset::Material& material, u64 id_salt,
-                              u64 out_map_keys[7]) {
+                              u64 out_map_keys[8]) {
   Params params;
   std::memcpy(params.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
   std::memcpy(params.emissive_factor, material.emissive_factor, sizeof(f32) * 3);
@@ -584,6 +587,12 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   params.uv_scroll[1] = material.uv_scroll_v;
   params.emissive_pulse[0] = material.emissive_pulse[0];
   params.emissive_pulse[1] = material.emissive_pulse[1];
+  std::memcpy(params.specular_color, material.specular_color, sizeof(f32) * 3);
+  params.specular_strength = material.specular_strength;
+  params.env_reflect = material.env_reflect;
+  params.soft_lighting = material.soft_lighting;
+  params.rim_lighting = material.rim_lighting;
+  params.back_lighting = material.back_lighting;
   // Effect-shader (unlit vfx) geometry: torch/campfire flames, glow planes,
   // mist. base_color is the source texture, base_color_factor the emissive
   // colour * multiple, and the unlit shader branch reads these flags/params.
@@ -618,6 +627,13 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   } else if (material.normal && textures_.find(material.normal.hash ^ id_salt)) {
     params.flags |= kFlagHasNormalMap;
     if (material.normal_model_space) params.flags |= kFlagNormalModelSpace;
+    // The mask lives in the normal map's alpha, so it only exists with one.
+    if (material.specular_mask_in_normal_alpha) params.flags |= kFlagSpecularMask;
+  }
+  // Env mask: only flagged when its map uploaded, so the reflection falls back
+  // to the specular mask instead of the white default reflecting everywhere.
+  if (material.env_mask && textures_.find(material.env_mask.hash ^ id_salt)) {
+    params.flags |= kFlagEnvMask;
   }
   if (material.height && textures_.find(material.height.hash ^ id_salt)) {
     params.flags |= kFlagHasHeightMap;
@@ -686,6 +702,7 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   runtime.map_keys[4] = material.height.hash ^ id_salt;
   runtime.map_keys[5] = material.metallic_map.hash ^ id_salt;
   runtime.map_keys[6] = material.occlusion_map.hash ^ id_salt;
+  runtime.map_keys[7] = material.env_mask.hash ^ id_salt;
   WriteSetBindings(set, runtime);
   std::memcpy(out_map_keys, runtime.map_keys, sizeof(runtime.map_keys));
   return true;

@@ -24,6 +24,7 @@ namespace rx::render {
 //   binding 5  height            (linear)
 //   binding 6  metallic          (linear; only when separate_metallic)
 //   binding 7  occlusion         (linear; multiplies ambient)
+//   binding 8  env mask          (linear; r scales the env reflection)
 // Missing maps fall back to builtin 1x1 defaults (white metallic = the mr map
 // alone, white occlusion = no AO) so the shader never branches on presence.
 //
@@ -90,6 +91,15 @@ class MaterialSystem {
     f32 sss_perfusion = 0;
     f32 sss_scatter_color[3] = {0, 0, 0};
     f32 sss_ior = 1.4f;
+    // Bethesda lighting-shader inputs (see asset::Material): a specular tint
+    // and strength that scale the direct lobe, an environment reflection layer,
+    // and the soft/rim/back light fills. Neutral at these defaults.
+    f32 specular_color[3] = {1, 1, 1};
+    f32 specular_strength = 1.0f;
+    f32 env_reflect = 0;
+    f32 soft_lighting = 0;
+    f32 rim_lighting = 0;
+    f32 back_lighting = 0;
   };
   static constexpr u32 kFlagAlphaMask = 1u << 0;
   static constexpr u32 kFlagHasNormalMap = 1u << 1;
@@ -110,6 +120,8 @@ class MaterialSystem {
   static constexpr u32 kFlagSeparateMetallic = 1u << 16;  // metallic from metallic_map.r, not mr.b
   static constexpr u32 kFlagHasOcclusion = 1u << 17;      // dedicated occlusion map multiplies ambient
   static constexpr u32 kFlagSilhouettePom = 1u << 18;  // curvature-aware pom that carves silhouettes
+  static constexpr u32 kFlagSpecularMask = 1u << 19;   // normal-map alpha masks the specular lobe
+  static constexpr u32 kFlagEnvMask = 1u << 20;        // env mask map bound at binding 8
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).
@@ -263,7 +275,7 @@ class MaterialSystem {
     BindingSetHandle set;
     u32 pool = 0;         // param_buffers_ index of the uniform slot
     u32 param_index = 0;  // slot within the pool
-    u64 map_keys[7] = {};  // salted texture hashes for bindings 1..7
+    u64 map_keys[8] = {};  // salted texture hashes for bindings 1..8
     u32 bindless_material = BindlessRegistry::kInvalidIndex;
     u32 last_used = 0;
   };
@@ -283,7 +295,7 @@ class MaterialSystem {
   bool AddPool();
   BindingSetHandle AllocateSet();
   bool WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
-                const asset::Material& material, u64 id_salt, u64 out_map_keys[7]);
+                const asset::Material& material, u64 id_salt, u64 out_map_keys[8]);
   void WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime);
   const GpuImage* texture_or(u64 hash, const GpuImage& fallback) const;
   TextureRecord* record_for(u64 hash);
