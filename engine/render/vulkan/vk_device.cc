@@ -696,9 +696,23 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
       {"timelineSemaphore", core12 ? f12.timelineSemaphore : timeline.timelineSemaphore},
       {"descriptorIndexing",
        core12 ? f12.descriptorIndexing
+              // The umbrella `descriptorIndexing` bit does not exist below 1.2,
+              // so the sub-features have to be named. These are exactly what
+              // the bindless set asks the driver for: a partially bound,
+              // update-after-bind array of textures and one of byte buffers
+              // (CreateBindingLayout tags both with PARTIALLY_BOUND |
+              // UPDATE_AFTER_BIND), and shaders index both with
+              // NonUniformResourceIndex - the texture array everywhere, the
+              // geometry buffers through rt_geometry.hlsli. Checking only the
+              // sampled-image half let an adapter pass here and then fail at
+              // pipeline creation, which is the failure this baseline exists
+              // to turn into an honest rejection.
               : descriptor_indexing.runtimeDescriptorArray &&
                     descriptor_indexing.descriptorBindingPartiallyBound &&
-                    descriptor_indexing.shaderSampledImageArrayNonUniformIndexing},
+                    descriptor_indexing.shaderSampledImageArrayNonUniformIndexing &&
+                    descriptor_indexing.descriptorBindingSampledImageUpdateAfterBind &&
+                    descriptor_indexing.shaderStorageBufferArrayNonUniformIndexing &&
+                    descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind},
       {"separateDepthStencilLayouts",
        core12 ? f12.separateDepthStencilLayouts
               : separate_depth_stencil.separateDepthStencilLayouts},
