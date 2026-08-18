@@ -66,6 +66,55 @@ def Xform "World"
 }
 )";
 
+// A MaterialX OpenPBR surface, the other shader tydra can hand back. Single
+// layer: composition is already covered above, this is about the material.
+constexpr char kOpenPbrStage[] = R"(#usda 1.0
+(
+    defaultPrim = "World"
+)
+
+def Xform "World"
+{
+    def Mesh "Quad"
+    {
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0)]
+        normal3f[] normals = [(0, 0, 1), (0, 0, 1), (0, 0, 1)] (
+            interpolation = "vertex"
+        )
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1)] (
+            interpolation = "vertex"
+        )
+        rel material:binding = </World/Coated>
+    }
+
+    def Material "Coated"
+    {
+        token outputs:surface.connect = </World/Coated/Surface.outputs:surface>
+
+        def Shader "Surface"
+        {
+            uniform token info:id = "ND_open_pbr_surface_surfaceshader"
+            float inputs:base_weight = 0.5
+            color3f inputs:base_color = (0.4, 0.6, 0.8)
+            float inputs:base_metalness = 1
+            float inputs:base_diffuse_roughness = 0.75
+            float inputs:specular_roughness = 0.2
+            float inputs:specular_ior = 1.8
+            float inputs:specular_roughness_anisotropy = 0.5
+            color3f inputs:specular_color = (0.9, 0.7, 0.5)
+            float inputs:coat_weight = 0.8
+            float inputs:coat_ior = 1.7
+            color3f inputs:coat_color = (0.2, 0.4, 0.6)
+            float inputs:thin_film_weight = 1
+            float inputs:thin_film_thickness = 0.35
+            token outputs:surface
+        }
+    }
+}
+)";
+
 int failures = 0;
 
 void Check(bool condition, const char *message) {
@@ -152,6 +201,49 @@ int main() {
           "z-up centimetres are normalized to y-up metres");
     Check(Near(instance.scale, 0.01f),
           "metersPerUnit is folded into the instance scale");
+  }
+
+  // OpenPBR: tydra parses it into a separate slot on RenderMaterial, so the
+  // importer has to reach for it instead of falling back to engine defaults.
+  const std::filesystem::path openpbr_stage = dir / "rx_usd_openpbr.usda";
+  if (!Write(openpbr_stage, kOpenPbrStage, sizeof(kOpenPbrStage) - 1)) {
+    std::fprintf(stderr, "usd_scene_test: cannot create openpbr fixture\n");
+    return 1;
+  }
+  asset::ImportedScene openpbr_scene;
+  const bool openpbr_loaded =
+      asset::LoadUsdScene(openpbr_stage.string(), &openpbr_scene);
+  std::filesystem::remove(openpbr_stage);
+  Check(openpbr_loaded, "an OpenPBR stage loads");
+
+  if (openpbr_loaded && openpbr_scene.materials.size() == 1) {
+    const asset::Material &m = openpbr_scene.materials[0];
+    // Anything other than the engine defaults here proves the OpenPBR shader
+    // was read rather than skipped: base_color would be white, not 0.4 * 0.5.
+    Check(Near(m.base_color_factor[0], 0.2f) && Near(m.base_color_factor[1], 0.3f) &&
+              Near(m.base_color_factor[2], 0.4f),
+          "base_weight scales base_color into the base color factor");
+    Check(Near(m.metallic_factor, 1.0f) && Near(m.roughness_factor, 0.2f),
+          "base_metalness and specular_roughness carry over");
+    Check(Near(m.base_diffuse_roughness, 0.75f), "base_diffuse_roughness carries over");
+    Check(Near(m.ior, 1.8f), "specular_ior carries over");
+    Check(Near(m.specular_color[0], 0.9f) && Near(m.specular_color[1], 0.7f) &&
+              Near(m.specular_color[2], 0.5f),
+          "specular_color carries over");
+    Check(Near(m.clearcoat, 0.8f) && Near(m.coat_ior, 1.7f),
+          "coat_weight and coat_ior carry over");
+    Check(Near(m.coat_color[0], 0.2f) && Near(m.coat_color[1], 0.4f) &&
+              Near(m.coat_color[2], 0.6f),
+          "coat_color carries over");
+    // k = a/(2-a) matches the NDF axis ratio; 0.5 -> 1/3.
+    Check(Near(m.anisotropy, 1.0f / 3.0f),
+          "specular_roughness_anisotropy is reparametrized to the engine's range");
+    // tinyusdz passes the document value through untouched, and the spec states
+    // it in micrometres, so the importer owns the conversion to nanometres.
+    Check(Near(m.iridescence, 1.0f) && Near(m.iridescence_thickness, 350.0f),
+          "thin film thickness converts from micrometres to nanometres");
+  } else if (openpbr_loaded) {
+    Check(false, "the OpenPBR stage yields exactly one material");
   }
 
   if (failures == 0) {

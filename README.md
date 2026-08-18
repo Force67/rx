@@ -27,7 +27,8 @@ viewer runtime in place of the game.
   animations, OpenUSD stage loading ([tinyusdz](https://github.com/lighttransport/tinyusdz):
   `.usd`/`.usda`/`.usdc`/`.usdz` with composition, GeomSubsets and
   UsdPreviewSurface; see [USD.md](docs/USD.md)),
-  MaterialX, primitives, LOD simplification, Loop subdivision,
+  MaterialX including OpenPBR Surface (see [OPENPBR.md](docs/OPENPBR.md)),
+  primitives, LOD simplification, Loop subdivision,
   virtual filesystem with `.rxp` archives (rx ships its own under
   `engine/assets`, mounted at boot: `fonts://` holds the default UI font).
 - **engine/core** - SDL3 windowing (+ KDE HDR monitor), job system, input

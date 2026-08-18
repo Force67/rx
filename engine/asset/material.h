@@ -54,6 +54,39 @@ struct Material {
   f32 ior = 1.5f;                  // KHR_materials_ior, dielectric f0
   f32 sheen_color[3] = {0, 0, 0};  // KHR_materials_sheen
   f32 sheen_roughness = 0.3f;
+  // OpenPBR Surface (AcademySoftwareFoundation/OpenPBR v1.1.1) additions, for
+  // the lobes glTF has no equivalent of. Every default here is the *glTF*
+  // default, not the OpenPBR one, so an imported metallic-roughness material
+  // shades exactly as it did before this block existed. The OpenPBR importers
+  // (usd_loader, materialx) apply the spec defaults themselves for inputs a
+  // document leaves unauthored - they differ, and silently taking the glTF
+  // value for an OpenPBR asset would be wrong. See docs/OPENPBR.md.
+  //
+  // Roughness of the Oren-Nayar diffuse lobe. 0 = Lambert (the glTF model), and
+  // the shader keeps the cheap Lambert path at 0 rather than evaluating EON.
+  f32 base_diffuse_roughness = 0.0f;  // openpbr base_diffuse_roughness
+  // Modulates dielectric reflectivity at normal incidence by reducing the ior
+  // below specular_ior; also scales the metal Fresnel. May exceed 1 (the shader
+  // clamps against the physical 1/F0 ceiling). 1 = the ior alone decides.
+  f32 specular_weight = 1.0f;  // openpbr specular_weight
+  // Dielectric: tints the Fresnel of the primary specular reflection only.
+  // Metal: the reflectivity at the ~82 degree grazing edge, as a fraction of
+  // the Schlick curve, feeding the F82-tint model (Kutz 2021). White reduces
+  // F82 to plain Schlick, which is what every non-OpenPBR material wants.
+  f32 specular_color[3] = {1, 1, 1};  // openpbr specular_color
+  // Square of the coat's normal-incidence transmittance, i.e. the tint the coat
+  // absorption applies to the base. White = a clear coat.
+  f32 coat_color[3] = {1, 1, 1};  // openpbr coat_color
+  // Coat ior. 1.5 is the glTF KHR_materials_clearcoat value (f0 = 0.04) and the
+  // engine's historical hardcode; OpenPBR's own default is 1.6.
+  f32 coat_ior = 1.5f;  // openpbr coat_ior
+  // How much of the physical coat darkening (internal reflections striking the
+  // base repeatedly) to apply. OpenPBR defaults this to 1 (fully physical); the
+  // engine defaults to 0 so existing clearcoat materials keep their look.
+  f32 coat_darkening = 0.0f;  // openpbr coat_darkening
+  // Thin-film ior. 1.3 is the KHR_materials_iridescence default and the
+  // engine's historical hardcode; OpenPBR's own default is 1.4.
+  f32 thin_film_ior = 1.3f;  // openpbr thin_film_ior
   // Subsurface scattering: wrap + back-scatter translucency for skin/wax/leaves.
   f32 subsurface_color[3] = {0.9f, 0.3f, 0.2f};
   f32 subsurface = 0.0f;  // 0 = off
@@ -155,6 +188,32 @@ struct Material {
   // (Hz), y = amount (0..1 of the mean it swings). 0 = constant.
   f32 emissive_pulse[2] = {0, 0};
 };
+
+// OpenPBR specifies anisotropy as a stretch a in [0,1] with the NDF axes
+// related by alpha_b/alpha_t = 1 - a, while the engine's shader parametrizes it
+// as ax = alpha*(1+k), ay = alpha*(1-k) with k in [-1,1]. Matching the axis
+// ratio gives k = a/(2-a). This reproduces the shape of the highlight but not
+// the spec's alpha_t^2 + alpha_b^2 = 2*alpha^2 mean-roughness normalization, so
+// a strongly anisotropic surface reads a little rougher overall than it would
+// in a reference renderer. Shared by the USD and MaterialX importers.
+inline f32 OpenPbrAnisotropyToEngine(f32 anisotropy) {
+  const f32 a = anisotropy < 0.0f ? 0.0f : (anisotropy > 1.0f ? 1.0f : anisotropy);
+  return a > 0.0f ? a / (2.0f - a) : 0.0f;
+}
+
+// OpenPBR's own defaults for the inputs where they differ from the engine's
+// (which follow glTF). An importer seeds these before parsing so that inputs a
+// document leaves unauthored land on the spec value rather than the glTF one.
+inline void ApplyOpenPbrDefaults(Material* m) {
+  m->base_color_factor[0] = m->base_color_factor[1] = m->base_color_factor[2] = 0.8f;
+  m->roughness_factor = 0.3f;   // specular_roughness
+  m->coat_ior = 1.6f;
+  m->coat_darkening = 1.0f;
+  m->thin_film_ior = 1.4f;
+  m->iridescence_thickness = 500.0f;  // 0.5um
+  m->sheen_roughness = 0.5f;          // fuzz_roughness
+  m->subsurface_color[0] = m->subsurface_color[1] = m->subsurface_color[2] = 0.8f;
+}
 
 }  // namespace rx::asset
 

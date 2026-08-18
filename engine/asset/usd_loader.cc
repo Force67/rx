@@ -123,16 +123,49 @@ i64 ImageIndexOf(const tt::RenderScene &scene, i32 texture_id) {
   return image;
 }
 
-void ConvertMaterial(const tt::RenderScene &scene, const tt::RenderMaterial &src,
-                     const base::Vector<AssetId> &image_ids, Material *out) {
-  out->name = src.name;
-  if (!src.surfaceShader)
-    return; // MDL- or MaterialX-only material: keep the engine defaults.
+AssetId TextureAssetOf(const tt::RenderScene &scene,
+                       const base::Vector<AssetId> &image_ids, i32 texture_id) {
+  const i64 image = ImageIndexOf(scene, texture_id);
+  return image >= 0 ? image_ids[static_cast<u32>(image)] : AssetId{};
+}
 
-  const tt::PreviewSurfaceShader &s = *src.surfaceShader;
-  const auto texture = [&](i32 texture_id) -> AssetId {
-    const i64 image = ImageIndexOf(scene, texture_id);
-    return image >= 0 ? image_ids[static_cast<u32>(image)] : AssetId{};
+// Neither UsdPreviewSurface nor OpenPBR has a packed ORM channel: roughness and
+// metallic are separate inputs. When both resolve to one image the author
+// packed them glTF-style and the combined path applies; otherwise the roughness
+// map goes in the combined slot (read through .g, which the greyscale expansion
+// above keeps valid) and metallic gets its own.
+void ConvertRoughnessMetallicMaps(const tt::RenderScene &scene,
+                                  const base::Vector<AssetId> &image_ids,
+                                  i32 roughness_texture, i32 metallic_texture,
+                                  Material *out) {
+  const i64 roughness_image = ImageIndexOf(scene, roughness_texture);
+  const i64 metallic_image = ImageIndexOf(scene, metallic_texture);
+  if (roughness_image >= 0)
+    out->metallic_roughness = image_ids[static_cast<u32>(roughness_image)];
+  if (metallic_image >= 0 && metallic_image != roughness_image) {
+    out->metallic_map = image_ids[static_cast<u32>(metallic_image)];
+    out->separate_metallic = true;
+    if (roughness_image < 0)
+      out->metallic_roughness = out->metallic_map;
+  } else if (metallic_image >= 0 && roughness_image < 0) {
+    out->metallic_roughness = image_ids[static_cast<u32>(metallic_image)];
+  } else if (roughness_image >= 0) {
+    // Roughness map, no metallic map. The combined slot is roughness-only, but
+    // the glTF packing the shader assumes reads metallic from its `.b` - and a
+    // greyscale roughness map expands to rgb, so `.b` is the roughness value.
+    // Matte cloth with a non-zero `metallic` scalar then shades as tinted
+    // metal. kFlagSeparateMetallic switches the shader to metallic_map.r, whose
+    // white default makes metallic == metallic_factor: exactly the
+    // UsdPreviewSurface meaning of a scalar metallic with no texture.
+    out->separate_metallic = true;
+  }
+}
+
+void ConvertPreviewSurface(const tt::RenderScene &scene,
+                           const tt::PreviewSurfaceShader &s,
+                           const base::Vector<AssetId> &image_ids, Material *out) {
+  const auto texture = [&](i32 texture_id) {
+    return TextureAssetOf(scene, image_ids, texture_id);
   };
 
   out->base_color = texture(s.diffuseColor.texture_id);
@@ -154,37 +187,127 @@ void ConvertMaterial(const tt::RenderScene &scene, const tt::RenderMaterial &src
   out->clearcoat_roughness = s.clearcoatRoughness.value;
   out->occlusion_map = texture(s.occlusion.texture_id);
 
-  // UsdPreviewSurface has no packed ORM channel: roughness and metallic are
-  // separate inputs. When both resolve to one image the author packed them
-  // glTF-style and the combined path applies; otherwise the roughness map goes
-  // in the combined slot (read through .g, which the greyscale expansion above
-  // keeps valid) and metallic gets its own.
-  const i64 roughness_image = ImageIndexOf(scene, s.roughness.texture_id);
-  const i64 metallic_image = ImageIndexOf(scene, s.metallic.texture_id);
-  if (roughness_image >= 0)
-    out->metallic_roughness = image_ids[static_cast<u32>(roughness_image)];
-  if (metallic_image >= 0 && metallic_image != roughness_image) {
-    out->metallic_map = image_ids[static_cast<u32>(metallic_image)];
-    out->separate_metallic = true;
-    if (roughness_image < 0)
-      out->metallic_roughness = out->metallic_map;
-  } else if (metallic_image >= 0 && roughness_image < 0) {
-    out->metallic_roughness = image_ids[static_cast<u32>(metallic_image)];
-  } else if (roughness_image >= 0) {
-    // Roughness map, no metallic map. The combined slot is roughness-only, but
-    // the glTF packing the shader assumes reads metallic from its `.b` - and a
-    // greyscale roughness map expands to rgb, so `.b` is the roughness value.
-    // Matte cloth with a non-zero `metallic` scalar then shades as tinted
-    // metal. kFlagSeparateMetallic switches the shader to metallic_map.r, whose
-    // white default makes metallic == metallic_factor: exactly the
-    // UsdPreviewSurface meaning of a scalar metallic with no texture.
-    out->separate_metallic = true;
+  ConvertRoughnessMetallicMaps(scene, image_ids, s.roughness.texture_id,
+                               s.metallic.texture_id, out);
+}
+
+// OpenPBR Surface (AcademySoftwareFoundation/OpenPBR v1.1.1). Tydra parses the
+// whole MaterialX input set into RenderMaterial::openPBRShader independently of
+// UsdPreviewSurface - a stage may carry either, or both - so this is a separate
+// mapping rather than a patch over the preview-surface one. Only the lobes the
+// engine can actually shade are mapped; the translucent-base volumetrics,
+// dispersion, thin-walled mode and separate coat normals are dropped. See
+// docs/OPENPBR.md for the full coverage table.
+//
+// Two things worth knowing about the tydra boundary:
+//   - ShaderParam carries no "was this authored" bit, only a value and a
+//     texture id. Some of tydra's fallbacks disagree with the spec
+//     (coat_roughness 0.1 vs 0, subsurface_radius_scale (1,0.2,0.1) vs
+//     (1,0.5,0.25), thin_film_ior 1.5 vs 1.4). An unauthored input is
+//     indistinguishable from one authored to the same value, so those are
+//     taken as given rather than "corrected" - clobbering a real authored
+//     value would be the worse failure.
+//   - thin_film_thickness is passed through verbatim from the document, which
+//     the spec defines in micrometers, into a field tydra documents as
+//     nanometers. The conversion has to happen somewhere, so it happens here.
+void ConvertOpenPbrSurface(const tt::RenderScene &scene,
+                           const tt::OpenPBRSurfaceShader &s,
+                           const base::Vector<AssetId> &image_ids, Material *out) {
+  const auto texture = [&](i32 texture_id) {
+    return TextureAssetOf(scene, image_ids, texture_id);
+  };
+
+  // base_weight scales base_color, which serves as both the diffuse albedo and
+  // the metal normal-incidence reflectivity F0.
+  const f32 base_weight = s.base_weight.value;
+  out->base_color = texture(s.base_color.texture_id);
+  out->base_color_factor[0] = s.base_color.value[0] * base_weight;
+  out->base_color_factor[1] = s.base_color.value[1] * base_weight;
+  out->base_color_factor[2] = s.base_color.value[2] * base_weight;
+  out->base_color_factor[3] = s.opacity.value;
+  out->base_diffuse_roughness = s.base_diffuse_roughness.value;
+  out->metallic_factor = s.base_metalness.value;
+
+  out->normal = texture(s.normal.texture_id);
+  ConvertRoughnessMetallicMaps(scene, image_ids, s.specular_roughness.texture_id,
+                               s.base_metalness.texture_id, out);
+
+  out->roughness_factor = s.specular_roughness.value;
+  out->ior = s.specular_ior.value;
+  out->specular_weight = s.specular_weight.value;
+  out->specular_color[0] = s.specular_color.value[0];
+  out->specular_color[1] = s.specular_color.value[1];
+  out->specular_color[2] = s.specular_color.value[2];
+
+  out->anisotropy = OpenPbrAnisotropyToEngine(s.specular_roughness_anisotropy.value);
+
+  out->transmission = s.transmission_weight.value;
+  out->subsurface = s.subsurface_weight.value;
+  out->subsurface_color[0] = s.subsurface_color.value[0];
+  out->subsurface_color[1] = s.subsurface_color.value[1];
+  out->subsurface_color[2] = s.subsurface_color.value[2];
+
+  // Fuzz folds onto the engine's Charlie sheen lobe (the spec asks for a
+  // Zeltner microflake LTC, which the engine does not implement). Tydra carries
+  // both the OpenPBR fuzz_* inputs and the Autodesk standard_surface sheen_*
+  // ones on the same struct, so take whichever the document actually drove.
+  const bool has_fuzz = s.fuzz_weight.value > 0.0f;
+  const f32 sheen_weight = has_fuzz ? s.fuzz_weight.value : s.sheen_weight.value;
+  const auto &sheen_tint = has_fuzz ? s.fuzz_color.value : s.sheen_color.value;
+  out->sheen_color[0] = sheen_tint[0] * sheen_weight;
+  out->sheen_color[1] = sheen_tint[1] * sheen_weight;
+  out->sheen_color[2] = sheen_tint[2] * sheen_weight;
+  out->sheen_roughness = has_fuzz ? s.fuzz_roughness.value : s.sheen_roughness.value;
+
+  out->clearcoat = s.coat_weight.value;
+  out->clearcoat_roughness = s.coat_roughness.value;
+  out->coat_ior = s.coat_ior.value;
+  out->coat_darkening = s.coat_darkening.value;
+  out->coat_color[0] = s.coat_color.value[0];
+  out->coat_color[1] = s.coat_color.value[1];
+  out->coat_color[2] = s.coat_color.value[2];
+
+  out->iridescence = s.thin_film_weight.value;
+  out->thin_film_ior = s.thin_film_ior.value;
+  if (out->iridescence > 0.0f) {
+    // Micrometers in the document, nanometers in the engine. A zero thickness
+    // with the film switched on is tydra's unauthored fallback rather than a
+    // real "no film", so fall back to the spec default of 0.5um.
+    const f32 thickness_um =
+        s.thin_film_thickness.value > 0.0f ? s.thin_film_thickness.value : 0.5f;
+    out->iridescence_thickness = thickness_um * 1000.0f;
+  }
+
+  // emission_luminance is an absolute luminance in nits, and emission_color a
+  // (possibly HDR) multiplier on it. The engine's emissive_factor is a linear
+  // radiance addend, so this is passed through literally and left to the auto
+  // exposure to resolve rather than rescaled by an invented constant.
+  const f32 emission = s.emission_luminance.value;
+  out->emissive = texture(s.emission_color.texture_id);
+  out->emissive_factor[0] = s.emission_color.value[0] * emission;
+  out->emissive_factor[1] = s.emission_color.value[1] * emission;
+  out->emissive_factor[2] = s.emission_color.value[2] * emission;
+}
+
+void ConvertMaterial(const tt::RenderScene &scene, const tt::RenderMaterial &src,
+                     const base::Vector<AssetId> &image_ids, Material *out) {
+  out->name = src.name;
+  // A material can carry both shaders. OpenPBR is the richer model, so it wins.
+  if (src.openPBRShader) {
+    ConvertOpenPbrSurface(scene, *src.openPBRShader, image_ids, out);
+  } else if (src.surfaceShader) {
+    ConvertPreviewSurface(scene, *src.surfaceShader, image_ids, out);
+  } else {
+    return; // MDL-only material: keep the engine defaults.
   }
 
   switch (src.materialTag) {
   case tt::MaterialTag::Masked:
     out->alpha_mode = AlphaMode::kMask;
-    out->alpha_cutoff = s.opacityThreshold.value;
+    // OpenPBR has no opacity-threshold input; its cutout is geometry_opacity
+    // driven by a mask texture, so the engine's own default cutoff stands.
+    if (src.surfaceShader && !src.openPBRShader)
+      out->alpha_cutoff = src.surfaceShader->opacityThreshold.value;
     break;
   case tt::MaterialTag::Translucent:
     out->alpha_mode = AlphaMode::kBlend;
@@ -1112,10 +1235,13 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
   base::Vector<AssetId> material_ids;
   material_ids.resize(static_cast<u32>(render_scene.materials.size()));
   u32 unsupported_shaders = 0;
+  u32 openpbr_shaders = 0;
   for (size_t i = 0; i < render_scene.materials.size(); ++i) {
     Material material;
     material.id = ScopedId(path, "mat", i);
-    if (!render_scene.materials[i].surfaceShader)
+    if (render_scene.materials[i].openPBRShader)
+      ++openpbr_shaders;
+    else if (!render_scene.materials[i].surfaceShader)
       ++unsupported_shaders;
     ConvertMaterial(render_scene, render_scene.materials[i], image_ids,
                     &material);
@@ -1171,9 +1297,12 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
           path, out->meshes.size() - skipped_meshes, out->materials.size(),
           out->textures.size(), out->instances.size(), out->lights.size(),
           out->cameras.size(), render_scene.meta.upAxis, meters_per_unit);
+  if (openpbr_shaders)
+    RX_INFO("usd {}: {} OpenPBR material(s)", path, openpbr_shaders);
   if (skipped_meshes || undecoded || unsupported_shaders || walk.mirrored) {
     RX_WARN("usd {}: {} mesh(es) not representable, {} image(s) not decoded, "
-            "{} material(s) without a UsdPreviewSurface, {} mirrored instance(s)",
+            "{} material(s) with neither a UsdPreviewSurface nor an OpenPBR "
+            "surface, {} mirrored instance(s)",
             path, skipped_meshes, undecoded, unsupported_shaders,
             walk.mirrored);
   }

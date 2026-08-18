@@ -446,9 +446,18 @@ if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
   add_test(NAME gltf_skin_test COMMAND gltf_skin_test)
 endif()
 
+# OpenPBR Surface import from MaterialX: the open_pbr_surface mapping, its unit
+# and parametrization conversions, the spec defaults for unauthored inputs, and
+# that standard_surface documents keep the legacy path. No USD needed.
+if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
+  add_executable(openpbr_test test/openpbr_test.cc)
+  target_link_libraries(openpbr_test PRIVATE rx::asset rx::core)
+  add_test(NAME openpbr_test COMMAND openpbr_test)
+endif()
+
 # USD import: composition (a reference arc into a second layer), the z-up /
-# metersPerUnit normalization and the UsdPreviewSurface mapping, on a usda
-# fixture the test writes itself.
+# metersPerUnit normalization and the UsdPreviewSurface / OpenPBR mappings, on a
+# usda fixture the test writes itself.
 if(RX_BUILD_TESTS AND RX_USD AND "asset" IN_LIST RX_MODULES)
   add_executable(usd_scene_test test/usd_scene_test.cc)
   target_link_libraries(usd_scene_test PRIVATE rx::asset rx::core)

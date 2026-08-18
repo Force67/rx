@@ -60,6 +60,7 @@ struct FrameGlobals {
 #include "geometry/shore_wetting.hlsli"  // ShoreWetness / ApplyShoreWetness (env slot 33)
 #include "geometry/water_caustics.hlsli"  // WaterCaustic (env slot 34)
 #include "sss_profile.hlsli"  // skin subsurface profile + blood-flow perfusion
+#include "openpbr.hlsli"  // EON diffuse, F82 metal fresnel, coat absorption
 
 struct PointLight {
   float4 pos_radius;       // xyz position, w influence radius
@@ -317,6 +318,18 @@ struct MaterialParams {
   float sss_perfusion;
   float3 sss_scatter_color;
   float sss_ior;
+  // OpenPBR Surface lobes (see asset/material.h). Neutral at their defaults:
+  // white specular_color reduces the F82-tint metal Fresnel to plain Schlick,
+  // white coat_color is a clear coat, and zero base_diffuse_roughness keeps the
+  // Lambert diffuse path.
+  float3 specular_color;
+  float specular_weight;
+  float3 coat_color;
+  float coat_ior;
+  float base_diffuse_roughness;
+  float coat_darkening;
+  float thin_film_ior;
+  float openpbr_pad;
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
 
@@ -856,13 +869,24 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   float roughness = clamp(mr.x * material.roughness_factor * decal_rough_mult, 0.045, 1.0);
   roughness *= lerp(1.0, 0.45, shore_wet);  // a wet surface is glossier
   roughness = SpecularAaRoughness(roughness, n);
+  // A rough coat blurs the base lobes underneath it (OpenPBR coat roughening).
+  // Has to land before the base specular is built, not after.
+  if (material.clearcoat > 0.001) {
+    roughness = clamp(RxCoatRoughenBase(roughness, material.clearcoat_roughness,
+                                        material.clearcoat),
+                      0.045, 1.0);
+  }
   float metallic = clamp(mr.y * material.metallic_factor, 0.0, 1.0);
 
   float3 l = normalize(-frame.sun_direction.xyz);
   float ndl = max(dot(n, l), 0.0);
 
-  // Dielectric f0 from the ior (1.5 reproduces the classic 0.04).
+  // Dielectric f0 from the ior (1.5 reproduces the classic 0.04). OpenPBR's
+  // specular_weight modulates the reflectivity at normal incidence by pulling
+  // the ior toward the ambient one; scaling f0 is the Schlick-domain
+  // equivalent, saturated because a reflectance above 1 is not physical.
   float dielectric_f0 = pow((material.ior - 1.0) / (material.ior + 1.0), 2.0);
+  dielectric_f0 = saturate(dielectric_f0 * material.specular_weight);
   float3 f0 = lerp(dielectric_f0.xxx, albedo, metallic);
   f0 = lerp(f0, max(f0, 0.05.xxx), shore_wet * 0.6);  // thin water film reflectance
   float3 diffuse_color = albedo * (1.0 - metallic);
@@ -873,9 +897,18 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   float vdh = max(dot(v, h), 0.0);
   float a = roughness * roughness;
   if (material.iridescence > 0.001) {
-    f0 = lerp(f0, ThinFilm(ndv, material.iridescence_thickness, 1.3), material.iridescence);
+    f0 = lerp(f0, ThinFilm(ndv, material.iridescence_thickness, material.thin_film_ior),
+              material.iridescence);
   }
-  float3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
+  // specular_color carries two different meanings in OpenPBR: a straight tint
+  // on the dielectric Fresnel, and the grazing-edge reflectivity of the
+  // F82-tint conductor curve. Both collapse to the old plain Schlick term at
+  // the default white, so nothing that does not set it changes.
+  float3 fresnel_dielectric =
+      material.specular_color * (f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0));
+  float3 fresnel_metal =
+      material.specular_weight * RxFresnelF82(f0, material.specular_color, vdh);
+  float3 fresnel = lerp(fresnel_dielectric, fresnel_metal, metallic);
 
   float3 specular;
   if (abs(material.anisotropy) > 0.001) {
@@ -893,7 +926,16 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     specular = D_GGX(ndh, a) * V_SmithGGXCorrelated(ndv, ndl, a) * fresnel;
   }
 
-  float3 direct = diffuse_color / kPi + specular;
+  // OpenPBR's diffuse lobe is EON (energy-preserving Oren-Nayar), which flattens
+  // and slightly saturates rough diffuse surfaces. At zero base_diffuse_roughness
+  // it is exactly Lambert, so the cheap path stays for everything that does not
+  // author it. Punctual, area and image-based lighting below keep Lambert: the
+  // LTC and prefiltered-cube integrals assume a cosine lobe.
+  float3 diffuse_brdf = material.base_diffuse_roughness > 0.001
+                            ? RxEonDiffuse(ndv, ndl, dot(l, v),
+                                           material.base_diffuse_roughness, diffuse_color)
+                            : diffuse_color / kPi;
+  float3 direct = diffuse_brdf + specular;
 
   // Sheen: a retroreflective lobe for cloth, added over the base.
   if (dot(material.sheen_color, 1.0) > 0.001) {
@@ -901,18 +943,32 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
               V_Ashikhmin(ndv, ndl);
   }
 
-  // Clearcoat: a smooth ggx lobe over a 1.5-ior coat that dims the base by its
-  // own fresnel reflectance.
-  float coat_fresnel_v = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+  // Coat: a second, usually smoother ggx lobe over a dielectric layer. What
+  // sits under it is dimmed by the coat's own fresnel reflectance, tinted by
+  // absorption in the coat medium (whose path lengthens, and so darkens and
+  // saturates, toward grazing angles), and darkened again by the light the
+  // underside of the coat reflects back down into the base. coat_ior defaults
+  // to 1.5, which reproduces the 0.04 this used to hardcode.
+  float coat_f0 = RxIorToF0(material.coat_ior);
+  float coat_fresnel_v = coat_f0 + (1.0 - coat_f0) * pow(1.0 - ndv, 5.0);
   if (material.clearcoat > 0.001) {
     float cc_a = max(material.clearcoat_roughness * material.clearcoat_roughness, 1e-3);
-    float cc_f = (0.04 + 0.96 * pow(1.0 - vdh, 5.0)) * material.clearcoat;
-    direct = direct * (1.0 - cc_f) + D_GGX(ndh, cc_a) * V_SmithGGXCorrelated(ndv, ndl, cc_a) * cc_f;
+    float cc_f = (coat_f0 + (1.0 - coat_f0) * pow(1.0 - vdh, 5.0)) * material.clearcoat;
+    float3 coat_absorb =
+        RxCoatTransmittance(material.coat_color, ndv, ndl, material.coat_ior);
+    float3 base_tint = lerp(diffuse_color, f0, metallic);
+    float base_albedo = (base_tint.r + base_tint.g + base_tint.b) / 3.0;
+    float coat_darken =
+        RxCoatDarkening(base_albedo, material.coat_ior, material.clearcoat,
+                        material.coat_darkening, roughness, ndv);
+    direct = direct * (1.0 - cc_f) * coat_darken *
+                 lerp(float3(1.0, 1.0, 1.0), coat_absorb, material.clearcoat) +
+             D_GGX(ndh, cc_a) * V_SmithGGXCorrelated(ndv, ndl, cc_a) * cc_f;
   }
 
   float3 sun = frame.sun_color.rgb * frame.sun_direction.w;
   float3 lit = direct * sun * ndl * shadow;
-  g_skin_diffuse += diffuse_color / kPi * sun * ndl * shadow;
+  g_skin_diffuse += diffuse_brdf * sun * ndl * shadow;
 
   // Hair: dual shifted Kajiya-Kay strand lobes along the tangent replace the
   // ggx sun response - an uncolored primary at the surface and an
@@ -929,7 +985,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       float3 spec2 =
           albedo * 0.45 * StrandSpecular(ShiftTangent(strand, n, 0.10), v, l, e1 * 0.25);
       float wrap = saturate((dot(n, l) + 0.5) / 1.5);
-      lit = (diffuse_color / kPi + spec1 + spec2) * wrap * sun * shadow;
+      lit = (diffuse_brdf + spec1 + spec2) * wrap * sun * shadow;
     }
   }
 
@@ -1104,7 +1160,16 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     }
     // Fdez-Aguera energy compensation: single scatter split-sum plus a
     // multiple scattering term so rough metals stop losing energy.
-    float3 fss_ess = f0 * f_ab.x + f_ab.y;
+    // specular_color / specular_weight reach the ambient lobe too, carrying the
+    // same two meanings the direct path gives them: a straight tint on the
+    // dielectric Fresnel, and a grazing-edge tint on the metal (f_ab.y is the
+    // grazing half of the split-sum, which is where F82 acts). Without this a
+    // tinted surface snaps back to untinted the moment it is lit by the
+    // environment instead of the sun. Both are inert at their defaults.
+    float3 fss_dielectric = material.specular_color * (f0 * f_ab.x + f_ab.y);
+    float3 fss_metal =
+        material.specular_weight * (f0 * f_ab.x + material.specular_color * f_ab.y);
+    float3 fss_ess = lerp(fss_dielectric, fss_metal, metallic);
     float ems = 1.0 - (f_ab.x + f_ab.y);
     float3 f_avg = f0 + (1.0 - f0) / 21.0;
     float3 fms_ems = ems * fss_ess * f_avg / (1.0 - f_avg * ems);
@@ -1127,13 +1192,28 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   }
   ambient *= ao;
 
-  // Clearcoat reflects the environment through its smooth coat as well.
+  // Clearcoat reflects the environment through its smooth coat as well, and
+  // what sits beneath it is absorbed and darkened by the coat exactly as in the
+  // direct path - otherwise a coloured coat tints the sunlit side of an object
+  // and not the ambient side. Indirect light arrives from the whole hemisphere
+  // rather than one direction, so the absorption path uses ndv for both legs
+  // where the direct path uses ndv and ndl.
   if (material.clearcoat > 0.001 && (frame.flags & kFrameIbl) != 0u) {
     float cc_r = clamp(material.clearcoat_roughness, 0.045, 1.0);
     float3 coat_refl = prefiltered_cube
         .SampleLevel(prefiltered_sampler, reflect(-v, n), cc_r * (kPrefilterMips - 1.0)).rgb;
     float cc_f = coat_fresnel_v * material.clearcoat;
-    ambient = ambient * (1.0 - cc_f) + coat_refl * cc_f * frame.camera_position.w;
+    float3 coat_absorb =
+        RxCoatTransmittance(material.coat_color, ndv, ndv, material.coat_ior);
+    float3 ambient_base_tint = lerp(diffuse_color, f0, metallic);
+    float ambient_base_albedo =
+        (ambient_base_tint.r + ambient_base_tint.g + ambient_base_tint.b) / 3.0;
+    float ambient_coat_darken =
+        RxCoatDarkening(ambient_base_albedo, material.coat_ior, material.clearcoat,
+                        material.coat_darkening, roughness, ndv);
+    ambient = ambient * (1.0 - cc_f) * ambient_coat_darken *
+                  lerp(float3(1.0, 1.0, 1.0), coat_absorb, material.clearcoat) +
+              coat_refl * cc_f * frame.camera_position.w;
   }
 
   float3 emissive = emissive_map.Sample(emissive_sampler, input.uv).rgb * material.emissive_factor;

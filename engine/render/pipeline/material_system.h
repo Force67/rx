@@ -90,6 +90,20 @@ class MaterialSystem {
     f32 sss_perfusion = 0;
     f32 sss_scatter_color[3] = {0, 0, 0};
     f32 sss_ior = 1.4f;
+    // OpenPBR Surface lobes, appended so no existing offset moves. Defaults are
+    // the neutral ones: white specular_color reduces the F82-tint metal Fresnel
+    // to plain Schlick and leaves the dielectric untinted, white coat_color is a
+    // clear coat, zero base_diffuse_roughness keeps the Lambert diffuse path,
+    // and zero coat_darkening disables the darkening compensation. See
+    // asset/material.h and docs/OPENPBR.md.
+    f32 specular_color[3] = {1, 1, 1};
+    f32 specular_weight = 1.0f;
+    f32 coat_color[3] = {1, 1, 1};
+    f32 coat_ior = 1.5f;
+    f32 base_diffuse_roughness = 0;
+    f32 coat_darkening = 0;
+    f32 thin_film_ior = 1.3f;
+    f32 openpbr_pad = 0;
   };
   static constexpr u32 kFlagAlphaMask = 1u << 0;
   static constexpr u32 kFlagHasNormalMap = 1u << 1;
