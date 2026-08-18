@@ -38,7 +38,7 @@ bool HairStrands::Initialize(Device& device, Format color_format, Format depth_f
       .color_formats = {color_format},
       .sets = {{.slots = {{0, BindingType::kStorageBuffer}, {1, BindingType::kStorageBuffer}},
                 .stages = kShaderStageVertex}},
-      .push_constant_size = sizeof(DrawPush),
+      .push_constant_size = PushSize<DrawPush>(),
       .debug_name = "hair_draw",
   });
   if (!draw_pipeline_) {

@@ -248,20 +248,28 @@ class ProceduralGrass {
  private:
   static constexpr u32 kFramesInFlight = Device::kMaxFramesInFlight;
 
-  struct alignas(16) GenerationPush {
+  // Phase-invariant half of the generation constants. Every phase of a frame
+  // pushes the same domain description, and it alone is the whole 128 bytes
+  // vulkan guarantees for a push block, so it rides in a uniform buffer and the
+  // push keeps only what a phase actually varies.
+  struct alignas(16) GenerationDomain {
     Mat4 view_proj;
     f32 field_origin_extent[4];
     u32 field[4];
+    f32 density_lod[4];
+    f32 bend_field[4];
+  };
+  static_assert(sizeof(GenerationDomain) == 128);
+
+  struct alignas(16) GenerationPush {
     f32 camera_stream[4];
     f32 placement[4];
     i32 grid[4];
     u32 counts[4];
-    f32 density_lod[4];
     f32 geometry_fade[4];
     u32 control[4];
-    f32 bend_field[4];
   };
-  static_assert(sizeof(GenerationPush) == 224);
+  static_assert(sizeof(GenerationPush) == 96);
 
   struct alignas(16) BendPush {
     f32 field[4];
@@ -271,9 +279,15 @@ class ProceduralGrass {
   };
   static_assert(sizeof(BendPush) == 64);
 
-  struct alignas(16) DrawPush {
+  // The two reprojection matrices are the entire push budget on their own, and
+  // the six tier draws all use the same pair, so they ride in a uniform buffer.
+  struct alignas(16) DrawCamera {
     Mat4 view_proj;
     Mat4 prev_view_proj;
+  };
+  static_assert(sizeof(DrawCamera) == 128);
+
+  struct alignas(16) DrawPush {
     f32 camera_time[4];
     f32 sun_direction_intensity[4];
     f32 sun_color_ambient[4];
@@ -281,7 +295,7 @@ class ProceduralGrass {
     f32 jitter_lod[4];
     u32 control[4];
   };
-  static_assert(sizeof(DrawPush) == 224);
+  static_assert(sizeof(DrawPush) == 96);
 
   struct FieldUploadState {
     const GrassFieldSample* source = nullptr;
@@ -323,6 +337,9 @@ class ProceduralGrass {
     GpuBuffer instances;
     GpuBuffer args;
     GpuBuffer counters;
+    // Per slot, so the previous in-flight frame keeps reading its own copy.
+    GpuBuffer generation_domain;
+    GpuBuffer draw_camera;
     BendPush bend{};
     u32 bend_write_index = 0;
     u32 bend_domain_seed = 0;

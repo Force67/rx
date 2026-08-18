@@ -14,8 +14,16 @@ namespace {
 
 constexpr Format kParticleMotionFormat = Format::kRG16Float;  // == kMotionFormat
 
-struct ParticlePush {
+// The two matrices on their own are the entire 128 bytes vulkan guarantees for
+// a push block, so they ride in a per-frame uniform buffer and the push keeps
+// the scalars (which differ between the lit and additive sets of a frame).
+struct ParticleCamera {
   Mat4 view_proj;
+  Mat4 prev_view_proj;  // for the particle motion vectors
+};
+static_assert(sizeof(ParticleCamera) == 128);
+
+struct ParticlePush {
   f32 cam_right[3];
   f32 near_plane;
   f32 cam_up[3];
@@ -24,13 +32,13 @@ struct ParticlePush {
   f32 sun_intensity;
   f32 sun_color[3];
   f32 ambient;
-  Mat4 prev_view_proj;
   u32 emissive;
   f32 jitter[2];
   f32 pad;
   f32 cluster_params[4];
   f32 froxel_params[4];
 };
+static_assert(sizeof(ParticlePush) == 112);
 
 struct ParticleSimPush {
   f32 emitter[3];
@@ -68,7 +76,8 @@ bool ParticleSystem::Initialize(Device& device, Format color_format,
                             {4, BindingType::kStorageBuffer},
                             {5, BindingType::kStorageBuffer},
                             {6, BindingType::kCombinedTextureSampler},
-                            {7, BindingType::kCombinedTextureSampler}}});
+                            {7, BindingType::kCombinedTextureSampler},
+                            {8, BindingType::kUniformBuffer}}});
   if (textured) sets.push_back({.shared = bindless_layout_});
   ShaderBlob frag =
       textured ? RX_SHADER(k_particle_tex_ps_hlsl) : RX_SHADER(k_particle_ps_hlsl);
@@ -85,7 +94,7 @@ bool ParticleSystem::Initialize(Device& device, Format color_format,
       .color_formats = {color_format, kParticleMotionFormat},
       .blend = {BlendMode::kAlpha, BlendMode::kAlpha},
       .sets = sets,
-      .push_constant_size = sizeof(ParticlePush),
+      .push_constant_size = PushSize<ParticlePush>(),
       .debug_name = "particles",
   };
   pipeline_ = device.CreateGraphicsPipeline(desc);
@@ -109,10 +118,13 @@ bool ParticleSystem::Initialize(Device& device, Format color_format,
     return false;
   }
 
+  // One camera CB per in-flight frame: the pass rewrites it while the previous
+  // frame may still be reading its own copy.
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     buffers_[i] = device.CreateBuffer(static_cast<u64>(kMaxParticles) * sizeof(ParticleInstance),
                                       kBufferUsageStorage, true);
-    if (!buffers_[i].mapped) return false;
+    camera_[i] = device.CreateBuffer(sizeof(ParticleCamera), kBufferUsageUniform, true);
+    if (!buffers_[i].mapped || !camera_[i].mapped) return false;
   }
 
   // GPU simulation: a compute pipeline over the persistent state buffer.
@@ -120,7 +132,7 @@ bool ParticleSystem::Initialize(Device& device, Format color_format,
       .shader = RX_SHADER(k_particle_sim_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
                           {1, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(ParticleSimPush),
+      .push_constant_size = PushSize<ParticleSimPush>(),
       .debug_name = "particle_sim",
   });
   if (!sim_pipeline_) {
@@ -158,6 +170,9 @@ void ParticleSystem::AddToGraph(RenderGraph& graph, ResourceHandle color, Resour
                 additive_count * sizeof(ParticleInstance));
   }
   GpuBuffer buffer = buffers_[frame_slot];
+  const ParticleCamera cam{frame.view_proj, frame.prev_view_proj};
+  std::memcpy(camera_[frame_slot].mapped, &cam, sizeof(cam));
+  GpuBuffer camera = camera_[frame_slot];
 
   graph.AddPass(
       "particles",
@@ -166,37 +181,40 @@ void ParticleSystem::AddToGraph(RenderGraph& graph, ResourceHandle color, Resour
         builder.Write(motion, ResourceUsage::kColorAttachment);
         builder.Read(depth, ResourceUsage::kSampledFragment);
       },
-      [this, color, depth, motion, buffer, count, additive_offset, additive_count, frame,
+      [this, color, depth, motion, buffer, camera, count, additive_offset, additive_count, frame,
        bindless](PassContext& ctx) {
         const GpuImage& target = ctx.graph->image(color);
         ColorAttachment attachments[2];
         attachments[0] = {.view = target.view, .load = LoadOp::kLoad};
         attachments[1] = {.view = ctx.graph->image(motion).view, .load = LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = target.extent, .colors = attachments});
-        if (count > 0) RecordSet(ctx, depth, buffer, 0, count, frame, frame.emissive, bindless);
+        if (count > 0)
+          RecordSet(ctx, depth, buffer, camera, 0, count, frame, frame.emissive, bindless);
         if (additive_count > 0) {
-          RecordSet(ctx, depth, buffer, additive_offset, additive_count, frame, true, bindless);
+          RecordSet(ctx, depth, buffer, camera, additive_offset, additive_count, frame, true,
+                    bindless);
         }
         ctx.cmd->EndRendering();
       });
 }
 
 void ParticleSystem::RecordDraw(PassContext& ctx, ResourceHandle color, ResourceHandle depth,
-                                ResourceHandle motion, const GpuBuffer& instances, u32 count,
-                                const Frame& frame, BindingSetHandle bindless) {
+                                ResourceHandle motion, const GpuBuffer& instances,
+                                const GpuBuffer& camera, u32 count, const Frame& frame,
+                                BindingSetHandle bindless) {
   const GpuImage& target = ctx.graph->image(color);
   ColorAttachment attachments[2];
   attachments[0] = {.view = target.view, .load = LoadOp::kLoad};  // blend over the lit scene
   attachments[1] = {.view = ctx.graph->image(motion).view,
                     .load = LoadOp::kLoad};  // blend velocity over the mvecs
   ctx.cmd->BeginRendering({.extent = target.extent, .colors = attachments});
-  RecordSet(ctx, depth, instances, 0, count, frame, frame.emissive, bindless);
+  RecordSet(ctx, depth, instances, camera, 0, count, frame, frame.emissive, bindless);
   ctx.cmd->EndRendering();
 }
 
 void ParticleSystem::RecordSet(PassContext& ctx, ResourceHandle depth, const GpuBuffer& instances,
-                               u64 offset, u32 count, const Frame& frame, bool emissive,
-                               BindingSetHandle bindless) {
+                               const GpuBuffer& camera, u64 offset, u32 count, const Frame& frame,
+                               bool emissive, BindingSetHandle bindless) {
   ctx.cmd->BindPipeline(emissive ? pipeline_additive_ : pipeline_);
   if (bindless_layout_ && bindless) ctx.cmd->BindSet(1, bindless);
   // The froxel volume stays in GENERAL; every other input arrives shader-read.
@@ -208,10 +226,10 @@ void ParticleSystem::RecordSet(PassContext& ctx, ResourceHandle depth, const Gpu
           Bind::StorageBuffer(4, frame.cluster_indices, 0, frame.cluster_indices.size),
           Bind::StorageBuffer(5, frame.local_shadow_faces, 0, frame.local_shadow_faces.size),
           Bind::Combined(6, frame.local_shadow_atlas, frame.comparison_sampler),
-          InGeneral(Bind::Combined(7, frame.froxel_volume, frame.froxel_sampler))});
+          InGeneral(Bind::Combined(7, frame.froxel_volume, frame.froxel_sampler)),
+          Bind::Uniform(8, camera, 0, sizeof(ParticleCamera))});
 
   ParticlePush push{};
-  push.view_proj = frame.view_proj;
   push.cam_right[0] = frame.cam_right.x;
   push.cam_right[1] = frame.cam_right.y;
   push.cam_right[2] = frame.cam_right.z;
@@ -228,7 +246,6 @@ void ParticleSystem::RecordSet(PassContext& ctx, ResourceHandle depth, const Gpu
   push.sun_color[1] = frame.sun_color.y;
   push.sun_color[2] = frame.sun_color.z;
   push.ambient = frame.ambient;
-  push.prev_view_proj = frame.prev_view_proj;
   std::memcpy(push.cluster_params, frame.cluster_params, sizeof(push.cluster_params));
   push.froxel_params[0] = frame.froxel_near;
   push.froxel_params[1] = frame.froxel_far;
@@ -248,6 +265,9 @@ void ParticleSystem::SimulateAndDraw(RenderGraph& graph, ResourceHandle color, R
   if (count == 0) return;
   GpuBuffer instances = buffers_[frame_slot];
   GpuBuffer state = sim_state_;
+  const ParticleCamera cam{frame.view_proj, frame.prev_view_proj};
+  std::memcpy(camera_[frame_slot].mapped, &cam, sizeof(cam));
+  GpuBuffer camera = camera_[frame_slot];
 
   graph.AddPass(
       "gpu_particles",
@@ -256,7 +276,7 @@ void ParticleSystem::SimulateAndDraw(RenderGraph& graph, ResourceHandle color, R
         builder.Write(motion, ResourceUsage::kColorAttachment);
         builder.Read(depth, ResourceUsage::kSampledFragment);
       },
-      [this, color, depth, motion, instances, state, count, sim, frame,
+      [this, color, depth, motion, instances, state, camera, count, sim, frame,
        bindless](PassContext& ctx) {
         // Step the simulation, then draw the freshly written billboards.
         ParticleSimPush sp{};
@@ -288,7 +308,7 @@ void ParticleSystem::SimulateAndDraw(RenderGraph& graph, ResourceHandle color, R
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kGraphicsRead);
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
 
-        RecordDraw(ctx, color, depth, motion, instances, count, frame, bindless);
+        RecordDraw(ctx, color, depth, motion, instances, camera, count, frame, bindless);
       });
 }
 
@@ -300,7 +320,10 @@ void ParticleSystem::Destroy(Device& device) {
   device.DestroyPipeline(sim_pipeline_);
   sim_pipeline_ = {};
   device.DestroyBuffer(sim_state_);
-  for (u32 i = 0; i < kFramesInFlight; ++i) device.DestroyBuffer(buffers_[i]);
+  for (u32 i = 0; i < kFramesInFlight; ++i) {
+    device.DestroyBuffer(buffers_[i]);
+    device.DestroyBuffer(camera_[i]);
+  }
 }
 
 }  // namespace rx::render

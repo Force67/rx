@@ -36,7 +36,7 @@ bool AerialPerspective::Initialize(Device& device) {
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kCombinedTextureSampler},
                           {4, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(ApPush),
+      .push_constant_size = PushSize<ApPush>(),
       .debug_name = "aerial_perspective",
   });
   if (!pipeline_) {

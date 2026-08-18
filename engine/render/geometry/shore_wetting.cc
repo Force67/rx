@@ -24,7 +24,7 @@ bool ShoreWetting::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(ShorePush),
+      .push_constant_size = PushSize<ShorePush>(),
       .debug_name = "shore_wetting",
   });
   if (!pipeline_) return false;

@@ -12,8 +12,9 @@
 [[vk::binding(4, 1)]] SamplerState bindless_sampler : register(s4, space1);
 #endif
 
+// Mirrors ParticlePush (particles.cc); the view/prev-view matrices live in the
+// vertex stage's camera CB (slot 8), which this stage never reads.
 struct PushData {
-  column_major float4x4 view_proj;
   float3 cam_right;
   float near_plane;
   float3 cam_up;
@@ -22,7 +23,6 @@ struct PushData {
   float sun_intensity;
   float3 sun_color;
   float ambient;
-  column_major float4x4 prev_view_proj;
   uint emissive;  // 1: hdr additive (fire) - color is radiance, no sun/ambient
   float2 jitter;  // ndc units, consumed by particle.vs
   float pad;

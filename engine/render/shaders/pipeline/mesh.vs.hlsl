@@ -36,32 +36,40 @@ static const uint kVsFlagWater = 16u;  // 1 << 4
 
 #include "water_waves.hlsli"
 
+// Mirrors render::MeshPushConstants. The per-draw matrices live in the frame's
+// DrawRecord arena (binding 3 below) instead of the push range; what is left
+// fits the 128 bytes vulkan guarantees on every adapter.
 struct PushData {
-  column_major float4x4 model;
-  column_major float4x4 prev_model;
-#ifdef RX_SKINNED
+  uint draw_index;   // this draw's record in the arena
+  uint tint_packed;  // low 24b rgb8 tint (team colour), high 8b decal tile
   uint64_t bone_address;  // device address of the frame bone palette
-  uint skin_offset;       // first bone of this mesh in the palette
-  uint tint_packed;       // low 24b rgb8 tint (team colour), high 8b decal tile
-#else
-  uint2 pad_bone;  // layout mirrors the skinned block (MeshPushConstants)
-  uint pad_skin;
-  uint tint_packed;  // low 24b rgb8 tint, high 8b decal tile
-#endif
-  // World-space rect (min_x, min_z, max_x, max_z) of the fully streamed
-  // terrain cells; set only on distant terrain-LOD draws, zeros otherwise.
-  float4 detail_rect;
   // Morph targets (blend shapes), zero on unmorphed draws. The deltas are a
   // per-mesh buffer, the active (target, weight) pairs a per-frame buffer;
   // both read by device address (root SRVs t997/t996 on DXIL, see morph.hlsli).
   uint64_t morph_delta_address;
   uint64_t morph_weight_address;
+  uint skin_offset;         // first bone of this mesh in the palette
   uint morph_first;         // this draw's first pair in the weight buffer
   uint morph_count;         // active pairs, 0 = no morphing
   uint morph_vertex_count;  // vertices per target in the delta buffer
-  uint pad_morph;
+  // World-space rect (min_x, min_z, max_x, max_z) of the fully streamed
+  // terrain cells; set only on distant terrain-LOD draws, zeros otherwise.
+  float4 detail_rect;
 };
 PUSH_CONSTANTS(PushData, push);
+
+// Mirrors render::DrawRecord: the transforms the push range used to carry.
+//
+// The pushed index is the record, flat across every stage - do NOT offset it by
+// DrawIndex. The one multi-draw that reaches this shader is the adaptive water
+// mesh, whose DrawIndirectCount emits a command per surviving triangle patch of
+// ONE surface: every command shares the record, and adding DrawIndex would send
+// all but the first to some other draw's transform.
+struct DrawRecord {
+  column_major float4x4 model;
+  column_major float4x4 prev_model;
+};
+[[vk::binding(3, 0)]] StructuredBuffer<DrawRecord> draw_records : register(t3, space0);
 
 #include "morph.hlsli"
 #ifndef __spirv__
@@ -112,8 +120,8 @@ struct VsOut {
 #ifndef __spirv__
 // DXIL has no buffer-device-address loads: the d3d12 backend binds the bone
 // palette as a root SRV at (t998, space0) using the u64 address it finds at
-// byte 128 of the push block (the RX_BDA convention, see RHI.md). SPIR-V
-// keeps reading through the raw address.
+// the push block's RX_BDA bone offset (see RHI.md). SPIR-V keeps reading
+// through the raw address.
 ByteAddressBuffer rec_bone_palette : register(t998, space0);
 #endif
 
@@ -153,6 +161,7 @@ void SkinVertex(VsIn input, inout float3 position, inout float3 normal, inout fl
 
 VsOut main(VsIn input) {
   VsOut output;
+  const DrawRecord record = draw_records[push.draw_index];
   float3 local_pos = input.position;
   float3 local_normal = input.normal;
   float3 local_tangent = input.tangent.xyz;
@@ -178,7 +187,7 @@ VsOut main(VsIn input) {
       transpose(float4x4(input.prev_instance_col0, input.prev_instance_col1,
                          input.prev_instance_col2, input.prev_instance_col3));
 #else
-  const float4x4 model = push.model;
+  const float4x4 model = record.model;
 #endif
   float4 model_world = mul(model, float4(local_pos, 1.0));
   float4 world = model_world;
@@ -216,7 +225,7 @@ VsOut main(VsIn input) {
   float4 prev_world = world;
   prev_world.xyz += mul(prev_model, float4(local_pos, 1.0)).xyz - model_world.xyz;
 #else
-  float4 prev_world = mul(push.prev_model, float4(local_pos, 1.0));
+  float4 prev_world = mul(record.prev_model, float4(local_pos, 1.0));
 #endif
   // Distant terrain LOD: sink vertices inside the full-detail streamed rect so
   // the coarse proxy never bridges above the real land there (level-32 quads

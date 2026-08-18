@@ -90,6 +90,7 @@ class ReflectionTrace {
  private:
   PipelineHandle pipeline_;
   PipelineHandle upscale_pipeline_;  // half-res -> full-res bilateral upscale
+  GpuBuffer camera_[2];  // inv_view_proj + eye, too big for the push block
 };
 
 }  // namespace rx::render

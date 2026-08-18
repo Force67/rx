@@ -14,11 +14,8 @@
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
 
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_JPEG
-#define STBI_ONLY_PNG
-#define STBI_ONLY_BMP
-#define STBI_ONLY_TGA
+// The implementation lives in third_party/stb_impl.c (rx::stb_impl); this is
+// only the declarations.
 #include <stb_image.h>
 
 namespace rx::asset {
@@ -184,7 +181,7 @@ void Decompose(const Mat4 &matrix, Vec3 *translation, Quat *rotation,
 
 } // namespace
 
-bool LoadGltfScene(const std::string &path, GltfScene *out) {
+bool LoadGltfScene(const std::string &path, ImportedScene *out) {
   static const mem::Category kAssetCategory = mem::RegisterCategory("assets");
   mem::CategoryScope mem_scope(kAssetCategory);
   cgltf_options options{};
@@ -408,7 +405,7 @@ bool LoadGltfScene(const std::string &path, GltfScene *out) {
   }
 
   // glTF nodes, rather than meshes, own skin associations. Mesh::skin keeps the
-  // first binding for compatibility with mesh-only consumers; GltfScene users
+  // first binding for compatibility with mesh-only consumers; ImportedScene users
   // use Instance::skeleton_index with skin_bindings for the exact binding.
   base::Vector<i32> mesh_skin(data->meshes_count);
   std::fill(mesh_skin.begin(), mesh_skin.end(), -1);
@@ -709,7 +706,7 @@ bool LoadGltfScene(const std::string &path, GltfScene *out) {
     const cgltf_node &node = data->nodes[i];
     if (!node.mesh)
       continue;
-    GltfScene::Instance instance;
+    ImportedScene::Instance instance;
     instance.mesh_index = static_cast<u32>(node.mesh - data->meshes);
     instance.skeleton_index =
         node.skin ? static_cast<i32>(node.skin - data->skins) : -1;

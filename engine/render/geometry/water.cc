@@ -49,7 +49,8 @@ std::unique_ptr<WaterPass> WaterPass::Create(Device& device, Format color_format
                {.slots = {{0, BindingType::kCombinedTextureSampler},
                           {1, BindingType::kCombinedTextureSampler}},
                 .stages = kShaderStageFragment}},
-      .push_constant_size = sizeof(MeshPushConstants),
+      .push_constant_size = PushSize<MeshPushConstants>(),
+      .push_bda = PushBdaHeader::kMeshDraw,
       .debug_name = "water",
   });
   if (!pass->pipeline_) {

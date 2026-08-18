@@ -43,7 +43,7 @@ int TestBlend(const std::string &blend_path, const std::string &script) {
              error.empty() ? "Blender conversion succeeds" : error.c_str()))
     return 1;
 
-  asset::GltfScene scene;
+  asset::ImportedScene scene;
   if (!Check(asset::LoadGltfScene(converted.glb_path, &scene),
              "converted GLB loads"))
     return 1;

@@ -12,6 +12,7 @@ PUSH_CONSTANTS(PrecipPush, push);
 
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] Texture2D<float> occlusion_map : register(t0, space0);
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] SamplerState occlusion_sampler : register(s0, space0);
+[[vk::binding(4, 0)]] ConstantBuffer<PrecipCamera> camera : register(b4, space0);
 
 struct VsOut {
   float4 pos : SV_Position;
@@ -76,12 +77,12 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
     world = p + float3(c.x * half_size, 0.004, c.y * half_size);
   }
 
-  o.pos = mul(push.view_proj, float4(world, 1.0));
+  o.pos = mul(camera.view_proj, float4(world, 1.0));
   o.pos.xy += push.jitter * o.pos.w;  // same temporal jitter as the geometry
   o.world_pos = world;
   // Splashes are world-static: their motion is pure camera reprojection.
-  float4 cc = mul(push.view_proj, float4(p, 1.0));
-  float4 pc = mul(push.prev_view_proj, float4(p, 1.0));
+  float4 cc = mul(camera.view_proj, float4(p, 1.0));
+  float4 pc = mul(camera.prev_view_proj, float4(p, 1.0));
   o.motion = (pc.xy / pc.w - cc.xy / cc.w) * 0.5;
   return o;
 }

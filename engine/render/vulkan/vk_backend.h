@@ -24,8 +24,13 @@
 
 #include "render/rhi/device.h"
 #include "render/rhi/swapchain.h"
+#include "render/rhi/vulkan_interop.h"
 
 namespace rx::render::vk {
+
+// Resolves the promoted-command table VulkanApi() hands out; called once, right
+// after volkLoadDevice, with the api version the device was created at.
+void LoadVulkanEntryPoints(u32 api_version);
 
 // --- backend records behind the opaque handles ---
 
@@ -379,8 +384,11 @@ class VulkanDevice final : public Device {
     return MakeHandle<PipelineHandle>(record);
   }
 
+  // Fails (and says why) when push_size is past the adapter's
+  // maxPushConstantsSize instead of letting the driver reject the layout.
   VkPipelineLayout GetOrCreatePipelineLayout(std::span<const VkDescriptorSetLayout> sets,
-                                             VkShaderStageFlags push_stages, u32 push_size);
+                                             VkShaderStageFlags push_stages, u32 push_size,
+                                             const char* debug_name);
   VkDescriptorSetLayout GetOrCreateSetLayout(const BindingLayoutDesc& desc);
 
  private:
@@ -443,6 +451,13 @@ class VulkanDevice final : public Device {
   VkSurfaceKHR surface_ = VK_NULL_HANDLE;
   VkPhysicalDevice physical_device_ = VK_NULL_HANDLE;
   VkDevice device_ = VK_NULL_HANDLE;
+  // The api version the device was created at, which is the adapter's own
+  // clamped by RX_VK_MAX_VERSION - not what the adapter reports (caps_ keeps
+  // that). Decides core-vs-KHR entry points and what VMA is told.
+  // What rx spends on push constants, which RX_MAX_PUSH_CONSTANTS can lower
+  // below what the adapter reports; caps_ keeps the adapter's own figure.
+  u32 push_constant_budget_ = 128;
+  u32 api_version_ = VK_API_VERSION_1_3;
   VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
   std::string pipeline_cache_path_;
   VkQueue graphics_queue_ = VK_NULL_HANDLE;

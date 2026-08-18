@@ -67,8 +67,13 @@ base::Option<bool> AsyncComputeOpt{"async.compute", true, "RX_ASYNC_COMPUTE"};
 base::Option<bool> FrameGenOpt{"framegen", false, "RX_FRAMEGEN"};
 base::Option<bool> LocalShadowsOpt{"local.shadows", true, "RX_LOCAL_SHADOWS"};
 base::Option<bool> FroxelOpt{"froxel.fog", true, "RX_FROXEL"};
+// Probe-based diffuse GI, on by default; an override makes it bisectable
+// when indirect light is suspected of tinting a scene.
+base::Option<bool> DdgiOpt{"ddgi", true, "RX_DDGI"};
 base::Option<double> FroxelDensity{"froxel.density", 0.005,
                                    "RX_FROXEL_DENSITY"};
+base::Option<double> FroxelStartDistance{"froxel.start", 0.0,
+                                         "RX_FROXEL_START"};
 base::Option<int> TexBudgetMb{"tex.budget.mb", -1, "RX_TEX_BUDGET_MB"};
 base::Option<bool> GpuTimings{"gpu.timings", false, "RX_GPU_TIMINGS"};
 base::Option<int> MsaaOpt{"msaa", 0, "RX_MSAA"};
@@ -119,6 +124,10 @@ base::Option<int> VgeoDebug{"vgeo.debug", 1, "RX_VGEO_DEBUG"};
 base::Option<bool> RtVegOpt{"rt.veg", true, "RX_RT_VEG"};
 base::Option<bool> RtVegAnyHitOpt{"rt.veg.anyhit", true, "RX_RT_VEG_ANYHIT"};
 // Phase 4 specular reflection quality/perf levers (AC Shadows adoption).
+// Raytraced specular for opaque surfaces; overridable so it can be bisected
+// against the rest of the ray tracing path.
+base::Option<bool> ReflOpt{"refl", true, "RX_REFL"};
+base::Option<bool> RtaoOpt{"rtao", true, "RX_RTAO"};
 base::Option<bool> ReflHalfOpt{"refl.half", true, "RX_REFL_HALF"};
 base::Option<bool> ReflShSkipOpt{"refl.sh_skip", true, "RX_REFL_SH_SKIP"};
 base::Option<float> ReflShSkipRough{"refl.sh_skip.rough", 0.45f,
@@ -367,6 +376,13 @@ f32 MaskedSubmeshOpacity(const base::Vector<asset::Vertex> &verts,
   return static_cast<f32>(weighted / area_sum);
 }
 
+// Mirrors ContactCamera in contact_shadow.cs: the march's two unjittered
+// camera matrices, which on their own would exhaust the push budget.
+struct ContactCamera {
+  Mat4 view_proj;
+  Mat4 inv_view_proj;
+};
+
 } // namespace
 
 Renderer::Renderer() = default;
@@ -558,14 +574,15 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
                             {2, BindingType::kStorageBuffer},
                             {3, BindingType::kStorageBuffer},
                             {4, BindingType::kStorageBuffer}}}},
-        .push_constant_size = sizeof(ClusterPush),
+        .push_constant_size = PushSize<ClusterPush>(),
         .debug_name = "light_cluster",
     });
     if (!light_cluster_pipeline_)
       return false;
+    // The two matrices alone are the whole 128 bytes vulkan guarantees for a
+    // push block, so they ride in a per-frame uniform buffer (binding 2) and
+    // the push keeps the scalars.
     struct ContactPush {
-      Mat4 view_proj;
-      Mat4 inv_view_proj;
       f32 sun_dir[3];
       f32 near_plane;
       u32 size[2];
@@ -578,8 +595,9 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     contact_shadow_pipeline_ = device_->CreateComputePipeline({
         .shader = RX_SHADER(k_contact_shadow_cs_hlsl),
         .sets = {{.slots = {{0, BindingType::kStorageImage},
-                            {1, BindingType::kSampledImage}}}},
-        .push_constant_size = sizeof(ContactPush),
+                            {1, BindingType::kSampledImage},
+                            {2, BindingType::kUniformBuffer}}}},
+        .push_constant_size = PushSize<ContactPush>(),
         .debug_name = "contact_shadow",
     });
     if (!contact_shadow_pipeline_)
@@ -602,7 +620,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
         .shader = RX_SHADER(k_cloud_shadow_cs_hlsl),
         .sets = {{.slots = {{0, BindingType::kStorageImage},
                             {1, BindingType::kSampledImage}}}},
-        .push_constant_size = sizeof(CloudShadowPush),
+        .push_constant_size = PushSize<CloudShadowPush>(),
         .debug_name = "cloud_shadow",
     });
     if (!cloud_shadow_pipeline_)
@@ -624,7 +642,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
                             {1, BindingType::kCombinedTextureSampler},
                             {2, BindingType::kCombinedTextureSampler},
                             {3, BindingType::kCombinedTextureSampler}}}},
-        .push_constant_size = sizeof(SssPush),
+        .push_constant_size = PushSize<SssPush>(),
         .debug_name = "sss_blur",
     });
     if (!sss_pipeline_)
@@ -642,6 +660,14 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
         kBufferUsageStorage);
     if (!cluster_counts_ || !cluster_indices_ || !decal_cluster_indices_)
       return false;
+    // One per in-flight frame: the contact-shadow pass rewrites it while the
+    // previous frame may still be reading its own copy.
+    for (GpuBuffer &camera : contact_camera_) {
+      camera = device_->CreateBuffer(sizeof(ContactCamera), kBufferUsageUniform,
+                                     true);
+      if (!camera.mapped)
+        return false;
+    }
   }
   if (!ssao_.Initialize(*device_))
     return false; // raster ao fallback, no rt needed
@@ -669,11 +695,17 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
 
   // Linear-hdr export: a compute copy from the resolved scene into a host
   // buffer.
+// Width and height of the captured image. Named so its size goes through
+  // the same guard as every other push block.
+  struct HdrCapturePush {
+    u32 width;
+    u32 height;
+  };
   hdr_pipeline_ = device_->CreateComputePipeline({
       .shader = RX_SHADER(k_hdr_capture_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
                           {1, BindingType::kSampledImage}}}},
-      .push_constant_size = 2 * sizeof(u32),
+      .push_constant_size = PushSize<HdrCapturePush>(),
       .debug_name = "hdr_capture",
   });
   if (!hdr_pipeline_)
@@ -684,7 +716,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
   if (!shadow_.Initialize(*device_, material_system_->set_layout(),
                           local_shadows_.atlas().format))
     return false; // raster sun and local-shadow pipelines
-  if (!froxel_fog_.Initialize(*device_)) {
+  if (!froxel_fog_.Initialize(*device_, rt_available_)) {
     RX_WARN("froxel volumetrics unavailable"); // non-fatal: feature gates on
                                                // available()
   }
@@ -978,6 +1010,12 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     settings_.froxel_fog = FroxelOpt;
   if (FroxelDensity.overridden())
     settings_.froxel_density = static_cast<f32>(double(FroxelDensity));
+  if (FroxelStartDistance.overridden())
+    settings_.froxel_start_distance = static_cast<f32>(double(FroxelStartDistance));
+  // Tracked separately: overriding one must not suppress the other's authored
+  // value, which would silently zero a stage's fog start.
+  froxel_density_overridden_ = FroxelDensity.overridden();
+  froxel_start_overridden_ = FroxelStartDistance.overridden();
   // RX_TEX_BUDGET_MB caps resident material-texture memory (mip streaming);
   // -1 auto (half of vram), 0 unlimited.
   if (TexBudgetMb.overridden())
@@ -1147,6 +1185,23 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
     }
   }
   return true;
+}
+
+bool Renderer::SetEnvironmentMap(const f32 *rgba, u32 width, u32 height,
+                                 const Vec3 &tint, f32 intensity,
+                                 f32 rotation_radians) {
+  if (!environment_) return false;
+  // The cubemap is only re-convolved when the sun moves; an authored dome does
+  // not move, so nudge the cached sun so the next frame rebuilds it.
+  applied_sun_intensity_ = -1.0f;
+  return environment_->SetEnvironmentMap(rgba, width, height, tint, intensity,
+                                         rotation_radians);
+}
+
+void Renderer::ClearEnvironmentMap() {
+  if (!environment_) return;
+  applied_sun_intensity_ = -1.0f;
+  environment_->ClearEnvironmentMap();
 }
 
 void Renderer::CaptureScreenshot(const std::string &path) {
@@ -2896,7 +2951,7 @@ void Renderer::BuildDebugLinePipelines() {
                 .format = kDepthFormat},
       .color_formats = {kSceneColorFormat},
       .blend = {BlendMode::kAlpha},
-      .push_constant_size = sizeof(DebugLinePush),
+      .push_constant_size = PushSize<DebugLinePush>(),
       .debug_name = "debug_line",
   };
   debug_line_pipeline_ = device_->CreateGraphicsPipeline(desc);
@@ -3139,7 +3194,7 @@ void Renderer::RenderPickPass(const FrameView &view) {
                   .compare = CompareOp::kGreaterEqual,
                   .format = Format::kD32Float},
         .color_formats = {Format::kR32Uint},
-        .push_constant_size = sizeof(PickPush),
+        .push_constant_size = PushSize<PickPush>(),
         .debug_name = "pick_id",
     });
   }
@@ -3213,7 +3268,12 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
   // static permutation up front so the matrix push always has a pipeline.
   PipelineHandle bound_pipeline = shadow_.pipeline();
   cmd.BindPipeline(bound_pipeline);
-  cmd.PushConstants(&light_view_proj, sizeof(Mat4));
+  // Every caster pipeline shares this layout, so the arena binds once for the
+  // whole depth-only pass; the per-draw base below selects the record.
+  cmd.BindTransient(ShadowPass::kDrawRecordSet,
+                    {Bind::StorageBuffer(0, frame.draw_records)});
+  cmd.PushConstants(&light_view_proj, sizeof(Mat4),
+                    ShadowPass::kLightMatrixOffset);
   for (const DrawItem &item : view.draws) {
     const GpuMesh *mesh = meshes_.find(item.mesh);
     // no_rt skips grass-like fill geometry, but skinned actors are
@@ -3226,17 +3286,18 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
     // shadow tracks the animated pose, not the bind pose.
     bool draw_skinned = mesh->skinned && item.skin_offset >= 0 &&
                         static_cast<bool>(shadow_.skinned_pipeline());
-    // The light matrix sits at offset 0; the model follows it, skin data after.
-    cmd.PushConstants(&item.transform, sizeof(Mat4), sizeof(Mat4));
+    // The per-draw head sits at offset 0; the cascade matrix pushed above it
+    // outlives every caster.
+    ShadowPass::DrawPush draw_push{};
+    draw_push.draw_index = static_cast<u32>(&item - view.draws.data()) + 1u;
+    if (draw_skinned) {
+      draw_push.skin_offset = static_cast<u32>(item.skin_offset);
+      draw_push.bone_address = frame.bone_palette.address;
+    }
+    cmd.PushConstants(&draw_push, sizeof(draw_push));
     cmd.BindVertexBuffer(0, mesh->vertices);
     if (draw_skinned) {
       cmd.BindVertexBuffer(1, mesh->skinning);
-      struct {
-        u64 bone_address;
-        u32 skin_offset;
-        u32 pad;
-      } skin{frame.bone_palette.address, static_cast<u32>(item.skin_offset), 0};
-      cmd.PushConstants(&skin, sizeof(skin), 2 * sizeof(Mat4));
     }
     cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
     for (const GpuSubmesh &submesh : mesh->submeshes) {
@@ -3304,7 +3365,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                const FrameView &view) {
   u32 frame_slot = frame_index_ % kFramesInFlight;
   bool rt_shadows = rt_available_ && settings_.rt_shadows;
-  bool rtao_active = rt_available_ && settings_.rtao;
+  bool rtao_active = rt_available_ && settings_.rtao && RtaoOpt.get();
   // RCGI takes over the indirect-diffuse path (DDGI + SSGI) when on. It is
   // available with hardware ray query OR the software SDF clipmap tracer.
   bool sdf_ready = sdf_clipmap_ && sdf_clipmap_->ready() && sdf_available_;
@@ -3317,9 +3378,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   bool rcgi_software =
       rcgi_active && sdf_ready && (!rt_available_ || rcgi_force_software_);
   bool rcgi_probes_only = RcgiProbesOnlyOpt || rcgi_software;
-  bool ddgi_active = ddgi_ && settings_.ddgi && settings_.ibl && !rcgi_active;
+  bool ddgi_active = ddgi_ && settings_.ddgi && DdgiOpt.get() && settings_.ibl && !rcgi_active;
   bool reflections_active =
-      rt_available_ && settings_.rt_reflections && bindless_ != nullptr;
+      rt_available_ && settings_.rt_reflections && ReflOpt.get() && bindless_ != nullptr;
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
   bool path_trace =
@@ -3473,6 +3534,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         items.push_back(
             Bind::Uniform(0, frames_[frame_index_ % kFramesInFlight].globals, 0,
                           sizeof(FrameGlobals)));
+        items.push_back(Bind::StorageBuffer(
+            3, frames_[frame_index_ % kFramesInFlight].draw_records));
         if (want_tlas && rt_available_ && raytracing_ &&
             raytracing_->tlas(tlas_slot)) {
           items.push_back(Bind::Accel(1, raytracing_->tlas(tlas_slot)));
@@ -3677,8 +3740,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               bound_item = nullptr;
             }
             if (draw.item != bound_item) {
-              MeshPushConstants push{.model = draw.item->transform,
-                                     .prev_model = draw.item->prev_transform};
+              MeshPushConstants push{};
+              push.draw_index =
+                  static_cast<u32>(draw.item - view.draws.data()) + 1u;
               // Same packing as the opaque site: low 24 bits the per-draw
               // tint, top byte the baked decal-layer tile.
               push.tint_packed =
@@ -3870,6 +3934,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   globals.misc[3] = static_cast<f32>(frame_index_ % 4096);
   if (settings_.ibl && !interior)
     globals.flags |= kFrameFlagIbl;
+  // With an authored dome the cubemap is a photograph of a real sky; the
+  // procedural sun/moon/stars in sky.ps would sit on top of it as a second sky.
+  if (environment_ && environment_->has_environment_map())
+    globals.flags |= kFrameFlagAuthoredSky;
   if (nrd_ao || ss_ao)
     globals.flags |= kFrameFlagAoValid;
   if (csm_active && !interior)
@@ -4073,6 +4141,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     std::memcpy(frame.morph_weights.mapped, view.morph_weights.data(),
                 count * sizeof(MorphWeight));
   }
+  // Per-draw transforms for every pass that walks view.draws this frame. One
+  // arena, filled once: the prepass, scene, shadow, transparent and water
+  // passes all index the same records with the base their push block carries.
+  UploadDrawRecords(frame, view);
 
   ResourceHandle scene_color =
       graph_.CreateTexture({.name = "scene_color",
@@ -4758,6 +4830,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                   // LocalShadows::Render bound the passed masked static
                   // pipeline.
                   PipelineHandle bound_pipeline = shadow_.local_pipeline();
+                  cmd.BindTransient(
+                      ShadowPass::kDrawRecordSet,
+                      {Bind::StorageBuffer(0, frame.draw_records)});
                   for (const DrawItem &item : view.draws) {
                     const GpuMesh *mesh = meshes_.find(item.mesh);
                     if (!mesh || mesh->all_blend ||
@@ -4787,18 +4862,18 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                     bool draw_skinned =
                         mesh->skinned && item.skin_offset >= 0 &&
                         static_cast<bool>(shadow_.local_skinned_pipeline());
-                    cmd.PushConstants(&item.transform, sizeof(Mat4),
-                                      sizeof(Mat4));
+                    ShadowPass::DrawPush draw_push{};
+                    draw_push.draw_index =
+                        static_cast<u32>(&item - view.draws.data()) + 1u;
+                    if (draw_skinned) {
+                      draw_push.skin_offset =
+                          static_cast<u32>(item.skin_offset);
+                      draw_push.bone_address = frame.bone_palette.address;
+                    }
+                    cmd.PushConstants(&draw_push, sizeof(draw_push));
                     cmd.BindVertexBuffer(0, mesh->vertices);
                     if (draw_skinned) {
                       cmd.BindVertexBuffer(1, mesh->skinning);
-                      struct {
-                        u64 bone_address;
-                        u32 skin_offset;
-                        u32 pad;
-                      } skin{frame.bone_palette.address,
-                             static_cast<u32>(item.skin_offset), 0};
-                      cmd.PushConstants(&skin, sizeof(skin), 2 * sizeof(Mat4));
                     }
                     cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
                     for (const GpuSubmesh &submesh : mesh->submeshes) {
@@ -5024,8 +5099,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         if (!mesh || mesh->all_blend || !mesh->has_meshlets)
           continue;
         MeshShaderPush push{};
-        push.model = item.transform;
-        push.prev_model = item.prev_transform;
+        push.draw_index = static_cast<u32>(&item - view.draws.data()) + 1u;
         push.meshlets_address = mesh->meshlets.address;
         push.meshlet_vertices_address = mesh->meshlet_vertices.address;
         push.meshlet_triangles_address = mesh->meshlet_triangles.address;
@@ -5146,8 +5220,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             bool ms_handled = ms_active && mesh->has_meshlets;
             bool draw_skinned = mesh->skinned && mesh_pipeline_->has_skinning();
             if (!ms_handled) {
-              MeshPushConstants push{.model = item.transform,
-                                     .prev_model = item.prev_transform};
+              MeshPushConstants push{};
+              push.draw_index =
+                  static_cast<u32>(&item - view.draws.data()) + 1u;
               if (mesh->terrain_lod) {
                 std::memcpy(push.detail_rect, view.detail_rect,
                             sizeof(push.detail_rect));
@@ -5446,11 +5521,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               b.Write(sun_shadow, ResourceUsage::kStorageWrite);
               b.Read(depth_export, ResourceUsage::kSampledCompute);
             },
-            [this, sun_shadow, depth_export, sun, view_proj = globals.view_proj,
+            [this, sun_shadow, depth_export, sun, frame_slot,
+             view_proj = globals.view_proj,
              inv_view_proj = globals.inv_view_proj](PassContext &ctx) {
+              const ContactCamera camera{view_proj, inv_view_proj};
+              std::memcpy(contact_camera_[frame_slot].mapped, &camera,
+                          sizeof(camera));
               struct ContactPush {
-                Mat4 view_proj;
-                Mat4 inv_view_proj;
                 f32 sun_dir[3];
                 f32 near_plane;
                 u32 size[2];
@@ -5460,8 +5537,6 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 u32 frame_index;
                 f32 pad[2];
               } p{};
-              p.view_proj = view_proj;
-              p.inv_view_proj = inv_view_proj;
               p.sun_dir[0] = sun.x;
               p.sun_dir[1] = sun.y;
               p.sun_dir[2] = sun.z;
@@ -5475,7 +5550,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               ctx.cmd->BindPipeline(contact_shadow_pipeline_);
               ctx.cmd->BindTransient(
                   0, {Bind::Storage(0, ctx.graph->image(sun_shadow)),
-                      Bind::Sampled(1, ctx.graph->image(depth_export))});
+                      Bind::Sampled(1, ctx.graph->image(depth_export)),
+                      Bind::Uniform(2, contact_camera_[frame_slot], 0,
+                                    sizeof(ContactCamera))});
               ctx.cmd->Push(p);
               ctx.cmd->Dispatch2D({render_width_, render_height_});
             });
@@ -5854,8 +5931,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                            settings_.wireframe);
                 skinned_bound = draw_skinned;
               }
-              MeshPushConstants push{.model = item.transform,
-                                     .prev_model = item.prev_transform};
+              MeshPushConstants push{};
+              push.draw_index =
+                  static_cast<u32>(&item - view.draws.data()) + 1u;
               if (mesh->terrain_lod) {
                 std::memcpy(push.detail_rect, view.detail_rect,
                             sizeof(push.detail_rect));
@@ -6371,11 +6449,27 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       ff.density = settings_.froxel_density;
       ff.height_falloff = settings_.fog_height_falloff;
       ff.base_height = settings_.fog_base_height;
+      ff.start_distance = settings_.froxel_start_distance;
       std::memcpy(ff.cluster_params, globals.cluster_params,
                   sizeof(ff.cluster_params));
       ff.screen_size[0] = static_cast<f32>(render_width_);
       ff.screen_size[1] = static_cast<f32>(render_height_);
       ff.csm_active = csm_active;
+      // The rt sun-shadow tier switches the cascades off, which leaves the fog
+      // lighting every froxel with an unoccluded sun: interiors fill with a
+      // flat glow and window shafts never form. Trace the sun instead - keyed
+      // on the selected shadow mode, not merely on the hardware being capable,
+      // so turning sun shadows off does not silently buy 1M rays a frame.
+      ff.ray_query_sun = rt_shadows && !csm_active;
+      // Neither source available while rt shadows are the selected mode means
+      // the tlas is still building or failed. An unoccluded sun would light the
+      // whole volume for those frames, which reads as a flash of flat glow; the
+      // fog keeps its local lights and drops the sun until the rays are there.
+      const bool ray_query_fog_ready =
+          froxel_fog_.ray_query_available() && raytracing_ &&
+          raytracing_->TlasValid(tlas_slot);
+      if (ff.ray_query_sun && !ray_query_fog_ready)
+        ff.sun_color = Vec3{0.0f, 0.0f, 0.0f};
       ff.lights = frame.lights;
       ff.cluster_counts = cluster_counts_;
       ff.cluster_indices = cluster_indices_;
@@ -6391,6 +6485,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       ff.comparison_sampler = environment_->comparison_sampler();
       froxel_fog_.AddToGraph(graph_, lit, depth_export,
                              csm_active ? shadow_atlas : kInvalidResource,
+                             raytracing_.get(), tlas_slot,
                              {render_width_, render_height_}, ff);
     }
 
@@ -6675,19 +6770,25 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           [&](RenderGraph::PassBuilder &builder) {
             builder.Write(lit, ResourceUsage::kColorAttachment);
           },
-          [this, lit, view_proj, &view](PassContext &ctx) {
+          [this, lit, view_proj, &frame, &view](PassContext &ctx) {
             overdraw_.Render(
                 *ctx.cmd, ctx.graph->image(lit).view,
                 {render_width_, render_height_}, view_proj,
-                [this, &view, view_proj](CommandList &cmd) {
+                [this, &frame, &view, view_proj](CommandList &cmd) {
+                  // This pass borrows shadow.vs, so it borrows its arena too.
+                  cmd.BindTransient(
+                      ShadowPass::kDrawRecordSet,
+                      {Bind::StorageBuffer(0, frame.draw_records)});
                   for (const DrawItem &item : view.draws) {
                     const GpuMesh *mesh = meshes_.find(item.mesh);
                     if (!mesh || !mesh->indices)
                       continue;
-                    // view_proj sits at offset 0 (pushed by Render); the model
-                    // follows it per draw.
-                    cmd.PushConstants(&item.transform, sizeof(Mat4),
-                                      sizeof(Mat4));
+                    // view_proj sits where the cascade matrix goes (pushed by
+                    // Render); the per-draw head leads the block.
+                    ShadowPass::DrawPush draw_push{};
+                    draw_push.draw_index =
+                        static_cast<u32>(&item - view.draws.data()) + 1u;
+                    cmd.PushConstants(&draw_push, sizeof(draw_push));
                     cmd.BindVertexBuffer(0, mesh->vertices);
                     cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
                     for (const GpuSubmesh &submesh : mesh->submeshes) {
@@ -6828,8 +6929,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             if (!mesh || mesh->all_blend)
               continue;
             bool draw_skinned = mesh->skinned && mesh_pipeline_->has_skinning();
-            MeshPushConstants push{.model = item.transform,
-                                   .prev_model = item.prev_transform};
+            MeshPushConstants push{};
+            push.draw_index = static_cast<u32>(&item - view.draws.data()) + 1u;
             if (mesh->terrain_lod) {
               std::memcpy(push.detail_rect, view.detail_rect,
                           sizeof(push.detail_rect));
@@ -7256,8 +7357,44 @@ bool Renderer::CreateFrameResources() {
                               kBufferUsageStorage, true);
     if (!frame.decals.mapped)
       return false;
+
+    // Per-draw transform arena. Sized for a typical scene here and grown by
+    // UploadDrawRecords when a frame needs more.
+    frame.draw_record_capacity = 1024;
+    frame.draw_records = device_->CreateBuffer(
+        static_cast<u64>(frame.draw_record_capacity) * sizeof(DrawRecord),
+        kBufferUsageStorage, true);
+    if (!frame.draw_records.mapped)
+      return false;
   }
   return true;
+}
+
+const GpuBuffer &Renderer::UploadDrawRecords(FrameResources &frame,
+                                             const FrameView &view) {
+  // Record 0 is the kNoDrawRecord slot an instanced draw points at, so the arena
+  // is one longer than the draw list and every draw's record is 1 + its index.
+  const u32 needed = static_cast<u32>(view.draws.size()) + 1;
+  if (frame.draw_record_capacity < needed) {
+    // The slot's fence fired in BeginFrame, so nothing still reads the old
+    // buffer; retire it deferred anyway and round up to keep growth rare.
+    u32 cap = frame.draw_record_capacity ? frame.draw_record_capacity : 1024;
+    while (cap < needed)
+      cap *= 2;
+    device_->DestroyBufferDeferred(frame.draw_records);
+    frame.draw_records =
+        device_->CreateBuffer(static_cast<u64>(cap) * sizeof(DrawRecord),
+                              kBufferUsageStorage, true);
+    frame.draw_record_capacity = frame.draw_records.mapped ? cap : 0;
+  }
+  if (!frame.draw_records.mapped)
+    return frame.draw_records;
+  auto *records = static_cast<DrawRecord *>(frame.draw_records.mapped);
+  records[0] = {Mat4::Identity(), Mat4::Identity()};
+  for (size_t i = 0; i < view.draws.size(); ++i) {
+    records[i + 1] = {view.draws[i].transform, view.draws[i].prev_transform};
+  }
+  return frame.draw_records;
 }
 
 void Renderer::DestroyFrameResources() {
@@ -7272,6 +7409,8 @@ void Renderer::DestroyFrameResources() {
       device_->DestroyBuffer(frame.lights);
     if (frame.decals)
       device_->DestroyBuffer(frame.decals);
+    if (frame.draw_records)
+      device_->DestroyBuffer(frame.draw_records);
     frame = {};
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
@@ -7444,6 +7583,11 @@ void Renderer::Shutdown() {
       device_->DestroyBuffer(cluster_indices_);
     if (decal_cluster_indices_)
       device_->DestroyBuffer(decal_cluster_indices_);
+    for (GpuBuffer &camera : contact_camera_) {
+      if (camera)
+        device_->DestroyBuffer(camera);
+      camera = {};
+    }
 #if defined(RX_HAS_NRD)
     if (rt_available_)
       nrd_.Destroy(*device_);

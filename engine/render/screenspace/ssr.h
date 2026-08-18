@@ -39,6 +39,7 @@ class SsrPass {
  private:
   Settings settings_;
   PipelineHandle pipeline_;
+  GpuBuffer camera_[2];  // march matrices, too big for the push block
   Extent2D extent_{};
 };
 

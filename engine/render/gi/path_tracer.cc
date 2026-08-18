@@ -1,5 +1,7 @@
 #include "render/gi/path_tracer.h"
 
+#include <cstring>
+
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
@@ -12,8 +14,18 @@
 namespace rx::render {
 namespace {
 
-struct PathPush {
+// A single Mat4 is half the 128 bytes vulkan guarantees for a push block and
+// three are past it outright, so both tracers read their matrices from a
+// per-frame uniform buffer and keep the scalars in the push. The reference
+// pipeline only needs inv_view_proj but shares the block; the layout is
+// identical on both sides.
+struct PathCamera {
   Mat4 inv_view_proj;
+  Mat4 view_proj;       // denoised gbuffer only
+  Mat4 prev_view_proj;  // denoised gbuffer only
+};
+
+struct PathPush {
   f32 camera_pos[4];
   f32 sun_direction[4];
   f32 sun_color[4];
@@ -31,9 +43,6 @@ constexpr Format kAccumFormat = Format::kRGBA32Float;
 #if defined(RX_HAS_NRD)
 // Matches PathGbufferPush in pathtrace_gbuffer.cs.hlsl.
 struct PathGbufferPush {
-  Mat4 inv_view_proj;
-  Mat4 view_proj;
-  Mat4 prev_view_proj;
   f32 camera_pos[4];
   f32 sun_direction[4];
   f32 sun_color[4];
@@ -58,9 +67,10 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kStorageImage},
                           {2, BindingType::kAccelStruct},
-                          {3, BindingType::kCombinedTextureSampler}}},
+                          {3, BindingType::kCombinedTextureSampler},
+                          {4, BindingType::kUniformBuffer}}},
                {.shared = bindless_layout}},
-      .push_constant_size = sizeof(PathPush),
+      .push_constant_size = PushSize<PathPush>(),
       .debug_name = "pathtrace",
   });
   if (!pipeline_) {
@@ -68,8 +78,16 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
     return false;
   }
 
+  // One per in-flight frame: a pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(PathCamera), kBufferUsageUniform, true);
+    if (!camera.mapped) return false;
+  }
+
 #if defined(RX_HAS_NRD)
-  // Denoised gbuffer: 6 NRD-input storage images (0..5), tlas (6), sky (7).
+  // Denoised gbuffer: 6 NRD-input storage images (0..5), tlas (6), sky (7),
+  // camera matrices (8).
   gbuffer_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_pathtrace_gbuffer_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
@@ -79,9 +97,10 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
                           {4, BindingType::kStorageImage},
                           {5, BindingType::kStorageImage},
                           {6, BindingType::kAccelStruct},
-                          {7, BindingType::kCombinedTextureSampler}}},
+                          {7, BindingType::kCombinedTextureSampler},
+                          {8, BindingType::kUniformBuffer}}},
                {.shared = bindless_layout}},
-      .push_constant_size = sizeof(PathGbufferPush),
+      .push_constant_size = PushSize<PathGbufferPush>(),
       .debug_name = "pathtrace_gbuffer",
   });
   if (!gbuffer_pipeline_) {
@@ -96,7 +115,7 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(CompositePush),
+      .push_constant_size = PushSize<CompositePush>(),
       .debug_name = "pathtrace_composite",
   });
   if (!composite_pipeline_) {
@@ -125,6 +144,10 @@ void PathTracer::Resize(Device& device, Extent2D extent) {
 
 void PathTracer::Destroy(Device& device) {
   if (accum_) device.DestroyImage(accum_);
+  for (GpuBuffer& camera : camera_) {
+    if (camera) device.DestroyBuffer(camera);
+    camera = {};
+  }
   for (PipelineHandle* p : {&pipeline_, &gbuffer_pipeline_, &composite_pipeline_}) {
     device.DestroyPipeline(*p);
     *p = {};
@@ -147,8 +170,11 @@ void PathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
       },
       [this, &raytracing, tlas_slot, bindless_set, sky_view, sky_sampler, output, accum,
        frame, sample_base](PassContext& ctx) {
+        const u32 slot = frame.frame_index % 2;
+        const PathCamera camera{frame.inv_view_proj, frame.view_proj, frame.prev_view_proj};
+        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+
         PathPush push{};
-        push.inv_view_proj = frame.inv_view_proj;
         push.camera_pos[0] = frame.camera_pos.x;
         push.camera_pos[1] = frame.camera_pos.y;
         push.camera_pos[2] = frame.camera_pos.z;
@@ -173,7 +199,8 @@ void PathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
         ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(output)),
                                    Bind::Storage(1, ctx.graph->image(accum)),
                                    Bind::Accel(2, raytracing.tlas(tlas_slot)),
-                                   Bind::Combined(3, sky_view, sky_sampler)});
+                                   Bind::Combined(3, sky_view, sky_sampler),
+                                   Bind::Uniform(4, camera_[slot], 0, sizeof(PathCamera))});
         ctx.cmd->BindSet(1, bindless_set);
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);
@@ -204,10 +231,12 @@ void PathTracer::AddGbufferPass(RenderGraph& graph, RayTracingContext& raytracin
         items.push_back(Bind::Accel(6, raytracing.tlas(tlas_slot)));
         items.push_back(Bind::Combined(7, sky_view, sky_sampler));
 
+        const u32 slot = frame.frame_index % 2;
+        const PathCamera camera{frame.inv_view_proj, frame.view_proj, frame.prev_view_proj};
+        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        items.push_back(Bind::Uniform(8, camera_[slot], 0, sizeof(PathCamera)));
+
         PathGbufferPush push{};
-        push.inv_view_proj = frame.inv_view_proj;
-        push.view_proj = frame.view_proj;
-        push.prev_view_proj = frame.prev_view_proj;
         push.camera_pos[0] = frame.camera_pos.x;
         push.camera_pos[1] = frame.camera_pos.y;
         push.camera_pos[2] = frame.camera_pos.z;

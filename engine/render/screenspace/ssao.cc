@@ -29,7 +29,7 @@ bool SsaoPass::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(SsaoPush),
+      .push_constant_size = PushSize<SsaoPush>(),
       .debug_name = "ssao",
   });
   return static_cast<bool>(pipeline_);

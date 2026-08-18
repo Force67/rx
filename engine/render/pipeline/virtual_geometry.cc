@@ -60,9 +60,15 @@ constexpr u32 kArgsSlots = 15;
 // compute; larger triangles keep fixed-function rasterization.
 constexpr u32 kSwThresholdPx = 32;
 
+// The legacy path's view_proj: the frustum planes already fill most of the 128
+// bytes vulkan guarantees for a push block, so the matrix rides in a per-frame
+// uniform buffer. (The gpu-driven path reads its own copy from VgeoParams.)
+struct LegacyCamera {
+  Mat4 view_proj;
+};
+
 // Legacy single-pass push block (vgeo.ms).
 struct LegacyPush {
-  Mat4 view_proj;
   f32 planes[5][4];
   f32 camera[4];  // xyz eye, w proj_scale
   f32 error_pixels;
@@ -105,9 +111,10 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
                           {1, BindingType::kStorageBuffer},
                           {2, BindingType::kStorageBuffer},
                           {3, BindingType::kStorageBuffer},
-                          {4, BindingType::kStorageBuffer}},
+                          {4, BindingType::kStorageBuffer},
+                          {5, BindingType::kUniformBuffer}},  // LegacyCamera
                 .stages = kShaderStageMesh}},
-      .push_constant_size = sizeof(LegacyPush),
+      .push_constant_size = PushSize<LegacyPush>(),
       .debug_name = "vgeo_legacy",
   });
   if (!legacy_pipeline_) {
@@ -116,6 +123,10 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     legacy_counters_[i] = device.CreateBuffer(16, kBufferUsageStorage, true);
+    // One per in-flight frame: the pass rewrites it while the previous frame
+    // may still be reading its own copy.
+    legacy_camera_[i] = device.CreateBuffer(sizeof(LegacyCamera), kBufferUsageUniform, true);
+    if (!legacy_camera_[i].mapped) return false;
   }
   if (!gpu_driven_) {
     RX_INFO("virtual geometry: no 64-bit buffer atomics, single-pass fallback");
@@ -129,26 +140,26 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
                           storage(5), storage(6), storage(7),
                           {8, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(u32),
+      .push_constant_size = PushSize<u32>(),
       .debug_name = "vgeo_cull",
   });
   args_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_vgeo_args_cs_hlsl),
       .sets = {{.slots = {storage(0), storage(1), storage(2)}}},
-      .push_constant_size = sizeof(u32),
+      .push_constant_size = PushSize<u32>(),
       .debug_name = "vgeo_args",
   });
   clear_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_vgeo_clear_cs_hlsl),
       .sets = {{.slots = {storage(0), storage(1)}}},
-      .push_constant_size = sizeof(u32),
+      .push_constant_size = PushSize<u32>(),
       .debug_name = "vgeo_clear",
   });
   sw_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_vgeo_sw_cs_hlsl),
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
                           storage(5), storage(6), storage(7), storage(8), storage(9)}}},
-      .push_constant_size = sizeof(u32),
+      .push_constant_size = PushSize<u32>(),
       .debug_name = "vgeo_sw",
   });
   hzb_pipeline_ = device.CreateComputePipeline({
@@ -165,7 +176,7 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
       .raster = {.cull = CullMode::kBack},
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
                           storage(5), storage(6), storage(7), storage(8), storage(9)}}},
-      .push_constant_size = sizeof(u32),
+      .push_constant_size = PushSize<u32>(),
       .debug_name = "vgeo_vis",
   });
   resolve_pipeline_ = device.CreateGraphicsPipeline({
@@ -233,7 +244,8 @@ void VirtualGeometryPass::Destroy(Device& device) {
     *b = {};
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
-    for (GpuBuffer* b : {&params_[i], &instances_[i], &readback_[i], &legacy_counters_[i]}) {
+    for (GpuBuffer* b : {&params_[i], &instances_[i], &readback_[i], &legacy_counters_[i],
+                         &legacy_camera_[i]}) {
       if (*b) device.DestroyBuffer(*b);
       *b = {};
     }
@@ -889,7 +901,6 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
 
 void VirtualGeometryPass::AddLegacyPass(RenderGraph& graph, const Frame& frame) {
   LegacyPush push{};
-  push.view_proj = frame.view_proj;
   std::memcpy(push.planes, frame.planes, sizeof(push.planes));
   push.camera[0] = frame.eye.x;
   push.camera[1] = frame.eye.y;
@@ -904,10 +915,12 @@ void VirtualGeometryPass::AddLegacyPass(RenderGraph& graph, const Frame& frame) 
         b.Write(frame.color, ResourceUsage::kColorAttachment);
         b.Write(frame.depth, ResourceUsage::kDepthAttachment);
       },
-      [this, color = frame.color, depth = frame.depth, push, slot = frame.slot](
-          PassContext& ctx) {
-        const GpuBuffer& counter = legacy_counters_[slot % kFramesInFlight];
+      [this, color = frame.color, depth = frame.depth, push, view_proj = frame.view_proj,
+       slot = frame.slot % kFramesInFlight](PassContext& ctx) {
+        const GpuBuffer& counter = legacy_counters_[slot];
         if (counter.mapped) static_cast<u32*>(counter.mapped)[0] = 0;
+        const LegacyCamera camera{view_proj};
+        std::memcpy(legacy_camera_[slot].mapped, &camera, sizeof(camera));
 
         ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
         DepthAttachment depth_att{.view = ctx.graph->image(depth).view,
@@ -921,7 +934,8 @@ void VirtualGeometryPass::AddLegacyPass(RenderGraph& graph, const Frame& frame) 
                 Bind::StorageBuffer(1, meshlet_vertices_, 0, meshlet_vertices_.size),
                 Bind::StorageBuffer(2, meshlet_triangles_, 0, meshlet_triangles_.size),
                 Bind::StorageBuffer(3, vertices_, 0, vertices_.size),
-                Bind::StorageBuffer(4, counter, 0, counter.size)});
+                Bind::StorageBuffer(4, counter, 0, counter.size),
+                Bind::Uniform(5, legacy_camera_[slot], 0, sizeof(LegacyCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->DrawMeshTasks(meshlet_count_, 1, 1);
         ctx.cmd->EndRendering();

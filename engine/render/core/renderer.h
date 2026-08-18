@@ -531,6 +531,13 @@ public:
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.
   RenderSettings &settings() { return settings_; }
+
+  // Installs an authored equirectangular HDR as the sky, so IBL comes from the
+  // scene's own environment map instead of the procedural atmosphere. Feeds a
+  // UsdLux DomeLight through to the lighting; see EnvironmentSystem.
+  bool SetEnvironmentMap(const f32 *rgba, u32 width, u32 height, const Vec3 &tint,
+                         f32 intensity, f32 rotation_radians);
+  void ClearEnvironmentMap();
   // Points the decal systems at an uploaded texture (the atlas). Both the
   // clustered projectors and the baked texture-space layers read it.
   void SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas = {});
@@ -571,6 +578,11 @@ public:
   // True when RX_RCGI was set on the command line/env: hosted presets must let
   // it win in both directions (force on OR force off) over the tier default.
   bool rcgi_env_overridden() const { return rcgi_env_overridden_; }
+  // Same for RX_FROXEL_DENSITY / RX_FROXEL_START: a stage that authors its own
+  // fog must not overwrite a value the operator dialled in by hand. Tracked
+  // per field, so setting one does not suppress the other's authored value.
+  bool froxel_density_overridden() const { return froxel_density_overridden_; }
+  bool froxel_start_overridden() const { return froxel_start_overridden_; }
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }
   size_t instance_group_count() const { return instances_.group_count(); }
   size_t instance_count() const { return instances_.instance_count(); }
@@ -627,6 +639,13 @@ private:
         morph_weights; // host visible MorphWeight pairs, read by device address
     GpuBuffer lights;  // host visible PointLight array
     GpuBuffer decals;  // host visible Decal array
+    // Host visible DrawRecord arena: one per FrameView draw (plus the zeroed
+    // record 0), indexed by the record id every mesh / shadow / water push carries
+    // instead of the 128 bytes of matrices that used to ride in the block.
+    // Grown on demand, never clamped - a dropped record would silently render
+    // a draw at the origin.
+    GpuBuffer draw_records;
+    u32 draw_record_capacity = 0;
   };
   // Max bones across all skinned draws in one frame.
   static constexpr u32 kMaxFrameBones = 8192;
@@ -636,6 +655,11 @@ private:
 
   bool CreateFrameResources();
   void DestroyFrameResources();
+  // Fills this slot's DrawRecord arena from view.draws (growing it first) and
+  // returns the buffer the passes bind. Record 0 stays zeroed: instanced draws
+  // take their matrices from vertex streams and used to push an all-zero model,
+  // and the fragment stage's model-space-normal branch rejects it the same way.
+  const GpuBuffer &UploadDrawRecords(FrameResources &frame, const FrameView &view);
   void RecreateSwapchain();
   // Whether the swapchain should request an HDR format: the hdr_output setting
   // gated on the OS actually compositing the window in HDR (Window::
@@ -685,6 +709,8 @@ private:
       false; // logged the "no startup SDF path" notice once
   bool rcgi_env_overridden_ =
       false;             // RX_RCGI was set explicitly (wins over preset both ways)
+  bool froxel_density_overridden_ = false;  // RX_FROXEL_DENSITY set explicitly
+  bool froxel_start_overridden_ = false;    // RX_FROXEL_START set explicitly
   LightGrid light_grid_; // world-space light grid feeding the rcgi cache
   base::Vector<InteriorVolume>
       interior_volumes_; // forwarded to rcgi each active frame (item 9b)
@@ -772,6 +798,9 @@ private:
   GpuBuffer cluster_counts_;
   GpuBuffer cluster_indices_;
   GpuBuffer decal_cluster_indices_;
+  // Contact-shadow camera matrices, too big for the push block; one per
+  // in-flight frame since the pass rewrites it while the previous frame reads.
+  GpuBuffer contact_camera_[kFramesInFlight];
   // Decal atlas: set once by the engine/demo via SetDecalAtlas (asset id of an
   // uploaded texture); empty binds white.
   TextureView decal_atlas_view_;

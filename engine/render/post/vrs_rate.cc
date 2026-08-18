@@ -29,7 +29,7 @@ bool VrsRatePass::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(RatePush),
+      .push_constant_size = PushSize<RatePush>(),
       .debug_name = "vrs_rate",
   });
   if (!pipeline_) {

@@ -2,19 +2,31 @@
 // Depth-only cascade shadow caster. Renders opaque geometry from the sun into
 // one sub-rect of the cascade atlas. The uv is passed through so the fragment
 // stage can alpha-test masked materials (perforated foliage shadows); fully
-// opaque casters never sample it. One draw per cascade, the light matrix
-// arrives per draw. RX_SKINNED adds the bone weight stream so animated meshes
-// cast a pose-matched shadow instead of their bind pose.
+// opaque casters never sample it. The light matrix arrives once per cascade,
+// the per-draw head once per caster. RX_SKINNED adds the bone weight stream so
+// animated meshes cast a pose-matched shadow instead of their bind pose.
+
+// Mirrors render::ShadowPass::Push. The per-draw model matrix lives in the
+// frame's DrawRecord arena (set 1) instead of the push range, which is what
+// brings the block under the 128 bytes vulkan guarantees. The per-draw head
+// leads so a caster rewrites only it, leaving the cascade / cube-face matrix
+// the pass pushed above it intact.
 struct PushData {
-  column_major float4x4 light_view_proj;
-  column_major float4x4 model;
-#ifdef RX_SKINNED
-  uint64_t bone_address;  // device address of the frame bone palette
+  uint draw_index;        // this caster's record in the frame arena
   uint skin_offset;       // first bone of this mesh in the palette
-  uint pad;
-#endif
+  uint64_t bone_address;  // device address of the frame bone palette
+  column_major float4x4 light_view_proj;
 };
 PUSH_CONSTANTS(PushData, push);
+
+// Mirrors render::DrawRecord; only `model` is read here. Bound as set 1, since
+// set 0 is the shared material layout the alpha test needs. The pushed index is
+// the record as-is (see mesh.vs on why DrawIndex must not be added to it).
+struct DrawRecord {
+  column_major float4x4 model;
+  column_major float4x4 prev_model;
+};
+[[vk::binding(0, 1)]] StructuredBuffer<DrawRecord> draw_records : register(t0, space1);
 
 struct VsIn {
   [[vk::location(0)]] float3 position : POSITION;
@@ -39,7 +51,7 @@ struct VsOut {
 #ifdef RX_SKINNED
 #ifndef __spirv__
 // DXIL bone palette access: root SRV bound by the d3d12 backend from the
-// address at push-block byte 128 (RX_BDA convention, see mesh.vs / RHI.md).
+// address at the push block's RX_BDA bone offset (see mesh.vs / RHI.md).
 ByteAddressBuffer rec_bone_palette : register(t998, space0);
 #endif
 
@@ -79,7 +91,7 @@ VsOut main(VsIn input) {
   const float4x4 model = transpose(float4x4(input.instance_col0, input.instance_col1,
                                             input.instance_col2, input.instance_col3));
 #else
-  const float4x4 model = push.model;
+  const float4x4 model = draw_records[push.draw_index].model;
 #endif
   float4 world = mul(model, float4(local_pos, 1.0));
   VsOut o;

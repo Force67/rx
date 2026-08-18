@@ -72,7 +72,6 @@ rx_add_module(render
   geometry/gaussian.cc
   util/exr_write.cc
   util/gpu_profiler.cc
-  util/stb_impl.cc
   rhi/rhi.cc
   null/null_device.cc
 )
@@ -114,6 +113,12 @@ if(RX_RHI_VULKAN)
   # PUBLIC: interop consumers (gui backend, thumbnailer, upscalers) gate their
   # Vulkan paths on this define.
   target_compile_definitions(rx_render PUBLIC RX_RHI_VULKAN)
+  # The device floor is a property of the shaders, not a taste: a driver that
+  # cannot load the SPIR-V this build emits must be rejected at enumeration
+  # rather than accepted and then failing every pipeline.
+  if(RX_SPIRV_1_4)
+    target_compile_definitions(rx_render PUBLIC RX_SPIRV_1_4=1)
+  endif()
 endif()
 
 if(RX_RHI_D3D12)
@@ -156,7 +161,7 @@ endif()
 target_link_libraries(rx_render
   PUBLIC rx::core rx::asset
          $<BUILD_INTERFACE:volk> $<BUILD_INTERFACE:GPUOpen::VulkanMemoryAllocator>)
-target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::stb>)
+target_link_libraries(rx_render PRIVATE $<BUILD_INTERFACE:rx::stb_impl>)
 
 if(RX_FSR3)
   target_sources(rx_render PRIVATE
@@ -191,7 +196,7 @@ if(RX_NRD)
 endif()
 
 if(NOT MSVC)
-  set_source_files_properties(vulkan/vma_impl.cc util/stb_impl.cc PROPERTIES COMPILE_OPTIONS -w)
+  set_source_files_properties(vulkan/vma_impl.cc PROPERTIES COMPILE_OPTIONS -w)
 endif()
 
 set(RX_RENDER_SHADERS
@@ -248,6 +253,7 @@ set(RX_RENDER_SHADERS
   shaders/atmosphere/cloudscape_haze.cs.hlsl
   shaders/atmosphere/cloudscape_funnel.cs.hlsl
   shaders/atmosphere/froxel_scatter.cs.hlsl
+  shaders/atmosphere/froxel_scatter_rt.cs.hlsl
   shaders/atmosphere/froxel_integrate.cs.hlsl
   shaders/atmosphere/froxel_apply.cs.hlsl
   shaders/atmosphere/precipitation.cs.hlsl
@@ -259,6 +265,7 @@ set(RX_RENDER_SHADERS
   shaders/atmosphere/lightning_bolt.vs.hlsl
   shaders/atmosphere/lightning_bolt.ps.hlsl
   shaders/atmosphere/surface_weather.cs.hlsl
+  shaders/atmosphere/envmap.cs.hlsl
   shaders/atmosphere/sky.cs.hlsl
   shaders/atmosphere/sky.ps.hlsl
   shaders/atmosphere/irradiance.cs.hlsl
@@ -419,6 +426,7 @@ set(RX_SHADER_DEPS_procedural_grass_prepass_ps_hlsl shaders/geometry/procedural_
 set(RX_SHADER_DEPS_procedural_grass_ps_hlsl shaders/geometry/procedural_grass.hlsli)
 set(RX_SHADER_DEPS_precip_volume_vs_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_volume_rt_vs_hlsl shaders/atmosphere/precip_volume.vs.hlsl shaders/atmosphere/precip_common.hlsli)
+set(RX_SHADER_DEPS_froxel_scatter_rt_cs_hlsl shaders/atmosphere/froxel_scatter.cs.hlsl shaders/rhi_bindings.hlsli)
 set(RX_SHADER_DEPS_precip_volume_ps_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_splash_vs_hlsl shaders/atmosphere/precip_common.hlsli)
 set(RX_SHADER_DEPS_precip_splash_ps_hlsl shaders/atmosphere/precip_common.hlsli)

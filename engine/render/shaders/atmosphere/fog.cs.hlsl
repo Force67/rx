@@ -4,8 +4,13 @@
 // light shafts (god rays). Marches from the eye to the depth-buffer surface,
 // jittered per pixel and per frame so the temporal pass resolves the noise.
 
-struct FogPush {
+// The unprojection matrix, which alone would be half the push budget.
+struct FogCamera {
   column_major float4x4 inv_view_proj;
+};
+[[vk::binding(4, 0)]] ConstantBuffer<FogCamera> camera : register(b4, space0);
+
+struct FogPush {
   float4 camera_pos;     // xyz eye
   float4 sun_direction;  // xyz travel direction, w intensity
   float4 sun_color;      // rgb, w anisotropy g
@@ -60,7 +65,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   // Reconstruct the view ray and the surface distance from reversed-z depth.
   float2 ndc = uv * 2.0 - 1.0;
-  float4 near_h = mul(pc.inv_view_proj, float4(ndc, 1.0, 1.0));
+  float4 near_h = mul(camera.inv_view_proj, float4(ndc, 1.0, 1.0));
   float3 p_near = near_h.xyz / near_h.w;
   float3 ro = pc.camera_pos.xyz;
   float3 rd = normalize(p_near - ro);
@@ -68,7 +73,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float depth = depth_in.Load(int3(id.xy, 0)).r;
   float march_end = pc.params.w;  // sky: fog to the far cap
   if (depth > 1e-6) {
-    float4 world_h = mul(pc.inv_view_proj, float4(ndc, depth, 1.0));
+    float4 world_h = mul(camera.inv_view_proj, float4(ndc, depth, 1.0));
     float3 world = world_h.xyz / world_h.w;
     march_end = min(length(world - ro), pc.params.w);
   }

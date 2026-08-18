@@ -11,18 +11,25 @@
 namespace rx::render {
 namespace {
 
+// The two interaction matrices alone are the entire 128 bytes vulkan guarantees
+// for a push block, so they ride in a per-frame uniform buffer. They are the
+// same for every ring and phase, unlike everything left in the push.
+struct WaterFieldCamera {
+  Mat4 view_proj;      // world -> clip (project the texel column to screen)
+  Mat4 inv_view_proj;  // clip -> world (reconstruct geometry from depth)
+};
+static_assert(sizeof(WaterFieldCamera) == 128);
+
 struct WaterFieldPush {
   f32 origin[4];       // new origin xz, half_extent, texel_world
   f32 prev_origin[4];  // old origin xz (advection source frame)
   f32 drift_time[4];   // wave-drift xz, dt, time
   u32 control[4];      // ring index, phase, flags, disturbance count
-  Mat4 view_proj;      // world -> clip (project the texel column to screen)
-  Mat4 inv_view_proj;  // clip -> world (reconstruct geometry from depth)
   f32 island[4];       // center xz, sigma, peak (obstacle terrain)
   f32 idepth0[4];      // near_plane, band, foam_scale, water_level
   f32 idepth1[4];      // render_w, render_h, xz_proximity, ripple_gain
 };
-static_assert(sizeof(WaterFieldPush) == 240);
+static_assert(sizeof(WaterFieldPush) == 112);
 
 // Interaction flag bits packed into control.z.
 constexpr u32 kFlagFftFoam = 1u;
@@ -69,8 +76,9 @@ bool WaterField::Initialize(Device& device) {
                           {4, BindingType::kSampledImage},
                           {5, BindingType::kCombinedTextureSampler},
                           {6, BindingType::kStorageImage},
-                          {7, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(WaterFieldPush),
+                          {7, BindingType::kCombinedTextureSampler},
+                          {8, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<WaterFieldPush>(),
       .debug_name = "water_field",
   });
   if (!pipeline_) return false;
@@ -104,11 +112,14 @@ bool WaterField::Initialize(Device& device) {
       return false;
     }
   }
+  // One camera CB per in-flight frame: the pass rewrites it while the previous
+  // frame may still be reading its own copy.
   for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
     params_[f] = device.CreateBuffer(sizeof(GpuParams), kBufferUsageUniform, true);
+    camera_[f] = device.CreateBuffer(sizeof(WaterFieldCamera), kBufferUsageUniform, true);
     disturbances_[f] = device.CreateBuffer(kMaxDisturbances * sizeof(GpuDisturbance),
                                            kBufferUsageStorage, true);
-    if (!params_[f].mapped || !disturbances_[f].mapped) {
+    if (!params_[f].mapped || !camera_[f].mapped || !disturbances_[f].mapped) {
       RX_WARN("water field buffer mapping failed; foam field disabled");
       Destroy(device);
       return false;
@@ -145,6 +156,7 @@ void WaterField::Destroy(Device& device) {
   }
   for (u32 f = 0; f < Device::kMaxFramesInFlight; ++f) {
     device.DestroyBuffer(params_[f]);
+    device.DestroyBuffer(camera_[f]);
     device.DestroyBuffer(disturbances_[f]);
   }
 }
@@ -183,6 +195,10 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
     gp.ring[r][3] = texel_world[r];
   }
   std::memcpy(params_[slot].mapped, &gp, sizeof(gp));
+
+  // Interaction matrices: identical for every ring/phase, so one CB per frame.
+  const WaterFieldCamera camera{params.view_proj, params.inv_view_proj};
+  std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
 
   // Object disturbances for this frame (bounded).
   u32 disturbance_count = std::min(params.disturbance_count, kMaxDisturbances);
@@ -237,7 +253,8 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
                   depth_view ? Bind::SampledView(4, slot4) : InGeneral(Bind::SampledView(4, slot4)),
                   InGeneral(Bind::Combined(5, mask_[write ^ 1u].view, sampler_)),
                   Bind::StorageView(6, mask_[write].view),
-                  InGeneral(Bind::Combined(7, disp_view, sampler_))});
+                  InGeneral(Bind::Combined(7, disp_view, sampler_)),
+                  Bind::Uniform(8, camera_[slot], 0, sizeof(WaterFieldCamera))});
 
           WaterFieldPush push{};
           push.origin[0] = origin_[r][0];
@@ -253,8 +270,6 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
           push.control[0] = r;
           push.control[2] = flags;
           push.control[3] = disturbance_count;
-          push.view_proj = params.view_proj;
-          push.inv_view_proj = params.inv_view_proj;
           push.island[0] = params.island[0];
           push.island[1] = params.island[1];
           push.island[2] = params.island[2];

@@ -81,6 +81,8 @@ class PrecipVolume {
   // failure is nonfatal), so the descriptor is always valid; the froxel flag
   // in the push already zeroes the term.
   GpuImage froxel_dummy_;
+  GpuBuffer camera_[2];   // view_proj + prev_view_proj, too big for the push block
+  u32 uniform_slot_ = 0;  // flips per pass; the other copy may still be in flight
 };
 
 }  // namespace rx::render

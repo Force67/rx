@@ -22,24 +22,30 @@ struct FrameGlobals {
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 
+// Mirrors render::MeshShaderPush. draw_index / tint_packed lead the block
+// because the fragment stage shares this push range with the raster path and
+// reads them at those offsets (render::MeshPushConstants agrees).
 struct PushData {
-  column_major float4x4 model;
-  column_major float4x4 prev_model;
-  // Mirrors MeshPushConstants' head: the fragment stage shares this range and
-  // reads the tint / decal-tile word at byte 140.
-  uint2 pad_bone;
-  uint pad_skin;
+  uint draw_index;
   uint tint_packed;
+  uint meshlet_offset;              // first meshlet of this (lod,submesh)
+  uint meshlet_count;               // meshlet count of this (lod,submesh)
   float4 bounds;                    // instance bounds (used by the task stage)
   float4 occlusion;                 // hi-z cull params (used by the task stage)
   uint64_t meshlets_addr;           // array of 48-byte Meshlet
   uint64_t meshlet_vertices_addr;   // array of uint (global vertex index)
   uint64_t meshlet_triangles_addr;  // array of uint (3 local indices packed)
   uint64_t vertices_addr;           // array of 52-byte asset::Vertex
-  uint meshlet_offset;              // first meshlet of this (lod,submesh)
-  uint meshlet_count;              // meshlet count of this (lod,submesh)
 };
 PUSH_CONSTANTS(PushData, push);
+
+// Mirrors render::DrawRecord: the transforms the push range used to carry.
+// The pushed index is flat, as in mesh.vs.
+struct DrawRecord {
+  column_major float4x4 model;
+  column_major float4x4 prev_model;
+};
+[[vk::binding(3, 0)]] StructuredBuffer<DrawRecord> draw_records : register(t3, space0);
 
 struct MeshPayload {
   uint meshlet[32];  // survivor meshlet indices from the task stage
@@ -70,6 +76,7 @@ uint LoadU(uint64_t base, uint off) { return vk::RawBufferLoad<uint>(base + off)
 [numthreads(128, 1, 1)]
 void main(uint3 gid : SV_GroupID, uint tid : SV_GroupIndex, in payload MeshPayload pl,
           out vertices VsOut verts[64], out indices uint3 tris[124]) {
+  const DrawRecord record = draw_records[push.draw_index];
   uint mi = pl.meshlet[gid.x];  // task stage already culled; this is a survivor
   uint64_t mbase = push.meshlets_addr + (uint64_t)mi * kMeshletStride;
   uint vertex_offset = LoadU(mbase, 32);
@@ -88,15 +95,15 @@ void main(uint3 gid : SV_GroupID, uint tid : SV_GroupIndex, in payload MeshPaylo
     float2 uv = float2(LoadF(vb, 40), LoadF(vb, 44));
     uint cpk = LoadU(vb, 48);  // R8G8B8A8 unorm
 
-    float4 world = mul(push.model, float4(pos, 1.0));
+    float4 world = mul(record.model, float4(pos, 1.0));
     float4 clip = mul(frame.view_proj, world);
     VsOut o;
     o.world_pos = world.xyz;
     o.curr_clip = clip;
-    o.prev_clip = mul(frame.prev_view_proj, mul(push.prev_model, float4(pos, 1.0)));
+    o.prev_clip = mul(frame.prev_view_proj, mul(record.prev_model, float4(pos, 1.0)));
     o.sv_position = clip + float4(frame.jitter * clip.w, 0.0, 0.0);
-    o.normal = mul((float3x3)push.model, nrm);
-    o.tangent = float4(mul((float3x3)push.model, tan.xyz), tan.w);
+    o.normal = mul((float3x3)record.model, nrm);
+    o.tangent = float4(mul((float3x3)record.model, tan.xyz), tan.w);
     o.uv = uv;
     o.color = float4(cpk & 0xff, (cpk >> 8) & 0xff, (cpk >> 16) & 0xff, (cpk >> 24) & 0xff) / 255.0;
     o.tension = 0.0;  // static geometry

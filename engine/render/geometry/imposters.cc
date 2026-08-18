@@ -63,7 +63,7 @@ bool ImposterPass::Initialize(Device& device, Format color_format, Format depth_
                 .format = Format::kD32Float},
       .color_formats = {Format::kRGBA8Unorm, Format::kRGBA8Unorm},
       .blend = {BlendMode::kOpaque, BlendMode::kOpaque},
-      .push_constant_size = sizeof(BakePush),
+      .push_constant_size = PushSize<BakePush>(),
       .debug_name = "imposter_bake",
   });
   draw_pipeline_ = device.CreateGraphicsPipeline({
@@ -77,7 +77,7 @@ bool ImposterPass::Initialize(Device& device, Format color_format, Format depth_
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(DrawPush),
+      .push_constant_size = PushSize<DrawPush>(),
       .debug_name = "imposter_draw",
   });
   if (!bake_pipeline_ || !draw_pipeline_) {

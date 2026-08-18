@@ -1,5 +1,7 @@
 #include "render/gi/recon_path_tracer.h"
 
+#include <cstring>
+
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
@@ -46,10 +48,16 @@ constexpr f32 kFogMaxDistance = 200.0f;
 constexpr u32 kRestirDiSpatialSamples = 5;
 constexpr f32 kRestirDiSpatialRadius = 30.0f;
 
-struct GbufferPush {
+// The three matrices are 192 bytes on their own, well past the 128 vulkan
+// guarantees for a push block, so they ride in a per-frame uniform buffer and
+// the pushes keep the scalars. The fog pass reads the same block (it only
+// needs inv_view_proj) rather than owning a second buffer.
+struct ReconCamera {
   Mat4 inv_view_proj;
   Mat4 view_proj;
   Mat4 prev_view_proj;
+};
+struct GbufferPush {
   f32 camera_pos[4];
   f32 sun_direction[4];
   f32 sun_color[4];
@@ -113,7 +121,6 @@ struct RestirDiTemporalPush {
   f32 pad[3];
 };
 struct FogPush {
-  Mat4 inv_view_proj;
   f32 camera_pos[4];
   f32 sun_direction[4];
   f32 sun_color[4];
@@ -146,12 +153,19 @@ struct RestirDiSpatialPush {
 bool ReconPathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout) {
   if (!bindless_layout) return false;
   device_ = &device;
+  // One per in-flight frame: the pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(ReconCamera), kBufferUsageUniform, true);
+    if (!camera.mapped) return false;
+  }
   return CreatePipelines(device, bindless_layout);
 }
 
 bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindless_layout) {
   // gbuffer: 7 storage outputs, tlas (7), sky (8), noisy specular out (9),
-  // restir initial sample + primary position (10..13); set 1 bindless.
+  // restir initial sample + primary position (10..13), camera matrices (17);
+  // set 1 bindless.
   gbuffer_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_recon_gbuffer_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
@@ -170,9 +184,10 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {13, BindingType::kStorageImage},
                           {14, BindingType::kStorageImage},
                           {15, BindingType::kStorageImage},
-                          {16, BindingType::kStorageImage}}},
+                          {16, BindingType::kStorageImage},
+                          {17, BindingType::kUniformBuffer}}},
                {.shared = bindless_layout}},
-      .push_constant_size = sizeof(GbufferPush),
+      .push_constant_size = PushSize<GbufferPush>(),
       .debug_name = "recon_gbuffer",
   });
 
@@ -195,7 +210,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {14, BindingType::kSampledImage},
                           {15, BindingType::kSampledImage},
                           {16, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(RestirTemporalPush),
+      .push_constant_size = PushSize<RestirTemporalPush>(),
       .debug_name = "recon_restir_temporal",
   });
 
@@ -214,7 +229,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {10, BindingType::kStorageImage},
                           {11, BindingType::kStorageImage},
                           {12, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(RestirSpatialPush),
+      .push_constant_size = PushSize<RestirSpatialPush>(),
       .debug_name = "recon_restir_spatial",
   });
 
@@ -239,7 +254,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {16, BindingType::kStorageImage},
                           {17, BindingType::kSampledImage},
                           {18, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(RestirDiTemporalPush),
+      .push_constant_size = PushSize<RestirDiTemporalPush>(),
       .debug_name = "recon_restir_di_temporal",
   });
 
@@ -247,7 +262,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
       .shader = RX_SHADER(k_recon_sky_cdf_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler},
                           {1, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(SkyCdfPush),
+      .push_constant_size = PushSize<SkyCdfPush>(),
       .debug_name = "recon_sky_cdf",
   });
 
@@ -271,7 +286,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {15, BindingType::kStorageImage},
                           {16, BindingType::kStorageImage}}},
                {.shared = bindless_layout}},
-      .push_constant_size = sizeof(RestirDiSpatialPush),
+      .push_constant_size = PushSize<RestirDiSpatialPush>(),
       .debug_name = "recon_restir_di_spatial",
   });
 
@@ -290,7 +305,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {10, BindingType::kSampledImage},
                           {11, BindingType::kSampledImage},
                           {12, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(TemporalPush),
+      .push_constant_size = PushSize<TemporalPush>(),
       .debug_name = "recon_temporal",
   });
 
@@ -301,7 +316,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kSampledImage},
                           {4, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(AtrousPush),
+      .push_constant_size = PushSize<AtrousPush>(),
       .debug_name = "recon_atrous",
   });
 
@@ -311,8 +326,9 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kSampledImage},
-                          {4, BindingType::kAccelStruct}}}},
-      .push_constant_size = sizeof(FogPush),
+                          {4, BindingType::kAccelStruct},
+                          {5, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<FogPush>(),
       .debug_name = "recon_fog",
   });
 
@@ -327,7 +343,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {6, BindingType::kSampledImage},
                           {7, BindingType::kSampledImage},
                           {8, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(CompositePush),
+      .push_constant_size = PushSize<CompositePush>(),
       .debug_name = "recon_composite",
   });
 
@@ -411,6 +427,10 @@ void ReconPathTracer::Destroy(Device& device) {
   if (sky_cdf_) {
     device.DestroyBuffer(sky_cdf_);
     sky_cdf_ = {};
+  }
+  for (GpuBuffer& camera : camera_) {
+    if (camera) device.DestroyBuffer(camera);
+    camera = {};
   }
   for (PipelineHandle* p :
        {&gbuffer_pipeline_, &temporal_pipeline_, &atrous_pipeline_, &composite_pipeline_,
@@ -518,6 +538,11 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
 
   u32 cur = frame.frame_index & 1u;
   u32 prv = 1u - cur;
+  // Written once here rather than per pass: the gbuffer and fog passes read the
+  // same matrices, and this frame's copy must not disturb the one the previous
+  // in-flight frame is still reading.
+  const ReconCamera camera{frame.inv_view_proj, frame.view_proj, frame.prev_view_proj};
+  std::memcpy(camera_[cur].mapped, &camera, sizeof(camera));
   auto imp = [&](const char* name, PingPong& pp, u32 i) {
     return graph.ImportImage(name, pp.image[i], &pp.state[i]);
   };
@@ -584,7 +609,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
       },
       [this, &raytracing, tlas_slot, bindless_set, sky_view, sky_sampler, gbuf_irr, nr_c, vz_c,
        motion, id_c, albedo, emissive, spec_noisy, s_pos, s_nrm, s_rad, p_pos, spec_albedo,
-       rr_normals, rr_depth, rr, di, frame](PassContext& ctx) {
+       rr_normals, rr_depth, rr, di, cur, frame](PassContext& ctx) {
         ResourceHandle outs[7] = {gbuf_irr, nr_c, vz_c, motion, id_c, albedo, emissive};
         base::Vector<BindingItem> items;
         for (u32 i = 0; i < 7; ++i) items.push_back(Bind::Storage(i, ctx.graph->image(outs[i])));
@@ -598,11 +623,9 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         items.push_back(Bind::Storage(14, ctx.graph->image(spec_albedo)));
         items.push_back(Bind::Storage(15, ctx.graph->image(rr_normals)));
         items.push_back(Bind::Storage(16, ctx.graph->image(rr_depth)));
+        items.push_back(Bind::Uniform(17, camera_[cur], 0, sizeof(ReconCamera)));
 
         GbufferPush p{};
-        p.inv_view_proj = frame.inv_view_proj;
-        p.view_proj = frame.view_proj;
-        p.prev_view_proj = frame.prev_view_proj;
         p.camera_pos[0] = frame.camera_pos.x; p.camera_pos[1] = frame.camera_pos.y;
         p.camera_pos[2] = frame.camera_pos.z;
         Vec3 sun = Normalize(frame.sun_direction);
@@ -613,8 +636,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         p.spp = frame.spp < 1 ? 1u : frame.spp;
         p.pixel_spread = frame.pixel_spread;
         p.frame_index = frame.frame_index;
-        // bits 0..7 bounce count, bit 8 restir, bit 9 rr guides (the push
-        // block is at the 256 B cap).
+        // bits 0..7 bounce count, bit 8 restir, bit 9 rr guides, bit 10 restir di.
         p.bounces = (bounces_ & 0xffu) | (frame.restir ? 0x100u : 0u) | (rr ? 0x200u : 0u) |
                     (di ? 0x400u : 0u);
         ctx.cmd->BindPipeline(gbuffer_pipeline_);
@@ -857,16 +879,16 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           for (ResourceHandle h : {fog_p, p_pos, motion})
             b.Read(h, ResourceUsage::kSampledCompute);
         },
-        [this, &raytracing, tlas_slot, fog_c, fog_p, p_pos, motion, frame](PassContext& ctx) {
+        [this, &raytracing, tlas_slot, fog_c, fog_p, p_pos, motion, cur, frame](PassContext& ctx) {
           base::Vector<BindingItem> items;
           items.push_back(Bind::Storage(0, ctx.graph->image(fog_c)));
           items.push_back(Bind::Sampled(1, ctx.graph->image(fog_p)));
           items.push_back(Bind::Sampled(2, ctx.graph->image(p_pos)));
           items.push_back(Bind::Sampled(3, ctx.graph->image(motion)));
           items.push_back(Bind::Accel(4, raytracing.tlas(tlas_slot)));
+          items.push_back(Bind::Uniform(5, camera_[cur], 0, sizeof(ReconCamera)));
 
           FogPush p{};
-          p.inv_view_proj = frame.inv_view_proj;
           p.camera_pos[0] = frame.camera_pos.x; p.camera_pos[1] = frame.camera_pos.y;
           p.camera_pos[2] = frame.camera_pos.z;
           Vec3 sun = Normalize(frame.sun_direction);

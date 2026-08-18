@@ -85,7 +85,7 @@ int TestNamedTargets() {
   std::fwrite(kNamedTargetsGltf, 1, sizeof(kNamedTargetsGltf) - 1, file);
   std::fclose(file);
 
-  asset::GltfScene scene;
+  asset::ImportedScene scene;
   bool loaded = asset::LoadGltfScene(path.string(), &scene);
   std::filesystem::remove(path);
   if (!loaded || scene.meshes.size() != 1) return Fail("generated gltf did not load");
@@ -121,7 +121,7 @@ int TestNamedTargets() {
 }
 
 int TestAnimatedMorphCube(const char* path) {
-  asset::GltfScene scene;
+  asset::ImportedScene scene;
   if (!asset::LoadGltfScene(path, &scene)) return Fail("AnimatedMorphCube did not load");
 
   const asset::Mesh* cube = nullptr;
@@ -181,7 +181,7 @@ int TestGpuEvaluation(const char* path) {
     }
   }
 
-  asset::GltfScene scene;
+  asset::ImportedScene scene;
   if (!asset::LoadGltfScene(path, &scene)) return Fail("AnimatedMorphCube did not load");
   const asset::Mesh& mesh = scene.meshes[0];
   const asset::MeshLod& lod = mesh.lods[0];

@@ -126,6 +126,13 @@ install(FILES ${_vma_root}/vk_mem_alloc.h DESTINATION ${RX_DEPS_INCDIR}/vma)
 
 # PRIVATE static deps: consumers need the archive at final link, never headers.
 _rx_bundle_archive(kinema)
+# rx_asset and rx_render call into it (and so does tinyusdz), so it has to reach
+# the consumer's final link even though its headers never do.
+_rx_bundle_archive(rx_stb_impl)
+if(RX_USD)
+  set(RX_INSTALL_USD ON)
+  _rx_bundle_archive(tinyusdz_static)
+endif()
 if(RX_INSTALL_JOLT)
   _rx_bundle_archive(Jolt)
 endif()
@@ -147,7 +154,7 @@ endif()
 
 # Normalize the feature flags (set as ON by the module CMakeLists only when the
 # feature is built) so the generated rxConfig.cmake always sees ON/OFF.
-foreach(_flag FSR3 DLSS NRD JOLT RHI_D3D12 WAYLAND_KDE_HDR SDL3)
+foreach(_flag FSR3 DLSS NRD JOLT USD RHI_D3D12 WAYLAND_KDE_HDR SDL3)
   if(NOT DEFINED RX_INSTALL_${_flag})
     set(RX_INSTALL_${_flag} OFF)
   endif()

@@ -30,7 +30,7 @@ std::unique_ptr<UiBlurPass> UiBlurPass::Create(Device& device) {
       .blend = {BlendMode::kOpaque},
       .sets = {{.slots = {{0, BindingType::kCombinedTextureSampler}},
                 .stages = kShaderStageFragment}},
-      .push_constant_size = sizeof(BlurPush),
+      .push_constant_size = PushSize<BlurPush>(),
       .debug_name = "ui_blur",
   });
   if (!pass->pipeline_) {

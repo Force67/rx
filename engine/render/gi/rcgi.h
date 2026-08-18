@@ -234,6 +234,7 @@ class RcgiSystem {
   GpuBuffer active_meta_; // [0] = active count
   GpuBuffer dispatch_args_;      // indirect args for cache shade
   GpuBuffer globals_buffers_[2]; // host visible, ping-pong by frame parity
+  GpuBuffer gather_camera_[2];   // gather matrices, too big for the push block
   GpuBuffer probe_meta_;         // uint2 per (cascade, probe): packed reloc offset + flags
   GpuBuffer interior_volumes_[2];  // frame-parity: 2 float4 (min,max) per volume
   u32 interior_volume_count_ = 0;

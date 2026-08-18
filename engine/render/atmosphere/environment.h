@@ -48,6 +48,17 @@ class EnvironmentSystem {
   void RecordUpdate(CommandList& cmd, const Vec3& sun_direction, f32 sun_intensity,
                     const Vec3& sun_color, f32 aurora_intensity, f32 time_seconds);
 
+  // Replaces the procedural atmosphere with an authored equirectangular HDR as
+  // the source of the sky cubemap, and therefore of the IBL convolutions. This
+  // is what a UsdLux DomeLight is: a scene's own sky, which the procedural
+  // model cannot reproduce (the Attic's is a photographed environment). `rgba`
+  // is `width * height` linear float4 texels, row major, +y at the top row.
+  // Returns false if the upload fails; the procedural sky then stays in use.
+  bool SetEnvironmentMap(const f32* rgba, u32 width, u32 height, const Vec3& tint,
+                         f32 intensity, f32 rotation_radians);
+  void ClearEnvironmentMap();
+  bool has_environment_map() const { return has_envmap_; }
+
   // Fullscreen sky at the far plane; call inside the scene rendering pass.
   void DrawSky(CommandList& cmd, BindingSetHandle globals);
 
@@ -124,6 +135,8 @@ class EnvironmentSystem {
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}
 
+  void RecordConvolutions(CommandList& cmd, ResourceState conv_old);
+
   bool CreatePipelines();
   bool CreateImages();
   bool CreateDummies();
@@ -135,6 +148,13 @@ class EnvironmentSystem {
   SamplerHandle shadow_sampler_;  // comparison sampler for cascades
 
   GpuImage sky_;         // rgba16f cube
+  // Authored sky: an equirect HDR that replaces the procedural atmosphere as
+  // the cubemap's source (see SetEnvironmentMap).
+  GpuImage envmap_;
+  bool has_envmap_ = false;
+  Vec3 envmap_tint_{1.0f, 1.0f, 1.0f};
+  f32 envmap_intensity_ = 1.0f;
+  f32 envmap_rotation_ = 0.0f;
   GpuImage irradiance_;  // rgba16f cube
   GpuImage prefiltered_; // rgba16f cube, kPrefilterMips
   GpuImage brdf_lut_;    // rg16f
@@ -152,6 +172,9 @@ class EnvironmentSystem {
   GpuImage black_;         // 1x1 zero, restir-di / vt dummies
   SamplerHandle point_sampler_;  // nearest+mips, virtual-texture indirection
   SamplerHandle wrap_sampler_;   // repeat, fft-ocean tiles
+  // Equirect env maps: longitude is periodic and must repeat or a seam
+  // shows where u crosses 0/1; latitude clamps at the poles.
+  SamplerHandle envmap_sampler_;
   // LTC fit tables for GGX area lights (64x64 RGBA16F, uploaded once).
   GpuImage ltc_matrix_;
   GpuImage ltc_amplitude_;
@@ -160,6 +183,7 @@ class EnvironmentSystem {
   GpuBuffer dummy_storage_;  // storage-usage fallback for the SB slots
 
   PipelineHandle sky_gen_;
+  PipelineHandle envmap_gen_;
   PipelineHandle irradiance_gen_;
   PipelineHandle prefilter_gen_;
   PipelineHandle brdf_gen_;

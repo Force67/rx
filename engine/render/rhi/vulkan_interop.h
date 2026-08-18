@@ -41,6 +41,22 @@ inline VkCommandBuffer GetVkCommandBuffer(CommandList& cmd) {
   return static_cast<VkCommandBuffer>(cmd.native_handle());
 }
 
+// Commands Vulkan promoted into 1.2 / 1.3 core. rx drives adapters as low as
+// 1.1, where only the KHR original exists and volk leaves the core symbol null,
+// so every call goes through this table instead of the core name. Filled once
+// at device creation from the version the device was actually created at; all
+// null before that and on other backends.
+struct VulkanEntryPoints {
+  PFN_vkCmdBeginRendering cmd_begin_rendering = nullptr;
+  PFN_vkCmdEndRendering cmd_end_rendering = nullptr;
+  PFN_vkCmdPipelineBarrier2 cmd_pipeline_barrier2 = nullptr;
+  PFN_vkQueueSubmit2 queue_submit2 = nullptr;
+  PFN_vkGetBufferDeviceAddress get_buffer_device_address = nullptr;
+  PFN_vkCmdDrawIndirectCount cmd_draw_indirect_count = nullptr;
+  PFN_vkCmdDrawIndexedIndirectCount cmd_draw_indexed_indirect_count = nullptr;
+};
+RX_RENDER_EXPORT const VulkanEntryPoints& VulkanApi();
+
 // Raw handles behind rhi resources, for handing to api-specific SDKs.
 RX_RENDER_EXPORT VkImage GetVkImage(const GpuImage& image);
 RX_RENDER_EXPORT VkImageView GetVkImageView(TextureView view);

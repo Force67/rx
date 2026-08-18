@@ -1,5 +1,7 @@
 #include "render/atmosphere/clouds.h"
 
+#include <cstring>
+
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "shaders/clouds_cs_hlsl.h"
@@ -7,8 +9,13 @@
 namespace rx::render {
 namespace {
 
-struct CloudPush {
+// Half of the 128 bytes vulkan guarantees for a push block would go to this one
+// matrix, so it rides in a per-frame uniform buffer and the push keeps the
+// scalars.
+struct CloudCamera {
   Mat4 inv_view_proj;
+};
+struct CloudPush {
   f32 camera_pos[4];     // xyz eye, w time
   f32 sun_direction[4];  // xyz travel dir, w intensity
   f32 sun_color[4];      // rgb, w coverage
@@ -27,13 +34,20 @@ bool Clouds::Initialize(Device& device) {
       .shader = RX_SHADER(k_clouds_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
-                          {2, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(CloudPush),
+                          {2, BindingType::kSampledImage},
+                          {3, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<CloudPush>(),
       .debug_name = "clouds",
   });
   if (!pipeline_) {
     RX_ERROR("clouds pipeline creation failed");
     return false;
+  }
+  // One per in-flight frame: the pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(CloudCamera), kBufferUsageUniform, true);
+    if (!camera.mapped) return false;
   }
   return true;
 }
@@ -41,6 +55,10 @@ bool Clouds::Initialize(Device& device) {
 void Clouds::Destroy(Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
+  for (GpuBuffer& camera : camera_) {
+    if (camera) device.DestroyBuffer(camera);
+    camera = {};
+  }
 }
 
 ResourceHandle Clouds::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
@@ -49,6 +67,8 @@ ResourceHandle Clouds::AddToGraph(RenderGraph& graph, ResourceHandle color, Reso
                                             .format = Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
+  uniform_slot_ ^= 1;
+  const u32 slot = uniform_slot_;
   graph.AddPass(
       "clouds",
       [&](RenderGraph::PassBuilder& builder) {
@@ -56,9 +76,11 @@ ResourceHandle Clouds::AddToGraph(RenderGraph& graph, ResourceHandle color, Reso
         builder.Read(depth, ResourceUsage::kSampledCompute);
         builder.Write(out, ResourceUsage::kStorageWrite);
       },
-      [this, color, depth, out, extent, frame](PassContext& ctx) {
+      [this, color, depth, out, extent, frame, slot](PassContext& ctx) {
+        const CloudCamera camera{frame.inv_view_proj};
+        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+
         CloudPush push{};
-        push.inv_view_proj = frame.inv_view_proj;
         push.camera_pos[0] = frame.camera_pos.x;
         push.camera_pos[1] = frame.camera_pos.y;
         push.camera_pos[2] = frame.camera_pos.z;
@@ -85,7 +107,8 @@ ResourceHandle Clouds::AddToGraph(RenderGraph& graph, ResourceHandle color, Reso
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
                                    Bind::Sampled(1, ctx.graph->image(color)),
-                                   Bind::Sampled(2, ctx.graph->image(depth))});
+                                   Bind::Sampled(2, ctx.graph->image(depth)),
+                                   Bind::Uniform(3, camera_[slot], 0, sizeof(CloudCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

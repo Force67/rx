@@ -62,7 +62,7 @@ bool CloudscapeTextures::Initialize(Device& device) {
   weather_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_cloudscape_weather_map_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage}}}},
-      .push_constant_size = sizeof(WeatherPush),
+      .push_constant_size = PushSize<WeatherPush>(),
       .debug_name = "cloudscape_weather_map",
   });
   if (!base_noise_pipeline_ || !detail_noise_pipeline_ || !curl_pipeline_ || !weather_pipeline_) {

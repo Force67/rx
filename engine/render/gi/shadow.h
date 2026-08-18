@@ -5,6 +5,7 @@
 
 #include "core/math.h"
 #include "render/rhi/device.h"
+#include "render/pipeline/mesh_pipeline.h"
 
 namespace rx::render {
 
@@ -21,6 +22,29 @@ class ShadowPass {
   // D16 is enough for the tightened per-cascade ortho ranges and halves the
   // atlas bandwidth; the graph texture and the pipelines must agree.
   static constexpr Format kAtlasFormat = Format::kD16Unorm;
+
+  // Mirrors PushData in shadow.vs. The per-draw model matrix lives in the
+  // frame's DrawRecord arena (set 1) instead of the push range, which is what
+  // brings the block under the 128 bytes vulkan guarantees. Every writer pokes
+  // its own slice rather than pushing the whole struct - the per-draw head once
+  // per caster, light_view_proj once per cascade / cube face - so the field
+  // order is a cross-backend contract: the d3d12 backend binds the t998
+  // bone-palette root SRV from the address at kPushBdaBoneOffset.
+  struct Push {
+    u32 draw_index = kNoDrawRecord;  // this caster's record in the frame arena
+    u32 skin_offset = 0;   // first bone of this mesh, skinned permutation only
+    u64 bone_address = 0;  // frame bone palette, 0 = static caster
+    Mat4 light_view_proj;
+  };
+  // The head every caster rewrites; light_view_proj outlives it.
+  struct DrawPush {
+    u32 draw_index = 0;
+    u32 skin_offset = 0;
+    u64 bone_address = 0;
+  };
+  static constexpr u32 kLightMatrixOffset = sizeof(DrawPush);
+  // Set 1 of every caster pipeline: the frame's per-draw transform arena.
+  static constexpr u32 kDrawRecordSet = 1;
 
   // Mirrors CascadeData in mesh.ps; 4 light matrices then two param vectors.
   struct CascadeData {

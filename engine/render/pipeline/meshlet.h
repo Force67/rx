@@ -76,6 +76,7 @@ class MeshletPass {
   GpuBuffer meshlet_triangles_;
   GpuBuffer vertices_;
   GpuBuffer counters_[kFramesInFlight];  // host-visible visible-meshlet counter
+  GpuBuffer camera_[kFramesInFlight];    // view_proj, too big for the push block
   u32 meshlet_count_ = 0;
 };
 

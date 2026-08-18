@@ -24,7 +24,7 @@ bool LightGrid::Initialize(Device& device) {
                           {1, BindingType::kStorageBuffer},
                           {2, BindingType::kStorageBuffer},
                           {3, BindingType::kUniformBuffer}}}},
-      .push_constant_size = sizeof(LightGridPush),
+      .push_constant_size = PushSize<LightGridPush>(),
       .debug_name = "light_grid",
   });
   if (!pipeline_) return false;

@@ -31,9 +31,14 @@ struct MVertex {
 [[vk::binding(2, 0)]] StructuredBuffer<uint> meshlet_triangles : register(t2, space0);
 [[vk::binding(3, 0)]] StructuredBuffer<MVertex> vertices : register(t3, space0);
 [[vk::binding(4, 0)]] RWStructuredBuffer<uint> visible_counter : register(u4, space0);
+// view_proj lives here because the frustum planes leave no room for it in the
+// push block.
+struct LegacyCamera {
+  column_major float4x4 view_proj;
+};
+[[vk::binding(5, 0)]] ConstantBuffer<LegacyCamera> cam : register(b5, space0);
 
 struct PushData {
-  column_major float4x4 view_proj;
   float4 planes[5];
   float4 camera;       // xyz eye, w proj_scale (px per world unit at d = 1)
   float error_pixels;  // tau
@@ -87,7 +92,7 @@ void main(uint3 gid : SV_GroupID, uint tid : SV_GroupIndex,
     uint vid = meshlet_vertices[m.vertex_offset + v];
     MVertex mv = vertices[vid];
     VsOut o;
-    o.pos = mul(push.view_proj, float4(mv.px, mv.py, mv.pz, 1.0));
+    o.pos = mul(cam.view_proj, float4(mv.px, mv.py, mv.pz, 1.0));
     o.normal = float3(mv.nx, mv.ny, mv.nz);
     o.meshlet = mi;
     verts[v] = o;

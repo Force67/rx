@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <initializer_list>
 
@@ -17,6 +18,11 @@ namespace {
 
 Vec3 Add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 Vec3 Mul(const Vec3& v, f32 s) { return {v.x * s, v.y * s, v.z * s}; }
+
+static_assert(offsetof(ShadowPass::Push, bone_address) == kPushBdaBoneOffset,
+              "d3d12 binds the bone palette root SRV from this offset");
+static_assert(offsetof(ShadowPass::Push, light_view_proj) == ShadowPass::kLightMatrixOffset,
+              "the per-cascade matrix push offset must follow the per-draw head");
 
 }  // namespace
 
@@ -60,8 +66,13 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout,
                   .format = depth_format,
                   .bias_constant = 1.25f,
                   .bias_slope = 2.0f},
-        .sets = {{.shared = material_layout}},  // set 0: alpha-test inputs
-        .push_constant_size = 2 * sizeof(Mat4) + 16,
+        // set 0: alpha-test inputs. set 1: the frame's per-draw transform
+        // arena, which the vertex stage indexes with the pushed record.
+        .sets = {{.shared = material_layout},
+                 {.slots = {{0, BindingType::kStorageBuffer}},
+                  .stages = kShaderStageVertex}},
+        .push_constant_size = PushSize<ShadowPass::Push>(),
+        .push_bda = PushBdaHeader::kBones,
         .debug_name = name,
     };
     desc.vertex_buffers.push_back(position_stream);
@@ -206,14 +217,15 @@ void ShadowPass::Render(CommandList& cmd, TextureView atlas_view,
   // Push constants resolve against the bound pipeline, so bind the static
   // permutation up front; the draw callback binds pipeline()/skinned_pipeline()
   // per mesh and both share the same push/set interface, so the per-cascade
-  // light matrix push below stays valid.
+  // light matrix push below stays valid across them (the callback only rewrites
+  // the per-draw head beneath it).
   cmd.BindPipeline(pipeline_);
 
   for (u32 i = 0; i < settings_.cascade_count; ++i) {
     cmd.BindPipeline(pipeline_);
     cmd.SetViewport(static_cast<f32>(i * res), 0.0f, static_cast<f32>(res), static_cast<f32>(res));
     cmd.SetScissor(static_cast<i32>(i * res), 0, res, res);
-    cmd.PushConstants(&current_.light_view_proj[i], sizeof(Mat4));
+    cmd.PushConstants(&current_.light_view_proj[i], sizeof(Mat4), kLightMatrixOffset);
     draw(cmd, current_.light_view_proj[i]);
   }
   cmd.EndRendering();

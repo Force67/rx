@@ -152,6 +152,7 @@ class VirtualGeometryPass {
   GpuBuffer args_;
   GpuBuffer readback_[kFramesInFlight];
   GpuBuffer legacy_counters_[kFramesInFlight];
+  GpuBuffer legacy_camera_[kFramesInFlight];  // view_proj, too big for the push block
   GpuBuffer visbuffer_;
   GpuImage dummy_hiz_;
   GpuImage albedo_;

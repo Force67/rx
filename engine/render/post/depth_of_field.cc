@@ -38,7 +38,7 @@ bool DepthOfFieldPass::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(CocPush),
+      .push_constant_size = PushSize<CocPush>(),
       .debug_name = "dof_coc",
   });
   gather_pipeline_ = device.CreateComputePipeline({
@@ -46,7 +46,7 @@ bool DepthOfFieldPass::Initialize(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kCombinedTextureSampler},
                           {2, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(GatherPush),
+      .push_constant_size = PushSize<GatherPush>(),
       .debug_name = "dof_gather",
   });
   composite_pipeline_ = device.CreateComputePipeline({
@@ -55,7 +55,7 @@ bool DepthOfFieldPass::Initialize(Device& device) {
                           {1, BindingType::kSampledImage},
                           {2, BindingType::kCombinedTextureSampler},
                           {3, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(CompositePush),
+      .push_constant_size = PushSize<CompositePush>(),
       .debug_name = "dof_composite",
   });
   if (!coc_pipeline_ || !gather_pipeline_ || !composite_pipeline_) {

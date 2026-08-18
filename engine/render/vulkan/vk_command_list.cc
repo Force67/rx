@@ -85,13 +85,13 @@ void VulkanCommandList::BeginRendering(const RenderingInfo& info) {
   rendering.colorAttachmentCount = static_cast<u32>(info.colors.size());
   rendering.pColorAttachments = colors;
   rendering.pDepthAttachment = info.depth ? &depth : nullptr;
-  vkCmdBeginRendering(cmd_, &rendering);
+  VulkanApi().cmd_begin_rendering(cmd_, &rendering);
 
   SetViewport(0, 0, static_cast<f32>(info.extent.width), static_cast<f32>(info.extent.height));
   SetScissor(0, 0, info.extent.width, info.extent.height);
 }
 
-void VulkanCommandList::EndRendering() { vkCmdEndRendering(cmd_); }
+void VulkanCommandList::EndRendering() { VulkanApi().cmd_end_rendering(cmd_); }
 
 void VulkanCommandList::SetViewport(f32 x, f32 y, f32 width, f32 height) {
   VkViewport viewport{x, y, width, height, 0.0f, 1.0f};
@@ -131,16 +131,17 @@ void VulkanCommandList::DrawIndexedIndirect(const GpuBuffer& args, u64 offset, u
 void VulkanCommandList::DrawIndirectCount(const GpuBuffer& args, u64 offset,
                                           const GpuBuffer& count_buffer, u64 count_offset,
                                           u32 max_draw_count, u32 stride) {
-  vkCmdDrawIndirectCount(cmd_, Rec(args.handle)->buffer, offset, Rec(count_buffer.handle)->buffer,
-                         count_offset, max_draw_count, stride);
+  VulkanApi().cmd_draw_indirect_count(cmd_, Rec(args.handle)->buffer, offset,
+                                      Rec(count_buffer.handle)->buffer, count_offset,
+                                      max_draw_count, stride);
 }
 
 void VulkanCommandList::DrawIndexedIndirectCount(const GpuBuffer& args, u64 offset,
                                                  const GpuBuffer& count_buffer, u64 count_offset,
                                                  u32 max_draw_count, u32 stride) {
-  vkCmdDrawIndexedIndirectCount(cmd_, Rec(args.handle)->buffer, offset,
-                                Rec(count_buffer.handle)->buffer, count_offset, max_draw_count,
-                                stride);
+  VulkanApi().cmd_draw_indexed_indirect_count(cmd_, Rec(args.handle)->buffer, offset,
+                                              Rec(count_buffer.handle)->buffer, count_offset,
+                                              max_draw_count, stride);
 }
 
 void VulkanCommandList::DrawMeshTasks(u32 x, u32 y, u32 z) {
@@ -221,7 +222,7 @@ void VulkanCommandList::TextureBarriers(std::span<const TextureBarrier> barriers
     VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
     dep.imageMemoryBarrierCount = static_cast<u32>(batch);
     dep.pImageMemoryBarriers = image_barriers;
-    vkCmdPipelineBarrier2(cmd_, &dep);
+    VulkanApi().cmd_pipeline_barrier2(cmd_, &dep);
     offset += batch;
   }
 }
@@ -237,7 +238,7 @@ void VulkanCommandList::MemoryBarrier(BarrierScope src, BarrierScope dst) {
   VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
   dep.memoryBarrierCount = 1;
   dep.pMemoryBarriers = &barrier;
-  vkCmdPipelineBarrier2(cmd_, &dep);
+  VulkanApi().cmd_pipeline_barrier2(cmd_, &dep);
 }
 
 void VulkanCommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
@@ -453,7 +454,7 @@ void VulkanCommandList::QueryCompactedSizes(AccelCompactionQueryHandle query,
   VkDependencyInfo dep{.sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
   dep.memoryBarrierCount = 1;
   dep.pMemoryBarriers = &mem;
-  vkCmdPipelineBarrier2(cmd_, &dep);
+  VulkanApi().cmd_pipeline_barrier2(cmd_, &dep);
 
   // Queries must be reset before they are written; re-resettable each frame.
   vkCmdResetQueryPool(cmd_, record->pool, 0, count);

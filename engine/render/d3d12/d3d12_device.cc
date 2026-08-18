@@ -286,6 +286,10 @@ std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* wind
   device->caps_.max_anisotropy = 16.0f;
   device->caps_.debug_utils = false;
   device->caps_.accel_scratch_alignment = 256;
+  // D3D12 has no push-constant ceiling to report: blocks past
+  // kMaxRootConstantBytes spill into the per-frame upload ring behind a root
+  // CBV, so the real bound is the 64 KiB a constant buffer can hold.
+  device->caps_.max_push_constant_bytes = 64 * 1024;
 
 #if defined(_WIN32)
   IDXGIFactory4* factory = nullptr;
@@ -1110,8 +1114,9 @@ ID3D12RootSignature* D3D12Device::GetOrCreateRootSignature(std::span<SetLayout* 
   // Push-block buffer-device-address emulation: root SRVs at (t998, space0)
   // for the skinned bone palette and (t997/t996, space0) for the morph target
   // deltas/weights. Shaders that do not declare them simply leave the
-  // parameters unused; the command list binds them from the addresses at push
-  // bytes 128 (bones) and 160/168 (morphs) when the push block carries them.
+  // parameters unused; the command list binds them from the RX_BDA header
+  // offsets of the push blocks that declare one (GraphicsPipelineDesc::
+  // push_bda).
   auto add_bda_param = [&](u32 shader_register) {
     D3D12_ROOT_PARAMETER param = {};
     param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_SRV;
@@ -1646,11 +1651,11 @@ PipelineHandle D3D12Device::CreateGraphicsPipeline(const GraphicsPipelineDesc& d
     delete record;
     return {};
   }
-  if (!uses_bone_palette) record->bda_param = -1;
-  // The morph root SRVs only apply to the raster mesh pipelines, identified by
-  // their push block (sizeof(MeshPushConstants), the only 192-byte one). Other
-  // pipelines leave them unbound for the same garbage-address reason.
-  if (desc.push_constant_size != 192) {
+  if (!uses_bone_palette || desc.push_bda == PushBdaHeader::kNone) record->bda_param = -1;
+  // The morph root SRVs only apply to the raster mesh push block. Every other
+  // pipeline leaves them unbound: whatever sits at those bytes is not an
+  // address, and binding a root SRV to it faults the GPU.
+  if (desc.push_bda != PushBdaHeader::kMeshDraw) {
     record->morph_delta_param = -1;
     record->morph_weight_param = -1;
   }

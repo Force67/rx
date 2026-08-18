@@ -21,24 +21,30 @@ struct FrameGlobals {
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 [[vk::binding(2, 0)]] Texture2D<float> hiz : register(t2, space0);  // last frame's coarse farthest-depth pyramid
 
+// Mirrors render::MeshShaderPush. draw_index / tint_packed lead the block
+// because the fragment stage shares this push range with the raster path and
+// reads them at those offsets (render::MeshPushConstants agrees).
 struct PushData {
-  column_major float4x4 model;
-  column_major float4x4 prev_model;
-  // Mirrors MeshPushConstants' head: the fragment stage shares this range and
-  // reads the tint / decal-tile word at byte 140.
-  uint2 pad_bone;
-  uint pad_skin;
+  uint draw_index;
   uint tint_packed;
+  uint meshlet_offset;              // first meshlet of this (lod,submesh)
+  uint meshlet_count;               // meshlet count of this (lod,submesh)
   float4 bounds;      // xyz model-space instance center, w radius (instance cull)
   float4 occlusion;   // proj.m00, proj.m11, hiz width, hiz height (hiz w == 0 disables)
   uint64_t meshlets_addr;
   uint64_t meshlet_vertices_addr;
   uint64_t meshlet_triangles_addr;
   uint64_t vertices_addr;
-  uint meshlet_offset;
-  uint meshlet_count;
 };
 PUSH_CONSTANTS(PushData, push);
+
+// Mirrors render::DrawRecord: the transforms the push range used to carry.
+// The pushed index is flat, as in mesh.vs.
+struct DrawRecord {
+  column_major float4x4 model;
+  column_major float4x4 prev_model;
+};
+[[vk::binding(3, 0)]] StructuredBuffer<DrawRecord> draw_records : register(t3, space0);
 
 struct MeshPayload {
   uint meshlet[32];
@@ -72,12 +78,12 @@ bool OutsideFrustum(float4 pl[5], float3 c, float r) {
 // pyramid: project the world bounds, compare the nearest point against the
 // farthest occluder over its (small) screen footprint. Ports cull.cs. Only
 // small footprints are tested (the coarse hi-z cannot bound large objects).
-bool InstanceOccluded(float3 mcenter, float mradius) {
+bool InstanceOccluded(float4x4 model, float3 mcenter, float mradius) {
   if (push.occlusion.z < 1.0) return false;  // hi-z unavailable / disabled
-  float3 center = mul(push.model, float4(mcenter, 1.0)).xyz;
-  float sx = length(push.model[0].xyz);
-  float sy = length(push.model[1].xyz);
-  float sz = length(push.model[2].xyz);
+  float3 center = mul(model, float4(mcenter, 1.0)).xyz;
+  float sx = length(model[0].xyz);
+  float sy = length(model[1].xyz);
+  float sz = length(model[2].xyz);
   float radius = mradius * max(sx, max(sy, sz));
   float4 cc = mul(frame.prev_view_proj, float4(center, 1.0));
   if (cc.w <= 1e-4) return false;
@@ -110,11 +116,12 @@ void main(uint3 dtid : SV_DispatchThreadID, uint gtid : SV_GroupIndex) {
   GroupMemoryBarrierWithGroupSync();
 
   // Model-space frustum planes from view_proj*model; instance cull is uniform.
-  float4x4 mvp = mul(frame.view_proj, push.model);
+  const float4x4 model = draw_records[push.draw_index].model;
+  float4x4 mvp = mul(frame.view_proj, model);
   float4 planes[5];
   FrustumPlanes(mvp, planes);
   bool instance_out = OutsideFrustum(planes, push.bounds.xyz, push.bounds.w) ||
-                      InstanceOccluded(push.bounds.xyz, push.bounds.w);
+                      InstanceOccluded(model, push.bounds.xyz, push.bounds.w);
 
   uint local = dtid.x;
   bool emit = false;
@@ -127,8 +134,8 @@ void main(uint3 dtid : SV_DispatchThreadID, uint gtid : SV_GroupIndex) {
     float3 cone = float3(LoadF(mb, 16), LoadF(mb, 20), LoadF(mb, 24));
     float cutoff = LoadF(mb, 28);
     bool culled = OutsideFrustum(planes, center, radius);
-    float3 world_center = mul(push.model, float4(center, 1.0)).xyz;
-    float3 world_axis = normalize(mul((float3x3)push.model, cone));
+    float3 world_center = mul(model, float4(center, 1.0)).xyz;
+    float3 world_axis = normalize(mul((float3x3)model, cone));
     float3 view_dir = normalize(world_center - frame.camera_position.xyz);
     if (dot(view_dir, world_axis) >= cutoff) culled = true;
     emit = !culled;

@@ -18,14 +18,20 @@
 #include "physics/physics_world.h"
 #include "render/core/presets.h"
 #include "render/core/renderer.h"
+#include "asset/usd_loader.h"
 
 namespace rx {
 
 // The viewer's boot configuration: the app::AppConfig fields plus the
 // front-door content selection (main.cc maps the overlap into AppConfig).
 struct EngineConfig {
-  std::string gltf_path;   // standalone gltf/glb scene (e.g. sponza)
+  std::string scene_path;  // standalone gltf/glb or usd scene (e.g. sponza)
   std::string demo_scene;  // builtin demo scene id ("water", "materials", ...)
+  // Prim paths whose authored `visibility` is overridden when loading a usd
+  // stage. Scenes ship alternative configurations (day/night lighting rigs,
+  // set dressing variants) toggled by visibility, and picking one is a
+  // viewing decision, not an edit to the stage.
+  asset::UsdLoadOptions usd_visibility;
   render::RendererDesc renderer;
   // Hardware quality tier. kAuto picks one from the gpu at startup; the rest
   // force a tier (steam deck, android, low/medium/high/ultra, console).

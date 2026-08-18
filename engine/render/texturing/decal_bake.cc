@@ -254,7 +254,7 @@ bool DecalBaker::CreatePipelines(Device& device) {
                           {1, BindingType::kStorageBuffer},
                           {2, BindingType::kCombinedTextureSampler},
                           {3, BindingType::kCombinedTextureSampler}}}};
-  bake.push_constant_size = sizeof(BakePush);
+  bake.push_constant_size = PushSize<BakePush>();
   bake.debug_name = "decal_bake";
   stamp_pipeline_ = device.CreateGraphicsPipeline(bake);
   if (!stamp_pipeline_) {
@@ -278,7 +278,7 @@ bool DecalBaker::CreatePipelines(Device& device) {
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kStorageImage},
                           {2, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(DilatePush),
+      .push_constant_size = PushSize<DilatePush>(),
       .debug_name = "decal_dilate",
   });
   if (!dilate_pipeline_) {

@@ -2,6 +2,7 @@
 
 #include "asset/mesh.h"
 #include "core/log.h"
+#include "render/gi/shadow.h"
 #include "shaders/overdraw_ps_hlsl.h"
 #include "shaders/shadow_instance_vs_hlsl.h"
 #include "shaders/shadow_vs_hlsl.h"
@@ -9,7 +10,9 @@
 namespace rx::render {
 
 bool OverdrawPass::Initialize(Device& device, Format color_format) {
-  // shadow.vs pushes {view_proj, model}; this pass reuses that 128-byte range.
+  // This pass borrows shadow.vs wholesale, so it has to borrow its interface
+  // too: the same push block (the caller pushes view_proj where the cascade
+  // matrix goes) and the same per-draw transform arena at set 1.
   // shadow.vs reads position (0) and uv (3); supply both from the vertex buffer.
   // TODO(rhi): blend preset mismatch: old alpha factors were srcAlpha=ZERO,
   // dstAlpha=ONE (keep dst alpha); kAdditive is ONE/ONE on alpha too. Color
@@ -30,7 +33,12 @@ bool OverdrawPass::Initialize(Device& device, Format color_format) {
       .depth = {},                          // no test/write, no depth attachment
       .color_formats = {color_format},
       .blend = {BlendMode::kAdditive},  // additive accumulation
-      .push_constant_size = 2 * sizeof(Mat4),
+      // Set 0 stays empty (no alpha test here); set 1 has to be the arena,
+      // because that is where shadow.vs declares it.
+      .sets = {{}, {.slots = {{0, BindingType::kStorageBuffer}},
+                    .stages = kShaderStageVertex}},
+      .push_constant_size = PushSize<ShadowPass::Push>(),
+      .push_bda = PushBdaHeader::kBones,
       .debug_name = "overdraw",
   };
   pipeline_ = device.CreateGraphicsPipeline(desc);
@@ -66,14 +74,14 @@ void OverdrawPass::Render(CommandList& cmd, TextureView color_view, Extent2D ext
                         .clear = {0.0f, 0.0f, 0.0f, 1.0f}};
   cmd.BeginRendering({.extent = extent, .colors = {&color, 1}});
   cmd.BindPipeline(pipeline_);
-  cmd.PushConstants(&view_proj, sizeof(Mat4));
+  cmd.PushConstants(&view_proj, sizeof(Mat4), ShadowPass::kLightMatrixOffset);
   draw(cmd);
   cmd.EndRendering();
 }
 
 void OverdrawPass::BindInstanced(CommandList& cmd, const Mat4& view_proj) {
   cmd.BindPipeline(instanced_pipeline_);
-  cmd.PushConstants(&view_proj, sizeof(Mat4));
+  cmd.PushConstants(&view_proj, sizeof(Mat4), ShadowPass::kLightMatrixOffset);
 }
 
 void OverdrawPass::Destroy(Device& device) {

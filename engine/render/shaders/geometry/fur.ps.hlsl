@@ -3,8 +3,8 @@
 // seeds one strand per cell with a random length and a coverage gap; a fragment
 // survives only while its shell height is below the local strand length, so the
 // stack of shells forms tapering strands. Root-darkened and sun lit.
+// Must match fur.vs.hlsl byte for byte: one push range spans both stages.
 struct PushData {
-  column_major float4x4 view_proj;
   column_major float4x4 model;
   float3 sun_dir;
   float fur_length;

@@ -76,6 +76,9 @@ class PathTracer {
   PipelineHandle composite_pipeline_;
   GpuImage accum_;  // rgba32f, persistent; rgb = sum, a = sample count
   ResourceState accum_state_ = ResourceState::kUndefined;
+  // Camera matrices for both tracers; too big for a push block. Ping-pongs
+  // with the frame parity.
+  GpuBuffer camera_[2];
   Extent2D extent_{};
   u32 accumulated_samples_ = 0;
   u32 spp_ = 2;     // samples per dispatch

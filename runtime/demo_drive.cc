@@ -676,7 +676,7 @@ void DriveDemo::BuildKite() {
 }
 
 bool DriveDemo::LoadModel(const std::string& path, i32 skip_mesh_index, Model* out) {
-  asset::GltfScene scene;
+  asset::ImportedScene scene;
   if (!asset::LoadGltfScene(path, &scene)) {
     RX_WARN("drive: vendor model '{}' unavailable, using graybox fallback", path.c_str());
     return false;
@@ -688,7 +688,7 @@ bool DriveDemo::LoadModel(const std::string& path, i32 skip_mesh_index, Model* o
     for (const asset::Mesh& m : scene.meshes) ctx_.renderer->UploadMesh(m);
   }
   bool first = true;
-  for (const asset::GltfScene::Instance& inst : scene.instances) {
+  for (const asset::ImportedScene::Instance& inst : scene.instances) {
     if (static_cast<i32>(inst.mesh_index) == skip_mesh_index) continue;
     const asset::Mesh& mesh = scene.meshes[inst.mesh_index];
     const Quat q{inst.rotation[0], inst.rotation[1], inst.rotation[2], inst.rotation[3]};

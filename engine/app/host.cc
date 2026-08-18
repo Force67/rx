@@ -180,6 +180,7 @@ void Host::ApplyRenderPreset() {
   tuned.local_shadows = env.local_shadows;  // honor RX_LOCAL_SHADOWS
   tuned.froxel_fog = env.froxel_fog;  // honor RX_FROXEL
   tuned.froxel_density = env.froxel_density;
+  tuned.froxel_start_distance = env.froxel_start_distance;  // honor RX_FROXEL_START
   tuned.vrs = env.vrs;  // honor RX_VRS
   tuned.texture_budget_mb = env.texture_budget_mb;  // honor RX_TEX_BUDGET_MB
   tuned.gpu_pass_timings = env.gpu_pass_timings;    // honor RX_GPU_TIMINGS

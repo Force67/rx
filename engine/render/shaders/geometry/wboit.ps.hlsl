@@ -2,18 +2,25 @@
 // Accumulates the weighted, premultiplied colour and the (1 - alpha) product for
 // the WBOIT resolve. accum blends additively (src ONE, dst ONE); revealage
 // blends (src ZERO, dst ONE_MINUS_SRC_COLOR) so it ends up as the transmittance.
+// Must match wboit.vs.hlsl byte for byte: one push range spans both stages.
 struct PushData {
-  column_major float4x4 view_proj;
   column_major float4x4 model;
   float4 color;
   float3 sun_dir;
   float pad0;
   float3 sun_color;
   float ambient;
+};
+PUSH_CONSTANTS(PushData, push);
+
+// Pass constants: identical for every instance, and together more than the
+// push budget, so they arrive through a uniform buffer instead.
+struct WboitFrame {
+  column_major float4x4 view_proj;
   float4 cluster_params;  // x slice scale, y slice bias, zw tile size px
   float4 froxel_params;   // x near, y far, z enabled
 };
-PUSH_CONSTANTS(PushData, push);
+[[vk::binding(4, 0)]] ConstantBuffer<WboitFrame> frame : register(b4, space0);
 
 struct PointLight {
   float4 pos_radius;
@@ -52,10 +59,10 @@ PsOut main(PsIn input) {
 
   // Clustered lights: wrapped diffuse so glass picks up nearby torches.
   {
-    uint tx = min(uint(input.pos.x / push.cluster_params.z), kClusterTilesX - 1u);
-    uint ty = min(uint(input.pos.y / push.cluster_params.w), kClusterTilesY - 1u);
-    uint tz = uint(clamp(log2(max(input.view_z, 1e-3)) * push.cluster_params.x +
-                         push.cluster_params.y, 0.0, float(kClusterSlices - 1u)));
+    uint tx = min(uint(input.pos.x / frame.cluster_params.z), kClusterTilesX - 1u);
+    uint ty = min(uint(input.pos.y / frame.cluster_params.w), kClusterTilesY - 1u);
+    uint tz = uint(clamp(log2(max(input.view_z, 1e-3)) * frame.cluster_params.x +
+                         frame.cluster_params.y, 0.0, float(kClusterSlices - 1u)));
     uint cluster = (tz * kClusterTilesY + ty) * kClusterTilesX + tx;
     uint count = min(cluster_counts[cluster] & 0xffffu, kMaxLightsPerCluster);
     for (uint ci = 0; ci < count; ++ci) {
@@ -81,13 +88,13 @@ PsOut main(PsIn input) {
   }
 
   // Froxel fog transmittance at this surface's depth.
-  if (push.froxel_params.z > 0.5) {
+  if (frame.froxel_params.z > 0.5) {
     // Screen uv from the raster position; the render size is the cluster tile
     // size times the tile count, so no extra push field is needed.
-    float2 uv = input.pos.xy / float2(push.cluster_params.z * kClusterTilesX,
-                                      push.cluster_params.w * kClusterTilesY);
-    float slice = saturate(log2(max(input.view_z, push.froxel_params.x) / push.froxel_params.x) /
-                           log2(push.froxel_params.y / push.froxel_params.x));
+    float2 uv = input.pos.xy / float2(frame.cluster_params.z * kClusterTilesX,
+                                      frame.cluster_params.w * kClusterTilesY);
+    float slice = saturate(log2(max(input.view_z, frame.froxel_params.x) / frame.froxel_params.x) /
+                           log2(frame.froxel_params.y / frame.froxel_params.x));
     lit *= froxel_volume.SampleLevel(froxel_sampler, float3(uv, slice), 0.0).a;
   }
 

@@ -9,8 +9,13 @@
 namespace rx::render {
 namespace {
 
-struct SurfacePush {
+// Half of the 128 bytes vulkan guarantees for a push block would go to this one
+// matrix, so it rides in a per-frame uniform buffer and the push keeps the
+// scalars.
+struct SurfaceCamera {
   Mat4 inv_view_proj;
+};
+struct SurfacePush {
   f32 camera_pos[4];  // xyz eye
   f32 params[4];      // wetness, snow cover, time, live rain
   f32 occl[4];        // sky-occlusion: center xz, 1/half extent, top_y
@@ -29,13 +34,20 @@ bool SurfaceWeather::Initialize(Device& device) {
                           {2, BindingType::kSampledImage},
                           {3, BindingType::kSampledImage},
                           {4, BindingType::kCombinedTextureSampler},
-                          {5, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(SurfacePush),
+                          {5, BindingType::kCombinedTextureSampler},
+                          {6, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<SurfacePush>(),
       .debug_name = "surface_weather",
   });
   if (!pipeline_) {
     RX_ERROR("surface weather pipeline creation failed");
     return false;
+  }
+  // One per in-flight frame: the pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& camera : camera_) {
+    camera = device.CreateBuffer(sizeof(SurfaceCamera), kBufferUsageUniform, true);
+    if (!camera.mapped) return false;
   }
   return true;
 }
@@ -43,6 +55,10 @@ bool SurfaceWeather::Initialize(Device& device) {
 void SurfaceWeather::Destroy(Device& device) {
   device.DestroyPipeline(pipeline_);
   pipeline_ = {};
+  for (GpuBuffer& camera : camera_) {
+    if (camera) device.DestroyBuffer(camera);
+    camera = {};
+  }
 }
 
 ResourceHandle SurfaceWeather::AddToGraph(RenderGraph& graph, ResourceHandle color,
@@ -53,6 +69,8 @@ ResourceHandle SurfaceWeather::AddToGraph(RenderGraph& graph, ResourceHandle col
                                             .format = Format::kRGBA16Float,
                                             .width = extent.width,
                                             .height = extent.height});
+  uniform_slot_ ^= 1;
+  const u32 slot = uniform_slot_;
   graph.AddPass(
       "surface_weather",
       [&](RenderGraph::PassBuilder& builder) {
@@ -61,9 +79,12 @@ ResourceHandle SurfaceWeather::AddToGraph(RenderGraph& graph, ResourceHandle col
         builder.Read(depth, ResourceUsage::kSampledCompute);
         builder.Write(out, ResourceUsage::kStorageWrite);
       },
-      [this, color, normals, depth, out, sky_view, sky_sampler, extent, frame](PassContext& ctx) {
+      [this, color, normals, depth, out, sky_view, sky_sampler, extent, frame,
+       slot](PassContext& ctx) {
+        const SurfaceCamera camera{frame.inv_view_proj};
+        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+
         SurfacePush push{};
-        push.inv_view_proj = frame.inv_view_proj;
         push.camera_pos[0] = frame.camera_pos.x;
         push.camera_pos[1] = frame.camera_pos.y;
         push.camera_pos[2] = frame.camera_pos.z;
@@ -87,7 +108,8 @@ ResourceHandle SurfaceWeather::AddToGraph(RenderGraph& graph, ResourceHandle col
                                    Bind::Sampled(1, ctx.graph->image(color)),
                                    Bind::Sampled(2, ctx.graph->image(normals)),
                                    Bind::Sampled(3, ctx.graph->image(depth)),
-                                   Bind::Combined(4, sky_view, sky_sampler), occl});
+                                   Bind::Combined(4, sky_view, sky_sampler), occl,
+                                   Bind::Uniform(6, camera_[slot], 0, sizeof(SurfaceCamera))});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent);
       });

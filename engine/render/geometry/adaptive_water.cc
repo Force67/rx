@@ -28,7 +28,7 @@ bool AdaptiveWaterMesh::Initialize(Device& device) {
                           {1, BindingType::kStorageBuffer},
                           {2, BindingType::kStorageBuffer},
                           {3, BindingType::kStorageBuffer}}}},
-      .push_constant_size = sizeof(AdaptivePush),
+      .push_constant_size = PushSize<AdaptivePush>(),
       .debug_name = "adaptive_water_cbt",
   });
   if (!pipeline_) return false;

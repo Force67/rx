@@ -36,6 +36,8 @@ class FurPass {
   PipelineHandle pipeline_;
   GpuBuffer vertices_;
   GpuBuffer indices_;
+  GpuBuffer camera_[2];  // view projection, too big for the push block
+  u32 camera_slot_ = 0;
   u32 index_count_ = 0;
 };
 

@@ -65,6 +65,10 @@ struct DeviceCaps {
   bool integrated = false;           // integrated/handheld gpu (shared memory)
   u64 device_local_bytes = 0;        // summed device-local heap size, vram proxy
   u32 accel_scratch_alignment = 256;  // min scratch offset alignment for AS builds
+  // Largest push-constant block a pipeline layout may declare. The vulkan
+  // guarantee is kGuaranteedPushConstantBytes; anything a pass relies on above
+  // that only works on the adapters generous enough to offer it.
+  u32 max_push_constant_bytes = 128;
   bool async_compute = false;  // second same-family queue for overlapped compute
   // 64-bit min/max/exchange atomics on storage buffers (vulkan
   // shaderBufferInt64Atomics). The virtual-geometry software rasterizer packs

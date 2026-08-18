@@ -16,15 +16,18 @@
 [[vk::image_format("rgba8")]] [[vk::binding(1, 0)]] RWTexture3D<float4> albedo_vol : register(u1, space0);
 [[vk::image_format("rgba8")]] [[vk::binding(2, 0)]] RWTexture3D<float4> emissive_vol : register(u2, space0);
 [[vk::binding(3, 0)]] StructuredBuffer<float> mesh_sdf : register(t3, space0);
+// Clip origins / voxel sizes. inv_transform is per dispatch and takes half the
+// push block, so the per-clip constants come from here instead (indexed by the
+// dispatch's clip) rather than riding along in the push.
+[[vk::binding(4, 0)]] ConstantBuffer<SdfGlobals> sdf : register(b4, space0);
 
 struct ComposePush {
   column_major float4x4 inv_transform;  // world -> mesh local
   float4 box_min;      // xyz mesh-local volume min corner, w mesh voxel size
   uint4 mesh_res;      // xyz mesh volume resolution, w clip index
-  float4 clip_origin;  // xyz clip world min corner, w clip voxel size
-  float4 albedo;       // rgb flat albedo
+  float4 albedo;       // rgb flat albedo, w conservative world-scale factor
+                       // (local dist -> world dist)
   float4 emissive;     // rgb flat emissive
-  float4 misc;         // x conservative world-scale factor (local dist -> world dist)
 };
 PUSH_CONSTANTS(ComposePush, pc);
 
@@ -58,8 +61,8 @@ void main(uint3 id : SV_DispatchThreadID) {
   if (any(id >= res)) return;
 
   uint clip = pc.mesh_res.w;
-  float clip_voxel = pc.clip_origin.w;
-  float3 world = pc.clip_origin.xyz + (float3(id) + 0.5) * clip_voxel;
+  float clip_voxel = sdf.clip_origin[clip].w;
+  float3 world = sdf.clip_origin[clip].xyz + (float3(id) + 0.5) * clip_voxel;
   float3 local = mul(pc.inv_transform, float4(world, 1.0)).xyz;
 
   // Mesh-voxel coordinate; mesh volume spans [box_min, box_min + res*voxel].
@@ -87,7 +90,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     d_local = max(box_dist, edge - box_dist);
   }
 
-  float d_world = d_local * pc.misc.x;  // conservative local->world scale
+  float d_world = d_local * pc.albedo.w;  // conservative local->world scale
 
   uint3 texel = uint3(id.x, id.y, clip * res + id.z);
   float current = dist_vol[texel];

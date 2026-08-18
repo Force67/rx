@@ -64,8 +64,15 @@ endif()
 
 # --- PRIVATE static archives (link-only for the consumer) -------------------
 _rx_import_static(kinema::kinema libkinema.a)
+_rx_import_static(rx::stb_impl librx_stb_impl.a)
 if(@RX_INSTALL_JOLT@)
   _rx_import_static(Jolt libJolt.a)
+endif()
+if(@RX_INSTALL_USD@)
+  _rx_import_static(rx::tinyusdz libtinyusdz_static.a)
+  # tinyusdz calls stb's decoders; rx_stb_impl has to follow it on the link line.
+  set_property(TARGET rx::tinyusdz APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::stb_impl>)
 endif()
 if(@RX_INSTALL_FSR3@)
   _rx_import_static(rx::ffx_fsr3 librx_ffx_fsr3.a)
@@ -133,6 +140,17 @@ endif()
 if(@RX_INSTALL_JOLT@ AND TARGET rx::physics)
   set_property(TARGET rx::physics APPEND PROPERTY
     INTERFACE_LINK_LIBRARIES $<LINK_ONLY:Jolt> $<LINK_ONLY:kinema::kinema>)
+endif()
+
+# rx::asset decodes images through stb, and reads USD stages through tinyusdz
+# when the package was built with it (both link-only: neither header is bundled).
+if(TARGET rx::asset)
+  set_property(TARGET rx::asset APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::stb_impl>)
+  if(@RX_INSTALL_USD@)
+    set_property(TARGET rx::asset APPEND PROPERTY
+      INTERFACE_LINK_LIBRARIES $<LINK_ONLY:rx::tinyusdz>)
+  endif()
 endif()
 
 # rx::anim's graph/rig/foot-placement units link kinema (link-only; kinema is

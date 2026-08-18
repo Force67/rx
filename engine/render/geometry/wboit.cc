@@ -16,16 +16,23 @@ namespace {
 constexpr Format kAccumFormat = Format::kRGBA16Float;
 constexpr Format kRevealFormat = Format::kR16Float;
 
-struct WboitPush {
+// Only model and color differ between the instance draws. The view projection
+// and the two lighting parameter blocks are the same for the whole pass, and
+// keeping them in the push would exceed the 128 bytes vulkan guarantees, so
+// they ride in a per-frame uniform buffer.
+struct WboitFrame {
   Mat4 view_proj;
+  f32 cluster_params[4];
+  f32 froxel_params[4];
+};
+
+struct WboitPush {
   Mat4 model;
   f32 color[4];
   f32 sun_dir[3];
   f32 pad0;
   f32 sun_color[3];
   f32 ambient;
-  f32 cluster_params[4];
-  f32 froxel_params[4];
 };
 
 }  // namespace
@@ -64,13 +71,24 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
                           {1, BindingType::kStorageBuffer},
                           {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kCombinedTextureSampler}}}},
-      .push_constant_size = sizeof(WboitPush),
+                          {3, BindingType::kCombinedTextureSampler},
+                          {4, BindingType::kUniformBuffer}}}},
+      .push_constant_size = PushSize<WboitPush>(),
       .debug_name = "wboit_geom",
   });
   if (!geom_pipeline_) {
     RX_ERROR("wboit geometry pipeline creation failed");
     return false;
+  }
+
+  // One per in-flight frame: the pass rewrites it while the previous frame may
+  // still be reading its own copy.
+  for (GpuBuffer& frame : frames_) {
+    frame = device.CreateBuffer(sizeof(WboitFrame), kBufferUsageUniform, true);
+    if (!frame.mapped) {
+      RX_ERROR("wboit frame uniform allocation failed");
+      return false;
+    }
   }
 
   // --- Resolve pipeline: composite the oit targets over the scene. ---
@@ -112,7 +130,6 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
       {.name = "oit_composite", .format = color_format_, .width = width, .height = height});
 
   WboitPush base{};
-  base.view_proj = view_proj;
   base.sun_dir[0] = sun_dir.x;
   base.sun_dir[1] = sun_dir.y;
   base.sun_dir[2] = sun_dir.z;
@@ -120,11 +137,17 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
   base.sun_color[1] = sun_color.y;
   base.sun_color[2] = sun_color.z;
   base.ambient = ambient;
-  std::memcpy(base.cluster_params, lighting.cluster_params, sizeof(base.cluster_params));
-  base.froxel_params[0] = lighting.froxel_near;
-  base.froxel_params[1] = lighting.froxel_far;
-  base.froxel_params[2] = lighting.froxel_enabled ? 1.0f : 0.0f;
-  base.froxel_params[3] = 0.0f;
+
+  WboitFrame constants{};
+  constants.view_proj = view_proj;
+  std::memcpy(constants.cluster_params, lighting.cluster_params,
+              sizeof(constants.cluster_params));
+  constants.froxel_params[0] = lighting.froxel_near;
+  constants.froxel_params[1] = lighting.froxel_far;
+  constants.froxel_params[2] = lighting.froxel_enabled ? 1.0f : 0.0f;
+  constants.froxel_params[3] = 0.0f;
+  frame_slot_ ^= 1u;
+  const u32 slot = frame_slot_;
 
   graph.AddPass(
       "oit_accumulate",
@@ -133,7 +156,8 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
         builder.Write(reveal, ResourceUsage::kColorAttachment);
         builder.Write(depth, ResourceUsage::kDepthAttachment);
       },
-      [this, accum, reveal, depth, instances, base, width, height, lighting](PassContext& ctx) {
+      [this, accum, reveal, depth, instances, base, constants, slot, width, height,
+       lighting](PassContext& ctx) {
         ColorAttachment colors[2];
         colors[0] = {.view = ctx.graph->image(accum).view,
                      .load = LoadOp::kClear,
@@ -146,12 +170,14 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
         ctx.cmd->BeginRendering(
             {.extent = {width, height}, .colors = colors, .depth = &depth_att});
         ctx.cmd->BindPipeline(geom_pipeline_);
+        std::memcpy(frames_[slot].mapped, &constants, sizeof(constants));
         ctx.cmd->BindTransient(
             0, {Bind::StorageBuffer(0, lighting.lights, 0, lighting.lights.size),
                 Bind::StorageBuffer(1, lighting.cluster_counts, 0, lighting.cluster_counts.size),
                 Bind::StorageBuffer(2, lighting.cluster_indices, 0,
                                     lighting.cluster_indices.size),
-                InGeneral(Bind::Combined(3, lighting.froxel_volume, lighting.froxel_sampler))});
+                InGeneral(Bind::Combined(3, lighting.froxel_volume, lighting.froxel_sampler)),
+                Bind::Uniform(4, frames_[slot], 0, sizeof(WboitFrame))});
         ctx.cmd->BindVertexBuffer(0, vertices_, 0);
         ctx.cmd->BindIndexBuffer(indices_, 0, IndexType::kUint32);
         for (const WboitInstance& inst : instances) {
@@ -197,6 +223,10 @@ void WboitPass::Destroy(Device& device) {
   resolve_pipeline_ = {};
   device.DestroyBuffer(vertices_);
   device.DestroyBuffer(indices_);
+  for (GpuBuffer& frame : frames_) {
+    if (frame) device.DestroyBuffer(frame);
+    frame = {};
+  }
 }
 
 }  // namespace rx::render

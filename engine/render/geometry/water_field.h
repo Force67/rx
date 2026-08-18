@@ -110,6 +110,8 @@ class WaterField {
   GpuImage rings_[kRingCount][2];       // ping-pong per ring
   GpuImage mask_[2];                    // ring-0 waterline intersection band, ping-pong
   GpuBuffer params_[Device::kMaxFramesInFlight];
+  // Interaction view_proj/inv_view_proj, too big for the push block.
+  GpuBuffer camera_[Device::kMaxFramesInFlight];
   GpuBuffer disturbances_[Device::kMaxFramesInFlight];
   f32 origin_[kRingCount][2] = {};      // snapped world origin xz, persisted
   u32 write_ = 0;                       // ping-pong index of this frame's target

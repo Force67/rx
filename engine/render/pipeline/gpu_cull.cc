@@ -13,9 +13,15 @@
 namespace rx::render {
 namespace {
 
+// The reprojection matrix used by the occlusion test: the five frustum planes
+// already fill most of the 128 bytes vulkan guarantees for a push block, so it
+// rides in a per-frame uniform buffer instead.
+struct CullReproject {
+  Mat4 prev_view_proj;
+};
+
 struct CullPush {
   f32 planes[5][4];   // 80
-  Mat4 prev_view_proj;
   f32 eye_pad[4];     // xyz eye
   f32 proj_hiz[4];    // proj.m00, proj.m11, hiz w, hiz h
   u32 misc[4];        // instance_count, frustum_enabled, occlusion_enabled, pad
@@ -55,8 +61,9 @@ bool GpuCull::Initialize(Device& device, Format color_format) {
       .sets = {{.slots = {{0, BindingType::kStorageBuffer},
                           {1, BindingType::kStorageBuffer},
                           {2, BindingType::kStorageBuffer},
-                          {3, BindingType::kSampledImage}}}},  // hi-z (occlusion)
-      .push_constant_size = sizeof(CullPush),
+                          {3, BindingType::kSampledImage},     // hi-z (occlusion)
+                          {4, BindingType::kUniformBuffer}}}},  // CullReproject
+      .push_constant_size = PushSize<CullPush>(),
       .debug_name = "cull",
   });
   if (!pipeline_) {
@@ -70,7 +77,13 @@ bool GpuCull::Initialize(Device& device, Format color_format) {
     commands_[i] = device.CreateBuffer(static_cast<u64>(kMaxCommands) * sizeof(Command),
                                        kBufferUsageStorage | kBufferUsageIndirect, true);
     counts_[i] = device.CreateBuffer(16, kBufferUsageStorage, true);
-    if (!instances_[i].mapped || !commands_[i].mapped || !counts_[i].mapped) return false;
+    // One per in-flight frame: the pass rewrites it while the previous frame
+    // may still be reading its own copy.
+    reproject_[i] = device.CreateBuffer(sizeof(CullReproject), kBufferUsageUniform, true);
+    if (!instances_[i].mapped || !commands_[i].mapped || !counts_[i].mapped ||
+        !reproject_[i].mapped) {
+      return false;
+    }
   }
 
   // Hi-z reduce pipeline: storage dst + sampled src.
@@ -78,7 +91,7 @@ bool GpuCull::Initialize(Device& device, Format color_format) {
       .shader = RX_SHADER(k_hiz_reduce_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage}}}},
-      .push_constant_size = sizeof(HizPush),
+      .push_constant_size = PushSize<HizPush>(),
       .debug_name = "cull_hiz_reduce",
   });
   if (!hiz_pipeline_) return false;
@@ -153,7 +166,7 @@ bool GpuCull::CreateBoundsPipeline(Device& device, Format color_format) {
       .raster = {.cull = CullMode::kNone},  // overlay, no depth
       .color_formats = {color_format},
       .sets = {{.slots = {{0, BindingType::kStorageBuffer}}, .stages = kShaderStageVertex}},
-      .push_constant_size = sizeof(Mat4),
+      .push_constant_size = PushSize<Mat4>(),
       .debug_name = "bounds_debug",
   });
   if (!bounds_pipeline_) {
@@ -201,9 +214,11 @@ void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& 
   *static_cast<u32*>(counts_[slot].mapped) = 0;  // reset the visible counter
 
   bool occ = occlusion && hiz != kInvalidResource;
+  const CullReproject reproject{prev_view_proj};
+  std::memcpy(reproject_[slot].mapped, &reproject, sizeof(reproject));
+
   CullPush push{};
   ExtractPlanes(view_proj, push.planes);
-  push.prev_view_proj = prev_view_proj;
   push.eye_pad[0] = eye.x;
   push.eye_pad[1] = eye.y;
   push.eye_pad[2] = eye.z;
@@ -217,6 +232,7 @@ void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& 
   GpuBuffer instances = instances_[slot];
   GpuBuffer commands = commands_[slot];
   GpuBuffer counts = counts_[slot];
+  GpuBuffer reproject_buffer = reproject_[slot];
 
   bool has_hiz = hiz != kInvalidResource;
   graph.AddPass(
@@ -224,13 +240,15 @@ void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& 
       [&](RenderGraph::PassBuilder& builder) {
         if (has_hiz) builder.Read(hiz, ResourceUsage::kSampledCompute);
       },
-      [this, push, instances, commands, counts, instance_count, has_hiz, hiz](PassContext& ctx) {
+      [this, push, instances, commands, counts, reproject_buffer, instance_count, has_hiz,
+       hiz](PassContext& ctx) {
         ctx.cmd->BindPipeline(pipeline_);
         base::Vector<BindingItem> items;
         items.push_back(Bind::StorageBuffer(0, instances));
         items.push_back(Bind::StorageBuffer(1, commands));
         items.push_back(Bind::StorageBuffer(2, counts));
         if (has_hiz) items.push_back(Bind::Sampled(3, ctx.graph->image(hiz)));
+        items.push_back(Bind::Uniform(4, reproject_buffer, 0, sizeof(CullReproject)));
         ctx.cmd->BindTransient(0, {items.data(), items.size()});
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch((instance_count + 63) / 64, 1, 1);
@@ -248,6 +266,7 @@ void GpuCull::Destroy(Device& device) {
     device.DestroyBuffer(instances_[i]);
     device.DestroyBuffer(commands_[i]);
     device.DestroyBuffer(counts_[i]);
+    device.DestroyBuffer(reproject_[i]);
     device.DestroyImage(prev_depth_[i]);
   }
 }

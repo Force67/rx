@@ -55,6 +55,8 @@ class WboitPass {
   SamplerHandle sampler_;
   GpuBuffer vertices_;
   GpuBuffer indices_;
+  GpuBuffer frames_[2];  // view projection + lighting params, too big for the push
+  u32 frame_slot_ = 0;
   u32 index_count_ = 0;
   Format color_format_ = Format::kUnknown;
 };
