@@ -7,7 +7,8 @@
 //
 // Dual path like the skinned bone palette: buffer device addresses on SPIR-V
 // (vk::RawBufferLoad), ByteAddressBuffer root SRVs on DXIL (the d3d12 backend
-// binds t997/t996 from the addresses at push bytes 160/168, see RHI.md).
+// binds t997/t996 from the addresses in the push block's RX_BDA header, see
+// RHI.md).
 
 #ifndef RX_MORPH_HLSLI_
 #define RX_MORPH_HLSLI_

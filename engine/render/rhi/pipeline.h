@@ -30,18 +30,20 @@ consteval u32 PushSize() {
   return sizeof(T);
 }
 
-// Deliberate exception, for a block whose every field is genuinely per-draw:
-// there is nothing to lift into a per-frame uniform, so fitting it means
-// routing the per-draw data through an indexed buffer - a redesign of the pass,
-// not a repack. Named rather than a bare sizeof so the exception stays
-// greppable and cannot be reached by accident; the device still refuses the
-// layout (and says which pipeline) on an adapter that cannot serve it.
-template <typename T>
-consteval u32 PushSizeOverGuarantee() {
-  static_assert(sizeof(T) > kGuaranteedPushConstantBytes,
-                "block fits the guarantee - use PushSize<> instead");
-  return sizeof(T);
-}
+// The RX_BDA header a push block may carry: leading u64 device addresses the
+// DXIL path cannot dereference, so the d3d12 backend binds them as root SRVs
+// instead (t998 bones, t997/t996 morph deltas/weights) from fixed byte offsets.
+// Vulkan ignores this - SPIR-V loads straight through the address. Declaring it
+// per pipeline rather than inferring it from the block size keeps an unrelated
+// block that happens to be the same size from feeding the root SRVs garbage.
+enum class PushBdaHeader : u8 {
+  kNone,
+  kBones,     // u64 bone palette address at byte 8 (shadow.vs)
+  kMeshDraw,  // bones at 8, morph deltas at 16, morph weights at 24 (mesh.vs)
+};
+inline constexpr u32 kPushBdaBoneOffset = 8;
+inline constexpr u32 kPushBdaMorphDeltaOffset = 16;
+inline constexpr u32 kPushBdaMorphWeightOffset = 24;
 
 // A pipeline's descriptor-set interface. Most passes declare their slots
 // inline and let the device derive (and cache) the layout; sets shared across
@@ -102,6 +104,7 @@ struct GraphicsPipelineDesc {
   base::Vector<BlendMode> blend;  // per color target; empty = all opaque
   base::Vector<PipelineBindings> sets;
   u32 push_constant_size = 0;
+  PushBdaHeader push_bda = PushBdaHeader::kNone;
   // Rasterization sample count; must match the bound targets' samples.
   // 1 = the standard single-sampled path (every existing pipeline).
   u32 samples = 1;

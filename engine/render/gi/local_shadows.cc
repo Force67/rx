@@ -5,6 +5,7 @@
 #include <cstring>
 
 #include "core/log.h"
+#include "render/gi/shadow.h"
 
 namespace rx::render {
 namespace {
@@ -139,7 +140,7 @@ void LocalShadows::Render(CommandList& cmd, PipelineHandle pipeline,
     f32 y = static_cast<f32>((face.slot / kFacesX) * kFaceRes);
     cmd.SetViewport(x, y, kFaceRes, kFaceRes);
     cmd.SetScissor(static_cast<i32>(x), static_cast<i32>(y), kFaceRes, kFaceRes);
-    cmd.PushConstants(&face.view_proj, sizeof(Mat4));
+    cmd.PushConstants(&face.view_proj, sizeof(Mat4), ShadowPass::kLightMatrixOffset);
     draw(cmd, face);
   }
   cmd.EndRendering();

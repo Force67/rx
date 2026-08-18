@@ -134,70 +134,80 @@ struct MorphWeight {
   f32 weight = 0;
 };
 
-// model + prev_model are 128 bytes; skinned draws append the bone palette's
-// buffer device address and this mesh's offset into it (needs a 144 byte push
-// range, available on every desktop GPU). Morphed draws use the trailing block
-// (192 bytes total). Shaders ignore the tails they do not read.
-//
-// This is the one block that knowingly overruns the 128 bytes vulkan
-// guarantees (see PushSizeOverGuarantee). Every field here varies per draw and
-// the push range is the sole per-draw channel the vertex and fragment stages
-// share, so there is nothing to lift into a per-frame uniform: fitting it means
-// moving transforms into an indexed buffer and giving every draw an index,
-// which is the GPU-driven path, not a repack of this one. A spec-minimum
-// adapter therefore fails these pipelines at startup, by name.
-struct MeshPushConstants {
+// One draw's transforms, in the per-frame arena the mesh, shadow and water
+// pipelines index instead of pushing 128 bytes of matrices per draw. The
+// renderer fills one record per FrameView draw (record 0 stays zeroed, which is
+// what an instanced draw's unused model used to be), every pass over that draw
+// list indexes the same arena, and the vertex / task / mesh / fragment stages
+// read it through binding 3 of the frame-globals set. Mirrors DrawRecord in
+// mesh.vs / mesh.ps / mesh_scene.as / mesh_scene.ms / shadow.vs.
+struct DrawRecord {
   Mat4 model;
   Mat4 prev_model;
-  u64 bone_address = 0;  // device address of the frame bone palette, 0 = none
-  u32 skin_offset = 0;   // first bone of this mesh in the palette
+};
+
+// The per-draw scalars that stayed in the push range, plus the arena index the
+// matrices moved to. Everything here fits the 128 bytes vulkan guarantees with
+// room to spare; the u64s lead so the d3d12 backend finds them at the fixed
+// RX_BDA offsets (see PushBdaHeader).
+//
+// draw_index addresses the record directly, in every stage. It is deliberately
+// NOT offset by SPIR-V DrawIndex: rx's one multi-draw through these pipelines
+// is AdaptiveWaterMesh::Draw, whose DrawIndirectCount emits a command per
+// surviving triangle patch of a single surface, so every command in it shares
+// one record. A flat index is also what lets the fragment stage - which has no
+// DrawIndex at all - read the same record its vertex stage did.
+struct MeshPushConstants {
+  u32 draw_index = 0;  // this draw's record in the frame arena
   // Bits 0-23: per-draw rgb8 tint (0xRRGGBB) modulating albedo, 0 = untinted.
   // Bits 24-31: 1 + the draw's baked decal-layer tile (DecalBaker), 0 = none.
   // The two share a word because the tint only ever needed three bytes and the
   // push block is the sole per-draw channel the fragment stage can read.
   u32 tint_packed = 0;
-  // World-space rect (min_x, min_z, max_x, max_z) where full-detail terrain is
-  // streamed in. Set only on distant terrain-LOD draws: the vertex shader sinks
-  // vertices inside it so the coarse proxy never bridges above the real land
-  // (it cut through buildings otherwise). All zeros = no clip.
-  f32 detail_rect[4] = {0, 0, 0, 0};
+  u64 bone_address = 0;  // device address of the frame bone palette, 0 = none
   // Morph targets: per-mesh deltas (GpuMesh::morph_deltas) and the frame's
   // (target, weight) pair buffer, read by device address like the bones.
   // morph_count = 0 disables morphing for the draw.
   u64 morph_delta_address = 0;
   u64 morph_weight_address = 0;
+  u32 skin_offset = 0;         // first bone of this mesh in the palette
   u32 morph_first = 0;         // this draw's first pair in the weight buffer
   u32 morph_count = 0;         // active (nonzero-weight) pairs
   u32 morph_vertex_count = 0;  // vertices per target in the delta buffer
-  u32 pad_morph = 0;
+  // World-space rect (min_x, min_z, max_x, max_z) where full-detail terrain is
+  // streamed in. Set only on distant terrain-LOD draws: the vertex shader sinks
+  // vertices inside it so the coarse proxy never bridges above the real land
+  // (it cut through buildings otherwise). All zeros = no clip.
+  f32 detail_rect[4] = {0, 0, 0, 0};
 };
 
 // Push constants for the optional mesh-shader opaque path. The geometry buffers
 // are read in the mesh shader by device address; layout matches mesh_scene.ms.
 struct MeshShaderPush {
-  Mat4 model;
-  Mat4 prev_model;
-  // The mesh-shader path shares its FRAGMENT stage (and therefore its push
-  // range) with the raster path, so the first 144 bytes must mirror
-  // MeshPushConstants exactly. Anything else here would be read as the tint /
-  // decal-tile word: bounds.w used to land on it, and the pixel shader decoded
-  // the bounding radius as a layer tile.
-  u64 pad_bone = 0;
-  u32 pad_skin = 0;
+  u32 draw_index = 0;
   u32 tint_packed = 0;  // meshlet draws carry no decal layer, so the tile is 0
+  u32 meshlet_offset = 0;
+  u32 meshlet_count = 0;
   f32 bounds[4] = {0, 0, 0, 0};  // xyz model-space center, w radius (task-stage cull)
   f32 occlusion[4] = {0, 0, 0, 0};  // proj.m00, proj.m11, hiz w, hiz h (w==0 disables)
   u64 meshlets_address = 0;
   u64 meshlet_vertices_address = 0;
   u64 meshlet_triangles_address = 0;
   u64 vertices_address = 0;
-  u32 meshlet_offset = 0;
-  u32 meshlet_count = 0;
 };
-// The shared fragment stage reads the tile from ONE offset; both push blocks
-// have to agree on it or a meshlet draw feeds it whatever else lives there.
+// The mesh-shader path shares its FRAGMENT stage - and therefore its push range
+// - with the raster path, so the two words that stage reads have to sit at the
+// same offsets in both blocks or a meshlet draw feeds it whatever else lives
+// there (bounds.w used to land on the tint word, and the pixel shader decoded
+// the bounding radius as a decal-layer tile).
+static_assert(offsetof(MeshShaderPush, draw_index) == offsetof(MeshPushConstants, draw_index),
+              "mesh-shader and raster push blocks must agree on draw_index");
 static_assert(offsetof(MeshShaderPush, tint_packed) == offsetof(MeshPushConstants, tint_packed),
               "mesh-shader and raster push blocks must agree on tint_packed");
+static_assert(offsetof(MeshPushConstants, bone_address) == kPushBdaBoneOffset &&
+                  offsetof(MeshPushConstants, morph_delta_address) == kPushBdaMorphDeltaOffset &&
+                  offsetof(MeshPushConstants, morph_weight_address) == kPushBdaMorphWeightOffset,
+              "mesh push block must keep the RX_BDA addresses where d3d12 looks");
 
 // Forward pbr pipeline: classic vertex buffer, metallic roughness shading,
 // reversed z depth. Outputs hdr color and motion vectors. Set 0 is the frame
@@ -298,7 +308,7 @@ class MeshPipeline {
   PipelineHandle instanced_pipelines_[4] = {};  // [rt | wire]
   PipelineHandle instanced_prepass_pipeline_;
   PipelineHandle instanced_prepass_masked_pipeline_;
-  // Optional mesh-shader opaque variants (larger mesh-stage push range).
+  // Optional mesh-shader opaque variants (their own mesh-stage push block).
   PipelineHandle ms_scene_[2] = {};  // [rt]
   PipelineHandle ms_prepass_;
 };

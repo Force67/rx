@@ -169,19 +169,29 @@ itself beyond loading SDL3's window-property helpers dynamically.
   of the shader-visible heap; persistent sets (bindless registry, material
   sets) get reserved regions with null-initialized descriptors. Sampler
   tables are content-hashed and cached forever (2048-descriptor api cap).
-- **Push constants**: ≤ 64 B ride as root constants; larger blocks spill into
-  a per-frame upload ring behind a root CBV, with a CPU shadow so offset
-  pushes (shadow cascade matrix at 0, per-draw model at 64) keep Vulkan
-  semantics.
+- **Push constants**: every block fits the 128 B Vulkan guarantees (`PushSize<>`
+  in `rhi/pipeline.h` makes an oversized one a build error). ≤ 64 B ride as
+  root constants; larger blocks spill into a per-frame upload ring behind a
+  root CBV, with a CPU shadow so offset pushes (per-draw head at 0, shadow
+  cascade matrix above it) keep Vulkan semantics. Per-draw data that does not
+  fit - the mesh, shadow and water paths' model/prev_model matrices - lives in
+  a per-frame `DrawRecord` arena instead, and the block carries that record's
+  index. The index is flat, not a multi-draw base: rx's one multi-draw through
+  these pipelines (`AdaptiveWaterMesh::Draw`) emits a command per triangle
+  patch of a *single* surface, so all its commands share one record - and a
+  flat index is also the only kind a fragment shader, which has no SPIR-V
+  `DrawIndex`, can read.
 - **Skinned meshes (RX_BDA convention)**: the skinned vertex shaders read
   the bone palette through `vk::RawBufferLoad` on SPIR-V and through a
-  `ByteAddressBuffer` root SRV at `(t998, space0)` on DXIL. The backend
-  detects skinned pipelines by their `BLENDINDICES` input signature and binds
-  that root SRV from the u64 palette address it finds at byte 128 of the push
-  block (both `mesh.vs` and `shadow.vs` keep it there). Morph target deltas
-  and weights extend the convention with root SRVs at `(t997/t996, space0)`,
-  fed from the addresses at push bytes 160/168 of the 192-byte mesh push
-  block (`MeshPushConstants`); other push sizes leave them unbound.
+  `ByteAddressBuffer` root SRV at `(t998, space0)` on DXIL. A pipeline opts in
+  with `GraphicsPipelineDesc::push_bda`, which names the header its push block
+  carries: `kBones` puts the u64 palette address at `kPushBdaBoneOffset`
+  (`shadow.vs`), `kMeshDraw` adds the morph target delta/weight addresses for
+  root SRVs at `(t997/t996, space0)` (`mesh.vs`). The backend still requires a
+  `BLENDINDICES` input signature before binding the palette, and a pipeline
+  that declares no header leaves all three unbound - inferring the header from
+  the block size would eventually feed a root SRV whatever an unrelated block
+  of the same size happens to hold.
 - **Barriers**: legacy `D3D12_RESOURCE_STATES` (vkd3d 2.0 has no enhanced
   barriers). Texture states are tracked per subresource on the device record;
   buffers decay to COMMON per ExecuteCommandLists, so per-list lazy
@@ -233,7 +243,7 @@ libvkd3d implements aggregate returns with the Windows out-pointer ABI.
 - Vulkan-interop consumers (ugui HUD/menus, imgui debug overlay, NRD, DLSS,
   FSR3, thumbnailer) degrade gracefully on d3d12 - feature-unavailable, as
   designed. A d3d12 gui backend would restore UI there.
-- The mesh-shader shaders (`mesh_scene.as/ms` push-constant BDA reads,
+- The mesh-shader shaders (`mesh_scene.as/ms` device-address geometry reads,
   `meshlet.ms` multi-branch SetMeshOutputCounts) still need DXIL-compatible
   ports; the ray-hit readers are already dual-path and run on DXR (verified
   through vkd3d-proton, `RX_VKD3D_PROTON=ON`: RT reflections/DDGI/path

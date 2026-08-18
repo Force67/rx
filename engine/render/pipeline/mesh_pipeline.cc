@@ -31,13 +31,15 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   // Set 0 (frame globals), created once and shared by every variant so
   // descriptor sets bound once serve them all. The mesh-shader path reads the
   // globals from the task and mesh stages too; binding 2 is last frame's hi-z,
-  // sampled by the task stage for instance occlusion cull.
+  // sampled by the task stage for instance occlusion cull, and binding 3 the
+  // frame's per-draw transform arena every stage indexes with the pushed record.
   BindingLayoutDesc set0{};
   set0.stages = kShaderStageVertex | kShaderStageFragment |
                 (mesh_caps ? (kShaderStageTask | kShaderStageMesh) : 0u);
   set0.slots.push_back({0, BindingType::kUniformBuffer});
   if (rt) set0.slots.push_back({1, BindingType::kAccelStruct});
   if (mesh_caps) set0.slots.push_back({2, BindingType::kSampledImage});
+  set0.slots.push_back({3, BindingType::kStorageBuffer});
   pipeline->set_layout_ = device.CreateBindingLayout(set0);
   if (!pipeline->set_layout_) return nullptr;
 
@@ -96,7 +98,8 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
   // RGBA. Closest is kOpaque.
   scene.blend = {BlendMode::kOpaque, BlendMode::kOpaque, BlendMode::kOpaque};
   scene.sets = sets;
-  scene.push_constant_size = PushSizeOverGuarantee<MeshPushConstants>();
+  scene.push_constant_size = PushSize<MeshPushConstants>();
+  scene.push_bda = PushBdaHeader::kMeshDraw;
   // kMsaa mode: opaque scene + prepass raster multisampled; the blend
   // pipelines below stay at 1 sample (the transparent pass runs post-resolve).
   scene.samples = samples;
@@ -253,15 +256,15 @@ std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_
 
   // Optional mesh-shader opaque variants: the vertex stage is replaced by a
   // meshlet mesh shader (geometry fed by device address), sharing the same
-  // descriptor set layouts and fragment shaders. The larger mesh-stage push
-  // range rides in the per-variant pipeline descs.
+  // descriptor set layouts and fragment shaders, and indexing the same per-draw
+  // transform arena with the same pushed record.
   if (mesh_caps) {
     GraphicsPipelineDesc ms{};
     ms.task = RX_SHADER(k_mesh_scene_as_hlsl);
     ms.mesh = RX_SHADER(k_mesh_scene_ms_hlsl);
     ms.raster = {.cull = CullMode::kNone};  // matches the raster path's winding policy
     ms.sets = sets;
-    ms.push_constant_size = PushSizeOverGuarantee<MeshShaderPush>();
+    ms.push_constant_size = PushSize<MeshShaderPush>();
 
     // Scene variants: depth EQUAL against the prepass, lit color + masked
     // motion target, like the raster main variants.

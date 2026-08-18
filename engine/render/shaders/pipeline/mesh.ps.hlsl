@@ -3,20 +3,27 @@
 
 #include "rhi_bindings.hlsli"
 
-// Object->world transform, read only for the model-space (_msn) normal path.
-// Mirrors the vertex MeshPushConstants layout; only `model` is used here (the
-// push range already covers the fragment stage).
+// The head of the mesh push range, which covers the fragment stage too. Only
+// these two words are read here, and both sit at the same offset in the
+// mesh-shader block (render::MeshShaderPush) so a meshlet draw feeds them the
+// same thing. The object->world transform the model-space (_msn) normal path
+// wants moved to the per-draw arena below.
 struct MeshPush {
-  column_major float4x4 model;
-  column_major float4x4 prev_model;
-  uint2 pad_bone;
-  uint pad_skin;
+  uint draw_index;
   // low 24b rgb8 tint (applied in the vertex stage), high 8b are
   // 1 + this draw's baked decal-layer tile, 0 = none.
   uint tint_packed;
-  float4 detail_rect;
 };
 PUSH_CONSTANTS(MeshPush, push);
+
+// Mirrors render::DrawRecord. The pushed index is flat (see mesh.vs), so this
+// stage reads exactly the record its vertex stage did - which is what lets a
+// fragment shader, where SPIR-V DrawIndex does not exist, take part at all.
+struct DrawRecord {
+  column_major float4x4 model;
+  column_major float4x4 prev_model;
+};
+[[vk::binding(3, 0)]] StructuredBuffer<DrawRecord> draw_records : register(t3, space0);
 
 struct FrameGlobals {
   column_major float4x4 view_proj;
@@ -454,7 +461,7 @@ float3 SurfaceNormal(PsIn input) {
       // Object-space (_msn) normal: rotate straight to world by the model
       // matrix (uniform scale drops out on normalize), replacing the vertex
       // normal. No TBN, so seam-broken tangents can't smear the shading.
-      float3 mn = mul((float3x3)push.model, sampled);
+      float3 mn = mul((float3x3)draw_records[push.draw_index].model, sampled);
       if (dot(mn, mn) > 1e-8) n = normalize(mn);
     } else {
       float3 t = input.tangent.xyz - n * dot(input.tangent.xyz, n);

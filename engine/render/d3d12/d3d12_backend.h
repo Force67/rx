@@ -125,10 +125,10 @@ struct PipelineRecord {
   bool push_root_constants = false;  // else: root CBV fed from the upload ring
   i32 push_param = -1;
   // Root SRV that emulates push-block buffer-device-address reads for DXIL
-  // (bone palettes): bound with the u64 the backend finds at byte 128 of the
-  // push block. See rec_bone_palette in mesh.vs.hlsl / RHI.md.
+  // (bone palettes): bound with the u64 the backend finds at the push block's
+  // RX_BDA bone offset. See rec_bone_palette in mesh.vs.hlsl / RHI.md.
   i32 bda_param = -1;
-  // The same emulation for the morph target addresses at push bytes 160/168:
+  // The same emulation for the mesh block's morph target addresses:
   // rec_morph_deltas / rec_morph_weights in mesh.vs.hlsl.
   i32 morph_delta_param = -1;
   i32 morph_weight_param = -1;

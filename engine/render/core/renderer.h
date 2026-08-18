@@ -639,6 +639,13 @@ private:
         morph_weights; // host visible MorphWeight pairs, read by device address
     GpuBuffer lights;  // host visible PointLight array
     GpuBuffer decals;  // host visible Decal array
+    // Host visible DrawRecord arena: one per FrameView draw (plus the zeroed
+    // record 0), indexed by the record id every mesh / shadow / water push carries
+    // instead of the 128 bytes of matrices that used to ride in the block.
+    // Grown on demand, never clamped - a dropped record would silently render
+    // a draw at the origin.
+    GpuBuffer draw_records;
+    u32 draw_record_capacity = 0;
   };
   // Max bones across all skinned draws in one frame.
   static constexpr u32 kMaxFrameBones = 8192;
@@ -648,6 +655,11 @@ private:
 
   bool CreateFrameResources();
   void DestroyFrameResources();
+  // Fills this slot's DrawRecord arena from view.draws (growing it first) and
+  // returns the buffer the passes bind. Record 0 stays zeroed: instanced draws
+  // take their matrices from vertex streams and used to push an all-zero model,
+  // and the fragment stage's model-space-normal branch rejects it the same way.
+  const GpuBuffer &UploadDrawRecords(FrameResources &frame, const FrameView &view);
   void RecreateSwapchain();
   // Whether the swapchain should request an HDR format: the hdr_output setting
   // gated on the OS actually compositing the window in HDR (Window::

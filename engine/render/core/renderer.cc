@@ -3268,7 +3268,12 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
   // static permutation up front so the matrix push always has a pipeline.
   PipelineHandle bound_pipeline = shadow_.pipeline();
   cmd.BindPipeline(bound_pipeline);
-  cmd.PushConstants(&light_view_proj, sizeof(Mat4));
+  // Every caster pipeline shares this layout, so the arena binds once for the
+  // whole depth-only pass; the per-draw base below selects the record.
+  cmd.BindTransient(ShadowPass::kDrawRecordSet,
+                    {Bind::StorageBuffer(0, frame.draw_records)});
+  cmd.PushConstants(&light_view_proj, sizeof(Mat4),
+                    ShadowPass::kLightMatrixOffset);
   for (const DrawItem &item : view.draws) {
     const GpuMesh *mesh = meshes_.find(item.mesh);
     // no_rt skips grass-like fill geometry, but skinned actors are
@@ -3281,17 +3286,18 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
     // shadow tracks the animated pose, not the bind pose.
     bool draw_skinned = mesh->skinned && item.skin_offset >= 0 &&
                         static_cast<bool>(shadow_.skinned_pipeline());
-    // The light matrix sits at offset 0; the model follows it, skin data after.
-    cmd.PushConstants(&item.transform, sizeof(Mat4), sizeof(Mat4));
+    // The per-draw head sits at offset 0; the cascade matrix pushed above it
+    // outlives every caster.
+    ShadowPass::DrawPush draw_push{};
+    draw_push.draw_index = static_cast<u32>(&item - view.draws.data()) + 1u;
+    if (draw_skinned) {
+      draw_push.skin_offset = static_cast<u32>(item.skin_offset);
+      draw_push.bone_address = frame.bone_palette.address;
+    }
+    cmd.PushConstants(&draw_push, sizeof(draw_push));
     cmd.BindVertexBuffer(0, mesh->vertices);
     if (draw_skinned) {
       cmd.BindVertexBuffer(1, mesh->skinning);
-      struct {
-        u64 bone_address;
-        u32 skin_offset;
-        u32 pad;
-      } skin{frame.bone_palette.address, static_cast<u32>(item.skin_offset), 0};
-      cmd.PushConstants(&skin, sizeof(skin), 2 * sizeof(Mat4));
     }
     cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
     for (const GpuSubmesh &submesh : mesh->submeshes) {
@@ -3528,6 +3534,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         items.push_back(
             Bind::Uniform(0, frames_[frame_index_ % kFramesInFlight].globals, 0,
                           sizeof(FrameGlobals)));
+        items.push_back(Bind::StorageBuffer(
+            3, frames_[frame_index_ % kFramesInFlight].draw_records));
         if (want_tlas && rt_available_ && raytracing_ &&
             raytracing_->tlas(tlas_slot)) {
           items.push_back(Bind::Accel(1, raytracing_->tlas(tlas_slot)));
@@ -3732,8 +3740,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               bound_item = nullptr;
             }
             if (draw.item != bound_item) {
-              MeshPushConstants push{.model = draw.item->transform,
-                                     .prev_model = draw.item->prev_transform};
+              MeshPushConstants push{};
+              push.draw_index =
+                  static_cast<u32>(draw.item - view.draws.data()) + 1u;
               // Same packing as the opaque site: low 24 bits the per-draw
               // tint, top byte the baked decal-layer tile.
               push.tint_packed =
@@ -4132,6 +4141,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     std::memcpy(frame.morph_weights.mapped, view.morph_weights.data(),
                 count * sizeof(MorphWeight));
   }
+  // Per-draw transforms for every pass that walks view.draws this frame. One
+  // arena, filled once: the prepass, scene, shadow, transparent and water
+  // passes all index the same records with the base their push block carries.
+  UploadDrawRecords(frame, view);
 
   ResourceHandle scene_color =
       graph_.CreateTexture({.name = "scene_color",
@@ -4817,6 +4830,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                   // LocalShadows::Render bound the passed masked static
                   // pipeline.
                   PipelineHandle bound_pipeline = shadow_.local_pipeline();
+                  cmd.BindTransient(
+                      ShadowPass::kDrawRecordSet,
+                      {Bind::StorageBuffer(0, frame.draw_records)});
                   for (const DrawItem &item : view.draws) {
                     const GpuMesh *mesh = meshes_.find(item.mesh);
                     if (!mesh || mesh->all_blend ||
@@ -4846,18 +4862,18 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                     bool draw_skinned =
                         mesh->skinned && item.skin_offset >= 0 &&
                         static_cast<bool>(shadow_.local_skinned_pipeline());
-                    cmd.PushConstants(&item.transform, sizeof(Mat4),
-                                      sizeof(Mat4));
+                    ShadowPass::DrawPush draw_push{};
+                    draw_push.draw_index =
+                        static_cast<u32>(&item - view.draws.data()) + 1u;
+                    if (draw_skinned) {
+                      draw_push.skin_offset =
+                          static_cast<u32>(item.skin_offset);
+                      draw_push.bone_address = frame.bone_palette.address;
+                    }
+                    cmd.PushConstants(&draw_push, sizeof(draw_push));
                     cmd.BindVertexBuffer(0, mesh->vertices);
                     if (draw_skinned) {
                       cmd.BindVertexBuffer(1, mesh->skinning);
-                      struct {
-                        u64 bone_address;
-                        u32 skin_offset;
-                        u32 pad;
-                      } skin{frame.bone_palette.address,
-                             static_cast<u32>(item.skin_offset), 0};
-                      cmd.PushConstants(&skin, sizeof(skin), 2 * sizeof(Mat4));
                     }
                     cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
                     for (const GpuSubmesh &submesh : mesh->submeshes) {
@@ -5083,8 +5099,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         if (!mesh || mesh->all_blend || !mesh->has_meshlets)
           continue;
         MeshShaderPush push{};
-        push.model = item.transform;
-        push.prev_model = item.prev_transform;
+        push.draw_index = static_cast<u32>(&item - view.draws.data()) + 1u;
         push.meshlets_address = mesh->meshlets.address;
         push.meshlet_vertices_address = mesh->meshlet_vertices.address;
         push.meshlet_triangles_address = mesh->meshlet_triangles.address;
@@ -5205,8 +5220,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             bool ms_handled = ms_active && mesh->has_meshlets;
             bool draw_skinned = mesh->skinned && mesh_pipeline_->has_skinning();
             if (!ms_handled) {
-              MeshPushConstants push{.model = item.transform,
-                                     .prev_model = item.prev_transform};
+              MeshPushConstants push{};
+              push.draw_index =
+                  static_cast<u32>(&item - view.draws.data()) + 1u;
               if (mesh->terrain_lod) {
                 std::memcpy(push.detail_rect, view.detail_rect,
                             sizeof(push.detail_rect));
@@ -5915,8 +5931,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                            settings_.wireframe);
                 skinned_bound = draw_skinned;
               }
-              MeshPushConstants push{.model = item.transform,
-                                     .prev_model = item.prev_transform};
+              MeshPushConstants push{};
+              push.draw_index =
+                  static_cast<u32>(&item - view.draws.data()) + 1u;
               if (mesh->terrain_lod) {
                 std::memcpy(push.detail_rect, view.detail_rect,
                             sizeof(push.detail_rect));
@@ -6753,19 +6770,25 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           [&](RenderGraph::PassBuilder &builder) {
             builder.Write(lit, ResourceUsage::kColorAttachment);
           },
-          [this, lit, view_proj, &view](PassContext &ctx) {
+          [this, lit, view_proj, &frame, &view](PassContext &ctx) {
             overdraw_.Render(
                 *ctx.cmd, ctx.graph->image(lit).view,
                 {render_width_, render_height_}, view_proj,
-                [this, &view, view_proj](CommandList &cmd) {
+                [this, &frame, &view, view_proj](CommandList &cmd) {
+                  // This pass borrows shadow.vs, so it borrows its arena too.
+                  cmd.BindTransient(
+                      ShadowPass::kDrawRecordSet,
+                      {Bind::StorageBuffer(0, frame.draw_records)});
                   for (const DrawItem &item : view.draws) {
                     const GpuMesh *mesh = meshes_.find(item.mesh);
                     if (!mesh || !mesh->indices)
                       continue;
-                    // view_proj sits at offset 0 (pushed by Render); the model
-                    // follows it per draw.
-                    cmd.PushConstants(&item.transform, sizeof(Mat4),
-                                      sizeof(Mat4));
+                    // view_proj sits where the cascade matrix goes (pushed by
+                    // Render); the per-draw head leads the block.
+                    ShadowPass::DrawPush draw_push{};
+                    draw_push.draw_index =
+                        static_cast<u32>(&item - view.draws.data()) + 1u;
+                    cmd.PushConstants(&draw_push, sizeof(draw_push));
                     cmd.BindVertexBuffer(0, mesh->vertices);
                     cmd.BindIndexBuffer(mesh->indices, 0, IndexType::kUint32);
                     for (const GpuSubmesh &submesh : mesh->submeshes) {
@@ -6906,8 +6929,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             if (!mesh || mesh->all_blend)
               continue;
             bool draw_skinned = mesh->skinned && mesh_pipeline_->has_skinning();
-            MeshPushConstants push{.model = item.transform,
-                                   .prev_model = item.prev_transform};
+            MeshPushConstants push{};
+            push.draw_index = static_cast<u32>(&item - view.draws.data()) + 1u;
             if (mesh->terrain_lod) {
               std::memcpy(push.detail_rect, view.detail_rect,
                           sizeof(push.detail_rect));
@@ -7334,8 +7357,44 @@ bool Renderer::CreateFrameResources() {
                               kBufferUsageStorage, true);
     if (!frame.decals.mapped)
       return false;
+
+    // Per-draw transform arena. Sized for a typical scene here and grown by
+    // UploadDrawRecords when a frame needs more.
+    frame.draw_record_capacity = 1024;
+    frame.draw_records = device_->CreateBuffer(
+        static_cast<u64>(frame.draw_record_capacity) * sizeof(DrawRecord),
+        kBufferUsageStorage, true);
+    if (!frame.draw_records.mapped)
+      return false;
   }
   return true;
+}
+
+const GpuBuffer &Renderer::UploadDrawRecords(FrameResources &frame,
+                                             const FrameView &view) {
+  // Record 0 is the zeroed "no per-draw transform" slot, so the arena is one
+  // longer than the draw list and every draw's record is 1 + its index.
+  const u32 needed = static_cast<u32>(view.draws.size()) + 1;
+  if (frame.draw_record_capacity < needed) {
+    // The slot's fence fired in BeginFrame, so nothing still reads the old
+    // buffer; retire it deferred anyway and round up to keep growth rare.
+    u32 cap = frame.draw_record_capacity ? frame.draw_record_capacity : 1024;
+    while (cap < needed)
+      cap *= 2;
+    device_->DestroyBufferDeferred(frame.draw_records);
+    frame.draw_records =
+        device_->CreateBuffer(static_cast<u64>(cap) * sizeof(DrawRecord),
+                              kBufferUsageStorage, true);
+    frame.draw_record_capacity = frame.draw_records.mapped ? cap : 0;
+  }
+  if (!frame.draw_records.mapped)
+    return frame.draw_records;
+  auto *records = static_cast<DrawRecord *>(frame.draw_records.mapped);
+  records[0] = DrawRecord{};
+  for (size_t i = 0; i < view.draws.size(); ++i) {
+    records[i + 1] = {view.draws[i].transform, view.draws[i].prev_transform};
+  }
+  return frame.draw_records;
 }
 
 void Renderer::DestroyFrameResources() {
@@ -7350,6 +7409,8 @@ void Renderer::DestroyFrameResources() {
       device_->DestroyBuffer(frame.lights);
     if (frame.decals)
       device_->DestroyBuffer(frame.decals);
+    if (frame.draw_records)
+      device_->DestroyBuffer(frame.draw_records);
     frame = {};
   }
   for (u32 i = 0; i < kFramesInFlight; ++i) {
