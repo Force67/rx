@@ -79,6 +79,23 @@ bool Parse(const std::string& v, UpscalerQuality& out) {
   return true;
 }
 
+const char* Name(HumanQualityTier t) {
+  switch (t) {
+    case HumanQualityTier::kHero: return "hero";
+    case HumanQualityTier::kStandard: return "standard";
+    case HumanQualityTier::kDistant: return "distant";
+  }
+  return "hero";
+}
+
+bool Parse(const std::string& v, HumanQualityTier& out) {
+  if (v == "hero") out = HumanQualityTier::kHero;
+  else if (v == "standard") out = HumanQualityTier::kStandard;
+  else if (v == "distant") out = HumanQualityTier::kDistant;
+  else return false;
+  return true;
+}
+
 const char* Name(TonemapOperator t) {
   switch (t) {
     case TonemapOperator::kAces: return "aces";
@@ -189,6 +206,7 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "water_absorption_scale = " << s.water_absorption_scale << "\n";
   o << "water_transmission = " << s.water_transmission << "\n";
   o << "water_refl_foam_gain = " << s.water_refl_foam_gain << "\n";
+  o << "human_tier_cap = " << Name(s.human_tier_cap) << "\n";
   o << "water_sss_intensity = " << s.water_sss_intensity << "\n";
   o << "water_sss_exponent = " << s.water_sss_exponent << "\n";
   o << "water_caustics = " << Bool(s.water_caustics) << "\n";
@@ -342,6 +360,7 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   fl("water_absorption_scale", s.water_absorption_scale);
   fl("water_transmission", s.water_transmission);
   fl("water_refl_foam_gain", s.water_refl_foam_gain);
+  en("human_tier_cap", s.human_tier_cap);
   fl("water_sss_intensity", s.water_sss_intensity);
   fl("water_sss_exponent", s.water_sss_exponent);
   b("water_caustics", s.water_caustics);

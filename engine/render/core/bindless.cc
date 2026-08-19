@@ -83,6 +83,23 @@ void BindlessRegistry::RewriteTextureIndex(u32 material_index, u32 old_texture, 
   if (record->terrain_weight_texture == old_texture) record->terrain_weight_texture = new_texture;
 }
 
+void BindlessRegistry::UpdateMaterialShading(u32 material_index, const MaterialRecord& record) {
+  if (material_index == kInvalidIndex || material_index >= material_count_) return;
+  auto* dst = reinterpret_cast<MaterialRecord*>(static_cast<u8*>(material_table_.mapped) +
+                                                material_index * sizeof(MaterialRecord));
+  // Texture slots are owned by streaming, which may have moved them since the
+  // caller built its record; everything else is shading state.
+  const u32 base = dst->base_color_texture;
+  const u32 mr = dst->metallic_roughness_texture;
+  const u32 layer1 = dst->terrain_layer1_texture;
+  const u32 weight = dst->terrain_weight_texture;
+  *dst = record;
+  dst->base_color_texture = base;
+  dst->metallic_roughness_texture = mr;
+  dst->terrain_layer1_texture = layer1;
+  dst->terrain_weight_texture = weight;
+}
+
 u32 BindlessRegistry::RegisterMaterial(const MaterialRecord& record) {
   if (material_count_ >= kMaxMaterials) {
     RX_WARN("bindless material table full");
