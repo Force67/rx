@@ -64,7 +64,9 @@ struct FrameGlobals {
 
 #include "sss_profile.hlsli"
 #include "human_brdf.hlsli"  // the character surface model every light path shares
-#include "human_eye.hlsli"   // corneal refraction, iris parallax, limbal ring  // skin subsurface profile + blood-flow perfusion
+#include "human_eye.hlsli"   // corneal refraction, iris parallax, limbal ring
+#include "hair_bsdf.hlsli"  // the fibre BSDF hair cards and strand grooms share
+#include "geometry/hair_transmittance.hlsli"  // fibre count between a point and the sun  // skin subsurface profile + blood-flow perfusion
 #include "geometry/shore_wetting.hlsli"  // ShoreWetness (env slot 33)
 #include "geometry/water_caustics.hlsli"  // WaterCaustic (env slot 34)
 
@@ -348,6 +350,10 @@ struct MaterialParams {
   float4 human_layer;            // x cavity occlusion, y spec-normal strength, z thickness scale (m), w region id
   float4 human_eye0;             // x iris depth (m), y iris radius (uv), z pupil scale, w limbal size (uv)
   float4 human_eye1;             // x limbal power, y cornea ior, z iris shadow depth, w light-shape response
+  // --- Hair cards (kFlagHair). The same fibre BSDF the strand grooms use.
+  float4 hair0;                  // xyz sigma_a, w beta_m
+  float4 hair1;                  // x beta_n, y alpha, z eta, w scatter scale
+  float4 hair2;                  // x colour reference depth, y assumed depth, z colour-from-albedo, w unused
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
 
@@ -405,6 +411,32 @@ struct MaterialParams {
 [[vk::combinedImageSampler]] [[vk::binding(5, 2)]] Texture2DArray ddgi_distance : register(t5, space2);
 [[vk::combinedImageSampler]] [[vk::binding(5, 2)]] SamplerState ddgi_distance_sampler : register(s5, space2);
 // RCGI resolved full-res indirect diffuse (env slot 35, replaces DDGI + SSGI).
+// Hair transmittance volume (env slots 44-46): the same deep opacity map the
+// strand pass shades against, so the scalp under a groom is shadowed by the
+// fibres over it. A groom is not opaque, so a binary shadow map cannot carry
+// this - and hair that casts nothing on the head is the single most visible
+// thing wrong with a rendered character.
+//
+// The volume is built later in the frame than this pass reads it, so the shadow
+// is one frame old. Hair moves slowly relative to a frame and the alternative
+// is reordering the whole graph around it; the lag is invisible and the
+// staleness is bounded.
+[[vk::combinedImageSampler]] [[vk::binding(44, 2)]] Texture2D<float> hair_front_depth : register(t44, space2);
+[[vk::combinedImageSampler]] [[vk::binding(44, 2)]] SamplerState hair_front_sampler : register(s44, space2);
+[[vk::combinedImageSampler]] [[vk::binding(45, 2)]] Texture2D<float4> hair_dom : register(t45, space2);
+[[vk::combinedImageSampler]] [[vk::binding(45, 2)]] SamplerState hair_dom_sampler : register(s45, space2);
+[[vk::binding(46, 2)]] ConstantBuffer<HairVolume> hair_volume : register(b46, space2);
+
+// Sun transmittance through whatever hair is overhead. Each fibre crossed
+// removes a share of the light; the exponential is Beer-Lambert over the fibre
+// count the volume reports.
+float HairSunTransmittance(float3 world_pos) {
+  if (hair_volume.transmittance.enabled <= 0.5) return 1.0;
+  float fibres = HairFibresToLight(hair_volume.transmittance, hair_dom, hair_dom_sampler,
+                                   hair_front_depth, hair_front_sampler, world_pos);
+  return exp(-hair_volume.ambient.w * fibres);
+}
+
 [[vk::combinedImageSampler]] [[vk::binding(35, 2)]] Texture2D rcgi_irradiance : register(t35, space2);
 [[vk::combinedImageSampler]] [[vk::binding(35, 2)]] SamplerState rcgi_irradiance_sampler : register(s35, space2);
 // RCGI world irradiance cascades (env slots 36-40). The resolved texture above is
@@ -1046,6 +1078,12 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   shadow *= WaterCaustic(input.world_pos, frame.flags,
                          frame.water_absorption.rgb * frame.water_absorption.w, frame.water_caustics);
 
+  // Hair overhead. Applied to the sun term for everything, not just skin: a
+  // groom shadows the collar and the shoulders too, and restricting it to
+  // flagged materials is how a head ends up with a shadow that stops at the
+  // hairline.
+  shadow *= HairSunTransmittance(input.world_pos);
+
   // glTF metallic roughness packing: g roughness, b metallic. Terrain reuses
   // this slot as a land layer, so it takes the neutral rough dielectric path.
   // Engines with separate maps (kFlagSeparateMetallic, e.g. Starfield) keep the
@@ -1198,13 +1236,43 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float3 strand = input.tangent.xyz - n * dot(input.tangent.xyz, n);
     if (dot(strand, strand) > 1e-8) {
       strand = normalize(strand);
-      float gloss = 1.0 - roughness;
-      float e1 = lerp(30.0, 260.0, gloss * gloss);
-      float3 spec1 = 0.20 * StrandSpecular(ShiftTangent(strand, n, -0.08), v, l, e1).xxx;
-      float3 spec2 =
-          albedo * 0.45 * StrandSpecular(ShiftTangent(strand, n, 0.10), v, l, e1 * 0.25);
-      float wrap = saturate((dot(n, l) + 0.5) / 1.5);
-      lit = (diffuse_color / kPi + spec1 + spec2) * wrap * sun * shadow;
+      HairSurfaceParams hair;
+      hair.beta_m = material.hair0.w;
+      hair.beta_n = material.hair1.x;
+      hair.alpha = material.hair1.y;
+      hair.eta = material.hair1.z;
+      hair.density = 1.0;
+      hair.scatter_scale = material.hair1.w;
+      // Painted hair textures are a target colour, not a pigment measurement,
+      // so they go through the same inversion the grooms use. Multiplying the
+      // shaded result by the albedo instead gives blonde cards that scatter
+      // like brown ones.
+      hair.sigma_a = material.hair2.z > 0.5
+                         ? HairSigmaFromColor(saturate(albedo), material.hair2.x)
+                         : material.hair0.xyz;
+
+      HairFrame hf = HairMakeFrame(strand);
+      // A card is a slab standing in for many fibres and is not in the
+      // transmittance volume, so it has no measured depth. The volume still
+      // answers when a strand groom is over it (a card fringe under simulated
+      // hair), and the authored assumption stands in otherwise - never zero,
+      // which would mean one isolated fibre.
+      float card_fibres = material.hair2.y;
+      if (hair_volume.transmittance.enabled > 0.5) {
+        float measured = HairFibresToLight(hair_volume.transmittance, hair_dom,
+                                           hair_dom_sampler, hair_front_depth,
+                                           hair_front_sampler, input.world_pos);
+        card_fibres = max(card_fibres, measured);
+      }
+      // `h` across the card: hair-card uv runs across the strand width on x, so
+      // the azimuthal variation a real fibre has is available here too rather
+      // than collapsing to the centre of the cylinder.
+      float card_h = clamp(frac(input.uv.x) * 2.0 - 1.0, -1.0, 1.0);
+      float3 hair_lit = HairShade(hair, HairToLocal(hf, v), HairToLocal(hf, l), card_h,
+                                  card_fibres);
+      // The sun shadow already carries whatever the volume said about hair
+      // overhead, so it is not applied twice.
+      lit = hair_lit * sun * shadow;
     }
   }
 
@@ -1596,6 +1664,15 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     // screen-space (photograph - render) difference back into texture space;
     // without it the residual fit has no way to know which texel it measured.
     case 23: return float3(frac(input.uv), 0.0);
+    // Fibres of hair between this surface and the sun, as a heat ramp. The
+    // number the hair shadow is a function of; without a way to look at it,
+    // "the shadow is too weak" and "the volume is empty" are indistinguishable.
+    case 24: {
+      if (hair_volume.transmittance.enabled <= 0.5) return float3(0.02, 0.0, 0.06);
+      float f = HairFibresToLight(hair_volume.transmittance, hair_dom, hair_dom_sampler,
+                                  hair_front_depth, hair_front_sampler, input.world_pos);
+      return HairFibreHeat(f);
+    }
     case 9:  // raw reflection: the denoised target when present, else traced
       if ((frame.flags & kFrameSpecReflTex) != 0u) {
         return spec_refl_map.SampleLevel(spec_refl_sampler,

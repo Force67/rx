@@ -8,6 +8,7 @@ rx_add_module(render
   pipeline/mesh_pipeline.cc
   pipeline/material_system.cc
   pipeline/human_material.cc
+  pipeline/hair_material.cc
   pipeline/meshlet.cc
   pipeline/gpu_cull.cc
   gi/shadow.cc
@@ -311,6 +312,7 @@ set(RX_RENDER_SHADERS
   shaders/pipeline/vgeo_resolve.ps.hlsl
   shaders/geometry/hair.vs.hlsl
   shaders/geometry/hair.ps.hlsl
+  shaders/geometry/hair_dom.ps.hlsl
   shaders/geometry/ocean_spectrum.cs.hlsl
   shaders/geometry/ocean_fft.cs.hlsl
   shaders/geometry/ocean_finalize.cs.hlsl
@@ -406,6 +408,8 @@ endif()
 # (rec_bone_palette root SRV on DXIL).
 # Wrapper-shader include dependencies (see cmake/shaders.cmake).
 set(RX_SHADER_DEPS_pathtrace_cs_hlsl shaders/human_brdf.hlsli shaders/material_record.hlsli)
+set(RX_SHADER_DEPS_hair_ps_hlsl shaders/hair_bsdf.hlsli shaders/geometry/hair_transmittance.hlsli)
+set(RX_SHADER_DEPS_hair_dom_ps_hlsl shaders/geometry/hair_transmittance.hlsli)
 set(RX_SHADER_DEPS_tonemap_ps_hlsl shaders/post/tonemap_ops.hlsli)
 set(RX_SHADER_DEPS_reference_compare_cs_hlsl shaders/post/tonemap_ops.hlsli)
 set(RX_SHADER_DEPS_mesh_vs_hlsl shaders/pipeline/morph.hlsli)
@@ -414,11 +418,12 @@ set(RX_SHADER_DEPS_sky_cs_hlsl shaders/atmosphere/aurora.hlsli)
 set(RX_SHADER_DEPS_mesh_instance_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_mesh_skin_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_decal_bake_skin_vs_hlsl shaders/texturing/decal_bake.vs.hlsl)
-set(RX_SHADER_DEPS_mesh_ps_hlsl shaders/human_brdf.hlsli shaders/human_eye.hlsli)
+set(RX_SHADER_DEPS_mesh_ps_hlsl shaders/human_brdf.hlsli shaders/human_eye.hlsli
+    shaders/geometry/hair_transmittance.hlsli shaders/hair_bsdf.hlsli)
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl shaders/human_brdf.hlsli
     shaders/human_eye.hlsli)
 set(RX_SHADER_DEPS_mesh_rt_ps_hlsl shaders/gi/rcgi_common.hlsli shaders/human_brdf.hlsli
-    shaders/human_eye.hlsli)
+    shaders/human_eye.hlsli shaders/geometry/hair_transmittance.hlsli shaders/hair_bsdf.hlsli)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl)
 set(RX_SHADER_DEPS_shadow_instance_vs_hlsl shaders/gi/shadow.vs.hlsl)
 set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl shaders/gi/rcgi_common.hlsli

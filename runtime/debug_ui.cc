@@ -77,7 +77,7 @@ const char* kDebugViews[] = {"Off",         "Base color",   "World normal",
                              // (docs/CHARACTER_RENDERING.md).
                              "Human: diffuse", "Human: specular", "Human: 2nd lobe",
                              "Human: transmission", "Human: residual", "Human: Ns vs Nd",
-                             "Human: eye", "UV"};
+                             "Human: eye", "UV", "Hair fibres"};
 
 // FPS readout colour bands: green above smooth, amber in the warning band, red
 // once it slips below playable.

@@ -46,6 +46,7 @@ enum class DebugView : u8 {
   kHumanNormalSplit,    // |Ns - Nd|: how far the specular normal has moved
   kHumanEye,            // r iris mask, g limbal ring, b iris shadow
   kUv,                  // the shaded texel's uv (feeds tools/fit_residual.py)
+  kHairFibres,          // fibres between the surface and the sun (the hair volume)
 };
 
 // Quality ceiling for the character surface model. Mirrors render::HumanTier
@@ -323,6 +324,23 @@ struct RenderSettings {
   // skin-flagged materials' diffuse lighting (red bleed at shadow terminators).
   bool sss = true;
   f32 sss_width = 0.012f;  // world scattering radius, meters
+
+  // Hair transmittance volume (the deep opacity map behind self-shadowing and
+  // dual scattering). Off, a groom shades against a constant assumed depth: it
+  // still gets multiple scattering, but no interior and no shadow from its own
+  // strands. See docs/HAIR.md.
+  bool hair_transmittance = true;
+  // Metres the volume's four layers span past the front-most fibre. Roughly the
+  // depth of a groom; too small and the interior saturates in the first layer,
+  // too large and the front fibres stop resolving.
+  f32 hair_transmittance_depth = 0.18f;
+  // Rendered ribbons -> optical fibres. A groom draws several clump children
+  // per simulated guide and the volume counts ribbons; this converts.
+  f32 hair_fibre_scale = 1.0f;
+  // Sun removed per crossed fibre for surfaces UNDER a groom (the scalp, the
+  // collar). 0 disables hair shadowing of the scene without disabling the
+  // groom's own self-shadowing.
+  f32 hair_shadow_density = 0.6f;
 
   // Character surface model quality ceiling for this hardware tier. The tier a
   // given character actually gets is min(this, the tier its screen height earns

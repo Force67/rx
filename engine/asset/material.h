@@ -271,10 +271,34 @@ struct Material {
   bool human = false;
   HumanParams human_params;
 
-  // Hair: dual-lobe Kajiya-Kay strand specular along the vertex tangent
-  // (strand direction) replaces the GGX sun response; roughness drives the
-  // highlight width. Pair with alpha-masked cards for real hair.
+  // Hair cards. `hair` routes the material through the fibre BSDF
+  // (render/shaders/hair_bsdf.hlsli) - Marschner's R/TT/TRT lobes with Zinke
+  // dual scattering - along the vertex tangent, which for a hair card is the
+  // strand direction. The same evaluator the strand grooms use: a character
+  // whose card hair and whose simulated strands shade differently has two hair
+  // materials, and only one of them can be the right one.
   bool hair = false;
+  struct HairParams {
+    // Absorption, or the colour to invert into it. See HairColorMode in
+    // render/pipeline/hair_material.h: authored colour is the default because
+    // hair textures are painted, not measured, and the inversion keeps the
+    // colour coupled to how the fibre scatters.
+    bool color_from_albedo = true;
+    f32 sigma_a[3] = {0.06f, 0.10f, 0.20f};  // only read when color_from_albedo is false
+    f32 beta_m = 0.3f;   // longitudinal roughness (highlight width along the strand)
+    f32 beta_n = 0.3f;   // azimuthal roughness (highlight width around it)
+    f32 alpha = 0.0349066f;  // cuticle scale tilt, radians; separates the two highlights
+    f32 eta = 1.55f;         // keratin
+    f32 scatter_scale = 1.0f;  // gain on multiple scattering
+    // Fibre depth at which the authored colour renders exactly.
+    f32 color_reference_depth = 6.0f;
+    // A card is a slab standing in for many fibres, and unlike a strand groom
+    // it is not in the transmittance volume, so it has no measured depth. This
+    // is what it assumes instead. Zero would mean "one isolated fibre", which
+    // is the one answer that is definitely wrong for a card.
+    f32 assumed_depth = 5.0f;
+  };
+  HairParams hair_params;
   // Albedo comes from the engine's virtual-texture space instead of the
   // base_color texture (feedback-streamed page atlas; see VirtualTexture).
   bool virtual_albedo = false;

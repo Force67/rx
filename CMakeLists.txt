@@ -609,6 +609,19 @@ if(RX_BUILD_TESTS)
   target_link_libraries(human_brdf_test PRIVATE rx::core)
   add_test(NAME human_brdf_test COMMAND human_brdf_test)
 
+  # Hair BSDF: energy over the sphere, reciprocity, pigment coupling, multiple
+  # scattering behaviour, tier monotonicity. Pure CPU (the mirror of
+  # hair_bsdf.hlsli), so plain `ctest` runs it everywhere.
+  add_executable(hair_bsdf_test
+    test/hair_bsdf_test.cc
+    engine/render/pipeline/hair_material.cc)
+  target_include_directories(hair_bsdf_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_compile_definitions(hair_bsdf_test PRIVATE RX_RENDER_IMPLEMENTATION)
+  target_link_libraries(hair_bsdf_test PRIVATE rx::core)
+  add_test(NAME hair_bsdf_test COMMAND hair_bsdf_test)
+
   add_executable(procedural_grass_test test/procedural_grass_test.cc)
   target_include_directories(procedural_grass_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/engine
