@@ -14,6 +14,7 @@
 #include "core/math.h"
 #include "render/core/render_graph.h"
 #include "render/geometry/hair_groom.h"
+#include "render/pipeline/hair_material.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {
@@ -46,18 +47,58 @@ class HairStrands {
   void SeedCap(Device& device, const Vec3& head_center, f32 head_radius, u32 strand_count,
                f32 strand_length);
 
+  // Per-groom fibre parameters. Colour is PIGMENT: the groom's per-strand colour
+  // tints it, it does not replace it. See render/pipeline/hair_material.h.
+  void SetGroomHair(u32 id, const HairSurfaceParameters& params);
+  void SetGroomTier(u32 id, HairTier tier);
+
   struct Frame {
     Mat4 view_proj;
     Vec3 camera_pos;
     Vec3 sun_direction;  // travel
     f32 sun_intensity = 3.0f;
     Vec3 sun_color{1, 1, 1};
+    // Sky/ambient reaching the groom. Hair with no ambient reads as a black
+    // silhouette the moment it leaves the sun, which is not what hair does.
+    Vec3 ambient{0.05f, 0.055f, 0.06f};
+    // Metres the deep opacity map's four layers span past the front-most fibre.
+    // Roughly the depth of the groom; too small and the interior saturates at
+    // the first layer, too large and the front fibres stop resolving.
+    f32 transmittance_depth = 0.18f;
+    // Rendered ribbons -> optical fibres. A groom draws `children` ribbons per
+    // simulated guide, and the DOM counts ribbons; this is the correction.
+    f32 fibre_scale = 1.0f;
+    // How much sun one crossed fibre removes from a surface UNDER the groom.
+    // A fibre is nearly opaque to a ray that hits it, but the volume counts
+    // partial ribbon coverage, so this is below 1.
+    f32 shadow_density = 0.6f;
+    // render::DebugView. The strand pass honours the fibre-count view: a debug
+    // view occluded by the very geometry it is diagnosing is not a diagnostic.
+    u32 debug_view = 0;
+    bool transmittance = true;
   };
+
+  // Renders the deep opacity map from the sun: pass one records the front-most
+  // fibre depth per light texel, pass two accumulates fibre counts into four
+  // layers past it. Must run before AddToGraph. No-op with no live grooms.
+  void AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame, u32 frame_slot);
 
   void AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
                   Extent2D extent, const Frame& frame, u32 frame_slot);
 
+  // The volume the last AddTransmittanceToGraph produced, for consumers outside
+  // the hair pass (the skin under the groom needs the same fibre count). Null
+  // view when hair is absent or the volume is off.
+  struct TransmittanceBinding {
+    TextureView front_depth;
+    TextureView layers;
+    const GpuBuffer* params = nullptr;
+    SamplerHandle sampler;
+  };
+  TransmittanceBinding transmittance() const;
+
   static constexpr u32 kFramesInFlight = 2;
+  static constexpr u32 kTransmittanceResolution = 1024;
 
  private:
   struct HairPoint {
@@ -81,14 +122,34 @@ class HairStrands {
     Vec3 collision_center{};
     f32 collision_radius = 0;
     Vec3 tint{1, 1, 1};
+    HairSurfaceParameters hair;
+    HairTier tier = HairTier::kHero;
+    GpuBuffer material;  // GroomMaterial, rewritten only when the material changes
     u32 id = 0;
     bool alive = false;
   };
   Groom* Find(u32 id);
   u32 Upload(Device& device, const GroomData& data, const GroomParams& params,
              const Mat4& transform);
+  // World AABB of every live groom's points. The light frustum is fitted to it,
+  // so the map's resolution follows the hair rather than the world.
+  bool WorldBounds(Vec3* lo, Vec3* hi) const;
+  void WriteGroomMaterial(Groom& g);
 
   PipelineHandle draw_pipeline_;
+  PipelineHandle depth_pipeline_;  // DOM pass one: front-most fibre depth
+  PipelineHandle dom_pipeline_;    // DOM pass two: layered fibre counts
+  SamplerHandle volume_sampler_;
+  GpuImage front_depth_;
+  GpuImage dom_;
+  GpuBuffer volume_params_[kFramesInFlight];
+  ResourceState front_depth_state_ = ResourceState::kUndefined;
+  ResourceState dom_state_ = ResourceState::kUndefined;
+  bool volume_valid_ = false;
+  u32 volume_slot_ = 0;
+  ResourceHandle volume_front_handle_{};
+  ResourceHandle volume_layers_handle_{};
+  Device* device_ = nullptr;
   base::Vector<Groom> grooms_;
   u32 next_id_ = 1;
 };

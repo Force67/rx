@@ -207,6 +207,10 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "water_transmission = " << s.water_transmission << "\n";
   o << "water_refl_foam_gain = " << s.water_refl_foam_gain << "\n";
   o << "human_tier_cap = " << Name(s.human_tier_cap) << "\n";
+  o << "hair_transmittance = " << s.hair_transmittance << "\n";
+  o << "hair_transmittance_depth = " << s.hair_transmittance_depth << "\n";
+  o << "hair_fibre_scale = " << s.hair_fibre_scale << "\n";
+  o << "hair_shadow_density = " << s.hair_shadow_density << "\n";
   o << "water_sss_intensity = " << s.water_sss_intensity << "\n";
   o << "water_sss_exponent = " << s.water_sss_exponent << "\n";
   o << "water_caustics = " << Bool(s.water_caustics) << "\n";
@@ -361,6 +365,10 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   fl("water_transmission", s.water_transmission);
   fl("water_refl_foam_gain", s.water_refl_foam_gain);
   en("human_tier_cap", s.human_tier_cap);
+  b("hair_transmittance", s.hair_transmittance);
+  fl("hair_transmittance_depth", s.hair_transmittance_depth);
+  fl("hair_fibre_scale", s.hair_fibre_scale);
+  fl("hair_shadow_density", s.hair_shadow_density);
   fl("water_sss_intensity", s.water_sss_intensity);
   fl("water_sss_exponent", s.water_sss_exponent);
   b("water_caustics", s.water_caustics);

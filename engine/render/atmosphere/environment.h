@@ -100,6 +100,16 @@ class EnvironmentSystem {
     const GpuBuffer* interior_vols = nullptr;
   };
 
+  // The hair transmittance volume (HairStrands), so the skin UNDER a groom is
+  // shadowed by the fibres over it. Hair that casts nothing on the scalp is the
+  // most visible thing wrong with a rendered head, and a binary shadow map
+  // cannot supply it - hair is not opaque.
+  struct HairVolumeBinding {
+    TextureView front_depth;
+    TextureView layers;
+    const GpuBuffer* params = nullptr;
+  };
+
   // Fills a freshly allocated set 2. Null ao view, ddgi binding, shadow view or
   // sun-shadow view fall back to the neutral dummies (white ao, black ddgi, lit
   // cascade shadow, fully-lit sun shadow).
@@ -130,7 +140,8 @@ class EnvironmentSystem {
                    const RcgiWorldBinding* rcgi_world = nullptr,
                    TextureView decal_layer_albedo = {},
                    TextureView decal_layer_fx = {},
-                   const GpuBuffer& decal_layer_xform = {}) const;
+                   const GpuBuffer& decal_layer_xform = {},
+                   const HairVolumeBinding* hair_volume = nullptr) const;
 
  private:
   explicit EnvironmentSystem(Device& device) : device_(device) {}

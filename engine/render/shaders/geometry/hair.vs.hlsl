@@ -11,12 +11,21 @@ struct HairPoint {
 [[vk::binding(0, 0)]] StructuredBuffer<HairPoint> points : register(t0, space0);
 [[vk::binding(1, 0)]] StructuredBuffer<float4> strand_color : register(t1, space0);  // per guide
 
+// Shared by the lit draw and the deep-opacity-map passes, so one vertex shader
+// expands the ribbons for all three (the DOM passes just hand it the light's
+// matrix and position, which is also what makes the ribbons face the light
+// there instead of the camera).
 struct DrawPush {
   column_major float4x4 view_proj;
   float4 camera;      // xyz eye, w = ribbon width
   float4 sun;         // xyz travel direction, w intensity
   float4 sun_color;   // rgb, w = clump radius
   float4 tint;        // rgb groom tint, w = children count
+  float4 dom;         // x depth range (m), y layer depth (m), z fibre scale, w dom enabled
+  float4 hair0;       // xyz sigma_a, w beta_m
+  float4 hair1;       // x beta_n, y alpha, z eta, w density
+  float4 hair2;       // x scatter_scale, y tier flags, zw unused
+  float4 ambient;     // rgb ambient reaching the groom, w unused
 };
 PUSH_CONSTANTS(DrawPush, pc);
 
@@ -28,6 +37,11 @@ struct VsOut {
   [[vk::location(1)]] float3 world_pos : POSITION1;
   [[vk::location(2)]] float along : TEXCOORD0;
   [[vk::location(3)]] float3 color : COLOR0;
+  // Position across the ribbon's width, -1..1. This is the fibre's `h` - where
+  // on the cylinder's cross-section the shading point sits - which the hair
+  // BSDF needs and which raster hair usually has to invent. The ribbon
+  // expansion already knows it, so it costs one interpolator and nothing else.
+  [[vk::location(4)]] float side : TEXCOORD1;
 };
 
 float Hash(uint x) {
@@ -89,5 +103,6 @@ VsOut main(uint vid : SV_VertexID) {
   o.world_pos = world;
   o.along = along;
   o.color = col;
+  o.side = side;
   return o;
 }
