@@ -16,7 +16,7 @@ void PrintUsage() {
   RX_INFO("  --usd-show <prim>     force a usd prim subtree visible (repeatable)");
   RX_INFO("  --usd-hide <prim>     force a usd prim subtree hidden (repeatable)");
   RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");
-  RX_INFO("                        featuregym | cloth | locomotion | ship | nav | gym | puppet | drive |");
+  RX_INFO("                        featuregym | cloth | locomotion | ship | nav | gym | shooter | puppet | drive |");
   RX_INFO("                        placement | grass | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
   RX_INFO("  --headless            no window, no renderer");
   RX_INFO("  --preset <tier>       auto (default) | android | steamdeck | low |");

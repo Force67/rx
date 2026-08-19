@@ -1617,6 +1617,7 @@ bool PhysicsWorld::SphereCast(const Vec3& origin, const Vec3& direction, f32 max
                    origin.z + dir.z * distance};
   const JPH::Vec3 n = -collector.mHit.mPenetrationAxis.Normalized();
   out->normal = {n.GetX(), n.GetY(), n.GetZ()};
+  out->body = collector.mHit.mBodyID2.GetIndexAndSequenceNumber() + 1;
   return true;
 }
 
@@ -3039,6 +3040,7 @@ bool PhysicsWorld::Raycast(const Vec3& origin, const Vec3& direction, f32 max_di
                    static_cast<f32>(hit.GetZ())};
   out->distance = result.mFraction * max_distance;
   out->normal = {0, 1, 0};
+  out->body = result.mBodyID.GetIndexAndSequenceNumber() + 1;
   JPH::BodyLockRead lock(impl_->system->GetBodyLockInterface(), result.mBodyID);
   if (lock.Succeeded()) {
     JPH::Vec3 n = lock.GetBody().GetWorldSpaceSurfaceNormal(result.mSubShapeID2, hit);

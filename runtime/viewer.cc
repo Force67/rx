@@ -751,6 +751,16 @@ void Viewer::OnUpdate(f32 frame_delta) {
     if (actions_->pressed(Action::kToggleDebug) && allow_keyboard) debug_ui_.ToggleVisible();
     return;
   }
+  // The FPS range owns its camera + input the same way the gym does: mouse look
+  // through the character, mouse buttons on the trigger.
+  if (ShooterDemo* shooter = demos_->shooter(); shooter && window_) {
+    const bool allow_keyboard = !debug_ui_.wants_keyboard();
+    const bool allow_mouse = !debug_ui_.wants_mouse();
+    shooter->Update(frame_delta, window_->input(), *actions_, allow_keyboard, allow_mouse);
+    window_->SetRelativeMouseMode(shooter->wants_mouse_capture());
+    if (actions_->pressed(Action::kToggleDebug) && allow_keyboard) debug_ui_.ToggleVisible();
+    return;
+  }
   // The driving gym likewise owns its camera + input (Tab-cycled vehicles, chase
   // / free-fly camera); route input here and skip the free-fly camera.
   if (DriveDemo* drive = demos_->drive(); drive && window_) {

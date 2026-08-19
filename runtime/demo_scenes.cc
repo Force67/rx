@@ -215,6 +215,7 @@ void DemoScenes::Shutdown() {
   puppet_.reset();
   drive_.reset();
   gym_.reset();
+  shooter_.reset();
   feature_gym_.reset();
   scene_hook_.reset();
   scene_hook_rhi_.reset();
@@ -300,6 +301,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (placement_) placement_->Emit(dt, view);
   if (grass_) grass_->Emit(view);
   if (gym_) gym_->Emit(dt, view);
+  if (shooter_) shooter_->Emit(dt, view);
   if (puppet_) puppet_->Emit(dt, view);
   if (drive_) drive_->Emit(dt, view);
   if (feature_gym_) feature_gym_->Emit(dt, view);
@@ -3723,6 +3725,11 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "gym") {
     gym_ = std::make_unique<GymDemo>(ctx_);
     gym_->Create();
+    return;
+  }
+  if (config_.demo_scene == "shooter" || config_.demo_scene == "fps") {
+    shooter_ = std::make_unique<ShooterDemo>(ctx_);
+    shooter_->Create();
     return;
   }
   if (config_.demo_scene == "puppet") {

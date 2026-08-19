@@ -275,6 +275,7 @@ if(NOT DEFINED RX_MODULES)
     net
     nav
     character
+    combat
     inventory
     locomotion
     app
@@ -811,6 +812,15 @@ if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
   add_executable(character_test test/character_test.cc)
   target_link_libraries(character_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
   add_test(NAME character_test COMMAND character_test)
+endif()
+
+# rx::combat over real Jolt: fire rate and modes, magazine/reserve reloading,
+# spread bloom, view recoil kick + recovery, hitscan falloff/zone/penetration,
+# ballistic projectiles, explosion falloff and line of sight. Headless.
+if(RX_BUILD_TESTS AND RX_JOLT AND "combat" IN_LIST RX_MODULES)
+  add_executable(combat_test test/combat_test.cc)
+  target_link_libraries(combat_test PRIVATE rx::combat rx::physics rx::scene rx::ecs rx::core)
+  add_test(NAME combat_test COMMAND combat_test)
 endif()
 
 # rx::locomotion pure math (gait clock, capture point, step clamping, swing

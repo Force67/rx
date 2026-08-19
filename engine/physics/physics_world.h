@@ -673,6 +673,11 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     Vec3 position;
     Vec3 normal{0, 1, 0};
     f32 distance = 0;
+    // The body the ray landed on, so a caller can identify WHAT it hit and not
+    // just where: a shooter maps it back to a damageable entity, an impact
+    // effect asks the body for its surface. 0 when the backend cannot name it
+    // (the physics stub).
+    BodyId body = 0;
   };
   bool Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out) const;
   // Same closest-hit ray, but skipping the body `ignore` (its whole shape).
