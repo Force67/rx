@@ -69,15 +69,29 @@ class BindlessRegistry {
     f32 sss_perfusion = 0.0f;        //        dynamic hemoglobin 0..1
     f32 sss_scatter_color[3] = {0, 0, 0};  // row 6: multiple-scatter tint
     f32 sss_ior = 1.4f;              //        boundary index of refraction
+    // --- Character surface model (appended; only meaningful under
+    // kMaterialHuman). The ray paths carry the SHAPING controls, not the whole
+    // block: a path tracer that shades a face with plain Lambert while the
+    // raster path shades it with the fitted model is exactly the "different
+    // light types produce different material semantics" failure the model
+    // exists to prevent. Mirrored by shaders/material_record.hlsli.
+    f32 human_diffuse_fresnel[4] = {0, 5, 5, 0};  // peak, falloff, tangent falloff, retro peak
+    f32 human_retro[4] = {5, 5, 0, 0};   // retro falloff, retro tangent falloff, term amount, term length
+    f32 human_spec[4] = {5, 3, 0, 0.001f};  // spec fresnel falloff, secondary scale, secondary weight, mfp
+    f32 human_transmission[4] = {0, 1, 0.35f, 0.2f};  // transmission, tint rgb
+    f32 human_extra[4] = {0, 0, 0, 0};  // x light-shape response; y/z/w reserved
   };
   static_assert(sizeof(MaterialRecord) % 16 == 0, "bindless material stride must be 16-aligned");
-  static_assert(sizeof(MaterialRecord) == 112, "bindless material record must match shaders/material_record.hlsli");
+  static_assert(sizeof(MaterialRecord) == 192, "bindless material record must match shaders/material_record.hlsli");
   static constexpr u32 kMaterialAlphaMask = 1u << 0;
   static constexpr u32 kMaterialTerrain = 1u << 1;
   // Skin subsurface scattering. Bit value matches MaterialSystem::kFlagSkin and
   // RX_MATERIAL_FLAG_SKIN in shaders/material_record.hlsli so the raster and RT
   // flag namespaces agree.
   static constexpr u32 kMaterialSkin = 1u << 6;
+  // Character surface model. Matches MaterialSystem::kFlagHuman and
+  // RX_MATERIAL_FLAG_HUMAN so the raster and RT flag namespaces agree.
+  static constexpr u32 kMaterialHuman = 1u << 21;
 
   static std::unique_ptr<BindlessRegistry> Create(Device& device);
   ~BindlessRegistry();
@@ -88,6 +102,11 @@ class BindlessRegistry {
   // All return kInvalidIndex when the respective table is full.
   u32 RegisterTexture(TextureView view);
   u32 RegisterMaterial(const MaterialRecord& record);
+  // Rewrites an already-registered record's SHADING fields, leaving its texture
+  // indices alone (streaming owns those; see RewriteTextureIndex). The live
+  // look-dev path uses it so a slider moves the traced face and the rastered
+  // face together - a bench where the two disagree measures the bench.
+  void UpdateMaterialShading(u32 material_index, const MaterialRecord& record);
   // Texture streaming support. ReleaseTexture returns a slot to a free list
   // that RegisterTexture reuses. The caller owns the timing: release only
   // after every in-flight frame that could read the slot has drained AND no

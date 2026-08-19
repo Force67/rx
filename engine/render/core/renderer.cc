@@ -773,6 +773,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
                              ResourceState::kShaderReadAll));
     });
   }
+  if (!reference_compare_.Initialize(*device_))
+    RX_WARN("reference compare unavailable; --demo lookdev comparison disabled");
   if (!bloom_.Initialize(*device_) || !exposure_.Initialize(*device_))
     return false;
   if (rt_available_) {
@@ -2594,6 +2596,12 @@ void Renderer::BeginUploadBatch() {
 void Renderer::FlushUploadBatch() {
   if (device_)
     device_->FlushUploadBatch();
+}
+
+bool Renderer::UpdateMaterial(const asset::Material &material, u64 id_salt) {
+  if (!material_system_)
+    return false;
+  return material_system_->UpdateMaterialParams(material, id_salt);
 }
 
 bool Renderer::UploadMaterial(const asset::Material &material, u64 id_salt) {
@@ -7188,6 +7196,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     }
   }
 
+  // Reference comparison sits here, on the scene-linear image, so the
+  // reference and the render go through the SAME exposure, bloom and tonemap.
+  // Comparing after the display transform would measure the tonemap.
+  post_input = reference_compare_.AddToGraph(graph_, post_input, {post_width, post_height},
+                                             static_cast<u32>(settings_.tonemap));
+
   exposure_.AddToGraph(graph_, post_input, post_width, post_height,
                        view.frame_delta_seconds);
   ResourceHandle bloom = kInvalidResource;
@@ -7599,6 +7613,7 @@ void Renderer::Shutdown() {
 #endif
     bloom_.Destroy(*device_);
     exposure_.Destroy(*device_);
+    reference_compare_.Destroy(*device_);
     vrs_.Destroy(*device_);
     restir_di_.Destroy(*device_);
     virtual_texture_.Destroy(*device_);

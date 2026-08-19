@@ -100,6 +100,19 @@ class MaterialSystem {
     f32 soft_lighting = 0;
     f32 rim_lighting = 0;
     f32 back_lighting = 0;
+    // Character surface model (kFlagHuman). Four floats per std140 row,
+    // mirroring the human_* rows at the tail of MaterialParams in mesh.ps.hlsl
+    // and HumanSurfaceParams in human_brdf.hlsli. Neutral here means "shades
+    // exactly like the stock Lambert + GGX path", so a material that never
+    // opts in pays nothing but the uniform bytes.
+    f32 human_diffuse_fresnel[4] = {0, 5, 5, 0};  // peak, falloff, tangent falloff, retro peak
+    f32 human_retro[4] = {5, 5, 0, 0};        // retro falloff, retro tangent falloff, term amount, term length
+    f32 human_spec[4] = {5, 3, 0, 0.001f};    // spec fresnel falloff, secondary scale, secondary weight, mfp (m)
+    f32 human_transport[4] = {1, 0, 1, 0};    // subsurface scale, transmission, extinction scale, corneal wetness
+    f32 human_tint[4] = {1, 0.35f, 0.2f, 0};  // transmission tint rgb, residual weight
+    f32 human_layer[4] = {0, 1, 0.01f, 0};    // cavity occlusion, spec-normal strength, thickness scale (m), region
+    f32 human_eye0[4] = {0.0028f, 0.16f, 1, 0.035f};  // iris depth (m), radius (uv), pupil scale, limbal size
+    f32 human_eye1[4] = {2, 1.376f, 0.5f, 0};         // limbal power, cornea ior, iris shadow depth, light-shape response
   };
   static constexpr u32 kFlagAlphaMask = 1u << 0;
   static constexpr u32 kFlagHasNormalMap = 1u << 1;
@@ -122,6 +135,11 @@ class MaterialSystem {
   static constexpr u32 kFlagSilhouettePom = 1u << 18;  // curvature-aware pom that carves silhouettes
   static constexpr u32 kFlagSpecularMask = 1u << 19;   // normal-map alpha masks the specular lobe
   static constexpr u32 kFlagEnvMask = 1u << 20;        // env mask map bound at binding 8
+  static constexpr u32 kFlagHuman = 1u << 21;          // character surface model (skin/eyes/teeth)
+  static constexpr u32 kFlagSpecularNormal = 1u << 22;  // dedicated Ns map at binding 9
+  static constexpr u32 kFlagThicknessMap = 1u << 23;    // local thickness map at binding 10
+  static constexpr u32 kFlagEye = 1u << 24;             // corneal refraction + iris parallax
+  static constexpr u32 kFlagResidual = 1u << 25;        // measured residual maps at bindings 11/12
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).
@@ -146,6 +164,19 @@ class MaterialSystem {
   // the salt the referenced textures were uploaded with); 0 keeps the unsalted
   // key.
   bool UploadMaterial(const asset::Material& material, u64 id_salt = 0);
+
+  // Rewrites an ALREADY-uploaded material's uniform parameters in place,
+  // leaving its textures and binding set alone. This is the live look-dev
+  // editing path: the tool needs a slider to move the shipped material this
+  // frame, and re-uploading would allocate a new set per keystroke.
+  //
+  // The write lands in a mapped uniform a frame in flight may still be reading.
+  // That is deliberate and bounded: every field is a continuously-varying
+  // scalar, so the worst case is one frame of a half-applied slider. The
+  // binding SET is untouched (a live one may be pending on the GPU and Vulkan
+  // forbids updating it), so swapping a MAP still goes through UploadMaterial
+  // with a fresh id.
+  bool UpdateMaterialParams(const asset::Material& material, u64 id_salt = 0);
 
   // Set for a material hash; 0 or unknown hashes get the default material.
   BindingSetHandle set(u64 material_hash) const;
@@ -275,7 +306,7 @@ class MaterialSystem {
     BindingSetHandle set;
     u32 pool = 0;         // param_buffers_ index of the uniform slot
     u32 param_index = 0;  // slot within the pool
-    u64 map_keys[8] = {};  // salted texture hashes for bindings 1..8
+    u64 map_keys[12] = {};  // salted texture hashes for bindings 1..12
     u32 bindless_material = BindlessRegistry::kInvalidIndex;
     u32 last_used = 0;
   };
@@ -294,8 +325,16 @@ class MaterialSystem {
   GpuImage UploadTextureImage(const asset::Texture& texture, u32 first_mip = 0);
   bool AddPool();
   BindingSetHandle AllocateSet();
+  // The bindless record the ray paths shade from. Built in one place so the
+  // uniform and the record cannot describe two different materials.
+  BindlessRegistry::MaterialRecord BuildBindlessRecord(const asset::Material& material,
+                                                       u64 id_salt, asset::AlphaMode mode);
+  // Resolves an asset material into the uniform block and the texture keys its
+  // bindings need. No GPU state is touched.
+  bool BuildParams(const asset::Material& material, u64 id_salt, Params& params,
+                   u64 out_map_keys[12]);
   bool WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
-                const asset::Material& material, u64 id_salt, u64 out_map_keys[8]);
+                const asset::Material& material, u64 id_salt, u64 out_map_keys[12]);
   void WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime);
   const GpuImage* texture_or(u64 hash, const GpuImage& fallback) const;
   TextureRecord* record_for(u64 hash);
@@ -345,6 +384,7 @@ class MaterialSystem {
 
   GpuImage white_;        // srgb-safe 1x1 white, also neutral mr/emissive
   GpuImage flat_normal_;  // 1x1 (0.5, 0.5, 1)
+  GpuImage black_;        // 1x1 transparent black; the neutral (absent) residual
 };
 
 }  // namespace rx::render

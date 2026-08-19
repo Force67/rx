@@ -1,5 +1,7 @@
 #include "render/pipeline/material_system.h"
 
+#include "render/pipeline/human_material.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -233,8 +235,12 @@ std::unique_ptr<MaterialSystem> MaterialSystem::Create(Device& device,
                 {4, BindingType::kCombinedTextureSampler},
                 {5, BindingType::kCombinedTextureSampler},
                 {6, BindingType::kCombinedTextureSampler},   // metallic (separate)
-                {7, BindingType::kCombinedTextureSampler},   // occlusion
-                {8, BindingType::kCombinedTextureSampler}},  // env mask
+                {7, BindingType::kCombinedTextureSampler},    // occlusion
+                {8, BindingType::kCombinedTextureSampler},    // env mask
+                {9, BindingType::kCombinedTextureSampler},    // specular normal (Ns)
+                {10, BindingType::kCombinedTextureSampler},   // local thickness
+                {11, BindingType::kCombinedTextureSampler},   // residual ambient
+                {12, BindingType::kCombinedTextureSampler}},  // residual directional
   });
   if (!system->set_layout_) return nullptr;
 
@@ -260,9 +266,13 @@ bool MaterialSystem::CreateDefaults() {
   // Direct uploads, bypassing the hash map: id 0 would collide.
   asset::Texture white = make_pixel(255, 255, 255, 255, true);
   asset::Texture normal = make_pixel(128, 128, 255, 255, false);
+  // Zero residual: rgb 0 with validity 0, so an unfitted character material
+  // adds nothing rather than a constant bias.
+  asset::Texture black = make_pixel(0, 0, 0, 0, false);
   white_ = UploadTextureImage(white);
   flat_normal_ = UploadTextureImage(normal);
-  if (!white_ || !flat_normal_) return false;
+  black_ = UploadTextureImage(black);
+  if (!white_ || !flat_normal_ || !black_) return false;
 
   asset::Material default_material;
   default_material.base_color_factor[0] = 0.6f;
@@ -276,7 +286,7 @@ bool MaterialSystem::CreateDefaults() {
   }
   default_set_ = AllocateSet();
   if (!default_set_) return false;
-  u64 map_keys[8];
+  u64 map_keys[12];
   return WriteSet(default_set_, static_cast<u32>(param_buffers_.size()) - 1,
                   sets_in_last_pool_ - 1, default_material, 0, map_keys);
 }
@@ -539,7 +549,7 @@ u32 MaterialSystem::EnsureBindless(u64 key) {
 }
 
 void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntime& runtime) {
-  const GpuImage* maps[8] = {
+  const GpuImage* maps[12] = {
       texture_or(runtime.map_keys[0], white_),
       texture_or(runtime.map_keys[1], flat_normal_),
       texture_or(runtime.map_keys[2], white_),
@@ -548,6 +558,10 @@ void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntim
       texture_or(runtime.map_keys[5], white_),  // white metallic = mr map alone
       texture_or(runtime.map_keys[6], white_),  // white occlusion = no AO
       texture_or(runtime.map_keys[7], white_),  // white env mask = reflect everywhere
+      texture_or(runtime.map_keys[8], flat_normal_),  // Ns absent = Ns == Nd
+      texture_or(runtime.map_keys[9], white_),        // white thickness = the material scale
+      texture_or(runtime.map_keys[10], black_),       // black residual = analytic only
+      texture_or(runtime.map_keys[11], black_),
   };
   GpuBuffer& buffer = param_buffers_[runtime.pool];
   u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
@@ -559,13 +573,18 @@ void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntim
                                  Bind::Combined(5, maps[4]->view, sampler_),
                                  Bind::Combined(6, maps[5]->view, sampler_),
                                  Bind::Combined(7, maps[6]->view, sampler_),
-                                 Bind::Combined(8, maps[7]->view, sampler_)});
+                                 Bind::Combined(8, maps[7]->view, sampler_),
+                                 Bind::Combined(9, maps[8]->view, sampler_),
+                                 Bind::Combined(10, maps[9]->view, sampler_),
+                                 Bind::Combined(11, maps[10]->view, sampler_),
+                                 Bind::Combined(12, maps[11]->view, sampler_)});
 }
 
-bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
-                              const asset::Material& material, u64 id_salt,
-                              u64 out_map_keys[8]) {
-  Params params;
+// The uniform block + the texture keys a material resolves to. Split out of
+// WriteSet so the live-tuning path can rewrite the numbers without touching a
+// binding set that may be pending on the GPU.
+bool MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, Params& params,
+                                 u64 out_map_keys[12]) {
   std::memcpy(params.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
   std::memcpy(params.emissive_factor, material.emissive_factor, sizeof(f32) * 3);
   params.metallic_factor = material.metallic_factor;
@@ -617,6 +636,66 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
     params.sss_anisotropy_g = c.g;
     params.sss_perfusion = c.perfusion;
     params.sss_ior = c.ior;
+  }
+  // Character surface model. Resolving through HumanResolve keeps ONE mapping
+  // from authored asset params to the GPU block, shared with the look-dev tool
+  // and the CPU BRDF mirror, so a knob cannot mean two things.
+  if (material.human) {
+    params.flags |= kFlagHuman;
+    const HumanSurfaceParameters h = HumanResolve(material.human_params);
+    params.human_diffuse_fresnel[0] = h.diffuse_fresnel_peak;
+    params.human_diffuse_fresnel[1] = h.diffuse_fresnel_falloff;
+    params.human_diffuse_fresnel[2] = h.diffuse_fresnel_tangent_falloff;
+    params.human_diffuse_fresnel[3] = h.retroreflection_peak;
+    params.human_retro[0] = h.retroreflection_falloff;
+    params.human_retro[1] = h.retroreflection_tangent_falloff;
+    params.human_retro[2] = h.smooth_terminator_amount;
+    params.human_retro[3] = h.smooth_terminator_length;
+    params.human_spec[0] = h.specular_fresnel_falloff;
+    params.human_spec[1] = h.secondary_roughness_scale;
+    params.human_spec[2] = h.secondary_specular_weight;
+    params.human_spec[3] = h.mean_free_path;
+    params.human_transport[0] = h.subsurface_scale;
+    params.human_transport[1] = h.transmission;
+    params.human_transport[2] = h.extinction_scale;
+    params.human_transport[3] = h.corneal_wetness;
+    std::memcpy(params.human_tint, h.transmission_tint, sizeof(f32) * 3);
+    params.human_tint[3] = h.residual_weight;
+    params.human_layer[0] = h.cavity_occlusion;
+    params.human_layer[1] = h.specular_normal_strength;
+    params.human_layer[2] = h.thickness_scale;
+    params.human_layer[3] = static_cast<f32>(static_cast<u32>(h.region));
+    params.human_eye0[0] = h.iris_depth;
+    params.human_eye0[1] = h.iris_radius;
+    params.human_eye0[2] = h.pupil_scale;
+    params.human_eye0[3] = h.limbal_ring_size;
+    params.human_eye1[0] = h.limbal_ring_power;
+    params.human_eye1[1] = h.cornea_ior;
+    params.human_eye1[2] = h.iris_shadow_depth;
+    params.human_eye1[3] = h.light_shape_response;
+    // The eye branch costs a refraction and two derivative fetches and is
+    // meaningless on a cheek, so only the eye regions reach it.
+    if (h.region == asset::Material::HumanRegion::kCornea ||
+        h.region == asset::Material::HumanRegion::kIris ||
+        h.region == asset::Material::HumanRegion::kSclera) {
+      params.flags |= kFlagEye;
+    }
+    // Every optional map only flags when it actually uploaded, so a missing one
+    // falls back to the neutral default instead of sampling a wrong texture.
+    if (material.human_params.specular_normal &&
+        textures_.find(material.human_params.specular_normal.hash ^ id_salt)) {
+      params.flags |= kFlagSpecularNormal;
+    }
+    if (material.human_params.thickness_map &&
+        textures_.find(material.human_params.thickness_map.hash ^ id_salt)) {
+      params.flags |= kFlagThicknessMap;
+    }
+    if (h.residual_weight > 0.0f && material.human_params.residual_ambient &&
+        textures_.find(material.human_params.residual_ambient.hash ^ id_salt) &&
+        material.human_params.residual_directional &&
+        textures_.find(material.human_params.residual_directional.hash ^ id_salt)) {
+      params.flags |= kFlagResidual;
+    }
   }
   if (material.hair) params.flags |= kFlagHair;
   if (material.virtual_albedo) params.flags |= kFlagVirtualAlbedo;
@@ -687,6 +766,27 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
     }
   }
 
+  out_map_keys[0] = material.base_color.hash ^ id_salt;
+  out_map_keys[1] = material.normal.hash ^ id_salt;
+  out_map_keys[2] = material.metallic_roughness.hash ^ id_salt;
+  out_map_keys[3] = material.emissive.hash ^ id_salt;
+  out_map_keys[4] = material.height.hash ^ id_salt;
+  out_map_keys[5] = material.metallic_map.hash ^ id_salt;
+  out_map_keys[6] = material.occlusion_map.hash ^ id_salt;
+  out_map_keys[7] = material.env_mask.hash ^ id_salt;
+  out_map_keys[8] = material.human_params.specular_normal.hash ^ id_salt;
+  out_map_keys[9] = material.human_params.thickness_map.hash ^ id_salt;
+  out_map_keys[10] = material.human_params.residual_ambient.hash ^ id_salt;
+  out_map_keys[11] = material.human_params.residual_directional.hash ^ id_salt;
+  return true;
+}
+
+bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
+                              const asset::Material& material, u64 id_salt,
+                              u64 out_map_keys[12]) {
+  Params params;
+  if (!BuildParams(material, id_salt, params, out_map_keys)) return false;
+
   GpuBuffer& buffer = param_buffers_[pool];
   u64 offset = static_cast<u64>(param_index) * kParamStride;
   std::memcpy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
@@ -695,22 +795,110 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   runtime.set = set;
   runtime.pool = pool;
   runtime.param_index = param_index;
-  runtime.map_keys[0] = material.base_color.hash ^ id_salt;
-  runtime.map_keys[1] = material.normal.hash ^ id_salt;
-  runtime.map_keys[2] = material.metallic_roughness.hash ^ id_salt;
-  runtime.map_keys[3] = material.emissive.hash ^ id_salt;
-  runtime.map_keys[4] = material.height.hash ^ id_salt;
-  runtime.map_keys[5] = material.metallic_map.hash ^ id_salt;
-  runtime.map_keys[6] = material.occlusion_map.hash ^ id_salt;
-  runtime.map_keys[7] = material.env_mask.hash ^ id_salt;
+  std::memcpy(runtime.map_keys, out_map_keys, sizeof(runtime.map_keys));
   WriteSetBindings(set, runtime);
-  std::memcpy(out_map_keys, runtime.map_keys, sizeof(runtime.map_keys));
   return true;
 }
 
 const GpuImage* MaterialSystem::find_texture(u64 hash) const {
   if (const u32* index = textures_.find(hash)) return &texture_records_[*index]->image;
   return nullptr;
+}
+
+BindlessRegistry::MaterialRecord MaterialSystem::BuildBindlessRecord(
+    const asset::Material& material, u64 id_salt, asset::AlphaMode mode) {
+  BindlessRegistry::MaterialRecord record;
+  std::memcpy(record.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
+  std::memcpy(record.emissive, material.emissive_factor, sizeof(f32) * 3);
+  record.roughness = material.roughness_factor;
+  record.metallic = material.metallic_factor;
+  if (TextureRecord* base = record_for(material.base_color.hash ^ id_salt)) {
+    record.base_color_texture = base->bindless;
+  }
+  // The metallic-roughness map is linear, so UploadTexture skipped the bindless
+  // table (it only registers sRGB color maps). Register it on demand here so the
+  // path tracer can read per-texel gloss for its specular lobe.
+  record.metallic_roughness_texture = EnsureBindless(material.metallic_roughness.hash ^ id_salt);
+  if (mode == asset::AlphaMode::kMask) {
+    record.flags |= BindlessRegistry::kMaterialAlphaMask;
+    record.alpha_cutoff = material.alpha_cutoff;
+  }
+  if (material.skin) {
+    record.flags |= BindlessRegistry::kMaterialSkin;
+    const SkinCoeffs c = ComputeSkinCoeffs(material.skin_params);
+    std::memcpy(record.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
+    std::memcpy(record.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
+    std::memcpy(record.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
+    record.sss_anisotropy_g = c.g;
+    record.sss_perfusion = c.perfusion;
+    record.sss_ior = c.ior;
+  }
+  // The ray paths shade a character from this record. They carry the SHAPING
+  // controls (not the eye or layer blocks, which are raster-only) so a traced
+  // face and a rastered face cannot be two different materials.
+  if (material.human) {
+    record.flags |= BindlessRegistry::kMaterialHuman;
+    const HumanSurfaceParameters h = HumanResolve(material.human_params);
+    record.human_diffuse_fresnel[0] = h.diffuse_fresnel_peak;
+    record.human_diffuse_fresnel[1] = h.diffuse_fresnel_falloff;
+    record.human_diffuse_fresnel[2] = h.diffuse_fresnel_tangent_falloff;
+    record.human_diffuse_fresnel[3] = h.retroreflection_peak;
+    record.human_retro[0] = h.retroreflection_falloff;
+    record.human_retro[1] = h.retroreflection_tangent_falloff;
+    record.human_retro[2] = h.smooth_terminator_amount;
+    record.human_retro[3] = h.smooth_terminator_length;
+    record.human_spec[0] = h.specular_fresnel_falloff;
+    record.human_spec[1] = h.secondary_roughness_scale;
+    record.human_spec[2] = h.secondary_specular_weight;
+    record.human_spec[3] = h.mean_free_path;
+    record.human_transmission[0] = h.transmission;
+    std::memcpy(record.human_transmission + 1, h.transmission_tint, sizeof(f32) * 3);
+    record.human_extra[0] = h.light_shape_response;
+  }
+  // Terrain splat: the rasterizer reuses the normal/emissive slots as land
+  // layer 1 and the per-cell weight map. Mirror that into the bindless record
+  // so the path tracer can reproduce the blend (base_color = layer 0,
+  // metallic_roughness = layer 2 are already registered above).
+  if (material.is_terrain) {
+    record.flags |= BindlessRegistry::kMaterialTerrain;
+    if (TextureRecord* layer1 = record_for(material.normal.hash ^ id_salt)) {
+      record.terrain_layer1_texture = layer1->bindless;
+    }
+    // The weight map is linear, so UploadTexture skipped the bindless table;
+    // register it on demand like the metallic-roughness map above.
+    record.terrain_weight_texture = EnsureBindless(material.emissive.hash ^ id_salt);
+  }
+  return record;
+}
+
+bool MaterialSystem::UpdateMaterialParams(const asset::Material& material, u64 id_salt) {
+  u64 key = material.id.hash ^ id_salt;
+  const u32* index = sets_.find(key);
+  if (!index) return false;
+  MaterialRuntime& runtime = material_records_[*index];
+  // The ray paths read the bindless record, the raster path reads the uniform.
+  // Refreshing only one would let a look-dev slider move the rastered face
+  // while the traced face stayed put - the exact disagreement the shared
+  // material model exists to rule out.
+  if (registry_ && runtime.bindless_material != BindlessRegistry::kInvalidIndex) {
+    const asset::AlphaMode mode =
+        material.transmission > 0.0f ? asset::AlphaMode::kBlend : material.alpha_mode;
+    registry_->UpdateMaterialShading(runtime.bindless_material,
+                                     BuildBindlessRecord(material, id_salt, mode));
+  }
+  // Only the uniform block. The binding SET is deliberately left alone: a live
+  // set may be pending on the GPU, and Vulkan forbids updating one that is
+  // (the streaming path allocates a fresh set for exactly this reason). A
+  // material whose TEXTURES changed therefore still goes through UploadMaterial
+  // under a new id - this path is for moving numbers, which is what a look-dev
+  // slider does.
+  Params params;
+  u64 keys[12];
+  if (!BuildParams(material, id_salt, params, keys)) return false;
+  GpuBuffer& buffer = param_buffers_[runtime.pool];
+  const u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
+  std::memcpy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
+  return true;
 }
 
 bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt) {
@@ -738,45 +926,7 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
   if (material.effect) effects_.insert(key, material.effect_additive ? 2 : 1);
   if (material.normal_model_space) normal_model_space_.insert(key, 1);
   if (registry_) {
-    BindlessRegistry::MaterialRecord record;
-    std::memcpy(record.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
-    std::memcpy(record.emissive, material.emissive_factor, sizeof(f32) * 3);
-    record.roughness = material.roughness_factor;
-    record.metallic = material.metallic_factor;
-    if (TextureRecord* base = record_for(material.base_color.hash ^ id_salt)) {
-      record.base_color_texture = base->bindless;
-    }
-    // The metallic-roughness map is linear, so UploadTexture skipped the bindless
-    // table (it only registers sRGB color maps). Register it on demand here so the
-    // path tracer can read per-texel gloss for its specular lobe.
-    record.metallic_roughness_texture = EnsureBindless(material.metallic_roughness.hash ^ id_salt);
-    if (mode == asset::AlphaMode::kMask) {
-      record.flags |= BindlessRegistry::kMaterialAlphaMask;
-      record.alpha_cutoff = material.alpha_cutoff;
-    }
-    if (material.skin) {
-      record.flags |= BindlessRegistry::kMaterialSkin;
-      const SkinCoeffs c = ComputeSkinCoeffs(material.skin_params);
-      std::memcpy(record.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
-      std::memcpy(record.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
-      std::memcpy(record.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
-      record.sss_anisotropy_g = c.g;
-      record.sss_perfusion = c.perfusion;
-      record.sss_ior = c.ior;
-    }
-    // Terrain splat: the rasterizer reuses the normal/emissive slots as land
-    // layer 1 and the per-cell weight map. Mirror that into the bindless record
-    // so the path tracer can reproduce the blend (base_color = layer 0,
-    // metallic_roughness = layer 2 are already registered above).
-    if (material.is_terrain) {
-      record.flags |= BindlessRegistry::kMaterialTerrain;
-      if (TextureRecord* layer1 = record_for(material.normal.hash ^ id_salt)) {
-        record.terrain_layer1_texture = layer1->bindless;
-      }
-      // The weight map is linear, so UploadTexture skipped the bindless table;
-      // register it on demand like the metallic-roughness map above.
-      record.terrain_weight_texture = EnsureBindless(material.emissive.hash ^ id_salt);
-    }
+    BindlessRegistry::MaterialRecord record = BuildBindlessRecord(material, id_salt, mode);
     u32 index = registry_->RegisterMaterial(record);
     if (index != BindlessRegistry::kInvalidIndex) {
       bindless_materials_.insert(key, index);

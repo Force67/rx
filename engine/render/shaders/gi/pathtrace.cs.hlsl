@@ -38,6 +38,7 @@ PUSH_CONSTANTS(PathPush, pc);
 
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
+#include "human_brdf.hlsli"  // must precede material_record.hlsli: RxHumanFromRecord needs it
 #include "material_record.hlsli"
 #include "sss_profile.hlsli"
 [[vk::binding(0, 1)]] StructuredBuffer<MeshRecord> mesh_records : register(t0, space1);
@@ -81,12 +82,18 @@ struct Hit {
   float3 sss_sigma_t;
   float3 sss_sigma_s;
   float3 sss_scatter_color;
+  bool human;
+  float roughness;
+  HumanSurfaceParams human_params;
 };
 
 Hit TraceClosest(float3 origin, float3 dir) {
   Hit h;
   h.hit = false;
   h.skin = false;
+  h.human = false;
+  h.roughness = 1.0;
+  h.human_params = HumanNeutralParams(0.0.xxx, 1.0, 0.04.xxx);
   h.sss_sigma_t = 0.0.xxx;
   h.sss_sigma_s = 0.0.xxx;
   h.sss_scatter_color = 0.0.xxx;
@@ -128,6 +135,12 @@ Hit TraceClosest(float3 origin, float3 dir) {
   }
   h.albedo = albedo;
   h.emissive = m.emissive;
+  h.roughness = m.roughness;
+  // The reference tracer shades a character through the SAME evaluator the
+  // raster and hybrid paths use. Without this the tracer - the thing everything
+  // else is validated against - would quietly disagree about what skin is.
+  h.human = (m.flags & RX_MATERIAL_FLAG_HUMAN) != 0u;
+  h.human_params = RxHumanFromRecord(m, albedo, m.roughness, 0.04.xxx);
   if ((m.flags & RX_MATERIAL_FLAG_SKIN) != 0u) {
     h.skin = true;
     h.sss_sigma_t = m.sss_sigma_t;
@@ -225,8 +238,26 @@ float3 Radiance(float3 origin, float3 dir, inout uint rng) {
       // Next event estimation toward the (soft) sun disk.
       float3 ldir = SunDirection(rng);
       float ndl = dot(h.normal, ldir);
-      if (ndl > 0.0 && !Occluded(h.position + h.normal * 0.002, ldir, 1000.0)) {
-        radiance += throughput * h.albedo / kPi * sun * ndl;
+      if (!Occluded(h.position + h.normal * 0.002, ldir, 1000.0)) {
+        if (h.human) {
+          // One evaluator, so the traced face and the rastered face agree. The
+          // terminator control can lift light past ndl == 0, which is why this
+          // branch does not gate on ndl > 0 the way the Lambert one does.
+          HumanLightSample ls;
+          ls.direction = ldir;
+          ls.radiance = sun;
+          ls.distance = 1e6;
+          ls.solid_angle = kPi * pc.sun_color.w * pc.sun_color.w;
+          ls.visibility = 1.0;
+          ls.transmission_visibility = 1.0;
+          ls.type = 0u;
+          ls.flags = 0u;
+          HumanShadingNormals hn = HumanNormals(h.normal);
+          HumanBrdfResult hr = HumanEvaluate(h.human_params, hn, -dir, ls, 0.0);
+          radiance += throughput * (hr.diffuse + hr.specular) * sun;
+        } else if (ndl > 0.0) {
+          radiance += throughput * h.albedo / kPi * sun * ndl;
+        }
       }
 
       // Diffuse bounce; the cosine pdf cancels the albedo/pi * ndl factors.

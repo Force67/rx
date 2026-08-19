@@ -22,6 +22,7 @@
 #include "demo_placement.h"
 #include "demo_ship.h"
 #include "demo_gym.h"
+#include "demo_lookdev.h"
 #include "demo_puppet.h"
 #include "demo_shooter.h"
 #include "demo_drive.h"
@@ -55,6 +56,9 @@ class DemoScenes {
   // The FPS range (--demo shooter), or null. Owns its camera + input like the
   // gym, so the Viewer routes OnUpdate to it.
   ShooterDemo* shooter() { return shooter_.get(); }
+  // The character reference lab (--demo lookdev), or null. Owns its camera
+  // (frozen framings are the point), so the Viewer routes OnUpdate to it.
+  LookdevDemo* lookdev() { return lookdev_.get(); }
   // The locomotion puppet (--demo puppet), or null. Keeps the free-fly camera;
   // the Viewer forwards raw keys to it (1/2/3) without an early return.
   PuppetDemo* puppet() { return puppet_.get(); }
@@ -282,6 +286,8 @@ class DemoScenes {
   // --demo gym: the character/inventory reference gym (graybox + tuning panel).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
   std::unique_ptr<GymDemo> gym_;
+  // The character reference lab (--demo lookdev).
+  std::unique_ptr<LookdevDemo> lookdev_;
 
   // --demo shooter: the FPS range over engine/combat (weapons, targets, HUD).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.

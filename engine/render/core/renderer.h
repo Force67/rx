@@ -74,6 +74,7 @@
 #include "render/post/motion_blur.h"
 #include "render/post/overdraw.h"
 #include "render/post/post.h"
+#include "render/post/reference_compare.h"
 #include "render/post/ui_blur.h"
 #include "render/post/upscaler.h"
 #include "render/post/vrs_rate.h"
@@ -485,6 +486,10 @@ public:
   // material references resolve to this domain's materials/textures.
   bool UploadTexture(const asset::Texture &texture, u64 id_salt = 0);
   bool UploadMaterial(const asset::Material &material, u64 id_salt = 0);
+  // Live material tuning: rewrites an uploaded material's parameters without
+  // reallocating its binding set (see MaterialSystem::UpdateMaterialParams).
+  // Returns false when the material was never uploaded.
+  bool UpdateMaterial(const asset::Material &material, u64 id_salt = 0);
   // Builds + uploads a mesh for the mesh-shader meshlet path (the --demo
   // meshlet scene draws it instead of the normal raster geometry).
   void UploadMeshletMesh(const asset::Mesh &mesh);
@@ -531,6 +536,11 @@ public:
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.
   RenderSettings &settings() { return settings_; }
+
+  // Calibrated-reference comparison (--demo lookdev, docs/CHARACTER_RENDERING.md).
+  // Runs on the scene-linear image before exposure and tonemap so reference and
+  // render share one colour path. Off unless a reference is loaded.
+  ReferenceCompare &reference_compare() { return reference_compare_; }
 
   // Installs an authored equirectangular HDR as the sky, so IBL comes from the
   // scene's own environment map instead of the procedural atmosphere. Feeds a
@@ -822,6 +832,7 @@ private:
 #endif
   BloomPass bloom_;
   ExposurePass exposure_;
+  ReferenceCompare reference_compare_;
   GpuProfiler profiler_;
   PathTracer path_tracer_;
   ReconPathTracer recon_path_tracer_;
