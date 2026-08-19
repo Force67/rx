@@ -1068,7 +1068,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       float spec_i = LtcEvaluate(n, v, input.world_pos, minv, c0, c1, c2, c3);
       static const float3x3 kLtcIdentity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
       float diff_i = LtcEvaluate(n, v, input.world_pos, kLtcIdentity, c0, c1, c2, c3);
-      float3 spec_col = f0 * lamp.x + (1.0 - f0) * lamp.y;
+      float3 spec_col = (f0 * lamp.x + (1.0 - f0) * lamp.y) * spec_tint;
       float panel_falloff = saturate(1.0 - dist2 / (lr * lr));
       panel_falloff *= panel_falloff;
       ++light_hits;
@@ -1105,7 +1105,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       float sphere_spec = LtcEvaluate(n, v, input.world_pos, sminv, s0, s1, s2, s3);
       static const float3x3 kLtcSphereId = {1, 0, 0, 0, 1, 0, 0, 0, 1};
       float sphere_diff = LtcEvaluate(n, v, input.world_pos, kLtcSphereId, s0, s1, s2, s3);
-      float3 sphere_spec_col = f0 * slamp.x + (1.0 - f0) * slamp.y;
+      float3 sphere_spec_col = (f0 * slamp.x + (1.0 - f0) * slamp.y) * spec_tint;
       float ball_falloff = saturate(1.0 - dist2 / (lr * lr));
       ball_falloff *= ball_falloff;
       ++light_hits;
@@ -1164,7 +1164,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float3 restir_di = restir_diffuse_map.Load(restir_p).rgb;
     float3 restir_ds = restir_spec_map.Load(restir_p).rgb;
     float3 restir_diffuse_term = diffuse_color * (1.0 / kPi) * restir_di;
-    lit += restir_diffuse_term + f0 * restir_ds;
+    lit += restir_diffuse_term + f0 * restir_ds * spec_tint;
     g_skin_diffuse += restir_diffuse_term;
   }
 
