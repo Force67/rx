@@ -13,6 +13,7 @@ set(RX_RUNTIME_SOURCES
   placement_demo_assets.cc
   demo_ship.cc
   demo_gym.cc
+  demo_lookdev.cc
   demo_shooter.cc
   demo_puppet.cc
   demo_drive.cc

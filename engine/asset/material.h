@@ -157,6 +157,120 @@ struct Material {
     f32 perfusion = 0.5f;
   };
   SkinParams skin_params;
+  // --- Character ("human") surface model -----------------------------------
+  // The Callisto-Protocol-style controllable BRDF for skin, lips, teeth, gums
+  // and eyes. Enabling it routes the material through one evaluator shared by
+  // every direct light type and every render path (raster, hybrid RT, path
+  // trace), which is the point: a face must not shade differently under a sun,
+  // a spot and a light panel.
+  //
+  // Every control below is NEUTRAL at its default, and the neutral set
+  // reproduces the engine's stock Lambert + GGX exactly - so turning `human`
+  // on changes nothing until an artist dials a knob against reference. Fit
+  // them with `--demo lookdev` (OLAT rig + split/difference comparison); do
+  // not copy constants out of a paper or a slide deck.
+  // See engine/render/shaders/human_brdf.hlsli for the shapes.
+  enum class HumanRegion : u8 {
+    kSkin,      // the default: dermis over subcutaneous scattering
+    kLips,      // wetter, thinner, redder transport
+    kTeeth,     // enamel over dentin; strong short-range diffusion
+    kGums,      // soft, high perfusion
+    kSclera,    // the white of the eye; wet, shallow scattering
+    kCornea,    // the transparent shell; refracts the iris behind it
+    kIris,      // the pigmented disc, shaded behind the cornea
+    kTearline,  // the wet meniscus at the lid contact
+  };
+
+  struct HumanParams {
+    HumanRegion region = HumanRegion::kSkin;
+
+    // Diffuse Fresnel: grazing gain on the diffuse lobe (the boundary
+    // transmission loss entering and leaving). `falloff` shapes the view half,
+    // `tangent_falloff` the light half; equal values keep the lobe reciprocal.
+    f32 diffuse_fresnel_peak = 0.0f;
+    f32 diffuse_fresnel_falloff = 5.0f;
+    f32 diffuse_fresnel_tangent_falloff = 5.0f;
+
+    // Grazing retroreflection: back-scatter toward the light, the velvety lift
+    // skin shows with the key behind the camera. Burley's shape, artist-keyed.
+    f32 retroreflection_peak = 0.0f;
+    f32 retroreflection_falloff = 5.0f;
+    f32 retroreflection_tangent_falloff = 5.0f;
+
+    // Smooth shading terminator: how far past the geometric terminator light
+    // wraps (in cosine units) and how strongly. Energy-normalized, so softening
+    // the terminator cannot brighten the face overall.
+    f32 smooth_terminator_amount = 0.0f;
+    f32 smooth_terminator_length = 0.0f;
+
+    // Generalized specular Fresnel exponent. 5 = classic Schlick.
+    f32 specular_fresnel_falloff = 5.0f;
+
+    // Optional second GGX lobe: a broad tail under the tight core, blended (not
+    // added) so specular energy is unchanged. weight 0 = single lobe.
+    f32 secondary_roughness_scale = 3.0f;
+    f32 secondary_specular_weight = 0.0f;
+
+    // How much of a light's SHAPE the specular lobe absorbs. 1 = a light with
+    // real solid angle cannot produce a highlight tighter than its own image,
+    // which is what makes a small hard emitter and a large soft one read as the
+    // same material. 0 (the default) is punctual, matching the engine's stock
+    // path - so a material that enables `human` and touches nothing shades
+    // exactly as it did before.
+    f32 light_shape_response = 0.0f;
+
+    // Transport. mean_free_path is in METRES (skin red channel is ~1 mm).
+    f32 mean_free_path = 0.001f;
+    f32 subsurface_scale = 1.0f;
+    // Through-the-surface lobe (ears, nostrils, eyelids, fingers). 0 = opaque.
+    f32 transmission = 0.0f;
+    f32 transmission_tint[3] = {1.0f, 0.35f, 0.2f};
+    f32 extinction_scale = 1.0f;
+    // Thickness at thickness_map == 1, in metres. Without a map the shader uses
+    // this directly, so a uniform-thickness part still transmits sanely.
+    f32 thickness_scale = 0.01f;
+    AssetId thickness_map;  // r = normalized local thickness
+
+    // A sharp wet lobe over the base (tear film, saliva, sweat sheen) that dims
+    // what is underneath by its own reflectance, so it adds no free energy.
+    f32 corneal_wetness = 0.0f;
+
+    // Mouth-cavity occlusion: darkens the INDIRECT term only, which is what a
+    // mouth interior actually loses. 0 = no cavity darkening.
+    f32 cavity_occlusion = 0.0f;
+
+    // Separate specular normal (Ns). A sweat/tear-film normal map bends the
+    // highlight without touching the diffuse lobe - without this split, sweat
+    // droplets make skin read as scarred geometry.
+    AssetId specular_normal;
+    f32 specular_normal_strength = 1.0f;
+
+    // --- eye anatomy (region kCornea / kIris / kSclera) ---------------------
+    // The eye is shaded as a layered system on one mesh: the corneal surface
+    // refracts the view ray, the iris is sampled at `iris_depth` BEHIND it, and
+    // the limbal ring darkens the sclera/iris boundary.
+    f32 iris_depth = 0.0028f;      // metres behind the corneal surface
+    f32 iris_radius = 0.16f;       // uv radius of the iris disc about the eye centre
+    f32 pupil_scale = 1.0f;        // dilation; scales the iris uv about its centre
+    f32 limbal_ring_size = 0.035f; // uv width of the ring
+    f32 limbal_ring_power = 2.0f;  // ring hardness
+    f32 cornea_ior = 1.376f;       // refraction at the corneal surface
+    f32 iris_shadow_depth = 0.5f;  // how much the cornea shadows the iris (0 = none)
+
+    // --- Realis-style measured residual ------------------------------------
+    // photograph - analytical render, fitted offline into a directional basis
+    // and stored as two maps (see tools/fit_residual.py). 0 = analytic only.
+    // The runtime fades it out when the material state no longer matches the
+    // capture state (blood, dirt, wetness), so a corrected face cannot keep a
+    // correction that was measured on a clean one.
+    f32 residual_weight = 0.0f;
+    AssetId residual_ambient;      // rgb = view-independent residual, a = validity
+    AssetId residual_directional;  // rgb = the fitted directional vector (tangent space)
+  };
+  // Off by default: `human` false leaves every material on the stock path.
+  bool human = false;
+  HumanParams human_params;
+
   // Hair: dual-lobe Kajiya-Kay strand specular along the vertex tangent
   // (strand direction) replaces the GGX sun response; roughness drives the
   // highlight width. Pair with alpha-masked cards for real hair.

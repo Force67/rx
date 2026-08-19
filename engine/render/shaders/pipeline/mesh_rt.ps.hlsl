@@ -62,7 +62,9 @@ struct FrameGlobals {
 };
 [[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
 
-#include "sss_profile.hlsli"  // skin subsurface profile + blood-flow perfusion
+#include "sss_profile.hlsli"
+#include "human_brdf.hlsli"  // the character surface model every light path shares
+#include "human_eye.hlsli"   // corneal refraction, iris parallax, limbal ring  // skin subsurface profile + blood-flow perfusion
 #include "geometry/shore_wetting.hlsli"  // ShoreWetness (env slot 33)
 #include "geometry/water_caustics.hlsli"  // WaterCaustic (env slot 34)
 
@@ -334,6 +336,18 @@ struct MaterialParams {
   float soft_lighting;
   float rim_lighting;
   float back_lighting;
+  // --- Character surface model (kFlagHuman) ---------------------------------
+  // Mirrors HumanSurfaceParams in human_brdf.hlsli and the tail of
+  // MaterialSystem::Params. Packed four-to-a-row; the names below are the only
+  // documentation of which slot is which, so keep them.
+  float4 human_diffuse_fresnel;  // x peak, y falloff, z tangent falloff, w retro peak
+  float4 human_retro;            // x retro falloff, y retro tangent falloff, z terminator amount, w terminator length
+  float4 human_spec;             // x spec fresnel falloff, y secondary rough scale, z secondary weight, w mean free path (m)
+  float4 human_transport;        // x subsurface scale, y transmission, z extinction scale, w corneal wetness
+  float4 human_tint;             // xyz transmission tint, w residual weight
+  float4 human_layer;            // x cavity occlusion, y spec-normal strength, z thickness scale (m), w region id
+  float4 human_eye0;             // x iris depth (m), y iris radius (uv), z pupil scale, w limbal size (uv)
+  float4 human_eye1;             // x limbal power, y cornea ior, z iris shadow depth, w light-shape response
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
 
@@ -356,6 +370,25 @@ struct MaterialParams {
 // surface reflect. Default 1x1 white; only read under kFlagEnvMask.
 [[vk::combinedImageSampler]] [[vk::binding(8, 1)]] Texture2D env_mask_map : register(t8, space1);
 [[vk::combinedImageSampler]] [[vk::binding(8, 1)]] SamplerState env_mask_sampler : register(s8, space1);
+
+// Character-material maps. All default to a neutral 1x1 (flat normal, white
+// thickness, black residual) so a material that authors none of them shades
+// exactly as it did before the model existed.
+// 9  Ns, the SPECULAR normal - the layer that owns the highlight (sweat, tear
+//    film, oil). Separate from the diffuse normal on purpose: without the
+//    split, sweat droplets turn skin into scarred geometry.
+[[vk::combinedImageSampler]] [[vk::binding(9, 1)]] Texture2D spec_normal_map : register(t9, space1);
+[[vk::combinedImageSampler]] [[vk::binding(9, 1)]] SamplerState spec_normal_sampler : register(s9, space1);
+// 10 local thickness (r), normalized; scaled by human_layer.z metres.
+[[vk::combinedImageSampler]] [[vk::binding(10, 1)]] Texture2D thickness_map : register(t10, space1);
+[[vk::combinedImageSampler]] [[vk::binding(10, 1)]] SamplerState thickness_sampler : register(s10, space1);
+// 11/12 Realis-style residual: rgb = the view-independent term and a = its
+//    validity, then the fitted directional vector in tangent space (encoded
+//    0..1). See tools/fit_residual.py.
+[[vk::combinedImageSampler]] [[vk::binding(11, 1)]] Texture2D residual_ambient_map : register(t11, space1);
+[[vk::combinedImageSampler]] [[vk::binding(11, 1)]] SamplerState residual_ambient_sampler : register(s11, space1);
+[[vk::combinedImageSampler]] [[vk::binding(12, 1)]] Texture2D residual_dir_map : register(t12, space1);
+[[vk::combinedImageSampler]] [[vk::binding(12, 1)]] SamplerState residual_dir_sampler : register(s12, space1);
 [[vk::combinedImageSampler]] [[vk::binding(4, 1)]] Texture2D emissive_map : register(t4, space1);
 [[vk::combinedImageSampler]] [[vk::binding(4, 1)]] SamplerState emissive_sampler : register(s4, space1);
 
@@ -428,6 +461,11 @@ static const uint kFlagSeparateMetallic = 65536u;   // 1 << 16, mr slot is rough
 static const uint kFlagHasOcclusion = 131072u;      // 1 << 17, dedicated occlusion map multiplies ambient
 static const uint kFlagSpecularMask = 524288u;   // 1 << 19, normal-map alpha masks the specular
 static const uint kFlagEnvMask = 1048576u;       // 1 << 20, env mask map bound at binding 8
+static const uint kFlagHuman = 2097152u;          // 1 << 21, character surface model
+static const uint kFlagSpecularNormal = 4194304u; // 1 << 22, dedicated Ns map at binding 9
+static const uint kFlagThicknessMap = 8388608u;   // 1 << 23, local thickness map at binding 10
+static const uint kFlagEye = 16777216u;           // 1 << 24, corneal refraction + iris parallax
+static const uint kFlagResidual = 33554432u;      // 1 << 25, measured residual maps at 11/12
 static const uint kFrameIbl = 1u;
 static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
@@ -861,10 +899,135 @@ float3 ApplyInteriorFog(float3 color, float3 world_pos) {
 // Cook-Torrance ggx with Schlick fresnel and Smith visibility for the sun,
 // split-sum ibl with Fdez-Aguera multi-scatter for ambient. Optional clearcoat,
 // sheen and anisotropy lobes layer on top.
+
+// --- character surface model -------------------------------------------------
+// One evaluator, fed by every light path below. The globals mirror what the
+// lobes contributed so the per-lobe debug views can isolate them without
+// shading the surface a second time (a second evaluation would not be the same
+// code, which is exactly the bug a debug view is supposed to catch).
+static float3 g_human_diffuse = float3(0.0, 0.0, 0.0);
+static float3 g_human_specular = float3(0.0, 0.0, 0.0);
+static float3 g_human_transmission = float3(0.0, 0.0, 0.0);
+static float3 g_human_residual = float3(0.0, 0.0, 0.0);
+static float3 g_human_tail = float3(0.0, 0.0, 0.0);
+
+// Eye state, resolved once in main() (it must run before the albedo sample, so
+// the iris is fetched through the cornea rather than painted on it).
+static bool g_eye_active = false;
+static float g_eye_mask = 0.0;
+static float g_eye_limbal = 1.0;
+static float g_eye_shadow = 1.0;
+static float g_eye_lens = 0.0;
+
+HumanSurfaceParams MakeHumanParams(float3 albedo, float roughness, float3 f0, float metallic) {
+  HumanSurfaceParams p = HumanNeutralParams(albedo, roughness, f0);
+  p.metallic = metallic;
+  p.diffuse_fresnel_peak = material.human_diffuse_fresnel.x;
+  p.diffuse_fresnel_falloff = material.human_diffuse_fresnel.y;
+  p.diffuse_fresnel_tangent_falloff = material.human_diffuse_fresnel.z;
+  p.retro_peak = material.human_diffuse_fresnel.w;
+  p.retro_falloff = material.human_retro.x;
+  p.retro_tangent_falloff = material.human_retro.y;
+  p.smooth_terminator_amount = material.human_retro.z;
+  p.smooth_terminator_length = material.human_retro.w;
+  p.spec_fresnel_falloff = material.human_spec.x;
+  p.secondary_roughness_scale = material.human_spec.y;
+  p.secondary_spec_weight = material.human_spec.z;
+  p.mean_free_path = material.human_spec.w;
+  p.subsurface_scale = material.human_transport.x;
+  p.transmission = material.human_transport.y;
+  p.extinction_scale = material.human_transport.z;
+  p.corneal_wetness = material.human_transport.w;
+  p.transmission_tint = material.human_tint.xyz;
+  p.residual_weight = material.human_tint.w;
+  p.cavity_occlusion = material.human_layer.x;
+  p.light_shape_response = material.human_eye1.w;
+  return p;
+}
+
+// Ns. Falls back to the diffuse normal when no map is bound, which is what
+// makes the split free for every material that does not need it.
+float3 SpecularNormal(PsIn input, float3 nd) {
+  // Strength 0 is EXACTLY Nd, not "a flat map applied": a flat tangent-space
+  // normal resolves to the geometric normal, which is a different vector
+  // wherever a diffuse normal map is doing anything. Being able to dial the
+  // split to zero and land back on the un-split result is what makes the sweat
+  // layer A/B-able at all.
+  if ((material.flags & kFlagSpecularNormal) == 0u || material.human_layer.y <= 0.0) return nd;
+  float3 sampled = spec_normal_map.Sample(spec_normal_sampler, input.uv).xyz * 2.0 - 1.0;
+  sampled.xy *= material.human_layer.y;
+  float3 gn = normalize(input.normal);
+  float3 t = input.tangent.xyz - gn * dot(input.tangent.xyz, gn);
+  if (dot(t, t) <= 1e-8) return nd;
+  t = normalize(t);
+  float3 b = cross(gn, t) * input.tangent.w;
+  float3 ns = sampled.x * t + sampled.y * b + sampled.z * gn;
+  return dot(ns, ns) > 1e-8 ? normalize(ns) : nd;
+}
+
+// Local thickness in metres for the transmission lobe. Without a map the
+// material's uniform scale stands in, so a thin part still transmits sanely.
+float HumanThickness(float2 uv) {
+  float t = material.human_layer.z;
+  if ((material.flags & kFlagThicknessMap) != 0u)
+    t *= thickness_map.Sample(thickness_sampler, uv).r;
+  return max(t, 0.0);
+}
+
+// Realis-style residual reconstruction: the fitted (photograph - render) error,
+// evaluated from the light's TANGENT-space direction so the correction rotates
+// with the surface. `validity` fades it when the runtime material no longer
+// matches the captured one.
+float3 HumanResidual(PsIn input, float2 uv, float3 l, float3 nd, float weight, float validity) {
+  if ((material.flags & kFlagResidual) == 0u || weight <= 0.0 || validity <= 0.0)
+    return float3(0.0, 0.0, 0.0);
+  float3 gn = normalize(input.normal);
+  float3 t = input.tangent.xyz - gn * dot(input.tangent.xyz, gn);
+  if (dot(t, t) <= 1e-8) return float3(0.0, 0.0, 0.0);
+  t = normalize(t);
+  float3 b = cross(gn, t) * input.tangent.w;
+  float3 lt = float3(dot(l, t), dot(l, b), dot(l, nd));
+  float4 amb = residual_ambient_map.Sample(residual_ambient_sampler, uv);
+  float3 dirc = residual_dir_map.Sample(residual_dir_sampler, uv).rgb * 2.0 - 1.0;
+  // Both maps are SIGNED, stored biased into an unsigned texture (v*0.5+0.5) -
+  // a residual is a difference, and it is negative wherever the analytic model
+  // is too bright, which is half of what there is to correct. `amb.a` is the
+  // fit's own coverage: texels no OLAT frame saw stay at 0 and contribute
+  // nothing, which is also what makes the all-zero default texture neutral.
+  // The fit is L0 + L1: a view-independent term modulated by one directional
+  // vector. Deliberately low order - a residual is a CORRECTION, and a
+  // high-order fit of a bad analytic model just bakes the model's errors in.
+  float3 residual = amb.rgb * 2.0 - 1.0;
+  return residual * max(1.0 + dot(dirc, lt), 0.0) * amb.a * weight * validity;
+}
+
+// Sun visibility for the TRANSMISSION lobe, traced. The lobe wants light that
+// entered the FAR side, so the ray starts `thickness` metres through the
+// surface: our own back face is then behind the origin and cannot self-occlude,
+// while a genuinely separate blocker still does.
+float HumanSunTransmission(PsIn input, float3 n, float thickness) {
+  if ((frame.flags & kFrameRtShadows) == 0u || thickness <= 0.0) return 1.0;
+  float3 l = normalize(-frame.sun_direction.xyz);
+  RayDesc ray;
+  ray.Origin = input.world_pos - n * (thickness + 0.002);
+  ray.TMin = 0.001;
+  ray.Direction = l;
+  ray.TMax = 1000.0;
+  RayQuery<RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH | RAY_FLAG_FORCE_OPAQUE> rq;
+  rq.TraceRayInline(tlas, RAY_FLAG_NONE, RX_RAY_MASK_REALTIME, ray);
+  rq.Proceed();
+  return rq.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0 : 1.0;
+}
+
 float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   float3 v = normalize(frame.camera_position.xyz - input.world_pos);
   if (dot(n, v) < 0.0) n = -n;  // shade double sided geometry from both sides
   float decal_rough_mult = 1.0;
+  // Residual validity: the measured correction was fitted against a CLEAN
+  // material. Anything that repaints the surface at runtime - decals, blood,
+  // dirt, a wet film - invalidates it, so remember the albedo before those
+  // layers run and fade the correction by how far they moved it.
+  float3 albedo_before_layers = albedo;
   float3 decal_emissive = float3(0.0, 0.0, 0.0);
   ApplyDecalLayer(albedo, n, decal_rough_mult, input.uv, input.tangent);
   ApplyDecals(albedo, n, decal_rough_mult, decal_emissive, input.world_pos,
@@ -874,6 +1037,8 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   // the roughness/f0 below, where the waves have reached the beach.
   float shore_wet = ShoreWetness(input.world_pos, frame.flags, frame.shore_field);
   albedo *= lerp(1.0, 0.55, shore_wet);
+  float human_residual_valid =
+      saturate(1.0 - length(albedo - albedo_before_layers) * 4.0) * saturate(1.0 - shore_wet);
 
   // Underwater caustics + wave shadows: fold an energy-conserving (mean-1) sun
   // modulation into the shadow term for surfaces below the water rest height, so
@@ -894,6 +1059,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   }
   float roughness = clamp(mr.x * material.roughness_factor * decal_rough_mult, 0.045, 1.0);
   roughness *= lerp(1.0, 0.45, shore_wet);  // a wet surface is glossier
+  float roughness_pre_aa = roughness;  // the character path re-filters against Ns
   roughness = SpecularAaRoughness(roughness, n);
   float metallic = clamp(mr.y * material.metallic_factor, 0.0, 1.0);
 
@@ -905,6 +1071,25 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   float3 f0 = lerp(dielectric_f0.xxx, albedo, metallic);
   f0 = lerp(f0, max(f0, 0.05.xxx), shore_wet * 0.6);  // thin water film reflectance
   float3 diffuse_color = albedo * (1.0 - metallic);
+
+  // Build the character material ONCE and hand it to every light below. This
+  // is the whole point of the model: the sun, a spot, a light panel and a
+  // traced bounce must not be able to disagree about what this face is.
+  bool human = (material.flags & kFlagHuman) != 0u;
+  HumanSurfaceParams hp = MakeHumanParams(albedo, roughness, f0, metallic);
+  HumanShadingNormals hn;
+  hn.geometric = normalize(input.normal);
+  if (dot(hn.geometric, v) < 0.0) hn.geometric = -hn.geometric;
+  hn.diffuse = n;
+  hn.specular = human ? SpecularNormal(input, n) : n;
+  // Specular antialiasing has to be filtered against the normal that drives the
+  // LOBE. Filtering a sweat layer's high-frequency droplets against the smooth
+  // diffuse normal leaves the highlight aliasing exactly where the split was
+  // introduced - and because the filter reads screen-space normal derivatives,
+  // it also tracks what minification does to the map as the character walks
+  // away, which is the mip-related roughness drift that has to not be ignored.
+  if (human) hp.roughness = SpecularAaRoughness(roughness_pre_aa, hn.specular);
+  float human_thickness = human ? HumanThickness(input.uv) : 0.0;
 
   float3 h = normalize(l + v);
   float ndv = max(dot(n, v), 1e-4);
@@ -961,8 +1146,48 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   }
 
   float3 sun = frame.sun_color.rgb * frame.sun_direction.w;
-  float3 lit = direct * sun * ndl * shadow;
-  g_skin_diffuse += diffuse_color / kPi * sun * ndl * shadow;
+  float3 lit;
+  if (human) {
+    HumanLightSample ls;
+    ls.direction = l;
+    ls.radiance = sun;
+    ls.distance = 1e6;
+    // The sun is NOT punctual. Feeding its angular radius through the same
+    // shape-aware widening every other light uses is half of why a small hard
+    // emitter and a large soft one read as the same skin instead of two
+    // different materials.
+    ls.solid_angle = kPi * frame.misc.z * frame.misc.z;
+    ls.visibility = shadow;
+    ls.transmission_visibility = HumanSunTransmission(input, hn.geometric, human_thickness);
+    ls.type = 0u;  // RX_HUMAN_LIGHT_DIRECTIONAL
+    ls.flags = 0u;
+    HumanBrdfResult hr = HumanEvaluate(hp, hn, v, ls, human_thickness);
+    if (g_eye_active) {
+      // The iris sits behind the cornea, so it is shadowed by the limbus
+      // separately from the corneal surface above it.
+      hr.diffuse *= lerp(1.0, g_eye_shadow, g_eye_mask);
+      // Posterior-surface / lens proxy: a weak second catchlight that must not
+      // be view-parallaxed, or it swims as the eye rotates.
+      hr.specular *= 1.0 + g_eye_lens;
+    }
+    float3 hdiff = hr.diffuse + hr.transmission;
+    lit = (hdiff + hr.specular * spec_tint) * sun;
+    g_skin_diffuse += hdiff * sun;
+    g_human_diffuse += hr.diffuse * sun;
+    g_human_specular += hr.specular * spec_tint * sun;
+    g_human_transmission += hr.transmission * sun;
+    // The tail's own contribution, for the per-lobe debug view: the same
+    // evaluator with the second lobe disabled, differenced.
+    if (hp.secondary_spec_weight > 0.0) {
+      HumanSurfaceParams core_only = hp;
+      core_only.secondary_spec_weight = 0.0;
+      HumanBrdfResult cr = HumanEvaluate(core_only, hn, v, ls, human_thickness);
+      g_human_tail += (hr.specular - cr.specular) * spec_tint * sun;
+    }
+  } else {
+    lit = direct * sun * ndl * shadow;
+    g_skin_diffuse += diffuse_color / kPi * sun * ndl * shadow;
+  }
 
   // Hair: dual shifted Kajiya-Kay strand lobes along the tangent replace the
   // ggx sun response - an uncolored primary at the surface and an
@@ -1072,11 +1297,22 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       float panel_falloff = saturate(1.0 - dist2 / (lr * lr));
       panel_falloff *= panel_falloff;
       ++light_hits;
+      float3 panel_radiance = pl.color_intensity.rgb * pl.color_intensity.w * panel_falloff;
       float3 panel_diff = diffuse_color * diff_i;
-      lit += (panel_diff + spec_col * spec_i) * pl.color_intensity.rgb *
-             pl.color_intensity.w * panel_falloff;
-      g_skin_diffuse +=
-          panel_diff * pl.color_intensity.rgb * pl.color_intensity.w * panel_falloff;
+      float3 panel_spec = spec_col * spec_i;
+      if (human) {
+        // LTC already integrated the panel's SHAPE; the material's directional
+        // shaping is evaluated once at the representative direction so a panel
+        // and a point light land on the same material semantics.
+        HumanBrdfResult hr =
+            HumanEvaluatePreintegrated(hp, hn, v, pl_l, diff_i, panel_spec, 1.0);
+        panel_diff = hr.diffuse;
+        panel_spec = hr.specular;
+        g_human_diffuse += panel_diff * panel_radiance;
+        g_human_specular += panel_spec * panel_radiance;
+      }
+      lit += (panel_diff + panel_spec) * panel_radiance;
+      g_skin_diffuse += panel_diff * panel_radiance;
       continue;
     }
     if (ltype == 2u) {
@@ -1109,11 +1345,19 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       float ball_falloff = saturate(1.0 - dist2 / (lr * lr));
       ball_falloff *= ball_falloff;
       ++light_hits;
+      float3 ball_radiance = pl.color_intensity.rgb * pl.color_intensity.w * ball_falloff;
       float3 ball_diff = diffuse_color * sphere_diff;
-      lit += (ball_diff + sphere_spec_col * sphere_spec) * pl.color_intensity.rgb *
-             pl.color_intensity.w * ball_falloff;
-      g_skin_diffuse +=
-          ball_diff * pl.color_intensity.rgb * pl.color_intensity.w * ball_falloff;
+      float3 ball_spec = sphere_spec_col * sphere_spec;
+      if (human) {
+        HumanBrdfResult hr =
+            HumanEvaluatePreintegrated(hp, hn, v, pl_l, sphere_diff, ball_spec, 1.0);
+        ball_diff = hr.diffuse;
+        ball_spec = hr.specular;
+        g_human_diffuse += ball_diff * ball_radiance;
+        g_human_specular += ball_spec * ball_radiance;
+      }
+      lit += (ball_diff + ball_spec) * ball_radiance;
+      g_skin_diffuse += ball_diff * ball_radiance;
       continue;
     }
     float pndl = max(dot(n, pl_l), 0.0);
@@ -1149,6 +1393,30 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       falloff *= LocalShadow(face, input.world_pos, n);
       if (falloff <= 0.0) continue;
     }
+    if (human) {
+      // Same evaluator, same parameters, different light. The cosine lives
+      // inside HumanEvaluate so the terminator control cannot be re-derived
+      // (differently) per light type - which is the failure this replaces.
+      float3 pl_radiance = pl.color_intensity.rgb * pl.color_intensity.w * falloff;
+      HumanLightSample ls;
+      ls.direction = pl_l;
+      ls.radiance = pl_radiance;
+      ls.distance = dist;
+      ls.solid_angle = 0.0;
+      ls.visibility = 1.0;  // `falloff` already carries the local shadow
+      ls.transmission_visibility = 1.0;
+      ls.type = (ltype == 1u) ? 2u : 1u;  // SPOT : POINT
+      ls.flags = 0u;
+      HumanBrdfResult hr = HumanEvaluate(hp, hn, v, ls, human_thickness);
+      if (g_eye_active) hr.diffuse *= lerp(1.0, g_eye_shadow, g_eye_mask);
+      float3 hdiff = hr.diffuse + hr.transmission;
+      lit += (hdiff + hr.specular * spec_tint) * pl_radiance;
+      g_skin_diffuse += hdiff * pl_radiance;
+      g_human_diffuse += hr.diffuse * pl_radiance;
+      g_human_specular += hr.specular * spec_tint * pl_radiance;
+      g_human_transmission += hr.transmission * pl_radiance;
+      continue;
+    }
     float3 pl_h = normalize(pl_l + v);
     float pndh = max(dot(n, pl_h), 0.0);
     float pvdh = max(dot(v, pl_h), 0.0);
@@ -1164,6 +1432,15 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float3 restir_di = restir_diffuse_map.Load(restir_p).rgb;
     float3 restir_ds = restir_spec_map.Load(restir_p).rgb;
     float3 restir_diffuse_term = diffuse_color * (1.0 / kPi) * restir_di;
+    if (human) {
+      // ReSTIR hands back DIRECTION-FREE irradiance, so only the view half of
+      // the diffuse Fresnel survives; applying the light half here would
+      // double-count what the estimator already integrated over.
+      float gv = pow(saturate(1.0 - max(dot(hn.diffuse, v), 1e-4)),
+                     max(hp.diffuse_fresnel_falloff, 1e-2));
+      restir_diffuse_term *= 1.0 + hp.diffuse_fresnel_peak * gv;
+      g_human_diffuse += restir_diffuse_term;
+    }
     lit += restir_diffuse_term + f0 * restir_ds * spec_tint;
     g_skin_diffuse += restir_diffuse_term;
   }
@@ -1251,6 +1528,10 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     g_skin_diffuse += ambient * ao;
   }
   ambient *= ao;
+  // Mouth-cavity occlusion darkens the INDIRECT term only: a mouth interior
+  // loses ambient, not the light you deliberately shine into it.
+  if (human && hp.cavity_occlusion > 0.0) ambient *= 1.0 - saturate(hp.cavity_occlusion);
+  if (g_eye_active) ambient *= lerp(1.0, g_eye_limbal, g_eye_mask);
 
   // Environment reflection layer: what the original games get from an authored
   // cubemap scaled by Environment Map Scale, taken here off the reflection this
@@ -1276,6 +1557,17 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     ambient = ambient * (1.0 - cc_f) + coat_refl * cc_f * frame.camera_position.w;
   }
 
+  // Realis-style measured residual: (photograph - analytical render), fitted
+  // offline into a directional basis and added on top of a converged analytic
+  // result. It is the LAST thing applied and the first thing to fade: once the
+  // runtime material stops matching the captured one it is simply wrong.
+  if (human) {
+    g_human_residual = HumanResidual(input, input.uv, l, hn.diffuse, hp.residual_weight,
+                                     human_residual_valid) *
+                       sun * shadow;
+    lit += g_human_residual;
+  }
+
   float3 emissive = emissive_map.Sample(emissive_sampler, input.uv).rgb * material.emissive_factor;
 
   // Debug channels isolate one shading input so it can be eyeballed. They share
@@ -1289,6 +1581,21 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     case 6: return ambient;     // indirect (ibl + ddgi), ao applied
     case 7: return lit;         // direct sun, shadowed
     case 8: return emissive;
+    // Per-lobe isolation for the character model. These read the SAME
+    // accumulators the lit path filled, so they verify the shipped evaluation
+    // rather than a second copy of it.
+    case 16: return g_human_diffuse;
+    case 17: return g_human_specular;
+    case 18: return abs(g_human_tail) * 8.0;    // second GGX lobe's own contribution
+    case 19: return g_human_transmission;
+    case 20: return abs(g_human_residual) * 4.0;
+    case 21: return abs(hn.specular - hn.diffuse) * 8.0;  // Ns vs Nd separation
+    case 22: return human ? float3(g_eye_mask, g_eye_limbal, g_eye_shadow)
+                          : float3(0.0, 0.0, 0.0);
+    // The uv of the shaded texel. tools/fit_residual.py needs it to project a
+    // screen-space (photograph - render) difference back into texture space;
+    // without it the residual fit has no way to know which texel it measured.
+    case 23: return float3(frac(input.uv), 0.0);
     case 9:  // raw reflection: the denoised target when present, else traced
       if ((frame.flags & kFrameSpecReflTex) != 0u) {
         return spec_refl_map.SampleLevel(spec_refl_sampler,
@@ -1353,7 +1660,20 @@ float SunShadow(PsIn input, float3 n) {
   }
 
   RayDesc ray;
-  ray.Origin = input.world_pos + n * 0.01;
+  // Offset along the GEOMETRIC normal, not the shaded one. A high-frequency
+  // normal map (a face scan's is 8K) can tilt the shading normal far enough
+  // that a fixed offset along it pushes the ray origin back INTO the surface,
+  // and the resulting self-hits read as hard triangular shadow wedges across
+  // cheeks and temples - the facial shadow artefact that has to be treated as
+  // a defect, not as contact shadowing.
+  //
+  // The magnitude scales with viewing distance: 1 cm is a reasonable bias for a
+  // landscape and an eighth of an ear at a close-up. Clamped at both ends so
+  // distant geometry keeps the bias it was tuned with.
+  float3 geo_n = normalize(input.normal);
+  if (dot(geo_n, l) < 0.0 && dot(n, l) > 0.0) geo_n = n;  // double-sided sanity
+  float bias = clamp(0.004 * distance(frame.camera_position.xyz, input.world_pos), 0.0008, 0.01);
+  ray.Origin = input.world_pos + geo_n * bias;
   ray.TMin = 0.001;
   ray.Direction = l;
   ray.TMax = 1000.0;
@@ -1516,6 +1836,45 @@ PsOut main(PsIn input) {
   }
 
 
+  // The eye resolves BEFORE the albedo sample: the iris has to be fetched
+  // through the corneal surface at its real depth, not painted onto it.
+  float2 surface_uv = input.uv;
+  if ((material.flags & kFlagEye) != 0u) {
+    float3 gn = normalize(input.normal);
+    float3 gt = input.tangent.xyz - gn * dot(input.tangent.xyz, gn);
+    if (dot(gt, gt) > 1e-8) {
+      gt = normalize(gt);
+      float3 gb = cross(gn, gt) * input.tangent.w;
+      float3 ev = normalize(frame.camera_position.xyz - input.world_pos);
+      float3 el = normalize(-frame.sun_direction.xyz);
+      HumanEyeParams ep;
+      // The iris disc is centred on the optical axis, which for a spherical eye
+      // uv layout is the middle of the map. Authoring a different layout means
+      // authoring a different centre; this is the convention the lookdev rig
+      // and the sample eyes use.
+      ep.iris_center = float2(0.5, 0.5);
+      ep.iris_radius = material.human_eye0.y;
+      ep.iris_depth = material.human_eye0.x;
+      ep.pupil_scale = material.human_eye0.z;
+      ep.limbal_size = material.human_eye0.w;
+      ep.limbal_power = material.human_eye1.x;
+      ep.cornea_ior = material.human_eye1.y;
+      ep.iris_shadow_depth = material.human_eye1.z;
+      HumanEyeSample es =
+          HumanEyeResolve(ep, input.uv, float3(dot(ev, gt), dot(ev, gb), dot(ev, gn)),
+                          float3(dot(el, gt), dot(el, gb), dot(el, gn)),
+                          HumanEyeUvPerMetre(input.uv, input.world_pos));
+      // Only the iris disc parallaxes; the sclera keeps its own uv.
+      surface_uv = lerp(input.uv, es.iris_uv, es.iris_mask);
+      g_eye_active = true;
+      g_eye_mask = es.iris_mask;
+      g_eye_limbal = es.limbal;
+      g_eye_shadow = es.iris_shadow;
+      g_eye_lens = es.lens_reflect;
+    }
+  }
+  input.uv = surface_uv;
+
   float4 base;
   if ((material.flags & kFlagVirtualAlbedo) != 0u) {
     base = float4(SampleVirtualAlbedo(input.uv, input.sv_position.xy), 1.0) *
@@ -1530,6 +1889,10 @@ PsOut main(PsIn input) {
     base = base_color_map.Sample(base_color_sampler, input.uv) * material.base_color_factor *
            input.color;
   }
+  // Limbal ring: the iris/sclera boundary darkens because the corneal stroma
+  // thickens and scatters there. Applied to the albedo, not the lighting, so it
+  // survives every light path identically.
+  if (g_eye_active) base.rgb *= lerp(1.0, g_eye_limbal, g_eye_mask);
   if ((material.flags & kFlagAlphaMask) != 0u && base.a < material.alpha_cutoff) discard;
 
   float3 n = SurfaceNormal(input);

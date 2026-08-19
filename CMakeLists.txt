@@ -596,6 +596,19 @@ if(RX_BUILD_TESTS)
   target_link_libraries(settings_ini_test PRIVATE rx::core)
   add_test(NAME settings_ini_test COMMAND settings_ini_test)
 
+  # Character surface model: the neutral-parity contract, control independence,
+  # terminator energy, tier monotonicity. Pure CPU (the mirror of
+  # human_brdf.hlsli), so plain `ctest` runs it everywhere.
+  add_executable(human_brdf_test
+    test/human_brdf_test.cc
+    engine/render/pipeline/human_material.cc)
+  target_include_directories(human_brdf_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium)
+  target_compile_definitions(human_brdf_test PRIVATE RX_RENDER_IMPLEMENTATION)
+  target_link_libraries(human_brdf_test PRIVATE rx::core)
+  add_test(NAME human_brdf_test COMMAND human_brdf_test)
+
   add_executable(procedural_grass_test test/procedural_grass_test.cc)
   target_include_directories(procedural_grass_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/engine

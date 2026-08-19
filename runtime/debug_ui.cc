@@ -72,7 +72,12 @@ const char* kDebugViews[] = {"Off",         "Base color",   "World normal",
                              "Roughness",   "Metallic",     "Ambient occlusion",
                              "Indirect GI", "Direct light", "Emissive", "Reflection",
                              "Overdraw",    "Bounds (BVH)", "Temporal history",
-                             "Motion vectors", "Ray count", "Light complexity"};
+                             "Motion vectors", "Ray count", "Light complexity",
+                             // Character surface model, one lobe at a time
+                             // (docs/CHARACTER_RENDERING.md).
+                             "Human: diffuse", "Human: specular", "Human: 2nd lobe",
+                             "Human: transmission", "Human: residual", "Human: Ns vs Nd",
+                             "Human: eye", "UV"};
 
 // FPS readout colour bands: green above smooth, amber in the warning band, red
 // once it slips below playable.

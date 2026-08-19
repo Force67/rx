@@ -57,7 +57,7 @@ viewer runtime in place of the game.
   `--gltf <scene>`, `--usd <stage>` or `--demo <id>` (water,
   materials, cornell, cloth, grass, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
   meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx,
-  gym, shooter),
+  gym, shooter, lookdev),
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`
   / `RX_SHOWCASE`), frame capture (`RX_UI_SHOT`).
@@ -66,6 +66,28 @@ viewer runtime in place of the game.
   into a cached GLB, retaining visible meshes, deform bones, skin weights, and
   body-deformation morphs. Compatible chest-helper/Genesis rigs automatically
   get a live jiggle preview plus selectable Hip Sway and March walk profiles.
+
+## Characters
+
+Skin, eyes and teeth run one controllable BRDF that every light type, every
+render path and every quality tier evaluates - the transferable half of The
+Callisto Protocol's character work. Independent artist controls for diffuse
+Fresnel, grazing retroreflection, a smooth shading terminator, generalized
+specular Fresnel and an optional second GGX lobe sit on top of separate diffuse
+and specular shading normals (so sweat bends the highlight, not the skin),
+thickness-driven transmission, and an eye shaded as a layered anatomy - corneal
+refraction with the iris sampled at its real depth behind it, a limbal ring, and
+an iris shadow evaluated separately from the corneal surface. The neutral
+parameter set reproduces the engine's stock Lambert + GGX exactly, so enabling
+the model changes nothing until it is fitted.
+
+`--demo lookdev` is the bench that makes fitting it a measurement: an OLAT rig
+(one light at a time, both emitter-shape extremes), frozen camera stops,
+scene-linear comparison against calibrated reference in the same tone-mapping
+path, per-region error metrics, live editing with undo, automated coordinate
+descent against the measured error, and a deterministic pass over the whole
+validation matrix. See [docs/CHARACTER_RENDERING.md](docs/CHARACTER_RENDERING.md);
+`tools/get_head_scan.sh` fetches a photogrammetry human to try it on.
 
 ## Global illumination
 

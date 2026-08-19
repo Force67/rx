@@ -301,6 +301,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   if (placement_) placement_->Emit(dt, view);
   if (grass_) grass_->Emit(view);
   if (gym_) gym_->Emit(dt, view);
+  if (lookdev_) lookdev_->Emit(dt, view);
   if (shooter_) shooter_->Emit(dt, view);
   if (puppet_) puppet_->Emit(dt, view);
   if (drive_) drive_->Emit(dt, view);
@@ -3644,6 +3645,13 @@ void DemoScenes::CreateDemoScene() {
   }
   if (config_.demo_scene == "imposters") {
     CreateImposterDemoScene();
+    return;
+  }
+  if (config_.demo_scene == "lookdev") {
+    // The character reference lab: OLAT rig, frozen framings, reference
+    // comparison and live material fitting. See docs/CHARACTER_RENDERING.md.
+    lookdev_ = std::make_unique<LookdevDemo>(ctx_);
+    lookdev_->Create();
     return;
   }
   if (config_.demo_scene == "sss") {

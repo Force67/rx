@@ -751,6 +751,16 @@ void Viewer::OnUpdate(f32 frame_delta) {
     if (actions_->pressed(Action::kToggleDebug) && allow_keyboard) debug_ui_.ToggleVisible();
     return;
   }
+  // The character reference lab owns its camera: the framings are frozen stops,
+  // not a free-fly. It never captures the cursor - the panel is the tool.
+  if (LookdevDemo* lookdev = demos_->lookdev(); lookdev && window_) {
+    const bool allow_keyboard = !debug_ui_.wants_keyboard();
+    const bool allow_mouse = !debug_ui_.wants_mouse();
+    lookdev->Update(frame_delta, window_->input(), *actions_, allow_keyboard, allow_mouse);
+    window_->SetRelativeMouseMode(false);
+    if (actions_->pressed(Action::kToggleDebug) && allow_keyboard) debug_ui_.ToggleVisible();
+    return;
+  }
   // The FPS range owns its camera + input the same way the gym does: mouse look
   // through the character, mouse buttons on the trigger.
   if (ShooterDemo* shooter = demos_->shooter(); shooter && window_) {
@@ -843,6 +853,13 @@ void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
 }
 
 void Viewer::OnFrameEnd() {
+  // The character bench's validation-matrix pass owns its own capture loop
+  // (every camera against every light); RX_LOOKDEV_QUIT exits when it drains,
+  // which is what makes it usable as a headless regression run.
+  if (LookdevDemo* lookdev = demos_->lookdev(); lookdev && lookdev->capture_finished()) {
+    host_->RequestQuit();
+    return;
+  }
   if (const char* shot = UiShot.get()) {
     static int ui_shot_frames = 0;
     static const int ui_shot_target = [] {

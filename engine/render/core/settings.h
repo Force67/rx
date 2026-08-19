@@ -35,7 +35,23 @@ enum class DebugView : u8 {
   kMotionVectors,    // screen-space velocity (red = +x, green = +y, grey = still)
   kRayCount,         // per-pixel ray-tracing cost heatmap (shadow + ao + reflection)
   kLightComplexity,  // per-pixel count of dynamic point lights affecting it
+  // Character surface model, one lobe at a time. They read the SAME
+  // accumulators the lit path filled, so they verify the shipped evaluation
+  // rather than a second copy of it. See docs/CHARACTER_RENDERING.md.
+  kHumanDiffuse,        // the character diffuse lobe alone
+  kHumanSpecular,       // the character specular lobe alone
+  kHumanSecondLobe,     // the second GGX lobe's own contribution
+  kHumanTransmission,   // the through-the-surface lobe
+  kHumanResidual,       // the measured (Realis-style) correction alone
+  kHumanNormalSplit,    // |Ns - Nd|: how far the specular normal has moved
+  kHumanEye,            // r iris mask, g limbal ring, b iris shadow
+  kUv,                  // the shaded texel's uv (feeds tools/fit_residual.py)
 };
+
+// Quality ceiling for the character surface model. Mirrors render::HumanTier
+// (pipeline/human_material.h); it lives here so a quality preset can cap it
+// without settings.h depending on the material layer.
+enum class HumanQualityTier : u8 { kHero, kStandard, kDistant };
 
 // Resolution scaling presets matching the vendor upscaler naming. The ratio
 // is per axis: render = output / ratio.
@@ -307,6 +323,15 @@ struct RenderSettings {
   // skin-flagged materials' diffuse lighting (red bleed at shadow terminators).
   bool sss = true;
   f32 sss_width = 0.012f;  // world scattering radius, meters
+
+  // Character surface model quality ceiling for this hardware tier. The tier a
+  // given character actually gets is min(this, the tier its screen height earns
+  // - see render::HumanTierForScreenHeight), so a handheld preset can cap the
+  // whole cast at Standard without every app re-deciding what a handheld is.
+  // The renderer does not apply it on its own: the tier is baked into a
+  // material's parameters at upload, so the APP picks per character and calls
+  // Renderer::UpdateMaterial. See docs/CHARACTER_RENDERING.md.
+  HumanQualityTier human_tier_cap = HumanQualityTier::kHero;
 
   // Dynamic blood flow (hemoglobin perfusion) for skin. The app normally drives
   // these from gameplay (heart rate, exertion, emotion); the defaults give a
