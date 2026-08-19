@@ -89,6 +89,22 @@ descent against the measured error, and a deterministic pass over the whole
 validation matrix. See [docs/CHARACTER_RENDERING.md](docs/CHARACTER_RENDERING.md);
 `tools/get_head_scan.sh` fetches a photogrammetry human to try it on.
 
+## Hair
+
+Strand grooms and hair cards run one fibre BSDF - Marschner's R / TT / TRT lobes
+in Chiang's parameterization - with Zinke dual scattering fed by a deep opacity
+map rendered from the sun. The same volume gives the groom its self-shadowing,
+supplies the fibre count multiple scattering is a function of, and shadows the
+skin underneath, which a binary shadow map cannot do because hair is not opaque.
+
+Colour is authored as pigment (eumelanin / pheomelanin) or as a target colour
+inverted into absorption, so a blonde groom transmits and forward-scatters like
+blonde hair instead of being brown hair with a lighter tint. The inversion is
+fitted against this renderer rather than copied: the published constants are
+calibrated for path-traced multiple scattering and render a requested 0.45 as
+0.77 here. See [docs/HAIR.md](docs/HAIR.md); `--demo strands` shows it, and
+`RX_DEBUG_VIEW=24` shows the fibre count it all rests on.
+
 ## Global illumination
 
 Indirect diffuse comes from one of three tiers, all fully dynamic (rx bakes

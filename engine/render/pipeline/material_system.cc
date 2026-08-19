@@ -697,7 +697,19 @@ bool MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
       params.flags |= kFlagResidual;
     }
   }
-  if (material.hair) params.flags |= kFlagHair;
+  if (material.hair) {
+    params.flags |= kFlagHair;
+    const asset::Material::HairParams& h = material.hair_params;
+    std::memcpy(params.hair0, h.sigma_a, sizeof(f32) * 3);
+    params.hair0[3] = h.beta_m;
+    params.hair1[0] = h.beta_n;
+    params.hair1[1] = h.alpha;
+    params.hair1[2] = h.eta;
+    params.hair1[3] = h.scatter_scale;
+    params.hair2[0] = h.color_reference_depth;
+    params.hair2[1] = h.assumed_depth;
+    params.hair2[2] = h.color_from_albedo ? 1.0f : 0.0f;
+  }
   if (material.virtual_albedo) params.flags |= kFlagVirtualAlbedo;
   // Terrain reuses the normal slot as a land layer, so the normal-map path must
   // stay off; the shader branches on kFlagTerrain instead.

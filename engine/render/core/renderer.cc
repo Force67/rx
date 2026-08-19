@@ -1689,6 +1689,12 @@ void Renderer::SetHairGroomTint(u32 id, const Vec3 &tint) {
   hair_.SetGroomTint(id, tint);
 }
 
+void Renderer::SetHairGroomMaterial(u32 id, const HairSurfaceParameters &params) {
+  hair_.SetGroomHair(id, params);
+}
+
+void Renderer::SetHairGroomTier(u32 id, HairTier tier) { hair_.SetGroomTier(id, tier); }
+
 void Renderer::DestroyHairGroom(u32 id) {
   if (!device_ || device_->is_stub())
     return;
@@ -3623,6 +3629,17 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           }
 
           BindingSetHandle env_set = env_transparent_sets_[frame_slot];
+          // The hair transmittance volume, so skin under a groom is shadowed
+          // by the fibres over it (see HairStrands::AddTransmittanceToGraph).
+          // Null params = no hair this frame, which the forward pass reads as
+          // "nothing overhead" rather than as a black shadow map.
+          EnvironmentSystem::HairVolumeBinding hair_env_binding;
+          {
+            const HairStrands::TransmittanceBinding hb = hair_.transmittance();
+            hair_env_binding.front_depth = hb.front_depth;
+            hair_env_binding.layers = hb.layers;
+            hair_env_binding.params = hb.params;
+          }
           EnvironmentSystem::DdgiBinding ddgi_binding;
           if (ddgi_active)
             ddgi_binding = ddgi_->binding(frame_index_);
@@ -3671,7 +3688,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               decal_baker_.available() ? decal_baker_.fx_view()
                                        : TextureView{},
               decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
-                                       : GpuBuffer{});
+                                       : GpuBuffer{},
+              hair_env_binding.params ? &hair_env_binding : nullptr);
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
@@ -5835,6 +5853,17 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           TextureView spec_refl_view = spec_refl != kInvalidResource
                                            ? ctx.graph->image(spec_refl).view
                                            : TextureView{};
+          // The hair transmittance volume, so skin under a groom is shadowed
+          // by the fibres over it (see HairStrands::AddTransmittanceToGraph).
+          // Null params = no hair this frame, which the forward pass reads as
+          // "nothing overhead" rather than as a black shadow map.
+          EnvironmentSystem::HairVolumeBinding hair_env_binding;
+          {
+            const HairStrands::TransmittanceBinding hb = hair_.transmittance();
+            hair_env_binding.front_depth = hb.front_depth;
+            hair_env_binding.layers = hb.layers;
+            hair_env_binding.params = hb.params;
+          }
           EnvironmentSystem::DdgiBinding ddgi_binding;
           if (ddgi_active)
             ddgi_binding = ddgi_->binding(frame_index_);
@@ -5891,7 +5920,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               decal_baker_.available() ? decal_baker_.fx_view()
                                        : TextureView{},
               decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
-                                       : GpuBuffer{});
+                                       : GpuBuffer{},
+              hair_env_binding.params ? &hair_env_binding : nullptr);
 
           ColorAttachment colors[3];
           colors[0] = {.view = ctx.graph->image(geom_scene).view,
@@ -6725,6 +6755,23 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       hf.sun_direction = applied_sun_direction_;
       hf.sun_intensity = applied_sun_intensity_;
       hf.sun_color = applied_sun_color_;
+      // Hair with no ambient is a black silhouette the moment it leaves the
+      // sun. The flat ambient is the sky term the forward pass uses for
+      // everything else when IBL is off; with IBL on the sky already carries
+      // it, so the groom takes a matching share.
+      const f32 ambient_level =
+          settings_.ibl ? settings_.ibl_intensity * 0.12f : settings_.ambient;
+      hf.ambient = {applied_sun_color_.x * ambient_level, applied_sun_color_.y * ambient_level,
+                    applied_sun_color_.z * ambient_level};
+      hf.transmittance = settings_.hair_transmittance;
+      hf.transmittance_depth = settings_.hair_transmittance_depth;
+      hf.fibre_scale = settings_.hair_fibre_scale;
+      hf.shadow_density = settings_.hair_shadow_density;
+      hf.debug_view = static_cast<u32>(settings_.debug_view);
+      // The volume has to be built before anything shades against it, and it
+      // is the same geometry drawn from the sun, so it goes in right here
+      // rather than at the top of the frame.
+      hair_.AddTransmittanceToGraph(graph_, hf, frame_slot);
       hair_.AddToGraph(graph_, lit, depth, {render_width_, render_height_}, hf,
                        frame_slot);
     }

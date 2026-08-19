@@ -525,6 +525,11 @@ public:
   // back from the physics strand groom; see app::HairStrandBinding.
   void SetHairGroomPoints(u32 id, const f32 *positions, u32 count);
   void SetHairGroomTint(u32 id, const Vec3 &tint);
+  // The groom's fibre material and quality tier (render/pipeline/hair_material.h).
+  // Colour is authored through the strand colours by default; this is the rest
+  // of the fibre - roughness, cuticle tilt, IOR, multiple-scattering gain.
+  void SetHairGroomMaterial(u32 id, const HairSurfaceParameters &params);
+  void SetHairGroomTier(u32 id, HairTier tier);
   void DestroyHairGroom(u32 id);
   // World-space head collision sphere of a groom, for aligning a head mesh.
   bool HairGroomHead(u32 id, Vec3 *center, f32 *radius);

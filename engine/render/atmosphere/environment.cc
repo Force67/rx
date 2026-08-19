@@ -320,6 +320,12 @@ bool EnvironmentSystem::CreatePipelines() {
   // 43: per-tile uv scale/bias, so the forward pass reproduces the mapping the
   // bake used (UDIM character bodies need one).
   env_desc.slots.push_back({43, BindingType::kStorageBuffer});
+  // 44-46: the hair transmittance volume (front-most fibre depth, the layered
+  // fibre counts, and the light frustum it was rendered with), so skin under a
+  // groom is shadowed by the strands over it. Neutral (no hair) when absent.
+  env_desc.slots.push_back({44, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({45, BindingType::kCombinedTextureSampler});
+  env_desc.slots.push_back({46, BindingType::kUniformBuffer});
   env_set_layout_ = device_.CreateBindingLayout(env_desc);
   if (!env_set_layout_) return false;
 
@@ -575,7 +581,8 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
                                     const RcgiWorldBinding* rcgi_world,
                                     TextureView decal_layer_albedo,
                                     TextureView decal_layer_fx,
-                                    const GpuBuffer& decal_layer_xform) const {
+                                    const GpuBuffer& decal_layer_xform,
+                                    const HairVolumeBinding* hair_volume) const {
   device_.UpdateBindingSet(
       set,
       {Bind::Combined(0, irradiance_.view, sampler_),
@@ -678,7 +685,18 @@ void EnvironmentSystem::WriteEnvSet(BindingSetHandle set, TextureView ao_view,
        Bind::Combined(41, decal_layer_albedo ? decal_layer_albedo : white_.view, sampler_),
        Bind::Combined(42, decal_layer_fx ? decal_layer_fx : flat_normal_.view, sampler_),
        Bind::StorageBuffer(43, decal_layer_xform ? decal_layer_xform : dummy_storage_, 0,
-                           decal_layer_xform ? decal_layer_xform.size : 256)});
+                           decal_layer_xform ? decal_layer_xform.size : 256),
+       // Hair transmittance volume. The dummy UBO leaves `enabled` at zero, so
+       // the forward pass reads "no hair" rather than sampling a black map and
+       // shadowing the whole scene.
+       Bind::Combined(44, hair_volume && hair_volume->front_depth ? hair_volume->front_depth
+                                                                 : black_.view,
+                      sampler_),
+       Bind::Combined(45, hair_volume && hair_volume->layers ? hair_volume->layers : black_.view,
+                      sampler_),
+       Bind::Uniform(46,
+                     hair_volume && hair_volume->params ? *hair_volume->params : dummy_volume_, 0,
+                     hair_volume && hair_volume->params ? hair_volume->params->size : 256)});
 }
 
 EnvironmentSystem::~EnvironmentSystem() {
