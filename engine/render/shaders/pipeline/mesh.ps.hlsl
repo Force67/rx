@@ -317,6 +317,14 @@ struct MaterialParams {
   float sss_perfusion;
   float3 sss_scatter_color;
   float sss_ior;
+  // Bethesda lighting-shader inputs (see asset::Material). Neutral defaults, so
+  // a material that sets none of them shades as plain metallic-roughness.
+  float3 specular_color;
+  float specular_strength;
+  float env_reflect;
+  float soft_lighting;
+  float rim_lighting;
+  float back_lighting;
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
 
@@ -335,6 +343,10 @@ struct MaterialParams {
 [[vk::combinedImageSampler]] [[vk::binding(6, 1)]] SamplerState metallic_map_sampler : register(s6, space1);
 [[vk::combinedImageSampler]] [[vk::binding(7, 1)]] Texture2D occlusion_map : register(t7, space1);
 [[vk::combinedImageSampler]] [[vk::binding(7, 1)]] SamplerState occlusion_sampler : register(s7, space1);
+// Environment-reflection mask (r), the Bethesda _em map: which texels of a
+// surface reflect. Default 1x1 white; only read under kFlagEnvMask.
+[[vk::combinedImageSampler]] [[vk::binding(8, 1)]] Texture2D env_mask_map : register(t8, space1);
+[[vk::combinedImageSampler]] [[vk::binding(8, 1)]] SamplerState env_mask_sampler : register(s8, space1);
 
 // Bindless texture table (set 3, shared with the rt hit shading): the terrain
 // splat v2 palette samples through it. Indices come from the material uniform,
@@ -397,6 +409,8 @@ static const uint kFlagTerrainV2 = 32768u;      // 1 << 15, bindless splat palet
 static const uint kFlagSeparateMetallic = 65536u;   // 1 << 16, mr slot is roughness-only, metallic from metallic_map.r
 static const uint kFlagHasOcclusion = 131072u;      // 1 << 17, dedicated occlusion map multiplies ambient
 static const uint kFlagSilhouettePom = 262144u;  // 1 << 18, curvature-aware pom + silhouette carve
+static const uint kFlagSpecularMask = 524288u;   // 1 << 19, normal-map alpha masks the specular
+static const uint kFlagEnvMask = 1048576u;       // 1 << 20, env mask map bound at binding 8
 static const uint kFrameIbl = 1u;
 static const uint kFrameAoValid = 2u;
 static const uint kFrameDdgi = 4u;
@@ -793,6 +807,17 @@ float StrandSpecular(float3 t, float3 v, float3 l, float exponent) {
   return smoothstep(-1.0, 0.0, tdh) * pow(sin_th, exponent);
 }
 
+// --- vanilla wrap-around fills ---------------------------------------------
+// The Bethesda lighting shader's soft-lighting curve: the difference of two
+// smoothsteps, one over the wrapped N.L and one over the raw one, so the fill
+// only appears past the terminator and dies out on faces the key light already
+// reaches. strength widens how far around the surface the light wraps.
+float SoftLightFill(float ndl, float strength) {
+  float w = saturate((strength + ndl) / (1.0 + strength));
+  float lit_face = saturate(ndl);
+  return max(0.0, w * w * (3.0 - 2.0 * w) - lit_face * lit_face * (3.0 - 2.0 * lit_face));
+}
+
 // Specular anti-aliasing (Tokuyoshi/Kaplanyan-style): widen the GGX lobe by
 // the screen-space variance of the shaded normal, so minified normal maps and
 // curved silhouettes stop minting single-pixel fireflies the TAA cannot hold.
@@ -877,6 +902,16 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   }
   float3 fresnel = f0 + (1.0 - f0) * pow(1.0 - vdh, 5.0);
 
+  // Bethesda specular masking: the highlight is scaled per texel by the normal
+  // map's alpha and tinted by the material, which is how the original games get
+  // dull leather and bright steel out of one texture set without a roughness
+  // map. White and 1 for everything else, so the lobe is untouched.
+  float spec_mask = 1.0;
+  if ((material.flags & kFlagSpecularMask) != 0u) {
+    spec_mask = normal_map.Sample(normal_sampler, input.uv).a;
+  }
+  float3 spec_tint = material.specular_color * (material.specular_strength * spec_mask);
+
   float3 specular;
   if (abs(material.anisotropy) > 0.001) {
     // Anisotropic ggx along the surface tangent (brushed-metal streaks).
@@ -892,6 +927,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   } else {
     specular = D_GGX(ndh, a) * V_SmithGGXCorrelated(ndv, ndl, a) * fresnel;
   }
+  specular *= spec_tint;
 
   float3 direct = diffuse_color / kPi + specular;
 
@@ -945,6 +981,22 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     g_skin_diffuse += sss_term;
   }
 
+  // Vanilla lighting-effect fills. These sit outside the N.L response on
+  // purpose - soft lighting spills past the terminator, rim lighting rides the
+  // backlit edge, back lighting comes through the surface - and carry the sun's
+  // shadow so nothing glows inside one.
+  float fill = 0.0;
+  if (material.soft_lighting > 0.001) fill += SoftLightFill(dot(n, l), material.soft_lighting);
+  if (material.rim_lighting > 0.001) {
+    fill += pow(1.0 - saturate(ndv), material.rim_lighting) * saturate(dot(v, -l));
+  }
+  if (material.back_lighting > 0.001) fill += material.back_lighting * saturate(-dot(n, l));
+  if (fill > 0.0) {
+    float3 fill_term = diffuse_color * material.subsurface_color * fill * sun * shadow;
+    lit += fill_term;
+    g_skin_diffuse += fill_term;
+  }
+
   // Dynamic point lights: ggx + diffuse with smooth radius falloff. light_hits
   // drives the light-complexity debug view.
   uint light_hits = 0;
@@ -990,7 +1042,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       float spec_i = LtcEvaluate(n, v, input.world_pos, minv, c0, c1, c2, c3);
       static const float3x3 kLtcIdentity = {1, 0, 0, 0, 1, 0, 0, 0, 1};
       float diff_i = LtcEvaluate(n, v, input.world_pos, kLtcIdentity, c0, c1, c2, c3);
-      float3 spec_col = f0 * lamp.x + (1.0 - f0) * lamp.y;
+      float3 spec_col = (f0 * lamp.x + (1.0 - f0) * lamp.y) * spec_tint;
       float panel_falloff = saturate(1.0 - dist2 / (lr * lr));
       panel_falloff *= panel_falloff;
       ++light_hits;
@@ -1027,7 +1079,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       float sphere_spec = LtcEvaluate(n, v, input.world_pos, sminv, s0, s1, s2, s3);
       static const float3x3 kLtcSphereId = {1, 0, 0, 0, 1, 0, 0, 0, 1};
       float sphere_diff = LtcEvaluate(n, v, input.world_pos, kLtcSphereId, s0, s1, s2, s3);
-      float3 sphere_spec_col = f0 * slamp.x + (1.0 - f0) * slamp.y;
+      float3 sphere_spec_col = (f0 * slamp.x + (1.0 - f0) * slamp.y) * spec_tint;
       float ball_falloff = saturate(1.0 - dist2 / (lr * lr));
       ball_falloff *= ball_falloff;
       ++light_hits;
@@ -1061,7 +1113,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float pndh = max(dot(n, pl_h), 0.0);
     float pvdh = max(dot(v, pl_h), 0.0);
     float3 pf = f0 + (1.0 - f0) * pow(1.0 - pvdh, 5.0);
-    float3 pspec = D_GGX(pndh, a) * V_SmithGGXCorrelated(ndv, pndl, a) * pf * area_norm;
+    float3 pspec = D_GGX(pndh, a) * V_SmithGGXCorrelated(ndv, pndl, a) * pf * area_norm * spec_tint;
     float3 pdiff = diffuse_color * (1.0 / kPi) * (1.0 - pf);
     lit += (pdiff + pspec) * pl.color_intensity.rgb * pl.color_intensity.w * falloff * pndl;
     g_skin_diffuse += pdiff * pl.color_intensity.rgb * pl.color_intensity.w * falloff * pndl;
@@ -1072,7 +1124,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float3 restir_di = restir_diffuse_map.Load(restir_p).rgb;
     float3 restir_ds = restir_spec_map.Load(restir_p).rgb;
     float3 restir_diffuse_term = diffuse_color * (1.0 / kPi) * restir_di;
-    lit += restir_diffuse_term + f0 * restir_ds;
+    lit += restir_diffuse_term + f0 * restir_ds * spec_tint;
     g_skin_diffuse += restir_diffuse_term;
   }
 
@@ -1089,11 +1141,16 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
   }
 
   float3 ambient;
+  // Mirror radiance along the view reflection, resolved once for the env-reflect
+  // layer below and already carrying whatever intensity scale its own branch
+  // applies (mesh_rt.ps traces this instead of probing).
+  float3 spec_radiance = 0.0.xxx;
   if ((frame.flags & kFrameIbl) != 0u) {
     float2 f_ab = brdf_lut.Sample(brdf_lut_sampler, float2(ndv, roughness)).rg;
     float3 r = reflect(-v, n);
     float3 radiance =
         prefiltered_cube.SampleLevel(prefiltered_sampler, r, roughness * (kPrefilterMips - 1.0)).rgb;
+    spec_radiance = radiance * frame.camera_position.w;
     float3 irradiance = irradiance_cube.Sample(irradiance_sampler, n).rgb;
     if ((frame.flags & kFrameRcgi) != 0u) {
       // RCGI replaces the DDGI + SSGI indirect-diffuse path with the resolved
@@ -1112,20 +1169,38 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     ambient = (fss_ess * radiance + (fms_ems + k_d) * irradiance) * frame.camera_position.w;
     g_skin_diffuse += (fms_ems + k_d) * irradiance * frame.camera_position.w * ao;
   } else if ((frame.flags & kFrameInterior) != 0u) {
-    if ((frame.flags & kFrameRcgi) != 0u) {
-      // RCGI lights the interior: its ray misses fall back to the interior
-      // ambient (RX_RCGI_INTERIOR), so this carries true indoor bounce instead
-      // of a flat term and no leaked skylight. Replaces the authored ambient.
-      ambient = albedo * rcgi_irradiance.Load(int3(input.sv_position.xy, 0)).rgb;
-    } else {
-      ambient = albedo * frame.interior_ambient.rgb;
-    }
+    // RCGI lights the interior: its ray misses fall back to the interior
+    // ambient (RX_RCGI_INTERIOR), so this carries true indoor bounce instead
+    // of a flat term and no leaked skylight. Replaces the authored ambient.
+    float3 indoor = (frame.flags & kFrameRcgi) != 0u
+                        ? rcgi_irradiance.Load(int3(input.sv_position.xy, 0)).rgb
+                        : frame.interior_ambient.rgb;
+    ambient = albedo * indoor;
+    // No probe indoors, so the room's own ambient stands in as the reflected
+    // radiance - otherwise every env-mapped candlestick and blade in a dungeon
+    // loses its sheen entirely, which is where the original shows it most.
+    spec_radiance = indoor;
     g_skin_diffuse += ambient * ao;
   } else {
     ambient = albedo * frame.sun_color.w;
+    spec_radiance = frame.sun_color.w.xxx;
     g_skin_diffuse += ambient * ao;
   }
   ambient *= ao;
+
+  // Environment reflection layer: what the original games get from an authored
+  // cubemap scaled by Environment Map Scale, taken here off the engine's own
+  // environment so the reflection actually contains the scene. The authored
+  // scale is the facing-view reflectance and schlick carries it to a mirror at
+  // grazing angles; the mask decides which texels reflect at all (the metal
+  // parts of an armour, the ice, the eye).
+  if (material.env_reflect > 0.001) {
+    float env_mask = (material.flags & kFlagEnvMask) != 0u
+                         ? env_mask_map.Sample(env_mask_sampler, input.uv).r
+                         : spec_mask;
+    float env_f = material.env_reflect + (1.0 - material.env_reflect) * pow(1.0 - ndv, 5.0);
+    ambient += spec_radiance * env_f * env_mask * ao;
+  }
 
   // Clearcoat reflects the environment through its smooth coat as well.
   if (material.clearcoat > 0.001 && (frame.flags & kFrameIbl) != 0u) {
