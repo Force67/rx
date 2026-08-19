@@ -89,6 +89,7 @@ struct ShotContext {
   physics::PhysicsWorld* physics = nullptr;
   const HitRegistry* registry = nullptr;
   CombatEvents* events = nullptr;
+  base::Vector<ExplosionParams>* blasts = nullptr;
   ecs::Entity shooter{};
   const physics::BodyId* ignore = nullptr;
   u32 ignore_count = 0;
@@ -147,6 +148,18 @@ void ResolveHitscan(const ShotContext& ctx, const WeaponDef& def, const Vec3& or
     impact.damage = damage;
     impact.penetrated = penetrates;
     ctx.events->impacts.push_back(impact);
+
+    if (def.blast_radius > 0) {
+      ExplosionParams blast;
+      blast.position = hit.position;
+      blast.radius = def.blast_radius;
+      blast.damage = def.blast_damage;
+      blast.min_scale = def.blast_min_scale;
+      blast.impulse = def.blast_impulse;
+      blast.instigator = ctx.shooter;
+      blast.source = def.name_hash;
+      ctx.blasts->push_back(blast);
+    }
 
     if (!penetrates) return;
     ++pierced;
@@ -261,6 +274,9 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
   // Projectile entities are created after the walk: spawning inside World::Each
   // is a structural change that can skip or revisit rows.
   base::Vector<Projectile> spawned;
+  // ApplyExplosion walks Health components, so hitscan blasts are deferred until
+  // the weapon walk finishes just like projectile creation is.
+  base::Vector<ExplosionParams> blasts;
 
   world.Each<Loadout, WeaponIntent>([&](ecs::Entity entity, Loadout& loadout,
                                         WeaponIntent& intent) {
@@ -412,6 +428,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
     context.physics = &physics;
     context.registry = &registry;
     context.events = &events;
+    context.blasts = &blasts;
     context.shooter = entity;
     context.ignore = ignore_count > 0 ? ignore : nullptr;
     context.ignore_count = ignore_count;
@@ -425,6 +442,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
       Projectile round;
       round.owner = entity;
       round.def = weapon.def;
+      round.source = def.name_hash;
       round.position = intent.origin;
       round.velocity = direction * def.muzzle_speed;
       round.damage = def.damage;
@@ -438,7 +456,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
       round.blast_min_scale = def.blast_min_scale;
       round.blast_impulse = def.blast_impulse;
       round.explode_on_expire = def.explode_on_expire;
-      round.ignore_count = static_cast<u8>(std::min<u32>(ignore_count, 4));
+      round.ignore_count = static_cast<u8>(std::min<u32>(ignore_count, kMaxIgnoredBodies));
       for (u8 i = 0; i < round.ignore_count; ++i) round.ignore[i] = ignore[i];
       spawned.push_back(round);
     }
@@ -447,6 +465,9 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
   });
 
   for (const Projectile& round : spawned) SpawnProjectile(world, round);
+  for (const ExplosionParams& blast : blasts) {
+    ApplyExplosion(world, physics, registry, blast, &events);
+  }
 }
 
 void StepViewRecoil(ecs::World& world, f32 dt) {

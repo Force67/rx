@@ -68,6 +68,7 @@ void AgeOut(base::Vector<T>& items, f32 dt) {
 ShooterDemo::ShooterDemo(EngineContext& ctx) : ctx_(ctx) {}
 
 void ShooterDemo::Create() {
+  sim_accum_ = 0.0f;
   if (!ctx_.config->headless) {
     auto& s = ctx_.renderer->settings();
     s.sun_direction = Normalize(Vec3{-0.35f, -0.9f, -0.3f});
@@ -571,11 +572,10 @@ void ShooterDemo::Update(f32 dt, const InputState& input, const ActionState& act
   const f32 fixed = ShooterFixedStep();
   FillLookAndMove(input, actions, allow_keyboard, allow_mouse, dt);
 
-  static f32 sim_accum = 0.0f;
-  sim_accum += std::min(dt, 0.25f);
+  sim_accum_ += std::min(dt, 0.25f);
   int steps = 0;
-  while (sim_accum >= fixed) {
-    sim_accum -= fixed;
+  while (sim_accum_ >= fixed) {
+    sim_accum_ -= fixed;
     ++steps;
   }
 
@@ -603,7 +603,7 @@ void ShooterDemo::Update(f32 dt, const InputState& input, const ActionState& act
       cam_eye_ = output->view.position;
       cam_orientation_ = output->view.orientation;
       cam_target_ = cam_eye_ + Rotate(cam_orientation_, Vec3{0, 0, -1});
-      cam_fov_ = output->view.lens.fov_y;
+      cam_base_fov_ = output->view.lens.fov_y;
       cam_valid_ = output->valid;
     }
 
@@ -613,15 +613,22 @@ void ShooterDemo::Update(f32 dt, const InputState& input, const ActionState& act
     combat::StepHealth(world, fixed);
     combat::StepViewmodels(world, fixed);
 
-    StepTargets(fixed);
+    // Kill events arm a target's respawn timer before its lifecycle advances.
+    // Doing this in the opposite order revives a newly killed target immediately
+    // because its timer still has the zero-initialized value.
     DrainEvents();
+    StepTargets(fixed);
   }
 
   // Aiming narrows the fov; the character rig owns the lens, so fold the
   // weapon's zoom in after it resolved.
-  if (auto* loadout = world.Get<combat::Loadout>(player_)) {
-    cam_fov_ *= combat::AimFovScale(*loadout, catalog_);
-  }
+  f32 fov_scale = 1.0f;
+  if (auto* loadout = world.Get<combat::Loadout>(player_))
+    fov_scale = combat::AimFovScale(*loadout, catalog_);
+  // Always derive the displayed FOV from the unscaled camera lens. At refresh
+  // rates above the fixed-step rate, some render frames run no simulation step;
+  // multiplying cam_fov_ in place on those frames compounds the ADS zoom.
+  cam_fov_ = cam_base_fov_ * fov_scale;
 
   AgePresentation(dt);
 }

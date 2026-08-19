@@ -430,6 +430,31 @@ void TestPenetration() {
   Near(thick.health().hp, 100.0f, "and nothing reaches the target");
 }
 
+void TestHitscanBlast() {
+  Range range;
+  if (!range.Init()) return;
+  WeaponDef def = Rifle();
+  def.mode = FireMode::kSemi;
+  def.damage = 10.0f;
+  def.blast_radius = 3.0f;
+  def.blast_damage = 20.0f;
+  def.blast_min_scale = 1.0f;
+  const WeaponDefId rifle = range.catalog.Register(def);
+  GiveWeapon(range.loadout(), range.catalog, rifle, 30);
+  range.Aim({0, 1.0f, 0}, {0, 0, -1});
+  range.intent().trigger = true;
+  range.Step(1);
+
+  Check(range.events.explosions.size() == 1, "a hitscan weapon emits its configured blast");
+  Check(range.events.damage.size() == 2, "the impact applies direct and blast damage");
+  Near(range.health().hp, 70.0f, "the target takes direct and blast damage");
+  for (const DamageEvent& event : range.events.damage) {
+    Check(event.source == def.name_hash, "hitscan damage carries the weapon source tag");
+  }
+  Check(range.events.explosions[0].source == def.name_hash,
+        "the hitscan explosion carries the weapon source tag");
+}
+
 void TestProjectileBallistics() {
   Range range;
   if (!range.Init()) return;
@@ -476,6 +501,36 @@ void TestProjectileBallistics() {
   }
   Check(!lofted.events.damage.empty(), "an arced shot connects");
   Check(lofted.health().hp < 100.0f, "and the target takes it");
+  Check(lofted.events.damage[0].source == def.name_hash,
+        "projectile damage carries the weapon source tag");
+}
+
+void TestProjectileIgnoreListCapacity() {
+  Range range;
+  if (!range.Init()) return;
+
+  Projectile round;
+  round.owner = range.shooter;
+  round.source = 0x5151;
+  round.position = {0, 1.0f, 0};
+  round.velocity = {0, 0, -24.0f};
+  round.gravity = 0;
+  round.damage = 10.0f;
+  round.life = 2.0f;
+  round.ignore_count = kMaxIgnoredBodies;
+  for (u8 i = 0; i < kMaxIgnoredBodies; ++i) {
+    round.ignore[i] = range.physics.AddKinematicBox(
+        {0, 1.0f, -1.0f - static_cast<f32>(i)}, {0.2f, 0.2f, 0.05f});
+  }
+  range.physics.Update(kDt);
+
+  SpawnProjectile(range.world, round);
+  StepProjectiles(range.world, range.physics, range.registry, range.events, 0.5f);
+  Check(range.events.damage.size() == 1,
+        "a projectile ignores every body supported by HitIgnoreList");
+  Near(range.health().hp, 90.0f, "the projectile reaches the target behind all ignored bodies");
+  Check(range.events.damage[0].source == round.source,
+        "directly spawned projectiles preserve their source tag");
 }
 
 void TestExplosionFalloffAndCover() {
@@ -547,7 +602,9 @@ int main() {
   TestSpreadBloomAndAds();
   TestRecoilKickAndRecovery();
   TestPenetration();
+  TestHitscanBlast();
   TestProjectileBallistics();
+  TestProjectileIgnoreListCapacity();
   TestExplosionFalloffAndCover();
   TestHitRegistryLifetime();
 

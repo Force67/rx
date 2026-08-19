@@ -155,6 +155,7 @@ class ShooterDemo {
   f32 look_sensitivity_ = 0.0022f;
   bool invert_pitch_ = false;
   bool show_panel_ = true;
+  f32 sim_accum_ = 0.0f;
 
   Vec3 spawn_feet_{0, 0.05f, 8.0f};
 
@@ -162,6 +163,7 @@ class ShooterDemo {
   Vec3 cam_target_{0, 1.6f, 0};
   Quat cam_orientation_{0, 0, 0, 1};
   f32 cam_fov_ = 1.0472f;
+  f32 cam_base_fov_ = 1.0472f;
   bool cam_valid_ = false;
 };
 

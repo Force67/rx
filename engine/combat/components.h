@@ -178,6 +178,7 @@ struct Viewmodel {
 struct Projectile {
   ecs::Entity owner{};      // credited with the damage
   WeaponDefId def = kInvalidWeaponDef;
+  u64 source = 0;           // game tag; 0 falls back to `def` for direct spawns
   Vec3 position = {0, 0, 0};
   Vec3 velocity = {0, 0, 0};
   f32 damage = 0;
@@ -192,7 +193,7 @@ struct Projectile {
   f32 blast_min_scale = 0.15f;
   f32 blast_impulse = 0;
   bool explode_on_expire = false;
-  u64 ignore[4] = {};  // owner bodies, copied from its HitIgnoreList at spawn
+  u64 ignore[kMaxIgnoredBodies] = {};  // owner bodies, copied at spawn
   u8 ignore_count = 0;
 };
 

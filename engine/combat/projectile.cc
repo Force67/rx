@@ -12,10 +12,15 @@ namespace rx::combat {
 namespace {
 
 bool IsIgnored(const Projectile& round, physics::BodyId body) {
-  for (u8 i = 0; i < round.ignore_count; ++i) {
+  const u8 count = std::min<u8>(round.ignore_count, kMaxIgnoredBodies);
+  for (u8 i = 0; i < count; ++i) {
     if (round.ignore[i] == body) return true;
   }
   return false;
+}
+
+u64 ProjectileSource(const Projectile& round) {
+  return round.source != 0 ? round.source : static_cast<u64>(round.def);
 }
 
 void WriteTransform(ecs::World& world, ecs::Entity entity, const Vec3& position) {
@@ -34,7 +39,7 @@ ExplosionParams BlastFrom(const Projectile& round, const Vec3& position) {
   blast.min_scale = round.blast_min_scale;
   blast.impulse = round.blast_impulse;
   blast.instigator = round.owner;
-  blast.source = static_cast<u64>(round.def);
+  blast.source = ProjectileSource(round);
   return blast;
 }
 
@@ -42,7 +47,9 @@ ExplosionParams BlastFrom(const Projectile& round, const Vec3& position) {
 
 ecs::Entity SpawnProjectile(ecs::World& world, const Projectile& desc) {
   const ecs::Entity entity = world.Create();
-  world.Add(entity, desc);
+  Projectile round = desc;
+  round.ignore_count = std::min<u8>(round.ignore_count, kMaxIgnoredBodies);
+  world.Add(entity, round);
   scene::Transform transform;
   transform.position[0] = desc.position.x;
   transform.position[1] = desc.position.y;
@@ -102,7 +109,7 @@ void StepProjectiles(ecs::World& world, physics::PhysicsWorld& physics,
           request.multiplier = proxy->multiplier;
           request.position = hit.position;
           request.direction = direction;
-          request.source = static_cast<u64>(round.def);
+          request.source = ProjectileSource(round);
           ApplyDamage(world, request, &events);
         }
         if (round.impulse > 0 && hit.body != 0) {
