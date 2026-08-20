@@ -148,12 +148,29 @@ build/linux/runtime/rx --gltf assets/sponza/Sponza.gltf
 
 ### Text scenes and headless capture
 
-A `.rxscene` is a text scene (see `runtime/scenes/cornell.rxscene`) that composes
-procedural shapes, surfaces, lights and a camera without any binary asset.
+A `.rxscene` is a text scene that composes shapes, surfaces, lights and a camera
+without any binary asset:
+
+- `Shape.kind` is `box | sphere | plane | cylinder | cone | torus | capsule`.
+- `Surface` carries the pbr lobes the mesh shaders actually shade (clearcoat,
+  anisotropy, ior, sheen, subsurface, iridescence, transmission, specular
+  colour/strength, `env_reflect` and the soft/rim/back light fills), or names a
+  `.mtlx` document to take the whole material from.
+- `Pattern` generates a procedural texture at load (`checker | grid | brick |
+  gradient | noise`) and binds it to base colour, plus a normal map derived from
+  the same pattern read as a height field and a roughness map ramped across it.
+  So a scene with no image files still gets textured, relief-bearing surfaces.
+
+`runtime/scenes/showcase.rxscene` exercises all of it in one frame;
+`runtime/scenes/material_sheet.rxscene` is a 24-cell material contact sheet, so a
+pass over a batch of materials costs one render instead of 24;
+`runtime/scenes/cornell.rxscene` is the minimal example.
+
 `--dump-schema` prints every component and prop such a file may use, generated
 from the reflection registry, so it never goes stale. Loading a `.rxscene` is
-strict: an unknown component or prop fails the load with a file:line rather than
-silently dropping the entity.
+strict: an unknown component, prop, shape kind, pattern kind or `.mtlx` path
+fails the load with a message naming it, rather than silently substituting a
+default.
 
 `--shot` renders windowless (no compositor, no display needed) and exits nonzero
 if the png was not written, which is what makes the author-render-look loop
@@ -161,8 +178,8 @@ scriptable:
 
 ```sh
 build/linux/runtime/rx --dump-schema
-build/linux/runtime/rx --scene runtime/scenes/cornell.rxscene \
-    --headless --shot /tmp/shot.png --shot-frames 8 --width 640 --height 360
+build/linux/runtime/rx --scene runtime/scenes/showcase.rxscene \
+    --headless --shot /tmp/shot.png --shot-frames 20 --width 1280 --height 720
 ```
 
 Under `swrun` add `--no-rt` or `--preset low`: lavapipe's acceleration-structure

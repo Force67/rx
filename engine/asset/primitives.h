@@ -25,6 +25,41 @@ RX_ASSET_EXPORT Mesh MakeSphere(f32 radius, u32 rings, u32 segments, AssetId id)
 // for exercising distance-based lod selection. Each lod has one empty submesh.
 RX_ASSET_EXPORT Mesh MakeLodSphere(f32 radius, AssetId id);
 
+// Blockout shapes for text-authored scenes, alongside the box and sphere above.
+// All of them carry smooth normals, tangents along +u and uvs covering the 0..1
+// square exactly once (so a procedural texture tiles by its own scale, not by
+// the mesh), and each appends one empty submesh for the caller to fill.
+//
+// The surfaces of revolution wind counter-clockwise seen from outside, like
+// MakeBox; MakeSphere predates that and winds the other way, which is invisible
+// only because every raster pipeline runs with culling off.
+
+// A flat quad in the xz plane at y = 0, facing +Y. One face, not a slab: a
+// backdrop or ground plane seen from behind is invisible under a culling
+// pipeline even though today's do not cull.
+RX_ASSET_EXPORT Mesh MakePlane(f32 hx, f32 hz, AssetId id);
+
+// A capped cylinder along Y, `half_height` from the origin to each cap. The
+// side's v runs bottom to top; the caps get their own vertices so the rim stays
+// a hard edge.
+RX_ASSET_EXPORT Mesh MakeCylinder(f32 radius, f32 half_height, u32 segments, AssetId id);
+
+// A cone along Y: base of `radius` at -half_height, apex at +half_height. The
+// apex ring is duplicated per segment so each column keeps its own normal
+// instead of averaging to straight up.
+RX_ASSET_EXPORT Mesh MakeCone(f32 radius, f32 half_height, u32 segments, AssetId id);
+
+// A torus around the Y axis. `major_radius` is the ring, `minor_radius` the
+// tube; u runs around the ring, v around the tube.
+RX_ASSET_EXPORT Mesh MakeTorus(f32 major_radius, f32 minor_radius, u32 rings, u32 segments,
+                               AssetId id);
+
+// A capsule along Y: a cylinder of `half_height` capped by two hemispheres of
+// `radius` (so it stands 2 * (half_height + radius) tall). v is distributed by
+// profile arc length, so the texel density does not pinch at the caps.
+RX_ASSET_EXPORT Mesh MakeCapsule(f32 radius, f32 half_height, u32 rings, u32 segments,
+                                 AssetId id);
+
 // Appends decimated lods to a single-lod static mesh via vertex clustering
 // (snap vertices to a coarse grid, collapse the triangles that fold up), so the
 // distance-lod path applies to authored meshes that ship one lod. No-op for

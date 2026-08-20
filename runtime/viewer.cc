@@ -214,15 +214,15 @@ bool Viewer::LoadRxScene() {
   // loader can resolve them by name; strict mode then rejects anything else,
   // so a misspelt component is a failed load rather than a missing object.
   RegisterSceneComponents();
-  // Only used to resolve Renderable asset paths, which a shape-authored scene
-  // has none of; the loader takes one regardless.
+  // Resolves Renderable asset paths (a shape-authored scene has none) and holds
+  // the textures BuildSceneShapes synthesizes for the scene's patterns.
   asset::AssetDatabase db(*ctx_.vfs);
   std::string error;
   if (!edit::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
     RX_ERROR("rxscene: {}", error);
     return false;
   }
-  if (!BuildSceneShapes(*world_, config_.headless ? nullptr : renderer_, &error)) {
+  if (!BuildSceneShapes(*world_, db, config_.headless ? nullptr : renderer_, &error)) {
     RX_ERROR("rxscene: {}", error);
     return false;
   }

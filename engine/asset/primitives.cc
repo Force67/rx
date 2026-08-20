@@ -96,6 +96,121 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
   return out;
 }
 
+// One sample of a lathe profile in the +x half plane: where the ring sits and
+// which way the surface faces there (the radial/axial split of the profile
+// normal, normalized once it has been rotated into place).
+struct LatheRing {
+  f32 radius;
+  f32 y;
+  f32 normal_r;
+  f32 normal_y;
+};
+
+// Revolves a profile around +Y into a quad grid, ccw seen from outside. The
+// seam column is duplicated so u reaches 1 instead of wrapping back to 0, v
+// follows the profile's arc length so texel density does not pinch where the
+// profile turns, and a ring that sits on the axis (a cone apex, a capsule pole)
+// drops the triangles that would collapse to slivers there.
+void AddLathe(MeshLod* lod, const base::Vector<LatheRing>& rings, u32 segments) {
+  if (rings.size() < 2) return;
+  segments = segments < 3 ? 3 : segments;
+
+  base::Vector<f32> v(rings.size());
+  f32 travelled = 0.0f;
+  v[0] = 0.0f;
+  for (size_t i = 1; i < rings.size(); ++i) {
+    f32 dr = rings[i].radius - rings[i - 1].radius;
+    f32 dy = rings[i].y - rings[i - 1].y;
+    travelled += std::sqrt(dr * dr + dy * dy);
+    v[i] = travelled;
+  }
+  const f32 inv_travelled = travelled > 0.0f ? 1.0f / travelled : 0.0f;
+
+  const u32 base = static_cast<u32>(lod->vertices.size());
+  const u32 stride = segments + 1;
+  for (size_t i = 0; i < rings.size(); ++i) {
+    const LatheRing& ring = rings[i];
+    for (u32 x = 0; x <= segments; ++x) {
+      f32 u = static_cast<f32>(x) / static_cast<f32>(segments);
+      f32 theta = u * 6.2831853f;
+      f32 sin_theta = std::sin(theta), cos_theta = std::cos(theta);
+      Vertex vertex{};
+      vertex.position[0] = ring.radius * cos_theta;
+      vertex.position[1] = ring.y;
+      vertex.position[2] = ring.radius * sin_theta;
+      Vec3 n = Normalize(Vec3{ring.normal_r * cos_theta, ring.normal_y, ring.normal_r * sin_theta});
+      vertex.normal[0] = n.x;
+      vertex.normal[1] = n.y;
+      vertex.normal[2] = n.z;
+      // Tangent runs along +theta, matching the u the uv above hands out.
+      vertex.tangent[0] = -sin_theta;
+      vertex.tangent[1] = 0.0f;
+      vertex.tangent[2] = cos_theta;
+      vertex.tangent[3] = 1.0f;
+      vertex.uv[0] = u;
+      vertex.uv[1] = v[i] * inv_travelled;
+      lod->vertices.push_back(vertex);
+    }
+  }
+
+  for (u32 r = 0; r + 1 < rings.size(); ++r) {
+    for (u32 x = 0; x < segments; ++x) {
+      u32 a = base + r * stride + x;
+      u32 b = a + stride;
+      if (rings[r].radius > 1e-6f) {
+        for (u32 i : {a, b, a + 1}) lod->indices.push_back(i);
+      }
+      if (rings[r + 1].radius > 1e-6f) {
+        for (u32 i : {a + 1, b, b + 1}) lod->indices.push_back(i);
+      }
+    }
+  }
+}
+
+// A flat cap disc at height `y` facing +Y (sign 1) or -Y (sign -1), as a fan
+// around a centre vertex. uvs project the disc into the unit square so a
+// pattern reads on the cap as well as on the side.
+void AddDisc(MeshLod* lod, f32 radius, f32 y, f32 sign, u32 segments) {
+  segments = segments < 3 ? 3 : segments;
+  const u32 centre = static_cast<u32>(lod->vertices.size());
+  auto push = [&](f32 x, f32 z, f32 u, f32 v) {
+    Vertex vertex{};
+    vertex.position[0] = x;
+    vertex.position[1] = y;
+    vertex.position[2] = z;
+    vertex.normal[1] = sign;
+    vertex.tangent[0] = 1.0f;
+    vertex.tangent[3] = 1.0f;
+    vertex.uv[0] = u;
+    vertex.uv[1] = v;
+    lod->vertices.push_back(vertex);
+  };
+  push(0.0f, 0.0f, 0.5f, 0.5f);
+  for (u32 x = 0; x <= segments; ++x) {
+    f32 theta = static_cast<f32>(x) / static_cast<f32>(segments) * 6.2831853f;
+    f32 cos_theta = std::cos(theta), sin_theta = std::sin(theta);
+    push(radius * cos_theta, radius * sin_theta, 0.5f + 0.5f * cos_theta,
+         0.5f + 0.5f * sin_theta);
+  }
+  for (u32 x = 0; x < segments; ++x) {
+    u32 cur = centre + 1 + x, next = cur + 1;
+    if (sign > 0.0f) {
+      for (u32 i : {centre, next, cur}) lod->indices.push_back(i);
+    } else {
+      for (u32 i : {centre, cur, next}) lod->indices.push_back(i);
+    }
+  }
+}
+
+// Closes a procedural mesh: one full-range submesh for the caller to point at a
+// material, plus the bounding sphere the culling and lod paths read.
+Mesh FinishPrimitive(Mesh mesh, f32 bounds_radius) {
+  MeshLod& lod = mesh.lods[0];
+  lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), AssetId{}});
+  mesh.bounds_radius = bounds_radius;
+  return mesh;
+}
+
 // One bone of the test biped: name, parent index, offset from the parent joint
 // in engine space. Identity bind rotation keeps local axes world-aligned so the
 // locomotion's about-X swings read as forward/back.
@@ -288,6 +403,101 @@ Mesh MakeSphere(f32 radius, u32 rings, u32 segments, AssetId id) {
   lod.submeshes.push_back({0, static_cast<u32>(lod.indices.size()), AssetId{}});
   mesh.bounds_radius = radius;
   return mesh;
+}
+
+Mesh MakePlane(f32 hx, f32 hz, AssetId id) {
+  Mesh mesh;
+  mesh.id = id;
+  MeshLod& lod = mesh.lods.emplace_back();
+  static constexpr f32 kCorners[4][2] = {{-1, -1}, {1, -1}, {1, 1}, {-1, 1}};
+  for (const auto& corner : kCorners) {
+    Vertex vertex{};
+    vertex.position[0] = hx * corner[0];
+    vertex.position[2] = hz * corner[1];
+    vertex.normal[1] = 1.0f;
+    vertex.tangent[0] = 1.0f;
+    vertex.tangent[3] = 1.0f;
+    vertex.uv[0] = corner[0] * 0.5f + 0.5f;
+    vertex.uv[1] = corner[1] * 0.5f + 0.5f;
+    lod.vertices.push_back(vertex);
+  }
+  // Corners run ccw in the xz plane, which is clockwise seen from +Y, so the
+  // winding is reversed to keep the visible face the one the normal points at.
+  for (u32 index : {0u, 3u, 2u, 0u, 2u, 1u}) lod.indices.push_back(index);
+  return FinishPrimitive(std::move(mesh), std::sqrt(hx * hx + hz * hz));
+}
+
+Mesh MakeCylinder(f32 radius, f32 half_height, u32 segments, AssetId id) {
+  Mesh mesh;
+  mesh.id = id;
+  MeshLod& lod = mesh.lods.emplace_back();
+  base::Vector<LatheRing> side;
+  side.push_back({radius, -half_height, 1.0f, 0.0f});
+  side.push_back({radius, half_height, 1.0f, 0.0f});
+  AddLathe(&lod, side, segments);
+  AddDisc(&lod, radius, half_height, 1.0f, segments);
+  AddDisc(&lod, radius, -half_height, -1.0f, segments);
+  return FinishPrimitive(std::move(mesh),
+                         std::sqrt(radius * radius + half_height * half_height));
+}
+
+Mesh MakeCone(f32 radius, f32 half_height, u32 segments, AssetId id) {
+  Mesh mesh;
+  mesh.id = id;
+  MeshLod& lod = mesh.lods.emplace_back();
+  // The slope normal leans out by the base radius and up by the full height, so
+  // it stays perpendicular to the side wherever the two are sampled.
+  const f32 normal_r = 2.0f * half_height;
+  base::Vector<LatheRing> side;
+  side.push_back({radius, -half_height, normal_r, radius});
+  side.push_back({0.0f, half_height, normal_r, radius});
+  AddLathe(&lod, side, segments);
+  AddDisc(&lod, radius, -half_height, -1.0f, segments);
+  return FinishPrimitive(std::move(mesh),
+                         std::sqrt(radius * radius + half_height * half_height));
+}
+
+Mesh MakeTorus(f32 major_radius, f32 minor_radius, u32 rings, u32 segments, AssetId id) {
+  Mesh mesh;
+  mesh.id = id;
+  MeshLod& lod = mesh.lods.emplace_back();
+  rings = rings < 3 ? 3 : rings;
+  base::Vector<LatheRing> profile;
+  // The last sample repeats the first so the tube closes with u/v at 1 rather
+  // than wrapping the uv back to 0 across the seam quad.
+  for (u32 i = 0; i <= rings; ++i) {
+    f32 angle = static_cast<f32>(i) / static_cast<f32>(rings) * 6.2831853f;
+    f32 cos_angle = std::cos(angle), sin_angle = std::sin(angle);
+    profile.push_back({major_radius + minor_radius * cos_angle, minor_radius * sin_angle,
+                       cos_angle, sin_angle});
+  }
+  AddLathe(&lod, profile, segments);
+  return FinishPrimitive(std::move(mesh), major_radius + minor_radius);
+}
+
+Mesh MakeCapsule(f32 radius, f32 half_height, u32 rings, u32 segments, AssetId id) {
+  Mesh mesh;
+  mesh.id = id;
+  MeshLod& lod = mesh.lods.emplace_back();
+  const u32 cap_rings = rings < 4 ? 2 : rings / 2;
+  base::Vector<LatheRing> profile;
+  // Bottom hemisphere, then the top one; the two rings at the seam sit at the
+  // same radius with the same horizontal normal, so the cylinder body between
+  // them needs no samples of its own.
+  for (u32 i = 0; i <= cap_rings; ++i) {
+    f32 angle = -1.5707963f + static_cast<f32>(i) / static_cast<f32>(cap_rings) * 1.5707963f;
+    f32 cos_angle = std::cos(angle), sin_angle = std::sin(angle);
+    profile.push_back({radius * cos_angle, -half_height + radius * sin_angle, cos_angle,
+                       sin_angle});
+  }
+  for (u32 i = 0; i <= cap_rings; ++i) {
+    f32 angle = static_cast<f32>(i) / static_cast<f32>(cap_rings) * 1.5707963f;
+    f32 cos_angle = std::cos(angle), sin_angle = std::sin(angle);
+    profile.push_back({radius * cos_angle, half_height + radius * sin_angle, cos_angle,
+                       sin_angle});
+  }
+  AddLathe(&lod, profile, segments);
+  return FinishPrimitive(std::move(mesh), half_height + radius);
 }
 
 Mesh MakeLodSphere(f32 radius, AssetId id) {

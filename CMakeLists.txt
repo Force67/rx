@@ -460,6 +460,12 @@ if(RX_BUILD_TESTS)
   add_executable(asset_database_test test/asset_database_test.cc)
   target_link_libraries(asset_database_test PRIVATE rx::asset rx::core)
   add_test(NAME asset_database_test COMMAND asset_database_test)
+
+  # Procedural texture synthesis and the blockout primitives behind the
+  # .rxscene Pattern/Shape components.
+  add_executable(procedural_asset_test test/procedural_asset_test.cc)
+  target_link_libraries(procedural_asset_test PRIVATE rx::asset rx::core)
+  add_test(NAME procedural_asset_test COMMAND procedural_asset_test)
 endif()
 
 if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)

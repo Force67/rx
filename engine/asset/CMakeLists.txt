@@ -4,6 +4,7 @@ rx_add_module(asset
   engine_archives.cc
   asset_database.cc
   primitives.cc
+  procedural_texture.cc
   simplify.cc
   subdivide.cc
   gltf_loader.cc
