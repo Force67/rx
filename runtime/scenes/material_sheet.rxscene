@@ -1,42 +1,46 @@
 rxscene 1
 
-# Material contact sheet: 24 surfaces on one neutral floor, so a pass over a
-# batch of materials costs one render instead of 24. Cells are named A1..D6,
-# reading left to right, back row to front:
+# The material palette, rendered. Every file in scenes/materials/ gets one
+# sphere here, so "what does terracotta look like in this engine" costs a glance
+# at docs/images/material-palette.png rather than a render of your own.
 #
-#   A  roughness sweep, 0 to 1, plain dielectric
-#   B  metals: gold, copper, brushed (anisotropic) steel, blasted aluminium,
-#      chrome, iridescent chrome
-#   C  dielectric lobes: clearcoat, sheen, subsurface, the soft/rim/back fills,
-#      transmission, env_reflect
-#   D  the procedural patterns: checker, grid, brick, gradient, noise, noise at
-#      deep relief
+# Cells are named A1..E6, reading left to right, back row to front. Every cell
+# below carries its Name and the preset it instances and nothing else, so the
+# file IS the legend: cell A3 is the third block of row A, which says copper.
 #
-# No cell carries a coordinate or a shape: the "Sheet" entity below is a 6 x 4
-# grid and each cell is a member of it, so a cell says only the material it
-# exists to show. Members take cells in the order this file declares them, which
-# is why the rows read straight down the file. To move the whole sheet, move
-# Sheet; to respace it, change Grid.step; to sweep your own batch, replace a
-# row's six blocks and re-render:
+#   A  metals
+#   B  stone, plaster and masonry
+#   C  tile, ceramic and wood
+#   D  wood, leather, fabric and plastic
+#   E  plastic, rubber, glass and emissives
+#
+# No cell carries a coordinate or a material value: "Sheet" is a 6 x 5 grid and
+# each cell is a member of it, taking cells in the order this file declares
+# them, and the material is whatever the palette file says. A cell does say
+# "sphere", because Grid.cell and Prefab.path are exclusive - a member holds one
+# Prefab, and here that one is the material - so the shared shape is a line per
+# cell instead of one Grid.cell. Its size is the Shape default, radius 0.5,
+# which is what Sheet's Transform y has to match to stand the row on the floor.
+#
+# To add a material to the sheet, write the preset and add four lines here:
 #   rx --scene runtime/scenes/material_sheet.rxscene --headless \
-#      --shot sheet.png --shot-frames 20 --width 1280 --height 960
+#      --shot sheet.png --shot-frames 20 --width 1440 --height 1080
 #
-# Nothing here is special-cased; it is an ordinary scene, so --dump-schema is
-# still the reference for what a block may say.
+# `rx --dump-materials` lists the palette with the values behind each name.
 
 entity
 Name.value = "Camera"
-Transform.position = 0 7.3 6.3
-Camera.target = 0 0.45 -2.3
-Camera.fov_degrees = 40
+Transform.position = 0 7.6 5
+Camera.target = 0 0.4 -2.3
+Camera.fov_degrees = 46
 
 # Neutral floor. Mid grey and fully rough so it neither tints the surfaces nor
 # competes with them for the eye.
 entity
 Name.value = "Floor"
 Shape.kind = "plane"
-Shape.size = 12 0 12
-Surface.base_color = 0.35 0.35 0.35
+Shape.size = 14 0 14
+Surface.base_color = 0.25 0.25 0.25
 Surface.roughness = 1
 
 # A soft fill from the camera side, so the shadow side of every sphere still
@@ -45,227 +49,204 @@ entity
 Name.value = "Fill"
 Transform.position = 0 5 6
 Light.color = 1 0.95 0.9
-Light.intensity = 10
-Light.radius = 22
+Light.intensity = 5
+Light.radius = 24
 
 # The sheet itself: where cell A1 sits, how far apart the cells are, and what
 # every cell is made of. Its Transform is cell 0 0 0, and y is the cell sphere's
 # radius, which is what stands the row on the floor.
 entity
 Name.value = "Sheet"
-Transform.position = -3.75 0.55 -4.5
-Grid.count = 6 1 4
-Grid.step = 1.5 0 1.5
-Grid.cell = "prefabs/sheet_cell.rxscene"
+Transform.position = -3.75 0.5 -5.4
+Grid.count = 6 1 5
+Grid.step = 1.5 0 1.6
 
-# --- A: roughness sweep, plain dielectric ---
-
-entity
-Name.value = "A1 roughness 0"
-Grid.of = "Sheet"
-Surface.base_color = 0.18 0.18 0.19
-Surface.roughness = 0
+# --- A: metals ---
 
 entity
-Name.value = "A2 roughness 0.2"
+Name.value = "A1 steel"
 Grid.of = "Sheet"
-Surface.base_color = 0.18 0.18 0.19
-Surface.roughness = 0.2
+Shape.kind = "sphere"
+Prefab.path = "materials/steel.rxscene"
 
 entity
-Name.value = "A3 roughness 0.4"
+Name.value = "A2 brushed aluminium"
 Grid.of = "Sheet"
-Surface.base_color = 0.18 0.18 0.19
-Surface.roughness = 0.4
+Shape.kind = "sphere"
+Prefab.path = "materials/brushed_aluminium.rxscene"
 
 entity
-Name.value = "A4 roughness 0.6"
+Name.value = "A3 copper"
 Grid.of = "Sheet"
-Surface.base_color = 0.18 0.18 0.19
-Surface.roughness = 0.6
+Shape.kind = "sphere"
+Prefab.path = "materials/copper.rxscene"
 
 entity
-Name.value = "A5 roughness 0.8"
+Name.value = "A4 gold"
 Grid.of = "Sheet"
-Surface.base_color = 0.18 0.18 0.19
-Surface.roughness = 0.8
+Shape.kind = "sphere"
+Prefab.path = "materials/gold.rxscene"
 
 entity
-Name.value = "A6 roughness 1"
+Name.value = "A5 cast iron"
 Grid.of = "Sheet"
-Surface.base_color = 0.18 0.18 0.19
-Surface.roughness = 1
-
-# --- B: metals ---
+Shape.kind = "sphere"
+Prefab.path = "materials/cast_iron.rxscene"
 
 entity
-Name.value = "B1 gold"
+Name.value = "A6 chrome"
 Grid.of = "Sheet"
-Surface.base_color = 1 0.77 0.34
-Surface.roughness = 0.25
-Surface.metallic = 1
+Shape.kind = "sphere"
+Prefab.path = "materials/chrome.rxscene"
+
+# --- B: stone, plaster and masonry ---
 
 entity
-Name.value = "B2 copper"
+Name.value = "B1 concrete"
 Grid.of = "Sheet"
-Surface.base_color = 0.95 0.64 0.54
-Surface.roughness = 0.4
-Surface.metallic = 1
+Shape.kind = "sphere"
+Prefab.path = "materials/concrete.rxscene"
 
 entity
-Name.value = "B3 brushed steel"
+Name.value = "B2 plaster white"
 Grid.of = "Sheet"
-Surface.base_color = 0.9 0.9 0.92
-Surface.roughness = 0.3
-Surface.metallic = 1
-Surface.anisotropy = 0.9
+Shape.kind = "sphere"
+Prefab.path = "materials/plaster_white.rxscene"
 
 entity
-Name.value = "B4 blasted aluminium"
+Name.value = "B3 marble white"
 Grid.of = "Sheet"
-Surface.base_color = 0.91 0.92 0.92
-Surface.roughness = 0.65
-Surface.metallic = 1
+Shape.kind = "sphere"
+Prefab.path = "materials/marble_white.rxscene"
 
 entity
-Name.value = "B5 chrome"
+Name.value = "B4 granite"
 Grid.of = "Sheet"
-Surface.base_color = 0.95 0.95 0.95
-Surface.roughness = 0.05
-Surface.metallic = 1
+Shape.kind = "sphere"
+Prefab.path = "materials/granite.rxscene"
 
 entity
-Name.value = "B6 iridescent chrome"
+Name.value = "B5 brick red"
 Grid.of = "Sheet"
-Surface.base_color = 0.9 0.9 0.9
-Surface.roughness = 0.3
-Surface.metallic = 1
-Surface.iridescence = 1
-Surface.iridescence_thickness = 520
-
-# --- C: the dielectric lobes ---
+Shape.kind = "sphere"
+Prefab.path = "materials/brick_red.rxscene"
 
 entity
-Name.value = "C1 car paint (clearcoat)"
+Name.value = "B6 terracotta"
 Grid.of = "Sheet"
-Surface.base_color = 0.05 0.09 0.3
-Surface.roughness = 0.55
-Surface.clearcoat = 1
-Surface.clearcoat_roughness = 0.02
+Shape.kind = "sphere"
+Prefab.path = "materials/terracotta.rxscene"
+
+# --- C: tile, ceramic and wood ---
 
 entity
-Name.value = "C2 velvet (sheen)"
+Name.value = "C1 slate tile"
 Grid.of = "Sheet"
-Surface.base_color = 0.09 0.03 0.12
-Surface.roughness = 0.95
-Surface.specular_strength = 0.1
-Surface.sheen_color = 0.8 0.45 0.9
-Surface.sheen_roughness = 0.25
+Shape.kind = "sphere"
+Prefab.path = "materials/slate_tile.rxscene"
 
 entity
-Name.value = "C3 wax (subsurface)"
+Name.value = "C2 tile ceramic"
 Grid.of = "Sheet"
-Surface.base_color = 0.85 0.72 0.58
-Surface.roughness = 0.45
-Surface.subsurface = 1
-Surface.subsurface_color = 0.9 0.35 0.22
+Shape.kind = "sphere"
+Prefab.path = "materials/tile_ceramic.rxscene"
 
 entity
-Name.value = "C4 leaf (soft/rim/back)"
+Name.value = "C3 porcelain white"
 Grid.of = "Sheet"
-Surface.base_color = 0.16 0.3 0.08
-Surface.roughness = 0.7
-Surface.subsurface_color = 0.55 0.85 0.2
-Surface.soft_lighting = 1
-Surface.rim_lighting = 2
-Surface.back_lighting = 1
+Shape.kind = "sphere"
+Prefab.path = "materials/porcelain_white.rxscene"
 
 entity
-Name.value = "C5 glass (transmission)"
+Name.value = "C4 ceramic glazed teal"
 Grid.of = "Sheet"
-Surface.base_color = 0.9 0.97 0.95
-Surface.roughness = 0.05
-Surface.transmission = 1
-Surface.ior = 1.5
+Shape.kind = "sphere"
+Prefab.path = "materials/ceramic_glazed_teal.rxscene"
 
 entity
-Name.value = "C6 gem (env_reflect)"
+Name.value = "C5 wood oak"
 Grid.of = "Sheet"
-Surface.base_color = 0.1 0.02 0.06
-Surface.roughness = 0.08
-Surface.ior = 1.9
-Surface.env_reflect = 1
-
-# --- D: the procedural patterns ---
+Shape.kind = "sphere"
+Prefab.path = "materials/wood_oak.rxscene"
 
 entity
-Name.value = "D1 checker"
+Name.value = "C6 wood walnut varnished"
 Grid.of = "Sheet"
-Surface.base_color = 1 1 1
-Surface.roughness = 1
-Pattern.kind = "checker"
-Pattern.scale = 8
-Pattern.color_a = 0.02 0.02 0.03
-Pattern.color_b = 0.8 0.78 0.72
-Pattern.roughness_a = 0.2
-Pattern.roughness_b = 0.7
+Shape.kind = "sphere"
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+# --- D: wood, leather, fabric and plastic ---
 
 entity
-Name.value = "D2 grid"
+Name.value = "D1 wood planks"
 Grid.of = "Sheet"
-Surface.base_color = 1 1 1
-Surface.roughness = 1
-Pattern.kind = "grid"
-Pattern.scale = 7
-Pattern.line_width = 0.1
-Pattern.color_a = 0.05 0.16 0.2
-Pattern.color_b = 0.7 0.68 0.6
-Pattern.relief = 0.03
+Shape.kind = "sphere"
+Prefab.path = "materials/wood_planks.rxscene"
 
 entity
-Name.value = "D3 brick"
+Name.value = "D2 leather brown"
 Grid.of = "Sheet"
-Surface.base_color = 1 1 1
-Surface.roughness = 1
-Pattern.kind = "brick"
-Pattern.scale = 11
-Pattern.line_width = 0.12
-Pattern.color_a = 0.55 0.52 0.48
-Pattern.color_b = 0.42 0.13 0.09
-Pattern.relief = 0.03
-Pattern.roughness_a = 0.95
-Pattern.roughness_b = 0.7
+Shape.kind = "sphere"
+Prefab.path = "materials/leather_brown.rxscene"
 
 entity
-Name.value = "D4 gradient"
+Name.value = "D3 velvet crimson"
 Grid.of = "Sheet"
-Surface.base_color = 1 1 1
-Surface.roughness = 1
-Pattern.kind = "gradient"
-Pattern.color_a = 0.02 0.06 0.2
-Pattern.color_b = 0.85 0.45 0.1
+Shape.kind = "sphere"
+Prefab.path = "materials/velvet_crimson.rxscene"
 
 entity
-Name.value = "D5 noise"
+Name.value = "D4 wool felt"
 Grid.of = "Sheet"
-Surface.base_color = 1 1 1
-Surface.roughness = 1
-Pattern.kind = "noise"
-Pattern.scale = 7
-Pattern.color_a = 0.17 0.16 0.14
-Pattern.color_b = 0.46 0.44 0.38
-Pattern.relief = 0.05
+Shape.kind = "sphere"
+Prefab.path = "materials/wool_felt.rxscene"
 
 entity
-Name.value = "D6 noise, deep relief"
+Name.value = "D5 linen canvas"
 Grid.of = "Sheet"
-Surface.base_color = 1 1 1
-Surface.roughness = 1
-Pattern.kind = "noise"
-Pattern.scale = 4
-Pattern.seed = 7
-Pattern.color_a = 0.3 0.24 0.12
-Pattern.color_b = 0.62 0.55 0.35
-Pattern.relief = 0.14
-Pattern.roughness_a = 0.5
-Pattern.roughness_b = 1
+Shape.kind = "sphere"
+Prefab.path = "materials/linen_canvas.rxscene"
+
+entity
+Name.value = "D6 plastic red"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/plastic_red.rxscene"
+
+# --- E: plastic, rubber, glass and emissives ---
+
+entity
+Name.value = "E1 plastic white"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/plastic_white.rxscene"
+
+entity
+Name.value = "E2 rubber black"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/rubber_black.rxscene"
+
+entity
+Name.value = "E3 glass clear"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/glass_clear.rxscene"
+
+entity
+Name.value = "E4 glass frosted"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/glass_frosted.rxscene"
+
+entity
+Name.value = "E5 emissive warm"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/emissive_warm.rxscene"
+
+entity
+Name.value = "E6 emissive cyan"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/emissive_cyan.rxscene"

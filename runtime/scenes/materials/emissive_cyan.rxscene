@@ -1,0 +1,10 @@
+rxscene 1
+
+# A cyan sign or status light. Same shape as emissive_warm with the hue moved;
+# the near-zero base_color matters as much as the emissive, because a glowing
+# panel that also diffuses looks like a painted one lit from outside.
+
+entity
+Surface.base_color = 0.02 0.02 0.02
+Surface.roughness = 0.6
+Surface.emissive = 0.6 4.5 5

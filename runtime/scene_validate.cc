@@ -294,10 +294,34 @@ void CheckShape(ecs::World& world, ecs::Entity entity, Report& report) {
   }
 }
 
-void CheckSurface(ecs::World& world, ecs::Entity entity, Report& report) {
+// True when the file describes properties rather than a place: nothing in it
+// can draw, light or frame anything on its own, so the only way it reaches a
+// render is merged onto an instance by Prefab.path. A material preset
+// (scenes/materials/) is exactly that, and judging one as a whole scene answers
+// every validate with "Surface with nothing to shade" and "no geometry" - both
+// true of the file, neither true of any instance of it, and a check that fires
+// on everything we ship is one the next author learns to ignore.
+//
+// A scene that merely FORGOT its geometry still carries the camera or the light
+// it was going to render with, so it is not a fragment and still gets both
+// findings. The blind spot is a file that has nothing at all but a Surface,
+// which is indistinguishable from a preset by construction.
+bool IsFragment(ecs::World& world, const std::vector<ecs::Entity>& entities) {
+  if (entities.empty()) return false;  // an empty file is a broken scene, not a fragment
+  for (ecs::Entity entity : entities) {
+    if (world.Has<SceneShape>(entity) || world.Has<SceneModel>(entity) ||
+        world.Has<scene::Renderable>(entity) || world.Has<SceneLight>(entity) ||
+        world.Has<SceneCamera>(entity)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+void CheckSurface(ecs::World& world, ecs::Entity entity, bool fragment, Report& report) {
   const SceneSurface* surface = world.Get<SceneSurface>(entity);
   if (!surface) return;
-  if (!world.Has<SceneShape>(entity)) {
+  if (!fragment && !world.Has<SceneShape>(entity)) {
     report.Warn(entity, "surface_without_shape",
                 "Surface on an entity with no Shape; nothing consumes it");
   }
@@ -313,10 +337,10 @@ void CheckSurface(ecs::World& world, ecs::Entity entity, Report& report) {
   }
 }
 
-void CheckPattern(ecs::World& world, ecs::Entity entity, Report& report) {
+void CheckPattern(ecs::World& world, ecs::Entity entity, bool fragment, Report& report) {
   const ScenePattern* pattern = world.Get<ScenePattern>(entity);
   if (!pattern) return;
-  if (!world.Has<SceneShape>(entity)) {
+  if (!fragment && !world.Has<SceneShape>(entity)) {
     report.Warn(entity, "pattern_without_shape",
                 "Pattern on an entity with no Shape; nothing consumes it");
   }
@@ -546,13 +570,16 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   if (!BuildScenePrefabs(world, path, &error)) report.FileError("prefab", error);
 
   const std::vector<ecs::Entity> entities = AllEntities(world);
+  // Decided once, after the two expansion passes: an instance that took its
+  // Shape from a prefab is not a fragment, and the file it took it from is.
+  const bool fragment = IsFragment(world, entities);
   u32 cameras = 0;
   u32 drawables = 0;
   for (ecs::Entity entity : entities) {
     CheckTransform(world, entity, report);
     CheckShape(world, entity, report);
-    CheckSurface(world, entity, report);
-    CheckPattern(world, entity, report);
+    CheckSurface(world, entity, fragment, report);
+    CheckPattern(world, entity, fragment, report);
     CheckModel(world, entity, report);
     CheckLight(world, entity, report);
     CheckCamera(world, entity, report);
@@ -579,8 +606,10 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   }
 
   // Suppressed when nothing loaded at all (a bad header, an unreadable file):
-  // there the load error is the finding and "no geometry" on top of it is noise.
-  if (drawables == 0 && (strict_loaded || !entities.empty())) {
+  // there the load error is the finding and "no geometry" on top of it is
+  // noise. Suppressed for a fragment because having none of its own is what a
+  // fragment is.
+  if (drawables == 0 && !fragment && (strict_loaded || !entities.empty())) {
     report.FileWarn("no_geometry", "no Shape, Model or Renderable in the scene; the render is "
                                    "the empty sky");
   }

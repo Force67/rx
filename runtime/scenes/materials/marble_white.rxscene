@@ -1,0 +1,16 @@
+rxscene 1
+
+# Polished white marble: worktops, statuary, lobby floors. The veining is noise
+# at a low scale, and the subsurface is what stops it reading as painted stone -
+# marble is translucent for a few millimetres and the terminator softens.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.16
+Surface.subsurface = 0.3
+Surface.subsurface_color = 0.86 0.84 0.8
+Pattern.kind = "noise"
+Pattern.resolution = 512
+Pattern.scale = 1.6
+Pattern.color_a = 0.2 0.2 0.2
+Pattern.color_b = 0.95 0.94 0.9

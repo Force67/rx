@@ -1,0 +1,12 @@
+rxscene 1
+
+# Teal-glazed ceramic: tableware, decorative tile, pottery. The glaze is a thin
+# clear layer over a coloured body, which is exactly what clearcoat is for, so
+# the specular stays white where the base colour is strongly tinted.
+
+entity
+Surface.base_color = 0.04 0.26 0.26
+Surface.roughness = 0.35
+Surface.ior = 1.55
+Surface.clearcoat = 1
+Surface.clearcoat_roughness = 0.03

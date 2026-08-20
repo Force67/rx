@@ -5,11 +5,12 @@ rxscene 1
 # left wall, green right wall, open at the top and the front so the sun reaches
 # inside; with gi on the coloured walls bleed onto the white floor and boxes.
 #
-# The white plaster is one prefab instanced four times, and the ball is anchored
-# on the short box rather than positioned at a height worked out from the box's
-# size plus its own radius.
+# The white plaster is one palette preset (scenes/materials/) instanced four
+# times, and the ball is anchored on the short box rather than positioned at a
+# height worked out from the box's size plus its own radius.
 #
-# `rx --dump-schema` prints every component and prop this file may use.
+# `rx --dump-schema` prints every component and prop this file may use, and
+# `rx --dump-materials` the presets a Prefab.path here may name.
 
 entity
 Name.value = "Camera"
@@ -22,14 +23,14 @@ Name.value = "Floor"
 Transform.position = 0 -0.1 0
 Shape.kind = "box"
 Shape.size = 2 0.1 2
-Prefab.path = "prefabs/matte_white.rxscene"
+Prefab.path = "materials/plaster_white.rxscene"
 
 entity
 Name.value = "Back wall"
 Transform.position = 0 1.5 -2
 Shape.kind = "box"
 Shape.size = 2 1.6 0.1
-Prefab.path = "prefabs/matte_white.rxscene"
+Prefab.path = "materials/plaster_white.rxscene"
 
 entity
 Name.value = "Left wall"
@@ -52,14 +53,14 @@ Name.value = "Tall box"
 Transform.position = -0.7 0.9 -0.6
 Shape.kind = "box"
 Shape.size = 0.45 0.9 0.45
-Prefab.path = "prefabs/matte_white.rxscene"
+Prefab.path = "materials/plaster_white.rxscene"
 
 entity
 Name.value = "Short box"
 Transform.position = 0.7 0.45 0.4
 Shape.kind = "box"
 Shape.size = 0.45 0.45 0.45
-Prefab.path = "prefabs/matte_white.rxscene"
+Prefab.path = "materials/plaster_white.rxscene"
 
 # A polished metal ball on the short box, so the room has something specular to
 # reflect the coloured walls in. Standing it on the box is the anchor's job: no

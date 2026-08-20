@@ -1,0 +1,17 @@
+rxscene 1
+
+# Fired clay brick in pale mortar. The mortar is the pattern's low end and the
+# brick face its high end, so relief and roughness follow the same courses the
+# colour does: the joint is recessed AND rougher than the face, in one pattern.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 1
+Pattern.kind = "brick"
+Pattern.scale = 8
+Pattern.line_width = 0.1
+Pattern.color_a = 0.62 0.6 0.55
+Pattern.color_b = 0.26 0.07 0.045
+Pattern.relief = 0.03
+Pattern.roughness_a = 0.95
+Pattern.roughness_b = 0.8

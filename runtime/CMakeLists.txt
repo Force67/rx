@@ -9,6 +9,7 @@ set(RX_RUNTIME_SOURCES
   demo_scenes.cc
   scene_authoring.cc
   scene_validate.cc
+  material_palette.cc
   demo_grass.cc
   demo_nav.cc
   demo_placement.cc
@@ -134,6 +135,48 @@ if(RX_BUILD_TESTS)
     COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_broken PROPERTIES WILL_FAIL TRUE)
+
+  # Every material preset, one test each, globbed so a preset added later is
+  # covered without touching this file. A preset is a fragment (no geometry of
+  # its own, no camera, no light), which the validator recognizes: the
+  # zero-warning assertion below is what keeps that recognition honest, because
+  # a preset that reported "Surface with nothing to shade" would put a finding
+  # on all 30 of them and teach the next author to skip the report.
+  file(GLOB RX_MATERIAL_PRESETS CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/scenes/materials/*.rxscene)
+  foreach(preset ${RX_MATERIAL_PRESETS})
+    get_filename_component(preset_name ${preset} NAME_WE)
+    add_test(NAME material_preset_${preset_name}
+      COMMAND rx --validate ${preset}
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(material_preset_${preset_name} PROPERTIES
+      PASS_REGULAR_EXPRESSION "0 error\\(s\\), 0 warning\\(s\\)")
+  endforeach()
+
+  # ... and the other half of that check: a file that HAS a camera and a light
+  # is a scene, so a Surface on an entity with no Shape in it is still the
+  # author's bug. Without this the fragment rule could silently grow to cover
+  # every file and the check would be gone rather than fixed.
+  add_test(NAME scene_validate_surface_without_shape
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(scene_validate_surface_without_shape PROPERTIES
+    PASS_REGULAR_EXPRESSION "surface_without_shape.*Material with nothing to be")
+
+  # `--dump-materials`: the palette listing an author picks a name from. It
+  # loads every preset, so this also proves the whole palette parses; the regex
+  # is the shape a caller reads (name -> the path it writes into Prefab.path).
+  add_test(NAME dump_materials
+    COMMAND rx --dump-materials
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(dump_materials PROPERTIES
+    PASS_REGULAR_EXPRESSION
+      "\"name\": \"brushed_aluminium\", \"path\": \"runtime/scenes/materials/brushed_aluminium.rxscene\"")
+
+  add_test(NAME dump_materials_missing_directory
+    COMMAND rx --dump-materials ${PROJECT_SOURCE_DIR}/test/data/no_such_palette
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(dump_materials_missing_directory PROPERTIES WILL_FAIL TRUE)
   # The two halves of the glTF reference check, which a pass/fail exit code
   # alone cannot tell apart: scene_validate_model above proves references that
   # resolve stay quiet, and this proves the one naming a mesh a real file does

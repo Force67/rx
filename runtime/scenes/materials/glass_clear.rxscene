@@ -1,0 +1,13 @@
+rxscene 1
+
+# Clear window glass. transmission moves the shape into the sorted transparent
+# pass and refracts what is behind it; it stops at 0.85 because a pane that
+# keeps none of its own shading has no surface left to catch the light on, and
+# env_reflect is what puts the reflection of the room back on top.
+
+entity
+Surface.base_color = 0.94 0.98 0.96
+Surface.roughness = 0.05
+Surface.transmission = 0.85
+Surface.ior = 1.5
+Surface.env_reflect = 0.6

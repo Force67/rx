@@ -1,0 +1,17 @@
+rxscene 1
+
+# Dark slate floor tiles in light grout. `grid` is the tiled counterpart to
+# `brick`: square cells rather than offset courses, with the lines as the joint.
+# Slate is cleaved rather than polished, so it is only half glossy.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.55
+Pattern.kind = "grid"
+Pattern.scale = 4
+Pattern.line_width = 0.06
+Pattern.color_a = 0.3 0.29 0.27
+Pattern.color_b = 0.07 0.075 0.085
+Pattern.relief = 0.02
+Pattern.roughness_a = 1
+Pattern.roughness_b = 0.7

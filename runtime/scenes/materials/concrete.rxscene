@@ -1,0 +1,16 @@
+rxscene 1
+
+# Poured concrete: walls, floors, kerbs. Fully rough and nearly colourless, with
+# the aggregate mottling carried by the pattern rather than by base_color, which
+# stays at 1 1 1 so the pattern's two colours arrive verbatim.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.95
+Pattern.kind = "noise"
+Pattern.scale = 6
+Pattern.color_a = 0.24 0.24 0.23
+Pattern.color_b = 0.35 0.34 0.32
+Pattern.relief = 0.02
+Pattern.roughness_a = 0.9
+Pattern.roughness_b = 1

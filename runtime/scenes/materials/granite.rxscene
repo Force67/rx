@@ -1,0 +1,18 @@
+rxscene 1
+
+# Speckled granite: kerbstones, cladding, headstones. The high pattern scale is
+# the point - granite is crystals a few millimetres across, so the noise has to
+# be far finer than concrete's aggregate or it reads as camouflage.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.45
+Pattern.kind = "noise"
+Pattern.scale = 14
+Pattern.seed = 3
+Pattern.color_a = 0.09 0.09 0.1
+Pattern.color_b = 0.44 0.42 0.43
+Pattern.relief = 0.006
+Pattern.roughness_a = 0.8
+Pattern.roughness_b = 1
+Pattern.resolution = 512

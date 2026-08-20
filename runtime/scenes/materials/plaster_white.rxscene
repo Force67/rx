@@ -1,0 +1,9 @@
+rxscene 1
+
+# White plaster: the painted interior wall, and the surface a Cornell box is
+# made of. Almost the brightest a real dielectric gets - a wall reflecting more
+# than 0.8 does not exist, and pushing it to 1 makes every bounce too bright.
+
+entity
+Surface.base_color = 0.8 0.8 0.8
+Surface.roughness = 0.95

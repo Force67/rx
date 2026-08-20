@@ -1,0 +1,18 @@
+rxscene 1
+
+# Glazed white wall tile: bathrooms, kitchens, subway stations. The whole point
+# is the roughness split - the glazed face is near-mirror and the grout between
+# is matte, which one pattern gives because both maps read the same mask.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.9
+Surface.ior = 1.6
+Pattern.kind = "grid"
+Pattern.scale = 8
+Pattern.line_width = 0.05
+Pattern.color_a = 0.5 0.49 0.46
+Pattern.color_b = 0.87 0.88 0.86
+Pattern.relief = 0.02
+Pattern.roughness_a = 1
+Pattern.roughness_b = 0.12
