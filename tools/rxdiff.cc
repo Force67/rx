@@ -4,12 +4,18 @@
 //   rxdiff <a.png> <b.png> [--rmse <t>] [--hot <f>] [--hot-delta <d>]
 //          [--diff <out.png>] [--json]
 //
-// The renderer is NOT deterministic frame to frame: TAA jitters the sample
-// position on a per-frame sequence and the temporal history resolves against
-// whatever the previous frames happened to be, so two runs of the same build on
-// the same scene write different bytes. Hashing a capture is therefore useless
-// and "pixel identical" is a claim nothing here can make. What IS stable is how
-// far apart two runs land, which is what this measures.
+// A capture run (rx --shot) locks the clock to a fixed 1/60 s delta, so what a
+// frame contains is a function of the frame index and not of how busy the
+// machine was. Every software and raytracing-off configuration measured below
+// then came out BIT identical run to run; with raytracing on a residual of a
+// few least significant bits survives in the traced gi, so hashing a capture is
+// still not a check to rely on. What IS stable is how far apart two runs land,
+// which is what this measures.
+//
+// The tolerances below assume both captures came from that locked clock. Two
+// wall-clock captures (RX_FIXED_DT=0, or a screenshot grabbed out of a windowed
+// session) land ~25x further apart than the defaults allow, because the frames
+// leading up to the capture advanced by different deltas.
 //
 // Two numbers, because content goes wrong in two shapes:
 //
@@ -35,40 +41,60 @@
 
 namespace {
 
-// The defaults below are measured, not guessed. 73 pairs of captures, each pair
-// two runs of the SAME build on the SAME scene with the same flags:
+// The defaults below are measured, not guessed. 78 pairs of captures, each pair
+// two --shot runs of the SAME build on the SAME scene with the same flags:
 //
-//   cornell        640x360  f8   vkrun            28 pairs  rmse max 0.00287
-//   showcase      1280x720  f20  vkrun            15 pairs  rmse max 0.00375
-//   material_sheet 1280x960 f20  vkrun            15 pairs  rmse max 0.00152
-//   cornell        640x360  f8   swrun --no-rt    15 pairs  rmse max 0.00229
+//   cornell        640x360  f8   vkrun            6 pairs  rmse max 0.000194
+//   cornell       1280x720  f20  vkrun            6 pairs  rmse max 0.000433
+//   cornell        640x360  f60  vkrun            6 pairs  rmse max 0.000151
+//   showcase       640x360  f8   vkrun            6 pairs  rmse max 0.000276
+//   showcase      1280x720  f20  vkrun            6 pairs  rmse max 0.000192
+//   showcase       640x360  f60  vkrun            6 pairs  rmse max 0.000137
+//   showcase      1920x1080 f30  vkrun            3 pairs  rmse max 0.000104
+//   material_sheet 640x480  f8   vkrun            6 pairs  rmse max 0.000185
+//   material_sheet 1280x960 f20  vkrun            6 pairs  rmse max 0.000203
+//   model          640x360  f30  vkrun            6 pairs  rmse max 0.000163
+//   model         1280x720  f20  vkrun            6 pairs  rmse max 0.000082
+//   showcase+cornell 640x360 f8  vkrun --no-taa   6 pairs  rmse max 0.000254
+//   cornell        640x360  f8   vkrun --no-rt    3 pairs  rmse max 0 (identical)
+//   cornell        640x360  f8   swrun --no-rt    3 pairs  rmse max 0 (identical)
+//   showcase       640x360  f8   swrun --no-rt    3 pairs  rmse max 0 (identical)
 //
-// so the run-to-run noise floor of this renderer is rmse 0.00375, with single
-// channel excursions as large as 0.13 on a high contrast edge.
+// so the floor is rmse 0.000433, with single channel excursions no larger than
+// 0.0275 (7/255). It does not grow with frame count or resolution, and it is
+// the radiance cache alone: RX_RCGI=0 makes even a raytraced capture bit
+// identical with rtao, ddgi and the NRD denoisers still running, so what is
+// left is rcgi's hash slots being claimed in whatever order the waves land in
+// (InterlockedCompareExchange in shaders/gi/rcgi_probe_trace_body.hlsli), not
+// anything time- or load-dependent. --no-taa does not move it either: TAA was
+// covering for the wall clock, not for the tracer.
 
-// How far one channel has to move for a pixel to count as hot. Deliberately far
-// above "visible to the eye": at 0.031 (a step you can see on a gradient) the
-// noise alone lights up 0.8% of showcase, and at 0.10 it still lights up 18
-// pixels of cornell. From 0.15 up, all 73 pairs above produce EXACTLY zero hot
-// pixels; 0.25 takes that with margin. That zero is the whole value of this
-// metric: any hot pixel at all is content, not jitter.
-constexpr float kDefaultHotDelta = 0.25f;
+// How far one channel has to move for a pixel to count as hot. Above the noise
+// by construction: across the 78 pairs a delta of 0.02 lights up 2 pixels in
+// the whole set and 0.03 up lights up EXACTLY zero, so 0.10 keeps that zero
+// with 3x to spare and is still 2.5x tighter than the old 0.25. That zero is
+// the whole value of this metric: any hot pixel at all is content, not jitter.
+constexpr float kDefaultHotDelta = 0.10f;
 
-// Twice the worst floor above. Not tighter: the floor itself spreads 3x between
-// the quietest and busiest scene measured, so a scene busier than these has room
-// to sit above 0.00375, and a gate that flakes is a gate the next agent learns
-// to ignore. The cost is stated plainly rather than hidden: changing one Cornell
-// wall's albedo by 12% scores 0.00700 and passes. This resolves changes from
-// about 2x the floor up (moving a 0.35 m ball 5 cm scores 0.01999, shrinking it
-// to 0.30 m scores 0.02575); below that the renderer's own wander is the same
-// size as the change, and no threshold makes that not true. Pass --rmse to
-// tighten it on a scene whose own floor you have measured.
-constexpr float kDefaultRmse = 0.0075f;
+// 4.6x the worst floor above, and the number the gate lives or dies by. The
+// headroom is deliberately larger than the spread measured here (the busiest
+// pair is 16x the quietest, but all of it under 0.0005) because the
+// residual is gpu-side: another vendor's tracer may dither more pixels than
+// this one does, and a gate that flakes is a gate the next agent learns to
+// ignore. Even a quarter of the frame moving by one lsb stays under it.
+//
+// What it buys: one Cornell wall's albedo dropped 0.8 -> 0.7 scores 0.00689 and
+// FAILS, at 3.4x the limit. That change passed the old 0.0075 gate, which is
+// what the locked capture clock was for. Sensitivity now runs down to about a
+// 4% albedo change on one wall: 0.8 -> 0.77 scores 0.00216 and fails, 0.8 ->
+// 0.78 scores 0.00155 and does not. Geometry is louder still: moving a 0.35 m
+// ball 5 cm scores 0.01989, shrinking it to 0.30 m scores 0.02566.
+constexpr float kDefaultRmse = 0.002f;
 
-// The measured floor for this one is exactly zero, so the default is pure
-// headroom for a scene noisier than the four above rather than a margin over
-// anything observed: 0.01% of the frame is 23 pixels at 640x360 and 92 at
-// 1280x720, roughly a 10x10 object gone wrong.
+// The measured floor for this one is exactly zero at the delta above, so the
+// default is pure headroom for a scene noisier than the ones measured rather
+// than a margin over anything observed: 0.01% of the frame is 23 pixels at
+// 640x360 and 92 at 1280x720, roughly a 10x10 object gone wrong.
 constexpr float kDefaultHot = 0.0001f;
 
 struct Image {

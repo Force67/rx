@@ -193,6 +193,14 @@ build/linux/runtime/rx --scene runtime/scenes/showcase.rxscene \
     --headless --shot /tmp/shot.png --shot-frames 20 --width 1280 --height 720
 ```
 
+A capture run drives the clock in lockstep at 1/60 s instead of the wall clock,
+so the frame it writes is decided by the frame index and not by how loaded the
+machine was: two runs of the same build land 25x closer together, which is the
+difference between a comparison that catches a regression and one that drowns in
+its own noise (see `rxdiff` below). It is automatic because forgetting it does
+not fail, it just quietly widens the noise. `RX_FIXED_DT=<seconds>` picks a
+different delta and `RX_FIXED_DT=0` asks for wall-clock timing back.
+
 Under `swrun` add `--no-rt` or `--preset low`: lavapipe's acceleration-structure
 builds crash, independently of this path.
 
@@ -213,15 +221,19 @@ fov, a light that cannot contribute, duplicate guids, a dangling or circular
 visible only in the text once the loader has read 0 from it. Nonzero exit on any
 error-level finding; `--json` for a machine-readable report.
 
-`rxdiff` compares two captures. The renderer is not deterministic frame to
-frame (TAA jitter, temporal accumulation), so two runs of the same build on the
-same scene write different bytes and comparing hashes means nothing. It reports
-an rmse and the fraction of pixels whose worst channel moved past
-`--hot-delta`, with a bounding box and an optional amplified diff image, and
-fails past a tolerance measured against that noise rather than guessed: across
-73 pairs of same-build captures over four scene and renderer configurations the
-worst rmse was 0.00375, and the defaults sit at twice that. `tools/rxdiff.cc`
-carries the measurement and what it costs in sensitivity.
+`rxdiff` compares two captures. Under the locked capture clock a software or
+non-raytraced run is bit identical run to run, but the raytraced one is not
+quite: the radiance cache claims its hash slots in whatever order the gpu waves
+land in, which moves a few pixels by a least significant bit or two. So
+comparing hashes is still not a check to rely on. It reports an rmse and the
+fraction of pixels whose worst channel moved past `--hot-delta`, with a bounding
+box and an optional amplified diff image, and fails past a tolerance measured
+against that residual rather than guessed: across 78 pairs of same-build
+captures over four scenes, five resolutions, four frame counts and both
+renderers the worst rmse was 0.000433, and the default sits at 0.002. That is
+tight enough to fail a single Cornell wall going from 0.8 to 0.7 albedo (0.00689,
+which the pre-lockstep gate passed) and still 4.6x clear of the noise.
+`tools/rxdiff.cc` carries the measurement and what it costs in sensitivity.
 
 ```sh
 build/linux/runtime/rx --validate runtime/scenes/showcase.rxscene --json

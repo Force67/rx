@@ -426,7 +426,8 @@ if(RX_BUILD_TOOLS)
 endif()
 
 # rxdiff compares two rendered pngs against a measured tolerance, which is the
-# only comparison a renderer with TAA and temporal accumulation admits. Its own
+# only comparison a renderer whose radiance cache races its own waves admits
+# (a capture's clock is locked, so nothing else about it wanders). Its own
 # tool rather than an rx flag: it needs no device, no window and no scene, so it
 # links stb and nothing else and starts instantly in a CI loop.
 if(RX_BUILD_TOOLS)

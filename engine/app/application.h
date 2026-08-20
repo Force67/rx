@@ -31,6 +31,12 @@ struct AppConfig {
   // or that needs a bespoke gather (skinned draws, decals, per-entity tint),
   // sets this false and appends every draw itself in OnBuildView.
   bool gather_entity_draws = true;
+  // Lockstep clock: > 0 makes every frame advance by exactly this delta instead
+  // of the wall clock, so time-driven state is a function of the frame index
+  // and not of how loaded the machine was. A run that exists to write a png
+  // someone will compare (--shot) sets it; an interactive one leaves it 0.
+  // RX_FIXED_DT wins when the caller set it, 0 included (host.cc).
+  f32 fixed_delta = 0.0f;
   // Last word on the resolved RenderSettings. ApplyRenderPreset replaces the
   // settings wholesale from the tier, then re-applies each env override by
   // hand; anything an app tuned earlier is lost in that replacement. This runs

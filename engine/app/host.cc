@@ -52,6 +52,12 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   mem::ApplyMemoryConfig(mem::LoadMemoryConfig());
   jobs_ = std::make_unique<JobSystem>();
   ConfigureClock(20.0f);
+  // An app that asked for lockstep (AppConfig::fixed_delta, i.e. a capture run)
+  // gets it unless the caller spoke about the clock themselves: RX_FIXED_DT set
+  // to 0 is how you ask a capture for real wall-clock timing back, and a
+  // nonzero one is re-applied every RunFrame below.
+  if (config_.fixed_delta > 0.0f && !FixedDt.overridden())
+    timer_.set_fixed_delta(static_cast<f64>(config_.fixed_delta));
 
   // rx's own content (fonts://, ...) mounts first, so anything the application
   // mounts later overrides it.

@@ -37,12 +37,14 @@ namespace {
 base::Option<const char*> SunDir{"sun.dir", nullptr, "RX_SUN_DIR"};
 // Test/CI hook: RX_UI_SHOT=<path> grabs the frame after RX_UI_SHOT_FRAMES
 // (default 30) and quits. Lets a headless GPU run capture a frame without
-// driving the app.
+// driving the app. Like --shot it runs the clock in lockstep (main.cc), so the
+// frame it grabs is the same one on a loaded machine as on an idle one.
 base::Option<const char*> UiShot{"ui.shot", nullptr, "RX_UI_SHOT"};
 base::Option<int> UiShotFrames{"ui.shot.frames", 30, "RX_UI_SHOT_FRAMES"};
 // RX_UI_SHOT_SEQ treats RX_UI_SHOT as a prefix and dumps every frame as
-// <prefix>_NNNN.png for RX_UI_SHOT_FRAMES frames (pair with RX_FIXED_DT for
-// an even cadence), for assembling headless captures into video.
+// <prefix>_NNNN.png for RX_UI_SHOT_FRAMES frames, for assembling headless
+// captures into video. The cadence is even because the capture clock is
+// lockstep; RX_FIXED_DT picks a different one (e.g. to match a target fps).
 base::Option<bool> UiShotSeq{"ui.shot.seq", false, "RX_UI_SHOT_SEQ"};
 // Capture hook: RX_MORPH_WEIGHTS="name=w,name=w" pins named morph targets to
 // fixed weights on every morphed instance (unmatched names are skipped per

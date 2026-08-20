@@ -17,6 +17,12 @@
 
 namespace {
 
+// The delta a capture run advances by. 1/60 s, which is FrameTimer's own fixed
+// step, so the accumulator hands out exactly one sim step per frame instead of
+// a 0-or-2 pattern that makes the capture frame land mid-step; it is also what
+// the demos mirroring the host's cadence (demo_gym, demo_shooter) fall back to.
+constexpr float kCaptureDelta = 1.0f / 60.0f;
+
 void PrintUsage() {
   RX_INFO("usage: rx [options]");
   RX_INFO("  --gltf <path>         load a gltf/glb scene (e.g. assets/sponza/Sponza.gltf)");
@@ -34,7 +40,9 @@ void PrintUsage() {
   RX_INFO("  --json                emit --validate's report as json instead of text");
   RX_INFO("  --authoring-endpoint <path>  serve those commands on a local unix socket");
   RX_INFO("  --headless            no window (a --shot run still brings the gpu up, windowless)");
-  RX_INFO("  --shot <path.png>     capture a frame, then quit; nonzero exit if it was not written");
+  RX_INFO("  --shot <path.png>     capture a frame, then quit; nonzero exit if it was not written.");
+  RX_INFO("                        Runs the clock in lockstep at 1/60 s so the png does not depend");
+  RX_INFO("                        on machine load (RX_FIXED_DT overrides, 0 = wall clock)");
   RX_INFO("  --shot-frames <n>     frames to render before the capture (default 30)");
   RX_INFO("  --width <px>          render/window width (also RX_WIN_W)");
   RX_INFO("  --height <px>         render/window height (also RX_WIN_H)");
@@ -194,6 +202,14 @@ int main(int argc, char** argv) {
   app_config.preset = config.preset;
   app_config.headless = no_window;
   app_config.offscreen = config.offscreen;
+  // A capture exists to be compared against another capture, so it must not
+  // depend on how fast this machine happened to run the frames before it: lock
+  // the clock, and the png is a function of the frame index. This is on by
+  // default because forgetting it does not fail, it just quietly widens the
+  // run-to-run noise (rmse 0.0002 -> 0.008, the size of a real regression, so a
+  // comparison then catches nothing); RX_FIXED_DT=0 asks for the wall clock
+  // back and RX_FIXED_DT=<seconds> picks a different delta.
+  if (!shot.empty()) app_config.fixed_delta = kCaptureDelta;
 
   // A stale png from an earlier run would otherwise pass the check below.
   const bool verify_shot = !config.shot_path.empty() && !std::getenv("RX_UI_SHOT_SEQ");
