@@ -227,10 +227,16 @@ PhysicsWorld::VehicleDesc SuvProfile() {
   d.anti_roll_rear = 2100.0f;  // moderate: leans some
   d.suspension_frequency = 1.6f;
   d.suspension_damping = 0.5f;
-  // All-terrain tyres: a touch less peak tarmac grip, but the surface grip
-  // table already favours AWD on dirt/grass; keep street grip near stock.
+  // All-terrain tyres: ordinary grip on tarmac (the surface table is untouched
+  // there), but the lugs shear a loose layer instead of skating over it. Past
+  // the hard-road cap in the friction combine this hands the SUV its full
+  // tarmac traction back on firm loose ground - grass, dirt and gravel, where
+  // its grass 0-40 now matches its asphalt 0-40 - while the soft surfaces the
+  // tread cannot key into still cost it grip (sand ~0.9 of tarmac, snow and mud
+  // ~0.75). That, with AWD behind it, is the off-road advantage.
   d.tire_long_friction = 1.0f;
   d.tire_lat_friction = 0.9f;
+  d.offroad_grip = 1.7f;
   d.brake_bias_front = 0.6f;
   d.max_brake_torque = 3200.0f;
   // traction control off: launch differentiation comes from drivetrain + grip.

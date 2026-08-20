@@ -392,6 +392,12 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // (1 = stock street tire, ~1.5+ slicks). 0 = default (1).
     f32 tire_long_friction = 0;
     f32 tire_lat_friction = 0;
+    // All-terrain tread: an extra grip multiplier on LOOSE surfaces only (dirt,
+    // gravel, grass, sand, snow, mud). The per-surface grip table has no
+    // tyre-type dimension, so this is what makes an off-road tyre differ from a
+    // street tyre; hard surfaces and ice are untouched, so raising it cannot
+    // change a profile's tarmac handling. 0 = default (1, a street tyre).
+    f32 offroad_grip = 0;
     // Suspension spring per wheel; 0 = Jolt default (1.5 Hz / 0.5).
     f32 suspension_frequency = 0;
     f32 suspension_damping = 0;

@@ -140,6 +140,24 @@ measured — `longitudinal` / `lateral` scale the tyre peak, `1` = dry asphalt;
 | wood     | 0.85 | 0.82 | 0.65 |
 | metal    | 0.70 | 0.65 | 0.55 |
 
+### Off-road tyres: `VehicleDesc::offroad_grip`
+
+The table above has no tyre-type dimension, so on its own an "all-terrain" tyre
+is identical to a street tyre everywhere. `offroad_grip` (`0`/`1` = a street
+tyre, no advantage) is the per-vehicle multiplier that makes them differ: the
+friction combine applies it **only on loose surfaces** (dirt, gravel, grass,
+sand, snow and mud), the ones where grip comes from a tread keying into a
+granular or vegetated layer. Asphalt, concrete, wood and metal are hard, and ice
+is hard and glazed (a knobbly block finds nothing to bite into), so none of them
+take the bonus: raising a profile's `offroad_grip` cannot move its tarmac
+numbers. The bonus is capped at the asphalt entry, so an off-road tread recovers
+what the loose layer costs a street tyre but never makes dirt grippier than a
+road.
+
+Only `SuvProfile` runs one (`1.7`). Past the cap that hands it full hard-road
+grip on grass, dirt and gravel, leaves sand at ~0.9 of tarmac and snow/mud at
+~0.75, and is why its grass launch below matches its asphalt launch.
+
 ### Wetness & aquaplaning
 
 `set_surface_wetness(0..1)` is global rain: it lerps every surface's grip toward
@@ -177,7 +195,7 @@ intended signature in one line.
 | `SportsCarProfile` | 1300 kg | RWD | low CG, stiff + strong front anti-roll, fast steering with a hard high-speed fade, sticky tyres, downforce, short gears — eager, planted at speed |
 | `MuscleCarProfile` | 1650 kg | RWD | big low-end torque, softer rear, modest anti-roll, rear grip below front — tail-happy power oversteer |
 | `HatchbackProfile` | 1150 kg | FWD | economical, understeer bias (front grip below rear), soft-ish, light — safe and nose-led |
-| `SuvProfile` | 2100 kg | AWD 30/70 | tall body, soft long-travel suspension, mild anti-roll, all-terrain tyres — sure-footed launch, leans in corners |
+| `SuvProfile` | 2100 kg | AWD 30/70 | tall body, soft long-travel suspension, mild anti-roll, all-terrain tyres (`offroad_grip 1.7`, the only profile with one) — sure-footed launch on or off the road, leans in corners |
 | `VanProfile(cargo_load)` | 2000–2400 kg | RWD | high CG over a narrow-ish track, slow steering; `cargo_load` (0..1) adds mass and shifts the CoM rearward/up (`com_fore`) |
 | `SemiTruckProfile` | 8500 kg | RWD | enormous torque geared tall, very slow steering, weak per-kg brakes (long stops), pronounced roll, gearing-capped top speed |
 
@@ -191,27 +209,32 @@ automatic box.
 ### Measured behaviour
 
 From `test/handling_test.cc` (headless, flat asphalt, real Jolt path — the test
-asserts the *orderings*, not the absolute numbers):
+asserts the *orderings*, not the absolute numbers). The numbers below are one
+machine's readings; they drift by a few percent (the SUV's 0–100 by more)
+between toolchains, which is exactly why nothing asserts on them:
 
 | Profile | 0–100 km/h | 100–0 km/h | step-steer roll¹ |
 | --- | --- | --- | --- |
-| Sports | 5.98 s | 25.4 m | 0.2° |
-| Muscle | 8.83 s | 53.4 m | — |
-| Hatchback | 17.20 s | 36.4 m | — |
-| SUV | 21.33 s | 40.8 m | 0.5° |
-| Van (laden) | 36.33 s | 41.8 m | 3.5° |
-| Semi | 80.43 s | 75.6 m | 1.2° |
+| Sports | 5.83 s | 25.6 m | 0.2° |
+| Muscle | 8.83 s | 53.5 m | — |
+| Hatchback | 17.22 s | 36.4 m | — |
+| SUV | 22.80 s | 40.7 m | 0.5° |
+| Van (laden) | 36.33 s | 41.7 m | 3.7° |
+| Semi | 80.47 s | 75.6 m | 1.2° |
 
 ¹ Peak body-lean in a gentle step-steer at ~55 km/h. At 80 km/h the soft, tall
 profiles roll fully onto their side (a saturated ~60°), so the graded lean
 ordering (sports < SUV < van/semi) is only measurable below the rollover regime.
 
-Further proven orderings: on **Grass** the AWD SUV reaches 40 km/h in 4.23 s vs
-the RWD muscle car's 5.05 s (traction); at full-throttle mid-corner the **FWD
-hatch's front axle slips more than its rear** (understeer: 0.307 vs 0.146 rad)
+Further proven orderings: on **Grass** the AWD SUV reaches 40 km/h in 3.67 s vs
+the RWD muscle car's 5.07 s. The SUV's all-terrain tyres (`offroad_grip`) hand
+it back its hard-road traction, so it launches on grass exactly as fast as it
+does on asphalt (3.67 s there too), while the street-shod muscle car spins its
+rears and drops from 3.03 s to 5.07 s; at full-throttle mid-corner the **FWD
+hatch's front axle slips more than its rear** (understeer: 0.300 vs 0.139 rad)
 while the **RWD muscle car's rear exceeds its front** (oversteer: 1.457 vs 1.421
 rad); and the sports car's achievable lateral grip **grows with speed** thanks to
-downforce (×1.67 from 60→120 km/h) where the hatch's barely moves (×1.30). All
+downforce (×1.67 from 60→120 km/h) where the hatch's barely moves (×1.32). All
 six are NaN-free, settle at rest, and still respect the surface/wetness grip
 table.
 
@@ -253,7 +276,9 @@ Force models (`BoatDesc`):
 
 `rpm`, `engine_load` (`0..1`, spool-limited thrust fraction), `throttle`,
 `speed_mps`, `forward_speed` (signed, hull axis), `planing` (`0..1`), `wetted`
-(`0..1` submerged-sample fraction), `draft_m` (submerged hull depth, waterline −
+(`0..1` of the buoyancy grid's **bottom layer** in the water; `0` means the hull
+is clear of the water, off a crest or up on the transom, *not* that it sank: a
+sunk hull reads `1`), `draft_m` (submerged hull depth, waterline −
 hull bottom, from the grid's submerged fraction so it tracks load and swell),
 `freeboard_m` (hull depth left above the waterline), `cargo_kg` (current load),
 `prop_submerged`, `position`, `rotation`.
