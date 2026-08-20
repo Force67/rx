@@ -8,6 +8,24 @@
 // prepass_masked.ps.hlsl defines RX_PREPASS_MASKED to compile the
 // alpha-test path for cutout materials (foliage, fences, hair cards).
 
+// Prefix of the frame globals (see mesh.ps FrameGlobals); only the clock the uv
+// scroll runs on is read here.
+struct FrameGlobals {
+  column_major float4x4 view_proj;
+  column_major float4x4 prev_view_proj;
+  column_major float4x4 inv_view_proj;
+  float2 jitter;
+  float2 prev_jitter;
+  float4 sun_direction;
+  float4 sun_color;
+  float4 camera_position;
+  float4 misc;
+  uint flags;
+  float time;  // seconds
+  float2 pad;
+};
+[[vk::binding(0, 0)]] ConstantBuffer<FrameGlobals> frame : register(b0, space0);
+
 struct MaterialParams {
   float4 base_color_factor;
   float3 emissive_factor;
@@ -15,9 +33,17 @@ struct MaterialParams {
   float roughness_factor;
   float alpha_cutoff;
   uint flags;
-  float pad;
+  float height_scale;
+  // clearcoat .. silhouette_curvature in mesh.ps MaterialParams: shading-only,
+  // never read here, but they have to be spanned so uv_scroll lands on byte 112
+  // like it does there. Inserting a field in mesh.ps before uv_scroll means
+  // widening this.
+  float4 shading_rows[4];
+  float2 uv_scroll;  // animated texture scroll (uv units/sec)
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
+
+#include "material_uv.hlsli"  // MaterialUv, shared with the main pass
 
 [[vk::combinedImageSampler]] [[vk::binding(1, 1)]] Texture2D base_color_map : register(t1, space1);
 [[vk::combinedImageSampler]] [[vk::binding(1, 1)]] SamplerState base_color_sampler : register(s1, space1);
@@ -62,6 +88,7 @@ struct PsOut {
 };
 
 PsOut main(PsIn input) {
+  input.uv = MaterialUv(input.uv);
 #if defined(RX_PREPASS_MASKED)
   if ((material.flags & kFlagAlphaMask) != 0u) {
     float4 base = base_color_map.Sample(base_color_sampler, input.uv) *

@@ -328,6 +328,8 @@ struct MaterialParams {
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
 
+#include "material_uv.hlsli"  // MaterialUv, shared with the prepass
+
 [[vk::combinedImageSampler]] [[vk::binding(1, 1)]] Texture2D base_color_map : register(t1, space1);
 [[vk::combinedImageSampler]] [[vk::binding(1, 1)]] SamplerState base_color_sampler : register(s1, space1);
 [[vk::combinedImageSampler]] [[vk::binding(2, 1)]] Texture2D normal_map : register(t2, space1);
@@ -1383,9 +1385,7 @@ float4 EffectColor(PsIn input) {
 }
 
 PsOut main(PsIn input) {
-  // Animated scroll (waterfalls, rivers, lava): shift the uv before anything
-  // samples it.
-  input.uv += frame.time * material.uv_scroll;
+  input.uv = MaterialUv(input.uv);
 
   // Effect-shader geometry short-circuits the lit path entirely (no lighting,
   // shadows, SSS or decals): additive fire premultiplies its coverage for the
