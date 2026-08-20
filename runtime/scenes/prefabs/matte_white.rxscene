@@ -1,0 +1,14 @@
+rxscene 1
+
+# The Cornell box's white plaster: the surface every uncoloured wall and block
+# in the room shares. It carries no Shape, so each instance brings its own and
+# only its own; the two coloured walls just do not instance this.
+#
+# Validating this file on its own reports a Surface with nothing to shade and no
+# geometry, both of which are true of the fragment and neither of which is true
+# of an instance of it. A prefab of a whole object (prefabs/sheet_cell.rxscene)
+# has no such split, and validates clean.
+
+entity
+Surface.base_color = 0.8 0.8 0.8
+Surface.roughness = 0.95

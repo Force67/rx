@@ -1,0 +1,13 @@
+rxscene 1
+
+# A prefab containing an instance of itself, for prefab_cycle.rxscene. Expanding
+# it would place a box, then a box, then a box, until memory ran out, so the
+# expansion refuses on the second time it reaches this file.
+
+entity
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+
+entity
+Transform.position = 1 0 0
+Prefab.path = "prefab_cycle_inner.rxscene"

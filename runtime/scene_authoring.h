@@ -130,6 +130,84 @@ struct SceneModel {
   std::string path;
 };
 
+// Another .rxscene instanced here, so a thing described once can be placed many
+// times. This is the only reuse mechanism: `path` is a scene file, resolved
+// RELATIVE TO THE FILE THAT NAMES IT rather than to the working directory
+// (unlike Model.path and Surface.materialx, which name external art a scene
+// merely points at). A prefab is scene content that belongs to the scene, so a
+// scene directory has to stay movable as a unit.
+//
+// A .rxscene is the definition format rather than a second syntax because that
+// buys every tool at once: a prefab file validates, renders and dumps its
+// schema with the commands that already exist, and SaveScene round-trips an
+// instance for free (see the expansion rule below). An inline `prefab` block
+// would need its own parser in edit::LoadScene, and SaveScene, which writes
+// entities, would drop it on the first live-edit save.
+//
+// The file's FIRST entity is the prefab's root: its components are added to
+// this entity, skipping any this entity already authored. That skip is what
+// lets one prefab serve many variants - the crate's Shape comes from the file,
+// its Surface from the instance - and it is per COMPONENT, not per field: an
+// instance that says anything about Surface owns the whole Surface.
+//
+// Every further entity in the file becomes a child of this entity, keeping its
+// relative Transform so the authored Transform moves the whole group, and
+// marked scene::Transient so SaveScene writes this Prefab line rather than the
+// entities it expanded into. That is BuildSceneModels' treatment of a glTF's
+// instances, for the same reason.
+struct ScenePrefab {
+  std::string path;
+};
+
+// Relative placement: stand this entity against another one instead of at a
+// coordinate derived by hand. `target` is the other entity's Name.value and
+// `mode` picks which side of it to sit against.
+//
+// The placement uses both entities' real world bounds, children included, so it
+// resolves after BuildSceneShapes/BuildSceneModels rather than at load; a
+// target whose geometry has no extent (a bare Light) cannot be measured and
+// fails the load.
+//
+// An anchor REPLACES Transform.position: the anchor is the position, and the
+// two axes the mode does not stack along centre on the target. It has to
+// replace rather than offset, or a SaveScene of a running engine (which writes
+// the resolved position along with the Anchor that produced it) would reload
+// with the placement applied on top of itself.
+//
+// Anchors resolve in dependency order, so anchoring to something itself
+// anchored works. A cycle fails the load naming the loop.
+struct SceneAnchor {
+  std::string target;
+  std::string mode = "on";
+};
+
+// Regular repetition: a row or a grid, so N cells cost one declaration of the
+// spacing instead of N stepped coordinates.
+//
+// One component, two roles. An entity with `count` and `step` is the CONTAINER:
+// its Transform is the position of cell (0,0,0). An entity naming that
+// container in `of` is a MEMBER: it becomes a child of the container and its
+// Transform.position becomes the cell it lands in, taken in the order the file
+// declares members, which is why a member needs no coordinate at all. Replaced,
+// not added to, for the same reason an Anchor replaces one: a saved member
+// carries the cell it was given, and a reload has to land it on the same cell
+// rather than a cell further along. `cell` names a prefab (see ScenePrefab,
+// same path resolution) that every member which does not instance one itself is
+// an instance of, so the members stay down to the one thing that differs
+// between them.
+//
+// Members are laid out before prefabs expand, so an entity a prefab expanded
+// into cannot itself be a grid member: a grid is a layout of the entities the
+// file declares.
+struct SceneGrid {
+  std::string of;
+  std::string cell;
+  // Cells along x, y and z. Fractional values truncate; the format has no
+  // integer vector.
+  f32 count[3] = {1, 1, 1};
+  f32 step[3] = {0, 0, 0};
+};
+
 // A punctual light at the entity's Transform position. `radius` is the
 // influence cutoff in meters, past which the light contributes nothing.
 struct SceneLight {
@@ -145,6 +223,16 @@ struct SceneCamera {
   f32 fov_degrees = 60.0f;
 };
 
+// The local-space bounds of an entity's built geometry, written by
+// BuildSceneShapes and BuildSceneModels and read only by BuildSceneAnchors.
+// Deliberately NOT reflected: it is derived from the mesh, so no scene authors
+// it and no save should write it back. Presence means "this entity has
+// something to measure"; an entity without it contributes nothing to a bound.
+struct SceneBounds {
+  f32 min[3] = {0, 0, 0};
+  f32 max[3] = {0, 0, 0};
+};
+
 // Registers the components above with the edit reflection registry, so
 // LoadScene resolves them by name and --dump-schema documents them. Idempotent;
 // must run before either.
@@ -157,6 +245,40 @@ void RegisterSceneComponents();
 // BuildSceneShapes and --validate both go through here, so neither can accept a
 // kind, or condemn a size, the other would not.
 u32 ShapeRequiredSizeAxes(std::string_view kind);
+
+// Parents every SceneGrid member to the container it names, at the cell its
+// declaration order earns it, and hands it the container's `cell` prefab when
+// it instances none itself. Runs before BuildScenePrefabs, which is what stops
+// an expanded entity from silently claiming a cell. `scene_path` is read only
+// to turn a failure into the `path:line:` of the assignment that caused it.
+//
+// False + *error on a container that names nothing, a container with a
+// non-positive cell count, a member that is its own container, and a grid asked
+// to hold more members than it has cells - the last of which would otherwise
+// stack two cells on one coordinate, which reads as a missing object.
+bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::string* error);
+
+// Expands every ScenePrefab entity: merges the prefab root's components into it
+// and adds one scene::Transient child per further entity of the prefab file
+// (see ScenePrefab). Each file is loaded once however many entities name it.
+// Runs before BuildSceneShapes, so the geometry a prefab carries is built like
+// any other. `scene_path` locates both the error and the prefab, whose path is
+// relative to the file naming it.
+//
+// False + *error on a prefab that does not load and on a prefab that reaches
+// itself, which would otherwise expand until memory ran out.
+bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::string* error);
+
+// Resolves every SceneAnchor into a Transform.position, in dependency order so
+// an anchor onto an anchored entity sees the settled one. Runs after
+// BuildSceneShapes/BuildSceneModels because "on top of" is measured from the
+// built geometry, not from the authored Shape.size.
+//
+// False + *error on a target that names no entity, a target no two entities
+// agree on (two entities of that Name), a target with no geometry to measure,
+// an unknown mode, and a cycle - each of which would otherwise leave an object
+// at the origin, which reads as a scene that failed to place it.
+bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::string* error);
 
 // Builds one mesh + material per SceneShape entity, uploads them (`renderer`
 // null skips the GPU side) and points each entity's Renderable at the result.

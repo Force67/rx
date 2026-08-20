@@ -5,6 +5,10 @@ rxscene 1
 # left wall, green right wall, open at the top and the front so the sun reaches
 # inside; with gi on the coloured walls bleed onto the white floor and boxes.
 #
+# The white plaster is one prefab instanced four times, and the ball is anchored
+# on the short box rather than positioned at a height worked out from the box's
+# size plus its own radius.
+#
 # `rx --dump-schema` prints every component and prop this file may use.
 
 entity
@@ -18,16 +22,14 @@ Name.value = "Floor"
 Transform.position = 0 -0.1 0
 Shape.kind = "box"
 Shape.size = 2 0.1 2
-Surface.base_color = 0.8 0.8 0.8
-Surface.roughness = 0.95
+Prefab.path = "prefabs/matte_white.rxscene"
 
 entity
 Name.value = "Back wall"
 Transform.position = 0 1.5 -2
 Shape.kind = "box"
 Shape.size = 2 1.6 0.1
-Surface.base_color = 0.8 0.8 0.8
-Surface.roughness = 0.95
+Prefab.path = "prefabs/matte_white.rxscene"
 
 entity
 Name.value = "Left wall"
@@ -50,22 +52,22 @@ Name.value = "Tall box"
 Transform.position = -0.7 0.9 -0.6
 Shape.kind = "box"
 Shape.size = 0.45 0.9 0.45
-Surface.base_color = 0.8 0.8 0.8
-Surface.roughness = 0.95
+Prefab.path = "prefabs/matte_white.rxscene"
 
 entity
 Name.value = "Short box"
 Transform.position = 0.7 0.45 0.4
 Shape.kind = "box"
 Shape.size = 0.45 0.45 0.45
-Surface.base_color = 0.8 0.8 0.8
-Surface.roughness = 0.95
+Prefab.path = "prefabs/matte_white.rxscene"
 
 # A polished metal ball on the short box, so the room has something specular to
-# reflect the coloured walls in.
+# reflect the coloured walls in. Standing it on the box is the anchor's job: no
+# line here repeats the box's height or the ball's radius.
 entity
 Name.value = "Metal ball"
-Transform.position = 0.7 1.25 0.4
+Anchor.target = "Short box"
+Anchor.mode = "on"
 Shape.kind = "sphere"
 Shape.size = 0.35 0 0
 Surface.base_color = 0.95 0.93 0.88

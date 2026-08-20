@@ -534,6 +534,17 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   Report report(world, source.entity_lines);
   if (!strict_loaded) report.FileError("load", error);
 
+  // The two passes that change what an entity IS have to run before the checks
+  // below, or every prefab instance is judged on the half of itself the file
+  // wrote: a cell that takes its Shape from a prefab would be condemned as a
+  // Surface with nothing to shade. Both are the viewer's own passes rather than
+  // a structural mirror of them, so a layout this accepts is one that loads.
+  // Failures land as file-wide findings for the same reason `load` does: the
+  // message already carries its own `path:line:`, and the entity it names may
+  // be one the expansion created, which has no line at all.
+  if (!BuildSceneGrids(world, path, &error)) report.FileError("grid", error);
+  if (!BuildScenePrefabs(world, path, &error)) report.FileError("prefab", error);
+
   const std::vector<ecs::Entity> entities = AllEntities(world);
   u32 cameras = 0;
   u32 drawables = 0;
@@ -555,6 +566,17 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   }
   CheckDuplicateGuids(world, entities, report);
   CheckNumberLiterals(world, source, report);
+
+  // Anchors are measured from built geometry, so the meshes have to exist
+  // before they resolve. Built here, after the per-entity checks, so a scene
+  // the builder refuses still gets the full report explaining why (its own
+  // finding already named the bad Shape.kind or Model.path) instead of one
+  // file-wide failure. No gpu: `renderer` null is the headless path the
+  // viewer's own --headless takes.
+  if (BuildSceneShapes(world, db, /*renderer=*/nullptr, &error) &&
+      BuildSceneModels(world, db, /*renderer=*/nullptr, path, &error)) {
+    if (!BuildSceneAnchors(world, path, &error)) report.FileError("anchor", error);
+  }
 
   // Suppressed when nothing loaded at all (a bad header, an unreadable file):
   // there the load error is the finding and "no geometry" on top of it is noise.

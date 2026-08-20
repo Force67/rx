@@ -12,7 +12,12 @@ rxscene 1
 #   D  the procedural patterns: checker, grid, brick, gradient, noise, noise at
 #      deep relief
 #
-# To sweep your own batch, replace a row's six blocks and re-render:
+# No cell carries a coordinate or a shape: the "Sheet" entity below is a 6 x 4
+# grid and each cell is a member of it, so a cell says only the material it
+# exists to show. Members take cells in the order this file declares them, which
+# is why the rows read straight down the file. To move the whole sheet, move
+# Sheet; to respace it, change Grid.step; to sweep your own batch, replace a
+# row's six blocks and re-render:
 #   rx --scene runtime/scenes/material_sheet.rxscene --headless \
 #      --shot sheet.png --shot-frames 20 --width 1280 --height 960
 #
@@ -43,163 +48,131 @@ Light.color = 1 0.95 0.9
 Light.intensity = 10
 Light.radius = 22
 
-# A1  roughness 0
+# The sheet itself: where cell A1 sits, how far apart the cells are, and what
+# every cell is made of. Its Transform is cell 0 0 0, and y is the cell sphere's
+# radius, which is what stands the row on the floor.
+entity
+Name.value = "Sheet"
+Transform.position = -3.75 0.55 -4.5
+Grid.count = 6 1 4
+Grid.step = 1.5 0 1.5
+Grid.cell = "prefabs/sheet_cell.rxscene"
+
+# --- A: roughness sweep, plain dielectric ---
+
 entity
 Name.value = "A1 roughness 0"
-Transform.position = -3.75 0.55 -4.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.18 0.18 0.19
 Surface.roughness = 0
 
-# A2  roughness 0.2
 entity
 Name.value = "A2 roughness 0.2"
-Transform.position = -2.25 0.55 -4.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.18 0.18 0.19
 Surface.roughness = 0.2
 
-# A3  roughness 0.4
 entity
 Name.value = "A3 roughness 0.4"
-Transform.position = -0.75 0.55 -4.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.18 0.18 0.19
 Surface.roughness = 0.4
 
-# A4  roughness 0.6
 entity
 Name.value = "A4 roughness 0.6"
-Transform.position = 0.75 0.55 -4.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.18 0.18 0.19
 Surface.roughness = 0.6
 
-# A5  roughness 0.8
 entity
 Name.value = "A5 roughness 0.8"
-Transform.position = 2.25 0.55 -4.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.18 0.18 0.19
 Surface.roughness = 0.8
 
-# A6  roughness 1
 entity
 Name.value = "A6 roughness 1"
-Transform.position = 3.75 0.55 -4.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.18 0.18 0.19
 Surface.roughness = 1
 
-# B1  gold
+# --- B: metals ---
+
 entity
 Name.value = "B1 gold"
-Transform.position = -3.75 0.55 -3.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 1 0.77 0.34
 Surface.roughness = 0.25
 Surface.metallic = 1
 
-# B2  copper
 entity
 Name.value = "B2 copper"
-Transform.position = -2.25 0.55 -3.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.95 0.64 0.54
 Surface.roughness = 0.4
 Surface.metallic = 1
 
-# B3  brushed steel
 entity
 Name.value = "B3 brushed steel"
-Transform.position = -0.75 0.55 -3.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.9 0.9 0.92
 Surface.roughness = 0.3
 Surface.metallic = 1
 Surface.anisotropy = 0.9
 
-# B4  blasted aluminium
 entity
 Name.value = "B4 blasted aluminium"
-Transform.position = 0.75 0.55 -3.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.91 0.92 0.92
 Surface.roughness = 0.65
 Surface.metallic = 1
 
-# B5  chrome
 entity
 Name.value = "B5 chrome"
-Transform.position = 2.25 0.55 -3.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.95 0.95 0.95
 Surface.roughness = 0.05
 Surface.metallic = 1
 
-# B6  iridescent chrome
 entity
 Name.value = "B6 iridescent chrome"
-Transform.position = 3.75 0.55 -3.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.9 0.9 0.9
 Surface.roughness = 0.3
 Surface.metallic = 1
 Surface.iridescence = 1
 Surface.iridescence_thickness = 520
 
-# C1  car paint (clearcoat)
+# --- C: the dielectric lobes ---
+
 entity
 Name.value = "C1 car paint (clearcoat)"
-Transform.position = -3.75 0.55 -1.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.05 0.09 0.3
 Surface.roughness = 0.55
 Surface.clearcoat = 1
 Surface.clearcoat_roughness = 0.02
 
-# C2  velvet (sheen)
 entity
 Name.value = "C2 velvet (sheen)"
-Transform.position = -2.25 0.55 -1.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.09 0.03 0.12
 Surface.roughness = 0.95
 Surface.specular_strength = 0.1
 Surface.sheen_color = 0.8 0.45 0.9
 Surface.sheen_roughness = 0.25
 
-# C3  wax (subsurface)
 entity
 Name.value = "C3 wax (subsurface)"
-Transform.position = -0.75 0.55 -1.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.85 0.72 0.58
 Surface.roughness = 0.45
 Surface.subsurface = 1
 Surface.subsurface_color = 0.9 0.35 0.22
 
-# C4  leaf (soft/rim/back)
 entity
 Name.value = "C4 leaf (soft/rim/back)"
-Transform.position = 0.75 0.55 -1.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.16 0.3 0.08
 Surface.roughness = 0.7
 Surface.subsurface_color = 0.55 0.85 0.2
@@ -207,34 +180,27 @@ Surface.soft_lighting = 1
 Surface.rim_lighting = 2
 Surface.back_lighting = 1
 
-# C5  glass (transmission)
 entity
 Name.value = "C5 glass (transmission)"
-Transform.position = 2.25 0.55 -1.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.9 0.97 0.95
 Surface.roughness = 0.05
 Surface.transmission = 1
 Surface.ior = 1.5
 
-# C6  gem (env_reflect)
 entity
 Name.value = "C6 gem (env_reflect)"
-Transform.position = 3.75 0.55 -1.5
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 0.1 0.02 0.06
 Surface.roughness = 0.08
 Surface.ior = 1.9
 Surface.env_reflect = 1
 
-# D1  checker
+# --- D: the procedural patterns ---
+
 entity
 Name.value = "D1 checker"
-Transform.position = -3.75 0.55 0.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 1 1 1
 Surface.roughness = 1
 Pattern.kind = "checker"
@@ -244,12 +210,9 @@ Pattern.color_b = 0.8 0.78 0.72
 Pattern.roughness_a = 0.2
 Pattern.roughness_b = 0.7
 
-# D2  grid
 entity
 Name.value = "D2 grid"
-Transform.position = -2.25 0.55 0.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 1 1 1
 Surface.roughness = 1
 Pattern.kind = "grid"
@@ -259,12 +222,9 @@ Pattern.color_a = 0.05 0.16 0.2
 Pattern.color_b = 0.7 0.68 0.6
 Pattern.relief = 0.03
 
-# D3  brick
 entity
 Name.value = "D3 brick"
-Transform.position = -0.75 0.55 0.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 1 1 1
 Surface.roughness = 1
 Pattern.kind = "brick"
@@ -276,24 +236,18 @@ Pattern.relief = 0.03
 Pattern.roughness_a = 0.95
 Pattern.roughness_b = 0.7
 
-# D4  gradient
 entity
 Name.value = "D4 gradient"
-Transform.position = 0.75 0.55 0.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 1 1 1
 Surface.roughness = 1
 Pattern.kind = "gradient"
 Pattern.color_a = 0.02 0.06 0.2
 Pattern.color_b = 0.85 0.45 0.1
 
-# D5  noise
 entity
 Name.value = "D5 noise"
-Transform.position = 2.25 0.55 0.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 1 1 1
 Surface.roughness = 1
 Pattern.kind = "noise"
@@ -302,12 +256,9 @@ Pattern.color_a = 0.17 0.16 0.14
 Pattern.color_b = 0.46 0.44 0.38
 Pattern.relief = 0.05
 
-# D6  noise, deep relief
 entity
 Name.value = "D6 noise, deep relief"
-Transform.position = 3.75 0.55 0.0
-Shape.kind = "sphere"
-Shape.size = 0.55 0 0
+Grid.of = "Sheet"
 Surface.base_color = 1 1 1
 Surface.roughness = 1
 Pattern.kind = "noise"
@@ -318,4 +269,3 @@ Pattern.color_b = 0.62 0.55 0.35
 Pattern.relief = 0.14
 Pattern.roughness_a = 0.5
 Pattern.roughness_b = 1
-

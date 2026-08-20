@@ -1,0 +1,20 @@
+rxscene 1
+
+# Test data for `rx --validate`: a box standing on a light. "On top of" is
+# measured from built geometry, and a light has none, so there is no face to
+# stand on - which the load has to say, because the alternative is a box left at
+# the origin and an author hunting for why.
+#
+#   rx --validate test/data/anchor_no_bounds.rxscene --json
+
+entity
+Name.value = "Lamp"
+Transform.position = 0 3 0
+Light.intensity = 5
+Light.radius = 6
+
+entity
+Name.value = "Box on a lamp"
+Anchor.target = "Lamp"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5

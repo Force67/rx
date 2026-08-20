@@ -224,12 +224,27 @@ bool Viewer::LoadRxScene() {
     RX_ERROR("rxscene: {}", error);
     return false;
   }
+  // Layout before geometry, geometry before anchors. Grids only move entities
+  // the file declared, so they run before prefabs add any; anchors measure
+  // built meshes, so they run after everything that builds one.
+  if (!BuildSceneGrids(*world_, config_.scene_path, &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+  if (!BuildScenePrefabs(*world_, config_.scene_path, &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
   if (!BuildSceneShapes(*world_, db, config_.headless ? nullptr : renderer_, &error)) {
     RX_ERROR("rxscene: {}", error);
     return false;
   }
   if (!BuildSceneModels(*world_, db, config_.headless ? nullptr : renderer_, config_.scene_path,
                         &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+  if (!BuildSceneAnchors(*world_, config_.scene_path, &error)) {
     RX_ERROR("rxscene: {}", error);
     return false;
   }

@@ -1,0 +1,13 @@
+rxscene 1
+
+# One cell of runtime/scenes/material_sheet.rxscene: the sphere, and nothing
+# else. A cell in the sheet is this shape plus the one Surface it exists to
+# show, so the shape lives here and the material stays with the cell.
+#
+# A prefab is an ordinary scene, which is why this file renders and validates on
+# its own:
+#   rx --validate runtime/scenes/prefabs/sheet_cell.rxscene
+
+entity
+Shape.kind = "sphere"
+Shape.size = 0.55 0 0
