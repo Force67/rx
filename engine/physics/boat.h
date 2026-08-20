@@ -151,7 +151,11 @@ struct BoatState {
   f32 speed_mps = 0.0f;     // world-space horizontal speed magnitude
   f32 forward_speed = 0.0f; // signed speed along the hull forward axis, m/s
   f32 planing = 0.0f;       // 0..1, planing fraction
-  f32 wetted = 0.0f;        // 0..1, fraction of buoyancy samples submerged
+  // 0..1, fraction of the buoyancy grid's BOTTOM layer that is submerged, i.e.
+  // how much of the hull bottom the water is touching. 0 means the hull is
+  // clear of the water (airborne off a wave crest, or planing on the transom),
+  // NOT that it sank - a sunk hull reads 1.
+  f32 wetted = 0.0f;
   // Draft: the submerged hull depth in metres (waterline minus hull bottom),
   // measured honestly from the buoyancy grid's submerged fraction so it tracks
   // load and chop. freeboard_m is the hull depth left above the waterline (deck

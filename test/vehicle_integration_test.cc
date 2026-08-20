@@ -167,6 +167,11 @@ int main() {
   f32 car_max_speed = 0.0f;
   f32 car_redline = car_desc.max_rpm > 0 ? car_desc.max_rpm : 6000.0f;
   f32 boat_max_fwd = 0.0f;
+  // Peak hull wetting over the run. A single frame's `wetted` proves nothing
+  // about floating: this hull skips over the chop, so it reads 0 (bottom clear
+  // of the water) in ~9% of frames, the final frame included. Sinking is what
+  // position.y below the surface catches, and that is asserted separately.
+  f32 boat_max_wetted = 0.0f;
   f32 plane_max_alt = 0.0f;
   f32 plane_peak_climb = 0.0f;
 
@@ -210,6 +215,7 @@ int main() {
 
     const physics::BoatState& bst = boat.state();
     boat_max_fwd = std::max(boat_max_fwd, bst.forward_speed);
+    boat_max_wetted = std::max(boat_max_wetted, bst.wetted);
 
     const physics::AircraftState& ast = plane.state();
     plane_max_alt = std::max(plane_max_alt, ast.position.y - plane_ground_y);
@@ -265,12 +271,14 @@ int main() {
 
   // (b) The boat throttled forward and is still afloat.
   const physics::BoatState& bfin = boat.state();
-  std::fprintf(stderr, "(b) boat: max_fwd=%.1f m/s pos=(%.0f,%.2f,%.1f) wetted=%.2f up=%.2f\n",
+  std::fprintf(stderr,
+               "(b) boat: max_fwd=%.1f m/s pos=(%.0f,%.2f,%.1f) wetted=%.2f max_wetted=%.2f "
+               "up=%.2f\n",
                boat_max_fwd, bfin.position.x, bfin.position.y, bfin.position.z, bfin.wetted,
-               Uprightness(bfin.rotation));
+               boat_max_wetted, Uprightness(bfin.rotation));
   if (boat_max_fwd < 3.0f) return Fail("(b) boat did not accelerate forward");
   if (bfin.position.z < 10.0f) return Fail("(b) boat did not travel forward (+Z)");
-  if (bfin.wetted <= 0.0f) return Fail("(b) boat sank (no submerged samples)");
+  if (boat_max_wetted <= 0.0f) return Fail("(b) boat never touched the water");
   if (bfin.position.y < -1.0f) return Fail("(b) boat dropped below the surface");
 
   // (c) The aircraft climbed away from the runway.
@@ -312,7 +320,7 @@ int main() {
     if (std::fabs(cpos.y) > 5.0f) return Fail("(e) car position drifted off the surface");
 
     if (!IsFinite(bfin.position)) return Fail("(e) boat position NaN");
-    if (bfin.wetted <= 0.0f) return Fail("(e) boat no longer afloat");
+    if (boat_max_wetted <= 0.0f) return Fail("(e) boat never touched the water");
     if (Uprightness(bfin.rotation) < 0.5f) return Fail("(e) boat capsized");
 
     if (!IsFinite(afin.position)) return Fail("(e) aircraft position NaN");
