@@ -14,6 +14,7 @@
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "edit/scene_io.h"
+#include "scene/scene_handlers.h"
 
 // Radiance .hdr decode for imported dome environment maps.
 #include <stb_image.h>
@@ -147,7 +148,43 @@ bool Viewer::OnInitialize(app::Services& services) {
     demos_->CreateDemoScene();
   }
 
+  StartAuthoringEndpoint();
   return true;
+}
+
+// --authoring-endpoint only. Nothing is registered and no socket exists without
+// it, because these commands rewrite the live scene (authoring/command_bridge.h
+// carries the threat model).
+void Viewer::StartAuthoringEndpoint() {
+  if (config_.authoring_socket.empty()) return;
+
+  scene::SetupSceneCommands(commands_);
+  script_ctx_.world = world_;
+  script_ctx_.symbols = &symbols_;
+  script_ctx_.scratch = &script_scratch_;
+  script_ctx_.log_sink = [](void*, script::ScriptStringView message) {
+    RX_INFO("authoring: {}", message.view());
+  };
+  bridge_ = std::make_unique<authoring::CommandBridge>(commands_, script_ctx_);
+
+  std::string error;
+  if (!authoring_endpoint_.Start(config_.authoring_socket, &error)) {
+    RX_ERROR("authoring endpoint: {}", error);
+    bridge_.reset();
+    return;
+  }
+  RX_INFO("authoring endpoint listening on {} ({} command(s))", config_.authoring_socket,
+          commands_.size());
+}
+
+void Viewer::OnSimulate(f32 frame_delta) {
+  (void)frame_delta;
+  if (!bridge_) return;
+  authoring_endpoint_.Poll(*bridge_);
+  // Every reply the poll produced already copied the strings it needed out of
+  // the scratch heap, so the whole batch is reclaimed here rather than growing
+  // for the run (see HandlerContext::scratch).
+  script_scratch_.Reset();
 }
 
 void Viewer::CreatePhysicsCubeAsset() {
@@ -942,6 +979,11 @@ void Viewer::OnFrameEnd() {
 }
 
 void Viewer::OnShutdown() {
+  // Close the endpoint while the world it dispatches into is still standing, so
+  // the socket file goes away at the moment the engine stops serving it rather
+  // than whenever the viewer is destroyed.
+  authoring_endpoint_.Stop();
+  bridge_.reset();
   // Release demo GPU resources (scenehook raw pipelines) before the host tears
   // the renderer's device down.
   if (tattoo_receiver_ != 0 && renderer_) {

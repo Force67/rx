@@ -80,6 +80,10 @@ class HandlerRegistry {
                                         ScriptArgs& args) const;
 
   size_t size() const { return table_.size(); }
+  // Enumeration for the tools that document the command surface (the
+  // --dump-commands schema). Table order, i.e. sorted by name hash: stable for
+  // a build, but not alphabetical and not registration order.
+  const HandlerDesc& at(size_t i) const { return table_[i].desc; }
 
  private:
   struct Entry {

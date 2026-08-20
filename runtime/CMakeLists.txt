@@ -33,6 +33,9 @@ set(RX_RUNTIME_MODULES
   rx::scene
   # .rxscene text scenes: component reflection + the text loader.
   rx::edit
+  # --authoring-endpoint / --dump-commands: the live script command surface.
+  rx::authoring
+  rx::script
   rx::audio
   rx::render
   rx::physics

@@ -168,6 +168,32 @@ build/linux/runtime/rx --scene runtime/scenes/cornell.rxscene \
 Under `swrun` add `--no-rt` or `--preset low`: lavapipe's acceleration-structure
 builds crash, independently of this path.
 
+### Driving a running engine
+
+`--authoring-endpoint <socket>` serves the engine's script commands
+(`engine/scene/scene_handlers.cc`) on a local unix socket while it runs, so a
+scene can be changed without a restart. `--dump-commands` prints the signatures,
+generated from the same registry the endpoint dispatches into. `rxcall` issues
+one call and prints the reply:
+
+```sh
+build/linux/runtime/rx --dump-commands
+build/linux/runtime/rx --scene runtime/scenes/cornell.rxscene --headless \
+    --authoring-endpoint /tmp/rx.sock &
+build/linux/rxcall /tmp/rx.sock World.Spawn crate 1 0.5 2 1   # -> 9
+build/linux/rxcall /tmp/rx.sock World.Teleport 9 -1.25 0.75 0.5
+build/linux/rxcall /tmp/rx.sock World.GetPosition 9           # -> -1.25 0.75 0.5
+```
+
+An entity id is one integer (index in the low 32 bits, generation in the high
+32) and a vec3 is three numbers, which is why a signature's parameter count and
+its `wire_args` differ.
+
+The endpoint is off unless the flag is passed, and reaching it is equivalent to
+owning the running scene: the socket is 0600, only a connection from this user's
+own uid is served, and the commands are not registered on the networked rpc path
+at all. `engine/authoring/command_bridge.h` has the threat model.
+
 ## Notes
 
 - The C++ namespace is `rx::`; env-var knobs are `RX_*` (`RX_PATHTRACE=1`,

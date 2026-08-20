@@ -272,6 +272,7 @@ if(NOT DEFINED RX_MODULES)
     anim
     audio
     rpc
+    authoring
     net
     nav
     character
@@ -379,6 +380,16 @@ if(RX_BUILD_TESTS AND "script" IN_LIST RX_MODULES)
   add_test(NAME script_test COMMAND script_test)
 endif()
 
+# rx::authoring unit tests: the rpc <-> script marshalling, the trust gate, and
+# the unix socket endpoint driven with a real client fd. No GPU or window, but
+# unix sockets, so it stays off Windows like the endpoint does.
+if(RX_BUILD_TESTS AND NOT WIN32 AND "authoring" IN_LIST RX_MODULES)
+  add_executable(command_bridge_test test/command_bridge_test.cc)
+  target_link_libraries(command_bridge_test PRIVATE rx::authoring rx::scene rx::script
+    rx::rpc rx::ecs rx::core)
+  add_test(NAME command_bridge_test COMMAND command_bridge_test)
+endif()
+
 # rx::nav unit tests: pure CPU logic over a synthetic terrain sampler (costed
 # A*, entry-cost commitment, funnel, event repathing, position scoring), so
 # plain `ctest` runs them everywhere.
@@ -412,6 +423,16 @@ if(RX_BUILD_TOOLS)
   add_executable(rxpack tools/rxpack.cc)
   target_link_libraries(rxpack PRIVATE rx::asset rx::core)
   rx_set_warnings(rxpack)
+endif()
+
+# rxcall issues one command to a running engine's --authoring-endpoint socket.
+# It links rx::rpc rather than reimplementing the frame, so the client and the
+# engine can never disagree about the encoding. Unix sockets only, like the
+# endpoint itself.
+if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
+  add_executable(rxcall tools/rxcall.cc)
+  target_link_libraries(rxcall PRIVATE rx::rpc rx::core)
+  rx_set_warnings(rxcall)
 endif()
 
 # The engine's own archives, packed from engine/assets with the tool above and

@@ -15,6 +15,12 @@
 #include "asset/gltf_loader.h"
 #include "asset/usd_loader.h"
 #include "asset/mesh.h"
+#include "authoring/command_bridge.h"
+#include "authoring/command_endpoint.h"
+#include "script/handler_context.h"
+#include "script/handler_registry.h"
+#include "script/script_arena.h"
+#include "script/script_symbols.h"
 
 #include "debug_ui.h"
 #include "engine_context.h"
@@ -36,6 +42,7 @@ class Viewer : public app::Application {
   ~Viewer() override;
 
   bool OnInitialize(app::Services& services) override;
+  void OnSimulate(f32 frame_delta) override;
   void OnUpdate(f32 frame_delta) override;
   void OnBuildView(f32 frame_delta, render::FrameView& view) override;
   void OnFrameEnd() override;
@@ -54,6 +61,11 @@ class Viewer : public app::Application {
   // handles with no generation counter, so a leaked one would be handed to the
   // next acquirer complete with this scene's baked decals.
   u32 tattoo_receiver_ = 0;
+  // --authoring-endpoint: install the script commands and bind the local socket
+  // an out-of-process agent drives the running scene through. A failure to bind
+  // is logged and the run continues without it, since the endpoint is a tool,
+  // not part of the scene.
+  void StartAuthoringEndpoint();
   // Registers the small wooden cube every scene can throw around (F key).
   void CreatePhysicsCubeAsset();
   void ThrowPhysicsCube();
@@ -151,6 +163,17 @@ class Viewer : public app::Application {
   f32 showcase_dt_max_ = 0;
   f32 showcase_bench_time_ = 0;  // summed dt of benchmarked frames (excludes load hitches)
   u32 showcase_frames_ = 0;
+
+  // The live authoring endpoint, all of it inert unless --authoring-endpoint
+  // named a socket. The symbol interner and the scratch heap are the script
+  // substrate's own storage; the bridge exists only while the endpoint does, so
+  // `bridge_` doubles as "the endpoint is up".
+  script::HandlerRegistry commands_;
+  script::ScriptSymbols symbols_;
+  script::ScriptArena script_scratch_;
+  script::HandlerContext script_ctx_;
+  std::unique_ptr<authoring::CommandBridge> bridge_;
+  authoring::CommandEndpoint authoring_endpoint_;
 
   // Shared service bundle handed to the demo scenes and the debug overlay.
   EngineContext ctx_;

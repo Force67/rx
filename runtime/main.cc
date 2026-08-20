@@ -8,7 +8,10 @@
 #include "app/host.h"
 #include "core/log.h"
 #include "edit/reflect.h"
+#include "scene/scene_handlers.h"
 #include "scene_authoring.h"
+#include "script/handler_registry.h"
+#include "script/script_value.h"
 #include "viewer.h"
 
 namespace {
@@ -24,6 +27,8 @@ void PrintUsage() {
   RX_INFO("                        featuregym | cloth | locomotion | ship | nav | gym | shooter | puppet | drive |");
   RX_INFO("                        placement | grass | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
   RX_INFO("  --dump-schema         print the .rxscene component schema as json and exit");
+  RX_INFO("  --dump-commands       print the live command schema as json and exit");
+  RX_INFO("  --authoring-endpoint <path>  serve those commands on a local unix socket");
   RX_INFO("  --headless            no window (a --shot run still brings the gpu up, windowless)");
   RX_INFO("  --shot <path.png>     capture a frame, then quit; nonzero exit if it was not written");
   RX_INFO("  --shot-frames <n>     frames to render before the capture (default 30)");
@@ -86,6 +91,33 @@ void DumpSchema() {
   std::printf("  ]\n}\n");
 }
 
+// The live command surface (--authoring-endpoint), generated from the registry
+// the endpoint dispatches into, so a caller reads the same signatures the bridge
+// enforces. `wire_args` is what the transport actually carries: a vec3 param
+// travels as three numbers, so it is not always the length of `params`.
+void DumpCommands() {
+  rx::script::HandlerRegistry commands;
+  rx::scene::SetupSceneCommands(commands);
+  std::printf("{\n  \"commands\": [\n");
+  for (size_t i = 0; i < commands.size(); ++i) {
+    const rx::script::HandlerDesc& desc = commands.at(i);
+    std::printf("    {\"name\": ");
+    PrintJsonString(std::string(desc.name.view()).c_str());
+    std::printf(", \"params\": [");
+    rx::u32 wire_args = 0;
+    for (rx::u32 p = 0; p < desc.sig.count; ++p) {
+      const rx::script::ScriptType type = desc.sig.params[p];
+      wire_args += type == rx::script::ScriptType::kVec3 ? 3 : 1;
+      std::printf("%s", p ? ", " : "");
+      PrintJsonString(rx::script::ScriptTypeName(type));
+    }
+    std::printf("], \"wire_args\": %u, \"returns\": ", wire_args);
+    PrintJsonString(rx::script::ScriptTypeName(desc.sig.ret));
+    std::printf("}%s\n", i + 1 < commands.size() ? "," : "");
+  }
+  std::printf("  ]\n}\n");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -93,6 +125,7 @@ int main(int argc, char** argv) {
   rx::app::AppConfig app_config;
   bool no_window = false;
   bool dump_schema = false;
+  bool dump_commands = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -103,6 +136,8 @@ int main(int argc, char** argv) {
     else if (arg == "--usd-show") config.usd_visibility.show.push_back(next());
     else if (arg == "--usd-hide") config.usd_visibility.hide.push_back(next());
     else if (arg == "--dump-schema") dump_schema = true;
+    else if (arg == "--dump-commands") dump_commands = true;
+    else if (arg == "--authoring-endpoint") config.authoring_socket = next();
     else if (arg == "--headless") no_window = true;
     else if (arg == "--shot") config.shot_path = next();
     else if (arg == "--shot-frames") config.shot_frames = std::atoi(next().c_str());
@@ -119,9 +154,13 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Pure query: no window, no device, nothing to tear down.
+  // Pure queries: no window, no device, nothing to tear down.
   if (dump_schema) {
     DumpSchema();
+    return 0;
+  }
+  if (dump_commands) {
+    DumpCommands();
     return 0;
   }
 

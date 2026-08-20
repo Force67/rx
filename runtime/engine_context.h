@@ -48,6 +48,11 @@ struct EngineConfig {
   // drive; 0 frames falls back to RX_UI_SHOT_FRAMES.
   std::string shot_path;
   int shot_frames = 0;
+  // --authoring-endpoint: serve the script commands on this unix socket path
+  // while the engine runs, so a tool can spawn/move/inspect without a restart.
+  // Empty (the default) means no endpoint is bound at all; see
+  // authoring/command_bridge.h for why that is not merely a convenience.
+  std::string authoring_socket;
 };
 
 // A dynamic physics body the host mirrors into an ECS transform after each
