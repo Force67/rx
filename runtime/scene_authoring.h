@@ -105,6 +105,31 @@ struct ScenePattern {
   f32 roughness_b = 1.0f;
 };
 
+// Geometry from a real art asset instead of a primitive: the meshes a
+// .gltf/.glb file ships, with the materials and textures it ships with. This is
+// the only component that names content the scene did not itself describe.
+//
+// `path` is the file, optionally narrowed to one of its meshes by the same
+// "#mesh<index>" fragment ImportedScene already addresses its assets by:
+//
+//   Model.path = "test/data/AnimatedMorphCube.glb"        the whole file
+//   Model.path = "test/data/AnimatedMorphCube.glb#mesh0"  one mesh of it
+//
+// The whole file places every instance its nodes describe, as children of this
+// entity, so the file keeps its internal layout and the authored Transform
+// moves the lot. A "#mesh<index>" reference is placed at the entity's Transform
+// instead, ignoring wherever the file's nodes put it: naming one mesh out of a
+// library file means "put THIS one here". Relative paths resolve against the
+// working directory, like Surface.materialx.
+//
+// BuildSceneModels writes the Renderables, so a Model entity authors none. Not
+// covered: skinning and animation (a skinned mesh draws in its bind pose at the
+// origin, since glTF has the node ignore its own transform), and the file's own
+// lights and cameras, which lose to the scene's.
+struct SceneModel {
+  std::string path;
+};
+
 // A punctual light at the entity's Transform position. `radius` is the
 // influence cutoff in meters, past which the light contributes nothing.
 struct SceneLight {
@@ -143,6 +168,23 @@ u32 ShapeRequiredSizeAxes(std::string_view kind);
 // asked for something else.
 bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
                       std::string* error);
+
+// Why a Model.path names no geometry that can be placed, or empty when it does:
+// the clause a caller puts behind a `path:line:`. Imports the file to answer,
+// because nothing short of that can tell a real file from a plausible name, or
+// know how many meshes are in it. BuildSceneModels and --validate both go
+// through here, so neither can accept a reference the other would reject.
+std::string SceneModelProblem(const std::string& path);
+
+// Imports every Model entity's file (once per file, however many entities name
+// it), publishes its meshes, materials and textures into `db` and onto the gpu
+// (`renderer` null skips the gpu side), and points the entity - or one child
+// entity per instance the file places - at the result. `scene_path` is read
+// only to turn a failure into the `path:line:` of the assignment that caused
+// it. False + *error on a reference that resolves to nothing, which would
+// otherwise leave a hole exactly where the author asked for a model.
+bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
+                      const std::string& scene_path, std::string* error);
 
 }  // namespace rx
 

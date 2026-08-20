@@ -148,10 +148,15 @@ build/linux/runtime/rx --gltf assets/sponza/Sponza.gltf
 
 ### Text scenes and headless capture
 
-A `.rxscene` is a text scene that composes shapes, surfaces, lights and a camera
-without any binary asset:
+A `.rxscene` is a text scene that composes shapes, surfaces, lights, a camera and
+real art assets:
 
 - `Shape.kind` is `box | sphere | plane | cylinder | cone | torus | capsule`.
+- `Model.path` names a `.gltf`/`.glb` file, which renders with the materials and
+  textures it ships with. The whole file is placed as one child entity per
+  instance its nodes describe, so the authored `Transform` moves the lot;
+  `"file.glb#mesh2"` places just that one mesh at the entity's own `Transform`.
+  Skinning, animation and the file's own lights and cameras are not applied.
 - `Surface` carries the pbr lobes the mesh shaders actually shade (clearcoat,
   anisotropy, ior, sheen, subsurface, iridescence, transmission, specular
   colour/strength, `env_reflect` and the soft/rim/back light fills), or names a
@@ -164,13 +169,14 @@ without any binary asset:
 `runtime/scenes/showcase.rxscene` exercises all of it in one frame;
 `runtime/scenes/material_sheet.rxscene` is a 24-cell material contact sheet, so a
 pass over a batch of materials costs one render instead of 24;
+`runtime/scenes/model.rxscene` places glTF files next to a procedural shape;
 `runtime/scenes/cornell.rxscene` is the minimal example.
 
 `--dump-schema` prints every component and prop such a file may use, generated
 from the reflection registry, so it never goes stale. Loading a `.rxscene` is
-strict: an unknown component, prop, shape kind, pattern kind or `.mtlx` path
-fails the load with a message naming it, rather than silently substituting a
-default. So does a number the loader cannot read whole (`1 abc 3`, `0.6f`) or
+strict: an unknown component, prop, shape kind, pattern kind, `.mtlx` path or
+model reference fails the load with a message naming it, rather than silently
+substituting a default. So does a number the loader cannot read whole (`1 abc 3`, `0.6f`) or
 cannot hold (`nan`, `inf`, `1e40`), and a `Transform.rotation` that is not a
 unit quaternion, `0 0 0` included: the rotation matrix is built without a
 normalize, so a short or non-unit quaternion scales the mesh, and the zero one

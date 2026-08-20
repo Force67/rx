@@ -327,6 +327,20 @@ void CheckPattern(ecs::World& world, ecs::Entity entity, Report& report) {
   }
 }
 
+void CheckModel(ecs::World& world, ecs::Entity entity, Report& report) {
+  const SceneModel* model = world.Get<SceneModel>(entity);
+  if (!model) return;
+  // Exactly the resolution BuildSceneModels performs, so a reference that
+  // validates here is one that places geometry there. It imports the file,
+  // which makes this (with Surface.materialx) one of the two checks whose
+  // answer depends on where the tool is run from.
+  const std::string problem = SceneModelProblem(model->path);
+  if (!problem.empty()) {
+    report.Error(entity, "unresolved_mesh",
+                 std::format("Model.path '{}' {}", model->path, problem));
+  }
+}
+
 void CheckLight(ecs::World& world, ecs::Entity entity, Report& report) {
   const SceneLight* light = world.Get<SceneLight>(entity);
   if (!light) return;
@@ -377,10 +391,11 @@ void CheckRenderable(ecs::World& world, asset::AssetDatabase& db, ecs::Entity en
                      Report& report) {
   const scene::Renderable* renderable = world.Get<scene::Renderable>(entity);
   if (!renderable) return;
-  // BuildSceneShapes writes both the Renderable and a default Transform for a
-  // Shape entity, so it is only a hand-written Renderable that can be missing
-  // either. That is the general case this check is here for.
-  if (world.Has<SceneShape>(entity)) return;
+  // BuildSceneShapes and BuildSceneModels write both the Renderable and a
+  // default Transform for a Shape/Model entity, so it is only a hand-written
+  // Renderable that can be missing either. That is the general case this check
+  // is here for.
+  if (world.Has<SceneShape>(entity) || world.Has<SceneModel>(entity)) return;
 
   if (!world.Has<scene::Transform>(entity)) {
     report.Error(entity, "renderable_without_transform",
@@ -393,13 +408,15 @@ void CheckRenderable(ecs::World& world, asset::AssetDatabase& db, ecs::Entity en
   }
   if (db.FindMesh(renderable->mesh)) return;
   // LoadScene resolves a Renderable path through AssetDatabase::LoadMesh, which
-  // needs a mesh converter for the extension. The engine registers none today,
-  // so no path a .rxscene can name resolves: a Renderable in a text scene has
-  // to come from a Shape.
+  // needs a mesh converter for the extension, and the engine registers none. A
+  // text scene reaches real geometry through Model instead, which imports the
+  // file itself and hands the meshes to the database; a hand-written
+  // Renderable path still resolves to nothing.
   const std::optional<std::string> path = asset::LookupAssetPath(renderable->mesh);
   report.Error(entity, "unresolved_mesh",
                std::format("Renderable.mesh '{}' resolves to no uploaded mesh; a .rxscene has "
-                           "no mesh converters, so author a Shape instead",
+                           "no mesh converters, so name the file from a Model (or author a "
+                           "Shape) instead",
                            path ? *path : std::format("hash:0x{:016x}", renderable->mesh.hash)));
 }
 
@@ -525,12 +542,16 @@ bool ValidateSceneFile(const std::string& path, bool json) {
     CheckShape(world, entity, report);
     CheckSurface(world, entity, report);
     CheckPattern(world, entity, report);
+    CheckModel(world, entity, report);
     CheckLight(world, entity, report);
     CheckCamera(world, entity, report);
     CheckRenderable(world, db, entity, report);
     CheckParent(world, entity, report);
     cameras += world.Has<SceneCamera>(entity) ? 1 : 0;
-    drawables += world.Has<SceneShape>(entity) || world.Has<scene::Renderable>(entity) ? 1 : 0;
+    drawables += world.Has<SceneShape>(entity) || world.Has<SceneModel>(entity) ||
+                         world.Has<scene::Renderable>(entity)
+                     ? 1
+                     : 0;
   }
   CheckDuplicateGuids(world, entities, report);
   CheckNumberLiterals(world, source, report);
@@ -538,7 +559,7 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // Suppressed when nothing loaded at all (a bad header, an unreadable file):
   // there the load error is the finding and "no geometry" on top of it is noise.
   if (drawables == 0 && (strict_loaded || !entities.empty())) {
-    report.FileWarn("no_geometry", "no Shape and no Renderable in the scene; the render is "
+    report.FileWarn("no_geometry", "no Shape, Model or Renderable in the scene; the render is "
                                    "the empty sky");
   }
   if (cameras > 1) {

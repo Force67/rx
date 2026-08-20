@@ -123,13 +123,27 @@ rx_enable_mimalloc(rx)
 # half matters more than the broken one - a check that fires on a scene we ship
 # is worse than no check, because the next agent learns to ignore the report.
 if(RX_BUILD_TESTS)
-  foreach(scene cornell showcase material_sheet)
+  # From the source root, because a scene names its assets (Model.path,
+  # Surface.materialx) relative to the working directory.
+  foreach(scene cornell showcase material_sheet model)
     add_test(NAME scene_validate_${scene}
-      COMMAND rx --validate ${CMAKE_CURRENT_SOURCE_DIR}/scenes/${scene}.rxscene)
+      COMMAND rx --validate ${CMAKE_CURRENT_SOURCE_DIR}/scenes/${scene}.rxscene
+      WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   endforeach()
   add_test(NAME scene_validate_broken
-    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json)
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
   set_tests_properties(scene_validate_broken PROPERTIES WILL_FAIL TRUE)
+  # The two halves of the glTF reference check, which a pass/fail exit code
+  # alone cannot tell apart: scene_validate_model above proves references that
+  # resolve stay quiet, and this proves the one naming a mesh a real file does
+  # not have is the thing that fires. PASS_REGULAR_EXPRESSION ignores the exit
+  # code, which is nonzero here for every other finding in that fixture.
+  add_test(NAME scene_validate_model_reference
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(scene_validate_model_reference PROPERTIES
+    PASS_REGULAR_EXPRESSION "unresolved_mesh.*TwoBoxes.gltf#mesh9.*a file that has 2")
 endif()
 
 file(GLOB RX_FEATURE_GYM_ASSETS CONFIGURE_DEPENDS

@@ -226,6 +226,11 @@ bool Viewer::LoadRxScene() {
     RX_ERROR("rxscene: {}", error);
     return false;
   }
+  if (!BuildSceneModels(*world_, db, config_.headless ? nullptr : renderer_, config_.scene_path,
+                        &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
 
   // Authored lights are static, so they are collected once here into the same
   // list an imported glTF/USD rig fills; OnBuildView hands it to the frame.
@@ -245,6 +250,8 @@ bool Viewer::LoadRxScene() {
 
   u32 shapes = 0;
   world_->Each<SceneShape>([&](ecs::Entity, SceneShape&) { ++shapes; });
+  u32 models = 0;
+  world_->Each<SceneModel>([&](ecs::Entity, SceneModel&) { ++models; });
   bool has_camera = false;
   world_->Each<SceneCamera, scene::Transform>(
       [&](ecs::Entity, SceneCamera& camera, scene::Transform& transform) {
@@ -261,8 +268,9 @@ bool Viewer::LoadRxScene() {
   }
   camera_.speed = 4.0f;
 
-  RX_INFO("rxscene: loaded {} ({} shape(s), {} light(s), camera {})", config_.scene_path,
-          shapes, scene_lights_.size(), has_camera ? "authored" : "default");
+  RX_INFO("rxscene: loaded {} ({} shape(s), {} model(s), {} light(s), camera {})",
+          config_.scene_path, shapes, models, scene_lights_.size(),
+          has_camera ? "authored" : "default");
   return true;
 }
 

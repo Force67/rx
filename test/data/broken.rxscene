@@ -94,10 +94,24 @@ Shape.size = 0.5 0.5 0.5
 
 # renderable_without_transform and unresolved_mesh: the bug that cost an agent
 # four renders. No mesh converter is registered for any extension, so a
-# .rxscene Renderable path never resolves either.
+# .rxscene Renderable path never resolves; Model is the way to a real file.
 entity
 Name.value = "Hand-written renderable"
 Renderable.mesh = "meshes/crate.glb"
+
+# unresolved_mesh from the Model side: a file that is not there, and a mesh
+# index a file that IS there does not have. The second one is why the check
+# imports rather than stopping at the file existing. Paths are relative to the
+# working directory, so this file is validated from the repo root.
+entity
+Name.value = "Model that is not on disk"
+Transform.position = 6 1 1
+Model.path = "test/data/NotHere.glb"
+
+entity
+Name.value = "Model with no such mesh"
+Transform.position = 7 1 1
+Model.path = "test/data/TwoBoxes.gltf#mesh9"
 
 # surface_without_shape and pattern_without_shape (warnings): nothing consumes
 # either without a Shape on the same entity.
