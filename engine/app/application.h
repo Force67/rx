@@ -17,6 +17,14 @@ struct AppConfig {
   // deck, android, low/medium/high/ultra, console).
   render::QualityPreset preset = render::QualityPreset::kAuto;
   bool headless = false;
+  // Headless with a renderer: no window, but a windowless device rendering into
+  // an offscreen image, so a run with no display can still capture a png
+  // (Renderer::InitializeOffscreen). Ignored unless `headless` is set.
+  bool offscreen = false;
+  // Offscreen/window size in pixels. 0 defers to RX_WIN_W / RX_WIN_H, then to
+  // the WindowDesc default.
+  u32 width = 0;
+  u32 height = 0;
   // When true (the default) the host gathers every visible
   // scene::Transform+scene::Renderable entity into the FrameView before
   // OnBuildView. A game that stores its renderables in its own component types,

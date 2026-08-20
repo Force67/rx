@@ -7,6 +7,7 @@ set(RX_RUNTIME_SOURCES
   camera_input.cc
   viewer_input.cc
   demo_scenes.cc
+  scene_authoring.cc
   demo_grass.cc
   demo_nav.cc
   demo_placement.cc
@@ -30,6 +31,8 @@ set(RX_RUNTIME_MODULES
   rx::ecs
   rx::asset
   rx::scene
+  # .rxscene text scenes: component reflection + the text loader.
+  rx::edit
   rx::audio
   rx::render
   rx::physics

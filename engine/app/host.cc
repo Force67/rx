@@ -57,13 +57,21 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   // mounts later overrides it.
   asset::MountEngineArchives(vfs_);
 
+  // --width/--height first, then RX_WIN_W/RX_WIN_H, then the WindowDesc
+  // default; the same size answers for a window and for an offscreen target.
+  WindowDesc desc;
+  if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
+  if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
+  if (config_.width > 0) desc.width = config_.width;
+  if (config_.height > 0) desc.height = config_.height;
   if (!config_.headless) {
-    WindowDesc desc;
-    if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
-    if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
     desc.touch_emits_mouse = TouchMouse;
     window_ = window ? std::move(window) : Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
+    ApplyRenderPreset();
+  } else if (config_.offscreen) {
+    if (!renderer_.InitializeOffscreen(config_.renderer, desc.width, desc.height))
+      return false;
     ApplyRenderPreset();
   }
 
@@ -260,7 +268,7 @@ bool Host::RunFrame() {
   // dedicated server advances the same authoritative logic a client does.
   app_->OnSimulate(frame_delta);
 
-  if (!config_.headless) {
+  if (rendering()) {
     app_->OnUpdate(frame_delta);
 
     // Mirror enrolled strand grooms into their renderer hair grooms: read the
@@ -385,7 +393,7 @@ void Host::Shutdown() {
   // Stop the audio device thread early, before the systems whose sounds it
   // might still be streaming go away.
   if (audio_) audio_->Shutdown();
-  if (!config_.headless) renderer_.WaitIdle();
+  if (rendering()) renderer_.WaitIdle();
   // Destroy app-provided frame callbacks while the renderer and application
   // resources they may own are still alive.
   renderer_.ClearFrameCallbacks();
@@ -393,7 +401,7 @@ void Host::Shutdown() {
   // The renderer is idle but alive: the application drops its GPU-dependent
   // resources (UI backends etc.) before the device goes away.
   if (app_) app_->OnShutdown();
-  if (!config_.headless) renderer_.Shutdown();
+  if (rendering()) renderer_.Shutdown();
   if (jobs_) jobs_->WaitIdle();
 }
 

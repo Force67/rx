@@ -36,7 +36,18 @@ struct EngineConfig {
   // Hardware quality tier. kAuto picks one from the gpu at startup; the rest
   // force a tier (steam deck, android, low/medium/high/ultra, console).
   render::QualityPreset preset = render::QualityPreset::kAuto;
+  // No renderer at all: content skips its GPU uploads and the host runs the
+  // simulation side only. Not the same as "no window" - see `offscreen`.
   bool headless = false;
+  // No window, but a windowless renderer drawing into an offscreen image so a
+  // display-less run can still capture a png. Content uploads exactly as it
+  // does windowed, so `headless` is false whenever this is set.
+  bool offscreen = false;
+  // --shot: write the frame after `shot_frames` as a png and quit. Empty falls
+  // back to the RX_UI_SHOT env var (viewer.cc), which existing capture scripts
+  // drive; 0 frames falls back to RX_UI_SHOT_FRAMES.
+  std::string shot_path;
+  int shot_frames = 0;
 };
 
 // A dynamic physics body the host mirrors into an ECS transform after each

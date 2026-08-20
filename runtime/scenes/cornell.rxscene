@@ -1,0 +1,81 @@
+rxscene 1
+
+# The Cornell box, authored as text instead of built in C++ (the --demo cornell
+# equivalent, plus a lamp and a sphere the demo does not have). White room, red
+# left wall, green right wall, open at the top and the front so the sun reaches
+# inside; with gi on the coloured walls bleed onto the white floor and boxes.
+#
+# `rx --dump-schema` prints every component and prop this file may use.
+
+entity
+Name.value = "Camera"
+Transform.position = 0 1.5 4.7
+Camera.target = 0 0.9 0
+Camera.fov_degrees = 55
+
+entity
+Name.value = "Floor"
+Transform.position = 0 -0.1 0
+Shape.kind = "box"
+Shape.size = 2 0.1 2
+Surface.base_color = 0.8 0.8 0.8
+Surface.roughness = 0.95
+
+entity
+Name.value = "Back wall"
+Transform.position = 0 1.5 -2
+Shape.kind = "box"
+Shape.size = 2 1.6 0.1
+Surface.base_color = 0.8 0.8 0.8
+Surface.roughness = 0.95
+
+entity
+Name.value = "Left wall"
+Transform.position = -2 1.5 0
+Shape.kind = "box"
+Shape.size = 0.1 1.6 2
+Surface.base_color = 0.8 0.05 0.05
+Surface.roughness = 0.95
+
+entity
+Name.value = "Right wall"
+Transform.position = 2 1.5 0
+Shape.kind = "box"
+Shape.size = 0.1 1.6 2
+Surface.base_color = 0.05 0.8 0.05
+Surface.roughness = 0.95
+
+entity
+Name.value = "Tall box"
+Transform.position = -0.7 0.9 -0.6
+Shape.kind = "box"
+Shape.size = 0.45 0.9 0.45
+Surface.base_color = 0.8 0.8 0.8
+Surface.roughness = 0.95
+
+entity
+Name.value = "Short box"
+Transform.position = 0.7 0.45 0.4
+Shape.kind = "box"
+Shape.size = 0.45 0.45 0.45
+Surface.base_color = 0.8 0.8 0.8
+Surface.roughness = 0.95
+
+# A polished metal ball on the short box, so the room has something specular to
+# reflect the coloured walls in.
+entity
+Name.value = "Metal ball"
+Transform.position = 0.7 1.25 0.4
+Shape.kind = "sphere"
+Shape.size = 0.35 0 0
+Surface.base_color = 0.95 0.93 0.88
+Surface.roughness = 0.18
+Surface.metallic = 1
+
+# A warm practical near the open ceiling, on top of the sun coming through it.
+entity
+Name.value = "Lamp"
+Transform.position = 0 2.6 0.2
+Light.color = 1 0.82 0.6
+Light.intensity = 12
+Light.radius = 7

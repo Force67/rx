@@ -9,15 +9,18 @@
 #include <base/option.h>
 
 #include "anim/morph.h"
+#include "asset/asset_database.h"
 #include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "core/log.h"
+#include "edit/scene_io.h"
 
 // Radiance .hdr decode for imported dome environment maps.
 #include <stb_image.h>
 #include "scene/components.h"
 
 #include "demo_scenes.h"
+#include "scene_authoring.h"
 
 // Viewer lifecycle and per-frame policy: the front-door content dispatch
 // (glTF scene or builtin demo), the day/night sun, the debug overlay and the
@@ -112,7 +115,9 @@ bool Viewer::OnInitialize(app::Services& services) {
   // When SunDir is set the world clock stops driving the day/night cycle.
   drive_sun_from_clock_ = SunDir.get() == nullptr;
 
-  if (!config_.headless) {
+  // The overlay is imgui on an SDL window; an offscreen capture run has a
+  // renderer but no window, so this keys off the window, not on headless.
+  if (window_) {
     if (!debug_ui_.Initialize(*window_, *renderer_, services.vfs)) {
       RX_WARN("debug ui unavailable");
     }
@@ -167,7 +172,65 @@ void Viewer::CreatePhysicsCubeAsset() {
   }
 }
 
+bool Viewer::LoadRxScene() {
+  // The runtime's own authoring components have to be registered before the
+  // loader can resolve them by name; strict mode then rejects anything else,
+  // so a misspelt component is a failed load rather than a missing object.
+  RegisterSceneComponents();
+  // Only used to resolve Renderable asset paths, which a shape-authored scene
+  // has none of; the loader takes one regardless.
+  asset::AssetDatabase db(*ctx_.vfs);
+  std::string error;
+  if (!edit::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+  if (!BuildSceneShapes(*world_, config_.headless ? nullptr : renderer_, &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+
+  // Authored lights are static, so they are collected once here into the same
+  // list an imported glTF/USD rig fills; OnBuildView hands it to the frame.
+  world_->Each<SceneLight, scene::Transform>(
+      [&](ecs::Entity, SceneLight& light, scene::Transform& transform) {
+        render::PointLight out;
+        out.pos_radius[0] = transform.position[0];
+        out.pos_radius[1] = transform.position[1];
+        out.pos_radius[2] = transform.position[2];
+        out.pos_radius[3] = light.radius;
+        out.color_intensity[0] = light.color[0];
+        out.color_intensity[1] = light.color[1];
+        out.color_intensity[2] = light.color[2];
+        out.color_intensity[3] = light.intensity;
+        scene_lights_.push_back(out);
+      });
+
+  u32 shapes = 0;
+  world_->Each<SceneShape>([&](ecs::Entity, SceneShape&) { ++shapes; });
+  bool has_camera = false;
+  world_->Each<SceneCamera, scene::Transform>(
+      [&](ecs::Entity, SceneCamera& camera, scene::Transform& transform) {
+        if (has_camera) return;  // first one wins
+        has_camera = true;
+        LookCameraAt({transform.position[0], transform.position[1], transform.position[2]},
+                     {camera.target[0], camera.target[1], camera.target[2]});
+        scene_camera_fov_ = camera.fov_degrees * 3.14159265f / 180.0f;
+      });
+  if (!has_camera) {
+    // No authored viewpoint: back off along +Z looking at the origin, which at
+    // least puts a scene built around the origin on screen.
+    LookCameraAt({0.0f, 2.0f, 8.0f}, {0.0f, 1.0f, 0.0f});
+  }
+  camera_.speed = 4.0f;
+
+  RX_INFO("rxscene: loaded {} ({} shape(s), {} light(s), camera {})", config_.scene_path,
+          shapes, scene_lights_.size(), has_camera ? "authored" : "default");
+  return true;
+}
+
 bool Viewer::LoadSceneFile() {
+  if (config_.scene_path.ends_with(".rxscene")) return LoadRxScene();
   asset::ImportedScene scene;
   const bool loaded = asset::IsUsdPath(config_.scene_path)
                           ? asset::LoadUsdScene(config_.scene_path, &scene,
@@ -843,9 +906,13 @@ void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
 }
 
 void Viewer::OnFrameEnd() {
-  if (const char* shot = UiShot.get()) {
+  // --shot / --shot-frames win over RX_UI_SHOT / RX_UI_SHOT_FRAMES; the env
+  // vars stay live for the capture scripts that already drive them.
+  const char* shot = !config_.shot_path.empty() ? config_.shot_path.c_str() : UiShot.get();
+  if (shot) {
     static int ui_shot_frames = 0;
-    static const int ui_shot_target = [] {
+    static const int ui_shot_target = [this] {
+      if (config_.shot_frames > 0) return config_.shot_frames;
       return UiShotFrames.get() > 0 ? UiShotFrames.get() : 30;
     }();
     ++ui_shot_frames;
@@ -882,7 +949,7 @@ void Viewer::OnShutdown() {
     tattoo_receiver_ = 0;
   }
   if (demos_) demos_->Shutdown();
-  if (!config_.headless) debug_ui_.Shutdown();
+  if (window_) debug_ui_.Shutdown();
 }
 
 }  // namespace rx

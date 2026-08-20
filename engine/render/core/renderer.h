@@ -420,6 +420,13 @@ public:
   ~Renderer();
 
   bool Initialize(const RendererDesc &desc, Window &window);
+  // Windowless bringup for offscreen capture (--headless --shot, CI): a
+  // surfaceless device (Device::CreateOffscreen) with no presentation surface,
+  // so every frame renders into the capture image and completes through the
+  // swapchainless submit. Same passes and settings as the windowed path; only
+  // Acquire/Present are gone, and CaptureScreenshot is the only way to see the
+  // result. False when the device or the frame resources cannot be created.
+  bool InitializeOffscreen(const RendererDesc &desc, u32 width, u32 height);
   void RenderFrame(const FrameView &view);
   void Shutdown();
   void WaitIdle();
@@ -653,6 +660,9 @@ private:
   static constexpr u32 kMaxFrameMorphWeights = 4096;
   static constexpr u32 kMaxFrameLights = 256;
 
+  // Shared bringup for both entry points. `window` is null for the offscreen
+  // path, which also decides the device factory and the swapchain stand-in.
+  bool InitializeCommon(const RendererDesc &desc, Window *window, u32 width, u32 height);
   bool CreateFrameResources();
   void DestroyFrameResources();
   // Fills this slot's DrawRecord arena from view.draws (growing it first) and
@@ -691,6 +701,11 @@ private:
   RendererDesc desc_;
   RenderSettings settings_;
   Window *window_ = nullptr;
+  // Windowless run (InitializeOffscreen): there is nothing to present to, so
+  // every frame takes the capture path below, armed or not. The warm-up frames
+  // a non-black capture needs (sky/atmosphere bakes, temporal history, streamed
+  // uploads) have to run just the same.
+  bool offscreen_only_ = false;
   // The HDR request the current swapchain was built with; when WantHdrSwapchain
   // diverges (OS toggle flipped, setting changed) the frame loop rebuilds.
   bool swapchain_hdr_request_ = false;

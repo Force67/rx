@@ -43,6 +43,10 @@ class Viewer : public app::Application {
 
  private:
   bool LoadSceneFile();
+  // The .rxscene branch of LoadSceneFile: a strict text load, then the runtime
+  // authoring components (shapes, surfaces, lights, camera) materialized into
+  // engine assets and viewer state.
+  bool LoadRxScene();
   // RX_TATTOO capture hook: bakes decal layers onto the heaviest imported mesh.
   void StampTattoos(const asset::ImportedScene& scene,
                     std::span<const std::pair<u32, ecs::Entity>> instances);

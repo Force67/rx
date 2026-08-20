@@ -169,22 +169,38 @@ bool SaveScene(ecs::World& world, const std::string& file_path, std::string* err
 
 namespace {
 
+// `line` is the 1-based source line, carried only so strict mode can point at
+// the offending assignment.
 struct Assign {
   std::string comp;
   std::string prop;
   std::string raw;
+  int line = 0;
+};
+
+struct BareComp {
+  std::string name;
+  int line = 0;
 };
 
 struct ParsedEntity {
   u64 guid = 0;
   std::vector<Assign> assigns;
-  std::vector<std::string> bare_comps;
+  std::vector<BareComp> bare_comps;
 };
+
+// Resolves a prop by name within a component, or null.
+const PropDesc* FindProp(const ComponentDesc& comp, std::string_view name) {
+  for (u32 p = 0; p < comp.prop_count; ++p) {
+    if (name == comp.props[p].name) return &comp.props[p];
+  }
+  return nullptr;
+}
 
 }  // namespace
 
 bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const std::string& file_path,
-               std::string* error) {
+               std::string* error, bool strict) {
   std::ifstream in(file_path, std::ios::binary);
   if (!in) {
     if (error) *error = "cannot open '" + file_path + "' for reading";
@@ -214,7 +230,9 @@ bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const std::string& f
 
   std::vector<ParsedEntity> parsed;
   ParsedEntity* current = nullptr;
+  int line_no = 1;  // the header consumed line 1
   while (std::getline(in, line)) {
+    ++line_no;
     std::string t = Trim(line);
     if (t.empty() || t[0] == '#' || t[0] == ';') continue;
     if (t == "entity") {
@@ -226,16 +244,53 @@ bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const std::string& f
 
     size_t eq = t.find('=');
     if (eq == std::string::npos) {
-      current->bare_comps.push_back(t);  // tag component
+      current->bare_comps.push_back({t, line_no});  // tag component
       continue;
     }
     std::string key = Trim(t.substr(0, eq));
     std::string raw = Trim(t.substr(eq + 1));
     size_t dot = key.find('.');
-    if (dot == std::string::npos) continue;  // malformed key
-    Assign a{key.substr(0, dot), key.substr(dot + 1), raw};
+    if (dot == std::string::npos) {
+      if (strict) {
+        if (error)
+          *error = std::format("{}:{}: '{}' is not a Component.prop assignment", file_path,
+                               line_no, key);
+        return false;
+      }
+      continue;  // malformed key
+    }
+    Assign a{key.substr(0, dot), key.substr(dot + 1), raw, line_no};
     if (a.comp == "Guid" && a.prop == "value") current->guid = ParseHexOrDec(raw);
     current->assigns.push_back(std::move(a));
+  }
+
+  // Strict mode resolves every name BEFORE anything is created, so a typo
+  // leaves the world exactly as it was instead of half-populated.
+  if (strict) {
+    for (const ParsedEntity& pe : parsed) {
+      for (const BareComp& bare : pe.bare_comps) {
+        if (!FindComponentByName(bare.name)) {
+          if (error)
+            *error = std::format("{}:{}: unknown component '{}'", file_path, bare.line,
+                                 bare.name);
+          return false;
+        }
+      }
+      for (const Assign& a : pe.assigns) {
+        const ComponentDesc* comp = FindComponentByName(a.comp);
+        if (!comp) {
+          if (error)
+            *error = std::format("{}:{}: unknown component '{}'", file_path, a.line, a.comp);
+          return false;
+        }
+        if (!FindProp(*comp, a.prop)) {
+          if (error)
+            *error = std::format("{}:{}: component '{}' has no prop '{}'", file_path, a.line,
+                                 a.comp, a.prop);
+          return false;
+        }
+      }
+    }
   }
 
   // Pass 1: create entities and map guids.
@@ -253,10 +308,10 @@ bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const std::string& f
     ecs::Entity e = created[i];
     const ParsedEntity& pe = parsed[i];
 
-    for (const std::string& name : pe.bare_comps) {
-      const ComponentDesc* comp = FindComponentByName(name);
+    for (const BareComp& bare : pe.bare_comps) {
+      const ComponentDesc* comp = FindComponentByName(bare.name);
       if (!comp) {
-        RX_WARN("rxscene: unknown component '{}', skipped", name);
+        RX_WARN("rxscene: unknown component '{}', skipped", bare.name);
         continue;
       }
       AddComponentByDesc(world, e, *comp);
@@ -270,10 +325,7 @@ bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const std::string& f
       }
       if (!world.HasRaw(e, comp->id)) AddComponentByDesc(world, e, *comp);
 
-      const PropDesc* prop = nullptr;
-      for (u32 p = 0; p < comp->prop_count; ++p) {
-        if (a.prop == comp->props[p].name) { prop = &comp->props[p]; break; }
-      }
+      const PropDesc* prop = FindProp(*comp, a.prop);
       if (!prop) {
         RX_WARN("rxscene: unknown prop '{}.{}', skipped", a.comp, a.prop);
         continue;

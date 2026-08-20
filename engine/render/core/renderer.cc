@@ -383,12 +383,50 @@ struct ContactCamera {
   Mat4 inv_view_proj;
 };
 
+// Swapchain stand-in for a windowless renderer. It owns no presentable images
+// (there is no surface); it only answers the size, format and color space the
+// post pass and the frame graph are built against, so the rest of the renderer
+// needs no windowless special case. A windowless frame always renders into
+// capture_image_, so Acquire and image() are never reached. BGRA8 is what both
+// backends negotiate for a real surface, and the byte order WriteBackbufferPng
+// unswizzles on the way to a png.
+class OffscreenSwapchain final : public Swapchain {
+public:
+  OffscreenSwapchain(Format format, Extent2D extent)
+      : format_(format), extent_(extent) {}
+
+  AcquireResult Acquire(u32, u32 *) override { return AcquireResult::kFailed; }
+  Format format() const override { return format_; }
+  Extent2D extent() const override { return extent_; }
+  u32 image_count() const override { return 0; }
+  const GpuImage &image(u32) const override {
+    static const GpuImage kNone;
+    return kNone;
+  }
+  bool can_sample() const override { return true; }
+
+private:
+  Format format_;
+  Extent2D extent_;
+};
+
 } // namespace
 
 Renderer::Renderer() = default;
 Renderer::~Renderer() = default;
 
 bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
+  return InitializeCommon(desc, &window, window.width(), window.height());
+}
+
+bool Renderer::InitializeOffscreen(const RendererDesc &desc, u32 width,
+                                   u32 height) {
+  offscreen_only_ = true;
+  return InitializeCommon(desc, nullptr, width, height);
+}
+
+bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
+                                u32 width, u32 height) {
 #if defined(RX_SHARED_BUILD)
   // base::Option self-registers through base::InitChain, whose list head is a
   // vague-linkage function-local static. Under RX_SHARED every module is built
@@ -404,8 +442,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
   settings_.aa_mode = desc.aa_mode;
   settings_.upscaler = desc.upscaler;
   settings_.rt_shadows = desc.raytracing.shadows;
-  output_width_ = window.width();
-  output_height_ = window.height();
+  output_width_ = width;
+  output_height_ = height;
   // Applied before the swapchain exists (the rest of the option overrides run
   // later in Initialize; these two decide the surface format).
   if (HdrOutput.overridden())
@@ -430,12 +468,14 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
               BackendName(backend));
   }
 
-  window_ = &window;
-  device_ = Device::Create({.backend = backend,
-                            .enable_validation = desc.enable_validation,
-                            .request_raytracing = desc.enable_raytracing,
-                            .extra_device_extensions = desc.vulkan.extensions},
-                           window);
+  window_ = window;
+  const DeviceDesc device_desc{
+      .backend = backend,
+      .enable_validation = desc.enable_validation,
+      .request_raytracing = desc.enable_raytracing,
+      .extra_device_extensions = desc.vulkan.extensions};
+  device_ = window ? Device::Create(device_desc, *window)
+                   : Device::CreateOffscreen(device_desc);
   if (device_->is_stub()) {
     RX_WARN("renderer running in stub mode");
     return true;
@@ -467,8 +507,11 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
             "using sdr "
             "(enable hdr in the os display settings)");
   }
-  swapchain_ = device_->CreateSwapchain(
-      output_width_, output_height_, settings_.vsync, swapchain_hdr_request_);
+  swapchain_ =
+      window ? device_->CreateSwapchain(output_width_, output_height_,
+                                        settings_.vsync, swapchain_hdr_request_)
+             : std::make_unique<OffscreenSwapchain>(
+                   Format::kBGRA8Unorm, Extent2D{output_width_, output_height_});
   if (!swapchain_ || !CreateFrameResources())
     return false;
   output_width_ = swapchain_->extent().width;
@@ -2660,9 +2703,15 @@ void Renderer::RenderFrame(const FrameView &view) {
   // frame would burn the full timeout each time, and the run needs its
   // warm-up frames. Acquiring here would be wrong as well as pointless:
   // nothing presents the image back, so the swapchain would run dry.
-  if ((CaptureOffscreen.get() || swapchain_starved_) && CaptureArmed() &&
+  // A windowless renderer has no surface at all, so every one of its frames
+  // goes this way whether or not a capture is due: the warm-up frames still
+  // have to run, or the one capture that is due comes out black.
+  if ((offscreen_only_ || ((CaptureOffscreen.get() || swapchain_starved_) &&
+                           CaptureArmed())) &&
       EnsureCaptureImage())
     capture_offscreen_ = true;
+  if (offscreen_only_ && !capture_offscreen_)
+    return; // no capture image, nowhere to render
   AcquireResult acquired =
       capture_offscreen_ ? AcquireResult::kOk : swapchain_->Acquire(slot, &image_index);
   if (acquired == AcquireResult::kOutOfDate) {
@@ -7429,6 +7478,8 @@ bool Renderer::WantHdrSwapchain() const {
 }
 
 void Renderer::RecreateSwapchain() {
+  if (!window_)
+    return; // windowless: the offscreen stand-in never resizes
   u32 width = window_->width();
   u32 height = window_->height();
   if (width == 0 || height == 0)

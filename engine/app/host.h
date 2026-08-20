@@ -63,6 +63,10 @@ class RX_APP_EXPORT Host {
   // Fills view.draws from every visible Transform+Renderable entity, keeping
   // last frame's world matrices for motion vectors.
   void GatherEntityDraws(render::FrameView& view);
+  // Whether a renderer came up: a windowed run, or a headless one capturing
+  // offscreen. Everything that touches the GPU is gated on this, not on
+  // `headless` alone.
+  bool rendering() const { return !config_.headless || config_.offscreen; }
 
   AppConfig config_;
   Application* app_ = nullptr;

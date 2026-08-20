@@ -116,6 +116,17 @@ void SetRange(RegEntry* entry, f32 min, f32 max) {
   entry->props.back().max = max;
 }
 
+void SetHint(RegEntry* entry, const char* hint) {
+  if (!entry || !hint || entry->props.empty()) return;
+  Registry& reg = TheRegistry();
+  std::lock_guard<std::mutex> lock(reg.mutex);
+  if (entry->props.empty()) return;
+  // Parked in the same deque the prop names use, so the handed-out pointer
+  // survives a caller that passed a temporary.
+  entry->prop_names.emplace_back(hint);
+  entry->props.back().hint = entry->prop_names.back().c_str();
+}
+
 }  // namespace detail
 
 namespace {
@@ -137,6 +148,25 @@ void RegisterBuiltins() {
 }
 
 }  // namespace
+
+const char* PropTypeName(PropType type) {
+  switch (type) {
+    case PropType::kBool: return "bool";
+    case PropType::kI32: return "i32";
+    case PropType::kU32: return "u32";
+    case PropType::kU64: return "u64";
+    case PropType::kF32: return "f32";
+    case PropType::kVec2: return "vec2";
+    case PropType::kVec3: return "vec3";
+    case PropType::kVec4: return "vec4";
+    case PropType::kQuat: return "quat";
+    case PropType::kColor: return "color";
+    case PropType::kString: return "string";
+    case PropType::kAssetId: return "assetid";
+    case PropType::kEntity: return "entity";
+  }
+  return "?";
+}
 
 std::span<const ComponentDesc* const> AllComponents() {
   EnsureBuiltins();

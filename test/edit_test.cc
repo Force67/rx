@@ -261,6 +261,65 @@ void TestSceneRoundTrip() {
   fs::remove(path);
 }
 
+// Hand-authored scenes load strict: a misspelt name has to fail loudly and
+// point at the line, or a typo silently drops the object it was meant to place.
+void TestStrictLoad() {
+  namespace fs = std::filesystem;
+  fs::path path = fs::temp_directory_path() / "rx_edit_strict.rxscene";
+
+  auto write = [&](const char* body) {
+    std::FILE* f = std::fopen(path.string().c_str(), "wb");
+    CHECK(f != nullptr);
+    if (!f) return;
+    std::fputs(body, f);
+    std::fclose(f);
+  };
+  auto load = [&](bool strict, std::string* error) {
+    asset::Vfs vfs;
+    asset::AssetDatabase db(vfs);
+    ecs::World world;
+    bool ok = LoadScene(world, db, path.string(), error, strict);
+    // A rejected load must leave nothing behind.
+    size_t entities = 0;
+    world.Each<scene::Transform>([&](ecs::Entity, scene::Transform&) { ++entities; });
+    if (!ok) CHECK(entities == 0);
+    return ok;
+  };
+
+  write("rxscene 1\n\nentity\nTransform.position = 1 2 3\nNaem.value = \"oops\"\n");
+  std::string error;
+  CHECK(load(/*strict=*/false, &error));  // lenient: the editor keeps opening it
+  CHECK(!load(/*strict=*/true, &error));
+  CHECK(error.find("Naem") != std::string::npos);
+  CHECK(error.find(":5:") != std::string::npos);
+
+  write("rxscene 1\n\nentity\nTransform.postion = 1 2 3\n");
+  error.clear();
+  CHECK(!load(/*strict=*/true, &error));
+  CHECK(error.find("Transform") != std::string::npos);
+  CHECK(error.find("postion") != std::string::npos);
+  CHECK(error.find(":4:") != std::string::npos);
+
+  // A clean file still loads under strict.
+  write("rxscene 1\n\nentity\nTransform.position = 1 2 3\nName.value = \"ok\"\n");
+  error.clear();
+  CHECK(load(/*strict=*/true, &error));
+
+  fs::remove(path);
+}
+
+// The schema dump names every PropType, so an unmapped one would silently
+// document itself as "?".
+void TestPropTypeNames() {
+  const PropType kAll[] = {PropType::kBool,  PropType::kI32,    PropType::kU32,
+                           PropType::kU64,   PropType::kF32,    PropType::kVec2,
+                           PropType::kVec3,  PropType::kVec4,   PropType::kQuat,
+                           PropType::kColor, PropType::kString, PropType::kAssetId,
+                           PropType::kEntity};
+  for (PropType type : kAll) CHECK(std::string(PropTypeName(type)) != "?");
+  CHECK(!AllComponents().empty());
+}
+
 void TestUndo() {
   ecs::World world;
   UndoStack stack;
@@ -393,6 +452,8 @@ void TestSelection() {
 int main() {
   TestReflection();
   TestSceneRoundTrip();
+  TestStrictLoad();
+  TestPropTypeNames();
   TestUndo();
   TestHierarchy();
   TestSelection();

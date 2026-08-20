@@ -146,6 +146,28 @@ tools/get_sponza.sh
 build/linux/runtime/rx --gltf assets/sponza/Sponza.gltf
 ```
 
+### Text scenes and headless capture
+
+A `.rxscene` is a text scene (see `runtime/scenes/cornell.rxscene`) that composes
+procedural shapes, surfaces, lights and a camera without any binary asset.
+`--dump-schema` prints every component and prop such a file may use, generated
+from the reflection registry, so it never goes stale. Loading a `.rxscene` is
+strict: an unknown component or prop fails the load with a file:line rather than
+silently dropping the entity.
+
+`--shot` renders windowless (no compositor, no display needed) and exits nonzero
+if the png was not written, which is what makes the author-render-look loop
+scriptable:
+
+```sh
+build/linux/runtime/rx --dump-schema
+build/linux/runtime/rx --scene runtime/scenes/cornell.rxscene \
+    --headless --shot /tmp/shot.png --shot-frames 8 --width 640 --height 360
+```
+
+Under `swrun` add `--no-rt` or `--preset low`: lavapipe's acceleration-structure
+builds crash, independently of this path.
+
 ## Notes
 
 - The C++ namespace is `rx::`; env-var knobs are `RX_*` (`RX_PATHTRACE=1`,
