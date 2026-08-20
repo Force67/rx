@@ -6,6 +6,15 @@
 // inline path lost indirect reflection light without NRD). Parameterized helpers
 // only; bindings are declared below (env slots 36-40).
 #include "gi/rcgi_common.hlsli"
+// NRD.hlsli supplies the REBLUR radiance unpacking for the denoised reflection
+// target. NRD is an optional dependency, so when it isn't vendored (e.g. CI,
+// mobile) fall back to the identity the trace's own fallback pack pairs with;
+// the denoised path is inactive in that case but must still compile.
+#if __has_include("NRD.hlsli")
+#include "NRD.hlsli"
+#else
+float4 REBLUR_BackEnd_UnpackRadianceAndNormHitDist(float4 data) { return data; }
+#endif
 
 // The head of the mesh push range, which covers the fragment stage too. Only
 // these two words are read here, and both sit at the same offset in the
@@ -283,10 +292,20 @@ void ApplyDecalLayer(inout float3 albedo, inout float3 n, inout float rough_mult
   }
 }
 
-// NRD REBLUR-denoised stochastic reflections (radiance in rgb); replaces the
-// inline mirror trace when kFrameSpecReflTex is set.
+// NRD REBLUR-denoised stochastic reflections; replaces the inline mirror trace
+// when kFrameSpecReflTex is set. reflection_trace.cs wrote it through
+// REBLUR_FrontEnd_PackRadianceAndNormHitDist, so rgb is YCoCg: read it only
+// through SampleSpecRefl, which pairs the matching unpack. Taken raw, luminance
+// lands in red and the chroma (negative for anything neutral or blue) clamps
+// green and blue to zero, which is a dark maroon ball on every surface smooth
+// enough to take this path instead of the prefiltered cube.
 [[vk::combinedImageSampler]] [[vk::binding(12, 2)]] Texture2D spec_refl_map : register(t12, space2);
 [[vk::combinedImageSampler]] [[vk::binding(12, 2)]] SamplerState spec_refl_sampler : register(s12, space2);
+
+float3 SampleSpecRefl(float2 uv) {
+  return REBLUR_BackEnd_UnpackRadianceAndNormHitDist(
+             spec_refl_map.SampleLevel(spec_refl_sampler, uv, 0.0)).rgb;
+}
 
 struct MaterialParams {
   float4 base_color_factor;
@@ -1200,9 +1219,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       // Denoised stochastic reflections: the trace pass VNDF-sampled the GGX
       // lobe, so the texture already carries the roughness-matched blur - no
       // crossfade to the cube needed until the cutoff.
-      float3 traced =
-          spec_refl_map.SampleLevel(spec_refl_sampler,
-                                    input.sv_position.xy / frame.misc.xy, 0.0).rgb;
+      float3 traced = SampleSpecRefl(input.sv_position.xy / frame.misc.xy);
       float blend = smoothstep(0.75, 1.0, roughness / max(frame.reflection_cutoff, 1e-3));
       radiance = lerp(traced, radiance, blend);
     } else if ((frame.flags & kFrameReflections) != 0u && roughness < frame.reflection_cutoff) {
@@ -1241,10 +1258,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     // reflects the room it is standing in), and the room ambient otherwise.
     spec_radiance = indoor;
     if ((frame.flags & kFrameSpecReflTex) != 0u && roughness < frame.reflection_cutoff) {
-      spec_radiance = spec_refl_map
-                          .SampleLevel(spec_refl_sampler,
-                                       input.sv_position.xy / frame.misc.xy, 0.0)
-                          .rgb;
+      spec_radiance = SampleSpecRefl(input.sv_position.xy / frame.misc.xy);
     }
     g_skin_diffuse += ambient * ao;
   } else {
@@ -1293,8 +1307,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     case 8: return emissive;
     case 9:  // raw reflection: the denoised target when present, else traced
       if ((frame.flags & kFrameSpecReflTex) != 0u) {
-        return spec_refl_map.SampleLevel(spec_refl_sampler,
-                                         input.sv_position.xy / frame.misc.xy, 0.0).rgb;
+        return SampleSpecRefl(input.sv_position.xy / frame.misc.xy);
       }
       return TraceReflection(input.world_pos + n * 0.02, reflect(-v, n));
     case 14: {  // ray-count heatmap: shadow + ao + reflection rays this pixel casts
