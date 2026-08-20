@@ -185,6 +185,35 @@ build/linux/runtime/rx --scene runtime/scenes/showcase.rxscene \
 Under `swrun` add `--no-rt` or `--preset low`: lavapipe's acceleration-structure
 builds crash, independently of this path.
 
+### Checking a scene and a render without looking at them
+
+`--validate` loads a `.rxscene` and reports what is structurally wrong with it,
+with no device and no window (0.01 s per scene, so it fits on every edit and in
+CI). Strict load already rejects misspelt names; this is about values, and about
+the combinations the engine's own walks quietly skip. A `Renderable` with no
+`Transform` (the frame walk is `Each<Transform, Renderable>`, so it uploads and
+then never draws), a `Light` or `Camera` the viewer drops the same way, a
+non-finite float anywhere in the reflection registry, a degenerate scale,
+rotation, `Shape.size` axis or fov, a light that cannot contribute, duplicate
+guids, a dangling or circular `Parent`, and a number literal the value parser
+silently truncated. Nonzero exit on any error-level finding; `--json` for a
+machine-readable report.
+
+`rxdiff` compares two captures. The renderer is not deterministic frame to
+frame (TAA jitter, temporal accumulation), so two runs of the same build on the
+same scene write different bytes and comparing hashes means nothing. It reports
+an rmse and the fraction of pixels whose worst channel moved past
+`--hot-delta`, with a bounding box and an optional amplified diff image, and
+fails past a tolerance measured against that noise rather than guessed: across
+73 pairs of same-build captures over four scene and renderer configurations the
+worst rmse was 0.00375, and the defaults sit at twice that. `tools/rxdiff.cc`
+carries the measurement and what it costs in sensitivity.
+
+```sh
+build/linux/runtime/rx --validate runtime/scenes/showcase.rxscene --json
+build/linux/rxdiff baseline.png /tmp/shot.png --diff /tmp/diff.png
+```
+
 ### Driving a running engine
 
 `--authoring-endpoint <socket>` serves the engine's script commands

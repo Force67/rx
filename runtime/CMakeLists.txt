@@ -8,6 +8,7 @@ set(RX_RUNTIME_SOURCES
   viewer_input.cc
   demo_scenes.cc
   scene_authoring.cc
+  scene_validate.cc
   demo_grass.cc
   demo_nav.cc
   demo_placement.cc
@@ -117,6 +118,19 @@ target_compile_definitions(rx PRIVATE
   RX_VERSION="${PROJECT_VERSION}")
 rx_set_warnings(rx)
 rx_enable_mimalloc(rx)
+
+# `rx --validate`: no device and no window, so plain ctest runs it. The clean
+# half matters more than the broken one - a check that fires on a scene we ship
+# is worse than no check, because the next agent learns to ignore the report.
+if(RX_BUILD_TESTS)
+  foreach(scene cornell showcase material_sheet)
+    add_test(NAME scene_validate_${scene}
+      COMMAND rx --validate ${CMAKE_CURRENT_SOURCE_DIR}/scenes/${scene}.rxscene)
+  endforeach()
+  add_test(NAME scene_validate_broken
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json)
+  set_tests_properties(scene_validate_broken PROPERTIES WILL_FAIL TRUE)
+endif()
 
 file(GLOB RX_FEATURE_GYM_ASSETS CONFIGURE_DEPENDS
   ${CMAKE_CURRENT_SOURCE_DIR}/feature_gym/assets/*)

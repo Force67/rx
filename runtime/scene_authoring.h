@@ -2,6 +2,7 @@
 #define RX_RUNTIME_SCENE_AUTHORING_H_
 
 #include <string>
+#include <string_view>
 
 #include "asset/asset_database.h"
 #include "core/types.h"
@@ -123,6 +124,14 @@ struct SceneCamera {
 // LoadScene resolves them by name and --dump-schema documents them. Idempotent;
 // must run before either.
 void RegisterSceneComponents();
+
+// Which axes of a kind's Shape.size must be positive for the primitive to
+// enclose any volume, as a bitmask (bit 0 = x, 1 = y, 2 = z). Zero means no
+// primitive builds `kind` at all. This is narrower than the axes a kind READS:
+// a capsule of half height 0 is a legal sphere, so only its radius is required.
+// BuildSceneShapes and --validate both go through here, so neither can accept a
+// kind, or condemn a size, the other would not.
+u32 ShapeRequiredSizeAxes(std::string_view kind);
 
 // Builds one mesh + material per SceneShape entity, uploads them (`renderer`
 // null skips the GPU side) and points each entity's Renderable at the result.

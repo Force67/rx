@@ -146,10 +146,29 @@ bool ApplyPattern(const ScenePattern& pattern, const std::string& key, asset::As
   return true;
 }
 
+// The size axes each kind needs positive; see ShapeRequiredSizeAxes.
+struct ShapeKind {
+  const char* name;
+  u32 required_size_axes;
+};
+constexpr ShapeKind kShapeKinds[] = {
+    {"box", 0b111},  {"sphere", 0b001}, {"plane", 0b101},  {"cylinder", 0b011},
+    {"cone", 0b011}, {"torus", 0b011},  {"capsule", 0b001},
+};
+
 // False + *error on a kind no primitive builds, which would otherwise put a box
 // where the author asked for something else.
 bool BuildShapeMesh(const SceneShape& shape, asset::AssetId id, asset::Mesh* out,
                     std::string* error) {
+  // The table gates the chain rather than the other way round, so a kind added
+  // below but not above fails loudly here instead of building a shape
+  // --validate would then reject as unknown.
+  if (ShapeRequiredSizeAxes(shape.kind) == 0) {
+    if (error)
+      *error = "unknown Shape.kind '" + shape.kind +
+               "' (box | sphere | plane | cylinder | cone | torus | capsule)";
+    return false;
+  }
   const f32* size = shape.size;
   if (shape.kind == "box") {
     *out = asset::MakeBox(size[0], size[1], size[2], id);
@@ -166,15 +185,22 @@ bool BuildShapeMesh(const SceneShape& shape, asset::AssetId id, asset::Mesh* out
   } else if (shape.kind == "capsule") {
     *out = asset::MakeCapsule(size[0], size[1], 16, 32, id);
   } else {
-    if (error)
-      *error = "unknown Shape.kind '" + shape.kind +
-               "' (box | sphere | plane | cylinder | cone | torus | capsule)";
+    // Unreachable while the table and this chain agree. A kind added to one and
+    // not the other lands here rather than quietly building the wrong shape.
+    if (error) *error = "Shape.kind '" + shape.kind + "' has no primitive builder";
     return false;
   }
   return true;
 }
 
 }  // namespace
+
+u32 ShapeRequiredSizeAxes(std::string_view kind) {
+  for (const ShapeKind& entry : kShapeKinds) {
+    if (kind == entry.name) return entry.required_size_axes;
+  }
+  return 0;
+}
 
 void RegisterSceneComponents() {
   edit::ReflectComponent<SceneShape>("Shape")

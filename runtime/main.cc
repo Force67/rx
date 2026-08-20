@@ -10,6 +10,7 @@
 #include "edit/reflect.h"
 #include "scene/scene_handlers.h"
 #include "scene_authoring.h"
+#include "scene_validate.h"
 #include "script/handler_registry.h"
 #include "script/script_value.h"
 #include "viewer.h"
@@ -28,6 +29,9 @@ void PrintUsage() {
   RX_INFO("                        placement | grass | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
   RX_INFO("  --dump-schema         print the .rxscene component schema as json and exit");
   RX_INFO("  --dump-commands       print the live command schema as json and exit");
+  RX_INFO("  --validate <path>     structurally check a .rxscene (no gpu); nonzero exit on an");
+  RX_INFO("                        error-level finding. --json for a machine-readable report");
+  RX_INFO("  --json                emit --validate's report as json instead of text");
   RX_INFO("  --authoring-endpoint <path>  serve those commands on a local unix socket");
   RX_INFO("  --headless            no window (a --shot run still brings the gpu up, windowless)");
   RX_INFO("  --shot <path.png>     capture a frame, then quit; nonzero exit if it was not written");
@@ -126,6 +130,8 @@ int main(int argc, char** argv) {
   bool no_window = false;
   bool dump_schema = false;
   bool dump_commands = false;
+  std::string validate_path;
+  bool json = false;
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
@@ -137,6 +143,8 @@ int main(int argc, char** argv) {
     else if (arg == "--usd-hide") config.usd_visibility.hide.push_back(next());
     else if (arg == "--dump-schema") dump_schema = true;
     else if (arg == "--dump-commands") dump_commands = true;
+    else if (arg == "--validate") validate_path = next();
+    else if (arg == "--json") json = true;
     else if (arg == "--authoring-endpoint") config.authoring_socket = next();
     else if (arg == "--headless") no_window = true;
     else if (arg == "--shot") config.shot_path = next();
@@ -163,6 +171,9 @@ int main(int argc, char** argv) {
     DumpCommands();
     return 0;
   }
+  // Same category: the structural checks touch no device and no window, which
+  // is what lets this run on every edit and in CI.
+  if (!validate_path.empty()) return rx::ValidateSceneFile(validate_path, json) ? 0 : 1;
 
   if (config.demo_scene == "featuregym" || config.demo_scene == "feature-gym") {
     config.renderer.software_gi_fallback = true;

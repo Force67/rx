@@ -425,6 +425,32 @@ if(RX_BUILD_TOOLS)
   rx_set_warnings(rxpack)
 endif()
 
+# rxdiff compares two rendered pngs against a measured tolerance, which is the
+# only comparison a renderer with TAA and temporal accumulation admits. Its own
+# tool rather than an rx flag: it needs no device, no window and no scene, so it
+# links stb and nothing else and starts instantly in a CI loop.
+if(RX_BUILD_TOOLS)
+  add_executable(rxdiff tools/rxdiff.cc)
+  target_link_libraries(rxdiff PRIVATE rx::stb_impl)
+  rx_set_warnings(rxdiff)
+
+  # The tolerance itself came from measuring the renderer (the tool's header
+  # carries the numbers); these only pin the two ends nothing should ever move.
+  # Two checked-in captures of the same Cornell box from different gi paths
+  # stand in for a regression, so no new binaries land in the tree for this.
+  if(RX_BUILD_TESTS)
+    add_test(NAME rxdiff_identical COMMAND rxdiff
+      ${CMAKE_CURRENT_SOURCE_DIR}/docs/images/rcgi-cornell-ddgi.png
+      ${CMAKE_CURRENT_SOURCE_DIR}/docs/images/rcgi-cornell-ddgi.png)
+    add_test(NAME rxdiff_regression COMMAND rxdiff
+      ${CMAKE_CURRENT_SOURCE_DIR}/docs/images/rcgi-cornell-ddgi.png
+      ${CMAKE_CURRENT_SOURCE_DIR}/docs/images/rcgi-cornell-rcgi.png)
+    # Matching the verdict, not just a nonzero exit, so an io error cannot pass
+    # for a detected regression.
+    set_tests_properties(rxdiff_regression PROPERTIES PASS_REGULAR_EXPRESSION "FAIL")
+  endif()
+endif()
+
 # rxcall issues one command to a running engine's --authoring-endpoint socket.
 # It links rx::rpc rather than reimplementing the frame, so the client and the
 # engine can never disagree about the encoding. Unix sockets only, like the
