@@ -28,6 +28,30 @@ constexpr size_t kPatternKeyOffset = offsetof(ScenePattern, scale);
 constexpr size_t kPatternKeyBytes =
     offsetof(ScenePattern, roughness_b) + sizeof(f32) - kPatternKeyOffset;
 
+// The layout notices nothing when that invariant is broken: both components end
+// in tail padding (the std::string forces 8-byte alignment) that an appended f32
+// lands in, leaving every offsetof and sizeof exactly as they were. Counting the
+// fields is what notices. Braces elide into the f32[N] members, so these are
+// counts of numbers, not of declarations.
+struct AnyField {
+  template <typename T>
+  operator T() const;
+};
+template <typename T, typename... F>
+constexpr size_t FieldCount() {
+  if constexpr (requires { T{F{}..., AnyField{}}; }) {
+    return FieldCount<T, F..., AnyField>();
+  } else {
+    return sizeof...(F);
+  }
+}
+static_assert(FieldCount<SceneSurface>() == 32,
+              "SceneSurface changed: widen kSurfaceKeyBytes to cover the new field before bumping "
+              "this, or two surfaces differing only in it collide onto one material");
+static_assert(FieldCount<ScenePattern>() == 14,
+              "ScenePattern changed: widen kPatternKeyBytes to cover the new field before bumping "
+              "this, or two patterns differing only in it collide onto one texture");
+
 // Numbers go into the key as raw bytes rather than formatted: MakeAssetId
 // hashes the whole span, and a human-readable float would collide across values
 // that happen to print the same.
