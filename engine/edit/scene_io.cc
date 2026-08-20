@@ -1,6 +1,7 @@
 #include "edit/scene_io.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
@@ -66,13 +67,78 @@ std::string Unquote(std::string_view raw) {
 
 std::string FloatStr(f32 v) { return std::format("{}", v); }
 
-std::vector<f32> ParseFloats(std::string_view s, size_t n) {
+// How many of PropValue::f a prop type uses; 0 for the types that carry no
+// float. Keeps the number handling generic over the registry instead of
+// listing components by hand.
+u32 FloatLanes(PropType type) {
+  switch (type) {
+    case PropType::kF32: return 1;
+    case PropType::kVec2: return 2;
+    case PropType::kVec3: return 3;
+    case PropType::kVec4:
+    case PropType::kQuat:
+    case PropType::kColor: return 4;
+    default: return 0;
+  }
+}
+
+// The one float reader for the format. Null on success, else the clause saying
+// why the token was refused, for a caller to put behind a `path:line:`.
+//
+// strtof for every float, scalar prop and vector lane alike: the lanes used to
+// go through an istringstream, which rejects "nan", "inf" and anything past the
+// f32 range where strtof takes them, so the same literal meant one thing in
+// `scale` and another in `position`. Neither may accept a non-finite value: it
+// poisons every matrix and lighting term it reaches, and FloatStr cannot write
+// one back out in a form this reader would take.
+const char* ReadFloat(const std::string& token, f32* out) {
+  char* end = nullptr;
+  const f32 v = std::strtof(token.c_str(), &end);
+  if (end == token.c_str() || *end != '\0') return "is not a number";
+  if (!std::isfinite(v)) return "is not finite";
+  *out = v;
+  return nullptr;
+}
+
+// Reads up to `n` whitespace-separated floats, zero-padding a short list (a
+// plane is authored "Shape.size = 9 0"). Stops at the first token that is not a
+// finite number and reports it through `error`; the lanes from there on stay 0,
+// which is what a lenient load keeps and what a strict load refuses.
+std::vector<f32> ParseFloats(std::string_view s, size_t n, std::string* error = nullptr) {
   std::vector<f32> out;
   std::istringstream in{std::string(s)};
-  f32 v;
-  while (out.size() < n && (in >> v)) out.push_back(v);
-  while (out.size() < n) out.push_back(0.f);
+  std::string token;
+  while (out.size() < n && (in >> token)) {
+    f32 v = 0.f;
+    if (const char* why = ReadFloat(token, &v)) {
+      if (error) *error = "'" + token + "' " + why;
+      break;
+    }
+    out.push_back(v);
+  }
+  out.resize(n, 0.f);
   return out;
+}
+
+// Why an authored quaternion is not usable as a rotation, or empty. MakeFromQuat
+// is the raw quaternion-to-matrix form with no normalize (24 call sites, one of
+// them the per-frame transform build), so the length of the authored quaternion
+// scales the mesh on top of Transform.scale, and all zeros - what "rotation =
+// 0 0 0" pads to, since a short list pads with 0 and not with an identity w -
+// yields a zero 3x3 and the mesh vanishes. The authoring boundary is the only
+// place this can be caught without putting a square root in that hot path.
+std::string QuatProblem(const std::vector<f32>& v) {
+  const f32 length_sq = v[0] * v[0] + v[1] * v[1] + v[2] * v[2] + v[3] * v[3];
+  if (length_sq < 1e-8f)
+    return "the zero quaternion collapses the mesh to a point (identity is 0 0 0 1)";
+  // 5% is far outside anything hand-rounding a unit quaternion produces
+  // (0.7 0 0 0.7 is only 1% short) and well inside a visible mis-scale. Same
+  // tolerance as --validate's non_unit_rotation, so the two agree on what is
+  // merely rounded and what is wrong.
+  const f32 length = std::sqrt(length_sq);
+  if (std::abs(length - 1.0f) > 0.05f)
+    return std::format("length {} scales the mesh by that on top of Transform.scale", length);
+  return {};
 }
 
 u64 ParseHexOrDec(std::string_view s) {
@@ -110,6 +176,13 @@ std::string FormatValue(const PropValue& v) {
 
 u64 PackKey(ecs::Entity e) { return static_cast<u64>(e.generation) << 32 | e.index; }
 
+// Names an entity in a save error the way the author would look for it. Only
+// called after EnsureGuid, so the guid fallback is always there.
+std::string EntityLabel(ecs::World& world, ecs::Entity e) {
+  if (const scene::Name* name = world.Get<scene::Name>(e)) return "'" + name->value + "'";
+  return std::format("guid:0x{:016x}", world.Get<scene::Guid>(e)->value);
+}
+
 }  // namespace
 
 bool SaveScene(ecs::World& world, const std::string& file_path, std::string* error) {
@@ -130,6 +203,32 @@ bool SaveScene(ecs::World& world, const std::string& file_path, std::string* err
   std::sort(entities.begin(), entities.end(), [&](ecs::Entity a, ecs::Entity b) {
     return world.Get<scene::Guid>(a)->value < world.Get<scene::Guid>(b)->value;
   });
+
+  // Refuse before the file is touched, so a rejected save leaves whatever was
+  // on disk intact rather than a truncated document. There is no literal for
+  // nan or inf that ReadFloat takes back, so writing one (FloatStr emits "nan"
+  // and "inf" happily) means a scene that reloads as 0 with no signal. Failing
+  // here names the component still holding the value, which is the last point
+  // where it can be traced back to whatever produced it.
+  for (ecs::Entity e : entities) {
+    for (const ComponentDesc* comp : ComponentsOn(world, e)) {
+      for (u32 i = 0; i < comp->prop_count; ++i) {
+        const PropDesc& prop = comp->props[i];
+        const u32 lanes = FloatLanes(prop.type);
+        if (lanes == 0) continue;
+        PropValue value;
+        if (!GetProp(world, e, *comp, prop, &value)) continue;
+        for (u32 lane = 0; lane < lanes; ++lane) {
+          if (std::isfinite(value.f[lane])) continue;
+          if (error)
+            *error = std::format("{}.{} on entity {} is {}; the scene format has no literal for "
+                                 "it, so nothing was written",
+                                 comp->name, prop.name, EntityLabel(world, e), value.f[lane]);
+          return false;
+        }
+      }
+    }
+  }
 
   std::ofstream out(file_path, std::ios::binary);
   if (!out) {
@@ -283,10 +382,27 @@ bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const std::string& f
             *error = std::format("{}:{}: unknown component '{}'", file_path, a.line, a.comp);
           return false;
         }
-        if (!FindProp(*comp, a.prop)) {
+        const PropDesc* prop = FindProp(*comp, a.prop);
+        if (!prop) {
           if (error)
             *error = std::format("{}:{}: component '{}' has no prop '{}'", file_path, a.line,
                                  a.comp, a.prop);
+          return false;
+        }
+        // Numbers are checked here with the names, before pass 1 creates
+        // anything, so a bad literal leaves the world exactly as it was. The
+        // alternative is what this used to do: read the lanes it could, pad the
+        // rest with zeros and hand back a value nothing downstream can tell
+        // from an authored one.
+        const u32 lanes = FloatLanes(prop->type);
+        if (lanes == 0) continue;
+        std::string why;
+        const std::vector<f32> v = ParseFloats(a.raw, lanes, &why);
+        if (why.empty() && prop->type == PropType::kQuat) why = QuatProblem(v);
+        if (!why.empty()) {
+          if (error)
+            *error = std::format("{}:{}: {}.{} = {}: {}", file_path, a.line, a.comp, a.prop,
+                                 a.raw, why);
           return false;
         }
       }
@@ -331,6 +447,18 @@ bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const std::string& f
         continue;
       }
 
+      // Strict already refused every literal this reports on, so the warning is
+      // for the lenient callers (the editor), which keep the zero-padded
+      // remainder and would otherwise get no signal at all.
+      auto floats = [&](size_t n) {
+        std::string why;
+        std::vector<f32> v = ParseFloats(a.raw, n, &why);
+        if (why.empty() && prop->type == PropType::kQuat) why = QuatProblem(v);
+        if (!why.empty())
+          RX_WARN("rxscene: {}:{}: {}.{} = {}: {}", file_path, a.line, a.comp, a.prop, a.raw, why);
+        return v;
+      };
+
       PropValue value;
       value.type = prop->type;
       switch (prop->type) {
@@ -338,29 +466,29 @@ bool LoadScene(ecs::World& world, asset::AssetDatabase& db, const std::string& f
         case PropType::kI32: value = PropValue::I32(static_cast<i32>(std::strtol(a.raw.c_str(), nullptr, 0))); break;
         case PropType::kU32: value = PropValue::U32(static_cast<u32>(ParseHexOrDec(a.raw))); break;
         case PropType::kU64: value = PropValue::U64(ParseHexOrDec(a.raw)); break;
-        case PropType::kF32: value = PropValue::F32(std::strtof(a.raw.c_str(), nullptr)); break;
+        case PropType::kF32: value = PropValue::F32(floats(1)[0]); break;
         case PropType::kVec2: {
-          auto v = ParseFloats(a.raw, 2);
+          auto v = floats(2);
           value = PropValue::Vec2(v[0], v[1]);
           break;
         }
         case PropType::kVec3: {
-          auto v = ParseFloats(a.raw, 3);
+          auto v = floats(3);
           value = PropValue::Vec3(v[0], v[1], v[2]);
           break;
         }
         case PropType::kVec4: {
-          auto v = ParseFloats(a.raw, 4);
+          auto v = floats(4);
           value = PropValue::Vec4(v[0], v[1], v[2], v[3]);
           break;
         }
         case PropType::kQuat: {
-          auto v = ParseFloats(a.raw, 4);
+          auto v = floats(4);
           value = PropValue::Quat(v[0], v[1], v[2], v[3]);
           break;
         }
         case PropType::kColor: {
-          auto v = ParseFloats(a.raw, 4);
+          auto v = floats(4);
           value = PropValue::Color(v[0], v[1], v[2], v[3]);
           break;
         }

@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <string>
 
 #include "asset/asset_database.h"
@@ -308,6 +309,155 @@ void TestStrictLoad() {
   fs::remove(path);
 }
 
+// Numbers. A malformed or unrepresentable literal used to load as a silent
+// zero, from the bad token onwards, and the scalar and vector readers disagreed
+// about which literals those were: "1e40" was inf in a scalar and 0 in a lane.
+// Now one reader serves both, strict refuses what it cannot read, and lenient
+// keeps its old zero-padded value with a warning so the editor still opens the
+// file.
+void TestNumberLiterals() {
+  namespace fs = std::filesystem;
+  fs::path path = fs::temp_directory_path() / "rx_edit_numbers.rxscene";
+
+  auto write = [&](const std::string& body) {
+    std::FILE* f = std::fopen(path.string().c_str(), "wb");
+    CHECK(f != nullptr);
+    if (!f) return;
+    std::fputs(("rxscene 1\n\nentity\n" + body).c_str(), f);
+    std::fclose(f);
+  };
+  // Loads leniently and hands back the entity's Transform, which is what the
+  // editor would show for the same file.
+  auto lenient = [&](scene::Transform* out) {
+    asset::Vfs vfs;
+    asset::AssetDatabase db(vfs);
+    ecs::World world;
+    CHECK(LoadScene(world, db, path.string(), nullptr, /*strict=*/false));
+    bool found = false;
+    world.Each<scene::Transform>([&](ecs::Entity, scene::Transform& t) {
+      if (!found) *out = t;
+      found = true;
+    });
+    CHECK(found);
+  };
+  auto strict_error = [&]() {
+    asset::Vfs vfs;
+    asset::AssetDatabase db(vfs);
+    ecs::World world;
+    std::string error;
+    CHECK(!LoadScene(world, db, path.string(), &error, /*strict=*/true));
+    // A rejected load must leave nothing behind, numbers included.
+    size_t entities = 0;
+    world.Each<scene::Transform>([&](ecs::Entity, scene::Transform&) { ++entities; });
+    CHECK(entities == 0);
+    return error;
+  };
+
+  scene::Transform t;
+
+  // A token that is not a number: rejected by name, with its line.
+  write("Transform.position = 1 abc 3\n");
+  std::string error = strict_error();
+  CHECK(error.find("abc") != std::string::npos);
+  CHECK(error.find("not a number") != std::string::npos);
+  CHECK(error.find(":4:") != std::string::npos);
+  lenient(&t);  // unchanged from before the fix: the bad lane and the rest zero
+  CHECK_NEAR(t.position[0], 1.f, 1e-6f);
+  CHECK_NEAR(t.position[1], 0.f, 1e-6f);
+  CHECK_NEAR(t.position[2], 0.f, 1e-6f);
+
+  // Out of f32 range, and the two spellings of a non-finite value. Every one is
+  // refused in both a lane and a scalar, which is the agreement that was
+  // missing: only the scalar path used to accept these.
+  for (const char* literal : {"1e40", "inf", "-inf", "nan"}) {
+    write(std::string("Transform.position = 0 ") + literal + " 0\n");
+    error = strict_error();
+    CHECK(error.find(literal) != std::string::npos);
+    CHECK(error.find("not finite") != std::string::npos);
+    lenient(&t);
+    CHECK_NEAR(t.position[1], 0.f, 1e-6f);
+    CHECK(std::isfinite(t.position[1]));
+
+    write(std::string("Transform.scale = ") + literal + "\n");
+    error = strict_error();
+    CHECK(error.find("not finite") != std::string::npos);
+    lenient(&t);
+    CHECK(std::isfinite(t.scale));
+  }
+
+  // A trailing suffix is not a number either, in the scalar path where strtof
+  // used to keep the prefix and drop it.
+  write("Transform.scale = 0.6f\n");
+  error = strict_error();
+  CHECK(error.find("0.6f") != std::string::npos);
+  CHECK(error.find("not a number") != std::string::npos);
+
+  // A short list is the authored short form, not an error: it pads with zeros.
+  write("Transform.position = 1 2\n");
+  {
+    asset::Vfs vfs;
+    asset::AssetDatabase db(vfs);
+    ecs::World world;
+    CHECK(LoadScene(world, db, path.string(), nullptr, /*strict=*/true));
+  }
+  lenient(&t);
+  CHECK_NEAR(t.position[0], 1.f, 1e-6f);
+  CHECK_NEAR(t.position[1], 2.f, 1e-6f);
+  CHECK_NEAR(t.position[2], 0.f, 1e-6f);
+
+  // Rotations. Three numbers pad with a zero w, not an identity one, so the
+  // whole quaternion is zero and MakeFromQuat collapses the mesh to a point.
+  write("Transform.rotation = 0 0 0\n");
+  error = strict_error();
+  CHECK(error.find("zero quaternion") != std::string::npos);
+
+  // Non-unit: MakeFromQuat does not normalize, so this scales the mesh by 0.707
+  // on top of Transform.scale.
+  write("Transform.rotation = 0 0.5 0 0.5\n");
+  error = strict_error();
+  CHECK(error.find("length") != std::string::npos);
+
+  // Hand-rounded unit quaternions stay legal; 0.7 0 0 0.7 is 1% short.
+  write("Transform.rotation = 0.7 0 0 0.7\nTransform.position = 0 0 0\n");
+  {
+    asset::Vfs vfs;
+    asset::AssetDatabase db(vfs);
+    ecs::World world;
+    std::string clean;
+    CHECK(LoadScene(world, db, path.string(), &clean, /*strict=*/true));
+  }
+
+  fs::remove(path);
+}
+
+// A non-finite float has no literal the loader reads back, so saving one would
+// be silent data loss on the next load. The save has to refuse, and refuse
+// before it has replaced whatever was on disk.
+void TestSaveRejectsNonFinite() {
+  namespace fs = std::filesystem;
+  fs::path path = fs::temp_directory_path() / "rx_edit_nonfinite.rxscene";
+  fs::remove(path);
+
+  ecs::World world;
+  ecs::Entity e = world.Create();
+  world.Add(e, scene::Transform{{0, std::numeric_limits<f32>::quiet_NaN(), 0}, {0, 0, 0, 1}, 1.f});
+  world.Add(e, scene::Name{"Poisoned"});
+
+  std::string error;
+  CHECK(!SaveScene(world, path.string(), &error));
+  CHECK(error.find("Transform.position") != std::string::npos);
+  CHECK(error.find("Poisoned") != std::string::npos);
+  CHECK(!fs::exists(path));  // nothing written, not a truncated file
+
+  // The same scene saves once the value is one the format can spell.
+  world.Get<scene::Transform>(e)->position[1] = 2.f;
+  error.clear();
+  CHECK(SaveScene(world, path.string(), &error));
+  CHECK(fs::exists(path));
+
+  fs::remove(path);
+}
+
 // The schema dump names every PropType, so an unmapped one would silently
 // document itself as "?".
 void TestPropTypeNames() {
@@ -453,6 +603,8 @@ int main() {
   TestReflection();
   TestSceneRoundTrip();
   TestStrictLoad();
+  TestNumberLiterals();
+  TestSaveRejectsNonFinite();
   TestPropTypeNames();
   TestUndo();
   TestHierarchy();

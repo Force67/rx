@@ -170,7 +170,12 @@ pass over a batch of materials costs one render instead of 24;
 from the reflection registry, so it never goes stale. Loading a `.rxscene` is
 strict: an unknown component, prop, shape kind, pattern kind or `.mtlx` path
 fails the load with a message naming it, rather than silently substituting a
-default.
+default. So does a number the loader cannot read whole (`1 abc 3`, `0.6f`) or
+cannot hold (`nan`, `inf`, `1e40`), and a `Transform.rotation` that is not a
+unit quaternion, `0 0 0` included: the rotation matrix is built without a
+normalize, so a short or non-unit quaternion scales the mesh, and the zero one
+collapses it. A rejected load creates no entities. Saving refuses a non-finite
+float for the same reason: there is no literal for it that reads back.
 
 `--shot` renders windowless (no compositor, no display needed) and exits nonzero
 if the png was not written, which is what makes the author-render-look loop
@@ -189,15 +194,18 @@ builds crash, independently of this path.
 
 `--validate` loads a `.rxscene` and reports what is structurally wrong with it,
 with no device and no window (0.01 s per scene, so it fits on every edit and in
-CI). Strict load already rejects misspelt names; this is about values, and about
-the combinations the engine's own walks quietly skip. A `Renderable` with no
-`Transform` (the frame walk is `Each<Transform, Renderable>`, so it uploads and
-then never draws), a `Light` or `Camera` the viewer drops the same way, a
-non-finite float anywhere in the reflection registry, a degenerate scale,
-rotation, `Shape.size` axis or fov, a light that cannot contribute, duplicate
-guids, a dangling or circular `Parent`, and a number literal the value parser
-silently truncated. Nonzero exit on any error-level finding; `--json` for a
-machine-readable report.
+CI). A strict load rejects, and stops at the first bad line; this explains, and
+walks the whole file, so a scene the loader refused still comes back as one
+report instead of twenty edit-and-rerun cycles (it retries leniently when the
+strict load says no, and carries that refusal as a finding of its own). It
+covers what a load cannot: the combinations the engine's own walks quietly skip.
+A `Renderable` with no `Transform` (the frame walk is `Each<Transform,
+Renderable>`, so it uploads and then never draws), a `Light` or `Camera` the
+viewer drops the same way, a degenerate scale, rotation, `Shape.size` axis or
+fov, a light that cannot contribute, duplicate guids, a dangling or circular
+`Parent`, and a number literal that is unreadable or non-finite, which is
+visible only in the text once the loader has read 0 from it. Nonzero exit on any
+error-level finding; `--json` for a machine-readable report.
 
 `rxdiff` compares two captures. The renderer is not deterministic frame to
 frame (TAA jitter, temporal accumulation), so two runs of the same build on the

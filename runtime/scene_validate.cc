@@ -179,59 +179,29 @@ u32 FloatLanes(edit::PropType type) {
   }
 }
 
-// NaN and inf reach here through strtof: "nan" and "inf" parse literally, and
-// any literal past the f32 range (1e40) overflows to inf. Either one poisons
-// every matrix and lighting term it touches downstream, usually as a shape that
-// vanishes rather than as anything that looks like a bad number.
-void CheckNonFinite(ecs::World& world, ecs::Entity entity, Report& report) {
-  for (const edit::ComponentDesc* comp : edit::ComponentsOn(world, entity)) {
-    for (u32 i = 0; i < comp->prop_count; ++i) {
-      const edit::PropDesc& prop = comp->props[i];
-      const u32 lanes = FloatLanes(prop.type);
-      if (lanes == 0) continue;
-      edit::PropValue value;
-      if (!edit::GetProp(world, entity, *comp, prop, &value)) continue;
-      for (u32 lane = 0; lane < lanes; ++lane) {
-        if (std::isfinite(value.f[lane])) continue;
-        report.Error(entity, "non_finite",
-                     std::string(comp->name) + "." + prop.name + " is not finite");
-        break;  // one finding per prop, not per component of a vector
-      }
-    }
-  }
-}
-
-// True when the loader's reader would consume the whole literal, which is the
-// only way to tell a number from something that merely starts with one: strtof
-// stops at the 'f' of "0.6f" and hands back 0.6 without complaint.
-bool FullyParsedNumber(const std::string& text, bool integer) {
+// True when the loader's integer reader would consume the whole literal, which
+// is the only way to tell a number from something that merely starts with one:
+// strtoll stops at the 'x' of "12x" and hands back 12 without complaint. Base 0,
+// matching the loader: an 0x-prefixed guid is hex.
+bool FullyParsedInteger(const std::string& text) {
   char* end = nullptr;
-  // Base 0 on the integers, matching the loader: an 0x-prefixed guid is hex.
-  if (integer) {
-    std::strtoll(text.c_str(), &end, 0);
-  } else {
-    std::strtod(text.c_str(), &end);
-  }
+  std::strtoll(text.c_str(), &end, 0);
   return end != text.c_str() && *end == '\0';
 }
 
-// A literal the loader's own reader could not finish. Both readers fail SILENTLY
-// and at different things, so this mirrors each rather than picking one:
+// A literal the loader's own reader refuses. Its float reader is strtof per
+// whitespace token, for a scalar prop and a vector lane alike, and it takes only
+// a token it consumes whole and whose value is finite. Running out of tokens is
+// the legal short form ("Shape.size = 9 0" for a plane) and not a finding.
 //
-//   f32 / i32 / u32 / u64 go through strtof/strtol/strtoull, which stop at the
-//   first character they cannot use and return what they had.
-//
-//   vec2/3/4, quat and color go through an istringstream, which additionally
-//   rejects "nan", "inf" and anything outside the f32 range. ParseFloats then
-//   pads the REST of the vector with zeros, so one bad lane zeroes every lane
-//   after it too: "1 abc 3" is not (1, 0, 3), it is (1, 0, 0).
-//
-// Nothing downstream can tell any of that from an authored zero, so the text is
-// the only place it is visible.
+// A strict load stops at the first of these, so a report that walked the loaded
+// world instead of the text would see none of them: leniently the lane and every
+// lane after it read 0, and nothing downstream can tell that from an authored
+// zero. The text is the only place they stay visible.
 void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report) {
   for (const SourceAssign& assign : source.assigns) {
     const edit::ComponentDesc* comp = edit::FindComponentByName(assign.comp);
-    if (!comp) continue;  // strict load already rejected unknown names
+    if (!comp) continue;  // the load finding already named it
     const edit::PropDesc* prop = nullptr;
     for (u32 i = 0; i < comp->prop_count && !prop; ++i) {
       if (assign.prop == comp->props[i].name) prop = &comp->props[i];
@@ -240,30 +210,34 @@ void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report
     const ecs::Entity entity{assign.entity_index, 0};
     if (!world.IsAlive(entity)) continue;
 
-    const u32 lanes = FloatLanes(prop->type);
-    if (lanes > 1) {
-      std::istringstream in{assign.raw};
-      f32 value;
-      u32 read = 0;
-      while (read < lanes && (in >> value)) ++read;
-      // Running out of input is the legal short form ("size = 9 0" for a plane);
-      // failing with input left is a token the reader choked on.
-      if (read < lanes && !in.eof()) {
+    if (prop->type == edit::PropType::kI32 || prop->type == edit::PropType::kU32 ||
+        prop->type == edit::PropType::kU64) {
+      if (!FullyParsedInteger(assign.raw)) {
         report.ErrorAt(entity, assign.line, "unparsed_number",
-                       std::format("{}.{} = {}: lane {} is not a number the loader reads, so it "
-                                   "and every lane after it load as 0",
-                                   comp->name, prop->name, assign.raw, read));
+                       std::format("{}.{} = {} is not a number; the loader keeps whatever prefix "
+                                   "parsed and discards the rest",
+                                   comp->name, prop->name, assign.raw));
       }
       continue;
     }
-    const bool integer = prop->type == edit::PropType::kI32 ||
-                         prop->type == edit::PropType::kU32 || prop->type == edit::PropType::kU64;
-    if (lanes == 0 && !integer) continue;
-    if (!FullyParsedNumber(assign.raw, integer)) {
-      report.ErrorAt(entity, assign.line, "unparsed_number",
-                     std::format("{}.{} = {} is not a number; the loader keeps whatever prefix "
-                                 "parsed and discards the rest",
-                                 comp->name, prop->name, assign.raw));
+    const u32 lanes = FloatLanes(prop->type);
+    if (lanes == 0) continue;
+    std::istringstream in{assign.raw};
+    std::string token;
+    for (u32 lane = 0; lane < lanes && (in >> token); ++lane) {
+      char* end = nullptr;
+      // strtof, not strtod: 1e40 is a perfectly good double and an inf f32, and
+      // it is the f32 the loader keeps.
+      const f32 value = std::strtof(token.c_str(), &end);
+      if (end != token.c_str() && *end == '\0' && std::isfinite(value)) continue;
+      const bool number = end != token.c_str() && *end == '\0';
+      report.ErrorAt(entity, assign.line, number ? "non_finite" : "unparsed_number",
+                     std::format("{}.{} = {}: '{}' {}; a strict load refuses the file and a "
+                                 "lenient one reads 0 from here on",
+                                 comp->name, prop->name, assign.raw, token,
+                                 number ? "is not finite (nan, inf, or past the f32 range)"
+                                        : "is not a number"));
+      break;  // one finding per assignment, not one per lane after the bad one
     }
   }
 }
@@ -280,7 +254,9 @@ void CheckTransform(ecs::World& world, ecs::Entity entity, Report& report) {
   // length of the authored quaternion scales the object on top of
   // Transform.scale. All zeros - what "rotation = 0 0 0" parses to, since
   // missing components pad with zero rather than with an identity w - yields a
-  // zero 3x3 and the entity disappears.
+  // zero 3x3 and the entity disappears. A strict load refuses both; this fires
+  // on the lenient reload below, which is what keeps the explanation available
+  // once the load has already said no.
   const f32* r = transform->rotation;
   const f32 length_sq = r[0] * r[0] + r[1] * r[1] + r[2] * r[2] + r[3] * r[3];
   if (length_sq < 1e-8f) {
@@ -527,46 +503,51 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   asset::Vfs vfs;
   asset::AssetDatabase db(vfs);
   const Source source = ScanSource(path);
-  Report report(world, source.entity_lines);
 
-  // Strict, exactly like the viewer: an unknown component or prop name is a
-  // failed load there, so it has to be a failed load here too rather than a
-  // finding this tool invents its own severity for.
+  // Strict first, exactly like the viewer: whatever fails the load there has to
+  // be an error here too rather than a finding this tool invents its own
+  // severity for. A strict load stops at the first bad line and creates
+  // nothing, though, and a report that stopped there would cost the author the
+  // other twenty findings, so fall back to a lenient load of the same file: the
+  // gate says no, and this still explains the whole document.
   std::string error;
-  if (!edit::LoadScene(world, db, path, &error, /*strict=*/true)) {
-    report.FileError("load", error);
-  } else {
-    const std::vector<ecs::Entity> entities = AllEntities(world);
-    u32 cameras = 0;
-    u32 drawables = 0;
-    for (ecs::Entity entity : entities) {
-      CheckNonFinite(world, entity, report);
-      CheckTransform(world, entity, report);
-      CheckShape(world, entity, report);
-      CheckSurface(world, entity, report);
-      CheckPattern(world, entity, report);
-      CheckLight(world, entity, report);
-      CheckCamera(world, entity, report);
-      CheckRenderable(world, db, entity, report);
-      CheckParent(world, entity, report);
-      cameras += world.Has<SceneCamera>(entity) ? 1 : 0;
-      drawables += world.Has<SceneShape>(entity) || world.Has<scene::Renderable>(entity) ? 1 : 0;
-    }
-    CheckDuplicateGuids(world, entities, report);
-    CheckNumberLiterals(world, source, report);
+  const bool strict_loaded = edit::LoadScene(world, db, path, &error, /*strict=*/true);
+  if (!strict_loaded) edit::LoadScene(world, db, path, nullptr, /*strict=*/false);
 
-    if (drawables == 0) {
-      report.FileWarn("no_geometry", "no Shape and no Renderable in the scene; the render is "
-                                     "the empty sky");
-    }
-    if (cameras > 1) {
-      // The viewer takes the first Camera its Each walk reaches, and that walk
-      // is in archetype order, not file order, so which one wins is not
-      // something the file decides.
-      report.FileWarn("multiple_cameras",
-                      std::format("{} Camera components; which one the viewer takes is "
-                                  "archetype order, not file order", cameras));
-    }
+  Report report(world, source.entity_lines);
+  if (!strict_loaded) report.FileError("load", error);
+
+  const std::vector<ecs::Entity> entities = AllEntities(world);
+  u32 cameras = 0;
+  u32 drawables = 0;
+  for (ecs::Entity entity : entities) {
+    CheckTransform(world, entity, report);
+    CheckShape(world, entity, report);
+    CheckSurface(world, entity, report);
+    CheckPattern(world, entity, report);
+    CheckLight(world, entity, report);
+    CheckCamera(world, entity, report);
+    CheckRenderable(world, db, entity, report);
+    CheckParent(world, entity, report);
+    cameras += world.Has<SceneCamera>(entity) ? 1 : 0;
+    drawables += world.Has<SceneShape>(entity) || world.Has<scene::Renderable>(entity) ? 1 : 0;
+  }
+  CheckDuplicateGuids(world, entities, report);
+  CheckNumberLiterals(world, source, report);
+
+  // Suppressed when nothing loaded at all (a bad header, an unreadable file):
+  // there the load error is the finding and "no geometry" on top of it is noise.
+  if (drawables == 0 && (strict_loaded || !entities.empty())) {
+    report.FileWarn("no_geometry", "no Shape and no Renderable in the scene; the render is "
+                                   "the empty sky");
+  }
+  if (cameras > 1) {
+    // The viewer takes the first Camera its Each walk reaches, and that walk is
+    // in archetype order, not file order, so which one wins is not something
+    // the file decides.
+    report.FileWarn("multiple_cameras",
+                    std::format("{} Camera components; which one the viewer takes is "
+                                "archetype order, not file order", cameras));
   }
 
   report.SortByLine();

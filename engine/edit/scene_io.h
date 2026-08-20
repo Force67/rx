@@ -17,7 +17,10 @@
 namespace rx::edit {
 
 // Writes the scene to `file_path`. Assigns Guids to identity-bearing entities
-// that lack one (so references resolve on reload). False + *error on I/O error.
+// that lack one (so references resolve on reload). False + *error on I/O error,
+// or on a nan/inf float: the format has no literal for one that reads back, so
+// it is refused (before the file is opened) rather than written as a value that
+// silently reloads as 0.
 RX_EDIT_EXPORT bool SaveScene(ecs::World& world, const std::string& file_path,
                               std::string* error = nullptr);
 
@@ -25,11 +28,14 @@ RX_EDIT_EXPORT bool SaveScene(ecs::World& world, const std::string& file_path,
 // references and resolving Renderable paths through `db`. Existing entities in
 // `world` are left untouched. False + *error on a parse/I/O error.
 //
-// `strict` promotes the unknown-component/prop warnings to failures, naming the
-// offending line. Hand-authored scenes want it: leniently, one misspelt name
-// silently yields an entity (or a whole scene) missing the thing it was written
-// to place, which reads as "the loader is broken". The editor stays lenient so
-// a scene saved by a build that had extra components still opens.
+// `strict` promotes the warnings to failures, naming the offending line: an
+// unknown component/prop name, a float literal that is not a whole finite
+// number, and a rotation that is not a unit quaternion. Hand-authored scenes
+// want it: leniently, one misspelt name silently yields an entity (or a whole
+// scene) missing the thing it was written to place, and one bad number reads
+// back as an authored zero, both of which read as "the loader is broken". A
+// rejected strict load creates no entities. The editor stays lenient so a scene
+// saved by a build that had extra components still opens.
 RX_EDIT_EXPORT bool LoadScene(ecs::World& world, asset::AssetDatabase& db,
                               const std::string& file_path, std::string* error = nullptr,
                               bool strict = false);
