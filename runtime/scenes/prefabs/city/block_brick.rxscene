@@ -1,19 +1,56 @@
 rxscene 1
 
-# Mid-rise brick warehouse conversion. Brick courses at wall scale, punched
-# sash windows on top of them is not expressible with one pattern, so the
-# windows win: a blank brick box reads as a wall, not a building.
+# Brick warehouse conversion: shopfront base, punched sash windows above, a
+# parapet standing proud of the roof.
+#
+# Brick courses at wall scale and punched windows on top of them is not
+# expressible with one pattern, so the windows win on the upper mass and the
+# base carries the brick - which is the right way round, since the base is what
+# anyone stands close enough to read the courses on.
+
 entity
-Name.value = "Brick block"
+Name.value = "Brick upper"
 Shape.kind = "box"
-Shape.size = 6 7 5
+Shape.size = 4.5 5 3.8
 Surface.base_color = 1 1 1
 Surface.roughness = 0.95
 Pattern.kind = "grid"
-Pattern.scale = 5 5
-Pattern.line_width = 0.34
+Pattern.scale = 5 4
+Pattern.line_width = 0.36
 Pattern.color_a = 0.30 0.10 0.07
 Pattern.color_b = 0.13 0.14 0.15
-Pattern.relief = 0.04
+Pattern.relief = 0.045
 Pattern.roughness_a = 0.95
 Pattern.roughness_b = 0.2
+
+entity
+Name.value = "Brick base"
+Transform.position = 0 -7.2 0
+Shape.kind = "box"
+Shape.size = 4.6 2.2 3.9
+Surface.base_color = 1 1 1
+Surface.roughness = 0.95
+Pattern.kind = "brick"
+Pattern.scale = 14 9
+Pattern.line_width = 0.14
+Pattern.color_a = 0.19 0.17 0.16
+Pattern.color_b = 0.34 0.13 0.09
+Pattern.relief = 0.05
+Pattern.roughness_a = 0.98
+Pattern.roughness_b = 0.9
+
+entity
+Name.value = "Brick parapet"
+Transform.position = 0 5.4 0
+Shape.kind = "box"
+Shape.size = 4.7 0.4 4
+Surface.base_color = 0.26 0.13 0.11
+Surface.roughness = 0.96
+
+entity
+Name.value = "Brick stack"
+Transform.position = 1.9 6.6 -0.9
+Shape.kind = "box"
+Shape.size = 0.5 1 0.5
+Surface.base_color = 0.24 0.12 0.1
+Surface.roughness = 0.96

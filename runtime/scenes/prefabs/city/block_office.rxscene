@@ -1,17 +1,53 @@
 rxscene 1
 
-# Ribbon-window office: wide bays, strong horizontal banding.
+# Mid-rise ribbon-window office: wide bays, strong horizontal banding, a glazed
+# ground floor and a cornice. The cornice is the cheapest thing in this whole
+# directory and does the most work - a mid-rise that stops dead at its top edge
+# reads as a cut-off box, and 40cm of overhang is the difference.
+
 entity
-Name.value = "Office block"
+Name.value = "Office shaft"
 Shape.kind = "box"
-Shape.size = 7 9 6
+Shape.size = 4.5 7 4
 Surface.base_color = 1 1 1
 Surface.roughness = 0.9
 Pattern.kind = "grid"
-Pattern.scale = 5 6
+Pattern.scale = 5 4
 Pattern.line_width = 0.26
 Pattern.color_a = 0.55 0.54 0.52
 Pattern.color_b = 0.11 0.16 0.21
 Pattern.relief = 0.03
 Pattern.roughness_a = 0.92
 Pattern.roughness_b = 0.09
+
+entity
+Name.value = "Office ground"
+Transform.position = 0 -9.1 0
+Shape.kind = "box"
+Shape.size = 4.6 2.1 4.1
+Surface.base_color = 1 1 1
+Surface.roughness = 0.82
+Pattern.kind = "grid"
+Pattern.scale = 5 1
+Pattern.line_width = 0.09
+Pattern.color_a = 0.2 0.2 0.21
+Pattern.color_b = 0.2 0.26 0.31
+Pattern.relief = 0.018
+Pattern.roughness_a = 0.8
+Pattern.roughness_b = 0.05
+
+entity
+Name.value = "Office cornice"
+Transform.position = 0 7.3 0
+Shape.kind = "box"
+Shape.size = 4.9 0.3 4.4
+Surface.base_color = 0.5 0.49 0.47
+Surface.roughness = 0.93
+
+entity
+Name.value = "Office plant"
+Transform.position = -0.8 8.4 0.4
+Shape.kind = "box"
+Shape.size = 1.8 0.8 1.5
+Surface.base_color = 0.42 0.42 0.41
+Surface.roughness = 0.94

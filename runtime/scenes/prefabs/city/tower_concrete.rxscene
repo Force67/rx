@@ -1,18 +1,57 @@
 rxscene 1
 
-# Post-war concrete slab block. Deep-set punched windows, so the relief is
-# heavier and the frame is the same concrete as the wall.
+# Post-war concrete slab block: heavy punched windows, a broad plinth and a
+# roof plant room. Deeper relief than the glass tower and the frame is the same
+# concrete as the wall, so it reads as mass with holes in it rather than as a
+# skin. Root is the shaft; see tower_glass.rxscene for the convention.
+
 entity
-Name.value = "Concrete tower"
+Name.value = "Concrete shaft"
 Shape.kind = "box"
-Shape.size = 5 14 5
+Shape.size = 4 11 4.5
 Surface.base_color = 1 1 1
 Surface.roughness = 0.92
 Pattern.kind = "grid"
-Pattern.scale = 4 11
+Pattern.scale = 4 7
 Pattern.line_width = 0.3
 Pattern.color_a = 0.46 0.45 0.43
 Pattern.color_b = 0.12 0.14 0.16
 Pattern.relief = 0.05
 Pattern.roughness_a = 0.95
 Pattern.roughness_b = 0.15
+
+# A plinth of two solid floors. Almost no glazing, which is what a building of
+# this period does at street level and what stops the punched grid running all
+# the way to the pavement as though the ground floor were another office.
+entity
+Name.value = "Concrete plinth"
+Transform.position = 0 -13.5 0
+Shape.kind = "box"
+Shape.size = 4.5 2.5 5
+Surface.base_color = 1 1 1
+Surface.roughness = 0.95
+Pattern.kind = "grid"
+Pattern.scale = 5 1
+Pattern.line_width = 0.42
+Pattern.color_a = 0.38 0.37 0.35
+Pattern.color_b = 0.20 0.21 0.22
+Pattern.relief = 0.04
+Pattern.roughness_a = 0.95
+Pattern.roughness_b = 0.4
+
+entity
+Name.value = "Concrete plant"
+Transform.position = 0 12.4 0
+Shape.kind = "box"
+Shape.size = 2.6 1.4 2.4
+Surface.base_color = 0.4 0.4 0.39
+Surface.roughness = 0.94
+
+entity
+Name.value = "Concrete tank"
+Transform.position = 1.4 14.6 -0.6
+Shape.kind = "cylinder"
+Shape.size = 0.7 0.8 0
+Surface.base_color = 0.36 0.37 0.38
+Surface.roughness = 0.5
+Surface.metallic = 0.85
