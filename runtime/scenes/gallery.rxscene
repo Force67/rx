@@ -1,0 +1,233 @@
+rxscene 1
+
+# A gallery hall, authored end to end as text: no absolute coordinate is derived
+# by hand except the shell and the two colonnade origins. Every column is a grid
+# cell, every display piece is anchored on the plinth below it, and every
+# material is a named preset.
+#
+#   rx --validate runtime/scenes/gallery.rxscene
+#   rx --scene runtime/scenes/gallery.rxscene --headless --shot out.png \
+#      --shot-frames 20 --width 1280 --height 720
+
+entity
+Name.value = "Camera"
+Transform.position = 0 1.9 6.2
+Camera.target = 0 1.35 -5
+Camera.fov_degrees = 52
+
+# --- shell -------------------------------------------------------------------
+
+entity
+Name.value = "Floor"
+Transform.position = 0 0 0
+Shape.kind = "plane"
+Shape.size = 7 0 11
+Prefab.path = "materials/slate_tile.rxscene"
+
+entity
+Name.value = "Back wall"
+Transform.position = 0 3 -11
+Shape.kind = "box"
+Shape.size = 7 3 0.3
+Prefab.path = "materials/plaster_white.rxscene"
+
+entity
+Name.value = "Left wall"
+Transform.position = -7 3 0
+Shape.kind = "box"
+Shape.size = 0.3 3 11
+Prefab.path = "materials/plaster_white.rxscene"
+
+entity
+Name.value = "Right wall"
+Transform.position = 7 3 0
+Shape.kind = "box"
+Shape.size = 0.3 3 11
+Prefab.path = "materials/plaster_white.rxscene"
+
+entity
+Name.value = "Ceiling"
+Transform.position = 0 6 0
+Shape.kind = "box"
+Shape.size = 7 0.2 11
+Prefab.path = "materials/plaster_white.rxscene"
+
+# --- colonnade ---------------------------------------------------------------
+# Two rows of six. Only the two origins are authored; the grid derives the rest.
+
+entity
+Name.value = "Left colonnade"
+Transform.position = -4.3 1.7 -7.2
+Grid.count = 1 1 5
+Grid.step = 0 0 3.6
+Grid.cell = "prefabs/hall_column.rxscene"
+
+entity
+Grid.of = "Left colonnade"
+entity
+Grid.of = "Left colonnade"
+entity
+Grid.of = "Left colonnade"
+entity
+Grid.of = "Left colonnade"
+entity
+Grid.of = "Left colonnade"
+
+entity
+Name.value = "Right colonnade"
+Transform.position = 4.3 1.7 -7.2
+Grid.count = 1 1 5
+Grid.step = 0 0 3.6
+Grid.cell = "prefabs/hall_column.rxscene"
+
+entity
+Grid.of = "Right colonnade"
+entity
+Grid.of = "Right colonnade"
+entity
+Grid.of = "Right colonnade"
+entity
+Grid.of = "Right colonnade"
+entity
+Grid.of = "Right colonnade"
+
+# --- plinths and their pieces ------------------------------------------------
+# Each piece is anchored on its plinth, so moving or resizing a plinth carries
+# the piece with it and no height is ever written down.
+
+entity
+Name.value = "Plinth A"
+Transform.position = -2.0 0.8 -7.5
+Shape.kind = "box"
+Shape.size = 0.55 0.8 0.55
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+entity
+Name.value = "Gold vessel"
+Anchor.target = "Plinth A"
+Anchor.mode = "on"
+Shape.kind = "sphere"
+Shape.size = 0.42 0 0
+Prefab.path = "materials/gold.rxscene"
+
+entity
+Name.value = "Plinth B"
+Transform.position = 2.0 0.8 -7.5
+Shape.kind = "box"
+Shape.size = 0.55 0.8 0.55
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+entity
+Name.value = "Copper torus"
+Anchor.target = "Plinth B"
+Anchor.mode = "on"
+Shape.kind = "torus"
+Shape.size = 0.4 0.14 0
+Prefab.path = "materials/copper.rxscene"
+
+entity
+Name.value = "Plinth C"
+Transform.position = -2.0 0.8 -3.2
+Shape.kind = "box"
+Shape.size = 0.55 0.8 0.55
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+entity
+Name.value = "Glass cone"
+Anchor.target = "Plinth C"
+Anchor.mode = "on"
+Shape.kind = "cone"
+Shape.size = 0.38 0.5 0
+Prefab.path = "materials/chrome.rxscene"
+
+entity
+Name.value = "Plinth D"
+Transform.position = 2.0 0.8 -3.2
+Shape.kind = "box"
+Shape.size = 0.55 0.8 0.55
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+entity
+Name.value = "Teal urn"
+Anchor.target = "Plinth D"
+Anchor.mode = "on"
+Shape.kind = "capsule"
+Shape.size = 0.3 0.28 0
+Prefab.path = "materials/ceramic_glazed_teal.rxscene"
+
+# --- furniture along the walls -----------------------------------------------
+
+entity
+Name.value = "Bench"
+Transform.position = -5.2 0.45 1
+Shape.kind = "box"
+Shape.size = 0.55 0.1 2.2
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+entity
+Name.value = "Bench leg near"
+Anchor.target = "Bench"
+Anchor.mode = "under"
+Shape.kind = "box"
+Shape.size = 0.45 0.35 0.12
+Prefab.path = "materials/cast_iron.rxscene"
+
+entity
+Name.value = "Crate stack base"
+Transform.position = 5.1 0.4 3.4
+Shape.kind = "box"
+Shape.size = 0.4 0.4 0.4
+Prefab.path = "materials/wood_planks.rxscene"
+
+entity
+Name.value = "Crate stack top"
+Anchor.target = "Crate stack base"
+Anchor.mode = "on"
+Shape.kind = "box"
+Shape.size = 0.3 0.3 0.3
+Prefab.path = "materials/wood_planks.rxscene"
+
+entity
+Name.value = "Barrel"
+Anchor.target = "Crate stack base"
+Anchor.mode = "front"
+Shape.kind = "cylinder"
+Shape.size = 0.34 0.45 0
+Prefab.path = "materials/steel.rxscene"
+
+entity
+Name.value = "Rug"
+Transform.position = 0 0.01 -0.5
+Shape.kind = "plane"
+Shape.size = 2.2 0 3.4
+Prefab.path = "materials/velvet_crimson.rxscene"
+
+# --- lighting ----------------------------------------------------------------
+
+entity
+Name.value = "Hall light front"
+Transform.position = 0 4.4 4.5
+Light.color = 1 0.88 0.72
+Light.intensity = 40
+Light.radius = 12
+
+entity
+Name.value = "Hall light mid"
+Transform.position = 0 4.6 -3
+Light.color = 1 0.88 0.72
+Light.intensity = 40
+Light.radius = 12
+
+entity
+Name.value = "Hall light back"
+Transform.position = 0 4.6 -8
+Light.color = 0.95 0.9 0.85
+Light.intensity = 34
+Light.radius = 12
+
+entity
+Name.value = "Apse glow"
+Transform.position = 0 2.2 -10
+Light.color = 0.5 0.75 1
+Light.intensity = 14
+Light.radius = 7
