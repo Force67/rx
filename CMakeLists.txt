@@ -503,6 +503,10 @@ if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
   add_executable(gltf_texture_transform_test test/gltf_texture_transform_test.cc)
   target_link_libraries(gltf_texture_transform_test PRIVATE rx::asset rx::core)
   add_test(NAME gltf_texture_transform_test COMMAND gltf_texture_transform_test)
+
+  add_executable(materialx_test test/materialx_test.cc)
+  target_link_libraries(materialx_test PRIVATE rx::asset rx::core)
+  add_test(NAME materialx_test COMMAND materialx_test)
 endif()
 
 # USD import: composition (a reference arc into a second layer), the z-up /

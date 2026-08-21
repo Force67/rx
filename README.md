@@ -164,8 +164,11 @@ no imported art, from the building prefabs in `runtime/scenes/prefabs/city/`.
   Skinning, animation and the file's own lights and cameras are not applied.
 - `Surface` carries the pbr lobes the mesh shaders actually shade (clearcoat,
   anisotropy, ior, sheen, subsurface, iridescence, transmission, specular
-  colour/strength, `env_reflect` and the soft/rim/back light fills), or names a
-  `.mtlx` document to take the whole material from.
+  colour/strength, `env_reflect` and the soft/rim/back light fills), plus six
+  image maps (base colour, normal, roughness, metallic, occlusion, emissive)
+  that put a downloaded PBR texture set on a primitive, or names a `.mtlx`
+  document to take the whole material from - constants and image-node inputs
+  alike, so an ambientCG-style document works as it ships.
 - `Pattern` generates a procedural texture at load (`checker | grid | brick |
   gradient | noise`) and binds it to base colour, plus a normal map derived from
   the same pattern read as a height field and a roughness map ramped across it.

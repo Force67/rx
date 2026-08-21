@@ -115,6 +115,17 @@ to reach an authored primitive. Things worth knowing:
 - A map named beside a `Surface.materialx` replaces that one slot of the
   document, the same precedence a `Pattern` already has over one.
 
+`Surface.materialx` is the other way in, and takes the whole material from a
+`.mtlx` document: both `standard_surface` and `open_pbr_surface` (which is what
+ambientCG's exporter writes), and both constant inputs and inputs **connected to
+`<image>` / `<tiledimage>` nodes**, optionally through a `<normalmap>`. That is
+what makes a downloaded set usable as it ships, since those documents carry no
+constants at all. Filenames inside a `.mtlx` resolve against **the document's own
+directory**, not the working directory, so a set stays movable as a folder. A
+connection through a node this build does not evaluate leaves that slot empty
+and says so by name in the log; it never binds an operand as if it were the
+result.
+
 Anchors and grids both **replace** `Transform.position`, so an entity cannot use
 both, and grid members all share the grid's y. A row of identical lamps is a
 grid; a terrace of differing buildings is individual anchors.

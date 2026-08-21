@@ -356,10 +356,25 @@ void CheckSurface(ecs::World& world, ecs::Entity entity, bool fragment, Report& 
   // is one that loads there. Paths are relative to the working directory, which
   // makes this the one check whose answer depends on where it is run from.
   asset::Material discarded;
-  if (!asset::LoadMaterialX(surface->materialx, &discarded)) {
+  asset::MaterialXMaps document_maps;
+  if (!asset::LoadMaterialX(surface->materialx, &discarded, &document_maps)) {
     report.Error(entity, "materialx_not_loaded",
                  "Surface.materialx '" + surface->materialx +
                      "' does not load (path is relative to the working directory)");
+    return;
+  }
+  // A document resolves its image nodes to files beside itself, and the load
+  // fails on one that is not there. Reported per file, since a set is usually
+  // missing one map rather than all of them.
+  for (const std::string* file : {&document_maps.base_color, &document_maps.normal,
+                                  &document_maps.roughness, &document_maps.metallic,
+                                  &document_maps.occlusion, &document_maps.emissive}) {
+    if (file->empty()) continue;
+    const std::string problem = SceneSurfaceMapProblem(*file);
+    if (problem.empty()) continue;
+    report.Error(entity, "materialx_map_not_loaded",
+                 std::format("Surface.materialx '{}' names an image '{}' that {}",
+                             surface->materialx, *file, problem));
   }
 }
 

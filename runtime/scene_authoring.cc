@@ -166,6 +166,42 @@ asset::AssetId SurfaceMapId(const std::string& path, bool srgb) {
                             asset::NormalizePath(path));
 }
 
+// Decodes one image file, binds it to `slot` and hands it to the db and the
+// gpu. Empty on success, else the clause saying why the file is not an image.
+std::string BindSurfaceTexture(const std::string& file, bool srgb,
+                               asset::AssetId asset::Material::*slot, asset::AssetDatabase& db,
+                               render::Renderer* renderer, asset::Material* material) {
+  const asset::AssetId id = SurfaceMapId(file, srgb);
+  if (!db.FindTexture(id)) {
+    asset::Texture texture;
+    if (!asset::LoadImageFile(file, srgb, id, &texture)) {
+      std::string problem = asset::ImageFileProblem(file);
+      // The header read and the decode disagree only on a truncated file.
+      if (problem.empty()) problem = "has a readable header and then fails to decode";
+      return problem;
+    }
+    // Order matters, exactly as in ApplyPattern: MaterialSystem resolves a
+    // material's texture slots at UploadMaterial and silently falls back to its
+    // 1x1 defaults for anything not uploaded yet, so every map has to reach the
+    // gpu before the material naming it does.
+    if (renderer) renderer->UploadTexture(texture);
+    db.AddTexture(std::move(texture));
+  }
+  material->*slot = id;
+  return {};
+}
+
+// A roughness or metallic map means the metallic_roughness slot is NOT glTF ORM
+// packing. Without this the shader reads metallic from the roughness map's BLUE
+// channel, so a rough dielectric comes back as rough metal - a rendering nobody
+// would connect to the texture being unpacked. The flag is also what makes
+// metallic_map readable at all, and with no metallic map the white default
+// leaves the scalar metallic factor in charge, which is the untextured
+// behaviour.
+void MarkSeparateMetallic(bool roughness, bool metallic, asset::Material* material) {
+  if (roughness || metallic) material->separate_metallic = true;
+}
+
 // Decodes Surface's image maps, binds them to `material` and hands each to the
 // db and the gpu. False + *prop/*path/*problem naming the assignment that could
 // not be resolved, which the caller turns into a `path:line:`.
@@ -175,36 +211,47 @@ bool ApplySurfaceMaps(const SceneSurface& surface, asset::AssetDatabase& db,
   for (const SurfaceMap& map : kSurfaceMaps) {
     const std::string& file = surface.*map.path;
     if (file.empty()) continue;
-    const asset::AssetId id = SurfaceMapId(file, map.srgb);
-    if (!db.FindTexture(id)) {
-      asset::Texture texture;
-      if (!asset::LoadImageFile(file, map.srgb, id, &texture)) {
-        *prop = map.prop;
-        *path = file;
-        *problem = asset::ImageFileProblem(file);
-        // The header read and the decode disagree only on a truncated file.
-        if (problem->empty()) *problem = "has a readable header and then fails to decode";
-        return false;
-      }
-      // Order matters, exactly as in ApplyPattern: MaterialSystem resolves a
-      // material's texture slots at UploadMaterial and silently falls back to
-      // its 1x1 defaults for anything not uploaded yet, so every map has to
-      // reach the gpu before the material naming it does.
-      if (renderer) renderer->UploadTexture(texture);
-      db.AddTexture(std::move(texture));
+    std::string why = BindSurfaceTexture(file, map.srgb, map.slot, db, renderer, material);
+    if (!why.empty()) {
+      *prop = map.prop;
+      *path = file;
+      *problem = std::move(why);
+      return false;
     }
-    material->*map.slot = id;
   }
-  // A standalone roughness map is not glTF ORM packing. Without this the shader
-  // reads metallic from the roughness map's BLUE channel, so a rough dielectric
-  // comes back as rough metal - a rendering nobody would connect to the texture
-  // being unpacked. The flag is also what makes metallic_map readable at all,
-  // and with no metallic map the white default leaves Surface.metallic in
-  // charge, which is the untextured behaviour.
-  if (!surface.roughness_map.empty() || !surface.metallic_map.empty()) {
-    material->separate_metallic = true;
-  }
+  MarkSeparateMetallic(!surface.roughness_map.empty(), !surface.metallic_map.empty(), material);
   return true;
+}
+
+// The same six slots, filled from a MaterialX document's own image nodes.
+// Empty on success, else the clause naming the file inside the document that
+// did not resolve; the caller puts it behind the Surface.materialx assignment,
+// since that is the line the author actually wrote.
+std::string ApplyMaterialXMaps(const asset::MaterialXMaps& maps, asset::AssetDatabase& db,
+                               render::Renderer* renderer, asset::Material* material) {
+  const struct {
+    const std::string& file;
+    asset::AssetId asset::Material::*slot;
+    bool srgb;
+  } bindings[] = {
+      {maps.base_color, &asset::Material::base_color, true},
+      {maps.normal, &asset::Material::normal, false},
+      {maps.roughness, &asset::Material::metallic_roughness, false},
+      {maps.metallic, &asset::Material::metallic_map, false},
+      {maps.occlusion, &asset::Material::occlusion_map, false},
+      {maps.emissive, &asset::Material::emissive, true},
+  };
+  for (const auto& binding : bindings) {
+    if (binding.file.empty()) continue;
+    std::string why =
+        BindSurfaceTexture(binding.file, binding.srgb, binding.slot, db, renderer, material);
+    if (!why.empty()) {
+      return std::format("names an image '{}' that {} (a MaterialX filename resolves against the "
+                         "document's own directory)", binding.file, why);
+    }
+  }
+  MarkSeparateMetallic(!maps.roughness.empty(), !maps.metallic.empty(), material);
+  return {};
 }
 
 // Synthesizes the pattern's maps, binds them to `material` and hands them to
@@ -896,14 +943,26 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     if (!built.insert(mesh_id.hash).second) return;
 
     asset::Material material;
+    asset::MaterialXMaps document_maps;
     if (surface.materialx.empty()) {
       ApplySurface(surface, &material);
-    } else if (!asset::LoadMaterialX(surface.materialx, &material)) {
+    } else if (!asset::LoadMaterialX(surface.materialx, &material, &document_maps)) {
       if (error) *error = "Surface.materialx '" + surface.materialx + "' did not load";
       ok = false;
       return;
     }
     material.id = asset::MakeAssetId(key + "/material");
+    // Before the Surface's own maps, so an explicitly named one replaces the
+    // slot the document filled rather than the other way round.
+    if (std::string why = ApplyMaterialXMaps(document_maps, db, renderer, &material);
+        !why.empty()) {
+      if (error) {
+        *error = Located(scene_path, EntityName(world, e), "Surface.materialx", surface.materialx,
+                         why);
+      }
+      ok = false;
+      return;
+    }
     // After the materialx load, so a map named beside a document replaces that
     // one slot of it, which is the precedence a Pattern already has over one.
     const char* prop = nullptr;
