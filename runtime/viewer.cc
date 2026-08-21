@@ -235,6 +235,10 @@ bool Viewer::LoadRxScene() {
     RX_ERROR("rxscene: {}", error);
     return false;
   }
+  // After the prefabs, so a rotation one carries is resolved like an authored
+  // one, and before the anchors, which stand a turned object on its turned
+  // footprint.
+  BuildSceneRotations(*world_);
   if (!BuildSceneShapes(*world_, db, config_.headless ? nullptr : renderer_, &error)) {
     RX_ERROR("rxscene: {}", error);
     return false;

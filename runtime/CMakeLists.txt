@@ -126,7 +126,7 @@ rx_enable_mimalloc(rx)
 if(RX_BUILD_TESTS)
   # From the source root, because a scene names its assets (Model.path,
   # Surface.materialx) relative to the working directory.
-  foreach(scene cornell showcase material_sheet model)
+  foreach(scene cornell showcase gallery material_sheet model)
     add_test(NAME scene_validate_${scene}
       COMMAND rx --validate ${CMAKE_CURRENT_SOURCE_DIR}/scenes/${scene}.rxscene
       WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

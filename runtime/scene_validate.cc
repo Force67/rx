@@ -568,6 +568,10 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // be one the expansion created, which has no line at all.
   if (!BuildSceneGrids(world, path, &error)) report.FileError("grid", error);
   if (!BuildScenePrefabs(world, path, &error)) report.FileError("prefab", error);
+  // Also before the per-entity checks, so CheckTransform judges the quaternion
+  // the renderer will actually use rather than the identity a Rotation has not
+  // been resolved into yet.
+  BuildSceneRotations(world);
 
   const std::vector<ecs::Entity> entities = AllEntities(world);
   // Decided once, after the two expansion passes: an instance that took its

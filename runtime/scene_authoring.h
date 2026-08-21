@@ -159,6 +159,36 @@ struct ScenePrefab {
   std::string path;
 };
 
+// Orientation in degrees, because a quaternion is not something an author (or
+// an agent) writes down: "turn this 30 degrees about y" is "0 30 0" here and
+// four hand-computed numbers in Transform.rotation, which is why every scene
+// authored before this component was axis-aligned.
+//
+// `euler` is degrees about x, y and z - pitch, yaw and roll - applied yaw, then
+// pitch, then roll about the entity's OWN axes (q = Ry * Rx * Rz). That order is
+// what keeps yaw horizontal however the thing is pitched, which is what a
+// placement almost always means. Right-handed and y-up like the rest of the
+// engine, so a positive yaw turns counter-clockwise seen from above and y = 90
+// takes the entity's +z face onto +x.
+//
+// It REPLACES Transform.rotation rather than composing onto it, for the same
+// reason an Anchor replaces Transform.position: BuildSceneRotations resolves it
+// into the Transform, and SaveScene writes the resolved quaternion next to the
+// Rotation that produced it, so anything additive would turn the object again on
+// every save/load round trip. An entity wanting a quaternion verbatim authors
+// Transform.rotation and no Rotation, and a live editor sees the failure mode an
+// Anchor already has: turning the entity by hand writes a quaternion the next
+// load throws away for the euler beside it.
+//
+// Against a prefab it follows the usual per-component rule (see ScenePrefab): an
+// instance that authors Rotation owns its orientation, one that does not takes
+// the prefab's. An instance authoring a raw Transform.rotation does NOT beat a
+// prefab's Rotation, because the two are different components; author Rotation
+// on both sides, or neither.
+struct SceneRotation {
+  f32 euler[3] = {0, 0, 0};
+};
+
 // Relative placement: stand this entity against another one instead of at a
 // coordinate derived by hand. `target` is the other entity's Name.value and
 // `mode` picks which side of it to sit against.
@@ -166,7 +196,10 @@ struct ScenePrefab {
 // The placement uses both entities' real world bounds, children included, so it
 // resolves after BuildSceneShapes/BuildSceneModels rather than at load; a
 // target whose geometry has no extent (a bare Light) cannot be measured and
-// fails the load.
+// fails the load. It also runs after BuildSceneRotations, because a turned box
+// stands on a different footprint than an axis-aligned one: both boxes are
+// measured with their rotation applied (every corner, not just min and max), so
+// a piece tilted on its plinth still sits on it rather than through or above it.
 //
 // An anchor REPLACES Transform.position: the anchor is the position, and the
 // two axes the mode does not stack along centre on the target. It has to
@@ -268,6 +301,15 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
 // False + *error on a prefab that does not load and on a prefab that reaches
 // itself, which would otherwise expand until memory ran out.
 bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::string* error);
+
+// Resolves every SceneRotation into its entity's Transform.rotation, adding a
+// Transform to an entity that has none. Runs after BuildScenePrefabs, so a
+// rotation a prefab carries resolves like an authored one, and before
+// BuildSceneShapes/BuildSceneAnchors, which measure the turned geometry.
+//
+// No failure path: every finite triple of degrees is a legal orientation, and a
+// non-finite one is refused by the loader with the line that wrote it.
+void BuildSceneRotations(ecs::World& world);
 
 // Resolves every SceneAnchor into a Transform.position, in dependency order so
 // an anchor onto an anchored entity sees the settled one. Runs after

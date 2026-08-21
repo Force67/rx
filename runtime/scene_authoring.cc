@@ -294,6 +294,25 @@ std::string ImportModel(const std::string& path, asset::ImportedScene* scene, i3
   return SelectionProblem(*index, scene->meshes.size(), scene->instances.size());
 }
 
+// The orientation a SceneRotation describes: yaw, then pitch, then roll about
+// the entity's own axes, which is q = Ry * Rx * Rz because `a * b` here applies
+// b first. See SceneRotation for why that order and that handedness.
+//
+// Every factor is unit, so the product is unit to float precision and the
+// rotation neither collapses nor scales the mesh - which is what keeps
+// --validate's degenerate_rotation and non_unit_rotation quiet on a legal euler.
+void EulerDegreesToQuat(const f32 euler[3], f32 out[4]) {
+  constexpr f32 kToRadians = 3.14159265358979f / 180.0f;
+  const Quat pitch = QuatFromAxisAngle({1, 0, 0}, euler[0] * kToRadians);
+  const Quat yaw = QuatFromAxisAngle({0, 1, 0}, euler[1] * kToRadians);
+  const Quat roll = QuatFromAxisAngle({0, 0, 1}, euler[2] * kToRadians);
+  const Quat q = yaw * pitch * roll;
+  out[0] = q.x;
+  out[1] = q.y;
+  out[2] = q.z;
+  out[3] = q.w;
+}
+
 // The Name.value of an entity, or empty. What Located narrows a finding by and
 // what an anchor message names a loop with.
 std::string EntityName(ecs::World& world, ecs::Entity entity) {
@@ -514,6 +533,12 @@ void RegisterSceneComponents() {
       .Hint("a .rxscene to instance here, relative to the file naming it; its first entity's "
             "components land on this entity (whatever this entity already says wins) and the "
             "rest become children of it");
+  edit::ReflectComponent<SceneRotation>("Rotation")
+      .Prop("euler", &SceneRotation::euler)
+      .Hint("degrees about x, y, z (pitch, yaw, roll), applied yaw then pitch then roll about "
+            "the entity's own axes; right-handed and y-up, so y = 90 turns the entity's +z "
+            "face onto +x. This replaces Transform.rotation, which needs no hand-written "
+            "quaternion once this exists");
   edit::ReflectComponent<SceneAnchor>("Anchor")
       .Prop("target", &SceneAnchor::target)
       .Hint("Name.value of the entity to stand against; this replaces Transform.position, and "
@@ -1166,6 +1191,32 @@ bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::st
         chain.emplace(PackKey(copy), descend);
       }
     }
+  }
+}
+
+void BuildSceneRotations(ecs::World& world) {
+  // Replaced rather than composed onto whatever Transform.rotation held: a
+  // SaveScene writes the resolved quaternion next to the Rotation that produced
+  // it, so composing would turn the entity a second time on the next load.
+  // Writing through the pointer moves nothing between archetypes, so this half
+  // is done in place; the entities needing a Transform ADDED are deferred, for
+  // the usual reason.
+  std::vector<ecs::Entity> untransformed;
+  world.Each<SceneRotation>([&](ecs::Entity entity, SceneRotation& rotation) {
+    if (scene::Transform* transform = world.Get<scene::Transform>(entity)) {
+      EulerDegreesToQuat(rotation.euler, transform->rotation);
+    } else {
+      untransformed.push_back(entity);
+    }
+  });
+  for (ecs::Entity entity : untransformed) {
+    // A Rotation without a position is idiomatic - a piece turned in place at
+    // the origin, a grid member whose cell arrives from the container - and
+    // BuildSceneShapes' own default Transform would land after the anchors have
+    // measured, which is too late to be turned.
+    scene::Transform transform;
+    EulerDegreesToQuat(world.Get<SceneRotation>(entity)->euler, transform.rotation);
+    world.Add(entity, transform);
   }
 }
 

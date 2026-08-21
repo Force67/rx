@@ -550,6 +550,17 @@ if(RX_BUILD_TESTS)
   add_executable(edit_test test/edit_test.cc)
   target_link_libraries(edit_test PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::core)
   add_test(NAME edit_test COMMAND edit_test)
+
+  # The .rxscene authoring passes themselves (runtime/scene_authoring.cc, which
+  # is viewer policy rather than a module, so it is compiled in here rather than
+  # linked). `rx --validate` covers what a scene REFUSES; this covers what the
+  # numbers come out as, which no exit code can show. Null renderer throughout,
+  # so it needs no device even though it links rx::render for the signatures.
+  add_executable(scene_authoring_test test/scene_authoring_test.cc runtime/scene_authoring.cc)
+  target_include_directories(scene_authoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime)
+  target_link_libraries(scene_authoring_test
+    PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::render rx::core)
+  add_test(NAME scene_authoring_test COMMAND scene_authoring_test)
 endif()
 
 if(RX_BUILD_TESTS)

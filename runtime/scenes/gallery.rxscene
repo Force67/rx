@@ -2,18 +2,23 @@ rxscene 1
 
 # A gallery hall, authored end to end as text: no absolute coordinate is derived
 # by hand except the shell and the two colonnade origins. Every column is a grid
-# cell, every display piece is anchored on the plinth below it, and every
-# material is a named preset.
+# cell, every display piece is anchored on the plinth below it, every material is
+# a named preset, and everything that is not architecture is turned off the axes
+# in degrees. The shell and the colonnade stay square, because a hall that is
+# out of true reads as a bug rather than as a composition.
 #
 #   rx --validate runtime/scenes/gallery.rxscene
 #   rx --scene runtime/scenes/gallery.rxscene --headless --shot out.png \
 #      --shot-frames 20 --width 1280 --height 720
 
+# Off the centre line and looking across the hall rather than down it. Dead
+# centre is one-point perspective, where every turned object is still seen
+# square on and the furniture along both walls is outside the frame entirely.
 entity
 Name.value = "Camera"
-Transform.position = 0 1.9 6.2
-Camera.target = 0 1.35 -5
-Camera.fov_degrees = 52
+Transform.position = 2.8 1.9 8.5
+Camera.target = -0.9 1.55 -6
+Camera.fov_degrees = 58
 
 # --- shell -------------------------------------------------------------------
 
@@ -93,11 +98,16 @@ Grid.of = "Right colonnade"
 
 # --- plinths and their pieces ------------------------------------------------
 # Each piece is anchored on its plinth, so moving or resizing a plinth carries
-# the piece with it and no height is ever written down.
+# the piece with it and no height is ever written down. That still holds once
+# they are turned: an anchor measures the rotated footprint, so the torus stood
+# on its edge sits on the plinth by the edge and not by the flat it was built
+# lying on. Every plinth is off square by a different amount, which is the whole
+# difference between four exhibits and four boxes in a row.
 
 entity
 Name.value = "Plinth A"
 Transform.position = -2.0 0.8 -7.5
+Rotation.euler = 0 24 0
 Shape.kind = "box"
 Shape.size = 0.55 0.8 0.55
 Prefab.path = "materials/wood_walnut_varnished.rxscene"
@@ -113,12 +123,16 @@ Prefab.path = "materials/gold.rxscene"
 entity
 Name.value = "Plinth B"
 Transform.position = 2.0 0.8 -7.5
+Rotation.euler = 0 -17 0
 Shape.kind = "box"
 Shape.size = 0.55 0.8 0.55
 Prefab.path = "materials/wood_walnut_varnished.rxscene"
 
+# Stood upright and turned to face the aisle, which is what a ring is for
+# looking at; lying flat it read as a washer on a stump.
 entity
 Name.value = "Copper torus"
+Rotation.euler = 84 34 0
 Anchor.target = "Plinth B"
 Anchor.mode = "on"
 Shape.kind = "torus"
@@ -128,12 +142,14 @@ Prefab.path = "materials/copper.rxscene"
 entity
 Name.value = "Plinth C"
 Transform.position = -2.0 0.8 -3.2
+Rotation.euler = 0 -38 0
 Shape.kind = "box"
 Shape.size = 0.55 0.8 0.55
 Prefab.path = "materials/wood_walnut_varnished.rxscene"
 
 entity
 Name.value = "Glass cone"
+Rotation.euler = 0 40 -19
 Anchor.target = "Plinth C"
 Anchor.mode = "on"
 Shape.kind = "cone"
@@ -143,12 +159,14 @@ Prefab.path = "materials/chrome.rxscene"
 entity
 Name.value = "Plinth D"
 Transform.position = 2.0 0.8 -3.2
+Rotation.euler = 0 31 0
 Shape.kind = "box"
 Shape.size = 0.55 0.8 0.55
 Prefab.path = "materials/wood_walnut_varnished.rxscene"
 
 entity
 Name.value = "Teal urn"
+Rotation.euler = 16 -28 11
 Anchor.target = "Plinth D"
 Anchor.mode = "on"
 Shape.kind = "capsule"
@@ -156,16 +174,21 @@ Shape.size = 0.3 0.28 0
 Prefab.path = "materials/ceramic_glazed_teal.rxscene"
 
 # --- furniture along the walls -----------------------------------------------
+# Pulled off the wall at an angle, and the leg turned with the bench so it stays
+# under it rather than crossing it. The crates are stacked by eye rather than
+# squared up, which is what a crate looks like once someone has moved it.
 
 entity
 Name.value = "Bench"
 Transform.position = -5.2 0.45 1
+Rotation.euler = 0 13 0
 Shape.kind = "box"
 Shape.size = 0.55 0.1 2.2
 Prefab.path = "materials/wood_walnut_varnished.rxscene"
 
 entity
 Name.value = "Bench leg near"
+Rotation.euler = 0 13 0
 Anchor.target = "Bench"
 Anchor.mode = "under"
 Shape.kind = "box"
@@ -175,20 +198,25 @@ Prefab.path = "materials/cast_iron.rxscene"
 entity
 Name.value = "Crate stack base"
 Transform.position = 5.1 0.4 3.4
+Rotation.euler = 0 29 0
 Shape.kind = "box"
 Shape.size = 0.4 0.4 0.4
 Prefab.path = "materials/wood_planks.rxscene"
 
 entity
 Name.value = "Crate stack top"
+Rotation.euler = 0 -14 0
 Anchor.target = "Crate stack base"
 Anchor.mode = "on"
 Shape.kind = "box"
 Shape.size = 0.3 0.3 0.3
 Prefab.path = "materials/wood_planks.rxscene"
 
+# Rolled onto its side: the roll takes the cylinder's axis off +y and the yaw
+# then points it across the corner.
 entity
 Name.value = "Barrel"
+Rotation.euler = 0 22 -90
 Anchor.target = "Crate stack base"
 Anchor.mode = "front"
 Shape.kind = "cylinder"
@@ -198,6 +226,7 @@ Prefab.path = "materials/steel.rxscene"
 entity
 Name.value = "Rug"
 Transform.position = 0 0.01 -0.5
+Rotation.euler = 0 7 0
 Shape.kind = "plane"
 Shape.size = 2.2 0 3.4
 Prefab.path = "materials/velvet_crimson.rxscene"
