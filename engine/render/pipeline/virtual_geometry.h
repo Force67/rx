@@ -72,6 +72,8 @@ class VirtualGeometryPass {
   // Builds the full cluster DAG from the mesh's lod 0 and uploads it.
   void Upload(Device& device, const asset::Mesh& mesh);
   // World transforms drawn next frame; empty keeps a single identity instance.
+  // Mirrored (negative determinant) transforms are dropped with a warning: the
+  // cluster rasterizers cull by winding and cannot flip it per instance.
   void SetInstances(std::span<const Mat4> transforms);
   // Albedo the resolve drapes over the mesh by planar world-xz projection
   // (uv = world.xz * world_to_uv + 0.5): rgba_mips is a full RGBA8 mip chain,

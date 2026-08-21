@@ -772,6 +772,16 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   target_link_libraries(compaction_test PRIVATE rx::render rx::core)
   add_test(NAME compaction_test COMMAND compaction_test)
 
+  # Cull bounding radius: runs cull.cs over a rotated, non-uniformly scaled
+  # instance straddling a frustum plane, the one case where reading the model
+  # matrix by row instead of by column under-reports the radius and culls
+  # visible geometry. Skips (exit 0) with no driver; the real path runs under
+  # vkrun.
+  add_executable(cull_bounds_test test/cull_bounds_test.cc)
+  target_link_libraries(cull_bounds_test PRIVATE rx::render rx::core)
+  target_include_directories(cull_bounds_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME cull_bounds_test COMMAND cull_bounds_test)
+
   # Upload batch: buffers created inside Begin/FlushUploadBatch (nested scopes,
   # implicit flush via ImmediateSubmit, soft-budget auto-submit) verified by
   # readback. Skips (exit 0) with no driver; the real path runs under vkrun.

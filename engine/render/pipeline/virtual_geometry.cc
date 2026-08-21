@@ -93,6 +93,15 @@ ByteSpan Span(const void* data, size_t bytes) {
   return ByteSpan(static_cast<const u8*>(data), bytes);
 }
 
+// Determinant of the linear part. Mat4 is column major, so m[0..2] is the
+// first column and this is c0 . (c1 x c2); negative means the transform
+// mirrors and every triangle it draws comes out wound the other way.
+f32 Determinant3(const Mat4& t) {
+  const f32* m = t.m;
+  return m[0] * (m[5] * m[10] - m[6] * m[9]) + m[1] * (m[6] * m[8] - m[4] * m[10]) +
+         m[2] * (m[4] * m[9] - m[5] * m[8]);
+}
+
 }  // namespace
 
 bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format depth_format) {
@@ -173,6 +182,8 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
   vis_pipeline_ = device.CreateGraphicsPipeline({
       .fragment = RX_SHADER(k_vgeo_vis_ps_hlsl),
       .mesh = RX_SHADER(k_vgeo_vis_ms_hlsl),
+      // Safe because SetInstances refuses mirrored transforms; see the note
+      // there before relaxing that.
       .raster = {.cull = CullMode::kBack},
       .sets = {{.slots = {storage(0), storage(1), storage(2), storage(3), storage(4),
                           storage(5), storage(6), storage(7), storage(8), storage(9)}}},
@@ -580,9 +591,27 @@ void VirtualGeometryPass::SetAlbedo(Device& device, ByteSpan rgba_mips, u32 size
 
 void VirtualGeometryPass::SetInstances(std::span<const Mat4> transforms) {
   pending_instances_.clear();
+  u32 mirrored = 0;
   for (const Mat4& m : transforms) {
     if (pending_instances_.size() >= kMaxInstances) break;
+    if (Determinant3(m) < 0.0f) {
+      ++mirrored;
+      continue;
+    }
     pending_instances_.push_back(m);
+  }
+  // A mirrored instance reverses screen-space winding, and both rasterizers on
+  // this path discard by winding: the hardware one through the vis pipeline's
+  // kBack cull, the compute one through the signed-area test in vgeo_sw.cs.
+  // Winding is pipeline state, not per-draw, so drawing such an instance
+  // correctly means a second flipped-winding pso plus a visible list split by
+  // instance parity to feed it - a scheduling change to the gpu-driven path
+  // for content the engine has never produced. Dropping is the loud failure;
+  // keeping it renders the cluster's interior, or nothing at all once the
+  // cluster cone cull has already removed the back-facing half.
+  if (mirrored) {
+    RX_WARN("vgeo: dropped {} mirrored instance(s); the cluster path needs a positive determinant",
+            mirrored);
   }
 }
 
