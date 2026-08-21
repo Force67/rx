@@ -79,7 +79,7 @@ writes no png, and exits nonzero.** Under `swrun` add `--no-rt` or
 
 Captures are deterministic: `--shot` implies a lockstep clock, so the same scene
 and build reproduce to about rmse 0.0002. `rxdiff` defaults to a 0.002 limit
-over a measured 0.00043 floor, which catches a 12% albedo change.
+over a measured 0.00055 floor, which catches a 12% albedo change.
 
 - **Diff at 20+ frames.** At 8 frames a busy scene's own run-to-run noise can
   exceed the tolerance and fail against itself.

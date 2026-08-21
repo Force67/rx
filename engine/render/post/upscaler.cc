@@ -37,4 +37,14 @@ std::unique_ptr<Upscaler> CreateUpscaler(const UpscalerDesc& desc, Device& devic
   return nullptr;
 }
 
+const char* UpscalerName(UpscalerKind kind) {
+  switch (kind) {
+    case UpscalerKind::kFsr3: return "fsr3";
+    case UpscalerKind::kDlss: return "dlss";
+    case UpscalerKind::kXess: return "xess";
+    case UpscalerKind::kNone: return "none";
+  }
+  return "none";
+}
+
 }  // namespace rx::render

@@ -687,6 +687,10 @@ private:
   void ResizeSizedPasses();
   void ApplySettings();
   bool CreateUpscalerForSettings();
+  // Creates the requested upscaler, or fsr3 when the requested one has no
+  // working runtime on this machine. False only when upscaling is off
+  // entirely, which is the caller's cue to drop to taa.
+  bool CreateUpscalerWithFallback();
   void BuildFrameGraph(FrameResources &frame, u32 image_index,
                        const FrameView &view);
   // Records the frame's opaque casters depth-only with ShadowPass's caster

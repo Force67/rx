@@ -62,6 +62,10 @@ class Upscaler {
 // device does not support it. Caller falls back to TAA.
 std::unique_ptr<Upscaler> CreateUpscaler(const UpscalerDesc& desc, class Device& device);
 
+// The spelling the --upscaler flag and the settings ini use, for logging which
+// backend a fallback actually landed on.
+const char* UpscalerName(UpscalerKind kind);
+
 }  // namespace rx::render
 
 #endif  // RX_RENDER_UPSCALER_H_

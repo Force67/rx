@@ -849,7 +849,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   }
 
   if (settings_.upscaler != UpscalerKind::kNone &&
-      !CreateUpscalerForSettings()) {
+      !CreateUpscalerWithFallback()) {
     RX_WARN("upscaler unavailable, falling back to taa");
     settings_.upscaler = UpscalerKind::kNone;
     settings_.aa_mode = AntiAliasingMode::kTaa;
@@ -1412,6 +1412,32 @@ bool Renderer::CreateUpscalerForSettings() {
   return false;
 }
 
+bool Renderer::CreateUpscalerWithFallback() {
+  if (CreateUpscalerForSettings())
+    return true;
+  // The preset picks dlss for any nvidia adapter and xess for intel, but both
+  // need a vendor runtime the machine may simply not have (a broken or absent
+  // ngx install is the common one, and it fails at context creation, not at
+  // load). Fsr3 is vendor-agnostic and runs on any vulkan device, so it is the
+  // second choice rather than dropping straight to taa. Without this an nvidia
+  // box with no working ngx renders every frame at native resolution and pays
+  // close to twice the frame cost, with nothing in the log but "falling back to
+  // taa" to say why.
+  if (settings_.upscaler == UpscalerKind::kFsr3)
+    return false;
+  const UpscalerKind requested = settings_.upscaler;
+  settings_.upscaler = UpscalerKind::kFsr3;
+  if (CreateUpscalerForSettings()) {
+    RX_WARN("{} upscaler unavailable, using fsr3 instead",
+            UpscalerName(requested));
+    return true;
+  }
+  // Leave the request in place so the caller's warning names what was asked
+  // for, not the substitute that also failed.
+  settings_.upscaler = requested;
+  return false;
+}
+
 void Renderer::UpdateRenderResolution() {
   if (upscaler_ && settings_.aa_mode == AntiAliasingMode::kUpscaler) {
     f32 scale = UpscalerScale(settings_.upscaler_quality);
@@ -1547,7 +1573,7 @@ void Renderer::ApplySettings() {
     device_->WaitIdle();
     upscaler_.reset();
     if (settings_.upscaler != UpscalerKind::kNone) {
-      if (!CreateUpscalerForSettings()) {
+      if (!CreateUpscalerWithFallback()) {
         RX_WARN("upscaler unavailable, falling back to taa");
         settings_.upscaler = UpscalerKind::kNone;
         settings_.aa_mode = AntiAliasingMode::kTaa;
@@ -7519,10 +7545,13 @@ void Renderer::RecreateSwapchain() {
   output_width_ = swapchain_->extent().width;
   output_height_ = swapchain_->extent().height;
 
-  // The upscaler is sized for the output, rebuild it alongside.
+  // The upscaler is sized for the output, rebuild it alongside. Same fallback
+  // as first bringup: a resize is another chance for a vendor runtime to fail,
+  // and dropping a working upscale to taa on a window resize is not something
+  // anyone would connect back to the resize.
   if (upscaler_) {
     upscaler_.reset();
-    if (!CreateUpscalerForSettings()) {
+    if (!CreateUpscalerWithFallback()) {
       settings_.upscaler = UpscalerKind::kNone;
       settings_.aa_mode = AntiAliasingMode::kTaa;
       applied_upscaler_ = UpscalerKind::kNone;

@@ -35,7 +35,7 @@ Captures are deterministic (`--shot` implies a lockstep clock), so a change that
 should not move the picture can be **proven** not to:
 
 ```sh
-./build/linux/rxdiff before.png after.png     # rmse limit 0.002, measured floor 0.00043
+./build/linux/rxdiff before.png after.png     # rmse limit 0.002, measured floor 0.00055
 ```
 
 - Diff at **20+ frames**. At 8, a busy scene's own noise can exceed the limit.

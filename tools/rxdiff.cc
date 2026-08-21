@@ -45,7 +45,7 @@ namespace {
 // two --shot runs of the SAME build on the SAME scene with the same flags:
 //
 //   cornell        640x360  f8   vkrun            6 pairs  rmse max 0.000194
-//   cornell       1280x720  f20  vkrun            6 pairs  rmse max 0.000433
+//   cornell       1280x720  f20  vkrun            6 pairs  rmse max 0.000553
 //   cornell        640x360  f60  vkrun            6 pairs  rmse max 0.000151
 //   showcase       640x360  f8   vkrun            6 pairs  rmse max 0.000276
 //   showcase      1280x720  f20  vkrun            6 pairs  rmse max 0.000192
@@ -60,7 +60,7 @@ namespace {
 //   cornell        640x360  f8   swrun --no-rt    3 pairs  rmse max 0 (identical)
 //   showcase       640x360  f8   swrun --no-rt    3 pairs  rmse max 0 (identical)
 //
-// so the floor is rmse 0.000433, with single channel excursions no larger than
+// so the floor is rmse 0.000553, with single channel excursions no larger than
 // 0.0275 (7/255). It does not grow with frame count or resolution, and it is
 // the radiance cache alone: RX_RCGI=0 makes even a raytraced capture bit
 // identical with rtao, ddgi and the NRD denoisers still running, so what is
