@@ -149,7 +149,12 @@ build/linux/runtime/rx --gltf assets/sponza/Sponza.gltf
 ### Text scenes and headless capture
 
 A `.rxscene` is a text scene that composes shapes, surfaces, lights, a camera and
-real art assets:
+real art assets. [docs/AUTHORING.md](docs/AUTHORING.md) is the guide to writing
+one; `runtime/scenes/city.rxscene` is a demo city built entirely this way, with
+no imported art, from the building prefabs in `runtime/scenes/prefabs/city/`.
+
+![a city street authored as text](docs/images/city.png)
+
 
 - `Shape.kind` is `box | sphere | plane | cylinder | cone | torus | capsule`.
 - `Model.path` names a `.gltf`/`.glb` file, which renders with the materials and

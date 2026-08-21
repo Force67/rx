@@ -1,0 +1,450 @@
+rxscene 1
+
+# A demo city, authored entirely as text through the .rxscene system. No C++,
+# no imported art: every building is a prefab from prefabs/city/, every facade
+# is a procedural pattern, every material is a named preset or inline PBR.
+#
+# The street grid stays square on purpose. A city reads as a city because its
+# blocks are orthogonal; what is turned off-axis is the traffic and the clutter,
+# which is what tells you the place is lived in rather than laid out.
+#
+#   rx --validate runtime/scenes/city.rxscene
+#   rx --scene runtime/scenes/city.rxscene --headless --shot out.png \
+#      --shot-frames 20 --width 1280 --height 720
+
+# Street-level at the intersection, looking north up the avenue. Low and off the
+# centre line so the towers rake and the cross street opens on the right.
+entity
+Name.value = "Camera"
+Transform.position = 2.6 6.4 56
+Camera.target = -0.5 13 -34
+Camera.fov_degrees = 55
+
+# --- ground and roads --------------------------------------------------------
+
+entity
+Name.value = "Ground"
+Transform.position = 0 0 0
+Shape.kind = "plane"
+Shape.size = 150 0 150
+Surface.base_color = 0.20 0.20 0.21
+Surface.roughness = 0.94
+Pattern.kind = "grid"
+Pattern.scale = 60
+Pattern.line_width = 0.06
+Pattern.color_a = 0.30 0.30 0.31
+Pattern.color_b = 0.19 0.19 0.20
+Pattern.relief = 0.01
+Pattern.roughness_a = 0.92
+Pattern.roughness_b = 0.95
+
+# Asphalt sits a hair above the paving so it wins the depth test cleanly.
+entity
+Name.value = "Avenue"
+Transform.position = 0 0.02 0
+Shape.kind = "plane"
+Shape.size = 9 0 150
+Surface.base_color = 0.085 0.085 0.09
+Surface.roughness = 0.93
+Pattern.kind = "noise"
+Pattern.scale = 22
+Pattern.color_a = 0.11 0.11 0.115
+Pattern.color_b = 0.075 0.075 0.08
+Pattern.relief = 0.006
+Pattern.roughness_a = 0.9
+Pattern.roughness_b = 0.95
+
+entity
+Name.value = "Cross street"
+Transform.position = 0 0.03 0
+Shape.kind = "plane"
+Shape.size = 150 0 9
+Surface.base_color = 0.085 0.085 0.09
+Surface.roughness = 0.93
+Pattern.kind = "noise"
+Pattern.scale = 22
+Pattern.color_a = 0.11 0.11 0.115
+Pattern.color_b = 0.075 0.075 0.08
+Pattern.relief = 0.006
+Pattern.roughness_a = 0.9
+Pattern.roughness_b = 0.95
+
+entity
+Name.value = "Centre line"
+Transform.position = 0 0.05 0
+Shape.kind = "plane"
+Shape.size = 0.16 0 140
+Surface.base_color = 0.62 0.58 0.22
+Surface.roughness = 0.8
+
+entity
+Name.value = "W shops"
+Transform.position = -15 3 30
+Prefab.path = "prefabs/city/shop_row.rxscene"
+
+entity
+Name.value = "W brick"
+Transform.position = -15 7 16
+Prefab.path = "prefabs/city/block_brick.rxscene"
+
+entity
+Name.value = "W office"
+Transform.position = -16 9 0
+Prefab.path = "prefabs/city/block_office.rxscene"
+
+entity
+Name.value = "W concrete"
+Transform.position = -15 14 -17
+Prefab.path = "prefabs/city/tower_concrete.rxscene"
+
+entity
+Name.value = "W glass"
+Transform.position = -14 18 -32
+Prefab.path = "prefabs/city/tower_glass.rxscene"
+
+entity
+Name.value = "W brick far"
+Transform.position = -15 7 -46
+Prefab.path = "prefabs/city/block_brick.rxscene"
+
+entity
+Name.value = "E office"
+Transform.position = 16 9 28
+Prefab.path = "prefabs/city/block_office.rxscene"
+
+entity
+Name.value = "E shops"
+Transform.position = 15 3 13
+Prefab.path = "prefabs/city/shop_row.rxscene"
+
+entity
+Name.value = "E glass"
+Transform.position = 14 18 -3
+Prefab.path = "prefabs/city/tower_glass.rxscene"
+
+entity
+Name.value = "E slim"
+Transform.position = 13 22 -19
+Prefab.path = "prefabs/city/tower_slim.rxscene"
+
+entity
+Name.value = "E concrete"
+Transform.position = 15 14 -35
+Prefab.path = "prefabs/city/tower_concrete.rxscene"
+
+entity
+Name.value = "E shops far"
+Transform.position = 15 3 -50
+Prefab.path = "prefabs/city/shop_row.rxscene"
+
+entity
+Name.value = "NW back"
+Transform.position = -34 18 -30
+Prefab.path = "prefabs/city/tower_glass.rxscene"
+
+entity
+Name.value = "NE back"
+Transform.position = 36 14 -28
+Prefab.path = "prefabs/city/tower_concrete.rxscene"
+
+entity
+Name.value = "SW warehouse"
+Transform.position = -40 4 20
+Prefab.path = "prefabs/city/warehouse.rxscene"
+
+entity
+Name.value = "SE warehouse"
+Transform.position = 40 4 22
+Prefab.path = "prefabs/city/warehouse.rxscene"
+
+entity
+Name.value = "SW brick"
+Transform.position = -38 7 -2
+Prefab.path = "prefabs/city/block_brick.rxscene"
+
+entity
+Name.value = "SE office"
+Transform.position = 39 9 2
+Prefab.path = "prefabs/city/block_office.rxscene"
+
+entity
+Name.value = "Sky tower A"
+Transform.position = -8 22 -62
+Prefab.path = "prefabs/city/tower_slim.rxscene"
+
+entity
+Name.value = "Sky tower B"
+Transform.position = 9 18 -66
+Prefab.path = "prefabs/city/tower_glass.rxscene"
+
+entity
+Name.value = "Sky tower C"
+Transform.position = 26 14 -60
+Prefab.path = "prefabs/city/tower_concrete.rxscene"
+
+entity
+Name.value = "Sky tower D"
+Transform.position = -30 22 -64
+Prefab.path = "prefabs/city/tower_slim.rxscene"
+
+entity
+Name.value = "West sidewalk"
+Transform.position = -13 0.09 0
+Shape.kind = "box"
+Shape.size = 4 0.09 150
+Surface.base_color = 0.32 0.32 0.33
+Surface.roughness = 0.93
+Pattern.kind = "grid"
+Pattern.scale = 4 130
+Pattern.line_width = 0.05
+Pattern.color_a = 0.24 0.24 0.25
+Pattern.color_b = 0.34 0.34 0.35
+Pattern.relief = 0.008
+
+entity
+Name.value = "East sidewalk"
+Transform.position = 13 0.09 0
+Shape.kind = "box"
+Shape.size = 4 0.09 150
+Surface.base_color = 0.32 0.32 0.33
+Surface.roughness = 0.93
+Pattern.kind = "grid"
+Pattern.scale = 4 130
+Pattern.line_width = 0.05
+Pattern.color_a = 0.24 0.24 0.25
+Pattern.color_b = 0.34 0.34 0.35
+Pattern.relief = 0.008
+
+# --- street lighting ---------------------------------------------------------
+# Lamps down the west kerb, then the east. Each is one prefab instance carrying
+# its own pole, arm, lit head and point light, so the rig is placed with the
+# geometry rather than authored separately.
+
+entity
+Name.value = "West kerb lamps"
+Transform.position = -10.2 4 26
+Grid.count = 1 1 7
+Grid.step = 0 0 -14
+Grid.cell = "prefabs/city/streetlamp.rxscene"
+
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+
+# Turned 180 so the arms reach out over the road from the far kerb.
+entity
+Name.value = "East kerb lamps"
+Transform.position = 10.2 4 26
+Rotation.euler = 0 180 0
+Grid.count = 1 1 7
+Grid.step = 0 0 -14
+Grid.cell = "prefabs/city/streetlamp.rxscene"
+
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+
+# --- street clutter ----------------------------------------------------------
+# The only things in the scene that are off the grid. A city is orthogonal; the
+# stuff people leave in it is not.
+
+entity
+Name.value = "Skip"
+Transform.position = -11.6 0.9 21
+Rotation.euler = 0 -12 0
+Shape.kind = "box"
+Shape.size = 1.5 0.9 0.9
+Prefab.path = "materials/steel.rxscene"
+
+entity
+Name.value = "Crate by skip"
+Rotation.euler = 0 34 0
+Anchor.target = "Skip"
+Anchor.mode = "on"
+Shape.kind = "box"
+Shape.size = 0.45 0.45 0.45
+Prefab.path = "materials/wood_planks.rxscene"
+
+entity
+Name.value = "Kiosk"
+Transform.position = 11.8 1.3 6
+Rotation.euler = 0 -21 0
+Shape.kind = "box"
+Shape.size = 1.1 1.3 1.1
+Prefab.path = "materials/brick_red.rxscene"
+
+entity
+Name.value = "Bollard row"
+Transform.position = -10.4 0.45 -4
+Grid.count = 1 1 6
+Grid.step = 0 0 -3.2
+
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+
+# --- roofline ----------------------------------------------------------------
+# Plant rooms and tanks, anchored on the towers they sit on. An anchor centres
+# on its target, which is what a penthouse wants anyway, and it means none of
+# these heights is written down: retune a tower and its roof follows.
+
+entity
+Name.value = "E glass plant"
+Anchor.target = "E glass"
+Anchor.mode = "on"
+Rotation.euler = 0 6 0
+Shape.kind = "box"
+Shape.size = 2.2 1.1 2.2
+Prefab.path = "materials/concrete.rxscene"
+
+entity
+Name.value = "E glass tank"
+Anchor.target = "E glass plant"
+Anchor.mode = "on"
+Shape.kind = "cylinder"
+Shape.size = 0.8 0.7 0
+Prefab.path = "materials/steel.rxscene"
+
+entity
+Name.value = "W glass plant"
+Anchor.target = "W glass"
+Anchor.mode = "on"
+Rotation.euler = 0 -9 0
+Shape.kind = "box"
+Shape.size = 2.4 0.9 2.4
+Prefab.path = "materials/concrete.rxscene"
+
+entity
+Name.value = "E slim mast"
+Anchor.target = "E slim"
+Anchor.mode = "on"
+Shape.kind = "cylinder"
+Shape.size = 0.12 3 0
+Prefab.path = "materials/steel.rxscene"
+
+entity
+Name.value = "W concrete plant"
+Anchor.target = "W concrete"
+Anchor.mode = "on"
+Rotation.euler = 0 14 0
+Shape.kind = "box"
+Shape.size = 2.6 1 2.2
+Prefab.path = "materials/concrete.rxscene"
+
+entity
+Name.value = "E office plant"
+Anchor.target = "E office"
+Anchor.mode = "on"
+Shape.kind = "box"
+Shape.size = 3 0.8 2.4
+Prefab.path = "materials/concrete.rxscene"
+
+
+entity
+Name.value = "Kerb crates"
+Transform.position = 12.4 0.4 -8
+Rotation.euler = 0 17 0
+Shape.kind = "box"
+Shape.size = 0.5 0.4 0.5
+Prefab.path = "materials/wood_planks.rxscene"
+
+entity
+Name.value = "Kerb crate top"
+Rotation.euler = 0 -26 0
+Anchor.target = "Kerb crates"
+Anchor.mode = "on"
+Shape.kind = "box"
+Shape.size = 0.36 0.3 0.36
+Prefab.path = "materials/wood_planks.rxscene"
+
+entity
+Name.value = "Bench west"
+Transform.position = -12.6 0.55 8
+Rotation.euler = 0 -4 0
+Shape.kind = "box"
+Shape.size = 0.35 0.06 1.4
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+entity
+Name.value = "Bench west leg"
+Anchor.target = "Bench west"
+Anchor.mode = "under"
+Shape.kind = "box"
+Shape.size = 0.3 0.25 0.1
+Prefab.path = "materials/cast_iron.rxscene"
+
+entity
+Name.value = "Planter"
+Transform.position = -12.2 0.4 -16
+Rotation.euler = 0 8 0
+Shape.kind = "box"
+Shape.size = 0.6 0.4 0.6
+Prefab.path = "materials/granite.rxscene"
+
+
+# --- fill light --------------------------------------------------------------
+# The lamps light the kerbs; these keep the far end of the avenue and the tower
+# faces from going to black, which the sun alone does not reach at this hour.
+
+entity
+Name.value = "Avenue fill"
+Transform.position = 0 34 -26
+Light.color = 0.72 0.79 1
+Light.intensity = 26
+Light.radius = 70
+
+entity
+Name.value = "Intersection fill"
+Transform.position = 0 22 16
+Light.color = 0.8 0.85 1
+Light.intensity = 14
+Light.radius = 45

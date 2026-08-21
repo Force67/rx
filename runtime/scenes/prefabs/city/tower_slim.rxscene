@@ -1,0 +1,18 @@
+rxscene 1
+
+# A narrow tower to break the skyline. Fewer, taller bays than the glass tower
+# so it does not read as the same asset stretched.
+entity
+Name.value = "Slim tower"
+Shape.kind = "box"
+Shape.size = 3 22 3
+Surface.base_color = 1 1 1
+Surface.roughness = 0.88
+Pattern.kind = "grid"
+Pattern.scale = 2 16
+Pattern.line_width = 0.18
+Pattern.color_a = 0.28 0.27 0.26
+Pattern.color_b = 0.14 0.17 0.19
+Pattern.relief = 0.02
+Pattern.roughness_a = 0.9
+Pattern.roughness_b = 0.1
