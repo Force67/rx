@@ -253,6 +253,76 @@ Shape.size = 0.5 0.5 0.5
   fs::remove(path);
 }
 
+// Anchor.offset is what makes a ground plane usable as a target: centring is
+// right for a plant room on a tower and useless for a street, where everything
+// stands on one floor at a different place on it. The height stays derived,
+// which is the whole point - these three land on the ground without the file
+// naming any of their heights, and go on landing on it when a Stretch changes
+// one of them.
+void TestAnchorOffset() {
+  const fs::path path = WriteScene("rx_anchor_offset.rxscene", R"(
+entity
+Name.value = "Ground"
+Transform.position = 0 0 0
+Shape.kind = "plane"
+Shape.size = 20 0 20
+
+entity
+Name.value = "Short"
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -6 0 2
+Shape.kind = "box"
+Shape.size = 1 1.5 1
+
+entity
+Name.value = "Tall"
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 6 0 -3
+Shape.kind = "box"
+Shape.size = 1 1.5 1
+Stretch.scale = 1 4 1
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  CHECK(LoadAndBuild(world, db, path));
+
+  // Each sits on its own half height, which is the number the file never wrote:
+  // 1.5 as authored, and 1.5 * 4 once the stretch is baked in.
+  const scene::Transform* shorter = world.Get<scene::Transform>(FindByName(world, "Short"));
+  CHECK_NEAR(shorter->position[1], 1.5f, 1e-4f);
+  const scene::Transform* taller = world.Get<scene::Transform>(FindByName(world, "Tall"));
+  CHECK_NEAR(taller->position[1], 6.0f, 1e-4f);
+  // Across the other two axes the offset displaces from the target's centre,
+  // rather than the centring winning and stacking both on one spot.
+  CHECK_NEAR(shorter->position[0], -6.0f, 1e-4f);
+  CHECK_NEAR(shorter->position[2], 2.0f, 1e-4f);
+  CHECK_NEAR(taller->position[0], 6.0f, 1e-4f);
+  CHECK_NEAR(taller->position[2], -3.0f, 1e-4f);
+
+  // The offset is authored INPUT, so a save writes it beside the position it
+  // helped solve and the reload re-derives the same place. Were it folded into
+  // Transform.position instead, every round trip would walk the object another
+  // offset along - which is the bug the anchor replaces rather than offsets to
+  // avoid in the first place.
+  const fs::path saved = fs::temp_directory_path() / "rx_anchor_offset_saved.rxscene";
+  std::string error;
+  CHECK(edit::SaveScene(world, saved.string(), &error));
+  CHECK(ReadFile(saved).find("Anchor.offset") != std::string::npos);
+
+  ecs::World reloaded;
+  CHECK(LoadAndBuild(reloaded, db, saved));
+  const scene::Transform* again = reloaded.Get<scene::Transform>(FindByName(reloaded, "Tall"));
+  CHECK_NEAR(again->position[0], 6.0f, 1e-4f);
+  CHECK_NEAR(again->position[1], 6.0f, 1e-4f);
+  CHECK_NEAR(again->position[2], -3.0f, 1e-4f);
+
+  fs::remove(path);
+  fs::remove(saved);
+}
+
 // A grid member is a child of its container, so a rotation on either composes
 // the way a parent chain does: the container's turns the whole layout about its
 // own origin, the member's turns only that cell.
@@ -394,6 +464,133 @@ Shape.size = 0.5 0.5 0.5
   CHECK(by_stretch.hash != plain.hash);
 
   fs::remove(path);
+}
+
+// A prefab of more than one piece has to stretch WHOLE, or the only shape that
+// survives being proportioned is a single box - which is what kept every
+// authored building a rectangle. Each part's offset scales, so the crown stays
+// on the shaft, and each part's geometry scales, so it widens with it.
+void TestPrefabStretchReachesParts() {
+  const fs::path prefab = WriteScene("rx_stretch_parts_cell.rxscene", R"(
+entity
+Name.value = "Podium"
+Shape.kind = "box"
+Shape.size = 2 1 2
+
+entity
+Name.value = "Shaft"
+Transform.position = 0 5 0
+Shape.kind = "box"
+Shape.size = 1 4 1
+
+entity
+Name.value = "Crown"
+Transform.position = 0 10 0
+Shape.kind = "box"
+Shape.size = 1.5 1 1.5
+Stretch.scale = 1 0.5 1
+)");
+  const fs::path path = WriteScene("rx_stretch_parts.rxscene", R"(
+entity
+Name.value = "Plain"
+Transform.position = 0 0 0
+Prefab.path = "rx_stretch_parts_cell.rxscene"
+
+entity
+Name.value = "Tall"
+Transform.position = 30 0 0
+Stretch.scale = 0.5 2 0.5
+Prefab.path = "rx_stretch_parts_cell.rxscene"
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  CHECK(LoadAndBuild(world, db, path));
+
+  // Every part of the plain instance is where the prefab put it.
+  const scene::Transform* plain_shaft = world.Get<scene::Transform>(FindByName(world, "Shaft"));
+  CHECK(plain_shaft != nullptr);
+
+  // The parts are Transient children named by the prefab, and both instances
+  // expand the same names, so collect by name and sort by the height each
+  // landed at: the tall instance's shaft and crown are the far ones.
+  f32 heights[8] = {};
+  u32 count = 0;
+  world.Each<scene::Name, scene::Transform>(
+      [&](ecs::Entity, scene::Name& name, scene::Transform& transform) {
+        if (name.value == "Crown" && count < 8) heights[count++] = transform.position[1];
+      });
+  CHECK(count == 2);
+  // One crown stayed at 10, the other doubled to 20 with the y stretch. Without
+  // the offset scaling it would have stayed at 10 and sat inside the shaft.
+  const f32 low = std::min(heights[0], heights[1]);
+  const f32 high = std::max(heights[0], heights[1]);
+  CHECK_NEAR(low, 10.0f, 1e-4f);
+  CHECK_NEAR(high, 20.0f, 1e-4f);
+
+  // And the part's own geometry took the stretch, multiplied into the one the
+  // prefab authored for it (1 0.5 1 * 0.5 2 0.5), so the crown is proportioned
+  // like the building rather than left at its authored size.
+  bool checked_crown = false;
+  world.Each<scene::Name, SceneStretch>(
+      [&](ecs::Entity entity, scene::Name& name, SceneStretch& stretch) {
+        const scene::Transform* at = world.Get<scene::Transform>(entity);
+        if (name.value != "Crown" || !at || at->position[1] < 15.0f) return;
+        CHECK_NEAR(stretch.scale[0], 0.5f, 1e-6f);
+        CHECK_NEAR(stretch.scale[1], 1.0f, 1e-6f);
+        CHECK_NEAR(stretch.scale[2], 0.5f, 1e-6f);
+        checked_crown = true;
+      });
+  CHECK(checked_crown);
+
+  fs::remove(prefab);
+  fs::remove(path);
+}
+
+// A turned part cannot take a per-axis stretch: that is a shear, and nothing in
+// the transform path carries one. Refused by name rather than rendered wrong.
+void TestPrefabStretchRefusesShear() {
+  const fs::path prefab = WriteScene("rx_stretch_shear_cell.rxscene", R"(
+entity
+Name.value = "Base"
+Shape.kind = "box"
+Shape.size = 1 1 1
+
+entity
+Name.value = "Fin"
+Transform.position = 0 2 0
+Rotation.euler = 0 30 0
+Shape.kind = "box"
+Shape.size = 1 0.2 0.4
+)");
+  const fs::path path = WriteScene("rx_stretch_shear.rxscene", R"(
+entity
+Name.value = "Sheared"
+Transform.position = 0 0 0
+Stretch.scale = 3 1 1
+Prefab.path = "rx_stretch_shear_cell.rxscene"
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  const std::string error = LoadAndBuildError(world, db, path);
+  CHECK(error.find("Fin") != std::string::npos);
+  CHECK(error.find("shear") != std::string::npos);
+
+  // A UNIFORM stretch of the same prefab is a similarity, so it is allowed.
+  const fs::path uniform = WriteScene("rx_stretch_shear_uniform.rxscene", R"(
+entity
+Name.value = "Scaled"
+Transform.position = 0 0 0
+Stretch.scale = 3 3 3
+Prefab.path = "rx_stretch_shear_cell.rxscene"
+)");
+  ecs::World fine;
+  CHECK(LoadAndBuild(fine, db, uniform));
+
+  fs::remove(prefab);
+  fs::remove(path);
+  fs::remove(uniform);
 }
 
 // The reason Stretch is a component of its own: prefab merge is per component,
@@ -634,11 +831,14 @@ int main() {
   TestEulerConvention();
   TestRoundTrip();
   TestAnchorOnRotated();
+  TestAnchorOffset();
   TestRotatedGrid();
   TestPrefabRotation();
   TestStretchComposesWithSize();
   TestPrefabStretch();
   TestAnchorOnStretched();
+  TestPrefabStretchReachesParts();
+  TestPrefabStretchRefusesShear();
   TestStretchedGrid();
   TestDegenerateStretchFailsTheLoad();
   TestStretchRoundTrip();

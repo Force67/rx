@@ -8,7 +8,7 @@ entity
 Surface.base_color = 1 1 1
 Surface.roughness = 0.6
 Pattern.kind = "noise"
-Pattern.scale = 12
+Pattern.scale = 12 12
 Pattern.seed = 5
 Pattern.color_a = 0.1 0.045 0.014
 Pattern.color_b = 0.33 0.17 0.06

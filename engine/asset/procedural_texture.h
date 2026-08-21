@@ -35,9 +35,15 @@ struct PatternDesc {
   PatternKind kind = PatternKind::kChecker;
   u32 width = 256;
   u32 height = 256;
-  // Cells (brick courses, noise lattice period) across the uv square. Whole
-  // numbers tile seamlessly; anything else leaves a seam where uv wraps.
-  f32 scale = 4.0f;
+  // Cells across the uv square, per axis: [0] along u, [1] along v (bricks
+  // across a course, and courses up the face). Whole numbers tile seamlessly;
+  // anything else leaves a seam where uv wraps.
+  //
+  // Per axis rather than one number because the things these patterns are for
+  // are not square. A facade is "five bays across and six floors up", and one
+  // scalar can only say that on a cube: on any other box the cells come out
+  // stretched by the face's aspect, which is a texel density nobody chose.
+  f32 scale[2] = {4.0f, 4.0f};
   // Grid line / brick mortar width as a fraction of one cell. Unused by the
   // patterns that have no lines.
   f32 line_width = 0.08f;

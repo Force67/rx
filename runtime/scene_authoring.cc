@@ -73,7 +73,7 @@ static_assert(FieldCount<SceneStretch>() == 3,
 static_assert(FieldCount<SceneSurface>() == 32,
               "SceneSurface changed: widen kSurfaceKeyBytes to cover the new field before bumping "
               "this, or two surfaces differing only in it collide onto one material");
-static_assert(FieldCount<ScenePattern>() == 14,
+static_assert(FieldCount<ScenePattern>() == 15,
               "ScenePattern changed: widen kPatternKeyBytes to cover the new field before bumping "
               "this, or two patterns differing only in it collide onto one texture");
 
@@ -140,7 +140,8 @@ bool ApplyPattern(const ScenePattern& pattern, const std::string& key, asset::As
     return false;
   }
   desc.width = desc.height = std::clamp(pattern.resolution, 4u, 2048u);
-  desc.scale = pattern.scale;
+  desc.scale[0] = pattern.scale[0];
+  desc.scale[1] = pattern.scale[1];
   desc.line_width = pattern.line_width;
   desc.seed = pattern.seed;
 
@@ -563,7 +564,9 @@ void RegisterSceneComponents() {
       .Prop("kind", &ScenePattern::kind)
       .Hint("checker | grid | brick | gradient | noise")
       .Prop("scale", &ScenePattern::scale)
-      .Hint("cells across the shape's uv square (brick: courses)")
+      .Hint("cells across the shape's uv square, u then v: a facade is bays across by floors "
+            "up, a brick wall is bricks across by courses up. Both have to be positive, so "
+            "one number is refused rather than padded with a zero")
       .Prop("color_a", &ScenePattern::color_a)
       .Range(0.0f, 1.0f)
       .Hint("checker/grid line/mortar/ramp start; multiplies Surface.base_color")
@@ -604,19 +607,26 @@ void RegisterSceneComponents() {
             "quaternion once this exists");
   edit::ReflectComponent<SceneStretch>("Stretch")
       .Prop("scale", &SceneStretch::scale)
-      .Hint("per-axis scale baked into this entity's built Shape, on top of Shape.size: this is "
-            "how a sphere becomes an ellipsoid, a torus an oval and a cylinder a flattened "
-            "column, which size cannot say for any kind but box and plane. Its own component so "
-            "an instance can stretch a prefab's geometry without restating Shape.kind and "
-            "Shape.size. 1 1 1 is no stretch, every axis has to be positive, and the bake "
-            "corrects the normals so a stretched shape lights correctly");
+      .Hint("per-axis scale baked into the built Shape, on top of Shape.size: this is how a "
+            "sphere becomes an ellipsoid, a torus an oval and a cylinder a flattened column, "
+            "which size cannot say for any kind but box and plane. Its own component so an "
+            "instance can stretch a prefab without restating Shape.kind and Shape.size, and it "
+            "reaches every part of a multi-entity prefab, so one podium/shaft/crown building is "
+            "as many silhouettes as it has instances. 1 1 1 is no stretch, every axis has to be "
+            "positive, and the bake corrects the normals so a stretched shape lights correctly. "
+            "Refused only where a non-uniform stretch meets a turned prefab part, which would "
+            "be a shear");
   edit::ReflectComponent<SceneAnchor>("Anchor")
       .Prop("target", &SceneAnchor::target)
       .Hint("Name.value of the entity to stand against; this replaces Transform.position, and "
             "centres on the target across the two axes the mode does not stack along")
       .Prop("mode", &SceneAnchor::mode)
       .Hint("on | under | right | left | front | behind, measured from both entities' built "
-            "geometry (front is +z, right is +x)");
+            "geometry (front is +z, right is +x)")
+      .Prop("offset", &SceneAnchor::offset)
+      .Hint("world-axis displacement added to the solved position, so an anchor can say WHERE "
+            "on a face as well as which face: standing on a ground plane, this is the x and z "
+            "to stand at, leaving the height (the only part worth deriving) derived");
   edit::ReflectComponent<SceneGrid>("Grid")
       .Prop("of", &SceneGrid::of)
       .Hint("Name.value of the grid this entity is a cell of; members fill the cells in the "
@@ -639,6 +649,71 @@ void RegisterSceneComponents() {
       .Hint("world point the eye looks at")
       .Prop("fov_degrees", &SceneCamera::fov_degrees)
       .Range(10.0f, 150.0f);
+  edit::ReflectComponent<SceneSun>("Sun")
+      .Prop("elevation", &SceneSun::elevation)
+      .Range(-90.0f, 90.0f)
+      .Hint("degrees above the horizon: 90 overhead, 0 on it, below 0 a set sun the sky "
+            "darkens for. Low sun rakes across facades and casts the long shadows that give "
+            "an exterior its depth")
+      .Prop("azimuth", &SceneSun::azimuth)
+      .Range(-360.0f, 360.0f)
+      .Hint("degrees about y from +z, counter-clockwise seen from above, like Rotation's yaw")
+      .Prop("color", &SceneSun::color)
+      .Range(0.0f, 1.0f)
+      .Hint("warm at low elevation (1 0.7 0.45 is a sunset), near white overhead")
+      .Prop("intensity", &SceneSun::intensity)
+      .Prop("ambient", &SceneSun::ambient)
+      .Range(0.0f, 1.0f)
+      .Hint("flat fill on what the sun misses, so a shadowed face is dark and not black");
+  edit::ReflectComponent<SceneAtmosphere>("Atmosphere")
+      .Prop("density", &SceneAtmosphere::density)
+      .Range(0.0f, 1.0f)
+      .Hint("haze scattered per metre: 0.005 the engine's own subtle base, 0.02 a visibly "
+            "misty street, 0.1 fog you cannot see through. This is what separates a near "
+            "building from a far one; without it both render at the same contrast")
+      .Prop("start_distance", &SceneAtmosphere::start_distance)
+      .Hint("metres of clear air before the haze ramps in; keeps a near field crisp")
+      .Prop("exposure", &SceneAtmosphere::exposure)
+      .Hint("multiplies the auto-exposure result, so 1 leaves the metering alone");
+}
+
+bool ApplySceneEnvironment(ecs::World& world, render::RenderSettings* settings) {
+  if (!settings) return false;
+  bool has_sun = false;
+  world.Each<SceneSun>([&](ecs::Entity, SceneSun& sun) {
+    if (has_sun) return;  // first one wins, like the camera
+    has_sun = true;
+    constexpr f32 kToRadians = 3.14159265358979f / 180.0f;
+    const f32 elevation = sun.elevation * kToRadians;
+    const f32 azimuth = sun.azimuth * kToRadians;
+    // Toward the sun first, because that is the direction an author is
+    // picturing; the renderer wants the direction the light TRAVELS, which is
+    // its negation. Azimuth turns +z toward +x, matching what a yaw of 90 does
+    // to an entity, so "the sun is where that building is facing" is the same
+    // number in both components.
+    const f32 horizontal = std::cos(elevation);
+    const Vec3 to_sun{horizontal * std::sin(azimuth), std::sin(elevation),
+                      horizontal * std::cos(azimuth)};
+    settings->sun_direction = {-to_sun.x, -to_sun.y, -to_sun.z};
+    settings->sun_color = {sun.color[0], sun.color[1], sun.color[2]};
+    settings->sun_intensity = sun.intensity;
+    settings->ambient = sun.ambient;
+    // Left at the sentinel on purpose: it tells the sky to infer how dark it is
+    // from the sun's own elevation, which is exactly what an authored elevation
+    // is. Pinning it would make a scene that set the sun below the horizon
+    // render it against a midday sky.
+    settings->night = -1.0f;
+  });
+  bool has_atmosphere = false;
+  world.Each<SceneAtmosphere>([&](ecs::Entity, SceneAtmosphere& air) {
+    if (has_atmosphere) return;
+    has_atmosphere = true;
+    settings->froxel_fog = air.density > 0.0f;
+    settings->froxel_density = air.density;
+    settings->froxel_start_distance = air.start_distance;
+    settings->exposure = air.exposure;
+  });
+  return has_sun;
 }
 
 bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
@@ -679,6 +754,22 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     const SceneSurface* found = world.Get<SceneSurface>(e);
     const SceneSurface& surface = found ? *found : kDefaultSurface;
     const ScenePattern* pattern = world.Get<ScenePattern>(e);
+    // A zero axis is what "Pattern.scale = 60" pads to, and the bake would take
+    // it: SamplePattern clamps to 0.0001, so the v cells come out ten thousand
+    // uv units tall and the face reads as one flat band. Refusing here is the
+    // only place that can still say which number was missing.
+    for (u32 axis = 0; pattern && axis < 2; ++axis) {
+      if (pattern->scale[axis] > 0.0f) continue;
+      if (error) {
+        *error = Located(scene_path, EntityName(world, e), "Pattern.scale",
+                         std::format("{} {}", pattern->scale[0], pattern->scale[1]),
+                         std::format("is {} along {}; the prop is cells across BY cells up, and "
+                                     "both have to be positive (one number pads with a zero)",
+                                     pattern->scale[axis], axis == 0 ? "u" : "v"));
+      }
+      ok = false;
+      return;
+    }
 
     const std::string key = ShapeKey(shape, stretch, surface, pattern);
     const asset::AssetId mesh_id = asset::MakeAssetId(key);
@@ -1198,6 +1289,96 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
   return true;
 }
 
+// True when a non-uniform stretch would shear this entity: a scale along world
+// axes lands on a mesh that has been turned off them as a shear, and there is
+// no shear anywhere in the transform path to put it in (BakeStretch multiplies
+// vertex positions per axis, which is only a scale while the axes agree).
+bool TurnedOffAxis(ecs::World& world, ecs::Entity entity) {
+  if (const SceneRotation* rotation = world.Get<SceneRotation>(entity)) {
+    if (rotation->euler[0] != 0.0f || rotation->euler[1] != 0.0f || rotation->euler[2] != 0.0f) {
+      return true;
+    }
+  }
+  // Identity is 0 0 0 1, so a non-zero xyz is a turn however w reads. The
+  // rotations BuildSceneRotations has yet to resolve are covered above.
+  if (const scene::Transform* transform = world.Get<scene::Transform>(entity)) {
+    if (transform->rotation[0] != 0.0f || transform->rotation[1] != 0.0f ||
+        transform->rotation[2] != 0.0f) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Carries an instance's Stretch onto the entities its prefab expanded into.
+//
+// Without this a Stretch reached the root's geometry and nothing else, so a
+// prefab made of more than one piece could not be proportioned at all: a
+// building authored as podium + shaft + crown came back with a stretched
+// podium and the other two floating at their authored size. The way around it
+// was to author every building as ONE box, which is exactly why the demo city's
+// silhouettes were 24 rectangles of differing height.
+//
+// A child takes the stretch twice over: its offset from the instance scales
+// with it, so a crown 10 up in prefab space stays on top of a shaft twice as
+// tall, and its own geometry multiplies by it, so the crown gets wider when the
+// building does. Multiplied into whatever Stretch the prefab already authored
+// rather than replacing it, so a prefab's own proportions survive.
+//
+// Refused rather than approximated when a non-uniform stretch meets a turned
+// child, per TurnedOffAxis. A uniform one is a similarity and always safe.
+std::string StretchPrefabChildren(ecs::World& world, ecs::Entity instance,
+                                  const std::vector<ecs::Entity>& children) {
+  const SceneStretch* authored = world.Get<SceneStretch>(instance);
+  if (!authored) return {};
+  const f32 scale[3] = {authored->scale[0], authored->scale[1], authored->scale[2]};
+  if (scale[0] == 1.0f && scale[1] == 1.0f && scale[2] == 1.0f) return {};
+  // A non-positive axis is BuildSceneShapes' finding to report, and it names
+  // the axis and the entity; multiplying it through here first would spread one
+  // bad number over every child before anything got to say so.
+  for (u32 axis = 0; axis < 3; ++axis) {
+    if (!(scale[axis] > 0.0f)) return {};
+  }
+
+  const bool uniform = scale[0] == scale[1] && scale[1] == scale[2];
+  if (!uniform) {
+    for (ecs::Entity child : children) {
+      if (!TurnedOffAxis(world, child)) continue;
+      return std::format(
+          "stretches a prefab by {} {} {} whose part '{}' is turned; a per-axis stretch of a "
+          "rotated shape is a shear, which no mesh, bound or transform here can carry. Stretch "
+          "it uniformly, turn the whole instance instead of the part, or author the part "
+          "already stretched",
+          scale[0], scale[1], scale[2], EntityName(world, child));
+    }
+  }
+
+  // Deferred out of the walk for the usual reason: adding a Stretch or a
+  // Transform moves the entity between archetypes and invalidates every pointer
+  // into the storage above.
+  std::vector<std::pair<ecs::Entity, SceneStretch>> add_stretch;
+  for (ecs::Entity child : children) {
+    if (scene::Transform* transform = world.Get<scene::Transform>(child)) {
+      for (u32 axis = 0; axis < 3; ++axis) transform->position[axis] *= scale[axis];
+    }
+    SceneStretch scaled;
+    if (const SceneStretch* own = world.Get<SceneStretch>(child)) {
+      for (u32 axis = 0; axis < 3; ++axis) scaled.scale[axis] = own->scale[axis] * scale[axis];
+    } else {
+      for (u32 axis = 0; axis < 3; ++axis) scaled.scale[axis] = scale[axis];
+    }
+    add_stretch.emplace_back(child, scaled);
+  }
+  for (const auto& [child, scaled] : add_stretch) {
+    if (SceneStretch* own = world.Get<SceneStretch>(child)) {
+      *own = scaled;
+    } else {
+      world.Add(child, scaled);
+    }
+  }
+  return {};
+}
+
 bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::string* error) {
   std::unordered_map<std::string, std::unique_ptr<PrefabFile>> files;
   // The file an entity came from, so a prefab instancing another resolves it
@@ -1282,6 +1463,13 @@ bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::st
         origin.emplace(PackKey(copy), resolved);
         chain.emplace(PackKey(copy), descend);
       }
+      // After every child exists and carries its authored components, so the
+      // stretch multiplies into the prefab's own proportions rather than racing
+      // the copy that establishes them.
+      if (std::string why = StretchPrefabChildren(world, entity, copies); !why.empty()) {
+        if (error) *error = Located(base, owner, "Prefab.path", path, why);
+        return false;
+      }
     }
   }
 }
@@ -1332,6 +1520,10 @@ bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::st
   for (ecs::Entity entity : order.order()) {
     const SceneAnchor& anchor = *world.Get<SceneAnchor>(entity);
     const std::string target_name = anchor.target;
+    // Copied out for the same reason target_name is: the placement below adds a
+    // Transform to entities that had none, which moves them between archetypes
+    // and leaves this reference dangling.
+    const f32 offset[3] = {anchor.offset[0], anchor.offset[1], anchor.offset[2]};
     const std::string owner = EntityName(world, entity);
     const AnchorMode* mode = FindAnchorMode(anchor.mode);
     if (!mode) {
@@ -1376,7 +1568,9 @@ bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::st
 
     // Replaced rather than offset: a SaveScene writes the resolved position
     // next to the Anchor that produced it, so anything additive here would
-    // reload with the placement applied on top of itself.
+    // reload with the placement applied on top of itself. Anchor.offset is not
+    // that - it is authored input the solve reads, so re-solving lands in the
+    // same place however often the scene round trips.
     for (u32 axis = 0; axis < 3; ++axis) {
       if (axis == mode->axis) {
         local.position[axis] = mode->ascending ? around.max[axis] - self.min[axis]
@@ -1385,6 +1579,7 @@ bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::st
         local.position[axis] = 0.5f * (around.min[axis] + around.max[axis]) -
                                0.5f * (self.min[axis] + self.max[axis]);
       }
+      local.position[axis] += offset[axis];
     }
     if (world.Has<scene::Transform>(entity)) {
       *world.Get<scene::Transform>(entity) = local;

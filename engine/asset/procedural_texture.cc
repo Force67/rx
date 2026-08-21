@@ -44,15 +44,18 @@ u32 HashLattice(i32 x, i32 y, u32 seed) {
   return h ^ (h >> 16);
 }
 
-// Value noise on a `period` x `period` lattice that wraps with it, so the field
-// tiles with the uv square (a sphere's uv seam would show any that did not).
-f32 ValueNoise(f32 x, f32 y, i32 period, u32 seed) {
-  if (period < 1) period = 1;
+// Value noise on a `px` x `py` lattice that wraps with it, so the field tiles
+// with the uv square (a sphere's uv seam would show any that did not). The two
+// periods are independent so a noise stretched along one axis still wraps.
+f32 ValueNoise(f32 x, f32 y, i32 px, i32 py, u32 seed) {
+  if (px < 1) px = 1;
+  if (py < 1) py = 1;
   i32 x0 = static_cast<i32>(std::floor(x)), y0 = static_cast<i32>(std::floor(y));
   f32 fx = x - static_cast<f32>(x0), fy = y - static_cast<f32>(y0);
-  auto wrap = [period](i32 v) { return ((v % period) + period) % period; };
+  auto wrap = [](i32 v, i32 period) { return ((v % period) + period) % period; };
   auto corner = [&](i32 cx, i32 cy) {
-    return static_cast<f32>(HashLattice(wrap(cx), wrap(cy), seed)) * (1.0f / 4294967296.0f);
+    return static_cast<f32>(HashLattice(wrap(cx, px), wrap(cy, py), seed)) *
+           (1.0f / 4294967296.0f);
   };
   f32 sx = fx * fx * (3.0f - 2.0f * fx), sy = fy * fy * (3.0f - 2.0f * fy);
   f32 top = corner(x0, y0) + (corner(x0 + 1, y0) - corner(x0, y0)) * sx;
@@ -96,41 +99,47 @@ bool ParsePatternKind(std::string_view name, PatternKind* out) {
 }
 
 f32 SamplePattern(const PatternDesc& desc, f32 u, f32 v) {
-  const f32 scale = std::max(desc.scale, 0.0001f);
+  const f32 su = std::max(desc.scale[0], 0.0001f);
+  const f32 sv = std::max(desc.scale[1], 0.0001f);
   const f32 line = std::clamp(desc.line_width, 0.0f, 0.9f);
   switch (desc.kind) {
     case PatternKind::kChecker: {
-      f32 a = SoftSquare(u * scale), b = SoftSquare(v * scale);
+      f32 a = SoftSquare(u * su), b = SoftSquare(v * sv);
       return a + b - 2.0f * a * b;  // soft xor
     }
     case PatternKind::kGrid: {
-      f32 d = std::min(EdgeDistance(u * scale), EdgeDistance(v * scale));
+      f32 d = std::min(EdgeDistance(u * su), EdgeDistance(v * sv));
       return Smoothstep(line - kEdgeSoftness, line + kEdgeSoftness, d);
     }
     case PatternKind::kBrick: {
-      // `scale` counts courses; bricks are twice as wide as they are tall and
-      // every other course is offset by half a brick.
-      f32 course = std::floor(v * scale);
-      f32 across = u * scale * 0.5f + (std::fmod(std::abs(course), 2.0f) >= 1.0f ? 0.5f : 0.0f);
-      // The joint has to be the same uv width both ways, and a brick is twice
-      // as wide as a course is tall, so the horizontal fraction is halved.
-      f32 dv = Smoothstep(line - kEdgeSoftness, line + kEdgeSoftness, EdgeDistance(v * scale));
-      f32 du = Smoothstep(line * 0.5f - kEdgeSoftness, line * 0.5f + kEdgeSoftness,
-                          EdgeDistance(across));
+      // scale is bricks across by courses up, and every other course is offset
+      // by half a brick.
+      f32 course = std::floor(v * sv);
+      f32 across = u * su + (std::fmod(std::abs(course), 2.0f) >= 1.0f ? 0.5f : 0.0f);
+      // `line` is a fraction of a COURSE, and the joint has to come out the
+      // same uv width both ways, so the fraction across is rescaled by how much
+      // wider a brick is than a course is tall. A wall 4 bricks across and 20
+      // courses up has bricks 5x as wide, so the vertical joint is 1/5 of the
+      // cell the horizontal one is.
+      f32 line_u = std::clamp(line * su / sv, 0.0f, 0.9f);
+      f32 dv = Smoothstep(line - kEdgeSoftness, line + kEdgeSoftness, EdgeDistance(v * sv));
+      f32 du = Smoothstep(line_u - kEdgeSoftness, line_u + kEdgeSoftness, EdgeDistance(across));
       return du * dv;
     }
     case PatternKind::kGradient:
       return std::clamp(v, 0.0f, 1.0f);
     case PatternKind::kNoise: {
       f32 sum = 0.0f, amplitude = 1.0f, total = 0.0f;
-      i32 period = std::max(1, static_cast<i32>(std::lround(scale)));
+      i32 px = std::max(1, static_cast<i32>(std::lround(su)));
+      i32 py = std::max(1, static_cast<i32>(std::lround(sv)));
       for (int octave = 0; octave < 4; ++octave) {
-        sum += ValueNoise(u * static_cast<f32>(period), v * static_cast<f32>(period), period,
+        sum += ValueNoise(u * static_cast<f32>(px), v * static_cast<f32>(py), px, py,
                           desc.seed + static_cast<u32>(octave) * 7919u) *
                amplitude;
         total += amplitude;
         amplitude *= 0.5f;
-        period *= 2;
+        px *= 2;
+        py *= 2;
       }
       return sum / total;
     }

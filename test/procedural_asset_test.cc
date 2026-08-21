@@ -37,7 +37,7 @@ void TestPatternNames() {
 void TestCheckerMask() {
   asset::PatternDesc desc;
   desc.kind = asset::PatternKind::kChecker;
-  desc.scale = 4.0f;  // 4 cells across, so cell centres sit at 1/8, 3/8, ...
+  desc.scale[0] = desc.scale[1] = 4.0f;  // 4 cells across, so cell centres sit at 1/8, 3/8, ...
   const f32 low = asset::SamplePattern(desc, 0.125f, 0.125f);
   const f32 high = asset::SamplePattern(desc, 0.375f, 0.125f);
   CHECK(low < 0.01f);
@@ -46,6 +46,42 @@ void TestCheckerMask() {
   CHECK(std::abs(asset::SamplePattern(desc, 0.375f, 0.375f) - low) < 0.01f);
   // Tiles: the mask at u and at u + 1 is the same field.
   CHECK(std::abs(asset::SamplePattern(desc, 1.125f, 0.125f) - low) < 0.01f);
+}
+
+// The two axes have to be independent, because the thing they describe is: a
+// facade is bays across by floors up, and a tower is not a cube. With one
+// scalar the cells took the face's aspect ratio instead of the author's word.
+void TestPatternAxes() {
+  asset::PatternDesc desc;
+  desc.kind = asset::PatternKind::kGrid;
+  desc.line_width = 0.2f;
+  // Two cells across, eight up: cell centres at u = 1/4, 3/4 and v = 1/16,
+  // 3/16, ... so a step of one v cell lands on a line while the same step
+  // across u stays well inside a cell.
+  desc.scale[0] = 2.0f;
+  desc.scale[1] = 8.0f;
+  CHECK(asset::SamplePattern(desc, 0.25f, 0.0625f) > 0.99f);   // cell centre
+  CHECK(asset::SamplePattern(desc, 0.25f, 0.125f) < 0.01f);    // line one cell up
+  CHECK(asset::SamplePattern(desc, 0.3125f, 0.0625f) > 0.99f); // same fraction across, still inside
+
+  // Swapping the axes has to swap the result, or they are not independent.
+  desc.scale[0] = 8.0f;
+  desc.scale[1] = 2.0f;
+  CHECK(asset::SamplePattern(desc, 0.0625f, 0.25f) > 0.99f);
+  CHECK(asset::SamplePattern(desc, 0.125f, 0.25f) < 0.01f);
+
+  // Noise wraps on each axis with that axis's period, so a field stretched one
+  // way still tiles: the uv seam a sphere has would show it if it did not.
+  desc.kind = asset::PatternKind::kNoise;
+  desc.scale[0] = 3.0f;
+  desc.scale[1] = 12.0f;
+  for (u32 i = 0; i < 8; ++i) {
+    const f32 u = i / 8.0f, v = i / 5.0f;
+    CHECK(std::abs(asset::SamplePattern(desc, u + 1.0f, v) -
+                   asset::SamplePattern(desc, u, v)) < 1e-4f);
+    CHECK(std::abs(asset::SamplePattern(desc, u, v + 1.0f) -
+                   asset::SamplePattern(desc, u, v)) < 1e-4f);
+  }
 }
 
 void TestPatternRange() {
@@ -57,7 +93,7 @@ void TestPatternRange() {
   for (asset::PatternKind kind : kinds) {
     asset::PatternDesc desc;
     desc.kind = kind;
-    desc.scale = 5.0f;
+    desc.scale[0] = desc.scale[1] = 5.0f;
     for (u32 y = 0; y < 32; ++y) {
       for (u32 x = 0; x < 32; ++x) {
         f32 mask = asset::SamplePattern(desc, x / 31.0f, y / 31.0f);
@@ -72,7 +108,7 @@ void TestColorTexture() {
   desc.kind = asset::PatternKind::kChecker;
   desc.width = 64;
   desc.height = 32;
-  desc.scale = 4.0f;
+  desc.scale[0] = desc.scale[1] = 4.0f;
   const f32 black[3] = {0, 0, 0};
   const f32 white[3] = {1, 1, 1};
   asset::Texture texture =
@@ -107,7 +143,7 @@ void TestNormalMap() {
   desc.kind = asset::PatternKind::kBrick;
   desc.width = 64;
   desc.height = 64;
-  desc.scale = 4.0f;
+  desc.scale[0] = desc.scale[1] = 4.0f;
 
   asset::Texture flat = asset::MakePatternNormalMap(desc, 0.0f, asset::MakeAssetId("n0"));
   CHECK(!flat.is_srgb);
@@ -132,7 +168,7 @@ void TestRoughnessMap() {
   desc.kind = asset::PatternKind::kChecker;
   desc.width = 32;
   desc.height = 32;
-  desc.scale = 4.0f;
+  desc.scale[0] = desc.scale[1] = 4.0f;
   asset::Texture mr = asset::MakePatternRoughnessMap(desc, 0.0f, 1.0f, asset::MakeAssetId("r"));
   CHECK(!mr.is_srgb);
   bool saw_smooth = false, saw_rough = false;
@@ -249,6 +285,7 @@ void TestPrimitives() {
 int main() {
   TestPatternNames();
   TestCheckerMask();
+  TestPatternAxes();
   TestPatternRange();
   TestColorTexture();
   TestNormalMap();

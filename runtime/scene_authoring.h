@@ -8,6 +8,7 @@
 #include "core/types.h"
 #include "ecs/world.h"
 #include "render/core/renderer.h"
+#include "render/core/settings.h"
 
 // What a hand-authored .rxscene may carry on top of the engine's builtin
 // components (Transform, Name, Guid, Parent, ...). A text scene has no binary
@@ -89,9 +90,18 @@ struct SceneSurface {
 // albedo does. Without one the surface is a flat colour.
 struct ScenePattern {
   std::string kind = "checker";
-  // Cells across the shape's uv square. Every primitive's uv covers 0..1 once,
-  // so this is the only thing that decides how often the pattern repeats.
-  f32 scale = 4.0f;
+  // Cells across the shape's uv square, per axis: [0] along u, [1] along v.
+  // Every primitive's uv covers 0..1 once, so this is the only thing that
+  // decides how often the pattern repeats.
+  //
+  // Both axes because a facade is "5 bays across and 6 floors up" and a box is
+  // rarely a cube: with one number the cells take the face's aspect ratio, so a
+  // 6x14 tower gets windows two and a half times taller than they are wide,
+  // whoever authored it. Both axes have to be positive - the short list this
+  // format pads with zeros is, here, an author who wrote one number for a prop
+  // that needs two, and that reads as a wall of stripes rather than as a
+  // mistake, so BuildSceneShapes refuses it by name.
+  f32 scale[2] = {4.0f, 4.0f};
   // The two ends of the pattern. These MULTIPLY Surface.base_color the way a
   // glTF base-colour texture does, so leave that at 1 1 1 to get them verbatim.
   f32 color_a[3] = {0.25f, 0.25f, 0.25f};
@@ -222,13 +232,30 @@ struct SceneRotation {
 // refuses the load naming the line, and --validate reports it as
 // degenerate_stretch.
 //
-// Scope is the entity's OWN Shape, and only a Shape. A Model is deliberately not
-// stretched: baking into imported geometry means a vertex copy and a mesh id per
-// stretch value, which is a draw call per variant instead of per instance, so a
-// glTF asset is stretched by authoring it stretched. A multi-entity prefab is
-// the same story per entity - the instance carries the root's geometry, so a
-// Stretch on it stretches the root and leaves the children the prefab expanded
-// into at their authored proportions.
+// Scope is Shapes, and only Shapes. A Model is deliberately not stretched:
+// baking into imported geometry means a vertex copy and a mesh id per stretch
+// value, which is a draw call per variant instead of per instance, so a glTF
+// asset is stretched by authoring it stretched.
+//
+// A MULTI-ENTITY PREFAB stretches whole. The instance's Stretch reaches every
+// entity the prefab expanded into: each part's offset from the instance scales
+// with it, so a crown ten metres up stays on top of a shaft made twice as tall,
+// and each part's own geometry multiplies by it, so the crown widens when the
+// building does. A part that authored its own Stretch keeps it, multiplied
+// through rather than replaced.
+//
+// That is what makes proportion and SILHOUETTE independent. A building authored
+// as podium + shaft + crown is one prefab and as many outlines as there are
+// instances of it; without it a stretched prefab came back with a stretched
+// root and its other parts floating at their authored size, so the only shape
+// that survived being stretched was a single box - which is why an authored
+// city used to be rectangles of differing height and nothing else.
+//
+// The one case it refuses: a NON-UNIFORM stretch of a prefab with a TURNED
+// part. Scaling per world axis is only a scale while the part's axes agree with
+// the world's; on a turned one it is a shear, which no mesh, bound or transform
+// in this engine can carry. BuildScenePrefabs fails the load naming the part.
+// A uniform stretch is a similarity and is always allowed.
 struct SceneStretch {
   f32 scale[3] = {1, 1, 1};
 };
@@ -251,11 +278,28 @@ struct SceneStretch {
 // the resolved position along with the Anchor that produced it) would reload
 // with the placement applied on top of itself.
 //
+// `offset` is how an author still says where, in world axes, added to the
+// solved position. Centring is right for a plant room on a tower and useless
+// for the far commoner case of standing something on the GROUND: without an
+// offset every object on a floor plane lands on the same spot, so the whole
+// scene goes back to hand-written coordinates, and the y in them is a hand-run
+// multiplication of the prefab's half height by its Stretch that silently
+// sinks the object the moment either changes. With one, "on the ground at
+// x -15, z 16" is Anchor.target = "Ground", mode = "on", offset = -15 0 16 -
+// and the height, the only number that was ever derived, stays derived.
+//
+// It survives the solve because it is authored INPUT, unlike Transform.position
+// which is the solve's output: the round trip re-derives the position from the
+// bounds and this, so it lands in the same place however many times it is
+// saved and reloaded. Along the stacking axis it is a deliberate gap or bite;
+// across the other two it is displacement from the target's centre.
+//
 // Anchors resolve in dependency order, so anchoring to something itself
 // anchored works. A cycle fails the load naming the loop.
 struct SceneAnchor {
   std::string target;
   std::string mode = "on";
+  f32 offset[3] = {0, 0, 0};
 };
 
 // Regular repetition: a row or a grid, so N cells cost one declaration of the
@@ -298,6 +342,59 @@ struct SceneLight {
 struct SceneCamera {
   f32 target[3] = {0, 0, 0};
   f32 fov_degrees = 60.0f;
+};
+
+// The key light, as an angle in the sky rather than a direction vector.
+//
+// Without this a scene is lit by whatever hour the world clock happens to be
+// at, which is the single largest thing deciding what a render looks like and
+// was the one thing a text scene could not say: an author could place every
+// object to the centimetre and still not ask for the light to come from the
+// left. Placing it takes a SUN, not a Light - a punctual light with a radius
+// cannot stand in for a source at infinity, and a scene that tried lit its
+// facades from a point halfway up the street.
+//
+// `elevation` is degrees above the horizon (90 is overhead, 0 is on it, and
+// below 0 is a set sun the sky darkens for) and `azimuth` is degrees about y
+// from +z, counter-clockwise seen from above, matching Rotation.euler's yaw.
+// Both in degrees for the reason SceneRotation is: an author writes "low sun
+// from behind the towers", not a normalized triple.
+//
+// A scene declaring one takes the sun over from the day/night clock ENTIRELY,
+// so the clock no longer moves it. That is the point - a capture has to be the
+// same picture on every run - but it means a scene wanting the clock's sun
+// authors no Sun at all rather than a Sun it hopes matches.
+//
+// The first one the scene declares wins, like the camera.
+struct SceneSun {
+  f32 elevation = 45.0f;
+  f32 azimuth = 0.0f;
+  f32 color[3] = {1.0f, 0.96f, 0.9f};
+  f32 intensity = 4.0f;
+  // Flat fill on everything the sun misses, so a shadowed face is dark rather
+  // than black. The sky's own IBL is the rest of it.
+  f32 ambient = 0.06f;
+};
+
+// The air between the camera and the thing it is looking at, plus the exposure
+// the result is developed at.
+//
+// Haze is what gives a big exterior its depth: without it every building is
+// rendered at the same contrast whether it is 10 or 200 metres away, which is
+// most of why a flat blockout reads as a diagram rather than as a place. It
+// rides the always-on froxel volume, so it is lit by the sun and by every
+// punctual light in the scene and costs nothing extra to ask for.
+//
+// `density` is the base scattering per metre (0.005 is the engine's own subtle
+// haze, 0.02 is a visibly misty street, 0.1 is fog you cannot see through) and
+// `start_distance` is metres of clear air before it ramps in, which is how an
+// interior keeps its near field crisp while still getting shafts across the
+// room. `exposure` multiplies the auto-exposure result, so it is a stop-style
+// nudge rather than an absolute: 1 leaves the metering alone.
+struct SceneAtmosphere {
+  f32 density = 0.005f;
+  f32 start_distance = 0.0f;
+  f32 exposure = 1.0f;
 };
 
 // The local-space bounds of an entity's built geometry, written by
@@ -399,6 +496,18 @@ std::string SceneModelProblem(const std::string& path);
 // otherwise leave a hole exactly where the author asked for a model.
 bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
                       const std::string& scene_path, std::string* error);
+
+// Writes the first SceneSun and SceneAtmosphere the scene declares into
+// `settings`, and returns whether a Sun was among them - which the caller has
+// to take as "stop driving the sun from the clock", or the next frame moves it
+// back and the capture stops being reproducible.
+//
+// Both are optional and independent: a scene with neither is left on the
+// engine's defaults, and one with only an Atmosphere still gets the clock's
+// sun. Nothing here can fail, because there is no value in range that produces
+// no picture; --validate carries the warnings about ones that produce a bad
+// one.
+bool ApplySceneEnvironment(ecs::World& world, render::RenderSettings* settings);
 
 }  // namespace rx
 

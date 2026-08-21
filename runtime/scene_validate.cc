@@ -349,6 +349,18 @@ void CheckPattern(ecs::World& world, ecs::Entity entity, bool fragment, Report& 
     report.Error(entity, "unknown_pattern_kind",
                  "unknown Pattern.kind '" + pattern->kind + "' (--dump-schema lists the kinds)");
   }
+  // Same reasoning as degenerate_stretch: BuildSceneShapes refuses these, so
+  // staying quiet would leave a failed load with no finding behind it. The case
+  // this actually catches is one number written for a prop that takes two,
+  // which the reader pads with a zero - so name the axis, since "scale 4 0"
+  // does not look wrong until you know the second number is the v one.
+  for (u32 axis = 0; axis < 2; ++axis) {
+    if (pattern->scale[axis] > 0.0f) continue;
+    report.Error(entity, "degenerate_pattern_scale",
+                 std::format("Pattern.scale {} is {}; the prop is cells across BY cells up and "
+                             "both have to be positive (one number pads with a zero)",
+                             axis == 0 ? "u" : "v", pattern->scale[axis]));
+  }
 }
 
 void CheckStretch(ecs::World& world, ecs::Entity entity, bool fragment, Report& report) {
@@ -430,6 +442,25 @@ void CheckCamera(ecs::World& world, ecs::Entity entity, Report& report) {
     report.Error(entity, "degenerate_camera_fov",
                  std::format("Camera.fov_degrees is {}; a projection needs it in (0, 180)",
                              camera->fov_degrees));
+  }
+}
+
+// A Sun that lights nothing. Both cases render as a scene lit by the ambient
+// alone, which reads as "the renderer is broken" rather than as "the key light
+// was authored off", and the day/night clock has already been handed over by
+// then so there is no fallback light to notice its absence.
+void CheckSun(ecs::World& world, ecs::Entity entity, Report& report) {
+  const SceneSun* sun = world.Get<SceneSun>(entity);
+  if (!sun) return;
+  if (sun->intensity <= 0.0f) {
+    report.Warn(entity, "dark_sun",
+                std::format("Sun.intensity is {}; the scene keeps the sun it declares and gets "
+                            "no light from it, leaving only Sun.ambient and any Lights",
+                            sun->intensity));
+  }
+  if (sun->color[0] <= 0.0f && sun->color[1] <= 0.0f && sun->color[2] <= 0.0f) {
+    report.Warn(entity, "black_sun",
+                "Sun.color is black, so whatever the intensity the sun contributes nothing");
   }
 }
 
@@ -600,6 +631,8 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // Shape from a prefab is not a fragment, and the file it took it from is.
   const bool fragment = IsFragment(world, entities);
   u32 cameras = 0;
+  u32 suns = 0;
+  u32 atmospheres = 0;
   u32 drawables = 0;
   for (ecs::Entity entity : entities) {
     CheckTransform(world, entity, report);
@@ -610,9 +643,12 @@ bool ValidateSceneFile(const std::string& path, bool json) {
     CheckModel(world, entity, report);
     CheckLight(world, entity, report);
     CheckCamera(world, entity, report);
+    CheckSun(world, entity, report);
     CheckRenderable(world, db, entity, report);
     CheckParent(world, entity, report);
     cameras += world.Has<SceneCamera>(entity) ? 1 : 0;
+    suns += world.Has<SceneSun>(entity) ? 1 : 0;
+    atmospheres += world.Has<SceneAtmosphere>(entity) ? 1 : 0;
     drawables += world.Has<SceneShape>(entity) || world.Has<SceneModel>(entity) ||
                          world.Has<scene::Renderable>(entity)
                      ? 1
@@ -647,6 +683,19 @@ bool ValidateSceneFile(const std::string& path, bool json) {
     report.FileWarn("multiple_cameras",
                     std::format("{} Camera components; which one the viewer takes is "
                                 "archetype order, not file order", cameras));
+  }
+  // Same walk, same ambiguity, and worse to debug: two Suns render as one of
+  // them with nothing on screen saying which, and the losing one reads as an
+  // authored light that did nothing.
+  if (suns > 1) {
+    report.FileWarn("multiple_suns",
+                    std::format("{} Sun components; which one lights the scene is archetype "
+                                "order, not file order", suns));
+  }
+  if (atmospheres > 1) {
+    report.FileWarn("multiple_atmospheres",
+                    std::format("{} Atmosphere components; which one the viewer takes is "
+                                "archetype order, not file order", atmospheres));
   }
 
   report.SortByLine();
