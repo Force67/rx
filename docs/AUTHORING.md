@@ -203,6 +203,13 @@ clutter: things at hand scale, off the grid, with their own shadows.
 - An `Anchor` centres the target's **whole subtree**, prefab parts included, so a
   prefab with something sticking out one side (an awning, an off-centre roof
   plant) places a little off from where its main mass suggests.
+- A glTF's `KHR_texture_transform` (which Blender's exporter emits whenever a
+  Mapping node scales the uvs) is **baked into the imported mesh's uvs**, so
+  authored texel density survives the import. The extension is per texture
+  reference and a uv is per vertex, so a material whose maps ask for different
+  transforms keeps its **base colour's** and the loader warns naming the map it
+  dropped; the same warning covers a transform pointing at a second uv set,
+  which this importer does not read. Nothing about it is silent.
 - `Prefab.path` resolves **relative to the file naming it**; `Model.path`,
   `Surface.materialx` and the `Surface` texture maps resolve relative to the
   **working directory**.
