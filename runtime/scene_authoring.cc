@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "asset/gltf_loader.h"
+#include "asset/image_file.h"
 #include "asset/materialx.h"
 #include "asset/primitives.h"
 #include "asset/procedural_texture.h"
@@ -70,12 +71,35 @@ static_assert(FieldCount<SceneShape>() == 4,
 static_assert(FieldCount<SceneStretch>() == 3,
               "SceneStretch changed: append the new field to ShapeKey before bumping this, or two "
               "proportions differing only in it collide onto one mesh");
-static_assert(FieldCount<SceneSurface>() == 32,
-              "SceneSurface changed: widen kSurfaceKeyBytes to cover the new field before bumping "
-              "this, or two surfaces differing only in it collide onto one material");
+static_assert(FieldCount<SceneSurface>() == 38,
+              "SceneSurface changed: widen kSurfaceKeyBytes to cover the new field (or, for a "
+              "string, append it to ShapeKey and to kSurfaceMaps) before bumping this, or two "
+              "surfaces differing only in it collide onto one material");
 static_assert(FieldCount<ScenePattern>() == 15,
               "ScenePattern changed: widen kPatternKeyBytes to cover the new field before bumping "
               "this, or two patterns differing only in it collide onto one texture");
+
+// Every image map a Surface can name: the prop, the member holding the path,
+// the asset::Material slot it binds, and whether the file is colour data (and
+// so wants the sRGB sampler). A table rather than six copies of the same four
+// lines, so ShapeKey, the loader, the Pattern conflict and --validate all walk
+// one list and cannot come to disagree about which props are maps.
+struct SurfaceMap {
+  const char* prop;
+  std::string SceneSurface::*path;
+  asset::AssetId asset::Material::*slot;
+  bool srgb;
+};
+constexpr SurfaceMap kSurfaceMaps[] = {
+    {"base_color_map", &SceneSurface::base_color_map, &asset::Material::base_color, true},
+    {"normal_map", &SceneSurface::normal_map, &asset::Material::normal, false},
+    // The metallic_roughness slot carries a roughness-ONLY map here, which is
+    // exactly what asset::Material::separate_metallic tells the shader.
+    {"roughness_map", &SceneSurface::roughness_map, &asset::Material::metallic_roughness, false},
+    {"metallic_map", &SceneSurface::metallic_map, &asset::Material::metallic_map, false},
+    {"occlusion_map", &SceneSurface::occlusion_map, &asset::Material::occlusion_map, false},
+    {"emissive_map", &SceneSurface::emissive_map, &asset::Material::emissive, true},
+};
 
 // Numbers go into the key as raw bytes rather than formatted: MakeAssetId
 // hashes the whole span, and a human-readable float would collide across values
@@ -91,6 +115,10 @@ void AppendBytes(std::string& key, const void* data, size_t bytes) {
 std::string ShapeKey(const SceneShape& shape, const SceneStretch& stretch,
                      const SceneSurface& surface, const ScenePattern* pattern) {
   std::string key = "rxscene/" + shape.kind + "/" + surface.materialx + "/";
+  // By hand, per the INVARIANT above: a string cannot ride the byte range, so
+  // two surfaces differing only in which concrete they name would otherwise
+  // collide onto one material and the second would draw the first one's maps.
+  for (const SurfaceMap& map : kSurfaceMaps) key += surface.*map.path + "/";
   AppendBytes(key, shape.size, sizeof(shape.size));
   AppendBytes(key, stretch.scale, sizeof(stretch.scale));
   AppendBytes(key, reinterpret_cast<const char*>(&surface) + kSurfaceKeyOffset, kSurfaceKeyBytes);
@@ -126,6 +154,57 @@ void ApplySurface(const SceneSurface& surface, asset::Material* material) {
   material->soft_lighting = surface.soft_lighting;
   material->rim_lighting = surface.rim_lighting;
   material->back_lighting = surface.back_lighting;
+}
+
+// The id a Surface map's texture gets. Keyed by the file AND by how the slot
+// samples it, so two surfaces naming one concrete share a single decode and a
+// single upload, while a file bound as colour in one place and as data in
+// another stays two textures - the gpu formats differ, and sharing them would
+// hand one of the two a picture that has been gamma-decoded once too often.
+asset::AssetId SurfaceMapId(const std::string& path, bool srgb) {
+  return asset::MakeAssetId("rxscene/map/" + std::string(srgb ? "srgb/" : "linear/") +
+                            asset::NormalizePath(path));
+}
+
+// Decodes Surface's image maps, binds them to `material` and hands each to the
+// db and the gpu. False + *prop/*path/*problem naming the assignment that could
+// not be resolved, which the caller turns into a `path:line:`.
+bool ApplySurfaceMaps(const SceneSurface& surface, asset::AssetDatabase& db,
+                      render::Renderer* renderer, asset::Material* material, const char** prop,
+                      std::string* path, std::string* problem) {
+  for (const SurfaceMap& map : kSurfaceMaps) {
+    const std::string& file = surface.*map.path;
+    if (file.empty()) continue;
+    const asset::AssetId id = SurfaceMapId(file, map.srgb);
+    if (!db.FindTexture(id)) {
+      asset::Texture texture;
+      if (!asset::LoadImageFile(file, map.srgb, id, &texture)) {
+        *prop = map.prop;
+        *path = file;
+        *problem = asset::ImageFileProblem(file);
+        // The header read and the decode disagree only on a truncated file.
+        if (problem->empty()) *problem = "has a readable header and then fails to decode";
+        return false;
+      }
+      // Order matters, exactly as in ApplyPattern: MaterialSystem resolves a
+      // material's texture slots at UploadMaterial and silently falls back to
+      // its 1x1 defaults for anything not uploaded yet, so every map has to
+      // reach the gpu before the material naming it does.
+      if (renderer) renderer->UploadTexture(texture);
+      db.AddTexture(std::move(texture));
+    }
+    material->*map.slot = id;
+  }
+  // A standalone roughness map is not glTF ORM packing. Without this the shader
+  // reads metallic from the roughness map's BLUE channel, so a rough dielectric
+  // comes back as rough metal - a rendering nobody would connect to the texture
+  // being unpacked. The flag is also what makes metallic_map readable at all,
+  // and with no metallic map the white default leaves Surface.metallic in
+  // charge, which is the untextured behaviour.
+  if (!surface.roughness_map.empty() || !surface.metallic_map.empty()) {
+    material->separate_metallic = true;
+  }
+  return true;
 }
 
 // Synthesizes the pattern's maps, binds them to `material` and hands them to
@@ -559,7 +638,29 @@ void RegisterSceneComponents() {
       .Hint("light transmitted straight through; needs the sun")
       .Prop("materialx", &SceneSurface::materialx)
       .Hint("path to a .mtlx document to take the whole material from, replacing the fields "
-            "above; empty to author them here");
+            "above; empty to author them here")
+      .Prop("base_color_map", &SceneSurface::base_color_map)
+      .Hint("image file for the base colour, MULTIPLYING base_color the way a glTF texture "
+            "does, so leave that at 1 1 1 to get the picture verbatim. Relative to the WORKING "
+            "DIRECTORY like materialx and Model.path; a path that does not resolve fails the "
+            "load rather than binding a default. Refused together with a Pattern, which binds "
+            "the same slots")
+      .Prop("normal_map", &SceneSurface::normal_map)
+      .Hint("tangent-space normal map, OpenGL green-up (+y is +v). A DirectX-style map lights "
+            "inverted along v and nothing here can tell the two apart, so take the _NormalGL "
+            "of a set that ships both")
+      .Prop("roughness_map", &SceneSurface::roughness_map)
+      .Hint("greyscale roughness, multiplying Surface.roughness. A standalone map, not glTF "
+            "ORM packing: naming it also stops the shader reading metallic out of its blue "
+            "channel")
+      .Prop("metallic_map", &SceneSurface::metallic_map)
+      .Hint("greyscale metallic, multiplying Surface.metallic; without one the scalar decides")
+      .Prop("occlusion_map", &SceneSurface::occlusion_map)
+      .Hint("greyscale ambient occlusion, darkening the INDIRECT light only, so the sun still "
+            "lands where it lands and the map does not read as painted-on dirt")
+      .Prop("emissive_map", &SceneSurface::emissive_map)
+      .Hint("image file multiplying Surface.emissive, which is 0 0 0 by default and so leaves "
+            "the map invisible until emissive is raised");
   edit::ReflectComponent<ScenePattern>("Pattern")
       .Prop("kind", &ScenePattern::kind)
       .Hint("checker | grid | brick | gradient | noise")
@@ -770,6 +871,24 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
       ok = false;
       return;
     }
+    // A Pattern and a texture map on one entity are two answers to the same
+    // question: both bind base colour, normal and roughness on this one
+    // material, and whichever ran second would silently win. Refused as a pair
+    // rather than given a precedence, and refused for ALL the maps rather than
+    // only the three that actually collide, so what an author has to remember
+    // is "one or the other" and not a table of which slots overlap.
+    for (const SceneSurfaceMapRef& map : SceneSurfaceMaps(surface)) {
+      if (!pattern || map.path->empty()) continue;
+      if (error) {
+        *error = Located(scene_path, EntityName(world, e), std::string("Surface.") + map.prop,
+                         *map.path,
+                         "is on an entity that also declares a Pattern; both bind the base "
+                         "colour, normal and roughness of one material, so one would silently "
+                         "overwrite the other. Author the maps or the Pattern, not both");
+      }
+      ok = false;
+      return;
+    }
 
     const std::string key = ShapeKey(shape, stretch, surface, pattern);
     const asset::AssetId mesh_id = asset::MakeAssetId(key);
@@ -785,6 +904,19 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
       return;
     }
     material.id = asset::MakeAssetId(key + "/material");
+    // After the materialx load, so a map named beside a document replaces that
+    // one slot of it, which is the precedence a Pattern already has over one.
+    const char* prop = nullptr;
+    std::string offender;
+    std::string problem;
+    if (!ApplySurfaceMaps(surface, db, renderer, &material, &prop, &offender, &problem)) {
+      if (error) {
+        *error = Located(scene_path, EntityName(world, e), std::string("Surface.") + prop,
+                         offender, problem);
+      }
+      ok = false;
+      return;
+    }
     if (pattern && !ApplyPattern(*pattern, key, db, renderer, &material, error)) {
       ok = false;
       return;
@@ -823,6 +955,17 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     }
   }
   return true;
+}
+
+std::vector<SceneSurfaceMapRef> SceneSurfaceMaps(const SceneSurface& surface) {
+  std::vector<SceneSurfaceMapRef> maps;
+  maps.reserve(std::size(kSurfaceMaps));
+  for (const SurfaceMap& map : kSurfaceMaps) maps.push_back({map.prop, &(surface.*map.path)});
+  return maps;
+}
+
+std::string SceneSurfaceMapProblem(const std::string& path) {
+  return asset::ImageFileProblem(path);
 }
 
 std::string SceneModelProblem(const std::string& path) {

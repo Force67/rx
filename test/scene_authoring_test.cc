@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdio>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -824,6 +825,121 @@ Stretch.scale = 2.5 6 1.75
   fs::remove(saved_b);
 }
 
+// A tiny uncompressed 24-bit TGA of one colour. Written rather than checked in
+// because what these tests need from an image is only that it decodes: an
+// 18-byte header and three bytes a pixel is the whole format, and a binary
+// fixture in the tree would have to be explained to everyone who greps for it.
+fs::path WriteImage(const char* name, u8 r, u8 g, u8 b) {
+  const fs::path path = fs::temp_directory_path() / name;
+  const int size = 4;
+  u8 header[18] = {};
+  header[2] = 2;  // uncompressed true-colour
+  header[12] = static_cast<u8>(size);
+  header[14] = static_cast<u8>(size);
+  header[16] = 24;
+  std::ofstream out(path, std::ios::binary);
+  out.write(reinterpret_cast<const char*>(header), sizeof(header));
+  for (int pixel = 0; pixel < size * size; ++pixel) {
+    const u8 bgr[3] = {b, g, r};  // TGA stores blue first
+    out.write(reinterpret_cast<const char*>(bgr), sizeof(bgr));
+  }
+  return path;
+}
+
+// The trap ShapeKey's INVARIANT comment is about, for the map props: they are
+// std::strings, so they ride no byte range and have to be appended to the key by
+// hand. Two surfaces alike but for which image they name must not collide onto
+// one material - the second entity would silently draw the first one's texture,
+// which looks like a scene that was authored that way.
+void TestSurfaceMapsKeyApart() {
+  const fs::path red = WriteImage("rx_map_red.tga", 220, 30, 30);
+  const fs::path blue = WriteImage("rx_map_blue.tga", 30, 30, 220);
+  const fs::path path = WriteScene("rx_surface_maps.rxscene", std::format(R"(
+entity
+Name.value = "Red"
+Shape.kind = "box"
+Shape.size = 1 1 1
+Surface.base_color_map = "{}"
+
+entity
+Name.value = "Blue"
+Shape.kind = "box"
+Shape.size = 1 1 1
+Surface.base_color_map = "{}"
+
+entity
+Name.value = "RedAgain"
+Shape.kind = "box"
+Shape.size = 1 1 1
+Surface.base_color_map = "{}"
+)", red.string(), blue.string(), red.string()));
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  CHECK(LoadAndBuild(world, db, path));
+
+  const scene::Renderable* a = world.Get<scene::Renderable>(FindByName(world, "Red"));
+  const scene::Renderable* b = world.Get<scene::Renderable>(FindByName(world, "Blue"));
+  const scene::Renderable* c = world.Get<scene::Renderable>(FindByName(world, "RedAgain"));
+  CHECK(a && b && c);
+  CHECK(a->mesh != b->mesh);
+  // And the other half of the rule: two surfaces that agree still share, or
+  // every textured entity in a scene would pay for its own copy of the set.
+  CHECK(a->mesh == c->mesh);
+
+  fs::remove(path);
+  fs::remove(red);
+  fs::remove(blue);
+}
+
+// A map that names no image fails the load on the line that wrote it, rather
+// than binding the material system's 1x1 default and rendering a flat colour
+// the author would have to reverse-engineer.
+void TestSurfaceMapMissingFailsTheLoad() {
+  const fs::path path = WriteScene("rx_surface_map_missing.rxscene", R"(
+entity
+Name.value = "Wall"
+Shape.kind = "box"
+Shape.size = 1 1 1
+Surface.normal_map = "no/such/concrete_normal.png"
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  const std::string error = LoadAndBuildError(world, db, path);
+  CHECK(error.find("rx_surface_map_missing.rxscene:7:") != std::string::npos);
+  CHECK(error.find("Surface.normal_map") != std::string::npos);
+  CHECK(error.find("working directory") != std::string::npos);
+
+  fs::remove(path);
+}
+
+// A Pattern and a texture map both write base colour, normal and roughness on
+// the one material the entity gets, so the pair is refused by name instead of
+// given a silent precedence.
+void TestSurfaceMapRefusesPattern() {
+  const fs::path image = WriteImage("rx_map_pattern.tga", 200, 200, 200);
+  const fs::path path = WriteScene("rx_surface_map_pattern.rxscene", std::format(R"(
+entity
+Name.value = "Facade"
+Shape.kind = "box"
+Shape.size = 1 1 1
+Surface.base_color_map = "{}"
+Pattern.kind = "brick"
+Pattern.scale = 6 8
+)", image.string()));
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  const std::string error = LoadAndBuildError(world, db, path);
+  CHECK(error.find("rx_surface_map_pattern.rxscene:7:") != std::string::npos);
+  CHECK(error.find("Surface.base_color_map") != std::string::npos);
+  CHECK(error.find("Pattern") != std::string::npos);
+
+  fs::remove(path);
+  fs::remove(image);
+}
+
 }  // namespace
 
 int main() {
@@ -842,6 +958,9 @@ int main() {
   TestStretchedGrid();
   TestDegenerateStretchFailsTheLoad();
   TestStretchRoundTrip();
+  TestSurfaceMapsKeyApart();
+  TestSurfaceMapMissingFailsTheLoad();
+  TestSurfaceMapRefusesPattern();
   if (failures == 0) std::printf("scene_authoring_test: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

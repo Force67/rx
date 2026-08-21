@@ -76,6 +76,45 @@ distance with nothing in it.
   `start_distance` of clear air before it ramps in, and an `exposure` multiplier
   over the auto-exposure result.
 
+## Putting a real texture on a primitive
+
+`Surface` takes six image maps: `base_color_map`, `normal_map`,
+`roughness_map`, `metallic_map`, `occlusion_map`, `emissive_map`. Each is a
+path, and each **layers on** the constant beside it exactly as the equivalent
+glTF texture does, so a set comes through verbatim only at `base_color = 1 1 1`,
+and an `emissive_map` is invisible while `emissive` is `0 0 0`.
+
+```
+Surface.base_color = 1 1 1
+Surface.base_color_map = "assets/concrete/Concrete034_Color.jpg"
+Surface.normal_map     = "assets/concrete/Concrete034_NormalGL.jpg"
+Surface.roughness_map  = "assets/concrete/Concrete034_Roughness.jpg"
+```
+
+That is the whole of what a CC0 photogrammetry set (ambientCG and friends) needs
+to reach an authored primitive. Things worth knowing:
+
+- **Paths resolve relative to the working directory**, like `Model.path` and
+  `Surface.materialx` and unlike `Prefab.path`. A path that resolves to no
+  image **fails the load** naming the assignment; nothing here substitutes a
+  default texture, because a render that quietly used one looks authored.
+- **A `Pattern` and a texture map on one entity are refused.** Both bind the
+  base colour, normal and roughness of the entity's one material, so either
+  would silently overwrite the other. Author one or the other.
+- **Take the OpenGL normal map.** A set shipping `_NormalGL` and `_NormalDX`
+  means the green channel is flipped between them; the DX one lights inverted
+  along v and nothing in the loader can tell them apart.
+- `roughness_map` and `metallic_map` are separate greyscale maps, which is how
+  a texture set ships them, not glTF's packed ORM. Naming a roughness map also
+  stops the shader reading metallic out of its blue channel, so `Surface.metallic`
+  stays in charge when there is no metallic map.
+- Two surfaces naming the same file share one decode and one upload; two naming
+  different files are two materials. Texel density is whatever the primitive's
+  uv says (0..1 once per face), the same rule `Pattern.scale` lives under, so a
+  big box wants a set that tiles or a `Model` with authored uvs.
+- A map named beside a `Surface.materialx` replaces that one slot of the
+  document, the same precedence a `Pattern` already has over one.
+
 Anchors and grids both **replace** `Transform.position`, so an entity cannot use
 both, and grid members all share the grid's y. A row of identical lamps is a
 grid; a terrace of differing buildings is individual anchors.
@@ -164,8 +203,9 @@ clutter: things at hand scale, off the grid, with their own shadows.
 - An `Anchor` centres the target's **whole subtree**, prefab parts included, so a
   prefab with something sticking out one side (an awning, an off-centre roof
   plant) places a little off from where its main mass suggests.
-- `Prefab.path` resolves **relative to the file naming it**; `Model.path` and
-  `Surface.materialx` resolve relative to the **working directory**.
+- `Prefab.path` resolves **relative to the file naming it**; `Model.path`,
+  `Surface.materialx` and the `Surface` texture maps resolve relative to the
+  **working directory**.
 
 ## Running it
 

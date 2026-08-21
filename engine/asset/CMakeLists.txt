@@ -5,6 +5,7 @@ rx_add_module(asset
   asset_database.cc
   primitives.cc
   procedural_texture.cc
+  image_file.cc
   simplify.cc
   subdivide.cc
   gltf_loader.cc

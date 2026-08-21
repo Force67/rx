@@ -321,9 +321,35 @@ bool IsFragment(ecs::World& world, const std::vector<ecs::Entity>& entities) {
 void CheckSurface(ecs::World& world, ecs::Entity entity, bool fragment, Report& report) {
   const SceneSurface* surface = world.Get<SceneSurface>(entity);
   if (!surface) return;
+  const std::vector<SceneSurfaceMapRef> maps = SceneSurfaceMaps(*surface);
+  bool any_map = false;
+  for (const SceneSurfaceMapRef& map : maps) any_map = any_map || !map.path->empty();
   if (!fragment && !world.Has<SceneShape>(entity)) {
     report.Warn(entity, "surface_without_shape",
-                "Surface on an entity with no Shape; nothing consumes it");
+                any_map ? "Surface on an entity with no Shape; only BuildSceneShapes reads one, "
+                          "so nothing consumes it and the texture maps it names are never opened"
+                        : "Surface on an entity with no Shape; nothing consumes it");
+  }
+  for (const SceneSurfaceMapRef& map : maps) {
+    if (map.path->empty()) continue;
+    // Exactly the resolution BuildSceneShapes performs, so a map that validates
+    // here is one that binds there. It touches the filesystem, which makes this
+    // (with materialx and Model.path) one of the checks whose answer depends on
+    // where the tool is run from.
+    const std::string problem = SceneSurfaceMapProblem(*map.path);
+    if (!problem.empty()) {
+      report.Error(entity, "map_not_loaded",
+                   std::format("Surface.{} '{}' {}", map.prop, *map.path, problem));
+    }
+    // Both write the base colour, normal and roughness of one material; the
+    // loader refuses the pair rather than picking a winner, so a report that
+    // stayed quiet would leave a failed load with no finding behind it.
+    if (world.Has<ScenePattern>(entity)) {
+      report.Error(entity, "pattern_and_map",
+                   std::format("Surface.{} is on an entity that also declares a Pattern; both "
+                               "bind the same material slots, so the load refuses the pair. "
+                               "Author the maps or the Pattern, not both", map.prop));
+    }
   }
   if (surface->materialx.empty()) return;
   // Exactly the call BuildSceneShapes makes, so a document that validates here

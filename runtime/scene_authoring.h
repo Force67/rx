@@ -3,6 +3,7 @@
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "asset/asset_database.h"
 #include "core/types.h"
@@ -82,6 +83,41 @@ struct SceneSurface {
   // above. Relative to the working directory; a document that will not load
   // fails the scene load rather than falling back to the authored values.
   std::string materialx;
+  // Image maps, each a path RELATIVE TO THE WORKING DIRECTORY like materialx
+  // and Model.path (a scene points at external art rather than owning it, so
+  // these do not move with the file the way Prefab.path does). Without these a
+  // primitive could only be a flat colour or a generated Pattern, and the
+  // thousands of CC0 photogrammetry sets a scene could be dressed with had no
+  // way in at all except through a glTF import.
+  //
+  // They LAYER ON the constants above rather than replacing them, exactly as
+  // the equivalent glTF texture does: base_color_map multiplies base_color,
+  // roughness_map multiplies roughness, emissive_map multiplies emissive. So a
+  // texture set wants base_color = 1 1 1 to come through verbatim, and an
+  // emissive_map does nothing at all while emissive is 0 0 0.
+  //
+  // A path that does not resolve FAILS THE LOAD naming the assignment. There is
+  // no default texture to fall back to: a substituted checkerboard is a render
+  // that looks authored and is not.
+  //
+  // Refused together with a Pattern on one entity (see BuildSceneShapes): both
+  // bind the same three material slots, so either would silently overwrite the
+  // other.
+  std::string base_color_map;
+  // Tangent space, OpenGL green-up (+y is +v), which is the convention the
+  // engine's shaders and its own generated normal maps use. A DirectX-style map
+  // (ambientCG ships both, _NormalDX and _NormalGL) lights inverted along v and
+  // nothing here can tell the two apart, so pick the GL one.
+  std::string normal_map;
+  // Greyscale. Roughness and metallic are separate maps rather than one packed
+  // ORM because that is how a CC0 texture set ships them; a scene wanting glTF
+  // packing has the file's own material through Model.
+  std::string roughness_map;
+  std::string metallic_map;
+  // Greyscale ambient occlusion, multiplying the INDIRECT light only. Direct
+  // sun is unaffected, which is what keeps it from reading as painted-on dirt.
+  std::string occlusion_map;
+  std::string emissive_map;
 };
 
 // A procedural texture bound to the entity's SceneSurface, generated at load.
@@ -477,8 +513,30 @@ bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::st
 // MaterialX document that will not load, all of which would otherwise silently
 // place a grey box where the author asked for something else, and on a
 // Stretch.scale with a non-positive axis, which the normal bake would divide by.
+// Also on a Surface texture map that names no image, and on an entity carrying
+// both a Pattern and a Surface texture map (see SceneSurface).
 bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
                       const std::string& scene_path, std::string* error);
+
+// Why a Surface texture-map path names no image that can be bound, or empty
+// when it does. Only the header is read, so this costs no decode; the point is
+// that BuildSceneShapes and --validate go through one function, and neither can
+// accept a map the other would reject. Same role SceneModelProblem plays for
+// Model.path.
+std::string SceneSurfaceMapProblem(const std::string& path);
+
+// One Surface prop that names an image, and what this surface writes in it.
+struct SceneSurfaceMapRef {
+  const char* prop;         // "base_color_map", "normal_map", ...
+  const std::string* path;  // the authored value, empty when the prop is unset
+};
+
+// Every texture-map prop of `surface`, set or not, in declaration order. One
+// list so the mesh key, the loader, the Pattern conflict and --validate cannot
+// disagree about which props are maps: a map added to SceneSurface and not to
+// the table behind this drops out of ShapeKey, and two surfaces differing only
+// in it then collide onto one material.
+std::vector<SceneSurfaceMapRef> SceneSurfaceMaps(const SceneSurface& surface);
 
 // Why a Model.path names no geometry that can be placed, or empty when it does:
 // the clause a caller puts behind a `path:line:`. Imports the file to answer,
