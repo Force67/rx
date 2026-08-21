@@ -163,6 +163,16 @@ if(RX_BUILD_TESTS)
   set_tests_properties(scene_validate_surface_without_shape PROPERTIES
     PASS_REGULAR_EXPRESSION "surface_without_shape.*Material with nothing to be")
 
+  # Stretch's own failure mode, which the exit code cannot tell from the two
+  # dozen other findings in that fixture: a non-positive axis is what the normal
+  # bake would divide by, so it is an error rather than a warning about an
+  # odd-looking number.
+  add_test(NAME scene_validate_degenerate_stretch
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/broken.rxscene --json
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(scene_validate_degenerate_stretch PROPERTIES
+    PASS_REGULAR_EXPRESSION "degenerate_stretch.*Squashed to nothing.*Stretch.scale y is 0")
+
   # `--dump-materials`: the palette listing an author picks a name from. It
   # loads every preset, so this also proves the whole palette parses; the regex
   # is the shape a caller reads (name -> the path it writes into Prefab.path).

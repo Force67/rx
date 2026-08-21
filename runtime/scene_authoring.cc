@@ -30,12 +30,15 @@
 namespace rx {
 namespace {
 
-// The numeric fields of each authoring component form one contiguous block of
+// Surface's and Pattern's numeric fields each form one contiguous block of
 // f32/u32 (no padding can creep in between equally aligned members), so the key
-// below hashes the block instead of listing thirty fields by hand. INVARIANT: a
-// new numeric field goes between the two members named per component, or it
-// drops out of the key and two surfaces differing only in it collide onto one
-// material.
+// below hashes the block instead of listing thirty fields by hand; Shape and
+// Stretch carry one numeric member each and go into the key by name. INVARIANT
+// either way: a new numeric field goes between the two members named per
+// component, or is appended to ShapeKey by hand, or it drops out of the key -
+// and two surfaces differing only in it collide onto one material, two
+// proportions onto one mesh, so the second entity silently draws the first
+// one's geometry.
 constexpr size_t kSurfaceKeyOffset = offsetof(SceneSurface, base_color);
 constexpr size_t kSurfaceKeyBytes =
     offsetof(SceneSurface, back_lighting) + sizeof(f32) - kSurfaceKeyOffset;
@@ -43,11 +46,12 @@ constexpr size_t kPatternKeyOffset = offsetof(ScenePattern, scale);
 constexpr size_t kPatternKeyBytes =
     offsetof(ScenePattern, roughness_b) + sizeof(f32) - kPatternKeyOffset;
 
-// The layout notices nothing when that invariant is broken: both components end
-// in tail padding (the std::string forces 8-byte alignment) that an appended f32
-// lands in, leaving every offsetof and sizeof exactly as they were. Counting the
-// fields is what notices. Braces elide into the f32[N] members, so these are
-// counts of numbers, not of declarations.
+// The layout notices nothing when that invariant is broken: Shape, Surface and
+// Pattern end in tail padding (the std::string forces 8-byte alignment) that an
+// appended f32 lands in, leaving every offsetof and sizeof exactly as they were,
+// and Stretch has no padding to hide in but no sizeof anything reads either.
+// Counting the fields is what notices. Braces elide into the f32[N] members, so
+// these are counts of numbers, not of declarations.
 struct AnyField {
   template <typename T>
   operator T() const;
@@ -60,6 +64,12 @@ constexpr size_t FieldCount() {
     return sizeof...(F);
   }
 }
+static_assert(FieldCount<SceneShape>() == 4,
+              "SceneShape changed: append the new field to ShapeKey before bumping this, or two "
+              "shapes differing only in it collide onto one mesh");
+static_assert(FieldCount<SceneStretch>() == 3,
+              "SceneStretch changed: append the new field to ShapeKey before bumping this, or two "
+              "proportions differing only in it collide onto one mesh");
 static_assert(FieldCount<SceneSurface>() == 32,
               "SceneSurface changed: widen kSurfaceKeyBytes to cover the new field before bumping "
               "this, or two surfaces differing only in it collide onto one material");
@@ -75,11 +85,14 @@ void AppendBytes(std::string& key, const void* data, size_t bytes) {
 }
 
 // Every field that changes a built asset, so two entities share a mesh and a
-// material exactly when sharing them is correct.
-std::string ShapeKey(const SceneShape& shape, const SceneSurface& surface,
-                     const ScenePattern* pattern) {
+// material exactly when sharing them is correct. The stretch is in here because
+// it is baked into the vertices (see SceneStretch): nothing downstream can tell
+// two proportions apart once they have collided onto one mesh.
+std::string ShapeKey(const SceneShape& shape, const SceneStretch& stretch,
+                     const SceneSurface& surface, const ScenePattern* pattern) {
   std::string key = "rxscene/" + shape.kind + "/" + surface.materialx + "/";
   AppendBytes(key, shape.size, sizeof(shape.size));
+  AppendBytes(key, stretch.scale, sizeof(stretch.scale));
   AppendBytes(key, reinterpret_cast<const char*>(&surface) + kSurfaceKeyOffset, kSurfaceKeyBytes);
   if (pattern) {
     key += "/" + pattern->kind + "/";
@@ -171,10 +184,59 @@ constexpr ShapeKind kShapeKinds[] = {
     {"cone", 0b011}, {"torus", 0b011},  {"capsule", 0b001},
 };
 
+// Unit length in place, over the f32[3] a Vertex stores rather than a Vec3.
+// Normalize's zero guard carries over: a primitive that ships no tangent keeps
+// its zero instead of gaining a nan the whole mesh then carries.
+void Normalize3(f32 v[3]) {
+  const Vec3 unit = Normalize(Vec3{v[0], v[1], v[2]});
+  v[0] = unit.x;
+  v[1] = unit.y;
+  v[2] = unit.z;
+}
+
+// Bakes Stretch.scale into a built primitive's vertices. Doing it here, once per
+// distinct mesh, is what makes the component free downstream: what comes out is
+// an ordinary mesh, so every transform stays a similarity and no shader, bound
+// or import path has to learn about non-uniform scale.
+//
+// Positions and TANGENTS ride the stretch; normals ride its inverse transpose,
+// which for a diagonal is the component-wise reciprocal. The two genuinely
+// differ: a tangent is dP/du, a direction lying IN the surface, while a normal
+// is a covector, and carrying a normal with the matrix tilts it off the surface
+// (a stretched sphere lit that way is subtly wrong rather than obviously
+// broken). That is the same split mesh.vs.hlsl makes for a non-uniform model
+// matrix. Both are renormalized because the interpolators and the brdf want unit
+// vectors, and the pair stays orthogonal exactly, since dot(Sv, S^-1 n) is
+// dot(v, n) for any diagonal S.
+//
+// tangent[3] is left alone: every axis is positive here (BuildSceneShapes
+// refuses anything else), so the determinant stays positive and neither the
+// winding nor the side the bitangent falls on flips.
+void BakeStretch(const f32 stretch[3], asset::Mesh* mesh) {
+  if (stretch[0] == 1.0f && stretch[1] == 1.0f && stretch[2] == 1.0f) return;
+  for (asset::MeshLod& lod : mesh->lods) {
+    for (asset::Vertex& vertex : lod.vertices) {
+      for (u32 axis = 0; axis < 3; ++axis) {
+        vertex.position[axis] *= stretch[axis];
+        vertex.normal[axis] /= stretch[axis];
+        vertex.tangent[axis] *= stretch[axis];
+      }
+      Normalize3(vertex.normal);
+      Normalize3(vertex.tangent);
+    }
+  }
+  // The bounding sphere has to keep enclosing the geometry, so its centre moves
+  // with the stretch and its radius takes the largest axis. Same rule as the
+  // gpu's RxMaxAxisScale, for the same reason: a sphere that shrank below the
+  // geometry would have the culls discard something that is on screen.
+  for (u32 axis = 0; axis < 3; ++axis) mesh->bounds_center[axis] *= stretch[axis];
+  mesh->bounds_radius *= std::max({stretch[0], stretch[1], stretch[2]});
+}
+
 // False + *error on a kind no primitive builds, which would otherwise put a box
 // where the author asked for something else.
-bool BuildShapeMesh(const SceneShape& shape, asset::AssetId id, asset::Mesh* out,
-                    std::string* error) {
+bool BuildShapeMesh(const SceneShape& shape, const SceneStretch& stretch, asset::AssetId id,
+                    asset::Mesh* out, std::string* error) {
   // The table gates the chain rather than the other way round, so a kind added
   // below but not above fails loudly here instead of building a shape
   // --validate would then reject as unknown.
@@ -205,6 +267,7 @@ bool BuildShapeMesh(const SceneShape& shape, asset::AssetId id, asset::Mesh* out
     if (error) *error = "Shape.kind '" + shape.kind + "' has no primitive builder";
     return false;
   }
+  BakeStretch(stretch.scale, out);
   return true;
 }
 
@@ -539,6 +602,14 @@ void RegisterSceneComponents() {
             "the entity's own axes; right-handed and y-up, so y = 90 turns the entity's +z "
             "face onto +x. This replaces Transform.rotation, which needs no hand-written "
             "quaternion once this exists");
+  edit::ReflectComponent<SceneStretch>("Stretch")
+      .Prop("scale", &SceneStretch::scale)
+      .Hint("per-axis scale baked into this entity's built Shape, on top of Shape.size: this is "
+            "how a sphere becomes an ellipsoid, a torus an oval and a cylinder a flattened "
+            "column, which size cannot say for any kind but box and plane. Its own component so "
+            "an instance can stretch a prefab's geometry without restating Shape.kind and "
+            "Shape.size. 1 1 1 is no stretch, every axis has to be positive, and the bake "
+            "corrects the normals so a stretched shape lights correctly");
   edit::ReflectComponent<SceneAnchor>("Anchor")
       .Prop("target", &SceneAnchor::target)
       .Hint("Name.value of the entity to stand against; this replaces Transform.position, and "
@@ -571,7 +642,7 @@ void RegisterSceneComponents() {
 }
 
 bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
-                      std::string* error) {
+                      const std::string& scene_path, std::string* error) {
   // The Renderable is added after the walk: adding a component moves the entity
   // between archetypes, which must not happen under Each.
   std::vector<std::pair<ecs::Entity, asset::AssetId>> renderables;
@@ -583,12 +654,33 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
 
   world.Each<SceneShape>([&](ecs::Entity e, SceneShape& shape) {
     if (!ok) return;
+    // Both default when the entity authors neither, which is what lets a shape
+    // stand on its own: a Stretch is the exception, not the rule.
+    static const SceneStretch kNoStretch;
+    const SceneStretch* authored = world.Get<SceneStretch>(e);
+    const SceneStretch& stretch = authored ? *authored : kNoStretch;
+    // Before anything is built, because the bake divides the normals by these:
+    // a zero axis hands the whole mesh nan normals and a negative one turns it
+    // inside out, neither of which reads as "the number was wrong".
+    for (u32 axis = 0; axis < 3; ++axis) {
+      if (stretch.scale[axis] > 0.0f) continue;
+      if (error) {
+        *error = Located(scene_path, EntityName(world, e), "Stretch.scale",
+                         std::format("{} {} {}", stretch.scale[0], stretch.scale[1],
+                                     stretch.scale[2]),
+                         std::format("is {} on {}; every axis has to be positive, because the "
+                                     "mesh bake divides the normals by it (1 1 1 is no stretch)",
+                                     stretch.scale[axis], "xyz"[axis]));
+      }
+      ok = false;
+      return;
+    }
     static const SceneSurface kDefaultSurface;
     const SceneSurface* found = world.Get<SceneSurface>(e);
     const SceneSurface& surface = found ? *found : kDefaultSurface;
     const ScenePattern* pattern = world.Get<ScenePattern>(e);
 
-    const std::string key = ShapeKey(shape, surface, pattern);
+    const std::string key = ShapeKey(shape, stretch, surface, pattern);
     const asset::AssetId mesh_id = asset::MakeAssetId(key);
     renderables.emplace_back(e, mesh_id);
     if (!built.insert(mesh_id.hash).second) return;
@@ -608,7 +700,7 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     }
 
     asset::Mesh mesh;
-    if (!BuildShapeMesh(shape, mesh_id, &mesh, error)) {
+    if (!BuildShapeMesh(shape, stretch, mesh_id, &mesh, error)) {
       ok = false;
       return;
     }

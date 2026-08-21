@@ -28,7 +28,8 @@ stale. Read them rather than guessing prop names.
   land on the instancing entity; components the instance already declares win.
   Merge is **per component**, so an instance can override a whole `Surface` or
   `Pattern` without restating geometry, but declaring any part of `Shape`
-  replaces the prefab's `Shape` entirely.
+  replaces the prefab's `Shape` entirely, which is why proportions live in
+  `Stretch` (below) rather than in `Shape`.
 - **The material palette** (`runtime/scenes/materials/`) is 30 named presets,
   instanced exactly like any other prefab. Prefer `Prefab.path =
   "materials/steel.rxscene"` over guessing PBR floats.
@@ -40,6 +41,11 @@ stale. Read them rather than guessing prop names.
   member that does not name its own prefab one to instance.
 - **`Rotation.euler`** is degrees, yaw then pitch then roll about the entity's
   own axes.
+- **`Stretch.scale`** is a per-axis scale baked into the entity's built `Shape`,
+  on top of `Shape.size`. It is a component of its own precisely so it composes
+  with a prefab: one building prefab instanced at three proportions is three
+  `Stretch.scale` lines, no restating of `Shape.kind` or `Shape.size`. Every
+  axis has to be positive.
 
 Anchors and grids both **replace** `Transform.position`, so an entity cannot use
 both, and grid members all share the grid's y. Buildings of differing height are

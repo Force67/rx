@@ -239,7 +239,8 @@ bool Viewer::LoadRxScene() {
   // one, and before the anchors, which stand a turned object on its turned
   // footprint.
   BuildSceneRotations(*world_);
-  if (!BuildSceneShapes(*world_, db, config_.headless ? nullptr : renderer_, &error)) {
+  if (!BuildSceneShapes(*world_, db, config_.headless ? nullptr : renderer_, config_.scene_path,
+                        &error)) {
     RX_ERROR("rxscene: {}", error);
     return false;
   }

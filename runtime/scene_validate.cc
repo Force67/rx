@@ -351,6 +351,28 @@ void CheckPattern(ecs::World& world, ecs::Entity entity, bool fragment, Report& 
   }
 }
 
+void CheckStretch(ecs::World& world, ecs::Entity entity, bool fragment, Report& report) {
+  const SceneStretch* stretch = world.Get<SceneStretch>(entity);
+  if (!stretch) return;
+  // BuildSceneShapes refuses a non-positive axis outright, so a report that
+  // stayed quiet about one would leave the author with a failed load and no
+  // finding explaining it. Judged without looking for a Shape, unlike the
+  // warning below: no axis of a stretch is ever meant to be zero or negative,
+  // wherever the component ends up being consumed.
+  for (u32 axis = 0; axis < 3; ++axis) {
+    if (stretch->scale[axis] > 0.0f) continue;
+    report.Error(entity, "degenerate_stretch",
+                 std::format("Stretch.scale {} is {}, which the mesh bake divides the normals "
+                             "by; every axis has to be positive (1 1 1 is no stretch)",
+                             "xyz"[axis], stretch->scale[axis]));
+  }
+  if (!fragment && !world.Has<SceneShape>(entity)) {
+    report.Warn(entity, "stretch_without_shape",
+                "Stretch on an entity with no Shape; only a built Shape is baked, so nothing "
+                "consumes it (a Model is stretched by authoring it stretched)");
+  }
+}
+
 void CheckModel(ecs::World& world, ecs::Entity entity, Report& report) {
   const SceneModel* model = world.Get<SceneModel>(entity);
   if (!model) return;
@@ -584,6 +606,7 @@ bool ValidateSceneFile(const std::string& path, bool json) {
     CheckShape(world, entity, report);
     CheckSurface(world, entity, fragment, report);
     CheckPattern(world, entity, fragment, report);
+    CheckStretch(world, entity, fragment, report);
     CheckModel(world, entity, report);
     CheckLight(world, entity, report);
     CheckCamera(world, entity, report);
@@ -604,7 +627,7 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // finding already named the bad Shape.kind or Model.path) instead of one
   // file-wide failure. No gpu: `renderer` null is the headless path the
   // viewer's own --headless takes.
-  if (BuildSceneShapes(world, db, /*renderer=*/nullptr, &error) &&
+  if (BuildSceneShapes(world, db, /*renderer=*/nullptr, path, &error) &&
       BuildSceneModels(world, db, /*renderer=*/nullptr, path, &error)) {
     if (!BuildSceneAnchors(world, path, &error)) report.FileError("anchor", error);
   }

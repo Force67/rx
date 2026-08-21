@@ -58,6 +58,16 @@ Transform.position = 2 1 0
 Shape.kind = "blob"
 Shape.size = 1 1 1
 
+# degenerate_stretch. Harder than a bad size: the bake divides the normals by
+# each axis, so a zero lane is a mesh of nans rather than a flat shape, and
+# BuildSceneShapes refuses the file outright instead of building it.
+entity
+Name.value = "Squashed to nothing"
+Transform.position = -4 1 2
+Shape.kind = "sphere"
+Shape.size = 0.5 0 0
+Stretch.scale = 1 0 1
+
 # unknown_pattern_kind.
 entity
 Name.value = "Plaid sphere"

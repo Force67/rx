@@ -1,9 +1,13 @@
 // Headless tests for the .rxscene authoring passes that turn a declaration into
-// engine state, focused on Rotation: the euler convention it promises, the
-// save/load round trip that has to reproduce the file exactly, and the three
-// things a rotation interacts with (anchors, grids, prefabs). No GPU: every
-// builder takes a null renderer, which is the viewer's own --headless path.
-// Exits non-zero on the first failure so it slots into ctest.
+// engine state. Rotation: the euler convention it promises, the save/load round
+// trip that has to reproduce the file exactly, and the three things a rotation
+// interacts with (anchors, grids, prefabs). Stretch: that it composes with
+// Shape.size and with a PREFAB's Shape (the case it is a component of its own
+// for), that the mesh key tells two proportions apart, and that the bounds
+// anchors and grids measure are the STRETCHED ones. No GPU: every builder takes
+// a null renderer, which is the viewer's own --headless path, so the shading
+// half of the stretch (the normals) is proved by render instead. Exits non-zero
+// on the first failure so it slots into ctest.
 
 #include <cmath>
 #include <cstdio>
@@ -67,13 +71,31 @@ bool LoadAndBuild(ecs::World& world, asset::AssetDatabase& db, const fs::path& p
     return false;
   }
   BuildSceneRotations(world);
-  if (!BuildSceneShapes(world, db, /*renderer=*/nullptr, &error) ||
+  if (!BuildSceneShapes(world, db, /*renderer=*/nullptr, file, &error) ||
       !BuildSceneModels(world, db, /*renderer=*/nullptr, file, &error) ||
       !BuildSceneAnchors(world, file, &error)) {
     std::printf("build error: %s\n", error.c_str());
     return false;
   }
   return true;
+}
+
+// The same pass order, kept quiet and handing back the refusal: for the files
+// that are supposed to fail, where the message is the thing under test.
+std::string LoadAndBuildError(ecs::World& world, asset::AssetDatabase& db, const fs::path& path) {
+  std::string error;
+  const std::string file = path.string();
+  if (!edit::LoadScene(world, db, file, &error, /*strict=*/true)) return error;
+  if (!BuildSceneGrids(world, file, &error) || !BuildScenePrefabs(world, file, &error)) {
+    return error;
+  }
+  BuildSceneRotations(world);
+  if (!BuildSceneShapes(world, db, /*renderer=*/nullptr, file, &error) ||
+      !BuildSceneModels(world, db, /*renderer=*/nullptr, file, &error) ||
+      !BuildSceneAnchors(world, file, &error)) {
+    return error;
+  }
+  return {};
 }
 
 ecs::Entity FindByName(ecs::World& world, const std::string& name) {
@@ -316,6 +338,295 @@ Prefab.path = "rx_rotation_prefab_cell.rxscene"
   fs::remove(path);
 }
 
+// Stretch.scale multiplies the built geometry per axis, so a box may reach the
+// same extents through either component. The two are not the same MESH, though:
+// the key has to keep them apart, or the second entity draws the first's
+// geometry.
+void TestStretchComposesWithSize() {
+  const fs::path path = WriteScene("rx_stretch_compose.rxscene", R"(
+entity
+Name.value = "Sized"
+Shape.kind = "box"
+Shape.size = 1 0.5 1.5
+
+entity
+Name.value = "Stretched"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+Stretch.scale = 2 1 3
+
+entity
+Name.value = "Twin"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+Stretch.scale = 2 1 3
+
+entity
+Name.value = "Unstretched"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  CHECK(LoadAndBuild(world, db, path));
+
+  const SceneBounds* sized = world.Get<SceneBounds>(FindByName(world, "Sized"));
+  const SceneBounds* stretched = world.Get<SceneBounds>(FindByName(world, "Stretched"));
+  CHECK(sized && stretched);
+  for (int axis = 0; axis < 3; ++axis) {
+    CHECK_NEAR(stretched->min[axis], sized->min[axis], 1e-5f);
+    CHECK_NEAR(stretched->max[axis], sized->max[axis], 1e-5f);
+  }
+
+  // Same extents reached a different way is a different mesh (the vertices are
+  // baked, so nothing downstream can tell the two apart later), the same
+  // numbers in the same components is one shared mesh, and dropping the stretch
+  // has to leave the key somewhere else again.
+  const asset::AssetId by_size = world.Get<scene::Renderable>(FindByName(world, "Sized"))->mesh;
+  const asset::AssetId by_stretch =
+      world.Get<scene::Renderable>(FindByName(world, "Stretched"))->mesh;
+  const asset::AssetId twin = world.Get<scene::Renderable>(FindByName(world, "Twin"))->mesh;
+  const asset::AssetId plain =
+      world.Get<scene::Renderable>(FindByName(world, "Unstretched"))->mesh;
+  CHECK(by_size.hash != by_stretch.hash);
+  CHECK(by_stretch.hash == twin.hash);
+  CHECK(by_stretch.hash != plain.hash);
+
+  fs::remove(path);
+}
+
+// The reason Stretch is a component of its own: prefab merge is per component,
+// so an instance that stretches a prefab keeps the prefab's Shape and Surface
+// and only changes its proportions. As a Shape prop this could not be said at
+// all - authoring any part of Shape replaces the prefab's whole Shape, which
+// silently loses the kind and size and draws a default box.
+void TestPrefabStretch() {
+  const fs::path prefab = WriteScene("rx_stretch_prefab_cell.rxscene", R"(
+entity
+Name.value = "Tower"
+Shape.kind = "box"
+Shape.size = 1 4 1
+Surface.base_color = 0.2 0.4 0.6
+Surface.roughness = 0.35
+)");
+  const fs::path path = WriteScene("rx_stretch_prefab.rxscene", R"(
+entity
+Name.value = "Plain"
+Transform.position = 0 0 0
+Prefab.path = "rx_stretch_prefab_cell.rxscene"
+
+entity
+Name.value = "Wide"
+Transform.position = 6 0 0
+Stretch.scale = 2 0.5 1
+Prefab.path = "rx_stretch_prefab_cell.rxscene"
+
+entity
+Name.value = "Slim"
+Transform.position = 12 0 0
+Stretch.scale = 0.5 1.5 1
+Prefab.path = "rx_stretch_prefab_cell.rxscene"
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  CHECK(LoadAndBuild(world, db, path));
+
+  const f32 expected[3][3] = {{1, 4, 1}, {2, 2, 1}, {0.5f, 6, 1}};
+  const char* names[3] = {"Plain", "Wide", "Slim"};
+  for (int i = 0; i < 3; ++i) {
+    const ecs::Entity entity = FindByName(world, names[i]);
+    // The prefab's geometry, at this instance's proportions: the Shape itself
+    // is untouched, which is what a second instance of the same prefab and a
+    // re-save both depend on.
+    const SceneShape* shape = world.Get<SceneShape>(entity);
+    CHECK(shape && shape->kind == "box");
+    CHECK_NEAR(shape->size[1], 4.0f, 1e-6f);
+    const SceneBounds* bounds = world.Get<SceneBounds>(entity);
+    CHECK(bounds != nullptr);
+    for (int axis = 0; axis < 3; ++axis) CHECK_NEAR(bounds->max[axis], expected[i][axis], 1e-5f);
+    // ... and the facade rides along, which is the other half of "the instance
+    // owns only what it authored".
+    const SceneSurface* surface = world.Get<SceneSurface>(entity);
+    CHECK(surface && std::abs(surface->base_color[2] - 0.6f) < 1e-6f);
+  }
+
+  // Three proportions of one prefab are three meshes, never a shared one.
+  const asset::AssetId plain = world.Get<scene::Renderable>(FindByName(world, "Plain"))->mesh;
+  const asset::AssetId wide = world.Get<scene::Renderable>(FindByName(world, "Wide"))->mesh;
+  const asset::AssetId slim = world.Get<scene::Renderable>(FindByName(world, "Slim"))->mesh;
+  CHECK(plain.hash != wide.hash);
+  CHECK(wide.hash != slim.hash);
+  CHECK(plain.hash != slim.hash);
+
+  // A save of the expanded scene reloads onto the same proportions: the
+  // instance's Stretch survives beside the Shape the expansion left on it.
+  const fs::path saved = fs::temp_directory_path() / "rx_stretch_prefab_saved.rxscene";
+  std::string error;
+  CHECK(edit::SaveScene(world, saved.string(), &error));
+  CHECK(ReadFile(saved).find("Stretch.scale = 2 0.5 1") != std::string::npos);
+  ecs::World reloaded;
+  CHECK(LoadAndBuild(reloaded, db, saved));
+  const SceneBounds* before = world.Get<SceneBounds>(FindByName(world, "Wide"));
+  const SceneBounds* after = reloaded.Get<SceneBounds>(FindByName(reloaded, "Wide"));
+  CHECK(before && after);
+  for (int axis = 0; axis < 3; ++axis) CHECK_NEAR(before->max[axis], after->max[axis], 1e-6f);
+
+  fs::remove(saved);
+  fs::remove(prefab);
+  fs::remove(path);
+}
+
+// An anchor measures built geometry, and after this change the built geometry is
+// the stretched geometry. Nothing in BuildSceneAnchors knows about stretch, so
+// this is the check that the bake really did reach SceneBounds rather than
+// leaving the placement to be worked out from the authored Shape.size.
+void TestAnchorOnStretched() {
+  const fs::path path = WriteScene("rx_stretch_anchor.rxscene", R"(
+entity
+Name.value = "Plinth"
+Transform.position = 0 1 0
+Shape.kind = "box"
+Shape.size = 1 0.5 1
+Stretch.scale = 1 2 1
+
+entity
+Name.value = "Column"
+Anchor.target = "Plinth"
+Anchor.mode = "on"
+Shape.kind = "box"
+Shape.size = 0.25 0.25 0.25
+Stretch.scale = 1 3 1
+
+entity
+Name.value = "Beside"
+Anchor.target = "Plinth"
+Anchor.mode = "right"
+Shape.kind = "sphere"
+Shape.size = 0.5 0.5 0.5
+Stretch.scale = 4 1 1
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  CHECK(LoadAndBuild(world, db, path));
+
+  // The plinth is half extent 0.5 stretched to 1, centred at y = 1, so its top
+  // face is y = 2; the column is half extent 0.25 stretched to 0.75.
+  const scene::Transform* column = world.Get<scene::Transform>(FindByName(world, "Column"));
+  CHECK_NEAR(column->position[1], 2.75f, 1e-4f);
+  // ... and an ellipsoid stands off the plinth's +x face by its own stretched
+  // radius, which is the case Shape.size cannot author at all.
+  const scene::Transform* beside = world.Get<scene::Transform>(FindByName(world, "Beside"));
+  CHECK_NEAR(beside->position[0], 1.0f + 2.0f, 1e-3f);
+  CHECK_NEAR(beside->position[1], 1.0f, 1e-3f);
+
+  fs::remove(path);
+}
+
+// A grid steps by Grid.step whatever its members are made of, so a stretched
+// cell lands on the same coordinate an unstretched one would. The point of the
+// check is that the bake did not move the geometry off its own origin.
+void TestStretchedGrid() {
+  const fs::path path = WriteScene("rx_stretch_grid.rxscene", R"(
+entity
+Name.value = "Row"
+Transform.position = 0 0 0
+Grid.count = 2 1 1
+Grid.step = 3 0 0
+
+entity
+Name.value = "First"
+Grid.of = "Row"
+Shape.kind = "cylinder"
+Shape.size = 0.5 1 0
+Stretch.scale = 1 1 2
+
+entity
+Name.value = "Second"
+Grid.of = "Row"
+Shape.kind = "cylinder"
+Shape.size = 0.5 1 0
+Stretch.scale = 1 1 2
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  CHECK(LoadAndBuild(world, db, path));
+
+  const scene::Transform second = edit::WorldTransform(world, FindByName(world, "Second"));
+  CHECK_NEAR(second.position[0], 3.0f, 1e-4f);
+
+  // An oval column: 0.5 across x and 1 across z, which no Shape.size can say
+  // for a cylinder, and centred on its own origin the way the grid assumes.
+  const SceneBounds* bounds = world.Get<SceneBounds>(FindByName(world, "First"));
+  CHECK(bounds != nullptr);
+  CHECK_NEAR(bounds->max[0], 0.5f, 1e-4f);
+  CHECK_NEAR(bounds->max[2], 1.0f, 1e-4f);
+  CHECK_NEAR(bounds->min[0], -0.5f, 1e-4f);
+  CHECK_NEAR(bounds->min[2], -1.0f, 1e-4f);
+
+  fs::remove(path);
+}
+
+// Zero would make the normal bake divide by it and hand the whole mesh nans, so
+// the load says no and names the line rather than uploading the wreckage.
+void TestDegenerateStretchFailsTheLoad() {
+  const fs::path path = WriteScene("rx_stretch_degenerate.rxscene", R"(
+entity
+Name.value = "Flattened"
+Shape.kind = "sphere"
+Shape.size = 0.5 0.5 0.5
+Stretch.scale = 1 0 1
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World world;
+  const std::string error = LoadAndBuildError(world, db, path);
+  CHECK(error.find("rx_stretch_degenerate.rxscene:7:") != std::string::npos);
+  CHECK(error.find("Stretch.scale") != std::string::npos);
+
+  fs::remove(path);
+}
+
+// Same round trip the rotation test makes: a saved scene reloads and re-saves
+// byte-identically, so a live edit of a stretched scene does not rewrite the
+// proportions the author set.
+void TestStretchRoundTrip() {
+  const fs::path path = WriteScene("rx_stretch_roundtrip.rxscene", R"(
+entity
+Name.value = "Tower"
+Transform.position = 0 6 0
+Shape.kind = "box"
+Shape.size = 1 1 1
+Stretch.scale = 2.5 6 1.75
+)");
+  asset::Vfs vfs;
+  asset::AssetDatabase db(vfs);
+  ecs::World first;
+  CHECK(LoadAndBuild(first, db, path));
+
+  const fs::path saved_a = fs::temp_directory_path() / "rx_stretch_roundtrip_a.rxscene";
+  const fs::path saved_b = fs::temp_directory_path() / "rx_stretch_roundtrip_b.rxscene";
+  std::string error;
+  CHECK(edit::SaveScene(first, saved_a.string(), &error));
+  ecs::World second;
+  CHECK(LoadAndBuild(second, db, saved_a));
+  CHECK(edit::SaveScene(second, saved_b.string(), &error));
+  CHECK(ReadFile(saved_a) == ReadFile(saved_b));
+  CHECK(ReadFile(saved_a).find("Stretch.scale = 2.5 6 1.75") != std::string::npos);
+
+  const SceneBounds* before = first.Get<SceneBounds>(FindByName(first, "Tower"));
+  const SceneBounds* after = second.Get<SceneBounds>(FindByName(second, "Tower"));
+  CHECK(before && after);
+  for (int axis = 0; axis < 3; ++axis) CHECK_NEAR(before->max[axis], after->max[axis], 1e-6f);
+
+  fs::remove(path);
+  fs::remove(saved_a);
+  fs::remove(saved_b);
+}
+
 }  // namespace
 
 int main() {
@@ -325,6 +636,12 @@ int main() {
   TestAnchorOnRotated();
   TestRotatedGrid();
   TestPrefabRotation();
+  TestStretchComposesWithSize();
+  TestPrefabStretch();
+  TestAnchorOnStretched();
+  TestStretchedGrid();
+  TestDegenerateStretchFailsTheLoad();
+  TestStretchRoundTrip();
   if (failures == 0) std::printf("scene_authoring_test: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

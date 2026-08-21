@@ -23,6 +23,10 @@ namespace rx {
 // registered for it), because one vec3 covers half extents, a radius, and the
 // radius pairs a torus and a capsule need. BuildSceneShapes writes the built
 // mesh into the entity's Renderable, so an entity does not author one itself.
+//
+// Only box and plane read all three axes of `size`; the per-axis proportion
+// every other kind lacks is SceneStretch, which is its own component so that it
+// composes with a prefab's Shape instead of replacing it.
 struct SceneShape {
   std::string kind = "box";
   f32 size[3] = {0.5f, 0.5f, 0.5f};
@@ -189,6 +193,46 @@ struct SceneRotation {
   f32 euler[3] = {0, 0, 0};
 };
 
+// Per-axis proportion for the entity's Shape: `scale` multiplies the built
+// geometry along x, y and z, on top of whatever Shape.size the kind read. This
+// is the only way to say "an ellipsoid", "an oval torus" or "a flattened
+// column", since every kind but box and plane reads size as radii.
+//
+// Its own component rather than a Shape prop for the reason SceneRotation is
+// one: prefab merge is per COMPONENT (see ScenePrefab), so a `Shape.stretch`
+// would make an instance that only wants different proportions replace the
+// prefab's whole Shape, silently losing the kind and size it meant to keep -
+// one building prefab at three proportions is the case this exists for, and it
+// costs one line beside the Prefab.path:
+//
+//   Transform.position = 12 18 0
+//   Stretch.scale = 1.6 0.7 1
+//   Prefab.path = "prefabs/city/tower_glass.rxscene"
+//
+// It is BAKED INTO THE VERTICES at build time rather than carried on the
+// Transform, which is what keeps it free: the bake applies the inverse
+// transpose to the normals once, on the cpu, exactly, so every matrix
+// downstream stays a similarity and no shader, bound or transform path has to
+// know the mesh was stretched. Two shapes differing only in the stretch are two
+// meshes (see ShapeKey), and two entities agreeing on it share one, so the cost
+// is per distinct proportion rather than per entity.
+//
+// Every axis has to be positive: the normal bake divides by them, so a zero is a
+// mesh of nans and a negative one is a mesh turned inside out. BuildSceneShapes
+// refuses the load naming the line, and --validate reports it as
+// degenerate_stretch.
+//
+// Scope is the entity's OWN Shape, and only a Shape. A Model is deliberately not
+// stretched: baking into imported geometry means a vertex copy and a mesh id per
+// stretch value, which is a draw call per variant instead of per instance, so a
+// glTF asset is stretched by authoring it stretched. A multi-entity prefab is
+// the same story per entity - the instance carries the root's geometry, so a
+// Stretch on it stretches the root and leaves the children the prefab expanded
+// into at their authored proportions.
+struct SceneStretch {
+  f32 scale[3] = {1, 1, 1};
+};
+
 // Relative placement: stand this entity against another one instead of at a
 // coordinate derived by hand. `target` is the other entity's Name.value and
 // `mode` picks which side of it to sit against.
@@ -326,12 +370,18 @@ bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::st
 // null skips the GPU side) and points each entity's Renderable at the result.
 // Generated pattern textures also go into `db`, which is where an asset a scene
 // synthesized belongs and what lets a headless build inspect them. Shapes that
-// agree on every field share one mesh. False + *error on an unrecognized
-// SceneShape::kind or ScenePattern::kind, or a MaterialX document that will not
-// load, all of which would otherwise silently place a grey box where the author
-// asked for something else.
+// agree on every field share one mesh. A SceneStretch other than 1 1 1 is baked
+// into that mesh here (see SceneStretch), so the SceneBounds this writes are the
+// stretched ones and an anchor onto a stretched object needs no special case.
+// `scene_path` is read only to turn a failure into the `path:line:` of the
+// assignment that caused it.
+//
+// False + *error on an unrecognized SceneShape::kind or ScenePattern::kind, or a
+// MaterialX document that will not load, all of which would otherwise silently
+// place a grey box where the author asked for something else, and on a
+// Stretch.scale with a non-positive axis, which the normal bake would divide by.
 bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
-                      std::string* error);
+                      const std::string& scene_path, std::string* error);
 
 // Why a Model.path names no geometry that can be placed, or empty when it does:
 // the clause a caller puts behind a `path:line:`. Imports the file to answer,
