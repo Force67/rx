@@ -104,6 +104,14 @@ const char* ReadFloat(const std::string& token, f32* out) {
 // plane is authored "Shape.size = 9 0"). Stops at the first token that is not a
 // finite number and reports it through `error`; the lanes from there on stay 0,
 // which is what a lenient load keeps and what a strict load refuses.
+//
+// A list LONGER than the prop is refused as well. The surplus used to be
+// dropped in silence, which is how every city prefab came to carry
+// "Pattern.scale = 5 6" - meaning 5 bays across and 6 floors up - against a
+// scalar prop that read the 5 and discarded the rest. The facade that came back
+// was one nobody had authored, and no load, no --validate and no warning said
+// so. A short list pads because the format asks it to; a long one is the author
+// believing in a prop that is not there.
 std::vector<f32> ParseFloats(std::string_view s, size_t n, std::string* error = nullptr) {
   std::vector<f32> out;
   std::istringstream in{std::string(s)};
@@ -115,6 +123,13 @@ std::vector<f32> ParseFloats(std::string_view s, size_t n, std::string* error = 
       break;
     }
     out.push_back(v);
+  }
+  // Only reached with n lanes in hand, so a token left over is surplus rather
+  // than the tail of a list that stopped early on a bad number.
+  if (out.size() == n && (in >> token)) {
+    if (error)
+      *error = std::format("takes {} value{} and was given more, starting at '{}'", n,
+                           n == 1 ? "" : "s", token);
   }
   out.resize(n, 0.f);
   return out;

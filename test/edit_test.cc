@@ -405,6 +405,27 @@ void TestNumberLiterals() {
   CHECK_NEAR(t.position[1], 2.f, 1e-6f);
   CHECK_NEAR(t.position[2], 0.f, 1e-6f);
 
+  // A LONG list is not the short form's mirror image: it is an author writing
+  // values for a prop that has nowhere to put them. The surplus used to be
+  // dropped in silence, which is how the shipped city prefabs came to carry a
+  // two-number Pattern.scale against a scalar prop and render facades nobody
+  // authored, with --validate reporting the file clean.
+  write("Transform.position = 1 2 3 4\n");
+  error = strict_error();
+  CHECK(error.find("takes 3 values") != std::string::npos);
+  CHECK(error.find("'4'") != std::string::npos);
+  CHECK(error.find(":4:") != std::string::npos);
+
+  // Including a surplus that is not a number: the count is what is wrong, and
+  // reporting it as a bad literal would send the author looking at the value.
+  write("Transform.scale = 2 unrelated\n");
+  error = strict_error();
+  CHECK(error.find("takes 1 value") != std::string::npos);
+  CHECK(error.find("unrelated") != std::string::npos);
+  // Lenient keeps the lanes it could read, so the editor still opens the file.
+  lenient(&t);
+  CHECK_NEAR(t.scale, 2.f, 1e-6f);
+
   // Rotations. Three numbers pad with a zero w, not an identity one, so the
   // whole quaternion is zero and MakeFromQuat collapses the mesh to a point.
   write("Transform.rotation = 0 0 0\n");
