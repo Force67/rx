@@ -47,6 +47,10 @@ void PrintUsage() {
   RX_INFO("                        Runs the clock in lockstep at 1/60 s so the png does not depend");
   RX_INFO("                        on machine load (RX_FIXED_DT overrides, 0 = wall clock)");
   RX_INFO("  --shot-frames <n>     frames to render before the capture (default 30)");
+  RX_INFO("  --camera-at \"x y z\"   override the scene's eye for this run, without editing it");
+  RX_INFO("  --camera-look \"x y z\" override what it looks at (a second angle is how you find");
+  RX_INFO("                        what one hero framing hides)");
+  RX_INFO("  --camera-fov <deg>    override the vertical field of view");
   RX_INFO("  --width <px>          render/window width (also RX_WIN_W)");
   RX_INFO("  --height <px>         render/window height (also RX_WIN_H)");
   RX_INFO("  --preset <tier>       auto (default) | android | steamdeck | low |");
@@ -173,6 +177,9 @@ int main(int argc, char** argv) {
     else if (arg == "--headless") no_window = true;
     else if (arg == "--shot") config.shot_path = next();
     else if (arg == "--shot-frames") config.shot_frames = std::atoi(next().c_str());
+    else if (arg == "--camera-at") config.camera_at = next();
+    else if (arg == "--camera-look") config.camera_look = next();
+    else if (arg == "--camera-fov") config.camera_fov = std::strtof(next().c_str(), nullptr);
     else if (arg == "--width") app_config.width = static_cast<rx::u32>(std::atoi(next().c_str()));
     else if (arg == "--height") app_config.height = static_cast<rx::u32>(std::atoi(next().c_str()));
     else if (arg == "--preset") config.preset = rx::render::ParsePreset(next());

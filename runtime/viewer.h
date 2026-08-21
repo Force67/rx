@@ -78,6 +78,10 @@ class Viewer : public app::Application {
   // frame, RX_REPLAY=<path> drives the camera from a recorded path.
   void DriveCamera(f32 dt);
   void LookCameraAt(const Vec3& eye, const Vec3& center);
+  // Applies --camera-at / --camera-look / --camera-fov over whatever viewpoint
+  // the loaded scene established, so a second angle on an authored scene costs
+  // a flag rather than an edit to the file and an edit back.
+  void ApplyCameraOverride();
   // Builds the cinematic showcase path (RX_SHOWCASE): a smooth drone pass over
   // the loaded scene.
   void BuildShowcase();

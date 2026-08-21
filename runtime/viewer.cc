@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
+#include <sstream>
 #include <utility>
 
 #include <base/option.h>
@@ -149,9 +150,48 @@ bool Viewer::OnInitialize(app::Services& services) {
   } else {
     demos_->CreateDemoScene();
   }
+  // After the scene, whichever kind it was, so the override beats the authored
+  // viewpoint rather than racing it.
+  ApplyCameraOverride();
 
   StartAuthoringEndpoint();
   return true;
+}
+
+// --camera-at / --camera-look / --camera-fov. Each is independent: overriding
+// only the eye keeps the scene looking at what it was authored to look at,
+// which is the common case when backing off to see whether a composition still
+// reads. A malformed triple is refused loudly rather than silently ignored -
+// the flag exists to be typed by hand, and a run that quietly used the authored
+// camera would be read as "the change did nothing".
+void Viewer::ApplyCameraOverride() {
+  auto triple = [](const std::string& text, Vec3* out) {
+    std::istringstream in(text);
+    return static_cast<bool>(in >> out->x >> out->y >> out->z);
+  };
+  Vec3 eye = camera_.position();
+  Vec3 target = camera_.target();
+  bool moved = false;
+  if (!config_.camera_at.empty()) {
+    if (!triple(config_.camera_at, &eye)) {
+      RX_WARN("--camera-at '{}' is not three numbers; keeping the scene's eye",
+              config_.camera_at);
+    } else {
+      moved = true;
+    }
+  }
+  if (!config_.camera_look.empty()) {
+    if (!triple(config_.camera_look, &target)) {
+      RX_WARN("--camera-look '{}' is not three numbers; keeping the scene's target",
+              config_.camera_look);
+    } else {
+      moved = true;
+    }
+  }
+  if (moved) LookCameraAt(eye, target);
+  if (config_.camera_fov > 0.0f) {
+    scene_camera_fov_ = config_.camera_fov * 3.14159265f / 180.0f;
+  }
 }
 
 // --authoring-endpoint only. Nothing is registered and no socket exists without
@@ -252,6 +292,15 @@ bool Viewer::LoadRxScene() {
   if (!BuildSceneAnchors(*world_, config_.scene_path, &error)) {
     RX_ERROR("rxscene: {}", error);
     return false;
+  }
+
+  // A scene that stages its own sun takes it over from the day/night clock for
+  // good: DriveSunFromClock would otherwise walk it back to the current hour on
+  // the very next frame, and a capture whose light depends on when it was taken
+  // is not the reproducible one --shot promises.
+  if (ApplySceneEnvironment(*world_, &renderer_->settings())) {
+    ctx_.scene_owns_sun = true;
+    drive_sun_from_clock_ = false;
   }
 
   // Authored lights are static, so they are collected once here into the same

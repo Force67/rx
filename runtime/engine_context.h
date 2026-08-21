@@ -48,6 +48,16 @@ struct EngineConfig {
   // drive; 0 frames falls back to RX_UI_SHOT_FRAMES.
   std::string shot_path;
   int shot_frames = 0;
+  // --camera-at / --camera-look / --camera-fov: override the scene's own
+  // viewpoint for this run without editing it. Looking at an authored scene
+  // from a second angle is how an author finds the things one hero framing
+  // hides - a facade that only works head-on, a silhouette that collapses from
+  // the side, a street with nothing in its middle distance - and having to edit
+  // the file to do it means the check costs an edit to undo, so it does not get
+  // made. Empty leaves the scene's Camera alone; `camera_fov` 0 does the same.
+  std::string camera_at;
+  std::string camera_look;
+  f32 camera_fov = 0.0f;
   // --authoring-endpoint: serve the script commands on this unix socket path
   // while the engine runs, so a tool can spawn/move/inspect without a restart.
   // Empty (the default) means no endpoint is bound at all; see
