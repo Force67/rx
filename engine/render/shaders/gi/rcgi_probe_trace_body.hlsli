@@ -2,6 +2,7 @@
 #define RX_GI_RCGI_PROBE_TRACE_BODY_HLSLI_
 
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 #include "gi/rcgi_common.hlsli"
 // Shared body for the RCGI probe-trace pass. For the current frame's cascade,
 // every probe shoots a rotated fibonacci sphere of visibility rays. Misses
@@ -185,7 +186,9 @@ void main(uint3 id : SV_DispatchThreadID) {
   float3 n_local = RxLoadNormal(mesh, tri[0]) * w[0] + RxLoadNormal(mesh, tri[1]) * w[1] +
                    RxLoadNormal(mesh, tri[2]) * w[2];
   float3x4 to_world = rq.CommittedObjectToWorld3x4();
-  float3 n = normalize(mul((float3x3)to_world, n_local));
+  // Cofactor, not the matrix: the normal is a covector. No mirror sign, the
+  // next line forces the normal to face the ray and discards it anyway.
+  float3 n = normalize(mul(RxCofactor((float3x3)to_world), n_local));
   if (dot(n, dir) > 0.0) n = -n;
   rays_out[id.xy] = float4(0, 0, 0, distance);  // hit; blend re-hashes for radiance
 #endif

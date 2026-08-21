@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 #include "vgeo_common.hlsli"
 // Fullscreen resolve of the visibility buffer: decodes the packed
 // cluster/triangle id, refetches the three vertices, reconstructs
@@ -39,6 +40,11 @@ PsOut main(float4 pos : SV_Position) {
   DagMeshlet m = meshlets[entry.x];
   VgeoInstance inst = instances[entry.y];
 
+  // Hoisted: the three corners share one instance. The mirror sign is folded
+  // into the interpolated normal below rather than per corner.
+  float inst_det;
+  const float3x3 inst_cof = RxCofactor((float3x3)inst.model, inst_det);
+
   uint packed = meshlet_triangles[m.triangle_offset + tri];
   float3 n[3];
   float3 wp[3];
@@ -53,7 +59,7 @@ PsOut main(float4 pos : SV_Position) {
     inv_w[k] = 1.0 / w;
     ndc[k] = float3(clip.xy * inv_w[k], clip.z * inv_w[k]);
     wp[k] = world.xyz;
-    n[k] = mul((float3x3)inst.model, float3(mv.nx, mv.ny, mv.nz));
+    n[k] = mul(inst_cof, float3(mv.nx, mv.ny, mv.nz));
   }
 
   float2 s;
@@ -67,7 +73,7 @@ PsOut main(float4 pos : SV_Position) {
   float sum = l.x + l.y + l.z;
   l = abs(sum) > 1e-12 ? l / sum : float3(1.0, 0.0, 0.0);
 
-  float3 normal = normalize(n[0] * l.x + n[1] * l.y + n[2] * l.z);
+  float3 normal = normalize(n[0] * l.x + n[1] * l.y + n[2] * l.z) * RxMirrorSign(inst_det);
   float ndl = saturate(dot(normal, normalize(float3(0.4, 1.0, 0.3))));
 
   float3 base;

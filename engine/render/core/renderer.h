@@ -303,6 +303,14 @@ struct FrameView {
   base::Vector<PointLight> lights;
   // Bone palette for every skinned draw this frame, concatenated; each skinned
   // DrawItem indexes its run by skin_offset. Column-major model-space matrices.
+  //
+  // Every entry must be translate * rotate * UNIFORM scale (what
+  // MakeTransform builds). The skinning vertex shader blends the raw upper 3x3
+  // across the influencing bones and applies it to the normal directly, which
+  // is only the right transform for a similarity: a bone carrying anisotropic
+  // scale tilts its normals off the surface, and blending makes it worse
+  // rather than failing loudly. Non-uniform scale belongs in the DrawItem's
+  // model matrix, where the cofactor path handles it.
   base::Vector<Mat4> bone_matrices;
   // Active morph target weights for every morphed draw this frame,
   // concatenated; each DrawItem indexes its run by morph_offset/morph_count.

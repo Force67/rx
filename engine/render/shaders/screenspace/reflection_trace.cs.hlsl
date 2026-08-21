@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // Stochastic specular reflections for the hybrid renderer: one VNDF-sampled
 // GGX ray per pixel through the scene TLAS, shaded like the old inline mirror
 // ray (sun + nearest-probe DDGI + emissive at the hit, prefiltered sky on
@@ -361,7 +362,9 @@ void main(uint3 id : SV_DispatchThreadID) {
       huv += RxLoadUv(mesh, tri[corner]) * w[corner];
     }
     float3x4 to_world = rq.CommittedObjectToWorld3x4();
-    float3 hit_n = normalize(mul((float3x3)to_world, n_local));
+    // Cofactor, not the matrix: the normal is a covector. No mirror sign, the
+    // next line forces the normal to face the ray and discards it anyway.
+    float3 hit_n = normalize(mul(RxCofactor((float3x3)to_world), n_local));
     if (dot(hit_n, dir) > 0.0) hit_n = -hit_n;
 
     MaterialRecord hit_material =

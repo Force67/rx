@@ -4180,6 +4180,30 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   if (!view.bone_matrices.empty() && frame.bone_palette.mapped) {
     u32 count = std::min<u32>(static_cast<u32>(view.bone_matrices.size()),
                               kMaxFrameBones);
+#ifndef NDEBUG
+    // The skinning path blends raw upper-3x3 blocks and carries normals with
+    // them, which only holds for a similarity transform (see FrameView::
+    // bone_matrices). Anisotropic scale in a bone shades wrong silently, so
+    // say so once instead of leaving it to be found in a screenshot.
+    static bool warned_anisotropic_bone = false;
+    if (!warned_anisotropic_bone) {
+      for (u32 i = 0; i < count && !warned_anisotropic_bone; ++i) {
+        const f32* m = view.bone_matrices[i].m;
+        const f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+        const f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+        const f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+        const f32 lo = std::min({sx, sy, sz});
+        const f32 hi = std::max({sx, sy, sz});
+        if (lo > 1e-6f && hi > lo * 1.01f) {
+          RX_WARN(
+              "bone {} carries anisotropic scale ({:.3f}/{:.3f}/{:.3f}); skinned "
+              "normals assume translate*rotate*uniform-scale and will shade wrong",
+              i, sx, sy, sz);
+          warned_anisotropic_bone = true;
+        }
+      }
+    }
+#endif
     std::memcpy(frame.bone_palette.mapped, view.bone_matrices.data(),
                 count * sizeof(Mat4));
   }

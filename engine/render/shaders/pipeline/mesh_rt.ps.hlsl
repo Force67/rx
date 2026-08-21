@@ -2,6 +2,7 @@
 // penumbras that the temporal passes integrate.
 
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // RCGI world-cascade sampling for the inline reflection bounce (finding: the
 // inline path lost indirect reflection light without NRD). Parameterized helpers
 // only; bindings are declared below (env slots 36-40).
@@ -513,10 +514,14 @@ float3 SurfaceNormal(PsIn input) {
   if ((material.flags & kFlagHasNormalMap) != 0u) {
     float3 sampled = normal_map.Sample(normal_sampler, input.uv).xyz * 2.0 - 1.0;
     if ((material.flags & kFlagNormalModelSpace) != 0u) {
-      // Object-space (_msn) normal: rotate straight to world by the model
-      // matrix (uniform scale drops out on normalize), replacing the vertex
-      // normal. No TBN, so seam-broken tangents can't smear the shading.
-      float3 mn = mul((float3x3)draw_records[push.draw_index].model, sampled);
+      // Object-space (_msn) normal: carried straight to world by the model
+      // matrix's cofactor, replacing the vertex normal. No TBN, so seam-broken
+      // tangents can't smear the shading. Same covector rule as the vertex
+      // normal, sign included, or a mirrored instance lights inside out.
+      float model_det;
+      const float3x3 cof =
+          RxCofactor((float3x3)draw_records[push.draw_index].model, model_det);
+      float3 mn = mul(cof, sampled) * RxMirrorSign(model_det);
       if (dot(mn, mn) > 1e-8) n = normalize(mn);
     } else {
       float3 t = input.tangent.xyz - n * dot(input.tangent.xyz, n);
@@ -650,7 +655,9 @@ float3 TraceReflection(float3 origin, float3 dir) {
     uv += RxLoadUv(mesh, tri[corner]) * w[corner];
   }
   float3x4 to_world = rq.CommittedObjectToWorld3x4();
-  float3 hit_n = normalize(mul((float3x3)to_world, n_local));
+  // Cofactor, not the matrix: the normal is a covector. No mirror sign, the
+  // next line forces the normal to face the ray and discards it anyway.
+  float3 hit_n = normalize(mul(RxCofactor((float3x3)to_world), n_local));
   if (dot(hit_n, dir) > 0.0) hit_n = -hit_n;
 
   MaterialRecord hit_material =

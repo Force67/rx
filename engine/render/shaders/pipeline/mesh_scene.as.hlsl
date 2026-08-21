@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // Task (amplification) stage for the optional mesh-shader opaque path. One
 // workgroup per 32 meshlets of one (lod, submesh): frustum-cull the whole
 // instance once, then frustum- and backface-cone-cull each meshlet and compact
@@ -81,10 +82,7 @@ bool OutsideFrustum(float4 pl[5], float3 c, float r) {
 bool InstanceOccluded(float4x4 model, float3 mcenter, float mradius) {
   if (push.occlusion.z < 1.0) return false;  // hi-z unavailable / disabled
   float3 center = mul(model, float4(mcenter, 1.0)).xyz;
-  float sx = length(model[0].xyz);
-  float sy = length(model[1].xyz);
-  float sz = length(model[2].xyz);
-  float radius = mradius * max(sx, max(sy, sz));
+  float radius = mradius * RxMaxAxisScale((float3x3)model);
   float4 cc = mul(frame.prev_view_proj, float4(center, 1.0));
   if (cc.w <= 1e-4) return false;
   float3 ndc = cc.xyz / cc.w;
@@ -134,10 +132,12 @@ void main(uint3 dtid : SV_DispatchThreadID, uint gtid : SV_GroupIndex) {
     float3 cone = float3(LoadF(mb, 16), LoadF(mb, 20), LoadF(mb, 24));
     float cutoff = LoadF(mb, 28);
     bool culled = OutsideFrustum(planes, center, radius);
-    float3 world_center = mul(model, float4(center, 1.0)).xyz;
-    float3 world_axis = normalize(mul((float3x3)model, cone));
-    float3 view_dir = normalize(world_center - frame.camera_position.xyz);
-    if (dot(view_dir, world_axis) >= cutoff) culled = true;
+    if (RxConeCullValid((float3x3)model)) {
+      float3 world_center = mul(model, float4(center, 1.0)).xyz;
+      float3 world_axis = normalize(mul((float3x3)model, cone));
+      float3 view_dir = normalize(world_center - frame.camera_position.xyz);
+      if (dot(view_dir, world_axis) >= cutoff) culled = true;
+    }
     emit = !culled;
   }
 

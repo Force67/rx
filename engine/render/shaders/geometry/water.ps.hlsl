@@ -4,6 +4,7 @@
 // glint. Material base color acts as the absorption tint.
 
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 
 struct FrameGlobals {
   column_major float4x4 view_proj;
@@ -216,7 +217,9 @@ float3 TraceReflection(float3 origin, float3 dir) {
     uv += RxLoadUv(mesh, tri[corner]) * w[corner];
   }
   float3x4 to_world = rq.CommittedObjectToWorld3x4();
-  float3 n = normalize(mul((float3x3)to_world, n_local));
+  // Cofactor, not the matrix: the normal is a covector. No mirror sign, the
+  // next line forces the normal to face the ray and discards it anyway.
+  float3 n = normalize(mul(RxCofactor((float3x3)to_world), n_local));
   if (dot(n, dir) > 0.0) n = -n;
 
   MaterialRecord hit_material =

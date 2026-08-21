@@ -9,6 +9,7 @@
 // the pose it actually landed on and then rides the animation.
 
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 
 struct BakePush {
   column_major float4x4 model;
@@ -70,8 +71,14 @@ VsOut main(VsIn input) {
 
   VsOut output;
   output.world_pos = mul(push.model, float4(local_pos, 1.0)).xyz;
-  output.normal = mul((float3x3)push.model, local_normal);
-  output.tangent = float4(mul((float3x3)push.model, local_tangent), input.tangent.w);
+  // A bake is persistent: a stamp baked with the old normal keeps the old
+  // shading until the receiver is rebaked, so this has to match mesh.vs or a
+  // rebake shifts the decal against the surface it sits on.
+  float model_det;
+  const float3x3 model_cof = RxCofactor((float3x3)push.model, model_det);
+  const float mirror = RxMirrorSign(model_det);
+  output.normal = normalize(mul(model_cof, local_normal)) * mirror;
+  output.tangent = float4(mul((float3x3)push.model, local_tangent), input.tangent.w * mirror);
   // uv space IS clip space here. Depth 0 with no depth attachment bound.
   // Geometry whose mapped uv leaves 0..1 (another UDIM tile, say) lands outside
   // the tile viewport and the scissor drops it - which is exactly what the

@@ -2,6 +2,7 @@
 // a ray queried shadow toward the sun.
 
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 
 // The head of the mesh push range, which covers the fragment stage too. Only
 // these two words are read here, and both sit at the same offset in the
@@ -474,10 +475,14 @@ float3 SurfaceNormal(PsIn input) {
   if ((material.flags & kFlagHasNormalMap) != 0u) {
     float3 sampled = normal_map.Sample(normal_sampler, input.uv).xyz * 2.0 - 1.0;
     if ((material.flags & kFlagNormalModelSpace) != 0u) {
-      // Object-space (_msn) normal: rotate straight to world by the model
-      // matrix (uniform scale drops out on normalize), replacing the vertex
-      // normal. No TBN, so seam-broken tangents can't smear the shading.
-      float3 mn = mul((float3x3)draw_records[push.draw_index].model, sampled);
+      // Object-space (_msn) normal: carried straight to world by the model
+      // matrix's cofactor, replacing the vertex normal. No TBN, so seam-broken
+      // tangents can't smear the shading. Same covector rule as the vertex
+      // normal, sign included, or a mirrored instance lights inside out.
+      float model_det;
+      const float3x3 cof =
+          RxCofactor((float3x3)draw_records[push.draw_index].model, model_det);
+      float3 mn = mul(cof, sampled) * RxMirrorSign(model_det);
       if (dot(mn, mn) > 1e-8) n = normalize(mn);
     } else {
       float3 t = input.tangent.xyz - n * dot(input.tangent.xyz, n);

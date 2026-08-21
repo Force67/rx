@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // Progressive reference path tracer. Shares the scene's TLAS and bindless
 // material/geometry tables with the realtime path; diffuse bounces with
 // next-event estimation toward the sun and the procedural sky cube on miss.
@@ -116,7 +117,9 @@ Hit TraceClosest(float3 origin, float3 dir) {
     uv += RxLoadUv(mesh, tri[c]) * w[c];
   }
   float3x4 to_world = rq.CommittedObjectToWorld3x4();
-  float3 n = normalize(mul((float3x3)to_world, n_local));
+  // Cofactor, not the matrix: the normal is a covector. No mirror sign, the
+  // next line forces the normal to face the ray and discards it anyway.
+  float3 n = normalize(mul(RxCofactor((float3x3)to_world), n_local));
   if (dot(n, dir) > 0.0) n = -n;
   h.normal = n;
 

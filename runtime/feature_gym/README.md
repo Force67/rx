@@ -13,7 +13,7 @@ deterministic tour selects its own modes where a stop is testing one of them.
 The lighting tour includes RCGI; launch with `--no-rt` or `RX_RCGI_SW=1` to run
 that stop through the software SDF tracer instead of hardware ray queries.
 
-The 31-stop tour also exercises streamed instance-group replacement, split PBR
+The 32-stop tour also exercises streamed instance-group replacement, split PBR
 maps with per-submesh materials, eight-layer terrain splatting, projected virtual
 geometry albedo, Gerstner shoreline buoyancy, Jolt strand grooming, local network
 interest bubbles, and ECS camera-stack transitions. The weather stops cover

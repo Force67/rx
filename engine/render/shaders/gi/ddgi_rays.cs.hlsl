@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // DDGI probe rays: every probe shoots a rotated fibonacci sphere of rays
 // through the TLAS. Misses sample the sky; hits fetch their triangle's
 // normal, uv and material through the bindless scene tables and shade from
@@ -144,7 +145,9 @@ void main(uint3 id : SV_DispatchThreadID) {
       uv += RxLoadUv(mesh, tri[corner]) * w[corner];
     }
     float3x4 to_world = rq.CommittedObjectToWorld3x4();
-    float3 n = normalize(mul((float3x3)to_world, n_local));
+    // Cofactor, not the matrix: the normal is a covector. No mirror sign, the
+    // next line forces the normal to face the ray and discards it anyway.
+    float3 n = normalize(mul(RxCofactor((float3x3)to_world), n_local));
     if (dot(n, dir) > 0.0) n = -n;  // shade the side the ray sees
 
     MaterialRecord material =

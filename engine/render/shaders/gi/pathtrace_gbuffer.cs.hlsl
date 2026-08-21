@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // Playable path tracer: one sample per pixel, emitting the inputs NRD's
 // REBLUR_DIFFUSE denoiser needs instead of brute-force accumulating. The primary
 // surface albedo is divided out (demodulation) so the denoiser blurs lighting,
@@ -187,7 +188,9 @@ Hit TraceClosest(float3 origin, float3 dir, float cone_spread) {
   float3 n_local = nrm[0] * w[0] + nrm[1] * w[1] + nrm[2] * w[2];
   float2 uv = uvv[0] * w[0] + uvv[1] * w[1] + uvv[2] * w[2];
   float3x4 to_world = rq.CommittedObjectToWorld3x4();
-  float3 n = normalize(mul((float3x3)to_world, n_local));
+  // Cofactor, not the matrix: the normal is a covector. No mirror sign, the
+  // next line forces the normal to face the ray and discards it anyway.
+  float3 n = normalize(mul(RxCofactor((float3x3)to_world), n_local));
   if (dot(n, dir) > 0.0) n = -n;
   h.normal = n;
 

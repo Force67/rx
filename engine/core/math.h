@@ -180,6 +180,10 @@ inline Mat4 MakeFromQuat(f32 x, f32 y, f32 z, f32 w) {
 inline Mat4 MakeFromQuat(const Quat& q) { return MakeFromQuat(q.x, q.y, q.z, q.w); }
 
 // Affine bone/node transform: translate * rotate * uniform scale, column major.
+// The uniform-scale restriction is load-bearing downstream, not a convenience:
+// skinning blends these matrices' upper 3x3 blocks and carries normals with the
+// result, which is only the correct transform for a similarity (see
+// render::FrameView::bone_matrices).
 inline Mat4 MakeTransform(const Vec3& translation, const Quat& rotation, f32 scale) {
   Mat4 m = MakeFromQuat(rotation);
   for (int i = 0; i < 12; ++i) m.m[i] *= scale;  // scale the 3x3 columns

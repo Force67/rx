@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // Optional mesh-shader opaque path (VK_EXT_mesh_shader). The task stage
 // (mesh_scene.as) culls instances and meshlets and hands this stage a compacted
 // list of surviving meshlet indices; one mesh workgroup per survivor pulls its
@@ -102,8 +103,14 @@ void main(uint3 gid : SV_GroupID, uint tid : SV_GroupIndex, in payload MeshPaylo
     o.curr_clip = clip;
     o.prev_clip = mul(frame.prev_view_proj, mul(record.prev_model, float4(pos, 1.0)));
     o.sv_position = clip + float4(frame.jitter * clip.w, 0.0, 0.0);
-    o.normal = mul((float3x3)record.model, nrm);
-    o.tangent = float4(mul((float3x3)record.model, tan.xyz), tan.w);
+    // Same covector rule as mesh.vs: this path must agree with the raster one
+    // per pixel, because whether an instance goes through mesh shaders is a
+    // device capability, not a visual choice.
+    float model_det;
+    const float3x3 model_cof = RxCofactor((float3x3)record.model, model_det);
+    const float mirror = RxMirrorSign(model_det);
+    o.normal = normalize(mul(model_cof, nrm)) * mirror;
+    o.tangent = float4(mul((float3x3)record.model, tan.xyz), tan.w * mirror);
     o.uv = uv;
     o.color = float4(cpk & 0xff, (cpk >> 8) & 0xff, (cpk >> 16) & 0xff, (cpk >> 24) & 0xff) / 255.0;
     o.tension = 0.0;  // static geometry

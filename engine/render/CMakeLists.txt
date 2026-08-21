@@ -462,6 +462,21 @@ set(RX_SHADER_DEPS_sdf_clear_cs_hlsl shaders/gi/sdf_trace.hlsli)
 set(RX_SHADER_DEPS_sdf_compose_cs_hlsl shaders/gi/sdf_trace.hlsli)
 set(RX_SHADER_DEPS_sdf_debug_cs_hlsl shaders/gi/sdf_trace.hlsli)
 
+# Every pass that turns a model matrix into a normal or a bounding radius pulls
+# in model_transform.hlsli. hlsl includes are not tracked automatically, and a
+# partial rebuild here ships raster and ray-traced normals out of phase, which
+# the denoisers and GI read as ghosting rather than as a stale build.
+foreach(sym
+    cull_cs_hlsl mesh_scene_as_hlsl mesh_scene_ms_hlsl vgeo_cull_cs_hlsl
+    vgeo_resolve_ps_hlsl mesh_vs_hlsl mesh_instance_vs_hlsl mesh_skin_vs_hlsl
+    mesh_ps_hlsl mesh_sss_ps_hlsl mesh_rt_ps_hlsl mesh_rt_sss_ps_hlsl
+    wboit_vs_hlsl fur_vs_hlsl decal_bake_vs_hlsl decal_bake_skin_vs_hlsl
+    pathtrace_cs_hlsl pathtrace_gbuffer_cs_hlsl ddgi_rays_cs_hlsl
+    recon_gbuffer_cs_hlsl rcgi_probe_trace_cs_hlsl rcgi_probe_trace_sw_cs_hlsl
+    water_ps_hlsl reflection_trace_cs_hlsl)
+  list(APPEND RX_SHADER_DEPS_${sym} shaders/model_transform.hlsli)
+endforeach()
+
 # The gpu-driven virtual geometry shaders touching the 64-bit visibility
 # buffer need SM 6.6 atomics/types the 6.5 DXIL sidecar cannot express; d3d12
 # runs the single-pass fallback instead (caps().buffer_atomics64 stays false).

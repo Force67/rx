@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // Weighted-blended order-independent transparency (McGuire & Bavoil 2013). The
 // transparent geometry accumulates premultiplied colour weighted by depth into
 // one target and the product of (1 - alpha) into another, so the result is
@@ -39,7 +40,9 @@ VsOut main(VsIn input) {
   float4 clip = mul(frame.view_proj, world);
   VsOut o;
   o.pos = clip;
-  o.normal = mul((float3x3)push.model, input.normal);
+  float model_det;
+  const float3x3 model_cof = RxCofactor((float3x3)push.model, model_det);
+  o.normal = normalize(mul(model_cof, input.normal)) * RxMirrorSign(model_det);
   o.view_z = clip.w;  // perspective w == view-space depth
   o.world_pos = world.xyz;
   return o;
