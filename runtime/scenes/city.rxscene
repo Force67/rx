@@ -79,72 +79,86 @@ Surface.roughness = 0.8
 
 entity
 Name.value = "W shops"
-Transform.position = -15 3 30
+Transform.position = -15 3.3 30
+Stretch.scale = 1.15 1.1 1
 Prefab.path = "prefabs/city/shop_row.rxscene"
 
 entity
 Name.value = "W brick"
-Transform.position = -15 7 16
+Transform.position = -15 8.05 16
+Stretch.scale = 0.9 1.15 1
 Prefab.path = "prefabs/city/block_brick.rxscene"
 
 entity
 Name.value = "W office"
-Transform.position = -16 9 0
+Transform.position = -16 8.1 0
+Stretch.scale = 1.1 0.9 1.05
 Prefab.path = "prefabs/city/block_office.rxscene"
 
 entity
 Name.value = "W concrete"
-Transform.position = -15 14 -17
+Transform.position = -15 16.1 -17
+Stretch.scale = 0.95 1.15 0.95
 Prefab.path = "prefabs/city/tower_concrete.rxscene"
 
 entity
 Name.value = "W glass"
-Transform.position = -14 18 -32
+Transform.position = -14 17.1 -32
+Stretch.scale = 1.1 0.95 1
 Prefab.path = "prefabs/city/tower_glass.rxscene"
 
 entity
 Name.value = "W brick far"
-Transform.position = -15 7 -46
+Transform.position = -15 5.95 -46
+Stretch.scale = 1.2 0.85 1
 Prefab.path = "prefabs/city/block_brick.rxscene"
 
 entity
 Name.value = "E office"
-Transform.position = 16 9 28
+Transform.position = 16 10.8 28
+Stretch.scale = 0.9 1.2 1
 Prefab.path = "prefabs/city/block_office.rxscene"
 
 entity
 Name.value = "E shops"
 Transform.position = 15 3 13
+Stretch.scale = 1.2 1 1.05
 Prefab.path = "prefabs/city/shop_row.rxscene"
 
 entity
 Name.value = "E glass"
-Transform.position = 14 18 -3
+Transform.position = 14 19.8 -3
+Stretch.scale = 0.9 1.1 0.9
 Prefab.path = "prefabs/city/tower_glass.rxscene"
 
 entity
 Name.value = "E slim"
-Transform.position = 13 22 -19
+Transform.position = 13 19.8 -19
+Stretch.scale = 1.15 0.9 1.15
 Prefab.path = "prefabs/city/tower_slim.rxscene"
 
 entity
 Name.value = "E concrete"
-Transform.position = 15 14 -35
+Transform.position = 15 14.7 -35
+Stretch.scale = 1.1 1.05 1
 Prefab.path = "prefabs/city/tower_concrete.rxscene"
 
 entity
 Name.value = "E shops far"
-Transform.position = 15 3 -50
+Transform.position = 15 3.6 -50
+Stretch.scale = 0.95 1.2 1
 Prefab.path = "prefabs/city/shop_row.rxscene"
 
 entity
 Name.value = "NW back"
-Transform.position = -34 18 -30
+Transform.position = -34 15.3 -30
+Stretch.scale = 1.2 0.85 1.1
 Prefab.path = "prefabs/city/tower_glass.rxscene"
 
 entity
 Name.value = "NE back"
-Transform.position = 36 14 -28
+Transform.position = 36 16.8 -28
+Stretch.scale = 0.95 1.2 1
 Prefab.path = "prefabs/city/tower_concrete.rxscene"
 
 entity
@@ -159,32 +173,38 @@ Prefab.path = "prefabs/city/warehouse.rxscene"
 
 entity
 Name.value = "SW brick"
-Transform.position = -38 7 -2
+Transform.position = -38 7.7 -2
+Stretch.scale = 1.1 1.1 1
 Prefab.path = "prefabs/city/block_brick.rxscene"
 
 entity
 Name.value = "SE office"
-Transform.position = 39 9 2
+Transform.position = 39 8.1 2
+Stretch.scale = 1.05 0.9 1.1
 Prefab.path = "prefabs/city/block_office.rxscene"
 
 entity
 Name.value = "Sky tower A"
-Transform.position = -8 22 -62
+Transform.position = -8 23.1 -62
+Stretch.scale = 1.1 1.05 1.1
 Prefab.path = "prefabs/city/tower_slim.rxscene"
 
 entity
 Name.value = "Sky tower B"
-Transform.position = 9 18 -66
+Transform.position = 9 21.6 -66
+Stretch.scale = 0.85 1.2 0.85
 Prefab.path = "prefabs/city/tower_glass.rxscene"
 
 entity
 Name.value = "Sky tower C"
-Transform.position = 26 14 -60
+Transform.position = 26 15.4 -60
+Stretch.scale = 1.15 1.1 1
 Prefab.path = "prefabs/city/tower_concrete.rxscene"
 
 entity
 Name.value = "Sky tower D"
-Transform.position = -30 22 -64
+Transform.position = -30 20.9 -64
+Stretch.scale = 0.9 0.95 0.9
 Prefab.path = "prefabs/city/tower_slim.rxscene"
 
 entity
@@ -287,13 +307,34 @@ Shape.kind = "box"
 Shape.size = 0.45 0.45 0.45
 Prefab.path = "materials/wood_planks.rxscene"
 
+# The kiosk is the one thing at the near kerb big enough to read, so it carries
+# a lit sign rather than sitting there as an unlit block. The sign is anchored
+# on its front face, so turning the kiosk turns the sign with it.
 entity
 Name.value = "Kiosk"
 Transform.position = 11.8 1.3 6
 Rotation.euler = 0 -21 0
 Shape.kind = "box"
 Shape.size = 1.1 1.3 1.1
-Prefab.path = "materials/brick_red.rxscene"
+Prefab.path = "materials/plaster_white.rxscene"
+
+entity
+Name.value = "Kiosk sign"
+Anchor.target = "Kiosk"
+Anchor.mode = "front"
+Rotation.euler = 0 -21 0
+Shape.kind = "box"
+Shape.size = 0.85 0.34 0.06
+Surface.base_color = 0.9 0.97 1
+Surface.emissive = 2.2 3.4 4.2
+Surface.roughness = 0.35
+
+entity
+Name.value = "Kiosk glow"
+Transform.position = 11.8 1.9 7.6
+Light.color = 0.6 0.86 1
+Light.intensity = 5
+Light.radius = 8
 
 entity
 Name.value = "Bollard row"
