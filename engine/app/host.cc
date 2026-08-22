@@ -176,6 +176,11 @@ void Host::ApplyRenderPreset() {
   if (env.wireframe) tuned.wireframe = true;  // honor RX_WIREFRAME over the preset
   tuned.ssr = env.ssr;                        // honor RX_SSR over the preset
   tuned.ssgi = env.ssgi;                      // honor RX_SSGI over the preset
+  // No preset sets these two, so the env value is the only one there is; before
+  // they were carried across, RX_DISTANCE_LOD / RX_MESH_SHADER_LOD were applied
+  // in Renderer::Initialize and then thrown away here, one line later.
+  tuned.distance_lod = env.distance_lod;      // honor RX_DISTANCE_LOD
+  tuned.mesh_shader_lod = env.mesh_shader_lod;  // honor RX_MESH_SHADER_LOD
   tuned.color_grade = env.color_grade;        // presets never set a grade
   tuned.sun_direction = env.sun_direction;    // honor RX_SUN_DIR over the default
   // Sky/weather env overrides (RX_AERIAL / RX_CLOUDS / RX_CLOUD_COVERAGE /
