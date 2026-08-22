@@ -197,6 +197,18 @@ class MaterialSystem {
   // material / texture is unknown or was uploaded fully opaque.
   const AlphaCoverage* material_base_alpha(u64 material_hash) const;
 
+  // A material's base-color map and the cutoff an alpha-masked one tests
+  // against (0 when the material is not masked). `image` is null when the
+  // material is unknown or binds no base-color map. For passes that sample a
+  // material's albedo outside its binding set, which is what an imposter bake
+  // does: it renders geometry it has no mesh pipeline for and only needs the
+  // one map.
+  struct BaseColor {
+    const GpuImage* image = nullptr;
+    f32 alpha_cutoff = 0.0f;
+  };
+  BaseColor material_base_color(u64 material_hash) const;
+
   // Bindless texture-table index for an uploaded (sRGB) texture, or
   // BindlessRegistry::kInvalidIndex when absent. Used to texture particles.
   u32 bindless_texture(u64 texture_hash) const;
@@ -278,6 +290,7 @@ class MaterialSystem {
     u64 map_keys[8] = {};  // salted texture hashes for bindings 1..8
     u32 bindless_material = BindlessRegistry::kInvalidIndex;
     u32 last_used = 0;
+    f32 alpha_cutoff = 0;  // masked materials only; 0 = no cutout
   };
 
   struct Retired {

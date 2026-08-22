@@ -730,6 +730,7 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
   asset::AlphaMode mode =
       material.transmission > 0.0f ? asset::AlphaMode::kBlend : material.alpha_mode;
   blend_modes_.insert(key, static_cast<u8>(mode));
+  if (mode == asset::AlphaMode::kMask) runtime.alpha_cutoff = material.alpha_cutoff;
   MaterialColor color;
   std::memcpy(color.albedo, material.base_color_factor, sizeof(f32) * 3);
   std::memcpy(color.emissive, material.emissive_factor, sizeof(f32) * 3);
@@ -1022,6 +1023,13 @@ const MaterialSystem::AlphaCoverage* MaterialSystem::material_base_alpha(u64 mat
   const u32* idx = sets_.find(material_hash);
   if (!idx) return nullptr;
   return texture_alpha_.find(material_records_[*idx].map_keys[0]);
+}
+
+MaterialSystem::BaseColor MaterialSystem::material_base_color(u64 material_hash) const {
+  const u32* idx = sets_.find(material_hash);
+  if (!idx) return {};
+  const MaterialRuntime& runtime = material_records_[*idx];
+  return {find_texture(runtime.map_keys[0]), runtime.alpha_cutoff};
 }
 
 u32 MaterialSystem::bindless_texture(u64 texture_hash) const {

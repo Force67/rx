@@ -538,10 +538,14 @@ public:
   void DestroyHairGroom(u32 id);
   // World-space head collision sphere of a groom, for aligning a head mesh.
   bool HairGroomHead(u32 id, Vec3 *center, f32 *radius);
-  // Bakes an octahedral imposter of the mesh and sets the distant instances
-  // drawn as billboards (--demo imposters).
-  void BakeImposter(const asset::Mesh &mesh,
-                    std::span<const ImposterPass::Instance> instances);
+  // Bakes an octahedral imposter of the mesh, textured and alpha-tested from
+  // its submeshes' own materials, and returns the index instances name it by
+  // (ImposterPass::kNoMesh on failure). Several meshes share one atlas, so a
+  // scene bakes each of its species once and then sets one instance list.
+  u32 BakeImposter(const asset::Mesh &mesh);
+  // The distant instances drawn as billboards. Replaces the previous set, so
+  // a game re-splitting near/far as the camera moves calls this again.
+  void SetImposterInstances(std::span<const ImposterPass::Instance> instances);
 
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.

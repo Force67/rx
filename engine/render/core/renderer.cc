@@ -1766,11 +1766,27 @@ bool Renderer::HairGroomHead(u32 id, Vec3 *center, f32 *radius) {
   return hair_.GroomHead(id, center, radius);
 }
 
-void Renderer::BakeImposter(const asset::Mesh &mesh,
-                            std::span<const ImposterPass::Instance> instances) {
+u32 Renderer::BakeImposter(const asset::Mesh &mesh) {
+  if (!device_ || device_->is_stub())
+    return ImposterPass::kNoMesh;
+  // The bake samples the base-colour maps the mesh's own materials bind, so
+  // they have to be uploaded already - which they are, since a mesh reaches
+  // the gpu after its materials.
+  base::Vector<ImposterPass::BakeMaterial> materials;
+  if (!mesh.lods.empty() && material_system_) {
+    for (const asset::Submesh &submesh : mesh.lods[0].submeshes) {
+      MaterialSystem::BaseColor base =
+          material_system_->material_base_color(submesh.material.hash);
+      materials.push_back({base.image, base.alpha_cutoff});
+    }
+  }
+  return imposters_.Bake(*device_, mesh, {materials.data(), materials.size()});
+}
+
+void Renderer::SetImposterInstances(
+    std::span<const ImposterPass::Instance> instances) {
   if (!device_ || device_->is_stub())
     return;
-  imposters_.Bake(*device_, mesh);
   imposters_.SetInstances(*device_, instances);
 }
 

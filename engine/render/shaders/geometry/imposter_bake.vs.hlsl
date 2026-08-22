@@ -1,8 +1,11 @@
 #include "rhi_bindings.hlsli"
-// Imposter bake vertex: mesh position/normal/color through an ortho
+// Imposter bake vertex: mesh position/normal/uv/color through an ortho
 // view-projection for one octahedral cell.
 struct BakePush {
   column_major float4x4 view_proj;
+  float alpha_cutoff;
+  float textured;
+  float2 pad;
 };
 PUSH_CONSTANTS(BakePush, pc);
 
@@ -18,6 +21,7 @@ struct VsOut {
   float4 pos : SV_Position;
   [[vk::location(0)]] float3 normal : NORMAL;
   [[vk::location(1)]] float4 color : COLOR0;
+  [[vk::location(2)]] float2 uv : TEXCOORD0;
 };
 
 VsOut main(VsIn input) {
@@ -25,5 +29,6 @@ VsOut main(VsIn input) {
   o.pos = mul(pc.view_proj, float4(input.position, 1.0));
   o.normal = input.normal;
   o.color = input.color;
+  o.uv = input.uv;
   return o;
 }

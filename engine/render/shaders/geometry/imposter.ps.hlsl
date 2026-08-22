@@ -6,10 +6,9 @@ struct DrawPush {
   float4 camera;
   float4 sun;
   float4 sun_color;
-  float radius;
-  float center_y;
   float grid;
-  float pad0;
+  float tile_scale;
+  float2 pad;
 };
 PUSH_CONSTANTS(DrawPush, pc);
 

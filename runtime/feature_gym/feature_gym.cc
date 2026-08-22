@@ -1411,6 +1411,9 @@ void FeatureGym::Impl::CreateGeometry() {
     if (!prop_group) RX_WARN("feature gym: persistent instance group unavailable");
   }
 
+  if (headless) return;
+  const u32 baked = renderer.BakeImposter(tree);
+  if (baked == render::ImposterPass::kNoMesh) return;
   std::vector<render::ImposterPass::Instance> imposters;
   for (int i = 0; i < 80; ++i) {
     const f32 angle = i * 2.39996323f;
@@ -1420,9 +1423,10 @@ void FeatureGym::Impl::CreateGeometry() {
     instance.position[1] = 0.1f;
     instance.position[2] = c.z + std::sin(angle) * radius;
     instance.scale = 0.65f + (i % 5) * 0.08f;
+    instance.mesh = baked;
     imposters.push_back(instance);
   }
-  if (!headless) renderer.BakeImposter(tree, imposters);
+  renderer.SetImposterInstances(imposters);
 }
 
 void FeatureGym::Impl::CreateAtmosphere() {
