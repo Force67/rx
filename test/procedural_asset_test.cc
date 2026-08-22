@@ -280,6 +280,109 @@ void TestPrimitives() {
   }
 }
 
+// A sphere cut into a top and a bottom material plus a patch of a third, which
+// is what an authored building is: several materials on one surface, one of
+// them a detail smaller than a lod cell.
+asset::Mesh MakeThreeMaterialSphere() {
+  asset::Mesh mesh = asset::MakeSphere(1.0f, 60, 90, asset::MakeAssetId("m"));
+  asset::MeshLod& lod = mesh.lods[0];
+  const u32 total = static_cast<u32>(lod.indices.size());
+  const u32 seam = total / 6 * 3;  // ring boundary between the two halves
+  const u32 trim = 6;              // two triangles: one quad of the sphere
+  lod.submeshes.clear();
+  lod.submeshes.push_back({0, seam, asset::MakeAssetId("wall")});
+  lod.submeshes.push_back({seam, trim, asset::MakeAssetId("trim")});
+  lod.submeshes.push_back({seam + trim, total - seam - trim, asset::MakeAssetId("roof")});
+  return mesh;
+}
+
+// A decimated multi-submesh mesh has to keep its materials and their index
+// ranges, and must not weld a vertex across two of them - the pair would then
+// have to draw with one material.
+void TestMultiSubmeshLods() {
+  asset::Mesh mesh = MakeThreeMaterialSphere();
+  const asset::MeshLod fine = mesh.lods[0];
+  asset::GenerateLods(&mesh);
+  CHECK(mesh.lods.size() > 1);
+
+  for (size_t l = 1; l < mesh.lods.size(); ++l) {
+    const asset::MeshLod& lod = mesh.lods[l];
+    CHECK(lod.indices.size() % 3 == 0);
+    CHECK(lod.indices.size() < mesh.lods[l - 1].indices.size());
+    // Entry for entry with lod 0, in order: the draw loop pairs submesh k of a
+    // coarse lod with submesh k of lod 0 and takes the material from there.
+    CHECK(lod.submeshes.size() == fine.submeshes.size());
+    if (lod.submeshes.size() != fine.submeshes.size()) continue;
+    u32 covered = 0;
+    for (size_t s = 0; s < lod.submeshes.size(); ++s) {
+      CHECK(lod.submeshes[s].material == fine.submeshes[s].material);
+      CHECK(lod.submeshes[s].index_offset == covered);
+      covered += lod.submeshes[s].index_count;
+    }
+    CHECK(covered == lod.indices.size());
+    for (u32 index : lod.indices) CHECK(index < lod.vertices.size());
+
+    // No vertex is reachable from two submeshes.
+    base::Vector<int> owner(lod.vertices.size());
+    for (int& o : owner) o = -1;
+    bool shared = false;
+    for (size_t s = 0; s < lod.submeshes.size(); ++s) {
+      const asset::Submesh& sub = lod.submeshes[s];
+      for (u32 i = sub.index_offset; i < sub.index_offset + sub.index_count; ++i) {
+        int& o = owner[lod.indices[i]];
+        shared |= o >= 0 && o != static_cast<int>(s);
+        o = static_cast<int>(s);
+      }
+    }
+    CHECK(!shared);
+
+    // The wall and the roof still meet: their representatives along the seam
+    // are separate vertices but sit on the same points, or the lod cracks open
+    // along every material boundary in the scene.
+    bool welded = false;
+    for (u32 a = 0; a < lod.vertices.size(); ++a) {
+      if (owner[a] != 0) continue;
+      for (u32 b = 0; b < lod.vertices.size(); ++b) {
+        if (owner[b] != 2) continue;
+        welded |= lod.vertices[a].position[0] == lod.vertices[b].position[0] &&
+                  lod.vertices[a].position[1] == lod.vertices[b].position[1] &&
+                  lod.vertices[a].position[2] == lod.vertices[b].position[2];
+      }
+    }
+    CHECK(welded);
+
+    // The trim is a patch narrower than a coarse cell, so it folds up entirely
+    // - and still has to hold its slot rather than shifting the roof after it.
+    if (l + 1 == mesh.lods.size()) CHECK(lod.submeshes[1].index_count == 0);
+  }
+
+  // Loose cards (alpha-masked foliage) do not cluster: the grid cannot merge
+  // vertices that no triangle shares, so the mesh is left at one lod rather
+  // than handed a coarser grid that only shreds the cards.
+  asset::Mesh cards;
+  cards.id = asset::MakeAssetId("cards");
+  asset::MeshLod& card_lod = cards.lods.emplace_back();
+  for (u32 i = 0; i < 400; ++i) {
+    const f32 x = static_cast<f32>(i % 20), z = static_cast<f32>(i / 20);
+    const u32 base = static_cast<u32>(card_lod.vertices.size());
+    for (u32 c = 0; c < 4; ++c) {
+      asset::Vertex v{};
+      v.position[0] = x + ((c & 1) ? 0.9f : 0.0f);
+      v.position[1] = (c & 2) ? 0.9f : 0.0f;
+      v.position[2] = z;
+      v.normal[2] = 1.0f;
+      v.tangent[0] = 1.0f;
+      v.tangent[3] = 1.0f;
+      card_lod.vertices.push_back(v);
+    }
+    for (u32 c : {0u, 1u, 2u, 1u, 3u, 2u}) card_lod.indices.push_back(base + c);
+  }
+  card_lod.submeshes.push_back({0, static_cast<u32>(card_lod.indices.size()),
+                                asset::MakeAssetId("leaf")});
+  asset::GenerateLods(&cards);
+  CHECK(cards.lods.size() == 1);
+}
+
 }  // namespace
 
 int main() {
@@ -291,6 +394,7 @@ int main() {
   TestNormalMap();
   TestRoughnessMap();
   TestPrimitives();
+  TestMultiSubmeshLods();
   if (failures == 0) std::printf("procedural_asset_test: PASS\n");
   return failures == 0 ? 0 : 1;
 }

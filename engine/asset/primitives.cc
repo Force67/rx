@@ -9,11 +9,37 @@
 namespace rx::asset {
 namespace {
 
+// Below this a mesh is not worth a coarse lod: see GenerateLods.
+constexpr size_t kMinLodIndices = 3000;
+
+// A coarse lod has to be this much smaller than the one before it to earn its
+// vertex/index memory and the switch that shows it: see GenerateLods.
+constexpr f32 kLodReduction = 0.7f;
+
 // One coarser lod by vertex clustering: snap each vertex to a g x g x g grid
 // cell over the mesh bounds, average the vertices that land in a cell into one
 // representative, and keep only the triangles whose three corners fall in three
 // distinct cells (the rest have folded up). Lower quality than edge collapse but
 // robust and fine for the distant lods the selector reaches for.
+//
+// Submeshes are clustered one at a time: a cell yields one representative per
+// submesh, never one shared between two, so no vertex is ever welded across a
+// material boundary and the wall of a building cannot pull the window it meets
+// into itself. Positions are still averaged over the whole mesh, so the two
+// submeshes that meet at a seam put their representatives on the same point and
+// the coarse lod does not crack open along it.
+//
+// The output submesh table matches the input entry for entry, including
+// submeshes whose triangles all folded up (they keep a zero-count entry): the
+// draw loop pairs a coarse lod's submesh k with lod 0's submesh k to carry the
+// material over, so the two tables have to stay aligned.
+//
+// Vertices on an open boundary (an edge no second triangle shares) are kept
+// where they are. Content arrives tiled - a terrain chunk, a road segment, a
+// water plane - and neighbouring meshes only meet because their border vertices
+// are the same points. A border that moved with the grid tears a lit gap
+// between two meshes at every seam, which is far more visible than the detail
+// the lod drops.
 MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u32 g) {
   f32 cell[3] = {std::max(ext.x, 1e-5f) / g, std::max(ext.y, 1e-5f) / g,
                  std::max(ext.z, 1e-5f) / g};
@@ -24,49 +50,184 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
     return (static_cast<u64>(cz) * g + cy) * g + cx;
   };
 
-  struct Accum {
+  // Whole-mesh position average per cell, shared by every submesh in it.
+  struct CellPosition {
     f64 p[3] = {0, 0, 0};
+    u32 count = 0;
+  };
+  std::unordered_map<u64, CellPosition> cell_position;
+  for (const Vertex& v : src.vertices) {
+    CellPosition& c = cell_position[cell_of(v)];
+    for (int k = 0; k < 3; ++k) c.p[k] += v.position[k];
+    ++c.count;
+  }
+
+  // Edges are counted between *positions*, not vertex indices: an importer
+  // splits a vertex per uv seam, per hard normal and per submesh, so a cube's
+  // corner is several indices and index-keyed edges would report every one of
+  // them as a boundary. Positions are compared on a fine grid rather than bit
+  // for bit, because the copies rarely agree to the last bit (a lathe's seam
+  // column closes on sin(2 pi), not on 0).
+  const f32 quantum = std::max({ext.x, ext.y, ext.z, 1e-5f}) / 65536.0f;
+  struct GridPosition {
+    i32 p[3];
+    bool operator==(const GridPosition&) const = default;
+  };
+  struct GridHash {
+    size_t operator()(const GridPosition& q) const {
+      u64 h = 1469598103934665603ull;
+      for (i32 c : q.p) h = (h ^ static_cast<u32>(c)) * 1099511628211ull;
+      return static_cast<size_t>(h);
+    }
+  };
+  base::Vector<u32> position_id(src.vertices.size());
+  u32 position_count = 0;
+  {
+    std::unordered_map<GridPosition, u32, GridHash> seen;
+    for (size_t i = 0; i < src.vertices.size(); ++i) {
+      const Vertex& v = src.vertices[i];
+      GridPosition q{{static_cast<i32>(std::lround((v.position[0] - bmin.x) / quantum)),
+                      static_cast<i32>(std::lround((v.position[1] - bmin.y) / quantum)),
+                      static_cast<i32>(std::lround((v.position[2] - bmin.z) / quantum))}};
+      auto it = seen.find(q);
+      if (it == seen.end()) it = seen.emplace(q, position_count++).first;
+      position_id[i] = it->second;
+    }
+  }
+  // Locked per position, not per vertex: the copies an importer split apart all
+  // have to stay put together or they part company at the seam.
+  //
+  // Only an open edge that runs along the mesh's own bounds is a tiling seam. A
+  // building is full of open edges that face inwards (a window recess, the
+  // underside of a balcony); locking those too would pin most of the mesh and
+  // leave nothing to decimate.
+  base::Vector<u8> locked(position_count);
+  {
+    const f32 border = std::max({ext.x, ext.y, ext.z, 1e-5f}) * 1e-4f;
+    auto on_bounds = [&](u32 index) {
+      const Vertex& v = src.vertices[index];
+      const f32 lo[3] = {bmin.x, bmin.y, bmin.z};
+      const f32 hi[3] = {bmin.x + ext.x, bmin.y + ext.y, bmin.z + ext.z};
+      for (int k = 0; k < 3; ++k) {
+        if (v.position[k] - lo[k] <= border || hi[k] - v.position[k] <= border) return true;
+      }
+      return false;
+    };
+    std::unordered_map<u64, u32> edge_uses;
+    auto edge = [&](u32 a, u32 b) {
+      u32 lo = std::min(position_id[a], position_id[b]);
+      u32 hi = std::max(position_id[a], position_id[b]);
+      return (static_cast<u64>(lo) << 32) | hi;
+    };
+    for (size_t i = 0; i + 3 <= src.indices.size(); i += 3) {
+      ++edge_uses[edge(src.indices[i], src.indices[i + 1])];
+      ++edge_uses[edge(src.indices[i + 1], src.indices[i + 2])];
+      ++edge_uses[edge(src.indices[i + 2], src.indices[i])];
+    }
+    for (size_t i = 0; i + 3 <= src.indices.size(); i += 3) {
+      const u32 tri[3] = {src.indices[i], src.indices[i + 1], src.indices[i + 2]};
+      for (int e = 0; e < 3; ++e) {
+        const u32 a = tri[e], b = tri[(e + 1) % 3];
+        if (edge_uses[edge(a, b)] != 1) continue;
+        if (!on_bounds(a) || !on_bounds(b)) continue;
+        locked[position_id[a]] = 1;
+        locked[position_id[b]] = 1;
+      }
+    }
+  }
+
+  // One per output vertex: the attributes averaged within this submesh's share
+  // of the cell, plus the cell whose shared position it takes (a locked vertex
+  // carries its own position instead).
+  struct Accum {
     f64 n[3] = {0, 0, 0};
     f64 t[3] = {0, 0, 0};
     f64 uv[2] = {0, 0};
+    f32 position[3] = {0, 0, 0};
+    u64 cell = 0;
     u32 count = 0;
     u32 color = 0xffffffff;
+    bool locked = false;
   };
-  std::unordered_map<u64, u32> cell_to_new;
   base::Vector<Accum> accum;
-  base::Vector<u32> remap(src.vertices.size());
-  for (size_t i = 0; i < src.vertices.size(); ++i) {
-    const Vertex& v = src.vertices[i];
-    u64 c = cell_of(v);
-    auto it = cell_to_new.find(c);
-    u32 ni;
-    if (it == cell_to_new.end()) {
-      ni = static_cast<u32>(accum.size());
-      cell_to_new.emplace(c, ni);
-      Accum a;
-      a.color = v.color;
-      accum.push_back(a);
-    } else {
-      ni = it->second;
-    }
-    remap[i] = ni;
-    Accum& a = accum[ni];
-    for (int k = 0; k < 3; ++k) {
-      a.p[k] += v.position[k];
-      a.n[k] += v.normal[k];
-      a.t[k] += v.tangent[k];
-    }
-    a.uv[0] += v.uv[0];
-    a.uv[1] += v.uv[1];
-    ++a.count;
-  }
+
+  // A mesh with no submesh table draws as one full-range submesh; cluster it
+  // the same way so the two spellings produce the same lod.
+  const Submesh whole{0, static_cast<u32>(src.indices.size()), AssetId{}};
+  const Submesh* subs = src.submeshes.empty() ? &whole : src.submeshes.data();
+  const size_t sub_count = src.submeshes.empty() ? 1 : src.submeshes.size();
 
   MeshLod out;
+  constexpr u32 kUnmapped = 0xffffffffu;
+  base::Vector<u32> remap(src.vertices.size());
+  std::unordered_map<u64, u32> cell_to_new;
+  for (size_t s = 0; s < sub_count; ++s) {
+    // Both are per submesh: a source vertex shared by two submeshes has to map
+    // to a separate representative in each.
+    cell_to_new.clear();
+    for (u32& r : remap) r = kUnmapped;
+
+    auto representative = [&](u32 index) {
+      u32& slot = remap[index];
+      const Vertex& v = src.vertices[index];
+      if (slot == kUnmapped) {
+        // A locked vertex keys on its position rather than its cell, so it
+        // merges with its own split copies and with nothing else.
+        const bool lock = locked[position_id[index]];
+        const u64 key = lock ? (1ull << 63) | position_id[index] : cell_of(v);
+        auto it = cell_to_new.find(key);
+        if (it == cell_to_new.end()) {
+          slot = static_cast<u32>(accum.size());
+          cell_to_new.emplace(key, slot);
+          Accum a;
+          a.cell = key;
+          a.locked = lock;
+          for (int k = 0; k < 3; ++k) a.position[k] = v.position[k];
+          a.color = v.color;
+          accum.push_back(a);
+        } else {
+          slot = it->second;
+        }
+        Accum& a = accum[slot];
+        for (int k = 0; k < 3; ++k) {
+          a.n[k] += v.normal[k];
+          a.t[k] += v.tangent[k];
+        }
+        a.uv[0] += v.uv[0];
+        a.uv[1] += v.uv[1];
+        ++a.count;
+      }
+      return slot;
+    };
+
+    const u32 first = static_cast<u32>(out.indices.size());
+    const size_t begin = std::min<size_t>(subs[s].index_offset, src.indices.size());
+    const size_t end = std::min<size_t>(begin + subs[s].index_count, src.indices.size());
+    for (size_t i = begin; i + 3 <= end; i += 3) {
+      u32 a = representative(src.indices[i]);
+      u32 b = representative(src.indices[i + 1]);
+      u32 c = representative(src.indices[i + 2]);
+      if (a != b && b != c && a != c) {
+        out.indices.push_back(a);
+        out.indices.push_back(b);
+        out.indices.push_back(c);
+      }
+    }
+    out.submeshes.push_back(
+        {first, static_cast<u32>(out.indices.size()) - first, subs[s].material});
+  }
+
   out.vertices.reserve(accum.size());
   for (const Accum& a : accum) {
     Vertex v{};
+    if (a.locked) {
+      for (int k = 0; k < 3; ++k) v.position[k] = a.position[k];
+    } else {
+      const CellPosition& c = cell_position[a.cell];
+      f64 inv_position = c.count ? 1.0 / c.count : 1.0;
+      for (int k = 0; k < 3; ++k) v.position[k] = static_cast<f32>(c.p[k] * inv_position);
+    }
     f64 inv = a.count ? 1.0 / a.count : 1.0;
-    for (int k = 0; k < 3; ++k) v.position[k] = static_cast<f32>(a.p[k] * inv);
     Vec3 n = Normalize(
         Vec3{static_cast<f32>(a.n[0]), static_cast<f32>(a.n[1]), static_cast<f32>(a.n[2])});
     v.normal[0] = n.x;
@@ -83,16 +244,6 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
     v.color = a.color;
     out.vertices.push_back(v);
   }
-  for (size_t i = 0; i + 2 < src.indices.size(); i += 3) {
-    u32 a = remap[src.indices[i]], b = remap[src.indices[i + 1]], c = remap[src.indices[i + 2]];
-    if (a != b && b != c && a != c) {
-      out.indices.push_back(a);
-      out.indices.push_back(b);
-      out.indices.push_back(c);
-    }
-  }
-  AssetId material = src.submeshes.empty() ? AssetId{} : src.submeshes[0].material;
-  out.submeshes.push_back({0, static_cast<u32>(out.indices.size()), material});
   return out;
 }
 
@@ -514,10 +665,16 @@ Mesh MakeLodSphere(f32 radius, AssetId id) {
   return mesh;
 }
 
+// The index floor is about what a coarse lod can save, not about mesh size on
+// its own: a lod removes vertex work but not the indirect draw per submesh that
+// goes with it, so under a thousand triangles there is nothing left to win and
+// a switch that can pop is all that is left. Measured on a full map, that
+// excludes the house kit (150-750 triangles) and keeps the towers and the
+// terrain chunks. Whether a mesh is *worth* lodding is then decided by what the
+// clustering actually achieves on it, below, rather than guessed from its size.
 void GenerateLods(Mesh* mesh) {
   if (mesh->skinned || mesh->lods.size() != 1) return;
-  if (mesh->lods[0].submeshes.size() > 1) return;  // single material only
-  if (mesh->lods[0].indices.size() < 3000) return;  // not worth lod'ing small meshes
+  if (mesh->lods[0].indices.size() < kMinLodIndices) return;
   // Copy: push_back below reallocates mesh->lods, so we must not hold a reference
   // into it across the loop.
   const MeshLod base = mesh->lods[0];
@@ -536,9 +693,17 @@ void GenerateLods(Mesh* mesh) {
   const u32 grids[2] = {24, 9};  // medium then coarse cell counts per axis
   for (u32 g : grids) {
     MeshLod lod = ClusterDecimate(base, bmin, ext, g);
-    if (lod.indices.size() >= 3 && lod.indices.size() < mesh->lods.back().indices.size()) {
-      mesh->lods.push_back(std::move(lod));
+    const size_t previous = mesh->lods.back().indices.size();
+    // A grid that does not shrink this mesh is the mesh telling us it does not
+    // cluster: its triangles are not a connected surface but loose cards
+    // (alpha-masked foliage is the case that matters), and the next grid down
+    // does not simplify those, it shreds them. Stop at the first refusal
+    // instead of skipping to the coarser one.
+    if (lod.indices.size() < 3 ||
+        static_cast<f32>(lod.indices.size()) > kLodReduction * static_cast<f32>(previous)) {
+      break;
     }
+    mesh->lods.push_back(std::move(lod));
   }
 }
 

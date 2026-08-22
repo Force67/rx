@@ -62,8 +62,11 @@ RX_ASSET_EXPORT Mesh MakeCapsule(f32 radius, f32 half_height, u32 rings, u32 seg
 
 // Appends decimated lods to a single-lod static mesh via vertex clustering
 // (snap vertices to a coarse grid, collapse the triangles that fold up), so the
-// distance-lod path applies to authored meshes that ship one lod. No-op for
-// skinned, multi-submesh, or already-multi-lod meshes, or tiny meshes.
+// distance-lod path applies to authored meshes that ship one lod. Multi-submesh
+// meshes keep their materials: each submesh is clustered on its own and the
+// output submesh table matches the input entry for entry. No-op for skinned or
+// already-multi-lod meshes, for meshes under a few thousand indices, and for
+// meshes the clustering fails to shrink (loose cards rather than a surface).
 RX_ASSET_EXPORT void GenerateLods(Mesh* mesh);
 
 // A blocky biped: a skeleton using the biped rig bone-name convention the
