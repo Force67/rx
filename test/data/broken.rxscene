@@ -12,7 +12,11 @@ rxscene 1
 # report still covers the whole document rather than stopping there.
 #
 # Keep it in sync with the checks in runtime/scene_validate.cc: a check with no
-# entity here is a check nothing proves still fires.
+# entity here is a check nothing proves still fires. One exception, and it is
+# because of this file rather than despite it: discarded_transform needs the
+# anchor solve to have run, and the degenerate Stretch below makes
+# BuildSceneShapes refuse the file before it can. That check has its own fixture
+# in discarded_transform.rxscene.
 
 # degenerate_camera (target == position), and one of the two Cameras that make
 # multiple_cameras fire.

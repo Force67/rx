@@ -123,6 +123,9 @@ class Report {
   void ErrorAt(ecs::Entity entity, int line, const char* check, std::string message) {
     Add(true, entity, line, check, std::move(message));
   }
+  void WarnAt(ecs::Entity entity, int line, const char* check, std::string message) {
+    Add(false, entity, line, check, std::move(message));
+  }
   // A finding about the file as a whole rather than about one entity.
   void FileError(const char* check, std::string message) {
     findings_.push_back({true, check, {}, 0, std::move(message)});
@@ -239,6 +242,101 @@ void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report
                                         : "is not a number"));
       break;  // one finding per assignment, not one per lane after the bad one
     }
+  }
+}
+
+// The loader's float reader over a whole assignment: strtof per whitespace
+// token, zero-padding a short list. False means a lane its own reader refuses,
+// which CheckNumberLiterals has already condemned by line, so the caller drops
+// the assignment rather than reporting it twice under a second name.
+bool ReadLanes(const std::string& raw, u32 lanes, f32* out) {
+  std::istringstream in{raw};
+  std::string token;
+  for (u32 lane = 0; lane < lanes; ++lane) {
+    if (!(in >> token)) return true;  // the legal short form; the rest stay 0
+    char* end = nullptr;
+    const f32 value = std::strtof(token.c_str(), &end);
+    if (end == token.c_str() || *end != '\0' || !std::isfinite(value)) return false;
+    out[lane] = value;
+  }
+  return true;
+}
+
+std::string LaneList(const f32* v, u32 lanes) {
+  std::string out;
+  for (u32 lane = 0; lane < lanes; ++lane) {
+    if (lane) out += ' ';
+    out += std::format("{}", v[lane]);
+  }
+  return out;
+}
+
+// A metre-scale scene's millimetre, and about a tenth of a degree of quaternion:
+// below this the author wrote the number the solve was going to produce anyway,
+// which is not a mistake, it is what a SaveScene round trip looks like.
+constexpr f32 kDiscardedEpsilon = 1e-3f;
+
+// An authored Transform value one of the authoring passes overwrote.
+//
+// Anchor, Grid.of and Rotation all REPLACE the field they solve rather than
+// composing onto it, and each has to: a SaveScene writes the resolved value next
+// to the component that produced it, so anything additive would walk the entity
+// one solve further along on every round trip. The cost is that a hand-authored
+// value beside one of them vanishes without a word, and the line stays in the
+// file reading like it decides something - which is how an author ends up
+// editing a position that has not moved anything since the anchor was added.
+//
+// Reported only when the two DISAGREE, which is what keeps a round-tripped scene
+// (where the saved value is by construction the one the solve reproduces) out of
+// the report entirely, and leaves only the hand-written contradiction.
+void CheckDiscardedTransform(ecs::World& world, const Source& source, bool grids_built,
+                             bool anchors_built, Report& report) {
+  for (const SourceAssign& assign : source.assigns) {
+    if (assign.comp != "Transform") continue;
+    const bool rotation = assign.prop == "rotation";
+    if (!rotation && assign.prop != "position") continue;
+    const ecs::Entity entity{assign.entity_index, 0};
+    if (!world.IsAlive(entity)) continue;
+    const scene::Transform* transform = world.Get<scene::Transform>(entity);
+    if (!transform) continue;
+
+    // What replaced it, and the assignment to reach for instead. A pass that
+    // failed left the field alone, so its finding is the one to read and a
+    // disagreement here means nothing.
+    std::string by;
+    std::string instead;
+    if (rotation) {
+      if (!world.Has<SceneRotation>(entity)) continue;
+      const SceneRotation& turn = *world.Get<SceneRotation>(entity);
+      by = std::format("Rotation.euler = {}", LaneList(turn.euler, 3));
+      instead = "author the angle there and drop the quaternion";
+    } else if (world.Has<SceneAnchor>(entity)) {
+      if (!anchors_built) continue;
+      const SceneAnchor& anchor = *world.Get<SceneAnchor>(entity);
+      by = std::format("Anchor.target = \"{}\"", anchor.target);
+      instead = "Anchor.offset is the displacement the solve reads";
+    } else if (const SceneGrid* grid = world.Get<SceneGrid>(entity); grid && !grid->of.empty()) {
+      if (!grids_built) continue;
+      by = std::format("Grid.of = \"{}\"", grid->of);
+      instead = "a member's cell comes from the order it is declared in, not from a coordinate";
+    } else {
+      continue;
+    }
+
+    const u32 lanes = rotation ? 4u : 3u;
+    const f32* solved = rotation ? transform->rotation : transform->position;
+    f32 authored[4] = {0, 0, 0, 0};
+    if (!ReadLanes(assign.raw, lanes, authored)) continue;
+    bool differs = false;
+    for (u32 lane = 0; lane < lanes; ++lane) {
+      differs = differs || std::abs(authored[lane] - solved[lane]) > kDiscardedEpsilon;
+    }
+    if (!differs) continue;
+
+    report.WarnAt(entity, assign.line, "discarded_transform",
+                  std::format("Transform.{} = {} is discarded: {} replaces it with {}. It is not "
+                              "added to, so this line moves nothing ({})",
+                              assign.prop, assign.raw, by, LaneList(solved, lanes), instead));
   }
 }
 
@@ -660,7 +758,8 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // Failures land as file-wide findings for the same reason `load` does: the
   // message already carries its own `path:line:`, and the entity it names may
   // be one the expansion created, which has no line at all.
-  if (!BuildSceneGrids(world, path, &error)) report.FileError("grid", error);
+  const bool grids_built = BuildSceneGrids(world, path, &error);
+  if (!grids_built) report.FileError("grid", error);
   if (!BuildScenePrefabs(world, path, &error)) report.FileError("prefab", error);
   // Also before the per-entity checks, so CheckTransform judges the quaternion
   // the renderer will actually use rather than the identity a Rotation has not
@@ -704,10 +803,15 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // finding already named the bad Shape.kind or Model.path) instead of one
   // file-wide failure. No gpu: `renderer` null is the headless path the
   // viewer's own --headless takes.
+  bool anchors_built = false;
   if (BuildSceneShapes(world, db, /*renderer=*/nullptr, path, &error) &&
       BuildSceneModels(world, db, /*renderer=*/nullptr, path, &error)) {
-    if (!BuildSceneAnchors(world, path, &error)) report.FileError("anchor", error);
+    anchors_built = BuildSceneAnchors(world, path, &error);
+    if (!anchors_built) report.FileError("anchor", error);
   }
+  // Last, because it compares what the file wrote against what the passes above
+  // left behind, and the anchor solve is the last of them to write a position.
+  CheckDiscardedTransform(world, source, grids_built, anchors_built, report);
 
   // Suppressed when nothing loaded at all (a bad header, an unreadable file):
   // there the load error is the finding and "no geometry" on top of it is

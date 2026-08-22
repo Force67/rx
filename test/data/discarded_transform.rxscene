@@ -1,0 +1,79 @@
+rxscene 1
+
+# Test data for `rx --validate`'s discarded_transform check. Not part of
+# broken.rxscene, and deliberately: that fixture's degenerate Stretch makes
+# BuildSceneShapes refuse the file, so the anchor solve never runs there and the
+# most important of the three cases below could not fire.
+#
+#   rx --validate test/data/discarded_transform.rxscene --json
+#
+# Three entities contradict the pass that places them and three warnings are
+# expected. The other two entities agree with it, which is what a SaveScene
+# round trip looks like, and must stay OUT of the report: a check that fired on
+# every saved scene would be one the next author learns to ignore. So the count
+# is the assertion, not the presence.
+
+entity
+Name.value = "Ground"
+Shape.kind = "plane"
+Shape.size = 20 0 20
+Transform.position = 0 0 0
+
+# discarded_transform: the anchor solves this to the top of the ground plane and
+# the authored height goes with it. Anchor.offset is the input that survives.
+entity
+Name.value = "Crate on a hand-written height"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+Transform.position = 3 9 -2
+Anchor.target = "Ground"
+Anchor.mode = "on"
+
+# Silent: the position IS what the anchor resolves to, which is what a save
+# writes next to the Anchor that produced it.
+entity
+Name.value = "Crate the anchor agrees with"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+Transform.position = 0 0.5 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+
+entity
+Name.value = "Row"
+Grid.count = 3 1 1
+Grid.step = 2 0 0
+Transform.position = -6 1 4
+
+# discarded_transform: a member's cell comes from its declaration order, so this
+# coordinate is overwritten with the cell offset before anything reads it.
+entity
+Name.value = "Ball on a hand-written cell"
+Shape.kind = "sphere"
+Shape.size = 0.4 0 0
+Grid.of = "Row"
+Transform.position = 100 100 100
+
+# discarded_transform: the euler wins and the quaternion beside it is dropped,
+# so a scene edited here turns by 45 degrees whatever the four numbers say.
+entity
+Name.value = "Box turned twice over"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+Transform.position = 6 1 0
+Transform.rotation = 0 0 0 1
+Rotation.euler = 0 45 0
+
+# Silent: the quaternion is the one the euler resolves to.
+entity
+Name.value = "Box the euler agrees with"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+Transform.position = 8 1 0
+Transform.rotation = 0 0.7071068 0 0.7071068
+Rotation.euler = 0 90 0
+
+entity
+Name.value = "Camera"
+Transform.position = 12 8 12
+Camera.target = 0 1 0

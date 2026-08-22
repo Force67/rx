@@ -163,6 +163,17 @@ if(RX_BUILD_TESTS)
   set_tests_properties(scene_validate_surface_without_shape PROPERTIES
     PASS_REGULAR_EXPRESSION "surface_without_shape.*Material with nothing to be")
 
+  # discarded_transform, both halves at once. The COUNT is the assertion: the
+  # fixture contradicts the placing pass three times and agrees with it twice,
+  # and the two that agree are what a SaveScene round trip writes, so a check
+  # that reported them would fire on every saved scene. Four warnings means the
+  # check stopped distinguishing the two.
+  add_test(NAME scene_validate_discarded_transform
+    COMMAND rx --validate ${PROJECT_SOURCE_DIR}/test/data/discarded_transform.rxscene
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+  set_tests_properties(scene_validate_discarded_transform PROPERTIES
+    PASS_REGULAR_EXPRESSION "0 error\\(s\\), 3 warning\\(s\\)")
+
   # Stretch's own failure mode, which the exit code cannot tell from the two
   # dozen other findings in that fixture: a non-positive axis is what the normal
   # bake would divide by, so it is an error rather than a warning about an

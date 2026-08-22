@@ -128,7 +128,11 @@ result.
 
 Anchors and grids both **replace** `Transform.position`, so an entity cannot use
 both, and grid members all share the grid's y. A row of identical lamps is a
-grid; a terrace of differing buildings is individual anchors.
+grid; a terrace of differing buildings is individual anchors. `Rotation.euler`
+replaces `Transform.rotation` the same way. All three replace rather than add,
+so a hand-written value beside one of them does nothing, and `--validate`
+reports it (`discarded_transform`) whenever the two disagree. `Anchor.offset` is
+the displacement that does survive.
 
 ## Making it look like something
 
