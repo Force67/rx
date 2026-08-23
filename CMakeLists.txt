@@ -329,6 +329,14 @@ if(NOT TARGET zetanet AND "net" IN_LIST RX_MODULES)
   endif()
 endif()
 
+# A downstream fork registers its own engine/<name> modules by shipping this
+# file: it runs with RX_MODULES already populated, so it appends to that list
+# (and sets whatever paths its modules need) without editing anything upstream
+# owns. Nothing in this tree provides one, which is the point - a merge from
+# here can never touch it, so a fork carrying private modules stays mergeable
+# with no conflict in the shared build files.
+include("${CMAKE_CURRENT_SOURCE_DIR}/engine/local.cmake" OPTIONAL)
+
 foreach(module ${RX_MODULES})
   add_subdirectory(engine/${module})
 endforeach()
