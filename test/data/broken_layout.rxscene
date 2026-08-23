@@ -1,0 +1,43 @@
+rxscene 1
+
+# Test data for `rx --validate`: the layout failures that are not an anchor
+# placement. One per pass, because a pass stops at its first error, and grids,
+# prefabs and anchors are three passes - so all three report from one file.
+#
+#   rx --validate test/data/broken_layout.rxscene --json
+#
+# The anchor failures that need the placement itself (a cycle, a target with
+# nothing to measure) each need their own file: both are found before any
+# placement runs, so a file carrying one never reaches the other.
+
+# A grid of one cell handed two members. The second has nowhere to go, and
+# silently stacking it on the first reads as an object that failed to load.
+entity
+Name.value = "Row"
+Grid.count = 1 1 1
+Grid.step = 1 0 0
+
+entity
+Name.value = "First cell"
+Grid.of = "Row"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+
+entity
+Name.value = "Second cell"
+Grid.of = "Row"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+
+# A prefab path naming no file. Relative to this file, like every prefab path.
+entity
+Name.value = "Instance of nothing"
+Transform.position = 3 0 0
+Prefab.path = "no_such_prefab.rxscene"
+
+# An anchor whose target is not a Name in this scene.
+entity
+Name.value = "Floating box"
+Anchor.target = "A box that is not here"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5

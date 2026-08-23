@@ -44,6 +44,7 @@ EXPECTED = {
     "post_tonemap_grade",
     "interior_fog",
     "path_trace_reconstruction",
+    "non_uniform_scale_normals",
 }
 
 

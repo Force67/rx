@@ -1,0 +1,10 @@
+rxscene 1
+
+# Mill-finish structural steel: the everyday grey metal of railings, girders and
+# machine housings. The base colour is steel's measured f0 reflectance, which is
+# what a metal's base colour means - it is not an albedo and it is never black.
+
+entity
+Surface.base_color = 0.56 0.57 0.58
+Surface.roughness = 0.35
+Surface.metallic = 1

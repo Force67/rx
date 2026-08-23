@@ -2,10 +2,20 @@
 // penumbras that the temporal passes integrate.
 
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // RCGI world-cascade sampling for the inline reflection bounce (finding: the
 // inline path lost indirect reflection light without NRD). Parameterized helpers
 // only; bindings are declared below (env slots 36-40).
 #include "gi/rcgi_common.hlsli"
+// NRD.hlsli supplies the REBLUR radiance unpacking for the denoised reflection
+// target. NRD is an optional dependency, so when it isn't vendored (e.g. CI,
+// mobile) fall back to the identity the trace's own fallback pack pairs with;
+// the denoised path is inactive in that case but must still compile.
+#if __has_include("NRD.hlsli")
+#include "NRD.hlsli"
+#else
+float4 REBLUR_BackEnd_UnpackRadianceAndNormHitDist(float4 data) { return data; }
+#endif
 
 // The head of the mesh push range, which covers the fragment stage too. Only
 // these two words are read here, and both sit at the same offset in the
@@ -283,10 +293,20 @@ void ApplyDecalLayer(inout float3 albedo, inout float3 n, inout float rough_mult
   }
 }
 
-// NRD REBLUR-denoised stochastic reflections (radiance in rgb); replaces the
-// inline mirror trace when kFrameSpecReflTex is set.
+// NRD REBLUR-denoised stochastic reflections; replaces the inline mirror trace
+// when kFrameSpecReflTex is set. reflection_trace.cs wrote it through
+// REBLUR_FrontEnd_PackRadianceAndNormHitDist, so rgb is YCoCg: read it only
+// through SampleSpecRefl, which pairs the matching unpack. Taken raw, luminance
+// lands in red and the chroma (negative for anything neutral or blue) clamps
+// green and blue to zero, which is a dark maroon ball on every surface smooth
+// enough to take this path instead of the prefiltered cube.
 [[vk::combinedImageSampler]] [[vk::binding(12, 2)]] Texture2D spec_refl_map : register(t12, space2);
 [[vk::combinedImageSampler]] [[vk::binding(12, 2)]] SamplerState spec_refl_sampler : register(s12, space2);
+
+float3 SampleSpecRefl(float2 uv) {
+  return REBLUR_BackEnd_UnpackRadianceAndNormHitDist(
+             spec_refl_map.SampleLevel(spec_refl_sampler, uv, 0.0)).rgb;
+}
 
 struct MaterialParams {
   float4 base_color_factor;
@@ -336,6 +356,8 @@ struct MaterialParams {
   float back_lighting;
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
+
+#include "material_uv.hlsli"  // MaterialUv, shared with the prepass
 
 [[vk::combinedImageSampler]] [[vk::binding(1, 1)]] Texture2D base_color_map : register(t1, space1);
 [[vk::combinedImageSampler]] [[vk::binding(1, 1)]] SamplerState base_color_sampler : register(s1, space1);
@@ -413,6 +435,10 @@ struct DdgiVolume {
 static const uint kFlagAlphaMask = 1u;
 static const uint kFlagHasNormalMap = 2u;
 static const uint kFlagNormalModelSpace = 16384u;  // 1 << 14, _msn object-space normal
+// 1 << 21: the normal map is BC5 and carries xy only, so z has to be rebuilt.
+// Set from the uploaded texture format, so an uncompressed map never takes this
+// path and keeps reading the z it actually has.
+static const uint kFlagNormalReconstructZ = 2097152u;
 static const uint kFlagTerrain = 4u;
 static const uint kFlagHasHeightMap = 32u;  // 1 << 5
 static const uint kFlagSkin = 64u;          // 1 << 6, exports diffuse for screen-space sss
@@ -491,11 +517,18 @@ float3 SurfaceNormal(PsIn input) {
   }
   if ((material.flags & kFlagHasNormalMap) != 0u) {
     float3 sampled = normal_map.Sample(normal_sampler, input.uv).xyz * 2.0 - 1.0;
+    if ((material.flags & kFlagNormalReconstructZ) != 0u) {
+      sampled.z = sqrt(saturate(1.0 - dot(sampled.xy, sampled.xy)));
+    }
     if ((material.flags & kFlagNormalModelSpace) != 0u) {
-      // Object-space (_msn) normal: rotate straight to world by the model
-      // matrix (uniform scale drops out on normalize), replacing the vertex
-      // normal. No TBN, so seam-broken tangents can't smear the shading.
-      float3 mn = mul((float3x3)draw_records[push.draw_index].model, sampled);
+      // Object-space (_msn) normal: carried straight to world by the model
+      // matrix's cofactor, replacing the vertex normal. No TBN, so seam-broken
+      // tangents can't smear the shading. Same covector rule as the vertex
+      // normal, sign included, or a mirrored instance lights inside out.
+      float model_det;
+      const float3x3 cof =
+          RxCofactor((float3x3)draw_records[push.draw_index].model, model_det);
+      float3 mn = mul(cof, sampled) * RxMirrorSign(model_det);
       if (dot(mn, mn) > 1e-8) n = normalize(mn);
     } else {
       float3 t = input.tangent.xyz - n * dot(input.tangent.xyz, n);
@@ -629,7 +662,9 @@ float3 TraceReflection(float3 origin, float3 dir) {
     uv += RxLoadUv(mesh, tri[corner]) * w[corner];
   }
   float3x4 to_world = rq.CommittedObjectToWorld3x4();
-  float3 hit_n = normalize(mul((float3x3)to_world, n_local));
+  // Cofactor, not the matrix: the normal is a covector. No mirror sign, the
+  // next line forces the normal to face the ray and discards it anyway.
+  float3 hit_n = normalize(mul(RxCofactor((float3x3)to_world), n_local));
   if (dot(hit_n, dir) > 0.0) hit_n = -hit_n;
 
   MaterialRecord hit_material =
@@ -1198,9 +1233,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       // Denoised stochastic reflections: the trace pass VNDF-sampled the GGX
       // lobe, so the texture already carries the roughness-matched blur - no
       // crossfade to the cube needed until the cutoff.
-      float3 traced =
-          spec_refl_map.SampleLevel(spec_refl_sampler,
-                                    input.sv_position.xy / frame.misc.xy, 0.0).rgb;
+      float3 traced = SampleSpecRefl(input.sv_position.xy / frame.misc.xy);
       float blend = smoothstep(0.75, 1.0, roughness / max(frame.reflection_cutoff, 1e-3));
       radiance = lerp(traced, radiance, blend);
     } else if ((frame.flags & kFrameReflections) != 0u && roughness < frame.reflection_cutoff) {
@@ -1239,10 +1272,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     // reflects the room it is standing in), and the room ambient otherwise.
     spec_radiance = indoor;
     if ((frame.flags & kFrameSpecReflTex) != 0u && roughness < frame.reflection_cutoff) {
-      spec_radiance = spec_refl_map
-                          .SampleLevel(spec_refl_sampler,
-                                       input.sv_position.xy / frame.misc.xy, 0.0)
-                          .rgb;
+      spec_radiance = SampleSpecRefl(input.sv_position.xy / frame.misc.xy);
     }
     g_skin_diffuse += ambient * ao;
   } else {
@@ -1291,8 +1321,7 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     case 8: return emissive;
     case 9:  // raw reflection: the denoised target when present, else traced
       if ((frame.flags & kFrameSpecReflTex) != 0u) {
-        return spec_refl_map.SampleLevel(spec_refl_sampler,
-                                         input.sv_position.xy / frame.misc.xy, 0.0).rgb;
+        return SampleSpecRefl(input.sv_position.xy / frame.misc.xy);
       }
       return TraceReflection(input.world_pos + n * 0.02, reflect(-v, n));
     case 14: {  // ray-count heatmap: shadow + ao + reflection rays this pixel casts
@@ -1469,9 +1498,7 @@ float4 EffectColor(PsIn input) {
 }
 
 PsOut main(PsIn input) {
-  // Animated scroll (waterfalls, rivers, lava): shift the uv before anything
-  // samples it.
-  input.uv += frame.time * material.uv_scroll;
+  input.uv = MaterialUv(input.uv);
 
   // Effect-shader geometry short-circuits the lit path entirely (no lighting,
   // shadows, SSS or decals): additive fire premultiplies its coverage for the

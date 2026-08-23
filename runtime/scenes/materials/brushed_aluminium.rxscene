@@ -1,0 +1,11 @@
+rxscene 1
+
+# Satin brushed aluminium: appliance panels, laptop shells, kitchen fittings.
+# Aluminium is the brightest common metal, and the anisotropy is the brushing -
+# it smears the highlight along the grain instead of leaving a round hotspot.
+
+entity
+Surface.base_color = 0.91 0.92 0.92
+Surface.roughness = 0.35
+Surface.metallic = 1
+Surface.anisotropy = 0.8

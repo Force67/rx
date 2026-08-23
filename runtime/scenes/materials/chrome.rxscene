@@ -1,0 +1,10 @@
+rxscene 1
+
+# Chrome plate: bumpers, taps, trim. A near-perfect mirror, so what it looks
+# like is almost entirely what is around it - put it somewhere with something to
+# reflect or it reads as a flat grey ball.
+
+entity
+Surface.base_color = 0.95 0.96 0.97
+Surface.roughness = 0.03
+Surface.metallic = 1

@@ -843,6 +843,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     device->caps_.shading_rate_max_size = std::max(fsr_props.maxFragmentSize.width, 1u);
   }
   device->caps_.fill_mode_non_solid = features.features.fillModeNonSolid;
+  device->caps_.texture_compression_bc = features.features.textureCompressionBC;
   // Enabled by the full-features query below whenever the driver reports it.
   device->caps_.buffer_atomics64 =
       core12 ? f12.shaderBufferInt64Atomics : atomic_int64.shaderBufferInt64Atomics;

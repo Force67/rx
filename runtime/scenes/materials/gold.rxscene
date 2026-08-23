@@ -1,0 +1,10 @@
+rxscene 1
+
+# Polished gold: leaf, trim, coinage. Low roughness because gold is soft and
+# takes a mirror finish; the blue channel at a third of the red is what makes it
+# read as gold rather than as brass.
+
+entity
+Surface.base_color = 1 0.77 0.34
+Surface.roughness = 0.22
+Surface.metallic = 1

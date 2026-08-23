@@ -12,6 +12,7 @@
 #include <stb_image_write.h>
 
 #include "asset/primitives.h"
+#include "asset/texture_compress.h"
 #include "core/log.h"
 #include "core/memory/memory_tracker.h"
 #include "render/util/exr_write.h"
@@ -75,6 +76,15 @@ base::Option<double> FroxelDensity{"froxel.density", 0.005,
 base::Option<double> FroxelStartDistance{"froxel.start", 0.0,
                                          "RX_FROXEL_START"};
 base::Option<int> TexBudgetMb{"tex.budget.mb", -1, "RX_TEX_BUDGET_MB"};
+// Import-time block compression of material textures. On wherever the device
+// can sample BC; the override exists to bisect a suspected compression
+// artifact without rebuilding.
+base::Option<bool> TexCompressOpt{"tex.compress", true, "RX_TEX_COMPRESS"};
+// Extends that to tangent-space normal maps (BC5 + a shader-side z rebuild).
+// Off by default; asset/texture_compress.h carries the measurements that put
+// it there and what content it is safe on.
+base::Option<bool> TexCompressNormalsOpt{"tex.compress.normals", false,
+                                         "RX_TEX_COMPRESS_NORMALS"};
 base::Option<bool> GpuTimings{"gpu.timings", false, "RX_GPU_TIMINGS"};
 base::Option<int> MsaaOpt{"msaa", 0, "RX_MSAA"};
 base::Option<bool> DrsOpt{"drs", false, "RX_DRS"};
@@ -383,12 +393,50 @@ struct ContactCamera {
   Mat4 inv_view_proj;
 };
 
+// Swapchain stand-in for a windowless renderer. It owns no presentable images
+// (there is no surface); it only answers the size, format and color space the
+// post pass and the frame graph are built against, so the rest of the renderer
+// needs no windowless special case. A windowless frame always renders into
+// capture_image_, so Acquire and image() are never reached. BGRA8 is what both
+// backends negotiate for a real surface, and the byte order WriteBackbufferPng
+// unswizzles on the way to a png.
+class OffscreenSwapchain final : public Swapchain {
+public:
+  OffscreenSwapchain(Format format, Extent2D extent)
+      : format_(format), extent_(extent) {}
+
+  AcquireResult Acquire(u32, u32 *) override { return AcquireResult::kFailed; }
+  Format format() const override { return format_; }
+  Extent2D extent() const override { return extent_; }
+  u32 image_count() const override { return 0; }
+  const GpuImage &image(u32) const override {
+    static const GpuImage kNone;
+    return kNone;
+  }
+  bool can_sample() const override { return true; }
+
+private:
+  Format format_;
+  Extent2D extent_;
+};
+
 } // namespace
 
 Renderer::Renderer() = default;
 Renderer::~Renderer() = default;
 
 bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
+  return InitializeCommon(desc, &window, window.width(), window.height());
+}
+
+bool Renderer::InitializeOffscreen(const RendererDesc &desc, u32 width,
+                                   u32 height) {
+  offscreen_only_ = true;
+  return InitializeCommon(desc, nullptr, width, height);
+}
+
+bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
+                                u32 width, u32 height) {
 #if defined(RX_SHARED_BUILD)
   // base::Option self-registers through base::InitChain, whose list head is a
   // vague-linkage function-local static. Under RX_SHARED every module is built
@@ -404,8 +452,8 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
   settings_.aa_mode = desc.aa_mode;
   settings_.upscaler = desc.upscaler;
   settings_.rt_shadows = desc.raytracing.shadows;
-  output_width_ = window.width();
-  output_height_ = window.height();
+  output_width_ = width;
+  output_height_ = height;
   // Applied before the swapchain exists (the rest of the option overrides run
   // later in Initialize; these two decide the surface format).
   if (HdrOutput.overridden())
@@ -430,12 +478,14 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
               BackendName(backend));
   }
 
-  window_ = &window;
-  device_ = Device::Create({.backend = backend,
-                            .enable_validation = desc.enable_validation,
-                            .request_raytracing = desc.enable_raytracing,
-                            .extra_device_extensions = desc.vulkan.extensions},
-                           window);
+  window_ = window;
+  const DeviceDesc device_desc{
+      .backend = backend,
+      .enable_validation = desc.enable_validation,
+      .request_raytracing = desc.enable_raytracing,
+      .extra_device_extensions = desc.vulkan.extensions};
+  device_ = window ? Device::Create(device_desc, *window)
+                   : Device::CreateOffscreen(device_desc);
   if (device_->is_stub()) {
     RX_WARN("renderer running in stub mode");
     return true;
@@ -467,8 +517,11 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
             "using sdr "
             "(enable hdr in the os display settings)");
   }
-  swapchain_ = device_->CreateSwapchain(
-      output_width_, output_height_, settings_.vsync, swapchain_hdr_request_);
+  swapchain_ =
+      window ? device_->CreateSwapchain(output_width_, output_height_,
+                                        settings_.vsync, swapchain_hdr_request_)
+             : std::make_unique<OffscreenSwapchain>(
+                   Format::kBGRA8Unorm, Extent2D{output_width_, output_height_});
   if (!swapchain_ || !CreateFrameResources())
     return false;
   output_width_ = swapchain_->extent().width;
@@ -482,6 +535,21 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
       RX_WARN("ray tracing disabled: fallback tlas creation failed");
   }
   rt_available_ = raytracing_ && device_->caps().ray_query;
+
+  // Material textures compress at import, which needs a device that can sample
+  // the block formats. This is the only place that knows both, and it runs
+  // before any scene loads, so the loaders can read the flag without a device
+  // handle of their own. RX_TEX_COMPRESS=0 forces the rgba8 path back for an
+  // A/B against a suspected compression artifact.
+  const bool compress_textures =
+      device_->caps().texture_compression_bc && TexCompressOpt;
+  asset::SetTextureCompression(
+      {.supported = compress_textures, .normals = compress_textures && TexCompressNormalsOpt});
+  if (!compress_textures) {
+    RX_INFO("material texture compression off ({}); textures upload as rgba8",
+            device_->caps().texture_compression_bc ? "RX_TEX_COMPRESS=0"
+                                                   : "no textureCompressionBC");
+  }
 
   transient_pool_ = std::make_unique<TransientPool>(*device_);
   // The bindless registry has no ray-tracing dependency (buffers + an
@@ -806,7 +874,7 @@ bool Renderer::Initialize(const RendererDesc &desc, Window &window) {
   }
 
   if (settings_.upscaler != UpscalerKind::kNone &&
-      !CreateUpscalerForSettings()) {
+      !CreateUpscalerWithFallback()) {
     RX_WARN("upscaler unavailable, falling back to taa");
     settings_.upscaler = UpscalerKind::kNone;
     settings_.aa_mode = AntiAliasingMode::kTaa;
@@ -1313,6 +1381,10 @@ void Renderer::WriteBackbufferPng(const std::string &path, u32 image_index) {
                      static_cast<int>(extent.height), 3, pixels.data(),
                      static_cast<int>(extent.width) * 3)) {
     RX_INFO("screenshot written: {}", path);
+    // Alongside the capture because that is where a before/after comparison is
+    // made: a headless run has no debug overlay, so without this the only
+    // report of resident texture memory is a tab nobody can open.
+    LogTextureMemory();
   } else {
     RX_WARN("screenshot write failed: {}", path);
   }
@@ -1366,6 +1438,32 @@ bool Renderer::CreateUpscalerForSettings() {
     settings_.aa_mode = AntiAliasingMode::kUpscaler;
     return true;
   }
+  return false;
+}
+
+bool Renderer::CreateUpscalerWithFallback() {
+  if (CreateUpscalerForSettings())
+    return true;
+  // The preset picks dlss for any nvidia adapter and xess for intel, but both
+  // need a vendor runtime the machine may simply not have (a broken or absent
+  // ngx install is the common one, and it fails at context creation, not at
+  // load). Fsr3 is vendor-agnostic and runs on any vulkan device, so it is the
+  // second choice rather than dropping straight to taa. Without this an nvidia
+  // box with no working ngx renders every frame at native resolution and pays
+  // close to twice the frame cost, with nothing in the log but "falling back to
+  // taa" to say why.
+  if (settings_.upscaler == UpscalerKind::kFsr3)
+    return false;
+  const UpscalerKind requested = settings_.upscaler;
+  settings_.upscaler = UpscalerKind::kFsr3;
+  if (CreateUpscalerForSettings()) {
+    RX_WARN("{} upscaler unavailable, using fsr3 instead",
+            UpscalerName(requested));
+    return true;
+  }
+  // Leave the request in place so the caller's warning names what was asked
+  // for, not the substitute that also failed.
+  settings_.upscaler = requested;
   return false;
 }
 
@@ -1504,7 +1602,7 @@ void Renderer::ApplySettings() {
     device_->WaitIdle();
     upscaler_.reset();
     if (settings_.upscaler != UpscalerKind::kNone) {
-      if (!CreateUpscalerForSettings()) {
+      if (!CreateUpscalerWithFallback()) {
         RX_WARN("upscaler unavailable, falling back to taa");
         settings_.upscaler = UpscalerKind::kNone;
         settings_.aa_mode = AntiAliasingMode::kTaa;
@@ -1697,11 +1795,27 @@ bool Renderer::HairGroomHead(u32 id, Vec3 *center, f32 *radius) {
   return hair_.GroomHead(id, center, radius);
 }
 
-void Renderer::BakeImposter(const asset::Mesh &mesh,
-                            std::span<const ImposterPass::Instance> instances) {
+u32 Renderer::BakeImposter(const asset::Mesh &mesh) {
+  if (!device_ || device_->is_stub())
+    return ImposterPass::kNoMesh;
+  // The bake samples the base-colour maps the mesh's own materials bind, so
+  // they have to be uploaded already - which they are, since a mesh reaches
+  // the gpu after its materials.
+  base::Vector<ImposterPass::BakeMaterial> materials;
+  if (!mesh.lods.empty() && material_system_) {
+    for (const asset::Submesh &submesh : mesh.lods[0].submeshes) {
+      MaterialSystem::BaseColor base =
+          material_system_->material_base_color(submesh.material.hash);
+      materials.push_back({base.image, base.alpha_cutoff});
+    }
+  }
+  return imposters_.Bake(*device_, mesh, {materials.data(), materials.size()});
+}
+
+void Renderer::SetImposterInstances(
+    std::span<const ImposterPass::Instance> instances) {
   if (!device_ || device_->is_stub())
     return;
-  imposters_.Bake(*device_, mesh);
   imposters_.SetInstances(*device_, instances);
 }
 
@@ -2660,9 +2774,15 @@ void Renderer::RenderFrame(const FrameView &view) {
   // frame would burn the full timeout each time, and the run needs its
   // warm-up frames. Acquiring here would be wrong as well as pointless:
   // nothing presents the image back, so the swapchain would run dry.
-  if ((CaptureOffscreen.get() || swapchain_starved_) && CaptureArmed() &&
+  // A windowless renderer has no surface at all, so every one of its frames
+  // goes this way whether or not a capture is due: the warm-up frames still
+  // have to run, or the one capture that is due comes out black.
+  if ((offscreen_only_ || ((CaptureOffscreen.get() || swapchain_starved_) &&
+                           CaptureArmed())) &&
       EnsureCaptureImage())
     capture_offscreen_ = true;
+  if (offscreen_only_ && !capture_offscreen_)
+    return; // no capture image, nowhere to render
   AcquireResult acquired =
       capture_offscreen_ ? AcquireResult::kOk : swapchain_->Acquire(slot, &image_index);
   if (acquired == AcquireResult::kOutOfDate) {
@@ -4131,6 +4251,30 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   if (!view.bone_matrices.empty() && frame.bone_palette.mapped) {
     u32 count = std::min<u32>(static_cast<u32>(view.bone_matrices.size()),
                               kMaxFrameBones);
+#ifndef NDEBUG
+    // The skinning path blends raw upper-3x3 blocks and carries normals with
+    // them, which only holds for a similarity transform (see FrameView::
+    // bone_matrices). Anisotropic scale in a bone shades wrong silently, so
+    // say so once instead of leaving it to be found in a screenshot.
+    static bool warned_anisotropic_bone = false;
+    if (!warned_anisotropic_bone) {
+      for (u32 i = 0; i < count && !warned_anisotropic_bone; ++i) {
+        const f32* m = view.bone_matrices[i].m;
+        const f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+        const f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+        const f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+        const f32 lo = std::min({sx, sy, sz});
+        const f32 hi = std::max({sx, sy, sz});
+        if (lo > 1e-6f && hi > lo * 1.01f) {
+          RX_WARN(
+              "bone {} carries anisotropic scale ({:.3f}/{:.3f}/{:.3f}); skinned "
+              "normals assume translate*rotate*uniform-scale and will shade wrong",
+              i, sx, sy, sz);
+          warned_anisotropic_bone = true;
+        }
+      }
+    }
+#endif
     std::memcpy(frame.bone_palette.mapped, view.bone_matrices.data(),
                 count * sizeof(Mat4));
   }
@@ -7429,6 +7573,8 @@ bool Renderer::WantHdrSwapchain() const {
 }
 
 void Renderer::RecreateSwapchain() {
+  if (!window_)
+    return; // windowless: the offscreen stand-in never resizes
   u32 width = window_->width();
   u32 height = window_->height();
   if (width == 0 || height == 0)
@@ -7444,10 +7590,13 @@ void Renderer::RecreateSwapchain() {
   output_width_ = swapchain_->extent().width;
   output_height_ = swapchain_->extent().height;
 
-  // The upscaler is sized for the output, rebuild it alongside.
+  // The upscaler is sized for the output, rebuild it alongside. Same fallback
+  // as first bringup: a resize is another chance for a vendor runtime to fail,
+  // and dropping a working upscale to taa on a window resize is not something
+  // anyone would connect back to the resize.
   if (upscaler_) {
     upscaler_.reset();
-    if (!CreateUpscalerForSettings()) {
+    if (!CreateUpscalerWithFallback()) {
       settings_.upscaler = UpscalerKind::kNone;
       settings_.aa_mode = AntiAliasingMode::kTaa;
       applied_upscaler_ = UpscalerKind::kNone;
@@ -7648,6 +7797,36 @@ void Renderer::Shutdown() {
   upscaler_.reset();
   raytracing_.reset();
   device_.reset();
+}
+
+void Renderer::LogTextureMemory() const {
+  if (!material_system_)
+    return;
+  auto mb = [](u64 bytes) { return static_cast<f64>(bytes) / (1024.0 * 1024.0); };
+  const MaterialSystem::StreamingStats stats = material_system_->streaming_stats();
+  const asset::TextureCompressionStats compression = asset::CompressionTotals();
+  RX_INFO("material textures: {:.2f} MB resident in {} textures, budget {} MB, {} streamable "
+          "({} at their tail)",
+          mb(stats.resident_bytes), material_system_->texture_count(),
+          stats.budget_bytes >> 20, stats.streamable_count, stats.demoted_count);
+  if (compression.compressed == 0 && compression.skipped == 0) {
+    RX_INFO("texture compression: nothing compressed (off, or nothing reached the importer)");
+    return;
+  }
+  RX_INFO("texture compression: {} textures {:.2f} -> {:.2f} MB ({:.2f}x), {} left "
+          "uncompressed, {} from cache, {:.2f}s encoding",
+          compression.compressed, mb(compression.source_bytes), mb(compression.compressed_bytes),
+          compression.compressed_bytes
+              ? static_cast<f64>(compression.source_bytes) /
+                    static_cast<f64>(compression.compressed_bytes)
+              : 0.0,
+          compression.skipped, compression.cache_hits, compression.encode_seconds);
+  // Otherwise the "left uncompressed" count above reads as a failure when it is
+  // a setting: normal maps are the bulk of it on a normal-mapped scene.
+  if (compression.skipped > 0 && !asset::TextureCompressionSettings().normals) {
+    RX_INFO("texture compression: tangent-space normal maps are excluded; "
+            "RX_TEX_COMPRESS_NORMALS=1 includes them (see asset/texture_compress.h)");
+  }
 }
 
 const DeviceCaps *Renderer::caps() const {

@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // Shell-based fur: the mesh is drawn as N concentric shells, each pushed out
 // along the surface normal. The instance index is the shell layer; the pixel
 // shader carves hair strands out of each shell with an alpha mask so the stack
@@ -39,7 +40,12 @@ VsOut main(VsIn input, uint iid : SV_InstanceID) {
   float4 world = mul(push.model, float4(local, 1.0));
   VsOut o;
   o.pos = mul(camera.view_proj, world);
-  o.normal = mul((float3x3)push.model, input.normal);
+  // The shell offset above stays on input.normal in object space (it is a
+  // displacement, and the matrix carries it correctly); only the shading normal
+  // is a covector.
+  float model_det;
+  const float3x3 model_cof = RxCofactor((float3x3)push.model, model_det);
+  o.normal = normalize(mul(model_cof, input.normal)) * RxMirrorSign(model_det);
   o.uv = input.uv;
   o.layer = layer;
   return o;

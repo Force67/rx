@@ -2,22 +2,31 @@
 // Imposter billboard vertex: one instanced quad per distant tree, expanded
 // around the instance origin facing the camera (cylindrical: yaw only, up
 // stays world-up so trunks stay vertical), with the hemi-octahedral cell of
-// the instance->camera direction selected per instance.
+// the instance->camera direction selected per instance. The instance names
+// which baked mesh it is, and that picks the atlas tile.
 struct Instance {
   float3 position;
   float scale;
+  uint mesh;
+  uint3 pad;
 };
 [[vk::binding(0, 0)]] StructuredBuffer<Instance> instances : register(t0, space0);
+
+struct MeshParams {
+  float radius;       // baked mesh bounding radius
+  float center_y;     // baked mesh center height
+  float2 tile_origin; // tile origin in atlas uv
+};
+[[vk::binding(3, 0)]] StructuredBuffer<MeshParams> mesh_params : register(t3, space0);
 
 struct DrawPush {
   column_major float4x4 view_proj;
   float4 camera;     // xyz eye
   float4 sun;        // xyz travel, w intensity
   float4 sun_color;  // rgb, w ambient
-  float radius;      // baked mesh bounding radius
-  float center_y;    // baked mesh center height
-  float grid;        // octahedral cells per axis
-  float pad0;
+  float grid;        // octahedral cells per axis within one tile
+  float tile_scale;  // 1 / mesh tiles per atlas axis
+  float2 pad;
 };
 PUSH_CONSTANTS(DrawPush, pc);
 
@@ -35,8 +44,9 @@ float2 HemiOctEncode(float3 d) {
 
 VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   Instance inst = instances[iid];
-  float r = pc.radius * inst.scale;
-  float3 center = inst.position + float3(0.0, pc.center_y * inst.scale, 0.0);
+  MeshParams mp = mesh_params[inst.mesh];
+  float r = mp.radius * inst.scale;
+  float3 center = inst.position + float3(0.0, mp.center_y * inst.scale, 0.0);
 
   // View direction from the instance to the camera, clamped to the upper
   // hemisphere the bake covered.
@@ -57,7 +67,7 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   // mesh top lands at v = 1; u mirrors because the baked view looks BACK
   // along the view direction.
   float2 quad_uv = float2(0.5 - corner.x * 0.5, 0.5 + corner.y * 0.5);
-  o.uv = (cell + quad_uv) / pc.grid;
+  o.uv = mp.tile_origin + ((cell + quad_uv) / pc.grid) * pc.tile_scale;
   o.world_pos = world;
   return o;
 }

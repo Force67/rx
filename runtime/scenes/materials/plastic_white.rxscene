@@ -1,0 +1,10 @@
+rxscene 1
+
+# White ABS: enclosures, fittings, appliance shells. The same dielectric as
+# plastic_red with a different base_color, which is the whole difference between
+# two plastics - copy the file, change the one line, keep everything else.
+
+entity
+Surface.base_color = 0.8 0.8 0.78
+Surface.roughness = 0.35
+Surface.ior = 1.5

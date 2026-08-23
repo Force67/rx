@@ -1,4 +1,7 @@
 build/
+# Agent worktrees: a full second checkout of this repo lives under here, so
+# without this a `git add -A` commits a copy of the tree into itself.
+.claude/
 scratch/
 out/
 .cache/

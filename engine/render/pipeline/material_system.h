@@ -122,6 +122,11 @@ class MaterialSystem {
   static constexpr u32 kFlagSilhouettePom = 1u << 18;  // curvature-aware pom that carves silhouettes
   static constexpr u32 kFlagSpecularMask = 1u << 19;   // normal-map alpha masks the specular lobe
   static constexpr u32 kFlagEnvMask = 1u << 20;        // env mask map bound at binding 8
+  // The bound normal map is BC5, which stores xy only: the shader has to put
+  // z back as sqrt(1 - x^2 - y^2) instead of reading it. Derived at WriteSet
+  // from the uploaded texture's format, never from the loader's intent, so a
+  // normal map that declined to compress cannot end up flagged.
+  static constexpr u32 kFlagNormalReconstructZ = 1u << 21;
 
   // Looks up an uploaded texture by asset hash (null when absent). Used by
   // systems that bind textures outside the material sets (decal atlas).
@@ -197,6 +202,18 @@ class MaterialSystem {
   // material / texture is unknown or was uploaded fully opaque.
   const AlphaCoverage* material_base_alpha(u64 material_hash) const;
 
+  // A material's base-color map and the cutoff an alpha-masked one tests
+  // against (0 when the material is not masked). `image` is null when the
+  // material is unknown or binds no base-color map. For passes that sample a
+  // material's albedo outside its binding set, which is what an imposter bake
+  // does: it renders geometry it has no mesh pipeline for and only needs the
+  // one map.
+  struct BaseColor {
+    const GpuImage* image = nullptr;
+    f32 alpha_cutoff = 0.0f;
+  };
+  BaseColor material_base_color(u64 material_hash) const;
+
   // Bindless texture-table index for an uploaded (sRGB) texture, or
   // BindlessRegistry::kInvalidIndex when absent. Used to texture particles.
   u32 bindless_texture(u64 texture_hash) const;
@@ -258,6 +275,10 @@ class MaterialSystem {
   struct TextureRecord {
     u64 key = 0;  // salted asset hash (textures_ key), for map upkeep
     GpuImage image;
+    // What was uploaded, which is what decides kFlagNormalReconstructZ. The
+    // asset-side intent is not enough: a normal map that declined to compress
+    // is still rgba8 and still has a real z.
+    asset::TextureFormat format = asset::TextureFormat::kUnknown;
     u32 bindless = BindlessRegistry::kInvalidIndex;
     u32 total_mips = 1;          // source chain length
     u32 resident_first_mip = 0;  // source mip backing image mip 0 (0 = full)
@@ -278,6 +299,7 @@ class MaterialSystem {
     u64 map_keys[8] = {};  // salted texture hashes for bindings 1..8
     u32 bindless_material = BindlessRegistry::kInvalidIndex;
     u32 last_used = 0;
+    f32 alpha_cutoff = 0;  // masked materials only; 0 = no cutout
   };
 
   struct Retired {

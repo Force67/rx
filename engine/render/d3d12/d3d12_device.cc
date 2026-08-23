@@ -283,6 +283,9 @@ std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* wind
 #endif
   device->caps_.api_version = 12;
   device->caps_.fill_mode_non_solid = true;
+  // BC1..BC7 are mandatory from feature level 11_0, which is this backend's
+  // floor, so there is nothing to query.
+  device->caps_.texture_compression_bc = true;
   device->caps_.max_anisotropy = 16.0f;
   device->caps_.debug_utils = false;
   device->caps_.accel_scratch_alignment = 256;

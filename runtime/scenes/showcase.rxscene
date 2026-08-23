@@ -1,0 +1,196 @@
+rxscene 1
+
+# Everything a text-authored scene can say, in one frame: the seven primitive
+# kinds, the five procedural patterns bound to base colour / normal / roughness,
+# and the pbr lobes the mesh shaders actually shade.
+#
+# `rx --dump-schema` prints every component and prop this file may use.
+#   rx --scene runtime/scenes/showcase.rxscene --headless --shot out.png \
+#      --shot-frames 20 --width 1280 --height 720
+
+entity
+Name.value = "Camera"
+Transform.position = 0 2.9 7.2
+Camera.target = 0 0.65 -0.8
+Camera.fov_degrees = 45
+
+# Ground. A plane is one-sided and sits at its Transform, so shapes stand on
+# top of it. The grout is recessed by the generated normal map, which is what
+# stops the tiling reading as a pattern printed on glass.
+entity
+Name.value = "Ground"
+Shape.kind = "plane"
+Shape.size = 9 0 9
+Surface.base_color = 1 1 1
+Surface.roughness = 1
+Pattern.kind = "grid"
+Pattern.scale = 18 18
+Pattern.color_a = 0.02 0.02 0.025
+Pattern.color_b = 0.26 0.25 0.23
+Pattern.line_width = 0.05
+Pattern.relief = 0.012
+Pattern.roughness_a = 0.95
+Pattern.roughness_b = 0.5
+Pattern.resolution = 1024
+
+# --- front row: patterns and the lobes that read on a close curve ---
+
+# Brick cylinder: courses wrap the side, mortar recessed by the normal map and
+# left rougher than the faces by the roughness map.
+entity
+Name.value = "Brick column"
+Transform.position = -3.4 0.85 0.6
+Shape.kind = "cylinder"
+Shape.size = 0.48 0.85 0
+Surface.base_color = 1 1 1
+Surface.roughness = 1
+Pattern.kind = "brick"
+Pattern.scale = 13 13
+Pattern.color_a = 0.55 0.52 0.48
+Pattern.color_b = 0.42 0.13 0.09
+Pattern.line_width = 0.12
+Pattern.relief = 0.02
+Pattern.roughness_a = 0.95
+Pattern.roughness_b = 0.7
+Pattern.resolution = 512
+
+# Checker cone: the pattern is albedo only, the gloss difference between the
+# squares comes from the roughness map alone.
+entity
+Name.value = "Checker cone"
+Transform.position = -2.05 0.85 0.6
+Shape.kind = "cone"
+Shape.size = 0.58 0.85 0
+Surface.base_color = 1 1 1
+Surface.roughness = 1
+Pattern.kind = "checker"
+Pattern.scale = 8 8
+Pattern.color_a = 0.02 0.02 0.03
+Pattern.color_b = 0.85 0.82 0.75
+Pattern.roughness_a = 0.15
+Pattern.roughness_b = 0.65
+
+# Brushed steel torus, anisotropic along the tangent (which runs the ring).
+entity
+Name.value = "Steel torus"
+Transform.position = -0.7 0.62 0.6
+Shape.kind = "torus"
+Shape.size = 0.44 0.18 0
+Surface.base_color = 0.95 0.93 0.88
+Surface.roughness = 0.3
+Surface.metallic = 1
+Surface.anisotropy = 0.85
+
+# Waxy capsule: subsurface plus the wrap-around fills, tinted by
+# subsurface_color, so the terminator bleeds instead of cutting.
+entity
+Name.value = "Wax capsule"
+Transform.position = 0.65 0.8 0.6
+Shape.kind = "capsule"
+Shape.size = 0.32 0.32 0
+Surface.base_color = 0.85 0.72 0.58
+Surface.roughness = 0.45
+Surface.subsurface = 0.9
+Surface.subsurface_color = 0.9 0.35 0.22
+Surface.soft_lighting = 0.7
+Surface.back_lighting = 0.6
+Surface.rim_lighting = 2
+
+# Car paint: a dark red base under a tight clear lacquer.
+entity
+Name.value = "Lacquered sphere"
+Transform.position = 2 0.6 0.6
+Shape.kind = "sphere"
+Shape.size = 0.6 0 0
+Surface.base_color = 0.32 0.02 0.04
+Surface.roughness = 0.55
+Surface.clearcoat = 1
+Surface.clearcoat_roughness = 0.02
+
+# Iridescent metal: a thin film over polished chrome, so the whole surface is
+# specular and the interference has something to colour.
+entity
+Name.value = "Iridescent sphere"
+Transform.position = 3.35 0.6 0.6
+Shape.kind = "sphere"
+Shape.size = 0.6 0 0
+Surface.base_color = 0.9 0.9 0.9
+Surface.roughness = 0.3
+Surface.metallic = 1
+Surface.iridescence = 1
+Surface.iridescence_thickness = 520
+
+# --- back row: the rest of the patterns and the fills ---
+
+# Noise, at enough relief to pass for rough stone.
+entity
+Name.value = "Stone boulder"
+Transform.position = -2.75 0.62 -2.5
+Shape.kind = "sphere"
+Shape.size = 0.62 0 0
+Surface.base_color = 1 1 1
+Surface.roughness = 1
+Pattern.kind = "noise"
+Pattern.scale = 7 7
+Pattern.color_a = 0.17 0.16 0.14
+Pattern.color_b = 0.46 0.44 0.38
+Pattern.relief = 0.05
+Pattern.roughness_a = 0.7
+Pattern.roughness_b = 1
+Pattern.resolution = 512
+
+# Velvet: barely any highlight, all of it grazing-angle sheen.
+entity
+Name.value = "Velvet drum"
+Transform.position = -1.4 0.55 -2.5
+Shape.kind = "cylinder"
+Shape.size = 0.5 0.55 0
+Surface.base_color = 0.09 0.03 0.12
+Surface.roughness = 0.95
+Surface.specular_strength = 0.1
+Surface.sheen_color = 0.8 0.45 0.9
+Surface.sheen_roughness = 0.25
+
+# A gradient panel. The ramp runs along v, which on a box face is its local +y,
+# so the panel needs no rotation to stand the gradient upright.
+entity
+Name.value = "Gradient panel"
+Transform.position = 0 0.7 -2.5
+Shape.kind = "box"
+Shape.size = 0.7 0.7 0.06
+Surface.base_color = 1 1 1
+Surface.roughness = 0.6
+Pattern.kind = "gradient"
+Pattern.color_a = 0.02 0.06 0.20
+Pattern.color_b = 0.85 0.45 0.10
+Pattern.resolution = 256
+
+# Glass: transmission moves the shape into the sorted transparent pass, where
+# it refracts what is behind it.
+entity
+Name.value = "Glass ball"
+Transform.position = 1.4 0.55 -2.5
+Shape.kind = "sphere"
+Shape.size = 0.55 0 0
+Surface.base_color = 0.9 0.97 0.95
+Surface.roughness = 0.05
+Surface.transmission = 1
+Surface.ior = 1.5
+
+# Emissive, the only thing in frame that is its own light source.
+entity
+Name.value = "Signal ring"
+Transform.position = 2.75 0.55 -2.5
+Shape.kind = "torus"
+Shape.size = 0.4 0.12 0
+Surface.base_color = 0.02 0.02 0.02
+Surface.roughness = 0.4
+Surface.emissive = 0.15 2.2 1.9
+
+# A warm practical off to the left, on top of the sun.
+entity
+Name.value = "Key light"
+Transform.position = -3.4 2.8 3
+Light.color = 1 0.85 0.65
+Light.intensity = 24
+Light.radius = 12

@@ -1,6 +1,6 @@
 # Feature-Gym Regression Tour
 
-The tour runs `--demo featuregym` with a fixed timestep, captures all 31 labeled
+The tour runs `--demo featuregym` with a fixed timestep, captures all 32 labeled
 camera stops, and rejects missing, black, or uniform frames. Alongside the nine
 district sweeps, dedicated stops cover recent RX instance streaming, material,
 terrain, virtual-geometry, water, strand, interest-bubble, camera-stack, and

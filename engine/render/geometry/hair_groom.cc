@@ -6,6 +6,7 @@
 
 #include <base/containers/unordered_map.h>
 
+#include "asset/bc_encode.h"
 #include "core/log.h"
 
 namespace rx::render {
@@ -98,8 +99,11 @@ size_t MipOffset(const asset::Texture& t, u32 mip, u32* w, u32* h) {
 }
 
 bool DecodeDiffuse(const asset::Texture& t, u32 target_max, DecodedTex* out) {
+  // BC7 is here because the import-time compressor sends opaque colour there,
+  // so a groom handed a glTF base-colour map now gets one of those rather than
+  // the rgba8 it used to.
   if (t.format != asset::TextureFormat::kBc1 && t.format != asset::TextureFormat::kBc3 &&
-      t.format != asset::TextureFormat::kRgba8) {
+      t.format != asset::TextureFormat::kBc7 && t.format != asset::TextureFormat::kRgba8) {
     return false;
   }
   u32 mip = 0;
@@ -125,29 +129,39 @@ bool DecodeDiffuse(const asset::Texture& t, u32 target_max, DecodedTex* out) {
     return true;
   }
   bool bc3 = t.format == asset::TextureFormat::kBc3;
-  size_t block_size = bc3 ? 16 : 8;
+  bool bc7 = t.format == asset::TextureFormat::kBc7;
+  size_t block_size = (bc3 || bc7) ? 16 : 8;
   u32 bw = (w + 3) / 4, bh = (h + 3) / 4;
   if (offset + static_cast<size_t>(bw) * bh * block_size > t.data.size()) return false;
   for (u32 by = 0; by < bh; ++by) {
     for (u32 bx = 0; bx < bw; ++bx) {
       const u8* blk = t.data.data() + offset + (static_cast<size_t>(by) * bw + bx) * block_size;
       u8 colors[16][3];
-      DecodeBc1Colors(blk + (bc3 ? 8 : 0), bc3, colors);
       f32 alpha[16];
-      if (bc3) {
-        DecodeBc4Alpha(blk, alpha);
-      } else {
-        // DXT1 1-bit alpha: the punch-through palette index (only in the 3-colour
-        // mode) is transparent; opaque cards decode to 1.
-        u16 c0, c1;
-        std::memcpy(&c0, blk, 2);
-        std::memcpy(&c1, blk + 2, 2);
-        u32 bits;
-        std::memcpy(&bits, blk + 4, 4);
-        bool four = c0 > c1;
+      if (bc7) {
+        u8 texels[64];
+        if (!asset::DecodeBc7Block(blk, texels)) return false;
         for (int i = 0; i < 16; ++i) {
-          u32 idx = (bits >> (i * 2)) & 0x3;
-          alpha[i] = (!four && idx == 3) ? 0.0f : 1.0f;
+          for (int k = 0; k < 3; ++k) colors[i][k] = texels[i * 4 + k];
+          alpha[i] = texels[i * 4 + 3] / 255.0f;
+        }
+      } else {
+        DecodeBc1Colors(blk + (bc3 ? 8 : 0), bc3, colors);
+        if (bc3) {
+          DecodeBc4Alpha(blk, alpha);
+        } else {
+          // DXT1 1-bit alpha: the punch-through palette index (only in the
+          // 3-colour mode) is transparent; opaque cards decode to 1.
+          u16 c0, c1;
+          std::memcpy(&c0, blk, 2);
+          std::memcpy(&c1, blk + 2, 2);
+          u32 bits;
+          std::memcpy(&bits, blk + 4, 4);
+          bool four = c0 > c1;
+          for (int i = 0; i < 16; ++i) {
+            u32 idx = (bits >> (i * 2)) & 0x3;
+            alpha[i] = (!four && idx == 3) ? 0.0f : 1.0f;
+          }
         }
       }
       for (int py = 0; py < 4; ++py) {

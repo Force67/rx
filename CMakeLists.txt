@@ -272,6 +272,7 @@ if(NOT DEFINED RX_MODULES)
     anim
     audio
     rpc
+    authoring
     net
     nav
     character
@@ -379,6 +380,16 @@ if(RX_BUILD_TESTS AND "script" IN_LIST RX_MODULES)
   add_test(NAME script_test COMMAND script_test)
 endif()
 
+# rx::authoring unit tests: the rpc <-> script marshalling, the trust gate, and
+# the unix socket endpoint driven with a real client fd. No GPU or window, but
+# unix sockets, so it stays off Windows like the endpoint does.
+if(RX_BUILD_TESTS AND NOT WIN32 AND "authoring" IN_LIST RX_MODULES)
+  add_executable(command_bridge_test test/command_bridge_test.cc)
+  target_link_libraries(command_bridge_test PRIVATE rx::authoring rx::scene rx::script
+    rx::rpc rx::ecs rx::core)
+  add_test(NAME command_bridge_test COMMAND command_bridge_test)
+endif()
+
 # rx::nav unit tests: pure CPU logic over a synthetic terrain sampler (costed
 # A*, entry-cost commitment, funnel, event repathing, position scoring), so
 # plain `ctest` runs them everywhere.
@@ -414,6 +425,43 @@ if(RX_BUILD_TOOLS)
   rx_set_warnings(rxpack)
 endif()
 
+# rxdiff compares two rendered pngs against a measured tolerance, which is the
+# only comparison a renderer whose radiance cache races its own waves admits
+# (a capture's clock is locked, so nothing else about it wanders). Its own
+# tool rather than an rx flag: it needs no device, no window and no scene, so it
+# links stb and nothing else and starts instantly in a CI loop.
+if(RX_BUILD_TOOLS)
+  add_executable(rxdiff tools/rxdiff.cc)
+  target_link_libraries(rxdiff PRIVATE rx::stb_impl)
+  rx_set_warnings(rxdiff)
+
+  # The tolerance itself came from measuring the renderer (the tool's header
+  # carries the numbers); these only pin the two ends nothing should ever move.
+  # Two checked-in captures of the same Cornell box from different gi paths
+  # stand in for a regression, so no new binaries land in the tree for this.
+  if(RX_BUILD_TESTS)
+    add_test(NAME rxdiff_identical COMMAND rxdiff
+      ${CMAKE_CURRENT_SOURCE_DIR}/docs/images/rcgi-cornell-ddgi.png
+      ${CMAKE_CURRENT_SOURCE_DIR}/docs/images/rcgi-cornell-ddgi.png)
+    add_test(NAME rxdiff_regression COMMAND rxdiff
+      ${CMAKE_CURRENT_SOURCE_DIR}/docs/images/rcgi-cornell-ddgi.png
+      ${CMAKE_CURRENT_SOURCE_DIR}/docs/images/rcgi-cornell-rcgi.png)
+    # Matching the verdict, not just a nonzero exit, so an io error cannot pass
+    # for a detected regression.
+    set_tests_properties(rxdiff_regression PROPERTIES PASS_REGULAR_EXPRESSION "FAIL")
+  endif()
+endif()
+
+# rxcall issues one command to a running engine's --authoring-endpoint socket.
+# It links rx::rpc rather than reimplementing the frame, so the client and the
+# engine can never disagree about the encoding. Unix sockets only, like the
+# endpoint itself.
+if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
+  add_executable(rxcall tools/rxcall.cc)
+  target_link_libraries(rxcall PRIVATE rx::rpc rx::core)
+  rx_set_warnings(rxcall)
+endif()
+
 # The engine's own archives, packed from engine/assets with the tool above and
 # mounted by asset::MountEngineArchives (one namespace each). Cross builds skip
 # this: rxpack would be built for the target and cannot run here.
@@ -439,12 +487,33 @@ if(RX_BUILD_TESTS)
   add_executable(asset_database_test test/asset_database_test.cc)
   target_link_libraries(asset_database_test PRIVATE rx::asset rx::core)
   add_test(NAME asset_database_test COMMAND asset_database_test)
+
+  # Procedural texture synthesis and the blockout primitives behind the
+  # .rxscene Pattern/Shape components.
+  add_executable(procedural_asset_test test/procedural_asset_test.cc)
+  target_link_libraries(procedural_asset_test PRIVATE rx::asset rx::core)
+  add_test(NAME procedural_asset_test COMMAND procedural_asset_test)
 endif()
 
 if(RX_BUILD_TESTS AND "asset" IN_LIST RX_MODULES)
   add_executable(gltf_skin_test test/gltf_skin_test.cc)
   target_link_libraries(gltf_skin_test PRIVATE rx::asset rx::core)
   add_test(NAME gltf_skin_test COMMAND gltf_skin_test)
+
+  add_executable(gltf_texture_transform_test test/gltf_texture_transform_test.cc)
+  target_link_libraries(gltf_texture_transform_test PRIVATE rx::asset rx::core)
+  add_test(NAME gltf_texture_transform_test COMMAND gltf_texture_transform_test)
+
+  add_executable(materialx_test test/materialx_test.cc)
+  target_link_libraries(materialx_test PRIVATE rx::asset rx::core)
+  add_test(NAME materialx_test COMMAND materialx_test)
+
+  # BCn block encoders and the import-time compressor, against decoders written
+  # from the format definitions. No gpu involved, so this one really runs under
+  # a plain ctest.
+  add_executable(bc_encode_test test/bc_encode_test.cc)
+  target_link_libraries(bc_encode_test PRIVATE rx::asset rx::core)
+  add_test(NAME bc_encode_test COMMAND bc_encode_test)
 endif()
 
 # USD import: composition (a reference arc into a second layer), the z-up /
@@ -496,6 +565,17 @@ if(RX_BUILD_TESTS)
   add_executable(edit_test test/edit_test.cc)
   target_link_libraries(edit_test PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::core)
   add_test(NAME edit_test COMMAND edit_test)
+
+  # The .rxscene authoring passes themselves (runtime/scene_authoring.cc, which
+  # is viewer policy rather than a module, so it is compiled in here rather than
+  # linked). `rx --validate` covers what a scene REFUSES; this covers what the
+  # numbers come out as, which no exit code can show. Null renderer throughout,
+  # so it needs no device even though it links rx::render for the signatures.
+  add_executable(scene_authoring_test test/scene_authoring_test.cc runtime/scene_authoring.cc)
+  target_include_directories(scene_authoring_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/runtime)
+  target_link_libraries(scene_authoring_test
+    PRIVATE rx::edit rx::scene rx::ecs rx::asset rx::render rx::core)
+  add_test(NAME scene_authoring_test COMMAND scene_authoring_test)
 endif()
 
 if(RX_BUILD_TESTS)
@@ -706,6 +786,16 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_executable(compaction_test test/compaction_test.cc)
   target_link_libraries(compaction_test PRIVATE rx::render rx::core)
   add_test(NAME compaction_test COMMAND compaction_test)
+
+  # Cull bounding radius: runs cull.cs over a rotated, non-uniformly scaled
+  # instance straddling a frustum plane, the one case where reading the model
+  # matrix by row instead of by column under-reports the radius and culls
+  # visible geometry. Skips (exit 0) with no driver; the real path runs under
+  # vkrun.
+  add_executable(cull_bounds_test test/cull_bounds_test.cc)
+  target_link_libraries(cull_bounds_test PRIVATE rx::render rx::core)
+  target_include_directories(cull_bounds_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME cull_bounds_test COMMAND cull_bounds_test)
 
   # Upload batch: buffers created inside Begin/FlushUploadBatch (nested scopes,
   # implicit flush via ImmediateSubmit, soft-budget auto-submit) verified by

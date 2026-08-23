@@ -303,6 +303,14 @@ struct FrameView {
   base::Vector<PointLight> lights;
   // Bone palette for every skinned draw this frame, concatenated; each skinned
   // DrawItem indexes its run by skin_offset. Column-major model-space matrices.
+  //
+  // Every entry must be translate * rotate * UNIFORM scale (what
+  // MakeTransform builds). The skinning vertex shader blends the raw upper 3x3
+  // across the influencing bones and applies it to the normal directly, which
+  // is only the right transform for a similarity: a bone carrying anisotropic
+  // scale tilts its normals off the surface, and blending makes it worse
+  // rather than failing loudly. Non-uniform scale belongs in the DrawItem's
+  // model matrix, where the cofactor path handles it.
   base::Vector<Mat4> bone_matrices;
   // Active morph target weights for every morphed draw this frame,
   // concatenated; each DrawItem indexes its run by morph_offset/morph_count.
@@ -420,6 +428,13 @@ public:
   ~Renderer();
 
   bool Initialize(const RendererDesc &desc, Window &window);
+  // Windowless bringup for offscreen capture (--headless --shot, CI): a
+  // surfaceless device (Device::CreateOffscreen) with no presentation surface,
+  // so every frame renders into the capture image and completes through the
+  // swapchainless submit. Same passes and settings as the windowed path; only
+  // Acquire/Present are gone, and CaptureScreenshot is the only way to see the
+  // result. False when the device or the frame resources cannot be created.
+  bool InitializeOffscreen(const RendererDesc &desc, u32 width, u32 height);
   void RenderFrame(const FrameView &view);
   void Shutdown();
   void WaitIdle();
@@ -523,10 +538,14 @@ public:
   void DestroyHairGroom(u32 id);
   // World-space head collision sphere of a groom, for aligning a head mesh.
   bool HairGroomHead(u32 id, Vec3 *center, f32 *radius);
-  // Bakes an octahedral imposter of the mesh and sets the distant instances
-  // drawn as billboards (--demo imposters).
-  void BakeImposter(const asset::Mesh &mesh,
-                    std::span<const ImposterPass::Instance> instances);
+  // Bakes an octahedral imposter of the mesh, textured and alpha-tested from
+  // its submeshes' own materials, and returns the index instances name it by
+  // (ImposterPass::kNoMesh on failure). Several meshes share one atlas, so a
+  // scene bakes each of its species once and then sets one instance list.
+  u32 BakeImposter(const asset::Mesh &mesh);
+  // The distant instances drawn as billboards. Replaces the previous set, so
+  // a game re-splitting near/far as the camera moves calls this again.
+  void SetImposterInstances(std::span<const ImposterPass::Instance> instances);
 
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.
@@ -587,6 +606,10 @@ public:
   size_t instance_group_count() const { return instances_.group_count(); }
   size_t instance_count() const { return instances_.instance_count(); }
   const MaterialSystem *materials() const { return material_system_.get(); }
+  // One line of resident material-texture memory and what import-time
+  // compression did to get there. Called after a --shot capture; a headless
+  // run has no overlay, and this is the number a memory change is judged on.
+  void LogTextureMemory() const;
 
   // Per-pass GPU timings from the last resolved frame, for the debug overlay.
   const base::Vector<GpuProfiler::PassTiming> &pass_timings() const {
@@ -653,6 +676,9 @@ private:
   static constexpr u32 kMaxFrameMorphWeights = 4096;
   static constexpr u32 kMaxFrameLights = 256;
 
+  // Shared bringup for both entry points. `window` is null for the offscreen
+  // path, which also decides the device factory and the swapchain stand-in.
+  bool InitializeCommon(const RendererDesc &desc, Window *window, u32 width, u32 height);
   bool CreateFrameResources();
   void DestroyFrameResources();
   // Fills this slot's DrawRecord arena from view.draws (growing it first) and
@@ -669,6 +695,10 @@ private:
   void ResizeSizedPasses();
   void ApplySettings();
   bool CreateUpscalerForSettings();
+  // Creates the requested upscaler, or fsr3 when the requested one has no
+  // working runtime on this machine. False only when upscaling is off
+  // entirely, which is the caller's cue to drop to taa.
+  bool CreateUpscalerWithFallback();
   void BuildFrameGraph(FrameResources &frame, u32 image_index,
                        const FrameView &view);
   // Records the frame's opaque casters depth-only with ShadowPass's caster
@@ -691,6 +721,11 @@ private:
   RendererDesc desc_;
   RenderSettings settings_;
   Window *window_ = nullptr;
+  // Windowless run (InitializeOffscreen): there is nothing to present to, so
+  // every frame takes the capture path below, armed or not. The warm-up frames
+  // a non-black capture needs (sky/atmosphere bakes, temporal history, streamed
+  // uploads) have to run just the same.
+  bool offscreen_only_ = false;
   // The HDR request the current swapchain was built with; when WantHdrSwapchain
   // diverges (OS toggle flipped, setting changed) the frame loop rebuilds.
   bool swapchain_hdr_request_ = false;

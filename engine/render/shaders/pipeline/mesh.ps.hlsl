@@ -2,6 +2,7 @@
 // a ray queried shadow toward the sun.
 
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 
 // The head of the mesh push range, which covers the fragment stage too. Only
 // these two words are read here, and both sit at the same offset in the
@@ -328,6 +329,8 @@ struct MaterialParams {
 };
 [[vk::binding(0, 1)]] ConstantBuffer<MaterialParams> material : register(b0, space1);
 
+#include "material_uv.hlsli"  // MaterialUv, shared with the prepass
+
 [[vk::combinedImageSampler]] [[vk::binding(1, 1)]] Texture2D base_color_map : register(t1, space1);
 [[vk::combinedImageSampler]] [[vk::binding(1, 1)]] SamplerState base_color_sampler : register(s1, space1);
 [[vk::combinedImageSampler]] [[vk::binding(2, 1)]] Texture2D normal_map : register(t2, space1);
@@ -395,6 +398,10 @@ struct CascadeData {
 static const uint kFlagAlphaMask = 1u;
 static const uint kFlagHasNormalMap = 2u;
 static const uint kFlagNormalModelSpace = 16384u;  // 1 << 14, _msn object-space normal
+// 1 << 21: the normal map is BC5 and carries xy only, so z has to be rebuilt.
+// Set from the uploaded texture format, so an uncompressed map never takes this
+// path and keeps reading the z it actually has.
+static const uint kFlagNormalReconstructZ = 2097152u;
 static const uint kFlagTerrain = 4u;
 static const uint kFlagHasHeightMap = 32u;  // 1 << 5
 static const uint kFlagSkin = 64u;          // 1 << 6, exports diffuse for screen-space sss
@@ -471,11 +478,18 @@ float3 SurfaceNormal(PsIn input) {
   }
   if ((material.flags & kFlagHasNormalMap) != 0u) {
     float3 sampled = normal_map.Sample(normal_sampler, input.uv).xyz * 2.0 - 1.0;
+    if ((material.flags & kFlagNormalReconstructZ) != 0u) {
+      sampled.z = sqrt(saturate(1.0 - dot(sampled.xy, sampled.xy)));
+    }
     if ((material.flags & kFlagNormalModelSpace) != 0u) {
-      // Object-space (_msn) normal: rotate straight to world by the model
-      // matrix (uniform scale drops out on normalize), replacing the vertex
-      // normal. No TBN, so seam-broken tangents can't smear the shading.
-      float3 mn = mul((float3x3)draw_records[push.draw_index].model, sampled);
+      // Object-space (_msn) normal: carried straight to world by the model
+      // matrix's cofactor, replacing the vertex normal. No TBN, so seam-broken
+      // tangents can't smear the shading. Same covector rule as the vertex
+      // normal, sign included, or a mirrored instance lights inside out.
+      float model_det;
+      const float3x3 cof =
+          RxCofactor((float3x3)draw_records[push.draw_index].model, model_det);
+      float3 mn = mul(cof, sampled) * RxMirrorSign(model_det);
       if (dot(mn, mn) > 1e-8) n = normalize(mn);
     } else {
       float3 t = input.tangent.xyz - n * dot(input.tangent.xyz, n);
@@ -1383,9 +1397,7 @@ float4 EffectColor(PsIn input) {
 }
 
 PsOut main(PsIn input) {
-  // Animated scroll (waterfalls, rivers, lava): shift the uv before anything
-  // samples it.
-  input.uv += frame.time * material.uv_scroll;
+  input.uv = MaterialUv(input.uv);
 
   // Effect-shader geometry short-circuits the lit path entirely (no lighting,
   // shadows, SSS or decals): additive fire premultiplies its coverage for the

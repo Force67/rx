@@ -1,0 +1,69 @@
+rxscene 1
+
+# A curtain-wall tower: glazed podium, shaft, setback plant crown.
+#
+# Three masses rather than one box, which is what gives it a silhouette that
+# survives being stretched. The ROOT is the shaft, so the parts are positioned
+# relative to its centre and the whole prefab hangs off wherever an instance
+# puts it; an Anchor onto the ground measures the subtree and stands all three
+# on it, so no instance writes a height. See SceneStretch: an instance's
+# Stretch reaches every part, scaling both their offsets and their geometry.
+#
+# Shaft 8 x 29 x 8 above a 9.2 podium, crown set back to 6.4. The setback is the
+# point: a tower that meets the sky with the same footprint it meets the street
+# with reads as an extrusion, not a building.
+
+entity
+Name.value = "Glass shaft"
+Shape.kind = "box"
+Shape.size = 4 14.5 4
+Surface.base_color = 1 1 1
+Surface.roughness = 0.9
+Surface.ior = 1.5
+# Three bays across by eight floors up. Before Pattern.scale took two numbers
+# this said "3 14" and got a 3x3 grid, which is where the old tower's absurdly
+# tall panes came from.
+Pattern.kind = "grid"
+Pattern.scale = 3 8
+Pattern.line_width = 0.16
+Pattern.color_a = 0.30 0.32 0.35
+Pattern.color_b = 0.10 0.15 0.21
+Pattern.relief = 0.014
+Pattern.roughness_a = 0.85
+Pattern.roughness_b = 0.07
+
+# Street level, wider than the shaft so the tower has a base to stand on and the
+# pavement has something to meet. Taller glazing and fewer bays: a lobby is not
+# a stack of offices, and reading that difference at ground level is most of
+# what tells a viewer how big the rest of it is.
+entity
+Name.value = "Glass podium"
+Transform.position = 0 -17 0
+Shape.kind = "box"
+Shape.size = 4.6 2.5 4.6
+Surface.base_color = 1 1 1
+Surface.roughness = 0.85
+Pattern.kind = "grid"
+Pattern.scale = 4 1
+Pattern.line_width = 0.1
+Pattern.color_a = 0.22 0.23 0.25
+Pattern.color_b = 0.16 0.22 0.28
+Pattern.relief = 0.02
+Pattern.roughness_a = 0.8
+Pattern.roughness_b = 0.06
+
+entity
+Name.value = "Glass crown"
+Transform.position = 0 16.5 0
+Shape.kind = "box"
+Shape.size = 3.2 2 3.2
+Surface.base_color = 0.42 0.43 0.44
+Surface.roughness = 0.9
+Pattern.kind = "grid"
+Pattern.scale = 6 2
+Pattern.line_width = 0.3
+Pattern.color_a = 0.34 0.35 0.36
+Pattern.color_b = 0.46 0.47 0.47
+Pattern.relief = 0.02
+Pattern.roughness_a = 0.9
+Pattern.roughness_b = 0.85

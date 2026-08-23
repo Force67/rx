@@ -38,6 +38,10 @@ enum class PropType : u32 {
   kEntity,
 };
 
+// Stable spelling of a PropType ("vec3", "assetid", ...), for anything that
+// has to name a type outside C++ (the schema dump an authoring tool reads).
+RX_EDIT_EXPORT const char* PropTypeName(PropType type);
+
 // A tagged value carrying any reflected field. The active member is selected by
 // `type`; the makers below fill exactly the relevant fields.
 struct PropValue {
@@ -104,6 +108,7 @@ RX_EDIT_EXPORT RegEntry* CreateEntry(const char* name, ecs::ComponentId id,
                                      void (*default_construct)(void*));
 RX_EDIT_EXPORT void AddProp(RegEntry* entry, const char* name, PropType type, u32 offset);
 RX_EDIT_EXPORT void SetRange(RegEntry* entry, f32 min, f32 max);
+RX_EDIT_EXPORT void SetHint(RegEntry* entry, const char* hint);
 
 // Byte offset of a member within its enclosing struct. Computed against a real
 // (default-constructed) instance rather than the null-pointer trick, so it is
@@ -179,6 +184,14 @@ class ComponentReflector {
   // Applies to the most recently added prop.
   ComponentReflector& Range(f32 min, f32 max) {
     detail::SetRange(entry_, min, max);
+    return *this;
+  }
+
+  // Free-form note on the most recently added prop: the accepted values of a
+  // string prop, the unit of a number. Documentation only (the schema dump and
+  // the inspector show it); nothing parses it.
+  ComponentReflector& Hint(const char* hint) {
+    detail::SetHint(entry_, hint);
     return *this;
   }
 

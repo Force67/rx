@@ -1,0 +1,17 @@
+rxscene 1
+
+# Cast iron: manhole covers, radiators, pan bottoms. Dark and rough because the
+# surface is oxide rather than bare metal, and the noise is the sand-cast grain,
+# carried on the roughness as well as the colour so the highlight breaks up.
+
+entity
+Surface.base_color = 0.25 0.24 0.23
+Surface.roughness = 0.7
+Surface.metallic = 1
+Pattern.kind = "noise"
+Pattern.scale = 16 16
+Pattern.color_a = 0.7 0.7 0.7
+Pattern.color_b = 1 1 1
+Pattern.relief = 0.008
+Pattern.roughness_a = 0.85
+Pattern.roughness_b = 1

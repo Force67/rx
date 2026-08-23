@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 // GPU frustum + occlusion culling: one thread per draw instance tests its world
 // bounding sphere against the camera frustum and, when enabled, against last
 // frame's hi-z (a coarse farthest-depth pyramid), writing the instanceCount
@@ -40,10 +41,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   Instance inst = instances[i];
 
   float3 center = mul(inst.model, float4(inst.bounds.xyz, 1.0)).xyz;
-  float sx = length(inst.model[0].xyz);
-  float sy = length(inst.model[1].xyz);
-  float sz = length(inst.model[2].xyz);
-  float radius = inst.bounds.w * max(sx, max(sz, sy));
+  float radius = inst.bounds.w * RxMaxAxisScale((float3x3)inst.model);
   bool testable = inst.cull_disabled == 0u && inst.bounds.w > 0.0;
 
   uint visible = 1;

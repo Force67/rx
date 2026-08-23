@@ -138,7 +138,14 @@ struct RenderSettings {
   bool vsync = false;
   bool gpu_culling = true;  // gpu compute frustum culling of the opaque indirect draws
   bool gpu_occlusion = true;  // hi-z occlusion culling against last frame's depth
-  bool distance_lod = false;  // pick coarser mesh lods by distance; off = always finest (it's 2026)
+  // Pick coarser mesh lods by distance; off = always finest (it's 2026). Left
+  // off after measuring it on a full map: it saves real time (1.6 of 7.8 ms
+  // there) but the picture visibly changes, because SelectLod switches at 2.5
+  // bounding radii, which is still near enough for a coarse lod to read as
+  // flattened terrain. Turning it on is a per-title call, not a default.
+  // Note the ray-traced paths pin lod 0 regardless (the raster geometry has to
+  // match the tlas they trace), so this only ever reaches raster-only tiers.
+  bool distance_lod = false;
   bool mesh_shader_lod = false;  // optional VK_EXT_mesh_shader opaque path (per-meshlet gpu cull)
   // GPU-generated cubic-Bezier blade fields submitted through FrameView. No
   // field means zero passes and allocations remain dormant after startup.

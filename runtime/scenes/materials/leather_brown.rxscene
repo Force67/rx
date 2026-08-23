@@ -1,0 +1,20 @@
+rxscene 1
+
+# Brown upholstery leather: seats, bags, book covers. The fine noise is the
+# pebble grain, and the sheen is the dusty fuzz leather keeps at grazing angles;
+# without it the surface reads as brown plastic however the roughness is set.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.6
+Surface.sheen_color = 0.25 0.18 0.12
+Surface.sheen_roughness = 0.4
+Pattern.kind = "noise"
+Pattern.scale = 26 26
+Pattern.seed = 2
+Pattern.color_a = 0.1 0.055 0.03
+Pattern.color_b = 0.19 0.1 0.055
+Pattern.relief = 0.02
+Pattern.roughness_a = 0.9
+Pattern.roughness_b = 1
+Pattern.resolution = 512

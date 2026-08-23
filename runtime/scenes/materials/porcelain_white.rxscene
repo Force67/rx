@@ -1,0 +1,12 @@
+rxscene 1
+
+# Glazed porcelain: sanitaryware, tableware, insulators. Near-white, very
+# smooth, and translucent enough that the shadow terminator never goes hard -
+# the subsurface is what separates it from white plastic.
+
+entity
+Surface.base_color = 0.88 0.88 0.86
+Surface.roughness = 0.08
+Surface.ior = 1.6
+Surface.subsurface = 0.35
+Surface.subsurface_color = 0.95 0.92 0.88

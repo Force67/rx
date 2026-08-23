@@ -1,5 +1,6 @@
 #include "rhi_bindings.hlsli"
 #include "vgeo_common.hlsli"
+#include "model_transform.hlsli"
 // Virtual geometry cluster culling, both phases of the two-pass occlusion
 // scheme (push.mode selects):
 //
@@ -114,8 +115,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   DagMeshlet m = meshlets[cluster];
   VgeoInstance inst = instances[instance];
-  float scale = max(length(inst.model[0].xyz),
-                    max(length(inst.model[1].xyz), length(inst.model[2].xyz)));
+  float scale = RxMaxAxisScale((float3x3)inst.model);
 
   if (push.mode == 0) {
     // DAG cut on the group spheres in world space: a cluster and the parents
@@ -139,10 +139,13 @@ void main(uint3 id : SV_DispatchThreadID) {
     for (int pl = 0; pl < 5; ++pl) {
       if (dot(p.planes[pl].xyz, center) + p.planes[pl].w < -radius) return;
     }
-    // Backface cone (model-space axis; valid for rotation + uniform scale).
-    float3 axis = normalize(mul((float3x3)inst.model, m.cone.xyz));
-    float3 view_dir = normalize(center - p.camera.xyz);
-    if (dot(view_dir, axis) >= m.cone.w) return;
+    // Backface cone (model-space axis; only valid for rotation + uniform
+    // scale, hence the guard).
+    if (RxConeCullValid((float3x3)inst.model)) {
+      float3 axis = normalize(mul((float3x3)inst.model, m.cone.xyz));
+      float3 view_dir = normalize(center - p.camera.xyz);
+      if (dot(view_dir, axis) >= m.cone.w) return;
+    }
   }
 
   // near_clip: the sphere reaches past the near plane, so the cluster must go

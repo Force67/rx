@@ -92,6 +92,7 @@ enum class TourMode : u8 {
   kMaterials,
   kSplitPbrPerSubmesh,
   kTerrainSplatV2,
+  kNonUniformScaleNormals,
   kLightingRaster,
   kLightingRaytraced,
   kLightingRcgi,
@@ -209,6 +210,14 @@ struct BubbleAgent {
   f32 extent = 5.0f;
   Vec3 center{};
 };
+
+Mat4 ScaleMat(const Vec3& s) {
+  Mat4 m = Mat4::Identity();
+  m.m[0] = s.x;
+  m.m[5] = s.y;
+  m.m[10] = s.z;
+  return m;
+}
 
 asset::Mesh WithMaterial(asset::Mesh mesh, asset::AssetId material) {
   for (asset::MeshLod& lod : mesh.lods) {
@@ -360,6 +369,7 @@ Area AreaForMode(TourMode mode) {
     case TourMode::kMaterials:
     case TourMode::kSplitPbrPerSubmesh:
     case TourMode::kTerrainSplatV2:
+    case TourMode::kNonUniformScaleNormals:
       return Area::kMaterials;
     case TourMode::kLightingRaster:
     case TourMode::kLightingRaytraced:
@@ -595,6 +605,8 @@ struct FeatureGym::Impl {
   void UpdateInstanceExhibit();
   void EmitStrandGroom();
   void EmitNetworkBubbles(render::FrameView& view);
+  void CreateSkewExhibit();
+  void EmitSkewedNormals(render::FrameView& view);
   void EmitCameraExhibit(f32 dt, render::FrameView& view);
   void EmitCloth(render::FrameView& view);
   void EmitAnimation(f32 dt, render::FrameView& view);
@@ -655,6 +667,10 @@ struct FeatureGym::Impl {
   asset::AssetId decal{};
   asset::AssetId decal_normal{};
   asset::AssetId neutral_material{};
+  // Drawn only under TourMode::kNonUniformScaleNormals, so the anisotropic
+  // transforms cannot leak into any other stop's capture.
+  u64 skew_sphere_mesh = 0;
+  u64 skew_torus_mesh = 0;
   std::vector<u8> virtual_geometry_albedo;
 
   base::Vector<render::PointLight> lights;
@@ -1395,6 +1411,9 @@ void FeatureGym::Impl::CreateGeometry() {
     if (!prop_group) RX_WARN("feature gym: persistent instance group unavailable");
   }
 
+  if (headless) return;
+  const u32 baked = renderer.BakeImposter(tree);
+  if (baked == render::ImposterPass::kNoMesh) return;
   std::vector<render::ImposterPass::Instance> imposters;
   for (int i = 0; i < 80; ++i) {
     const f32 angle = i * 2.39996323f;
@@ -1404,9 +1423,10 @@ void FeatureGym::Impl::CreateGeometry() {
     instance.position[1] = 0.1f;
     instance.position[2] = c.z + std::sin(angle) * radius;
     instance.scale = 0.65f + (i % 5) * 0.08f;
+    instance.mesh = baked;
     imposters.push_back(instance);
   }
-  if (!headless) renderer.BakeImposter(tree, imposters);
+  renderer.SetImposterInstances(imposters);
 }
 
 void FeatureGym::Impl::CreateAtmosphere() {
@@ -2667,6 +2687,61 @@ void FeatureGym::Impl::EmitNetworkBubbles(render::FrameView& view) {
   if (bubble_viz) bubble_viz->Emit(view, bubble_map.bubbles());
 }
 
+// Normals are covectors, so a squashed instance has to carry them by the model
+// matrix's cofactor rather than the matrix itself. The difference only appears
+// when the scale is anisotropic AND the surface carries normals off the scale
+// axes, which is why this exhibit is a sphere and a torus rotated out of axis
+// alignment: the scaled boxes and cylinders elsewhere in the gym have normals
+// along their scale axes, where the wrong transform happens to agree.
+//
+// Built on first activation, not in Create(). Uploading two more meshes at
+// startup measurably perturbs what the geometry district's LOD and virtual
+// geometry streaming has resolved by the time earlier stops capture; deferring
+// keeps every stop before this one bit-comparable against a run from before the
+// exhibit existed.
+void FeatureGym::Impl::CreateSkewExhibit() {
+  if (skew_sphere_mesh) return;
+  asset::Material skewed;
+  skewed.id = asset::MakeAssetId("featuregym/material/non_uniform_scale");
+  skewed.base_color = albedo;
+  skewed.normal = normal;
+  skewed.metallic_roughness = orm;
+  skewed.roughness_factor = 0.42f;
+  if (!headless) renderer.UploadMaterial(skewed);
+  skew_sphere_mesh =
+      UploadMesh(asset::MakeSphere(0.85f, 32, 48, asset::MakeAssetId("featuregym/mesh/skew_sphere")),
+                 skewed.id)
+          .hash;
+  skew_torus_mesh =
+      UploadMesh(asset::MakeTorus(0.78f, 0.3f, 24, 40,
+                                  asset::MakeAssetId("featuregym/mesh/skew_torus")),
+                 skewed.id)
+          .hash;
+}
+
+void FeatureGym::Impl::EmitSkewedNormals(render::FrameView& view) {
+  if (active_mode != TourMode::kNonUniformScaleNormals || !skew_sphere_mesh) return;
+  const Vec3 c = Info(Area::kMaterials).center + Vec3{0, 1.55f, 7.5f};
+  // Scale last, rotation outside it: R*S is the transform whose columns are no
+  // longer orthogonal, so the surface normal and the scaled normal genuinely
+  // diverge. S*R would only rotate an axis-aligned squash and hide the bug.
+  auto emit = [&](u64 mesh, Vec3 offset, Quat rotation, Vec3 scale) {
+    if (!mesh) return;
+    render::DrawItem d;
+    d.mesh = mesh;
+    d.transform = MakeTranslation(c + offset) * MakeFromQuat(rotation) * ScaleMat(scale);
+    d.prev_transform = d.transform;  // static exhibit, no motion to reproject
+    view.draws.push_back(d);
+  };
+  const Quat tilt = QuatFromAxisAngle(Normalize(Vec3{0.35f, 1.0f, 0.45f}), 0.9f);
+  emit(skew_sphere_mesh, {-3.4f, 0, 0}, tilt, {0.45f, 1.7f, 0.85f});
+  emit(skew_torus_mesh, {0, 0, 0}, tilt, {1.5f, 0.4f, 1.05f});
+  // Mirrored: |scale| is uniform, so anything that moves here is the negative
+  // determinant alone (inward normals, flipped tangent handedness), not the
+  // anisotropy the other two carry.
+  emit(skew_sphere_mesh, {3.4f, 0, 0}, tilt, {-1.0f, 1.0f, 1.0f});
+}
+
 void FeatureGym::Impl::EmitCameraExhibit(f32 dt, render::FrameView& view) {
   if (active_mode != TourMode::kEcsCameraStackRig || !camera_activation) return;
   if (scene::CameraOrbit* orbit = world.Get<scene::CameraOrbit>(camera_rig_mode))
@@ -2757,6 +2832,7 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
   }
   if (active == Area::kLighting) view.lights = lights;
   if (active == Area::kMaterials) view.decals = decals;
+  EmitSkewedNormals(view);
   EmitNetworkBubbles(view);
   view.debug_lines = std::span<const render::DebugLine>(lines.data(), lines.size());
   view.world_texts = labels;  // floating district + exhibit captions
@@ -2868,6 +2944,13 @@ bool FeatureGym::Impl::BuildTour(ShowcaseCamera& camera) {
   district(TourMode::kPostTonemapGrade, 2.5f, "post_tonemap_grade");
   district(TourMode::kInteriorFog, 3.0f, "interior_fog");
   district(TourMode::kPathTraceReconstruction, 5.0f, "path_trace_reconstruction");
+  // Last on purpose, even though it belongs to the materials district: every
+  // stop's capture inherits the temporal history of the flight that reached it,
+  // so appending is the only insertion that leaves the other 31 captures
+  // comparable frame for frame against a run from before this stop existed.
+  const Vec3 skew = Info(Area::kMaterials).center + Vec3{0, 1.55f, 7.5f};
+  add(TourMode::kNonUniformScaleNormals, skew + Vec3{0, 1.6f, 6.4f}, skew, 6.0f,
+      "non_uniform_scale_normals");
   return true;
 }
 
@@ -3094,6 +3177,9 @@ void FeatureGym::Impl::ApplyTourMode(TourMode mode) {
       break;
     case TourMode::kOverview:
     case TourMode::kMaterials:
+    case TourMode::kNonUniformScaleNormals:
+      CreateSkewExhibit();
+      break;
     case TourMode::kSplitPbrPerSubmesh:
     case TourMode::kTerrainSplatV2:
     case TourMode::kLightingRaster:

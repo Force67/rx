@@ -1,0 +1,572 @@
+rxscene 1
+
+# A demo city, authored entirely as text. No C++, no imported art: every
+# building is a prefab from prefabs/city/, every facade is a procedural pattern,
+# every material is a named preset or inline PBR.
+#
+# Three things carry this scene, and all three are properties of the format
+# rather than of the layout:
+#
+#   The light is AUTHORED. Sun and Atmosphere below fix a low evening sun and
+#   the haze it rakes through, instead of taking whatever hour the world clock
+#   was at. The sun is off to +x, so the west terrace is lit and the east one is
+#   in its own shade - a street reads as a street largely because its two sides
+#   are not the same brightness.
+#
+#   No building writes down its height. Each is anchored onto the ground with an
+#   Anchor.offset saying where on it, so the y is derived from the prefab's own
+#   geometry. Retune a prefab, or a Stretch, and every instance follows; the old
+#   version of this file carried 24 hand-multiplied half-heights, every one of
+#   which silently sank its building the moment either changed.
+#
+#   Every building is SEVERAL masses - podium, shaft, crown - and an instance's
+#   Stretch reaches all of them (see SceneStretch). That is what makes the
+#   skyline a skyline: with a Stretch that only reached the root, the only shape
+#   that survived being proportioned was a single box, so every silhouette was a
+#   rectangle of a different height.
+#
+# The street grid stays square on purpose. A city reads as a city because its
+# blocks are orthogonal; what is turned off-axis is the traffic and the clutter,
+# which is what tells you the place is lived in rather than laid out.
+#
+#   rx --validate runtime/scenes/city.rxscene
+#   rx --scene runtime/scenes/city.rxscene --headless --shot out.png \
+#      --shot-frames 20 --width 1280 --height 720
+
+# Street level, off the centre line so the towers rake and the cross street
+# opens on the right. Low, because the thing worth seeing here is the way the
+# terraces converge, and that only happens from eye height.
+entity
+Name.value = "Camera"
+Transform.position = 4.2 4.6 54
+Camera.target = -2 14 -46
+Camera.fov_degrees = 52
+
+# --- light and air -----------------------------------------------------------
+# A low sun off to +x: long shadows across the carriageway, one terrace lit and
+# one in shade. Elevation is what decides how much of the scene is in shadow at
+# all, so it is the single number here worth moving first when the render reads
+# flat.
+entity
+Name.value = "Evening"
+Sun.elevation = 12
+Sun.azimuth = 42
+Sun.color = 1 0.74 0.5
+Sun.intensity = 6.5
+Sun.ambient = 0.055
+# Enough haze to separate the near terrace from the far one and to give the
+# lamps something to glow into. Past about 0.05 the froxel volume starts to band
+# at grazing angles on a large ground plane, which is the practical ceiling.
+Atmosphere.density = 0.009
+Atmosphere.start_distance = 10
+Atmosphere.exposure = 0.9
+
+# --- ground and roads --------------------------------------------------------
+
+entity
+Name.value = "Ground"
+Transform.position = 0 0 0
+Shape.kind = "plane"
+Shape.size = 150 0 150
+Surface.base_color = 0.20 0.20 0.21
+Surface.roughness = 0.94
+Pattern.kind = "grid"
+Pattern.scale = 60 60
+Pattern.line_width = 0.06
+Pattern.color_a = 0.30 0.30 0.31
+Pattern.color_b = 0.19 0.19 0.20
+Pattern.relief = 0.003
+Pattern.roughness_a = 0.92
+Pattern.roughness_b = 0.95
+
+# Asphalt sits a hair above the paving so it wins the depth test cleanly.
+entity
+Name.value = "Avenue"
+Transform.position = 0 0.02 0
+Shape.kind = "plane"
+Shape.size = 9 0 150
+Surface.base_color = 0.085 0.085 0.09
+Surface.roughness = 0.93
+Pattern.kind = "noise"
+Pattern.scale = 10 140
+Pattern.color_a = 0.105 0.105 0.11
+Pattern.color_b = 0.082 0.082 0.087
+Pattern.relief = 0.0012
+Pattern.roughness_a = 0.9
+Pattern.roughness_b = 0.95
+
+entity
+Name.value = "Cross street"
+Transform.position = 0 0.03 0
+Shape.kind = "plane"
+Shape.size = 150 0 9
+Surface.base_color = 0.085 0.085 0.09
+Surface.roughness = 0.93
+Pattern.kind = "noise"
+Pattern.scale = 140 10
+Pattern.color_a = 0.105 0.105 0.11
+Pattern.color_b = 0.082 0.082 0.087
+Pattern.relief = 0.0012
+Pattern.roughness_a = 0.9
+Pattern.roughness_b = 0.95
+
+entity
+Name.value = "Centre line"
+Transform.position = 0 0.05 0
+Shape.kind = "plane"
+Shape.size = 0.16 0 140
+Surface.base_color = 0.62 0.58 0.22
+Surface.roughness = 0.8
+
+entity
+Name.value = "West sidewalk"
+Transform.position = -11 0.09 0
+Shape.kind = "box"
+Shape.size = 2 0.09 150
+Surface.base_color = 0.32 0.32 0.33
+Surface.roughness = 0.93
+Pattern.kind = "grid"
+Pattern.scale = 2 90
+Pattern.line_width = 0.05
+Pattern.color_a = 0.24 0.24 0.25
+Pattern.color_b = 0.34 0.34 0.35
+Pattern.relief = 0.002
+
+entity
+Name.value = "East sidewalk"
+Transform.position = 11 0.09 0
+Shape.kind = "box"
+Shape.size = 2 0.09 150
+Surface.base_color = 0.32 0.32 0.33
+Surface.roughness = 0.93
+Pattern.kind = "grid"
+Pattern.scale = 2 90
+Pattern.line_width = 0.05
+Pattern.color_a = 0.24 0.24 0.25
+Pattern.color_b = 0.34 0.34 0.35
+Pattern.relief = 0.002
+
+# --- the west terrace --------------------------------------------------------
+# Turned +90 so each frontage faces the carriageway (+90 about y takes a
+# prefab's +z face onto +x). Every one of these is Anchor.offset = x 0 z: the
+# two numbers that are a decision, with the third derived. The Stretches stay
+# inside about 0.85..1.25, because a stretch scales the facade's window cells
+# along with the building and a big one reads as a different building rather
+# than as a taller one.
+
+entity
+Name.value = "W shops near"
+Rotation.euler = 0 90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -19 0 40
+Stretch.scale = 1 1.05 1.1
+Prefab.path = "prefabs/city/shop_row.rxscene"
+
+entity
+Name.value = "W brick near"
+Rotation.euler = 0 90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -19.5 0 25
+Stretch.scale = 0.95 1.15 1
+Prefab.path = "prefabs/city/block_brick.rxscene"
+
+entity
+Name.value = "W office"
+Rotation.euler = 0 90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -20 0 9
+Stretch.scale = 1.1 0.95 1
+Prefab.path = "prefabs/city/block_office.rxscene"
+
+entity
+Name.value = "W glass"
+Rotation.euler = 0 90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -21 0 -12
+Stretch.scale = 1 1.1 1
+Prefab.path = "prefabs/city/tower_glass.rxscene"
+
+entity
+Name.value = "W brick far"
+Rotation.euler = 0 90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -19.5 0 -30
+Stretch.scale = 1.15 0.9 1
+Prefab.path = "prefabs/city/block_brick.rxscene"
+
+entity
+Name.value = "W concrete"
+Rotation.euler = 0 90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -20.5 0 -46
+Stretch.scale = 1 1.1 1
+Prefab.path = "prefabs/city/tower_concrete.rxscene"
+
+entity
+Name.value = "W shops far"
+Rotation.euler = 0 90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -19 0 -62
+Stretch.scale = 0.95 1.1 1
+Prefab.path = "prefabs/city/shop_row.rxscene"
+
+# --- the east terrace --------------------------------------------------------
+# Turned the other way, and deliberately out of step with the west in both
+# height and spacing: two terraces whose masses line up across the street read
+# as one building split down the middle.
+
+entity
+Name.value = "E office near"
+Rotation.euler = 0 -90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 20 0 46
+Stretch.scale = 1 1.2 1
+Prefab.path = "prefabs/city/block_office.rxscene"
+
+entity
+Name.value = "E shops"
+Rotation.euler = 0 -90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 19 0 30
+Stretch.scale = 1.1 1 1
+Prefab.path = "prefabs/city/shop_row.rxscene"
+
+entity
+Name.value = "E concrete"
+Rotation.euler = 0 -90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 20.5 0 13
+Stretch.scale = 1 0.95 1
+Prefab.path = "prefabs/city/tower_concrete.rxscene"
+
+entity
+Name.value = "E brick"
+Rotation.euler = 0 -90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 19.5 0 -4
+Stretch.scale = 1 1.1 1
+Prefab.path = "prefabs/city/block_brick.rxscene"
+
+entity
+Name.value = "E glass"
+Rotation.euler = 0 -90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 21 0 -22
+Stretch.scale = 1.05 0.9 1
+Prefab.path = "prefabs/city/tower_glass.rxscene"
+
+entity
+Name.value = "E office far"
+Rotation.euler = 0 -90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 20 0 -40
+Stretch.scale = 1 1.1 1
+Prefab.path = "prefabs/city/block_office.rxscene"
+
+entity
+Name.value = "E slim"
+Rotation.euler = 0 -90 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 21 0 -58
+Stretch.scale = 1 0.95 1
+Prefab.path = "prefabs/city/tower_slim.rxscene"
+
+# --- behind the terraces -----------------------------------------------------
+# Depth, not detail: these are only ever seen over a roofline, so they exist to
+# stop the sky meeting the street in one step. Turned off the street grid a few
+# degrees each, since nothing back here has a frontage to align.
+
+entity
+Name.value = "NW slim"
+Rotation.euler = 0 84 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -38 0 -34
+Stretch.scale = 1 1.15 1
+Prefab.path = "prefabs/city/tower_slim.rxscene"
+
+entity
+Name.value = "NE glass"
+Rotation.euler = 0 -96 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 40 0 -18
+Stretch.scale = 1.1 1.05 1.1
+Prefab.path = "prefabs/city/tower_glass.rxscene"
+
+entity
+Name.value = "SW concrete"
+Rotation.euler = 0 93 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -40 0 8
+Stretch.scale = 1 1.2 1
+Prefab.path = "prefabs/city/tower_concrete.rxscene"
+
+entity
+Name.value = "SE slim"
+Rotation.euler = 0 -87 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 42 0 26
+Stretch.scale = 0.9 1.1 0.9
+Prefab.path = "prefabs/city/tower_slim.rxscene"
+
+entity
+Name.value = "SW warehouse"
+Rotation.euler = 0 6 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -42 0 36
+Prefab.path = "prefabs/city/warehouse.rxscene"
+
+entity
+Name.value = "SE warehouse"
+Rotation.euler = 0 -4 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 44 0 44
+Prefab.path = "prefabs/city/warehouse.rxscene"
+
+# The avenue has to end on something. Without this the two terraces converge on
+# an empty patch of lit sky, which is the brightest thing in the frame and the
+# one place there is nothing to look at.
+entity
+Name.value = "Avenue terminus"
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = -3 0 -78
+Stretch.scale = 1.5 1.25 1.4
+Prefab.path = "prefabs/city/tower_glass.rxscene"
+
+entity
+Name.value = "Terminus neighbour"
+Rotation.euler = 0 12 0
+Anchor.target = "Ground"
+Anchor.mode = "on"
+Anchor.offset = 22 0 -88
+Stretch.scale = 1.2 1 1.2
+Prefab.path = "prefabs/city/tower_concrete.rxscene"
+
+# --- street lighting ---------------------------------------------------------
+# Lamps down the west kerb, then the east. Each is one prefab instance carrying
+# its own pole, arm, lit head and point light, so the rig is placed with the
+# geometry rather than authored separately. A grid member is placed by its
+# container and so cannot also be anchored, which is why this row still names a
+# height: one number for sixteen lamps.
+
+entity
+Name.value = "West kerb lamps"
+Transform.position = -10.2 4 40
+Grid.count = 1 1 8
+Grid.step = 0 0 -15
+Grid.cell = "prefabs/city/streetlamp.rxscene"
+
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+entity
+Grid.of = "West kerb lamps"
+
+# Turned 180 so the arms reach out over the road from the far kerb.
+entity
+Name.value = "East kerb lamps"
+Transform.position = 10.2 4 32
+Rotation.euler = 0 180 0
+Grid.count = 1 1 8
+Grid.step = 0 0 -15
+Grid.cell = "prefabs/city/streetlamp.rxscene"
+
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+entity
+Grid.of = "East kerb lamps"
+
+# --- street clutter ----------------------------------------------------------
+# The only things in the scene off the grid. A city is orthogonal; the stuff
+# people leave in it is not. All of it anchored onto the pavement rather than
+# the road, so it rides the kerb height without naming it.
+
+entity
+Name.value = "Skip"
+Rotation.euler = 0 -12 0
+Anchor.target = "West sidewalk"
+Anchor.mode = "on"
+Anchor.offset = -0.4 0 21
+Shape.kind = "box"
+Shape.size = 1.5 0.9 0.9
+Prefab.path = "materials/steel.rxscene"
+
+entity
+Name.value = "Crate by skip"
+Rotation.euler = 0 34 0
+Anchor.target = "Skip"
+Anchor.mode = "on"
+Shape.kind = "box"
+Shape.size = 0.45 0.45 0.45
+Prefab.path = "materials/wood_planks.rxscene"
+
+# The kiosk is the one thing at the near kerb big enough to read, so it carries
+# a lit sign rather than sitting there as an unlit block. The sign is anchored
+# on its front face, so turning the kiosk turns the sign with it.
+entity
+Name.value = "Kiosk"
+Rotation.euler = 0 -21 0
+Anchor.target = "East sidewalk"
+Anchor.mode = "on"
+Anchor.offset = 0.2 0 8
+Shape.kind = "box"
+Shape.size = 1.1 1.3 1.1
+Prefab.path = "materials/plaster_white.rxscene"
+
+entity
+Name.value = "Kiosk sign"
+Anchor.target = "Kiosk"
+Anchor.mode = "front"
+Rotation.euler = 0 -21 0
+Shape.kind = "box"
+Shape.size = 0.85 0.34 0.06
+Surface.base_color = 0.9 0.97 1
+Surface.emissive = 2.2 3.4 4.2
+Surface.roughness = 0.35
+
+entity
+Name.value = "Kiosk glow"
+Transform.position = 11.4 2.2 9.6
+Light.color = 0.6 0.86 1
+Light.intensity = 5
+Light.radius = 8
+
+entity
+Name.value = "Bollard row"
+Transform.position = -10.4 0.63 -4
+Grid.count = 1 1 6
+Grid.step = 0 0 -3.2
+
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+entity
+Grid.of = "Bollard row"
+Shape.kind = "cylinder"
+Shape.size = 0.14 0.45 0
+Prefab.path = "materials/cast_iron.rxscene"
+
+entity
+Name.value = "Kerb crates"
+Rotation.euler = 0 17 0
+Anchor.target = "East sidewalk"
+Anchor.mode = "on"
+Anchor.offset = 0.6 0 -9
+Shape.kind = "box"
+Shape.size = 0.5 0.4 0.5
+Prefab.path = "materials/wood_planks.rxscene"
+
+entity
+Name.value = "Kerb crate top"
+Rotation.euler = 0 -26 0
+Anchor.target = "Kerb crates"
+Anchor.mode = "on"
+Shape.kind = "box"
+Shape.size = 0.36 0.3 0.36
+Prefab.path = "materials/wood_planks.rxscene"
+
+entity
+Name.value = "Bench west"
+Rotation.euler = 0 -4 0
+Anchor.target = "West sidewalk"
+Anchor.mode = "on"
+Anchor.offset = -0.5 0.45 10
+Shape.kind = "box"
+Shape.size = 0.35 0.06 1.4
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+entity
+Name.value = "Bench west leg"
+Anchor.target = "Bench west"
+Anchor.mode = "under"
+Shape.kind = "box"
+Shape.size = 0.3 0.25 0.1
+Prefab.path = "materials/cast_iron.rxscene"
+
+entity
+Name.value = "Planter"
+Rotation.euler = 0 8 0
+Anchor.target = "West sidewalk"
+Anchor.mode = "on"
+Anchor.offset = -0.3 0 -16
+Shape.kind = "box"
+Shape.size = 0.6 0.4 0.6
+Prefab.path = "materials/granite.rxscene"
+
+# --- fill --------------------------------------------------------------------
+# The sun lights one terrace and the lamps light the kerbs; this keeps the shaded
+# terrace off black without flattening it. One light, high and cool, against a
+# warm low key: raising Sun.ambient instead would lift the whole image evenly and
+# take the modelling out of it.
+
+entity
+Name.value = "Avenue fill"
+Transform.position = -14 30 -18
+Light.color = 0.62 0.72 1
+Light.intensity = 22
+Light.radius = 80

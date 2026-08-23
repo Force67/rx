@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 
+#include "asset/bc_encode.h"
 #include "core/log.h"
 #include "core/memory/small_vector.h"
 
@@ -95,10 +96,11 @@ u32 FullMipChainLength(u32 width, u32 height) {
 //
 // The bake reads the mip-0 alpha channel of a color texture and reduces it to a
 // small per-cell mean-opacity grid plus a whole-texture mean. It decodes alpha
-// for the formats masked (cutout) content ships in -- RGBA8 and BC1/BC2/BC3.
-// BC7 (and anything else) is treated as opaque here: the mesh-side bake then
-// leaves the vegetation stand-in at full size, i.e. today's behavior, rather
-// than guessing (documented limitation; BC7 alpha decode is a follow-up).
+// for the formats masked (cutout) content ships in -- RGBA8, BC1/BC2/BC3, and
+// the mode-6 BC7 the import-time compressor writes. Anything else (BC4/BC5, a
+// BC7 block in a mode rx does not emit) is treated as opaque: the mesh-side
+// bake then leaves the vegetation stand-in at full size, which is what it did
+// before rather than a guess.
 constexpr u32 kAlphaGridDim = 64;
 // A texture whose mean opacity is at (or above) this needs no per-cell grid:
 // masking it would not shrink the stand-in, so we keep only the scalar mean.
@@ -136,17 +138,26 @@ bool DecodeAlphaGrid(const asset::Texture& tex, MaterialSystem::AlphaCoverage& o
     ++cnt[c];
   };
 
-  auto decode_blocks = [&](u32 block_bytes, auto texel_alpha) -> bool {
+  // The callback fills a whole block's 16 alphas, rather than answering one
+  // texel at a time. Per texel is the obvious shape and it is a trap for BC7,
+  // whose only way to answer for one texel is to decode all sixteen: the block
+  // then gets decoded sixteen times and fifteen of the results thrown away.
+  // Measured at 2048x2048, that is 0.70 s against 0.046 s, and it is paid on
+  // every load of every colour texture whether the compressor's disk cache hit
+  // or not. The bit-twiddling formats do not care which shape this is.
+  auto decode_blocks = [&](u32 block_bytes, auto block_alpha) -> bool {
     const u32 bx_count = (w + 3) / 4, by_count = (h + 3) / 4;
     if (static_cast<u64>(bx_count) * by_count * block_bytes > tex.data.size()) return false;
+    u32 alpha[16];
     for (u32 by = 0; by < by_count; ++by) {
       for (u32 bx = 0; bx < bx_count; ++bx) {
         const u8* blk = src + (static_cast<u64>(by) * bx_count + bx) * block_bytes;
+        block_alpha(blk, alpha);
         for (u32 ty = 0; ty < 4; ++ty) {
           for (u32 tx = 0; tx < 4; ++tx) {
             u32 px = bx * 4 + tx, py = by * 4 + ty;
             if (px >= w || py >= h) continue;
-            add(px, py, texel_alpha(blk, ty * 4 + tx));
+            add(px, py, alpha[ty * 4 + tx]);
           }
         }
       }
@@ -164,33 +175,51 @@ bool DecodeAlphaGrid(const asset::Texture& tex, MaterialSystem::AlphaCoverage& o
       break;
     }
     case TextureFormat::kBc1: {
-      decoded = decode_blocks(8, [](const u8* blk, u32 t) -> u32 {
+      decoded = decode_blocks(8, [](const u8* blk, u32* alpha) {
         u32 c0 = blk[0] | (blk[1] << 8), c1 = blk[2] | (blk[3] << 8);
-        if (c0 > c1) return 255;  // opaque BC1 block
         u32 idx = blk[4] | (blk[5] << 8) | (blk[6] << 16) | (blk[7] << 24);
-        return ((idx >> (t * 2)) & 0x3u) == 0x3u ? 0u : 255u;  // 1-bit punch-through
+        for (u32 t = 0; t < 16; ++t) {
+          // 1-bit punch-through, and only in the c0 <= c1 encoding.
+          alpha[t] = (c0 > c1 || ((idx >> (t * 2)) & 0x3u) != 0x3u) ? 255u : 0u;
+        }
       });
       break;
     }
     case TextureFormat::kBc2: {
-      decoded = decode_blocks(16, [](const u8* blk, u32 t) -> u32 {
-        u32 nib = (blk[t / 2] >> ((t & 1u) * 4)) & 0xfu;
-        return nib * 17u;  // 4-bit explicit alpha
+      decoded = decode_blocks(16, [](const u8* blk, u32* alpha) {
+        for (u32 t = 0; t < 16; ++t) {
+          u32 nib = (blk[t / 2] >> ((t & 1u) * 4)) & 0xfu;
+          alpha[t] = nib * 17u;  // 4-bit explicit alpha
+        }
       });
       break;
     }
     case TextureFormat::kBc3: {
-      decoded = decode_blocks(16, [](const u8* blk, u32 t) -> u32 {
+      decoded = decode_blocks(16, [](const u8* blk, u32* alpha) {
         u32 pal[8];
         Bc4AlphaPalette(blk[0], blk[1], pal);
         u64 bits = 0;
         for (u32 i = 0; i < 6; ++i) bits |= static_cast<u64>(blk[2 + i]) << (i * 8);
-        return pal[(bits >> (t * 3)) & 0x7u];
+        for (u32 t = 0; t < 16; ++t) alpha[t] = pal[(bits >> (t * 3)) & 0x7u];
+      });
+      break;
+    }
+    case TextureFormat::kBc7: {
+      decoded = decode_blocks(16, [](const u8* blk, u32* alpha) {
+        // Only the mode rx's own encoder emits decodes here; a third-party BC7
+        // texture in another mode falls through to the opaque stand-in, which
+        // is what this bake did for every BC7 texture before.
+        u8 texels[64];
+        if (!asset::DecodeBc7Block(blk, texels)) {
+          for (u32 t = 0; t < 16; ++t) alpha[t] = 255u;
+          return;
+        }
+        for (u32 t = 0; t < 16; ++t) alpha[t] = texels[t * 4 + 3];
       });
       break;
     }
     default:
-      return false;  // BC7 / BC4 / BC5 / unknown: no CPU alpha decoder
+      return false;  // BC4 / BC5 / unknown: no alpha channel to read
   }
   if (!decoded) return false;
 
@@ -461,6 +490,7 @@ bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
   auto record = std::make_unique<TextureRecord>();
   record->key = key;
   record->image = image;
+  record->format = texture.format;
   record->total_mips = texture.mip_count;
   FormatInfo info = FormatFor(texture.format, texture.is_srgb);
   bool baked = info.block_dim == 4 && texture.mip_count > 1;
@@ -624,11 +654,25 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
   // stay off; the shader branches on kFlagTerrain instead.
   if (material.is_terrain) {
     params.flags |= kFlagTerrain;
-  } else if (material.normal && textures_.find(material.normal.hash ^ id_salt)) {
+  } else if (const u32* normal_index =
+                 material.normal ? textures_.find(material.normal.hash ^ id_salt) : nullptr) {
     params.flags |= kFlagHasNormalMap;
     if (material.normal_model_space) params.flags |= kFlagNormalModelSpace;
     // The mask lives in the normal map's alpha, so it only exists with one.
     if (material.specular_mask_in_normal_alpha) params.flags |= kFlagSpecularMask;
+    if (texture_records_[*normal_index]->format == asset::TextureFormat::kBc5) {
+      // BC5 dropped z and alpha. Reconstructing z is exact for a tangent-space
+      // normal and wrong for an object-space one (whose z is signed), and the
+      // alpha is simply gone. The importer only ever assigns
+      // TextureRole::kNormalTangent, so reaching either of these means a
+      // caller compressed a map that needed more than two channels.
+      if (material.normal_model_space || material.specular_mask_in_normal_alpha) {
+        RX_WARN("material {:x}: normal map is BC5 but the material needs its {} channel; "
+                "compress that map as data, not as a tangent-space normal",
+                material.id.hash, material.normal_model_space ? "signed z" : "alpha");
+      }
+      if (!material.normal_model_space) params.flags |= kFlagNormalReconstructZ;
+    }
   }
   // Env mask: only flagged when its map uploaded, so the reflection falls back
   // to the specular mask instead of the white default reflecting everywhere.
@@ -730,6 +774,7 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
   asset::AlphaMode mode =
       material.transmission > 0.0f ? asset::AlphaMode::kBlend : material.alpha_mode;
   blend_modes_.insert(key, static_cast<u8>(mode));
+  if (mode == asset::AlphaMode::kMask) runtime.alpha_cutoff = material.alpha_cutoff;
   MaterialColor color;
   std::memcpy(color.albedo, material.base_color_factor, sizeof(f32) * 3);
   std::memcpy(color.emissive, material.emissive_factor, sizeof(f32) * 3);
@@ -1022,6 +1067,13 @@ const MaterialSystem::AlphaCoverage* MaterialSystem::material_base_alpha(u64 mat
   const u32* idx = sets_.find(material_hash);
   if (!idx) return nullptr;
   return texture_alpha_.find(material_records_[*idx].map_keys[0]);
+}
+
+MaterialSystem::BaseColor MaterialSystem::material_base_color(u64 material_hash) const {
+  const u32* idx = sets_.find(material_hash);
+  if (!idx) return {};
+  const MaterialRuntime& runtime = material_records_[*idx];
+  return {find_texture(runtime.map_keys[0]), runtime.alpha_cutoff};
 }
 
 u32 MaterialSystem::bindless_texture(u64 texture_hash) const {

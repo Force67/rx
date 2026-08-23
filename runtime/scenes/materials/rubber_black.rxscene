@@ -1,0 +1,11 @@
+rxscene 1
+
+# Black rubber: tyres, seals, mats. Very dark but not black - 0.025 is about the
+# floor for a real surface - and rough enough to have no highlight, with the
+# specular pulled down because carbon-black rubber reflects less than glass.
+
+entity
+Surface.base_color = 0.025 0.025 0.025
+Surface.roughness = 0.85
+Surface.ior = 1.5
+Surface.specular_strength = 0.6

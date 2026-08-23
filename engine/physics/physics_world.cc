@@ -190,6 +190,32 @@ constexpr SurfaceGripEntry kSurfaceGrip[kSurfaceCount] = {
     /* kMetal    */ {0.70f, 0.65f, 0.55f},
 };
 
+// Surfaces whose grip comes from a tread keying into a loose granular or
+// vegetated layer rather than from rubber gripping a hard road. Only these take
+// VehicleDesc::offroad_grip: the table above has no tyre-type dimension, so
+// without this an "all-terrain" tyre is identical to a street tyre everywhere.
+// Asphalt/concrete/wood/metal are hard, and ice is hard and glazed (a knobbly
+// block finds nothing to bite into), so none of them earn the bonus.
+bool IsLooseSurface(SurfaceType s) {
+  switch (s) {
+    case SurfaceType::kDirt:
+    case SurfaceType::kGravel:
+    case SurfaceType::kGrass:
+    case SurfaceType::kSand:
+    case SurfaceType::kSnow:
+    case SurfaceType::kMud:
+      return true;
+    case SurfaceType::kAsphalt:
+    case SurfaceType::kConcrete:
+    case SurfaceType::kIce:
+    case SurfaceType::kWood:
+    case SurfaceType::kMetal:
+    case SurfaceType::kCount:
+      return false;
+  }
+  return false;
+}
+
 const char* SurfaceName(SurfaceType s) {
   switch (s) {
     case SurfaceType::kAsphalt: return "asphalt";
@@ -329,6 +355,9 @@ struct PhysicsWorld::Impl {
     f32 steer_fade_speed = 0;
     bool traction_control = false;
     f32 tc_scale = 1;  // smoothed traction-control throttle authority
+    // All-terrain tread bonus, applied to loose-surface grip in the tire
+    // friction combine. 1 = a street tyre with no off-road advantage.
+    f32 offroad_grip = 1.0f;
     // Manual transmission state: gears change only on the shift edges of the
     // VehicleInput overload; prev_* debounce those edges. manual_shifting is set
     // on the step a shift edge actually changes the ratio, so telemetry reports
@@ -1879,6 +1908,7 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
   entry.steer_high_speed_fraction = desc.steer_high_speed_fraction;
   entry.steer_fade_speed = desc.steer_fade_speed;
   entry.traction_control = desc.traction_control;
+  entry.offroad_grip = desc.offroad_grip > 0 ? desc.offroad_grip : 1.0f;
   InstallVehicleFriction(static_cast<u32>(impl_->vehicles.size() - 1));
   return impl_->vehicles.size();
 }
@@ -2041,10 +2071,23 @@ void PhysicsWorld::InstallVehicleFriction(u32 vehicle_index) {
     f32 grip_long = g.longitudinal * wet;
     f32 grip_lat = g.lateral * wet;
 
+    // All-terrain tread. The grip table is per-surface only, so this is the one
+    // place an off-road tyre can earn its advantage, and it is deliberately
+    // gated on loose surfaces: dialling a profile's offroad_grip up must never
+    // move its tarmac numbers. Capped at the hard-road entry, so a knobbly
+    // tread can recover what the loose layer costs a street tyre but never make
+    // dirt grippier than asphalt. A street tyre (offroad_grip 1) is unchanged:
+    // every loose entry sits below asphalt, so the cap can't bind.
+    const Impl::VehicleEntry& entry = impl_->vehicles[vehicle_index];
+    if (IsLooseSurface(surf)) {
+      const SurfaceGripEntry& hard = kSurfaceGrip[static_cast<u32>(SurfaceType::kAsphalt)];
+      grip_long = std::min(grip_long * entry.offroad_grip, hard.longitudinal * wet);
+      grip_lat = std::min(grip_lat * entry.offroad_grip, hard.lateral * wet);
+    }
+
     // Aquaplaning from the per-wheel water cache filled on the game thread at the
     // top of Update; SampleWater is never called here (this runs on a Jolt worker
     // thread). One step of latency on the wading depth, immaterial to the ramp.
-    const Impl::VehicleEntry& entry = impl_->vehicles[vehicle_index];
     if (wheel_index < 4 && entry.wheel_water[wheel_index].submerged) {
       const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(wheel_index));
       const f32 aqua = AquaplaneGrip(entry.wheel_water[wheel_index].depth,

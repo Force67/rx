@@ -52,18 +52,32 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   mem::ApplyMemoryConfig(mem::LoadMemoryConfig());
   jobs_ = std::make_unique<JobSystem>();
   ConfigureClock(20.0f);
+  // An app that asked for lockstep (AppConfig::fixed_delta, i.e. a capture run)
+  // gets it unless the caller spoke about the clock themselves: RX_FIXED_DT set
+  // to 0 is how you ask a capture for real wall-clock timing back, and a
+  // nonzero one is re-applied every RunFrame below.
+  if (config_.fixed_delta > 0.0f && !FixedDt.overridden())
+    timer_.set_fixed_delta(static_cast<f64>(config_.fixed_delta));
 
   // rx's own content (fonts://, ...) mounts first, so anything the application
   // mounts later overrides it.
   asset::MountEngineArchives(vfs_);
 
+  // --width/--height first, then RX_WIN_W/RX_WIN_H, then the WindowDesc
+  // default; the same size answers for a window and for an offscreen target.
+  WindowDesc desc;
+  if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
+  if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
+  if (config_.width > 0) desc.width = config_.width;
+  if (config_.height > 0) desc.height = config_.height;
   if (!config_.headless) {
-    WindowDesc desc;
-    if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
-    if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
     desc.touch_emits_mouse = TouchMouse;
     window_ = window ? std::move(window) : Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
+    ApplyRenderPreset();
+  } else if (config_.offscreen) {
+    if (!renderer_.InitializeOffscreen(config_.renderer, desc.width, desc.height))
+      return false;
     ApplyRenderPreset();
   }
 
@@ -162,6 +176,11 @@ void Host::ApplyRenderPreset() {
   if (env.wireframe) tuned.wireframe = true;  // honor RX_WIREFRAME over the preset
   tuned.ssr = env.ssr;                        // honor RX_SSR over the preset
   tuned.ssgi = env.ssgi;                      // honor RX_SSGI over the preset
+  // No preset sets these two, so the env value is the only one there is; before
+  // they were carried across, RX_DISTANCE_LOD / RX_MESH_SHADER_LOD were applied
+  // in Renderer::Initialize and then thrown away here, one line later.
+  tuned.distance_lod = env.distance_lod;      // honor RX_DISTANCE_LOD
+  tuned.mesh_shader_lod = env.mesh_shader_lod;  // honor RX_MESH_SHADER_LOD
   tuned.color_grade = env.color_grade;        // presets never set a grade
   tuned.sun_direction = env.sun_direction;    // honor RX_SUN_DIR over the default
   // Sky/weather env overrides (RX_AERIAL / RX_CLOUDS / RX_CLOUD_COVERAGE /
@@ -260,7 +279,7 @@ bool Host::RunFrame() {
   // dedicated server advances the same authoritative logic a client does.
   app_->OnSimulate(frame_delta);
 
-  if (!config_.headless) {
+  if (rendering()) {
     app_->OnUpdate(frame_delta);
 
     // Mirror enrolled strand grooms into their renderer hair grooms: read the
@@ -385,7 +404,7 @@ void Host::Shutdown() {
   // Stop the audio device thread early, before the systems whose sounds it
   // might still be streaming go away.
   if (audio_) audio_->Shutdown();
-  if (!config_.headless) renderer_.WaitIdle();
+  if (rendering()) renderer_.WaitIdle();
   // Destroy app-provided frame callbacks while the renderer and application
   // resources they may own are still alive.
   renderer_.ClearFrameCallbacks();
@@ -393,7 +412,7 @@ void Host::Shutdown() {
   // The renderer is idle but alive: the application drops its GPU-dependent
   // resources (UI backends etc.) before the device goes away.
   if (app_) app_->OnShutdown();
-  if (!config_.headless) renderer_.Shutdown();
+  if (rendering()) renderer_.Shutdown();
   if (jobs_) jobs_->WaitIdle();
 }
 

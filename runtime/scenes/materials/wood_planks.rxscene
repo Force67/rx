@@ -1,0 +1,17 @@
+rxscene 1
+
+# A planked wood floor. `brick` is the plank layout: offset courses with a dark
+# gap where the boards meet, which is the joint pattern a floor actually has. A
+# wide `scale` and a thin `line_width` are what make a course read as a board.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.65
+Pattern.kind = "brick"
+Pattern.scale = 5 5
+Pattern.line_width = 0.035
+Pattern.color_a = 0.09 0.055 0.03
+Pattern.color_b = 0.27 0.15 0.055
+Pattern.relief = 0.02
+Pattern.roughness_a = 1
+Pattern.roughness_b = 0.85

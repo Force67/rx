@@ -1,0 +1,12 @@
+rxscene 1
+
+# Test data for `rx --validate`: a prefab that reaches itself. The instance here
+# is fine; the file it names contains an instance of itself, which is the case a
+# depth counter would turn into a mystery and the chain of files that produced
+# an entity turns into a sentence.
+#
+#   rx --validate test/data/prefab_cycle.rxscene --json
+
+entity
+Name.value = "Outer"
+Prefab.path = "prefab_cycle_inner.rxscene"

@@ -1,0 +1,174 @@
+rxscene 1
+
+# Test data for `rx --validate`: every error-level check firing, plus the
+# warnings. Nothing here is a NAME typo, because those are one-line load
+# failures with nothing left to explain; everything here either loads and then
+# renders nothing (or the wrong thing), or is a number the loader refuses.
+#
+#   rx --validate test/data/broken.rxscene --json
+#
+# The `load` finding is expected: a strict load refuses this file at the first
+# bad number (line 36), and the validator falls back to a lenient load so the
+# report still covers the whole document rather than stopping there.
+#
+# Keep it in sync with the checks in runtime/scene_validate.cc: a check with no
+# entity here is a check nothing proves still fires. One exception, and it is
+# because of this file rather than despite it: discarded_transform needs the
+# anchor solve to have run, and the degenerate Stretch below makes
+# BuildSceneShapes refuse the file before it can. That check has its own fixture
+# in discarded_transform.rxscene.
+
+# degenerate_camera (target == position), and one of the two Cameras that make
+# multiple_cameras fire.
+entity
+Name.value = "Camera on its own target"
+Transform.position = 0 2 5
+Camera.target = 0 2 5
+Camera.fov_degrees = 45
+
+# camera_without_transform: no eye position, so the viewer drops the viewpoint.
+# degenerate_camera_fov on top.
+entity
+Name.value = "Camera with no eye"
+Camera.target = 0 0 0
+Camera.fov_degrees = 0
+
+# non_finite ("inf" names a value no float lane can hold and no save can write
+# back), degenerate_shape_size on the y a box needs, degenerate_scale.
+entity
+Name.value = "Sick box"
+Transform.position = 0 1 0
+Transform.scale = 0
+Shape.kind = "box"
+Shape.size = 0.5 0 0.5
+Surface.roughness = inf
+
+# unparsed_number, once in a lane and once in a scalar (one reader now, so both
+# refuse the same literals). Leniently the vec3 loses the trailing 3 as well as
+# the bad lane and the scale reads 0, which is why degenerate_scale fires here
+# too: none of it is visible in the loaded values, only in the text.
+entity
+Name.value = "Numbers that are not"
+Transform.position = 1 abc 3
+Transform.scale = 0.6f
+Shape.kind = "sphere"
+Shape.size = 0.5 0 0
+
+# unknown_shape_kind. The kind list lives in one table shared with the builder,
+# so this can never disagree with what BuildSceneShapes accepts.
+entity
+Name.value = "Blob"
+Transform.position = 2 1 0
+Shape.kind = "blob"
+Shape.size = 1 1 1
+
+# degenerate_stretch. Harder than a bad size: the bake divides the normals by
+# each axis, so a zero lane is a mesh of nans rather than a flat shape, and
+# BuildSceneShapes refuses the file outright instead of building it.
+entity
+Name.value = "Squashed to nothing"
+Transform.position = -4 1 2
+Shape.kind = "sphere"
+Shape.size = 0.5 0 0
+Stretch.scale = 1 0 1
+
+# unknown_pattern_kind.
+entity
+Name.value = "Plaid sphere"
+Transform.position = -2 1 0
+Shape.kind = "sphere"
+Shape.size = 0.5 0 0
+Pattern.kind = "plaid"
+
+# materialx_not_loaded.
+entity
+Name.value = "Missing mtlx"
+Transform.position = 4 1 0
+Shape.kind = "sphere"
+Shape.size = 0.5 0 0
+Surface.materialx = "does/not/exist.mtlx"
+
+# degenerate_rotation: three numbers pad with a zero w rather than an identity
+# one, so this is the whole quaternion at zero and the mesh collapses. A strict
+# load refuses it; leniently it loads and the check below is what says why.
+entity
+Name.value = "Collapsed by rotation"
+Transform.position = -4 1 0
+Transform.rotation = 0 0 0
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+
+# non_unit_rotation (warning): a half-length quaternion quarters the mesh.
+entity
+Name.value = "Shrunk by rotation"
+Transform.position = -6 1 0
+Transform.rotation = 0 0.5 0 0.5
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+
+# renderable_without_transform and unresolved_mesh: the bug that cost an agent
+# four renders. No mesh converter is registered for any extension, so a
+# .rxscene Renderable path never resolves; Model is the way to a real file.
+entity
+Name.value = "Hand-written renderable"
+Renderable.mesh = "meshes/crate.glb"
+
+# unresolved_mesh from the Model side: a file that is not there, and a mesh
+# index a file that IS there does not have. The second one is why the check
+# imports rather than stopping at the file existing. Paths are relative to the
+# working directory, so this file is validated from the repo root.
+entity
+Name.value = "Model that is not on disk"
+Transform.position = 6 1 1
+Model.path = "test/data/NotHere.glb"
+
+entity
+Name.value = "Model with no such mesh"
+Transform.position = 7 1 1
+Model.path = "test/data/TwoBoxes.gltf#mesh9"
+
+# surface_without_shape and pattern_without_shape (warnings): nothing consumes
+# either without a Shape on the same entity.
+entity
+Name.value = "Material with nothing to be"
+Transform.position = 0 0 0
+Surface.base_color = 1 0 0
+Pattern.kind = "checker"
+
+# light_without_transform, plus light_cannot_contribute twice.
+entity
+Name.value = "Light nowhere"
+Light.intensity = 0
+Light.radius = -1
+
+# duplicate_guid: the second of these two makes every reference to the guid
+# resolve to one of them and a re-save drop the other.
+entity
+Guid.value = 0x1111111111111111
+Name.value = "Twin A"
+Transform.position = 1 1 1
+
+entity
+Guid.value = 0x1111111111111111
+Name.value = "Twin B"
+Transform.position = 2 1 1
+
+# dangling_parent: no entity in this file declares that guid.
+entity
+Name.value = "Orphan"
+Transform.position = 3 1 1
+Parent.value = guid:0xdeadbeefdeadbeef
+
+# parent_cycle: each is the other's parent, so composing a world matrix never
+# terminates on its own.
+entity
+Guid.value = 0x2222222222222222
+Name.value = "Loop A"
+Transform.position = 4 1 1
+Parent.value = guid:0x3333333333333333
+
+entity
+Guid.value = 0x3333333333333333
+Name.value = "Loop B"
+Transform.position = 5 1 1
+Parent.value = guid:0x2222222222222222

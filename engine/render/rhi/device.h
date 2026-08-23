@@ -59,6 +59,11 @@ struct DeviceCaps {
   u32 shading_rate_texel = 16;         // rate image texel size in pixels
   u32 shading_rate_max_size = 1;       // largest fragment edge (4 = 4x4 allowed)
   bool fill_mode_non_solid = false;  // wireframe debug views
+  // Sampling of the BC1..BC7 block formats (vulkan textureCompressionBC). Every
+  // desktop adapter and lavapipe have it; most mobile GPUs do not, and offer
+  // ASTC or ETC2 instead. Material textures are only compressed at import when
+  // this is set, so a device without it keeps getting rgba8.
+  bool texture_compression_bc = false;
   f32 max_anisotropy = 1.0f;         // 1 = anisotropic filtering unavailable
   f32 timestamp_period = 0.0f;       // ns per timestamp tick, 0 = no gpu timing
   bool debug_utils = false;          // debug markers/labels available

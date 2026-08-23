@@ -1,0 +1,252 @@
+rxscene 1
+
+# The material palette, rendered. Every file in scenes/materials/ gets one
+# sphere here, so "what does terracotta look like in this engine" costs a glance
+# at docs/images/material-palette.png rather than a render of your own.
+#
+# Cells are named A1..E6, reading left to right, back row to front. Every cell
+# below carries its Name and the preset it instances and nothing else, so the
+# file IS the legend: cell A3 is the third block of row A, which says copper.
+#
+#   A  metals
+#   B  stone, plaster and masonry
+#   C  tile, ceramic and wood
+#   D  wood, leather, fabric and plastic
+#   E  plastic, rubber, glass and emissives
+#
+# No cell carries a coordinate or a material value: "Sheet" is a 6 x 5 grid and
+# each cell is a member of it, taking cells in the order this file declares
+# them, and the material is whatever the palette file says. A cell does say
+# "sphere", because Grid.cell and Prefab.path are exclusive - a member holds one
+# Prefab, and here that one is the material - so the shared shape is a line per
+# cell instead of one Grid.cell. Its size is the Shape default, radius 0.5,
+# which is what Sheet's Transform y has to match to stand the row on the floor.
+#
+# To add a material to the sheet, write the preset and add four lines here:
+#   rx --scene runtime/scenes/material_sheet.rxscene --headless \
+#      --shot sheet.png --shot-frames 20 --width 1440 --height 1080
+#
+# `rx --dump-materials` lists the palette with the values behind each name.
+
+entity
+Name.value = "Camera"
+Transform.position = 0 7.6 5
+Camera.target = 0 0.4 -2.3
+Camera.fov_degrees = 46
+
+# Neutral floor. Mid grey and fully rough so it neither tints the surfaces nor
+# competes with them for the eye.
+entity
+Name.value = "Floor"
+Shape.kind = "plane"
+Shape.size = 14 0 14
+Surface.base_color = 0.25 0.25 0.25
+Surface.roughness = 1
+
+# A soft fill from the camera side, so the shadow side of every sphere still
+# carries some shape on top of the sun.
+entity
+Name.value = "Fill"
+Transform.position = 0 5 6
+Light.color = 1 0.95 0.9
+Light.intensity = 5
+Light.radius = 24
+
+# The sheet itself: where cell A1 sits, how far apart the cells are, and what
+# every cell is made of. Its Transform is cell 0 0 0, and y is the cell sphere's
+# radius, which is what stands the row on the floor.
+entity
+Name.value = "Sheet"
+Transform.position = -3.75 0.5 -5.4
+Grid.count = 6 1 5
+Grid.step = 1.5 0 1.6
+
+# --- A: metals ---
+
+entity
+Name.value = "A1 steel"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/steel.rxscene"
+
+entity
+Name.value = "A2 brushed aluminium"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/brushed_aluminium.rxscene"
+
+entity
+Name.value = "A3 copper"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/copper.rxscene"
+
+entity
+Name.value = "A4 gold"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/gold.rxscene"
+
+entity
+Name.value = "A5 cast iron"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/cast_iron.rxscene"
+
+entity
+Name.value = "A6 chrome"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/chrome.rxscene"
+
+# --- B: stone, plaster and masonry ---
+
+entity
+Name.value = "B1 concrete"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/concrete.rxscene"
+
+entity
+Name.value = "B2 plaster white"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/plaster_white.rxscene"
+
+entity
+Name.value = "B3 marble white"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/marble_white.rxscene"
+
+entity
+Name.value = "B4 granite"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/granite.rxscene"
+
+entity
+Name.value = "B5 brick red"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/brick_red.rxscene"
+
+entity
+Name.value = "B6 terracotta"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/terracotta.rxscene"
+
+# --- C: tile, ceramic and wood ---
+
+entity
+Name.value = "C1 slate tile"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/slate_tile.rxscene"
+
+entity
+Name.value = "C2 tile ceramic"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/tile_ceramic.rxscene"
+
+entity
+Name.value = "C3 porcelain white"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/porcelain_white.rxscene"
+
+entity
+Name.value = "C4 ceramic glazed teal"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/ceramic_glazed_teal.rxscene"
+
+entity
+Name.value = "C5 wood oak"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/wood_oak.rxscene"
+
+entity
+Name.value = "C6 wood walnut varnished"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/wood_walnut_varnished.rxscene"
+
+# --- D: wood, leather, fabric and plastic ---
+
+entity
+Name.value = "D1 wood planks"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/wood_planks.rxscene"
+
+entity
+Name.value = "D2 leather brown"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/leather_brown.rxscene"
+
+entity
+Name.value = "D3 velvet crimson"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/velvet_crimson.rxscene"
+
+entity
+Name.value = "D4 wool felt"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/wool_felt.rxscene"
+
+entity
+Name.value = "D5 linen canvas"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/linen_canvas.rxscene"
+
+entity
+Name.value = "D6 plastic red"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/plastic_red.rxscene"
+
+# --- E: plastic, rubber, glass and emissives ---
+
+entity
+Name.value = "E1 plastic white"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/plastic_white.rxscene"
+
+entity
+Name.value = "E2 rubber black"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/rubber_black.rxscene"
+
+entity
+Name.value = "E3 glass clear"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/glass_clear.rxscene"
+
+entity
+Name.value = "E4 glass frosted"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/glass_frosted.rxscene"
+
+entity
+Name.value = "E5 emissive warm"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/emissive_warm.rxscene"
+
+entity
+Name.value = "E6 emissive cyan"
+Grid.of = "Sheet"
+Shape.kind = "sphere"
+Prefab.path = "materials/emissive_cyan.rxscene"

@@ -205,6 +205,9 @@ bool MeshletPass::Initialize(Device& device, Format color_format, Format depth_f
   pipeline_ = device.CreateGraphicsPipeline({
       .fragment = RX_SHADER(k_meshlet_ps_hlsl),
       .mesh = RX_SHADER(k_meshlet_ms_hlsl),
+      // The pass has no model transform at all: uploaded positions are world
+      // space and the mesh shader only applies view_proj, so no caller can hand
+      // it a mirror and reverse the winding this cull assumes.
       .raster = {.cull = CullMode::kBack},
       .depth = {.test = true, .write = true, .compare = CompareOp::kGreaterEqual,  // reversed z
                 .format = depth_format},

@@ -1,0 +1,10 @@
+rxscene 1
+
+# A lit tungsten bulb or warm panel. emissive is not clamped to 0..1: it is
+# radiance added after shading, so it has to exceed 1 to read as a source rather
+# than as a pale colour, and the base_color under it goes dark.
+
+entity
+Surface.base_color = 0.02 0.02 0.02
+Surface.roughness = 0.6
+Surface.emissive = 6 3.6 1.6

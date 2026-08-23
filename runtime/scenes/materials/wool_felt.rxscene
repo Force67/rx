@@ -1,0 +1,19 @@
+rxscene 1
+
+# Grey wool felt: blankets, pinboards, hat bodies. Matte to the point of having
+# no highlight at all, with a broad low sheen for the fibre halo. The wide
+# sheen_roughness is what separates felt from velvet's tight bright rim.
+
+entity
+Surface.base_color = 0.12 0.115 0.105
+Surface.roughness = 1
+Surface.specular_strength = 0.1
+Surface.sheen_color = 0.22 0.21 0.19
+Surface.sheen_roughness = 0.6
+Pattern.kind = "noise"
+Pattern.scale = 28 28
+Pattern.seed = 9
+Pattern.color_a = 0.85 0.85 0.85
+Pattern.color_b = 1 1 1
+Pattern.relief = 0.012
+Pattern.resolution = 512

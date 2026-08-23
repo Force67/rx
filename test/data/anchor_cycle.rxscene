@@ -1,0 +1,19 @@
+rxscene 1
+
+# Test data for `rx --validate`: two boxes each standing on the other. There is
+# no order to resolve them in, so the load says so and names the loop instead of
+# picking one and placing the other against a position that has not settled.
+#
+#   rx --validate test/data/anchor_cycle.rxscene --json
+
+entity
+Name.value = "Lower"
+Anchor.target = "Upper"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5
+
+entity
+Name.value = "Upper"
+Anchor.target = "Lower"
+Shape.kind = "box"
+Shape.size = 0.5 0.5 0.5

@@ -4,6 +4,7 @@
 #include <type_traits>
 #include <vector>
 
+#include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
 #include "ecs/entity.h"
@@ -27,6 +28,10 @@ enum class ScriptType : u8 {
   kString,  // content: an owned/borrowed ScriptString
   kSymbol,  // an interned identifier: just a StrId, resolved via ScriptSymbols
 };
+
+// Stable spelling of a ScriptType ("vec3", "entity", ...), for anything that has
+// to name a type outside C++ (the command schema an authoring tool reads).
+RX_SCRIPT_EXPORT const char* ScriptTypeName(ScriptType type);
 
 // One value on the "script stack": a call argument or a return. A hand-rolled
 // tagged union, not std::variant -- for an 8-way value the variant is larger and

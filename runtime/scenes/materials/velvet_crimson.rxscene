@@ -1,0 +1,12 @@
+rxscene 1
+
+# Crimson velvet: curtains, upholstery, lining. Velvet is nearly all sheen - the
+# pile scatters back towards the viewer at the silhouette and almost nothing
+# specular happens face-on, so specular_strength has to come down with it.
+
+entity
+Surface.base_color = 0.06 0.004 0.008
+Surface.roughness = 0.95
+Surface.specular_strength = 0.08
+Surface.sheen_color = 0.95 0.16 0.2
+Surface.sheen_roughness = 0.18

@@ -1,0 +1,10 @@
+rxscene 1
+
+# Injection-moulded red plastic: crates, casings, toys. A dielectric, so
+# metallic stays 0 and ior 1.5 is what sets the (white, ~4%) specular level; the
+# saturated colour lives only in the diffuse.
+
+entity
+Surface.base_color = 0.45 0.03 0.02
+Surface.roughness = 0.28
+Surface.ior = 1.5

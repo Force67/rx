@@ -8,6 +8,7 @@
 #include <string_view>
 
 #include "asset/asset_id.h"
+#include "asset/texture_compress.h"
 #include "core/log.h"
 #include "core/memory/memory_tracker.h"
 
@@ -167,6 +168,80 @@ void QuatFromMatrix(const f32 m[16], const Vec3 &scale, f32 out[4]) {
   }
 }
 
+// KHR_texture_transform: offset/rotation/scale applied to the uv before a
+// texture is sampled. Blender's exporter emits it for any Mapping node feeding
+// the image nodes, which is how an author says "this material tiles four times
+// across the wall". Dropping it renders at whatever the raw uvs say, which is a
+// texel density nobody chose and which nothing on screen explains.
+//
+// Baked into the VERTEX UVS here rather than carried on the material, for three
+// reasons: the bake is exact, it costs nothing at runtime, and the alternative
+// needs a per-slot uv matrix in the material params (whose byte layout three
+// shaders already pin by hand) to express something an offline multiply
+// expresses for free. The one thing it cannot express is two slots of one
+// material disagreeing, which is warned about below rather than silently
+// resolved.
+struct UvTransform {
+  f32 offset[2] = {0, 0};
+  f32 rotation = 0;
+  f32 scale[2] = {1, 1};
+  bool present = false;
+};
+
+bool SameUvTransform(const UvTransform &a, const cgltf_texture_transform &b) {
+  return a.offset[0] == b.offset[0] && a.offset[1] == b.offset[1] &&
+         a.rotation == b.rotation && a.scale[0] == b.scale[0] &&
+         a.scale[1] == b.scale[1];
+}
+
+// Folds one texture reference's transform into the material's, warning by name
+// when the slot disagrees with a slot already read. First one wins, so what a
+// conflicting material renders at is its base colour's density rather than
+// whichever slot the struct happened to list last.
+void MergeUvTransform(const cgltf_texture_view &view, const char *slot,
+                      const char *material_name, UvTransform *out) {
+  if (!view.texture || !view.has_transform)
+    return;
+  const cgltf_texture_transform &transform = view.transform;
+  if (out->present) {
+    if (!SameUvTransform(*out, transform)) {
+      RX_WARN("gltf material '{}': KHR_texture_transform on the {} map "
+              "(offset {} {}, rotation {}, scale {} {}) disagrees with an "
+              "earlier map's; the uvs are per vertex, so only one transform "
+              "can be baked and this one is DROPPED",
+              material_name, slot, transform.offset[0], transform.offset[1],
+              transform.rotation, transform.scale[0], transform.scale[1]);
+    }
+    return;
+  }
+  if (transform.has_texcoord && transform.texcoord != 0) {
+    // The importer reads uv set 0 only (attribute.index != 0 is skipped), so a
+    // transform that redirects the slot to another set would be baked onto uvs
+    // it does not belong to.
+    RX_WARN("gltf material '{}': KHR_texture_transform on the {} map selects "
+            "TEXCOORD_{}, and this importer reads uv set 0 only; the transform "
+            "is DROPPED",
+            material_name, slot, transform.texcoord);
+    return;
+  }
+  out->present = true;
+  out->offset[0] = transform.offset[0];
+  out->offset[1] = transform.offset[1];
+  out->rotation = transform.rotation;
+  out->scale[0] = transform.scale[0];
+  out->scale[1] = transform.scale[1];
+}
+
+// uv' = T * R * S * uv, spelt out from the extension's own sample shader.
+void ApplyUvTransform(const UvTransform &transform, f32 uv[2]) {
+  const f32 cos_r = std::cos(transform.rotation);
+  const f32 sin_r = std::sin(transform.rotation);
+  const f32 u = uv[0] * transform.scale[0];
+  const f32 v = uv[1] * transform.scale[1];
+  uv[0] = cos_r * u - sin_r * v + transform.offset[0];
+  uv[1] = sin_r * u + cos_r * v + transform.offset[1];
+}
+
 void Decompose(const Mat4 &matrix, Vec3 *translation, Quat *rotation,
                f32 *scale) {
   *translation = Translation(matrix);
@@ -198,19 +273,29 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
   }
   std::filesystem::path base_dir = std::filesystem::path(path).parent_path();
 
-  // Base color and emissive sample as srgb, data maps stay linear.
+  // Base color and emissive sample as srgb, data maps stay linear. The same
+  // walk records which slot each image is bound as, because that - not the
+  // colour space - is what picks a block format, and a glTF image carries no
+  // hint of its own.
   base::Vector<bool> texture_srgb(data->textures_count);
+  base::Vector<u8> texture_slots(data->textures_count);
+  constexpr u8 kSlotColor = 1u << 0;
+  constexpr u8 kSlotNormal = 1u << 1;
+  constexpr u8 kSlotData = 1u << 2;
+  auto mark = [&](const cgltf_texture *t, u8 slot) {
+    if (!t) return;
+    texture_slots[static_cast<size_t>(t - data->textures)] |= slot;
+    if (slot == kSlotColor) texture_srgb[static_cast<size_t>(t - data->textures)] = true;
+  };
   for (size_t i = 0; i < data->materials_count; ++i) {
     const cgltf_material &material = data->materials[i];
     if (material.has_pbr_metallic_roughness) {
-      if (const cgltf_texture *t =
-              material.pbr_metallic_roughness.base_color_texture.texture) {
-        texture_srgb[static_cast<size_t>(t - data->textures)] = true;
-      }
+      mark(material.pbr_metallic_roughness.base_color_texture.texture, kSlotColor);
+      mark(material.pbr_metallic_roughness.metallic_roughness_texture.texture,
+           kSlotData);
     }
-    if (const cgltf_texture *t = material.emissive_texture.texture) {
-      texture_srgb[static_cast<size_t>(t - data->textures)] = true;
-    }
+    mark(material.emissive_texture.texture, kSlotColor);
+    mark(material.normal_texture.texture, kSlotNormal);
   }
 
   out->textures.resize(data->textures_count);
@@ -222,7 +307,20 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
         !DecodeImage(data->textures[i].image, base_dir, &texture)) {
       RX_WARN("gltf texture {} failed to decode", i);
       texture.id = {};
+      continue;
     }
+    // One image bound as more than one kind of map falls back to the format
+    // that keeps every channel. BC5 would drop the two channels the other
+    // slot reads, and a normal map is the only slot whose consumer knows to
+    // put one of them back.
+    const u8 slots = texture_slots[i];
+    TextureRole role = TextureRole::kData;
+    if (slots == kSlotNormal) {
+      role = TextureRole::kNormalTangent;
+    } else if (slots & kSlotColor) {
+      role = TextureRole::kColor;
+    }
+    CompressTexture(&texture, role, path + "#image" + std::to_string(i));
   }
 
   auto texture_id = [&](const cgltf_texture *texture) -> AssetId {
@@ -232,10 +330,33 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
   };
 
   out->materials.resize(data->materials_count);
+  // Parallel to the materials: the uv transform every primitive drawn with one
+  // bakes into its own vertex range, below.
+  base::Vector<UvTransform> material_uv(data->materials_count);
   for (size_t i = 0; i < data->materials_count; ++i) {
     const cgltf_material &src = data->materials[i];
     Material &material = out->materials[i];
     material.id = ScopedId(path, "mat", i);
+    // Only the slots this importer actually binds: a transform on a map that is
+    // dropped anyway (occlusion, specular) is not a conflict worth reporting.
+    const char *material_name = src.name ? src.name : "<unnamed>";
+    if (src.has_pbr_metallic_roughness) {
+      MergeUvTransform(src.pbr_metallic_roughness.base_color_texture,
+                       "base colour", material_name, &material_uv[i]);
+      MergeUvTransform(src.pbr_metallic_roughness.metallic_roughness_texture,
+                       "metallic-roughness", material_name, &material_uv[i]);
+    }
+    MergeUvTransform(src.normal_texture, "normal", material_name,
+                     &material_uv[i]);
+    MergeUvTransform(src.emissive_texture, "emissive", material_name,
+                     &material_uv[i]);
+    if (material_uv[i].present) {
+      RX_INFO("gltf material '{}': baking KHR_texture_transform into the uvs "
+              "(offset {} {}, rotation {}, scale {} {})",
+              material_name, material_uv[i].offset[0], material_uv[i].offset[1],
+              material_uv[i].rotation, material_uv[i].scale[0],
+              material_uv[i].scale[1]);
+    }
     if (src.has_pbr_metallic_roughness) {
       const auto &pbr = src.pbr_metallic_roughness;
       std::memcpy(material.base_color_factor, pbr.base_color_factor,
@@ -501,11 +622,21 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
           lod.vertices[vertex_offset + v].normal[1] = 1.0f;
         }
       }
+      const UvTransform uv_transform =
+          primitive.material ? material_uv[static_cast<size_t>(
+                                   primitive.material - data->materials)]
+                             : UvTransform{};
       if (uv && uv->count == vertex_count) {
         ReadFloats(uv, 2, &scratch);
         for (u32 v = 0; v < vertex_count; ++v) {
-          std::memcpy(lod.vertices[vertex_offset + v].uv, &scratch[v * 2],
-                      sizeof(f32) * 2);
+          Vertex &vertex = lod.vertices[vertex_offset + v];
+          std::memcpy(vertex.uv, &scratch[v * 2], sizeof(f32) * 2);
+          // Safe per primitive because this loader appends a fresh vertex range
+          // per primitive, so no two materials ever share a vertex to disagree
+          // over. Before the tangent generation below, which derives the frame
+          // from these uvs and so has to see the transformed ones.
+          if (uv_transform.present)
+            ApplyUvTransform(uv_transform, vertex.uv);
         }
       }
       if (color && color->count == vertex_count) {
@@ -568,6 +699,17 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
       }
 
       if (tangent && tangent->count == vertex_count) {
+        // A rotated uv transform turns the tangent frame with it, and an
+        // authored TANGENT was computed in the untransformed frame, so the
+        // normal map lights as if lit from the wrong side. Scale and offset do
+        // not move the frame, so only rotation is a problem.
+        if (uv_transform.present && uv_transform.rotation != 0.0f) {
+          RX_WARN("gltf mesh {}: KHR_texture_transform rotates the uvs of a "
+                  "primitive that ships its own TANGENT; the authored tangents "
+                  "are in the untransformed frame and normal mapping on it will "
+                  "be turned by {} radians",
+                  i, uv_transform.rotation);
+        }
         ReadFloats(tangent, 4, &scratch);
         for (u32 v = 0; v < vertex_count; ++v) {
           std::memcpy(lod.vertices[vertex_offset + v].tangent, &scratch[v * 4],

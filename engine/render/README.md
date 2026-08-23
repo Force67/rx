@@ -162,8 +162,9 @@ class FooPass {
 3. Cross-backend spot check for anything touching shared shaders or the RHI:
    `vkrun env RX_RHI=d3d12 ./build/nix/runtime/rx --demo materials --no-rt`
    should match Vulkan pixel-near-identically (see RHI.md for the method).
-4. One-off screenshots: `RX_UI_SHOT=/tmp/shot.png RX_UI_SHOT_FRAMES=45`;
-   `RX_FIXED_DT` makes time-driven systems deterministic.
+4. One-off screenshots: `RX_UI_SHOT=/tmp/shot.png RX_UI_SHOT_FRAMES=45`. A
+   capture run locks the clock at 1/60 s already, so time-driven systems land
+   on the same frame every run; `RX_FIXED_DT` overrides that delta.
 5. Toggle matrix: your feature off, on, and on-without-caps (e.g. `--no-rt`)
    must all render clean frames - no validation errors under `swrun`
    (lavapipe + validation layers) where it runs.

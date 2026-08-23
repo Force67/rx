@@ -1,0 +1,13 @@
+rxscene 1
+
+# Frosted / acid-etched glass: shower screens, lamp diffusers, privacy panes.
+# The etched face is rough, which blurs what is behind it, and the subsurface is
+# the scattering that makes it milky rather than merely a dirty window.
+
+entity
+Surface.base_color = 0.9 0.93 0.92
+Surface.roughness = 0.45
+Surface.transmission = 0.6
+Surface.ior = 1.5
+Surface.subsurface = 0.6
+Surface.subsurface_color = 0.9 0.95 0.95

@@ -1,0 +1,19 @@
+rxscene 1
+
+# Natural linen canvas: sacking, awnings, artist's canvas. The weave is a `grid`
+# at a high scale with a fat line_width, so the threads are as wide as the gaps;
+# the relief is what catches the light along them and makes it read as cloth.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.95
+Surface.specular_strength = 0.25
+Surface.sheen_color = 0.3 0.28 0.23
+Surface.sheen_roughness = 0.5
+Pattern.kind = "grid"
+Pattern.scale = 24 24
+Pattern.line_width = 0.45
+Pattern.color_a = 0.2 0.17 0.11
+Pattern.color_b = 0.38 0.33 0.23
+Pattern.relief = 0.012
+Pattern.resolution = 512

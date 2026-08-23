@@ -1,0 +1,19 @@
+rxscene 1
+
+# One fluted-looking marble column, instanced by the gallery colonnade grids.
+# Shape and surface live here rather than on the members so a member costs two
+# lines; an entity holds one Prefab, so a Grid.cell member cannot also name a
+# material preset.
+
+entity
+Name.value = "Column"
+Shape.kind = "cylinder"
+Shape.size = 0.28 1.7 0
+Surface.base_color = 0.74 0.73 0.70
+Surface.roughness = 0.28
+Pattern.kind = "grid"
+Pattern.scale = 1 14
+Pattern.color_a = 1 1 1
+Pattern.color_b = 0.86 0.85 0.82
+Pattern.line_width = 0.34
+Pattern.relief = 0.012

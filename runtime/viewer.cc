@@ -4,20 +4,25 @@
 #include <cstdlib>
 #include <algorithm>
 #include <cstring>
+#include <sstream>
 #include <utility>
 
 #include <base/option.h>
 
 #include "anim/morph.h"
+#include "asset/asset_database.h"
 #include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "core/log.h"
+#include "edit/scene_io.h"
+#include "scene/scene_handlers.h"
 
 // Radiance .hdr decode for imported dome environment maps.
 #include <stb_image.h>
 #include "scene/components.h"
 
 #include "demo_scenes.h"
+#include "scene_authoring.h"
 
 // Viewer lifecycle and per-frame policy: the front-door content dispatch
 // (glTF scene or builtin demo), the day/night sun, the debug overlay and the
@@ -33,12 +38,14 @@ namespace {
 base::Option<const char*> SunDir{"sun.dir", nullptr, "RX_SUN_DIR"};
 // Test/CI hook: RX_UI_SHOT=<path> grabs the frame after RX_UI_SHOT_FRAMES
 // (default 30) and quits. Lets a headless GPU run capture a frame without
-// driving the app.
+// driving the app. Like --shot it runs the clock in lockstep (main.cc), so the
+// frame it grabs is the same one on a loaded machine as on an idle one.
 base::Option<const char*> UiShot{"ui.shot", nullptr, "RX_UI_SHOT"};
 base::Option<int> UiShotFrames{"ui.shot.frames", 30, "RX_UI_SHOT_FRAMES"};
 // RX_UI_SHOT_SEQ treats RX_UI_SHOT as a prefix and dumps every frame as
-// <prefix>_NNNN.png for RX_UI_SHOT_FRAMES frames (pair with RX_FIXED_DT for
-// an even cadence), for assembling headless captures into video.
+// <prefix>_NNNN.png for RX_UI_SHOT_FRAMES frames, for assembling headless
+// captures into video. The cadence is even because the capture clock is
+// lockstep; RX_FIXED_DT picks a different one (e.g. to match a target fps).
 base::Option<bool> UiShotSeq{"ui.shot.seq", false, "RX_UI_SHOT_SEQ"};
 // Capture hook: RX_MORPH_WEIGHTS="name=w,name=w" pins named morph targets to
 // fixed weights on every morphed instance (unmatched names are skipped per
@@ -112,7 +119,9 @@ bool Viewer::OnInitialize(app::Services& services) {
   // When SunDir is set the world clock stops driving the day/night cycle.
   drive_sun_from_clock_ = SunDir.get() == nullptr;
 
-  if (!config_.headless) {
+  // The overlay is imgui on an SDL window; an offscreen capture run has a
+  // renderer but no window, so this keys off the window, not on headless.
+  if (window_) {
     if (!debug_ui_.Initialize(*window_, *renderer_, services.vfs)) {
       RX_WARN("debug ui unavailable");
     }
@@ -141,8 +150,83 @@ bool Viewer::OnInitialize(app::Services& services) {
   } else {
     demos_->CreateDemoScene();
   }
+  // After the scene, whichever kind it was, so the override beats the authored
+  // viewpoint rather than racing it.
+  ApplyCameraOverride();
 
+  StartAuthoringEndpoint();
   return true;
+}
+
+// --camera-at / --camera-look / --camera-fov. Each is independent: overriding
+// only the eye keeps the scene looking at what it was authored to look at,
+// which is the common case when backing off to see whether a composition still
+// reads. A malformed triple is refused loudly rather than silently ignored -
+// the flag exists to be typed by hand, and a run that quietly used the authored
+// camera would be read as "the change did nothing".
+void Viewer::ApplyCameraOverride() {
+  auto triple = [](const std::string& text, Vec3* out) {
+    std::istringstream in(text);
+    return static_cast<bool>(in >> out->x >> out->y >> out->z);
+  };
+  Vec3 eye = camera_.position();
+  Vec3 target = camera_.target();
+  bool moved = false;
+  if (!config_.camera_at.empty()) {
+    if (!triple(config_.camera_at, &eye)) {
+      RX_WARN("--camera-at '{}' is not three numbers; keeping the scene's eye",
+              config_.camera_at);
+    } else {
+      moved = true;
+    }
+  }
+  if (!config_.camera_look.empty()) {
+    if (!triple(config_.camera_look, &target)) {
+      RX_WARN("--camera-look '{}' is not three numbers; keeping the scene's target",
+              config_.camera_look);
+    } else {
+      moved = true;
+    }
+  }
+  if (moved) LookCameraAt(eye, target);
+  if (config_.camera_fov > 0.0f) {
+    scene_camera_fov_ = config_.camera_fov * 3.14159265f / 180.0f;
+  }
+}
+
+// --authoring-endpoint only. Nothing is registered and no socket exists without
+// it, because these commands rewrite the live scene (authoring/command_bridge.h
+// carries the threat model).
+void Viewer::StartAuthoringEndpoint() {
+  if (config_.authoring_socket.empty()) return;
+
+  scene::SetupSceneCommands(commands_);
+  script_ctx_.world = world_;
+  script_ctx_.symbols = &symbols_;
+  script_ctx_.scratch = &script_scratch_;
+  script_ctx_.log_sink = [](void*, script::ScriptStringView message) {
+    RX_INFO("authoring: {}", message.view());
+  };
+  bridge_ = std::make_unique<authoring::CommandBridge>(commands_, script_ctx_);
+
+  std::string error;
+  if (!authoring_endpoint_.Start(config_.authoring_socket, &error)) {
+    RX_ERROR("authoring endpoint: {}", error);
+    bridge_.reset();
+    return;
+  }
+  RX_INFO("authoring endpoint listening on {} ({} command(s))", config_.authoring_socket,
+          commands_.size());
+}
+
+void Viewer::OnSimulate(f32 frame_delta) {
+  (void)frame_delta;
+  if (!bridge_) return;
+  authoring_endpoint_.Poll(*bridge_);
+  // Every reply the poll produced already copied the strings it needed out of
+  // the scratch heap, so the whole batch is reclaimed here rather than growing
+  // for the run (see HandlerContext::scratch).
+  script_scratch_.Reset();
 }
 
 void Viewer::CreatePhysicsCubeAsset() {
@@ -167,7 +251,102 @@ void Viewer::CreatePhysicsCubeAsset() {
   }
 }
 
+bool Viewer::LoadRxScene() {
+  // The runtime's own authoring components have to be registered before the
+  // loader can resolve them by name; strict mode then rejects anything else,
+  // so a misspelt component is a failed load rather than a missing object.
+  RegisterSceneComponents();
+  // Resolves Renderable asset paths (a shape-authored scene has none) and holds
+  // the textures BuildSceneShapes synthesizes for the scene's patterns.
+  asset::AssetDatabase db(*ctx_.vfs);
+  std::string error;
+  if (!edit::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+  // Layout before geometry, geometry before anchors. Grids only move entities
+  // the file declared, so they run before prefabs add any; anchors measure
+  // built meshes, so they run after everything that builds one.
+  if (!BuildSceneGrids(*world_, config_.scene_path, &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+  if (!BuildScenePrefabs(*world_, config_.scene_path, &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+  // After the prefabs, so a rotation one carries is resolved like an authored
+  // one, and before the anchors, which stand a turned object on its turned
+  // footprint.
+  BuildSceneRotations(*world_);
+  if (!BuildSceneShapes(*world_, db, config_.headless ? nullptr : renderer_, config_.scene_path,
+                        &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+  if (!BuildSceneModels(*world_, db, config_.headless ? nullptr : renderer_, config_.scene_path,
+                        &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+  if (!BuildSceneAnchors(*world_, config_.scene_path, &error)) {
+    RX_ERROR("rxscene: {}", error);
+    return false;
+  }
+
+  // A scene that stages its own sun takes it over from the day/night clock for
+  // good: DriveSunFromClock would otherwise walk it back to the current hour on
+  // the very next frame, and a capture whose light depends on when it was taken
+  // is not the reproducible one --shot promises.
+  if (ApplySceneEnvironment(*world_, &renderer_->settings())) {
+    ctx_.scene_owns_sun = true;
+    drive_sun_from_clock_ = false;
+  }
+
+  // Authored lights are static, so they are collected once here into the same
+  // list an imported glTF/USD rig fills; OnBuildView hands it to the frame.
+  world_->Each<SceneLight, scene::Transform>(
+      [&](ecs::Entity, SceneLight& light, scene::Transform& transform) {
+        render::PointLight out;
+        out.pos_radius[0] = transform.position[0];
+        out.pos_radius[1] = transform.position[1];
+        out.pos_radius[2] = transform.position[2];
+        out.pos_radius[3] = light.radius;
+        out.color_intensity[0] = light.color[0];
+        out.color_intensity[1] = light.color[1];
+        out.color_intensity[2] = light.color[2];
+        out.color_intensity[3] = light.intensity;
+        scene_lights_.push_back(out);
+      });
+
+  u32 shapes = 0;
+  world_->Each<SceneShape>([&](ecs::Entity, SceneShape&) { ++shapes; });
+  u32 models = 0;
+  world_->Each<SceneModel>([&](ecs::Entity, SceneModel&) { ++models; });
+  bool has_camera = false;
+  world_->Each<SceneCamera, scene::Transform>(
+      [&](ecs::Entity, SceneCamera& camera, scene::Transform& transform) {
+        if (has_camera) return;  // first one wins
+        has_camera = true;
+        LookCameraAt({transform.position[0], transform.position[1], transform.position[2]},
+                     {camera.target[0], camera.target[1], camera.target[2]});
+        scene_camera_fov_ = camera.fov_degrees * 3.14159265f / 180.0f;
+      });
+  if (!has_camera) {
+    // No authored viewpoint: back off along +Z looking at the origin, which at
+    // least puts a scene built around the origin on screen.
+    LookCameraAt({0.0f, 2.0f, 8.0f}, {0.0f, 1.0f, 0.0f});
+  }
+  camera_.speed = 4.0f;
+
+  RX_INFO("rxscene: loaded {} ({} shape(s), {} model(s), {} light(s), camera {})",
+          config_.scene_path, shapes, models, scene_lights_.size(),
+          has_camera ? "authored" : "default");
+  return true;
+}
+
 bool Viewer::LoadSceneFile() {
+  if (config_.scene_path.ends_with(".rxscene")) return LoadRxScene();
   asset::ImportedScene scene;
   const bool loaded = asset::IsUsdPath(config_.scene_path)
                           ? asset::LoadUsdScene(config_.scene_path, &scene,
@@ -843,9 +1022,13 @@ void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
 }
 
 void Viewer::OnFrameEnd() {
-  if (const char* shot = UiShot.get()) {
+  // --shot / --shot-frames win over RX_UI_SHOT / RX_UI_SHOT_FRAMES; the env
+  // vars stay live for the capture scripts that already drive them.
+  const char* shot = !config_.shot_path.empty() ? config_.shot_path.c_str() : UiShot.get();
+  if (shot) {
     static int ui_shot_frames = 0;
-    static const int ui_shot_target = [] {
+    static const int ui_shot_target = [this] {
+      if (config_.shot_frames > 0) return config_.shot_frames;
       return UiShotFrames.get() > 0 ? UiShotFrames.get() : 30;
     }();
     ++ui_shot_frames;
@@ -875,6 +1058,11 @@ void Viewer::OnFrameEnd() {
 }
 
 void Viewer::OnShutdown() {
+  // Close the endpoint while the world it dispatches into is still standing, so
+  // the socket file goes away at the moment the engine stops serving it rather
+  // than whenever the viewer is destroyed.
+  authoring_endpoint_.Stop();
+  bridge_.reset();
   // Release demo GPU resources (scenehook raw pipelines) before the host tears
   // the renderer's device down.
   if (tattoo_receiver_ != 0 && renderer_) {
@@ -882,7 +1070,7 @@ void Viewer::OnShutdown() {
     tattoo_receiver_ = 0;
   }
   if (demos_) demos_->Shutdown();
-  if (!config_.headless) debug_ui_.Shutdown();
+  if (window_) debug_ui_.Shutdown();
 }
 
 }  // namespace rx

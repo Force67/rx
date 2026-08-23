@@ -1,0 +1,10 @@
+rxscene 1
+
+# Polished copper: pipework, cookware, roofing before it patinates. The red
+# shift lives entirely in the f0, so the tint shows in the reflection rather
+# than in a diffuse term a metal does not have.
+
+entity
+Surface.base_color = 0.95 0.64 0.54
+Surface.roughness = 0.3
+Surface.metallic = 1

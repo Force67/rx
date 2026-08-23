@@ -1,0 +1,17 @@
+rxscene 1
+
+# Oiled oak: furniture, worktops, panelling. Mid-brown, half rough, with noise
+# standing in for the grain. The engine's patterns have no directional stripe,
+# so the grain is mottled rather than lined; wood_planks carries the joinery.
+
+entity
+Surface.base_color = 1 1 1
+Surface.roughness = 0.6
+Pattern.kind = "noise"
+Pattern.scale = 12 12
+Pattern.seed = 5
+Pattern.color_a = 0.1 0.045 0.014
+Pattern.color_b = 0.33 0.17 0.06
+Pattern.relief = 0.012
+Pattern.roughness_a = 0.8
+Pattern.roughness_b = 1

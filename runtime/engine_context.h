@@ -36,7 +36,33 @@ struct EngineConfig {
   // Hardware quality tier. kAuto picks one from the gpu at startup; the rest
   // force a tier (steam deck, android, low/medium/high/ultra, console).
   render::QualityPreset preset = render::QualityPreset::kAuto;
+  // No renderer at all: content skips its GPU uploads and the host runs the
+  // simulation side only. Not the same as "no window" - see `offscreen`.
   bool headless = false;
+  // No window, but a windowless renderer drawing into an offscreen image so a
+  // display-less run can still capture a png. Content uploads exactly as it
+  // does windowed, so `headless` is false whenever this is set.
+  bool offscreen = false;
+  // --shot: write the frame after `shot_frames` as a png and quit. Empty falls
+  // back to the RX_UI_SHOT env var (viewer.cc), which existing capture scripts
+  // drive; 0 frames falls back to RX_UI_SHOT_FRAMES.
+  std::string shot_path;
+  int shot_frames = 0;
+  // --camera-at / --camera-look / --camera-fov: override the scene's own
+  // viewpoint for this run without editing it. Looking at an authored scene
+  // from a second angle is how an author finds the things one hero framing
+  // hides - a facade that only works head-on, a silhouette that collapses from
+  // the side, a street with nothing in its middle distance - and having to edit
+  // the file to do it means the check costs an edit to undo, so it does not get
+  // made. Empty leaves the scene's Camera alone; `camera_fov` 0 does the same.
+  std::string camera_at;
+  std::string camera_look;
+  f32 camera_fov = 0.0f;
+  // --authoring-endpoint: serve the script commands on this unix socket path
+  // while the engine runs, so a tool can spawn/move/inspect without a restart.
+  // Empty (the default) means no endpoint is bound at all; see
+  // authoring/command_bridge.h for why that is not merely a convenience.
+  std::string authoring_socket;
 };
 
 // A dynamic physics body the host mirrors into an ECS transform after each

@@ -1,4 +1,5 @@
 #include "rhi_bindings.hlsli"
+#include "model_transform.hlsli"
 struct FrameGlobals {
   column_major float4x4 view_proj;
   column_major float4x4 prev_view_proj;
@@ -244,8 +245,19 @@ VsOut main(VsIn input) {
   output.curr_clip = clip;
   output.prev_clip = mul(frame.prev_view_proj, prev_world);
   output.sv_position = clip + float4(frame.jitter * clip.w, 0.0, 0.0);
-  output.normal = mul((float3x3)model, local_normal);
-  output.tangent = float4(mul((float3x3)model, local_tangent), input.tangent.w);
+  // The normal rides the cofactor, the tangent rides the matrix: the tangent is
+  // dP/du, a direction in the surface, while the normal is a covector. Under a
+  // non-uniform scale the two transforms genuinely differ. Normalized here
+  // because the cofactor stretches lengths by s^2 per direction, and feeding
+  // unequal lengths to the rasterizer skews the barycentric blend.
+  float model_det;
+  const float3x3 model_cof = RxCofactor((float3x3)model, model_det);
+  const float mirror = RxMirrorSign(model_det);
+  output.normal = normalize(mul(model_cof, local_normal)) * mirror;
+  // Handedness is per-instance, not per-vertex: the same mesh data is drawn by
+  // mirrored and unmirrored instances, and a mirror swaps the side the pixel
+  // stage's cross(n, t) * w bitangent falls on.
+  output.tangent = float4(mul((float3x3)model, local_tangent), input.tangent.w * mirror);
   output.uv = input.uv;
   output.color = input.color;
   // Skin tension proxy: SkinVertex/ApplyMorphs blend the normal without
