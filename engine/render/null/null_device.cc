@@ -37,7 +37,8 @@ class NullCommandList final : public CommandList {
   void ClearColor(const GpuImage&, const f32[4]) override {}
   void ClearDepth(const GpuImage&, f32) override {}
   void FillBuffer(const GpuBuffer&, u64, u64, u32) override {}
-  void BuildBlas(AccelStructHandle, const BlasBuildDesc&, const GpuBuffer&, u64) override {}
+  void BuildBlas(AccelStructHandle, const BlasBuildDesc&, const GpuBuffer&, u64,
+                 AccelStructHandle) override {}
   void BuildTlas(AccelStructHandle, const GpuBuffer&, u32, const GpuBuffer&) override {}
   void ResetTimestamps(TimestampPoolHandle, u32, u32) override {}
   void WriteTimestamp(TimestampPoolHandle, u32, bool) override {}

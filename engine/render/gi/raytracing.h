@@ -70,6 +70,10 @@ class RayTracingContext {
     // structure. 0 = LOD0 (blas_), N>0 = lods_[N-1]. Mutually exclusive with
     // approx (distant LODs stay force-opaque; see BuildLodBlas).
     u32 lod = 0;
+    // Resolves mesh_key against the per-ACTOR skinned structures (see
+    // ReserveSkinnedBlas) instead of the per-mesh ones. Mutually exclusive with
+    // approx/lod: a skinned actor has exactly one posed structure.
+    bool skinned = false;
     Mat4 transform = Mat4::Identity();
   };
 
@@ -114,6 +118,35 @@ class RayTracingContext {
   // callers re-registering bindless geometry need to skip already-built meshes).
   bool HasBlas(u64 mesh_key) const { return blas_.contains(mesh_key); }
 
+  // --- refittable structures (skinned actors) ---
+  // A structure built with ALLOW_UPDATE over a buffer something else deforms
+  // every frame, and REFIT rather than rebuilt from then on. Both the build and
+  // the refit are recorded into the frame command list, so a steady-state
+  // skinned actor costs no blocking submit at all.
+  //
+  // Keyed by whatever the caller likes, in a map of its own: SkinnedRayTracing
+  // keys per (actor, ping-pong slot), because two actors sharing a GpuMesh hold
+  // different poses and a slot being refit must not be one a live TLAS is
+  // traversing. The ping-pong policy lives entirely there; this only knows how
+  // to reserve one structure and record one build into it.
+  //
+  // Split in two on purpose: ReserveSkinnedBlas allocates (structure + its
+  // persistent scratch) and must run in the CPU frame-build phase like
+  // ReserveTlas, RecordSkinnedBlas only records. `geometries` must describe the
+  // deformed buffer and is captured for the key's lifetime; a refit must repeat
+  // the geometry layout of the build it updates from.
+  bool ReserveSkinnedBlas(u64 key, const base::Vector<AccelTriangles>& geometries);
+  // Refits `key` from `src_key` when that source holds a completed build, and
+  // does a full build otherwise (a key whose ping-pong partner has never been
+  // built, i.e. an actor's first two frames). Pass src_key == key for an
+  // in-place refit. No-op for a key that was never reserved.
+  void RecordSkinnedBlas(CommandList& cmd, u64 key, u64 src_key);
+  bool HasSkinnedBlas(u64 key) const { return skinned_blas_.contains(key); }
+  // Retires the structure and its scratch. Unlike a refit this DOES drop the
+  // address out from under any TLAS slot that referenced it, so the slot
+  // tracker is bumped exactly as RemoveBlas does.
+  void RemoveSkinnedBlasDeferred(u64 key);
+
   // Grows the slot's TLAS to hold at least instance_count instances. This can
   // stall (device idle) and reallocate, so it MUST be called during the CPU
   // frame-build phase, never while a command list is recording. Doing the
@@ -156,6 +189,17 @@ class RayTracingContext {
     u64 address = 0;
   };
 
+  // One refittable structure. Its scratch is persistent and private because
+  // several of these are built into the same command list with no barrier
+  // between them; one shared arena would make those builds alias each other.
+  struct SkinnedBlas {
+    Blas blas;
+    GpuBuffer scratch;
+    u64 scratch_offset = 0;
+    base::Vector<AccelTriangles> geometries;
+    bool built = false;  // a build has been recorded, so it may be refit FROM
+  };
+
   struct Tlas {
     AccelStructHandle handle;
     GpuBuffer instances;  // host visible TlasInstance[]
@@ -182,6 +226,8 @@ class RayTracingContext {
   // Distance-LOD BLASes, keyed by mesh_key; the vector is indexed by lod-1
   // (lod 1 = [0]) and grown lazily as LODs are first selected.
   base::UnorderedMap<u64, base::Vector<Blas>> lod_blas_;
+  // Refittable structures for compute-skinned actors, keyed by (actor, slot).
+  base::UnorderedMap<u64, SkinnedBlas> skinned_blas_;
   // Reused across builds. Freeing scratch right after the fence tripped
   // lavapipe, whose build workers can outlive the signal; a persistent
   // arena avoids both that and the per-build allocation.

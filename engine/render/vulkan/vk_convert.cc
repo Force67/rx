@@ -233,9 +233,15 @@ ScopeInfo ScopeInfoOf(BarrierScope scope, bool as_source) {
     case BarrierScope::kTransferRead:
       return {VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT};
     case BarrierScope::kAccelBuildWrite:
+      // SHADER_READ is not decoration: a build reads its GEOMETRY INPUT
+      // (vertex/index buffers, instance descriptors) with that access at the
+      // build stage, and skinned actors deform theirs in a compute pass in the
+      // same frame. Without it the compute-write -> build-read hazard is
+      // uncovered and the refit sees last frame's pose (or torn vertices).
       return {VK_PIPELINE_STAGE_2_ACCELERATION_STRUCTURE_BUILD_BIT_KHR,
               VK_ACCESS_2_ACCELERATION_STRUCTURE_WRITE_BIT_KHR |
-                  VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR};
+                  VK_ACCESS_2_ACCELERATION_STRUCTURE_READ_BIT_KHR |
+                  VK_ACCESS_2_SHADER_READ_BIT};
     case BarrierScope::kAccelRead:
       // Vertex stage included: the precipitation volume ray-queries the TLAS
       // per particle from its vertex shader, not only compute/fragment.

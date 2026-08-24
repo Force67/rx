@@ -64,6 +64,10 @@ RayTracingContext::~RayTracingContext() {
   for (auto kv : lod_blas_)
     for (Blas& blas : kv.value)
       if (blas.handle) device_.DestroyAccelStruct(blas.handle);
+  for (auto kv : skinned_blas_) {
+    if (kv.value.blas.handle) device_.DestroyAccelStruct(kv.value.blas.handle);
+    device_.DestroyBuffer(kv.value.scratch);
+  }
   device_.DestroyBuffer(blas_scratch_);
   for (Tlas& tlas : tlas_) DestroyTlas(tlas);
   DestroyTlas(fallback_tlas_);
@@ -236,6 +240,64 @@ void RayTracingContext::RemoveLodBlasDeferred(u64 mesh_key) {
   slot_tracker_.InvalidateBuilds();
 }
 
+bool RayTracingContext::ReserveSkinnedBlas(u64 key,
+                                           const base::Vector<AccelTriangles>& geometries) {
+  if (skinned_blas_.contains(key)) return true;
+  if (geometries.empty()) return false;
+
+  // No compaction: a compacted structure cannot be refit, which is the whole
+  // point of this path.
+  BlasBuildDesc desc{.geometries = {geometries.data(), geometries.size()},
+                     .allow_update = true};
+  AccelSizes sizes = device_.GetBlasSizes(desc);
+  if (sizes.accel_bytes == 0) return false;
+
+  SkinnedBlas entry;
+  entry.blas.handle = device_.CreateAccelStruct(AccelStructType::kBlas, sizes.accel_bytes);
+  if (!entry.blas.handle) return false;
+
+  // One arena covering both the initial full build and every later refit; the
+  // refit is the smaller of the two, so this is dominated by the one-off build.
+  const u32 alignment = device_.caps().accel_scratch_alignment;
+  const u64 scratch_bytes = std::max(sizes.scratch_bytes, sizes.update_scratch_bytes);
+  entry.scratch = device_.CreateBuffer(scratch_bytes + alignment, kBufferUsageAccelScratch);
+  if (!entry.scratch) {
+    device_.DestroyAccelStruct(entry.blas.handle);
+    return false;
+  }
+  entry.scratch_offset = AlignUp(entry.scratch.address, alignment) - entry.scratch.address;
+  entry.blas.address = device_.accel_address(entry.blas.handle);
+  entry.geometries = geometries;
+  skinned_blas_.emplace(key, std::move(entry));
+  return true;
+}
+
+void RayTracingContext::RecordSkinnedBlas(CommandList& cmd, u64 key, u64 src_key) {
+  SkinnedBlas* entry = skinned_blas_.find(key);
+  if (!entry) return;
+  BlasBuildDesc desc{.geometries = {entry->geometries.data(), entry->geometries.size()},
+                     .allow_update = true};
+  // Refit from the partner slot when it holds a completed build; a full build
+  // otherwise, which is the case for an actor's first two frames (neither slot
+  // has been built yet). The refit never moves an address, so TLAS slots built
+  // against either structure stay valid. The two structures are separate
+  // allocations, which is what makes updating across them legal.
+  const SkinnedBlas* src = skinned_blas_.find(src_key);
+  const AccelStructHandle from =
+      (src && src->built) ? src->blas.handle : AccelStructHandle{};
+  cmd.BuildBlas(entry->blas.handle, desc, entry->scratch, entry->scratch_offset, from);
+  entry->built = true;
+}
+
+void RayTracingContext::RemoveSkinnedBlasDeferred(u64 key) {
+  SkinnedBlas* entry = skinned_blas_.find(key);
+  if (!entry) return;
+  if (entry->blas.handle) device_.DestroyAccelStructDeferred(entry->blas.handle);
+  device_.DestroyBufferDeferred(entry->scratch);
+  skinned_blas_.erase(key);
+  slot_tracker_.InvalidateBuilds();  // slots still embed the freed address
+}
+
 bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
   if (tlas.handle && tlas.capacity >= instance_count) return true;
 
@@ -286,7 +348,10 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot, u32 frame_index,
   gpu_instances.reserve(instances.size());
   for (const Instance& instance : instances) {
     const Blas* blas = nullptr;
-    if (instance.approx) {
+    if (instance.skinned) {
+      if (const SkinnedBlas* entry = skinned_blas_.find(instance.mesh_key))
+        blas = &entry->blas;
+    } else if (instance.approx) {
       blas = approx_blas_.find(instance.mesh_key);
     } else if (instance.lod > 0) {
       const base::Vector<Blas>* lods = lod_blas_.find(instance.mesh_key);

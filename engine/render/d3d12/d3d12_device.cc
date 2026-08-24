@@ -1767,13 +1767,16 @@ AccelSizes D3D12Device::GetBlasSizes(const BlasBuildDesc& desc) {
                      : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
   if (desc.allow_compaction)
     inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
+  if (desc.allow_update)
+    inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
   inputs.NumDescs = static_cast<u32>(geometries.size());
   inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
   inputs.pGeometryDescs = geometries.data();
 
   D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO info = {};
   device5_->GetRaytracingAccelerationStructurePrebuildInfo(&inputs, &info);
-  return {info.ResultDataMaxSizeInBytes, info.ScratchDataSizeInBytes};
+  return {info.ResultDataMaxSizeInBytes, info.ScratchDataSizeInBytes,
+          info.UpdateScratchDataSizeInBytes};
 }
 
 AccelSizes D3D12Device::GetTlasSizes(u32 instance_count) {

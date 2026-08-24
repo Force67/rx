@@ -392,6 +392,8 @@ VkAccelerationStructureBuildGeometryInfoKHR BlasBuildInfo(
                                : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
   if (desc.allow_compaction)
     info.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+  if (desc.allow_update)
+    info.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
   info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
   info.geometryCount = static_cast<u32>(geometry.geometries.size());
   info.pGeometries = geometry.geometries.data();
@@ -401,10 +403,15 @@ VkAccelerationStructureBuildGeometryInfoKHR BlasBuildInfo(
 }  // namespace
 
 void VulkanCommandList::BuildBlas(AccelStructHandle blas, const BlasBuildDesc& desc,
-                                  const GpuBuffer& scratch, u64 scratch_offset) {
+                                  const GpuBuffer& scratch, u64 scratch_offset,
+                                  AccelStructHandle src) {
   AccelStructRecord* record = Rec(blas);
   BlasGeometry geometry = TranslateBlas(desc);
   VkAccelerationStructureBuildGeometryInfoKHR info = BlasBuildInfo(desc, geometry);
+  if (src) {
+    info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_UPDATE_KHR;
+    info.srcAccelerationStructure = Rec(src)->accel;
+  }
   info.dstAccelerationStructure = record->accel;
   info.scratchData.deviceAddress = scratch.address + scratch_offset;
   const VkAccelerationStructureBuildRangeInfoKHR* ranges = geometry.ranges.data();

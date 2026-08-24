@@ -257,7 +257,7 @@ class D3D12CommandList final : public CommandList {
   void ClearDepth(const GpuImage& image, f32 depth) override;
   void FillBuffer(const GpuBuffer& buffer, u64 offset, u64 size, u32 data) override;
   void BuildBlas(AccelStructHandle blas, const BlasBuildDesc& desc, const GpuBuffer& scratch,
-                 u64 scratch_offset) override;
+                 u64 scratch_offset, AccelStructHandle src) override;
   void BuildTlas(AccelStructHandle tlas, const GpuBuffer& instances, u32 instance_count,
                  const GpuBuffer& scratch) override;
   void CopyAccelStruct(AccelStructHandle dst, AccelStructHandle src, bool compact) override;

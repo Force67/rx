@@ -82,6 +82,16 @@ struct BlasBuildDesc {
   // sizes); the size query and the build derive their flags from the same desc,
   // so pass the same desc to both. Costs nothing on the trace side.
   bool allow_compaction = false;
+  // Builds with ALLOW_UPDATE so a later CommandList::BuildBlas can REFIT the
+  // structure in place (same topology, moved vertices) instead of rebuilding
+  // it. Like allow_compaction it must be set on the matching
+  // Device::GetBlasSizes call, which is also what makes
+  // AccelSizes::update_scratch_bytes meaningful. A refit is a fraction of a
+  // build but degrades traversal quality as the pose drifts from the one the
+  // structure was built in, so it suits per-frame skinned deformation, not
+  // topology changes. Mutually exclusive with compaction in practice: a
+  // compacted structure cannot be updated.
+  bool allow_update = false;
 };
 
 // One TLAS instance. Layout is identical between
@@ -217,8 +227,15 @@ class CommandList {
   virtual void FillBuffer(const GpuBuffer& buffer, u64 offset, u64 size, u32 data) = 0;
 
   // --- acceleration structures (DeviceCaps::ray_query gated) ---
+  // `src` selects a REFIT instead of a full build: the structure is updated
+  // from `src` (pass `blas` itself for the usual in-place refit) rather than
+  // rebuilt, which requires both to have been built with
+  // BlasBuildDesc::allow_update and `desc` to describe the same geometry
+  // layout as that build. Refits keep the destination's device address, so
+  // TLASes referencing it stay valid. Null src = full build.
   virtual void BuildBlas(AccelStructHandle blas, const BlasBuildDesc& desc,
-                         const GpuBuffer& scratch, u64 scratch_offset = 0) = 0;
+                         const GpuBuffer& scratch, u64 scratch_offset = 0,
+                         AccelStructHandle src = {}) = 0;
   virtual void BuildTlas(AccelStructHandle tlas, const GpuBuffer& instances, u32 instance_count,
                          const GpuBuffer& scratch) = 0;
   // Records, into this command list, a compacted-size query over `count`

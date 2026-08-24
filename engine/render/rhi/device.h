@@ -90,6 +90,11 @@ enum class AccelStructType : u8 { kBlas, kTlas };
 struct AccelSizes {
   u64 accel_bytes = 0;
   u64 scratch_bytes = 0;
+  // Scratch a REFIT needs (CommandList::BuildBlas with a source structure).
+  // Only nonzero when the size query carried BlasBuildDesc::allow_update; it is
+  // usually far smaller than scratch_bytes, which is the point of keeping a
+  // persistent per-actor refit arena.
+  u64 update_scratch_bytes = 0;
 };
 
 enum class PresentResult : u8 {

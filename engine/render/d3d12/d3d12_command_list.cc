@@ -800,7 +800,8 @@ void D3D12CommandList::FillBuffer(const GpuBuffer& buffer, u64 offset, u64 size,
 // --- acceleration structures ---
 
 void D3D12CommandList::BuildBlas(AccelStructHandle blas, const BlasBuildDesc& desc,
-                                 const GpuBuffer& scratch, u64 scratch_offset) {
+                                 const GpuBuffer& scratch, u64 scratch_offset,
+                                 AccelStructHandle src) {
   ID3D12GraphicsCommandList4* list4 = nullptr;
   if (FAILED(list_->QueryInterface(IID_ID3D12GraphicsCommandList4,
                                    reinterpret_cast<void**>(&list4)))) {
@@ -829,6 +830,12 @@ void D3D12CommandList::BuildBlas(AccelStructHandle blas, const BlasBuildDesc& de
                            : D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
   if (desc.allow_compaction)
     build.Inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
+  if (desc.allow_update)
+    build.Inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+  if (src) {
+    build.Inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+    build.SourceAccelerationStructureData = Rec(src)->address;
+  }
   build.Inputs.NumDescs = static_cast<u32>(geometries.size());
   build.Inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
   build.Inputs.pGeometryDescs = geometries.data();

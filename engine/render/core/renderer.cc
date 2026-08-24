@@ -155,6 +155,12 @@ base::Option<float> RtCullAngle{"rt.cull.angle", 0.004f, "RX_RT_CULL_ANGLE"};
 base::Option<float> RtCullStart{"rt.cull.start", 40.0f, "RX_RT_CULL_START"};
 base::Option<float> RtLodNear{"rt.lod.near", 64.0f, "RX_RT_LOD_NEAR"};
 base::Option<bool> RtAsyncTlasOpt{"rt.async.tlas", true, "RX_RT_ASYNC_TLAS"};
+// RX_RT_SKIN=0 drops every skinned actor back out of the acceleration
+// structure, which is what the engine did before compute skinning existed. The
+// A/B is how the path's real cost is measured: everything else about the frame
+// is unchanged, so the difference is the dispatch, the refit and the extra
+// instance.
+base::Option<bool> RtSkinOpt{"rt.skin", true, "RX_RT_SKIN"};
 base::Option<bool> FftOceanOpt{"fft.ocean", true, "RX_FFT_OCEAN"};
 base::Option<bool> AdaptiveWaterOpt{"water.adaptive", true,
                                     "RX_ADAPTIVE_WATER"};
@@ -535,6 +541,11 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
       RX_WARN("ray tracing disabled: fallback tlas creation failed");
   }
   rt_available_ = raytracing_ && device_->caps().ray_query;
+  // Skinned actors only reach the TLAS through this, so it lives and dies with
+  // the ray-tracing context; without one Acquire hands back 0 and every draw
+  // that asked for it simply stays out of ray tracing.
+  if (raytracing_)
+    skinned_rt_.Initialize(*device_);
 
   // Material textures compress at import, which needs a device that can sample
   // the block formats. This is the only place that knows both, and it runs
@@ -1946,11 +1957,14 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   gpu.vertex_count = static_cast<u32>(lod.vertices.size());
   // Skinned meshes carry a parallel bone index/weight stream, bound as a second
   // vertex buffer by the skinned pipeline. Skinned meshes are not lod'd.
+  // kBufferUsageStorage: the skinned-RT compute pass reads this stream as a
+  // ByteAddressBuffer to deform the mesh for ray tracing, not only the raster
+  // vertex stage.
   if (mesh.skinned && lod.skinning.size() == lod.vertices.size()) {
     gpu.skinning = device_->CreateBufferWithData(
         ByteSpan(reinterpret_cast<const u8 *>(lod.skinning.data()),
                  lod.skinning.size() * sizeof(asset::SkinnedVertexExtra)),
-        kBufferUsageVertex);
+        kBufferUsageVertex | kBufferUsageStorage);
     gpu.skinned = static_cast<bool>(gpu.skinning);
   }
   // Morph target deltas, packed [target][vertex] as {position, normal,
@@ -2675,6 +2689,15 @@ void Renderer::SetDecalAtlas(asset::AssetId texture,
       normal_atlas ? material_system_->find_texture(normal_atlas.hash)
                    : nullptr;
   decal_normal_atlas_view_ = normal_img ? normal_img->view : TextureView{};
+}
+
+u32 Renderer::AcquireSkinnedRt() { return skinned_rt_.Acquire(); }
+
+void Renderer::ReleaseSkinnedRt(u32 actor) {
+  if (!device_)
+    return;
+  skinned_rt_.Release(*device_, raytracing_.get(), actor,
+                      retired_bindless_meshes_[(frame_index_ + 1) % kFramesInFlight]);
 }
 
 u32 Renderer::AcquireDecalReceiver() { return decal_baker_.AcquireReceiver(); }
@@ -3615,6 +3638,23 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       (water_pipeline_active && settings_.water_reflections) || fog_active ||
       precip_rt;
 
+  // Skinned actors that asked to be ray traced in their animated pose
+  // (DrawItem::rt_skin). Their structures ping-pong per frame, which is what
+  // keeps them compatible with the async tlas build below: the slot being refit
+  // is never one a live tlas references. See render/gi/skinned_rt.h.
+  base::Vector<SkinnedRayTracing::Request> skin_requests;
+  if (RtSkinOpt && raytracing_ && bindless_ && material_system_ &&
+      skinned_rt_.available()) {
+    for (const DrawItem &item : view.draws) {
+      if (item.rt_skin == 0 || item.skin_offset < 0)
+        continue;
+      skin_requests.push_back({.handle = item.rt_skin,
+                               .mesh_key = item.mesh,
+                               .skin_offset =
+                                   static_cast<u32>(item.skin_offset)});
+    }
+  }
+
   // Async TLAS build (RX_RT_ASYNC_TLAS): build this frame's slot on the compute
   // queue while the graphics timeline consumes the slot built last frame -- the
   // slot being built is never the slot being read this frame, so there is no
@@ -4537,9 +4577,24 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       out_index = idx;
     };
 
+    // Compute-skin the requested actors into their own vertex buffers and get
+    // their BLASes reserved, before anything below asks for their custom index.
+    // Allocation happens here, on the build thread; only the dispatches and the
+    // build/refit are recorded (see the skin_deform pass below).
+    const u32 skinned_actors =
+        skin_requests.empty()
+            ? 0u
+            : skinned_rt_.Prepare(*device_, *bindless_, *material_system_,
+                                  *raytracing_, meshes_, skin_requests);
+
     base::Vector<RayTracingContext::Instance> instances;
     instances.reserve(view.draws.size() + instances_.instance_count());
     for (const DrawItem &item : view.draws) {
+      // A posed actor is instanced against its own refit BLAS below; its mesh's
+      // bind-pose structure must not enter the tlas as well, or every ray sees
+      // a T-posed twin standing where she is.
+      if (item.rt_skin != 0 && skinned_rt_.active(item.rt_skin))
+        continue;
       GpuMesh *mesh = meshes_.find(item.mesh);
       // no_rt grass-like fill stays out of the realtime tlas; when the path
       // tracer is active it joins with a path-trace-only instance mask, so
@@ -4576,6 +4631,24 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                              .approx = true,
                              .transform = item.transform});
       }
+    }
+    // Posed skinned actors: one instance each, on the actor's own structure and
+    // its own bindless record, so hit shaders read ITS deformed vertices.
+    // Never LOD'd or approximated (skinned meshes carry neither) and never
+    // solid-angle culled: the handful of actors a game asks for are the ones it
+    // cares about seeing in a reflection.
+    for (const DrawItem &item : view.draws) {
+      if (item.rt_skin == 0)
+        continue;
+      const u32 index = skinned_rt_.custom_index(item.rt_skin);
+      if (index == SkinnedRayTracing::kInvalidIndex)
+        continue;
+      instances.push_back(
+          {.mesh_key = skinned_rt_.blas_key(item.rt_skin),
+           .custom_index = index,
+           .mask = static_cast<u8>(kRayMaskRealtime | kRayMaskPathTrace),
+           .skinned = true,
+           .transform = item.transform});
     }
     const base::Vector<InstanceStore::Group> &groups = instances_.groups();
     for (u32 gi = 0; gi < groups.size(); ++gi) {
@@ -4618,6 +4691,31 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                .approx = true,
                                .transform = transform});
         }
+      }
+    }
+    // Skinning + BLAS refits, on the graphics timeline, recorded ahead of the
+    // TLAS build that reads the structures they write.
+    //
+    // Placement is load-bearing, not incidental. The render graph forks the
+    // async queue at the FIRST async-flagged pass and the fork semaphore orders
+    // everything recorded before it, so this pass must precede that fork or the
+    // async TLAS build can read a half-written structure. tlas_build below is
+    // the earliest pass in the whole graph that can be flagged async (the only
+    // others are ddgi, rcgi and light_grid, all added after it), and this is
+    // added immediately before it. Anything that adds an async pass ahead of
+    // this point has to move this with it.
+    if (skinned_actors > 0) {
+      graph_.AddPass(
+          "skin_deform", [](RenderGraph::PassBuilder &) {},
+          [this, palette = frame.bone_palette](PassContext &ctx) {
+            skinned_rt_.Record(*ctx.cmd, *raytracing_, palette);
+          });
+      static bool logged_async_skin = false;
+      if (async_tlas && !logged_async_skin) {
+        logged_async_skin = true;
+        RX_INFO("skinned-rt: {} actor(s) with the async tlas build active; their "
+                "ray-traced pose is one frame behind the raster one",
+                skinned_actors);
       }
     }
     // Grow the TLAS now, on the build thread, so the record-time BuildTlas
@@ -7689,6 +7787,7 @@ void Renderer::Shutdown() {
     wboit_.Destroy(*device_);
     overdraw_.Destroy(*device_);
     gpu_cull_.Destroy(*device_);
+    skinned_rt_.Destroy(*device_);
     meshlet_.Destroy(*device_);
     if (ms_dummy_hiz_)
       device_->DestroyImage(ms_dummy_hiz_);

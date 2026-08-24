@@ -61,6 +61,7 @@
 #include "render/gi/sdf_scene.h"
 #include "render/gi/shadow.h"
 #include "render/gi/shadow_trace.h"
+#include "render/gi/skinned_rt.h"
 #include "render/pipeline/gpu_cull.h"
 #include "render/pipeline/material_system.h"
 #include "render/pipeline/mesh_pipeline.h"
@@ -252,6 +253,13 @@ struct DrawItem {
   // Stamps queued against this handle bake into the draw's UV space and shade
   // as part of the material from then on. See render/texturing/decal_bake.h.
   u32 decal_receiver = 0;
+  // Skinned ray-tracing actor (Renderer::AcquireSkinnedRt), 0 = none. Set it on
+  // a SKINNED draw that should appear in ray tracing with the pose skin_offset
+  // names instead of vanishing (exclude_from_rt) or casting its bind pose. The
+  // renderer then GPU-skins the mesh into this actor's own vertex buffer each
+  // frame and refits its own BLAS over it. One handle per skinned draw, held
+  // for that draw's lifetime; see Renderer::AcquireSkinnedRt.
+  u32 rt_skin = 0;
 };
 
 // A world-space debug line segment with a packed rgba8 (0xRRGGBBAA) color.
@@ -584,6 +592,24 @@ public:
     return decal_baker_.stats();
   }
 
+  // --- skinned ray tracing (render/gi/skinned_rt.h) ---
+  // Puts a skinned draw into ray tracing with its ANIMATED pose. Skinning
+  // otherwise runs only in the raster vertex stage, so a skinned mesh's BLAS is
+  // its bind pose and such actors are normally kept out of the TLAS entirely
+  // (asset::Mesh::exclude_from_rt). Acquire one handle per skinned draw that
+  // should be ray traced (a character with a separate hair mesh needs two),
+  // keep it for that draw's lifetime, and put it on the draw's
+  // DrawItem::rt_skin alongside its usual skin_offset. The renderer deforms the
+  // mesh in compute into a buffer that actor owns and refits its BLAS in place
+  // each frame; nothing else about the draw changes, and the raster path still
+  // skins it in the vertex stage as before.
+  //
+  // Returns 0 when the path is unavailable (no ray tracing, pipeline creation
+  // failed), which is also the "no actor" value, so the result can be stored
+  // unconditionally.
+  u32 AcquireSkinnedRt();
+  void ReleaseSkinnedRt(u32 actor);
+
   const DeviceCaps *caps() const;
   bool raytracing_available() const { return rt_available_; }
   Device *device() { return device_.get(); }
@@ -805,6 +831,9 @@ private:
   // False if the image cannot be created, so the caller skips the frame.
   bool EnsureCaptureImage();
   std::unique_ptr<RayTracingContext> raytracing_;
+  // Compute skinning + refittable per-actor BLASes for skinned draws that carry
+  // a DrawItem::rt_skin handle. Inert (no pipeline) without ray tracing.
+  SkinnedRayTracing skinned_rt_;
   // Solid-angle + distance culling of realtime TLAS instances, persistent
   // across frames (time-sliced sweep state per instance group).
   RtInstanceCuller rt_cull_;

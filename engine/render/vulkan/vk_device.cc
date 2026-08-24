@@ -2533,6 +2533,8 @@ AccelSizes VulkanDevice::GetBlasSizes(const BlasBuildDesc& desc) {
                                : VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR;
   if (desc.allow_compaction)
     info.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_COMPACTION_BIT_KHR;
+  if (desc.allow_update)
+    info.flags |= VK_BUILD_ACCELERATION_STRUCTURE_ALLOW_UPDATE_BIT_KHR;
   info.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
   info.geometryCount = static_cast<u32>(geometries.size());
   info.pGeometries = geometries.data();
@@ -2542,7 +2544,7 @@ AccelSizes VulkanDevice::GetBlasSizes(const BlasBuildDesc& desc) {
   vkGetAccelerationStructureBuildSizesKHR(device_,
                                           VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &info,
                                           primitive_counts.data(), &sizes);
-  return {sizes.accelerationStructureSize, sizes.buildScratchSize};
+  return {sizes.accelerationStructureSize, sizes.buildScratchSize, sizes.updateScratchSize};
 }
 
 AccelSizes VulkanDevice::GetTlasSizes(u32 instance_count) {

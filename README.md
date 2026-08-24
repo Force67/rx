@@ -13,7 +13,9 @@ viewer runtime in place of the game.
   [Slang](docs/SLANG.md) shaders compiled to SPIR-V at build time (dxc /
   slangc). Feature set includes: TAA / MSAA /
   FSR3 / DLSS upscaling + FSR3 frame generation, hardware ray tracing (RT
-  shadows/AO/reflections, DDGI, RCGI radiance-cache GI, ReSTIR DI), a
+  shadows/AO/reflections, DDGI, RCGI radiance-cache GI, ReSTIR DI,
+  compute-skinned characters posed into the acceleration structure by a
+  per-actor BLAS refit), a
   reference path tracer, NRD
   denoising, screen-space SSS, strand hair, virtual textures, virtual geometry
   (cluster-DAG LOD, gpu-driven two-pass hi-z occlusion culling, 64-bit

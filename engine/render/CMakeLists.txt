@@ -18,6 +18,7 @@ rx_add_module(render
   gi/sdf_scene.cc
   gi/sdf_clipmap.cc
   gi/raytracing.cc
+  gi/skinned_rt.cc
   gi/rt_instance_cull.cc
   gi/path_tracer.cc
   gi/recon_path_tracer.cc
@@ -282,6 +283,7 @@ set(RX_RENDER_SHADERS
   shaders/screenspace/contact_shadow.cs.hlsl
   shaders/screenspace/sss_blur.cs.hlsl
   shaders/pipeline/cull.cs.hlsl
+  shaders/pipeline/skin.cs.hlsl
   shaders/pipeline/light_cluster.cs.hlsl
   shaders/pipeline/hiz_reduce.cs.hlsl
   shaders/pipeline/meshlet.ms.hlsl
