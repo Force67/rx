@@ -188,6 +188,17 @@ struct MeshPushConstants {
   // vertices inside it so the coarse proxy never bridges above the real land
   // (it cut through buildings otherwise). All zeros = no clip.
   f32 detail_rect[4] = {0, 0, 0, 0};
+  // The mesh's first bone in the palette's PREVIOUS-pose half, which the
+  // renderer appends after the current one. The vertex stage skins the vertex a
+  // second time from here to build its motion vector; equal to skin_offset when
+  // no history exists, which cancels the deformation term instead of inventing
+  // one. Costs one more palette fetch per vertex in the passes that emit motion.
+  //
+  // LAST on purpose. detail_rect is a float4 and the shader block aligns it to
+  // 16 bytes, so a scalar inserted ahead of it moves it in HLSL but not in C++
+  // and the terrain-LOD rect arrives as whatever followed it - measured as a
+  // 0.057 rmse break of the showcase scene. Anything added here goes after it.
+  u32 prev_skin_offset = 0;
 };
 
 // Push constants for the optional mesh-shader opaque path. The geometry buffers
@@ -217,6 +228,12 @@ static_assert(offsetof(MeshPushConstants, bone_address) == kPushBdaBoneOffset &&
                   offsetof(MeshPushConstants, morph_delta_address) == kPushBdaMorphDeltaOffset &&
                   offsetof(MeshPushConstants, morph_weight_address) == kPushBdaMorphWeightOffset,
               "mesh push block must keep the RX_BDA addresses where d3d12 looks");
+// The shader block aligns detail_rect (a float4) to 16 bytes and this one packs
+// it, so the two agree only while its offset is already a multiple of 16. An
+// added scalar that breaks that does not fail to compile - it feeds the terrain
+// LOD rect four bytes of something else, and the far terrain sinks or does not.
+static_assert(offsetof(MeshPushConstants, detail_rect) % 16 == 0,
+              "detail_rect must stay 16-byte aligned; add new scalars AFTER it");
 
 // Forward pbr pipeline: classic vertex buffer, metallic roughness shading,
 // reversed z depth. Outputs hdr color and motion vectors. Set 0 is the frame

@@ -237,6 +237,13 @@ struct DrawItem {
   // Index of this mesh's first bone in FrameView::bone_matrices, -1 = static.
   // Only meaningful for skinned meshes.
   i32 skin_offset = -1;
+  // The same mesh's first bone in FrameView::prev_bone_matrices, -1 = none.
+  // What prev_transform is for rigid motion, this is for the pose: without it
+  // a skinned draw's motion vectors carry the actor's translation only, and
+  // every temporal consumer (taa, the upscaler, motion blur) reprojects a
+  // swinging limb to where the torso went. -1 falls back to the current pose,
+  // which is exactly that rigid-only behaviour rather than a wrong velocity.
+  i32 prev_skin_offset = -1;
   // Range in FrameView::morph_weights holding this draw's active morph target
   // weights, -1 = none. Only meaningful for meshes with morph targets; apps
   // should skip zero weights so idle targets cost nothing.
@@ -320,6 +327,18 @@ struct FrameView {
   // rather than failing loudly. Non-uniform scale belongs in the DrawItem's
   // model matrix, where the cofactor path handles it.
   base::Vector<Mat4> bone_matrices;
+  // Last frame's palette, in the same form, indexed by DrawItem::prev_skin_offset.
+  // The app owns it because only the app knows which pose preceded this one: a
+  // draw list is rebuilt every frame and carries no identity the renderer could
+  // match a run of bones by. Leaving it empty is supported and costs nothing.
+  //
+  // It is uploaded APPENDED to bone_matrices, so both palettes are written
+  // fresh each frame and neither is read across a frame boundary. Handing the
+  // shader last frame's buffer instead would be smaller and wrong: with
+  // kMaxFramesInFlight == 2 the frame that writes a ring slot only waits on the
+  // fence two frames back, so it would overwrite the very slot the frame still
+  // in flight is reading as its history.
+  base::Vector<Mat4> prev_bone_matrices;
   // Active morph target weights for every morphed draw this frame,
   // concatenated; each DrawItem indexes its run by morph_offset/morph_count.
   base::Vector<MorphWeight> morph_weights;
@@ -413,6 +432,7 @@ struct FrameView {
     fresh.decal_stamps = std::move(decal_stamps);
     fresh.lights = std::move(lights);
     fresh.bone_matrices = std::move(bone_matrices);
+    fresh.prev_bone_matrices = std::move(prev_bone_matrices);
     fresh.particles = std::move(particles);
     fresh.grass_interactions = std::move(grass_interactions);
     fresh.oit = std::move(oit);
@@ -422,6 +442,7 @@ struct FrameView {
     fresh.decal_stamps.clear();
     fresh.lights.clear();
     fresh.bone_matrices.clear();
+    fresh.prev_bone_matrices.clear();
     fresh.particles.clear();
     fresh.grass_interactions.clear();
     fresh.oit.clear();
@@ -670,6 +691,12 @@ public:
   u32 meshlets_visible() const { return meshlet_visible_; }
 
 private:
+  // The palette index a skinned draw skins its PREVIOUS position from, for the
+  // motion vector. Returns the draw's current skin_offset when the app supplied
+  // no history: prev then equals the current pose, the deformation term cancels
+  // and the draw keeps the rigid-only motion it had before this existed.
+  u32 PrevSkinOffset(const DrawItem &item) const;
+
   static constexpr u32 kFramesInFlight = Device::kMaxFramesInFlight;
   static constexpr Format kSceneColorFormat = Format::kRGBA16Float;
   static constexpr Format kMotionFormat = Format::kRG16Float;
@@ -1031,6 +1058,10 @@ private:
   Mat4 prev_view_ = Mat4::Identity();
   Mat4 prev_proj_ = Mat4::Identity();
   f32 prev_jitter_[2] = {0, 0};
+  // First bone of the palette's previous-pose half this frame, 0 = the app
+  // supplied no history and every draw skins its motion vector from the current
+  // pose (rigid motion only).
+  u32 prev_bone_base_ = 0;
   f64 time_seconds_ = 0;
   bool has_prev_frame_ = false;
   bool rt_available_ = false;

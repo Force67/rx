@@ -723,6 +723,9 @@ struct FeatureGym::Impl {
   base::Vector<i32> remap;
   base::Vector<Mat4> bone_model;
   base::Vector<Mat4> palette;
+  // Last frame's palette, for the motion vectors. Without it the temporal
+  // passes reproject every swinging limb to where the torso went.
+  base::Vector<Mat4> prev_palette;
   u64 biped_mesh = 0;
   Vec3 biped_position{0, 0, -44};
   Mat4 biped_previous = Mat4::Identity();
@@ -2482,11 +2485,20 @@ void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
   anim::BuildSkinPalette(bone_model, skin, remap, &palette);
   const i32 offset = static_cast<i32>(view.bone_matrices.size());
   for (const Mat4& matrix : palette) view.bone_matrices.push_back(matrix);
+  // The pose of the previous frame, tied to the same validity flag the rigid
+  // prev_transform uses: a stop that re-enters resets both rather than
+  // reporting a frame of motion that never happened.
+  i32 prev_offset = -1;
+  if (biped_previous_valid && prev_palette.size() == palette.size()) {
+    prev_offset = static_cast<i32>(view.prev_bone_matrices.size());
+    for (const Mat4& matrix : prev_palette) view.prev_bone_matrices.push_back(matrix);
+  }
   render::DrawItem draw;
   draw.mesh = biped_mesh;
   draw.transform = actor;
   draw.prev_transform = biped_previous_valid ? biped_previous : actor;
   draw.skin_offset = offset;
+  draw.prev_skin_offset = prev_offset;
   if (biped_decal_receiver == 0) {
     biped_decal_receiver = renderer.AcquireDecalReceiver();
     if (biped_decal_receiver != 0) {
@@ -2508,6 +2520,7 @@ void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
   view.draws.push_back(draw);
   biped_previous = actor;
   biped_previous_valid = true;
+  prev_palette = palette;
 
   // Fluid splatter, thrown from a different angle each time. The bake resolves
   // which texels the projector box actually covers against the CURRENT pose, so

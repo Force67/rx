@@ -3504,6 +3504,12 @@ void Renderer::RecordDepthOnlyScene(CommandList &cmd,
   }
 }
 
+u32 Renderer::PrevSkinOffset(const DrawItem &item) const {
+  if (prev_bone_base_ == 0 || item.prev_skin_offset < 0)
+    return static_cast<u32>(item.skin_offset);
+  return prev_bone_base_ + static_cast<u32>(item.prev_skin_offset);
+}
+
 void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                const FrameView &view) {
   u32 frame_slot = frame_index_ % kFramesInFlight;
@@ -4317,6 +4323,19 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
 #endif
     std::memcpy(frame.bone_palette.mapped, view.bone_matrices.data(),
                 count * sizeof(Mat4));
+  }
+  // Last frame's poses, in the palette's second half. Written every frame like
+  // the first, so nothing in the ring is read across a frame boundary; a draw
+  // whose app supplied no history keeps prev_skin_offset == skin_offset (see
+  // PrevSkinOffset) and never reads this range at all.
+  prev_bone_base_ = 0;
+  if (!view.prev_bone_matrices.empty() && frame.bone_palette.mapped) {
+    const u32 count = std::min<u32>(static_cast<u32>(view.prev_bone_matrices.size()),
+                                    kMaxFrameBones);
+    prev_bone_base_ = kMaxFrameBones;
+    std::memcpy(static_cast<u8*>(frame.bone_palette.mapped) +
+                    static_cast<u64>(prev_bone_base_) * sizeof(Mat4),
+                view.prev_bone_matrices.data(), count * sizeof(Mat4));
   }
   // Active morph target weights for every morphed draw, read by device address.
   if (!view.morph_weights.empty() && frame.morph_weights.mapped) {
@@ -5472,6 +5491,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               if (draw_skinned && item.skin_offset >= 0) {
                 push.bone_address = frame.bone_palette.address;
                 push.skin_offset = static_cast<u32>(item.skin_offset);
+                push.prev_skin_offset = PrevSkinOffset(item);
               }
               if (mesh->morph_target_count > 0 && item.morph_offset >= 0 &&
                   item.morph_count > 0) {
@@ -6183,6 +6203,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               if (draw_skinned && item.skin_offset >= 0) {
                 push.bone_address = frame.bone_palette.address;
                 push.skin_offset = static_cast<u32>(item.skin_offset);
+                push.prev_skin_offset = PrevSkinOffset(item);
               }
               if (mesh->morph_target_count > 0 && item.morph_offset >= 0 &&
                   item.morph_count > 0) {
@@ -7180,6 +7201,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             if (draw_skinned && item.skin_offset >= 0) {
               push.bone_address = frame.bone_palette.address;
               push.skin_offset = static_cast<u32>(item.skin_offset);
+              push.prev_skin_offset = PrevSkinOffset(item);
             }
             if (mesh->morph_target_count > 0 && item.morph_offset >= 0 &&
                 item.morph_count > 0) {
@@ -7576,8 +7598,11 @@ bool Renderer::CreateFrameResources() {
 
     // Bone palette: host visible, read in the skinned vertex shader through its
     // device address (no descriptor binding). Column-major 4x4 per bone.
+    // Two halves of kMaxFrameBones: this frame's poses, then last frame's for
+    // the motion vectors. Sized for both so a scene that fills the budget loses
+    // no history - the cliff would show up as smearing on the busiest frame.
     frame.bone_palette = device_->CreateBuffer(
-        static_cast<u64>(kMaxFrameBones) * sizeof(Mat4),
+        static_cast<u64>(kMaxFrameBones) * 2 * sizeof(Mat4),
         kBufferUsageStorage | kBufferUsageDeviceAddress, true);
     if (!frame.bone_palette.mapped)
       return false;

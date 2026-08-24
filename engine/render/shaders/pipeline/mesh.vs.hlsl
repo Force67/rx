@@ -56,6 +56,10 @@ struct PushData {
   // World-space rect (min_x, min_z, max_x, max_z) of the fully streamed
   // terrain cells; set only on distant terrain-LOD draws, zeros otherwise.
   float4 detail_rect;
+  // The same mesh in the palette's previous-pose half. AFTER detail_rect: a
+  // scalar ahead of that float4 aligns differently here than in the C++ block
+  // and silently shifts the rect. See MeshPushConstants.
+  uint prev_skin_offset;
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -129,7 +133,8 @@ ByteAddressBuffer rec_bone_palette : register(t998, space0);
 // Each bone is a column-major 4x4 (64 bytes) in the palette, so M*v is the
 // weighted sum of columns. Normals/tangents use the upper 3x3. position/
 // normal/tangent come in mesh space (already morphed) and leave posed.
-void SkinVertex(VsIn input, inout float3 position, inout float3 normal, inout float3 tangent) {
+void SkinVertex(VsIn input, uint palette_offset, inout float3 position, inout float3 normal,
+                inout float3 tangent) {
   float4 p = float4(position, 1.0);
   float3 in_normal = normal;
   float3 in_tangent = tangent;
@@ -140,7 +145,7 @@ void SkinVertex(VsIn input, inout float3 position, inout float3 normal, inout fl
   for (uint i = 0; i < 4; ++i) {
     float w = input.bone_weights[i];
     if (w <= 0.0) continue;
-    uint bone_byte_offset = (push.skin_offset + input.bone_indices[i]) * 64;
+    uint bone_byte_offset = (palette_offset + input.bone_indices[i]) * 64;
 #ifdef __spirv__
     uint64_t addr = push.bone_address + (uint64_t)bone_byte_offset;
     float4 c0 = vk::RawBufferLoad<float4>(addr + 0);
@@ -157,6 +162,34 @@ void SkinVertex(VsIn input, inout float3 position, inout float3 normal, inout fl
     normal += w * (c0.xyz * in_normal.x + c1.xyz * in_normal.y + c2.xyz * in_normal.z);
     tangent += w * (c0.xyz * in_tangent.x + c1.xyz * in_tangent.y + c2.xyz * in_tangent.z);
   }
+}
+
+// Position only, for the far end of the motion vector. Nothing shades the
+// previous pose, so its normal and tangent would be four bone fetches and two
+// blends per vertex spent on values that go nowhere.
+float3 SkinPosition(VsIn input, uint palette_offset, float3 position) {
+  float4 p = float4(position, 1.0);
+  float3 posed = float3(0, 0, 0);
+  [unroll]
+  for (uint i = 0; i < 4; ++i) {
+    float w = input.bone_weights[i];
+    if (w <= 0.0) continue;
+    uint bone_byte_offset = (palette_offset + input.bone_indices[i]) * 64;
+#ifdef __spirv__
+    uint64_t addr = push.bone_address + (uint64_t)bone_byte_offset;
+    float4 c0 = vk::RawBufferLoad<float4>(addr + 0);
+    float4 c1 = vk::RawBufferLoad<float4>(addr + 16);
+    float4 c2 = vk::RawBufferLoad<float4>(addr + 32);
+    float4 c3 = vk::RawBufferLoad<float4>(addr + 48);
+#else
+    float4 c0 = asfloat(rec_bone_palette.Load4(bone_byte_offset + 0));
+    float4 c1 = asfloat(rec_bone_palette.Load4(bone_byte_offset + 16));
+    float4 c2 = asfloat(rec_bone_palette.Load4(bone_byte_offset + 32));
+    float4 c3 = asfloat(rec_bone_palette.Load4(bone_byte_offset + 48));
+#endif
+    posed += w * (c0 * p.x + c1 * p.y + c2 * p.z + c3 * p.w).xyz;
+  }
+  return posed;
 }
 #endif
 
@@ -179,7 +212,17 @@ VsOut main(VsIn input) {
 #endif
   }
 #ifdef RX_SKINNED
-  SkinVertex(input, local_pos, local_normal, local_tangent);
+  // The morphed, unposed vertex feeds BOTH poses: this frame's, which is what
+  // gets shaded, and last frame's, which is where the motion vector starts.
+  // Morph weights are not double-buffered, so a vertex whose morphs changed
+  // between the two frames reports the bone motion only - a face mid-blink
+  // reprojects as a still face, where a walking leg used to reproject as a
+  // still leg.
+  const float3 unposed = local_pos;
+  SkinVertex(input, push.skin_offset, local_pos, local_normal, local_tangent);
+  const float3 prev_local_pos = SkinPosition(input, push.prev_skin_offset, unposed);
+#else
+  const float3 prev_local_pos = local_pos;
 #endif
 #ifdef RX_INSTANCED
   const float4x4 model = transpose(float4x4(input.instance_col0, input.instance_col1,
@@ -224,9 +267,9 @@ VsOut main(VsIn input) {
   }
 #ifdef RX_INSTANCED
   float4 prev_world = world;
-  prev_world.xyz += mul(prev_model, float4(local_pos, 1.0)).xyz - model_world.xyz;
+  prev_world.xyz += mul(prev_model, float4(prev_local_pos, 1.0)).xyz - model_world.xyz;
 #else
-  float4 prev_world = mul(record.prev_model, float4(local_pos, 1.0));
+  float4 prev_world = mul(record.prev_model, float4(prev_local_pos, 1.0));
 #endif
   // Distant terrain LOD: sink vertices inside the full-detail streamed rect so
   // the coarse proxy never bridges above the real land there (level-32 quads
@@ -240,8 +283,7 @@ VsOut main(VsIn input) {
   float4 clip = mul(frame.view_proj, world);
   output.world_pos = world.xyz;
   // Motion vectors compare unjittered positions, so jitter only moves the
-  // rasterized sample, never the reprojection. Skinned deformation reuses the
-  // current pose for prev (rigid motion only).
+  // rasterized sample, never the reprojection.
   output.curr_clip = clip;
   output.prev_clip = mul(frame.prev_view_proj, prev_world);
   output.sv_position = clip + float4(frame.jitter * clip.w, 0.0, 0.0);

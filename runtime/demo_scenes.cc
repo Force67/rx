@@ -3922,8 +3922,17 @@ void DemoScenes::EmitLocomotion(f32 dt, render::FrameView& view) {
   anim::BuildSkinPalette(loco_bone_model_, loco_skin_, loco_remap_, &loco_palette_);
   i32 skin_offset = static_cast<i32>(view.bone_matrices.size());
   for (const Mat4& m : loco_palette_) view.bone_matrices.push_back(m);
-  view.draws.push_back({loco_mesh_, actor, loco_prev_xform_, skin_offset});
+  // The pose he was in last frame, for the motion vectors. The size guard
+  // covers his first frame; -1 falls back to the current pose, which reports
+  // his rigid motion and no limb motion.
+  i32 prev_skin_offset = -1;
+  if (loco_prev_palette_.size() == loco_palette_.size()) {
+    prev_skin_offset = static_cast<i32>(view.prev_bone_matrices.size());
+    for (const Mat4& m : loco_prev_palette_) view.prev_bone_matrices.push_back(m);
+  }
+  view.draws.push_back({loco_mesh_, actor, loco_prev_xform_, skin_offset, prev_skin_offset});
   loco_prev_xform_ = actor;
+  loco_prev_palette_ = loco_palette_;
 }
 
 }  // namespace rx

@@ -250,6 +250,9 @@ class DemoScenes {
   base::Vector<i32> loco_remap_;
   base::Vector<Mat4> loco_bone_model_;
   base::Vector<Mat4> loco_palette_;
+  // Last frame's palette. Without it his motion vectors carry the actor's
+  // translation only and the temporal passes smear every swinging limb.
+  base::Vector<Mat4> loco_prev_palette_;
   Vec3 loco_pos_{0, 0, 0};
   f32 loco_yaw_ = 0;
   f32 loco_time_ = 0;
