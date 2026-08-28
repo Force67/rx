@@ -111,9 +111,9 @@ Offscreen devices are wired for d3d12 (`Device::CreateOffscreen` with
 `Backend::kD3D12`): no swapchain, frames complete through the swapchainless
 `SubmitFrame(CommandList*)`, and pixels come back via `ReadbackImage`
 (READBACK-heap staging; `ImmediateSubmit`'s fence wait covers host
-visibility). The `offscreen_test`/`compaction_test` acceptance tests pick
-their backend from `RX_RHI` and are registered twice (`*_d3d12` variants)
-when `RX_RHI_D3D12` is on. Validation status under
+visibility). The `offscreen_test`/`compaction_test`/`fluid_sim_test`
+acceptance tests pick their backend from `RX_RHI` and are registered twice
+(`*_d3d12` variants) when `RX_RHI_D3D12` is on. Validation status under
 `VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation`: the Vulkan backend and the
 d3d12 offscreen tests run clean; the full demo on d3d12 still reports a
 couple dozen errors that originate inside vkd3d 2.0's own translation
@@ -129,14 +129,29 @@ cross-compile as x86_64 PEs via `cmake/toolchain-mingw-w64.cmake` and run
 through `tools/wine_d3d12_test.sh` - on aarch64 hosts the x86_64 Wine runs
 under box64, whose winevulkan -> libvulkan boundary is wrapped to the native
 loader, so the host NVIDIA ICD *and* the Khronos validation layer serve the
-emulated process. Verified on the GB10 box: `offscreen_test` renders
-pixel-exact and both tests report zero validation errors on the Vulkan
-instance underneath Wine's d3d12; `compaction_test` skips (Wine's bundled
-vkd3d reports no DXR tier here). wined3d must be pinned to its Vulkan
-adapter path (`HKCU\Software\Wine\Direct3D renderer=vulkan`, the script does
-this) - the default GL path finds no pixel formats under Xvfb. The DXGI
-flip-model swapchain still needs a real interactive Windows desktop to
-validate; the mingw cross build required no source changes in the backend
+emulated process. The script bootstraps its prefix explicitly (wineboot,
+`renderer=vulkan` - the default GL path finds no pixel formats under Xvfb -
+and no crash dialog) and runs every test against two D3D12 providers,
+selected per-process with `WINEDLLOVERRIDES` so the prefix itself is never
+mutated:
+
+- **wine** - Wine's builtin `d3d12.dll` (WineHQ vkd3d underneath). Verified
+  on the GB10 box: `offscreen_test` renders pixel-exact and `fluid_sim_test`
+  runs its full compute pipeline (volume conserved, dam-break settles) with
+  zero validation errors; `compaction_test` skips (no DXR tier here).
+- **proton** - vkd3d-proton's PE `d3d12.dll`/`d3d12core.dll` (the pinned,
+  checksummed official release, dropped next to the test PEs and loaded via
+  `d3d12,d3d12core=n`). Exposes DXR 1.1 through box64's wrapped Vulkan, so
+  `compaction_test` runs the real path on the GB10 box: BLAS build with
+  ALLOW_COMPACTION, postbuild compacted-size query across a submit boundary,
+  compact-copy and a TLAS over the result, PASS. vkd3d-proton suballocates
+  acceleration structures and scratch out of shared VkBuffer/VkDeviceMemory
+  blocks, which trips the validation layer's conservative AS-overlap checks;
+  the script waives exactly those two VUIDs (rx places every AS and scratch
+  in its own committed resource) and stays strict about everything else.
+
+The DXGI flip-model swapchain still needs a real interactive Windows desktop
+to validate; the mingw cross build required no source changes in the backend
 itself beyond loading SDL3's window-property helpers dynamically.
 
 ### How it maps

@@ -7,8 +7,9 @@
 //       flooding the empty half, the water surface (bed + depth) over the wet
 //       cells settles level to within a few cm — the dam-break settling test.
 //
-// Skips cleanly (exit 0) when no Vulkan driver is present (null backend), like
-// offscreen_test; run under vkrun to exercise the real GPU path.
+// The backend follows RX_RHI (vulkan|d3d12; default vulkan) like offscreen_test.
+// Skips cleanly (exit 0) when no driver is present (null backend); run under
+// vkrun to exercise the real GPU path.
 
 #include <cmath>
 #include <cstdio>
@@ -43,11 +44,14 @@ f32 BowlBed(u32 x, u32 y) {
 
 int main() {
   DeviceDesc desc;
+  const char* rhi = std::getenv("RX_RHI");
+  desc.backend = (rhi && std::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = false;
   std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
-    std::printf("fluid_sim_test: no Vulkan driver, skipping (null backend)\n");
+    std::printf("fluid_sim_test: no %s driver, skipping (null backend)\n",
+                BackendName(desc.backend));
     return 0;
   }
   std::printf("fluid_sim_test: device '%s'\n", device->caps().adapter_name.c_str());
