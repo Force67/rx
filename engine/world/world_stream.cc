@@ -1,0 +1,576 @@
+#include "world/world_stream.h"
+
+#include <algorithm>
+#include <cstring>
+#include <utility>
+
+#include <base/check.h>
+
+#include "edit/reflect.h"
+#include "scene/components.h"
+
+namespace rx::world {
+namespace {
+
+constexpr u32 kMaximumRetainedErrors = 32;
+
+// Everything a cancel has to undo has to be undone now: leaving a half
+// materialized cell alive for a budgeted teardown would let the planner hand
+// its slot to a new generation while the old rows still exist.
+constexpr u32 kUnbudgeted = ~u32{0};
+
+const ResidentInstance* FindSorted(const base::Vector<ResidentInstance>& instances, u64 stable_id) {
+  auto it = std::lower_bound(
+      instances.begin(), instances.end(), stable_id,
+      [](const ResidentInstance& instance, u64 wanted) { return instance.stable_id < wanted; });
+  return it != instances.end() && it->stable_id == stable_id ? it : nullptr;
+}
+
+class ArchiveCellLoader final : public CellLoader {
+ public:
+  ArchiveCellLoader(const WorldMap& map, const asset::Vfs& vfs) : map_(map), vfs_(vfs) {}
+
+  void Begin(const CellLoadRequest& request) override {
+    CellLoadResult result;
+    result.ticket = request.ticket;
+    result.cell = request.cell;
+    result.domain = request.domain;
+    result.tier = request.tier;
+    result.ok = map_.ReadPayload(vfs_, request.cell, request.domain, request.tier, &result.payload,
+                                &result.error);
+    if (!result.ok) result.payload = WorldCellPayload{};
+    ready_.push_back(std::move(result));
+  }
+
+  void Cancel(scene::WorldStreamTicket ticket) override {
+    for (size_t i = 0; i < ready_.size();) {
+      if (ready_[i].ticket == ticket) {
+        ready_.erase(ready_.begin() + i);
+      } else {
+        ++i;
+      }
+    }
+  }
+
+  void Poll(base::Vector<CellLoadResult>* out) override {
+    if (!out) return;
+    for (CellLoadResult& result : ready_) out->push_back(std::move(result));
+    ready_.clear();
+  }
+
+ private:
+  const WorldMap& map_;
+  const asset::Vfs& vfs_;
+  base::Vector<CellLoadResult> ready_;
+};
+
+}  // namespace
+
+base::UniquePointer<CellLoader> MakeArchiveCellLoader(const WorldMap& map, const asset::Vfs& vfs) {
+  return base::MakeUnique<ArchiveCellLoader>(map, vfs);
+}
+
+bool RuntimeComponentLayout(std::string_view component, u32* stride, u64* layout_hash) {
+  const edit::ComponentDesc* desc = edit::FindComponentByName(component);
+  if (!desc) return false;
+  const ecs::ComponentInfo& info = ecs::GetComponentInfo(desc->id);
+  base::Vector<std::string_view> names;
+  base::Vector<u32> types;
+  base::Vector<u32> offsets;
+  names.reserve(desc->prop_count);
+  types.reserve(desc->prop_count);
+  offsets.reserve(desc->prop_count);
+  for (u32 i = 0; i < desc->prop_count; ++i) {
+    names.push_back(desc->props[i].name);
+    types.push_back(static_cast<u32>(desc->props[i].type));
+    offsets.push_back(desc->props[i].offset);
+  }
+  if (stride) *stride = info.size;
+  if (layout_hash) {
+    *layout_hash = HashComponentLayout(
+        component, info.size, std::span<const std::string_view>(names.data(), names.size()),
+        std::span<const u32>(types.data(), types.size()),
+        std::span<const u32>(offsets.data(), offsets.size()));
+  }
+  return true;
+}
+
+WorldStreamer::WorldStreamer(const WorldMap& map, CellLoader& loader, ecs::World& world)
+    : map_(map), loader_(loader), world_(world) {}
+
+WorldStreamer::~WorldStreamer() { Shutdown(); }
+
+void WorldStreamer::Configure(const WorldStreamPolicy& policy) { policy_ = policy; }
+
+WorldStreamer::DomainCell* WorldStreamer::Find(DomainState& state, u64 cell) {
+  auto it = std::lower_bound(state.cells.begin(), state.cells.end(), cell,
+                             [](const DomainCell& entry, u64 wanted) { return entry.cell < wanted; });
+  return it != state.cells.end() && it->cell == cell ? it : nullptr;
+}
+
+const WorldStreamer::DomainCell* WorldStreamer::Find(const DomainState& state, u64 cell) const {
+  auto it = std::lower_bound(state.cells.begin(), state.cells.end(), cell,
+                             [](const DomainCell& entry, u64 wanted) { return entry.cell < wanted; });
+  return it != state.cells.end() && it->cell == cell ? it : nullptr;
+}
+
+WorldStreamer::DomainCell& WorldStreamer::Emplace(DomainState& state, u64 cell) {
+  auto it = std::lower_bound(state.cells.begin(), state.cells.end(), cell,
+                             [](const DomainCell& entry, u64 wanted) { return entry.cell < wanted; });
+  if (it != state.cells.end() && it->cell == cell) return *it;
+  DomainCell created;
+  created.cell = cell;
+  return *state.cells.insert(it, std::move(created));
+}
+
+void WorldStreamer::Erase(DomainState& state, u64 cell) {
+  if (DomainCell* entry = Find(state, cell)) state.cells.erase(entry);
+}
+
+void WorldStreamer::RecordError(std::string message) {
+  ++error_count_;
+  if (errors_.size() >= kMaximumRetainedErrors) return;
+  errors_.push_back(std::move(message));
+}
+
+std::span<const std::string> WorldStreamer::errors() const {
+  return std::span<const std::string>(errors_.data(), errors_.size());
+}
+
+bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
+  cell.resolved.clear();
+  const WorldCellPayload& payload = cell.payload;
+  if (payload.kind == PayloadKind::kInstances) return true;
+
+  const ecs::ComponentId resident_id = ecs::GetComponentId<CellResident>();
+  for (u32 a = 0; a < payload.archetypes.size(); ++a) {
+    const WorldArchetypeRecord& archetype = payload.archetypes[a];
+    if (payload.StableIds(archetype).size() != archetype.row_count) {
+      *error = "archetype " + std::to_string(a) + " has no readable stable-id array";
+      return false;
+    }
+    ResolvedArchetype resolved;
+    resolved.signature.push_back(resident_id);
+    resolved.column_ids.reserve(archetype.column_count);
+    for (u32 c = 0; c < archetype.column_count; ++c) {
+      const WorldColumnRecord& column = payload.columns[archetype.column_first + c];
+      const std::string_view name = payload.String(column.name);
+      if (payload.ColumnBytes(column).size() != column.data_bytes) {
+        *error = "archetype " + std::to_string(a) + " column '" + std::string(name) +
+                 "' is not readable";
+        return false;
+      }
+      const edit::ComponentDesc* desc = edit::FindComponentByName(name);
+      if (!desc) {
+        *error = "component '" + std::string(name) +
+                 "' is not registered in this build; the cook and the runtime disagree about what "
+                 "a world may contain";
+        return false;
+      }
+      if (desc->id == resident_id) {
+        *error = "payload declares CellResident, which the streamer owns";
+        return false;
+      }
+      const ecs::ComponentInfo& info = ecs::GetComponentInfo(desc->id);
+      if (!info.trivially_copyable) {
+        *error = "component '" + std::string(name) +
+                 "' holds an indirection and cannot be restored by copying bytes";
+        return false;
+      }
+      if (info.size != column.stride) {
+        *error = "component '" + std::string(name) + "' is " + std::to_string(info.size) +
+                 " bytes here, " + std::to_string(column.stride) + " in the bake";
+        return false;
+      }
+      u64 runtime_hash = 0;
+      if (!RuntimeComponentLayout(name, nullptr, &runtime_hash) ||
+          runtime_hash != column.layout_hash) {
+        *error = "component '" + std::string(name) +
+                 "' has a different field layout here than it had at bake time";
+        return false;
+      }
+      for (ecs::ComponentId existing : resolved.column_ids) {
+        if (existing != desc->id) continue;
+        *error = "archetype " + std::to_string(a) + " lists component '" + std::string(name) +
+                 "' twice";
+        return false;
+      }
+      resolved.signature.push_back(desc->id);
+      resolved.column_ids.push_back(desc->id);
+    }
+    std::sort(resolved.signature.begin(), resolved.signature.end());
+    cell.resolved.push_back(std::move(resolved));
+  }
+  return true;
+}
+
+bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
+  const WorldCellPayload& payload = cell.payload;
+  if (payload.kind == PayloadKind::kInstances) {
+    const u32 total = static_cast<u32>(payload.instances.size());
+    const u32 take = std::min(rows, total - cell.next_instance);
+    for (u32 i = 0; i < take; ++i) {
+      const WorldInstanceRecord& source = payload.instances[cell.next_instance + i];
+      cell.instances.push_back(
+          {source.stable_id, source.prototype, source.position, source.rotation, source.scale});
+    }
+    cell.next_instance += take;
+    return cell.next_instance >= total;
+  }
+
+  const ecs::ComponentId resident_id = ecs::GetComponentId<CellResident>();
+  u32 budget = rows;
+  while (cell.next_archetype < payload.archetypes.size() && budget > 0) {
+    const WorldArchetypeRecord& archetype = payload.archetypes[cell.next_archetype];
+    const u32 remaining = archetype.row_count - cell.next_row;
+    if (remaining == 0) {
+      ++cell.next_archetype;
+      cell.next_row = 0;
+      continue;
+    }
+    const ResolvedArchetype& resolved = cell.resolved[cell.next_archetype];
+    const std::span<const u64> stable_ids = payload.StableIds(archetype);
+    const u32 first = cell.next_row;
+    const u32 take = std::min(remaining, budget);
+    const u64 owning_cell = cell.cell;
+
+    world_.CreateBatch(resolved.signature, take, [&](const ecs::EntityBatch& batch) {
+      for (u32 c = 0; c < archetype.column_count; ++c) {
+        const WorldColumnRecord& column = payload.columns[archetype.column_first + c];
+        const std::span<const u8> bytes = payload.ColumnBytes(column);
+        const u8* source = bytes.data() + static_cast<size_t>(first) * column.stride;
+        u32 written = 0;
+        while (written < take) {
+          u32 run = 0;
+          void* destination = batch.Column(resolved.column_ids[c], written, &run);
+          // ResolveSchema put every column id into the signature this batch was
+          // created from, so a missing run would mean the batch is not the
+          // archetype we asked for.
+          BASE_BUGCHECK(destination != nullptr && run != 0, "world batch column vanished");
+          std::memcpy(destination, source + static_cast<size_t>(written) * column.stride,
+                      static_cast<size_t>(run) * column.stride);
+          written += run;
+        }
+      }
+      u32 written = 0;
+      while (written < take) {
+        u32 run = 0;
+        auto* residents = static_cast<CellResident*>(batch.Column(resident_id, written, &run));
+        BASE_BUGCHECK(residents != nullptr && run != 0, "world batch resident column vanished");
+        for (u32 i = 0; i < run; ++i) {
+          new (residents + i) CellResident{stable_ids[first + written + i], owning_cell};
+        }
+        written += run;
+      }
+      for (u32 i = 0; i < take; ++i) {
+        cell.entities.push_back({stable_ids[first + i], batch.EntityAt(i)});
+      }
+    });
+
+    cell.next_row += take;
+    budget -= take;
+  }
+  // Step past archetypes the last quantum finished exactly, so a completed cell
+  // never needs one more empty commit to notice it is done.
+  while (cell.next_archetype < payload.archetypes.size() &&
+         cell.next_row >= payload.archetypes[cell.next_archetype].row_count) {
+    ++cell.next_archetype;
+    cell.next_row = 0;
+  }
+  return cell.next_archetype >= payload.archetypes.size();
+}
+
+bool WorldStreamer::TeardownStep(DomainCell& cell, u32 rows) {
+  u32 budget = rows;
+  while (!cell.entities.empty() && budget > 0) {
+    world_.Destroy(cell.entities.back().entity);
+    cell.entities.pop_back();
+    --budget;
+  }
+  if (!cell.entities.empty()) return false;
+  cell.instances.clear();
+  cell.payload = WorldCellPayload{};
+  cell.resolved.clear();
+  cell.next_archetype = 0;
+  cell.next_row = 0;
+  cell.next_instance = 0;
+  cell.resident_bytes = 0;
+  return true;
+}
+
+void WorldStreamer::DrainLoader() {
+  results_scratch_.clear();
+  loader_.Poll(&results_scratch_);
+  for (CellLoadResult& result : results_scratch_) {
+    DomainState& state = domains_[static_cast<u32>(result.domain)];
+    DomainCell* cell = Find(state, result.cell);
+    // A result for a generation that no longer owns the cell is not a result at
+    // all: the region was cancelled and re-prepared while it was in flight.
+    if (!cell || !(cell->ticket == result.ticket) || cell->phase != CellPhase::kLoading) continue;
+
+    std::string error;
+    if (result.ok) {
+      cell->payload = std::move(result.payload);
+      if (!ResolveSchema(*cell, &error)) result.ok = false;
+    } else {
+      error = std::move(result.error);
+    }
+
+    if (!result.ok) {
+      RecordError(CellPayloadPath(map_.payload_prefix(), result.cell, result.domain, result.tier) +
+                  ": " + error);
+      cell->payload = WorldCellPayload{};
+      cell->resolved.clear();
+      scene::ApplyWorldStreamPrepareResult(state.plan, cell->ticket,
+                                           scene::WorldStreamPrepareResult::kFailed);
+      continue;
+    }
+    if (!scene::ApplyWorldStreamPrepareResult(state.plan, cell->ticket,
+                                              scene::WorldStreamPrepareResult::kReady)) {
+      // The plan rejected the ticket after all; drop the bytes rather than let
+      // a later commit adopt them.
+      cell->payload = WorldCellPayload{};
+      cell->resolved.clear();
+      continue;
+    }
+    cell->phase = CellPhase::kDecoded;
+  }
+  results_scratch_.clear();
+}
+
+void WorldStreamer::AdvanceRetirements(Domain domain, DomainState& state) {
+  const u32 rows = std::max(1u, policy_[domain].rows_per_commit);
+  for (size_t i = 0; i < state.cells.size();) {
+    DomainCell& cell = state.cells[i];
+    if (cell.phase != CellPhase::kRetiring) {
+      ++i;
+      continue;
+    }
+    if (!TeardownStep(cell, rows)) {
+      ++i;
+      continue;
+    }
+    const scene::WorldStreamTicket ticket = cell.ticket;
+    state.cells.erase(state.cells.begin() + i);
+    scene::ApplyWorldStreamRetireResult(state.plan, ticket);
+  }
+}
+
+void WorldStreamer::UpdateDomain(Domain domain,
+                                 std::span<const scene::WorldStreamObservation> observers) {
+  DomainState& state = domains_[static_cast<u32>(domain)];
+  const DomainStreamPolicy& domain_policy = policy_[domain];
+
+  state.observations.clear();
+  state.candidates.clear();
+  for (const scene::WorldStreamObservation& observer : observers) {
+    scene::WorldStreamObservation narrowed;
+    if (!MakeDomainObservation(observer, domain, policy_, &narrowed)) continue;
+    state.observations.push_back(narrowed);
+    map_.GatherRegions(scene::BuildWorldStreamQuery(narrowed), domain, &state.candidates);
+  }
+
+  AdvanceRetirements(domain, state);
+
+  scene::AdvanceWorldStreaming(
+      state.plan, std::span<const scene::WorldStreamObservation>(state.observations.data(),
+                                                                 state.observations.size()),
+      std::span<const scene::WorldStreamRegion>(state.candidates.data(), state.candidates.size()),
+      domain_policy.budget, &state.actions);
+
+  for (const scene::WorldStreamAction& action : state.actions) {
+    switch (action.kind) {
+      case scene::WorldStreamActionKind::kPrepare: {
+        const WorldCellRecord* record = map_.index().FindCell(action.region.id);
+        const Tier tier =
+            record ? TargetTier(map_.index(), *record, domain, domain_policy, action.distance)
+                   : Tier::kAbsent;
+        if (!record || tier == Tier::kAbsent) {
+          scene::ApplyWorldStreamPrepareResult(state.plan, action.ticket,
+                                               scene::WorldStreamPrepareResult::kFailed);
+          break;
+        }
+        DomainCell& cell = Emplace(state, action.region.id);
+        // A prepare only ever follows a completed retirement, so there is
+        // nothing of an older generation left to tear down here.
+        cell.ticket = action.ticket;
+        cell.tier = tier;
+        cell.phase = CellPhase::kLoading;
+        const WorldPayloadRecord* payload = map_.index().FindPayload(*record, domain, tier);
+        cell.resident_bytes = payload ? payload->resident_bytes : 0;
+        loader_.Begin({action.ticket, cell.cell, domain, tier});
+        break;
+      }
+      case scene::WorldStreamActionKind::kCommit: {
+        DomainCell* cell = Find(state, action.ticket.region);
+        if (!cell || !(cell->ticket == action.ticket) || cell->phase != CellPhase::kDecoded) {
+          scene::ApplyWorldStreamCommitResult(state.plan, action.ticket,
+                                              scene::WorldStreamCommitResult::kFailed);
+          break;
+        }
+        if (!MaterializeStep(*cell, std::max(1u, domain_policy.rows_per_commit))) {
+          scene::ApplyWorldStreamCommitResult(state.plan, action.ticket,
+                                              scene::WorldStreamCommitResult::kMoreWork);
+          break;
+        }
+        std::sort(cell->entities.begin(), cell->entities.end(),
+                  [](const StableEntity& a, const StableEntity& b) {
+                    return a.stable_id < b.stable_id;
+                  });
+        std::sort(cell->instances.begin(), cell->instances.end(),
+                  [](const ResidentInstance& a, const ResidentInstance& b) {
+                    return a.stable_id < b.stable_id;
+                  });
+        cell->phase = CellPhase::kPublished;
+        // The payload's bytes have served their purpose; the ECS and the
+        // instance page own the state now.
+        cell->payload = WorldCellPayload{};
+        cell->resolved.clear();
+        scene::ApplyWorldStreamCommitResult(state.plan, action.ticket,
+                                            scene::WorldStreamCommitResult::kComplete);
+        break;
+      }
+      case scene::WorldStreamActionKind::kCancel: {
+        loader_.Cancel(action.ticket);
+        DomainCell* cell = Find(state, action.ticket.region);
+        if (cell && cell->ticket == action.ticket) {
+          TeardownStep(*cell, kUnbudgeted);
+          state.cells.erase(cell);
+        }
+        scene::ApplyWorldStreamRetireResult(state.plan, action.ticket);
+        break;
+      }
+      case scene::WorldStreamActionKind::kUnload: {
+        DomainCell* cell = Find(state, action.ticket.region);
+        if (!cell || !(cell->ticket == action.ticket)) {
+          scene::ApplyWorldStreamRetireResult(state.plan, action.ticket);
+          break;
+        }
+        // Teardown is budgeted like materialization: destroying a whole cell's
+        // entities in one frame is the same hitch as creating them in one.
+        cell->phase = CellPhase::kRetiring;
+        break;
+      }
+    }
+  }
+}
+
+void WorldStreamer::Update(std::span<const scene::WorldStreamObservation> observers) {
+  if (shut_down_) return;
+  DrainLoader();
+  for (u32 i = 0; i < kDomainCount; ++i) UpdateDomain(static_cast<Domain>(i), observers);
+}
+
+void WorldStreamer::Shutdown() {
+  if (shut_down_) return;
+  shut_down_ = true;
+  base::Vector<scene::WorldStreamAction> actions;
+  for (u32 i = 0; i < kDomainCount; ++i) {
+    DomainState& state = domains_[i];
+    scene::ResetWorldStreaming(state.plan, &actions);
+    for (const scene::WorldStreamAction& action : actions) {
+      if (action.kind == scene::WorldStreamActionKind::kCancel) loader_.Cancel(action.ticket);
+      scene::ApplyWorldStreamRetireResult(state.plan, action.ticket);
+    }
+    // Unbudgeted: the caller is about to destroy the ecs::World, so every row
+    // this streamer created has to be gone before this returns.
+    for (DomainCell& cell : state.cells) TeardownStep(cell, kUnbudgeted);
+    state.cells.clear();
+  }
+}
+
+ecs::Entity WorldStreamer::Resolve(u64 stable_id) const {
+  const WorldCellRecord* record = map_.index().FindCellByStableId(stable_id);
+  if (!record) return {};
+  for (u32 i = 0; i < kDomainCount; ++i) {
+    const DomainCell* cell = Find(domains_[i], record->id);
+    // A cell that is still materializing, or already dying, has no answer to
+    // give: half its rows exist and the other half never will.
+    if (!cell || cell->phase != CellPhase::kPublished) continue;
+    auto it = std::lower_bound(
+        cell->entities.begin(), cell->entities.end(), stable_id,
+        [](const StableEntity& entry, u64 wanted) { return entry.stable_id < wanted; });
+    if (it != cell->entities.end() && it->stable_id == stable_id) return it->entity;
+  }
+  return {};
+}
+
+std::span<const ResidentInstance> WorldStreamer::Instances(u64 cell_id) const {
+  for (u32 i = 0; i < kDomainCount; ++i) {
+    const DomainCell* cell = Find(domains_[i], cell_id);
+    if (!cell || cell->phase != CellPhase::kPublished || cell->instances.empty()) continue;
+    return std::span<const ResidentInstance>(cell->instances.data(), cell->instances.size());
+  }
+  return {};
+}
+
+const ResidentInstance* WorldStreamer::FindInstance(u64 stable_id) const {
+  const WorldCellRecord* record = map_.index().FindCellByStableId(stable_id);
+  if (!record) return nullptr;
+  for (u32 i = 0; i < kDomainCount; ++i) {
+    const DomainCell* cell = Find(domains_[i], record->id);
+    if (!cell || cell->phase != CellPhase::kPublished) continue;
+    if (const ResidentInstance* found = FindSorted(cell->instances, stable_id)) return found;
+  }
+  return nullptr;
+}
+
+ecs::Entity WorldStreamer::Promote(u64 stable_id) {
+  const WorldCellRecord* record = map_.index().FindCellByStableId(stable_id);
+  if (!record) return {};
+  for (u32 i = 0; i < kDomainCount; ++i) {
+    DomainState& state = domains_[i];
+    DomainCell* cell = Find(state, record->id);
+    if (!cell || cell->phase != CellPhase::kPublished) continue;
+    const ResidentInstance* instance = FindSorted(cell->instances, stable_id);
+    if (!instance) continue;
+    auto slot = std::lower_bound(
+        cell->entities.begin(), cell->entities.end(), stable_id,
+        [](const StableEntity& entry, u64 wanted) { return entry.stable_id < wanted; });
+    if (slot != cell->entities.end() && slot->stable_id == stable_id) return {};  // already promoted
+
+    // The entity gets an identity and a place in the world; what it means -
+    // which mesh, which behavior - is the caller's to add from the prototype.
+    const ecs::Entity entity = world_.Create();
+    scene::Transform transform;
+    transform.position[0] = instance->position.x;
+    transform.position[1] = instance->position.y;
+    transform.position[2] = instance->position.z;
+    transform.rotation[0] = instance->rotation.x;
+    transform.rotation[1] = instance->rotation.y;
+    transform.rotation[2] = instance->rotation.z;
+    transform.rotation[3] = instance->rotation.w;
+    transform.scale = instance->scale;
+    world_.Add(entity, transform);
+    world_.Add(entity, CellResident{stable_id, cell->cell});
+    cell->entities.insert(slot, StableEntity{stable_id, entity});
+    return entity;
+  }
+  return {};
+}
+
+WorldStreamerStats WorldStreamer::stats() const {
+  WorldStreamerStats stats;
+  for (u32 i = 0; i < kDomainCount; ++i) {
+    const DomainState& state = domains_[i];
+    for (const DomainCell& cell : state.cells) {
+      switch (cell.phase) {
+        case CellPhase::kPublished:
+          ++stats.resident;
+          stats.resident_bytes += cell.resident_bytes;
+          break;
+        case CellPhase::kLoading:
+        case CellPhase::kDecoded:
+        case CellPhase::kRetiring:
+          ++stats.pending;
+          break;
+      }
+      stats.entities += static_cast<u32>(cell.entities.size());
+      stats.instances += static_cast<u32>(cell.instances.size());
+    }
+    stats.failed += scene::GetWorldStreamStats(state.plan).failed;
+  }
+  return stats;
+}
+
+}  // namespace rx::world
