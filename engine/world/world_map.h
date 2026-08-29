@@ -95,9 +95,11 @@ struct DomainStreamPolicy {
   Tier far_tier = Tier::kProxy;
   // Per-domain budgets, so one domain's payload sizes cannot starve another's.
   scene::WorldStreamFrameBudget budget;
-  // Rows materialized per commit quantum. Publishing an entire cell in one
-  // frame is how a streaming engine stays inside its memory budget and still
-  // hitches.
+  // Rows materialized per commit quantum, and destroyed per teardown quantum.
+  // Publishing an entire cell in one frame is how a streaming engine stays
+  // inside its memory budget and still hitches. Note the asymmetry: the planner
+  // admits at most maximum_commit_steps cells per tick, but every retiring cell
+  // gets a quantum, so a tick can destroy more rows than it creates.
   u32 rows_per_commit = 512;
 };
 

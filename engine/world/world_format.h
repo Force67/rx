@@ -214,6 +214,10 @@ struct WorldArchetypeRecord {
   u32 column_first = 0;
   u32 column_count = 0;
   u64 stable_id_offset = 0;  // u64[row_count], from the start of the data section
+  // Where the decoder put those ids in WorldCellPayload::stable_ids. They are
+  // lifted out of the byte buffer rather than read through a cast, so nothing
+  // depends on how the allocator happened to align it.
+  u32 stable_id_index = 0;
 };
 
 struct WorldPrototypeRecord {
@@ -243,7 +247,8 @@ struct WorldCellPayload {
   base::Vector<WorldPrototypeRecord> prototypes;
   base::Vector<WorldInstanceRecord> instances;
   base::Vector<char> strings;
-  base::Vector<u8> data;  // column bytes and stable-id arrays
+  base::Vector<u8> data;         // column bytes and stable-id arrays
+  base::Vector<u64> stable_ids;  // every archetype's ids, in archetype order
 
   std::string_view String(u32 offset) const;
   std::span<const u8> ColumnBytes(const WorldColumnRecord& column) const;
