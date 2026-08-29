@@ -197,6 +197,30 @@ reload treadmill. A claim that does want the near tier says so explicitly.
 The set has no clock: `Expire` is the host's to call. A lease nobody expires is
 the immortal pin it exists to replace.
 
+## Driving it
+
+```sh
+rx --world build/linux/runtime/worlds/streamworld.rxp
+```
+
+`runtime/demo_world.cc` is the whole of what a host has to do: mount the
+archive, load the index, hand the camera to the streamer once a frame, draw
+what came back. It is deliberately thin, because anything thicker there would
+be the module failing to carry its own weight.
+
+The two halves of the design show up as two different amounts of work. Gameplay
+cells materialize real ECS entities carrying `Transform` and `Renderable`, so
+`app::Host::GatherEntityDraws` finds them with everything else and the host does
+nothing at all for them. Representation cells stay out of the ECS: `EmitToView`
+walks the resident pages and emits draws straight from them.
+
+`runtime/scenes/streamworld.rxscene` is the test map - six by six cells of 32 m,
+cooked by the build into `worlds/streamworld.rxp`. Fly around it with the debug
+overlay up and the status bar reads e.g. `WORLD 61/72 res 25e 144i 8K`: 61 of
+the world's 72 (cell, domain) pairs resident, 25 entities, 144 instances, 8 KiB.
+Fly far enough out and it drops to `2/72` - the spawn cell, which the demo holds
+with a hard claim, and nothing else.
+
 ## Cooking
 
 ```sh

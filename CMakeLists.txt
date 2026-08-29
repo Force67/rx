@@ -441,6 +441,29 @@ if(RX_BUILD_TOOLS AND "world" IN_LIST RX_MODULES)
   add_executable(rxworld tools/rxworld.cc)
   target_link_libraries(rxworld PRIVATE rx::world rx::edit rx::asset rx::ecs rx::core)
   rx_set_warnings(rxworld)
+
+  # The baked world `rx --world` streams. Cooked at build time rather than
+  # checked in as a binary: the .rxscene beside it is the authored source, and
+  # running the real cook every build is also the only thing that would notice
+  # the tool and the runtime drifting apart. Lives here rather than in
+  # runtime/CMakeLists.txt because that is added before rxworld exists.
+  if(TARGET rx)
+    set(RX_STREAMWORLD_SCENE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/scenes/streamworld.rxscene)
+    # A plain path rather than $<TARGET_FILE_DIR:rx>: a generator expression in
+    # an OUTPUT cannot name a target from another directory, and rx is added
+    # from runtime/.
+    set(RX_STREAMWORLD_DIR ${CMAKE_BINARY_DIR}/runtime/worlds)
+    set(RX_STREAMWORLD_ARCHIVE ${RX_STREAMWORLD_DIR}/streamworld.rxp)
+    add_custom_command(
+      OUTPUT ${RX_STREAMWORLD_ARCHIVE}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${RX_STREAMWORLD_DIR}
+      COMMAND rxworld bake ${RX_STREAMWORLD_SCENE} ${RX_STREAMWORLD_ARCHIVE}
+              --name streamworld --cell-size 32
+      DEPENDS rxworld ${RX_STREAMWORLD_SCENE}
+      COMMENT "Cooking the streamworld test map")
+    add_custom_target(rx-streamworld ALL DEPENDS ${RX_STREAMWORLD_ARCHIVE})
+    add_dependencies(rx rx-streamworld)
+  endif()
 endif()
 
 # rxdiff compares two rendered pngs against a measured tolerance, which is the

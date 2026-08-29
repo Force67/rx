@@ -145,7 +145,17 @@ bool Viewer::OnInitialize(app::Services& services) {
 
   if (physics_->initialized()) CreatePhysicsCubeAsset();
 
-  if (!config_.scene_path.empty()) {
+  if (!config_.world_path.empty()) {
+    // A baked world is not a scene: nothing is loaded whole, and what exists at
+    // any moment is whatever the streamer has decided to keep.
+    if (!world_stream_.Init(*services.vfs, config_.headless ? nullptr : renderer_, *world_,
+                            config_.headless, config_.world_path, config_.world_name)) {
+      return false;
+    }
+    camera_.set_position({96.0f, 26.0f, 6.0f});
+    camera_.set_yaw_pitch(1.35f, -0.42f);
+    camera_.speed = 24.0f;
+  } else if (!config_.scene_path.empty()) {
     if (!LoadSceneFile()) return false;
   } else {
     demos_->CreateDemoScene();
@@ -919,6 +929,10 @@ void Viewer::DriveSunFromClock() {
 void Viewer::OnUpdate(f32 frame_delta) {
   DriveSunFromClock();
   debug_ui_.BeginFrame();
+  // Before the camera moves this frame, so the streamer sees the position the
+  // last frame was drawn from and its own prediction is not a frame stale.
+  world_stream_.Update(frame_delta, camera_.position());
+  if (world_stream_.active()) debug_ui_.set_world_status(world_stream_.StatusLine());
   demos_->Update(frame_delta);
   // The gym owns its camera + input: route input to the character controller
   // instead of the free-fly camera and let it capture the cursor for mouse look.
@@ -967,6 +981,7 @@ void Viewer::OnBuildView(f32 frame_delta, render::FrameView& view) {
   if (!scene_lights_.empty()) view.lights = scene_lights_;
   if (scene_camera_fov_ > 0.0f) view.camera.fov_y = scene_camera_fov_;
   demos_->EmitToView(frame_delta, view);
+  world_stream_.EmitToView(view);
   EmitMorphedInstances(frame_delta, view);
   debug_ui_.Build(*renderer_, camera_, *world_, frame_delta, &view);
   demos_->ApplyRenderPolicy();
@@ -1069,6 +1084,10 @@ void Viewer::OnShutdown() {
     renderer_->ReleaseDecalReceiver(tattoo_receiver_);
     tattoo_receiver_ = 0;
   }
+  // Before the host tears the ecs::World down: the streamer owns every entity
+  // its cells materialized and has to give them back while there is a world to
+  // give them back to.
+  world_stream_.Shutdown();
   if (demos_) demos_->Shutdown();
   if (window_) debug_ui_.Shutdown();
 }
