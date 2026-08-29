@@ -656,6 +656,10 @@ if(RX_BUILD_TESTS)
     add_executable(world_map_test test/world_map_test.cc)
     target_link_libraries(world_map_test PRIVATE rx::world rx::asset rx::scene rx::core)
     add_test(NAME world_map_test COMMAND world_map_test)
+
+    add_executable(world_stream_test test/world_stream_test.cc)
+    target_link_libraries(world_stream_test PRIVATE rx::world rx::edit rx::asset rx::scene rx::ecs rx::core)
+    add_test(NAME world_stream_test COMMAND world_stream_test)
   endif()
 
   if("terrain" IN_LIST RX_MODULES)
