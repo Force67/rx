@@ -30,9 +30,11 @@ namespace rx::world {
 // no clock: Expire is the host's to call, from whatever tick it advances. A
 // lease nobody expires is exactly the immortal pin this exists to replace.
 //
-// A claim also stands at the middle of the cell it names, so its distance is
-// zero and the cell loads at the domain's near tier. That is right for a
-// teleport destination and expensive for a speculative prefetch.
+// A claim admits a cell and can raise its priority. It does not decide the
+// cell's detail: the tier band follows the real observers, so adding or
+// dropping a lease never evicts and rebuilds a cell that was already resident
+// and correct. A claim that does want the near tier - a teleport destination,
+// a cutscene about to play - says so with `full_detail`.
 enum class ClaimKind : u8 {
   // Correctness. Unloading this would be a bug: the player is standing on it,
   // a network-authoritative entity lives in it, a cutscene actor is in it.
@@ -54,6 +56,12 @@ struct ResidencyClaim {
   // The tick this claim stops counting, or 0 for "until it is removed". A lease
   // rather than a pin: the failure mode of a pin is that nobody releases it.
   u64 expires_at_tick = 0;
+  // Load the cell at the domain's near tier rather than its far one. A
+  // teleport destination wants it; a speculative prefetch does not, and a
+  // prefetch that asked for it would pay for the largest payload the cook
+  // produced. Changing it on a resident cell reloads that cell, so it is a
+  // property of the claim rather than something to toggle.
+  bool full_detail = false;
   // A static string naming the reason, for the debugger and the log. Nothing
   // parses it; it exists so a resident cell can say why.
   const char* reason = "";

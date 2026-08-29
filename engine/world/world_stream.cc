@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <limits>
 #include <utility>
 
 #include <base/check.h>
@@ -18,6 +19,12 @@ constexpr u32 kMaximumRetainedErrors = 32;
 // it. A cook error is deterministic: re-reading the same broken bytes every
 // retry interval produces the same failure and nothing else, forever.
 constexpr u32 kMaximumLoadAttempts = 3;
+
+// How long a suppressed cell waits before it is offered once more. Long enough
+// that a genuinely broken cook costs one read every half a minute rather than
+// one every retry interval, short enough that a world holed by a momentary
+// archive problem heals itself.
+constexpr u64 kSuppressedRetryTicks = 1800;
 
 // Shutdown only. Everywhere else teardown is budgeted, because destroying a
 // whole cell's rows in one frame is the same hitch as creating them in one.
@@ -425,6 +432,9 @@ void WorldStreamer::DrainLoader() {
                   ": " + error);
       cell->payload = WorldCellPayload{};
       cell->resolved.clear();
+      // Out of kLoading, so a loader that delivers the same ticket twice cannot
+      // be counted as two failures.
+      cell->phase = CellPhase::kFailed;
       scene::ApplyWorldStreamPrepareResult(state.plan, cell->ticket,
                                            scene::WorldStreamPrepareResult::kFailed);
       continue;
@@ -497,7 +507,13 @@ void WorldStreamer::GatherClaims(Domain domain, DomainState& state) {
     claim_scratch_.clear();
     map_.GatherRegions(observation, domain, &claim_scratch_);
     for (const CellDemand& demand : claim_scratch_) {
-      if (demand.region.id == entry.claim.cell) state.demands.push_back(demand);
+      if (demand.region.id != entry.claim.cell) continue;
+      CellDemand claimed = demand;
+      claimed.from_claim = true;
+      // A claim that wants detail says so; one that does not leaves the band to
+      // whoever is actually looking at the cell.
+      claimed.distance = entry.claim.full_detail ? 0 : std::numeric_limits<f32>::infinity();
+      state.demands.push_back(claimed);
     }
   }
 }
@@ -521,15 +537,18 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
     const u64 id = nearest.region.id;
     size_t end = i;
     while (end < state.demands.size() && state.demands[end].region.id == id) ++end;
+    // The band follows whoever is actually near the cell. A claim's source
+    // stands at the cell's own middle, so letting it into this would mean that
+    // taking or dropping a lease evicts and rebuilds a cell that was already
+    // resident and correct, in both directions.
+    f32 band_distance = std::numeric_limits<f32>::infinity();
+    for (size_t d = i; d < end; ++d) {
+      if (!state.demands[d].from_claim) band_distance = std::min(band_distance, state.demands[d].distance);
+    }
+    band_distance = std::min(band_distance, nearest.distance);
     i = end;
 
-    auto failed = std::lower_bound(
-        state.failed.begin(), state.failed.end(), id,
-        [](const FailedCell& entry, u64 wanted) { return entry.cell < wanted; });
-    if (failed != state.failed.end() && failed->cell == id &&
-        failed->attempts >= kMaximumLoadAttempts) {
-      continue;
-    }
+    if (Suppressed(state, id)) continue;
 
     const WorldCellRecord* record = map_.index().FindCell(id);
     if (!record) continue;
@@ -539,7 +558,7 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
         [](const CellBand& entry, u64 wanted) { return entry.cell < wanted; });
     const bool was_near =
         previous != state.bands.end() && previous->cell == id && previous->near;
-    const bool near = InNearTierBand(domain_policy, nearest.distance, was_near);
+    const bool near = InNearTierBand(domain_policy, band_distance, was_near);
     const Tier tier = ResolveTier(map_.index(), *record, domain,
                                   near ? domain_policy.near_tier : domain_policy.far_tier);
     if (tier == Tier::kAbsent) continue;
@@ -560,11 +579,22 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
 void WorldStreamer::NoteLoadFailure(DomainState& state, u64 cell) {
   auto it = std::lower_bound(state.failed.begin(), state.failed.end(), cell,
                              [](const FailedCell& entry, u64 wanted) { return entry.cell < wanted; });
-  if (it != state.failed.end() && it->cell == cell) {
-    ++it->attempts;
-    return;
+  if (it == state.failed.end() || it->cell != cell) {
+    it = state.failed.insert(it, FailedCell{cell, 0, 0});
   }
-  state.failed.insert(it, FailedCell{cell, 1});
+  ++it->attempts;
+  if (it->attempts >= kMaximumLoadAttempts) it->retry_at_tick = tick_ + kSuppressedRetryTicks;
+}
+
+bool WorldStreamer::Suppressed(const DomainState& state, u64 cell) const {
+  auto it = std::lower_bound(state.failed.begin(), state.failed.end(), cell,
+                             [](const FailedCell& entry, u64 wanted) { return entry.cell < wanted; });
+  if (it == state.failed.end() || it->cell != cell) return false;
+  return it->attempts >= kMaximumLoadAttempts && tick_ < it->retry_at_tick;
+}
+
+void WorldStreamer::ClearFailures() {
+  for (u32 i = 0; i < kDomainCount; ++i) domains_[i].failed.clear();
 }
 
 void WorldStreamer::UpdateDomain(Domain domain,
@@ -619,6 +649,8 @@ void WorldStreamer::UpdateDomain(Domain domain,
         cell.next_row = 0;
         cell.next_instance = 0;
         cell.overlay_touched = false;
+        cell.entities.clear();
+        cell.instances.clear();
         const WorldPayloadRecord* payload = map_.index().FindPayload(*record, domain, tier);
         cell.resident_bytes = payload ? payload->resident_bytes : 0;
         loader_.Begin({action.ticket, cell.cell, domain, tier});
@@ -668,7 +700,8 @@ void WorldStreamer::UpdateDomain(Domain domain,
           scene::ApplyWorldStreamRetireResult(state.plan, action.ticket);
           break;
         }
-        // Teardown is budgeted, cancel and unload alike. The planner will not
+        // Teardown is budgeted, cancel and unload alike, and a cell parked in
+        // kFailed by a refused read comes through here too. The planner will not
         // admit a new generation for a region it still tracks, and it tracks a
         // retiring one until ApplyWorldStreamRetireResult, so there is nothing
         // to be gained by destroying a large half-built cell in one frame - on
@@ -682,6 +715,7 @@ void WorldStreamer::UpdateDomain(Domain domain,
 
 void WorldStreamer::Update(std::span<const scene::WorldStreamObservation> observers) {
   if (shut_down_) return;
+  ++tick_;
   DrainLoader();
   for (u32 i = 0; i < kDomainCount; ++i) UpdateDomain(static_cast<Domain>(i), observers);
 }
@@ -730,6 +764,7 @@ ecs::Entity WorldStreamer::Resolve(u64 stable_id) const {
 }
 
 std::span<const ResidentInstance> WorldStreamer::Instances(u64 cell_id, Domain domain) const {
+  if (static_cast<u32>(domain) >= kDomainCount) return {};
   const DomainCell* cell = Find(domains_[static_cast<u32>(domain)], cell_id);
   if (!cell || cell->phase != CellPhase::kPublished) return {};
   return std::span<const ResidentInstance>(cell->instances.data(), cell->instances.size());
@@ -790,18 +825,30 @@ WorldStreamerStats WorldStreamer::stats() const {
           ++stats.resident;
           stats.resident_bytes += cell.resident_bytes;
           break;
+        case CellPhase::kRetiring:
+          // Its rows still exist and still cost, which is exactly when a memory
+          // budget reading this must not be told they are already gone.
+          stats.resident_bytes += cell.resident_bytes;
+          ++stats.pending;
+          break;
         case CellPhase::kLoading:
         case CellPhase::kDecoded:
-        case CellPhase::kRetiring:
+        case CellPhase::kFailed:
           ++stats.pending;
           break;
       }
       stats.entities += static_cast<u32>(cell.entities.size());
       stats.instances += static_cast<u32>(cell.instances.size());
     }
-    stats.failed += scene::GetWorldStreamStats(state.plan).failed;
+    // From the streamer's own tally rather than the plan's kFailed count: the
+    // plan parks a cell there on the way through an ordinary tier change too,
+    // and a suppressed cell has left the plan entirely.
     for (const FailedCell& failed : state.failed) {
-      if (failed.attempts >= kMaximumLoadAttempts) ++stats.suppressed;
+      if (Suppressed(state, failed.cell)) {
+        ++stats.suppressed;
+      } else {
+        ++stats.failed;
+      }
     }
   }
   return stats;

@@ -17,6 +17,9 @@
 // Entities whose component set is exactly the one named by --instance (default:
 // Transform + Renderable) are cooked as static instance pages instead of ECS
 // rows: they get a stable world id and no entity until something promotes them.
+// A Guid does not count towards that set - SaveScene puts one on everything it
+// writes - and an instance carries no components at all, so a Guid on one is
+// replaced by its stable id rather than baked.
 //
 // inspect prints the index of an already-baked archive, which is the cheapest
 // way to see what a streaming decision will be working from.
@@ -72,9 +75,19 @@ int Fail(const std::string& message) {
 struct Authored {
   ecs::Entity entity;
   u64 cell = 0;
-  base::Vector<const edit::ComponentDesc*> components;  // sorted by name
+  i64 cell_x = 0;
+  i64 cell_z = 0;
+  base::Vector<const edit::ComponentDesc*> components;  // bakeable, sorted by name
   bool instance = false;
 };
+
+// Identity a baked world already has a better answer for. SaveScene puts a Guid
+// on every entity it writes, so without this nothing an editor produced would
+// ever classify as static decoration; the stable id replaces it, and carrying
+// both would mean the instance page's rows each needed an ECS row to hold one.
+bool IdentityOnly(const edit::ComponentDesc& desc) {
+  return std::strcmp(desc.name, "Guid") == 0;
+}
 
 // The grid. Cells are ids on a 2D lattice over XZ (vertical extent is the
 // cell's own bounds, not a third axis of the grid): a world tall enough to need
@@ -88,8 +101,19 @@ u64 CellIdFor(i64 x, i64 z) {
   return (uz << 32) | (ux & 0xffffffffull);
 }
 
-i64 FloorDiv(f32 value, f32 size) {
+// The cell a coordinate falls in, and the lattice origin of that cell. Both go
+// through the same division, so the bounds a cell is given always contain the
+// entities binned into it - computing the two separately in different precisions
+// puts an AABB one square away from its own contents.
+i64 CellCoord(f32 value, f32 size) {
   return static_cast<i64>(std::floor(static_cast<double>(value) / size));
+}
+
+f32 CellOrigin(i64 coord, f32 size) { return static_cast<f32>(static_cast<double>(coord) * size); }
+
+bool Finite(const scene::Transform& transform) {
+  return std::isfinite(transform.position[0]) && std::isfinite(transform.position[1]) &&
+         std::isfinite(transform.position[2]);
 }
 
 bool ParseU64(const char* text, u64* out) {
@@ -188,7 +212,9 @@ int Bake(int argc, char** argv) {
       return Usage();
     }
   }
-  if (!(options.cell_size > 0)) return Fail("--cell-size must be positive");
+  if (!(options.cell_size > 0) || !std::isfinite(options.cell_size)) {
+    return Fail("--cell-size must be a positive, finite number");
+  }
   if (options.instance_components.empty()) {
     options.instance_components.push_back("Transform");
     options.instance_components.push_back("Renderable");
@@ -217,16 +243,37 @@ int Bake(int argc, char** argv) {
   base::Vector<Authored> authored;
   base::Vector<std::string> dropped;
   u32 parented = 0;
+  u32 not_finite = 0;
   source.Each<scene::Transform>([&](ecs::Entity entity, scene::Transform& transform) {
     if (source.Has<scene::Parent>(entity)) {
       ++parented;
       return;
     }
+    if (!Finite(transform)) {
+      ++not_finite;
+      return;
+    }
     Authored record;
     record.entity = entity;
-    record.cell = CellIdFor(FloorDiv(transform.position[0], options.cell_size),
-                            FloorDiv(transform.position[2], options.cell_size));
+    record.cell_x = CellCoord(transform.position[0], options.cell_size);
+    record.cell_z = CellCoord(transform.position[2], options.cell_size);
+    record.cell = CellIdFor(record.cell_x, record.cell_z);
+
+    // Classify from what was authored, not from what survived: an entity that
+    // is a transform, a mesh and a Name is an entity that happens to lose its
+    // Name, not a static instance. Deciding after the drop would quietly turn
+    // it into a page row with no ECS identity at all.
+    u32 authored_count = 0;
+    bool only_instance_components = true;
     for (const edit::ComponentDesc* desc : edit::ComponentsOn(source, entity)) {
+      // Identity-only components do not decide what a thing is, but they are
+      // still baked onto anything that stays an entity.
+      if (!IdentityOnly(*desc)) {
+        ++authored_count;
+        bool named = false;
+        for (const std::string& want : options.instance_components) named |= want == desc->name;
+        only_instance_components &= named;
+      }
       if (!Bakeable(*desc)) {
         bool seen = false;
         for (const std::string& name : dropped) seen |= name == desc->name;
@@ -239,14 +286,8 @@ int Bake(int argc, char** argv) {
               [](const edit::ComponentDesc* a, const edit::ComponentDesc* b) {
                 return std::strcmp(a->name, b->name) < 0;
               });
-    record.instance = record.components.size() == options.instance_components.size();
-    for (size_t i = 0; record.instance && i < record.components.size(); ++i) {
-      bool named = false;
-      for (const std::string& want : options.instance_components) {
-        named |= want == record.components[i]->name;
-      }
-      record.instance = named;
-    }
+    record.instance =
+        only_instance_components && authored_count == options.instance_components.size();
     authored.push_back(std::move(record));
   });
 
@@ -257,6 +298,11 @@ int Bake(int argc, char** argv) {
     return Fail(std::to_string(parented) +
                 " entities have a Parent; flatten the hierarchy before baking (a parent link is "
                 "an ecs handle, which no baked cell can carry)");
+  }
+  if (not_finite != 0) {
+    return Fail(std::to_string(not_finite) +
+                " entities have a non-finite Transform.position; the index would refuse the "
+                "bounds they produce, so the archive would cook and never load");
   }
   if (authored.empty()) return Fail(scene_path + ": no entities with a Transform to bake");
 
@@ -316,10 +362,8 @@ int Bake(int argc, char** argv) {
       high_y = first_y ? transform->position[1] : std::max(high_y, transform->position[1]);
       first_y = false;
     }
-    const scene::Transform* any = source.Get<scene::Transform>(authored[cell_begin].entity);
-    if (!any) return Fail("an entity lost its Transform mid-bake");
-    const f32 base_x = std::floor(any->position[0] / options.cell_size) * options.cell_size;
-    const f32 base_z = std::floor(any->position[2] / options.cell_size) * options.cell_size;
+    const f32 base_x = CellOrigin(authored[cell_begin].cell_x, options.cell_size);
+    const f32 base_z = CellOrigin(authored[cell_begin].cell_z, options.cell_size);
     const f32 pad = options.cell_size * 0.5f;
     index.AddCell(cell, {base_x, low_y - pad, base_z},
                   {base_x + options.cell_size, high_y + pad, base_z + options.cell_size}, 0,
@@ -346,6 +390,7 @@ int Bake(int argc, char** argv) {
       if (authored[group_begin].instance) {
         for (size_t i = group_begin; i < group_end; ++i) {
           const scene::Transform* transform = source.Get<scene::Transform>(authored[i].entity);
+          if (!transform) return Fail("an entity lost its Transform mid-bake");
           const scene::Renderable* renderable = source.Get<scene::Renderable>(authored[i].entity);
           const std::string prototype =
               renderable ? asset::LookupAssetPath(renderable->mesh).value_or(
