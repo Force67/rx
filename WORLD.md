@@ -96,7 +96,10 @@ Update(observers)
 Loading is behind the `CellLoader` interface rather than a direct call into the
 Vfs. That is what makes the hard parts testable: a test hands a payload back
 after its generation was cancelled, or out of order, and the streamer has to
-drop it.
+drop it. A request is identified by the whole `CellLoadRequest`, never by its
+ticket alone - each domain runs its own plan and each numbers generations from
+one, so a cell's first gameplay request and its first representation request
+carry the same ticket.
 
 Materialization goes through `ecs::World::CreateBatch`: the whole run appended
 into one archetype, then filled column by column. `Add<T>` would walk each

@@ -79,7 +79,13 @@ class RX_WORLD_EXPORT CellLoader {
   virtual ~CellLoader() = default;
 
   virtual void Begin(const CellLoadRequest& request) = 0;
-  virtual void Cancel(scene::WorldStreamTicket ticket) = 0;
+  // Cancels a request Begin was given. It takes the whole request, not just the
+  // ticket: every domain runs its own plan and every plan numbers generations
+  // from one, so cell 0's first gameplay request and its first representation
+  // request carry the identical ticket. A loader keyed on the ticket alone
+  // cancels whichever it finds, and the other waits for a result that is never
+  // coming.
+  virtual void Cancel(const CellLoadRequest& request) = 0;
   // Moves out everything that finished since the last call.
   virtual void Poll(base::Vector<CellLoadResult>* out) = 0;
 };

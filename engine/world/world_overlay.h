@@ -49,8 +49,11 @@ class RX_WORLD_EXPORT WorldOverlay {
   void Destroy(u64 stable_id);
   bool IsDestroyed(u64 stable_id) const;
 
-  // Moving a destroyed id is refused rather than resurrecting it.
-  void Move(u64 stable_id, Vec3 position, Quat rotation, f32 scale);
+  // False when the id is destroyed - moving it would resurrect it - or when the
+  // transform is not finite. The decoder refuses a non-finite transform, so
+  // accepting one here would let a transient simulation value produce a save
+  // that writes successfully and then cannot be loaded.
+  bool Move(u64 stable_id, Vec3 position, Quat rotation, f32 scale);
   const OverlayMove* FindMove(u64 stable_id) const;
 
   // Drops every delta for one id, putting it back to whatever the bake says.

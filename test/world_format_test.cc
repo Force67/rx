@@ -509,6 +509,26 @@ void TestPayloadRefusesCraftedStructure() {
                   error, "a future payload version");
   }
   {
+    // Two rows sharing an identity. The writer refuses to emit this; a decoder
+    // that accepts it lets Resolve reach only one of them while an overlay
+    // delta lands on both. The stable-id array is the last 16 bytes.
+    base::Vector<u8> bad(good);
+    for (u32 i = 0; i < 8; ++i) bad[bad.size() - 8 + i] = bad[bad.size() - 16 + i];
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "two rows sharing a stable id");
+  }
+  {
+    // Archetypes may share one stable-id array, so each one's rows can pass the
+    // bounds check while the total does not. Claiming a huge row count against
+    // the same small array is how a two-kilobyte file asks for billions of ids.
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, kPayloadHeaderBytes, 0xffffffffu);  // row_count
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "more rows than a cell may hold");
+  }
+  {
     // The bake id is in the header, so editing it now fails the checksum rather
     // than reaching the cross-check that used to be its only guard.
     base::Vector<u8> bad(good);

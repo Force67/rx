@@ -206,11 +206,13 @@ class QueuedLoader final : public CellLoader {
     pending_.push_back(request);
   }
 
-  void Cancel(rx::scene::WorldStreamTicket ticket) override {
+  void Cancel(const CellLoadRequest& request) override {
     ++cancelled_;
     if (!honor_cancel_) return;
     for (size_t i = 0; i < pending_.size();) {
-      if (pending_[i].ticket == ticket) {
+      const CellLoadRequest& pending = pending_[i];
+      if (pending.ticket == request.ticket && pending.cell == request.cell &&
+          pending.domain == request.domain && pending.tier == request.tier) {
         pending_.erase(pending_.begin() + i);
       } else {
         ++i;
@@ -1589,6 +1591,45 @@ void TestShutdownMidFlight(const fs::path& directory) {
   CHECK(world.IsAlive(bystander));
 }
 
+// Every domain runs its own plan and every plan numbers generations from one,
+// so one cell's first gameplay request and its first representation request
+// carry the identical ticket. Cancelling one must not take the other's read
+// with it: the survivor would sit in the planner waiting for a result nobody
+// is going to produce, holding a pending slot, with no retry and no timeout.
+void TestCancellingOneDomainLeavesTheOthersRead(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "twodomains.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  loader.set_honor_cancel(true);  // a loader that really does drop what it is told to
+  WorldStreamer streamer(map, loader, world);
+  streamer.Configure(TestPolicy());
+
+  // Both domains of cell 0 start a read on the same tick, with the same ticket.
+  WorldStreamObservation both = At(32, 32);
+  Tick(&streamer, both, 1);
+  CHECK(loader.pending() == 2);
+
+  // Drop gameplay from the observer's mask. Its in-flight read is cancelled;
+  // representation's, which shares the ticket, must survive.
+  WorldStreamObservation representation_only = both;
+  representation_only.channels = 1u << static_cast<u32>(Domain::kRepresentation);
+  Tick(&streamer, representation_only, 3);
+  CHECK(loader.cancelled() > 0);
+  CHECK(loader.pending() == 1);
+
+  Settle(&streamer, &loader, representation_only, 30);
+  CHECK(streamer.errors().empty());
+  CHECK(streamer.stats().instances == kInstancesPerCell);
+  CHECK(streamer.stats().pending == 0);  // nothing left waiting on a dead read
+  CHECK(streamer.stats().entities == 0);  // gameplay really did go
+}
+
 void TestDeterministicAcrossRuns(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -1662,6 +1703,7 @@ int main() {
   TestDefaultPolicyStreams(tmp / "defaults");
   TestCancelDuringCommitIsAlsoBudgeted(tmp / "cancelbudget");
   TestShutdownMidFlight(tmp / "midflight");
+  TestCancellingOneDomainLeavesTheOthersRead(tmp / "twodomains");
   TestDeterministicAcrossRuns(tmp / "deterministic");
 
   fs::remove_all(tmp);

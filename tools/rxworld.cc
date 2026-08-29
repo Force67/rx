@@ -171,6 +171,16 @@ u64 HashBytes(u64 hash, const void* data, size_t size) {
   return hash;
 }
 
+// Length first, then the bytes. Concatenating variable-length strings without
+// it makes the hash ambiguous: {"A", "BC"} and {"AB", "C"} feed it the same
+// sequence, so two cooks that cut the world differently would claim the same
+// bake id and each accept the other's saves.
+u64 HashString(u64 hash, std::string_view value) {
+  const u64 size = value.size();
+  hash = HashBytes(hash, &size, sizeof(size));
+  return HashBytes(hash, value.data(), value.size());
+}
+
 // A content hash rather than a timestamp: baking the same scene with the same
 // settings twice produces the same id, so a no-op rebuild does not invalidate
 // every overlay keyed to it, while any change to the input or to how it is cut
@@ -191,13 +201,17 @@ u64 HashCook(const std::string& scene_path, const BakeOptions& options,
     hash = HashBytes(hash, buffer, read);
   }
   std::fclose(file);
-  hash = HashBytes(hash, options.name.data(), options.name.size());
+  hash = HashString(hash, options.name);
   hash = HashBytes(hash, &options.cell_size, sizeof(options.cell_size));
   hash = HashBytes(hash, &options.skip_unknown, sizeof(options.skip_unknown));
+  const u64 instance_count = options.instance_components.size();
+  hash = HashBytes(hash, &instance_count, sizeof(instance_count));
   for (const std::string& component : options.instance_components) {
-    hash = HashBytes(hash, component.data(), component.size());
+    hash = HashString(hash, component);
   }
-  for (const std::string& entry : schema) hash = HashBytes(hash, entry.data(), entry.size());
+  const u64 schema_count = schema.size();
+  hash = HashBytes(hash, &schema_count, sizeof(schema_count));
+  for (const std::string& entry : schema) hash = HashString(hash, entry);
   return hash == 0 ? 1 : hash;  // 0 means "unreadable"
 }
 

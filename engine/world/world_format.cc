@@ -22,6 +22,11 @@ constexpr u32 kMaximumArchetypes = 65'536;
 constexpr u32 kMaximumColumns = 1'000'000;
 constexpr u32 kMaximumPrototypes = 1'000'000;
 constexpr u32 kMaximumInstances = 16'000'000;
+// Archetypes may share a stable-id array, so each one's rows can pass the
+// bounds check against a small data section while the total does not: 65,536
+// archetypes of 65,536 rows fit in under two megabytes and describe 2^32 ids.
+// The per-archetype limits do not bound the sum, so the sum is bounded here.
+constexpr u64 kMaximumTotalRows = 32'000'000;
 constexpr u32 kMaximumStringBytes = 64u * 1024 * 1024;
 constexpr u64 kMaximumDataBytes = 2ull * 1024 * 1024 * 1024;
 
@@ -1043,9 +1048,14 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
 
   // Lift each archetype's stable ids out of the byte buffer, so reading one is
   // an array access rather than a cast through bytes that were never a u64.
-  u32 total_ids = 0;
+  u64 total_ids = 0;
   for (const WorldArchetypeRecord& archetype : out->archetypes) total_ids += archetype.row_count;
-  out->stable_ids.reserve(total_ids);
+  if (total_ids > kMaximumTotalRows) {
+    SetError(error, "cell payload: " + std::to_string(total_ids) +
+                        " rows across its archetypes, more than a cell may hold");
+    return false;
+  }
+  out->stable_ids.reserve(static_cast<size_t>(total_ids));
   for (WorldArchetypeRecord& archetype : out->archetypes) {
     archetype.stable_id_index = static_cast<u32>(out->stable_ids.size());
     Cursor ids(std::span<const u8>(out->data.data(), out->data.size()));
@@ -1056,6 +1066,20 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
       SetError(error, "cell payload: archetype stable ids run past the data section");
       return false;
     }
+  }
+
+  // The writer refuses to emit a duplicate (see Encode); a decoder that accepts
+  // one lets two live rows share an identity, so Resolve can only ever reach
+  // the first and an overlay delta lands on both.
+  base::Vector<u64> seen;
+  seen.reserve(out->stable_ids.size() + out->instances.size());
+  seen.insert(seen.end(), out->stable_ids.begin(), out->stable_ids.end());
+  for (const WorldInstanceRecord& instance : out->instances) seen.push_back(instance.stable_id);
+  std::sort(seen.begin(), seen.end());
+  for (size_t i = 1; i < seen.size(); ++i) {
+    if (seen[i] != seen[i - 1]) continue;
+    SetError(error, "cell payload: stable id " + std::to_string(seen[i]) + " appears twice");
+    return false;
   }
   return true;
 }
