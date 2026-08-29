@@ -36,13 +36,20 @@ void SetError(std::string* error, std::string message) {
   if (error) *error = std::move(message);
 }
 
-u64 Checksum(std::span<const u8> bytes) {
-  u64 hash = 0xcbf29ce484222325ull;
+u64 Checksum(u64 hash, std::span<const u8> bytes) {
   for (u8 byte : bytes) {
     hash ^= byte;
     hash *= 0x100000001b3ull;
   }
   return hash;
+}
+
+// Header and body together. Leaving the header out would mean the bake id, the
+// cell, the domain, the tier and every table count were guarded only by the
+// cross-checks that read them, and a zeroed field passes a cross-check by
+// looking like "unset".
+u64 Checksum(std::span<const u8> header, std::span<const u8> body) {
+  return Checksum(Checksum(0xcbf29ce484222325ull, header), body);
 }
 
 u64 HashBytes(u64 hash, const void* data, size_t size) {
@@ -442,7 +449,8 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
   AppendVec3(out, grid_origin_);
   AppendU32(out, static_cast<u32>(cells.size()));
   AppendU32(out, static_cast<u32>(payloads.size()));
-  AppendU64(out, Checksum(std::span<const u8>(body.data(), body.size())));
+  AppendU64(out, Checksum(std::span<const u8>(out->data(), out->size()),
+                          std::span<const u8>(body.data(), body.size())));
   out->insert(out->end(), body.begin(), body.end());
   return true;
 }
@@ -488,7 +496,7 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
     return false;
   }
   const std::span<const u8> body = bytes.subspan(body_offset);
-  if (Checksum(body) != checksum) {
+  if (Checksum(bytes.first(body_offset - sizeof(u64)), body) != checksum) {
     SetError(error, "world index: checksum mismatch");
     return false;
   }
@@ -802,7 +810,8 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
   AppendU32(out, static_cast<u32>(instances_.size()));
   AppendU32(out, static_cast<u32>(strings.bytes().size()));
   AppendU64(out, data.size());
-  AppendU64(out, Checksum(std::span<const u8>(body.data(), body.size())));
+  AppendU64(out, Checksum(std::span<const u8>(out->data(), out->size()),
+                          std::span<const u8>(body.data(), body.size())));
   out->insert(out->end(), body.begin(), body.end());
   return true;
 }
@@ -900,7 +909,7 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     return false;
   }
   const std::span<const u8> body = bytes.subspan(body_offset);
-  if (Checksum(body) != checksum) {
+  if (Checksum(bytes.first(body_offset - sizeof(u64)), body) != checksum) {
     SetError(error, "cell payload: checksum mismatch");
     return false;
   }

@@ -409,6 +409,169 @@ void TestPayloadRefusesCorruptedBytes() {
   CHECK(DecodeCellPayload(std::span<const u8>(good.data(), good.size()), &payload, &error));
 }
 
+// The checksum now covers the header, so a structural field cannot be edited
+// into place without recomputing it. That is exactly what a crafted archive
+// would do, so the tests that check the in-body range checks have to do it too.
+constexpr u32 kIndexHeaderBytes = 64;
+constexpr u32 kPayloadHeaderBytes = 72;
+
+void RepairChecksum(base::Vector<u8>* bytes, u32 header_bytes) {
+  u64 hash = 0xcbf29ce484222325ull;
+  auto fold = [&](size_t first, size_t last) {
+    for (size_t i = first; i < last; ++i) {
+      hash ^= (*bytes)[i];
+      hash *= 0x100000001b3ull;
+    }
+  };
+  fold(0, header_bytes - sizeof(u64));
+  fold(header_bytes, bytes->size());
+  for (u32 shift = 0; shift < 64; shift += 8) {
+    (*bytes)[header_bytes - sizeof(u64) + shift / 8] = static_cast<u8>(hash >> shift);
+  }
+}
+
+void WriteU32(base::Vector<u8>* bytes, size_t offset, u32 value) {
+  for (u32 shift = 0; shift < 32; shift += 8) {
+    (*bytes)[offset + shift / 8] = static_cast<u8>(value >> shift);
+  }
+}
+
+// Every one of these decodes cleanly as far as its checksum, so nothing but the
+// structural check itself stands between a crafted archive and a bad read. The
+// archetype/column span is the load-bearing one: the streamer indexes
+// columns[column_first + c] with no second check of its own.
+void TestPayloadRefusesCraftedStructure() {
+  const Position positions[2] = {{1, 2, 3}, {4, 5, 6}};
+  const base::Vector<u8> column = BytesOf(positions, sizeof(positions));
+  const u64 ids[2] = {1, 2};
+  CellPayloadWriter writer(1, Domain::kGameplay, Tier::kStandard);
+  writer.set_bake_id(kBakeId);
+  const u32 archetype = writer.BeginArchetype(2);
+  writer.AddColumn(archetype, "Position", sizeof(Position),
+                   HashComponentLayout("Position", sizeof(Position), {}, {}, {}),
+                   std::span<const u8>(column.data(), column.size()));
+  writer.SetStableIds(archetype, std::span<const u64>(ids, 2));
+  base::Vector<u8> good;
+  std::string error;
+  CHECK(writer.Encode(&good, &error));
+
+  WorldCellPayload payload;
+  // The body opens with the archetype record: row_count, column_first,
+  // column_count, stable_id_offset.
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, kPayloadHeaderBytes + 4, 1);  // column_first past the single column
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "an archetype whose columns start past the table");
+  }
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, kPayloadHeaderBytes + 8, 2);  // two columns where one exists
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "an archetype claiming more columns than exist");
+  }
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, kPayloadHeaderBytes, 3);  // three rows of a two-row column
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "a row count its columns cannot fill");
+  }
+  {
+    // The column record follows the archetype record: name, stride, ...
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, kPayloadHeaderBytes + 20, 9999);
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "a column name outside the string table");
+  }
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, 12, 7);  // kind
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "an unknown payload kind");
+  }
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, 12, static_cast<u32>(PayloadKind::kInstances));
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "an instance payload carrying entity tables");
+  }
+  {
+    base::Vector<u8> bad(good);
+    bad[8] = 2;  // version
+    RepairChecksum(&bad, kPayloadHeaderBytes);
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "a future payload version");
+  }
+  {
+    // The bake id is in the header, so editing it now fails the checksum rather
+    // than reaching the cross-check that used to be its only guard.
+    base::Vector<u8> bad(good);
+    bad[24] ^= 0xff;
+    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+                  error, "a header field edited without repairing the checksum");
+  }
+  CHECK(DecodeCellPayload(std::span<const u8>(good.data(), good.size()), &payload, &error));
+}
+
+void TestIndexRefusesCraftedStructure() {
+  WorldIndexWriter writer;
+  writer.set_bake_id(kBakeId);
+  writer.AddCell(1, {}, {16, 16, 16}, 0, 0, 4);
+  writer.AddCell(2, {16, 0, 0}, {32, 16, 16}, 0, 4, 4);
+  writer.AddPayload(1, Domain::kGameplay, Tier::kStandard, 64, 4);
+  base::Vector<u8> good;
+  std::string error;
+  CHECK(writer.Encode(&good, &error));
+
+  WorldIndexData index;
+  // The cell record is id, min[3], max[3], zone, flags, stable ids, spans.
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, kIndexHeaderBytes + 52, 5);  // payload_first past the table
+    RepairChecksum(&bad, kIndexHeaderBytes);
+    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                  error, "a cell spanning past the payload table");
+  }
+  {
+    base::Vector<u8> bad(good);
+    // Give cell 1 a range that swallows cell 2's.
+    WriteU32(&bad, kIndexHeaderBytes + 48, 100);  // stable_id_count
+    RepairChecksum(&bad, kIndexHeaderBytes);
+    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                  error, "overlapping stable-id ranges on the read side");
+  }
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, kIndexHeaderBytes + 16, 0x7fc00000);  // minimum.z = NaN
+    RepairChecksum(&bad, kIndexHeaderBytes);
+    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                  error, "a cell with non-finite bounds");
+  }
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, kIndexHeaderBytes + 16, 0x42c80000);  // minimum.z = 100 > maximum.z
+    RepairChecksum(&bad, kIndexHeaderBytes);
+    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                  error, "a cell with inverted bounds");
+  }
+  {
+    // The payload table sits after both cells; its last four bytes are the
+    // domain, tier and padding.
+    base::Vector<u8> bad(good);
+    bad[kIndexHeaderBytes + 2 * 60 + 12] = 42;  // domain
+    RepairChecksum(&bad, kIndexHeaderBytes);
+    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                  error, "a payload with an unknown domain");
+  }
+  CHECK(DecodeWorldIndex(std::span<const u8>(good.data(), good.size()), &index, &error));
+}
+
 void TestLayoutHashSeparatesShapes() {
   const std::string_view names[2] = {"x", "y"};
   const u32 types[2] = {4, 4};
@@ -441,6 +604,8 @@ int main() {
   TestInstancePayloadRoundTrip();
   TestPayloadRefusesInconsistentContent();
   TestPayloadRefusesCorruptedBytes();
+  TestPayloadRefusesCraftedStructure();
+  TestIndexRefusesCraftedStructure();
   TestLayoutHashSeparatesShapes();
   if (g_failures) {
     std::fprintf(stderr, "world_format_test: %d failure(s)\n", g_failures);

@@ -3,6 +3,7 @@
 // search while a cell materializes.
 #include "world/world_overlay.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <string>
 
@@ -178,33 +179,102 @@ void TestRefusesCorruptedBytes() {
   CHECK(WorldOverlay::Decode(std::span<const u8>(good.data(), good.size()), &decoded, &error));
 }
 
-// An overlay that arrives out of order would answer IsDestroyed wrongly rather
-// than slowly, so the decoder has to catch it. Building one takes hand-written
-// bytes: the in-memory API cannot produce it.
-void TestRefusesUnsortedFile() {
-  WorldOverlay overlay;
-  overlay.Destroy(10);
-  overlay.Destroy(20);
-  base::Vector<u8> bytes;
-  std::string error;
-  CHECK(overlay.Encode(&bytes, &error));
-
-  // Swap the two ids and repair the checksum so only the ordering is wrong.
-  const size_t body = bytes.size() - 16;
-  for (u32 i = 0; i < 8; ++i) std::swap(bytes[body + i], bytes[body + 8 + i]);
-  u64 checksum = 0xcbf29ce484222325ull;
-  for (size_t i = body; i < bytes.size(); ++i) {
-    checksum ^= bytes[i];
-    checksum *= 0x100000001b3ull;
-  }
+// Rewrites the file's checksum after an edit, so only the structural check
+// under test can reject it. Every case below decodes cleanly up to that point,
+// which is what a hand-edited or crafted save would do.
+void RepairChecksum(base::Vector<u8>* bytes) {
+  constexpr size_t kHeaderBytes = 32;  // magic, version, flags, bake id, counts, checksum
+  u64 hash = 0xcbf29ce484222325ull;
+  auto fold = [&](size_t first, size_t last) {
+    for (size_t i = first; i < last; ++i) {
+      hash ^= (*bytes)[i];
+      hash *= 0x100000001b3ull;
+    }
+  };
+  fold(0, kHeaderBytes - sizeof(u64));
+  fold(kHeaderBytes, bytes->size());
   for (u32 shift = 0; shift < 64; shift += 8) {
-    bytes[body - 8 + shift / 8] = static_cast<u8>(checksum >> shift);
+    (*bytes)[kHeaderBytes - sizeof(u64) + shift / 8] = static_cast<u8>(hash >> shift);
   }
+}
+
+// The invariants a decoded overlay has to hold for the streamer to consult it
+// with a binary search and to trust what it says.
+void TestRefusesInconsistentFiles() {
+  WorldOverlay overlay;
+  overlay.set_bake_id(7);
+  overlay.Move(10, {1, 2, 3}, {0, 0, 0, 1}, 1.0f);
+  overlay.Move(20, {4, 5, 6}, {0, 0, 0, 1}, 1.0f);
+  base::Vector<u8> good;
+  std::string error;
+  CHECK(overlay.Encode(&good, &error));
 
   WorldOverlay decoded;
-  CheckRejected(WorldOverlay::Decode(std::span<const u8>(bytes.data(), bytes.size()), &decoded,
-                                     &error),
-                error, "an unsorted destroyed list");
+  {
+    // Swap the two moves so the list is no longer sorted by stable id.
+    base::Vector<u8> bad(good);
+    constexpr size_t kMove = 40;
+    for (u32 i = 0; i < kMove; ++i) std::swap(bad[32 + i], bad[32 + kMove + i]);
+    RepairChecksum(&bad);
+    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+                                       &error),
+                  error, "an unsorted move list");
+  }
+  {
+    // scale = NaN, the last field of the first move.
+    base::Vector<u8> bad(good);
+    for (u32 shift = 0; shift < 32; shift += 8) {
+      bad[32 + 36 + shift / 8] = static_cast<u8>(0x7fc00000u >> shift);
+    }
+    RepairChecksum(&bad);
+    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+                                       &error),
+                  error, "a move with a non-finite transform");
+  }
+  {
+    // Say there is one destroyed id and one move, and let the first move's
+    // leading u64 be read as that destroyed id: 10, which the move also names.
+    base::Vector<u8> bad(good);
+    bad[20] = 1;  // destroyed_count
+    bad[24] = 1;  // move_count
+    RepairChecksum(&bad);
+    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+                                       &error),
+                  error, "an id that is both destroyed and moved");
+  }
+  {
+    base::Vector<u8> bad(good);
+    bad[8] = 9;  // version
+    RepairChecksum(&bad);
+    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+                                       &error),
+                  error, "a future version");
+  }
+  {
+    // The bake id lives in the header, so zeroing it - which would read as "not
+    // keyed to any bake" and re-enable cross-bake application - fails the
+    // checksum instead.
+    base::Vector<u8> bad(good);
+    for (u32 i = 0; i < 8; ++i) bad[12 + i] = 0;
+    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+                                       &error),
+                  error, "a zeroed bake id");
+  }
+  CHECK(WorldOverlay::Decode(std::span<const u8>(good.data(), good.size()), &decoded, &error));
+  CHECK(decoded.bake_id() == 7);
+
+  // And the same for the destroyed list, which IsDestroyed binary searches: out
+  // of order it would answer wrongly rather than slowly.
+  WorldOverlay destroys;
+  destroys.Destroy(10);
+  destroys.Destroy(20);
+  base::Vector<u8> sorted;
+  CHECK(destroys.Encode(&sorted, &error));
+  for (u32 i = 0; i < 8; ++i) std::swap(sorted[32 + i], sorted[32 + 8 + i]);
+  RepairChecksum(&sorted);
+  CheckRejected(
+      WorldOverlay::Decode(std::span<const u8>(sorted.data(), sorted.size()), &decoded, &error),
+      error, "an unsorted destroyed list");
 }
 
 }  // namespace
@@ -214,7 +284,7 @@ int main() {
   TestTouchesRange();
   TestRoundTrip();
   TestRefusesCorruptedBytes();
-  TestRefusesUnsortedFile();
+  TestRefusesInconsistentFiles();
   if (g_failures) {
     std::fprintf(stderr, "world_overlay_test: %d failure(s)\n", g_failures);
     return 1;

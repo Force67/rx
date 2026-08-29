@@ -418,18 +418,23 @@ void WorldStreamer::DrainLoader() {
     // all: the region was cancelled and re-prepared while it was in flight.
     if (!cell || !(cell->ticket == result.ticket) || cell->phase != CellPhase::kLoading) continue;
 
+    // A read failure already names the path it failed on; a schema failure is
+    // about the payload's contents and does not.
     std::string error;
     if (result.ok) {
       cell->payload = std::move(result.payload);
-      if (!ResolveSchema(*cell, &error)) result.ok = false;
+      if (!ResolveSchema(*cell, &error)) {
+        result.ok = false;
+        error = CellPayloadPath(map_.payload_prefix(), result.cell, result.domain, result.tier) +
+                ": " + error;
+      }
     } else {
       error = std::move(result.error);
     }
 
     if (!result.ok) {
       NoteLoadFailure(state, result.cell);
-      RecordError(CellPayloadPath(map_.payload_prefix(), result.cell, result.domain, result.tier) +
-                  ": " + error);
+      RecordError(std::move(error));
       cell->payload = WorldCellPayload{};
       cell->resolved.clear();
       // Out of kLoading, so a loader that delivers the same ticket twice cannot
@@ -509,10 +514,11 @@ void WorldStreamer::GatherClaims(Domain domain, DomainState& state) {
     for (const CellDemand& demand : claim_scratch_) {
       if (demand.region.id != entry.claim.cell) continue;
       CellDemand claimed = demand;
-      claimed.from_claim = true;
-      // A claim that wants detail says so; one that does not leaves the band to
-      // whoever is actually looking at the cell.
-      claimed.distance = entry.claim.full_detail ? 0 : std::numeric_limits<f32>::infinity();
+      // A claim that does not ask for detail must not decide the band: its
+      // source stands at the cell's own middle, so its distance is zero and it
+      // would pin the near tier for as long as the lease lived. One that does
+      // ask counts exactly like an observer standing there, which is what it is.
+      claimed.from_claim = !entry.claim.full_detail;
       state.demands.push_back(claimed);
     }
   }
@@ -543,9 +549,9 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
     // resident and correct, in both directions.
     f32 band_distance = std::numeric_limits<f32>::infinity();
     for (size_t d = i; d < end; ++d) {
-      if (!state.demands[d].from_claim) band_distance = std::min(band_distance, state.demands[d].distance);
+      if (state.demands[d].from_claim) continue;
+      band_distance = std::min(band_distance, state.demands[d].distance);
     }
-    band_distance = std::min(band_distance, nearest.distance);
     i = end;
 
     if (Suppressed(state, id)) continue;

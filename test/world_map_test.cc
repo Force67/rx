@@ -163,6 +163,74 @@ void TestMissingAndStaleArchives(const fs::path& directory) {
   }
 }
 
+// The index's stable-id ranges are what resolves an id to its owner and what
+// decides whether a save has anything to say about a cell. A payload carrying
+// an id outside its cell's range would be unreachable by Resolve and silently
+// exempt from every overlay delta - a fence that comes back after the player
+// broke it - so it is refused rather than loaded.
+void TestPayloadIdsMustLieInTheCellsRange(const fs::path& directory) {
+  fs::create_directories(directory);
+  WorldIndexWriter writer;
+  writer.set_bake_id(kBakeId);
+  writer.AddCell(1, {}, {64, 32, 64}, 0, 100, 10);
+  writer.AddCell(2, {64, 0, 0}, {128, 32, 64}, 0, 200, 10);
+  writer.AddPayload(1, Domain::kRepresentation, Tier::kFull, 64, 2);
+  writer.AddPayload(2, Domain::kRepresentation, Tier::kFull, 64, 1);
+  base::Vector<u8> index_bytes;
+  std::string error;
+  CHECK(writer.Encode(&index_bytes, &error));
+
+  auto page = [&](u64 cell, u64 first_id, u32 count) {
+    CellPayloadWriter payload(cell, Domain::kRepresentation, Tier::kFull);
+    payload.set_bake_id(kBakeId);
+    const u32 prototype = payload.AddPrototype("prop/rock");
+    for (u32 i = 0; i < count; ++i) {
+      payload.AddInstance(first_id + i, prototype, {}, {0, 0, 0, 1}, 1.0f);
+    }
+    base::Vector<u8> bytes;
+    CHECK(payload.Encode(&bytes, &error));
+    return bytes;
+  };
+
+  PackWriter pack;
+  pack.Add("city/city.rxworld", std::move(index_bytes));
+  // Cell 1's page strays one id past its range; cell 2's is written under
+  // cell 1's path, so it decodes and describes the wrong cell.
+  pack.Add(CellPayloadPath("city", 1, Domain::kRepresentation, Tier::kFull), page(1, 109, 2));
+  pack.Add(CellPayloadPath("city", 2, Domain::kRepresentation, Tier::kFull), page(1, 100, 1));
+  CHECK(pack.WriteTo((directory / "ranges.rxp").string()));
+
+  Vfs vfs;
+  auto provider = rx::asset::MakePackFileProvider((directory / "ranges.rxp").string());
+  CHECK(provider != nullptr);
+  if (!provider) return;
+  vfs.Mount("world", std::move(provider));
+  WorldMap map;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  WorldCellPayload payload;
+  CHECK(!map.ReadPayload(vfs, 1, Domain::kRepresentation, Tier::kFull, &payload, &error));
+  CHECK(error.find("outside the range") != std::string::npos);
+  CHECK(!map.ReadPayload(vfs, 2, Domain::kRepresentation, Tier::kFull, &payload, &error));
+  CHECK(error.find("not cell 2") != std::string::npos);
+
+  // The same page inside the range loads.
+  PackWriter good;
+  base::Vector<u8> good_index;
+  CHECK(writer.Encode(&good_index, &error));
+  good.Add("city/city.rxworld", std::move(good_index));
+  good.Add(CellPayloadPath("city", 1, Domain::kRepresentation, Tier::kFull), page(1, 100, 2));
+  CHECK(good.WriteTo((directory / "ok.rxp").string()));
+  Vfs ok_vfs;
+  auto ok_provider = rx::asset::MakePackFileProvider((directory / "ok.rxp").string());
+  if (!ok_provider) return;
+  ok_vfs.Mount("world", std::move(ok_provider));
+  WorldMap ok_map;
+  CHECK(ok_map.Load(ok_vfs, "world://city/city.rxworld", &error));
+  CHECK(ok_map.ReadPayload(ok_vfs, 1, Domain::kRepresentation, Tier::kFull, &payload, &error));
+  CHECK(payload.instances.size() == 2);
+}
+
 void TestPerDomainBubbles(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -321,6 +389,7 @@ int main() {
 
   TestLoadFromArchive(tmp / "load");
   TestMissingAndStaleArchives(tmp / "stale");
+  TestPayloadIdsMustLieInTheCellsRange(tmp / "ranges");
   TestPerDomainBubbles(tmp / "bubbles");
   TestMovingObserverRetainsElongatedCells(tmp / "thin");
   TestTargetTier(tmp / "tiers");

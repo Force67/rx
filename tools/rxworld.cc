@@ -152,7 +152,13 @@ u64 HashBytes(u64 hash, const void* data, size_t size) {
 // settings twice produces the same id, so a no-op rebuild does not invalidate
 // every overlay keyed to it, while any change to the input or to how it is cut
 // up produces a different one that an older index refuses to read.
-u64 HashCook(const std::string& scene_path, const BakeOptions& options) {
+//
+// `schema` is the sorted name and reflected layout of every component this cook
+// actually writes. Only those: folding in the whole registry would move every
+// world's bake id whenever an unrelated component was added anywhere in the
+// engine, invalidating the saves the id exists to protect.
+u64 HashCook(const std::string& scene_path, const BakeOptions& options,
+             const base::Vector<std::string>& schema) {
   std::FILE* file = std::fopen(scene_path.c_str(), "rb");
   if (!file) return 0;
   u64 hash = 0xcbf29ce484222325ull;
@@ -168,17 +174,7 @@ u64 HashCook(const std::string& scene_path, const BakeOptions& options) {
   for (const std::string& component : options.instance_components) {
     hash = HashBytes(hash, component.data(), component.size());
   }
-  // And the schema this build can bake. Two cooks from builds that disagree
-  // about a component's fields produce different bytes for the same scene, so
-  // they have to be different bakes.
-  for (const edit::ComponentDesc* desc : edit::AllComponents()) {
-    if (!Bakeable(*desc)) continue;
-    u32 stride = 0;
-    u64 layout = 0;
-    if (!world::RuntimeComponentLayout(desc->name, &stride, &layout)) continue;
-    hash = HashBytes(hash, desc->name, std::strlen(desc->name));
-    hash = HashBytes(hash, &layout, sizeof(layout));
-  }
+  for (const std::string& entry : schema) hash = HashBytes(hash, entry.data(), entry.size());
   return hash == 0 ? 1 : hash;  // 0 means "unreadable"
 }
 
@@ -219,9 +215,6 @@ int Bake(int argc, char** argv) {
     options.instance_components.push_back("Transform");
     options.instance_components.push_back("Renderable");
   }
-  if (options.bake_id == 0) options.bake_id = HashCook(scene_path, options);
-  if (options.bake_id == 0) return Fail(scene_path + ": cannot be read");
-
   asset::Vfs vfs;
   asset::AssetDatabase database(vfs);
   ecs::World source;
@@ -324,8 +317,40 @@ int Bake(int argc, char** argv) {
       const int order = std::strcmp(a.components[i]->name, b.components[i]->name);
       if (order != 0) return order < 0;
     }
-    return false;
+    // A total order, so std::sort's instability cannot decide which entity gets
+    // which stable id. Two cooks of one scene must hand out the same ids or
+    // every overlay keyed to the old bake silently names different rows.
+    return a.entity.index < b.entity.index;
   });
+
+  // The schema this cook actually writes, sorted, with each component's
+  // reflected layout: a build that disagrees about any of it produces different
+  // bytes for the same scene and so has to be a different bake.
+  base::Vector<const edit::ComponentDesc*> written;
+  for (const Authored& record : authored) {
+    for (const edit::ComponentDesc* desc : record.components) {
+      bool seen = false;
+      for (const edit::ComponentDesc* entry : written) seen |= entry == desc;
+      if (!seen) written.push_back(desc);
+    }
+  }
+  std::sort(written.begin(), written.end(),
+            [](const edit::ComponentDesc* a, const edit::ComponentDesc* b) {
+              return std::strcmp(a->name, b->name) < 0;
+            });
+  base::Vector<std::string> schema;
+  schema.reserve(written.size());
+  for (const edit::ComponentDesc* desc : written) {
+    u32 stride = 0;
+    u64 layout = 0;
+    if (!world::RuntimeComponentLayout(desc->name, &stride, &layout)) {
+      return Fail(std::string("component '") + desc->name + "' has no reflected layout");
+    }
+    schema.push_back(std::string(desc->name) + " " + std::to_string(layout));
+  }
+
+  if (options.bake_id == 0) options.bake_id = HashCook(scene_path, options, schema);
+  if (options.bake_id == 0) return Fail(scene_path + ": cannot be read");
 
   world::WorldIndexWriter index;
   index.set_world_id(asset::MakeAssetId(options.name).hash);

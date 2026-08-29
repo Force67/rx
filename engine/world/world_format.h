@@ -24,6 +24,10 @@
 //             columns; instance payloads are packed transforms for static
 //             decoration that has no ECS identity until something needs it to.
 //
+// The checksum covers the header as well as the body, so the fields the
+// cross-checks lean on - the bake id, the cell, the domain, the tier, the table
+// counts - cannot be zeroed or edited into agreement without failing it.
+//
 // Both are little-endian, hand-rolled in the style of terrain_io.cc, and both
 // refuse to load rather than substitute a default. A truncated, reordered or
 // stale file is a cook bug, and a silently half-loaded world costs far more to

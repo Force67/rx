@@ -2,6 +2,7 @@
 // exact-size column resize was O(n^2) and relocated rows bitwise), non-POD
 // components with interior pointers (bitwise relocation would corrupt them),
 // archetype transitions, swap-remove churn and chunk reclamation.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -217,6 +218,11 @@ void TestCreateBatchFillsColumnRuns() {
       CHECK(run > 0);
       // Both columns live in the same chunk, so both runs end together.
       CHECK(run == velocity_run);
+      // A run stops at the chunk boundary. Getting this wrong is not a missed
+      // optimization: the caller memcpys `run` rows from one pointer, so a run
+      // that overstates the chunk writes into the next one.
+      const rx::u32 rows_per_chunk = 16 * 1024 / (sizeof(Position) + sizeof(Velocity));
+      CHECK(run == std::min(rows_per_chunk - covered % rows_per_chunk, batch.count() - covered));
       for (rx::u32 i = 0; i < run; ++i) {
         new (positions + i) Position{static_cast<float>(covered + i), 0, 0};
         new (velocities + i) Velocity{0, static_cast<float>(covered + i), 0};
@@ -251,6 +257,43 @@ void TestCreateBatchFillsColumnRuns() {
   world.Destroy(created[0]);
   CHECK(!world.IsAlive(created[0]));
   CHECK(world.entity_count() == kCount - 1);
+
+  // A second batch into the same archetype starts partway through it, so the
+  // column pointers have to be offset by the rows already there. Filling only
+  // the second batch and reading back both is what catches an implementation
+  // that ignores where the batch begins.
+  std::vector<rx::ecs::Entity> second;
+  world.CreateBatch(signature, 700, [&](const rx::ecs::EntityBatch& batch) {
+    rx::u32 covered = 0;
+    while (covered < batch.count()) {
+      rx::u32 run = 0;
+      auto* positions =
+          static_cast<Position*>(batch.Column(rx::ecs::GetComponentId<Position>(), covered, &run));
+      rx::u32 velocity_run = 0;
+      auto* velocities =
+          static_cast<Velocity*>(batch.Column(rx::ecs::GetComponentId<Velocity>(), covered,
+                                              &velocity_run));
+      CHECK(run > 0 && run == velocity_run);
+      for (rx::u32 i = 0; i < run; ++i) {
+        new (positions + i) Position{-1.0f, 0, 0};
+        new (velocities + i) Velocity{};
+      }
+      covered += run;
+    }
+    for (rx::u32 i = 0; i < batch.count(); ++i) second.push_back(batch.EntityAt(i));
+  });
+  // The first batch's rows are untouched: a batch that wrote from row zero
+  // would have overwritten them with -1.
+  int untouched = 0;
+  for (rx::u32 i = 1; i < kCount; ++i) {
+    const Position* position = world.Get<Position>(created[i]);
+    if (position && position->x == static_cast<float>(i)) ++untouched;
+  }
+  CHECK(untouched == static_cast<int>(kCount) - 1);
+  for (rx::ecs::Entity entity : second) {
+    const Position* position = world.Get<Position>(entity);
+    CHECK(position != nullptr && position->x == -1.0f);
+  }
 }
 
 // A batch must reuse the free list Destroy fills, and a zero-row batch must not
