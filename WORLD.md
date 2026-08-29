@@ -207,6 +207,22 @@ fields all produce a different one that an old index refuses to read.
 `rxworld` reflects only the components its own build registers. A game cooks
 from a build that registers its own.
 
+## Verifying it
+
+Five test binaries, all in plain `ctest`, no GPU:
+
+| | |
+|---|---|
+| `world_format_test` | round trip, the cook-time consistency checks, and the decoders' in-body structural checks driven by crafted bytes with the checksum repaired |
+| `world_map_test` | an index out of a real `.rxp`, per-domain bubbles, and the refusals for a stale, holed or out-of-range archive |
+| `world_overlay_test` | the delta semantics and the invariants a decoded save has to hold |
+| `world_stream_test` | cancellation races, stale generations, budgeted commit and teardown, tier bands, claims, overlays, promotion, multi-archetype and chunk-spanning cells |
+| `world_bake_test` | the whole path: an authored scene through the real `rxworld` binary into an archive, mounted and streamed back |
+
+The streaming tests drive a hand-controlled `CellLoader`, so completion order,
+late results after a cancel, and transient read failures are all things a test
+decides rather than things it waits for.
+
 ## What is not here
 
 Named, so nobody has to discover them:

@@ -1466,6 +1466,99 @@ void TestDefaultPolicyStreams(const fs::path& directory) {
   CHECK(world.entity_count() == 0);
 }
 
+// Cancel is the other teardown path, and it is the one that runs when an
+// observer moves fast, so it is the one that can least afford to destroy a
+// whole cell in a frame. A cell big enough for the budget to matter, cancelled
+// while it is still committing.
+void TestCancelDuringCommitIsAlsoBudgeted(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "cancelbudget.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy(/*rows_per_commit=*/1);
+  policy[Domain::kRepresentation].load_distance = 0;  // one domain, one cell
+  streamer.Configure(policy);
+  const WorldStreamObservation inside = At(32, 32);
+
+  // Stop while the cell is committing, not after it is resident: that is what
+  // makes the planner cancel rather than unload.
+  u32 built = 0;
+  for (u32 i = 0; i < 40; ++i) {
+    loader.CompleteAll();
+    Tick(&streamer, inside, 1);
+    built = streamer.stats().entities;
+    if (built >= 3) break;
+  }
+  CHECK(built >= 3);
+  CHECK(built < kEntitiesPerCell);
+  CHECK(streamer.stats().resident == 0);  // still mid-commit, never published
+
+  const u32 cancels_before = loader.cancelled();
+  u32 previous = built;
+  u32 steps = 0;
+  for (u32 i = 0; i < 40 && streamer.stats().entities > 0; ++i) {
+    loader.CompleteAll();
+    Tick(&streamer, At(5000, 5000), 1);
+    const u32 now = streamer.stats().entities;
+    if (now < previous) {
+      CHECK(previous - now <= 1);  // one row per quantum, cancel included
+      ++steps;
+    }
+    previous = now;
+  }
+  CHECK(loader.cancelled() > cancels_before);  // it really was a cancel
+  CHECK(steps > 1);
+  CHECK(streamer.stats().entities == 0);
+  CHECK(world.entity_count() == 0);
+}
+
+// Shutdown has to hold with work still in flight, not only from a settled
+// world, because that is when a host swaps worlds or quits.
+void TestShutdownMidFlight(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "midflight.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  const Entity bystander = world.Create();
+  {
+    QueuedLoader loader(map, vfs);
+    WorldStreamer streamer(map, loader, world);
+    streamer.Configure(TestPolicy(/*rows_per_commit=*/2));
+    const WorldStreamObservation inside = At(32, 32);
+
+    Tick(&streamer, inside, 1);  // reads in flight, nothing decoded
+    CHECK(streamer.stats().pending > 0);
+    loader.CompleteAll();
+    Tick(&streamer, inside, 2);  // now some rows exist, the cell is mid-commit
+    CHECK(streamer.stats().entities > 0);
+    CHECK(streamer.stats().entities < kEntitiesPerCell);
+
+    streamer.Shutdown();
+    CHECK(streamer.stats().entities == 0);
+    CHECK(world.entity_count() == 1);  // the bystander, untouched
+
+    // Terminal: a tick after it does nothing, rather than half-restarting.
+    loader.CompleteAll();
+    Tick(&streamer, inside, 5);
+    CHECK(streamer.stats().entities == 0);
+    CHECK(streamer.stats().pending == 0);
+    CHECK(world.entity_count() == 1);
+    streamer.Shutdown();  // idempotent
+  }
+  CHECK(world.entity_count() == 1);
+  CHECK(world.IsAlive(bystander));
+}
+
 void TestDeterministicAcrossRuns(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -1479,18 +1572,26 @@ void TestDeterministicAcrossRuns(const fs::path& directory) {
     QueuedLoader loader(map, vfs);
     WorldStreamer streamer(map, loader, world);
     streamer.Configure(TestPolicy(/*rows_per_commit=*/2));
+    // Which stable id landed in which ECS slot, tick by tick: a count alone is
+    // a monotone ramp that a different materialization order would not disturb.
     base::Vector<u32> trace;
     const WorldStreamObservation inside = At(32, 32);
     for (u32 i = 0; i < 20; ++i) {
       loader.CompleteAll();
       Tick(&streamer, inside, 1);
-      trace.push_back(streamer.stats().entities);
+      for (u32 c = 0; c < 4; ++c) {
+        for (u32 e = 0; e < kEntitiesPerCell; ++e) {
+          const Entity entity = streamer.Resolve(EntityStableId(c, e));
+          trace.push_back(world.IsAlive(entity) ? entity.index : ~u32{0});
+        }
+      }
     }
     return trace;
   };
 
-  // Same inputs, same tick-by-tick shape. The planner promises this; the shell
-  // has to not break it.
+  // Same inputs, same tick-by-tick result, down to which slot each stable id
+  // occupies. The planner promises the action stream; the shell has to not
+  // break it, and the ECS handles it hands out have to follow.
   const base::Vector<u32> first = run();
   const base::Vector<u32> second = run();
   CHECK(first.size() == second.size());
@@ -1529,6 +1630,8 @@ int main() {
   TestATransientFailureIsForgottenOnSuccess(tmp / "transient");
   TestResolveRefusesAnEntityTheGameDestroyed(tmp / "destroyed");
   TestDefaultPolicyStreams(tmp / "defaults");
+  TestCancelDuringCommitIsAlsoBudgeted(tmp / "cancelbudget");
+  TestShutdownMidFlight(tmp / "midflight");
   TestDeterministicAcrossRuns(tmp / "deterministic");
 
   fs::remove_all(tmp);
