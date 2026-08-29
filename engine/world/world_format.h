@@ -40,6 +40,11 @@ namespace rx::world {
 // texture detail are deliberately absent: those are resource-page residency
 // owned by the virtual geometry and texture streamers, and tying them to a
 // world cell is exactly the over-wide chunk this format exists to avoid.
+// Only two payload shapes exist so far (PayloadKind below): entity columns and
+// instance pages. Collision, navigation, lighting and audio are named here
+// because their residency is genuinely independent and the streamer already
+// schedules them separately, but nothing streams for them until content shaped
+// like a collision tile or a navigation tile exists to bake.
 enum class Domain : u8 {
   kGameplay = 0,        // ECS entities that need behavior
   kRepresentation = 1,  // static instance pages: decoration with no ECS identity
@@ -90,6 +95,13 @@ struct WorldCellRecord {
   // Every stable id the cook assigned inside this cell. Ranges never overlap
   // between cells, which is what lets a stable id be resolved to its owning
   // cell by binary search without any cell being resident.
+  //
+  // A stable id is a streaming key, not yet a persistence key. It is assigned
+  // by cook order within a cell, so re-baking a changed scene - or moving one
+  // object across a cell boundary - can reassign it, and an overlay keyed to
+  // the old bake no longer means what it said. That is what the bake id catches
+  // on the index; a save that must survive re-cooking needs an authored
+  // identity the cook maps to an id, which nothing here provides yet.
   u64 stable_id_first = 0;
   u32 stable_id_count = 0;
   u32 payload_first = 0;

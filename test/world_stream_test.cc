@@ -57,18 +57,25 @@ struct BakeOptions {
   bool corrupt_layout_hash = false;
   bool unknown_component = false;
   bool non_trivial_component = false;
+  // Also bake a cheaper gameplay tier, so a cell has two payloads to choose
+  // between and crossing the band actually changes what is resident.
+  bool tiered = false;
 };
 
-base::Vector<u8> BakeGameplay(u64 cell, const BakeOptions& options) {
+constexpr u32 kProxyEntitiesPerCell = 2;
+
+base::Vector<u8> BakeGameplay(u64 cell, const BakeOptions& options,
+                              Tier tier = Tier::kStandard) {
   u32 stride = 0;
   u64 layout = 0;
   CHECK(RuntimeComponentLayout("Transform", &stride, &layout));
   CHECK(stride == sizeof(Transform));
   if (options.corrupt_layout_hash) layout ^= 1;
 
+  const u32 rows = tier == Tier::kProxy ? kProxyEntitiesPerCell : kEntitiesPerCell;
   base::Vector<Transform> transforms;
   base::Vector<u64> ids;
-  for (u32 i = 0; i < kEntitiesPerCell; ++i) {
+  for (u32 i = 0; i < rows; ++i) {
     Transform transform;
     transform.position[0] = static_cast<f32>(cell);
     transform.position[1] = static_cast<f32>(i);
@@ -77,9 +84,9 @@ base::Vector<u8> BakeGameplay(u64 cell, const BakeOptions& options) {
     ids.push_back(EntityStableId(cell, i));
   }
 
-  CellPayloadWriter writer(cell, Domain::kGameplay, Tier::kStandard);
+  CellPayloadWriter writer(cell, Domain::kGameplay, tier);
   writer.set_bake_id(options.payload_bake_id);
-  const u32 archetype = writer.BeginArchetype(kEntitiesPerCell);
+  const u32 archetype = writer.BeginArchetype(rows);
   const char* name = options.unknown_component  ? "NoSuchComponentInThisBuild"
                      : options.non_trivial_component ? "Name"
                                                      : "Transform";
@@ -133,6 +140,12 @@ void MountWorld(const fs::path& archive, Vfs* vfs, const BakeOptions& options = 
                        kInstancesPerCell);
       pack.Add(CellPayloadPath("city", cell, Domain::kGameplay, Tier::kStandard),
                BakeGameplay(cell, options));
+      if (options.tiered) {
+        index.AddPayload(cell, Domain::kGameplay, Tier::kProxy,
+                         kProxyEntitiesPerCell * sizeof(Transform), kProxyEntitiesPerCell);
+        pack.Add(CellPayloadPath("city", cell, Domain::kGameplay, Tier::kProxy),
+                 BakeGameplay(cell, options, Tier::kProxy));
+      }
       pack.Add(CellPayloadPath("city", cell, Domain::kRepresentation, Tier::kFull),
                BakeRepresentation(cell, options));
     }
@@ -347,7 +360,7 @@ void TestWideBubbleLoadsEveryCell(const fs::path& directory) {
   }
 }
 
-void TestBudgetedCommitIsNotObservableHalfway(const fs::path& directory) {
+void TestBudgetedCommitIsNotResolvableHalfway(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
   MountWorld(directory / "budget.rxp", &vfs);
@@ -363,6 +376,11 @@ void TestBudgetedCommitIsNotObservableHalfway(const fs::path& directory) {
   const WorldStreamObservation inside = At(32, 32);
   // Load, then commit two rows at a time. Until the cell is published, a stable
   // id must not resolve: half its rows exist and the rest never may.
+  //
+  // The rows that do exist are ordinary entities and a query walking the world
+  // will see them, which is inherent to committing into a live world over
+  // several frames. What is guaranteed is narrower and is what this checks: a
+  // cell is not addressable by stable id until all of it is there.
   bool saw_partial = false;
   for (u32 i = 0; i < 40; ++i) {
     loader.CompleteAll();
@@ -774,6 +792,168 @@ void TestClaimKeepsACellResident(const fs::path& directory) {
   CHECK(streamer.stats().entities == 0);
 }
 
+// A cell that enters the bubble far away comes in cheap, and refines when the
+// observer closes on it. Without this the near tier is unreachable: a cell
+// always enters at roughly the load radius, which is by definition the far
+// band, and would keep that tier for as long as it stayed resident.
+void TestTierRefinesWhenTheObserverCloses(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  BakeOptions options;
+  options.tiered = true;
+  MountWorld(directory / "tiers.rxp", &vfs, options);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy();
+  policy[Domain::kGameplay].load_distance = 200;
+  policy[Domain::kGameplay].retain_distance = 240;
+  // Cells are 64 m: standing in the middle of one puts its neighbours 32 m away
+  // and the diagonal one 45 m, so a 20 m band means only the cell underfoot is
+  // near, and the margin lets it drift to 40 m before dropping back.
+  policy[Domain::kGameplay].full_tier_distance = 20;
+  policy[Domain::kGameplay].tier_hysteresis = 2.0f;
+  policy[Domain::kGameplay].near_tier = Tier::kFull;
+  policy[Domain::kGameplay].far_tier = Tier::kProxy;
+  policy[Domain::kRepresentation].load_distance = 0;  // one domain at a time
+  streamer.Configure(policy);
+
+  // Standing in cell 0, far from cell 3: one at the near tier, one at the far.
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(streamer.errors().empty());
+  CHECK(streamer.stats().entities == kEntitiesPerCell + 3 * kProxyEntitiesPerCell);
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, 5))));   // full has six rows
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));  // proxy has two
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 1))));
+
+  // Walk into cell 3. It refines to the full tier without the observer ever
+  // leaving its retain radius, so it never becomes a hole.
+  Settle(&streamer, &loader, At(96, 96));
+  CHECK(streamer.errors().empty());
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
+  CHECK(streamer.stats().entities == kEntitiesPerCell + 3 * kProxyEntitiesPerCell);
+
+  // Step past the band edge but inside the hysteresis margin: the cell keeps
+  // the tier it has rather than reloading on a wobble. Cell 3 starts at x = 64,
+  // so this stands 30 m from it - outside the 20 m band, inside the 40 m one.
+  Settle(&streamer, &loader, At(34, 96));
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
+
+  // Far enough to clear the margin: back to the cheap tier.
+  Settle(&streamer, &loader, At(-60, 96));
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 1))));
+  CHECK(streamer.errors().empty());
+}
+
+// A world baked at one tier per domain must not churn: both bands resolve to
+// the same payload, so nothing about the region changes as the observer moves
+// and the cell is never reloaded.
+void TestSingleTierWorldNeverReloads(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "single.rxp", &vfs);  // gameplay at kStandard only
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy();
+  policy[Domain::kGameplay].load_distance = 200;
+  policy[Domain::kGameplay].retain_distance = 240;
+  policy[Domain::kGameplay].full_tier_distance = 40;
+  policy[Domain::kRepresentation].load_distance = 0;
+  streamer.Configure(policy);
+
+  Settle(&streamer, &loader, At(-60, 96));
+  const Entity before = streamer.Resolve(EntityStableId(3, 0));
+  CHECK(world.IsAlive(before));
+  const u32 reads = loader.begun();
+
+  // Cross the band in both directions. Nothing reloads, so nothing is re-read.
+  Settle(&streamer, &loader, At(96, 96));
+  Settle(&streamer, &loader, At(-60, 96));
+  CHECK(streamer.Resolve(EntityStableId(3, 0)) == before);
+  CHECK(loader.begun() == reads);
+}
+
+// A cook error is deterministic: the same payload fails the same way every
+// time. Left alone the planner retries it for as long as the cell is in range,
+// re-reading and re-decoding broken bytes forever.
+void TestPersistentFailuresStopRetrying(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  BakeOptions options;
+  options.corrupt_layout_hash = true;
+  MountWorld(directory / "broken.rxp", &vfs, options);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy();
+  policy[Domain::kRepresentation].load_distance = 0;  // only the broken domain
+  streamer.Configure(policy);
+
+  // Long enough for many retry intervals (the plan's default is 30 ticks).
+  Settle(&streamer, &loader, At(32, 32), 400);
+  CHECK(streamer.stats().entities == 0);
+  CHECK(!streamer.errors().empty());
+  const u32 attempts = loader.begun();
+  if (attempts > 8) {
+    std::fprintf(stderr, "FAIL: a broken cell was read %u times in 400 ticks\n", attempts);
+    ++g_failures;
+  }
+
+  // And it stays stopped rather than resuming on a later tick.
+  Settle(&streamer, &loader, At(32, 32), 200);
+  CHECK(loader.begun() == attempts);
+  CHECK(streamer.stats().pending == 0);
+}
+
+// Teardown is budgeted on both paths. A cancel is the observer moving fast,
+// which is exactly when a whole cell destroyed in one frame would show.
+void TestTeardownRespectsTheBudget(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "teardown.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  streamer.Configure(TestPolicy(/*rows_per_commit=*/2));
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(streamer.stats().entities == kEntitiesPerCell);
+
+  const WorldStreamObservation away = At(1000, 1000);
+  u32 previous = streamer.stats().entities;
+  u32 ticks_spent = 0;
+  for (u32 i = 0; i < 40 && streamer.stats().entities > 0; ++i) {
+    loader.CompleteAll();
+    Tick(&streamer, away, 1);
+    const u32 now = streamer.stats().entities;
+    if (now < previous) {
+      CHECK(previous - now <= 2);  // never more than one quantum in a tick
+      ++ticks_spent;
+    }
+    previous = now;
+  }
+  CHECK(streamer.stats().entities == 0);
+  CHECK(ticks_spent > 1);  // six entities at two per tick cannot be one tick
+  CHECK(world.entity_count() == 0);
+}
+
 void TestDeterministicAcrossRuns(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -814,7 +994,7 @@ int main() {
 
   TestStreamInAndOut(tmp / "roundtrip");
   TestWideBubbleLoadsEveryCell(tmp / "wide");
-  TestBudgetedCommitIsNotObservableHalfway(tmp / "budget");
+  TestBudgetedCommitIsNotResolvableHalfway(tmp / "budget");
   TestUnloadDuringCommitDestroysExactlyWhatWasMade(tmp / "interrupt");
   TestLateResultAfterCancelIsNotPublished(tmp / "late");
   TestSchemaDriftIsRefusedLoudly(tmp / "drift");
@@ -822,6 +1002,10 @@ int main() {
   TestOverlayThatDeletesEverythingLeavesNothing(tmp / "wipe");
   TestPromoteAnInstance(tmp / "promote");
   TestShutdownEmptiesTheWorld(tmp / "shutdown");
+  TestTierRefinesWhenTheObserverCloses(tmp / "tiers");
+  TestSingleTierWorldNeverReloads(tmp / "single");
+  TestPersistentFailuresStopRetrying(tmp / "broken");
+  TestTeardownRespectsTheBudget(tmp / "teardown");
   TestClaimSet();
   TestClaimKeepsACellResident(tmp / "claims");
   TestDeterministicAcrossRuns(tmp / "deterministic");

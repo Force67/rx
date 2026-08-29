@@ -16,25 +16,6 @@ std::string DirectoryOf(std::string_view path) {
   return std::string(path.substr(0, slash));
 }
 
-// Conservative swept overlap: the query's segment grown by its radius, tested
-// against the cell on every axis the observer streams along. A false positive
-// costs one exact test in the planner; a false negative would read as the cell
-// having left the world, so this errs outward on purpose.
-bool QueryOverlaps(const scene::WorldStreamQuery& query, const Vec3& minimum, const Vec3& maximum) {
-  auto axis_overlaps = [&](u8 axis, f32 origin, f32 predicted, f32 low, f32 high) {
-    if ((query.axes & axis) == 0) return true;
-    const f32 sweep_low = std::min(origin, predicted) - query.radius;
-    const f32 sweep_high = std::max(origin, predicted) + query.radius;
-    return sweep_high >= low && sweep_low <= high;
-  };
-  return axis_overlaps(scene::kWorldStreamX, query.origin.x, query.predicted.x, minimum.x,
-                       maximum.x) &&
-         axis_overlaps(scene::kWorldStreamY, query.origin.y, query.predicted.y, minimum.y,
-                       maximum.y) &&
-         axis_overlaps(scene::kWorldStreamZ, query.origin.z, query.predicted.z, minimum.z,
-                       maximum.z);
-}
-
 }  // namespace
 
 bool WorldMap::Load(const asset::Vfs& vfs, std::string_view index_path, std::string* error) {
@@ -98,15 +79,18 @@ bool WorldMap::HasDomain(const WorldCellRecord& cell, Domain domain) const {
   return false;
 }
 
-void WorldMap::GatherRegions(const scene::WorldStreamQuery& query, Domain domain,
-                             base::Vector<scene::WorldStreamRegion>* out) const {
+void WorldMap::GatherRegions(const scene::WorldStreamObservation& observer, Domain domain,
+                             base::Vector<CellDemand>* out) const {
   if (!out || !loaded_) return;
   const u32 channel = 1u << static_cast<u32>(domain);
-  if ((query.channels & channel) == 0) return;
+  if ((observer.channels & channel) == 0) return;
   for (const WorldCellRecord& cell : index_.cells) {
     if (!HasDomain(cell, domain)) continue;
-    if (!QueryOverlaps(query, cell.minimum, cell.maximum)) continue;
-    out->push_back({cell.id, cell.minimum, cell.maximum, 0, channel});
+    const scene::WorldStreamRegion region{cell.id, cell.minimum, cell.maximum, 0, channel};
+    const scene::WorldStreamDemand demand = scene::EvaluateWorldStreamDemand(observer, region);
+    if (!demand.retain) continue;
+    out->push_back(
+        {region, std::min(demand.current_distance, demand.predicted_distance), demand.load});
   }
 }
 
@@ -147,20 +131,29 @@ bool MakeDomainObservation(const scene::WorldStreamObservation& observer, Domain
   return true;
 }
 
-Tier TargetTier(const WorldIndexData& index, const WorldCellRecord& cell, Domain domain,
-                const DomainStreamPolicy& policy, f32 distance) {
-  const bool near = std::isfinite(distance) && distance <= policy.full_tier_distance;
-  const Tier wanted = near ? policy.near_tier : policy.far_tier;
+bool InNearTierBand(const DomainStreamPolicy& policy, f32 distance, bool currently_near) {
+  const f32 margin = policy.tier_hysteresis > 1.0f ? policy.tier_hysteresis : 1.0f;
+  const f32 threshold =
+      currently_near ? policy.full_tier_distance * margin : policy.full_tier_distance;
+  return std::isfinite(distance) && distance <= threshold;
+}
+
+Tier ResolveTier(const WorldIndexData& index, const WorldCellRecord& cell, Domain domain,
+                 Tier wanted) {
   const Tier best = index.BestTier(cell, domain, wanted);
-  // Nothing at or below the wanted tier: fall back to the cheapest the cook did
-  // produce rather than treating the cell as absent. A proxy is a worse answer
-  // than the full thing, but it is a far better one than a hole.
   if (best != Tier::kAbsent) return best;
+  // Payloads are sorted by tier within a domain, so the first is the cheapest.
   for (u32 i = 0; i < cell.payload_count; ++i) {
     const WorldPayloadRecord& payload = index.payloads[cell.payload_first + i];
     if (payload.domain == domain) return payload.tier;
   }
   return Tier::kAbsent;
+}
+
+Tier TargetTier(const WorldIndexData& index, const WorldCellRecord& cell, Domain domain,
+                const DomainStreamPolicy& policy, f32 distance) {
+  const bool near = InNearTierBand(policy, distance, /*currently_near=*/false);
+  return ResolveTier(index, cell, domain, near ? policy.near_tier : policy.far_tier);
 }
 
 }  // namespace rx::world

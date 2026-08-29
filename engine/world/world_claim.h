@@ -22,6 +22,13 @@ namespace rx::world {
 // streaming source pinned to one cell, which is what it always was: a teleport
 // destination, a quest that must keep running, an AI route being planned, a
 // cutscene about to play. The planner sees it the same way it sees a player.
+//
+// Two limits worth knowing before relying on it. A claim's only lever over
+// scheduling is the region priority, and the planner sorts starvation age ahead
+// of priority when it hands out commit quanta, so a hard claim is admitted
+// early but does not preempt an older request already waiting. And the set has
+// no clock: Expire is the host's to call, from whatever tick it advances. A
+// lease nobody expires is exactly the immortal pin this exists to replace.
 enum class ClaimKind : u8 {
   // Correctness. Unloading this would be a bug: the player is standing on it,
   // a network-authoritative entity lives in it, a cutscene actor is in it.
