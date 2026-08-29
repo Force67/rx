@@ -106,8 +106,9 @@ bool WorldOverlay::IsDestroyed(u64 stable_id) const {
   return std::binary_search(destroyed_.begin(), destroyed_.end(), stable_id);
 }
 
-void WorldOverlay::Move(u64 stable_id, Vec3 position, Quat rotation, f32 scale) {
-  if (IsDestroyed(stable_id)) return;
+bool WorldOverlay::Move(u64 stable_id, Vec3 position, Quat rotation, f32 scale) {
+  if (IsDestroyed(stable_id)) return false;
+  if (!Finite({stable_id, position, rotation, scale})) return false;
   auto it = std::lower_bound(
       moves_.begin(), moves_.end(), stable_id,
       [](const OverlayMove& entry, u64 wanted) { return entry.stable_id < wanted; });
@@ -115,9 +116,10 @@ void WorldOverlay::Move(u64 stable_id, Vec3 position, Quat rotation, f32 scale) 
     it->position = position;
     it->rotation = rotation;
     it->scale = scale;
-    return;
+    return true;
   }
   moves_.insert(it, OverlayMove{stable_id, position, rotation, scale});
+  return true;
 }
 
 const OverlayMove* WorldOverlay::FindMove(u64 stable_id) const {

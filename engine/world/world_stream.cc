@@ -93,9 +93,11 @@ class ArchiveCellLoader final : public CellLoader {
     ready_.push_back(std::move(result));
   }
 
-  void Cancel(scene::WorldStreamTicket ticket) override {
+  void Cancel(const CellLoadRequest& request) override {
     for (size_t i = 0; i < ready_.size();) {
-      if (ready_[i].ticket == ticket) {
+      const CellLoadResult& result = ready_[i];
+      if (result.ticket == request.ticket && result.cell == request.cell &&
+          result.domain == request.domain && result.tier == request.tier) {
         ready_.erase(ready_.begin() + i);
       } else {
         ++i;
@@ -742,8 +744,10 @@ void WorldStreamer::UpdateDomain(Domain domain,
       }
       case scene::WorldStreamActionKind::kCancel:
       case scene::WorldStreamActionKind::kUnload: {
-        if (action.kind == scene::WorldStreamActionKind::kCancel) loader_.Cancel(action.ticket);
         DomainCell* cell = Find(state, action.ticket.region);
+        if (action.kind == scene::WorldStreamActionKind::kCancel && cell != nullptr) {
+          loader_.Cancel({action.ticket, cell->cell, domain, cell->tier});
+        }
         if (!cell || !(cell->ticket == action.ticket)) {
           // Nothing of ours under that ticket: acknowledge so the plan can let
           // the region go.
@@ -778,7 +782,12 @@ void WorldStreamer::Shutdown() {
     DomainState& state = domains_[i];
     scene::ResetWorldStreaming(state.plan, &actions);
     for (const scene::WorldStreamAction& action : actions) {
-      if (action.kind == scene::WorldStreamActionKind::kCancel) loader_.Cancel(action.ticket);
+      if (action.kind == scene::WorldStreamActionKind::kCancel) {
+        const DomainCell* cell = Find(state, action.ticket.region);
+        if (cell != nullptr) {
+          loader_.Cancel({action.ticket, cell->cell, static_cast<Domain>(i), cell->tier});
+        }
+      }
       scene::ApplyWorldStreamRetireResult(state.plan, action.ticket);
     }
     // Unbudgeted: the caller is about to destroy the ecs::World, so every row

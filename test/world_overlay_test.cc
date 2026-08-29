@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <limits>
 #include <string>
 
 namespace {
@@ -69,8 +70,18 @@ void TestDeltas() {
 
   // Moving something destroyed is refused; destroying something moved drops the
   // move. A row that will not exist has no transform worth keeping.
-  overlay.Move(5, {1, 1, 1}, {0, 0, 0, 1}, 1.0f);
+  CHECK(!overlay.Move(5, {1, 1, 1}, {0, 0, 0, 1}, 1.0f));
   CHECK(overlay.FindMove(5) == nullptr);
+
+  // And a value the decoder would refuse never reaches the file: a save that
+  // writes and then cannot be loaded is worse than one that says no.
+  const f32 nan = std::numeric_limits<f32>::quiet_NaN();
+  CHECK(!overlay.Move(11, {nan, 0, 0}, {0, 0, 0, 1}, 1.0f));
+  CHECK(!overlay.Move(11, {0, 0, 0}, {0, 0, 0, 1}, std::numeric_limits<f32>::infinity()));
+  CHECK(overlay.FindMove(11) == nullptr);
+  CHECK(overlay.Move(11, {1, 2, 3}, {0, 0, 0, 1}, 1.0f));
+  CHECK(overlay.FindMove(11) != nullptr);
+  overlay.Forget(11);
   overlay.Destroy(7);
   CHECK(overlay.FindMove(7) == nullptr);
   CHECK(overlay.IsDestroyed(7));
