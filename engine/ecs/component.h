@@ -17,6 +17,11 @@ struct ComponentInfo {
   u32 align = 0;
   void (*move_construct)(void* dst, void* src) = nullptr;
   void (*destruct)(void* ptr) = nullptr;
+  // Whether a row of this component may be produced by copying bytes rather
+  // than by running a constructor. Cooked data and replication snapshots test
+  // this before memcpy'ing a column; a component holding a pointer, a
+  // std::string or any other indirection must be refused there, not copied.
+  bool trivially_copyable = false;
 };
 
 namespace detail {
@@ -48,6 +53,7 @@ ComponentId ComponentIdFor() {
             .move_construct = [](void* dst,
                                  void* src) { new (dst) T(std::move(*static_cast<T*>(src))); },
             .destruct = [](void* ptr) { static_cast<T*>(ptr)->~T(); },
+            .trivially_copyable = std::is_trivially_copyable_v<T>,
         });
   }();
   return id;
