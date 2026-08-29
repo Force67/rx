@@ -195,6 +195,9 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
                  "' twice";
         return false;
       }
+      if (desc->id == ecs::GetComponentId<scene::Transform>()) {
+        resolved.transform_column = static_cast<int>(resolved.column_ids.size());
+      }
       resolved.signature.push_back(desc->id);
       resolved.column_ids.push_back(desc->id);
     }
@@ -206,13 +209,25 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
 
 bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
   const WorldCellPayload& payload = cell.payload;
+  // Only a cell the overlay actually mentions pays for consulting it.
+  const bool overlaid = overlay_ != nullptr && cell.overlay_touched;
+
   if (payload.kind == PayloadKind::kInstances) {
     const u32 total = static_cast<u32>(payload.instances.size());
     const u32 take = std::min(rows, total - cell.next_instance);
     for (u32 i = 0; i < take; ++i) {
       const WorldInstanceRecord& source = payload.instances[cell.next_instance + i];
-      cell.instances.push_back(
-          {source.stable_id, source.prototype, source.position, source.rotation, source.scale});
+      if (overlaid && overlay_->IsDestroyed(source.stable_id)) continue;
+      ResidentInstance instance{source.stable_id, source.prototype, source.position,
+                                source.rotation, source.scale};
+      if (overlaid) {
+        if (const OverlayMove* move = overlay_->FindMove(source.stable_id)) {
+          instance.position = move->position;
+          instance.rotation = move->rotation;
+          instance.scale = move->scale;
+        }
+      }
+      cell.instances.push_back(instance);
     }
     cell.next_instance += take;
     return cell.next_instance >= total;
@@ -234,38 +249,83 @@ bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
     const u32 take = std::min(remaining, budget);
     const u64 owning_cell = cell.cell;
 
-    world_.CreateBatch(resolved.signature, take, [&](const ecs::EntityBatch& batch) {
-      for (u32 c = 0; c < archetype.column_count; ++c) {
-        const WorldColumnRecord& column = payload.columns[archetype.column_first + c];
-        const std::span<const u8> bytes = payload.ColumnBytes(column);
-        const u8* source = bytes.data() + static_cast<size_t>(first) * column.stride;
+    // A destroyed row is skipped here rather than created and destroyed after
+    // the fact: the deletion is never briefly observable, and the row's bytes
+    // are never copied at all.
+    u32 kept = take;
+    if (overlaid) {
+      rows_scratch_.clear();
+      for (u32 r = first; r < first + take; ++r) {
+        if (!overlay_->IsDestroyed(stable_ids[r])) rows_scratch_.push_back(r);
+      }
+      kept = static_cast<u32>(rows_scratch_.size());
+    }
+
+    if (kept != 0) {
+      world_.CreateBatch(resolved.signature, kept, [&](const ecs::EntityBatch& batch) {
+        auto source_row = [&](u32 i) { return overlaid ? rows_scratch_[i] : first + i; };
+        for (u32 c = 0; c < archetype.column_count; ++c) {
+          const WorldColumnRecord& column = payload.columns[archetype.column_first + c];
+          const std::span<const u8> bytes = payload.ColumnBytes(column);
+          const ecs::ComponentId id = resolved.column_ids[c];
+          if (!overlaid) {
+            const u8* source = bytes.data() + static_cast<size_t>(first) * column.stride;
+            u32 written = 0;
+            while (written < kept) {
+              u32 run = 0;
+              void* destination = batch.Column(id, written, &run);
+              // ResolveSchema put every column id into the signature this batch
+              // was created from, so a missing run would mean the batch is not
+              // the archetype we asked for.
+              BASE_BUGCHECK(destination != nullptr && run != 0, "world batch column vanished");
+              std::memcpy(destination, source + static_cast<size_t>(written) * column.stride,
+                          static_cast<size_t>(run) * column.stride);
+              written += run;
+            }
+            continue;
+          }
+          for (u32 i = 0; i < kept; ++i) {
+            u32 run = 0;
+            void* destination = batch.Column(id, i, &run);
+            BASE_BUGCHECK(destination != nullptr && run != 0, "world batch column vanished");
+            std::memcpy(destination,
+                        bytes.data() + static_cast<size_t>(source_row(i)) * column.stride,
+                        column.stride);
+          }
+        }
         u32 written = 0;
-        while (written < take) {
+        while (written < kept) {
           u32 run = 0;
-          void* destination = batch.Column(resolved.column_ids[c], written, &run);
-          // ResolveSchema put every column id into the signature this batch was
-          // created from, so a missing run would mean the batch is not the
-          // archetype we asked for.
-          BASE_BUGCHECK(destination != nullptr && run != 0, "world batch column vanished");
-          std::memcpy(destination, source + static_cast<size_t>(written) * column.stride,
-                      static_cast<size_t>(run) * column.stride);
+          auto* residents = static_cast<CellResident*>(batch.Column(resident_id, written, &run));
+          BASE_BUGCHECK(residents != nullptr && run != 0, "world batch resident column vanished");
+          for (u32 i = 0; i < run; ++i) {
+            new (residents + i) CellResident{stable_ids[source_row(written + i)], owning_cell};
+          }
           written += run;
         }
-      }
-      u32 written = 0;
-      while (written < take) {
-        u32 run = 0;
-        auto* residents = static_cast<CellResident*>(batch.Column(resident_id, written, &run));
-        BASE_BUGCHECK(residents != nullptr && run != 0, "world batch resident column vanished");
-        for (u32 i = 0; i < run; ++i) {
-          new (residents + i) CellResident{stable_ids[first + written + i], owning_cell};
+        if (overlaid && resolved.transform_column >= 0) {
+          const ecs::ComponentId transform_id = resolved.column_ids[resolved.transform_column];
+          for (u32 i = 0; i < kept; ++i) {
+            const OverlayMove* move = overlay_->FindMove(stable_ids[source_row(i)]);
+            if (!move) continue;
+            u32 run = 0;
+            auto* transform = static_cast<scene::Transform*>(batch.Column(transform_id, i, &run));
+            BASE_BUGCHECK(transform != nullptr && run != 0, "world batch transform vanished");
+            transform->position[0] = move->position.x;
+            transform->position[1] = move->position.y;
+            transform->position[2] = move->position.z;
+            transform->rotation[0] = move->rotation.x;
+            transform->rotation[1] = move->rotation.y;
+            transform->rotation[2] = move->rotation.z;
+            transform->rotation[3] = move->rotation.w;
+            transform->scale = move->scale;
+          }
         }
-        written += run;
-      }
-      for (u32 i = 0; i < take; ++i) {
-        cell.entities.push_back({stable_ids[first + i], batch.EntityAt(i)});
-      }
-    });
+        for (u32 i = 0; i < kept; ++i) {
+          cell.entities.push_back({stable_ids[source_row(i)], batch.EntityAt(i)});
+        }
+      });
+    }
 
     cell.next_row += take;
     budget -= take;
@@ -294,6 +354,7 @@ bool WorldStreamer::TeardownStep(DomainCell& cell, u32 rows) {
   cell.next_archetype = 0;
   cell.next_row = 0;
   cell.next_instance = 0;
+  cell.overlay_touched = false;
   cell.resident_bytes = 0;
   return true;
 }
@@ -333,6 +394,10 @@ void WorldStreamer::DrainLoader() {
       cell->resolved.clear();
       continue;
     }
+    const WorldCellRecord* record = map_.index().FindCell(cell->cell);
+    cell->overlay_touched =
+        overlay_ != nullptr && record != nullptr &&
+        overlay_->TouchesRange(record->stable_id_first, record->stable_id_count);
     cell->phase = CellPhase::kDecoded;
   }
   results_scratch_.clear();

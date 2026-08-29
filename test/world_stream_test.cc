@@ -15,6 +15,7 @@
 #include "ecs/world.h"
 #include "scene/components.h"
 #include "world/world_map.h"
+#include "world/world_overlay.h"
 
 namespace {
 
@@ -565,6 +566,110 @@ void TestShutdownEmptiesTheWorld(const fs::path& directory) {
   CHECK(world.entity_count() == 0);
 }
 
+void TestOverlayShapesTheCellOnTheWayIn(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "overlay.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  WorldOverlay overlay;
+  overlay.Destroy(EntityStableId(0, 1));
+  overlay.Destroy(EntityStableId(0, 4));
+  overlay.Destroy(InstanceStableId(0, 0));
+  overlay.Move(EntityStableId(0, 2), {10, 20, 30}, {0, 0, 0, 1}, 5.0f);
+  overlay.Move(InstanceStableId(0, 2), {40, 50, 60}, {0, 0, 0, 1}, 7.0f);
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  streamer.Configure(TestPolicy(/*rows_per_commit=*/2));  // deletions must survive the quanta
+  streamer.SetOverlay(&overlay);
+  Settle(&streamer, &loader, At(32, 32));
+
+  // The destroyed rows were never created, not created and then removed.
+  CHECK(streamer.stats().entities == kEntitiesPerCell - 2);
+  CHECK(world.entity_count() == kEntitiesPerCell - 2);
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(0, 1))));
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(0, 4))));
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, 0))));
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, 5))));
+
+  // Survivors keep their baked transform ...
+  const Transform* untouched = world.Get<Transform>(streamer.Resolve(EntityStableId(0, 5)));
+  CHECK(untouched && untouched->position[1] == 5.0f);
+  CHECK(untouched && untouched->scale == 2.0f);
+  // ... and a moved one comes up where the save says, not where the bake does.
+  const Transform* moved = world.Get<Transform>(streamer.Resolve(EntityStableId(0, 2)));
+  CHECK(moved != nullptr);
+  CHECK(moved && moved->position[0] == 10.0f);
+  CHECK(moved && moved->position[1] == 20.0f);
+  CHECK(moved && moved->scale == 5.0f);
+  // The stable id is still the row's own, not the one it was copied over.
+  const CellResident* resident = world.Get<CellResident>(streamer.Resolve(EntityStableId(0, 2)));
+  CHECK(resident && resident->stable_id == EntityStableId(0, 2));
+
+  // Instances follow the same rules.
+  CHECK(streamer.stats().instances == kInstancesPerCell - 1);
+  CHECK(streamer.FindInstance(InstanceStableId(0, 0)) == nullptr);
+  const ResidentInstance* moved_instance = streamer.FindInstance(InstanceStableId(0, 2));
+  CHECK(moved_instance != nullptr);
+  CHECK(moved_instance && moved_instance->position.x == 40.0f);
+  CHECK(moved_instance && moved_instance->scale == 7.0f);
+
+  // A neighbouring cell the overlay says nothing about is untouched.
+  WorldStreamPolicy wide = TestPolicy(/*rows_per_commit=*/2);
+  wide[Domain::kGameplay].load_distance = 500;
+  wide[Domain::kGameplay].retain_distance = 600;
+  streamer.Configure(wide);
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(streamer.stats().entities == (kEntitiesPerCell - 2) + 3 * kEntitiesPerCell);
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(1, 1))));
+
+  // The deletions survive a full unload and reload: the overlay is the record,
+  // the resident cell is not.
+  Settle(&streamer, &loader, At(5000, 5000));
+  CHECK(world.entity_count() == 0);
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(0, 1))));
+  const Transform* removed = world.Get<Transform>(streamer.Resolve(EntityStableId(0, 2)));
+  CHECK(removed && removed->position[0] == 10.0f);
+}
+
+void TestOverlayThatDeletesEverythingLeavesNothing(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "wipe.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  WorldOverlay overlay;
+  for (u32 i = 0; i < kEntitiesPerCell; ++i) overlay.Destroy(EntityStableId(0, i));
+  for (u32 i = 0; i < kInstancesPerCell; ++i) overlay.Destroy(InstanceStableId(0, i));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  streamer.Configure(TestPolicy(/*rows_per_commit=*/2));
+  streamer.SetOverlay(&overlay);
+  Settle(&streamer, &loader, At(32, 32));
+
+  // An emptied cell still becomes resident: it exists, it just holds nothing.
+  // Leaving it stuck mid-commit instead would wedge the plan.
+  CHECK(streamer.stats().resident == 2);
+  CHECK(streamer.stats().pending == 0);
+  CHECK(streamer.stats().entities == 0);
+  CHECK(streamer.stats().instances == 0);
+  CHECK(world.entity_count() == 0);
+  CHECK(streamer.errors().empty());
+
+  Settle(&streamer, &loader, At(5000, 5000));
+  CHECK(streamer.stats().resident == 0);
+  CHECK(streamer.stats().pending == 0);
+}
+
 void TestDeterministicAcrossRuns(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -609,6 +714,8 @@ int main() {
   TestUnloadDuringCommitDestroysExactlyWhatWasMade(tmp / "interrupt");
   TestLateResultAfterCancelIsNotPublished(tmp / "late");
   TestSchemaDriftIsRefusedLoudly(tmp / "drift");
+  TestOverlayShapesTheCellOnTheWayIn(tmp / "overlay");
+  TestOverlayThatDeletesEverythingLeavesNothing(tmp / "wipe");
   TestPromoteAnInstance(tmp / "promote");
   TestShutdownEmptiesTheWorld(tmp / "shutdown");
   TestDeterministicAcrossRuns(tmp / "deterministic");
