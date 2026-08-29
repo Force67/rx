@@ -118,6 +118,25 @@ WorldStreamer::~WorldStreamer() { Shutdown(); }
 
 void WorldStreamer::Configure(const WorldStreamPolicy& policy) { policy_ = policy; }
 
+bool WorldStreamer::SetOverlay(const WorldOverlay* overlay) {
+  if (!overlay) {
+    overlay_ = nullptr;
+    return true;
+  }
+  // A bake id of zero means the overlay was never keyed to a world, which is
+  // the caller's business. A different one is not: stable ids are assigned by
+  // cook order, so applying it here would delete and move whatever rows now
+  // happen to carry those ids.
+  if (overlay->bake_id() != 0 && overlay->bake_id() != map_.index().bake_id) {
+    RecordError("overlay was recorded against bake " + std::to_string(overlay->bake_id()) +
+                ", this world is bake " + std::to_string(map_.index().bake_id));
+    overlay_ = nullptr;
+    return false;
+  }
+  overlay_ = overlay;
+  return true;
+}
+
 WorldStreamer::DomainCell* WorldStreamer::Find(DomainState& state, u64 cell) {
   auto it = std::lower_bound(state.cells.begin(), state.cells.end(), cell,
                              [](const DomainCell& entry, u64 wanted) { return entry.cell < wanted; });
@@ -781,6 +800,9 @@ WorldStreamerStats WorldStreamer::stats() const {
       stats.instances += static_cast<u32>(cell.instances.size());
     }
     stats.failed += scene::GetWorldStreamStats(state.plan).failed;
+    for (const FailedCell& failed : state.failed) {
+      if (failed.attempts >= kMaximumLoadAttempts) ++stats.suppressed;
+    }
   }
   return stats;
 }

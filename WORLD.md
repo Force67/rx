@@ -29,7 +29,10 @@ on-disk size for the same reason.
 transforms, sparse, keyed by stable id. A player who breaks one fence must not
 cause the cell that fence was in to be rewritten. Deltas are applied *while* a
 cell materializes - a destroyed row is skipped during the column copy, so its
-bytes are never touched and it never briefly exists.
+bytes are never touched and it never briefly exists. It carries the bake id it
+was recorded against, and `SetOverlay` refuses one from a different cook: stable
+ids are assigned by cook order, so a mismatched overlay would not fail, it would
+delete and move whatever rows now happen to carry those ids.
 
 ## Domains, not cell states
 
@@ -62,6 +65,13 @@ region's identity, so a cell crossing a distance band is an ordinary budgeted
 reload the planner schedules inside the retain radius, with a hysteresis margin
 so a cell sitting on the boundary does not flap. A world baked at one tier
 resolves both bands to the same payload and never reloads at all.
+
+The swap is a reload, not a crossfade: the old tier's rows are destroyed before
+the new tier's arrive. The retain radius guarantees the reload happens; it does
+not close the gap. For a domain carrying behavior that gap is an entity
+despawning and respawning as the player walks up, which is why
+`DefaultWorldStreamPolicy` leaves gameplay, collision and navigation on one tier
+and bands only the domains whose gap is a moment of coarser scenery.
 
 ## The loop
 
@@ -96,7 +106,16 @@ cook already knew.
 Commit and teardown are both budgeted in rows per tick. Staying inside a memory
 budget and still hitching because a cell was published in one frame is the
 failure mode budgets exist to prevent, and it applies just as much to
-destroying 100,000 entities as to creating them.
+destroying 100,000 entities as to creating them. The two are not symmetric: the
+planner admits at most `maximum_commit_steps` cells per tick, while every
+retiring cell gets a teardown quantum, so a tick can destroy more rows than it
+creates. `maximum_pending` is what bounds that.
+
+A payload that fails to load is retried a few times and then stopped: a cook
+error is deterministic, so the alternative is re-reading the same broken bytes
+forever. A suppressed cell is gone from the world without being gone from the
+index, so `stats().suppressed` counts it rather than leaving it only in the
+capped `errors()` list.
 
 ## Identity across a boundary
 
@@ -116,10 +135,10 @@ instead of failing; components holding an indirection are refused outright.
 
 **A stable id is a streaming key, not yet a persistence key.** It is assigned by
 cook order within a cell, so re-baking a changed scene, or moving one object
-across a cell boundary, can reassign it. The bake id stamped into the index and
-every payload catches an archive/index mismatch, but a save that must survive
-re-cooking needs an authored identity the cook maps to an id, which nothing here
-provides yet.
+across a cell boundary, can reassign it. The bake id stamped into the index,
+every payload and every serialized overlay catches the mismatch loudly, but a
+save that must survive re-cooking needs an authored identity the cook maps to an
+id, which nothing here provides yet.
 
 ## Static decoration
 
@@ -160,9 +179,15 @@ transform and a mesh become instance page rows.
 
 Two things it refuses rather than guesses: a `Parent` link, because an ECS
 handle cannot survive a bake, and a component this build does not register
-(`--skip-unknown` to override). The bake id is a hash of the scene and the cook
-settings, so an unchanged rebuild produces the same id and a changed one cannot
-be read through an old index.
+(`--skip-unknown` to override). A third it neither refuses nor bakes: a
+component holding an indirection (`Name`, anything with a `std::string`) cannot
+be restored by copying bytes, so it is dropped with a warning naming it. An
+authored world that needs one needs a different representation for it.
+
+The bake id is a hash of the scene, the cook settings and the schema the cooking
+build can bake, so an unchanged rebuild produces the same id, and a changed
+scene, a different cell size or a build that disagrees about a component's
+fields all produce a different one that an old index refuses to read.
 
 `rxworld` reflects only the components its own build registers. A game cooks
 from a build that registers its own.

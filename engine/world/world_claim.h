@@ -29,6 +29,10 @@ namespace rx::world {
 // early but does not preempt an older request already waiting. And the set has
 // no clock: Expire is the host's to call, from whatever tick it advances. A
 // lease nobody expires is exactly the immortal pin this exists to replace.
+//
+// A claim also stands at the middle of the cell it names, so its distance is
+// zero and the cell loads at the domain's near tier. That is right for a
+// teleport destination and expensive for a speculative prefetch.
 enum class ClaimKind : u8 {
   // Correctness. Unloading this would be a bug: the player is standing on it,
   // a network-authoritative entity lives in it, a cutscene actor is in it.
