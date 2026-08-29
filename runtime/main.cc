@@ -29,6 +29,8 @@ void PrintUsage() {
   RX_INFO("  --gltf <path>         load a gltf/glb scene (e.g. assets/sponza/Sponza.gltf)");
   RX_INFO("  --usd <path>          load a usd/usda/usdc/usdz stage");
   RX_INFO("  --scene <path>        load any of the above, or a .rxscene text scene");
+  RX_INFO("  --world <archive.rxp> stream a baked world around the camera");
+  RX_INFO("  --world-name <name>   the name it was cooked under (default streamworld)");
   RX_INFO("  --usd-show <prim>     force a usd prim subtree visible (repeatable)");
   RX_INFO("  --usd-hide <prim>     force a usd prim subtree hidden (repeatable)");
   RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");
@@ -159,6 +161,8 @@ int main(int argc, char** argv) {
 
     if (arg == "--gltf" || arg == "--usd" || arg == "--scene") config.scene_path = next();
     else if (arg == "--demo") config.demo_scene = next();
+    else if (arg == "--world") config.world_path = next();
+    else if (arg == "--world-name") config.world_name = next();
     else if (arg == "--usd-show") config.usd_visibility.show.push_back(next());
     else if (arg == "--usd-hide") config.usd_visibility.hide.push_back(next());
     else if (arg == "--dump-schema") dump_schema = true;

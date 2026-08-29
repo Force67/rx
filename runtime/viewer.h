@@ -23,6 +23,7 @@
 #include "script/script_symbols.h"
 
 #include "debug_ui.h"
+#include "demo_world.h"
 #include "engine_context.h"
 #include "fly_camera.h"
 #include "showcase_camera.h"
@@ -85,6 +86,9 @@ class Viewer : public app::Application {
   // Builds the cinematic showcase path (RX_SHOWCASE): a smooth drone pass over
   // the loaded scene.
   void BuildShowcase();
+
+  // --world: the baked-world streamer, when one was asked for.
+  WorldStreamDemo world_stream_;
 
   EngineConfig config_;
 

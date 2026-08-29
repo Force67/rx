@@ -55,6 +55,15 @@ viewer runtime in place of the game.
   Skeletal animation sampling comes from
   [kinema](https://github.com/Force67/kinema), a reusable SoA animation
   runtime consumed as a sibling checkout.
+- **engine/world** - baked worlds: a cooked, immutable map in an `.rxp` that
+  streams into the ECS a cell at a time. An always-resident index every
+  streaming decision reads (and nothing else), immutable per-cell payloads
+  grouped by domain, and a sparse overlay for what a save changed. Residency is
+  per domain rather than per cell, so gameplay, collision and representation
+  each have their own radius and budget; static decoration stays out of the ECS
+  until something promotes it; identity across a streaming boundary is a stable
+  id, never an entity handle. Cooked by `rxworld`
+  ([design](WORLD.md)).
 - **engine/app** - the composition root a game embeds instead of forking the
   viewer: `app::Host` owns the subsystems and the fixed-step/render loop and
   drives a game-implemented `app::Application`. See [EMBEDDING.md](EMBEDDING.md)

@@ -264,6 +264,7 @@ if(NOT DEFINED RX_MODULES)
     scene
     terrain
     edit
+    world
     render
     render2d
     weather
@@ -431,6 +432,38 @@ if(RX_BUILD_TOOLS)
   add_executable(rxpack tools/rxpack.cc)
   target_link_libraries(rxpack PRIVATE rx::asset rx::core)
   rx_set_warnings(rxpack)
+endif()
+
+# rxworld cooks an authored .rxscene into a baked, streamable world archive
+# (engine/world/): a world index plus one payload per cell and domain, packed
+# into one .rxp the engine mounts like any other content.
+if(RX_BUILD_TOOLS AND "world" IN_LIST RX_MODULES)
+  add_executable(rxworld tools/rxworld.cc)
+  target_link_libraries(rxworld PRIVATE rx::world rx::edit rx::asset rx::ecs rx::core)
+  rx_set_warnings(rxworld)
+
+  # The baked world `rx --world` streams. Cooked at build time rather than
+  # checked in as a binary: the .rxscene beside it is the authored source, and
+  # running the real cook every build is also the only thing that would notice
+  # the tool and the runtime drifting apart. Lives here rather than in
+  # runtime/CMakeLists.txt because that is added before rxworld exists.
+  if(TARGET rx)
+    set(RX_STREAMWORLD_SCENE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/scenes/streamworld.rxscene)
+    # A plain path rather than $<TARGET_FILE_DIR:rx>: a generator expression in
+    # an OUTPUT cannot name a target from another directory, and rx is added
+    # from runtime/.
+    set(RX_STREAMWORLD_DIR ${CMAKE_BINARY_DIR}/runtime/worlds)
+    set(RX_STREAMWORLD_ARCHIVE ${RX_STREAMWORLD_DIR}/streamworld.rxp)
+    add_custom_command(
+      OUTPUT ${RX_STREAMWORLD_ARCHIVE}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${RX_STREAMWORLD_DIR}
+      COMMAND rxworld bake ${RX_STREAMWORLD_SCENE} ${RX_STREAMWORLD_ARCHIVE}
+              --name streamworld --cell-size 32
+      DEPENDS rxworld ${RX_STREAMWORLD_SCENE}
+      COMMENT "Cooking the streamworld test map")
+    add_custom_target(rx-streamworld ALL DEPENDS ${RX_STREAMWORLD_ARCHIVE})
+    add_dependencies(rx rx-streamworld)
+  endif()
 endif()
 
 # rxdiff compares two rendered pngs against a measured tolerance, which is the
@@ -646,6 +679,42 @@ if(RX_BUILD_TESTS)
   add_executable(world_streaming_test test/world_streaming_test.cc)
   target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME world_streaming_test COMMAND world_streaming_test)
+
+  if("world" IN_LIST RX_MODULES)
+    add_executable(world_format_test test/world_format_test.cc)
+    target_link_libraries(world_format_test PRIVATE rx::world rx::core)
+    add_test(NAME world_format_test COMMAND world_format_test)
+
+    add_executable(world_map_test test/world_map_test.cc)
+    target_link_libraries(world_map_test PRIVATE rx::world rx::asset rx::scene rx::core)
+    add_test(NAME world_map_test COMMAND world_map_test)
+
+    add_executable(world_stream_test test/world_stream_test.cc)
+    target_link_libraries(world_stream_test PRIVATE rx::world rx::edit rx::asset rx::scene rx::ecs rx::core)
+    add_test(NAME world_stream_test COMMAND world_stream_test)
+
+    add_executable(world_overlay_test test/world_overlay_test.cc)
+    target_link_libraries(world_overlay_test PRIVATE rx::world rx::core)
+    add_test(NAME world_overlay_test COMMAND world_overlay_test)
+
+    # Random mutation over the three decoders. The hand-written refusal tests
+    # each aim one mutation at one check; this aims many at none in particular,
+    # which is the half they cannot cover. Cheap enough to keep in the default
+    # suite; run it under -DRX_SANITIZE=ON for the memory-safety half to bite,
+    # and pass an iteration count to run it longer than the suite does.
+    add_executable(world_fuzz_test test/world_fuzz_test.cc)
+    target_link_libraries(world_fuzz_test PRIVATE rx::world rx::core)
+    add_test(NAME world_fuzz_test COMMAND world_fuzz_test)
+
+    # The whole path in one test: an authored scene through the real baker into
+    # a real archive, mounted and streamed back. Needs the tool, so it is only
+    # registered when the tools are built.
+    if(TARGET rxworld)
+      add_executable(world_bake_test test/world_bake_test.cc)
+      target_link_libraries(world_bake_test PRIVATE rx::world rx::asset rx::scene rx::ecs rx::core)
+      add_test(NAME world_bake_test COMMAND world_bake_test $<TARGET_FILE:rxworld>)
+    endif()
+  endif()
 
   if("terrain" IN_LIST RX_MODULES)
     add_executable(terrain_test test/terrain_test.cc)

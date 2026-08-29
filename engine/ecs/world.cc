@@ -89,6 +89,63 @@ Entity World::Create() {
   return entity;
 }
 
+Entity EntityBatch::EntityAt(u32 row) const {
+  if (!archetype_ || row >= count_) return {};
+  return archetype_->entity_at(first_row_ + row);
+}
+
+void* EntityBatch::Column(ComponentId id, u32 row, u32* run) const {
+  if (run) *run = 0;
+  if (!archetype_ || row >= count_) return nullptr;
+  const int column = archetype_->ColumnIndex(id);
+  if (column < 0) return nullptr;
+  const u32 absolute = first_row_ + row;
+  const u32 rows_per_chunk = archetype_->rows_per_chunk();
+  const u32 chunk = absolute / rows_per_chunk;
+  const u32 in_chunk = absolute % rows_per_chunk;
+  void* base = archetype_->ChunkColumnData(chunk, column);
+  if (!base) return nullptr;
+  if (run) {
+    // The run ends at whichever comes first: the end of this chunk's rows or
+    // the end of the batch.
+    *run = std::min(archetype_->ChunkRowCount(chunk) - in_chunk, count_ - row);
+  }
+  return static_cast<u8*>(base) + static_cast<size_t>(in_chunk) * GetComponentInfo(id).size;
+}
+
+EntityBatch World::BeginBatch(const Signature& signature, u32 count) {
+  mem::CategoryScope scope(kEcsCategory);
+  EntityBatch batch;
+  if (count == 0) return batch;
+
+  Signature sorted(signature);
+  std::sort(sorted.begin(), sorted.end());
+  sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
+
+  Archetype* archetype = GetOrCreateArchetype(sorted);
+  batch.archetype_ = archetype;
+  batch.first_row_ = archetype->row_count();
+  batch.count_ = count;
+  records_.reserve(records_.size() + count);
+  for (u32 i = 0; i < count; ++i) {
+    u32 index;
+    if (!free_indices_.empty()) {
+      index = free_indices_.back();
+      free_indices_.pop_back();
+    } else {
+      index = static_cast<u32>(records_.size());
+      records_.emplace_back();
+    }
+    EntityRecord& record = records_[index];
+    record.alive = true;
+    const Entity entity{index, record.generation};
+    record.archetype = archetype;
+    record.row = archetype->AddRow(entity);
+    ++live_count_;
+  }
+  return batch;
+}
+
 void World::Destroy(Entity entity) {
   mem::CategoryScope scope(kEcsCategory);
   if (!IsAlive(entity)) return;

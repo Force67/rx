@@ -985,6 +985,7 @@ void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
   draw_section(&text_x, text_y, ecs_text, white);
   draw_section(&text_x, text_y, stream_text,
                PressureColor(streaming.resident_bytes, streaming.budget_bytes));
+  if (!world_status_.empty()) draw_section(&text_x, text_y, world_status_.c_str(), white);
   draw_section(&text_x, text_y, build_text, white);
   draw_section(&text_x, text_y, config_text, white);
 

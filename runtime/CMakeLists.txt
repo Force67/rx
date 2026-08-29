@@ -19,6 +19,7 @@ set(RX_RUNTIME_SOURCES
   demo_shooter.cc
   demo_puppet.cc
   demo_drive.cc
+  demo_world.cc
   feature_gym/feature_gym.cc
   scene_hook_demo.cc
   scene_hook_rhi_demo.cc
@@ -35,6 +36,8 @@ set(RX_RUNTIME_MODULES
   rx::scene
   # .rxscene text scenes: component reflection + the text loader.
   rx::edit
+  # --world: baked worlds streamed around the camera.
+  rx::world
   # --authoring-endpoint / --dump-commands: the live script command surface.
   rx::authoring
   rx::script
