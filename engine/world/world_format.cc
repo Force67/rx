@@ -816,15 +816,11 @@ std::span<const u8> WorldCellPayload::ColumnBytes(const WorldColumnRecord& colum
 }
 
 std::span<const u64> WorldCellPayload::StableIds(const WorldArchetypeRecord& archetype) const {
-  const u64 bytes = static_cast<u64>(archetype.row_count) * sizeof(u64);
-  if (archetype.stable_id_offset > data.size() || data.size() - archetype.stable_id_offset < bytes) {
+  if (archetype.stable_id_index > stable_ids.size() ||
+      stable_ids.size() - archetype.stable_id_index < archetype.row_count) {
     return {};
   }
-  // The decoder rejects a misaligned stable_id_offset, and base::Vector's
-  // allocation is at least max_align_t aligned, so this stays well defined for
-  // anything DecodeCellPayload produced.
-  return std::span<const u64>(
-      reinterpret_cast<const u64*>(data.data() + archetype.stable_id_offset), archetype.row_count);
+  return std::span<const u64>(stable_ids.data() + archetype.stable_id_index, archetype.row_count);
 }
 
 u32 WorldCellPayload::total_row_count() const {
@@ -927,11 +923,6 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
       SetError(error, "cell payload: archetype " + std::to_string(i) + " spans past the columns");
       return false;
     }
-    if ((record.stable_id_offset % sizeof(u64)) != 0) {
-      SetError(error, "cell payload: archetype " + std::to_string(i) +
-                          " has a misaligned stable-id array");
-      return false;
-    }
     const u64 stable_bytes = static_cast<u64>(record.row_count) * sizeof(u64);
     if (record.stable_id_offset > data_bytes ||
         data_bytes - record.stable_id_offset < stable_bytes) {
@@ -1028,6 +1019,23 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
   if (!cursor.ok()) {
     SetError(error, "cell payload: truncated body");
     return false;
+  }
+
+  // Lift each archetype's stable ids out of the byte buffer, so reading one is
+  // an array access rather than a cast through bytes that were never a u64.
+  u32 total_ids = 0;
+  for (const WorldArchetypeRecord& archetype : out->archetypes) total_ids += archetype.row_count;
+  out->stable_ids.reserve(total_ids);
+  for (WorldArchetypeRecord& archetype : out->archetypes) {
+    archetype.stable_id_index = static_cast<u32>(out->stable_ids.size());
+    Cursor ids(std::span<const u8>(out->data.data(), out->data.size()));
+    const u8* skipped = nullptr;
+    ids.Take(static_cast<size_t>(archetype.stable_id_offset), &skipped);
+    for (u32 row = 0; row < archetype.row_count; ++row) out->stable_ids.push_back(ids.U64());
+    if (!ids.ok()) {
+      SetError(error, "cell payload: archetype stable ids run past the data section");
+      return false;
+    }
   }
   return true;
 }

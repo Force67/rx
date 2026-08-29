@@ -22,6 +22,7 @@
 // way to see what a streaming decision will be working from.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -302,6 +303,7 @@ int Bake(int argc, char** argv) {
       first_y = false;
     }
     const scene::Transform* any = source.Get<scene::Transform>(authored[cell_begin].entity);
+    if (!any) return Fail("an entity lost its Transform mid-bake");
     const f32 base_x = std::floor(any->position[0] / options.cell_size) * options.cell_size;
     const f32 base_z = std::floor(any->position[2] / options.cell_size) * options.cell_size;
     const f32 pad = options.cell_size * 0.5f;
