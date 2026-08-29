@@ -264,6 +264,7 @@ if(NOT DEFINED RX_MODULES)
     scene
     terrain
     edit
+    world
     render
     render2d
     weather
@@ -646,6 +647,12 @@ if(RX_BUILD_TESTS)
   add_executable(world_streaming_test test/world_streaming_test.cc)
   target_link_libraries(world_streaming_test PRIVATE rx::scene rx::ecs rx::core)
   add_test(NAME world_streaming_test COMMAND world_streaming_test)
+
+  if("world" IN_LIST RX_MODULES)
+    add_executable(world_format_test test/world_format_test.cc)
+    target_link_libraries(world_format_test PRIVATE rx::world rx::core)
+    add_test(NAME world_format_test COMMAND world_format_test)
+  endif()
 
   if("terrain" IN_LIST RX_MODULES)
     add_executable(terrain_test test/terrain_test.cc)
