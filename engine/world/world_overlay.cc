@@ -19,13 +19,19 @@ void SetError(std::string* error, std::string message) {
   if (error) *error = std::move(message);
 }
 
-u64 Checksum(std::span<const u8> bytes) {
-  u64 hash = 0xcbf29ce484222325ull;
+u64 Checksum(u64 hash, std::span<const u8> bytes) {
   for (u8 byte : bytes) {
     hash ^= byte;
     hash *= 0x100000001b3ull;
   }
   return hash;
+}
+
+// Header included: bake_id is what stops an overlay being applied to the wrong
+// cook, and a zeroed one reads as "not keyed to any bake", so leaving it out of
+// the checksum would let corruption re-enable exactly what it guards against.
+u64 Checksum(std::span<const u8> header, std::span<const u8> body) {
+  return Checksum(Checksum(0xcbf29ce484222325ull, header), body);
 }
 
 void AppendU32(base::Vector<u8>* bytes, u32 value) {
@@ -175,7 +181,8 @@ bool WorldOverlay::Encode(base::Vector<u8>* out, std::string* error) const {
   AppendU64(out, bake_id_);
   AppendU32(out, static_cast<u32>(destroyed_.size()));
   AppendU32(out, static_cast<u32>(moves_.size()));
-  AppendU64(out, Checksum(std::span<const u8>(body.data(), body.size())));
+  AppendU64(out, Checksum(std::span<const u8>(out->data(), out->size()),
+                          std::span<const u8>(body.data(), body.size())));
   out->insert(out->end(), body.begin(), body.end());
   return true;
 }
@@ -217,7 +224,7 @@ bool WorldOverlay::Decode(std::span<const u8> bytes, WorldOverlay* out, std::str
     return false;
   }
   const std::span<const u8> body = bytes.subspan(body_offset);
-  if (Checksum(body) != checksum) {
+  if (Checksum(bytes.first(body_offset - sizeof(u64)), body) != checksum) {
     SetError(error, "world overlay: checksum mismatch");
     return false;
   }

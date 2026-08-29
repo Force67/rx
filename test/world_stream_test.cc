@@ -228,6 +228,9 @@ class QueuedLoader final : public CellLoader {
   u32 begun() const { return begun_; }
   u32 cancelled() const { return cancelled_; }
   void set_honor_cancel(bool honor) { honor_cancel_ = honor; }
+  // Make the next `count` reads fail the way a briefly unmounted archive does:
+  // the bytes are simply not there, and then later they are.
+  void set_fail_next(u32 count) { fail_next_ = count; }
 
  private:
   void Finish(const CellLoadRequest& request) {
@@ -236,8 +239,14 @@ class QueuedLoader final : public CellLoader {
     result.cell = request.cell;
     result.domain = request.domain;
     result.tier = request.tier;
-    result.ok = map_.ReadPayload(vfs_, request.cell, request.domain, request.tier, &result.payload,
-                                 &result.error);
+    if (fail_next_ != 0) {
+      --fail_next_;
+      result.ok = false;
+      result.error = "the archive was not there this time";
+    } else {
+      result.ok = map_.ReadPayload(vfs_, request.cell, request.domain, request.tier,
+                                   &result.payload, &result.error);
+    }
     ready_.push_back(std::move(result));
   }
 
@@ -247,6 +256,7 @@ class QueuedLoader final : public CellLoader {
   base::Vector<CellLoadResult> ready_;
   u32 begun_ = 0;
   u32 cancelled_ = 0;
+  u32 fail_next_ = 0;
   bool honor_cancel_ = false;
 };
 
@@ -1111,6 +1121,351 @@ void TestSuppressionIsAThrottleNotABan(const fs::path& directory) {
   CHECK(streamer.stats().entities == 0);  // still broken, so still nothing
 }
 
+// Every other test in this file uses a cell with one archetype and one column,
+// which leaves the indexing that makes several of either work unexercised:
+// resolved[next_archetype], columns[column_first + c], and the transform column
+// an overlay move rewrites. A real cell has neither shape.
+//
+// It is also the only cell here big enough to cross an ECS chunk, so it is what
+// proves the bulk copy advances by the run it is handed instead of assuming one
+// pointer covers the batch.
+void TestManyArchetypesColumnsAndChunks(const fs::path& directory) {
+  fs::create_directories(directory);
+  using rx::scene::Guid;
+  using rx::scene::SpawnedFrom;
+
+  // 16 KiB chunks; {CellResident, Transform, Guid} is 48 bytes, so ~341 rows
+  // fit and 900 spans three.
+  constexpr u32 kWide = 900;
+  u32 transform_stride = 0, guid_stride = 0, spawned_stride = 0;
+  u64 transform_layout = 0, guid_layout = 0, spawned_layout = 0;
+  CHECK(RuntimeComponentLayout("Transform", &transform_stride, &transform_layout));
+  CHECK(RuntimeComponentLayout("Guid", &guid_stride, &guid_layout));
+  CHECK(RuntimeComponentLayout("SpawnedFrom", &spawned_stride, &spawned_layout));
+
+  base::Vector<Transform> wide_transforms;
+  base::Vector<Guid> wide_guids;
+  base::Vector<u64> wide_ids;
+  for (u32 i = 0; i < kWide; ++i) {
+    Transform transform;
+    transform.position[0] = static_cast<f32>(i);
+    transform.scale = 3.0f;
+    wide_transforms.push_back(transform);
+    wide_guids.push_back(Guid{1000 + i});
+    wide_ids.push_back(i);
+  }
+  // A second archetype whose columns are in a different order and whose
+  // Transform is not column zero.
+  const SpawnedFrom spawned[2] = {{0x112233}, {0x445566}};
+  const Transform narrow[2] = {{{7, 8, 9}, {0, 0, 0, 1}, 4.0f}, {{1, 2, 3}, {0, 0, 0, 1}, 5.0f}};
+  const u64 narrow_ids[2] = {kWide, kWide + 1};
+
+  CellPayloadWriter writer(0, Domain::kGameplay, Tier::kStandard);
+  writer.set_bake_id(kBakeId);
+  const u32 wide = writer.BeginArchetype(kWide);
+  writer.AddColumn(wide, "Transform", transform_stride, transform_layout,
+                   std::span<const u8>(reinterpret_cast<const u8*>(wide_transforms.data()),
+                                       wide_transforms.size() * sizeof(Transform)));
+  writer.AddColumn(wide, "Guid", guid_stride, guid_layout,
+                   std::span<const u8>(reinterpret_cast<const u8*>(wide_guids.data()),
+                                       wide_guids.size() * sizeof(Guid)));
+  writer.SetStableIds(wide, std::span<const u64>(wide_ids.data(), wide_ids.size()));
+
+  const u32 second = writer.BeginArchetype(2);
+  writer.AddColumn(second, "SpawnedFrom", spawned_stride, spawned_layout,
+                   std::span<const u8>(reinterpret_cast<const u8*>(spawned), sizeof(spawned)));
+  writer.AddColumn(second, "Transform", transform_stride, transform_layout,
+                   std::span<const u8>(reinterpret_cast<const u8*>(narrow), sizeof(narrow)));
+  writer.SetStableIds(second, std::span<const u64>(narrow_ids, 2));
+
+  base::Vector<u8> payload;
+  std::string error;
+  CHECK(writer.Encode(&payload, &error));
+
+  WorldIndexWriter index;
+  index.set_bake_id(kBakeId);
+  index.AddCell(0, {0, 0, 0}, {64, 32, 64}, 0, 0, kWide + 2);
+  index.AddPayload(0, Domain::kGameplay, Tier::kStandard, kWide * 48, kWide + 2);
+  base::Vector<u8> index_bytes;
+  CHECK(index.Encode(&index_bytes, &error));
+
+  PackWriter pack;
+  pack.Add("city/city.rxworld", std::move(index_bytes));
+  pack.Add(CellPayloadPath("city", 0, Domain::kGameplay, Tier::kStandard), std::move(payload));
+  CHECK(pack.WriteTo((directory / "wide.rxp").string()));
+  Vfs vfs;
+  auto provider = rx::asset::MakePackFileProvider((directory / "wide.rxp").string());
+  CHECK(provider != nullptr);
+  if (!provider) return;
+  vfs.Mount("world", std::move(provider));
+
+  WorldMap map;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  // An overlay that deletes and moves rows in both archetypes, so the
+  // row-by-row path and the transform-column lookup run on a payload where the
+  // transform is not the first column.
+  WorldOverlay overlay;
+  overlay.set_bake_id(kBakeId);
+  overlay.Destroy(5);
+  overlay.Destroy(800);  // in a later chunk than row 5
+  overlay.Move(400, {50, 60, 70}, {0, 0, 0, 1}, 9.0f);
+  overlay.Move(kWide + 1, {11, 12, 13}, {0, 0, 0, 1}, 8.0f);
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy(/*rows_per_commit=*/250);  // several quanta per chunk
+  policy[Domain::kRepresentation].load_distance = 0;
+  streamer.Configure(policy);
+  CHECK(streamer.SetOverlay(&overlay));
+  Settle(&streamer, &loader, At(32, 32), 60);
+
+  CHECK(streamer.errors().empty());
+  for (const std::string& message : streamer.errors()) {
+    std::fprintf(stderr, "  error: %s\n", message.c_str());
+  }
+  CHECK(streamer.stats().entities == kWide + 2 - 2);
+  CHECK(world.entity_count() == kWide + 2 - 2);
+
+  // Both columns of the wide archetype arrived, on rows either side of every
+  // chunk boundary, and the two columns stayed paired.
+  for (u32 i = 0; i < kWide; ++i) {
+    if (i == 5 || i == 800) {
+      CHECK(!world.IsAlive(streamer.Resolve(i)));
+      continue;
+    }
+    const Entity entity = streamer.Resolve(i);
+    if (!world.IsAlive(entity)) {
+      std::fprintf(stderr, "FAIL: row %u did not materialize\n", i);
+      ++g_failures;
+      break;
+    }
+    const Transform* transform = world.Get<Transform>(entity);
+    const Guid* guid = world.Get<Guid>(entity);
+    if (!transform || !guid || guid->value != 1000 + i ||
+        (i != 400 && transform->position[0] != static_cast<f32>(i))) {
+      std::fprintf(stderr, "FAIL: row %u came back wrong\n", i);
+      ++g_failures;
+      break;
+    }
+  }
+  // The moved row took the overlay's transform and kept its own guid.
+  const Entity moved = streamer.Resolve(400);
+  CHECK(world.Get<Transform>(moved)->position[0] == 50.0f);
+  CHECK(world.Get<Transform>(moved)->scale == 9.0f);
+  CHECK(world.Get<Guid>(moved)->value == 1400);
+
+  // The second archetype: a different component set, and a Transform that is
+  // not its first column, so a move that assumed column zero would write over
+  // the SpawnedFrom instead.
+  const Entity other = streamer.Resolve(kWide);
+  CHECK(world.IsAlive(other));
+  CHECK(world.Get<SpawnedFrom>(other) != nullptr &&
+        world.Get<SpawnedFrom>(other)->prefab == 0x112233);
+  CHECK(world.Get<Transform>(other) != nullptr && world.Get<Transform>(other)->scale == 4.0f);
+  CHECK(world.Get<Guid>(other) == nullptr);  // not in this archetype
+  const Entity moved_other = streamer.Resolve(kWide + 1);
+  CHECK(world.Get<SpawnedFrom>(moved_other) != nullptr &&
+        world.Get<SpawnedFrom>(moved_other)->prefab == 0x445566);
+  CHECK(world.Get<Transform>(moved_other) != nullptr &&
+        world.Get<Transform>(moved_other)->position[0] == 11.0f);
+
+  Settle(&streamer, &loader, At(5000, 5000), 60);
+  CHECK(world.entity_count() == 0);
+}
+
+// Several observers in one tick: the merge has to fold them to one candidate
+// per cell at the nearest distance, or a far observer's view of a cell decides
+// its tier.
+void TestManyObserversFoldToTheNearest(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  BakeOptions options;
+  options.tiered = true;
+  MountWorld(directory / "observers.rxp", &vfs, options);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy();
+  policy[Domain::kGameplay].load_distance = 500;
+  policy[Domain::kGameplay].retain_distance = 600;
+  policy[Domain::kGameplay].full_tier_distance = 20;
+  policy[Domain::kRepresentation].load_distance = 0;
+  streamer.Configure(policy);
+
+  // One observer far from cell 3, one standing in it. The near one has to win.
+  const WorldStreamObservation observers[2] = {At(32, 32), At(96, 96)};
+  for (u32 i = 0; i < 40; ++i) {
+    loader.CompleteAll();
+    streamer.Update(std::span<const WorldStreamObservation>(observers, 2));
+  }
+  CHECK(streamer.errors().empty());
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));  // full tier, six rows
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, 5))));  // and so is cell 0
+  // Reversing the order must not change the answer.
+  const WorldStreamObservation reversed[2] = {At(96, 96), At(32, 32)};
+  for (u32 i = 0; i < 10; ++i) {
+    loader.CompleteAll();
+    streamer.Update(std::span<const WorldStreamObservation>(reversed, 2));
+  }
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
+}
+
+// The payload of a cancelled generation arriving while a NEW generation of the
+// same cell is in flight. The two differ in tier, so adopting the stale one is
+// visible: the cell would publish the two rows of the proxy payload under the
+// generation that asked for the six of the full one.
+void TestStalePayloadIsNotAdoptedByANewGeneration(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  BakeOptions options;
+  options.tiered = true;
+  MountWorld(directory / "stalegen.rxp", &vfs, options);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  loader.set_honor_cancel(false);  // the worker finishes anyway
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy();
+  policy[Domain::kGameplay].load_distance = 500;
+  policy[Domain::kGameplay].retain_distance = 600;
+  policy[Domain::kGameplay].full_tier_distance = 20;
+  policy[Domain::kGameplay].near_tier = Tier::kFull;
+  policy[Domain::kGameplay].far_tier = Tier::kProxy;
+  policy[Domain::kRepresentation].load_distance = 0;
+  streamer.Configure(policy);
+
+  // Approach cell 0 from the far corner, so it is the nearest cell and the
+  // first one a prepare slot goes to. A proxy-tier read starts, and is left in
+  // flight.
+  Tick(&streamer, At(-300, -300), 1);
+  CHECK(loader.pending() > 0);
+
+  // Walk into cell 0. The band changes, so the in-flight generation is
+  // cancelled and a full-tier one takes its place - with the proxy read still
+  // sitting unanswered in the loader.
+  const WorldStreamObservation inside = At(32, 32);
+  Tick(&streamer, inside, 8);
+  CHECK(loader.cancelled() > 0);
+  CHECK(loader.pending() >= 2);
+
+  // Now everything arrives at once. The stale proxy payload must be dropped on
+  // its ticket rather than adopted by the generation that asked for the full
+  // one, which would publish two rows where six belong.
+  Settle(&streamer, &loader, inside, 40);
+  CHECK(streamer.errors().empty());
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, 5))));  // the full tier's sixth row
+  for (u32 i = 0; i < kEntitiesPerCell; ++i) {
+    CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, i))));
+  }
+}
+
+// A cell that fails once and then reads cleanly must not carry the failure
+// forward: three unrelated transient failures over a session would otherwise
+// suppress a cell whose cook is fine.
+void TestATransientFailureIsForgottenOnSuccess(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "transient.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy();
+  policy[Domain::kRepresentation].load_distance = 0;
+  streamer.Configure(policy);
+
+  const WorldStreamObservation inside = At(32, 32);
+  // Two failures, then let it read.
+  loader.set_fail_next(2);
+  Settle(&streamer, &loader, inside, 200);
+  CHECK(streamer.stats().entities == kEntitiesPerCell);
+  CHECK(streamer.stats().failed == 0);     // the tally was cleared by the read
+  CHECK(streamer.stats().suppressed == 0);
+  CHECK(streamer.errors().size() == 2);
+
+  // Two more failures later still must not tip it over, because the successful
+  // read in between reset the count.
+  Settle(&streamer, &loader, At(5000, 5000), 40);
+  loader.set_fail_next(2);
+  Settle(&streamer, &loader, inside, 200);
+  CHECK(streamer.stats().suppressed == 0);
+  CHECK(streamer.stats().entities == kEntitiesPerCell);
+}
+
+// The handle a stable id resolves to is checked, not trusted: a game that
+// destroys a streamed entity itself leaves the record behind until the cell
+// unloads, and handing that handle out is precisely the dangling reference
+// stable ids exist to prevent.
+void TestResolveRefusesAnEntityTheGameDestroyed(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "destroyed.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  streamer.Configure(TestPolicy());
+  Settle(&streamer, &loader, At(32, 32));
+
+  const Entity entity = streamer.Resolve(EntityStableId(0, 2));
+  CHECK(world.IsAlive(entity));
+  world.Destroy(entity);
+  CHECK(streamer.Resolve(EntityStableId(0, 2)) == Entity{});
+  // Its neighbours are untouched, and the cell still tears down cleanly.
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, 3))));
+  Settle(&streamer, &loader, At(5000, 5000));
+  CHECK(world.entity_count() == 0);
+}
+
+// The shipped defaults have to produce a world that actually streams, or every
+// game starts by discovering they do not.
+void TestDefaultPolicyStreams(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  BakeOptions options;
+  options.tiered = true;
+  MountWorld(directory / "defaults.rxp", &vfs, options);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  // The cells are 64 m; scale the defaults down so their radii suit them.
+  streamer.Configure(DefaultWorldStreamPolicy(0.5f));
+  Settle(&streamer, &loader, At(32, 32), 60);
+  CHECK(streamer.errors().empty());
+  CHECK(streamer.stats().entities == 4 * kEntitiesPerCell);
+  CHECK(streamer.stats().instances == 4 * kInstancesPerCell);
+
+  // Gameplay is left on one tier by default, so walking around cannot make a
+  // cell reload and take its entities with it.
+  const u32 reads = loader.begun();
+  Settle(&streamer, &loader, At(96, 96), 40);
+  Settle(&streamer, &loader, At(32, 32), 40);
+  CHECK(loader.begun() == reads);
+  CHECK(streamer.stats().entities == 4 * kEntitiesPerCell);
+
+  Settle(&streamer, &loader, At(5000, 5000), 80);
+  CHECK(world.entity_count() == 0);
+}
+
 void TestDeterministicAcrossRuns(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -1168,6 +1523,12 @@ int main() {
   TestClaimKeepsACellResident(tmp / "claims");
   TestClaimDoesNotChangeAResidentCellsTier(tmp / "claimtier");
   TestSuppressionIsAThrottleNotABan(tmp / "throttle");
+  TestManyArchetypesColumnsAndChunks(tmp / "wide");
+  TestManyObserversFoldToTheNearest(tmp / "observers");
+  TestStalePayloadIsNotAdoptedByANewGeneration(tmp / "stalegen");
+  TestATransientFailureIsForgottenOnSuccess(tmp / "transient");
+  TestResolveRefusesAnEntityTheGameDestroyed(tmp / "destroyed");
+  TestDefaultPolicyStreams(tmp / "defaults");
   TestDeterministicAcrossRuns(tmp / "deterministic");
 
   fs::remove_all(tmp);
