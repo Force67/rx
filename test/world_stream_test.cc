@@ -733,10 +733,11 @@ void TestClaimSet() {
                                DomainMask(Domain::kGameplay),
                                ClaimKind::kHard,
                                /*expires_at_tick=*/0,
+                               /*full_detail=*/false,
                                "the player is standing on it"});
   const u64 soft = claims.Add({7, 2, DomainMask(Domain::kRepresentation), ClaimKind::kSoft, 100,
-                               "predicted camera movement"});
-  claims.Add({7, 3, DomainMask(Domain::kGameplay), ClaimKind::kSpeculative, 0, "a guess"});
+                               false, "predicted camera movement"});
+  claims.Add({7, 3, DomainMask(Domain::kGameplay), ClaimKind::kSpeculative, 0, false, "a guess"});
   CHECK(claims.size() == 3);
 
   CHECK(claims.Holds(2, DomainMask(Domain::kGameplay)));
@@ -795,7 +796,7 @@ void TestClaimKeepsACellResident(const fs::path& directory) {
 
   // Nobody is anywhere near cell 3, and its gameplay is claimed.
   const u64 handle = claims.Add({/*owner=*/42, /*cell=*/3, DomainMask(Domain::kGameplay),
-                                 ClaimKind::kHard, 0, "a quest runs here"});
+                                 ClaimKind::kHard, 0, false, "a quest runs here"});
   const WorldStreamObservation away = At(5000, 5000);
   Settle(&streamer, &loader, away);
 
@@ -821,7 +822,7 @@ void TestClaimKeepsACellResident(const fs::path& directory) {
   CHECK(world.entity_count() == 0);
 
   // A soft claim behaves the same until the host raises the bar under pressure.
-  claims.Add({42, 1, DomainMask(Domain::kGameplay), ClaimKind::kSoft, 0, "likely encounter"});
+  claims.Add({42, 1, DomainMask(Domain::kGameplay), ClaimKind::kSoft, 0, false, "likely encounter"});
   Settle(&streamer, &loader, away);
   CHECK(streamer.stats().entities == kEntitiesPerCell);
   claims.set_weakest_honored(ClaimKind::kHard);
@@ -1000,6 +1001,116 @@ void TestTeardownRespectsTheBudget(const fs::path& directory) {
   CHECK(world.entity_count() == 0);
 }
 
+// A claim admits a cell; it does not decide the cell's detail. If it did, the
+// claim's own source stands at the cell's middle, so taking or dropping a lease
+// would evict and rebuild a cell that was already resident and correct - and a
+// lease that is re-issued periodically would put the cell on a treadmill.
+void TestClaimDoesNotChangeAResidentCellsTier(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  BakeOptions options;
+  options.tiered = true;
+  MountWorld(directory / "claimtier.rxp", &vfs, options);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy();
+  policy[Domain::kGameplay].load_distance = 500;
+  policy[Domain::kGameplay].retain_distance = 600;
+  policy[Domain::kGameplay].full_tier_distance = 20;
+  policy[Domain::kGameplay].near_tier = Tier::kFull;
+  policy[Domain::kGameplay].far_tier = Tier::kProxy;
+  policy[Domain::kRepresentation].load_distance = 0;
+  streamer.Configure(policy);
+  ClaimSet claims;
+  streamer.SetClaims(&claims);
+
+  // Cell 3 is far away, so it is resident at the cheap tier.
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 1))));
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
+  const Entity before = streamer.Resolve(EntityStableId(3, 1));
+  const u32 reads = loader.begun();
+
+  // Claim it, then drop the claim. Neither may touch the cell: same handle,
+  // same tier, no re-read.
+  const u64 handle = claims.Add({1, 3, DomainMask(Domain::kGameplay), ClaimKind::kSoft, 0, false,
+                                 "a guess"});
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(streamer.Resolve(EntityStableId(3, 1)) == before);
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
+  CHECK(loader.begun() == reads);
+
+  CHECK(claims.Remove(handle));
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(streamer.Resolve(EntityStableId(3, 1)) == before);
+  CHECK(loader.begun() == reads);
+
+  // A claim that does want the detail says so, and then it is a reload.
+  claims.Add({1, 3, DomainMask(Domain::kGameplay), ClaimKind::kHard, 0, /*full_detail=*/true,
+              "a cutscene plays here"});
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
+  CHECK(loader.begun() > reads);
+
+  // A claim on a cell nobody is near still loads it, at the cheap tier.
+  claims.Clear();
+  claims.Add({1, 3, DomainMask(Domain::kGameplay), ClaimKind::kSoft, 0, false, "keep it"});
+  Settle(&streamer, &loader, At(5000, 5000));
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 1))));
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
+}
+
+// Suppression throttles a failing cell rather than removing it from the world
+// forever: the streamer cannot tell a broken cook from an archive that was
+// missing for a moment.
+void TestSuppressionIsAThrottleNotABan(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  BakeOptions options;
+  options.corrupt_layout_hash = true;
+  MountWorld(directory / "throttle.rxp", &vfs, options);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  WorldStreamPolicy policy = TestPolicy();
+  policy[Domain::kRepresentation].load_distance = 0;
+  streamer.Configure(policy);
+
+  const WorldStreamObservation inside = At(32, 32);
+  Settle(&streamer, &loader, inside, 400);
+  CHECK(streamer.stats().suppressed == 1);
+  CHECK(streamer.stats().failed == 0);  // suppressed, not merely waiting
+  const u32 throttled = loader.begun();
+
+  // Past the retry interval it is offered again, fails again, and re-suppresses
+  // rather than resuming the tight loop.
+  Settle(&streamer, &loader, inside, 1800);
+  const u32 after = loader.begun();
+  CHECK(after > throttled);
+  if (after - throttled > 4) {
+    std::fprintf(stderr, "FAIL: a suppressed cell was retried %u times in 1800 ticks\n",
+                 after - throttled);
+    ++g_failures;
+  }
+  CHECK(streamer.stats().suppressed == 1);
+
+  // And a host that has just remounted its archives can say so.
+  streamer.ClearFailures();
+  CHECK(streamer.stats().suppressed == 0);
+  Settle(&streamer, &loader, inside, 5);
+  CHECK(loader.begun() > after);
+  CHECK(streamer.stats().entities == 0);  // still broken, so still nothing
+}
+
 void TestDeterministicAcrossRuns(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -1055,6 +1166,8 @@ int main() {
   TestTeardownRespectsTheBudget(tmp / "teardown");
   TestClaimSet();
   TestClaimKeepsACellResident(tmp / "claims");
+  TestClaimDoesNotChangeAResidentCellsTier(tmp / "claimtier");
+  TestSuppressionIsAThrottleNotABan(tmp / "throttle");
   TestDeterministicAcrossRuns(tmp / "deterministic");
 
   fs::remove_all(tmp);

@@ -22,6 +22,10 @@ struct CellDemand {
   scene::WorldStreamRegion region;
   f32 distance = 0;
   bool load = false;  // inside the load radius, not merely still retained
+  // A claim's synthetic source stands at the middle of the cell it names, so
+  // its distance is always zero. That is what admits the cell; it is not
+  // evidence about detail, and the tier band ignores it.
+  bool from_claim = false;
 };
 
 // A loaded world: the index, resident for the lifetime of the world, plus the
@@ -42,9 +46,10 @@ class RX_WORLD_EXPORT WorldMap {
   const WorldIndexData& index() const { return index_; }
   const std::string& payload_prefix() const { return payload_prefix_; }
 
-  // Reads and decodes one payload. Fails when the entry is missing, corrupt, or
-  // describes a different cell, domain, tier or bake than the index promised:
-  // a payload that disagrees with the index it was addressed through means the
+  // Reads and decodes one payload. Fails when the entry is missing, corrupt,
+  // describes a different cell, domain, tier or bake than the index promised,
+  // or carries a stable id outside the range the index gives that cell: a
+  // payload that disagrees with the index it was addressed through means the
   // archive and the index came from different cooks.
   bool ReadPayload(const asset::Vfs& vfs, u64 cell, Domain domain, Tier tier,
                    WorldCellPayload* out, std::string* error) const;

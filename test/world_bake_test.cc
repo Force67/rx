@@ -43,6 +43,10 @@ int g_failures = 0;
 // Two 32 m cells side by side on x. Cell A (x around 8) holds three plain
 // entities and two renderables; cell B (x around 48) holds one of each. Only
 // components this build registers, so the bake is strict.
+//
+// One of the renderables carries a Guid and one does not, because SaveScene
+// puts a Guid on everything it writes: if the cook let that decide, no scene
+// that had ever been through the editor would produce a single static instance.
 constexpr const char* kScene = R"(rxscene 1
 
 entity
@@ -62,6 +66,7 @@ Transform.position = 9 1 12
 Renderable.mesh = "meshes/rock.gltf"
 
 entity
+Guid.value = 104
 Transform.position = 11 1 13
 Renderable.mesh = "meshes/rock.gltf"
 

@@ -111,11 +111,13 @@ planner admits at most `maximum_commit_steps` cells per tick, while every
 retiring cell gets a teardown quantum, so a tick can destroy more rows than it
 creates. `maximum_pending` is what bounds that.
 
-A payload that fails to load is retried a few times and then stopped: a cook
+A payload that fails to load is retried a few times and then throttled: a cook
 error is deterministic, so the alternative is re-reading the same broken bytes
-forever. A suppressed cell is gone from the world without being gone from the
-index, so `stats().suppressed` counts it rather than leaving it only in the
-capped `errors()` list.
+every retry interval forever. It is a throttle rather than a ban because the
+streamer cannot tell a broken cook from an archive that went missing for a
+second, so a suppressed cell is offered again long after and heals if it can. A
+host that has just changed what is mounted can say so with `ClearFailures`, and
+`stats().suppressed` counts the cells that are quietly gone.
 
 ## Identity across a boundary
 
@@ -148,6 +150,13 @@ cost no row. `WorldStreamer::Promote` turns one into a real entity when
 something finally needs its behavior - damage, a script, a player - with the
 same stable id it always had.
 
+A promoted entity belongs to its cell, so it does not survive that cell being
+unloaded or reloaded, and neither does anything the game attached to it. That
+includes a tier change, which is why the default policy does not band the
+domains a game is likely to promote from. A game that needs promotions to
+persist records them in its own save data against the stable id and re-promotes
+after a load.
+
 ## Residency claims
 
 A pin says "keep this loaded" and, six months later, nobody can say who said it
@@ -161,6 +170,12 @@ what a teleport destination or a running quest always was - so the planner
 weighs it exactly as it weighs a player. Hard claims outrank ordinary demand and
 are never revocable; weaker ones stop counting when the host raises the bar
 under memory pressure.
+
+A claim admits a cell; it does not decide its detail. The tier band follows the
+real observers, so taking or dropping a lease never evicts and rebuilds a cell
+that was already resident and correct - which matters because a lease that is
+re-issued periodically would otherwise put its cell on a permanent unload and
+reload treadmill. A claim that does want the near tier says so explicitly.
 
 The set has no clock: `Expire` is the host's to call. A lease nobody expires is
 the immortal pin it exists to replace.
@@ -210,3 +225,5 @@ Named, so nobody has to discover them:
   index carries. The baker refuses a hierarchy rather than pretend.
 - The overlay records deletions and moves. It cannot express a spawned entity or
   one that moved between cells.
+- No re-promotion hook: nothing tells a game that a cell it promoted from is
+  about to retire.

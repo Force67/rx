@@ -84,7 +84,9 @@ RX_WORLD_EXPORT base::UniquePointer<CellLoader> MakeArchiveCellLoader(const Worl
 struct WorldStreamerStats {
   u32 resident = 0;   // (cell, domain) pairs fully published
   u32 pending = 0;    // reading, decoded-not-published, or retiring
-  u32 failed = 0;     // refused payloads awaiting a retry
+  // Cells whose last payload read or schema check was refused and which are
+  // waiting to be tried again. A cell merely changing tier is not one of these.
+  u32 failed = 0;
   // (cell, domain) pairs the streamer has stopped offering because their
   // payload failed too many times. They are gone from the world without being
   // gone from the index, so a world that is quietly missing a cell says so here
@@ -156,6 +158,9 @@ class RX_WORLD_EXPORT WorldStreamer {
   // Resident static instances of one cell and domain, empty when that cell is
   // not published. Instance pages are per domain, so which one is asked for is
   // the caller's to say.
+  //
+  // The span is invalidated by the next Update, which may move or free the
+  // cell's storage; copy anything that has to outlive the tick.
   std::span<const ResidentInstance> Instances(u64 cell,
                                               Domain domain = Domain::kRepresentation) const;
   // The instance carrying `stable_id`, or null.
@@ -171,9 +176,16 @@ class RX_WORLD_EXPORT WorldStreamer {
 
   WorldStreamerStats stats() const;
 
+  // Forgets which cells have been failing, so the next tick offers them again.
+  // For a host that has just changed what is mounted: the streamer cannot tell
+  // a broken cook from an archive that was missing for a moment, and this is
+  // how it is told the difference.
+  void ClearFailures();
+
   // Load failures since construction, oldest first and capped. A refused
   // payload is a cook or archive bug, so the messages are kept rather than
-  // counted: knowing which cell and why is the whole value.
+  // counted: knowing which cell and why is the whole value. The span is
+  // invalidated by the next failure.
   std::span<const std::string> errors() const;
 
  private:
@@ -194,6 +206,7 @@ class RX_WORLD_EXPORT WorldStreamer {
     kLoading,    // asked the loader, nothing decoded yet
     kDecoded,    // payload validated, waiting for commit quanta
     kPublished,  // fully materialized
+    kFailed,     // the read or the schema was refused; awaiting the plan's cancel
     kRetiring,   // being torn down, possibly over several ticks
   };
 
@@ -233,9 +246,16 @@ class RX_WORLD_EXPORT WorldStreamer {
   // The tally is per cell and domain, not per tier: a cell whose near-tier
   // payload is broken stops being offered at its working far tier too. That is
   // the coarse answer, and the loud one - stats().suppressed counts it.
+  //
+  // Suppression throttles rather than forbids. The failures this counts are not
+  // all deterministic: an archive briefly unmounted, or a read that fails under
+  // load, would otherwise put a permanent hole in the world over a stall that
+  // lasted a second. A suppressed cell is offered again once, long after, and
+  // re-suppressed if it fails again.
   struct FailedCell {
     u64 cell = 0;
     u32 attempts = 0;
+    u64 retry_at_tick = 0;
   };
 
   struct DomainState {
@@ -263,6 +283,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   // the priority, and cells that have failed too often are dropped.
   void MergeCandidates(Domain domain, DomainState& state);
   void NoteLoadFailure(DomainState& state, u64 cell);
+  bool Suppressed(const DomainState& state, u64 cell) const;
   void AdvanceRetirements(Domain domain, DomainState& state);
 
   bool ResolveSchema(DomainCell& cell, std::string* error) const;
@@ -284,6 +305,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   base::Vector<CellDemand> claim_scratch_;
   base::Vector<std::string> errors_;
   u32 error_count_ = 0;
+  u64 tick_ = 0;
   bool shut_down_ = false;
 };
 

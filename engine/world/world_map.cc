@@ -69,6 +69,38 @@ bool WorldMap::ReadPayload(const asset::Vfs& vfs, u64 cell, Domain domain, Tier 
                         std::to_string(cell) + " " + DomainName(domain) + "/" + TierName(tier));
     return false;
   }
+
+  // Every id in the payload has to lie in the range the index declared for this
+  // cell. The index's ranges are what resolves a stable id to its owner and what
+  // decides whether an overlay has anything to say about a cell; an id outside
+  // them would be unreachable by Resolve and silently exempt from every save
+  // delta, which is a rock that comes back after the player broke it.
+  const WorldCellRecord* record = index_.FindCell(cell);
+  if (!record) {
+    SetError(error, path + ": the index has no such cell");
+    return false;
+  }
+  auto owned = [&](u64 stable_id) {
+    return stable_id - record->stable_id_first < record->stable_id_count;
+  };
+  for (const WorldArchetypeRecord& archetype : out->archetypes) {
+    for (u64 stable_id : out->StableIds(archetype)) {
+      if (owned(stable_id)) continue;
+      SetError(error, path + ": stable id " + std::to_string(stable_id) +
+                          " is outside the range the index gives this cell (" +
+                          std::to_string(record->stable_id_first) + "+" +
+                          std::to_string(record->stable_id_count) + ")");
+      return false;
+    }
+  }
+  for (const WorldInstanceRecord& instance : out->instances) {
+    if (owned(instance.stable_id)) continue;
+    SetError(error, path + ": instance stable id " + std::to_string(instance.stable_id) +
+                        " is outside the range the index gives this cell (" +
+                        std::to_string(record->stable_id_first) + "+" +
+                        std::to_string(record->stable_id_count) + ")");
+    return false;
+  }
   return true;
 }
 
