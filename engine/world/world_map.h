@@ -21,7 +21,6 @@ namespace rx::world {
 struct CellDemand {
   scene::WorldStreamRegion region;
   f32 distance = 0;
-  bool load = false;  // inside the load radius, not merely still retained
   // A claim's synthetic source stands at the middle of the cell it names, so
   // its distance is always zero. That is what admits the cell; it is not
   // evidence about detail, and the tier band ignores it.

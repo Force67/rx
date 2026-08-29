@@ -32,10 +32,17 @@ struct CellResident {
 // no ECS row until something needs its behavior.
 struct ResidentInstance {
   u64 stable_id = 0;
-  u32 prototype = 0;  // index into the owning cell payload's prototype table
+  // What this instance is, as an index into the cell's prototype table
+  // (WorldStreamer::Prototypes). The table outlives the payload it was decoded
+  // from; the index alone would not, which is the point of keeping it.
+  u32 prototype = 0;
   Vec3 position;
   Quat rotation;
   f32 scale = 1.0f;
+  // Set once Promote has given this instance an entity. The row stays in the
+  // page - nothing removes it - so a renderer drawing the page skips these or
+  // draws the same rock twice.
+  bool promoted = false;
 };
 
 struct CellLoadRequest {
@@ -95,6 +102,9 @@ struct WorldStreamerStats {
   u32 entities = 0;   // ECS rows this streamer owns
   u32 instances = 0;  // static instances resident
   u64 resident_bytes = 0;
+  // Every load failure since construction, including the ones past the cap on
+  // the retained messages. errors() says which; this says how many.
+  u32 errors_total = 0;
 };
 
 // Drives one baked world: one streaming plan per domain, each with its own
@@ -163,15 +173,24 @@ class RX_WORLD_EXPORT WorldStreamer {
   // cell's storage; copy anything that has to outlive the tick.
   std::span<const ResidentInstance> Instances(u64 cell,
                                               Domain domain = Domain::kRepresentation) const;
+
+  // The names ResidentInstance::prototype indexes: what each instance is, in
+  // whatever vocabulary the cook used (a mesh path, a prefab name). Held by the
+  // cell for as long as it is resident, because the payload they were decoded
+  // from is dropped the moment the cell is published. Same span lifetime as
+  // Instances.
+  std::span<const std::string> Prototypes(u64 cell,
+                                          Domain domain = Domain::kRepresentation) const;
   // The instance carrying `stable_id`, or null.
   const ResidentInstance* FindInstance(u64 stable_id) const;
 
   // Turns a static instance into a real entity: the point where a rock stops
   // being a row in a page and starts being something with behavior. The
-  // instance stays in the page (the renderer keeps drawing it) unless the
-  // caller removes it; what it gains is an ECS identity under the same stable
-  // id. Returns a null entity when the instance is not resident, or when it
-  // was already promoted.
+  // instance stays in the page and is marked ResidentInstance::promoted; what
+  // it gains is an ECS identity under the same stable id. Nothing removes the
+  // page row, so a renderer drawing the page has to skip promoted instances or
+  // draw the same rock twice. Returns a null entity when the instance is not
+  // resident, or when it was already promoted.
   ecs::Entity Promote(u64 stable_id);
 
   WorldStreamerStats stats() const;
@@ -222,6 +241,9 @@ class RX_WORLD_EXPORT WorldStreamer {
     u32 next_instance = 0;
     base::Vector<StableEntity> entities;  // sorted by stable id once published
     base::Vector<ResidentInstance> instances;
+    // Lifted out of the payload before it is dropped, so a resident instance
+    // can still say what it is.
+    base::Vector<std::string> prototypes;
     // Whether the overlay has anything to say about this cell's stable-id
     // range. Decided once, when the payload arrives, so an untouched cell takes
     // the bulk copy path rather than the row-by-row one.

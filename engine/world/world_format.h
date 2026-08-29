@@ -5,6 +5,7 @@
 #include <string>
 #include <string_view>
 
+#include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
 #include "core/export.h"
@@ -191,6 +192,12 @@ class RX_WORLD_EXPORT WorldIndexWriter {
 
   base::Vector<PendingCell> cells_;
   base::Vector<PendingPayload> payloads_;
+  // Cell id to its index, and cell id to the payloads it owns. A world is
+  // millions of cells at the ceiling this format allows, and scanning either
+  // table per insertion is the one place where that ceiling would be reached by
+  // the cook rather than by the runtime.
+  base::UnorderedMap<u64, u32> cell_index_;
+  base::UnorderedMap<u64, base::Vector<u32>> payloads_by_cell_;
   u64 world_id_ = 0;
   u64 bake_id_ = 0;
   f32 cell_size_ = 0;

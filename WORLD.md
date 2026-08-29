@@ -133,7 +133,16 @@ first-use order at runtime and differs between runs, so it can never reach disk.
 Each column carries the cook's hash of the component's reflected field layout,
 which the loader recomputes and compares. Column bytes are the struct verbatim,
 so an ABI drift that went unnoticed would corrupt every entity in the cell
-instead of failing; components holding an indirection are refused outright.
+instead of failing.
+
+Three things are refused rather than copied: a component that needs a
+constructor, one whose reflected layout no longer matches the bake, and one with
+an entity-reference field - a handle is reused with a new generation as soon as
+its slot is freed, so a restored one names whatever unrelated entity now sits
+there. What cannot be caught is a member nobody reflected: neither the layout
+hash nor the field check can see one, so a component meant to be baked has to be
+fully reflected, and that is a rule for whoever writes it rather than something
+the loader can enforce.
 
 **A stable id is a streaming key, not yet a persistence key.** It is assigned by
 cook order within a cell, so re-baking a changed scene, or moving one object
@@ -145,10 +154,15 @@ id, which nothing here provides yet.
 ## Static decoration
 
 A noninteractive rock needs to be drawn and stood on. It does not need an ECS
-identity. Instance pages hold prototype, transform and a stable world id, and
-cost no row. `WorldStreamer::Promote` turns one into a real entity when
-something finally needs its behavior - damage, a script, a player - with the
-same stable id it always had.
+identity. Instance pages hold a prototype, a transform and a stable world id,
+and cost no row. `Instances(cell)` gives the rows and `Prototypes(cell)` the
+names their `prototype` field indexes; the names outlive the payload they were
+decoded from, because that payload is dropped the moment the cell publishes.
+
+`WorldStreamer::Promote` turns one into a real entity when something finally
+needs its behavior - damage, a script, a player - with the same stable id it
+always had. The page row stays and is marked `promoted`: nothing removes it, so
+a renderer walking the page skips those or draws the same rock twice.
 
 A promoted entity belongs to its cell, so it does not survive that cell being
 unloaded or reloaded, and neither does anything the game attached to it. That
@@ -209,7 +223,8 @@ from a build that registers its own.
 
 ## Verifying it
 
-Five test binaries, all in plain `ctest`, no GPU:
+Five test binaries, all in plain `ctest`, no GPU (the last needs
+`RX_BUILD_TOOLS`, since it drives the tool):
 
 | | |
 |---|---|
@@ -242,4 +257,7 @@ Named, so nobody has to discover them:
 - The overlay records deletions and moves. It cannot express a spawned entity or
   one that moved between cells.
 - No re-promotion hook: nothing tells a game that a cell it promoted from is
-  about to retire.
+  about to retire, and a promoted entity does not survive that.
+- Nothing outside the tests and `rxworld` links `rx::world` yet: no host drives
+  it, so the numbers in `DefaultWorldStreamPolicy` are a starting point rather
+  than a measurement.

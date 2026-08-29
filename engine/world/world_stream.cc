@@ -42,11 +42,39 @@ Tier TierFromChannels(u32 channels) {
   return Tier::kAbsent;
 }
 
+// Trivial copyability says a component needs no constructor. It says nothing
+// about whether its bytes still mean anything after a bake: it is true of a
+// struct holding a raw pointer or an ecs::Entity, and an entity handle is
+// reused with a new generation the moment its slot is freed, so a restored one
+// names whatever unrelated entity now sits there.
+//
+// What can be checked is the reflection: a field the editor knows is an entity
+// reference is refused outright. What cannot is a member nobody reflected -
+// neither this nor the layout hash can see one - so a component meant to be
+// baked has to be fully reflected, and that is a rule for whoever writes it.
+bool BakeableContents(const edit::ComponentDesc& desc, std::string* error) {
+  for (u32 i = 0; i < desc.prop_count; ++i) {
+    if (desc.props[i].type != edit::PropType::kEntity) continue;
+    *error = std::string("field '") + desc.props[i].name +
+             "' is an entity reference, which does not survive a bake; refer across a cell by "
+             "stable id instead";
+    return false;
+  }
+  return true;
+}
+
 const ResidentInstance* FindSorted(const base::Vector<ResidentInstance>& instances, u64 stable_id) {
   auto it = std::lower_bound(
       instances.begin(), instances.end(), stable_id,
       [](const ResidentInstance& instance, u64 wanted) { return instance.stable_id < wanted; });
   return it != instances.end() && it->stable_id == stable_id ? it : nullptr;
+}
+
+ResidentInstance* FindSortedMutable(base::Vector<ResidentInstance>* instances, u64 stable_id) {
+  auto it = std::lower_bound(
+      instances->begin(), instances->end(), stable_id,
+      [](const ResidentInstance& instance, u64 wanted) { return instance.stable_id < wanted; });
+  return it != instances->end() && it->stable_id == stable_id ? it : nullptr;
 }
 
 class ArchiveCellLoader final : public CellLoader {
@@ -216,7 +244,11 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
       const ecs::ComponentInfo& info = ecs::GetComponentInfo(desc->id);
       if (!info.trivially_copyable) {
         *error = "component '" + std::string(name) +
-                 "' holds an indirection and cannot be restored by copying bytes";
+                 "' needs a constructor and cannot be restored by copying bytes";
+        return false;
+      }
+      if (!BakeableContents(*desc, error)) {
+        *error = "component '" + std::string(name) + "' " + *error;
         return false;
       }
       if (info.size != column.stride) {
@@ -255,13 +287,19 @@ bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
   const bool overlaid = overlay_ != nullptr && cell.overlay_touched;
 
   if (payload.kind == PayloadKind::kInstances) {
+    if (cell.prototypes.empty() && !payload.prototypes.empty()) {
+      cell.prototypes.reserve(payload.prototypes.size());
+      for (const WorldPrototypeRecord& prototype : payload.prototypes) {
+        cell.prototypes.push_back(std::string(payload.String(prototype.name)));
+      }
+    }
     const u32 total = static_cast<u32>(payload.instances.size());
     const u32 take = std::min(rows, total - cell.next_instance);
     for (u32 i = 0; i < take; ++i) {
       const WorldInstanceRecord& source = payload.instances[cell.next_instance + i];
       if (overlaid && overlay_->IsDestroyed(source.stable_id)) continue;
       ResidentInstance instance{source.stable_id, source.prototype, source.position,
-                                source.rotation, source.scale};
+                                source.rotation, source.scale, /*promoted=*/false};
       if (overlaid) {
         if (const OverlayMove* move = overlay_->FindMove(source.stable_id)) {
           instance.position = move->position;
@@ -391,6 +429,7 @@ bool WorldStreamer::TeardownStep(DomainCell& cell, u32 rows) {
   }
   if (!cell.entities.empty()) return false;
   cell.instances.clear();
+  cell.prototypes.clear();
   cell.payload = WorldCellPayload{};
   cell.resolved.clear();
   cell.next_archetype = 0;
@@ -507,8 +546,12 @@ void WorldStreamer::GatherClaims(Domain domain, DomainState& state) {
     observation.axes = scene::kWorldStreamXYZ;
     state.observations.push_back(observation);
 
-    // Nested cells can contain the claimed cell's centre; a claim contributes
-    // exactly the cell it names and nothing that happens to surround it.
+    // A claim contributes exactly the cell it names as a candidate. Its source
+    // is still an observation, though, and the planner measures every candidate
+    // against every observation - so where cell bounds overlap, a cell that is
+    // already a candidate and contains this claim's centre also sees demand
+    // from it. A grid cook never produces overlapping bounds; a room-and-portal
+    // one would, and would want the claim to name its domain precisely.
     claim_scratch_.clear();
     map_.GatherRegions(observation, domain, &claim_scratch_);
     for (const CellDemand& demand : claim_scratch_) {
@@ -657,6 +700,7 @@ void WorldStreamer::UpdateDomain(Domain domain,
         cell.overlay_touched = false;
         cell.entities.clear();
         cell.instances.clear();
+        cell.prototypes.clear();
         const WorldPayloadRecord* payload = map_.index().FindPayload(*record, domain, tier);
         cell.resident_bytes = payload ? payload->resident_bytes : 0;
         loader_.Begin({action.ticket, cell.cell, domain, tier});
@@ -776,6 +820,13 @@ std::span<const ResidentInstance> WorldStreamer::Instances(u64 cell_id, Domain d
   return std::span<const ResidentInstance>(cell->instances.data(), cell->instances.size());
 }
 
+std::span<const std::string> WorldStreamer::Prototypes(u64 cell_id, Domain domain) const {
+  if (static_cast<u32>(domain) >= kDomainCount) return {};
+  const DomainCell* cell = Find(domains_[static_cast<u32>(domain)], cell_id);
+  if (!cell || cell->phase != CellPhase::kPublished) return {};
+  return std::span<const std::string>(cell->prototypes.data(), cell->prototypes.size());
+}
+
 const ResidentInstance* WorldStreamer::FindInstance(u64 stable_id) const {
   const WorldCellRecord* record = map_.index().FindCellByStableId(stable_id);
   if (!record) return nullptr;
@@ -794,7 +845,7 @@ ecs::Entity WorldStreamer::Promote(u64 stable_id) {
     DomainState& state = domains_[i];
     DomainCell* cell = Find(state, record->id);
     if (!cell || cell->phase != CellPhase::kPublished) continue;
-    const ResidentInstance* instance = FindSorted(cell->instances, stable_id);
+    ResidentInstance* instance = FindSortedMutable(&cell->instances, stable_id);
     if (!instance) continue;
     auto slot = std::lower_bound(
         cell->entities.begin(), cell->entities.end(), stable_id,
@@ -816,6 +867,7 @@ ecs::Entity WorldStreamer::Promote(u64 stable_id) {
     world_.Add(entity, transform);
     world_.Add(entity, CellResident{stable_id, cell->cell});
     cell->entities.insert(slot, StableEntity{stable_id, entity});
+    instance->promoted = true;
     return entity;
   }
   return {};
@@ -823,6 +875,7 @@ ecs::Entity WorldStreamer::Promote(u64 stable_id) {
 
 WorldStreamerStats WorldStreamer::stats() const {
   WorldStreamerStats stats;
+  stats.errors_total = error_count_;
   for (u32 i = 0; i < kDomainCount; ++i) {
     const DomainState& state = domains_[i];
     for (const DomainCell& cell : state.cells) {
@@ -837,8 +890,13 @@ WorldStreamerStats WorldStreamer::stats() const {
           stats.resident_bytes += cell.resident_bytes;
           ++stats.pending;
           break;
-        case CellPhase::kLoading:
         case CellPhase::kDecoded:
+          // Decoded and waiting for a commit quantum: the payload is in memory
+          // whether or not any of it has reached the ECS yet.
+          stats.resident_bytes += cell.resident_bytes;
+          ++stats.pending;
+          break;
+        case CellPhase::kLoading:
         case CellPhase::kFailed:
           ++stats.pending;
           break;

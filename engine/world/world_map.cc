@@ -121,8 +121,8 @@ void WorldMap::GatherRegions(const scene::WorldStreamObservation& observer, Doma
     const scene::WorldStreamRegion region{cell.id, cell.minimum, cell.maximum, 0, channel};
     const scene::WorldStreamDemand demand = scene::EvaluateWorldStreamDemand(observer, region);
     if (!demand.retain) continue;
-    out->push_back(
-        {region, std::min(demand.current_distance, demand.predicted_distance), demand.load});
+    out->push_back({region, std::min(demand.current_distance, demand.predicted_distance),
+                    /*from_claim=*/false});
   }
 }
 
