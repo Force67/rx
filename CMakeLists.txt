@@ -660,6 +660,10 @@ if(RX_BUILD_TESTS)
     add_executable(world_stream_test test/world_stream_test.cc)
     target_link_libraries(world_stream_test PRIVATE rx::world rx::edit rx::asset rx::scene rx::ecs rx::core)
     add_test(NAME world_stream_test COMMAND world_stream_test)
+
+    add_executable(world_overlay_test test/world_overlay_test.cc)
+    target_link_libraries(world_overlay_test PRIVATE rx::world rx::core)
+    add_test(NAME world_overlay_test COMMAND world_overlay_test)
   endif()
 
   if("terrain" IN_LIST RX_MODULES)

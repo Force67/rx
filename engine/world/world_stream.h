@@ -12,6 +12,7 @@
 #include "ecs/world.h"
 #include "scene/world_streaming.h"
 #include "world/world_map.h"
+#include "world/world_overlay.h"
 
 namespace rx::world {
 
@@ -101,6 +102,15 @@ class RX_WORLD_EXPORT WorldStreamer {
   void Configure(const WorldStreamPolicy& policy);
   const WorldStreamPolicy& policy() const { return policy_; }
 
+  // The sparse deltas applied on top of every cell this streamer materializes.
+  // The overlay is the caller's, and must outlive the streamer.
+  //
+  // It is consulted when a cell's payload is decoded, so it decides what a cell
+  // looks like on the way in. Editing it does not reach back into cells that
+  // are already resident: a game that destroys something destroys the entity
+  // itself and records it here so the deletion survives the next reload.
+  void SetOverlay(const WorldOverlay* overlay) { overlay_ = overlay; }
+
   // One tick. `observers` are world-space streaming sources - the player, the
   // camera, a teleport destination, an AI route request; the streamer derives
   // one bubble per domain from each.
@@ -145,6 +155,8 @@ class RX_WORLD_EXPORT WorldStreamer {
     ecs::Signature signature;
     // Runtime component id per column of this archetype, in payload order.
     base::Vector<ecs::ComponentId> column_ids;
+    // Which of those columns is the Transform an overlay move rewrites, or -1.
+    int transform_column = -1;
   };
 
   enum class CellPhase : u8 {
@@ -166,7 +178,10 @@ class RX_WORLD_EXPORT WorldStreamer {
     u32 next_instance = 0;
     base::Vector<StableEntity> entities;  // sorted by stable id once published
     base::Vector<ResidentInstance> instances;
-    base::Vector<u64> promoted;  // stable ids that already have an entity
+    // Whether the overlay has anything to say about this cell's stable-id
+    // range. Decided once, when the payload arrives, so an untouched cell takes
+    // the bulk copy path rather than the row-by-row one.
+    bool overlay_touched = false;
     u64 resident_bytes = 0;
   };
 
@@ -197,9 +212,11 @@ class RX_WORLD_EXPORT WorldStreamer {
   const WorldMap& map_;
   CellLoader& loader_;
   ecs::World& world_;
+  const WorldOverlay* overlay_ = nullptr;
   WorldStreamPolicy policy_;
   DomainState domains_[kDomainCount];
   base::Vector<CellLoadResult> results_scratch_;
+  base::Vector<u32> rows_scratch_;
   base::Vector<std::string> errors_;
   u32 error_count_ = 0;
   bool shut_down_ = false;
