@@ -27,7 +27,9 @@
 // Both are little-endian, hand-rolled in the style of terrain_io.cc, and both
 // refuse to load rather than substitute a default. A truncated, reordered or
 // stale file is a cook bug, and a silently half-loaded world costs far more to
-// diagnose than a load that names the byte it choked on.
+// diagnose than a load that names the byte it choked on. The checksum is fnv1a
+// and catches corruption, not forgery; a world that has to survive a hostile
+// archive needs a signature over the pack, which is the pack's problem.
 //
 // The index does not store payload paths or compressed sizes. Paths follow one
 // convention (CellPayloadPath), and the archive's own table of contents is
