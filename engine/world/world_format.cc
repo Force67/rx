@@ -300,10 +300,8 @@ void WorldIndexWriter::set_grid(f32 cell_size, Vec3 origin) {
 }
 
 WorldIndexWriter::PendingCell* WorldIndexWriter::Find(u64 id) {
-  for (PendingCell& cell : cells_) {
-    if (cell.id == id) return &cell;
-  }
-  return nullptr;
+  u32* index = cell_index_.find(id);
+  return index != nullptr ? &cells_[*index] : nullptr;
 }
 
 void WorldIndexWriter::AddCell(u64 id, Vec3 minimum, Vec3 maximum, u32 zone, u64 stable_id_first,
@@ -320,6 +318,7 @@ void WorldIndexWriter::AddCell(u64 id, Vec3 minimum, Vec3 maximum, u32 zone, u64
     existing->stable_id_count = stable_id_count;
     return;
   }
+  cell_index_.insert(id, static_cast<u32>(cells_.size()));
   cells_.push_back({id, low, high, zone, 0, stable_id_first, stable_id_count});
 }
 
@@ -329,12 +328,22 @@ void WorldIndexWriter::SetCellFlags(u64 id, u32 flags) {
 
 void WorldIndexWriter::AddPayload(u64 cell, Domain domain, Tier tier, u64 resident_bytes,
                                   u32 row_count) {
-  for (PendingPayload& payload : payloads_) {
-    if (payload.cell != cell || payload.domain != domain || payload.tier != tier) continue;
-    payload.resident_bytes = resident_bytes;
-    payload.row_count = row_count;
-    return;
+  // A cell owns at most one payload per domain and tier, so the scan below is
+  // over two dozen entries at worst rather than over the whole world.
+  base::Vector<u32>* owned = payloads_by_cell_.find(cell);
+  if (owned != nullptr) {
+    for (u32 index : *owned) {
+      PendingPayload& payload = payloads_[index];
+      if (payload.domain != domain || payload.tier != tier) continue;
+      payload.resident_bytes = resident_bytes;
+      payload.row_count = row_count;
+      return;
+    }
+  } else {
+    payloads_by_cell_.insert(cell, base::Vector<u32>());
+    owned = payloads_by_cell_.find(cell);
   }
+  owned->push_back(static_cast<u32>(payloads_.size()));
   payloads_.push_back({cell, resident_bytes, row_count, domain, tier});
 }
 

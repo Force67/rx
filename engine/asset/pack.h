@@ -7,6 +7,7 @@
 #include <string>
 #include <string_view>
 
+#include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 #include <base/memory/unique_pointer.h>
 
@@ -100,6 +101,10 @@ class RX_ASSET_EXPORT PackWriter {
   };
 
   base::Vector<Pending> pending_;
+  // Fnv1a of each staged path to the entries carrying it, so re-adding a path
+  // does not rescan every entry staged so far. A world cook stages one entry
+  // per cell per domain and is the first caller to make that a real cost.
+  base::UnorderedMap<u64, base::Vector<u32>> staged_;
   int compression_level_ = 6;
 };
 

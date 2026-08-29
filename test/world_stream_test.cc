@@ -57,6 +57,10 @@ struct BakeOptions {
   bool corrupt_layout_hash = false;
   bool unknown_component = false;
   bool non_trivial_component = false;
+  // A component that copies fine but whose bytes stop meaning anything the
+  // moment they leave this process: an entity handle is reused with a new
+  // generation as soon as its slot is freed.
+  bool entity_reference_component = false;
   // Also bake a cheaper gameplay tier, so a cell has two payloads to choose
   // between and crossing the band actually changes what is resident.
   bool tiered = false;
@@ -87,9 +91,10 @@ base::Vector<u8> BakeGameplay(u64 cell, const BakeOptions& options,
   CellPayloadWriter writer(cell, Domain::kGameplay, tier);
   writer.set_bake_id(options.payload_bake_id);
   const u32 archetype = writer.BeginArchetype(rows);
-  const char* name = options.unknown_component  ? "NoSuchComponentInThisBuild"
-                     : options.non_trivial_component ? "Name"
-                                                     : "Transform";
+  const char* name = options.unknown_component        ? "NoSuchComponentInThisBuild"
+                     : options.non_trivial_component  ? "Name"
+                     : options.entity_reference_component ? "Parent"
+                                                         : "Transform";
   writer.AddColumn(archetype, name, stride, layout,
                    std::span<const u8>(reinterpret_cast<const u8*>(transforms.data()),
                                        transforms.size() * sizeof(Transform)));
@@ -312,8 +317,18 @@ void TestStreamInAndOut(const fs::path& directory) {
   CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(3, 0))));
   CHECK(!world.IsAlive(streamer.Resolve(999999)));
 
-  // Static decoration is resident without costing an ECS row.
+  // Static decoration is resident without costing an ECS row, and still says
+  // what it is: the payload its prototype table came from was dropped when the
+  // cell published, so the names have to have been lifted out of it.
   CHECK(streamer.Instances(0).size() == kInstancesPerCell);
+  CHECK(streamer.Prototypes(0).size() == 1);
+  for (const ResidentInstance& resident : streamer.Instances(0)) {
+    CHECK(resident.prototype < streamer.Prototypes(0).size());
+    CHECK(streamer.Prototypes(0)[resident.prototype] == "prop/rock");
+    CHECK(!resident.promoted);
+  }
+  CHECK(streamer.Prototypes(0, Domain::kGameplay).empty());  // no page in that domain
+  CHECK(streamer.Prototypes(3).empty());                     // cell not resident
   const ResidentInstance* instance = streamer.FindInstance(InstanceStableId(0, 1));
   CHECK(instance != nullptr);
   CHECK(instance && instance->position.y == 1.0f);
@@ -497,7 +512,9 @@ void TestSchemaDriftIsRefusedLoudly(const fs::path& directory) {
       {"hash", [] { BakeOptions o; o.corrupt_layout_hash = true; return o; }(), "field layout"},
       {"unknown", [] { BakeOptions o; o.unknown_component = true; return o; }(), "not registered"},
       {"nontrivial", [] { BakeOptions o; o.non_trivial_component = true; return o; }(),
-       "indirection"},
+       "constructor"},
+      {"entityref", [] { BakeOptions o; o.entity_reference_component = true; return o; }(),
+       "entity reference"},
       {"stale", [] { BakeOptions o; o.payload_bake_id = kBakeId + 1; return o; }(), "baked by"},
   };
 
@@ -554,6 +571,19 @@ void TestPromoteAnInstance(const fs::path& directory) {
 
   const Entity promoted = streamer.Promote(stable_id);
   CHECK(world.IsAlive(promoted));
+  // The page row stays - nothing removes it - so it is marked, or a renderer
+  // walking the page draws the same rock the promoted entity now draws.
+  const ResidentInstance* page_row = streamer.FindInstance(stable_id);
+  CHECK(page_row != nullptr && page_row->promoted);
+  CHECK(streamer.Instances(0).size() == kInstancesPerCell);
+  u32 still_static = 0;
+  for (const ResidentInstance& resident : streamer.Instances(0)) {
+    if (!resident.promoted) ++still_static;
+  }
+  CHECK(still_static == kInstancesPerCell - 1);
+  // And it still says what it is, which is what a caller needs to give the new
+  // entity a mesh.
+  CHECK(streamer.Prototypes(0)[page_row->prototype] == "prop/rock");
   CHECK(world.entity_count() == kEntitiesPerCell + 1);
   const Transform* transform = world.Get<Transform>(promoted);
   CHECK(transform != nullptr);

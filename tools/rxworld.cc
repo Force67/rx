@@ -89,6 +89,11 @@ bool IdentityOnly(const edit::ComponentDesc& desc) {
   return std::strcmp(desc.name, "Guid") == 0;
 }
 
+// The lattice is packed 32 bits per axis, and the sign fold below doubles the
+// magnitude, so a coordinate this far out would alias onto another cell rather
+// than fail. Far beyond any real world: at 64 m cells this is 2^29 * 64 m.
+constexpr i64 kMaximumCellCoord = i64{1} << 29;
+
 // The grid. Cells are ids on a 2D lattice over XZ (vertical extent is the
 // cell's own bounds, not a third axis of the grid): a world tall enough to need
 // stacked cells needs zones and portals, which the format carries but the
@@ -111,9 +116,20 @@ i64 CellCoord(f32 value, f32 size) {
 
 f32 CellOrigin(i64 coord, f32 size) { return static_cast<f32>(static_cast<double>(coord) * size); }
 
-bool Finite(const scene::Transform& transform) {
-  return std::isfinite(transform.position[0]) && std::isfinite(transform.position[1]) &&
-         std::isfinite(transform.position[2]);
+// Finite and inside the lattice. The magnitude check is not paranoia: without
+// it the cast in CellCoord is undefined for a large enough quotient, and a
+// merely large one folds two distant entities into one cell whose bounds
+// contain neither of them - a cook that exits zero having written a world that
+// is wrong rather than one that fails to load.
+bool InLattice(const scene::Transform& transform, f32 cell_size) {
+  for (u32 axis = 0; axis < 3; ++axis) {
+    if (!std::isfinite(transform.position[axis])) return false;
+  }
+  for (u32 axis = 0; axis < 3; axis += 2) {
+    const double quotient = static_cast<double>(transform.position[axis]) / cell_size;
+    if (!(std::abs(quotient) < static_cast<double>(kMaximumCellCoord))) return false;
+  }
+  return true;
 }
 
 bool ParseU64(const char* text, u64* out) {
@@ -132,11 +148,18 @@ struct BakeOptions {
   base::Vector<std::string> instance_components;
 };
 
-// Whether a component can be cooked at all. Anything holding an indirection is
-// restored by copying bytes at load, so it cannot be; the caller is told which
-// ones were dropped rather than left to notice at runtime.
+// Whether a component can be cooked at all: it has to be restorable by copying
+// bytes, and its bytes have to still mean something afterwards. An entity
+// reference fails the second test even though it passes the first - a handle is
+// reused with a new generation once its slot is freed - so it is refused here
+// as well as at load. The caller is told what was dropped rather than left to
+// notice at runtime.
 bool Bakeable(const edit::ComponentDesc& desc) {
-  return ecs::GetComponentInfo(desc.id).trivially_copyable;
+  if (!ecs::GetComponentInfo(desc.id).trivially_copyable) return false;
+  for (u32 i = 0; i < desc.prop_count; ++i) {
+    if (desc.props[i].type == edit::PropType::kEntity) return false;
+  }
+  return true;
 }
 
 u64 HashBytes(u64 hash, const void* data, size_t size) {
@@ -236,14 +259,14 @@ int Bake(int argc, char** argv) {
   base::Vector<Authored> authored;
   base::Vector<std::string> dropped;
   u32 parented = 0;
-  u32 not_finite = 0;
+  u32 off_lattice = 0;
   source.Each<scene::Transform>([&](ecs::Entity entity, scene::Transform& transform) {
     if (source.Has<scene::Parent>(entity)) {
       ++parented;
       return;
     }
-    if (!Finite(transform)) {
-      ++not_finite;
+    if (!InLattice(transform, options.cell_size)) {
+      ++off_lattice;
       return;
     }
     Authored record;
@@ -292,10 +315,10 @@ int Bake(int argc, char** argv) {
                 " entities have a Parent; flatten the hierarchy before baking (a parent link is "
                 "an ecs handle, which no baked cell can carry)");
   }
-  if (not_finite != 0) {
-    return Fail(std::to_string(not_finite) +
-                " entities have a non-finite Transform.position; the index would refuse the "
-                "bounds they produce, so the archive would cook and never load");
+  if (off_lattice != 0) {
+    return Fail(std::to_string(off_lattice) +
+                " entities have a Transform.position that is not finite, or so far out that its "
+                "cell would alias onto another; either way the archive would cook and be wrong");
   }
   if (authored.empty()) return Fail(scene_path + ": no entities with a Transform to bake");
 

@@ -17,10 +17,13 @@ struct ComponentInfo {
   u32 align = 0;
   void (*move_construct)(void* dst, void* src) = nullptr;
   void (*destruct)(void* ptr) = nullptr;
-  // Whether a row of this component may be produced by copying bytes rather
-  // than by running a constructor. Cooked data and replication snapshots test
-  // this before memcpy'ing a column; a component holding a pointer, a
-  // std::string or any other indirection must be refused there, not copied.
+  // Whether a row of this component can be produced by copying bytes instead of
+  // running a constructor. This is std::is_trivially_copyable, and it is a
+  // statement about construction only: it is true of a struct holding a raw
+  // pointer or an ecs::Entity, neither of which survives being written to disk
+  // or sent to another process. A consumer that persists or transmits a column
+  // needs this AND its own check that the component's contents mean anything
+  // outside this process; see rx::world's ResolveSchema.
   bool trivially_copyable = false;
 };
 
