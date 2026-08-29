@@ -11,6 +11,7 @@
 #include "core/export.h"
 #include "ecs/world.h"
 #include "scene/world_streaming.h"
+#include "world/world_claim.h"
 #include "world/world_map.h"
 #include "world/world_overlay.h"
 
@@ -111,6 +112,14 @@ class RX_WORLD_EXPORT WorldStreamer {
   // itself and records it here so the deletion survives the next reload.
   void SetOverlay(const WorldOverlay* overlay) { overlay_ = overlay; }
 
+  // Residency claims held by systems that need a cell whether or not anyone is
+  // standing near it. Each honored claim becomes a streaming source pinned to
+  // its cell for this tick, so the planner weighs it exactly as it weighs a
+  // player. A claim is an explicit request rather than a distance heuristic,
+  // so it is honored even for a domain whose radius policy is zero. The set is
+  // the caller's, and must outlive the streamer.
+  void SetClaims(const ClaimSet* claims) { claims_ = claims; }
+
   // One tick. `observers` are world-space streaming sources - the player, the
   // camera, a teleport destination, an AI route request; the streamer derives
   // one bubble per domain from each.
@@ -200,6 +209,7 @@ class RX_WORLD_EXPORT WorldStreamer {
 
   void DrainLoader();
   void UpdateDomain(Domain domain, std::span<const scene::WorldStreamObservation> observers);
+  void GatherClaims(Domain domain, DomainState& state);
   void AdvanceRetirements(Domain domain, DomainState& state);
 
   bool ResolveSchema(DomainCell& cell, std::string* error) const;
@@ -213,10 +223,12 @@ class RX_WORLD_EXPORT WorldStreamer {
   CellLoader& loader_;
   ecs::World& world_;
   const WorldOverlay* overlay_ = nullptr;
+  const ClaimSet* claims_ = nullptr;
   WorldStreamPolicy policy_;
   DomainState domains_[kDomainCount];
   base::Vector<CellLoadResult> results_scratch_;
   base::Vector<u32> rows_scratch_;
+  base::Vector<scene::WorldStreamRegion> claim_scratch_;
   base::Vector<std::string> errors_;
   u32 error_count_ = 0;
   bool shut_down_ = false;

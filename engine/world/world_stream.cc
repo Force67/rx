@@ -421,6 +421,41 @@ void WorldStreamer::AdvanceRetirements(Domain domain, DomainState& state) {
   }
 }
 
+void WorldStreamer::GatherClaims(Domain domain, DomainState& state) {
+  if (!claims_ || claims_->empty()) return;
+  const u32 channel = 1u << static_cast<u32>(domain);
+  for (const ClaimEntry& entry : claims_->entries()) {
+    if ((entry.claim.domains & channel) == 0 || !claims_->Honors(entry.claim)) continue;
+    const WorldCellRecord* record = map_.index().FindCell(entry.claim.cell);
+    if (!record || !map_.HasDomain(*record, domain)) continue;
+
+    // A claim is a streaming source standing at the middle of one cell with no
+    // radius at all. Distance to its own bounds is zero, so the cell loads;
+    // distance to any other cell is positive, so nothing else does.
+    scene::WorldStreamObservation observation;
+    observation.position = {(record->minimum.x + record->maximum.x) * 0.5f,
+                            (record->minimum.y + record->maximum.y) * 0.5f,
+                            (record->minimum.z + record->maximum.z) * 0.5f};
+    observation.load_distance = 0;
+    observation.retain_distance = 0;
+    observation.channels = channel;
+    observation.axes = scene::kWorldStreamXYZ;
+    state.observations.push_back(observation);
+
+    claim_scratch_.clear();
+    map_.GatherRegions(scene::BuildWorldStreamQuery(observation), domain, &claim_scratch_);
+    for (const scene::WorldStreamRegion& region : claim_scratch_) {
+      if (region.id == entry.claim.cell) state.candidates.push_back(region);
+    }
+  }
+
+  // Correctness is admitted before quality: a hard claim's cell outranks a
+  // nearer cell that only the picture depends on.
+  for (scene::WorldStreamRegion& region : state.candidates) {
+    region.priority = std::max(region.priority, claims_->Priority(region.id, channel));
+  }
+}
+
 void WorldStreamer::UpdateDomain(Domain domain,
                                  std::span<const scene::WorldStreamObservation> observers) {
   DomainState& state = domains_[static_cast<u32>(domain)];
@@ -434,6 +469,7 @@ void WorldStreamer::UpdateDomain(Domain domain,
     state.observations.push_back(narrowed);
     map_.GatherRegions(scene::BuildWorldStreamQuery(narrowed), domain, &state.candidates);
   }
+  GatherClaims(domain, state);
 
   AdvanceRetirements(domain, state);
 

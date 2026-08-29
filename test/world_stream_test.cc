@@ -670,6 +670,110 @@ void TestOverlayThatDeletesEverythingLeavesNothing(const fs::path& directory) {
   CHECK(streamer.stats().pending == 0);
 }
 
+void TestClaimSet() {
+  ClaimSet claims;
+  CHECK(claims.empty());
+  const u64 hard = claims.Add({/*owner=*/1,
+                               /*cell=*/2,
+                               DomainMask(Domain::kGameplay),
+                               ClaimKind::kHard,
+                               /*expires_at_tick=*/0,
+                               "the player is standing on it"});
+  const u64 soft = claims.Add({7, 2, DomainMask(Domain::kRepresentation), ClaimKind::kSoft, 100,
+                               "predicted camera movement"});
+  claims.Add({7, 3, DomainMask(Domain::kGameplay), ClaimKind::kSpeculative, 0, "a guess"});
+  CHECK(claims.size() == 3);
+
+  CHECK(claims.Holds(2, DomainMask(Domain::kGameplay)));
+  CHECK(!claims.Holds(2, DomainMask(Domain::kCollision)));
+  CHECK(!claims.Holds(99, ~u32{0}));
+  // Hard outranks soft outranks speculative outranks nothing.
+  CHECK(claims.Priority(2, DomainMask(Domain::kGameplay)) >
+        claims.Priority(2, DomainMask(Domain::kRepresentation)));
+  CHECK(claims.Priority(2, DomainMask(Domain::kRepresentation)) >
+        claims.Priority(3, DomainMask(Domain::kGameplay)));
+  CHECK(claims.Priority(3, DomainMask(Domain::kGameplay)) > claims.Priority(99, ~u32{0}));
+
+  // "Why is this cell still resident?" has an answer, most binding first.
+  base::Vector<ResidencyClaim> why;
+  claims.Explain(2, ~u32{0}, &why);
+  CHECK(why.size() == 2);
+  CHECK(why.size() == 2 && why[0].kind == ClaimKind::kHard);
+  CHECK(why.size() == 2 && std::string(why[0].reason) == "the player is standing on it");
+
+  // Pressure revokes the weak and never the hard.
+  claims.set_weakest_honored(ClaimKind::kSoft);
+  CHECK(claims.Holds(2, DomainMask(Domain::kRepresentation)));
+  CHECK(!claims.Holds(3, DomainMask(Domain::kGameplay)));
+  claims.set_weakest_honored(ClaimKind::kHard);
+  CHECK(claims.Holds(2, DomainMask(Domain::kGameplay)));
+  CHECK(!claims.Holds(2, DomainMask(Domain::kRepresentation)));
+  // Raising the bar past hard is refused: a hard claim is not revocable.
+  claims.set_weakest_honored(static_cast<ClaimKind>(0));
+  CHECK(claims.weakest_honored() == ClaimKind::kHard);
+  claims.set_weakest_honored(ClaimKind::kSpeculative);
+
+  // A lease expires on the tick the host says, not on its own.
+  CHECK(claims.Expire(99) == 0);
+  CHECK(claims.Expire(100) == 1);
+  CHECK(!claims.Remove(soft));  // already expired
+  CHECK(claims.Remove(hard));
+  CHECK(!claims.Remove(hard));  // handles are never reused
+  CHECK(claims.RemoveOwner(7) == 1);
+  CHECK(claims.empty());
+}
+
+void TestClaimKeepsACellResident(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "claims.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  streamer.Configure(TestPolicy());
+  ClaimSet claims;
+  streamer.SetClaims(&claims);
+
+  // Nobody is anywhere near cell 3, and its gameplay is claimed.
+  const u64 handle = claims.Add({/*owner=*/42, /*cell=*/3, DomainMask(Domain::kGameplay),
+                                 ClaimKind::kHard, 0, "a quest runs here"});
+  const WorldStreamObservation away = At(5000, 5000);
+  Settle(&streamer, &loader, away);
+
+  CHECK(streamer.stats().entities == kEntitiesPerCell);
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 0))));
+  // Exactly the claimed cell, and exactly the claimed domain: the neighbours
+  // stay out, and so does cell 3's own representation payload.
+  CHECK(streamer.stats().resident == 1);
+  CHECK(streamer.stats().instances == 0);
+  CHECK(!world.IsAlive(streamer.Resolve(EntityStableId(2, 0))));
+
+  // Revoking under pressure must not drop a hard claim.
+  claims.set_weakest_honored(ClaimKind::kHard);
+  Settle(&streamer, &loader, away);
+  CHECK(streamer.stats().entities == kEntitiesPerCell);
+  claims.set_weakest_honored(ClaimKind::kSpeculative);
+
+  // Release the lease and the cell goes, with no observer having moved.
+  CHECK(claims.Remove(handle));
+  Settle(&streamer, &loader, away);
+  CHECK(streamer.stats().entities == 0);
+  CHECK(streamer.stats().resident == 0);
+  CHECK(world.entity_count() == 0);
+
+  // A soft claim behaves the same until the host raises the bar under pressure.
+  claims.Add({42, 1, DomainMask(Domain::kGameplay), ClaimKind::kSoft, 0, "likely encounter"});
+  Settle(&streamer, &loader, away);
+  CHECK(streamer.stats().entities == kEntitiesPerCell);
+  claims.set_weakest_honored(ClaimKind::kHard);
+  Settle(&streamer, &loader, away);
+  CHECK(streamer.stats().entities == 0);
+}
+
 void TestDeterministicAcrossRuns(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -718,6 +822,8 @@ int main() {
   TestOverlayThatDeletesEverythingLeavesNothing(tmp / "wipe");
   TestPromoteAnInstance(tmp / "promote");
   TestShutdownEmptiesTheWorld(tmp / "shutdown");
+  TestClaimSet();
+  TestClaimKeepsACellResident(tmp / "claims");
   TestDeterministicAcrossRuns(tmp / "deterministic");
 
   fs::remove_all(tmp);
