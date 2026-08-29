@@ -254,14 +254,15 @@ const WorldCellRecord* WorldIndexData::FindCell(u64 id) const {
 
 const WorldCellRecord* WorldIndexData::FindCellByStableId(u64 stable_id) const {
   // Ranges never overlap (the writer refuses a world where they do), so the
-  // last cell whose range starts at or below the id is the only candidate.
-  auto it = std::upper_bound(cells.begin(), cells.end(), stable_id,
-                             [](u64 wanted, const WorldCellRecord& cell) {
-                               return wanted < cell.stable_id_first;
+  // last range starting at or below the id is the only candidate.
+  auto it = std::upper_bound(stable_id_order.begin(), stable_id_order.end(), stable_id,
+                             [this](u64 wanted, u32 index) {
+                               return wanted < cells[index].stable_id_first;
                              });
-  if (it == cells.begin()) return nullptr;
+  if (it == stable_id_order.begin()) return nullptr;
   --it;
-  return stable_id - it->stable_id_first < it->stable_id_count ? it : nullptr;
+  const WorldCellRecord& cell = cells[*it];
+  return stable_id - cell.stable_id_first < cell.stable_id_count ? &cell : nullptr;
 }
 
 const WorldPayloadRecord* WorldIndexData::FindPayload(const WorldCellRecord& cell, Domain domain,
@@ -538,22 +539,23 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
     out->cells.push_back(cell);
   }
 
-  // FindCellByStableId depends on non-overlapping ranges, and a hand-edited or
-  // corrupted index is exactly where that would stop holding.
-  base::Vector<const WorldCellRecord*> ranged;
-  ranged.reserve(out->cells.size());
-  for (const WorldCellRecord& cell : out->cells) {
-    if (cell.stable_id_count != 0) ranged.push_back(&cell);
+  // The ordering FindCellByStableId searches, and the check that makes its
+  // answer unique. A hand-edited or corrupted index is exactly where
+  // non-overlap would stop holding.
+  out->stable_id_order.reserve(out->cells.size());
+  for (u32 i = 0; i < out->cells.size(); ++i) {
+    if (out->cells[i].stable_id_count != 0) out->stable_id_order.push_back(i);
   }
-  std::sort(ranged.begin(), ranged.end(),
-            [](const WorldCellRecord* a, const WorldCellRecord* b) {
-              return a->stable_id_first < b->stable_id_first;
+  std::sort(out->stable_id_order.begin(), out->stable_id_order.end(),
+            [&](u32 a, u32 b) {
+              return out->cells[a].stable_id_first < out->cells[b].stable_id_first;
             });
-  for (size_t i = 1; i < ranged.size(); ++i) {
-    if (ranged[i - 1]->stable_id_first + ranged[i - 1]->stable_id_count >
-        ranged[i]->stable_id_first) {
-      SetError(error, "world index: cells " + std::to_string(ranged[i - 1]->id) + " and " +
-                          std::to_string(ranged[i]->id) + " have overlapping stable-id ranges");
+  for (size_t i = 1; i < out->stable_id_order.size(); ++i) {
+    const WorldCellRecord& previous = out->cells[out->stable_id_order[i - 1]];
+    const WorldCellRecord& current = out->cells[out->stable_id_order[i]];
+    if (previous.stable_id_first + previous.stable_id_count > current.stable_id_first) {
+      SetError(error, "world index: cells " + std::to_string(previous.id) + " and " +
+                          std::to_string(current.id) + " have overlapping stable-id ranges");
       return false;
     }
   }

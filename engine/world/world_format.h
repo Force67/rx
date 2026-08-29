@@ -121,6 +121,11 @@ struct WorldIndexData {
   Vec3 grid_origin;
   base::Vector<WorldCellRecord> cells;
   base::Vector<WorldPayloadRecord> payloads;
+  // Indices into `cells`, sorted by stable_id_first, holding only the cells
+  // that own ids. `cells` itself is sorted by cell id, and nothing requires the
+  // cook to hand out id ranges in that order, so resolving a stable id needs
+  // its own ordering rather than an assumption that the two agree.
+  base::Vector<u32> stable_id_order;
 
   const WorldCellRecord* FindCell(u64 id) const;
   // The cell whose stable-id range contains `stable_id`, or null.

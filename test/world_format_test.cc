@@ -123,6 +123,41 @@ void TestIndexRoundTrip() {
   CHECK(index.FindCellByStableId(0) == nullptr);
 }
 
+// Cells are sorted by cell id; nothing makes the cook hand out stable-id ranges
+// in that same order. Resolving an id must not assume the two agree, and cells
+// that own no ids at all must not sit in the way of ones that do.
+void TestStableIdLookupIgnoresCellOrder() {
+  WorldIndexWriter writer;
+  // Descending ranges against ascending ids, plus two cells owning nothing,
+  // one of them with a stable_id_first inside another cell's range.
+  writer.AddCell(1, {}, {1, 1, 1}, 0, 900, 100);
+  writer.AddCell(2, {}, {1, 1, 1}, 0, 500, 100);
+  writer.AddCell(3, {}, {1, 1, 1}, 0, 950, 0);  // owns nothing, sits inside cell 1's range
+  writer.AddCell(4, {}, {1, 1, 1}, 0, 100, 100);
+  writer.AddCell(5, {}, {1, 1, 1}, 0, 0, 0);  // owns nothing, at the bottom
+  writer.AddPayload(1, Domain::kGameplay, Tier::kStandard, 16, 1);
+
+  base::Vector<u8> bytes;
+  std::string error;
+  CHECK(writer.Encode(&bytes, &error));
+  CHECK(error.empty());
+
+  WorldIndexData index;
+  CHECK(DecodeWorldIndex(std::span<const u8>(bytes.data(), bytes.size()), &index, &error));
+  CHECK(index.stable_id_order.size() == 3);  // only the cells that own ids
+
+  CHECK(index.FindCellByStableId(950) == index.FindCell(1));
+  CHECK(index.FindCellByStableId(999) == index.FindCell(1));
+  CHECK(index.FindCellByStableId(550) == index.FindCell(2));
+  CHECK(index.FindCellByStableId(150) == index.FindCell(4));
+  CHECK(index.FindCellByStableId(100) == index.FindCell(4));
+  // Between and beyond the ranges.
+  CHECK(index.FindCellByStableId(0) == nullptr);
+  CHECK(index.FindCellByStableId(99) == nullptr);
+  CHECK(index.FindCellByStableId(200) == nullptr);
+  CHECK(index.FindCellByStableId(1000) == nullptr);
+}
+
 void TestIndexRefusesInconsistentWorlds() {
   std::string error;
   base::Vector<u8> bytes;
@@ -399,6 +434,7 @@ void TestLayoutHashSeparatesShapes() {
 int main() {
   TestPayloadPathIsDerived();
   TestIndexRoundTrip();
+  TestStableIdLookupIgnoresCellOrder();
   TestIndexRefusesInconsistentWorlds();
   TestIndexRefusesCorruptedBytes();
   TestEntityPayloadRoundTrip();

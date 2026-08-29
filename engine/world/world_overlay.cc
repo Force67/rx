@@ -137,7 +137,9 @@ void WorldOverlay::Clear() {
 
 bool WorldOverlay::TouchesRange(u64 first, u32 count) const {
   if (count == 0) return false;
-  const u64 last = first + count - 1;  // callers pass ranges the index validated
+  // Saturating rather than wrapping: the index refuses a range that runs off the
+  // end of the id space, but this is public and does not get to assume it.
+  const u64 last = first > ~u64{0} - (count - 1) ? ~u64{0} : first + count - 1;
   auto destroyed = std::lower_bound(destroyed_.begin(), destroyed_.end(), first);
   if (destroyed != destroyed_.end() && *destroyed <= last) return true;
   auto move = std::lower_bound(
