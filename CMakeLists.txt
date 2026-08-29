@@ -434,6 +434,15 @@ if(RX_BUILD_TOOLS)
   rx_set_warnings(rxpack)
 endif()
 
+# rxworld cooks an authored .rxscene into a baked, streamable world archive
+# (engine/world/): a world index plus one payload per cell and domain, packed
+# into one .rxp the engine mounts like any other content.
+if(RX_BUILD_TOOLS AND "world" IN_LIST RX_MODULES)
+  add_executable(rxworld tools/rxworld.cc)
+  target_link_libraries(rxworld PRIVATE rx::world rx::edit rx::asset rx::ecs rx::core)
+  rx_set_warnings(rxworld)
+endif()
+
 # rxdiff compares two rendered pngs against a measured tolerance, which is the
 # only comparison a renderer whose radiance cache races its own waves admits
 # (a capture's clock is locked, so nothing else about it wanders). Its own
@@ -664,6 +673,15 @@ if(RX_BUILD_TESTS)
     add_executable(world_overlay_test test/world_overlay_test.cc)
     target_link_libraries(world_overlay_test PRIVATE rx::world rx::core)
     add_test(NAME world_overlay_test COMMAND world_overlay_test)
+
+    # The whole path in one test: an authored scene through the real baker into
+    # a real archive, mounted and streamed back. Needs the tool, so it is only
+    # registered when the tools are built.
+    if(TARGET rxworld)
+      add_executable(world_bake_test test/world_bake_test.cc)
+      target_link_libraries(world_bake_test PRIVATE rx::world rx::asset rx::scene rx::ecs rx::core)
+      add_test(NAME world_bake_test COMMAND world_bake_test $<TARGET_FILE:rxworld>)
+    endif()
   endif()
 
   if("terrain" IN_LIST RX_MODULES)
