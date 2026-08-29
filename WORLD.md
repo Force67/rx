@@ -226,7 +226,7 @@ from a build that registers its own.
 
 ## Verifying it
 
-Five test binaries, all in plain `ctest`, no GPU (the last needs
+Six test binaries, all in plain `ctest`, no GPU (`world_bake_test` needs
 `RX_BUILD_TOOLS`, since it drives the tool):
 
 | | |
@@ -236,10 +236,16 @@ Five test binaries, all in plain `ctest`, no GPU (the last needs
 | `world_overlay_test` | the delta semantics and the invariants a decoded save has to hold |
 | `world_stream_test` | cancellation races, stale generations, budgeted commit and teardown, tier bands, claims, overlays, promotion, multi-archetype and chunk-spanning cells |
 | `world_bake_test` | the whole path: an authored scene through the real `rxworld` binary into an archive, mounted and streamed back |
+| `world_fuzz_test` | random mutation over all three decoders, half of it with the checksum repaired so it reaches the structural checks behind it |
 
 The streaming tests drive a hand-controlled `CellLoader`, so completion order,
 late results after a cancel, and transient read failures are all things a test
 decides rather than things it waits for.
+
+The hand-written refusal tests each aim one mutation at one check; the fuzz aims
+many at none in particular, which is the half they cannot cover. Build with
+`-DRX_SANITIZE=ON` for its memory-safety half to mean anything, and pass it an
+iteration count to run it longer than the suite does.
 
 ## What is not here
 
