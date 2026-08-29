@@ -85,6 +85,11 @@ struct WorldStreamerStats {
   u32 resident = 0;   // (cell, domain) pairs fully published
   u32 pending = 0;    // reading, decoded-not-published, or retiring
   u32 failed = 0;     // refused payloads awaiting a retry
+  // (cell, domain) pairs the streamer has stopped offering because their
+  // payload failed too many times. They are gone from the world without being
+  // gone from the index, so a world that is quietly missing a cell says so here
+  // rather than only in the capped errors() list.
+  u32 suppressed = 0;
   u32 entities = 0;   // ECS rows this streamer owns
   u32 instances = 0;  // static instances resident
   u64 resident_bytes = 0;
@@ -116,7 +121,12 @@ class RX_WORLD_EXPORT WorldStreamer {
   // next reload. Do not edit it while a cell is mid-commit - the streamer reads
   // it once per quantum, so a cell straddling the edit would come up half from
   // each version of the save.
-  void SetOverlay(const WorldOverlay* overlay) { overlay_ = overlay; }
+  //
+  // False, with a message in errors() and the overlay left unset, when the
+  // overlay was recorded against a different bake than this world. Its stable
+  // ids would name different rows, so it would not fail, it would delete and
+  // move the wrong things. Passing null clears it and always succeeds.
+  bool SetOverlay(const WorldOverlay* overlay);
 
   // Residency claims held by systems that need a cell whether or not anyone is
   // standing near it. Each honored claim becomes a streaming source pinned to
@@ -219,6 +229,10 @@ class RX_WORLD_EXPORT WorldStreamer {
   // A cell whose payload has failed to load. A cook error is deterministic, so
   // retrying it forever re-reads and re-decodes the same broken bytes every
   // retry interval; past a few attempts the cell stops being offered at all.
+  //
+  // The tally is per cell and domain, not per tier: a cell whose near-tier
+  // payload is broken stops being offered at its working far tier too. That is
+  // the coarse answer, and the loud one - stats().suppressed counts it.
   struct FailedCell {
     u64 cell = 0;
     u32 attempts = 0;

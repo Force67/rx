@@ -113,6 +113,17 @@ WorldStreamPolicy DefaultWorldStreamPolicy(f32 scale) {
   set(Domain::kNavigation, 384, 448, 192, 1024);
   set(Domain::kLighting, 256, 320, 128, 1024);
   set(Domain::kAudio, 0, 0, 0, 1024);  // opt in per game
+
+  // Swapping tiers is a reload: the old tier's rows are destroyed before the
+  // new tier's arrive. For anything the simulation depends on that reads as an
+  // entity despawning and respawning as the player walks up, so the domains
+  // that carry behavior stay on one tier by default and only the ones whose
+  // gap is a moment of coarser scenery band by distance. Set near_tier apart
+  // from far_tier per game once the cook produces a tier worth the swap.
+  for (Domain domain : {Domain::kGameplay, Domain::kCollision, Domain::kNavigation}) {
+    policy[domain].near_tier = Tier::kFull;
+    policy[domain].far_tier = Tier::kFull;
+  }
   return policy;
 }
 

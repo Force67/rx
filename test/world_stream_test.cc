@@ -593,6 +593,7 @@ void TestOverlayShapesTheCellOnTheWayIn(const fs::path& directory) {
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   WorldOverlay overlay;
+  overlay.set_bake_id(kBakeId);
   overlay.Destroy(EntityStableId(0, 1));
   overlay.Destroy(EntityStableId(0, 4));
   overlay.Destroy(InstanceStableId(0, 0));
@@ -603,7 +604,7 @@ void TestOverlayShapesTheCellOnTheWayIn(const fs::path& directory) {
   QueuedLoader loader(map, vfs);
   WorldStreamer streamer(map, loader, world);
   streamer.Configure(TestPolicy(/*rows_per_commit=*/2));  // deletions must survive the quanta
-  streamer.SetOverlay(&overlay);
+  CHECK(streamer.SetOverlay(&overlay));
   Settle(&streamer, &loader, At(32, 32));
 
   // The destroyed rows were never created, not created and then removed.
@@ -655,6 +656,41 @@ void TestOverlayShapesTheCellOnTheWayIn(const fs::path& directory) {
   CHECK(removed && removed->position[0] == 10.0f);
 }
 
+// An overlay recorded against a different cook names different rows. Applying
+// it would not fail: it would delete and move whatever now carries those ids.
+void TestOverlayFromAnotherBakeIsRefused(const fs::path& directory) {
+  fs::create_directories(directory);
+  Vfs vfs;
+  MountWorld(directory / "mismatch.rxp", &vfs);
+  WorldMap map;
+  std::string error;
+  CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
+
+  rx::ecs::World world;
+  QueuedLoader loader(map, vfs);
+  WorldStreamer streamer(map, loader, world);
+  streamer.Configure(TestPolicy());
+
+  WorldOverlay stale;
+  stale.set_bake_id(kBakeId + 1);
+  stale.Destroy(EntityStableId(0, 1));
+  CHECK(!streamer.SetOverlay(&stale));
+  CHECK(!streamer.errors().empty());
+
+  // Refused means not applied, not applied-anyway-with-a-warning.
+  Settle(&streamer, &loader, At(32, 32));
+  CHECK(streamer.stats().entities == kEntitiesPerCell);
+  CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, 1))));
+
+  // The matching one is taken, and so is an unkeyed one built in memory.
+  WorldOverlay matching;
+  matching.set_bake_id(kBakeId);
+  CHECK(streamer.SetOverlay(&matching));
+  WorldOverlay unkeyed;
+  CHECK(streamer.SetOverlay(&unkeyed));
+  CHECK(streamer.SetOverlay(nullptr));
+}
+
 void TestOverlayThatDeletesEverythingLeavesNothing(const fs::path& directory) {
   fs::create_directories(directory);
   Vfs vfs;
@@ -664,6 +700,7 @@ void TestOverlayThatDeletesEverythingLeavesNothing(const fs::path& directory) {
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   WorldOverlay overlay;
+  overlay.set_bake_id(kBakeId);
   for (u32 i = 0; i < kEntitiesPerCell; ++i) overlay.Destroy(EntityStableId(0, i));
   for (u32 i = 0; i < kInstancesPerCell; ++i) overlay.Destroy(InstanceStableId(0, i));
 
@@ -671,7 +708,7 @@ void TestOverlayThatDeletesEverythingLeavesNothing(const fs::path& directory) {
   QueuedLoader loader(map, vfs);
   WorldStreamer streamer(map, loader, world);
   streamer.Configure(TestPolicy(/*rows_per_commit=*/2));
-  streamer.SetOverlay(&overlay);
+  CHECK(streamer.SetOverlay(&overlay));
   Settle(&streamer, &loader, At(32, 32));
 
   // An emptied cell still becomes resident: it exists, it just holds nothing.
@@ -831,7 +868,10 @@ void TestTierRefinesWhenTheObserverCloses(const fs::path& directory) {
   CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 1))));
 
   // Walk into cell 3. It refines to the full tier without the observer ever
-  // leaving its retain radius, so it never becomes a hole.
+  // leaving its retain radius, so the reload is guaranteed to happen - but it
+  // is a reload: the proxy rows are destroyed before the full ones arrive, and
+  // for a domain carrying behavior that gap is a visible despawn. Hence
+  // DefaultWorldStreamPolicy leaving gameplay on one tier.
   Settle(&streamer, &loader, At(96, 96));
   CHECK(streamer.errors().empty());
   CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
@@ -907,6 +947,9 @@ void TestPersistentFailuresStopRetrying(const fs::path& directory) {
   Settle(&streamer, &loader, At(32, 32), 400);
   CHECK(streamer.stats().entities == 0);
   CHECK(!streamer.errors().empty());
+  // The latch is 3 per (cell, domain); the bubble here covers one cell, whose
+  // representation payload is fine and loads once. Anything beyond that plus
+  // slack means the retry loop is still running.
   const u32 attempts = loader.begun();
   if (attempts > 8) {
     std::fprintf(stderr, "FAIL: a broken cell was read %u times in 400 ticks\n", attempts);
@@ -951,6 +994,9 @@ void TestTeardownRespectsTheBudget(const fs::path& directory) {
   }
   CHECK(streamer.stats().entities == 0);
   CHECK(ticks_spent > 1);  // six entities at two per tick cannot be one tick
+  // One retiring cell per domain here. The budget is per retiring cell, so a
+  // tick with several of them destroys several quanta; that is the planner's
+  // pending cap to bound, not this one.
   CHECK(world.entity_count() == 0);
 }
 
@@ -999,6 +1045,7 @@ int main() {
   TestLateResultAfterCancelIsNotPublished(tmp / "late");
   TestSchemaDriftIsRefusedLoudly(tmp / "drift");
   TestOverlayShapesTheCellOnTheWayIn(tmp / "overlay");
+  TestOverlayFromAnotherBakeIsRefused(tmp / "mismatch");
   TestOverlayThatDeletesEverythingLeavesNothing(tmp / "wipe");
   TestPromoteAnInstance(tmp / "promote");
   TestShutdownEmptiesTheWorld(tmp / "shutdown");

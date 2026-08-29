@@ -34,6 +34,16 @@ struct OverlayMove {
 
 class RX_WORLD_EXPORT WorldOverlay {
  public:
+  // Which cook this overlay's stable ids mean something against. A stable id is
+  // assigned by cook order, so the same id names a different row after a
+  // re-bake: an overlay applied to the wrong world does not fail, it deletes
+  // and moves the wrong things. Set it from WorldIndexData::bake_id before
+  // serializing; WorldStreamer::SetOverlay refuses a mismatch. Zero means the
+  // overlay is not keyed to any bake, which is only safe for one built and
+  // discarded in memory.
+  void set_bake_id(u64 id) { bake_id_ = id; }
+  u64 bake_id() const { return bake_id_; }
+
   // Destroying an id also drops any move recorded for it: a row that is not
   // going to exist has no transform worth keeping.
   void Destroy(u64 stable_id);
@@ -68,6 +78,7 @@ class RX_WORLD_EXPORT WorldOverlay {
  private:
   base::Vector<u64> destroyed_;      // sorted
   base::Vector<OverlayMove> moves_;  // sorted by stable id
+  u64 bake_id_ = 0;
 };
 
 }  // namespace rx::world

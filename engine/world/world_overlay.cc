@@ -172,6 +172,7 @@ bool WorldOverlay::Encode(base::Vector<u8>* out, std::string* error) const {
   out->insert(out->end(), std::begin(kMagic), std::end(kMagic));
   AppendU32(out, kVersion);
   AppendU32(out, 0);  // flags, reserved
+  AppendU64(out, bake_id_);
   AppendU32(out, static_cast<u32>(destroyed_.size()));
   AppendU32(out, static_cast<u32>(moves_.size()));
   AppendU64(out, Checksum(std::span<const u8>(body.data(), body.size())));
@@ -194,6 +195,7 @@ bool WorldOverlay::Decode(std::span<const u8> bytes, WorldOverlay* out, std::str
     return false;
   }
   header.U32();  // flags, reserved
+  const u64 bake_id = header.U64();
   const u32 destroyed_count = header.U32();
   const u32 move_count = header.U32();
   const u64 checksum = header.U64();
@@ -221,6 +223,7 @@ bool WorldOverlay::Decode(std::span<const u8> bytes, WorldOverlay* out, std::str
   }
 
   out->Clear();
+  out->set_bake_id(bake_id);
   Cursor cursor(body);
   out->destroyed_.reserve(destroyed_count);
   for (u32 i = 0; i < destroyed_count; ++i) {

@@ -102,6 +102,7 @@ void TestTouchesRange() {
 
 void TestRoundTrip() {
   WorldOverlay overlay;
+  overlay.set_bake_id(0xfeedfacecafebeefull);
   overlay.Destroy(400);
   overlay.Destroy(100);
   overlay.Move(250, {1, 2, 3}, {0, 0.5f, 0, 0.5f}, 1.5f);
@@ -114,6 +115,9 @@ void TestRoundTrip() {
 
   WorldOverlay decoded;
   CHECK(WorldOverlay::Decode(std::span<const u8>(bytes.data(), bytes.size()), &decoded, &error));
+  // The bake it was recorded against travels with it, or the ids it holds mean
+  // nothing checkable.
+  CHECK(decoded.bake_id() == 0xfeedfacecafebeefull);
   CHECK(decoded.destroyed_count() == 2);
   CHECK(decoded.move_count() == 2);
   CHECK(decoded.IsDestroyed(100) && decoded.IsDestroyed(400));

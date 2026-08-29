@@ -108,6 +108,13 @@ struct BakeOptions {
   base::Vector<std::string> instance_components;
 };
 
+// Whether a component can be cooked at all. Anything holding an indirection is
+// restored by copying bytes at load, so it cannot be; the caller is told which
+// ones were dropped rather than left to notice at runtime.
+bool Bakeable(const edit::ComponentDesc& desc) {
+  return ecs::GetComponentInfo(desc.id).trivially_copyable;
+}
+
 u64 HashBytes(u64 hash, const void* data, size_t size) {
   const u8* bytes = static_cast<const u8*>(data);
   for (size_t i = 0; i < size; ++i) {
@@ -133,17 +140,22 @@ u64 HashCook(const std::string& scene_path, const BakeOptions& options) {
   std::fclose(file);
   hash = HashBytes(hash, options.name.data(), options.name.size());
   hash = HashBytes(hash, &options.cell_size, sizeof(options.cell_size));
+  hash = HashBytes(hash, &options.skip_unknown, sizeof(options.skip_unknown));
   for (const std::string& component : options.instance_components) {
     hash = HashBytes(hash, component.data(), component.size());
   }
+  // And the schema this build can bake. Two cooks from builds that disagree
+  // about a component's fields produce different bytes for the same scene, so
+  // they have to be different bakes.
+  for (const edit::ComponentDesc* desc : edit::AllComponents()) {
+    if (!Bakeable(*desc)) continue;
+    u32 stride = 0;
+    u64 layout = 0;
+    if (!world::RuntimeComponentLayout(desc->name, &stride, &layout)) continue;
+    hash = HashBytes(hash, desc->name, std::strlen(desc->name));
+    hash = HashBytes(hash, &layout, sizeof(layout));
+  }
   return hash == 0 ? 1 : hash;  // 0 means "unreadable"
-}
-
-// Whether a component can be cooked at all. Anything holding an indirection is
-// restored by copying bytes at load, so it cannot be; the caller is told which
-// ones were dropped rather than left to notice at runtime.
-bool Bakeable(const edit::ComponentDesc& desc) {
-  return ecs::GetComponentInfo(desc.id).trivially_copyable;
 }
 
 bool SameComponents(const Authored& a, const Authored& b) {
@@ -249,7 +261,9 @@ int Bake(int argc, char** argv) {
   if (authored.empty()) return Fail(scene_path + ": no entities with a Transform to bake");
 
   for (const std::string& name : dropped) {
-    std::fprintf(stderr, "rxworld: warning: dropping '%s', which holds an indirection\n",
+    std::fprintf(stderr,
+                 "rxworld: warning: '%s' holds an indirection and cannot be baked; every entity "
+                 "carrying it loses it\n",
                  name.c_str());
   }
 
@@ -320,6 +334,7 @@ int Bake(int argc, char** argv) {
     entities.set_bake_id(options.bake_id);
     u32 cell_instances = 0;
     u32 cell_entities = 0;
+    u64 cell_entity_bytes = 0;
 
     for (size_t group_begin = cell_begin; group_begin < cell_end;) {
       size_t group_end = group_begin;
@@ -372,7 +387,12 @@ int Bake(int argc, char** argv) {
         }
         entities.AddColumn(archetype, desc->name, stride, layout,
                            std::span<const u8>(column.data(), column.size()));
+        cell_entity_bytes += column.size();
       }
+      // What the rows cost once they are ECS rows, which is the number the
+      // memory budget wants: the columns plus the CellResident the streamer
+      // adds. The encoded payload is a different, smaller number.
+      cell_entity_bytes += static_cast<u64>(rows) * sizeof(world::CellResident);
       cell_entities += rows;
       group_begin = group_end;
     }
@@ -380,7 +400,7 @@ int Bake(int argc, char** argv) {
     if (cell_entities != 0) {
       base::Vector<u8> bytes;
       if (!entities.Encode(&bytes, &error)) return Fail(error);
-      index.AddPayload(cell, world::Domain::kGameplay, world::Tier::kStandard, bytes.size(),
+      index.AddPayload(cell, world::Domain::kGameplay, world::Tier::kStandard, cell_entity_bytes,
                        cell_entities);
       pack.Add(world::CellPayloadPath(prefix, cell, world::Domain::kGameplay,
                                       world::Tier::kStandard),
@@ -390,7 +410,8 @@ int Bake(int argc, char** argv) {
     if (cell_instances != 0) {
       base::Vector<u8> bytes;
       if (!instances.Encode(&bytes, &error)) return Fail(error);
-      index.AddPayload(cell, world::Domain::kRepresentation, world::Tier::kFull, bytes.size(),
+      index.AddPayload(cell, world::Domain::kRepresentation, world::Tier::kFull,
+                       static_cast<u64>(cell_instances) * sizeof(world::ResidentInstance),
                        cell_instances);
       pack.Add(world::CellPayloadPath(prefix, cell, world::Domain::kRepresentation,
                                       world::Tier::kFull),
