@@ -6,6 +6,7 @@
 rx_add_module(world
   world_format.cc
   world_map.cc
+  world_claim.cc
   world_overlay.cc
   world_stream.cc
 )
