@@ -14,6 +14,16 @@
 
 namespace rx::world {
 
+// One cell one observer wants, and how far away the planner thinks it is: the
+// nearer of the current and swept-predicted distances, which is the number the
+// planner itself schedules by. The streamer bands tiers on it, so a tier
+// decision and an admission decision can never be made from different numbers.
+struct CellDemand {
+  scene::WorldStreamRegion region;
+  f32 distance = 0;
+  bool load = false;  // inside the load radius, not merely still retained
+};
+
 // A loaded world: the index, resident for the lifetime of the world, plus the
 // archive it was mounted from. Everything a streaming decision needs is here
 // and in memory; reading a payload is only ever the consequence of a decision,
@@ -39,13 +49,20 @@ class RX_WORLD_EXPORT WorldMap {
   bool ReadPayload(const asset::Vfs& vfs, u64 cell, Domain domain, Tier tier,
                    WorldCellPayload* out, std::string* error) const;
 
-  // Every cell the query could reach that has any payload for `domain`, as
-  // streaming regions with the cell id as the region id. Conservative: the
-  // planner's own bounds test decides load and retain, so a cell emitted here
-  // that turns out to be too far is merely wasted comparison, while one missed
-  // here would be read as having left the world.
-  void GatherRegions(const scene::WorldStreamQuery& query, Domain domain,
-                     base::Vector<scene::WorldStreamRegion>* out) const;
+  // Every cell this observer retains that has any payload for `domain`.
+  //
+  // The test is the planner's own EvaluateWorldStreamDemand rather than a
+  // cheaper approximation of it, because the two must agree exactly. A cell the
+  // planner would still retain but this pass omits is not merely a missed
+  // optimization: AdvanceWorldStreaming reads an absent candidate as the cell
+  // having left the world, and retires it on the spot, ignoring the retain
+  // radius that exists to prevent precisely that.
+  //
+  // This walks every cell. A spatial index belongs in front of it once a world
+  // is large enough to want one, as a broad phase whose survivors still take
+  // this exact test.
+  void GatherRegions(const scene::WorldStreamObservation& observer, Domain domain,
+                     base::Vector<CellDemand>* out) const;
 
   // Whether the cook produced anything at all for this domain.
   bool HasDomain(const WorldCellRecord& cell, Domain domain) const;
@@ -64,10 +81,16 @@ class RX_WORLD_EXPORT WorldMap {
 struct DomainStreamPolicy {
   f32 load_distance = 0;    // 0 disables the domain outright
   f32 retain_distance = 0;  // hysteresis; clamped up to load_distance
-  // Cells nearer than this take the higher tier. A cell keeps the tier it was
-  // prepared with for as long as it stays resident: tiers are alternatives, and
-  // swapping one for another under a moving observer is churn, not detail.
+  // Cells nearer than this take near_tier, the rest far_tier. Tiers are
+  // alternatives rather than increments, so crossing the band is a reload: the
+  // streamer folds the band into the region's identity and the planner runs its
+  // ordinary budgeted retire-and-re-prepare inside the retain radius. Setting
+  // near_tier == far_tier turns the whole mechanism off.
   f32 full_tier_distance = 0;
+  // How far past full_tier_distance a cell already at near_tier is allowed to
+  // drift before dropping back. Without it a cell sitting on the boundary
+  // reloads every time the observer breathes.
+  f32 tier_hysteresis = 1.25f;
   Tier near_tier = Tier::kFull;
   Tier far_tier = Tier::kProxy;
   // Per-domain budgets, so one domain's payload sizes cannot starve another's.
@@ -99,8 +122,20 @@ RX_WORLD_EXPORT bool MakeDomainObservation(const scene::WorldStreamObservation& 
                                            Domain domain, const WorldStreamPolicy& policy,
                                            scene::WorldStreamObservation* out);
 
-// The tier this domain wants for a cell at `distance`, capped by what the cook
-// actually produced. kAbsent means nothing to load.
+// Whether a cell at `distance` sits in the near band. `currently_near` is the
+// band it is already in, so the hysteresis margin only applies on the way out.
+RX_WORLD_EXPORT bool InNearTierBand(const DomainStreamPolicy& policy, f32 distance,
+                                    bool currently_near);
+
+// The best tier at or below `wanted` that the cook actually produced. When it
+// produced nothing that cheap, the cheapest it did produce: a proxy is a worse
+// answer than the full thing and a much better one than a hole. kAbsent means
+// the cook produced nothing for this domain at all.
+RX_WORLD_EXPORT Tier ResolveTier(const WorldIndexData& index, const WorldCellRecord& cell,
+                                 Domain domain, Tier wanted);
+
+// The two together: what this domain wants for a cell at `distance`, capped by
+// what exists. Equivalent to ResolveTier(TierBand(...)) with no hysteresis.
 RX_WORLD_EXPORT Tier TargetTier(const WorldIndexData& index, const WorldCellRecord& cell,
                                 Domain domain, const DomainStreamPolicy& policy, f32 distance);
 

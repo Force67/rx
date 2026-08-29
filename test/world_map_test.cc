@@ -188,17 +188,16 @@ void TestPerDomainBubbles(const fs::path& directory) {
   CHECK(gameplay.load_distance == 8);
   CHECK(gameplay.channels == (1u << static_cast<u32>(Domain::kGameplay)));
 
-  base::Vector<rx::scene::WorldStreamRegion> regions;
-  map.GatherRegions(rx::scene::BuildWorldStreamQuery(gameplay), Domain::kGameplay, &regions);
+  base::Vector<CellDemand> regions;
+  map.GatherRegions(gameplay, Domain::kGameplay, &regions);
   // The tight gameplay bubble reaches only its own cell.
   CHECK(regions.size() == 1);
-  CHECK(regions.size() == 1 && regions[0].id == 0);
+  CHECK(regions.size() == 1 && regions[0].region.id == 0);
 
   regions.clear();
   rx::scene::WorldStreamObservation representation;
   CHECK(MakeDomainObservation(observer, Domain::kRepresentation, policy, &representation));
-  map.GatherRegions(rx::scene::BuildWorldStreamQuery(representation), Domain::kRepresentation,
-                    &regions);
+  map.GatherRegions(representation, Domain::kRepresentation, &regions);
   // The wide one reaches all four. Same observer, same frame, different bubble.
   CHECK(regions.size() == 4);
 
@@ -218,9 +217,69 @@ void TestPerDomainBubbles(const fs::path& directory) {
   policy[Domain::kCollision].retain_distance = 500;
   rx::scene::WorldStreamObservation collision;
   CHECK(MakeDomainObservation(observer, Domain::kCollision, policy, &collision));
-  map.GatherRegions(rx::scene::BuildWorldStreamQuery(collision), Domain::kCollision, &regions);
+  map.GatherRegions(collision, Domain::kCollision, &regions);
   CHECK(regions.size() == 1);
-  CHECK(regions.size() == 1 && regions[0].id == 0);
+  CHECK(regions.size() == 1 && regions[0].region.id == 0);
+}
+
+// The gather and the planner must agree about what is retained, and the case
+// where a cheaper approximation stops agreeing is a long thin cell seen by a
+// moving observer: the planner measures from the cell's bounding sphere, which
+// reaches much further than the cell's own box along its short axis. A gather
+// that missed it would read to the planner as the cell having left the world,
+// and the resident cell would be retired on the spot, retain radius ignored.
+void TestMovingObserverRetainsElongatedCells(const fs::path& directory) {
+  fs::create_directories(directory);
+  WorldIndexWriter writer;
+  writer.set_bake_id(kBakeId);
+  // 100 m wide on x, 2 m deep on z: bounding radius about 50, box depth 1.
+  writer.AddCell(1, {-50, -1, 0}, {50, 1, 2}, 0, 0, 0);
+  writer.AddPayload(1, Domain::kGameplay, Tier::kStandard, 64, 1);
+  base::Vector<u8> index_bytes;
+  std::string error;
+  CHECK(writer.Encode(&index_bytes, &error));
+
+  PackWriter pack;
+  pack.Add("thin/thin.rxworld", std::move(index_bytes));
+  CHECK(pack.WriteTo((directory / "thin.rxp").string()));
+  Vfs vfs;
+  auto provider = rx::asset::MakePackFileProvider((directory / "thin.rxp").string());
+  CHECK(provider != nullptr);
+  if (!provider) return;
+  vfs.Mount("world", std::move(provider));
+
+  WorldMap map;
+  CHECK(map.Load(vfs, "world://thin/thin.rxworld", &error));
+
+  rx::scene::WorldStreamObservation observer;
+  observer.position = {0, 0, 40};
+  observer.velocity = {0, 0, 4};
+  observer.prediction_seconds = 0.25f;
+  observer.maximum_prediction_distance = 4;
+  observer.load_distance = 12;
+  observer.retain_distance = 12;
+  observer.channels = 1u << static_cast<u32>(Domain::kGameplay);
+
+  const rx::scene::WorldStreamRegion region{1, {-50, -1, 0}, {50, 1, 2}, 0,
+                                            1u << static_cast<u32>(Domain::kGameplay)};
+  // The planner retains it (38 m away by the box, but inside the swept sphere).
+  const rx::scene::WorldStreamDemand demand =
+      rx::scene::EvaluateWorldStreamDemand(observer, region);
+  CHECK(demand.retain);
+
+  base::Vector<CellDemand> gathered;
+  map.GatherRegions(observer, Domain::kGameplay, &gathered);
+  CHECK(gathered.size() == 1);
+  CHECK(gathered.size() == 1 && gathered[0].region.id == 1);
+
+  // Standing still, the same observer is genuinely out of range, and the two
+  // still agree.
+  rx::scene::WorldStreamObservation still = observer;
+  still.velocity = {};
+  CHECK(!rx::scene::EvaluateWorldStreamDemand(still, region).retain);
+  gathered.clear();
+  map.GatherRegions(still, Domain::kGameplay, &gathered);
+  CHECK(gathered.empty());
 }
 
 void TestTargetTier(const fs::path& directory) {
@@ -263,6 +322,7 @@ int main() {
   TestLoadFromArchive(tmp / "load");
   TestMissingAndStaleArchives(tmp / "stale");
   TestPerDomainBubbles(tmp / "bubbles");
+  TestMovingObserverRetainsElongatedCells(tmp / "thin");
   TestTargetTier(tmp / "tiers");
 
   fs::remove_all(tmp);

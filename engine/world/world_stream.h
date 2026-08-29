@@ -63,6 +63,10 @@ struct CellLoadResult {
 // Begin, Cancel and Poll are all called on the streamer's own thread. An
 // implementation that does the work elsewhere owns its own synchronization and
 // must tolerate Cancel arriving for a ticket it has already completed.
+//
+// WorldStreamer::Shutdown does not Poll: an implementation with results still
+// in flight owns them, and must be able to drop them (and join its workers)
+// when it is destroyed.
 class RX_WORLD_EXPORT CellLoader {
  public:
   virtual ~CellLoader() = default;
@@ -106,10 +110,12 @@ class RX_WORLD_EXPORT WorldStreamer {
   // The sparse deltas applied on top of every cell this streamer materializes.
   // The overlay is the caller's, and must outlive the streamer.
   //
-  // It is consulted when a cell's payload is decoded, so it decides what a cell
-  // looks like on the way in. Editing it does not reach back into cells that
-  // are already resident: a game that destroys something destroys the entity
-  // itself and records it here so the deletion survives the next reload.
+  // It decides what a cell looks like on the way in, and does not reach back
+  // into cells that are already resident: a game that destroys something
+  // destroys the entity itself and records it here so the deletion survives the
+  // next reload. Do not edit it while a cell is mid-commit - the streamer reads
+  // it once per quantum, so a cell straddling the edit would come up half from
+  // each version of the save.
   void SetOverlay(const WorldOverlay* overlay) { overlay_ = overlay; }
 
   // Residency claims held by systems that need a cell whether or not anyone is
@@ -126,16 +132,22 @@ class RX_WORLD_EXPORT WorldStreamer {
   void Update(std::span<const scene::WorldStreamObservation> observers);
 
   // Retires everything and drains it in this call, so the ecs::World can be
-  // destroyed afterwards. Idempotent.
+  // destroyed afterwards. Terminal and idempotent: Update does nothing after
+  // it, because a streamer is cheap to rebuild and a half-restarted one is not
+  // worth the states it would add.
   void Shutdown();
 
   // The live entity for a stable id, or a null entity when its cell is not
-  // resident. Resolution goes through the index's stable-id ranges, so an id
-  // belonging to an unloaded cell is answered without any of it resident.
+  // resident, is still materializing, is retiring, or the game destroyed that
+  // entity itself. Resolution goes through the index's stable-id ranges, so an
+  // id belonging to an unloaded cell is answered without any of it resident.
   ecs::Entity Resolve(u64 stable_id) const;
 
-  // Resident static instances of one cell, empty when it is not resident.
-  std::span<const ResidentInstance> Instances(u64 cell) const;
+  // Resident static instances of one cell and domain, empty when that cell is
+  // not published. Instance pages are per domain, so which one is asked for is
+  // the caller's to say.
+  std::span<const ResidentInstance> Instances(u64 cell,
+                                              Domain domain = Domain::kRepresentation) const;
   // The instance carrying `stable_id`, or null.
   const ResidentInstance* FindInstance(u64 stable_id) const;
 
@@ -194,12 +206,34 @@ class RX_WORLD_EXPORT WorldStreamer {
     u64 resident_bytes = 0;
   };
 
+  // Which tier band a cell was last placed in, so the hysteresis margin has
+  // something to compare against. Kept apart from residency on purpose: the
+  // band is a fact about where the observers are, and it has to survive the
+  // window where a cell is retiring at one tier and not yet resident at the
+  // other.
+  struct CellBand {
+    u64 cell = 0;
+    bool near = false;
+  };
+
+  // A cell whose payload has failed to load. A cook error is deterministic, so
+  // retrying it forever re-reads and re-decodes the same broken bytes every
+  // retry interval; past a few attempts the cell stops being offered at all.
+  struct FailedCell {
+    u64 cell = 0;
+    u32 attempts = 0;
+  };
+
   struct DomainState {
     scene::WorldStreamPlan plan;
     base::Vector<DomainCell> cells;  // sorted by cell id
     base::Vector<scene::WorldStreamObservation> observations;
+    base::Vector<CellDemand> demands;
     base::Vector<scene::WorldStreamRegion> candidates;
     base::Vector<scene::WorldStreamAction> actions;
+    base::Vector<CellBand> bands;  // sorted by cell id
+    base::Vector<CellBand> bands_scratch;
+    base::Vector<FailedCell> failed;  // sorted by cell id
   };
 
   DomainCell* Find(DomainState& state, u64 cell);
@@ -210,6 +244,11 @@ class RX_WORLD_EXPORT WorldStreamer {
   void DrainLoader();
   void UpdateDomain(Domain domain, std::span<const scene::WorldStreamObservation> observers);
   void GatherClaims(Domain domain, DomainState& state);
+  // Folds this tick's per-observer demands into one candidate per cell: nearest
+  // distance wins, the resolved tier joins the region's identity, claims raise
+  // the priority, and cells that have failed too often are dropped.
+  void MergeCandidates(Domain domain, DomainState& state);
+  void NoteLoadFailure(DomainState& state, u64 cell);
   void AdvanceRetirements(Domain domain, DomainState& state);
 
   bool ResolveSchema(DomainCell& cell, std::string* error) const;
@@ -228,7 +267,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   DomainState domains_[kDomainCount];
   base::Vector<CellLoadResult> results_scratch_;
   base::Vector<u32> rows_scratch_;
-  base::Vector<scene::WorldStreamRegion> claim_scratch_;
+  base::Vector<CellDemand> claim_scratch_;
   base::Vector<std::string> errors_;
   u32 error_count_ = 0;
   bool shut_down_ = false;
