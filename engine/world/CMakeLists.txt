@@ -5,5 +5,6 @@
 # name rx::world back.
 rx_add_module(world
   world_format.cc
+  world_map.cc
 )
 target_link_libraries(rx_world PUBLIC rx::core rx::ecs rx::asset rx::scene rx::edit)
