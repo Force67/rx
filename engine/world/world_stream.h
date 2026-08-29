@@ -180,6 +180,11 @@ class RX_WORLD_EXPORT WorldStreamer {
   std::span<const ResidentInstance> Instances(u64 cell,
                                               Domain domain = Domain::kRepresentation) const;
 
+  // Every cell of a domain that is published right now, in ascending id order.
+  // A host draws instance pages by walking this rather than the whole index:
+  // the index is the world, and this is the part of it that is here.
+  void ResidentCells(Domain domain, base::Vector<u64>* out) const;
+
   // The names ResidentInstance::prototype indexes: what each instance is, in
   // whatever vocabulary the cook used (a mesh path, a prefab name). Held by the
   // cell for as long as it is resident, because the payload they were decoded

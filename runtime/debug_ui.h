@@ -51,6 +51,11 @@ class DebugUi {
   void Build(render::Renderer& renderer, FlyCamera& camera, const ecs::World& world,
              f32 frame_delta, render::FrameView* view);
 
+  // One line of baked-world streaming state for the status bar, refreshed each
+  // frame by the viewer. Empty leaves the section out entirely, which is what
+  // every run without --world sees.
+  void set_world_status(std::string status) { world_status_ = std::move(status); }
+
   // The day/night clock, so the Lighting panel can scrub the time of day and the
   // timescale. Null leaves those controls out.
   void set_clock(WorldClock* clock) { clock_ = clock; }
@@ -95,6 +100,7 @@ class DebugUi {
   bool gpu_timings_forced_ = false;
   bool show_demo_ = false;
   WorldClock* clock_ = nullptr;  // day/night cycle, for the Lighting time controls
+  std::string world_status_;     // --world: one status-bar line, empty when off
   int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
   // Editable .ini render presets (engine/render/presets): the discovered file
   // list (lazy-scanned, rescannable), the combo selection, the save-as name

@@ -829,6 +829,16 @@ std::span<const ResidentInstance> WorldStreamer::Instances(u64 cell_id, Domain d
   return std::span<const ResidentInstance>(cell->instances.data(), cell->instances.size());
 }
 
+void WorldStreamer::ResidentCells(Domain domain, base::Vector<u64>* out) const {
+  if (!out) return;
+  out->clear();
+  if (static_cast<u32>(domain) >= kDomainCount) return;
+  const DomainState& state = domains_[static_cast<u32>(domain)];
+  for (const DomainCell& cell : state.cells) {
+    if (cell.phase == CellPhase::kPublished) out->push_back(cell.cell);
+  }
+}
+
 std::span<const std::string> WorldStreamer::Prototypes(u64 cell_id, Domain domain) const {
   if (static_cast<u32>(domain) >= kDomainCount) return {};
   const DomainCell* cell = Find(domains_[static_cast<u32>(domain)], cell_id);
