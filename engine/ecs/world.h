@@ -14,6 +14,29 @@
 
 namespace rx::ecs {
 
+// A run of freshly appended rows in one archetype, handed to a
+// World::CreateBatch callback. Component memory is uninitialized, exactly as
+// Archetype::AddRow leaves it: the callback must construct every column of
+// every row before it returns, and must not query the world while it does.
+class RX_ECS_EXPORT EntityBatch {
+ public:
+  u32 count() const { return count_; }
+  Entity EntityAt(u32 row) const;
+
+  // Base of `id`'s column at batch row `row`, and how many consecutive batch
+  // rows that pointer covers. A batch spans chunk boundaries, so a bulk copy
+  // advances by the returned run until it has covered count(). Null when the
+  // batch's archetype has no such component.
+  void* Column(ComponentId id, u32 row, u32* run) const;
+
+ private:
+  friend class World;
+
+  Archetype* archetype_ = nullptr;
+  u32 first_row_ = 0;
+  u32 count_ = 0;
+};
+
 class RX_ECS_EXPORT World {
  public:
   World();
@@ -77,6 +100,21 @@ class RX_ECS_EXPORT World {
     }
   }
 
+  // Creates `count` entities that all carry `signature`, in one append into one
+  // archetype, and hands the run to `fill` to initialize column by column.
+  //
+  // Add<T> reaches the same end state by moving each entity through one
+  // intermediate archetype per component; for cooked data that is N transitions
+  // and N typed move-constructions per entity, all of it to arrive somewhere
+  // known in advance. This does none of that. The cost is the callback's
+  // obligation: every column of every row must be constructed before it
+  // returns, or the first query to touch the batch reads uninitialized memory.
+  template <typename Fn>
+  void CreateBatch(const Signature& signature, u32 count, Fn&& fill) {
+    EntityBatch batch = BeginBatch(signature, count);
+    if (batch.count() != 0) fill(static_cast<const EntityBatch&>(batch));
+  }
+
   size_t entity_count() const { return live_count_; }
 
   struct Stats {
@@ -104,6 +142,7 @@ class RX_ECS_EXPORT World {
 
   Archetype* GetOrCreateArchetype(const Signature& signature);
   void MoveEntity(Entity entity, EntityRecord& record, Archetype* destination);
+  EntityBatch BeginBatch(const Signature& signature, u32 count);
 
   base::Vector<EntityRecord> records_;
   base::Vector<u32> free_indices_;
