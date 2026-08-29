@@ -674,6 +674,15 @@ if(RX_BUILD_TESTS)
     target_link_libraries(world_overlay_test PRIVATE rx::world rx::core)
     add_test(NAME world_overlay_test COMMAND world_overlay_test)
 
+    # Random mutation over the three decoders. The hand-written refusal tests
+    # each aim one mutation at one check; this aims many at none in particular,
+    # which is the half they cannot cover. Cheap enough to keep in the default
+    # suite; run it under -DRX_SANITIZE=ON for the memory-safety half to bite,
+    # and pass an iteration count to run it longer than the suite does.
+    add_executable(world_fuzz_test test/world_fuzz_test.cc)
+    target_link_libraries(world_fuzz_test PRIVATE rx::world rx::core)
+    add_test(NAME world_fuzz_test COMMAND world_fuzz_test)
+
     # The whole path in one test: an authored scene through the real baker into
     # a real archive, mounted and streamed back. Needs the tool, so it is only
     # registered when the tools are built.
