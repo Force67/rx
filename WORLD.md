@@ -154,6 +154,17 @@ every payload and every serialized overlay catches the mismatch loudly, but a
 save that must survive re-cooking needs an authored identity the cook maps to an
 id, which nothing here provides yet.
 
+When it does, the shape is two keys rather than one: keep the dense cook-order
+stable id exactly as it is, because the index's contiguous per-cell ranges are
+what make owner lookup a binary search and what let the overlay ask "does this
+cell have any deltas at all" in one comparison. Add the authored `Guid` as the
+*persistence* key and bake a Guid-to-stable-id table the save system translates
+through at load. Deriving the stable id from the Guid instead looks tempting and
+is not: it makes the always-resident index scale with entities rather than
+cells, kills that overlay pre-check, and churns the overlap invariants and the
+fuzz corpus that hardened them - for a guarantee that still would not hold,
+since `LoadScene` mints no guids and hand-authored scenes are first class.
+
 ## Static decoration
 
 A noninteractive rock needs to be drawn and stood on. It does not need an ECS
@@ -227,6 +238,30 @@ with a hard claim, and nothing else.
 rxworld bake city.rxscene city.rxp --name city --cell-size 64
 rxworld inspect city.rxp --name city
 ```
+
+The cook itself is `engine/world/world_bake.h`, not the tool: there are two
+front ends and two cooks would be two answers to what a world is. The editor's
+**Bake World** saves the scene and then cooks the file it wrote, into
+`<scene>.rxp` beside it.
+
+The input is a path rather than a live `ecs::World`, and that is load-bearing
+three times over. The bake id is a hash of the scene's bytes, so a live-world
+cook would need a second definition of it and the two front ends would stamp
+different ids on identical content. An editor's world is not its scene - it
+holds terrain-tile visuals and preview models the author never wrote, and
+`edit::SaveScene` already knows to leave those out. And stable-id assignment is
+deterministic *because* the cook loads the file into a fresh world, so entity
+indices are file order; cooking a lived-in world would order ties by that
+session's create/destroy history and hand out different ids for the same
+content.
+
+The editor also shows, for the selected entity, what the cook would make of it:
+gameplay entity or instance page row, which cell it lands in, how close it is to
+a seam, and which of its components will be dropped. That split is otherwise
+invisible until somebody inspects an archive, and an author who cannot see it
+cannot author against it. The cell size is printed with it, because it is a cook
+setting rather than scene data and a label computed against a different one than
+the archive was cooked with would be quietly wrong.
 
 `bake` sorts every entity into a grid cell by world position, groups each cell's
 entities by component set, and writes one archetype-major payload per cell and

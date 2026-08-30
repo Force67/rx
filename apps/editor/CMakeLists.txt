@@ -39,6 +39,8 @@ add_executable(rx_editor
 
 target_link_libraries(rx_editor PRIVATE
   rx::app rx::edit rx::terrain rx::render rx::anim rx::asset rx::scene rx::ecs rx::core
+  # Bake World: the same cook rxworld runs, so an archive from either is the same bytes.
+  rx::world
   ultragui)
 
 target_compile_definitions(rx_editor PRIVATE

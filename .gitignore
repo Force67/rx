@@ -25,3 +25,12 @@ third_party/NRD-MathLib/
 third_party/NRD-ShaderMake/
 third_party/tinyusdz/
 vkd3d-proton.cache*
+
+# .rxp archives are all build products - the engine's own are packed into the
+# build directory, and the editor's Bake World writes one beside its .rxscene.
+# None is tracked, and committing one would churn a binary on every bake.
+*.rxp
+# Editor save temporaries: staging files and the numbered backups DoSave leaves.
+*.editor-stage
+*.editor-backup
+*.editor-backup.*

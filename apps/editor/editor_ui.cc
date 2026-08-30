@@ -557,6 +557,57 @@ std::string Editor::BuildInspector() {
     return out;
   }
 
+  // What the cook would make of this entity. Baking sorts every object into
+  // one of two very different things - an ECS row or a page row with no
+  // identity at all - and until this label existed the only way to find out
+  // which was to bake and inspect the archive. The cell size is printed because
+  // it comes from the bake options rather than the scene, so a label that left
+  // it out could disagree with the archive and give no clue why.
+  {
+    const world::BakeVerdict verdict = world::ClassifyForBake(*world_, e, world_bake_options_);
+    const bool refused = verdict.role == world::BakeRole::kRefused;
+    out += "panel bakeh { class: comp_header; text bt { class: comp_title; text: \"World "
+           "bake\"; } }\n";
+    out += "panel bakeb { layout: column; padding: 8 12; gap: 4;\n";
+    out += F("  text bakerole { text: \"%s\"; font-size: 12; color: %s; }\n",
+             world::BakeRoleName(verdict.role), refused ? "#e0655f" : "#9fd08a");
+    if (refused) {
+      out += F("  text bakewhy { text: \"%s\"; font-size: 11; color: #a8abb2; }\n",
+               EscapeUguiString(verdict.refusal).c_str());
+    } else if (verdict.has_cell) {
+      const scene::Transform *t = world_->Get<scene::Transform>(e);
+      const f32 to_min_x = t->position[0] - verdict.cell_minimum.x;
+      const f32 to_max_x = verdict.cell_maximum.x - t->position[0];
+      const f32 to_min_z = t->position[2] - verdict.cell_minimum.z;
+      const f32 to_max_z = verdict.cell_maximum.z - t->position[2];
+      const f32 nearest = std::min(std::min(to_min_x, to_max_x), std::min(to_min_z, to_max_z));
+      out += F("  text bakecell { text: \"cell %016llx   [%.0f, %.0f]..[%.0f, %.0f] @ %g m\"; "
+               "font-size: 11; color: #a8abb2; }\n",
+               static_cast<unsigned long long>(verdict.cell),
+               static_cast<double>(verdict.cell_minimum.x),
+               static_cast<double>(verdict.cell_minimum.z),
+               static_cast<double>(verdict.cell_maximum.x),
+               static_cast<double>(verdict.cell_maximum.z),
+               static_cast<double>(world_bake_options_.cell_size));
+      // An object close to a seam changes cell - and therefore its stable id
+      // range - on a small nudge, which is the one thing about the partition an
+      // author has to keep in mind while placing things.
+      out += F("  text bakeedge { text: \"%.1f m from the nearest cell edge\"; font-size: 11; "
+               "color: %s; }\n",
+               static_cast<double>(nearest), nearest < 1.0f ? "#e0b06a" : "#6a6d73");
+    }
+    if (!verdict.dropped.empty()) {
+      std::string dropped;
+      for (size_t i = 0; i < verdict.dropped.size(); ++i) {
+        dropped += (i != 0 ? ", " : "") + verdict.dropped[i];
+      }
+      out += F("  text bakedrop { text: \"dropped when baked: %s\"; font-size: 11; "
+               "color: #e0b06a; }\n",
+               EscapeUguiString(dropped).c_str());
+    }
+    out += "}\n";
+  }
+
   // Inspector tab: one section per component.
   for (const edit::ComponentDesc *comp : edit::ComponentsOn(*world_, e)) {
     if (std::string(comp->name) == "Guid")
@@ -983,6 +1034,10 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
       OpenFileDialog();
     else
       DoSave(scene_path_);
+    return true;
+  }
+  if (name == "menu_bakeworld") {
+    DoBakeWorld();
     return true;
   }
   if (name == "menu_saveas") {
