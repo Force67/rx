@@ -108,7 +108,11 @@ struct WorldCellRecord {
   // object across a cell boundary - can reassign it, and an overlay keyed to
   // the old bake no longer means what it said. That is what the bake id catches
   // on the index; a save that must survive re-cooking needs an authored
-  // identity the cook maps to an id, which nothing here provides yet.
+  // identity the cook maps to an id, which nothing here provides yet. When it
+  // does, the plan is two keys - this stays the streaming key, the authored
+  // Guid becomes the persistence key, and the cook bakes a table between them -
+  // rather than deriving this one from the Guid, which would cost the
+  // contiguous ranges everything below depends on. See WORLD.md.
   u64 stable_id_first = 0;
   u32 stable_id_count = 0;
   u32 payload_first = 0;

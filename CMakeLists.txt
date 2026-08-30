@@ -706,6 +706,12 @@ if(RX_BUILD_TESTS)
     target_link_libraries(world_fuzz_test PRIVATE rx::world rx::core)
     add_test(NAME world_fuzz_test COMMAND world_fuzz_test)
 
+    # The cook's per-entity verdict, which the editor shows for the selection.
+    # A label that lies about what an object will become is worse than no label.
+    add_executable(world_classify_test test/world_classify_test.cc)
+    target_link_libraries(world_classify_test PRIVATE rx::world rx::edit rx::ecs rx::core)
+    add_test(NAME world_classify_test COMMAND world_classify_test)
+
     # The whole path in one test: an authored scene through the real baker into
     # a real archive, mounted and streamed back. Needs the tool, so it is only
     # registered when the tools are built.

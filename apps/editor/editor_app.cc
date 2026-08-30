@@ -1179,6 +1179,62 @@ void Editor::OpenDocument(const std::string &path) {
   }
 }
 
+void Editor::DoBakeWorld() {
+  // Save first. The cook reads the file, so baking an unsaved scene would cook
+  // the last saved one and report success on work the author cannot see - the
+  // worst possible answer. This is also what an author means by "bake my
+  // world": bake what is in front of me.
+  if (doc_dirty_ || scene_path_ == "untitled.rxscene") {
+    if (scene_path_ == "untitled.rxscene") {
+      status_message_ = "Save the scene before baking a world from it";
+      return;
+    }
+    DoSave(scene_path_);
+  }
+
+  const fs::path archive = fs::path(scene_path_).replace_extension(".rxp");
+  // Stage and rename, so a failed cook cannot leave a half-written archive
+  // where a whole one was. No backup chain: unlike the scene, this is a derived
+  // artifact regenerable from the scene and the code, and a drift of numbered
+  // backups of a build product serves nobody.
+  const fs::path stage = archive.string() + ".editor-stage";
+  std::error_code ignored;
+  fs::remove(stage, ignored);
+
+  world::WorldBakeResult result;
+  std::string error;
+  if (!world::BakeWorld(scene_path_, world_bake_options_, stage.string(), &result, &error)) {
+    fs::remove(stage, ignored);
+    // The refusals are the point of having this button in the editor at all:
+    // they land where the author is looking instead of in a terminal.
+    status_message_ = "Bake failed: " + error;
+    RX_ERROR("bake world: {}", error);
+    return;
+  }
+  std::error_code rename_error;
+  fs::rename(stage, archive, rename_error);
+  if (rename_error) {
+    fs::remove(stage, ignored);
+    status_message_ = "Bake failed: cannot replace " + archive.string();
+    return;
+  }
+
+  std::string message = "Baked " + archive.filename().string() + ": " +
+                        std::to_string(result.cells) + " cells, " +
+                        std::to_string(result.entities) + " entities, " +
+                        std::to_string(result.instances) + " instances";
+  if (!result.dropped.empty()) {
+    message += " (dropped ";
+    for (size_t i = 0; i < result.dropped.size(); ++i) {
+      message += (i != 0 ? ", " : "") + result.dropped[i];
+    }
+    message += ")";
+  }
+  status_message_ = message;
+  RX_INFO("bake world: {} -> {} ({} cells, bake {})", scene_path_, archive.string(), result.cells,
+          result.bake_id);
+}
+
 void Editor::DoSave(const std::string &path) {
   FinishTerrainStroke();
   FinishPlacementDrag();
@@ -1625,6 +1681,24 @@ void Editor::RunAutopilot() {
   case 710:
     pick_at_entity("Sphere");
     break;
+  case 730: {
+    // Bake World, on the scene saved at frame 550. The verdict for the current
+    // selection first, because that label is what an author reads before
+    // baking and it must agree with what the bake then does.
+    const ecs::Entity selected = selection_.primary();
+    if (selected && world_->IsAlive(selected)) {
+      const world::BakeVerdict verdict =
+          world::ClassifyForBake(*world_, selected, world_bake_options_);
+      RX_INFO("autopilot: bake verdict for selection = {} (cell {:016x})",
+              world::BakeRoleName(verdict.role), verdict.cell);
+    }
+    scene_path_ = "scene_saved.rxscene";
+    doc_dirty_ = false;
+    DoBakeWorld();
+    const bool baked = fs::exists("scene_saved.rxp");
+    RX_INFO("autopilot: bake world -> {} -> {}", status_message_, baked ? "PASS" : "FAIL");
+    break;
+  }
   case 770:
     check_sel("Sphere");
     RX_INFO("autopilot: done");
