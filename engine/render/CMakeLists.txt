@@ -418,6 +418,7 @@ set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl shaders/pipeli
 set(RX_SHADER_DEPS_mesh_rt_ps_hlsl shaders/gi/rcgi_common.hlsli shaders/pipeline/material_uv.hlsli)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl shaders/pipeline/material_uv.hlsli)
 set(RX_SHADER_DEPS_shadow_instance_vs_hlsl shaders/gi/shadow.vs.hlsl)
+set(RX_SHADER_DEPS_shadow_skin_vs_hlsl shaders/gi/shadow.vs.hlsl)
 set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl shaders/gi/rcgi_common.hlsli shaders/pipeline/material_uv.hlsli)
 set(RX_SHADER_DEPS_vgeo_cull_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_args_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
