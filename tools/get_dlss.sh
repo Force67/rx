@@ -6,10 +6,13 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="$REPO_DIR/third_party/DLSS"
-TAG="v310.6.0"
+# v310.7.0 or newer: the v310.6.0 Linux snippets shipped without their .nvsig
+# section, so NGX Core rejects them (unsigned snippet, feature init 0xbad0000b).
+TAG="v310.7.0"
 
-if [ -f "$DEST/lib/Linux_x86_64/libnvsdk_ngx.a" ]; then
-  echo "already present: $DEST"
+if [ -f "$DEST/lib/Linux_x86_64/libnvsdk_ngx.a" ] &&
+   [ "$(git -C "$DEST" describe --tags 2>/dev/null)" = "$TAG" ]; then
+  echo "already present: $DEST ($TAG)"
   exit 0
 fi
 
