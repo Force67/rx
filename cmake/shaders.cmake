@@ -6,12 +6,13 @@
 # point is always `main`.
 #
 # When the d3d12 backend is enabled (RX_RHI_D3D12) every shader also
-# gets a DXIL sidecar embedded as k_<symbol>_dxil. The DXIL target is SM 6.5,
-# not 6.6: it is the highest model accepted by vkd3d 2.0 (the Linux D3D12
-# layer used for validation) and still covers ray queries (6.5) and mesh
-# shaders (6.5). The DXIL is unsigned, which vkd3d accepts natively and
-# Windows accepts with experimental shader models enabled; production Windows
-# builds would sign via dxil.dll.
+# gets a DXIL sidecar embedded as k_<symbol>_dxil. The model is SM 6.5 on the
+# Linux validation path, the highest WineHQ vkd3d 2.0 accepts, and still covers
+# ray queries and mesh shaders; a windows build targets 6.6, which real D3D12
+# and vkd3d-proton both take and which the wave/atomic-heavy compute passes
+# need. The DXIL is unsigned, which vkd3d accepts natively and Windows accepts
+# with experimental shader models enabled; production Windows builds would sign
+# via dxil.dll.
 #
 # For hlsl the sidecar is the same dxc invocation minus -spirv. For slang it
 # is slangc's hlsl target fed through the same dxc: distro slangc builds
@@ -25,6 +26,14 @@
 # root, and the embed script lives next to this one.
 set(RX_EMBED_SPV_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/embed_spv.cmake"
   CACHE INTERNAL "rx spirv embed script")
+
+# The DXIL shader model (see the header comment). Cached like the script above
+# so an add_subdirectory consumer compiling its own passes agrees with ours.
+if(WIN32)
+  set(RX_DXIL_MODEL 6_6 CACHE INTERNAL "rx dxil shader model")
+else()
+  set(RX_DXIL_MODEL 6_5 CACHE INTERNAL "rx dxil shader model")
+endif()
 
 # The SPIR-V target env. Vulkan 1.3 (SPIR-V 1.6) is the desktop default;
 # RX_SPIRV_1_4 drops both toolchains to SPIR-V 1.4, the newest a Vulkan 1.1
@@ -127,7 +136,7 @@ function(rx_embed_shaders target)
           COMMENT "slang hlsl ${name}"
           VERBATIM)
         add_custom_command(OUTPUT ${dxil}
-          COMMAND ${RX_DXC} -T ${stage}_6_5 -E main -Qstrip_reflect
+          COMMAND ${RX_DXC} -T ${stage}_${RX_DXIL_MODEL} -E main -Qstrip_reflect
                   -Fo ${dxil} ${gen_hlsl}
           DEPENDS ${gen_hlsl}
           COMMENT "dxil ${name}"
@@ -135,7 +144,7 @@ function(rx_embed_shaders target)
       else()
         add_custom_command(OUTPUT ${dxil}
           COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
-          COMMAND ${RX_DXC} -T ${stage}_6_5 -E main -Qstrip_reflect
+          COMMAND ${RX_DXC} -T ${stage}_${RX_DXIL_MODEL} -E main -Qstrip_reflect
                   ${include_flags} -Fo ${dxil} ${src}
           DEPENDS ${src} ${extra_deps}
           COMMENT "dxil ${name}"
