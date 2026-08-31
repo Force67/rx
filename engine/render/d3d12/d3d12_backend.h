@@ -418,7 +418,7 @@ class D3D12Device final : public Device {
 
   ID3D12Device* device() const { return device_; }
   ID3D12CommandQueue* queue() const { return queue_; }
-  void* native_window() const { return native_window_; }
+  void* platform_window() const { return platform_window_; }
 
   static constexpr u32 kRingCount = kMaxFramesInFlight + 1;  // frame slots + immediate
   static constexpr u32 kImmediateRing = kMaxFramesInFlight;
@@ -510,7 +510,7 @@ class D3D12Device final : public Device {
   IDXGIAdapter3* memory_adapter_ = nullptr;  // local video-memory budget query
 #endif
   ID3D12CommandQueue* queue_ = nullptr;
-  void* native_window_ = nullptr;  // SDL_Window*, for the DXGI HWND on windows
+  void* platform_window_ = nullptr;  // the HWND the DXGI swapchain binds to
 
   ID3D12DescriptorHeap* view_heap_ = nullptr;
   ID3D12DescriptorHeap* sampler_heap_ = nullptr;
