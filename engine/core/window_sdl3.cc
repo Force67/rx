@@ -238,6 +238,19 @@ class Sdl3Window final : public Window {
     SDL_SetWindowRelativeMouseMode(window_, enabled);
   }
 
+  // Compared against SDL's OWN state, never a cached flag: imgui's backend
+  // starts and stops text input on this window behind our back, so a local
+  // "already on" latch would go stale the first time it did and we would never
+  // turn it back on. Asking SDL is the only answer that stays true.
+  void SetTextInputActive(bool active) override {
+    if (active == SDL_TextInputActive(window_))
+      return;
+    if (active)
+      SDL_StartTextInput(window_);
+    else
+      SDL_StopTextInput(window_);
+  }
+
   void SetFullscreen(bool enabled) override { SDL_SetWindowFullscreen(window_, enabled); }
 
   bool fullscreen() const override {

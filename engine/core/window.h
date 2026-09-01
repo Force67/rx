@@ -80,6 +80,18 @@ class RX_CORE_EXPORT Window {
   virtual void SetRelativeMouseMode(bool enabled) {}
   virtual bool relative_mouse_mode() const { return false; }
 
+  // Whether the platform should translate keystrokes into the InputState::text
+  // stream. An application asserts this while one of ITS text fields has focus.
+  //
+  // It has to be asked for, and asked for every frame, because it is not the
+  // application's alone to hold: Dear ImGui's SDL3 backend drives
+  // SDL_StartTextInput/SDL_StopTextInput from whether an IMGUI widget wants
+  // text, and it stops it on the window for everyone else too. A host that
+  // enabled text input once at startup therefore lost it on the first frame
+  // imgui ran, silently, leaving every non-imgui text field dead while mouse
+  // and key events kept working perfectly.
+  virtual void SetTextInputActive(bool active) {}
+
   // Runtime borderless-fullscreen toggle (settings menus); headless and
   // platforms without the concept no-op and report false.
   virtual void SetFullscreen(bool enabled) { (void)enabled; }
