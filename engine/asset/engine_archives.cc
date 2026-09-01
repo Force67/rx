@@ -6,6 +6,7 @@
 
 #include "asset/pack.h"
 #include "core/log.h"
+#include "core/paths.h"
 
 namespace rx::asset {
 namespace {
@@ -34,6 +35,9 @@ std::string FindEngineArchive(std::string_view file_name) {
     if (std::string found = try_dir(dir); !found.empty()) return found;
   }
   if (std::string found = try_dir("."); !found.empty()) return found;
+  // A shipped build carries the archives beside the executable, and is started
+  // from wherever the launcher happens to be.
+  if (std::string found = try_dir(ExecutableDirectory()); !found.empty()) return found;
 #ifdef RX_ENGINE_ARCHIVES_DIR_DEFAULT
   if (std::string found = try_dir(RX_ENGINE_ARCHIVES_DIR_DEFAULT); !found.empty()) return found;
 #endif

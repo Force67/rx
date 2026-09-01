@@ -18,7 +18,8 @@ namespace rx::asset {
 // They mount first, so a game archive of the same name overrides them.
 
 // Where MountEngineArchives looks, in order: RX_ENGINE_ARCHIVES if set, the
-// working directory, then the build directory the engine was compiled in.
+// working directory, the directory the executable sits in, then the build
+// directory the engine was compiled in.
 RX_ASSET_EXPORT std::string FindEngineArchive(std::string_view file_name);
 
 // Mounts every engine archive found. Returns how many mounted; 0 just means the

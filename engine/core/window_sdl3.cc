@@ -270,8 +270,14 @@ class Sdl3Window final : public Window {
 
   NativeWindowHandles native_handles() const override {
     // The renderer goes through SDL_Vulkan_CreateSurface, which takes the
-    // SDL_Window itself rather than platform handles.
-    return {window_, nullptr};
+    // SDL_Window itself rather than platform handles. D3D12 is the exception:
+    // CreateSwapChainForHwnd wants the real HWND.
+    void* platform_window = nullptr;
+#if defined(_WIN32)
+    platform_window = SDL_GetPointerProperty(SDL_GetWindowProperties(window_),
+                                             SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#endif
+    return {window_, nullptr, platform_window};
   }
 
   bool hdr_enabled() const override {

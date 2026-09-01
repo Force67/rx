@@ -211,6 +211,13 @@ find_program(RX_SLANGC slangc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/shaders.cmake)
 
 find_package(SDL3 QUIET)
+# An embedding project may have fetched SDL3 itself before adding rx (recreation
+# does when the platform has no system SDL3, which is every cross build). The
+# target is then already defined and find_package cannot see it, so reuse it
+# rather than fetching a second, conflicting copy.
+if(NOT SDL3_FOUND AND TARGET SDL3::SDL3)
+  set(SDL3_FOUND TRUE)
+endif()
 if(NOT SDL3_FOUND AND RX_FETCH_SDL3)
   set(SDL_TEST_LIBRARY OFF)
   # Static keeps the artifacts self contained, no SDL3.dll shipping.
@@ -433,6 +440,26 @@ if(RX_BUILD_TOOLS)
   rx_set_warnings(rxpack)
 endif()
 
+# Packing an .rxp happens at build time, on the *host*, so a cross build cannot
+# use the rxpack it just produced for the target. RX_RXPACK names a host-built
+# one instead (the cross build scripts configure a small native tree to get it).
+# Cached INTERNAL so both rx's own archive rules and an embedding project's see
+# the same answer. Empty means: pack nothing, and everything that reads an
+# archive degrades to loose files.
+set(RX_RXPACK "" CACHE FILEPATH
+  "Host rxpack executable, for cross builds (a native build uses its own)")
+if(NOT CMAKE_CROSSCOMPILING AND TARGET rxpack)
+  set(RX_RXPACK_COMMAND "$<TARGET_FILE:rxpack>" CACHE INTERNAL "rxpack invocation")
+  set(RX_RXPACK_DEPENDS rxpack CACHE INTERNAL "rxpack build dependency")
+elseif(RX_RXPACK)
+  set(RX_RXPACK_COMMAND "${RX_RXPACK}" CACHE INTERNAL "rxpack invocation")
+  set(RX_RXPACK_DEPENDS "" CACHE INTERNAL "rxpack build dependency")
+else()
+  set(RX_RXPACK_COMMAND "" CACHE INTERNAL "rxpack invocation")
+  set(RX_RXPACK_DEPENDS "" CACHE INTERNAL "rxpack build dependency")
+  message(STATUS "no host rxpack (set RX_RXPACK); engine archives will not be packed")
+endif()
+
 # rxdiff compares two rendered pngs against a measured tolerance, which is the
 # only comparison a renderer whose radiance cache races its own waves admits
 # (a capture's clock is locked, so nothing else about it wanders). Its own
@@ -471,16 +498,15 @@ if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
 endif()
 
 # The engine's own archives, packed from engine/assets with the tool above and
-# mounted by asset::MountEngineArchives (one namespace each). Cross builds skip
-# this: rxpack would be built for the target and cannot run here.
-if(RX_BUILD_TOOLS AND NOT CMAKE_CROSSCOMPILING)
+# mounted by asset::MountEngineArchives (one namespace each).
+if(RX_RXPACK_COMMAND)
   file(GLOB_RECURSE RX_ENGINE_FONT_FILES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts/*)
   add_custom_command(
     OUTPUT ${PROJECT_BINARY_DIR}/rx_fonts.rxp
-    COMMAND rxpack create ${PROJECT_BINARY_DIR}/rx_fonts.rxp
+    COMMAND ${RX_RXPACK_COMMAND} create ${PROJECT_BINARY_DIR}/rx_fonts.rxp
             ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts
-    DEPENDS rxpack ${RX_ENGINE_FONT_FILES}
+    DEPENDS ${RX_RXPACK_DEPENDS} ${RX_ENGINE_FONT_FILES}
     COMMENT "Packing rx_fonts.rxp")
   add_custom_target(rx_engine_archives ALL DEPENDS ${PROJECT_BINARY_DIR}/rx_fonts.rxp)
 endif()
