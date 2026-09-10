@@ -29,7 +29,7 @@ struct PushData {
   float4 idepth0;      // standing-displacement depth (m), waterline band (m), foam scale, water rest level
   float4 idepth1;      // render width, render height, xz proximity (m), ripple gain
 };
-[[vk::push_constant]] ConstantBuffer<PushData> push : register(b0, space0);
+PUSH_CONSTANTS(PushData, push);
 
 // Previous frame's ring (sampled at the old origin) and this frame's target.
 [[vk::combinedImageSampler]] [[vk::binding(0, 0)]] Texture2D<float4> prev_ring : register(t0, space0);

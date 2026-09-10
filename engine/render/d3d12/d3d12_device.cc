@@ -246,9 +246,9 @@ void CpuDescriptorPool::Free(u32 index) { free_.push_back(index); }
 
 std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* window) {
   auto device = std::unique_ptr<D3D12Device>(new D3D12Device());
-  // Unused on linux (offscreen swapchain); the DXGI swapchain pulls the HWND
-  // out of the SDL window on windows. Null for an offscreen device.
-  device->native_window_ = window ? window->native_handles().window : nullptr;
+  // Unused on linux (offscreen swapchain). Null for an offscreen device, and
+  // for any window backend that has no OS handle to give.
+  device->platform_window_ = window ? window->native_handles().platform_window : nullptr;
 
 #if defined(_WIN32)
   if (desc.enable_validation) {

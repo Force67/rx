@@ -246,13 +246,18 @@ void BaselineFeatures(VkPhysicalDevice candidate, u32 api_version,
     const char* name;
     bool present;
   } kBaseline[] = {
-      {"dynamicRendering", core13 ? f13.dynamicRendering : dynamic_rendering.dynamicRendering},
-      {"synchronization2", core13 ? f13.synchronization2 : sync2.synchronization2},
+      {"dynamicRendering", static_cast<bool>(core13 ? f13.dynamicRendering
+                                                    : dynamic_rendering.dynamicRendering)},
+      {"synchronization2",
+       static_cast<bool>(core13 ? f13.synchronization2 : sync2.synchronization2)},
       {"shaderDemoteToHelperInvocation",
-       core13 ? f13.shaderDemoteToHelperInvocation : demote.shaderDemoteToHelperInvocation},
+       static_cast<bool>(core13 ? f13.shaderDemoteToHelperInvocation
+                                : demote.shaderDemoteToHelperInvocation)},
       {"bufferDeviceAddress",
-       core12 ? f12.bufferDeviceAddress : buffer_address.bufferDeviceAddress},
-      {"timelineSemaphore", core12 ? f12.timelineSemaphore : timeline.timelineSemaphore},
+       static_cast<bool>(core12 ? f12.bufferDeviceAddress
+                                : buffer_address.bufferDeviceAddress)},
+      {"timelineSemaphore",
+       static_cast<bool>(core12 ? f12.timelineSemaphore : timeline.timelineSemaphore)},
       {"shaderInt64", static_cast<bool>(features.features.shaderInt64)},
       {"drawIndirectCount", core12 ? static_cast<bool>(f12.drawIndirectCount) : true},
       {"descriptorIndexing",
@@ -269,10 +274,10 @@ void BaselineFeatures(VkPhysicalDevice candidate, u32 api_version,
                  descriptor_indexing.shaderStorageBufferArrayNonUniformIndexing &&
                  descriptor_indexing.descriptorBindingStorageBufferUpdateAfterBind)},
       {"separateDepthStencilLayouts",
-       core12 ? f12.separateDepthStencilLayouts
-              : separate_depth_stencil.separateDepthStencilLayouts},
+       static_cast<bool>(core12 ? f12.separateDepthStencilLayouts
+                                : separate_depth_stencil.separateDepthStencilLayouts)},
       {"shaderDrawParameters",
-       core12 ? f11.shaderDrawParameters : draw_params.shaderDrawParameters},
+       static_cast<bool>(core12 ? f11.shaderDrawParameters : draw_params.shaderDrawParameters)},
   };
   for (const auto& feature : kBaseline) {
     if (!feature.present) unmet->push_back(feature.name);

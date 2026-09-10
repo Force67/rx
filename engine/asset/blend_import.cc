@@ -51,10 +51,12 @@ std::string CacheKey(const fs::path &source, const fs::path &script) {
       fs::last_write_time(script, error).time_since_epoch().count();
   if (error)
     return {};
-  const std::string identity = fs::weakly_canonical(source).string() + ":" +
-                               std::to_string(source_size) + ":" +
-                               std::to_string(source_time) + ":" +
-                               std::to_string(script_time);
+  // file_time_type::rep is not a fixed type across standard libraries (libc++
+  // on windows makes it wider than long long), so name the width here.
+  const std::string identity =
+      fs::weakly_canonical(source).string() + ":" + std::to_string(source_size) + ":" +
+      std::to_string(static_cast<long long>(source_time)) + ":" +
+      std::to_string(static_cast<long long>(script_time));
   char key[17];
   std::snprintf(key, sizeof(key), "%016llx",
                 static_cast<unsigned long long>(MakeAssetId(identity).hash));

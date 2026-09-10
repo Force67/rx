@@ -35,10 +35,14 @@ struct WindowDesc {
 };
 
 // Opaque handles the renderer needs to create a surface. With the SDL3
-// backend `window` is the SDL_Window, headless leaves both null.
+// backend `window` is the SDL_Window, headless leaves them null.
 struct NativeWindowHandles {
   void* window = nullptr;
   void* display = nullptr;
+  // The operating system's own window handle (HWND on windows), for APIs that
+  // take one directly instead of going through SDL: the DXGI swapchain is the
+  // only one so far. Vulkan does not need it, SDL creates that surface itself.
+  void* platform_window = nullptr;
 };
 
 class RX_CORE_EXPORT Window {

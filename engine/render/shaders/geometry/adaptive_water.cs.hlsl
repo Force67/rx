@@ -2,6 +2,8 @@
 // Phase 0 resets a changed surface, phase 1 atomically splits/merges leaves,
 // phase 2 updates only dirty vertex and indirect-command slots.
 
+#include "rhi_bindings.hlsli"
+
 struct PushData {
   column_major float4x4 local_to_clip;
   float4 bounds;             // min xz, max xz
@@ -9,7 +11,7 @@ struct PushData {
   float4 metrics;            // target edge px, render width/height
   uint4 control;             // phase, nodes/tree, max depth, budget
 };
-[[vk::push_constant]] ConstantBuffer<PushData> push : register(b0, space0);
+PUSH_CONSTANTS(PushData, push);
 
 [[vk::binding(0, 0)]] RWStructuredBuffer<uint> states : register(u0, space0);
 [[vk::binding(1, 0)]] RWStructuredBuffer<uint> counters : register(u1, space0);

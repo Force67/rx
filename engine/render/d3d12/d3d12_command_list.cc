@@ -490,13 +490,14 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
   base::Vector<u64> staged_offsets(regions.size());
   ID3D12Resource* staging = nullptr;
   if (!aligned) {
+    // The source is normally the host-visible upload ring, and the repack is a
+    // memcpy. It is not always: a texture written by the GPU and then copied
+    // back into another one comes from a device-local buffer that cannot be
+    // mapped, and that used to drop the upload and leave the texture blank.
+    // Those repack on the GPU instead, one CopyBufferRegion per row.
     const u8* mapped = nullptr;
     void* raw = nullptr;
     if (SUCCEEDED(buffer->resource->Map(0, nullptr, &raw))) mapped = static_cast<const u8*>(raw);
-    if (!mapped) {
-      RX_ERROR("d3d12: misaligned texture upload from an unmapped buffer, dropping");
-      return;
-    }
     u64 total = 0;
     for (size_t i = 0; i < regions.size(); ++i) {
       const BufferTextureCopy& region = regions[i];
@@ -512,7 +513,9 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
     }
 
     D3D12_HEAP_PROPERTIES upload = {};
-    upload.Type = D3D12_HEAP_TYPE_UPLOAD;
+    upload.Type = mapped ? D3D12_HEAP_TYPE_UPLOAD : D3D12_HEAP_TYPE_DEFAULT;
+    const D3D12_RESOURCE_STATES staging_state =
+        mapped ? D3D12_RESOURCE_STATE_GENERIC_READ : D3D12_RESOURCE_STATE_COPY_DEST;
     D3D12_RESOURCE_DESC desc = {};
     desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
     desc.Width = total;
@@ -522,14 +525,15 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
     desc.SampleDesc.Count = 1;
     desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
     if (FAILED(device_.device()->CreateCommittedResource(
-            &upload, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ, nullptr,
+            &upload, D3D12_HEAP_FLAG_NONE, &desc, staging_state, nullptr,
             IID_ID3D12Resource, reinterpret_cast<void**>(&staging)))) {
       RX_ERROR("d3d12: upload staging allocation failed ({} bytes)", total);
       return;
     }
     void* staging_raw = nullptr;
-    staging->Map(0, nullptr, &staging_raw);
+    if (mapped) staging->Map(0, nullptr, &staging_raw);
     u8* out = static_cast<u8*>(staging_raw);
+    if (!mapped) RequireBufferState(buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
     for (size_t i = 0; i < regions.size(); ++i) {
       const BufferTextureCopy& region = regions[i];
       u32 width = region.extent.width ? region.extent.width
@@ -539,12 +543,26 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
       RowInfo rows = RowInfoOf(dst.format, width, height);
       u64 pitch = (rows.row_bytes + kRowPitchAlign - 1) & ~static_cast<u64>(kRowPitchAlign - 1);
       for (u32 row = 0; row < rows.row_count; ++row) {
-        std::memcpy(out + staged_offsets[i] + row * pitch,
-                    mapped + region.buffer_offset + static_cast<u64>(row) * rows.row_bytes,
-                    rows.row_bytes);
+        const u64 src_offset = region.buffer_offset + static_cast<u64>(row) * rows.row_bytes;
+        const u64 dst_offset = staged_offsets[i] + row * pitch;
+        if (mapped)
+          std::memcpy(out + dst_offset, mapped + src_offset, rows.row_bytes);
+        else
+          list_->CopyBufferRegion(staging, dst_offset, buffer->resource, src_offset,
+                                  rows.row_bytes);
       }
     }
-    staging->Unmap(0, nullptr);
+    if (mapped) {
+      staging->Unmap(0, nullptr);
+    } else {
+      D3D12_RESOURCE_BARRIER barrier = {};
+      barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+      barrier.Transition.pResource = staging;
+      barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+      barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COPY_DEST;
+      barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+      list_->ResourceBarrier(1, &barrier);
+    }
     source = staging;
     device_.DeferRelease(ring_, staging);
   } else {
