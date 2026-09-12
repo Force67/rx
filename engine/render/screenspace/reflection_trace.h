@@ -70,8 +70,8 @@ class ReflectionTrace {
   };
 
   bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
+  bool available() const { return pipeline_ && upscale_pipeline_; }
   void Destroy(Device& device);
-  bool available() const { return static_cast<bool>(pipeline_); }
 
   // Returns the full-res packed radiance+hitdist target (rgba16f) for
   // DenoiseSpecular. When frame.half_res the trace runs at half `extent` and an

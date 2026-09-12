@@ -52,6 +52,7 @@ bool RrDenoiser::Initialize(Device& device, Extent2D extent) {
 
 bool RrDenoiser::CreateFeature(Device& device, Extent2D extent) {
   extent_ = extent;
+  has_history_ = false;
   VulkanHandles h = GetVulkanHandles(device);
   bool created = false;
   device.ImmediateSubmit([&](CommandList& cmd) {
@@ -64,16 +65,16 @@ bool RrDenoiser::CreateFeature(Device& device, Extent2D extent) {
     create.InTargetWidth = extent.width;  // native: denoise-only, no upscale
     create.InTargetHeight = extent.height;
     create.InPerfQualityValue = NVSDK_NGX_PerfQuality_Value_DLAA;
-    // Linear HDR radiance, reversed depth. Motion vectors are full render
-    // resolution (no MVLowRes: render == target here).
+    // RR requires input-resolution motion even when input and output sizes match.
     create.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_IsHDR |
                                   NVSDK_NGX_DLSS_Feature_Flags_DepthInverted |
+                                  NVSDK_NGX_DLSS_Feature_Flags_MVLowRes |
                                   NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
     NVSDK_NGX_Result r = NGX_VULKAN_CREATE_DLSSD_EXT1(h.device, GetVkCommandBuffer(cmd), 1, 1,
                                                       &handle_, params_, &create);
     created = r == NVSDK_NGX_Result_Success;
     if (!created) {
-      RX_WARN("dlss-rr: feature creation failed ({:#x}) - dlssd snippet missing?",
+      RX_WARN("dlss-rr: feature creation failed ({:#x})",
                static_cast<u32>(r));
     }
   });
@@ -117,10 +118,10 @@ void RrDenoiser::AddToGraph(RenderGraph& graph, const Inputs& inputs, ResourceHa
       "dlss_rr",
       [&](RenderGraph::PassBuilder& builder) {
         for (ResourceHandle h : {inputs.color, inputs.depth, inputs.motion, inputs.normals_rough,
-                                 inputs.diffuse_albedo, inputs.specular_albedo}) {
+                                 inputs.diffuse_albedo, inputs.specular_albedo, inputs.specular_hit_distance}) {
           builder.Read(h, ResourceUsage::kSampledCompute);
         }
-        builder.Write(output, ResourceUsage::kStorageWrite);
+        builder.Write(output, ResourceUsage::kStorageClearWrite);
       },
       [this, inputs, output, frame](PassContext& ctx) {
         VkImageSubresourceRange range{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
@@ -136,9 +137,10 @@ void RrDenoiser::AddToGraph(RenderGraph& graph, const Inputs& inputs, ResourceHa
         NVSDK_NGX_Resource_VK normals = wrap(inputs.normals_rough, false);
         NVSDK_NGX_Resource_VK diffuse_albedo = wrap(inputs.diffuse_albedo, false);
         NVSDK_NGX_Resource_VK specular_albedo = wrap(inputs.specular_albedo, false);
+        NVSDK_NGX_Resource_VK specular_hit_distance = wrap(inputs.specular_hit_distance, false);
         NVSDK_NGX_Resource_VK out = wrap(output, true);
 
-        // Column-major Mat4 passed as float*; NGX consumes the same layout.
+        // Column-vector/column-major storage equals NGX row-vector/row-major storage.
         Mat4 world_to_view = frame.world_to_view;
         Mat4 view_to_clip = frame.view_to_clip;
 
@@ -150,10 +152,11 @@ void RrDenoiser::AddToGraph(RenderGraph& graph, const Inputs& inputs, ResourceHa
         eval.pInNormals = &normals;  // roughness packed in .w (create params)
         eval.pInDiffuseAlbedo = &diffuse_albedo;
         eval.pInSpecularAlbedo = &specular_albedo;
-        eval.InJitterOffsetX = 0.0f;  // the recon path traces unjittered rays
-        eval.InJitterOffsetY = 0.0f;
+        eval.pInSpecularHitDistance = &specular_hit_distance;
+        eval.InJitterOffsetX = frame.jitter[0];
+        eval.InJitterOffsetY = frame.jitter[1];
         eval.InRenderSubrectDimensions = {extent_.width, extent_.height};
-        eval.InReset = frame.reset ? 1 : 0;
+        eval.InReset = (frame.reset || !has_history_ || frame.frame_index != previous_frame_ + 1u) ? 1 : 0;
         // The motion target stores uv-space current->previous offsets; scaling
         // by the render size yields the pixel-space vectors DLSS expects.
         eval.InMVScaleX = static_cast<f32>(extent_.width);
@@ -165,7 +168,11 @@ void RrDenoiser::AddToGraph(RenderGraph& graph, const Inputs& inputs, ResourceHa
         NVSDK_NGX_Result r =
             NGX_VULKAN_EVALUATE_DLSSD_EXT(GetVkCommandBuffer(*ctx.cmd), handle_, params_, &eval);
         if (r != NVSDK_NGX_Result_Success) {
+          has_history_ = false;
           RX_ERROR("dlss-rr: evaluate failed ({:#x})", static_cast<u32>(r));
+        } else {
+          has_history_ = true;
+          previous_frame_ = frame.frame_index;
         }
       });
 }

@@ -64,6 +64,9 @@ class SkinnedRayTracing {
   // list would be reused under that frame. Safe for a handle that never drew.
   void Release(Device& device, RayTracingContext* raytracing, u32 handle,
                base::Vector<u32>& retire_to);
+  void InvalidateMesh(Device& device, RayTracingContext* raytracing, u64 mesh_key,
+                       base::Vector<u32>& retire_to);
+  void BeginFrame();
 
   // One skinned draw to deform this frame.
   struct Request {
@@ -88,6 +91,7 @@ class SkinnedRayTracing {
   // structure holds. kInvalidIndex when the actor was not prepared this frame.
   static constexpr u32 kInvalidIndex = 0xffffffffu;
   u32 custom_index(u32 handle) const;
+  u32 previous_custom_index(u32 handle) const;
   // The RayTracingContext key of the structure this frame's TLAS instance must
   // reference (RayTracingContext::Instance::mesh_key with `skinned` set).
   u64 blas_key(u32 handle) const;
@@ -109,6 +113,7 @@ class SkinnedRayTracing {
   struct Slot {
     GpuBuffer posed;  // asset::Vertex layout, deformed on the frames it is current
     u32 bindless = kInvalidIndex;
+    bool valid = false;
   };
 
   struct Actor {
@@ -121,6 +126,7 @@ class SkinnedRayTracing {
     GpuBuffer skin_stream;    // the mesh's bone index/weight buffer (not owned)
     bool live = false;    // buffers + structures exist
     bool active = false;  // requested this frame
+    bool allocated = false;
   };
 
   // RayTracingContext key for one slot. The two halves must be distinct keys in
@@ -128,6 +134,9 @@ class SkinnedRayTracing {
   static u64 SlotKey(u32 handle, u32 slot) {
     return (static_cast<u64>(handle) << 1) | slot;
   }
+
+  void RetireActor(Device& device, RayTracingContext* raytracing, u32 handle,
+                    base::Vector<u32>& retire_to);
 
   // Recycles a released handle's slot. Handles are 1-based so 0 stays "none".
   base::Vector<Actor> actors_;

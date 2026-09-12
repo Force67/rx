@@ -1231,6 +1231,9 @@ GpuBuffer VulkanDevice::CreateBuffer(u64 size, BufferUsageFlags usage, bool host
   if (host_visible) {
     alloc_info.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                        VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    // Persistent frame data (including TLAS instances and bindless tables) is
+    // written directly by callers without a per-write flush.
+    alloc_info.requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
   }
 
   VkBuffer buffer = VK_NULL_HANDLE;
@@ -2897,7 +2900,9 @@ PresentResult VulkanDevice::SubmitFrame(CommandList* cmd, Swapchain& swapchain, 
   VkSemaphoreSubmitInfo waits[2];
   waits[0] = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
   waits[0].semaphore = frame->image_available;
-  waits[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  // Image layout transitions may precede color output. They must also wait
+  // for presentation to release the acquired image.
+  waits[0].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   u32 wait_count = 1;
   if (frame->async_submitted) {
     // Join: the final segment consumes the async queue's results.
@@ -2989,15 +2994,14 @@ PresentResult VulkanDevice::SubmitFrameGen(CommandList* cmd, Swapchain& swapchai
   vkEndCommandBuffer(active);
   vkResetFences(device_, 1, &frame->in_flight);
 
-  // Wait both acquires; the interpolated image is written by a transfer, the
-  // real one by the color-attachment output, so gate at those stages.
+  // Both images must be acquired before their first layout transitions.
   VkSemaphoreSubmitInfo waits[3];
   waits[0] = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
   waits[0].semaphore = frame->image_available;
-  waits[0].stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+  waits[0].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   waits[1] = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};
   waits[1].semaphore = frame->image_available_fg;
-  waits[1].stageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+  waits[1].stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
   u32 wait_count = 2;
   if (frame->async_submitted) {
     waits[2] = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO};

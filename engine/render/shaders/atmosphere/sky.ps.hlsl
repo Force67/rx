@@ -178,7 +178,7 @@ float3 Moon(float3 dir, float3 to_sun, float3 sun_color, float intensity) {
 PsOut main(float4 sv_position : SV_Position,
            [[vk::location(0)]] float2 uv : TEXCOORD0) {
   // Match the geometry jitter so temporal passes see a consistent frame.
-  float2 ndc = uv * 2.0 - 1.0 + frame.jitter;
+  float2 ndc = uv * 2.0 - 1.0 - frame.jitter;
   float4 near = mul(frame.inv_view_proj, float4(ndc, 1.0, 1.0));  // reversed z near
   float3 dir = normalize(near.xyz / near.w - frame.camera_position.xyz);
 

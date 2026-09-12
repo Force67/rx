@@ -50,6 +50,7 @@ class PathTracer {
   bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
   void Resize(Device& device, Extent2D extent);
   void Destroy(Device& device);
+  bool available() const { return pipeline_ && accum_; }
 
   // Reference accumulation into output (an hdr storage image, usually
   // scene_color), accumulating across frames.

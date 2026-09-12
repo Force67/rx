@@ -31,6 +31,7 @@ class ReconPathTracer {
     u32 spp = 1;
     u32 frame_index = 0;
     bool reset = false;
+    f32 jitter[2] = {};  // pixel-space projection offset, RR only
     // Tunables.
     f32 current_weight_min = 0.05f;  // floor on current-frame weight (responsiveness)
     u32 max_history = 32;            // history length cap (frames)
@@ -44,6 +45,7 @@ class ReconPathTracer {
     // light over the sun disk AND the frame's dynamic point lights (which the
     // inline path never sampled). One alpha-tested shadow ray per pixel.
     bool restir_di = true;
+    bool reset_reservoirs = false;
     GpuBuffer lights;     // host-visible PointLight[], the renderer's frame buffer
     u32 light_count = 0;
     // Volumetric fog (single-scattering height fog with shadowed sun shafts,
@@ -65,11 +67,13 @@ class ReconPathTracer {
     ResourceHandle normals_rough = kInvalidResource;  // world normal, roughness in .w
     ResourceHandle diffuse_albedo = kInvalidResource;
     ResourceHandle specular_albedo = kInvalidResource;
+    ResourceHandle specular_hit_distance = kInvalidResource;
   };
 
   bool Initialize(Device& device, BindingLayoutHandle bindless_layout);
   void Resize(Device& device, Extent2D extent);
   void Destroy(Device& device);
+  bool available() const { return gbuffer_pipeline_ && buffers_ready_; }
 
   // Reconstructs the path-traced image into output (scene_color, an hdr storage
   // image), in place of the raster path.
@@ -87,7 +91,7 @@ class ReconPathTracer {
   };
 
   bool CreatePipelines(Device& device, BindingLayoutHandle bindless_layout);
-  void CreateBuffers(Device& device, Extent2D extent);
+  bool CreateBuffers(Device& device, Extent2D extent);
   void DestroyBuffers(Device& device);
 
   // Reusable per-signal reconstruction (diffuse irradiance and specular both run
@@ -110,6 +114,10 @@ class ReconPathTracer {
   // reset (a mid-session resize otherwise feeds garbage - possibly NaN - into
   // the temporal moments EMA, which never recovers).
   bool history_invalid_ = false;
+  bool buffers_ready_ = false;
+  u32 previous_frame_ = 0;
+  u32 previous_features_ = 0;
+  f32 previous_jitter_[2] = {};
 
   // gbuffer (set 0: 7 storage + tlas + sky + restir samples; set 1: bindless)
   PipelineHandle gbuffer_pipeline_;
@@ -125,12 +133,13 @@ class ReconPathTracer {
 
   // Cross-frame ping-pong buffers (indexed by frame_index & 1).
   PingPong accum_;        // rgba16f accumulated diffuse irradiance + variance
-  PingPong moments_;      // rgba16f mean, meanSq, variance, historyLen
+  PingPong moments_;      // rgba32f mean, meanSq, variance, historyLen
   PingPong spec_accum_;   // rgba16f accumulated specular + variance
-  PingPong spec_moments_; // rgba16f specular moments
+  PingPong spec_moments_; // rgba32f specular moments
   PingPong normal_rough_; // rgba16f normal*0.5+0.5, roughness
   PingPong viewz_;        // r32f
   PingPong matid_;        // r32ui
+  PingPong primary_pos_;  // rgba32f, exact source position for temporal GI reconnection
   // ReSTIR GI reservoirs (pos+W / normal+M / radiance+w_sum). Cross-frame
   // ping-pong like the accumulation history; ~40 B/px per slot.
   PingPong restir_r0_;    // rgba32f sample position, W

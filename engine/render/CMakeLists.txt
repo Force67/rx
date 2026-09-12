@@ -529,4 +529,13 @@ if(TARGET rx_imgui_core)
     shaders/util/imgui.ps.hlsl)
 endif()
 
+
+foreach(sym recon_gbuffer_cs_hlsl pathtrace_gbuffer_cs_hlsl)
+  list(APPEND RX_SHADER_DEPS_${sym} shaders/path_motion.hlsli)
+endforeach()
+
+foreach(sym pathtrace_cs_hlsl recon_gbuffer_cs_hlsl pathtrace_gbuffer_cs_hlsl)
+  list(APPEND RX_SHADER_DEPS_${sym} shaders/path_continue.hlsli)
+endforeach()
+
 rx_embed_shaders(rx_render ${RX_RENDER_SHADERS})

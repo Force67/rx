@@ -68,6 +68,7 @@ D3D12_RESOURCE_STATES ToResourceStates(ResourceState state) {
   switch (state) {
     case ResourceState::kUndefined: return D3D12_RESOURCE_STATE_COMMON;
     case ResourceState::kGeneral: return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+    case ResourceState::kGeneralComputeTransfer: return D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
     case ResourceState::kShaderReadCompute:
     case ResourceState::kShaderReadTaskMesh:
       return D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
@@ -128,6 +129,23 @@ D3D12_FILTER ToFilter(const SamplerDesc& desc) {
   if (desc.min_filter == Filter::kLinear) filter |= 0x10;
   if (desc.compare_enable) filter |= 0x80;
   return static_cast<D3D12_FILTER>(filter);
+}
+
+D3D12_RAYTRACING_GEOMETRY_DESC ToD3dTriangles(const AccelTriangles& t) {
+  D3D12_RAYTRACING_GEOMETRY_DESC geometry = {};
+  geometry.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+  geometry.Flags = t.opaque ? D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE
+                            : D3D12_RAYTRACING_GEOMETRY_FLAG_NONE;
+  geometry.Triangles.VertexBuffer = {t.vertex_address, t.vertex_stride};
+  geometry.Triangles.VertexFormat = ToDxgiFormat(t.vertex_format);
+  geometry.Triangles.VertexCount = t.vertex_count;
+  geometry.Triangles.IndexBuffer = t.index_count ? t.index_address : 0;
+  geometry.Triangles.IndexCount = t.index_count;
+  geometry.Triangles.IndexFormat =
+      !t.index_count ? DXGI_FORMAT_UNKNOWN
+                      : (t.index_type == IndexType::kUint16 ? DXGI_FORMAT_R16_UINT
+                                                            : DXGI_FORMAT_R32_UINT);
+  return geometry;
 }
 
 }  // namespace rx::render::d3d12

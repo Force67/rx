@@ -16,7 +16,7 @@ struct ReconTemporalPush {
 PUSH_CONSTANTS(ReconTemporalPush, pc);
 
 [[vk::binding(0, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> out_accum : register(u0, space0);
-[[vk::binding(1, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> out_moments : register(u1, space0);
+[[vk::binding(1, 0)]] [[vk::image_format("rgba32f")]] RWTexture2D<float4> out_moments : register(u1, space0);
 [[vk::binding(2, 0)]] Texture2D<float4> curr_noisy : register(t2, space0);
 [[vk::binding(3, 0)]] Texture2D<float4> prev_accum : register(t3, space0);
 [[vk::binding(4, 0)]] Texture2D<float4> curr_nr : register(t4, space0);
@@ -102,9 +102,11 @@ void main(uint3 tid : SV_DispatchThreadID) {
     for (uint k = 0; k < 4; ++k) {
       int2 pp = base + off[k];
       if (bw[k] <= 0.0 || !ValidateHistory(p, pp)) continue;
-      float w = bw[k];
-      prev_c += w * prev_accum.Load(int3(pp, 0)).rgb;
+      float4 history = prev_accum.Load(int3(pp, 0));
       float4 pm = prev_moments.Load(int3(pp, 0));
+      if (!all(isfinite(history)) || !all(isfinite(pm))) continue;
+      float w = bw[k];
+      prev_c += w * history.rgb;
       prev_m += w * pm.xy;
       prev_len += w * pm.w;
       wsum += w;
@@ -137,8 +139,8 @@ void main(uint3 tid : SV_DispatchThreadID) {
   float3 ext = (mx - mn) * 0.5;
   prev_c = clamp(prev_c, mn - ext, mx + ext);
 
-  float len = valid ? min(prev_len + 1.0, pc.max_history) : 1.0;
-  float weight = valid ? max(1.0 / len, pc.current_weight_min) : 1.0;
+  float len = valid ? clamp(prev_len + 1.0, 1.0, max(pc.max_history, 1.0)) : 1.0;
+  float weight = valid ? saturate(max(1.0 / len, pc.current_weight_min)) : 1.0;
 
   float3 accum = lerp(prev_c, curr, weight);
 
@@ -151,6 +153,6 @@ void main(uint3 tid : SV_DispatchThreadID) {
   float spatial_var = max(0.0, s_l2 / 9.0 - (s_l / 9.0) * (s_l / 9.0));
   float variance = len < 4.0 ? spatial_var : temporal_var;
 
-  out_accum[p] = float4(accum, variance);  // .a carries variance to the a-trous
+  out_accum[p] = float4(accum, min(variance, 65504.0));  // .a is half precision
   out_moments[p] = float4(m.x, m.y, variance, len);
 }

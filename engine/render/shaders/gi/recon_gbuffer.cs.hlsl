@@ -1,5 +1,6 @@
 #include "rhi_bindings.hlsli"
 #include "model_transform.hlsli"
+#include "path_motion.hlsli"
 // SVGF reconstruction path tracer, stage 1: trace one noisy sample per pixel and
 // emit the g-buffer + demodulated noisy DIFFUSE IRRADIANCE that the temporal /
 // atrous passes reconstruct. Irradiance carries no primary albedo (the composite
@@ -27,6 +28,8 @@ struct PathGbufferPush {
                          // bit 8: ReSTIR GI (emit an initial sample instead of
                          // integrating indirect inline); bit 9 rr guides;
                          // bit 10 ReSTIR DI.
+  float2 jitter;
+  float2 pad;
 };
 PUSH_CONSTANTS(PathGbufferPush, pc);
 
@@ -54,6 +57,10 @@ PUSH_CONSTANTS(PathGbufferPush, pc);
 [[vk::binding(15, 0)]] [[vk::image_format("rgba16f")]] RWTexture2D<float4> rr_normals_out : register(u15, space0);
 [[vk::binding(16, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> rr_depth_out : register(u16, space0);
 [[vk::binding(17, 0)]] ConstantBuffer<ReconCamera> camera : register(b17, space0);
+
+[[vk::binding(18, 0)]] StructuredBuffer<PathMotionRecord> path_motion : register(t18, space0);
+
+[[vk::binding(19, 0)]] [[vk::image_format("r32f")]] RWTexture2D<float> rr_hitdist_out : register(u19, space0);
 
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
@@ -84,6 +91,7 @@ uint Pcg(inout uint state) {
   return (word >> 22u) ^ word;
 }
 float Rand(inout uint state) { return (Pcg(state) & 0xffffffu) / 16777216.0; }
+#include "path_continue.hlsli"
 
 float3 CosineHemisphere(float3 n, inout uint rng) {
   float u1 = Rand(rng);
@@ -99,6 +107,8 @@ float3 CosineHemisphere(float3 n, inout uint rng) {
 struct Hit {
   bool hit;
   float3 position;
+  float3 previous_position;
+  bool history_valid;
   float3 normal;
   float3 albedo;
   float3 emissive;
@@ -143,7 +153,8 @@ bool PassesAlpha(uint inst, uint geom, uint prim, float2 bary, float cone_width)
   MeshRecord mesh = mesh_records[NonUniformResourceIndex(inst)];
   GeometryRecord geometry = geometry_records[mesh.geometry_offset + geom];
   MaterialRecord m = material_records[NonUniformResourceIndex(geometry.material_index)];
-  if ((m.flags & kMaterialAlphaMask) == 0u || m.base_color_texture == 0xffffffffu) return true;
+  if ((m.flags & kMaterialAlphaMask) == 0u) return true;
+  if (m.base_color_texture == 0xffffffffu) return m.base_color_factor.a >= m.alpha_cutoff;
   uint3 tri = RxLoadTriangle(mesh, geometry.index_offset + prim * 3);
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
   float2 uvv[3];
@@ -186,17 +197,27 @@ Hit TraceClosest(float3 origin, float3 dir, float cone_spread, bool sample_mr) {
   float hit_t = rq.CommittedRayT();
   h.hit = true;
   h.position = origin + dir * hit_t;
-  // History id for temporal disocclusion: the auto instance INDEX is unique per
-  // TLAS instance, unlike InstanceID (== per-mesh bindless index, shared by every
-  // instance of the same mesh), so two distinct objects built from one mesh no
-  // longer alias each other's lighting history. (Mesh lookup still uses the ID.)
-  h.inst = rq.CommittedInstanceIndex();
   MeshRecord mesh = mesh_records[NonUniformResourceIndex(rq.CommittedInstanceID())];
   GeometryRecord geometry = geometry_records[mesh.geometry_offset + rq.CommittedGeometryIndex()];
   uint3 tri =
       RxLoadTriangle(mesh, geometry.index_offset + rq.CommittedPrimitiveIndex() * 3);
   float2 bary = rq.CommittedTriangleBarycentrics();
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
+  h.previous_position = h.position;
+  h.history_valid = false;
+  h.inst = 0xffffffffu;
+  if (sample_mr) {
+    PathMotionRecord history = path_motion[rq.CommittedInstanceIndex()];
+    h.inst = history.history_id;
+    h.history_valid = history.previous_mesh != 0xffffffffu;
+    if (h.history_valid) {
+      MeshRecord previous = mesh_records[NonUniformResourceIndex(history.previous_mesh)];
+      float3 local = RxLoadPosition(previous, tri.x) * w.x +
+                     RxLoadPosition(previous, tri.y) * w.y +
+                     RxLoadPosition(previous, tri.z) * w.z;
+      h.previous_position = mul(history.previous_transform, float4(local, 1.0)).xyz;
+    }
+  }
   float3 pos[3];
   float3 nrm[3];
   float2 uvv[3];
@@ -312,6 +333,23 @@ float V_SmithGGX(float NoV, float NoL, float a) {
 float3 F_Schlick(float u, float3 f0) {
   return f0 + (1.0 - f0) * pow(saturate(1.0 - u), 5.0);
 }
+// Integrated specular reflectance fit from the DLSS-RR guide (Ray Tracing Gems, chapter 32).
+float3 SpecularAlbedo(float3 f0, float roughness, float NoV) {
+  float v = saturate(abs(NoV));
+  float a = roughness * roughness;
+  float4 x = float4(1, v, v * v, v * v * v);
+  float4 y = float4(1, a, a * a, a * a * a);
+  float2x2 m1 = float2x2(0.99044, -1.28514, 1.29678, -0.755907);
+  float3x3 m2 = float3x3(1, 2.92338, 59.4188, 20.3225, -27.0302, 222.592,
+                         121.563, 626.13, 316.627);
+  float2x2 m3 = float2x2(0.0365463, 3.32707, 9.0632, -9.04756);
+  float3x3 m4 = float3x3(1, 3.59685, -1.36772, 9.04401, -16.3174, 9.22949,
+                         5.56589, 19.7886, -20.2123);
+  float bias = dot(mul(m1, x.xy), y.xy) / dot(mul(m2, x.xyw), y.xyw);
+  float scale = dot(mul(m3, x.xy), y.xy) / dot(mul(m4, x.xzw), y.xyw);
+  return saturate(f0 * max(0.0, scale) + max(0.0, bias) * saturate(f0.g * 50.0));
+}
+
 float3 SunSpecular(float3 pos, float3 N, float3 V, float3 albedo, float rough, float metal) {
   float3 L = normalize(-pc.sun_direction.xyz);
   float NoL = dot(N, L);
@@ -378,7 +416,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   uint rng = (id.y * size.x + id.x) * 9781u + pc.frame_index * 26699u + 1u;
 
   float2 uv = (float2(id.xy) + 0.5) / float2(size);
-  float2 ndc = uv * 2.0 - 1.0;
+  float2 ndc = uv * 2.0 - 1.0 - 2.0 * pc.jitter / float2(size);
   float4 near_h = mul(camera.inv_view_proj, float4(ndc, 1.0, 1.0));
   float3 ro = pc.camera_pos.xyz;
   float3 primary_dir = normalize(near_h.xyz / near_h.w - ro);
@@ -399,7 +437,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     viewz_out[id.xy] = kDenoisingRange;
     motion_out[id.xy] = (prev_ndc - ndc) * 0.5;  // engine convention, no y-flip
     materialid_out[id.xy] = 0xffffffffu;
-    albedo_out[id.xy] = 0.0.xxxx;
+    albedo_out[id.xy] = rr ? float4(0.5.xxx, 1.0) : 0.0.xxxx;
     emissive_out[id.xy] = float4(SampleSky(primary_dir), 1.0);
     specular_out[id.xy] = 0.0.xxxx;
     if (restir) {
@@ -409,8 +447,9 @@ void main(uint3 id : SV_DispatchThreadID) {
     }
     primary_pos_out[id.xy] = 0.0.xxxx;  // .w 0 = no visible surface
     if (rr) {
-      spec_albedo_out[id.xy] = 0.0.xxxx;
+      spec_albedo_out[id.xy] = float4(0.5.xxx, 1.0);
       rr_normals_out[id.xy] = 0.0.xxxx;
+      rr_hitdist_out[id.xy] = 0.0;
       rr_depth_out[id.xy] = 0.0;  // reversed-inf-z far plane
     }
     return;
@@ -463,7 +502,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         throughput *= hb.albedo;
         pos = hb.position;
         normal = hb.normal;
-        if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01) break;
+        if (!ContinuePath(throughput, rng)) break;
       }
       float rlum = dot(radiance, float3(0.2126, 0.7152, 0.0722));
       if (rlum > kFireflyClamp) radiance *= kFireflyClamp / rlum;
@@ -493,7 +532,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         throughput *= h.albedo;
         pos = h.position;
         normal = h.normal;
-        if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01) break;
+        if (!ContinuePath(throughput, rng)) break;
       }
       float lum = dot(e, float3(0.2126, 0.7152, 0.0722));
       if (lum > kFireflyClamp) e *= kFireflyClamp / lum;
@@ -515,10 +554,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float depth = clip.z / clip.w;
   float viewz = depth > 0.0 ? kNearPlane / depth : kDenoisingRange;
 
-  // Jitter-free camera motion (static geometry): prevUV - currUV.
-  float4 prev_clip = mul(camera.prev_view_proj, float4(prim.position, 1.0));
-  float2 prev_ndc = prev_clip.xy / prev_clip.w;
-  float2 motion = (prev_ndc - ndc) * 0.5;  // engine convention, no y-flip
+  float2 motion = PathMotion(prim.previous_position, camera.prev_view_proj, ndc, prim.history_valid);
 
   // Two specular contributions, kept apart by noise level:
   //  - analytic sun glint: noise-free direct highlight of the sun -> un-denoised
@@ -547,7 +583,9 @@ void main(uint3 id : SV_DispatchThreadID) {
   primary_pos_out[id.xy] = float4(prim.position, 1.0);
 
   if (rr) {
-    spec_albedo_out[id.xy] = float4(lerp(0.04.xxx, prim.albedo, prim.metallic), 1.0);
+    spec_albedo_out[id.xy] = float4(SpecularAlbedo(lerp(0.04.xxx, prim.albedo, prim.metallic),
+                                                  prim.roughness, dot(prim.normal, V)), 1.0);
+    rr_hitdist_out[id.xy] = spec_hit_dist;
     rr_normals_out[id.xy] = float4(prim.normal, prim.roughness);  // roughness packed in .w
     rr_depth_out[id.xy] = depth;  // clip z/w, reversed-inf-z
   }

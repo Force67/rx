@@ -153,6 +153,11 @@ StateInfo StateInfoOf(ResourceState state, bool as_source) {
     case ResourceState::kGeneral:
       return {VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
               VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT};
+    case ResourceState::kGeneralComputeTransfer:
+      return {VK_IMAGE_LAYOUT_GENERAL,
+              VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT,
+              VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT |
+                  VK_ACCESS_2_TRANSFER_WRITE_BIT};
     case ResourceState::kShaderReadCompute:
       return {VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT};

@@ -85,6 +85,24 @@ class Fsr3Upscaler final : public Upscaler {
       return false;
     }
 
+    // The bundled FFX allocator rejects host-visible device-local heaps.
+    // Check before context creation, which does not unwind failed allocations.
+    VkPhysicalDeviceMemoryProperties memory{};
+    vkGetPhysicalDeviceMemoryProperties(h.physical_device, &memory);
+    bool has_local_heap = false;
+    for (u32 i = 0; i < memory.memoryTypeCount; ++i) {
+      VkMemoryPropertyFlags flags = memory.memoryTypes[i].propertyFlags;
+      if ((flags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
+          !(flags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
+        has_local_heap = true;
+        break;
+      }
+    }
+    if (!has_local_heap) {
+      RX_WARN("fsr3: no compatible device-local memory, upscaler unavailable");
+      return false;
+    }
+
     VkDeviceContext device_context{h.device, h.physical_device, DeviceProcAddr};
     FfxDevice ffx_device = ffxGetDeviceVK(&device_context);
     scratch_size_ = ffxGetScratchMemorySizeVK(h.physical_device,
@@ -241,7 +259,7 @@ class Fsr3Upscaler final : public Upscaler {
     dispatch.sharpness = inputs.sharpness;
     dispatch.frameTimeDelta = inputs.frame_delta_seconds * 1000.0f;  // fsr wants milliseconds
     dispatch.preExposure = 1.0f;
-    dispatch.reset = inputs.reset_history;
+    dispatch.reset = inputs.reset_history || !has_history_ || inputs.frame_index != previous_frame_ + 1u;
     // Reversed-infinite depth: the header convention puts FLT_MAX in
     // cameraNear and the near plane distance in cameraFar.
     dispatch.cameraNear = FLT_MAX;
@@ -251,7 +269,11 @@ class Fsr3Upscaler final : public Upscaler {
 
     FfxErrorCode err = ffxFsr3UpscalerContextDispatch(&context_, &dispatch);
     if (err != FFX_OK) {
+      has_history_ = false;
       RX_ERROR("fsr3: dispatch failed ({})", static_cast<int>(err));
+    } else {
+      has_history_ = true;
+      previous_frame_ = inputs.frame_index;
     }
   }
 
@@ -274,6 +296,8 @@ class Fsr3Upscaler final : public Upscaler {
 
   Device& device_;
   UpscalerDesc desc_;
+  u32 previous_frame_ = 0;
+  bool has_history_ = false;
   void* scratch_ = nullptr;
   size_t scratch_size_ = 0;
   FfxInterface interface_{};

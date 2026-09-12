@@ -8,16 +8,15 @@
 // spatial stage consumes the result; the SVGF chain cleans the residual noise.
 //
 // Measures: initial samples are drawn with pdf cos/pi in the solid angle of
-// the CURRENT pixel, and temporal reprojection lands on (nearly) the same
-// surface point, so no Jacobian is applied here (the spatial stage does).
+// the CURRENT pixel. Reuse reconnects the previous sample to the current
+// surface point with a solid-angle Jacobian, including camera motion.
 struct ReconRestirTemporalPush {
   uint2 size;
   uint frame_index;
   float m_max;   // history length cap (in reservoir M)
   float reset;   // 1 = drop all history this frame
   float pad0;
-  float pad1;
-  float pad2;
+  float2 jitter_delta;
 };
 PUSH_CONSTANTS(ReconRestirTemporalPush, pc);
 
@@ -42,6 +41,8 @@ PUSH_CONSTANTS(ReconRestirTemporalPush, pc);
 [[vk::binding(14, 0)]] Texture2D<float4> r0_prev : register(t14, space0);
 [[vk::binding(15, 0)]] Texture2D<float4> r1_prev : register(t15, space0);
 [[vk::binding(16, 0)]] Texture2D<float4> r2_prev : register(t16, space0);
+
+[[vk::binding(17, 0)]] Texture2D<float4> prev_p_pos : register(t17, space0);
 
 static const float kPi = 3.14159265359;
 
@@ -120,7 +121,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
   // bilinearly blended), gated by the same surface tests SVGF uses.
   if (pc.reset == 0.0) {
     float2 uv = (float2(p) + 0.5) / float2(pc.size);
-    float2 prev_uv = uv + motion.Load(int3(p, 0));
+    float2 prev_uv = uv + motion.Load(int3(p, 0)) + pc.jitter_delta / float2(pc.size);
     int2 pp = int2(floor(prev_uv * float2(pc.size)));
     if (ValidateHistory(p, pp)) {
       float4 q0 = r0_prev.Load(int3(pp, 0));
@@ -128,9 +129,23 @@ void main(uint3 tid : SV_DispatchThreadID) {
       float4 q2 = r2_prev.Load(int3(pp, 0));
       float qM = min(q1.w, pc.m_max);
       float qW = q0.w;
+      // Absorbed paths contribute zero energy, but still count as samples.
+      if (qM > 0.0) r.M += qM;
       if (qM > 0.0 && qW > 0.0) {
         float p_hat = PHat(vp, vn, q0.xyz, q2.xyz);
-        float w = p_hat * qW * qM;
+        float3 previous_vp = prev_p_pos.Load(int3(pp, 0)).xyz;
+        float3 to_current = vp - q0.xyz;
+        float3 to_previous = previous_vp - q0.xyz;
+        float current_dist2 = dot(to_current, to_current);
+        float previous_dist2 = dot(to_previous, to_previous);
+        float jacobian = 1.0;
+        if (current_dist2 < 1.0e8) {
+          float3 sample_normal = DecodeN(q1);
+          float current_cos = abs(dot(sample_normal, to_current / max(sqrt(current_dist2), 1e-4)));
+          float previous_cos = abs(dot(sample_normal, to_previous / max(sqrt(previous_dist2), 1e-4)));
+          jacobian = current_cos * previous_dist2 / max(previous_cos * current_dist2, 1e-8);
+        }
+        float w = p_hat * jacobian * qW * qM;
         if (w > 0.0 && !(w > 1.0e12)) {  // reject inf/nan history
           r.w_sum += w;
           if (Rand(rng) < w / r.w_sum) {
@@ -139,7 +154,6 @@ void main(uint3 tid : SV_DispatchThreadID) {
             r.rad = q2.xyz;
           }
         }
-        r.M += qM;
       }
     }
   }

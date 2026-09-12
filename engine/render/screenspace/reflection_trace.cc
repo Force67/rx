@@ -59,6 +59,7 @@ static_assert(sizeof(UpscalePush) == 32, "UpscalePush must match the shader layo
 }  // namespace
 
 bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_layout) {
+  if (!bindless_layout) return false;
   pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_reflection_trace_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
@@ -89,7 +90,10 @@ bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_la
   // still be reading its own copy.
   for (GpuBuffer& camera : camera_) {
     camera = device.CreateBuffer(sizeof(ReflectionCamera), kBufferUsageUniform, true);
-    if (!camera.mapped) return false;
+    if (!camera.mapped) {
+      Destroy(device);
+      return false;
+    }
   }
   upscale_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_reflection_upscale_cs_hlsl),
@@ -102,6 +106,7 @@ bool ReflectionTrace::Initialize(Device& device, BindingLayoutHandle bindless_la
   });
   if (!upscale_pipeline_) {
     RX_ERROR("reflection upscale pipeline creation failed");
+    Destroy(device);
     return false;
   }
   return true;

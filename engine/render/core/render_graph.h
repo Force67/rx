@@ -29,6 +29,7 @@ enum class ResourceUsage : u8 {
   kStorageWrite,
   kResolveSrc,  // multisample resolve source (CommandList::ResolveTexture)
   kResolveDst,
+  kStorageClearWrite,  // compute UAV writes and transfer clears (vendor SDK outputs)
 };
 
 struct TransientTextureDesc {

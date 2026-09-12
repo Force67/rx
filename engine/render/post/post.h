@@ -53,7 +53,7 @@ class PostPass {
 
   // bloom/flare may be the input view when bloom is off (still bound, not
   // read; flare_intensity is zeroed alongside). `flare` is the tight 1/4-res
-  // highlight snapshot from the bloom down chain that the ghost/halo sampling
+  // highlight snapshot from the bloom down chain that the ghost sampling
   // reads.
   void Record(PassContext& ctx, TextureView input, TextureView bloom, TextureView flare,
               const GpuBuffer& exposure, u64 exposure_size, TextureView output,

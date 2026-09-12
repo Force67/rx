@@ -441,7 +441,8 @@ void D3D12CommandList::TextureBarriers(std::span<const TextureBarrier> barriers)
     if (!texture) continue;
     D3D12_RESOURCE_STATES after = ToResourceStates(barrier.after);
     // General->general is a UAV hazard, not a state change.
-    if (barrier.before == ResourceState::kGeneral && barrier.after == ResourceState::kGeneral) {
+    if (ToResourceStates(barrier.before) == D3D12_RESOURCE_STATE_UNORDERED_ACCESS &&
+        after == D3D12_RESOURCE_STATE_UNORDERED_ACCESS) {
       D3D12_RESOURCE_BARRIER uav = {};
       uav.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
       uav.UAV.pResource = texture->resource;
@@ -826,20 +827,8 @@ void D3D12CommandList::BuildBlas(AccelStructHandle blas, const BlasBuildDesc& de
     return;
   }
   base::Vector<D3D12_RAYTRACING_GEOMETRY_DESC> geometries;
-  for (const AccelTriangles& t : desc.geometries) {
-    D3D12_RAYTRACING_GEOMETRY_DESC geometry = {};
-    geometry.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-    geometry.Flags = t.opaque ? D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE
-                              : D3D12_RAYTRACING_GEOMETRY_FLAG_NONE;
-    geometry.Triangles.VertexBuffer = {t.vertex_address, t.vertex_stride};
-    geometry.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-    geometry.Triangles.VertexCount = t.vertex_count;
-    geometry.Triangles.IndexBuffer = t.index_address;
-    geometry.Triangles.IndexCount = t.index_count;
-    geometry.Triangles.IndexFormat =
-        t.index_type == IndexType::kUint16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
-    geometries.push_back(geometry);
-  }
+  for (const AccelTriangles& t : desc.geometries)
+    geometries.push_back(ToD3dTriangles(t));
 
   D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build = {};
   build.Inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;

@@ -75,7 +75,18 @@ class RayTracingContext {
     // approx/lod: a skinned actor has exactly one posed structure.
     bool skinned = false;
     Mat4 transform = Mat4::Identity();
+    Mat4 previous_transform = Mat4::Identity();
+    u32 previous_mesh = 0xffffffffu;
+    u32 history_id = 0xffffffffu;
   };
+
+  struct MotionRecord {
+    Mat4 previous_transform;
+    u32 previous_mesh = 0xffffffffu;
+    u32 history_id = 0xffffffffu;
+    u32 pad[2] = {};
+  };
+  static_assert(sizeof(MotionRecord) == 80);
 
   static std::unique_ptr<RayTracingContext> Create(Device& device);
   ~RayTracingContext();
@@ -166,6 +177,10 @@ class RayTracingContext {
     return slot_tracker_.Valid(slot) ? tlas_[slot].handle : fallback_tlas_.handle;
   }
 
+  const GpuBuffer& motion_buffer(u32 slot) const {
+    return slot_tracker_.Valid(slot) ? tlas_[slot].motion : fallback_tlas_.motion;
+  }
+
   // Whether `slot` currently holds a valid TLAS build (built this session and
   // against the live BLAS set). False for a never-built slot or one retired by a
   // RemoveBlas/replace -- consumers must not bind such a slot.
@@ -203,6 +218,7 @@ class RayTracingContext {
   struct Tlas {
     AccelStructHandle handle;
     GpuBuffer instances;  // host visible TlasInstance[]
+    GpuBuffer motion;     // MotionRecord[] in the actual built TLAS order
     GpuBuffer scratch;
     u32 capacity = 0;
   };

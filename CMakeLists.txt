@@ -944,6 +944,103 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   target_link_libraries(compaction_test PRIVATE rx::render rx::core)
   add_test(NAME compaction_test COMMAND compaction_test)
 
+  add_executable(rt_failure_test test/rt_failure_test.cc)
+  target_link_libraries(rt_failure_test PRIVATE rx::render rx::core)
+  add_test(NAME rt_failure_test COMMAND rt_failure_test)
+
+  add_executable(raytracing_test test/raytracing_test.cc)
+  target_link_libraries(raytracing_test PRIVATE rx::render rx::core)
+  rx_embed_shaders(raytracing_test test/shaders/rt_query.cs.hlsl)
+  add_test(NAME raytracing_test COMMAND raytracing_test)
+  set_tests_properties(raytracing_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(recon_temporal_test test/recon_temporal_test.cc)
+  target_link_libraries(recon_temporal_test PRIVATE rx::render rx::core)
+  target_include_directories(recon_temporal_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME recon_temporal_test COMMAND recon_temporal_test)
+  set_tests_properties(recon_temporal_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(path_sampling_test test/path_sampling_test.cc)
+  target_link_libraries(path_sampling_test PRIVATE rx::render rx::core)
+  target_include_directories(path_sampling_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders)
+  set(RX_SHADER_DEPS_path_continue_cs_hlsl engine/render/shaders/path_continue.hlsli)
+  rx_embed_shaders(path_sampling_test test/shaders/path_continue.cs.hlsl)
+  unset(RX_SHADER_INCLUDE_DIRS)
+  add_test(NAME path_sampling_test COMMAND path_sampling_test)
+  set_tests_properties(path_sampling_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(path_alpha_test test/path_alpha_test.cc)
+  target_link_libraries(path_alpha_test PRIVATE rx::render rx::core)
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders
+      ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
+  set(path_alpha_shaders test/shaders/path_alpha_recon.cs.hlsl test/shaders/path_alpha_di.cs.hlsl)
+  set(RX_SHADER_DEPS_path_alpha_recon_cs_hlsl engine/render/shaders/gi/recon_gbuffer.cs.hlsl)
+  set(RX_SHADER_DEPS_path_alpha_di_cs_hlsl engine/render/shaders/gi/recon_restir_di_spatial.cs.hlsl)
+  if(RX_NRD)
+    list(APPEND path_alpha_shaders test/shaders/path_alpha_nrd.cs.hlsl)
+    set(RX_SHADER_DEPS_path_alpha_nrd_cs_hlsl engine/render/shaders/gi/pathtrace_gbuffer.cs.hlsl)
+  endif()
+  foreach(shader IN LISTS path_alpha_shaders)
+    get_filename_component(name ${shader} NAME)
+    string(MAKE_C_IDENTIFIER ${name} symbol)
+    list(APPEND RX_SHADER_DEPS_${symbol} engine/render/shaders/rt_geometry.hlsli
+        engine/render/shaders/material_record.hlsli engine/render/shaders/path_continue.hlsli
+        engine/render/shaders/path_motion.hlsli)
+  endforeach()
+  rx_embed_shaders(path_alpha_test ${path_alpha_shaders})
+  unset(RX_SHADER_INCLUDE_DIRS)
+  add_test(NAME path_alpha_test COMMAND path_alpha_test)
+  set_tests_properties(path_alpha_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(upscaler_motion_test test/upscaler_motion_test.cc)
+  target_link_libraries(upscaler_motion_test PRIVATE rx::render rx::core)
+  add_test(NAME upscaler_motion_test COMMAND upscaler_motion_test)
+  set_tests_properties(upscaler_motion_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected|dispatch failed")
+  if(RX_DLSS)
+    add_test(NAME upscaler_motion_test_dlss COMMAND upscaler_motion_test)
+    set_tests_properties(upscaler_motion_test_dlss PROPERTIES
+      ENVIRONMENT "RX_TEST_UPSCALER=dlss" FAIL_REGULAR_EXPRESSION "VUID|hazard detected|evaluate failed")
+  endif()
+
+  add_executable(recon_atrous_test test/recon_atrous_test.cc)
+  target_link_libraries(recon_atrous_test PRIVATE rx::render rx::core)
+  target_include_directories(recon_atrous_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME recon_atrous_test COMMAND recon_atrous_test)
+  set_tests_properties(recon_atrous_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(lens_flare_test test/lens_flare_test.cc)
+  target_link_libraries(lens_flare_test PRIVATE rx::render rx::core)
+  add_test(NAME lens_flare_test COMMAND lens_flare_test)
+  set_tests_properties(lens_flare_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(path_motion_test test/path_motion_test.cc)
+  target_link_libraries(path_motion_test PRIVATE rx::render rx::core)
+  set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders
+      ${PROJECT_SOURCE_DIR}/third_party/NRD/Shaders)
+  set(path_motion_shaders test/shaders/path_motion_recon.cs.hlsl)
+  set(RX_SHADER_DEPS_path_motion_recon_cs_hlsl engine/render/shaders/gi/recon_gbuffer.cs.hlsl)
+  if(RX_NRD)
+    list(APPEND path_motion_shaders test/shaders/path_motion_nrd.cs.hlsl)
+    set(RX_SHADER_DEPS_path_motion_nrd_cs_hlsl engine/render/shaders/gi/pathtrace_gbuffer.cs.hlsl)
+  endif()
+  foreach(shader IN LISTS path_motion_shaders)
+    get_filename_component(name ${shader} NAME)
+    string(MAKE_C_IDENTIFIER ${name} symbol)
+    list(APPEND RX_SHADER_DEPS_${symbol} engine/render/shaders/rt_geometry.hlsli
+        engine/render/shaders/material_record.hlsli engine/render/shaders/path_continue.hlsli
+        engine/render/shaders/path_motion.hlsli)
+  endforeach()
+  rx_embed_shaders(path_motion_test ${path_motion_shaders})
+  unset(RX_SHADER_INCLUDE_DIRS)
+  add_test(NAME path_motion_test COMMAND path_motion_test)
+  set_tests_properties(path_motion_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
+  add_executable(path_material_test test/path_material_test.cc)
+  target_link_libraries(path_material_test PRIVATE rx::render rx::core)
+  add_test(NAME path_material_test COMMAND path_material_test)
+  set_tests_properties(path_material_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
   # Cull bounding radius: runs cull.cs over a rotated, non-uniformly scaled
   # instance straddling a frustum plane, the one case where reading the model
   # matrix by row instead of by column under-reports the radius and culls
@@ -996,10 +1093,28 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # tests read RX_RHI to pick the backend and skip cleanly when the driver or
   # feature is unavailable.
   if(RX_RHI_D3D12)
+    add_test(NAME lens_flare_test_d3d12 COMMAND lens_flare_test)
+    set_tests_properties(lens_flare_test_d3d12 PROPERTIES
+      ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+    add_test(NAME recon_atrous_test_d3d12 COMMAND recon_atrous_test)
+    set_tests_properties(recon_atrous_test_d3d12 PROPERTIES
+      ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
     add_test(NAME offscreen_test_d3d12 COMMAND offscreen_test)
     set_tests_properties(offscreen_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
     add_test(NAME compaction_test_d3d12 COMMAND compaction_test)
     set_tests_properties(compaction_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
+    add_test(NAME raytracing_test_d3d12 COMMAND raytracing_test)
+    set_tests_properties(raytracing_test_d3d12 PROPERTIES
+      ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+    add_test(NAME recon_temporal_test_d3d12 COMMAND recon_temporal_test)
+    set_tests_properties(recon_temporal_test_d3d12 PROPERTIES
+      ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+    add_test(NAME path_alpha_test_d3d12 COMMAND path_alpha_test)
+    set_tests_properties(path_alpha_test_d3d12 PROPERTIES
+      ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+    add_test(NAME path_sampling_test_d3d12 COMMAND path_sampling_test)
+    set_tests_properties(path_sampling_test_d3d12 PROPERTIES
+      ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
   endif()
 endif()
 

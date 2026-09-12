@@ -22,7 +22,8 @@ class RestirDi {
   void Destroy(Device& device);
   bool Resize(Device& device, Extent2D extent);
   bool available() const {
-    return static_cast<bool>(temporal_pipeline_) && static_cast<bool>(reservoir_[0]);
+    return temporal_pipeline_ && spatial_pipeline_ && reservoir_[0] && reservoir_[1] &&
+           prev_depth_ && prev_normal_;
   }
 
   struct Frame {
@@ -56,6 +57,7 @@ class RestirDi {
   GpuImage prev_normal_;  // RGBA16F oct+roughness snapshot
   Extent2D extent_ = {0, 0};
   bool reset_ = true;
+  u32 previous_frame_ = 0;
 };
 
 }  // namespace rx::render

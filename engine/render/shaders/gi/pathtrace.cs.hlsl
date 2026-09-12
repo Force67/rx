@@ -61,6 +61,7 @@ uint Pcg(inout uint state) {
   return (word >> 22u) ^ word;
 }
 float Rand(inout uint state) { return (Pcg(state) & 0xffffffu) / 16777216.0; }
+#include "path_continue.hlsli"
 
 float3 CosineHemisphere(float3 n, inout uint rng) {
   float u1 = Rand(rng);
@@ -282,8 +283,8 @@ float3 Radiance(float3 origin, float3 dir, inout uint rng) {
       throughput *= h.albedo;
     }
 
-    // Russian-roulette-free fixed depth; kill near-black paths early.
-    if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01) break;
+    // Keep dim paths unbiased while limiting work below the fixed maximum depth.
+    if (!ContinuePath(throughput, rng)) break;
   }
   return radiance;
 }

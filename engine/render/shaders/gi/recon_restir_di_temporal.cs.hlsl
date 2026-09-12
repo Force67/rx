@@ -29,8 +29,7 @@ struct ReconRestirDiTemporalPush {
   float reset;          // 1 = drop history
   float m_max_sky;      // reservoir B (sky) age cap
   float pad0;
-  float pad1;
-  float pad2;
+  float2 jitter_delta;
 };
 PUSH_CONSTANTS(ReconRestirDiTemporalPush, pc);
 
@@ -147,11 +146,11 @@ float3 SampleSkyCdf(inout uint rng, out float pdf) {
   if (!(lum > 0.0)) return float3(0, 1, 0);
   pdf = lum / total;  // cell solid angle cancels (weights are luma * omega)
   float u = (float(col) + Rand(rng)) / float(kSkyGridW);
-  float v = (float(row) + Rand(rng)) / float(kSkyGridH);
-  float theta = v * kPi;
+  float cos_theta = lerp(cos(float(row) * kPi / float(kSkyGridH)),
+                         cos(float(row + 1u) * kPi / float(kSkyGridH)), Rand(rng));
   float phi = u * 2.0 * kPi;
-  float sn = sin(theta);
-  return float3(sn * cos(phi), cos(theta), sn * sin(phi));
+  float sn = sqrt(max(0.0, 1.0 - cos_theta * cos_theta));
+  return float3(sn * cos(phi), cos_theta, sn * sin(phi));
 }
 
 // Unshadowed target function, demodulated irradiance luminance. Shared with
@@ -220,9 +219,10 @@ void main(uint3 tid : SV_DispatchThreadID) {
   float3 n = DecodeN(curr_nr.Load(int3(p, 0)));
   uint rng = (tid.y * pc.size.x + tid.x) * 20749u + pc.frame_index * 12269u + 5u;
 
-  // Streaming RIS over the candidate set. Candidate weight w = p_hat / pdf:
-  // the sun is a deterministic proposal (pdf 1); each of the K uniform picks
-  // has pdf 1/N, so w = p_hat * N. The 1/M in W averages the strategies.
+  // The sun and point-light proposals have disjoint support. Include each
+  // proposal's fraction of the candidate set in its PDF so W estimates their sum.
+  uint light_candidates = pc.light_count > 0u ? pc.candidates : 0u;
+  float candidate_count = float(light_candidates) + 1.0;
   float sel_id = -1.0;
   float3 sel_dir = 0.0.xxx;
   float w_sum = 0.0;
@@ -230,7 +230,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
 
   float3 sun_dir = SunDiskDir(rng);
   {
-    float w = PHatSun(n, sun_dir);
+    float w = PHatSun(n, sun_dir) * candidate_count;
     w_sum += w;
     M += 1.0;
     if (w > 0.0) {  // first candidate: always selected while it is the only mass
@@ -238,9 +238,10 @@ void main(uint3 tid : SV_DispatchThreadID) {
       sel_dir = sun_dir;
     }
   }
-  for (uint k = 0; k < pc.candidates && pc.light_count > 0u; ++k) {
+  for (uint k = 0; k < light_candidates; ++k) {
     uint li = min(uint(Rand(rng) * float(pc.light_count)), pc.light_count - 1u);
-    float w = PHatLight(x, n, point_lights[li]) * float(pc.light_count);
+    float w = PHatLight(x, n, point_lights[li]) * float(pc.light_count) *
+              (candidate_count / float(light_candidates));
     M += 1.0;
     if (!(w > 0.0)) continue;
     w_sum += w;
@@ -255,13 +256,15 @@ void main(uint3 tid : SV_DispatchThreadID) {
   // vanished lights age out through a zero target).
   if (pc.reset == 0.0) {
     float2 uv = (float2(p) + 0.5) / float2(pc.size);
-    float2 prev_uv = uv + motion.Load(int3(p, 0));
+    float2 prev_uv = uv + motion.Load(int3(p, 0)) + pc.jitter_delta / float2(pc.size);
     int2 pp = int2(floor(prev_uv * float2(pc.size)));
     if (ValidateHistory(p, pp)) {
       float4 q0 = r0_prev.Load(int3(pp, 0));
       float4 q1 = r1_prev.Load(int3(pp, 0));
       float qM = min(q1.y, pc.m_max);
       float qW = q1.z;
+      // Zero-contribution draws still belong to the normalization denominator.
+      if (qM > 0.0) M += qM;
       if (qM > 0.0 && qW > 0.0 && q0.w > -0.5) {
         float p_hat = PHat(x, n, q0.w, q0.xyz);
         float w = p_hat * qW * qM;
@@ -272,7 +275,6 @@ void main(uint3 tid : SV_DispatchThreadID) {
             sel_dir = q0.xyz;
           }
         }
-        M += qM;
       }
     }
   }
@@ -305,13 +307,14 @@ void main(uint3 tid : SV_DispatchThreadID) {
   }
   if (pc.reset == 0.0 && pc.sky_candidates > 0u) {
     float2 uv = (float2(p) + 0.5) / float2(pc.size);
-    float2 prev_uv = uv + motion.Load(int3(p, 0)).xy;
+    float2 prev_uv = uv + motion.Load(int3(p, 0)).xy + pc.jitter_delta / float2(pc.size);
     int2 pp = int2(floor(prev_uv * float2(pc.size)));
     if (ValidateHistory(p, pp)) {
       float4 q2 = r2_prev.Load(int3(pp, 0));
       float4 q3 = r3_prev.Load(int3(pp, 0));
       float qM = min(q3.y, pc.m_max_sky);
       float qW = q3.z;
+      if (qM > 0.0) sky_M += qM;
       if (qM > 0.0 && qW > 0.0 && q2.w < -1.5) {
         float p_hat = PHatSky(n, q2.xyz);
         float w = p_hat * qW * qM;
@@ -322,7 +325,6 @@ void main(uint3 tid : SV_DispatchThreadID) {
             sky_dir = q2.xyz;
           }
         }
-        sky_M += qM;
       }
     }
   }

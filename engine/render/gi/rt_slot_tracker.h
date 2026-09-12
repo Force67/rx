@@ -26,6 +26,7 @@ struct TlasSlotTracker {
 
   // Record that `slot` was (re)built this frame against the current BLAS set.
   void MarkBuilt(u32 slot, u32 frame_index) {
+    if (slot >= kSlots) return;
     built_[slot] = true;
     built_frame_[slot] = frame_index;
     slot_revision_[slot] = revision_;
@@ -33,7 +34,7 @@ struct TlasSlotTracker {
 
   // A reservation or record-time invariant failed for one slot. Its resources
   // may still exist, but consumers must use the empty fallback until a rebuild.
-  void Invalidate(u32 slot) { built_[slot] = false; }
+  void Invalidate(u32 slot) { if (slot < kSlots) built_[slot] = false; }
 
   // A BLAS was removed/replaced: every previously built slot now references a
   // structure that no longer exists. Bump the revision so they read as invalid
@@ -42,7 +43,9 @@ struct TlasSlotTracker {
 
   // A slot may be read iff it was built at least once and against the current
   // BLAS revision.
-  bool Valid(u32 slot) const { return built_[slot] && slot_revision_[slot] == revision_; }
+  bool Valid(u32 slot) const {
+    return slot < kSlots && built_[slot] && slot_revision_[slot] == revision_;
+  }
 
   bool ValidForFrame(u32 slot, u32 frame_index) const {
     return Valid(slot) && built_frame_[slot] == frame_index;

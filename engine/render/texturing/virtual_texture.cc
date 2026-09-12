@@ -345,6 +345,7 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
         ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kTransferRead);
         ctx.cmd->CopyBuffer(feedback_, 0, readback_[frame_index % kReadbackRing], 0,
                             (1 + kFeedbackCapacity) * sizeof(u32));
+        ctx.cmd->MemoryBarrier(BarrierScope::kTransferRead, BarrierScope::kTransferWrite);
         ctx.cmd->FillBuffer(feedback_, 0, sizeof(u32), 0);
         ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kAllCommands);
       });

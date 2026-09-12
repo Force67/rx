@@ -1,6 +1,7 @@
 #include "render/gi/path_tracer.h"
 
 #include <cstring>
+#include <limits>
 
 #include "core/log.h"
 #include "render/gi/raytracing.h"
@@ -82,7 +83,10 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
   // still be reading its own copy.
   for (GpuBuffer& camera : camera_) {
     camera = device.CreateBuffer(sizeof(PathCamera), kBufferUsageUniform, true);
-    if (!camera.mapped) return false;
+    if (!camera.mapped) {
+      Destroy(device);
+      return false;
+    }
   }
 
 #if defined(RX_HAS_NRD)
@@ -98,13 +102,15 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
                           {5, BindingType::kStorageImage},
                           {6, BindingType::kAccelStruct},
                           {7, BindingType::kCombinedTextureSampler},
-                          {8, BindingType::kUniformBuffer}}},
+                          {8, BindingType::kUniformBuffer},
+                          {9, BindingType::kStorageBuffer}}},
                {.shared = bindless_layout}},
       .push_constant_size = PushSize<PathGbufferPush>(),
       .debug_name = "pathtrace_gbuffer",
   });
   if (!gbuffer_pipeline_) {
     RX_ERROR("path tracer gbuffer pipeline creation failed");
+    Destroy(device);
     return false;
   }
 
@@ -120,6 +126,7 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
   });
   if (!composite_pipeline_) {
     RX_ERROR("path tracer composite pipeline creation failed");
+    Destroy(device);
     return false;
   }
 #endif  // RX_HAS_NRD
@@ -127,9 +134,14 @@ bool PathTracer::Initialize(Device& device, BindingLayoutHandle bindless_layout)
 }
 
 void PathTracer::Resize(Device& device, Extent2D extent) {
+  if (!pipeline_) return;
   if (extent.width == extent_.width && extent.height == extent_.height && accum_) return;
-  if (accum_) device.DestroyImage(accum_);
+  if (accum_) {
+    device.WaitIdle();
+    device.DestroyImage(accum_);
+  }
   extent_ = extent;
+  if (extent.width == 0 || extent.height == 0) return;
   accum_ = device.CreateImage2D(kAccumFormat, extent, kTextureUsageStorage);
   accum_state_ = ResourceState::kUndefined;
   accumulated_samples_ = 0;
@@ -157,7 +169,9 @@ void PathTracer::Destroy(Device& device) {
 void PathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u32 tlas_slot,
                             BindingSetHandle bindless_set, TextureView sky_view,
                             SamplerHandle sky_sampler, ResourceHandle output, const Frame& frame) {
-  if (frame.reset) accumulated_samples_ = 0;
+  if (!available()) return;
+  if (frame.reset || accumulated_samples_ > std::numeric_limits<u32>::max() - spp_)
+    accumulated_samples_ = 0;
   u32 sample_base = accumulated_samples_;
   accumulated_samples_ += spp_;
 
@@ -235,6 +249,7 @@ void PathTracer::AddGbufferPass(RenderGraph& graph, RayTracingContext& raytracin
         const PathCamera camera{frame.inv_view_proj, frame.view_proj, frame.prev_view_proj};
         std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
         items.push_back(Bind::Uniform(8, camera_[slot], 0, sizeof(PathCamera)));
+        items.push_back(Bind::StorageBuffer(9, raytracing.motion_buffer(tlas_slot)));
 
         PathGbufferPush push{};
         push.camera_pos[0] = frame.camera_pos.x;

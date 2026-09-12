@@ -62,6 +62,7 @@ float PHat(float3 vp, float3 vn, float3 sample_pos, float3 sample_rad) {
 }
 
 bool Occluded(float3 origin, float3 dir, float dist) {
+  if (!(dist > 0.001)) return false;
   RayDesc ray;
   ray.Origin = origin;
   ray.TMin = 0.001;
@@ -124,7 +125,11 @@ void main(uint3 tid : SV_DispatchThreadID) {
     float4 n2 = r2_in.Load(int3(np, 0));
     float nM = n1.w;
     float nW = n0.w;
-    if (nM <= 0.0 || nW <= 0.0) continue;
+    if (!(nM > 0.0)) continue;
+    if (!(nW > 0.0)) {
+      M += nM;
+      continue;
+    }
 
     // Solid-angle Jacobian through the shared sample point: the neighbor's W
     // is an inverse pdf in ITS solid angle; reusing at this pixel scales the
@@ -148,9 +153,9 @@ void main(uint3 tid : SV_DispatchThreadID) {
 
     float p_hat = PHat(vp, vn, s_p, n2.xyz);
     float w = p_hat * jacobian * nW * nM;
+    M += nM;
     if (!(w > 0.0) || w > 1.0e12) continue;
     w_sum += w;
-    M += nM;
     if (Rand(rng) < w / w_sum) {
       sel_pos = s_p;
       sel_nrm = s_n;
@@ -168,8 +173,8 @@ void main(uint3 tid : SV_DispatchThreadID) {
     float3 dir = to_sample / dist;
     // One visibility ray for the winner: reused samples were traced from a
     // different visible point and may be behind local geometry here. A failed
-    // test zeroes W in the history too: the temporal stage skips dead
-    // reservoirs and reseeds, so occluded samples cannot linger.
+    // test zeroes W in the history too, while retaining the sample count
+    // for normalization during reuse.
     if (W > 0.0 && Occluded(vp + vn * 0.002, dir, min(dist - 0.004, 1000.0))) {
       W = 0.0;
     }

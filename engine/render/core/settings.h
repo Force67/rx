@@ -313,12 +313,12 @@ struct RenderSettings {
   bool motion_blur = true;
   f32 motion_blur_shutter = 0.5f;  // 180-degree shutter
 
-  // Lens package: flare ghosts + halo off the bloom chain, radial chromatic
+  // Lens package: highlight ghosts from the bloom chain, radial chromatic
   // aberration, vignette and film grain. Subtle defaults; 0 disables each.
   f32 lens_flare = 0.06f;
   f32 chromatic_aberration = 1.2f;  // px at the corners
   f32 vignette = 0.22f;
-  f32 film_grain = 0.015f;
+  f32 film_grain = 0.0f;
 
   // Bokeh depth of field on the resolved frame. focus <= 0 = center autofocus.
   // Off by default: the center-chasing focal plane blurs most of a landscape

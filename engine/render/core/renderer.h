@@ -52,6 +52,7 @@
 #include "render/gi/light_grid.h"
 #include "render/gi/local_shadows.h"
 #include "render/gi/path_tracer.h"
+#include "render/gi/path_scene_history.h"
 #include "render/gi/raytracing.h"
 #include "render/gi/rcgi.h"
 #include "render/gi/recon_path_tracer.h"
@@ -303,6 +304,7 @@ struct PickResult {
 
 struct FrameView {
   CameraPose camera;
+  bool camera_cut = false;  // discard temporal history after a discontinuous camera change
   f32 frame_delta_seconds = 1.0f / 60.0f; // upscalers want real frame time
   // World-space rect (min_x, min_z, max_x, max_z) covering the fully streamed
   // terrain cells. Distant terrain-LOD draws sink their vertices inside it so
@@ -978,9 +980,13 @@ private:
   GpuImage ms_dummy_hiz_; // 1x1 fallback bound to the mesh-shader cull when
                           // occlusion is off
   Mat4 pt_prev_view_proj_ = Mat4::Identity();
-  f32 pt_prev_sig_ = 0; // lighting signature; change resets accumulation
+  f32 pt_prev_sun_intensity_ = 0;
+  f32 pt_prev_sun_radius_ = 0;
+  Vec3 pt_prev_sun_direction_{};
+  Vec3 pt_prev_sun_color_{};
   u64 scene_revision_ = 0;
   u64 pt_prev_scene_revision_ = 0;
+  PathSceneHistory pt_scene_history_;
   bool pt_was_active_ = false;
   // Which path-trace mode ran last frame (0 reference, 1 nrd-denoised, 2 recon,
   // -1 none). Switching mode must reset accumulation: each mode reprojects its
@@ -1044,8 +1050,8 @@ private:
   GpuImage pick_depth_image_; // D32, render resolution
   u32 pick_image_w_ = 0, pick_image_h_ = 0;
 
-  void WriteBackbufferPng(const std::string &path, u32 image_index);
-  void WriteScreenshot(u32 image_index);
+  void WriteBackbufferPng(const std::string &path);
+  void WriteScreenshot();
   void DumpFgImage(const GpuImage &image, ResourceState state, bool bgra,
                    const char *path);
   void WriteHdr(); // reads back the captured linear hdr buffer to a .hdr file

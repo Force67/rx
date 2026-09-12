@@ -99,6 +99,7 @@ enum class ResourceState : u8 {
   kResolveDst,
   kPresent,
   kShadingRate,  // fragment shading rate attachment (vrs rate image)
+  kGeneralComputeTransfer,  // compute storage access and transfer clears in GENERAL
 };
 
 // Coarse execution+memory scopes for global (non-image) barriers. Covers every

@@ -22,6 +22,7 @@ class RtaoPass {
   };
 
   bool Initialize(Device& device);
+  bool available() const { return static_cast<bool>(pipeline_); }
   void Resize(Device& device, Extent2D extent) { extent_ = extent; }
   void Destroy(Device& device);
 

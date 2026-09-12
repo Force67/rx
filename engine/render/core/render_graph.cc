@@ -31,6 +31,8 @@ UsageState StateFor(ResourceUsage usage) {
       return {ResourceState::kShaderReadTaskMesh, false};
     case ResourceUsage::kStorageWrite:
       return {ResourceState::kGeneral, true};
+    case ResourceUsage::kStorageClearWrite:
+      return {ResourceState::kGeneralComputeTransfer, true};
     case ResourceUsage::kResolveSrc:
       return {ResourceState::kResolveSrc, false};
     case ResourceUsage::kResolveDst:
@@ -51,6 +53,8 @@ TextureUsageFlags ImageUsageFor(ResourceUsage usage) {
       return kTextureUsageSampled;
     case ResourceUsage::kStorageWrite:
       return kTextureUsageStorage;
+    case ResourceUsage::kStorageClearWrite:
+      return kTextureUsageStorage | kTextureUsageTransferDst;
     case ResourceUsage::kResolveSrc:
       return kTextureUsageTransferSrc;
     case ResourceUsage::kResolveDst:
@@ -147,7 +151,7 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
   }
   for (size_t i = 0; i < resources_.size(); ++i) {
     Resource& resource = resources_[i];
-    if (resource.imported) continue;
+    if (resource.imported || usages[i] == 0) continue;
     const GpuImage* image = pool.Acquire(
         resource.desc.format, {resource.desc.width, resource.desc.height}, usages[i],
         resource.desc.samples > 0 ? resource.desc.samples : 1);
@@ -239,7 +243,8 @@ CommandList* RenderGraph::Execute(PassContext& ctx) {
     }
     if (passes_[i].builder.join_async && join == passes_.size()) join = i;
   }
-  bool do_async = any_async && ctx.device && ctx.device->caps().async_compute;
+  bool do_async = any_async && join > first_async && join < passes_.size() &&
+                  ctx.device && ctx.device->caps().async_compute;
   if (do_async) {
     // Every async pass must precede the join (its first consumer).
     for (size_t i = join; i < passes_.size(); ++i) {
@@ -273,6 +278,11 @@ CommandList* RenderGraph::Execute(PassContext& ctx) {
       if (pass.builder.async) run_pass(pass);
     }
     ctx.device->SubmitAsync(async_cmd);
+  } else {
+    ctx.cmd = main_cmd;
+    for (Pass& pass : passes_) {
+      if (pass.builder.async) run_pass(pass);
+    }
   }
 
   // Segment B: main passes inside the overlap window.

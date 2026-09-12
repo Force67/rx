@@ -10,7 +10,7 @@ struct ReconAtrousPush {
   float depth_phi;
   float luma_phi;
   uint spec_mode;   // 1 = specular signal: tighten the kernel for smooth reflectors
-  float spec_lobe;  // strength of the roughness-driven lobe tightening
+  float spec_radius;  // Gaussian radius in pixels at roughness 1
 };
 PUSH_CONSTANTS(ReconAtrousPush, pc);
 
@@ -101,14 +101,12 @@ void main(uint3 tid : SV_DispatchThreadID) {
       float wl = exp(-abs(center_l - Luma(c)) / luma_denom);
       float w = kernel[abs(x)] * kernel[abs(y)] * wn * wz * wl;
 
-      // Specular: a sharp (low-roughness) reflection has a tight lobe and must not
-      // be blurred into its neighbors. Attenuate far taps by the reflector's
-      // roughness so mirrors stay crisp while rough surfaces filter normally
-      // (roughness 1 -> factor 1, no change to the diffuse-equivalent behavior).
+      // Keep at least a one-pixel footprint to denoise glossy surfaces. The
+      // normal/depth/luminance stops still protect edges inside this footprint.
       if (pc.spec_mode != 0u) {
         float dist2 = float(x * x + y * y) * float(pc.step_size * pc.step_size);
-        float smooth = 1.0 - center_rough;
-        w *= exp(-dist2 * smooth * smooth * pc.spec_lobe);
+        float radius = max(saturate(center_rough) * pc.spec_radius, 1.0);
+        w *= exp(-dist2 / (2.0 * radius * radius));
       }
 
       sum += c * w;

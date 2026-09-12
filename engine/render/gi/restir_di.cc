@@ -63,6 +63,7 @@ bool RestirDi::Initialize(Device& device) {
   });
   if (!temporal_pipeline_ || !spatial_pipeline_) {
     RX_ERROR("restir di pipeline creation failed");
+    Destroy(device);
     return false;
   }
   return true;
@@ -84,16 +85,18 @@ void RestirDi::Destroy(Device& device) {
 }
 
 bool RestirDi::Resize(Device& device, Extent2D extent) {
-  if (!temporal_pipeline_) return false;
-  if (reservoir_[0] && extent.width == extent_.width && extent.height == extent_.height) {
+  if (!temporal_pipeline_ || !spatial_pipeline_) return false;
+  if (available() && extent.width == extent_.width && extent.height == extent_.height) {
     return true;
   }
+  if (available()) device.WaitIdle();
   for (GpuImage& image : reservoir_) {
     if (image) device.DestroyImage(image);
   }
   if (prev_depth_) device.DestroyImage(prev_depth_);
   if (prev_normal_) device.DestroyImage(prev_normal_);
   extent_ = extent;
+  if (extent.width == 0 || extent.height == 0) return false;
 
   const TextureUsageFlags usage = kTextureUsageStorage | kTextureUsageSampled;
   reservoir_[0] = device.CreateImage2D(Format::kRGBA32Float, extent, usage);
@@ -101,6 +104,9 @@ bool RestirDi::Resize(Device& device, Extent2D extent) {
   prev_depth_ = device.CreateImage2D(Format::kR32Float, extent, usage);
   prev_normal_ = device.CreateImage2D(Format::kRGBA16Float, extent, usage);
   if (!reservoir_[0] || !reservoir_[1] || !prev_depth_ || !prev_normal_) {
+    for (GpuImage& image : reservoir_) device.DestroyImage(image);
+    device.DestroyImage(prev_depth_);
+    device.DestroyImage(prev_normal_);
     RX_WARN("restir di history allocation failed");
     return false;
   }
@@ -132,8 +138,9 @@ RestirDi::Outputs RestirDi::AddToGraph(RenderGraph& graph, ResourceHandle depth_
                                   .width = extent.width,
                                   .height = extent.height});
 
-  const bool reset = reset_;
+  const bool reset = reset_ || frame.frame_index != previous_frame_ + 1u;
   reset_ = false;
+  previous_frame_ = frame.frame_index;
 
   graph.AddPass(
       "restir_di_temporal",

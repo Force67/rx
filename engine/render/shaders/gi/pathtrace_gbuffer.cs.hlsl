@@ -1,5 +1,6 @@
 #include "rhi_bindings.hlsli"
 #include "model_transform.hlsli"
+#include "path_motion.hlsli"
 // Playable path tracer: one sample per pixel, emitting the inputs NRD's
 // REBLUR_DIFFUSE denoiser needs instead of brute-force accumulating. The primary
 // surface albedo is divided out (demodulation) so the denoiser blurs lighting,
@@ -42,6 +43,8 @@ PUSH_CONSTANTS(PathGbufferPush, pc);
 [[vk::combinedImageSampler]] [[vk::binding(7, 0)]] SamplerState sky_sampler : register(s7, space0);
 [[vk::binding(8, 0)]] ConstantBuffer<PathCamera> camera : register(b8, space0);
 
+[[vk::binding(9, 0)]] StructuredBuffer<PathMotionRecord> path_motion : register(t9, space0);
+
 #define RX_GEOMETRY_SPACE space1
 #include "rt_geometry.hlsli"
 #include "material_record.hlsli"
@@ -61,6 +64,7 @@ uint Pcg(inout uint state) {
   return (word >> 22u) ^ word;
 }
 float Rand(inout uint state) { return (Pcg(state) & 0xffffffu) / 16777216.0; }
+#include "path_continue.hlsli"
 
 float3 CosineHemisphere(float3 n, inout uint rng) {
   float u1 = Rand(rng);
@@ -76,6 +80,8 @@ float3 CosineHemisphere(float3 n, inout uint rng) {
 struct Hit {
   bool hit;
   float3 position;
+  float3 previous_position;
+  bool history_valid;
   float3 normal;
   float3 albedo;
   float3 emissive;
@@ -125,7 +131,8 @@ bool PassesAlpha(uint inst, uint geom, uint prim, float2 bary, float cone_width)
   MeshRecord mesh = mesh_records[NonUniformResourceIndex(inst)];
   GeometryRecord geometry = geometry_records[mesh.geometry_offset + geom];
   MaterialRecord m = material_records[NonUniformResourceIndex(geometry.material_index)];
-  if ((m.flags & kMaterialAlphaMask) == 0u || m.base_color_texture == 0xffffffffu) return true;
+  if ((m.flags & kMaterialAlphaMask) == 0u) return true;
+  if (m.base_color_texture == 0xffffffffu) return m.base_color_factor.a >= m.alpha_cutoff;
   uint3 tri = RxLoadTriangle(mesh, geometry.index_offset + prim * 3);
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
   float2 uvv[3];
@@ -147,7 +154,7 @@ bool PassesAlpha(uint inst, uint geom, uint prim, float2 bary, float cone_width)
   return a >= m.alpha_cutoff;
 }
 
-Hit TraceClosest(float3 origin, float3 dir, float cone_spread) {
+Hit TraceClosest(float3 origin, float3 dir, float cone_spread, bool primary = false) {
   Hit h;
   h.hit = false;
   RayDesc ray;
@@ -176,6 +183,19 @@ Hit TraceClosest(float3 origin, float3 dir, float cone_spread) {
       RxLoadTriangle(mesh, geometry.index_offset + rq.CommittedPrimitiveIndex() * 3);
   float2 bary = rq.CommittedTriangleBarycentrics();
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
+  h.previous_position = h.position;
+  h.history_valid = false;
+  if (primary) {
+    PathMotionRecord history = path_motion[rq.CommittedInstanceIndex()];
+    h.history_valid = history.previous_mesh != 0xffffffffu;
+    if (h.history_valid) {
+      MeshRecord previous = mesh_records[NonUniformResourceIndex(history.previous_mesh)];
+      float3 local = RxLoadPosition(previous, tri.x) * w.x +
+                     RxLoadPosition(previous, tri.y) * w.y +
+                     RxLoadPosition(previous, tri.z) * w.z;
+      h.previous_position = mul(history.previous_transform, float4(local, 1.0)).xyz;
+    }
+  }
   float3 pos[3];
   float3 nrm[3];
   float2 uvv[3];
@@ -281,7 +301,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   // Primary visibility is deterministic, so trace it once; only the lighting
   // (random bounces + sun NEE) is sampled spp times and averaged. More samples
   // = lower input variance = NRD has to invent less under motion = less shimmer.
-  Hit prim = TraceClosest(ro, primary_dir, pc.pixel_spread);
+  Hit prim = TraceClosest(ro, primary_dir, pc.pixel_spread, true);
   bool primary_hit = prim.hit;
   if (primary_hit) {
     prim_pos = prim.position;
@@ -311,7 +331,7 @@ void main(uint3 id : SV_DispatchThreadID) {
         }
         float3 dir = CosineHemisphere(normal, rng);
         throughput *= albedo;
-        if (max(throughput.r, max(throughput.g, throughput.b)) < 0.01) break;
+        if (!ContinuePath(throughput, rng)) break;
         Hit h = TraceClosest(pos + normal * 0.002, dir, kSecondarySpread);
         if (b == 0) first_hit_dist += h.hit ? distance(h.position, prim_pos) : 1000.0;
         if (!h.hit) {
@@ -341,10 +361,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     float4 clip = mul(camera.view_proj, float4(prim_pos, 1.0));
     float depth = clip.z / clip.w;
     viewz = depth > 0.0 ? kNearPlane / depth : kDenoisingRange;
-    // Camera-only motion (static geometry): current ndc is this pixel's ndc.
-    float4 prev_clip = mul(camera.prev_view_proj, float4(prim_pos, 1.0));
-    float2 prev_ndc = prev_clip.xy / prev_clip.w;
-    motion = (prev_ndc - ndc) * 0.5;  // uv-space delta, matches the taa motion pass
+    motion = PathMotion(prim.previous_position, camera.prev_view_proj, ndc, prim.history_valid);
   }
 
   float norm_hit = REBLUR_FrontEnd_GetNormHitDist(first_hit_dist, viewz, kHitDistParams, 1.0);

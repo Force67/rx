@@ -22,9 +22,9 @@ struct PushData {
   // grading is a later stage.
   uint output_transfer;
   float paper_white;  // nits of tonemapped 1.0 in the HDR modes
-  // Lens package: ghosts/halo feed off the bloom chain, aberration shifts the
+  // Lens package: ghosts feed off the bloom chain, aberration shifts the
   // scene fetch radially, vignette+grain apply post-tonemap.
-  float flare_intensity;      // 0 disables the ghost/halo sampling
+  float flare_intensity;      // 0 disables the ghost sampling
   float aberration;           // px of radial r/b shift at the corners
   float vignette;             // 0..1 corner darkening
   float grain;                // 0..~0.06 film grain amplitude
@@ -76,6 +76,19 @@ float GrainHash(float2 p) {
   return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
 }
 
+float3 FlareHighlight(float2 uv, float exposure) {
+  // The clamp sampler would otherwise extend an edge highlight across the image.
+  if (any(uv < 0.0) || any(uv > 1.0)) return 0.0.xxx;
+  float3 color = max(flare_src.SampleLevel(flare_src_sampler, uv, 0.0).rgb, 0.0) * exposure;
+  float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
+  // Two stops above scene white, with a soft knee between 3 and 5. Threshold
+  // luminance so colored highlights retain their hue instead of channel clipping.
+  float soft = clamp(luminance - 3.0, 0.0, 2.0);
+  float excess = max(luminance - 4.0, soft * soft * 0.25);
+  float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
+  return color * (excess / max(luminance, 1e-4)) * smoothstep(0.0, 0.1, edge);
+}
+
 float4 main(float4 sv_position : SV_Position,
             [[vk::location(0)]] float2 uv : TEXCOORD0) : SV_Target0 {
   float3 hdr;
@@ -96,39 +109,22 @@ float4 main(float4 sv_position : SV_Position,
   if (push.bloom_enabled != 0u) {
     hdr = lerp(hdr, bloom.Sample(bloom_sampler, uv).rgb, push.bloom_intensity);
   }
+  hdr *= exposure_buffer[0];
   if (push.flare_intensity > 0.0) {
-    // Ghosts: bright sources mirrored through the lens center at a few
-    // characteristic scales, tinted cooler with distance; plus a halo ring.
-    // Sampled from the tight flare_src snapshot (the wide final bloom smears
-    // every ghost into a screen-filling halo), and highpassed so only the
-    // excess above display white flares: the source is threshold-free, so raw
-    // it mirrors the whole scene back as a milky wash. The threshold is in
-    // pre-exposure space, scaled by the resolved exposure so it tracks
-    // auto-exposure.
-    float flare_thresh = 1.0 / max(exposure_buffer[0], 1e-4);
-    float2 flipped = 1.0 - uv;
     float3 ghosts = 0.0.xxx;
     const float scales[4] = {-0.35, -0.65, 0.4, 0.8};
     const float weights[4] = {0.5, 0.25, 0.35, 0.15};
     [unroll]
     for (int g = 0; g < 4; ++g) {
-      float2 guv = 0.5 + (flipped - 0.5) * scales[g];
-      float edge_fade = saturate(1.0 - 2.2 * length(guv - 0.5));
-      float3 hot = max(flare_src.Sample(flare_src_sampler, guv).rgb - flare_thresh, 0.0);
-      ghosts += hot * weights[g] * edge_fade;
+      // Inverse mapping: a source's ghost is scaled around the optical center,
+      // so gathering divides by the scale. Multiplying magnifies silhouettes.
+      float2 guv = 0.5 + (uv - 0.5) / scales[g];
+      ghosts += FlareHighlight(guv, exposure_buffer[0]) * weights[g];
     }
-    float2 from_center = uv - 0.5;
-    float halo_r = length(from_center);
-    float2 halo_uv = 0.5 + normalize(from_center + 1e-5) * 0.45;
-    float halo_w = exp(-abs(halo_r - 0.42) * 18.0);
-    ghosts +=
-        max(flare_src.Sample(flare_src_sampler, halo_uv).rgb - flare_thresh, 0.0) * halo_w * 0.4;
-    // Soft-clip so a blown-out source (the 220x sun disk) cannot dump unbounded
-    // energy back onto the frame; cool tint keeps the ghosts reading as glass.
-    ghosts = ghosts / (1.0 + ghosts);
+    float peak = max(ghosts.r, max(ghosts.g, ghosts.b));
+    ghosts /= 1.0 + peak;
     hdr += ghosts * float3(0.7, 0.85, 1.0) * (push.flare_intensity * 8.0);
   }
-  hdr *= exposure_buffer[0];
 
   float3 ldr;
   if (push.tonemap == 0u) {

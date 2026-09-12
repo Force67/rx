@@ -127,7 +127,8 @@ bool PassesAlpha(uint inst, uint geom, uint prim, float2 bary) {
   MeshRecord mesh = mesh_records[NonUniformResourceIndex(inst)];
   GeometryRecord geometry = geometry_records[mesh.geometry_offset + geom];
   MaterialRecord m = material_records[NonUniformResourceIndex(geometry.material_index)];
-  if ((m.flags & kMaterialAlphaMask) == 0u || m.base_color_texture == 0xffffffffu) return true;
+  if ((m.flags & kMaterialAlphaMask) == 0u) return true;
+  if (m.base_color_texture == 0xffffffffu) return m.base_color_factor.a >= m.alpha_cutoff;
   uint3 tri = RxLoadTriangle(mesh, geometry.index_offset + prim * 3);
   float3 w = float3(1.0 - bary.x - bary.y, bary.x, bary.y);
   float2 uv = 0.0.xx;
@@ -142,6 +143,7 @@ bool PassesAlpha(uint inst, uint geom, uint prim, float2 bary) {
 }
 
 bool Occluded(float3 origin, float3 dir, float dist) {
+  if (!(dist > 0.001)) return false;
   RayDesc ray;
   ray.Origin = origin;
   ray.TMin = 0.001;
@@ -201,11 +203,12 @@ void main(uint3 tid : SV_DispatchThreadID) {
     float4 n1 = r1_in.Load(int3(np, 0));
     float nM = n1.y;
     float nW = n1.z;
-    if (nM <= 0.0 || nW <= 0.0 || n0.w < -0.5) continue;
+    if (!(nM > 0.0)) continue;
+    M += nM;
+    if (!(nW > 0.0) || n0.w < -0.5) continue;
 
     float p_hat = PHat(x, n, n0.w, n0.xyz);
     float w = p_hat * nW * nM;
-    M += nM;
     if (!(w > 0.0) || w > 1.0e12) continue;
     w_sum += w;
     if (Rand(rng) < w / w_sum) {
@@ -268,10 +271,11 @@ void main(uint3 tid : SV_DispatchThreadID) {
 
     float4 n2 = r2_in.Load(int3(np, 0));
     float4 n3 = r3_in.Load(int3(np, 0));
-    if (n3.y <= 0.0 || n3.z <= 0.0 || n2.w > -1.5) continue;
+    if (!(n3.y > 0.0)) continue;
+    sky_M += n3.y;
+    if (!(n3.z > 0.0) || n2.w > -1.5) continue;
     float p_hat = PHatSky(n, n2.xyz);
     float w = p_hat * n3.z * n3.y;
-    sky_M += n3.y;
     if (!(w > 0.0) || w > 1.0e12) continue;
     sky_w_sum += w;
     if (Rand(rng) < w / sky_w_sum) {
@@ -295,8 +299,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
   direct.z = direct.z >= 0.0 ? direct.z : 0.0;
   direct = min(direct, 1.0e4.xxx);
   direct_out[p] = float4(direct, 1.0);
-  // Feedback: occluded winners persist with W = 0; the temporal stage skips
-  // dead reservoirs and reseeds, so shadowed lights cannot linger.
+  // Occluded winners retain their sample count but contribute zero energy on reuse.
   r0_out[p] = float4(sel_dir, sel_id);
   r1_out[p] = float4(w_sum, M, W, 0.0);
   r2_out[p] = float4(sky_dir, sky_id);

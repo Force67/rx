@@ -108,7 +108,7 @@ class DlssUpscaler final : public Upscaler {
           builder.Read(inputs.color, ResourceUsage::kSampledCompute);
           builder.Read(inputs.depth, ResourceUsage::kSampledCompute);
           builder.Read(inputs.motion_vectors, ResourceUsage::kSampledCompute);
-          builder.Write(output, ResourceUsage::kStorageWrite);
+          builder.Write(output, ResourceUsage::kStorageClearWrite);
         },
         [this, inputs, output](PassContext& ctx) { Dispatch(ctx, inputs, output); });
     return output;
@@ -145,7 +145,8 @@ class DlssUpscaler final : public Upscaler {
     eval.InJitterOffsetX = inputs.jitter_x;
     eval.InJitterOffsetY = inputs.jitter_y;
     eval.InRenderSubrectDimensions = {desc_.render_width, desc_.render_height};
-    eval.InReset = inputs.reset_history ? 1 : 0;
+    eval.InReset = (inputs.reset_history || !has_history_ || inputs.frame_index != previous_frame_ + 1u) ? 1 : 0;
+    eval.InFrameTimeDeltaInMsec = inputs.frame_delta_seconds * 1000.0f;
     // The motion target stores uv-space current->previous offsets; scaling by
     // the render size yields the pixel-space vectors DLSS expects.
     eval.InMVScaleX = static_cast<f32>(desc_.render_width);
@@ -154,7 +155,11 @@ class DlssUpscaler final : public Upscaler {
     NVSDK_NGX_Result er =
         NGX_VULKAN_EVALUATE_DLSS_EXT(GetVkCommandBuffer(*ctx.cmd), handle_, params_, &eval);
     if (er != NVSDK_NGX_Result_Success) {
+      has_history_ = false;
       RX_ERROR("dlss: evaluate failed ({:#x})", static_cast<u32>(er));
+    } else {
+      has_history_ = true;
+      previous_frame_ = inputs.frame_index;
     }
   }
 
@@ -176,6 +181,8 @@ class DlssUpscaler final : public Upscaler {
 
   Device& device_;
   UpscalerDesc desc_;
+  u32 previous_frame_ = 0;
+  bool has_history_ = false;
   NVSDK_NGX_Parameter* params_ = nullptr;
   NVSDK_NGX_Handle* handle_ = nullptr;
   bool ngx_initialized_ = false;

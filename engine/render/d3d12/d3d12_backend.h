@@ -26,6 +26,7 @@ class D3D12Device;
 // --- conversion tables (d3d12_convert.cc) ---
 
 DXGI_FORMAT ToDxgiFormat(Format format);
+D3D12_RAYTRACING_GEOMETRY_DESC ToD3dTriangles(const AccelTriangles& triangles);
 // Format used for SRVs over the image (depth reads as R32_FLOAT).
 DXGI_FORMAT ToDxgiSrvFormat(Format format);
 D3D12_RESOURCE_STATES ToResourceStates(ResourceState state);

@@ -29,6 +29,8 @@ class RrDenoiser {
     Mat4 view_to_clip;
     f32 frame_delta_ms = 16.6f;
     bool reset = false;
+    u32 frame_index = 0;
+    f32 jitter[2] = {};
   };
 
   // Guide inputs, all render-resolution graph handles from the recon gbuffer.
@@ -39,6 +41,7 @@ class RrDenoiser {
     ResourceHandle normals_rough = kInvalidResource;    // xyz world normal, w roughness
     ResourceHandle diffuse_albedo = kInvalidResource;
     ResourceHandle specular_albedo = kInvalidResource;
+    ResourceHandle specular_hit_distance = kInvalidResource;
   };
 
   bool Initialize(Device& device, Extent2D extent);
@@ -56,6 +59,8 @@ class RrDenoiser {
 
   Extent2D extent_{};
   bool ngx_acquired_ = false;
+  bool has_history_ = false;
+  u32 previous_frame_ = 0;
   NVSDK_NGX_Handle* handle_ = nullptr;
   NVSDK_NGX_Parameter* params_ = nullptr;
 };

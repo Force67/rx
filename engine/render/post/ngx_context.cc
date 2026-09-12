@@ -49,12 +49,16 @@ Context g_context;
 }  // namespace
 
 bool Acquire(Device& device) {
+  VulkanHandles h = GetVulkanHandles(device);
   if (g_context.initialized) {
+    if (h.device != g_context.vk_device) {
+      RX_WARN("ngx: context belongs to another device");
+      return false;
+    }
     ++g_context.refcount;
     return true;
   }
 
-  VulkanHandles h = GetVulkanHandles(device);
   if (h.device == VK_NULL_HANDLE) {
     RX_WARN("ngx: requires the vulkan backend");
     return false;
@@ -85,6 +89,8 @@ bool Acquire(Device& device) {
           NVSDK_NGX_Result_Success ||
       !g_context.capability) {
     RX_ERROR("ngx: capability parameters unavailable");
+    if (g_context.capability) NVSDK_NGX_VULKAN_DestroyParameters(g_context.capability);
+    g_context.capability = nullptr;
     NVSDK_NGX_VULKAN_Shutdown1(h.device);
     return false;
   }
@@ -98,12 +104,18 @@ bool Acquire(Device& device) {
 void Release() {
   if (!g_context.initialized) return;
   if (--g_context.refcount > 0) return;
+#if defined(__aarch64__)
   // Deliberately NOT calling NVSDK_NGX_VULKAN_Shutdown1: the driver's aarch64
   // implementation crashes (observed on GB10, 580.159.03 - a pass-through
   // wrapper per the SDK disassembly, so the fault is driver-internal). NGX
   // stays initialized for the process lifetime; the OS reclaims it at exit.
   // Refcounting is kept so a future driver fix only needs this comment gone.
   g_context.refcount = 0;
+#else
+  NVSDK_NGX_VULKAN_DestroyParameters(g_context.capability);
+  NVSDK_NGX_VULKAN_Shutdown1(g_context.vk_device);
+  g_context = {};
+#endif
 }
 
 NVSDK_NGX_Parameter* Capability() {

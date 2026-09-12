@@ -6,14 +6,19 @@
 namespace rx::render {
 namespace {
 
-// Largest per-axis scale of the upper-left 3x3, so a non-uniform transform
-// never shrinks the bounding sphere below the geometry it must enclose.
+// Bound the largest eigenvalue of M^T M by its maximum absolute row sum.
+// Column lengths alone underestimate the stretch when a transform has shear.
 f32 MaxScale(const Mat4& t) {
   const f32* m = t.m;
-  const f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-  const f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-  const f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-  return std::max({sx, sy, sz});
+  f32 bound = 0.0f;
+  for (u32 i = 0; i < 3; ++i) {
+    f32 row = 0.0f;
+    for (u32 j = 0; j < 3; ++j)
+      row += std::abs(m[4 * i] * m[4 * j] + m[4 * i + 1] * m[4 * j + 1] +
+                      m[4 * i + 2] * m[4 * j + 2]);
+    bound = std::max(bound, row);
+  }
+  return std::sqrt(bound);
 }
 
 }  // namespace
@@ -65,11 +70,15 @@ const base::Vector<u8>& RtInstanceCuller::UpdateGroup(u32 group_id, u32 generati
   // the stale bitmask until the moved instance's sweep index is revisited.
   bool fresh = false;
   if (!gs.valid || gs.generation != generation || gs.revision != revision ||
-      gs.visible.size() != n) {
+      gs.visible.size() != n || gs.mesh_radius != mesh_radius ||
+      gs.mesh_center.x != mesh_center.x || gs.mesh_center.y != mesh_center.y ||
+      gs.mesh_center.z != mesh_center.z) {
     gs.generation = generation;
     gs.revision = revision;
     gs.cursor = 0;
     gs.valid = true;
+    gs.mesh_center = mesh_center;
+    gs.mesh_radius = mesh_radius;
     gs.visible.assign(n, u8{1});
     fresh = true;
   }

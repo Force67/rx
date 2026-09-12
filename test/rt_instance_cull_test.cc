@@ -161,6 +161,41 @@ int main() {
     CHECK(CountVisible(moved) == kN);  // revision bump restarts accept-all
   }
 
+  // Reconfiguration and mesh-bound changes must immediately discard culled bits.
+  {
+    RtInstanceCuller c;
+    base::Vector<Mat4> xf;
+    xf.assign(300, At(Vec3{0, 0, 500}));
+    auto update = [&](f32 radius = 0.05f, Vec3 center = Vec3{}) -> const base::Vector<u8>& {
+      c.BeginFrame(Vec3{});
+      return c.UpdateGroup(0, 1, 0, {xf.data(), xf.size()}, center, radius);
+    };
+    for (u32 f = 0; f < 5; ++f) update();
+    CHECK(CountVisible(update()) == 0);
+    c.Configure(false, start, angle);
+    CHECK(CountVisible(update()) == xf.size());
+    c.Configure(true, start, angle);
+    CHECK(CountVisible(update()) == xf.size());
+    for (u32 f = 0; f < 5; ++f) update();
+    c.Configure(true, start, angle * 0.5f);
+    CHECK(CountVisible(update()) == xf.size());
+    for (u32 f = 0; f < 5; ++f) update();
+    CHECK(CountVisible(update(5.0f)) == xf.size());
+    for (u32 f = 0; f < 5; ++f) update();
+    CHECK(CountVisible(update(0.05f, Vec3{0, 0, -495})) == xf.size());
+  }
+
+  // A shear stretches a sphere farther than its largest column length.
+  {
+    RtInstanceCuller c;
+    c.Configure(true, start, angle);
+    c.BeginFrame(Vec3{});
+    Mat4 shear = At(Vec3{0, 0, 400});
+    shear.m[4] = 1.0f;
+    CHECK(c.DrawVisible(shear, Vec3{}, 1.0f));
+    CHECK(!c.DrawVisible(At(Vec3{0, 0, 400}), Vec3{}, 1.0f));
+  }
+
   if (g_failures == 0) {
     std::printf("rt_instance_cull_test: all checks passed\n");
     return 0;

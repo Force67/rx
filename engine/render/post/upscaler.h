@@ -32,6 +32,7 @@ struct UpscalerInputs {
   f32 camera_near = 0.1f;
   f32 camera_fov_y = 1.0472f;
   bool reset_history = false;
+  u32 frame_index = 0;
 };
 
 // One implementation per vendor SDK. Each lives behind this boundary so the

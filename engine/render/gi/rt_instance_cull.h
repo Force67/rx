@@ -44,6 +44,10 @@ class RtInstanceCuller {
   static constexpr f32 kTeleportDistance = 20.0f;
 
   void Configure(bool enabled, f32 start_distance, f32 angle_threshold) {
+    if (enabled_ != enabled || start_distance_ != start_distance ||
+        angle_threshold_ != angle_threshold) {
+      for (GroupState& gs : groups_) gs.valid = false;
+    }
     enabled_ = enabled;
     start_distance_ = start_distance;
     angle_threshold_ = angle_threshold;
@@ -76,6 +80,8 @@ class RtInstanceCuller {
     u32 revision = 0;
     u32 cursor = 0;  // next instance index the sweep will (re)test
     bool valid = false;
+    Vec3 mesh_center{};
+    f32 mesh_radius = 0.0f;
     base::Vector<u8> visible;  // one byte per instance, 1 = keep
   };
 

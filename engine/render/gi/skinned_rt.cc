@@ -63,15 +63,25 @@ u32 SkinnedRayTracing::Acquire() {
     const u32 handle = free_handles_.back();
     free_handles_.pop_back();
     actors_[handle - 1] = {};
+    actors_[handle - 1].allocated = true;
     return handle;
   }
   actors_.push_back({});
+  actors_.back().allocated = true;
   return static_cast<u32>(actors_.size());
 }
 
 void SkinnedRayTracing::Release(Device& device, RayTracingContext* raytracing, u32 handle,
                                 base::Vector<u32>& retire_to) {
   if (handle == 0 || handle > actors_.size()) return;
+  if (!actors_[handle - 1].allocated) return;
+  RetireActor(device, raytracing, handle, retire_to);
+  actors_[handle - 1].allocated = false;
+  free_handles_.push_back(handle);
+}
+
+void SkinnedRayTracing::RetireActor(Device& device, RayTracingContext* raytracing, u32 handle,
+                                   base::Vector<u32>& retire_to) {
   Actor& actor = actors_[handle - 1];
   for (u32 i = 0; i < 2; ++i) {
     if (actor.slots[i].posed) device.DestroyBufferDeferred(actor.slots[i].posed);
@@ -79,13 +89,32 @@ void SkinnedRayTracing::Release(Device& device, RayTracingContext* raytracing, u
     if (raytracing) raytracing->RemoveSkinnedBlasDeferred(SlotKey(handle, i));
   }
   actor = {};
-  free_handles_.push_back(handle);
+  actor.allocated = true;
+}
+
+void SkinnedRayTracing::InvalidateMesh(Device& device, RayTracingContext* raytracing,
+                                      u64 mesh_key, base::Vector<u32>& retire_to) {
+  for (u32 i = 0; i < actors_.size(); ++i)
+    if (actors_[i].live && actors_[i].mesh_key == mesh_key)
+      RetireActor(device, raytracing, i + 1, retire_to);
+}
+
+void SkinnedRayTracing::BeginFrame() {
+  recording_.clear();
+  for (Actor& actor : actors_) actor.active = false;
 }
 
 u32 SkinnedRayTracing::custom_index(u32 handle) const {
   if (handle == 0 || handle > actors_.size()) return kInvalidIndex;
   const Actor& actor = actors_[handle - 1];
   return actor.active ? actor.slots[actor.current].bindless : kInvalidIndex;
+}
+
+u32 SkinnedRayTracing::previous_custom_index(u32 handle) const {
+  if (handle == 0 || handle > actors_.size()) return kInvalidIndex;
+  const Actor& actor = actors_[handle - 1];
+  const Slot& slot = actor.slots[actor.current ^ 1u];
+  return actor.active && slot.valid ? slot.bindless : kInvalidIndex;
 }
 
 u64 SkinnedRayTracing::blas_key(u32 handle) const {
@@ -101,13 +130,13 @@ u32 SkinnedRayTracing::Prepare(Device& device, BindlessRegistry& bindless,
                                const MaterialSystem& materials, RayTracingContext& raytracing,
                                const base::UnorderedMap<u64, GpuMesh>& meshes,
                                const base::Vector<Request>& requests) {
-  recording_.clear();
-  for (Actor& actor : actors_) actor.active = false;
+  BeginFrame();
   if (!pipeline_) return 0;
 
   for (const Request& request : requests) {
     if (request.handle == 0 || request.handle > actors_.size()) continue;
     Actor& actor = actors_[request.handle - 1];
+    if (!actor.allocated) continue;
     // Two draws sharing one handle would deform and refit the same buffer
     // twice in one frame. One handle per skinned draw is what the header asks
     // for; honour the first request and skip the redundant work.
@@ -257,7 +286,8 @@ void SkinnedRayTracing::Record(CommandList& cmd, RayTracingContext& raytracing,
   // through the bindless geometry table in compute AND fragment.
   cmd.MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kAllCommands);
   for (u32 handle : recording_) {
-    const Actor& actor = actors_[handle - 1];
+    Actor& actor = actors_[handle - 1];
+    actor.slots[actor.current].valid = true;
     raytracing.RecordSkinnedBlas(cmd, SlotKey(handle, actor.current),
                                  SlotKey(handle, actor.current ^ 1u));
   }

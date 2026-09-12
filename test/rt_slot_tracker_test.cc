@@ -6,6 +6,7 @@
 #include "render/gi/rt_slot_tracker.h"
 
 #include <cstdio>
+#include <initializer_list>
 
 using namespace rx;
 using namespace rx::render;
@@ -162,6 +163,18 @@ int main() {
     TlasSlotTracker::Selection next = t.Select(1, true);
     CHECK(!next.async);
     CHECK(next.read_slot == next.build_slot);
+  }
+
+  {
+    TlasSlotTracker t;
+    t.MarkBuilt(0, 0);
+    for (u32 slot : {kSlots, ~0u}) {
+      CHECK(!t.Valid(slot));
+      CHECK(!t.ValidForFrame(slot, 0));
+      t.MarkBuilt(slot, 0);
+      t.Invalidate(slot);
+    }
+    CHECK(t.Valid(0));
   }
 
   if (g_failures == 0) {

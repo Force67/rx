@@ -54,7 +54,7 @@ base::Option<bool> HdrOutput{"hdr.output", false, "RX_HDR_OUTPUT"};
 base::Option<bool> MotionBlurOpt{"motion.blur", true, "RX_MOTION_BLUR"};
 base::Option<bool> DofOpt{"dof", true, "RX_DOF"};
 base::Option<double> LensFlareOpt{"lens.flare", 0.06, "RX_LENS_FLARE"};
-base::Option<double> GrainOpt{"film.grain", 0.015, "RX_FILM_GRAIN"};
+base::Option<double> GrainOpt{"film.grain", 0.0, "RX_FILM_GRAIN"};
 base::Option<double> DofFocus{"dof.focus", 0.0, "RX_DOF_FOCUS"};
 base::Option<double> DofAperture{"dof.aperture", 2.8, "RX_DOF_APERTURE"};
 base::Option<bool> SssOpt{"sss", true, "RX_SSS"};
@@ -1354,7 +1354,7 @@ void Renderer::DumpFgImage(const GpuImage &image, ResourceState state,
   }
 }
 
-void Renderer::WriteBackbufferPng(const std::string &path, u32 image_index) {
+void Renderer::WriteBackbufferPng(const std::string &path) {
   device_->WaitIdle();
   Extent2D extent = swapchain_->extent();
   u64 size = static_cast<u64>(extent.width) * extent.height * 4;
@@ -1363,20 +1363,9 @@ void Renderer::WriteBackbufferPng(const std::string &path, u32 image_index) {
   if (!staging.mapped)
     return;
 
-  // The offscreen capture path renders into capture_image_ and the graph
-  // already left it in kCopySrc, so only the swapchain image needs the
-  // present<->copy round trip.
-  const bool offscreen = capture_offscreen_;
-  const GpuImage &backbuffer =
-      offscreen ? capture_image_ : swapchain_->image(image_index);
   device_->ImmediateSubmit([&](CommandList &cmd) {
-    if (!offscreen)
-      cmd.Barrier(Transition(backbuffer, ResourceState::kPresent,
-                             ResourceState::kCopySrc));
-    cmd.CopyTextureToBuffer(backbuffer, staging, {});
-    if (!offscreen)
-      cmd.Barrier(Transition(backbuffer, ResourceState::kCopySrc,
-                             ResourceState::kPresent));
+    cmd.CopyTextureToBuffer(capture_image_, staging, {});
+    cmd.MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kHostRead);
   });
 
   // Swapchain is bgra; png wants rgb.
@@ -1403,8 +1392,8 @@ void Renderer::WriteBackbufferPng(const std::string &path, u32 image_index) {
   }
 }
 
-void Renderer::WriteScreenshot(u32 image_index) {
-  WriteBackbufferPng(screenshot_path_, image_index);
+void Renderer::WriteScreenshot() {
+  WriteBackbufferPng(screenshot_path_);
   screenshot_path_.clear();
 }
 
@@ -2307,6 +2296,9 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   const bool replacing_mesh = meshes_.find(mesh_key) != nullptr;
   if (GpuMesh *previous = meshes_.find(mesh_key)) {
     device_->WaitIdle(); // uploads happen at load time; never per frame
+    skinned_rt_.InvalidateMesh(
+        *device_, raytracing_.get(), mesh_key,
+        retired_bindless_meshes_[(frame_index_ + 1) % kFramesInFlight]);
     if (raytracing_) {
       raytracing_->RemoveBlas(mesh_key);
       raytracing_->RemoveApproxBlas(mesh_key);
@@ -2612,6 +2604,9 @@ bool Renderer::RemoveDynamicMesh(asset::AssetId mesh, u64 id_salt) {
     raytracing_->RemoveLodBlasDeferred(key);
   }
   meshes_.erase(key);
+  skinned_rt_.InvalidateMesh(
+      *device_, raytracing_.get(), key,
+      retired_bindless_meshes_[(frame_index_ + 1) % kFramesInFlight]);
   ++scene_revision_;
   return true;
 }
@@ -2742,9 +2737,10 @@ void Renderer::FlushUploadBatch() {
 }
 
 bool Renderer::UpdateMaterial(const asset::Material &material, u64 id_salt) {
-  if (!material_system_)
+  if (!material_system_ || !material_system_->UpdateMaterialParams(material, id_salt))
     return false;
-  return material_system_->UpdateMaterialParams(material, id_salt);
+  ++scene_revision_;
+  return true;
 }
 
 bool Renderer::UploadMaterial(const asset::Material &material, u64 id_salt) {
@@ -2793,6 +2789,11 @@ void Renderer::RenderFrame(const FrameView &view) {
   }
 
   ApplySettings();
+  if (view.camera_cut) {
+    has_prev_frame_ = false;
+    pt_was_active_ = false;
+    taa_.Reset();
+  }
 
   u32 slot = frame_index_ % kFramesInFlight;
   // Waits on the slot's fence, resets its command allocator and transient
@@ -2912,6 +2913,34 @@ void Renderer::RenderFrame(const FrameView &view) {
   CommandList *final_cmd = graph_.Execute(ctx);
   profiler_.EndFrameTotal(*final_cmd);
 
+  const bool screenshot_due =
+      !screenshot_path_.empty() && time_seconds_ >= screenshot_at_;
+  const bool sequence_due = !seq_prefix_.empty() && seq_written_ < seq_count_ &&
+                            time_seconds_ >= seq_at_;
+  bool dump_due = false;
+  if (const char *dump = std::getenv("RX_FRAMEGEN_DUMP")) {
+    u64 dump_frame = std::strtoull(dump, nullptr, 10);
+    dump_due = fg_frame &&
+               (frame_index_ == dump_frame || frame_index_ == dump_frame + 1);
+  }
+  bool capture_ready = capture_offscreen_;
+  auto copy_capture = [&] {
+    if (!(screenshot_due || (sequence_due && seq_frame_ctr_ % seq_stride_ == 0) ||
+          dump_due) || !EnsureCaptureImage())
+      return;
+    const GpuImage &backbuffer = swapchain_->image(image_index);
+    TextureBarrier pre[] = {
+        Transition(backbuffer, ResourceState::kPresent, ResourceState::kCopySrc),
+        Transition(capture_image_, ResourceState::kUndefined, ResourceState::kCopyDst)};
+    final_cmd->TextureBarriers(pre);
+    final_cmd->CopyTexture(backbuffer, capture_image_);
+    TextureBarrier post[] = {
+        Transition(backbuffer, ResourceState::kCopySrc, ResourceState::kPresent),
+        Transition(capture_image_, ResourceState::kCopyDst, ResourceState::kCopySrc)};
+    final_cmd->TextureBarriers(post);
+    capture_ready = true;
+  };
+
   PresentResult presented;
 #if defined(RX_HAS_FSR3)
   Fsr3SharedResources fg_shared;
@@ -2986,6 +3015,7 @@ void Renderer::RenderFrame(const FrameView &view) {
           Transition(target, ResourceState::kCopyDst, ResourceState::kPresent)};
       final_cmd->TextureBarriers(post);
     }
+    copy_capture();
     presented = device_->SubmitFrameGen(final_cmd, *swapchain_, interp_index,
                                         image_index);
     fg_presents_ += 2;
@@ -2994,15 +3024,15 @@ void Renderer::RenderFrame(const FrameView &view) {
     // N->N+1 midpoint and real frame N+1 as pngs in the working directory.
     if (const char *dump = std::getenv("RX_FRAMEGEN_DUMP")) {
       u64 dump_frame = std::strtoull(dump, nullptr, 10);
-      if (frame_index_ == dump_frame) {
-        DumpFgImage(swapchain_->image(image_index), ResourceState::kPresent,
+      if (frame_index_ == dump_frame && capture_ready) {
+        DumpFgImage(capture_image_, ResourceState::kCopySrc,
                     true, "fg_dump_real0.png");
-      } else if (frame_index_ == dump_frame + 1) {
+      } else if (frame_index_ == dump_frame + 1 && capture_ready) {
         DumpFgImage(framegen_->interpolated(), ResourceState::kGeneral, false,
                     "fg_dump_interp.png");
         DumpFgImage(framegen_->hudless(), ResourceState::kShaderReadCompute,
                     false, "fg_dump_hudless.png");
-        DumpFgImage(swapchain_->image(image_index), ResourceState::kPresent,
+        DumpFgImage(capture_image_, ResourceState::kCopySrc,
                     true, "fg_dump_real1.png");
       }
     }
@@ -3016,6 +3046,7 @@ void Renderer::RenderFrame(const FrameView &view) {
     presented = PresentResult::kOk;
     framegen_was_active_ = false;
   } else {
+    copy_capture();
     presented = device_->SubmitFrame(final_cmd, *swapchain_, image_index);
     framegen_was_active_ = false;
     fg_presents_ += 1;
@@ -3035,16 +3066,15 @@ void Renderer::RenderFrame(const FrameView &view) {
     fg_presents_ = 0;
   }
 
-  if (!screenshot_path_.empty() && time_seconds_ >= screenshot_at_) {
-    WriteScreenshot(image_index);
+  if (screenshot_due && capture_ready) {
+    WriteScreenshot();
   }
-  if (!seq_prefix_.empty() && seq_written_ < seq_count_ &&
-      time_seconds_ >= seq_at_) {
-    if (seq_frame_ctr_ % seq_stride_ == 0) {
+  if (sequence_due) {
+    if (seq_frame_ctr_ % seq_stride_ == 0 && capture_ready) {
       char path[512];
       std::snprintf(path, sizeof(path), "%s_%04d.png", seq_prefix_.c_str(),
                     seq_written_);
-      WriteBackbufferPng(path, image_index);
+      WriteBackbufferPng(path);
       ++seq_written_;
     }
     ++seq_frame_ctr_;
@@ -3528,7 +3558,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                const FrameView &view) {
   u32 frame_slot = frame_index_ % kFramesInFlight;
   bool rt_shadows = rt_available_ && settings_.rt_shadows;
-  bool rtao_active = rt_available_ && settings_.rtao && RtaoOpt.get();
+  bool rtao_active = rt_available_ && rtao_.available() && settings_.rtao && RtaoOpt.get();
   // RCGI takes over the indirect-diffuse path (DDGI + SSGI) when on. It is
   // available with hardware ray query OR the software SDF clipmap tracer.
   bool sdf_ready = sdf_clipmap_ && sdf_clipmap_->ready() && sdf_available_;
@@ -3546,8 +3576,15 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       rt_available_ && settings_.rt_reflections && ReflOpt.get() && bindless_ != nullptr;
   // The ray-query fragment variant serves both shadows and reflections.
   bool use_rt_frag = rt_shadows || reflections_active;
+  if (rt_available_ && bindless_ && settings_.path_trace &&
+      settings_.path_trace_recon && !settings_.path_trace_reference)
+    recon_path_tracer_.Resize(*device_, {render_width_, render_height_});
+  bool path_scene_moved = false;
   bool path_trace =
-      rt_available_ && bindless_ != nullptr && settings_.path_trace;
+      rt_available_ && bindless_ != nullptr && settings_.path_trace &&
+      (path_tracer_.available() ||
+       (settings_.path_trace_recon && !settings_.path_trace_reference &&
+        recon_path_tracer_.available()));
   bool rcgi_world = rcgi_active && !path_trace;
   if (rcgi_ && !rcgi_world)
     rcgi_->RequestReset();
@@ -3581,13 +3618,14 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   bool nrd_shadow = false;
 #if defined(RX_HAS_NRD)
   nrd_ao = rtao_active && nrd_.available();
-  nrd_shadow = rt_shadows && nrd_.available();
+  nrd_shadow = rt_shadows && shadow_trace_.available() && nrd_.available();
 #endif
   // Denoised stochastic reflections need the NRD specular denoiser; without
   // it the rt fragment variant keeps its inline deterministic mirror ray.
   bool spec_refl_active = false;
 #if defined(RX_HAS_NRD)
-  spec_refl_active = reflections_active && nrd_.available() && !path_trace;
+  spec_refl_active = reflections_active && reflection_trace_.available() &&
+                     nrd_.available() && !path_trace;
 #endif
   bool ss_ao = settings_.ssao && !nrd_ao && !path_trace;
   // Cascaded shadow maps: the raster sun-shadow path, used whenever ray-traced
@@ -3663,10 +3701,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // keeps them compatible with the async tlas build below: the slot being refit
   // is never one a live tlas references. See render/gi/skinned_rt.h.
   base::Vector<SkinnedRayTracing::Request> skin_requests;
+  skinned_rt_.BeginFrame();
   if (RtSkinOpt && raytracing_ && bindless_ && material_system_ &&
       skinned_rt_.available()) {
     for (const DrawItem &item : view.draws) {
-      if (item.rt_skin == 0 || item.skin_offset < 0)
+      if (item.rt_skin == 0 || item.skin_offset < 0 || !frame.bone_palette ||
+          static_cast<u32>(item.skin_offset) >= view.bone_matrices.size())
         continue;
       skin_requests.push_back({.handle = item.rt_skin,
                                .mesh_key = item.mesh,
@@ -4676,7 +4716,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                            .custom_index = index,
                            .mask = mask,
                            .lod = lod,
-                           .transform = item.transform});
+                           .transform = item.transform,
+                           .previous_transform = item.prev_transform,
+                           .previous_mesh = index});
       // Vegetation stand-in: a second instance on the opaque-approximation
       // BLAS, masked kRayMaskApprox so only the realtime diffuse/AO/shadow rays
       // hit it. Only at LOD0: distant LODs are built force-opaque and need no
@@ -4705,7 +4747,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
            .custom_index = index,
            .mask = static_cast<u8>(kRayMaskRealtime | kRayMaskPathTrace),
            .skinned = true,
-           .transform = item.transform});
+           .transform = item.transform,
+           .previous_transform = item.prev_transform,
+           .previous_mesh = skinned_rt_.previous_custom_index(item.rt_skin)});
     }
     const base::Vector<InstanceStore::Group> &groups = instances_.groups();
     for (u32 gi = 0; gi < groups.size(); ++gi) {
@@ -4740,7 +4784,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                              .custom_index = index,
                              .mask = mask,
                              .lod = lod,
-                             .transform = transform});
+                             .transform = transform,
+                             .previous_transform = transform,
+                             .previous_mesh = index});
         if (mesh->rt_approx && lod == 0) {
           instances.push_back({.mesh_key = group.mesh,
                                .custom_index = mesh->rt_approx_bindless,
@@ -4749,6 +4795,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                .transform = transform});
         }
       }
+    }
+    if (path_trace) {
+      path_scene_moved = pt_scene_history_.Update(
+          instances, {view.bone_matrices.data(), view.bone_matrices.size()});
+    } else {
+      pt_scene_history_ = {};
     }
     // Skinning + BLAS refits, on the graphics timeline, recorded ahead of the
     // TLAS build that reads the structures they write.
@@ -4792,6 +4844,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             raytracing_->BuildTlas(*ctx.cmd, tlas_build_slot, frame_index,
                                    instances);
           });
+    } else if (path_trace) {
+      path_scene_moved = true;
+      pt_scene_history_ = {};
     }
   }
 
@@ -4891,11 +4946,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     pt.sun_color = settings_.sun_color;
     pt.sun_radius = settings_.sun_angular_radius;
     pt.frame_index = frame_index_;
-    f32 sig = settings_.sun_intensity + settings_.sun_color.x * 3.0f +
-              settings_.sun_color.y * 5.0f + settings_.sun_color.z * 7.0f;
     bool moved =
         std::memcmp(&view_proj, &pt_prev_view_proj_, sizeof(Mat4)) != 0;
-    bool lit_changed = sig != pt_prev_sig_;
+    bool lit_changed =
+        settings_.sun_intensity != pt_prev_sun_intensity_ ||
+        settings_.sun_angular_radius != pt_prev_sun_radius_ ||
+        std::memcmp(&settings_.sun_direction, &pt_prev_sun_direction_, sizeof(Vec3)) != 0 ||
+        std::memcmp(&settings_.sun_color, &pt_prev_sun_color_, sizeof(Vec3)) != 0;
     bool scene_changed = scene_revision_ != pt_prev_scene_revision_;
     bool denoised_path = false;
 
@@ -4905,7 +4962,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // and the NRD path. Reference always wins (screenshots); else recon if
     // selected.
     bool recon_path =
-        settings_.path_trace_recon && !settings_.path_trace_reference;
+        settings_.path_trace_recon && !settings_.path_trace_reference &&
+        recon_path_tracer_.available();
     if (recon_path) {
       // Lazily allocate the recon history targets on first use: the mode is off
       // by default and the buffers are large, so they are not created up front.
@@ -4935,6 +4993,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                         static_cast<f32>(render_height_);
       rf.spp = settings_.path_trace_spp;
       rf.frame_index = frame_index_;
+      if (rr_active) JitterSequence::Sample(frame_index_, 32, &rf.jitter[0], &rf.jitter[1]);
       // Reset on first frame, on (re)activation, AND when switching into recon
       // from another path-trace mode (its ping-pong history was never written
       // by the reference/NRD paths). Never on the day/night drift.
@@ -4946,11 +5005,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       rf.debug_mode = settings_.path_trace_recon_debug;
       // Modes 8/9 visualize the restir reservoir (M / W): the spatial pass
       // substitutes the heatmap, the composite renders it as raw lighting.
-      if (rf.debug_mode >= 8) {
-        rf.restir = true;
-      }
-      rf.restir = settings_.path_trace_restir;
+      rf.restir = settings_.path_trace_restir || rf.debug_mode >= 8;
       rf.restir_di = settings_.path_trace_restir_di;
+      rf.reset_reservoirs = path_scene_moved;
       rf.lights = frame.lights;
       rf.light_count = light_count;
       rf.fog = settings_.fog;
@@ -4970,9 +5027,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         rrf.view_to_clip = proj;
         rrf.frame_delta_ms = view.frame_delta_seconds * 1000.0f;
         rrf.reset = rf.reset;
+        rrf.frame_index = frame_index_;
+        rrf.jitter[0] = rf.jitter[0];
+        rrf.jitter[1] = rf.jitter[1];
         rr_.AddToGraph(graph_,
                        {ext.color, ext.depth, ext.motion, ext.normals_rough,
-                        ext.diffuse_albedo, ext.specular_albedo},
+                        ext.diffuse_albedo, ext.specular_albedo, ext.specular_hit_distance},
                        scene_color, rrf);
       } else
 #endif
@@ -5049,14 +5109,17 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     if (!denoised_path && !recon_path) {
       // Reference: brute-force accumulation, hard reset on any motion = ground
       // truth. Also reset when switching into reference from another mode.
-      pt.reset = !pt_was_active_ || moved || lit_changed || scene_changed ||
+      pt.reset = !pt_was_active_ || moved || lit_changed || scene_changed || path_scene_moved ||
                  pt_prev_mode_ != 0;
       path_tracer_.AddToGraph(graph_, *raytracing_, tlas_slot, bindless_->set(),
                               environment_->sky_view(), environment_->sampler(),
                               scene_color, pt);
     }
     pt_prev_view_proj_ = view_proj;
-    pt_prev_sig_ = sig;
+    pt_prev_sun_intensity_ = settings_.sun_intensity;
+    pt_prev_sun_radius_ = settings_.sun_angular_radius;
+    pt_prev_sun_direction_ = settings_.sun_direction;
+    pt_prev_sun_color_ = settings_.sun_color;
     pt_prev_scene_revision_ = scene_revision_;
     pt_was_active_ = true;
     pt_prev_mode_ = recon_path ? 2 : (denoised_path ? 1 : 0);
@@ -7391,7 +7454,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                    .frame_delta_seconds = view.frame_delta_seconds,
                    .camera_near = 0.1f,
                    .camera_fov_y = view.camera.fov_y,
-                   .reset_history = first_frame});
+                   .reset_history = first_frame,
+                   .frame_index = frame_index_});
       if (upscaled != kInvalidResource)
         post_input = upscaled;
       break;

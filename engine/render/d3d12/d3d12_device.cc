@@ -1729,36 +1729,11 @@ void D3D12Device::DeferRelease(u32 ring, ID3D12Resource* resource) {
 
 // --- acceleration structures ---
 
-namespace {
-
-DXGI_FORMAT AccelVertexFormat(Format format) {
-  return format == Format::kRGB32Float ? DXGI_FORMAT_R32G32B32_FLOAT : DXGI_FORMAT_R32G32_FLOAT;
-}
-
-void FillGeometries(const BlasBuildDesc& desc,
-                    base::Vector<D3D12_RAYTRACING_GEOMETRY_DESC>* out) {
-  for (const AccelTriangles& t : desc.geometries) {
-    D3D12_RAYTRACING_GEOMETRY_DESC geometry = {};
-    geometry.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-    geometry.Flags = t.opaque ? D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE
-                              : D3D12_RAYTRACING_GEOMETRY_FLAG_NONE;
-    geometry.Triangles.VertexBuffer = {t.vertex_address, t.vertex_stride};
-    geometry.Triangles.VertexFormat = AccelVertexFormat(t.vertex_format);
-    geometry.Triangles.VertexCount = t.vertex_count;
-    geometry.Triangles.IndexBuffer = t.index_address;
-    geometry.Triangles.IndexCount = t.index_count;
-    geometry.Triangles.IndexFormat =
-        t.index_type == IndexType::kUint16 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
-    out->push_back(geometry);
-  }
-}
-
-}  // namespace
-
 AccelSizes D3D12Device::GetBlasSizes(const BlasBuildDesc& desc) {
   if (!device5_) return {};
   base::Vector<D3D12_RAYTRACING_GEOMETRY_DESC> geometries;
-  FillGeometries(desc, &geometries);
+  for (const AccelTriangles& t : desc.geometries)
+    geometries.push_back(ToD3dTriangles(t));
 
   D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS inputs = {};
   inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;

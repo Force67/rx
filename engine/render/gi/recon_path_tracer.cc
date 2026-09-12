@@ -1,5 +1,6 @@
 #include "render/gi/recon_path_tracer.h"
 
+#include <algorithm>
 #include <cstring>
 
 #include "core/log.h"
@@ -21,7 +22,8 @@ namespace {
 
 constexpr Format kIrradiance = Format::kRGBA16Float;
 constexpr Format kNormalRough = Format::kRGBA16Float;
-constexpr Format kMoments = Format::kRGBA16Float;
+// Squared HDR luminance exceeds half precision even when radiance fits.
+constexpr Format kMoments = Format::kRGBA32Float;
 constexpr Format kViewZ = Format::kR32Float;
 constexpr Format kMotion = Format::kRG16Float;
 constexpr Format kMatId = Format::kR32Uint;
@@ -65,6 +67,8 @@ struct GbufferPush {
   f32 pixel_spread;
   u32 frame_index;
   u32 bounces;
+  f32 jitter[2];
+  f32 pad[2];
 };
 struct TemporalPush {
   Mat4 prev_view_proj;  // spec: virtual-point reprojection
@@ -83,7 +87,7 @@ struct AtrousPush {
   f32 depth_phi;
   f32 luma_phi;
   u32 spec_mode;
-  f32 spec_lobe;
+  f32 spec_radius;
 };
 struct CompositePush {
   u32 size[2];
@@ -97,7 +101,8 @@ struct RestirTemporalPush {
   u32 frame_index;
   f32 m_max;
   f32 reset;
-  f32 pad[3];
+  f32 pad;
+  f32 jitter_delta[2];
 };
 struct RestirSpatialPush {
   u32 size[2];
@@ -118,7 +123,8 @@ struct RestirDiTemporalPush {
   f32 m_max;
   f32 reset;
   f32 m_max_sky;
-  f32 pad[3];
+  f32 pad;
+  f32 jitter_delta[2];
 };
 struct FogPush {
   f32 camera_pos[4];
@@ -157,9 +163,16 @@ bool ReconPathTracer::Initialize(Device& device, BindingLayoutHandle bindless_la
   // still be reading its own copy.
   for (GpuBuffer& camera : camera_) {
     camera = device.CreateBuffer(sizeof(ReconCamera), kBufferUsageUniform, true);
-    if (!camera.mapped) return false;
+    if (!camera.mapped) {
+      Destroy(device);
+      return false;
+    }
   }
-  return CreatePipelines(device, bindless_layout);
+  if (!CreatePipelines(device, bindless_layout)) {
+    Destroy(device);
+    return false;
+  }
+  return true;
 }
 
 bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindless_layout) {
@@ -185,7 +198,9 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {14, BindingType::kStorageImage},
                           {15, BindingType::kStorageImage},
                           {16, BindingType::kStorageImage},
-                          {17, BindingType::kUniformBuffer}}},
+                          {17, BindingType::kUniformBuffer},
+                          {18, BindingType::kStorageBuffer},
+                          {19, BindingType::kStorageImage}}},
                {.shared = bindless_layout}},
       .push_constant_size = PushSize<GbufferPush>(),
       .debug_name = "recon_gbuffer",
@@ -209,7 +224,8 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
                           {13, BindingType::kSampledImage},
                           {14, BindingType::kSampledImage},
                           {15, BindingType::kSampledImage},
-                          {16, BindingType::kSampledImage}}}},
+                          {16, BindingType::kSampledImage},
+                          {17, BindingType::kSampledImage}}}},
       .push_constant_size = PushSize<RestirTemporalPush>(),
       .debug_name = "recon_restir_temporal",
   });
@@ -357,7 +373,7 @@ bool ReconPathTracer::CreatePipelines(Device& device, BindingLayoutHandle bindle
   return true;
 }
 
-void ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
+bool ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
   extent_ = extent;
   auto make = [&](PingPong& pp, Format fmt) {
     for (u32 i = 0; i < 2; ++i) {
@@ -373,6 +389,7 @@ void ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
   make(normal_rough_, kNormalRough);
   make(viewz_, kViewZ);
   make(matid_, kMatId);
+  make(primary_pos_, kWorldPos);
   make(restir_r0_, kWorldPos);
   make(restir_r1_, kNormalRough);
   make(restir_r2_, kWorldPos);
@@ -392,12 +409,23 @@ void ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
   }
   history_invalid_ = true;
 
+  bool complete = static_cast<bool>(sky_cdf_);
+  for (PingPong* pp : {&accum_, &moments_, &spec_accum_, &spec_moments_, &normal_rough_,
+                       &viewz_, &matid_, &primary_pos_, &restir_r0_, &restir_r1_, &restir_r2_,
+                       &restir_di_r0_, &restir_di_r1_, &restir_di_r2_, &restir_di_r3_, &fog_})
+    for (const GpuImage& image : pp->image) complete &= static_cast<bool>(image);
+  if (!complete) {
+    DestroyBuffers(device);
+    RX_ERROR("recon path tracer history allocation failed");
+    return false;
+  }
+
   // Prime every owned image to kGeneral so the first frame's barriers have a
   // defined source state (and reads of the not-yet-written prev slot are legal).
   device.ImmediateSubmit([&](CommandList& cmd) {
     base::Vector<TextureBarrier> barriers;
     for (PingPong* pp : {&accum_, &moments_, &spec_accum_, &spec_moments_, &normal_rough_,
-                         &viewz_, &matid_, &restir_r0_, &restir_r1_, &restir_r2_,
+                         &viewz_, &matid_, &primary_pos_, &restir_r0_, &restir_r1_, &restir_r2_,
                          &restir_di_r0_, &restir_di_r1_, &restir_di_r2_, &restir_di_r3_, &fog_})
       for (u32 i = 0; i < 2; ++i) {
         barriers.push_back(Transition(pp->image[i], ResourceState::kUndefined,
@@ -406,19 +434,26 @@ void ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
       }
     cmd.TextureBarriers({barriers.data(), barriers.size()});
   });
+  buffers_ready_ = true;
+  return true;
 }
 
 void ReconPathTracer::DestroyBuffers(Device& device) {
+  buffers_ready_ = false;
+  history_invalid_ = true;
   for (PingPong* pp : {&accum_, &moments_, &spec_accum_, &spec_moments_, &normal_rough_,
-                       &viewz_, &matid_, &restir_r0_, &restir_r1_, &restir_r2_,
+                       &viewz_, &matid_, &primary_pos_, &restir_r0_, &restir_r1_, &restir_r2_,
                          &restir_di_r0_, &restir_di_r1_, &restir_di_r2_, &restir_di_r3_, &fog_})
     for (u32 i = 0; i < 2; ++i)
       if (pp->image[i]) device.DestroyImage(pp->image[i]);
 }
 
 void ReconPathTracer::Resize(Device& device, Extent2D extent) {
-  if (extent == extent_ && accum_.image[0]) return;
+  if (!gbuffer_pipeline_) return;
+  if (extent == extent_ && buffers_ready_) return;
+  if (buffers_ready_) device.WaitIdle();
   DestroyBuffers(device);
+  if (extent.width == 0 || extent.height == 0) return;
   CreateBuffers(device, extent);
 }
 
@@ -510,7 +545,7 @@ ResourceHandle ReconPathTracer::RunAtrous(RenderGraph& graph, ResourceHandle in,
           p.depth_phi = 80.0f;
           p.luma_phi = 4.0f;
           p.spec_mode = spec ? 1u : 0u;
-          p.spec_lobe = 8.0f;  // smooth reflectors keep tight lobes, rough ones filter normally
+          p.spec_radius = 8.0f;
           ctx.cmd->BindPipeline(atrous_pipeline_);
           ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(out)),
                                      Bind::Sampled(1, ctx.graph->image(in)),
@@ -530,11 +565,21 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
                                  BindingSetHandle bindless_set, TextureView sky_view,
                                  SamplerHandle sky_sampler, ResourceHandle output,
                                  const Frame& original_frame, ExternalInputs* external) {
+  if (!available()) return;
   // Freshly (re)created history images hold undefined data; force one reset
   // frame so the temporal pass never blends garbage into the moments EMA.
   Frame frame = original_frame;
-  frame.reset |= history_invalid_;
+  const u32 features = (frame.restir ? 1u : 0u) | (frame.restir_di ? 2u : 0u) |
+                       (frame.fog ? 4u : 0u) | (external ? 8u : 0u);
+  frame.reset |= history_invalid_ || frame.frame_index != previous_frame_ + 1u ||
+                 features != previous_features_;
+  const Vec2 jitter_delta{previous_jitter_[0] - frame.jitter[0],
+                         previous_jitter_[1] - frame.jitter[1]};
+  previous_jitter_[0] = frame.jitter[0];
+  previous_jitter_[1] = frame.jitter[1];
   history_invalid_ = false;
+  previous_frame_ = frame.frame_index;
+  previous_features_ = features;
 
   u32 cur = frame.frame_index & 1u;
   u32 prv = 1u - cur;
@@ -581,7 +626,8 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
   ResourceHandle s_pos = tex("recon_restir_spos", kWorldPos);
   ResourceHandle s_nrm = tex("recon_restir_snrm", kNormalRough);
   ResourceHandle s_rad = tex("recon_restir_srad", kIrradiance);
-  ResourceHandle p_pos = tex("recon_restir_ppos", kWorldPos);
+  ResourceHandle p_pos = imp("recon_restir_ppos", primary_pos_, cur);
+  ResourceHandle p_pos_prev = imp("recon_restir_ppos_prev", primary_pos_, prv);
   // With restir the gbuffer emits direct-only irradiance; the spatial stage
   // adds the resampled indirect and produces the noisy input the SVGF
   // temporal pass consumes. Without it the gbuffer output IS the noisy input.
@@ -594,6 +640,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
   ResourceHandle spec_albedo = rr ? tex("recon_rr_spec_albedo", kIrradiance) : albedo;
   ResourceHandle rr_normals = rr ? tex("recon_rr_normals", kNormalRough) : nr_c;
   ResourceHandle rr_depth = rr ? tex("recon_rr_depth", kViewZ) : vz_c;
+  ResourceHandle rr_hitdist = rr ? tex("recon_rr_hitdist", kViewZ) : vz_c;
 
   // --- 1. gbuffer ---
   graph.AddPass(
@@ -603,13 +650,13 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
                                  s_pos, s_nrm, s_rad, p_pos})
           b.Write(h, ResourceUsage::kStorageWrite);
         if (rr) {
-          for (ResourceHandle h : {spec_albedo, rr_normals, rr_depth})
+          for (ResourceHandle h : {spec_albedo, rr_normals, rr_depth, rr_hitdist})
             b.Write(h, ResourceUsage::kStorageWrite);
         }
       },
       [this, &raytracing, tlas_slot, bindless_set, sky_view, sky_sampler, gbuf_irr, nr_c, vz_c,
        motion, id_c, albedo, emissive, spec_noisy, s_pos, s_nrm, s_rad, p_pos, spec_albedo,
-       rr_normals, rr_depth, rr, di, cur, frame](PassContext& ctx) {
+       rr_normals, rr_depth, rr_hitdist, rr, di, cur, frame](PassContext& ctx) {
         ResourceHandle outs[7] = {gbuf_irr, nr_c, vz_c, motion, id_c, albedo, emissive};
         base::Vector<BindingItem> items;
         for (u32 i = 0; i < 7; ++i) items.push_back(Bind::Storage(i, ctx.graph->image(outs[i])));
@@ -624,6 +671,8 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         items.push_back(Bind::Storage(15, ctx.graph->image(rr_normals)));
         items.push_back(Bind::Storage(16, ctx.graph->image(rr_depth)));
         items.push_back(Bind::Uniform(17, camera_[cur], 0, sizeof(ReconCamera)));
+        items.push_back(Bind::StorageBuffer(18, raytracing.motion_buffer(tlas_slot)));
+        items.push_back(Bind::Storage(19, ctx.graph->image(rr_hitdist)));
 
         GbufferPush p{};
         p.camera_pos[0] = frame.camera_pos.x; p.camera_pos[1] = frame.camera_pos.y;
@@ -636,6 +685,8 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         p.spp = frame.spp < 1 ? 1u : frame.spp;
         p.pixel_spread = frame.pixel_spread;
         p.frame_index = frame.frame_index;
+        p.jitter[0] = frame.jitter[0];
+        p.jitter[1] = frame.jitter[1];
         // bits 0..7 bounce count, bit 8 restir, bit 9 rr guides, bit 10 restir di.
         p.bounces = (bounces_ & 0xffu) | (frame.restir ? 0x100u : 0u) | (rr ? 0x200u : 0u) |
                     (di ? 0x400u : 0u);
@@ -702,7 +753,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
             b.Read(h, ResourceUsage::kSampledCompute);
         },
         [this, d0_t, d1_t, d2_t, d3_t, p_pos, nr_c, nr_p, vz_c, vz_p, id_c, id_p, motion, d0_p,
-         d1_p, d2_p, d3_p, sky_view, sky_sampler, frame](PassContext& ctx) {
+         d1_p, d2_p, d3_p, sky_view, sky_sampler, jitter_delta, frame](PassContext& ctx) {
           ResourceHandle reads[10] = {p_pos, nr_c, nr_p, vz_c, vz_p,
                                       id_c,  id_p, motion, d0_p, d1_p};
           base::Vector<BindingItem> items;
@@ -730,8 +781,10 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           p.candidates = kRestirDiCandidates;
           p.sky_candidates = kRestirDiSkyCandidates;
           p.m_max = kRestirDiMMax;
-          p.reset = frame.reset ? 1.0f : 0.0f;
+          p.reset = (frame.reset || frame.reset_reservoirs) ? 1.0f : 0.0f;
           p.m_max_sky = kRestirDiSkyMMax;
+          p.jitter_delta[0] = jitter_delta.x;
+          p.jitter_delta[1] = jitter_delta.y;
           ctx.cmd->BindPipeline(restir_di_temporal_pipeline_);
           ctx.cmd->BindTransient(0, {items.data(), items.size()});
           ctx.cmd->Push(p);
@@ -804,11 +857,11 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           for (ResourceHandle h : {r0_t, r1_t, r2_t}) b.Write(h, ResourceUsage::kStorageWrite);
           for (ResourceHandle h :
                {s_pos, s_nrm, s_rad, p_pos, nr_c, nr_p, vz_c, vz_p, id_c, id_p, motion, r0_p,
-                r1_p, r2_p})
+                r1_p, r2_p, p_pos_prev})
             b.Read(h, ResourceUsage::kSampledCompute);
         },
         [this, r0_t, r1_t, r2_t, s_pos, s_nrm, s_rad, p_pos, nr_c, nr_p, vz_c, vz_p, id_c, id_p,
-         motion, r0_p, r1_p, r2_p, frame](PassContext& ctx) {
+         motion, r0_p, r1_p, r2_p, p_pos_prev, jitter_delta, frame](PassContext& ctx) {
           ResourceHandle reads[14] = {s_pos, s_nrm, s_rad, p_pos, nr_c, nr_p, vz_c,
                                       vz_p, id_c, id_p, motion, r0_p, r1_p, r2_p};
           base::Vector<BindingItem> items;
@@ -818,11 +871,14 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           for (u32 i = 0; i < 14; ++i)
             items.push_back(Bind::Sampled(i + 3, ctx.graph->image(reads[i])));
 
+          items.push_back(Bind::Sampled(17, ctx.graph->image(p_pos_prev)));
           RestirTemporalPush p{};
           p.size[0] = extent_.width; p.size[1] = extent_.height;
           p.frame_index = frame.frame_index;
           p.m_max = kRestirMMax;
-          p.reset = frame.reset ? 1.0f : 0.0f;
+          p.reset = (frame.reset || frame.reset_reservoirs) ? 1.0f : 0.0f;
+          p.jitter_delta[0] = jitter_delta.x;
+          p.jitter_delta[1] = jitter_delta.y;
           ctx.cmd->BindPipeline(restir_temporal_pipeline_);
           ctx.cmd->BindTransient(0, {items.data(), items.size()});
           ctx.cmd->Push(p);
@@ -949,6 +1005,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
     external->normals_rough = rr_normals;
     external->diffuse_albedo = albedo;
     external->specular_albedo = spec_albedo;
+    external->specular_hit_distance = rr_hitdist;
     return;
   }
 
@@ -959,7 +1016,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
               motion, p_pos, /*spec=*/true, frame);
 
   // --- 3. a-trous (N passes, ping-pong) for each signal ---
-  u32 passes = frame.atrous_passes == 0 ? 1u : frame.atrous_passes;
+  u32 passes = std::clamp(frame.atrous_passes, 1u, 8u);
   ResourceHandle denoised = RunAtrous(graph, ac_c, ping, pong, nr_c, vz_c, mo_c, passes, false);
   ResourceHandle spec_denoised =
       RunAtrous(graph, sac_c, spec_ping, spec_pong, nr_c, vz_c, smo_c, passes, true);
