@@ -88,7 +88,10 @@ class RX_WORLD_EXPORT ClaimSet {
 
   // Under memory pressure the host raises the bar and everything weaker stops
   // contributing. Hard claims are never revocable - that is the whole content
-  // of the distinction - so raising it past kHard is refused.
+  // of the distinction - and they stay honored at every setting because kHard
+  // is the lowest enumerator and Honors compares with <=. That is the enum's
+  // ordering doing the work, so a kind added above kHard would quietly become
+  // revocable; keep kHard first.
   void set_weakest_honored(ClaimKind kind);
   ClaimKind weakest_honored() const { return weakest_honored_; }
 

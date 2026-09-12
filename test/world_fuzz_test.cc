@@ -94,8 +94,17 @@ base::Vector<u8> SeedOverlay() {
   return bytes;
 }
 
-// Header sizes, so a mutation can be followed by a repaired checksum.
-size_t HeaderBytes(u32 seed) { return seed == 0 ? 64 : (seed == 3 ? 32 : 72); }
+// Header sizes, so a mutation can be followed by a repaired checksum. Each one
+// runs to the end of the checksum field, which is what RepairChecksum rewrites;
+// getting one wrong does not fail the test, it silently aims the repair at two
+// other fields and every repaired case is then rejected on the way in, so the
+// decoder past the checksum never gets fuzzed at all.
+//   index   RXWORLDI  8 magic + 4 version + 4 flags + 8 world + 8 bake
+//                     + 4 cell size + 12 origin + 4 + 4 counts + 8 sum = 64
+//   payload RXCELLPL  8 + 4 + 4 + 8 cell + 8 bake + 4 domain/tier/pad
+//                     + 5*4 counts + 8 data bytes + 8 sum = 72
+//   overlay RXOVRLAY  8 + 4 + 4 + 8 bake + 4 + 4 counts + 8 sum = 40
+size_t HeaderBytes(u32 seed) { return seed == 0 ? 64 : (seed == 3 ? 40 : 72); }
 
 void RepairChecksum(base::Vector<u8>* bytes, size_t header) {
   if (bytes->size() < header) return;

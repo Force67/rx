@@ -235,9 +235,16 @@ with a hard claim, and nothing else.
 ## Cooking
 
 ```sh
-rxworld bake city.rxscene city.rxp --name city --cell-size 64
-rxworld inspect city.rxp --name city
+rxworld bake city.rxscene city.rxp --cell-size 64
+rxworld inspect city.rxp
 ```
+
+`--name` decides the directory the world occupies inside the archive
+(`city/city.rxworld` plus `city/<cell>.<domain>.<tier>.rxcell`). It defaults to
+the archive's filename stem, and `rxworld inspect` and `rx --world` take the
+same default, so the three agree without being told three times. Naming every
+world the same constant would have made them agree too, and would have made two
+worlds collide the moment anyone put both in one archive.
 
 The cook itself is `engine/world/world_bake.h`, not the tool: there are two
 front ends and two cooks would be two answers to what a world is. The editor's
@@ -278,14 +285,17 @@ authored world that needs one needs a different representation for it.
 The bake id is a hash of the scene, the cook settings and the schema the cooking
 build can bake, so an unchanged rebuild produces the same id, and a changed
 scene, a different cell size or a build that disagrees about a component's
-fields all produce a different one that an old index refuses to read.
+fields all produce a different one that an old index refuses to read. The name
+is one of those settings, because it decides every path inside the archive - so
+cooking one scene to two filenames without `--name` produces two ids and two
+save spaces. Pass the same `--name` to both if they are meant to be one world.
 
 `rxworld` reflects only the components its own build registers. A game cooks
 from a build that registers its own.
 
 ## Verifying it
 
-Six test binaries, all in plain `ctest`, no GPU (`world_bake_test` needs
+Seven test binaries, all in plain `ctest`, no GPU (`world_bake_test` needs
 `RX_BUILD_TOOLS`, since it drives the tool):
 
 | | |
@@ -293,6 +303,7 @@ Six test binaries, all in plain `ctest`, no GPU (`world_bake_test` needs
 | `world_format_test` | round trip, the cook-time consistency checks, and the decoders' in-body structural checks driven by crafted bytes with the checksum repaired |
 | `world_map_test` | an index out of a real `.rxp`, per-domain bubbles, and the refusals for a stale, holed or out-of-range archive |
 | `world_overlay_test` | the delta semantics and the invariants a decoded save has to hold |
+| `world_classify_test` | what the cook makes of one entity, which is what the editor's per-entity label reads |
 | `world_stream_test` | cancellation races, stale generations, budgeted commit and teardown, tier bands, claims, overlays, promotion, multi-archetype and chunk-spanning cells |
 | `world_bake_test` | the whole path: an authored scene through the real `rxworld` binary into an archive, mounted and streamed back |
 | `world_fuzz_test` | random mutation over all three decoders, half of it with the checksum repaired so it reaches the structural checks behind it |
@@ -326,6 +337,37 @@ Named, so nobody has to discover them:
   one that moved between cells.
 - No re-promotion hook: nothing tells a game that a cell it promoted from is
   about to retire, and a promoted entity does not survive that.
-- Nothing outside the tests and `rxworld` links `rx::world` yet: no host drives
-  it, so the numbers in `DefaultWorldStreamPolicy` are a starting point rather
-  than a measurement.
+- No merge. Two worlds coexist in one archive perfectly well - everything a cook
+  emits is under `<name>/`, and `WorldMap::Load` takes the prefix from whatever
+  index path it is handed - but `BakeWorld` always writes a fresh `.rxp`, so
+  building that archive today means `rxpack extract` both and `rxpack create`
+  the union. Mounting the two archives separately needs none of that and is
+  usually the better answer; see below.
+- The only shipped `CellLoader` is synchronous. `MakeArchiveCellLoader` does the
+  read and the decode inside `Begin`, on the thread that called `Update`. The
+  frame budget caps it at `maximum_prepare_starts` per domain per tick, which
+  bounds the hitch without removing it; a game streaming a large archive wants
+  one that hands the work to the job system, which is the whole reason
+  `CellLoader` is an interface.
+- The numbers in `DefaultWorldStreamPolicy` are a starting point rather than a
+  measurement. `rx --world` and the editor's **Bake World** drive the module
+  now, but nothing has been profiled against a world worth profiling.
+
+## More than one world
+
+Nothing here assumes a process has exactly one. A `WorldMap` is one index; a
+`WorldStreamer` is one map, fixed at construction. So:
+
+- **Several at once.** Mount each `.rxp`, `Load` each index, one streamer per
+  map, all over the same `ecs::World`. Each owns the entities it materialized
+  and tears down only those. What they do not have is a shared identity space:
+  every cook numbers stable ids from 1 and `CellResident` carries no world id,
+  so a bare stable id means nothing without knowing which streamer to ask.
+- **Swap one for another.** `Shutdown()` the streamer, drop it, `Load` the other
+  index into the map, build a new streamer. `Shutdown` is deliberately terminal
+  and `WorldMap::Load` resets itself, so this is the supported shape rather than
+  a restart path with states of its own. `Vfs::Mount` appends, so unmount the
+  old archive first if the two would collide.
+
+`--world` does neither: it mounts one archive at `world://` in `Init` and never
+lets go. Driving two is a host's job, and the pieces above are what it uses.

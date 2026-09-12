@@ -4,6 +4,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace rx::world {
 namespace {
@@ -231,21 +232,25 @@ bool WorldOverlay::Decode(std::span<const u8> bytes, WorldOverlay* out, std::str
     return false;
   }
 
-  out->Clear();
-  out->set_bake_id(bake_id);
+  // Into a local, moved out only once every check has passed. Populating `out`
+  // as we go would leave a caller that ignores the false return holding a
+  // truncated delta set stamped with this file's bake id - which SetOverlay's
+  // mismatch guard would then wave through, and apply to every cell.
+  WorldOverlay decoded;
+  decoded.set_bake_id(bake_id);
   Cursor cursor(body);
-  out->destroyed_.reserve(destroyed_count);
+  decoded.destroyed_.reserve(destroyed_count);
   for (u32 i = 0; i < destroyed_count; ++i) {
     const u64 id = cursor.U64();
     // Sortedness is what makes IsDestroyed a binary search; a file that lost it
     // would answer wrongly rather than slowly.
-    if (i > 0 && id <= out->destroyed_[i - 1]) {
+    if (i > 0 && id <= decoded.destroyed_[i - 1]) {
       SetError(error, "world overlay: destroyed ids are not sorted at " + std::to_string(i));
       return false;
     }
-    out->destroyed_.push_back(id);
+    decoded.destroyed_.push_back(id);
   }
-  out->moves_.reserve(move_count);
+  decoded.moves_.reserve(move_count);
   for (u32 i = 0; i < move_count; ++i) {
     OverlayMove move;
     move.stable_id = cursor.U64();
@@ -257,7 +262,7 @@ bool WorldOverlay::Decode(std::span<const u8> bytes, WorldOverlay* out, std::str
     move.rotation.z = cursor.F32();
     move.rotation.w = cursor.F32();
     move.scale = cursor.F32();
-    if (i > 0 && move.stable_id <= out->moves_[i - 1].stable_id) {
+    if (i > 0 && move.stable_id <= decoded.moves_[i - 1].stable_id) {
       SetError(error, "world overlay: moves are not sorted at " + std::to_string(i));
       return false;
     }
@@ -266,17 +271,18 @@ bool WorldOverlay::Decode(std::span<const u8> bytes, WorldOverlay* out, std::str
                           " has a non-finite transform");
       return false;
     }
-    if (out->IsDestroyed(move.stable_id)) {
+    if (decoded.IsDestroyed(move.stable_id)) {
       SetError(error, "world overlay: " + std::to_string(move.stable_id) +
                           " is both destroyed and moved");
       return false;
     }
-    out->moves_.push_back(move);
+    decoded.moves_.push_back(move);
   }
   if (!cursor.ok()) {
     SetError(error, "world overlay: truncated body");
     return false;
   }
+  *out = std::move(decoded);
   return true;
 }
 

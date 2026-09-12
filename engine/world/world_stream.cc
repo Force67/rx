@@ -209,6 +209,23 @@ std::span<const std::string> WorldStreamer::errors() const {
   return std::span<const std::string>(errors_.data(), errors_.size());
 }
 
+u64 WorldStreamer::LayoutHash(const edit::ComponentDesc& desc) const {
+  // A component's reflected layout cannot change for the life of the process,
+  // but ResolveSchema would otherwise recompute it - three vector allocations
+  // and an fnv1a over every field - once per column, per archetype, per cell,
+  // on every load and every tier change. Cached per streamer rather than
+  // globally: everything here happens on the calling thread, and a process-wide
+  // cache would be the one thing in this class two streamers on two threads
+  // could race on.
+  if (const u64* found = layout_hashes_.find(desc.id)) return *found;
+  u64 hash = 0;
+  // A component with no reflected layout hashes to 0, which no bake produces,
+  // so the caller's comparison fails rather than passing on a cache miss.
+  if (!RuntimeComponentLayout(desc.name, nullptr, &hash)) hash = 0;
+  layout_hashes_.insert(desc.id, hash);
+  return hash;
+}
+
 bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
   cell.resolved.clear();
   const WorldCellPayload& payload = cell.payload;
@@ -258,9 +275,7 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
                  " bytes here, " + std::to_string(column.stride) + " in the bake";
         return false;
       }
-      u64 runtime_hash = 0;
-      if (!RuntimeComponentLayout(name, nullptr, &runtime_hash) ||
-          runtime_hash != column.layout_hash) {
+      if (LayoutHash(*desc) != column.layout_hash) {
         *error = "component '" + std::string(name) +
                  "' has a different field layout here than it had at bake time";
         return false;
@@ -548,24 +563,29 @@ void WorldStreamer::GatherClaims(Domain domain, DomainState& state) {
     observation.axes = scene::kWorldStreamXYZ;
     state.observations.push_back(observation);
 
-    // A claim contributes exactly the cell it names as a candidate. Its source
-    // is still an observation, though, and the planner measures every candidate
-    // against every observation - so where cell bounds overlap, a cell that is
-    // already a candidate and contains this claim's centre also sees demand
-    // from it. A grid cook never produces overlapping bounds; a room-and-portal
-    // one would, and would want the claim to name its domain precisely.
-    claim_scratch_.clear();
-    map_.GatherRegions(observation, domain, &claim_scratch_);
-    for (const CellDemand& demand : claim_scratch_) {
-      if (demand.region.id != entry.claim.cell) continue;
-      CellDemand claimed = demand;
-      // A claim that does not ask for detail must not decide the band: its
-      // source stands at the cell's own middle, so its distance is zero and it
-      // would pin the near tier for as long as the lease lived. One that does
-      // ask counts exactly like an observer standing there, which is what it is.
-      claimed.from_claim = !entry.claim.full_detail;
-      state.demands.push_back(claimed);
-    }
+    // A claim contributes exactly the cell it names as a candidate, and that
+    // cell's record is already in hand - so the region is built from it rather
+    // than by gathering the whole index and discarding all but one answer.
+    // The demand still comes from the planner's own EvaluateWorldStreamDemand,
+    // because a claim's candidate has to be measured the same way every other
+    // candidate is.
+    //
+    // The claim's source is still an observation, though, and the planner
+    // measures every candidate against every observation - so where cell bounds
+    // overlap, a cell that is already a candidate and contains this claim's
+    // centre also sees demand from it. A grid cook never produces overlapping
+    // bounds; a room-and-portal one would, and would want the claim to name its
+    // domain precisely.
+    const scene::WorldStreamRegion region{record->id, record->minimum, record->maximum, 0, channel};
+    const scene::WorldStreamDemand demand = scene::EvaluateWorldStreamDemand(observation, region);
+    if (!demand.retain) continue;
+    // A claim that does not ask for detail must not decide the band: its source
+    // stands at the cell's own middle, so its distance is zero and it would pin
+    // the near tier for as long as the lease lived. One that does ask counts
+    // exactly like an observer standing there, which is what it is.
+    state.demands.push_back({region,
+                             std::min(demand.current_distance, demand.predicted_distance),
+                             /*from_claim=*/!entry.claim.full_detail});
   }
 }
 
@@ -745,14 +765,17 @@ void WorldStreamer::UpdateDomain(Domain domain,
       case scene::WorldStreamActionKind::kCancel:
       case scene::WorldStreamActionKind::kUnload: {
         DomainCell* cell = Find(state, action.ticket.region);
-        if (action.kind == scene::WorldStreamActionKind::kCancel && cell != nullptr) {
-          loader_.Cancel({action.ticket, cell->cell, domain, cell->tier});
-        }
         if (!cell || !(cell->ticket == action.ticket)) {
           // Nothing of ours under that ticket: acknowledge so the plan can let
-          // the region go.
+          // the region go. No Cancel either - a request is identified by its
+          // tier as well as its ticket, and the tier on a record belonging to
+          // another generation would name a request that was never begun,
+          // leaving the real one in flight forever.
           scene::ApplyWorldStreamRetireResult(state.plan, action.ticket);
           break;
+        }
+        if (action.kind == scene::WorldStreamActionKind::kCancel) {
+          loader_.Cancel({action.ticket, cell->cell, domain, cell->tier});
         }
         // Teardown is budgeted, cancel and unload alike, and a cell parked in
         // kFailed by a refused read comes through here too. The planner will not

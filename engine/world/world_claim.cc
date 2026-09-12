@@ -59,9 +59,7 @@ size_t ClaimSet::Expire(u64 tick) {
 
 void ClaimSet::Clear() { entries_.clear(); }
 
-void ClaimSet::set_weakest_honored(ClaimKind kind) {
-  weakest_honored_ = kind < ClaimKind::kHard ? ClaimKind::kHard : kind;
-}
+void ClaimSet::set_weakest_honored(ClaimKind kind) { weakest_honored_ = kind; }
 
 bool ClaimSet::Holds(u64 cell, u32 domains) const {
   for (const ClaimEntry& entry : entries_) {

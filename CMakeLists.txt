@@ -468,29 +468,51 @@ if(RX_BUILD_TOOLS AND "world" IN_LIST RX_MODULES)
   add_executable(rxworld tools/rxworld.cc)
   target_link_libraries(rxworld PRIVATE rx::world rx::edit rx::asset rx::ecs rx::core)
   rx_set_warnings(rxworld)
+endif()
 
-  # The baked world `rx --world` streams. Cooked at build time rather than
-  # checked in as a binary: the .rxscene beside it is the authored source, and
-  # running the real cook every build is also the only thing that would notice
-  # the tool and the runtime drifting apart. Lives here rather than in
-  # runtime/CMakeLists.txt because that is added before rxworld exists.
-  if(TARGET rx)
-    set(RX_STREAMWORLD_SCENE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/scenes/streamworld.rxscene)
-    # A plain path rather than $<TARGET_FILE_DIR:rx>: a generator expression in
-    # an OUTPUT cannot name a target from another directory, and rx is added
-    # from runtime/.
-    set(RX_STREAMWORLD_DIR ${CMAKE_BINARY_DIR}/runtime/worlds)
-    set(RX_STREAMWORLD_ARCHIVE ${RX_STREAMWORLD_DIR}/streamworld.rxp)
-    add_custom_command(
-      OUTPUT ${RX_STREAMWORLD_ARCHIVE}
-      COMMAND ${CMAKE_COMMAND} -E make_directory ${RX_STREAMWORLD_DIR}
-      COMMAND rxworld bake ${RX_STREAMWORLD_SCENE} ${RX_STREAMWORLD_ARCHIVE}
-              --name streamworld --cell-size 32
-      DEPENDS rxworld ${RX_STREAMWORLD_SCENE}
-      COMMENT "Cooking the streamworld test map")
-    add_custom_target(rx-streamworld ALL DEPENDS ${RX_STREAMWORLD_ARCHIVE})
-    add_dependencies(rx rx-streamworld)
-  endif()
+# Cooking a world happens at build time, on the *host*, so a cross build cannot
+# use the rxworld it just produced for the target. The same problem RX_RXPACK
+# solves above, and the same shape of answer: RX_RXWORLD names a host-built one,
+# and empty means no world is cooked - `rx --world` then has nothing to open,
+# which is a missing test map rather than a broken build.
+set(RX_RXWORLD "" CACHE FILEPATH
+  "Host rxworld executable, for cross builds (a native build uses its own)")
+if(NOT CMAKE_CROSSCOMPILING AND TARGET rxworld)
+  set(RX_RXWORLD_COMMAND "$<TARGET_FILE:rxworld>")
+  set(RX_RXWORLD_DEPENDS rxworld)
+elseif(RX_RXWORLD)
+  set(RX_RXWORLD_COMMAND "${RX_RXWORLD}")
+  set(RX_RXWORLD_DEPENDS "")
+else()
+  set(RX_RXWORLD_COMMAND "")
+  set(RX_RXWORLD_DEPENDS "")
+endif()
+
+# The baked world `rx --world` streams. Cooked at build time rather than checked
+# in as a binary: the .rxscene beside it is the authored source, and running the
+# real cook every build is also the only thing that would notice the tool and
+# the runtime drifting apart. Lives here rather than in runtime/CMakeLists.txt
+# because that is added before rxworld exists.
+if(TARGET rx AND RX_RXWORLD_COMMAND)
+  set(RX_STREAMWORLD_SCENE ${CMAKE_CURRENT_SOURCE_DIR}/runtime/scenes/streamworld.rxscene)
+  # A plain path rather than $<TARGET_FILE_DIR:rx>: a generator expression in an
+  # OUTPUT cannot name a target from another directory, and rx is added from
+  # runtime/.
+  set(RX_STREAMWORLD_DIR ${CMAKE_BINARY_DIR}/runtime/worlds)
+  # No --name: the cook takes the archive's filename stem, so the archive, the
+  # world inside it, and a bare `rx --world` all agree without being told.
+  set(RX_STREAMWORLD_ARCHIVE ${RX_STREAMWORLD_DIR}/streamworld.rxp)
+  add_custom_command(
+    OUTPUT ${RX_STREAMWORLD_ARCHIVE}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${RX_STREAMWORLD_DIR}
+    COMMAND ${RX_RXWORLD_COMMAND} bake ${RX_STREAMWORLD_SCENE} ${RX_STREAMWORLD_ARCHIVE}
+            --cell-size 32
+    DEPENDS ${RX_RXWORLD_DEPENDS} ${RX_STREAMWORLD_SCENE}
+    COMMENT "Cooking the streamworld test map")
+  add_custom_target(rx-streamworld ALL DEPENDS ${RX_STREAMWORLD_ARCHIVE})
+  add_dependencies(rx rx-streamworld)
+elseif(TARGET rx)
+  message(STATUS "no host rxworld (set RX_RXWORLD); the streamworld test map will not be cooked")
 endif()
 
 # rxdiff compares two rendered pngs against a measured tolerance, which is the

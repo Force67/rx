@@ -147,7 +147,14 @@ bool Viewer::OnInitialize(app::Services& services) {
 
   if (!config_.world_path.empty()) {
     // A baked world is not a scene: nothing is loaded whole, and what exists at
-    // any moment is whatever the streamer has decided to keep.
+    // any moment is whatever the streamer has decided to keep. The two are
+    // therefore not layerable, and picking one silently would leave the author
+    // of the ignored flag looking at a world that is missing everything they
+    // asked for with nothing saying why.
+    if (!config_.scene_path.empty()) {
+      RX_ERROR("--world and --scene are exclusive: a baked world is streamed, not loaded whole");
+      return false;
+    }
     if (!world_stream_.Init(*services.vfs, config_.headless ? nullptr : renderer_, *world_,
                             config_.headless, config_.world_path, config_.world_name)) {
       return false;

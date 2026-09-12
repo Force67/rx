@@ -10,9 +10,18 @@ void SetError(std::string* error, std::string message) {
   if (error) *error = std::move(message);
 }
 
+// The directory an index sits in, which is the prefix its payloads share.
+// An index at the root of its own scheme ("world://city.rxworld") has none: the
+// last slash there belongs to the scheme separator, and cutting there would
+// leave "world:/", which resolves to no mount at all and would turn every
+// payload read into a missing entry while the index itself loaded fine.
 std::string DirectoryOf(std::string_view path) {
+  const size_t scheme = path.find("://");
+  const size_t first = scheme == std::string_view::npos ? 0 : scheme + 3;
   const size_t slash = path.find_last_of('/');
-  if (slash == std::string_view::npos) return {};
+  if (slash == std::string_view::npos || slash < first) {
+    return scheme == std::string_view::npos ? std::string() : std::string(path.substr(0, first));
+  }
   return std::string(path.substr(0, slash));
 }
 

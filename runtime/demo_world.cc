@@ -6,6 +6,7 @@
 #include "asset/primitives.h"
 #include "core/log.h"
 #include "scene/components.h"
+#include "world/world_bake.h"
 
 namespace rx {
 namespace {
@@ -58,7 +59,11 @@ void WorldStreamDemo::RegisterMeshes(render::Renderer* renderer, bool headless) 
 bool WorldStreamDemo::Init(asset::Vfs& vfs, render::Renderer* renderer, ecs::World& ecs,
                            bool headless, const std::string& archive_path,
                            const std::string& world_name) {
-  world_name_ = world_name;
+  // The cook's own default, so an archive baked without --name opens without
+  // --world-name. Asking world_bake for it rather than reimplementing the stem
+  // is the point: two answers here would be two answers about where the index
+  // lives, and the failure would read as a missing archive.
+  world_name_ = world_name.empty() ? world::WorldNameForArchive(archive_path) : world_name;
 
   auto provider = asset::MakePackFileProvider(archive_path);
   if (!provider) {
@@ -67,7 +72,7 @@ bool WorldStreamDemo::Init(asset::Vfs& vfs, render::Renderer* renderer, ecs::Wor
   }
   vfs.Mount("world", std::move(provider));
 
-  const std::string index_path = "world://" + world_name + "/" + world_name + ".rxworld";
+  const std::string index_path = "world://" + world_name_ + "/" + world_name_ + ".rxworld";
   std::string error;
   if (!map_.Load(vfs, index_path, &error)) {
     RX_ERROR("--world {}: {}", archive_path, error);

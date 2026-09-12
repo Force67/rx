@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <optional>
 
 #include "asset/asset_database.h"
 #include "asset/asset_id.h"
@@ -168,6 +169,15 @@ base::Vector<std::string> InstanceComponents(const WorldBakeOptions& options) {
 
 }  // namespace
 
+std::string WorldNameForArchive(std::string_view archive_path) {
+  const size_t slash = archive_path.find_last_of("/\\");
+  const std::string_view file =
+      slash == std::string_view::npos ? archive_path : archive_path.substr(slash + 1);
+  const size_t dot = file.find_last_of('.');
+  // A leading dot is the whole name of a dotfile, not an extension.
+  return std::string(dot == std::string_view::npos || dot == 0 ? file : file.substr(0, dot));
+}
+
 const char* BakeRoleName(BakeRole role) {
   switch (role) {
     case BakeRole::kEntity: return "gameplay entity";
@@ -242,6 +252,14 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
     return false;
   }
   options.instance_components = InstanceComponents(options);
+  if (options.name.empty()) options.name = WorldNameForArchive(archive_path);
+  // The name becomes a directory inside the archive and half of every payload
+  // path, so a name that is not a single path segment would silently scatter
+  // the world somewhere the index's own prefix convention cannot find it again.
+  if (options.name.empty() || options.name.find_first_of("/\\") != std::string::npos) {
+    SetError(error, "world name must be one path segment; '" + options.name + "' is not");
+    return false;
+  }
 
   asset::Vfs vfs;
   asset::AssetDatabase database(vfs);
@@ -445,11 +463,26 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
             SetError(error, "an entity lost its Transform mid-bake");
             return false;
           }
+          // The prototype is the only thing a page row says about what it is,
+          // and a host resolves it by hashing the name back into an asset id.
+          // A name nothing can resolve is a row that draws nothing, silently,
+          // in an archive that cooked clean - so both ways of failing to name
+          // one stop the cook instead.
           const scene::Renderable* renderable = source.Get<scene::Renderable>(authored[i].entity);
-          const std::string prototype =
-              renderable ? asset::LookupAssetPath(renderable->mesh)
-                               .value_or(std::to_string(renderable->mesh.hash))
-                         : std::string("prototype/unnamed");
+          if (!renderable) {
+            SetError(error,
+                     "an instance page row has no Renderable, so the cook has no name for what it "
+                     "is; --instance must name a set that includes Renderable");
+            return false;
+          }
+          const std::optional<std::string> mesh_path = asset::LookupAssetPath(renderable->mesh);
+          if (!mesh_path) {
+            SetError(error, "Renderable.mesh " + std::to_string(renderable->mesh.hash) +
+                                " resolves to no asset path, so the instance page would name a "
+                                "prototype no host can look up; author the mesh by path");
+            return false;
+          }
+          const std::string& prototype = *mesh_path;
           instances.AddInstance(
               next_stable_id + (i - cell_begin), instances.AddPrototype(prototype),
               {transform->position[0], transform->position[1], transform->position[2]},
@@ -539,6 +572,7 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
     return false;
   }
   result->bake_id = options.bake_id;
+  result->name = options.name;
   return true;
 }
 

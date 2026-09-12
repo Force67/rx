@@ -4,6 +4,9 @@
 //                [--instance <Component>] [--bake-id N] [--skip-unknown]
 //   rxworld inspect <out.rxp> [--name city]
 //
+// --name defaults to the archive's filename stem for both, so `bake s.rxscene
+// city.rxp` and `inspect city.rxp` agree without being told twice.
+//
 // bake reads the scene, sorts every entity into a grid cell by its world
 // position, groups the entities of each cell by their component set, and writes
 // one archetype-major payload per (cell, domain). The index goes in beside them
@@ -104,14 +107,16 @@ int Bake(int argc, char** argv) {
   std::printf("  %u cells, %u entities, %u static instances, bake %llu\n", result.cells,
               result.entities, result.instances,
               static_cast<unsigned long long>(result.bake_id));
-  std::printf("  index at %s/%s.rxworld\n", options.name.c_str(), options.name.c_str());
+  std::printf("  index at %s/%s.rxworld\n", result.name.c_str(), result.name.c_str());
   return 0;
 }
 
 int Inspect(int argc, char** argv) {
   if (argc < 3) return Usage();
   const std::string archive_path = argv[2];
-  std::string name = "world";
+  // Same default the cook uses, so inspecting an archive baked with no --name
+  // needs no --name either.
+  std::string name = world::WorldNameForArchive(archive_path);
   for (int i = 3; i < argc; ++i) {
     if (std::strcmp(argv[i], "--name") == 0 && i + 1 < argc) {
       name = argv[++i];
@@ -130,9 +135,10 @@ int Inspect(int argc, char** argv) {
   if (!map.Load(vfs, "world://" + name + "/" + name + ".rxworld", &error)) return Fail(error);
 
   const world::WorldIndexData& index = map.index();
-  std::printf("world %llu, bake %llu, %zu cells, cell size %.1f\n",
+  std::printf("world %llu, bake %llu, %llu cells, cell size %.1f\n",
               static_cast<unsigned long long>(index.world_id),
-              static_cast<unsigned long long>(index.bake_id), index.cells.size(),
+              static_cast<unsigned long long>(index.bake_id),
+              static_cast<unsigned long long>(index.cells.size()),
               static_cast<double>(index.cell_size));
   for (const world::WorldCellRecord& cell : index.cells) {
     std::printf("  cell %016llx  [%.1f %.1f %.1f]..[%.1f %.1f %.1f]  ids %llu+%u\n",

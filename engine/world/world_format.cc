@@ -4,6 +4,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <utility>
 
 namespace rx::world {
 namespace {
@@ -316,9 +317,13 @@ void WorldIndexWriter::AddCell(u64 id, Vec3 minimum, Vec3 maximum, u32 zone, u64
   const Vec3 high{std::max(minimum.x, maximum.x), std::max(minimum.y, maximum.y),
                   std::max(minimum.z, maximum.z)};
   if (PendingCell* existing = Find(id)) {
+    // Every field, flags included. Re-adding replaces the record, so what a
+    // cell ends up with must not depend on whether SetCellFlags ran before or
+    // after the re-add.
     existing->minimum = low;
     existing->maximum = high;
     existing->zone = zone;
+    existing->flags = 0;
     existing->stable_id_first = stable_id_first;
     existing->stable_id_count = stable_id_count;
     return;
@@ -360,6 +365,25 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
   }
   if (payloads_.size() > kMaximumPayloads) {
     SetError(error, "world index: too many payloads");
+    return false;
+  }
+
+  // The decoder refuses a non-finite grid or non-finite bounds. Checking the
+  // same things here is what keeps the cook from succeeding on an archive its
+  // own loader will not open: a bake that fails at the end of a cook is a bad
+  // afternoon, one that fails at the start of a play session is a bug report.
+  if (!std::isfinite(cell_size_) || cell_size_ < 0) {
+    SetError(error, "world index: grid cell size is not a finite, non-negative number");
+    return false;
+  }
+  if (!IsFinite(grid_origin_)) {
+    SetError(error, "world index: grid origin is not finite");
+    return false;
+  }
+  for (const PendingCell& cell : cells_) {
+    if (IsFinite(cell.minimum) && IsFinite(cell.maximum)) continue;
+    SetError(error,
+             "world index: cell " + std::to_string(cell.id) + " has non-finite bounds");
     return false;
   }
 
@@ -515,15 +539,32 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
     return false;
   }
 
-  *out = WorldIndexData{};
-  out->version = version;
-  out->world_id = world_id;
-  out->bake_id = bake_id;
-  out->cell_size = std::isfinite(cell_size) && cell_size > 0 ? cell_size : 0;
-  out->grid_origin = IsFinite(grid_origin) ? grid_origin : Vec3{};
+  // Zero is the legitimate "this world is not on a regular grid"; anything that
+  // is not a finite, non-negative number is a corrupt header, and substituting
+  // zero for it would read as that legitimate answer. Both fields are inside
+  // the checksum, so reaching here with either wrong means a wrong cook.
+  if (!std::isfinite(cell_size) || cell_size < 0) {
+    SetError(error, "world index: grid cell size is not a finite, non-negative number");
+    return false;
+  }
+  if (!IsFinite(grid_origin)) {
+    SetError(error, "world index: grid origin is not finite");
+    return false;
+  }
+
+  // Into a local, moved out only once every check has passed. Populating `out`
+  // as we go would leave a caller that ignores the false return holding a
+  // half-decoded world carrying this file's bake id - which every cross-check
+  // downstream would then accept.
+  WorldIndexData decoded;
+  decoded.version = version;
+  decoded.world_id = world_id;
+  decoded.bake_id = bake_id;
+  decoded.cell_size = cell_size;
+  decoded.grid_origin = grid_origin;
 
   Cursor cursor(body);
-  out->cells.reserve(cell_count);
+  decoded.cells.reserve(cell_count);
   for (u32 i = 0; i < cell_count; ++i) {
     WorldCellRecord cell;
     cell.id = cursor.U64();
@@ -544,7 +585,7 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
       SetError(error, "world index: cell " + std::to_string(cell.id) + " has inverted bounds");
       return false;
     }
-    if (i > 0 && cell.id <= out->cells[i - 1].id) {
+    if (i > 0 && cell.id <= decoded.cells[i - 1].id) {
       SetError(error, "world index: cells are not sorted by id at " + std::to_string(i));
       return false;
     }
@@ -558,23 +599,23 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
                           " stable-id range wraps past the end of the id space");
       return false;
     }
-    out->cells.push_back(cell);
+    decoded.cells.push_back(cell);
   }
 
   // The ordering FindCellByStableId searches, and the check that makes its
   // answer unique. A hand-edited or corrupted index is exactly where
   // non-overlap would stop holding.
-  out->stable_id_order.reserve(out->cells.size());
-  for (u32 i = 0; i < out->cells.size(); ++i) {
-    if (out->cells[i].stable_id_count != 0) out->stable_id_order.push_back(i);
+  decoded.stable_id_order.reserve(decoded.cells.size());
+  for (u32 i = 0; i < decoded.cells.size(); ++i) {
+    if (decoded.cells[i].stable_id_count != 0) decoded.stable_id_order.push_back(i);
   }
-  std::sort(out->stable_id_order.begin(), out->stable_id_order.end(),
+  std::sort(decoded.stable_id_order.begin(), decoded.stable_id_order.end(),
             [&](u32 a, u32 b) {
-              return out->cells[a].stable_id_first < out->cells[b].stable_id_first;
+              return decoded.cells[a].stable_id_first < decoded.cells[b].stable_id_first;
             });
-  for (size_t i = 1; i < out->stable_id_order.size(); ++i) {
-    const WorldCellRecord& previous = out->cells[out->stable_id_order[i - 1]];
-    const WorldCellRecord& current = out->cells[out->stable_id_order[i]];
+  for (size_t i = 1; i < decoded.stable_id_order.size(); ++i) {
+    const WorldCellRecord& previous = decoded.cells[decoded.stable_id_order[i - 1]];
+    const WorldCellRecord& current = decoded.cells[decoded.stable_id_order[i]];
     if (previous.stable_id_first + previous.stable_id_count > current.stable_id_first) {
       SetError(error, "world index: cells " + std::to_string(previous.id) + " and " +
                           std::to_string(current.id) + " have overlapping stable-id ranges");
@@ -582,7 +623,7 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
     }
   }
 
-  out->payloads.reserve(payload_count);
+  decoded.payloads.reserve(payload_count);
   for (u32 i = 0; i < payload_count; ++i) {
     WorldPayloadRecord payload;
     payload.resident_bytes = cursor.U64();
@@ -596,12 +637,13 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
     }
     payload.domain = static_cast<Domain>(domain);
     payload.tier = static_cast<Tier>(tier);
-    out->payloads.push_back(payload);
+    decoded.payloads.push_back(payload);
   }
   if (!cursor.ok()) {
     SetError(error, "world index: truncated body");
     return false;
   }
+  *out = std::move(decoded);
   return true;
 }
 
@@ -710,6 +752,15 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
     if (instance.prototype >= prototypes_.size()) {
       SetError(error, "cell payload: instance " + std::to_string(instance.stable_id) +
                           " names unknown prototype " + std::to_string(instance.prototype));
+      return false;
+    }
+    // A transform nothing can draw, refused where it was produced rather than
+    // on the machine that tries to load the cell.
+    if (!IsFinite(instance.position) || !std::isfinite(instance.rotation.x) ||
+        !std::isfinite(instance.rotation.y) || !std::isfinite(instance.rotation.z) ||
+        !std::isfinite(instance.rotation.w) || !std::isfinite(instance.scale)) {
+      SetError(error, "cell payload: instance " + std::to_string(instance.stable_id) +
+                          " has a non-finite transform");
       return false;
     }
   }
@@ -928,16 +979,19 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     return false;
   }
 
-  *out = WorldCellPayload{};
-  out->version = version;
-  out->kind = static_cast<PayloadKind>(kind);
-  out->cell_id = cell_id;
-  out->bake_id = bake_id;
-  out->domain = static_cast<Domain>(domain);
-  out->tier = static_cast<Tier>(tier);
+  // Into a local, moved out only once every check has passed: a caller that
+  // ignores the false return must not be left holding half a cell whose header
+  // fields all cross-check against the index.
+  WorldCellPayload decoded;
+  decoded.version = version;
+  decoded.kind = static_cast<PayloadKind>(kind);
+  decoded.cell_id = cell_id;
+  decoded.bake_id = bake_id;
+  decoded.domain = static_cast<Domain>(domain);
+  decoded.tier = static_cast<Tier>(tier);
 
   Cursor cursor(body);
-  out->archetypes.reserve(archetype_count);
+  decoded.archetypes.reserve(archetype_count);
   for (u32 i = 0; i < archetype_count; ++i) {
     WorldArchetypeRecord record;
     record.row_count = cursor.U32();
@@ -955,10 +1009,10 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
                           " stable ids fall outside the data section");
       return false;
     }
-    out->archetypes.push_back(record);
+    decoded.archetypes.push_back(record);
   }
 
-  out->columns.reserve(column_count);
+  decoded.columns.reserve(column_count);
   for (u32 i = 0; i < column_count; ++i) {
     WorldColumnRecord record;
     record.name = cursor.U32();
@@ -979,12 +1033,12 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
                           " falls outside the data section");
       return false;
     }
-    out->columns.push_back(record);
+    decoded.columns.push_back(record);
   }
-  for (u32 a = 0; a < out->archetypes.size(); ++a) {
-    const WorldArchetypeRecord& archetype = out->archetypes[a];
+  for (u32 a = 0; a < decoded.archetypes.size(); ++a) {
+    const WorldArchetypeRecord& archetype = decoded.archetypes[a];
     for (u32 c = 0; c < archetype.column_count; ++c) {
-      const WorldColumnRecord& column = out->columns[archetype.column_first + c];
+      const WorldColumnRecord& column = decoded.columns[archetype.column_first + c];
       if (column.data_bytes != static_cast<u64>(column.stride) * archetype.row_count) {
         SetError(error, "cell payload: archetype " + std::to_string(a) + " column " +
                             std::to_string(c) + " byte count disagrees with its row count");
@@ -993,7 +1047,7 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     }
   }
 
-  out->prototypes.reserve(prototype_count);
+  decoded.prototypes.reserve(prototype_count);
   for (u32 i = 0; i < prototype_count; ++i) {
     WorldPrototypeRecord record;
     record.name = cursor.U32();
@@ -1001,10 +1055,10 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
       SetError(error, "cell payload: prototype " + std::to_string(i) + " name is out of range");
       return false;
     }
-    out->prototypes.push_back(record);
+    decoded.prototypes.push_back(record);
   }
 
-  out->instances.reserve(instance_count);
+  decoded.instances.reserve(instance_count);
   for (u32 i = 0; i < instance_count; ++i) {
     WorldInstanceRecord record;
     record.stable_id = cursor.U64();
@@ -1020,7 +1074,14 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
                           std::to_string(record.prototype));
       return false;
     }
-    out->instances.push_back(record);
+    if (!IsFinite(record.position) || !std::isfinite(record.rotation.x) ||
+        !std::isfinite(record.rotation.y) || !std::isfinite(record.rotation.z) ||
+        !std::isfinite(record.rotation.w) || !std::isfinite(record.scale)) {
+      SetError(error, "cell payload: instance " + std::to_string(i) +
+                          " has a non-finite transform");
+      return false;
+    }
+    decoded.instances.push_back(record);
   }
 
   const u8* strings = nullptr;
@@ -1028,9 +1089,9 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     SetError(error, "cell payload: truncated string table");
     return false;
   }
-  out->strings.insert(out->strings.end(), reinterpret_cast<const char*>(strings),
+  decoded.strings.insert(decoded.strings.end(), reinterpret_cast<const char*>(strings),
                       reinterpret_cast<const char*>(strings) + string_bytes);
-  if (string_bytes != 0 && !StringTableTerminated(out->strings)) {
+  if (string_bytes != 0 && !StringTableTerminated(decoded.strings)) {
     SetError(error, "cell payload: string table is not terminated");
     return false;
   }
@@ -1040,7 +1101,7 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     SetError(error, "cell payload: truncated data section");
     return false;
   }
-  out->data.insert(out->data.end(), data, data + data_bytes);
+  decoded.data.insert(decoded.data.end(), data, data + data_bytes);
   if (!cursor.ok()) {
     SetError(error, "cell payload: truncated body");
     return false;
@@ -1049,19 +1110,19 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
   // Lift each archetype's stable ids out of the byte buffer, so reading one is
   // an array access rather than a cast through bytes that were never a u64.
   u64 total_ids = 0;
-  for (const WorldArchetypeRecord& archetype : out->archetypes) total_ids += archetype.row_count;
+  for (const WorldArchetypeRecord& archetype : decoded.archetypes) total_ids += archetype.row_count;
   if (total_ids > kMaximumTotalRows) {
     SetError(error, "cell payload: " + std::to_string(total_ids) +
                         " rows across its archetypes, more than a cell may hold");
     return false;
   }
-  out->stable_ids.reserve(static_cast<size_t>(total_ids));
-  for (WorldArchetypeRecord& archetype : out->archetypes) {
-    archetype.stable_id_index = static_cast<u32>(out->stable_ids.size());
-    Cursor ids(std::span<const u8>(out->data.data(), out->data.size()));
+  decoded.stable_ids.reserve(static_cast<size_t>(total_ids));
+  for (WorldArchetypeRecord& archetype : decoded.archetypes) {
+    archetype.stable_id_index = static_cast<u32>(decoded.stable_ids.size());
+    Cursor ids(std::span<const u8>(decoded.data.data(), decoded.data.size()));
     const u8* skipped = nullptr;
     ids.Take(static_cast<size_t>(archetype.stable_id_offset), &skipped);
-    for (u32 row = 0; row < archetype.row_count; ++row) out->stable_ids.push_back(ids.U64());
+    for (u32 row = 0; row < archetype.row_count; ++row) decoded.stable_ids.push_back(ids.U64());
     if (!ids.ok()) {
       SetError(error, "cell payload: archetype stable ids run past the data section");
       return false;
@@ -1072,15 +1133,16 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
   // one lets two live rows share an identity, so Resolve can only ever reach
   // the first and an overlay delta lands on both.
   base::Vector<u64> seen;
-  seen.reserve(out->stable_ids.size() + out->instances.size());
-  seen.insert(seen.end(), out->stable_ids.begin(), out->stable_ids.end());
-  for (const WorldInstanceRecord& instance : out->instances) seen.push_back(instance.stable_id);
+  seen.reserve(decoded.stable_ids.size() + decoded.instances.size());
+  seen.insert(seen.end(), decoded.stable_ids.begin(), decoded.stable_ids.end());
+  for (const WorldInstanceRecord& instance : decoded.instances) seen.push_back(instance.stable_id);
   std::sort(seen.begin(), seen.end());
   for (size_t i = 1; i < seen.size(); ++i) {
     if (seen[i] != seen[i - 1]) continue;
     SetError(error, "cell payload: stable id " + std::to_string(seen[i]) + " appears twice");
     return false;
   }
+  *out = std::move(decoded);
   return true;
 }
 

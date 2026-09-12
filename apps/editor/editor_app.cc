@@ -1201,9 +1201,16 @@ void Editor::DoBakeWorld() {
   std::error_code ignored;
   fs::remove(stage, ignored);
 
+  // Named for where the archive lands, not for where it is written. The cook
+  // takes an unset name from the path it is given, and that path is the staging
+  // file here, so leaving it unset would bury the world under a directory named
+  // after a temporary nobody will ever open the archive by.
+  world::WorldBakeOptions options = world_bake_options_;
+  if (options.name.empty()) options.name = world::WorldNameForArchive(archive.string());
+
   world::WorldBakeResult result;
   std::string error;
-  if (!world::BakeWorld(scene_path_, world_bake_options_, stage.string(), &result, &error)) {
+  if (!world::BakeWorld(scene_path_, options, stage.string(), &result, &error)) {
     fs::remove(stage, ignored);
     // The refusals are the point of having this button in the editor at all:
     // they land where the author is looking instead of in a terminal.

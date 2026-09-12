@@ -30,7 +30,7 @@ void PrintUsage() {
   RX_INFO("  --usd <path>          load a usd/usda/usdc/usdz stage");
   RX_INFO("  --scene <path>        load any of the above, or a .rxscene text scene");
   RX_INFO("  --world <archive.rxp> stream a baked world around the camera");
-  RX_INFO("  --world-name <name>   the name it was cooked under (default streamworld)");
+  RX_INFO("  --world-name <name>   the name it was cooked under (default: the archive filename)");
   RX_INFO("  --usd-show <prim>     force a usd prim subtree visible (repeatable)");
   RX_INFO("  --usd-hide <prim>     force a usd prim subtree hidden (repeatable)");
   RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");

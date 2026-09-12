@@ -2,6 +2,7 @@
 #define RX_WORLD_WORLD_BAKE_H_
 
 #include <string>
+#include <string_view>
 
 #include <base/containers/vector.h>
 
@@ -42,10 +43,20 @@
 
 namespace rx::world {
 
+// The world name an archive path implies: its filename with directories and
+// extension removed, so "build/worlds/city.rxp" is "city".
+//
+// One function because three front ends have to agree on it - the cook that
+// writes <name>/ into the archive, `rxworld inspect`, and `rx --world` - and a
+// constant default would have them agree only by accident. It also keeps two
+// worlds from colliding when they are merged into one archive, which naming
+// every world the same thing would guarantee.
+RX_WORLD_EXPORT std::string WorldNameForArchive(std::string_view archive_path);
+
 struct WorldBakeOptions {
   // Names the world, and the directory its index and payloads sit in inside the
-  // archive: <name>/<name>.rxworld.
-  std::string name = "world";
+  // archive: <name>/<name>.rxworld. Empty means WorldNameForArchive.
+  std::string name;
   f32 cell_size = 64.0f;
   // 0 hashes the cook: the scene's bytes, these settings, and the reflected
   // layout of every component actually written. An explicit value overrides it,
@@ -94,6 +105,10 @@ RX_WORLD_EXPORT BakeVerdict ClassifyForBake(ecs::World& world, ecs::Entity entit
 
 struct WorldBakeResult {
   u64 bake_id = 0;
+  // The name the world was actually cooked under, which is what `--world-name`
+  // has to be given to open it. Reported rather than left to the caller to
+  // recompute, because an empty options.name means the cook decided it.
+  std::string name;
   u32 cells = 0;
   u32 entities = 0;
   u32 instances = 0;

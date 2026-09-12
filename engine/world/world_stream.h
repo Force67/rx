@@ -4,12 +4,14 @@
 #include <span>
 #include <string>
 
+#include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 #include <base/memory/unique_pointer.h>
 
 #include "asset/vfs.h"
 #include "core/export.h"
 #include "ecs/world.h"
+#include "edit/reflect.h"
 #include "scene/world_streaming.h"
 #include "world/world_claim.h"
 #include "world/world_map.h"
@@ -91,6 +93,14 @@ class RX_WORLD_EXPORT CellLoader {
 };
 
 // Reads and decodes through the Vfs. `map` and `vfs` must outlive the loader.
+//
+// This one is synchronous: Begin does the whole read and decode inline, so the
+// work lands on the thread that called WorldStreamer::Update. The frame budget
+// caps it at maximum_prepare_starts per domain per tick, which bounds the
+// hitch without removing it. It is the right loader for a tool, a test, and a
+// world small enough that the bound is enough; a game that streams a large
+// archive wants one that hands Begin to the job system and returns, which is
+// what the CellLoader interface exists to allow.
 RX_WORLD_EXPORT base::UniquePointer<CellLoader> MakeArchiveCellLoader(const WorldMap& map,
                                                                       const asset::Vfs& vfs);
 
@@ -117,8 +127,10 @@ struct WorldStreamerStats {
 // radii and budget, materializing cooked payloads into an ecs::World and
 // tearing them down again.
 //
-// Everything happens on the calling thread. The streamer never blocks on I/O
-// itself; it asks the CellLoader and picks the results up on a later tick.
+// Everything happens on the calling thread. The streamer itself never reads a
+// file: it asks the CellLoader and picks the results up on a later tick, so
+// whether a load blocks the caller is the loader's answer to give, not this
+// class's. MakeArchiveCellLoader's answer is "yes"; see it.
 class RX_WORLD_EXPORT WorldStreamer {
  public:
   WorldStreamer(const WorldMap& map, CellLoader& loader, ecs::World& world);
@@ -319,6 +331,8 @@ class RX_WORLD_EXPORT WorldStreamer {
   bool Suppressed(const DomainState& state, u64 cell) const;
   void AdvanceRetirements(Domain domain, DomainState& state);
 
+  // The reflected layout hash of a component as this build sees it, memoized.
+  u64 LayoutHash(const edit::ComponentDesc& desc) const;
   bool ResolveSchema(DomainCell& cell, std::string* error) const;
   // Materializes at most `rows` rows; true when the cell is fully published.
   bool MaterializeStep(DomainCell& cell, u32 rows);
@@ -335,7 +349,8 @@ class RX_WORLD_EXPORT WorldStreamer {
   DomainState domains_[kDomainCount];
   base::Vector<CellLoadResult> results_scratch_;
   base::Vector<u32> rows_scratch_;
-  base::Vector<CellDemand> claim_scratch_;
+  // Component id to its reflected layout hash; see LayoutHash.
+  mutable base::UnorderedMap<ecs::ComponentId, u64> layout_hashes_;
   base::Vector<std::string> errors_;
   u32 error_count_ = 0;
   u64 tick_ = 0;
