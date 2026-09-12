@@ -24,9 +24,9 @@ struct ComparePush {
   u32 region;
   u32 stats;
   f32 exposure_scale;
+  u32 stats_base;
 };
 
-constexpr u32 kStatSlots = 16;  // 4 regions x 4 accumulators
 constexpr f64 kStatScale = 65536.0;
 
 }  // namespace
@@ -49,10 +49,18 @@ bool ReferenceCompare::Initialize(Device& device) {
                                 .address_u = AddressMode::kClampToEdge,
                                 .address_v = AddressMode::kClampToEdge});
   // Host-visible so the fitting loop can read the metric without a staging
-  // round trip; it is 64 bytes.
-  stats_buffer_ = device.CreateBuffer(kStatSlots * sizeof(u32), kBufferUsageStorage, true);
-  if (!stats_buffer_.mapped) return false;
-  std::memset(stats_buffer_.mapped, 0, kStatSlots * sizeof(u32));
+  // round trip; it is under half a kilobyte. TransferDst because the pass
+  // clears its own ring slot on the GPU - clearing it from the CPU at record
+  // time races the dispatches still in flight from earlier frames.
+  const u64 stats_bytes = u64(kStatWordsPerFrame) * kStatRing * sizeof(u32);
+  stats_buffer_ =
+      device.CreateBuffer(stats_bytes, kBufferUsageStorage | kBufferUsageTransferDst, true);
+  if (!stats_buffer_.mapped) {
+    device.DestroyPipeline(pipeline_);
+    pipeline_ = {};
+    return false;
+  }
+  std::memset(stats_buffer_.mapped, 0, stats_bytes);
 
   // "No mask loaded" must mean "every region is everywhere", not "nothing is
   // anything" - otherwise turning stats on before authoring a mask silently
@@ -85,6 +93,8 @@ void ReferenceCompare::Destroy(Device& device) {
   reference_ = {};
   region_mask_ = {};
   white_mask_ = {};
+  stats_frame_ = 0;
+  stats_read_slot_ = 0;
   device_ = nullptr;
 }
 
@@ -159,16 +169,31 @@ ResourceHandle ReferenceCompare::AddToGraph(RenderGraph& graph, ResourceHandle s
                                             .width = extent.width,
                                             .height = extent.height});
   Settings s = settings_;
+  // This frame accumulates into its own ring slot. Up to kMaxFramesInFlight
+  // earlier frames may still be executing, so the newest slot whose dispatch
+  // has certainly retired sits that many frames back - which is the one stats()
+  // may read without a stall.
+  const u32 write_slot = stats_frame_ % kStatRing;
+  stats_read_slot_ = (stats_frame_ + kStatRing - Device::kMaxFramesInFlight) % kStatRing;
+  ++stats_frame_;
+  const u32 stats_base = write_slot * kStatWordsPerFrame;
   graph.AddPass(
       "reference_compare",
       [&](RenderGraph::PassBuilder& builder) {
         builder.Read(scene_color, ResourceUsage::kSampledCompute);
         builder.Write(out, ResourceUsage::kStorageWrite);
       },
-      [this, scene_color, out, extent, s, tonemap_op](PassContext& ctx) {
+      [this, scene_color, out, extent, s, tonemap_op, stats_base](PassContext& ctx) {
         // The metric accumulates for exactly one frame, so a fitting step reads
         // one frame's error and not a running sum of every frame it displayed.
-        if (s.collect_stats) std::memset(stats_buffer_.mapped, 0, kStatSlots * sizeof(u32));
+        // The clear runs on the GPU, ordered against this frame's own dispatch:
+        // memset-ing the mapped pointer here would run at RECORD time, while
+        // earlier frames are still atomically adding into the same buffer.
+        if (s.collect_stats) {
+          ctx.cmd->FillBuffer(stats_buffer_, u64(stats_base) * sizeof(u32),
+                              u64(kStatWordsPerFrame) * sizeof(u32), 0);
+          ctx.cmd->MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kComputeRead);
+        }
         ComparePush push{};
         push.size[0] = extent.width;
         push.size[1] = extent.height;
@@ -186,6 +211,7 @@ ResourceHandle ReferenceCompare::AddToGraph(RenderGraph& graph, ResourceHandle s
         push.region = static_cast<u32>(s.region);
         push.stats = s.collect_stats ? 1u : 0u;
         push.exposure_scale = s.exposure_scale;
+        push.stats_base = stats_base;
 
         const GpuImage& mask = region_mask_ ? region_mask_ : white_mask_;
         ctx.cmd->BindPipeline(pipeline_);
@@ -204,14 +230,23 @@ ResourceHandle ReferenceCompare::AddToGraph(RenderGraph& graph, ResourceHandle s
 ReferenceCompare::Stats ReferenceCompare::stats(Region region) const {
   Stats out;
   if (!stats_buffer_.mapped) return out;
-  const u32 index = region == Region::kAll ? 0u : static_cast<u32>(region) - 1u;
-  const u32* raw = static_cast<const u32*>(stats_buffer_.mapped) + index * 4;
-  const f64 count = static_cast<f64>(raw[3]) / kStatScale;
+  // Region values index the shader's buckets directly: 0 really is the whole
+  // frame, not the red mask channel standing in for it.
+  const u32* raw = static_cast<const u32*>(stats_buffer_.mapped) +
+                   stats_read_slot_ * kStatWordsPerFrame +
+                   static_cast<u32>(region) * kStatAccumulators * 2;
+  // Each accumulator is a 64-bit fixed-point pair, low word first.
+  auto read = [raw](u32 accumulator) {
+    const u32 lo = raw[accumulator * 2];
+    const u32 hi = raw[accumulator * 2 + 1];
+    return (static_cast<f64>(hi) * 4294967296.0 + static_cast<f64>(lo)) / kStatScale;
+  };
+  const f64 count = read(3);
   if (count <= 0.0) return out;
   out.coverage = count;
-  out.mean_squared_error = static_cast<f64>(raw[0]) / kStatScale / count;
-  out.mean_absolute_error = static_cast<f64>(raw[1]) / kStatScale / count / 3.0;
-  out.mean_reference_luma = static_cast<f64>(raw[2]) / kStatScale / count;
+  out.mean_squared_error = read(0) / count;
+  out.mean_absolute_error = read(1) / count / 3.0;
+  out.mean_reference_luma = read(2) / count;
   return out;
 }
 

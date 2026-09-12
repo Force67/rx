@@ -127,6 +127,24 @@ struct FitField {
   f32 HumanSurfaceParameters::*member;
 };
 
+// Which mask channel scores a given anatomical region. Fitting the lips against
+// the skin channel (or against the whole frame) measures the wrong pixels, and
+// the fit then converges on whatever dominates the coverage instead of on the
+// part being tuned. The mask's channels are r skin, g eyes, b lips, a teeth.
+Compare::Region MaskRegionFor(HumanRegion region) {
+  switch (region) {
+    case HumanRegion::kSkin: return Compare::Region::kSkin;
+    case HumanRegion::kLips: return Compare::Region::kLips;
+    case HumanRegion::kTeeth:
+    case HumanRegion::kGums: return Compare::Region::kTeeth;
+    case HumanRegion::kSclera:
+    case HumanRegion::kCornea:
+    case HumanRegion::kIris:
+    case HumanRegion::kTearline: return Compare::Region::kEyes;
+  }
+  return Compare::Region::kAll;
+}
+
 constexpr FitField kFitFields[] = {
     {"secondary_roughness_scale", 2, &HumanSurfaceParameters::secondary_roughness_scale},
     {"secondary_specular_weight", 2, &HumanSurfaceParameters::secondary_specular_weight},
@@ -732,6 +750,12 @@ void LookdevDemo::Impl::StepFit() {
 
   const FitField& field = kFitFields[fit.field];
   const render::HumanRange range = render::HumanSafeRange(field.name);
+  if (!range.known) {
+    // Stepping a field over a made-up range is not a fit, it is a random walk.
+    fit.running = false;
+    fit.log = std::string("no safe range for ") + field.name;
+    return;
+  }
   f32& value = target->params.*(field.member);
 
   // Settle: the parameter write lands in a uniform this frame, the metric it
@@ -744,8 +768,7 @@ void LookdevDemo::Impl::StepFit() {
 
   // Accumulate this probe's error over the selected stops.
   if (fit.stop_cursor < static_cast<int>(fit.stops.size())) {
-    const Compare::Stats stats = compare.stats(
-        fit.region == HumanRegion::kSkin ? Compare::Region::kSkin : Compare::Region::kAll);
+    const Compare::Stats stats = compare.stats(MaskRegionFor(fit.region));
     fit.error[fit.probe] += stats.mean_squared_error;
     ++fit.stop_cursor;
     if (fit.stop_cursor < static_cast<int>(fit.stops.size())) {
@@ -1099,6 +1122,12 @@ void LookdevDemo::Impl::DrawPanel() {
           HumanSurfaceParameters& p = part.params;
           auto slider = [&](const char* label, f32* value) {
             const render::HumanRange r = render::HumanSafeRange(label);
+            // A slider over an invented range edits the material into nonsense,
+            // so show the name as broken instead of pretending it is tunable.
+            if (!r.known) {
+              ImGui::TextDisabled("%s: no safe range", label);
+              return;
+            }
             if (ImGui::SliderFloat(label, value, r.lo, r.hi)) dirty = true;
           };
           ImGui::SeparatorText("1-2 frontal + specular shape");

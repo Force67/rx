@@ -355,6 +355,34 @@ int main() {
           "HumanStore / HumanResolve round-trip every field");
   }
 
+  // --- 11. the area-light terminator multiplier stays bounded ---------------
+  // HumanEvaluatePreintegrated carries the terminator onto LTC area lights as a
+  // RATIO of the soft cosine to the hard one. The hard cosine goes to zero at
+  // the terminator and the soft one does not, so an unbounded ratio multiplies
+  // the panel's diffuse integral by hundreds and rings the face in blown-out
+  // white. The bound is the contract; this pins it.
+  {
+    const rx::f32 rep_grazing[3] = {0.9999f, 0.014f, 0.0f};  // ~0.8 deg above the horizon
+    for (int ri = 0; ri < 8; ++ri) {
+      const HumanSurfaceParameters p = HumanPreset(static_cast<HumanRegion>(ri));
+      rx::f32 worst = 0.0f;
+      // Sweep the terminator, including the far side the wrap reaches onto.
+      for (int i = -64; i <= 64; ++i) {
+        const rx::f32 theta = kPi * 0.5f - static_cast<rx::f32>(i) * (kPi * 0.5f / 64.0f);
+        const V3 ll = Spherical(theta, 0.0f);
+        const rx::f32 rep[3] = {ll.x, ll.y, ll.z};
+        worst = std::max(worst, HumanTerminatorMultiplierCpu(p, n, n, rep));
+      }
+      Check(worst <= 2.0f, "the area-light terminator multiplier is bounded");
+      if (worst > 2.0f) std::fprintf(stderr, "  region %d worst multiplier: %g\n", ri, worst);
+    }
+    // Neutral has nothing to soften, so the multiplier must be exactly 1 -
+    // otherwise turning the model on re-shades every area-lit surface.
+    const HumanSurfaceParameters neutral = HumanNeutral();
+    Check(std::abs(HumanTerminatorMultiplierCpu(neutral, n, n, rep_grazing) - 1.0f) < 1e-6f,
+          "the neutral set leaves area-light diffuse untouched");
+  }
+
   if (failures == 0) std::fprintf(stderr, "human_brdf_test: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

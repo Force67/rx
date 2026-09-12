@@ -42,7 +42,8 @@ struct MaterialRecord {
   float4 human_retro;               // row 8: retro falloff, retro tangent falloff, term amount, term length
   float4 human_spec;                // row 9: spec fresnel falloff, secondary scale, secondary weight, mfp (m)
   float4 human_transmission;        // row 10: transmission, tint rgb
-  float4 human_extra;               // row 11: x light-shape response; y/z/w reserved
+  float4 human_extra;               // row 11: x light-shape response, y thickness scale (m),
+                                    //         z subsurface scale, w extinction scale
 };
 
 // Skin flag bit (matches MaterialSystem::kFlagSkin and mesh.ps MaterialParams).
@@ -74,8 +75,17 @@ HumanSurfaceParams RxHumanFromRecord(MaterialRecord m, float3 albedo, float roug
   p.transmission = m.human_transmission.x;
   p.transmission_tint = m.human_transmission.yzw;
   p.light_shape_response = m.human_extra.x;
+  p.subsurface_scale = m.human_extra.z;
+  p.extinction_scale = m.human_extra.w;
   return p;
 }
+
+// Thickness the ray paths feed the transmission lobe, in metres. They cannot
+// sample a thickness map, so they use the material's own scale - which is what
+// the raster path uses for a material with no map bound, and a sane mean for
+// one that has. Feeding 0 instead would not disable the lobe: zero optical
+// depth means zero attenuation, i.e. transmission at FULL strength.
+float RxHumanThicknessFromRecord(MaterialRecord m) { return max(m.human_extra.y, 0.0); }
 #endif
 
 #endif  // RX_MATERIAL_RECORD_HLSLI_

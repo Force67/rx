@@ -1,7 +1,10 @@
 #include "render/pipeline/human_material.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+
+#include "core/log.h"
 
 namespace rx::render {
 namespace {
@@ -260,7 +263,10 @@ HumanRange HumanSafeRange(const char* field) {
   if (is("cornea_ior")) return {1.0f, 1.6f};
   if (is("iris_shadow_depth")) return {0.0f, 1.0f};
   if (is("residual_weight")) return {0.0f, 1.0f};
-  return {0.0f, 1.0f};
+  RX_ERROR("human material: no safe range for '{}'; the caller is naming a field "
+           "that does not exist",
+           field ? field : "(null)");
+  return {0.0f, 1.0f, false};
 }
 
 HumanSurfaceParameters HumanResolve(const asset::Material::HumanParams& a) {
@@ -423,6 +429,26 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
     }
   }
   return out;
+}
+
+f32 HumanTerminatorMultiplierCpu(const HumanSurfaceParameters& p, const f32 geometric_n[3],
+                                 const f32 nd_in[3], const f32 rep_in[3]) {
+  const V3 ng = Load(geometric_n), nd = Load(nd_in), rep = Load(rep_in);
+  const f32 ndl_shading = Dot(nd, rep);
+  const f32 ndl = Sat(ndl_shading);
+
+  f32 cos_soft = ndl;
+  if (p.smooth_terminator_amount > 0.0f) {
+    const f32 w = std::max(p.smooth_terminator_length, 0.0f);
+    const f32 soft = Sat((ndl_shading + w) / ((1.0f + w) * (1.0f + w)));
+    const f32 gate = Sat(Dot(ng, rep) * 4.0f + 1.0f);
+    cos_soft = ndl + (soft - ndl) * Sat(p.smooth_terminator_amount) * gate;
+  }
+
+  const f32 wrap = std::max(p.smooth_terminator_length, 0.0f);
+  const f32 amount = Sat(p.smooth_terminator_amount);
+  const f32 max_lift = (1.0f - amount) + amount * 2.0f / ((1.0f + wrap) * (1.0f + wrap));
+  return std::min(cos_soft / std::max(ndl, 1e-4f), max_lift);
 }
 
 HumanBrdfSample StockBrdfCpu(const f32 base_color[3], f32 roughness, const f32 f0[3],

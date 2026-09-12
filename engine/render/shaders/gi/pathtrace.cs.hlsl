@@ -85,6 +85,7 @@ struct Hit {
   float3 sss_scatter_color;
   bool human;
   float roughness;
+  float human_thickness;
   HumanSurfaceParams human_params;
 };
 
@@ -94,6 +95,7 @@ Hit TraceClosest(float3 origin, float3 dir) {
   h.skin = false;
   h.human = false;
   h.roughness = 1.0;
+  h.human_thickness = 0.0;
   h.human_params = HumanNeutralParams(0.0.xxx, 1.0, 0.04.xxx);
   h.sss_sigma_t = 0.0.xxx;
   h.sss_sigma_s = 0.0.xxx;
@@ -143,7 +145,10 @@ Hit TraceClosest(float3 origin, float3 dir) {
   // raster and hybrid paths use. Without this the tracer - the thing everything
   // else is validated against - would quietly disagree about what skin is.
   h.human = (m.flags & RX_MATERIAL_FLAG_HUMAN) != 0u;
-  h.human_params = RxHumanFromRecord(m, albedo, m.roughness, 0.04.xxx);
+  if (h.human) {
+    h.human_params = RxHumanFromRecord(m, albedo, m.roughness, 0.04.xxx);
+    h.human_thickness = RxHumanThicknessFromRecord(m);
+  }
   if ((m.flags & RX_MATERIAL_FLAG_SKIN) != 0u) {
     h.skin = true;
     h.sss_sigma_t = m.sss_sigma_t;
@@ -241,24 +246,32 @@ float3 Radiance(float3 origin, float3 dir, inout uint rng) {
       // Next event estimation toward the (soft) sun disk.
       float3 ldir = SunDirection(rng);
       float ndl = dot(h.normal, ldir);
-      if (!Occluded(h.position + h.normal * 0.002, ldir, 1000.0)) {
+      // The character branch does not gate on ndl > 0 (the terminator control
+      // and the transmission lobe both reach past it), so the shadow ray is
+      // only worth casting for a Lambert hit that is actually facing the sun.
+      if ((h.human || ndl > 0.0) && !Occluded(h.position + h.normal * 0.002, ldir, 1000.0)) {
         if (h.human) {
-          // One evaluator, so the traced face and the rastered face agree. The
-          // terminator control can lift light past ndl == 0, which is why this
-          // branch does not gate on ndl > 0 the way the Lambert one does.
+          // One evaluator, so the traced face and the rastered face agree.
           HumanLightSample ls;
           ls.direction = ldir;
           ls.radiance = sun;
           ls.distance = 1e6;
-          ls.solid_angle = kPi * pc.sun_color.w * pc.sun_color.w;
+          // Punctual on purpose: SunDirection already SAMPLED the sun disk, so
+          // widening the lobe by the disk's solid angle here would account for
+          // the light's shape twice and leave the traced face glossier than the
+          // rastered one - the opposite of what this path is for.
+          ls.solid_angle = 0.0;
           ls.visibility = 1.0;
           ls.transmission_visibility = 1.0;
           ls.type = 0u;
           ls.flags = 0u;
           HumanShadingNormals hn = HumanNormals(h.normal);
-          HumanBrdfResult hr = HumanEvaluate(h.human_params, hn, -dir, ls, 0.0);
-          radiance += throughput * (hr.diffuse + hr.specular) * sun;
-        } else if (ndl > 0.0) {
+          HumanBrdfResult hr = HumanEvaluate(h.human_params, hn, -dir, ls, h.human_thickness);
+          // Transmission is part of the material, not a raster-only garnish:
+          // dropping it here is what made ears and nostrils read differently
+          // under the tracer than under the raster path.
+          radiance += throughput * (hr.diffuse + hr.specular + hr.transmission) * sun;
+        } else {
           radiance += throughput * h.albedo / kPi * sun * ndl;
         }
       }

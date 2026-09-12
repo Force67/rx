@@ -30,9 +30,11 @@ class ReferenceCompare {
     kReferenceOnly,
   };
 
-  // Regions the error metric is bucketed into. They come from a mask texture's
-  // four channels; fitting one material against a mask that mixes them
-  // converges on none of them.
+  // Regions the error metric is bucketed into. kAll is a bucket of its own (the
+  // whole aligned frame); the rest come from a mask texture's four channels.
+  // Fitting one material against a mask that mixes them converges on none of
+  // them. The values index the shader's buckets directly - keep them in step
+  // with the loop in post/reference_compare.cs.hlsl.
   enum class Region : u8 { kAll, kSkin, kEyes, kLips, kTeeth };
 
   struct Settings {
@@ -51,9 +53,11 @@ class ReferenceCompare {
     f32 exposure_scale = 1.0f;
   };
 
-  // Per-region readback of the accumulated error, one frame behind (the
-  // readback is deliberately not stalled - a fitting loop wants throughput,
-  // and a one-frame-old metric of a static rig is the same metric).
+  // Per-region readback of the accumulated error, a couple of frames behind
+  // (the readback is deliberately not stalled - a fitting loop wants
+  // throughput, and a slightly old metric of a static rig is the same metric).
+  // The pass accumulates into a ring so the slot being read is one the GPU has
+  // provably finished with, rather than one it is still adding into.
   struct Stats {
     f64 mean_squared_error = 0.0;
     f64 mean_absolute_error = 0.0;
@@ -84,6 +88,15 @@ class ReferenceCompare {
   Stats stats(Region region) const;
 
  private:
+  // 5 buckets (whole frame + 4 mask channels) x 4 accumulators x 2 words: the
+  // accumulators are 64-bit fixed point because a u32 wraps after a 256x256
+  // region. The ring is one slot deeper than the frames the device keeps in
+  // flight, which is what lets stats() read a finished slot without a stall.
+  static constexpr u32 kStatBuckets = 5;
+  static constexpr u32 kStatAccumulators = 4;
+  static constexpr u32 kStatWordsPerFrame = kStatBuckets * kStatAccumulators * 2;
+  static constexpr u32 kStatRing = Device::kMaxFramesInFlight + 1;
+
   Settings settings_;
   PipelineHandle pipeline_;
   SamplerHandle sampler_;
@@ -91,6 +104,8 @@ class ReferenceCompare {
   GpuImage region_mask_;
   GpuImage white_mask_;  // 1x1 all-channels-1, so "no mask loaded" means "all"
   GpuBuffer stats_buffer_;
+  u32 stats_frame_ = 0;       // frames recorded; picks the write slot
+  u32 stats_read_slot_ = 0;   // the newest slot the GPU has certainly retired
   Device* device_ = nullptr;
 };
 

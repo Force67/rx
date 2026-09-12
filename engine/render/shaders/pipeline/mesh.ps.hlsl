@@ -60,9 +60,9 @@ struct FrameGlobals {
 
 #include "geometry/shore_wetting.hlsli"  // ShoreWetness / ApplyShoreWetness (env slot 33)
 #include "geometry/water_caustics.hlsli"  // WaterCaustic (env slot 34)
-#include "sss_profile.hlsli"
+#include "sss_profile.hlsli"  // skin subsurface profile + blood-flow perfusion
 #include "human_brdf.hlsli"  // the character surface model every light path shares
-#include "human_eye.hlsli"   // corneal refraction, iris parallax, limbal ring  // skin subsurface profile + blood-flow perfusion
+#include "human_eye.hlsli"   // corneal refraction, iris parallax, limbal ring
 
 struct PointLight {
   float4 pos_radius;       // xyz position, w influence radius
@@ -956,12 +956,17 @@ float3 SpecularNormal(PsIn input, float3 nd) {
   if ((material.flags & kFlagSpecularNormal) == 0u || material.human_layer.y <= 0.0) return nd;
   float3 sampled = spec_normal_map.Sample(spec_normal_sampler, input.uv).xyz * 2.0 - 1.0;
   sampled.xy *= material.human_layer.y;
-  float3 gn = normalize(input.normal);
-  float3 t = input.tangent.xyz - gn * dot(input.tangent.xyz, gn);
+  // The frame is built on Nd, NOT on the geometric normal. Building it on the
+  // geometry made the slider discontinuous at zero: strength 0 returned nd, but
+  // any strength above it snapped Ns to the geometric normal, which is a
+  // different vector everywhere the diffuse normal map is doing something. The
+  // whole point of the split is being able to dial it to nothing and land back
+  // on the un-split result, so the perturbation has to be RELATIVE to Nd.
+  float3 t = input.tangent.xyz - nd * dot(input.tangent.xyz, nd);
   if (dot(t, t) <= 1e-8) return nd;
   t = normalize(t);
-  float3 b = cross(gn, t) * input.tangent.w;
-  float3 ns = sampled.x * t + sampled.y * b + sampled.z * gn;
+  float3 b = cross(nd, t) * input.tangent.w;
+  float3 ns = sampled.x * t + sampled.y * b + sampled.z * nd;
   return dot(ns, ns) > 1e-8 ? normalize(ns) : nd;
 }
 
@@ -1418,16 +1423,36 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
     float3 restir_di = restir_diffuse_map.Load(restir_p).rgb;
     float3 restir_ds = restir_spec_map.Load(restir_p).rgb;
     float3 restir_diffuse_term = diffuse_color * (1.0 / kPi) * restir_di;
+    float3 restir_spec_term = f0 * restir_ds * spec_tint;
     if (human) {
-      // ReSTIR hands back DIRECTION-FREE irradiance, so only the view half of
-      // the diffuse Fresnel survives; applying the light half here would
-      // double-count what the estimator already integrated over.
+      // ReSTIR hands back DIRECTION-FREE irradiance, so only the VIEW half of
+      // the material's directional shaping can be applied here: the light-half
+      // terms (retroreflection, the wrapped terminator, the transmission lobe)
+      // are functions of L, and the estimator already integrated L away.
+      // Re-deriving them from a representative direction would be inventing a
+      // second material, so this path is deliberately the reduced one - it is
+      // the one place the model is not evaluated whole, and the reason the
+      // character bench runs with ReSTIR DI off.
       float gv = pow(saturate(1.0 - max(dot(hn.diffuse, v), 1e-4)),
                      max(hp.diffuse_fresnel_falloff, 1e-2));
       restir_diffuse_term *= 1.0 + hp.diffuse_fresnel_peak * gv;
+      // The specular Fresnel exponent IS view-only, so there is no excuse for
+      // the stock pow5 here: an authored falloff has to reach this path too or
+      // a face changes reflectance the moment ReSTIR DI is switched on.
+      restir_spec_term = HumanFresnel(f0, max(dot(hn.specular, v), 1e-4),
+                                      hp.spec_fresnel_falloff) *
+                         restir_ds * spec_tint;
+      // The wet layer dims what is underneath it by its own reflectance; it is
+      // view-only too, so it applies here for the same reason.
+      if (hp.corneal_wetness > 0.0) {
+        float wf = (0.02 + 0.98 * pow(saturate(1.0 - max(dot(hn.specular, v), 1e-4)), 5.0)) *
+                   saturate(hp.corneal_wetness);
+        restir_diffuse_term *= 1.0 - wf;
+      }
       g_human_diffuse += restir_diffuse_term;
+      g_human_specular += restir_spec_term;
     }
-    lit += restir_diffuse_term + f0 * restir_ds * spec_tint;
+    lit += restir_diffuse_term + restir_spec_term;
     g_skin_diffuse += restir_diffuse_term;
   }
 

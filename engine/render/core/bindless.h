@@ -79,7 +79,11 @@ class BindlessRegistry {
     f32 human_retro[4] = {5, 5, 0, 0};   // retro falloff, retro tangent falloff, term amount, term length
     f32 human_spec[4] = {5, 3, 0, 0.001f};  // spec fresnel falloff, secondary scale, secondary weight, mfp
     f32 human_transmission[4] = {0, 1, 0.35f, 0.2f};  // transmission, tint rgb
-    f32 human_extra[4] = {0, 0, 0, 0};  // x light-shape response; y/z/w reserved
+    // x light-shape response, y thickness scale (m), z subsurface scale,
+    // w extinction scale. The last three are what the transmission lobe needs;
+    // without them a traced face would evaluate it against neutral transport
+    // while the rastered one used the authored numbers.
+    f32 human_extra[4] = {0, 0.01f, 1, 1};
   };
   static_assert(sizeof(MaterialRecord) % 16 == 0, "bindless material stride must be 16-aligned");
   static_assert(sizeof(MaterialRecord) == 192, "bindless material record must match shaders/material_record.hlsli");

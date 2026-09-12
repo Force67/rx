@@ -361,10 +361,18 @@ HumanBrdfResult HumanEvaluatePreintegrated(HumanSurfaceParams p, HumanShadingNor
   float ldh = saturate(dot(rep_dir, h));
   float shaping = HumanDiffuseShaping(p, ndl, ndv, ldh);
   // The terminator softening rides the ratio, not the integral: LTC already
-  // carries the cosine.
+  // carries the cosine. The ratio has to be CAPPED, because cos_soft stays
+  // finite as ndl goes to zero while cos_hard does not - uncapped it runs to
+  // ~1/epsilon and puts a blown-out ring on every area-lit face. The cap is the
+  // ratio at ndl == the wrap width, which is the largest lift this
+  // approximation still means anything at; it is exactly 1 for the neutral set,
+  // so capping cannot disturb neutral parity.
+  float wrap = max(p.smooth_terminator_length, 0.0);
+  float amount = saturate(p.smooth_terminator_amount);
+  float max_lift = (1.0 - amount) + amount * 2.0 / ((1.0 + wrap) * (1.0 + wrap));
   float cos_hard = max(ndl, 1e-4);
   float cos_soft = HumanDiffuseCosine(p, dot(n.diffuse, rep_dir), dot(n.geometric, rep_dir));
-  float terminator = cos_soft / cos_hard;
+  float terminator = min(cos_soft / cos_hard, max_lift);
 
   r.diffuse = p.base_color * (1.0 - p.metallic) * diffuse_integral * shaping * terminator * visibility;
   r.specular = specular_integral * visibility;

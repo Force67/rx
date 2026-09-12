@@ -112,11 +112,21 @@ HumanTier HumanTierForScreenHeight(f32 pixels);
 struct HumanRange {
   f32 lo;
   f32 hi;
+  bool known = true;  // false: `field` names nothing, and lo/hi are meaningless
 };
+// An unrecognised field name returns known == false rather than a plausible
+// [0,1]: the callers drive sliders and a fitting search off this, and silently
+// clamping mean_free_path to [0,1] would hand back numbers that look fine and
+// are wrong by four orders of magnitude.
 HumanRange HumanSafeRange(const char* field);
 
-// Resolves an authored asset material into the GPU parameter block, applying
-// the region preset for anything the material left at its neutral default.
+// Resolves an authored asset material into the GPU parameter block. It is a
+// straight field copy and deliberately does NOT fold in the region preset: the
+// authored defaults ARE the neutral set, and a material that opts into `human`
+// without touching a control has to keep shading exactly as it did before (see
+// asset::Material::HumanParams). A preset is a starting point an author applies
+// through the lookdev tool, which writes the result back with HumanStore; it is
+// not something the upload path substitutes behind their back.
 HumanSurfaceParameters HumanResolve(const asset::Material::HumanParams& authored);
 
 // The inverse: writes a resolved parameter block back onto an authored material
@@ -145,6 +155,14 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
 // The stock Lambert + GGX the neutral set must reproduce.
 HumanBrdfSample StockBrdfCpu(const f32 base_color[3], f32 roughness, const f32 f0[3],
                              const f32 n[3], const f32 v[3], const f32 l[3]);
+
+// The multiplier HumanEvaluatePreintegrated applies to an LTC diffuse integral
+// to carry the terminator control onto area lights. Mirrors the shader. It is
+// its own entry point because it is the one part of the model that is a RATIO:
+// an unbounded one puts a blown-out ring on every area-lit face, so the bound
+// is a contract the test pins rather than an implementation detail.
+f32 HumanTerminatorMultiplierCpu(const HumanSurfaceParameters& p, const f32 geometric_n[3],
+                                 const f32 nd[3], const f32 rep_dir[3]);
 
 }  // namespace rx::render
 

@@ -612,8 +612,10 @@ void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntim
 
 // The uniform block + the texture keys a material resolves to. Split out of
 // WriteSet so the live-tuning path can rewrite the numbers without touching a
-// binding set that may be pending on the GPU.
-bool MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, Params& params,
+// binding set that may be pending on the GPU. Resolving cannot fail - every
+// input is already in memory - so this returns void rather than a status
+// nobody could act on.
+void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, Params& params,
                                  u64 out_map_keys[12]) {
   std::memcpy(params.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
   std::memcpy(params.emissive_factor, material.emissive_factor, sizeof(f32) * 3);
@@ -822,14 +824,13 @@ bool MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
   out_map_keys[9] = material.human_params.thickness_map.hash ^ id_salt;
   out_map_keys[10] = material.human_params.residual_ambient.hash ^ id_salt;
   out_map_keys[11] = material.human_params.residual_directional.hash ^ id_salt;
-  return true;
 }
 
 bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
                               const asset::Material& material, u64 id_salt,
                               u64 out_map_keys[12]) {
   Params params;
-  if (!BuildParams(material, id_salt, params, out_map_keys)) return false;
+  BuildParams(material, id_salt, params, out_map_keys);
 
   GpuBuffer& buffer = param_buffers_[pool];
   u64 offset = static_cast<u64>(param_index) * kParamStride;
@@ -898,6 +899,9 @@ BindlessRegistry::MaterialRecord MaterialSystem::BuildBindlessRecord(
     record.human_transmission[0] = h.transmission;
     std::memcpy(record.human_transmission + 1, h.transmission_tint, sizeof(f32) * 3);
     record.human_extra[0] = h.light_shape_response;
+    record.human_extra[1] = h.thickness_scale;
+    record.human_extra[2] = h.subsurface_scale;
+    record.human_extra[3] = h.extinction_scale;
   }
   // Terrain splat: the rasterizer reuses the normal/emissive slots as land
   // layer 1 and the per-cell weight map. Mirror that into the bindless record
@@ -938,7 +942,7 @@ bool MaterialSystem::UpdateMaterialParams(const asset::Material& material, u64 i
   // slider does.
   Params params;
   u64 keys[12];
-  if (!BuildParams(material, id_salt, params, keys)) return false;
+  BuildParams(material, id_salt, params, keys);
   GpuBuffer& buffer = param_buffers_[runtime.pool];
   const u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
   std::memcpy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));

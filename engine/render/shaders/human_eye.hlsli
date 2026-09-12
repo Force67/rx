@@ -106,8 +106,9 @@ HumanEyeSample HumanEyeResolve(HumanEyeParams p, float2 uv, float3 view_ts, floa
   float2 offset = (refr_v.z < 0.0)
                       ? HumanEyeParallax(refr_v, p.iris_depth, uv_per_metre)
                       : float2(0.0, 0.0);
-  // The ray travels DOWN into the eye, so the pigment we see sits opposite the
-  // lateral drift.
+  // The refracted ray drifts laterally on its way down to the iris plane, so
+  // the pigment we see sits ALONG the drift, not opposite it. (The light trace
+  // below runs the same offset backwards, which is why it subtracts.)
   float2 iris_uv = uv + offset;
   iris_uv = HumanEyePupil(iris_uv, p.iris_center, p.iris_radius, p.pupil_scale);
   s.iris_uv = iris_uv;

@@ -353,7 +353,7 @@ class MaterialSystem {
                                                        u64 id_salt, asset::AlphaMode mode);
   // Resolves an asset material into the uniform block and the texture keys its
   // bindings need. No GPU state is touched.
-  bool BuildParams(const asset::Material& material, u64 id_salt, Params& params,
+  void BuildParams(const asset::Material& material, u64 id_salt, Params& params,
                    u64 out_map_keys[12]);
   bool WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
                 const asset::Material& material, u64 id_salt, u64 out_map_keys[12]);

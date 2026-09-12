@@ -26,6 +26,7 @@ struct ComparePush {
   uint region;           // 0 = whole frame, 1..4 = isolate that mask channel
   uint stats;            // 1 = accumulate the error metric
   float exposure_scale;  // the frame's resolved exposure, so mode 4 matches
+  uint stats_base;       // first word of this frame's slot in the stats ring
 };
 PUSH_CONSTANTS(ComparePush, pc);
 
@@ -38,13 +39,30 @@ PUSH_CONSTANTS(ComparePush, pc);
 [[vk::combinedImageSampler]] [[vk::binding(1, 0)]] SamplerState reference_sampler : register(s1, space0);
 [[vk::combinedImageSampler]] [[vk::binding(2, 0)]] Texture2D<float4> region_mask : register(t2, space0);
 [[vk::combinedImageSampler]] [[vk::binding(2, 0)]] SamplerState region_sampler : register(s2, space0);
-// 4 regions x 4 slots: squared error, absolute error, reference luminance,
-// pixel count. Fixed point (x 65536) because atomics on float are not portable.
+// 5 buckets (whole frame, then the mask's four channels) x 4 accumulators
+// (squared error, absolute error, reference luminance, pixel count) x 2 words.
+// Fixed point (x 65536) because atomics on float are not portable, and 64 bit
+// because a single u32 at that scale wraps after 65536 masked pixels - a 256x256
+// region. Every measurement worth making is larger than that, so the wrap used
+// to turn the whole metric into noise.
 [[vk::binding(3, 0)]] RWStructuredBuffer<uint> stats_buffer : register(u3, space0);
 
 static const float kStatScale = 65536.0;
+static const uint kStatWholeFrame = 0u;  // bucket 0 is the frame, not a mask channel
 
 float Luma(float3 c) { return dot(c, float3(0.2126, 0.7152, 0.0722)); }
+
+// Accumulates one non-negative sample into a 64-bit fixed-point slot. `value`
+// is clamped at zero first: a tonemap can return a slightly negative channel,
+// and casting that to uint wraps to ~4e9 and destroys the accumulator.
+void StatAdd(uint slot, float value) {
+  uint amount = (uint)(max(value, 0.0) * kStatScale);
+  if (amount == 0u) return;
+  uint prev;
+  InterlockedAdd(stats_buffer[slot], amount, prev);
+  // Unsigned wrap is the carry: the sum only goes down when it overflowed.
+  if (prev + amount < prev) InterlockedAdd(stats_buffer[slot + 1u], 1u);
+}
 
 [numthreads(8, 8, 1)]
 void main(uint3 id : SV_DispatchThreadID) {
@@ -112,15 +130,22 @@ void main(uint3 id : SV_DispatchThreadID) {
     float3 a = TonemapApply(render * pc.exposure_scale, pc.tonemap_op);
     float3 b = TonemapApply(ref * pc.exposure_scale, pc.tonemap_op);
     float3 d = a - b;
-    for (uint r = 0; r < 4; ++r) {
-      float4 m = region_mask.SampleLevel(region_sampler, uv, 0.0);
-      float w = r == 0u ? m.r : (r == 1u ? m.g : (r == 2u ? m.b : m.a));
+    const float sq = dot(d, d);
+    const float abs_err = dot(abs(d), 1.0.xxx);
+    const float luma = Luma(b);
+    float4 m = saturate(region_mask.SampleLevel(region_sampler, uv, 0.0));
+    // Bucket 0 is the WHOLE FRAME, which the mask channels cannot stand in for:
+    // without it, asking for Region::kAll answered with whatever the red
+    // channel happened to cover.
+    for (uint r = 0; r <= 4u; ++r) {
+      float w = r == kStatWholeFrame ? 1.0
+                                     : (r == 1u ? m.r : (r == 2u ? m.g : (r == 3u ? m.b : m.a)));
       if (w <= 0.001) continue;
-      uint base = r * 4u;
-      InterlockedAdd(stats_buffer[base + 0], (uint)(dot(d, d) * w * kStatScale));
-      InterlockedAdd(stats_buffer[base + 1], (uint)(dot(abs(d), 1.0.xxx) * w * kStatScale));
-      InterlockedAdd(stats_buffer[base + 2], (uint)(Luma(b) * w * kStatScale));
-      InterlockedAdd(stats_buffer[base + 3], (uint)(w * kStatScale));
+      uint base = pc.stats_base + r * 8u;
+      StatAdd(base + 0u, sq * w);
+      StatAdd(base + 2u, abs_err * w);
+      StatAdd(base + 4u, luma * w);
+      StatAdd(base + 6u, w);
     }
   }
 }
