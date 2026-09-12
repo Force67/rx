@@ -1292,6 +1292,7 @@ MaterialSystem::~MaterialSystem() {
   }
   device_.DestroyImage(white_);
   device_.DestroyImage(flat_normal_);
+  device_.DestroyImage(black_);
   if (staging_bytes_) device_.DestroyBuffer(staging_);
   for (GpuBuffer& buffer : param_buffers_) device_.DestroyBuffer(buffer);
   for (MaterialRuntime& runtime : material_records_) device_.DestroyBindingSet(runtime.set);
