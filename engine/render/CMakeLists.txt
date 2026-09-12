@@ -8,6 +8,7 @@ rx_add_module(render
   pipeline/mesh_pipeline.cc
   pipeline/material_system.cc
   pipeline/human_material.cc
+  pipeline/hair_material.cc
   pipeline/meshlet.cc
   pipeline/gpu_cull.cc
   gi/shadow.cc
@@ -313,6 +314,7 @@ set(RX_RENDER_SHADERS
   shaders/pipeline/vgeo_resolve.ps.hlsl
   shaders/geometry/hair.vs.hlsl
   shaders/geometry/hair.ps.hlsl
+  shaders/geometry/hair_dom.ps.hlsl
   shaders/geometry/ocean_spectrum.cs.hlsl
   shaders/geometry/ocean_fft.cs.hlsl
   shaders/geometry/ocean_finalize.cs.hlsl
@@ -408,6 +410,8 @@ endif()
 # (rec_bone_palette root SRV on DXIL).
 # Wrapper-shader include dependencies (see cmake/shaders.cmake).
 set(RX_SHADER_DEPS_pathtrace_cs_hlsl shaders/human_brdf.hlsli shaders/material_record.hlsli)
+set(RX_SHADER_DEPS_hair_ps_hlsl shaders/hair_bsdf.hlsli shaders/geometry/hair_transmittance.hlsli)
+set(RX_SHADER_DEPS_hair_dom_ps_hlsl shaders/geometry/hair_transmittance.hlsli)
 set(RX_SHADER_DEPS_tonemap_ps_hlsl shaders/post/tonemap_ops.hlsli)
 set(RX_SHADER_DEPS_reference_compare_cs_hlsl shaders/post/tonemap_ops.hlsli)
 set(RX_SHADER_DEPS_mesh_vs_hlsl shaders/pipeline/morph.hlsli)
@@ -418,19 +422,24 @@ set(RX_SHADER_DEPS_mesh_skin_vs_hlsl shaders/pipeline/mesh.vs.hlsl shaders/pipel
 set(RX_SHADER_DEPS_decal_bake_skin_vs_hlsl shaders/texturing/decal_bake.vs.hlsl)
 # material_uv.hlsli is what keeps the prepass and main alpha tests in phase, so
 # every pass that includes it has to rebuild when it changes or they ship out of
-# sync again.
+# sync again. The *_sss variants include mesh.ps/mesh_rt.ps wholesale, so they
+# carry the same list: a variant that misses a header ships against a stale copy
+# of it, which is the failure mode these lists exist to prevent.
 set(RX_SHADER_DEPS_mesh_ps_hlsl shaders/pipeline/material_uv.hlsli shaders/human_brdf.hlsli
-    shaders/human_eye.hlsli)
+    shaders/human_eye.hlsli shaders/hair_bsdf.hlsli shaders/geometry/hair_transmittance.hlsli)
 set(RX_SHADER_DEPS_prepass_ps_hlsl shaders/pipeline/material_uv.hlsli)
 set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl shaders/pipeline/material_uv.hlsli
-    shaders/human_brdf.hlsli shaders/human_eye.hlsli)
+    shaders/human_brdf.hlsli shaders/human_eye.hlsli shaders/hair_bsdf.hlsli
+    shaders/geometry/hair_transmittance.hlsli)
 set(RX_SHADER_DEPS_mesh_rt_ps_hlsl shaders/gi/rcgi_common.hlsli shaders/pipeline/material_uv.hlsli
-    shaders/human_brdf.hlsli shaders/human_eye.hlsli)
+    shaders/human_brdf.hlsli shaders/human_eye.hlsli shaders/hair_bsdf.hlsli
+    shaders/geometry/hair_transmittance.hlsli)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl shaders/pipeline/material_uv.hlsli)
 set(RX_SHADER_DEPS_shadow_instance_vs_hlsl shaders/gi/shadow.vs.hlsl)
 set(RX_SHADER_DEPS_shadow_skin_vs_hlsl shaders/gi/shadow.vs.hlsl)
 set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl shaders/gi/rcgi_common.hlsli
-    shaders/pipeline/material_uv.hlsli shaders/human_brdf.hlsli shaders/human_eye.hlsli)
+    shaders/pipeline/material_uv.hlsli shaders/human_brdf.hlsli shaders/human_eye.hlsli
+    shaders/hair_bsdf.hlsli shaders/geometry/hair_transmittance.hlsli)
 set(RX_SHADER_DEPS_vgeo_cull_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_args_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_clear_cs_hlsl shaders/pipeline/vgeo_common.hlsli)

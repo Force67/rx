@@ -113,6 +113,11 @@ class MaterialSystem {
     f32 human_layer[4] = {0, 1, 0.01f, 0};    // cavity occlusion, spec-normal strength, thickness scale (m), region
     f32 human_eye0[4] = {0.0028f, 0.16f, 1, 0.035f};  // iris depth (m), radius (uv), pupil scale, limbal size
     f32 human_eye1[4] = {2, 1.376f, 0.5f, 0};         // limbal power, cornea ior, iris shadow depth, light-shape response
+    // Hair-card fibre material (kFlagHair). Mirrors the hair_* rows in
+    // mesh.ps.hlsl; the same BSDF the strand grooms use.
+    f32 hair0[4] = {0.06f, 0.10f, 0.20f, 0.3f};  // xyz sigma_a, w beta_m
+    f32 hair1[4] = {0.3f, 0.0349066f, 1.55f, 1.0f};  // beta_n, alpha, eta, scatter scale
+    f32 hair2[4] = {6.0f, 5.0f, 1.0f, 0};  // colour ref depth, assumed depth, colour-from-albedo, unused
   };
   static constexpr u32 kFlagAlphaMask = 1u << 0;
   static constexpr u32 kFlagHasNormalMap = 1u << 1;

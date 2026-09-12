@@ -1798,6 +1798,12 @@ void Renderer::SetHairGroomTint(u32 id, const Vec3 &tint) {
   hair_.SetGroomTint(id, tint);
 }
 
+void Renderer::SetHairGroomMaterial(u32 id, const HairSurfaceParameters &params) {
+  hair_.SetGroomHair(id, params);
+}
+
+void Renderer::SetHairGroomTier(u32 id, HairTier tier) { hair_.SetGroomTier(id, tier); }
+
 void Renderer::DestroyHairGroom(u32 id) {
   if (!device_ || device_->is_stub())
     return;
@@ -3729,6 +3735,14 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // can composite water over its result too. Consumes `transparent` (moved into
   // the pass), so it runs at most once per frame. Returns the composited
   // colour.
+  // Declared here rather than at the assignment below because add_water
+  // captures by reference and its `transparent` pass samples the hair volume
+  // too; a lambda only captures what is already in scope where it is written.
+  ResourceHandle hair_front = kInvalidResource;
+  ResourceHandle hair_layers = kInvalidResource;
+  bool hair_volume_on = false;
+  HairStrands::Frame hair_frame;
+
   auto add_water =
       [&](ResourceHandle scene_color, ResourceHandle depth,
           ResourceHandle depth_export, ResourceHandle motion,
@@ -3765,6 +3779,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     graph_.AddPass(
         "transparent",
         [&](RenderGraph::PassBuilder &builder) {
+          if (hair_volume_on) {
+            builder.Read(hair_front, ResourceUsage::kSampledFragment);
+            builder.Read(hair_layers, ResourceUsage::kSampledFragment);
+          }
           builder.Write(composite, ResourceUsage::kColorAttachment);
           builder.Write(motion, ResourceUsage::kColorAttachment);
           builder.Write(depth, ResourceUsage::kDepthAttachment);
@@ -3789,6 +3807,17 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           }
 
           BindingSetHandle env_set = env_transparent_sets_[frame_slot];
+          // The hair transmittance volume, so skin under a groom is shadowed
+          // by the fibres over it (see HairStrands::AddTransmittanceToGraph).
+          // Null params = no hair this frame, which the forward pass reads as
+          // "nothing overhead" rather than as a black shadow map.
+          EnvironmentSystem::HairVolumeBinding hair_env_binding;
+          {
+            const HairStrands::TransmittanceBinding hb = hair_.transmittance();
+            hair_env_binding.front_depth = hb.front_depth;
+            hair_env_binding.layers = hb.layers;
+            hair_env_binding.params = hb.params;
+          }
           EnvironmentSystem::DdgiBinding ddgi_binding;
           if (ddgi_active)
             ddgi_binding = ddgi_->binding(frame_index_);
@@ -3837,7 +3866,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               decal_baker_.available() ? decal_baker_.fx_view()
                                        : TextureView{},
               decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
-                                       : GpuBuffer{});
+                                       : GpuBuffer{},
+              hair_env_binding.params ? &hair_env_binding : nullptr);
 
           // Update the dominant planar surface before beginning rasterization.
           // Its CBT/vertex/indirect buffers persist inside WaterPass; this
@@ -5982,6 +6012,36 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                            proj_scale, 0.1f, frame_index_);
     }
 
+    // Hair transmittance volume. It has to be built BEFORE anything shades
+    // against it: the scene pass and the transparent pass both sample it for
+    // the shadow a groom casts on the scalp and shoulders, and the graph runs
+    // passes in declaration order. Built late it would hand them the previous
+    // frame's texels indexed by this frame's light matrix, which slides the
+    // hair shadow off the head the moment either the sun or the groom moves.
+    if (hair_.active()) {
+      hair_frame.view_proj = view_proj;
+      hair_frame.camera_pos = view.camera.eye;
+      hair_frame.sun_direction = applied_sun_direction_;
+      hair_frame.sun_intensity = applied_sun_intensity_;
+      hair_frame.sun_color = applied_sun_color_;
+      // Hair with no ambient is a black silhouette the moment it leaves the
+      // sun. The flat ambient is the sky term the forward pass uses for
+      // everything else when IBL is off; with IBL on the sky already carries
+      // it, so the groom takes a matching share.
+      const f32 ambient_level =
+          settings_.ibl ? settings_.ibl_intensity * 0.12f : settings_.ambient;
+      hair_frame.ambient = {applied_sun_color_.x * ambient_level,
+                            applied_sun_color_.y * ambient_level,
+                            applied_sun_color_.z * ambient_level};
+      hair_frame.transmittance = settings_.hair_transmittance;
+      hair_frame.transmittance_depth = settings_.hair_transmittance_depth;
+      hair_frame.fibre_scale = settings_.hair_fibre_scale;
+      hair_frame.shadow_density = settings_.hair_shadow_density;
+      hair_frame.debug_view = static_cast<u32>(settings_.debug_view);
+      hair_.AddTransmittanceToGraph(graph_, hair_frame, frame_slot);
+    }
+    hair_volume_on = hair_.volume_handles(&hair_front, &hair_layers);
+
     // Hybrid ReSTIR DI: reservoir-resampled point/spot lights with one shadow
     // ray per pixel, shaded off the prepass G-buffer into screen-space targets
     // the forward pass folds back in (env slots 23/24, kFrameFlagRestirDi).
@@ -6057,6 +6117,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     graph_.AddPass(
         "scene",
         [&](RenderGraph::PassBuilder &builder) {
+          // The hair volume is sampled for the groom's shadow on skin; the
+          // declaration is what orders it against the pass that wrote it.
+          if (hair_volume_on) {
+            builder.Read(hair_front, ResourceUsage::kSampledFragment);
+            builder.Read(hair_layers, ResourceUsage::kSampledFragment);
+          }
           builder.Write(geom_scene, ResourceUsage::kColorAttachment);
           builder.Write(geom_motion, ResourceUsage::kColorAttachment);
           builder.Write(geom_skin, ResourceUsage::kColorAttachment);
@@ -6097,6 +6163,17 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           TextureView spec_refl_view = spec_refl != kInvalidResource
                                            ? ctx.graph->image(spec_refl).view
                                            : TextureView{};
+          // The hair transmittance volume, so skin under a groom is shadowed
+          // by the fibres over it (see HairStrands::AddTransmittanceToGraph).
+          // Null params = no hair this frame, which the forward pass reads as
+          // "nothing overhead" rather than as a black shadow map.
+          EnvironmentSystem::HairVolumeBinding hair_env_binding;
+          {
+            const HairStrands::TransmittanceBinding hb = hair_.transmittance();
+            hair_env_binding.front_depth = hb.front_depth;
+            hair_env_binding.layers = hb.layers;
+            hair_env_binding.params = hb.params;
+          }
           EnvironmentSystem::DdgiBinding ddgi_binding;
           if (ddgi_active)
             ddgi_binding = ddgi_->binding(frame_index_);
@@ -6153,7 +6230,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               decal_baker_.available() ? decal_baker_.fx_view()
                                        : TextureView{},
               decal_baker_.available() ? decal_baker_.tile_uv_buffer(frame_slot)
-                                       : GpuBuffer{});
+                                       : GpuBuffer{},
+              hair_env_binding.params ? &hair_env_binding : nullptr);
 
           ColorAttachment colors[3];
           colors[0] = {.view = ctx.graph->image(geom_scene).view,
@@ -6980,15 +7058,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     }
 
     // Strand hair: ribbon draw over the lit scene with depth, node positions
-    // fed by the physics strand sim through SetHairGroomPoints.
+    // fed by the physics strand sim through SetHairGroomPoints. The
+    // transmittance volume this shades against was built above, before the
+    // passes that sample it.
     if (hair_.active()) {
-      HairStrands::Frame hf;
-      hf.view_proj = view_proj;
-      hf.camera_pos = view.camera.eye;
-      hf.sun_direction = applied_sun_direction_;
-      hf.sun_intensity = applied_sun_intensity_;
-      hf.sun_color = applied_sun_color_;
-      hair_.AddToGraph(graph_, lit, depth, {render_width_, render_height_}, hf,
+      hair_.AddToGraph(graph_, lit, depth, {render_width_, render_height_}, hair_frame,
                        frame_slot);
     }
 

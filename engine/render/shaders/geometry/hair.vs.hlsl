@@ -11,6 +11,16 @@ struct HairPoint {
 [[vk::binding(0, 0)]] StructuredBuffer<HairPoint> points : register(t0, space0);
 [[vk::binding(1, 0)]] StructuredBuffer<float4> strand_color : register(t1, space0);  // per guide
 
+// Shared by the lit draw and the deep-opacity-map passes, so one vertex shader
+// expands the ribbons for all three (the DOM passes just hand it the light's
+// matrix and position, which is also what makes the ribbons face the light
+// there instead of the camera).
+// Must match DrawPush in hair_strands.cc EXACTLY, and stay within the 128 bytes
+// Vulkan guarantees: a declared block wider than the pipeline's push range is a
+// spec violation even if the extra rows are never read. The fibre material used
+// to ride here and now comes from the GroomMaterial uniform; the rows it used
+// are gone rather than left declared, because a block that over-declares is one
+// the validator rejects on every pipeline it is part of.
 struct DrawPush {
   column_major float4x4 view_proj;
   float4 camera;      // xyz eye, w = ribbon width
@@ -28,6 +38,11 @@ struct VsOut {
   [[vk::location(1)]] float3 world_pos : POSITION1;
   [[vk::location(2)]] float along : TEXCOORD0;
   [[vk::location(3)]] float3 color : COLOR0;
+  // Position across the ribbon's width, -1..1. This is the fibre's `h` - where
+  // on the cylinder's cross-section the shading point sits - which the hair
+  // BSDF needs and which raster hair usually has to invent. The ribbon
+  // expansion already knows it, so it costs one interpolator and nothing else.
+  [[vk::location(4)]] float side : TEXCOORD1;
 };
 
 float Hash(uint x) {
@@ -89,5 +104,6 @@ VsOut main(uint vid : SV_VertexID) {
   o.world_pos = world;
   o.along = along;
   o.color = col;
+  o.side = side;
   return o;
 }
