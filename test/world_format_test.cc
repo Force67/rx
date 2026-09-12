@@ -3,6 +3,7 @@
 // make a corrupted or stale one fail loudly instead of materializing garbage.
 #include "world/world_format.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -539,6 +540,119 @@ void TestPayloadRefusesCraftedStructure() {
   CHECK(DecodeCellPayload(std::span<const u8>(good.data(), good.size()), &payload, &error));
 }
 
+// The grid fields sit in the header: cell_size at 32, grid_origin at 36..48.
+// They used to be silently repaired to "no grid" and {0,0,0}, which reads as a
+// legitimate answer - so a corrupt one became an accepted one.
+void TestIndexRefusesCorruptGrid() {
+  WorldIndexWriter writer;
+  writer.set_bake_id(kBakeId);
+  writer.set_grid(64.0f, {1, 2, 3});
+  writer.AddCell(1, {}, {16, 16, 16}, 0, 0, 4);
+  base::Vector<u8> good;
+  std::string error;
+  CHECK(writer.Encode(&good, &error));
+
+  WorldIndexData index;
+  CHECK(DecodeWorldIndex(std::span<const u8>(good.data(), good.size()), &index, &error));
+  CHECK(index.cell_size == 64.0f);
+
+  const u32 kNaN = 0x7fc00000;
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, 32, kNaN);
+    RepairChecksum(&bad, kIndexHeaderBytes);
+    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                  error, "a non-finite grid cell size");
+  }
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, 32, 0xbf800000);  // -1.0f
+    RepairChecksum(&bad, kIndexHeaderBytes);
+    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                  error, "a negative grid cell size");
+  }
+  {
+    base::Vector<u8> bad(good);
+    WriteU32(&bad, 40, kNaN);  // grid_origin.y
+    RepairChecksum(&bad, kIndexHeaderBytes);
+    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                  error, "a non-finite grid origin");
+  }
+  {
+    // Zero is not corruption: it is how a world says it is not on a regular
+    // grid, which is exactly why the refusals above cannot substitute it.
+    base::Vector<u8> fine(good);
+    WriteU32(&fine, 32, 0);
+    RepairChecksum(&fine, kIndexHeaderBytes);
+    WorldIndexData off_grid;
+    CHECK(DecodeWorldIndex(std::span<const u8>(fine.data(), fine.size()), &off_grid, &error));
+    CHECK(off_grid.cell_size == 0.0f);
+  }
+
+  // The write side refuses what the read side does, so a cook cannot succeed on
+  // an archive its own loader will not open.
+  {
+    WorldIndexWriter nan_grid;
+    nan_grid.set_grid(std::nanf(""), {});
+    nan_grid.AddCell(1, {}, {16, 16, 16}, 0, 0, 4);
+    base::Vector<u8> bytes;
+    CheckRejected(nan_grid.Encode(&bytes, &error), error, "encoding a non-finite grid cell size");
+  }
+  {
+    WorldIndexWriter nan_bounds;
+    nan_bounds.AddCell(1, {}, {std::nanf(""), 16, 16}, 0, 0, 4);
+    base::Vector<u8> bytes;
+    CheckRejected(nan_bounds.Encode(&bytes, &error), error, "encoding non-finite cell bounds");
+  }
+}
+
+// A decoder that populates its output as it goes leaves a caller that ignores
+// the false return holding half a world stamped with the bad file's bake id,
+// which every cross-check downstream then accepts.
+void TestRefusedDecodeLeavesTheOutputAlone() {
+  std::string error;
+
+  WorldIndexWriter writer;
+  writer.set_world_id(0x1234);
+  writer.set_bake_id(kBakeId);
+  writer.AddCell(1, {}, {16, 16, 16}, 0, 0, 4);
+  writer.AddCell(2, {16, 0, 0}, {32, 16, 16}, 0, 4, 4);
+  base::Vector<u8> good;
+  CHECK(writer.Encode(&good, &error));
+
+  WorldIndexData index;
+  CHECK(DecodeWorldIndex(std::span<const u8>(good.data(), good.size()), &index, &error));
+  CHECK(index.cells.size() == 2);
+
+  base::Vector<u8> bad(good);
+  WriteU32(&bad, kIndexHeaderBytes + 16, 0x7fc00000);  // cell 1 minimum.z = NaN
+  RepairChecksum(&bad, kIndexHeaderBytes);
+  CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+                error, "an index with non-finite bounds");
+  CHECK(index.cells.size() == 2);
+  CHECK(index.world_id == 0x1234);
+  CHECK(index.bake_id == kBakeId);
+
+  CellPayloadWriter payload_writer(1, Domain::kRepresentation, Tier::kFull);
+  payload_writer.set_bake_id(kBakeId);
+  payload_writer.AddInstance(1, payload_writer.AddPrototype("rock"), {1, 2, 3}, {0, 0, 0, 1}, 1.0f);
+  base::Vector<u8> payload_bytes;
+  CHECK(payload_writer.Encode(&payload_bytes, &error));
+
+  WorldCellPayload payload;
+  CHECK(DecodeCellPayload(std::span<const u8>(payload_bytes.data(), payload_bytes.size()), &payload,
+                          &error));
+  CHECK(payload.instances.size() == 1);
+
+  base::Vector<u8> truncated(payload_bytes);
+  truncated.pop_back();
+  CheckRejected(
+      DecodeCellPayload(std::span<const u8>(truncated.data(), truncated.size()), &payload, &error),
+      error, "a truncated payload");
+  CHECK(payload.instances.size() == 1);
+  CHECK(payload.cell_id == 1);
+}
+
 void TestIndexRefusesCraftedStructure() {
   WorldIndexWriter writer;
   writer.set_bake_id(kBakeId);
@@ -626,6 +740,8 @@ int main() {
   TestPayloadRefusesCorruptedBytes();
   TestPayloadRefusesCraftedStructure();
   TestIndexRefusesCraftedStructure();
+  TestIndexRefusesCorruptGrid();
+  TestRefusedDecodeLeavesTheOutputAlone();
   TestLayoutHashSeparatesShapes();
   if (g_failures) {
     std::fprintf(stderr, "world_format_test: %d failure(s)\n", g_failures);

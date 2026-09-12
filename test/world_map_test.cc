@@ -126,6 +126,42 @@ void TestLoadFromArchive(const fs::path& directory) {
   CHECK(map.HasDomain(*map.index().FindCell(3), Domain::kGameplay));
 }
 
+// A world sitting at the root of its own scheme rather than in a directory.
+// The payload prefix is cut from the index path, and the only slash in
+// "world://city.rxworld" belongs to the scheme separator - cutting there gives
+// "world:/", which matches no mount, so the index would load and every single
+// payload read would then fail as a missing entry.
+void TestIndexAtTheRootOfItsScheme(const fs::path& directory) {
+  fs::create_directories(directory);
+  const fs::path archive = directory / "root.rxp";
+  PackWriter pack;
+  pack.Add("city.rxworld", BakeIndex());
+  CellPayloadWriter writer(CellId(0, 0), Domain::kRepresentation, Tier::kFull);
+  writer.set_bake_id(kBakeId);
+  const u32 prototype = writer.AddPrototype("prop/rock");
+  writer.AddInstance(0, prototype, {}, {0, 0, 0, 1}, 1.0f);
+  base::Vector<u8> bytes;
+  std::string error;
+  CHECK(writer.Encode(&bytes, &error));
+  // Empty prefix: the payloads sit beside the index, at the scheme root.
+  pack.Add(CellPayloadPath("", CellId(0, 0), Domain::kRepresentation, Tier::kFull),
+           std::move(bytes));
+  CHECK(pack.WriteTo(archive.string()));
+
+  Vfs vfs;
+  auto provider = rx::asset::MakePackFileProvider(archive.string());
+  CHECK(provider != nullptr);
+  if (!provider) return;
+  vfs.Mount("world", std::move(provider));
+
+  WorldMap map;
+  CHECK(map.Load(vfs, "world://city.rxworld", &error));
+  CHECK(map.payload_prefix() == "world://");
+  WorldCellPayload payload;
+  CHECK(map.ReadPayload(vfs, CellId(0, 0), Domain::kRepresentation, Tier::kFull, &payload, &error));
+  CHECK(payload.instances.size() == 1);
+}
+
 void TestMissingAndStaleArchives(const fs::path& directory) {
   fs::create_directories(directory);
   {
@@ -388,6 +424,7 @@ int main() {
   fs::create_directories(tmp);
 
   TestLoadFromArchive(tmp / "load");
+  TestIndexAtTheRootOfItsScheme(tmp / "schemeroot");
   TestMissingAndStaleArchives(tmp / "stale");
   TestPayloadIdsMustLieInTheCellsRange(tmp / "ranges");
   TestPerDomainBubbles(tmp / "bubbles");

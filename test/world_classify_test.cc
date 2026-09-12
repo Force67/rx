@@ -177,9 +177,28 @@ void TestInstanceSetIsConfigurable() {
   CHECK(ClassifyForBake(world, entity, wider).role == BakeRole::kInstance);
 }
 
+// Three front ends take their default world name from this - the cook, `rxworld
+// inspect` and `rx --world` - so the archive one writes is the archive the
+// others open. A disagreement here reads as a missing archive, which is the
+// least informative way any of them could fail.
+void TestWorldNameForArchive() {
+  CHECK(WorldNameForArchive("city.rxp") == "city");
+  CHECK(WorldNameForArchive("build/linux/runtime/worlds/streamworld.rxp") == "streamworld");
+  CHECK(WorldNameForArchive("C:\\games\\city.rxp") == "city");
+  CHECK(WorldNameForArchive("city") == "city");
+  // Only the last extension comes off. The editor bakes to <archive>.rxp before
+  // renaming into place, and taking the name from that staging path would bury
+  // the world under a directory named after a temporary.
+  CHECK(WorldNameForArchive("city.rxp.editor-stage") == "city.rxp");
+  // A leading dot is the whole name of a dotfile, not an extension.
+  CHECK(WorldNameForArchive(".rxp") == ".rxp");
+  CHECK(WorldNameForArchive("") == "");
+}
+
 }  // namespace
 
 int main() {
+  TestWorldNameForArchive();
   TestTheTwoRoles();
   TestClassifyIgnoresWhatTheDropWouldRemove();
   TestRefusals();

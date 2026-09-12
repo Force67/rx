@@ -183,6 +183,11 @@ class RX_WORLD_EXPORT WorldIndexWriter {
     u32 flags = 0;
     u64 stable_id_first = 0;
     u32 stable_id_count = 0;
+    // Whether AddCell was handed finite bounds. Recorded rather than inferred
+    // from the stored values, because the min/max canonicalization below throws
+    // a NaN away - std::min(0, NaN) is 0 - so by the time the bounds are stored
+    // the only trace of one is an extent that silently collapsed.
+    bool finite_bounds = true;
   };
   struct PendingPayload {
     u64 cell = 0;

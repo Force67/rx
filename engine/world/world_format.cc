@@ -312,6 +312,7 @@ WorldIndexWriter::PendingCell* WorldIndexWriter::Find(u64 id) {
 
 void WorldIndexWriter::AddCell(u64 id, Vec3 minimum, Vec3 maximum, u32 zone, u64 stable_id_first,
                                u32 stable_id_count) {
+  const bool finite = IsFinite(minimum) && IsFinite(maximum);
   const Vec3 low{std::min(minimum.x, maximum.x), std::min(minimum.y, maximum.y),
                  std::min(minimum.z, maximum.z)};
   const Vec3 high{std::max(minimum.x, maximum.x), std::max(minimum.y, maximum.y),
@@ -326,10 +327,11 @@ void WorldIndexWriter::AddCell(u64 id, Vec3 minimum, Vec3 maximum, u32 zone, u64
     existing->flags = 0;
     existing->stable_id_first = stable_id_first;
     existing->stable_id_count = stable_id_count;
+    existing->finite_bounds = finite;
     return;
   }
   cell_index_.insert(id, static_cast<u32>(cells_.size()));
-  cells_.push_back({id, low, high, zone, 0, stable_id_first, stable_id_count});
+  cells_.push_back({id, low, high, zone, 0, stable_id_first, stable_id_count, finite});
 }
 
 void WorldIndexWriter::SetCellFlags(u64 id, u32 flags) {
@@ -381,7 +383,7 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
     return false;
   }
   for (const PendingCell& cell : cells_) {
-    if (IsFinite(cell.minimum) && IsFinite(cell.maximum)) continue;
+    if (cell.finite_bounds && IsFinite(cell.minimum) && IsFinite(cell.maximum)) continue;
     SetError(error,
              "world index: cell " + std::to_string(cell.id) + " has non-finite bounds");
     return false;
