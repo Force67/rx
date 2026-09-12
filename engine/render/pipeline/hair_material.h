@@ -20,7 +20,9 @@ namespace rx::render {
 // Where a fibre's absorption comes from.
 //   kPigment   sigma_a is authored directly (melanin concentrations).
 //   kAuthored  the groom's per-strand colour is the TARGET multiple-scattering
-//              colour, inverted to absorption through Chiang's fit.
+//              colour, inverted to absorption through HairSigmaFromColor - this
+//              renderer's own fit, not Chiang's, which is calibrated against a
+//              different transport (see HairSigmaFromColorPathTraced).
 // The second is the default because grooms carry colours sampled from a hair
 // texture and artists expect those to mean what they look like. It is not a
 // shortcut past the physics: the colour becomes absorption, so a light strand
@@ -37,6 +39,11 @@ struct HairSurfaceParameters {
   f32 eta = 1.55f;        // keratin
   f32 density = 1.0f;     // groom fibre density multiplier for dual scattering
   f32 scatter_scale = 1.0f;  // artist gain on multiple scattering
+  // Whether the multiple-scattering model runs at all; the Distant tier turns
+  // it off. It gates BOTH halves - forward attenuation and the neighbour fill -
+  // because keeping the attenuation while dropping the fill leaves a groom
+  // darker than the tier above it, worst on light hair.
+  bool dual_scattering = true;
   HairColorMode color_mode = HairColorMode::kAuthored;
   // Fibre depth at which an authored colour renders exactly. Roughly how deep
   // into a groom the "colour of the hair" is judged from.
@@ -91,7 +98,12 @@ HairTierCaps HairTierApply(HairTier tier, HairSurfaceParameters& params);
 struct HairRange {
   f32 lo;
   f32 hi;
+  bool known = true;  // false: `field` names nothing, and lo/hi are meaningless
 };
+// An unrecognised field name reports known == false rather than a plausible
+// [0,1]. Silently clamping is worse than refusing: color_reference_depth lives
+// in [1, 16], and a [0,1] clamp of it moves the colour inversion by a factor of
+// four while still looking like a valid number.
 HairRange HairSafeRange(const char* field);
 
 // --- CPU mirror of hair_bsdf.hlsli ------------------------------------------

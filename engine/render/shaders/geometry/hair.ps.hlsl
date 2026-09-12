@@ -72,6 +72,7 @@ float4 main(PsIn input) : SV_Target0 {
   } else {
     hp.sigma_a = hair_material.sigma_a;
   }
+  hp.dual_scattering = (caps & kHairCapDualScatter) != 0u;
   hp.alpha = hair_material.alpha;
   hp.eta = hair_material.eta;
   hp.density = hair_material.density;

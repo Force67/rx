@@ -16,7 +16,12 @@
 //      groom silently loses energy and comes out dark. That failure looks like
 //      an art problem, so it gets fixed by painting the hair brighter, which
 //      breaks the pigment coupling permanently.
-//   2. RECIPROCITY. f(wo -> wi) == f(wi -> wo).
+//   2. BOUNDED NON-RECIPROCITY. This model is deliberately not reciprocal (the
+//      attenuations derive from the outgoing direction alone, as in the
+//      published formulation), so the check is that the asymmetry stays within
+//      the range that formulation produces rather than that it is zero. An
+//      asymmetry that grows past it means a real error crept in beside the
+//      accepted one.
 //   3. PIGMENT COUPLING. Colour comes from absorption, so more melanin must
 //      darken, and pheomelanin must redden rather than just darken.
 //   4. MULTIPLE SCATTERING. It must attenuate with depth, saturate rather than
@@ -390,6 +395,36 @@ int main() {
             "that size, not detail)");
       Check(distant.alpha == 0.0f && distant.scatter_scale == 0.0f,
             "the distant tier drops the tilt and the multiple scattering");
+      Check(!distant.dual_scattering,
+            "the distant tier turns the multiple-scattering model off, not just its gain");
+    }
+
+    // Turning multiple scattering off has to drop BOTH halves. Dropping only
+    // the neighbour fill leaves the forward attenuation in place, which makes
+    // a distant groom darker than the same groom up close - worst on light
+    // hair, which is the failure the whole model exists to avoid.
+    rx::f32 wo[3], wi[3];
+    Dir(0.2f, 0.0f, wo);
+    Dir(-0.1f, 2.0f, wi);
+    for (int i = 0; i < 6; ++i) {
+      HairSurfaceParameters hero = HairPresetParams(static_cast<HairPreset>(i));
+      HairSurfaceParameters distant = hero;
+      HairTierApply(HairTier::kDistant, distant);
+
+      // With it off, the shade is single scattering and the fibre depth cannot
+      // matter at all.
+      rx::f32 shallow[3], deep[3];
+      HairShadeCpu(distant, wo, wi, 0.0f, 1.0f, shallow);
+      HairShadeCpu(distant, wo, wi, 0.0f, 40.0f, deep);
+      Check(std::abs(shallow[0] - deep[0]) < 1e-6f && std::abs(shallow[2] - deep[2]) < 1e-6f,
+            "with multiple scattering off, fibre depth changes nothing");
+
+      rx::f32 lit_hero[3];
+      HairShadeCpu(hero, wo, wi, 0.0f, 8.0f, lit_hero);
+      const float hero_luma = lit_hero[0] + lit_hero[1] + lit_hero[2];
+      const float distant_luma = deep[0] + deep[1] + deep[2];
+      Check(distant_luma >= hero_luma * 0.5f,
+            "the distant tier does not go dark relative to the tier above it");
     }
   }
 
@@ -397,8 +432,15 @@ int main() {
   {
     auto in_range = [](const char* field, float value) {
       const HairRange r = HairSafeRange(field);
-      return value >= r.lo - 1e-6f && value <= r.hi + 1e-6f;
+      // A name the table does not know would otherwise pass this check against
+      // an invented [0,1], which is how a renamed field stops being validated
+      // without anything failing.
+      return r.known && value >= r.lo - 1e-6f && value <= r.hi + 1e-6f;
     };
+    Check(!HairSafeRange("not_a_hair_field").known,
+          "an unknown field name is reported, not answered with [0,1]");
+    Check(HairSafeRange("color_reference_depth").known,
+          "every authored field has a published safe range");
     for (int i = 0; i < 6; ++i) {
       const HairSurfaceParameters p = HairPresetParams(static_cast<HairPreset>(i));
       Check(in_range("beta_m", p.beta_m) && in_range("beta_n", p.beta_n) &&

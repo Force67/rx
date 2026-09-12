@@ -1,5 +1,7 @@
 #include "render/pipeline/hair_material.h"
 
+#include "core/log.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -205,6 +207,7 @@ HairTierCaps HairTierApply(HairTier tier, HairSurfaceParameters& params) {
       break;
     case HairTier::kDistant:
       caps = {false, false, false, false};
+      params.dual_scattering = false;
       // At this size a groom is a silhouette. Keeping the lobes alive costs
       // aliasing, not detail, so the fibre is flattened to one broad response.
       params.beta_m = std::max(params.beta_m, 0.5f);
@@ -230,7 +233,13 @@ HairRange HairSafeRange(const char* field) {
   if (is("scatter_scale")) return {0.0f, 3.0f};
   if (is("eumelanin")) return {0.0f, 8.0f};
   if (is("pheomelanin")) return {0.0f, 4.0f};
-  return {0.0f, 1.0f};
+  // The depth the authored colour is exact at. Below ~1 the inversion is
+  // dominated by the constant term; above ~16 a groom is opaque anyway.
+  if (is("color_reference_depth")) return {1.0f, 16.0f};
+  RX_ERROR("hair material: no safe range for '{}'; the caller is naming a field "
+           "that does not exist",
+           field ? field : "(null)");
+  return {0.0f, 1.0f, false};
 }
 
 void HairEvaluateCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[3], f32 h,
@@ -313,6 +322,12 @@ void HairShadeCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[
   const f32 cos_theta_i = SafeSqrt(1.0f - wi[0] * wi[0]);
   const f32 cos_theta_d =
       std::cos(0.5f * (SafeAsin(wi[0]) - SafeAsin(wo[0])));
+
+  if (!p.dual_scattering) {
+    HairEvaluateCpu(p, wo, wi, h, out_rgb);
+    for (int c = 0; c < 3; ++c) out_rgb[c] *= cos_theta_i;
+    return;
+  }
 
   f32 a_f[3], a_b[3];
   AverageAttenuation(p, std::abs(cos_theta_d), a_f, a_b);

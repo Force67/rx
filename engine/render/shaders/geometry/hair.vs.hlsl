@@ -15,17 +15,18 @@ struct HairPoint {
 // expands the ribbons for all three (the DOM passes just hand it the light's
 // matrix and position, which is also what makes the ribbons face the light
 // there instead of the camera).
+// Must match DrawPush in hair_strands.cc EXACTLY, and stay within the 128 bytes
+// Vulkan guarantees: a declared block wider than the pipeline's push range is a
+// spec violation even if the extra rows are never read. The fibre material used
+// to ride here and now comes from the GroomMaterial uniform; the rows it used
+// are gone rather than left declared, because a block that over-declares is one
+// the validator rejects on every pipeline it is part of.
 struct DrawPush {
   column_major float4x4 view_proj;
   float4 camera;      // xyz eye, w = ribbon width
   float4 sun;         // xyz travel direction, w intensity
   float4 sun_color;   // rgb, w = clump radius
   float4 tint;        // rgb groom tint, w = children count
-  float4 dom;         // x depth range (m), y layer depth (m), z fibre scale, w dom enabled
-  float4 hair0;       // xyz sigma_a, w beta_m
-  float4 hair1;       // x beta_n, y alpha, z eta, w density
-  float4 hair2;       // x scatter_scale, y tier flags, zw unused
-  float4 ambient;     // rgb ambient reaching the groom, w unused
 };
 PUSH_CONSTANTS(DrawPush, pc);
 

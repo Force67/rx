@@ -97,6 +97,18 @@ class HairStrands {
   };
   TransmittanceBinding transmittance() const;
 
+  // Graph handles of the volume images, so a pass that samples them can DECLARE
+  // the read. Declaring it is the synchronization - the graph derives its
+  // barriers from the declarations, and an undeclared read of an image another
+  // pass writes is unordered no matter where the passes sit. Returns false when
+  // no volume was built this frame, in which case there is nothing to declare.
+  bool volume_handles(ResourceHandle* front, ResourceHandle* layers) const {
+    if (!volume_valid_) return false;
+    *front = volume_front_handle_;
+    *layers = volume_layers_handle_;
+    return true;
+  }
+
   static constexpr u32 kFramesInFlight = 2;
   static constexpr u32 kTransmittanceResolution = 1024;
 

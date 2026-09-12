@@ -439,10 +439,11 @@ struct MaterialParams {
 // this - and hair that casts nothing on the head is the single most visible
 // thing wrong with a rendered character.
 //
-// The volume is built later in the frame than this pass reads it, so the shadow
-// is one frame old. Hair moves slowly relative to a frame and the alternative
-// is reordering the whole graph around it; the lag is invisible and the
-// staleness is bounded.
+// The volume is built earlier in the frame than this pass reads it, and this
+// pass DECLARES the read so the graph orders the two. Both halves matter: built
+// late, the lookup would index the previous frame's texels with this frame's
+// light matrix and the shadow would slide off the head whenever the sun or the
+// groom moved; undeclared, the read would be unordered against the write.
 [[vk::combinedImageSampler]] [[vk::binding(44, 2)]] Texture2D<float> hair_front_depth : register(t44, space2);
 [[vk::combinedImageSampler]] [[vk::binding(44, 2)]] SamplerState hair_front_sampler : register(s44, space2);
 [[vk::combinedImageSampler]] [[vk::binding(45, 2)]] Texture2D<float4> hair_dom : register(t45, space2);
@@ -1283,6 +1284,8 @@ float3 ShadeSurface(PsIn input, float3 albedo, float3 n, float shadow) {
       hair.eta = material.hair1.z;
       hair.density = 1.0;
       hair.scatter_scale = material.hair1.w;
+      // A card carries no tier of its own; the mesh LOD already replaced it.
+      hair.dual_scattering = true;
       // Painted hair textures are a target colour, not a pigment measurement,
       // so they go through the same inversion the grooms use. Multiplying the
       // shaded result by the albedo instead gives blonde cards that scatter

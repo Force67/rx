@@ -66,6 +66,12 @@ struct HairSurfaceParams {
   // and a dense one with the same fibres are not the same material.
   float density;
   float scatter_scale;   // artist gain on the multiple-scattering term, 1 = as fitted
+  // Whether the multiple-scattering model runs at all (the Distant tier turns
+  // it off). It gates BOTH halves: dropping only the back-scatter fill while
+  // keeping the forward attenuation leaves a groom darker than the tier above
+  // it, and does it worst on light hair - the "blonde renders as dark straw"
+  // failure this whole file exists to avoid, reintroduced as a LOD pop.
+  bool dual_scattering;
 };
 
 // Keratin, human hair. These are the values to start from, not to ship blindly.
@@ -78,6 +84,7 @@ HairSurfaceParams HairDefaultParams() {
   p.eta = 1.55;
   p.density = 1.0;
   p.scatter_scale = 1.0;
+  p.dual_scattering = true;
   return p;
 }
 
@@ -417,6 +424,11 @@ float3 HairShade(HairSurfaceParams p, float3 wo, float3 wi, float h, float stran
   // theta_d, the half longitudinal angle, is what the average attenuations are
   // parameterized on.
   float cos_theta_d = cos(0.5 * (asin(clamp(wi.x, -1.0, 1.0)) - asin(clamp(wo.x, -1.0, 1.0))));
+  if (!p.dual_scattering) {
+    // Single scattering alone: no forward attenuation and no neighbour fill,
+    // so the fibre keeps the brightness family of the tiers above it.
+    return HairEvaluate(p, wo, wi, h) * cos_theta_i;
+  }
   HairScattering s = HairDualScattering(p, abs(cos_theta_d), strand_count);
 
   float3 direct = HairEvaluate(p, wo, wi, h) * s.forward;
