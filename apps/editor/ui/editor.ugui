@@ -119,6 +119,7 @@ panel root {
     button menu_open { class: menu_item; text: "Open"; }
     button menu_save { class: menu_item; text: "Save"; }
     button menu_saveas { class: menu_item; text: "Save As"; }
+    button menu_bakeworld { class: menu_item; text: "Bake World"; }
 
     panel sep1 { width: 1; height: 22; background: #34373d; margin: 0 8; }
 

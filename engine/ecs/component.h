@@ -17,6 +17,14 @@ struct ComponentInfo {
   u32 align = 0;
   void (*move_construct)(void* dst, void* src) = nullptr;
   void (*destruct)(void* ptr) = nullptr;
+  // Whether a row of this component can be produced by copying bytes instead of
+  // running a constructor. This is std::is_trivially_copyable, and it is a
+  // statement about construction only: it is true of a struct holding a raw
+  // pointer or an ecs::Entity, neither of which survives being written to disk
+  // or sent to another process. A consumer that persists or transmits a column
+  // needs this AND its own check that the component's contents mean anything
+  // outside this process; see rx::world's ResolveSchema.
+  bool trivially_copyable = false;
 };
 
 namespace detail {
@@ -48,6 +56,7 @@ ComponentId ComponentIdFor() {
             .move_construct = [](void* dst,
                                  void* src) { new (dst) T(std::move(*static_cast<T*>(src))); },
             .destruct = [](void* ptr) { static_cast<T*>(ptr)->~T(); },
+            .trivially_copyable = std::is_trivially_copyable_v<T>,
         });
   }();
   return id;

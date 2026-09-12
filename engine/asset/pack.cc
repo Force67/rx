@@ -156,13 +156,23 @@ std::optional<base::Vector<u8>> PackFile::ReadEntry(size_t index) const {
 void PackWriter::Add(std::string_view virtual_path, base::Vector<u8> bytes,
                      PackCompression compression) {
   std::string normalized = NormalizePath(virtual_path);
-  for (auto& pending : pending_) {
-    if (pending.path == normalized) {
+  const u64 hash = Fnv1a(normalized);
+  base::Vector<u32>* staged = staged_.find(hash);
+  if (staged != nullptr) {
+    // Same hash is nearly always the same path; the string compare settles the
+    // rest rather than trusting a 64-bit hash with the payload.
+    for (u32 index : *staged) {
+      Pending& pending = pending_[index];
+      if (pending.path != normalized) continue;
       pending.bytes = std::move(bytes);
       pending.compression = compression;
       return;
     }
+  } else {
+    staged_.insert(hash, base::Vector<u32>());
+    staged = staged_.find(hash);
   }
+  staged->push_back(static_cast<u32>(pending_.size()));
   pending_.push_back(Pending{std::move(normalized), std::move(bytes), compression});
 }
 

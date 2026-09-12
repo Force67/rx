@@ -22,6 +22,7 @@
 
 #include "edit/hierarchy.h"
 #include "edit/reflect.h"
+#include "world/world_bake.h"
 #include "edit/scene_io.h"
 #include "edit/selection.h"
 #include "edit/undo.h"
@@ -207,6 +208,11 @@ private:
   // --- file ops (editor_app.cc) ---
   void NewScene();
   void DoSave(const std::string &path);
+  // Bake World: save first, then cook what was saved into <scene>.rxp. The cook
+  // reads the file rather than this live world - the editor's world holds
+  // transients the author never wrote (terrain tile visuals, preview models),
+  // and edit::SaveScene already knows which of those to leave out.
+  void DoBakeWorld();
   void DoLoad(const std::string &path);
   void OpenDocument(const std::string &path);
   void OpenFileDialog();
@@ -263,6 +269,11 @@ private:
   GizmoDrag gizmo_drag_;
 
   std::string scene_path_ = "untitled.rxscene";
+  // Held once, so the Bake World action and the inspector's per-entity verdict
+  // cannot disagree about the partition. The cell size in particular is not
+  // scene data, and a label computed against a different one than the archive
+  // was cooked with would be quietly wrong.
+  world::WorldBakeOptions world_bake_options_;
   std::string terrain_path_ = "untitled.rxterrain";
   std::string asset_root_ = "assets";
   bool doc_dirty_ = false; // scene has unsaved changes

@@ -58,6 +58,17 @@ struct EngineConfig {
   std::string camera_at;
   std::string camera_look;
   f32 camera_fov = 0.0f;
+  // --world <archive.rxp>: mount a baked world and stream it around the camera
+  // instead of loading a scene whole. `world_name` is the name it was cooked
+  // under (rxworld --name), which is also the directory its index sits in.
+  //
+  // Empty takes the same default the cook does - world::WorldNameForArchive,
+  // the archive's filename stem - so an archive from a bare `rxworld bake` or
+  // the editor's Bake World opens with a bare `--world`. Only an archive baked
+  // under a name that is not its filename, or one holding more than one world,
+  // needs --world-name to say which.
+  std::string world_path;
+  std::string world_name;
   // --authoring-endpoint: serve the script commands on this unix socket path
   // while the engine runs, so a tool can spawn/move/inspect without a restart.
   // Empty (the default) means no endpoint is bound at all; see
