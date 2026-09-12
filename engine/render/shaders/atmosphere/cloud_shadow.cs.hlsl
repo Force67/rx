@@ -57,7 +57,16 @@ float CloudDensityAt(float3 p, float h01) {
   float3 wp = (p + wind) * 0.00035;
   float warp = Fbm3(wp * 0.4 + 13.7, 2);
   wp += (warp - 0.5) * 0.9;
-  float base = Fbm3(wp, 4);
+  float base = 0.0, amplitude = 0.5;
+  [unroll]
+  for (int i = 0; i < 4; ++i) {
+    base += amplitude * Noise3(wp);
+    // Upper bound of the remaining octaves, as in the cloud march.
+    float remaining = amplitude - 0.0625;
+    if (i < 3 && base + remaining < 1.0 - pc.coverage) return 0.0;
+    wp = wp * 2.02 + 33.3;
+    amplitude *= 0.5;
+  }
   float d = saturate(base - (1.0 - pc.coverage)) * grad;
   return d;
 }

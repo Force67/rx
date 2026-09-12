@@ -70,12 +70,32 @@ float CloudDensity(float3 p, float time) {
   // billowing cauliflower masses.
   float warp = Fbm3(wp * 0.4 + 13.7, 2);
   wp += (warp - 0.5) * 0.9;
-  float base = Fbm3(wp, 4);
   float coverage = pc.sun_color.w;
+  float base = 0.0, amplitude = 0.5;
+  float3 bp = wp;
+  [unroll]
+  for (int i = 0; i < 4; ++i) {
+    base += amplitude * Noise3(bp);
+    // Noise is in [0,1]. Even the maximum remaining octaves cannot reach coverage.
+    float remaining = amplitude - 0.0625;
+    if (i < 3 && base + remaining < 1.0 - coverage) return 0.0;
+    bp = bp * 2.03 + 11.1;
+    amplitude *= 0.5;
+  }
   float d = saturate(base - (1.0 - coverage)) * grad;
   if (d <= 0.0) return 0.0;
   // Erode the edges with higher-frequency detail.
-  float erosion = Fbm3(wp * 4.0 + 5.0, 3);
+  float erosion = 0.0;
+  amplitude = 0.5;
+  float3 ep = wp * 4.0 + 5.0;
+  [unroll]
+  for (int j = 0; j < 3; ++j) {
+    erosion += amplitude * Noise3(ep);
+    // Further octaves only erode more, so a fully eroded sample stays empty.
+    if (j < 2 && d < erosion * 0.4 * (1.0 - d)) return 0.0;
+    ep = ep * 2.03 + 11.1;
+    amplitude *= 0.5;
+  }
   d = saturate(d - erosion * 0.4 * (1.0 - d));
   return d * pc.params.z;
 }
@@ -174,8 +194,9 @@ void main(uint3 id : SV_DispatchThreadID) {
       float3 lit = sun_col * light * lerp(0.35, 1.0, powder) * phase + ambient;
       float sigma = density * 0.05;  // extinction per metre
       float step_trans = exp(-sigma * dt);
-      // Energy-conserving front-to-back integration.
-      scatter += transmittance * lit * density * (1.0 - step_trans);
+      // Density is already in extinction. Scattering/extinction cancels it
+      // for a non-absorbing cloud, leaving the incident light times opacity.
+      scatter += transmittance * lit * (1.0 - step_trans);
       transmittance *= step_trans;
       if (transmittance < 0.01) break;
     }

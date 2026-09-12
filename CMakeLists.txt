@@ -1009,6 +1009,10 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_test(NAME recon_atrous_test COMMAND recon_atrous_test)
   set_tests_properties(recon_atrous_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
+  add_executable(cloud_lighting_test test/cloud_lighting_test.cc)
+  target_link_libraries(cloud_lighting_test PRIVATE rx::render rx::core)
+  add_test(NAME cloud_lighting_test COMMAND cloud_lighting_test)
+
   add_executable(lens_flare_test test/lens_flare_test.cc)
   target_link_libraries(lens_flare_test PRIVATE rx::render rx::core)
   add_test(NAME lens_flare_test COMMAND lens_flare_test)
@@ -1099,6 +1103,8 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # tests read RX_RHI to pick the backend and skip cleanly when the driver or
   # feature is unavailable.
   if(RX_RHI_D3D12)
+    add_test(NAME cloud_lighting_test_d3d12 COMMAND cloud_lighting_test)
+    set_tests_properties(cloud_lighting_test_d3d12 PROPERTIES ENVIRONMENT "RX_RHI=d3d12")
     add_test(NAME lens_flare_test_d3d12 COMMAND lens_flare_test)
     set_tests_properties(lens_flare_test_d3d12 PROPERTIES
       ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
@@ -1129,7 +1135,7 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   # Unsupported coverage is a CTest skip. The strict renderer gate rejects
   # skips, while the general suite can still run on machines without a GPU.
   foreach(name IN ITEMS offscreen_test recon_temporal_test recon_atrous_test
-      lens_flare_test post_sampling_test path_alpha_test path_sampling_test
+      cloud_lighting_test lens_flare_test post_sampling_test path_alpha_test path_sampling_test
       raytracing_test path_motion_test path_material_test upscaler_motion_test
       rt_failure_test rt_slot_tracker_test rt_instance_cull_test)
     foreach(suffix IN ITEMS "" "_d3d12" "_dlss")

@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_GPU_PROFILER_H_
 #define RX_RENDER_GPU_PROFILER_H_
 
+#include <cstdio>
 #include <string>
 
 #include <base/containers/vector.h>
@@ -87,6 +88,8 @@ class GpuProfiler {
 
   base::Vector<PassTiming> results_;
   f32 total_ms_ = 0.0f;
+  std::FILE* timing_file_ = nullptr;
+  u64 resolved_frames_ = 0;
 };
 
 }  // namespace rx::render

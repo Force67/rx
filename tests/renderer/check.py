@@ -19,12 +19,12 @@ PROFILES = {
     "portable": (
         "offscreen_test", "rt_slot_tracker_test", "rt_instance_cull_test", "rt_failure_test",
         "recon_temporal_test", "recon_atrous_test", "path_alpha_test",
-        "lens_flare_test", "post_sampling_test",
+        "cloud_lighting_test", "lens_flare_test", "post_sampling_test",
     ),
     "raytracing": ("raytracing_test", "path_sampling_test", "path_motion_test", "path_material_test"),
     "d3d12": (
         "offscreen_test_d3d12", "recon_temporal_test_d3d12", "recon_atrous_test_d3d12",
-        "path_alpha_test_d3d12", "lens_flare_test_d3d12", "post_sampling_test_d3d12",
+        "path_alpha_test_d3d12", "cloud_lighting_test_d3d12", "lens_flare_test_d3d12", "post_sampling_test_d3d12",
     ),
     "fsr": ("upscaler_motion_test",),
     "dlss": ("upscaler_motion_test_dlss",),

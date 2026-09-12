@@ -364,6 +364,29 @@ build/linux/runtime/rx --validate runtime/scenes/showcase.rxscene --json
 build/linux/rxdiff baseline.png /tmp/shot.png --diff /tmp/diff.png
 ```
 
+### Sampling GPU passes
+
+`RX_GPU_TIMINGS_FILE` writes tab-separated `frame`, `pass`, and `ms` samples
+as completed GPU timestamps are resolved. Set `RX_GPU_TIMINGS=1` for individual
+passes; without it, the profiler records the whole frame. Frame numbers count
+resolved samples, which lag rendering by the frames in flight. The file is
+overwritten for each run and closed on renderer shutdown.
+
+```sh
+nix develop -c vkrun env RX_GPU_TIMINGS=1 RX_GPU_TIMINGS_FILE=/tmp/passes.tsv \
+    build/linux/runtime/rx --demo materials --preset high --no-taa --headless \
+    --width 1920 --height 1080 --shot /tmp/materials.png --shot-frames 480
+python3 tools/gpu_timings.py /tmp/passes.tsv --warmup 120 --top 15
+```
+
+The summary ranks passes by mean GPU time and also shows median, p95, and sample
+count. Repeated passes with the same name are summed within each frame. Keep
+scene, resolution, preset, camera, and capture frame fixed for comparisons.
+Per-pass timestamps include barriers and add GPU overhead, so confirm overall
+improvements with `RX_GPU_TIMINGS=0` and repeat runs to account for desktop GPU
+contention. Async work may overlap the main queue; the sum is not a wall-clock
+frame-time measurement.
+
 ### Driving a running engine
 
 `--authoring-endpoint <socket>` serves the engine's script commands

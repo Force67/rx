@@ -11,7 +11,7 @@ From an already configured checkout:
 nix develop -c python3 tests/renderer/check.py --runner swrun
 ```
 
-The default `portable` profile builds nine tests and runs them on software
+The default `portable` profile builds ten tests and runs them on software
 Vulkan. No NVIDIA GPU or vendor SDK is required for this profile. Python uses
 only its standard library. Configure the build with `RX_BUILD_TESTS=ON` first
 (`nix develop -c cmake --preset linux`).
@@ -26,9 +26,9 @@ Profiles can also be selected individually or combined with repeated `--profile`
 
 | Profile | Required coverage |
 | --- | --- |
-| `portable` | Offscreen draw/readback, RT allocation/culling/slot bookkeeping, temporal rejection, reflection filtering, alpha selection, lens flares, depth of field and motion blur |
+| `portable` | Offscreen draw/readback, RT allocation/culling/slot bookkeeping, temporal rejection, reflection filtering, alpha selection, cloud lighting, lens flares, depth of field and motion blur |
 | `raytracing` | Ray queries, sampling/proposal energy and reservoir counts, traced rigid/skinned motion, material/geometry/camera-cut accumulation resets |
-| `d3d12` | Six shared draw/shader regressions through D3D12; no DXR claim |
+| `d3d12` | Seven shared draw/shader regressions through D3D12; no DXR claim |
 | `fsr` | Actual FSR reconstruction with correct/reversed motion and jitter controls, plus history resets |
 | `dlss` | Actual DLSS reconstruction controls and resets, plus RR creation/resize/shared-NGX lifecycle |
 
@@ -73,6 +73,10 @@ Useful properties already covered here include equivalent exposed inputs giving
 the same flare, an in-focus image remaining unchanged, native/upscaled blur
 agreeing in the moving region, longer pixel-space velocities winning, unbiased
 sampling energy, and denoising reducing noise while preserving tested edges.
+Cloud lighting is checked by recovering transmission from black/white background
+pairs: changing density must change opacity without changing the scattering
+source. The production pass also covers foreground occlusion, empty clouds,
+zero illumination, and odd output dimensions on both backends.
 
 Extend those tests when changing a pass's inputs or behavior. Cover applicable
 resolution changes (including odd sizes/aspect ratios), motion/jitter signs,
