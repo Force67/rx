@@ -7,6 +7,7 @@ rx_add_module(render
   core/bindless.cc
   pipeline/mesh_pipeline.cc
   pipeline/material_system.cc
+  pipeline/human_material.cc
   pipeline/meshlet.cc
   pipeline/gpu_cull.cc
   gi/shadow.cc
@@ -42,6 +43,7 @@ rx_add_module(render
   post/post.cc
   post/bloom.cc
   post/exposure.cc
+  post/reference_compare.cc
   post/taa.cc
   post/overdraw.cc
   post/ui_blur.cc
@@ -238,6 +240,7 @@ set(RX_RENDER_SHADERS
   shaders/util/msaa_resolve.cs.hlsl
   shaders/util/depth_copy.ps.hlsl
   shaders/post/tonemap.ps.hlsl
+  shaders/post/reference_compare.cs.hlsl
   shaders/post/taa.cs.hlsl
   shaders/atmosphere/transmittance_lut.cs.hlsl
   shaders/atmosphere/multiscatter_lut.cs.hlsl
@@ -387,6 +390,7 @@ list(APPEND RX_SHADER_INCLUDE_DIRS
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/atmosphere
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/geometry
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/pipeline
+  ${CMAKE_CURRENT_SOURCE_DIR}/shaders/post
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/texturing
   ${CMAKE_CURRENT_SOURCE_DIR}/shaders/gi)
 if(RX_NRD)
@@ -403,6 +407,9 @@ endif()
 # The skinned vertex permutations carry their own dual path
 # (rec_bone_palette root SRV on DXIL).
 # Wrapper-shader include dependencies (see cmake/shaders.cmake).
+set(RX_SHADER_DEPS_pathtrace_cs_hlsl shaders/human_brdf.hlsli shaders/material_record.hlsli)
+set(RX_SHADER_DEPS_tonemap_ps_hlsl shaders/post/tonemap_ops.hlsli)
+set(RX_SHADER_DEPS_reference_compare_cs_hlsl shaders/post/tonemap_ops.hlsli)
 set(RX_SHADER_DEPS_mesh_vs_hlsl shaders/pipeline/morph.hlsli)
 set(RX_SHADER_DEPS_sky_ps_hlsl shaders/atmosphere/aurora.hlsli)
 set(RX_SHADER_DEPS_sky_cs_hlsl shaders/atmosphere/aurora.hlsli)
@@ -412,14 +419,18 @@ set(RX_SHADER_DEPS_decal_bake_skin_vs_hlsl shaders/texturing/decal_bake.vs.hlsl)
 # material_uv.hlsli is what keeps the prepass and main alpha tests in phase, so
 # every pass that includes it has to rebuild when it changes or they ship out of
 # sync again.
-set(RX_SHADER_DEPS_mesh_ps_hlsl shaders/pipeline/material_uv.hlsli)
+set(RX_SHADER_DEPS_mesh_ps_hlsl shaders/pipeline/material_uv.hlsli shaders/human_brdf.hlsli
+    shaders/human_eye.hlsli)
 set(RX_SHADER_DEPS_prepass_ps_hlsl shaders/pipeline/material_uv.hlsli)
-set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl shaders/pipeline/material_uv.hlsli)
-set(RX_SHADER_DEPS_mesh_rt_ps_hlsl shaders/gi/rcgi_common.hlsli shaders/pipeline/material_uv.hlsli)
+set(RX_SHADER_DEPS_mesh_sss_ps_hlsl shaders/pipeline/mesh.ps.hlsl shaders/pipeline/material_uv.hlsli
+    shaders/human_brdf.hlsli shaders/human_eye.hlsli)
+set(RX_SHADER_DEPS_mesh_rt_ps_hlsl shaders/gi/rcgi_common.hlsli shaders/pipeline/material_uv.hlsli
+    shaders/human_brdf.hlsli shaders/human_eye.hlsli)
 set(RX_SHADER_DEPS_prepass_masked_ps_hlsl shaders/pipeline/prepass.ps.hlsl shaders/pipeline/material_uv.hlsli)
 set(RX_SHADER_DEPS_shadow_instance_vs_hlsl shaders/gi/shadow.vs.hlsl)
 set(RX_SHADER_DEPS_shadow_skin_vs_hlsl shaders/gi/shadow.vs.hlsl)
-set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl shaders/gi/rcgi_common.hlsli shaders/pipeline/material_uv.hlsli)
+set(RX_SHADER_DEPS_mesh_rt_sss_ps_hlsl shaders/pipeline/mesh_rt.ps.hlsl shaders/gi/rcgi_common.hlsli
+    shaders/pipeline/material_uv.hlsli shaders/human_brdf.hlsli shaders/human_eye.hlsli)
 set(RX_SHADER_DEPS_vgeo_cull_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_args_cs_hlsl shaders/pipeline/vgeo_common.hlsli)
 set(RX_SHADER_DEPS_vgeo_clear_cs_hlsl shaders/pipeline/vgeo_common.hlsli)

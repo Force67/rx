@@ -20,6 +20,8 @@ geometry/     water, ocean FFT, hair, fur, particles, imposters, WBOIT
 post/         TAA, upscalers, framegen, bloom, exposure, DoF, motion blur, VRS
 texturing/    virtual texturing
 shaders/      HLSL, mirrored per subsystem; rhi_bindings.hlsli is the ABI glue
+              human_brdf.hlsli / human_eye.hlsli are the character surface
+              model every light path shares (docs/CHARACTER_RENDERING.md)
 util/         gpu profiler, EXR/screenshot, shader utilities
 presets/      quality tier definitions
 ```
