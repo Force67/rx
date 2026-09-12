@@ -18,7 +18,10 @@ int main() {
   desc.request_raytracing = false;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
-  if (!device || device->is_stub()) return 0;
+  if (!device || device->is_stub()) {
+    std::printf("lens_flare_test: SKIP, GPU unavailable\n");
+    return 77;
+  }
   auto post = PostPass::Create(*device, Format::kRGBA32Float);
   if (!post) return 1;
   GpuImage scene = device->CreateImage2D(Format::kRGBA32Float, {w,h}, kTextureUsageSampled | kTextureUsageTransferDst);

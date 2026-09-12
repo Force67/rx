@@ -7,6 +7,13 @@ terrain, virtual-geometry, water, strand, interest-bubble, camera-stack, and
 vehicle physics: a car lapping a driving circuit, a motorboat cruising the lake,
 and an aircraft banking around a flyover circle.
 
+Rendering is windowless at an explicit 1280x720, so desktop DPI scaling and
+window resizing cannot change the capture dimensions.
+
+Validation and synchronization checks are enabled. Validation and SDK evaluation
+errors fail the tour even if the captures look plausible. The full process log is
+saved as `process.log`, including on timeout.
+
 ```sh
 python3 tests/feature_gym/tour.py --runner vkrun
 ```
@@ -20,3 +27,5 @@ fallbacks when the active GPU does not provide those features.
 The harness requires Pillow (`python3-pil` or the `Pillow` Python package). It
 checks exact labels, capture count, 1280x720 dimensions, and basic image variance;
 feature-specific engine behavior remains covered by RX's focused unit tests.
+Run the [strict renderer gate](../renderer/README.md) for numerical correctness
+and to require actual GPU/SDK execution instead of capability fallbacks.

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -85,11 +86,11 @@ def main() -> int:
         print("Pillow is required: install python3-pil or pip install Pillow", file=sys.stderr)
         return 2
 
-    binary = Path(args.binary)
+    binary = Path(args.binary).resolve()
     if not binary.exists():
         print(f"binary not found: {binary}", file=sys.stderr)
         return 2
-    output = Path(args.out)
+    output = Path(args.out).resolve()
     output.mkdir(parents=True, exist_ok=True)
     for old in output.glob("*.png"):
         old.unlink()
@@ -104,20 +105,25 @@ def main() -> int:
         "RX_SHOWCASE": "1",
         "RX_SHOWCASE_SHOTS": str(output),
         "RX_SHOWCASE_QUIT": "1",
+        "VK_LAYER_VALIDATE_SYNC": "1",
     })
     command = shlex.split(args.runner) + [
         str(binary),
-        "--demo", "featuregym",
+        "--demo", "featuregym", "--validation", "--headless",
+        "--width", "1280", "--height", "720",
     ]
     if args.no_rt:
         command.append("--no-rt")
     try:
         process = subprocess.run(command, cwd=REPO, env=env, timeout=args.timeout,
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as error:
+        (output / "process.log").write_bytes(error.stdout or b"")
         print(f"feature gym timed out after {args.timeout}s", file=sys.stderr)
         return 1
 
+    (output / "process.log").write_bytes(process.stdout)
+    process_log = process.stdout.decode(errors="replace")
     captures = sorted(output.glob("*.png"))
     capture_labels = [capture_label(path) for path in captures]
     labels = set(capture_labels)
@@ -125,6 +131,10 @@ def main() -> int:
     unexpected = sorted(labels - EXPECTED)
     duplicates = sorted(label for label in labels if capture_labels.count(label) > 1)
     failures = []
+    errors = [line for line in process_log.splitlines()
+              if re.search(r"VUID-|SYNC-HAZARD|hazard detected|evaluate failed|dispatch failed", line)]
+    if errors:
+        failures.append("GPU validation or SDK evaluation errors:\n  " + "\n  ".join(errors[:20]))
     for path in captures:
         error = smoke_check(path)
         if error:

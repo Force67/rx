@@ -30,7 +30,10 @@ static base::Option<const char*> ShowcaseShots{"showcase.shots", nullptr, "RX_SH
 static base::Option<bool> ShowcaseQuit{"showcase.quit", false, "RX_SHOWCASE_QUIT"};
 
 void Viewer::UpdateCamera(f32 frame_delta) {
-  if (!window_) return;
+  if (!window_) {
+    DriveCamera(frame_delta);
+    return;
+  }
   const InputState& input = window_->input();
 
   bool kb = debug_ui_.wants_keyboard();

@@ -34,6 +34,7 @@ int main() {
   DeviceDesc desc;
   const char* rhi = std::getenv("RX_RHI");
   desc.backend = (rhi && std::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
+  desc.enable_validation = true;
   desc.request_raytracing = false;  // not needed; keeps the adapter requirements minimal
   std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
@@ -43,7 +44,7 @@ int main() {
     // vkrun). A skip, not a failure - the real pixel path is proven under vkrun.
     std::printf("offscreen_test: no %s driver, skipping (null backend)\n",
                 BackendName(desc.backend));
-    return 0;
+    return 77;
   }
 
   std::printf("offscreen_test: device '%s'\n", device->caps().adapter_name.c_str());

@@ -30,10 +30,13 @@ class DepthOfFieldPass {
                             Extent2D extent, const Frame& frame);
 
  private:
+  PipelineHandle focus_pipeline_;
   PipelineHandle coc_pipeline_;
   PipelineHandle gather_pipeline_;
   PipelineHandle composite_pipeline_;
-  GpuBuffer focus_state_;
+  GpuImage focus_state_;
+  ResourceState focus_layout_ = ResourceState::kUndefined;
+  bool focus_valid_ = false;
   SamplerHandle sampler_;
 };
 

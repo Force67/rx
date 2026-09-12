@@ -373,6 +373,7 @@ set(RX_RENDER_SHADERS
   shaders/post/motion_tilemax.cs.hlsl
   shaders/post/motion_blur.cs.hlsl
   shaders/post/dof_coc.cs.hlsl
+  shaders/post/dof_focus.cs.hlsl
   shaders/post/dof_gather.cs.hlsl
   shaders/post/dof_composite.cs.hlsl
 )

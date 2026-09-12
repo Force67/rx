@@ -44,7 +44,7 @@ void PrintUsage() {
   RX_INFO("                        error-level finding. --json for a machine-readable report");
   RX_INFO("  --json                emit --validate's report as json instead of text");
   RX_INFO("  --authoring-endpoint <path>  serve those commands on a local unix socket");
-  RX_INFO("  --headless            no window (a --shot run still brings the gpu up, windowless)");
+  RX_INFO("  --headless            no window (--shot and showcase captures still use the gpu)");
   RX_INFO("  --shot <path.png>     capture a frame, then quit; nonzero exit if it was not written.");
   RX_INFO("                        Runs the clock in lockstep at 1/60 s so the png does not depend");
   RX_INFO("                        on machine load (RX_FIXED_DT overrides, 0 = wall clock)");
@@ -218,13 +218,15 @@ int main(int argc, char** argv) {
   }
 
   // The env var is the older spelling of --shot and still drives existing
-  // capture scripts; resolve both here because whether a shot is armed decides
+  // capture scripts; resolve both here because whether a capture is armed decides
   // whether a windowless run needs the gpu at all.
   std::string shot = config.shot_path;
   if (shot.empty()) {
     if (const char* env = std::getenv("RX_UI_SHOT")) shot = env;
   }
-  config.offscreen = no_window && !shot.empty();
+  const char* showcase_shots = std::getenv("RX_SHOWCASE_SHOTS");
+  const bool capture = !shot.empty() || (showcase_shots && showcase_shots[0]);
+  config.offscreen = no_window && capture;
   config.headless = no_window && !config.offscreen;
 
   app_config.renderer = config.renderer;
@@ -238,7 +240,7 @@ int main(int argc, char** argv) {
   // run-to-run noise (rmse 0.0002 -> 0.008, the size of a real regression, so a
   // comparison then catches nothing); RX_FIXED_DT=0 asks for the wall clock
   // back and RX_FIXED_DT=<seconds> picks a different delta.
-  if (!shot.empty()) app_config.fixed_delta = kCaptureDelta;
+  if (capture) app_config.fixed_delta = kCaptureDelta;
 
   // A stale png from an earlier run would otherwise pass the check below.
   const bool verify_shot = !config.shot_path.empty() && !std::getenv("RX_UI_SHOT_SEQ");

@@ -33,7 +33,10 @@ int main() {
   desc.request_raytracing = false;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
-  if (!device || device->is_stub()) return 0;
+  if (!device || device->is_stub()) {
+    std::printf("recon_atrous_test: SKIP, GPU unavailable\n");
+    return 77;
+  }
   PipelineHandle pipeline = device->CreateComputePipeline({
       .shader = RX_SHADER(k_recon_atrous_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage}, {1, BindingType::kSampledImage},

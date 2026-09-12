@@ -44,7 +44,8 @@ void main(uint3 id : SV_DispatchThreadID) {
     for (int tx = -1; tx <= 1; ++tx) {
       int2 t = clamp(tile + int2(tx, ty), int2(0, 0), int2(pc.tile_count) - 1);
       float2 v = tile_max.Load(int3(t, 0));
-      float m = dot(v, v);
+      float2 pixels = v * float2(pc.size);
+      float m = dot(pixels, pixels);
       if (m > vmax_mag) {
         vmax_mag = m;
         vmax = v;

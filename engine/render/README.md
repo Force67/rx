@@ -51,7 +51,7 @@ presets/      quality tier definitions
    done. If it genuinely can't run on d3d12 yet (e.g. `vk::RawBufferLoad`),
    it goes on the `RX_SHADER_NO_DXIL` list with a comment, and caps
    gating must keep the path unreached there.
-6. **Verify with the golden harness before declaring victory** (see
+6. **Verify with the renderer correctness gate before declaring victory** (see
    Verification). "It compiles" is not evidence for a renderer.
 
 ## Adding a render pass
@@ -157,10 +157,16 @@ class FooPass {
 1. Build with both backends: the nix dev shell provides vkd3d, so
    `RX_RHI_D3D12` defaults ON. Configure **only inside
    `nix develop`** - a host-compiler-contaminated cache SIGBUSes.
-2. Golden-image regression:
-   `nix develop -c python3 tests/golden/golden.py --runner vkrun`.
-   After an *intentional* visual change, regenerate refs with `--update` and
-   commit them - and say so in the commit subject.
+2. Numerical renderer regression:
+   `nix develop -c python3 tests/renderer/check.py --runner swrun`.
+   This builds and runs the portable tests and rejects missing/skipped coverage.
+   Run the relevant hardware profiles too, for example
+   `nix develop -c python3 tests/renderer/check.py --runner vkrun --profile all`
+   on the NVIDIA SDK runner. See [profiles and coverage](../../tests/renderer/README.md).
+   For numerical/temporal fixes, add a production-shader or pass regression that
+   fails against the original bug and has an independent expected result.
+   API validation alone does not prove sampling, motion, exposure, or history
+   correctness. The previously documented `tests/golden/golden.py` does not exist.
 3. Cross-backend spot check for anything touching shared shaders or the RHI:
    `vkrun env RX_RHI=d3d12 ./build/nix/runtime/rx --demo materials --no-rt`
    should match Vulkan pixel-near-identically (see RHI.md for the method).
@@ -170,6 +176,12 @@ class FooPass {
 5. Toggle matrix: your feature off, on, and on-without-caps (e.g. `--no-rt`)
    must all render clean frames - no validation errors under `swrun`
    (lavapipe + validation layers) where it runs.
+6. Scene integration:
+   `nix develop -c python3 tests/feature_gym/tour.py --runner vkrun`.
+   The tour requires Pillow and saves a process log with the captures. It rejects
+   missing/black/uniform frames and validation/SDK evaluation errors. Inspect
+   intentional appearance changes too; these smoke checks cannot judge visual
+   quality or replace the numerical regressions.
 
 ## Pitfall log (hard-won; don't re-learn these)
 

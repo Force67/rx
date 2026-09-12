@@ -4,7 +4,7 @@
 // neighborhood so fast movers bleed blur into neighboring tiles (McGuire).
 struct TileMaxPush {
   uint2 tile_count;
-  uint2 size;      // velocity texture resolution
+  uint2 size;      // output resolution, tiles cover 16x16 output pixels
   float2 scale;    // uv velocity -> blur vector (shutter * direction)
   float2 max_blur; // uv clamp so extreme velocities stay bounded
   float2 debug_vel;  // nonzero: override every velocity (static-camera testing)
@@ -21,15 +21,20 @@ void main(uint3 id : SV_DispatchThreadID) {
   float2 best = 0.0.xx;
   float best_mag = 0.0;
   uint2 base = id.xy * 16u;
+  uint width, height;
+  motion.GetDimensions(width, height);
   for (uint y = 0; y < 16u; ++y) {
     for (uint x = 0; x < 16u; ++x) {
       uint2 p = min(base + uint2(x, y), pc.size - 1u);
+      float2 uv = (float2(p) + 0.5) / float2(pc.size);
+      uint2 source = min(uint2(uv * float2(width, height)), uint2(width, height) - 1u);
       // motion points current -> previous; the blur streaks along the
       // apparent screen motion, i.e. the opposite.
       float2 v = any(pc.debug_vel != 0.0) ? pc.debug_vel
-                                          : -motion.Load(int3(p, 0)) * pc.scale;
+                                          : -motion.Load(int3(source, 0)) * pc.scale;
       v = clamp(v, -pc.max_blur, pc.max_blur);
-      float m = dot(v, v);
+      float2 pixels = v * float2(pc.size);
+      float m = dot(pixels, pixels);
       if (m > best_mag) {
         best_mag = m;
         best = v;

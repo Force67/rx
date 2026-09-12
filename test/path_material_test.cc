@@ -15,7 +15,7 @@ int main() {
   if (!renderer.InitializeOffscreen(desc, 32, 32)) return 1;
   if (!renderer.caps() || !renderer.caps()->ray_query) {
     std::printf("path_material_test: SKIP, ray queries unavailable\n");
-    return 0;
+    return 77;
   }
   RenderSettings& settings = renderer.settings();
   settings.path_trace = true;

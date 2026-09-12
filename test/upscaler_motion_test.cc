@@ -32,12 +32,15 @@ int main() {
   desc.request_raytracing = false;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
-  if (!device || device->is_stub()) return 0;
+  if (!device || device->is_stub()) {
+    std::printf("upscaler_motion_test: SKIP, GPU unavailable\n");
+    return 77;
+  }
   const char* name = std::getenv("RX_TEST_UPSCALER");
   const UpscalerKind kind = name && std::strcmp(name, "dlss") == 0 ? UpscalerKind::kDlss : UpscalerKind::kFsr3;
   auto upscaler = CreateUpscaler({.kind = kind, .render_width = kW, .render_height = kH,
                                  .output_width = kOutW, .output_height = kOutH}, *device);
-  if (!upscaler) { std::printf("upscaler_motion_test: SKIP, backend unavailable\n"); return 0; }
+  if (!upscaler) { std::printf("upscaler_motion_test: SKIP, backend unavailable\n"); return 77; }
 #if defined(RX_HAS_DLSS) && !defined(__aarch64__)
   if (kind == UpscalerKind::kDlss) {
     RrDenoiser rr;

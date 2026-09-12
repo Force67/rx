@@ -55,7 +55,7 @@ int main() {
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub() || !device->caps().ray_query) {
     std::printf("path_motion_test: GPU checks SKIP, %d CPU failures\n", failures);
-    return failures ? 1 : 0;
+    return failures ? 1 : 77;
   }
   auto rt = RayTracingContext::Create(*device);
   auto bindless = BindlessRegistry::Create(*device);

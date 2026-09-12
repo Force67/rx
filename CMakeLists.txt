@@ -1014,6 +1014,12 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
   add_test(NAME lens_flare_test COMMAND lens_flare_test)
   set_tests_properties(lens_flare_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
 
+  add_executable(post_sampling_test test/post_sampling_test.cc)
+  target_link_libraries(post_sampling_test PRIVATE rx::render rx::core)
+  target_include_directories(post_sampling_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+  add_test(NAME post_sampling_test COMMAND post_sampling_test)
+  set_tests_properties(post_sampling_test PROPERTIES FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+
   add_executable(path_motion_test test/path_motion_test.cc)
   target_link_libraries(path_motion_test PRIVATE rx::render rx::core)
   set(RX_SHADER_INCLUDE_DIRS ${PROJECT_SOURCE_DIR}/engine/render/shaders
@@ -1096,6 +1102,9 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
     add_test(NAME lens_flare_test_d3d12 COMMAND lens_flare_test)
     set_tests_properties(lens_flare_test_d3d12 PROPERTIES
       ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+    add_test(NAME post_sampling_test_d3d12 COMMAND post_sampling_test)
+    set_tests_properties(post_sampling_test_d3d12 PROPERTIES
+      ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
     add_test(NAME recon_atrous_test_d3d12 COMMAND recon_atrous_test)
     set_tests_properties(recon_atrous_test_d3d12 PROPERTIES
       ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
@@ -1115,6 +1124,29 @@ if(RX_BUILD_TESTS AND (RX_RHI_VULKAN OR RX_RHI_D3D12))
     add_test(NAME path_sampling_test_d3d12 COMMAND path_sampling_test)
     set_tests_properties(path_sampling_test_d3d12 PROPERTIES
       ENVIRONMENT "RX_RHI=d3d12" FAIL_REGULAR_EXPRESSION "VUID|hazard detected")
+  endif()
+
+  # Unsupported coverage is a CTest skip. The strict renderer gate rejects
+  # skips, while the general suite can still run on machines without a GPU.
+  foreach(name IN ITEMS offscreen_test recon_temporal_test recon_atrous_test
+      lens_flare_test post_sampling_test path_alpha_test path_sampling_test
+      raytracing_test path_motion_test path_material_test upscaler_motion_test
+      rt_failure_test rt_slot_tracker_test rt_instance_cull_test)
+    foreach(suffix IN ITEMS "" "_d3d12" "_dlss")
+      if(TEST ${name}${suffix})
+        set_tests_properties(${name}${suffix} PROPERTIES
+          LABELS "renderer"
+          SKIP_RETURN_CODE 77
+          TIMEOUT 120
+          FAIL_REGULAR_EXPRESSION "VUID|hazard detected|evaluate failed|dispatch failed")
+      endif()
+    endforeach()
+  endforeach()
+
+  find_package(Python3 QUIET COMPONENTS Interpreter)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME renderer_gate_test
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/renderer/test_check.py)
   endif()
 endif()
 

@@ -89,13 +89,13 @@ ResourceHandle MotionBlurPass::AddToGraph(RenderGraph& graph, ResourceHandle col
         b.Write(tiles, ResourceUsage::kStorageWrite);
         b.Read(motion, ResourceUsage::kSampledCompute);
       },
-      [this, tiles, motion, tiles_x, tiles_y, max_blur_uv, debug_uv, frame](PassContext& ctx) {
+      [this, tiles, motion, extent, tiles_x, tiles_y, max_blur_uv, debug_uv, frame](PassContext& ctx) {
         const GpuImage& mv = ctx.graph->image(motion);
         TileMaxPush p{};
         p.tile_count[0] = tiles_x;
         p.tile_count[1] = tiles_y;
-        p.size[0] = mv.extent.width;
-        p.size[1] = mv.extent.height;
+        p.size[0] = extent.width;
+        p.size[1] = extent.height;
         p.scale[0] = p.scale[1] = frame.shutter;
         p.max_blur[0] = max_blur_uv[0];
         p.max_blur[1] = max_blur_uv[1];

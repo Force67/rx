@@ -37,7 +37,7 @@ int main() {
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
     std::printf("recon_temporal_test: SKIP, GPU unavailable\n");
-    return 0;
+    return 77;
   }
   int failures = 0;
   auto check = [&](bool ok, const char* message) {

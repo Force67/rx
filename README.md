@@ -392,6 +392,11 @@ at all. `engine/authoring/command_bridge.h` has the threat model.
 
 ## Notes
 
+- Renderer correctness: `nix develop -c python3 tests/renderer/check.py --runner swrun`.
+  This builds and runs the portable GPU regressions and rejects skipped coverage.
+  See [renderer test profiles and CI usage](tests/renderer/README.md) for hardware
+  RT, D3D12, FSR, and DLSS checks.
+
 - The C++ namespace is `rx::`; env-var knobs are `RX_*` (`RX_PATHTRACE=1`,
   `RX_DRS=1`, `RX_MSAA=4`, `RX_HDR_OUTPUT=pq`). Grep for `base::Option` to see
   the full set.

@@ -22,7 +22,7 @@ int main() {
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
     std::printf("path_alpha_test: SKIP, GPU unavailable\n");
-    return 0;
+    return 77;
   }
   auto bindless = BindlessRegistry::Create(*device);
   if (!bindless) return 1;

@@ -1,23 +1,26 @@
 #include "render/post/depth_of_field.h"
 
-#include <cstring>
-
 #include "core/log.h"
 #include "shaders/dof_coc_cs_hlsl.h"
 #include "shaders/dof_composite_cs_hlsl.h"
+#include "shaders/dof_focus_cs_hlsl.h"
 #include "shaders/dof_gather_cs_hlsl.h"
 
 namespace rx::render {
 namespace {
 
+struct FocusPush {
+  f32 near_plane;
+  f32 focus_speed;
+  f32 focus_override;
+  u32 reset;
+};
 struct CocPush {
   u32 size[2];
   f32 near_plane;
   f32 aperture;
   f32 max_coc;
-  f32 focus_speed;
-  f32 focus_override;
-  f32 pad0;
+  f32 pad[3];
 };
 struct GatherPush {
   u32 size[2];
@@ -33,11 +36,18 @@ struct CompositePush {
 }  // namespace
 
 bool DepthOfFieldPass::Initialize(Device& device) {
+  focus_pipeline_ = device.CreateComputePipeline({
+      .shader = RX_SHADER(k_dof_focus_cs_hlsl),
+      .sets = {{.slots = {{0, BindingType::kStorageImage},
+                          {1, BindingType::kSampledImage}}}},
+      .push_constant_size = PushSize<FocusPush>(),
+      .debug_name = "dof_focus",
+  });
   coc_pipeline_ = device.CreateComputePipeline({
       .shader = RX_SHADER(k_dof_coc_cs_hlsl),
       .sets = {{.slots = {{0, BindingType::kStorageImage},
                           {1, BindingType::kSampledImage},
-                          {2, BindingType::kStorageBuffer}}}},
+                          {2, BindingType::kSampledImage}}}},
       .push_constant_size = PushSize<CocPush>(),
       .debug_name = "dof_coc",
   });
@@ -58,29 +68,38 @@ bool DepthOfFieldPass::Initialize(Device& device) {
       .push_constant_size = PushSize<CompositePush>(),
       .debug_name = "dof_composite",
   });
-  if (!coc_pipeline_ || !gather_pipeline_ || !composite_pipeline_) {
+  if (!focus_pipeline_ || !coc_pipeline_ || !gather_pipeline_ || !composite_pipeline_) {
     RX_ERROR("dof pipeline creation failed");
     return false;
   }
-  focus_state_ = device.CreateBuffer(sizeof(f32), kBufferUsageStorage, true);
-  if (!focus_state_.mapped) return false;
-  std::memset(focus_state_.mapped, 0, sizeof(f32));
+  focus_state_ = device.CreateImage2D(Format::kR32Float, {1, 1},
+                                     kTextureUsageStorage | kTextureUsageSampled);
+  focus_layout_ = ResourceState::kUndefined;
+  focus_valid_ = false;
+  if (!focus_state_) return false;
   sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
                                 .address_v = AddressMode::kClampToEdge});
   return true;
 }
 
 void DepthOfFieldPass::Destroy(Device& device) {
-  for (PipelineHandle* p : {&coc_pipeline_, &gather_pipeline_, &composite_pipeline_}) {
+  for (PipelineHandle* p : {&focus_pipeline_, &coc_pipeline_, &gather_pipeline_, &composite_pipeline_}) {
     if (*p) device.DestroyPipeline(*p);
     *p = {};
   }
-  if (focus_state_) device.DestroyBuffer(focus_state_);
+  if (focus_state_) device.DestroyImage(focus_state_);
+  focus_state_ = {};
+  focus_valid_ = false;
 }
 
 ResourceHandle DepthOfFieldPass::AddToGraph(RenderGraph& graph, ResourceHandle color,
                                             ResourceHandle depth, Extent2D extent,
                                             const Frame& frame) {
+  if (!focus_state_ || !focus_pipeline_ || !coc_pipeline_ || !gather_pipeline_ ||
+      !composite_pipeline_) return color;
+  ResourceHandle focus = graph.ImportImage("dof_focus", focus_state_, &focus_layout_);
+  const bool reset = !focus_valid_;
+  focus_valid_ = true;
   Extent2D half{(extent.width + 1) / 2, (extent.height + 1) / 2};
   ResourceHandle coc = graph.CreateTexture(
       {.name = "dof_coc", .format = Format::kR16Float, .width = extent.width,
@@ -93,24 +112,38 @@ ResourceHandle DepthOfFieldPass::AddToGraph(RenderGraph& graph, ResourceHandle c
        .height = extent.height});
 
   graph.AddPass(
+      "dof_focus",
+      [&](RenderGraph::PassBuilder& b) {
+        b.Write(focus, ResourceUsage::kStorageWrite);
+        b.Read(depth, ResourceUsage::kSampledCompute);
+      },
+      [this, focus, depth, frame, reset](PassContext& ctx) {
+        FocusPush p{frame.near_plane, frame.focus_speed, frame.focus_distance, reset ? 1u : 0u};
+        ctx.cmd->BindPipeline(focus_pipeline_);
+        ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(focus)),
+                                   Bind::Sampled(1, ctx.graph->image(depth))});
+        ctx.cmd->Push(p);
+        ctx.cmd->Dispatch(1, 1, 1);
+      });
+
+  graph.AddPass(
       "dof_coc",
       [&](RenderGraph::PassBuilder& b) {
         b.Write(coc, ResourceUsage::kStorageWrite);
         b.Read(depth, ResourceUsage::kSampledCompute);
+        b.Read(focus, ResourceUsage::kSampledCompute);
       },
-      [this, coc, depth, extent, frame](PassContext& ctx) {
+      [this, coc, depth, focus, extent, frame](PassContext& ctx) {
         CocPush p{};
         p.size[0] = extent.width;
         p.size[1] = extent.height;
         p.near_plane = frame.near_plane;
         p.aperture = frame.aperture;
         p.max_coc = frame.max_coc;
-        p.focus_speed = frame.focus_speed;
-        p.focus_override = frame.focus_distance;
         ctx.cmd->BindPipeline(coc_pipeline_);
         ctx.cmd->BindTransient(0, {Bind::Storage(0, ctx.graph->image(coc)),
                                    Bind::Sampled(1, ctx.graph->image(depth)),
-                                   Bind::StorageBuffer(2, focus_state_, 0, focus_state_.size)});
+                                   Bind::Sampled(2, ctx.graph->image(focus))});
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent);
       });
