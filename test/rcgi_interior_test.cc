@@ -28,7 +28,7 @@ bool Near(f32 a, f32 b, f32 eps) { return std::fabs(a - b) <= eps; }
 }  // namespace
 
 int main() {
-  // --- interior-volume classification ---
+  // interior-volume classification
   {
     InteriorVolume vols[2] = {
         {Vec3{-1, 0, -1}, Vec3{1, 3, 1}},     // a room around the origin
@@ -45,7 +45,7 @@ int main() {
     CHECK(!PointInInteriorVolumes(vols, 0, Vec3{0, 1.5f, 0}));
   }
 
-  // --- relocation offset packing round trip (fraction of spacing) ---
+  // relocation offset packing round trip (fraction of spacing)
   {
     // Zero offset survives exactly.
     CHECK(RcgiPackOffset(Vec3{0, 0, 0}) == RcgiPackOffset(Vec3{0, 0, 0}));

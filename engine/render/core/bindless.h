@@ -59,7 +59,7 @@ class BindlessRegistry {
     u32 terrain_weight_texture = kInvalidIndex;  // terrain per-cell weight/control map
     u32 pad2 = 0;  // pad to 64B: the std430 array stride rounds up to a multiple
                    // of 16 (float4 alignment), so every shader struct must match.
-    // --- Skin subsurface scattering (appended; existing offsets unchanged).
+    // Skin subsurface scattering (appended; existing offsets unchanged).
     // Physical coefficients pre-mapped from artist colour/mfp via Kulla-Conty at
     // upload; only meaningful when flags has kMaterialSkin. Mirrored by the
     // shared shaders/material_record.hlsli. sigma_a = sigma_t - sigma_s.
@@ -69,7 +69,7 @@ class BindlessRegistry {
     f32 sss_perfusion = 0.0f;        //        dynamic hemoglobin 0..1
     f32 sss_scatter_color[3] = {0, 0, 0};  // row 6: multiple-scatter tint
     f32 sss_ior = 1.4f;              //        boundary index of refraction
-    // --- Character surface model (appended; only meaningful under
+    // Character surface model (appended; only meaningful under
     // kMaterialHuman). The ray paths carry the SHAPING controls, not the whole
     // block: a path tracer that shades a face with plain Lambert while the
     // raster path shades it with the fitted model is exactly the "different

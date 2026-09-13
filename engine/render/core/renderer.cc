@@ -3100,7 +3100,7 @@ void Renderer::RenderFrame(const FrameView &view) {
   ++frame_index_;
 }
 
-// --- Editor debug lines ------------------------------------------------------
+// Editor debug lines
 
 namespace {
 // One vertex of a debug line: world position + packed rgba8 colour.
@@ -3316,7 +3316,7 @@ void Renderer::DrawDebugLines(CommandList &cmd, const FrameView &view,
   }
 }
 
-// --- Editor picking ----------------------------------------------------------
+// Editor picking
 
 void Renderer::RequestPick(u32 x, u32 y) {
   pick_requested_ = true;

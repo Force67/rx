@@ -62,7 +62,7 @@ struct RX_PHYSICS_EXPORT AircraftDesc {
     bool braked = false;           // wheel brakes act here (main gear)
   };
 
-  // --- mass & structure ---
+  // mass & structure
   // Collision box wraps the fuselage core only (not the wings/empennage) so it
   // clears the runway on its gear; the visual/aero model is larger.
   Vec3 fuselage_half_extent{0.55f, 0.6f, 2.6f};
@@ -76,7 +76,7 @@ struct RX_PHYSICS_EXPORT AircraftDesc {
   // reports the between-MTOM-and-limit state.
   f32 structural_mass_limit_kg = 1300.0f;
 
-  // --- wing (whole wing; the model splits it into two equal halves) ---
+  // wing (whole wing; the model splits it into two equal halves)
   f32 wing_area_m2 = 16.2f;
   f32 wing_span_m = 11.0f;
   f32 wing_zero_lift_alpha_rad = -0.035f;  // cambered section, ~ -2 deg
@@ -88,32 +88,32 @@ struct RX_PHYSICS_EXPORT AircraftDesc {
   f32 oswald_efficiency = 0.75f;           // e in induced drag CL^2/(pi AR e)
   f32 cd0 = 0.028f;                        // parasitic drag coefficient
 
-  // --- flaps ---
+  // flaps
   f32 flap_delta_cl = 0.65f;   // ΔCL added at full flap deflection
   f32 flap_delta_cd = 0.06f;   // ΔCD added at full flap deflection
   u32 flap_steps = 3;          // detents between 0 and 1 (0/1/3 -> 0,.33,.66,1)
 
-  // --- horizontal tail (elevator) ---
+  // horizontal tail (elevator)
   f32 tail_area_m2 = 2.0f;
   f32 tail_arm_m = 4.6f;        // aerodynamic centre aft of CoM, m
   f32 tail_cl_alpha = 3.6f;     // tailplane lift-curve slope, /rad
   f32 elevator_authority = 1.1f;  // ΔCL_tail at full elevator
 
-  // --- vertical fin (rudder) ---
+  // vertical fin (rudder)
   f32 fin_area_m2 = 1.1f;
   f32 fin_arm_m = 4.6f;         // aft of CoM, m
   f32 fin_cl_beta = 3.0f;       // side-force slope vs sideslip, /rad
   f32 rudder_authority = 0.9f;  // ΔCL_fin at full rudder
 
-  // --- ailerons ---
+  // ailerons
   f32 aileron_authority = 0.5f;  // ΔCL differential between the wing halves at
                                  //   full roll input (outboard camber change)
 
-  // --- fuselage side drag (sideslip / weathervane damping) ---
+  // fuselage side drag (sideslip / weathervane damping)
   f32 fuselage_side_cd = 0.55f;
   f32 fuselage_side_area_m2 = 6.5f;
 
-  // --- rotational aerodynamic damping (per unit dynamic pressure) ---
+  // rotational aerodynamic damping (per unit dynamic pressure)
   // Real airframes damp their own rotation; the strip-theory wing/tail/fin
   // forces already supply most of it (each surface is sampled at its own point
   // velocity). The body inertia is now set honestly from the airframe geometry
@@ -128,7 +128,7 @@ struct RX_PHYSICS_EXPORT AircraftDesc {
   f32 pitch_damp = 1800.0f;
   f32 yaw_damp = 1400.0f;
 
-  // --- propulsion ---
+  // propulsion
   Propulsion propulsion = Propulsion::kProp;
   // Prop: momentum-theory-style thrust that falls off with airspeed,
   // T ~= min(power * eff / max(V, v_min), static_cap). rpm tracks throttle
@@ -146,7 +146,7 @@ struct RX_PHYSICS_EXPORT AircraftDesc {
   f32 jet_max_thrust_n = 24000.0f;
   f32 jet_spool_time_s = 3.5f;
 
-  // --- landing gear: 0 = nose (steerable), 1 = left main, 2 = right main ---
+  // landing gear: 0 = nose (steerable), 1 = left main, 2 = right main
   Wheel wheels[3];
   f32 nose_steer_angle_rad = 0.55f;  // full nose-wheel deflection (low speed)
 

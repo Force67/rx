@@ -375,7 +375,7 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
   // stable across frames; read_ never flips.
 }
 
-// --- test seam (readback of the solver output) ---------------------------
+// test seam (readback of the solver output)
 const GpuImage& FluidSimProbe::state(const FluidSim& sim) { return sim.state_[sim.read_]; }
 const GpuImage& FluidSimProbe::velocity(const FluidSim& sim) { return sim.velocity_; }
 

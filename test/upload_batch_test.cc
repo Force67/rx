@@ -69,7 +69,7 @@ int main() {
   }
   std::printf("upload_batch_test: device '%s'\n", device->caps().adapter_name.c_str());
 
-  // --- batched uploads, nested scopes, verified after the outermost flush ---
+  // batched uploads, nested scopes, verified after the outermost flush
   device->BeginUploadBatch();
   std::vector<u8> expect_a, expect_b;
   GpuBuffer a = UploadPattern(*device, 64 * 1024, 1, expect_a);
@@ -83,7 +83,7 @@ int main() {
   if (!VerifyContents(*device, a, expect_a)) return Fail("buffer A contents wrong after flush");
   if (!VerifyContents(*device, b, expect_b)) return Fail("buffer B contents wrong after flush");
 
-  // --- implicit flush: ImmediateSubmit must see a still-batched buffer ---
+  // implicit flush: ImmediateSubmit must see a still-batched buffer
   device->BeginUploadBatch();
   std::vector<u8> expect_c;
   GpuBuffer c = UploadPattern(*device, 16 * 1024, 3, expect_c);
@@ -93,7 +93,7 @@ int main() {
   if (!VerifyContents(*device, c, expect_c)) return Fail("implicit flush lost a batched copy");
   device->FlushUploadBatch();
 
-  // --- soft staging budget: enough payload that the batch auto-submits early;
+  // soft staging budget: enough payload that the batch auto-submits early;
   // every buffer must still verify (early chunks and the final flush alike) ---
   constexpr u64 kChunk = 24ull << 20;  // 3 x 24 MiB crosses the 64 MiB budget
   device->BeginUploadBatch();
@@ -109,7 +109,7 @@ int main() {
       return Fail("large buffer contents wrong across budget auto-submit");
   }
 
-  // --- the frame path: a batched buffer read by the frame that follows, with
+  // the frame path: a batched buffer read by the frame that follows, with
   // no explicit flush. BeginFrame's implicit flush plus the batch's trailing
   // transfer->all barrier are the only things ordering the copy against the
   // frame, which is what streaming mid-frame relies on. ---
@@ -131,7 +131,7 @@ int main() {
     return Fail("frame read a batched buffer before its copy landed");
   device->FlushUploadBatch();
 
-  // --- the texture path: RecordUpload + ParkBatchStaging, as MaterialSystem
+  // the texture path: RecordUpload + ParkBatchStaging, as MaterialSystem
   // does it. The staging must survive to the flush and the image must come out
   // in kShaderReadAll with the right pixels. ---
   constexpr u32 kDim = 64;
@@ -208,7 +208,7 @@ int main() {
   retire.join();
   if (!race_frames_ok) return Fail("BeginFrame returned null (off-thread destroy case)");
 
-  // --- deferred destroy of a resource a submitted-but-unfinished batch is
+  // deferred destroy of a resource a submitted-but-unfinished batch is
   // still copying into. Retiring from outside the frame loop parks under the
   // previous frame's slot, whose fence predates the batch, so only the batch
   // serial keeps the free honest. Under validation an early free shows up as

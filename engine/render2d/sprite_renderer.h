@@ -98,7 +98,7 @@ class RX_RENDER2D_EXPORT SpriteRenderer {
   void SetSamplingMode(SamplingMode mode);
   SamplingMode sampling_mode() const { return sampling_mode_; }
 
-  // --- per frame (call in OnBuildView) ---
+  // per frame (call in OnBuildView)
   void Begin(const Camera2D& camera);
   void DrawSprite(const SpriteParams& s);
   void DrawQuad(Vec2 pos, Vec2 size, Color color, f32 sort_key = 0.0f);

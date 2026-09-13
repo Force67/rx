@@ -81,7 +81,7 @@ struct PsOut {
   float2 motion : SV_Target1;
 };
 
-// --- value noise (self-contained, matches water.ps conventions) -------------
+// value noise (self-contained, matches water.ps conventions)
 
 float Hash1(float2 p) {
   float3 q = frac(float3(p.xyx) * float3(0.1031, 0.1030, 0.0973));
@@ -176,7 +176,7 @@ PsOut main(PsIn input) {
   float alpha;
 
   if (input.fluid == 1u) {
-    // --- lava --------------------------------------------------------------
+    // lava
     float T = st.z;
     float heat;
     float3 emis = LavaEmissive(T, heat);
@@ -199,7 +199,7 @@ PsOut main(PsIn input) {
     color = lerp(emissive, crust_col, crust_amt);
     alpha = shore;  // opaque body, only the shoreline sliver fades
   } else {
-    // --- water -------------------------------------------------------------
+    // water
     float fres = 0.02 + 0.98 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
 
     // IBL sky reflection fallback (no ray queries): reflect the view, keep it

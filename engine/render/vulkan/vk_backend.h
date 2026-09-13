@@ -32,7 +32,7 @@ namespace rx::render::vk {
 // after volkLoadDevice, with the api version the device was created at.
 void LoadVulkanEntryPoints(u32 api_version);
 
-// --- backend records behind the opaque handles ---
+// backend records behind the opaque handles
 
 struct BufferRecord {
   VkBuffer buffer = VK_NULL_HANDLE;
@@ -122,7 +122,7 @@ inline TextureView MakeView(VkImageView view) {
 }
 inline VkSampler SamplerOf(SamplerHandle s) { return reinterpret_cast<VkSampler>(s.value); }
 
-// --- conversion tables (vk_convert.cc) ---
+// conversion tables (vk_convert.cc)
 
 VkFormat ToVkFormat(Format format);
 Format FromVkFormat(VkFormat format);

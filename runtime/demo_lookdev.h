@@ -55,7 +55,7 @@ class LookdevDemo {
   // validation matrix; the Viewer quits on it under RX_LOOKDEV_QUIT.
   bool capture_finished() const;
 
-  // --- the validation matrix -------------------------------------------------
+  // the validation matrix
   // Named so the capture pass, the panel and the docs cannot drift apart.
   struct LightStop {
     const char* name;

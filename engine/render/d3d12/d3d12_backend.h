@@ -23,7 +23,7 @@ namespace rx::render::d3d12 {
 
 class D3D12Device;
 
-// --- conversion tables (d3d12_convert.cc) ---
+// conversion tables (d3d12_convert.cc)
 
 DXGI_FORMAT ToDxgiFormat(Format format);
 D3D12_RAYTRACING_GEOMETRY_DESC ToD3dTriangles(const AccelTriangles& triangles);
@@ -34,7 +34,7 @@ D3D12_COMPARISON_FUNC ToCompareFunc(CompareOp op);
 D3D12_FILTER ToFilter(const SamplerDesc& desc);
 D3D12_TEXTURE_ADDRESS_MODE ToAddressMode(AddressMode mode);
 
-// --- backend records behind the opaque handles ---
+// backend records behind the opaque handles
 
 struct BufferRecord {
   ID3D12Resource* resource = nullptr;
@@ -415,7 +415,7 @@ class D3D12Device final : public Device {
   bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
                      size_t out_size) override;
 
-  // --- backend internals ---
+  // backend internals
 
   ID3D12Device* device() const { return device_; }
   ID3D12CommandQueue* queue() const { return queue_; }

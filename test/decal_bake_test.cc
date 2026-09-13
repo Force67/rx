@@ -100,7 +100,7 @@ void RunBake(Device& device, DecalBaker& baker, TransientPool& pool,
 }  // namespace
 
 int main() {
-  // --- projector math (no GPU) ---
+  // projector math (no GPU)
   {
     const Decal d = MakeDecalProjector({2, 3, 4}, {0, 1, 0}, {0, 0, 1}, 2.0f, 2.0f, 1.0f);
     const Vec3 center = ToDecalSpace(d, {2, 3, 4});
@@ -200,7 +200,7 @@ int main() {
   Check(coverage_at(mid, mid) > 240, "the projector covers the middle of the tile");
   Check(coverage_at(2, 2) == 0, "the tile corner is outside the projector");
 
-  // --- eviction and journal rebake ---
+  // eviction and journal rebake
   DecalStamp other = stamp;
   other.receiver = second;
   Check(baker.Stamp(other), "the second receiver takes a stamp");
@@ -226,7 +226,7 @@ int main() {
   read_atlas();
   Check(coverage_at(mid, mid) == 0, "clearing a receiver repaints its tile empty");
 
-  // --- an empty receiver must not take a tile ---
+  // an empty receiver must not take a tile
   // ClearReceiver / SetReceiverUv set repaint, but a receiver with no tile and
   // no history has nothing to repaint: allocating for it would evict a receiver
   // that does have decals, to display nothing.
@@ -244,7 +244,7 @@ int main() {
     baker.ReleaseReceiver(idle);
   }
 
-  // --- the frame stamp budget must not strand a half-claimed tile ---
+  // the frame stamp budget must not strand a half-claimed tile
   // Bailing on the budget AFTER acquiring would leave the receiver owning a
   // tile it never cleared, and the forward pass would shade it with the
   // evicted owner's decals.
@@ -294,7 +294,7 @@ int main() {
     }
   }
 
-  // --- burst past the journal limit ---
+  // burst past the journal limit
   // A run of stamps landing before any bake is capped by journal_limit: the
   // journal is what a repaint replays, and overflowing it drops the OLDEST. A
   // caller that dumps a hundred decals in one frame keeps the last N.
@@ -352,7 +352,7 @@ int main() {
   baker.ReleaseReceiver(second);
   Check(baker.stats().receivers == 0, "released receivers are gone");
 
-  // --- UDIM: a receiver whose uvs live on tile 2 ---
+  // UDIM: a receiver whose uvs live on tile 2
   // Real character bodies (Daz/Genesis) lay their zones out across u in [0,7).
   // Without a bias the whole mesh sits outside 0..1 and nothing may bake; with
   // one, the addressed zone gets the entire layer.

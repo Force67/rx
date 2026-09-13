@@ -161,9 +161,7 @@ std::string KindColor(const std::string &k) {
 }
 } // namespace
 
-// ===========================================================================
 // ugui init / shutdown
-// ===========================================================================
 bool Editor::UiInit() {
   host_state_.window_width = (f32)window_->width();
   host_state_.window_height = (f32)window_->height();
@@ -220,9 +218,7 @@ void Editor::UiShutdown() {
   ui_ready_ = false;
 }
 
-// ===========================================================================
 // Input feeding
-// ===========================================================================
 void Editor::UiFeedInput(f32) {
   const InputState &in = window_->input();
   host_state_.window_width = (f32)window_->width();
@@ -291,9 +287,7 @@ void Editor::UiFeedInput(f32) {
   }
 }
 
-// ===========================================================================
 // Per-frame text + gizmo widget updates
-// ===========================================================================
 void Editor::UiPerFrameText() {
   auto set = [&](const char *name, const std::string &v) {
     ugui::wid w = ui_.FindWidget(name);
@@ -367,9 +361,7 @@ void Editor::UpdateGizmoWidgets() {
   }
 }
 
-// ===========================================================================
 // Document generation
-// ===========================================================================
 void Editor::UiRebuild() {
   if (!ui_ready_)
     return;
@@ -990,9 +982,7 @@ void Editor::UiHotReloadCheck(f32 dt) {
     MarkDirty();
 }
 
-// ===========================================================================
 // Event routing
-// ===========================================================================
 namespace {
 // Climb up to `max` ancestors, returning the first non-empty widget name.
 std::string NamedAncestor(ugui::UIContext &ui, ugui::wid w, int max = 5) {
@@ -1316,9 +1306,7 @@ void Editor::OnUiTextSubmit(const std::string &widget,
   }
 }
 
-// ===========================================================================
 // OnBuildView: gather draws + drive the UI production
-// ===========================================================================
 void Editor::OnBuildView(f32 dt, render::FrameView &view) {
   view.camera.eye = camera_.position();
   view.camera.target = camera_.target();

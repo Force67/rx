@@ -240,14 +240,12 @@ void ReseedShaping(HumanSurfaceParameters& params, HumanSurfaceParameters fresh)
   params = fresh;
 }
 
-// -----------------------------------------------------------------------------
-
 struct LookdevDemo::Impl {
   explicit Impl(EngineContext& c) : ctx(c) {}
 
   EngineContext& ctx;
 
-  // --- subject ---------------------------------------------------------------
+  // subject
   // The authored materials are kept CPU-side so a slider can rewrite them and
   // push the change straight into the live uniform. This is also the thing that
   // gets saved and reloaded as a validation preset.
@@ -267,7 +265,7 @@ struct LookdevDemo::Impl {
   // Ns for the sweat/sebum layer; bound on every skin part, off until dialled.
   asset::AssetId sweat_normal{};
 
-  // --- rig -------------------------------------------------------------------
+  // rig
   int light_index = 5;      // key 45: the framing the frontal match starts from
   int camera_index = 0;
   HumanTier tier = HumanTier::kHero;
@@ -276,13 +274,13 @@ struct LookdevDemo::Impl {
   bool ambient_fill = false;
   f32 gpu_budget_ms = 8.0f;  // OLAT purity: no environment unless asked for
 
-  // --- comparison ------------------------------------------------------------
+  // comparison
   std::string reference_path;
   std::string mask_path;
   char reference_input[256] = {};
   char mask_input[256] = {};
 
-  // --- history ---------------------------------------------------------------
+  // history
   // Parameter history: look-dev is a search, and a search without an undo is a
   // walk. Each entry is the whole part table, which is small and makes the
   // restore exact rather than field-by-field.
@@ -292,7 +290,7 @@ struct LookdevDemo::Impl {
   bool dirty = false;
   bool pending_history = false;
 
-  // --- automated fitting -----------------------------------------------------
+  // automated fitting
   // Coordinate descent over kFitFields, measured against the reference error
   // summed over EVERY selected OLAT stop - fitting against one hero image is
   // the documented way to produce a material that only works in that image.
@@ -312,7 +310,7 @@ struct LookdevDemo::Impl {
     std::string log;
   } fit;
 
-  // --- deterministic capture -------------------------------------------------
+  // deterministic capture
   struct Capture {
     bool running = false;
     bool finished = false;
@@ -322,7 +320,7 @@ struct LookdevDemo::Impl {
     int settle = 0;
   } capture;
 
-  // --- helpers ---------------------------------------------------------------
+  // helpers
   void LoadSubject();
   void BuildProceduralSubject();
   void ApplyPartsToRenderer();
@@ -341,7 +339,7 @@ struct LookdevDemo::Impl {
   void EmitLights(render::FrameView& view);
 };
 
-// --- subject -----------------------------------------------------------------
+// subject
 
 void LookdevDemo::Impl::BuildProceduralSubject() {
   // The fallback subject. It is deliberately anatomical rather than a sphere:
@@ -583,7 +581,7 @@ void LookdevDemo::Impl::ApplyPartsToRenderer() {
   }
 }
 
-// --- rig ---------------------------------------------------------------------
+// rig
 
 render::CameraPose LookdevDemo::Impl::ResolveCamera() const {
   const CameraStop& stop = kCameraStops[std::clamp(camera_index, 0,
@@ -678,7 +676,7 @@ void LookdevDemo::Impl::EmitLights(render::FrameView& view) {
   }
 }
 
-// --- history -----------------------------------------------------------------
+// history
 
 void LookdevDemo::Impl::PushHistory() {
   history.resize(history_cursor);
@@ -703,7 +701,7 @@ void LookdevDemo::Impl::Redo() {
 
 void LookdevDemo::Impl::ApplyTier() { ApplyPartsToRenderer(); }
 
-// --- automated fitting -------------------------------------------------------
+// automated fitting
 // Coordinate descent, one field at a time, measured against the reference error
 // summed over every selected OLAT stop. Three properties make it a measurement
 // rather than a preference:
@@ -813,7 +811,7 @@ void LookdevDemo::Impl::StepFit() {
   ApplyPartsToRenderer();
 }
 
-// --- deterministic capture ---------------------------------------------------
+// deterministic capture
 // Walks the full validation matrix - every camera against every light - and
 // writes one PNG per cell. Deterministic because the rig is frozen: same
 // camera, same light, same material, same exposure, so a diff between two runs
@@ -851,7 +849,7 @@ void LookdevDemo::Impl::StepCapture() {
   capture.settle = 8;
 }
 
-// --- presets -----------------------------------------------------------------
+// presets
 // A flat key=value file, one section per part. Deliberately not a binary blob:
 // a validation preset is something people diff, review and paste into a bug.
 
@@ -988,7 +986,7 @@ bool LookdevDemo::Impl::LoadPreset(const std::string& path) {
   return true;
 }
 
-// --- panel -------------------------------------------------------------------
+// panel
 
 void LookdevDemo::Impl::DrawPanel() {
 #if defined(RX_HAS_IMGUI)
@@ -1004,7 +1002,7 @@ void LookdevDemo::Impl::DrawPanel() {
                                                   : subject_path.c_str());
     ImGui::Separator();
 
-    // --- rig ---------------------------------------------------------------
+    // rig
     if (ImGui::CollapsingHeader("Rig", ImGuiTreeNodeFlags_DefaultOpen)) {
       int light = light_index;
       if (ImGui::SliderInt("OLAT light", &light, 0,
@@ -1043,7 +1041,7 @@ void LookdevDemo::Impl::DrawPanel() {
                   static_cast<int>(render::HumanTierForScreenHeight(head_px)));
     }
 
-    // --- comparison --------------------------------------------------------
+    // comparison
     if (ImGui::CollapsingHeader("Reference comparison", ImGuiTreeNodeFlags_DefaultOpen)) {
       ImGui::InputText("path", reference_input, sizeof(reference_input));
       ImGui::SameLine();
@@ -1087,7 +1085,7 @@ void LookdevDemo::Impl::DrawPanel() {
                          ImGuiSliderFlags_Logarithmic);
     }
 
-    // --- material ----------------------------------------------------------
+    // material
     if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
       if (ImGui::Button("Undo")) Undo();
       ImGui::SameLine();
@@ -1179,7 +1177,7 @@ void LookdevDemo::Impl::DrawPanel() {
       }
     }
 
-    // --- fitting -----------------------------------------------------------
+    // fitting
     if (ImGui::CollapsingHeader("Automated fitting")) {
       ImGui::TextWrapped("Coordinate descent against the measured reference error, summed over "
                          "every selected OLAT stop. Fit stage by stage: a terminator fitted "
@@ -1202,7 +1200,7 @@ void LookdevDemo::Impl::DrawPanel() {
       if (!fit.log.empty()) ImGui::TextUnformatted(fit.log.c_str());
     }
 
-    // --- captures / presets -------------------------------------------------
+    // captures / presets
     if (ImGui::CollapsingHeader("Captures and presets")) {
       if (ImGui::Button("Capture the validation matrix")) {
         capture = Capture{};
@@ -1238,7 +1236,7 @@ void LookdevDemo::Impl::DrawPanel() {
 #endif
 }
 
-// --- public ------------------------------------------------------------------
+// public
 
 LookdevDemo::LookdevDemo(EngineContext& ctx) : impl_(std::make_unique<Impl>(ctx)) {}
 LookdevDemo::~LookdevDemo() = default;

@@ -82,7 +82,7 @@ void SetTransform(ecs::World &world, ecs::Entity e, const scene::Transform &t) {
     world.Add(e, t);
 }
 
-// ---- Commands ---------------------------------------------------------------
+// Commands
 
 class SetPropCommand : public Command {
 public:
@@ -334,7 +334,7 @@ private:
 
 } // namespace
 
-// ---- UndoStack --------------------------------------------------------------
+// UndoStack
 
 void UndoStack::Push(ecs::World &world, std::unique_ptr<Command> cmd) {
   if (!cmd)
@@ -399,7 +399,7 @@ void UndoStack::Clear() {
   group_depth_ = 0;
 }
 
-// ---- Factories --------------------------------------------------------------
+// Factories
 
 std::unique_ptr<Command> MakeSetProp(ecs::World &world, ecs::Entity entity,
                                      const ComponentDesc &comp,

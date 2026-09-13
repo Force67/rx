@@ -117,7 +117,7 @@ u32 BoatProfileFromName(const char* s, u32 fallback) {
 // Cargo cycle L: 0% -> 50% -> 100% -> 125% (structural overload).
 constexpr f32 kCargoSteps[4] = {0.0f, 0.5f, 1.0f, 1.25f};
 
-// --- terrain layout (world XZ, metres) -------------------------------------
+// terrain layout (world XZ, metres)
 constexpr f32 kTerrainSize = 400.0f;
 constexpr f32 kTerrainMin = -200.0f;  // min corner of the heightfield
 constexpr u32 kSamples = 256;         // heightfield / render grid resolution
@@ -208,7 +208,7 @@ Mat4 ScaleMat(const Vec3& s) {
   return m;
 }
 
-// --- small procedural-mesh helpers (boat hull + wheel) ---------------------
+// small procedural-mesh helpers (boat hull + wheel)
 struct MeshBuild {
   base::Vector<asset::Vertex> v;
   base::Vector<u32> i;

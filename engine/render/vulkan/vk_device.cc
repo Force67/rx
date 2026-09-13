@@ -1210,7 +1210,7 @@ Device::MemoryBudget VulkanDevice::memory_budget() const {
   return result;
 }
 
-// --- resources ---
+// resources
 
 GpuBuffer VulkanDevice::CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible) {
   VkBufferCreateInfo buffer_info{.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
@@ -1944,7 +1944,7 @@ SamplerHandle VulkanDevice::GetSampler(const SamplerDesc& desc) {
   return SamplerHandle{reinterpret_cast<u64>(sampler)};
 }
 
-// --- bindings ---
+// bindings
 
 VkDescriptorSetLayout VulkanDevice::GetOrCreateSetLayout(const BindingLayoutDesc& desc) {
   std::lock_guard lock(layout_cache_mutex_);
@@ -2162,7 +2162,7 @@ void VulkanDevice::UpdateBindingSet(BindingSetHandle set, std::span<const Bindin
   WriteDescriptors(Rec(set)->set, items);
 }
 
-// --- pipelines ---
+// pipelines
 
 namespace {
 
@@ -2507,7 +2507,7 @@ void VulkanDevice::DestroyPipeline(PipelineHandle pipeline) {
   }
 }
 
-// --- acceleration structures ---
+// acceleration structures
 
 AccelSizes VulkanDevice::GetBlasSizes(const BlasBuildDesc& desc) {
   base::Vector<VkAccelerationStructureGeometryKHR> geometries;
@@ -2662,7 +2662,7 @@ bool VulkanDevice::GetCompactedSizes(AccelCompactionQueryHandle query, u64* out,
                                sizeof(u64), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
 }
 
-// --- profiling ---
+// profiling
 
 TimestampPoolHandle VulkanDevice::CreateTimestampPool(u32 count) {
   VkQueryPoolCreateInfo info{.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
@@ -2686,7 +2686,7 @@ bool VulkanDevice::GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count,
                                sizeof(u64), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
 }
 
-// --- recording & submission ---
+// recording & submission
 
 void VulkanDevice::ImmediateSubmit(const std::function<void(CommandList&)>& record) {
   // A buffer batched but not yet submitted must land before this submit's work,

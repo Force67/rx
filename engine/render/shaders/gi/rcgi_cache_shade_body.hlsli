@@ -102,11 +102,11 @@ void main(uint3 id : SV_DispatchThreadID) {
   float3 albedo;
   float3 emissive;
 #ifdef RCGI_TRACE_SDF
-  // ---- software: surface colour packed by the SDF probe trace ----
+  // software: surface colour packed by the SDF probe trace
   albedo = RcgiUnpackColor8(rcgi_state_rw[base + kRcgiOffHit0]);
   emissive = RcgiUnpackColor8(rcgi_state_rw[base + kRcgiOffHit1] & ~kRcgiSwEntryBit);
 #else
-  // ---- hardware: re-resolve the triangle/material through the bindless tables ----
+  // hardware: re-resolve the triangle/material through the bindless tables
   uint hit0 = rcgi_state_rw[base + kRcgiOffHit0];
   uint instance = hit0 & 0x00ffffffu;
   uint geom_index = hit0 >> 24u;

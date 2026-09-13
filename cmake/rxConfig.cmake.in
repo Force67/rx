@@ -31,7 +31,7 @@ function(_rx_import_static name archive)
   endif()
 endfunction()
 
-# --- equilibrium::base (PUBLIC headers + defs) ------------------------------
+# equilibrium::base (PUBLIC headers + defs)
 if(NOT TARGET equilibrium::base)
   add_library(equilibrium::base STATIC IMPORTED)
   set_target_properties(equilibrium::base PROPERTIES
@@ -42,7 +42,7 @@ if(NOT TARGET equilibrium::base)
     INTERFACE_LINK_LIBRARIES "Threads::Threads")
 endif()
 
-# --- Vulkan headers / volk / VMA (PUBLIC via rhi/vulkan_interop.h) ----------
+# Vulkan headers / volk / VMA (PUBLIC via rhi/vulkan_interop.h)
 if(NOT TARGET Vulkan::Headers)
   add_library(Vulkan::Headers INTERFACE IMPORTED)
   set_target_properties(Vulkan::Headers PROPERTIES
@@ -62,7 +62,7 @@ if(NOT TARGET GPUOpen::VulkanMemoryAllocator)
     INTERFACE_LINK_LIBRARIES "Vulkan::Headers")
 endif()
 
-# --- PRIVATE static archives (link-only for the consumer) -------------------
+# PRIVATE static archives (link-only for the consumer)
 _rx_import_static(kinema::kinema libkinema.a)
 _rx_import_static(rx::stb_impl librx_stb_impl.a)
 if(@RX_INSTALL_JOLT@)
@@ -90,7 +90,7 @@ if(@RX_INSTALL_NRD@)
     INTERFACE_LINK_LIBRARIES rx::ShaderMakeBlob)
 endif()
 
-# --- system shared libraries re-resolved through pkg-config -----------------
+# system shared libraries re-resolved through pkg-config
 if(@RX_INSTALL_RHI_D3D12@ OR @RX_INSTALL_WAYLAND_KDE_HDR@)
   find_package(PkgConfig REQUIRED)
 endif()
@@ -101,10 +101,10 @@ if(@RX_INSTALL_WAYLAND_KDE_HDR@ AND NOT TARGET PkgConfig::WAYLAND_CLIENT)
   pkg_check_modules(WAYLAND_CLIENT REQUIRED IMPORTED_TARGET wayland-client)
 endif()
 
-# --- the rx module targets --------------------------------------------------
+# the rx module targets
 include("${CMAKE_CURRENT_LIST_DIR}/rxTargets.cmake")
 
-# --- re-attach the bundled closure to the rx:: targets ----------------------
+# re-attach the bundled closure to the rx:: targets
 if(TARGET rx::core)
   set_property(TARGET rx::core APPEND PROPERTY
     INTERFACE_LINK_LIBRARIES equilibrium::base)

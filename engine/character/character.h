@@ -27,9 +27,7 @@ class PhysicsWorld;
 // keeps the controller free of any camera/heading policy.
 namespace rx::character {
 
-// ---------------------------------------------------------------------------
 // Components (data only).
-// ---------------------------------------------------------------------------
 
 // The locomotion tuning. Per-gait ground speeds, how quickly velocity chases
 // the target, how much authority exists in the air, jump height (the vertical
@@ -51,7 +49,7 @@ struct CharacterMovementSettings {
   f32 step_height = 0.4f;              // tallest ledge the controller steps over
   f32 max_slope_angle = 0.9599311f;    // ~55 deg, steepest walkable ground
 
-  // --- Game-feel: turn smoothing (never robotic) ------------------------------
+  // Game-feel: turn smoothing (never robotic)
   // The body facing yaw (visible mesh / Transform rotation) eases toward the
   // movement direction instead of snapping. Only active in third person; first
   // person hard-locks facing to the raw look yaw (see StepCharacters). A near-180
@@ -62,7 +60,7 @@ struct CharacterMovementSettings {
   f32 pivot_turn_half_life = 0.05f;   // s, faster chase for reversals past pivot_angle
   f32 pivot_angle = 2.4434610f;       // rad (~140 deg): beyond this the pivot rate applies
 
-  // --- Game-feel: gait target-speed blend -------------------------------------
+  // Game-feel: gait target-speed blend
   // The *target* speed eases across gait changes (walk<->run<->sprint) over
   // `speed_blend_time` (time to traverse the full walk..sprint span; partial
   // changes are proportionally quicker) so speed does not step. Ground
@@ -70,7 +68,7 @@ struct CharacterMovementSettings {
   f32 speed_blend_time = 0.18f;       // s
   f32 stop_speed_epsilon = 0.05f;     // m/s: below this with no input, velocity zeroes exactly
 
-  // --- Game-feel: jump forgiveness --------------------------------------------
+  // Game-feel: jump forgiveness
   // Jump buffer: a jump pressed up to `jump_buffer_time` before touchdown still
   // fires on landing. Coyote time: a jump within `coyote_time` after walking off
   // a ledge still fires. Both 0 disable the window (jump only when grounded).
@@ -92,7 +90,7 @@ struct CharacterShape {
 
   f32 crouch_blend_speed = 9.0f;  // crouch fraction change per second
 
-  // --- Game-feel: eye/anchor vertical smoothing -------------------------------
+  // Game-feel: eye/anchor vertical smoothing
   // The camera anchor's *vertical* component eases over sudden ground-height
   // changes (step-up / step-down / stairs) so the eye glides instead of popping;
   // horizontal stays 1:1 raw (smoothing horizontal reads as lag). Active only
@@ -100,7 +98,7 @@ struct CharacterShape {
   // seconds; 0 disables (raw eye, old behaviour).
   f32 eye_step_half_life = 0.06f;
 
-  // --- Game-feel: landing recoil ----------------------------------------------
+  // Game-feel: landing recoil
   // On touchdown after a real fall, a small fast-recovering eye-height dip scaled
   // by impact speed. No screen shake. `landing_dip_scale` 0 disables it.
   f32 landing_dip_min_speed = 2.5f;   // m/s impact below which no dip
@@ -160,7 +158,7 @@ struct CharacterState {
   f32 yaw = 0;                  // LOOK yaw, radians; raw (never smoothed); feeds the camera anchor
   bool teleported = false;      // set by TeleportCharacter; bumps the anchor revision once
 
-  // --- Game-feel state (written by StepCharacters) ----------------------------
+  // Game-feel state (written by StepCharacters)
   f32 facing_yaw = 0;      // BODY facing, radians; drives Transform. Eases toward the
                            // movement dir in third person, hard-locked to `yaw` in first.
   bool pivoting = false;   // in a quick-pivot (near-180 reversal): holds the faster turn rate
@@ -200,9 +198,7 @@ struct CharacterViewMode {
   scene::CameraActivation transition;
 };
 
-// ---------------------------------------------------------------------------
 // Systems (free functions, staged per fixed step).
-// ---------------------------------------------------------------------------
 
 // Stage A. Consume CharacterIntent: update heading yaw, accelerate the velocity
 // toward the gait target (ground accel vs air control), integrate gravity and
@@ -223,9 +219,7 @@ RX_CHARACTER_EXPORT void SyncCharacterCameraAnchors(ecs::World& world);
 // PrepareCameraRigConstraints, before ResolveCameraRigs.
 RX_CHARACTER_EXPORT void AnswerCameraObstructions(ecs::World& world, physics::PhysicsWorld& physics);
 
-// ---------------------------------------------------------------------------
 // View-mode composition helpers (compose EXISTING scene rig components).
-// ---------------------------------------------------------------------------
 
 // Tuning for the two recipes. Defaults are engine-reasonable; a game tunes them.
 struct CharacterViewSettings {

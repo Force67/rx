@@ -286,7 +286,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
   r0_out[p] = float4(sel_dir, sel_id);
   r1_out[p] = float4(w_sum, M, W, 0.0);
 
-  // --- Reservoir B: the sky. Candidate weights are bounded (w = p-hat/pdf =
+  // Reservoir B: the sky. Candidate weights are bounded (w = p-hat/pdf =
   // total * cos, both read the CDF table), reuse mirrors reservoir A. ---
   float sky_id = -1.0;
   float3 sky_dir = 0.0.xxx;

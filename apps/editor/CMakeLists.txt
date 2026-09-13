@@ -1,6 +1,6 @@
 # rx editor: an app::Application on app::Host with its entire UI in libultragui.
 
-# --- libultragui: sibling checkout ../libultragui (discovered like ../kinema) ---
+# libultragui: sibling checkout ../libultragui (discovered like ../kinema)
 if(NOT TARGET ultragui)
   set(RX_LIBULTRAGUI_DIR "${PROJECT_SOURCE_DIR}/../libultragui"
       CACHE PATH "Path to a libultragui checkout")

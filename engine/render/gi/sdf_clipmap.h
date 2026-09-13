@@ -62,7 +62,7 @@ class SdfClipmap {
   void AddDebugPass(RenderGraph& graph, ResourceHandle lit, Extent2D extent,
                     const Mat4& inv_view_proj, const Vec3& camera, u32 mode, u32 frame_index);
 
-  // --- S2 interface (bind these into the software trace variants) ---
+  // S2 interface (bind these into the software trace variants)
   const GpuImage& distance_volume() const { return distance_; }
   const GpuImage& albedo_volume() const { return albedo_; }
   const GpuImage& emissive_volume() const { return emissive_; }

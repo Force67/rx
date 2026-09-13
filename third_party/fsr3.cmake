@@ -18,7 +18,6 @@ find_program(RX_GLSLANG glslangValidator REQUIRED)
 find_package(Threads REQUIRED)
 enable_language(C)  # the tool's vendored SPIRV-Reflect is C
 
-# ---------------------------------------------------------------------------
 # Host shader compiler tool.
 add_executable(ffx_sc
   ${FFX_SC_DIR}/src/ffx_sc.cpp
@@ -68,7 +67,6 @@ if(NOT MSVC)
 endif()
 target_link_libraries(ffx_sc PRIVATE Threads::Threads)
 
-# ---------------------------------------------------------------------------
 # Shader permutation headers. ffx_sc expands the {0,1} permutation sets
 # itself (one invocation per pass and variant); the invocation lives in
 # cmake/ffx_sc_compile.cmake so the braces never meet a shell. No depfiles:
@@ -123,7 +121,6 @@ foreach(pass IN LISTS FFX_FSR3_PASSES)
   endforeach()
 endforeach()
 
-# ---------------------------------------------------------------------------
 # Frame generation permutations: the opticalflow + frameinterpolation passes,
 # same four variants as the upscaler but with each effect's own option set
 # (cmake/ffx_sc_compile_fg.cmake mirrors the SDK's per-effect args).
@@ -187,7 +184,6 @@ endforeach()
 
 add_custom_target(ffx_fsr3_shaders DEPENDS ${FFX_FSR3_PERMUTATION_HEADERS})
 
-# ---------------------------------------------------------------------------
 # Runtime library: fsr3upscaler component + vulkan backend. ffx_compat.h is
 # force-included for the MSVC string functions and to route the backend's
 # vulkan calls through volk (the engine's loader).

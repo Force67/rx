@@ -47,7 +47,7 @@ u64 AlignUp(u64 value, u64 alignment) { return (value + alignment - 1) & ~(align
 
 }  // namespace
 
-// --- read side ---------------------------------------------------------------
+// read side
 
 base::UniquePointer<PackFile> PackFile::Open(std::string archive_path) {
   base::UniquePointer<PackFile> pack(new PackFile());
@@ -151,7 +151,7 @@ std::optional<base::Vector<u8>> PackFile::ReadEntry(size_t index) const {
   return out;
 }
 
-// --- write side --------------------------------------------------------------
+// write side
 
 void PackWriter::Add(std::string_view virtual_path, base::Vector<u8> bytes,
                      PackCompression compression) {
@@ -265,7 +265,7 @@ bool PackWriter::WriteTo(const std::string& file_path) {
   return static_cast<bool>(out);
 }
 
-// --- Vfs provider ------------------------------------------------------------
+// Vfs provider
 
 namespace {
 

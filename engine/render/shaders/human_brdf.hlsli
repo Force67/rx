@@ -30,7 +30,7 @@
 #define RX_HUMAN_PI 3.14159265358979323846
 #endif
 
-// --- normalized light input -------------------------------------------------
+// normalized light input
 // Every direct light path fills one of these and hands it to the same
 // evaluator. `direction` points FROM the surface TOWARD the light. radiance is
 // scene-linear and already carries the light's intensity and distance
@@ -57,7 +57,7 @@ static const uint RX_HUMAN_LIGHT_AMBIENT = 5u;   // pre-integrated, no direction
 // wants only the material's directional modifiers, not a second cosine.
 static const uint RX_HUMAN_LIGHT_FLAG_PREINTEGRATED = 1u;
 
-// --- shading normals --------------------------------------------------------
+// shading normals
 // geometric  : the interpolated vertex normal, before any map. Terminator and
 //              shadow-bias decisions use it, because a normal map must not be
 //              able to push a surface past its own geometric horizon.
@@ -77,7 +77,7 @@ HumanShadingNormals HumanNormals(float3 n) {
   return s;
 }
 
-// --- surface parameters -----------------------------------------------------
+// surface parameters
 // Mirrors render::HumanSurfaceParameters (pipeline/human_material.h) and the
 // tail of MaterialParams in mesh.ps.hlsl. Keep the three in sync.
 struct HumanSurfaceParams {
@@ -165,7 +165,7 @@ HumanSurfaceParams HumanNeutralParams(float3 base_color, float roughness, float3
   return p;
 }
 
-// --- lobes ------------------------------------------------------------------
+// lobes
 float HumanD_GGX(float ndh, float a) {
   float a2 = a * a;
   float d = ndh * ndh * (a2 - 1.0) + 1.0;
@@ -243,7 +243,7 @@ float HumanShapeRoughness(float roughness, float solid_angle, float response) {
   return saturate(sqrt(roughness * roughness + widen * widen));
 }
 
-// --- the evaluator ----------------------------------------------------------
+// the evaluator
 // Returns cosine-weighted lobes: multiply by the light's radiance and add.
 // Keeping the cosine INSIDE is what lets the terminator control live here
 // instead of being re-derived (differently) at every call site.
@@ -272,7 +272,7 @@ HumanBrdfResult HumanEvaluate(HumanSurfaceParams p, HumanShadingNormals n, float
   float ndv_d = max(dot(n.diffuse, v), 1e-4);
   float ndl_g = dot(n.geometric, l);
 
-  // ---- diffuse -------------------------------------------------------------
+  // diffuse
   float cos_d = HumanDiffuseCosine(p, ndl_d, ndl_g);
   if (cos_d > 0.0) {
     float3 hd = normalize(l + v);
@@ -282,7 +282,7 @@ HumanBrdfResult HumanEvaluate(HumanSurfaceParams p, HumanShadingNormals n, float
     r.diffuse = albedo * (1.0 / RX_HUMAN_PI) * shaping * cos_d;
   }
 
-  // ---- specular ------------------------------------------------------------
+  // specular
   float ndl_s = dot(n.specular, l);
   if (ndl_s > 0.0) {
     float ndl = saturate(ndl_s);
@@ -320,7 +320,7 @@ HumanBrdfResult HumanEvaluate(HumanSurfaceParams p, HumanShadingNormals n, float
     }
   }
 
-  // ---- transmission --------------------------------------------------------
+  // transmission
   // Light entering the far side and leaving toward the eye: ears, nostrils,
   // eyelids, fingers. Beer-Lambert over the local thickness, view-aligned so
   // it only shows where you are looking into the light.

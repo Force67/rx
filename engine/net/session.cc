@@ -33,7 +33,7 @@ void DefaultSimulatePlayer(ecs::World& world, ecs::Entity player,
 
 }  // namespace
 
-// --- server ---
+// server
 
 ServerSession::ServerSession(SessionConfig config) : config_(std::move(config)) {
   interest_.Configure(config_.interest);
@@ -292,7 +292,7 @@ ecs::Entity ServerSession::PlayerOf(u32 peer) const {
   return client ? client->player : ecs::kInvalidEntity;
 }
 
-// --- client ---
+// client
 
 ClientSession::ClientSession(SessionConfig config) : config_(std::move(config)) {
   if (config_.snapshot_interval_ticks > 0 && config_.tick_rate > 0) {

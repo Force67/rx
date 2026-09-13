@@ -87,7 +87,7 @@ int main() {
     return 0;
   }
 
-  // --- down: normalized -> pixels, on the correct axes ---
+  // down: normalized -> pixels, on the correct axes
   PushFinger(SDL_EVENT_FINGER_DOWN, kFinger, 0.25f, 0.5f, 1.0f);
   window->PumpEvents();
 
@@ -113,7 +113,7 @@ int main() {
   Check("touch did not emit mouse motion",
         window->input().mouse_dx == 0.0f && window->input().mouse_dy == 0.0f);
 
-  // --- motion: delta is in pixels and signed correctly ---
+  // motion: delta is in pixels and signed correctly
   PushFinger(SDL_EVENT_FINGER_MOTION, kFinger, 0.5f, 0.25f, 1.0f);
   window->PumpEvents();
   if (window->touch().count == 1) {
@@ -124,7 +124,7 @@ int main() {
     Check("press edge cleared on the next pump", !p.pressed);
   }
 
-  // --- cancel collapses into the same end state as a lift ---
+  // cancel collapses into the same end state as a lift
   PushFinger(SDL_EVENT_FINGER_CANCELED, kFinger, 0.5f, 0.25f, 0.0f);
   window->PumpEvents();
   Check("canceled contact is released", window->touch().count == 1 &&
@@ -134,7 +134,7 @@ int main() {
   window->PumpEvents();
   Check("slot reclaimed on the following pump", window->touch().count == 0);
 
-  // --- a second finger opens a second slot (multi-touch really arrives) ---
+  // a second finger opens a second slot (multi-touch really arrives)
   PushFinger(SDL_EVENT_FINGER_DOWN, 1, 0.1f, 0.1f, 1.0f);
   PushFinger(SDL_EVENT_FINGER_DOWN, 2, 0.9f, 0.9f, 1.0f);
   window->PumpEvents();

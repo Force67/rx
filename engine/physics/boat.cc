@@ -93,7 +93,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   const f32 steer = Clamp(input.steer, -1.0f, 1.0f);
   const f32 trim = Clamp(input.trim, -1.0f, 1.0f);
 
-  // --- pose + body axes ---
+  // pose + body axes
   Vec3 pos{};
   f32 rot[4] = {0, 0, 0, 1};
   world_.GetBodyTransform(body_, &pos, rot);
@@ -106,7 +106,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   // until displacement rebalances it - the emergent laden draft.
   const f32 weight = loaded_mass_ * kGravity;
 
-  // --- engine spool: rpm chases the throttle target with a first-order lag ---
+  // engine spool: rpm chases the throttle target with a first-order lag
   const f32 target_rpm =
       desc_.idle_rpm + std::fabs(throttle) * (desc_.max_rpm - desc_.idle_rpm);
   const f32 spool = desc_.spool_time > 0 ? (1.0f - std::exp(-dt / desc_.spool_time)) : 1.0f;
@@ -117,7 +117,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   f32 thrust_mag = desc_.max_thrust * thrust_frac;
   if (throttle < 0.0f) thrust_mag = -thrust_mag * desc_.reverse_fraction;
 
-  // --- volumetric multi-point hull buoyancy ---
+  // volumetric multi-point hull buoyancy
   // Each sample owns an equal share of the hull volume (subvol) and, while
   // submerged, displaces it: F = rho * g * subvol (N, up) applied AT the
   // sample. A `frac` ramps the topmost partially submerged layer over one
@@ -175,7 +175,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
       total_samples > 0 ? Clamp(1.0f - submerged_vol / static_cast<f32>(total_samples), 0.0f, 1.0f)
                         : 0.0f;
 
-  // --- hull drag, relative to the water flow (rivers carry the hull) ---
+  // hull drag, relative to the water flow (rivers carry the hull)
   Vec3 vel = world_.GetLinearVelocity(body_);
   f32 centre_h = 0.0f;
   Vec3 flow{};
@@ -200,7 +200,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   Vec3 hull_force = forward * drag_long + right * drag_lat + up * drag_vert;
   if (Finite(hull_force)) world_.AddForce(body_, hull_force);
 
-  // --- planing lift: past hull speed the bow lifts, reducing wetted drag ---
+  // planing lift: past hull speed the bow lifts, reducing wetted drag
   // Dynamic lift = plane_lift * v_fwd^2 * planing, capped at plane_lift_cap of
   // the weight and GATED BY the wetted fraction: as the hull rises the wetted
   // area falls, cutting the lift, so lift transfers load off buoyancy without
@@ -214,7 +214,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
     if (Finite(lift_force)) world_.AddForceAtPoint(body_, lift_force, bow);
   }
 
-  // --- propulsion: thrust at the prop point, only while it is submerged ---
+  // propulsion: thrust at the prop point, only while it is submerged
   const Vec3 prop = pos + Rotate(q, desc_.prop_offset);
   f32 prop_surface = 0.0f;
   Vec3 prop_flow{};
@@ -227,7 +227,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
     if (Finite(thrust)) world_.AddForceAtPoint(body_, thrust, prop);
   }
 
-  // --- rudder: stern sideforce from water speed + prop wash ---
+  // rudder: stern sideforce from water speed + prop wash
   // Authority scales with the water speed over the rudder (|v_fwd|^2) plus the
   // propeller wash (proportional to thrust), so the boat still answers the helm
   // on the wash at a standstill. Only the wash term needs the prop submerged.
@@ -239,7 +239,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
     if (Finite(rudder_force)) world_.AddForceAtPoint(body_, rudder_force, rudder_pt);
   }
 
-  // --- wind load on the exposed topsides ---
+  // wind load on the exposed topsides
   // The global wind pushes on the above-water hull. Force is quadratic in the
   // wind speed relative to the hull, scaled by the exposed fraction and the
   // above-water box area the wind sees (a directional blend of the side and bow
@@ -262,7 +262,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
     }
   }
 
-  // --- ballast keel righting couple (emulated lowered CoM) ---
+  // ballast keel righting couple (emulated lowered CoM)
   // Relocating the weight to a point eff_com_drop below the geometric centre adds
   // a couple torque = r_ballast x (m*g down). Zero when upright, righting when
   // heeled; the dominant self-righting term from a knock-down. eff_com_drop is
@@ -274,7 +274,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
     const Vec3 righting = Cross(r_ballast, gravity_force);
     if (Finite(righting)) world_.AddTorque(body_, righting);
   }
-  // --- cargo fore/aft trim couple ---
+  // cargo fore/aft trim couple
   // Cargo offset along the hull axis (cargo_com_offset.z) hangs its weight fore
   // or aft of the centre, a static pitch couple = r_cargo x (m_cargo*g down) that
   // the buoyancy grid settles against (the loaded end sits deeper). Self-limiting
@@ -286,13 +286,13 @@ void Boat::Update(const BoatInput& input, f32 dt) {
     if (Finite(trim)) world_.AddTorque(body_, trim);
   }
 
-  // --- yaw-rate damping + trim ---
+  // yaw-rate damping + trim
   const Vec3 ang = world_.GetAngularVelocity(body_);
   Vec3 torque = up * (-desc_.yaw_damping * Dot(ang, up));
   if (trim != 0.0f) torque += right * (trim * desc_.trim_torque);
   if (Finite(torque)) world_.AddTorque(body_, torque);
 
-  // --- telemetry ---
+  // telemetry
   state_.rpm = rpm_;
   state_.engine_load = thrust_frac;
   state_.throttle = throttle;

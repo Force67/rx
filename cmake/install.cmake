@@ -35,7 +35,7 @@ set(RX_INSTALL_CMAKEDIR ${CMAKE_INSTALL_LIBDIR}/cmake/rx)
 set(RX_DEPS_LIBDIR ${CMAKE_INSTALL_LIBDIR}/rx)
 set(RX_DEPS_INCDIR ${CMAKE_INSTALL_INCLUDEDIR}/rx-deps)
 
-# --- rx module targets + export set -----------------------------------------
+# rx module targets + export set
 set(RX_MODULE_NAMES core ecs script asset scene terrain render render2d physics locomotion anim audio
     weather rpc authoring character inventory inventory_world app)
 set(RX_INSTALL_TARGETS)
@@ -64,7 +64,7 @@ install(EXPORT rxTargets
   NAMESPACE rx::
   DESTINATION ${RX_INSTALL_CMAKEDIR})
 
-# --- rx public headers (module-qualified layout preserved) ------------------
+# rx public headers (module-qualified layout preserved)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/engine/
   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   FILES_MATCHING
@@ -76,7 +76,7 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/engine/
     # header may never include <kinema/kinema.h>.
     PATTERN "*_internal.h" EXCLUDE)
 
-# --- third-party archive + header bundling ----------------------------------
+# third-party archive + header bundling
 # Resolve an imported/interface target's own include dir(s), stripping the
 # BUILD_INTERFACE genex wrapper and dropping any INSTALL_INTERFACE entry.
 function(_rx_iface_includes out target)
@@ -147,7 +147,7 @@ if(RX_INSTALL_NRD)
   _rx_bundle_archive(ShaderMakeBlob)  # NRD links it for the embedded SPIR-V blobs
 endif()
 
-# --- config files -----------------------------------------------------------
+# config files
 if(SDL3_FOUND)
   set(RX_INSTALL_SDL3 ON)
 endif()
@@ -176,7 +176,7 @@ install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/rxConfigVersion.cmake
   DESTINATION ${RX_INSTALL_CMAKEDIR})
 
-# --- engine archives --------------------------------------------------------
+# engine archives
 # rx's own content (engine/assets, packed by the rx_engine_archives target).
 # They go next to the binaries; asset::MountEngineArchives picks them up from
 # the working directory, or from wherever RX_ENGINE_ARCHIVES points.

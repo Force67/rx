@@ -104,7 +104,7 @@ void ReserveWorldItemId(u64 seen_id) {
   }
 }
 
-// --- WorldItemStore ---
+// WorldItemStore
 
 size_t WorldItemStore::CellKeyHash::operator()(const CellKey& key) const {
   u64 h = 1469598103934665603ull;  // FNV-1a 64 offset basis
@@ -158,7 +158,7 @@ void WorldItemStore::Clear() {
   count_ = 0;
 }
 
-// --- drop / pick up ---
+// drop / pick up
 
 ecs::Entity DropItem(ecs::World& world, physics::PhysicsWorld& physics, const ItemCatalog& catalog,
                      ecs::Entity source, u32 entry_index, u32 count, const scene::Transform& spawn,
@@ -213,7 +213,7 @@ bool PickUpItem(ecs::World& world, physics::PhysicsWorld& physics, const ItemCat
   return true;
 }
 
-// --- per-tick maintenance ---
+// per-tick maintenance
 
 void SyncWorldItems(ecs::World& world, physics::PhysicsWorld& physics) {
   world.Each<scene::Transform, WorldItem>([&](ecs::Entity, scene::Transform& t, WorldItem& wi) {
@@ -292,7 +292,7 @@ void WakeWorldItemsNear(ecs::World& world, physics::PhysicsWorld& physics,
   }
 }
 
-// --- persistence (world items) ---
+// persistence (world items)
 
 std::vector<u8> SaveWorldItems(ecs::World& world, const WorldItemStore& store) {
   struct Live {

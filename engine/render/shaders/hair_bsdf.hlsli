@@ -75,7 +75,7 @@ HairSurfaceParams HairDefaultParams() {
   return p;
 }
 
-// --- pigment ----------------------------------------------------------------
+// pigment
 // Hair colour is two pigments, not an RGB swatch: eumelanin (brown/black) and
 // pheomelanin (red/yellow). Authoring in pigment rather than in albedo is what
 // keeps a groom's colour physically coupled to how it scatters - paint a fibre
@@ -120,7 +120,7 @@ float3 HairSigmaFromColor(float3 color, float reference_depth) {
   return -log(clamp(color, 1e-4, 1.0)) / max(denom, 1e-3);
 }
 
-// --- numerics ---------------------------------------------------------------
+// numerics
 float HairSafeSqrt(float x) { return sqrt(max(x, 0.0)); }
 float HairSafeAsin(float x) { return asin(clamp(x, -1.0, 1.0)); }
 float HairSqr(float x) { return x * x; }
@@ -240,7 +240,7 @@ float HairAzimuthalScale(float beta_n) {
          (0.265 * b + 1.194 * b * b + 5.372 * pow(b, 22.0));
 }
 
-// --- the local frame --------------------------------------------------------
+// the local frame
 // Builds an orthonormal frame with +X along the strand tangent. The other two
 // axes are arbitrary but must be CONSISTENT between the two directions handed
 // to HairEvaluate, since only their difference (the azimuth) is used.
@@ -263,7 +263,7 @@ float3 HairToLocal(HairFrame f, float3 w) {
   return float3(dot(w, f.t), dot(w, f.b1), dot(w, f.b2));
 }
 
-// --- single scattering ------------------------------------------------------
+// single scattering
 // wo / wi are in the strand's local frame (HairToLocal). Returns the BSDF
 // itself - hair's "cosine" is cos(theta_i) and the caller applies it, because
 // the dual-scattering terms below need the bare BSDF. Note the division at the
@@ -341,7 +341,7 @@ float3 HairEvaluate(HairSurfaceParams p, float3 wo, float3 wi, float h) {
   return max(sum, 0.0);
 }
 
-// --- dual scattering --------------------------------------------------------
+// dual scattering
 // Zinke's observation: in a groom, the light that reaches a fibre has already
 // passed through others (FORWARD scattering, which attenuates and spreads it),
 // and the light a viewer sees also includes what came back out of the

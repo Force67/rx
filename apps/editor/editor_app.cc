@@ -113,9 +113,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
 }
 } // namespace
 
-// ===========================================================================
 // Lifecycle
-// ===========================================================================
 bool Editor::OnInitialize(app::Services &s) {
   services_ = &s;
   host_ = s.host;
@@ -164,9 +162,7 @@ void Editor::OnShutdown() {
     UiShutdown();
 }
 
-// ===========================================================================
 // Scene / assets
-// ===========================================================================
 void Editor::SetupDefaultScene() {
   // One neutral material; per-entity variety comes from DrawItem tint.
   asset::Material mat;
@@ -775,9 +771,7 @@ std::string Editor::EntityLabel(ecs::Entity e) const {
   return buf;
 }
 
-// ===========================================================================
 // Per-frame
-// ===========================================================================
 void Editor::OnUpdate(f32 dt) {
   if (!window_)
     return;
@@ -802,7 +796,7 @@ void Editor::OnUpdate(f32 dt) {
 
   UpdateModeInteraction(lmb, lmb_edge);
 
-  // ---- gizmo / scrub / pick on the primary selection ----
+  // gizmo / scrub / pick on the primary selection
   if (!headless_) {
     // Scrub start: LMB pressed over an inspector number field.
     if (editor_mode_ == EditorMode::kSelect && lmb_edge && !scrub_.active &&
@@ -835,7 +829,7 @@ void Editor::OnUpdate(f32 dt) {
   if (std::getenv("RX_EDITOR_AUTOPILOT"))
     RunAutopilot();
 
-  // ---- keyboard shortcuts ----
+  // keyboard shortcuts
   bool ctrl = in.key(Key::kLeftCtrl);
   auto edge = [&](Key k) {
     bool now = in.key(k);
@@ -914,11 +908,9 @@ void Editor::FocusSelection() {
                         std::asin(std::clamp(d.y, -1.0f, 1.0f)));
 }
 
-// ===========================================================================
 // Picking. The engine GPU path (DrawItem::pick_id + Renderer::RequestPick /
 // TakePickResult) is the default; the CPU ray-vs-mesh raycast stays compiled
 // as the fallback behind the flag.
-// ===========================================================================
 #define RX_EDITOR_HAVE_ENGINE_PICKING 1
 
 void Editor::BeginScenePick(f32 mx, f32 my) {
@@ -1030,10 +1022,8 @@ ecs::Entity Editor::PickAt(f32 mx, f32 my) const {
   return best;
 }
 
-// ===========================================================================
 // Gizmo: 3D axis lines through FrameView::debug_lines_overlay + ugui handle
 // dots (screen-space) for hit-testing.
-// ===========================================================================
 Mat4 Editor::ViewMatrix() const {
   return LookAt(camera_.position(), camera_.target(), {0, 1, 0});
 }
@@ -1128,9 +1118,7 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
   }
 }
 
-// ===========================================================================
 // File ops
-// ===========================================================================
 void Editor::NewScene() {
   FinishTerrainStroke();
   FinishPlacementDrag();
@@ -1518,13 +1506,11 @@ void Editor::OpenFileDialog() {
   MarkDirty();
 }
 
-// ===========================================================================
 // Autopilot (RX_EDITOR_AUTOPILOT=1): drives the editor's own interaction code
 // paths at fixed frames (GPU pick round-trips at projected entity pixels,
 // an undo-grouped move (the gizmo-drag path), undo/redo, and a save/new/load
 // round-trip), logging pass/fail so a headless GPU run smoke-tests the whole
 // engine-integration surface without OS-synthesized input.
-// ===========================================================================
 void Editor::RunAutopilot() {
   static int f = 0;
   static f32 terrain_before = 0;

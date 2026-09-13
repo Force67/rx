@@ -780,7 +780,7 @@ void ShooterDemo::DrawHud() {
   combat::WeaponState* weapon = combat::ActiveWeapon(*loadout);
   const combat::WeaponDef* def = weapon ? catalog_.Find(weapon->def) : nullptr;
 
-  // --- crosshair: the cone the next round actually leaves in ----------------
+  // crosshair: the cone the next round actually leaves in
   ImDrawList* draw = ImGui::GetForegroundDrawList();
   const ImVec2 size = ImGui::GetIO().DisplaySize;
   const ImVec2 middle{size.x * 0.5f, size.y * 0.5f};
@@ -806,7 +806,7 @@ void ShooterDemo::DrawHud() {
     }
   }
 
-  // --- ammo / health --------------------------------------------------------
+  // ammo / health
   ImGui::SetNextWindowPos({size.x - 250.0f, size.y - 120.0f}, ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.35f);
   if (ImGui::Begin("hud", nullptr,
@@ -832,7 +832,7 @@ void ShooterDemo::DrawHud() {
 
   if (!show_panel_) return;
 
-  // --- live weapon tuning ---------------------------------------------------
+  // live weapon tuning
   ImGui::SetNextWindowSize({330, 0}, ImGuiCond_FirstUseEver);
   if (ImGui::Begin("shooter (M hides)")) {
     ImGui::TextWrapped(

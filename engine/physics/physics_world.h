@@ -92,7 +92,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // the generic path. Off by default, so ordinary floaters are unchanged.
   void set_buoyancy_exempt(BodyId id, bool exempt);
 
-  // --- rigid-body force primitives (thin Jolt wrappers) ---
+  // rigid-body force primitives (thin Jolt wrappers)
   // Continuous force (N) / torque (Nm) accumulated for the next step and
   // cleared by Jolt after it; call every step while the force applies. Point
   // variants take a WORLD-space application point. These wake the body. The
@@ -243,7 +243,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // a ragdoll's root so the figure hangs from it like a puppet.
   void SetBodyKinematic(BodyId id);
 
-  // --- feedback-controller adapter surface ---
+  // feedback-controller adapter surface
   // These read back and drive individual bodies for a physics-first locomotion
   // controller that closes a loop around measured body state.
 
@@ -355,7 +355,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // chassis OffsetCenterOfMass Z with com_drop's Y.
     f32 com_fore = 0;
 
-    // --- racing-sim extensions ---
+    // racing-sim extensions
     Drivetrain drivetrain = Drivetrain::kRWD;
     f32 awd_front_split = 0.4f;  // kAWD: engine torque fraction to the front axle
     // Gearbox: gear_count 0 keeps Jolt's default 5-speed. Ratios are
@@ -411,7 +411,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // ~8%, holding the tire near its grip peak (and letting the automatic
     // box shift, which Jolt gates on slip). Off = raw throttle.
     bool traction_control = false;
-    // --- handling-profile extensions (all default to current behaviour) ---
+    // handling-profile extensions (all default to current behaviour)
     // Limited-slip differential: Jolt's mLimitedSlipRatio (max/min driven-wheel
     // speed before all torque routes to the slower wheel). Lower = tighter lock
     // (a spinning inside wheel still drives the car out of a corner, adds

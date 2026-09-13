@@ -22,7 +22,7 @@ f32 DistanceSq(const f32 a[3], const f32 b[3]) {
 }  // namespace
 
 void InterestMap::Update(ecs::World& world, u64 tick) {
-  // --- gather bubbles ---
+  // gather bubbles
   bubbles_.clear();
   scratch_bubbles_.clear();
   f32 max_exit = 0;
@@ -77,7 +77,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
     return;
   }
 
-  // --- broad phase: bucket bubbles into the XZ cells their exit sphere overlaps ---
+  // broad phase: bucket bubbles into the XZ cells their exit sphere overlaps
   const f32 cell = config_.cell_size > 0 ? config_.cell_size
                                          : (max_exit > 1.0f ? max_exit : 1.0f);
   const f32 inv_cell = 1.0f / cell;
@@ -115,7 +115,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
     if (!peers_.find(b.peer)) peers_.insert(b.peer, PeerData{});
   }
 
-  // --- membership + ownership, one pass over the replicated entities ---
+  // membership + ownership, one pass over the replicated entities
   // Candidates for one entity land here; bubbles are few per cell so a flat
   // scan beats anything fancier.
   struct Candidate {
@@ -156,7 +156,7 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
           }
         }
 
-        // --- ownership ---
+        // ownership
         Ownership* owned = owners_.find(id.value);
         const u32 prev_owner = owned ? owned->peer : kNoPeer;
         u32 next_owner = prev_owner;

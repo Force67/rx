@@ -50,7 +50,7 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
       ByteSpan(reinterpret_cast<const u8*>(lod.indices.data()), lod.indices.size() * sizeof(u32)),
       kBufferUsageIndex);
 
-  // --- Geometry pipeline: accumulate into the two oit targets. ---
+  // Geometry pipeline: accumulate into the two oit targets.
   // accum: additive. revealage: dst *= (1 - src.r).
   geom_pipeline_ = device.CreateGraphicsPipeline({
       .vertex = RX_SHADER(k_wboit_vs_hlsl),
@@ -91,7 +91,7 @@ bool WboitPass::Initialize(Device& device, Format color_format, Format depth_for
     }
   }
 
-  // --- Resolve pipeline: composite the oit targets over the scene. ---
+  // Resolve pipeline: composite the oit targets over the scene.
   sampler_ = device.GetSampler({.min_filter = Filter::kNearest,
                                 .mag_filter = Filter::kNearest,
                                 .mip_filter = Filter::kNearest,

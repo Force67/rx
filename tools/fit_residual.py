@@ -64,7 +64,7 @@ import zlib
 import numpy as np
 
 
-# --- minimal PNG io (no PIL dependency; the pipeline should not need one) -----
+# minimal PNG io (no PIL dependency; the pipeline should not need one)
 
 def read_png(path):
     data = open(path, "rb").read()

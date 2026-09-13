@@ -105,7 +105,7 @@ struct PsOut {
   float2 motion : SV_Target1;
 };
 
-// --- waves -----------------------------------------------------------------
+// waves
 
 float2 Hash2(float2 p) {
   float3 q = frac(float3(p.xyx) * float3(0.1031, 0.1030, 0.0973));
@@ -149,7 +149,7 @@ float3 WaveNormal(float2 p, float t, float strength) {
   return normalize(float3(-(hx - h0) / eps * strength, 1.0, -(hz - h0) / eps * strength));
 }
 
-// --- ddgi sampling (matches mesh.ps) ----------------------------------------
+// ddgi sampling (matches mesh.ps)
 
 float2 OctEncode(float3 d) {
   d /= (abs(d.x) + abs(d.y) + abs(d.z));
@@ -178,7 +178,7 @@ float3 SampleDdgiNearest(float3 world_pos, float3 n) {
   return irr * irr * ddgi.params.w;
 }
 
-// --- reflection -------------------------------------------------------------
+// reflection
 
 // The sky cube carries the raw sun disk for bloom; reflections must not,
 // the analytic glint term owns sun reflection. Blurred mip + clamp.
@@ -236,7 +236,7 @@ float3 TraceReflection(float3 origin, float3 dir) {
          hit_material.emissive;
 }
 
-// --- surface ----------------------------------------------------------------
+// surface
 
 #include "water_waves.hlsli"
 #include "water_field.hlsli"

@@ -94,7 +94,7 @@ u32 FullMipChainLength(u32 width, u32 height) {
   return levels;
 }
 
-// --- Average-opacity bake (AC Shadows vegetation opaque approximation) ---
+// Average-opacity bake (AC Shadows vegetation opaque approximation)
 //
 // The bake reads the mip-0 alpha channel of a color texture and reduces it to a
 // small per-cell mean-opacity grid plus a whole-texture mean. It decodes alpha
@@ -1010,7 +1010,7 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
   return true;
 }
 
-// --- texture streaming ------------------------------------------------------
+// texture streaming
 
 void MaterialSystem::Pin(u64 texture_hash) {
   TextureRecord* record = record_for(texture_hash);

@@ -35,7 +35,7 @@ TlasSlotTracker::Selection RunFrame(TlasSlotTracker& t, u32 frame, bool want_asy
 int main() {
   constexpr u32 kSlots = TlasSlotTracker::kSlots;
 
-  // --- RT enabled from frame 0: first frame cannot read an async prev slot ---
+  // RT enabled from frame 0: first frame cannot read an async prev slot
   {
     TlasSlotTracker t;
     // Frame 0: nothing built yet, so even with async wanted we must build+read
@@ -55,7 +55,7 @@ int main() {
     CHECK(s2.async && s2.read_slot == 1);
   }
 
-  // --- want_async false always builds+reads the current slot (sync path) ---
+  // want_async false always builds+reads the current slot (sync path)
   {
     TlasSlotTracker t;
     for (u32 f = 0; f < 5; ++f) {
@@ -66,7 +66,7 @@ int main() {
     }
   }
 
-  // --- RT enabled only after several raster-only frames ---
+  // RT enabled only after several raster-only frames
   {
     TlasSlotTracker t;
     // Frames 0..4 render raster-only: no TLAS is built (BuildTlas not called),
@@ -82,7 +82,7 @@ int main() {
     CHECK(s2.read_slot == enable_frame % kSlots);
   }
 
-  // --- a previously used tracker must not accept an old pre-inactivity slot ---
+  // a previously used tracker must not accept an old pre-inactivity slot
   {
     TlasSlotTracker t;
     RunFrame(t, 0, false);
@@ -93,7 +93,7 @@ int main() {
     CHECK(s.read_slot == s.build_slot);
   }
 
-  // --- a failed build leaves the following frame on the sync fallback ---
+  // a failed build leaves the following frame on the sync fallback
   {
     TlasSlotTracker t;
     RunFrame(t, 0, false);
@@ -105,7 +105,7 @@ int main() {
     CHECK(s2.read_slot == s2.build_slot);
   }
 
-  // --- BLAS replaced (RemoveBlas) invalidates every prior slot ---
+  // BLAS replaced (RemoveBlas) invalidates every prior slot
   {
     TlasSlotTracker t;
     // Prime all slots over several async frames so every slot is a valid build.
@@ -124,7 +124,7 @@ int main() {
     CHECK(s2.async);
   }
 
-  // --- a slot built under an older revision never reads as valid ---
+  // a slot built under an older revision never reads as valid
   {
     TlasSlotTracker t;
     t.MarkBuilt(0, 0);
@@ -135,7 +135,7 @@ int main() {
     CHECK(t.Valid(0));
   }
 
-  // --- one-slot invalidation routes consumers to the fallback until rebuilt ---
+  // one-slot invalidation routes consumers to the fallback until rebuilt
   {
     TlasSlotTracker t;
     t.MarkBuilt(2, 9);

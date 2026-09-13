@@ -42,8 +42,7 @@ bool Finite(const Quat& q) {
   return std::isfinite(q.x) && std::isfinite(q.y) && std::isfinite(q.z) && std::isfinite(q.w);
 }
 
-// --- synthetic terrain probes
-// -------------------------------------------------
+// synthetic terrain probes
 
 struct FlatFloor {
   f32 y = 0;
@@ -68,8 +67,7 @@ bool SteepProbe(void*, const Vec3& probe_start, f32, GroundHit* out) {
 
 bool NoHitProbe(void*, const Vec3&, f32, GroundHit*) { return false; }
 
-// --- measurement builders
-// -----------------------------------------------------
+// measurement builders
 
 CharacterMeasurements MakeMeasurements(const ControllerParameters& params, const Vec3& com_vel) {
   CharacterMeasurements m;
@@ -97,8 +95,7 @@ ContactEstimate MakeContacts() {
   return c;
 }
 
-// --- Wrap01
-// -------------------------------------------------------------------
+// Wrap01
 
 void TestWrap01() {
   Near(Wrap01(0.25f), 0.25f, "wrap in range");
@@ -109,8 +106,7 @@ void TestWrap01() {
   Near(Wrap01(2.5f), 0.5f, "wrap far above");
 }
 
-// --- GaitClock
-// ----------------------------------------------------------------
+// GaitClock
 
 void TestGaitFeetOppose() {
   GaitState s;
@@ -229,8 +225,7 @@ void TestGaitRampSmooth() {
   Near(clock.state().speed_ratio, 1.0f, "settles at run speed ratio", 0.02f);
 }
 
-// --- CapturePoint
-// -------------------------------------------------------------
+// CapturePoint
 
 void TestCapturePoint() {
   const Vec3 com{1, 0.95f, 2};
@@ -249,8 +244,7 @@ void TestCapturePoint() {
   Check(Finite(cp2), "zero COM height does not NaN");
 }
 
-// --- Swing trajectory
-// ---------------------------------------------------------
+// Swing trajectory
 
 void TestSwingTrajectory() {
   const Vec3 start{0, 0, 0};
@@ -298,8 +292,7 @@ void TestSwingTrajectory() {
   }
 }
 
-// --- FootstepPlanner
-// ----------------------------------------------------------
+// FootstepPlanner
 
 void TestFootstepPlanner() {
   const ControllerParameters params;
@@ -371,8 +364,7 @@ void TestFootstepPlanner() {
         "no-ground outputs finite");
 }
 
-// --- SolveLegIk / BuildWholeBodyTargets
-// ------------------------------------
+// SolveLegIk / BuildWholeBodyTargets
 
 // Rotation angle of a quaternion delta from identity (radians, [0,pi]).
 f32 QuatAngle(const Quat& q) {

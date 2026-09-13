@@ -41,7 +41,7 @@ std::atomic<bool> g_compress_normals{false};
 std::mutex g_stats_mutex;
 TextureCompressionStats g_stats;
 
-// --- colour space -----------------------------------------------------------
+// colour space
 
 const f32* SrgbToLinearTable() {
   static const auto* table = [] {
@@ -61,7 +61,7 @@ u8 LinearToSrgb(f32 v) {
   return static_cast<u8>(std::clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
 }
 
-// --- mip chain --------------------------------------------------------------
+// mip chain
 
 u32 FullMipChainLength(u32 width, u32 height) {
   u32 levels = 1;
@@ -119,7 +119,7 @@ void Downsample(const u8* src, u32 sw, u32 sh, u8* dst, u32 dw, u32 dh, bool srg
   }
 }
 
-// --- block layout -----------------------------------------------------------
+// block layout
 
 u32 BlockBytes(TextureFormat format) {
   switch (format) {
@@ -218,7 +218,7 @@ void EncodeSurface(const u8* rgba, u32 width, u32 height, TextureFormat format, 
   for (std::thread& worker : workers) worker.join();
 }
 
-// --- format choice ----------------------------------------------------------
+// format choice
 
 bool HasAlpha(const Texture& texture) {
   const size_t texels = static_cast<size_t>(texture.width) * texture.height;
@@ -244,7 +244,7 @@ TextureFormat FormatForRole(const Texture& texture, TextureRole role) {
   return TextureFormat::kUnknown;
 }
 
-// --- disk cache -------------------------------------------------------------
+// disk cache
 
 std::string CacheRoot() {
   if (const char* override_dir = std::getenv("RX_TEXCACHE_DIR")) return override_dir;

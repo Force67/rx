@@ -46,7 +46,7 @@ RX_COMBAT_EXPORT void StepViewRecoil(ecs::World& world, f32 dt);
 // other system reads Viewmodel.
 RX_COMBAT_EXPORT void StepViewmodels(ecs::World& world, f32 dt);
 
-// --- loadout helpers ------------------------------------------------------
+// loadout helpers
 
 // The raised weapon, or nullptr for an empty loadout.
 RX_COMBAT_EXPORT WeaponState* ActiveWeapon(Loadout& loadout);

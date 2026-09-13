@@ -642,7 +642,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
   ResourceHandle rr_depth = rr ? tex("recon_rr_depth", kViewZ) : vz_c;
   ResourceHandle rr_hitdist = rr ? tex("recon_rr_hitdist", kViewZ) : vz_c;
 
-  // --- 1. gbuffer ---
+  // 1. gbuffer
   graph.AddPass(
       "recon_gbuffer",
       [&](RenderGraph::PassBuilder& b) {
@@ -697,12 +697,12 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         ctx.cmd->Dispatch2D(extent_);
       });
 
-  // --- 1b. ReSTIR GI: temporal + spatial reservoir resampling of the initial
+  // 1b. ReSTIR GI: temporal + spatial reservoir resampling of the initial
   // indirect samples, then shading into the noisy irradiance the SVGF chain
   // consumes. Reservoir history ping-pongs with the frame parity like the
   // accumulation targets; the temporal output (pre-spatial) is what the next
   // frame reuses, which keeps spatial correlation out of the history.
-  // --- 1a. ReSTIR DI: light-sample reservoirs (sun disk + dynamic point
+  // 1a. ReSTIR DI: light-sample reservoirs (sun disk + dynamic point
   // lights) replace the gbuffer's inline sun sampling for the primary direct
   // term. Temporal writes transient reservoirs, spatial merges + traces the
   // one shadow ray, shades into direct_irr and persists the merged reservoir
@@ -920,7 +920,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         });
   }
 
-  // --- 1c. volumetric fog: marched against the primary hit with shadowed sun
+  // 1c. volumetric fog: marched against the primary hit with shadowed sun
   // scattering, EMA'd into its own history; the composite folds it in. Bound
   // to the composite even when off (static reference), aliasing the emissive
   // target then.
@@ -969,7 +969,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         });
   }
 
-  // --- external denoiser (DLSS-RR): compose the NOISY radiance with the
+  // external denoiser (DLSS-RR): compose the NOISY radiance with the
   // regular composite pipeline (mode 0 is exactly albedo/pi*e + emissive +
   // spec) and hand the guides back; SVGF stays out of the loop. ---
   if (external) {
@@ -1009,19 +1009,19 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
     return;
   }
 
-  // --- 2. temporal accumulation (diffuse + specular share the gbuffer history) ---
+  // 2. temporal accumulation (diffuse + specular share the gbuffer history)
   RunTemporal(graph, noisy, ac_c, ac_p, mo_c, mo_p, nr_c, nr_p, vz_c, vz_p, id_c, id_p, motion,
               p_pos, /*spec=*/false, frame);
   RunTemporal(graph, spec_noisy, sac_c, sac_p, smo_c, smo_p, nr_c, nr_p, vz_c, vz_p, id_c, id_p,
               motion, p_pos, /*spec=*/true, frame);
 
-  // --- 3. a-trous (N passes, ping-pong) for each signal ---
+  // 3. a-trous (N passes, ping-pong) for each signal
   u32 passes = std::clamp(frame.atrous_passes, 1u, 8u);
   ResourceHandle denoised = RunAtrous(graph, ac_c, ping, pong, nr_c, vz_c, mo_c, passes, false);
   ResourceHandle spec_denoised =
       RunAtrous(graph, sac_c, spec_ping, spec_pong, nr_c, vz_c, smo_c, passes, true);
 
-  // --- 4. composite ---
+  // 4. composite
   graph.AddPass(
       "recon_composite",
       [&](RenderGraph::PassBuilder& b) {

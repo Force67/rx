@@ -36,7 +36,7 @@ int main() {
   const f32 start = 40.0f;
   const f32 angle = 0.004f;  // ~a 0.5 m radius object culls near 125 m
 
-  // --- inline per-draw predicate ---
+  // inline per-draw predicate
   {
     RtInstanceCuller c;
     c.Configure(true, start, angle);
@@ -54,7 +54,7 @@ int main() {
     CHECK(c.DrawVisible(At(Vec3{0, 0, 100000}), origin, 0.0f));
   }
 
-  // --- disabled culler keeps everything ---
+  // disabled culler keeps everything
   {
     RtInstanceCuller c;
     c.Configure(false, start, angle);
@@ -66,7 +66,7 @@ int main() {
     CHECK(CountVisible(vis) == xf.size());
   }
 
-  // --- time-sliced group sweep converges over ~kSweepFrames ---
+  // time-sliced group sweep converges over ~kSweepFrames
   {
     RtInstanceCuller c;
     c.Configure(true, start, angle);
@@ -97,7 +97,7 @@ int main() {
     CHECK(visible == 0);
   }
 
-  // --- teleport falls back to accept-all ---
+  // teleport falls back to accept-all
   {
     RtInstanceCuller c;
     c.Configure(true, start, angle);
@@ -117,7 +117,7 @@ int main() {
     CHECK(CountVisible(v) == kN);
   }
 
-  // --- generation change invalidates stale state ---
+  // generation change invalidates stale state
   {
     RtInstanceCuller c;
     c.Configure(true, start, angle);
@@ -136,7 +136,7 @@ int main() {
     CHECK(CountVisible(v) == b.size());
   }
 
-  // --- in-place transform update (revision bump) re-admits a moved instance ---
+  // in-place transform update (revision bump) re-admits a moved instance
   {
     RtInstanceCuller c;
     c.Configure(true, start, angle);

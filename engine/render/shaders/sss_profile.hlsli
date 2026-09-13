@@ -22,7 +22,7 @@
 
 static const float RX_SSS_PI = 3.14159265358979323846;
 
-// --- Kulla-Conty 2017: perceptual colour C -> single-scattering albedo -------
+// Kulla-Conty 2017: perceptual colour C -> single-scattering albedo
 // Inverts the multiple-scattering albedo so an artist authors the diffuse
 // colour they want to see. Evaluated per channel. Normally done CPU-side at
 // upload; provided here for the LUT/hero path and for reference.
@@ -37,7 +37,7 @@ float3 SssSingleScatterAlbedo(float3 c, float g) {
   return (1.0 - s2) / (1.0 - g * s2);
 }
 
-// --- Dynamic blood flow (hemoglobin perfusion) -------------------------------
+// Dynamic blood flow (hemoglobin perfusion)
 // Couples a hemoglobin concentration `perfusion` (0..1, resting ~0.5) into the
 // scattering coefficients and multiple-scatter tint. Oxygenated hemoglobin
 // absorbs green/blue far more than red, so more blood reads as redder skin with
@@ -74,7 +74,7 @@ float SssEffectivePerfusion(float base, float4 dyn, float tension) {
   return saturate(base + dyn.y + pulse - tension * dyn.w);
 }
 
-// --- Christensen-Burley normalized diffusion profile -------------------------
+// Christensen-Burley normalized diffusion profile
 // d is the per-channel scale (d = ell / s). r is the radial surface distance.
 // R_d(r) = a * (e^{-r/d} + e^{-r/(3d)}) / (8*pi*d*r). The surface albedo a is
 // applied by the caller; this returns the geometric profile (a = 1).
@@ -123,7 +123,7 @@ float SssSampleRadius(float d, float u) {
   return r;
 }
 
-// --- Single-scattering residual R1 (Zhang & d'Eon 2025, slide 77) ------------
+// Single-scattering residual R1 (Zhang & d'Eon 2025, slide 77)
 // The first-order Taylor coefficient (in single-scattering albedo) of Burley
 // under diffuse transmission, IOR 1.4, semi-infinite flat slab. It is
 // ALBEDO-INDEPENDENT, so subtracting it from the full Burley profile yields a
@@ -143,7 +143,7 @@ float SssMultiScatter(float r, float d, float ell) {
   return max(SssBurley(r, d) - SssSingleScatterResidual(r, ell), 0.0);
 }
 
-// --- Henyey-Greenstein phase + importance sampling ---------------------------
+// Henyey-Greenstein phase + importance sampling
 float SssHgPhase(float cos_theta, float g) {
   float denom = 1.0 + g * g - 2.0 * g * cos_theta;
   return (1.0 - g * g) / (4.0 * RX_SSS_PI * denom * sqrt(max(denom, 1e-8)));
@@ -179,7 +179,7 @@ float3 SssDirectionInFrame(float3 w, float cos_theta, float phi) {
   return sin_theta * cos(phi) * t + sin_theta * sin(phi) * b + cos_theta * w;
 }
 
-// --- Free-flight distance sampling (Beer-Lambert, homogeneous medium) --------
+// Free-flight distance sampling (Beer-Lambert, homogeneous medium)
 // Unbounded: p(t) = sigma_t e^{-sigma_t t}.
 float SssSampleDistance(float sigma_t, float u) {
   return -log(max(1.0 - u, 1e-8)) / max(sigma_t, 1e-6);
@@ -200,7 +200,7 @@ float SssDistancePdfBounded(float sigma_t, float d, float t) {
   return sigma_t * exp(-sigma_t * t) / max(span, 1e-8);
 }
 
-// --- Spectral (per-channel) distance-sampling MIS (Zhang 2025, slide 104) ----
+// Spectral (per-channel) distance-sampling MIS (Zhang 2025, slide 104)
 // Pick a channel by throughput-weighted CDF, then combine the three per-channel
 // exponentials with MIS. ss_albedo is the single-scattering albedo (float3).
 float SssChannelPdf(float3 sigma_t, float3 ss_albedo, float t) {

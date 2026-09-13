@@ -122,7 +122,7 @@ void RefitEndpoints(const f32* points, const f32* weights, f32* e0, f32* e1) {
   }
 }
 
-// --- BC1 colour block ---
+// BC1 colour block
 
 u16 Quantize565(const f32* c) {
   const int r = std::clamp(static_cast<int>(c[0] * (31.0f / 255.0f) + 0.5f), 0, 31);
@@ -227,7 +227,7 @@ void EncodeColorBlock(const u8* rgba, u8* out) {
   PackColorBlock(best, out);
 }
 
-// --- BC4 single-channel block ---
+// BC4 single-channel block
 
 struct AlphaFit {
   u8 r0 = 0;
@@ -309,7 +309,7 @@ void EncodeChannelBlock(const f32* values, u8* out) {
   PackAlphaBlock(best, out);
 }
 
-// --- BC7 mode 6 ---
+// BC7 mode 6
 
 // The endpoint's low bit is the shared p-bit, so a component quantizes to the
 // nearest 8-bit value of the requested parity.

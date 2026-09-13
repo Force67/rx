@@ -35,7 +35,7 @@ class Mixer {
   void Configure(u32 output_rate) { output_rate_ = output_rate; }
   u32 output_rate() const { return output_rate_; }
 
-  // --- engine thread ---------------------------------------------------------
+  // engine thread
   // Starts `decoder` as a new voice and returns its id (0 if decoder is null).
   // The returned id stays valid for Stop/SetVoice* until the voice finishes.
   u32 Play(std::unique_ptr<Decoder> decoder, const PlayParams& params);
@@ -46,7 +46,7 @@ class Mixer {
   void SetListener(const Listener& listener);
   void SetMasterGain(f32 gain);  // 0 mutes; applied on the device thread
 
-  // --- device thread ---------------------------------------------------------
+  // device thread
   // Renders `frames` interleaved stereo frames into `out` (2*frames floats),
   // overwriting whatever was there.
   void MixInto(float* out, u32 frames);

@@ -44,7 +44,7 @@ namespace rx::weather {
 struct WeatherState {
   const char *name = ""; // debug label only
 
-  // --- Cloud deck (feeds render::CloudscapeMapState + CloudscapeControls) ---
+  // Cloud deck (feeds render::CloudscapeMapState + CloudscapeControls)
   f32 coverage = 0.4f;   // 0 clear .. 1 overcast
   f32 cloud_type = 0.6f; // 0 stratus .. 0.5 stratocumulus .. 1 cumulus
   f32 precipitation =
@@ -61,29 +61,29 @@ struct WeatherState {
   f32 base_altitude = 1800.0f;
   f32 top_altitude = 6000.0f;
 
-  // --- Wind (shared by clouds + precipitation slant) ---
+  // Wind (shared by clouds + precipitation slant)
   f32 wind_yaw = 0.29146f;    // radians on XZ, direction the wind blows toward
   f32 wind_speed = 12.53f;    // m/s
   f32 vertical_skew = 700.0f; // metres of extra downwind drift at the layer top
   f32 turbulence = 1.0f;      // curl-noise distortion of the erosion detail
 
-  // --- Ground haze ---
+  // Ground haze
   f32 fog_density =
       0.03f; // 0 clear .. 1 thick murk (post-rain mist adds on top)
   f32 fog_height = 90.0f; // exponential falloff scale, metres
   f32 fog_churn = 0.15f;  // 0 still .. 1 boiling (vapour rising off warm water)
 
-  // --- Surface / sky flags ---
+  // Surface / sky flags
   bool snow = false; // precipitation falls as snow (whitens instead of wetting)
   bool aurora = false; // night-sky curtains up in this state
 
-  // --- Tornado ---
+  // Tornado
   // How prone this state is to spawning a vortex (0 = never). Requires the
   // blended deck to be anvil-heavy; the layer then runs the whole lifecycle:
   // touchdown, a wander downwind past the player, rope-out.
   f32 tornado_prone = 0.0f;
 
-  // --- Lightning placement ---
+  // Lightning placement
   // Strikes land in this ring around the player. The defaults put the storm
   // overhead; a distant-front state pushes the ring kilometres out, and the
   // global flash then attenuates with strike distance so only the far cell's
@@ -91,7 +91,7 @@ struct WeatherState {
   f32 strike_min_range = 100.0f;
   f32 strike_max_range = 300.0f;
 
-  // --- Scheduling ---
+  // Scheduling
   f32 transition_seconds =
       20.0f; // cross-fade duration when this state becomes the target
   f32 min_dwell = 40.0f;  // shortest time to remain once settled (seconds)

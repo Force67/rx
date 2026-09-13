@@ -14,7 +14,7 @@ constexpr size_t kMaxRpcPacket = 60000;
 
 }  // namespace
 
-// --- server ---
+// server
 
 void RpcServerChannel::OnPacket(u32 peer, const u8* data, size_t size) {
   std::optional<rpc::RpcCall> call = rpc::DecodeCall(data, size);
@@ -56,7 +56,7 @@ bool RpcServerChannel::Broadcast(std::string name, rpc::RpcArgs args) {
               rpc::RpcCall{std::move(name), std::move(args)});
 }
 
-// --- client ---
+// client
 
 void RpcClientChannel::OnPacket(const u8* data, size_t size) {
   std::optional<rpc::RpcCall> call = rpc::DecodeCall(data, size);

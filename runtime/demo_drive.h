@@ -110,7 +110,7 @@ class DriveDemo {
 
   EngineContext& ctx_;
 
-  // --- vehicles ---
+  // vehicles
   physics::VehicleId car_ = 0;
   std::unique_ptr<physics::Boat> boat_;
   std::unique_ptr<physics::Aircraft> aircraft_;
@@ -132,7 +132,7 @@ class DriveDemo {
   Vec3 plane_spawn_{-62, 1.4f, -140};
   f32 plane_yaw_ = 0;
 
-  // --- captured driver input (render cadence -> fixed-step StepVehicles) ---
+  // captured driver input (render cadence -> fixed-step StepVehicles)
   f32 car_throttle_ = 0;   // -1..1 forward/reverse gas
   f32 car_steer_ = 0;      // -1..1
   f32 car_brake_ = 0;      // 0..1
@@ -170,12 +170,12 @@ class DriveDemo {
   u32 wetness_step_ = 0;  // 0/1/2 -> 0 / 0.5 / 1
   f32 wetness_ = 0;
 
-  // --- procedural audio (one voice set per vehicle) ---
+  // procedural audio (one voice set per vehicle)
   std::unique_ptr<audio::VehicleAudio> car_audio_;
   std::unique_ptr<audio::VehicleAudio> boat_audio_;
   std::unique_ptr<audio::VehicleAudio> plane_audio_;
 
-  // --- visuals ---
+  // visuals
   Model car_model_;
   Model plane_model_;
   std::vector<std::pair<Model, Mat4>> showcase_;  // parked pieces + baked placement
@@ -190,7 +190,7 @@ class DriveDemo {
   f32 car_wheel_radius_ = 0.34f;
   f32 car_wheel_width_ = 0.25f;
 
-  // --- camera ---
+  // camera
   bool free_cam_ = false;
   bool cam_init_ = false;
   Vec3 cam_eye_{0, 4, -40};

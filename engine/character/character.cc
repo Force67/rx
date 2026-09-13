@@ -102,7 +102,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
           body.configured = true;
         }
 
-        // --- Heading + look ---------------------------------------------------
+        // Heading + look
         state.yaw = WrapAngle(state.yaw + intent.look_yaw_delta);
         if (scene::CameraIntent* cam = world.Get<scene::CameraIntent>(entity)) {
           cam->pitch_delta += intent.look_pitch_delta;
@@ -115,7 +115,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         const bool have_center = physics.GetCharacterPosition(body.id, &center);
         const Vec3 feet = have_center ? center - up * old_total_half : TransformFeet(transform);
 
-        // --- Stance resolution ------------------------------------------------
+        // Stance resolution
         // Only Standing/Crouching are driven here; reserved stances pass through.
         CharacterStance stance = state.stance;
         if (stance != CharacterStance::kStanding && stance != CharacterStance::kCrouching) {
@@ -137,7 +137,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         }
         state.stance = stance;
 
-        // --- Crouch blend + capsule resize (feet-planted) --------------------
+        // Crouch blend + capsule resize (feet-planted)
         const f32 prev_blend = state.crouch_blend;
         const f32 target_blend = stance == CharacterStance::kCrouching ? 1.0f : 0.0f;
         f32 blend =
@@ -167,12 +167,12 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         state.eye_height =
             std::lerp(shape.standing_eye_height, shape.crouched_eye_height, blend);
 
-        // --- Analog move intent ----------------------------------------------
+        // Analog move intent
         const Vec3 move_h{intent.move.x, 0, intent.move.z};
         const f32 throttle = std::clamp(Length(move_h), 0.0f, 1.0f);
         const Vec3 dir = throttle > 1e-4f ? Normalize(move_h) : Vec3{0, 0, 0};
 
-        // --- Body facing (turn smoothing) ------------------------------------
+        // Body facing (turn smoothing)
         // First person hard-locks the body to the RAW look yaw (no damping ever
         // touches look input); third person eases the facing toward the movement
         // direction, using the faster pivot half-life for near-180 reversals.
@@ -195,7 +195,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
           state.facing_yaw = ExpApproachAngle(state.facing_yaw, target_yaw, hl, dt);
         }  // third person, not moving: hold facing
 
-        // --- Gait target-speed blend (smooth target, snappy accel) -----------
+        // Gait target-speed blend (smooth target, snappy accel)
         const f32 raw_gait = stance == CharacterStance::kCrouching
                                  ? settings.crouch_speed
                                  : GaitSpeed(settings, intent.gait);
@@ -208,7 +208,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         }
         const Vec3 target_h = dir * (state.gait_speed * throttle);
 
-        // --- Horizontal velocity ---------------------------------------------
+        // Horizontal velocity
         Vec3 horizontal{state.integration_velocity.x, 0, state.integration_velocity.z};
         f32 accel = throttle > 1e-4f ? settings.ground_acceleration : settings.ground_deceleration;
         if (!state.grounded) accel = settings.ground_acceleration * settings.air_control;
@@ -217,7 +217,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         if (throttle <= 1e-4f && Length(horizontal) < settings.stop_speed_epsilon)
           horizontal = {0, 0, 0};
 
-        // --- Vertical velocity + jump (buffer + coyote) ----------------------
+        // Vertical velocity + jump (buffer + coyote)
         const bool grounded_prev = state.grounded;  // last step's result
         if (grounded_prev) state.jump_consumed = false;
 
@@ -245,7 +245,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
 
         Vec3 velocity{horizontal.x, vy, horizontal.z};
 
-        // --- external per-step acceleration (jetpack thrust, dashes) ----------
+        // external per-step acceleration (jetpack thrust, dashes)
         // Integrated on top of gravity + locomotion, before the mover consumes
         // the velocity. Its vertical part competes with gravity (a jetpack must
         // out-thrust weight to lift off) and the ground clamp below still stops
@@ -254,7 +254,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         if (std::isfinite(ext.x) && std::isfinite(ext.y) && std::isfinite(ext.z))
           velocity += ext * dt;
 
-        // --- Drive the controller --------------------------------------------
+        // Drive the controller
         Vec3 out_pos = center;
         bool grounded = false;
         physics.MoveCharacterVelocity(body.id, velocity, dt, &out_pos, &grounded, nullptr);
@@ -293,7 +293,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         transform.rotation[2] = q.z;
         transform.rotation[3] = q.w;
 
-        // --- Camera-anchor eye Y: step smoothing + landing dip ---------------
+        // Camera-anchor eye Y: step smoothing + landing dip
         // Vertical only; horizontal follows the feet 1:1 in SyncCharacterCameraAnchors.
         const f32 raw_eye_y = out_feet.y + state.eye_height;
         if (!state.view_initialized) {

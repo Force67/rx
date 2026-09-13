@@ -155,7 +155,7 @@ f32 ShipDemo::Rand() {
 }
 
 void ShipDemo::Create() {
-  // --- Ocean sheet + deep floor (mirrors the water demo's minimal sea). -------
+  // Ocean sheet + deep floor (mirrors the water demo's minimal sea).
   asset::Material water_mat;
   water_mat.id = asset::MakeAssetId("ship/water_mat");
   water_mat.base_color_factor[0] = 0.06f;
@@ -232,7 +232,7 @@ void ShipDemo::Create() {
     return true;
   });
 
-  // --- Vessel geometry --------------------------------------------------------
+  // Vessel geometry
   BuildFlagship();
   BuildAnchoredShip();
   BuildRopes();
@@ -252,7 +252,7 @@ void ShipDemo::Create() {
     renderer_.UploadMesh(ball);
   }
 
-  // --- Flagship dynamic hull body (floats via the buoyancy callback). ---------
+  // Flagship dynamic hull body (floats via the buoyancy callback).
   // A box approximating the submerged hull; density < water so it floats. The
   // parallel water-bodies agent's swell-riding buoyancy hooks in right here.
   const Vec3 half{kBeam * 0.95f, 1.2f, kHalfLen * 0.9f};
@@ -260,7 +260,7 @@ void ShipDemo::Create() {
   hull_prev_pos_ = hull_pos_;
   hull_body_ = physics_.AddDynamicBox(hull_pos_, half, 460.0f, {0, 0, 2.0f});
 
-  // --- Scene lighting: a fixed afternoon sun so captures are frame-stable. -----
+  // Scene lighting: a fixed afternoon sun so captures are frame-stable.
   ctx_.scene_owns_sun = true;
   renderer_.settings().sun_direction = Normalize(Vec3{-0.45f, -0.72f, 0.28f});
   renderer_.settings().sun_intensity = 4.2f;
@@ -303,7 +303,7 @@ void ShipDemo::BuildFlagship() {
     renderer_.UploadMaterial(canvas);
   }
 
-  // ----- Hull loft -----
+  // Hull loft
   constexpr u32 kStations = 28;  // along Z
   constexpr u32 kProfile = 18;   // around the U cross-section (port -> keel -> stbd)
   MeshBuild hb;
@@ -366,7 +366,7 @@ void ShipDemo::BuildFlagship() {
   if (!config_.headless) renderer_.UploadMesh(hull);
   flagship_parts_.push_back({hull.id.hash, Mat4::Identity()});
 
-  // ----- Rig: masts, yards, bowsprit (all wood, one baked mesh) -----
+  // Rig: masts, yards, bowsprit (all wood, one baked mesh)
   MeshBuild rb;
   struct MastDef {
     f32 z, height;
@@ -392,7 +392,7 @@ void ShipDemo::BuildFlagship() {
   if (!config_.headless) renderer_.UploadMesh(rig);
   flagship_parts_.push_back({rig.id.hash, Mat4::Identity()});
 
-  // ----- Sails: billowed square grids hanging below their yards -----
+  // Sails: billowed square grids hanging below their yards
   struct SailDef {
     f32 z, top, bottom, halfw;
     const char* id;

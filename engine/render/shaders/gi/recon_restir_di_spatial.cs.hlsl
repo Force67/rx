@@ -251,7 +251,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     }
   }
 
-  // --- Reservoir B: sky. Same merge, own shadow ray, contribution adds. ---
+  // Reservoir B: sky. Same merge, own shadow ray, contribution adds.
   float4 s2 = r2_in.Load(int3(p, 0));
   float4 s3 = r3_in.Load(int3(p, 0));
   float sky_id = s2.w;

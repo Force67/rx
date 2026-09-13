@@ -16,9 +16,7 @@
 
 namespace rx::locomotion {
 
-// ---------------------------------------------------------------------------
 // Rig topology. Fixed simplified biped: 13 bodies, 12 joints.
-// ---------------------------------------------------------------------------
 
 enum class BodyPart : u8 {
   kPelvis,  // the root body
@@ -58,9 +56,7 @@ inline constexpr u32 kRigJointCount = static_cast<u32>(RigJoint::kCount);
 // Feet index the paired arrays below: 0 = left, 1 = right.
 inline constexpr u32 kFootCount = 2;
 
-// ---------------------------------------------------------------------------
 // Inputs: goals and physical modifiers, filled by the game every fixed step.
-// ---------------------------------------------------------------------------
 
 // What the player or AI wants the body to do. Goals only, no animation names,
 // no movement categories, no clip variants.
@@ -136,10 +132,8 @@ struct ControllerParameters {
   f32 recovery_blend_time = 0.35f; // s to blend motor strength across mode changes
 };
 
-// ---------------------------------------------------------------------------
 // Measured state. Filled at the start of every fixed update by estimator.cc,
 // measured from the simulation, never assumed from the previous plan.
-// ---------------------------------------------------------------------------
 
 struct FootMeasurement {
   Vec3 position{};        // sole centre, world
@@ -178,9 +172,7 @@ struct ContactEstimate {
   u32 support_count = 0;  // number of supporting feet
 };
 
-// ---------------------------------------------------------------------------
 // Plans and targets, regenerated every tick.
-// ---------------------------------------------------------------------------
 
 struct GaitState {
   f32 phase = 0;        // [0,1) continuous gait phase; left foot keys `phase`,
@@ -222,10 +214,8 @@ struct WholeBodyTargets {
   FootPlan foot[kFootCount];
 };
 
-// ---------------------------------------------------------------------------
 // Control regime. A physical-state machine only: owns no resources, selects
 // no animation content.
-// ---------------------------------------------------------------------------
 
 enum class ControlMode : u8 {
   kStable,

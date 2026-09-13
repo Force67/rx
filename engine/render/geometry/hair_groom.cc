@@ -29,7 +29,7 @@ struct Tri {
   u32 a, b, c;
 };
 
-// --- CPU diffuse sampling (BC1/BC3/RGBA8) --------------------------------
+// CPU diffuse sampling (BC1/BC3/RGBA8)
 
 struct DecodedTex {
   u32 w = 0, h = 0;
@@ -203,7 +203,7 @@ Texel SampleTex(const DecodedTex& t, f32 u, f32 v) {
   return lerp(lerp(a, b, tx), lerp(c, d, tx), ty);
 }
 
-// --- union-find -----------------------------------------------------------
+// union-find
 
 u32 Find(base::Vector<u32>& parent, u32 x) {
   while (parent[x] != x) {

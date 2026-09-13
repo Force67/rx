@@ -120,7 +120,7 @@ class CommandList {
  public:
   virtual ~CommandList() = default;
 
-  // --- binding ---
+  // binding
   virtual void BindPipeline(PipelineHandle pipeline) = 0;
   // Persistent set (bindless registry, frame globals).
   virtual void BindSet(u32 set_index, BindingSetHandle set) = 0;
@@ -140,7 +140,7 @@ class CommandList {
     PushConstants(&constants, sizeof(T), offset);
   }
 
-  // --- compute ---
+  // compute
   virtual void Dispatch(u32 x, u32 y, u32 z) = 0;
   // Ubiquitous fullscreen helper: one 8x8 thread group per tile.
   void Dispatch2D(Extent2D extent, u32 tile = 8) {
@@ -152,7 +152,7 @@ class CommandList {
   // no-op so the null backend stays inert.
   virtual void DispatchIndirect(const GpuBuffer& /*args*/, u64 /*offset*/) {}
 
-  // --- raster ---
+  // raster
   // Begins dynamic rendering and sets viewport+scissor to the full extent.
   virtual void BeginRendering(const RenderingInfo& info) = 0;
   virtual void EndRendering() = 0;
@@ -192,7 +192,7 @@ class CommandList {
                                           const GpuBuffer& /*count_buffer*/, u64 /*count_offset*/,
                                           u32 /*max_draws*/, u32 /*stride*/) {}
 
-  // --- synchronization ---
+  // synchronization
   virtual void TextureBarriers(std::span<const TextureBarrier> barriers) = 0;
   void Barrier(const TextureBarrier& barrier) {
     TextureBarriers(std::span<const TextureBarrier>(&barrier, 1));
@@ -201,7 +201,7 @@ class CommandList {
   // args, transfer -> shader read, AS build -> ray query, ...).
   virtual void MemoryBarrier(BarrierScope src, BarrierScope dst) = 0;
 
-  // --- transfer ---
+  // transfer
   virtual void CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
                                    std::span<const BufferTextureCopy> regions) = 0;
   virtual void CopyTextureToBuffer(const GpuImage& src, const GpuBuffer& dst,
@@ -226,7 +226,7 @@ class CommandList {
   virtual void ClearDepth(const GpuImage& image, f32 depth) = 0;           // kCopyDst state
   virtual void FillBuffer(const GpuBuffer& buffer, u64 offset, u64 size, u32 data) = 0;
 
-  // --- acceleration structures (DeviceCaps::ray_query gated) ---
+  // acceleration structures (DeviceCaps::ray_query gated)
   // `src` selects a REFIT instead of a full build: the structure is updated
   // from `src` (pass `blas` itself for the usual in-place refit) rather than
   // rebuilt, which requires both to have been built with
@@ -259,7 +259,7 @@ class CommandList {
   virtual void CopyAccelStruct(AccelStructHandle /*dst*/, AccelStructHandle /*src*/,
                                bool /*compact*/) {}
 
-  // --- profiling ---
+  // profiling
   virtual void ResetTimestamps(TimestampPoolHandle pool, u32 first, u32 count) = 0;
   virtual void WriteTimestamp(TimestampPoolHandle pool, u32 index, bool after_work) = 0;
   virtual void BeginDebugLabel(const char* name) = 0;

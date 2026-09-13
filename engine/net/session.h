@@ -78,7 +78,7 @@ class RX_NET_EXPORT ServerSession : public Session {
   bool Start();
   void Tick(ecs::World& world, f32 dt) override;
 
-  // --- game seams ---
+  // game seams
 
   // Every data-channel message with id >= kFirstGameMessage lands here,
   // undecoded, attributed to its peer. Unset drops them.
@@ -114,7 +114,7 @@ class RX_NET_EXPORT ServerSession : public Session {
     client_left_sink_ = std::move(sink);
   }
 
-  // --- sending ---
+  // sending
 
   // Ships a game payload to one client / every client on the data channel.
   void SendTo(u32 peer, u16 type, const std::vector<u8>& payload, bool reliable,

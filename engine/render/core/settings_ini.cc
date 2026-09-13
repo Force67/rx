@@ -23,7 +23,7 @@ std::string Lower(std::string s) {
   return s;
 }
 
-// --- enum <-> name ---------------------------------------------------------
+// enum <-> name
 
 const char* Name(AntiAliasingMode m) {
   switch (m) {

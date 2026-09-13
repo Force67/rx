@@ -11,14 +11,14 @@
 
 namespace rx::inventory {
 
-// --- queries ---
+// queries
 
 // Total units of `item` held (summed over every payload variant).
 RX_INVENTORY_EXPORT u32 InventoryCount(const Inventory& inv, ItemDefId item);
 // Summed weight = sum(count * ItemDef::weight). Unknown defs contribute 0.
 RX_INVENTORY_EXPORT f32 InventoryWeight(const Inventory& inv, const ItemCatalog& catalog);
 
-// --- mutation ---
+// mutation
 
 // Adds up to `count` units of (item, payload), first topping up existing stacks
 // (bounded by ItemDef::max_stack), then filling empty slots / appending new
@@ -37,7 +37,7 @@ RX_INVENTORY_EXPORT u32 RemoveItem(Inventory& inv, ItemDefId item, u32 count, u6
 RX_INVENTORY_EXPORT u32 TransferItem(Inventory& src, Inventory& dst, const ItemCatalog& catalog,
                                      ItemDefId item, u32 count, u64 payload = 0);
 
-// --- equipment ---
+// equipment
 
 RX_INVENTORY_EXPORT EquipmentSlot* FindSlot(Equipment& eq, u32 tag);
 // Marks (item, payload) equipped in slot `tag` (created if absent) provided the

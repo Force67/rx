@@ -74,18 +74,18 @@ void Kite::Update(const KiteInput& input, f32 dt) {
   const f32 steer = Clamp(input.steer, -1.0f, 1.0f);
   const f32 reel = Clamp(input.reel, -1.0f, 1.0f);
 
-  // --- reel: pay the tether rest length in/out within [min,max] ---
+  // reel: pay the tether rest length in/out within [min,max]
   line_length_ = Clamp(line_length_ + reel * desc_.reel_rate * dt, desc_.min_line_m,
                        desc_.max_line_m);
 
-  // --- pose + body axes ---
+  // pose + body axes
   Vec3 pos{};
   f32 rot[4] = {0, 0, 0, 1};
   world_.GetBodyTransform(body_, &pos, rot);
   const Quat q{rot[0], rot[1], rot[2], rot[3]};
   const Vec3 sail_normal = Rotate(q, Vec3{0, 0, 1});  // body +Z
 
-  // --- ambient airmass: world wind + optional internal gust ---
+  // ambient airmass: world wind + optional internal gust
   gust_time_ += dt;
   Vec3 ambient = world_.wind();
   if (desc_.gust_amplitude_mps > 0.0f) {
@@ -94,7 +94,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     ambient += Normalize(desc_.gust_dir) * (desc_.gust_amplitude_mps * g);
   }
 
-  // --- flat-plate aero at the aero centre (normal-force decomposition) ---
+  // flat-plate aero at the aero centre (normal-force decomposition)
   // Relative wind is taken at the aero centre's point velocity so the sail's own
   // rotation contributes (real damping). The pressure force acts along the sail
   // normal with magnitude 0.5 rho A cn (w . n) |w|; a small tangential drag adds
@@ -120,7 +120,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     const f32 alpha = std::asin(Clamp(wn / speed, -1.0f, 1.0f));
     alpha_deg = alpha * kRadToDeg;
 
-    // --- attitude trim: align the belly normal to a belly-UP target ----------
+    // attitude trim: align the belly normal to a belly-UP target
     // Target normal = w_hat sin(trim) + up_perp cos(trim), where up_perp is world
     // up projected off the wind: this sits the sail at trim incidence with lift
     // positive (belly up), an unambiguous target that cannot flip belly-down. A
@@ -156,7 +156,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     }
   }
 
-  // --- tail: bluff drag on a long lever down body -Y ---
+  // tail: bluff drag on a long lever down body -Y
   // Weathervanes the nose into the wind and damps yaw/roll/pitch. Full quadratic
   // drag at the tail point, taken relative to the ambient air at that point.
   if (desc_.tail_area_m2 > 0.0f && desc_.tail_drag > 0.0f) {
@@ -171,7 +171,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     }
   }
 
-  // --- two-line steering: a moment about the line-of-sight (anchor->kite) axis ---
+  // two-line steering: a moment about the line-of-sight (anchor->kite) axis
   // Banks the sail so its lift vector carves a turn. Scaled by dynamic pressure
   // over the sail, so authority vanishes as the wind dies (a falling kite stops
   // answering the lines). Emergent loops/dives; limp in dead air.
@@ -186,7 +186,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     }
   }
 
-  // --- tether: stiff ONE-SIDED spring from the bridle to the anchor ---
+  // tether: stiff ONE-SIDED spring from the bridle to the anchor
   // A string only pulls: force applies only while the bridle is farther than the
   // rest length. Damped along the line. HARD-CAPPED at tether_max_tension so a
   // fast-moving anchor (towed behind a vehicle) cannot spike the solver.
@@ -208,21 +208,21 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     if (Finite(f_tether)) world_.AddForceAtPoint(body_, f_tether, bridle_world);
   }
 
-  // --- angular damping: the D term of the attitude PD + gust net ---
+  // angular damping: the D term of the attitude PD + gust net
   if (desc_.angular_damping > 0.0f) {
     const Vec3 ang = world_.GetAngularVelocity(body_);
     const Vec3 damp = ang * (-desc_.angular_damping);
     if (Finite(damp)) world_.AddTorque(body_, damp);
   }
 
-  // --- linear (whole-sail form-drag) damping: bleeds the tangential swing ---
+  // linear (whole-sail form-drag) damping: bleeds the tangential swing
   if (desc_.linear_damping > 0.0f) {
     const Vec3 vel = world_.GetLinearVelocity(body_);
     const Vec3 lin = vel * (-desc_.linear_damping);
     if (Finite(lin)) world_.AddForce(body_, lin);
   }
 
-  // --- telemetry ---
+  // telemetry
   state_.position = pos;
   state_.rotation = q;
   state_.altitude_m = pos.y - anchor_.y;

@@ -79,7 +79,7 @@ void PushI16(AudioClip* out, i32 v) {
   out->samples.push_back(SampleI16(static_cast<i16>(v)));
 }
 
-// --- integer PCM / IEEE float -------------------------------------------------
+// integer PCM / IEEE float
 
 bool DecodePcm(Reader& r, const Format& fmt, AudioClip* out) {
   const size_t bytes_per_sample = fmt.bits / 8u;
@@ -111,7 +111,7 @@ bool DecodePcm(Reader& r, const Format& fmt, AudioClip* out) {
   return out->valid();
 }
 
-// --- IMA / DVI ADPCM (0x0011) -------------------------------------------------
+// IMA / DVI ADPCM (0x0011)
 
 const int kImaIndexTable[16] = {-1, -1, -1, -1, 2, 4, 6, 8, -1, -1, -1, -1, 2, 4, 6, 8};
 const int kImaStepTable[89] = {
@@ -176,7 +176,7 @@ bool DecodeImaAdpcm(Reader& r, const Format& fmt, AudioClip* out) {
   return out->valid();
 }
 
-// --- Microsoft ADPCM (0x0002) -------------------------------------------------
+// Microsoft ADPCM (0x0002)
 
 const int kMsAdaptTable[16] = {230, 230, 230, 230, 307, 409, 512, 614,
                                768, 614, 512, 409, 307, 230, 230, 230};

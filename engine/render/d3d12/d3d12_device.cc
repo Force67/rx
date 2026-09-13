@@ -83,7 +83,7 @@ void SafeRelease(T*& p) {
   }
 }
 
-// --- DXIL container input-signature parsing ---
+// DXIL container input-signature parsing
 //
 // D3D12 input layouts bind vertex attributes by semantic name, which the rhi
 // deliberately does not carry (Vulkan matches by location). The ISG1 part of
@@ -209,7 +209,7 @@ struct alignas(void*) StreamSubobject {
 
 }  // namespace
 
-// --- CpuDescriptorPool ---
+// CpuDescriptorPool
 
 bool CpuDescriptorPool::Init(ID3D12Device* device, D3D12_DESCRIPTOR_HEAP_TYPE type, u32 capacity) {
   D3D12_DESCRIPTOR_HEAP_DESC desc = {};
@@ -242,7 +242,7 @@ u32 CpuDescriptorPool::Alloc() {
 
 void CpuDescriptorPool::Free(u32 index) { free_.push_back(index); }
 
-// --- device creation ---
+// device creation
 
 std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* window) {
   auto device = std::unique_ptr<D3D12Device>(new D3D12Device());
@@ -513,7 +513,7 @@ Device::MemoryBudget D3D12Device::memory_budget() const {
   return result;
 }
 
-// --- resources ---
+// resources
 
 GpuBuffer D3D12Device::CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible) {
   bool wants_uav = (usage & (kBufferUsageStorage | kBufferUsageTransferDst |
@@ -960,7 +960,7 @@ SamplerHandle D3D12Device::GetSampler(const SamplerDesc& desc) {
   return SamplerHandle{value};
 }
 
-// --- bindings ---
+// bindings
 
 SetLayout* D3D12Device::GetOrCreateSetLayout(const BindingLayoutDesc& desc) {
   u64 key = HashLayoutDesc(desc);
@@ -1420,7 +1420,7 @@ u32 D3D12Device::GetSamplerTable(const u64* samplers, u32 count) {
   return start;
 }
 
-// --- pipelines ---
+// pipelines
 
 namespace {
 
@@ -1727,7 +1727,7 @@ void D3D12Device::DeferRelease(u32 ring, ID3D12Resource* resource) {
   rings_[ring].deferred.push_back(resource);
 }
 
-// --- acceleration structures ---
+// acceleration structures
 
 AccelSizes D3D12Device::GetBlasSizes(const BlasBuildDesc& desc) {
   if (!device5_) return {};
@@ -1796,7 +1796,7 @@ void D3D12Device::DestroyAccelStruct(AccelStructHandle accel) { FreeAccelRecord(
 
 u64 D3D12Device::accel_address(AccelStructHandle accel) { return Rec(accel)->address; }
 
-// --- profiling ---
+// profiling
 
 TimestampPoolHandle D3D12Device::CreateTimestampPool(u32 count) {
   D3D12_QUERY_HEAP_DESC heap_desc = {};
@@ -1910,7 +1910,7 @@ bool D3D12Device::GetCompactedSizes(AccelCompactionQueryHandle query, u64* out, 
   return true;
 }
 
-// --- recording & submission ---
+// recording & submission
 
 D3D12CommandList* D3D12Device::BeginRing(u32 ring_index) {
   Ring& ring = rings_[ring_index];

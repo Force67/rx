@@ -19,7 +19,7 @@ namespace {
 
 using namespace rx::script;  // ScriptValue, ScriptArgs, HandlerContext, ...
 
-// --- small direct helpers over the real components (no gateway) -------------
+// small direct helpers over the real components (no gateway)
 constexpr int kMaxHierarchyDepth = 4096;
 
 Mat4 LocalMatrix(const Transform* t) {
@@ -112,13 +112,11 @@ void WritePos(ecs::World& w, ecs::Entity e, Vec3 p) {
   }
 }
 
-// ============================================================================
 // 1. Handlers: typed free functions that call the engine DIRECTLY through the
 //    context's concrete ecs::World. PODs / entity ids / StrId / ScriptStringView
 //    only; still trivially testable, now against a real (cheap) ecs::World.
-// ============================================================================
 
-// --- spatial ---
+// spatial
 void Teleport(HandlerContext& c, ecs::Entity e, Vec3 position) {
   WritePos(c.Ecs(), e, position);
 }
@@ -137,7 +135,7 @@ f32 GetScale(HandlerContext& c, ecs::Entity e) {
   return t ? t->scale : 1.0f;
 }
 
-// --- lifecycle ---
+// lifecycle
 bool IsValid(HandlerContext& c, ecs::Entity e) { return c.Ecs().IsAlive(e); }
 ecs::Entity Spawn(HandlerContext& c, StrId prefab, Vec3 pos, f32 scale) {
   ecs::Entity e = c.Ecs().Create();
@@ -152,7 +150,7 @@ ecs::Entity Spawn(HandlerContext& c, StrId prefab, Vec3 pos, f32 scale) {
 }
 void Destroy(HandlerContext& c, ecs::Entity e) { c.Ecs().Destroy(e); }
 
-// --- identity: symbol in (scan), string in/out (arena) ---
+// identity: symbol in (scan), string in/out (arena)
 ecs::Entity FindByPrefab(HandlerContext& c, StrId prefab) {
   const u64 want = static_cast<u64>(prefab);
   ecs::Entity found{};
@@ -178,9 +176,7 @@ ScriptStringView GetName(HandlerContext& c, ecs::Entity e) {
 }
 void Log(HandlerContext& c, ScriptStringView message) { c.Log(message); }
 
-// ============================================================================
 // 2. Unpacking trampolines: mechanical glue a generator/LLM emits.
-// ============================================================================
 ScriptValue Call_Teleport(HandlerContext& c, ScriptArgs& a) {
   Teleport(c, a.Ent(0), a.Vec(1));
   return ScriptValue::Null();
@@ -229,9 +225,7 @@ ScriptValue Call_Log(HandlerContext& c, ScriptArgs& a) {
 
 }  // namespace
 
-// ============================================================================
 // 3. SetupSceneCommands, the one exported symbol, called at engine start.
-// ============================================================================
 void SetupSceneCommands(HandlerRegistry& reg) {
   using T = ScriptType;
   reg.Add("World.Teleport", &Call_Teleport, {T::kVoid, {T::kEntity, T::kVec3}});

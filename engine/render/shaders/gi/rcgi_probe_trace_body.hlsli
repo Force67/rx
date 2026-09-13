@@ -124,7 +124,7 @@ void main(uint3 id : SV_DispatchThreadID) {
                                 dot(push.rotation_z.xyz, fib)));
   uint stamp = RcgiStampEncode(frame);  // frame+1; 0 = never (matches cleared slot)
 
-  // ---- visibility trace (variant): resolve hit_pos + normal (+ payload data) ----
+  // visibility trace (variant): resolve hit_pos + normal (+ payload data)
 #ifdef RCGI_TRACE_SDF
   // Software: sphere-trace the global SDF clipmap. Start bias = clip 0's voxel
   // (probes originate in free space / the finer clips).
@@ -193,7 +193,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   rays_out[id.xy] = float4(0, 0, 0, distance);  // hit; blend re-hashes for radiance
 #endif
 
-  // ---- shared cache insertion (identical for both variants) ----
+  // shared cache insertion (identical for both variants)
   int found = RcgiClaimCell(hit_pos, stamp);
   if (found < 0) return;
   uint base = uint(found) * kRcgiEntry;

@@ -125,7 +125,7 @@ class RayTracingContext {
   // callers re-registering bindless geometry need to skip already-built meshes).
   bool HasBlas(u64 mesh_key) const { return blas_.contains(mesh_key); }
 
-  // --- refittable structures (skinned actors) ---
+  // refittable structures (skinned actors)
   // ALLOW_UPDATE structures over a buffer something else deforms every frame,
   // refit (never rebuilt) from then on; build and refit are recorded into the
   // frame command list, so a steady-state skinned actor costs no blocking

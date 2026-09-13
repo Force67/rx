@@ -69,7 +69,7 @@ WeatherState Storm(u32 seed) {
   return s;
 }
 
-// --- Determinism: identical seed + identical Update stream -> identical run. --
+// Determinism: identical seed + identical Update stream -> identical run. --
 void TestDeterministic() {
   auto build = [](WeatherSystem& sys) {
     sys.AddState(Clear(1));
@@ -104,7 +104,7 @@ void TestDeterministic() {
   Check(saw_change, "the scheduler actually transitions between states");
 }
 
-// --- Region gating: inside a region, only its allowed states ever schedule. --
+// Region gating: inside a region, only its allowed states ever schedule. --
 void TestRegionRestriction() {
   WeatherSystem sys(42u);
   sys.AddState(Clear(1));   // 0
@@ -138,7 +138,7 @@ void TestRegionRestriction() {
   Check(settled_samples > 0, "the region run reaches settled states to sample");
 }
 
-// --- Transitions: map_blend rises monotonically, ends at 0 with map_a == b. --
+// Transitions: map_blend rises monotonically, ends at 0 with map_a == b. --
 void TestTransitionBlend() {
   WeatherSystem sys(7u);
   WeatherState s0 = Clear(11);
@@ -191,7 +191,7 @@ void TestTransitionBlend() {
   Check(c.map_b.seed == 22u, "settled onto the forced target's map");
 }
 
-// --- Scripted override wins and releases. --
+// Scripted override wins and releases. --
 void TestForcedOverride() {
   WeatherSystem sys(99u);
   sys.AddState(Clear(1));   // 0, weight 1
@@ -223,7 +223,7 @@ void TestForcedOverride() {
   Check(resumed, "ClearForced resumes scheduling away from the forced state");
 }
 
-// --- Surface response: wetness rises in rain and dries after. --
+// Surface response: wetness rises in rain and dries after. --
 void TestSurfaceResponse() {
   WeatherSystem sys(5u);
   sys.AddState(Storm(1));   // 0: heavy rain, not snow
@@ -242,7 +242,7 @@ void TestSurfaceResponse() {
   Check(sys.weather().wetness < wet, "wetness dries after the rain stops");
 }
 
-// --- Wind interpolation follows the short arc across the +/-pi wrap. --
+// Wind interpolation follows the short arc across the +/-pi wrap. --
 void TestWindYawWrap() {
   WeatherSystem sys(8u);
   WeatherState a = Clear(1);
@@ -258,7 +258,7 @@ void TestWindYawWrap() {
         "wind yaw crosses the wrap without reversing through zero");
 }
 
-// --- A default/degenerate region never captures the world origin. --
+// A default/degenerate region never captures the world origin. --
 void TestDegenerateRegion() {
   WeatherSystem sys(11u);
   WeatherState allowed = Clear(1);
@@ -481,7 +481,7 @@ void TestUpdatePartitioning() {
        "wind integration is stable across long and sliced updates", 1e-4f);
 }
 
-// --- Wind advection: map_offset integrates wind * dt, across a state change. --
+// Wind advection: map_offset integrates wind * dt, across a state change. --
 void TestWindAdvection() {
   WeatherSystem sys(3u);
   WeatherState east = Clear(1);
@@ -505,7 +505,7 @@ void TestWindAdvection() {
         "map_offset keeps advecting across a state change");
 }
 
-// --- Lightning: only stormy states strike; clear weather stays dark. --
+// Lightning: only stormy states strike; clear weather stays dark. --
 void TestLightning() {
   // Clear weather: no strike ever, flash stays 0.
   {

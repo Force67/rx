@@ -337,7 +337,7 @@ void HumanStore(const HumanSurfaceParameters& p, asset::Material::HumanParams& a
   a.residual_weight = p.residual_weight;
 }
 
-// --- CPU mirror -------------------------------------------------------------
+// CPU mirror
 
 HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base_color[3],
                                  f32 roughness, const f32 f0[3], const f32 geometric_n[3],

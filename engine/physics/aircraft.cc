@@ -118,7 +118,7 @@ Aircraft::~Aircraft() {
 void Aircraft::Update(const AircraftInput& input, f32 dt) {
   if (body_ == 0 || dt <= 0.0f) return;
 
-  // --- pose and body axes (sampled at the start of the step) ---
+  // pose and body axes (sampled at the start of the step)
   Vec3 pos{};
   f32 rot[4] = {0, 0, 0, 1};
   world_.GetBodyTransform(body_, &pos, rot);
@@ -158,7 +158,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   const f32 alpha_com = std::atan2(-u_com, f_com);
   const f32 beta_com = std::atan2(s_com, std::max(std::fabs(f_com), 1e-3f));
 
-  // --- wing halves: strip theory at each half's aerodynamic centre ---
+  // wing halves: strip theory at each half's aerodynamic centre
   // Each half is evaluated at its OWN point velocity (GetPointVelocity), so
   // roll/pitch rates change the local angle of attack: this yields natural roll
   // damping, and near the stall a rolling perturbation stalls the down-going
@@ -215,7 +215,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   apply_wing_half(+quarter_span, +ail, &stalled_left);   // left wing (+X)
   apply_wing_half(-quarter_span, -ail, &stalled_right);  // right wing (-X)
 
-  // --- parasitic + flap drag, once at the CoM ---
+  // parasitic + flap drag, once at the CoM
   if (speed > 1e-3f) {
     const f32 cd0 = desc_.cd0 + desc_.flap_delta_cd * flaps_;
     const f32 drag = q_com * desc_.wing_area_m2 * cd0;
@@ -223,7 +223,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     world_.AddForce(body_, vdir * (-drag) * aero_fade);
   }
 
-  // --- fuselage side drag (sideslip): damps lateral sliding through the air ---
+  // fuselage side drag (sideslip): damps lateral sliding through the air
   {
     const f32 vside = Dot(vair_com, right);
     const f32 fside = -0.5f * kAirDensity * std::fabs(vside) * vside * desc_.fuselage_side_cd *
@@ -231,7 +231,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     world_.AddForce(body_, right * (fside * aero_fade));
   }
 
-  // --- horizontal tail (elevator): pitch control + static stability ---
+  // horizontal tail (elevator): pitch control + static stability
   // Sampled at the tail's own point velocity so a pitch rate changes tail alpha
   // (pitch damping) and, being aft of the CoM, an alpha increase pitches the
   // nose back down (weathervane in pitch). + pitch input = nose up = tail
@@ -255,7 +255,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     }
   }
 
-  // --- vertical fin (rudder): yaw control + weathervane yaw stability ---
+  // vertical fin (rudder): yaw control + weathervane yaw stability
   {
     const Vec3 fin_local{0.0f, 0.45f, -desc_.fin_arm_m};
     const Vec3 fin_world = pos + Rotate(q, fin_local);
@@ -278,7 +278,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     }
   }
 
-  // --- rotational aerodynamic damping (safety net over the strip theory) ---
+  // rotational aerodynamic damping (safety net over the strip theory)
   {
     const f32 qscale = Clampf(q_com / kQRef, 0.0f, 4.0f);
     const f32 mroll = -desc_.roll_damp * Dot(omega, fwd) * qscale;
@@ -287,7 +287,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     world_.AddTorque(body_, fwd * mroll + left * mpitch + up * myaw);
   }
 
-  // --- propulsion ---
+  // propulsion
   f32 thrust = 0.0f;
   f32 engine_load = 0.0f;
   f32 telemetry_rpm = 0.0f;
@@ -317,7 +317,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   // couple; keeps the model simple and the trim clean).
   world_.AddForce(body_, fwd * thrust);
 
-  // --- landing gear: per-wheel suspension + tire friction ---
+  // landing gear: per-wheel suspension + tire friction
   bool on_ground = false;
   for (u32 i = 0; i < 3; ++i) {
     const AircraftDesc::Wheel& w = desc_.wheels[i];
@@ -392,7 +392,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     world_.AddForceAtPoint(body_, gear_force, contact);
   }
 
-  // --- telemetry snapshot ---
+  // telemetry snapshot
   state_.airspeed_mps = speed;
   state_.vertical_speed_mps = vel.y;
   state_.alpha_deg = aero_fade > 0.0f ? alpha_com * kRad2Deg : 0.0f;

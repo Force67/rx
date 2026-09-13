@@ -924,7 +924,7 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
   const f32 near_plane = 0.1f;
   const f32 ray_max = kBaseSpacing * static_cast<f32>(kProbesPerAxis) * 2.0f;  // ~64 m reach
 
-  // --- 1. final gather (half res) ---
+  // 1. final gather (half res)
   graph.AddPass(
       "rcgi_gather",
       [&](RenderGraph::PassBuilder& pb) {
@@ -975,7 +975,7 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
         ctx.cmd->Dispatch2D(gather);
       });
 
-  // --- 2. separable bilateral denoise (H: A->B, V: B->A) ---
+  // 2. separable bilateral denoise (H: A->B, V: B->A)
   auto denoise = [&](ResourceHandle in_r, ResourceHandle in_g, ResourceHandle in_b,
                      ResourceHandle out_r, ResourceHandle out_g, ResourceHandle out_b, int dx,
                      int dy) {
@@ -1013,7 +1013,7 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
   denoise(a_r, a_g, a_b, b_r, b_g, b_b, 1, 0);  // horizontal
   denoise(b_r, b_g, b_b, a_r, a_g, a_b, 0, 1);  // vertical
 
-  // --- 3. upscale + temporal + SH resolve (full res) ---
+  // 3. upscale + temporal + SH resolve (full res)
   graph.AddPass(
       "rcgi_upscale",
       [&](RenderGraph::PassBuilder& pb) {

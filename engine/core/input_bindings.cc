@@ -12,7 +12,7 @@
 namespace rx {
 namespace {
 
-// --- Device token tables. Each is indexed by the matching enum value, so order
+// Device token tables. Each is indexed by the matching enum value, so order
 // here must track the enum declarations in input.h. These are physical device
 // codes, not game actions, so they stay in the engine. ---
 
@@ -56,7 +56,7 @@ int FindToken(const char* name, const char* const* table, int count) {
 
 }  // namespace
 
-// --- Binding tokens (device-only, independent of the game's action set) ------
+// Binding tokens (device-only, independent of the game's action set)
 
 std::string BindingToken(const Binding& b) {
   switch (b.kind) {
@@ -149,7 +149,7 @@ std::string BindingLabel(const Binding& b) {
   return "(unbound)";
 }
 
-// --- Schema registration -----------------------------------------------------
+// Schema registration
 
 void InputMap::RegisterActionId(ActionId id, const char* ini_name) {
   if (id >= kMaxActions) return;
@@ -198,7 +198,7 @@ bool InputMap::AxisFromName(const char* name, AxisId* out) const {
   return false;
 }
 
-// --- Defaults ----------------------------------------------------------------
+// Defaults
 
 void InputMap::LoadDefaults() {
   for (auto& v : action_) v.clear();
@@ -265,7 +265,7 @@ ActionId InputMap::ConflictingAction(const Binding& b) const {
   return static_cast<ActionId>(action_count_);
 }
 
-// --- Resolution --------------------------------------------------------------
+// Resolution
 
 bool InputMap::SourceHeld(const Binding& b, const InputState& kbm, const GamepadState& pad) const {
   switch (b.kind) {
@@ -365,7 +365,7 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const Tou
   out->last_device = last_device_;
 }
 
-// --- Persistence -------------------------------------------------------------
+// Persistence
 
 namespace {
 

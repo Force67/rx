@@ -201,7 +201,6 @@ class RX_WORLD_EXPORT WorldIndexWriter {
   Vec3 grid_origin_;
 };
 
-// ---------------------------------------------------------------------------
 // Cell payloads
 
 enum class PayloadKind : u8 {

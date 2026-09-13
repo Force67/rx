@@ -53,7 +53,7 @@ struct RX_PHYSICS_EXPORT BoatDesc {
   // default hull+grid settles heave without ringing at 60 Hz.
   f32 heave_damping = 1100.0f;
 
-  // --- engine / propeller ---
+  // engine / propeller
   f32 max_thrust = 8000.0f;     // N delivered at max rpm, forward
   f32 idle_rpm = 800.0f;        // rpm at zero throttle (no thrust)
   f32 max_rpm = 5000.0f;        // rpm at full throttle
@@ -63,7 +63,7 @@ struct RX_PHYSICS_EXPORT BoatDesc {
   // applied here and ONLY while this point is under the surface.
   Vec3 prop_offset{0.0f, -0.48f, -2.7f};
 
-  // --- rudder ---
+  // rudder
   // Stern sideforce = steer * (rudder_speed_gain * v_fwd^2
   //                            + rudder_wash_gain * |thrust|), applied at
   // rudder_offset. The wash term keeps steering authority at a standstill.
@@ -75,13 +75,13 @@ struct RX_PHYSICS_EXPORT BoatDesc {
   // spinning when the helm is centred.
   f32 yaw_damping = 6000.0f;
 
-  // --- hull drag (quadratic: N per (m/s)^2), scaled by the wetted fraction ---
+  // hull drag (quadratic: N per (m/s)^2), scaled by the wetted fraction
   f32 drag_fwd = 110.0f;      // longitudinal, moving ahead (streamlined bow)
   f32 drag_aft = 260.0f;      // longitudinal, moving astern (blunt transom)
   f32 drag_lateral = 1400.0f; // keel resists sideslip (high -> the hull carves)
   f32 drag_vertical = 500.0f; // extra whole-hull heave drag (N per (m/s)^2)
 
-  // --- planing ---
+  // planing
   f32 hull_speed = 5.0f;         // m/s where the bow starts to lift
   f32 plane_full_speed = 9.0f;   // m/s where the hull is fully planing
   f32 plane_lift = 90.0f;        // N per (m/s)^2 of dynamic bow lift when planing
@@ -93,7 +93,7 @@ struct RX_PHYSICS_EXPORT BoatDesc {
   // Positive trim pitches the bow up (e.g. trim tabs / outdrive out).
   f32 trim_torque = 3000.0f;
 
-  // --- wind load on the exposed topsides ---
+  // wind load on the exposed topsides
   // Drag coefficient of the above-water hull. The global PhysicsWorld::wind()
   // pushes on the exposed (above-water) topside area with a force quadratic in
   // the wind speed relative to the hull, scaled by the exposed fraction, and
@@ -102,7 +102,7 @@ struct RX_PHYSICS_EXPORT BoatDesc {
   // conservative nudge, not a capsizing force. 0 disables it.
   f32 wind_drag = 0.8f;
 
-  // --- cargo load (see Boat::SetCargo) ---
+  // cargo load (see Boat::SetCargo)
   // Rated cargo capacity, kg. SetCargo adds this mass to the hull at runtime, so
   // a laden boat displaces more water and settles measurably DEEPER (draft is
   // emergent from the buoyancy grid, not scripted), accelerates and turns more

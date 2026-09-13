@@ -25,7 +25,7 @@ PUSH_CONSTANTS(CloudShadowPush, pc);
 
 static const float kGroundRadius = 6360000.0;
 
-// --- density, kept in lockstep with clouds.cs ------------------------------
+// density, kept in lockstep with clouds.cs
 float Hash3(float3 p) {
   p = frac(p * 0.3183099 + 0.1);
   p *= 17.0;

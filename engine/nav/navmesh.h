@@ -82,7 +82,7 @@ class RX_NAV_EXPORT NavMesh {
   f32 TraverseMultiplier(AreaId area) const { return traverse_mult_[area & (kMaxAreas - 1)]; }
   f32 EntryCost(AreaId area) const { return entry_cost_[area & (kMaxAreas - 1)]; }
 
-  // --- tile lifecycle -------------------------------------------------------
+  // tile lifecycle
 
   // (Re)samples one tile. Returns false when the sampler reported no surface
   // anywhere in it (the tile is then stored empty, still versioned).
@@ -111,7 +111,7 @@ class RX_NAV_EXPORT NavMesh {
   u64 TileKeyOf(CellRef cell) const;
   u32 TileVersionByKey(u64 key) const;
 
-  // --- queries --------------------------------------------------------------
+  // queries
 
   CellRef CellAt(const Vec3& pos) const;
   Vec3 CellCenter(CellRef cell) const;  // y = stored cell height

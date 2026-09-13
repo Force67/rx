@@ -158,7 +158,7 @@ class Device {
   };
   virtual MemoryBudget memory_budget() const = 0;
 
-  // --- resources ---
+  // resources
   virtual GpuBuffer CreateBuffer(u64 size, BufferUsageFlags usage, bool host_visible = false) = 0;
   virtual GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) = 0;
   // Makes writes to a persistently mapped host-visible range available to the
@@ -205,7 +205,7 @@ class Device {
   // Cached; valid for the device's lifetime, never destroyed by callers.
   virtual SamplerHandle GetSampler(const SamplerDesc& desc) = 0;
 
-  // --- pipelines & bindings ---
+  // pipelines & bindings
   virtual PipelineHandle CreateComputePipeline(const ComputePipelineDesc& desc) = 0;
   virtual PipelineHandle CreateGraphicsPipeline(const GraphicsPipelineDesc& desc) = 0;
   virtual void DestroyPipeline(PipelineHandle pipeline) = 0;
@@ -234,7 +234,7 @@ class Device {
     UpdateBindingSet(set, std::span<const BindingItem>(items.begin(), items.size()));
   }
 
-  // --- acceleration structures (caps().ray_query gated) ---
+  // acceleration structures (caps().ray_query gated)
   virtual AccelSizes GetBlasSizes(const BlasBuildDesc& desc) = 0;
   virtual AccelSizes GetTlasSizes(u32 instance_count) = 0;
   virtual AccelStructHandle CreateAccelStruct(AccelStructType type, u64 size) = 0;
@@ -258,7 +258,7 @@ class Device {
     return false;
   }
 
-  // --- frame-safe deferred destruction ---
+  // frame-safe deferred destruction
   // Retire a resource that a submitted-but-not-yet-finished frame may still
   // reference. The resource is parked in a per-frame-slot graveyard and freed
   // only once a fence proves every frame that could have touched it has
@@ -272,19 +272,19 @@ class Device {
   virtual void DestroyImageDeferred(GpuImage& image) { DestroyImage(image); }
   virtual void DestroyAccelStructDeferred(AccelStructHandle accel) { DestroyAccelStruct(accel); }
 
-  // --- profiling ---
+  // profiling
   virtual TimestampPoolHandle CreateTimestampPool(u32 count) = 0;
   virtual void DestroyTimestampPool(TimestampPoolHandle pool) = 0;
   // Copies available results (ticks) for [first, first+count); returns false
   // while the range is still in flight.
   virtual bool GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, u64* out) = 0;
 
-  // --- recording & submission ---
+  // recording & submission
   // Records into a transient command list and blocks until execution
   // finished. For uploads and one-off transitions, not the frame path.
   virtual void ImmediateSubmit(const std::function<void(CommandList&)>& record) = 0;
 
-  // --- coalesced uploads ---
+  // coalesced uploads
   // While the batch is open, CreateBufferWithData records its staging copy into
   // one shared command buffer instead of a blocking ImmediateSubmit per buffer.
   // FlushUploadBatch submits once WITHOUT blocking: the device orders the copies
@@ -355,7 +355,7 @@ class Device {
     return false;
   }
 
-  // --- async compute (optional; see caps().async_compute) ---
+  // async compute (optional; see caps().async_compute)
   // A second queue of the same family overlaps flagged compute passes with the
   // graphics timeline (same family = no ownership transfers, semaphore-only
   // sync). SplitFrame ends the current graphics segment, submits it (signaling
@@ -368,7 +368,7 @@ class Device {
   virtual CommandList* BeginAsync() { return nullptr; }
   virtual void SubmitAsync(CommandList* /*cmd*/) {}
 
-  // --- frame generation present (optional; vulkan only today) ---
+  // frame generation present (optional; vulkan only today)
   // Ends recording and submits waiting on BOTH of the slot's acquires (the
   // regular one and Swapchain::AcquireSecond's), then presents interp_index
   // followed by real_index. Under FIFO the two presents land a vblank apart,

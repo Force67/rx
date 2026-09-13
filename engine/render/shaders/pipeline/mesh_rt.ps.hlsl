@@ -358,7 +358,7 @@ struct MaterialParams {
   float soft_lighting;
   float rim_lighting;
   float back_lighting;
-  // --- Character surface model (kFlagHuman) ---------------------------------
+  // Character surface model (kFlagHuman)
   // Mirrors HumanSurfaceParams in human_brdf.hlsli and the tail of
   // MaterialSystem::Params. Packed four-to-a-row; the names below are the only
   // documentation of which slot is which, so keep them.
@@ -370,7 +370,7 @@ struct MaterialParams {
   float4 human_layer;            // x cavity occlusion, y spec-normal strength, z thickness scale (m), w region id
   float4 human_eye0;             // x iris depth (m), y iris radius (uv), z pupil scale, w limbal size (uv)
   float4 human_eye1;             // x limbal power, y cornea ior, z iris shadow depth, w light-shape response
-  // --- Hair cards (kFlagHair). The same fibre BSDF the strand grooms use.
+  // Hair cards (kFlagHair). The same fibre BSDF the strand grooms use.
   float4 hair0;                  // xyz sigma_a, w beta_m
   float4 hair1;                  // x beta_n, y alpha, z eta, w scatter scale
   float4 hair2;                  // x colour reference depth, y assumed depth, z colour-from-albedo, w unused
@@ -757,7 +757,7 @@ float3 TraceReflection(float3 origin, float3 dir) {
   return albedo / kPi * sun * ndl + albedo * indirect + hit_material.emissive;
 }
 
-// --- BRDF lobes shared by the base, clearcoat, sheen and anisotropy paths ---
+// BRDF lobes shared by the base, clearcoat, sheen and anisotropy paths
 float D_GGX(float ndh, float a) {
   float a2 = a * a;
   float d = ndh * ndh * (a2 - 1.0) + 1.0;
@@ -799,7 +799,7 @@ float3 ThinFilm(float ndv, float thickness_nm, float film_ior) {
 
 
 
-// --- parallax occlusion mapping -----------------------------------------
+// parallax occlusion mapping
 // Height map: r channel, 1 = surface, 0 = height_scale deep. The march digs
 // into the surface along the tangent-space view ray; grazing angles get more
 // steps. Gradients come from the undisplaced uv so mip selection stays sane.
@@ -845,7 +845,7 @@ float ParallaxShadow(float2 uv, float3 light_ts, float scale, float2 dx, float2 
 }
 
 
-// --- local light shadows ----------------------------------------------------
+// local light shadows
 // Cube face pick for point lights; order matches kFaceDirs in local_shadows.cc.
 uint CubeFaceIndex(float3 d) {
   float3 a = abs(d);
@@ -880,7 +880,7 @@ float LocalShadow(uint face_index, float3 world_pos, float3 n) {
   return sum * 0.25;
 }
 
-// --- linearly transformed cosines (Heitz et al. 2016), rect area lights ----
+// linearly transformed cosines (Heitz et al. 2016), rect area lights
 static const float kLtcLut = 64.0;
 float3 LtcIntegrateEdge(float3 v1, float3 v2) {
   float x = dot(v1, v2);
@@ -912,7 +912,7 @@ float LtcEvaluate(float3 n, float3 v, float3 pos, float3x3 minv, float3 p0, floa
   return len * scale;
 }
 
-// --- hair strand lobes (Kajiya-Kay with dual shifted highlights) -----------
+// hair strand lobes (Kajiya-Kay with dual shifted highlights)
 float3 ShiftTangent(float3 t, float3 n, float shift) {
   return normalize(t + n * shift);
 }
@@ -963,7 +963,7 @@ float3 ApplyInteriorFog(float3 color, float3 world_pos) {
 // split-sum ibl with Fdez-Aguera multi-scatter for ambient. Optional clearcoat,
 // sheen and anisotropy lobes layer on top.
 
-// --- character surface model -------------------------------------------------
+// character surface model
 // One evaluator, fed by every light path below. The globals mirror what the
 // lobes contributed so the per-lobe debug views can isolate them without
 // shading the surface a second time (a second evaluation would not be the same

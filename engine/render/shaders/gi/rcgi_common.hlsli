@@ -73,7 +73,7 @@ struct RcgiGlobals {
   uint4 misc;                            // x current cascade, y frame, z cascades, w hash capacity
   float4 params;                         // x max ray dist, y hysteresis, z energy scale, w base cell
   uint4 valid;                           // x post-blend mask, y cache-shade pre-blend mask
-  // ---- Phase 3 (leak & occlusion hardening) ----
+  // Phase 3 (leak & occlusion hardening)
   float4 interior;   // xyz interior ambient (ray-miss fallback when interior), w probe-AO scale
   uint4 gi_flags;    // x feature bits (below), y interior volume count, z asfloat probe-AO bias, w pad
 };
@@ -103,7 +103,7 @@ bool RcgiCascadeValid(RcgiGlobals g, uint cascade) {
   return (g.valid.x & (1u << cascade)) != 0u;
 }
 
-// ---- octahedral ----
+// octahedral
 float2 RcgiOctEncode(float3 d) {
   d /= (abs(d.x) + abs(d.y) + abs(d.z));
   float2 o = d.xz;
@@ -127,7 +127,7 @@ float3 RcgiUnpackOct(uint p) {
   return RcgiOctDecode(o);
 }
 
-// ---- radiance packing (RGBA16F in uint2) ----
+// radiance packing (RGBA16F in uint2)
 uint2 RcgiPackRadiance(float3 c) {
   c = max(c, 0.0.xxx);
   return uint2(f32tof16(c.r) | (f32tof16(c.g) << 16u), f32tof16(c.b));
@@ -136,7 +136,7 @@ float3 RcgiUnpackRadiance(uint2 p) {
   return float3(f16tof32(p.x & 0xffffu), f16tof32(p.x >> 16u), f16tof32(p.y & 0xffffu));
 }
 
-// ---- software (SDF-traced) cache entries ----
+// software (SDF-traced) cache entries
 // The SDF probe trace has no instance/primitive/barycentric to re-resolve, so
 // the software variant repurposes the triangle-reference slots (1..3, unused in
 // software mode) to carry the surface colour the SDF gives it directly:
@@ -156,7 +156,7 @@ float3 RcgiUnpackColor8(uint p) {
   return float3(p & 0xffu, (p >> 8u) & 0xffu, (p >> 16u) & 0xffu) * (1.0 / 255.0);
 }
 
-// ---- fibonacci ray directions (rotated per frame like DDGI) ----
+// fibonacci ray directions (rotated per frame like DDGI)
 float3 RcgiFibonacci(uint i, uint n) {
   float phi = 2.0 * kRcgiPi * frac(i * 0.61803398875);
   float cos_theta = 1.0 - (2.0 * i + 1.0) / n;
@@ -164,7 +164,7 @@ float3 RcgiFibonacci(uint i, uint n) {
   return float3(cos(phi) * sin_theta, sin(phi) * sin_theta, cos_theta);
 }
 
-// ---- probe / cascade geometry ----
+// probe / cascade geometry
 uint3 RcgiProbeFromIndex(uint index) {
   uint px = index % kRcgiProbesPerAxis;
   uint py = (index / kRcgiProbesPerAxis) % kRcgiProbesPerAxis;
@@ -178,7 +178,7 @@ float3 RcgiProbePosition(RcgiGlobals g, uint cascade, uint3 probe) {
   return g.cascade_origin[cascade].xyz + float3(probe) * g.cascade_origin[cascade].w;
 }
 
-// ---- probe relocation metadata (Phase 3 item 10) ----
+// probe relocation metadata (Phase 3 item 10)
 // Per (cascade, probe) uint2: .x = packed world-space offset (fraction of
 // spacing), .y = flags (bit0 = disabled: drowning in backfaces even relocated).
 static const uint kRcgiMetaDisabled = 1u;
@@ -219,7 +219,7 @@ bool RcgiProbeDisabledMeta(RcgiGlobals g, StructuredBuffer<uint2> meta, uint cas
   return (meta[RcgiMetaIndex(cascade, probe)].y & kRcgiMetaDisabled) != 0u;
 }
 
-// ---- interior-volume classification (Phase 3 item 9b) ----
+// interior-volume classification (Phase 3 item 9b)
 // Volumes buffer: two float4 per box (min.xyz, max.xyz), g.gi_flags.y boxes.
 bool RcgiPointInInterior(RcgiGlobals g, StructuredBuffer<float4> vols, float3 p) {
   uint n = min(g.gi_flags.y, 64u);
@@ -265,7 +265,7 @@ bool RcgiSelectCascade(RcgiGlobals g, float3 pos, out uint cascade) {
   return false;
 }
 
-// ---- world radiance cache: cell / hash ----
+// world radiance cache: cell / hash
 uint RcgiHashScalar(uint x) {
   x ^= x >> 17; x *= 0xed5ad4bbu;
   x ^= x >> 11; x *= 0xac4c1b51u;

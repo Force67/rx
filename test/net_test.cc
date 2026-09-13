@@ -62,7 +62,7 @@ void MoveTo(ecs::World& world, ecs::Entity e, f32 x, f32 y, f32 z) {
   t->position[2] = z;
 }
 
-// --- wire + protocol ---
+// wire + protocol
 
 void TestWireRoundtrip() {
   net::ByteWriter w;
@@ -156,7 +156,7 @@ void TestProtocolRoundtrip() {
   }
 }
 
-// --- per-peer delta streams ---
+// per-peer delta streams
 
 void TestPeerStreamDelta() {
   ecs::World world;
@@ -236,7 +236,7 @@ void TestPeerStreamInterest() {
   CHECK_EQ(snap.entities[0].net_id, 1u);
 }
 
-// --- snapshot application ---
+// snapshot application
 
 void TestSnapshotApplier() {
   ecs::World world;
@@ -296,7 +296,7 @@ void TestInterpolation() {
   CHECK_EQ(now->position[0], 10.0f);
 }
 
-// --- streaming bubbles ---
+// streaming bubbles
 
 void TestBubbleMembership() {
   ecs::World world;

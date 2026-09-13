@@ -170,7 +170,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
   uint phase = push.control.y;
 
   if (phase == 0u) {
-    // --- recenter + advect + decay + ripple step -----------------------------
+    // recenter + advect + decay + ripple step
     float texel = push.origin.z * 2.0 / float(kSize);
 
     // Foam advects with the wave drift: back-sample where this water came from.
@@ -210,7 +210,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     return;
   }
 
-  // --- injection (in-place, no neighbour reads) ------------------------------
+  // injection (in-place, no neighbour reads)
   float4 cell = cur_ring[id];
   float height = cell.r, vel = cell.g, foam = cell.b, age = cell.a;
 

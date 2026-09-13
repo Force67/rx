@@ -186,7 +186,7 @@ struct SceneHookContext {
   f32 near_plane = 0.1f;  // reversed-Z, infinite far
   Vec3 camera_pos{};
 
-  // --- Temporal fields, appended to keep the offsets above ABI-stable across
+  // Temporal fields, appended to keep the offsets above ABI-stable across
   // the RX_SHARED RenderFrame boundary. New consumers opt in; old ones ignore.
 
   // rx's screen-space motion-vector target (RG16F), the same buffer rx's own
@@ -607,7 +607,7 @@ public:
   // clustered projectors and the baked texture-space layers read it.
   void SetDecalAtlas(asset::AssetId texture, asset::AssetId normal_atlas = {});
 
-  // --- baked texture-space decals (render/texturing/decal_bake.h) ---
+  // baked texture-space decals (render/texturing/decal_bake.h)
   // A receiver is a persistent handle an actor keeps for its lifetime; put it
   // on the actor's DrawItem::decal_receiver and stamp against it. Decals
   // accumulate into one small per-receiver tile instead of costing per-pixel
@@ -630,7 +630,7 @@ public:
     return decal_baker_.stats();
   }
 
-  // --- skinned ray tracing (render/gi/skinned_rt.h) ---
+  // skinned ray tracing (render/gi/skinned_rt.h)
   // Puts a skinned draw into ray tracing with its ANIMATED pose (its BLAS is
   // otherwise the bind pose, so such actors are normally excluded via
   // asset::Mesh::exclude_from_rt). Acquire one handle per skinned draw to ray

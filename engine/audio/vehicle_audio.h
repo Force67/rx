@@ -26,7 +26,7 @@ struct VehicleAudioState {
   bool submerged = false;  // vehicle is underwater: duck and muffle
   Vec3 position{};         // world position (Y-up, metres) for panning
 
-  // --- additive, default-inert fields (vehicle-realism pass) -----------------
+  // additive, default-inert fields (vehicle-realism pass)
   // Optional per-wheel slip, order FL FR RL RR (+Z forward, right side is -X).
   // `wheel_count` 0 (the default) ignores `wheel_slip` and uses the aggregate
   // `slip` above exactly as before; >=1 takes intensity from the worst wheel, and

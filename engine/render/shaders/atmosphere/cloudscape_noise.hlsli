@@ -49,7 +49,7 @@ float2 cs_hash22(float2 p) {
                 cs_hash_float(cs_hash_u32(q3 ^ uint3(0x4f1bbcdcu, 0x5c4bcea9u, 0x9e3779b9u))));
 }
 
-// --- tileable 3D Perlin (gradient) noise, period = freq cells ---
+// tileable 3D Perlin (gradient) noise, period = freq cells
 float cs_perlin3(float3 x, float freq) {
   float3 p = x * freq;
   float3 pi = floor(p);
@@ -82,7 +82,7 @@ float cs_perlin3_fbm(float3 p, float base, int octaves) {
   return saturate(sum / norm * 0.5 + 0.5);  // [0, 1]
 }
 
-// --- tileable 3D Worley (cellular) F1 distance, period = freq cells ---
+// tileable 3D Worley (cellular) F1 distance, period = freq cells
 float cs_worley3(float3 x, float freq) {
   float3 p = x * freq;
   float3 pi = floor(p);
@@ -112,7 +112,7 @@ float cs_worley3_fbm(float3 p, float base) {
   return saturate(0.625 * w0 + 0.25 * w1 + 0.125 * w2);
 }
 
-// --- tileable 2D Perlin + inverted-Worley fbm (weather map + curl potential) ---
+// tileable 2D Perlin + inverted-Worley fbm (weather map + curl potential)
 float cs_perlin2(float2 x, float freq) {
   float2 p = x * freq;
   float2 pi = floor(p);

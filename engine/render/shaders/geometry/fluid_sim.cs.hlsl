@@ -38,7 +38,7 @@ struct Source {
 };
 [[vk::binding(5, 0)]] StructuredBuffer<Source> sources : register(t5, space0);
 
-// --- lava constitutive relations (temperature -> flow behaviour) ------------
+// lava constitutive relations (temperature -> flow behaviour)
 
 // Arrhenius mobility: hot lava (T >= T_liq) flows like thick water, cooling
 // lava creeps exponentially slower. m in (0, 1].
@@ -101,7 +101,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
   int2 cB = int2(id.x, max(id.y - 1, 0));
   int2 cT = int2(id.x, min(id.y + 1, int(res) - 1));
 
-  // ------------------------------------------------------------------ FLUX
+  // FLUX
   if (phase == 0u || phase == 2u) {
     float4 s = state_in[id];
     float d = lava ? s.g : s.r;
@@ -130,7 +130,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     return;
   }
 
-  // -------------------------------------------------------------- INTEGRATE
+  // INTEGRATE
   float4 s = state_in[id];
   float d = lava ? s.g : s.r;
   float4 fo = flux_tex[id];  // our outflow (fL, fR, fT, fB)
@@ -154,7 +154,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
   v = clamp(v, -vmax, vmax);
 
   if (lava) {
-    // ---- thermal: donor-cell heat advection ------------------------------
+    // thermal: donor-cell heat advection
     // Each inflow carries its donor cell's temperature; the retained lava keeps
     // its own. Mass-weighted mix conserves heat where flows merge.
     float diL = dt * inL / (l * l);
@@ -167,7 +167,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     float denom = retained + diL + diR + diB + diT;
     float T = denom > 1e-6 ? numer / denom : s.b;
 
-    // ---- lava sources: add depth, blend temperature toward the vent -------
+    // lava sources: add depth, blend temperature toward the vent
     float2 world = CellWorld(id);
     float add_pos = 0.0, add_neg = 0.0, heat = 0.0;
     for (uint i = 0u; i < push.control.z; ++i) {
@@ -185,10 +185,10 @@ void main(uint3 tid : SV_DispatchThreadID) {
     T = mixed > 1e-6 ? (T * dnew + heat) / mixed : T;
     dnew = max(0.0, mixed + add_neg);
 
-    // ---- cooling: radiative relaxation, faster for thin flows -------------
+    // cooling: radiative relaxation, faster for thin flows
     T += (push.sim.w - T) * push.lava1.y * dt / max(dnew, 0.05);
 
-    // ---- solidification: below the solidus, depth freezes into crust ------
+    // solidification: below the solidus, depth freezes into crust
     float C = s.a;
     if (T < push.lava0.y && dnew > 0.0) {
       float rate = push.lava1.z * saturate((push.lava0.y - T) / max(push.lava0.y, 1.0));
@@ -204,7 +204,7 @@ void main(uint3 tid : SV_DispatchThreadID) {
     return;
   }
 
-  // -------------------------------------------------------- WATER INTEGRATE
+  // WATER INTEGRATE
   // Edge-overshoot damp (Chentanez): suppress the ringing crest a steep
   // dam-break front leaves behind. Only genuine wet cells overshoot, and the
   // correction is clamped to REMOVE the crest (min(0, .)) so it can never mint

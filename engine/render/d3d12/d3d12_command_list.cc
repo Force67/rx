@@ -103,7 +103,7 @@ void D3D12CommandList::RequireTextureState(TextureRecord* texture, u32 base_mip,
   flush();
 }
 
-// --- binding ---
+// binding
 
 void D3D12CommandList::BindPipeline(PipelineHandle pipeline) {
   bound_ = Rec(pipeline);
@@ -250,7 +250,7 @@ void D3D12CommandList::SetPushRootCbv() {
   }
 }
 
-// --- compute ---
+// compute
 
 void D3D12CommandList::Dispatch(u32 x, u32 y, u32 z) {
   if (!bound_) return;  // pipeline creation may have failed (dxil-less shader)
@@ -267,7 +267,7 @@ void D3D12CommandList::DispatchIndirect(const GpuBuffer& args, u64 offset) {
   list_->ExecuteIndirect(signature, 1, record->resource, offset, nullptr, 0);
 }
 
-// --- raster ---
+// raster
 
 void D3D12CommandList::BeginRendering(const RenderingInfo& info) {
   D3D12_CPU_DESCRIPTOR_HANDLE rtvs[8];
@@ -433,7 +433,7 @@ void D3D12CommandList::DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 off
                          count_offset);
 }
 
-// --- synchronization ---
+// synchronization
 
 void D3D12CommandList::TextureBarriers(std::span<const TextureBarrier> barriers) {
   for (const TextureBarrier& barrier : barriers) {
@@ -465,7 +465,7 @@ void D3D12CommandList::MemoryBarrier(BarrierScope src, BarrierScope dst) {
   list_->ResourceBarrier(1, &barrier);
 }
 
-// --- transfer ---
+// transfer
 
 void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
                                            std::span<const BufferTextureCopy> regions) {
@@ -816,7 +816,7 @@ void D3D12CommandList::FillBuffer(const GpuBuffer& buffer, u64 offset, u64 size,
   device_.srv_pool().Free(cpu);  // consumed at record time by vkd3d/d3d12
 }
 
-// --- acceleration structures ---
+// acceleration structures
 
 void D3D12CommandList::BuildBlas(AccelStructHandle blas, const BlasBuildDesc& desc,
                                  const GpuBuffer& scratch, u64 scratch_offset,
@@ -932,7 +932,7 @@ void D3D12CommandList::CopyAccelStruct(AccelStructHandle dst, AccelStructHandle 
   list4->Release();
 }
 
-// --- profiling ---
+// profiling
 
 void D3D12CommandList::ResetTimestamps(TimestampPoolHandle pool, u32 first, u32 count) {
   (void)pool;

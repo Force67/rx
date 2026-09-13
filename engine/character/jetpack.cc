@@ -26,7 +26,7 @@ void StepJetpacks(ecs::World& world, f32 dt) {
           CharacterMovementSettings& move, CharacterState& cs, CharacterIntent& intent) {
         const bool grounded = cs.grounded;  // last step's result (StepCharacters runs after us)
 
-        // --- thrust demand + spool lag ---------------------------------------
+        // thrust demand + spool lag
         // Burn only while enabled, held AND fuel remains; empty tank = dead stick.
         const bool want = in.enabled && in.thrust && st.fuel > 0.0f;
         const f32 demand = want ? 1.0f : 0.0f;
@@ -34,7 +34,7 @@ void StepJetpacks(ecs::World& world, f32 dt) {
         const f32 a = tau > 0.0f ? 1.0f - std::exp(-dt / tau) : 1.0f;
         st.thrust = Clamp01(st.thrust + (demand - st.thrust) * a);
 
-        // --- fuel: drain by actual thrust; refuel grounded + idle only --------
+        // fuel: drain by actual thrust; refuel grounded + idle only
         const f32 cap = std::max(d.fuel_capacity_s, 1e-3f);
         if (st.thrust > 1e-3f) {
           st.fuel -= st.thrust * (dt / cap);  // full thrust empties the tank in `cap` s
@@ -45,7 +45,7 @@ void StepJetpacks(ecs::World& world, f32 dt) {
         st.burning = st.thrust > 0.02f;
         st.refueling = grounded && !want && d.refuel_rate > 0.0f && st.fuel < 1.0f;
 
-        // --- thrust -> acceleration (the seam StepCharacters integrates) ------
+        // thrust -> acceleration (the seam StepCharacters integrates)
         // Vertical: TWR * gravity, so it competes with weight and only climbs
         // when thrust_to_weight * thrust > 1. Lateral: along the horizontal move
         // intent, scaled by thrust: the in-air lean that beats free-fall drift.

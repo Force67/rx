@@ -30,7 +30,7 @@ void Check(bool condition, const char* message) {
   ++failures;
 }
 
-// --- reference decoders -----------------------------------------------------
+// reference decoders
 
 u32 Bits(const u8* block, u32 offset, u32 count) {
   u32 value = 0;
@@ -133,7 +133,7 @@ bool DecodeBc7Mode6(const u8* block, u8* rgba) {
   return true;
 }
 
-// --- helpers ----------------------------------------------------------------
+// helpers
 
 f64 Psnr(const std::vector<u8>& a, const std::vector<u8>& b, u32 channels, u32 stride) {
   f64 sum = 0;
@@ -421,7 +421,7 @@ void TestFlatBlocks() {
   }
 }
 
-// --- CompressTexture --------------------------------------------------------
+// CompressTexture
 
 asset::Texture MakeTexture(const std::vector<u8>& rgba, u32 size, bool srgb) {
   asset::Texture texture;

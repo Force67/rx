@@ -57,7 +57,7 @@ int main() {
   const rx::f32 f0[3] = {0.04f, 0.04f, 0.04f};
   const rx::f32 n[3] = {0.0f, 1.0f, 0.0f};
 
-  // --- 1. neutral parity ----------------------------------------------------
+  // 1. neutral parity
   {
     const HumanSurfaceParameters neutral = HumanNeutral();
     rx::f32 worst = 0.0f;
@@ -94,7 +94,7 @@ int main() {
   const rx::f32 l_45[3] = {0.707f, 0.707f, 0.0f};
   const rx::f32 l_graze[3] = {0.985f, 0.174f, 0.0f};
 
-  // --- 2. each control is independent and monotone --------------------------
+  // 2. each control is independent and monotone
   {
     HumanSurfaceParameters p = HumanNeutral();
     const HumanBrdfSample zero =
@@ -125,7 +125,7 @@ int main() {
           "the specular Fresnel exponent does not touch the diffuse lobe");
   }
 
-  // --- 3. the terminator moves light, it does not create it -----------------
+  // 3. the terminator moves light, it does not create it
   {
     HumanSurfaceParameters hard = HumanNeutral();
     HumanSurfaceParameters soft = HumanNeutral();
@@ -169,7 +169,7 @@ int main() {
           "the terminator control never widens the specular lobe");
   }
 
-  // --- 4. the second lobe blends, it does not add ---------------------------
+  // 4. the second lobe blends, it does not add
   {
     HumanSurfaceParameters single = HumanNeutral();
     HumanSurfaceParameters dual = HumanNeutral();
@@ -220,7 +220,7 @@ int main() {
           "a half-weight blend actually sits between the two lobes");
   }
 
-  // --- 5. separate diffuse and specular normals -----------------------------
+  // 5. separate diffuse and specular normals
   {
     HumanSurfaceParameters p = HumanNeutral();
     const rx::f32 ns[3] = {0.30f, 0.95f, 0.0f};  // a "sweat" normal, tilted
@@ -234,7 +234,7 @@ int main() {
           "a specular-only normal moves the highlight");
   }
 
-  // --- 6. transmission ------------------------------------------------------
+  // 6. transmission
   {
     HumanSurfaceParameters p = HumanPreset(HumanRegion::kSkin);
     const rx::f32 l_back[3] = {0.2f, -0.9f, 0.39f};
@@ -251,7 +251,7 @@ int main() {
     Check(Sum(opaque.transmission) == 0.0f, "transmission 0 means opaque");
   }
 
-  // --- 7. light-shape widening ---------------------------------------------
+  // 7. light-shape widening
   {
     HumanSurfaceParameters p = HumanNeutral();
     // The response is a MATERIAL control, off in the neutral set on purpose:
@@ -279,7 +279,7 @@ int main() {
           "a larger emitter widens the lobe further");
   }
 
-  // --- 8. tiers only ever simplify -----------------------------------------
+  // 8. tiers only ever simplify
   {
     for (int r = 0; r < 8; ++r) {
       const HumanRegion region = static_cast<HumanRegion>(r);
@@ -310,7 +310,7 @@ int main() {
     Check(HumanTierForScreenHeight(12.0f) == HumanTier::kDistant, "a tiny head is distant");
   }
 
-  // --- 9. the presets stay inside the published safe ranges -----------------
+  // 9. the presets stay inside the published safe ranges
   {
     auto in_range = [](const char* field, rx::f32 value) {
       const HumanRange r = HumanSafeRange(field);
@@ -336,7 +336,7 @@ int main() {
     }
   }
 
-  // --- 10. authored <-> resolved round trip ---------------------------------
+  // 10. authored <-> resolved round trip
   {
     HumanSurfaceParameters original = HumanPreset(HumanRegion::kTeeth);
     original.residual_weight = 0.37f;
@@ -355,7 +355,7 @@ int main() {
           "HumanStore / HumanResolve round-trip every field");
   }
 
-  // --- 11. the area-light terminator multiplier stays bounded ---------------
+  // 11. the area-light terminator multiplier stays bounded
   // HumanEvaluatePreintegrated carries the terminator onto LTC area lights as a
   // RATIO of the soft cosine to the hard one. The hard cosine goes to zero at
   // the terminator and the soft one does not, so an unbounded ratio multiplies

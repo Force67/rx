@@ -130,7 +130,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   const f32 strength = FiniteScalar(modifiers.strength) ? modifiers.strength : 1.0f;
   const f32 balance = FiniteScalar(modifiers.balance) ? modifiers.balance : 1.0f;
 
-  // --- 1. Frames ----------------------------------------------------------
+  // 1. Frames
   Quat q_p = FiniteQ(m.root_rotation) ? Normalize(m.root_rotation) : Quat{0, 0, 0, 1};
 
   Vec3 f = Planar(intent.desired_facing);
@@ -141,7 +141,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   const Quat q_yaw = YawFromFacing(f);
   const Vec3 right = Rotate(q_yaw, {1, 0, 0});  // character-right after yaw
 
-  // --- 2. Desired pelvis pose (the IK frame) ------------------------------
+  // 2. Desired pelvis pose (the IK frame)
   Vec3 support_center =
       FiniteV(contacts.support_center) ? contacts.support_center : m.root_position;
   // The IK frame sits at the MEASURED pelvis planar position. Averaging it toward
@@ -176,7 +176,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   if (!FiniteQ(q_d)) q_d = q_yaw;
   const Quat q_d_inv = Conjugate(q_d);
 
-  // --- 3. Legs ------------------------------------------------------------
+  // 3. Legs
   const RigJoint hip_joint[kFootCount] = {RigJoint::kHipL, RigJoint::kHipR};
   const RigJoint knee_joint[kFootCount] = {RigJoint::kKneeL, RigJoint::kKneeR};
   const RigJoint ankle_joint[kFootCount] = {RigJoint::kAnkleL, RigJoint::kAnkleR};
@@ -215,7 +215,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
     out->joint_drive_scale[static_cast<u32>(ankle_joint[i])] = leg_scale * strength;
   }
 
-  // --- 4. Waist + neck ----------------------------------------------------
+  // 4. Waist + neck
   // Torso faces f and stays upright while the pelvis leans: aim it at the yaw
   // plus half the acceleration lean, then express the delta in the pelvis frame.
   const Quat torso_world = QuatFromAxisAngle(right, 0.5f * lean_angle) * q_yaw;
@@ -227,7 +227,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   out->joint_drive_scale[static_cast<u32>(RigJoint::kWaist)] = 0.9f * strength;
   out->joint_drive_scale[static_cast<u32>(RigJoint::kNeck)] = 0.4f * strength;
 
-  // --- 5. Arms: gait-phase counter-swing (arm opposes the same-side leg) ---
+  // 5. Arms: gait-phase counter-swing (arm opposes the same-side leg)
   const f32 speed_ratio = Clampf(gait.speed_ratio, 0.0f, 4.0f);
   const f32 swing_l = 0.45f * speed_ratio * std::cos(2.0f * kPi * GaitClock::FootPhase(gait, 1));
   const f32 swing_r = 0.45f * speed_ratio * std::cos(2.0f * kPi * GaitClock::FootPhase(gait, 0));
@@ -248,7 +248,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
     if (!FiniteScalar(out->joint_drive_scale[j])) out->joint_drive_scale[j] = 0.0f;
   }
 
-  // --- 7. Root assists (bounded cheats) -----------------------------------
+  // 7. Root assists (bounded cheats)
   const f32 mass =
       params.total_mass + (FiniteScalar(modifiers.carried_mass) ? modifiers.carried_mass : 0.0f);
   Vec3 assist_force{0, 0, 0};
@@ -286,7 +286,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   out->root_assist_force = assist_force;
   out->root_assist_torque = assist_torque;
 
-  // --- 8. Copy the plans through --------------------------------------------
+  // 8. Copy the plans through
   for (u32 i = 0; i < kFootCount; ++i) out->foot[i] = plan[i];
 }
 

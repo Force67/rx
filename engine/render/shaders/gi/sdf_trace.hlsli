@@ -7,7 +7,7 @@
 // no bindless tables. All resources are passed as parameters (rcgi_common.hlsli
 // convention), so an includer declares its own bindings.
 //
-// ============================ S2 binding contract ============================
+// S2 binding contract
 // A pass that traces the clipmap must bind (any slots; pass them in):
 //   ConstantBuffer<SdfGlobals> sdf:  clip origins / voxel sizes / camera.
 //   Texture3D<float>  sdf_distance:  signed distance, R16Float, kGeneral.
@@ -26,7 +26,6 @@
 //      distance < surface epsilon (voxel-scaled); 6-tap central-difference
 //      gradient normal; ~1-voxel start bias. Returns hit position, normal,
 //      albedo, emissive, hitT, and a miss flag.
-// =============================================================================
 
 static const uint kSdfClips = 4u;
 static const uint kSdfRes = 128u;  // per-axis voxels per clip (mirror SdfClipmap::kRes)

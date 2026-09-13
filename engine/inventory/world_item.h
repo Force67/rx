@@ -73,7 +73,7 @@ class RX_INVENTORY_WORLD_EXPORT WorldItemStore {
   size_t count_ = 0;
 };
 
-// --- drop / pick up ---
+// drop / pick up
 
 // Drops `count` units of `source`'s Inventory entry `entry_index` into the
 // world as a dynamic physics body at `spawn`, applying `impulse` (kg*m/s) so it
@@ -96,7 +96,7 @@ RX_INVENTORY_WORLD_EXPORT bool PickUpItem(ecs::World& world, physics::PhysicsWor
                                           const ItemCatalog& catalog, ecs::Entity item_entity,
                                           ecs::Entity receiver);
 
-// --- per-tick maintenance ---
+// per-tick maintenance
 
 // Copies body transforms into entity Transforms for AWAKE world items only.
 // Once an item stays near-motionless for a few calls it is flagged at_rest and
@@ -129,7 +129,7 @@ RX_INVENTORY_WORLD_EXPORT void WakeWorldItemsNear(ecs::World& world, physics::Ph
 RX_INVENTORY_WORLD_EXPORT u64 NextWorldItemId();
 RX_INVENTORY_WORLD_EXPORT void ReserveWorldItemId(u64 seen_id);
 
-// --- persistence (world items, incl. hibernated) ---
+// persistence (world items, incl. hibernated)
 
 // Serializes every live WorldItem entity AND every record in `store` into one
 // versioned little-endian blob; live/dormant status is preserved.

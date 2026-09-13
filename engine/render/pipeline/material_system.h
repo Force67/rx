@@ -255,7 +255,7 @@ class MaterialSystem {
   u32 texture_count() const { return static_cast<u32>(texture_records_.size()); }
   u32 material_count() const { return static_cast<u32>(sets_.size()); }
 
-  // --- texture streaming ---
+  // texture streaming
   // VRAM budget for material textures, bytes; 0 = unlimited (streaming off).
   void SetBudget(u64 bytes) { budget_bytes_ = bytes; }
   bool streaming_active() const { return budget_bytes_ != 0; }

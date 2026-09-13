@@ -44,14 +44,14 @@ struct KiteInput {
 // Kite definition. Defaults describe a ~1.5 m sport/delta kite; override for
 // other sizes. See the force models in kite.cc for how each field is used.
 struct RX_PHYSICS_EXPORT KiteDesc {
-  // --- sail geometry (collision/visual plate) & mass ---
+  // sail geometry (collision/visual plate) & mass
   f32 span_m = 1.5f;        // wingspan, body X
   f32 height_m = 1.0f;      // nose-to-tail height of the sail, body Y
   f32 thickness_m = 0.04f;  // plate thickness, body Z (collision + inertia only)
   f32 sail_area_m2 = 0.8f;  // aerodynamic reference area (< span*height for a delta)
   f32 mass_kg = 0.3f;       // sail + spars
 
-  // --- flat-plate aero (normal-force model; see the header) ---
+  // flat-plate aero (normal-force model; see the header)
   f32 normal_coeff = 2.0f;      // cn: CN = cn sin(alpha), flat-plate normal slope
   f32 tangential_coeff = 0.12f;  // skin/edge drag along the sail surface
   // Aerodynamic centre (centre of pressure) in the body frame, CoM-relative.
@@ -61,7 +61,7 @@ struct RX_PHYSICS_EXPORT KiteDesc {
   // bridle). A small offset here is a knob for extra weathervaning if wanted.
   Vec3 aero_center{0.0f, 0.0f, 0.0f};
 
-  // --- attitude trim (why a kite flies belly-to-wind at high, not zero, alpha) --
+  // attitude trim (why a kite flies belly-to-wind at high, not zero, alpha) --
   // A kite's bridle holds the sail at a set angle to the lines, its camber adds
   // a pitching moment and its tail weathervanes it, so the sail flies
   // belly-INTO-the-wind at a fixed high angle of attack instead of feathering or
@@ -76,12 +76,12 @@ struct RX_PHYSICS_EXPORT KiteDesc {
   f32 trim_alpha_rad = 0.40f;      // ~23 deg, the incidence the bridle+camber sets
   f32 attitude_stiffness = 0.30f;  // belly-normal alignment gain (per unit q_dyn)
 
-  // --- tail (yaw/roll/pitch damper + weathervane) ---
+  // tail (yaw/roll/pitch damper + weathervane)
   f32 tail_length_m = 1.4f;  // tail patch hangs this far down body -Y from the CoM
   f32 tail_area_m2 = 0.05f;  // effective drag area of the tail
   f32 tail_drag = 1.2f;      // bluff drag coefficient of the tail
 
-  // --- bridle + tether ---
+  // bridle + tether
   // Bridle attach point on the sail (body frame, CoM-relative). Kept CLOSE to the
   // CoM: the attitude trim owns stability, and a long bridle lever would let a
   // tension spike (a taut-line snap, a fast tow) torque the sail hard enough to
@@ -105,12 +105,12 @@ struct RX_PHYSICS_EXPORT KiteDesc {
   // tension (a few tens of N) so it never clips normal flight.
   f32 tether_max_tension = 1500.0f;
 
-  // --- two-line steering ---
+  // two-line steering
   // Moment about the line-of-sight axis per unit dynamic pressure*area (so it
   // reads as an effective lever arm, m). Larger = twitchier stunt response.
   f32 steer_authority = 0.45f;
 
-  // --- stability / robustness ---
+  // stability / robustness
   // Sized to (over)damp the attitude spring on the light sail so it settles onto
   // its trim without ringing, and to keep violent gusts bounded (the D term of
   // the attitude PD; the tail adds more).
@@ -124,7 +124,7 @@ struct RX_PHYSICS_EXPORT KiteDesc {
   f32 linear_damping = 1.4f;
   f32 min_airspeed_mps = 0.4f;    // below this the aero pass is skipped (1/|w| guard)
 
-  // --- gusts (optional, default OFF so tests driving set_wind stay exact) ---
+  // gusts (optional, default OFF so tests driving set_wind stay exact)
   f32 gust_amplitude_mps = 0.0f;  // 0 disables the internal gust generator
   Vec3 gust_dir{0.0f, 0.0f, 1.0f};  // gust blows along this (normalized) direction
 };

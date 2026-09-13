@@ -306,7 +306,7 @@ void TestUnpoweredCollapse() {
   rig.Destroy(s.physics);
 }
 
-// --- pure ContactEstimator hysteresis (no physics) ---
+// pure ContactEstimator hysteresis (no physics)
 
 CharacterMeasurements ContactM(bool c0, bool c1) {
   CharacterMeasurements m;
@@ -448,12 +448,10 @@ void TestEstimatorIgnoresRigContacts() {
   rig.Destroy(s.physics);
 }
 
-// ===========================================================================
 // Wave 3 acceptance suite: a full LocomotionController closing the loop over the
 // simulated ragdoll. Every case builds a fresh PhysicsWorld + controller on the
 // shared floor (top at y = 0), steps at the fixed rate, and finishes with a
 // NaN/inf sweep over every rig body and the debug state.
-// ===========================================================================
 
 // Sweeps every rig body position/velocity and the debug state for NaN/inf.
 void CheckFinite(const physics::PhysicsWorld& phys, const LocomotionController& c,

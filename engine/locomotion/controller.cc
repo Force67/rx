@@ -185,7 +185,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   }
   resolved_intent.desired_facing = controlled_facing_;
 
-  // --- Step 1: MEASURE ----------------------------------------------------
+  // Step 1: MEASURE
   state_estimator_.Measure(*physics_, rig_, modifiers, &measurements_);
   const CharacterMeasurements& m = measurements_;
 
@@ -214,7 +214,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   contact_estimator_.Update(m, dt);
   contacts_ = contact_estimator_.estimate();
 
-  // --- Step 3: MODE MACHINE (from measured physics only) ------------------
+  // Step 3: MODE MACHINE (from measured physics only)
   const f32 com_height = Clampf(m.com_position.y - contacts_.support_center.y, 0.3f, 1e4f);
   const Vec3 cp = CapturePoint(m.com_position, m.com_velocity, m.gravity, com_height);
   // Balance error = how far the capture point strays from where a body moving at
@@ -332,7 +332,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   }
   drive_blend_ += (target_blend - drive_blend_) * blend_alpha;
 
-  // --- Step 4/5: build the tick's whole-body targets ----------------------
+  // Step 4/5: build the tick's whole-body targets
   // Populate targets_ fully for every mode, then a common actuation pass drives
   // the motors. Root force/torque distribution stays mode-specific.
   const bool control_mode =
@@ -437,7 +437,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
     }
   }
 
-  // --- Step 7: finite guard over everything we are about to apply ----------
+  // Step 7: finite guard over everything we are about to apply
   bool all_finite = FiniteV(targets_.root_assist_force) && FiniteV(targets_.root_assist_torque);
   for (u32 j = 0; j < kRigJointCount && all_finite; ++j)
     all_finite = FiniteQ(targets_.joint_target[j]) && FiniteScalar(targets_.joint_drive_scale[j]);
@@ -487,7 +487,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
     measurements_.valid = false;
   }
 
-  // --- Step 6: DEBUG (filled completely every tick) -----------------------
+  // Step 6: DEBUG (filled completely every tick)
   debug_.desired_velocity = resolved_intent.desired_velocity;
   debug_.controlled_facing = controlled_facing_;
   debug_.measured_velocity = m.com_velocity;

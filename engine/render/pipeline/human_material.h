@@ -134,7 +134,7 @@ HumanSurfaceParameters HumanResolve(const asset::Material::HumanParams& authored
 // references on the authored side are left alone.
 void HumanStore(const HumanSurfaceParameters& params, asset::Material::HumanParams& authored);
 
-// --- CPU mirror of human_brdf.hlsli -----------------------------------------
+// CPU mirror of human_brdf.hlsli
 // Used by the neutral-parity test and by the offline fitting experiments. Keep
 // it byte-for-byte equivalent to the shader; the test diffs both against the
 // stock Lambert + GGX reference.

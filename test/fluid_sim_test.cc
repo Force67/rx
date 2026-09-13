@@ -148,7 +148,7 @@ int main() {
       return Fail("uploaded water volume does not match the CPU fill");
   }
 
-  // --- Phase 1: settle behind the ridge, then check conservation + sanity ---
+  // Phase 1: settle behind the ridge, then check conservation + sanity
   if (!run(dom, 75)) return Fail("frame loop failed (phase 1)");  // ~300 substeps
 
   std::vector<f32> s1;
@@ -170,7 +170,7 @@ int main() {
               initial_volume, vol1, drift * 100.0f);
   if (drift > 0.01f) return Fail("water volume not conserved within 1%");
 
-  // --- Phase 2: remove the ridge (bed re-upload) and flood the empty half ----
+  // Phase 2: remove the ridge (bed re-upload) and flood the empty half
   dom.bed = bed_open.data();
   dom.initial_water = nullptr;  // no re-seed; only the bed changes
   dom.bed_version = 2;

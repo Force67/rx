@@ -155,7 +155,7 @@ public:
   void OnShutdown() override;
 
 private:
-  // --- scene / assets (editor_app.cc) ---
+  // scene / assets (editor_app.cc)
   void SetupDefaultScene();
   asset::AssetId UploadPrimitive(const std::string &name,
                                  const asset::Mesh &mesh);
@@ -166,7 +166,7 @@ private:
   void UpdateImportedModels(f32 dt);
   u32 ConfigureImportedBody(ImportedSkin *skin);
 
-  // --- interaction (editor_app.cc) ---
+  // interaction (editor_app.cc)
   void UpdateCamera(f32 dt);
   bool CursorOverViewport() const;
   ecs::Entity PickAt(f32 mx, f32 my) const; // CPU raycast fallback
@@ -182,7 +182,7 @@ private:
   void PerformUndo();
   void PerformRedo();
 
-  // --- terrain and surface placement (editor_terrain.cc) ---
+  // terrain and surface placement (editor_terrain.cc)
   void SetupDefaultTerrain();
   void ClearTerrainVisuals();
   void RebuildTerrainVisuals();
@@ -205,7 +205,7 @@ private:
   void OnTerrainCommandReplayed(std::span<const terrain::TerrainTileKey> keys);
   void SyncTerrainRayTracing(std::span<const terrain::TerrainTileKey> keys);
 
-  // --- file ops (editor_app.cc) ---
+  // file ops (editor_app.cc)
   void NewScene();
   void DoSave(const std::string &path);
   // Bake World: save first, then cook what was saved into <scene>.rxp. The cook
@@ -218,7 +218,7 @@ private:
   void OpenFileDialog();
   void RunAutopilot(); // RX_EDITOR_AUTOPILOT smoke driver
 
-  // --- ui (editor_ui.cc) ---
+  // ui (editor_ui.cc)
   bool UiInit();
   void UiShutdown();
   void UiFeedInput(f32 dt);
@@ -245,7 +245,7 @@ private:
   const MeshRecord *FindMesh(u64 hash) const;
   std::string EntityLabel(ecs::Entity e) const;
 
-  // --- services ---
+  // services
   app::Services *services_ = nullptr;
   app::Host *host_ = nullptr;
   Window *window_ = nullptr;
@@ -258,7 +258,7 @@ private:
 
   std::string open_path_; // scene/gltf passed on argv
 
-  // --- editor state ---
+  // editor state
   FlyCamera camera_;
   edit::Selection selection_;
   edit::UndoStack undo_;
@@ -336,7 +336,7 @@ private:
   // fps smoothing
   f32 fps_ = 0;
 
-  // --- ugui ---
+  // ugui
   ugui::UIContext ui_;
   ui::GuiRenderBackend backend_;
   ui::UguiHostState host_state_;

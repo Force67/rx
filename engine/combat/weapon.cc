@@ -376,7 +376,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
       return;
     }
 
-    // --- a round leaves ---
+    // a round leaves
     if (def.magazine > 0) --weapon.ammo;
     ++weapon.shots_fired;
 

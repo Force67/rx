@@ -21,7 +21,7 @@
 
 namespace {
 
-// ---- PCG32: minimal, deterministic, self-contained ------------------------
+// PCG32: minimal, deterministic, self-contained
 struct Pcg32 {
   uint64_t state = 0;
   uint64_t inc = 0;
@@ -136,7 +136,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // ---- Write the generated header ------------------------------------------
+  // Write the generated header
   FILE* f = std::fopen(outPath.c_str(), "wb");
   if (!f) {
     std::fprintf(stderr, "pattern_gen: cannot open %s for writing\n",

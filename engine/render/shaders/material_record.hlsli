@@ -25,7 +25,7 @@ struct MaterialRecord {
   uint terrain_layer1_texture;      //        (terrain: land layer 1)
   uint terrain_weight_texture;      //        (terrain: per-cell weight map)
   uint pad2;
-  // --- Skin subsurface scattering (only meaningful when flags has the skin
+  // Skin subsurface scattering (only meaningful when flags has the skin
   // bit). Coefficients are per-channel and pre-mapped from artist colour/mfp
   // via Kulla-Conty at upload; the shaders consume physical quantities. See
   // sss_profile.hlsli. sigma_a = sigma_t - sigma_s; albedo = sigma_s / sigma_t.
@@ -35,7 +35,7 @@ struct MaterialRecord {
   float sss_perfusion;              //        dynamic hemoglobin concentration 0..1
   float3 sss_scatter_color;         // row 6: multiple-scatter tint (for flush coupling)
   float sss_ior;                    //        boundary index of refraction
-  // --- Character surface model (only meaningful under RX_MATERIAL_FLAG_HUMAN).
+  // Character surface model (only meaningful under RX_MATERIAL_FLAG_HUMAN).
   // The ray paths carry the shaping controls so a traced face and a rastered
   // face are the same material; see human_brdf.hlsli.
   float4 human_diffuse_fresnel;     // row 7: peak, falloff, tangent falloff, retro peak

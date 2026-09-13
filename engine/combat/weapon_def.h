@@ -33,13 +33,13 @@ struct WeaponDef {
   WeaponKind kind = WeaponKind::kHitscan;
   FireMode mode = FireMode::kSemi;
 
-  // --- rate of fire ---------------------------------------------------------
+  // rate of fire
   f32 rpm = 600.0f;         // rounds per minute between trigger events
   u32 burst_count = 3;      // rounds per burst (kBurst only)
   f32 burst_interval = 0;   // s between rounds INSIDE a burst; 0 uses the rpm gap
   u32 pellets = 1;          // rounds released per shot; >1 is a shotgun spread
 
-  // --- damage ---------------------------------------------------------------
+  // damage
   f32 damage = 25.0f;  // per pellet, before falloff, zone and armor scaling
   f32 range = 200.0f;  // metres a hitscan ray travels before it gives up
   // Linear damage falloff between the two distances, flooring at
@@ -48,7 +48,7 @@ struct WeaponDef {
   f32 falloff_end = 0;
   f32 falloff_min_scale = 0.5f;
 
-  // --- penetration ----------------------------------------------------------
+  // penetration
   // A hitscan round may punch through up to `max_penetrations` surfaces. After
   // each one the ray resumes `penetration` metres further along, so the field is
   // a thickness budget: anything thicker than that is effectively cover, because
@@ -61,7 +61,7 @@ struct WeaponDef {
 
   f32 impulse = 0;  // N*s pushed into a dynamic body along the shot direction
 
-  // --- accuracy -------------------------------------------------------------
+  // accuracy
   // Shots leave inside a cone whose half-angle is lerped from `spread_min` to
   // `spread_max` by the bloom the weapon has accumulated. Every shot adds
   // `spread_per_shot` (in bloom units, 1 = fully bloomed) and bloom bleeds off
@@ -76,14 +76,14 @@ struct WeaponDef {
   f32 spread_crouch_scale = 0.7f; // multiplier while crouched
   f32 spread_ads_scale = 0.25f;   // multiplier at full aim-down-sights
 
-  // --- recoil ---------------------------------------------------------------
+  // recoil
   // Per shot view kick, fed to the entity's ViewRecoil (see components.h).
   f32 recoil_pitch = 0.012f;      // rad up per shot
   f32 recoil_yaw = 0.003f;        // rad of horizontal bias per shot (signed)
   f32 recoil_yaw_variance = 0.004f;  // rad of random horizontal jitter
   f32 recoil_ads_scale = 0.6f;    // kick multiplier at full aim-down-sights
 
-  // --- ammunition -----------------------------------------------------------
+  // ammunition
   u32 magazine = 30;      // rounds per magazine; 0 means the weapon never runs dry
   u32 reserve_max = 240;  // cap on carried rounds; 0 = uncapped
   f32 reload_time = 2.1f;         // s for a magazine swap with a round chambered
@@ -93,12 +93,12 @@ struct WeaponDef {
   // switching interrupts it after the rounds already loaded.
   f32 reload_shell_time = 0;
 
-  // --- handling -------------------------------------------------------------
+  // handling
   f32 ads_time = 0.22f;   // s from hip to fully aimed (and back)
   f32 ads_fov_scale = 0.75f;  // camera fov multiplier at full aim; 1 = no zoom
   f32 swap_time = 0.5f;   // s to bring this weapon up when switched to
 
-  // --- projectile (kind == kProjectile) -------------------------------------
+  // projectile (kind == kProjectile)
   f32 muzzle_speed = 40.0f;      // m/s
   f32 projectile_gravity = 9.81f;  // m/s^2 down
   f32 projectile_drag = 0;       // 1/m: velocity loses this fraction per metre
@@ -106,7 +106,7 @@ struct WeaponDef {
   f32 projectile_life = 8.0f;    // s before it despawns (or detonates, below)
   bool explode_on_expire = false;  // timed frag: detonate at the end of life
 
-  // --- explosion (both kinds; 0 radius = no blast) --------------------------
+  // explosion (both kinds; 0 radius = no blast)
   f32 blast_radius = 0;
   f32 blast_damage = 0;
   f32 blast_min_scale = 0.15f;  // damage scale at the rim of the radius

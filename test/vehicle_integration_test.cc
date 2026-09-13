@@ -64,7 +64,7 @@ bool IsFinite(const Vec3& v) {
   return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
 }
 
-// --- audio buffer helpers (mirror vehicle_audio_test) ---------------------
+// audio buffer helpers (mirror vehicle_audio_test)
 bool AllFinite(const std::vector<f32>& b) {
   for (f32 v : b)
     if (!std::isfinite(v)) return false;
@@ -118,7 +118,7 @@ int main() {
     return true;
   });
 
-  // --- spawn all three, well separated in X so nobody collides ---
+  // spawn all three, well separated in X so nobody collides
   PhysicsWorld::VehicleDesc car_desc;
   car_desc.drivetrain = PhysicsWorld::Drivetrain::kAWD;  // reliable launch traction
   const VehicleId car = world.CreateVehicle(car_desc, Vec3{-40.0f, car_desc.wheel_radius + 0.6f, 0.0f}, 0.0f);
@@ -132,7 +132,7 @@ int main() {
   Aircraft plane(world, plane_desc, Vec3{40.0f, 1.7f, 0.0f}, 0.0f);
   if (!plane.valid()) return Fail("aircraft spawn failed");
 
-  // --- settle: 2.5 s of zero input so the gear/suspension/hull all quiet ---
+  // settle: 2.5 s of zero input so the gear/suspension/hull all quiet
   for (int i = 0; i < 150; ++i) {
     world.DriveVehicle(car, 0, 0, 0, 0);
     boat.Update(BoatInput{}, kDt);
@@ -175,7 +175,7 @@ int main() {
   f32 plane_max_alt = 0.0f;
   f32 plane_peak_climb = 0.0f;
 
-  // --- the shared 30 s run: stage all three, then step the world once ---
+  // the shared 30 s run: stage all three, then step the world once
   for (int frame = 0; frame < kSteps; ++frame) {
     g_wave_t += kDt;
 
@@ -201,7 +201,7 @@ int main() {
 
     world.Update(kDt);
 
-    // --- read telemetry back ---
+    // read telemetry back
     PhysicsWorld::VehicleState cst;
     if (!world.GetVehicleState(car, &cst)) return Fail("(a) car telemetry read failed");
     if (cst.rpm < 0.0f || cst.rpm > car_redline + 50.0f) return Fail("(a) car rpm out of range");
@@ -254,7 +254,6 @@ int main() {
     plane_synth.Render(&plane_audio[static_cast<size_t>(frame) * kBlock], kBlock, pp);
   }
 
-  // ---------------------------------------------------------------------------
   // (a) The car moved, the automatic box shifted, telemetry stayed in range.
   {
     Vec3 pos{};

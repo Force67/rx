@@ -17,7 +17,7 @@ namespace rx::combat {
 enum class HitZone : u8 { kDefault, kHead, kTorso, kLimb };
 constexpr u32 kHitZoneCount = 4;
 
-// --- health ---------------------------------------------------------------
+// health
 
 // Attach to anything that can be shot. Armor soaks `armor_absorb` of every
 // incoming hit until it runs out. Regeneration is opt-in: `regen_rate` 0 (the
@@ -62,7 +62,7 @@ struct HitIgnoreList {
   u8 count = 0;
 };
 
-// --- weapons --------------------------------------------------------------
+// weapons
 
 // The mutable half of a weapon: what the definition looks like right now.
 struct WeaponState {
@@ -170,7 +170,7 @@ struct Viewmodel {
   f32 punch = 0;
 };
 
-// --- projectiles ----------------------------------------------------------
+// projectiles
 
 // A round in flight. Spawned by StepWeapons for kProjectile weapons (and by
 // SpawnProjectile for anything a game throws), advanced by StepProjectiles,

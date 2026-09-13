@@ -214,7 +214,7 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
   const f32 rot[4] = {0, -hy, 0, hcw};
   auto world = [&](const Vec3& local) { return feet_position + Rotate(yawq, local); };
 
-  // --- bodies ---
+  // bodies
   const i32 group = physics.CreateBodyFilterGroup(kBodyPartCount);
   if (group < 0) return false;
   out->filter_group = group;
@@ -301,7 +301,7 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
     }
   }
 
-  // --- collision filtering ---
+  // collision filtering
   // One group; each body's subgroup is its BodyPart index. Disable the jointed
   // pairs (they overlap at the shared pivot) plus a few extra overlap-prone
   // non-adjacent pairs.
@@ -319,7 +319,7 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
   disable(BodyPart::kPelvis, BodyPart::kUpperArmR);
   disable(BodyPart::kUpperLegL, BodyPart::kUpperLegR);
 
-  // --- joints ---
+  // joints
   // Twist limits / cones per the fixed convention table; hinges take a [min,max]
   // angle range. Parent is always body a, child body b. Frame origins are the
   // shared pivot expressed in each body's local space.

@@ -21,7 +21,7 @@ struct SynthParams {
   f32 speed_mps = 0.0f;  // ground speed, drives wind and scales skid
   f32 slip = 0.0f;       // 0..1 tyre slip ratio, gates the skid layer
 
-  // --- additive, default-inert fields (added for the vehicle-realism pass) ---
+  // additive, default-inert fields (added for the vehicle-realism pass)
   // Each defaults to a value that reproduces the pre-existing behaviour exactly,
   // so a caller that fills only the block above is unchanged.
 
@@ -113,7 +113,7 @@ class RX_AUDIO_EXPORT SynthVoice final : public Decoder {
   // needs no resampling. `synth` is the model rendered; it is owned here.
   SynthVoice(u32 output_rate, std::unique_ptr<Synth> synth);
 
-  // --- device thread (mixer) -------------------------------------------------
+  // device thread (mixer)
   u32 channels() const override { return 1; }
   u32 sample_rate() const override { return rate_; }
   u64 frame_count() const override { return 0; }  // endless: no natural length
@@ -123,7 +123,7 @@ class RX_AUDIO_EXPORT SynthVoice final : public Decoder {
   // The model is phase-continuous, so a restart is a no-op that always succeeds.
   bool Rewind() override { return true; }
 
-  // --- engine thread ---------------------------------------------------------
+  // engine thread
   // Publishes the latest telemetry. Wait-free against Read; the render thread
   // ramps toward it so even a large jump never clicks.
   void SetParams(const SynthParams& p) { params_->Publish(p); }

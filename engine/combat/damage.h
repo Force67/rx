@@ -15,7 +15,7 @@ class World;
 
 namespace rx::combat {
 
-// --- who owns a body ------------------------------------------------------
+// who owns a body
 
 // What a physics body means to the combat systems.
 struct HitProxy {
@@ -58,7 +58,7 @@ class RX_COMBAT_EXPORT HitRegistry {
   base::UnorderedMap<physics::BodyId, HitProxy> bodies_;
 };
 
-// --- damage ---------------------------------------------------------------
+// damage
 
 struct DamageRequest {
   ecs::Entity target{};
@@ -92,7 +92,7 @@ RX_COMBAT_EXPORT f32 Heal(ecs::World& world, ecs::Entity entity, f32 amount);
 // `regen_delay` has passed without damage.
 RX_COMBAT_EXPORT void StepHealth(ecs::World& world, f32 dt);
 
-// --- explosions -----------------------------------------------------------
+// explosions
 
 struct ExplosionParams {
   Vec3 position = {0, 0, 0};

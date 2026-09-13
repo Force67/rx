@@ -157,7 +157,7 @@ struct Material {
     f32 perfusion = 0.5f;
   };
   SkinParams skin_params;
-  // --- Character ("human") surface model -----------------------------------
+  // Character ("human") surface model
   // The Callisto-Protocol-style controllable BRDF for skin, lips, teeth, gums
   // and eyes. Enabling it routes the material through one evaluator shared by
   // every direct light type and every render path (raster, hybrid RT, path
@@ -245,7 +245,7 @@ struct Material {
     AssetId specular_normal;
     f32 specular_normal_strength = 1.0f;
 
-    // --- eye anatomy (region kCornea / kIris / kSclera) ---------------------
+    // eye anatomy (region kCornea / kIris / kSclera)
     // The eye is shaded as a layered system on one mesh: the corneal surface
     // refracts the view ray, the iris is sampled at `iris_depth` BEHIND it, and
     // the limbal ring darkens the sclera/iris boundary.
@@ -257,7 +257,7 @@ struct Material {
     f32 cornea_ior = 1.376f;       // refraction at the corneal surface
     f32 iris_shadow_depth = 0.5f;  // how much the cornea shadows the iris (0 = none)
 
-    // --- Realis-style measured residual ------------------------------------
+    // Realis-style measured residual
     // photograph - analytical render, fitted offline into a directional basis
     // and stored as two maps (see tools/fit_residual.py). 0 = analytic only.
     // The runtime fades it out when the material state no longer matches the

@@ -45,7 +45,7 @@ class RX_CORE_EXPORT InputMap {
   // Empty until the application registers its schema and defaults.
   InputMap() = default;
 
-  // --- Schema registration (call once at startup, before Resolve / LoadFromIni)
+  // Schema registration (call once at startup, before Resolve / LoadFromIni)
   // Registers an action/axis id with the stable token used in controls.ini and
   // the rebind UI. `id` is the game's enum value; names must round-trip old INIs.
   template <class A>
@@ -77,7 +77,7 @@ class RX_CORE_EXPORT InputMap {
   void Resolve(const InputState& kbm, const GamepadState& pad, const TouchState& touch,
                ActionState* out);
 
-  // --- Rebinding (used by the settings UI) ---
+  // Rebinding (used by the settings UI)
   template <class A>
   const std::vector<Binding>& bindings(A a) const {
     return action_[static_cast<int>(a)];
@@ -120,7 +120,7 @@ class RX_CORE_EXPORT InputMap {
   int action_count() const { return action_count_; }
   int axis_count() const { return axis_count_; }
 
-  // --- Options (persisted) ---
+  // Options (persisted)
   f32 look_sens_kbm = 0.0025f;  // radians per mouse pixel
   f32 look_sens_pad = 2.6f;     // radians per second at full stick deflection
   bool invert_y = false;
@@ -130,7 +130,7 @@ class RX_CORE_EXPORT InputMap {
   bool adaptive_triggers = true;
   u8 led_r = 0, led_g = 60, led_b = 120;  // DualSense lightbar
 
-  // --- Persistence ---
+  // Persistence
   bool LoadFromIni(const std::string& path);
   bool SaveToIni(const std::string& path) const;
 

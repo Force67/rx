@@ -102,7 +102,7 @@ struct HairRange {
 // four while still looking like a valid number.
 HairRange HairSafeRange(const char* field);
 
-// --- CPU mirror of hair_bsdf.hlsli ------------------------------------------
+// CPU mirror of hair_bsdf.hlsli
 // Kept equivalent to the shader by construction. hair_bsdf_test diffs its
 // behaviour against the contracts the shader is supposed to hold.
 

@@ -48,7 +48,7 @@ float Luma(const rx::f32 rgb[3]) {
 int main() {
   using namespace rx::render;
 
-  // --- 1. energy ------------------------------------------------------------
+  // 1. energy
   {
     HairSurfaceParameters clear;  // no absorption at all
     clear.sigma_a[0] = clear.sigma_a[1] = clear.sigma_a[2] = 0.0f;
@@ -80,7 +80,7 @@ int main() {
     Check(dark_albedo < clear_albedo * 0.6f, "absorption costs energy");
   }
 
-  // --- 2. the azimuthal geometry ------------------------------------------
+  // 2. the azimuthal geometry
   {
     // `h` - where across the fibre's width the shading point sits - is the part
     // raster hair usually fakes, and faking it is what flattens a strand into
@@ -123,7 +123,7 @@ int main() {
           "the response varies across the fibre's width");
   }
 
-  // --- 2b. the asymmetry is bounded ---------------------------------------
+  // 2b. the asymmetry is bounded
   {
     // This model is not reciprocal - the attenuations and the refraction
     // geometry come from the outgoing direction alone, exactly as published.
@@ -159,7 +159,7 @@ int main() {
     if (worst >= 0.75f) std::fprintf(stderr, "  asymmetry: %.3f\n", worst);
   }
 
-  // --- 2c. the lobes are what they claim to be -----------------------------
+  // 2c. the lobes are what they claim to be
   {
     // R is a surface reflection: Fresnel only, no absorption, so it is
     // ACHROMATIC however dark the fibre is. TT and TRT have crossed the pigment
@@ -189,7 +189,7 @@ int main() {
     Check(tint > 2.0f, "the transmission lobe carries the pigment's colour");
   }
 
-  // --- 3. pigment coupling --------------------------------------------------
+  // 3. pigment coupling
   {
     rx::f32 wo[3], wi[3];
     Dir(0.1f, 0.0f, wo);
@@ -294,7 +294,7 @@ int main() {
     }
   }
 
-  // --- 4. multiple scattering ----------------------------------------------
+  // 4. multiple scattering
   {
     rx::f32 wo[3], wi[3];
     Dir(0.2f, 0.0f, wo);
@@ -339,7 +339,7 @@ int main() {
           "white hair depends on multiple scattering (without it, it is grey)");
   }
 
-  // --- 5. the cuticle tilt separates the highlights -------------------------
+  // 5. the cuticle tilt separates the highlights
   {
     // The R and TRT lobes must peak at DIFFERENT longitudinal angles. That
     // separation is the double highlight; without it hair reads as tubing.
@@ -369,7 +369,7 @@ int main() {
           "the cuticle tilt shifts the highlight off the specular direction");
   }
 
-  // --- 6. tiers only ever simplify -----------------------------------------
+  // 6. tiers only ever simplify
   {
     for (int i = 0; i < 6; ++i) {
       HairSurfaceParameters hero = HairPresetParams(static_cast<HairPreset>(i));
@@ -419,7 +419,7 @@ int main() {
     }
   }
 
-  // --- 7. presets stay inside the published safe ranges ---------------------
+  // 7. presets stay inside the published safe ranges
   {
     auto in_range = [](const char* field, float value) {
       const HairRange r = HairSafeRange(field);

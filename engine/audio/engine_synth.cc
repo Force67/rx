@@ -181,7 +181,7 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     return shift_sign_ < 0.0f ? (1.0f - 0.55f * bump) : (1.0f + 0.30f * bump);
   };
 
-  // ---- Turbine path: no piston bank, a spool-tracking whine + exhaust roar ---
+  // Turbine path: no piston bank, a spool-tracking whine + exhaust roar
   if (preset_.turbine) {
     const f32 spool = std::clamp(p.rpm * 0.01f, 0.0f, 1.05f);  // rpm is N1 %
     // Whine pitch/level tracks spool (rpm/N1); roar level tracks thrust when it is
@@ -211,7 +211,7 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     return;
   }
 
-  // ---- Piston path ----------------------------------------------------------
+  // Piston path
   const f32 rev_freq = std::max(0.0f, p.rpm) / 60.0f;  // crank revs per second
   const f32 base_freq = rev_freq * 0.5f;               // half-order fundamental
   const i32 fire_n = preset_.cylinders;  // firing order counted in half-orders

@@ -30,7 +30,7 @@ namespace {
 
 constexpr f32 kPi = 3.14159265358979f;
 
-// --- procedural checker textures -------------------------------------------
+// procedural checker textures
 
 struct Rgb {
   u8 r, g, b;
@@ -75,7 +75,7 @@ asset::Texture MakeChecker(asset::AssetId id, u32 res, u32 cells, Rgb a, Rgb b, 
   return tex;
 }
 
-// --- box / geometry accumulation (world space, world-continuous checker UVs) --
+// box / geometry accumulation (world space, world-continuous checker UVs) --
 
 struct MeshBuilder {
   asset::Mesh mesh;
@@ -246,7 +246,7 @@ f32 GymFixedStep() {
 GymDemo::GymDemo(EngineContext& ctx) : ctx_(ctx) {}
 
 void GymDemo::Create() {
-  // --- lighting: simple, bright, no lens-flare artifacts ---------------------
+  // lighting: simple, bright, no lens-flare artifacts
   if (!ctx_.config->headless) {
     auto& s = ctx_.renderer->settings();
     s.sun_direction = Normalize(Vec3{-0.4f, -0.85f, -0.35f});
@@ -364,7 +364,7 @@ void GymDemo::BuildContent() {
     phys.AddStaticBox(c, h);
   };
 
-  // --- reference cubes: 0.25 / 0.5 / 1.0 / 2.0 m, resting on the ground -------
+  // reference cubes: 0.25 / 0.5 / 1.0 / 2.0 m, resting on the ground
   MeshBuilder cubes;
   const f32 sizes[4] = {0.25f, 0.5f, 1.0f, 2.0f};
   f32 cx = -3.0f;
@@ -375,14 +375,14 @@ void GymDemo::BuildContent() {
   }
   UploadBuilder(ctx_, cubes, asset::MakeAssetId("gym/cubes"), cube_mat.id);
 
-  // --- furniture-scale obstacles: 0.75 m table, 0.45 m seat, 1.0 m counter ----
+  // furniture-scale obstacles: 0.75 m table, 0.45 m seat, 1.0 m counter
   MeshBuilder furn;
   solid_box(furn, {-2.0f, 0.375f, 6.5f}, {0.6f, 0.375f, 0.4f});  // table top at 0.75 m
   solid_box(furn, {-3.2f, 0.225f, 6.5f}, {0.22f, 0.225f, 0.22f});  // seat top at 0.45 m
   solid_box(furn, {1.6f, 0.5f, 6.5f}, {0.9f, 0.5f, 0.3f});          // counter top at 1.0 m
   UploadBuilder(ctx_, furn, asset::MakeAssetId("gym/furniture"), furniture_mat.id);
 
-  // --- structure: doorway, stairs, ramps, crouch tunnel, narrow gap ----------
+  // structure: doorway, stairs, ramps, crouch tunnel, narrow gap
   MeshBuilder st;
 
   // Doorway frame: 1.0 m clear width, 2.1 m clear height.
@@ -448,7 +448,7 @@ void GymDemo::BuildContent() {
 
   UploadBuilder(ctx_, st, asset::MakeAssetId("gym/structure"), structure_mat.id);
 
-  // --- kinematic moving platform (demonstration only) ------------------------
+  // kinematic moving platform (demonstration only)
   platform_center_ = {9.0f, 0.25f, 8.0f};
   platform_span_ = 3.0f;
   {
@@ -484,7 +484,7 @@ void GymDemo::BuildContent() {
     capsule_cap_mesh_ = cap.id.hash;
   }
 
-  // --- inventory: one "crate" item def (0.25 m checker cube) ------------------
+  // inventory: one "crate" item def (0.25 m checker cube)
   {
     MeshBuilder crate;
     AddBox(crate, {0, 0, 0}, {0.125f, 0.125f, 0.125f}, 1.0f);

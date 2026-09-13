@@ -52,7 +52,7 @@ int main() {
   }
   std::printf("compaction_test: device '%s'\n", device->caps().adapter_name.c_str());
 
-  // --- a single opaque triangle in a host-visible, AS-build-input buffer ---
+  // a single opaque triangle in a host-visible, AS-build-input buffer
   const f32 verts[9] = {-0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.0f, 0.5f, 0.0f};
   GpuBuffer vbo = device->CreateBuffer(sizeof(verts),
                                        kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress,
