@@ -10,25 +10,21 @@ namespace rx::render {
 // quality tiers, and a faithful CPU mirror of the shader so the energy and
 // reciprocity contracts can be tested without a GPU.
 //
-// Hair colour is authored as PIGMENT, not as albedo. A blonde fibre is not a
-// brown fibre with a lighter swatch: it absorbs less, so it also transmits and
-// forward-scatters more, and that coupling is most of what makes light hair
-// read as hair. Tinting an albedo breaks the coupling and produces the classic
-// "dark straw" blonde. HairSigmaFromColor exists for artists who want to author
-// a target colour anyway, and it goes through the same absorption path.
+// Hair colour is authored as PIGMENT, not as albedo: a blonde fibre absorbs
+// less and so also transmits and forward-scatters more, and that coupling is
+// most of what makes light hair read as hair. Tinting an albedo breaks it and
+// produces the classic "dark straw" blonde. HairSigmaFromColor exists for
+// artists who want to author a target colour anyway; it still goes through
+// absorption.
 
 // Where a fibre's absorption comes from.
-//   kPigment   sigma_a is authored directly (melanin concentrations).
-//   kAuthored  the groom's per-strand colour is the TARGET multiple-scattering
-//              colour, inverted to absorption through HairSigmaFromColor - this
-//              renderer's own fit, not Chiang's, which is calibrated against a
-//              different transport (see HairSigmaFromColorPathTraced).
-// The second is the default because grooms carry colours sampled from a hair
-// texture and artists expect those to mean what they look like. It is not a
-// shortcut past the physics: the colour becomes absorption, so a light strand
-// still transmits and forward-scatters more than a dark one. Tinting the
-// shaded result instead - the obvious alternative - is what breaks the coupling
-// and gives you blonde hair that scatters like brown.
+//   kPigment   sigma_a authored directly (melanin concentrations).
+//   kAuthored  the per-strand colour is the TARGET multiple-scattering colour,
+//              inverted through HairSigmaFromColor (this renderer's own fit,
+//              not Chiang's, which is calibrated against a different transport).
+// kAuthored is the default: grooms carry sampled colours and artists expect
+// them to mean what they look like. The colour still becomes absorption, so a
+// light strand transmits and forward-scatters more than a dark one.
 enum class HairColorMode : u8 { kPigment, kAuthored };
 
 struct HairSurfaceParameters {

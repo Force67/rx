@@ -9,10 +9,10 @@
 
 namespace rx::render {
 
-// A dynamic omni light, accumulated in the forward lighting pass. Packed in
-// float4s so the StructuredBuffer stride matches the shader exactly.
-// Dynamic local light. The first two rows are the legacy point-light layout;
-// direction/params extend it to spots and representative-point area lights.
+// A dynamic local light, accumulated in the forward lighting pass. Packed in
+// float4s so the StructuredBuffer stride matches the shader exactly; the first
+// two rows are the legacy point-light layout, direction/params extend it to
+// spots and representative-point area lights.
 // type: 0 point, 1 spot, 2 sphere area, 3 rect area.
 struct PointLight {
   f32 pos_radius[4] = {0, 0, 0, 1};       // xyz position, w influence radius (meters)
@@ -146,13 +146,11 @@ struct DrawRecord {
   Mat4 prev_model;
 };
 
-// The record an instanced draw points at, since it takes its transform from the
-// instance buffer and never reads record.model. It holds identity rather than
-// zeroes: a non-instanced draw that reaches a pipeline without its index set is
-// a bug either way, but identity draws it at the origin where it can be seen and
-// keeps its motion vectors finite, where a zero matrix collapsed it to a point
-// and fed garbage to the temporal passes - a corruption that looked like nothing
-// at all.
+// The record an instanced draw points at (it takes its transform from the
+// instance buffer and never reads record.model). Identity rather than zeroes:
+// identity draws a buggy non-instanced draw at the origin with finite motion
+// vectors, where a zero matrix collapsed it to a point and fed garbage to the
+// temporal passes.
 inline constexpr u32 kNoDrawRecord = 0;
 
 // The per-draw scalars that stayed in the push range, plus the arena index the
