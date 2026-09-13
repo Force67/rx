@@ -1,17 +1,14 @@
 rxscene 1
 
-# A curtain-wall tower: glazed podium, shaft, setback plant crown.
+# A curtain-wall tower: glazed podium, shaft, setback plant crown. Three masses
+# rather than one box, so the silhouette survives being stretched. The ROOT is
+# the shaft: parts are positioned relative to its centre and the whole prefab
+# hangs off wherever an instance puts it; an Anchor onto the ground measures the
+# subtree, so no instance writes a height. See SceneStretch: an instance's
+# Stretch reaches every part, scaling offsets and geometry.
 #
-# Three masses rather than one box, which is what gives it a silhouette that
-# survives being stretched. The ROOT is the shaft, so the parts are positioned
-# relative to its centre and the whole prefab hangs off wherever an instance
-# puts it; an Anchor onto the ground measures the subtree and stands all three
-# on it, so no instance writes a height. See SceneStretch: an instance's
-# Stretch reaches every part, scaling both their offsets and their geometry.
-#
-# Shaft 8 x 29 x 8 above a 9.2 podium, crown set back to 6.4. The setback is the
-# point: a tower that meets the sky with the same footprint it meets the street
-# with reads as an extrusion, not a building.
+# Shaft 8 x 29 x 8 above a 9.2 podium, crown set back to 6.4 (a tower that meets
+# sky and street with the same footprint reads as an extrusion).
 
 entity
 Name.value = "Glass shaft"

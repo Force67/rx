@@ -1,26 +1,22 @@
 #ifndef RX_RENDER_UTIL_IMGUI_RENDERER_H_
 #define RX_RENDER_UTIL_IMGUI_RENDERER_H_
 
-// A generic, reusable Dear ImGui *render* backend built entirely on the RHI
-// (engine/render/rhi). It replaces the raw imgui_impl_vulkan backend for any
-// RHI-based app: font-atlas + user textures via CreateImage2D, a per-frame
-// vertex/index ring, one blended pipeline from the engine's embedded imgui
-// shaders (with an optional frosted-glass backdrop, see SetBackdrop), and
-// scissored indexed draws per ImDrawCmd. Dynamic textures
-// (ImGuiBackendFlags_RendererHasTextures) and large-mesh vertex offsets are
-// honored.
+// A generic Dear ImGui *render* backend built entirely on the RHI, replacing
+// raw imgui_impl_vulkan for RHI apps: font-atlas + user textures via
+// CreateImage2D, a per-frame vertex/index ring, one blended pipeline from the
+// embedded imgui shaders (optional frosted-glass backdrop, SetBackdrop),
+// scissored indexed draws per ImDrawCmd. Honors dynamic textures
+// (ImGuiBackendFlags_RendererHasTextures) and large-mesh vertex offsets.
 //
-// The platform side (imgui_impl_sdl3 or another) is separate and unchanged; this
-// is only the renderer. It deliberately calls no global ImGui:: function - it
-// operates purely on the ImDrawData handed to Render() - so under RX_SHARED the
-// app keeps a single imgui context even though this backend lives in the render
-// DSO. The app therefore owns two small responsibilities on its context:
+// The platform side (imgui_impl_sdl3 or other) is separate and unchanged. Calls
+// no global ImGui:: function (operates only on the ImDrawData given to
+// Render()), so under RX_SHARED the app keeps one imgui context even with this
+// backend in the render DSO. The app sets once, before the first Render:
 //   io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures |
 //                      ImGuiBackendFlags_RendererHasVtxOffset;
-// (set once, before the first Render).
 //
-// Compiled only when the vendored imgui target exists (see the render module's
-// CMakeLists); engine/render never hard-depends on imgui.
+// Compiled only when the vendored imgui target exists; engine/render never
+// hard-depends on imgui.
 
 #include <cstddef>
 #include <vector>

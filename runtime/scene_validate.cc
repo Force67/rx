@@ -276,19 +276,14 @@ std::string LaneList(const f32* v, u32 lanes) {
 // which is not a mistake, it is what a SaveScene round trip looks like.
 constexpr f32 kDiscardedEpsilon = 1e-3f;
 
-// An authored Transform value one of the authoring passes overwrote.
-//
-// Anchor, Grid.of and Rotation all REPLACE the field they solve rather than
-// composing onto it, and each has to: a SaveScene writes the resolved value next
-// to the component that produced it, so anything additive would walk the entity
-// one solve further along on every round trip. The cost is that a hand-authored
-// value beside one of them vanishes without a word, and the line stays in the
-// file reading like it decides something - which is how an author ends up
-// editing a position that has not moved anything since the anchor was added.
-//
-// Reported only when the two DISAGREE, which is what keeps a round-tripped scene
-// (where the saved value is by construction the one the solve reproduces) out of
-// the report entirely, and leaves only the hand-written contradiction.
+// An authored Transform value one of the authoring passes overwrote. Anchor,
+// Grid.of and Rotation REPLACE the field they solve rather than composing
+// (a SaveScene writes the resolved value beside the component, so anything
+// additive would walk the entity further along every round trip). The cost: a
+// hand-authored value beside one of them vanishes silently while the line keeps
+// reading like it decides something. Reported only when the two DISAGREE, so a
+// round-tripped scene (saved value == solved value by construction) never
+// appears here.
 void CheckDiscardedTransform(ecs::World& world, const Source& source, bool grids_built,
                              bool anchors_built, Report& report) {
   for (const SourceAssign& assign : source.assigns) {

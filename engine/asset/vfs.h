@@ -40,23 +40,15 @@ struct VirtualPath {
 };
 RX_ASSET_EXPORT VirtualPath SplitVirtualPath(std::string_view path);
 
-// Unified virtual filesystem over named mount points. A provider mounts under
-// a mount point of the form
-//   ""              the root (schemeless) namespace; legacy single-arg Mount
-//   "game"          everything addressed as game://...
-//   "game://"       same
-//   "game://dlc/"   a subtree: the provider's "a.dds" resolves as game://dlc/a.dds
-// so archives and loose directories from anywhere unify under one namespace.
+// Unified virtual filesystem over named mount points. Mount points:
+//   "" / "game" / "game://"   the root or a named namespace
+//   "game://dlc/"             a subtree: the provider's "a.dds" is game://dlc/a.dds
+// Later mounts win: mount base archives, then DLC, then mods in plugin order,
+// then loose files, reproducing the override behaviour mods rely on.
 //
-// Later mounts win. Mount base game archives first, then DLC, then mod
-// archives in plugin order, then loose files last. This reproduces the
-// override behavior mods rely on.
-//
-// Threading: Read/Contains/Size only read the mount table and are safe to call
-// concurrently (providers guard their own IO), which is what background asset
-// conversion relies on. Mount/Unmount/UnmountByPrefix mutate the table
-// unguarded — quiesce background loads (e.g. a mod reload) before calling them,
-// or a loader thread reads a freed provider.
+// Threading: Read/Contains/Size only read the mount table and are concurrent-
+// safe (providers guard their own IO). Mount/Unmount/UnmountByPrefix mutate it
+// unguarded: quiesce background loads first, or a loader reads a freed provider.
 class RX_ASSET_EXPORT Vfs {
  public:
   void Mount(std::string_view mount_point, base::UniquePointer<FileProvider> provider);

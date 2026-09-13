@@ -1,4 +1,4 @@
-# rx::nav -- tiled cost-aware navmesh, capped A* with entry costs, per-frame
+# rx::nav: tiled cost-aware navmesh, capped A* with entry costs, per-frame
 # funnel steering, event-based repathing and terrain-aware position queries.
 # Headless by design: tiles are sampled through a game callback, no physics or
 # renderer dependency.

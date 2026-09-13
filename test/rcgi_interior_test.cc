@@ -54,7 +54,7 @@ int main() {
 
     // A zero-filled (FillBuffer-cleared / freshly reset) meta word must decode as
     // NO offset, not the max negative corner. Before the fix a raw 0 unpacked to
-    // (-0.45,-0.45,-0.45) -- up to 7.2 m off in the largest cascade.
+    // (-0.45,-0.45,-0.45), up to 7.2 m off in the largest cascade.
     Vec3 raw0 = RcgiUnpackOffset(0u);
     CHECK(Near(raw0.x, 0.0f, 1e-6f) && Near(raw0.y, 0.0f, 1e-6f) && Near(raw0.z, 0.0f, 1e-6f));
     // A packed zero offset is itself never the reserved sentinel word.

@@ -256,7 +256,7 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
   std::memcpy(params_[slot].mapped, &gp, sizeof(gp));
 
   // Bounded per-frame sources, packed for the shader. A null pointer means no
-  // sources regardless of the count — the shader must never consume the slot's
+  // sources regardless of the count; the shader must never consume the slot's
   // stale records from a previous frame.
   u32 source_count = params.sources ? std::min(params.source_count, kMaxSources) : 0u;
   if (source_count > 0) {
@@ -282,7 +282,7 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
   accum_ -= static_cast<f32>(substeps) * kSubstepDt;
   // A dt larger than the per-frame substep budget must not accumulate as time
   // debt (it would spiral: every later frame runs the cap and never catches
-  // up). Drop the excess — the sim slows down instead of death-spiralling.
+  // up). Drop the excess: the sim slows down instead of death-spiralling.
   accum_ = std::min(accum_, kSubstepDt);
   if (substeps == 0) return;  // read side unchanged; renderer still has state
 

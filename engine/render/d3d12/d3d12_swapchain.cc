@@ -30,7 +30,7 @@ bool D3D12Swapchain::Init(u32 width, u32 height, bool vsync) {
   // The window backend hands the HWND over (NativeWindowHandles), so the render
   // module keeps its independence from any windowing library: it used to fish
   // the handle out of SDL3.dll through GetModuleHandle, which finds nothing in
-  // a build that links SDL statically -- as the shipping one does.
+  // a build that links SDL statically, as the shipping one does.
   HWND hwnd = static_cast<HWND>(device_.platform_window());
   if (!hwnd) {
     RX_ERROR("d3d12: no HWND for the swapchain");

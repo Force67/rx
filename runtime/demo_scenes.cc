@@ -121,7 +121,7 @@ void DemoScenes::CreateBubbleDemoScene() {
   // The streaming-bubble acceptance scene: a field of replicated entities
   // (NetworkId), three wandering "players" carrying InterestBubbles, the
   // InterestMap driven locally each frame. Entities tint to their owner's
-  // color, wire spheres draw through rx::net_viz -- the whole bubble feature
+  // color, wire spheres draw through rx::net_viz; the whole bubble feature
   // without a transport in sight.
   asset::Mesh pawn = asset::MakeCube(0.35f, asset::MakeAssetId("bubbles/pawn"));
   asset::Mesh player = asset::MakeCube(0.7f, asset::MakeAssetId("bubbles/player"));
@@ -488,7 +488,7 @@ inline f32 SmoothStep(f32 e0, f32 e1, f32 x) {
 // Analytic terrain bed for --demo fluid, world meters (XZ) -> world-Y height.
 // Kept a free function so the sim's CPU bed array and the visual terrain mesh
 // evaluate the SAME surface. All features are smoothsteps/gaussians (C1, no
-// step steeper than ~45 deg) — heightfield solvers ring on near-vertical beds.
+// step steeper than ~45 deg); heightfield solvers ring on near-vertical beds.
 // The dam strip is NOT part of this function (the visible dam is boxes, and the
 // sim's dam is stamped in RebuildFluidBed only while dam_up_).
 f32 FluidDemoBed(f32 x, f32 z) {
@@ -500,7 +500,7 @@ f32 FluidDemoBed(f32 x, f32 z) {
 
   // Upper reservoir plateau (~6 m), gated to the central x band so it walls the
   // bowl without reaching under the lava hill off to +x. The z ramp reaches
-  // full height by z = -19 — UPSTREAM of the dam band — so the rim beside the
+  // full height by z = -19 (UPSTREAM of the dam band), so the rim beside the
   // channel throat stays above the 5.2 m fill level; a longer ramp (the first
   // cut used -12..-24) leaves a ~4 m shoulder the reservoir quietly drains
   // around, dam or no dam.
@@ -610,7 +610,7 @@ void DemoScenes::CreateWaterDemoScene() {
   // Wave-riding buoyancy: the surface height (and its horizontal orbital flow)
   // comes from the analytic Gerstner proxy, so the cubes ride the swell instead
   // of bobbing on a flat plane and drift along with the passing waves. Entirely
-  // CPU/analytic — no GPU readback. Constants live in physics/water_waves.h,
+  // CPU/analytic, no GPU readback. Constants live in physics/water_waves.h,
   // kept in sync with the shader Gerstner field.
   physics_.set_water_height([this](const Vec3& p, f32* height, Vec3* flow) {
     Vec3 f{};
@@ -804,7 +804,7 @@ void DemoScenes::CreateFluidDemoScene() {
   // beyond the domain clamp to the rim, so the world reads as bounded without a
   // hard edge). Same FluidDemoBed as the sim, WITHOUT the dam strip. NOTE: the
   // lava crust the sim grows (solidified flow raising the fluid-visible surface)
-  // is NOT reflected in this static mesh — the fluid surface renderer draws the
+  // is NOT reflected in this static mesh; the fluid surface renderer draws the
   // crust; the terrain is just the bed.
   constexpr f32 kSkirt = 80.0f;
   constexpr u32 kGrid = 288;  // ~0.56 m spacing across the 160 m span
@@ -3221,7 +3221,7 @@ void DemoScenes::CreateSkyDemoScene() {
   weather_sys_->AddState(tune(storm));
   // A distant front: the Unwetter sits kilometres off. No rain reaches the
   // player, the menace rides the far storm cells only (local deck keeps its
-  // daylight), and strikes land in a far ring -- their flash glows on that
+  // daylight), and strikes land in a far ring; their flash glows on that
   // horizon and the thunder arrives many seconds late and muffled.
   weather::WeatherState front;
   front.name = "distant front";
@@ -3283,8 +3283,8 @@ void DemoScenes::CreateSkyDemoScene() {
 void DemoScenes::CreateSwampDemoScene() {
   // A stagnant lowland under a low stratus lid: dark waterlogged ground with
   // puddle sheen, leaning dead snags, and knee-deep mist drifting between
-  // them. Everything atmospheric comes from one forced swamp weather state --
-  // the scene itself is just wet geometry for the haze to sit in.
+  // them. Everything atmospheric comes from one forced swamp weather state; the
+  // scene itself is just wet geometry for the haze to sit in.
   auto mat = [&](const char* tag, f32 r, f32 g, f32 b, f32 rough) {
     asset::Material m;
     m.id = asset::MakeAssetId(tag);
@@ -3426,8 +3426,8 @@ void DemoScenes::EmitSky(f32 dt) {
 
   // Thunder (the game's role, like the strike scheduling itself): each new
   // strike queues a procedural clap delayed by the speed of sound, so the
-  // flash leads the sound the way it does outdoors -- a 340 m strike rumbles
-  // in a second later.
+  // flash leads the sound the way it does outdoors (a 340 m strike rumbles
+  // in a second later).
   const render::WeatherSettings& w = rs.weather;
   bool new_strike = w.strike_age >= 0.0f &&
                     (sky_prev_strike_age_ < 0.0f ||

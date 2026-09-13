@@ -1,7 +1,7 @@
 # app
 
 What this component hides: how the engine's subsystems are constructed,
-ordered, stepped and torn down. `app::Host` is the composition root - it owns
+ordered, stepped and torn down. `app::Host` is the composition root: it owns
 the window, job system, world clock, ECS world/scheduler, renderer, physics,
 vfs and audio, resolves the render quality preset, runs the fixed-step
 simulation loop and assembles the per-frame `render::FrameView` (transform

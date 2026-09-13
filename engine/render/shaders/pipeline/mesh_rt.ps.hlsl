@@ -8,7 +8,7 @@
 // only; bindings are declared below (env slots 36-40).
 #include "gi/rcgi_common.hlsli"
 // NRD.hlsli supplies the REBLUR radiance unpacking for the denoised reflection
-// target. NRD is an optional dependency, so when it isn't vendored (e.g. CI,
+// target. NRD is an optional dependency, so when it is not vendored (e.g. CI,
 // mobile) fall back to the identity the trace's own fallback pack pairs with;
 // the denoised path is inactive in that case but must still compile.
 #if __has_include("NRD.hlsli")
@@ -433,17 +433,12 @@ struct MaterialParams {
 [[vk::combinedImageSampler]] [[vk::binding(5, 2)]] Texture2DArray ddgi_distance : register(t5, space2);
 [[vk::combinedImageSampler]] [[vk::binding(5, 2)]] SamplerState ddgi_distance_sampler : register(s5, space2);
 // RCGI resolved full-res indirect diffuse (env slot 35, replaces DDGI + SSGI).
-// Hair transmittance volume (env slots 44-46): the same deep opacity map the
-// strand pass shades against, so the scalp under a groom is shadowed by the
-// fibres over it. A groom is not opaque, so a binary shadow map cannot carry
-// this - and hair that casts nothing on the head is the single most visible
-// thing wrong with a rendered character.
-//
-// The volume is built earlier in the frame than this pass reads it, and this
-// pass DECLARES the read so the graph orders the two. Both halves matter: built
-// late, the lookup would index the previous frame's texels with this frame's
-// light matrix and the shadow would slide off the head whenever the sun or the
-// groom moved; undeclared, the read would be unordered against the write.
+// Hair transmittance volume (env slots 44-46): the deep opacity map the strand
+// pass shades against, so the scalp under a groom is shadowed by its fibres (a
+// groom is not opaque; a binary shadow map cannot carry this). The volume is
+// built earlier in the frame and this pass DECLARES the read so the graph
+// orders them: built late the shadow slides off the head on sun/groom motion,
+// undeclared the read is unordered against the write.
 [[vk::combinedImageSampler]] [[vk::binding(44, 2)]] Texture2D<float> hair_front_depth : register(t44, space2);
 [[vk::combinedImageSampler]] [[vk::binding(44, 2)]] SamplerState hair_front_sampler : register(s44, space2);
 [[vk::combinedImageSampler]] [[vk::binding(45, 2)]] Texture2D<float4> hair_dom : register(t45, space2);
@@ -464,7 +459,7 @@ float HairSunTransmittance(float3 world_pos) {
 [[vk::combinedImageSampler]] [[vk::binding(35, 2)]] SamplerState rcgi_irradiance_sampler : register(s35, space2);
 // RCGI world irradiance cascades (env slots 36-40). The resolved texture above is
 // screen-space (primary surface only); the inline reflection bounce hits arbitrary
-// world points, so it samples these world cascades instead -- the same source the
+// world points, so it samples these world cascades instead, the same source the
 // NRD reflection_trace path uses. Placeholders when RCGI is off (kFrameRcgi clear).
 [[vk::binding(36, 2)]] ConstantBuffer<RcgiGlobals> rcgi_world_globals : register(b36, space2);
 [[vk::combinedImageSampler]] [[vk::binding(37, 2)]] Texture2D rcgi_world_irr : register(t37, space2);
@@ -594,7 +589,7 @@ float3 SurfaceNormal(PsIn input) {
     if ((material.flags & kFlagNormalModelSpace) != 0u) {
       // Object-space (_msn) normal: carried straight to world by the model
       // matrix's cofactor, replacing the vertex normal. No TBN, so seam-broken
-      // tangents can't smear the shading. Same covector rule as the vertex
+      // tangents cannot smear the shading. Same covector rule as the vertex
       // normal, sign included, or a mirrored instance lights inside out.
       float model_det;
       const float3x3 cof =

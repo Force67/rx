@@ -22,8 +22,8 @@
 # FetchContent'd / submodule / vendored targets whose include dirs point into
 # read-only source trees, so install(EXPORT) rejects them. Static archives do
 # NOT absorb their dependencies, so the consumer's linker still needs every one
-# of those archives. The pragmatic, honest route (documented in EMBEDDING.md):
-# bundle the archives + headers into the package and recreate them as IMPORTED
+# of those archives. The pragmatic, honest route: bundle the archives + headers
+# into the package and recreate them as IMPORTED
 # targets in rxConfig.cmake, then re-attach them to the rx:: targets. The module
 # CMakeLists wrap those references in $<BUILD_INTERFACE:...> so they drop out of
 # the exported interface and rxConfig owns them for installed consumers.

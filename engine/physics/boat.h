@@ -8,31 +8,22 @@
 
 namespace rx::physics {
 
-// Force-based motorboat simulator layered on the public PhysicsWorld rigid-body
-// primitives (AddForceAtPoint / AddForce / AddTorque / SampleWater). One Boat
-// owns one dynamic hull body; the game drives it with an input each frame and
-// reads telemetry back for HUD/audio/camera.
+// Force-based motorboat simulator on the PhysicsWorld rigid-body primitives.
+// One Boat owns one dynamic hull body; the game drives it with an input each
+// frame and reads telemetry back. SI units; +Z forward, +Y up.
 //
-// Model summary (all SI: metres, kg, seconds, newtons; +Z forward, +Y up,
-// right-handed):
-//  * Multi-point hull buoyancy over a grid on the hull bottom, applied per
-//    sample so swell tilts the boat and the grid + a lowered centre of mass
-//    self-right it from a knock-down.
-//  * Quadratic hull drag (fore/aft asymmetric longitudinal + strong lateral
-//    keel), scaled by the wetted fraction, all taken relative to the water flow
-//    so rivers carry the hull.
-//  * Speed-dependent planing: past hull speed the bow lifts and the wetted
-//    longitudinal drag drops, so a planing hull tops out faster.
-//  * Propeller thrust vs a spooling engine rpm, applied at a stern point ONLY
-//    while that point is submerged (launch off a wave and the screw loses bite).
-//  * A rudder sideforce at the stern from water speed + propeller wash, so the
-//    boat still turns on the wash at a standstill.
+// Model: multi-point hull buoyancy on a bottom grid (per-sample application so
+// swell tilts, grid + lowered COM self-right from a knock-down); quadratic drag
+// (fore/aft asymmetric longitudinal + strong lateral keel) scaled by wetted
+// fraction and taken relative to water flow so rivers carry the hull;
+// speed-dependent planing (past hull speed the bow lifts and wetted longitudinal
+// drag drops); propeller thrust at a stern point ONLY while submerged (launch
+// off a wave and the screw loses bite); rudder sideforce from water speed +
+// propeller wash, so the boat turns on the wash at a standstill.
 //
-// UPDATE CONTRACT: call Boat::Update(input, dt) once per fixed step BEFORE
-// PhysicsWorld::Update(dt). Update() only accumulates forces on the hull body
-// (Jolt clears them after its own step), so ordering matters: forces staged
-// this frame are consumed by the very next PhysicsWorld::Update. dt must match
-// the world's fixed step (~1/60 s).
+// UPDATE CONTRACT: Update(input, dt) once per fixed step BEFORE
+// PhysicsWorld::Update(dt); it only accumulates forces on the hull body, and dt
+// must match the fixed step (~1/60 s).
 struct RX_PHYSICS_EXPORT BoatDesc {
   // Hull box half extents, boat-local: x = half beam (to +X), y = half height
   // (to +Y), z = half length (+Z forward). Default ~ a 6 m motorboat: 1.8 m

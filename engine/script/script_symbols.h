@@ -10,18 +10,16 @@
 
 namespace rx::script {
 
-// The interner: the single owner of every script SYMBOL -- handler/category
-// names, keywords, animation-event names, editor ids. Symbols are a bounded,
-// repeated set compared by identity, so interning buys three things: one place
-// with full control (dump, count, budget every symbol), O(1) identity comparison
-// through StrId, and canonical storage stable for the interner's lifetime, so a
-// symbol crosses the handler boundary as a bare ScriptStringView with no
-// ownership question.
+// The interner: the single owner of every script SYMBOL (handler/category
+// names, keywords, animation-event names, editor ids). Symbols are a bounded,
+// repeated set compared by identity, so interning gives one controlled place
+// (dump, count, budget), O(1) comparison via StrId, and storage stable for the
+// interner's lifetime: a symbol crosses the handler boundary as a bare
+// ScriptStringView with no ownership question.
 //
-// CONTENT strings (messages, user text, concatenations) are deliberately NOT
-// interned: they are unbounded and transient, and belong in a per-call
-// ScriptArena instead. Keeping the two populations apart is what stops the
-// interner from growing without bound.
+// CONTENT strings (messages, user text) are deliberately NOT interned: they are
+// unbounded and transient and belong in the per-call ScriptArena. Keeping the
+// populations apart is what stops the interner growing without bound.
 class ScriptSymbols {
  public:
   RX_SCRIPT_EXPORT ScriptSymbols();

@@ -10,21 +10,18 @@ namespace rx::ecs {
 class World;
 }
 
-// A player jetpack layered on the character controller, in the module's idiom:
-// plain-data components plus one free-function system staged per fixed step. It
-// owns no physics body — the character controller is a kinematic, velocity-based
-// mover (there is no mass to push), so the pack works in ACCELERATION units and
-// injects its thrust through CharacterIntent::external_acceleration, the seam the
-// controller integrates before it consumes the velocity. Because that seam
-// competes with gravity honestly and the controller's ground clamp still stops
-// downward motion, a jetpack climbs, hovers-with-finesse and dead-sticks without
-// ever bypassing the existing fall/land handling.
+// A player jetpack on the character controller, in the module's idiom:
+// plain-data components plus one free-function system. The controller is a
+// kinematic, velocity-based mover with no mass to push, so the pack works in
+// ACCELERATION units injected through CharacterIntent::external_acceleration;
+// thrust competes with gravity honestly and the ground clamp still stops
+// downward motion, so climbing, hover-with-finesse and dead-stick never bypass
+// the existing fall/land handling.
 //
-// Staging: run StepJetpacks(world, dt) BEFORE character::StepCharacters(world,
-// physics, dt) each fixed step. StepJetpacks reads last step's grounded flag
-// (for refuel) and this step's move intent (for the lateral thrust vector) and
-// writes CharacterIntent::external_acceleration; StepCharacters then folds it in
-// and clears it.
+// Staging: StepJetpacks(world, dt) BEFORE character::StepCharacters each fixed
+// step. It reads last step's grounded flag (refuel) and this step's move intent
+// (lateral thrust vector) and writes external_acceleration, which
+// StepCharacters folds in and clears.
 namespace rx::character {
 
 // Jetpack tuning (a component; plain data, like CharacterMovementSettings). Five
@@ -34,7 +31,7 @@ struct JetpackDesc {
   // (CharacterMovementSettings::gravity). >1 climbs, =1 exactly hovers, <1 only
   // softens a fall. Kept modest (~1.3-1.6) so lift-off is brisk, not violent.
   // There is NO auto-hover: matching thrust to weight to hang still is left to
-  // the player's finesse (intended — see the demo).
+  // the player's finesse (intended, see the demo).
   f32 thrust_to_weight = 1.45f;
   // ~90% thrust rise time, seconds: the actual thrust lags the demand through a
   // first-order spool so a stab of the button does not snap to full thrust.

@@ -64,8 +64,8 @@ const base::Vector<u8>& RtInstanceCuller::UpdateGroup(u32 group_id, u32 generati
   const u32 n = static_cast<u32>(transforms.size());
 
   // A fresh or reused slot, a resized group, or an in-place transform update
-  // (revision bump) starts accept-all so a group that just streamed in -- or an
-  // instance that just moved next to the camera -- is fully present before the
+  // (revision bump) starts accept-all so a group that just streamed in, or an
+  // instance that just moved next to the camera, is fully present before the
   // next sweep refines it. Without the revision check a same-count Replace keeps
   // the stale bitmask until the moved instance's sweep index is revisited.
   bool fresh = false;

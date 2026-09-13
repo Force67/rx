@@ -14,8 +14,8 @@
 namespace rx::render {
 
 // GPU side of the asset Material/Texture types. Owns uploaded textures, a
-// shared trilinear anisotropic sampler, a parameter buffer and one
-// persistent binding set per material (set 1 of the mesh pipeline):
+// shared trilinear anisotropic sampler, a parameter buffer and one persistent
+// binding set per material (set 1 of the mesh pipeline):
 //   binding 0  uniform MaterialParams
 //   binding 1  base color        (srgb)
 //   binding 2  normal map        (linear)
@@ -28,15 +28,12 @@ namespace rx::render {
 // Missing maps fall back to builtin 1x1 defaults (white metallic = the mr map
 // alone, white occlusion = no AO) so the shader never branches on presence.
 //
-// Texture streaming: multi-mip BCn textures above the tail size keep a CPU
-// copy of their source and can be demoted to a low-mip tail image under VRAM
-// pressure (SetBudget), then promoted back when their materials draw again
-// (Touch feeds the LRU). A promote/demote swaps in a freshly-created image:
-// the affected materials get NEW binding sets (the live ones may be pending
-// on the GPU and cannot be updated in place), the bindless slot moves to a
-// fresh index with the material records repointed, and the old image, set
-// and slot sit in a retire ring until every in-flight frame that could read
-// them has drained (BeginFrame flushes it).
+// Texture streaming: multi-mip BCn textures above the tail size keep a CPU copy
+// and demote to a low-mip tail under VRAM pressure (SetBudget), promoting again
+// when drawn (Touch feeds the LRU). A swap creates a fresh image, so affected
+// materials get NEW binding sets (live ones may be GPU-pending); the bindless
+// slot moves to a fresh index and the old image/set/slot retire once every
+// in-flight frame has drained (BeginFrame flushes the ring).
 class MaterialSystem {
  public:
   // Matches the std140 block in mesh.frag.

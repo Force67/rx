@@ -56,7 +56,7 @@ RX_NET_EXPORT void TickInterpolation(ecs::World& world, f32 dt);
 // everything else a game addresses entities by travels in the opaque
 // EntityState::user_tag through these hooks. Unset hooks mean "no tag".
 struct ReplicationHooks {
-  // Server capture: the tag stored for an entity (0 = none) -- e.g. a game
+  // Server capture: the tag stored for an entity (0 = none), e.g. a game
   // packs its form/record id here.
   std::function<u64(ecs::World&, ecs::Entity)> capture_user_tag;
   // Client apply: called once when a replica spawns with a non-zero tag, so

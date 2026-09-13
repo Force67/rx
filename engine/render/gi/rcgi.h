@@ -66,7 +66,7 @@ class RcgiSystem {
   // hardware ray-query pipelines (probe trace, cache shade, gather chain) plus
   // the software SDF variants are all created (so RX_RCGI_SW A/B works on RT
   // hardware). When false, ONLY the software variants + the shared/probes-only
-  // pipelines are created -- a SPIR-V module declaring RayQuery can fail pipeline
+  // pipelines are created; a SPIR-V module declaring RayQuery can fail pipeline
   // creation on a non-ray-query device, so the hw pipelines are skipped entirely.
   static std::unique_ptr<RcgiSystem> Create(Device& device, TextureView sky_view,
                                             SamplerHandle sky_sampler, BindlessRegistry& bindless,

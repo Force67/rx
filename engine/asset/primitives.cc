@@ -17,29 +17,22 @@ constexpr size_t kMinLodIndices = 3000;
 constexpr f32 kLodReduction = 0.7f;
 
 // One coarser lod by vertex clustering: snap each vertex to a g x g x g grid
-// cell over the mesh bounds, average the vertices that land in a cell into one
-// representative, and keep only the triangles whose three corners fall in three
-// distinct cells (the rest have folded up). Lower quality than edge collapse but
-// robust and fine for the distant lods the selector reaches for.
+// cell over the mesh bounds, average each cell's vertices into one
+// representative, keep only triangles whose corners land in three distinct
+// cells. Lower quality than edge collapse; fine for distant lods.
 //
-// Submeshes are clustered one at a time: a cell yields one representative per
-// submesh, never one shared between two, so no vertex is ever welded across a
-// material boundary and the wall of a building cannot pull the window it meets
-// into itself. Positions are still averaged over the whole mesh, so the two
-// submeshes that meet at a seam put their representatives on the same point and
-// the coarse lod does not crack open along it.
+// Submeshes cluster one at a time (a cell yields one representative per
+// submesh, never shared across a material boundary), but positions average
+// over the whole mesh, so submeshes meeting at a seam put their representatives
+// on the same point and the coarse lod does not crack along it. The output
+// submesh table matches the input entry for entry, including zero-count
+// entries: the draw loop pairs coarse submesh k with lod 0's submesh k to
+// carry the material.
 //
-// The output submesh table matches the input entry for entry, including
-// submeshes whose triangles all folded up (they keep a zero-count entry): the
-// draw loop pairs a coarse lod's submesh k with lod 0's submesh k to carry the
-// material over, so the two tables have to stay aligned.
-//
-// Vertices on an open boundary (an edge no second triangle shares) are kept
-// where they are. Content arrives tiled - a terrain chunk, a road segment, a
-// water plane - and neighbouring meshes only meet because their border vertices
-// are the same points. A border that moved with the grid tears a lit gap
-// between two meshes at every seam, which is far more visible than the detail
-// the lod drops.
+// Open-boundary vertices are kept where they are. Content arrives tiled
+// (terrain chunks, road segments) and neighbours meet only because their
+// border vertices coincide; a border that moved would tear a lit gap at every
+// seam.
 MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u32 g) {
   f32 cell[3] = {std::max(ext.x, 1e-5f) / g, std::max(ext.y, 1e-5f) / g,
                  std::max(ext.z, 1e-5f) / g};

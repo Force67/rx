@@ -1,7 +1,7 @@
 #ifndef RX_GI_SDF_TRACE_HLSLI_
 #define RX_GI_SDF_TRACE_HLSLI_
 
-// Global SDF clipmap sphere-trace -- the software visibility ray S2 swaps in for
+// Global SDF clipmap sphere-trace: the software visibility ray S2 swaps in for
 // a TLAS query on hardware without ray query (the Lumen "software ray tracing"
 // idea grafted onto RCGI's visibility-only rays). Dependency-free: no RayQuery,
 // no bindless tables. All resources are passed as parameters (rcgi_common.hlsli
@@ -9,11 +9,11 @@
 //
 // ============================ S2 binding contract ============================
 // A pass that traces the clipmap must bind (any slots; pass them in):
-//   ConstantBuffer<SdfGlobals> sdf   -- clip origins / voxel sizes / camera.
-//   Texture3D<float>  sdf_distance   -- signed distance, R16Float, kGeneral.
-//   Texture3D<float4> sdf_albedo     -- surface albedo proxy, RGBA8, kGeneral.
-//   Texture3D<float4> sdf_emissive   -- surface emissive proxy, RGBA8, kGeneral.
-//   SamplerState      sdf_sampler    -- linear clamp-to-edge (all three axes).
+//   ConstantBuffer<SdfGlobals> sdf:  clip origins / voxel sizes / camera.
+//   Texture3D<float>  sdf_distance:  signed distance, R16Float, kGeneral.
+//   Texture3D<float4> sdf_albedo:    surface albedo proxy, RGBA8, kGeneral.
+//   Texture3D<float4> sdf_emissive:  surface emissive proxy, RGBA8, kGeneral.
+//   SamplerState      sdf_sampler:   linear clamp-to-edge (all three axes).
 // The three volumes are one stacked-Z atlas of size
 //   (kSdfRes, kSdfRes, kSdfRes * kSdfClips): clip c occupies z in
 //   [c*kSdfRes, (c+1)*kSdfRes). Bind them InGeneral (they live in kGeneral).
@@ -106,7 +106,7 @@ struct SdfHit {
   float3 emissive;
   float hitT;
   bool miss;
-  bool inside;  // ray origin sits inside closed geometry (SDF<0 at the start) -->
+  bool inside;  // ray origin sits inside closed geometry (SDF<0 at the start),
                 // the hardware "backface" case; the caller must skip cache insertion.
 };
 
@@ -115,7 +115,7 @@ struct SdfHit {
 // not a self-hit bias: callers that need to clear their own surface offset the
 // origin instead (the sun-occlusion trace in rcgi_cache_shade_body.hlsli pushes
 // the origin ~1.5 voxels along the normal, then passes a tiny start_t here so a
-// blocker just past that biased origin is not skipped -- one bias, not two).
+// blocker just past that biased origin is not skipped; one bias, not two).
 SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfGlobals g,
                       Texture3D<float> sdf_distance, Texture3D<float4> sdf_albedo,
                       Texture3D<float4> sdf_emissive, SamplerState sdf_sampler) {
@@ -137,13 +137,13 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
   // starts inside closed geometry -> mirror the hardware backface case immediately.
   //
   // SdfSelectClip guard-bands by one voxel, so an OUTER probe sitting in the
-  // coarsest clip's guard shell -- or exactly on a clip face, where the RCGI-
-  // aligned clip snap (sdf_clipmap.cc) parks cascade-3 outer probes -- is rejected
+  // coarsest clip's guard shell (or exactly on a clip face, where the RCGI-
+  // aligned clip snap in sdf_clipmap.cc parks cascade-3 outer probes) is rejected
   // by it even when the clip's data encloses the probe. For that case fall back to
   // the coarsest clip's PHYSICAL voxel extent (local [0,res], no guard inset) and
   // sample it with coords clamped to the valid trilinear interior (SdfClipUvw
   // clamps to [0.5,res-0.5]); a negative there is still inside/backface. Finer
-  // clips keep their normal guarded sample -- the physical fallback is only for the
+  // clips keep their normal guarded sample; the physical fallback is only for the
   // guard shell / boundary. Origins outside the coarsest physical extent are by
   // definition not inside geometry; fall through to the slab-entry march.
   uint c0 = SdfSelectClip(g, origin);
@@ -205,7 +205,7 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
           // record it as the anchor but leave real_anchor false, so a negative on
           // the first in-volume sample trips the backface backstop below rather
           // than bisecting to a fake front hit. (If the origin already gave a real
-          // anchor -- an outer probe in the guard shell that read >= 0 -- keep it.)
+          // anchor (an outer probe in the guard shell that read >= 0), keep it.)
           t_anchor = t;
           has_anchor = true;
         }
@@ -225,7 +225,7 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
         // Backstop: the first real in-volume sample is already negative and the
         // only anchor is the slab entry boundary (entry epsilon is 1% of a voxel).
         // The entry point is itself inside geometry, so this is the hardware
-        // backface case -- NOT a front hit. A genuine front surface at the boundary
+        // backface case, NOT a front hit. A genuine front surface at the boundary
         // reads near-zero POSITIVE at entry + 1% voxel, so this never swallows a
         // legitimate front hit; ordinary mid-march crossings (after a real positive
         // sample) still resolve as front hits via the bisection below.
@@ -236,7 +236,7 @@ SdfHit TraceGlobalSdf(float3 origin, float3 dir, float tmax, float start_t, SdfG
         return hit;
       }
       // A negative sample AFTER a proven-outside (real) anchor means the surface
-      // lies between that anchor and here -- a front-surface crossing, never an
+      // lies between that anchor and here: a front-surface crossing, never an
       // inside/backface (the origin already excluded that). Bisect toward the
       // crossing for a hit position/normal on the surface rather than inside it.
       if (d < 0.0 && real_anchor) {

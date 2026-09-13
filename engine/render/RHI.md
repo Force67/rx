@@ -20,7 +20,7 @@ gate compilation; the null backend always builds.
 
 - **Device** (`rhi/device.h`): resource + pipeline creation, frame ring
   (`BeginFrame(slot)` / `SubmitFrame`), `ImmediateSubmit` for uploads. Owns all
-  sync primitives - nothing above the RHI touches fences or semaphores.
+  sync primitives; nothing above the RHI touches fences or semaphores.
 - **CommandList** (`rhi/command_list.h`): recording. Dynamic-rendering-style
   raster (`BeginRendering` auto-sets viewport/scissor), compute, transfers,
   acceleration-structure builds, timestamps, debug labels.
@@ -44,7 +44,7 @@ gate compilation; the null backend always builds.
   an SM 6.5 DXIL sidecar when the d3d12 backend is built (see the D3D12
   section). `RX_SHADER(k_foo_cs_hlsl)` wraps both as one `ShaderBlob`; pass
   code does not change per backend.
-- **Samplers**: `device.GetSampler(SamplerDesc{...})` - cached, never destroyed
+- **Samplers**: `device.GetSampler(SamplerDesc{...})`, cached, never destroyed
   by callers.
 - **Ray tracing**: ray queries only (no RT pipelines/SBT). `AccelTriangles`,
   `TlasInstance` (layout-identical between VK and D3D12) and
@@ -58,7 +58,7 @@ gate compilation; the null backend always builds.
   `cmd->CopyAccelStruct(dst, src, /*compact=*/true)` into it; retire the fat one
   via `DestroyAccelStructDeferred`. Vulkan-complete; d3d12 implements the size
   query via `EmitRaytracingAccelerationStructurePostbuildInfo` + readback copy
-  (needs real DXR - under vkd3d, which reports no raytracing caps, the query
+  (needs real DXR; under vkd3d, which reports no raytracing caps, the query
   handle comes back null and callers skip compaction; Windows runtime
   validation pending); null inert. The engine `RayTracingContext` compacts
   every mesh BLAS on upload whenever the query is available.
@@ -87,8 +87,8 @@ query + history imports + shared bindless set), `gi/raytracing.*` (AS builds),
 
 ## Interop escape hatch
 
-Modules that integrate API-specific SDKs - NRD, DLSS, FSR3, the runtime gui
-backend, the thumbnailer - include `rhi/vulkan_interop.h` (guarded by
+Modules that integrate API-specific SDKs (NRD, DLSS, FSR3, the runtime gui
+backend, the thumbnailer) include `rhi/vulkan_interop.h` (guarded by
 `RX_RHI_VULKAN`) and pull raw handles via `GetVulkanHandles(device)`,
 `GetVkCommandBuffer(cmd)`, `GetVkImage/GetVkImageView/...`. This keeps them
 fully functional on the Vulkan backend without leaking Vulkan into the
@@ -104,7 +104,7 @@ the nix dev shell). `vkrun env RX_RHI=d3d12 ./build/nix/runtime/rx
 --demo materials --no-rt` renders the materials demo pixel-identical to the
 Vulkan backend outside the stochastic cloud layer (MAE < 1/255, p99 = 0
 against `RX_RHI=vulkan` with clouds pinned off; the demo is not run-to-run
-deterministic - animated particles and TAA state add temporal noise to any
+deterministic: animated particles and TAA state add temporal noise to any
 two captures, so judge parity against a same-backend rerun baseline).
 
 Offscreen devices are wired for d3d12 (`Device::CreateOffscreen` with
@@ -118,7 +118,7 @@ when `RX_RHI_D3D12` is on. Validation status under
 d3d12 offscreen tests run clean; the full demo on d3d12 still reports a
 couple dozen errors that originate inside vkd3d 2.0's own translation
 (read-only-depth render pass layouts, typeless-depth
-`VkImageFormatListCreateInfo` gaps), not from rx's D3D12 API usage - the
+`VkImageFormatListCreateInfo` gaps), not from rx's D3D12 API usage. The
 real arbiter for that half is the D3D12 debug layer on a Windows runtime.
 
 ### Wine runtime (real d3d12.dll)
@@ -126,7 +126,7 @@ real arbiter for that half is the D3D12 debug layer on a Windows runtime.
 The `_WIN32` half of the backend also runs against Wine's own `d3d12.dll`
 (a Windows-shaped runtime rather than in-process vkd3d): the tests
 cross-compile as x86_64 PEs via `cmake/toolchain-mingw-w64.cmake` and run
-through `tools/wine_d3d12_test.sh` - on aarch64 hosts the x86_64 Wine runs
+through `tools/wine_d3d12_test.sh`; on aarch64 hosts the x86_64 Wine runs
 under box64, whose winevulkan -> libvulkan boundary is wrapped to the native
 loader, so the host NVIDIA ICD *and* the Khronos validation layer serve the
 emulated process. Verified on the GB10 box: `offscreen_test` renders
@@ -134,7 +134,7 @@ pixel-exact and both tests report zero validation errors on the Vulkan
 instance underneath Wine's d3d12; `compaction_test` skips (Wine's bundled
 vkd3d reports no DXR tier here). wined3d must be pinned to its Vulkan
 adapter path (`HKCU\Software\Wine\Direct3D renderer=vulkan`, the script does
-this) - the default GL path finds no pixel formats under Xvfb. The DXGI
+this): the default GL path finds no pixel formats under Xvfb. The DXGI
 flip-model swapchain still needs a real interactive Windows desktop to
 validate; the mingw cross build required no source changes in the backend
 itself beyond loading SDL3's window-property helpers dynamically.
@@ -146,7 +146,7 @@ itself beyond loading SDL3's window-property helpers dynamically.
   from `shaders/rhi_bindings.hlsli` (SPIR-V push constants / DXIL cbuffer at
   `b999, space0`). The build embeds a DXIL sidecar (`k_<sym>_dxil`) next to
   the SPIR-V when `RX_RHI_D3D12` is on; the sidecar targets SM 6.5
-  (vkd3d 2.0's ceiling - 6.6 DXIL is rejected; 6.5 still covers ray queries
+  (vkd3d 2.0's ceiling; 6.6 DXIL is rejected. 6.5 still covers ray queries
   and mesh shaders). The DXIL is unsigned, which vkd3d accepts natively and
   Windows accepts with experimental shader models; shipping Windows builds
   would sign via dxil.dll. The ray-hit shading readers are dual-path through
@@ -163,7 +163,7 @@ itself beyond loading SDL3's window-property helpers dynamically.
   vkd3d 2.0 silently accepted mismatches).
 - **Bindings**: one root-signature descriptor table per set for views and one
   for samplers (`space = set index`); `kStorageBuffer` slots occupy an SRV+UAV
-  descriptor pair (raw views - vkd3d lowers structured access to byte ranges;
+  descriptor pair (raw views; vkd3d lowers structured access to byte ranges;
   descriptor-stride-consuming Windows hardware needs the rhi to carry element
   strides, see below). Transient sets write straight into a per-frame window
   of the shader-visible heap; persistent sets (bindless registry, material
@@ -174,11 +174,11 @@ itself beyond loading SDL3's window-property helpers dynamically.
   root constants; larger blocks spill into a per-frame upload ring behind a
   root CBV, with a CPU shadow so offset pushes (per-draw head at 0, shadow
   cascade matrix above it) keep Vulkan semantics. Per-draw data that does not
-  fit - the mesh, shadow and water paths' model/prev_model matrices - lives in
+  fit (the mesh, shadow and water paths' model/prev_model matrices) lives in
   a per-frame `DrawRecord` arena instead, and the block carries that record's
   index. The index is flat, not a multi-draw base: rx's one multi-draw through
   these pipelines (`AdaptiveWaterMesh::Draw`) emits a command per triangle
-  patch of a *single* surface, so all its commands share one record - and a
+  patch of a *single* surface, so all its commands share one record, and a
   flat index is also the only kind a fragment shader, which has no SPIR-V
   `DrawIndex`, can read.
 - **Skinned meshes (RX_BDA convention)**: the skinned vertex shaders read
@@ -189,7 +189,7 @@ itself beyond loading SDL3's window-property helpers dynamically.
   (`shadow.vs`), `kMeshDraw` adds the morph target delta/weight addresses for
   root SRVs at `(t997/t996, space0)` (`mesh.vs`). The backend still requires a
   `BLENDINDICES` input signature before binding the palette, and a pipeline
-  that declares no header leaves all three unbound - inferring the header from
+  that declares no header leaves all three unbound; inferring the header from
   the block size would eventually feed a root SRV whatever an unrelated block
   of the same size happens to hold.
 - **Barriers**: legacy `D3D12_RESOURCE_STATES` (vkd3d 2.0 has no enhanced
@@ -201,7 +201,7 @@ itself beyond loading SDL3's window-property helpers dynamically.
   legal in D3D12), which cancels the D3D/Vulkan NDC y-flip so the shared
   Vulkan-tuned HLSL and matrices render identically on both backends.
 - **Swapchain**: DXGI flip-model on Windows (compile-guarded); on Linux an
-  offscreen ring of three render targets - no display path exists through
+  offscreen ring of three render targets; no display path exists through
   vkd3d, "present" is a no-op and `RX_UI_SHOT` reads frames back through the
   normal `CopyTextureToBuffer` path (with the 256-byte row-pitch staging
   shuffle D3D12 requires).
@@ -211,7 +211,7 @@ itself beyond loading SDL3's window-property helpers dynamically.
 - **Ray tracing & mesh shaders**: prebuild info, AS creation and
   BLAS/TLAS builds are implemented against `ID3D12Device5` /
   `ID3D12GraphicsCommandList4`, mesh PSOs against `ID3D12Device2` state
-  streams - all caps-gated. vkd3d 2.0 reports neither
+  streams, all caps-gated. vkd3d 2.0 reports neither
   (`raytracing/ray_query/mesh_shaders = false`), so on Linux these paths
   compile but stay unreached; the engine's existing gating handles it.
 
@@ -241,7 +241,7 @@ libvkd3d implements aggregate returns with the Windows out-pointer ABI.
   vkd3d lowers correctly; hardware that indexes via the descriptor stride
   needs `BindingItem` to carry strides.
 - Vulkan-interop consumers (ugui HUD/menus, imgui debug overlay, NRD, DLSS,
-  FSR3, thumbnailer) degrade gracefully on d3d12 - feature-unavailable, as
+  FSR3, thumbnailer) degrade gracefully on d3d12 (feature-unavailable, as
   designed. A d3d12 gui backend would restore UI there.
 - The mesh-shader shaders (`mesh_scene.as/ms` device-address geometry reads,
   `meshlet.ms` multi-branch SetMeshOutputCounts) still need DXIL-compatible
@@ -256,7 +256,7 @@ pass code assumes descriptor sets, image layouts or SPIR-V.
 
 `Device::CreateSwapchain(..., hdr)` requests an HDR surface: HDR10 PQ
 (A2B10G10R10 + ST2084) preferred, scRGB (RGBA16F + extended-sRGB linear)
-second, silent SDR fallback otherwise - `Swapchain::color_space()` reports
+second, silent SDR fallback otherwise. `Swapchain::color_space()` reports
 the negotiated space and the tonemap pass encodes accordingly (sRGB / PQ /
 scRGB). Enable with `RX_HDR_OUTPUT=1`; `RX_HDR_PAPER_WHITE=<nits>` maps
 tonemapped white (default 200). The HDR modes are SDR-referred v1: grading
@@ -266,7 +266,7 @@ numeric testing (verified: PQ and scRGB round-trip at the container's
 quantization floor).
 
 Pending: a display with an HDR-capable surface (this box's X11 session
-offers only SRGB_NONLINEAR - Wayland or Windows needed for runtime
+offers only SRGB_NONLINEAR; Wayland or Windows needed for runtime
 validation), HDR10 metadata (VK_EXT_hdr_metadata), and the UI caveat: gui /
 HUD passes draw after the tonemap in sRGB values, so on a real HDR surface
 they will render dim/miscoded until they encode per color_space() too.

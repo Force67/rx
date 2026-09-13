@@ -290,7 +290,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   if (dot(dir, n) <= 0.0) dir = reflect(dir, n);  // rare below-horizon sample
 
   // Roughness-scaled ray reach (AC Shadows): rough surfaces reflect only the
-  // near neighbourhood, so shorten the ray -- fewer long traversals, and the
+  // near neighbourhood, so shorten the ray: fewer long traversals, and the
   // miss (sky/SH) fills the far field the blur would swallow anyway.
   float ray_reach = pc.max_ray_dist * ((1.0 - roughness) * (1.0 - roughness) + 0.1);
 
@@ -316,7 +316,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   ray.TMin = 0.02;
   ray.Direction = dir;
   ray.TMax = ray_reach;
-  // Specular reflections keep the real masked (vegetation) geometry -- the
+  // Specular reflections keep the real masked (vegetation) geometry; the
   // opaque approximation reads wrong in sharp reflections. Masked triangles are
   // non-opaque in the tlas; run the RayQuery candidate loop and alpha-test them
   // against the real texture, capped at kMaxAlphaTests evaluations. With the

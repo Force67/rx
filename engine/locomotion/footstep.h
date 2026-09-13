@@ -2,17 +2,16 @@
 #define RX_LOCOMOTION_FOOTSTEP_H_
 
 // Footstep planning (docs/LOCOMOTION.md §footstep). Each fixed step every foot
-// gets a plan: stance feet hold their measured contact, swing feet get a
-// terrain-projected, geometry-clamped landing target plus a live analytic swing
-// pose (smoothstep horizontal blend + parabolic lift). The landing target
-// combines desired velocity look-ahead, a lateral stance offset, a velocity
-// error term, and a linear-inverted-pendulum capture-point correction.
+// gets a plan: stance feet hold their measured contact; swing feet get a
+// terrain-projected, geometry-clamped landing target (desired-velocity
+// look-ahead + lateral stance offset + velocity error + capture-point
+// correction) and a live analytic swing pose (smoothstep horizontal, parabolic
+// lift).
 //
-// The math here is deliberately physics-free: terrain is sampled only through a
-// caller-supplied downward probe (which wraps a physics raycast), so the whole
-// module is pure and unit-testable. Conventions: right-handed, +Y up, facing
-// yaw 0 looks down -Z. Metres, m/s, radians. All outputs stay finite for
-// degenerate inputs (zero vectors, zero COM height).
+// Deliberately physics-free: terrain is sampled only through a caller-supplied
+// downward probe, so the module stays pure and unit-testable. Right-handed, +Y
+// up, yaw 0 faces -Z; metres, m/s, radians. Outputs stay finite for degenerate
+// inputs.
 
 #include "core/export.h"
 #include "core/math.h"
@@ -31,7 +30,7 @@ struct GroundHit {
 // Terrain probe supplied by the controller (wraps a physics raycast). Probes
 // straight down from `probe_start` for up to `max_depth` metres; returns true
 // and fills `*out` on a hit, false when nothing is within reach. `context` is
-// the opaque pointer passed to FootstepPlanner::Update — no std::function, no
+// the opaque pointer passed to FootstepPlanner::Update; no std::function, no
 // captured state, so the planner stays allocation- and heap-free.
 using GroundProbeFn = bool (*)(void* context, const Vec3& probe_start, f32 max_depth,
                                GroundHit* out);

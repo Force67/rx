@@ -14,7 +14,7 @@ namespace rx::mem {
 // Linear (bump) allocator for allocations that live exactly one frame:
 // gather lists, scratch buffers, pass-closure captures. Alloc is a pointer
 // bump; Reset at the top of the frame reclaims everything at once. Nothing is
-// destructed — only trivially-destructible payloads belong here.
+// destructed; only trivially-destructible payloads belong here.
 //
 // Single-threaded by design: owned by the frame loop (app::Host resets it in
 // RunFrame). Worker threads must not allocate from it.

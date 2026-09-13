@@ -16,7 +16,7 @@ namespace rx::script {
 // vocabulary every runtime and the wire codec speak; it mirrors edit::PropType
 // but stays independent so the script layer does not depend on the editor.
 // Everything here is a scalar, an entity id, a small POD (Vec3), or ScriptString
-// -- no engine object pointers, no runtime types -- which is what keeps a handler
+// (no engine object pointers, no runtime types), which is what keeps a handler
 // serializable, replayable and testable without a VM.
 enum class ScriptType : u8 {
   kVoid,
@@ -34,7 +34,7 @@ enum class ScriptType : u8 {
 RX_SCRIPT_EXPORT const char* ScriptTypeName(ScriptType type);
 
 // One value on the "script stack": a call argument or a return. A hand-rolled
-// tagged union, not std::variant -- for an 8-way value the variant is larger and
+// tagged union, not std::variant: for an 8-way value the variant is larger and
 // copies/destroys through a hidden index switch, and holding an owning string
 // would make it non-trivially-copyable. Here the string case is a borrowed VIEW
 // (the arena or interner owns the bytes; the value never does), so ScriptValue is
@@ -51,7 +51,7 @@ class ScriptValue {
   static ScriptValue EntityRef(ecs::Entity v) { ScriptValue x; x.type_ = ScriptType::kEntity; x.u_.e = v; return x; }
   // Strings on the stack are borrowed views into arena/interner storage, never
   // owned. The bytes must outlive the call (a literal, an interned symbol, or an
-  // ArenaCopy into the scratch heap) -- see ScriptArena / ScriptSymbols.
+  // ArenaCopy into the scratch heap); see ScriptArena / ScriptSymbols.
   static ScriptValue Str(ScriptStringView v) { ScriptValue x; x.type_ = ScriptType::kString; x.u_.s = v; return x; }
   static ScriptValue Symbol(StrId v) { ScriptValue x; x.type_ = ScriptType::kSymbol; x.u_.sym = v; return x; }
 
@@ -92,7 +92,7 @@ static_assert(std::is_trivially_copyable_v<ScriptValue>,
 using ScriptStack = std::vector<ScriptValue>;
 
 // A thin typed reader over the argument stack. This is the surface the unpacking
-// trampolines use -- a.Ent(0), a.Vec(1), a.Str(0) -- so a handler's generated
+// trampolines use (a.Ent(0), a.Vec(1), a.Str(0)), so a handler's generated
 // glue never indexes the raw stack or touches ScriptValue directly. Out-of-range
 // or wrong-typed reads return a benign default, matching how a partially-wired
 // runtime should degrade rather than crash.

@@ -30,8 +30,8 @@ struct SessionConfig {
   u16 port = 29700;
   base::String address;  // client: server to join
   base::NameString player_name{"player"};
-  // The game's wire version, checked at join. Bump it whenever any payload --
-  // engine or game -- changes shape.
+  // The game's wire version, checked at join. Bump it whenever any payload,
+  // engine or game, changes shape.
   u32 protocol = 1;
   u32 max_clients = 64;
   u32 tick_rate = 60;
@@ -101,8 +101,8 @@ class RX_NET_EXPORT ServerSession : public Session {
     player_simulator_ = std::move(sim);
   }
 
-  // Per-entity replication payload (user tags) capture, and -- through the
-  // same hooks type -- what a client does when a tagged replica spawns.
+  // Per-entity replication payload (user tags) capture, and (through the
+  // same hooks type) what a client does when a tagged replica spawns.
   void SetReplicationHooks(ReplicationHooks hooks) { hooks_ = std::move(hooks); }
 
   // Join/leave notifications, the fundamental multiplayer hooks for

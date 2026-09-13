@@ -331,7 +331,7 @@ void TestRemoveJoint() {
   f32 q[4] = {0, 0, 0, 1};
   Check(w.GetJointOrientation(joint, q), "joint orientation readable before removal");
 
-  // Drop the constraint FIRST, then both bodies — the previously-crashing order
+  // Drop the constraint FIRST, then both bodies. The previously-crashing order
   // (bodies removed while the constraint stayed registered) left the next Update
   // dereferencing freed body pointers.
   w.RemoveJoint(joint);

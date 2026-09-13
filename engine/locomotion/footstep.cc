@@ -109,7 +109,7 @@ void FootstepPlanner::Update(const CharacterMeasurements& m, const ContactEstima
     // The capture term is a CORRECTION on top of the desired-velocity look-ahead
     // reach, not the whole step: letting it run to the full capture excursion
     // double-counts the forward lead and over-steps, pole-vaulting a walking body
-    // backward. Cap it to ~2.5x the recovery margin — enough to reach out and
+    // backward. Cap it to ~2.5x the recovery margin, enough to reach out and
     // catch a real disturbance, small enough not to over-stride a steady walk.
     capture_off = ClampLength(capture_off, params.recovery_margin * 2.5f);
 

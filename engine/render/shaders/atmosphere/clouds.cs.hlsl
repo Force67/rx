@@ -166,7 +166,7 @@ void main(uint3 id : SV_DispatchThreadID) {
 
   float3 to_sun = normalize(-pc.sun_direction.xyz);
   float3 sun_col = pc.sun_color.rgb * pc.sun_direction.w;
-  // Cool sky ambient so shadowed cloud bottoms aren't black; graded by height
+  // Cool sky ambient so shadowed cloud bottoms are not black; graded by height
   // inside the march (tops see the whole sky dome, bases see the dark ground).
   float3 ambient_base = float3(0.50, 0.62, 0.88) * 0.38 * pc.sun_direction.w;
   float c = dot(view, to_sun);

@@ -48,7 +48,7 @@ const char* WireTypeName(rpc::RpcValue::Type type) {
   return "unknown";
 }
 
-// "(entity, vec3)" -- the signature as the caller has to spell it, for a
+// "(entity, vec3)", the signature as the caller has to spell it, for a
 // mismatch message that says what was wanted rather than only what was wrong.
 std::string SigText(const script::HandlerSig& sig) {
   std::string text = "(";

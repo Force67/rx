@@ -162,26 +162,19 @@ Vec3 SdfClipmap::SnapOrigin(const Vec3& camera, u32 clip) const {
   f32 extent = kBaseExtent * static_cast<f32>(1u << clip);
   f32 voxel = extent / kRes;
   // Snap the clip origin on a granularity of 8 voxels, NOT 1. The RCGI cascades
-  // this clipmap mirrors snap their origin to their PROBE SPACING -- `floor((cam -
-  // half)/spacing)*spacing` -- and cascade N's probe spacing is exactly 8x this
-  // clip's voxel (RCGI base spacing 2 m * 2^N vs clip voxel kBaseExtent/kRes * 2^N
-  // = 0.25 m * 2^N; ratio 8). Matching the snap granularity keeps the 256 m clip-3
-  // and 240 m cascade-3 volumes coincident so every cascade probe -- including the
-  // outer faces -- lands inside this clip's PHYSICAL voxel extent; snapping finer
-  // (per-voxel) let the two origins drift by up to a probe spacing, pushing outer
-  // probes several metres outside the coarsest clip and injecting sky / false hits.
-  //
-  // The formulas are otherwise identical to RCGI's (same camera eye, std::floor,
-  // per-axis) except the half offset: clip half = extent/2 = 64 voxels = 8 snaps,
-  // vs RCGI half = (kProbesPerAxis-1)*spacing/2 = 7.5 spacings. With snap == spacing
-  // this leaves the two shared origins differing by only 0 or +1 snap, so the outer
-  // cascade probe lands at most exactly on a clip face (handled by the zero-margin
-  // physical-extent origin classification in sdf_trace.hlsli). The two also update
-  // on different cadences -- RCGI re-snaps only the round-robin *current* cascade
-  // each frame (its blended origin lags for the other three), while this clipmap
-  // re-snaps every clip that moved -- so during fast motion the origins can
-  // transiently disagree by up to one snap; the first-sample-after-entry backface
-  // backstop in sdf_trace.hlsli is the safety net for that window.
+  // this clipmap mirrors snap to their probe spacing, which is exactly 8x this
+  // clip's voxel (RCGI 2 m * 2^N vs clip voxel 0.25 m * 2^N). Matching the
+  // granularity keeps the 256 m clip-3 and 240 m cascade-3 volumes coincident so
+  // every cascade probe lands inside this clip's PHYSICAL voxel extent; per-voxel
+  // snap let the origins drift by a probe spacing and inject sky / false hits.
+  // The formulas otherwise match RCGI's except the half offset (clip 64 voxels =
+  // 8 snaps vs RCGI 7.5 spacings), so with snap == spacing the shared origins
+  // differ by at most one snap, putting the outer probe at worst exactly on a
+  // clip face (handled by sdf_trace.hlsli's zero-margin classification). Cadence
+  // differs (RCGI re-snaps only the round-robin current cascade, this clipmap
+  // every moved clip), so during fast motion the origins can transiently
+  // disagree by one snap; sdf_trace.hlsli's first-sample-after-entry backface
+  // backstop covers that window.
   const f32 snap = voxel * 8.0f;
   f32 half = extent * 0.5f;
   return Vec3{std::floor((camera.x - half) / snap) * snap,
@@ -311,10 +304,9 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             const SdfScene::MeshSdf* mesh = candidate.mesh;
 
             // Conservative local->world distance scale: the transform's minimum
-            // axis scale is a safe lower bound on world distance (so the sphere
-            // trace never overshoots). The design doc names the max axis; the
-            // minimum is the correct conservative choice for non-overshoot -- see
-            // SDF_TRACE.md S1 notes.
+            // axis scale is a safe lower bound on world distance, so the sphere
+            // trace never overshoots. (The max axis would be correct only for a
+            // non-overshooting bound.)
             const f32* m = inst.transform.m;
             f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
             f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);

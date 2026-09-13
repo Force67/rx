@@ -3,9 +3,9 @@
 
 // World-space light grid sampling. Include after declaring the three bound
 // resources (see LightGrid in gi/light_grid.h):
-//   ConstantBuffer<LightGridParams> lg_grid   -- per-cascade origins + info
-//   StructuredBuffer<uint>          lg_counts  -- per-cell light count
-//   StructuredBuffer<uint>          lg_ids     -- per-cell light id list
+//   ConstantBuffer<LightGridParams> lg_grid:  per-cascade origins + info
+//   StructuredBuffer<uint>          lg_counts: per-cell light count
+//   StructuredBuffer<uint>          lg_ids:    per-cell light id list
 // under whatever register/space the including shader assigns, then iterate with
 // LightGridBegin/LightGridLightId. The ids index the same Light structured
 // buffer the froxel cluster consumes.

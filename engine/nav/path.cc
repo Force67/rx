@@ -211,8 +211,8 @@ Portal MakePortal(const NavMesh& mesh, CellRef from, CellRef to, f32 radius) {
     b = {(static_cast<f32>(from.x) + 1.0f) * cs, y, pz};
   }
   // Orient the pair for the funnel's update conditions. The funnel's "left"
-  // is the endpoint on the NEGATIVE TriArea2 side of the travel direction --
-  // the +z side when walking +x, which by TriArea2's convention is the
+  // is the endpoint on the NEGATIVE TriArea2 side of the travel direction (the
+  // +z side when walking +x), which by TriArea2's convention is the
   // geometric RIGHT. The label is the funnel's, not the compass's: only
   // consistency between this orientation and the update conditions matters.
   const Vec3 dir{static_cast<f32>(dx), 0, static_cast<f32>(dz)};

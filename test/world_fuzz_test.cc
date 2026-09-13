@@ -1,21 +1,15 @@
-// Random-mutation fuzz over the three baked-map decoders.
+// Random-mutation fuzz over the three baked-map decoders. The hand-written
+// refusal tests aim one mutation at one check; this aims many at no check in
+// particular, covering the half they cannot: a decoder must be safe on input
+// nobody thought of. Half the runs repair the checksum after mutating, else
+// the checksum rejects everything and the fuzz never reaches the structural
+// validation behind it (the code that computes offsets and counts from the
+// file).
 //
-// The hand-written refusal tests in world_format_test and world_overlay_test
-// each aim one mutation at one check. This aims a great many at no check in
-// particular, which is the half they cannot cover: a decoder has to be safe on
-// input nobody thought of, not only on input somebody thought of.
-//
-// Half the runs repair the checksum after mutating. Without that the checksum
-// rejects essentially everything and the fuzz never reaches the structural
-// validation behind it - which is where the interesting bugs are, because that
-// is the code that computes offsets and counts from the file.
-//
-// The contract under test is narrow and absolute: a decoder may accept or it
-// may refuse with a message, and it may not crash, hang, leak, or read out of
-// bounds. Anything it accepts must survive its own accessors. Run under
-// -DRX_SANITIZE=ON for that to mean what it says.
-//
-// Deterministic: fixed seed, fixed iteration count. Pass a count to run longer.
+// Contract: a decoder may accept or refuse with a message, and may not crash,
+// hang, leak, or read out of bounds; anything accepted must survive its own
+// accessors. Run under -DRX_SANITIZE=ON for that to mean what it says.
+// Deterministic: fixed seed, fixed iteration count; pass a count to run longer.
 #include <cstdio>
 #include <cstdlib>
 #include <random>

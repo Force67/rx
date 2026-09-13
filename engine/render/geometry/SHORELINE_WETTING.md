@@ -31,11 +31,11 @@ a single full-resolution pass.
 
 For each texel at world XZ:
 
-1. **Water height** — the same Gerstner field the water displaces with
+1. **Water height**: the same Gerstner field the water displaces with
    (`water_waves.hlsli`, so the wet line tracks the visible swell), or the FFT
    ocean displacement map when that path is active (`RX_FFT_OCEAN`). The
    Gerstner path ignores horizontal chop (a height-field approximation).
-2. **Terrain height** — see the height source below.
+2. **Terrain height**: see the height source below.
 3. `submerged = water >= terrain`.
 4. History from the previous field decays by `exp(-dt / drying_time)`; the
    result is `max(submerged, decayed)`. Freshly reached texels snap to soaked;

@@ -1,7 +1,7 @@
 // rx::authoring acceptance: the live command endpoint, from an encoded rpc frame
 // on a unix socket all the way into a real ecs::World and back. Covers the two
-// things that make it safe to leave in a shipping binary -- the signature check
-// in front of every handler, and the trust gate in front of the registry -- with
+// things that make it safe to leave in a shipping binary: the signature check
+// in front of every handler, and the trust gate in front of the registry, with
 // no window, GPU or transport, so plain ctest runs it.
 
 #include <sys/socket.h>
@@ -73,7 +73,7 @@ void TestMarshalling() {
   CHECK(rig.bridge->registry().size() == rig.commands.size());
   CHECK(rig.bridge->registry().Has("World.Spawn"));
 
-  // World.Spawn(symbol, vec3, float) -- 3 params, 5 wire args.
+  // World.Spawn(symbol, vec3, float): 3 params, 5 wire args.
   authoring::CommandBridge::Reply reply =
       rig.Call("World.Spawn", {rpc::RpcValue(std::string("crate")), rpc::RpcValue(1.0),
                                rpc::RpcValue(2.0), rpc::RpcValue(3.0), rpc::RpcValue(rx::i64(2))});

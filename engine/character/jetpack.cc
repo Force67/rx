@@ -48,7 +48,7 @@ void StepJetpacks(ecs::World& world, f32 dt) {
         // --- thrust -> acceleration (the seam StepCharacters integrates) ------
         // Vertical: TWR * gravity, so it competes with weight and only climbs
         // when thrust_to_weight * thrust > 1. Lateral: along the horizontal move
-        // intent, scaled by thrust — the in-air lean that beats free-fall drift.
+        // intent, scaled by thrust: the in-air lean that beats free-fall drift.
         const f32 g = std::max(move.gravity, 0.0f);
         Vec3 accel{0.0f, st.thrust * d.thrust_to_weight * g, 0.0f};
         const Vec3 mh{intent.move.x, 0.0f, intent.move.z};

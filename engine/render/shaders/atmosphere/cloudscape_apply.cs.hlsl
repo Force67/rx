@@ -58,7 +58,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   // faster than the 16-frame refresh cycle, so boosting the amortized march
   // would print the refresh grid (and bake flash frames into the history).
   // Two components: the distance-damped global flash (uniform, weak for far
-  // storms), plus a directional glow -- a distant strike lights ITS corner of
+  // storms), plus a directional glow: a distant strike lights ITS corner of
   // the sky, a lobe around the strike azimuth hugging the horizon, so an
   // Unwetter flickers on the skyline without relighting the whole dome.
   float flash = pc.flash;

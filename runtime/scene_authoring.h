@@ -83,26 +83,17 @@ struct SceneSurface {
   // above. Relative to the working directory; a document that will not load
   // fails the scene load rather than falling back to the authored values.
   std::string materialx;
-  // Image maps, each a path RELATIVE TO THE WORKING DIRECTORY like materialx
-  // and Model.path (a scene points at external art rather than owning it, so
-  // these do not move with the file the way Prefab.path does). Without these a
-  // primitive could only be a flat colour or a generated Pattern, and the
-  // thousands of CC0 photogrammetry sets a scene could be dressed with had no
-  // way in at all except through a glTF import.
+  // Image maps, each a path RELATIVE TO THE WORKING DIRECTORY (like materialx
+  // and Model.path: a scene points at external art rather than owning it).
+  // They LAYER ON the constants above, exactly as the glTF equivalent does:
+  // base_color_map multiplies base_color, and so on, so a texture set wants
+  // base_color = 1 1 1 to come through verbatim and an emissive_map is inert
+  // while emissive is 0 0 0.
   //
-  // They LAYER ON the constants above rather than replacing them, exactly as
-  // the equivalent glTF texture does: base_color_map multiplies base_color,
-  // roughness_map multiplies roughness, emissive_map multiplies emissive. So a
-  // texture set wants base_color = 1 1 1 to come through verbatim, and an
-  // emissive_map does nothing at all while emissive is 0 0 0.
-  //
-  // A path that does not resolve FAILS THE LOAD naming the assignment. There is
-  // no default texture to fall back to: a substituted checkerboard is a render
-  // that looks authored and is not.
-  //
-  // Refused together with a Pattern on one entity (see BuildSceneShapes): both
-  // bind the same three material slots, so either would silently overwrite the
-  // other.
+  // A path that does not resolve FAILS THE LOAD naming the assignment; there is
+  // no default texture, because a substituted checkerboard is a render that
+  // looks authored and is not. Refused together with a Pattern on one entity
+  // (BuildSceneShapes): both bind the same three material slots.
   std::string base_color_map;
   // Tangent space, OpenGL green-up (+y is +v), which is the convention the
   // engine's shaders and its own generated normal maps use. A DirectX-style map
@@ -156,206 +147,118 @@ struct ScenePattern {
 };
 
 // Geometry from a real art asset instead of a primitive: the meshes a
-// .gltf/.glb file ships, with the materials and textures it ships with. This is
-// the only component that names content the scene did not itself describe.
+// .gltf/.glb ships, with its materials and textures. The only component naming
+// content the scene did not itself describe.
 //
-// `path` is the file, optionally narrowed to one of its meshes by the same
-// "#mesh<index>" fragment ImportedScene already addresses its assets by:
-//
-//   Model.path = "test/data/AnimatedMorphCube.glb"        the whole file
-//   Model.path = "test/data/AnimatedMorphCube.glb#mesh0"  one mesh of it
-//
-// The whole file places every instance its nodes describe, as children of this
-// entity, so the file keeps its internal layout and the authored Transform
-// moves the lot. A "#mesh<index>" reference is placed at the entity's Transform
-// instead, ignoring wherever the file's nodes put it: naming one mesh out of a
-// library file means "put THIS one here". Relative paths resolve against the
-// working directory, like Surface.materialx.
+// `path` is the file, optionally narrowed with the "#mesh<index>" fragment
+// ImportedScene already uses. The whole file places every instance its nodes
+// describe as children of this entity (the authored Transform moves the lot);
+// a "#mesh<index>" reference is placed at the entity's own Transform instead.
+// Paths resolve against the working directory, like Surface.materialx.
 //
 // BuildSceneModels writes the Renderables, so a Model entity authors none. Not
-// covered: skinning and animation (a skinned mesh draws in its bind pose at the
-// origin, since glTF has the node ignore its own transform), and the file's own
+// covered: skinning and animation (bind pose at the origin) and the file's own
 // lights and cameras, which lose to the scene's.
 struct SceneModel {
   std::string path;
 };
 
-// Another .rxscene instanced here, so a thing described once can be placed many
-// times. This is the only reuse mechanism: `path` is a scene file, resolved
-// RELATIVE TO THE FILE THAT NAMES IT rather than to the working directory
-// (unlike Model.path and Surface.materialx, which name external art a scene
-// merely points at). A prefab is scene content that belongs to the scene, so a
-// scene directory has to stay movable as a unit.
+// Another .rxscene instanced here: the only reuse mechanism. `path` resolves
+// RELATIVE TO THE FILE THAT NAMES IT (prefabs are scene content and move with
+// it), unlike Model.path / Surface.materialx which point at external art via
+// the working directory. The format is a plain .rxscene so a prefab validates,
+// renders and round-trips with the existing tools.
 //
-// A .rxscene is the definition format rather than a second syntax because that
-// buys every tool at once: a prefab file validates, renders and dumps its
-// schema with the commands that already exist, and SaveScene round-trips an
-// instance for free (see the expansion rule below). An inline `prefab` block
-// would need its own parser in edit::LoadScene, and SaveScene, which writes
-// entities, would drop it on the first live-edit save.
-//
-// The file's FIRST entity is the prefab's root: its components are added to
-// this entity, skipping any this entity already authored. That skip is what
-// lets one prefab serve many variants - the crate's Shape comes from the file,
-// its Surface from the instance - and it is per COMPONENT, not per field: an
-// instance that says anything about Surface owns the whole Surface.
-//
-// Every further entity in the file becomes a child of this entity, keeping its
-// relative Transform so the authored Transform moves the whole group, and
-// marked scene::Transient so SaveScene writes this Prefab line rather than the
-// entities it expanded into. That is BuildSceneModels' treatment of a glTF's
-// instances, for the same reason.
+// The file's FIRST entity is the root: its components are added to this entity,
+// skipping any it already authored, per COMPONENT (an instance saying anything
+// about Surface owns the whole Surface), which is how one prefab serves many
+// variants. Every further entity becomes a Transient child keeping its relative
+// Transform, so the authored Transform moves the group and SaveScene writes
+// this Prefab line instead of the expansion (same treatment as a glTF's
+// instances).
 struct ScenePrefab {
   std::string path;
 };
 
-// Orientation in degrees, because a quaternion is not something an author (or
-// an agent) writes down: "turn this 30 degrees about y" is "0 30 0" here and
-// four hand-computed numbers in Transform.rotation, which is why every scene
-// authored before this component was axis-aligned.
+// Orientation in degrees, because a quaternion is not something an author
+// writes. `euler` is pitch, yaw, roll about the entity's OWN axes, applied
+// q = Ry * Rx * Rz, which keeps yaw horizontal however the thing is pitched.
+// Right-handed, y-up; positive yaw is counter-clockwise from above.
 //
-// `euler` is degrees about x, y and z - pitch, yaw and roll - applied yaw, then
-// pitch, then roll about the entity's OWN axes (q = Ry * Rx * Rz). That order is
-// what keeps yaw horizontal however the thing is pitched, which is what a
-// placement almost always means. Right-handed and y-up like the rest of the
-// engine, so a positive yaw turns counter-clockwise seen from above and y = 90
-// takes the entity's +z face onto +x.
-//
-// It REPLACES Transform.rotation rather than composing onto it, for the same
-// reason an Anchor replaces Transform.position: BuildSceneRotations resolves it
-// into the Transform, and SaveScene writes the resolved quaternion next to the
-// Rotation that produced it, so anything additive would turn the object again on
-// every save/load round trip. An entity wanting a quaternion verbatim authors
-// Transform.rotation and no Rotation, and a live editor sees the failure mode an
-// Anchor already has: turning the entity by hand writes a quaternion the next
-// load throws away for the euler beside it.
-//
-// Against a prefab it follows the usual per-component rule (see ScenePrefab): an
-// instance that authors Rotation owns its orientation, one that does not takes
-// the prefab's. An instance authoring a raw Transform.rotation does NOT beat a
-// prefab's Rotation, because the two are different components; author Rotation
-// on both sides, or neither.
+// REPLACES Transform.rotation rather than composing: BuildSceneRotations
+// resolves it into the Transform and SaveScene writes the resolved quaternion
+// beside it, so anything additive would turn the object again every round trip.
+// A verbatim quaternion is authored as Transform.rotation with no Rotation.
+// Per the usual per-component prefab rule (ScenePrefab): an instance authoring
+// Rotation owns its orientation; authoring a raw Transform.rotation does NOT
+// beat a prefab's Rotation (different components), and a live editor turning
+// the entity by hand writes a quaternion the next load discards.
 struct SceneRotation {
   f32 euler[3] = {0, 0, 0};
 };
 
 // Per-axis proportion for the entity's Shape: `scale` multiplies the built
-// geometry along x, y and z, on top of whatever Shape.size the kind read. This
-// is the only way to say "an ellipsoid", "an oval torus" or "a flattened
-// column", since every kind but box and plane reads size as radii.
+// geometry on top of Shape.size (the only way to author an ellipsoid or
+// flattened column, since every kind but box and plane reads size as radii).
+// Its own component rather than a Shape prop because prefab merge is per
+// COMPONENT (ScenePrefab): a `Shape.stretch` prop would let an instance that
+// only wants different proportions replace the prefab's whole Shape.
 //
-// Its own component rather than a Shape prop for the reason SceneRotation is
-// one: prefab merge is per COMPONENT (see ScenePrefab), so a `Shape.stretch`
-// would make an instance that only wants different proportions replace the
-// prefab's whole Shape, silently losing the kind and size it meant to keep -
-// one building prefab at three proportions is the case this exists for, and it
-// costs one line beside the Prefab.path:
+// BAKED INTO THE VERTICES at build time, not carried on the Transform: the bake
+// applies the inverse transpose to the normals once on cpu, so every downstream
+// matrix stays a similarity. Two shapes differing only in stretch are two
+// meshes (ShapeKey), so cost is per distinct proportion, not per entity. Every
+// axis must be positive (the normal bake divides by them): zero is nans,
+// negative is inside-out; BuildSceneShapes refuses naming the line, --validate
+// reports degenerate_stretch.
 //
-//   Transform.position = 12 18 0
-//   Stretch.scale = 1.6 0.7 1
-//   Prefab.path = "prefabs/city/tower_glass.rxscene"
+// Scope is Shapes only (baking into imported geometry would cost a draw call
+// per variant; stretch a Model by authoring it stretched). A MULTI-ENTITY
+// PREFAB stretches whole: each part's offset and geometry scale with the
+// instance's Stretch (a part's own Stretch is kept, multiplied through), so one
+// podium + shaft + crown prefab yields as many silhouettes as it has instances.
 //
-// It is BAKED INTO THE VERTICES at build time rather than carried on the
-// Transform, which is what keeps it free: the bake applies the inverse
-// transpose to the normals once, on the cpu, exactly, so every matrix
-// downstream stays a similarity and no shader, bound or transform path has to
-// know the mesh was stretched. Two shapes differing only in the stretch are two
-// meshes (see ShapeKey), and two entities agreeing on it share one, so the cost
-// is per distinct proportion rather than per entity.
-//
-// Every axis has to be positive: the normal bake divides by them, so a zero is a
-// mesh of nans and a negative one is a mesh turned inside out. BuildSceneShapes
-// refuses the load naming the line, and --validate reports it as
-// degenerate_stretch.
-//
-// Scope is Shapes, and only Shapes. A Model is deliberately not stretched:
-// baking into imported geometry means a vertex copy and a mesh id per stretch
-// value, which is a draw call per variant instead of per instance, so a glTF
-// asset is stretched by authoring it stretched.
-//
-// A MULTI-ENTITY PREFAB stretches whole. The instance's Stretch reaches every
-// entity the prefab expanded into: each part's offset from the instance scales
-// with it, so a crown ten metres up stays on top of a shaft made twice as tall,
-// and each part's own geometry multiplies by it, so the crown widens when the
-// building does. A part that authored its own Stretch keeps it, multiplied
-// through rather than replaced.
-//
-// That is what makes proportion and SILHOUETTE independent. A building authored
-// as podium + shaft + crown is one prefab and as many outlines as there are
-// instances of it; without it a stretched prefab came back with a stretched
-// root and its other parts floating at their authored size, so the only shape
-// that survived being stretched was a single box - which is why an authored
-// city used to be rectangles of differing height and nothing else.
-//
-// The one case it refuses: a NON-UNIFORM stretch of a prefab with a TURNED
-// part. Scaling per world axis is only a scale while the part's axes agree with
-// the world's; on a turned one it is a shear, which no mesh, bound or transform
-// in this engine can carry. BuildScenePrefabs fails the load naming the part.
-// A uniform stretch is a similarity and is always allowed.
+// Refused: a NON-UNIFORM stretch of a prefab with a TURNED part (per-world-axis
+// scaling is a shear on turned axes, which nothing here carries);
+// BuildScenePrefabs fails naming the part. Uniform stretch is a similarity.
 struct SceneStretch {
   f32 scale[3] = {1, 1, 1};
 };
 
-// Relative placement: stand this entity against another one instead of at a
-// coordinate derived by hand. `target` is the other entity's Name.value and
-// `mode` picks which side of it to sit against.
+// Relative placement: stand this entity against another one's measured bounds
+// (children included) instead of at a hand-derived coordinate. `target` is the
+// other entity's Name.value; `mode` picks the side. Resolves after
+// BuildSceneShapes/Models/Rotations, with both bounds measured rotated (every
+// corner), so a tilted piece still sits on its plinth. A target with no extent
+// (a bare Light) fails the load.
 //
-// The placement uses both entities' real world bounds, children included, so it
-// resolves after BuildSceneShapes/BuildSceneModels rather than at load; a
-// target whose geometry has no extent (a bare Light) cannot be measured and
-// fails the load. It also runs after BuildSceneRotations, because a turned box
-// stands on a different footprint than an axis-aligned one: both boxes are
-// measured with their rotation applied (every corner, not just min and max), so
-// a piece tilted on its plinth still sits on it rather than through or above it.
-//
-// An anchor REPLACES Transform.position: the anchor is the position, and the
-// two axes the mode does not stack along centre on the target. It has to
-// replace rather than offset, or a SaveScene of a running engine (which writes
-// the resolved position along with the Anchor that produced it) would reload
-// with the placement applied on top of itself.
-//
-// `offset` is how an author still says where, in world axes, added to the
-// solved position. Centring is right for a plant room on a tower and useless
-// for the far commoner case of standing something on the GROUND: without an
-// offset every object on a floor plane lands on the same spot, so the whole
-// scene goes back to hand-written coordinates, and the y in them is a hand-run
-// multiplication of the prefab's half height by its Stretch that silently
-// sinks the object the moment either changes. With one, "on the ground at
-// x -15, z 16" is Anchor.target = "Ground", mode = "on", offset = -15 0 16 -
-// and the height, the only number that was ever derived, stays derived.
-//
-// It survives the solve because it is authored INPUT, unlike Transform.position
-// which is the solve's output: the round trip re-derives the position from the
-// bounds and this, so it lands in the same place however many times it is
-// saved and reloaded. Along the stacking axis it is a deliberate gap or bite;
-// across the other two it is displacement from the target's centre.
+// An anchor REPLACES Transform.position (the anchor is the position; the two
+// non-stacking axes centre on the target). Replace rather than offset, or a
+// SaveScene round trip would apply the placement twice. `offset` is authored
+// world-space displacement added to the solved position and survives the solve
+// because it is input, unlike the position which is output: along the stacking
+// axis a deliberate gap, across the others displacement from the target's
+// centre (this is how anything sits on a ground plane without a hand-written y).
 //
 // Anchors resolve in dependency order, so anchoring to something itself
-// anchored works. A cycle fails the load naming the loop.
+// anchored works; a cycle fails the load naming the loop.
 struct SceneAnchor {
   std::string target;
   std::string mode = "on";
   f32 offset[3] = {0, 0, 0};
 };
 
-// Regular repetition: a row or a grid, so N cells cost one declaration of the
-// spacing instead of N stepped coordinates.
+// Regular repetition: a row or a grid, so N cells cost one spacing declaration
+// instead of N stepped coordinates.
 //
-// One component, two roles. An entity with `count` and `step` is the CONTAINER:
-// its Transform is the position of cell (0,0,0). An entity naming that
-// container in `of` is a MEMBER: it becomes a child of the container and its
-// Transform.position becomes the cell it lands in, taken in the order the file
-// declares members, which is why a member needs no coordinate at all. Replaced,
-// not added to, for the same reason an Anchor replaces one: a saved member
-// carries the cell it was given, and a reload has to land it on the same cell
-// rather than a cell further along. `cell` names a prefab (see ScenePrefab,
-// same path resolution) that every member which does not instance one itself is
-// an instance of, so the members stay down to the one thing that differs
-// between them.
-//
-// Members are laid out before prefabs expand, so an entity a prefab expanded
-// into cannot itself be a grid member: a grid is a layout of the entities the
-// file declares.
+// Two roles in one component. An entity with `count` and `step` is the
+// CONTAINER (its Transform is cell (0,0,0)); an entity naming it in `of` is a
+// MEMBER: a Transient child whose Transform.position is replaced by the cell it
+// lands in, in declaration order (replaced, not added, so a save/load round
+// trip lands it on the same cell). `cell` names a prefab (ScenePrefab path
+// rules) instanced by every member that does not instance one itself.
+// Members are laid out before prefabs expand, so expanded entities cannot be
+// members: a grid lays out what the file declares.
 struct SceneGrid {
   std::string of;
   std::string cell;
@@ -380,28 +283,15 @@ struct SceneCamera {
   f32 fov_degrees = 60.0f;
 };
 
-// The key light, as an angle in the sky rather than a direction vector.
+// The key light, as an angle in the sky rather than a direction vector. Without
+// it a scene is lit by whatever hour the world clock is at, and a punctual
+// Light cannot stand in for a source at infinity. `elevation` is degrees above
+// the horizon (negative is a set sun the sky darkens for); `azimuth` is degrees
+// about y from +z, matching Rotation.euler's yaw.
 //
-// Without this a scene is lit by whatever hour the world clock happens to be
-// at, which is the single largest thing deciding what a render looks like and
-// was the one thing a text scene could not say: an author could place every
-// object to the centimetre and still not ask for the light to come from the
-// left. Placing it takes a SUN, not a Light - a punctual light with a radius
-// cannot stand in for a source at infinity, and a scene that tried lit its
-// facades from a point halfway up the street.
-//
-// `elevation` is degrees above the horizon (90 is overhead, 0 is on it, and
-// below 0 is a set sun the sky darkens for) and `azimuth` is degrees about y
-// from +z, counter-clockwise seen from above, matching Rotation.euler's yaw.
-// Both in degrees for the reason SceneRotation is: an author writes "low sun
-// from behind the towers", not a normalized triple.
-//
-// A scene declaring one takes the sun over from the day/night clock ENTIRELY,
-// so the clock no longer moves it. That is the point - a capture has to be the
-// same picture on every run - but it means a scene wanting the clock's sun
-// authors no Sun at all rather than a Sun it hopes matches.
-//
-// The first one the scene declares wins, like the camera.
+// A scene declaring one takes the sun from the day/night clock ENTIRELY (a
+// capture must be the same picture every run); a scene wanting the clock's sun
+// authors no Sun at all. The first one declared wins, like the camera.
 struct SceneSun {
   f32 elevation = 45.0f;
   f32 azimuth = 0.0f;
@@ -412,21 +302,16 @@ struct SceneSun {
   f32 ambient = 0.06f;
 };
 
-// The air between the camera and the thing it is looking at, plus the exposure
-// the result is developed at.
+// The air between the camera and the thing it looks at, plus the exposure the
+// result is developed at. Haze gives a big exterior its depth (without it every
+// building renders at the same contrast at 10 m and 200 m) and rides the
+// always-on froxel volume, so it is sun- and light-lit at no extra cost.
 //
-// Haze is what gives a big exterior its depth: without it every building is
-// rendered at the same contrast whether it is 10 or 200 metres away, which is
-// most of why a flat blockout reads as a diagram rather than as a place. It
-// rides the always-on froxel volume, so it is lit by the sun and by every
-// punctual light in the scene and costs nothing extra to ask for.
-//
-// `density` is the base scattering per metre (0.005 is the engine's own subtle
-// haze, 0.02 is a visibly misty street, 0.1 is fog you cannot see through) and
-// `start_distance` is metres of clear air before it ramps in, which is how an
-// interior keeps its near field crisp while still getting shafts across the
-// room. `exposure` multiplies the auto-exposure result, so it is a stop-style
-// nudge rather than an absolute: 1 leaves the metering alone.
+// `density` is base scattering per metre (0.005 subtle, 0.02 misty street, 0.1
+// opaque fog); `start_distance` is metres of clear air before the ramp, which
+// keeps an interior's near field crisp while still getting shafts. `exposure`
+// multiplies the auto-exposure result: a stop-style nudge, 1 leaves metering
+// alone.
 struct SceneAtmosphere {
   f32 density = 0.005f;
   f32 start_distance = 0.0f;

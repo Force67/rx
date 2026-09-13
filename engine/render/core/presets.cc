@@ -130,7 +130,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       // High/ultra ship RCGI (idTech8-style radiance-cached GI, the AC-Shadows
       // adoption) as the indirect-diffuse GI; ddgi stays enabled as the
       // automatic fallback when rcgi is unavailable (no ray query / creation
-      // failed -- the renderer's rcgi_active predicate gates which one runs).
+      // failed; the renderer's rcgi_active predicate gates which one runs).
       // Measured gather chain ~1.2-1.4 ms on GB10, within this tier's budget.
       s.ddgi = true;
       s.ddgi_spacing = 1.0f;

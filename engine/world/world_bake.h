@@ -12,33 +12,17 @@
 #include "ecs/entity.h"
 #include "ecs/world.h"
 
-// The cook: an authored .rxscene in, a streamable .rxp out.
-//
-// It lives here rather than in the rxworld tool because there is more than one
-// front end - the tool and the editor - and two cooks would be two answers to
-// what a world is. One function, called from both.
-//
-// The input is deliberately a path, not a live ecs::World, and that is not a
-// convenience:
-//
-//   The bake id is a hash of the scene's bytes together with the cook settings
-//   and the schema. A live-world cook would need a second definition of it, and
-//   then the editor and the tool would stamp different ids on identical
-//   content - exactly the disagreement that sharing the cook is meant to
-//   prevent.
-//
-//   An editor's world is not its scene. It holds transient entities the author
-//   never wrote: terrain-tile visuals, preview models. edit::SaveScene already
-//   knows which of those to leave out, so cooking the file it wrote inherits
-//   that judgement instead of duplicating it.
-//
-//   Stable id assignment is deterministic *because* the input is a file: the
-//   cook loads it into a fresh ecs::World, so entity indices are file order,
-//   and two cooks of one file replay the same creation sequence. Cooking a
-//   lived-in world would order ties by that session's create/destroy history
-//   and hand out different ids for identical content. This signature forbids
-//   that caller structurally.
-//
+// The cook: an authored .rxscene in, a streamable .rxp out. One function shared
+// by the tool and the editor, so there is one answer to what a world is. The
+// input is deliberately a path, not a live ecs::World:
+//   * the bake id hashes the scene bytes + cook settings + schema; a live-world
+//     cook would need a second definition and let editor and tool stamp
+//     different ids on identical content;
+//   * an editor's world holds transient entities the author never wrote;
+//     cooking the file SaveScene wrote inherits its judgement about those;
+//   * stable id assignment is deterministic because the cook loads the file
+//     into a fresh ecs::World (entity indices are file order); cooking a
+//     lived-in world would order ties by session history.
 // The editor's flow is save, then bake what was saved.
 
 namespace rx::world {

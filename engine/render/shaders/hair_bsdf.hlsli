@@ -1,50 +1,37 @@
 #ifndef RX_HAIR_BSDF_HLSLI_
 #define RX_HAIR_BSDF_HLSLI_
 
-// A production hair BSDF: Marschner's R / TT / TRT lobes in the practical,
-// controllable parameterization of Chiang et al., plus Zinke's dual-scattering
-// approximation for the multiple scattering between strands.
-//
-// Why this rather than a Kajiya-Kay highlight: a strand is a dielectric
-// CYLINDER, and what makes hair read as hair is where light goes after it
-// enters one. The surface reflection (R) is only the white sheen. The
-// transmitted lobe (TT) is what makes backlit hair glow. The
-// transmit-reflect-transmit lobe (TRT) is the coloured secondary highlight and
-// the glint. And in anything lighter than black, MOST of the light a viewer
-// sees has bounced between many strands - which is why a blonde groom shaded
-// with a single-scattering model comes out looking like dark straw no matter
-// what colour you paint it.
+// A production hair BSDF: Marschner's R / TT / TRT lobes in Chiang et al.'s
+// practical parameterization, plus Zinke's dual-scattering approximation for
+// inter-strand multiple scattering. A strand is a dielectric CYLINDER: R is
+// only the white sheen, TT is why backlit hair glows, TRT is the coloured
+// secondary highlight, and in anything lighter than black most of what a
+// viewer sees has bounced between many strands (a single-scattering model
+// renders any blonde groom as dark straw).
 //
 // References:
-//   Marschner et al. 2003, "Light Scattering from Human Hair Fibers" (the
-//     R/TT/TRT decomposition, the longitudinal/azimuthal separation).
+//   Marschner et al. 2003 (R/TT/TRT decomposition, longitudinal/azimuthal
+//     separation).
 //   d'Eon et al. 2011 (the energy-conserving longitudinal M_p used here).
-//   Chiang et al. 2016, "A Practical and Controllable Hair and Fur Model for
-//     Production Path Tracing" (the beta_m / beta_n roughness parameterization,
-//     the logistic azimuthal N_p, the melanin and colour-inversion mappings).
-//   Zinke et al. 2008, "Dual Scattering Approximation for Fast Multiple
-//     Scattering in Hair" (the global/local multiple-scattering split).
+//   Chiang et al. 2016 (beta_m / beta_n roughness, logistic azimuthal N_p,
+//     melanin and colour-inversion mappings).
+//   Zinke et al. 2008 (the global/local multiple-scattering split).
 //
-// Frame convention: the strand's local frame has +X along the tangent (root to
-// tip). A direction's x component is sin(theta), the longitudinal angle; its
-// (y, z) give the azimuth phi. Callers build the frame with HairFrame.
+// Frame: +X along the tangent (root to tip); a direction's x is sin(theta)
+// (longitudinal), its (y, z) give azimuth phi. Callers build the frame with
+// HairFrame.
 //
-// Reciprocity: this model is NOT reciprocal, and that is a property of the
-// published formulation rather than of this implementation. The per-lobe
-// attenuations and the internal refraction geometry are derived from the
-// OUTGOING direction alone, so f(wo -> wi) and f(wi -> wo) differ - measurably,
-// by tens of percent on the transmission lobes. It is accepted in production
-// because the error sits on lobes that have already been attenuated and because
-// the alternative is an order of magnitude more expensive. It does mean this
-// BSDF must not be dropped into a bidirectional integrator that assumes
-// reciprocity; hair_bsdf_test pins the magnitude so the asymmetry cannot grow
-// unnoticed.
+// NOT reciprocal, a property of the published formulation: attenuations and
+// the internal refraction derive from the OUTGOING direction alone, so
+// f(wo->wi) and f(wi->wo) differ by tens of percent on the transmission lobes.
+// Accepted because the error sits on already-attenuated lobes and the
+// alternative is an order of magnitude costlier; do not drop this into a
+// bidirectional integrator. hair_bsdf_test pins the magnitude.
 //
-// `h` is the offset of the shading point across the fibre's width, in [-1, 1].
-// A path tracer gets it from the curve intersection; the raster path gets it
-// for free from the ribbon expansion, which already knows which side of the
-// strand a fragment is on. Faking it (h = 0 everywhere) collapses the azimuthal
-// variation and is what makes raster hair look like flat tape.
+// `h` is the shading point's offset across the fibre width in [-1, 1]: from the
+// curve intersection when tracing, free from the ribbon expansion when
+// rastered. Faking it (h = 0) collapses the azimuthal variation into flat
+// tape.
 
 #ifndef RX_HAIR_PI
 #define RX_HAIR_PI 3.14159265358979323846

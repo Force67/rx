@@ -38,7 +38,7 @@ option(RX_MIMALLOC "Route allocations through mimalloc (+memory tracking)" ON)
 
 # install()/find_package(rx) support. Default ON only when rx is the top-level
 # project; an add_subdirectory consumer (recreation) leaves it OFF so its build
-# is untouched. See cmake/install.cmake and EMBEDDING.md.
+# is untouched. See cmake/install.cmake.
 option(RX_INSTALL "Generate install()/export rules for find_package(rx)"
   ${PROJECT_IS_TOP_LEVEL})
 
@@ -46,7 +46,7 @@ option(RX_INSTALL "Generate install()/export rules for find_package(rx)"
 # archive. Off by default (the static build is the shipping configuration). This
 # is a correctness discipline, not a distribution mode: hidden visibility plus
 # explicit per-module export annotations (engine/core/export.h) document each
-# module's real cross-DSO API and flush out ambient-state bugs. See EMBEDDING.md.
+# module's real cross-DSO API and flush out ambient-state bugs.
 option(RX_SHARED "Build rx modules as shared libraries (experimental)" OFF)
 
 if(RX_SHARED)
@@ -64,7 +64,7 @@ if(RX_SHARED)
     "RX_SHARED is experimental. rx modules build as shared objects with hidden "
     "visibility + explicit export annotations. Caveat: equilibrium's base::Option "
     "registry (base::InitChain) is a per-DSO instance under hidden visibility, so "
-    "each option-owning DSO re-applies env overrides at init (see EMBEDDING.md). "
+    "each option-owning DSO re-applies env overrides at init. "
     "Env knobs work; the mechanism differs from the static single-registry build.")
 else()
   set(RX_LIB_TYPE STATIC)
@@ -1242,7 +1242,7 @@ endif()
 
 # rx::locomotion over real Jolt: rig build sanity, joint motor target
 # convergence, standing survival, push recovery, walking speed tracking and
-# controlled falls — the acceptance suite of docs/LOCOMOTION.md. Headless.
+# controlled falls; the acceptance suite of docs/LOCOMOTION.md. Headless.
 if(RX_BUILD_TESTS AND RX_JOLT AND "locomotion" IN_LIST RX_MODULES)
   add_executable(locomotion_test test/locomotion_test.cc)
   target_link_libraries(locomotion_test PRIVATE rx::locomotion rx::physics rx::core)

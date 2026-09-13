@@ -1,32 +1,23 @@
 rxscene 1
 
-# A world authored to be streamed, not to be loaded whole.
-#
-# Six by six cells of 32 m, so 192 m on a side, and the viewer's streaming
-# bubble only ever holds a fraction of it. Bake it with:
+# A world authored to be streamed, not loaded whole: 6x6 cells of 32 m (192 m a
+# side), of which the viewer's streaming bubble holds a fraction. Bake and run:
 #
 #   rxworld bake runtime/scenes/streamworld.rxscene world.rxp \
 #           --name streamworld --cell-size 32
+#   rx --world <world.rxp>       (the build does both; see runtime/CMakeLists.txt)
 #
-# and drive it with `rx --world <world.rxp>`. The build does both for you; see
-# runtime/CMakeLists.txt.
+# Two kinds of thing, sorted by the cook into two domains:
 #
-# Two kinds of thing on purpose, because the cook sorts them into two different
-# domains and the runtime treats them differently:
+#   A tile and its scatter carry Transform + Renderable only: instance-page
+#   rows, no ECS entity, drawn straight from the page. Most of a world.
 #
-#   A tile and its scatter are a Transform and a Renderable and nothing else.
-#   The cook makes those instance-page rows: no ECS entity, no per-object cost,
-#   drawn straight from the page. This is most of a world.
+#   A pillar also carries SpawnedFrom: provenance, so the cook makes it a real
+#   ECS entity in the gameplay domain.
 #
-#   A pillar additionally carries SpawnedFrom, so it is something with
-#   provenance rather than scenery. The cook makes those real ECS entities in
-#   the gameplay domain, and the host draws them the same way it draws anything
-#   else with a Transform and a Renderable.
-#
-# Guid is deliberately present on the pillars and absent from the scatter: it is
-# identity the baked world replaces with its own stable id, so it must not be
-# what decides which of the two a thing becomes. A scene saved by the editor has
-# one on everything.
+# Guid is present on pillars and absent from scatter: the baked world replaces
+# Guid with its own stable id, so it must not decide which of the two a thing
+# becomes (a scene saved by the editor puts one on everything).
 #
 # Generated, then checked in: it is the authored source the cook reads, and a
 # hand-written 200-entity grid would be worse in every way except provenance.

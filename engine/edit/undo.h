@@ -72,7 +72,7 @@ MakeSetProp(ecs::World &world, ecs::Entity entity, const ComponentDesc &comp,
 
 // Creates an entity with the given components and initial prop values. The
 // entity's Guid is stable across undo/redo; *out_entity (may be null) receives
-// the live handle from the initial Apply inside UndoStack::Push only — a stack
+// the live handle from the initial Apply inside UndoStack::Push only; a stack
 // address is safe, later undo/redo never writes through it.
 RX_EDIT_EXPORT std::unique_ptr<Command> MakeCreateEntity(
     std::vector<std::pair<const ComponentDesc *,

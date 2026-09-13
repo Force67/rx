@@ -1,7 +1,7 @@
 # Hair rendering
 
-A production fibre BSDF — Marschner's R / TT / TRT lobes in Chiang's
-parameterization — with Zinke dual scattering fed by a deep opacity map, shared
+A production fibre BSDF (Marschner's R / TT / TRT lobes in Chiang's
+parameterization) with Zinke dual scattering fed by a deep opacity map, shared
 by strand grooms and hair cards, and shadowing the skin underneath.
 
 ## Why not a Kajiya-Kay highlight
@@ -21,15 +21,15 @@ flat ambient fill, and no shadowing of any kind. It produced opaque straw:
 A strand is a dielectric **cylinder**, and what makes hair read as hair is where
 light goes after it enters one:
 
-- **R** — surface reflection. The white sheen. Achromatic: it never entered the
+- **R**: surface reflection. The white sheen. Achromatic: it never entered the
   fibre, so it carries no pigment.
-- **TT** — straight through. This is why backlit hair glows.
-- **TRT** — in, off the back wall, out. The coloured secondary highlight and the
+- **TT**: straight through. This is why backlit hair glows.
+- **TRT**: in, off the back wall, out. The coloured secondary highlight and the
   glint.
 - and in anything lighter than black, **most of what you see has bounced between
   many strands**. A blonde groom shaded with single scattering comes out looking
   like dark straw no matter what colour it is painted, which is the failure that
-  usually gets "fixed" by painting the hair brighter — permanently breaking the
+  usually gets "fixed" by painting the hair brighter, permanently breaking the
   link between its colour and how it scatters.
 
 | Piece | Where |
@@ -57,7 +57,7 @@ differently has two hair materials, and only one of them can be right.
 Cards differ in exactly two respects, both stated at the call site: they take
 `h` from the card's uv (which runs across the strand width) rather than from the
 ribbon expansion, and they are not in the transmittance volume, so they assume
-an authored fibre depth instead of measuring one — falling back to the volume
+an authored fibre depth instead of measuring one, falling back to the volume
 when a strand groom happens to be overhead.
 
 ## Colour is pigment, not a tint
@@ -70,7 +70,7 @@ concentrations in the ranges measured in human hair.
 Authoring in pigment keeps a groom's colour coupled to how it scatters. Painting
 a fibre "blonde" by lowering its absorption also gives it the forward glow blonde
 hair actually has. **Multiplying an albedo into the shaded result cannot do
-this** — it produces blonde hair that scatters like brown hair, which is the
+this**: it produces blonde hair that scatters like brown hair, which is the
 single most common way hair rendering goes wrong.
 
 Artists still want to paint a colour, so the default mode inverts a target
@@ -79,7 +79,7 @@ colour into absorption instead. Which brings us to:
 ### The published inversion does not transfer, and this is how far off it is
 
 Chiang's colour inversion is calibrated against **full path-traced multiple
-scattering** — dozens of intra-fibre bounces. Measured against this renderer's
+scattering**: dozens of intra-fibre bounces. Measured against this renderer's
 dual-scattering transport, it is badly wrong:
 
 | asked for | Chiang's fit renders |
@@ -91,7 +91,7 @@ dual-scattering transport, it is badly wrong:
 | 0.30 | 0.549 |
 | 0.10 | 0.112 |
 
-Everything light comes out washed toward white — visibly, an olive-khaki blonde
+Everything light comes out washed toward white; visibly, an olive-khaki blonde
 instead of a gold one.
 
 So the mapping was **fitted against this renderer** rather than copied. Measuring
@@ -104,8 +104,8 @@ sigma_a = -ln(c) / D,     D = 2.17 + 2.02 * n_ref
 
 `n_ref` is the fibre depth at which the authored colour is exact. `D` turned out
 to be **independent of the azimuthal roughness** (8.23 to 8.29 across
-`beta_n` 0.15–0.75 at n = 3), which is why this is so much simpler than the
-published polynomial — that form's roughness dependence is an artefact of the
+`beta_n` 0.15-0.75 at n = 3), which is why this is so much simpler than the
+published polynomial: that form's roughness dependence is an artefact of the
 transport it was fitted to, not a property of the fibre. Round-trip error is
 under **0.002** over c in [0.07, 0.85] and n in [3, 10], and `hair_bsdf_test`
 asserts it.
@@ -121,15 +121,15 @@ parts read lighter and deeper parts darker, which is what hair does.
 
 Self-shadowing, dual scattering and the shadow a groom casts on the forehead are
 all the same question: **how many fibres are between this point and the light?**
-A binary shadow map cannot answer it — hair is not opaque, and "in shadow / not
+A binary shadow map cannot answer it: hair is not opaque, and "in shadow / not
 in shadow" turns a groom into a black cutout with a hard edge.
 
 Deep opacity map (Yuksel & Keyser), two passes over the same ribbon geometry
 from the sun:
 
-1. **front depth** — the nearest fibre per light-space texel. No fragment
+1. **front depth**: the nearest fibre per light-space texel. No fragment
    shader; the depth is the whole output.
-2. **layered counts** — additive, **depth test off**, because every fibre along
+2. **layered counts**: additive, **depth test off**, because every fibre along
    the ray has to be counted including the ones the front one occludes. Four
    layers at 0.15 / 0.35 / 0.65 / 1.0 of the layer depth past the front surface.
 
@@ -147,12 +147,12 @@ The light frustum is fitted to the grooms' own bounds, so 1024 texels resolve
 individual strands on a head.
 
 `RX_DEBUG_VIEW=24` shows the count as a heat ramp, in the forward pass **and in
-the strand pass** — a debug view occluded by the geometry it is diagnosing is not
+the strand pass**; a debug view occluded by the geometry it is diagnosing is not
 a diagnostic.
 
 ### Hair shadowing the scene
 
-The forward pass reads the same volume (env slots 44–46) and attenuates the sun
+The forward pass reads the same volume (env slots 44-46) and attenuates the sun
 by `exp(-hair_shadow_density * fibres)`, for every material rather than only
 skin: a groom shadows the collar and the shoulders too, and restricting it to
 flagged materials is how a head ends up with a shadow that stops at the hairline.
@@ -165,7 +165,7 @@ the lag is invisible.
 ## Dual scattering
 
 Zinke's split: light reaching a fibre has already passed through others
-(**forward** scattering — attenuated and spread), and what the viewer sees also
+(**forward** scattering, attenuated and spread), and what the viewer sees also
 includes light that came back out of the neighbours (**backward** scattering).
 
 The exact formulation integrates the BSDF over the sphere per shading point.
@@ -174,13 +174,13 @@ made:
 
 - average forward/backward attenuations evaluated analytically from the fibre's
   own absorption, fitted against the single-scattering evaluation in the same
-  file rather than taken from the paper's tables — so the two halves stay
+  file rather than taken from the paper's tables, so the two halves stay
   consistent when the BSDF changes;
 - `T_f = a_f^n` evaluated in log space, so a groom hundreds of fibres deep does
   not underflow to a hard black core;
 - lobe spread grows as `sqrt(n)` (the random-walk result), and the
   multiply-scattered term is evaluated against a deliberately blunted copy of
-  the fibre — a highlight in the multiple-scattering term is a highlight that
+  the fibre: a highlight in the multiple-scattering term is a highlight that
   never survived the walk to get there;
 - local back-scattering saturates rather than growing with depth: past a few
   fibres the extra ones are already dark.
@@ -194,13 +194,13 @@ white hair white rather than grey.
 
 | Control | What it does | Safe range |
 | --- | --- | --- |
-| `beta_m` | longitudinal roughness — highlight width **along** the strand | 0.02 … 1 |
-| `beta_n` | azimuthal roughness — highlight width **around** it | 0.02 … 1 |
+| `beta_m` | longitudinal roughness, highlight width **along** the strand | 0.02 … 1 |
+| `beta_n` | azimuthal roughness, highlight width **around** it | 0.02 … 1 |
 | `alpha` | cuticle scale tilt, radians. Shifts R toward the tip and TRT toward the root; that separation is why a real highlight is two offset bands. Remove it and hair reads as plastic tubing. | 0 … 0.175 |
 | `eta` | index of refraction. Keratin is 1.55. | 1.3 … 1.8 |
 | `density` | groom fibre density multiplier for dual scattering | 0 … 4 |
 | `scatter_scale` | gain on multiple scattering | 0 … 3 |
-| `color_reference_depth` | the fibre depth at which an authored colour is exact | — |
+| `color_reference_depth` | the fibre depth at which an authored colour is exact | |
 
 Renderer settings: `hair_transmittance`, `hair_transmittance_depth` (metres the
 four layers span; too small and the interior saturates in the first layer, too
@@ -227,10 +227,10 @@ narrow lobe is aliasing, not detail.
 
 `test/hair_bsdf_test.cc`, on the CPU mirror:
 
-1. **Energy.** A non-absorbing fibre reflects 0.93–1.02 of what it receives,
+1. **Energy.** A non-absorbing fibre reflects 0.93-1.02 of what it receives,
    integrated over the whole **sphere** (a cylinder scatters on every side),
    across roughness and incidence. Marschner's three lobes do not sum to one on
-   their own — the residual term closes the gap. If that regresses, every
+   their own; the residual term closes the gap. If that regresses, every
    light-coloured groom silently loses energy and comes out dark, which looks
    like an art problem and gets fixed by painting the hair brighter.
 2. **The azimuthal geometry.** The R lobe peaks at `phi = -2*asin(h)`, to within
@@ -241,7 +241,7 @@ narrow lobe is aliasing, not detail.
 4. **Pigment coupling.** More eumelanin is always darker; pheomelanin reddens
    rather than merely darkening.
 5. **The fitted colour inversion** renders the colour it was asked for, at every
-   reference depth — and the published constants are confirmed to be far off, so
+   reference depth, and the published constants are confirmed to be far off, so
    nobody swaps them back in.
 6. **Multiple scattering** attenuates with depth, lifts a light fibre more than a
    black one, and is what makes white hair white.
@@ -252,7 +252,7 @@ narrow lobe is aliasing, not detail.
 This model is **not reciprocal**, and that is a property of the published
 formulation rather than of this implementation: the per-lobe attenuations and the
 internal refraction geometry are derived from the outgoing direction alone. The
-asymmetry is measurable — tens of percent on the transmission lobes, and it does
+asymmetry is measurable (tens of percent on the transmission lobes), and it does
 not go away with a clear fibre, no tilt and `h = 0`.
 
 It is accepted in production because the error sits on lobes that have already
@@ -268,6 +268,6 @@ asserting the property away, so the asymmetry cannot grow unnoticed.
 - No transparency ordering for the ribbons; they are drawn opaque against depth.
 - Nothing here has been fitted against photographed hair. The presets are melanin
   concentrations from the literature and the roughnesses are reasoned, not
-  measured. The colour inversion *is* fitted — but against this renderer, not
+  measured. The colour inversion *is* fitted, but against this renderer, not
   against reality.
 - The scene-side shadow is one frame old (see above).

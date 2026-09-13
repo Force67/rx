@@ -1,5 +1,5 @@
-# rx::weather -- the art-directable weather-STATE layer for the Cloudscape
-# volumetric cloud system (WEATHER.md). Decides WHAT atmospheric
+# rx::weather: the art-directable weather-STATE layer for the Cloudscape
+# volumetric cloud system. Decides WHAT atmospheric
 # conditions exist and where (states, regions, a deterministic scheduler,
 # transitions and the wind/surface/lightning integrals) and emits the two
 # renderer value structs each frame. Headless and GPU-free: it only reads the

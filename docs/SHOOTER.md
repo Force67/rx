@@ -7,7 +7,7 @@ hitboxes. It is the tuning environment for weapon feel and the end-to-end
 exercise of every combat system.
 
 Everything lives in `runtime/demo_shooter.{h,cc}`. It touches no engine
-internals — it drives `rx::combat`, `rx::character` and the scene camera rig
+internals: it drives `rx::combat`, `rx::character` and the scene camera rig
 through their public APIs exactly as a game would. The registry wiring is the
 usual few lines: a `shooter_` member on `DemoScenes`, a dispatch arm in
 `CreateDemoScene`, a `shooter_->Emit(...)` call in `EmitToView`, and (because it
@@ -29,9 +29,9 @@ vkrun ./build/linux/runtime/rx --demo shooter
 | **LMB** | Fire (held; semi-auto latches, the automatic paces itself) |
 | **RMB** | Aim down sights (hold): tighter cone, narrower fov, softer recoil, slower look |
 | **R** | Reload (a dry trigger pull also starts one) |
-| **1 – 4** / scroll | Raise a weapon (the swap takes that weapon's `swap_time`) |
-| **Shift** | Sprint (hold) — and watch the cone open |
-| **Ctrl** | Crouch (hold) — and watch it close |
+| **1-4** / scroll | Raise a weapon (the swap takes that weapon's `swap_time`) |
+| **Shift** | Sprint (hold), and watch the cone open |
+| **Ctrl** | Crouch (hold), and watch it close |
 | **Space** | Jump |
 | **G** | Reset the player, health and ammo |
 | **M** | Hide / show the tuning panel |
@@ -48,7 +48,7 @@ vkrun ./build/linux/runtime/rx --demo shooter
   `combat::HitRegistry`. A head shot doubles, per the default zone table. A
   downed target drops through the floor and pops back up three seconds later.
 - **Cover**: a 0.1 m plank the rifle punches through (at 60% damage) and a 1.0 m
-  block it cannot — the same thickness-budget rule the module documents.
+  block it cannot; the same thickness-budget rule the module documents.
 - **Crates**: dynamic bodies registered with an invalid entity, so they take
   bullet and blast impulses and never take damage.
 
@@ -71,7 +71,7 @@ damage, falloff band and floor, spread min/max, bloom per shot and decay, aim
 spread scale, recoil pitch/yaw/jitter, aim time and fov, reload time,
 pass-throughs and thickness budget, blast radius and damage. Edits are
 re-registered into the catalog under the same id, which is exactly what a data
-reload does at runtime — so the feel is dialled in without a rebuild.
+reload does at runtime, so the feel is dialled in without a rebuild.
 
 Below the sliders is the live state the systems are actually using: current
 bloom, aim blend, cooldown, the cone half-angle the next round will leave in,
@@ -80,14 +80,14 @@ half-life editable). The viewmodel's sway, bob and punch are there too.
 
 ## The HUD
 
-- **Crosshair** sized from `combat::EffectiveSpread` — it *is* the cone the next
+- **Crosshair** sized from `combat::EffectiveSpread`: it *is* the cone the next
   round leaves in, so a running, jumping, spraying player watches it open.
 - **Hit marker** on any damage the player dealt, **damage numbers** floating in
   the world (head shots in gold), and a `DOWN` popup on a kill.
 - Ammo (magazine / reserve), reload and swap state, health bar, and a
   kills / hits / rounds tally.
 - **Tracers** from the muzzle to each impact and **bullet holes** that lie flat
-  on the surface they hit, both drained from `CombatEvents` — the engine emits
+  on the surface they hit, both drained from `CombatEvents`. The engine emits
   events, the game decides what they look like.
 
 ## Capture hook
@@ -106,7 +106,7 @@ RX_SHOOTER_AUTOFIRE=1 RX_UI_SHOT=/tmp/shot.png RX_UI_SHOT_FRAMES=140 \
 
 ## What it does not do
 
-Nothing shoots back — there is no AI in the range, so the player's `Health` and
+Nothing shoots back; there is no AI in the range, so the player's `Health` and
 the regeneration on it only ever come into play when standing in a blast. The
 targets are boxes, not skeletons: hitbox bodies are placed by hand rather than
 driven from an animated rig. Both are a game's job; the module's contract is the

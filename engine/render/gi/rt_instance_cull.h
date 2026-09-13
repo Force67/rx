@@ -11,27 +11,19 @@
 namespace rx::render {
 
 // Solid-angle + distance TLAS instance culling (AC Shadows "Ray tracing the
-// world" §2). Beyond a start distance from the camera, an instance whose
-// projected angular radius (bounding-sphere radius / distance) falls below a
-// threshold is dropped from the realtime TLAS, so small distant clutter stops
-// paying BLAS/traversal cost in the rays.
+// world" §2): beyond a start distance, an instance whose projected angular
+// radius (bounding-sphere radius / distance) is below a threshold is dropped
+// from the realtime TLAS, so small distant clutter stops paying BLAS/traversal
+// cost. Per-draw instances are few and tested inline every frame (DrawVisible);
+// static groups can hold thousands, so each is swept incrementally (a slice per
+// frame, full sweep ~1 s, kSweepFrames) while a persistent per-instance
+// visibility bitmask drives inclusion, bounding per-frame cost regardless of
+// group size.
 //
-// Per-draw instances are already frustum-culled and few, so they are tested
-// inline every frame (DrawVisible). Static instance groups can hold thousands
-// of entries, so re-testing every one every frame would defeat the point:
-// instead each group is swept incrementally -- a slice per frame, a full sweep
-// amortized over ~1 s (kSweepFrames), like Ubisoft's -- while a persistent
-// per-instance visibility bitmask drives inclusion every frame. Per-frame cost
-// is therefore bounded regardless of group size.
-//
-// Culling only ever *removes* distant, small geometry, so a conservative
-// "keep everything" state is always safe. On a large camera jump (teleport,
-// fast-travel) every group falls back to accept-all and the incremental sweep
-// re-converges over the next second, so the near field never shows a stale hole
-// where an instance the camera moved next to is still marked culled.
-//
-// This is a realtime-only optimisation: the path tracer / reference modes keep
-// the full instance set (the caller simply does not consult the culler then).
+// Culling only removes distant small geometry, so "keep everything" is always
+// safe: on a large camera jump every group falls back to accept-all and the
+// sweep re-converges within a second. Realtime-only: path tracer / reference
+// modes keep the full instance set.
 class RtInstanceCuller {
  public:
   // Frames a full per-group sweep is spread across (~1 s at 60 fps).

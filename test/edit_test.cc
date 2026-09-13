@@ -563,7 +563,7 @@ void TestUndo() {
 
   // Regression: the create command must not retain the caller's out pointer.
   // Callers pass stack addresses, so only the initial Apply inside Push may
-  // write through it — undoing/redoing the creation must leave it untouched.
+  // write through it; undoing/redoing the creation must leave it untouched.
   {
     ecs::World w2;
     UndoStack s2;

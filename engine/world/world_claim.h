@@ -11,30 +11,17 @@
 
 namespace rx::world {
 
-// Why a cell is resident when no observer is near it.
+// Why a cell is resident when no observer is near it. A claim is a streaming
+// source pinned to one cell that carries who asked, why, and when it stops
+// being true (Explain), instead of an ad hoc "keep this loaded" nobody can
+// account for later. The planner treats it like a player.
 //
-// The alternative is the ad hoc pin: a script says "keep this loaded", and six
-// months later nobody can say who said it, why, or when it stops being true. A
-// claim carries all three, so "why is this cell still resident?" has an answer
-// (Explain) instead of a guess.
-//
-// A claim is not a separate mechanism bolted onto streaming. It becomes a
-// streaming source pinned to one cell, which is what it always was: a teleport
-// destination, a quest that must keep running, an AI route being planned, a
-// cutscene about to play. The planner sees it the same way it sees a player.
-//
-// Two limits worth knowing before relying on it. A claim's only lever over
-// scheduling is the region priority, and the planner sorts starvation age ahead
-// of priority when it hands out commit quanta, so a hard claim is admitted
-// early but does not preempt an older request already waiting. And the set has
-// no clock: Expire is the host's to call, from whatever tick it advances. A
-// lease nobody expires is exactly the immortal pin this exists to replace.
-//
-// A claim admits a cell and can raise its priority. It does not decide the
-// cell's detail: the tier band follows the real observers, so adding or
-// dropping a lease never evicts and rebuilds a cell that was already resident
-// and correct. A claim that does want the near tier - a teleport destination,
-// a cutscene about to play - says so with `full_detail`.
+// Limits: a claim's only scheduling lever is region priority (starvation age
+// still sorts ahead of it), and the set has no clock, so Expire is the host's
+// to call; an unexpired lease is the immortal pin this replaces. A claim admits
+// a cell and can raise priority but never its detail tier (that follows the
+// real observers, so claims never evict a resident cell); a claim wanting the
+// near tier says so with `full_detail`.
 enum class ClaimKind : u8 {
   // Correctness. Unloading this would be a bug: the player is standing on it,
   // a network-authoritative entity lives in it, a cutscene actor is in it.

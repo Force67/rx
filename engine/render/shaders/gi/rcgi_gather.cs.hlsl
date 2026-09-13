@@ -7,7 +7,7 @@
 // three-level cache fallback (previous-frame lit screen colour -> world radiance
 // cache -> irradiance cascades; sky on a ray miss). The ray's radiance is
 // projected into 2-band SH along the ray direction; the SH triple + a hit
-// distance feed the denoise / upscale chain. See RCGI.md section 4.
+// distance feed the denoise / upscale chain.
 
 [[vk::image_format("rgba16f")]] [[vk::binding(0, 0)]] RWTexture2D<float4> sh_r_out : register(u0, space0);
 [[vk::image_format("rgba16f")]] [[vk::binding(1, 0)]] RWTexture2D<float4> sh_g_out : register(u1, space0);

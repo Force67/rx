@@ -28,14 +28,14 @@ survives versus the scattered body colour; foam reduces it further downstream.
 
 **Reflection roughening.** Foam density (`1 - exp(-1.1·foam)`) plus ripple energy
 drive `refl_rough`, which blends the sharp RT/mirror reflection toward a blurred
-sky mip and dims it — foamy/choppy water reads matte instead of glassy.
+sky mip and dims it: foamy/choppy water reads matte instead of glassy.
 `water_material.y` is the gain.
 
 ## 2. Wave subsurface-scattering crest glow (water.ps.hlsl)
 
 Backlit sun transmits through thin, lifted crests toward the camera. A thickness
-proxy is built from the wave state — `thickness = lerp(1.4, 0.10, crest) +
-saturate(-height_above)*0.8` — so pinched crests and lifted water are thin,
+proxy is built from the wave state, `thickness = lerp(1.4, 0.10, crest) +
+saturate(-height_above)*0.8`, so pinched crests and lifted water are thin,
 troughs are thick. Thickness becomes attenuation through
 `exp(-thickness · absorption · 4)`: thin crests transmit nearly white, thick
 bases go dark and turquoise (red absorbed first). The lobe peaks where the view
@@ -53,7 +53,7 @@ world-space RG16F map** (env slot 34, `kTile = 64 m`, matching the FFT patch so
 the FFT path tiles seamlessly):
 
 - **R = energy-conserving caustic density.** A 512² grid of surface photons is
-  refracted through the surface — the coarse Gerstner/FFT normal is refined with
+  refracted through the surface: the coarse Gerstner/FFT normal is refined with
   fine animated capillary ripples, since it is the sub-metre ripples (not the
   swell) that focus the sun into a caustic web over a shallow receiver. Each
   photon lands on a reference receiver plane a fixed depth below rest and is
@@ -61,7 +61,7 @@ the FFT path tiles seamlessly):
   (fixed-point `InterlockedAdd`). Because photon count == texel count and each
   deposits exactly one unit, the map's **mean is 1**: convergent refraction piles
   photons up (R>1, brighter) and divergent refraction thins them out (R<1,
-  darker) — no free energy. Three phases: clear → scatter → resolve.
+  darker): no free energy. Three phases: clear → scatter → resolve.
 - **G = wave shadow.** The sun's Fresnel transmission through the surface above
   the texel; the backs of waves let less light through.
 
@@ -88,5 +88,5 @@ depth, and the "surface below rest height" test uses one global `water_rest_heig
 Scenes with unrelated geometry below that plane would receive spurious modulation,
 so caustics are gated on water presence; a proper per-region water height/mask
 would refine this. The caustic contrast also depends on the sun being a
-meaningful fraction of the surface's lighting — under a sky-ambient-dominated
-demo it is real but subtle (measure, don't eyeball).
+meaningful fraction of the surface's lighting: under a sky-ambient-dominated
+demo it is real but subtle (measure, do not eyeball).

@@ -2,40 +2,26 @@
 #define RX_RENDER_DECAL_BAKE_H_
 
 // Texture-space decal baking. A projected decal is rasterized ONCE into a small
-// per-instance layer that lives in the receiver's UV space, and the forward
-// pass composites that layer over the material with a single extra texture
-// fetch. Unlike the clustered projector path (mesh_pipeline.h Decal), the cost
-// of a stamped decal does not grow with the number of decals: a character
-// carrying two hundred blood splats shades exactly as fast as a clean one.
+// per-instance layer in the receiver's UV space; the forward pass composites it
+// with one extra texture fetch, so decal count does not affect shading cost
+// (unlike the clustered projector path in mesh_pipeline.h Decal).
 //
-// The layers are tiles in three shared atlases, so a receiver costs a fixed
-// tile no matter how much gets thrown at it, and nothing at all until its
-// first stamp:
+// Layers are LRU-recycled tiles in three shared atlases, so a receiver costs a
+// fixed tile and nothing until its first stamp:
 //   albedo  RGBA8  premultiplied decal colour + coverage
 //   fx      RGBA8  tangent-space normal xy, roughness multiplier, coverage
-//   chart   R8     1 where the receiver's UV charts are, for the gutter fill
-// A 2D decal (a tattoo) writes albedo only; a "3D fx" decal (wet splatter,
-// embossed ink) also perturbs the normal and the roughness, so it catches the
-// light like a real surface feature.
+//   chart   R8     1 where the receiver's UV charts are (gutter fill)
+// A 2D decal (tattoo) writes albedo only; a "3D fx" decal also perturbs normal
+// and roughness. Every stamp is journalled CPU-side (~112 B), so a receiver
+// whose tile was evicted off screen REBAKES its whole history in one draw:
+// keep the cheap description, throw away the expensive pixels.
 //
-// Tiles are recycled LRU. Every stamp is also journalled CPU-side (~112 bytes),
-// so a receiver whose tile was evicted while it was off screen REBAKES its
-// whole history in one draw the next time it appears - the decals survive
-// without the memory. That is the whole trade: keep the cheap description,
-// throw away the expensive pixels.
-//
-// Requirements on a receiver: its lod-0 UV0 must be unique across the mesh
-// (charts must not overlap). Character and prop UVs normally are; tiling
-// architecture UVs are not, and a decal stamped on one would repeat across
-// every tile. One tile covers the whole mesh, so submeshes that each re-use the
-// full 0..1 UV space share it.
-//
-// A receiver's uvs do not have to BE 0..1, though. SetReceiverUv applies a
-// scale+bias first, which is what makes UDIM content work: a Daz/Genesis figure
-// lays its body zones out across u in [0,7), and a receiver biased onto one of
-// those tiles gets the whole layer to itself at full resolution. Geometry that
-// falls outside 0..1 after the transform takes no decal at all, in the bake and
-// in the forward pass alike.
+// Receiver requirements: lod-0 UV0 must be unique across the mesh (overlapping
+// charts would repeat a decal across tiles); one tile covers the whole mesh, so
+// submeshes re-using 0..1 share it. SetReceiverUv applies a scale+bias first,
+// which is what makes UDIM content work (a Genesis body zone across u in
+// [0,7) gets a full-resolution layer); geometry outside 0..1 after the
+// transform takes no decal at all.
 
 #include <span>
 

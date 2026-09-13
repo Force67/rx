@@ -98,7 +98,7 @@ u32 FullMipChainLength(u32 width, u32 height) {
 //
 // The bake reads the mip-0 alpha channel of a color texture and reduces it to a
 // small per-cell mean-opacity grid plus a whole-texture mean. It decodes alpha
-// for the formats masked (cutout) content ships in -- RGBA8, BC1/BC2/BC3, and
+// for the formats masked (cutout) content ships in (RGBA8, BC1/BC2/BC3, and
 // the mode-6 BC7 the import-time compressor writes. Anything else (BC4/BC5, a
 // BC7 block in a mode rx does not emit) is treated as opaque: the mesh-side
 // bake then leaves the vegetation stand-in at full size, which is what it did

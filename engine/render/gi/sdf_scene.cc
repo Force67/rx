@@ -133,7 +133,7 @@ void SdfScene::Remove(u64 mesh_key) {
   // same-key replacement flow, which has already called device_->WaitIdle()
   // (renderer.cc:1372) before touching the SDF, so no in-flight frame can still be
   // reading this buffer. Destroying now (rather than parking it in the deferred
-  // graveyard) avoids retired-SDF accumulation during a load burst -- the outer
+  // graveyard) avoids retired-SDF accumulation during a load burst; the outer
   // stall makes the graveyard pointless here, it would only keep the old
   // allocation resident until a frame slot cycles.
   if (existing->sdf) {
@@ -156,10 +156,10 @@ void SdfScene::RemoveDeferred(u64 mesh_key) {
 bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   // Re-uploading under an existing key replaces the geometry (Renderer::UploadMesh
   // destroys and rebuilds the GPU buffers), so the old SDF is stale and must be
-  // regenerated -- keeping the first one (an early return) would permanently pin
+  // regenerated; keeping the first one (an early return) would permanently pin
   // a bind-pose / previous mesh. Immediate destroy is safe here: this replace path
   // is reached ONLY from Renderer::UploadMesh's same-key flow, which has already
-  // called device_->WaitIdle() (renderer.cc:1372) before regenerating the SDF -- so
+  // called device_->WaitIdle() (renderer.cc:1372) before regenerating the SDF, so
   // no in-flight compose can still read the old buffer. Destroying now (not via the
   // deferred graveyard) avoids retired-SDF accumulation across repeated load-time
   // replacements before a frame slot cycles. Then fall through and rebuild below.

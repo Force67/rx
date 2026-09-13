@@ -22,19 +22,15 @@ struct RayTracingSettings {
   bool global_illumination = false;
 };
 
-// TLAS instance mask bits. Mirrored by the RX_RAY_MASK_* defines in
-// shaders/rhi_bindings.hlsli; keep the two in sync. Realtime effects
-// (shadows, RTAO, reflections, fog, water, forward hits) trace with
-// kRayMaskRealtime; the path-tracer family traces with kRayMaskPathTrace,
-// which additionally sees no_rt fill geometry (grass-like meshes that are
-// too dense for realtime rays but wanted for ground-truth light transport).
-//
-// kRayMaskApprox tags the opaque-approximation variant of alpha-masked
-// vegetation (see the shrunk-triangle "opaque approximation" BLAS built by
-// BuildApproxBlas). Realtime diffuse GI / AO / shadow rays trace
-// kRayMaskRealtime|kRayMaskApprox with RAY_FLAG_CULL_NON_OPAQUE and hit the
-// stand-in instead of the real (non-opaque) masked geometry; reflections and
-// the path tracer never carry the approx bit, so no ray sees both variants.
+// TLAS instance mask bits, mirrored by the RX_RAY_MASK_* defines in
+// shaders/rhi_bindings.hlsli (keep in sync). Realtime effects trace
+// kRayMaskRealtime; the path-tracer family traces kRayMaskPathTrace, which
+// additionally sees no_rt fill geometry (too dense for realtime rays, wanted
+// for ground-truth light transport). kRayMaskApprox tags the opaque-
+// approximation BLAS of alpha-masked vegetation (BuildApproxBlas): realtime
+// diffuse GI / AO / shadow rays trace kRayMaskRealtime|kRayMaskApprox with
+// RAY_FLAG_CULL_NON_OPAQUE and hit the stand-in; reflections and the path
+// tracer never carry the approx bit, so no ray sees both variants.
 enum RayMask : u8 {
   kRayMaskRealtime = 0x01,
   kRayMaskPathTrace = 0x02,
@@ -117,9 +113,9 @@ class RayTracingContext {
   // Builds (once) the BLAS for a non-zero distance LOD of an already-uploaded
   // mesh, keyed by mesh_key + lod. lod is 1-based here (lod 1 = lods_[0]); the
   // renderer builds these lazily the first time an instance selects the LOD.
-  // Distant LODs are built fully OPAQUE (masked foliage stays force-opaque --
-  // the opaque-approximation shrink is imperceptible past the LOD switch
-  // distance), so no separate approx variant is needed for them.
+  // Distant LODs are built fully OPAQUE (masked foliage stays force-opaque; the
+  // opaque-approximation shrink is imperceptible past the LOD switch distance),
+  // so no separate approx variant is needed for them.
   bool BuildLodBlas(u64 mesh_key, u32 lod, const base::Vector<AccelTriangles>& geometries);
   bool HasLodBlas(u64 mesh_key, u32 lod) const;
   void RemoveLodBlas(u64 mesh_key);
@@ -130,22 +126,15 @@ class RayTracingContext {
   bool HasBlas(u64 mesh_key) const { return blas_.contains(mesh_key); }
 
   // --- refittable structures (skinned actors) ---
-  // A structure built with ALLOW_UPDATE over a buffer something else deforms
-  // every frame, and REFIT rather than rebuilt from then on. Both the build and
-  // the refit are recorded into the frame command list, so a steady-state
-  // skinned actor costs no blocking submit at all.
-  //
-  // Keyed by whatever the caller likes, in a map of its own: SkinnedRayTracing
-  // keys per (actor, ping-pong slot), because two actors sharing a GpuMesh hold
-  // different poses and a slot being refit must not be one a live TLAS is
-  // traversing. The ping-pong policy lives entirely there; this only knows how
-  // to reserve one structure and record one build into it.
-  //
-  // Split in two on purpose: ReserveSkinnedBlas allocates (structure + its
-  // persistent scratch) and must run in the CPU frame-build phase like
-  // ReserveTlas, RecordSkinnedBlas only records. `geometries` must describe the
-  // deformed buffer and is captured for the key's lifetime; a refit must repeat
-  // the geometry layout of the build it updates from.
+  // ALLOW_UPDATE structures over a buffer something else deforms every frame,
+  // refit (never rebuilt) from then on; build and refit are recorded into the
+  // frame command list, so a steady-state skinned actor costs no blocking
+  // submit. Keyed in a map of its own: SkinnedRayTracing keys per (actor,
+  // ping-pong slot) because a slot being refit must not be one a live TLAS
+  // traverses; the ping-pong policy lives entirely there. Reserve allocates
+  // (structure + persistent scratch) in the CPU frame-build phase like
+  // ReserveTlas, Record only records. `geometries` must describe the deformed
+  // buffer and a refit must repeat the build's geometry layout.
   bool ReserveSkinnedBlas(u64 key, const base::Vector<AccelTriangles>& geometries);
   // Refits `key` from `src_key` when that source holds a completed build, and
   // does a full build otherwise (a key whose ping-pong partner has never been
@@ -183,7 +172,7 @@ class RayTracingContext {
 
   // Whether `slot` currently holds a valid TLAS build (built this session and
   // against the live BLAS set). False for a never-built slot or one retired by a
-  // RemoveBlas/replace -- consumers must not bind such a slot.
+  // RemoveBlas/replace; consumers must not bind such a slot.
   bool TlasValid(u32 slot) const { return slot_tracker_.Valid(slot); }
 
   // Pick this frame's build/read slots and whether the async (build-ahead) path

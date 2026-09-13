@@ -15,32 +15,24 @@
 
 namespace rx {
 
-// The character reference lab (`--demo lookdev`).
-//
-// This is the first thing the Callisto workflow asks for and the last thing
-// anyone builds: a calibrated bench where a frozen head, a frozen camera and a
-// frozen material are lit ONE LIGHT AT A TIME and compared against reference in
-// the same colour path. The shader controls are worth nothing without it -
-// with no way to measure, "better skin" is an argument, not a result.
-//
-// What it provides:
-//   * an OLAT rig (one light active at a time) covering front/side/grazing/
-//     back/top/bottom and both emitter extremes - a small hard source and a
-//     large soft panel - plus a multi-light stop;
-//   * the same nominal light direction routed through the sun, a sphere and a
-//     rect panel, which is the parity test for "every light type evaluates the
-//     same material";
+// The character reference lab (`--demo lookdev`): a calibrated bench where a
+// frozen head, camera and material are lit ONE LIGHT AT A TIME and compared
+// against reference in the same colour path. Provides:
+//   * an OLAT rig (front/side/grazing/back/top/bottom, both emitter extremes,
+//     one multi-light stop);
+//   * one nominal light direction routed through sun / sphere / rect panel, the
+//     parity test for "every light type evaluates the same material";
 //   * frozen camera presets (front, 30, three-quarter, profile, close-up,
 //     gameplay distance, LOD distance);
 //   * side-by-side / wipe / linear-difference / display-referred-difference
-//     comparison against a loaded reference, with per-region masks;
-//   * live global and per-region material editing with an undo history;
-//   * automated coordinate-descent fitting against the measured error over
-//     every selected OLAT frame at once;
+//     comparison with per-region masks;
+//   * live global and per-region material editing with undo;
+//   * coordinate-descent fitting against the measured error over all selected
+//     OLAT frames at once;
 //   * a deterministic capture pass over the full validation matrix.
 //
-// It owns its camera (the presets are the point), so the Viewer routes
-// OnUpdate here and reads the pose back through Emit.
+// It owns its camera (the presets are the point), so the Viewer routes OnUpdate
+// here and reads the pose back through Emit.
 class LookdevDemo {
  public:
   explicit LookdevDemo(EngineContext& ctx);

@@ -73,7 +73,7 @@ class HairStrands {
     // partial ribbon coverage, so this is below 1.
     f32 shadow_density = 0.6f;
     // render::DebugView. The strand pass honours the fibre-count view: a debug
-    // view occluded by the very geometry it is diagnosing is not a diagnostic.
+    // view occluded by the geometry it is diagnosing is not a diagnostic.
     u32 debug_view = 0;
     bool transmittance = true;
   };

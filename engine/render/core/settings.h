@@ -138,7 +138,7 @@ struct RenderSettings {
   bool gpu_pass_timings = false;
 
   // Material-texture VRAM budget (MB) for the mip streaming in MaterialSystem:
-  // textures whose materials haven't drawn recently drop to a low-mip tail
+  // textures whose materials have not drawn recently drop to a low-mip tail
   // when the budget is exceeded, and stream back in when used again.
   // -1 = auto (half of device-local memory), 0 = unlimited (streaming off).
   i32 texture_budget_mb = -1;
@@ -155,7 +155,7 @@ struct RenderSettings {
   bool vsync = false;
   bool gpu_culling = true;  // gpu compute frustum culling of the opaque indirect draws
   bool gpu_occlusion = true;  // hi-z occlusion culling against last frame's depth
-  // Pick coarser mesh lods by distance; off = always finest (it's 2026). Left
+  // Pick coarser mesh lods by distance; off = always finest (it is 2026). Left
   // off after measuring it on a full map: it saves real time (1.6 of 7.8 ms
   // there) but the picture visibly changes, because SelectLod switches at 2.5
   // bounding radii, which is still near enough for a coarse lod to read as
@@ -196,7 +196,7 @@ struct RenderSettings {
   // NOTE: SDF software-trace availability is intentionally NOT a RenderSettings
   // field. It is an immutable startup decision (RendererDesc::software_gi / RX_SDF
   // / RX_RCGI_SW / a non-RT RX_RCGI request) held on Renderer::sdf_available_, so
-  // that applying a quality preset live -- which wholesale-replaces this struct --
+  // that applying a quality preset live (which wholesale-replaces this struct)
   // can never turn a seeded software path off. RX_SDF_DEBUG raymarches the clipmap
   // for verification and gates on availability.
 

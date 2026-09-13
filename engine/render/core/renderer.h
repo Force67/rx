@@ -339,8 +339,8 @@ struct FrameView {
   // fresh each frame and neither is read across a frame boundary. Handing the
   // shader last frame's buffer instead would be smaller and wrong: with
   // kMaxFramesInFlight == 2 the frame that writes a ring slot only waits on the
-  // fence two frames back, so it would overwrite the very slot the frame still
-  // in flight is reading as its history.
+  // fence two frames back, so it would overwrite the slot the frame still in
+  // flight is reading as its history.
   base::Vector<Mat4> prev_bone_matrices;
   // Active morph target weights for every morphed draw this frame,
   // concatenated; each DrawItem indexes its run by morph_offset/morph_count.
@@ -631,20 +631,15 @@ public:
   }
 
   // --- skinned ray tracing (render/gi/skinned_rt.h) ---
-  // Puts a skinned draw into ray tracing with its ANIMATED pose. Skinning
-  // otherwise runs only in the raster vertex stage, so a skinned mesh's BLAS is
-  // its bind pose and such actors are normally kept out of the TLAS entirely
-  // (asset::Mesh::exclude_from_rt). Acquire one handle per skinned draw that
-  // should be ray traced (a character with a separate hair mesh needs two),
-  // keep it for that draw's lifetime, and put it on the draw's
-  // DrawItem::rt_skin alongside its usual skin_offset. The renderer deforms the
-  // mesh in compute into a buffer that actor owns and refits its BLAS in place
-  // each frame; nothing else about the draw changes, and the raster path still
-  // skins it in the vertex stage as before.
-  //
-  // Returns 0 when the path is unavailable (no ray tracing, pipeline creation
-  // failed), which is also the "no actor" value, so the result can be stored
-  // unconditionally.
+  // Puts a skinned draw into ray tracing with its ANIMATED pose (its BLAS is
+  // otherwise the bind pose, so such actors are normally excluded via
+  // asset::Mesh::exclude_from_rt). Acquire one handle per skinned draw to ray
+  // trace (a character with a separate hair mesh needs two), keep it for the
+  // draw's lifetime, and set DrawItem::rt_skin beside the usual skin_offset;
+  // the renderer deforms in compute and refits the BLAS in place each frame,
+  // and the raster path is unchanged. Returns 0 when unavailable (no ray
+  // tracing, pipeline creation failed), which is also the "no actor" value, so
+  // the result can be stored unconditionally.
   u32 AcquireSkinnedRt();
   void ReleaseSkinnedRt(u32 actor);
 
@@ -823,7 +818,7 @@ private:
   // global clipmap. Both null unless the path was enabled at startup, so with
   // it off nothing is generated/allocated. `sdf_available_` is the IMMUTABLE
   // startup availability bit, decided once in Initialize and gated on creation
-  // success -- separate from any live RenderSettings toggle, so applying a
+  // success, separate from any live RenderSettings toggle, so applying a
   // quality preset can never turn the seeded software path off (see
   // RendererDesc::software_gi).
   bool sdf_available_ = false;

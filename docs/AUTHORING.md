@@ -167,7 +167,7 @@ plane.
 
 **Give things a silhouette.** One box with a window pattern on it is a box with
 a window pattern on it, whatever colour it is. Build a prefab from two or three
-masses - a wider podium, a shaft, a set-back crown - and the outline does the
+masses (a wider podium, a shaft, a set-back crown) and the outline does the
 work at any distance. A setback or a 40cm cornice is the difference between a
 building and an extrusion. `Stretch` reaches every part, so one such prefab is
 as many buildings as you instance it.

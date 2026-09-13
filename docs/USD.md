@@ -74,7 +74,7 @@ rgb so a greyscale roughness map still reads through `.g`.
 
 - **MDL materials render as untextured defaults.** NVIDIA's Omniverse content is
   largely authored in MDL (`outputs:mdl:surface`), which needs NVIDIA's MDL SDK
-  to evaluate - no USD reader, including Pixar's, shades these on its own. Only
+  to evaluate; no USD reader, including Pixar's, shades these on its own. Only
   the prims that also carry a UsdPreviewSurface get their real look. The importer
   logs how many materials had no UsdPreviewSurface.
 - **Mirrored instances lose their mirroring.** `ImportedScene::Instance` is a
@@ -98,7 +98,7 @@ Both are handled in `usd_loader.cc`, and both cost whole scenes if they are not:
 - Omniverse writes `colorSpace = "RAW"`; tinyusdz matches `"raw"`/`"Raw"` and
   treats an unknown token as a hard error that fails the entire stage, not just
   that material. The importer lowercases colorSpace tokens on the composed layer
-  first - every token tinyusdz accepts survives that.
+  first; every token tinyusdz accepts survives that.
 - tinyusdz rejects asset paths beginning with `..` (a sandbox escape for a
   resolver serving remote assets). Authored scenes use them constantly for
   sibling texture and prop directories, so composition is configured to allow
@@ -117,7 +117,7 @@ authoring tool's render settings over from the stage.
 - **The authored camera** supplies position, orientation and vertical fov. A
   stage camera is a lens as much as a pose: the Attic's is 18 mm, which frames
   nothing like the engine's default 60 degrees.
-- **Inherited `visibility` is honoured.** This matters more than it sounds -
+- **Inherited `visibility` is honoured.** This matters more than it sounds;
   see below.
 
 UsdLux intensity is photometric and its absolute scale is a per-DCC convention
@@ -145,7 +145,7 @@ switch between them with `visibility`. The Attic ships a **day** rig and a
 the stronger one, so **night is the file's authored default** and that is what
 rx renders with no flags.
 
-NVIDIA's marketing images of this scene are the *day* rig - the warm golden one.
+NVIDIA's marketing images of this scene are the *day* rig (the warm golden one).
 To get it, override visibility:
 
     rx --usd assets/usd/attic/Attic_NVIDIA.usd \
@@ -157,7 +157,7 @@ visibility only; nothing in the stage is modified.
 
 ## Render settings
 
-USD has no standard schema for renderer configuration - UsdRender describes
+USD has no standard schema for renderer configuration: UsdRender describes
 outputs, not light transport, and the Attic authors no UsdRender prims at all.
 Omniverse instead records its renderer's state as an `rtx:` dictionary in the
 layer's `customLayerData`, and rx reads the parts that map onto engine features.
@@ -172,7 +172,7 @@ advisory: unauthored settings leave the engine default alone.
 | `rtx:post:lensFlares:*` | lens flare scale, when camera effects are enabled |
 
 The indirect scale is the one that changes the picture. A path-traced interior
-is mostly bounce light - the Attic asks for **7x** - and at 1x the same geometry
+is mostly bounce light (the Attic asks for **7x**); at 1x the same geometry
 reads as an unlit box with a bright window in it.
 
 Fog is authored as distance fog with the near field kept clear (the Attic starts

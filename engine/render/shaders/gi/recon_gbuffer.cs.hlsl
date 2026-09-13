@@ -254,7 +254,7 @@ Hit TraceClosest(float3 origin, float3 dir, float cone_spread, bool sample_mr) {
   h.emissive = m.emissive;
   // Metallic-roughness map (glTF: .g roughness, .b metallic) scaled by the
   // factors, matching the rasterizer. Only the primary hit needs it (the diffuse
-  // bounces don't shade specular), so secondary rays skip the fetch.
+  // bounces do not shade specular), so secondary rays skip the fetch.
   float rough = m.roughness;
   float metal = m.metallic;
   // Terrain reuses the mr slot for land layer 2 (an albedo), so skip the mr

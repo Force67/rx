@@ -3,7 +3,7 @@
 // optical depth along the sun ray, sampling the SAME textured density field
 // the march renders (base noise + weather map + height profile, no erosion),
 // so the shade on the ground tracks the formation that actually occludes the
-// sun -- gaps stay lit, cores darken, and the pattern advects with the wind.
+// sun: gaps stay lit, cores darken, and the pattern advects with the wind.
 // Constants are kept in lockstep with cloudscape_march.cs.hlsl's cheap
 // sampler; two taps through the shell are plenty at this softness.
 

@@ -2,7 +2,7 @@
 #include "gi/material_class.hlsli"
 // Bilateral upscale of the half-res reflection trace (RX_REFL_HALF) to full
 // render resolution before NRD REBLUR_SPECULAR consumes it. The trace runs at
-// half res (quarter the rays -- the dominant reflection cost); this reconstructs
+// half res (quarter the rays, the dominant reflection cost); this reconstructs
 // the full-res packed radiance+normHitDist with depth/normal-aware weights so
 // reflections do not bleed across silhouettes before the denoiser locks them in.
 // Mirrors the RCGI upscale weighting pattern (rcgi_upscale.cs.hlsl).

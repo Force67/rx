@@ -1,4 +1,4 @@
-// rx::weather acceptance: the weather-state layer as pure CPU logic -- a seeded
+// rx::weather acceptance: the weather-state layer as pure CPU logic, a seeded
 // scheduler that dwells and cross-fades between named states, region gating of
 // which states occur where, scripted overrides, and the wind / surface /
 // lightning integrals it writes into the two renderer value structs. No GPU, no

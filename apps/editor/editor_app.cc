@@ -1306,8 +1306,8 @@ void Editor::DoSave(const std::string &path) {
       scene_saved = false;
     // Only a document that owns terrain may touch the sidecar. Without this
     // gate a no-terrain document saved onto a stem with an existing sidecar
-    // would move it to the backup, then delete the backup on success --
-    // silently destroying the user's terrain.
+    // would move it to the backup, then delete the backup on success, silently
+    // destroying the user's terrain.
     if (has_terrain) {
       terrain_backed_up = fs::exists(terrain_path) &&
                           move(terrain_path, terrain_backup, &terrain_error);
@@ -1520,9 +1520,9 @@ void Editor::OpenFileDialog() {
 
 // ===========================================================================
 // Autopilot (RX_EDITOR_AUTOPILOT=1): drives the editor's own interaction code
-// paths at fixed frames -- GPU pick round-trips at projected entity pixels,
+// paths at fixed frames (GPU pick round-trips at projected entity pixels,
 // an undo-grouped move (the gizmo-drag path), undo/redo, and a save/new/load
-// round-trip -- logging pass/fail so a headless GPU run smoke-tests the whole
+// round-trip), logging pass/fail so a headless GPU run smoke-tests the whole
 // engine-integration surface without OS-synthesized input.
 // ===========================================================================
 void Editor::RunAutopilot() {

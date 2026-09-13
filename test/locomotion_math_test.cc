@@ -1,5 +1,5 @@
 // Pure-math locomotion tests (docs/LOCOMOTION.md): the gait clock, capture
-// point, swing trajectory and footstep planner. No Jolt / physics involved —
+// point, swing trajectory and footstep planner. No Jolt / physics involved.
 // terrain is faked through a synthetic downward probe. Hand-rolled Check/Near
 // harness in the rx test style (see test/camera_test.cc).
 
@@ -402,7 +402,7 @@ Vec3 LegForwardAnkle(const LegIkResult& r, f32 upper, f32 lower) {
   return knee_pos + Rotate(r.hip * q_knee, {0, -lower, 0});
 }
 
-// Hand-built rig geometry (never call BipedRig::Build here — that needs Jolt and
+// Hand-built rig geometry (never call BipedRig::Build here; that needs Jolt and
 // belongs to the concurrent agent's test). Straight-leg reach (hip->sole) is
 // upper + lower + foot_height = 0.904 m, so pelvis_height = leg_length = 0.904
 // puts the soles flat on the ground with the legs essentially straight at bind.
@@ -447,7 +447,7 @@ void TestLegIkForwardKinematics() {
   // (b) Full sole reproduction (through hip + knee + ankle) on near-straight
   // targets, where keeping the foot flat needs less than the 0.5 rad ankle cone
   // so the sole plane is achieved exactly. (A deeply-bent knee would require the
-  // heel to lift, which the cone deliberately prevents — see whole_body.cc.)
+  // heel to lift, which the cone deliberately prevents; see whole_body.cc.)
   const Vec3 near_straight[] = {
       {0.0f, -0.88f, 0.0f},   {0.0f, -0.85f, 0.0f},    {0.0f, -0.83f, 0.0f},
       {0.10f, -0.86f, 0.0f},  {-0.10f, -0.86f, 0.0f},  {0.0f, -0.85f, 0.12f},

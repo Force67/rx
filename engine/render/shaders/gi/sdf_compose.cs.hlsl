@@ -10,7 +10,7 @@
 // distance-to-box + the clamped edge value, a conservative underestimate that
 // keeps the sphere-trace from overshooting and avoids a false shell at the box.
 // Non-uniform instance scale is folded in by a single conservative world-scale
-// factor (the transform's minimum axis scale -- see the .cc for the rationale).
+// factor (the transform's minimum axis scale; see the .cc for the rationale).
 
 [[vk::image_format("r16f")]] [[vk::binding(0, 0)]] RWTexture3D<float> dist_vol : register(u0, space0);
 [[vk::image_format("rgba8")]] [[vk::binding(1, 0)]] RWTexture3D<float4> albedo_vol : register(u1, space0);
@@ -78,7 +78,7 @@ void main(uint3 id : SV_DispatchThreadID) {
     // surface, so the sphere trace never overshoots (the previous box_dist+edge
     // was an upper bound and could step through geometry). Two lower bounds,
     // take the larger:
-    //  (a) box_dist -- the surface lies inside the mesh AABB, so the distance
+    //  (a) box_dist: the surface lies inside the mesh AABB, so the distance
     //      from p to the box is <= the distance from p to the surface.
     //  (b) 1-Lipschitz SDF: d(p) >= d(q) - |p-q| for any q. Clamping to the AABB
     //      makes q the closest box point, and |p-q| == box_dist exactly, so

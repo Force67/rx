@@ -5,7 +5,7 @@
 // (RGBA16F; the channel was previously written as 0 and read by nothing).
 // Denoisers reject cross-class neighbours so wind-blown vegetation, skinned
 // characters and translucency do not bleed their noisy indirect light onto
-// opaque surfaces during spatial filtering -- AC Shadows' denoiser-mask fix.
+// opaque surfaces during spatial filtering (AC Shadows' denoiser-mask fix).
 // Values 0..3 also map 1:1 onto NRD's 2-bit A2 material-ID slot
 // (NormalEncoding::R10_G10_B10_A2_UNORM), so the same id can feed IN_MATERIALID.
 

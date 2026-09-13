@@ -20,22 +20,22 @@ thresholds are the sorted ranks, a density level `d` activates exactly the
    thresholds are `(i + 0.5)/N`, spread uniformly across `(0, 1)`.
 
 2. **Maximal successive spacing.** Consecutive positions (in threshold order)
-   are placed as far apart as possible, so that *every* prefix — the points
-   active at a given density — is an evenly spaced, blue-noise-like set. Low
+   are placed as far apart as possible, so that *every* prefix (the points
+   active at a given density) is an evenly spaced, blue-noise-like set. Low
    density yields few, well-separated points; density `1.0` activates all 256,
    still well spaced.
 
 ## Toroidal metric
 
 The tile repeats edge-to-edge, so all distances are **toroidal** on the unit
-square (each axis wraps: `d = min(|Δ|, 1 - |Δ|)`). This makes the pattern tile
-seamlessly with no clumping or gaps across tile boundaries.
+square (each axis wraps: `d = min(|Δ|, 1 - |Δ|)`). Distances wrap, so the
+pattern tiles without clumping or gaps across tile boundaries.
 
 ## Algorithm
 
 Greedy farthest-point ordering (`pattern_gen.cc`):
 
-1. Build a candidate pool of `4N = 1024` points via stratified jitter — one
+1. Build a candidate pool of `4N = 1024` points via stratified jitter: one
    jittered point per cell of a 32×32 grid.
 2. Pick the first point from the PRNG. Then repeatedly select the candidate
    whose **minimum toroidal distance to the already-selected set** is largest,
@@ -71,6 +71,6 @@ Minimum toroidal spacing of each prefix against the ideal grid spacing
 | 128      | 0.06430  | 0.08839 | 0.727 |
 | 256      | 0.04389  | 0.06250 | 0.702 |
 
-Every prefix sits at 70–98% of ideal spacing — comfortably above the 50% bar.
-Coverage: all 4×4 cells hold 8–24 of the 256 points (target 16), and 2–14 of
+Every prefix sits at 70-98% of ideal spacing: comfortably above the 50% bar.
+Coverage: all 4×4 cells hold 8-24 of the 256 points (target 16), and 2-14 of
 the first 128 points (target 8).

@@ -1,23 +1,17 @@
 #ifndef RX_NAV_NAVMESH_H_
 #define RX_NAV_NAVMESH_H_
 
-// Tiled navigation surface for terrain-heavy worlds, after the Death
-// Stranding recipe: the mesh does not only answer "can I stand here" but
-// "how much do I want to". Every cell carries an area id; areas map to a
-// per-meter traversal multiplier plus a one-time ENTRY cost, so pathfinding
-// can prefer smooth ground, commit to rough ground once entered (no 360-turn
-// backtracking after one accidental step), and wade rivers at sensible spots
-// instead of treating water as a wall.
+// Tiled navigation surface for terrain-heavy worlds, after the Death Stranding
+// recipe: cells carry an area id mapping to a per-metre traversal multiplier
+// plus a one-time ENTRY cost, so paths prefer smooth ground, commit to rough
+// ground once entered, and wade rivers at sensible spots instead of treating
+// water as a wall.
 //
-// Tiles are built on demand inside a bubble around the agents (EnsureBubble)
-// from a game-supplied sampler -- a heightfield probe, physics raycasts,
-// analytic terrain, whatever the game has. Nothing here touches physics or
-// rendering; the module stays headless.
-//
-// Coordinates: world XZ maps to a global integer cell grid, cell (cx, cz)
-// spans [cx*cell, (cx+1)*cell) in x. Tiles group tile_cells^2 cells and are
-// versioned: painting or rebuilding bumps the version, which is how corridors
-// notice the world changed under them (see path.h, RepathReason).
+// Tiles build on demand inside a bubble around the agents (EnsureBubble) from a
+// game-supplied sampler (heightfield probe, physics raycasts, analytic terrain).
+// Headless: no physics or rendering dependency. World XZ maps to a global
+// integer cell grid; tiles group tile_cells^2 cells and are versioned, which is
+// how corridors notice the world changed under them (path.h, RepathReason).
 
 #include <cstdint>
 

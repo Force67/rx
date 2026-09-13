@@ -1,4 +1,4 @@
-# rx - render experience
+# rx: render experience
 
 A standalone real-time rendering engine, extracted from the
 [recreation](https://github.com/Force67/recreation) project. rx is the part of
@@ -8,67 +8,61 @@ viewer runtime in place of the game.
 
 ## What's here
 
-- **engine/render** - the renderer, behind a backend-agnostic RHI
+- **engine/render**: the renderer, behind a backend-agnostic RHI
   (`engine/render/rhi/`: vulkan, d3d12-via-vkd3d, null). HLSL and
   [Slang](docs/SLANG.md) shaders compiled to SPIR-V at build time (dxc /
-  slangc). Feature set includes: TAA / MSAA /
-  FSR3 / DLSS upscaling + FSR3 frame generation, hardware ray tracing (RT
-  shadows/AO/reflections, DDGI, RCGI radiance-cache GI, ReSTIR DI,
-  compute-skinned characters posed into the acceleration structure by a
-  per-actor BLAS refit), a
-  reference path tracer, NRD
-  denoising, screen-space SSS, strand hair, virtual textures, virtual geometry
-  (cluster-DAG LOD, gpu-driven two-pass hi-z occlusion culling, 64-bit
+  slangc). Feature set: TAA / MSAA / FSR3 / DLSS upscaling + FSR3 frame
+  generation, hardware ray tracing (RT shadows/AO/reflections, DDGI, RCGI
+  radiance-cache GI, ReSTIR DI, compute-skinned characters posed into the
+  acceleration structure by a per-actor BLAS refit), a reference path tracer,
+  NRD denoising, screen-space SSS, strand hair, virtual textures, virtual
+  geometry (cluster-DAG LOD, gpu-driven two-pass hi-z occlusion culling, 64-bit
   visibility buffer with compute + mesh-shader rasterization, instancing),
-  froxel volumetrics, procedural grass ([design](PROCEDURAL_GRASS.md)), local
-  shadow atlas, clustered + baked texture-space decals
-  ([design](DECALS.md)), lit
-  translucency, FFT ocean, gaussian splats, GPU particles, HDR10 output,
-  dynamic resolution, texture streaming, async compute, VRS, meshlet path.
-- **engine/asset** - glTF loading (cgltf) including morph targets and weight
-  animations, OpenUSD stage loading ([tinyusdz](https://github.com/lighttransport/tinyusdz):
-  `.usd`/`.usda`/`.usdc`/`.usdz` with composition, GeomSubsets and
-  UsdPreviewSurface; see [USD.md](docs/USD.md)),
-  MaterialX, primitives, LOD simplification, Loop subdivision,
-  import-time BCn compression of material textures (BC7 colour, BC3 masked
-  colour, BC7 data, with a baked mip chain, cached on disk by source pixels;
-  `RX_TEX_COMPRESS=0` to disable, `RX_TEX_COMPRESS_NORMALS=1` to include BC5
-  normal maps),
-  virtual filesystem with `.rxp` archives (rx ships its own under
-  `engine/assets`, mounted at boot: `fonts://` holds the default UI font).
-- **engine/core** - SDL3 windowing (+ KDE HDR monitor), job system, input
-  action layer with gamepad support, math, logging, feature registry.
-- **engine/ecs / scene / physics (Jolt) / anim / audio / rpc** - entity
-  storage and scheduling, scene components, Jolt-backed rigid bodies and
-  arbitrary-mesh cloth (native XPBD/skinning/pressure plus fast self-collision;
-  see `engine/physics/README.md`), pose and locomotion helpers including
+  froxel volumetrics, procedural grass, local shadow atlas, clustered + baked
+  texture-space decals, lit translucency, FFT ocean, gaussian splats, GPU
+  particles, HDR10 output, dynamic resolution, texture streaming, async
+  compute, VRS, meshlet path.
+- **engine/asset**: glTF loading (cgltf) including morph targets and weight
+  animations, OpenUSD stage loading
+  ([tinyusdz](https://github.com/lighttransport/tinyusdz): `.usd`/`.usda`/`.usdc`/`.usdz`
+  with composition, GeomSubsets and UsdPreviewSurface; see
+  [docs/USD.md](docs/USD.md)), MaterialX, primitives, LOD simplification, Loop
+  subdivision, import-time BCn compression of material textures (BC7 colour, BC3
+  masked colour, BC7 data, with a baked mip chain, cached on disk by source
+  pixels; `RX_TEX_COMPRESS=0` to disable, `RX_TEX_COMPRESS_NORMALS=1` to
+  include BC5 normal maps), and a virtual filesystem with `.rxp` archives (rx
+  ships its own under `engine/assets`, mounted at boot: `fonts://` holds the
+  default UI font).
+- **engine/core**: SDL3 windowing (+ KDE HDR monitor), job system, input action
+  layer with gamepad support, math, logging, feature registry.
+- **engine/ecs / scene / physics (Jolt) / anim / audio / rpc**: entity storage
+  and scheduling, scene components, Jolt-backed rigid bodies and arbitrary-mesh
+  cloth (native XPBD/skinning/pressure plus fast self-collision; see
+  `engine/physics/README.md`), pose and locomotion helpers including
   configurable [procedural walk styles](docs/WALK_STYLES.md), extensible
   [body dynamics and soft-tissue deformation](docs/BODY_DYNAMICS.md), a facial
-  expression controller (damped per-region
-  transitions between named morph poses, plus a blink/micro-motion life
-  layer), an SDL mixer with wav/xwma decoding, and a small RPC value/registry
-  layer. **engine/combat** adds the shooter half of a first-person game -
-  weapon definitions as data, fire modes, spread bloom, view recoil, reloading,
-  aim-down-sights, hitscan with falloff and penetration, ballistic projectiles,
-  explosions and health/armor/teams
-  ([design](engine/combat/README.md), [range demo](docs/SHOOTER.md)).
-  Skeletal animation sampling comes from
-  [kinema](https://github.com/Force67/kinema), a reusable SoA animation
-  runtime consumed as a sibling checkout.
-- **engine/world** - baked worlds: a cooked, immutable map in an `.rxp` that
+  expression controller (damped per-region transitions between named morph
+  poses, plus a blink/micro-motion life layer), an SDL mixer with wav/xwma
+  decoding, and a small RPC value/registry layer. **engine/combat** adds the
+  shooter half of a first-person game: weapon definitions as data, fire modes,
+  spread bloom, view recoil, reloading, aim-down-sights, hitscan with falloff
+  and penetration, ballistic projectiles, explosions and health/armor/teams
+  ([design](engine/combat/README.md), [range demo](docs/SHOOTER.md)). Skeletal
+  animation sampling comes from
+  [kinema](https://github.com/Force67/kinema), a reusable SoA animation runtime
+  consumed as a sibling checkout.
+- **engine/world**: baked worlds: a cooked, immutable map in an `.rxp` that
   streams into the ECS a cell at a time. An always-resident index every
   streaming decision reads (and nothing else), immutable per-cell payloads
   grouped by domain, and a sparse overlay for what a save changed. Residency is
   per domain rather than per cell, so gameplay, collision and representation
   each have their own radius and budget; static decoration stays out of the ECS
   until something promotes it; identity across a streaming boundary is a stable
-  id, never an entity handle. Cooked by `rxworld`
-  ([design](WORLD.md)).
-- **engine/app** - the composition root a game embeds instead of forking the
+  id, never an entity handle. Cooked by `rxworld`.
+- **engine/app**: the composition root a game embeds instead of forking the
   viewer: `app::Host` owns the subsystems and the fixed-step/render loop and
-  drives a game-implemented `app::Application`. See [EMBEDDING.md](EMBEDDING.md)
-  for using rx as the engine of your own game.
-- **runtime/** - the `rx` viewer (the reference `app::Application`):
+  drives a game-implemented `app::Application` (see `engine/app/README.md`).
+- **runtime/**: the `rx` viewer (the reference `app::Application`):
   `--gltf <scene>`, `--usd <stage>` or `--demo <id>` (water,
   materials, cornell, cloth, grass, lod, oit, fire, bricks, sss, strands, vt, vgeo, lights,
   meshlet, occlusion, imposters, gaussian, fur, gpuparticles, autolod, mtlx,
@@ -76,7 +70,7 @@ viewer runtime in place of the game.
   fly camera, imgui debug overlay (F1), physics cube toss (F), camera
   record/replay/orbit/showcase drivers (`RX_RECORD` / `RX_REPLAY` / `RX_ORBIT`
   / `RX_SHOWCASE`), frame capture (`RX_UI_SHOT`).
-- **apps/editor** - the scene editor. It opens `.rxscene`, `.gltf`, `.glb`,
+- **apps/editor**: the scene editor. It opens `.rxscene`, `.gltf`, `.glb`,
   `.usd`/`.usda`/`.usdc`/`.usdz` and `.blend` documents. Blend files are converted by Blender in background mode
   into a cached GLB, retaining visible meshes, deform bones, skin weights, and
   body-deformation morphs. Compatible chest-helper/Genesis rigs automatically
@@ -85,12 +79,12 @@ viewer runtime in place of the game.
 ## Characters
 
 Skin, eyes and teeth run one controllable BRDF that every light type, every
-render path and every quality tier evaluates - the transferable half of The
+render path and every quality tier evaluates: the transferable half of The
 Callisto Protocol's character work. Independent artist controls for diffuse
 Fresnel, grazing retroreflection, a smooth shading terminator, generalized
 specular Fresnel and an optional second GGX lobe sit on top of separate diffuse
 and specular shading normals (so sweat bends the highlight, not the skin),
-thickness-driven transmission, and an eye shaded as a layered anatomy - corneal
+thickness-driven transmission, and an eye shaded as a layered anatomy: corneal
 refraction with the iris sampled at its real depth behind it, a limbal ring, and
 an iris shadow evaluated separately from the corneal surface. The neutral
 parameter set reproduces the engine's stock Lambert + GGX exactly, so enabling
@@ -106,8 +100,8 @@ validation matrix. See [docs/CHARACTER_RENDERING.md](docs/CHARACTER_RENDERING.md
 
 ## Hair
 
-Strand grooms and hair cards run one fibre BSDF - Marschner's R / TT / TRT lobes
-in Chiang's parameterization - with Zinke dual scattering fed by a deep opacity
+Strand grooms and hair cards run one fibre BSDF (Marschner's R / TT / TRT lobes
+in Chiang's parameterization) with Zinke dual scattering fed by a deep opacity
 map rendered from the sun. The same volume gives the groom its self-shadowing,
 supplies the fibre count multiple scattering is a function of, and shadows the
 skin underneath, which a binary shadow map cannot do because hair is not opaque.
@@ -123,28 +117,26 @@ calibrated for path-traced multiple scattering and render a requested 0.45 as
 ## Global illumination
 
 Indirect diffuse comes from one of three tiers, all fully dynamic (rx bakes
-nothing - no lightmaps, no probe bakes, no per-level GI data on disk):
+nothing: no lightmaps, probe bakes, or per-level GI data on disk):
 
-- **SSGI** - screen-space bounce; the raster fallback when ray query is
+- **SSGI**: screen-space bounce; the raster fallback when ray query is
   unavailable.
-- **DDGI** (default) - a single camera-following probe volume, traced and
+- **DDGI** (default): a single camera-following probe volume, traced and
   blended every frame. Simple and cheap, but range-limited (its whole volume
   is ~24 m) and it only bounces sun + emissive.
-- **RCGI** (`RX_RCGI=1`, experimental) - a cascaded radiance-cache pipeline
-  modeled on the GI id Software shipped in idTech 8: a world-space cascaded
+- **RCGI** (`RX_RCGI=1`, experimental): a cascaded radiance-cache pipeline
+  modeled on the GI id Software shipped in idTech 8. A world-space cascaded
   light grid lights ray hits outside the frustum, hits land in a spatially
   hashed world radiance cache that is shaded incrementally (sun + emissive +
   clustered lights + previous-frame bounce), cascaded octahedral irradiance
   volumes (~256 m range, one cascade updated per frame) integrate the cache,
   and a half-res 1-ray/pixel final gather resolves per-pixel GI through a
-  three-level cache fallback (previous frame's screen radiance, then the
-  radiance cache, then the volumes) into 2-band SH, which a bilateral
-  denoise + temporal upscale turn into the indirect-diffuse term. The why:
-  DDGI's every-probe-every-frame update cannot scale its volume up, while
-  RCGI's amortized caches keep a flat ~0.2 ms world-side cost regardless of
-  range, add point/spot-light bounce, and the gather restores the per-pixel
-  contact detail probe interpolation loses - for roughly +1 ms over DDGI.
-  Design, GPU interfaces and measured costs: [RCGI.md](RCGI.md).
+  three-level cache fallback into 2-band SH, which a bilateral denoise +
+  temporal upscale turn into the indirect-diffuse term. The why: DDGI's
+  every-probe-every-frame update cannot scale its volume up, while RCGI's
+  amortized caches keep a flat ~0.2 ms world-side cost regardless of range,
+  add point/spot-light bounce, and the gather restores the per-pixel contact
+  detail probe interpolation loses, for roughly +1 ms over DDGI.
 
 Both probe modes need ray query; the path tracer modes (`RX_PATHTRACE*`)
 remain the ground-truth reference.
@@ -157,8 +149,8 @@ a surface-material grip table driving rain wetness and tyre aquaplaning), and
 force-based boats (volumetric buoyancy, planing, prop ventilation) and aircraft
 (strip-theory wings with stall, MTOM-honest performance, raycast landing gear).
 Each feeds a procedural audio stack that synthesizes the engine, skid and wind
-from telemetry - no samples. The `--demo drive` scene shows all three over a
-painted material heightfield with a lake. See [docs/VEHICLES.md](docs/VEHICLES.md).
+from telemetry, with no samples. The `--demo drive` scene shows all three over a
+painted material heightfield with a lake.
 
 ## Building
 
@@ -175,7 +167,7 @@ build/linux/runtime/rx --demo cornell
 ```
 
 Requirements: CMake 3.24+, a C++23 compiler, dxc (DirectXShaderCompiler),
-slangc (shader-slang, for the `.slang` shaders — see docs/SLANG.md),
+slangc (shader-slang, for the `.slang` shaders, see docs/SLANG.md),
 SDL3. Vulkan headers/volk/VMA are pinned and fetched by CMake. On NixOS just
 use the dev shell: `nix develop`, which also provides `vkrun` (host NVIDIA
 driver bridging) and `swrun` (headless lavapipe + Xvfb software path).
@@ -208,7 +200,6 @@ no imported art, from the building prefabs in `runtime/scenes/prefabs/city/`.
 
 ![a city street authored as text](docs/images/city.png)
 
-
 - `Shape.kind` is `box | sphere | plane | cylinder | cone | torus | capsule`.
 - `Model.path` names a `.gltf`/`.glb` file, which renders with the materials and
   textures it ships with. The whole file is placed as one child entity per
@@ -220,7 +211,7 @@ no imported art, from the building prefabs in `runtime/scenes/prefabs/city/`.
   colour/strength, `env_reflect` and the soft/rim/back light fills), plus six
   image maps (base colour, normal, roughness, metallic, occlusion, emissive)
   that put a downloaded PBR texture set on a primitive, or names a `.mtlx`
-  document to take the whole material from - constants and image-node inputs
+  document to take the whole material from, constants and image-node inputs
   alike, so an ambientCG-style document works as it ships.
 - `Pattern` generates a procedural texture at load (`checker | grid | brick |
   gradient | noise`) and binds it to base colour, plus a normal map derived from
@@ -286,8 +277,8 @@ a partial override. A preset is a prefab like any other, which also means an
 entity that already instances a prefab of its own cannot take one: the material
 has to be written out, or folded into that prefab.
 
-`--dump-materials` lists the palette as json - the name, the path to write into
-`Prefab.path`, the file's leading comment, and the props each preset sets -
+`--dump-materials` lists the palette as json (the name, the path to write into
+`Prefab.path`, the file's leading comment, and the props each preset sets),
 generated by loading every file, so it can neither go stale nor list a preset
 that does not load:
 
@@ -323,41 +314,36 @@ author will see.
 
 `--validate` loads a `.rxscene` and reports what is structurally wrong with it,
 with no device and no window (0.01 s per scene, so it fits on every edit and in
-CI). A strict load rejects, and stops at the first bad line; this explains, and
-walks the whole file, so a scene the loader refused still comes back as one
-report instead of twenty edit-and-rerun cycles (it retries leniently when the
-strict load says no, and carries that refusal as a finding of its own). It
-covers what a load cannot: the combinations the engine's own walks quietly skip.
-A `Renderable` with no `Transform` (the frame walk is `Each<Transform,
-Renderable>`, so it uploads and then never draws), a `Light` or `Camera` the
-viewer drops the same way, a degenerate scale, rotation, `Shape.size` axis or
-fov, a light that cannot contribute, duplicate guids, a dangling or circular
-`Parent`, and a number literal that is unreadable or non-finite, which is
-visible only in the text once the loader has read 0 from it. Nonzero exit on any
-error-level finding; `--json` for a machine-readable report.
+CI). Where a strict load rejects and stops at the first bad line, this explains
+and walks the whole file, so a refused scene comes back as one report instead
+of twenty edit-and-rerun cycles (it retries leniently and carries that refusal
+as a finding of its own). It also covers what a load cannot: the combinations
+the engine's own walks quietly skip. A `Renderable` with no `Transform` (the
+frame walk is `Each<Transform, Renderable>`, so it uploads and never draws), a
+`Light` or `Camera` dropped the same way, a degenerate scale, rotation,
+`Shape.size` axis or fov, a light that cannot contribute, duplicate guids, a
+dangling or circular `Parent`, a number literal that is unreadable or
+non-finite. Nonzero exit on any error-level finding; `--json` for a
+machine-readable report.
 
-A file that can draw nothing on its own - no `Shape`, `Model`, `Renderable`,
-`Light` or `Camera` anywhere in it - is a fragment rather than a scene: a
-material preset is exactly that, and it is only ever rendered merged onto an
-instance. The two checks that would otherwise fire on all 30 of them, "`Surface`
-on an entity with no `Shape`" and "no geometry in the scene", are true of the
-file and false of every instance of it, so they are skipped there. A scene that
-merely forgot its geometry still carries the camera or the light it was going to
-render with, so it is not a fragment and still gets both.
+A file that can draw nothing on its own (no `Shape`, `Model`, `Renderable`,
+`Light` or `Camera` anywhere in it) is a fragment rather than a scene: a
+material preset is exactly that, only ever rendered merged onto an instance.
+The two checks that would otherwise fire on all 30 presets ("`Surface` on an
+entity with no `Shape`", "no geometry in the scene") are true of the file and
+false of every instance, so they are skipped there. A scene that merely forgot
+its geometry still carries its camera or light, so it is not a fragment.
 
-`rxdiff` compares two captures. Under the locked capture clock a software or
-non-raytraced run is bit identical run to run, but the raytraced one is not
-quite: the radiance cache claims its hash slots in whatever order the gpu waves
-land in, which moves a few pixels by a least significant bit or two. So
-comparing hashes is still not a check to rely on. It reports an rmse and the
-fraction of pixels whose worst channel moved past `--hot-delta`, with a bounding
-box and an optional amplified diff image, and fails past a tolerance measured
-against that residual rather than guessed: across 78 pairs of same-build
-captures over four scenes, five resolutions, four frame counts and both
-renderers the worst rmse was 0.000433, and the default sits at 0.002. That is
-tight enough to fail a single Cornell wall going from 0.8 to 0.7 albedo (0.00689,
-which the pre-lockstep gate passed) and still 4.6x clear of the noise.
-`tools/rxdiff.cc` carries the measurement and what it costs in sensitivity.
+`rxdiff` compares two captures: an rmse, the fraction of pixels whose worst
+channel moved past `--hot-delta`, a bounding box and an optional amplified diff
+image, failing past a tolerance measured against the renderer's own residual
+rather than guessed. Under the locked capture clock software and non-raytraced
+runs are bit identical; with ray tracing on, the radiance cache's hash-slot
+claim order moves a few pixels by a least-significant bit or two, so hashes are
+never a check to rely on. Across 78 same-build capture pairs the worst rmse was
+0.000433 and the default limit is 0.002: tight enough to fail one Cornell wall
+dropping from 0.8 to 0.7 albedo (0.00689, which the pre-lockstep gate passed),
+4.6x clear of the noise. `tools/rxdiff.cc` carries the measurement.
 
 ```sh
 build/linux/runtime/rx --validate runtime/scenes/showcase.rxscene --json
@@ -367,10 +353,9 @@ build/linux/rxdiff baseline.png /tmp/shot.png --diff /tmp/diff.png
 ### Sampling GPU passes
 
 `RX_GPU_TIMINGS_FILE` writes tab-separated `frame`, `pass`, and `ms` samples
-as completed GPU timestamps are resolved. Set `RX_GPU_TIMINGS=1` for individual
-passes; without it, the profiler records the whole frame. Frame numbers count
-resolved samples, which lag rendering by the frames in flight. The file is
-overwritten for each run and closed on renderer shutdown.
+as completed GPU timestamps are resolved. The file is overwritten for each run
+and closed on renderer shutdown. Set `RX_GPU_TIMINGS=1` for individual passes;
+without it, the profiler records the whole frame.
 
 ```sh
 nix develop -c vkrun env RX_GPU_TIMINGS=1 RX_GPU_TIMINGS_FILE=/tmp/passes.tsv \
@@ -419,7 +404,6 @@ at all. `engine/authoring/command_bridge.h` has the threat model.
   This builds and runs the portable GPU regressions and rejects skipped coverage.
   See [renderer test profiles and CI usage](tests/renderer/README.md) for hardware
   RT, D3D12, FSR, and DLSS checks.
-
 - The C++ namespace is `rx::`; env-var knobs are `RX_*` (`RX_PATHTRACE=1`,
   `RX_DRS=1`, `RX_MSAA=4`, `RX_HDR_OUTPUT=pq`). Grep for `base::Option` to see
   the full set.

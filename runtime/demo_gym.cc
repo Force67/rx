@@ -859,7 +859,7 @@ void GymDemo::Emit(f32 dt, render::FrameView& view) {
     const f32 cyl_len = std::max(2.0f * body->half_height, 0.01f);
     const Vec3 feet{tr->position[0], tr->position[1], tr->position[2]};
     const f32 center_y = feet.y + radius + cyl_len * 0.5f;
-    // Body faces the smoothed facing yaw (turn smoothing) — in third person it
+    // Body faces the smoothed facing yaw (turn smoothing); in third person it
     // eases toward the movement direction rather than snapping to the look yaw.
     const Mat4 rot = MakeFromQuat(HeadingQuat(st->facing_yaw));
     const u32 tint = 0x4a90d0;  // cool blue so it reads against the gray checker
@@ -893,7 +893,7 @@ void GymDemo::DrawPanel() {
   // The compile guard only proves imgui is available, not that a live context /
   // frame exists. The Viewer keeps running when DebugUi init fails (renderer stub
   // or UI-init failure) and only starts the imgui frame while initialized, so
-  // with no context ImGui::Begin below would assert — bail at runtime too. (Same
+  // with no context ImGui::Begin below would assert; bail at runtime too. (Same
   // GetCurrentContext() guard DebugUi::wants_mouse/keyboard use.)
   if (ImGui::GetCurrentContext() == nullptr) return;
   ecs::World& world = *ctx_.world;
@@ -928,7 +928,7 @@ void GymDemo::DrawPanel() {
     ImGui::Text("cursor: %s (Tab)   inventory crates: %u", mouse_captured_ ? "captured" : "free",
                 inv ? inventory::InventoryCount(*inv, crate_def_) : 0);
 
-    // Jetpack: on/off, a fuel bar and the actual (spooled) thrust. No auto-hover —
+    // Jetpack: on/off, a fuel bar and the actual (spooled) thrust. No auto-hover;
     // matching thrust to weight to hang still is the player's finesse.
     if (auto* jst = world.Get<character::JetpackState>(player_)) {
       auto* jin = world.Get<character::JetpackInput>(player_);

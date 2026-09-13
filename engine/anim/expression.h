@@ -12,32 +12,24 @@
 
 namespace rx::anim {
 
-// Facial expression controller over morph-target weights. Poses are data - a
-// named set of (target name, weight) pairs - and switching poses never snaps
-// or lerps: every channel runs a critically-damped spring toward its goal, so
-// transitions are C1-continuous and a retarget mid-flight carries the current
-// velocity instead of popping (the morph-weight analogue of kinema's
-// inertialized state switches). Channels are classified into facial regions
-// by target-name prefix, each with its own response and onset delay, so the
-// eyes and brows lead a new expression and the mouth and jaw settle in a beat
-// behind them, the way real faces move.
+// Facial expression controller over morph-target weights. Poses are data (a
+// named set of (target, weight) pairs); switching never snaps: every channel
+// runs a critically-damped spring toward its goal, so transitions are
+// C1-continuous and a mid-flight retarget carries velocity instead of popping.
+// Channels are grouped into facial regions by target-name prefix, each with its
+// own response and onset delay (eyes and brows lead, mouth and jaw settle
+// behind).
 //
-// An always-on life layer keeps a held expression from going dead: periodic
-// blinks at randomized intervals (fast close, slower open, occasional double
-// blink) and low-amplitude smoothed noise on the brows. Blinks composite over
-// the expression with max(), so a pose that already holds the eyes closed
-// absorbs them, and the micro-motion fades out as the expression takes over
-// its channels. The layer is seedable and the whole controller is
-// deterministic for a fixed seed and dt sequence.
+// An always-on life layer keeps a held expression alive: randomized blinks
+// (fast close, slower open, occasional double) and low-amplitude brow noise.
+// Blinks composite with max(), so a closed-eyes pose absorbs them; micro-motion
+// fades as the expression takes its channels back. Seedable and deterministic
+// for a fixed seed + dt sequence.
 //
-// The controller is one producer of morph weights and does not know about
-// imported glTF weight tracks. When a mesh has an active imported animation
-// that track wins: drive the instance from the track and leave the controller
-// out rather than mixing the two (the viewer follows this rule).
-//
-// Output weights are final and clamped to [0, 1]; write them into the dense
-// per-target set and feed FrameView::morph_weights through the usual
-// AppendActiveMorphWeights path.
+// One producer of morph weights: with an active imported glTF weight track,
+// drive the instance from the track and leave this controller out rather than
+// mixing (the viewer follows this rule). Output weights are final and clamped
+// to [0, 1]; feed them through AppendActiveMorphWeights as usual.
 class RX_ANIM_EXPORT ExpressionController {
  public:
   // One channel of a pose: a morph target by source name (e.g. "jawOpen"),

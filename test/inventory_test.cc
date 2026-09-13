@@ -317,7 +317,7 @@ void TestHibernateWakeAndWorldSave() {
 }
 
 // Regression: a blob that is valid up to a point and then truncated must be
-// rejected with NO partial state applied -- pre-fix the loader committed each
+// rejected with NO partial state applied; pre-fix the loader committed each
 // record as it parsed, so the first live item's entity + physics body survived
 // a later failure, and an out-of-range serialized count reserved a huge buffer
 // before failing.
@@ -343,7 +343,7 @@ void TestCorruptWorldItemRejection() {
   CHECK(blob.size() > 16);
 
   const u32 bodies_before = physics.dynamic_body_count();
-  // Truncate at every offset past the magic+version header (8 bytes) -- this
+  // Truncate at every offset past the magic+version header (8 bytes); this
   // spans a chopped record count (which must fail the reserve bound instead of
   // allocating for the declared-but-absent records) and a chopped record body
   // (which must fail after full parse, before any commit). Every case must be

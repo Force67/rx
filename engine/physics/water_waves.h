@@ -6,20 +6,16 @@
 #include "core/math.h"
 #include "core/types.h"
 
-// CPU port of the analytic Gerstner wave field. This is the wave PROXY the
-// physics side uses to make floating bodies ride the swell: the water-height
-// callback fed to PhysicsWorld::set_water_height evaluates it so buoyant bodies
-// bob on real waves instead of a flat plane, and their horizontal drift follows
-// the wave's orbital flow.
+// CPU port of the analytic Gerstner wave field: the wave PROXY behind
+// PhysicsWorld::set_water_height, so buoyant bodies ride the swell and drift
+// with its orbital flow.
 //
-// KEEP THESE CONSTANTS IN SYNC with the GPU Gerstner field in
-// engine/render/shaders/geometry/water_waves.hlsli (which mesh.vs displaces the
-// surface with, water.ps re-evaluates for shading, and shore_wetting.cs.hlsl /
-// water_field.cs.hlsl mirror as their wave proxy). If the numbers here drift
-// from the shader the floaters will ride a surface that no longer matches the
-// rendered water. This mirrors the precedent the shore-wetting compute set: CPU
-// systems evaluate the analytic Gerstner even when the FFT ocean is the actual
-// displaced surface, as a plausible-phase proxy.
+// KEEP THE CONSTANTS IN SYNC with the GPU field in
+// engine/render/shaders/geometry/water_waves.hlsli (mesh.vs displacement, water.ps
+// shading, mirrored by shore_wetting.cs.hlsl / water_field.cs.hlsl); drift makes
+// floaters ride a surface that no longer matches the rendered water. As with
+// shore wetting, CPU systems evaluate the analytic Gerstner even when the FFT
+// ocean is the actual displaced surface, as a plausible-phase proxy.
 
 namespace rx::physics {
 
@@ -47,9 +43,9 @@ inline constexpr f32 kGravity = 9.81f;  // deep-water dispersion
 // cheap proxy, and it matches how mesh.vs evaluates the field per grid vertex.
 //
 // Optional outputs:
-//  * `flow`   — horizontal orbital velocity (m/s) in xz (y left untouched), so a
+//  * `flow`  : horizontal orbital velocity (m/s) in xz (y left untouched), so a
 //               buoyant body drifts along with the passing swell.
-//  * `surface_vy` — vertical velocity of the surface (m/s), so a body slamming
+//  * `surface_vy`: vertical velocity of the surface (m/s), so a body slamming
 //               into a rising/falling surface can be detected relative to it.
 inline f32 GerstnerWaveHeight(f32 x, f32 z, f32 t, Vec3* flow = nullptr,
                               f32* surface_vy = nullptr) {

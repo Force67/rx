@@ -17,7 +17,7 @@ there forever" persistence story.
   identified by a game-hashed `u32` tag (`"hand.right"`, `"head"`, ...).
 - **Functional-first.** Plain-data components + free-function systems, matching
   `scene/camera_rig.h`. State lives in components; behaviour lives in free
-  functions you call. The `ItemCatalog` is passed explicitly — there is no
+  functions you call. The `ItemCatalog` is passed explicitly: there is no
   global catalog.
 - **Two targets.** `rx::inventory` is physics-free (catalog, inventories,
   equipment, their persistence) so a dedicated server or a drop-free game links
@@ -60,12 +60,12 @@ Persistence (`serialize.h`, physics-free): `SaveInventories`, `LoadInventories`.
 A game that drops items into the world runs, inside its simulation stage, after
 `physics.Update(dt)`:
 
-1. `SyncWorldItems(world, physics)` — copy body transforms into entity
+1. `SyncWorldItems(world, physics)`: copy body transforms into entity
    Transforms for **awake** items; latch settled ones to `at_rest`.
 2. `HibernateDistantWorldItems(world, physics, store, player_pos, hibernate_r)`
-   — evict at-rest items beyond `hibernate_r` into the store (body + entity
+   evicts at-rest items beyond `hibernate_r` into the store (body + entity
    freed).
-3. `WakeWorldItemsNear(world, physics, catalog, store, player_pos, wake_r)` —
+3. `WakeWorldItemsNear(world, physics, catalog, store, player_pos, wake_r)`:
    re-materialise stored items within `wake_r`. **Use `wake_r < hibernate_r`**
    (hysteresis) so a boundary item does not thrash.
 
@@ -84,7 +84,7 @@ Inventories and world items serialize to compact, explicit-little-endian blobs
 - Inventories are **frequently-mutated gameplay state** written to a *game save
   file*, not editor scene documents. They want a tiny, stable, self-describing
   wire format independent of the editor module's schema and independent of the
-  `edit` target (which the core `rx::inventory` does not — and should not — link).
+  `edit` target (which the core `rx::inventory` does not, and should not, link).
 - The blob is versioned so it can evolve without a reflection dependency.
 
 Inventories are keyed by `scene::Guid` (the engine's stable, handle-independent
@@ -94,20 +94,20 @@ World items are keyed by a stable `persistent_id`.
 ### Hibernation: eviction to a spatial store (the perf story)
 
 The scaling cost of "thousands of dropped items lie there forever" is the
-**physics body** — every live Jolt body sits in the broadphase and the active
+**physics body**: every live Jolt body sits in the broadphase and the active
 island lists. `HibernateDistantWorldItems` therefore, for at-rest items beyond
 the radius, **destroys the body, moves the item into a `WorldItemStore`, and
 destroys the ECS entity**. A dormant item becomes a ~64-byte `WorldItemRecord`
-in a vector bucketed by cubic spatial cell — no body, no entity, no render
+in a vector bucketed by cubic spatial cell: no body, no entity, no render
 iteration. `WakeWorldItemsNear` re-materialises entity + body from the record,
 preserving `persistent_id`, when the player returns.
 
-*Design choice — evict vs. park.* We evict (destroy the entity) rather than park
+*Design choice: evict vs. park.* We evict (destroy the entity) rather than park
 (keep the entity, drop only the body). Parking still pays ECS storage and
 per-system iteration for every item ever dropped; eviction to a cell-bucketed
 store makes a distant item cost only a struct, and is exactly what a streaming
 world wants (query/save/load by region). The trade-off: a woken item gets a new
-ECS handle — which is fine because gameplay and saves key on `persistent_id`,
+ECS handle: which is fine because gameplay and saves key on `persistent_id`,
 not the handle. Items settle first (`at_rest`) before they are eligible, so an
 item still bouncing is never evicted mid-flight.
 
@@ -120,7 +120,7 @@ the item has been near-motionless for a few consecutive syncs, latches
 `WorldItem::at_rest` and stops polling it (near-zero steady-state cost). A
 sleeping Jolt body reports an unchanged transform, so this reliably latches once
 the item settles. Consequence: if an already-at-rest item is later disturbed by
-an external force, the module will not notice on its own — the game should clear
+an external force, the module will not notice on its own: the game should clear
 that item's `at_rest` flag when it applies such a force. A future
 `IsBodyActive(BodyId)` (or velocity getter) on `PhysicsWorld` would let
 `SyncWorldItems` use the engine's real sleep state instead of the heuristic.

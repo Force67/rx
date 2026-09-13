@@ -17,7 +17,7 @@
 
 namespace rx::asset {
 
-// .rxp — the engine's game archive ("rx pack"), in the spirit of RAGE's RPF:
+// .rxp, the engine's game archive ("rx pack"), in the spirit of RAGE's RPF:
 // a flat table of contents keyed by the fnv1a-64 hash of each normalized
 // virtual path (binary-searchable, full paths kept in a name table), payloads
 // stored raw or deflated, each guarded by a CRC-32 of the uncompressed bytes.

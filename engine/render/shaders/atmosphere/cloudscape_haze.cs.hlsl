@@ -145,8 +145,8 @@ void main(uint3 id : SV_DispatchThreadID) {
   float2 mid2 = cam.xz + view.xz * (dist * 0.7) - drift;
   // Churn scrolls the 3D noise through its third axis (two taps at different
   // rates so they slide against each other): the banks stop being a frozen
-  // pattern that merely translates and start roiling -- vapour rising off the
-  // water rather than a printed veil.
+  // pattern that merely translates and start roiling (vapour rising off the
+  // water rather than a printed veil).
   float churn = pc.map.w * pc.camera_pos.w;
   float s1 = 0.31 - churn * 0.011;
   float s2 = 0.63 - churn * 0.019;
@@ -206,7 +206,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   float phase = lerp(HG(cos_a, 0.55), 1.0 / (4.0 * kPi), 0.35);
 
   // God rays: the sun term is marched so the deck's actual formations gate
-  // it per segment -- fog in a cloud gap glows, fog under a core sits in a
+  // it per segment: fog in a cloud gap glows, fog under a core sits in a
   // shadow shaft. One cheap deck tap per step at the sun ray's mid-shell
   // crossing carries the shape; the analytic transmittance stays exact.
   float sun_amt = 0.0;

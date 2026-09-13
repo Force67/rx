@@ -1,31 +1,21 @@
-// rxworld — cooks an authored .rxscene into a baked, streamable world archive.
+// rxworld cooks an authored .rxscene into a baked, streamable world archive.
 //
 //   rxworld bake <scene.rxscene> <out.rxp> [--name city] [--cell-size 64]
 //                [--instance <Component>] [--bake-id N] [--skip-unknown]
 //   rxworld inspect <out.rxp> [--name city]
 //
-// --name defaults to the archive's filename stem for both, so `bake s.rxscene
-// city.rxp` and `inspect city.rxp` agree without being told twice.
+// --name defaults to the archive's filename stem for both. bake sorts every
+// entity into a grid cell by world position, groups each cell's entities by
+// component set, and writes one archetype-major payload per (cell, domain); the
+// index goes in beside them as <name>/<name>.rxworld, so the world is one
+// archive the engine mounts like any other content.
 //
-// bake reads the scene, sorts every entity into a grid cell by its world
-// position, groups the entities of each cell by their component set, and writes
-// one archetype-major payload per (cell, domain). The index goes in beside them
-// under <name>/<name>.rxworld, so the whole world is one archive the engine
-// mounts like any other content:
-//
-//   world/city/city.rxworld
-//   world/city/0000000000000000.gameplay.standard.rxcell
-//   world/city/0000000000000000.representation.full.rxcell
-//
-// Entities whose component set is exactly the one named by --instance (default:
-// Transform + Renderable) are cooked as static instance pages instead of ECS
-// rows: they get a stable world id and no entity until something promotes them.
-// A Guid does not count towards that set - SaveScene puts one on everything it
-// writes - and an instance carries no components at all, so a Guid on one is
-// replaced by its stable id rather than baked.
-//
-// inspect prints the index of an already-baked archive, which is the cheapest
-// way to see what a streaming decision will be working from.
+// Entities whose component set is exactly --instance (default Transform +
+// Renderable) are cooked as static instance pages instead of ECS rows: stable
+// world id, no entity until something promotes them. A Guid does not count
+// towards that set (SaveScene puts one on everything) and is replaced by the
+// stable id. inspect prints the index: the cheapest view of what a streaming
+// decision works from.
 
 #include <cstdio>
 #include <cstdlib>

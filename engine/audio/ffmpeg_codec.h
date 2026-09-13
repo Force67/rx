@@ -10,8 +10,8 @@ namespace rx::audio {
 
 // Decodes a complete compressed container (an xWMA RIFF, or anything libavformat
 // can demux) into a decoder, using FFmpeg's libav* libraries. This is the backend
-// for the codecs with no lightweight decoder of their own -- WMA behind xWMA/FUZ,
-// and the compressed Wwise codecs.
+// for the codecs with no lightweight decoder of their own (WMA behind xWMA/FUZ,
+// and the compressed Wwise codecs).
 //
 // Two implementations are linked exclusively: the real one (ffmpeg_codec.cc, when
 // RX_AUDIO_FFMPEG is on and libav* is found) and a stub (ffmpeg_stub.cc)

@@ -150,7 +150,7 @@ int main() {
       c.UpdateGroup(7, 1, 0, {xf.data(), xf.size()}, Vec3{0, 0, 0}, 0.05f);
     }
     // Move instance 0 right next to the camera. Same group_id, same generation,
-    // same count -- only the transforms (and the store's revision) change.
+    // same count: only the transforms (and the store's revision) change.
     xf[0] = At(Vec3{0, 0, 5});
     c.BeginFrame(eye);
     // Without the revision bump the stale bitmask still hides instance 0 (its

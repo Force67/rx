@@ -13,8 +13,8 @@
 namespace rx {
 
 // Navigation acceptance demo (--demo nav): a cat-and-mouse chase across
-// terrain that fights back. A porter wanders a procedural landscape -- rolling
-// hills, a winding river, boulder fields, two steep unclimbable mesas -- while
+// terrain that fights back. A porter wanders a procedural landscape (rolling
+// hills, a winding river, boulder fields, two steep unclimbable mesas) while
 // a pack of mules pursues it through rx::nav: cost-aware A* (rocks and water
 // are walkable but expensive, with one-time entry tolls), per-frame funnel
 // steering, and event-based repathing (the pack replans when the porter

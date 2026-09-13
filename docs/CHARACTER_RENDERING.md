@@ -8,8 +8,8 @@ work. The lesson there is not a shader equation:
 > Calibrated photography is the ground truth. The renderer is an approximation,
 > adjusted until it matches reality.
 
-Everything below is organised around being able to *do* that — measure, adjust,
-measure again — rather than around any one lobe.
+Everything below is organised around being able to *do* that (measure, adjust,
+measure again) rather than around any one lobe.
 
 ```
 reference / colour pipeline
@@ -56,7 +56,7 @@ re-shades every material that opted in, and every fit made before the change is
 worthless after it. It is defended in two places:
 
 - `test/human_brdf_test.cc` diffs the CPU mirror against the stock BRDF over a
-  sweep of roughness, view and light directions — *including a non-zero light
+  sweep of roughness, view and light directions, *including a non-zero light
   solid angle*, which is what caught `light_shape_response` re-shading every
   highlight in the frame when it was on by default.
 - End to end, in the real renderer, on the real asset:
@@ -87,7 +87,7 @@ computed. It is called from:
 Area lights whose *shape* the caller already integrated (the LTC panels and
 spheres) go through `HumanEvaluatePreintegrated`, which applies the material's
 directional shaping once at the representative direction. That is an
-approximation, and it is documented as one at the call site — the alternative,
+approximation, and it is documented as one at the call site. The alternative,
 letting the panel path grow its own material model, is the failure this design
 exists to prevent.
 
@@ -99,7 +99,7 @@ face stays put.
 ## 3. The controls
 
 Every control is independent, monotonic in its own direction, and neutral at its
-default. The forms are the engine's own fits — the published Callisto slides give
+default. The forms are the engine's own fits; the published Callisto slides give
 indicative shapes, not production constants. **Fit them against your own
 reference. Do not copy numbers out of a paper.**
 
@@ -107,7 +107,7 @@ reference. Do not copy numbers out of a paper.**
 
 | Control | What it does | Safe range |
 | --- | --- | --- |
-| `diffuse_fresnel_peak` | Grazing gain on the diffuse lobe — the boundary transmission loss, entered and left. Negative darkens. | −0.5 … 1.0 |
+| `diffuse_fresnel_peak` | Grazing gain on the diffuse lobe: the boundary transmission loss, entered and left. Negative darkens. | −0.5 … 1.0 |
 | `diffuse_fresnel_falloff` | Shapes the **view** half of that. | 1 … 8 |
 | `diffuse_fresnel_tangent_falloff` | Shapes the **light** half. Equal values keep the lobe reciprocal. | 1 … 8 |
 | `retroreflection_peak` | Back-scatter toward the light: the velvety lift skin shows with the key behind the camera. Burley's shape, artist-keyed. | 0 … 2 |
@@ -117,7 +117,7 @@ reference. Do not copy numbers out of a paper.**
 
 The terminator softening is **energy normalized** (Hill's wrapped cosine): it
 moves light, it does not create it, and the test asserts the hemispherical
-integral does not rise. It is also gated by the *geometric* normal — a normal map
+integral does not rise. It is also gated by the *geometric* normal: a normal map
 may soften a terminator, never carry light around the far side of a head. And it
 applies to the diffuse lobe only: a soft terminator is a subsurface transport
 effect, and letting it widen the highlight is exactly the "looks like wax"
@@ -129,12 +129,12 @@ failure.
 | --- | --- | --- |
 | `specular_fresnel_falloff` | Generalized Schlick exponent. 5 = classic. | 2 … 8 |
 | `secondary_roughness_scale` | The second GGX lobe's roughness, as a multiple of the first. Below 1 the "tail" is tighter than the core, which is not a tail. | 1 … 8 |
-| `secondary_specular_weight` | How much of it. **Blended, not added** — total specular energy is unchanged. | 0 … 1 |
+| `secondary_specular_weight` | How much of it. **Blended, not added**; total specular energy is unchanged. | 0 … 1 |
 | `light_shape_response` | How much of a light's solid angle the lobe absorbs. 1 = a light cannot produce a highlight tighter than its own image. **0 in the neutral set**, because the stock path treats every light as punctual. | 0 … 1 |
 
 A single GGX cannot hold both a tight core and the broad tail a real dermis and
 oil stack throws. The second lobe is the answer, and it is the first thing the
-Standard tier drops — the most cost per pixel of visible difference at gameplay
+Standard tier drops: the most cost per pixel of visible difference at gameplay
 distance.
 
 ### Transport
@@ -144,12 +144,12 @@ distance.
 | `mean_free_path` | Metres. Skin's red channel is ~1 mm. | 0.0001 … 0.01 |
 | `subsurface_scale` | Uniform multiplier (thicker / thinner skin). | 0.1 … 4 |
 | `transmission` | The through-the-surface lobe: ears, nostrils, eyelids, fingers. | 0 … 1 |
-| `transmission_tint` | What survives the crossing. | — |
+| `transmission_tint` | What survives the crossing. | |
 | `extinction_scale` | Thickness → optical depth. | 0.1 … 8 |
 | `thickness_scale` | Metres at `thickness_map` == 1; used directly when no map is bound. | 0.0005 … 0.1 |
 
 The transmission lobe needs the light that entered the **far** side, which the
-ordinary shadow test correctly reports as occluded — by the surface's own back
+ordinary shadow test correctly reports as occluded, by the surface's own back
 face. Both paths handle it explicitly:
 
 - raster: the cascade comparison reference is pushed `thickness` metres toward
@@ -159,7 +159,7 @@ face. Both paths handle it explicitly:
 - RT: the shadow ray starts `thickness` metres *through* the surface.
 
 Screen-space diffusion (`sss_blur.cs.hlsl`) still owns the lateral bleed; the
-analytic model owns the surface. Seed both from the same mean free path — the
+analytic model owns the surface. Seed both from the same mean free path; the
 bench does.
 
 ### Layers
@@ -176,7 +176,7 @@ droplets turn skin into scarred geometry the moment the key light moves off axis
 `--demo lookdev` binds a procedural sweat normal on every skin part at strength
 0, so the A/B is one slider away and never reallocates a binding set.
 
-Strength 0 is *exactly* Nd, not "a flat map applied" — a flat tangent-space
+Strength 0 is *exactly* Nd, not "a flat map applied": a flat tangent-space
 normal resolves to the geometric normal, which is a different vector wherever a
 diffuse normal map is doing anything.
 
@@ -188,12 +188,12 @@ There is deliberately **no spectral thin-film simulation** in this file.
 
 | Control | What it does |
 | --- | --- |
-| `iris_depth` | Metres behind the corneal surface. The iris is *sampled* there, through a refracted view ray — not decalled onto the surface. |
+| `iris_depth` | Metres behind the corneal surface. The iris is *sampled* there, through a refracted view ray, not decalled onto the surface. |
 | `iris_radius` | uv radius of the iris disc. |
-| `pupil_scale` | Dilation, as a radial remap that leaves the limbus fixed — dilating cannot slide the iris edge. |
+| `pupil_scale` | Dilation, as a radial remap that leaves the limbus fixed; dilating cannot slide the iris edge. |
 | `limbal_ring_size` / `_power` | The darkened annulus at the iris/sclera boundary. Applied to *albedo*, so it survives every light path identically. |
 | `cornea_ior` | Refraction at the corneal surface. |
-| `iris_shadow_depth` | The limbus occluding oblique light before it reaches the pigment — evaluated separately from the corneal surface's own shadow. |
+| `iris_shadow_depth` | The limbus occluding oblique light before it reaches the pigment, evaluated separately from the corneal surface's own shadow. |
 
 The corneal reflection is evaluated on the **unperturbed** corneal normal. That
 is what keeps a catchlight from swimming while the eye rotates: only the iris
@@ -206,7 +206,7 @@ derivatives, so the parallax is correct on any uv layout.
 
 `HumanRegion` selects a fitted starting point: `kSkin`, `kLips`, `kTeeth`,
 `kGums`, `kSclera`, `kCornea`, `kIris`, `kTearline`. Each preset's rationale is
-in `human_material.cc` — teeth, for instance, get a strong diffuse Fresnel
+in `human_material.cc`. Teeth, for instance, get a strong diffuse Fresnel
 because that is what makes enamel read as glassy rather than as painted bone, and
 a saliva film plus cavity occlusion because a tooth lit like an isolated opaque
 object never looks like it is in a mouth.
@@ -219,17 +219,17 @@ override it per part.
 Do not tune everything at once. The bench's fitting stages follow this order, and
 it is the order for hand-tuning too.
 
-1. **Frontal match** — base colour, exposure, white balance, primary roughness,
+1. **Frontal match**: base colour, exposure, white balance, primary roughness,
    primary specular. Everything after this is fitted against whatever exposure
    you settle here, so settling it late invalidates the rest.
-2. **Specular shape** — `secondary_roughness_scale`, `secondary_specular_weight`,
+2. **Specular shape**: `secondary_roughness_scale`, `secondary_specular_weight`,
    `specular_fresnel_falloff`, `light_shape_response`.
-3. **Retroreflection** — peak and falloff.
-4. **Side-light terminator** — amount and length.
-5. **Grazing response** — diffuse Fresnel, its tint and falloffs.
-6. **Skin transport** — SSS, mean free path, transmission, thickness.
-7. **Art-direction layers** — wrinkles, sweat, dirt, blood, damage, wetness.
-8. **Residual correction** — only once every stage above is stable.
+3. **Retroreflection**: peak and falloff.
+4. **Side-light terminator**: amount and length.
+5. **Grazing response**: diffuse Fresnel, its tint and falloffs.
+6. **Skin transport**: SSS, mean free path, transmission, thickness.
+7. **Art-direction layers**: wrinkles, sweat, dirt, blood, damage, wetness.
+8. **Residual correction**: only once every stage above is stable.
 
 ## 5. The bench (`--demo lookdev`)
 
@@ -248,7 +248,7 @@ full-body scan gets its head framed rather than its navel.
 
 One light at a time. Two lights at once make a parameter's effect
 unattributable, and every fit done that way lands on a compromise nobody chose.
-Ambient and IBL are off by default for the same reason — they are a second,
+Ambient and IBL are off by default for the same reason: they are a second,
 omnidirectional light.
 
 | # | Stop | | # | Stop |
@@ -265,10 +265,10 @@ Stops 01/02 and 11/12 are the emitter-shape pairs, and they are the parity test
 for "every light type evaluates the same material": same nominal direction, same
 **illuminance**, opposite extremes of shape. The stops are authored as an
 illuminance target and converted to radiance through each emitter's own solid
-angle — an area light's `intensity` is radiance, so a 0.9 m panel and an 8 mm ball
+angle: an area light's `intensity` is radiance, so a 0.9 m panel and an 8 mm ball
 at the same number differ by three orders of magnitude in how much light they put
 on a face. Measured over the 14 stops, mean face luminance lands within
-0.19 – 0.36 (0.49 for the three-light stop), which is what makes them comparable
+0.19-0.36 (0.49 for the three-light stop), which is what makes them comparable
 at a fixed exposure.
 
 ### Camera stops
@@ -320,7 +320,7 @@ RX_FIXED_DT=0.0166667 RX_LOOKDEV_SHOTS=build/lookdev-shots RX_LOOKDEV_QUIT=1 \
   build/linux/runtime/rx --demo lookdev
 ```
 
-Walks the full matrix — 14 lights × 7 cameras = 98 frames — and exits. The rig is
+Walks the full matrix (14 lights × 7 cameras = 98 frames) and exits. The rig is
 frozen, so a diff between two runs is a renderer change and nothing else.
 
 ### Per-lobe debug views
@@ -358,7 +358,7 @@ the test asserts the reduction is monotonic.
 | Residual | optional | no | no |
 
 `HumanTierForScreenHeight` gives the nominal edges (≥360 px hero, ≥64 px
-standard). `RenderSettings::human_tier_cap` — set by the quality presets — caps
+standard). `RenderSettings::human_tier_cap`, set by the quality presets, caps
 the whole cast for the hardware; the tier a character actually gets is the lower
 of the two. The renderer does not apply it on its own: the tier is baked into a
 material's parameters at upload, so the **app** picks per character and calls
@@ -378,7 +378,7 @@ basis and writes two maps. The runtime evaluates
 residual = ambient * max(1 + dot(direction, l_tangent), 0) * coverage * weight * validity
 ```
 
-Both maps are **signed**, stored biased (`v*0.5+0.5`) — a residual is a
+Both maps are **signed**, stored biased (`v*0.5+0.5`): a residual is a
 difference and is negative wherever the analytic model is too bright, which is
 half of what there is to correct. The alpha of the ambient map is the fit's own
 coverage, which is why an all-zero default texture is the neutral one.
@@ -414,14 +414,14 @@ Texture memory is the engine's existing `texture_budget_mb` streaming budget; an
 
 Test every significant change across:
 
-- **Views** — front, 30°, three-quarter, profile, close-up, gameplay distance,
+- **Views**: front, 30°, three-quarter, profile, close-up, gameplay distance,
   LOD transition.
-- **Lights** — frontal soft, frontal hard, side, grazing, back, top, bottom,
+- **Lights**: frontal soft, frontal hard, side, grazing, back, top, bottom,
   large rect emitter, small point emitter, multiple lights, dark scene at high
   exposure.
-- **States** — neutral, eye rotation, blink, mouth open, teeth visible,
+- **States**: neutral, eye rotation, blink, mouth open, teeth visible,
   wrinkles, sweat, dirt, blood, mixed layers.
-- **Motion** — camera orbit, character turn, light orbit, eye movement, LOD
+- **Motion**: camera orbit, character turn, light orbit, eye movement, LOD
   transition, resolution change, temporal reconstruction reset, exposure
   adaptation.
 
@@ -436,7 +436,7 @@ are driven from the panel.
 - Do not treat ray tracing as the goal.
 - Do not blur all normals globally to fix grazing lighting.
 - Do not let blood, sweat or dirt silently invalidate the calibrated base
-  material — that is what the residual validity term is for.
+  material; that is what the residual validity term is for.
 - Do not optimize only for close-ups.
 - Do not ignore the roughness and normal changes mipmapping causes.
 - Do not let different light types produce different material semantics. This is
@@ -446,20 +446,20 @@ are driven from the panel.
 
 `tools/get_head_scan.sh [scan|head|face|all]`
 
-- **scan** (default) — RenderPeople's free "Dennis" sample: a photogrammetry
+- **scan** (default): RenderPeople's free "Dennis" sample: a photogrammetry
   human, ~100k triangles, 8K diffuse and 8K tangent-space normal. The
   high-fidelity subject; the pore-level normal map is what actually exercises the
   dual specular lobe, the normal split and the mip behaviour. Ships as OBJ, so
   `tools/obj_to_glb.py` converts it to metres, facing −Z.
-- **head** — the Lee Perry-Smith head (Infinite-Realities, CC-BY 3.0), 1K maps.
+- **head**: the Lee Perry-Smith head (Infinite-Realities, CC-BY 3.0), 1K maps.
   Small and instant; the head most published skin work is shown on.
-- **face** — the MPFB / MakeHuman example avatar (CC0). Lower fidelity, but the
+- **face**: the MPFB / MakeHuman example avatar (CC0). Lower fidelity, but the
   only one of the three with separate eyeball, teeth and tongue meshes.
   **Known issue:** it carries morph targets, and the viewer's morph-instance
   path currently hangs on it and presents a corrupt frame. This reproduces on a
   clean tree, so it predates the character work; the bench does not auto-pick
   it. Until that is fixed, the eye and mouth materials are exercised by the
-  bench's procedural stand-in — run `--demo lookdev` with no head asset present,
+  bench's procedural stand-in: run `--demo lookdev` with no head asset present,
   or `RX_LOOKDEV_SUBJECT=` pointed at nothing.
 
 `tools/wire_gltf_textures.py` embeds loose maps into a glTF whose material ships

@@ -15,38 +15,26 @@ class Device;
 class MaterialSystem;
 class RayTracingContext;
 
-// GPU skinning of skinned actors into ray-traceable geometry.
+// GPU skinning of skinned actors into ray-traceable geometry. A skinned mesh's
+// BLAS otherwise holds its bind pose (skinning runs only in the raster vertex
+// stage), so this deforms the mesh in compute into a per-actor vertex buffer
+// (ordinary asset::Vertex layout) and refits a per-actor BLAS in place: every
+// ray-traced effect sees the animated pose for one dispatch plus one refit.
 //
-// Skinning otherwise happens only in the raster vertex stage, so a skinned
-// actor's BLAS holds its BIND POSE and the engine's convention has been to keep
-// such actors out of ray tracing entirely. This deforms the mesh in a compute
-// pass into a per-actor vertex buffer in the ordinary asset::Vertex layout and
-// refits a per-actor BLAS over it in place, which puts the animated pose into
-// every ray-traced effect for the cost of one dispatch plus one refit.
+// State is per ACTOR, not per mesh: each actor gets its own deformed buffer,
+// bindless mesh record (instanceCustomIndex, so hit shaders read its vertices)
+// and BLAS, named by an opaque handle held for the actor's lifetime.
 //
-// State is per ACTOR, not per mesh: two actors sharing a GpuMesh hold different
-// poses, so each gets its own deformed buffer, its own bindless mesh record
-// (its instanceCustomIndex, so hit shaders read ITS vertices) and its own BLAS.
-// Actors are named by an opaque handle the game acquires once and keeps for the
-// actor's lifetime, exactly like a decal receiver.
+// Each actor holds TWO of everything, alternating by frame, so the async TLAS
+// build stays on: frame N writes slot N&1 and this frame's TLAS references it
+// while earlier TLASes reference the other slot. Price: in async mode the
+// ray-traced pose is one frame behind the rasterized one. The alternation runs
+// in both modes; SelectTlasSlots can flip slots frame to frame, so nothing may
+// key off a fixed slot.
 //
-// Each actor holds TWO of everything and alternates by frame. That is what lets
-// the async TLAS build stay on: with the async path the graphics timeline
-// traverses the TLAS built LAST frame, so an in-place refit would be rewriting
-// a structure two queues are reading. Frame N writes slot N&1 and this frame's
-// TLAS references it, while every live TLAS from earlier frames references the
-// other slot, which nothing touches. The consequence, stated plainly because it
-// is the price: in async mode the ray-traced pose is one frame behind the
-// rasterized one, the same age as the TLAS transform beside it. In synchronous
-// mode the slot is built and read in the same frame, so it is current. The
-// alternation runs in both modes regardless -- SelectTlasSlots can flip between
-// them from frame to frame, and a strategy that changed with it would be one
-// silent frame of garbage each time it did.
-//
-// Morph targets are NOT applied here: the deformed geometry is the skinned bind
-// shape. A morphed actor is registered anyway (its skinning is the part that
-// moves a silhouette) but warns once, rather than quietly ray tracing a face
-// that does not match the rasterized one.
+// Morph targets are NOT applied: a morphed actor registers anyway (skinning is
+// what moves the silhouette) but warns once, rather than quietly ray tracing a
+// face that does not match the rasterized one.
 class SkinnedRayTracing {
  public:
   bool Initialize(Device& device);

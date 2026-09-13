@@ -25,7 +25,7 @@ class DynamicResolution {
   bool Update(f32 gpu_ms);
 
   // Back to native. Called whenever the controller is inactive so a reduced
-  // scale never leaks into a mode that doesn't run it.
+  // scale never leaks into a mode that does not run it.
   void Reset();
 
   f32 scale() const { return scale_; }

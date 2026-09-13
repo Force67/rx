@@ -1,25 +1,18 @@
 #ifndef RX_HAIR_TRANSMITTANCE_HLSLI_
 #define RX_HAIR_TRANSMITTANCE_HLSLI_
 
-// How many hair fibres sit between a point and the light.
+// How many hair fibres sit between a point and the light: the input hair
+// rendering cannot fake. Self-shadowing, dual scattering and the shadow a groom
+// casts on the forehead are all this one quantity; a binary shadow map cannot
+// supply it (hair is not opaque).
 //
-// This is the input hair rendering cannot fake. Self-shadowing needs it, dual
-// scattering is a function of it, and the shadow a groom casts on the forehead
-// under it is the same quantity. A binary shadow map cannot supply it: hair is
-// not opaque, and "in shadow / not in shadow" turns a groom into a black cutout
-// with a hard edge.
-//
-// Deep opacity map (Yuksel & Keyser 2008). Pass one records the depth of the
-// FRONT-most fibre per light-space texel. Pass two additively accumulates fibre
-// counts into four layers spanning a fixed depth past that front surface. The
-// layers are anchored to the front rather than to a global slab because that is
-// where the density gradient is steepest - the difference between one fibre and
-// four is the difference between a lit rim and a shadowed one, and a global
-// slab spends all its resolution on the empty air in front of the groom.
-//
-// The stored quantity is a COUNT, not an opacity, because dual scattering is
-// parameterized on the number of fibres crossed rather than on how much light
-// they blocked.
+// Deep opacity map (Yuksel & Keyser 2008). Pass one records the FRONT-most
+// fibre depth per light-space texel; pass two additively accumulates counts
+// into four layers spanning a fixed depth past it. Layers anchor to the front
+// because that is where the density gradient is steepest: one fibre vs four is
+// a lit rim vs a shadowed one, and a global slab spends its resolution on empty
+// air. Stored as a COUNT, not an opacity, because dual scattering is
+// parameterized on fibres crossed.
 
 // Layer boundaries as a fraction of the layer depth. Packed toward the front:
 // the first fibre matters more than the fortieth.

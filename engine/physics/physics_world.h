@@ -88,7 +88,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // Excludes a dynamic body from the generic whole-body buoyancy+drag applied
   // in Update (the Jolt water sample scheme above). A force-based hull that
   // does its own multi-point buoyancy (the boat simulator) opts out here so the
-  // two schemes don't stack. No effect when true is set twice; false restores
+  // two schemes do not stack. No effect when true is set twice; false restores
   // the generic path. Off by default, so ordinary floaters are unchanged.
   void set_buoyancy_exempt(BodyId id, bool exempt);
 
@@ -421,7 +421,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     // High-speed steering fade: the effective steer command scales from 1 at
     // rest down to steer_high_speed_fraction as forward speed reaches
     // steer_fade_speed (m/s), then holds. Models the rack calming down at speed
-    // so a full flick doesn't spin the car on the motorway. fraction >= 1 or
+    // so a full flick does not spin the car on the motorway. fraction >= 1 or
     // fade_speed <= 0 = no fade (legacy full-angle steering at any speed).
     f32 steer_high_speed_fraction = 1.0f;
     f32 steer_fade_speed = 0;
@@ -467,7 +467,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
 
   // Motorcycle (Jolt MotorcycleController): two-wheeler with a lean spring
   // that banks the bike into corners and a speed-aware steering limit so it
-  // doesn't topple. Wheel 0 = front (steers, caster-raked fork), 1 = rear
+  // does not topple. Wheel 0 = front (steers, caster-raked fork), 1 = rear
   // (drive). Same handle space and Drive/Get API as cars; handbrake input is
   // ignored.
   struct MotorcycleDesc {
@@ -686,11 +686,11 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
     BodyId body = 0;
   };
   bool Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out) const;
-  // Same closest-hit ray, but skipping the body `ignore` (its whole shape).
-  // Lets a force-based simulator cast from a point INSIDE its own collision
-  // shape without hitting itself - the aircraft's gear suspension rays start
-  // at real hardpoints on the fuselage and would otherwise register the plane's
-  // own underside. `ignore` == 0 skips nothing (identical to the overload
+  // Same closest-hit ray, but skipping the body `ignore` (its whole shape). A
+  // force-based simulator casts from a point INSIDE its own collision shape
+  // without hitting itself: the aircraft's gear suspension rays start at real
+  // hardpoints on the fuselage and would otherwise register the plane's own
+  // underside. `ignore` == 0 skips nothing (identical to the overload
   // above). Jolt IgnoreSingleBodyFilter.
   bool Raycast(const Vec3& origin, const Vec3& direction, f32 max_distance, RayHit* out,
                BodyId ignore) const;

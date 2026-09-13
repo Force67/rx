@@ -38,8 +38,8 @@ struct VehicleAudioState {
   // Gearbox state for the shift flare. `gear` == INT_MIN (the default) means
   // "unknown": no flare is ever produced, so existing callers hear no change. A
   // rising edge of `is_shifting` with a known gear triggers one brief, click-free
-  // engine excursion — an upshift cut if the gear rose, a downshift blip if it
-  // fell.
+  // engine excursion (an upshift cut if the gear rose, a downshift blip if it
+  // fell).
   i32 gear = INT_MIN;
   bool is_shifting = false;
 

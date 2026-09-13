@@ -13,7 +13,7 @@ constexpr f32 kTwoPi = 6.28318530717958648f;
 constexpr f32 kPi = kTwoPi * 0.5f;
 
 // Surface-response rates (per second, scaled by precipitation for
-// accumulation). Soak is fast, drying slow -- a soaked street stays dark for a
+// accumulation). Soak is fast, drying slow: a soaked street stays dark for a
 // while after the rain stops; snow blankets steadily and melts even slower than
 // roads dry.
 constexpr f32 kSoakRate = 0.10f;

@@ -8,53 +8,32 @@
 
 namespace rx::physics {
 
-// Force-based tethered-kite simulator layered on the public PhysicsWorld
-// rigid-body primitives (AddForceAtPoint / AddTorque / GetPointVelocity). One
-// Kite owns one light dynamic sail body; the game moves an ANCHOR world point
-// each frame (a hand, a post, a moving vehicle) and drives the kite with a
-// two-axis input (steer + reel), reading telemetry back for HUD/camera.
+// Force-based tethered-kite simulator on the PhysicsWorld rigid-body
+// primitives. One Kite owns one light dynamic sail body; the game moves an
+// ANCHOR world point each frame and drives steer + reel, reading telemetry.
 //
-// Model summary (all SI: metres, kg, seconds, newtons; +Z forward, +Y up,
-// right-handed). Unlike the boat/aircraft this body is HEAVIER-THAN-AIR and
-// gets ordinary Jolt gravity - the sail flies by aerodynamic lift, not
-// buoyancy, so nothing is buoyancy-exempted and no gravity is added here.
-//  * Sail frame: the sail lies in the body X-Y plane, spanwise along body X,
-//    leading edge / nose toward body +Y, tail hanging toward body -Y, sail
-//    NORMAL along body +Z. The visual/collision plate is span x height x a thin
-//    thickness; the aerodynamic reference area (sail_area_m2) is separate (a
-//    delta is roughly half its bounding box).
-//  * Flat-plate aero via a NORMAL-FORCE decomposition (robust at every incidence,
-//    which a kite needs: it trims at high alpha and must survive tumbling and
-//    violent gusts without a lift/drag-direction singularity). The relative wind
-//    w = ambient wind - the aero centre's point velocity is split into a normal
-//    component (wn = w . n) and a tangential one. The pressure force is
-//        F_n = 0.5 rho A cn (w . n) |w|  along n
-//    so its effective coefficient CN = cn sin(alpha) grows with incidence (thin-
-//    plate linear region); its VERTICAL part is lift and its downwind part is
-//    drag - exactly how a sail generates both from one inclined pressure force.
-//    A small tangential (skin/edge) drag and the tail add the rest. Equivalent
-//    CL/CD: CL ~ cn sin(alpha) cos(alpha) = (cn/2) sin(2a) (peaks near 45 deg),
-//    CD ~ cd0 + cn sin^2(alpha) (grows to a broadside parachute at 90 deg).
-//  * A tail: a bluff drag patch on a long lever down body -Y. It weathervanes
-//    the nose into the wind and damps yaw/roll/pitch oscillation (a real tail).
-//  * Aero centre offset above the centre of mass gives pendulum stability; the
-//    aero force applied AT the aero centre supplies the trimming moment.
-//  * Tether: a stiff ONE-SIDED spring (a string only pulls, never pushes) from
-//    the bridle point on the sail to the anchor, damped along the line, with the
-//    rest length reeled within [min,max]. The tension is HARD-CAPPED at
-//    tether_max_tension so a fast-moving anchor (towed kitesurf-style behind a
-//    vehicle) cannot inject an explosive impulse - the documented blow-up guard.
-//  * Two-line steering: steer models the stunt-kite line-warp as a moment about
-//    the line-of-sight (anchor->kite) axis, banking the sail so its lift vector
-//    carves a turn. It is scaled by dynamic pressure, so control authority
-//    vanishes as the wind dies (the kite that stops answering the lines as it
-//    falls) - emergent loops and dives under steer, a limp fall in dead air.
+// SI units; +Z forward, +Y up, right-handed. Heavier-than-air: ordinary Jolt
+// gravity, nothing buoyancy-exempted. Sail lies in the body X-Y plane, span
+// along X, nose +Y, sail normal +Z; sail_area_m2 is the aero reference (a delta
+// is roughly half its bounding box), separate from the visual plate.
 //
-// UPDATE CONTRACT: call Kite::Update(input, dt) once per fixed step BEFORE
-// PhysicsWorld::Update(dt), with set_anchor() already pointing at this step's
-// anchor. Update() only accumulates forces/torques on the sail body (Jolt clears
-// them after its own step) and refreshes telemetry from the pose sampled at the
-// start of the step. dt must match the world's fixed step (~1/60 s).
+// Aero is flat-plate normal-force decomposition, robust at every incidence (the
+// kite trims at high alpha and tumbles without a lift/drag singularity):
+// relative wind w = ambient wind - aero-centre velocity, pressure force
+//   F_n = 0.5 rho A cn (w . n) |w|  along n
+// so CN = cn sin(alpha) grows with incidence; vertical part is lift, downwind
+// part drag. A small tangential drag and the tail patch (bluff drag on a lever
+// down -Y, weathervaning + damping) add the rest. The aero centre sits above
+// the COM for pendulum stability. Tether: one-sided damped spring from bridle
+// to anchor, rest length reeled in [min,max], tension HARD-CAPPED at
+// tether_max_tension. Steer warps the line into a moment about the
+// anchor->kite axis (banks the sail into a turn), scaled by dynamic pressure so
+// authority dies with the wind.
+//
+// UPDATE CONTRACT: Update(input, dt) once per fixed step BEFORE
+// PhysicsWorld::Update(dt), anchor already set. It only accumulates
+// forces/torques (Jolt clears them after its step); dt must match the fixed
+// step (~1/60 s).
 
 // Per-frame control. Both -1..1.
 struct KiteInput {
@@ -83,18 +62,17 @@ struct RX_PHYSICS_EXPORT KiteDesc {
   Vec3 aero_center{0.0f, 0.0f, 0.0f};
 
   // --- attitude trim (why a kite flies belly-to-wind at high, not zero, alpha) --
-  // A kite's bridle geometrically holds the sail at a set angle to the lines, its
-  // camber adds a pitching moment and its tail weathervanes it, so the sail flies
+  // A kite's bridle holds the sail at a set angle to the lines, its camber adds
+  // a pitching moment and its tail weathervanes it, so the sail flies
   // belly-INTO-the-wind at a fixed high angle of attack instead of feathering or
-  // flipping. Modelled as a restoring torque that aligns the belly normal (body
-  // +Z) with a target computed each step from the relative wind: the direction
-  // that sits at trim_alpha_rad incidence with the belly UP (lift positive) - an
-  // unambiguous, non-flippable target (a symmetric pitch-only trim has a second,
-  // belly-down equilibrium the tether can knock it into). Torque =
-  // attitude_stiffness * q_dyn * (n_current x n_target), so it fades with dynamic
-  // pressure: firm in wind, gone in dead air (the kite goes limp and falls). It
-  // leaves rotation ABOUT the normal free, which is what steering and the tail
-  // act on.
+  // flipping. Modelled as a restoring torque aligning the belly normal (body +Z)
+  // with a target computed each step from the relative wind: the direction at
+  // trim_alpha_rad incidence with the belly UP. That target is unambiguous; a
+  // symmetric pitch-only trim has a second, belly-down equilibrium the tether
+  // can knock the sail into. Torque =
+  // attitude_stiffness * q_dyn * (n_current x n_target), so it fades with
+  // dynamic pressure: firm in wind, gone in dead air. Rotation ABOUT the normal
+  // stays free, which is what steering and the tail act on.
   f32 trim_alpha_rad = 0.40f;      // ~23 deg, the incidence the bridle+camber sets
   f32 attitude_stiffness = 0.30f;  // belly-normal alignment gain (per unit q_dyn)
 
@@ -107,8 +85,8 @@ struct RX_PHYSICS_EXPORT KiteDesc {
   // Bridle attach point on the sail (body frame, CoM-relative). Kept CLOSE to the
   // CoM: the attitude trim owns stability, and a long bridle lever would let a
   // tension spike (a taut-line snap, a fast tow) torque the sail hard enough to
-  // flip it. A small below-centre offset adds a touch of pendulum feel without
-  // giving tension the leverage to overpower the trim.
+  // flip it. A small below-centre offset adds a little pendulum feel without
+  // letting tension overpower the trim.
   Vec3 bridle_point{0.0f, -0.08f, 0.02f};
   f32 min_line_m = 6.0f;        // shortest reelable line
   f32 max_line_m = 60.0f;       // longest reelable line

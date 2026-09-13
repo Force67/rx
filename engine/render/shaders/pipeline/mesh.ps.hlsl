@@ -411,17 +411,12 @@ struct MaterialParams {
 [[vk::combinedImageSampler]] [[vk::binding(5, 2)]] Texture2DArray ddgi_distance : register(t5, space2);
 [[vk::combinedImageSampler]] [[vk::binding(5, 2)]] SamplerState ddgi_distance_sampler : register(s5, space2);
 // RCGI resolved full-res indirect diffuse (env slot 35, replaces DDGI + SSGI).
-// Hair transmittance volume (env slots 44-46): the same deep opacity map the
-// strand pass shades against, so the scalp under a groom is shadowed by the
-// fibres over it. A groom is not opaque, so a binary shadow map cannot carry
-// this - and hair that casts nothing on the head is the single most visible
-// thing wrong with a rendered character.
-//
-// The volume is built earlier in the frame than this pass reads it, and this
-// pass DECLARES the read so the graph orders the two. Both halves matter: built
-// late, the lookup would index the previous frame's texels with this frame's
-// light matrix and the shadow would slide off the head whenever the sun or the
-// groom moved; undeclared, the read would be unordered against the write.
+// Hair transmittance volume (env slots 44-46): the deep opacity map the strand
+// pass shades against, so the scalp under a groom is shadowed by its fibres (a
+// groom is not opaque; a binary shadow map cannot carry this). The volume is
+// built earlier in the frame and this pass DECLARES the read so the graph
+// orders them: built late the shadow slides off the head on sun/groom motion,
+// undeclared the read is unordered against the write.
 [[vk::combinedImageSampler]] [[vk::binding(44, 2)]] Texture2D<float> hair_front_depth : register(t44, space2);
 [[vk::combinedImageSampler]] [[vk::binding(44, 2)]] SamplerState hair_front_sampler : register(s44, space2);
 [[vk::combinedImageSampler]] [[vk::binding(45, 2)]] Texture2D<float4> hair_dom : register(t45, space2);
@@ -555,7 +550,7 @@ float3 SurfaceNormal(PsIn input) {
     if ((material.flags & kFlagNormalModelSpace) != 0u) {
       // Object-space (_msn) normal: carried straight to world by the model
       // matrix's cofactor, replacing the vertex normal. No TBN, so seam-broken
-      // tangents can't smear the shading. Same covector rule as the vertex
+      // tangents cannot smear the shading. Same covector rule as the vertex
       // normal, sign included, or a mirrored instance lights inside out.
       float model_det;
       const float3x3 cof =
@@ -740,20 +735,15 @@ float ParallaxShadow(float2 uv, float3 light_ts, float scale, float2 dx, float2 
 }
 
 // --- silhouette-aware parallax occlusion ------------------------------------
-// Classic POM leaves the mesh outline polygon-straight: the heightfield displaces
-// the interior but the silhouette is still the flat triangle edge. Here the
-// underlying mesh is approximated as a locally curved (quadric) patch, after
-// Oliveira & Policarpo 2005, reduced to a single mean-curvature term `curv`
-// (turn of the interpolated normal per uv unit, derived per pixel). As the
-// tangent-space view ray travels laterally by `off` uv units the curved surface
-// bends away from the flat tangent plane, so the depth the heightfield must reach
-// to be hit lifts by curv*dot(off,off). When the ray reaches the bottom of the
-// height shell without ever meeting the lifted field it has marched past where
-// the real curved surface exists: `clip` is set and the caller discards the
-// fragment, carving the heightfield's profile into the silhouette. On a flat
-// patch curv is ~0, bend stays 0 and this reduces to the classic march (nothing
-// clips). Gradients are passed in (taken before any divergent flow) so the loop
-// and the caller's discard never touch implicit derivatives.
+// POM leaves the mesh outline polygon-straight. Following Oliveira & Policarpo
+// 2005 the mesh is approximated as a locally curved (quadric) patch reduced to
+// one mean-curvature term `curv` (normal turn per uv unit, derived per pixel):
+// a view ray moving `off` uv units laterally must reach depth lifted by
+// curv*dot(off,off); marching past the bottom of the height shell without
+// meeting the lifted field sets `clip`, and the caller's discard carves the
+// heightfield's profile into the silhouette. curv ~0 reduces to the classic
+// march. Gradients are passed in (taken before any divergent flow) so the loop
+// and the discard never touch implicit derivatives.
 float2 ParallaxUvSilhouette(float2 uv, float3 view_ts, float scale, float curv, float2 dx,
                             float2 dy, out bool clip) {
   clip = false;

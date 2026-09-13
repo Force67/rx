@@ -1,33 +1,19 @@
 rxscene 1
 
-# A demo city, authored entirely as text. No C++, no imported art: every
-# building is a prefab from prefabs/city/, every facade is a procedural pattern,
-# every material is a named preset or inline PBR.
+# A demo city, authored entirely as text: every building a prefab from
+# prefabs/city/, every facade a procedural pattern, every material a named
+# preset or inline PBR. Three format properties carry the scene:
 #
-# Three things carry this scene, and all three are properties of the format
-# rather than of the layout:
+#   The light is AUTHORED. Sun and Atmosphere fix a low evening sun off to +x
+#   (one terrace lit, one in shade), instead of whatever hour the clock is at.
 #
-#   The light is AUTHORED. Sun and Atmosphere below fix a low evening sun and
-#   the haze it rakes through, instead of taking whatever hour the world clock
-#   was at. The sun is off to +x, so the west terrace is lit and the east one is
-#   in its own shade - a street reads as a street largely because its two sides
-#   are not the same brightness.
+#   No building writes down its height. Each anchors onto the ground with an
+#   Anchor.offset, so y derives from the prefab's geometry; retune a prefab or
+#   a Stretch and every instance follows.
 #
-#   No building writes down its height. Each is anchored onto the ground with an
-#   Anchor.offset saying where on it, so the y is derived from the prefab's own
-#   geometry. Retune a prefab, or a Stretch, and every instance follows; the old
-#   version of this file carried 24 hand-multiplied half-heights, every one of
-#   which silently sank its building the moment either changed.
-#
-#   Every building is SEVERAL masses - podium, shaft, crown - and an instance's
-#   Stretch reaches all of them (see SceneStretch). That is what makes the
-#   skyline a skyline: with a Stretch that only reached the root, the only shape
-#   that survived being proportioned was a single box, so every silhouette was a
-#   rectangle of a different height.
-#
-# The street grid stays square on purpose. A city reads as a city because its
-# blocks are orthogonal; what is turned off-axis is the traffic and the clutter,
-# which is what tells you the place is lived in rather than laid out.
+#   Every building is SEVERAL masses (podium, shaft, crown) and an instance's
+#   Stretch reaches all of them (see SceneStretch), so one prefab yields as
+#   many silhouettes as it has instances.
 #
 #   rx --validate runtime/scenes/city.rxscene
 #   rx --scene runtime/scenes/city.rxscene --headless --shot out.png \

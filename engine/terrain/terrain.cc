@@ -888,8 +888,8 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
     // A diagonal neighbor's corner normal reads this tile's two edge-adjacent
     // samples through GridHeight. When the shared cardinal tile exists its own
     // border copy reaches the diagonal through the pushes above, but in sparse
-    // layouts (corner tile present, edge tile missing) that indirection breaks
-    // -- so mark the diagonal directly.
+    // layouts (corner tile present, edge tile missing) that indirection breaks,
+    // so mark the diagonal directly.
     const std::optional<TerrainTileKey> southwest = neighbor(sample.tile, -1, -1);
     const std::optional<TerrainTileKey> southeast = neighbor(sample.tile, 1, -1);
     const std::optional<TerrainTileKey> northwest = neighbor(sample.tile, -1, 1);

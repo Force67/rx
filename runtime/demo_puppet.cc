@@ -156,7 +156,7 @@ void PuppetDemo::BuildProxies() {
 
   // Box half-extents per body, aligned to each capsule's long axis (limbs and
   // torso along local Y, the pelvis laterally along local X). Derived from the
-  // rig's public geometry -- a graybox proxy, not the exact collision capsule.
+  // rig's public geometry, a graybox proxy, not the exact collision capsule.
   const f32 hw = params_.hip_width * 0.5f;
   const f32 torso_half = 0.19f * params_.body_height;
   auto ext = [&](BodyPart part) -> Vec3 {

@@ -1,4 +1,4 @@
-# rx::net -- replication, streaming bubbles (interest management + ownership)
+# rx::net: replication, streaming bubbles (interest management + ownership)
 # and the client/server sessions.
 #
 # The codec + interest half has no transport dependency and always builds; the

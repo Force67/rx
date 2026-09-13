@@ -12,7 +12,7 @@
 namespace rx {
 namespace {
 
-// Areas beyond plain ground. Rock and water stay walkable -- they just cost:
+// Areas beyond plain ground. Rock and water stay walkable, they just cost:
 // per-meter multipliers make pathfinding prefer smooth routes, entry tolls
 // make agents COMMIT once they stepped in instead of bouncing back out.
 constexpr nav::AreaId kAreaRock = 2;
@@ -282,7 +282,7 @@ void NavDemo::SpawnActors() {
 
 void NavDemo::Create() {
   // Traversal economics: rock is 3x per meter + a 4 m entry toll, water 3x +
-  // 2 m. Both stay passable -- a cornered mule wades the river; it just never
+  // 2 m. Both stay passable: a cornered mule wades the river; it just never
   // prefers to.
   mesh_.SetAreaCost(kAreaRock, 3.0f, 4.0f);
   mesh_.SetAreaCost(kAreaWater, 3.0f, 2.0f);

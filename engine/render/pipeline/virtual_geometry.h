@@ -4,35 +4,31 @@
 // Virtual geometry: a cluster-DAG LOD hierarchy rendered through a fully
 // GPU-driven, two-pass occlusion-culled visibility buffer.
 //
-// Build (Upload): meshlets are grouped by spatial adjacency, each group's
-// interior is QEM-simplified with its border vertices LOCKED (so any two
-// clusters that can meet across a level boundary share identical edges), and
-// the result re-clusters into the next level - repeated until a handful of
-// root clusters remain. A cluster draws iff
+// Build (Upload): meshlets grouped by spatial adjacency, each group's interior
+// QEM-simplified with border vertices LOCKED (clusters meeting across a level
+// boundary share identical edges), re-clustered into the next level, repeated
+// to a handful of roots. A cluster draws iff
 //   project(self_error) <= tau < project(parent_error)
-// - the standard DAG cut: each screen region independently picks the coarsest
-// level whose error is invisible, per-cluster LOD inside one mesh, no cracks.
+// (the standard DAG cut: per-cluster LOD, no cracks).
 //
 // Frame (AddToGraph, gpu-driven path):
 //   1 clear      visibility buffer + counters
-//   2 cull main  DAG cut + frustum + cone per cluster x instance; passing
-//                clusters split into compute-raster (small) and mesh-shader
-//                (large / near-clipping) bins. Clusters that fail only the
-//                PREVIOUS frame's hi-z are deferred, not dropped.
-//   3 raster     sw: one 128-thread group per cluster rasters its triangles
-//                with 2D edge functions; hw: mesh shader + pixel shader.
-//                Both write (depth<<32 | cluster | tri) with one 64-bit
-//                InterlockedMax - the atomic IS the depth test.
-//   4 hi-z       coarse farthest-depth rebuilt from scene depth + step 3
-//   5 cull post  retests the deferred clusters against the fresh hi-z;
-//                disocclusions raster exactly like step 3
+//   2 cull main  DAG cut + frustum + cone per cluster x instance; survivors
+//                split into compute-raster (small) and mesh-shader (large /
+//                near-clipping) bins; clusters failing only the PREVIOUS
+//                frame's hi-z are deferred, not dropped
+//   3 raster     sw: 128-thread group per cluster, 2D edge functions; hw:
+//                mesh shader + pixel shader. Both write
+//                (depth<<32 | cluster | tri) with one 64-bit InterlockedMax,
+//                the atomic IS the depth test
+//   4 hi-z       coarse farthest-depth from scene depth + step 3
+//   5 cull post  retests deferred clusters; disocclusions raster as in step 3
 //   6 resolve    fullscreen: decode ids, refetch verts, perspective-correct
 //                barycentrics, shade, export SV_Depth against the scene
 //
 // Falls back to the single-pass mesh-shader path (no occlusion, no sw raster)
-// when the device lacks 64-bit buffer atomics; stays inert without mesh
-// shaders. Cluster pages/streaming are deliberately out of scope here: the
-// whole DAG stays resident.
+// without 64-bit buffer atomics; inert without mesh shaders. Cluster
+// pages/streaming are out of scope: the whole DAG stays resident.
 
 #include <span>
 

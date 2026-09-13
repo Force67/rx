@@ -208,7 +208,7 @@ void Host::ApplyRenderPreset() {
   tuned.dynamic_min_scale = env.dynamic_min_scale;
   tuned.restir_di = env.restir_di;  // honor RX_RESTIR_DI
   // RCGI is now a preset default (ultra/high). RX_RCGI still wins in both
-  // directions, but only when explicitly set -- otherwise the preset decides,
+  // directions, but only when explicitly set; otherwise the preset decides,
   // so an unset env must not clobber a tier that enabled rcgi.
   if (renderer_.rcgi_env_overridden()) tuned.rcgi = env.rcgi;
   tuned.rcgi_intensity = env.rcgi_intensity;

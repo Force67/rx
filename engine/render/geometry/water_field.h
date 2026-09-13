@@ -83,7 +83,7 @@ class WaterField {
   // `ocean_displacement` is the FFT ocean displacement map (its .y height);
   // interaction tests the waterline against the live swell when it is bound, and
   // an analytic proxy otherwise. `opaque_depth` is the frame's prepass depth
-  // (always valid when the field is active — the caller must schedule this pass
+  // (always valid when the field is active; the caller must schedule this pass
   // after the prepass writes it); it is only read when params.interaction is set.
   void AddToGraph(RenderGraph& graph, const UpdateParams& params,
                   TextureView ocean_normal_foam, TextureView ocean_displacement,

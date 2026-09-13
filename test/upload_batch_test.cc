@@ -1,17 +1,11 @@
-// Upload-batch acceptance test. Through the RHI on a surfaceless device:
-// create buffers inside a Begin/FlushUploadBatch scope (nested, to exercise the
-// depth count) and prove the deferred copies land — after the explicit flush,
-// after an implicit flush (ImmediateSubmit reading a just-created buffer), and
-// across the soft staging budget (enough data that the batch auto-submits
-// early). Contents are verified by copying each buffer back to a host-visible
-// readback buffer; ImmediateSubmit's fence wait proves the async batch
-// submissions retired, so the mapped reads are safe.
-//
-// Also covers the two paths the batch is actually used through: a frame that
-// reads a buffer still batched when BeginFrame ran (the only ordering is the
-// implicit flush plus the batch's trailing barrier), and RecordUpload +
+// Upload-batch acceptance test, through the RHI on a surfaceless device:
+// buffers created inside a (nested) Begin/FlushUploadBatch scope must land via
+// explicit flush, implicit flush (ImmediateSubmit reading a just-created
+// buffer), and the soft staging budget's early auto-submit. Contents verified
+// by readback; ImmediateSubmit's fence wait proves the async batch retired
+// before the mapped reads. Also covers a frame reading a buffer still batched
+// at BeginFrame (implicit flush + trailing barrier) and RecordUpload +
 // ParkBatchStaging with an image, as MaterialSystem uploads textures.
-//
 // Skips cleanly (exit 0) when no Vulkan driver is present (null backend).
 
 #include <barrier>

@@ -2,7 +2,7 @@
 
 A procedural sailing-ship slice on the adaptive-water / FFT-ocean stack: a lofted
 wooden brig with wind-billowed sails, verlet rope rigging and timed cannon
-broadsides, cruising past a second anchored vessel. It is **content only** — it
+broadsides, cruising past a second anchored vessel. It is **content only**: it
 drives the ship through the same public physics/render APIs the water demo uses
 (`AddDynamicBox` + the buoyancy callback, `WaterDisturbance` wakes, additive demo
 particles) and touches no engine internals, water shaders, or `FrameGlobals`.
@@ -21,12 +21,12 @@ one `ship_->Emit(...)` call in `EmitToView`.
 | **Floating + wake** | The hull is a Jolt dynamic box floating on `set_water_height`; a gentle centre-of-mass impulse each frame holds a slow cruise (no torque → straight heading). `EmitWake` injects bow/stern/side/trailing `WaterDisturbance`s scaled by speed, exactly like the water-demo cubes, so the `WaterField` draws the foam trail. |
 | **Ropes** | A handful of stays/shrouds/sheets as CPU verlet strands (≤14 segments), re-simulated each frame under gravity + a swaying local wind, drawn as thin ribbons. See the pitfall below. |
 | **Cannons** | `N` gunports per side; a timer fires alternating broadsides: additive muzzle flash + grey powder smoke (demo particles), a brief warm muzzle point-light, and an iron cannonball mesh on a ballistic arc. On surface impact it injects a strong `WaterDisturbance` (ripple + a large one-shot foam patch that lingers in the field) plus a white spray burst. |
-| **Second vessel** | The anchored ship reuses the flagship meshes at a fixed pose — free multi-vessel + hull-LOD coverage. |
+| **Second vessel** | The anchored ship reuses the flagship meshes at a fixed pose: free multi-vessel + hull-LOD coverage. |
 
 Additive particle convention (matches the water demo / `particle_emitters.cc`):
 the life fade is premultiplied into the HDR RGB radiance and alpha stays 1, so a
 particle never death-pops. `view.particles_emissive = true` routes the whole set
-through additive blending — one flag for the set, so the powder smoke is authored
+through additive blending: one flag for the set, so the powder smoke is authored
 as dim grey additive rather than lit alpha.
 
 ## Pitfall: per-frame rope re-upload
@@ -46,14 +46,14 @@ through `FrameView::water_disturbances`. When the parallel swell-riding buoyancy
 lands, the ship's dynamic box will ride the swell with no demo change (it already
 reads its pose back from Jolt each frame in `UpdateShipMotion`). Velocity-shaped
 directional wakes / slam splashes will flow straight into the existing `EmitWake`
-and cannon-impact disturbances — those already pass `velocity_x/z` and speed-scaled
+and cannon-impact disturbances: those already pass `velocity_x/z` and speed-scaled
 `foam_amount`, so the improved field just needs to consume them.
 
-## Crew (stretch) — skipped
+## Crew (stretch): skipped
 
 The locomotion demo's animated biped needs a per-character `RigPlayer` +
 `FootPlacement` + skin-palette pipeline (~70 lines each) plus a ground to foot-IK
-against; transplanting 2–3 onto a moving, bobbing deck (feet would need to ride
+against; transplanting 2-3 onto a moving, bobbing deck (feet would need to ride
 the hull transform, not a static floor) exceeded the "cheap, <100 lines" bar, so
 crew were left out.
 

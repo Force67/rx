@@ -2,7 +2,7 @@
 #define RX_LOCOMOTION_GAIT_H_
 
 // GaitClock: the continuous phase generator of docs/LOCOMOTION.md §gait. Gait
-// is NOT a clip or a state machine — it is one scalar phase in [0,1) advanced
+// is NOT a clip or a state machine: it is one scalar phase in [0,1) advanced
 // every fixed step at a speed-dependent rate. The left foot keys `phase`, the
 // right foot keys Wrap01(phase + 0.5); a foot is in stance while its foot-phase
 // is below the (speed-blended) stance fraction, otherwise in swing. Walk and

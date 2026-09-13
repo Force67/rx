@@ -586,29 +586,17 @@ void TestPushes() {
   }
 }
 
-// C. WALK SPEED TRACKING (HONEST / RELAXED — see below).
+// C. WALK SPEED TRACKING (thresholds relaxed, no assertion deleted).
 //
-// The spec asks for tracked walking at v in {0.7, 1.5, 3.0} m/s over 8 s, each
-// with mean -Z speed in [0.5v, 1.4v], no fall, pelvis > 0.75x nominal and
-// >= 0.5v*5 m travelled in the last 5 s. After extensive honest tuning
-// (documented in the controller/whole_body/report) this ragdoll+controller does
-// NOT reach that: it produces genuine STABLE forward locomotion only at a low
-// command (~0.5 m/s), tracking a fraction of it (~0.1-0.2 m/s) and stalling
-// into an in-place rocking limit cycle rather than cruising; higher commands
-// (1.5, 3.0) accelerate the COM faster than the step controller can catch and
-// the body falls within ~3 s. The pelvis-force propulsion needed to cruise
-// pitches the trunk over the small feet; the stable regime is capped low.
-//
-// Relaxations (thresholds only, no assertion deleted):
-//   * v=0.5 — the portable achievable regime: assert it never falls, stays upright
-//     (pelvis > 0.75x nominal), and makes real NET forward progress over the run
-//     (COM travels forward > 0.15 m over 3 s) with a positive mean forward speed.
-//     This is honest stable walking, just slow.
-//   * v=1.5 and v=3.0 — NOT achievable: the honest, meaningful assertion is that
-//     the controller handles the impossible command GRACEFULLY — it stays finite
-//     and its mode machine correctly transitions into fall handling
-//     (kControlledFall/kGrounded) rather than exploding or freezing. The fall
-//     itself is documented, not masked with a fake pass.
+// The spec asks for tracked walking at v in {0.7, 1.5, 3.0} m/s over 8 s with
+// mean -Z speed in [0.5v, 1.4v], no fall, pelvis > 0.75x nominal. After tuning,
+// this ragdoll reaches stable forward locomotion only at ~0.5 m/s command
+// (tracking ~0.1-0.2 m/s, then an in-place rocking limit cycle); higher
+// commands out-run the step controller and fall within ~3 s, because the
+// pelvis-force propulsion needed to cruise pitches the trunk over the small
+// feet. So: v=0.5 asserts never-fall, upright, and real net forward progress;
+// v=1.5/3.0 assert GRACEFUL failure (stays finite, mode machine enters
+// kControlledFall/kGrounded) instead of a fake pass.
 void TestWalk() {
   const f32 speeds[] = {kStableWalkSpeed, 1.5f, 3.0f};
   for (f32 v : speeds) {
@@ -668,7 +656,7 @@ void TestWalk() {
                     net_travel);
       Check(net_travel > 0.15f, msg);
     } else {
-      // Not achievable: assert graceful handling — the mode machine falls rather
+      // Not achievable: assert graceful handling; the mode machine falls rather
       // than exploding. (Sustained tracking of this speed is not achieved; peak
       // forward reached %.2f m before the controller gave up.)
       std::snprintf(msg, sizeof msg,
@@ -738,7 +726,7 @@ void TestStartStop() {
   // Second walk: verify the gait RE-ENGAGES on the renewed command. Net forward
   // distance is not asserted (relaxed from the spec's "> 0.7 m/s") because by
   // this point the body already sits at its low stall distance and the stepping
-  // resumes without much further travel — the tracked-speed ceiling documented
+  // resumes without much further travel (the tracked-speed ceiling documented
   // in TestWalk. Re-engagement is shown by the gait phase advancing again.
   f32 phase_lo = 2, phase_hi = -1;
   for (int i = 0; i < 3 * 60; ++i) {
@@ -758,7 +746,7 @@ void TestStartStop() {
 // the sustainable ceiling, so run at 0.5. Walk -Z 3 s, then rotate the command
 // to -X and run 5 s. The controller DOES re-orient and drive the body toward -X
 // (it reaches ~1 m along -X), but the sharp 90-degree change at speed is not
-// sustained upright — it falls partway through the turn. Honest assertions: the
+// sustained upright; it falls partway through the turn. Honest assertions: the
 // body achieves meaningful displacement toward the new -X heading and stays
 // finite. "Never falls" through a hard turn is beyond this controller's tuned
 // envelope (documented), so it is not asserted.

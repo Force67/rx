@@ -32,7 +32,7 @@ the FFT ocean maps) and are sampled by the water pixel shader through env slots
 Recorded into the render graph after the FFT ocean pass (so crest injection can
 read the fresh foam map). Two dispatches per ring:
 
-* **Phase 0 — recenter + advect + decay + ripple step.** Each output texel maps
+* **Phase 0: recenter + advect + decay + ripple step.** Each output texel maps
   to a world XZ from the *new* snapped origin and resamples the *previous*
   texture (bilinear, keyed off the *old* origin). This full-res resample makes
   toroidal bookkeeping unnecessary. Foam is back-advected by the wave drift
@@ -40,7 +40,7 @@ read the fresh foam map). Two dispatches per ring:
   Ring 0 also steps a damped 2-D wave equation on `R`/`G` (neighbours read from
   the previous texture, so the write never races), with a stability clamp.
   Texels newly exposed at the edge read out of bounds → start empty.
-* **Phase 1 — injection.** Crest foam: the FFT fold-foam channel (when the FFT
+* **Phase 1: injection.** Crest foam: the FFT fold-foam channel (when the FFT
   ocean is on) plus a gentle analytic Gerstner-crest term, added above a low
   threshold so transient whitecaps get *stamped* into the field and then
   persist/advect. Object disturbances (below) add a wake ripple impulse (ring 0
@@ -66,7 +66,7 @@ standing ripple.
 
 ### Velocity-shaped wakes
 
-A *still* body leaves a near-radial splat (the degenerate case — with speed ~0
+A *still* body leaves a near-radial splat (the degenerate case: with speed ~0
 the shaping below collapses to the old circular falloff). A *moving* body leaves
 a directional wake, shaped entirely on the GPU from the disturbance's velocity
 and wake fields:
@@ -95,7 +95,7 @@ coherent V-wake without any hull-specific code in the field.
 ### Impact splashes (slam)
 
 When a body's vertical velocity *relative to the local wave surface* (both from
-the analytic Gerstner proxy — see sync note below) exceeds a threshold while it
+the analytic Gerstner proxy: see sync note below) exceeds a threshold while it
 sits at the waterline, the demo emits a one-shot stronger disturbance (wide
 radius, sharp ripple pulse, big foam burst) with a short cooldown so a single
 impact fires once. It also spawns a small **additive spray burst** into the demo
@@ -117,9 +117,9 @@ Setting `water_interaction` (default on, only meaningful with `water_field`) /
 env `RX_WATER_INTERACTION` / debug-UI checkbox. Makes ANY geometry crossing the
 surface ripple with no CPU disturbances, and makes ripples reflect off the beach
 instead of passing through it. Both live inside the `water_field` pass's own
-transient set (extra binding slots 4–7, all bound every dispatch; the depth
+transient set (extra binding slots 4-7, all bound every dispatch; the depth
 slot is a real graph resource, the rest are the field's own GENERAL images) plus
-its push constant — no env-set slots, FrameGlobals fields, or frame flags were
+its push constant: no env-set slots, FrameGlobals fields, or frame flags were
 added. **The pass is scheduled after the prepass** (renderer.cc, past the
 `depth_export` write) so it can read the opaque depth; it still records after the
 FFT ocean, so crest injection samples the fresh foam.
@@ -134,7 +134,7 @@ FFT ocean, so crest injection samples the fresh foam.
   ping-ponged R32F mask (recentred with the rings via the same `PrevUv`
   resample). The band drives three things: a **bounded standing dent** the
   surface is *pinned* toward (`lerp` to a fixed target, so it can never
-  accumulate — the previous agent's runaway came from integrating an un-signed
+  accumulate: the previous agent's runaway came from integrating an un-signed
   source) which the wave equation rings outward; a **swell-driven bob** velocity
   (`mask × dSurface/dt`, zero-mean over a wave cycle) so a *static* floater keeps
   ringing as waves lap past it; and a **motion** velocity (`mask` change between
@@ -159,7 +159,7 @@ FFT ocean, so crest injection samples the fresh foam.
 
 The field is sampled once by world XZ with a ring-0-priority distance blend
 (ring 0 inside its extent, fading to ring 1, then to zero past ring 1). Foam
-uses a thickness model — `coverage = 1 − exp(−k·density)` — screen-composited
+uses a thickness model (`coverage = 1 − exp(−k·density)`), screen-composited
 with the (now reduced-weight) instantaneous crest/shore term so the persistent
 field always shows through in open water. Brightness is modulated by age (fresh
 = bright white, old = grey), broken up by the existing high-frequency noise, and

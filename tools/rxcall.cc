@@ -1,4 +1,4 @@
-// rxcall -- issue one script command to a running engine and print the reply.
+// rxcall issues one script command to a running engine and prints the reply.
 //
 //   rxcall <socket> <Command.Name> [args...]
 //

@@ -1,5 +1,5 @@
 // Scene/spatial script handlers. Lives in the scene module (not the script
-// substrate) so it can call ecs::World and the scene components DIRECTLY -- this
+// substrate) so it can call ecs::World and the scene components DIRECTLY. This
 // is what replaces the old virtual gateway: the dependency points the right way
 // (scene -> script), so no interface indirection is needed. Same three-part
 // shape as every category: typed handlers, unpacking trampolines, Setup*.
@@ -113,7 +113,7 @@ void WritePos(ecs::World& w, ecs::Entity e, Vec3 p) {
 }
 
 // ============================================================================
-// 1. Handlers -- typed free functions that call the engine DIRECTLY through the
+// 1. Handlers: typed free functions that call the engine DIRECTLY through the
 //    context's concrete ecs::World. PODs / entity ids / StrId / ScriptStringView
 //    only; still trivially testable, now against a real (cheap) ecs::World.
 // ============================================================================
@@ -179,7 +179,7 @@ ScriptStringView GetName(HandlerContext& c, ecs::Entity e) {
 void Log(HandlerContext& c, ScriptStringView message) { c.Log(message); }
 
 // ============================================================================
-// 2. Unpacking trampolines -- mechanical glue a generator/LLM emits.
+// 2. Unpacking trampolines: mechanical glue a generator/LLM emits.
 // ============================================================================
 ScriptValue Call_Teleport(HandlerContext& c, ScriptArgs& a) {
   Teleport(c, a.Ent(0), a.Vec(1));
@@ -230,7 +230,7 @@ ScriptValue Call_Log(HandlerContext& c, ScriptArgs& a) {
 }  // namespace
 
 // ============================================================================
-// 3. SetupSceneCommands -- the one exported symbol, called at engine start.
+// 3. SetupSceneCommands, the one exported symbol, called at engine start.
 // ============================================================================
 void SetupSceneCommands(HandlerRegistry& reg) {
   using T = ScriptType;

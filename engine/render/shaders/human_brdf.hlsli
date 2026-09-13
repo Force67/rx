@@ -2,33 +2,29 @@
 #define RX_HUMAN_BRDF_HLSLI_
 
 // The character ("human") surface model: one controllable BRDF that every
-// light type, every render path and every quality tier evaluates, so a face
-// cannot shade differently under the sun than under a spot, a panel or a
-// traced bounce. This is the transferable half of The Callisto Protocol's
-// character work - not one equation, but "every light that touches the
-// character runs the same material".
+// light type, render path and quality tier evaluates, so a face cannot shade
+// differently under a sun than under a spot or a traced bounce (the
+// transferable half of The Callisto Protocol's character work).
 //
-// Design contract (do not break it):
-//   * The NEUTRAL parameter set (HumanNeutralParams) reproduces the engine's
-//     stock Lambert + GGX response bit-for-bit. Everything below is an
-//     opt-in deviation an artist dials in against calibrated reference.
-//   * Every control is independent. Diffuse Fresnel does not secretly move
-//     retroreflection; the terminator does not move energy into the tail.
-//   * Diffuse and specular read SEPARATE shading normals (Nd / Ns) so a
-//     layered effect - sweat over skin - can bend the highlight without
-//     turning the diffuse into scarred geometry.
+// Design contract (do not break):
+//   * The NEUTRAL parameter set (HumanNeutralParams) matches the engine's
+//     stock Lambert + GGX bit-for-bit; everything below is an opt-in deviation
+//     dialled in against calibrated reference.
+//   * Every control is independent (diffuse Fresnel does not move
+//     retroreflection; the terminator does not feed the tail).
+//   * Diffuse and specular read SEPARATE shading normals (Nd / Ns), so a
+//     layered effect (sweat over skin) bends the highlight without scarring
+//     the diffuse.
 //
-// Source caveat: the published Callisto slides give indicative shapes, not
-// production constants. The forms here are the engine's own fits, chosen so
-// each knob is monotonic, energy-sane and neutral at zero. Fit them against
-// your own OLAT reference (see --demo lookdev); do not treat the defaults as
-// measured truth.
+// The Callisto slides give indicative shapes, not production constants: the
+// forms here are the engine's own fits, monotonic, energy-sane and neutral at
+// zero. Fit against your own OLAT reference (--demo lookdev); the defaults are
+// not measured truth.
 //
 // References:
-//   Burley 2012, "Physically Based Shading at Disney" (retroreflection shape).
-//   Heitz 2014 (Smith height-correlated GGX visibility).
-//   Hill 2010, "Wrap shading" (energy-normalized terminator softening).
-//   Kelemen & Szirmay-Kalos 2001 (separable diffuse/specular for skin).
+//   Burley 2012 (retroreflection shape); Heitz 2014 (Smith height-correlated
+//   GGX visibility); Hill 2010 (energy-normalized wrap shading); Kelemen &
+//   Szirmay-Kalos 2001 (separable diffuse/specular for skin).
 
 #ifndef RX_HUMAN_PI
 #define RX_HUMAN_PI 3.14159265358979323846

@@ -167,18 +167,13 @@ void ApplySurface(const SceneSurface& surface, asset::Material* material) {
   material->back_lighting = surface.back_lighting;
 }
 
-// The id a Surface map's texture gets. Keyed by the file AND by how the slot
-// samples it, so two surfaces naming one concrete share a single decode and a
-// single upload, while a file bound as colour in one place and as data in
-// another stays two textures - the gpu formats differ, and sharing them would
-// hand one of the two a picture that has been gamma-decoded once too often.
-// The ROLE is part of the key for the same reason srgb already is: it decides
-// how the file is decoded, so two surfaces naming one file in two roles are two
-// textures and not one. Keyed on path alone, whichever surface the authoring
-// pass reached first won, and the second silently got a block format chosen for
-// somebody else's channels: a normal map compressed as BC7, or a roughness map
-// as BC5, whose blue channel decodes to zero and reads mirror-smooth. Nothing
-// said so, and the file that produced it was correct in isolation.
+// The id a Surface map's texture gets: keyed by file, srgb-ness AND slot role.
+// File alone would make the first surface the authoring pass reached decide the
+// gpu format for everyone, handing the second a wrongly-decoded picture (a
+// normal map as BC7, a roughness map as BC5 with a dead blue channel) with
+// nothing to say so. Role is part of the key for the same reason srgb is: it
+// decides how the file decodes, so one file bound as colour and as data stays
+// two textures.
 asset::AssetId SurfaceMapId(const std::string& path, bool srgb, asset::TextureRole role) {
   return asset::MakeAssetId("rxscene/map/" + std::to_string(static_cast<int>(role)) + "/" +
                             std::string(srgb ? "srgb/" : "linear/") +
@@ -351,24 +346,16 @@ void Normalize3(f32 v[3]) {
   v[2] = unit.z;
 }
 
-// Bakes Stretch.scale into a built primitive's vertices. Doing it here, once per
-// distinct mesh, is what makes the component free downstream: what comes out is
-// an ordinary mesh, so every transform stays a similarity and no shader, bound
-// or import path has to learn about non-uniform scale.
-//
-// Positions and TANGENTS ride the stretch; normals ride its inverse transpose,
-// which for a diagonal is the component-wise reciprocal. The two genuinely
-// differ: a tangent is dP/du, a direction lying IN the surface, while a normal
-// is a covector, and carrying a normal with the matrix tilts it off the surface
-// (a stretched sphere lit that way is subtly wrong rather than obviously
-// broken). That is the same split mesh.vs.hlsl makes for a non-uniform model
-// matrix. Both are renormalized because the interpolators and the brdf want unit
-// vectors, and the pair stays orthogonal exactly, since dot(Sv, S^-1 n) is
-// dot(v, n) for any diagonal S.
-//
-// tangent[3] is left alone: every axis is positive here (BuildSceneShapes
-// refuses anything else), so the determinant stays positive and neither the
-// winding nor the side the bitangent falls on flips.
+// Bakes Stretch.scale into a built primitive's vertices, once per distinct
+// mesh, so downstream everything stays an ordinary mesh and a similarity.
+// Positions and TANGENTS ride the stretch; normals ride its inverse transpose
+// (component-wise reciprocal for a diagonal): a tangent is a direction in the
+// surface, a normal is a covector, and carrying it with the matrix tilts it off
+// the surface (the split mesh.vs.hlsl makes for a non-uniform model matrix).
+// Both renormalized; the pair stays orthogonal exactly, since dot(Sv, S^-1 n) ==
+// dot(v, n) for diagonal S. tangent[3] is untouched: axes are all positive
+// here, so the determinant stays positive and winding/bitangent side never
+// flip.
 void BakeStretch(const f32 stretch[3], asset::Mesh* mesh) {
   if (stretch[0] == 1.0f && stretch[1] == 1.0f && stretch[2] == 1.0f) return;
   for (asset::MeshLod& lod : mesh->lods) {
@@ -1543,22 +1530,13 @@ bool TurnedOffAxis(ecs::World& world, ecs::Entity entity) {
 }
 
 // Carries an instance's Stretch onto the entities its prefab expanded into.
-//
-// Without this a Stretch reached the root's geometry and nothing else, so a
-// prefab made of more than one piece could not be proportioned at all: a
-// building authored as podium + shaft + crown came back with a stretched
-// podium and the other two floating at their authored size. The way around it
-// was to author every building as ONE box, which is exactly why the demo city's
-// silhouettes were 24 rectangles of differing height.
-//
-// A child takes the stretch twice over: its offset from the instance scales
-// with it, so a crown 10 up in prefab space stays on top of a shaft twice as
-// tall, and its own geometry multiplies by it, so the crown gets wider when the
-// building does. Multiplied into whatever Stretch the prefab already authored
-// rather than replacing it, so a prefab's own proportions survive.
-//
-// Refused rather than approximated when a non-uniform stretch meets a turned
-// child, per TurnedOffAxis. A uniform one is a similarity and always safe.
+// Without it a multi-part prefab could not be proportioned at all (only the
+// root's geometry stretched). A child takes it twice over: its offset from the
+// instance scales, so a crown 10 up stays on a shaft twice as tall, and its own
+// geometry multiplies, so the crown widens with the building. Multiplied into
+// whatever Stretch the prefab already authored, not replacing it. Refused
+// rather than approximated when a non-uniform stretch meets a turned child
+// (TurnedOffAxis); uniform is a similarity and always safe.
 std::string StretchPrefabChildren(ecs::World& world, ecs::Entity instance,
                                   const std::vector<ecs::Entity>& children) {
   const SceneStretch* authored = world.Get<SceneStretch>(instance);

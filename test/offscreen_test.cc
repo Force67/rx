@@ -3,7 +3,7 @@
 // pixels (red triangle at the centre, blue background in the corners).
 //
 // The backend follows RX_RHI (vulkan|d3d12; default vulkan), so the same binary
-// validates both paths — d3d12 runs against vkd3d on linux. Skips cleanly
+// validates both paths; d3d12 runs against vkd3d on linux. Skips cleanly
 // (exit 0) when no driver is present: CreateOffscreen then returns a
 // null-backend stub. Run under vkrun to exercise the real GPU path.
 

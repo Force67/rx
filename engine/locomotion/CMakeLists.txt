@@ -1,4 +1,4 @@
-# rx::locomotion — physics-first articulated locomotion (docs/LOCOMOTION.md):
+# rx::locomotion: physics-first articulated locomotion (docs/LOCOMOTION.md):
 # a feedback controller that stands, walks and recovers a jointed ragdoll biped
 # by measuring the simulation and driving joint motors toward continuous
 # numeric targets. No animation clips or motion-block hierarchy; depends on

@@ -8,26 +8,21 @@
 
 namespace rx::physics {
 
-// Force-based fixed-wing aircraft simulator. One instance drives one plane: it
-// owns a single dynamic fuselage body in the PhysicsWorld and, each step,
-// integrates a strip-theory aero model (wing halves, tail, fin), a propeller or
-// jet, and a three-wheel landing gear into that body via the public force
-// primitives (AddForce / AddForceAtPoint / AddTorque). Gravity, integration and
-// contact response stay in Jolt; the simulator only supplies aero, thrust and
-// suspension forces.
+// Force-based fixed-wing aircraft simulator. One instance drives one plane: a
+// single dynamic fuselage body in the PhysicsWorld, into which each step
+// integrates strip-theory aero (wing halves, tail, fin), a propeller or jet,
+// and three-wheel landing gear via the public force primitives. Gravity,
+// integration and contacts stay in Jolt.
 //
-// Frame: engine convention, +Z forward, +Y up, right-handed, so the RIGHT wing
-// is along -X and the LEFT wing along +X (right = forward x up = +Z x +Y = -X).
-// Units are SI throughout (m, kg, s, N, Nm, rad). Air density is a constant
-// 1.225 kg/m^3 (sea level, ISA). Airspeed and aero are measured relative to the
-// airmass: the world's global wind (PhysicsWorld::wind()) plus this aircraft's
-// local set_wind() bias (both default to still air).
+// Frame: engine convention (+Z forward, +Y up, right-handed, so the RIGHT wing
+// is -X and LEFT +X). SI units; air density constant 1.225 kg/m^3 (sea level
+// ISA). Airspeed is relative to the airmass: world wind (PhysicsWorld::wind())
+// plus this aircraft's set_wind() bias, both default still.
 //
-// Update ordering contract: call Update(input, dt) for every aircraft BEFORE
-// PhysicsWorld::Update(dt) each fixed step, with the same dt. Update only
-// accumulates forces on the body (Jolt clears them after it integrates), reads
-// back nothing it just wrote, and refreshes the telemetry snapshot from the
-// body pose sampled at the start of the step.
+// ORDERING: Update(input, dt) for every aircraft BEFORE PhysicsWorld::Update
+// each fixed step, same dt. Update only accumulates forces (Jolt clears them
+// after integrating) and refreshes telemetry from the pose sampled at step
+// start.
 
 // Per-step pilot input. Elevator/aileron/rudder are normalized command axes,
 // not deflection angles; the model maps them to control-surface ΔCL internally.

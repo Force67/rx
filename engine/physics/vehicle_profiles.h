@@ -43,8 +43,8 @@ RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc SuvProfile();
 // rearward and up (empty ~2000 kg, laden ~2400 kg). Ponderous, top-heavy.
 RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc VanProfile(f32 cargo_load = 0.0f);
 
-// Heavy tractor unit (~8500 kg) with enormous torque geared very tall, very
-// slow steering, weak per-kilogram brakes (long stops), a high CG and
+// Heavy tractor unit (~8500 kg) with enormous torque and tall gearing, slow
+// steering, weak per-kilogram brakes (long stops), a high CG and
 // pronounced roll, top speed capped by the gearing. Unstoppable, unturnable.
 RX_PHYSICS_EXPORT PhysicsWorld::VehicleDesc SemiTruckProfile();
 

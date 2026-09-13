@@ -346,7 +346,7 @@ bool SphereOutsideFrustum(const f32 planes[5][4], const Vec3 &c, f32 r) {
 // Average opacity of an alpha-masked submesh for the vegetation opaque
 // approximation. Samples the material's baked alpha grid at each triangle's
 // three vertices, edge midpoints and centroid (7 points in barycentric UV
-// space -- a cheap stand-in for integrating covered texels over the footprint)
+// space, a cheap stand-in for integrating covered texels over the footprint)
 // and area-weights across the submesh. Returns 1.0 (no shrink, i.e. today's
 // force-opaque behavior) when the alpha was not decoded: opaque texture, a
 // format without a CPU alpha decoder (BC7), or a missing material.
@@ -1192,20 +1192,17 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   if (AuroraIntensity.overridden())
     settings_.weather.aurora_intensity = AuroraIntensity.get();
 
-  // RCGI software mode: on a device without ray query (or when RX_RCGI_SW
-  // forces it for A/B on RT hardware), RCGI's world side runs through the SDF
-  // clipmap tracer, which needs the SDF infrastructure. SDF availability is an
-  // IMMUTABLE STARTUP decision, NOT a live settings bit: the CPU mesh
-  // positions/indices used to voxelise mesh SDFs are not retained after upload,
-  // so there is no way to backfill the field on a later toggle, and a quality
-  // preset applied live must not be able to turn a seeded path off. Decide
-  // want_sdf once here from the startup desc flag, the SDF-implying envs
-  // (RX_SDF / RX_RCGI_SW), or a non-RT RCGI request; it is gated on creation
-  // success into `sdf_available_` below and stays fixed for the session.
-  // RCGI-software therefore implies the SDF memory + compose cost documented in
-  // SDF_TRACE.md. (A late programmatic rcgi enable on a non-RT device that
-  // seeded nothing at startup gets no software path; ApplySettings logs that
-  // once.)
+  // RCGI software mode: on a device without ray query (or RX_RCGI_SW on RT
+  // hardware for A/B) RCGI's world side runs through the SDF clipmap tracer.
+  // SDF availability is an IMMUTABLE STARTUP decision, not a live settings bit:
+  // the CPU mesh data used to voxelise is not retained after upload, so a field
+  // cannot be backfilled on a later toggle, and a live quality preset must not
+  // turn a seeded path off. Decide want_sdf once here (startup desc flag, the
+  // SDF-implying envs RX_SDF / RX_RCGI_SW, or a non-RT RCGI request) and gate
+  // it on creation success into sdf_available_; it stays fixed for the session,
+  // so RCGI-software carries the SDF memory + compose cost throughout. A late
+  // programmatic rcgi enable on a non-RT device gets no software path;
+  // ApplySettings logs that once.
   if (RcgiSwOpt.overridden())
     rcgi_force_software_ = RcgiSwOpt;
   const bool want_sdf = desc.software_gi || (desc.software_gi_fallback && !rt_available_) ||
@@ -1247,12 +1244,12 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // SDF software-trace infrastructure (RX_SDF) is created AFTER the pipeline
   // batch is joined, on purpose: it is an OPTIONAL, non-fatal path, but inside
   // a batch Create*Pipeline returns a placeholder handle that only fails at
-  // EndPipelineBatch -- a failed SDF pipeline would then abort the whole
+  // EndPipelineBatch; a failed SDF pipeline would then abort the whole
   // renderer above instead of degrading. Built immediately here, a pipeline (or
   // 3D-storage -image) failure surfaces at this call site and is handled
   // non-fatally: log, tear the SDF systems down, leave the software path
   // unavailable. (RcgiSystem's _sw pipelines are likewise created outside any
-  // batch -- lazily in ApplySettings during RenderFrame -- so a failure there
+  // batch (lazily in ApplySettings during RenderFrame), so a failure there
   // returns a null system and is handled non-fatally at that call site too.)
   if (want_sdf) {
     sdf_scene_ = std::make_unique<SdfScene>(*device_);
@@ -1676,7 +1673,7 @@ void Renderer::ApplySettings() {
   bool rcgi_sw_possible = sdf_available_ && sdf_clipmap_ != nullptr;
   // Honest failure for a late/programmatic rcgi enable on a non-RT device that
   // never seeded the SDF path at startup: the software tracer cannot come up
-  // (SDF availability is a startup decision -- see Initialize / SDF_TRACE.md),
+  // (SDF availability is a startup decision, see Initialize),
   // so say so once rather than silently leaving rcgi doing nothing. (The
   // debug-UI rcgi toggle is already greyed out when the device lacks ray
   // query.)
@@ -2364,14 +2361,14 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   // The SDF stands in for RCGI's realtime visibility rays
   // (RX_RAY_MASK_REALTIME), so it must mirror that TLAS set exactly: skip no_rt
   // fill geometry entirely (never in the realtime tlas), and build the field
-  // from only the OPAQUE submesh triangle ranges (blended submeshes --
-  // glass/water/effects -- are excluded from the tlas and must not turn the SDF
+  // from only the OPAQUE submesh triangle ranges (blended submeshes, i.e.
+  // glass/water/effects, are excluded from the tlas and must not turn the SDF
   // opaque). Average albedo / emissive over the opaque submeshes only, matching
   // the geometry that fed it. Eligibility can flip on a same-key re-upload
   // (opaque mesh replaced by an all- blend / no_rt one, or one that lost its
   // opaque submeshes). When it does the block below never calls RegisterMesh,
   // so the previous field must be dropped explicitly or it lingers as a stale
-  // occluder -- Remove covers every such replacement path (no-op when nothing
+  // occluder; Remove covers every such replacement path (no-op when nothing
   // was registered).
   bool sdf_eligible =
       sdf_scene_ && !gpu.all_blend && !gpu.no_rt && !gpu.dynamic_vertices;
@@ -2418,7 +2415,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     // Only register when there is opaque indexed geometry to voxelise (an all-
     // blend mesh is already excluded above; a non-indexed opaque mesh is not a
     // shape we generate SDFs for here). If there is none, this is not eligible
-    // after all -- drop any prior field below.
+    // after all, drop any prior field below.
     if (in.positions && in.index_count > 0)
       sdf_scene_->RegisterMesh(mesh_key, in);
     else
@@ -2449,7 +2446,7 @@ bool Renderer::UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt) {
   GpuMesh *gpu = meshes_.find(key);
   // rt_approx meshes are rejected: the opaque-approx stand-in duplicates the
   // masked geometry into its own buffers/BLAS, which this fast path does not
-  // rebuild -- realtime rays would keep hitting the pre-edit shape. Callers
+  // rebuild; realtime rays would keep hitting the pre-edit shape. Callers
   // fall back to a full UploadMesh, which rebuilds the stand-in.
   if (!gpu || gpu->skinned || gpu->morph_target_count != 0 ||
       !gpu->lods.empty() || gpu->rt_approx ||
@@ -2757,7 +2754,7 @@ void Renderer::RenderFrame(const FrameView &view) {
 
   // Advance the frame clock before anything can bail out of the frame. The
   // timed captures and the rate-limited logs below key off it, so leaving it
-  // until after the acquire froze time whenever frames were skipped -- a
+  // until after the acquire froze time whenever frames were skipped, a
   // screenshot armed for t=45s then never came due.
   time_seconds_ += view.frame_delta_seconds;
 
@@ -2808,7 +2805,7 @@ void Renderer::RenderFrame(const FrameView &view) {
   u32 image_index = 0;
   // Offscreen: drive the whole capture run off the swapchain, so the result
   // never depends on the compositor ever showing the window. Requested up
-  // front, or latched once an acquire timed out below -- retrying it every
+  // front, or latched once an acquire timed out below; retrying it every
   // frame would burn the full timeout each time, and the run needs its
   // warm-up frames. Acquiring here would be wrong as well as pointless:
   // nothing presents the image back, so the swapchain would run dry.
@@ -2833,7 +2830,7 @@ void Renderer::RenderFrame(const FrameView &view) {
     // the one frame the capture is due on: the engine needs its warm-up frames
     // (sky/atmosphere bakes, temporal history, streamed uploads) or the
     // capture comes out black. Without one, skip the frame rather than wedging
-    // the loop on an unbounded wait -- and do not burn the GPU on a window
+    // the loop on an unbounded wait, and do not burn the GPU on a window
     // nobody is compositing.
     if (!CaptureArmed() || !EnsureCaptureImage()) {
       if (time_seconds_ - acquire_timeout_log_time_ >= 1.0) {
@@ -3716,23 +3713,16 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   }
 
   // Async TLAS build (RX_RT_ASYNC_TLAS): build this frame's slot on the compute
-  // queue while the graphics timeline consumes the slot built last frame -- the
-  // slot being built is never the slot being read this frame, so there is no
-  // same-frame cross-queue hazard on the acceleration structure at all; the
-  // async submit is waited by SubmitFrame and a full frame elapses before the
-  // slot is read, which the frame fence already guarantees. This rides the same
-  // async-fork discipline the DDGI/RCGI world passes already use to read the
-  // TLAS across queues (validated clean). Needs a second queue and one prior
-  // frame to have primed a slot; the path tracer keeps the synchronous same-
-  // slot build for reference correctness. Three ping-pong slots keep a slot
-  // safe to rebuild while one frame still reads the previous one at two frames
-  // in flight (see RayTracingContext::kSlots).
-  // The async read slot is the previous frame's build. It is only safe when
-  // that slot actually holds a current build: RT enabled after raster-only
-  // frames leaves it unbuilt, and a mesh replace (WaitIdle + RemoveBlas)
-  // retires every slot whose instances still point at the freed BLAS.
-  // TlasSlotTracker tracks both and falls the selection back to a synchronous
-  // build+read of the current slot when the previous one is invalid.
+  // queue while graphics consumes the slot built last frame (same async-fork
+  // discipline as the DDGI/RCGI world passes, validated clean); a full frame
+  // elapses before the slot is read, which the frame fence guarantees. Needs a
+  // second queue and one primed slot; three ping-pong slots cover two frames in
+  // flight (RayTracingContext::kSlots). The path tracer keeps the synchronous
+  // same-slot build for reference correctness.
+  // The read slot (previous frame's build) is only safe when it holds a current
+  // build: RT enabled after raster-only frames leaves it unbuilt, and a mesh
+  // replace (WaitIdle + RemoveBlas) retires slots pointing at the freed BLAS.
+  // TlasSlotTracker falls back to a synchronous build+read when invalid.
   bool want_async_tlas = RtAsyncTlasOpt && device_->caps().async_compute &&
                          settings_.async_compute && !path_trace &&
                          frame_index_ > 0;
@@ -4283,7 +4273,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // describe a water surface, and every water surface (sea, CBT sheet, lake)
   // reaches the renderer as a water-material submesh, so gate the whole family
   // on one being submitted. These features default on, and "available()" only
-  // means the pipelines exist -- without this gate every scene paid for the
+  // means the pipelines exist; without this gate every scene paid for the
   // sims, and worse, caustics modulated the sun on everything below the rest
   // height (y=0 by default): wavy grey mottling across dry ground.
   const bool scene_has_water = water_pipeline_active;
@@ -4299,7 +4289,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // The optional fluid solver runs whenever a domain is submitted; it is NOT
   // gated on scene_has_water (a lava-only scene carries no water material). It
   // IS gated on the surface draw being reachable: the fluid draws inside the
-  // transparent pass, which needs water_ (only created with ray query) — on a
+  // transparent pass, which needs water_ (only created with ray query); on a
   // non-RT device the solver would otherwise burn GPU every frame with no
   // visual output.
   fluid_sim_active_ = settings_.fluid_sim && fluid_sim_.available() &&
@@ -4328,7 +4318,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   globals.water_caustics[1] = settings_.water_rest_height;
   globals.water_caustics[2] = settings_.water_caustic_depth_fade;
   // Underwater caustics: gated on an actual water surface (scene_has_water),
-  // not on the interaction field -- the field defaults on in every scene, and
+  // not on the interaction field: the field defaults on in every scene, and
   // keying caustics off it painted the sun modulation onto dry ground below
   // y=0.
   water_caustics_active_ = settings_.water_caustics &&

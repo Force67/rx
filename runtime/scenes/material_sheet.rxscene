@@ -1,28 +1,21 @@
 rxscene 1
 
-# The material palette, rendered. Every file in scenes/materials/ gets one
-# sphere here, so "what does terracotta look like in this engine" costs a glance
-# at docs/images/material-palette.png rather than a render of your own.
+# The material palette, rendered: one sphere per file in scenes/materials/, so
+# "what does terracotta look like here" costs a glance at
+# docs/images/material-palette.png. Cells are named A1..E6, left to right, back
+# row to front; the file IS the legend.
 #
-# Cells are named A1..E6, reading left to right, back row to front. Every cell
-# below carries its Name and the preset it instances and nothing else, so the
-# file IS the legend: cell A3 is the third block of row A, which says copper.
+#   A  metals            B  stone, plaster, masonry
+#   C  tile, ceramic, wood    D  wood, leather, fabric, plastic
+#   E  plastic, rubber, glass, emissives
 #
-#   A  metals
-#   B  stone, plaster and masonry
-#   C  tile, ceramic and wood
-#   D  wood, leather, fabric and plastic
-#   E  plastic, rubber, glass and emissives
+# No cell carries a coordinate or material value: "Sheet" is a 6 x 5 grid and
+# each cell is a member taking cells in declaration order, with the material
+# from the preset. A cell does say "sphere" because Grid.cell and Prefab.path
+# are exclusive (a member holds one Prefab); its radius 0.5 default is what
+# Sheet's Transform y matches to stand the row on the floor. To add a material,
+# write the preset and add four lines here.
 #
-# No cell carries a coordinate or a material value: "Sheet" is a 6 x 5 grid and
-# each cell is a member of it, taking cells in the order this file declares
-# them, and the material is whatever the palette file says. A cell does say
-# "sphere", because Grid.cell and Prefab.path are exclusive - a member holds one
-# Prefab, and here that one is the material - so the shared shape is a line per
-# cell instead of one Grid.cell. Its size is the Shape default, radius 0.5,
-# which is what Sheet's Transform y has to match to stand the row on the floor.
-#
-# To add a material to the sheet, write the preset and add four lines here:
 #   rx --scene runtime/scenes/material_sheet.rxscene --headless \
 #      --shot sheet.png --shot-frames 20 --width 1440 --height 1080
 #

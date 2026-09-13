@@ -22,7 +22,7 @@ void HandlerRegistry::Add(ScriptStringView name, HandlerFn fn, HandlerSig sig) {
   if (it != table_.end() && it->key == key) {
     // Same hash: either a legitimate re-registration of the same name, or a
     // (2^-64-rare) collision between two distinct names. Catch the collision at
-    // registration -- startup, one-time -- so dispatch can stay hash-only on the
+    // registration (startup, one-time), so dispatch can stay hash-only on the
     // hot path without a name compare.
     assert(it->desc.name.view() == name.view() && "handler name hash collision");
     it->desc = HandlerDesc{fn, sig, name};  // replace

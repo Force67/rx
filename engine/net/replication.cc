@@ -216,7 +216,7 @@ bool SnapshotApplier::Apply(ecs::World& world, const Snapshot& snapshot,
 
   // A keyframe is authoritative about what exists: drop replicas the server
   // no longer streams here, covering despawn deltas that got lost in transit
-  // -- and, under interest management, entities whose bubbles moved on.
+  // and, under interest management, entities whose bubbles moved on.
   if (snapshot.full) {
     scratch_removed_.clear();
     for (auto replica : entities_) {

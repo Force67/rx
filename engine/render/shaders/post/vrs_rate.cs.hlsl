@@ -67,7 +67,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   dy /= 12.0;
 
   // Weber-Fechner: the eye notices relative error, so the allowance grows
-  // with brightness (plus a floor so blacks don't pin to full rate). The
+  // with brightness (plus a floor so blacks do not pin to full rate). The
   // allowance is mostly motion-gated: a static camera keeps near-full rate
   // (coarse fragments fight the temporal upscaler's jittered sub-pixel
   // reconstruction and stripe glossy surfaces), while screen motion - where

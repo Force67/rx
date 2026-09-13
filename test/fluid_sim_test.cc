@@ -5,7 +5,7 @@
 //   (2) no NaNs and no negative depths anywhere,
 //   (3) after removing the ridge (bed re-upload with a version bump) and
 //       flooding the empty half, the water surface (bed + depth) over the wet
-//       cells settles level to within a few cm — the dam-break settling test.
+//       cells settles level to within a few cm (the dam-break settling test).
 //
 // Skips cleanly (exit 0) when no Vulkan driver is present (null backend), like
 // offscreen_test; run under vkrun to exercise the real GPU path.

@@ -4,7 +4,7 @@
 // lit scene colour (a late render-graph pass). Casts one camera ray per pixel
 // and sphere-traces the clipmap. RX_SDF_DEBUG=1 shows the distance field (tint
 // by clip + gradient shading + distance bands); RX_SDF_DEBUG=2 shows the hit
-// albedo lit by the gradient normal -- a crude "SDF view of the scene", the S1
+// albedo lit by the gradient normal, a crude "SDF view of the scene"; the S1
 // acceptance test. This is the primary standalone verification tool for S1.
 
 [[vk::image_format("rgba16f")]] [[vk::binding(0, 0)]] RWTexture2D<float4> lit : register(u0, space0);

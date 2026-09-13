@@ -1,4 +1,4 @@
-// rxpack — authoring tool for .rxp game archives (engine/asset/pack.h).
+// rxpack, authoring tool for .rxp game archives (engine/asset/pack.h).
 //
 //   rxpack create <archive.rxp> <input_dir> [--store] [--level N]
 //   rxpack list <archive.rxp>

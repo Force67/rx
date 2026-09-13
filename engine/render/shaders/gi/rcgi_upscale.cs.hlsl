@@ -11,7 +11,6 @@
 //      (restores normal-map detail); clamp negative lobes.
 //   3. Temporal filter (motion reproject, per-pixel sample counter in alpha,
 //      neighborhood clamp) into a persistent history image.
-// See RCGI.md section 5.
 
 [[vk::image_format("rgba16f")]] [[vk::binding(0, 0)]] RWTexture2D<float4> irradiance_out : register(u0, space0);
 [[vk::image_format("rgba16f")]] [[vk::binding(1, 0)]] RWTexture2D<float4> hist_out : register(u1, space0);
@@ -173,7 +172,7 @@ void main(uint3 id : SV_DispatchThreadID) {
   if (found && (!veg || h.a >= 1.0)) {
     // Neighborhood clamp with a generous margin: the taps come from the same
     // denoised frame (a tight box would pin history to the noisy current sample
-    // and defeat temporal integration), so widen it — GI is low frequency and
+    // and defeat temporal integration), so widen it: GI is low frequency and
     // TAA still runs after us. Bounds gross ghosts without killing convergence.
     // Vegetation loosens it further (wind normals => higher spatial variance).
     float3 margin = ((mx - mn) * 0.5 + mx * 0.6 + 0.03) * (veg ? 1.6 : 1.0);

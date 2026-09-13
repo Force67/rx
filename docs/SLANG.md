@@ -2,7 +2,7 @@
 
 Shaders can be written in [Slang](https://shader-slang.org/) alongside HLSL.
 Both feed the same `rx_embed_shaders` flow (cmake/shaders.cmake): the stage
-comes from the file suffix — `<name>.{vs,ps,cs,ms,as}.{hlsl,slang}` — the
+comes from the file suffix (`<name>.{vs,ps,cs,ms,as}.{hlsl,slang}`), the
 entry point is always `main`, and the result embeds as the same C array
 (`k_blit_ps_slang` for `blit.ps.slang`) consumed through `RX_SHADER`. Nothing
 downstream of the embed step knows or cares which language a blob came from.
@@ -16,7 +16,7 @@ downstream of the embed step knows or cares which language a blob came from.
 
 The DXIL detour through HLSL is deliberate: distro slangc builds (nixpkgs
 included, `SLANG_ENABLE_DXIL=FALSE`) ship without the embedded-dxc backend,
-and slang's own DXIL path is exactly this lower-to-hlsl-then-dxc flow — doing
+and slang's own DXIL path is exactly this lower-to-hlsl-then-dxc flow, so
 it in the build keeps one dxc for both languages and pins the DXIL feature
 set to the same SM 6.5 / vkd3d envelope as the hlsl shaders.
 
@@ -47,7 +47,7 @@ Slang is close to an HLSL superset, and the dxc attribute vocabulary
 
 // Push constants: real push block on spirv, b999 cbuffer for the d3d12
 // backend's root constants. Replaces rhi_bindings.hlsli's PUSH_CONSTANTS
-// macro — slang never defines __spirv__, so that macro must not be used
+// macro; slang never defines __spirv__, so that macro must not be used
 // from slang; the dual annotation below needs no preprocessor at all.
 struct Push { uint count; };
 [[vk::push_constant]] ConstantBuffer<Push> push : register(b999, space0);
@@ -69,11 +69,11 @@ Buffer-device-address reads use slang pointers (`Ptr<T>`) instead of dxc's
 Migrated so far (each doubling as the acceptance test for a piece of the
 toolchain):
 
-- `test/shaders/offscreen_tri.{vs,ps}.slang` — spirv + dxil sidecar, covered
+- `test/shaders/offscreen_tri.{vs,ps}.slang`: spirv + dxil sidecar, covered
   by offscreen_test on vulkan and d3d12.
-- `engine/render/shaders/util/fullscreen.vs.slang` — shared by every
+- `engine/render/shaders/util/fullscreen.vs.slang`: shared by every
   fullscreen pass (tonemap, wboit composite, vgeo resolve, ui blur, blits).
-- `engine/render/shaders/util/blit.ps.slang` — the d3d12 BlitMip lowering;
+- `engine/render/shaders/util/blit.ps.slang`: the d3d12 BlitMip lowering;
   first user of the combined `Sampler2D` form.
 
 Validated on NVIDIA (vulkan, validation layers clean) and vkd3d (d3d12).
@@ -89,7 +89,7 @@ a full migration would buy, by construct:
 | wrapper-shader variants (`#define` + `#include` around a shared body) | ~20 | `import` + interfaces/generics; depfiles retire the manual dep lists either way |
 | `#ifdef __spirv__` target splits | 6 | slang target capabilities, or often unnecessary once the constructs above are native |
 
-Not worth migrating: shaders including vendored HLSL (NRD, FidelityFX — 6
+Not worth migrating: shaders including vendored HLSL (NRD, FidelityFX; 6
 files). They exist to match third-party headers that are and will stay HLSL;
 slang can `#include` most of it, but there is nothing to win.
 

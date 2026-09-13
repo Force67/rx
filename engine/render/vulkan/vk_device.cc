@@ -1448,7 +1448,7 @@ void VulkanDevice::DrainUploadBatchesInFlight() {
 // unchanged) so more uploads keep coalescing; this is the implicit-flush used
 // before dependent GPU work (ImmediateSubmit/frame + async submits/WaitIdle)
 // and by the explicit FlushUploadBatch. Cross-queue readers cannot rely on the
-// barrier — SubmitAsync handles that case explicitly via batch serials.
+// barrier; SubmitAsync handles that case explicitly via batch serials.
 void VulkanDevice::SubmitUploadBatchIfPending() {
   RetireCompletedUploadBatches();
   if (upload_batch_cmd_ == VK_NULL_HANDLE) return;
@@ -1471,7 +1471,7 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
     }
     if (const VkResult waited = vkQueueWaitIdle(graphics_queue_); waited != VK_SUCCESS) {
       // Submitted but unproven. The command buffer is still pending and the
-      // stagings are still being read, so freeing either is illegal — leak both
+      // stagings are still being read, so freeing either is illegal; leak both
       // (this is device-lost) and leave the serial unretired. Resources already
       // parked against it stay parked until a later batch on this queue
       // retires, which proves this one did too by submission order.
@@ -2091,7 +2091,7 @@ void VulkanDevice::DestroyBindingSet(BindingSetHandle set) {
 
 void VulkanDevice::WriteDescriptors(VkDescriptorSet set, std::span<const BindingItem> items) {
   // Hot path: dozens of BindTransient calls per frame, almost always with a
-  // handful of items — inline storage keeps this allocation-free. The write
+  // handful of items; inline storage keeps this allocation-free. The write
   // entries point into the side arrays, which is safe because each is sized
   // once up front and never grows mid-loop.
   mem::SmallVector<VkWriteDescriptorSet, 8> writes;
@@ -2838,7 +2838,7 @@ void VulkanDevice::SubmitAsync(CommandList*) {
   // batch's trailing barrier only orders the graphics queue; cross-queue, the
   // fork semaphore covers every batch submitted before its signal (a semaphore
   // signal orders all earlier graphics submissions), but a batch submitted
-  // AFTER the fork — or any batch at all when no fork was signaled — must be
+  // AFTER the fork (or any batch at all when no fork was signaled) must be
   // complete before the compute queue may read it, so block on those (rare;
   // uploads between SplitFrame and here are the exception, not the rule).
   FrameRing& frame = frames_[current_slot_];

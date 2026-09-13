@@ -14,32 +14,20 @@
 
 // The baked map formats. Two files, two jobs:
 //
-//   RXWORLDI  the world index. One per world, always resident, small enough to
-//             keep resident forever. It is the only thing a streaming decision
-//             may read: bounds, zone, which domains and tiers exist, and what
-//             each costs once resident. Opening a cell payload merely to learn
-//             where the cell is, or how big it is, is the failure this file
-//             exists to prevent.
+//   RXWORLDI  the world index: one per world, always resident, the ONLY thing a
+//             streaming decision may read (bounds, zone, domains, tiers, costs).
 //   RXCELLPL  one cell payload: one domain of one cell at one tier. Immutable
-//             and cooked. Entity payloads are archetype-major component
-//             columns; instance payloads are packed transforms for static
-//             decoration that has no ECS identity until something needs it to.
+//             and cooked; archetype-major entity columns or packed instance
+//             transforms.
 //
-// The checksum covers the header as well as the body, so the fields the
-// cross-checks lean on - the bake id, the cell, the domain, the tier, the table
-// counts - cannot be zeroed or edited into agreement without failing it.
-//
-// Both are little-endian, hand-rolled in the style of terrain_io.cc, and both
-// refuse to load rather than substitute a default. A truncated, reordered or
-// stale file is a cook bug, and a silently half-loaded world costs far more to
-// diagnose than a load that names the byte it choked on. The checksum is fnv1a
-// and catches corruption, not forgery; a world that has to survive a hostile
-// archive needs a signature over the pack, which is the pack's problem.
-//
-// The index does not store payload paths or compressed sizes. Paths follow one
-// convention (CellPayloadPath), and the archive's own table of contents is
-// authoritative for on-disk bytes; duplicating either into the index only
-// creates two answers that can disagree.
+// The checksum covers the header too, so the fields the cross-checks lean on
+// cannot be zeroed or edited into agreement without failing it. Both are
+// little-endian, hand-rolled like terrain_io.cc, and refuse to load rather than
+// substitute a default: a truncated, reordered or stale file is a cook bug. The
+// checksum is fnv1a (corruption, not forgery); a hostile archive needs a pack
+// signature. The index stores no payload paths or compressed sizes: paths
+// follow CellPayloadPath and the archive's own table of contents is
+// authoritative for on-disk bytes.
 
 namespace rx::world {
 
@@ -112,21 +100,21 @@ struct WorldCellRecord {
   // does, the plan is two keys - this stays the streaming key, the authored
   // Guid becomes the persistence key, and the cook bakes a table between them -
   // rather than deriving this one from the Guid, which would cost the
-  // contiguous ranges everything below depends on. See WORLD.md.
+  // contiguous ranges everything below depends on.
   u64 stable_id_first = 0;
   u32 stable_id_count = 0;
   u32 payload_first = 0;
   u32 payload_count = 0;
 };
 
-// The decoded index. Cells are sorted by id, so lookup is a binary search and
+// The decoded index. Cells are sorted by id: lookup is a binary search and
 // iteration order never depends on cook order.
 struct WorldIndexData {
   u32 version = 0;
   u64 world_id = 0;
-  // Identifies the cook that produced this index. Every payload carries the
-  // same value; a mismatch at load means the index and the archive came from
-  // different bakes, and is refused rather than materialized.
+  // Identifies the cook that produced this index; every payload carries the
+  // same value, and a mismatch at load means the index and the archive came
+  // from different bakes, and is refused rather than materialized.
   u64 bake_id = 0;
   f32 cell_size = 0;  // 0 when the world is not on a regular grid
   Vec3 grid_origin;

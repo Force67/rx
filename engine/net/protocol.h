@@ -32,7 +32,7 @@ enum class MessageType : u16 {
 inline constexpr u16 kFirstGameMessage = 128;
 
 // "No peer": the sentinel for server-owned/unowned in the interest map and
-// ownership queries. Matches the transport's invalid peer id -- real peer ids
+// ownership queries. Matches the transport's invalid peer id; real peer ids
 // start at 0, so 0 is NOT usable as a sentinel.
 inline constexpr u32 kNoPeer = 0xffffffffu;
 
@@ -81,7 +81,7 @@ struct RX_NET_EXPORT JoinRefuse {
 // State of one replicated entity: the transform plus two opaque payload slots.
 // `mesh` is the AssetId hash the replica renders with (0 = none); `user_tag`
 // is the game's per-entity payload (0 = none) captured and applied through
-// ReplicationHooks -- recreation packs its Bethesda form id there.
+// ReplicationHooks; recreation packs its Bethesda form id there.
 struct RX_NET_EXPORT EntityState {
   u64 net_id = 0;
   u64 mesh = 0;

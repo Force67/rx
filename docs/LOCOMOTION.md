@@ -1,7 +1,7 @@
-# rx::locomotion — physics-first articulated locomotion
+# rx::locomotion: physics-first articulated locomotion
 
 `engine/locomotion` makes a jointed ragdoll biped stand, walk, take corrective
-steps, and fall — as a **feedback controller over the physics simulation**, not
+steps, and fall, as a **feedback controller over the physics simulation**, not
 as an animation player. Every fixed step the controller measures the simulated
 body, plans support contacts, generates continuous numeric targets, and drives
 the joint motors toward them:
@@ -63,22 +63,22 @@ physics step, before `PhysicsWorld::Update`.
 
 `ControlMode` is a small physical-regime enum; it owns no resources:
 
-- `kStable` — nominal standing/walking.
-- `kCorrectiveStep` — the capture point left the support margin but a reachable
+- `kStable`: nominal standing/walking.
+- `kCorrectiveStep`: the capture point left the support margin but a reachable
   step can catch it; the next swing target is retargeted.
-- `kControlledFall` — recovery is implausible; stance stiffness blends down,
+- `kControlledFall`: recovery is implausible; stance stiffness blends down,
   the arms loosen, extreme angular velocity is damped. Motors are never cut
   instantly.
-- `kGrounded` — sustained torso/pelvis environment contact with low body
+- `kGrounded`: sustained torso/pelvis environment contact with low body
   velocity for a dwell time.
-- `kRecovering` — procedural get-up: establish hand/knee support, move the COM
+- `kRecovering`: procedural get-up: establish hand/knee support, move the COM
   over the support region, raise the pelvis, stand.
 
 ## Testing
 
-- `test/locomotion_math_test.cc` — pure math (gait clock, capture point, step
+- `test/locomotion_math_test.cc`: pure math (gait clock, capture point, step
   clamping, swing trajectory, leg IK), no Jolt required.
-- `test/locomotion_test.cc` — Jolt acceptance tests: rig build sanity, motor
+- `test/locomotion_test.cc`: Jolt acceptance tests: rig build sanity, motor
   target convergence, standing survival + push recovery, walking speed
   tracking, unrecoverable-push fall, no NaNs anywhere.
 

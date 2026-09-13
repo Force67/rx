@@ -1,25 +1,20 @@
 #ifndef RX_WEATHER_WEATHER_H_
 #define RX_WEATHER_WEATHER_H_
 
-// rx::weather -- an art-directable weather-STATE framework (the "weather
-// layer") that decides WHAT atmospheric conditions exist and where. It never
-// renders anything: every frame it hands the renderer two value structs and is
-// done. render::CloudscapeControls drives the volumetric cloud deck (the
-// opt-in "Cloudscape" system); render::WeatherSettings drives precipitation,
-// wind, surface wetness/snow response, lightning and aurora.
+// rx::weather: an art-directable weather-STATE framework. Decides WHAT
+// atmospheric conditions exist and where; never renders, just hands the
+// renderer two value structs per frame (CloudscapeControls for the cloud deck,
+// WeatherSettings for precipitation, wind, surface response, lightning,
+// aurora). Owns named WeatherStates, world-space WeatherRegions gating where
+// each may occur, a deterministic dwell-then-cross-fade scheduler, a scripted
+// override, and the integrals that persist across state changes (cloud-map wind
+// advection, surface soak/dry, strike timing).
 //
-// The layer owns named WeatherStates (presets), world-space WeatherRegions
-// that gate which states may occur where, a deterministic scheduler that dwells
-// in a state then cross-fades to the next, a scripted override for story beats,
-// and the running integrals (wind advection of the cloud map, surface soak/dry,
-// lightning strike timing) that must persist across state changes.
-//
-// Conventions (shared with rx::scene / rx::locomotion): right-handed, +Y up,
-// metres, m/s, radians. Wind yaw is the direction the wind blows TOWARD on the
-// XZ plane and matches render::WeatherSettings::wind_yaw. All randomness comes
-// from one seeded integer PRNG owned here (no <random> distributions), so a
-// given seed and Update() call sequence reproduce the same schedule on a given
-// floating-point implementation.
+// Conventions as rx::scene: right-handed, +Y up, metres, m/s, radians. Wind yaw
+// is the direction the wind blows TOWARD on the XZ plane and matches
+// render::WeatherSettings::wind_yaw. All randomness comes from
+// one seeded integer PRNG here, so a seed + Update() sequence reproduces the
+// schedule.
 
 #include <base/containers/vector.h>
 
@@ -149,7 +144,7 @@ public:
   void ClearForced();
 
   // Advance one frame. `time_of_day01` is 0 at midnight, 0.5 at noon, 1 at
-  // midnight again -- it biases state weights (day_weight/night_weight) and is
+  // midnight again; it biases state weights (day_weight/night_weight) and is
   // the only clock the layer reads. With no states registered this is a no-op
   // that leaves the default outputs untouched (never crashes).
   void Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01);

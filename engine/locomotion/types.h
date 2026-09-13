@@ -62,7 +62,7 @@ inline constexpr u32 kFootCount = 2;
 // Inputs: goals and physical modifiers, filled by the game every fixed step.
 // ---------------------------------------------------------------------------
 
-// What the player or AI wants the body to do. Goals only — no animation names,
+// What the player or AI wants the body to do. Goals only, no animation names,
 // no movement categories, no clip variants.
 struct LocomotionIntent {
   Vec3 desired_velocity{};      // planar (y ignored), world space, m/s
@@ -73,7 +73,7 @@ struct LocomotionIntent {
 };
 
 // Continuous physical modifiers (surface, encumbrance, condition). Typed
-// inputs passed every tick — never entries in a shared generic dictionary.
+// inputs passed every tick, never entries in a shared generic dictionary.
 struct PhysicalModifiers {
   f32 traction = 1;   // scales usable foot friction assumptions [0..1+]
   f32 strength = 1;   // scales motor torque budgets
@@ -137,7 +137,7 @@ struct ControllerParameters {
 };
 
 // ---------------------------------------------------------------------------
-// Measured state. Filled at the start of every fixed update by estimator.cc —
+// Measured state. Filled at the start of every fixed update by estimator.cc,
 // measured from the simulation, never assumed from the previous plan.
 // ---------------------------------------------------------------------------
 
@@ -210,7 +210,7 @@ struct FootPlan {
   StepReject rejected = StepReject::kNone;  // why the step shortened/aborted
 };
 
-// Continuous numeric targets for the whole body — the only thing the joint
+// Continuous numeric targets for the whole body, the only thing the joint
 // layer consumes. Joint targets are LOCAL child-relative-to-parent rotations
 // expressed relative to the bind pose (identity = bind); rig.cc converts them
 // to constraint-space motor targets.
@@ -223,7 +223,7 @@ struct WholeBodyTargets {
 };
 
 // ---------------------------------------------------------------------------
-// Control regime. A physical-state machine only — owns no resources, selects
+// Control regime. A physical-state machine only: owns no resources, selects
 // no animation content.
 // ---------------------------------------------------------------------------
 

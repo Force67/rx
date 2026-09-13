@@ -154,8 +154,8 @@ void main(uint3 id : SV_DispatchThreadID) {
     // ONE clip-scaled self-bias: push the origin ~1.5 voxels of the HIT's clip
     // along the normal (a coarse-cascade surface accepts ~1.5 voxels as a hit, so
     // a finest-clip offset would self-intersect and drop direct sun), then start
-    // marching almost immediately -- a tiny numerical epsilon, NOT a second voxel-
-    // sized step. Stacking a voxel-sized start_t on top blinds a segment right off
+    // marching almost immediately: a tiny numerical epsilon, NOT a second
+    // voxel-sized step. Stacking a voxel-sized start_t on top blinds a segment right off
     // the surface (5 m in clip 3 when the sun aligns with the normal), skipping
     // real blockers there.
     uint hit_clip = SdfSelectClip(sdf, pos);
@@ -165,7 +165,7 @@ void main(uint3 id : SV_DispatchThreadID) {
                                 sdf.clip_origin[3].w * kSdfRes, hit_voxel * 0.01, sdf, sdf_distance,
                                 sdf_albedo, sdf_emissive, sdf_sampler);
     // A hit shadows; `inside` (the biased origin sits inside geometry) also
-    // shadows -- the self-hit is already paid by the normal offset, so being inside
+    // shadows; the self-hit is already paid by the normal offset, so being inside
     // a field here means a genuine blocker, not our own surface. Both set
     // occ.miss=false, so one test covers them; only a clean miss leaves the point lit.
     if (!occ.miss) shadow = 0.0;

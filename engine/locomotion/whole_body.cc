@@ -148,7 +148,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
   // support_center (as an earlier revision did) biases the frame by the foot-box
   // forward offset the estimator reports as the sole, and since no horizontal
   // pelvis-position force enforces that target, the leg IK resolves the mismatch
-  // by walking the real pelvis toward it — a standing forward creep. Balance is
+  // by walking the real pelvis toward it (a standing forward creep). Balance is
   // instead handled by the capture-point footstep planner and the planar
   // velocity assist below, which do not fight a stationary stance. (Both math
   // tests place the root and support_center at the origin, so this term is

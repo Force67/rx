@@ -51,7 +51,7 @@ LoadWith(std::mutex &mutex, Vfs &vfs, std::string_view path,
     RX_WARN("{}: {}", failure, normalized);
 
   // Another thread may have converted the same key meanwhile; the existing
-  // entry wins and our duplicate is dropped — unless it cached a failure and we
+  // entry wins and our duplicate is dropped, unless it cached a failure and we
   // succeeded, in which case our asset supersedes the null (a transient read
   // failure on one thread must not pin a permanent miss over a good convert).
   // Failures cache a null entry so repeated lookups stay cheap.

@@ -1,24 +1,21 @@
 // Underwater caustics + wave shadows. Refracts a grid of sun rays through the
-// water surface (FFT displacement/normal maps when active, an analytic Gerstner
-// field otherwise) onto a reference receiver plane a fixed depth below the rest
-// height, and writes a tiling world-space caustic map (RG16F):
-//   R = caustic density, energy-conserving. Every surface photon carries unit
-//       energy and is bilinearly splatted into the texel it lands on, so the
-//       map sums to the photon count and its MEAN is 1: convergent refraction
-//       piles photons up (R>1, brighter) and divergent refraction thins them
-//       out (R<1, darker). No energy is created - brightening is paid for by
-//       darkening elsewhere.
-//   G = a soft wave-shadow term: the sun's Fresnel transmission through the
-//       surface above the texel, so the backs of waves let less light through.
+// water surface (FFT maps when active, analytic Gerstner otherwise) onto a
+// reference plane a fixed depth below rest height, writing a tiling world-space
+// RG16F caustic map:
+//   R = caustic density, energy-conserving: every surface photon carries unit
+//       energy and is bilinearly splatted where it lands, so the map's MEAN is
+//       1 (convergent refraction brightens, divergent darkens; nothing is
+//       created).
+//   G = soft wave shadow: the sun's Fresnel transmission through the surface
+//       above the texel.
 //
-// Three phases over the 512x512 grid, driven by control.x:
-//   0 clear the fixed-point accumulation buffer
-//   1 scatter: one thread per surface photon, InterlockedAdd into the buffer
-//   2 resolve: normalize to the mean and write the RG16F map + wave shadow
+// Three phases over the 512x512 grid (control.x): 0 clear the fixed-point
+// accumulation buffer, 1 scatter one thread per photon via InterlockedAdd,
+// 2 normalize to the mean and write the map.
 //
-// The map tiles over kTile metres. With the FFT ocean (periodic over its patch
-// size) this tiles seamlessly; the Gerstner field is near-periodic at this
-// scale and the residual seam is buried by the depth fade in the sampler.
+// The map tiles over kTile metres: seamlessly under the FFT ocean (periodic
+// over its patch); the Gerstner field is near-periodic at this scale and the
+// residual seam is buried by the depth fade in the sampler.
 
 #include "rhi_bindings.hlsli"
 #include "water_waves.hlsli"  // GerstnerWave + constants (FFT path uses our own bound maps)

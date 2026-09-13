@@ -1,33 +1,25 @@
-// rxdiff -- compare two rendered pngs and fail when they differ by more than a
-// tolerance.
+// rxdiff: compare two rendered pngs and fail past a tolerance.
 //
 //   rxdiff <a.png> <b.png> [--rmse <t>] [--hot <f>] [--hot-delta <d>]
 //          [--diff <out.png>] [--json]
 //
-// A capture run (rx --shot) locks the clock to a fixed 1/60 s delta, so what a
-// frame contains is a function of the frame index and not of how busy the
-// machine was. Every software and raytracing-off configuration measured below
-// then came out BIT identical run to run; with raytracing on a residual of a
-// few least significant bits survives in the traced gi, so hashing a capture is
-// still not a check to rely on. What IS stable is how far apart two runs land,
-// which is what this measures.
+// Both captures must come from the locked capture clock (rx --shot fixes 1/60 s
+// per frame). Two wall-clock captures land ~25x further apart than the defaults
+// allow. Software and raytracing-off runs are bit identical run to run; with
+// ray tracing on, rcgi's hash-slot claim order leaves a least-significant-bit
+// residual, so hashing a capture is never a check to rely on. Measured floor:
+// rmse 0.000553 over 78 same-build pairs (cornell / showcase / material_sheet /
+// model, 3 resolutions, 3 frame counts, vkrun + swrun, --no-taa and --no-rt);
+// it does not grow with frame count or resolution, and RX_RCGI=0 makes even a
+// raytraced capture bit identical.
 //
-// The tolerances below assume both captures came from that locked clock. Two
-// wall-clock captures (RX_FIXED_DT=0, or a screenshot grabbed out of a windowed
-// session) land ~25x further apart than the defaults allow, because the frames
-// leading up to the capture advanced by different deltas.
+// Two metrics, because content fails in two shapes:
+//   rmse  over rgb (0..1): sees change spread across the frame (exposure,
+//         light, material) that no single pixel makes obvious.
+//   hot   fraction of pixels whose worst channel moved more than --hot-delta:
+//         sees one small object going wrong in a large frame.
 //
-// Two numbers, because content goes wrong in two shapes:
-//
-//   rmse   root mean square error over the rgb channels, 0..1. Sees a change
-//          spread across the frame (exposure, a light, a material) that no
-//          single pixel makes obvious.
-//   hot    the fraction of pixels whose worst channel moved by more than
-//          --hot-delta. Sees one small object going wrong in a large frame,
-//          which is exactly what an average washes out.
-//
-// Exit 0 when both are within tolerance, 1 when either is not, 2 on a usage or
-// io error (an unreadable file must not read as "no difference").
+// Exit 0 within tolerance, 1 when either metric is over, 2 on usage/io error.
 
 #include <cmath>
 #include <cstdio>
@@ -41,60 +33,22 @@
 
 namespace {
 
-// The defaults below are measured, not guessed. 78 pairs of captures, each pair
-// two --shot runs of the SAME build on the SAME scene with the same flags:
-//
-//   cornell        640x360  f8   vkrun            6 pairs  rmse max 0.000194
-//   cornell       1280x720  f20  vkrun            6 pairs  rmse max 0.000553
-//   cornell        640x360  f60  vkrun            6 pairs  rmse max 0.000151
-//   showcase       640x360  f8   vkrun            6 pairs  rmse max 0.000276
-//   showcase      1280x720  f20  vkrun            6 pairs  rmse max 0.000192
-//   showcase       640x360  f60  vkrun            6 pairs  rmse max 0.000137
-//   showcase      1920x1080 f30  vkrun            3 pairs  rmse max 0.000104
-//   material_sheet 640x480  f8   vkrun            6 pairs  rmse max 0.000185
-//   material_sheet 1280x960 f20  vkrun            6 pairs  rmse max 0.000203
-//   model          640x360  f30  vkrun            6 pairs  rmse max 0.000163
-//   model         1280x720  f20  vkrun            6 pairs  rmse max 0.000082
-//   showcase+cornell 640x360 f8  vkrun --no-taa   6 pairs  rmse max 0.000254
-//   cornell        640x360  f8   vkrun --no-rt    3 pairs  rmse max 0 (identical)
-//   cornell        640x360  f8   swrun --no-rt    3 pairs  rmse max 0 (identical)
-//   showcase       640x360  f8   swrun --no-rt    3 pairs  rmse max 0 (identical)
-//
-// so the floor is rmse 0.000553, with single channel excursions no larger than
-// 0.0275 (7/255). It does not grow with frame count or resolution, and it is
-// the radiance cache alone: RX_RCGI=0 makes even a raytraced capture bit
-// identical with rtao, ddgi and the NRD denoisers still running, so what is
-// left is rcgi's hash slots being claimed in whatever order the waves land in
-// (InterlockedCompareExchange in shaders/gi/rcgi_probe_trace_body.hlsli), not
-// anything time- or load-dependent. --no-taa does not move it either: TAA was
-// covering for the wall clock, not for the tracer.
+// Measured provenance for these defaults is summarized in the file header.
+// Floor: rmse 0.000553 (rcgi hash-slot claim order; --no-rt and swrun pairs are
+// bit identical), worst single-channel excursion 0.0275.
 
-// How far one channel has to move for a pixel to count as hot. Above the noise
-// by construction: across the 78 pairs a delta of 0.02 lights up 2 pixels in
-// the whole set and 0.03 up lights up EXACTLY zero, so 0.10 keeps that zero
-// with 3x to spare and is still 2.5x tighter than the old 0.25. That zero is
-// the whole value of this metric: any hot pixel at all is content, not jitter.
+// Above the measured noise: 0.03 lights up exactly zero pixels across all 78
+// pairs, so 0.10 keeps that zero with 3x to spare. Any hot pixel is content.
 constexpr float kDefaultHotDelta = 0.10f;
 
-// 4.6x the worst floor above, and the number the gate lives or dies by. The
-// headroom is deliberately larger than the spread measured here (the busiest
-// pair is 16x the quietest, but all of it under 0.0005) because the
-// residual is gpu-side: another vendor's tracer may dither more pixels than
-// this one does, and a gate that flakes is a gate the next agent learns to
-// ignore. Even a quarter of the frame moving by one lsb stays under it.
-//
-// What it buys: one Cornell wall's albedo dropped 0.8 -> 0.7 scores 0.00689 and
-// FAILS, at 3.4x the limit. That change passed the old 0.0075 gate, which is
-// what the locked capture clock was for. Sensitivity now runs down to about a
-// 4% albedo change on one wall: 0.8 -> 0.77 scores 0.00216 and fails, 0.8 ->
-// 0.78 scores 0.00155 and does not. Geometry is louder still: moving a 0.35 m
-// ball 5 cm scores 0.01989, shrinking it to 0.30 m scores 0.02566.
+// 4.6x the measured floor; the headroom is for gpu-side residuals this vendor
+// does not dither. One Cornell wall's albedo 0.8 -> 0.7 scores 0.00689 and
+// FAILS (it passed the old wall-clock gate); sensitivity runs to ~4% albedo on
+// one wall, and geometry is louder still (a 5 cm move scores 0.01989).
 constexpr float kDefaultRmse = 0.002f;
 
-// The measured floor for this one is exactly zero at the delta above, so the
-// default is pure headroom for a scene noisier than the ones measured rather
-// than a margin over anything observed: 0.01% of the frame is 23 pixels at
-// 640x360 and 92 at 1280x720, roughly a 10x10 object gone wrong.
+// Measured floor is exactly zero at kDefaultHotDelta; pure headroom for a
+// noisier scene (0.01% of the frame is a ~10x10 object gone wrong).
 constexpr float kDefaultHot = 0.0001f;
 
 struct Image {

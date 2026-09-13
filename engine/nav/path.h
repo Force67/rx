@@ -1,22 +1,18 @@
 #ifndef RX_NAV_PATH_H_
 #define RX_NAV_PATH_H_
 
-// Pathfinding over the tiled navmesh, and the corridor machinery that keeps
-// an agent honest about the path it is on:
-//
-//  - FindPath: capped A* (default 500 pops, the Death Stranding budget) with
-//    per-area traversal multipliers and one-time entry costs. When the cap or
-//    a navmesh hole stops the search short, the best partial path toward the
-//    goal is returned instead of nothing, so agents make incremental progress
-//    through a world whose tiles may not exist yet.
+// Pathfinding over the tiled navmesh, plus the corridor machinery that keeps an
+// agent honest about its path:
+//  - FindPath: capped A* (default 500 pops) with per-area traversal multipliers
+//    and one-time entry costs; a capped or hole-blocked search returns the best
+//    partial path so agents make incremental progress through unbuilt tiles.
 //  - ShortcutCorridor: navmesh raycasts from both ends replace edge-midpoint
 //    detours with straighter, cheaper stretches.
-//  - FunnelCorners / NextCorner: the funnel (string pulling) re-run from the
-//    agent's CURRENT position every frame. A running agent that drifts inside
-//    the corridor keeps getting a sensible next corner instead of steering at
-//    a stale waypoint, missing the turn and repathing forever.
-//  - ValidateCorridor: event-based repathing. Nobody repaths on a timer; a
-//    corridor is replaced only when one of the RepathReason events fires.
+//  - FunnelCorners / NextCorner: the funnel re-runs from the agent's CURRENT
+//    position every frame, so a drifting agent keeps a sensible next corner
+//    instead of steering at a stale waypoint.
+//  - ValidateCorridor: event-based repathing; a corridor is replaced only when
+//    a RepathReason fires, never on a timer.
 
 #include <base/containers/vector.h>
 
@@ -71,7 +67,7 @@ struct Corridor {
   u32 progress = 0;                 // corridor index the agent last occupied
   // Whether the agent has been on the corridor at least once. Until then an
   // off-corridor position is an approach (the clamped start can be up to
-  // clamp_radius away), not a departure -- no kLeftCorridor, and NextCorner
+  // clamp_radius away), not a departure; no kLeftCorridor, and NextCorner
   // steers at the corridor start instead of failing.
   bool entered = false;
 

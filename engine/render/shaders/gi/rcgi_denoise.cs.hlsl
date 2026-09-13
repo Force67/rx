@@ -4,8 +4,7 @@
 // RCGI M2 spatial denoise (gather resolution). Separable bilateral gaussian run
 // twice (horizontal then vertical) over the SH triple. Bilateral weights come
 // from linear-depth delta, normal agreement, and hit-distance delta; contact
-// detail (short center hitT) is protected by sharpening the hitT falloff. See
-// RCGI.md section 5.
+// detail (short center hitT) is protected by sharpening the hitT falloff.
 
 [[vk::image_format("rgba16f")]] [[vk::binding(0, 0)]] RWTexture2D<float4> sh_r_out : register(u0, space0);
 [[vk::image_format("rgba16f")]] [[vk::binding(1, 0)]] RWTexture2D<float4> sh_g_out : register(u1, space0);

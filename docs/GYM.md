@@ -6,7 +6,7 @@ tunes eye heights, capsule dims and player scale against **known-size geometry**
 It is the validation and tuning environment for the character controller and a
 light showcase of the inventory module.
 
-Everything lives in `runtime/demo_gym.{h,cc}`. It touches no engine internals —
+Everything lives in `runtime/demo_gym.{h,cc}`. It touches no engine internals:
 it drives the two modules and the scene camera rig through their public APIs
 exactly as a game would. The registry wiring is the usual few lines: a `gym_`
 member on `DemoScenes`, a dispatch arm in `CreateDemoScene`, a `gym_->Emit(...)`
@@ -27,7 +27,7 @@ DISPLAY=:10 vkrun ./build/linux/runtime/rx --demo gym
 | **Mouse** / right stick | Look |
 | **Shift** | Sprint (hold) |
 | **Ctrl** | Crouch (hold) |
-| **Space** | Jump — or, with the jetpack **on**, hold to thrust (the normal jump is suppressed while the pack is on) |
+| **Space** | Jump; with the jetpack **on**, hold to thrust (the normal jump is suppressed while the pack is on) |
 | **J** | Toggle the jetpack on / off |
 | **V** | Toggle first / third person (smooth stack transition) |
 | **Scroll** | Zoom the third-person boom (`ApplyCharacterZoom`) |
@@ -39,8 +39,8 @@ DISPLAY=:10 vkrun ./build/linux/runtime/rx --demo gym
 
 ## The tuning panel (the point of the gym)
 
-An imgui panel (top-right) with a live readout — view mode, stance, grounded,
-speed, eye height, crouch %, capsule dims, inventory count — and sliders that
+An imgui panel (top-right) with a live readout (view mode, stance, grounded,
+speed, eye height, crouch %, capsule dims, inventory count) and sliders that
 apply to the **live** components every frame:
 
 - **Eye height:** standing / crouched eye height.
@@ -55,7 +55,7 @@ apply to the **live** components every frame:
   top readout shows live `look` vs `facing` yaw (with a `(pivot)` marker), the
   blended `gait tgt` speed, and the current buffer / coyote / dip values.
 - **Third-person camera:** boom distance, shoulder / height offsets, min / max
-  distance, obstruction radius — written straight onto the rig's `CameraBoom` /
+  distance, obstruction radius, written straight onto the rig's `CameraBoom` /
   `CameraObstruction` / `CameraDamping` / `CameraOrbit` components.
 - **Look:** mouse sensitivity, invert pitch.
 
@@ -66,7 +66,7 @@ apply to the **live** components every frame:
 | **Reference cubes** 0.25 / 0.5 / 1.0 / 2.0 m | Scale reference; the 2 m cube is "door height", human-scale. |
 | **Doorway** 1.0 × 2.1 m clear | Eye-height / clearance framing. |
 | **Staircases** 0.15 m and 0.30 m risers | Step-up vs blocked-step tuning. |
-| **Ramps** 30° / 45° / 60° | Slope walkability — the 60° ramp is above the ~55° limit and is deliberately **unwalkable**. |
+| **Ramps** 30° / 45° / 60° | Slope walkability; the 60° ramp is above the ~55° limit and is deliberately **unwalkable**. |
 | **Crouch tunnel** 1.25 m clearance | Forces crouch; the 1.8 m standing capsule cannot uncrouch under the roof (headroom-checked). |
 | **Furniture** 0.75 m table, 0.45 m seat, 1.0 m counter | "Furniture in the way" collision. |
 | **Narrow gap** 0.7 m | Squeeze test between two walls. |
@@ -84,8 +84,8 @@ graybox surfaces stay readable.
 
 ## The player
 
-An entity wired exactly per the `rx::character` README — capsule + movement +
-shape + intent + state + view mode + camera rig — plus a visible **capsule proxy
+An entity wired exactly per the `rx::character` README (capsule + movement +
+shape + intent + state + view mode + camera rig) plus a visible **capsule proxy
 mesh** (a checker-tinted cylinder + two sphere caps, sized from the live capsule
 so it shrinks when crouched) drawn only in third person. The per-fixed-step call
 order (fill intent → `StepCharacters` → `SyncCharacterCameraAnchors` →
@@ -95,7 +95,7 @@ resolved `CameraOutput` is read back into the frame view each frame.
 
 ## Inventory garnish
 
-One `ItemDef` — a 0.25 m checker-cube "crate" — is registered in a gym-owned
+One `ItemDef`, a 0.25 m checker-cube "crate", is registered in a gym-owned
 `ItemCatalog`; the player spawns with 8. **G** drops one as a dynamic body via
 `inventory_world::DropItem` (forward impulse); **F** / **T** pick up the nearest
 `WorldItem` via `PickUpItem`. `SyncWorldItems` / `HibernateDistantWorldItems` /
@@ -123,11 +123,11 @@ Fuel / spool / refuel model:
 - Thrust lags demand through a first-order spool (**`spool_time`** ≈ 0.3 s ≈ 90%
   rise time), so a stab of the button does not snap to full thrust.
 - Fuel drains proportional to the *actual* (spooled) thrust
-  (**`fuel_capacity_s`** = 4 s of full burn); an empty tank is a dead stick —
+  (**`fuel_capacity_s`** = 4 s of full burn); an empty tank is a dead stick:
   thrust forced to zero, normal gravity fall.
 - Refuel **only while grounded** (**`refuel_rate`** = 0.5 tank/s → full in 2 s);
   airborne never refuels.
-- **`thrust_to_weight`** = 1.45 — the pack climbs but does not hover on its own.
+- **`thrust_to_weight`** = 1.45: the pack climbs but does not hover on its own.
   There is **no auto-hover**: matching thrust to weight to hang still is the
   player's finesse (intended).
 - **`lateral_accel`** = 24 m/s² of thrust-vector authority scaled by the actual

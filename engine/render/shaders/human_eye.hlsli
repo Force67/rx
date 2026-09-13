@@ -1,25 +1,21 @@
 #ifndef RX_HUMAN_EYE_HLSLI_
 #define RX_HUMAN_EYE_HLSLI_
 
-// The eye as a layered anatomical system on ONE mesh.
+// The eye as a layered anatomical system on ONE mesh, in the order the
+// Callisto work insists on: geometry, depth, parallax, occlusion, roughness
+// first; no thin-film simulation here on purpose.
 //
-// The order the Callisto work insists on - geometry, depth, parallax,
-// occlusion, roughness FIRST, exotic spectral effects never - is the order
-// implemented here. There is no thin-film simulation in this file on purpose.
-//
-// The eye mesh is a sphere with a corneal bulge. What this header adds:
-//   * the corneal surface refracts the view ray, and the iris is sampled at
-//     `iris_depth` BEHIND that surface (parallax + refraction, not a decal);
-//   * the pupil dilates by a radial remap that leaves the limbus fixed, so
-//     dilation cannot slide the iris edge;
+// The eye mesh is a sphere with a corneal bulge. This header adds:
+//   * the corneal surface refracts the view ray; the iris is sampled at
+//     `iris_depth` BEHIND it (parallax + refraction, not a decal);
+//   * the pupil dilates by a radial remap that leaves the limbus fixed;
 //   * the limbal ring darkens the iris/sclera boundary;
-//   * the iris is shadowed separately from the corneal surface, because the
-//     limbus occludes oblique light before it ever reaches the pigment;
-//   * a weak internal (posterior-surface / lens) reflection proxy.
+//   * the iris is shadowed separately from the corneal surface (the limbus
+//     occludes oblique light before it reaches the pigment);
+//   * a weak internal (posterior/lens) reflection proxy.
 //
-// The corneal REFLECTION is evaluated on the unperturbed corneal normal, which
-// is what keeps a catchlight from swimming while the eye rotates: only the
-// iris lookup moves, never the specular normal.
+// The corneal REFLECTION uses the unperturbed corneal normal, so a catchlight
+// does not swim while the eye rotates: only the iris lookup moves.
 
 #ifndef RX_HUMAN_EYE_PI
 #define RX_HUMAN_EYE_PI 3.14159265358979323846

@@ -109,7 +109,7 @@ VsOut main(uint vid : SV_VertexID, uint iid : SV_InstanceID) {
   if (depth < push.eps) {
     // Dry vertex for this fluid: emit a degenerate position. Note this kills
     // any triangle with a mixed wet/dry corner set, so the rendered surface
-    // retreats up to one cell from the true wetting front — the PS depth fade
+    // retreats up to one cell from the true wetting front; the PS depth fade
     // hides the resulting edge.
     o.sv_position = float4(0, 0, 0, 0);
     o.world_pos = float3(world_xz.x, surf, world_xz.y);

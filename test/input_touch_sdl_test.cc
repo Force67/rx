@@ -1,23 +1,16 @@
 // input_touch_sdl_test: drives the real SDL3 finger-event path end to end.
+// input_touch_test covers the TouchState machine; this covers what it cannot:
+// the backend translation in window_sdl3.cc where SDL's normalized (0..1)
+// finger coordinates become window pixels and FINGER_UP/CANCELED collapse to
+// one end state. A wrong conversion (swapped axes, desktop-layout size instead
+// of pixel size) is invisible to a logic test and puts every tap in the wrong
+// place; with high_pixel_density on, the two sizes differ on any scaled
+// display, so the wrong one is a different number. Skips on an unscaled
+// display, where nothing can tell them apart.
 //
-// input_touch_test covers the TouchState state machine directly. This covers
-// the piece it cannot: the backend translation in window_sdl3.cc, where SDL's
-// normalized (0..1) finger coordinates become the window pixels the rest of the
-// input layer speaks, and where FINGER_UP/FINGER_CANCELED collapse into one end
-// state. Getting that conversion wrong (swapped axes, forgotten scale, using
-// the size the desktop lays the window out at instead of the pixel size) is
-// invisible to a pure logic test and would put every tap in the wrong place.
-//
-// With high_pixel_density on, the two sizes differ on any scaled display, so
-// the wrong one is a different number and the check for it bites. It skips
-// itself on an unscaled display, where nothing can tell them apart.
-//
-// Real SDL_Event structs are pushed through SDL's own queue, so PumpEvents
-// polls them exactly as it would from a panel. No touchscreen and no uinput
-// device required.
-//
-// Needs a display to open a window; skips cleanly when there is none, so it is
-// safe in a headless gate.
+// Real SDL_Event structs go through SDL's own queue so PumpEvents polls them
+// exactly as from a panel; no touchscreen or uinput needed. Needs a display to
+// open a window; skips cleanly without one.
 
 #include <cmath>
 #include <cstdio>

@@ -1,24 +1,17 @@
 // rx::locomotion LocomotionController: the fixed-update orchestration of
-// docs/LOCOMOTION.md. Runs BEFORE physics::PhysicsWorld::Update each fixed step
-// and closes the feedback loop
-//
+// docs/LOCOMOTION.md. Runs BEFORE PhysicsWorld::Update each fixed step:
 //   measure -> classify contacts -> mode machine -> gait -> footstep plan
 //           -> whole-body targets -> joint motor commands + bounded root assist.
+// All actuation is joint motor targets/limits plus small root assists; nothing
+// teleports a body; no per-tick heap allocation.
 //
-// Nothing here teleports a body: all actuation is joint motor targets/limits
-// plus the small root force/torque assists. No per-tick heap allocation.
-//
-// The five control modes are a physical-regime state machine only. Motors are
-// never cut instantly; drive_blend_ eases the motor-strength budget across
-// transitions with time constant params.recovery_blend_time so a failing
-// controller sags rather than snapping limp.
-//
-// Recovery (kRecovering) is deliberately modest (docs/LOCOMOTION.md scopes the
-// full get-up choreography out): it blends drive back up, folds the legs into a
-// loose crouch and rights the torso with a bounded upright torque. It promotes
-// to kStable if the body actually comes back up within a few seconds, otherwise
-// it drops back to kGrounded and retries while intent.allow_recovery holds. It
-// is not a hand/knee-staged stand-up.
+// The control modes are a physical-regime machine. Motors are never cut
+// instantly: drive_blend_ eases motor strength across transitions (time const
+// params.recovery_blend_time) so a failing controller sags instead of snapping
+// limp. Recovery is deliberately modest (docs/LOCOMOTION.md scopes the full
+// get-up out): blend drive back up, fold into a loose crouch, right the torso
+// with a bounded torque, promote to kStable if it works within a few seconds,
+// else back to kGrounded and retry while intent.allow_recovery holds.
 
 #include "locomotion/controller.h"
 
@@ -356,10 +349,10 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
 
     // Ankle-strategy balance assist. The whole-body root force only DAMPS planar
     // velocity; a damper alone lets the COM drift off the base and topple. Anchor
-    // the COM over the mean ANKLE pivot (the true standing base — the estimator's
+    // the COM over the mean ANKLE pivot (the true standing base; the estimator's
     // foot-box "sole" sits forward of it), decomposed relative to the commanded
     // travel direction:
-    //   * the LATERAL (perpendicular) component is always full strength — without
+    //   * the LATERAL (perpendicular) component is always full strength; without
     //     it a walk has no side-to-side foot-placement balance and simply veers
     //     over and topples;
     //   * the FORWARD (parallel) component fades out with commanded speed so it

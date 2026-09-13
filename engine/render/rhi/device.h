@@ -285,24 +285,17 @@ class Device {
   virtual void ImmediateSubmit(const std::function<void(CommandList&)>& record) = 0;
 
   // --- coalesced uploads ---
-  // Opens/closes a transfer batch: while open, CreateBufferWithData records its
-  // staging copy into one shared command buffer and defers its submit, instead
-  // of doing a blocking ImmediateSubmit per buffer. FlushUploadBatch submits the
-  // accumulated copies once, WITHOUT blocking the CPU: the device orders them
-  // against all later GPU work itself, and the stagings retire once the copies
-  // finish. The batch is also flushed implicitly by ImmediateSubmit / BeginFrame
-  // / every frame or async submit / WaitIdle, so any GPU work that could read a
-  // just-created buffer (a BLAS build, the frame that samples it) always sees
-  // it uploaded, and early when the parked staging memory crosses an internal
-  // budget (so a big burst does not hold its whole payload host-visible at
-  // once; a hard cap on in-flight staging bounds it even across flushes).
-  // Nestable via a depth count (only the outermost FlushUploadBatch submits).
-  // Buffers created inside the batch are valid for GPU use only after the
-  // flush; there is no point at which the CPU may assume the copy has executed
-  // short of WaitIdle.
-  // Default no-op: backends without the optimization just keep submitting per
-  // buffer, which stays correct. Streaming wraps a frame's uploads in one batch
-  // so a burst of new cells no longer pays a blocking round-trip per buffer.
+  // While the batch is open, CreateBufferWithData records its staging copy into
+  // one shared command buffer instead of a blocking ImmediateSubmit per buffer.
+  // FlushUploadBatch submits once WITHOUT blocking: the device orders the copies
+  // against later GPU work and the stagings retire when they finish. Also
+  // flushed implicitly by ImmediateSubmit / BeginFrame / any submit / WaitIdle,
+  // so GPU work that could read a just-created buffer always sees it uploaded,
+  // and early once parked staging crosses an internal budget. Nestable via a
+  // depth count (only the outermost flush submits). Buffers are GPU-valid only
+  // after a flush; only WaitIdle proves the copy executed on the CPU side.
+  // Default no-op: backends without the optimization keep submitting per
+  // buffer, which stays correct.
   virtual void BeginUploadBatch() {}
   virtual void FlushUploadBatch() {}
 

@@ -54,8 +54,8 @@ class ReflectionTrace {
   // RCGI irradiance-cascade resources for the spec-bounce indirect term. When
   // `active`, the diffuse GI at a reflection hit reads the RCGI cascades
   // (kFlagRcgi) instead of the DDGI atlas, which is empty under RCGI. The
-  // renderer always supplies valid handles -- the real RCGI images when the
-  // system is up, otherwise environment placeholders -- so the descriptor set is
+  // renderer always supplies valid handles (the real RCGI images when the
+  // system is up, otherwise environment placeholders), so the descriptor set is
   // always complete; `active` alone gates the sampling. `in_general` marks the
   // atlases as living in kGeneral (true only for the real RCGI images).
   struct RcgiBinding {

@@ -19,7 +19,7 @@ namespace rx::net {
 // Attached to the player's avatar entity (the bubble follows its Transform).
 // Entities carrying a NetworkId replicate to a client only while they are
 // inside that client's bubble, so per-client bandwidth scales with local
-// density instead of world population -- the lever that lets one server carry
+// density instead of world population: the lever that lets one server carry
 // more players.
 struct InterestBubble {
   u32 peer = kNoPeer;  // the transport peer this bubble streams to
@@ -28,7 +28,7 @@ struct InterestBubble {
 
 struct InterestConfig {
   // Entities enter a bubble at `radius` and leave at radius * hysteresis, so
-  // one straddling the boundary doesn't spawn/despawn every tick.
+  // one straddling the boundary does not spawn/despawn every tick.
   f32 hysteresis = 1.15f;
   // XZ grid cell edge for the broad phase. 0 sizes it from the largest
   // bubble's exit radius each update.
@@ -39,14 +39,14 @@ struct InterestConfig {
 // for the snapshot streams, plus a single owner per replicated entity.
 //
 // Ownership is what keeps overlapping bubbles from tangling: when two
-// players' bubbles cover the same entity, exactly one peer owns it --
-// deterministically -- and keeps it until its own bubble no longer contains
-// the entity (sticky, so ownership doesn't ping-pong on the overlap seam).
+// players' bubbles cover the same entity, exactly one peer owns it,
+// deterministically, and keeps it until its own bubble no longer contains
+// the entity (sticky, so ownership does not ping-pong on the overlap seam).
 // Only then does the entity hand off to the nearest containing bubble (ties
 // break to the lower peer id), or back to the server (owner kNoPeer) when no
 // bubble holds it. A player's own avatar is always owned by its peer. The
-// game decides what ownership gates -- interaction rights, simulation
-// islands, update priority -- through OwnerOf and the changed-sink.
+// game decides what ownership gates (interaction rights, simulation
+// islands, update priority) through OwnerOf and the changed-sink.
 class RX_NET_EXPORT InterestMap {
  public:
   void Configure(const InterestConfig& config) { config_ = config; }

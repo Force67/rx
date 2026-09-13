@@ -21,7 +21,7 @@ float ShoreWetness(float3 world_pos, uint flags, float4 shore_field) {
   if (any(uv < 0.0) || any(uv > 1.0)) return 0.0;
   float wet = saturate(shore_wetness_map.SampleLevel(shore_wetness_sampler, uv, 0.0));
   // The field is 2D: open water reads fully wet, which would soak a floating
-  // hull to its top. Waves only splash so high — fade the response out above
+  // hull to its top. Waves only splash so high; fade the response out above
   // the reach of the swell so decks and cube tops stay dry.
   wet *= saturate(1.0 - (world_pos.y - shore_field.w - 0.6) / 1.2);
   return wet;

@@ -6,20 +6,13 @@
 
 namespace rx::physics {
 
-// Boat-type presets: fully tuned BoatDesc values, mirroring vehicle_profiles'
-// car presets, so a dinghy handles like a dinghy and a work barge like a barge
-// straight out of the Boat constructor. Each function returns a complete desc
-// (hull dims, mass, engine/prop, drag/planing/righting tune and cargo capacity);
-// its doc comment states the handling signature in one line. The measured
-// orderings (settle draft, top speed, planing, turn rate, stability, freeboard,
-// and the visible laden-vs-empty draft split) are proven in
-// test/boat_profiles_test.cc.
-//
-// Units follow BoatDesc: metres/kg/s/newtons, +Z fwd, +Y up. Draft is EMERGENT
-// from displacement - a heavier hull over a given footprint settles deeper - so
-// the presets differ in mass and footprint to sit at believably different
-// waterlines, and SetCargo adds mass at runtime so a laden hull visibly sinks,
-// turns and planes accordingly.
+// Boat-type presets: fully tuned BoatDesc values (as vehicle_profiles does for
+// cars), one function per type whose doc comment states the handling signature;
+// measured orderings (draft, top speed, planing, turn rate, stability, laden vs
+// empty) are proven in test/boat_profiles_test.cc. Units follow BoatDesc:
+// metres/kg/s/newtons, +Z fwd, +Y up. Draft is EMERGENT from displacement, so
+// presets differ in mass and footprint to sit at different waterlines, and
+// SetCargo adds mass so a laden hull visibly sinks, turns and planes worse.
 
 // ~3 m, ~220 kg including a small outboard: light and twitchy, low top speed,
 // planes early but chop-sensitive; a shallow ballast lever so it capsizes far
@@ -36,10 +29,10 @@ RX_PHYSICS_EXPORT BoatDesc SpeedboatProfile();
 RX_PHYSICS_EXPORT BoatDesc JetskiProfile();
 
 // ~9 m displacement hull, ~6500 kg: heavy, high drag, generous cargo capacity,
-// very stable (strong ballast); barely planes even empty.
+// stable (strong ballast); barely planes even empty.
 RX_PHYSICS_EXPORT BoatDesc FishingBoatProfile();
 
-// ~12 m, ~9000 kg: very heavy, huge cargo capacity, enormous draft when laden
+// ~12 m, ~9000 kg: the heaviest hull, huge cargo capacity, enormous draft when laden
 // (deck near awash at the structural limit), a slow-spooling big-torque engine,
 // wide turning; never planes. The cargo showcase.
 RX_PHYSICS_EXPORT BoatDesc WorkBargeProfile();

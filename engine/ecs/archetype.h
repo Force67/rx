@@ -55,7 +55,7 @@ struct SignatureEqual {
 // Rows live in fixed-size chunks drawn from mem::GlobalChunkPool (16 KiB),
 // laid out SoA within each chunk: column c of chunk k is the array at
 // chunk[k] + column_offset[c], rows_per_chunk elements long. Growing an
-// archetype appends a chunk — existing rows never relocate, so components are
+// archetype appends a chunk; existing rows never relocate, so components are
 // only ever moved through their typed move_construct (swap-remove and
 // archetype transitions), never memcpy'd. Emptied tail chunks return to the
 // pool. Archetypes whose row (or component alignment) exceeds the pool chunk

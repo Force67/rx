@@ -1,6 +1,6 @@
 // rx::nav acceptance: costed A* (prefers smooth ground, commits after entry),
 // capped/partial searches, funnel string-pulling, raycast shortcuts,
-// event-based corridor validation and the delta-cost position query -- all on
+// event-based corridor validation and the delta-cost position query, all on
 // a synthetic sampler, no GPU, no physics.
 
 #include "nav/agent.h"
@@ -177,7 +177,7 @@ void TestFunnelAndShortcut(NavMesh& mesh) {
         "open-field path completes");
 
   // Open field: the funnel must collapse the corridor to (almost) a straight
-  // shot -- the goal and maybe one corner, not a zig-zag of cell midpoints.
+  // shot: the goal and maybe one corner, not a zig-zag of cell midpoints.
   base::Vector<Vec3> corners;
   FunnelCorners(mesh, corridor, request.start, 0, 0.2f, 16, &corners);
   Check(corners.size() <= 2, "funnel over open field yields at most one bend");
@@ -268,8 +268,8 @@ void TestPositionQuery(NavMesh& mesh) {
   Check(candidates[1].delta_cost > candidates[0].delta_cost + 1.0f,
         "crossing the river carries the delta cost");
 
-  // Agent already IN the river: normalization must not freeze it in place --
-  // the nearest bank must beat staying put even though every move costs.
+  // Agent already IN the river: normalization must not freeze it in place; the
+  // nearest bank must beat staying put even though every move costs.
   PositionQueryParams wet;
   wet.origin = {16, -0.3f, 25.5f};
   wet.max_cost = 200;
@@ -311,7 +311,7 @@ void TestEcsAgents(NavMesh& mesh) {
 void TestOffMeshAgentRecovers(NavMesh& mesh) {
   // Agent standing in the middle of the hole, more than one cell from any
   // walkable ground: the plan starts from a clamped cell it is not on. It
-  // must walk back onto the corridor and arrive -- not freeze in kWaiting
+  // must walk back onto the corridor and arrive, not freeze in kWaiting
   // while burning a replan every tick on a corridor it cannot attach to.
   ecs::World world;
   ecs::Entity entity = world.Create();

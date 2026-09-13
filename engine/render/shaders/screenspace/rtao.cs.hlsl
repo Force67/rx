@@ -4,7 +4,7 @@
 // denoiser (no temporal/spatial filtering here, NRD owns that).
 //
 // NRD.hlsli supplies the hit-distance packing. NRD is an optional dependency, so
-// when it isn't vendored (e.g. CI, mobile) fall back to a self-contained copy of
+// when it is not vendored (e.g. CI, mobile) fall back to a self-contained copy of
 // REBLUR_FrontEnd_GetNormHitDist; this pass runs undenoised in that case but must
 // still compile.
 #if __has_include("NRD.hlsli")

@@ -1,4 +1,4 @@
-# rx::inventory -- optional, batteries-included ECS item/inventory/equipment
+# rx::inventory: optional, batteries-included ECS item/inventory/equipment
 # system: an item catalog, stacking inventories, generic equipment slots and
 # their persistence. Physics-free by design, so a dedicated server or a game
 # with no world drops links it without dragging Jolt in.

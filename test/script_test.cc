@@ -1,6 +1,6 @@
 // rx::script acceptance: the portable string/value primitives, and driving the
 // scene script handlers end-to-end against a REAL ecs::World with NO script
-// runtime present -- no VM, no net, no game. The handlers call ecs::World and the
+// runtime present (no VM, no net, no game). The handlers call ecs::World and the
 // scene components directly (no gateway); the test exercises them purely from a
 // ScriptValue stack. Pure CPU logic; plain ctest runs it.
 
@@ -152,7 +152,7 @@ void TestDispatch() {
   ecs::Entity e = rig.world.Create();
 
   using V = script::ScriptValue;
-  // World.Teleport(e, {1,2,3}) -- args pushed as a ScriptValue stack, exactly the
+  // World.Teleport(e, {1,2,3}): args pushed as a ScriptValue stack, exactly the
   // shape a runtime would produce. The handler writes a real scene::Transform.
   V ret = rig.Call("World.Teleport", {V::EntityRef(e), V::Vec(Vec3{1, 2, 3})});
   CHECK(ret.is_null());
@@ -259,7 +259,7 @@ void TestSymbolsAndArena() {
   Rig rig;
   using V = script::ScriptValue;
 
-  // World.Spawn(symbol "gold_ingot", pos, scale) -- a symbol arg (never a string
+  // World.Spawn(symbol "gold_ingot", pos, scale): a symbol arg (never a string
   // compare) that the handler records in persistent prefab provenance.
   const script::StrId prefab = rig.symbols.Intern("gold_ingot");
   V ret = rig.Call("World.Spawn", {V::Symbol(prefab), V::Vec(Vec3{5, 6, 7}), V::Float(2.0)});
@@ -270,12 +270,12 @@ void TestSymbolsAndArena() {
   CHECK(rig.world.Get<scene::SpawnedFrom>(spawned)->prefab ==
         static_cast<rx::u64>(prefab));
 
-  // World.FindByPrefab(symbol) -- scans provenance components, finds the spawned one
+  // World.FindByPrefab(symbol): scans provenance components, finds the spawned one
   // (also verifies the prefab was recorded, without peeking at an internal type).
   ret = rig.Call("World.FindByPrefab", {V::Symbol(prefab)});
   CHECK(ret.as_entity().index == spawned.index);
 
-  // World.SetName / GetName -- string IN (copied to a real scene::Name), string
+  // World.SetName / GetName: string IN (copied to a real scene::Name), string
   // OUT (arena-backed borrowed ScriptString, no global heap).
   // String args are borrowed views; the literal's bytes have static storage.
   rig.Call("World.SetName", {V::EntityRef(spawned), V::Str("Gold Ingot")});

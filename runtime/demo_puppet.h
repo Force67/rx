@@ -12,8 +12,8 @@
 
 namespace rx {
 
-// Physics-first locomotion proving ground (--demo puppet): a graybox arena --
-// flat floor, a shallow ramp, a 0.15 m curb and a few scattered boxes -- with a
+// Physics-first locomotion proving ground (--demo puppet): a graybox arena
+// (flat floor, a shallow ramp, a 0.15 m curb, a few scattered boxes) with a
 // single rx::locomotion ragdoll biped standing on it. The controller Ticks once
 // per fixed step in the kPreSim stage (BEFORE the host steps the shared physics
 // world in kSim, so the demo never double-steps Jolt); a scripted intent walks

@@ -55,9 +55,9 @@ struct CloudscapeControls {
   // Storminess 0..1: flattens tops toward an anvil profile and raises the
   // sun absorption so precipitating decks go dark-bottomed.
   f32 anvil = 0.0f;
-  // Menace 0..1: blackens the deck beyond what physics alone gives -- sun
+  // Menace 0..1: blackens the deck beyond what physics alone gives (sun
   // absorption climbs and the ambient/multi-scatter floors collapse, so a
-  // severe-storm sky reads genuinely threatening instead of merely grey.
+  // severe-storm sky reads genuinely threatening instead of merely grey).
   f32 darkness = 0.0f;
 
   // Ground haze: an exponential height-fog layer that shares the deck's
@@ -74,7 +74,7 @@ struct CloudscapeControls {
   f32 fog_churn = 0.15f;
 
   // Active tornado, written by the weather layer's vortex lifecycle (not
-  // authored directly per state -- states only opt in via tornado proneness).
+  // authored directly per state; states only opt in via tornado proneness).
   // strength ramps 0 -> 1 on touchdown and back to 0 as the funnel ropes out;
   // the renderer draws nothing at 0.
   Vec2 tornado_pos{0.0f, 0.0f}; // funnel axis on the ground, world XZ

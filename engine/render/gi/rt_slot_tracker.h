@@ -6,19 +6,15 @@
 namespace rx::render {
 
 // Pure bookkeeping for the ping-pong TLAS slots (RayTracingContext::kSlots).
-// The async-TLAS path builds slot N this frame and reads the slot built last
-// frame, so consumers must be told when the slot they are about to read is not
-// actually a valid, current build:
-//   * RT enabled after raster-only frames -> the previous slot was never built,
-//     binding it yields a null acceleration structure (validation error).
-//   * a mesh/BLAS replaced (renderer WaitIdle + RemoveBlas) -> slots built
-//     before the replace still reference the freed BLAS device addresses, so
-//     tracing them risks stale reads / device loss.
-//
-// A slot records the frame and BLAS-set revision of its last completed build.
-// Removing/replacing a BLAS bumps the global revision, retiring every slot built
-// before it. No device dependency on purpose -- the selection logic is
-// unit-tested off-GPU (rt_slot_tracker_test).
+// The async-TLAS path reads the slot built last frame, so consumers must know
+// when that slot is not a valid current build:
+//   * RT enabled after raster-only frames: the previous slot was never built
+//     (binding it yields a null acceleration structure).
+//   * a mesh/BLAS replace (WaitIdle + RemoveBlas): older slots reference the
+//     freed BLAS addresses (stale reads / device loss).
+// A slot records the frame and BLAS-set revision of its last build; a
+// remove/replace bumps the global revision, retiring slots built before it.
+// No device dependency on purpose: unit-tested off-GPU (rt_slot_tracker_test).
 struct TlasSlotTracker {
   // Four divides the u32 frame-counter period, so the modulo slot sequence
   // remains continuous when frame_index wraps to zero.

@@ -5,28 +5,19 @@
 #include <cstdio>
 
 // Regression tests for the hair BSDF (render/shaders/hair_bsdf.hlsli, mirrored
-// on the CPU in hair_material.cc).
+// on the CPU in hair_material.cc). The contracts that matter for hair:
 //
-// The contracts that matter for hair are different from a surface BRDF's:
-//
-//   1. ENERGY. A non-absorbing fibre must reflect essentially all of the light
-//      it receives, over the whole SPHERE - a cylinder scatters on every side.
-//      Marschner's three lobes do not sum to one on their own; the residual
-//      term is what closes the gap, and if it regresses, every light-coloured
-//      groom silently loses energy and comes out dark. That failure looks like
-//      an art problem, so it gets fixed by painting the hair brighter, which
-//      breaks the pigment coupling permanently.
-//   2. BOUNDED NON-RECIPROCITY. This model is deliberately not reciprocal (the
-//      attenuations derive from the outgoing direction alone, as in the
-//      published formulation), so the check is that the asymmetry stays within
-//      the range that formulation produces rather than that it is zero. An
-//      asymmetry that grows past it means a real error crept in beside the
-//      accepted one.
-//   3. PIGMENT COUPLING. Colour comes from absorption, so more melanin must
-//      darken, and pheomelanin must redden rather than just darken.
-//   4. MULTIPLE SCATTERING. It must attenuate with depth, saturate rather than
-//      grow without bound, and do almost nothing to a black fibre (which
-//      absorbs before it can bounce) while doing a lot to a white one.
+//   1. ENERGY. A non-absorbing fibre reflects essentially all received light
+//      over the whole SPHERE (a cylinder scatters on every side). Marschner's
+//      lobes do not sum to one; the residual term closes the gap, and a
+//      regression here darkens every light groom, which looks like an art
+//      problem and gets "fixed" by painting the hair brighter.
+//   2. BOUNDED NON-RECIPROCITY. Deliberately not reciprocal (attenuations
+//      derive from the outgoing direction alone, as published); the check is
+//      that asymmetry stays within the published range, not that it is zero.
+//   3. PIGMENT COUPLING. More melanin darkens; pheomelanin reddens.
+//   4. MULTIPLE SCATTERING. Attenuates with depth, saturates rather than
+//      growing unbounded, near-nothing on a black fibre, a lot on a white one.
 
 namespace {
 

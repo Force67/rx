@@ -11,26 +11,17 @@
 
 namespace rx::render {
 
-// Per-unique-mesh signed distance fields, generated CPU-side at mesh upload and
-// stored as flat float storage buffers (local space, signed). The global SDF
-// clipmap (SdfClipmap) min-blends these into camera-following volumes; S2 will
-// sphere-trace that clipmap in place of a TLAS on hardware without ray query.
+// Per-unique-mesh signed distance fields, generated CPU-side at mesh upload as
+// flat float storage buffers (local space, signed). SdfClipmap min-blends them
+// into camera-following volumes for the software sphere tracer. Gated by RX_SDF
+// upstream: with it unset nothing is constructed or allocated.
 //
-// Everything here is gated by RX_SDF upstream: the renderer only constructs an
-// SdfScene when the software-trace path is enabled, so with RX_SDF unset no SDF
-// is ever generated and nothing is allocated.
-//
-// Design notes / limitations (S1 prototype):
-//  - Distance is exact point-triangle distance accelerated by a uniform triangle
-//    grid; sign is a 3-axis ray-parity majority vote. Open / thin meshes leak
-//    (the same failure class as Lumen's mesh SDFs) — documented, not fought.
-//  - The SDF is stored as one signed float per voxel in a StructuredBuffer (not
-//    a 3D texture): the RHI's CopyBufferToTexture is 2D-only, so a 3D upload
-//    would need a compute copy per mesh; a flat buffer sampled with manual
-//    trilinear in the compose shader is simpler and dodges the R16Float-3D
-//    storage-format question. f16 packing is a future memory win (noted).
-//  - Per-mesh average albedo / emissive come from material factors only (texture
-//    averaging is out of scope).
+// Limitations (S1): distance is exact point-triangle distance on a uniform
+// triangle grid, sign is a 3-axis ray-parity majority vote, so open / thin
+// meshes leak (Lumen's mesh-SDF failure class). Storage is one float per voxel
+// in a StructuredBuffer, not a 3D texture: CopyBufferToTexture is 2D-only and a
+// flat buffer with manual trilinear dodges the R16Float-3D question. Albedo /
+// emissive proxies come from material factors only, no texture averaging.
 class SdfScene {
  public:
   // One mesh's CPU geometry + averaged surface colour, handed in at upload.
@@ -66,7 +57,7 @@ class SdfScene {
   // Drops the SDF for a key if one exists. Called when a re-upload under an
   // existing renderer mesh key loses SDF eligibility (the replacement became all-
   // blend / no_rt, or has no opaque indexed geometry) and so never reaches
-  // RegisterMesh -- without this the previous field would stay a permanent stale
+  // RegisterMesh; without this the previous field would stay a permanent stale
   // occluder in the clipmap. No-op for an unregistered key. Destroys the buffer
   // IMMEDIATELY, like RegisterMesh's replace path: both are reached only from
   // Renderer::UploadMesh's same-key replacement flow, which has already done

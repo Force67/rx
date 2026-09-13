@@ -15,7 +15,7 @@ namespace rx::script {
 struct HandlerContext;  // the per-call service locator (handler_context.h)
 
 // A bound script handler: the file-private unpacking trampoline a category emits.
-// A plain function pointer, not std::function -- no capture, no allocation, and a
+// A plain function pointer, not std::function: no capture, no allocation, and a
 // stable calling convention every runtime and the wire path can share.
 using HandlerFn = ScriptValue (*)(HandlerContext&, ScriptArgs&);
 
@@ -24,12 +24,12 @@ using HandlerFn = ScriptValue (*)(HandlerContext&, ScriptArgs&);
 // nothing per command.
 inline constexpr u32 kMaxHandlerParams = 12;
 
-// The typed signature recorded alongside a handler -- the machine-readable record
+// The typed signature recorded alongside a handler, the machine-readable record
 // of the free function's signature, the one source of truth for arg validation,
 // wire codecs and generating outward runtime stubs. Trivially copyable: params
 // live inline, not in a heap vector, so building one is allocation-free. The
 // braced call site `{kVoid, {kEntity, kVec3}}` still works: the initializer_list
-// is backed by a stack array, copied into `params` here -- no heap.
+// is backed by a stack array, copied into `params` here; no heap.
 struct HandlerSig {
   ScriptType ret = ScriptType::kVoid;
   u8 count = 0;
@@ -48,7 +48,7 @@ struct HandlerDesc {
   HandlerFn fn = nullptr;
   HandlerSig sig;
   // Points at the caller's name bytes. Command names are string literals (static
-  // storage), so this is a view, never a copied std::string -- zero allocation.
+  // storage), so this is a view, never a copied std::string; zero allocation.
   ScriptStringView name;
 };
 
@@ -72,7 +72,7 @@ class HandlerRegistry {
   RX_SCRIPT_EXPORT const HandlerDesc* Find(ScriptStringView name) const;
 
   // Looks up the name and invokes its handler. An unregistered name returns Null
-  // and does nothing -- a runtime may emit names this build does not implement,
+  // and does nothing: a runtime may emit names this build does not implement,
   // and that is dropped, not an error (mirrors rpc::RpcRegistry). A returned
   // string value views the context's scratch arena; the caller must consume it
   // before that arena is reset (see HandlerContext::scratch).

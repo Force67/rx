@@ -11,9 +11,9 @@ namespace rx::script {
 
 // A linear (bump) allocator for transient script memory: the per-call argument
 // stacks and the content strings handlers produce. Allocate freely during a call
-// or frame, then Reset() to reclaim it all at once -- no per-argument malloc/free
+// or frame, then Reset() to reclaim it all at once (no per-argument malloc/free
 // churn, and script memory stays bounded and separately accountable from the
-// global heap. Grows in chained blocks; Reset keeps the blocks for reuse so the
+// global heap). Grows in chained blocks; Reset keeps the blocks for reuse so the
 // steady state does not allocate at all.
 //
 // This is the "script heap" seam. Today it owns its blocks via operator new;
@@ -59,7 +59,7 @@ class ScriptArena {
 // valid until the arena's next Reset(); the runtime must consume/marshal a
 // handler's return value before it resets the scratch arena (see HandlerContext
 // and HandlerRegistry::Dispatch). This is how a handler puts a content string on
-// the value stack without touching the global heap -- the arena owns the bytes,
+// the value stack without touching the global heap; the arena owns the bytes,
 // the ScriptValue only views them.
 RX_SCRIPT_EXPORT ScriptStringView ArenaCopy(ScriptArena& arena, ScriptStringView s);
 

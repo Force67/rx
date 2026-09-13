@@ -80,7 +80,7 @@ float HeightIn(float3 p) {
 // The march runs in the planet frame (camera on the +y axis, so p.xz is the
 // XZ offset from the eye). Every texture lookup must be world-anchored or the
 // whole deck would ride along with the camera: unwrap the shell into world
-// coordinates -- world XZ by adding the eye, altitude along the radial.
+// coordinates: world XZ by adding the eye, altitude along the radial.
 float3 WorldUnwrap(float3 p) {
   return float3(p.x + pc.camera_pos.x, length(p) - kGroundRadius, p.z + pc.camera_pos.z);
 }
@@ -98,7 +98,7 @@ float3 Advect(float3 wp, float h) {
 static const float kVirgaDepth = 0.22;
 
 // Virga: rain shafts hanging under precipitating cells, evaporating before
-// (or at) the ground. Sampled for h < 0 -- vertically stretched noise gives
+// (or at) the ground. Sampled for h < 0; vertically stretched noise gives
 // the streaked curtain look, fading toward the shaft's ragged bottom.
 float VirgaDensity(float3 p, float h, float4 weather) {
   if (h < -kVirgaDepth) return 0.0;
@@ -186,7 +186,7 @@ float LightEnergy(float3 p, float3 to_sun, float4 weather, float cos_angle, floa
   optical += DensityCheap(fp, SampleWeather(fp.xz + pc.camera_pos.xz)) * step_len * 3.0;
 
   // Precipitating cells absorb harder: rain cores go graphite instead of
-  // white. Kept moderate -- a deck that clamps to black under rain stops
+  // white. Kept moderate: a deck that clamps to black under rain stops
   // reading as cloud at all. Menace stacks on top for the authored version,
   // gated by the LOCAL precip cell: a distant storm blackens its own corner
   // of the sky while the deck over the camera keeps its daylight.
@@ -274,7 +274,7 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
   float3 sun_col = pc.sun_color.rgb * pc.sun_direction.w;
   // The ambient the deck bathes in follows the sky: cool blue under a high
   // sun, and as the sun drops toward the horizon it hands over to the warm
-  // band of a low atmosphere -- multiplied by the sun colour (which the clock
+  // band of a low atmosphere, multiplied by the sun colour (which the clock
   // already reddens at dusk), this is what sets evening decks on fire instead
   // of leaving them grey-blue at sunset.
   float sun_elev = saturate(to_sun.y * 2.2 + 0.08);
@@ -287,7 +287,7 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
   uint steps = max(pc.steps, 8u);
   steps = uint(lerp(float(steps) * 2.0, float(steps), abs(view.y)));
   float dt_full = (t_end - t_start) / float(steps);
-  // The march can't afford full-detail samples in empty air: cheap base-only
+  // The march cannot afford full-detail samples in empty air: cheap base-only
   // taps stride 3x wider until they hit possible cloud, then the walk backs up
   // one stride and drops to full samples until the cloud is left again.
   float dt_cheap = dt_full * 3.0;
@@ -310,7 +310,7 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
         t += dt_cheap;
         continue;
       }
-      // Possible cloud: back up so the boundary isn't skipped, go fine.
+      // Possible cloud: back up so the boundary is not skipped, go fine.
       t = max(t - dt_cheap, t_start);
       full_mode = true;
       empty_run = 0;
@@ -332,7 +332,7 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
     // to vary or the deck flattens into a painted ceiling. Two cheap taps up
     // the radial estimate the cloud mass overhead: a sample under a heavy
     // column loses its sky dome and goes dark, a sample under a thin spot
-    // glows -- exactly the mottled underside a real deck shows from below.
+    // glows, exactly the mottled underside a real deck shows from below.
     float3 up = pos / max(length(pos), 1.0);
     float up_od = DensityCheap(pos + up * 350.0, weather) * 350.0 +
                   DensityCheap(pos + up * 950.0, weather) * 650.0;
@@ -347,7 +347,7 @@ MarchResult March(float3 cam, float3 view, float scene_dist, uint2 px) {
     // Rain thickens the view extinction: soaked decks cut harder silhouettes
     // against the haze instead of dissolving into it. The base coefficient
     // stays permeable enough that rays reach a little interior before
-    // saturating -- an opaque skin flattens every deck into one grey sheet.
+    // saturating; an opaque skin flattens every deck into one grey sheet.
     float sigma = density * 0.045 * (1.0 + weather.g * 0.6);
     float step_trans = exp(-sigma * dt_full);
     float contrib = r.transmittance * (1.0 - step_trans);

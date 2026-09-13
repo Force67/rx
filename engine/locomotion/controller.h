@@ -61,7 +61,7 @@ class RX_LOCOMOTION_EXPORT LocomotionController {
   static bool GroundProbe(void* context, const Vec3& probe_start, f32 max_depth, GroundHit* out);
 
   // True when `watched` (pelvis/torso) touches something that is not part of the
-  // rig this tick — used by the grounded detection.
+  // rig this tick, used by the grounded detection.
   bool HasEnvironmentContact(physics::BodyId watched) const;
 
   // World-space ankle pivot of a foot (0 = left, 1 = right), reconstructed from

@@ -27,7 +27,7 @@
 // flagged OPAQUE. Realtime diffuse GI / AO / shadow rays trace
 // RX_RAY_MASK_DIFFUSE (realtime + approx) with RAY_FLAG_CULL_NON_OPAQUE, so
 // they hit the shrunk opaque stand-in and skip the real (non-opaque) masked
-// geometry entirely -- correct-on-average foliage occlusion at ~60% cost.
+// geometry entirely (correct-on-average foliage occlusion at ~60% cost).
 // The path tracer (PATHTRACE) and specular reflections (REALTIME, via a
 // bounded any-hit alpha test) still see only the real masked geometry; the
 // approx instance carries neither bit, so no ray ever sees both variants.

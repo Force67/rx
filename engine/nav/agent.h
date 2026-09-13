@@ -1,25 +1,21 @@
 #ifndef RX_NAV_AGENT_H_
 #define RX_NAV_AGENT_H_
 
-// ECS navigation agents. NavAgent is the game-facing component: set `goal`,
-// read `velocity` / `status`. NavCorridor is the paired working state (the
-// live corridor + funnel scratch); UpdateAgents adds it on demand.
+// ECS navigation agents. NavAgent is the game-facing component (set `goal`,
+// read `velocity` / `status`); NavCorridor is the paired working state
+// UpdateAgents adds on demand.
 //
-// UpdateAgents is the per-tick system. Register it from the app:
-//
+// UpdateAgents is the per-tick system, registered by the app:
 //   scheduler.AddSystem(ecs::Stage::kSim, "nav_agents",
 //       [&mesh](ecs::World& world, f32 dt) { nav::UpdateAgents(world, mesh, {}, dt); });
-//
-// Every frame each agent validates its corridor (event-based repathing: no
-// timers), replans at most `max_repaths` corridors per tick across the whole
-// world (first come, first served in iteration order; agents that miss the
-// budget keep steering along their stale corridor and usually catch up next
-// tick, since handled events do not fire again -- incremental progress beats
-// stalling),
-// re-runs the funnel from its live position and writes the desired planar
-// velocity. With `move` set it also integrates the Transform and snaps it to
-// the surface, which is all a demo or a simple game needs; games with their
-// own movers read `velocity` and integrate themselves.
+// Each agent validates its corridor (event-based repathing, no timers) and
+// replans at most `max_repaths` corridors per tick, first come first served;
+// agents over budget keep steering their stale corridor and usually catch up
+// next tick (handled events do not refire). UpdateAgents also steps movement:
+// the funnel re-runs from the live position and the desired planar velocity is
+// written; with `move` set it integrates the Transform and snaps to the
+// surface, which is all a demo needs (games with their own movers read
+// `velocity`).
 
 #include "core/export.h"
 #include "ecs/world.h"

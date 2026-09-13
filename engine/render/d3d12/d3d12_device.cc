@@ -1321,7 +1321,7 @@ void D3D12Device::WriteViewDescriptor(const SetLayout::Slot& slot, const Binding
       // Raw (ByteAddressBuffer-shaped) views: stride-agnostic, which matches
       // vkd3d's byte-range lowering of structured access. Native Windows
       // hardware that consumes the descriptor stride would need the rhi to
-      // carry element strides -- documented Windows-pending work in RHI.md.
+      // carry element strides (documented Windows-pending work in RHI.md).
       D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
       srv.Format = DXGI_FORMAT_R32_TYPELESS;
       srv.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;

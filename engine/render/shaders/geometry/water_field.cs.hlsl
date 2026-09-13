@@ -1,22 +1,20 @@
 // Persistent water-surface field, one nested ring per dispatch. Phase 0
-// recenters/advects/decays the previous frame's ring and steps the ripple wave
-// equation (ring 0); phase 1 injects crest foam + object disturbances. The ring
-// is fully resampled from the previous texture each frame (bilinear, keyed off
-// the OLD snapped origin), so there is no toroidal bookkeeping and the field
-// never swims under the camera. Channels: R ripple height, G ripple velocity,
-// B foam density, A foam age (seconds).
+// recenters/advects/decays the previous ring and steps the ripple wave equation
+// (ring 0); phase 1 injects crest foam + object disturbances. The ring is fully
+// resampled from the previous texture each frame (bilinear, keyed off the OLD
+// snapped origin), so there is no toroidal bookkeeping and the field never
+// swims under the camera. Channels: R ripple height, G ripple velocity, B foam
+// density, A foam age (s).
 //
 // Local interaction (control.z flags): the DEPTH path projects each ring-0
-// texel's water-plane column into the frame, samples the opaque prepass depth,
-// reconstructs the geometry's world position and — where geometry crosses the
-// waterline right at this column — stores a soft intersection band in a small
-// ping-ponged mask texture; the per-frame CHANGE of that band drives a ripple
-// impulse + foam, so ANY geometry breaking the surface ripples with no CPU
-// disturbances (a still object holds a steady band and stays quiet). The
-// OBSTACLE path treats texels whose analytic terrain height sits above the
-// water as reflecting Neumann boundaries: their ripple state is zeroed and the
-// wave stencil reads the centre's own value in place of an obstacle neighbour,
-// so rings bounce off the beach instead of crossing it.
+// texel's water column into the frame against the opaque prepass depth and,
+// where geometry crosses the waterline, stores an intersection band in a small
+// ping-ponged mask; the band's per-frame CHANGE drives ripple + foam, so any
+// geometry breaking the surface ripples with no CPU disturbances (a still
+// object holds a steady band and stays quiet). The OBSTACLE path treats texels
+// whose analytic terrain height is above the water as Neumann boundaries
+// (ripple state zeroed, stencil reads the centre's own value), so rings bounce
+// off the beach instead of crossing it.
 
 #include "rhi_bindings.hlsli"
 
@@ -314,15 +312,15 @@ void main(uint3 tid : SV_DispatchThreadID) {
     vel += push.idepth1.w * (mask_now * dsdt + delta);
     // Persistent, BOUNDED waterline displacement: softly pin the surface toward
     // a small dent under the footprint. This is a spring toward a fixed target
-    // (kInteractStandDisp * mask), so it CANNOT accumulate — the previous agent's
-    // runaway came from integrating an un-signed source; this can't. The wave
+    // (kInteractStandDisp * mask), so it CANNOT accumulate; the previous agent's
+    // runaway came from integrating an un-signed source; this cannot. The wave
     // equation rings this dent outward, which is what makes the intersection
     // visibly ripple even at steady state.
     float target = -push.idepth0.x * mask_now;
     height = lerp(height, target, saturate(0.35 * mask_now));
     // Foam scaled by how fast the intersection moves (the swell washing the
     // waterline), as a per-second RATE * dt so it integrates to a modest steady
-    // density over the ~13 s foam tau instead of saturating into milky bands —
+    // density over the ~13 s foam tau instead of saturating into milky bands.
     // the whole shoreline is a large, always-active intersection.
     inject += push.idepth0.z * mask_now * abs(dsdt) * dt;
     cur_mask[id] = mask_now;

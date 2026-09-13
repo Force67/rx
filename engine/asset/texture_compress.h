@@ -55,25 +55,15 @@ struct TextureCompressionOptions {
   // until a renderer says otherwise, so a run with no gpu at all (--validate,
   // tools, unit tests) keeps producing rgba8.
   bool supported = false;
-  // Include tangent-space normal maps. OFF by default, and not because BC5 is
-  // wrong - it is measurably the best compressed form for a normal map (49.5 dB
-  // on xy against BC7's 43.4 in bc_encode_test, and 2-5 degrees closer to the
-  // uncompressed normal than BC7 on the ambientCG maps island-game ships).
-  // What is off is the pair of BC5 AND the z the shader has to rebuild from it.
-  // That rebuild is exact only where the source texels are unit vectors that
-  // stay well away from horizontal, and rx's own content is not:
-  //   - Pattern's generated normal maps are the derivative of a step-edged
-  //     height field, so at every pattern edge |xy| reaches 0.99 and z falls to
-  //     0.14, where a one-level xy error swings the normal by degrees. Measured
-  //     on runtime/scenes/showcase.rxscene: rmse 0.00925 against a 0.002 limit,
-  //     from the normal maps alone. Colour and data maps on the same scene came
-  //     in at 0.00148 and 0.00066.
-  //   - jpeg-compressed normal maps (the usual CC0 texture-set format) have
-  //     texels with |xy| > 1, which no reconstruction can represent; on
-  //     island-game's set, simply rebuilding z with no compression at all
-  //     already moves the normal by 0.4 to 6.4 degrees on average.
-  // Turning this on roughly doubles the saving and is the right default for
-  // content whose normal maps are authored to survive it. RX_TEX_COMPRESS_NORMALS=1.
+  // Include tangent-space normal maps. OFF by default: BC5 itself is the best
+  // compressed form (49.5 dB xy vs BC7's 43.4 in bc_encode_test), but the z the
+  // shader rebuilds from it is exact only for unit vectors well away from
+  // horizontal, and rx content is not: Pattern's generated maps hit |xy| 0.99
+  // at pattern edges (showcase rmse 0.00925 vs the 0.002 limit, from the normal
+  // maps alone), and jpeg-compressed CC0 maps carry |xy| > 1 that no
+  // reconstruction can represent (island-game: 0.4-6.4 degrees of error from
+  // rebuilding z with no compression at all). Doubles the saving when on; right
+  // for content authored to survive it. RX_TEX_COMPRESS_NORMALS=1.
   bool normals = false;
 };
 

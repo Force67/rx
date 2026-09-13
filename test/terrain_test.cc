@@ -200,7 +200,7 @@ void TestDiagonalAndNegativeInvalidation() {
   }
 
   // Diagonal revision: replacing {0,0} with the shared corner value unchanged
-  // but an edge-adjacent sample changed must still bump {-1,-1} -- its corner
+  // but an edge-adjacent sample changed must still bump {-1,-1} (its corner
   // normal reads the new tile's samples (1,0)/(0,1) through GridHeight.
   Check(terrain.AddOrReplaceTile({-1, -1}, flat), "diagonal tile is added");
   const u64 diagonal_revision = terrain.FindTile({-1, -1})->revision;
@@ -212,7 +212,7 @@ void TestDiagonalAndNegativeInvalidation() {
 
   // Sparse layout: {0,0} and {-1,-1} exist, {0,-1}/{-1,0} do not. A brush on
   // {0,0}'s sample (1,0) changes the diagonal's corner normal, so the change
-  // must list {-1,-1} as dirty even though none of its samples moved -- the
+  // must list {-1,-1} as dirty even though none of its samples moved; the
   // usual indirection through the cardinal neighbor's border copy is absent.
   Terrain sparse(BasicDesc());
   Check(sparse.AddOrReplaceTile({0, 0}, flat), "sparse origin tile is added");

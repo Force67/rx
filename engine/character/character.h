@@ -96,7 +96,7 @@ struct CharacterShape {
   // The camera anchor's *vertical* component eases over sudden ground-height
   // changes (step-up / step-down / stairs) so the eye glides instead of popping;
   // horizontal stays 1:1 raw (smoothing horizontal reads as lag). Active only
-  // while grounded — airborne (jumps) snap so the arc is not damped. Half-life in
+  // while grounded; airborne (jumps) snap so the arc is not damped. Half-life in
   // seconds; 0 disables (raw eye, old behaviour).
   f32 eye_step_half_life = 0.06f;
 
@@ -129,7 +129,7 @@ struct CharacterIntent {
   // World-space acceleration (m/s^2) the game stages this step ON TOP of the
   // controller's own gravity + locomotion integration, folded into the velocity
   // just before the mover consumes it and cleared on consume (an edge input like
-  // `jump`). The seam for external thrusters — a jetpack, a dash, a wind gust —
+  // `jump`). The seam for external thrusters (a jetpack, a dash, a wind gust),
   // that add to the character's motion without the controller knowing about them:
   // the result is kept in the integration velocity, so momentum carries. The
   // vertical component competes with gravity honestly (thrust must beat weight to
@@ -157,7 +157,7 @@ struct CharacterState {
   f32 crouch_blend = 0;       // [0..1], 0 standing, 1 fully crouched
   f32 eye_height = 1.62f;     // current, blended, measured from the feet
   f32 time_since_grounded = 0;  // seconds airborne (coyote-time friendly)
-  f32 yaw = 0;                  // LOOK yaw, radians; raw (never smoothed) — feeds the camera anchor
+  f32 yaw = 0;                  // LOOK yaw, radians; raw (never smoothed); feeds the camera anchor
   bool teleported = false;      // set by TeleportCharacter; bumps the anchor revision once
 
   // --- Game-feel state (written by StepCharacters) ----------------------------
@@ -168,7 +168,7 @@ struct CharacterState {
   f32 jump_buffer_timer = 0;   // seconds of remaining buffered-jump window
   bool jump_consumed = false;  // a jump fired this airborne stint (blocks coyote double-jumps)
   f32 eye_base_y = 0;      // step-smoothed world-space eye Y (before landing dip)
-  f32 anchor_eye_y = 0;    // eye_base_y minus landing dip — the value the camera anchor reads
+  f32 anchor_eye_y = 0;    // eye_base_y minus landing dip, the value the camera anchor reads
   f32 landing_dip = 0;     // current landing-recoil dip in metres (>= 0), decays to 0
   bool view_initialized = false;  // facing_yaw / eye Y primed (cleared on teleport to snap)
 

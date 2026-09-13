@@ -3,7 +3,7 @@
 The shooter half of a first-person game, in the same functional-first shape as
 `rx::character`: **plain-data components**, **free-function systems**, no manager
 classes, no singletons, and no game taxonomy. The module knows what a *round*
-is, not what a *rocket launcher* is — an arsenal is `WeaponDef` data a game
+is, not what a *rocket launcher* is: an arsenal is `WeaponDef` data a game
 registers, and presentation is a game draining `CombatEvents`.
 
 It is optional, like `rx::inventory`: nothing else in the engine depends on it.
@@ -40,7 +40,7 @@ carries a `Transform`) and `rx::ecs`.
 | `Projectile` | a round in flight: position, velocity, drag, fuse, blast |
 
 `WeaponDef` (weapon_def.h) is the immutable tuning half, held in a game-owned
-`WeaponCatalog` passed explicitly to the systems — there is no global catalog,
+`WeaponCatalog` passed explicitly to the systems: there is no global catalog,
 for the same reason `inventory::ItemCatalog` has none.
 
 ## The HitRegistry
@@ -62,16 +62,16 @@ pushes without ever taking damage. `UnregisterTarget(entity)` drops the lot.
 
 ## Systems (free functions)
 
-- `StepWeapons(world, physics, catalog, registry, events, dt)` — the whole
+- `StepWeapons(world, physics, catalog, registry, events, dt)`: the whole
   firing pipeline: swap and reload clocks, fire-mode gating, spread, recoil,
   hitscan resolve and projectile staging. Structural (it creates projectile
   entities after its walk), so call it outside another `World::Each`.
-- `StepProjectiles(world, physics, registry, events, dt)` — integrates rounds in
+- `StepProjectiles(world, physics, registry, events, dt)`: integrates rounds in
   flight and sweeps the segment each one covered this step.
-- `StepViewRecoil(world, dt)` — turns kick into `view_*_delta`.
-- `StepViewmodels(world, dt)` — sway, bob, aim pull-in, punch.
-- `StepHealth(world, dt)` — the regeneration clock.
-- `ApplyDamage` / `Heal` / `CanDamage` / `ApplyExplosion` — the damage verbs, all
+- `StepViewRecoil(world, dt)`: turns kick into `view_*_delta`.
+- `StepViewmodels(world, dt)`: sway, bob, aim pull-in, punch.
+- `StepHealth(world, dt)`: the regeneration clock.
+- `ApplyDamage` / `Heal` / `CanDamage` / `ApplyExplosion`: the damage verbs, all
   usable on their own (a trap, a fall, a scripted execution).
 
 Helpers: `GiveWeapon`, `AddAmmo`, `StartReload`, `ActiveWeapon`,

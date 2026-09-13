@@ -90,7 +90,7 @@ bool RcgiClassifyOn(RcgiGlobals g) { return (g.gi_flags.x & kRcgiFlagClassify) !
 
 // Ray-miss radiance for the visibility rays (probe trace) and gather rays: the
 // sky cubemap outdoors, the authored interior ambient when interior mode is on
-// (RX_RCGI_INTERIOR). This is the root skylight-leak fix -- an interior scene's
+// (RX_RCGI_INTERIOR). This is the root skylight-leak fix: an interior scene's
 // probe cascades stop being fed sky through ceiling/doorway gaps.
 float3 RcgiSkyMiss(RcgiGlobals g, float3 sky_radiance) {
   return RcgiInteriorMode(g) ? g.interior.xyz : sky_radiance;
@@ -367,8 +367,9 @@ float3 SampleRcgiIrradiance(RcgiGlobals g, Texture2D irr_atlas, SamplerState irr
   }
   // No same-class probe contributed: the 8 taps are all the opposite class and
   // renormalizing their 0.02 weights would restore full cross-wall irradiance
-  // (e.g. a small interior lit by outdoor probes only). Return no indirect --
-  // conservative, and the sample's own class re-converges as its probes fill in.
+  // (e.g. a small interior lit by outdoor probes only). Return no indirect;
+  // that is conservative, and the sample's own class re-converges as its probes
+  // fill in.
   if (classify && match_weight_sum <= 1e-4) return 0.0.xxx;
   float3 mean = sum / max(weight_sum, 1e-4);
   return mean * mean * g.params.z;  // decode + energy scale

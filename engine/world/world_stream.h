@@ -142,20 +142,16 @@ class RX_WORLD_EXPORT WorldStreamer {
   void Configure(const WorldStreamPolicy& policy);
   const WorldStreamPolicy& policy() const { return policy_; }
 
-  // The sparse deltas applied on top of every cell this streamer materializes.
-  // The overlay is the caller's, and must outlive the streamer.
+  // The sparse deltas applied on top of every cell this streamer materializes;
+  // the overlay is the caller's and must outlive the streamer. It decides what a
+  // cell looks like on the way in and does not reach into resident cells (a game
+  // destroys the entity itself and records the deletion here so it survives
+  // reload). Do not edit while a cell is mid-commit: the streamer reads it once
+  // per quantum and a straddling cell would come up half from each version.
   //
-  // It decides what a cell looks like on the way in, and does not reach back
-  // into cells that are already resident: a game that destroys something
-  // destroys the entity itself and records it here so the deletion survives the
-  // next reload. Do not edit it while a cell is mid-commit - the streamer reads
-  // it once per quantum, so a cell straddling the edit would come up half from
-  // each version of the save.
-  //
-  // False, with a message in errors() and the overlay left unset, when the
-  // overlay was recorded against a different bake than this world. Its stable
-  // ids would name different rows, so it would not fail, it would delete and
-  // move the wrong things. Passing null clears it and always succeeds.
+  // False (errors() says why, overlay unset) when the overlay was recorded
+  // against a different bake: its stable ids would name different rows and it
+  // would delete and move the wrong things rather than fail. Null clears it.
   bool SetOverlay(const WorldOverlay* overlay);
 
   // Residency claims held by systems that need a cell whether or not anyone is
@@ -284,18 +280,13 @@ class RX_WORLD_EXPORT WorldStreamer {
     bool near = false;
   };
 
-  // A cell whose payload has failed to load. A cook error is deterministic, so
-  // retrying it forever re-reads and re-decodes the same broken bytes every
-  // retry interval; past a few attempts the cell stops being offered at all.
-  //
-  // The tally is per cell and domain, not per tier: a cell whose near-tier
-  // payload is broken stops being offered at its working far tier too. That is
-  // the coarse answer, and the loud one - stats().suppressed counts it.
-  //
-  // Suppression throttles rather than forbids. The failures this counts are not
-  // all deterministic: an archive briefly unmounted, or a read that fails under
-  // load, would otherwise put a permanent hole in the world over a stall that
-  // lasted a second. A suppressed cell is offered again once, long after, and
+  // A cell whose payload failed to load. Cook errors are deterministic, so
+  // retrying forever re-decodes the same broken bytes; past a few attempts the
+  // cell stops being offered. The tally is per cell + domain, not per tier (a
+  // broken near tier suppresses the working far tier too; stats().suppressed
+  // counts it). Suppression throttles rather than forbids, because not every
+  // failure is deterministic (a briefly unmounted archive, a read failing under
+  // load): a suppressed cell is offered again once, long after, and
   // re-suppressed if it fails again.
   struct FailedCell {
     u64 cell = 0;
