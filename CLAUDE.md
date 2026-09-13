@@ -1,7 +1,8 @@
 # rx
 
 A real-time rendering engine. C++23, Vulkan and D3D12 behind an RHI, HLSL/Slang
-shaders. See `README.md` for what each module does.
+shaders. Modules are top-level directories: `engine/<domain>`, `runtime/`
+(viewer), `apps/` (editor).
 
 ## Building and running
 
