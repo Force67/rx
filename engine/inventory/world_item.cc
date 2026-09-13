@@ -104,8 +104,6 @@ void ReserveWorldItemId(u64 seen_id) {
   }
 }
 
-// WorldItemStore
-
 size_t WorldItemStore::CellKeyHash::operator()(const CellKey& key) const {
   u64 h = 1469598103934665603ull;  // FNV-1a 64 offset basis
   auto mix = [&](i32 v) {

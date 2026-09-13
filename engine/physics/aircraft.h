@@ -128,7 +128,6 @@ struct RX_PHYSICS_EXPORT AircraftDesc {
   f32 pitch_damp = 1800.0f;
   f32 yaw_damp = 1400.0f;
 
-  // propulsion
   Propulsion propulsion = Propulsion::kProp;
   // Prop: momentum-theory-style thrust that falls off with airspeed,
   // T ~= min(power * eff / max(V, v_min), static_cap). rpm tracks throttle

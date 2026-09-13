@@ -538,7 +538,6 @@ void TestStand() {
   CheckFinite(s.physics, c, "stand");
 }
 
-// Applies an impulse to the torso body of a controller's rig.
 void PushTorso(Scene& s, LocomotionController& c, const Vec3& impulse) {
   s.physics.ApplyImpulse(c.rig().body[static_cast<u32>(BodyPart::kTorso)], impulse);
 }

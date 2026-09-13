@@ -61,8 +61,6 @@ u8 LinearToSrgb(f32 v) {
   return static_cast<u8>(std::clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
 }
 
-// mip chain
-
 u32 FullMipChainLength(u32 width, u32 height) {
   u32 levels = 1;
   while (width > 1 || height > 1) {

@@ -642,7 +642,6 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
   ResourceHandle rr_depth = rr ? tex("recon_rr_depth", kViewZ) : vz_c;
   ResourceHandle rr_hitdist = rr ? tex("recon_rr_hitdist", kViewZ) : vz_c;
 
-  // 1. gbuffer
   graph.AddPass(
       "recon_gbuffer",
       [&](RenderGraph::PassBuilder& b) {
@@ -1021,7 +1020,6 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
   ResourceHandle spec_denoised =
       RunAtrous(graph, sac_c, spec_ping, spec_pong, nr_c, vz_c, smo_c, passes, true);
 
-  // 4. composite
   graph.AddPass(
       "recon_composite",
       [&](RenderGraph::PassBuilder& b) {

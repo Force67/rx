@@ -111,7 +111,6 @@ struct Scrub {
   f32 step = 0.01f;
 };
 
-// Active gizmo drag.
 struct GizmoDrag {
   bool active = false;
   int axis = -1; // 0=x,1=y,2=z
@@ -245,7 +244,6 @@ private:
   const MeshRecord *FindMesh(u64 hash) const;
   std::string EntityLabel(ecs::Entity e) const;
 
-  // services
   app::Services *services_ = nullptr;
   app::Host *host_ = nullptr;
   Window *window_ = nullptr;
@@ -336,7 +334,6 @@ private:
   // fps smoothing
   f32 fps_ = 0;
 
-  // ugui
   ugui::UIContext ui_;
   ui::GuiRenderBackend backend_;
   ui::UguiHostState host_state_;

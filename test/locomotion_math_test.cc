@@ -95,8 +95,6 @@ ContactEstimate MakeContacts() {
   return c;
 }
 
-// Wrap01
-
 void TestWrap01() {
   Near(Wrap01(0.25f), 0.25f, "wrap in range");
   Near(Wrap01(-0.25f), 0.75f, "wrap negative");
@@ -105,8 +103,6 @@ void TestWrap01() {
   Near(Wrap01(-1.0f), 0.0f, "wrap negative one -> zero");
   Near(Wrap01(2.5f), 0.5f, "wrap far above");
 }
-
-// GaitClock
 
 void TestGaitFeetOppose() {
   GaitState s;
@@ -225,8 +221,6 @@ void TestGaitRampSmooth() {
   Near(clock.state().speed_ratio, 1.0f, "settles at run speed ratio", 0.02f);
 }
 
-// CapturePoint
-
 void TestCapturePoint() {
   const Vec3 com{1, 0.95f, 2};
   const Vec3 cp0 = CapturePoint(com, {0, 0, 0}, 9.81f, 0.95f);
@@ -243,8 +237,6 @@ void TestCapturePoint() {
   const Vec3 cp2 = CapturePoint(com, v, 9.81f, 0.0f);
   Check(Finite(cp2), "zero COM height does not NaN");
 }
-
-// Swing trajectory
 
 void TestSwingTrajectory() {
   const Vec3 start{0, 0, 0};
@@ -291,8 +283,6 @@ void TestSwingTrajectory() {
     Near(va.z, fd.z, "swing velocity z matches finite difference", tol);
   }
 }
-
-// FootstepPlanner
 
 void TestFootstepPlanner() {
   const ControllerParameters params;

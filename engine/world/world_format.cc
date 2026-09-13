@@ -297,8 +297,6 @@ Tier WorldIndexData::BestTier(const WorldCellRecord& cell, Domain domain, Tier c
   return best;
 }
 
-// Index
-
 void WorldIndexWriter::set_grid(f32 cell_size, Vec3 origin) {
   cell_size_ = cell_size;
   grid_origin_ = origin;
@@ -647,8 +645,6 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
   *out = std::move(decoded);
   return true;
 }
-
-// Cell payload
 
 CellPayloadWriter::CellPayloadWriter(u64 cell_id, Domain domain, Tier tier)
     : cell_id_(cell_id), domain_(domain), tier_(tier) {}

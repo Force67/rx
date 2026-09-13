@@ -98,7 +98,6 @@ void TestVelocityMassCom() {
   Check(!w.GetBodyCenterOfMass(0, &dummy), "GetBodyCenterOfMass(0) is false");
   Check(!w.GetBodyCenterOfMass(987654321u, &dummy), "GetBodyCenterOfMass(bogus) is false");
 
-  // A static body has no mass.
   physics::BodyId floor = w.AddStaticBox({0, -0.5f, 0}, {5, 0.5f, 5});
   Near(w.GetBodyMass(floor), 0.0f, "static body reports 0 mass");
 

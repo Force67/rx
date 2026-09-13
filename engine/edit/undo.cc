@@ -334,8 +334,6 @@ private:
 
 } // namespace
 
-// UndoStack
-
 void UndoStack::Push(ecs::World &world, std::unique_ptr<Command> cmd) {
   if (!cmd)
     return;

@@ -491,7 +491,6 @@ std::string Editor::BuildInspector() {
 
   std::string out;
   const std::string escaped_entity_label = EscapeUguiString(EntityLabel(e));
-  // Name row.
   out += "panel name_row { layout: row; align: center; padding: 10 12; gap: 8; "
          "border-color:#101113; border-width:0 0 1 0;\n";
   out += "  panel ni { width: 8; height: 8; corner-radius: 4; background: "

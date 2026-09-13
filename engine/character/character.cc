@@ -208,7 +208,6 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         }
         const Vec3 target_h = dir * (state.gait_speed * throttle);
 
-        // Horizontal velocity
         Vec3 horizontal{state.integration_velocity.x, 0, state.integration_velocity.z};
         f32 accel = throttle > 1e-4f ? settings.ground_acceleration : settings.ground_deceleration;
         if (!state.grounded) accel = settings.ground_acceleration * settings.air_control;

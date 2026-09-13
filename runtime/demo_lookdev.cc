@@ -339,8 +339,6 @@ struct LookdevDemo::Impl {
   void EmitLights(render::FrameView& view);
 };
 
-// subject
-
 void LookdevDemo::Impl::BuildProceduralSubject() {
   // The fallback subject. It is deliberately anatomical rather than a sphere:
   // the terminator, the transmission and the eye path all need curvature,
@@ -676,8 +674,6 @@ void LookdevDemo::Impl::EmitLights(render::FrameView& view) {
   }
 }
 
-// history
-
 void LookdevDemo::Impl::PushHistory() {
   history.resize(history_cursor);
   history.push_back(parts);
@@ -986,8 +982,6 @@ bool LookdevDemo::Impl::LoadPreset(const std::string& path) {
   return true;
 }
 
-// panel
-
 void LookdevDemo::Impl::DrawPanel() {
 #if defined(RX_HAS_IMGUI)
   if (ImGui::GetCurrentContext() == nullptr) return;
@@ -1041,7 +1035,6 @@ void LookdevDemo::Impl::DrawPanel() {
                   static_cast<int>(render::HumanTierForScreenHeight(head_px)));
     }
 
-    // comparison
     if (ImGui::CollapsingHeader("Reference comparison", ImGuiTreeNodeFlags_DefaultOpen)) {
       ImGui::InputText("path", reference_input, sizeof(reference_input));
       ImGui::SameLine();
@@ -1085,7 +1078,6 @@ void LookdevDemo::Impl::DrawPanel() {
                          ImGuiSliderFlags_Logarithmic);
     }
 
-    // material
     if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen)) {
       if (ImGui::Button("Undo")) Undo();
       ImGui::SameLine();
@@ -1177,7 +1169,6 @@ void LookdevDemo::Impl::DrawPanel() {
       }
     }
 
-    // fitting
     if (ImGui::CollapsingHeader("Automated fitting")) {
       ImGui::TextWrapped("Coordinate descent against the measured reference error, summed over "
                          "every selected OLAT stop. Fit stage by stage: a terminator fitted "
@@ -1200,7 +1191,6 @@ void LookdevDemo::Impl::DrawPanel() {
       if (!fit.log.empty()) ImGui::TextUnformatted(fit.log.c_str());
     }
 
-    // captures / presets
     if (ImGui::CollapsingHeader("Captures and presets")) {
       if (ImGui::Button("Capture the validation matrix")) {
         capture = Capture{};

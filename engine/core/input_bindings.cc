@@ -198,8 +198,6 @@ bool InputMap::AxisFromName(const char* name, AxisId* out) const {
   return false;
 }
 
-// Defaults
-
 void InputMap::LoadDefaults() {
   for (auto& v : action_) v.clear();
   for (auto& v : axis_) v.clear();
