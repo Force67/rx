@@ -37,7 +37,7 @@ set(RX_DEPS_INCDIR ${CMAKE_INSTALL_INCLUDEDIR}/rx-deps)
 
 # rx module targets + export set
 set(RX_MODULE_NAMES core ecs script asset scene terrain render render2d physics locomotion anim audio
-    weather rpc authoring character inventory inventory_world app)
+    weather rpc authoring character inventory inventory_world ui app)
 set(RX_INSTALL_TARGETS)
 foreach(_m ${RX_MODULE_NAMES})
   # Some modules are conditional (inventory_world only when rx_physics exists);
@@ -124,6 +124,21 @@ _rx_iface_includes(_vma_inc GPUOpen::VulkanMemoryAllocator)
 list(GET _vma_inc 0 _vma_root)
 install(FILES ${_vma_root}/vk_mem_alloc.h DESTINATION ${RX_DEPS_INCDIR}/vma)
 
+# libultragui (PUBLIC: ugui:: types appear in rx::ui headers) -> archive+headers.
+# Its own dependencies are PRIVATE to it; only yoga is a static archive rx
+# builds, the text stack (freetype, harfbuzz) resolves on the consumer's machine
+# the same way it resolved here.
+if(TARGET ultragui)
+  set(RX_INSTALL_UI ON)
+  _rx_bundle_archive(ultragui)
+  _rx_bundle_archive(yogacore)
+  _rx_iface_includes(_ugui_inc ultragui)
+  list(GET _ugui_inc 0 _ugui_root)
+  install(DIRECTORY ${_ugui_root}/ugui
+    DESTINATION ${RX_DEPS_INCDIR}
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp" PATTERN "*.inl")
+endif()
+
 # PRIVATE static deps: consumers need the archive at final link, never headers.
 _rx_bundle_archive(kinema)
 # rx_asset and rx_render call into it (and so does tinyusdz), so it has to reach
@@ -154,7 +169,7 @@ endif()
 
 # Normalize the feature flags (set as ON by the module CMakeLists only when the
 # feature is built) so the generated rxConfig.cmake always sees ON/OFF.
-foreach(_flag FSR3 DLSS NRD JOLT USD RHI_D3D12 WAYLAND_KDE_HDR SDL3)
+foreach(_flag FSR3 DLSS NRD JOLT USD RHI_D3D12 WAYLAND_KDE_HDR SDL3 UI)
   if(NOT DEFINED RX_INSTALL_${_flag})
     set(RX_INSTALL_${_flag} OFF)
   endif()

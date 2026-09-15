@@ -1,13 +1,15 @@
-// Custom ugui::Platform for the recreation engine. Compiled into the ultragui
-// static library in place of the bundled GLFW backend (ULTRAGUI_PLATFORM_SOURCE)
-// so the library needs no windowing dependency of its own. The engine owns the
-// SDL3 window and feeds this shim through a UguiHostState pointer passed as
+// Custom ugui::Platform for rx. Compiled into the ultragui static library in
+// place of the bundled GLFW backend (ULTRAGUI_PLATFORM_SOURCE) so the library
+// needs no windowing dependency of its own. The engine owns the SDL3 window and
+// feeds this shim through a UguiHostState pointer passed as
 // UIConfig::external_window, plus events pushed into input_queue().
 
 #include <ugui/platform/platform.h>
 
 #include <chrono>
 
+// Quoted relative, not "ui/...": this file is compiled into the ultragui
+// library, which does not see rx's engine include root.
 #include "ugui_platform.h"
 
 namespace ugui {

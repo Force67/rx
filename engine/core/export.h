@@ -156,6 +156,12 @@
 #  define RX_NAV_VIZ_EXPORT RX_DSO_IMPORT
 #endif
 
+#if defined(RX_UI_IMPLEMENTATION)
+#define RX_UI_EXPORT RX_DSO_EXPORT
+#else
+#define RX_UI_EXPORT RX_DSO_IMPORT
+#endif
+
 #if defined(RX_APP_IMPLEMENTATION)
 #define RX_APP_EXPORT RX_DSO_EXPORT
 #else

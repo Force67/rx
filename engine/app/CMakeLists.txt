@@ -7,4 +7,6 @@ rx_add_module(app
 )
 
 target_link_libraries(rx_app PUBLIC
-  rx::core rx::ecs rx::asset rx::scene rx::render rx::physics rx::audio)
+  rx::core rx::ecs rx::asset rx::scene rx::render rx::physics rx::audio
+  # The splash plate the host puts up before the application sees a frame.
+  rx::ui)

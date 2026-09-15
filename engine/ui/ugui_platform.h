@@ -1,5 +1,5 @@
-#ifndef RECREATION_RUNTIME_UGUI_PLATFORM_H_
-#define RECREATION_RUNTIME_UGUI_PLATFORM_H_
+#ifndef RX_UI_UGUI_PLATFORM_H_
+#define RX_UI_UGUI_PLATFORM_H_
 
 // Bridge between the engine and the custom ugui::Platform backend that is
 // compiled into the ultragui static library (ugui_platform.cc, wired through
@@ -19,4 +19,4 @@ struct UguiHostState {
 
 }  // namespace rx::ui
 
-#endif  // RECREATION_RUNTIME_UGUI_PLATFORM_H_
+#endif  // RX_UI_UGUI_PLATFORM_H_

@@ -21,6 +21,10 @@ class RX_CORE_EXPORT FrameTimer {
   // index (golden-image captures, replay tests). 0 restores real time.
   void set_fixed_delta(f64 seconds) { fixed_delta_ = seconds; }
 
+  // > 0 while the timer is in lockstep. Callers that must behave differently
+  // in a capture run read this rather than re-deriving it from their own flags.
+  f64 fixed_delta() const { return fixed_delta_; }
+
   f64 fixed_step() const { return fixed_step_; }
   f64 frame_delta() const { return frame_delta_; }
   f64 interpolation_alpha() const { return accumulator_ / fixed_step_; }

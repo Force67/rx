@@ -21,7 +21,7 @@ option(RX_USD "Enable OpenUSD scene loading (needs tools/get_tinyusdz.sh)" ON)
 option(RX_SPIRV_1_4 "Emit SPIR-V 1.4 modules (loadable on Vulkan 1.1)" OFF)
 option(RX_BUILD_TESTS "Build library test suites" ON)
 option(RX_BUILD_RUNTIME "Build the rx viewer executable" ON)
-option(RX_BUILD_EDITOR "Build the rx editor application (apps/editor, needs libultragui)" OFF)
+option(RX_BUILD_EDITOR "Build the rx editor application (apps/editor)" OFF)
 option(RX_BUILD_TOOLS "Build the asset authoring tools (rxpack)" ON)
 option(RX_BUILD_EXAMPLES "Build small standalone engine examples" OFF)
 option(RX_AUDIO_FFMPEG "Decode compressed audio via FFmpeg (libav*)" OFF)
@@ -287,6 +287,7 @@ if(NOT DEFINED RX_MODULES)
     combat
     inventory
     locomotion
+    ui
     app
   )
 endif()
@@ -428,7 +429,7 @@ if(RX_BUILD_RUNTIME)
   add_subdirectory(runtime)
 endif()
 
-# The editor application: an app::Application whose entire UI is libultragui.
+# The editor application: an app::Application whose entire UI is rx::ui.
 if(RX_BUILD_EDITOR)
   add_subdirectory(apps/editor)
 endif()
