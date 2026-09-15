@@ -39,6 +39,11 @@ base::Option<float> GameHour{"game.hour", 11.0f, "RX_GAME_HOUR"};
 // RX_FIXED_DT=<seconds> locks every frame to one delta (frame-index-pure
 // animation for golden-image captures; wall clock stops mattering).
 base::Option<float> FixedDt{"fixed.dt", 0.0f, "RX_FIXED_DT"};
+// The rx splash plate. RX_SPLASH=0 suppresses it; RX_SPLASH=1 is also the only
+// way to get it into a capture, which WantsSplash otherwise refuses.
+base::Option<bool> ShowSplash{"splash", true, "RX_SPLASH"};
+base::Option<float> SplashSeconds{"splash.seconds", ui::Splash::kDefaultSeconds,
+                                  "RX_SPLASH_SECONDS"};
 }  // namespace
 
 bool Host::Initialize(const AppConfig& config, Application& app,
@@ -124,7 +129,29 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   services_.physics_bindings = &physics_bindings_;
   services_.hair_bindings = &hair_bindings_;
 
+  // Before OnInitialize, so a splash that cannot come up says so before the
+  // application spends seconds loading content, and so the ultragui registry
+  // the plate parks (ui::Splash::Initialize) is the one the application is
+  // about to build its own UI into.
+  if (WantsSplash()) {
+    auto splash = std::make_unique<ui::Splash>();
+    if (splash->Initialize(*window_, renderer_, vfs_, SplashSeconds.get()))
+      splash_ = std::move(splash);
+  }
+
   return app_->OnInitialize(services_);
+}
+
+bool Host::WantsSplash() const {
+  if (!config_.splash || !ShowSplash) return false;
+  if (config_.headless || !window_) return false;
+  // A lockstep run exists to write a png someone will compare, and the plate
+  // covers the whole screen: leaving it on would land it in every capture that
+  // renders fewer than ~140 frames. Setting RX_SPLASH by hand is how you ask
+  // for a capture of the plate itself.
+  if ((timer_.fixed_delta() > 0.0 || FixedDt.get() > 0.0f) && !ShowSplash.overridden())
+    return false;
+  return true;
 }
 
 void Host::ApplyRenderPreset() {
@@ -300,6 +327,19 @@ bool Host::RunFrame() {
     view.frame_delta_seconds = frame_delta;
     if (config_.gather_entity_draws) GatherEntityDraws(view);
     app_->OnBuildView(frame_delta, view);
+    // After the application built its view, so the plate covers whatever the
+    // application drew; it takes FrameView::hud_draw for as long as it is up.
+    if (splash_) {
+      if (splash_->Update(frame_delta)) {
+        splash_->Draw(view);
+      } else {
+        // The plate's textures are still referenced by frames in flight. This
+        // is the one stall the splash costs, and it lands on the frame the
+        // application becomes visible, before anything is animating.
+        renderer_.WaitIdle();
+        splash_.reset();
+      }
+    }
     // Move the audio listener to this frame's viewpoint, so positional
     // voices pan and attenuate around the camera.
     if (audio_) {
@@ -405,6 +445,9 @@ void Host::Shutdown() {
   // might still be streaming go away.
   if (audio_) audio_->Shutdown();
   if (rendering()) renderer_.WaitIdle();
+  // A run that quit inside the first seconds still owns a plate; drop it while
+  // the device it uploaded through is alive.
+  splash_.reset();
   // Destroy app-provided frame callbacks while the renderer and application
   // resources they may own are still alive.
   renderer_.ClearFrameCallbacks();

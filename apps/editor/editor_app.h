@@ -28,8 +28,8 @@
 #include "edit/undo.h"
 #include "fly_camera.h"
 #include "terrain/terrain.h"
-#include "ugui_backend.h"
-#include "ugui_platform.h"
+#include "ui/ugui_backend.h"
+#include "ui/ugui_platform.h"
 
 // libultragui
 #include <ugui/ui_context.h>

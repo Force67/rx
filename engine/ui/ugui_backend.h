@@ -1,5 +1,5 @@
-#ifndef RECREATION_RUNTIME_GUI_BACKEND_H_
-#define RECREATION_RUNTIME_GUI_BACKEND_H_
+#ifndef RX_UI_UGUI_BACKEND_H_
+#define RX_UI_UGUI_BACKEND_H_
 
 #include <volk.h>
 
@@ -14,12 +14,11 @@
 namespace rx::ui {
 
 // Vulkan renderer backend for ultragui draw data. Adapted from the bundled
-// ugui_impl_vulkan to the recreation engine's conventions: volk entry points,
-// dynamic rendering (no VkRenderPass) and shaders embedded as SPIR-V at build
-// time. It records into a command buffer the engine already opened with
-// vkCmdBeginRendering on the backbuffer, exactly where the debug ImGui overlay
-// records. Also serves as ultragui's TextureBackend so Image/SVG textures work
-// in draw-data mode.
+// ugui_impl_vulkan to rx's conventions: volk entry points, dynamic rendering
+// (no VkRenderPass) and shaders embedded as SPIR-V at build time. It records
+// into a command buffer the engine already opened with vkCmdBeginRendering on
+// the backbuffer, exactly where the debug ImGui overlay records. Also serves as
+// ultragui's TextureBackend so Image/SVG textures work in draw-data mode.
 class GuiRenderBackend final : public ugui::TextureBackend {
  public:
   struct InitInfo {
@@ -124,4 +123,4 @@ class GuiRenderBackend final : public ugui::TextureBackend {
 
 }  // namespace rx::ui
 
-#endif  // RECREATION_RUNTIME_GUI_BACKEND_H_
+#endif  // RX_UI_UGUI_BACKEND_H_
