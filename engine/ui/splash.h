@@ -99,7 +99,9 @@ class RX_UI_EXPORT Splash {
   u32 font_revision_ = 0;
 
   ugui::TextureId logo_ = ugui::kNullTextureId;
-  // Of the trimmed ink, not of the artwork's canvas.
+  // Of the uploaded texture, which is the trimmed ink and not the artwork's
+  // canvas. BuildDocument measures the draw box from it, so the two cannot
+  // drift apart without the wordmark stretching to cover the difference.
   f32 logo_aspect_ = 1.0f;
   // Deleted in Shutdown; empty when the font came from the system instead.
   std::string font_cache_path_;

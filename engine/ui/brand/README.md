@@ -11,5 +11,5 @@ backdrop the splash paints, and the rect also defeats the transparent-margin
 trim that sizes the logo (`Splash::LoadLogo`). Every glyph and gradient is
 otherwise untouched.
 
-Charcoal `#363a3b`, red `#a91b1e`; `ui::kBrandRed` mirrors the latter for the
-splash rule.
+Charcoal `#363a3b`, red `#a91b1e`; both live in the paths, and nothing in the
+plate around them repeats a brand colour.

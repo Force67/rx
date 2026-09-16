@@ -27,9 +27,6 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// The wordmark's own red, for the rule under it.
-constexpr const char* kBrandRed = "#a91b1e";
-
 // Fractions of the window the logo is allowed to take. Height leads (the plate
 // reads as a band across the middle); the width clamp keeps the wordmark off
 // the edges of a wide or ultrawide window.
@@ -42,8 +39,8 @@ constexpr f32 kLogoWidthFraction = 0.52f;
 constexpr const char* kFontAsset = "fonts://roboto/Roboto-Medium.ttf";
 
 // A font on the machine, for a tree whose rx_fonts.rxp was never packed. The
-// plate is the wordmark either way: losing this costs the two text lines, not
-// the splash.
+// plate is the wordmark either way: losing this costs the one line above it,
+// not the splash.
 const char* SystemFont() {
   static const char* kCandidates[] = {
       "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
@@ -60,8 +57,8 @@ const char* SystemFont() {
 
 // Crops fully transparent rows and columns off an RGBA8 image in place. The
 // wordmark sits in a canvas with a wide margin; laying that margin out as if it
-// were logo would push the two text lines away from it by an amount that
-// depends on the artwork rather than on the design.
+// were logo would push the line above it away by an amount that depends on the
+// artwork rather than on the design.
 void TrimTransparentBorder(ugui::SvgImage& image) {
   const u32 w = image.width;
   const u32 h = image.height;
@@ -182,7 +179,7 @@ bool Splash::LoadFont(asset::Vfs& vfs) {
     ui_->set_default_font(ui_->LoadFont(system));
     return true;
   }
-  // The wordmark carries the plate on its own; only the two lines are lost.
+  // The wordmark carries the plate on its own; only the line above it is lost.
   RX_WARN("splash: no font (mount rx_fonts.rxp); the plate draws without text");
   return false;
 }
@@ -232,13 +229,18 @@ bool Splash::LoadLogo() {
     return false;
   }
 
+  // Each trim rounds its four edges on its own, so the final raster's aspect
+  // sits near the probe's without matching it. The draw box follows the raster
+  // this uploads. A box measured from the probe stretches the wordmark by the
+  // difference between the two.
+  logo_aspect_ = static_cast<f32>(image.width) / static_cast<f32>(image.height);
+
   logo_ = backend_.CreateTexture(image.width, image.height, ugui::RHIFormat::kRgba8Unorm,
                                  image.pixels.data(), ugui::RHIFilter::kLinear);
   if (logo_ == ugui::kNullTextureId) {
     RX_ERROR("splash: cannot upload the rx wordmark");
     return false;
   }
-  logo_aspect_ = ink_aspect;
   return true;
 }
 
@@ -273,7 +275,11 @@ void Splash::BuildDocument() {
   const f32 plate_w = static_cast<f32>(window_->width()) / density + 2.0f * kBleed;
   const f32 plate_h = static_cast<f32>(window_->height()) / density + 2.0f * kBleed;
 
-  char doc[1536];
+  char doc[1024];
+  // ugui blits the texture into whatever rect layout hands the widget, so the
+  // box has to hold the aspect of the upload. Fractional px, because rounding
+  // the two sides apart skews it. flex-shrink: 0, because a column short on
+  // room takes the height back and leaves the width alone.
   std::snprintf(doc, sizeof(doc),
                 "panel splash_root {\n"
                 "  width: %d; height: %d; margin: %d 0 0 %d;\n"
@@ -283,20 +289,13 @@ void Splash::BuildDocument() {
                 "    text: \"MADE WITH\"; font-size: 13; font-weight: medium;\n"
                 "    letter-spacing: 7; color: #8a8f92; margin: 0 0 %d 0;\n"
                 "  }\n"
-                "  image splash_logo { width: %d; height: %d; }\n"
-                "  panel splash_rule {\n"
-                "    width: 56; height: 2; background: %s; margin: %d 0 0 0;\n"
-                "  }\n"
-                "  text splash_version {\n"
-                "    text: \"%s\"; font-size: 12; letter-spacing: 3;\n"
-                "    color: #9aa0a3; margin: %d 0 0 0;\n"
+                "  image splash_logo {\n"
+                "    width: %.2f; height: %.2f; flex-shrink: 0;\n"
                 "  }\n"
                 "}\n",
                 static_cast<int>(plate_w), static_cast<int>(plate_h),
                 -static_cast<int>(kBleed), -static_cast<int>(kBleed),
-                static_cast<int>(logo_h * 0.20f), static_cast<int>(logo_w),
-                static_cast<int>(logo_h), kBrandRed, static_cast<int>(logo_h * 0.26f),
-                RX_ENGINE_VERSION, static_cast<int>(logo_h * 0.13f));
+                static_cast<int>(logo_h * 0.20f), logo_w, logo_h);
 
   ui_->LoadUiString(doc, "rx_splash");
   if (ugui::wid logo = ui_->FindWidget("splash_logo"); logo.valid())
@@ -312,8 +311,8 @@ bool Splash::Update(f32 frame_delta) {
   if (elapsed_ >= total_seconds_) return false;
 
   // Hold at full strength, then fade the whole plate out; opacity inherits
-  // multiplicatively in ugui, so the root carries the wordmark and both lines
-  // with it.
+  // multiplicatively in ugui, so the root carries the wordmark and the line
+  // above it.
   const f32 fade_starts = total_seconds_ - kFadeOutSeconds;
   opacity_ = elapsed_ <= fade_starts
                  ? 1.0f

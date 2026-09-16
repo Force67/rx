@@ -44,10 +44,6 @@ rx_add_module(ui
 target_link_libraries(rx_ui PUBLIC
   rx::core rx::asset rx::render $<BUILD_INTERFACE:ultragui>)
 
-# The splash plate names the engine build it came from; nothing else in the
-# tree needs a version string, so it is defined here rather than generated.
-target_compile_definitions(rx_ui PRIVATE RX_ENGINE_VERSION="rx ${PROJECT_VERSION}")
-
 # ugui pipeline shaders (SDF quads, glyphs, frosted glass), hlsl -> embedded spirv.
 rx_embed_shaders(rx_ui
   shaders/ugui_quad.vs.hlsl
