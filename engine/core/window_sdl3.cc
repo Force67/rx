@@ -253,6 +253,23 @@ class Sdl3Window final : public Window {
 
   void SetFullscreen(bool enabled) override { SDL_SetWindowFullscreen(window_, enabled); }
 
+  void SetIcon(const u8* rgba, u32 width, u32 height) override {
+    if (!rgba || width == 0 || height == 0) return;
+    // The surface only borrows the pixels; SDL_SetWindowIcon copies them into
+    // the icon it keeps, so both can go back before this returns.
+    SDL_Surface* surface =
+        SDL_CreateSurfaceFrom(static_cast<int>(width), static_cast<int>(height),
+                              SDL_PIXELFORMAT_RGBA32, const_cast<u8*>(rgba),
+                              static_cast<int>(width * 4));
+    if (!surface) {
+      RX_WARN("sdl: icon surface failed: {}", SDL_GetError());
+      return;
+    }
+    if (!SDL_SetWindowIcon(window_, surface))
+      RX_WARN("sdl: window icon rejected: {}", SDL_GetError());
+    SDL_DestroySurface(surface);
+  }
+
   bool fullscreen() const override {
     return (SDL_GetWindowFlags(window_) & SDL_WINDOW_FULLSCREEN) != 0;
   }

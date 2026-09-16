@@ -92,6 +92,12 @@ class RX_CORE_EXPORT Window {
   // and key events kept working perfectly.
   virtual void SetTextInputActive(bool active) {}
 
+  // The window's desktop and taskbar icon, as tightly packed RGBA8. The
+  // platform copies the pixels, so they are the caller's again the moment this
+  // returns. Headless, and the platforms that take the icon from the package
+  // manifest rather than the process, no-op.
+  virtual void SetIcon(const u8* rgba, u32 width, u32 height) {}
+
   // Runtime borderless-fullscreen toggle (settings menus); headless and
   // platforms without the concept no-op and report false.
   virtual void SetFullscreen(bool enabled) { (void)enabled; }
