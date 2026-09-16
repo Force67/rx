@@ -1,6 +1,7 @@
 #include "render/geometry/ocean_fft.h"
 
 #include <cmath>
+#include <cstring>
 #include <random>
 #include <vector>
 

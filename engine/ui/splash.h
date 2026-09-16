@@ -2,7 +2,6 @@
 #define RX_UI_SPLASH_H_
 
 #include <optional>
-#include <string>
 
 #include <ugui/ui_context.h>
 
@@ -103,8 +102,6 @@ class RX_UI_EXPORT Splash {
   // canvas. BuildDocument measures the draw box from it, so the two cannot
   // drift apart without the wordmark stretching to cover the difference.
   f32 logo_aspect_ = 1.0f;
-  // Deleted in Shutdown; empty when the font came from the system instead.
-  std::string font_cache_path_;
 
   f32 total_seconds_ = kDefaultSeconds;
   f32 elapsed_ = 0.0f;

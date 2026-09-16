@@ -1,12 +1,8 @@
 #include "ui/splash.h"
 
-#include <unistd.h>
-
-#include <cstdio>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
-#include <string>
 #include <system_error>
 
 #include <ugui/core/color.h>
@@ -33,9 +29,8 @@ namespace fs = std::filesystem;
 constexpr f32 kLogoHeightFraction = 0.26f;
 constexpr f32 kLogoWidthFraction = 0.52f;
 
-// ultragui's TextEngine opens fonts by path (FT_New_Face), and rx ships Roboto
-// inside rx_fonts.rxp, so the bytes have no path of their own. Mirror them into
-// one file under the temp dir; Shutdown removes it again.
+// rx ships Roboto inside rx_fonts.rxp, so the face has no path of its own and
+// is handed to ultragui as bytes (LoadFontMemory, which keeps its own copy).
 constexpr const char* kFontAsset = "fonts://roboto/Roboto-Medium.ttf";
 
 // A font on the machine, for a tree whose rx_fonts.rxp was never packed. The
@@ -159,20 +154,11 @@ bool Splash::Initialize(Window& window, render::Renderer& renderer, asset::Vfs& 
 
 bool Splash::LoadFont(asset::Vfs& vfs) {
   if (std::optional<base::Vector<u8>> bytes = vfs.Read(kFontAsset)) {
-    std::error_code ec;
-    fs::path path = fs::temp_directory_path(ec) /
-                    ("rx-splash-" + std::to_string(::getpid()) + ".ttf");
-    if (!ec) {
-      if (std::FILE* f = std::fopen(path.c_str(), "wb")) {
-        const std::size_t written = std::fwrite(bytes->data(), 1, bytes->size(), f);
-        std::fclose(f);
-        if (written == bytes->size()) {
-          font_cache_path_ = path.string();
-          ui_->set_default_font(ui_->LoadFont(font_cache_path_.c_str()));
-          return true;
-        }
-        fs::remove(path, ec);
-      }
+    const ugui::FontHandle font = ui_->LoadFontMemory(
+        reinterpret_cast<const char*>(bytes->data()), bytes->size());
+    if (font != ugui::kInvalidFont) {
+      ui_->set_default_font(font);
+      return true;
     }
   }
   if (const char* system = SystemFont()) {
@@ -369,11 +355,6 @@ void Splash::Shutdown() {
     }
     park_.reset();  // before ui_: ScopedActive restores in reverse order
     ui_.reset();
-  }
-  if (!font_cache_path_.empty()) {
-    std::error_code ec;
-    fs::remove(font_cache_path_, ec);
-    font_cache_path_.clear();
   }
   draw_data_ = nullptr;
   ready_ = false;
