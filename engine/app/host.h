@@ -11,6 +11,7 @@
 #include "app/services.h"
 #include "core/export.h"
 #include "core/frame_timer.h"
+#include "ui/splash.h"
 
 namespace rx::app {
 
@@ -63,6 +64,9 @@ class RX_APP_EXPORT Host {
   // Fills view.draws from every visible Transform+Renderable entity, keeping
   // last frame's world matrices for motion vectors.
   void GatherEntityDraws(render::FrameView& view);
+  // Whether this run should open with the rx splash plate: a windowed run that
+  // did not ask for it to be suppressed and is not a capture.
+  bool WantsSplash() const;
   // Whether a renderer came up: a windowed run, or a headless one capturing
   // offscreen. Everything that touches the GPU is gated on this, not on
   // `headless` alone.
@@ -85,6 +89,8 @@ class RX_APP_EXPORT Host {
   std::unique_ptr<audio::AudioSystem> audio_;
 
   render::Renderer renderer_;
+  // Alive only until the plate is spent, then dropped mid-run (RunFrame).
+  std::unique_ptr<ui::Splash> splash_;
   physics::PhysicsWorld physics_;
   base::Vector<PhysicsBinding> physics_bindings_;
   base::Vector<HairStrandBinding> hair_bindings_;

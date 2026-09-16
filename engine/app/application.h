@@ -37,6 +37,12 @@ struct AppConfig {
   // someone will compare (--shot) sets it; an interactive one leaves it 0.
   // RX_FIXED_DT wins when the caller set it, 0 included (host.cc).
   f32 fixed_delta = 0.0f;
+  // Show the rx splash plate over the first seconds of a windowed run
+  // (engine/ui/splash.h). An application turns it off only when it is not an
+  // rx-branded product; the host already suppresses it for headless and
+  // lockstep-capture runs, which is where it would do damage. RX_SPLASH
+  // overrides this in both directions.
+  bool splash = true;
   // Last word on the resolved RenderSettings. ApplyRenderPreset replaces the
   // settings wholesale from the tier, then re-applies each env override by
   // hand; anything an app tuned earlier is lost in that replacement. This runs

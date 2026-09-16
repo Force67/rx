@@ -1,9 +1,9 @@
-// Headless no-op ugui::RHI for the recreation engine. Compiled into the
-// ultragui static library in place of the bundled Vulkan RHI
-// (ULTRAGUI_RHI_SOURCE). In draw-data mode the host engine owns the GPU and
-// renders the draw list itself, so the bundled RHI is never initialized; this
-// stub keeps the library free of any Vulkan (and the volk/loader conflict it
-// would otherwise cause against the engine's own renderer).
+// Headless no-op ugui::RHI for rx. Compiled into the ultragui static library in
+// place of the bundled Vulkan RHI (ULTRAGUI_RHI_SOURCE). In draw-data mode the
+// host engine owns the GPU and renders the draw list itself, so the bundled RHI
+// is never initialized; this stub keeps the library free of any Vulkan (and the
+// volk/loader conflict it would otherwise cause against the engine's own
+// renderer).
 
 #include <ugui/rhi/rhi.h>
 

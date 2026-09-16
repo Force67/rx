@@ -42,6 +42,28 @@ if(NOT TARGET equilibrium::base)
     INTERFACE_LINK_LIBRARIES "Threads::Threads")
 endif()
 
+# libultragui (PUBLIC via rx::ui headers: the splash and the editor's UI).
+# Its text stack is private to it, but a static archive defers those symbols to
+# the consumer's final link, so freetype/harfbuzz are pulled in here too.
+if(@RX_INSTALL_UI@ AND NOT TARGET ultragui)
+  find_package(PkgConfig REQUIRED)
+  if(NOT TARGET PkgConfig::FREETYPE)
+    pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
+  endif()
+  if(NOT TARGET PkgConfig::HARFBUZZ)
+    pkg_check_modules(HARFBUZZ REQUIRED IMPORTED_TARGET harfbuzz)
+  endif()
+  add_library(yogacore STATIC IMPORTED)
+  set_target_properties(yogacore PROPERTIES
+    IMPORTED_LOCATION "${_rx_deps_lib}/libyogacore.a")
+  add_library(ultragui STATIC IMPORTED)
+  set_target_properties(ultragui PROPERTIES
+    IMPORTED_LOCATION "${_rx_deps_lib}/libultragui.a"
+    INTERFACE_INCLUDE_DIRECTORIES "${_rx_deps_inc}"
+    INTERFACE_LINK_LIBRARIES
+      "yogacore;PkgConfig::FREETYPE;PkgConfig::HARFBUZZ")
+endif()
+
 # Vulkan headers / volk / VMA (PUBLIC via rhi/vulkan_interop.h)
 if(NOT TARGET Vulkan::Headers)
   add_library(Vulkan::Headers INTERFACE IMPORTED)
@@ -112,6 +134,10 @@ if(TARGET rx::core)
     set_property(TARGET rx::core APPEND PROPERTY
       INTERFACE_LINK_LIBRARIES $<LINK_ONLY:PkgConfig::WAYLAND_CLIENT>)
   endif()
+endif()
+
+if(TARGET rx::ui AND TARGET ultragui)
+  set_property(TARGET rx::ui APPEND PROPERTY INTERFACE_LINK_LIBRARIES ultragui)
 endif()
 
 # volk / VMA are PUBLIC on rx::render (headers propagate), the SDK archives are
