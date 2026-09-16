@@ -16,12 +16,12 @@
 namespace rx::ui {
 
 // The engine plate every rx application shows over its first frames: the rx
-// wordmark on a light field, held for a couple of seconds and then faded out.
+// wordmark on a light field, held for a few seconds and then faded out.
 // app::Host owns one and drives it; an application never sees it.
 //
 // It draws through FrameView::hud_draw, the same slot an application's own
 // ultragui HUD uses, and the host installs it *after* OnBuildView. So while the
-// splash is up it takes that slot over: for its ~2.4s a game's own HUD does not
+// splash is up it takes that slot over: for its ~4s a game's own HUD does not
 // record. That is the point (the plate is opaque and full-screen, so anything
 // underneath is invisible anyway) but it is why the host drops the splash the
 // moment it is done rather than keeping an idle instance around.
@@ -35,7 +35,7 @@ class RX_UI_EXPORT Splash {
   // How long the plate is up in total, and how much of that tail is the fade to
   // the application's first visible frame. RX_SPLASH_SECONDS overrides the
   // former; the fade is a constant so a shortened splash still lands softly.
-  static constexpr f32 kDefaultSeconds = 2.4f;
+  static constexpr f32 kDefaultSeconds = 4.0f;
   static constexpr f32 kFadeOutSeconds = 0.45f;
 
   Splash() = default;
