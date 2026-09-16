@@ -334,8 +334,12 @@ void Splash::Draw(render::FrameView& view) {
   }
   backend_.NewFrame();
   // Takes the slot an application's own HUD would use. The host installs this
-  // after OnBuildView precisely so the plate wins while it is up.
-  view.hud_draw = [this](render::CommandList& cmd) {
+  // after OnBuildView precisely so the plate wins while it is up. The HUD
+  // underneath still records: drop it and the fade dissolves to the bare scene
+  // rather than to the application's first screen, which on a game is a world
+  // that has not finished streaming.
+  view.hud_draw = [this, under = std::move(view.hud_draw)](render::CommandList& cmd) {
+    if (under) under(cmd);
     if (draw_data_) backend_.Render(*draw_data_, render::GetVkCommandBuffer(cmd));
   };
   // And drops the debug overlay, which records after hud_draw and would
