@@ -12,6 +12,9 @@ option(RX_FSR3 "Enable the AMD FSR 3.1 upscaler backend" ON)
 option(RX_DLSS "Enable the NVIDIA DLSS upscaler backend" ON)
 option(RX_NRD "Enable the NVIDIA NRD ray tracing denoiser" ON)
 option(RX_JOLT "Enable Jolt physics" ON)
+# https in rx::http. Off leaves the plain-http client, and an https URL then
+# fails with a message rather than downgrading. See engine/http/CMakeLists.txt.
+option(RX_HTTPS "Build rx::http's https path (needs an mbedTLS checkout)" ON)
 option(RX_USD "Enable OpenUSD scene loading (needs tools/get_tinyusdz.sh)" ON)
 # Vulkan 1.1 accepts SPIR-V 1.3, or 1.4 with VK_KHR_spirv_1_4; the default
 # shader target emits 1.6, which a conformant 1.1 driver rejects outright (only
@@ -282,6 +285,7 @@ if(NOT DEFINED RX_MODULES)
     rpc
     authoring
     net
+    http
     nav
     character
     combat
@@ -338,6 +342,39 @@ if(NOT TARGET zetanet AND "net" IN_LIST RX_MODULES)
   endif()
 endif()
 
+# mbedTLS backs rx::http's https path, and is the only external dependency that
+# client has. Nothing new is fetched: equilibrium vendors mbedTLS as a submodule
+# and zetanet vendors its own, so whichever checkout is present is reused.
+# A parent project that already builds an `mbedtls` target (recreation, when
+# zetanet takes its mbedTLS crypto backend) wins outright - two copies of it in
+# one link is a symbol clash, and the client compiles against either major
+# version (see the MBEDTLS_VERSION_MAJOR branches in tls_stream.cc).
+if(RX_HTTPS AND "http" IN_LIST RX_MODULES AND NOT TARGET mbedtls)
+  set(RX_MBEDTLS_DIR "" CACHE PATH "Path to an mbedTLS checkout for rx::http's https")
+  if(NOT RX_MBEDTLS_DIR)
+    foreach(_candidate
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium/external/mbedtls"
+        "${RX_ZETANET_DIR}/vendor/mbedtls")
+      if(EXISTS "${_candidate}/CMakeLists.txt")
+        set(RX_MBEDTLS_DIR "${_candidate}" CACHE PATH "" FORCE)
+        break()
+      endif()
+    endforeach()
+  endif()
+  if(EXISTS "${RX_MBEDTLS_DIR}/CMakeLists.txt")
+    set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+    set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(MBEDTLS_AS_SUBPROJECT ON CACHE BOOL "" FORCE)
+    # A vendored release we do not get to edit, built with -Werror: every new
+    # compiler finds something new in it, and none of it is ours to fix.
+    set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(${RX_MBEDTLS_DIR} mbedtls EXCLUDE_FROM_ALL)
+  else()
+    message(STATUS
+      "rx: no mbedtls checkout found (set RX_MBEDTLS_DIR), rx::http is http-only")
+  endif()
+endif()
+
 # A downstream fork registers its own engine/<name> modules by shipping this
 # file: it runs with RX_MODULES already populated, so it appends to that list
 # (and sets whatever paths its modules need) without editing anything upstream
@@ -369,6 +406,15 @@ if(RX_BUILD_TESTS AND "net" IN_LIST RX_MODULES)
   add_executable(net_test test/net_test.cc)
   target_link_libraries(net_test PRIVATE rx::net rx::core)
   add_test(NAME net_test COMMAND net_test)
+endif()
+
+# rx::http unit tests: url parsing, response-head parsing, chunked decoding and
+# the refusals that happen before a socket is opened. Nothing here touches the
+# network; the live fetch inside it only runs with RX_HTTP_LIVE set.
+if(RX_BUILD_TESTS AND "http" IN_LIST RX_MODULES)
+  add_executable(http_test test/http_test.cc)
+  target_link_libraries(http_test PRIVATE rx::http rx::core)
+  add_test(NAME http_test COMMAND http_test)
 endif()
 
 # Touch contact state machine: header-only logic over core/input.h, so it needs
