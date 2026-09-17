@@ -106,10 +106,18 @@ bool LoadWindowsRoots(mbedtls_x509_crt* chain, base::String* error) {
 bool LoadTrustStore(mbedtls_x509_crt* chain,
                     const base::String& ca_file,
                     base::String* error) {
+  // mbedtls_x509_crt_parse_file returns 0 when every certificate in the file
+  // parsed, a POSITIVE count when some did and the rest are usable, and a
+  // negative code when nothing loaded. Reading that as "only 0 means loaded"
+  // failed a usable 149-of-150 bundle; reading a failure as "try the system
+  // store" quietly replaced a pinned CA with every public root.
+  const auto load = [](mbedtls_x509_crt* into, const char* path) {
+    return mbedtls_x509_crt_parse_file(into, path) >= 0;
+  };
+
   if (!ca_file.empty()) {
-    const int rc = mbedtls_x509_crt_parse_file(chain, ca_file.c_str());
-    if (rc != 0) {
-      *error = MbedError("cannot read the ca bundle", rc);
+    if (!load(chain, ca_file.c_str())) {
+      *error = base::String("cannot read the ca bundle at ") + ca_file;
       return false;
     }
     return true;
@@ -120,20 +128,26 @@ bool LoadTrustStore(mbedtls_x509_crt* chain,
   // never call InitOptionsFromEnv. RX_HTTP_CA_FILE is ours (a private CA in
   // front of a self-hosted service), SSL_CERT_FILE is the one the rest of the
   // system already sets, NixOS included.
+  //
+  // Naming a file is a decision, so a named file that will not load fails the
+  // request. Falling through to the system store would hand an operator who
+  // pinned one CA the full public root set instead, with a warning as the only
+  // sign of it.
   for (const char* key : {"RX_HTTP_CA_FILE", "SSL_CERT_FILE"}) {
     const char* env = std::getenv(key);
     if (env == nullptr || *env == '\0')
       continue;
-    if (mbedtls_x509_crt_parse_file(chain, env) == 0)
+    if (load(chain, env))
       return true;
-    RX_WARN("http: {}={} is unreadable, falling back to the system paths", key, env);
+    *error = base::String(key) + "=" + env + " holds no certificate this build can read";
+    return false;
   }
 
 #ifdef _WIN32
   return LoadWindowsRoots(chain, error);
 #else
   for (const char* path : kCaBundlePaths) {
-    if (mbedtls_x509_crt_parse_file(chain, path) == 0)
+    if (load(chain, path))
       return true;
   }
   // A directory of hashed certs is the other common shape (openssl c_rehash).
