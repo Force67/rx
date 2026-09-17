@@ -60,9 +60,9 @@ void SetTimeouts(SocketHandle s, u32 timeout_ms) {
   ::setsockopt(s, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&ms), sizeof(ms));
 }
 
-// Winsock needs one process-wide startup before any socket call, and nothing
-// else in rx guarantees it has happened (zetanet does its own, but rx::http
-// builds without zetanet).
+// Winsock needs one process-wide startup before any socket call. Nothing else
+// in rx guarantees it ran: zetanet does its own, and rx::http builds without
+// zetanet.
 void EnsureSocketLibrary() {
   static std::once_flag once;
   std::call_once(once, [] {
@@ -121,7 +121,7 @@ void SetTimeouts(SocketHandle s, u32 timeout_ms) {
 void EnsureSocketLibrary() {}
 #endif
 
-base::String Describe(const char* what, int err) {
+base::String SocketError(const char* what, int err) {
   char buffer[192] = {};
   std::snprintf(buffer, sizeof(buffer), "%s: %s (%d)", what, std::strerror(err), err);
   return base::String(buffer);
@@ -189,7 +189,7 @@ class TcpStream final : public Stream {
       if (ErrorIsInterrupt(err))
         continue;
       *error = ErrorIsTimeout(err) ? base::String("write timed out")
-                                   : Describe("write failed", err);
+                                   : SocketError("write failed", err);
       return false;
     }
     return true;
@@ -204,7 +204,7 @@ class TcpStream final : public Stream {
       if (ErrorIsInterrupt(err))
         continue;
       *error = ErrorIsTimeout(err) ? base::String("read timed out")
-                                   : Describe("read failed", err);
+                                   : SocketError("read failed", err);
       return -1;
     }
   }
@@ -213,7 +213,7 @@ class TcpStream final : public Stream {
   bool TryConnect(const addrinfo& ai, u32 timeout_ms, base::String* last_error) {
     SocketHandle sock = ::socket(ai.ai_family, ai.ai_socktype, ai.ai_protocol);
     if (sock == kInvalidSocket) {
-      *last_error = Describe("socket", LastError());
+      *last_error = SocketError("socket", LastError());
       return false;
     }
 #if defined(SO_NOSIGPIPE)
@@ -228,14 +228,14 @@ class TcpStream final : public Stream {
     if (rc != 0) {
       const int err = LastError();
       if (!ErrorIsInProgress(err)) {
-        *last_error = Describe("connect", err);
+        *last_error = SocketError("connect", err);
         CloseSocket(sock);
         return false;
       }
       const int ready = PollWritable(sock, static_cast<int>(timeout_ms));
       if (ready <= 0) {
         *last_error = ready == 0 ? base::String("connect timed out")
-                                 : Describe("connect poll", LastError());
+                                 : SocketError("connect poll", LastError());
         CloseSocket(sock);
         return false;
       }
@@ -245,7 +245,7 @@ class TcpStream final : public Stream {
       if (::getsockopt(sock, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&so_error), &len) !=
               0 ||
           so_error != 0) {
-        *last_error = Describe("connect", so_error != 0 ? so_error : LastError());
+        *last_error = SocketError("connect", so_error != 0 ? so_error : LastError());
         CloseSocket(sock);
         return false;
       }

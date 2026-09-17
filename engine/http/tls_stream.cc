@@ -1,6 +1,6 @@
-// The TLS half of rx::http, kept in its own translation unit so a build
-// without an mbedTLS backend still links the plain-HTTP client (MakeTlsStream
-// then returns null and an https URL fails with a clear error).
+// The TLS half of rx::http, in its own translation unit so that a build with
+// no mbedTLS backend still links the plain-http client. MakeTlsStream then
+// returns null and an https URL fails with a message saying exactly that.
 
 #include "http/stream.h"
 
@@ -282,8 +282,8 @@ class TlsStream final : public Stream {
 #if defined(MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET)
       // TLS 1.3 servers hand out resumption tickets after the handshake, and
       // mbedTLS reports each one to the caller instead of swallowing it. This
-      // client never resumes a session, so a ticket is just a record to read
-      // past -- not doing so ends every 1.3 response with an error.
+      // client never resumes a session, so a ticket is a record to read past.
+      // Treating it as an error ends every 1.3 response with one.
       if (got == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET)
         continue;
 #endif

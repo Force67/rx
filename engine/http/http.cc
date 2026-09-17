@@ -7,9 +7,8 @@
 namespace rx::http {
 namespace {
 
-// A response head larger than this is a server doing something else entirely;
-// the cap keeps a hostile peer from growing the buffer without bound before we
-// have even seen a status line.
+// A response head larger than this is a server doing something else entirely.
+// The cap bounds the buffer a peer can grow before it has sent a status line.
 constexpr u32 kMaxHeadBytes = 64 * 1024;
 constexpr u32 kReadChunk = 16 * 1024;
 
@@ -26,14 +25,15 @@ bool EqualsIgnoreCase(const base::String& a, const base::String& b) {
   return true;
 }
 
-bool ContainsIgnoreCase(const base::String& haystack, const char* needle) {
-  const base::String lowered_needle(needle);
-  if (lowered_needle.empty() || haystack.size() < lowered_needle.size())
+// `needle` must already be lowercase: only the haystack is folded.
+bool Contains(const base::String& haystack, const char* lowercase_needle) {
+  const base::String needle(lowercase_needle);
+  if (needle.empty() || haystack.size() < needle.size())
     return false;
-  for (base::String::size_type i = 0; i + lowered_needle.size() <= haystack.size(); ++i) {
+  for (base::String::size_type i = 0; i + needle.size() <= haystack.size(); ++i) {
     bool hit = true;
-    for (base::String::size_type j = 0; j < lowered_needle.size(); ++j) {
-      if (Lower(haystack[i + j]) != lowered_needle[j]) {
+    for (base::String::size_type j = 0; j < needle.size(); ++j) {
+      if (Lower(haystack[i + j]) != needle[j]) {
         hit = false;
         break;
       }
@@ -290,7 +290,7 @@ Response Exchange(const Request& request,
     return response;
 
   const base::String* encoding = response.Find(base::String("transfer-encoding"));
-  const bool chunked = encoding != nullptr && ContainsIgnoreCase(*encoding, "chunked");
+  const bool chunked = encoding != nullptr && Contains(*encoding, "chunked");
   const base::String* length_header = response.Find(base::String("content-length"));
 
   if (chunked) {

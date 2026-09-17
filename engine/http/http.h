@@ -8,10 +8,10 @@
 #include "core/types.h"
 #include "http/url.h"
 
-// A small HTTP/1.1 client: one request, one connection, one answer. It exists
-// so the engine can talk to plain web APIs (a server list, an update check)
-// without pulling a dependency in; it is not a general-purpose library and
-// deliberately has no keep-alive pool, no cookie jar and no compression.
+// A small HTTP/1.1 client: one request, one connection, one answer. It is here
+// so the engine can call a web API (a server list, an update check) without
+// taking a dependency for it. What a browser needs is absent: connection
+// reuse, cookies, content decoding.
 //
 // Every call BLOCKS the calling thread for as long as the exchange takes. Never
 // call it from a frame thread: hand it to a worker and pick the result up.
@@ -35,8 +35,8 @@ struct RX_HTTP_EXPORT Request {
   base::String content_type;  // sent only when body is non-empty
 
   // Armed per socket operation (connect, each read, each write), not on the
-  // exchange as a whole: a server that keeps trickling bytes keeps the call
-  // alive, a server that stalls does not.
+  // exchange as a whole. A server that keeps sending keeps the call alive; one
+  // that stalls does not.
   u32 timeout_ms = 10'000;
   // A response larger than this fails instead of growing the heap. Raise it
   // deliberately for an endpoint known to answer with more.
