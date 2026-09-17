@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <base/option.h>
+
 #include "http/http.h"
 #include "http/url.h"
 
@@ -186,6 +188,20 @@ void TestLive() {
   const http::Response response = http::Get(target);
   std::printf("  status %u, %zu bytes, error '%s'\n", unsigned(response.status),
               size_t(response.body.size()), response.error.c_str());
+  // The first line or so of the body, which is how a probe endpoint (say
+  // howsmyssl) is read back: the answer is the point of the fetch. The whole
+  // body goes to RX_HTTP_LIVE_OUT when the interesting part is further in.
+  if (!response.body.empty()) {
+    const size_t shown = response.body.size() < 240 ? response.body.size() : 240;
+    std::printf("  body: %.*s\n", int(shown), response.body.c_str());
+    if (const char* out = std::getenv("RX_HTTP_LIVE_OUT"); out != nullptr && *out != '\0') {
+      if (std::FILE* file = std::fopen(out, "wb"); file != nullptr) {
+        std::fwrite(response.body.c_str(), 1, response.body.size(), file);
+        std::fclose(file);
+        std::printf("  body written to %s\n", out);
+      }
+    }
+  }
   CHECK(response.ok());
   CHECK(!response.body.empty());
 }
@@ -193,6 +209,9 @@ void TestLive() {
 }  // namespace
 
 int main() {
+  // The client's own knobs (RX_HTTP_TLS_DEBUG) are base::Options, and nothing
+  // else in a bare test binary populates them from the environment.
+  base::InitOptionsFromEnv();
   TestUrlParse();
   TestUrlResolve();
   TestResponseHead();

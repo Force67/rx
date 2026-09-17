@@ -6,7 +6,10 @@
 
 #if RX_HTTP_TLS
 
+#include <base/option.h>
+
 #include <mbedtls/ctr_drbg.h>
+#include <mbedtls/debug.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/error.h>
 #include <mbedtls/net_sockets.h>  // only for the MBEDTLS_ERR_NET_* BIO codes
@@ -31,6 +34,15 @@
 
 namespace rx::http {
 namespace {
+
+// mbedTLS's own handshake trace, 1 (errors) to 4 (every record). The only way
+// to see why a handshake failed from the outside is to watch it happen.
+base::Option<int> TlsDebug{"http.tls.debug", 0, "RX_HTTP_TLS_DEBUG",
+                           "mbedtls handshake trace level, 1 to 4"};
+
+void TraceMbed(void*, int level, const char* file, int line, const char* message) {
+  RX_INFO("tls[{}] {}:{}: {}", level, file, line, message);
+}
 
 // TLS 1.3 (and all of mbedTLS 4) draws its randomness from PSA, which the
 // application has to start exactly once before the first handshake. Harmless
@@ -103,11 +115,18 @@ bool LoadTrustStore(mbedtls_x509_crt* chain,
     return true;
   }
 
-  if (const char* env = std::getenv("SSL_CERT_FILE"); env != nullptr && *env != '\0') {
-    const int rc = mbedtls_x509_crt_parse_file(chain, env);
-    if (rc == 0)
+  // Read straight from the environment rather than through base::Option: this
+  // runs in whatever process linked the client, including test binaries that
+  // never call InitOptionsFromEnv. RX_HTTP_CA_FILE is ours (a private CA in
+  // front of a self-hosted service), SSL_CERT_FILE is the one the rest of the
+  // system already sets, NixOS included.
+  for (const char* key : {"RX_HTTP_CA_FILE", "SSL_CERT_FILE"}) {
+    const char* env = std::getenv(key);
+    if (env == nullptr || *env == '\0')
+      continue;
+    if (mbedtls_x509_crt_parse_file(chain, env) == 0)
       return true;
-    RX_WARN("http: SSL_CERT_FILE={} is unreadable, falling back to the system paths", env);
+    RX_WARN("http: {}={} is unreadable, falling back to the system paths", key, env);
   }
 
 #ifdef _WIN32
@@ -191,6 +210,11 @@ class TlsStream final : public Stream {
     mbedtls_ssl_conf_rng(&conf_, mbedtls_ctr_drbg_random, &drbg_);
 #endif
 
+    if (TlsDebug.get() > 0) {
+      mbedtls_debug_set_threshold(TlsDebug.get());
+      mbedtls_ssl_conf_dbg(&conf_, &TraceMbed, nullptr);
+    }
+
     rc = mbedtls_ssl_setup(&ssl_, &conf_);
     if (rc != 0) {
       *error = MbedError("cannot set up the tls session", rc);
@@ -255,6 +279,14 @@ class TlsStream final : public Stream {
         return got;
       if (got == MBEDTLS_ERR_SSL_WANT_READ || got == MBEDTLS_ERR_SSL_WANT_WRITE)
         continue;
+#if defined(MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET)
+      // TLS 1.3 servers hand out resumption tickets after the handshake, and
+      // mbedTLS reports each one to the caller instead of swallowing it. This
+      // client never resumes a session, so a ticket is just a record to read
+      // past -- not doing so ends every 1.3 response with an error.
+      if (got == MBEDTLS_ERR_SSL_RECEIVED_NEW_SESSION_TICKET)
+        continue;
+#endif
       // A peer that closes the session is end of stream, not an error, whether
       // it sent close_notify or just hung up: a "body ends at close" response
       // lands here and the caller decides whether what it read is complete.

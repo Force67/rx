@@ -369,6 +369,25 @@ if(RX_HTTPS AND "http" IN_LIST RX_MODULES AND NOT TARGET mbedtls)
     # compiler finds something new in it, and none of it is ours to fix.
     set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
     add_subdirectory(${RX_MBEDTLS_DIR} mbedtls EXCLUDE_FROM_ALL)
+    # mbedTLS 3.x ships with TLS 1.3 compiled out. rx::http talks to the open
+    # web, where 1.3 is what a modern endpoint negotiates and a few already
+    # refuse anything older, so it is switched on here rather than left as a
+    # surprise. PUBLIC on every library: the option changes the layout of
+    # mbedtls_ssl_context, so the library and everyone including its headers
+    # have to be compiled with the same answer. Harmless on 4.x, which defines
+    # the same symbol itself.
+    # COMPATIBILITY_MODE is not optional in practice: a TLS 1.3 server sends a
+    # dummy ChangeCipherSpec record so middleboxes keep believing they are
+    # watching TLS 1.2, and without this mbedTLS calls that record invalid and
+    # fails every handshake on the open web. Verified: with 1.3 on and this off,
+    # example.com, google.com and cloudflare.com all died at EncryptedExtensions.
+    foreach(_mbed mbedtls mbedx509 mbedcrypto)
+      if(TARGET ${_mbed})
+        target_compile_definitions(${_mbed} PUBLIC
+          MBEDTLS_SSL_PROTO_TLS1_3
+          MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE)
+      endif()
+    endforeach()
   else()
     message(STATUS
       "rx: no mbedtls checkout found (set RX_MBEDTLS_DIR), rx::http is http-only")

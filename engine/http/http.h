@@ -16,8 +16,9 @@
 // Every call BLOCKS the calling thread for as long as the exchange takes. Never
 // call it from a frame thread: hand it to a worker and pick the result up.
 //
-// https rides mbedTLS (RX_HTTP_TLS). Without that backend an https URL fails
-// with an error rather than quietly downgrading to plaintext.
+// https rides mbedTLS (RX_HTTP_TLS), TLS 1.3 with a 1.2 fallback. Without that
+// backend an https URL fails with an error rather than quietly downgrading to
+// plaintext, and a certificate that does not verify fails the same way.
 
 namespace rx::http {
 
