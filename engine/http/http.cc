@@ -1,6 +1,7 @@
 #include "http/http.h"
 
 #include <cstdio>
+#include <initializer_list>
 
 #include "http/stream.h"
 
@@ -118,13 +119,21 @@ bool ParseChunkSize(const base::String& text,
 
 enum class Chunked { kNeedMore, kDone, kBad };
 
-// Decodes what is there so far. kNeedMore means the caller should read more
-// bytes and try again with the longer buffer; the work is repeated on each
-// attempt, which is cheap next to the socket round trip and keeps the decoder
-// a pure function of the bytes received.
-Chunked DecodeChunkedPartial(const base::String& raw, base::String* out, u32 max_bytes) {
-  out->clear();
-  base::String::size_type i = 0;
+// How far into `raw` the decoder got, so the next call resumes instead of
+// starting over. Decoding from zero on every socket read is quadratic in the
+// body size: a 64 MB chunked answer cost 210 seconds of pure CPU, and no
+// timeout covers it because none of that time is spent in a socket call.
+struct ChunkedCursor {
+  base::String::size_type consumed = 0;  // bytes of `raw` already decoded
+};
+
+// Decodes what has arrived since the last call. kNeedMore means read more and
+// call again with the longer buffer and the same cursor.
+Chunked DecodeChunkedPartial(const base::String& raw,
+                             base::String* out,
+                             u32 max_bytes,
+                             ChunkedCursor* cursor) {
+  base::String::size_type i = cursor->consumed;
   for (;;) {
     const auto eol = raw.find("\r\n", i);
     if (eol == base::String::npos)
@@ -133,30 +142,54 @@ Chunked DecodeChunkedPartial(const base::String& raw, base::String* out, u32 max
     u64 size = 0;
     if (!ParseChunkSize(raw, i, eol, &size))
       return Chunked::kBad;
-    i = eol + 2;
 
     if (size == 0) {
       // The terminating chunk, then optional trailers, then a blank line.
+      base::String::size_type trailer = eol + 2;
       for (;;) {
-        const auto line_end = raw.find("\r\n", i);
+        const auto line_end = raw.find("\r\n", trailer);
         if (line_end == base::String::npos)
           return Chunked::kNeedMore;
-        if (line_end == i)
+        if (line_end == trailer)
           return Chunked::kDone;
-        i = line_end + 2;
+        trailer = line_end + 2;
       }
     }
 
-    if (out->size() + size > max_bytes)
+    // Written as a subtraction because the sum overflows: a declared size of
+    // 0xffffffffffffffff made `out->size() + size` wrap past the cap and
+    // `i + size + 2` wrap past the buffer length, and the append that followed
+    // was a memcpy of 2^64 bytes.
+    if (size > static_cast<u64>(max_bytes) - out->size())
       return Chunked::kBad;
-    if (raw.size() < i + size + 2)
+    const auto data = eol + 2;
+    if (raw.size() < data + size + 2)
       return Chunked::kNeedMore;
-    out->append(raw.c_str() + i, static_cast<base::String::size_type>(size));
-    i += static_cast<base::String::size_type>(size);
+    out->append(raw.c_str() + data, static_cast<base::String::size_type>(size));
+    i = data + static_cast<base::String::size_type>(size);
     if (raw[i] != '\r' || raw[i + 1] != '\n')
       return Chunked::kBad;
     i += 2;
+    cursor->consumed = i;  // this chunk is in `out` and will not be re-read
   }
+}
+
+// Removes every header whose name matches one of `names` (already lowercase).
+void DropHeaders(base::Vector<Header>* headers,
+                 std::initializer_list<const char*> names) {
+  base::Vector<Header> kept;
+  for (const Header& header : *headers) {
+    bool drop = false;
+    for (const char* name : names) {
+      if (EqualsIgnoreCase(header.name, base::String(name))) {
+        drop = true;
+        break;
+      }
+    }
+    if (!drop)
+      kept.push_back(header);
+  }
+  *headers = kept;
 }
 
 bool IsRedirect(u16 status) {
@@ -196,17 +229,20 @@ base::String BuildRequest(const Request& request,
   // socket, which doubles as the end-of-body signal when there is no length.
   out += "Connection: close\r\n";
 
-  if (!body.empty()) {
-    if (!request.content_type.empty() && !HasHeader(request.headers, "content-type")) {
-      out += "Content-Type: ";
-      out += request.content_type;
-      out += "\r\n";
-    }
-    if (!HasHeader(request.headers, "content-length")) {
-      out += "Content-Length: ";
-      out += Decimal(body.size());
-      out += "\r\n";
-    }
+  if (!body.empty() && !request.content_type.empty() &&
+      !HasHeader(request.headers, "content-type")) {
+    out += "Content-Type: ";
+    out += request.content_type;
+    out += "\r\n";
+  }
+  // A method that can carry a body says how long it is even when it is empty:
+  // without the header nginx answers 411 rather than running the request.
+  const bool body_allowed = !EqualsIgnoreCase(method, base::String("GET")) &&
+                            !EqualsIgnoreCase(method, base::String("HEAD"));
+  if ((!body.empty() || body_allowed) && !HasHeader(request.headers, "content-length")) {
+    out += "Content-Length: ";
+    out += Decimal(body.size());
+    out += "\r\n";
   }
 
   for (const Header& header : request.headers) {
@@ -244,7 +280,13 @@ Response Exchange(const Request& request,
     stream = MakeTcpStream();
   }
 
-  if (!stream->Connect(url.host, url.port, request.timeout_ms, &response.error))
+  // 0 means "return immediately" to poll and "wait forever" to SO_RCVTIMEO, and
+  // anything past INT_MAX turns into a negative poll timeout, which is also
+  // "wait forever". Neither is a timeout, so the value is bounded here.
+  const u32 timeout_ms =
+      request.timeout_ms == 0 ? 1u : (request.timeout_ms > 3600000u ? 3600000u
+                                                                   : request.timeout_ms);
+  if (!stream->Connect(url.host, url.port, timeout_ms, &response.error))
     return response;
 
   const base::String wire = BuildRequest(request, url, method, body);
@@ -274,10 +316,35 @@ Response Exchange(const Request& request,
     }
   }
 
-  if (!ParseResponseHead(buffer.substr(0, head_end), &response)) {
-    response.error = "the answer is not http (no status line)";
-    response.status = 0;
-    return response;
+  // A 1xx is an interim answer, not the response: an unsolicited "100 Continue"
+  // is legal and some proxies emit one. Drop it and read the next head, or the
+  // real response ends up inside this one's body.
+  for (;;) {
+    if (!ParseResponseHead(buffer.substr(0, head_end), &response)) {
+      response.error = "the answer is not http (no status line)";
+      response.status = 0;
+      return response;
+    }
+    if (response.status < 100 || response.status >= 200)
+      break;
+    response = Response{};
+    buffer = buffer.substr(head_end + 4);
+    head_end = buffer.find("\r\n\r\n");
+    while (head_end == base::String::npos) {
+      const i64 got = stream->Read(chunk, kReadChunk, &response.error);
+      if (got <= 0) {
+        response.error = "the server sent an interim answer and then stopped";
+        response.status = 0;
+        return response;
+      }
+      buffer.append(chunk, static_cast<base::String::size_type>(got));
+      head_end = buffer.find("\r\n\r\n");
+      if (head_end == base::String::npos && buffer.size() > kMaxHeadBytes) {
+        response.error = "response head exceeds 64 KB";
+        response.status = 0;
+        return response;
+      }
+    }
   }
 
   base::String raw = buffer.substr(head_end + 4);
@@ -294,13 +361,16 @@ Response Exchange(const Request& request,
   const base::String* length_header = response.Find(base::String("content-length"));
 
   if (chunked) {
+    ChunkedCursor cursor;
     for (;;) {
-      const Chunked state = DecodeChunkedPartial(raw, &response.body, request.max_body_bytes);
+      const Chunked state =
+          DecodeChunkedPartial(raw, &response.body, request.max_body_bytes, &cursor);
       if (state == Chunked::kDone)
         return response;
       if (state == Chunked::kBad) {
         response.error = "malformed chunked body";
         response.status = 0;
+        response.body.clear();  // partial bytes with no status is a trap
         return response;
       }
       const i64 got = stream->Read(chunk, kReadChunk, &response.error);
@@ -323,8 +393,30 @@ Response Exchange(const Request& request,
   }
 
   u64 expected = 0;
-  const bool have_length =
-      length_header != nullptr && ParseDecimal(Trim(*length_header), &expected);
+  bool have_length = false;
+  if (length_header != nullptr) {
+    // RFC 7230: a message with an unparseable Content-Length must be rejected.
+    // Falling through to "read until close" instead made "Content-Length: -1"
+    // and a 24-digit length return a happy 200 with whatever arrived.
+    if (!ParseDecimal(Trim(*length_header), &expected)) {
+      response.error = "the server sent a content-length that is not a length";
+      response.status = 0;
+      return response;
+    }
+    // Two different lengths mean two readers can disagree about where this
+    // message ends, which is how a request smuggles past a proxy.
+    for (const Header& header : response.headers) {
+      if (!EqualsIgnoreCase(header.name, base::String("content-length")))
+        continue;
+      u64 other = 0;
+      if (!ParseDecimal(Trim(header.value), &other) || other != expected) {
+        response.error = "the server sent conflicting content-lengths";
+        response.status = 0;
+        return response;
+      }
+    }
+    have_length = true;
+  }
   if (have_length && expected > request.max_body_bytes) {
     response.error = "response body exceeds the limit";
     response.status = 0;
@@ -341,13 +433,12 @@ Response Exchange(const Request& request,
     }
     const i64 got = stream->Read(chunk, kReadChunk, &response.error);
     if (got < 0) {
-      // Without a length, "the peer hung up" is the end of the body, so only a
-      // declared length turns a short read into a failure.
-      if (!have_length && !raw.empty()) {
-        response.error.clear();
-        break;
-      }
+      // Only a clean end of stream closes a body with no declared length. A
+      // read error is not one: treating a reset mid-body as "the end" handed
+      // the caller a truncated JSON document as a successful 200, which over
+      // TLS is the truncation attack this framing exists to notice.
       response.status = 0;
+      response.body.clear();
       return response;
     }
     if (got == 0) {
@@ -410,7 +501,9 @@ bool ParseResponseHead(const base::String& head, Response* out) {
 }
 
 bool DecodeChunked(const base::String& raw, base::String* out, u32 max_bytes) {
-  return DecodeChunkedPartial(raw, out, max_bytes) == Chunked::kDone;
+  out->clear();
+  ChunkedCursor cursor;
+  return DecodeChunkedPartial(raw, out, max_bytes, &cursor) == Chunked::kDone;
 }
 
 bool TlsAvailable() {
@@ -440,13 +533,29 @@ Response Fetch(const Request& request) {
     return response;
   }
 
-  base::String active_method = method;
-  base::String active_body = request.body;
+  // The request each hop actually sends. It starts as the caller's and is
+  // stripped down as the redirects move it away from the origin it was
+  // addressed to.
+  Request hop = request;
+  hop.method = method;
   u32 redirects_left = request.max_redirects;
   for (;;) {
-    response = Exchange(request, url, active_method, active_body);
-    if (response.status == 0 || !IsRedirect(response.status) || redirects_left == 0)
+    response = Exchange(hop, url, hop.method, hop.body);
+    if (response.status == 0 || !IsRedirect(response.status))
       return response;
+    if (redirects_left == 0) {
+      // Say so, rather than handing back a 3xx that looks like the server's
+      // final answer. A caller that switched following off (a POST, where a
+      // redirect would silently become a GET) needs to hear which it was.
+      const base::String* to = response.Find(base::String("location"));
+      response.error = request.max_redirects == 0
+                           ? base::String("the server redirected to ") +
+                                 (to != nullptr ? *to : base::String("elsewhere")) +
+                                 ", which this request does not follow"
+                           : base::String("too many redirects");
+      response.status = 0;
+      return response;
+    }
 
     const base::String* location = response.Find(base::String("location"));
     if (location == nullptr || location->empty())
@@ -458,11 +567,32 @@ Response Fetch(const Request& request) {
       response.status = 0;
       return response;
     }
+    // A redirect off TLS is refused, never followed: the caller asked for https
+    // and the bytes (a token, a session) would go out in the clear.
+    if (url.tls && !next.tls) {
+      response.error = "the redirect leaves https for http";
+      response.status = 0;
+      return response;
+    }
+    // Credentials belong to the origin they were addressed to. Every browser
+    // and every serious client drops them when a redirect crosses to another
+    // host, port or scheme, and so does this: otherwise one hostile Location
+    // hands a third party the caller's Authorization header. A caller-supplied
+    // Host goes for the same reason (it would name the old vhost on the new
+    // machine).
+    const bool same_origin =
+        next.host == url.host && next.port == url.port && next.tls == url.tls;
+    if (!same_origin)
+      DropHeaders(&hop.headers, {"authorization", "cookie", "proxy-authorization", "host"});
+
     // 303 says so outright, and 301/302 are treated the same way because that
     // is what every client on the web does; 307/308 exist to keep the method.
     if (response.status == 301 || response.status == 302 || response.status == 303) {
-      active_method = "GET";
-      active_body.clear();
+      hop.method = "GET";
+      hop.body.clear();
+      // The body is gone, so its framing headers have to go with it, or the
+      // next server waits for bytes that will never arrive.
+      DropHeaders(&hop.headers, {"content-length", "content-type", "transfer-encoding"});
     }
     url = next;
     --redirects_left;

@@ -32,6 +32,17 @@ bool ParsePort(const base::String& text, u16* out) {
   return true;
 }
 
+// CR and LF are the ones that matter (they end a request line), but nothing
+// below 0x20 or at 0x7f belongs in a URL either.
+bool HasControlChars(const base::String& text) {
+  for (base::String::size_type i = 0; i < text.size(); ++i) {
+    const unsigned char c = static_cast<unsigned char>(text[i]);
+    if (c < 0x20 || c == 0x7f)
+      return true;
+  }
+  return false;
+}
+
 bool SchemePort(const base::String& scheme, u16* port, bool* tls) {
   if (scheme == "http") {
     *port = 80;
@@ -99,12 +110,9 @@ bool SplitAuthority(const base::String& authority,
 bool Url::Parse(const base::String& text, Url* out) {
   // A CR or LF in a URL splices a second request into the stream once the
   // target reaches the request line, so it is refused here rather than
-  // escaped later. Other control bytes have no business in one either.
-  for (base::String::size_type i = 0; i < text.size(); ++i) {
-    const unsigned char c = static_cast<unsigned char>(text[i]);
-    if (c < 0x20 || c == 0x7f)
-      return false;
-  }
+  // escaped later.
+  if (HasControlChars(text))
+    return false;
 
   const auto sep = text.find("://");
   if (sep == base::String::npos || sep == 0)
@@ -165,12 +173,46 @@ base::String Url::Authority() const {
 bool Url::Resolve(const base::String& location, Url* out) const {
   if (location.empty())
     return false;
-  if (location.find("://") != base::String::npos)
-    return Parse(location, out);
+  // A Location comes off the wire and its bytes end up on the next request
+  // line, so it gets the screen Parse gives a URL. Without it a bare LF in a
+  // header splices a second request into the stream, and a server that accepts
+  // bare LF as a line ending reads whatever the sender wanted.
+  if (HasControlChars(location))
+    return false;
+
+  // Absolute only when the scheme separator comes before any path, query or
+  // fragment. Testing anywhere in the string sends "/login?next=https://x"
+  // through the URL parser, which then reads "/login?next=https" as a scheme.
+  const auto scheme_end = location.find("://");
+  if (scheme_end != base::String::npos) {
+    bool path_first = false;
+    for (base::String::size_type i = 0; i < scheme_end; ++i) {
+      const char c = location[i];
+      if (c == '/' || c == '?' || c == '#') {
+        path_first = true;
+        break;
+      }
+    }
+    if (!path_first)
+      return Parse(location, out);
+  }
+
+  // Protocol-relative ("//cdn.example/x"): the scheme stays, everything else
+  // comes from the location. Treating it as a path would send "GET //cdn..."
+  // to the host we are already talking to.
+  if (location.size() >= 2 && location[0] == '/' && location[1] == '/')
+    return Parse(scheme + ":" + location, out);
 
   Url next = *this;
   if (location[0] == '/') {
     next.target = location;
+  } else if (location[0] == '?') {
+    // A query-only reference keeps the path and replaces the query.
+    base::String base_path = target;
+    const auto query = base_path.find('?');
+    if (query != base::String::npos)
+      base_path = base_path.substr(0, query);
+    next.target = base_path + location;
   } else {
     // A relative reference replaces the last path segment, so "b" under
     // "/v1/a" is "/v1/b" and under "/v1/" is "/v1/b".
