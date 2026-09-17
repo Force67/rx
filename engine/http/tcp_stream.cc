@@ -16,6 +16,7 @@
 #include <unistd.h>
 #endif
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -45,10 +46,19 @@ bool ErrorIsInterrupt(int) {
   return false;  // Winsock has no EINTR on these calls.
 }
 int PollWritable(SocketHandle s, int timeout_ms) {
-  WSAPOLLFD fd{};
-  fd.fd = s;
-  fd.events = POLLWRNORM;
-  return ::WSAPoll(&fd, 1, timeout_ms);
+  // Not WSAPoll: it is documented not to report a connection attempt that
+  // FAILED, so a refused connect would wait out the whole timeout and then be
+  // reported as one. select's exception set is how Windows says "refused".
+  fd_set write_set;
+  fd_set error_set;
+  FD_ZERO(&write_set);
+  FD_ZERO(&error_set);
+  FD_SET(s, &write_set);
+  FD_SET(s, &error_set);
+  timeval tv{};
+  tv.tv_sec = timeout_ms / 1000;
+  tv.tv_usec = (timeout_ms % 1000) * 1000;
+  return ::select(0, nullptr, &write_set, &error_set, &tv);
 }
 void SetNonBlocking(SocketHandle s, bool on) {
   u_long mode = on ? 1 : 0;
@@ -122,8 +132,23 @@ void EnsureSocketLibrary() {}
 #endif
 
 base::String SocketError(const char* what, int err) {
-  char buffer[192] = {};
+  char buffer[320] = {};
+#ifdef _WIN32
+  // WSA error codes start at 10000 and are not errno values: strerror answered
+  // "Unknown error 10061" where the system had "Connection refused".
+  char text[192] = {};
+  const DWORD written = ::FormatMessageA(
+      FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, nullptr,
+      static_cast<DWORD>(err), 0, text, sizeof(text) - 1, nullptr);
+  for (DWORD i = 0; i < written; ++i) {
+    if (text[i] == '\r' || text[i] == '\n')
+      text[i] = ' ';
+  }
+  std::snprintf(buffer, sizeof(buffer), "%s: %s (%d)", what,
+                written != 0 ? text : "socket error", err);
+#else
   std::snprintf(buffer, sizeof(buffer), "%s: %s (%d)", what, std::strerror(err), err);
+#endif
   return base::String(buffer);
 }
 
@@ -152,8 +177,10 @@ class TcpStream final : public Stream {
     if (rc != 0 || resolved == nullptr) {
       char buffer[256] = {};
       std::snprintf(buffer, sizeof(buffer), "cannot resolve %s: %s", host.c_str(),
-                    ::gai_strerror(rc));
+                    rc != 0 ? ::gai_strerror(rc) : "the resolver returned no addresses");
       *error = base::String(buffer);
+      if (resolved != nullptr)
+        ::freeaddrinfo(resolved);
       return false;
     }
 
@@ -232,7 +259,24 @@ class TcpStream final : public Stream {
         CloseSocket(sock);
         return false;
       }
-      const int ready = PollWritable(sock, static_cast<int>(timeout_ms));
+      // A signal interrupts poll without restarting it (SA_RESTART does not
+      // cover it), so a process with a periodic timer would see a spurious
+      // "connect failed". Wait out the remaining time instead.
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+      int ready = 0;
+      for (;;) {
+        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              deadline - std::chrono::steady_clock::now())
+                              .count();
+        ready = PollWritable(sock, static_cast<int>(left > 0 ? left : 0));
+        if (ready >= 0 || !ErrorIsInterrupt(LastError()))
+          break;
+        if (std::chrono::steady_clock::now() >= deadline) {
+          ready = 0;
+          break;
+        }
+      }
       if (ready <= 0) {
         *last_error = ready == 0 ? base::String("connect timed out")
                                  : SocketError("connect poll", LastError());

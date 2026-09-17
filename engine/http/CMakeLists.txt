@@ -16,7 +16,7 @@ target_link_libraries(rx_http PUBLIC rx::core)
 # The mbedtls target comes from the top-level CMakeLists (or from a parent
 # project that already builds one). Absent, MakeTlsStream returns null and
 # every https URL fails with a message saying exactly that.
-if(TARGET mbedtls)
+if(RX_HTTPS AND TARGET mbedtls)
   target_link_libraries(rx_http PRIVATE mbedtls)
   target_compile_definitions(rx_http PRIVATE RX_HTTP_TLS=1)
   if(WIN32)

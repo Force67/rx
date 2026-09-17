@@ -349,7 +349,12 @@ endif()
 # zetanet takes its mbedTLS crypto backend) wins outright - two copies of it in
 # one link is a symbol clash, and the client compiles against either major
 # version (see the MBEDTLS_VERSION_MAJOR branches in tls_stream.cc).
-if(RX_HTTPS AND "http" IN_LIST RX_MODULES AND NOT TARGET mbedtls)
+# NOT TARGET mbedtls is not enough on its own: zetanet finds its mbedTLS with
+# find_library, which leaves a PATH in MBEDTLS_LIB and no target at all. Adding
+# a second copy on top of that puts two mbedTLS builds in one link with
+# different mbedtls_ssl_context layouts, and the linker picks one set of
+# function bodies for structs laid out by the other.
+if(RX_HTTPS AND "http" IN_LIST RX_MODULES AND NOT TARGET mbedtls AND NOT MBEDTLS_LIB)
   set(RX_MBEDTLS_DIR "" CACHE PATH "Path to an mbedTLS checkout for rx::http's https")
   if(NOT RX_MBEDTLS_DIR)
     foreach(_candidate
@@ -386,6 +391,17 @@ if(RX_HTTPS AND "http" IN_LIST RX_MODULES AND NOT TARGET mbedtls)
         target_compile_definitions(${_mbed} PUBLIC
           MBEDTLS_SSL_PROTO_TLS1_3
           MBEDTLS_SSL_TLS1_3_COMPATIBILITY_MODE)
+        # http.h tells callers to Fetch from a worker, and TLS 1.3 is PSA-only:
+        # every handshake touches mbedTLS's global key-slot table and RNG. That
+        # table grew its own locking in 3.6, so on 3.5 the locks have to be
+        # switched on here or two concurrent https requests race.
+        if(NOT WIN32)
+          find_package(Threads REQUIRED)
+          target_compile_definitions(${_mbed} PUBLIC
+            MBEDTLS_THREADING_C
+            MBEDTLS_THREADING_PTHREAD)
+          target_link_libraries(${_mbed} PUBLIC Threads::Threads)
+        endif()
       endif()
     endforeach()
   else()
