@@ -1,5 +1,6 @@
 #include "http/http.h"
 
+#include <chrono>
 #include <cstdio>
 #include <initializer_list>
 
@@ -262,7 +263,8 @@ base::String BuildRequest(const Request& request,
 Response Exchange(const Request& request,
                   const Url& url,
                   const base::String& method,
-                  const base::String& body) {
+                  const base::String& body,
+                  const StreamLimits& limits) {
   Response response;
 
   std::unique_ptr<Stream> stream;
@@ -280,18 +282,16 @@ Response Exchange(const Request& request,
     stream = MakeTcpStream();
   }
 
-  // 0 means "return immediately" to poll and "wait forever" to SO_RCVTIMEO, and
-  // anything past INT_MAX turns into a negative poll timeout, which is also
-  // "wait forever". Neither is a timeout, so the value is bounded here.
-  const u32 timeout_ms =
-      request.timeout_ms == 0 ? 1u : (request.timeout_ms > 3600000u ? 3600000u
-                                                                   : request.timeout_ms);
-  if (!stream->Connect(url.host, url.port, timeout_ms, &response.error))
+  if (!stream->Connect(url.host, url.port, limits, &response.error)) {
+    response.cancelled = stream->was_cancelled();
     return response;
+  }
 
   const base::String wire = BuildRequest(request, url, method, body);
-  if (!stream->Write(wire.c_str(), static_cast<u32>(wire.size()), &response.error))
+  if (!stream->Write(wire.c_str(), static_cast<u32>(wire.size()), &response.error)) {
+    response.cancelled = stream->was_cancelled();
     return response;
+  }
 
   // Head first: read until the blank line that ends it, keeping whatever body
   // bytes arrived in the same packets.
@@ -300,8 +300,10 @@ Response Exchange(const Request& request,
   char chunk[kReadChunk];
   while (head_end == base::String::npos) {
     const i64 got = stream->Read(chunk, kReadChunk, &response.error);
-    if (got < 0)
+    if (got < 0) {
+      response.cancelled = stream->was_cancelled();
       return response;
+    }
     if (got == 0) {
       response.error = buffer.empty() ? base::String("the server closed the connection "
                                                      "without answering")
@@ -376,6 +378,8 @@ Response Exchange(const Request& request,
       const i64 got = stream->Read(chunk, kReadChunk, &response.error);
       if (got < 0) {
         response.status = 0;
+        response.cancelled = stream->was_cancelled();
+        response.body.clear();
         return response;
       }
       if (got == 0) {
@@ -438,6 +442,7 @@ Response Exchange(const Request& request,
       // the caller a truncated JSON document as a successful 200, which over
       // TLS is the truncation attack this framing exists to notice.
       response.status = 0;
+      response.cancelled = stream->was_cancelled();
       response.body.clear();
       return response;
     }
@@ -536,11 +541,32 @@ Response Fetch(const Request& request) {
   // The request each hop actually sends. It starts as the caller's and is
   // stripped down as the redirects move it away from the origin it was
   // addressed to.
+  // One set of limits for the whole call: a redirect chain gets the deadline
+  // the caller asked for, not a fresh one per hop.
+  StreamLimits limits;
+  // 0 means "return immediately" to poll and "wait forever" to SO_RCVTIMEO, and
+  // anything past INT_MAX becomes a negative poll timeout, which is also
+  // forever. Neither is a timeout, so the idle budget is bounded here.
+  limits.idle_ms = request.timeout_ms == 0
+                       ? 1u
+                       : (request.timeout_ms > 3600000u ? 3600000u : request.timeout_ms);
+  if (request.total_timeout_ms > 0) {
+    limits.deadline = std::chrono::steady_clock::now() +
+                      std::chrono::milliseconds(request.total_timeout_ms);
+  }
+  limits.cancel = request.cancel;
+
   Request hop = request;
   hop.method = method;
   u32 redirects_left = request.max_redirects;
   for (;;) {
-    response = Exchange(hop, url, hop.method, hop.body);
+    if (limits.cancelled()) {
+      response = Response{};
+      response.error = "the request was cancelled";
+      response.cancelled = true;
+      return response;
+    }
+    response = Exchange(hop, url, hop.method, hop.body, limits);
     if (response.status == 0 || !IsRedirect(response.status))
       return response;
     if (redirects_left == 0) {

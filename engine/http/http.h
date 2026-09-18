@@ -4,6 +4,8 @@
 #include <base/containers/vector.h>
 #include <base/strings/xstring.h>
 
+#include <atomic>
+
 #include "core/export.h"
 #include "core/types.h"
 #include "http/url.h"
@@ -14,7 +16,10 @@
 // reuse, cookies, content decoding.
 //
 // Every call BLOCKS the calling thread for as long as the exchange takes. Never
-// call it from a frame thread: hand it to a worker and pick the result up.
+// call it from a frame thread: hand it to a worker and pick the result up. The
+// worker stays yours, and Request gives you what owning it requires: an idle
+// timeout, a deadline for the whole exchange, and a cancel flag that is seen
+// within about a quarter second wherever the call happens to be waiting.
 //
 // https rides mbedTLS (RX_HTTP_TLS), TLS 1.3 with a 1.2 fallback. Without that
 // backend an https URL fails with an error rather than quietly downgrading to
@@ -34,10 +39,19 @@ struct RX_HTTP_EXPORT Request {
   base::String body;
   base::String content_type;  // sent only when body is non-empty
 
-  // Armed per socket operation (connect, each read, each write), not on the
-  // exchange as a whole. A server that keeps sending keeps the call alive; one
-  // that stalls does not.
+  // Idle timeout: how long the peer may say nothing before the call fails. A
+  // server that keeps sending keeps the call alive; one that stalls does not.
   u32 timeout_ms = 10'000;
+  // Wall clock for the WHOLE exchange, connect and body included. The idle
+  // timeout alone cannot bound a call: a peer that dribbles one byte every few
+  // seconds is never idle and never done. 0 leaves only the idle timeout, which
+  // is what a caller with its own supervision wants.
+  u32 total_timeout_ms = 60'000;
+  // Raised by the caller to abandon the exchange, checked about four times a
+  // second, including mid-handshake and mid-body. The flag has to outlive the
+  // call. This is how a worker thread is made joinable on demand: without it,
+  // "run it on a worker" means "wait for the timeout to quit".
+  const std::atomic<bool>* cancel = nullptr;
   // A response larger than this fails instead of growing the heap. Raise it
   // deliberately for an endpoint known to answer with more.
   u32 max_body_bytes = 4u * 1024 * 1024;
@@ -60,6 +74,11 @@ struct RX_HTTP_EXPORT Response {
   // Why there is no status: DNS, connect, TLS, timeout, a malformed answer.
   // Empty whenever status is non-zero, including for a 500.
   base::String error;
+
+  // True when the caller's own cancel flag ended this, not the peer and not
+  // the network. A caller that shut down on purpose can then stay quiet
+  // instead of logging a failure it caused.
+  bool cancelled = false;
 
   bool ok() const { return status >= 200 && status < 300; }
   // Case-insensitive header lookup; null when absent. The first match wins,

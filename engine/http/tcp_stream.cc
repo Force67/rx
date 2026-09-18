@@ -22,6 +22,16 @@
 #include <mutex>
 
 namespace rx::http {
+
+i64 StreamLimits::remaining_ms() const {
+  if (!has_deadline())
+    return -1;
+  const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        deadline - std::chrono::steady_clock::now())
+                        .count();
+  return left > 0 ? static_cast<i64>(left) : 0;
+}
+
 namespace {
 
 #ifdef _WIN32
@@ -161,9 +171,12 @@ class TcpStream final : public Stream {
 
   bool Connect(const base::String& host,
                u16 port,
-               u32 timeout_ms,
+               const StreamLimits& limits,
                base::String* error) override {
     EnsureSocketLibrary();
+    limits_ = limits;
+    if (Stopped(error))
+      return false;
 
     char service[8] = {};
     std::snprintf(service, sizeof(service), "%u", static_cast<unsigned>(port));
@@ -188,9 +201,17 @@ class TcpStream final : public Stream {
     // record on a v4-only network is the case that makes this a loop.
     base::String last;
     for (addrinfo* ai = resolved; ai != nullptr; ai = ai->ai_next) {
-      if (TryConnect(*ai, timeout_ms, &last)) {
+      if (Stopped(error)) {
         ::freeaddrinfo(resolved);
-        SetTimeouts(socket_, timeout_ms);
+        return false;
+      }
+      if (TryConnect(*ai, ConnectBudgetMs(), &last)) {
+        ::freeaddrinfo(resolved);
+        // The socket wakes on a short tick rather than the idle timeout, so
+        // the loops below can notice a cancel or the deadline between reads
+        // instead of only when the peer says something.
+        SetTimeouts(socket_, kWakeTickMs);
+        MarkProgress();
         return true;
       }
     }
@@ -206,17 +227,29 @@ class TcpStream final : public Stream {
     const char* cursor = static_cast<const char*>(data);
     u32 left = size;
     while (left > 0) {
+      if (Stopped(error))
+        return false;
       const auto sent = ::send(socket_, cursor, static_cast<int>(left), kSendFlags);
       if (sent > 0) {
         cursor += sent;
         left -= static_cast<u32>(sent);
+        MarkProgress();
         continue;
       }
       const int err = LastError();
       if (ErrorIsInterrupt(err))
         continue;
-      *error = ErrorIsTimeout(err) ? base::String("write timed out")
-                                   : SocketError("write failed", err);
+      // The socket's own timeout is the wake tick, not the idle limit, so a
+      // timeout here only means "nothing moved this tick": loop, and let
+      // Stopped decide whether the exchange is actually over.
+      if (ErrorIsTimeout(err)) {
+        if (Idle() > limits_.idle_ms) {
+          *error = "write timed out";
+          return false;
+        }
+        continue;
+      }
+      *error = SocketError("write failed", err);
       return false;
     }
     return true;
@@ -224,20 +257,76 @@ class TcpStream final : public Stream {
 
   i64 Read(void* data, u32 size, base::String* error) override {
     for (;;) {
+      if (Stopped(error))
+        return -1;
       const auto got = ::recv(socket_, static_cast<char*>(data), static_cast<int>(size), 0);
-      if (got >= 0)
+      if (got > 0) {
+        MarkProgress();
         return static_cast<i64>(got);
+      }
+      if (got == 0)
+        return 0;  // a clean end of stream
       const int err = LastError();
       if (ErrorIsInterrupt(err))
         continue;
-      *error = ErrorIsTimeout(err) ? base::String("read timed out")
-                                   : SocketError("read failed", err);
+      if (ErrorIsTimeout(err)) {
+        if (Idle() > limits_.idle_ms) {
+          *error = "read timed out";
+          return -1;
+        }
+        continue;
+      }
+      *error = SocketError("read failed", err);
       return -1;
     }
   }
 
+  bool was_cancelled() const override { return cancelled_; }
+
  private:
-  bool TryConnect(const addrinfo& ai, u32 timeout_ms, base::String* last_error) {
+  // How often a blocked socket call wakes to look at the cancel flag and the
+  // deadline. Short enough that quitting the game feels immediate, long enough
+  // that an idle connection costs nothing to hold.
+  static constexpr u32 kWakeTickMs = 250;
+
+  // True when the exchange is over for a reason that is not the peer's: the
+  // caller cancelled, or the deadline passed.
+  bool Stopped(base::String* error) {
+    if (limits_.cancelled()) {
+      cancelled_ = true;
+      *error = "the request was cancelled";
+      return true;
+    }
+    if (limits_.has_deadline() && limits_.remaining_ms() <= 0) {
+      *error = "the request ran out of time";
+      return true;
+    }
+    return false;
+  }
+
+  void MarkProgress() { last_progress_ = std::chrono::steady_clock::now(); }
+
+  u32 Idle() const {
+    const auto since = std::chrono::steady_clock::now() - last_progress_;
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(since).count();
+    return ms < 0 ? 0u : static_cast<u32>(ms);
+  }
+
+  // What the connect itself may spend: the idle budget, cut short by the
+  // deadline when there is one.
+  u32 ConnectBudgetMs() const {
+    u32 budget = limits_.idle_ms;
+    if (limits_.has_deadline()) {
+      const i64 left = limits_.remaining_ms();
+      if (left >= 0 && static_cast<u64>(left) < budget)
+        budget = static_cast<u32>(left);
+    }
+    // A cancel has to be noticed during a connect too, so the poll waits in
+    // ticks rather than in one long block.
+    return budget < kWakeTickMs ? budget : kWakeTickMs;
+  }
+
+  bool TryConnect(const addrinfo& ai, u32 tick_ms, base::String* last_error) {
     SocketHandle sock = ::socket(ai.ai_family, ai.ai_socktype, ai.ai_protocol);
     if (sock == kInvalidSocket) {
       *last_error = SocketError("socket", LastError());
@@ -261,18 +350,24 @@ class TcpStream final : public Stream {
       }
       // A signal interrupts poll without restarting it (SA_RESTART does not
       // cover it), so a process with a periodic timer would see a spurious
-      // "connect failed". Wait out the remaining time instead.
-      const auto deadline =
-          std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+      // "connect failed". Wait in ticks instead, which also gives the cancel
+      // flag and the deadline a look in between.
+      const auto give_up =
+          std::chrono::steady_clock::now() + std::chrono::milliseconds(limits_.idle_ms);
       int ready = 0;
       for (;;) {
-        const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
-                              deadline - std::chrono::steady_clock::now())
-                              .count();
-        ready = PollWritable(sock, static_cast<int>(left > 0 ? left : 0));
-        if (ready >= 0 || !ErrorIsInterrupt(LastError()))
+        ready = PollWritable(sock, static_cast<int>(tick_ms));
+        if (ready > 0)
           break;
-        if (std::chrono::steady_clock::now() >= deadline) {
+        if (ready < 0 && !ErrorIsInterrupt(LastError()))
+          break;
+        base::String stop;
+        if (Stopped(&stop)) {
+          *last_error = stop;
+          CloseSocket(sock);
+          return false;
+        }
+        if (std::chrono::steady_clock::now() >= give_up) {
           ready = 0;
           break;
         }
@@ -301,6 +396,9 @@ class TcpStream final : public Stream {
   }
 
   SocketHandle socket_ = kInvalidSocket;
+  StreamLimits limits_;
+  std::chrono::steady_clock::time_point last_progress_ = std::chrono::steady_clock::now();
+  bool cancelled_ = false;
 };
 
 }  // namespace

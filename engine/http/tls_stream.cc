@@ -186,12 +186,15 @@ class TlsStream final : public Stream {
 
   bool Connect(const base::String& host,
                u16 port,
-               u32 timeout_ms,
+               const StreamLimits& limits,
                base::String* error) override {
     EnsurePsaCrypto();
 
+    // The deadline and the cancel flag live on the socket underneath: every
+    // byte mbedTLS reads or writes goes through the BIO callbacks into that
+    // stream, so a handshake is bounded exactly like the body is.
     inner_ = MakeTcpStream();
-    if (!inner_->Connect(host, port, timeout_ms, error))
+    if (!inner_->Connect(host, port, limits, error))
       return false;
 
 #if MBEDTLS_VERSION_MAJOR < 4
@@ -266,6 +269,10 @@ class TlsStream final : public Stream {
 
     handshaked_ = true;
     return true;
+  }
+
+  bool was_cancelled() const override {
+    return inner_ != nullptr && inner_->was_cancelled();
   }
 
   bool Write(const void* data, u32 size, base::String* error) override {

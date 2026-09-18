@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -446,6 +447,112 @@ void TestRedirectSafety() {
   }
 }
 
+// A server that accepts and then says nothing: the shape that used to park a
+// worker thread until the process was killed.
+class SilentServer {
+ public:
+  SilentServer() {
+    listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
+    const int on = 1;
+    ::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+    sockaddr_in addr{};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port = 0;
+    ::bind(listener_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr));
+    ::listen(listener_, 4);
+    socklen_t len = sizeof(addr);
+    ::getsockname(listener_, reinterpret_cast<sockaddr*>(&addr), &len);
+    port_ = ntohs(addr.sin_port);
+    thread_ = std::thread([this] {
+      const int client = ::accept(listener_, nullptr, nullptr);
+      if (client < 0)
+        return;
+      // Hold the connection open, saying nothing, until the test is done.
+      while (!done_.load())
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      ::close(client);
+    });
+  }
+
+  ~SilentServer() {
+    done_ = true;
+    if (thread_.joinable())
+      thread_.join();
+    ::close(listener_);
+  }
+
+  base::String url() const {
+    char buffer[64] = {};
+    std::snprintf(buffer, sizeof(buffer), "http://127.0.0.1:%u/", unsigned(port_));
+    return base::String(buffer);
+  }
+
+ private:
+  int listener_ = -1;
+  u16 port_ = 0;
+  std::atomic<bool> done_{false};
+  std::thread thread_;
+};
+
+void TestDeadline() {
+  SilentServer server;
+  http::Request request;
+  request.url = server.url();
+  request.timeout_ms = 30'000;      // the idle timeout alone would hold for 30 s
+  request.total_timeout_ms = 700;   // the deadline is what ends this
+
+  const auto began = std::chrono::steady_clock::now();
+  const http::Response r = http::Fetch(request);
+  const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - began)
+                        .count();
+  CHECK_EQ(r.status, u16{0});
+  CHECK(!r.cancelled);  // it ran out of time, nobody cancelled it
+  CHECK(took >= 600 && took < 3000);
+  if (took >= 3000)
+    std::printf("  deadline took %lld ms\n", static_cast<long long>(took));
+}
+
+void TestCancel() {
+  SilentServer server;
+  std::atomic<bool> cancel{false};
+
+  http::Request request;
+  request.url = server.url();
+  request.timeout_ms = 30'000;
+  request.total_timeout_ms = 30'000;  // neither limit is what ends this
+  request.cancel = &cancel;
+
+  // What a shutdown does: raise the flag on another thread and join.
+  std::thread raiser([&cancel] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+    cancel = true;
+  });
+
+  const auto began = std::chrono::steady_clock::now();
+  const http::Response r = http::Fetch(request);
+  const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - began)
+                        .count();
+  raiser.join();
+
+  CHECK_EQ(r.status, u16{0});
+  CHECK(r.cancelled);  // the caller's doing, not the peer's: do not log a fault
+  // Within a wake tick or so of the flag going up, not 30 seconds later.
+  CHECK(took < 2000);
+  if (took >= 2000)
+    std::printf("  cancel took %lld ms\n", static_cast<long long>(took));
+
+  // A flag already raised means the call never opens a socket at all.
+  std::atomic<bool> already{true};
+  http::Request second = request;
+  second.cancel = &already;
+  const http::Response none = http::Fetch(second);
+  CHECK_EQ(none.status, u16{0});
+  CHECK(none.cancelled);
+}
+
 // Off by default: reaches the network, so it only runs when asked.
 void TestLive() {
   const char* target = std::getenv("RX_HTTP_LIVE");
@@ -487,6 +594,8 @@ int main() {
   TestRequestRefusals();
   TestBodyFraming();
   TestRedirectSafety();
+  TestDeadline();
+  TestCancel();
   TestLive();
   if (g_failures == 0) {
     std::printf("http_test: all passed\n");
