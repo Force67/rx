@@ -290,6 +290,11 @@ ecs::Entity ServerSession::PlayerOf(u32 peer) const {
   return client ? client->player : ecs::kInvalidEntity;
 }
 
+u64 ServerSession::PlayerNetId(u32 peer) const {
+  const RemoteClient* client = clients_.find(peer);
+  return client ? client->player_net_id : 0;
+}
+
 ClientSession::ClientSession(SessionConfig config) : config_(std::move(config)) {
   if (config_.snapshot_interval_ticks > 0 && config_.tick_rate > 0) {
     snapshot_dt_ = static_cast<f32>(config_.snapshot_interval_ticks) /

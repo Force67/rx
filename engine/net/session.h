@@ -139,6 +139,8 @@ class RX_NET_EXPORT ServerSession : public Session {
   u32 client_count() const { return static_cast<u32>(clients_.size()); }
   u64 tick() const { return tick_; }
   ecs::Entity PlayerOf(u32 peer) const;
+  // The player entity's network id, or 0 when the peer is unknown.
+  u64 PlayerNetId(u32 peer) const;
 
   // Visits every admitted peer id (game layers pushing per-peer payloads,
   // e.g. re-offering an asset manifest after a live reload).
@@ -232,7 +234,10 @@ class RX_NET_EXPORT ClientSession : public Session {
 
   bool joined() const { return joined_; }
   u64 player_net_id() const { return player_net_id_; }
-  ecs::Entity player_entity() const { return applier_.Find(player_net_id_); }
+  ecs::Entity player_entity() const { return replicated_entity(player_net_id_); }
+  // Any replicated entity by its network id, or kInvalidEntity when the
+  // snapshot stream has not (yet) spawned it.
+  ecs::Entity replicated_entity(u64 net_id) const { return applier_.Find(net_id); }
   u32 replicated_entity_count() const { return applier_.entity_count(); }
 
  private:
