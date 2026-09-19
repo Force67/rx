@@ -251,7 +251,17 @@ struct TouchState {
 struct InputState {
   bool keys[static_cast<u8>(Key::kCount)] = {};
   bool pressed[static_cast<u8>(Key::kCount)] = {};  // went down this pump
+  // Auto-repeat fired this pump. Separate from `pressed` because most callers
+  // want one action per physical press; a list that scrolls while a key is held
+  // wants this one.
+  bool repeated[static_cast<u8>(Key::kCount)] = {};
   bool mouse[static_cast<u8>(MouseButton::kCount)] = {};
+  // Button transitions within this pump. `mouse` alone is the level at the end
+  // of the pump, so a click whose press and release both land inside one pump
+  // leaves no trace in it at all: the ui would never see the click. These say
+  // what happened rather than where it ended up.
+  bool mouse_pressed[static_cast<u8>(MouseButton::kCount)] = {};
+  bool mouse_released[static_cast<u8>(MouseButton::kCount)] = {};
   // Pointer motion this pump, in pixels like the position below. Pixels rather
   // than the units the desktop lays the window out in so that look speed does
   // not change with the display's scaling factor: the same sweep across the
@@ -271,7 +281,10 @@ struct InputState {
 
   bool key(Key k) const { return keys[static_cast<u8>(k)]; }
   bool key_pressed(Key k) const { return pressed[static_cast<u8>(k)]; }
+  bool key_repeated(Key k) const { return repeated[static_cast<u8>(k)]; }
   bool button(MouseButton b) const { return mouse[static_cast<u8>(b)]; }
+  bool button_pressed(MouseButton b) const { return mouse_pressed[static_cast<u8>(b)]; }
+  bool button_released(MouseButton b) const { return mouse_released[static_cast<u8>(b)]; }
 };
 
 }  // namespace rx
