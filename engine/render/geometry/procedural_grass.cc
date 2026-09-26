@@ -110,7 +110,7 @@ bool BuildCandidateRing(const Vec3& camera,
 
 bool AllFinite(const f32* values, u32 count) {
   for (u32 i = 0; i < count; ++i) {
-    if (!::isfinite(values[i]))
+    if (!isfinite(values[i]))
       return false;
   }
   return true;
@@ -433,13 +433,13 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   const bool valid_field =
       domain.samples && domain.sample_width >= 2 && domain.sample_height >= 2 &&
       domain.sample_width <= kMaxFieldDimension &&
-      domain.sample_height <= kMaxFieldDimension && ::isfinite(domain.origin_x) &&
-      ::isfinite(domain.origin_z) && ::isfinite(domain.extent_x) &&
-      ::isfinite(domain.extent_z) && domain.extent_x > 0.0f && domain.extent_z > 0.0f;
+      domain.sample_height <= kMaxFieldDimension && isfinite(domain.origin_x) &&
+      isfinite(domain.origin_z) && isfinite(domain.extent_x) &&
+      isfinite(domain.extent_z) && domain.extent_x > 0.0f && domain.extent_z > 0.0f;
   if (type_count == 0 || !domain.types || (!valid_field && surface_count == 0))
     return false;
-  if (!::isfinite(frame.camera_pos.x) || !::isfinite(frame.camera_pos.y) ||
-      !::isfinite(frame.camera_pos.z))
+  if (!isfinite(frame.camera_pos.x) || !isfinite(frame.camera_pos.y) ||
+      !isfinite(frame.camera_pos.z))
     return false;
   if (!AllFinite(frame.view_proj.m, 16) || !AllFinite(frame.prev_view_proj.m, 16))
     return false;
@@ -459,7 +459,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
     for (const f32* values :
          {type.base_color, type.tip_color, type.dimensions, type.shape, type.material}) {
       for (u32 value = 0; value < 4; ++value) {
-        if (!::isfinite(values[value]))
+        if (!isfinite(values[value]))
           return false;
       }
     }
@@ -621,8 +621,8 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
     auto* gpu_surfaces = static_cast<GpuSurface*>(slot.surfaces.mapped);
     for (u32 i = 0; i < surface_count; ++i) {
       const GrassSurfaceTriangle& src = domain.surfaces[i];
-      if (!::isfinite(src.density) || src.density <= 0.0f ||
-          !::isfinite(src.growth) || src.growth <= 0.0f)
+      if (!isfinite(src.density) || src.density <= 0.0f ||
+          !isfinite(src.growth) || src.growth <= 0.0f)
         continue;
       u32 count = GrassSurfaceCandidateCount(src, settings.candidate_spacing);
       const u32 remaining = max_surface_candidates - surface_candidates;
@@ -669,9 +669,9 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   const f32 bend_extent = settings.stream_radius * 2.0f;
   const f32 bend_texel = bend_extent / static_cast<f32>(kBendResolution);
   const f32 bend_origin_x =
-      ::floor((frame.camera_pos.x - bend_extent * 0.5f) / bend_texel) * bend_texel;
+      ::floorf((frame.camera_pos.x - bend_extent * 0.5f) / bend_texel) * bend_texel;
   const f32 bend_origin_z =
-      ::floor((frame.camera_pos.z - bend_extent * 0.5f) / bend_texel) * bend_texel;
+      ::floorf((frame.camera_pos.z - bend_extent * 0.5f) / bend_texel) * bend_texel;
   const bool fields_overlap =
       preserve_bend_history && bend_origin_x < bend_origin_[0] + bend_extent_ &&
       bend_origin_x + bend_extent > bend_origin_[0] &&
@@ -686,15 +686,15 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   f32 bend_max_strength = fields_overlap ? bend_max_strength_ : 0.0f;
   if (settings.bend_recovery_time > 0.0f) {
     bend_max_strength *=
-        ::exp2(-recovery_elapsed / settings.bend_recovery_time);
+        ::exp2f(-recovery_elapsed / settings.bend_recovery_time);
   }
-  const f32 bend_height_origin = ::floor(frame.camera_pos.y / 64.0f) * 64.0f;
+  const f32 bend_height_origin = ::floorf(frame.camera_pos.y / 64.0f) * 64.0f;
   for (u32 i = 0; i < interaction_count; ++i) {
     const GrassInteraction& interaction = interactions[i];
     if (!AllFinite(interaction.position_radius, 4) ||
         !AllFinite(interaction.direction_strength, 4) ||
         interaction.position_radius[3] <= 0.0f ||
-        ::fabs(interaction.direction_strength[3]) <= 1e-4f)
+        ::fabsf(interaction.direction_strength[3]) <= 1e-4f)
       continue;
     const f32 closest_x = rx::Clamp(interaction.position_radius[0], bend_origin_x,
                                      bend_origin_x + bend_extent);
@@ -707,10 +707,10 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
     if (dx * dx + dz * dz > effective_radius * effective_radius)
       continue;
     const f32 strength =
-        rx::Min(::fabs(interaction.direction_strength[3]), 2.0f);
+        rx::Min(::fabsf(interaction.direction_strength[3]), 2.0f);
     const f32 relative_height = interaction.position_radius[1] - bend_height_origin;
     const f32 radius = effective_radius;
-    if (::fabs(relative_height) * strength > 60000.0f ||
+    if (::fabsf(relative_height) * strength > 60000.0f ||
         radius * strength > 60000.0f)
       continue;
     bend_max_strength = rx::Max(bend_max_strength, strength);

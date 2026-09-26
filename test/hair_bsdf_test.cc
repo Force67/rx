@@ -35,9 +35,9 @@ constexpr float kPi = 3.14159265358979323846f;
 // A direction in the strand frame: theta is the longitudinal angle off the
 // normal plane, phi the azimuth around the fibre.
 void Dir(float theta, float phi, rx::f32 out[3]) {
-  out[0] = ::sin(theta);
-  out[1] = ::cos(theta) * ::cos(phi);
-  out[2] = ::cos(theta) * ::sin(phi);
+  out[0] = ::sinf(theta);
+  out[1] = ::cosf(theta) * ::cosf(phi);
+  out[2] = ::cosf(theta) * ::sinf(phi);
 }
 
 float Luma(const rx::f32 rgb[3]) {
@@ -107,7 +107,7 @@ int main() {
           best_phi = phi;
         }
       }
-      worst = rx::Max(worst, ::abs(best_phi - (-2.0f * ::asin(h))));
+      worst = rx::Max(worst, ::fabsf(best_phi - (-2.0f * ::asinf(h))));
     }
     Check(worst < 0.01f, "the surface lobe peaks where the cylinder geometry says it should");
     if (worst >= 0.01f) ::fprintf(stderr, "  worst azimuthal peak error: %.4f rad\n", worst);
@@ -120,7 +120,7 @@ int main() {
     rx::f32 centre[3], edge[3];
     HairEvaluateCpu(brown, wo, wi, 0.0f, centre);
     HairEvaluateCpu(brown, wo, wi, 0.85f, edge);
-    Check(::abs(Luma(centre) - Luma(edge)) > 0.01f * rx::Max(Luma(centre), Luma(edge)),
+    Check(::fabsf(Luma(centre) - Luma(edge)) > 0.01f * rx::Max(Luma(centre), Luma(edge)),
           "the response varies across the fibre's width");
   }
 
@@ -151,7 +151,7 @@ int main() {
       for (int c = 0; c < 3; ++c) {
         const float m = rx::Max(a[c], b[c]);
         if (m < 0.05f * peak) continue;
-        worst = rx::Max(worst, ::abs(a[c] - b[c]) / m);
+        worst = rx::Max(worst, ::fabsf(a[c] - b[c]) / m);
       }
     }
     Check(worst < 0.75f,
@@ -263,7 +263,7 @@ int main() {
                 rx::f32 wi[3], rgb[3];
                 Dir(theta, phi, wi);
                 HairShadeCpu(q, w_out, wi, 0.0f, depth, rgb);
-                total += static_cast<double>(rgb[1]) * ::cos(theta);
+                total += static_cast<double>(rgb[1]) * ::cosf(theta);
               }
             }
           }
@@ -274,7 +274,7 @@ int main() {
       float worst = 0.0f;
       for (const float depth : {3.0f, 6.0f, 10.0f}) {
         for (const float target : {0.85f, 0.65f, 0.45f, 0.28f, 0.15f, 0.07f}) {
-          worst = rx::Max(worst, ::abs(shaded_albedo(target, depth) - target));
+          worst = rx::Max(worst, ::fabsf(shaded_albedo(target, depth) - target));
         }
       }
       Check(worst < 0.02f,
@@ -366,7 +366,7 @@ int main() {
     };
     const float flat_peak = peak_theta(flat, 1);
     const float tilted_peak = peak_theta(tilted, 1);
-    Check(::abs(tilted_peak - flat_peak) > 0.01f,
+    Check(::fabsf(tilted_peak - flat_peak) > 0.01f,
           "the cuticle tilt shifts the highlight off the specular direction");
   }
 
@@ -408,7 +408,7 @@ int main() {
       rx::f32 shallow[3], deep[3];
       HairShadeCpu(distant, wo, wi, 0.0f, 1.0f, shallow);
       HairShadeCpu(distant, wo, wi, 0.0f, 40.0f, deep);
-      Check(::abs(shallow[0] - deep[0]) < 1e-6f && ::abs(shallow[2] - deep[2]) < 1e-6f,
+      Check(::fabsf(shallow[0] - deep[0]) < 1e-6f && ::fabsf(shallow[2] - deep[2]) < 1e-6f,
             "with multiple scattering off, fibre depth changes nothing");
 
       rx::f32 lit_hero[3];

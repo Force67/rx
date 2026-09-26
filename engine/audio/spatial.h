@@ -68,8 +68,8 @@ inline StereoGains PanForSource(const Listener& listener, const Vec3& source,
 
   // Map pan [-1,1] -> angle [0, pi/2] and take cos/sin for equal-power gains.
   const f32 angle = (pan * 0.5f + 0.5f) * 1.57079633f;
-  f32 l = ::cos(angle);
-  f32 r = ::sin(angle);
+  f32 l = ::cosf(angle);
+  f32 r = ::sinf(angle);
   l = min_bleed + (1.0f - min_bleed) * l;
   r = min_bleed + (1.0f - min_bleed) * r;
   return {l * gain, r * gain};

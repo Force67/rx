@@ -119,7 +119,7 @@ bool DecodeDiffuse(const asset::Texture& t, u32 target_max, DecodedTex* out) {
   out->rgba.resize(static_cast<size_t>(w) * h * 4);
   auto to_lin = [&](u8 c) {
     f32 x = c / 255.0f;
-    return t.is_srgb ? ::pow(x, 2.2f) : x;
+    return t.is_srgb ? ::powf(x, 2.2f) : x;
   };
   if (t.format == asset::TextureFormat::kRgba8) {
     if (offset + static_cast<size_t>(w) * h * 4 > t.data.size()) return false;
@@ -187,9 +187,9 @@ struct Texel {
 
 // Bilinear tap, returns linear rgb + coverage alpha.
 Texel SampleTex(const DecodedTex& t, f32 u, f32 v) {
-  auto wrap = [](f32 x) { return x - ::floor(x); };
+  auto wrap = [](f32 x) { return x - ::floorf(x); };
   f32 fx = wrap(u) * t.w - 0.5f, fy = wrap(v) * t.h - 0.5f;
-  i32 x0 = static_cast<i32>(::floor(fx)), y0 = static_cast<i32>(::floor(fy));
+  i32 x0 = static_cast<i32>(::floorf(fx)), y0 = static_cast<i32>(::floorf(fy));
   f32 tx = fx - x0, ty = fy - y0;
   auto at = [&](i32 x, i32 y) {
     x = ((x % (i32)t.w) + t.w) % t.w;
@@ -254,7 +254,7 @@ Vec3 ChainStep(const Comp& comp, const base::Vector<GVert>& verts, f32 target_a,
     f32 dc = AcrossOf(comp, gv) - c;
     Vec3 dw = gv.p - prev;
     f32 e = da * da * inv_ha + dc * dc * inv_hc + Dot(dw, dw) * inv_hw;
-    f32 w = ::exp(-e);
+    f32 w = ::expf(-e);
     acc = acc + gv.p * w;
     wsum += w;
   }
@@ -272,7 +272,7 @@ Vec3 RootAt(const Comp& comp, const base::Vector<GVert>& verts, f32 c) {
   f32 wsum = 0;
   for (u32 vi : comp.root_verts) {
     f32 dc = AcrossOf(comp, verts[vi]) - c;
-    f32 w = ::exp(-dc * dc * inv);
+    f32 w = ::expf(-dc * dc * inv);
     acc = acc + verts[vi].p * w;
     wsum += w;
   }
@@ -360,7 +360,7 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     }
     f32 det = suu * svv - suv * suv;
     Vec3 dpu, dpv;  // world metres per unit u / v
-    if (::fabs(det) > 1e-12f) {
+    if (::fabsf(det) > 1e-12f) {
       dpu = (sup * svv - svp * suv) * (1.0f / det);
       dpv = (svp * suu - sup * suv) * (1.0f / det);
     } else {
@@ -412,9 +412,9 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     else { comp.a_root = amax; comp.a_tip = amin; }
     // Root-edge verts: the scalp-side band. Strands are seeded only here so they
     // start at the scalp and trace the full card length, never mid-card.
-    f32 root_band = 0.14f * ::fabs(comp.a_tip - comp.a_root) + 1e-6f;
+    f32 root_band = 0.14f * ::fabsf(comp.a_tip - comp.a_root) + 1e-6f;
     for (u32 vi : comp.verts) {
-      if (::fabs(AlongOf(comp, verts[vi]) - comp.a_root) <= root_band) {
+      if (::fabsf(AlongOf(comp, verts[vi]) - comp.a_root) <= root_band) {
         comp.root_verts.push_back(vi);
       }
     }
@@ -490,14 +490,14 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     }
     Vec3 color = (have_tex && a_acc > 1e-3f) ? col_acc * (1.0f / a_acc) : Vec3{1, 1, 1};
 
-    f32 ha = 0.8f * ::fabs(comp.a_tip - comp.a_root) / (P - 1) + 1e-4f;
-    f32 hc = 0.06f * ::fabs(comp.c_max - comp.c_min) + 1e-4f;
+    f32 ha = 0.8f * ::fabsf(comp.a_tip - comp.a_root) / (P - 1) + 1e-4f;
+    f32 hc = 0.06f * ::fabsf(comp.c_max - comp.c_min) + 1e-4f;
     // Per-strand flyaway: a fixed random bend that grows toward the tip, applied
     // to the stored point only (not the chain anchor) so neighbouring strands from
     // the same card fan apart into individual locks instead of a flat card-slab.
     f32 fang = randf() * 6.2831853f;
     f32 fh = randf();
-    Vec3 fdir{::cos(fang), -0.15f - 0.3f * fh, ::sin(fang)};  // outward + slight droop
+    Vec3 fdir{::cosf(fang), -0.15f - 0.3f * fh, ::sinf(fang)};  // outward + slight droop
     // A few strands only (fh near 1) get a real flyaway; most stay tidy so the
     // silhouette reads as groomed hair, not frizz. Curl already separates strands.
     f32 famp = rx::Clamp(comp.hw * 0.3f, 0.002f, 0.008f) * (fh > 0.7f ? fh : 0.15f * fh) *
@@ -507,9 +507,9 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     const f32 kLockWorld = 0.010f;
     f32 lock_c = comp.world_per_c > 1e-6f ? kLockWorld / comp.world_per_c : (comp.c_max - comp.c_min);
     lock_c = rx::Min(rx::Max(lock_c, 1e-6f), comp.c_max - comp.c_min + 1e-6f);
-    f32 lock_center = comp.c_min + (::floor((c_seed - comp.c_min) / lock_c) + 0.5f) * lock_c;
+    f32 lock_center = comp.c_min + (::floorf((c_seed - comp.c_min) / lock_c) + 0.5f) * lock_c;
     f32 an = rx::Clamp((c_seed - lock_center) / (0.5f * lock_c), -1.0f, 1.0f);
-    f32 profile = ::sqrt(rx::Max(0.0f, 1.0f - an * an));
+    f32 profile = ::sqrtf(rx::Max(0.0f, 1.0f - an * an));
     f32 bulge = 0.5f * lock_c * comp.world_per_c * (profile * 0.9f + (randf() - 0.4f) * 0.4f);
     // Per-strand curl: a two-frequency wave (in-plane + out-of-plane) unique to
     // each strand, growing toward the tip, so coplanar strands of one flat card
@@ -542,10 +542,10 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
         // tip; the very first point stays pinned on the scalp (k==0 above).
         f32 wv = camp * (0.2f + 0.8f * tt);
         Vec3 curl =
-            comp.normal * ((::sin(cfreq * tt + cph1) + 0.4f * ::sin(cfreq * 2.7f * tt + cph3)) * wv) +
+            comp.normal * ((::sinf(cfreq * tt + cph1) + 0.4f * ::sinf(cfreq * 2.7f * tt + cph3)) * wv) +
             comp.across_dir *
-                ((::sin(cfreq * 0.7f * tt + cph2) + 0.4f * ::sin(cfreq * 2.3f * tt + cph4)) * wv * 0.6f);
-        pos = chain_prev + comp.normal * (bulge * ramp) + curl + fdir * (famp * ::pow(tt, 1.4f));
+                ((::sinf(cfreq * 0.7f * tt + cph2) + 0.4f * ::sinf(cfreq * 2.3f * tt + cph4)) * wv * 0.6f);
+        pos = chain_prev + comp.normal * (bulge * ramp) + curl + fdir * (famp * ::powf(tt, 1.4f));
       }
       pts[(static_cast<size_t>(emitted) * P + k) * 3 + 0] = pos.x;
       pts[(static_cast<size_t>(emitted) * P + k) * 3 + 1] = pos.y;
@@ -580,7 +580,7 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
   f32 head_r = 0;
   for (u32 i = 0; i < emitted; ++i) {
     Vec3 rp{roots[i * 3], roots[i * 3 + 1], roots[i * 3 + 2]};
-    f32 horiz = ::sqrt((rp.x - scalp.x) * (rp.x - scalp.x) + (rp.z - scalp.z) * (rp.z - scalp.z));
+    f32 horiz = ::sqrtf((rp.x - scalp.x) * (rp.x - scalp.x) + (rp.z - scalp.z) * (rp.z - scalp.z));
     head_r = rx::Max(head_r, horiz);
   }
   if (params.recenter) {
@@ -631,9 +631,9 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
   auto cap_normal = [&](u32 s, u32 count) {
     f32 t = (static_cast<f32>(s) + 0.5f) / count;
     f32 y = 0.35f + 0.6f * t;
-    f32 r = ::sqrt(rx::Max(0.0f, 1.0f - y * y));
+    f32 r = ::sqrtf(rx::Max(0.0f, 1.0f - y * y));
     f32 a = 2.399963f * static_cast<f32>(s);
-    return Vec3{r * ::cos(a), y, r * ::sin(a)};
+    return Vec3{r * ::cosf(a), y, r * ::sinf(a)};
   };
 
   out->points.reserve(static_cast<size_t>(guide_count) * P * 3);
@@ -655,7 +655,7 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
         for (u32 k = 0; k < P; ++k) {
           if (k > 0) {
             f32 t = static_cast<f32>(k) / (P - 1);
-            Vec3 dir = Normalize(Lerp(nrm, {0, -1, 0}, ::pow(t, 0.7f)));
+            Vec3 dir = Normalize(Lerp(nrm, {0, -1, 0}, ::powf(t, 0.7f)));
             p = p + dir * segment;
             length_sum += Length(p - prev);
             prev = p;
@@ -685,8 +685,8 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
         for (u32 k = 0; k < P; ++k) {
           f32 t = static_cast<f32>(k) / (P - 1);
           f32 w = 18.849556f * t + phase;  // three full crossings down the braid
-          centers[b * P + k] = nape + Vec3{amp * ::sin(w), -len * t,
-                                           -0.02f * t - 0.5f * amp * ::cos(2.0f * w)};
+          centers[b * P + k] = nape + Vec3{amp * ::sinf(w), -len * t,
+                                           -0.02f * t - 0.5f * amp * ::cosf(2.0f * w)};
         }
       }
       for (u32 b = 0; b < 3; ++b) {
@@ -694,8 +694,8 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
           u32 s = b * per_bundle + i;
           // Per-strand offset within the bundle, tapering to the tip.
           f32 ang = randf() * 6.2831853f;
-          f32 rad = 0.004f * ::sqrt(randf());
-          Vec3 off{rad * ::cos(ang), 0, rad * ::sin(ang)};
+          f32 rad = 0.004f * ::sqrtf(randf());
+          Vec3 off{rad * ::cosf(ang), 0, rad * ::sinf(ang)};
           Vec3 root = Normalize(centers[b * P] + off * 2.0f) * head_r;
           push_root(root);
           Vec3 prev{};
@@ -752,8 +752,8 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
         Vec3 root = nrm * head_r;
         // Small spread at the tie so the tail keeps volume.
         f32 ang = randf() * 6.2831853f;
-        f32 rad = 0.006f * ::sqrt(randf());
-        Vec3 tie_off{rad * ::cos(ang), 0, rad * ::sin(ang)};
+        f32 rad = 0.006f * ::sqrtf(randf());
+        Vec3 tie_off{rad * ::cosf(ang), 0, rad * ::sinf(ang)};
         f32 tail_len = 0.30f + 0.05f * randf();
         push_root(root);
         Vec3 prev{};

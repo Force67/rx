@@ -21,7 +21,7 @@ void Check(bool condition, const char *message) {
 }
 
 void Near(f32 actual, f32 expected, f32 tolerance, const char *message) {
-  if (::fabs(actual - expected) <= tolerance)
+  if (::fabsf(actual - expected) <= tolerance)
     return;
   ::fprintf(
       stderr,
@@ -70,7 +70,7 @@ BodyRegionSample Simulate(f32 step, f32 seconds,
   BodyDynamics dynamics;
   dynamics.AddRegion(TestRegion());
   dynamics.Update(skeleton, frame, step, &pose); // initialize
-  const u32 count = static_cast<u32>(::ceil(seconds / step));
+  const u32 count = static_cast<u32>(::ceilf(seconds / step));
   for (u32 i = 0; i < count; ++i) {
     pose.ResetToBind(skeleton);
     dynamics.Update(skeleton, frame, rx::Min(step, seconds - i * step), &pose);
@@ -82,7 +82,7 @@ void TestGravityAndInertia() {
   BodyDynamicsFrame gravity;
   const BodyRegionSample sag = Simulate(1.0f / 120.0f, 2.0f, gravity);
   const f32 expected =
-      -9.81f / ::pow(2.0f * 3.14159265358979323846f * 2.0f, 2.0f);
+      -9.81f / ::powf(2.0f * 3.14159265358979323846f * 2.0f, 2.0f);
   Near(sag.translation.y, expected, 0.0005f,
        "settled sag follows the spring's physical equilibrium");
 
@@ -130,9 +130,9 @@ void TestLimitsAndTeleport() {
   pose.ResetToBind(skeleton);
   dynamics.Update(skeleton, frame, 1.0f / 60.0f, &pose);
   BodyRegionSample sample = dynamics.sample(0);
-  Check(::fabs(sample.translation.x) <= 0.010001f &&
-            ::fabs(sample.translation.y) <= 0.020001f &&
-            ::fabs(sample.translation.z) <= 0.030001f,
+  Check(::fabsf(sample.translation.x) <= 0.010001f &&
+            ::fabsf(sample.translation.y) <= 0.020001f &&
+            ::fabsf(sample.translation.z) <= 0.030001f,
         "per-axis anatomical limits hold under extreme impulses");
 
   frame = {};
@@ -148,7 +148,7 @@ void TestLimitsAndTeleport() {
   frame.linear_impulse = {0, -1, 0};
   pose.ResetToBind(skeleton);
   dynamics.Update(skeleton, frame, 1.0f / 60.0f, &pose);
-  Check(::fabs(dynamics.sample(0).translation.y) > 0,
+  Check(::fabsf(dynamics.sample(0).translation.y) > 0,
         "region resumes simulation on the frame after a teleport");
 }
 
@@ -169,7 +169,7 @@ void TestPoseAndMorphOutput() {
   BodyDynamicsFrame frame;
   base::Vector<BodyMorphWeight> weights;
   dynamics.Update(skeleton, frame, 1.0f / 60.0f, &pose, &weights);
-  Check(weights.size() == 1 && ::fabs(weights[0].weight - 0.15f) < 1e-6f,
+  Check(weights.size() == 1 && ::fabsf(weights[0].weight - 0.15f) < 1e-6f,
         "morph bias is emitted on the rest/initialization frame");
   frame.linear_impulse = {0, -1, 0};
   pose.ResetToBind(skeleton);
@@ -241,7 +241,7 @@ void TestModelUnitScale() {
   const BodyRegionSample result = dynamics.sample(0);
   Check(result.active,
         "changing the source-unit scale keeps the region active");
-  Check(::fabs(result.translation.y) > 0,
+  Check(::fabsf(result.translation.y) > 0,
         "source-unit scaled simulation responds to a physical impulse");
   Near((pose.translation[2].y - skeleton.bones[2].bind_translation.y) / 100.0f,
        result.translation.y, 1e-6f,

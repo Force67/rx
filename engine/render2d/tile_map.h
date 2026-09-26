@@ -74,7 +74,7 @@ class RX_RENDER2D_EXPORT TileMap {
   Vec2i WorldToTile(Vec2 world) const;
   // Top-left world corner of tile (tx, ty).
   Vec2 TileToWorld(i32 tx, i32 ty) const {
-    if (!(tile_size > 0.0f) || !::isfinite(tile_size)) return {};
+    if (!(tile_size > 0.0f) || !isfinite(tile_size)) return {};
     return {static_cast<f32>(tx) * tile_size, static_cast<f32>(ty) * tile_size};
   }
 

@@ -20,7 +20,7 @@ void Damp(f32* x, f32* v, f32 goal, f32 halflife, f32 dt) {
   const f32 y = (2.0f * 0.69314718f) / rx::Max(halflife, 1e-4f);
   const f32 j0 = *x - goal;
   const f32 j1 = *v + j0 * y;
-  const f32 e = ::exp(-y * dt);
+  const f32 e = ::expf(-y * dt);
   *x = goal + (j0 + j1 * dt) * e;
   *v = (*v - j1 * y * dt) * e;
 }
@@ -37,7 +37,7 @@ f32 ToUnit(u64 value) { return static_cast<f32>(value >> 40) * (1.0f / 16777216.
 // Stateless value noise in [-1, 1]: random knots at integer positions of `s`,
 // smoothstep between them - smooth drift, never jitter.
 f32 SmoothNoise(u64 seed, u32 lane, f32 s) {
-  const f32 floor = ::floor(s);
+  const f32 floor = ::floorf(s);
   const i64 knot = static_cast<i64>(floor);
   auto knot_value = [&](i64 k) {
     u64 state = seed ^ (static_cast<u64>(lane) * 0xD6E8FEB86659FD93ull) ^
@@ -273,7 +273,7 @@ void ExpressionController::Update(f32 dt) {
     f32 out = channel.value;
     if (life_.enabled && channel.micro >= 0) {
       // Micro-motion fades as the expression takes the channel over.
-      const f32 headroom = 1.0f - rx::Min(::abs(channel.value), 1.0f);
+      const f32 headroom = 1.0f - rx::Min(::fabsf(channel.value), 1.0f);
       out += life_.micro_amplitude * headroom *
              SmoothNoise(seed_, static_cast<u32>(channel.micro), life_time_ * life_.micro_hz);
     }

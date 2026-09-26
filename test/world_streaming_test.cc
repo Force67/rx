@@ -25,7 +25,7 @@ void Check(bool condition, const char* message) {
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-4f) {
-  if (::abs(actual - expected) <= epsilon) return;
+  if (::fabsf(actual - expected) <= epsilon) return;
   ::fprintf(stderr, "world_streaming_test: FAIL: %s (got %.6f, expected %.6f)\n", message,
                actual, expected);
   ++failures;
@@ -138,12 +138,12 @@ void TestDemandAndQueries() {
   observer.prediction_seconds = maximum;
   observer.maximum_prediction_distance = maximum;
   query = BuildWorldStreamQuery(observer);
-  Check(::isfinite(query.predicted.x), "large finite prediction remains finite");
+  Check(isfinite(query.predicted.x), "large finite prediction remains finite");
   demand = EvaluateWorldStreamDemand(observer, Region(3, -maximum, 0, -maximum, 1));
   Check(!demand.load, "overflow-scale distances do not spuriously load a region");
 
   const f32 large = 1.0e30f;
-  const f32 adjacent = ::nextafter(large, maximum);
+  const f32 adjacent = ::nextafterf(large, maximum);
   observer = Observer({large, 0, 0}, 0, 0);
   observer.velocity = {adjacent - large, 0, 0};
   observer.prediction_seconds = 1;
@@ -262,7 +262,7 @@ void TestBudgetsPriorityAndFairness() {
 
   WorldStreamPlan large_distance;
   const f32 farther = 1.0e30f;
-  const f32 nearer = ::nextafter(farther, 0.0f);
+  const f32 nearer = ::nextafterf(farther, 0.0f);
   const WorldStreamObservation maximum_range =
       Observer({0, 0, 0}, FLT_MAX, FLT_MAX);
   const WorldStreamRegion distant[] = {Region(1, farther, 0, farther, 1),

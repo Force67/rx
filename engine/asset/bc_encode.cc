@@ -64,7 +64,7 @@ void FitLine(const f32* points, f32* e0, f32* e1) {
       // Single-colour block: any axis works, the projection collapses anyway.
       for (int c = 0; c < N; ++c) axis[c] = c == 0 ? 1.0f : 0.0f;
     } else {
-      const f32 inv = 1.0f / ::sqrt(len);
+      const f32 inv = 1.0f / ::sqrtf(len);
       for (int c = 0; c < N; ++c) axis[c] *= inv;
     }
   }
@@ -76,7 +76,7 @@ void FitLine(const f32* points, f32* e0, f32* e1) {
     f32 len = 0;
     for (int c = 0; c < N; ++c) len += next[c] * next[c];
     if (len < 1e-12f) break;
-    const f32 inv = 1.0f / ::sqrt(len);
+    const f32 inv = 1.0f / ::sqrtf(len);
     for (int c = 0; c < N; ++c) axis[c] = next[c] * inv;
   }
 
@@ -117,7 +117,7 @@ void RefitEndpoints(const f32* points, const f32* weights, f32* e0, f32* e1) {
     }
   }
   const f32 det = aa * bb - ab * ab;
-  if (::abs(det) < 1e-6f) return;
+  if (::fabsf(det) < 1e-6f) return;
   const f32 inv = 1.0f / det;
   for (int c = 0; c < N; ++c) {
     e0[c] = rx::Clamp((bb * ax[c] - ab * bx[c]) * inv, 0.0f, 255.0f);

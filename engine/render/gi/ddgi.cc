@@ -60,12 +60,12 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
   f32 u3 = static_cast<f32>(hash(frame_index + 2) & 0xffffff) / 16777215.0f;
   f32 angle = u1 * 6.2831853f;
   f32 z = u2 * 2.0f - 1.0f;
-  f32 r = ::sqrt(rx::Max(0.0f, 1.0f - z * z));
+  f32 r = ::sqrtf(rx::Max(0.0f, 1.0f - z * z));
   f32 phi = u3 * 6.2831853f;
-  Vec3 axis{r * ::cos(phi), r * ::sin(phi), z};
+  Vec3 axis{r * ::cosf(phi), r * ::sinf(phi), z};
 
-  f32 c = ::cos(angle);
-  f32 s = ::sin(angle);
+  f32 c = ::cosf(angle);
+  f32 s = ::sinf(angle);
   f32 t = 1.0f - c;
   f32 rows[12] = {
       t * axis.x * axis.x + c,          t * axis.x * axis.y - s * axis.z,
@@ -176,9 +176,9 @@ void DdgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   // every probe represents, so history resets and re-converges.
   f32 spacing = settings_.probe_spacing;
   Vec3 extent{(kProbesX - 1) * spacing, (kProbesY - 1) * spacing, (kProbesZ - 1) * spacing};
-  Vec3 origin{::floor((camera.x - extent.x * 0.5f) / spacing) * spacing,
-              ::floor((camera.y - extent.y * 0.5f) / spacing) * spacing,
-              ::floor((camera.z - extent.z * 0.5f) / spacing) * spacing};
+  Vec3 origin{::floorf((camera.x - extent.x * 0.5f) / spacing) * spacing,
+              ::floorf((camera.y - extent.y * 0.5f) / spacing) * spacing,
+              ::floorf((camera.z - extent.z * 0.5f) / spacing) * spacing};
   bool snapped = origin.x != origin_.x || origin.y != origin_.y || origin.z != origin_.z;
   origin_ = origin;
   bool reset = !history_valid_ || snapped;

@@ -25,7 +25,7 @@ void Check(bool condition, const char* message) {
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-3f) {
-  if (::fabs(actual - expected) <= epsilon) return;
+  if (::fabsf(actual - expected) <= epsilon) return;
   ::fprintf(stderr, "weather_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
@@ -94,7 +94,7 @@ void TestDeterministic() {
     lhs.Update(0.5f, Vec3{0, 0, 0}, 0.5f);
     rhs.Update(0.5f, Vec3{0, 0, 0}, 0.5f);
     if (lhs.active_state() != rhs.active_state() || lhs.target_state() != rhs.target_state() ||
-        ::fabs(lhs.transition() - rhs.transition()) > 1e-6f) {
+        ::fabsf(lhs.transition() - rhs.transition()) > 1e-6f) {
       identical = false;
     }
     if (lhs.active_state() != last) saw_change = true;
@@ -254,7 +254,7 @@ void TestWindYawWrap() {
   sys.ForceState(0, 0.0f);
   sys.ForceState(1, 4.0f);
   sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
-  Check(::fabs(sys.cloudscape().wind_yaw) > 3.0f,
+  Check(::fabsf(sys.cloudscape().wind_yaw) > 3.0f,
         "wind yaw crosses the wrap without reversing through zero");
 }
 
@@ -433,7 +433,7 @@ void TestHugeDeltaTimeIsBounded() {
   sys.AddState(Clear(1));
   sys.ForceState(0, 0.0f);
   sys.Update(FLT_MAX, Vec3{0, 0, 0}, 0.5f);
-  Check(::isfinite(sys.cloudscape().map_offset.x),
+  Check(isfinite(sys.cloudscape().map_offset.x),
         "a huge finite delta is bounded and returns finite output");
 }
 
@@ -452,7 +452,7 @@ void TestStateValidation() {
   sys.ForceState(0, 0.0f);
   sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
   const render::CloudscapeControls& controls = sys.cloudscape();
-  Check(::isfinite(controls.map_a.coverage) && controls.map_a.coverage == 0.0f,
+  Check(isfinite(controls.map_a.coverage) && controls.map_a.coverage == 0.0f,
         "non-finite state controls are sanitized at registration");
   Check(controls.density == 0.0f, "negative density is clamped");
   Check(controls.top > controls.bottom, "cloud shell keeps a positive thickness");
@@ -532,7 +532,7 @@ void TestLightning() {
       if (w.strike_age >= 0.0f) {
         struck = true;
         f32 dx = w.strike_pos.x - player.x, dz = w.strike_pos.z - player.z;
-        f32 d = ::sqrt(dx * dx + dz * dz);
+        f32 d = ::sqrtf(dx * dx + dz * dz);
         if (d < 90.0f || d > 320.0f) in_range = false;
       }
       if (w.lightning > 0.0f) flashed = true;

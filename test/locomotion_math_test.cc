@@ -29,18 +29,18 @@ void Check(bool condition, const char* message) {
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-4f) {
-  if (::abs(actual - expected) <= epsilon) return;
+  if (::fabsf(actual - expected) <= epsilon) return;
   ::fprintf(stderr, "locomotion_math_test: FAIL: %s (got %.6f, expected %.6f)\n", message,
                actual, expected);
   ++failures;
 }
 
 bool Finite(const Vec3& v) {
-  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
+  return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
 }
 
 bool Finite(const Quat& q) {
-  return ::isfinite(q.x) && ::isfinite(q.y) && ::isfinite(q.z) && ::isfinite(q.w);
+  return isfinite(q.x) && isfinite(q.y) && isfinite(q.z) && isfinite(q.w);
 }
 
 // synthetic terrain probes
@@ -215,7 +215,7 @@ void TestGaitRampSmooth() {
   for (int i = 0; i < 400; ++i) {
     clock.Update(m, run, params, false, dt);
     const f32 rate = clock.state().phase_rate;
-    if (prev_rate > 0 && ::abs(rate - prev_rate) / prev_rate > 0.2f) smooth = false;
+    if (prev_rate > 0 && ::fabsf(rate - prev_rate) / prev_rate > 0.2f) smooth = false;
     prev_rate = rate;
   }
   Check(smooth, "phase rate ramps smoothly (<20% per tick)");
@@ -231,7 +231,7 @@ void TestCapturePoint() {
 
   const Vec3 v{0.5f, 0, -0.3f};
   const Vec3 cp1 = CapturePoint(com, v, 9.81f, 0.95f);
-  const f32 omega = ::sqrt(9.81f / 0.95f);
+  const f32 omega = ::sqrtf(9.81f / 0.95f);
   Near(cp1.x - com.x, v.x / omega, "capture offset x = v/sqrt(g/h)");
   Near(cp1.z - com.z, v.z / omega, "capture offset z = v/sqrt(g/h)");
 
@@ -360,7 +360,7 @@ void TestFootstepPlanner() {
 // Rotation angle of a quaternion delta from identity (radians, [0,pi]).
 f32 QuatAngle(const Quat& q) {
   const Quat n = Normalize(q);
-  return 2.0f * ::acos(::abs(n.w) > 1.0f ? 1.0f : ::abs(n.w));
+  return 2.0f * ::acosf(::fabsf(n.w) > 1.0f ? 1.0f : ::fabsf(n.w));
 }
 
 // Independent forward kinematics matching the module's chain convention: the
@@ -416,7 +416,7 @@ void TestLegIkForwardKinematics() {
         const Vec3 target{x, y, z};
         const Vec3 ankle_target = target + flat_normal * foot_height;
         const LegIkResult r = SolveLegIk(target, flat_normal, upper, lower, foot_height);
-        Check(Finite(r.hip) && Finite(r.ankle) && ::isfinite(r.knee_flexion), "leg IK finite");
+        Check(Finite(r.hip) && Finite(r.ankle) && isfinite(r.knee_flexion), "leg IK finite");
         Check(r.knee_flexion >= 0.0f, "knee flexion non-negative");
         Check(!r.clamped, "reachable target not clamped");
         const Vec3 ankle = LegForwardAnkle(r, upper, lower);
@@ -458,13 +458,13 @@ void TestLegIkUnreachable() {
   Near(r.knee_flexion, 0.0f, "unreachable leg is ~straight", 0.05f);
   const Vec3 sole = LegForwardKinematics(r, upper, lower, foot_height);
   const f32 cos_angle = Dot(Normalize(sole), Normalize(target));
-  const f32 angle = ::acos(cos_angle > 1.0f ? 1.0f : cos_angle);
+  const f32 angle = ::acosf(cos_angle > 1.0f ? 1.0f : cos_angle);
   Check(angle < 2.0f * 3.14159265f / 180.0f, "FK aims within 2deg of the target direction");
 }
 
 void TestLegIkDegenerate() {
   const LegIkResult r = SolveLegIk({0, 0, 0}, {0, 1, 0}, 0.45f, 0.40f, 0.054f);
-  Check(Finite(r.hip) && Finite(r.ankle) && ::isfinite(r.knee_flexion), "degenerate finite");
+  Check(Finite(r.hip) && Finite(r.ankle) && isfinite(r.knee_flexion), "degenerate finite");
   Check(r.clamped, "zero-length target flagged clamped");
 }
 
@@ -523,7 +523,7 @@ void TestWholeBodyStanding() {
 
     for (u32 j = 0; j < kRigJointCount; ++j) {
       Check(Finite(out.joint_target[j]), "joint target finite");
-      Check(::isfinite(out.joint_drive_scale[j]), "drive scale finite");
+      Check(isfinite(out.joint_drive_scale[j]), "drive scale finite");
     }
     Check(Finite(out.root_assist_force) && Finite(out.root_assist_torque), "root assists finite");
 

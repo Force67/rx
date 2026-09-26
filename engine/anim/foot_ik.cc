@@ -96,7 +96,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
     if (l_thigh < 1e-4f || l_calf < 1e-4f) continue;
 
     Vec3 to_target = p.target - a;
-    f32 reach = Clamp(Length(to_target), ::fabs(l_thigh - l_calf) + 1e-3f,
+    f32 reach = Clamp(Length(to_target), ::fabsf(l_thigh - l_calf) + 1e-3f,
                       l_thigh + l_calf - 1e-3f);
     Vec3 dir = Normalize(to_target);
     Vec3 effective_target = a + dir * reach;
@@ -106,7 +106,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
     f32 cos_hip = Clamp((l_thigh * l_thigh + reach * reach - l_calf * l_calf) /
                             (2.0f * l_thigh * reach),
                         -1.0f, 1.0f);
-    f32 hip_angle = ::acos(cos_hip);
+    f32 hip_angle = ::acosf(cos_hip);
     Vec3 plane_n = Cross(dir, forward);
     if (Length(plane_n) < 1e-4f) plane_n = Cross(dir, up);
     plane_n = Normalize(plane_n);

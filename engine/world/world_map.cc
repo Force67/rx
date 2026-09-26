@@ -142,7 +142,7 @@ void WorldMap::GatherRegions(const scene::WorldStreamObservation& observer, Doma
 }
 
 WorldStreamPolicy DefaultWorldStreamPolicy(f32 scale) {
-  const f32 unit = ::isfinite(scale) && scale > 0 ? scale : 1.0f;
+  const f32 unit = isfinite(scale) && scale > 0 ? scale : 1.0f;
   WorldStreamPolicy policy;
   auto set = [&](Domain domain, f32 load, f32 retain, f32 full, u32 rows_per_commit) {
     DomainStreamPolicy& target = policy[domain];
@@ -193,7 +193,7 @@ bool InNearTierBand(const DomainStreamPolicy& policy, f32 distance, bool current
   const f32 margin = policy.tier_hysteresis > 1.0f ? policy.tier_hysteresis : 1.0f;
   const f32 threshold =
       currently_near ? policy.full_tier_distance * margin : policy.full_tier_distance;
-  return ::isfinite(distance) && distance <= threshold;
+  return isfinite(distance) && distance <= threshold;
 }
 
 Tier ResolveTier(const WorldIndexData& index, const WorldCellRecord& cell, Domain domain,

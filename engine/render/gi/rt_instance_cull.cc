@@ -17,11 +17,11 @@ f32 MaxScale(const Mat4& t) {
   for (u32 i = 0; i < 3; ++i) {
     f32 row = 0.0f;
     for (u32 j = 0; j < 3; ++j)
-      row += ::abs(m[4 * i] * m[4 * j] + m[4 * i + 1] * m[4 * j + 1] +
+      row += ::fabsf(m[4 * i] * m[4 * j] + m[4 * i + 1] * m[4 * j + 1] +
                       m[4 * i + 2] * m[4 * j + 2]);
     bound = rx::Max(bound, row);
   }
-  return ::sqrt(bound);
+  return ::sqrtf(bound);
 }
 
 }  // namespace
@@ -35,7 +35,7 @@ bool RtInstanceCuller::DrawVisible(const Mat4& transform, const Vec3& mesh_cente
 bool RtInstanceCuller::Cull(const Vec3& c, f32 radius) const {
   if (radius <= 0.0f) return false;  // unknown bounds (radius 0): never cull
   const f32 dx = c.x - eye_.x, dy = c.y - eye_.y, dz = c.z - eye_.z;
-  const f32 dist = ::sqrt(dx * dx + dy * dy + dz * dz);
+  const f32 dist = ::sqrtf(dx * dx + dy * dy + dz * dz);
   if (dist <= start_distance_) return false;  // near field is always kept
   // Angular radius ~= radius / dist; drop when it is below the threshold.
   return radius < angle_threshold_ * dist;

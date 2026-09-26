@@ -82,10 +82,10 @@ int main() {
       for (u32 c = 0; c < 3; ++c) {
         const u32 index = (y*w+x)*4+c;
         const f32 value = pixels[index];
-        if (!::isfinite(value)) ++failures;
-        sum += ::abs(value);
-        if (!expected) outside += ::abs(value);
-        if (mode == 2) difference = rx::Max(difference, double(::abs(value-reference[index])));
+        if (!isfinite(value)) ++failures;
+        sum += ::fabsf(value);
+        if (!expected) outside += ::fabsf(value);
+        if (mode == 2) difference = rx::Max(difference, double(::fabsf(value-reference[index])));
       }
     }
     ::printf("flare mode=%u energy=%g outside_ghosts=%g exposure_error=%g\n", mode, sum, outside, difference);

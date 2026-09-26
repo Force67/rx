@@ -38,7 +38,7 @@ int failures = 0;
     }                                                                \
   } while (0)
 
-#define CHECK_NEAR(a, b, eps) CHECK(::abs((a) - (b)) <= (eps))
+#define CHECK_NEAR(a, b, eps) CHECK(::fabsf((a) - (b)) <= (eps))
 
 // A component exercising every PropType.
 struct TestAll {
@@ -182,7 +182,7 @@ bool DeepEqual(ecs::World& wa, ecs::Entity a, ecs::World& wb, ecs::Entity b) {
         if (va.b != vb.b) return false;
       } else {
         for (int k = 0; k < 4; ++k)
-          if (::abs(va.f[k] - vb.f[k]) > 1e-5f) return false;
+          if (::fabsf(va.f[k] - vb.f[k]) > 1e-5f) return false;
       }
     }
   }
@@ -373,13 +373,13 @@ void TestNumberLiterals() {
     CHECK(error.find("not finite") != base::String::npos);
     lenient(&t);
     CHECK_NEAR(t.position[1], 0.f, 1e-6f);
-    CHECK(::isfinite(t.position[1]));
+    CHECK(isfinite(t.position[1]));
 
     write(base::String("Transform.scale = ") + literal + "\n");
     error = strict_error();
     CHECK(error.find("not finite") != base::String::npos);
     lenient(&t);
-    CHECK(::isfinite(t.scale));
+    CHECK(isfinite(t.scale));
   }
 
   // A trailing suffix is not a number either, in the scalar path where strtof

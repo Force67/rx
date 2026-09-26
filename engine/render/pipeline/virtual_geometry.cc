@@ -493,7 +493,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
         const WorkCluster& c = current[ci];
         Vec3 d = Vec3{c.self_sphere[0], c.self_sphere[1], c.self_sphere[2]} - center;
         radius = rx::Max(radius,
-                          ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + c.self_sphere[3]);
+                          ::sqrtf(d.x * d.x + d.y * d.y + d.z * d.z) + c.self_sphere[3]);
       }
       f32 group_sphere[4] = {center.x, center.y, center.z, radius};
 

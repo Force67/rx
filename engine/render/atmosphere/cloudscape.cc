@@ -92,9 +92,9 @@ bool SameMapState(const CloudscapeMapState &a, const CloudscapeMapState &b) {
 
 bool MapStateDiscontinuous(const CloudscapeMapState &a,
                            const CloudscapeMapState &b) {
-  return a.seed != b.seed || ::abs(a.coverage - b.coverage) > 0.25f ||
-         ::abs(a.cloud_type - b.cloud_type) > 0.25f ||
-         ::abs(a.precipitation - b.precipitation) > 0.25f;
+  return a.seed != b.seed || ::fabsf(a.coverage - b.coverage) > 0.25f ||
+         ::fabsf(a.cloud_type - b.cloud_type) > 0.25f ||
+         ::fabsf(a.precipitation - b.precipitation) > 0.25f;
 }
 
 bool DensityFieldDiscontinuous(const CloudscapeControls &previous,
@@ -118,21 +118,21 @@ bool DensityFieldDiscontinuous(const CloudscapeControls &previous,
       return true;
   }
   if (!endpoint_relabel &&
-      ::abs(current.map_blend - previous.map_blend) > 0.25f)
+      ::fabsf(current.map_blend - previous.map_blend) > 0.25f)
     return true;
 
   const f32 thickness = rx::Max(previous.top - previous.bottom, 1.0f);
   const Vec2 map_delta = current.map_offset - previous.map_offset;
-  const f32 wind_alignment = ::cos(current.wind_yaw - previous.wind_yaw);
-  return ::abs(current.bottom - previous.bottom) > rx::Max(250.0f, thickness * 0.15f) ||
-         ::abs(current.top - previous.top) > rx::Max(500.0f, thickness * 0.15f) ||
-         ::abs(current.density - previous.density) > 0.25f ||
-         ::abs(current.anvil - previous.anvil) > 0.25f ||
-         ::abs(current.darkness - previous.darkness) > 0.25f ||
+  const f32 wind_alignment = ::cosf(current.wind_yaw - previous.wind_yaw);
+  return ::fabsf(current.bottom - previous.bottom) > rx::Max(250.0f, thickness * 0.15f) ||
+         ::fabsf(current.top - previous.top) > rx::Max(500.0f, thickness * 0.15f) ||
+         ::fabsf(current.density - previous.density) > 0.25f ||
+         ::fabsf(current.anvil - previous.anvil) > 0.25f ||
+         ::fabsf(current.darkness - previous.darkness) > 0.25f ||
          map_delta.x * map_delta.x + map_delta.y * map_delta.y > 250000.0f ||
          wind_alignment < 0.94f ||
-         ::abs(current.vertical_skew - previous.vertical_skew) > 250.0f ||
-         ::abs(current.turbulence - previous.turbulence) > 0.25f;
+         ::fabsf(current.vertical_skew - previous.vertical_skew) > 250.0f ||
+         ::fabsf(current.turbulence - previous.turbulence) > 0.25f;
 }
 
 } // namespace
@@ -308,8 +308,8 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
   push.sun_color[2] = frame.sun_color.z;
   push.sun_color[3] = frame.flash;
   const CloudscapeControls &c = frame.controls;
-  push.wind[0] = ::cos(c.wind_yaw);
-  push.wind[1] = ::sin(c.wind_yaw);
+  push.wind[0] = ::cosf(c.wind_yaw);
+  push.wind[1] = ::sinf(c.wind_yaw);
   push.wind[2] = c.vertical_skew;
   push.wind[3] = c.darkness;
   push.fog[0] = c.fog_density;
@@ -389,8 +389,8 @@ void Cloudscape::AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
   push.sun_dir[2] = sun.z;
   push.near_plane = 0.1f;
   const CloudscapeControls &c = frame.controls;
-  push.wind[0] = ::cos(c.wind_yaw);
-  push.wind[1] = ::sin(c.wind_yaw);
+  push.wind[0] = ::cosf(c.wind_yaw);
+  push.wind[1] = ::sinf(c.wind_yaw);
   push.wind[2] = c.wind_speed;
   push.wind[3] = c.vertical_skew;
   push.shape[0] = c.bottom;
@@ -494,10 +494,10 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
   Vec3 current_sun = Normalize(frame.sun_direction);
   bool lighting_cut = has_last_frame_ &&
                       (Dot(current_sun, last_sun_direction_) < 0.98f ||
-                       ::abs(frame.sun_intensity - last_sun_intensity_) > 0.5f ||
+                       ::fabsf(frame.sun_intensity - last_sun_intensity_) > 0.5f ||
                        Dot(frame.sun_color - last_sun_color_,
                            frame.sun_color - last_sun_color_) > 0.04f ||
-                       ::abs(frame.ambient - last_ambient_) > 0.1f);
+                       ::fabsf(frame.ambient - last_ambient_) > 0.1f);
   bool history = history_valid_ && contiguous && !frame.reset_history &&
                  !camera_cut && !density_cut && !lighting_cut;
   MarchPush march_push{};
@@ -517,8 +517,8 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
   march_push.sun_color[2] = frame.sun_color.z;
   march_push.sun_color[3] = frame.ambient;
   const CloudscapeControls &c = frame.controls;
-  march_push.wind[0] = ::cos(c.wind_yaw);
-  march_push.wind[1] = ::sin(c.wind_yaw);
+  march_push.wind[0] = ::cosf(c.wind_yaw);
+  march_push.wind[1] = ::sinf(c.wind_yaw);
   march_push.wind[2] = c.wind_speed;
   march_push.wind[3] = c.vertical_skew;
   march_push.shape[0] = c.bottom;

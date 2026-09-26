@@ -30,7 +30,7 @@ void Check(const char* what, bool ok) {
 }
 
 bool Near(rx::f32 a, rx::f32 b, rx::f32 eps = 1.0f) {
-  return ::fabs(a - b) < eps;  // a pixel of slack: normalized -> pixel rounds
+  return ::fabsf(a - b) < eps;  // a pixel of slack: normalized -> pixel rounds
 }
 
 constexpr SDL_TouchID kTouch = 1;

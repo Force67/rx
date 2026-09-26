@@ -26,7 +26,7 @@ u32 AreaColor(AreaId area) { return kAreaColors[area & 7]; }
 void AppendNavMeshLines(const NavMesh& mesh, const Vec3& center, f32 radius,
                         base::Vector<render::DebugLine>* out) {
   const f32 cs = mesh.config().cell_size;
-  const i32 r = static_cast<i32>(::ceil(radius / cs));
+  const i32 r = static_cast<i32>(::ceilf(radius / cs));
   const CellRef mid = mesh.CellAt(center);
   // Line endpoints take the interpolated surface height so edges hug slopes
   // instead of burying their downhill half in the ground.

@@ -43,9 +43,9 @@ void TestCheckerMask() {
   CHECK(low < 0.01f);
   CHECK(high > 0.99f);
   // Diagonal neighbours share a colour, orthogonal ones do not.
-  CHECK(::abs(asset::SamplePattern(desc, 0.375f, 0.375f) - low) < 0.01f);
+  CHECK(::fabsf(asset::SamplePattern(desc, 0.375f, 0.375f) - low) < 0.01f);
   // Tiles: the mask at u and at u + 1 is the same field.
-  CHECK(::abs(asset::SamplePattern(desc, 1.125f, 0.125f) - low) < 0.01f);
+  CHECK(::fabsf(asset::SamplePattern(desc, 1.125f, 0.125f) - low) < 0.01f);
 }
 
 // The two axes have to be independent, because the thing they describe is: a
@@ -77,9 +77,9 @@ void TestPatternAxes() {
   desc.scale[1] = 12.0f;
   for (u32 i = 0; i < 8; ++i) {
     const f32 u = i / 8.0f, v = i / 5.0f;
-    CHECK(::abs(asset::SamplePattern(desc, u + 1.0f, v) -
+    CHECK(::fabsf(asset::SamplePattern(desc, u + 1.0f, v) -
                    asset::SamplePattern(desc, u, v)) < 1e-4f);
-    CHECK(::abs(asset::SamplePattern(desc, u, v + 1.0f) -
+    CHECK(::fabsf(asset::SamplePattern(desc, u, v + 1.0f) -
                    asset::SamplePattern(desc, u, v)) < 1e-4f);
   }
 }
@@ -156,9 +156,9 @@ void TestNormalMap() {
   for (size_t i = 0; i < relief.data.size(); i += 4) {
     f32 n[3];
     for (int c = 0; c < 3; ++c) n[c] = relief.data[i + c] / 255.0f * 2.0f - 1.0f;
-    CHECK(::abs(::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) - 1.0f) < 0.02f);
+    CHECK(::fabsf(::sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) - 1.0f) < 0.02f);
     CHECK(n[2] > 0.0f);  // a heightfield normal never points into the surface
-    tilted |= ::abs(n[0]) > 0.2f || ::abs(n[1]) > 0.2f;
+    tilted |= ::fabsf(n[0]) > 0.2f || ::fabsf(n[1]) > 0.2f;
   }
   CHECK(tilted);
 }
@@ -197,15 +197,15 @@ void CheckMesh(const char* what, const asset::Mesh& mesh) {
   for (u32 index : lod.indices) CHECK(index < lod.vertices.size());
 
   for (const asset::Vertex& v : lod.vertices) {
-    f32 len = ::sqrt(v.normal[0] * v.normal[0] + v.normal[1] * v.normal[1] +
+    f32 len = ::sqrtf(v.normal[0] * v.normal[0] + v.normal[1] * v.normal[1] +
                         v.normal[2] * v.normal[2]);
-    if (::abs(len - 1.0f) > 1e-3f) {
+    if (::fabsf(len - 1.0f) > 1e-3f) {
       ::fprintf(stderr, "procedural_asset_test: %s has a non-unit normal (%f)\n", what, len);
       ++failures;
       break;
     }
     f32 dot = v.normal[0] * v.tangent[0] + v.normal[1] * v.tangent[1] + v.normal[2] * v.tangent[2];
-    if (::abs(dot) > 1e-3f) {
+    if (::fabsf(dot) > 1e-3f) {
       ::fprintf(stderr, "procedural_asset_test: %s tangent not perpendicular (%f)\n", what, dot);
       ++failures;
       break;
@@ -231,9 +231,9 @@ void TestPrimitives() {
   asset::Mesh plane = asset::MakePlane(2.0f, 3.0f, id);
   for (const asset::Vertex& v : plane.lods[0].vertices) {
     CHECK(v.normal[1] > 0.999f);
-    CHECK(::abs(::abs(v.position[0]) - 2.0f) < 1e-5f);
-    CHECK(::abs(v.position[1]) < 1e-5f);
-    CHECK(::abs(::abs(v.position[2]) - 3.0f) < 1e-5f);
+    CHECK(::fabsf(::fabsf(v.position[0]) - 2.0f) < 1e-5f);
+    CHECK(::fabsf(v.position[1]) < 1e-5f);
+    CHECK(::fabsf(::fabsf(v.position[2]) - 3.0f) < 1e-5f);
   }
 
   // A capsule is convex around its axis segment, so every normal points away
@@ -243,8 +243,8 @@ void TestPrimitives() {
   for (const asset::Vertex& v : capsule.lods[0].vertices) {
     f32 axis_y = v.position[1] > 0.6f ? 0.6f : (v.position[1] < -0.6f ? -0.6f : v.position[1]);
     f32 d[3] = {v.position[0], v.position[1] - axis_y, v.position[2]};
-    f32 len = ::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-    CHECK(::abs(len - 0.4f) < 1e-3f);  // every point is one radius off the axis
+    f32 len = ::sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    CHECK(::fabsf(len - 0.4f) < 1e-3f);  // every point is one radius off the axis
     CHECK((d[0] * v.normal[0] + d[1] * v.normal[1] + d[2] * v.normal[2]) / len > 0.999f);
   }
 
@@ -252,12 +252,12 @@ void TestPrimitives() {
   // test above cannot express (the inner half faces the axis).
   asset::Mesh torus = asset::MakeTorus(1.0f, 0.25f, 20, 32, id);
   for (const asset::Vertex& v : torus.lods[0].vertices) {
-    f32 radial = ::sqrt(v.position[0] * v.position[0] + v.position[2] * v.position[2]);
+    f32 radial = ::sqrtf(v.position[0] * v.position[0] + v.position[2] * v.position[2]);
     f32 scale = radial > 1e-6f ? 1.0f / radial : 0.0f;
     f32 d[3] = {v.position[0] - v.position[0] * scale, v.position[1],
                 v.position[2] - v.position[2] * scale};
-    f32 len = ::sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
-    CHECK(::abs(len - 0.25f) < 1e-3f);
+    f32 len = ::sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+    CHECK(::fabsf(len - 0.25f) < 1e-3f);
     CHECK((d[0] * v.normal[0] + d[1] * v.normal[1] + d[2] * v.normal[2]) / len > 0.999f);
   }
 
@@ -276,7 +276,7 @@ void TestPrimitives() {
     }
     f32 n[3] = {e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2],
                 e1[0] * e2[1] - e1[1] * e2[0]};
-    CHECK(::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) > 1e-6f);
+    CHECK(::sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) > 1e-6f);
   }
 }
 

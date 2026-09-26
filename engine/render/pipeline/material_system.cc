@@ -41,7 +41,7 @@ SkinCoeffs ComputeSkinCoeffs(const asset::Material::SkinParams& p) {
     // Kulla-Conty 2017: invert the multiple-scattering albedo so the authored
     // colour is what's seen. Per channel; s is the surface-albedo scale factor.
     const f32 s = 4.09712f + 4.20863f * col -
-                  ::sqrt(rx::Max(0.0f, 9.59217f + 41.6808f * col +
+                  ::sqrtf(rx::Max(0.0f, 9.59217f + 41.6808f * col +
                                               17.7126f * col * col));
     const f32 s2 = s * s;
     const f32 alpha = rx::Clamp((1.0f - s2) / (1.0f - c.g * s2), 0.0f, 0.999f);
@@ -1223,11 +1223,11 @@ MaterialSystem::MaterialColor MaterialSystem::material_color(u64 material_hash) 
 
 f32 MaterialSystem::AlphaCoverage::Sample(f32 u, f32 v) const {
   if (alpha.empty() || width == 0 || height == 0) return mean;
-  u -= ::floor(u);  // wrap into [0,1)
-  v -= ::floor(v);
+  u -= ::floorf(u);  // wrap into [0,1)
+  v -= ::floorf(v);
   f32 fx = u * static_cast<f32>(width) - 0.5f;
   f32 fy = v * static_cast<f32>(height) - 0.5f;
-  i32 x0 = static_cast<i32>(::floor(fx)), y0 = static_cast<i32>(::floor(fy));
+  i32 x0 = static_cast<i32>(::floorf(fx)), y0 = static_cast<i32>(::floorf(fy));
   f32 tx = fx - static_cast<f32>(x0), ty = fy - static_cast<f32>(y0);
   auto at = [&](i32 x, i32 y) -> f32 {
     x = ((x % static_cast<i32>(width)) + static_cast<i32>(width)) % static_cast<i32>(width);

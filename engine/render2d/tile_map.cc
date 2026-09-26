@@ -8,8 +8,8 @@ namespace rx::render2d {
 namespace {
 
 bool TryWorldToTile(f32 tile_size, Vec2 world, Vec2i* tile) {
-  if (!(tile_size > 0.0f) || !::isfinite(tile_size) ||
-      !::isfinite(world.x) || !::isfinite(world.y)) {
+  if (!(tile_size > 0.0f) || !isfinite(tile_size) ||
+      !isfinite(world.x) || !isfinite(world.y)) {
     return false;
   }
   const f64 x = ::floor(static_cast<f64>(world.x) / tile_size);
@@ -56,7 +56,7 @@ bool TileMap::IsSolidWorld(Vec2 world) const {
 }
 
 Rect TileMap::WorldBounds() const {
-  if (!(tile_size > 0.0f) || !::isfinite(tile_size)) return {};
+  if (!(tile_size > 0.0f) || !isfinite(tile_size)) return {};
   u32 max_w = 0, max_h = 0;
   for (const TileLayer& layer : layers) {
     max_w = layer.width > max_w ? layer.width : max_w;

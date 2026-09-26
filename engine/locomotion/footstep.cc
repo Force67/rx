@@ -31,7 +31,7 @@ Vec3 ResolveFacing(const LocomotionIntent& intent, const Quat& root_rotation) {
 // rolls the ankle past its limit).
 Quat FootOrientation(const Vec3& normal, const Vec3& facing) {
   Vec3 n = Length(normal) > 1e-5f ? Normalize(normal) : kUp;
-  const f32 angle = ::acos(Clampf(n.y, -1, 1));
+  const f32 angle = ::acosf(Clampf(n.y, -1, 1));
   Quat tilt{0, 0, 0, 1};
   if (angle > 1e-4f) {
     Vec3 axis = Cross(kUp, n);
@@ -46,7 +46,7 @@ Quat FootOrientation(const Vec3& normal, const Vec3& facing) {
 
 Vec3 CapturePoint(const Vec3& com_position, const Vec3& com_velocity, f32 gravity, f32 com_height) {
   const f32 h = com_height < 0.1f ? 0.1f : com_height;
-  const f32 omega = ::sqrt((gravity > 0 ? gravity : 9.81f) / h);
+  const f32 omega = ::sqrtf((gravity > 0 ? gravity : 9.81f) / h);
   if (!(omega > 0)) return com_position;
   return com_position + com_velocity * (1.0f / omega);
 }
@@ -72,7 +72,7 @@ void FootstepPlanner::Update(const CharacterMeasurements& m, const ContactEstima
   (void)dt;  // the planner is memoryless per tick beyond the lift-off latch
   const Vec3 facing = ResolveFacing(intent, m.root_rotation);
   const Vec3 right = Normalize(Cross(facing, kUp));  // character right (+X at yaw 0)
-  const f32 cos_slope = ::cos(params.max_ground_slope);
+  const f32 cos_slope = ::cosf(params.max_ground_slope);
 
   for (u32 foot = 0; foot < kFootCount; ++foot) {
     FootPlan& p = plan_[foot];

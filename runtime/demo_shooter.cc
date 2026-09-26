@@ -470,7 +470,7 @@ void ShooterDemo::StepTargets(f32 dt) {
     target.strafe_phase += dt * 0.7f;
     Vec3 position = target.home;
     if (target.strafe_span > 0) {
-      position.x += ::sin(target.strafe_phase) * target.strafe_span;
+      position.x += ::sinf(target.strafe_phase) * target.strafe_span;
     }
     // A downed target drops through the floor and pops back up on respawn,
     // which also takes its hitboxes out of the line of fire.
@@ -788,7 +788,7 @@ void ShooterDemo::DrawHud() {
   if (def && weapon && cam_fov_ > 0) {
     const f32 spread = combat::EffectiveSpread(*def, *weapon, *intent);
     const f32 pixels = rx::Clamp(
-        ::tan(spread) / ::tan(cam_fov_ * 0.5f) * size.y * 0.5f, 3.0f, size.y * 0.45f);
+        ::tanf(spread) / ::tanf(cam_fov_ * 0.5f) * size.y * 0.5f, 3.0f, size.y * 0.45f);
     const u32 color = IM_COL32(235, 240, 245, 210);
     const f32 arm = rx::Max(4.0f, pixels * 0.35f);
     draw->AddLine({middle.x - pixels - arm, middle.y}, {middle.x - pixels, middle.y}, color, 1.6f);

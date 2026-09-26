@@ -28,7 +28,7 @@ void Check(bool condition, const char* message) {
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-2f) {
-  if (::abs(actual - expected) <= epsilon) return;
+  if (::fabsf(actual - expected) <= epsilon) return;
   ::fprintf(stderr, "character_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
@@ -84,7 +84,7 @@ struct Scene {
 };
 
 f32 HorizontalSpeed(const CharacterState& s) {
-  return ::sqrt(s.velocity.x * s.velocity.x + s.velocity.z * s.velocity.z);
+  return ::sqrtf(s.velocity.x * s.velocity.x + s.velocity.z * s.velocity.z);
 }
 
 void TestGaitSpeeds() {
@@ -331,7 +331,7 @@ void TestTurnSmoothingConverges() {
 
   // Movement direction with heading yaw ~1.0 rad.
   const f32 theta = 1.0f;
-  s.intent().move = {::sin(theta), 0, -::cos(theta)};
+  s.intent().move = {::sinf(theta), 0, -::cosf(theta)};
   s.intent().gait = CharacterGait::kRun;
 
   f32 prev = s.state().facing_yaw;
@@ -364,7 +364,7 @@ void TestQuickPivotIsFaster() {
     move->pivot_angle = pivot_angle;
     s.Settle();
     const f32 theta = 2.6f;  // ~149 deg from the +? forward: a near reversal
-    s.intent().move = {::sin(theta), 0, -::cos(theta)};
+    s.intent().move = {::sinf(theta), 0, -::cosf(theta)};
     s.intent().gait = CharacterGait::kRun;
     for (int i = 0; i < steps; ++i) {
       StepCharacters(s.world, s.physics, kDt);

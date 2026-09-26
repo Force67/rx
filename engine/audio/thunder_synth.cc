@@ -20,24 +20,24 @@ public:
 
     // Air absorption: the crack is high-frequency and dies within ~1 km; the
     // rumble survives but its brightness closes down with range.
-    crack_gain_ = 1.6f * energy_ * ::exp(-dist / 900.0f);
+    crack_gain_ = 1.6f * energy_ * ::expf(-dist / 900.0f);
     f32 muffle = rx::Min(dist / 3000.0f, 1.0f);
     f32 cutoff_hz = rx::Min(2600.0f - 2250.0f * muffle, rate_f_ * 0.45f);
-    body_lp_k_ = rx::Clamp(1.0f - ::exp(-2.0f * 3.14159265f * cutoff_hz / rate_f_),
+    body_lp_k_ = rx::Clamp(1.0f - ::expf(-2.0f * 3.14159265f * cutoff_hz / rate_f_),
                             0.0f, 1.0f);
     f32 crack_hz = rx::Min(1800.0f, rate_f_ * 0.2f);
-    svf_f_ = 2.0f * ::sin(3.14159265f * crack_hz / rate_f_);
+    svf_f_ = 2.0f * ::sinf(3.14159265f * crack_hz / rate_f_);
 
     // Convert the old 48 kHz per-sample coefficients into rate-independent
     // time constants. Preserve the brown-noise variance at the reference rate.
-    brown_decay_ = ::exp(::log(0.998f) * (48000.0f / rate_f_));
+    brown_decay_ = ::expf(::logf(0.998f) * (48000.0f / rate_f_));
     brown_gain_ = 0.03f *
-                  ::sqrt((1.0f - brown_decay_ * brown_decay_) /
+                  ::sqrtf((1.0f - brown_decay_ * brown_decay_) /
                             (1.0f - 0.998f * 0.998f));
-    wobble_k_ = 1.0f - ::exp(-7.20054f / rate_f_);
-    bump_decay_step_ = ::exp(-1.6f / rate_f_);
-    global_decay_step_ = ::exp(-1.0f / ((2.2f + 2.0f * energy_) * rate_f_));
-    crack_decay_step_ = ::exp(-26.0f / rate_f_);
+    wobble_k_ = 1.0f - ::expf(-7.20054f / rate_f_);
+    bump_decay_step_ = ::expf(-1.6f / rate_f_);
+    global_decay_step_ = ::expf(-1.0f / ((2.2f + 2.0f * energy_) * rate_f_));
+    crack_decay_step_ = ::expf(-26.0f / rate_f_);
 
     seconds_ = 5.0f + 4.0f * energy_;
     total_frames_ = static_cast<u64>(seconds_ * rate_f_);
@@ -88,7 +88,7 @@ public:
         f32 dt_b = t - bump_t_[b];
         if (dt_b > 0.0f) {
           if (bump_decay_[b] == 0.0f)
-            bump_decay_[b] = ::exp(-dt_b * 1.6f);
+            bump_decay_[b] = ::expf(-dt_b * 1.6f);
           else
             bump_decay_[b] *= bump_decay_step_;
           env += bump_w_[b] * dt_b * bump_decay_[b] * 4.349251f;
@@ -107,7 +107,7 @@ public:
       f32 tail = rx::Clamp(remaining / 0.4f, 0.0f, 1.0f);
       tail = tail * tail * (3.0f - 2.0f * tail);
       f32 s = (crack + body) * tail;
-      out[i] = s / (1.0f + ::fabs(s)) * 0.95f; // asymptote inside full scale
+      out[i] = s / (1.0f + ::fabsf(s)) * 0.95f; // asymptote inside full scale
     }
     frame_ += n;
     return n;
@@ -156,8 +156,8 @@ private:
 
 base::UniquePointer<Decoder> MakeThunder(u32 output_rate, u32 seed, f32 energy,
                                      f32 distance_m) {
-  if (output_rate == 0 || output_rate > 768000u || !::isfinite(energy) ||
-      !::isfinite(distance_m))
+  if (output_rate == 0 || output_rate > 768000u || !isfinite(energy) ||
+      !isfinite(distance_m))
     return nullptr;
   return base::MakeUnique<ThunderDecoder>(output_rate, seed, energy,
                                           distance_m);

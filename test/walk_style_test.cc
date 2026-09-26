@@ -21,7 +21,7 @@ void Check(bool condition, const char *message) {
 }
 
 f32 RotationDelta(const Quat &a, const Quat &b) {
-  const f32 dot = ::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
+  const f32 dot = ::fabsf(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
   return 1.0f - rx::Min(dot, 1.0f);
 }
 
@@ -102,8 +102,8 @@ void TestGenesisAliases() {
                           march_pose.rotation[hip]) *
                 2.0f,
         "Genesis aliases receive stronger Hip Sway pelvis rotation");
-  Check(::fabs(sway_pose.translation[hip].x) >
-            ::fabs(march_pose.translation[hip].x) * 4.0f,
+  Check(::fabsf(sway_pose.translation[hip].x) >
+            ::fabsf(march_pose.translation[hip].x) * 4.0f,
         "Genesis hip receives stronger Hip Sway lateral travel");
   Check(RotationDelta(skeleton.bones[thigh].bind_rotation,
                       march_pose.rotation[thigh]) >
@@ -122,7 +122,7 @@ void TestGenesisAliases() {
         "styled Genesis pose produces a complete model palette");
   for (const Mat4 &matrix : matrices)
     for (f32 value : matrix.m)
-      Check(::isfinite(value), "styled pose matrices stay finite");
+      Check(isfinite(value), "styled pose matrices stay finite");
 }
 
 } // namespace

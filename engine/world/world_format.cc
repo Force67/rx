@@ -200,7 +200,7 @@ bool StringTableTerminated(const base::Vector<char>& table) {
 }
 
 bool IsFinite(const Vec3& value) {
-  return ::isfinite(value.x) && ::isfinite(value.y) && ::isfinite(value.z);
+  return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
 }
 
 bool ValidDomain(u8 value) { return value < kDomainCount; }
@@ -377,7 +377,7 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, base::String* error) const 
   // same things here is what keeps the cook from succeeding on an archive its
   // own loader will not open: a bake that fails at the end of a cook is a bad
   // afternoon, one that fails at the start of a play session is a bug report.
-  if (!::isfinite(cell_size_) || cell_size_ < 0) {
+  if (!isfinite(cell_size_) || cell_size_ < 0) {
     SetError(error, "world index: grid cell size is not a finite, non-negative number");
     return false;
   }
@@ -555,7 +555,7 @@ bool DecodeWorldIndex(base::Span<const u8> bytes, WorldIndexData* out, base::Str
   // is not a finite, non-negative number is a corrupt header, and substituting
   // zero for it would read as that legitimate answer. Both fields are inside
   // the checksum, so reaching here with either wrong means a wrong cook.
-  if (!::isfinite(cell_size) || cell_size < 0) {
+  if (!isfinite(cell_size) || cell_size < 0) {
     SetError(error, "world index: grid cell size is not a finite, non-negative number");
     return false;
   }
@@ -767,9 +767,9 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, base::String* error) const
     }
     // A transform nothing can draw, refused where it was produced rather than
     // on the machine that tries to load the cell.
-    if (!IsFinite(instance.position) || !::isfinite(instance.rotation.x) ||
-        !::isfinite(instance.rotation.y) || !::isfinite(instance.rotation.z) ||
-        !::isfinite(instance.rotation.w) || !::isfinite(instance.scale)) {
+    if (!IsFinite(instance.position) || !isfinite(instance.rotation.x) ||
+        !isfinite(instance.rotation.y) || !isfinite(instance.rotation.z) ||
+        !isfinite(instance.rotation.w) || !isfinite(instance.scale)) {
       SetError(error, "cell payload: instance " + rx::ToString(instance.stable_id) +
                           " has a non-finite transform");
       return false;
@@ -1085,9 +1085,9 @@ bool DecodeCellPayload(base::Span<const u8> bytes, WorldCellPayload* out, base::
                           rx::ToString(record.prototype));
       return false;
     }
-    if (!IsFinite(record.position) || !::isfinite(record.rotation.x) ||
-        !::isfinite(record.rotation.y) || !::isfinite(record.rotation.z) ||
-        !::isfinite(record.rotation.w) || !::isfinite(record.scale)) {
+    if (!IsFinite(record.position) || !isfinite(record.rotation.x) ||
+        !isfinite(record.rotation.y) || !isfinite(record.rotation.z) ||
+        !isfinite(record.rotation.w) || !isfinite(record.scale)) {
       SetError(error, "cell payload: instance " + rx::ToString(i) +
                           " has a non-finite transform");
       return false;

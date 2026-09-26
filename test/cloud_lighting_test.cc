@@ -15,7 +15,7 @@ namespace {
 f32 Half(u16 bits) {
   if ((bits & 0x7c00u) == 0x7c00u) return INFINITY;
   const int exponent = (bits >> 10) & 31;
-  return ::ldexp(float((bits & 1023) + (exponent ? 1024 : 0)),
+  return ::ldexpf(float((bits & 1023) + (exponent ? 1024 : 0)),
                     exponent ? exponent - 25 : -24) * ((bits & 0x8000) ? -1.f : 1.f);
 }
 }  // namespace
@@ -113,7 +113,7 @@ int main() {
         const u32 i = p * 4 + c;
         const f32 opacity_a = 1 - (light_a[i] - dark_a[i]);
         const f32 opacity_b = 1 - (light_b[i] - dark_b[i]);
-        if (!::isfinite(opacity_a) || !::isfinite(opacity_b)) {
+        if (!isfinite(opacity_a) || !isfinite(opacity_b)) {
           error = INFINITY;
           continue;
         }
@@ -121,20 +121,20 @@ int main() {
         const f32 source_a = dark_a[i] / opacity_a;
         const f32 source_b = dark_b[i] / opacity_b;
         min_source = rx::Min(min_source, double(rx::Min(source_a, source_b)));
-        error = rx::Max(error, double(::abs(source_a - source_b) /
+        error = rx::Max(error, double(::fabsf(source_a - source_b) /
                                        rx::Max(source_b, 1e-6f)));
         ++compared;
       }
     }
     check(compared > count && error < .025, "Cloud source independent of density", error);
-    check(::isfinite(min_source) && min_source > .1, "Cloud ambient illumination preserved", min_source);
+    check(isfinite(min_source) && min_source > .1, "Cloud ambient illumination preserved", min_source);
     ::printf("extent=%ux%u, compared=%u channels\n", extent.width, extent.height, compared);
 
     auto expect = [&](const base::Vector<f32>& pixels, f32 value, const char* name) {
       double difference = 0;
       for (u32 p = 0; p < count; ++p) for (u32 c = 0; c < 3; ++c) {
         f32 sample = pixels[p * 4 + c];
-        difference = ::isfinite(sample) ? rx::Max(difference, double(::abs(sample - value))) : INFINITY;
+        difference = isfinite(sample) ? rx::Max(difference, double(::fabsf(sample - value))) : INFINITY;
       }
       check(difference < .001, name, difference);
     };

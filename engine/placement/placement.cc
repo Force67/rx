@@ -75,7 +75,7 @@ void PlacementSystem::Update(const Vec3& viewer) {
     f32 cz = (static_cast<f32>(tile.key.z) + 0.5f) * stack.tile_size;
     f32 dx = viewer.x - cx;
     f32 dz = viewer.z - cz;
-    bool outside = ::sqrt(dx * dx + dz * dz) > stack.stream_radius;
+    bool outside = ::sqrtf(dx * dx + dz * dz) > stack.stream_radius;
     if (tile.state == 2 && (outside || tile.stale)) evicted_.push_back(tile.key);
   }
 
@@ -84,8 +84,8 @@ void PlacementSystem::Update(const Vec3& viewer) {
   for (u32 s = 0; s < stacks_.size() && budget > 0; ++s) {
     const PlacementStack& stack = stacks_[s];
     i32 r = static_cast<i32>(config_.radius_tiles);
-    i32 center_x = static_cast<i32>(::floor(viewer.x / stack.tile_size));
-    i32 center_z = static_cast<i32>(::floor(viewer.z / stack.tile_size));
+    i32 center_x = static_cast<i32>(::floorf(viewer.x / stack.tile_size));
+    i32 center_z = static_cast<i32>(::floorf(viewer.z / stack.tile_size));
     for (i32 dz = -r; dz <= r && budget > 0; ++dz) {
       for (i32 dx = -r; dx <= r && budget > 0; ++dx) {
         TileKey key{s, center_x + dx, center_z + dz};
@@ -93,7 +93,7 @@ void PlacementSystem::Update(const Vec3& viewer) {
         f32 cz = (static_cast<f32>(key.z) + 0.5f) * stack.tile_size;
         f32 ddx = viewer.x - cx;
         f32 ddz = viewer.z - cz;
-        if (::sqrt(ddx * ddx + ddz * ddz) > stack.stream_radius) continue;
+        if (::sqrtf(ddx * ddx + ddz * ddz) > stack.stream_radius) continue;
         if (Find(key)) continue;
         pending_.push_back(key);
         --budget;
@@ -224,7 +224,7 @@ void PlacementSystem::EmitTileCpu(const TileKey& key, base::Vector<PlacedInstanc
     f32 dhz = world_->Sample(height_map_, world_x, world_z + h) -
               world_->Sample(height_map_, world_x, world_z - h);
     Vec3 normal{-dhx, 2.0f * h, -dhz};
-    f32 nlen = ::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+    f32 nlen = ::sqrtf(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
     point.normal = {normal.x / nlen, normal.y / nlen, normal.z / nlen};
 
     u32 seed = InstanceSeed(config_.seed, key.x, key.z, i, layer_index);

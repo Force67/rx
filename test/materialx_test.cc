@@ -114,7 +114,7 @@ void TestOpenPbrImages() {
   Check(maps.metallic.empty(), "a constant input leaves its map slot empty");
   // OpenPBR spells it base_metalness; the engine field is the same one
   // standard_surface's metalness fills.
-  Check(::fabs(material.metallic_factor - 0.25f) < 1e-6f,
+  Check(::fabsf(material.metallic_factor - 0.25f) < 1e-6f,
         "the OpenPBR spelling of a constant input maps onto the same field");
   // The shader multiplies each map by its factor. The OpenPBR defaults seeded
   // before parsing (0.8 base colour, 0.3 roughness) must not survive onto a
@@ -137,7 +137,7 @@ void TestNodegraphAndUnsupportedNode() {
   // empty (and warning by name) is the honest answer; binding the operand as if
   // it were the result would render a material nobody authored.
   Check(maps.roughness.empty(), "a connection through an unevaluated node binds nothing");
-  Check(::fabs(material.ior - 1.7f) < 1e-6f, "constants beside a connection still load");
+  Check(::fabsf(material.ior - 1.7f) < 1e-6f, "constants beside a connection still load");
   fs::Remove(path);
 }
 
@@ -147,12 +147,12 @@ void TestConstantsStillLoad() {
   Check(asset::LoadMaterialX(path, &material, nullptr),
         "a constants-only document loads with no maps requested");
   // base is a weight on base_color, not a field of its own.
-  Check(::fabs(material.base_color_factor[0] - 0.1f) < 1e-6f &&
-            ::fabs(material.base_color_factor[2] - 0.3f) < 1e-6f,
+  Check(::fabsf(material.base_color_factor[0] - 0.1f) < 1e-6f &&
+            ::fabsf(material.base_color_factor[2] - 0.3f) < 1e-6f,
         "base weight multiplies base_color");
-  Check(::fabs(material.metallic_factor - 1.0f) < 1e-6f &&
-            ::fabs(material.roughness_factor - 0.3f) < 1e-6f &&
-            ::fabs(material.clearcoat - 0.75f) < 1e-6f,
+  Check(::fabsf(material.metallic_factor - 1.0f) < 1e-6f &&
+            ::fabsf(material.roughness_factor - 0.3f) < 1e-6f &&
+            ::fabsf(material.clearcoat - 0.75f) < 1e-6f,
         "the standard_surface constants map onto the engine's lobes");
   fs::Remove(path);
 }

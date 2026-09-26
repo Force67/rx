@@ -66,7 +66,7 @@ class WorldClock {
 
  private:
   static f32 Wrap24(f32 h) {
-    h = ::fmod(h, 24.0f);
+    h = ::fmodf(h, 24.0f);
     return h < 0 ? h + 24.0f : h;
   }
   base::Atomic<f64> game_days_{0.0};

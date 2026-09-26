@@ -209,11 +209,11 @@ asset::Texture MakeSweatNormal(u32 size) {
           const f32 radius = cell * (0.18f + 0.22f * (static_cast<f32>((h >> 24) & 255u) / 255.0f));
           const f32 dx = static_cast<f32>(px) - (static_cast<f32>(gx) + jx) * cell;
           const f32 dy = static_cast<f32>(py) - (static_cast<f32>(gy) + jy) * cell;
-          const f32 d = ::sqrt(dx * dx + dy * dy);
+          const f32 d = ::sqrtf(dx * dx + dy * dy);
           if (d >= radius || radius <= 0.0f) continue;
           // Hemispherical bead: the slope grows toward the rim.
           const f32 t = d / radius;
-          const f32 slope = t / ::sqrt(rx::Max(1.0f - t * t, 1e-3f));
+          const f32 slope = t / ::sqrtf(rx::Max(1.0f - t * t, 1e-3f));
           const f32 k = rx::Min(slope, 3.0f) / 3.0f;
           if (d > 1e-4f) {
             nx += (dx / d) * k;
@@ -222,7 +222,7 @@ asset::Texture MakeSweatNormal(u32 size) {
         }
       }
       Vec3 n{nx, ny, 1.0f};
-      const f32 len = ::sqrt(n.x * n.x + n.y * n.y + 1.0f);
+      const f32 len = ::sqrtf(n.x * n.x + n.y * n.y + 1.0f);
       const size_t o = (static_cast<size_t>(py) * size + px) * 4;
       texture.data[o + 0] = static_cast<u8>(rx::Clamp((n.x / len) * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f);
       texture.data[o + 1] = static_cast<u8>(rx::Clamp((n.y / len) * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f);
@@ -517,7 +517,7 @@ void LookdevDemo::Impl::LoadSubject() {
           r2 = rx::Max(r2, d.x * d.x + d.y * d.y + d.z * d.z);
         }
       }
-      subject_radius = rx::Max(::sqrt(r2), 1e-3f);
+      subject_radius = rx::Max(::sqrtf(r2), 1e-3f);
     } else {
       subject_center = {(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
       subject_radius = 0.5f * rx::Max({extent.x, extent.y, extent.z});
@@ -597,9 +597,9 @@ render::CameraPose LookdevDemo::Impl::ResolveCamera() const {
   const f32 distance = stop.distance * scale;
   render::CameraPose pose;
   pose.target = subject_center;
-  pose.eye = {subject_center.x + ::sin(yaw) * ::cos(pitch) * distance,
-              subject_center.y - ::sin(pitch) * distance,
-              subject_center.z - ::cos(yaw) * ::cos(pitch) * distance};
+  pose.eye = {subject_center.x + ::sinf(yaw) * ::cosf(pitch) * distance,
+              subject_center.y - ::sinf(pitch) * distance,
+              subject_center.z - ::cosf(yaw) * ::cosf(pitch) * distance};
   pose.fov_y = stop.fov_degrees * kDeg;
   return pose;
 }
@@ -1033,7 +1033,7 @@ void LookdevDemo::Impl::DrawPanel() {
       const f32 head_px = ImGui::GetIO().DisplaySize.y * 2.0f * subject_radius /
                           rx::Max(kCameraStops[camera_index].distance *
                                        (subject_radius / 0.115f) *
-                                       ::tan(kCameraStops[camera_index].fov_degrees * kDeg * 0.5f) *
+                                       ::tanf(kCameraStops[camera_index].fov_degrees * kDeg * 0.5f) *
                                        2.0f,
                                    1e-4f);
       ImGui::Text("subject height: %.0f px -> tier %d suggested", head_px,

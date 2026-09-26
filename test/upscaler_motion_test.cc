@@ -17,12 +17,12 @@ using namespace rx::render;
 namespace {
 constexpr u32 kW = 96, kH = 64, kOutW = 192, kOutH = 128;
 float Pattern(float x, float y, u32 channel) {
-  if (channel == 0) return .5f + .4f * ::sin(x * 1.1f);
-  if (channel == 1) return .5f + .4f * ::sin(y * .9f);
-  return .5f + .3f * ::sin(x * .6f + y * .7f);
+  if (channel == 0) return .5f + .4f * ::sinf(x * 1.1f);
+  if (channel == 1) return .5f + .4f * ::sinf(y * .9f);
+  return .5f + .3f * ::sinf(x * .6f + y * .7f);
 }
 float Half(u16 bits) {
-  return ::ldexp(float((bits & 1023) | 1024), int((bits >> 10) & 31) - 25) *
+  return ::ldexpf(float((bits & 1023) | 1024), int((bits >> 10) & 31) - 25) *
          ((bits & 0x8000) ? -1.f : 1.f);
 }
 }  // namespace
@@ -143,5 +143,5 @@ int main() {
   device->DestroyImage(color);
   device->DestroyImage(depth);
   device->DestroyImage(motion);
-  return positive < negative && moving_correct < moving_wrong && ::abs(resumed - reset) < 1e-6 ? 0 : 1;
+  return positive < negative && moving_correct < moving_wrong && ::fabs(resumed - reset) < 1e-6 ? 0 : 1;
 }

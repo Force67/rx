@@ -29,9 +29,9 @@ void DefaultSimulatePlayer(ecs::World& world, ecs::Entity player,
   t->position[2] += ClampAxis(input.move_z) * kDefaultPlayerSpeed * dt;
   const f32 half_yaw = input.yaw * 0.5f;
   t->rotation[0] = 0;
-  t->rotation[1] = ::sin(half_yaw);
+  t->rotation[1] = ::sinf(half_yaw);
   t->rotation[2] = 0;
-  t->rotation[3] = ::cos(half_yaw);
+  t->rotation[3] = ::cosf(half_yaw);
 }
 
 }  // namespace

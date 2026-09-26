@@ -96,7 +96,7 @@ int main() {
     for (int i = 0; i < 60 * 30; ++i) {
       Step(world, kite, {});
       const f32 a = kite.state().altitude_m;
-      if (!::isfinite(a)) return Fail("(a) NaN altitude");
+      if (!isfinite(a)) return Fail("(a) NaN altitude");
       lo = rx::Min(lo, a);
       hi = rx::Max(hi, a);
     }
@@ -141,7 +141,7 @@ int main() {
     const f32 left = steered_x(-1.0f);
     const f32 right = steered_x(+1.0f);
     ::fprintf(stderr, "(c) steer dX  left=%.2f m  right=%.2f m\n", left, right);
-    if (::fabs(left) < 0.5f || ::fabs(right) < 0.5f)
+    if (::fabsf(left) < 0.5f || ::fabsf(right) < 0.5f)
       return Fail("(c) steering produced no lateral displacement");
     if ((left > 0) == (right > 0)) return Fail("(c) left/right steer did not oppose");
   }
@@ -195,7 +195,7 @@ int main() {
       kite.set_anchor(anc);
       Step(world, kite, in);
       const f32 a = kite.state().altitude_m;  // height above the (moving) anchor
-      if (!::isfinite(a)) return Fail("(e) NaN while towed");
+      if (!isfinite(a)) return Fail("(e) NaN while towed");
       max_alt = rx::Max(max_alt, a);
     }
     ::fprintf(stderr, "(e) towed max altitude=%.2f m  tension=%.1f N\n", max_alt,
@@ -217,18 +217,18 @@ int main() {
       const f32 t = i * kDt;
       // Violent gusting: base wind plus large multi-frequency swings and a
       // rotating cross-component.
-      const f32 base = 8.0f + 7.0f * ::sin(t * 1.3f) + 4.0f * ::sin(t * 5.1f + 0.7f);
-      const f32 cross = 6.0f * ::sin(t * 0.9f + 2.0f);
-      world.set_wind({cross, 2.0f * ::sin(t * 3.3f), base});
+      const f32 base = 8.0f + 7.0f * ::sinf(t * 1.3f) + 4.0f * ::sinf(t * 5.1f + 0.7f);
+      const f32 cross = 6.0f * ::sinf(t * 0.9f + 2.0f);
+      world.set_wind({cross, 2.0f * ::sinf(t * 3.3f), base});
       // Also jerk the anchor around to stress the one-sided spring.
-      kite.set_anchor(Vec3{2.0f * ::sin(t * 2.0f), 0.0f, 2.0f * ::cos(t * 2.0f)});
+      kite.set_anchor(Vec3{2.0f * ::sinf(t * 2.0f), 0.0f, 2.0f * ::cosf(t * 2.0f)});
       KiteInput in;
-      in.steer = ::sin(t * 4.0f);
+      in.steer = ::sinf(t * 4.0f);
       Step(world, kite, in);
       const KiteState s = kite.state();
-      if (!::isfinite(s.position.x) || !::isfinite(s.position.y) ||
-          !::isfinite(s.position.z) || !::isfinite(s.tension_n) ||
-          !::isfinite(s.alpha_deg))
+      if (!isfinite(s.position.x) || !isfinite(s.position.y) ||
+          !isfinite(s.position.z) || !isfinite(s.tension_n) ||
+          !isfinite(s.alpha_deg))
         return Fail("(f) NaN under gusting");
       max_tension = rx::Max(max_tension, s.tension_n);
     }

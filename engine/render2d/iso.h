@@ -49,7 +49,7 @@ struct IsoGrid {
   // Nearest integer cell for a world point (floor of the fractional map).
   Vec2i WorldToCell(Vec2 world) const {
     Vec2 f = WorldToCellF(world);
-    return {static_cast<i32>(::floor(f.x)), static_cast<i32>(::floor(f.y))};
+    return {static_cast<i32>(::floorf(f.x)), static_cast<i32>(::floorf(f.y))};
   }
 
   // Painter's-order sort key: cells with a larger (col+row) are nearer the

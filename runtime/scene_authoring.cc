@@ -863,9 +863,9 @@ bool ApplySceneEnvironment(ecs::World& world, render::RenderSettings* settings) 
     // its negation. Azimuth turns +z toward +x, matching what a yaw of 90 does
     // to an entity, so "the sun is where that building is facing" is the same
     // number in both components.
-    const f32 horizontal = ::cos(elevation);
-    const Vec3 to_sun{horizontal * ::sin(azimuth), ::sin(elevation),
-                      horizontal * ::cos(azimuth)};
+    const f32 horizontal = ::cosf(elevation);
+    const Vec3 to_sun{horizontal * ::sinf(azimuth), ::sinf(elevation),
+                      horizontal * ::cosf(azimuth)};
     settings->sun_direction = {-to_sun.x, -to_sun.y, -to_sun.z};
     settings->sun_color = {sun.color[0], sun.color[1], sun.color[2]};
     settings->sun_intensity = sun.intensity;

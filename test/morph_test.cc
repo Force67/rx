@@ -77,7 +77,7 @@ constexpr char kNamedTargetsGltf[] = R"({
   "buffers": [{"byteLength": 132, "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAIA+AABAPwAAgD8AAAAA"}]
 })";
 
-bool Near(f32 a, f32 b, f32 tolerance = 1e-5f) { return ::abs(a - b) <= tolerance; }
+bool Near(f32 a, f32 b, f32 tolerance = 1e-5f) { return ::fabsf(a - b) <= tolerance; }
 
 int TestNamedTargets() {
   base::String path =
@@ -139,7 +139,7 @@ int TestAnimatedMorphCube(const char* path) {
     if (target.position_deltas.size() != verts * 3) return Fail("position delta size");
     if (target.normal_deltas.size() != verts * 3) return Fail("normal delta size");
     if (target.tangent_deltas.size() != verts * 3) return Fail("tangent delta size");
-    for (f32 d : target.position_deltas) magnitude = rx::Max(magnitude, ::abs(d));
+    for (f32 d : target.position_deltas) magnitude = rx::Max(magnitude, ::fabsf(d));
   }
   if (magnitude <= 0) return Fail("all position deltas are zero");
 
@@ -277,7 +277,7 @@ int TestGpuEvaluation(const char* path) {
       for (const Pair& pair : pairs) {
         expected += pair.weight * deltas[(static_cast<size_t>(pair.target) * verts + v) * 9 + c];
       }
-      worst = rx::Max(worst, ::abs(result[v * 9 + c] - expected));
+      worst = rx::Max(worst, ::fabsf(result[v * 9 + c] - expected));
     }
   }
   ::printf("morph_test: gpu vs cpu max error %g\n", worst);

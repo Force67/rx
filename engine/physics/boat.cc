@@ -23,15 +23,15 @@ f32 SmoothStep(f32 edge0, f32 edge1, f32 x) {
 
 // Yaw quaternion about +Y (x,y,z,w), for spawn orientation.
 Quat YawQuat(f32 yaw_radians) {
-  return {0.0f, ::sin(yaw_radians * 0.5f), 0.0f, ::cos(yaw_radians * 0.5f)};
+  return {0.0f, ::sinf(yaw_radians * 0.5f), 0.0f, ::cosf(yaw_radians * 0.5f)};
 }
 
 // v * |v|: signed quadratic term (drag ~ v^2 but keeps the sign of v).
-f32 SignedSquare(f32 v) { return v * ::fabs(v); }
+f32 SignedSquare(f32 v) { return v * ::fabsf(v); }
 
 // Guards a force/torque against NaN/Inf before it reaches the solver.
 bool Finite(const Vec3& v) {
-  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
+  return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
 }
 
 }  // namespace
@@ -108,8 +108,8 @@ void Boat::Update(const BoatInput& input, f32 dt) {
 
   // engine spool: rpm chases the throttle target with a first-order lag
   const f32 target_rpm =
-      desc_.idle_rpm + ::fabs(throttle) * (desc_.max_rpm - desc_.idle_rpm);
-  const f32 spool = desc_.spool_time > 0 ? (1.0f - ::exp(-dt / desc_.spool_time)) : 1.0f;
+      desc_.idle_rpm + ::fabsf(throttle) * (desc_.max_rpm - desc_.idle_rpm);
+  const f32 spool = desc_.spool_time > 0 ? (1.0f - ::expf(-dt / desc_.spool_time)) : 1.0f;
   rpm_ += (target_rpm - rpm_) * spool;
   const f32 rpm_span = rx::Max(desc_.max_rpm - desc_.idle_rpm, 1.0f);
   const f32 thrust_frac = Clamp((rpm_ - desc_.idle_rpm) / rpm_span, 0.0f, 1.0f);
@@ -184,10 +184,10 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   const f32 v_fwd = Dot(vrel, forward);
   const f32 v_lat = Dot(vrel, right);
   const f32 v_vert = Dot(vel, up);
-  const f32 speed = ::sqrt(vel.x * vel.x + vel.z * vel.z);
+  const f32 speed = ::sqrtf(vel.x * vel.x + vel.z * vel.z);
 
   // Planing fraction from forward speed; drives bow lift + drag drop.
-  const f32 planing = SmoothStep(desc_.hull_speed, desc_.plane_full_speed, ::fabs(v_fwd));
+  const f32 planing = SmoothStep(desc_.hull_speed, desc_.plane_full_speed, ::fabsf(v_fwd));
 
   // Longitudinal: fore drag < aft drag; wetted-scaled; dropped by planing when
   // moving ahead. Lateral: strong keel drag so the hull carves rather than
@@ -231,7 +231,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   // Authority scales with the water speed over the rudder (|v_fwd|^2) plus the
   // propeller wash (proportional to thrust), so the boat still answers the helm
   // on the wash at a standstill. Only the wash term needs the prop submerged.
-  const f32 wash = (prop_submerged ? desc_.rudder_wash_gain * ::fabs(thrust_mag) : 0.0f);
+  const f32 wash = (prop_submerged ? desc_.rudder_wash_gain * ::fabsf(thrust_mag) : 0.0f);
   const f32 rudder_mag = steer * (desc_.rudder_speed_gain * v_fwd * v_fwd + wash);
   if (rudder_mag != 0.0f) {
     const Vec3 rudder_pt = pos + Rotate(q, desc_.rudder_offset);
@@ -247,13 +247,13 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   // little as it shoves it downwind. Conservative coefficient (see wind_drag).
   if (desc_.wind_drag > 0.0f && exposed > 0.0f) {
     const Vec3 vrel_wind = world_.wind() - vel;  // air velocity relative to hull
-    const f32 wind_speed = ::sqrt(Dot(vrel_wind, vrel_wind));
+    const f32 wind_speed = ::sqrtf(Dot(vrel_wind, vrel_wind));
     if (wind_speed > 1e-3f) {
       const Vec3 wdir = vrel_wind * (1.0f / wind_speed);
       const f32 side_area = (2.0f * he.z) * (2.0f * he.y);   // beam-on profile
       const f32 front_area = (2.0f * he.x) * (2.0f * he.y);  // head-on profile
       const f32 area =
-          ::fabs(Dot(wdir, right)) * side_area + ::fabs(Dot(wdir, forward)) * front_area;
+          ::fabsf(Dot(wdir, right)) * side_area + ::fabsf(Dot(wdir, forward)) * front_area;
       const f32 mag =
           0.5f * kAirDensity * desc_.wind_drag * area * exposed * wind_speed * wind_speed;
       const Vec3 wind_force = wdir * mag;

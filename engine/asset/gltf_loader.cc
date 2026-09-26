@@ -111,7 +111,7 @@ void GenerateTangents(MeshLod *lod, u32 vertex_offset, u32 index_offset) {
     f32 du1 = v1.uv[0] - v0.uv[0], dv1 = v1.uv[1] - v0.uv[1];
     f32 du2 = v2.uv[0] - v0.uv[0], dv2 = v2.uv[1] - v0.uv[1];
     f32 det = du1 * dv2 - du2 * dv1;
-    if (::abs(det) < 1e-12f)
+    if (::fabsf(det) < 1e-12f)
       continue;
     f32 inv = 1.0f / det;
     Vec3 tangent = (e1 * dv2 + e2 * -dv1) * inv;
@@ -127,7 +127,7 @@ void GenerateTangents(MeshLod *lod, u32 vertex_offset, u32 index_offset) {
     Vec3 t = tangents[i] - n * Dot(n, tangents[i]);
     if (Dot(t, t) < 1e-12f) {
       // Degenerate uvs; any frame orthogonal to n will do.
-      t = ::abs(n.y) < 0.99f ? Cross(n, {0, 1, 0}) : Cross(n, {1, 0, 0});
+      t = ::fabsf(n.y) < 0.99f ? Cross(n, {0, 1, 0}) : Cross(n, {1, 0, 0});
     }
     t = Normalize(t);
     vertex.tangent[0] = t.x;
@@ -148,25 +148,25 @@ void QuatFromMatrix(const f32 m[16], const Vec3 &scale, f32 out[4]) {
   }
   f32 trace = r[0] + r[4] + r[8];
   if (trace > 0) {
-    f32 s = ::sqrt(trace + 1.0f) * 2;
+    f32 s = ::sqrtf(trace + 1.0f) * 2;
     out[3] = 0.25f * s;
     out[0] = (r[7] - r[5]) / s;
     out[1] = (r[2] - r[6]) / s;
     out[2] = (r[3] - r[1]) / s;
   } else if (r[0] > r[4] && r[0] > r[8]) {
-    f32 s = ::sqrt(1.0f + r[0] - r[4] - r[8]) * 2;
+    f32 s = ::sqrtf(1.0f + r[0] - r[4] - r[8]) * 2;
     out[3] = (r[7] - r[5]) / s;
     out[0] = 0.25f * s;
     out[1] = (r[1] + r[3]) / s;
     out[2] = (r[2] + r[6]) / s;
   } else if (r[4] > r[8]) {
-    f32 s = ::sqrt(1.0f + r[4] - r[0] - r[8]) * 2;
+    f32 s = ::sqrtf(1.0f + r[4] - r[0] - r[8]) * 2;
     out[3] = (r[2] - r[6]) / s;
     out[0] = (r[1] + r[3]) / s;
     out[1] = 0.25f * s;
     out[2] = (r[5] + r[7]) / s;
   } else {
-    f32 s = ::sqrt(1.0f + r[8] - r[0] - r[4]) * 2;
+    f32 s = ::sqrtf(1.0f + r[8] - r[0] - r[4]) * 2;
     out[3] = (r[3] - r[1]) / s;
     out[0] = (r[2] + r[6]) / s;
     out[1] = (r[5] + r[7]) / s;
@@ -240,8 +240,8 @@ void MergeUvTransform(const cgltf_texture_view &view, const char *slot,
 
 // uv' = T * R * S * uv, spelt out from the extension's own sample shader.
 void ApplyUvTransform(const UvTransform &transform, f32 uv[2]) {
-  const f32 cos_r = ::cos(transform.rotation);
-  const f32 sin_r = ::sin(transform.rotation);
+  const f32 cos_r = ::cosf(transform.rotation);
+  const f32 sin_r = ::sinf(transform.rotation);
   const f32 u = uv[0] * transform.scale[0];
   const f32 v = uv[1] * transform.scale[1];
   uv[0] = cos_r * u - sin_r * v + transform.offset[0];
@@ -807,7 +807,7 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
         f32 dz = vertex.position[2] - mesh.bounds_center[2];
         radius_sq = rx::Max(radius_sq, dx * dx + dy * dy + dz * dz);
       }
-      mesh.bounds_radius = ::sqrt(radius_sq);
+      mesh.bounds_radius = ::sqrtf(radius_sq);
     }
   }
 
@@ -862,11 +862,11 @@ bool LoadGltfScene(const base::String &path, ImportedScene *out) {
       f32 world[16];
       cgltf_node_transform_world(&node, world);
       instance.position = {world[12], world[13], world[14]};
-      Vec3 scale{::sqrt(world[0] * world[0] + world[1] * world[1] +
+      Vec3 scale{::sqrtf(world[0] * world[0] + world[1] * world[1] +
                            world[2] * world[2]),
-                 ::sqrt(world[4] * world[4] + world[5] * world[5] +
+                 ::sqrtf(world[4] * world[4] + world[5] * world[5] +
                            world[6] * world[6]),
-                 ::sqrt(world[8] * world[8] + world[9] * world[9] +
+                 ::sqrtf(world[8] * world[8] + world[9] * world[9] +
                            world[10] * world[10])};
       instance.scale = (scale.x + scale.y + scale.z) / 3.0f;
       QuatFromMatrix(world, scale, instance.rotation);

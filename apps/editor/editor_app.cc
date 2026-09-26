@@ -82,7 +82,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
   const u32 top_ring = static_cast<u32>(lod.vertices.size());
   for (u32 i = 0; i <= kSegments; ++i) {
     const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
-    const f32 x = ::cos(angle), z = ::sin(angle);
+    const f32 x = ::cosf(angle), z = ::sinf(angle);
     lod.vertices.push_back(vertex({x * radius, half_height, z * radius},
                                   {0, 1, 0}, x * 0.5f + 0.5f,
                                   z * 0.5f + 0.5f));
@@ -92,7 +92,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
   const u32 bottom_ring = static_cast<u32>(lod.vertices.size());
   for (u32 i = 0; i <= kSegments; ++i) {
     const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
-    const f32 x = ::cos(angle), z = ::sin(angle);
+    const f32 x = ::cosf(angle), z = ::sinf(angle);
     lod.vertices.push_back(vertex({x * radius, -half_height, z * radius},
                                   {0, -1, 0}, x * 0.5f + 0.5f,
                                   z * 0.5f + 0.5f));
@@ -100,7 +100,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
   const u32 side_ring = static_cast<u32>(lod.vertices.size());
   for (u32 i = 0; i <= kSegments; ++i) {
     const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
-    const f32 x = ::cos(angle), z = ::sin(angle);
+    const f32 x = ::cosf(angle), z = ::sinf(angle);
     lod.vertices.push_back(
         vertex({x * radius, half_height, z * radius}, {x, 0, z},
                static_cast<f32>(i) / kSegments, 0));
@@ -125,7 +125,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
   }
   lod.submeshes.push_back(
       {0, static_cast<u32>(lod.indices.size()), material});
-  mesh.bounds_radius = ::sqrt(radius * radius + half_height * half_height);
+  mesh.bounds_radius = ::sqrtf(radius * radius + half_height * half_height);
   return mesh;
 }
 } // namespace
@@ -157,8 +157,8 @@ bool Editor::OnInitialize(app::Services &s) {
 
   camera_.set_position({6.0f, 4.5f, 6.0f});
   Vec3 d = Normalize(Vec3{0, 1.0f, 0} - camera_.position());
-  camera_.set_yaw_pitch(::atan2(d.x, -d.z),
-                        ::asin(rx::Clamp(d.y, -1.0f, 1.0f)));
+  camera_.set_yaw_pitch(::atan2f(d.x, -d.z),
+                        ::asinf(rx::Clamp(d.y, -1.0f, 1.0f)));
 
   // Load a scene or authoring model passed on argv.
   if (!open_path_.empty()) {
@@ -579,7 +579,7 @@ bool Editor::LoadModelDocument(const base::String &path) {
                 .y);
       }
     }
-    if (!::isfinite(floor_y))
+    if (!isfinite(floor_y))
       floor_y = center.y - radius;
     constexpr f32 kPlateHalfHeight = 0.055f;
     const f32 surface_y =
@@ -629,8 +629,8 @@ bool Editor::LoadModelDocument(const base::String &path) {
   camera_.set_position(center +
                        Vec3{radius * 1.4f, radius * 0.75f, radius * 1.8f});
   Vec3 direction = Normalize(center - camera_.position());
-  camera_.set_yaw_pitch(::atan2(direction.x, -direction.z),
-                        ::asin(rx::Clamp(direction.y, -1.0f, 1.0f)));
+  camera_.set_yaw_pitch(::atan2f(direction.x, -direction.z),
+                        ::asinf(rx::Clamp(direction.y, -1.0f, 1.0f)));
   status_message_ = "Imported " + base::String(fs::Filename(path)) + ": " +
                     rx::ToString(imported_scene.meshes.size()) + " meshes, " +
                     rx::ToString(region_count) + " jiggle regions" +
@@ -660,7 +660,7 @@ void Editor::UpdateImportedModels(f32 dt) {
       model.active_walk_style = anim::WalkStyleKind::kMarch;
       walk_style = march;
     } else {
-      const f32 cycle = ::fmod(model.preview_time, 12.0f);
+      const f32 cycle = ::fmodf(model.preview_time, 12.0f);
       if (cycle < 5.0f) {
         model.active_walk_style = anim::WalkStyleKind::kHipSway;
         walk_style = hip_sway;
@@ -737,14 +737,14 @@ void Editor::UpdateImportedModels(f32 dt) {
       anim::BodyDynamicsFrame frame;
       if (playing_) {
         frame.linear_acceleration = {
-            ::sin(model.preview_time * 2.7f) * 7.0f,
-            ::sin(model.preview_time * 5.4f) * 5.5f,
-            ::cos(model.preview_time * 2.1f) * 6.0f,
+            ::sinf(model.preview_time * 2.7f) * 7.0f,
+            ::sinf(model.preview_time * 5.4f) * 5.5f,
+            ::cosf(model.preview_time * 2.1f) * 6.0f,
         };
         frame.angular_acceleration = {
-            ::sin(model.preview_time * 2.3f) * 2.8f,
-            ::cos(model.preview_time * 1.7f) * 3.5f,
-            ::sin(model.preview_time * 3.2f) * 3.0f,
+            ::sinf(model.preview_time * 2.3f) * 2.8f,
+            ::cosf(model.preview_time * 1.7f) * 3.5f,
+            ::sinf(model.preview_time * 3.2f) * 3.0f,
         };
         if (fire_event) {
           if (event_kind == 0)
@@ -917,8 +917,8 @@ void Editor::FocusSelection() {
   Vec3 eye = center - camera_.forward() * 4.0f;
   camera_.set_position(eye);
   Vec3 d = Normalize(center - eye);
-  camera_.set_yaw_pitch(::atan2(d.x, -d.z),
-                        ::asin(rx::Clamp(d.y, -1.0f, 1.0f)));
+  camera_.set_yaw_pitch(::atan2f(d.x, -d.z),
+                        ::asinf(rx::Clamp(d.y, -1.0f, 1.0f)));
 }
 
 // Picking. The engine GPU path (DrawItem::pick_id + Renderer::RequestPick /
@@ -966,7 +966,7 @@ bool RayTriangle(const Vec3 &o, const Vec3 &d, const Vec3 &a, const Vec3 &b,
   Vec3 e1 = b - a, e2 = c - a;
   Vec3 p = Cross(d, e2);
   f32 det = Dot(e1, p);
-  if (::fabs(det) < 1e-8f)
+  if (::fabsf(det) < 1e-8f)
     return false;
   f32 inv = 1.0f / det;
   Vec3 tv = o - a;
@@ -1052,7 +1052,7 @@ Vec2 Editor::ProjectToScreen(const Vec3 &world, bool *in_front) const {
   f32 w = vp.m[3] * world.x + vp.m[7] * world.y + vp.m[11] * world.z + vp.m[15];
   if (in_front)
     *in_front = w > 1e-4f;
-  if (::fabs(w) < 1e-6f)
+  if (::fabsf(w) < 1e-6f)
     w = 1e-6f;
   f32 ndc_x = x / w, ndc_y = y / w;
   return {(ndc_x * 0.5f + 0.5f) * window_->width(),
@@ -1112,7 +1112,7 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
       // distance from cursor to the handle tip. The tolerance is authored at
       // 1x and both operands are pixels, so it scales with the buffer or the
       // handle gets relatively harder to grab the denser the display.
-      f32 d = ::hypot(mx - s1.x, my - s1.y);
+      f32 d = ::hypotf(mx - s1.x, my - s1.y);
       if (d < 14.0f * window_->pixel_density()) {
         gizmo_drag_.active = true;
         gizmo_drag_.axis = a;
@@ -1121,7 +1121,7 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
         gizmo_drag_.grab_mouse_x = mx;
         gizmo_drag_.grab_mouse_y = my;
         Vec2 sd{s1.x - s0.x, s1.y - s0.y};
-        f32 sl = rx::Max(1.0f, ::hypot(sd.x, sd.y));
+        f32 sl = rx::Max(1.0f, ::hypotf(sd.x, sd.y));
         gizmo_drag_.axis_screen_dir = {sd.x / sl, sd.y / sl};
         gizmo_drag_.world_per_pixel = len / sl;
         undo_.BeginGroup("Move");
@@ -1585,7 +1585,7 @@ void Editor::RunAutopilot() {
     scene::Transform *t = world_->Get<scene::Transform>(find_named("Cube"));
     RX_INFO("autopilot: undo -> cube z={:.2f} expected 0 -> {}",
             t ? t->position[2] : -99.f,
-            (t && ::fabs(t->position[2]) < 1e-3f) ? "PASS" : "FAIL");
+            (t && ::fabsf(t->position[2]) < 1e-3f) ? "PASS" : "FAIL");
     MarkDirty();
     break;
   }
@@ -1594,7 +1594,7 @@ void Editor::RunAutopilot() {
     scene::Transform *t = world_->Get<scene::Transform>(find_named("Cube"));
     RX_INFO("autopilot: redo -> cube z={:.2f} expected 2 -> {}",
             t ? t->position[2] : -99.f,
-            (t && ::fabs(t->position[2] - 2.0f) < 1e-3f) ? "PASS" : "FAIL");
+            (t && ::fabsf(t->position[2] - 2.0f) < 1e-3f) ? "PASS" : "FAIL");
     MarkDirty();
     break;
   }
@@ -1628,7 +1628,7 @@ void Editor::RunAutopilot() {
     const f32 height = terrain_.SampleHeight(0, 0).value_or(-99.0f);
     RX_INFO("autopilot: terrain undo height={:.3f} expected {:.3f} -> {}",
             height, terrain_before,
-            ::fabs(height - terrain_before) < 1e-4f ? "PASS" : "FAIL");
+            ::fabsf(height - terrain_before) < 1e-4f ? "PASS" : "FAIL");
     break;
   }
   case 520: {
@@ -1636,7 +1636,7 @@ void Editor::RunAutopilot() {
     const f32 height = terrain_.SampleHeight(0, 0).value_or(-99.0f);
     RX_INFO("autopilot: terrain redo height={:.3f} expected {:.3f} -> {}",
             height, terrain_after,
-            ::fabs(height - terrain_after) < 1e-4f ? "PASS" : "FAIL");
+            ::fabsf(height - terrain_after) < 1e-4f ? "PASS" : "FAIL");
     break;
   }
   case 530:
@@ -1661,10 +1661,10 @@ void Editor::RunAutopilot() {
     scene::Transform *t = e ? world_->Get<scene::Transform>(e) : nullptr;
     RX_INFO("autopilot: after load cube z={:.2f} expected 2 -> {}",
             t ? t->position[2] : -99.f,
-            (t && ::fabs(t->position[2] - 2.0f) < 1e-3f) ? "PASS" : "FAIL");
+            (t && ::fabsf(t->position[2] - 2.0f) < 1e-3f) ? "PASS" : "FAIL");
     const f32 height = terrain_.SampleHeight(0, 0).value_or(-99.0f);
     const bool sidecar_pass = fs::Exists("scene_saved.rxterrain") &&
-                              ::fabs(height - terrain_after) < 2e-3f;
+                              ::fabsf(height - terrain_after) < 2e-3f;
     RX_INFO("autopilot: terrain sidecar height={:.3f} expected {:.3f} -> {}",
             height, terrain_after, sidecar_pass ? "PASS" : "FAIL");
     break;

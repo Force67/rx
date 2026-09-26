@@ -33,7 +33,7 @@ void Check(bool condition, const char* message) {
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-2f) {
-  if (::abs(actual - expected) <= epsilon) return;
+  if (::fabsf(actual - expected) <= epsilon) return;
   ::fprintf(stderr, "locomotion_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
@@ -90,19 +90,19 @@ Vec3 BodyPos(const physics::PhysicsWorld& phys, physics::BodyId id) {
 }
 
 bool FiniteVec(const Vec3& v) {
-  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
+  return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
 }
 
 bool MeasurementsFinite(const CharacterMeasurements& m) {
-  bool ok = FiniteVec(m.root_position) && ::isfinite(m.root_rotation.x) &&
-            ::isfinite(m.root_rotation.w) && FiniteVec(m.root_linear_velocity) &&
+  bool ok = FiniteVec(m.root_position) && isfinite(m.root_rotation.x) &&
+            isfinite(m.root_rotation.w) && FiniteVec(m.root_linear_velocity) &&
             FiniteVec(m.root_angular_velocity) && FiniteVec(m.com_position) &&
             FiniteVec(m.com_velocity) && FiniteVec(m.ground_normal) &&
-            ::isfinite(m.estimated_body_height);
+            isfinite(m.estimated_body_height);
   for (u32 f = 0; f < kFootCount; ++f) {
     ok = ok && FiniteVec(m.foot[f].position) && FiniteVec(m.foot[f].velocity) &&
-         FiniteVec(m.foot[f].contact_normal) && ::isfinite(m.foot[f].contact_impulse) &&
-         ::isfinite(m.foot[f].slip_speed);
+         FiniteVec(m.foot[f].contact_normal) && isfinite(m.foot[f].contact_impulse) &&
+         isfinite(m.foot[f].slip_speed);
   }
   return ok;
 }
@@ -147,7 +147,7 @@ void TestBuild() {
   Check(sole_r.y > -0.01f && sole_r.y < 0.05f, "right sole near y in [0, 0.05]");
 
   bool binds_ok = true;
-  for (u32 j = 0; j < kRigJointCount; ++j) binds_ok = binds_ok && ::abs(rig.bind_constraint[j].w) > 0.99f;
+  for (u32 j = 0; j < kRigJointCount; ++j) binds_ok = binds_ok && ::fabsf(rig.bind_constraint[j].w) > 0.99f;
   Check(binds_ok, "every bind constraint orientation is near identity (|w| > 0.99)");
 
   Check(rig.leg_length > 0 && rig.upper_leg_length > 0 && rig.lower_leg_length > 0 &&
@@ -466,15 +466,15 @@ void CheckFinite(const physics::PhysicsWorld& phys, const LocomotionController& 
     phys.GetBodyTransform(rig.body[i], &p, r);
     Vec3 lin, ang;
     phys.GetBodyVelocity(rig.body[i], &lin, &ang);
-    ok = ok && FiniteVec(p) && ::isfinite(r[0]) && ::isfinite(r[1]) && ::isfinite(r[2]) &&
-         ::isfinite(r[3]) && FiniteVec(lin) && FiniteVec(ang);
+    ok = ok && FiniteVec(p) && isfinite(r[0]) && isfinite(r[1]) && isfinite(r[2]) &&
+         isfinite(r[3]) && FiniteVec(lin) && FiniteVec(ang);
   }
   const DebugState& d = c.debug();
   ok = ok && FiniteVec(d.desired_velocity) && FiniteVec(d.controlled_facing) &&
        FiniteVec(d.measured_velocity) &&
        FiniteVec(d.com_position) && FiniteVec(d.com_velocity) && FiniteVec(d.capture_point) &&
-       FiniteVec(d.support_center) && ::isfinite(d.gait_phase) &&
-       ::isfinite(d.max_torque_saturation) && ::isfinite(d.mode_time);
+       FiniteVec(d.support_center) && isfinite(d.gait_phase) &&
+       isfinite(d.max_torque_saturation) && isfinite(d.mode_time);
   for (u32 f = 0; f < kFootCount; ++f)
     ok = ok && FiniteVec(d.foot_target[f]) && FiniteVec(d.swing_position[f]);
   if (!ok) {
@@ -528,7 +528,7 @@ void TestStand() {
     min_pelvis = rx::Min(min_pelvis, py);
     max_pelvis = rx::Max(max_pelvis, py);
     const Vec3 com = c.measurements().com_position;
-    max_drift = rx::Max(max_drift, ::sqrt((com.x - com0.x) * (com.x - com0.x) +
+    max_drift = rx::Max(max_drift, ::sqrtf((com.x - com0.x) * (com.x - com0.x) +
                                               (com.z - com0.z) * (com.z - com0.z)));
   }
 
@@ -578,7 +578,7 @@ void TestPushes() {
                   py);
     Check(py > 0.85f * nominal, msg);
     const Vec3 v = c.measurements().com_velocity;
-    const f32 planar = ::sqrt(v.x * v.x + v.z * v.z);
+    const f32 planar = ::sqrtf(v.x * v.x + v.z * v.z);
     ::snprintf(msg, sizeof msg, "push %s planar COM speed < 0.3 (got %.2f)", names[d], planar);
     Check(planar < 0.3f, msg);
     CheckFinite(s.physics, c, "push");
@@ -720,7 +720,7 @@ void TestStartStop() {
   Check(!fell, "start/stop never falls");
   Check(c.mode() == ControlMode::kStable, "settles to kStable after stop");
   const Vec3 vs = c.measurements().com_velocity;
-  Check(::sqrt(vs.x * vs.x + vs.z * vs.z) < 0.3f, "planar speed < 0.3 after stop");
+  Check(::sqrtf(vs.x * vs.x + vs.z * vs.z) < 0.3f, "planar speed < 0.3 after stop");
 
   // Second walk: verify the gait RE-ENGAGES on the renewed command. Net forward
   // distance is not asserted (relaxed from the spec's "> 0.7 m/s") because by
@@ -810,7 +810,7 @@ void TestTurnRate() {
   c.Tick(left, mods, kDt);
   s.physics.Update(kDt);
   const Vec3 first = c.debug().controlled_facing;
-  const f32 first_angle = ::atan2(Cross(Vec3{0, 0, -1}, first).y,
+  const f32 first_angle = ::atan2f(Cross(Vec3{0, 0, -1}, first).y,
                                       Dot(Vec3{0, 0, -1}, first));
   Check(first_angle > 0, "turn target starts moving toward requested facing");
   Check(first_angle <= params.max_turn_rate * kDt + 1e-4f,

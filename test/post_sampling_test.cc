@@ -17,7 +17,7 @@ constexpr u32 kW = 256, kH = 128;
 f32 Half(u16 b) {
   if ((b & 0x7c00u) == 0x7c00u) return INFINITY;
   const int exponent = (b >> 10) & 31;
-  return ::ldexp(float((b & 1023) + (exponent ? 1024 : 0)),
+  return ::ldexpf(float((b & 1023) + (exponent ? 1024 : 0)),
                     exponent ? exponent - 25 : -24) * ((b & 0x8000) ? -1.f : 1.f);
 }
 struct TilePush {
@@ -103,8 +103,8 @@ int main() {
     for (u32 y = top; y < bottom; ++y) for (u32 x = left; x < right; ++x)
       for (u32 c = 0; c < 3; ++c) {
         const u32 i = (y*kW+x)*4+c;
-        if (!::isfinite(a[i]) || !::isfinite(b[i])) return double(INFINITY);
-        error = rx::Max(error, double(::abs(a[i]-b[i])));
+        if (!isfinite(a[i]) || !isfinite(b[i])) return double(INFINITY);
+        error = rx::Max(error, double(::fabsf(a[i]-b[i])));
       }
     return error;
   };
@@ -206,7 +206,7 @@ int main() {
   if (!device->ReadbackImage(tiles, ResourceState::kGeneral, bits.data(), bits.size()*sizeof(u16))) return 1;
   double error = 0;
   for (u32 p = 0; p < bits.size()/2; ++p)
-    error = rx::Max(error, double(::abs(Half(bits[p*2])-12.f/kW) + ::abs(Half(bits[p*2+1]))));
+    error = rx::Max(error, double(::fabsf(Half(bits[p*2])-12.f/kW) + ::fabsf(Half(bits[p*2+1]))));
   check(error < .0001, "Motion blur aspect-correct maximum", error);
   device->WaitIdle();
   device->DestroyPipeline(pipeline);

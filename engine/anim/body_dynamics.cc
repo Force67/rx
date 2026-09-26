@@ -47,26 +47,26 @@ void Spring(f32 *x, f32 *velocity, f32 force, f32 frequency, f32 damping,
   const f32 z = rx::Max(damping, 0.0f);
 
   if (z < 1.0f - 1e-4f) {
-    const f32 wd = w * ::sqrt(1.0f - z * z);
-    const f32 e = ::exp(-z * w * dt);
-    const f32 c = ::cos(wd * dt);
-    const f32 s = ::sin(wd * dt);
+    const f32 wd = w * ::sqrtf(1.0f - z * z);
+    const f32 e = ::expf(-z * w * dt);
+    const f32 c = ::cosf(wd * dt);
+    const f32 s = ::sinf(wd * dt);
     const f32 a = (v + z * w * y) / wd;
     *x = target + e * (y * c + a * s);
     *velocity = e * (v * c - ((z * w * v + w * w * y) / wd) * s);
   } else if (z <= 1.0f + 1e-4f) {
-    const f32 e = ::exp(-w * dt);
+    const f32 e = ::expf(-w * dt);
     const f32 a = v + w * y;
     *x = target + (y + a * dt) * e;
     *velocity = (v - w * a * dt) * e;
   } else {
-    const f32 root = ::sqrt(z * z - 1.0f);
+    const f32 root = ::sqrtf(z * z - 1.0f);
     const f32 r1 = -w * (z - root);
     const f32 r2 = -w * (z + root);
     const f32 c1 = (v - r2 * y) / (r1 - r2);
     const f32 c2 = y - c1;
-    const f32 e1 = ::exp(r1 * dt);
-    const f32 e2 = ::exp(r2 * dt);
+    const f32 e1 = ::expf(r1 * dt);
+    const f32 e2 = ::expf(r2 * dt);
     *x = target + c1 * e1 + c2 * e2;
     *velocity = r1 * c1 * e1 + r2 * c2 * e2;
   }
@@ -80,7 +80,7 @@ void Spring(Vec3 *x, Vec3 *velocity, const Vec3 &force, f32 frequency,
 }
 
 Vec3 ExpSmooth(const Vec3 &previous, const Vec3 &value, f32 halflife, f32 dt) {
-  const f32 t = 1.0f - ::exp(-0.69314718f * dt / rx::Max(halflife, 1e-4f));
+  const f32 t = 1.0f - ::expf(-0.69314718f * dt / rx::Max(halflife, 1e-4f));
   return Lerp(previous, value, t);
 }
 
@@ -91,11 +91,11 @@ Vec3 QuaternionVelocity(Quat previous, Quat current, f32 dt) {
   if (delta.w < 0)
     delta = {-delta.x, -delta.y, -delta.z, -delta.w};
   const f32 sin_half =
-      ::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+      ::sqrtf(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
   if (sin_half < 1e-6f || dt <= 0)
     return {};
   const f32 angle =
-      2.0f * ::atan2(sin_half, rx::Clamp(delta.w, -1.0f, 1.0f));
+      2.0f * ::atan2f(sin_half, rx::Clamp(delta.w, -1.0f, 1.0f));
   return Vec3{delta.x, delta.y, delta.z} * (angle / (sin_half * dt));
 }
 
@@ -284,14 +284,14 @@ void BodyDynamics::Update(const asset::Skeleton &skeleton,
     Resolve(skeleton);
   }
   const f32 model_units_per_metre = rx::Max(
-      ::isfinite(frame.model_units_per_metre) ? frame.model_units_per_metre
+      isfinite(frame.model_units_per_metre) ? frame.model_units_per_metre
                                                  : 1.0f,
       1e-6f);
-  if (::fabs(model_units_per_metre - model_units_per_metre_) > 1e-5f) {
+  if (::fabsf(model_units_per_metre - model_units_per_metre_) > 1e-5f) {
     Reset();
     model_units_per_metre_ = model_units_per_metre;
   }
-  if (frame.teleport || !::isfinite(dt) || dt <= 0 || dt > 0.25f)
+  if (frame.teleport || !isfinite(dt) || dt <= 0 || dt > 0.25f)
     Reset();
 
   ComputeModelMatrices(skeleton, *pose, &model_);
@@ -386,7 +386,7 @@ void BodyDynamics::Update(const asset::Skeleton &skeleton,
     const f32 impact_from_impulse = Length(frame.linear_impulse) / 2.0f;
     state.impact = rx::Max(
         state.impact *
-            ::exp(-0.69314718f * dt / rx::Max(config.impact_decay, 1e-4f)),
+            ::expf(-0.69314718f * dt / rx::Max(config.impact_decay, 1e-4f)),
         rx::Clamp(rx::Max(impact_from_acceleration, impact_from_impulse),
                    0.0f, 1.0f));
 

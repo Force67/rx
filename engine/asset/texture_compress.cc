@@ -53,7 +53,7 @@ const f32* SrgbToLinearTable() {
     auto* values = new f32[256];
     for (u32 i = 0; i < 256; ++i) {
       const f32 c = static_cast<f32>(i) / 255.0f;
-      values[i] = c <= 0.04045f ? c / 12.92f : ::pow((c + 0.055f) / 1.055f, 2.4f);
+      values[i] = c <= 0.04045f ? c / 12.92f : ::powf((c + 0.055f) / 1.055f, 2.4f);
     }
     return values;
   }();
@@ -62,7 +62,7 @@ const f32* SrgbToLinearTable() {
 
 u8 LinearToSrgb(f32 v) {
   v = rx::Clamp(v, 0.0f, 1.0f);
-  const f32 s = v <= 0.0031308f ? v * 12.92f : 1.055f * ::pow(v, 1.0f / 2.4f) - 0.055f;
+  const f32 s = v <= 0.0031308f ? v * 12.92f : 1.055f * ::powf(v, 1.0f / 2.4f) - 0.055f;
   return static_cast<u8>(rx::Clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
 }
 
@@ -88,13 +88,13 @@ void Downsample(const u8* src, u32 sw, u32 sh, u8* dst, u32 dw, u32 dh, bool srg
   const f32 scale_y = static_cast<f32>(sh) / static_cast<f32>(dh);
   for (u32 y = 0; y < dh; ++y) {
     const f32 fy = (static_cast<f32>(y) + 0.5f) * scale_y - 0.5f;
-    const i32 y0 = static_cast<i32>(::floor(fy));
+    const i32 y0 = static_cast<i32>(::floorf(fy));
     const f32 wy = fy - static_cast<f32>(y0);
     const u32 ya = static_cast<u32>(rx::Clamp(y0, 0, static_cast<i32>(sh) - 1));
     const u32 yb = static_cast<u32>(rx::Clamp(y0 + 1, 0, static_cast<i32>(sh) - 1));
     for (u32 x = 0; x < dw; ++x) {
       const f32 fx = (static_cast<f32>(x) + 0.5f) * scale_x - 0.5f;
-      const i32 x0 = static_cast<i32>(::floor(fx));
+      const i32 x0 = static_cast<i32>(::floorf(fx));
       const f32 wx = fx - static_cast<f32>(x0);
       const u32 xa = static_cast<u32>(rx::Clamp(x0, 0, static_cast<i32>(sw) - 1));
       const u32 xb = static_cast<u32>(rx::Clamp(x0 + 1, 0, static_cast<i32>(sw) - 1));

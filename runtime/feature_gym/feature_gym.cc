@@ -504,8 +504,8 @@ asset::Mesh MakeTree(asset::AssetId id, asset::AssetId material) {
     for (int side = 0; side < 10; ++side) {
       const f32 a0 = side * 2.0f * kPi / 10.0f;
       const f32 a1 = (side + 1) * 2.0f * kPi / 10.0f;
-      triangle({::cos(a0) * radius, base, ::sin(a0) * radius}, {0, tip, 0},
-               {::cos(a1) * radius, base, ::sin(a1) * radius},
+      triangle({::cosf(a0) * radius, base, ::sinf(a0) * radius}, {0, tip, 0},
+               {::cosf(a1) * radius, base, ::sinf(a1) * radius},
                side & 1 ? 0xff245a27 : 0xff377a31);
     }
   }
@@ -950,7 +950,7 @@ void FeatureGym::Impl::Create() {
 
   ctx.camera->set_position({0, 50, 56});
   const Vec3 direction = Normalize(Vec3{0, 0, -14} - ctx.camera->position());
-  ctx.camera->set_yaw_pitch(::atan2(direction.x, -direction.z), ::asin(direction.y));
+  ctx.camera->set_yaw_pitch(::atan2f(direction.x, -direction.z), ::asinf(direction.y));
   ctx.camera->speed = 15.0f;
   RX_INFO(
       "feature gym: nine self-contained districts ready; use RX_SHOWCASE=1 "
@@ -1251,8 +1251,8 @@ void FeatureGym::Impl::CreateLighting() {
   spot.direction_type[1] = spot_direction.y;
   spot.direction_type[2] = spot_direction.z;
   spot.direction_type[3] = 1;
-  spot.params[0] = ::cos(0.28f);
-  spot.params[1] = ::cos(0.48f);
+  spot.params[0] = ::cosf(0.28f);
+  spot.params[1] = ::cosf(0.48f);
   lights.push_back(spot);
 
   render::PointLight sphere;
@@ -1340,7 +1340,7 @@ void FeatureGym::Impl::CreateGeometry() {
       const f32 pz = (static_cast<f32>(z) / kGrid - 0.5f) * kVirtualGeometrySize;
       asset::Vertex vertex{};
       vertex.position[0] = px;
-      vertex.position[1] = ::sin(px * 1.4f) * ::cos(pz * 1.2f) * 0.6f;
+      vertex.position[1] = ::sinf(px * 1.4f) * ::cosf(pz * 1.2f) * 0.6f;
       vertex.position[2] = pz;
       vertex.normal[1] = 1;
       terrain_lod.vertices.push_back(vertex);
@@ -1385,7 +1385,7 @@ void FeatureGym::Impl::CreateGeometry() {
         const Vec3 position = c + Vec3{-10.0f + column * 2.2f, 0.45f, -1.0f - row * 2.1f};
         prop_transforms.push_back(MakeTranslation(position) * MakeScale(scale));
         prop_updated_transforms.push_back(
-            MakeTranslation(position + Vec3{0, 0.35f + 0.12f * ::sin(column * 0.7f), -0.45f}) *
+            MakeTranslation(position + Vec3{0, 0.35f + 0.12f * ::sinf(column * 0.7f), -0.45f}) *
             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.18f * (row + column))) * MakeScale(scale));
       }
     }
@@ -1405,9 +1405,9 @@ void FeatureGym::Impl::CreateGeometry() {
     const f32 angle = i * 2.39996323f;
     const f32 radius = 10.0f + (i % 9) * 0.65f;
     render::ImposterPass::Instance instance;
-    instance.position[0] = c.x + ::cos(angle) * radius;
+    instance.position[0] = c.x + ::cosf(angle) * radius;
     instance.position[1] = 0.1f;
-    instance.position[2] = c.z + ::sin(angle) * radius;
+    instance.position[2] = c.z + ::sinf(angle) * radius;
     instance.scale = 0.65f + (i % 5) * 0.08f;
     instance.mesh = baked;
     imposters.push_back(instance);
@@ -1478,7 +1478,7 @@ void FeatureGym::Impl::CreateWater() {
       const f32 local_x = -kIslandRadius + 2.0f * kIslandRadius * static_cast<f32>(x) / kIslandGrid;
       const f32 local_z = -kIslandRadius + 2.0f * kIslandRadius * static_cast<f32>(z) / kIslandGrid;
       const f32 gaussian =
-          ::exp(-(local_x * local_x + local_z * local_z) / (2.0f * kIslandSigma * kIslandSigma));
+          ::expf(-(local_x * local_x + local_z * local_z) / (2.0f * kIslandSigma * kIslandSigma));
       const f32 slope = kIslandPeak * 2.0f * gaussian / (kIslandSigma * kIslandSigma);
       const Vec3 island_normal = Normalize(Vec3{slope * local_x, 1, slope * local_z});
       asset::Vertex vertex{};
@@ -1511,7 +1511,7 @@ void FeatureGym::Impl::CreateWater() {
   Spawn(island.id, island_center);
 
   physics.set_water_height([this, c](const Vec3& p, f32* out, Vec3* flow) {
-    if (::abs(p.x - c.x) > 14 || ::abs(p.z - c.z) > 14) return false;
+    if (::fabsf(p.x - c.x) > 14 || ::fabsf(p.z - c.z) > 14) return false;
     Vec3 orbital_flow{};
     *out = water_height + physics::GerstnerWaveHeight(p.x, p.z, sim_time, &orbital_flow);
     if (flow) *flow = orbital_flow;
@@ -1590,9 +1590,9 @@ void FeatureGym::Impl::CreateEffects() {
   for (u32 i = 0; i < kSplatCount; ++i) {
     const f32 t = (i + 0.5f) / kSplatCount;
     const f32 y = 1.0f - 2.0f * t;
-    const f32 radius = ::sqrt(rx::Max(0.0f, 1.0f - y * y));
+    const f32 radius = ::sqrtf(rx::Max(0.0f, 1.0f - y * y));
     const f32 angle = i * 2.39996323f;
-    const Vec3 direction{::cos(angle) * radius, y, ::sin(angle) * radius};
+    const Vec3 direction{::cosf(angle) * radius, y, ::sinf(angle) * radius};
     render::GaussianInstance splat;
     splat.position[0] = c.x + 5.2f + direction.x * 1.6f;
     splat.position[1] = 2.0f + direction.y * 1.6f;
@@ -1773,7 +1773,7 @@ void FeatureGym::Impl::CreatePhysics() {
   base::Array<f32, kHeightSamples * kHeightSamples> heights{};
   for (u32 z = 0; z < kHeightSamples; ++z)
     for (u32 x = 0; x < kHeightSamples; ++x)
-      heights[z * kHeightSamples + x] = 0.25f * ::sin(x * 0.7f) * ::cos(z * 0.55f);
+      heights[z * kHeightSamples + x] = 0.25f * ::sinf(x * 0.7f) * ::cosf(z * 0.55f);
   physics.AddHeightField(c + Vec3{-11, 0, -10}, heights.data(), kHeightSamples, 8.0f);
   CreateCloth();
 }
@@ -1918,8 +1918,8 @@ void FeatureGym::Impl::CreateDrivingCircuit() {
     for (u32 i = 0; i < kOvalSegments; ++i) {
       const f32 a0 = (static_cast<f32>(i) / kOvalSegments) * 2.0f * kPi;
       const f32 a1 = (static_cast<f32>(i + 1) / kOvalSegments) * 2.0f * kPi;
-      lines.push_back({c + Vec3{rx * ::cos(a0), 0.09f, rz * ::sin(a0)},
-                       c + Vec3{rx * ::cos(a1), 0.09f, rz * ::sin(a1)}, color});
+      lines.push_back({c + Vec3{rx * ::cosf(a0), 0.09f, rz * ::sinf(a0)},
+                       c + Vec3{rx * ::cosf(a1), 0.09f, rz * ::sinf(a1)}, color});
     }
   };
   oval(circuit_rx, circuit_rz, 0xf4f4f5ff);
@@ -1934,7 +1934,7 @@ void FeatureGym::Impl::CreateDrivingCircuit() {
   for (u32 i = 0; i < kCones; ++i) {
     const f32 a = (static_cast<f32>(i) / kCones) * 2.0f * kPi;
     Spawn(cone,
-          c + Vec3{(circuit_rx + 1.3f) * ::cos(a), 0.36f, (circuit_rz + 1.3f) * ::sin(a)});
+          c + Vec3{(circuit_rx + 1.3f) * ::cosf(a), 0.36f, (circuit_rz + 1.3f) * ::sinf(a)});
   }
 
   // The circuit car reuses the chassis + wheel meshes uploaded in
@@ -2011,7 +2011,7 @@ void FeatureGym::Impl::CreateAnimation() {
   target.name_hash = asset::MakeAssetId(target.name).hash;
   target.position_deltas.reserve(morph.lods[0].vertices.size() * 3);
   for (const asset::Vertex& vertex : morph.lods[0].vertices) {
-    const f32 wave = 0.26f * ::sin(vertex.position[1] * 6.0f);
+    const f32 wave = 0.26f * ::sinf(vertex.position[1] * 6.0f);
     target.position_deltas.push_back(vertex.normal[0] * wave);
     target.position_deltas.push_back(vertex.normal[1] * wave);
     target.position_deltas.push_back(vertex.normal[2] * wave);
@@ -2171,7 +2171,7 @@ void FeatureGym::Impl::AddSimulation() {
             [this](ecs::Entity, GymMotion& motion, scene::Transform& transform) {
               const f32 angle = sim_time * motion.speed + motion.phase;
               transform.position[0] = motion.origin.x;
-              transform.position[1] = motion.origin.y + ::sin(angle * 1.7f) * motion.amplitude;
+              transform.position[1] = motion.origin.y + ::sinf(angle * 1.7f) * motion.amplitude;
               transform.position[2] = motion.origin.z;
               const Quat rotation = QuatFromAxisAngle(motion.axis, angle);
               transform.rotation[0] = rotation.x;
@@ -2184,25 +2184,25 @@ void FeatureGym::Impl::AddSimulation() {
             [dt](ecs::Entity, BubbleAgent& agent, scene::Transform& transform) {
               agent.time += dt;
               transform.position[0] =
-                  agent.center.x + ::sin(agent.time * agent.rate_x) * agent.extent;
+                  agent.center.x + ::sinf(agent.time * agent.rate_x) * agent.extent;
               transform.position[1] = agent.center.y;
               transform.position[2] =
-                  agent.center.z + ::cos(agent.time * agent.rate_z) * agent.extent;
+                  agent.center.z + ::cosf(agent.time * agent.rate_z) * agent.extent;
             });
         if (strand_sim) {
           const f32 angle = sim_time * 0.85f;
           const Vec3 position =
-              strand_center + Vec3{0.08f * ::sin(angle), 0.10f * ::sin(angle * 1.7f), 0};
+              strand_center + Vec3{0.08f * ::sinf(angle), 0.10f * ::sinf(angle * 1.7f), 0};
           strand_transform = MakeTranslation(position) *
-                             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.7f * ::sin(angle)));
+                             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.7f * ::sinf(angle)));
           physics.SetStrandGroomTransform(strand_sim, strand_transform, dt);
           physics.SetStrandGroomWind(strand_sim,
-                                     {0.8f + 0.45f * ::sin(sim_time * 2.1f), 0.12f, -0.35f});
+                                     {0.8f + 0.45f * ::sinf(sim_time * 2.1f), 0.12f, -0.35f});
         }
 
         const f32 identity[4] = {0, 0, 0, 1};
         if (platform_body) {
-          const Vec3 target = platform_origin + Vec3{::sin(sim_time * 0.7f) * 3.5f, 0, 0};
+          const Vec3 target = platform_origin + Vec3{::sinf(sim_time * 0.7f) * 3.5f, 0, 0};
           physics.MoveBodyKinematic(platform_body, target, identity, dt);
           if (scene::Transform* transform = sim_world.Get<scene::Transform>(platform_entity)) {
             transform->position[0] = target.x;
@@ -2221,7 +2221,7 @@ void FeatureGym::Impl::AddSimulation() {
             if (transform->position[0] < physics_x - 9.0f) character_direction = 1;
           }
           const int cycle = static_cast<int>(sim_time / 5.0f);
-          const bool jump = cycle != jump_cycle && ::fmod(sim_time, 5.0f) < dt * 1.5f;
+          const bool jump = cycle != jump_cycle && ::fmodf(sim_time, 5.0f) < dt * 1.5f;
           if (jump) jump_cycle = cycle;
           physics.MoveCharacter(character, {character_direction * 2.0f, 0, 0}, jump, dt, &position,
                                 &grounded);
@@ -2237,7 +2237,7 @@ void FeatureGym::Impl::AddSimulation() {
           if (active == Area::kPhysics) {
             const bool accelerating = physics_active_time < 1.0f;
             physics.DriveVehicle(car, accelerating ? 0.10f : 0.0f,
-                                 ::sin(physics_active_time * 0.35f) * 0.35f,
+                                 ::sinf(physics_active_time * 0.35f) * 0.35f,
                                  accelerating ? 0.0f : 0.65f, 0.0f);
           } else {
             physics.DriveVehicle(car, 0, 0, 1, 0);
@@ -2247,7 +2247,7 @@ void FeatureGym::Impl::AddSimulation() {
           if (active == Area::kPhysics) {
             const bool accelerating = physics_active_time < 1.0f;
             physics.DriveVehicle(bike, accelerating ? 0.08f : 0.0f,
-                                 ::sin(physics_active_time * 0.42f) * 0.22f,
+                                 ::sinf(physics_active_time * 0.42f) * 0.22f,
                                  accelerating ? 0.0f : 0.55f, 0.0f);
           } else {
             physics.DriveVehicle(bike, 0, 0, 1, 0);
@@ -2257,13 +2257,13 @@ void FeatureGym::Impl::AddSimulation() {
           if (active_mode == TourMode::kVehicleCircuit) {
             circuit_time += dt;
             const f32 theta = circuit_time * 0.6f + 0.42f;
-            const Vec3 target = circuit_center + Vec3{circuit_rx * ::cos(theta), 0,
-                                                      circuit_rz * ::sin(theta)};
+            const Vec3 target = circuit_center + Vec3{circuit_rx * ::cosf(theta), 0,
+                                                      circuit_rz * ::sinf(theta)};
             Vec3 pos;
             f32 rot[4];
             if (physics.GetVehicleTransform(circuit_car, &pos, rot)) {
               const Vec3 fwd = Rotate(Quat{rot[0], rot[1], rot[2], rot[3]}, Vec3{0, 0, 1});
-              f32 err = ::atan2(target.x - pos.x, target.z - pos.z) - ::atan2(fwd.x, fwd.z);
+              f32 err = ::atan2f(target.x - pos.x, target.z - pos.z) - ::atan2f(fwd.x, fwd.z);
               while (err > kPi) err -= 2.0f * kPi;
               while (err < -kPi) err += 2.0f * kPi;
               // +Z forward, right = -X, so steer (positive = right) chases the
@@ -2301,8 +2301,8 @@ void FeatureGym::Impl::AddSimulation() {
                           const physics::BoatState& s = boat->state();
                           const f32 theta = boat_time * 0.5f + 0.6f;
                           Vec3 target = boat_circuit_center +
-                                        Vec3{boat_circuit_radius * ::cos(theta), 0,
-                                             boat_circuit_radius * ::sin(theta)};
+                                        Vec3{boat_circuit_radius * ::cosf(theta), 0,
+                                             boat_circuit_radius * ::sinf(theta)};
                           // Safety backstop: a heavy hull turns wide, so if it
                           // drifts past the ring steer straight for the lake
                           // centre. This bounds the path inside the water region
@@ -2314,14 +2314,14 @@ void FeatureGym::Impl::AddSimulation() {
                                                (boat_circuit_radius + 1.0f) * (boat_circuit_radius + 1.0f);
                           if (outside) target = boat_circuit_center;
                           const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
-                          f32 err = ::atan2(target.x - s.position.x, target.z - s.position.z) -
-                                    ::atan2(fwd.x, fwd.z);
+                          f32 err = ::atan2f(target.x - s.position.x, target.z - s.position.z) -
+                                    ::atan2f(fwd.x, fwd.z);
                           while (err > kPi) err -= 2.0f * kPi;
                           while (err < -kPi) err += 2.0f * kPi;
                           // Ease off the throttle when steering hard or recovering
                           // so the hull stays slow enough to answer the helm.
                           input.steer = rx::Clamp(-err * 2.2f, -1.0f, 1.0f);
-                          input.throttle = (outside || ::abs(err) > 1.0f) ? 0.12f : 0.22f;
+                          input.throttle = (outside || ::fabsf(err) > 1.0f) ? 0.12f : 0.22f;
                         } else {
                           boat_cruise_active = false;
                           boat_time = 0;
@@ -2354,7 +2354,7 @@ void FeatureGym::Impl::AddSimulation() {
           plane_time += dt;
           const physics::AircraftState& s = aircraft->state();
           const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
-          f32 herr = (kPi * 0.5f) - ::atan2(fwd.x, fwd.z);
+          f32 herr = (kPi * 0.5f) - ::atan2f(fwd.x, fwd.z);
           while (herr > kPi) herr -= 2.0f * kPi;
           while (herr < -kPi) herr += 2.0f * kPi;
           // Hold heading +X with a gentle bank + rudder, hold the cruise altitude
@@ -2441,7 +2441,7 @@ void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
   if (!graph.valid()) return;
   const f32 animation_dt = rx::Min(dt, 0.05f);
   biped_time += animation_dt;
-  const f32 phase = ::fmod(biped_time, 8.0f);
+  const f32 phase = ::fmodf(biped_time, 8.0f);
   const f32 speed = phase < 1.0f ? 0.0f : phase < 3.0f ? 1.6f : 3.8f;
   rig.SetSpeed(speed);
   Vec3 root = rig.Update(animation_dt, &pose, [&](const anim::RigPlayer::Event& event) {
@@ -2513,7 +2513,7 @@ void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
     if (splat_timer > 0.8f) {
       splat_timer = 0;
       const f32 angle = static_cast<f32>(splat_index) * 2.39996f;  // golden angle
-      const Vec3 dir{::cos(angle), 0.0f, ::sin(angle)};
+      const Vec3 dir{::cosf(angle), 0.0f, ::sinf(angle)};
       const f32 height = 0.55f + 0.28f * static_cast<f32>(splat_index % 4);
       render::DecalStamp splat;
       splat.receiver = biped_decal_receiver;
@@ -2536,7 +2536,7 @@ void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
   morph.prev_transform = morph_previous;
   morph.morph_offset = static_cast<i32>(view.morph_weights.size());
   morph.morph_count = 1;
-  view.morph_weights.push_back({0, ::sin(render_time * 1.7f) * 0.5f + 0.5f});
+  view.morph_weights.push_back({0, ::sinf(render_time * 1.7f) * 0.5f + 0.5f});
   view.draws.push_back(morph);
   morph_previous = morph_transform;
 }
@@ -2741,11 +2741,11 @@ void FeatureGym::Impl::EmitSkewedNormals(render::FrameView& view) {
 void FeatureGym::Impl::EmitCameraExhibit(f32 dt, render::FrameView& view) {
   if (active_mode != TourMode::kEcsCameraStackRig || !camera_activation) return;
   if (scene::CameraOrbit* orbit = world.Get<scene::CameraOrbit>(camera_rig_mode))
-    orbit->yaw = 0.22f * ::sin(active_mode_elapsed * 0.7f);
+    orbit->yaw = 0.22f * ::sinf(active_mode_elapsed * 0.7f);
   if (scene::CameraAnchor* anchor = world.Get<scene::CameraAnchor>(camera_rig_mode)) {
     const Vec3 c = Info(Area::kPost).center;
-    anchor->position = c + Vec3{::sin(active_mode_elapsed * 0.6f) * 1.2f, 0.4f, 0};
-    anchor->velocity = {::cos(active_mode_elapsed * 0.6f) * 0.72f, 0, 0};
+    anchor->position = c + Vec3{::sinf(active_mode_elapsed * 0.6f) * 1.2f, 0.4f, 0};
+    anchor->velocity = {::cosf(active_mode_elapsed * 0.6f) * 0.72f, 0, 0};
   }
   scene::BuildCameraRigs(world, dt);
   scene::PrepareCameraRigConstraints(world, dt);

@@ -115,7 +115,7 @@ int main() {
   f32 light[16] = {0, 1, 0, 10, 1, 1, 1, 0};
   GpuBuffer lights = device->CreateBuffer(sizeof(light), kBufferUsageStorage, true);
   base::Vector<f32> cdf(1 + kSkyH + 2 * kSkyW * kSkyH);
-  const f32 omega = 2 * kPi / kSkyW * (1 - ::cos(kPi / kSkyH));
+  const f32 omega = 2 * kPi / kSkyW * (1 - ::cosf(kPi / kSkyH));
   cdf[0] = omega;
   for (u32 r = 0; r < kSkyH; ++r) cdf[1 + r] = omega;
   for (u32 c = 0; c < kSkyW; ++c) cdf[1 + kSkyH + c] = 1;
@@ -164,7 +164,7 @@ int main() {
       f32 expected = mode == 2 ? 2 : 1;
       bool correct = true;
       for (u32 p = 0; p < kPixels; ++p)
-        correct &= ::abs(values[1][4 * p + 2] - expected) < 1e-4f;
+        correct &= ::fabsf(values[1][4 * p + 2] - expected) < 1e-4f;
       ::printf("candidates=%u mode=%u W=%g expected=%g\n", candidates, mode,
                    values[1][2], expected);
       check(correct, "candidate count must not change total light energy");
@@ -173,11 +173,11 @@ int main() {
   Push push;
   push.candidates = 0;
   run(push, 1);
-  check(::abs(values[1][2] - 1) < 1e-5f, "zero point proposals retain sun energy");
+  check(::fabsf(values[1][2] - 1) < 1e-5f, "zero point proposals retain sun energy");
   push.candidates = 8;
   push.light_count = 0;
   run(push, 0);
-  check(::abs(values[1][2] - 1) < 1e-5f, "sun-only scene retains its energy");
+  check(::fabsf(values[1][2] - 1) < 1e-5f, "sun-only scene retains its energy");
   push.sun_direction[3] = 0;
   push.sky_candidates = 1;
   run(push, 0);
@@ -197,8 +197,8 @@ int main() {
   ::printf("sky solid-angle mean=%g lower-half fraction=%g retained=%u/%u\n",
                mean, fraction, samples, kPixels);
   check(samples >= kPixels - 8, "sky proposals must retain positive target mass");
-  check(::abs(mean - .5) < .015, "sky cells must be uniform in solid angle");
-  check(::abs(fraction - .5) < .02, "sky PDF must match cell samples");
+  check(::fabs(mean - .5) < .015, "sky cells must be uniform in solid angle");
+  check(::fabs(fraction - .5) < .02, "sky PDF must match cell samples");
 
   const f32 dead_id[4] = {0, 0, 0, -1}, light_id[4] = {0, 0, 0, 1};
   const f32 dead_mass[4] = {0, 2, 0, 0}, live_mass[4] = {4, 2, 2, 0};
@@ -212,12 +212,12 @@ int main() {
   reuse.reset = 0;
   run(reuse, 1, dead_sample, dead_history);
   const f32 dark_estimate = values[1][2];
-  check(::abs(values[1][1] - 4) < 1e-5f, "zero-weight DI history retains sample count");
+  check(::fabsf(values[1][1] - 4) < 1e-5f, "zero-weight DI history retains sample count");
   run(reuse, 1, live_sample, live_history);
   const f32 bright_estimate = values[1][2];
   ::printf("DI reuse: dark=%g bright=%g mean=%g expected=1\n",
                dark_estimate, bright_estimate, (dark_estimate + bright_estimate) / 2);
-  check(::abs((dark_estimate + bright_estimate) / 2 - 1) < 1e-5f,
+  check(::fabsf((dark_estimate + bright_estimate) / 2 - 1) < 1e-5f,
         "equally likely zero and double-energy histories must preserve expected energy");
   reuse.pad[1] = 1;
   run(reuse, 1, live_sample, live_history);
@@ -226,7 +226,7 @@ int main() {
   reuse.light_count = 0;
   reuse.sky_candidates = 1;
   run(reuse, 0, {}, {}, dead_sample, dead_history);
-  check(::abs(values[3][1] - 3) < 1e-5f, "zero-weight sky history retains sample count");
+  check(::fabsf(values[3][1] - 3) < 1e-5f, "zero-weight sky history retains sample count");
   check(values[3][4 * (kWidth - 1) + 1] == 1,
         "sky reservoir reprojection includes the jitter delta");
 
@@ -271,7 +271,7 @@ int main() {
       check(device->ReadbackImage(mass, ResourceState::kGeneral, values[0].data(), values[0].size() * sizeof(f32)),
             "read reservoir count");
       ::printf("%s: M=%g\n", name, values[0][center]);
-      check(values[0][center] > 2 && ::isfinite(values[0][center]), name);
+      check(values[0][center] > 2 && isfinite(values[0][center]), name);
     }
     device->ImmediateSubmit([&](CommandList& cmd) {
       cmd.Barrier(Transition(mass, ResourceState::kCopySrc, ResourceState::kGeneral));
@@ -323,7 +323,7 @@ int main() {
   check(device->ReadbackImage(out[0], ResourceState::kGeneral, values[0].data(), values[0].size() * sizeof(f32)),
         "read GI reconnection weight");
   ::printf("GI reconnection W=%g expected=%g\n", values[0][3], kPi * .5f);
-  check(::abs(values[0][3] - kPi * .5f) < 1e-5f, "temporal GI must convert source solid angle to current solid angle");
+  check(::fabsf(values[0][3] - kPi * .5f) < 1e-5f, "temporal GI must convert source solid angle to current solid angle");
   device->ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(out[0], ResourceState::kCopySrc, ResourceState::kGeneral));
   });
@@ -385,7 +385,7 @@ int main() {
   for (u32 p = 0; p < kPixels; ++p)
     for (u32 c = 0; c < 3; ++c) energy[c] += values[0][4 * p + c] / kPixels;
   for (u32 c = 0; c < 3; ++c)
-    check(::abs(energy[c] - .001 * (c + 1)) < .00015, "roulette retains expected energy of dim paths");
+    check(::fabs(energy[c] - .001 * (c + 1)) < .00015, "roulette retains expected energy of dim paths");
   ::printf("dim-path expected energy=(.001,.002,.003), measured=(%g,%g,%g)\n", energy[0], energy[1], energy[2]);
   device->DestroyPipeline(continuation);
   device->DestroyImage(half_out);

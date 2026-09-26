@@ -285,7 +285,7 @@ bool InputMap::SourceHeld(const Binding& b, const InputState& kbm, const Gamepad
       f32 thr = trigger ? trigger_threshold : stick_deadzone;
       if (b.axis_dir > 0) return v > thr;
       if (b.axis_dir < 0) return v < -thr;
-      return ::fabs(v) > thr;
+      return ::fabsf(v) > thr;
     }
     case SourceKind::kNone:
       return false;
@@ -309,11 +309,11 @@ f32 InputMap::AxisValue(const Binding& b, const GamepadState& pad) const {
       b.code >= static_cast<u16>(GamepadAxis::kCount))
     return 0;
   f32 v = pad.axes[b.code];
-  if (::fabs(v) < stick_deadzone) return 0;
+  if (::fabsf(v) < stick_deadzone) return 0;
   // Rescale so the value ramps from 0 at the deadzone edge to 1 at full throw.
-  f32 s = (::fabs(v) - stick_deadzone) / (1.0f - stick_deadzone);
+  f32 s = (::fabsf(v) - stick_deadzone) / (1.0f - stick_deadzone);
   s = rx::Clamp(s, 0.0f, 1.0f);
-  return ::copysign(s, v);
+  return ::copysignf(s, v);
 }
 
 void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const TouchState& touch,
@@ -364,7 +364,7 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const Tou
       bool trigger = x == static_cast<int>(GamepadAxis::kLeftTrigger) ||
                      x == static_cast<int>(GamepadAxis::kRightTrigger);
       f32 thr = trigger ? trigger_threshold : stick_deadzone;
-      if (::fabs(pad.axes[x]) > thr) pad_active = true;
+      if (::fabsf(pad.axes[x]) > thr) pad_active = true;
     }
   }
   // A finger landing wins over a stale pointer position: on a handheld the

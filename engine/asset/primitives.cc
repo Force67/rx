@@ -80,9 +80,9 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
     base::UnorderedMap<GridPosition, u32, GridHash> seen;
     for (size_t i = 0; i < src.vertices.size(); ++i) {
       const Vertex& v = src.vertices[i];
-      GridPosition q{{static_cast<i32>(::lround((v.position[0] - bmin.x) / quantum)),
-                      static_cast<i32>(::lround((v.position[1] - bmin.y) / quantum)),
-                      static_cast<i32>(::lround((v.position[2] - bmin.z) / quantum))}};
+      GridPosition q{{static_cast<i32>(::lroundf((v.position[0] - bmin.x) / quantum)),
+                      static_cast<i32>(::lroundf((v.position[1] - bmin.y) / quantum)),
+                      static_cast<i32>(::lroundf((v.position[2] - bmin.z) / quantum))}};
       u32* id = seen.find(q);
       if (!id) id = seen.emplace(q, position_count++).first;
       position_id[i] = *id;
@@ -266,7 +266,7 @@ void AddLathe(MeshLod* lod, const base::Vector<LatheRing>& rings, u32 segments) 
   for (size_t i = 1; i < rings.size(); ++i) {
     f32 dr = rings[i].radius - rings[i - 1].radius;
     f32 dy = rings[i].y - rings[i - 1].y;
-    travelled += ::sqrt(dr * dr + dy * dy);
+    travelled += ::sqrtf(dr * dr + dy * dy);
     v[i] = travelled;
   }
   const f32 inv_travelled = travelled > 0.0f ? 1.0f / travelled : 0.0f;
@@ -278,7 +278,7 @@ void AddLathe(MeshLod* lod, const base::Vector<LatheRing>& rings, u32 segments) 
     for (u32 x = 0; x <= segments; ++x) {
       f32 u = static_cast<f32>(x) / static_cast<f32>(segments);
       f32 theta = u * 6.2831853f;
-      f32 sin_theta = ::sin(theta), cos_theta = ::cos(theta);
+      f32 sin_theta = ::sinf(theta), cos_theta = ::cosf(theta);
       Vertex vertex{};
       vertex.position[0] = ring.radius * cos_theta;
       vertex.position[1] = ring.y;
@@ -333,7 +333,7 @@ void AddDisc(MeshLod* lod, f32 radius, f32 y, f32 sign, u32 segments) {
   push(0.0f, 0.0f, 0.5f, 0.5f);
   for (u32 x = 0; x <= segments; ++x) {
     f32 theta = static_cast<f32>(x) / static_cast<f32>(segments) * 6.2831853f;
-    f32 cos_theta = ::cos(theta), sin_theta = ::sin(theta);
+    f32 cos_theta = ::cosf(theta), sin_theta = ::sinf(theta);
     push(radius * cos_theta, radius * sin_theta, 0.5f + 0.5f * cos_theta,
          0.5f + 0.5f * sin_theta);
   }
@@ -494,7 +494,7 @@ Mesh MakeBox(f32 hx, f32 hy, f32 hz, AssetId id) {
     for (u32 index : {0u, 1u, 2u, 0u, 2u, 3u}) lod.indices.push_back(base + index);
   }
 
-  mesh.bounds_radius = ::sqrt(hx * hx + hy * hy + hz * hz);
+  mesh.bounds_radius = ::sqrtf(hx * hx + hy * hy + hz * hz);
   return mesh;
 }
 
@@ -512,11 +512,11 @@ Mesh MakeSphere(f32 radius, u32 rings, u32 segments, AssetId id) {
   for (u32 y = 0; y <= rings; ++y) {
     f32 v = static_cast<f32>(y) / static_cast<f32>(rings);
     f32 phi = v * 3.14159265f;  // 0..pi, pole to pole
-    f32 sin_phi = ::sin(phi), cos_phi = ::cos(phi);
+    f32 sin_phi = ::sinf(phi), cos_phi = ::cosf(phi);
     for (u32 x = 0; x <= segments; ++x) {
       f32 u = static_cast<f32>(x) / static_cast<f32>(segments);
       f32 theta = u * 6.2831853f;
-      f32 sin_theta = ::sin(theta), cos_theta = ::cos(theta);
+      f32 sin_theta = ::sinf(theta), cos_theta = ::cosf(theta);
       Vec3 n{sin_phi * cos_theta, cos_phi, sin_phi * sin_theta};
       Vertex vertex{};
       vertex.position[0] = n.x * radius;
@@ -569,7 +569,7 @@ Mesh MakePlane(f32 hx, f32 hz, AssetId id) {
   // Corners run ccw in the xz plane, which is clockwise seen from +Y, so the
   // winding is reversed to keep the visible face the one the normal points at.
   for (u32 index : {0u, 3u, 2u, 0u, 2u, 1u}) lod.indices.push_back(index);
-  return FinishPrimitive(base::move(mesh), ::sqrt(hx * hx + hz * hz));
+  return FinishPrimitive(base::move(mesh), ::sqrtf(hx * hx + hz * hz));
 }
 
 Mesh MakeCylinder(f32 radius, f32 half_height, u32 segments, AssetId id) {
@@ -583,7 +583,7 @@ Mesh MakeCylinder(f32 radius, f32 half_height, u32 segments, AssetId id) {
   AddDisc(&lod, radius, half_height, 1.0f, segments);
   AddDisc(&lod, radius, -half_height, -1.0f, segments);
   return FinishPrimitive(base::move(mesh),
-                         ::sqrt(radius * radius + half_height * half_height));
+                         ::sqrtf(radius * radius + half_height * half_height));
 }
 
 Mesh MakeCone(f32 radius, f32 half_height, u32 segments, AssetId id) {
@@ -599,7 +599,7 @@ Mesh MakeCone(f32 radius, f32 half_height, u32 segments, AssetId id) {
   AddLathe(&lod, side, segments);
   AddDisc(&lod, radius, -half_height, -1.0f, segments);
   return FinishPrimitive(base::move(mesh),
-                         ::sqrt(radius * radius + half_height * half_height));
+                         ::sqrtf(radius * radius + half_height * half_height));
 }
 
 Mesh MakeTorus(f32 major_radius, f32 minor_radius, u32 rings, u32 segments, AssetId id) {
@@ -612,7 +612,7 @@ Mesh MakeTorus(f32 major_radius, f32 minor_radius, u32 rings, u32 segments, Asse
   // than wrapping the uv back to 0 across the seam quad.
   for (u32 i = 0; i <= rings; ++i) {
     f32 angle = static_cast<f32>(i) / static_cast<f32>(rings) * 6.2831853f;
-    f32 cos_angle = ::cos(angle), sin_angle = ::sin(angle);
+    f32 cos_angle = ::cosf(angle), sin_angle = ::sinf(angle);
     profile.push_back({major_radius + minor_radius * cos_angle, minor_radius * sin_angle,
                        cos_angle, sin_angle});
   }
@@ -631,13 +631,13 @@ Mesh MakeCapsule(f32 radius, f32 half_height, u32 rings, u32 segments, AssetId i
   // them needs no samples of its own.
   for (u32 i = 0; i <= cap_rings; ++i) {
     f32 angle = -1.5707963f + static_cast<f32>(i) / static_cast<f32>(cap_rings) * 1.5707963f;
-    f32 cos_angle = ::cos(angle), sin_angle = ::sin(angle);
+    f32 cos_angle = ::cosf(angle), sin_angle = ::sinf(angle);
     profile.push_back({radius * cos_angle, -half_height + radius * sin_angle, cos_angle,
                        sin_angle});
   }
   for (u32 i = 0; i <= cap_rings; ++i) {
     f32 angle = static_cast<f32>(i) / static_cast<f32>(cap_rings) * 1.5707963f;
-    f32 cos_angle = ::cos(angle), sin_angle = ::sin(angle);
+    f32 cos_angle = ::cosf(angle), sin_angle = ::sinf(angle);
     profile.push_back({radius * cos_angle, half_height + radius * sin_angle, cos_angle,
                        sin_angle});
   }

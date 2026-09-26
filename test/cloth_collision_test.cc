@@ -23,8 +23,8 @@ physics::detail::ClothTopology ManualTopology(u32 vertex_count) {
 
 bool Finite(const base::Vector<Vec3>& values) {
   for (const Vec3& value : values) {
-    if (!::isfinite(value.x) || !::isfinite(value.y) ||
-        !::isfinite(value.z)) {
+    if (!isfinite(value.x) || !isfinite(value.y) ||
+        !isfinite(value.z)) {
       return false;
     }
   }

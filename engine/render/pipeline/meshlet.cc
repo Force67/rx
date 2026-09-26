@@ -70,7 +70,7 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
     f32 radius = 0.0f;
     for (u32 i = 0; i < local_count; ++i) {
       Vec3 d = P(local_global[i]) - center;
-      radius = rx::Max(radius, ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
+      radius = rx::Max(radius, ::sqrtf(d.x * d.x + d.y * d.y + d.z * d.z));
     }
     m.center_radius[0] = center.x;
     m.center_radius[1] = center.y;
@@ -84,10 +84,10 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
       u32 packed = out.triangles[t];
       Vec3 n = Cross(P(local_global[(packed >> 8) & 0xff]) - P(local_global[packed & 0xff]),
                      P(local_global[(packed >> 16) & 0xff]) - P(local_global[packed & 0xff]));
-      f32 len = ::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      f32 len = ::sqrtf(n.x * n.x + n.y * n.y + n.z * n.z);
       if (len > 1e-8f) axis = axis + n * (1.0f / len);
     }
-    f32 alen = ::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+    f32 alen = ::sqrtf(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
     if (alen > 1e-6f) {
       axis = axis * (1.0f / alen);
       f32 min_c = 1.0f;
@@ -95,13 +95,13 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
         u32 packed = out.triangles[t];
         Vec3 n = Cross(P(local_global[(packed >> 8) & 0xff]) - P(local_global[packed & 0xff]),
                        P(local_global[(packed >> 16) & 0xff]) - P(local_global[packed & 0xff]));
-        f32 len = ::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+        f32 len = ::sqrtf(n.x * n.x + n.y * n.y + n.z * n.z);
         if (len > 1e-8f) min_c = rx::Min(min_c, (n.x * axis.x + n.y * axis.y + n.z * axis.z) / len);
       }
       m.cone[0] = axis.x;
       m.cone[1] = axis.y;
       m.cone[2] = axis.z;
-      m.cone[3] = min_c > 0.0f ? ::sqrt(1.0f - min_c * min_c) : 2.0f;  // 2 = never cull
+      m.cone[3] = min_c > 0.0f ? ::sqrtf(1.0f - min_c * min_c) : 2.0f;  // 2 = never cull
     } else {
       m.cone[3] = 2.0f;  // degenerate, never cone-cull
     }
@@ -155,13 +155,13 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
     // This triangle's unit normal, to keep the meshlet's normal cone tight.
     Vec3 pa = P(g[0]);
     Vec3 n = Cross(P(g[1]) - pa, P(g[2]) - pa);
-    f32 nlen = ::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    f32 nlen = ::sqrtf(n.x * n.x + n.y * n.y + n.z * n.z);
     if (nlen > 1e-8f) n = n * (1.0f / nlen);
     // Bound the cone half-angle (~45deg from the running mean) so backface cone
     // culling stays effective; finalize early when a triangle would widen it.
     bool cone_break = false;
     if (cone_split && local_count > 0) {
-      f32 slen = ::sqrt(cone_sum.x * cone_sum.x + cone_sum.y * cone_sum.y + cone_sum.z * cone_sum.z);
+      f32 slen = ::sqrtf(cone_sum.x * cone_sum.x + cone_sum.y * cone_sum.y + cone_sum.z * cone_sum.z);
       if (slen > 1e-6f && (n.x * cone_sum.x + n.y * cone_sum.y + n.z * cone_sum.z) / slen < 0.85f) {
         cone_break = true;
       }

@@ -169,8 +169,8 @@ void DemoScenes::CreateBubbleDemoScene() {
     world.Each<BubbleAgent, scene::Transform>(
         [dt](ecs::Entity, BubbleAgent& agent, scene::Transform& t) {
           agent.time += dt;
-          t.position[0] = ::sin(agent.time * agent.rate_x) * agent.extent;
-          t.position[2] = ::cos(agent.time * agent.rate_z) * agent.extent;
+          t.position[0] = ::sinf(agent.time * agent.rate_x) * agent.extent;
+          t.position[2] = ::cosf(agent.time * agent.rate_z) * agent.extent;
         });
   });
 
@@ -289,7 +289,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
     renderer_.settings().sun_intensity = rx::Min(renderer_.settings().sun_intensity, 1.3f);
     const render::WeatherSettings &weather = renderer_.settings().weather;
     weather_map_offset_ +=
-        Vec2{::cos(weather.wind_yaw), ::sin(weather.wind_yaw)} * (weather.wind_speed * dt);
+        Vec2{::cosf(weather.wind_yaw), ::sinf(weather.wind_yaw)} * (weather.wind_speed * dt);
     renderer_.settings().cloudscape_controls.map_offset = weather_map_offset_;
   }
   if (storm_enabled_) UpdateStorm(dt);
@@ -326,8 +326,8 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
       // path traces real shadows from it).
       fire_time_ += dt;
       f32 t = fire_time_;
-      f32 flicker = 0.82f + 0.12f * ::sin(t * 11.7f) + 0.06f * ::sin(t * 23.3f + 1.7f) +
-                    0.05f * ::sin(t * 5.1f + 0.6f);
+      f32 flicker = 0.82f + 0.12f * ::sinf(t * 11.7f) + 0.06f * ::sinf(t * 23.3f + 1.7f) +
+                    0.05f * ::sinf(t * 5.1f + 0.6f);
       render::PointLight l;
       l.pos_radius[0] = gpu_particle_emitter_.x;
       l.pos_radius[1] = gpu_particle_emitter_.y + 0.55f;
@@ -355,17 +355,17 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // and lags as the head bobs.
   if (!hair_sims_.empty()) {
     hair_time_ += dt;
-    Vec3 wind = Vec3{0.5f, 0.0f, 0.25f} * (0.6f + 0.4f * ::sin(hair_time_ * 2.1f)) +
-                Vec3{0.0f, 0.15f * ::sin(hair_time_ * 3.7f), 0.0f};
+    Vec3 wind = Vec3{0.5f, 0.0f, 0.25f} * (0.6f + 0.4f * ::sinf(hair_time_ * 2.1f)) +
+                Vec3{0.0f, 0.15f * ::sinf(hair_time_ * 3.7f), 0.0f};
     for (physics::StrandGroomId sim : hair_sims_) physics_.SetStrandGroomWind(sim, wind);
     if (hair_orbit_strands_ != 0) {
       f32 a = hair_time_ * 0.9f;
       // Mostly a head turn (rotation keeps the head under the hair) plus a
       // small bob, so the hair sways without exposing the scalp.
-      Vec3 pos{hair_orbit_center_.x + 0.03f * ::sin(a),
-               hair_orbit_center_.y + 0.02f * ::sin(a * 1.7f), hair_orbit_center_.z};
+      Vec3 pos{hair_orbit_center_.x + 0.03f * ::sinf(a),
+               hair_orbit_center_.y + 0.02f * ::sinf(a * 1.7f), hair_orbit_center_.z};
       Mat4 m =
-          MakeTranslation(pos) * MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * ::sin(a)));
+          MakeTranslation(pos) * MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * ::sinf(a)));
       physics_.SetStrandGroomTransform(hair_orbit_strands_, m, dt);
       renderer_.SetHairGroomTransform(hair_orbit_groom_, m);
     }
@@ -402,8 +402,8 @@ void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
     f32 surface_vy = 0.0f;
     f32 surface = physics::GerstnerWaveHeight(pos.x, pos.z, water_time_, nullptr, &surface_vy);
 
-    f32 horiz = ::sqrt(vel.x * vel.x + vel.z * vel.z);
-    f32 vert = ::fabs(vel.y);
+    f32 horiz = ::sqrtf(vel.x * vel.x + vel.z * vel.z);
+    f32 vert = ::fabsf(vel.y);
     f32 motion = horiz + vert;
     render::WaterDisturbance d;
     d.position = {pos.x, 0.0f, pos.z};
@@ -426,7 +426,7 @@ void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
     const f32 rel_vy = vel.y - surface_vy;
     const f32 kSlamSpeed = 2.5f;         // m/s of downward closing speed
     const f32 kWaterlineBand = 1.4f;     // cube half-height + margin
-    if (rel_vy < -kSlamSpeed && ::fabs(pos.y - surface) < kWaterlineBand &&
+    if (rel_vy < -kSlamSpeed && ::fabsf(pos.y - surface) < kWaterlineBand &&
         water_cube_slam_cd_[i] <= 0.0f) {
       water_cube_slam_cd_[i] = 0.6f;
       f32 slam = rx::Min(-rel_vy, 12.0f);
@@ -463,8 +463,8 @@ void DemoScenes::SpawnSplashSpray(const Vec3& pos, f32 surface, f32 strength) {
     p.position = {pos.x + (rnd() - 0.5f) * 1.6f, surface + 0.1f, pos.z + (rnd() - 0.5f) * 1.6f};
     f32 ang = rnd() * 6.2831853f;
     f32 spread = 0.6f + rnd() * (0.5f + 0.15f * strength);
-    p.velocity = {::cos(ang) * spread, 2.0f + rnd() * (1.0f + 0.25f * strength),
-                  ::sin(ang) * spread};
+    p.velocity = {::cosf(ang) * spread, 2.0f + rnd() * (1.0f + 0.25f * strength),
+                  ::sinf(ang) * spread};
     p.max_life = 0.5f + rnd() * 0.4f;
     p.life = p.max_life;
     p.size = 0.03f + rnd() * 0.03f;
@@ -498,7 +498,7 @@ f32 FluidDemoBed(f32 x, f32 z) {
   // Lower basin is the datum (~0). Everything is built up from here.
   // Domain-edge rim: the outer ~12 m rises to ~2.5 m on every side so the flood
   // can't visibly spill out of the 128 m domain.
-  f32 edge = rx::Max(::fabs(x), ::fabs(z));
+  f32 edge = rx::Max(::fabsf(x), ::fabsf(z));
   f32 h = 2.5f * SmoothStep(52.0f, 64.0f, edge);
 
   // Upper reservoir plateau (~6 m), gated to the central x band so it walls the
@@ -507,12 +507,12 @@ f32 FluidDemoBed(f32 x, f32 z) {
   // channel throat stays above the 5.2 m fill level; a longer ramp (the first
   // cut used -12..-24) leaves a ~4 m shoulder the reservoir quietly drains
   // around, dam or no dam.
-  f32 plateau_x = 1.0f - SmoothStep(22.0f, 32.0f, ::fabs(x));
+  f32 plateau_x = 1.0f - SmoothStep(22.0f, 32.0f, ::fabsf(x));
   f32 plateau = 6.0f * SmoothStep(-13.0f, -19.0f, z) * plateau_x;
 
   // Carve the reservoir bowl into the plateau: floor ~3.5 m, centred (0,-40),
   // radius ~18 m (a smooth radial depression).
-  f32 rb = ::sqrt(x * x + (z + 40.0f) * (z + 40.0f));
+  f32 rb = ::sqrtf(x * x + (z + 40.0f) * (z + 40.0f));
   f32 bowl = 2.5f * (1.0f - SmoothStep(6.0f, 18.0f, rb));
   h = rx::Max(h, plateau - bowl);
 
@@ -520,7 +520,7 @@ f32 FluidDemoBed(f32 x, f32 z) {
   // floor descends 3.5 m -> 0.5 m as z runs -24 -> -12, min-blended through the
   // plateau lip (1 m feather in x, ramps in/out over ~1 m in z).
   f32 channel_floor = 3.5f - 3.0f * SmoothStep(-24.0f, -12.0f, z);
-  f32 cmask = (1.0f - SmoothStep(5.0f, 6.0f, ::fabs(x))) *
+  f32 cmask = (1.0f - SmoothStep(5.0f, 6.0f, ::fabsf(x))) *
               SmoothStep(-25.0f, -24.0f, z) * (1.0f - SmoothStep(-13.0f, -12.0f, z));
   h -= rx::Max(0.0f, h - channel_floor) * cmask;
 
@@ -528,7 +528,7 @@ f32 FluidDemoBed(f32 x, f32 z) {
   // flank runs ~30+ m downhill into the lower basin (slope ~15 deg), so the vent
   // near its top feeds a flow that runs, slows and solidifies before pooling.
   f32 hx = x - 35.0f, hz = z + 30.0f;
-  f32 hill = 8.0f * ::exp(-(hx * hx + hz * hz) / (2.0f * 12.0f * 12.0f));
+  f32 hill = 8.0f * ::expf(-(hx * hx + hz * hz) / (2.0f * 12.0f * 12.0f));
   h = rx::Max(h, hill);
 
   return h;
@@ -624,7 +624,7 @@ void DemoScenes::CreateWaterDemoScene() {
   for (int i = 0; i < 6; ++i) {
     ecs::Entity block = world_.Create();
     f32 angle = static_cast<f32>(i) * 1.047f;
-    Vec3 position{::cos(angle) * 6.0f, 2.0f + (i % 3), ::sin(angle) * 6.0f};
+    Vec3 position{::cosf(angle) * 6.0f, 2.0f + (i % 3), ::sinf(angle) * 6.0f};
     world_.Add(block, scene::Transform{.position = {position.x, position.y, position.z}});
     world_.Add(block, scene::Renderable{cube.id});
     // Density 450 kg/m^3 against the 1.2x buoyancy factor settles the cubes at
@@ -687,7 +687,7 @@ void DemoScenes::CreateWaterDemoScene() {
     for (u32 gx = 0; gx <= kIslandGrid; ++gx) {
       f32 lx = -kRadius + 2.0f * kRadius * static_cast<f32>(gx) / kIslandGrid;
       f32 lz = -kRadius + 2.0f * kRadius * static_cast<f32>(gy) / kIslandGrid;
-      f32 g = ::exp(-(lx * lx + lz * lz) / (2.0f * kSigma * kSigma));
+      f32 g = ::expf(-(lx * lx + lz * lz) / (2.0f * kSigma * kSigma));
       f32 slope = kPeak * 2.0f * g / (kSigma * kSigma);  // -dh/dr factor
       Vec3 n = Normalize(Vec3{slope * lx, 1.0f, slope * lz});
       asset::Vertex v{};
@@ -759,7 +759,7 @@ void DemoScenes::RebuildFluidBed() {
         // The wall's flat top must run past the notch shoulders (bed ~5.2-5.9 m
         // at |x| 5.5-6.5): the startup slosh piles water ~1 m above the rest
         // level and spills over anything lower than ~6.5 m there.
-        f32 dmx = 1.0f - SmoothStep(7.0f, 8.5f, ::fabs(x));
+        f32 dmx = 1.0f - SmoothStep(7.0f, 8.5f, ::fabsf(x));
         f32 dmz = SmoothStep(-18.5f, -17.5f, z) * (1.0f - SmoothStep(-14.5f, -13.5f, z));
         h = rx::Max(h, 8.5f * dmx * dmz);
       }
@@ -794,8 +794,8 @@ void DemoScenes::CreateFluidDemoScene() {
     f32 z = fluid_domain_.origin[1] + (static_cast<f32>(j) + 0.5f) * l;
     for (u32 i = 0; i < res; ++i) {
       f32 x = fluid_domain_.origin[0] + (static_cast<f32>(i) + 0.5f) * l;
-      f32 rb = ::sqrt(x * x + (z + 40.0f) * (z + 40.0f));
-      bool in_reservoir = rb < 19.0f || (::fabs(x) < 6.0f && z < -18.0f && z > -25.0f);
+      f32 rb = ::sqrtf(x * x + (z + 40.0f) * (z + 40.0f));
+      bool in_reservoir = rb < 19.0f || (::fabsf(x) < 6.0f && z < -18.0f && z > -25.0f);
       if (!in_reservoir) continue;
       f32 depth = 5.2f - FluidDemoBed(x, z);
       if (depth > 0.0f) fluid_initial_water_[static_cast<size_t>(j) * res + i] = depth;
@@ -959,7 +959,7 @@ void DemoScenes::EmitFluid(f32 dt, render::FrameView& view) {
   render::FluidSource lava;
   lava.position = {35.0f, 0.0f, -30.0f};
   lava.radius = 2.5f;
-  lava.rate = 0.35f * (1.0f + 0.3f * ::sin(fluid_time_ * 0.7f));
+  lava.rate = 0.35f * (1.0f + 0.3f * ::sinf(fluid_time_ * 0.7f));
   lava.fluid = 1;
   lava.temperature = 1250.0f;
   view.fluid_sources.push_back(lava);
@@ -1095,7 +1095,7 @@ void DemoScenes::UpdateParticles(f32 dt, render::FrameView& view) {
     p.position = particle_emitter_;
     f32 ang = rnd() * 6.2831853f;
     f32 spread = rnd() * 0.65f;
-    p.velocity = {::cos(ang) * spread, 2.8f + rnd() * 1.4f, ::sin(ang) * spread};
+    p.velocity = {::cosf(ang) * spread, 2.8f + rnd() * 1.4f, ::sinf(ang) * spread};
     p.max_life = 0.8f + rnd() * 0.6f;
     p.life = p.max_life;
     p.size = 0.02f + rnd() * 0.02f;
@@ -1163,9 +1163,9 @@ void DemoScenes::CreateGaussianDemoScene() {
   for (u32 i = 0; i < kCount; ++i) {
     f32 t = (static_cast<f32>(i) + 0.5f) / static_cast<f32>(kCount);
     f32 y = 1.0f - 2.0f * t;
-    f32 r = ::sqrt(rx::Max(0.0f, 1.0f - y * y));
+    f32 r = ::sqrtf(rx::Max(0.0f, 1.0f - y * y));
     f32 phi = static_cast<f32>(i) * golden;
-    Vec3 dir{::cos(phi) * r, y, ::sin(phi) * r};
+    Vec3 dir{::cosf(phi) * r, y, ::sinf(phi) * r};
     render::GaussianInstance g;
     g.position[0] = dir.x * radius;
     g.position[1] = dir.y * radius + 1.8f;
@@ -1385,7 +1385,7 @@ void DemoScenes::CreateImposterDemoScene() {
   auto push_vertex = [&](f32 x, f32 y, f32 z, f32 nx, f32 ny, f32 nz, u32 color) {
     asset::Vertex v{};
     v.position[0] = x; v.position[1] = y; v.position[2] = z;
-    f32 len = ::sqrt(nx * nx + ny * ny + nz * nz);
+    f32 len = ::sqrtf(nx * nx + ny * ny + nz * nz);
     v.normal[0] = nx / len; v.normal[1] = ny / len; v.normal[2] = nz / len;
     v.tangent[3] = 1.0f;
     v.color = color;
@@ -1403,9 +1403,9 @@ void DemoScenes::CreateImposterDemoScene() {
   const f32 tw = 0.14f, th = 1.1f;
   for (int s = 0; s < 4; ++s) {
     f32 a0 = s * 1.5708f, a1 = a0 + 1.5708f;
-    f32 x0 = ::cos(a0) * tw, z0 = ::sin(a0) * tw;
-    f32 x1 = ::cos(a1) * tw, z1 = ::sin(a1) * tw;
-    f32 nx = ::cos(a0 + 0.7854f), nz = ::sin(a0 + 0.7854f);
+    f32 x0 = ::cosf(a0) * tw, z0 = ::sinf(a0) * tw;
+    f32 x1 = ::cosf(a1) * tw, z1 = ::sinf(a1) * tw;
+    f32 nx = ::cosf(a0 + 0.7854f), nz = ::sinf(a0 + 0.7854f);
     u32 v0 = push_vertex(x0, 0.0f, z0, nx, 0, nz, kBrown);
     u32 v1 = push_vertex(x1, 0.0f, z1, nx, 0, nz, kBrown);
     u32 v2 = push_vertex(x1, th, z1, nx, 0, nz, kBrown);
@@ -1419,13 +1419,13 @@ void DemoScenes::CreateImposterDemoScene() {
     const int kSegs = 10;
     for (int s = 0; s < kSegs; ++s) {
       f32 a0 = s * 6.2831853f / kSegs, a1 = (s + 1) * 6.2831853f / kSegs;
-      f32 x0 = ::cos(a0) * radius, z0 = ::sin(a0) * radius;
-      f32 x1 = ::cos(a1) * radius, z1 = ::sin(a1) * radius;
+      f32 x0 = ::cosf(a0) * radius, z0 = ::sinf(a0) * radius;
+      f32 x1 = ::cosf(a1) * radius, z1 = ::sinf(a1) * radius;
       f32 am = (a0 + a1) * 0.5f;
       u32 color = (s & 1) ? kGreen : kGreenDark;
       u32 v0 = push_vertex(x0, base, z0, x0, radius * 0.6f, z0, color);
       u32 v1 = push_vertex(x1, base, z1, x1, radius * 0.6f, z1, color);
-      u32 v2 = push_vertex(0.0f, tip, 0.0f, ::cos(am), 0.8f, ::sin(am), color);
+      u32 v2 = push_vertex(0.0f, tip, 0.0f, ::cosf(am), 0.8f, ::sinf(am), color);
       lod.indices.push_back(v0);
       lod.indices.push_back(v2);
       lod.indices.push_back(v1);
@@ -1466,9 +1466,9 @@ void DemoScenes::CreateImposterDemoScene() {
     f32 ang = next_rand() * 6.2831853f;
     f32 dist = 22.0f + next_rand() * 170.0f;
     render::ImposterPass::Instance inst;
-    inst.position[0] = ::cos(ang) * dist;
+    inst.position[0] = ::cosf(ang) * dist;
     inst.position[1] = 0.0f;
-    inst.position[2] = ::sin(ang) * dist;
+    inst.position[2] = ::sinf(ang) * dist;
     inst.scale = 0.8f + next_rand() * 0.7f;
     inst.mesh = baked == render::ImposterPass::kNoMesh ? 0 : baked;
     instances.push_back(inst);
@@ -1477,8 +1477,8 @@ void DemoScenes::CreateImposterDemoScene() {
     f32 ang = next_rand() * 6.2831853f;
     f32 dist = 6.0f + next_rand() * 12.0f;
     ecs::Entity t = world_.Create();
-    world_.Add(t, scene::Transform{.position = {::cos(ang) * dist, 0.0f,
-                                                ::sin(ang) * dist}});
+    world_.Add(t, scene::Transform{.position = {::cosf(ang) * dist, 0.0f,
+                                                ::sinf(ang) * dist}});
     world_.Add(t, scene::Renderable{tree.id});
   }
   if (baked != render::ImposterPass::kNoMesh) renderer_.SetImposterInstances(instances);
@@ -1908,9 +1908,9 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
   asset::MeshLod& lod = terrain.lods[0];
   lod.vertices.reserve(static_cast<size_t>(kGrid + 1) * (kGrid + 1));
   auto analytic = [](f32 x, f32 z) {
-    return 3.0f * ::sin(x * 0.05f) * ::cos(z * 0.045f) +
-           0.8f * ::sin(x * 0.31f + 1.7f) * ::sin(z * 0.27f) +
-           0.15f * ::sin(x * 1.7f) * ::cos(z * 1.9f);
+    return 3.0f * ::sinf(x * 0.05f) * ::cosf(z * 0.045f) +
+           0.8f * ::sinf(x * 0.31f + 1.7f) * ::sinf(z * 0.27f) +
+           0.15f * ::sinf(x * 1.7f) * ::cosf(z * 1.9f);
   };
   const u32 hm_n = kGrid + 1;
   auto height = [&](f32 wx, f32 wz, u32 xi, u32 zi) {
@@ -1931,7 +1931,7 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
       f32 hx = height(wx + e, wz, x1, z) - height(wx - e, wz, x0, z);
       f32 hz = height(wx, wz + e, x, z1) - height(wx, wz - e, x, z0);
       f32 nx = -hx / (2.0f * e), nz = -hz / (2.0f * e);
-      f32 len = ::sqrt(nx * nx + 1.0f + nz * nz);
+      f32 len = ::sqrtf(nx * nx + 1.0f + nz * nz);
       v.normal[0] = nx / len;
       v.normal[1] = 1.0f / len;
       v.normal[2] = nz / len;
@@ -2062,8 +2062,8 @@ void DemoScenes::CreateBrickDemoScene() {
     // Two-course running bond with rounded mortar channels.
     f32 row = v * 8.0f;
     f32 col = u * 4.0f + (static_cast<int>(row) % 2 ? 0.5f : 0.0f);
-    f32 fy = row - ::floor(row);
-    f32 fx = col - ::floor(col);
+    f32 fy = row - ::floorf(row);
+    f32 fx = col - ::floorf(col);
     auto channel = [](f32 t, f32 w) {
       f32 d = rx::Min(t, 1.0f - t) / w;  // distance to the mortar line
       return rx::Min(d, 1.0f);
@@ -2100,7 +2100,7 @@ void DemoScenes::CreateBrickDemoScene() {
       f32 hx = brick_height(u + e, v) - brick_height(u - e, v);
       f32 hy = brick_height(u, v + e) - brick_height(u, v - e);
       f32 nx = -hx * 6.0f, ny = -hy * 6.0f, nz = 1.0f;
-      f32 len = ::sqrt(nx * nx + ny * ny + nz * nz);
+      f32 len = ::sqrtf(nx * nx + ny * ny + nz * nz);
       normal.data[o] = static_cast<u8>((nx / len * 0.5f + 0.5f) * 255.0f);
       normal.data[o + 1] = static_cast<u8>((ny / len * 0.5f + 0.5f) * 255.0f);
       normal.data[o + 2] = static_cast<u8>((nz / len * 0.5f + 0.5f) * 255.0f);
@@ -2175,10 +2175,10 @@ void DemoScenes::CreateBrickDemoScene() {
   auto blob = [](f32 u, f32 v, u32 seed_base, int arms) {
     // Irregular radial blob: radius modulated by a few sine lobes.
     f32 du = u - 0.5f, dv = v - 0.5f;
-    f32 r = ::sqrt(du * du + dv * dv) * 2.2f;
-    f32 ang = ::atan2(dv, du);
-    f32 rim = 0.75f + 0.18f * ::sin(ang * arms + seed_base) +
-              0.12f * ::sin(ang * (arms * 2 + 1) + seed_base * 1.7f);
+    f32 r = ::sqrtf(du * du + dv * dv) * 2.2f;
+    f32 ang = ::atan2f(dv, du);
+    f32 rim = 0.75f + 0.18f * ::sinf(ang * arms + seed_base) +
+              0.12f * ::sinf(ang * (arms * 2 + 1) + seed_base * 1.7f);
     return rx::Max(0.0f, 1.0f - r / rim);
   };
   for (u32 y = 0; y < atlas.height; ++y) {
@@ -2196,7 +2196,7 @@ void DemoScenes::CreateBrickDemoScene() {
       } else {  // moss
         f32 u = (x - 256 + 0.5f) / 256.0f;
         f32 m = blob(u, v, 11, 9);
-        f32 grain = 0.7f + 0.3f * blob(::fmod(u * 5.0f, 1.0f), ::fmod(v * 5.0f, 1.0f), 5, 5);
+        f32 grain = 0.7f + 0.3f * blob(::fmodf(u * 5.0f, 1.0f), ::fmodf(v * 5.0f, 1.0f), 5, 5);
         f32 a = m > 0.05f ? rx::Min(1.0f, m * 1.6f) * grain : 0.0f;
         atlas.data[o] = static_cast<u8>(40 + 25 * m);
         atlas.data[o + 1] = static_cast<u8>(85 + 60 * m * grain);
@@ -2217,7 +2217,7 @@ void DemoScenes::CreateBrickDemoScene() {
   channels.data.resize(static_cast<size_t>(channels.width) * channels.height * 4);
   auto moss_height = [&](f32 u, f32 v) {
     f32 m = blob(u, v, 11, 9);
-    f32 grain = 0.7f + 0.3f * blob(::fmod(u * 5.0f, 1.0f), ::fmod(v * 5.0f, 1.0f), 5, 5);
+    f32 grain = 0.7f + 0.3f * blob(::fmodf(u * 5.0f, 1.0f), ::fmodf(v * 5.0f, 1.0f), 5, 5);
     return m * grain;
   };
   for (u32 y = 0; y < channels.height; ++y) {
@@ -2231,7 +2231,7 @@ void DemoScenes::CreateBrickDemoScene() {
         nx = (moss_height(u - e, v) - moss_height(u + e, v)) * 3.0f;
         ny = (moss_height(u, v - e) - moss_height(u, v + e)) * 3.0f;
       }
-      f32 nz = ::sqrt(rx::Max(1.0f - nx * nx - ny * ny, 0.05f));
+      f32 nz = ::sqrtf(rx::Max(1.0f - nx * nx - ny * ny, 0.05f));
       channels.data[o] = static_cast<u8>((nx * 0.5f + 0.5f) * 255.0f);
       channels.data[o + 1] = static_cast<u8>((ny * 0.5f + 0.5f) * 255.0f);
       channels.data[o + 2] = static_cast<u8>((nz * 0.5f + 0.5f) * 255.0f);
@@ -2306,9 +2306,9 @@ void DemoScenes::CreateSilhouettePomDemoScene() {
     // Grid of rounded domes; deep flat gaps between them give the limb something
     // to carve. Round-shouldered so the normal map stays smooth.
     f32 cu = u * kTilesU, cv = v * kTilesV;
-    f32 fu = cu - ::floor(cu) - 0.5f;
-    f32 fv = cv - ::floor(cv) - 0.5f;
-    f32 d = ::sqrt(fu * fu + fv * fv) * 2.0f;  // 0 centre .. ~1.4 corner
+    f32 fu = cu - ::floorf(cu) - 0.5f;
+    f32 fv = cv - ::floorf(cv) - 0.5f;
+    f32 d = ::sqrtf(fu * fu + fv * fv) * 2.0f;  // 0 centre .. ~1.4 corner
     f32 h = rx::Max(0.0f, 1.0f - d / 0.82f);
     return h * h * (3.0f - 2.0f * h);  // smoothstep dome
   };
@@ -2333,7 +2333,7 @@ void DemoScenes::CreateSilhouettePomDemoScene() {
       f32 hx = stud_height(u + e, v) - stud_height(u - e, v);
       f32 hy = stud_height(u, v + e) - stud_height(u, v - e);
       f32 nx = -hx * 6.0f, ny = -hy * 6.0f, nz = 1.0f;
-      f32 len = ::sqrt(nx * nx + ny * ny + nz * nz);
+      f32 len = ::sqrtf(nx * nx + ny * ny + nz * nz);
       normal.data[o] = static_cast<u8>((nx / len * 0.5f + 0.5f) * 255.0f);
       normal.data[o + 1] = static_cast<u8>((ny / len * 0.5f + 0.5f) * 255.0f);
       normal.data[o + 2] = static_cast<u8>((nz / len * 0.5f + 0.5f) * 255.0f);
@@ -2555,8 +2555,8 @@ void DemoScenes::CreateFireDemoScene() {
     f32 a = static_cast<f32>(i) * 1.2566f;
     Quat q = QuatFromAxisAngle({0, 1, 0}, a);
     ecs::Entity e = world_.Create();
-    world_.Add(e, scene::Transform{.position = {::cos(a) * 0.28f, 0.10f + 0.02f * i,
-                                                ::sin(a) * 0.28f},
+    world_.Add(e, scene::Transform{.position = {::cosf(a) * 0.28f, 0.10f + 0.02f * i,
+                                                ::sinf(a) * 0.28f},
                                    .rotation = {q.x, q.y, q.z, q.w}});
     world_.Add(e, scene::Renderable{log.id});
   }
@@ -2893,11 +2893,11 @@ void DemoScenes::CreatePointLightDemoScene() {
     spot.color_intensity[0] = 1.0f; spot.color_intensity[1] = 0.95f;
     spot.color_intensity[2] = 0.8f; spot.color_intensity[3] = 20.0f;
     f32 dir[3] = {0.35f, -0.85f, -0.4f};
-    f32 len = ::sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
+    f32 len = ::sqrtf(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
     spot.direction_type[0] = dir[0]/len; spot.direction_type[1] = dir[1]/len;
     spot.direction_type[2] = dir[2]/len; spot.direction_type[3] = 1.0f;  // spot
-    spot.params[0] = ::cos(0.28f);  // inner ~16 deg
-    spot.params[1] = ::cos(0.45f);  // outer ~26 deg
+    spot.params[0] = ::cosf(0.28f);  // inner ~16 deg
+    spot.params[1] = ::cosf(0.45f);  // outer ~26 deg
     demo_lights_.push_back(spot);
 
     render::PointLight ball;
@@ -3318,9 +3318,9 @@ void DemoScenes::CreateSwampDemoScene() {
     // Small-angle lean as a quaternion straight from the half-angles: the
     // snags list drunkenly instead of standing surveyor-straight.
     f32 hx = tilt_x * 0.5f, hz = tilt_z * 0.5f;
-    t.rotation[0] = ::sin(hx);
-    t.rotation[2] = ::sin(hz);
-    t.rotation[3] = ::cos(hx) * ::cos(hz);
+    t.rotation[0] = ::sinf(hx);
+    t.rotation[2] = ::sinf(hz);
+    t.rotation[3] = ::cosf(hx) * ::cosf(hz);
     world_.Add(e, t);
     world_.Add(e, scene::Renderable{mesh.id});
   };
@@ -3347,7 +3347,7 @@ void DemoScenes::CreateSwampDemoScene() {
   for (int i = 0; i < 26; ++i) {
     f32 x = (next01() - 0.5f) * 140.0f;
     f32 z = (next01() - 0.5f) * 140.0f;
-    if (::fabs(x) < 4.0f && ::fabs(z) < 4.0f) continue;  // keep the spawn clear
+    if (::fabsf(x) < 4.0f && ::fabsf(z) < 4.0f) continue;  // keep the spawn clear
     f32 h = next01() < 0.3f ? 3.0f + next01() * 3.0f : 8.0f + next01() * 9.0f;
     f32 w = 0.25f + next01() * 0.35f;
     f32 tx = (next01() - 0.5f) * 0.16f;
@@ -3416,9 +3416,9 @@ void DemoScenes::EmitSky(f32 dt) {
     Vec3 cam = camera_.position();
     f32 dx = cc.tornado_pos.x - cam.x;
     f32 dz = cc.tornado_pos.y - cam.z;
-    f32 flat = ::sqrt(dx * dx + dz * dz);
+    f32 flat = ::sqrtf(dx * dx + dz * dz);
     // forward() is (sin yaw, sin pitch, -cos yaw): aim a third up the funnel.
-    camera_.set_yaw_pitch(::atan2(dx, -dz), ::atan2(300.0f - cam.y, flat));
+    camera_.set_yaw_pitch(::atan2f(dx, -dz), ::atan2f(300.0f - cam.y, flat));
   }
   if (cc.tornado_strength > 0.05f && !sky_tornado_seen_) {
     sky_tornado_seen_ = true;
@@ -3444,7 +3444,7 @@ void DemoScenes::EmitSky(f32 dt) {
     Vec3 cam = camera_.position();
     f32 dx = w.strike_pos.x - cam.x, dy = w.strike_pos.y + 400.0f - cam.y;
     f32 dz = w.strike_pos.z - cam.z;
-    f32 dist = ::sqrt(dx * dx + dy * dy + dz * dz);
+    f32 dist = ::sqrtf(dx * dx + dy * dy + dz * dz);
     sky_thunder_.push_back({dist / 343.0f, w.strike_pos, w.strike_seed, w.strike_energy, dist});
   }
   for (u32 i = 0; i < sky_thunder_.size();) {
@@ -3485,7 +3485,7 @@ void DemoScenes::UpdateStorm(f32 dt) {
     // Peak ~0.35: the global consumers multiply hard (sun +9x, ambient +0.5
     // at flash 1.0) and would white the staged overcast frame out above that.
     w.lightning = rx::Min(
-        1.0f, w.strike_energy * (0.22f * ::exp(-w.strike_age * 9.0f) + 0.35f * env));
+        1.0f, w.strike_energy * (0.22f * ::expf(-w.strike_age * 9.0f) + 0.35f * env));
     if (w.strike_age > 1.2f) {  // envelope + afterglow both spent
       w.strike_age = -1.0f;
       w.lightning = 0.0f;
@@ -3504,7 +3504,7 @@ void DemoScenes::UpdateStorm(f32 dt) {
   if (test_dist > 0.0f) {
     // Deterministic: directly in front of the camera at the given distance.
     Vec3 fwd = camera_.forward();
-    f32 len = ::sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
+    f32 len = ::sqrtf(fwd.x * fwd.x + fwd.z * fwd.z);
     Vec3 dir = len > 1e-4f ? Vec3{fwd.x / len, 0.0f, fwd.z / len} : Vec3{0, 0, -1};
     Vec3 eye = camera_.position();
     w.strike_pos = {eye.x + dir.x * test_dist, 0.0f, eye.z + dir.z * test_dist};
@@ -3515,7 +3515,7 @@ void DemoScenes::UpdateStorm(f32 dt) {
     f32 az = hash01(w.strike_seed * 3u + 1u) * 6.2831853f;
     f32 dist = 300.0f + 600.0f * hash01(w.strike_seed * 3u + 2u);
     Vec3 eye = camera_.position();
-    w.strike_pos = {eye.x + ::cos(az) * dist, 0.0f, eye.z + ::sin(az) * dist};
+    w.strike_pos = {eye.x + ::cosf(az) * dist, 0.0f, eye.z + ::sinf(az) * dist};
     w.strike_energy = 0.65f + 0.35f * hash01(w.strike_seed * 3u + 3u);
     storm_next_strike_ = storm_time_ + 6.0f + 3.0f * hash01(w.strike_seed * 7u + 5u);
   }
@@ -3782,8 +3782,8 @@ void DemoScenes::CreateDemoScene() {
   scheduler_.AddSystem(ecs::Stage::kSim, "demo_spin", [](ecs::World& world, f32 dt) {
     world.Each<Spin, scene::Transform>([dt](ecs::Entity, Spin& spin, scene::Transform& t) {
       spin.angle += spin.speed * dt;
-      t.rotation[1] = ::sin(spin.angle * 0.5f);
-      t.rotation[3] = ::cos(spin.angle * 0.5f);
+      t.rotation[1] = ::sinf(spin.angle * 0.5f);
+      t.rotation[3] = ::cosf(spin.angle * 0.5f);
     });
   });
   RX_INFO("no scene given, spinning a cube instead");
@@ -3884,7 +3884,7 @@ void DemoScenes::EmitLocomotion(f32 dt, render::FrameView& view) {
   if (ctx_.actions) {
     f32 mx = ctx_.actions->axis(Axis::kMoveX);
     f32 my = ctx_.actions->axis(Axis::kMoveY);
-    f32 mag = ::sqrt(mx * mx + my * my);
+    f32 mag = ::sqrtf(mx * mx + my * my);
     if (mag > 0.05f) {
       speed = rx::Min(mag, 1.0f) * 4.5f;  // full stick -> run
       input_driven = true;

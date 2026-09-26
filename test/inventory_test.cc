@@ -274,7 +274,7 @@ void TestHibernateWakeAndWorldSave() {
     CHECK(wi.body != 0);
   });
   CHECK(woken.index != 0xffffffff);
-  CHECK(::abs(world.Get<scene::Transform>(woken)->position[1] - rest_y) < 0.01f);
+  CHECK(::fabsf(world.Get<scene::Transform>(woken)->position[1] - rest_y) < 0.01f);
 
   // Load the saved blob (item was hibernated at save time) into a fresh world:
   // it restores as a dormant store record with the same persistent id.

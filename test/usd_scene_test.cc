@@ -188,7 +188,7 @@ bool Write(const base::String &path, const char *text, size_t size) {
   return ok;
 }
 
-bool Near(f32 value, f32 expected) { return ::fabs(value - expected) < 1e-4f; }
+bool Near(f32 value, f32 expected) { return ::fabsf(value - expected) < 1e-4f; }
 
 } // namespace
 

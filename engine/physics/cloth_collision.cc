@@ -44,7 +44,7 @@ bool SameFace(const FaceKey& a, const FaceKey& b) {
 }
 
 bool IsFinite(const Vec3& p) {
-  return ::isfinite(p.x) && ::isfinite(p.y) && ::isfinite(p.z);
+  return isfinite(p.x) && isfinite(p.y) && isfinite(p.z);
 }
 
 f64 TriangleAreaTwice(const Vec3& a, const Vec3& b, const Vec3& c) {
@@ -205,14 +205,14 @@ f64 Dot64(const Vec3& a, const Vec3& b) {
 
 u32 FindCubicRoots(f64 c0, f64 c1, f64 c2, f64 c3, f32 roots[4]) {
   const f64 scale =
-      ::abs(c0) + ::abs(c1) + ::abs(c2) + ::abs(c3) + 1.0;
+      ::fabs(c0) + ::fabs(c1) + ::fabs(c2) + ::fabs(c3) + 1.0;
   const f64 epsilon = scale * 1.0e-10;
   f64 points[4] = {0, 1, 0, 0};
   u32 point_count = 2;
   const f64 da = 3 * c3;
   const f64 db = 2 * c2;
   const f64 dc = c1;
-  if (::abs(da) > epsilon) {
+  if (::fabs(da) > epsilon) {
     const f64 discriminant = db * db - 4 * da * dc;
     if (discriminant >= 0) {
       const f64 root = ::sqrt(discriminant);
@@ -221,7 +221,7 @@ u32 FindCubicRoots(f64 c0, f64 c1, f64 c2, f64 c3, f32 roots[4]) {
       if (t0 > 0 && t0 < 1 && point_count < 4) points[point_count++] = t0;
       if (t1 > 0 && t1 < 1 && point_count < 4) points[point_count++] = t1;
     }
-  } else if (::abs(db) > epsilon) {
+  } else if (::fabs(db) > epsilon) {
     const f64 t = -dc / db;
     if (t > 0 && t < 1 && point_count < 4) points[point_count++] = t;
   }
@@ -235,12 +235,12 @@ u32 FindCubicRoots(f64 c0, f64 c1, f64 c2, f64 c3, f32 roots[4]) {
     if (root < -epsilon || root > 1 + epsilon) return;
     const f32 value = static_cast<f32>(rx::Clamp(root, 0.0, 1.0));
     if (root_count < 4 && (root_count == 0 ||
-                           ::abs(value - roots[root_count - 1]) > 1.0e-5f)) {
+                           ::fabsf(value - roots[root_count - 1]) > 1.0e-5f)) {
       roots[root_count++] = value;
     }
   };
   for (u32 i = 0; i < point_count; ++i) {
-    if (::abs(evaluate(points[i])) <= epsilon) add_root(points[i]);
+    if (::fabs(evaluate(points[i])) <= epsilon) add_root(points[i]);
     if (i + 1 == point_count) continue;
     f64 low = points[i], high = points[i + 1];
     f64 low_value = evaluate(low);
@@ -608,7 +608,7 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     }
     const f64 area_twice =
         TriangleAreaTwice(positions[a], positions[b], positions[c]);
-    if (!::isfinite(area_twice) || area_twice < kMinAreaTwice ||
+    if (!isfinite(area_twice) || area_twice < kMinAreaTwice ||
         area_twice > FLT_MAX) {
       return false;
     }
@@ -619,7 +619,7 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     faces.push_back(MakeFaceKey(a, b, c));
     const f64 volume =
         SignedVolumeContribution(positions[a], positions[b], positions[c]);
-    if (!::isfinite(volume)) return false;
+    if (!isfinite(volume)) return false;
     signed_volume += volume;
     neighbors.push_back({a, b});
     neighbors.push_back({a, c});
@@ -662,7 +662,7 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     const f64 dy = static_cast<f64>(b.y) - a.y;
     const f64 dz = static_cast<f64>(b.z) - a.z;
     const f64 length = ::sqrt(dx * dx + dy * dy + dz * dz);
-    if (!::isfinite(length)) return false;
+    if (!isfinite(length)) return false;
     edge_length += length;
     ++edge_count;
     i = end;
@@ -787,10 +787,10 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
   result.neighbor_offsets[vertex_count] =
       static_cast<u32>(result.neighbors.size());
   const f64 average_edge_length = edge_count > 0 ? edge_length / edge_count : 0;
-  if (!::isfinite(average_edge_length) ||
+  if (!isfinite(average_edge_length) ||
       average_edge_length > FLT_MAX ||
-      !::isfinite(signed_volume) ||
-      ::abs(signed_volume) > FLT_MAX) {
+      !isfinite(signed_volume) ||
+      ::fabs(signed_volume) > FLT_MAX) {
     return false;
   }
   result.average_edge_length = static_cast<f32>(average_edge_length);
@@ -820,7 +820,7 @@ u32 SolveClothSelfCollision(const ClothTopology& topology,
   scratch->predicted.resize(positions.size());
   for (size_t i = 0; i < positions.size(); ++i) {
     if (!IsFinite(positions[i]) || !IsFinite((*velocities)[i]) ||
-        !::isfinite(inverse_masses[i]) || inverse_masses[i] < 0) {
+        !isfinite(inverse_masses[i]) || inverse_masses[i] < 0) {
       return 0;
     }
     scratch->predicted[i] = positions[i] + (*velocities)[i] * dt;
@@ -881,7 +881,7 @@ u32 SolveClothSelfCollision(const ClothTopology& topology,
         Vec3 correction = contact.normal * ((config.distance - separation) *
                                             relaxation / denominator);
         const f32 correction_length = Length(correction);
-        if (!IsFinite(correction) || !::isfinite(correction_length)) return;
+        if (!IsFinite(correction) || !isfinite(correction_length)) return;
         if (correction_length > max_correction) {
           correction = correction * (max_correction / correction_length);
         }
@@ -952,7 +952,7 @@ u32 SolveClothSelfCollision(const ClothTopology& topology,
         Vec3 correction = contact.normal * ((config.distance - separation) *
                                             relaxation / denominator);
         const f32 correction_length = Length(correction);
-        if (!IsFinite(correction) || !::isfinite(correction_length)) return;
+        if (!IsFinite(correction) || !isfinite(correction_length)) return;
         if (correction_length > max_correction) {
           correction = correction * (max_correction / correction_length);
         }

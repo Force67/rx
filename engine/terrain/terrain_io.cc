@@ -91,15 +91,15 @@ bool GetSampleCount(u32 quads, u32 *count) {
 bool ValidateTerrain(const Terrain &terrain, u32 *sample_count,
                      base::String *error) {
   const TerrainDesc &desc = terrain.desc();
-  if (!desc.id || !::isfinite(desc.origin.x) || !::isfinite(desc.origin.y) ||
-      !::isfinite(desc.origin.z) || !::isfinite(desc.sample_spacing) ||
+  if (!desc.id || !isfinite(desc.origin.x) || !isfinite(desc.origin.y) ||
+      !isfinite(desc.origin.z) || !isfinite(desc.sample_spacing) ||
       desc.sample_spacing <= 0 ||
       !GetSampleCount(desc.tile_quads, sample_count)) {
     SetError(error, "terrain has invalid dimensions or non-finite metadata");
     return false;
   }
   const f32 tile_width = desc.tile_quads * desc.sample_spacing;
-  if (!::isfinite(tile_width)) {
+  if (!isfinite(tile_width)) {
     SetError(error, "terrain tile width is not finite");
     return false;
   }
@@ -132,7 +132,7 @@ bool ValidateTerrain(const Terrain &terrain, u32 *sample_count,
     previous = tile.key;
     has_previous = true;
     for (u32 i = 0; i < *sample_count; ++i) {
-      if (!::isfinite(tile.heights[i]) ||
+      if (!isfinite(tile.heights[i]) ||
           !IsNormalized(tile.weights[i],
                         static_cast<u32>(desc.layers.size()))) {
         SetError(error, "terrain tile contains invalid height or weight data");
@@ -281,7 +281,7 @@ bool SaveTerrain(const Terrain &terrain, const base::String &file_path,
     }
     const f32 minimum = *minimum_it;
     const f32 range = *maximum_it - minimum;
-    if (!::isfinite(range)) {
+    if (!isfinite(range)) {
       SetError(error, "terrain tile height range is not finite");
       return false;
     }
@@ -384,12 +384,12 @@ bool LoadTerrain(const base::String &file_path, Terrain *terrain,
     return false;
   }
   u32 sample_count = 0;
-  if (!desc.id || !::isfinite(desc.origin.x) ||
-      !::isfinite(desc.origin.y) ||
-      !::isfinite(desc.origin.z) || !::isfinite(desc.sample_spacing) ||
+  if (!desc.id || !isfinite(desc.origin.x) ||
+      !isfinite(desc.origin.y) ||
+      !isfinite(desc.origin.z) || !isfinite(desc.sample_spacing) ||
       desc.sample_spacing <= 0 ||
       !GetSampleCount(desc.tile_quads, &sample_count) ||
-      !::isfinite(desc.tile_quads * desc.sample_spacing) ||
+      !isfinite(desc.tile_quads * desc.sample_spacing) ||
       layer_count == 0 || layer_count > kMaximumLayers ||
       tile_count > kMaximumTiles ||
       static_cast<u64>(tile_count) * sample_count > kMaximumTotalSamples) {
@@ -432,8 +432,8 @@ bool LoadTerrain(const base::String &file_path, Terrain *terrain,
       SetError(error, "terrain tile header is truncated");
       return false;
     }
-    if ((has_previous && !KeyLess(previous, key)) || !::isfinite(minimum) ||
-        !::isfinite(range) || range < 0 || !::isfinite(minimum + range) ||
+    if ((has_previous && !KeyLess(previous, key)) || !isfinite(minimum) ||
+        !isfinite(range) || range < 0 || !isfinite(minimum + range) ||
         stored_samples != sample_count ||
         stored_weight_bytes != sample_count * 4 ||
         reader.remaining() < static_cast<size_t>(sample_count) * 6) {
@@ -451,7 +451,7 @@ bool LoadTerrain(const base::String &file_path, Terrain *terrain,
         return false;
       }
       height = minimum + range * (static_cast<f32>(quantized) / 65535.0f);
-      if (!::isfinite(height)) {
+      if (!isfinite(height)) {
         SetError(error, "terrain height data is not finite");
         return false;
       }

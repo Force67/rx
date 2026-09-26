@@ -23,7 +23,7 @@ int Fail(const char* what) {
 }
 
 bool IsFinite(const Vec3& p) {
-  return ::isfinite(p.x) && ::isfinite(p.y) && ::isfinite(p.z);
+  return isfinite(p.x) && isfinite(p.y) && isfinite(p.z);
 }
 
 struct Mesh {
@@ -74,7 +74,7 @@ Mesh MakeSkirt(u32 segments, u32 rings) {
       const f32 angle = 6.28318530718f * static_cast<f32>(segment) /
                         static_cast<f32>(segments);
       mesh.positions.push_back(
-          {radius * ::cos(angle), -0.7f * t, radius * ::sin(angle)});
+          {radius * ::cosf(angle), -0.7f * t, radius * ::sinf(angle)});
     }
   }
   for (u32 ring = 0; ring + 1 < rings; ++ring) {
@@ -234,7 +234,7 @@ int TestSkirt(physics::PhysicsWorld& world) {
   for (u32 ring = 1; ring < kRings; ++ring) {
     for (u32 segment = 0; segment < kSegments; ++segment) {
       const Vec3 p = positions[ring * kSegments + segment] - Vec3{1.4f, 0, 0};
-      if (::sqrt(p.x * p.x + p.z * p.z) < 0.27f) {
+      if (::sqrtf(p.x * p.x + p.z * p.z) < 0.27f) {
         return Fail("skirt penetrated character capsule");
       }
     }
@@ -403,7 +403,7 @@ int TestSelfCollision(physics::PhysicsWorld& world) {
     lower += positions[i].z;
     upper += positions[i + 3].z;
   }
-  if (::abs(upper - lower) / 3.0f < 0.025f) {
+  if (::fabsf(upper - lower) / 3.0f < 0.025f) {
     return Fail("self-collision did not separate overlapping panels");
   }
   world.RemoveCloth(cloth);

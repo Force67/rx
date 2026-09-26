@@ -54,11 +54,11 @@ void Check(bool condition, const char *message) {
 
 bool IdentityTransform(const asset::ImportedScene::Instance &instance) {
   return Length(instance.position) < 1e-7f &&
-         ::fabs(instance.rotation[0]) < 1e-7f &&
-         ::fabs(instance.rotation[1]) < 1e-7f &&
-         ::fabs(instance.rotation[2]) < 1e-7f &&
-         ::fabs(instance.rotation[3] - 1.0f) < 1e-7f &&
-         ::fabs(instance.scale - 1.0f) < 1e-7f;
+         ::fabsf(instance.rotation[0]) < 1e-7f &&
+         ::fabsf(instance.rotation[1]) < 1e-7f &&
+         ::fabsf(instance.rotation[2]) < 1e-7f &&
+         ::fabsf(instance.rotation[3] - 1.0f) < 1e-7f &&
+         ::fabsf(instance.scale - 1.0f) < 1e-7f;
 }
 
 } // namespace

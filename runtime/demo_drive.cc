@@ -154,31 +154,31 @@ u8 RegionAt(f32 x, f32 z) {
   // Runway: a long asphalt strip on the -X side.
   if (x >= -74.0f && x <= -50.0f && z >= -152.0f && z <= 152.0f) return kAsphalt;
   // Road loop centred on the origin (a square ring band).
-  const f32 m = rx::Max(::fabs(x), ::fabs(z));
+  const f32 m = rx::Max(::fabsf(x), ::fabsf(z));
   if (m >= 40.0f && m <= 57.0f) {
-    if (x >= 40.0f && x <= 57.0f && ::fabs(z) <= 9.0f) return kIce;  // ice on the east straight
+    if (x >= 40.0f && x <= 57.0f && ::fabsf(z) <= 9.0f) return kIce;  // ice on the east straight
     return kAsphalt;
   }
   // Dirt field just inside the loop's north-west.
   if (x >= -46.0f && x <= -12.0f && z >= 40.0f && z <= 84.0f) return kDirt;
   // Sand beach ringing the lake.
-  const f32 ld = ::sqrt((x - kLakeCx) * (x - kLakeCx) + (z - kLakeCz) * (z - kLakeCz));
+  const f32 ld = ::sqrtf((x - kLakeCx) * (x - kLakeCx) + (z - kLakeCz) * (z - kLakeCz));
   if (ld >= 66.0f && ld <= 92.0f) return kSand;
   return kGrass;
 }
 
 f32 HeightAt(f32 x, f32 z) {
-  f32 h = 1.8f * ::sin(x * 0.017f) * ::cos(z * 0.019f) +
-          1.1f * ::sin((x + z) * 0.011f + 0.6f);
+  f32 h = 1.8f * ::sinf(x * 0.017f) * ::cosf(z * 0.019f) +
+          1.1f * ::sinf((x + z) * 0.011f + 0.6f);
   // Lake basin: dip below the water surface toward the centre.
-  const f32 ld = ::sqrt((x - kLakeCx) * (x - kLakeCx) + (z - kLakeCz) * (z - kLakeCz));
+  const f32 ld = ::sqrtf((x - kLakeCx) * (x - kLakeCx) + (z - kLakeCz) * (z - kLakeCz));
   if (ld < 104.0f) {
     const f32 t = SmoothStep((104.0f - ld) / (104.0f - 40.0f));
     h = h + (-6.0f - h) * t;
   }
   // Flatten the road loop and the runway so the wheeled vehicles roll on level
   // ground and the plane has a real runway.
-  const f32 m = rx::Max(::fabs(x), ::fabs(z));
+  const f32 m = rx::Max(::fabsf(x), ::fabsf(z));
   const f32 road_w = Feather(m, 40.0f, 57.0f, 3.0f);
   h = h + (0.0f - h) * road_w;
   const f32 rw = Feather(x, -74.0f, -50.0f, 3.0f) * Feather(z, -152.0f, 152.0f, 4.0f);
@@ -273,7 +273,7 @@ asset::Mesh FinishMesh(MeshBuild& mb, const char* id, asset::AssetId material) {
   lod.submeshes.push_back({0, static_cast<u32>(mb.i.size()), material});
   f32 r = 0;
   for (const asset::Vertex& vert : mb.v)
-    r = rx::Max(r, ::sqrt(vert.position[0] * vert.position[0] +
+    r = rx::Max(r, ::sqrtf(vert.position[0] * vert.position[0] +
                               vert.position[1] * vert.position[1] +
                               vert.position[2] * vert.position[2]));
   mesh.bounds_radius = r;
@@ -540,7 +540,7 @@ void DriveDemo::BuildWater() {
   // the car's tires never read the dry world as submerged.
   ctx_.physics->set_water_height([](const Vec3& p, f32* height, Vec3* flow) {
     const f32 d =
-        ::sqrt((p.x - kLakeCx) * (p.x - kLakeCx) + (p.z - kLakeCz) * (p.z - kLakeCz));
+        ::sqrtf((p.x - kLakeCx) * (p.x - kLakeCx) + (p.z - kLakeCz) * (p.z - kLakeCz));
     if (d > kLakeWaterRadius) return false;
     *height = kLakeY;
     if (flow) *flow = {};
@@ -561,13 +561,13 @@ void DriveDemo::BuildWheelMesh() {
     const f32 a = t * 2.0f * kPi;
     for (int k = 0; k < 2; ++k) {
       asset::Vertex v{};
-      v.position[0] = ::cos(a);
+      v.position[0] = ::cosf(a);
       v.position[1] = k ? 0.5f : -0.5f;
-      v.position[2] = ::sin(a);
-      v.normal[0] = ::cos(a);
-      v.normal[2] = ::sin(a);
-      v.tangent[0] = -::sin(a);
-      v.tangent[2] = ::cos(a);
+      v.position[2] = ::sinf(a);
+      v.normal[0] = ::cosf(a);
+      v.normal[2] = ::sinf(a);
+      v.tangent[0] = -::sinf(a);
+      v.tangent[2] = ::cosf(a);
       v.tangent[3] = 1;
       v.uv[0] = t * 4.0f;
       v.uv[1] = k ? 1.0f : 0.0f;
@@ -601,8 +601,8 @@ void DriveDemo::BuildBoatHull() {
     const f32 ws = width_scale(z);
     for (u32 pj = 0; pj <= kPr; ++pj) {
       const f32 th = kPi * static_cast<f32>(pj) / kPr;
-      const f32 x = -kHB * ws * ::cos(th);
-      const f32 y = kDeck - (kDeck - kKeel) * ::pow(::sin(th), 0.62f);
+      const f32 x = -kHB * ws * ::cosf(th);
+      const f32 y = kDeck - (kDeck - kKeel) * ::powf(::sinf(th), 0.62f);
       hb.Add({x, y, z}, static_cast<f32>(pj) / kPr, z / 4.0f);
     }
   }
@@ -899,7 +899,7 @@ void DriveDemo::SetCarProfile(u32 index) {
     f32 rot[4];
     if (ctx_.physics->GetVehicleTransform(car_, &pos, rot)) {
       const Vec3 fwd = Rotate(Quat{rot[0], rot[1], rot[2], rot[3]}, Vec3{0, 0, 1});
-      yaw = ::atan2(fwd.x, fwd.z);
+      yaw = ::atan2f(fwd.x, fwd.z);
     }
     ctx_.physics->RemoveVehicle(car_);
   }
@@ -926,7 +926,7 @@ void DriveDemo::SetBoatProfile(u32 index) {
     const physics::BoatState& s = boat_->state();
     const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
     pos = {s.position.x, boat_spawn_.y, s.position.z};
-    yaw = ::atan2(fwd.x, fwd.z);
+    yaw = ::atan2f(fwd.x, fwd.z);
     ctx_.physics->RemoveBody(boat_->body());  // Boat has no dtor cleanup
   }
   boat_ = base::MakeUnique<physics::Boat>(*ctx_.physics, boat_desc_, pos, yaw);
@@ -1070,14 +1070,14 @@ void DriveDemo::Update(f32 dt, const InputState& input, const ActionState& actio
     if (ctx_.physics->GetVehicleState(car_, &vs)) {
       st.rpm = vs.rpm;
       st.load = vs.engine_load;
-      st.speed_mps = ::fabs(vs.forward_speed);
+      st.speed_mps = ::fabsf(vs.forward_speed);
       st.gear = vs.gear;
       st.is_shifting = vs.is_shifting;
       st.wheel_count = vs.wheel_count;
       for (u32 i = 0; i < vs.wheel_count && i < 4; ++i)
         st.wheel_slip[i] = vs.wheels[i].longitudinal_slip;
     }
-    st.throttle = ::fabs(car_throttle_);
+    st.throttle = ::fabsf(car_throttle_);
     st.slip = CarMaxSlip();
     st.position = p;
     car_audio_->Update(st);
@@ -1148,7 +1148,7 @@ void DriveDemo::UpdateChaseCamera(f32 dt, const InputState& input, const ActionS
       cam_target_ = desired_target;
       cam_init_ = true;
     } else {
-      const f32 a = 1.0f - ::exp(-dt / 0.2f);
+      const f32 a = 1.0f - ::expf(-dt / 0.2f);
       cam_eye_ = Lerp(cam_eye_, desired_eye, a);
       cam_target_ = Lerp(cam_target_, desired_target, a);
     }
@@ -1163,7 +1163,7 @@ void DriveDemo::UpdateChaseCamera(f32 dt, const InputState& input, const ActionS
     cam_target_ = desired_target;
     cam_init_ = true;
   } else {
-    const f32 a = 1.0f - ::exp(-dt / 0.14f);
+    const f32 a = 1.0f - ::expf(-dt / 0.14f);
     cam_eye_ = Lerp(cam_eye_, desired_eye, a);
     cam_target_ = Lerp(cam_target_, desired_target, a);
   }
@@ -1314,7 +1314,7 @@ void DriveDemo::DrawPanel() {
                   static_cast<int>(car_desc_.mass));
       physics::PhysicsWorld::VehicleState vs;
       if (ctx_.physics->GetVehicleState(car_, &vs)) {
-        const f32 kmh = ::fabs(vs.forward_speed) * 3.6f;
+        const f32 kmh = ::fabsf(vs.forward_speed) * 3.6f;
         const char* gear = vs.gear < 0 ? "R" : (vs.gear == 0 ? "N" : nullptr);
         if (gear)
           ImGui::Text("speed %.0f km/h   gear %s   rpm %.0f", kmh, gear, vs.rpm);
@@ -1360,7 +1360,7 @@ void DriveDemo::DrawPanel() {
       ImGui::Text("altitude %.1f m   line %.1f m", ks.altitude_m, ks.line_length_m);
       ImGui::Text("tension %.0f N   %s", ks.tension_n, ks.taut ? "taut" : "slack");
       ImGui::Text("airspeed %.1f m/s   alpha %.0f deg", ks.airspeed_mps, ks.alpha_deg);
-      ImGui::Text("wind %.1f m/s", ::sqrt(w.x * w.x + w.y * w.y + w.z * w.z));
+      ImGui::Text("wind %.1f m/s", ::sqrtf(w.x * w.x + w.y * w.y + w.z * w.z));
       ImGui::TextDisabled("A/D steer   W/S reel out/in");
     }
   }

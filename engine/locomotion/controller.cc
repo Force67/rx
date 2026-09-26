@@ -30,7 +30,7 @@ namespace {
 
 // Angle (rad) between two directions, both assumed roughly unit-length.
 f32 AngleBetween(const Vec3& a, const Vec3& b) {
-  return ::acos(Clampf(Dot(a, b), -1.0f, 1.0f));
+  return ::acosf(Clampf(Dot(a, b), -1.0f, 1.0f));
 }
 
 }  // namespace
@@ -69,7 +69,7 @@ void LocomotionController::ApplyJointDrive(RigJoint j, f32 torque) {
   // SetJointDrive walks Jolt constraint settings, so re-issue it only when the
   // effective torque budget moved > 1%.
   const f32 ref = applied_torque_[idx] > 1e-3f ? applied_torque_[idx] : 1.0f;
-  if (::fabs(torque - applied_torque_[idx]) > 0.01f * ref) {
+  if (::fabsf(torque - applied_torque_[idx]) > 0.01f * ref) {
     rig_.SetJointDrive(*physics_, j, params_.joint_frequency, params_.joint_damping, torque);
     applied_torque_[idx] = torque;
   }
@@ -175,7 +175,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   if (FiniteV(requested_facing) && Length(requested_facing) > 1e-4f) {
     requested_facing = Normalize(requested_facing);
     const f32 turn_error =
-        ::atan2(Cross(controlled_facing_, requested_facing).y,
+        ::atan2f(Cross(controlled_facing_, requested_facing).y,
                    Clampf(Dot(controlled_facing_, requested_facing), -1.0f, 1.0f));
     const f32 turn_rate = FiniteScalar(params_.max_turn_rate) ? rx::Max(params_.max_turn_rate, 0.0f)
                                                               : 0.0f;
@@ -222,7 +222,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   // a lead of ~desired_velocity/omega ahead of the support (that IS forward
   // locomotion, not a fall); subtracting that lead keeps `margin` near zero while
   // walking and only grows on genuine, uncommanded imbalance.
-  const f32 omega = ::sqrt(m.gravity / com_height);
+  const f32 omega = ::sqrtf(m.gravity / com_height);
   const Vec3 expected_lead = Planar(resolved_intent.desired_velocity) * (1.0f / omega);
   const f32 margin =
       PlanarLength(Planar(cp) - Planar(contacts_.support_center) - expected_lead);

@@ -207,10 +207,10 @@ base::Vector<u8> MakeAlbedo(u32 size) {
       const f32 v = static_cast<f32>(y) / static_cast<f32>(size);
       const f32 grain = static_cast<f32>(Rand(state) % 32) - 16.0f;
       u8* p = image.data() + (static_cast<size_t>(y) * size + x) * 4;
-      p[0] = static_cast<u8>(::fmin(255.0f, ::fmax(0.0f, 180.0f * u + 40.0f + grain)));
-      p[1] = static_cast<u8>(::fmin(255.0f, ::fmax(0.0f, 140.0f * v + 60.0f + grain)));
+      p[0] = static_cast<u8>(::fminf(255.0f, ::fmaxf(0.0f, 180.0f * u + 40.0f + grain)));
+      p[1] = static_cast<u8>(::fminf(255.0f, ::fmaxf(0.0f, 140.0f * v + 60.0f + grain)));
       p[2] = static_cast<u8>(
-          ::fmin(255.0f, ::fmax(0.0f, 90.0f * (u + v) * 0.5f + 30.0f + grain)));
+          ::fminf(255.0f, ::fmaxf(0.0f, 90.0f * (u + v) * 0.5f + 30.0f + grain)));
       p[3] = 255;
     }
   }
@@ -229,9 +229,9 @@ base::Vector<u8> MakeNormalMap(u32 size) {
       // angle. Roughly the spatial frequency a 1k tiling material carries.
       const f32 u = static_cast<f32>(x) * 0.09f;
       const f32 v = static_cast<f32>(y) * 0.07f;
-      f32 n[3] = {-(0.55f * ::cos(u) + 0.2f * ::cos(u * 3.1f + v)),
-                  -(0.55f * ::sin(v) + 0.2f * ::sin(u * 2.3f)), 1.0f};
-      const f32 len = ::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      f32 n[3] = {-(0.55f * ::cosf(u) + 0.2f * ::cosf(u * 3.1f + v)),
+                  -(0.55f * ::sinf(v) + 0.2f * ::sinf(u * 2.3f)), 1.0f};
+      const f32 len = ::sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
       u8* p = image.data() + (static_cast<size_t>(y) * size + x) * 4;
       for (u32 c = 0; c < 3; ++c) {
         p[c] = static_cast<u8>((n[c] / len) * 127.5f + 127.5f);
@@ -307,16 +307,16 @@ void TestBc5Normal() {
     auto decode = [](const u8* p, f32* n) {
       n[0] = static_cast<f32>(p[0]) / 127.5f - 1.0f;
       n[1] = static_cast<f32>(p[1]) / 127.5f - 1.0f;
-      n[2] = ::sqrt(::fmax(0.0f, 1.0f - n[0] * n[0] - n[1] * n[1]));
-      const f32 len = ::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      n[2] = ::sqrtf(::fmaxf(0.0f, 1.0f - n[0] * n[0] - n[1] * n[1]));
+      const f32 len = ::sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
       for (u32 c = 0; c < 3; ++c) n[c] /= len;
     };
     f32 a[3];
     f32 b[3];
     decode(source.data() + t * 4, a);
     decode(decoded.data() + t * 4, b);
-    const f32 dot = ::fmin(1.0f, ::fmax(-1.0f, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
-    const f64 degrees = ::acos(dot) * 57.2957795;
+    const f32 dot = ::fminf(1.0f, ::fmaxf(-1.0f, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
+    const f64 degrees = ::acosf(dot) * 57.2957795;
     worst_degrees = ::fmax(worst_degrees, degrees);
     mean_degrees += degrees;
     ++samples;

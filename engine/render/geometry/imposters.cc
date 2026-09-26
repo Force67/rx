@@ -50,7 +50,7 @@ Vec3 HemiOctDecode(f32 u, f32 v) {
   Vec3 d;
   d.x = (ex - ey) * 0.5f;
   d.z = (ex + ey) * 0.5f;
-  d.y = 1.0f - ::abs(d.x) - ::abs(d.z);
+  d.y = 1.0f - ::fabsf(d.x) - ::fabsf(d.z);
   return Normalize(d);
 }
 
@@ -163,7 +163,7 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
   }
   Vec3 center = (lo + hi) * 0.5f;
   Vec3 ext = (hi - lo) * 0.5f;
-  const f32 radius = ::sqrt(ext.x * ext.x + ext.y * ext.y + ext.z * ext.z);
+  const f32 radius = ::sqrtf(ext.x * ext.x + ext.y * ext.y + ext.z * ext.z);
 
   if (first) {
     albedo_atlas_ = device.CreateImage2D(
@@ -219,7 +219,7 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
     for (u32 j = 0; j < kGrid; ++j) {
       for (u32 i = 0; i < kGrid; ++i) {
         Vec3 dir = HemiOctDecode((i + 0.5f) / kGrid, (j + 0.5f) / kGrid);
-        Vec3 up = ::abs(dir.y) > 0.98f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
+        Vec3 up = ::fabsf(dir.y) > 0.98f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
         Mat4 view = LookAt(center + dir * (radius * 2.0f), center, up);
         Mat4 proj = Orthographic(-radius, radius, -radius, radius, 0.1f, radius * 4.0f);
         const f32 x = static_cast<f32>(tile_x + i * kCell);

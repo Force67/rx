@@ -76,7 +76,7 @@ bool UvIs(const asset::Mesh &mesh, u32 vertex, f32 u, f32 v) {
   if (mesh.lods.empty() || mesh.lods[0].vertices.size() <= vertex)
     return false;
   const asset::Vertex &out = mesh.lods[0].vertices[vertex];
-  return ::fabs(out.uv[0] - u) < 1e-5f && ::fabs(out.uv[1] - v) < 1e-5f;
+  return ::fabsf(out.uv[0] - u) < 1e-5f && ::fabsf(out.uv[1] - v) < 1e-5f;
 }
 
 } // namespace

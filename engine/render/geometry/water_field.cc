@@ -175,8 +175,8 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
     prev_origin[r][0] = origin_[r][0];
     prev_origin[r][1] = origin_[r][1];
     texel_world[r] = 2.0f * kRingHalfExtent[r] / static_cast<f32>(kSize);
-    origin_[r][0] = ::round(params.camera_pos.x / texel_world[r]) * texel_world[r];
-    origin_[r][1] = ::round(params.camera_pos.z / texel_world[r]) * texel_world[r];
+    origin_[r][0] = ::roundf(params.camera_pos.x / texel_world[r]) * texel_world[r];
+    origin_[r][1] = ::roundf(params.camera_pos.z / texel_world[r]) * texel_world[r];
     if (!centered_) {  // first frame: no history, resample lands out of bounds
       prev_origin[r][0] = origin_[r][0] + 1e6f;
       prev_origin[r][1] = origin_[r][1] + 1e6f;
@@ -231,7 +231,7 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
         ctx.cmd->BindPipeline(pipeline_);
 
-        f32 inv = kDriftSpeed / ::sqrt(kDriftDirX * kDriftDirX + kDriftDirZ * kDriftDirZ);
+        f32 inv = kDriftSpeed / ::sqrtf(kDriftDirX * kDriftDirX + kDriftDirZ * kDriftDirZ);
         f32 drift_x = kDriftDirX * inv;
         f32 drift_z = kDriftDirZ * inv;
         // Depth for slot 4: the real prepass depth when available, else the ring

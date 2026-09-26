@@ -26,8 +26,8 @@ bool DynamicResolution::Update(f32 gpu_ms) {
     if (++over_ < kDownFrames) return false;
     // Cost is ~quadratic in the per-axis scale: jump to the step predicted to
     // land just under the target instead of walking down one step per cycle.
-    f32 fit = scale_ * ::sqrt(target * 0.95f / ema_ms_);
-    f32 next = ::floor(fit / kStep) * kStep;
+    f32 fit = scale_ * ::sqrtf(target * 0.95f / ema_ms_);
+    f32 next = ::floorf(fit / kStep) * kStep;
     return Apply(rx::Clamp(next, min_scale, scale_ - kStep));
   }
 
@@ -47,8 +47,8 @@ bool DynamicResolution::Update(f32 gpu_ms) {
 }
 
 bool DynamicResolution::Apply(f32 next) {
-  next = ::round(next / kStep) * kStep;  // stay on the grid, no float drift
-  if (::abs(next - scale_) < 1e-4f) {
+  next = ::roundf(next / kStep) * kStep;  // stay on the grid, no float drift
+  if (::fabsf(next - scale_) < 1e-4f) {
     over_ = under_ = 0;
     return false;
   }

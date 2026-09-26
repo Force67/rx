@@ -82,7 +82,7 @@ class TestDevice final : public Device {
   size_t data_uploads_ = 0;
 };
 
-bool Near(f32 a, f32 b) { return ::abs(a - b) < 1e-5f; }
+bool Near(f32 a, f32 b) { return ::fabsf(a - b) < 1e-5f; }
 
 f32 TranslationX(const GpuBuffer& buffer, size_t index = 0) {
   return static_cast<const Mat4*>(buffer.mapped)[index].m[12];

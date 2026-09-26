@@ -61,18 +61,18 @@ int Fail(const char* what) {
 }
 
 bool IsFinite(const Vec3& v) {
-  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
+  return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
 }
 
 // audio buffer helpers (mirror vehicle_audio_test)
 bool AllFinite(const base::Vector<f32>& b) {
   for (f32 v : b)
-    if (!::isfinite(v)) return false;
+    if (!isfinite(v)) return false;
   return true;
 }
 f32 MaxAbs(const base::Vector<f32>& b) {
   f32 m = 0.0f;
-  for (f32 v : b) m = rx::Max(m, ::fabs(v));
+  for (f32 v : b) m = rx::Max(m, ::fabsf(v));
   return m;
 }
 // RMS over the half-open sample window [lo, hi).
@@ -181,7 +181,7 @@ int main() {
 
     // (a) Car: idle briefly, then full throttle with a mild weave.
     const f32 car_throttle = frame < kIdleEnd ? 0.0f : 1.0f;
-    const f32 car_steer = frame < kIdleEnd ? 0.0f : 0.25f * ::sin(frame * 0.02f);
+    const f32 car_steer = frame < kIdleEnd ? 0.0f : 0.25f * ::sinf(frame * 0.02f);
     world.DriveVehicle(car, car_throttle, car_steer, 0.0f, 0.0f);
 
     // (b) Boat: straight-ahead throttle across the chop.
@@ -222,12 +222,12 @@ int main() {
     if (!ast.on_ground) plane_peak_climb = rx::Max(plane_peak_climb, ast.vertical_speed_mps);
 
     // Per-frame NaN gate: three simulators must never poison the shared world.
-    if (!::isfinite(car_speed) || !::isfinite(cst.rpm)) return Fail("(a) car NaN in telemetry");
-    if (!IsFinite(bst.position) || !::isfinite(bst.rpm) || !::isfinite(bst.forward_speed) ||
-        !::isfinite(bst.rotation.w))
+    if (!isfinite(car_speed) || !isfinite(cst.rpm)) return Fail("(a) car NaN in telemetry");
+    if (!IsFinite(bst.position) || !isfinite(bst.rpm) || !isfinite(bst.forward_speed) ||
+        !isfinite(bst.rotation.w))
       return Fail("(b) boat NaN in telemetry");
-    if (!IsFinite(ast.position) || !::isfinite(ast.airspeed_mps) ||
-        !::isfinite(ast.vertical_speed_mps) || !::isfinite(ast.rotation.w))
+    if (!IsFinite(ast.position) || !isfinite(ast.airspeed_mps) ||
+        !isfinite(ast.vertical_speed_mps) || !isfinite(ast.rotation.w))
       return Fail("(c) aircraft NaN in telemetry");
 
     // (d) Telemetry -> SynthParams -> one rendered block per vehicle.
@@ -235,7 +235,7 @@ int main() {
     cp.rpm = cst.rpm;
     cp.load = cst.engine_load;
     cp.throttle = car_throttle;
-    cp.speed_mps = ::fabs(car_speed);
+    cp.speed_mps = ::fabsf(car_speed);
     cp.slip = car_slip;
     car_synth.Render(&car_audio[static_cast<size_t>(frame) * kBlock], kBlock, cp);
 
@@ -260,7 +260,7 @@ int main() {
     f32 rot[4];
     world.GetVehicleTransform(car, &pos, rot);
     const f32 dx = pos.x - car_start.x, dz = pos.z - car_start.z;
-    const f32 travelled = ::sqrt(dx * dx + dz * dz);
+    const f32 travelled = ::sqrtf(dx * dx + dz * dz);
     ::fprintf(stderr, "(a) car: travelled=%.1f m max_speed=%.1f m/s max_gear=%d\n", travelled,
                  car_max_speed, car_max_gear);
     if (travelled < 20.0f) return Fail("(a) car did not drive");
@@ -316,7 +316,7 @@ int main() {
     for (u32 w = 0; w < cst.wheel_count; ++w) car_grounded |= cst.wheels[w].contact;
     if (!IsFinite(cpos)) return Fail("(e) car position NaN");
     if (!car_grounded) return Fail("(e) car left the ground");
-    if (::fabs(cpos.y) > 5.0f) return Fail("(e) car position drifted off the surface");
+    if (::fabsf(cpos.y) > 5.0f) return Fail("(e) car position drifted off the surface");
 
     if (!IsFinite(bfin.position)) return Fail("(e) boat position NaN");
     if (boat_max_wetted <= 0.0f) return Fail("(e) boat never touched the water");

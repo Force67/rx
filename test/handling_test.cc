@@ -65,12 +65,12 @@ VehicleId SpawnSettled(PhysicsWorld& world, const Desc& d) {
 
 f32 Heading(const f32 q[4]) {
   const Vec3 f = Rotate(Quat{q[0], q[1], q[2], q[3]}, Vec3{0, 0, 1});
-  return ::atan2(f.x, f.z);
+  return ::atan2f(f.x, f.z);
 }
 
 f32 RollAngle(const f32 q[4]) {
   const Vec3 right = Rotate(Quat{q[0], q[1], q[2], q[3]}, Vec3{1, 0, 0});
-  return ::asin(rx::Clamp(right.y, -1.0f, 1.0f));
+  return ::asinf(rx::Clamp(right.y, -1.0f, 1.0f));
 }
 
 f32 WrapPi(f32 a) {
@@ -115,10 +115,10 @@ f32 BrakeDistance(const Desc& d, f32 entry) {
     world.DriveVehicle(id, 0.0f, 0.0f, 1.0f, 0.0f);
     world.Update(kDt);
     world.GetVehicleTransform(id, &last, rot);
-    if (::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
+    if (::fabsf(world.VehicleForwardSpeed(id)) < 0.5f) break;
   }
   const f32 dx = last.x - start.x, dz = last.z - start.z;
-  return ::sqrt(dx * dx + dz * dz);
+  return ::sqrtf(dx * dx + dz * dz);
 }
 
 struct SteerResult {
@@ -152,11 +152,11 @@ SteerResult StepSteer(const Desc& d, f32 entry) {
     world.DriveVehicle(id, 0.35f, 0.30f, 0.0f, 0.0f);
     world.Update(kDt);
     world.GetVehicleTransform(id, &pos, rot);
-    r.peak_roll_deg = rx::Max(r.peak_roll_deg, ::fabs(RollAngle(rot)) * 57.2958f);
-    min_speed = rx::Min(min_speed, ::fabs(world.VehicleForwardSpeed(id)));
+    r.peak_roll_deg = rx::Max(r.peak_roll_deg, ::fabsf(RollAngle(rot)) * 57.2958f);
+    min_speed = rx::Min(min_speed, ::fabsf(world.VehicleForwardSpeed(id)));
   }
   world.GetVehicleTransform(id, &pos, rot);
-  r.heading_change_deg = ::fabs(WrapPi(Heading(rot) - start_heading)) * 57.2958f;
+  r.heading_change_deg = ::fabsf(WrapPi(Heading(rot) - start_heading)) * 57.2958f;
   r.speed_lost_mps = entry_speed - min_speed;
   return r;
 }
@@ -189,8 +189,8 @@ SlipResult CornerSlip(const Desc& d) {
     if (i < 40) continue;  // let the corner develop
     PhysicsWorld::VehicleState st;
     if (!world.GetVehicleState(id, &st)) continue;
-    const f32 f = 0.5f * (::fabs(st.wheels[0].lateral_slip) + ::fabs(st.wheels[1].lateral_slip));
-    const f32 rr = 0.5f * (::fabs(st.wheels[2].lateral_slip) + ::fabs(st.wheels[3].lateral_slip));
+    const f32 f = 0.5f * (::fabsf(st.wheels[0].lateral_slip) + ::fabsf(st.wheels[1].lateral_slip));
+    const f32 rr = 0.5f * (::fabsf(st.wheels[2].lateral_slip) + ::fabsf(st.wheels[3].lateral_slip));
     r.front = rx::Max(r.front, f);
     r.rear = rx::Max(r.rear, rr);
   }
@@ -222,15 +222,15 @@ f32 LateralAccel(const Desc& d, f32 target) {
     world.Update(kDt);
     world.GetVehicleTransform(id, &pos, rot);
     const f32 h = Heading(rot);
-    const f32 yaw_rate = ::fabs(WrapPi(h - prev_heading)) / kDt;
+    const f32 yaw_rate = ::fabsf(WrapPi(h - prev_heading)) / kDt;
     prev_heading = h;
     if (i < 8) continue;  // skip the initial transient
-    peak = rx::Max(peak, ::fabs(world.VehicleForwardSpeed(id)) * yaw_rate);
+    peak = rx::Max(peak, ::fabsf(world.VehicleForwardSpeed(id)) * yaw_rate);
   }
   return peak;
 }
 
-bool Finite(const Vec3& v) { return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z); }
+bool Finite(const Vec3& v) { return isfinite(v.x) && isfinite(v.y) && isfinite(v.z); }
 
 }  // namespace
 
@@ -379,7 +379,7 @@ int main() {
       Vec3 pos{};
       f32 rot[4];
       world.GetVehicleTransform(id, &pos, rot);
-      const f32 rest_speed = ::fabs(world.VehicleForwardSpeed(id));
+      const f32 rest_speed = ::fabsf(world.VehicleForwardSpeed(id));
       Check(Finite(pos), "(g) profile position went non-finite");
       Check(rest_speed < 0.5f, "(g) profile did not settle at rest");
       // Drive full throttle 2 s; must move and stay finite.
@@ -388,7 +388,7 @@ int main() {
         world.Update(kDt);
       }
       world.GetVehicleTransform(id, &pos, rot);
-      Check(Finite(pos) && ::isfinite(world.VehicleForwardSpeed(id)),
+      Check(Finite(pos) && isfinite(world.VehicleForwardSpeed(id)),
             "(g) profile went non-finite under throttle");
       Check(world.VehicleForwardSpeed(id) > 1.0f, "(g) profile did not accelerate");
       ::fprintf(stderr, "(g) %s: rest_speed=%.3f moved_to=%.1f m/s (finite)\n", it.name,
@@ -416,9 +416,9 @@ int main() {
         world.DriveVehicle(id, 0.0f, 0.0f, 1.0f, 0.0f);
         world.Update(kDt);
         world.GetVehicleTransform(id, &b, r);
-        if (::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
+        if (::fabsf(world.VehicleForwardSpeed(id)) < 0.5f) break;
       }
-      ice = ::sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
+      ice = ::sqrtf((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
     }
     {
       PhysicsWorld world;
@@ -439,9 +439,9 @@ int main() {
         world.DriveVehicle(id, 0.0f, 0.0f, 1.0f, 0.0f);
         world.Update(kDt);
         world.GetVehicleTransform(id, &b, r);
-        if (::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
+        if (::fabsf(world.VehicleForwardSpeed(id)) < 0.5f) break;
       }
-      wet = ::sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
+      wet = ::sqrtf((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
     }
     ::fprintf(stderr, "(g) sports 80-0: dry=%.1fm ice=%.1fm wet=%.1fm\n", dry, ice, wet);
     Check(ice > dry * 2.0f, "(g) ice not much longer than asphalt");

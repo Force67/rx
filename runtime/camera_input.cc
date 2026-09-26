@@ -54,8 +54,8 @@ void Viewer::UpdateCamera(f32 frame_delta) {
 void Viewer::LookCameraAt(const Vec3& eye, const Vec3& center) {
   camera_.set_position(eye);
   Vec3 d = Normalize(center - eye);
-  camera_.set_yaw_pitch(::atan2(d.x, -d.z),
-                        ::asin(rx::Clamp(d.y, -1.0f, 1.0f)));  // forward() convention
+  camera_.set_yaw_pitch(::atan2f(d.x, -d.z),
+                        ::asinf(rx::Clamp(d.y, -1.0f, 1.0f)));  // forward() convention
 }
 
 void Viewer::DriveCamera(f32 dt) {
@@ -152,7 +152,7 @@ void Viewer::DriveCamera(f32 dt) {
   } else if (cam_orbit_) {
     f32 a = cam_time_ * 0.4f;  // radians/sec
     Vec3 center{0.0f, 1.0f, 0.0f};
-    LookCameraAt({center.x + ::cos(a) * 6.0f, 2.4f, center.z + ::sin(a) * 6.0f}, center);
+    LookCameraAt({center.x + ::cosf(a) * 6.0f, 2.4f, center.z + ::sinf(a) * 6.0f}, center);
   } else if (!cam_replay_.empty()) {
     // Linear interpolation between the bracketing keys for the current time.
     const CamKey* lo = &cam_replay_[0];

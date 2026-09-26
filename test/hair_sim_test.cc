@@ -68,7 +68,7 @@ int CheckGroom(physics::PhysicsWorld& world, Groom& g, const Mat4& transform,
     return Fail("GetStrandGroomPositions");
   }
   for (u32 i = 0; i < count; ++i) {
-    if (!::isfinite(g.positions[i])) {
+    if (!isfinite(g.positions[i])) {
       ::fprintf(stderr, "  groom %s\n", name);
       return Fail("non-finite node position");
     }
@@ -173,8 +173,8 @@ int main() {
   Mat4 moving = rest_transform;
   for (int i = 1; i <= 240; ++i) {
     f32 a = static_cast<f32>(i) * dt * 3.0f;
-    moving = MakeTranslation({0.05f * ::sin(a), 1.6f + 0.03f * ::sin(a * 1.7f), 0}) *
-             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * ::sin(a)));
+    moving = MakeTranslation({0.05f * ::sinf(a), 1.6f + 0.03f * ::sinf(a * 1.7f), 0}) *
+             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * ::sinf(a)));
     world.SetStrandGroomTransform(braid.sim, moving, dt);
     world.SetStrandGroomTransform(ponytail.sim, moving, dt);
     world.Update(dt);

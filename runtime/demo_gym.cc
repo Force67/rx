@@ -65,7 +65,7 @@ asset::Texture MakeChecker(asset::AssetId id, u32 res, u32 cells, Rgb a, Rgb b, 
         c = Rgb{0xE0, 0x82, 0x28};
         const f32 fx = static_cast<f32>(x % cell_px) / static_cast<f32>(cell_px);
         const f32 fy = static_cast<f32>(y % cell_px) / static_cast<f32>(cell_px);
-        if (fx + ::fabs(fy - 0.5f) < 0.55f && fx > 0.15f) c = Rgb{0x18, 0x18, 0x18};
+        if (fx + ::fabsf(fy - 0.5f) < 0.55f && fx > 0.15f) c = Rgb{0x18, 0x18, 0x18};
       }
       u8* p = &tex.data[(y * res + x) * 4];
       p[0] = c.r;
@@ -123,9 +123,9 @@ void PushVert(MeshBuilder& b, const Vec3& p, const Vec3& n, const Vec3& tan, f32
 void AddBox(MeshBuilder& b, const Vec3& c, const Vec3& h, f32 uv_scale) {
   for (const Face& f : kFaces) {
     const u32 base = static_cast<u32>(b.lod().vertices.size());
-    const f32 hu = ::fabs(Dot(f.u, h));
-    const f32 hv = ::fabs(Dot(f.v, h));
-    const Vec3 fc = c + f.n * ::fabs(Dot(f.n, h));
+    const f32 hu = ::fabsf(Dot(f.u, h));
+    const f32 hv = ::fabsf(Dot(f.v, h));
+    const Vec3 fc = c + f.n * ::fabsf(Dot(f.n, h));
     const Vec3 corners[4] = {
         fc - f.u * hu - f.v * hv,
         fc + f.u * hu - f.v * hv,
@@ -142,9 +142,9 @@ void AddBox(MeshBuilder& b, const Vec3& c, const Vec3& h, f32 uv_scale) {
 void AddRotatedBox(MeshBuilder& b, const Vec3& c, const Vec3& h, const Quat& q, f32 uv_scale) {
   for (const Face& f : kFaces) {
     const u32 base = static_cast<u32>(b.lod().vertices.size());
-    const f32 hu = ::fabs(Dot(f.u, h));
-    const f32 hv = ::fabs(Dot(f.v, h));
-    const Vec3 fc_local = f.n * ::fabs(Dot(f.n, h));
+    const f32 hu = ::fabsf(Dot(f.u, h));
+    const f32 hv = ::fabsf(Dot(f.v, h));
+    const Vec3 fc_local = f.n * ::fabsf(Dot(f.n, h));
     const Vec3 local[4] = {
         fc_local - f.u * hu - f.v * hv,
         fc_local + f.u * hu - f.v * hv,
@@ -196,7 +196,7 @@ asset::Mesh MakeUnitCylinder(asset::AssetId id, u32 segments) {
   for (u32 i = 0; i <= segments; ++i) {
     const f32 t = static_cast<f32>(i) / segments;
     const f32 a = t * 2.0f * kPi;
-    const Vec3 n{::cos(a), 0, ::sin(a)};
+    const Vec3 n{::cosf(a), 0, ::sinf(a)};
     for (int k = 0; k < 2; ++k) {
       asset::Vertex v{};
       v.position[0] = n.x;
@@ -416,7 +416,7 @@ void GymDemo::BuildContent() {
     const f32 ang = deg * kPi / 180.0f;
     const f32 run = 3.0f, w = 1.4f, thick = 0.15f;
     const Quat q = QuatFromAxisAngle({1, 0, 0}, -ang);  // tilt up toward -Z
-    const Vec3 center{x, ::sin(ang) * run * 0.5f + 0.05f, z - ::cos(ang) * run * 0.5f};
+    const Vec3 center{x, ::sinf(ang) * run * 0.5f + 0.05f, z - ::cosf(ang) * run * 0.5f};
     AddRotatedBox(st, center, {w * 0.5f, thick * 0.5f, run * 0.5f}, q, 1.0f);
     physics::ShapeDesc box;
     box.kind = physics::ShapeDesc::Kind::kBox;
@@ -789,7 +789,7 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
     // Moving platform: ping-pong along X, driven kinematically so a standing body
     // could ride it (character platform-riding is not yet folded into the module).
     platform_time_ += fixed;
-    const f32 offset = ::sin(platform_time_ * 0.6f) * platform_span_;
+    const f32 offset = ::sinf(platform_time_ * 0.6f) * platform_span_;
     const Vec3 target{platform_center_.x + offset, platform_center_.y, platform_center_.z};
     const f32 identity_rot[4] = {0, 0, 0, 1};
     if (platform_body_) phys.MoveBodyKinematic(platform_body_, target, identity_rot, fixed);
@@ -915,7 +915,7 @@ void GymDemo::DrawPanel() {
     const bool tp = vm && vm->kind == character::CharacterViewKind::kThirdPerson;
     ImGui::Text("view: %s   stance: %s   %s", tp ? "third-person" : "first-person", stance,
                 state->grounded ? "grounded" : "airborne");
-    const f32 speed = ::sqrt(state->velocity.x * state->velocity.x +
+    const f32 speed = ::sqrtf(state->velocity.x * state->velocity.x +
                                 state->velocity.z * state->velocity.z);
     ImGui::Text("speed: %.2f m/s   eye: %.2f m   crouch: %.0f%%", speed, state->eye_height,
                 state->crouch_blend * 100.0f);

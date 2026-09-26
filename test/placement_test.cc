@@ -31,18 +31,18 @@ void Check(bool condition, const char* message) {
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-3f) {
-  if (::fabs(actual - expected) <= epsilon) return;
+  if (::fabsf(actual - expected) <= epsilon) return;
   ::fprintf(stderr, "placement_test: FAIL: %s (got %.4f, expected %.4f)\n", message,
                actual, expected);
   ++failures;
 }
 
 f32 ToroidalDistance(f32 ax, f32 ay, f32 bx, f32 by) {
-  f32 dx = ::fabs(ax - bx);
-  f32 dy = ::fabs(ay - by);
+  f32 dx = ::fabsf(ax - bx);
+  f32 dy = ::fabsf(ay - by);
   dx = rx::Min(dx, 1.0f - dx);
   dy = rx::Min(dy, 1.0f - dy);
-  return ::sqrt(dx * dx + dy * dy);
+  return ::sqrtf(dx * dx + dy * dy);
 }
 
 // The two pattern-generator rules: even threshold coverage at every prefix,
@@ -64,7 +64,7 @@ void TestPattern() {
                                        kPatternXY[j * 2], kPatternXY[j * 2 + 1]));
       }
     }
-    f32 ideal = ::sqrt(1.0f / static_cast<f32>(prefix));
+    f32 ideal = ::sqrtf(1.0f / static_cast<f32>(prefix));
     Check(min_dist >= 0.5f * ideal, "pattern prefix keeps half the ideal spacing");
   }
 
@@ -170,7 +170,7 @@ void TestDeterminismAndSpacing() {
   WorldData world(0.0f, 0.0f, 512.0f, 256);
   u32 height = world.AddMap("height");
   world.Generate(height, [](f32 x, f32 z) {
-    return 4.0f * ::sin(x * 0.02f) + 3.0f * ::cos(z * 0.015f);
+    return 4.0f * ::sinf(x * 0.02f) + 3.0f * ::cosf(z * 0.015f);
   });
   u32 forest = world.AddMap("forest", 1.0f);
   u32 road = world.AddMap("road");
@@ -197,7 +197,7 @@ void TestDeterminismAndSpacing() {
     for (u32 j = i + 1; j < a.size(); ++j) {
       f32 dx = a[i].transform.m[12] - a[j].transform.m[12];
       f32 dz = a[i].transform.m[14] - a[j].transform.m[14];
-      min_dist = rx::Min(min_dist, ::sqrt(dx * dx + dz * dz));
+      min_dist = rx::Min(min_dist, ::sqrtf(dx * dx + dz * dz));
     }
   }
   Check(min_dist >= 0.6f * stack.footprint, "instances keep footprint spacing");
@@ -225,7 +225,7 @@ void TestDeterminismAndSpacing() {
     f32 z = instance.transform.m[14];
     Near(instance.transform.m[13], world.Sample(height, x, z), "instance sits on ground",
          0.01f);
-    f32 sx = ::sqrt(instance.transform.m[0] * instance.transform.m[0] +
+    f32 sx = ::sqrtf(instance.transform.m[0] * instance.transform.m[0] +
                        instance.transform.m[1] * instance.transform.m[1] +
                        instance.transform.m[2] * instance.transform.m[2]);
     Check(sx >= 0.79f && sx <= 1.31f, "instance scale within layer range");

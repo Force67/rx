@@ -24,12 +24,12 @@ bool Check(bool condition, const char *message) {
 f32 MatrixDifference(const Mat4 &a, const Mat4 &b) {
   f32 difference = 0;
   for (u32 i = 0; i < 16; ++i)
-    difference = rx::Max(difference, ::fabs(a.m[i] - b.m[i]));
+    difference = rx::Max(difference, ::fabsf(a.m[i] - b.m[i]));
   return difference;
 }
 
 f32 RotationDifference(const Quat &a, const Quat &b) {
-  const f32 dot = ::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
+  const f32 dot = ::fabsf(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
   return 1.0f - rx::Min(dot, 1.0f);
 }
 

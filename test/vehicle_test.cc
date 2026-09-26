@@ -61,7 +61,7 @@ VehicleId SpawnSettledCar(PhysicsWorld& world, const PhysicsWorld::VehicleDesc& 
 f32 HorizontalDistance(const Vec3& a, const Vec3& b) {
   const f32 dx = a.x - b.x;
   const f32 dz = a.z - b.z;
-  return ::sqrt(dx * dx + dz * dz);
+  return ::sqrtf(dx * dx + dz * dz);
 }
 
 // Full-throttle until the car reaches `target` m/s or `max_steps` elapse.
@@ -86,7 +86,7 @@ f32 BrakeToStop(PhysicsWorld& world, VehicleId id, int max_steps) {
     world.DriveVehicle(id, 0.0f, 0.0f, 1.0f, 0.0f);
     world.Update(kDt);
     world.GetVehicleTransform(id, &last, rot);
-    if (::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
+    if (::fabsf(world.VehicleForwardSpeed(id)) < 0.5f) break;
   }
   return HorizontalDistance(start, last);
 }
@@ -243,7 +243,7 @@ int main() {
         world.Update(kDt);
         Vec3 pos;
         world.GetVehicleTransform(car, &pos, rot);
-        peak = rx::Max(peak, ::fabs(pos.x - start.x));
+        peak = rx::Max(peak, ::fabsf(pos.x - start.x));
       }
       return peak;
     };
@@ -306,7 +306,7 @@ int main() {
     const f32 self_driven = world.VehicleForwardSpeed(trailer);
     ::fprintf(stderr, "(h) free-rolling self-driven speed after 3 s throttle=%.3f m/s\n",
                  self_driven);
-    if (::fabs(self_driven) > 1.0f) return Fail("(h) free-rolling vehicle drove itself");
+    if (::fabsf(self_driven) > 1.0f) return Fail("(h) free-rolling vehicle drove itself");
 
     // (3) Tow it: a steady forward (+Z) force on the chassis body makes it roll.
     const physics::BodyId body = world.GetVehicleBody(trailer);
@@ -327,7 +327,7 @@ int main() {
     Vec3 p0{};
     f32 r0[4];
     world.GetVehicleTransform(trailer, &p0, r0);
-    const f32 start_heading = ::atan2(Rotate(Quat{r0[0], r0[1], r0[2], r0[3]}, Vec3{0, 0, 1}).x,
+    const f32 start_heading = ::atan2f(Rotate(Quat{r0[0], r0[1], r0[2], r0[3]}, Vec3{0, 0, 1}).x,
                                          Rotate(Quat{r0[0], r0[1], r0[2], r0[3]}, Vec3{0, 0, 1}).z);
     for (int i = 0; i < 60 * 3; ++i) {
       Vec3 pos{};
@@ -341,13 +341,13 @@ int main() {
     f32 r1[4];
     world.GetVehicleTransform(trailer, &p1, r1);
     const Vec3 fdir = Rotate(Quat{r1[0], r1[1], r1[2], r1[3]}, Vec3{0, 0, 1});
-    const f32 end_heading = ::atan2(fdir.x, fdir.z);
+    const f32 end_heading = ::atan2f(fdir.x, fdir.z);
     f32 dh = end_heading - start_heading;
     while (dh > 3.14159265f) dh -= 6.2831853f;
     while (dh < -3.14159265f) dh += 6.2831853f;
     ::fprintf(stderr, "(h) free-rolling heading change while steering=%.1f deg\n",
                  dh * 57.2958f);
-    if (::fabs(dh) < 0.05f) return Fail("(h) free-rolling front axle did not steer");
+    if (::fabsf(dh) < 0.05f) return Fail("(h) free-rolling front axle did not steer");
   }
 
   // (i) Manual transmission routes through traction control: on ice, TC-on holds
@@ -370,12 +370,12 @@ int main() {
         world.Update(kDt);
         // Only sample once rolling: TC (like a real system) is disengaged at
         // launch, where the slip-ratio denominator makes the reading meaningless.
-        if (::fabs(world.VehicleForwardSpeed(car)) < 5.0f) continue;
+        if (::fabsf(world.VehicleForwardSpeed(car)) < 5.0f) continue;
         PhysicsWorld::VehicleState st;
         if (!world.GetVehicleState(car, &st)) continue;
         f32 peak = 0;
         for (u32 w = 0; w < st.wheel_count; ++w)
-          peak = rx::Max(peak, ::fabs(st.wheels[w].longitudinal_slip));
+          peak = rx::Max(peak, ::fabsf(st.wheels[w].longitudinal_slip));
         slip_sum += peak;
         ++slip_n;
       }

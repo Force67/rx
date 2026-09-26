@@ -64,7 +64,7 @@ bool InverseTransformPoint(const Mat4& m, Vec3 point, Vec3* result) {
   const f64 c1xc2y = c1z * c2x - c1x * c2z;
   const f64 c1xc2z = c1x * c2y - c1y * c2x;
   const f64 det = c0x * c1xc2x + c0y * c1xc2y + c0z * c1xc2z;
-  if (det == 0 || !::isfinite(det)) return false;
+  if (det == 0 || !isfinite(det)) return false;
 
   const f64 dx = static_cast<f64>(point.x) - m.m[12];
   const f64 dy = static_cast<f64>(point.y) - m.m[13];
@@ -78,9 +78,9 @@ bool InverseTransformPoint(const Mat4& m, Vec3 point, Vec3* result) {
                  dy * (c0z * c1x - c0x * c1z) +
                  dz * (c0x * c1y - c0y * c1x)) /
                 det;
-  if (!::isfinite(x) || !::isfinite(y) || !::isfinite(z)) return false;
+  if (!isfinite(x) || !isfinite(y) || !isfinite(z)) return false;
   const Vec3 local{static_cast<f32>(x), static_cast<f32>(y), static_cast<f32>(z)};
-  if (!::isfinite(local.x) || !::isfinite(local.y) || !::isfinite(local.z))
+  if (!isfinite(local.x) || !isfinite(local.y) || !isfinite(local.z))
     return false;
   *result = local;
   return true;

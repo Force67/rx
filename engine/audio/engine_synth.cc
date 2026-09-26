@@ -14,12 +14,12 @@ constexpr i32 kMaxPartials = 32;
 
 // A phase in [0,1) turned into a sine. Wrapping the accumulator (not the angle)
 // keeps precision bounded no matter how long the engine runs.
-f32 SinPhase(f32 phase) { return ::sin(phase * kTwoPi); }
+f32 SinPhase(f32 phase) { return ::sinf(phase * kTwoPi); }
 
 // Advances a normalised phase by `freq` Hz for one sample and wraps it.
 f32 Advance(f32 phase, f32 freq, f32 inv_rate) {
   phase += freq * inv_rate;
-  phase -= ::floor(phase);
+  phase -= ::floorf(phase);
   return phase;
 }
 
@@ -27,7 +27,7 @@ f32 Advance(f32 phase, f32 freq, f32 inv_rate) {
 // stable band so a runaway parameter cannot make the filter blow up.
 f32 LowpassAlpha(f32 cutoff_hz, f32 rate) {
   const f32 fc = rx::Clamp(cutoff_hz, 20.0f, rate * 0.49f);
-  return rx::Clamp(1.0f - ::exp(-kTwoPi * fc / rate), 0.0f, 1.0f);
+  return rx::Clamp(1.0f - ::expf(-kTwoPi * fc / rate), 0.0f, 1.0f);
 }
 
 f32 Smoothstep(f32 edge0, f32 edge1, f32 x) {
@@ -176,7 +176,7 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     if (shift_left_ <= 0) return 1.0f;
     const f32 phase =
         static_cast<f32>(shift_total_ - shift_left_) / static_cast<f32>(rx::Max(1, shift_total_));
-    const f32 bump = ::sin(kPi * rx::Clamp(phase, 0.0f, 1.0f));
+    const f32 bump = ::sinf(kPi * rx::Clamp(phase, 0.0f, 1.0f));
     --shift_left_;
     return shift_sign_ < 0.0f ? (1.0f - 0.55f * bump) : (1.0f + 0.30f * bump);
   };
@@ -193,7 +193,7 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     const f32 roar_alpha = LowpassAlpha(400.0f + roar_in * 2500.0f, rate);
     const f32 out_alpha = LowpassAlpha(out_cut_hz, rate);
     const f32 whine_gain = 0.42f * spool;
-    const f32 roar_gain = 0.30f * ::pow(roar_in, 1.4f);
+    const f32 roar_gain = 0.30f * ::powf(roar_in, 1.4f);
     for (u32 i = 0; i < frames; ++i) {
       f32 tone = SinPhase(whine_phase_);
       // A couple of harmonics of the whine, dropped if they alias.
@@ -204,8 +204,8 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
       const f32 roar = 0.5f * roar_lp_ + 0.5f * (Noise() * 0.4f);
       f32 s = tone * whine_gain + roar * roar_gain;
       out_lp_ += out_alpha * (s - out_lp_);
-      s = ::tanh(out_lp_) * muffle_gain * flare_gain();
-      out[i] = ::isfinite(s) ? s : 0.0f;
+      s = ::tanhf(out_lp_) * muffle_gain * flare_gain();
+      out[i] = isfinite(s) ? s : 0.0f;
       whine_phase_ = Advance(whine_phase_, whine_hz, inv_rate);
     }
     return;
@@ -291,8 +291,8 @@ void EngineSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     // The muffle duck and the gear-shift flare ride on the limited output so both
     // stay bounded and click-free.
     out_lp_ += out_alpha * (s - out_lp_);
-    f32 y = ::tanh(out_lp_ * 1.3f) * muffle_gain * flare_gain();
-    out[i] = ::isfinite(y) ? y : 0.0f;
+    f32 y = ::tanhf(out_lp_ * 1.3f) * muffle_gain * flare_gain();
+    out[i] = isfinite(y) ? y : 0.0f;
 
     base_phase_ = Advance(base_phase_, base_freq, inv_rate);
     burble_phase_ = Advance(burble_phase_, burble_hz, inv_rate);

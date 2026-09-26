@@ -39,12 +39,12 @@ constexpr f32 kStrikeMinRange = 100.0f;
 constexpr f32 kStrikeMaxRange = 300.0f;
 
 f32 Clamp01(f32 v) {
-  if (!::isfinite(v)) return 0.0f;
+  if (!isfinite(v)) return 0.0f;
   return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : v);
 }
 f32 Lerpf(f32 a, f32 b, f32 t) { return a + (b - a) * t; }
 f32 LerpAngle(f32 a, f32 b, f32 t) {
-  f32 delta = ::fmod(b - a + kPi, kTwoPi);
+  f32 delta = ::fmodf(b - a + kPi, kTwoPi);
   if (delta < 0.0f)
     delta += kTwoPi;
   return a + (delta - kPi) * t;
@@ -88,7 +88,7 @@ WeatherSystem::WeatherSystem(u32 rng_seed) : rng_(rng_seed ? rng_seed : 1u) {}
 u32 WeatherSystem::AddState(const WeatherState &state) {
   WeatherState clean = state;
   auto finite_or = [](f32 value, f32 fallback) {
-    return ::isfinite(value) ? value : fallback;
+    return isfinite(value) ? value : fallback;
   };
   clean.coverage = Clamp01(clean.coverage);
   clean.cloud_type = Clamp01(clean.cloud_type);
@@ -101,7 +101,7 @@ u32 WeatherSystem::AddState(const WeatherState &state) {
   clean.top_altitude =
       rx::Clamp(finite_or(clean.top_altitude, clean.base_altitude + 1.0f),
                  clean.base_altitude + 1.0f, 200000.0f);
-  clean.wind_yaw = ::remainder(finite_or(clean.wind_yaw, 0.0f), kTwoPi);
+  clean.wind_yaw = ::remainderf(finite_or(clean.wind_yaw, 0.0f), kTwoPi);
   clean.wind_speed = rx::Clamp(finite_or(clean.wind_speed, 0.0f), 0.0f, 200.0f);
   clean.vertical_skew =
       rx::Clamp(finite_or(clean.vertical_skew, 0.0f), -100000.0f, 100000.0f);
@@ -129,13 +129,13 @@ u32 WeatherSystem::AddState(const WeatherState &state) {
 
 u32 WeatherSystem::AddRegion(const WeatherRegion &region) {
   WeatherRegion clean = region;
-  if (!::isfinite(clean.min_xz.x) || !::isfinite(clean.min_xz.y) ||
-      !::isfinite(clean.max_xz.x) || !::isfinite(clean.max_xz.y)) {
+  if (!isfinite(clean.min_xz.x) || !isfinite(clean.min_xz.y) ||
+      !isfinite(clean.max_xz.x) || !isfinite(clean.max_xz.y)) {
     clean.min_xz = {};
     clean.max_xz = {};
   }
   for (f32 &weight : clean.weights) {
-    weight = ::isfinite(weight) ? rx::Clamp(weight, 0.0f, 1000000.0f)
+    weight = isfinite(weight) ? rx::Clamp(weight, 0.0f, 1000000.0f)
                                    : 0.0f;
   }
   regions_.push_back(base::move(clean));
@@ -152,7 +152,7 @@ void WeatherSystem::ForceState(u32 state_index, f32 transition_seconds) {
   if (state_index >= states_.size()) {
     state_index = static_cast<u32>(states_.size() - 1);
   }
-  if (!::isfinite(transition_seconds))
+  if (!isfinite(transition_seconds))
     transition_seconds = 0.0f;
   forced_ = true;
   started_ = true; // a forced state suppresses the first-frame region auto-pick
@@ -243,10 +243,10 @@ u32 WeatherSystem::PickNext(const Vec3 &player_pos, f32 time_of_day01) {
   // Day phase in [0,1]: 0 at midnight (fully night), 1 at noon (fully day),
   // smoothly through dawn/dusk. Biases each candidate's weight toward its
   // day_weight or night_weight.
-  f32 dayness = 0.5f - 0.5f * ::cos(kTwoPi * time_of_day01);
+  f32 dayness = 0.5f - 0.5f * ::cosf(kTwoPi * time_of_day01);
 
   auto effective_weight = [&](u32 idx, f32 base) -> f32 {
-    if (!::isfinite(base) || base <= 0.0f)
+    if (!isfinite(base) || base <= 0.0f)
       return 0.0f;
     const WeatherState &s = states_[idx];
     f32 mult = Lerpf(s.night_weight, s.day_weight, dayness);
@@ -414,8 +414,8 @@ void WeatherSystem::IntegrateTornado(f32 dt, const Vec3 &player_pos,
     f32 out = 1.0f - Smoothstep((tornado_age_ - tornado_dur_ + 9.0f) / 9.0f);
     cloudscape_.tornado_strength = ramp * out;
     f32 speed = cloudscape_.wind_speed * 0.55f;
-    f32 wob = ::sin(tornado_age_ * 0.31f) * 0.6f;
-    Vec2 dir{::cos(cloudscape_.wind_yaw), ::sin(cloudscape_.wind_yaw)};
+    f32 wob = ::sinf(tornado_age_ * 0.31f) * 0.6f;
+    Vec2 dir{::cosf(cloudscape_.wind_yaw), ::sinf(cloudscape_.wind_yaw)};
     tornado_pos_.x += (dir.x - dir.y * wob) * speed * dt;
     tornado_pos_.y += (dir.y + dir.x * wob) * speed * dt;
     cloudscape_.tornado_pos = tornado_pos_;
@@ -425,7 +425,7 @@ void WeatherSystem::IntegrateTornado(f32 dt, const Vec3 &player_pos,
       f32 u = NextF32();
       if (u < 1e-4f)
         u = 1e-4f;
-      tornado_timer_ = -kTornadoMeanInterval * ::log(u);
+      tornado_timer_ = -kTornadoMeanInterval * ::logf(u);
     }
     return;
   }
@@ -437,7 +437,7 @@ void WeatherSystem::IntegrateTornado(f32 dt, const Vec3 &player_pos,
   if (tornado_timer_ > 0.0f)
     return;
   // Touch down upwind of the player so the track carries the funnel past.
-  Vec2 dir{::cos(cloudscape_.wind_yaw), ::sin(cloudscape_.wind_yaw)};
+  Vec2 dir{::cosf(cloudscape_.wind_yaw), ::sinf(cloudscape_.wind_yaw)};
   f32 upwind = RandomRange(400.0f, 1100.0f);
   f32 crosswind = RandomRange(-350.0f, 350.0f);
   tornado_pos_ = Vec2{player_pos.x - dir.x * upwind - dir.y * crosswind,
@@ -483,11 +483,11 @@ bool WeatherSystem::IntegrateLightning(f32 dt, const Vec3 &player_pos,
         base::Swap(min_r, max_r);
       f32 ang = RandomRange(0.0f, kTwoPi);
       f32 range = RandomRange(min_r, max_r);
-      f32 sx = player_pos.x + ::cos(ang) * range;
-      f32 sz = player_pos.z + ::sin(ang) * range;
+      f32 sx = player_pos.x + ::cosf(ang) * range;
+      f32 sz = player_pos.z + ::sinf(ang) * range;
       f32 strike_ground = ground_(sx, sz);
       weather_.strike_pos =
-          Vec3{sx, ::isfinite(strike_ground) ? strike_ground : 0.0f, sz};
+          Vec3{sx, isfinite(strike_ground) ? strike_ground : 0.0f, sz};
       weather_.strike_seed = NextU32();
       weather_.strike_energy = RandomRange(0.6f, 1.0f);
       weather_.strike_age = 0.0f;
@@ -495,7 +495,7 @@ bool WeatherSystem::IntegrateLightning(f32 dt, const Vec3 &player_pos,
       f32 u = NextF32();
       if (u < 1e-4f)
         u = 1e-4f;
-      strike_timer_ = -kStrikeMeanInterval * ::log(u);
+      strike_timer_ = -kStrikeMeanInterval * ::logf(u);
     }
   }
 
@@ -508,7 +508,7 @@ bool WeatherSystem::IntegrateLightning(f32 dt, const Vec3 &player_pos,
   if (weather_.strike_age >= 0.0f) {
     f32 dx = weather_.strike_pos.x - player_pos.x;
     f32 dz = weather_.strike_pos.z - player_pos.z;
-    f32 dist = ::sqrt(dx * dx + dz * dz);
+    f32 dist = ::sqrtf(dx * dx + dz * dz);
     f32 near_w = 600.0f / (600.0f + dist);
     f32 falloff = 0.08f + 0.92f * near_w * near_w;
     weather_.lightning = render::LightningEnvelope(
@@ -523,12 +523,12 @@ bool WeatherSystem::IntegrateLightning(f32 dt, const Vec3 &player_pos,
 void WeatherSystem::Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01) {
   if (states_.empty())
     return; // no states: leave the default outputs untouched
-  if (!::isfinite(dt) || dt < 0.0f)
+  if (!isfinite(dt) || dt < 0.0f)
     return;
-  if (!::isfinite(player_pos.x) || !::isfinite(player_pos.y) ||
-      !::isfinite(player_pos.z))
+  if (!isfinite(player_pos.x) || !isfinite(player_pos.y) ||
+      !isfinite(player_pos.z))
     return;
-  if (!::isfinite(time_of_day01))
+  if (!isfinite(time_of_day01))
     time_of_day01 = 0.0f;
   dt = rx::Min(dt, 60.0f);
 
@@ -593,7 +593,7 @@ void WeatherSystem::Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01) {
     if (slice > 0.0f) {
       f32 yaw = cloudscape_.wind_yaw;
       f32 speed = cloudscape_.wind_speed;
-      map_offset_ += Vec2{::cos(yaw), ::sin(yaw)} * (speed * slice);
+      map_offset_ += Vec2{::cosf(yaw), ::sinf(yaw)} * (speed * slice);
       cloudscape_.map_offset = map_offset_;
 
       IntegrateSurface(slice, weather_.precipitation, weather_.snow);
@@ -610,7 +610,7 @@ void WeatherSystem::Update(f32 dt, const Vec3 &player_pos, f32 time_of_day01) {
       IntegrateTornado(slice, player_pos, cloudscape_.anvil);
     }
     f32 local_ground = ground_(player_pos.x, player_pos.z);
-    cloudscape_.fog_ground = ::isfinite(local_ground) ? local_ground : 0.0f;
+    cloudscape_.fog_ground = isfinite(local_ground) ? local_ground : 0.0f;
 
     remaining -= slice;
     first_slice = false;

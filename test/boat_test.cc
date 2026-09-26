@@ -53,7 +53,7 @@ BoatState Run(PhysicsWorld& world, Boat& boat, const BoatInput& in, int steps) {
 // Heading angle (radians) of the hull forward axis in the XZ plane.
 f32 Heading(const BoatState& s) {
   const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
-  return ::atan2(fwd.x, fwd.z);
+  return ::atan2f(fwd.x, fwd.z);
 }
 
 // World up projected onto the hull's up axis: 1 = upright, 0 = on its side.
@@ -94,7 +94,7 @@ int main() {
     const Vec3 p0 = s0.position;
     Run(world, boat, {}, 60 * 3);
     const Vec3 p1 = boat.state().position;
-    const f32 drift = ::sqrt((p1.x - p0.x) * (p1.x - p0.x) + (p1.z - p0.z) * (p1.z - p0.z));
+    const f32 drift = ::sqrtf((p1.x - p0.x) * (p1.x - p0.x) + (p1.z - p0.z) * (p1.z - p0.z));
     ::fprintf(stderr, "(a) idle drift=%.4f m\n", drift);
     if (drift > 0.15f) return Fail("(a) idle boat drifted");
   }
@@ -114,7 +114,7 @@ int main() {
                  s.position.z, s.position.x, Uprightness(s));
     if (s.forward_speed < 4.0f) return Fail("(b) boat did not accelerate to several m/s");
     if (s.position.z < 10.0f) return Fail("(b) boat did not travel forward (+Z)");
-    if (::fabs(s.position.x) > 3.0f) return Fail("(b) boat veered sideways under straight throttle");
+    if (::fabsf(s.position.x) > 3.0f) return Fail("(b) boat veered sideways under straight throttle");
   }
 
   // (c) Sustained steer while moving yaws the boat.
@@ -133,7 +133,7 @@ int main() {
     turn.throttle = 1.0f;
     turn.steer = 1.0f;
     const BoatState s = Run(world, boat, turn, 60 * 5);
-    const f32 dh = ::fabs(Heading(s) - h0);
+    const f32 dh = ::fabsf(Heading(s) - h0);
     ::fprintf(stderr, "(c) heading change=%.3f rad\n", dh);
     if (dh < 0.2f) return Fail("(c) sustained steer did not yaw the boat");
   }
@@ -209,7 +209,7 @@ int main() {
     Boat boat(world, desc, Vec3{0, 0.4f, 0}, 0.0f);
     // Knock it down: roll ~80 deg about the forward (+Z) axis, then let go.
     const f32 heel = 1.4f;
-    const f32 rot[4] = {0.0f, 0.0f, ::sin(heel * 0.5f), ::cos(heel * 0.5f)};
+    const f32 rot[4] = {0.0f, 0.0f, ::sinf(heel * 0.5f), ::cosf(heel * 0.5f)};
     world.SetBodyPosition(boat.body(), Vec3{0, 0.4f, 0}, rot);
     Step(world, boat, {});  // refresh telemetry from the knocked-down pose
     const f32 before = Uprightness(boat.state());
@@ -233,7 +233,7 @@ int main() {
     const f32 footprint = (2.0f * desc.hull_half_extent.x) * (2.0f * desc.hull_half_extent.z);
     const f32 predicted = desc.mass / (1000.0f * footprint);
     ::fprintf(stderr, "(h) draft=%.3f predicted=%.3f\n", draft, predicted);
-    if (::fabs(draft - predicted) > 0.06f) {
+    if (::fabsf(draft - predicted) > 0.06f) {
       return Fail("(h) draft does not match single-model displacement (double buoyancy?)");
     }
   }
@@ -255,14 +255,14 @@ int main() {
     BoatInput in;
     for (int i = 0; i < 60 * 60; ++i) {
       // Wander the helm so thrust, planing and rudder all exercise on the chop.
-      in.throttle = ::sin(t * 0.7f);
-      in.steer = ::sin(t * 0.3f);
+      in.throttle = ::sinf(t * 0.7f);
+      in.steer = ::sinf(t * 0.3f);
       t += kDt;
       Step(world, boat, in);
       const BoatState s = boat.state();
-      if (!::isfinite(s.position.x) || !::isfinite(s.position.y) ||
-          !::isfinite(s.position.z) || !::isfinite(s.rpm) ||
-          !::isfinite(s.forward_speed) || !::isfinite(s.rotation.w)) {
+      if (!isfinite(s.position.x) || !isfinite(s.position.y) ||
+          !isfinite(s.position.z) || !isfinite(s.rpm) ||
+          !isfinite(s.forward_speed) || !isfinite(s.rotation.w)) {
         return Fail("(i) NaN/Inf in boat state on chop");
       }
     }
@@ -294,7 +294,7 @@ int main() {
     ::fprintf(stderr, "(j) calm dx=%.2f up=%.4f | beam wind(25 m/s) dx=%.2f up=%.4f\n", calm_dx,
                  calm_up, wind_dx, wind_up);
     if (wind_dx < 1.5f) return Fail("(j) beam wind did not push the boat downwind");
-    if (wind_dx <= ::fabs(calm_dx) + 1.0f) return Fail("(j) wind drift not distinct from calm");
+    if (wind_dx <= ::fabsf(calm_dx) + 1.0f) return Fail("(j) wind drift not distinct from calm");
   }
 
   // (k) Lifecycle: destroying a Boat removes its hull body and clears the

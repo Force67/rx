@@ -180,9 +180,9 @@ Vec3 SdfClipmap::SnapOrigin(const Vec3& camera, u32 clip) const {
   // backstop covers that window.
   const f32 snap = voxel * 8.0f;
   f32 half = extent * 0.5f;
-  return Vec3{::floor((camera.x - half) / snap) * snap,
-             ::floor((camera.y - half) / snap) * snap,
-             ::floor((camera.z - half) / snap) * snap};
+  return Vec3{::floorf((camera.x - half) / snap) * snap,
+             ::floorf((camera.y - half) / snap) * snap,
+             ::floorf((camera.z - half) / snap) * snap};
 }
 
 void SdfClipmap::WriteGlobals(u32 frame_index, const Vec3& camera) {
@@ -313,9 +313,9 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             // trace never overshoots. (The max axis would be correct only for a
             // non-overshooting bound.)
             const f32* m = inst.transform.m;
-            f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-            f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-            f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+            f32 sx = ::sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+            f32 sy = ::sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+            f32 sz = ::sqrtf(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
             f32 min_scale = rx::Min(sx, rx::Min(sy, sz));
 
             ComposePush pp{};

@@ -130,7 +130,7 @@ f32 Heal(ecs::World& world, ecs::Entity entity, f32 amount) {
 }
 
 void StepHealth(ecs::World& world, f32 dt) {
-  if (!::isfinite(dt) || dt <= 0) return;
+  if (!isfinite(dt) || dt <= 0) return;
   world.Each<Health>([dt](ecs::Entity, Health& health) {
     if (health.dead) return;
     health.time_since_damage += dt;

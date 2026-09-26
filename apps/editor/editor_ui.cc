@@ -107,13 +107,13 @@ base::String EscapeUguiString(base::StringRef value) {
 void QuatToEuler(const Quat &q, f32 out_deg[3]) {
   f32 sinr = 2 * (q.w * q.x + q.y * q.z);
   f32 cosr = 1 - 2 * (q.x * q.x + q.y * q.y);
-  f32 x = ::atan2(sinr, cosr);
+  f32 x = ::atan2f(sinr, cosr);
   f32 sinp = 2 * (q.w * q.y - q.z * q.x);
   f32 y =
-      ::fabs(sinp) >= 1 ? ::copysign(1.5707963f, sinp) : ::asin(sinp);
+      ::fabsf(sinp) >= 1 ? ::copysignf(1.5707963f, sinp) : ::asinf(sinp);
   f32 siny = 2 * (q.w * q.z + q.x * q.y);
   f32 cosy = 1 - 2 * (q.y * q.y + q.z * q.z);
-  f32 z = ::atan2(siny, cosy);
+  f32 z = ::atan2f(siny, cosy);
   const f32 r2d = 57.29578f;
   out_deg[0] = x * r2d;
   out_deg[1] = y * r2d;
@@ -121,9 +121,9 @@ void QuatToEuler(const Quat &q, f32 out_deg[3]) {
 }
 Quat EulerToQuat(const f32 deg[3]) {
   const f32 d2r = 0.0174533f;
-  f32 cx = ::cos(deg[0] * d2r * 0.5f), sx = ::sin(deg[0] * d2r * 0.5f);
-  f32 cy = ::cos(deg[1] * d2r * 0.5f), sy = ::sin(deg[1] * d2r * 0.5f);
-  f32 cz = ::cos(deg[2] * d2r * 0.5f), sz = ::sin(deg[2] * d2r * 0.5f);
+  f32 cx = ::cosf(deg[0] * d2r * 0.5f), sx = ::sinf(deg[0] * d2r * 0.5f);
+  f32 cy = ::cosf(deg[1] * d2r * 0.5f), sy = ::sinf(deg[1] * d2r * 0.5f);
+  f32 cz = ::cosf(deg[2] * d2r * 0.5f), sz = ::sinf(deg[2] * d2r * 0.5f);
   return Normalize(
       Quat{sx * cy * cz - cx * sy * sz, cx * sy * cz + sx * cy * sz,
            cx * cy * sz - sx * sy * cz, cx * cy * cz + sx * sy * sz});
