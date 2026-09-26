@@ -129,6 +129,15 @@ AssetId TextureAssetOf(const tt::RenderScene &scene,
   return image >= 0 ? image_ids[static_cast<u32>(image)] : AssetId{};
 }
 
+// A connected input keeps tydra's class default as its value (UsdPreviewSurface
+// diffuseColor 0.18 and emissiveColor 0, OpenPBR base_color 0.8), not anything
+// the document authored, and the shader multiplies a map by its factor. So a
+// mapped input's factor is 1 and the map carries the value alone.
+template <typename T>
+f32 FactorOf(const tt::ShaderParam<T> &param, f32 value) {
+  return param.is_texture() ? 1.0f : value;
+}
+
 // Neither UsdPreviewSurface nor OpenPBR has a packed ORM channel: roughness and
 // metallic are separate inputs. When both resolve to one image the author
 // packed them glTF-style and the combined path applies; otherwise the roughness
@@ -169,19 +178,19 @@ void ConvertPreviewSurface(const tt::RenderScene &scene,
   };
 
   out->base_color = texture(s.diffuseColor.texture_id);
-  out->base_color_factor[0] = s.diffuseColor.value[0];
-  out->base_color_factor[1] = s.diffuseColor.value[1];
-  out->base_color_factor[2] = s.diffuseColor.value[2];
+  out->base_color_factor[0] = FactorOf(s.diffuseColor, s.diffuseColor.value[0]);
+  out->base_color_factor[1] = FactorOf(s.diffuseColor, s.diffuseColor.value[1]);
+  out->base_color_factor[2] = FactorOf(s.diffuseColor, s.diffuseColor.value[2]);
   out->base_color_factor[3] = s.opacity.value;
 
   out->normal = texture(s.normal.texture_id);
   out->emissive = texture(s.emissiveColor.texture_id);
-  out->emissive_factor[0] = s.emissiveColor.value[0];
-  out->emissive_factor[1] = s.emissiveColor.value[1];
-  out->emissive_factor[2] = s.emissiveColor.value[2];
+  out->emissive_factor[0] = FactorOf(s.emissiveColor, s.emissiveColor.value[0]);
+  out->emissive_factor[1] = FactorOf(s.emissiveColor, s.emissiveColor.value[1]);
+  out->emissive_factor[2] = FactorOf(s.emissiveColor, s.emissiveColor.value[2]);
 
-  out->metallic_factor = s.metallic.value;
-  out->roughness_factor = s.roughness.value;
+  out->metallic_factor = FactorOf(s.metallic, s.metallic.value);
+  out->roughness_factor = FactorOf(s.roughness, s.roughness.value);
   out->ior = s.ior.value;
   out->clearcoat = s.clearcoat.value;
   out->clearcoat_roughness = s.clearcoatRoughness.value;
@@ -217,34 +226,26 @@ void ConvertOpenPbrSurface(const tt::RenderScene &scene,
     return TextureAssetOf(scene, image_ids, texture_id);
   };
 
-  // A connected input keeps tydra's class default as its value (0.8 base
-  // colour, 0.3 roughness, 0 metalness), not anything the document authored,
-  // and the shader multiplies a map by its factor. So a mapped input's factor
-  // is 1 and the map carries the value alone.
-  const auto factor = [](const auto &param, f32 value) {
-    return param.is_texture() ? 1.0f : value;
-  };
-
   // base_weight scales base_color, which serves as both the diffuse albedo and
   // the metal normal-incidence reflectivity F0.
   const f32 base_weight = s.base_weight.value;
   out->base_color = texture(s.base_color.texture_id);
   out->base_color_factor[0] =
-      factor(s.base_color, s.base_color.value[0]) * base_weight;
+      FactorOf(s.base_color, s.base_color.value[0]) * base_weight;
   out->base_color_factor[1] =
-      factor(s.base_color, s.base_color.value[1]) * base_weight;
+      FactorOf(s.base_color, s.base_color.value[1]) * base_weight;
   out->base_color_factor[2] =
-      factor(s.base_color, s.base_color.value[2]) * base_weight;
+      FactorOf(s.base_color, s.base_color.value[2]) * base_weight;
   out->base_color_factor[3] = s.opacity.value;
   out->base_diffuse_roughness = s.base_diffuse_roughness.value;
-  out->metallic_factor = factor(s.base_metalness, s.base_metalness.value);
+  out->metallic_factor = FactorOf(s.base_metalness, s.base_metalness.value);
 
   out->normal = texture(s.normal.texture_id);
   ConvertRoughnessMetallicMaps(scene, image_ids, s.specular_roughness.texture_id,
                                s.base_metalness.texture_id, out);
 
   out->roughness_factor =
-      factor(s.specular_roughness, s.specular_roughness.value);
+      FactorOf(s.specular_roughness, s.specular_roughness.value);
   out->ior = s.specular_ior.value;
   out->specular_weight = s.specular_weight.value;
   out->openpbr_specular_color[0] = s.specular_color.value[0];
@@ -297,11 +298,11 @@ void ConvertOpenPbrSurface(const tt::RenderScene &scene,
   const f32 emission = s.emission_luminance.value;
   out->emissive = texture(s.emission_color.texture_id);
   out->emissive_factor[0] =
-      factor(s.emission_color, s.emission_color.value[0]) * emission;
+      FactorOf(s.emission_color, s.emission_color.value[0]) * emission;
   out->emissive_factor[1] =
-      factor(s.emission_color, s.emission_color.value[1]) * emission;
+      FactorOf(s.emission_color, s.emission_color.value[1]) * emission;
   out->emissive_factor[2] =
-      factor(s.emission_color, s.emission_color.value[2]) * emission;
+      FactorOf(s.emission_color, s.emission_color.value[2]) * emission;
 }
 
 void ConvertMaterial(const tt::RenderScene &scene, const tt::RenderMaterial &src,
