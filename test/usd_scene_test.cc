@@ -115,6 +115,60 @@ def Xform "World"
 }
 )";
 
+// A UsdPreviewSurface whose diffuse, emissive and roughness inputs connect to
+// textures. tydra leaves a connected input's value at its class default
+// (diffuseColor 0.18, emissiveColor 0), and the shader multiplies a map by its
+// factor, so reading that value renders every textured asset dark and every
+// emissive map black.
+constexpr char kTexturedStage[] = R"(#usda 1.0
+(
+    defaultPrim = "World"
+)
+
+def Xform "World"
+{
+    def Mesh "Tri"
+    {
+        int[] faceVertexCounts = [3]
+        int[] faceVertexIndices = [0, 1, 2]
+        point3f[] points = [(0, 0, 0), (1, 0, 0), (1, 1, 0)]
+        texCoord2f[] primvars:st = [(0, 0), (1, 0), (1, 1)] (
+            interpolation = "vertex"
+        )
+        rel material:binding = </World/Textured>
+    }
+
+    def Material "Textured"
+    {
+        token outputs:surface.connect = </World/Textured/Surface.outputs:surface>
+
+        def Shader "Surface"
+        {
+            uniform token info:id = "UsdPreviewSurface"
+            color3f inputs:diffuseColor.connect = </World/Textured/Grey.outputs:rgb>
+            color3f inputs:emissiveColor.connect = </World/Textured/Grey.outputs:rgb>
+            float inputs:roughness.connect = </World/Textured/Grey.outputs:r>
+            token outputs:surface
+        }
+
+        def Shader "Grey"
+        {
+            uniform token info:id = "UsdUVTexture"
+            asset inputs:file = @rx_usd_grey.png@
+            float3 outputs:rgb
+            float outputs:r
+        }
+    }
+}
+)";
+
+// 1x1 rgb8 png, mid grey.
+constexpr char kGreyPng[] =
+    "\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00"
+    "\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90\x77\x53\xde\x00\x00\x00"
+    "\x0c\x49\x44\x41\x54\x78\x9c\x63\x68\x68\x68\x00\x00\x03\x04\x01\x81\x4b"
+    "\xd3\xd2\x10\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+
 int failures = 0;
 
 void Check(bool condition, const char *message) {
@@ -245,6 +299,31 @@ int main() {
           "thin film thickness converts from micrometres to nanometres");
   } else if (openpbr_loaded) {
     Check(false, "the OpenPBR stage yields exactly one material");
+  }
+
+  const std::filesystem::path textured_stage = dir / "rx_usd_textured.usda";
+  const std::filesystem::path grey = dir / "rx_usd_grey.png";
+  if (!Write(textured_stage, kTexturedStage, sizeof(kTexturedStage) - 1) ||
+      !Write(grey, kGreyPng, sizeof(kGreyPng) - 1)) {
+    std::fprintf(stderr, "usd_scene_test: cannot create textured fixture\n");
+    return 1;
+  }
+  asset::ImportedScene textured_scene;
+  const bool textured_loaded =
+      asset::LoadUsdScene(textured_stage.string(), &textured_scene);
+  std::filesystem::remove(textured_stage);
+  std::filesystem::remove(grey);
+  Check(textured_loaded, "a textured UsdPreviewSurface stage loads");
+  if (textured_loaded && textured_scene.materials.size() == 1) {
+    const asset::Material &m = textured_scene.materials[0];
+    Check(static_cast<bool>(m.base_color) && static_cast<bool>(m.emissive),
+          "the connected inputs bind their textures");
+    Check(Near(m.base_color_factor[0], 1.0f) && Near(m.base_color_factor[2], 1.0f),
+          "a mapped diffuseColor leaves its factor at 1, not tydra's 0.18");
+    Check(Near(m.emissive_factor[0], 1.0f), "a mapped emissiveColor is not zeroed");
+    Check(Near(m.roughness_factor, 1.0f), "a mapped roughness leaves its factor at 1");
+  } else if (textured_loaded) {
+    Check(false, "the textured stage yields exactly one material");
   }
 
   if (failures == 0) {
