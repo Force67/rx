@@ -134,6 +134,9 @@ class Sdl3Window final : public Window {
     input_.text_len = 0;
     input_.text[0] = '\0';
     std::memset(input_.pressed, 0, sizeof(input_.pressed));
+    std::memset(input_.repeated, 0, sizeof(input_.repeated));
+    std::memset(input_.mouse_pressed, 0, sizeof(input_.mouse_pressed));
+    std::memset(input_.mouse_released, 0, sizeof(input_.mouse_released));
     std::memset(gamepad_.pressed, 0, sizeof(gamepad_.pressed));
     touch_.BeginPump();
 
@@ -158,6 +161,9 @@ class Sdl3Window final : public Window {
           if (down && !event.key.repeat && !input_.keys[static_cast<u8>(key)]) {
             input_.pressed[static_cast<u8>(key)] = true;
           }
+          if (down && event.key.repeat) {
+            input_.repeated[static_cast<u8>(key)] = true;
+          }
           input_.keys[static_cast<u8>(key)] = down;
           break;
         }
@@ -167,7 +173,12 @@ class Sdl3Window final : public Window {
           input_.mouse_y = event.button.y * density;
           MouseButton button = TranslateButton(event.button.button);
           if (button == MouseButton::kCount) break;
-          input_.mouse[static_cast<u8>(button)] = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+          const bool down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+          if (down)
+            input_.mouse_pressed[static_cast<u8>(button)] = true;
+          else
+            input_.mouse_released[static_cast<u8>(button)] = true;
+          input_.mouse[static_cast<u8>(button)] = down;
           break;
         }
         case SDL_EVENT_MOUSE_MOTION:
