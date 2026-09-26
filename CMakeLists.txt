@@ -462,6 +462,12 @@ if(RX_BUILD_TESTS)
   target_link_libraries(input_touch_test PRIVATE rx::core)
   add_test(NAME input_touch_test COMMAND input_touch_test)
 
+  # Action edges from raw input, including presses that begin and end inside
+  # one pump.
+  add_executable(input_map_test test/input_map_test.cc)
+  target_link_libraries(input_map_test PRIVATE rx::core)
+  add_test(NAME input_map_test COMMAND input_map_test)
+
   # The other half: SDL's own event queue driven through the real backend, so
   # the normalized-to-pixel translation is covered too. Skips without a display.
   if(TARGET SDL3::SDL3)

@@ -160,6 +160,9 @@ class RX_CORE_EXPORT InputMap {
   bool AxisFromName(const char* name, AxisId* out) const;
 
   bool SourceHeld(const Binding& b, const InputState& kbm, const GamepadState& pad) const;
+  // Whether a key or mouse source went down during this pump, whatever its level
+  // at the end of it.
+  bool SourcePressed(const Binding& b, const InputState& kbm) const;
   f32 AxisValue(const Binding& b, const GamepadState& pad) const;
 
   base::Vector<Binding> action_[kMaxActions];

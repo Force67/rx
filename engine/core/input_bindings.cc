@@ -293,6 +293,17 @@ bool InputMap::SourceHeld(const Binding& b, const InputState& kbm, const Gamepad
   return false;
 }
 
+bool InputMap::SourcePressed(const Binding& b, const InputState& kbm) const {
+  switch (b.kind) {
+    case SourceKind::kKey:
+      return b.code < static_cast<u16>(Key::kCount) && kbm.pressed[b.code];
+    case SourceKind::kMouseButton:
+      return b.code < static_cast<u16>(MouseButton::kCount) && kbm.mouse_pressed[b.code];
+    default:
+      return false;
+  }
+}
+
 f32 InputMap::AxisValue(const Binding& b, const GamepadState& pad) const {
   if (b.kind != SourceKind::kGamepadAxis || !pad.connected ||
       b.code >= static_cast<u16>(GamepadAxis::kCount))
@@ -314,16 +325,19 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const Tou
     out->analog[a] = rx::Clamp(v, -1.0f, 1.0f);
   }
 
-  // Digital actions: a source held => action held; edge from the previous pump.
+  // Digital actions: a source held => action held. The edge also takes the
+  // press the backend saw within the pump: a key tapped or a button clicked
+  // down and up inside one pump ends it released, so comparing levels across
+  // pumps alone would drop it. Gamepad buttons report levels only.
   for (int a = 0; a < action_count_; ++a) {
     bool held = false;
-    for (const Binding& b : action_[a])
-      if (SourceHeld(b, kbm, pad)) {
-        held = true;
-        break;
-      }
+    bool pressed = false;
+    for (const Binding& b : action_[a]) {
+      held = held || SourceHeld(b, kbm, pad);
+      pressed = pressed || SourcePressed(b, kbm);
+    }
     out->held[a] = held;
-    out->edge[a] = held && !prev_held_[a];
+    out->edge[a] = (held && !prev_held_[a]) || pressed;
     prev_held_[a] = held;
   }
 
