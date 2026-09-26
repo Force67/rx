@@ -41,6 +41,10 @@ struct ScriptStringView {
     BASE_FATAL_CHECK(s.size() <= base::MinMax<u32>::max(), "script string longer than u32");
     size = static_cast<u32>(s.size());
   }
+  // A base::String reaches base::StringRef through two viable constructor
+  // templates there; MSVC calls that ambiguous, so take it directly.
+  ScriptStringView(const base::String& s)  // NOLINT(google-explicit-constructor)
+      : ScriptStringView(base::StringRef(s.data(), s.size(), /*is_null_terminated=*/true)) {}
 
   base::StringRef view() const { return {data, size}; }
   operator base::StringRef() const { return view(); }  // NOLINT
