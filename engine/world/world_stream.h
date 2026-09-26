@@ -278,7 +278,8 @@ class RX_WORLD_EXPORT WorldStreamer {
   // other.
   struct CellBand {
     u64 cell = 0;
-    bool near = false;
+    // Not "near": <windows.h> defines near (and far) as empty macros.
+    bool near_tier = false;
   };
 
   // A cell whose payload failed to load. Cook errors are deterministic, so

@@ -210,8 +210,8 @@ Tier ResolveTier(const WorldIndexData& index, const WorldCellRecord& cell, Domai
 
 Tier TargetTier(const WorldIndexData& index, const WorldCellRecord& cell, Domain domain,
                 const DomainStreamPolicy& policy, f32 distance) {
-  const bool near = InNearTierBand(policy, distance, /*currently_near=*/false);
-  return ResolveTier(index, cell, domain, near ? policy.near_tier : policy.far_tier);
+  const bool in_near_band = InNearTierBand(policy, distance, /*currently_near=*/false);
+  return ResolveTier(index, cell, domain, in_near_band ? policy.near_tier : policy.far_tier);
 }
 
 }  // namespace rx::world

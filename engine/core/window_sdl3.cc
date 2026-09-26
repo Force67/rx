@@ -3,13 +3,13 @@
 
 #include <string.h>
 
-#include "core/log.h"
-#include "core/window.h"
-#if defined(RX_HAS_WAYLAND_KDE_HDR)
 #include "base/containers/vector.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
+#include "core/log.h"
 #include "core/scalar.h"
+#include "core/window.h"
+#if defined(RX_HAS_WAYLAND_KDE_HDR)
 #include "core/wayland_kde_hdr.h"
 #endif
 

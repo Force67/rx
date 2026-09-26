@@ -2,13 +2,13 @@
 
 #include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/numeric_limits.h"
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
 #include "shaders/pathtrace_cs_hlsl.h"
 #if defined(RX_HAS_NRD)
-#include "base/memory/mem_ops.h"
-#include "base/numeric_limits.h"
 #include "shaders/pathtrace_composite_cs_hlsl.h"
 #include "shaders/pathtrace_gbuffer_cs_hlsl.h"
 #endif
