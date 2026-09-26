@@ -33,7 +33,7 @@ bool StateEqual(const CloudscapeMapState& a, const CloudscapeMapState& b) {
 
 f32 QuantizeBlend(f32 blend) {
   constexpr f32 kSteps = 64.0f;
-  return ::round(rx::Clamp(blend, 0.0f, 1.0f) * kSteps) / kSteps;
+  return ::roundf(rx::Clamp(blend, 0.0f, 1.0f) * kSteps) / kSteps;
 }
 
 }  // namespace

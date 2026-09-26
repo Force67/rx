@@ -90,10 +90,10 @@ class Cursor {
 };
 
 bool Finite(const OverlayMove& move) {
-  return ::isfinite(move.position.x) && ::isfinite(move.position.y) &&
-         ::isfinite(move.position.z) && ::isfinite(move.rotation.x) &&
-         ::isfinite(move.rotation.y) && ::isfinite(move.rotation.z) &&
-         ::isfinite(move.rotation.w) && ::isfinite(move.scale);
+  return isfinite(move.position.x) && isfinite(move.position.y) &&
+         isfinite(move.position.z) && isfinite(move.rotation.x) &&
+         isfinite(move.rotation.y) && isfinite(move.rotation.z) &&
+         isfinite(move.rotation.w) && isfinite(move.scale);
 }
 
 }  // namespace

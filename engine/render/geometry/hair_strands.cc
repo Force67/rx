@@ -451,9 +451,9 @@ void HairStrands::SeedCap(Device& device, const Vec3& head_center, f32 head_radi
   for (u32 s = 0; s < strand_count; ++s) {
     f32 t = (static_cast<f32>(s) + 0.5f) / strand_count;
     f32 y = 0.45f + 0.55f * t;
-    f32 r = ::sqrt(rx::Max(0.0f, 1.0f - y * y));
+    f32 r = ::sqrtf(rx::Max(0.0f, 1.0f - y * y));
     f32 a = golden * static_cast<f32>(s);
-    Vec3 nrm{r * ::cos(a), y, r * ::sin(a)};
+    Vec3 nrm{r * ::cosf(a), y, r * ::sinf(a)};
     Vec3 root = nrm * head_radius;  // local: scalp at origin
     for (u32 i = 0; i < kPointsPerStrand; ++i) {
       Vec3 p = root + nrm * (segment * static_cast<f32>(i));
@@ -526,13 +526,13 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
   const Vec3 centre{(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
   const Vec3 extent_v{hi.x - lo.x, hi.y - lo.y, hi.z - lo.z};
   const f32 radius =
-      0.5f * ::sqrt(extent_v.x * extent_v.x + extent_v.y * extent_v.y +
+      0.5f * ::sqrtf(extent_v.x * extent_v.x + extent_v.y * extent_v.y +
                        extent_v.z * extent_v.z) +
       0.02f;
   const Vec3 dir = Normalize(frame.sun_direction);
   const Vec3 eye{centre.x - dir.x * (radius * 2.0f), centre.y - dir.y * (radius * 2.0f),
                  centre.z - dir.z * (radius * 2.0f)};
-  const Vec3 up_ref = ::abs(dir.y) > 0.99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
+  const Vec3 up_ref = ::fabsf(dir.y) > 0.99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
   const f32 depth_range = radius * 4.0f;
   const Mat4 light_vp = Orthographic(-radius, radius, -radius, radius, 0.0f, depth_range) *
                         LookAt(eye, centre, up_ref);

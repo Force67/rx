@@ -70,7 +70,7 @@ VehicleAudio::~VehicleAudio() { Stop(); }
 
 void VehicleAudio::SetLayerGain(Layer& layer, f32 gain) {
   if (!layer.voice) return;
-  if (::abs(gain - layer.sent_gain) < kGainEpsilon) return;
+  if (::fabsf(gain - layer.sent_gain) < kGainEpsilon) return;
   mixer_->SetVoiceGain(layer.voice, gain);
   layer.sent_gain = gain;
 }
@@ -122,7 +122,7 @@ void VehicleAudio::Update(const VehicleAudioState& state) {
   SynthParams params;
   params.rpm = state.rpm;
   params.load = state.load;
-  params.throttle = ::fabs(state.throttle);  // signed input (astern); use its magnitude
+  params.throttle = ::fabsf(state.throttle);  // signed input (astern); use its magnitude
   params.speed_mps = state.speed_mps;
   params.slip = slip;
   params.muffle = state.submerged ? 1.0f : 0.0f;  // synth-side dark/duck (smoothed)

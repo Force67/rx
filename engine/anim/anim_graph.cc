@@ -100,7 +100,7 @@ kinema::OwnedClip BakeGait(const kinema::Skeleton& sk, u32 frames, f32 rate, con
   for (u32 fr = 0; fr < frames; ++fr) {
     const f32 phase = static_cast<f32>(fr) / static_cast<f32>(frames - 1);  // 0..1, wraps
     const f32 theta = phase * kTwoPi;
-    const f32 leg = ::sin(theta);
+    const f32 leg = ::sinf(theta);
 
     for (u32 bone = 0; bone < bones; ++bone) {
       kinema::Quat rot = sk.bind_rotation[bone];
@@ -108,19 +108,19 @@ kinema::OwnedClip BakeGait(const kinema::Skeleton& sk, u32 frames, f32 rate, con
       if (is(j.l_thigh)) rot = Compose(rot, x, amp.thigh * leg);
       else if (is(j.r_thigh)) rot = Compose(rot, x, -amp.thigh * leg);
       else if (is(j.l_calf))
-        rot = Compose(rot, x, -amp.knee * Clamp01(-::sin(theta - 0.6f)));
+        rot = Compose(rot, x, -amp.knee * Clamp01(-::sinf(theta - 0.6f)));
       else if (is(j.r_calf))
-        rot = Compose(rot, x, -amp.knee * Clamp01(-::sin(theta + kPi - 0.6f)));
+        rot = Compose(rot, x, -amp.knee * Clamp01(-::sinf(theta + kPi - 0.6f)));
       else if (is(j.l_arm)) rot = Compose(rot, x, -amp.arm * leg);
       else if (is(j.r_arm)) rot = Compose(rot, x, amp.arm * leg);
-      else if (is(j.spine1)) rot = Compose(rot, z, amp.spine * ::cos(theta));
+      else if (is(j.spine1)) rot = Compose(rot, z, amp.spine * ::cosf(theta));
       else if (is(j.spine)) rot = Compose(rot, x, amp.lean);  // constant forward lean
       b.SetSample(fr, bone, sk.bind_translation[bone], rot, sk.bind_scale[bone]);
     }
     if (curve >= 0) {
       // Two intensity pulses per cycle, peaking at the footfalls.
-      f32 pL = ::exp(-::pow((phase - 0.25f) * 6.0f, 2.0f));
-      f32 pR = ::exp(-::pow((phase - 0.75f) * 6.0f, 2.0f));
+      f32 pL = ::expf(-::powf((phase - 0.25f) * 6.0f, 2.0f));
+      f32 pR = ::expf(-::powf((phase - 0.75f) * 6.0f, 2.0f));
       b.SetCurveSample(fr, static_cast<u32>(curve), rx::Max(pL, pR));
     }
   }

@@ -121,14 +121,14 @@ void Editor::SetupDefaultTerrain() {
           const i32 grid_z = tile_z * static_cast<i32>(quads) + static_cast<i32>(z);
           const f32 world_x = grid_x * spacing;
           const f32 world_z = grid_z * spacing;
-          const f32 broad = 0.46f * ::sin(world_x * 0.22f) * ::cos(world_z * 0.18f);
-          const f32 detail = 0.17f * ::sin((world_x + world_z) * 0.48f) +
-                             0.10f * ::cos((world_x - world_z) * 0.61f);
-          const f32 knoll = 0.30f * ::exp(-(world_x * world_x + world_z * world_z) / 95.0f);
+          const f32 broad = 0.46f * ::sinf(world_x * 0.22f) * ::cosf(world_z * 0.18f);
+          const f32 detail = 0.17f * ::sinf((world_x + world_z) * 0.48f) +
+                             0.10f * ::cosf((world_x - world_z) * 0.61f);
+          const f32 knoll = 0.30f * ::expf(-(world_x * world_x + world_z * world_z) / 95.0f);
           const size_t sample = static_cast<size_t>(z) * side + x;
           heights[sample] = broad + detail + knoll;
 
-          const f32 patch = ::sin(world_x * 0.31f) * ::cos(world_z * 0.27f);
+          const f32 patch = ::sinf(world_x * 0.31f) * ::cosf(world_z * 0.27f);
           if (heights[sample] > 0.62f) {
             weights[sample].rgba = {40, 25, 190, 0};
           } else if (heights[sample] < -0.25f) {
@@ -235,7 +235,7 @@ base::Pair<Vec3, Vec3> Editor::ViewportCameraRay(f32 mx, f32 my) const {
   const f32 height = static_cast<f32>(window_->height());
   const f32 ndc_x = 2.0f * mx / width - 1.0f;
   const f32 ndc_y = 1.0f - 2.0f * my / height;
-  const f32 tan_half_fov = ::tan(1.0472f * 0.5f);
+  const f32 tan_half_fov = ::tanf(1.0472f * 0.5f);
   const Vec3 forward = camera_.forward();
   const Vec3 right = Normalize(Cross(forward, {0, 1, 0}));
   const Vec3 up = Cross(right, forward);
@@ -425,7 +425,7 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
     if (terrain_cursor_hit_) {
       position = terrain_cursor_hit_->position;
     } else {
-      const f32 plane_t = ::fabs(direction.y) > 1e-5f ? -origin.y / direction.y : -1.0f;
+      const f32 plane_t = ::fabsf(direction.y) > 1e-5f ? -origin.y / direction.y : -1.0f;
       position = plane_t > 0 ? origin + direction * plane_t : origin + direction * 5.0f;
     }
     position.y += vertical_offset;
@@ -516,8 +516,8 @@ void Editor::AppendInteractionPreview(base::Vector<render::DebugLine>* lines) co
   Vec3 previous;
   for (int i = 0; i <= kSegments; ++i) {
     const f32 angle = static_cast<f32>(i) * 6.2831853f / kSegments;
-    Vec3 point{center.x + ::cos(angle) * radius, center.y + 0.035f,
-               center.z + ::sin(angle) * radius};
+    Vec3 point{center.x + ::cosf(angle) * radius, center.y + 0.035f,
+               center.z + ::sinf(angle) * radius};
     if (editor_mode_ == EditorMode::kTerrain) {
       if (base::Optional<f32> y = terrain_.SampleHeight(point.x, point.z)) point.y = *y + 0.035f;
     }

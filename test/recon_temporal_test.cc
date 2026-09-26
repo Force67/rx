@@ -119,8 +119,8 @@ int main() {
     f32 values[12]{};
     check(device->ReadbackImage(moments, ResourceState::kGeneral, values, sizeof(values)),
           "read back temporal moments");
-    for (f32 value : values) check(::isfinite(value), "HDR moments must remain finite");
-    check(::abs(values[5] - 1000000.0f) < 1.0f, "squared HDR luminance must not overflow");
+    for (f32 value : values) check(isfinite(value), "HDR moments must remain finite");
+    check(::fabsf(values[5] - 1000000.0f) < 1.0f, "squared HDR luminance must not overflow");
     check(values[7] == 1.0f, "reset or invalid history must seed one frame");
     u16 half[12]{};
     check(device->ReadbackImage(accum, ResourceState::kGeneral, half, sizeof(half)),

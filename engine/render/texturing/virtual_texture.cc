@@ -141,15 +141,15 @@ void VirtualTexture::GeneratePage(const PageKey& key, base::Vector<u8>* pixels) 
       f32 u = vx / virtual_size, v = vy / virtual_size;
 
       // Base: two-tone checker drifting through hue across the space.
-      f32 checker = (static_cast<i32>(::floor(vx / 64.0f)) ^
-                     static_cast<i32>(::floor(vy / 64.0f))) & 1
+      f32 checker = (static_cast<i32>(::floorf(vx / 64.0f)) ^
+                     static_cast<i32>(::floorf(vy / 64.0f))) & 1
                         ? 0.55f
                         : 0.45f;
       f32 r = checker * (0.6f + 0.4f * u);
       f32 g = checker * (0.6f + 0.4f * v);
       f32 b = checker * (0.6f + 0.4f * (1.0f - u));
       // Coarse grid lines every 1024 virtual texels.
-      f32 gx = ::fmod(vx, 1024.0f), gy = ::fmod(vy, 1024.0f);
+      f32 gx = ::fmodf(vx, 1024.0f), gy = ::fmodf(vy, 1024.0f);
       if (gx < 3.0f * scale || gy < 3.0f * scale) {
         r = g = b = 0.05f;
       }

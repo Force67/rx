@@ -96,9 +96,9 @@ void LocalShadows::Assign(PointLight* lights, u32 count, const Vec3& camera, u32
       if (type == 1) {  // spot: one face down the cone, slightly overscanned
         Vec3 dir = Normalize(Vec3{light.direction_type[0], light.direction_type[1],
                                   light.direction_type[2]});
-        Vec3 up = ::abs(dir.y) < 0.99f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+        Vec3 up = ::fabsf(dir.y) < 0.99f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
         view = LookAt(pos, pos + dir, up);
-        f32 outer = ::acos(rx::Clamp(light.params[1], -1.0f, 1.0f));
+        f32 outer = ::acosf(rx::Clamp(light.params[1], -1.0f, 1.0f));
         fov = rx::Clamp(2.2f * outer, 0.2f, 2.9f);
       } else {  // point: 95-degree cube faces so the sampling inset stays valid
         view = LookAt(pos, pos + kFaceDirs[f], kFaceUps[f]);

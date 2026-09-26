@@ -32,14 +32,14 @@ f32 SafeLerpT(f32 t, f32 a, f32 b) { return b - a > 1e-5f ? rx::Clamp((t - a) / 
 // Random direction in a cone of half angle `spread` around `axis`.
 Vec3 ConeDirection(const Vec3& axis, f32 spread, u32& rng) {
   if (spread <= 1e-3f) return axis;
-  Vec3 ref = ::abs(axis.y) < 0.95f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+  Vec3 ref = ::fabsf(axis.y) < 0.95f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
   Vec3 t = Normalize(Cross(ref, axis));
   Vec3 b = Cross(axis, t);
   f32 angle = spread * RandUnit(rng);
   f32 azimuth = 6.2831853f * RandUnit(rng);
-  f32 s = ::sin(angle);
-  return Normalize(axis * ::cos(angle) + t * (s * ::cos(azimuth)) +
-                   b * (s * ::sin(azimuth)));
+  f32 s = ::sinf(angle);
+  return Normalize(axis * ::cosf(angle) + t * (s * ::cosf(azimuth)) +
+                   b * (s * ::sinf(azimuth)));
 }
 
 }  // namespace
@@ -78,11 +78,11 @@ void ParticleEmitterSim::AddInstance(u64 mesh_key,
       Vec3 ex = TransformDir(transform, {emitter.extent[0], 0, 0});
       Vec3 ey = TransformDir(transform, {0, emitter.extent[1], 0});
       Vec3 ez = TransformDir(transform, {0, 0, emitter.extent[2]});
-      fresh.extent = {::abs(ex.x) + ::abs(ey.x) + ::abs(ez.x),
-                      ::abs(ex.y) + ::abs(ey.y) + ::abs(ez.y),
-                      ::abs(ex.z) + ::abs(ey.z) + ::abs(ez.z)};
+      fresh.extent = {::fabsf(ex.x) + ::fabsf(ey.x) + ::fabsf(ez.x),
+                      ::fabsf(ex.y) + ::fabsf(ey.y) + ::fabsf(ez.y),
+                      ::fabsf(ex.z) + ::fabsf(ey.z) + ::fabsf(ez.z)};
       // Uniform scale of the instance transform, for the scalar quantities.
-      f32 scale = ::sqrt(LengthSq(TransformDir(transform, {1, 0, 0})));
+      f32 scale = ::sqrtf(LengthSq(TransformDir(transform, {1, 0, 0})));
       fresh.spread = emitter.spread;
       fresh.speed_variation = emitter.speed_variation * scale;
       fresh.rate = emitter.rate;
@@ -128,7 +128,7 @@ void ParticleEmitterSim::Step(Pool& pool) {
   }
 
   pool.spawn_accumulator = rx::Min(pool.spawn_accumulator + pool.rate * dt_, 8.0f);
-  f32 speed = ::sqrt(LengthSq(pool.velocity));
+  f32 speed = ::sqrtf(LengthSq(pool.velocity));
   Vec3 axis = speed > 1e-4f ? pool.velocity * (1.0f / speed) : Vec3{0, 1, 0};
   while (pool.spawn_accumulator >= 1.0f && pool.particles.size() < pool.max_particles) {
     pool.spawn_accumulator -= 1.0f;

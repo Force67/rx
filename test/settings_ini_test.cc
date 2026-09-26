@@ -37,7 +37,7 @@ int main() {
   settings.cloud_coverage = 0.5f;
   Check(rx::render::ApplyIni("cloud_coverage = nan", settings) == 0,
         "non-finite floats are rejected");
-  Check(::isfinite(settings.cloud_coverage) &&
+  Check(isfinite(settings.cloud_coverage) &&
             settings.cloud_coverage == 0.5f,
         "a rejected float leaves the setting unchanged");
 

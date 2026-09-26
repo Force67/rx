@@ -42,9 +42,9 @@ void PrecipOcclusion::BeginFrame(const Vec3& eye, u32 frame_index) {
   // Quantize the anchor to the coarse cell: the projection window only ever
   // moves in whole cells (which are whole texels), so map content never
   // shimmers under camera motion; between cells the map is simply reused.
-  f32 ax = ::floor(eye.x / kAnchorCell + 0.5f) * kAnchorCell;
-  f32 ay = ::floor(eye.y / kAnchorCell + 0.5f) * kAnchorCell;
-  f32 az = ::floor(eye.z / kAnchorCell + 0.5f) * kAnchorCell;
+  f32 ax = ::floorf(eye.x / kAnchorCell + 0.5f) * kAnchorCell;
+  f32 ay = ::floorf(eye.y / kAnchorCell + 0.5f) * kAnchorCell;
+  f32 az = ::floorf(eye.z / kAnchorCell + 0.5f) * kAnchorCell;
   if (ax != center_[0] || ay != center_[1] || az != center_[2]) dirty_ = true;
   // Cheap steady-state refresh so doors/moving cover eventually update.
   if (frame_index % kRefreshFrames == 0) dirty_ = true;

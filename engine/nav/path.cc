@@ -23,12 +23,12 @@ f32 TriArea2(const Vec3& a, const Vec3& b, const Vec3& c) {
 f32 PlanarDist(const Vec3& a, const Vec3& b) {
   const f32 dx = a.x - b.x;
   const f32 dz = a.z - b.z;
-  return ::sqrt(dx * dx + dz * dz);
+  return ::sqrtf(dx * dx + dz * dz);
 }
 
 f32 Octile(CellRef a, CellRef b, f32 cell_size) {
-  const f32 dx = ::fabs(static_cast<f32>(a.x - b.x));
-  const f32 dz = ::fabs(static_cast<f32>(a.z - b.z));
+  const f32 dx = ::fabsf(static_cast<f32>(a.x - b.x));
+  const f32 dz = ::fabsf(static_cast<f32>(a.z - b.z));
   const f32 lo = rx::Min(dx, dz);
   const f32 hi = rx::Max(dx, dz);
   return (hi + 0.41421356f * lo) * cell_size;

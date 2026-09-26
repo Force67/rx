@@ -19,7 +19,7 @@ V3 Load(const f32 v[3]) { return {v[0], v[1], v[2]}; }
 f32 Dot(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 V3 Add(V3 a, V3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 V3 Norm(V3 a) {
-  f32 len = ::sqrt(rx::Max(Dot(a, a), 1e-20f));
+  f32 len = ::sqrtf(rx::Max(Dot(a, a), 1e-20f));
   return {a.x / len, a.y / len, a.z / len};
 }
 f32 Sat(f32 x) { return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x); }
@@ -31,8 +31,8 @@ f32 D_GGX(f32 ndh, f32 a) {
 }
 f32 V_Smith(f32 ndv, f32 ndl, f32 a) {
   f32 a2 = a * a;
-  f32 gv = ndl * ::sqrt(ndv * ndv * (1.0f - a2) + a2);
-  f32 gl = ndv * ::sqrt(ndl * ndl * (1.0f - a2) + a2);
+  f32 gv = ndl * ::sqrtf(ndv * ndv * (1.0f - a2) + a2);
+  f32 gl = ndv * ::sqrtf(ndl * ndl * (1.0f - a2) + a2);
   return 0.5f / rx::Max(gv + gl, 1e-5f);
 }
 
@@ -365,14 +365,14 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
   if (cos_d > 0.0f) {
     V3 hd = Norm(Add(l, v));
     f32 ldh = Sat(Dot(l, hd));
-    f32 gv = ::pow(Sat(1.0f - ndv_d), rx::Max(p.diffuse_fresnel_falloff, 1e-2f));
-    f32 gl = ::pow(Sat(1.0f - Sat(ndl_d)),
+    f32 gv = ::powf(Sat(1.0f - ndv_d), rx::Max(p.diffuse_fresnel_falloff, 1e-2f));
+    f32 gl = ::powf(Sat(1.0f - Sat(ndl_d)),
                       rx::Max(p.diffuse_fresnel_tangent_falloff, 1e-2f));
     f32 fresnel = (1.0f + p.diffuse_fresnel_peak * gv) * (1.0f + p.diffuse_fresnel_peak * gl);
     f32 fd90 = p.retroreflection_peak * ldh * ldh;
-    f32 rv = 1.0f + fd90 * ::pow(Sat(1.0f - ndv_d),
+    f32 rv = 1.0f + fd90 * ::powf(Sat(1.0f - ndv_d),
                                     rx::Max(p.retroreflection_tangent_falloff, 1e-2f));
-    f32 rl = 1.0f + fd90 * ::pow(Sat(1.0f - Sat(ndl_d)),
+    f32 rl = 1.0f + fd90 * ::powf(Sat(1.0f - Sat(ndl_d)),
                                     rx::Max(p.retroreflection_falloff, 1e-2f));
     f32 shaping = rx::Max(fresnel * rv * rl, 0.0f);
     for (int c = 0; c < 3; ++c) out.diffuse[c] = base_color[c] * (1.0f / kPi) * shaping * cos_d;
@@ -389,8 +389,8 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
     f32 rough = roughness;
     solid_angle *= Sat(p.light_shape_response);
     if (solid_angle > 0.0f) {
-      f32 widen = Sat(::sqrt(solid_angle / kPi) * 0.5f);
-      rough = Sat(::sqrt(roughness * roughness + widen * widen));
+      f32 widen = Sat(::sqrtf(solid_angle / kPi) * 0.5f);
+      rough = Sat(::sqrtf(roughness * roughness + widen * widen));
     }
     f32 a1 = rx::Max(rough * rough, 1e-5f);
     f32 core = D_GGX(ndh, a1) * V_Smith(ndv, ndl, a1);
@@ -402,14 +402,14 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
       f32 w = Sat(p.secondary_specular_weight);
       lobe = core + (tail - core) * w;
     }
-    f32 fpow = ::pow(Sat(1.0f - vdh), rx::Max(p.specular_fresnel_falloff, 1e-2f));
+    f32 fpow = ::powf(Sat(1.0f - vdh), rx::Max(p.specular_fresnel_falloff, 1e-2f));
     for (int c = 0; c < 3; ++c) {
       f32 f = f0[c] + (1.0f - f0[c]) * fpow;
       out.specular[c] = lobe * f * ndl;
     }
     if (p.corneal_wetness > 0.0f) {
       f32 wa = rx::Max(0.02f * 0.02f, 1e-5f);
-      f32 wf = (0.02f + 0.98f * ::pow(Sat(1.0f - vdh), 5.0f)) * Sat(p.corneal_wetness);
+      f32 wf = (0.02f + 0.98f * ::powf(Sat(1.0f - vdh), 5.0f)) * Sat(p.corneal_wetness);
       f32 wet = D_GGX(ndh, wa) * V_Smith(ndv, ndl, wa) * ndl;
       for (int c = 0; c < 3; ++c) {
         out.specular[c] = out.specular[c] * (1.0f - wf) + wet * wf;
@@ -421,7 +421,7 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
   if (p.transmission > 0.0f && ndl_d < 0.35f) {
     f32 optical =
         rx::Max(p.extinction_scale * thickness / rx::Max(p.mean_free_path * p.subsurface_scale, 1e-4f), 0.0f);
-    f32 attenuation = ::exp(-optical);
+    f32 attenuation = ::expf(-optical);
     f32 back = Sat(Dot(v, {-l.x, -l.y, -l.z}));
     f32 lobe = back * back * Sat(0.35f - ndl_d) / 0.35f;
     for (int c = 0; c < 3; ++c) {
@@ -463,7 +463,7 @@ HumanBrdfSample StockBrdfCpu(const f32 base_color[3], f32 roughness, const f32 f
   f32 vdh = Sat(Dot(v, h));
   f32 a = rx::Max(roughness * roughness, 1e-5f);
   f32 lobe = D_GGX(ndh, a) * V_Smith(ndv, ndl, a);
-  f32 fpow = ::pow(Sat(1.0f - vdh), 5.0f);
+  f32 fpow = ::powf(Sat(1.0f - vdh), 5.0f);
   for (int c = 0; c < 3; ++c) {
     out.diffuse[c] = base_color[c] * (1.0f / kPi) * ndl;
     f32 f = f0[c] + (1.0f - f0[c]) * fpow;

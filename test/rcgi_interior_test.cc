@@ -24,7 +24,7 @@ int g_failures = 0;
     }                                                                          \
   } while (0)
 
-bool Near(f32 a, f32 b, f32 eps) { return ::fabs(a - b) <= eps; }
+bool Near(f32 a, f32 b, f32 eps) { return ::fabsf(a - b) <= eps; }
 
 }  // namespace
 

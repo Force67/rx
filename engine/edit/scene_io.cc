@@ -97,7 +97,7 @@ const char* ReadFloat(const base::String& token, f32* out) {
   char* end = nullptr;
   const f32 v = ::strtof(token.c_str(), &end);
   if (end == token.c_str() || *end != '\0') return "is not a number";
-  if (!::isfinite(v)) return "is not finite";
+  if (!isfinite(v)) return "is not finite";
   *out = v;
   return nullptr;
 }
@@ -152,8 +152,8 @@ base::String QuatProblem(const base::Vector<f32>& v) {
   // (0.7 0 0 0.7 is only 1% short) and well inside a visible mis-scale. Same
   // tolerance as --validate's non_unit_rotation, so the two agree on what is
   // merely rounded and what is wrong.
-  const f32 length = ::sqrt(length_sq);
-  if (::abs(length - 1.0f) > 0.05f)
+  const f32 length = ::sqrtf(length_sq);
+  if (::fabsf(length - 1.0f) > 0.05f)
     return rx::StrFormat("length {} scales the mesh by that on top of Transform.scale", length);
   return {};
 }
@@ -238,7 +238,7 @@ bool SaveScene(ecs::World& world, const base::String& file_path, base::String* e
         PropValue value;
         if (!GetProp(world, e, *comp, prop, &value)) continue;
         for (u32 lane = 0; lane < lanes; ++lane) {
-          if (::isfinite(value.f[lane])) continue;
+          if (isfinite(value.f[lane])) continue;
           if (error)
             *error = rx::StrFormat("{}.{} on entity {} is {}; the scene format has no literal for "
                                  "it, so nothing was written",

@@ -40,13 +40,13 @@ constexpr u32 kRate = 48000;
 
 bool AllFinite(const base::Vector<f32>& b) {
   for (f32 v : b)
-    if (!::isfinite(v)) return false;
+    if (!isfinite(v)) return false;
   return true;
 }
 
 f32 MaxAbs(const base::Vector<f32>& b) {
   f32 m = 0.0f;
-  for (f32 v : b) m = rx::Max(m, ::fabs(v));
+  for (f32 v : b) m = rx::Max(m, ::fabsf(v));
   return m;
 }
 
@@ -58,14 +58,14 @@ f32 Rms(const base::Vector<f32>& b) {
 
 f32 MaxDelta(const base::Vector<f32>& b) {
   f32 m = 0.0f;
-  for (size_t i = 1; i < b.size(); ++i) m = rx::Max(m, ::fabs(b[i] - b[i - 1]));
+  for (size_t i = 1; i < b.size(); ++i) m = rx::Max(m, ::fabsf(b[i] - b[i - 1]));
   return m;
 }
 
 // One-pole low-pass in place, to isolate the firing fundamental from the noise
 // bed before counting zero crossings.
 void LowPass(base::Vector<f32>& b, f32 cutoff) {
-  const f32 a = 1.0f - ::exp(-6.28318531f * cutoff / kRate);
+  const f32 a = 1.0f - ::expf(-6.28318531f * cutoff / kRate);
   f32 s = 0.0f;
   for (f32& v : b) {
     s += a * (v - s);
@@ -276,8 +276,8 @@ void TestMixerIntegration() {
   for (int i = 0; i < 40; ++i) {
     mixer.MixInto(out.data(), 1024);
     for (f32 v : out) {
-      CHECK(::isfinite(v));
-      peak = rx::Max(peak, ::fabs(v));
+      CHECK(isfinite(v));
+      peak = rx::Max(peak, ::fabsf(v));
     }
   }
   CHECK(peak > 0.01f);      // the vehicle is audible in the mix
@@ -361,7 +361,7 @@ void TestSignedThrottleEquivalence() {
   const base::Vector<f32> astern = run(-0.6f);
   CHECK(ahead.size() == astern.size());
   f32 diff = 0.0f;
-  for (size_t i = 0; i < ahead.size(); ++i) diff = rx::Max(diff, ::fabs(ahead[i] - astern[i]));
+  for (size_t i = 0; i < ahead.size(); ++i) diff = rx::Max(diff, ::fabsf(ahead[i] - astern[i]));
   ::fprintf(stderr, "vehicle_audio_test: signed-throttle max diff=%.6g\n", diff);
   CHECK(Rms(ahead) > 0.005f);  // audible (so the equivalence is not trivial silence)
   CHECK(diff < 1e-6f);         // |−0.6| == |+0.6|: bit-for-bit identical
@@ -418,13 +418,13 @@ void TestPerWheelSlipPansSkid() {
   const base::Vector<f32> quad = render_side(balanced, 4, 0.0f);
   f32 diff = 0.0f;
   for (size_t i = 0; i < rx::Min(agg.size(), quad.size()); ++i)
-    diff = rx::Max(diff, ::fabs(agg[i] - quad[i]));
+    diff = rx::Max(diff, ::fabsf(agg[i] - quad[i]));
   const f32 aL = ChannelRms(agg, 0), aR = ChannelRms(agg, 1);
   ::fprintf(stderr, "vehicle_audio_test: skid fallback diff=%.6g balanced L=%.4f R=%.4f\n", diff,
                aL, aR);
   CHECK(Rms(agg) > 0.005f);                       // the skid is actually audible
   CHECK(diff < 1e-6f);                            // count=0 aggregate == 4 equal wheels
-  CHECK(::fabs(aL - aR) < 0.1f * (aL + aR));   // balanced slip stays centred
+  CHECK(::fabsf(aL - aR) < 0.1f * (aL + aR));   // balanced slip stays centred
 }
 
 // (4) A gear shift produces a bounded, click-free level excursion, and nothing at
@@ -470,7 +470,7 @@ void TestShiftFlare() {
   CHECK(up.worst < 0.15f);             // ... without a click
   CHECK(down.flr > down.ref * 1.05f);  // downshift audibly blips it up
   CHECK(down.worst < 0.15f);
-  CHECK(::fabs(none.flr - none.ref) < none.ref * 0.06f);  // flat when idle
+  CHECK(::fabsf(none.flr - none.ref) < none.ref * 0.06f);  // flat when idle
 
   // Mapping level: a gear left INT_MIN must yield no flare even as is_shifting
   // pulses, so the mix is bit-identical to a run that never touches either field.
@@ -495,7 +495,7 @@ void TestShiftFlare() {
   const base::Vector<f32> plain = run_gate(false);
   const base::Vector<f32> pulsed = run_gate(true);
   f32 gate_diff = 0.0f;
-  for (size_t i = 0; i < plain.size(); ++i) gate_diff = rx::Max(gate_diff, ::fabs(plain[i] - pulsed[i]));
+  for (size_t i = 0; i < plain.size(); ++i) gate_diff = rx::Max(gate_diff, ::fabsf(plain[i] - pulsed[i]));
   ::fprintf(stderr, "vehicle_audio_test: shift gate (unknown gear) diff=%.6g\n", gate_diff);
   CHECK(gate_diff < 1e-6f);  // unknown gear -> no flare, nothing changes
 }
@@ -574,7 +574,7 @@ void TestUpdateAfterStopAllIsSafe() {
     st.slip = 0.5f;
     va.Update(st);
     mixer.MixInto(out.data(), 1024);
-    for (f32 v : out) CHECK(::isfinite(v));
+    for (f32 v : out) CHECK(isfinite(v));
   }
   va.Stop();  // idempotent, also safe after the voices are gone
 }

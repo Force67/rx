@@ -41,9 +41,13 @@ struct ScriptStringView {
     BASE_FATAL_CHECK(s.size() <= base::MinMax<u32>::max(), "script string longer than u32");
     size = static_cast<u32>(s.size());
   }
+  // A base::String reaches base::StringRef through two viable constructor
+  // templates there; MSVC calls that ambiguous, so take it directly.
+  ScriptStringView(const base::String& s)  // NOLINT(google-explicit-constructor)
+      : ScriptStringView(base::StringRef(s.data(), s.size(), /*is_null_terminated=*/true)) {}
 
-  constexpr base::StringRef view() const { return {data, size}; }
-  constexpr operator base::StringRef() const { return view(); }  // NOLINT
+  base::StringRef view() const { return {data, size}; }
+  operator base::StringRef() const { return view(); }  // NOLINT
   bool empty() const { return size == 0; }
 };
 static_assert(sizeof(ScriptStringView) == 16, "ABI-boundary layout must stay fixed");
@@ -82,11 +86,11 @@ class ScriptString {
 
 // Interned identifier hash for handler/category names. Names are compile-time
 // tokens, not content, so dispatch keys on this 64-bit hash rather than dragging
-// a string type onto the hot path. FNV-1a, constexpr so a runtime can hash a
-// name once and dispatch by id.
+// a string type onto the hot path. FNV-1a, so a runtime can hash a name once
+// and dispatch by id.
 enum class StrId : u64 {};
 
-constexpr StrId HashStr(base::StringRef s) {
+inline StrId HashStr(base::StringRef s) {
   return static_cast<StrId>(Fnv1a(s));
 }
 

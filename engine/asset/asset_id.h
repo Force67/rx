@@ -26,7 +26,11 @@ struct AssetId {
   u64 hash = 0;
 
   bool operator==(const AssetId&) const = default;
-  auto operator<=>(const AssetId&) const = default;
+  // Spelled out rather than a defaulted <=>, which needs <compare>.
+  bool operator<(const AssetId& o) const { return hash < o.hash; }
+  bool operator<=(const AssetId& o) const { return hash <= o.hash; }
+  bool operator>(const AssetId& o) const { return hash > o.hash; }
+  bool operator>=(const AssetId& o) const { return hash >= o.hash; }
   explicit operator bool() const { return hash != 0; }
 };
 

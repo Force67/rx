@@ -75,7 +75,7 @@ f32 EvalDensityProgram(base::Span<const DensityOp> ops, const WorldData& world, 
         break;
       }
       case DensityOpCode::kPow:
-        push(::pow(rx::Max(pop(), 0.0f), op.a));
+        push(::powf(rx::Max(pop(), 0.0f), op.a));
         break;
     }
   }

@@ -20,12 +20,12 @@ constexpr u32 kSmoothChunk = 32;
 f32 ChunkAlpha(f32 tau_seconds, u32 rate) {
   if (tau_seconds <= 0.0f || rate == 0) return 1.0f;
   const f32 dt = static_cast<f32>(kSmoothChunk) / static_cast<f32>(rate);
-  return rx::Clamp(1.0f - ::exp(-dt / tau_seconds), 0.0f, 1.0f);
+  return rx::Clamp(1.0f - ::expf(-dt / tau_seconds), 0.0f, 1.0f);
 }
 
 // Replaces a non-finite telemetry value with zero so a stray NaN upstream can
 // never poison the smoother (a NaN would stick forever through the one-pole).
-f32 Sane(f32 v) { return ::isfinite(v) ? v : 0.0f; }
+f32 Sane(f32 v) { return isfinite(v) ? v : 0.0f; }
 
 }  // namespace
 
@@ -39,7 +39,7 @@ void ParamMailbox::Publish(const SynthParams& p) {
   clean.muffle = rx::Clamp(Sane(p.muffle), 0.0f, 1.0f);
   // thrust keeps its <0 "derive from rpm" sentinel; only a real request is
   // clamped into 0..1 (a NaN degrades to the sentinel, i.e. old behaviour).
-  clean.thrust = ::isfinite(p.thrust) ? (p.thrust < 0.0f ? -1.0f : rx::Clamp(p.thrust, 0.0f, 1.0f))
+  clean.thrust = isfinite(p.thrust) ? (p.thrust < 0.0f ? -1.0f : rx::Clamp(p.thrust, 0.0f, 1.0f))
                                          : -1.0f;
   clean.gear_shift = rx::Clamp(Sane(p.gear_shift), -1.0f, 1.0f);
   clean.skid_bias = rx::Clamp(Sane(p.skid_bias), -1.0f, 1.0f);

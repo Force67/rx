@@ -88,7 +88,7 @@ struct Scene {
   }
 };
 
-f32 HSpeed(const Vec3& v) { return ::sqrt(v.x * v.x + v.z * v.z); }
+f32 HSpeed(const Vec3& v) { return ::sqrtf(v.x * v.x + v.z * v.z); }
 
 }  // namespace
 
@@ -245,13 +245,13 @@ int main() {
     s.Step(20);
     for (int i = 0; i < 60 * 20; ++i) {
       const f32 t = i * kDt;
-      s.jin().enabled = ::sin(t * 3.1f) > 0.0f;
-      s.jin().thrust = ::sin(t * 7.3f) > 0.0f;
-      s.intent().move = {::sin(t * 2.0f), 0, ::cos(t * 1.3f)};
-      if (::sin(t * 5.0f) > 0.9f) s.intent().jump = true;
+      s.jin().enabled = ::sinf(t * 3.1f) > 0.0f;
+      s.jin().thrust = ::sinf(t * 7.3f) > 0.0f;
+      s.intent().move = {::sinf(t * 2.0f), 0, ::cosf(t * 1.3f)};
+      if (::sinf(t * 5.0f) > 0.9f) s.intent().jump = true;
       s.Step(1);
-      if (!::isfinite(s.feet_y()) || !::isfinite(s.jst().fuel) ||
-          !::isfinite(s.state().velocity.y))
+      if (!isfinite(s.feet_y()) || !isfinite(s.jst().fuel) ||
+          !isfinite(s.state().velocity.y))
         return Fail("(f) NaN under random input");
     }
     ::fprintf(stderr, "(f) random 20 s: finite, fuel=%.2f y=%.2f\n", s.jst().fuel, s.feet_y());

@@ -55,7 +55,7 @@ bool AxisRayCross(const Vec3& p, u32 axis, const Tri& t, f32& s) {
   Vec3 e1 = t.b - t.a, e2 = t.c - t.a;
   Vec3 pv = Cross(dir, e2);
   f32 det = Dot(e1, pv);
-  if (::fabs(det) < 1e-12f) return false;
+  if (::fabsf(det) < 1e-12f) return false;
   f32 inv = 1.0f / det;
   Vec3 tv = p - t.a;
   f32 u = Dot(tv, pv) * inv;
@@ -77,7 +77,7 @@ struct Grid {
 
   int Index(int x, int y, int z) const { return (z * n[1] + y) * n[0] + x; }
   int ClampCell(f32 v, int axis) const {
-    int c = static_cast<int>(::floor((v - (&origin.x)[axis]) / cell));
+    int c = static_cast<int>(::floorf((v - (&origin.x)[axis]) / cell));
     return rx::Clamp(c, 0, n[axis] - 1);
   }
 };
@@ -87,7 +87,7 @@ void BuildGrid(Grid& g, const base::Vector<Tri>& tris, const Vec3& box_min, cons
   g.origin = box_min;
   g.cell = cell;
   for (int a = 0; a < 3; ++a)
-    g.n[a] = rx::Max(1, static_cast<int>(::ceil((&box_ext.x)[a] / cell)));
+    g.n[a] = rx::Max(1, static_cast<int>(::ceilf((&box_ext.x)[a] / cell)));
   const int cells = g.n[0] * g.n[1] * g.n[2];
   base::Vector<u32> counts;
   counts.resize(static_cast<size_t>(cells) + 1, 0u);
@@ -95,8 +95,8 @@ void BuildGrid(Grid& g, const base::Vector<Tri>& tris, const Vec3& box_min, cons
     for (int a = 0; a < 3; ++a) {
       f32 mn = rx::Min({(&t.a.x)[a], (&t.b.x)[a], (&t.c.x)[a]});
       f32 mx = rx::Max({(&t.a.x)[a], (&t.b.x)[a], (&t.c.x)[a]});
-      lo[a] = rx::Clamp(static_cast<int>(::floor((mn - (&box_min.x)[a]) / cell)), 0, g.n[a] - 1);
-      hi[a] = rx::Clamp(static_cast<int>(::floor((mx - (&box_min.x)[a]) / cell)), 0, g.n[a] - 1);
+      lo[a] = rx::Clamp(static_cast<int>(::floorf((mn - (&box_min.x)[a]) / cell)), 0, g.n[a] - 1);
+      hi[a] = rx::Clamp(static_cast<int>(::floorf((mx - (&box_min.x)[a]) / cell)), 0, g.n[a] - 1);
     }
   };
   for (const Tri& t : tris) {
@@ -220,7 +220,7 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   u32 res[3];
   auto compute_res = [&]() {
     for (int a = 0; a < 3; ++a) {
-      u32 interior = static_cast<u32>(::ceil((&ext.x)[a] / voxel));
+      u32 interior = static_cast<u32>(::ceilf((&ext.x)[a] / voxel));
       res[a] = rx::Clamp(interior + 2u * kPad, 16u, 64u);
     }
   };
@@ -288,7 +288,7 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
               }
             }
           }
-          f32 dist = ::sqrt(best_sq);
+          f32 dist = ::sqrtf(best_sq);
 
           // Sign: 3-axis ray parity. An axis-aligned ray stays in one cell row,
           // so we only test that row; a hit counts once (cell-ownership dedup).

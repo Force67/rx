@@ -75,12 +75,12 @@ int main() {
     device->ImmediateSubmit([&](CommandList& cmd) { rt->BuildTlas(cmd, 0, frame, instances); });
   };
   build(0);
-  check(::abs(trace(0) - 1.0f) < 1e-5f, "compacted triangle must hit at distance 1");
+  check(::fabsf(trace(0) - 1.0f) < 1e-5f, "compacted triangle must hit at distance 1");
   check(rt->ReserveTlas(0, 65), "grow built TLAS");
   check(!rt->TlasValid(0), "replacement remains invalid until built");
   check(trace(0) == -1.0f, "replacement must use fallback before build");
   build(1);
-  check(::abs(trace(0) - 1.0f) < 1e-5f, "grown TLAS must hit after build");
+  check(::fabsf(trace(0) - 1.0f) < 1e-5f, "grown TLAS must hit after build");
   rt->RemoveBlasDeferred(1);
   check(trace(0) == -1.0f, "retired BLAS must invalidate TLAS");
   build(2);
@@ -101,7 +101,7 @@ int main() {
     cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelBuildWrite);
     rt->BuildTlas(cmd, 0, 4, instances);
   });
-  check(::abs(trace(0) - 1.0f) < 1e-5f, "built skinned BLAS must hit");
+  check(::fabsf(trace(0) - 1.0f) < 1e-5f, "built skinned BLAS must hit");
   check(rt->ReserveSkinnedBlas(3, geometry), "reserve refit target");
   instances[0].mesh_key = 3;
   device->ImmediateSubmit([&](CommandList& cmd) {
@@ -109,7 +109,7 @@ int main() {
     cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelBuildWrite);
     rt->BuildTlas(cmd, 0, 5, instances);
   });
-  check(::abs(trace(0) - 1.0f) < 1e-5f, "refitted BLAS must hit");
+  check(::fabsf(trace(0) - 1.0f) < 1e-5f, "refitted BLAS must hit");
 
   rt->RemoveSkinnedBlasDeferred(2);
   rt->RemoveSkinnedBlasDeferred(3);
@@ -141,7 +141,7 @@ int main() {
       skin.Record(cmd, *rt, bones);
       rt->BuildTlas(cmd, 0, frame, instances);
     });
-    check(::abs(trace(0) - (z + 1.0f)) < 1e-5f, "ray must hit the current skinned pose");
+    check(::fabsf(trace(0) - (z + 1.0f)) < 1e-5f, "ray must hit the current skinned pose");
   };
   pose(1, 6);
   check(skin.previous_custom_index(actor) == SkinnedRayTracing::kInvalidIndex,

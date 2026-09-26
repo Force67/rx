@@ -37,7 +37,7 @@ f32 RandomSigned(u32& state) { return RandomUnit(state) * 2.0f - 1.0f; }
 
 f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
   const f32 d = target - current;
-  if (::abs(d) <= max_delta) return target;
+  if (::fabsf(d) <= max_delta) return target;
   return current + (d > 0 ? max_delta : -max_delta);
 }
 
@@ -45,11 +45,11 @@ f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
 // of the remaining gap closed over `dt` for a given half-life.
 f32 ApproachFraction(f32 half_life, f32 dt) {
   if (half_life <= 0) return 1.0f;
-  return 1.0f - ::exp2(-dt / half_life);
+  return 1.0f - ::exp2f(-dt / half_life);
 }
 
 void Basis(const Vec3& forward, Vec3* right, Vec3* up) {
-  const Vec3 reference = ::abs(forward.y) > 0.99f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+  const Vec3 reference = ::fabsf(forward.y) > 0.99f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
   *right = Normalize(Cross(forward, reference));
   *up = Cross(*right, forward);
 }
@@ -60,17 +60,17 @@ void Basis(const Vec3& forward, Vec3* right, Vec3* up) {
 Vec3 ConeDirection(const Vec3& forward, f32 spread, u32& rng) {
   if (spread <= 0) return forward;
   const f32 angle = RandomUnit(rng) * kTwoPi;
-  const f32 radius = ::sqrt(RandomUnit(rng)) * ::tan(spread);
+  const f32 radius = ::sqrtf(RandomUnit(rng)) * ::tanf(spread);
   Vec3 right;
   Vec3 up;
   Basis(forward, &right, &up);
-  return Normalize(forward + right * (::cos(angle) * radius) +
-                   up * (::sin(angle) * radius));
+  return Normalize(forward + right * (::cosf(angle) * radius) +
+                   up * (::sinf(angle) * radius));
 }
 
 Vec3 SafeDirection(const Vec3& v) {
   const f32 length = Length(v);
-  if (!::isfinite(length) || length < 1e-6f) return {0, 0, -1};
+  if (!isfinite(length) || length < 1e-6f) return {0, 0, -1};
   return v * (1.0f / length);
 }
 
@@ -270,7 +270,7 @@ f32 AimFovScale(const Loadout& loadout, const WeaponCatalog& catalog) {
 
 void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const WeaponCatalog& catalog,
                  const HitRegistry& registry, CombatEvents& events, f32 dt) {
-  if (!::isfinite(dt) || dt <= 0) return;
+  if (!isfinite(dt) || dt <= 0) return;
 
   // Projectile entities are created after the walk: spawning inside World::Each
   // is a structural change that can skip or revisit rows.
@@ -472,7 +472,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
 }
 
 void StepViewRecoil(ecs::World& world, f32 dt) {
-  if (!::isfinite(dt) || dt <= 0) return;
+  if (!isfinite(dt) || dt <= 0) return;
   world.Each<ViewRecoil>([dt](ecs::Entity, ViewRecoil& recoil) {
     recoil.time_since_shot += dt;
     f32 pitch = 0;
@@ -506,7 +506,7 @@ void StepViewRecoil(ecs::World& world, f32 dt) {
 }
 
 void StepViewmodels(ecs::World& world, f32 dt) {
-  if (!::isfinite(dt) || dt <= 0) return;
+  if (!isfinite(dt) || dt <= 0) return;
   world.Each<Viewmodel, WeaponIntent>([&](ecs::Entity entity, Viewmodel& viewmodel,
                                           WeaponIntent& intent) {
     // Sway trails the look RATE, so a flick throws the weapon and holding still
@@ -527,7 +527,7 @@ void StepViewmodels(ecs::World& world, f32 dt) {
     viewmodel.bob_weight +=
         (bob_target - viewmodel.bob_weight) * ApproachFraction(viewmodel.bob_half_life, dt);
     viewmodel.bob_phase =
-        ::fmod(viewmodel.bob_phase + viewmodel.bob_rate * speed_ratio * dt, kTwoPi);
+        ::fmodf(viewmodel.bob_phase + viewmodel.bob_rate * speed_ratio * dt, kTwoPi);
 
     viewmodel.punch -= viewmodel.punch * ApproachFraction(viewmodel.punch_half_life, dt);
 
@@ -543,8 +543,8 @@ void StepViewmodels(ecs::World& world, f32 dt) {
 
     const f32 bob = viewmodel.bob_amplitude * viewmodel.bob_weight * hip;
     Vec3 target;
-    target.x = sway_x * hip + ::sin(viewmodel.bob_phase) * bob;
-    target.y = sway_y * hip + ::sin(viewmodel.bob_phase * 2.0f) * bob * 0.5f;
+    target.x = sway_x * hip + ::sinf(viewmodel.bob_phase) * bob;
+    target.y = sway_y * hip + ::sinf(viewmodel.bob_phase * 2.0f) * bob * 0.5f;
     target.z = -viewmodel.punch;
     target += viewmodel.ads_offset * ads;
 

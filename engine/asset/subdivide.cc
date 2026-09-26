@@ -195,7 +195,7 @@ void RecomputeNormalsTangents(MeshLod& lod) {
     f32 du1 = v1.uv[0] - v0.uv[0], dv1 = v1.uv[1] - v0.uv[1];
     f32 du2 = v2.uv[0] - v0.uv[0], dv2 = v2.uv[1] - v0.uv[1];
     f32 det = du1 * dv2 - du2 * dv1;
-    if (::fabs(det) > 1e-12f) {
+    if (::fabsf(det) > 1e-12f) {
       f32 r = 1.0f / det;
       Vec3 tan = (e1 * dv2 - e2 * dv1) * r;
       Vec3 bit = (e2 * du1 - e1 * du2) * r;
@@ -215,7 +215,7 @@ void RecomputeNormalsTangents(MeshLod& lod) {
     tan = tan - nrm * Dot(nrm, tan);  // Gram-Schmidt
     if (Dot(tan, tan) < 1e-10f) {
       // Degenerate uv: pick any axis orthogonal to the normal.
-      Vec3 axis = ::fabs(nrm.x) < 0.9f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+      Vec3 axis = ::fabsf(nrm.x) < 0.9f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
       tan = Cross(axis, nrm);
     }
     tan = Normalize(tan);

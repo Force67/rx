@@ -14,10 +14,10 @@ namespace {
 constexpr f32 kDistanceQuantization = 1024.0f;
 
 bool IsFinite(const Vec3& value) {
-  return ::isfinite(value.x) && ::isfinite(value.y) && ::isfinite(value.z);
+  return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
 }
 
-f32 NonNegative(f32 value) { return ::isfinite(value) && value > 0 ? value : 0; }
+f32 NonNegative(f32 value) { return isfinite(value) && value > 0 ? value : 0; }
 
 u8 SanitizeAxes(u8 axes) {
   axes &= kWorldStreamXYZ;
@@ -27,8 +27,8 @@ u8 SanitizeAxes(u8 axes) {
 WorldStreamObservation SanitizeObservation(WorldStreamObservation observer) {
   observer.axes = SanitizeAxes(observer.axes);
   auto sanitize_axis = [&](u8 axis, f32* position, f32* velocity) {
-    if ((observer.axes & axis) == 0 && !::isfinite(*position)) *position = 0;
-    if (!::isfinite(*velocity)) *velocity = 0;
+    if ((observer.axes & axis) == 0 && !isfinite(*position)) *position = 0;
+    if (!isfinite(*velocity)) *velocity = 0;
   };
   sanitize_axis(kWorldStreamX, &observer.position.x, &observer.velocity.x);
   sanitize_axis(kWorldStreamY, &observer.position.y, &observer.velocity.y);
@@ -42,9 +42,9 @@ WorldStreamObservation SanitizeObservation(WorldStreamObservation observer) {
 }
 
 bool HasFiniteActivePosition(const WorldStreamObservation& observer) {
-  return ((observer.axes & kWorldStreamX) == 0 || ::isfinite(observer.position.x)) &&
-         ((observer.axes & kWorldStreamY) == 0 || ::isfinite(observer.position.y)) &&
-         ((observer.axes & kWorldStreamZ) == 0 || ::isfinite(observer.position.z));
+  return ((observer.axes & kWorldStreamX) == 0 || isfinite(observer.position.x)) &&
+         ((observer.axes & kWorldStreamY) == 0 || isfinite(observer.position.y)) &&
+         ((observer.axes & kWorldStreamZ) == 0 || isfinite(observer.position.z));
 }
 
 bool SanitizeRegion(const WorldStreamRegion& source, WorldStreamRegion* result) {
@@ -60,7 +60,7 @@ bool SanitizeRegion(const WorldStreamRegion& source, WorldStreamRegion* result) 
 }
 
 f32 SafeDistance(double distance) {
-  if (!::isfinite(distance) || distance > FLT_MAX) {
+  if (!isfinite(distance) || distance > FLT_MAX) {
     return INFINITY;
   }
   return static_cast<f32>(rx::Max(0.0, distance));
@@ -82,7 +82,7 @@ Vec3 PredictedPosition(const WorldStreamObservation& observer) {
           ? static_cast<double>(observer.velocity.z) * observer.prediction_seconds
           : 0.0,
   };
-  const double length = ::hypot(offset[0], offset[1], offset[2]);
+  const double length = rx::Hypot(offset[0], offset[1], offset[2]);
   if (length <= 0) return observer.position;
   const double scale =
       rx::Min(1.0, static_cast<double>(observer.maximum_prediction_distance) / length);
@@ -130,7 +130,7 @@ double PointSegmentDistance(double point_x, double point_y, double point_z, Vec3
             length_sq,
         0.0, 1.0);
   }
-  return ::hypot(relative[0] - segment[0] * t, relative[1] - segment[1] * t,
+  return rx::Hypot(relative[0] - segment[0] * t, relative[1] - segment[1] * t,
                     relative[2] - segment[2] * t);
 }
 
@@ -156,9 +156,9 @@ f32 SweptBoundsDistance(const Vec3& start, const Vec3& end, const WorldStreamReg
       (axes & kWorldStreamZ) ? (static_cast<double>(region.maximum.z) - region.minimum.z) * 0.5
                              : 0.0,
   };
-  const double radius = ::hypot(extent[0], extent[1], extent[2]);
+  const double radius = rx::Hypot(extent[0], extent[1], extent[2]);
   const double distance = PointSegmentDistance(center[0], center[1], center[2], start, end, axes);
-  if (!::isfinite(distance) || !::isfinite(radius)) {
+  if (!isfinite(distance) || !isfinite(radius)) {
     return PointBoundsDistance(start, region, axes);
   }
   return SafeDistance(rx::Max(0.0, distance - radius));

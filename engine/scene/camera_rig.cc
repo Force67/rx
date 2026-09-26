@@ -14,14 +14,14 @@ constexpr f32 kTwoPi = 2.0f * kPi;
 
 f32 BlendForHalfLife(f32 half_life, f32 dt) {
   if (half_life <= 0) return 1.0f;
-  return 1.0f - ::exp2(-dt / half_life);
+  return 1.0f - ::exp2f(-dt / half_life);
 }
 
 f32 MoveAngle(f32 current, f32 target, f32 amount) {
-  return current + ::remainder(target - current, kTwoPi) * amount;
+  return current + ::remainderf(target - current, kTwoPi) * amount;
 }
 
-f32 YawFromDirection(const Vec3& direction) { return ::atan2(direction.x, -direction.z); }
+f32 YawFromDirection(const Vec3& direction) { return ::atan2f(direction.x, -direction.z); }
 
 Quat OrbitRotation(f32 yaw, f32 pitch) {
   return Normalize(QuatFromAxisAngle({0, -1, 0}, yaw) * QuatFromAxisAngle({1, 0, 0}, pitch));
@@ -35,9 +35,9 @@ Quat LookRotation(const Vec3& direction, const Vec3& up_reference, const Quat& f
   if (Length(right) <= 1e-5f) right = Cross(forward, Rotate(fallback, Vec3{0, 1, 0}));
   if (Length(right) <= 1e-5f) {
     const Vec3 axis =
-        ::abs(forward.x) <= ::abs(forward.y) && ::abs(forward.x) <= ::abs(forward.z)
+        ::fabsf(forward.x) <= ::fabsf(forward.y) && ::fabsf(forward.x) <= ::fabsf(forward.z)
             ? Vec3{1, 0, 0}
-            : (::abs(forward.y) <= ::abs(forward.z) ? Vec3{0, 1, 0} : Vec3{0, 0, 1});
+            : (::fabsf(forward.y) <= ::fabsf(forward.z) ? Vec3{0, 1, 0} : Vec3{0, 0, 1});
     right = Cross(forward, axis);
   }
   right = Normalize(right);
@@ -99,9 +99,9 @@ CameraLens DampLens(const CameraLens& current, const CameraLens& target, f32 amo
 
   CameraLens lens = target;
   if (target.projection == CameraProjection::kPerspective) {
-    const f32 current_scale = ::tan(current.fov_y * 0.5f);
-    const f32 target_scale = ::tan(target.fov_y * 0.5f);
-    lens.fov_y = 2.0f * ::atan(rx::Lerp(current_scale, target_scale, amount));
+    const f32 current_scale = ::tanf(current.fov_y * 0.5f);
+    const f32 target_scale = ::tanf(target.fov_y * 0.5f);
+    lens.fov_y = 2.0f * ::atanf(rx::Lerp(current_scale, target_scale, amount));
   } else {
     lens.ortho_height = rx::Lerp(current.ortho_height, target.ortho_height, amount);
     lens.ortho_near = rx::Lerp(current.ortho_near, target.ortho_near, amount);
@@ -113,7 +113,7 @@ CameraLens DampLens(const CameraLens& current, const CameraLens& target, f32 amo
 }  // namespace
 
 void BuildCameraRigs(ecs::World& world, f32 dt) {
-  if (!::isfinite(dt) || dt < 0) dt = 0;
+  if (!isfinite(dt) || dt < 0) dt = 0;
 
   world.Each<CameraRigPose, CameraAnchor, CameraMode>([&](ecs::Entity entity, CameraRigPose& pose,
                                                           CameraAnchor& anchor, CameraMode& mode) {
@@ -165,7 +165,7 @@ void BuildCameraRigs(ecs::World& world, f32 dt) {
         const Quat anchor_rotation = Normalize(anchor.orientation);
 
         if (CameraRecenter* recenter = world.Get<CameraRecenter>(entity)) {
-          const bool manual = ::abs(yaw_delta) > 1e-6f || ::abs(pitch_delta) > 1e-6f;
+          const bool manual = ::fabsf(yaw_delta) > 1e-6f || ::fabsf(pitch_delta) > 1e-6f;
           if (manual) {
             recenter->idle_time = 0;
           } else {
@@ -237,7 +237,7 @@ void BuildCameraRigs(ecs::World& world, f32 dt) {
 }
 
 void PrepareCameraRigConstraints(ecs::World& world, f32 dt) {
-  if (!::isfinite(dt) || dt < 0) dt = 0;
+  if (!isfinite(dt) || dt < 0) dt = 0;
 
   world.Each<CameraRigPose, CameraAnchor, CameraMode>(
       [&](ecs::Entity entity, CameraRigPose& pose, CameraAnchor&, CameraMode&) {
@@ -265,7 +265,7 @@ void PrepareCameraRigConstraints(ecs::World& world, f32 dt) {
 }
 
 void ResolveCameraRigs(ecs::World& world, f32 dt) {
-  if (!::isfinite(dt) || dt < 0) dt = 0;
+  if (!isfinite(dt) || dt < 0) dt = 0;
 
   world.Each<CameraRigPose, CameraAnchor, CameraMode>([&](ecs::Entity entity, CameraRigPose& pose,
                                                           CameraAnchor& anchor, CameraMode& mode) {

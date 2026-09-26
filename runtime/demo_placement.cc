@@ -24,7 +24,7 @@ constexpr u32 kWorldResolution = 512;
 constexpr u32 kTerrainGrid = 384;
 
 // The road winds north-south through the world.
-f32 RoadCenter(f32 z) { return 90.0f * ::sin(z * 0.004f) + 30.0f * ::sin(z * 0.011f); }
+f32 RoadCenter(f32 z) { return 90.0f * ::sinf(z * 0.004f) + 30.0f * ::sinf(z * 0.011f); }
 constexpr f32 kRoadHalfWidth = 4.5f;
 
 // The lake basin carved into the height field.
@@ -66,12 +66,12 @@ f32 PlacementDemo::TerrainHeight(f32 x, f32 z) const {
   // Rolling hills with a broad ridge, softened toward the road and carved
   // into a basin around the lake.
   f32 height = 10.0f * Fbm(x, z, 420.0f, 101u, 4) + 3.0f * Fbm(x, z, 90.0f, 202u, 3);
-  f32 road_dist = ::fabs(x - RoadCenter(z));
+  f32 road_dist = ::fabsf(x - RoadCenter(z));
   f32 road_blend = rx::Min(road_dist / 22.0f, 1.0f);
   road_blend = road_blend * road_blend * (3.0f - 2.0f * road_blend);
   f32 dx = x - kLakeX;
   f32 dz = z - kLakeZ;
-  f32 lake_dist = ::sqrt(dx * dx + dz * dz);
+  f32 lake_dist = ::sqrtf(dx * dx + dz * dz);
   f32 basin = rx::Min(lake_dist / kLakeRadius, 1.0f);
   basin = basin * basin * (3.0f - 2.0f * basin);
   height = height * (0.35f + 0.65f * road_blend);  // road hugs gentler ground
@@ -97,7 +97,7 @@ void PlacementDemo::BuildWorldData() {
     return t * t * (3.0f - 2.0f * t);
   });
   world_.Generate(map_road_, [](f32 x, f32 z) {
-    f32 d = ::fabs(x - RoadCenter(z));
+    f32 d = ::fabsf(x - RoadCenter(z));
     return rx::Clamp(1.0f - (d - kRoadHalfWidth) / 4.0f, 0.0f, 1.0f);
   });
   world_.Generate(map_water_, [this](f32 x, f32 z) {
@@ -262,7 +262,7 @@ void PlacementDemo::BuildTerrainMesh() {
       const f32 dhz =
           world_.Sample(map_height_, x, z + h) - world_.Sample(map_height_, x, z - h);
       const f32 inv =
-          1.0f / ::sqrt(dhx * dhx + dhz * dhz + 4.0f * h * h);
+          1.0f / ::sqrtf(dhx * dhx + dhz * dhz + 4.0f * h * h);
       v.normal[0] = -dhx * inv;
       v.normal[1] = 2.0f * h * inv;
       v.normal[2] = -dhz * inv;

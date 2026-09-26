@@ -45,10 +45,10 @@ bool NavMesh::BuildTile(i32 tx, i32 tz, SampleFn& sample) {
 
 u32 NavMesh::EnsureBubble(const Vec3& center, f32 radius, SampleFn& sample, u32 max_tiles) {
   const f32 tile_m = config_.cell_size * static_cast<f32>(config_.tile_cells);
-  const i32 t0x = static_cast<i32>(::floor((center.x - radius) / tile_m));
-  const i32 t1x = static_cast<i32>(::floor((center.x + radius) / tile_m));
-  const i32 t0z = static_cast<i32>(::floor((center.z - radius) / tile_m));
-  const i32 t1z = static_cast<i32>(::floor((center.z + radius) / tile_m));
+  const i32 t0x = static_cast<i32>(::floorf((center.x - radius) / tile_m));
+  const i32 t1x = static_cast<i32>(::floorf((center.x + radius) / tile_m));
+  const i32 t0z = static_cast<i32>(::floorf((center.z - radius) / tile_m));
+  const i32 t1z = static_cast<i32>(::floorf((center.z + radius) / tile_m));
 
   // Missing tiles, then nearest-first so the ground under the agents exists
   // before the bubble rim does.
@@ -96,10 +96,10 @@ u32 NavMesh::RemoveTilesBeyond(const Vec3& center, f32 radius) {
 void NavMesh::PaintDisc(const Vec3& center, f32 radius, AreaId area) {
   if (area >= kMaxAreas) return;
   const f32 cs = config_.cell_size;
-  const i32 c0x = static_cast<i32>(::floor((center.x - radius) / cs));
-  const i32 c1x = static_cast<i32>(::floor((center.x + radius) / cs));
-  const i32 c0z = static_cast<i32>(::floor((center.z - radius) / cs));
-  const i32 c1z = static_cast<i32>(::floor((center.z + radius) / cs));
+  const i32 c0x = static_cast<i32>(::floorf((center.x - radius) / cs));
+  const i32 c1x = static_cast<i32>(::floorf((center.x + radius) / cs));
+  const i32 c0z = static_cast<i32>(::floorf((center.z - radius) / cs));
+  const i32 c1z = static_cast<i32>(::floorf((center.z + radius) / cs));
   const i32 n = static_cast<i32>(config_.tile_cells);
   u64 last_tile = ~0ull;
   Tile* tile = nullptr;
@@ -173,7 +173,7 @@ u32 NavMesh::TileVersionByKey(u64 key) const {
 
 CellRef NavMesh::CellAt(const Vec3& pos) const {
   const f32 cs = config_.cell_size;
-  return {static_cast<i32>(::floor(pos.x / cs)), static_cast<i32>(::floor(pos.z / cs))};
+  return {static_cast<i32>(::floorf(pos.x / cs)), static_cast<i32>(::floorf(pos.z / cs))};
 }
 
 Vec3 NavMesh::CellCenter(CellRef cell) const {
@@ -201,8 +201,8 @@ bool NavMesh::HeightAt(f32 x, f32 z, f32* out_height) const {
   // Sample space where integer coordinates sit on cell centers.
   const f32 sx = x / cs - 0.5f;
   const f32 sz = z / cs - 0.5f;
-  const i32 x0 = static_cast<i32>(::floor(sx));
-  const i32 z0 = static_cast<i32>(::floor(sz));
+  const i32 x0 = static_cast<i32>(::floorf(sx));
+  const i32 z0 = static_cast<i32>(::floorf(sz));
   const f32 fx = sx - static_cast<f32>(x0);
   const f32 fz = sz - static_cast<f32>(z0);
   f32 h[4];
@@ -225,13 +225,13 @@ bool NavMesh::Reachable(CellRef from, CellRef to) const {
   const Tile* ta = TileOf(from, &ia);
   const Tile* tb = TileOf(to, &ib);
   if (!ta || !tb || ta->area[ia] == kAreaNone || tb->area[ib] == kAreaNone) return false;
-  return ::fabs(ta->height[ia] - tb->height[ib]) <= config_.max_step;
+  return ::fabsf(ta->height[ia] - tb->height[ib]) <= config_.max_step;
 }
 
 CellRef NavMesh::ClampToWalkable(const Vec3& pos, f32 max_radius) const {
   const CellRef at = CellAt(pos);
   if (Walkable(at)) return at;
-  const i32 rings = static_cast<i32>(::ceil(max_radius / config_.cell_size));
+  const i32 rings = static_cast<i32>(::ceilf(max_radius / config_.cell_size));
   // Ring scan outward; within a ring prefer the cell nearest to pos.
   for (i32 r = 1; r <= rings; ++r) {
     CellRef best;
@@ -282,7 +282,7 @@ NavRaycast NavMesh::Raycast(const Vec3& from, const Vec3& to) const {
   // Amanatides & Woo traversal over the cell grid.
   const f32 dx = to.x - from.x;
   const f32 dz = to.z - from.z;
-  const f32 len = ::sqrt(dx * dx + dz * dz);
+  const f32 len = ::sqrtf(dx * dx + dz * dz);
   const i32 step_x = dx > 0 ? 1 : -1;
   const i32 step_z = dz > 0 ? 1 : -1;
   const f32 inv_dx = dx != 0 ? 1.0f / dx : 0;

@@ -274,7 +274,7 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
   };
   auto as_f32 = [](const base::String& v, f32& out) {
     f32 parsed = 0.0f;
-    if (!ParseWholeF32(v, &parsed) || !::isfinite(parsed)) return false;
+    if (!ParseWholeF32(v, &parsed) || !isfinite(parsed)) return false;
     out = parsed;
     return true;
   };

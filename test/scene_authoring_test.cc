@@ -40,7 +40,7 @@ int failures = 0;
     }                                                             \
   } while (0)
 
-#define CHECK_NEAR(a, b, eps) CHECK(::abs((a) - (b)) <= (eps))
+#define CHECK_NEAR(a, b, eps) CHECK(::fabsf((a) - (b)) <= (eps))
 
 namespace fs = rx::fs;
 
@@ -151,7 +151,7 @@ Rotation.euler = 90 90 0
   // --validate's non_unit_rotation warns past 5%, and MakeFromQuat does not
   // normalize, so a euler that did not resolve to a unit quaternion would scale
   // every mesh it is written to.
-  const f32 length = ::sqrt(yaw.x * yaw.x + yaw.y * yaw.y + yaw.z * yaw.z + yaw.w * yaw.w);
+  const f32 length = ::sqrtf(yaw.x * yaw.x + yaw.y * yaw.y + yaw.z * yaw.z + yaw.w * yaw.w);
   CHECK_NEAR(length, 1.0f, 1e-5f);
 
   fs::Remove(path);
@@ -244,7 +244,7 @@ Shape.size = 0.5 0.5 0.5
   const scene::Transform* upright = world.Get<scene::Transform>(FindByName(world, "Upright"));
   CHECK_NEAR(upright->position[1], 1.5f, 1e-4f);
   const scene::Transform* cornered = world.Get<scene::Transform>(FindByName(world, "Cornered"));
-  CHECK_NEAR(cornered->position[1], 1.0f + 0.5f * ::sqrt(2.0f), 1e-4f);
+  CHECK_NEAR(cornered->position[1], 1.0f + 0.5f * ::sqrtf(2.0f), 1e-4f);
   // The two axes the mode does not stack along still centre on the target.
   CHECK_NEAR(cornered->position[0], 0.0f, 1e-4f);
   CHECK_NEAR(cornered->position[2], 0.0f, 1e-4f);
@@ -360,8 +360,8 @@ Shape.size = 0.5 0.5 0.5
   // ... and the member's own 45 adds to the container's 90, so its +z face ends
   // up 135 degrees round.
   const Vec3 facing = Rotate(WorldRotation(world, FindByName(world, "Second")), {0, 0, 1});
-  CHECK_NEAR(facing.x, ::sin(135.0f * 3.14159265f / 180.0f), 1e-4f);
-  CHECK_NEAR(facing.z, ::cos(135.0f * 3.14159265f / 180.0f), 1e-4f);
+  CHECK_NEAR(facing.x, ::sinf(135.0f * 3.14159265f / 180.0f), 1e-4f);
+  CHECK_NEAR(facing.z, ::cosf(135.0f * 3.14159265f / 180.0f), 1e-4f);
 
   const Vec3 unrotated = Rotate(WorldRotation(world, FindByName(world, "First")), {0, 0, 1});
   CHECK_NEAR(unrotated.x, 1.0f, 1e-4f);
@@ -645,7 +645,7 @@ Prefab.path = "rx_stretch_prefab_cell.rxscene"
     // ... and the facade rides along, which is the other half of "the instance
     // owns only what it authored".
     const SceneSurface* surface = world.Get<SceneSurface>(entity);
-    CHECK(surface && ::abs(surface->base_color[2] - 0.6f) < 1e-6f);
+    CHECK(surface && ::fabsf(surface->base_color[2] - 0.6f) < 1e-6f);
   }
 
   // Three proportions of one prefab are three meshes, never a shared one.

@@ -38,8 +38,8 @@ f32 WorldData::Sample(u32 map, f32 world_x, f32 world_z) const {
   f32 step = meters_per_texel();
   f32 u = (world_x - origin_x_) / step - 0.5f;
   f32 v = (world_z - origin_z_) / step - 0.5f;
-  f32 fu = ::floor(u);
-  f32 fv = ::floor(v);
+  f32 fu = ::floorf(u);
+  f32 fv = ::floorf(v);
   f32 tu = u - fu;
   f32 tv = v - fv;
   i32 max_texel = static_cast<i32>(resolution_) - 1;
@@ -67,7 +67,7 @@ void WorldData::PaintDisc(u32 map, f32 center_x, f32 center_z, f32 radius, f32 v
     for (i32 x = x0; x <= x1; ++x) {
       f32 wx = origin_x_ + (static_cast<f32>(x) + 0.5f) * step;
       f32 wz = origin_z_ + (static_cast<f32>(z) + 0.5f) * step;
-      f32 d = ::sqrt((wx - center_x) * (wx - center_x) + (wz - center_z) * (wz - center_z));
+      f32 d = ::sqrtf((wx - center_x) * (wx - center_x) + (wz - center_z) * (wz - center_z));
       if (d >= radius) continue;
       f32 strength = rx::Min(1.0f, (radius - d) / (radius * 0.25f + 1e-5f));
       f32& texel = At(map, static_cast<u32>(x), static_cast<u32>(z));

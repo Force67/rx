@@ -30,7 +30,7 @@ class Camera2D {
   void MoveBy(Vec2 delta) { center_ += delta; }
   // Pixels per world unit. Clamped positive so the mapping stays invertible.
   void SetZoom(f32 zoom) {
-    zoom_ = ::isfinite(zoom) && zoom > 1e-3f ? zoom : 1e-3f;
+    zoom_ = isfinite(zoom) && zoom > 1e-3f ? zoom : 1e-3f;
   }
 
   Vec2 center() const { return center_; }

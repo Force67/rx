@@ -638,12 +638,12 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
         state.bands.begin(), state.bands.end(), id,
         [](const CellBand& entry, u64 wanted) { return entry.cell < wanted; });
     const bool was_near =
-        previous != state.bands.end() && previous->cell == id && previous->near;
-    const bool near = InNearTierBand(domain_policy, band_distance, was_near);
+        previous != state.bands.end() && previous->cell == id && previous->near_tier;
+    const bool in_near_band = InNearTierBand(domain_policy, band_distance, was_near);
     const Tier tier = ResolveTier(map_.index(), *record, domain,
-                                  near ? domain_policy.near_tier : domain_policy.far_tier);
+                                  in_near_band ? domain_policy.near_tier : domain_policy.far_tier);
     if (tier == Tier::kAbsent) continue;
-    state.bands_scratch.push_back({id, near});
+    state.bands_scratch.push_back({id, in_near_band});
 
     scene::WorldStreamRegion region = nearest.region;
     // A world baked at one tier resolves both bands to the same payload, so its

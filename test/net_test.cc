@@ -288,9 +288,9 @@ void TestInterpolation() {
 
   net::TickInterpolation(world, 0.5f);
   const scene::Transform* now = world.Get<scene::Transform>(e);
-  CHECK(::fabs(now->position[0] - 5.0f) < 1e-4f);
+  CHECK(::fabsf(now->position[0] - 5.0f) < 1e-4f);
   const net::ReplicatedGait* gait = world.Get<net::ReplicatedGait>(e);
-  CHECK(gait->moving && ::fabs(gait->speed - 10.0f) < 1e-3f);
+  CHECK(gait->moving && ::fabsf(gait->speed - 10.0f) < 1e-3f);
 
   net::TickInterpolation(world, 0.6f);
   now = world.Get<scene::Transform>(e);

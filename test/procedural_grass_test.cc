@@ -16,7 +16,7 @@ void Check(bool condition, const char* message) {
 }
 
 bool Near(rx::f32 a, rx::f32 b) {
-  return ::fabs(a - b) < 1e-5f;
+  return ::fabsf(a - b) < 1e-5f;
 }
 
 void SetPoint(rx::f32 point[3], rx::f32 x, rx::f32 y, rx::f32 z) {
@@ -69,11 +69,11 @@ int main() {
   non_finite.fade_end = NAN;
   non_finite.bend_recovery_time = INFINITY;
   const GrassGenerationSettings finite = SanitizeGrassSettings(non_finite);
-  Check(::isfinite(finite.candidate_spacing), "non-finite spacing uses a default");
-  Check(::isfinite(finite.stream_radius), "non-finite radius uses a default");
+  Check(isfinite(finite.candidate_spacing), "non-finite spacing uses a default");
+  Check(isfinite(finite.stream_radius), "non-finite radius uses a default");
   Check(finite.fade_end <= finite.stream_radius,
         "fade completes inside the stream radius");
-  Check(::isfinite(finite.bend_recovery_time),
+  Check(isfinite(finite.bend_recovery_time),
         "non-finite bend recovery uses a default");
 
   GrassGenerationSettings distant;

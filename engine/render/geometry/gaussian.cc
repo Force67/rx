@@ -36,7 +36,7 @@ u32 PlyTypeSize(const base::String& t) {
   return 0;
 }
 
-f32 Sigmoid(f32 x) { return 1.0f / (1.0f + ::exp(-x)); }
+f32 Sigmoid(f32 x) { return 1.0f / (1.0f + ::expf(-x)); }
 
 }  // namespace
 
@@ -273,9 +273,9 @@ bool LoadGaussianPly(const base::String& path, base::Vector<GaussianInstance>* o
       g.position[2] = at(iz);
       if (iop >= 0) g.opacity = Sigmoid(at(iop));
       if (is0 >= 0 && is1 >= 0 && is2 >= 0) {
-        g.scale[0] = ::exp(at(is0));
-        g.scale[1] = ::exp(at(is1));
-        g.scale[2] = ::exp(at(is2));
+        g.scale[0] = ::expf(at(is0));
+        g.scale[1] = ::expf(at(is1));
+        g.scale[2] = ::expf(at(is2));
       }
       if (if0 >= 0 && if1 >= 0 && if2 >= 0) {
         g.color[0] = rx::Clamp(0.5f + kC0 * at(if0), 0.0f, 1.0f);
@@ -284,7 +284,7 @@ bool LoadGaussianPly(const base::String& path, base::Vector<GaussianInstance>* o
       }
       if (ir0 >= 0 && ir1 >= 0 && ir2 >= 0 && ir3 >= 0) {
         f32 w = at(ir0), x = at(ir1), y = at(ir2), z = at(ir3);  // inria stores wxyz
-        f32 len = ::sqrt(w * w + x * x + y * y + z * z);
+        f32 len = ::sqrtf(w * w + x * x + y * y + z * z);
         if (len < 1e-8f) len = 1.0f;
         g.rotation[0] = x / len;
         g.rotation[1] = y / len;

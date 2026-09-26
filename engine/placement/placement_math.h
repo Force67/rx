@@ -46,8 +46,8 @@ inline f32 ValueNoise(f32 x, f32 z, f32 feature_size, u32 seed) {
   if (feature_size <= 0.0f) return 0.5f;
   f32 fx = x / feature_size;
   f32 fz = z / feature_size;
-  f32 ix = ::floor(fx);
-  f32 iz = ::floor(fz);
+  f32 ix = ::floorf(fx);
+  f32 iz = ::floorf(fz);
   f32 tx = Smoothstep01(fx - ix);
   f32 tz = Smoothstep01(fz - iz);
   i32 cx = static_cast<i32>(ix);
@@ -78,19 +78,19 @@ inline Mat4 BuildPlacementTransform(const OrientedPoint& point, f32 yaw, f32 sca
   Vec3 up{0.0f, 1.0f, 0.0f};
   Vec3 axis{up.x + (point.normal.x - up.x) * tilt, up.y + (point.normal.y - up.y) * tilt,
             up.z + (point.normal.z - up.z) * tilt};
-  f32 len = ::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+  f32 len = ::sqrtf(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
   if (len < 1e-5f) {
     axis = up;
   } else {
     axis = {axis.x / len, axis.y / len, axis.z / len};
   }
   // Orthonormal basis around `axis`, yawed by `yaw`.
-  f32 c = ::cos(yaw);
-  f32 s = ::sin(yaw);
-  Vec3 ref = ::fabs(axis.y) < 0.99f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+  f32 c = ::cosf(yaw);
+  f32 s = ::sinf(yaw);
+  Vec3 ref = ::fabsf(axis.y) < 0.99f ? Vec3{0.0f, 1.0f, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
   Vec3 tangent{ref.y * axis.z - ref.z * axis.y, ref.z * axis.x - ref.x * axis.z,
                ref.x * axis.y - ref.y * axis.x};
-  f32 tlen = ::sqrt(tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z);
+  f32 tlen = ::sqrtf(tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z);
   tangent = {tangent.x / tlen, tangent.y / tlen, tangent.z / tlen};
   // tangent x axis, so [x=tangent, y=axis, z=bitangent] is right-handed
   // (instance groups reject mirrored transforms).

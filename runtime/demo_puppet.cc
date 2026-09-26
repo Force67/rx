@@ -61,7 +61,7 @@ void PushRing(base::Vector<render::DebugLine>& out, const Vec3& p, f32 r, u32 rg
   Vec3 prev{p.x + r, p.y, p.z};
   for (u32 i = 1; i <= segs; ++i) {
     const f32 a = 6.2831853f * static_cast<f32>(i) / static_cast<f32>(segs);
-    Vec3 cur{p.x + ::cos(a) * r, p.y, p.z + ::sin(a) * r};
+    Vec3 cur{p.x + ::cosf(a) * r, p.y, p.z + ::sinf(a) * r};
     PushLine(out, prev, cur, rgba);
     prev = cur;
   }
@@ -71,7 +71,7 @@ void PushRing(base::Vector<render::DebugLine>& out, const Vec3& p, f32 r, u32 rg
 void PushArrow(base::Vector<render::DebugLine>& out, const Vec3& from, const Vec3& dir, u32 rgba) {
   const Vec3 tip{from.x + dir.x, from.y + dir.y, from.z + dir.z};
   PushLine(out, from, tip, rgba);
-  const f32 len = ::sqrt(dir.x * dir.x + dir.z * dir.z);
+  const f32 len = ::sqrtf(dir.x * dir.x + dir.z * dir.z);
   if (len < 1e-3f) return;
   const Vec3 back{-dir.x / len, 0, -dir.z / len};
   const Vec3 side{back.z, 0, -back.x};  // perpendicular in the ground plane
@@ -126,7 +126,7 @@ void PuppetDemo::BuildArena() {
 
   // A shallow ~15 deg ramp off to the +X/+Z corner (scenery + a slope to probe).
   const f32 ramp_deg = 15.0f * 3.14159265f / 180.0f;
-  const f32 rh = ::sin(ramp_deg * 0.5f), rw = ::cos(ramp_deg * 0.5f);
+  const f32 rh = ::sinf(ramp_deg * 0.5f), rw = ::cosf(ramp_deg * 0.5f);
   const f32 ramp_rot[4] = {rh, 0, 0, rw};  // tilt about +X
   solid({3.0f, 0.35f, 3.0f}, 1.6f, 0.08f, 2.0f, ramp_rot, 0x45483f);
 
@@ -244,7 +244,7 @@ locomotion::LocomotionIntent PuppetDemo::ScriptedIntent() const {
     // Turn gradually from -Z toward -X over 3 s (an abrupt heading snap while
     // walking tips this slow ragdoll over); velocity follows the heading.
     const f32 phi = rx::Min((t - 11.0f) / 3.0f, 1.0f) * 1.5707963f;
-    const Vec3 dir{-::sin(phi), 0, -::cos(phi)};
+    const Vec3 dir{-::sinf(phi), 0, -::cosf(phi)};
     intent.desired_facing = dir;
     intent.desired_velocity = {dir.x * kSpeed, 0, dir.z * kSpeed};
   } else {
@@ -269,7 +269,7 @@ void PuppetDemo::Step(f32 dt) {
     pending_small_push_ = pending_big_push_ = false;
     rng_ = rng_ * 1664525u + 1013904223u;
     const f32 a = 6.2831853f * (static_cast<f32>((rng_ >> 8) & 0xffff) / 65535.0f);
-    const Vec3 impulse{::cos(a) * mag, 0, ::sin(a) * mag};
+    const Vec3 impulse{::cosf(a) * mag, 0, ::sinf(a) * mag};
     ctx_.physics->ApplyImpulse(controller_.rig().body[static_cast<u32>(BodyPart::kTorso)], impulse);
     RX_INFO("puppet demo: push {} kg*m/s", mag);
   }

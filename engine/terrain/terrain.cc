@@ -16,8 +16,8 @@ namespace rx::terrain {
 namespace {
 
 bool IsFinite(Vec3 value) {
-  return ::isfinite(value.x) && ::isfinite(value.y) &&
-         ::isfinite(value.z);
+  return isfinite(value.x) && isfinite(value.y) &&
+         isfinite(value.z);
 }
 
 bool CheckedSampleCount(u32 quads, size_t *count) {
@@ -106,7 +106,7 @@ TerrainWeights PaintWeights(TerrainWeights old, u32 target, f32 amount,
   amount = rx::Clamp(amount, 0.0f, 1.0f);
   const u32 old_target = old.rgba[target];
   const u32 new_target = static_cast<u32>(rx::Clamp(
-      ::lround(old_target + (255.0f - old_target) * amount), 0l, 255l));
+      ::lroundf(old_target + (255.0f - old_target) * amount), 0l, 255l));
   const u32 old_others = 255 - old_target;
   const u32 new_others = 255 - new_target;
 
@@ -198,7 +198,7 @@ bool RayBounds(Vec3 origin, Vec3 direction,
   const f32 minima[3] = {bounds.minimum.x, bounds.minimum.y, bounds.minimum.z};
   const f32 maxima[3] = {bounds.maximum.x, bounds.maximum.y, bounds.maximum.z};
   for (u32 axis = 0; axis < 3; ++axis) {
-    if (::abs(directions[axis]) < 1e-12f) {
+    if (::fabsf(directions[axis]) < 1e-12f) {
       if (origins[axis] < minima[axis] || origins[axis] > maxima[axis])
         return false;
       continue;
@@ -224,19 +224,19 @@ bool RayTriangle(Vec3 origin, Vec3 direction, Vec3 a, Vec3 b, Vec3 c,
   const Vec3 edge_b = c - a;
   const Vec3 p = Cross(direction, edge_b);
   const f32 determinant = Dot(edge_a, p);
-  if (!::isfinite(determinant) || ::abs(determinant) < 1e-8f)
+  if (!isfinite(determinant) || ::fabsf(determinant) < 1e-8f)
     return false;
   const f32 inverse = 1.0f / determinant;
   const Vec3 relative = origin - a;
   const f32 u = Dot(relative, p) * inverse;
-  if (!::isfinite(u) || u < 0 || u > 1)
+  if (!isfinite(u) || u < 0 || u > 1)
     return false;
   const Vec3 q = Cross(relative, edge_a);
   const f32 v = Dot(direction, q) * inverse;
-  if (!::isfinite(v) || v < 0 || u + v > 1)
+  if (!isfinite(v) || v < 0 || u + v > 1)
     return false;
   const f32 hit = Dot(edge_b, q) * inverse;
-  if (!::isfinite(hit) || hit < 0 || hit > maximum_distance)
+  if (!isfinite(hit) || hit < 0 || hit > maximum_distance)
     return false;
   *distance = hit;
   *normal = Normalize(Cross(edge_a, edge_b));
@@ -252,14 +252,14 @@ Terrain::Terrain() : Terrain(TerrainDesc{}) {}
 Terrain::Terrain(TerrainDesc desc) : desc_(base::move(desc)) {
   if (desc_.tile_quads == 0)
     desc_.tile_quads = 32;
-  if (!::isfinite(desc_.sample_spacing) || desc_.sample_spacing <= 0) {
+  if (!isfinite(desc_.sample_spacing) || desc_.sample_spacing <= 0) {
     desc_.sample_spacing = 1.0f;
   }
-  if (!::isfinite(desc_.origin.x))
+  if (!isfinite(desc_.origin.x))
     desc_.origin.x = 0;
-  if (!::isfinite(desc_.origin.y))
+  if (!isfinite(desc_.origin.y))
     desc_.origin.y = 0;
-  if (!::isfinite(desc_.origin.z))
+  if (!isfinite(desc_.origin.z))
     desc_.origin.z = 0;
   if (desc_.layers.empty())
     desc_.layers.push_back(TerrainLayer{"Layer 0"});
@@ -308,11 +308,11 @@ bool Terrain::AddOrReplaceTile(TerrainTileKey key, base::Span<const f32> heights
   if (!CheckedSampleCount(desc_.tile_quads, &sample_count) ||
       heights.size() != sample_count ||
       (!weights.empty() && weights.size() != sample_count) ||
-      !::isfinite(desc_.tile_quads * desc_.sample_spacing)) {
+      !isfinite(desc_.tile_quads * desc_.sample_spacing)) {
     return false;
   }
   for (f32 height : heights) {
-    if (!::isfinite(height))
+    if (!isfinite(height))
       return false;
   }
 
@@ -327,7 +327,7 @@ bool Terrain::AddOrReplaceTile(TerrainTileKey key, base::Span<const f32> heights
     }
   }
   RecalculateBounds(&replacement);
-  if (!::isfinite(replacement.maximum_height - replacement.minimum_height))
+  if (!isfinite(replacement.maximum_height - replacement.minimum_height))
     return false;
 
   auto insertion =
@@ -448,7 +448,7 @@ base::Optional<f32> Terrain::GridHeight(i64 grid_x, i64 grid_z) const {
 }
 
 base::Optional<f32> Terrain::SampleHeight(f32 world_x, f32 world_z) const {
-  if (!::isfinite(world_x) || !::isfinite(world_z) || tiles_.empty())
+  if (!isfinite(world_x) || !isfinite(world_z) || tiles_.empty())
     return base::nullopt;
   const double grid_x =
       (static_cast<double>(world_x) - desc_.origin.x) / desc_.sample_spacing;
@@ -474,8 +474,8 @@ base::Optional<f32> Terrain::SampleHeight(f32 world_x, f32 world_z) const {
   constexpr double kBoundaryEpsilon = 1e-6;
   const i64 candidate_x[2] = {base_x, base_x - 1};
   const i64 candidate_z[2] = {base_z, base_z - 1};
-  const u32 count_x = ::abs(edge_x) <= kBoundaryEpsilon ? 2 : 1;
-  const u32 count_z = ::abs(edge_z) <= kBoundaryEpsilon ? 2 : 1;
+  const u32 count_x = ::fabs(edge_x) <= kBoundaryEpsilon ? 2 : 1;
+  const u32 count_z = ::fabs(edge_z) <= kBoundaryEpsilon ? 2 : 1;
   const u32 side = desc_.tile_quads + 1;
 
   for (u32 cz = 0; cz < count_z; ++cz) {
@@ -515,8 +515,8 @@ base::Optional<f32> Terrain::SampleHeight(f32 world_x, f32 world_z) const {
                              : d + (1.0f - fraction_x) * (c - d) +
                                    (1.0f - fraction_z) * (b - d);
       const double world_height = static_cast<double>(desc_.origin.y) + height;
-      if (!::isfinite(world_height) ||
-          ::abs(world_height) > FLT_MAX) {
+      if (!isfinite(world_height) ||
+          ::fabs(world_height) > FLT_MAX) {
         return base::nullopt;
       }
       return static_cast<f32>(world_height);
@@ -557,7 +557,7 @@ Terrain::TileRegion(TerrainTileKey key, u32 channels, i32 priority) const {
   const double values[] = {minimum_x, minimum_y, minimum_z,
                            maximum_x, maximum_y, maximum_z};
   for (double value : values) {
-    if (!::isfinite(value) || value < -maximum_float ||
+    if (!isfinite(value) || value < -maximum_float ||
         value > maximum_float) {
       return base::nullopt;
     }
@@ -579,7 +579,7 @@ void Terrain::GatherStreamRegions(
   if (!regions)
     return;
   regions->clear();
-  if ((query.channels & channels) == 0 || !::isfinite(query.radius) ||
+  if ((query.channels & channels) == 0 || !isfinite(query.radius) ||
       query.radius < 0)
     return;
   u8 axes = query.axes & scene::kWorldStreamXYZ;
@@ -587,7 +587,7 @@ void Terrain::GatherStreamRegions(
     axes = scene::kWorldStreamXYZ;
   auto valid_axis = [&](u8 axis, f32 origin, f32 predicted) {
     return (axes & axis) == 0 ||
-           (::isfinite(origin) && ::isfinite(predicted));
+           (isfinite(origin) && isfinite(predicted));
   };
   if (!valid_axis(scene::kWorldStreamX, query.origin.x, query.predicted.x) ||
       !valid_axis(scene::kWorldStreamY, query.origin.y, query.predicted.y) ||
@@ -629,7 +629,7 @@ Terrain::BuildTileMesh(TerrainTileKey key, asset::AssetId material) const {
   const u32 quads = desc_.tile_quads;
   const u32 side = quads + 1;
   const f32 width = static_cast<f32>(quads) * desc_.sample_spacing;
-  if (!::isfinite(width))
+  if (!isfinite(width))
     return base::nullopt;
 
   asset::Mesh mesh;
@@ -696,7 +696,7 @@ Terrain::BuildTileMesh(TerrainTileKey key, asset::AssetId material) const {
                           (tile->maximum_height - tile->minimum_height) * 0.5f;
   mesh.bounds_center[2] = width * 0.5f;
   const f32 half_height = (tile->maximum_height - tile->minimum_height) * 0.5f;
-  mesh.bounds_radius = ::hypot(width * 0.5f, width * 0.5f, half_height);
+  mesh.bounds_radius = rx::Hypot(width * 0.5f, width * 0.5f, half_height);
   return mesh;
 }
 
@@ -706,8 +706,8 @@ base::Optional<TerrainRayHit> Terrain::Raycast(Vec3 origin, Vec3 direction,
       ::isnan(maximum_distance) || maximum_distance < 0) {
     return base::nullopt;
   }
-  const double length = ::hypot(direction.x, direction.y, direction.z);
-  if (!::isfinite(length) || length <= 0)
+  const double length = rx::Hypot(direction.x, direction.y, direction.z);
+  if (!isfinite(length) || length <= 0)
     return base::nullopt;
   direction = {static_cast<f32>(static_cast<double>(direction.x) / length),
                static_cast<f32>(static_cast<double>(direction.y) / length),
@@ -733,8 +733,8 @@ base::Optional<TerrainRayHit> Terrain::Raycast(Vec3 origin, Vec3 direction,
                              minimum_x + width, maximum_y, minimum_z + width};
     bool valid_bounds = true;
     for (double value : values) {
-      if (!::isfinite(value) ||
-          ::abs(value) > FLT_MAX) {
+      if (!isfinite(value) ||
+          ::fabs(value) > FLT_MAX) {
         valid_bounds = false;
         break;
       }
@@ -786,12 +786,12 @@ base::Optional<TerrainRayHit> Terrain::Raycast(Vec3 origin, Vec3 direction,
 TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
   TerrainChange change;
   change.terrain = desc_.id;
-  if (!::isfinite(brush.center_x) || !::isfinite(brush.center_z) ||
-      !::isfinite(brush.radius) || brush.radius <= 0 ||
-      !::isfinite(brush.strength) || brush.strength <= 0 ||
-      !::isfinite(brush.falloff) || brush.falloff < 0 ||
+  if (!isfinite(brush.center_x) || !isfinite(brush.center_z) ||
+      !isfinite(brush.radius) || brush.radius <= 0 ||
+      !isfinite(brush.strength) || brush.strength <= 0 ||
+      !isfinite(brush.falloff) || brush.falloff < 0 ||
       (brush.mode == TerrainBrushMode::kFlatten &&
-       !::isfinite(brush.flatten_target)) ||
+       !isfinite(brush.flatten_target)) ||
       (brush.mode == TerrainBrushMode::kPaintLayer &&
        brush.layer >= ActiveLayerCount(desc_))) {
     return change;
@@ -826,7 +826,7 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
           continue;
         const f32 radial = rx::Max(0.0f, 1.0f - distance / brush.radius);
         const f32 influence =
-            brush.falloff == 0 ? 1.0f : ::pow(radial, brush.falloff);
+            brush.falloff == 0 ? 1.0f : ::powf(radial, brush.falloff);
         if (influence <= 0)
           continue;
 
@@ -872,7 +872,7 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
                            ActiveLayerCount(desc_));
           break;
         }
-        if (!::isfinite(new_value.height) || new_value == old_value)
+        if (!isfinite(new_value.height) || new_value == old_value)
           continue;
         change.samples.push_back({tile.key, index, old_value, new_value});
       }
@@ -973,7 +973,7 @@ bool Terrain::SetChangeState(const TerrainChange &change, bool use_new) {
         use_new ? sample.new_value : sample.old_value;
     const TerrainSampleState &expected =
         use_new ? sample.old_value : sample.new_value;
-    if (!::isfinite(wanted.height) ||
+    if (!isfinite(wanted.height) ||
         !IsNormalized(wanted.weights, layer_count) ||
         tile->heights[sample.sample] != expected.height ||
         tile->weights[sample.sample] != expected.weights) {

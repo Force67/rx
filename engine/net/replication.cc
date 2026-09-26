@@ -29,7 +29,7 @@ f32 SegmentPlanarSpeed(const InterpolatedTransform& interp) {
   if (interp.duration <= 0) return 0;
   const f32 dx = interp.to.position[0] - interp.from.position[0];
   const f32 dz = interp.to.position[2] - interp.from.position[2];
-  return ::sqrt(dx * dx + dz * dz) / interp.duration;
+  return ::sqrtf(dx * dx + dz * dz) / interp.duration;
 }
 
 // Lerps position and scale, nlerps the quaternion along the shorter arc.
@@ -49,7 +49,7 @@ void Blend(const scene::Transform& a, const scene::Transform& b, f32 alpha,
     q[i] = a.rotation[i] + (sign * b.rotation[i] - a.rotation[i]) * alpha;
     length_sq += q[i] * q[i];
   }
-  const f32 inv_length = length_sq > 0 ? 1.0f / ::sqrt(length_sq) : 0;
+  const f32 inv_length = length_sq > 0 ? 1.0f / ::sqrtf(length_sq) : 0;
   for (int i = 0; i < 4; ++i) out->rotation[i] = q[i] * inv_length;
 }
 

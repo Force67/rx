@@ -48,7 +48,7 @@ void ExtractPlanes(const Mat4& vp, f32 out[5][4]) {
       {row(2, 0), row(2, 1), row(2, 2), row(2, 3)},  // near: clip.z >= 0
   };
   for (int i = 0; i < 5; ++i) {
-    f32 len = ::sqrt(p[i][0] * p[i][0] + p[i][1] * p[i][1] + p[i][2] * p[i][2]);
+    f32 len = ::sqrtf(p[i][0] * p[i][0] + p[i][1] * p[i][1] + p[i][2] * p[i][2]);
     if (len < 1e-8f) len = 1.0f;
     for (int c = 0; c < 4; ++c) out[i][c] = p[i][c] / len;
   }

@@ -221,16 +221,16 @@ void TestWorldSpaceDispatch() {
   rig.world.Add(child, scene::Parent{parent});
 
   V ret = rig.Call("World.GetPosition", {V::EntityRef(child)});
-  CHECK(::fabs(ret.as_vec3().x - 10.0f) < 1e-4f);
-  CHECK(::fabs(ret.as_vec3().y - 2.0f) < 1e-4f);
+  CHECK(::fabsf(ret.as_vec3().x - 10.0f) < 1e-4f);
+  CHECK(::fabsf(ret.as_vec3().y - 2.0f) < 1e-4f);
 
   rig.Call("World.Teleport", {V::EntityRef(child), V::Vec(Vec3{8, 0, 0})});
   scene::Transform* local = rig.world.Get<scene::Transform>(child);
-  CHECK(::fabs(local->position[0] - 0.0f) < 1e-4f);
-  CHECK(::fabs(local->position[1] - 1.0f) < 1e-4f);
+  CHECK(::fabsf(local->position[0] - 0.0f) < 1e-4f);
+  CHECK(::fabsf(local->position[1] - 1.0f) < 1e-4f);
   ret = rig.Call("World.GetPosition", {V::EntityRef(child)});
-  CHECK(::fabs(ret.as_vec3().x - 8.0f) < 1e-4f);
-  CHECK(::fabs(ret.as_vec3().y - 0.0f) < 1e-4f);
+  CHECK(::fabsf(ret.as_vec3().x - 8.0f) < 1e-4f);
+  CHECK(::fabsf(ret.as_vec3().y - 0.0f) < 1e-4f);
 
   ecs::Entity other = rig.world.Create();
   rig.world.Add(other, scene::Transform{{8, 0, 0}});
@@ -246,7 +246,7 @@ void TestWorldSpaceDispatch() {
   rig.world.Add(tiny_child, scene::Parent{tiny_parent});
   rig.Call("World.Teleport", {V::EntityRef(tiny_child), V::Vec(Vec3{1, 0, 0})});
   ret = rig.Call("World.GetPosition", {V::EntityRef(tiny_child)});
-  CHECK(::fabs(ret.as_vec3().x - 1.0f) < 1e-4f);
+  CHECK(::fabsf(ret.as_vec3().x - 1.0f) < 1e-4f);
 
   // Over-depth hierarchies are rejected consistently: reads report no position
   // and writes leave the local transform untouched.

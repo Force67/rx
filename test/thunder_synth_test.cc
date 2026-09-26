@@ -52,12 +52,12 @@ void TestFiniteDeterministicStream() {
   bool finite = true;
   bool non_silent = false;
   for (float sample : lhs) {
-    finite &= ::isfinite(sample) && ::abs(sample) <= 0.951f;
-    non_silent |= ::abs(sample) > 1e-4f;
+    finite &= isfinite(sample) && ::fabsf(sample) <= 0.951f;
+    non_silent |= ::fabsf(sample) > 1e-4f;
   }
   Check(finite, "all samples remain finite and bounded");
   Check(non_silent, "positive energy produces an audible signal");
-  Check(!lhs.empty() && ::abs(lhs.back()) < 1e-4f,
+  Check(!lhs.empty() && ::fabsf(lhs.back()) < 1e-4f,
         "the end-of-stream fade reaches silence");
 }
 

@@ -25,7 +25,7 @@ void Check(const char* what, bool ok) {
 }
 
 bool Near(rx::f32 a, rx::f32 b) {
-  return ::fabs(a - b) < 1e-4f;
+  return ::fabsf(a - b) < 1e-4f;
 }
 
 using rx::TouchState;

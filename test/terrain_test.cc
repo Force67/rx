@@ -35,7 +35,7 @@ void Check(bool condition, const char *message) {
 }
 
 void Near(f32 actual, f32 expected, const char *message, f32 epsilon = 1e-4f) {
-  if (::abs(actual - expected) <= epsilon)
+  if (::fabsf(actual - expected) <= epsilon)
     return;
   ::fprintf(stderr, "terrain_test: FAIL: %s (got %.6f, expected %.6f)\n",
                message, actual, expected);
@@ -280,7 +280,7 @@ void TestMeshAndRaycast() {
           "layer debug colors are blended into vertex colors");
     Near(mesh->bounds_center[0], 1, "mesh bounds center x is tile-local");
     Near(mesh->bounds_center[1], 2, "mesh bounds center includes height range");
-    Near(mesh->bounds_radius, ::sqrt(6.0f),
+    Near(mesh->bounds_radius, ::sqrtf(6.0f),
          "mesh sphere contains xz and height extents");
   }
 

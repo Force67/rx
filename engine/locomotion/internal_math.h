@@ -16,12 +16,12 @@
 namespace rx::locomotion::internal {
 
 // Finiteness predicates.
-inline bool FiniteScalar(f32 x) { return ::isfinite(x); }
+inline bool FiniteScalar(f32 x) { return isfinite(x); }
 inline bool FiniteV(const Vec3& v) {
-  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
+  return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
 }
 inline bool FiniteQ(const Quat& q) {
-  return ::isfinite(q.x) && ::isfinite(q.y) && ::isfinite(q.z) && ::isfinite(q.w);
+  return isfinite(q.x) && isfinite(q.y) && isfinite(q.z) && isfinite(q.w);
 }
 
 // Clamp a scalar to [lo, hi].
@@ -34,7 +34,7 @@ inline f32 Lerpf(f32 a, f32 b, f32 t) { return a + (b - a) * t; }
 inline Vec3 Planar(const Vec3& v) { return {v.x, 0.0f, v.z}; }
 
 // Planar (x,z) magnitude of a world vector, ignoring the vertical component.
-inline f32 PlanarLength(const Vec3& v) { return ::sqrt(v.x * v.x + v.z * v.z); }
+inline f32 PlanarLength(const Vec3& v) { return ::sqrtf(v.x * v.x + v.z * v.z); }
 
 // Clamp a vector's length to `max_len` (no-op below it; safe for the zero vec).
 inline Vec3 ClampLength(const Vec3& v, f32 max_len) {
@@ -47,7 +47,7 @@ inline Vec3 ClampLength(const Vec3& v, f32 max_len) {
 // 0 for dt <= 0 or tau <= 0 (holds the current value); -> 1 for large dt.
 inline f32 SmoothingAlpha(f32 dt, f32 tau) {
   if (!(dt > 0) || !(tau > 0)) return 0;
-  return 1.0f - ::exp(-dt / tau);
+  return 1.0f - ::expf(-dt / tau);
 }
 
 }  // namespace rx::locomotion::internal

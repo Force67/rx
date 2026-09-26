@@ -14,12 +14,12 @@ f32 Clamp(f32 v, f32 lo, f32 hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 // Yaw quaternion about +Y (x,y,z,w), for spawn orientation.
 Quat YawQuat(f32 yaw_radians) {
-  return {0.0f, ::sin(yaw_radians * 0.5f), 0.0f, ::cos(yaw_radians * 0.5f)};
+  return {0.0f, ::sinf(yaw_radians * 0.5f), 0.0f, ::cosf(yaw_radians * 0.5f)};
 }
 
 // Guards a force/torque against NaN/Inf before it reaches the solver.
 bool Finite(const Vec3& v) {
-  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
+  return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
 }
 
 }  // namespace
@@ -90,7 +90,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
   Vec3 ambient = world_.wind();
   if (desc_.gust_amplitude_mps > 0.0f) {
     // Two-octave sinusoid: a cheap, bounded, deterministic gust. Along gust_dir.
-    const f32 g = 0.6f * ::sin(gust_time_ * 0.7f) + 0.4f * ::sin(gust_time_ * 2.3f + 1.7f);
+    const f32 g = 0.6f * ::sinf(gust_time_ * 0.7f) + 0.4f * ::sinf(gust_time_ * 2.3f + 1.7f);
     ambient += Normalize(desc_.gust_dir) * (desc_.gust_amplitude_mps * g);
   }
 
@@ -117,7 +117,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     const Vec3 f_aero = f_normal + f_tan;
     if (Finite(f_aero)) world_.AddForceAtPoint(body_, f_aero, ac_world);
     // Angle of attack (sail incidence to the wind): sin(alpha) = (w.n)/|w|.
-    const f32 alpha = ::asin(Clamp(wn / speed, -1.0f, 1.0f));
+    const f32 alpha = ::asinf(Clamp(wn / speed, -1.0f, 1.0f));
     alpha_deg = alpha * kRadToDeg;
 
     // attitude trim: align the belly normal to a belly-UP target
@@ -135,7 +135,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
       wind_ref_primed_ = true;
     } else {
       constexpr f32 kAttTau = 0.35f;  // s, attitude-target smoothing time constant
-      wind_ref_ += (w - wind_ref_) * (1.0f - ::exp(-dt / kAttTau));
+      wind_ref_ += (w - wind_ref_) * (1.0f - ::expf(-dt / kAttTau));
     }
     const f32 ref_speed = Length(wind_ref_);
     if (desc_.attitude_stiffness > 0.0f && ref_speed > desc_.min_airspeed_mps) {
@@ -147,8 +147,8 @@ void Kite::Update(const KiteInput& input, f32 dt) {
       // target stays well-defined (no divide-by-zero, no snap).
       up_perp = upl > 1e-3f ? up_perp * (1.0f / upl)
                             : Normalize(sail_normal - w_hat * Dot(sail_normal, w_hat));
-      const f32 st = ::sin(desc_.trim_alpha_rad);
-      const f32 ct = ::cos(desc_.trim_alpha_rad);
+      const f32 st = ::sinf(desc_.trim_alpha_rad);
+      const f32 ct = ::cosf(desc_.trim_alpha_rad);
       const Vec3 n_target = w_hat * st + up_perp * ct;
       const f32 q_dyn = q_area * speed * speed;  // 0.5 rho A |w|^2
       const Vec3 align_torque = Cross(sail_normal, n_target) * (desc_.attitude_stiffness * q_dyn);

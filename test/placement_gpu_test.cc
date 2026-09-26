@@ -78,11 +78,11 @@ int main() {
   WorldData world(0.0f, 0.0f, 512.0f, 128);
   u32 height = world.AddMap("height");
   world.Generate(height, [](f32 x, f32 z) {
-    return 6.0f * ::sin(x * 0.011f) + 4.0f * ::cos(z * 0.017f);
+    return 6.0f * ::sinf(x * 0.011f) + 4.0f * ::cosf(z * 0.017f);
   });
   u32 forest = world.AddMap("forest");
   world.Generate(forest, [](f32 x, f32 z) {
-    return 0.5f + 0.5f * ::sin(x * 0.007f) * ::cos(z * 0.009f);
+    return 0.5f + 0.5f * ::sinf(x * 0.007f) * ::cosf(z * 0.009f);
   });
 
   PlacementConfig config;
@@ -157,7 +157,7 @@ int main() {
         continue;
       }
       for (u32 e = 0; e < 16; ++e) {
-        if (::fabs(gpu_a[i].transform.m[e] - cpu[i].transform.m[e]) > 2e-3f) {
+        if (::fabsf(gpu_a[i].transform.m[e] - cpu[i].transform.m[e]) > 2e-3f) {
           ++mismatches;
           break;
         }

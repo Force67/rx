@@ -137,7 +137,7 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
   const u32 count = settings_.cascade_count;
   const f32 near_plane = 0.1f;
   const f32 far_plane = settings_.distance;
-  const f32 tan_half = ::tan(fov_y * 0.5f);
+  const f32 tan_half = ::tanf(fov_y * 0.5f);
   const f32 lambda = 0.7f;       // log/uniform split blend
   const f32 back_pad = 80.0f;    // caster range behind the slice, toward the sun
 
@@ -145,13 +145,13 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
   splits[0] = near_plane;
   for (u32 i = 1; i <= count; ++i) {
     f32 p = static_cast<f32>(i) / static_cast<f32>(count);
-    f32 log_split = near_plane * ::pow(far_plane / near_plane, p);
+    f32 log_split = near_plane * ::powf(far_plane / near_plane, p);
     f32 uniform_split = near_plane + (far_plane - near_plane) * p;
     splits[i] = lambda * log_split + (1.0f - lambda) * uniform_split;
   }
 
   Vec3 light_dir = Normalize(sun_direction);  // travel direction = look direction
-  Vec3 up_ref = ::abs(light_dir.y) > 0.99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
+  Vec3 up_ref = ::fabsf(light_dir.y) > 0.99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
 
   current_ = CascadeData{};
   for (u32 i = 0; i < count; ++i) {
@@ -172,9 +172,9 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
     f32 radius = 0.0f;
     for (const Vec3& p : corners) {
       Vec3 v = {p.x - center.x, p.y - center.y, p.z - center.z};
-      radius = rx::Max(radius, ::sqrt(v.x * v.x + v.y * v.y + v.z * v.z));
+      radius = rx::Max(radius, ::sqrtf(v.x * v.x + v.y * v.y + v.z * v.z));
     }
-    radius = ::ceil(radius * 16.0f) / 16.0f;  // quantize so it stops pulsing
+    radius = ::ceilf(radius * 16.0f) / 16.0f;  // quantize so it stops pulsing
 
     Vec3 light_eye = {center.x - light_dir.x * (radius + back_pad),
                       center.y - light_dir.y * (radius + back_pad),
@@ -190,8 +190,8 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
     f32 half_res = settings_.resolution * 0.5f;
     f32 sx = origin_ndc.x * half_res;
     f32 sy = origin_ndc.y * half_res;
-    f32 dx = (::round(sx) - sx) / half_res;
-    f32 dy = (::round(sy) - sy) / half_res;
+    f32 dx = (::roundf(sx) - sx) / half_res;
+    f32 dy = (::roundf(sy) - sy) / half_res;
     light_vp.m[12] += dx;
     light_vp.m[13] += dy;
 

@@ -42,7 +42,7 @@ Vec3 ToDecalSpace(const Decal& d, const Vec3& world) {
           d.row2[0] * world.x + d.row2[1] * world.y + d.row2[2] * world.z + d.row2[3]};
 }
 
-bool Near(f32 a, f32 b) { return ::fabs(a - b) < 1e-4f; }
+bool Near(f32 a, f32 b) { return ::fabsf(a - b) < 1e-4f; }
 
 // A unit quad in the XZ plane, uv0 covering the full 0..1 chart. World x maps to
 // u and world z to v, so a projector at the origin lands in the middle of the
@@ -109,12 +109,12 @@ int main() {
           "the projector centre is the origin of decal space");
     // Half the FULL width along a plane axis is the box edge.
     const Vec3 edge = ToDecalSpace(d, {2, 3, 5});
-    Check(Near(::fabs(edge.x) + ::fabs(edge.y), 1.0f) && Near(edge.z, 0),
+    Check(Near(::fabsf(edge.x) + ::fabsf(edge.y), 1.0f) && Near(edge.z, 0),
           "a point at half the width sits on the box edge");
     const Vec3 above = ToDecalSpace(d, {2, 3.5f, 4});
     Check(Near(above.z, 1.0f), "the box depth runs along the surface normal");
     const Vec3 outside = ToDecalSpace(d, {5, 3, 4});
-    Check(::fabs(outside.x) > 1.0f, "a point past the box falls outside");
+    Check(::fabsf(outside.x) > 1.0f, "a point past the box falls outside");
   }
 
   DeviceDesc desc;

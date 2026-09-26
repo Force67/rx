@@ -245,7 +245,7 @@ void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report
       // strtof, not strtod: 1e40 is a perfectly good double and an inf f32, and
       // it is the f32 the loader keeps.
       const f32 value = ::strtof(token.c_str(), &end);
-      if (end != token.c_str() && *end == '\0' && ::isfinite(value)) continue;
+      if (end != token.c_str() && *end == '\0' && isfinite(value)) continue;
       const bool number = end != token.c_str() && *end == '\0';
       report.ErrorAt(entity, assign.line, number ? "non_finite" : "unparsed_number",
                      rx::StrFormat("{}.{} = {}: '{}' {}; a strict load refuses the file and a "
@@ -269,7 +269,7 @@ bool ReadLanes(const base::String& raw, u32 lanes, f32* out) {
     if (!in.Next(&token)) return true;  // the legal short form; the rest stay 0
     char* end = nullptr;
     const f32 value = ::strtof(token.c_str(), &end);
-    if (end == token.c_str() || *end != '\0' || !::isfinite(value)) return false;
+    if (end == token.c_str() || *end != '\0' || !isfinite(value)) return false;
     out[lane] = value;
   }
   return true;
@@ -337,7 +337,7 @@ void CheckDiscardedTransform(ecs::World& world, const Source& source, bool grids
     if (!ReadLanes(assign.raw, lanes, authored)) continue;
     bool differs = false;
     for (u32 lane = 0; lane < lanes; ++lane) {
-      differs = differs || ::abs(authored[lane] - solved[lane]) > kDiscardedEpsilon;
+      differs = differs || ::fabsf(authored[lane] - solved[lane]) > kDiscardedEpsilon;
     }
     if (!differs) continue;
 
@@ -369,12 +369,12 @@ void CheckTransform(ecs::World& world, ecs::Entity entity, Report& report) {
     report.Error(entity, "degenerate_rotation",
                  "Transform.rotation is the zero quaternion; the mesh collapses to a point "
                  "(identity is 0 0 0 1)");
-  } else if (::abs(::sqrt(length_sq) - 1.0f) > 0.05f) {
+  } else if (::fabsf(::sqrtf(length_sq) - 1.0f) > 0.05f) {
     // 5% is far outside anything hand-rounding a unit quaternion produces
     // (0.7 0 0 0.7 is only 1% short) and well inside a visible mis-scale.
     report.Warn(entity, "non_unit_rotation",
                 rx::StrFormat("Transform.rotation has length {}, so it scales the mesh by that "
-                            "on top of Transform.scale", ::sqrt(length_sq)));
+                            "on top of Transform.scale", ::sqrtf(length_sq)));
   }
 }
 

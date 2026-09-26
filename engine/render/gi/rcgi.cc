@@ -103,10 +103,10 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
   f32 u3 = static_cast<f32>(hash(frame_index + 2) & 0xffffff) / 16777215.0f;
   f32 angle = u1 * 6.2831853f;
   f32 z = u2 * 2.0f - 1.0f;
-  f32 r = ::sqrt(rx::Max(0.0f, 1.0f - z * z));
+  f32 r = ::sqrtf(rx::Max(0.0f, 1.0f - z * z));
   f32 phi = u3 * 6.2831853f;
-  Vec3 axis{r * ::cos(phi), r * ::sin(phi), z};
-  f32 c = ::cos(angle), s = ::sin(angle), t = 1.0f - c;
+  Vec3 axis{r * ::cosf(phi), r * ::sinf(phi), z};
+  f32 c = ::cosf(angle), s = ::sinf(angle), t = 1.0f - c;
   f32 rows[12] = {
       t * axis.x * axis.x + c,          t * axis.x * axis.y - s * axis.z,
       t * axis.x * axis.z + s * axis.y, 0,
@@ -134,9 +134,9 @@ base::UniquePointer<RcgiSystem> RcgiSystem::Create(Device& device, TextureView s
 Vec3 RcgiSystem::SnapOrigin(const Vec3& camera, u32 cascade) const {
   f32 spacing = kBaseSpacing * static_cast<f32>(1u << cascade);
   f32 half = (kProbesPerAxis - 1) * spacing * 0.5f;
-  return Vec3{::floor((camera.x - half) / spacing) * spacing,
-             ::floor((camera.y - half) / spacing) * spacing,
-             ::floor((camera.z - half) / spacing) * spacing};
+  return Vec3{::floorf((camera.x - half) / spacing) * spacing,
+             ::floorf((camera.y - half) / spacing) * spacing,
+             ::floorf((camera.z - half) / spacing) * spacing};
 }
 
 bool RcgiSystem::CreateResources() {
@@ -501,7 +501,7 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                             bool async, const SdfClipmap* sdf) {
   // A camera teleport (bigger than cascade 0's extent) invalidates the whole
   // world cache; zero it before this frame's inserts.
-  f32 jump = ::sqrt((camera.x - last_camera_.x) * (camera.x - last_camera_.x) +
+  f32 jump = ::sqrtf((camera.x - last_camera_.x) * (camera.x - last_camera_.x) +
                        (camera.y - last_camera_.y) * (camera.y - last_camera_.y) +
                        (camera.z - last_camera_.z) * (camera.z - last_camera_.z));
   if (history_valid_ && jump > kBaseSpacing * kProbesPerAxis) {

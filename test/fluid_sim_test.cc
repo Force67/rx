@@ -146,7 +146,7 @@ int main() {
     f32 v = 0;
     for (u32 i = 0; i < kRes * kRes; ++i) v += s0[i * 4 + 0];
     ::printf("fluid_sim_test: uploaded water volume %.3f (cpu %.3f)\n", v, initial_volume);
-    if (::fabs(v - initial_volume) > 0.01f * initial_volume)
+    if (::fabsf(v - initial_volume) > 0.01f * initial_volume)
       return Fail("uploaded water volume does not match the CPU fill");
   }
 
@@ -162,12 +162,12 @@ int main() {
     const f32 dl = s1[i * 4 + 1];
     const f32 T = s1[i * 4 + 2];
     const f32 C = s1[i * 4 + 3];
-    if (!::isfinite(dw) || !::isfinite(dl) || !::isfinite(T) || !::isfinite(C))
+    if (!isfinite(dw) || !isfinite(dl) || !isfinite(T) || !isfinite(C))
       return Fail("non-finite value in state");
     if (dw < -1e-4f || dl < -1e-4f || C < -1e-4f) return Fail("negative depth/crust in state");
     vol1 += dw;
   }
-  const f32 drift = ::fabs(vol1 - initial_volume) / rx::Max(initial_volume, 1e-6f);
+  const f32 drift = ::fabsf(vol1 - initial_volume) / rx::Max(initial_volume, 1e-6f);
   ::printf("fluid_sim_test: initial volume %.3f, after settle %.3f (drift %.3f%%)\n",
               initial_volume, vol1, drift * 100.0f);
   if (drift > 0.01f) return Fail("water volume not conserved within 1%");
@@ -194,13 +194,13 @@ int main() {
     wet = 0;
     for (u32 i = 0; i < kRes * kRes; ++i) {
       const f32 dw = s2[i * 4 + 0];
-      if (!::isfinite(dw)) return Fail("non-finite depth after flood");
+      if (!isfinite(dw)) return Fail("non-finite depth after flood");
       if (dw < -1e-4f) return Fail("negative depth after flood");
       vol2 += dw;
       if (dw > 0.5f) {  // core pond; shoreline partial cells sit below the plane
         const f32 surface = bed_open[i] + dw;
-        mn = ::fmin(mn, surface);
-        mx = ::fmax(mx, surface);
+        mn = ::fminf(mn, surface);
+        mx = ::fmaxf(mx, surface);
         ++wet;
       }
     }

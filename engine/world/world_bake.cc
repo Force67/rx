@@ -83,11 +83,11 @@ f32 CellOrigin(i64 coord, f32 size) { return static_cast<f32>(static_cast<double
 // is wrong rather than one that fails to load.
 bool InLattice(const scene::Transform& transform, f32 cell_size) {
   for (u32 axis = 0; axis < 3; ++axis) {
-    if (!::isfinite(transform.position[axis])) return false;
+    if (!isfinite(transform.position[axis])) return false;
   }
   for (u32 axis = 0; axis < 3; axis += 2) {
     const double quotient = static_cast<double>(transform.position[axis]) / cell_size;
-    if (!(::abs(quotient) < static_cast<double>(kMaximumCellCoord))) return false;
+    if (!(::fabs(quotient) < static_cast<double>(kMaximumCellCoord))) return false;
   }
   return true;
 }
@@ -211,7 +211,7 @@ BakeVerdict ClassifyForBake(ecs::World& world, ecs::Entity entity,
     verdict.refusal = "has a Parent, which is an ecs handle no baked cell can carry";
     return verdict;
   }
-  const f32 cell_size = options.cell_size > 0 && ::isfinite(options.cell_size)
+  const f32 cell_size = options.cell_size > 0 && isfinite(options.cell_size)
                             ? options.cell_size
                             : 64.0f;
   if (!InLattice(*transform, cell_size)) {
@@ -255,7 +255,7 @@ bool BakeWorld(const base::String& scene_path, const WorldBakeOptions& input_opt
   *result = WorldBakeResult{};
 
   WorldBakeOptions options = input_options;
-  if (!(options.cell_size > 0) || !::isfinite(options.cell_size)) {
+  if (!(options.cell_size > 0) || !isfinite(options.cell_size)) {
     SetError(error, "cell size must be a positive, finite number");
     return false;
   }

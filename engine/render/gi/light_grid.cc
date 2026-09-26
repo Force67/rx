@@ -56,9 +56,9 @@ void LightGrid::AddToGraph(RenderGraph& graph, const GpuBuffer& lights, u32 ligh
   for (u32 c = 0; c < kCascades; ++c) {
     f32 extent = kCascade0Extent * static_cast<f32>(1u << c);
     f32 cell_size = extent / static_cast<f32>(kCells);
-    Vec3 origin{::floor((camera.x - extent * 0.5f) / cell_size) * cell_size,
-                ::floor((camera.y - extent * 0.5f) / cell_size) * cell_size,
-                ::floor((camera.z - extent * 0.5f) / cell_size) * cell_size};
+    Vec3 origin{::floorf((camera.x - extent * 0.5f) / cell_size) * cell_size,
+                ::floorf((camera.y - extent * 0.5f) / cell_size) * cell_size,
+                ::floorf((camera.z - extent * 0.5f) / cell_size) * cell_size};
     params.cascade[c][0] = origin.x;
     params.cascade[c][1] = origin.y;
     params.cascade[c][2] = origin.z;

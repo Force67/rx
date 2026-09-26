@@ -101,7 +101,7 @@ bool Write(const base::String &path, const char *text, size_t size) {
   return ok;
 }
 
-bool Near(f32 value, f32 expected) { return ::fabs(value - expected) < 1e-4f; }
+bool Near(f32 value, f32 expected) { return ::fabsf(value - expected) < 1e-4f; }
 
 bool Near3(const f32 *value, f32 x, f32 y, f32 z) {
   return Near(value[0], x) && Near(value[1], y) && Near(value[2], z);
@@ -231,7 +231,7 @@ void CheckUnknownShaderRejected() {
   Check(!loaded, "a document with neither surface node is rejected");
 }
 
-bool Finite(f32 v) { return ::isfinite(v); }
+bool Finite(f32 v) { return isfinite(v); }
 
 bool Finite3(const f32 *v) { return Finite(v[0]) && Finite(v[1]) && Finite(v[2]); }
 

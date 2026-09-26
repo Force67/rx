@@ -18,8 +18,8 @@ constexpr f32 kSpeedRatioTau = 0.15f;
 }  // namespace
 
 f32 Wrap01(f32 x) {
-  if (!::isfinite(x)) return 0;
-  x -= ::floor(x);
+  if (!isfinite(x)) return 0;
+  x -= ::floorf(x);
   if (x < 0) x += 1;   // guard tiny-negative rounding
   if (x >= 1) x -= 1;  // guard rounding up to exactly 1
   return x;

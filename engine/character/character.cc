@@ -13,7 +13,7 @@ namespace {
 
 constexpr f32 kTwoPi = 6.28318530717958647692f;
 
-f32 WrapAngle(f32 a) { return ::remainder(a, kTwoPi); }
+f32 WrapAngle(f32 a) { return ::remainderf(a, kTwoPi); }
 
 // Heading quaternion: yaw about -Y so a character's forward (-Z at yaw 0) agrees
 // with scene::CameraOrbit's yaw and the camera it drives.
@@ -21,7 +21,7 @@ Quat HeadingQuat(f32 yaw) { return QuatFromAxisAngle({0, -1, 0}, yaw); }
 
 f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
   const f32 d = target - current;
-  if (::abs(d) <= max_delta) return target;
+  if (::fabsf(d) <= max_delta) return target;
   return current + (d > 0 ? max_delta : -max_delta);
 }
 
@@ -29,7 +29,7 @@ f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
 // `half_life` seconds. Converges without overshoot; half_life <= 0 snaps.
 f32 ExpApproach(f32 current, f32 target, f32 half_life, f32 dt) {
   if (half_life <= 0.0f) return target;
-  const f32 t = 1.0f - ::exp2(-dt / half_life);
+  const f32 t = 1.0f - ::exp2f(-dt / half_life);
   return current + (target - current) * t;
 }
 
@@ -37,13 +37,13 @@ f32 ExpApproach(f32 current, f32 target, f32 half_life, f32 dt) {
 f32 ExpApproachAngle(f32 current, f32 target, f32 half_life, f32 dt) {
   const f32 diff = WrapAngle(target - current);
   if (half_life <= 0.0f) return WrapAngle(current + diff);
-  const f32 t = 1.0f - ::exp2(-dt / half_life);
+  const f32 t = 1.0f - ::exp2f(-dt / half_life);
   return WrapAngle(current + diff * t);
 }
 
 // Heading yaw for a horizontal world direction, inverse of HeadingQuat's forward
 // (forward at yaw 0 is -Z, yaw increases toward +X): forward = (sin y, 0, -cos y).
-f32 YawFromDir(const Vec3& d) { return ::atan2(d.x, -d.z); }
+f32 YawFromDir(const Vec3& d) { return ::atan2f(d.x, -d.z); }
 
 Vec3 MoveTowardVec(const Vec3& current, const Vec3& target, f32 max_delta) {
   const Vec3 d = target - current;
@@ -88,7 +88,7 @@ void RemoveIfPresent(ecs::World& world, ecs::Entity e) {
 }  // namespace
 
 void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
-  if (!::isfinite(dt) || dt <= 0) return;
+  if (!isfinite(dt) || dt <= 0) return;
 
   world.Each<CharacterMovementSettings, CharacterShape, CharacterIntent, CharacterState,
              CharacterBody, scene::Transform>(
@@ -150,8 +150,8 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         const f32 half_height = CylinderHalf(height, radius);
         const f32 new_total_half = half_height + radius;
 
-        const bool dims_changed = ::abs(new_total_half - old_total_half) > 1e-4f ||
-                                  ::abs(radius - body.radius) > 1e-4f;
+        const bool dims_changed = ::fabsf(new_total_half - old_total_half) > 1e-4f ||
+                                  ::fabsf(radius - body.radius) > 1e-4f;
         if (dims_changed && have_center) {
           const Vec3 new_center = feet + up * new_total_half;
           physics.SetCharacterPosition(body.id, new_center);
@@ -185,7 +185,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
           state.facing_yaw = state.yaw;  // locked, raw
         } else if (throttle > 1e-3f) {
           const f32 target_yaw = YawFromDir(dir);
-          const f32 gap = ::abs(WrapAngle(target_yaw - state.facing_yaw));
+          const f32 gap = ::fabsf(WrapAngle(target_yaw - state.facing_yaw));
           // Sticky pivot: a reversal past pivot_angle latches the faster rate and
           // holds it through the bulk of the turn (released near completion), so a
           // 180 spins on the spot instead of arcing then stalling.
@@ -236,7 +236,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         f32 vy = state.integration_velocity.y;
         if (grounded_prev && vy < 0) vy = 0;
         if (jump_wanted && coyote_ok) {
-          vy = ::sqrt(2.0f * rx::Max(settings.gravity, 0.0f) *
+          vy = ::sqrtf(2.0f * rx::Max(settings.gravity, 0.0f) *
                          rx::Max(settings.jump_height, 0.0f));
           state.jump_buffer_timer = 0;
           state.jump_consumed = true;
@@ -251,7 +251,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         // out-thrust weight to lift off) and the ground clamp below still stops
         // any downward component, so this never bypasses fall/land handling.
         const Vec3& ext = intent.external_acceleration;
-        if (::isfinite(ext.x) && ::isfinite(ext.y) && ::isfinite(ext.z))
+        if (isfinite(ext.x) && isfinite(ext.y) && isfinite(ext.z))
           velocity += ext * dt;
 
         // Drive the controller
@@ -311,7 +311,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
           state.landing_dip = rx::Max(state.landing_dip, dip);
         }
         state.landing_dip = shape.landing_dip_half_life > 0.0f
-                                ? state.landing_dip * ::exp2(-dt / shape.landing_dip_half_life)
+                                ? state.landing_dip * ::exp2f(-dt / shape.landing_dip_half_life)
                                 : 0.0f;
         state.anchor_eye_y = state.eye_base_y - state.landing_dip;
         state.view_initialized = true;

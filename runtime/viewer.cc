@@ -606,8 +606,8 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
     // One draw carries one layer tile, so every tattoo has to live in the zone
     // the first anchor picked; a later anchor on another zone would bake
     // outside the tile and shade nothing.
-    const i32 anchor_tile_u = static_cast<i32>(::floor(nearest->uv[0]));
-    const i32 anchor_tile_v = static_cast<i32>(::floor(nearest->uv[1]));
+    const i32 anchor_tile_u = static_cast<i32>(::floorf(nearest->uv[0]));
+    const i32 anchor_tile_v = static_cast<i32>(::floorf(nearest->uv[1]));
     if (!tile_chosen) {
       tile_u = anchor_tile_u;
       tile_v = anchor_tile_v;
@@ -625,7 +625,7 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
     const Vec3 normal = Normalize(TransformDir(
         to_world, {nearest->normal[0], nearest->normal[1], nearest->normal[2]}));
     Vec3 up{0, 1, 0};
-    if (::abs(Dot(up, normal)) > 0.9f) up = {0, 0, 1};
+    if (::fabsf(Dot(up, normal)) > 0.9f) up = {0, 0, 1};
     render::DecalStamp tattoo;
     tattoo.receiver = receiver;
     const f32 world_size = f[3] * placement_scale;
@@ -678,16 +678,16 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
   u32 punctual = 0, dropped = 0, distant_count = 0, dome_count = 0;
 
   for (const asset::ImportedScene::Light& light : scene.lights) {
-    const f32 gain = light.intensity * ::exp2(light.exposure);
+    const f32 gain = light.intensity * ::exp2f(light.exposure);
     if (light.kind == Kind::kDistant) {
       // Brightest distant light wins: a rig may carry a fill as well as a key.
       ++distant_count;
-      if (!sun || gain > sun->intensity * ::exp2(sun->exposure)) sun = &light;
+      if (!sun || gain > sun->intensity * ::exp2f(sun->exposure)) sun = &light;
       continue;
     }
     if (light.kind == Kind::kDome) {
       ++dome_count;
-      if (!dome || gain > dome->intensity * ::exp2(dome->exposure)) dome = &light;
+      if (!dome || gain > dome->intensity * ::exp2f(dome->exposure)) dome = &light;
       continue;
     }
     render::PointLight pl;
@@ -709,7 +709,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     }
     // Influence radius from an inverse-square falloff down to a ~1/255 cutoff,
     // clamped so a bright practical does not light the entire stage.
-    pl.pos_radius[3] = rx::Min(30.0f, rx::Max(1.0f, ::sqrt(intensity * 255.0f)));
+    pl.pos_radius[3] = rx::Min(30.0f, rx::Max(1.0f, ::sqrtf(intensity * 255.0f)));
     pl.color_intensity[0] = light.color[0];
     pl.color_intensity[1] = light.color[1];
     pl.color_intensity[2] = light.color[2];
@@ -738,8 +738,8 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
       pl.direction_type[3] = 1.0f;
       const f32 outer = light.cone_angle * 3.14159265358979f / 180.0f;
       const f32 inner = outer * (1.0f - rx::Clamp(light.cone_softness, 0.0f, 1.0f));
-      pl.params[0] = ::cos(inner);
-      pl.params[1] = ::cos(outer);
+      pl.params[0] = ::cosf(inner);
+      pl.params[1] = ::cosf(outer);
     }
     scene_lights_.push_back(pl);
     ++punctual;
@@ -764,7 +764,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     s.sun_direction = sun->direction;
     s.sun_color = {sun->color[0], sun->color[1], sun->color[2]};
     s.sun_intensity =
-        sun->intensity * ::exp2(sun->exposure) * UsdSunScale.get();
+        sun->intensity * ::exp2f(sun->exposure) * UsdSunScale.get();
     ctx_.scene_owns_sun = true;
     drive_sun_from_clock_ = false;
   }
@@ -779,7 +779,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     if (f32* pixels = stbi_loadf(dome->texture.c_str(), &w, &h, &channels, 4)) {
       const Vec3 tint{dome->color[0], dome->color[1], dome->color[2]};
       const f32 gain =
-          dome->intensity * ::exp2(dome->exposure) * UsdDomeScale.get();
+          dome->intensity * ::exp2f(dome->exposure) * UsdDomeScale.get();
       dome_ibl = renderer_->SetEnvironmentMap(pixels, static_cast<u32>(w),
                                               static_cast<u32>(h), tint, gain,
                                               UsdDomeRotation.get());
@@ -827,7 +827,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     s.clouds = false;
     s.aerial_perspective = 0.0f;
     const f32 dome_gain =
-        dome ? dome->intensity * ::exp2(dome->exposure) * UsdDomeScale.get()
+        dome ? dome->intensity * ::exp2f(dome->exposure) * UsdDomeScale.get()
              : 0.05f;
     // The dome's tint multiplies its environment map, so the fill colour is
     // both together - the tint alone is not the colour of the sky.
@@ -918,8 +918,8 @@ void Viewer::ApplySceneCamera(const asset::ImportedScene& scene) {
                                   camera.rotation[2], camera.rotation[3]);
   const Vec3 forward = TransformDir(basis, {0.0f, 0.0f, -1.0f});
   camera_.set_position(camera.position);
-  camera_.set_yaw_pitch(::atan2(forward.x, -forward.z),
-                        ::asin(rx::Clamp(forward.y, -1.0f, 1.0f)));
+  camera_.set_yaw_pitch(::atan2f(forward.x, -forward.z),
+                        ::asinf(rx::Clamp(forward.y, -1.0f, 1.0f)));
   camera_.speed = 4.0f;
   // Framing is the lens as much as the pose: a 18mm wide-angle stage camera
   // shows a different scene through the engine's default 60 degrees.
@@ -934,7 +934,7 @@ void Viewer::DriveSunFromClock() {
   // frame for sub-degree motion.
   if (!drive_sun_from_clock_ || ctx_.scene_owns_sun) return;
   const f32 hour = clock_->hour();
-  if (last_sky_hour_ >= -100.0f && ::abs(hour - last_sky_hour_) < 0.02f) return;
+  if (last_sky_hour_ >= -100.0f && ::fabsf(hour - last_sky_hour_) < 0.02f) return;
   last_sky_hour_ = hour;
   const SkyLighting sky = ComputeSkyLighting(hour);
   auto& s = renderer_->settings();
@@ -1036,7 +1036,7 @@ void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
       // RX_MORPH_WEIGHTS: weights were fixed at load; skip track/sweep.
     } else if (!instance.animation.times.empty()) {
       f32 time = instance.animation.duration > 0
-                     ? ::fmod(morph_time_, instance.animation.duration)
+                     ? ::fmodf(morph_time_, instance.animation.duration)
                      : 0.0f;
       anim::SampleMorphWeights(instance.animation, time, &instance.weights);
     } else if (!instance.expression_map.empty()) {
@@ -1051,8 +1051,8 @@ void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
       base::Fill(instance.weights.begin(), instance.weights.end(), 0.0f);
       const f32 period = 1.2f;  // seconds per target
       u32 index = static_cast<u32>(morph_time_ / period) % instance.weights.size();
-      f32 phase = ::fmod(morph_time_, period) / period;
-      instance.weights[index] = ::sin(phase * 3.14159265f);
+      f32 phase = ::fmodf(morph_time_, period) / period;
+      instance.weights[index] = ::sinf(phase * 3.14159265f);
     }
     render::DrawItem draw;
     draw.mesh = instance.mesh;

@@ -21,7 +21,7 @@ struct Push {
 };
 f32 Half(u16 b) {
   const int exponent = (b >> 10) & 31;
-  return ::ldexp(float((b & 1023) + (exponent ? 1024 : 0)),
+  return ::ldexpf(float((b & 1023) + (exponent ? 1024 : 0)),
                     exponent ? exponent - 25 : -24) * ((b & 0x8000) ? -1.f : 1.f);
 }
 }
@@ -110,7 +110,7 @@ int main() {
       mean += value / kPixels;
     }
     ::printf("specular mode=%u RMS=%g mean=%g\n", mode, ::sqrt(mse), mean);
-    const bool ok = finite && (mode == 0 ? ::sqrt(mse) < .14 && ::abs(mean - 1) < .03 : ::sqrt(mse) < .005);
+    const bool ok = finite && (mode == 0 ? ::sqrt(mse) < .14 && ::fabs(mean - 1) < .03 : ::sqrt(mse) < .005);
     if (!ok) { ::printf("FAIL: reflection noise reduction / edge preservation\n"); ++failures; }
   }
   device->WaitIdle();

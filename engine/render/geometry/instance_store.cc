@@ -14,9 +14,9 @@ namespace {
 
 f32 MaxScale(const Mat4 &transform) {
   const f32 *m = transform.m;
-  const f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-  const f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-  const f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+  const f32 sx = ::sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+  const f32 sy = ::sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+  const f32 sz = ::sqrtf(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
   return rx::Max(sx, rx::Max(sy, sz));
 }
 
@@ -55,7 +55,7 @@ void InstanceStore::ComputeBounds(Group &group, const f32 mesh_center[3], f32 me
     const Vec3 center = TransformPoint(transform, {mesh_center[0], mesh_center[1], mesh_center[2]});
     const Vec3 delta = center - group.bounds_center;
     group.bounds_radius = rx::Max(
-        group.bounds_radius, ::sqrt(Dot(delta, delta)) + mesh_radius * MaxScale(transform));
+        group.bounds_radius, ::sqrtf(Dot(delta, delta)) + mesh_radius * MaxScale(transform));
   }
 }
 

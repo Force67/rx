@@ -255,7 +255,7 @@ void Mixer::MixInto(float* out, u32 frames) {
   const f32 m = master_;
   for (u32 i = 0; i < frames * 2; ++i) {
     f32 s = out[i] * m;
-    if (s > 1.0f || s < -1.0f) s = ::tanh(s);
+    if (s > 1.0f || s < -1.0f) s = ::tanhf(s);
     out[i] = s;
   }
 }

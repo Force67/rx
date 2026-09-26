@@ -20,7 +20,7 @@ void Check(bool condition, const char* message) {
 }
 
 void Near(float actual, float expected, const char* message, float epsilon = 1e-4f) {
-  if (::abs(actual - expected) <= epsilon) return;
+  if (::fabsf(actual - expected) <= epsilon) return;
   ::fprintf(stderr, "render2d_test: FAIL: %s (got %.6f, expected %.6f)\n", message, actual,
                expected);
   ++failures;
@@ -51,7 +51,7 @@ void TestCameraRejectsDegenerateInputs() {
   const rx::Mat4 view_proj = camera.ViewProj();
   Check(camera.viewport().x == 1.0f && camera.viewport().y == 1.0f,
         "zero viewport is kept invertible");
-  Check(::isfinite(view_proj.m[0]) && ::isfinite(view_proj.m[5]),
+  Check(isfinite(view_proj.m[0]) && isfinite(view_proj.m[5]),
         "degenerate camera inputs produce a finite matrix");
 }
 

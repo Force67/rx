@@ -60,7 +60,7 @@ ecs::Entity SpawnProjectile(ecs::World& world, const Projectile& desc) {
 
 void StepProjectiles(ecs::World& world, physics::PhysicsWorld& physics,
                      const HitRegistry& registry, CombatEvents& events, f32 dt) {
-  if (!::isfinite(dt) || dt <= 0) return;
+  if (!isfinite(dt) || dt <= 0) return;
 
   base::Vector<ecs::Entity> spent;
   base::Vector<ExplosionParams> blasts;
@@ -73,7 +73,7 @@ void StepProjectiles(ecs::World& world, physics::PhysicsWorld& physics,
     if (round.drag > 0) {
       // drag is per metre travelled, so the decay over a step depends on how
       // far the round actually gets: fast rounds bleed speed faster.
-      velocity = velocity * ::exp(-round.drag * Length(velocity) * dt);
+      velocity = velocity * ::expf(-round.drag * Length(velocity) * dt);
     }
 
     const Vec3 from = round.position;

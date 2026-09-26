@@ -37,12 +37,12 @@ struct V3 {
 };
 
 V3 Norm(V3 v) {
-  rx::f32 l = ::sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+  rx::f32 l = ::sqrtf(v.x * v.x + v.y * v.y + v.z * v.z);
   return {v.x / l, v.y / l, v.z / l};
 }
 
 V3 Spherical(rx::f32 theta, rx::f32 phi) {
-  return {::sin(theta) * ::cos(phi), ::cos(theta), ::sin(theta) * ::sin(phi)};
+  return {::sinf(theta) * ::cosf(phi), ::cosf(theta), ::sinf(theta) * ::sinf(phi)};
 }
 
 rx::f32 Sum(const rx::f32 v[3]) { return v[0] + v[1] + v[2]; }
@@ -80,8 +80,8 @@ int main() {
               HumanEvaluateCpu(neutral, base, roughness, f0, n, n, n, v, l, 0.4f, 0.0f);
           const HumanBrdfSample s = StockBrdfCpu(base, roughness, f0, n, v, l);
           for (int c = 0; c < 3; ++c) {
-            worst = rx::Max(worst, ::abs(h.diffuse[c] - s.diffuse[c]));
-            worst = rx::Max(worst, ::abs(h.specular[c] - s.specular[c]));
+            worst = rx::Max(worst, ::fabsf(h.diffuse[c] - s.diffuse[c]));
+            worst = rx::Max(worst, ::fabsf(h.specular[c] - s.specular[c]));
           }
           Check(Sum(h.transmission) == 0.0f, "neutral transmission is exactly zero");
         }
@@ -105,7 +105,7 @@ int main() {
         HumanEvaluateCpu(p, base, 0.4f, f0, n, n, n, v_side, l_graze, 0.0f, 0.0f);
     Check(Sum(lifted.diffuse) > Sum(zero.diffuse),
           "diffuse Fresnel lifts the grazing diffuse");
-    Check(::abs(Sum(lifted.specular) - Sum(zero.specular)) < 1e-7f,
+    Check(::fabsf(Sum(lifted.specular) - Sum(zero.specular)) < 1e-7f,
           "diffuse Fresnel does not touch the specular lobe");
 
     p = HumanNeutral();
@@ -113,7 +113,7 @@ int main() {
     const HumanBrdfSample retro =
         HumanEvaluateCpu(p, base, 0.4f, f0, n, n, n, v_side, l_graze, 0.0f, 0.0f);
     Check(Sum(retro.diffuse) > Sum(zero.diffuse), "retroreflection lifts the back-scatter");
-    Check(::abs(Sum(retro.specular) - Sum(zero.specular)) < 1e-7f,
+    Check(::fabsf(Sum(retro.specular) - Sum(zero.specular)) < 1e-7f,
           "retroreflection does not touch the specular lobe");
 
     p = HumanNeutral();
@@ -122,7 +122,7 @@ int main() {
         HumanEvaluateCpu(p, base, 0.4f, f0, n, n, n, v_side, l_graze, 0.0f, 0.0f);
     Check(Sum(fres.specular) > Sum(zero.specular),
           "a lower specular Fresnel exponent raises grazing reflectance");
-    Check(::abs(Sum(fres.diffuse) - Sum(zero.diffuse)) < 1e-7f,
+    Check(::fabsf(Sum(fres.diffuse) - Sum(zero.diffuse)) < 1e-7f,
           "the specular Fresnel exponent does not touch the diffuse lobe");
   }
 
@@ -147,7 +147,7 @@ int main() {
         const rx::f32 l[3] = {ll.x, ll.y, ll.z};
         const HumanBrdfSample s =
             HumanEvaluateCpu(p, base, 0.5f, f0, n, n, n, v_side, l, 0.0f, 0.0f);
-        total += static_cast<double>(s.diffuse[0]) * ::sin(theta);
+        total += static_cast<double>(s.diffuse[0]) * ::sinf(theta);
       }
       return total * (kPi / steps) * 2.0 * kPi;
     };
@@ -180,7 +180,7 @@ int main() {
         HumanEvaluateCpu(single, base, 0.3f, f0, n, n, n, v_side, l_45, 0.0f, 0.0f);
     const HumanBrdfSample b =
         HumanEvaluateCpu(dual, base, 0.3f, f0, n, n, n, v_side, l_45, 0.0f, 0.0f);
-    Check(::abs(Sum(a.diffuse) - Sum(b.diffuse)) < 1e-7f,
+    Check(::fabsf(Sum(a.diffuse) - Sum(b.diffuse)) < 1e-7f,
           "the second specular lobe does not touch the diffuse lobe");
 
     // Integrated over the hemisphere the two lobes must carry the same energy;
@@ -197,7 +197,7 @@ int main() {
           const rx::f32 l[3] = {ll.x, ll.y, ll.z};
           const HumanBrdfSample s =
               HumanEvaluateCpu(p, base, 0.3f, f0, n, n, n, v_side, l, 0.0f, 0.0f);
-          total += static_cast<double>(s.specular[0]) * ::sin(theta);
+          total += static_cast<double>(s.specular[0]) * ::sinf(theta);
         }
       }
       return total;
@@ -229,9 +229,9 @@ int main() {
         HumanEvaluateCpu(p, base, 0.25f, f0, n, n, n, v_side, l_45, 0.0f, 0.0f);
     const HumanBrdfSample split =
         HumanEvaluateCpu(p, base, 0.25f, f0, n, n, ns, v_side, l_45, 0.0f, 0.0f);
-    Check(::abs(Sum(shared_n.diffuse) - Sum(split.diffuse)) < 1e-7f,
+    Check(::fabsf(Sum(shared_n.diffuse) - Sum(split.diffuse)) < 1e-7f,
           "a specular-only normal leaves the diffuse lobe alone");
-    Check(::abs(Sum(shared_n.specular) - Sum(split.specular)) > 1e-6f,
+    Check(::fabsf(Sum(shared_n.specular) - Sum(split.specular)) > 1e-6f,
           "a specular-only normal moves the highlight");
   }
 
@@ -380,7 +380,7 @@ int main() {
     // Neutral has nothing to soften, so the multiplier must be exactly 1 -
     // otherwise turning the model on re-shades every area-lit surface.
     const HumanSurfaceParameters neutral = HumanNeutral();
-    Check(::abs(HumanTerminatorMultiplierCpu(neutral, n, n, rep_grazing) - 1.0f) < 1e-6f,
+    Check(::fabsf(HumanTerminatorMultiplierCpu(neutral, n, n, rep_grazing) - 1.0f) < 1e-6f,
           "the neutral set leaves area-light diffuse untouched");
   }
 

@@ -454,7 +454,7 @@ bool ConvertMesh(const tt::RenderMesh &src,
   out->bounds_center[2] = (lo.z + hi.z) * 0.5f;
   const Vec3 extent{hi.x - lo.x, hi.y - lo.y, hi.z - lo.z};
   out->bounds_radius =
-      0.5f * ::sqrt(extent.x * extent.x + extent.y * extent.y +
+      0.5f * ::sqrtf(extent.x * extent.x + extent.y * extent.y +
                        extent.z * extent.z);
 
   const auto material_of = [&](int id) -> AssetId {
@@ -539,7 +539,7 @@ ImportedScene::Instance MakeInstance(u32 mesh_index, const Mat4 &world) {
   instance.position = {world.m[12], world.m[13], world.m[14]};
   const auto axis_length = [&](int col) {
     const f32 *c = &world.m[col * 4];
-    return ::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+    return ::sqrtf(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
   };
   instance.scale = (axis_length(0) + axis_length(1) + axis_length(2)) / 3.0f;
   const Quat rotation = QuatFromMat4(world);
@@ -676,7 +676,7 @@ u32 NormalizeColorSpaceTokens(tinyusdz::PrimSpec &spec) {
 
 Vec3 TransformDirectionNormalized(const Mat4 &m, const Vec3 &v) {
   Vec3 d = TransformDir(m, v);
-  const f32 len = ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+  const f32 len = ::sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
   if (len > 1e-8f) {
     d.x /= len;
     d.y /= len;
@@ -731,7 +731,7 @@ bool AverageEnvmapColor(const base::String &path, f32 out_rgb[3]) {
       // Guard against inf/nan, which show up in the wild in exr-sourced hdr.
       for (int c = 0; c < 3; ++c) {
         const f32 v = p[c];
-        if (::isfinite(v) && v > 0.0f) sum[c] += weight * v;
+        if (isfinite(v) && v > 0.0f) sum[c] += weight * v;
       }
       weight_total += weight;
     }
@@ -957,7 +957,7 @@ void ConvertCameras(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
     camera.rotation[2] = rotation.z;
     camera.rotation[3] = rotation.w;
     if (src.focalLength > 1e-6f) {
-      camera.yfov = 2.0f * ::atan(0.5f * src.verticalAperture / src.focalLength);
+      camera.yfov = 2.0f * ::atanf(0.5f * src.verticalAperture / src.focalLength);
     }
     camera.znear = src.znear;
     camera.zfar = src.zfar;

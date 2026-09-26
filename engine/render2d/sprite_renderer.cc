@@ -222,7 +222,7 @@ void SpriteRenderer::DrawSprite(const SpriteParams& s) {
   q.texture = (s.texture != 0 && s.texture < textures_.size() && textures_[s.texture].valid)
                   ? s.texture
                   : kWhiteTexture;
-  q.sort_key = ::isfinite(s.sort_key) ? s.sort_key : 0.0f;
+  q.sort_key = isfinite(s.sort_key) ? s.sort_key : 0.0f;
   queue_.push_back(q);
 }
 
@@ -238,17 +238,17 @@ void SpriteRenderer::DrawQuad(Vec2 pos, Vec2 size, Color color, f32 sort_key) {
 
 void SpriteRenderer::DrawTileMap(TextureId tileset_texture, const TileMap& map,
                                  const Camera2D& camera) {
-  if (!(map.tile_size > 0.0f) || !::isfinite(map.tile_size)) return;
+  if (!(map.tile_size > 0.0f) || !isfinite(map.tile_size)) return;
   Rect view = camera.VisibleRect();
   for (const TileLayer& layer : map.layers) {
     // Parallax shifts a distant layer so it scrolls slower than the camera.
     Vec2 offset = camera.center() * (1.0f - layer.parallax);
     // Visible tile range in this layer's own space (undo the parallax offset).
     f32 x0 = view.x - offset.x, y0 = view.y - offset.y;
-    i32 tx0 = static_cast<i32>(::floor(x0 / map.tile_size)) - 1;
-    i32 ty0 = static_cast<i32>(::floor(y0 / map.tile_size)) - 1;
-    i32 tx1 = static_cast<i32>(::floor((x0 + view.w) / map.tile_size)) + 1;
-    i32 ty1 = static_cast<i32>(::floor((y0 + view.h) / map.tile_size)) + 1;
+    i32 tx0 = static_cast<i32>(::floorf(x0 / map.tile_size)) - 1;
+    i32 ty0 = static_cast<i32>(::floorf(y0 / map.tile_size)) - 1;
+    i32 tx1 = static_cast<i32>(::floorf((x0 + view.w) / map.tile_size)) + 1;
+    i32 ty1 = static_cast<i32>(::floorf((y0 + view.h) / map.tile_size)) + 1;
     tx0 = rx::Max(tx0, 0);
     ty0 = rx::Max(ty0, 0);
     tx1 = rx::Min(tx1, static_cast<i32>(layer.width) - 1);

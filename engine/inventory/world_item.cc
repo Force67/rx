@@ -107,8 +107,8 @@ void ReserveWorldItemId(u64 seen_id) {
 }
 
 WorldItemStore::CellKey WorldItemStore::CellOf(const Vec3& p) const {
-  return CellKey{i32(::floor(p.x / cell_size_)), i32(::floor(p.y / cell_size_)),
-                 i32(::floor(p.z / cell_size_))};
+  return CellKey{i32(::floorf(p.x / cell_size_)), i32(::floorf(p.y / cell_size_)),
+                 i32(::floorf(p.z / cell_size_))};
 }
 
 void WorldItemStore::Insert(const WorldItemRecord& record) {
@@ -120,7 +120,7 @@ void WorldItemStore::Insert(const WorldItemRecord& record) {
 
 base::Vector<WorldItemRecord> WorldItemStore::TakeNear(const Vec3& center, f32 radius) {
   base::Vector<WorldItemRecord> out;
-  const i32 span = i32(::ceil(radius / cell_size_));
+  const i32 span = i32(::ceilf(radius / cell_size_));
   const CellKey c = CellOf(center);
   for (i32 z = c.z - span; z <= c.z + span; ++z) {
     for (i32 y = c.y - span; y <= c.y + span; ++y) {
@@ -216,7 +216,7 @@ void SyncWorldItems(ecs::World& world, physics::PhysicsWorld& physics) {
     // between the two unit quaternions (|dot| handles the double-cover sign).
     const f32 rdot = t.rotation[0] * rot[0] + t.rotation[1] * rot[1] + t.rotation[2] * rot[2] +
                      t.rotation[3] * rot[3];
-    const f32 ang_delta = 1.0f - ::fabs(rdot);
+    const f32 ang_delta = 1.0f - ::fabsf(rdot);
 
     t.position[0] = pos.x;
     t.position[1] = pos.y;

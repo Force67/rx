@@ -54,20 +54,20 @@ int TestTransition() {
     controller.Update(dt);
     const f32 weight = controller.Weight(smile);
     const f32 v = (weight - previous) / dt;
-    if (i > 0) max_jump = rx::Max(max_jump, ::abs(v - velocity));
+    if (i > 0) max_jump = rx::Max(max_jump, ::fabsf(v - velocity));
     previous = weight;
     velocity = v;
   }
   ::printf("expression_test: max velocity jump %g /s per step\n", max_jump);
   if (max_jump > 1.5f) return Fail("velocity discontinuity across a retarget");
-  if (::abs(controller.Weight(smile) - 0.75f) > 1e-3f) {
+  if (::fabsf(controller.Weight(smile) - 0.75f) > 1e-3f) {
     return Fail("smile did not converge to its pose weight");
   }
-  if (::abs(velocity) > 1e-2f) return Fail("velocity did not settle");
+  if (::fabsf(velocity) > 1e-2f) return Fail("velocity did not settle");
 
   controller.SetExpression("neutral");
   for (int i = 0; i < 2 * 240; ++i) controller.Update(dt);
-  if (::abs(controller.Weight(smile)) > 1e-3f) return Fail("neutral did not release");
+  if (::fabsf(controller.Weight(smile)) > 1e-3f) return Fail("neutral did not release");
   return 0;
 }
 

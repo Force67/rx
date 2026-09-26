@@ -147,12 +147,12 @@ JPH::Mat44 ToJolt(const Mat4& m) {
 }
 
 bool IsFinite(const Vec3& value) {
-  return ::isfinite(value.x) && ::isfinite(value.y) && ::isfinite(value.z);
+  return isfinite(value.x) && isfinite(value.y) && isfinite(value.z);
 }
 
 bool IsFinite(const Mat4& value) {
   for (f32 element : value.m) {
-    if (!::isfinite(element)) return false;
+    if (!isfinite(element)) return false;
   }
   return true;
 }
@@ -281,7 +281,7 @@ void ApplyTorqueCurve(JPH::VehicleEngineSettings& engine, const Point (&curve)[N
 // `fade_speed` (m/s), then held. fraction >= 1 or fade_speed <= 0 = no fade.
 f32 SteerFadeScale(f32 fraction, f32 fade_speed, f32 speed) {
   if (fade_speed <= 0.0f || fraction >= 1.0f) return 1.0f;
-  const f32 t = rx::Clamp(::fabs(speed) / fade_speed, 0.0f, 1.0f);
+  const f32 t = rx::Clamp(::fabsf(speed) / fade_speed, 0.0f, 1.0f);
   return 1.0f - (1.0f - fraction) * t;
 }
 
@@ -496,7 +496,7 @@ struct PhysicsWorld::Impl {
                                      settings.mCombinedRestitution);
       f32 impulse = 0;
       for (f32 point_impulse : estimate.mContactImpulse) impulse += point_impulse;
-      impulse = ::abs(impulse);
+      impulse = ::fabsf(impulse);
 
       base::LockGuard<base::Mutex> guard(mutex);
       if (watch1) {
@@ -772,9 +772,9 @@ void PhysicsWorld::Update(f32 dt) {
           const JPH::Vec3 cloth_velocity = (a.mVelocity + b.mVelocity + c.mVelocity) / 3.0f;
           const f32 normal_speed = (local_wind - cloth_velocity).Dot(normal);
           const JPH::Vec3 force = normal * (0.25f * kAirDensity * entry.aerodynamic_drag *
-                                             area_twice * normal_speed * ::abs(normal_speed));
-          if (!::isfinite(force.GetX()) || !::isfinite(force.GetY()) ||
-              !::isfinite(force.GetZ())) {
+                                             area_twice * normal_speed * ::fabsf(normal_speed));
+          if (!isfinite(force.GetX()) || !isfinite(force.GetY()) ||
+              !isfinite(force.GetZ())) {
             continue;
           }
           for (JPH::SoftBodyVertex* vertex : {&a, &b, &c}) {
@@ -783,12 +783,12 @@ void PhysicsWorld::Update(f32 dt) {
             // Explicit quadratic drag must not overshoot the air velocity in
             // one face contribution or it can oscillate and hit the speed cap.
             const f32 max_delta =
-                rx::Min(entry.max_linear_velocity * 0.25f, ::abs(normal_speed));
-            if (delta_sq > max_delta * max_delta) delta *= max_delta / ::sqrt(delta_sq);
+                rx::Min(entry.max_linear_velocity * 0.25f, ::fabsf(normal_speed));
+            if (delta_sq > max_delta * max_delta) delta *= max_delta / ::sqrtf(delta_sq);
             vertex->mVelocity += delta;
             const f32 speed_sq = vertex->mVelocity.LengthSq();
             if (speed_sq > entry.max_linear_velocity * entry.max_linear_velocity) {
-              vertex->mVelocity *= entry.max_linear_velocity / ::sqrt(speed_sq);
+              vertex->mVelocity *= entry.max_linear_velocity / ::sqrtf(speed_sq);
             }
           }
         }
@@ -1266,7 +1266,7 @@ void PhysicsWorld::SetJointMotorTarget(JointId joint, const f32 target_quat[4]) 
   if (entry.hinge) {
     auto* hinge = static_cast<JPH::HingeConstraint*>(entry.constraint.GetPtr());
     // Twist angle about the hinge axis (constraint-space X) of the target.
-    f32 angle = 2.0f * ::atan2(q.GetX(), q.GetW());
+    f32 angle = 2.0f * ::atan2f(q.GetX(), q.GetW());
     hinge->SetTargetAngle(angle);
   } else {
     auto* st = static_cast<JPH::SwingTwistConstraint*>(entry.constraint.GetPtr());
@@ -1957,7 +1957,7 @@ VehicleId PhysicsWorld::CreateMotorcycle(const MotorcycleDesc& desc, const Vec3&
   front->mPosition = JPH::Vec3(0, attach_y, desc.front_z);
   front->mMaxSteerAngle = desc.max_steer_angle;
   // Caster: the fork rakes back, and the steering axis follows the fork.
-  front->mSuspensionDirection = JPH::Vec3(0, -1, ::tan(desc.caster_angle)).Normalized();
+  front->mSuspensionDirection = JPH::Vec3(0, -1, ::tanf(desc.caster_angle)).Normalized();
   front->mSteeringAxis = -front->mSuspensionDirection;
   front->mRadius = desc.wheel_radius;
   front->mWidth = desc.wheel_width;
@@ -2178,7 +2178,7 @@ f32 PhysicsWorld::TractionControlThrottle(u32 vehicle_index, f32 forward) {
   JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
   const JPH::Vec3 velocity = bodies.GetLinearVelocity(entry.body);
   const JPH::Vec3 fwd_axis = bodies.GetRotation(entry.body) * JPH::Vec3::sAxisZ();
-  if (::fabs(velocity.Dot(fwd_axis)) > 5.0f) {
+  if (::fabsf(velocity.Dot(fwd_axis)) > 5.0f) {
     f32 max_slip = 0;
     for (u32 i = 0; i < entry.wheel_count; ++i) {
       const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(i));
@@ -2280,7 +2280,7 @@ bool PhysicsWorld::GetVehicleState(VehicleId id, VehicleState* out) const {
   // ~0 to the wheels even though the engine still revs. GetTorque is linear in
   // its input, so load == delivered/max at this rpm.
   const f32 clutch = trans.GetClutchFriction();
-  const f32 applied = ::fabs(controller->GetForwardInput()) * clutch;
+  const f32 applied = ::fabsf(controller->GetForwardInput()) * clutch;
   const f32 max_torque_at_rpm = engine.GetTorque(1.0f);
   out->engine_torque = engine.GetTorque(applied);
   out->engine_load =
@@ -2573,22 +2573,22 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
       !IsFinite(transform)) {
     return 0;
   }
-  if (!::isfinite(desc.areal_density) || desc.areal_density <= 0 ||
-      !::isfinite(desc.warp_compliance) || desc.warp_compliance < 0 ||
-      !::isfinite(desc.weft_compliance) || desc.weft_compliance < 0 ||
-      !::isfinite(desc.shear_compliance) || desc.shear_compliance < 0 ||
-      !::isfinite(desc.bend_compliance) || desc.bend_compliance < 0 ||
-      !::isfinite(desc.max_stretch) || desc.max_stretch < 1 ||
-      !::isfinite(desc.collision_radius) || desc.collision_radius < 0 ||
-      !::isfinite(desc.self_collision_distance) || desc.self_collision_distance < 0 ||
-      !::isfinite(desc.self_collision_relaxation) || desc.self_collision_relaxation < 0 ||
+  if (!isfinite(desc.areal_density) || desc.areal_density <= 0 ||
+      !isfinite(desc.warp_compliance) || desc.warp_compliance < 0 ||
+      !isfinite(desc.weft_compliance) || desc.weft_compliance < 0 ||
+      !isfinite(desc.shear_compliance) || desc.shear_compliance < 0 ||
+      !isfinite(desc.bend_compliance) || desc.bend_compliance < 0 ||
+      !isfinite(desc.max_stretch) || desc.max_stretch < 1 ||
+      !isfinite(desc.collision_radius) || desc.collision_radius < 0 ||
+      !isfinite(desc.self_collision_distance) || desc.self_collision_distance < 0 ||
+      !isfinite(desc.self_collision_relaxation) || desc.self_collision_relaxation < 0 ||
       desc.self_collision_relaxation > 1 ||
-      !::isfinite(desc.aerodynamic_drag) || desc.aerodynamic_drag < 0 ||
-      !::isfinite(desc.damping) || desc.damping < 0 ||
-      !::isfinite(desc.gravity_factor) || !::isfinite(desc.friction) || desc.friction < 0 ||
-      !::isfinite(desc.restitution) || desc.restitution < 0 ||
-      !::isfinite(desc.pressure) || desc.pressure < 0 ||
-      !::isfinite(desc.max_linear_velocity) || desc.max_linear_velocity <= 0 ||
+      !isfinite(desc.aerodynamic_drag) || desc.aerodynamic_drag < 0 ||
+      !isfinite(desc.damping) || desc.damping < 0 ||
+      !isfinite(desc.gravity_factor) || !isfinite(desc.friction) || desc.friction < 0 ||
+      !isfinite(desc.restitution) || desc.restitution < 0 ||
+      !isfinite(desc.pressure) || desc.pressure < 0 ||
+      !isfinite(desc.max_linear_velocity) || desc.max_linear_velocity <= 0 ||
       desc.iterations > 64 || desc.self_collision_iterations > 8 ||
       (desc.self_collision_distance > 0 && desc.self_collision_iterations == 0)) {
     RX_WARN("cloth rejected: invalid material or collision parameters");
@@ -2614,7 +2614,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
     return 0;
   }
   const bool pressure_capable = topology.closed && topology.component_count == 1 &&
-                                ::isfinite(topology.signed_volume) &&
+                                isfinite(topology.signed_volume) &&
                                 topology.signed_volume > 1.0e-9f;
   if (desc.pressure > 0 && !pressure_capable) {
     RX_WARN("cloth rejected: pressure requires one closed, outward-wound volume");
@@ -2622,7 +2622,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   }
   if (desc.uvs) {
     for (u32 i = 0; i < desc.vertex_count * 2; ++i) {
-      if (!::isfinite(desc.uvs[i])) {
+      if (!isfinite(desc.uvs[i])) {
         RX_WARN("cloth rejected: non-finite material UV");
         return 0;
       }
@@ -2659,8 +2659,8 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   for (u32 i = 0; i < desc.skin_constraint_count; ++i) {
     const ClothSkinConstraint& skin = desc.skin_constraints[i];
     if (skin.vertex >= desc.vertex_count || skinned[skin.vertex] || pin_mask[skin.vertex] ||
-        !::isfinite(skin.max_distance) || skin.max_distance < 0 ||
-        !::isfinite(skin.backstop_distance) || !::isfinite(skin.backstop_radius) ||
+        !isfinite(skin.max_distance) || skin.max_distance < 0 ||
+        !isfinite(skin.backstop_distance) || !isfinite(skin.backstop_radius) ||
         skin.backstop_radius < 0) {
       RX_WARN("cloth rejected: invalid skin constraint");
       return 0;
@@ -2668,7 +2668,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
     u32 weight_count = 0;
     for (const ClothSkinWeight& weight : skin.weights) {
       if (weight.weight == 0) continue;
-      if (!::isfinite(weight.weight) || weight.weight < 0 || weight.joint >= desc.joint_count ||
+      if (!isfinite(weight.weight) || weight.weight < 0 || weight.joint >= desc.joint_count ||
           weight_count >= JPH::SoftBodySharedSettings::Skinned::cMaxSkinWeights) {
         RX_WARN("cloth rejected: invalid skin weight");
         return 0;
@@ -2707,7 +2707,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   inverse_masses.resize(desc.vertex_count);
   if (desc.inverse_masses) {
     for (u32 i = 0; i < desc.vertex_count; ++i) {
-      if (!::isfinite(desc.inverse_masses[i]) || desc.inverse_masses[i] < 0) {
+      if (!isfinite(desc.inverse_masses[i]) || desc.inverse_masses[i] < 0) {
         RX_WARN("cloth rejected: inverse masses must be finite and non-negative");
         return 0;
       }
@@ -2723,15 +2723,15 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
       const u32 c = topology.indices[i + 2];
       const f64 triangle_mass =
           static_cast<f64>(topology.triangle_areas[i / 3]) * desc.areal_density;
-      if (!::isfinite(triangle_mass)) return 0;
+      if (!isfinite(triangle_mass)) return 0;
       masses[a] += triangle_mass / 3.0;
       masses[b] += triangle_mass / 3.0;
       masses[c] += triangle_mass / 3.0;
     }
     for (u32 i = 0; i < desc.vertex_count; ++i) {
       const f64 inverse_mass = 1.0 / masses[i];
-      if (masses[i] <= 1.0e-8 || !::isfinite(masses[i]) ||
-          !::isfinite(inverse_mass) || inverse_mass > FLT_MAX) {
+      if (masses[i] <= 1.0e-8 || !isfinite(masses[i]) ||
+          !isfinite(inverse_mass) || inverse_mass > FLT_MAX) {
         RX_WARN("cloth rejected: every vertex must belong to a non-degenerate face");
         return 0;
       }
@@ -2806,9 +2806,9 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
              topology.edges[low * 2 + 1] == b;
     };
     for (JPH::SoftBodySharedSettings::Edge& edge : shared->mEdgeConstraints) {
-      const f32 du = ::abs(desc.uvs[edge.mVertex[1] * 2 + 0] -
+      const f32 du = ::fabsf(desc.uvs[edge.mVertex[1] * 2 + 0] -
                               desc.uvs[edge.mVertex[0] * 2 + 0]);
-      const f32 dv = ::abs(desc.uvs[edge.mVertex[1] * 2 + 1] -
+      const f32 dv = ::fabsf(desc.uvs[edge.mVertex[1] * 2 + 1] -
                               desc.uvs[edge.mVertex[0] * 2 + 1]);
       const bool warp = du > 2.0f * dv;
       const bool weft = dv > 2.0f * du;
@@ -2911,7 +2911,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
 
 bool PhysicsWorld::SetClothTransform(ClothId id, const Mat4& transform, f32 dt) {
   if (!impl_ || id == 0 || id > impl_->cloth.size() || !IsFinite(transform) ||
-      !::isfinite(dt) || dt < 0) {
+      !isfinite(dt) || dt < 0) {
     return false;
   }
   Impl::ClothEntry& entry = impl_->cloth[id - 1];
@@ -2925,7 +2925,7 @@ bool PhysicsWorld::SetClothTransform(ClothId id, const Mat4& transform, f32 dt) 
 }
 
 bool PhysicsWorld::SetClothPinTargets(ClothId id, const Vec3* targets, u32 target_count, f32 dt) {
-  if (!impl_ || id == 0 || id > impl_->cloth.size() || !::isfinite(dt) || dt < 0) return false;
+  if (!impl_ || id == 0 || id > impl_->cloth.size() || !isfinite(dt) || dt < 0) return false;
   Impl::ClothEntry& entry = impl_->cloth[id - 1];
   if (!entry.alive || target_count != entry.pinned.size() || (target_count > 0 && !targets)) {
     return false;
@@ -2972,7 +2972,7 @@ bool PhysicsWorld::SetClothJointTransforms(ClothId id, const Mat4* world_joints,
     if (!IsFinite(world_joints[i])) return false;
     if (!changed) {
       for (u32 element = 0; element < 16; ++element) {
-        if (::abs(world_joints[i].m[element] - entry.last_joint_transforms[i].m[element]) >
+        if (::fabsf(world_joints[i].m[element] - entry.last_joint_transforms[i].m[element]) >
             1.0e-7f) {
           changed = true;
           break;
@@ -3013,7 +3013,7 @@ void PhysicsWorld::SetClothWind(ClothId id, const Vec3& velocity) {
 }
 
 void PhysicsWorld::SetClothPressure(ClothId id, f32 pressure) {
-  if (!impl_ || id == 0 || id > impl_->cloth.size() || !::isfinite(pressure) || pressure < 0) {
+  if (!impl_ || id == 0 || id > impl_->cloth.size() || !isfinite(pressure) || pressure < 0) {
     return;
   }
   Impl::ClothEntry& entry = impl_->cloth[id - 1];

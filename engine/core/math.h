@@ -49,11 +49,11 @@ inline Vec3 Cross(const Vec3& a, const Vec3& b) {
 }
 
 inline Vec3 Normalize(const Vec3& v) {
-  f32 length = ::sqrt(Dot(v, v));
+  f32 length = ::sqrtf(Dot(v, v));
   return length > 0 ? Vec3{v.x / length, v.y / length, v.z / length} : v;
 }
 
-inline f32 Length(const Vec3& v) { return ::sqrt(Dot(v, v)); }
+inline f32 Length(const Vec3& v) { return ::sqrtf(Dot(v, v)); }
 
 inline Vec3 Lerp(const Vec3& a, const Vec3& b, f32 t) { return a + (b - a) * t; }
 
@@ -71,7 +71,7 @@ inline Quat operator*(const Quat& a, const Quat& b) {
 }
 
 inline Quat Normalize(const Quat& q) {
-  f32 len = ::sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+  f32 len = ::sqrtf(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
   if (len <= 0) return {0, 0, 0, 1};
   f32 inv = 1.0f / len;
   return {q.x * inv, q.y * inv, q.z * inv, q.w * inv};
@@ -79,8 +79,8 @@ inline Quat Normalize(const Quat& q) {
 
 inline Quat QuatFromAxisAngle(const Vec3& axis, f32 radians) {
   Vec3 n = Normalize(axis);
-  f32 s = ::sin(radians * 0.5f);
-  return {n.x * s, n.y * s, n.z * s, ::cos(radians * 0.5f)};
+  f32 s = ::sinf(radians * 0.5f);
+  return {n.x * s, n.y * s, n.z * s, ::cosf(radians * 0.5f)};
 }
 
 inline Quat Conjugate(const Quat& q) { return {-q.x, -q.y, -q.z, q.w}; }
@@ -118,10 +118,10 @@ inline Quat Slerp(const Quat& a, Quat b, f32 t) {
     return Normalize(Quat{a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t,
                           a.w + (b.w - a.w) * t});
   }
-  f32 theta = ::acos(cos_theta);
-  f32 sin_theta = ::sin(theta);
-  f32 wa = ::sin((1 - t) * theta) / sin_theta;
-  f32 wb = ::sin(t * theta) / sin_theta;
+  f32 theta = ::acosf(cos_theta);
+  f32 sin_theta = ::sinf(theta);
+  f32 wa = ::sinf((1 - t) * theta) / sin_theta;
+  f32 wb = ::sinf(t * theta) / sin_theta;
   return {wa * a.x + wb * b.x, wa * a.y + wb * b.y, wa * a.z + wb * b.z, wa * a.w + wb * b.w};
 }
 
@@ -259,25 +259,25 @@ inline Quat QuatFromMat4(const Mat4& m) {
   f32 trace = r00 + r11 + r22;
   Quat q;
   if (trace > 0) {
-    f32 s = 0.5f / ::sqrt(trace + 1.0f);
+    f32 s = 0.5f / ::sqrtf(trace + 1.0f);
     q.w = 0.25f / s;
     q.x = (r21 - r12) * s;
     q.y = (r02 - r20) * s;
     q.z = (r10 - r01) * s;
   } else if (r00 > r11 && r00 > r22) {
-    f32 s = 2.0f * ::sqrt(1.0f + r00 - r11 - r22);
+    f32 s = 2.0f * ::sqrtf(1.0f + r00 - r11 - r22);
     q.w = (r21 - r12) / s;
     q.x = 0.25f * s;
     q.y = (r01 + r10) / s;
     q.z = (r02 + r20) / s;
   } else if (r11 > r22) {
-    f32 s = 2.0f * ::sqrt(1.0f + r11 - r00 - r22);
+    f32 s = 2.0f * ::sqrtf(1.0f + r11 - r00 - r22);
     q.w = (r02 - r20) / s;
     q.x = (r01 + r10) / s;
     q.y = 0.25f * s;
     q.z = (r12 + r21) / s;
   } else {
-    f32 s = 2.0f * ::sqrt(1.0f + r22 - r00 - r11);
+    f32 s = 2.0f * ::sqrtf(1.0f + r22 - r00 - r11);
     q.w = (r10 - r01) / s;
     q.x = (r02 + r20) / s;
     q.y = (r12 + r21) / s;
@@ -306,7 +306,7 @@ inline Mat4 LookAt(const Vec3& eye, const Vec3& target, const Vec3& up) {
 // whole range, which matters for large open-world exteriors. Y is flipped for
 // vulkan clip space.
 inline Mat4 PerspectiveReversedZ(f32 fov_y_radians, f32 aspect, f32 near_plane) {
-  f32 g = 1.0f / ::tan(fov_y_radians * 0.5f);
+  f32 g = 1.0f / ::tanf(fov_y_radians * 0.5f);
   Mat4 r;
   r.m[0] = g / aspect;
   r.m[5] = -g;
@@ -320,7 +320,7 @@ inline Mat4 PerspectiveReversedZ(f32 fov_y_radians, f32 aspect, f32 near_plane) 
 // and sampled with the same matrix, so it stays self-consistent without
 // matching the camera's reversed-infinite clip space.
 inline Mat4 PerspectiveShadow(f32 fov_y_radians, f32 aspect, f32 near_plane, f32 far_plane) {
-  f32 g = 1.0f / ::tan(fov_y_radians * 0.5f);
+  f32 g = 1.0f / ::tanf(fov_y_radians * 0.5f);
   Mat4 r;
   r.m[0] = g / aspect;
   r.m[5] = g;

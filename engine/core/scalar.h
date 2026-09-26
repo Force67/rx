@@ -1,6 +1,8 @@
 #ifndef RX_CORE_SCALAR_H_
 #define RX_CORE_SCALAR_H_
 
+#include <math.h>
+
 #include <initializer_list>
 
 namespace rx {
@@ -61,6 +63,32 @@ constexpr T Lerp(T a, T b, T t) {
   if (t == 1) return b;
   const T x = a + t * (b - a);
   return (t > 1) == (b > a) ? (b < x ? x : b) : (x < b ? x : b);
+}
+
+// Three-argument std::hypot, step for step as libstdc++ computes it (scale by
+// the largest magnitude, then sum the squares). C has no three-argument hypot,
+// so without this MSVC finds nothing to call. Instantiated for float or double.
+template <typename T>
+T Hypot(T x, T y, T z) {
+  static_assert(sizeof(T) == sizeof(float) || sizeof(T) == sizeof(double),
+                "Hypot is for float or double");
+  if constexpr (sizeof(T) == sizeof(float)) {
+    x = ::fabsf(x);
+    y = ::fabsf(y);
+    z = ::fabsf(z);
+  } else {
+    x = ::fabs(x);
+    y = ::fabs(y);
+    z = ::fabs(z);
+  }
+  if (T a = x < y ? y < z ? z : y : x < z ? z : x) {
+    const T sum = (x / a) * (x / a) + (y / a) * (y / a) + (z / a) * (z / a);
+    if constexpr (sizeof(T) == sizeof(float))
+      return a * ::sqrtf(sum);
+    else
+      return a * ::sqrt(sum);
+  }
+  return {};
 }
 
 // std::bit_cast, on the builtin every supported compiler has.

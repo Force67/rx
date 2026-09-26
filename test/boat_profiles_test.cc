@@ -61,7 +61,7 @@ BoatState Run(PhysicsWorld& world, Boat& boat, const BoatInput& in, int steps) {
 
 f32 Heading(const BoatState& s) {
   const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
-  return ::atan2(fwd.x, fwd.z);
+  return ::atan2f(fwd.x, fwd.z);
 }
 
 f32 Uprightness(const BoatState& s) {
@@ -146,7 +146,7 @@ int main() {
     const int n = 60 * 5;
     for (int k = 0; k < n; ++k) {
       Step(w, *b, in);
-      sum += ::fabs(b->state().forward_speed);
+      sum += ::fabsf(b->state().forward_speed);
     }
     return static_cast<f32>(sum / n);
   };
@@ -222,7 +222,7 @@ int main() {
       BoatInput t = go;
       t.steer = 1.0f;
       const BoatState s = Run(w, *b, t, 60 * 5);
-      return ::fabs(Heading(s) - h0) / 5.0f;  // rad/s
+      return ::fabsf(Heading(s) - h0) / 5.0f;  // rad/s
     };
     ::fprintf(stderr, "(d) turn rate (rad/s), full helm:\n");
     for (int i = 0; i < 5; ++i) {
@@ -247,7 +247,7 @@ int main() {
       base::UniquePointer<Boat> b;
       make(w, Profile(profile), cargo, 5.0f, b);
       const Vec3 p = b->state().position;
-      const f32 rot[4] = {0.0f, 0.0f, ::sin(heel * 0.5f), ::cos(heel * 0.5f)};
+      const f32 rot[4] = {0.0f, 0.0f, ::sinf(heel * 0.5f), ::cosf(heel * 0.5f)};
       w.SetBodyPosition(b->body(), p, rot);
       b->Update({}, kDt);  // refresh telemetry from the heeled pose
       return Uprightness(Run(w, *b, {}, static_cast<int>(secs * 60.0f)));
@@ -260,7 +260,7 @@ int main() {
       base::UniquePointer<Boat> b;
       make(w, Profile(profile), cargo, 5.0f, b);
       const Vec3 p = b->state().position;
-      const f32 rot[4] = {0.0f, 0.0f, ::sin(heel * 0.5f), ::cos(heel * 0.5f)};
+      const f32 rot[4] = {0.0f, 0.0f, ::sinf(heel * 0.5f), ::cosf(heel * 0.5f)};
       w.SetBodyPosition(b->body(), p, rot);
       b->Update({}, kDt);
       const int limit = static_cast<int>(timeout * 60.0f);
@@ -318,8 +318,8 @@ int main() {
       Boat boat(w, d, Vec3{0, 0.8f, 0}, 0.0f);
       BoatInput in;
       for (int k = 0; k < 60 * 60; ++k) {
-        in.throttle = ::sin(t * 0.7f);
-        in.steer = ::sin(t * 0.3f);
+        in.throttle = ::sinf(t * 0.7f);
+        in.steer = ::sinf(t * 0.3f);
         // Load transfer partway: ramp cargo up past the rated limit and back.
         if (k == 60 * 20) boat.SetCargo(d.max_cargo_kg);
         if (k == 60 * 30) boat.SetCargo(d.max_cargo_kg * 1.25f);
@@ -328,10 +328,10 @@ int main() {
         boat.Update(in, kDt);
         w.Update(kDt);
         const BoatState s = boat.state();
-        if (!::isfinite(s.position.x) || !::isfinite(s.position.y) ||
-            !::isfinite(s.position.z) || !::isfinite(s.rpm) ||
-            !::isfinite(s.forward_speed) || !::isfinite(s.rotation.w) ||
-            !::isfinite(s.draft_m) || !::isfinite(s.freeboard_m)) {
+        if (!isfinite(s.position.x) || !isfinite(s.position.y) ||
+            !isfinite(s.position.z) || !isfinite(s.rpm) ||
+            !isfinite(s.forward_speed) || !isfinite(s.rotation.w) ||
+            !isfinite(s.draft_m) || !isfinite(s.freeboard_m)) {
           return Fail("(g) NaN/Inf in boat state on chop");
         }
       }

@@ -277,28 +277,28 @@ bool HasUniformScale(base::Span<const Mat4> transforms) {
   for (const Mat4 &transform : transforms) {
     const f32 *m = transform.m;
     for (u32 i = 0; i < 16; ++i)
-      if (!::isfinite(m[i]))
+      if (!isfinite(m[i]))
         return false;
-    if (::abs(m[3]) > 1e-5f || ::abs(m[7]) > 1e-5f ||
-        ::abs(m[11]) > 1e-5f || ::abs(m[15] - 1.0f) > 1e-5f)
+    if (::fabsf(m[3]) > 1e-5f || ::fabsf(m[7]) > 1e-5f ||
+        ::fabsf(m[11]) > 1e-5f || ::fabsf(m[15] - 1.0f) > 1e-5f)
       return false;
-    const f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-    const f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-    const f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+    const f32 sx = ::sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    const f32 sy = ::sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    const f32 sz = ::sqrtf(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
     const f32 tolerance = rx::Max({sx, sy, sz}) * 1e-4f;
-    if (sx <= 1e-6f || ::abs(sx - sy) > tolerance ||
-        ::abs(sx - sz) > tolerance)
+    if (sx <= 1e-6f || ::fabsf(sx - sy) > tolerance ||
+        ::fabsf(sx - sz) > tolerance)
       return false;
     const f32 orthogonal_tolerance = sx * sx * 1e-4f;
     const f32 determinant = m[0] * (m[5] * m[10] - m[6] * m[9]) -
                             m[4] * (m[1] * m[10] - m[2] * m[9]) +
                             m[8] * (m[1] * m[6] - m[2] * m[5]);
     if (determinant <= 0 ||
-        ::abs(m[0] * m[4] + m[1] * m[5] + m[2] * m[6]) >
+        ::fabsf(m[0] * m[4] + m[1] * m[5] + m[2] * m[6]) >
             orthogonal_tolerance ||
-        ::abs(m[0] * m[8] + m[1] * m[9] + m[2] * m[10]) >
+        ::fabsf(m[0] * m[8] + m[1] * m[9] + m[2] * m[10]) >
             orthogonal_tolerance ||
-        ::abs(m[4] * m[8] + m[5] * m[9] + m[6] * m[10]) >
+        ::fabsf(m[4] * m[8] + m[5] * m[9] + m[6] * m[10]) >
             orthogonal_tolerance)
       return false;
   }
@@ -307,7 +307,7 @@ bool HasUniformScale(base::Span<const Mat4> transforms) {
 
 f32 InstanceGroupDistance(const InstanceStore::Group &group, const Vec3 &eye) {
   const Vec3 delta = eye - group.bounds_center;
-  return rx::Max(::sqrt(Dot(delta, delta)) - group.bounds_radius, 0.0f) /
+  return rx::Max(::sqrtf(Dot(delta, delta)) - group.bounds_radius, 0.0f) /
          group.lod_scale;
 }
 
@@ -330,7 +330,7 @@ void ExtractFrustumPlanes(const Mat4 &vp, f32 out[5][4]) {
   };
   for (int i = 0; i < 5; ++i) {
     f32 len =
-        ::sqrt(p[i][0] * p[i][0] + p[i][1] * p[i][1] + p[i][2] * p[i][2]);
+        ::sqrtf(p[i][0] * p[i][0] + p[i][1] * p[i][1] + p[i][2] * p[i][2]);
     if (len < 1e-8f)
       len = 1.0f;
     for (int c = 0; c < 4; ++c)
@@ -393,7 +393,7 @@ f32 MaskedSubmeshOpacity(const base::Vector<asset::Vertex> &verts,
                  c.position[2] - a.position[2]};
     f32 cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2],
         cz = e1[0] * e2[1] - e1[1] * e2[0];
-    f32 area = 0.5f * ::sqrt(cx * cx + cy * cy + cz * cz);
+    f32 area = 0.5f * ::sqrtf(cx * cx + cy * cy + cz * cz);
     weighted += static_cast<f64>(mean_a) * area;
     area_sum += area;
   }
@@ -1056,7 +1056,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   if (const char *sd = SunDir.get()) {
     Vec3 d{};
     if (::sscanf(sd, "%f,%f,%f", &d.x, &d.y, &d.z) == 3) {
-      f32 len = ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+      f32 len = ::sqrtf(d.x * d.x + d.y * d.y + d.z * d.z);
       if (len > 1e-4f)
         settings_.sun_direction = {d.x / len, d.y / len, d.z / len};
     }
@@ -2230,7 +2230,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
                     all_verts, all_indices, submesh,
                     material_system_->material_base_alpha(submesh.material))
               : 1.0f;
-      const f32 s = ::sqrt(rx::Clamp(opacity, 0.02f, 1.0f));
+      const f32 s = ::sqrtf(rx::Clamp(opacity, 0.02f, 1.0f));
       const u32 base_index = static_cast<u32>(approx_indices.size());
       for (u32 e = 0; e + 3 <= submesh.index_count; e += 3) {
         const u32 idx[3] = {all_indices[submesh.index_offset + e],
@@ -4077,9 +4077,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       Vec3 wc{m[0] * c[0] + m[4] * c[1] + m[8] * c[2] + m[12],
               m[1] * c[0] + m[5] * c[1] + m[9] * c[2] + m[13],
               m[2] * c[0] + m[6] * c[1] + m[10] * c[2] + m[14]};
-      f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-      f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-      f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+      f32 sx = ::sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+      f32 sy = ::sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+      f32 sz = ::sqrtf(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
       f32 radius = mesh->bounds_radius * rx::Max(sx, rx::Max(sy, sz));
       if (radius > 0.0f && SphereOutsideFrustum(touch_planes, wc, radius))
         continue;
@@ -4112,7 +4112,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // FSR-style phase count grows with the scale factor squared.
       f32 scale =
           static_cast<f32>(output_width_) / static_cast<f32>(render_width_);
-      sample_count = static_cast<u32>(::ceil(8.0f * scale * scale));
+      sample_count = static_cast<u32>(::ceilf(8.0f * scale * scale));
     }
     JitterSequence::Sample(frame_index_, sample_count, &jitter_x, &jitter_y);
   }
@@ -4341,7 +4341,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   if (settings_.skin_dynamics) {
     constexpr f32 kTwoPi = 6.28318530718f;
     f32 phase = static_cast<f32>(time_seconds_) * settings_.skin_heart_rate * kTwoPi;
-    globals.skin_dynamics[0] = ::fmod(phase, kTwoPi);
+    globals.skin_dynamics[0] = ::fmodf(phase, kTwoPi);
     globals.skin_dynamics[1] = rx::Clamp(settings_.skin_perfusion, -0.5f, 0.5f);
     globals.skin_dynamics[2] = settings_.skin_pulse_amplitude;
     globals.skin_dynamics[3] = settings_.skin_tension_gain;
@@ -4358,9 +4358,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   {
     // Froxel slicing: exponential view-z between the near plane and 500 m.
     constexpr f32 kNear = 0.1f, kFar = 500.0f;
-    f32 scale = static_cast<f32>(kClusterSlices) / ::log2(kFar / kNear);
+    f32 scale = static_cast<f32>(kClusterSlices) / ::log2f(kFar / kNear);
     globals.cluster_params[0] = scale;
-    globals.cluster_params[1] = -::log2(kNear) * scale;
+    globals.cluster_params[1] = -::log2f(kNear) * scale;
     globals.cluster_params[2] =
         static_cast<f32>(render_width_) / static_cast<f32>(kClusterTilesX);
     globals.cluster_params[3] =
@@ -4646,7 +4646,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       const f32 wy = mm[1] * c.x + mm[5] * c.y + mm[9] * c.z + mm[13];
       const f32 wz = mm[2] * c.x + mm[6] * c.y + mm[10] * c.z + mm[14];
       const f32 dx = wx - eye.x, dy = wy - eye.y, dz = wz - eye.z;
-      return ::sqrt(dx * dx + dy * dy + dz * dz);
+      return ::sqrtf(dx * dx + dy * dy + dz * dz);
     };
     // Resolves the RT LOD for one instance: LOD0 inside the near radius (raster
     // and rays agree there, avoiding the self-intersection disparity the AC
@@ -4988,7 +4988,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       rf.sun_intensity = settings_.sun_intensity;
       rf.sun_color = settings_.sun_color;
       rf.sun_radius = settings_.sun_angular_radius;
-      rf.pixel_spread = 2.0f * ::tan(view.camera.fov_y * 0.5f) /
+      rf.pixel_spread = 2.0f * ::tanf(view.camera.fov_y * 0.5f) /
                         static_cast<f32>(render_height_);
       rf.spp = settings_.path_trace_spp;
       rf.frame_index = frame_index_;
@@ -5050,7 +5050,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       denoised_path = true;
       pt.spp = settings_.path_trace_spp;
       // Ray-cone spread for texture lod: vertical fov radians per pixel.
-      pt.pixel_spread = 2.0f * ::tan(view.camera.fov_y * 0.5f) /
+      pt.pixel_spread = 2.0f * ::tanf(view.camera.fov_y * 0.5f) /
                         static_cast<f32>(render_height_);
       PathTracer::GbufferTargets t;
       auto guide = [&](const char *name, Format format) {
@@ -5207,10 +5207,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                               mesh->bounds_center[1],
                                               mesh->bounds_center[2]});
                     const f32 *m = item.transform.m;
-                    f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-                    f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+                    f32 sx = ::sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+                    f32 sy = ::sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
                     f32 sz =
-                        ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+                        ::sqrtf(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
                     f32 wr =
                         mesh->bounds_radius * rx::Max(sx, rx::Max(sy, sz));
                     Vec3 d{wc.x - face.light_pos.x, wc.y - face.light_pos.y,
@@ -5358,7 +5358,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                                     mesh->bounds_center[1],
                                                     mesh->bounds_center[2]});
           Vec3 d = view.camera.eye - wc;
-          lod = SelectLod(*mesh, ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
+          lod = SelectLod(*mesh, ::sqrtf(d.x * d.x + d.y * d.y + d.z * d.z));
         }
         const base::Vector<GpuSubmesh> &lod_subs =
             lod == 0 ? mesh->submeshes : mesh->lods[lod - 1].submeshes;
@@ -5422,7 +5422,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // width clamp. m[5] is negative under the reversed-Z Y-flip projection.
       grass_frame.pixel_scale =
           proj.m[5] != 0.0f
-              ? 2.0f / (::fabs(proj.m[5]) * static_cast<f32>(render_height_))
+              ? 2.0f / (::fabsf(proj.m[5]) * static_cast<f32>(render_height_))
               : 0.0f;
       grass_active = procedural_grass_.Prepare(
           *view.grass_domain,
@@ -5481,15 +5481,15 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         // Cpu frustum skip: a conservative world radius (bounds scaled by the
         // largest transform axis) lets off-screen instances cost no dispatch.
         const f32 *m = item.transform.m;
-        f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-        f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-        f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+        f32 sx = ::sqrtf(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+        f32 sy = ::sqrtf(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+        f32 sz = ::sqrtf(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
         f32 ms_radius = mesh->bounds_radius * rx::Max(sx, rx::Max(sy, sz));
         if (ms_radius > 0.0f &&
             SphereOutsideFrustum(ms_planes, ms_wc, ms_radius))
           continue;
         u32 ms_lod =
-            SelectLod(*mesh, ::sqrt(ms_d.x * ms_d.x + ms_d.y * ms_d.y +
+            SelectLod(*mesh, ::sqrtf(ms_d.x * ms_d.x + ms_d.y * ms_d.y +
                                        ms_d.z * ms_d.z));
         const base::Vector<GpuSubmesh> &ms_subs =
             ms_lod == 0 ? mesh->submeshes : mesh->lods[ms_lod - 1].submeshes;
@@ -5972,9 +5972,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 p.top = 4200.0f;
                 // Same drift velocity as clouds.cs, so the shadows track the
                 // deck.
-                p.wind = ::cos(settings_.weather.wind_yaw) *
+                p.wind = ::cosf(settings_.weather.wind_yaw) *
                          settings_.weather.wind_speed;
-                p.wind_z = ::sin(settings_.weather.wind_yaw) *
+                p.wind_z = ::sinf(settings_.weather.wind_yaw) *
                            settings_.weather.wind_speed;
                 p.strength = 0.75f;
                 ctx.cmd->BindPipeline(cloud_shadow_pipeline_);
@@ -6153,10 +6153,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           p.near_plane = 0.1f;
           constexpr f32 kNear = 0.1f, kFar = 500.0f;
           p.slice_scale =
-              static_cast<f32>(kClusterSlices) / ::log2(kFar / kNear);
-          p.slice_bias = -::log2(kNear) * p.slice_scale;
+              static_cast<f32>(kClusterSlices) / ::log2f(kFar / kNear);
+          p.slice_bias = -::log2f(kNear) * p.slice_scale;
           p.light_count = light_count;
-          p.tan_half_fov_y = ::tan(view.camera.fov_y * 0.5f);
+          p.tan_half_fov_y = ::tanf(view.camera.fov_y * 0.5f);
           p.aspect = static_cast<f32>(render_width_) /
                      static_cast<f32>(render_height_);
           p.decal_count = decal_count;
@@ -6593,7 +6593,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         // Pixels per meter at view depth 1. The projection bakes the vulkan
         // y-flip into m[5], so it is negative - take the magnitude.
         p.proj_scale =
-            ::abs(proj.m[5]) * 0.5f * static_cast<f32>(render_height_);
+            ::fabsf(proj.m[5]) * 0.5f * static_cast<f32>(render_height_);
         p.max_radius = 24.0f;
         p.strength =
             ::getenv("RX_SSS_DEBUG") ? -1.0f : 1.0f; // <0 = mask debug view
@@ -6803,9 +6803,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       cf.sun_color = settings_.sun_color;
       cf.coverage = settings_.cloud_coverage;
       cf.wind_x =
-          ::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+          ::cosf(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
       cf.wind_z =
-          ::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+          ::sinf(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
       lit = clouds_.AddToGraph(graph_, lit, depth_export,
                                {render_width_, render_height_}, cf);
     }
@@ -6979,9 +6979,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       vf.snow = settings_.weather.snow;
       // Wind yaw is the direction the wind blows toward; decompose to xz.
       vf.wind[0] =
-          ::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+          ::cosf(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
       vf.wind[1] =
-          ::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+          ::sinf(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
       vf.gustiness = settings_.weather.gustiness;
       vf.lightning = settings_.weather.lightning;
       vf.jitter[0] = globals.jitter[0];
@@ -7138,9 +7138,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // Screen pixels per world unit at distance 1 (|proj.m5| carries the
       // vulkan y-flip, hence the fabs).
       vf.proj_scale =
-          ::fabs(proj.m[5]) * static_cast<f32>(render_height_) * 0.5f;
-      vf.proj_m00 = ::fabs(proj.m[0]);
-      vf.proj_m11 = ::fabs(proj.m[5]);
+          ::fabsf(proj.m[5]) * static_cast<f32>(render_height_) * 0.5f;
+      vf.proj_m00 = ::fabsf(proj.m[0]);
+      vf.proj_m11 = ::fabsf(proj.m[5]);
       vf.error_pixels = VgeoError.get() > 0.0f ? VgeoError.get() : 1.0f;
       // Reversed-z infinite far: proj m[14] is the near plane distance.
       vf.near_plane = proj.m[14] > 0.0f ? proj.m[14] : 0.1f;

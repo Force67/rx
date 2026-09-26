@@ -6,7 +6,7 @@
 namespace rx {
 
 Vec3 FlyCamera::forward() const {
-  return {::cos(pitch_) * ::sin(yaw_), ::sin(pitch_), -::cos(pitch_) * ::cos(yaw_)};
+  return {::cosf(pitch_) * ::sinf(yaw_), ::sinf(pitch_), -::cosf(pitch_) * ::cosf(yaw_)};
 }
 
 void FlyCamera::Update(const InputState& input, const ActionState& actions, bool allow_mouse,
@@ -17,7 +17,7 @@ void FlyCamera::Update(const InputState& input, const ActionState& actions, bool
     yaw_ += input.mouse_dx * sensitivity;
     pitch_ -= input.mouse_dy * sensitivity;
     if (input.wheel != 0) {
-      speed *= ::pow(1.2f, input.wheel);
+      speed *= ::powf(1.2f, input.wheel);
       speed = rx::Clamp(speed, 0.1f, 200.0f);
     }
   }
@@ -39,7 +39,7 @@ void FlyCamera::Update(const InputState& input, const ActionState& actions, bool
   if (actions.down(Action::kCamUp) || actions.down(Action::kJump)) move += Vec3{0, 1, 0};
   if (actions.down(Action::kCamDown) || actions.down(Action::kSneak)) move += Vec3{0, -1, 0};
 
-  f32 length = ::sqrt(Dot(move, move));
+  f32 length = ::sqrtf(Dot(move, move));
   if (length > 0) {
     f32 boost = actions.down(Action::kSprint) ? 4.0f : 1.0f;
     position_ += move * (speed * boost * dt / length);

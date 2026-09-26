@@ -84,7 +84,7 @@ struct GrassGenerationSettings {
 inline GrassGenerationSettings SanitizeGrassSettings(GrassGenerationSettings settings) {
   const GrassGenerationSettings defaults;
   auto finite_or = [](f32 value, f32 fallback) {
-    return ::isfinite(value) ? value : fallback;
+    return isfinite(value) ? value : fallback;
   };
   settings.candidate_spacing =
       finite_or(settings.candidate_spacing, defaults.candidate_spacing);
@@ -144,8 +144,8 @@ inline u32 GrassSurfaceCandidateCount(const GrassSurfaceTriangle& triangle,
   const Vec3 c{triangle.p2[0], triangle.p2[1], triangle.p2[2]};
   const f32 area = 0.5f * Length(Cross(b - a, c - a));
   const f32 spacing = rx::Clamp(
-      ::isfinite(candidate_spacing) ? candidate_spacing : 0.42f, 0.08f, 8.0f);
-  if (!::isfinite(area) || area <= 1e-6f)
+      isfinite(candidate_spacing) ? candidate_spacing : 0.42f, 0.08f, 8.0f);
+  if (!isfinite(area) || area <= 1e-6f)
     return 0;
   const f64 candidates =
       ::ceil(static_cast<f64>(area) / (static_cast<f64>(spacing) * spacing));

@@ -38,10 +38,10 @@ f32 SmoothStep(f32 a, f32 b, f32 value) {
 }  // namespace
 
 f32 GrassDemo::TerrainHeight(f32 x, f32 z) const {
-  f32 broad = ::sin(x * 0.025f) * 4.8f + ::cos(z * 0.031f) * 3.6f;
-  f32 crossing = ::sin((x + z) * 0.019f + 0.8f) * 3.1f;
-  f32 detail = ::sin(x * 0.071f - z * 0.049f) * 0.75f +
-               ::cos(x * 0.043f + z * 0.063f) * 0.55f;
+  f32 broad = ::sinf(x * 0.025f) * 4.8f + ::cosf(z * 0.031f) * 3.6f;
+  f32 crossing = ::sinf((x + z) * 0.019f + 0.8f) * 3.1f;
+  f32 detail = ::sinf(x * 0.071f - z * 0.049f) * 0.75f +
+               ::cosf(x * 0.043f + z * 0.063f) * 0.55f;
   return broad + crossing + detail;
 }
 
@@ -120,10 +120,10 @@ void GrassDemo::BuildField() {
       const f32 world_z = kOrigin + static_cast<f32>(z) * kStep;
       render::GrassFieldSample& sample = samples_[z * kResolution + x];
       sample.height = TerrainHeight(world_x, world_z);
-      const f32 patch = 0.5f + 0.25f * ::sin(world_x * 0.057f + world_z * 0.031f) +
-                        0.20f * ::cos(world_x * 0.021f - world_z * 0.069f);
-      const f32 path_center = ::sin(world_x * 0.035f) * 7.0f - 4.0f;
-      const f32 path_distance = ::fabs(world_z - path_center);
+      const f32 patch = 0.5f + 0.25f * ::sinf(world_x * 0.057f + world_z * 0.031f) +
+                        0.20f * ::cosf(world_x * 0.021f - world_z * 0.069f);
+      const f32 path_center = ::sinf(world_x * 0.035f) * 7.0f - 4.0f;
+      const f32 path_distance = ::fabsf(world_z - path_center);
       // Wide enough to survive the coarser kilometre-scale field texels.
       const f32 path_mask = SmoothStep(3.0f, 14.0f, path_distance);
       sample.density = rx::Clamp((0.90f + patch * 0.14f) * path_mask, 0.0f, 1.0f);
@@ -343,11 +343,11 @@ void GrassDemo::Create() {
 
 void GrassDemo::Update(f32 dt) {
   time_ += dt;
-  const f32 x = ::sin(time_ * 0.34f) * 12.0f - 3.0f;
-  const f32 z = ::cos(time_ * 0.27f) * 7.0f + 4.0f;
+  const f32 x = ::sinf(time_ * 0.34f) * 12.0f - 3.0f;
+  const f32 z = ::cosf(time_ * 0.27f) * 7.0f + 4.0f;
   const f32 y = TerrainHeight(x, z) + 0.62f;
   interaction_position_ = {x, y, z};
-  interaction_direction_ = {::cos(time_ * 0.34f), 0.0f, -::sin(time_ * 0.27f)};
+  interaction_direction_ = {::cosf(time_ * 0.34f), 0.0f, -::sinf(time_ * 0.27f)};
   if (scene::Transform* transform =
           ctx_.world->Get<scene::Transform>(interaction_marker_)) {
     transform->position[0] = x;

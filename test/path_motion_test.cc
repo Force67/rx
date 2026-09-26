@@ -118,9 +118,9 @@ int main() {
                  recon ? "recon" : "nrd", previous, data[0], data[1], data[2], data[4], data[5], data[6]);
     check(data[7] == 1 && data[3] == (valid ? 1 : 0), "trace hit and motion validity");
     if (valid) {
-      check(::abs(data[0] - expected_x) < 1e-5f && ::abs(data[1] - .5f) < 1e-5f,
+      check(::fabsf(data[0] - expected_x) < 1e-5f && ::fabsf(data[1] - .5f) < 1e-5f,
             "previous position includes rigid transform and previous vertex pose");
-      check(::abs(data[4] - rx::Clamp(expected_x * .5f, -2.f, 2.f)) < 1e-5f && ::abs(data[5] - .25f) < 1e-5f,
+      check(::fabsf(data[4] - rx::Clamp(expected_x * .5f, -2.f, 2.f)) < 1e-5f && ::fabsf(data[5] - .25f) < 1e-5f,
             "motion is current-to-previous in UV units");
     } else {
       check(data[4] == 2 && data[5] == 2, "missing surface history rejects reprojection");

@@ -112,7 +112,7 @@ f32 AdvancePhase(f32 phase, f32 speed, f32 dt, const WalkStyle &style) {
   f32 cycles_per_second =
       speed > 0.01f ? speed / kStride : 0.5f; // idle ticks slowly
   phase += cycles_per_second * rx::Max(style.cadence_scale, 0.0f) * dt;
-  phase -= ::floor(phase);
+  phase -= ::floorf(phase);
   return phase;
 }
 
@@ -129,7 +129,7 @@ void Locomotion::Apply(const asset::Skeleton &skeleton, f32 speed,
 
   if (!is_biped) {
     // Quadrupeds/creatures: a slow breathing bob on the spine, no stepping.
-    f32 breathe = ::sin(theta) * 0.03f;
+    f32 breathe = ::sinf(theta) * 0.03f;
     const i32 spine =
         FindFirst(skeleton, {"NPC Spine [Spn0]", "spine", "spine-1", "chest"});
     LayerRotation(pose, spine, {1, 0, 0}, breathe);
@@ -156,7 +156,7 @@ void Locomotion::Apply(const asset::Skeleton &skeleton, f32 speed,
   const i32 right_forearm = FindFirst(
       skeleton, {"NPC R Forearm [RLar]", "forearm.bend.R", "forearm.R"});
 
-  f32 leg = ::sin(theta); // left leg leads, right is opposite phase
+  f32 leg = ::sinf(theta); // left leg leads, right is opposite phase
   f32 thigh_amp = (0.06f + 0.45f * walk + 0.35f * run) * style.stride_scale;
   f32 knee_amp = (0.10f + 0.7f * walk + 0.6f * run) * style.knee_lift_scale;
   f32 arm_amp = (0.05f + 0.35f * walk + 0.45f * run) * style.arm_swing_scale;
@@ -167,9 +167,9 @@ void Locomotion::Apply(const asset::Skeleton &skeleton, f32 speed,
   LayerRotation(pose, left_thigh, x, ts * thigh_amp * leg);
   LayerRotation(pose, right_thigh, x, -ts * thigh_amp * leg);
   LayerRotation(pose, left_shin, x,
-                -knee_amp * Clamp01(-::sin(theta - 0.6f)));
+                -knee_amp * Clamp01(-::sinf(theta - 0.6f)));
   LayerRotation(pose, right_shin, x,
-                -knee_amp * Clamp01(-::sin(theta + kPi - 0.6f)));
+                -knee_amp * Clamp01(-::sinf(theta + kPi - 0.6f)));
 
   // Arms counter-swing the legs.
   f32 as = arm_axis_sign;
@@ -185,14 +185,14 @@ void Locomotion::Apply(const asset::Skeleton &skeleton, f32 speed,
   if (left_shin >= 0)
     leg_length =
         rx::Max(Length(skeleton.bones[left_shin].bind_translation), 1.0e-4f);
-  const f32 sway = ::cos(theta) * walk;
-  const f32 twist = ::sin(theta) * walk;
+  const f32 sway = ::cosf(theta) * walk;
+  const f32 twist = ::sinf(theta) * walk;
   LayerRotation(pose, hip, {0, 0, 1}, style.hip_roll * sway);
   LayerRotation(pose, hip, {0, 1, 0}, style.hip_yaw * twist);
   if (hip >= 0 && hip < static_cast<i32>(pose->translation.size())) {
     pose->translation[hip].x += style.hip_shift * leg_length * sway;
     pose->translation[hip].y += style.vertical_bob * leg_length * walk *
-                                (0.5f - 0.5f * ::cos(theta * 2.0f));
+                                (0.5f - 0.5f * ::cosf(theta * 2.0f));
   }
   LayerRotation(pose, spine, {0, 0, 1}, -style.torso_counter_roll * sway);
   LayerRotation(pose, spine, {0, 1, 0}, -style.torso_counter_yaw * twist);

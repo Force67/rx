@@ -55,7 +55,7 @@ void SkidSynth::Render(f32* out, u32 frames, const SynthParams& p) {
   const f32 bias = rx::Clamp(p.skid_bias, -1.0f, 1.0f);
   const f32 centre_hz =
       rx::Clamp((900.0f + speed * 25.0f) * (1.0f + 0.12f * bias), 300.0f, rate_ * 0.4f);
-  const f32 f = rx::Clamp(2.0f * ::sin(kPi * centre_hz / rate_), 0.0f, 1.0f);
+  const f32 f = rx::Clamp(2.0f * ::sinf(kPi * centre_hz / rate_), 0.0f, 1.0f);
   const f32 q = 0.28f;  // moderate resonance: a band, not a whistle
 
   for (u32 i = 0; i < frames; ++i) {
@@ -65,8 +65,8 @@ void SkidSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     const f32 high = in - svf_low_ - q * svf_band_;
     svf_band_ += f * high;
     f32 s = svf_band_ * level;
-    s = ::tanh(s);
-    out[i] = ::isfinite(s) ? s : 0.0f;
+    s = ::tanhf(s);
+    out[i] = isfinite(s) ? s : 0.0f;
   }
 }
 
@@ -93,7 +93,7 @@ void WindSynth::Render(f32* out, u32 frames, const SynthParams& p) {
 
   // Cutoff opens with speed: faster air reads brighter, not just louder.
   const f32 cutoff = rx::Clamp(300.0f + speed * 55.0f, 200.0f, rate_ * 0.45f);
-  const f32 alpha = rx::Clamp(1.0f - ::exp(-2.0f * kPi * cutoff / rate_), 0.0f, 1.0f);
+  const f32 alpha = rx::Clamp(1.0f - ::expf(-2.0f * kPi * cutoff / rate_), 0.0f, 1.0f);
 
   for (u32 i = 0; i < frames; ++i) {
     const f32 white = Noise();
@@ -102,8 +102,8 @@ void WindSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     // rather than a low roar.
     const f32 band = lp_ - hp_prev_ * 0.02f;
     hp_prev_ = lp_;
-    f32 s = ::tanh(band * level);
-    out[i] = ::isfinite(s) ? s : 0.0f;
+    f32 s = ::tanhf(band * level);
+    out[i] = isfinite(s) ? s : 0.0f;
   }
 }
 

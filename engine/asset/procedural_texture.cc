@@ -10,7 +10,7 @@
 namespace rx::asset {
 namespace {
 
-f32 Fract(f32 x) { return x - ::floor(x); }
+f32 Fract(f32 x) { return x - ::floorf(x); }
 
 f32 Smoothstep(f32 edge0, f32 edge1, f32 x) {
   if (edge1 <= edge0) return x < edge0 ? 0.0f : 1.0f;
@@ -33,8 +33,8 @@ f32 EdgeDistance(f32 t) {
 // cell boundary rather than stepped. Both cells reach exactly 0.5 at the
 // boundary, which is what keeps it continuous (and the checker antialiased).
 f32 SoftSquare(f32 t) {
-  f32 cell = ::floor(t);
-  f32 parity = ::fmod(::abs(cell), 2.0f) >= 1.0f ? 1.0f : 0.0f;
+  f32 cell = ::floorf(t);
+  f32 parity = ::fmodf(::fabsf(cell), 2.0f) >= 1.0f ? 1.0f : 0.0f;
   f32 inside = 0.5f + 0.5f * Smoothstep(0.0f, kEdgeSoftness * 2.0f, EdgeDistance(t));
   return parity * inside + (1.0f - parity) * (1.0f - inside);
 }
@@ -52,7 +52,7 @@ u32 HashLattice(i32 x, i32 y, u32 seed) {
 f32 ValueNoise(f32 x, f32 y, i32 px, i32 py, u32 seed) {
   if (px < 1) px = 1;
   if (py < 1) py = 1;
-  i32 x0 = static_cast<i32>(::floor(x)), y0 = static_cast<i32>(::floor(y));
+  i32 x0 = static_cast<i32>(::floorf(x)), y0 = static_cast<i32>(::floorf(y));
   f32 fx = x - static_cast<f32>(x0), fy = y - static_cast<f32>(y0);
   auto wrap = [](i32 v, i32 period) { return ((v % period) + period) % period; };
   auto corner = [&](i32 cx, i32 cy) {
@@ -69,12 +69,12 @@ f32 ValueNoise(f32 x, f32 y, i32 px, i32 py, u32 seed) {
 // bound to a slot the GPU samples as sRGB.
 u8 EncodeSrgb(f32 linear) {
   f32 v = rx::Clamp(linear, 0.0f, 1.0f);
-  f32 encoded = v <= 0.0031308f ? v * 12.92f : 1.055f * ::pow(v, 1.0f / 2.4f) - 0.055f;
-  return static_cast<u8>(::lround(encoded * 255.0f));
+  f32 encoded = v <= 0.0031308f ? v * 12.92f : 1.055f * ::powf(v, 1.0f / 2.4f) - 0.055f;
+  return static_cast<u8>(::lroundf(encoded * 255.0f));
 }
 
 u8 EncodeLinear(f32 v) {
-  return static_cast<u8>(::lround(rx::Clamp(v, 0.0f, 1.0f) * 255.0f));
+  return static_cast<u8>(::lroundf(rx::Clamp(v, 0.0f, 1.0f) * 255.0f));
 }
 
 Texture BeginTexture(const PatternDesc& desc, bool srgb, AssetId id) {
@@ -116,8 +116,8 @@ f32 SamplePattern(const PatternDesc& desc, f32 u, f32 v) {
     case PatternKind::kBrick: {
       // scale is bricks across by courses up, and every other course is offset
       // by half a brick.
-      f32 course = ::floor(v * sv);
-      f32 across = u * su + (::fmod(::abs(course), 2.0f) >= 1.0f ? 0.5f : 0.0f);
+      f32 course = ::floorf(v * sv);
+      f32 across = u * su + (::fmodf(::fabsf(course), 2.0f) >= 1.0f ? 0.5f : 0.0f);
       // `line` is a fraction of a COURSE, and the joint has to come out the
       // same uv width both ways, so the fraction across is rescaled by how much
       // wider a brick is than a course is tall. A wall 4 bricks across and 20
@@ -132,8 +132,8 @@ f32 SamplePattern(const PatternDesc& desc, f32 u, f32 v) {
       return rx::Clamp(v, 0.0f, 1.0f);
     case PatternKind::kNoise: {
       f32 sum = 0.0f, amplitude = 1.0f, total = 0.0f;
-      i32 px = rx::Max(1, static_cast<i32>(::lround(su)));
-      i32 py = rx::Max(1, static_cast<i32>(::lround(sv)));
+      i32 px = rx::Max(1, static_cast<i32>(::lroundf(su)));
+      i32 py = rx::Max(1, static_cast<i32>(::lroundf(sv)));
       for (int octave = 0; octave < 4; ++octave) {
         sum += ValueNoise(u * static_cast<f32>(px), v * static_cast<f32>(py), px, py,
                           desc.seed + static_cast<u32>(octave) * 7919u) *

@@ -46,7 +46,7 @@ void BeginTransition(CameraOutput& output, CameraStack& stack, ecs::Entity mode,
 
   const bool compatible_projection =
       output.view.lens.projection == camera_mode.view.lens.projection;
-  if (!::isfinite(spec.duration) || spec.duration <= 0 || !had_output ||
+  if (!isfinite(spec.duration) || spec.duration <= 0 || !had_output ||
       !compatible_projection) {
     CutToMode(output, stack, mode, camera_mode);
     return;
@@ -201,9 +201,9 @@ CameraView InterpolateCameraView(const CameraView& source, const CameraView& des
   view.lens = destination.lens;
 
   if (destination.lens.projection == CameraProjection::kPerspective) {
-    const f32 source_scale = ::tan(source.lens.fov_y * 0.5f);
-    const f32 destination_scale = ::tan(destination.lens.fov_y * 0.5f);
-    view.lens.fov_y = 2.0f * ::atan(rx::Lerp(source_scale, destination_scale, t));
+    const f32 source_scale = ::tanf(source.lens.fov_y * 0.5f);
+    const f32 destination_scale = ::tanf(destination.lens.fov_y * 0.5f);
+    view.lens.fov_y = 2.0f * ::atanf(rx::Lerp(source_scale, destination_scale, t));
   } else {
     view.lens.ortho_height = rx::Lerp(source.lens.ortho_height, destination.lens.ortho_height, t);
     view.lens.ortho_near = rx::Lerp(source.lens.ortho_near, destination.lens.ortho_near, t);
@@ -213,7 +213,7 @@ CameraView InterpolateCameraView(const CameraView& source, const CameraView& des
 }
 
 void ResolveCameraStacks(ecs::World& world, f32 dt) {
-  if (!::isfinite(dt) || dt < 0) dt = 0;
+  if (!isfinite(dt) || dt < 0) dt = 0;
   world.Each<CameraStack, CameraOutput>([&](ecs::Entity, CameraStack& stack, CameraOutput& output) {
     if (!PruneInvalidModes(world, stack, output)) return;
 

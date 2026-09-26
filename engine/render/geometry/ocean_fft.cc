@@ -125,13 +125,13 @@ f32 Phillips(f32 kx, f32 kz, f32 wind_speed, f32 wind_x, f32 wind_z) {
   if (k2 < 1e-8f) return 0.0f;
   const f32 g = 9.81f;
   f32 l = wind_speed * wind_speed / g;  // largest wave from this wind
-  f32 k = ::sqrt(k2);
+  f32 k = ::sqrtf(k2);
   f32 kdw = (kx * wind_x + kz * wind_z) / k;
   constexpr f32 kAmplitude = 0.6f;
-  f32 p = kAmplitude * ::exp(-1.0f / (k2 * l * l)) / (k2 * k2) * (kdw * kdw);
+  f32 p = kAmplitude * ::expf(-1.0f / (k2 * l * l)) / (k2 * k2) * (kdw * kdw);
   if (kdw < 0.0f) p *= 0.25f;               // damp waves running against the wind
   const f32 small_cut = 0.35f;               // meters
-  p *= ::exp(-k2 * small_cut * small_cut);
+  p *= ::expf(-k2 * small_cut * small_cut);
   return p;
 }
 
@@ -201,8 +201,8 @@ bool OceanFft::Initialize(Device& device) {
       f32 m = static_cast<f32>(y) - kSize * 0.5f;
       f32 kx = 2.0f * 3.14159265f * n / kPatchSize;
       f32 kz = 2.0f * 3.14159265f * m / kPatchSize;
-      f32 ph = ::sqrt(Phillips(kx, kz, wind_speed, wind_x, wind_z));
-      f32 phm = ::sqrt(Phillips(-kx, -kz, wind_speed, wind_x, wind_z));
+      f32 ph = ::sqrtf(Phillips(kx, kz, wind_speed, wind_x, wind_z));
+      f32 phm = ::sqrtf(Phillips(-kx, -kz, wind_speed, wind_x, wind_z));
       size_t o = (static_cast<size_t>(y) * kSize + x) * 4;
       h0[o + 0] = gauss(rng) * inv_sqrt2 * ph;
       h0[o + 1] = gauss(rng) * inv_sqrt2 * ph;

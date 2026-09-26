@@ -97,7 +97,7 @@ Result Compare(const Image& a, const Image& b, float hot_delta,
             (static_cast<float>(a.pixels[base + c]) - static_cast<float>(b.pixels[base + c])) /
             255.0f;
         sum_squares += static_cast<double>(delta) * delta;
-        const float magnitude = ::fabs(delta);
+        const float magnitude = ::fabsf(delta);
         if (magnitude > worst) worst = magnitude;
         // Amplified so a difference the eye cannot find in the source frames is
         // obvious in the diff; saturating is the point, not a defect.

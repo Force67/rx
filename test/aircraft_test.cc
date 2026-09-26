@@ -41,14 +41,14 @@ void AddRunway(PhysicsWorld& world) {
 }
 
 bool IsFinite(const Vec3& v) {
-  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
+  return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
 }
 
 bool StateFinite(const AircraftState& s) {
-  return ::isfinite(s.airspeed_mps) && ::isfinite(s.vertical_speed_mps) &&
-         ::isfinite(s.alpha_deg) && ::isfinite(s.beta_deg) && ::isfinite(s.rpm) &&
-         ::isfinite(s.engine_load) && IsFinite(s.position) && ::isfinite(s.rotation.x) &&
-         ::isfinite(s.rotation.y) && ::isfinite(s.rotation.z) && ::isfinite(s.rotation.w);
+  return isfinite(s.airspeed_mps) && isfinite(s.vertical_speed_mps) &&
+         isfinite(s.alpha_deg) && isfinite(s.beta_deg) && isfinite(s.rpm) &&
+         isfinite(s.engine_load) && IsFinite(s.position) && isfinite(s.rotation.x) &&
+         isfinite(s.rotation.y) && isfinite(s.rotation.z) && isfinite(s.rotation.w);
 }
 
 // Spawns a plane a little high and lets the suspension settle under zero input.
@@ -65,7 +65,7 @@ Aircraft* SpawnSettled(PhysicsWorld& world, const AircraftDesc& desc, Aircraft* 
 // Heading (yaw) of the plane in radians about +Y, from its forward axis.
 f32 Heading(const Aircraft& a) {
   Vec3 fwd = Rotate(a.state().rotation, Vec3{0, 0, 1});
-  return ::atan2(fwd.x, fwd.z);
+  return ::atan2f(fwd.x, fwd.z);
 }
 
 // Wrap a heading delta into (-pi, pi] so a signed turn reads correctly even if
@@ -105,7 +105,7 @@ int main() {
                  s.gear_compression[0], s.gear_compression[1], s.gear_compression[2]);
     if (!s.on_ground) return Fail("(a) not resting on the gear");
     if (s.position.y < 0.5f) return Fail("(a) sank through the runway");
-    if (::fabs(s.vertical_speed_mps) > 0.2f || s.airspeed_mps > 0.3f)
+    if (::fabsf(s.vertical_speed_mps) > 0.2f || s.airspeed_mps > 0.3f)
       return Fail("(a) not settled/stationary");
     a->~Aircraft();
   }
@@ -374,9 +374,9 @@ int main() {
     for (int i = 0; i < 60 * 180; ++i) {
       AircraftInput in;
       in.throttle = (i / 30) % 2 ? 1.0f : 0.0f;
-      in.pitch = ::sin(i * 0.05f);
-      in.roll = ::sin(i * 0.11f);
-      in.yaw = ::cos(i * 0.07f);
+      in.pitch = ::sinf(i * 0.05f);
+      in.roll = ::sinf(i * 0.11f);
+      in.yaw = ::cosf(i * 0.07f);
       in.flaps = (i / 120) % 2 ? 1.0f : 0.0f;
       in.brakes = (i % 90) < 10 ? 1.0f : 0.0f;
       a->Update(in, kDt);
@@ -465,9 +465,9 @@ int main() {
     if (fly(12.0f, &cross_dx, &cross_yaw)) return 1;
     ::fprintf(stderr, "(ii) calm dx=%.1f yaw=%.2f | crosswind dx=%.1f yaw=%.2f deg\n", calm_dx,
                  calm_yaw * 57.2958f, cross_dx, cross_yaw * 57.2958f);
-    if (::fabs(cross_yaw) < 0.15f)
+    if (::fabsf(cross_yaw) < 0.15f)
       return Fail("(ii) crosswind did not weathervane the nose");
-    if (::fabs(cross_yaw) <= ::fabs(calm_yaw) + 0.1f)
+    if (::fabsf(cross_yaw) <= ::fabsf(calm_yaw) + 0.1f)
       return Fail("(ii) crosswind weathervane not distinct from calm");
   }
 

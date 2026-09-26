@@ -30,7 +30,7 @@ void Check(bool condition, const char* message) {
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-4f) {
-  if (::abs(actual - expected) <= epsilon) return;
+  if (::fabsf(actual - expected) <= epsilon) return;
   ::fprintf(stderr, "camera_test: FAIL: %s (got %.6f, expected %.6f)\n", message, actual,
                expected);
   ++failures;
@@ -223,8 +223,8 @@ void TestLensAndOrientationInterpolation() {
 
   CameraView half = InterpolateCameraView(source, destination, 0.5f);
   const f32 expected_fov =
-      2.0f * ::atan(rx::Lerp(::tan(source.lens.fov_y * 0.5f),
-                                 ::tan(destination.lens.fov_y * 0.5f), 0.5f));
+      2.0f * ::atanf(rx::Lerp(::tanf(source.lens.fov_y * 0.5f),
+                                 ::tanf(destination.lens.fov_y * 0.5f), 0.5f));
   Near(half.lens.fov_y, expected_fov, "field of view blends in focal scale");
   Near(rx::Length(CameraForward(half)), 1.0f, "slerped orientation remains normalized");
 

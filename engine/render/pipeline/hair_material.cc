@@ -16,8 +16,8 @@ constexpr f32 kSqrtPiOver8 = 0.626657069f;
 constexpr int kPMax = 3;
 
 f32 Sqr(f32 x) { return x * x; }
-f32 SafeSqrt(f32 x) { return ::sqrt(rx::Max(x, 0.0f)); }
-f32 SafeAsin(f32 x) { return ::asin(rx::Clamp(x, -1.0f, 1.0f)); }
+f32 SafeSqrt(f32 x) { return ::sqrtf(rx::Max(x, 0.0f)); }
+f32 SafeAsin(f32 x) { return ::asinf(rx::Clamp(x, -1.0f, 1.0f)); }
 
 f32 I0(f32 x) {
   f32 val = 0.0f;
@@ -35,18 +35,18 @@ f32 I0(f32 x) {
 
 f32 LogI0(f32 x) {
   if (x > 12.0f) {
-    return x + 0.5f * (-::log(2.0f * kPi) + ::log(1.0f / x) + 1.0f / (8.0f * x));
+    return x + 0.5f * (-::logf(2.0f * kPi) + ::logf(1.0f / x) + 1.0f / (8.0f * x));
   }
-  return ::log(I0(x));
+  return ::logf(I0(x));
 }
 
 f32 Mp(f32 cos_theta_i, f32 cos_theta_o, f32 sin_theta_i, f32 sin_theta_o, f32 v) {
   f32 a = cos_theta_i * cos_theta_o / v;
   f32 b = sin_theta_i * sin_theta_o / v;
   if (v <= 0.1f) {
-    return ::exp(LogI0(a) - b - 1.0f / v + 0.6931472f + ::log(1.0f / (2.0f * v)));
+    return ::expf(LogI0(a) - b - 1.0f / v + 0.6931472f + ::logf(1.0f / (2.0f * v)));
   }
-  return (::exp(-b) * I0(a)) / (::sinh(1.0f / v) * 2.0f * v);
+  return (::expf(-b) * I0(a)) / (::sinhf(1.0f / v) * 2.0f * v);
 }
 
 f32 FresnelDielectric(f32 cos_theta_i, f32 eta) {
@@ -57,19 +57,19 @@ f32 FresnelDielectric(f32 cos_theta_i, f32 eta) {
   }
   f32 sin2_t = (1.0f - cos_theta_i * cos_theta_i) / (eta * eta);
   if (sin2_t >= 1.0f) return 1.0f;
-  f32 cos_t = ::sqrt(1.0f - sin2_t);
+  f32 cos_t = ::sqrtf(1.0f - sin2_t);
   f32 rp = (eta * cos_theta_i - cos_t) / (eta * cos_theta_i + cos_t);
   f32 rs = (cos_theta_i - eta * cos_t) / (cos_theta_i + eta * cos_t);
   return 0.5f * (rp * rp + rs * rs);
 }
 
 f32 Logistic(f32 x, f32 s) {
-  x = ::abs(x);
-  f32 e = ::exp(-x / s);
+  x = ::fabsf(x);
+  f32 e = ::expf(-x / s);
   return e / (s * Sqr(1.0f + e));
 }
 
-f32 LogisticCdf(f32 x, f32 s) { return 1.0f / (1.0f + ::exp(-x / s)); }
+f32 LogisticCdf(f32 x, f32 s) { return 1.0f / (1.0f + ::expf(-x / s)); }
 
 f32 TrimmedLogistic(f32 x, f32 s) {
   f32 norm = LogisticCdf(kPi, s) - LogisticCdf(-kPi, s);
@@ -82,13 +82,13 @@ f32 PhiLobe(int p, f32 gamma_o, f32 gamma_t) {
 
 f32 Np(f32 phi, int p, f32 s, f32 gamma_o, f32 gamma_t) {
   f32 dphi = phi - PhiLobe(p, gamma_o, gamma_t);
-  dphi = dphi - 2.0f * kPi * ::floor((dphi + kPi) / (2.0f * kPi));
+  dphi = dphi - 2.0f * kPi * ::floorf((dphi + kPi) / (2.0f * kPi));
   return TrimmedLogistic(dphi, s);
 }
 
 void LobeVariance(f32 beta_m, f32 v[kPMax + 1]) {
   f32 b = rx::Clamp(beta_m, 0.02f, 1.0f);
-  f32 v0 = Sqr(0.726f * b + 0.812f * b * b + 3.7f * ::pow(b, 20.0f));
+  f32 v0 = Sqr(0.726f * b + 0.812f * b * b + 3.7f * ::powf(b, 20.0f));
   v[0] = v0;
   v[1] = 0.25f * v0;
   v[2] = 4.0f * v0;
@@ -97,7 +97,7 @@ void LobeVariance(f32 beta_m, f32 v[kPMax + 1]) {
 
 f32 AzimuthalScale(f32 beta_n) {
   f32 b = rx::Clamp(beta_n, 0.02f, 1.0f);
-  return kSqrtPiOver8 * (0.265f * b + 1.194f * b * b + 5.372f * ::pow(b, 22.0f));
+  return kSqrtPiOver8 * (0.265f * b + 1.194f * b * b + 5.372f * ::powf(b, 22.0f));
 }
 
 void AverageAttenuation(const HairSurfaceParameters& p, f32 cos_theta_d, f32 a_f[3],
@@ -105,7 +105,7 @@ void AverageAttenuation(const HairSurfaceParameters& p, f32 cos_theta_d, f32 a_f
   f32 f = FresnelDielectric(rx::Max(cos_theta_d, 1e-3f), p.eta);
   f32 spread = rx::Clamp(p.beta_n, 0.0f, 1.0f);
   for (int c = 0; c < 3; ++c) {
-    f32 T = ::exp(-p.sigma_a[c] * 2.0f);
+    f32 T = ::expf(-p.sigma_a[c] * 2.0f);
     f32 tt = Sqr(1.0f - f) * T;
     f32 trt = tt * T * f;
     a_f[c] = rx::Clamp(tt * (1.0f - 0.5f * spread) + trt * 0.15f, 0.0f, 1.0f);
@@ -128,7 +128,7 @@ void HairSigmaFromColorPathTraced(const f32 color[3], f32 beta_n, f32 out_sigma[
   const f32 denom = 5.969f - 0.215f * b + 2.532f * b * b - 10.73f * b * b * b +
                     5.574f * b * b * b * b + 0.245f * b * b * b * b * b;
   for (int c = 0; c < 3; ++c) {
-    const f32 t = ::log(rx::Clamp(color[c], 1e-4f, 1.0f)) / rx::Max(denom, 1e-4f);
+    const f32 t = ::logf(rx::Clamp(color[c], 1e-4f, 1.0f)) / rx::Max(denom, 1e-4f);
     out_sigma[c] = t * t;
   }
 }
@@ -136,7 +136,7 @@ void HairSigmaFromColorPathTraced(const f32 color[3], f32 beta_n, f32 out_sigma[
 void HairSigmaFromColor(const f32 color[3], f32 reference_depth, f32 out_sigma[3]) {
   const f32 denom = 2.17f + 2.02f * rx::Max(reference_depth, 0.0f);
   for (int c = 0; c < 3; ++c) {
-    out_sigma[c] = -::log(rx::Clamp(color[c], 1e-4f, 1.0f)) / rx::Max(denom, 1e-3f);
+    out_sigma[c] = -::logf(rx::Clamp(color[c], 1e-4f, 1.0f)) / rx::Max(denom, 1e-3f);
   }
 }
 
@@ -250,11 +250,11 @@ void HairEvaluateCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 
 
   const f32 sin_theta_o = rx::Clamp(wo[0], -1.0f, 1.0f);
   const f32 cos_theta_o = SafeSqrt(1.0f - sin_theta_o * sin_theta_o);
-  const f32 phi_o = ::atan2(wo[2], wo[1]);
+  const f32 phi_o = ::atan2f(wo[2], wo[1]);
 
   const f32 sin_theta_i = rx::Clamp(wi[0], -1.0f, 1.0f);
   const f32 cos_theta_i = SafeSqrt(1.0f - sin_theta_i * sin_theta_i);
-  const f32 phi_i = ::atan2(wi[2], wi[1]);
+  const f32 phi_i = ::atan2f(wi[2], wi[1]);
 
   const f32 sin_theta_t = sin_theta_o / p.eta;
   const f32 cos_theta_t = SafeSqrt(1.0f - sin_theta_t * sin_theta_t);
@@ -267,7 +267,7 @@ void HairEvaluateCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 
 
   f32 T[3];
   for (int c = 0; c < 3; ++c) {
-    T[c] = ::exp(-p.sigma_a[c] * (2.0f * cos_gamma_t / rx::Max(cos_theta_t, 1e-5f)));
+    T[c] = ::expf(-p.sigma_a[c] * (2.0f * cos_gamma_t / rx::Max(cos_theta_t, 1e-5f)));
   }
 
   const f32 cos_gamma_o = SafeSqrt(1.0f - h * h);
@@ -284,7 +284,7 @@ void HairEvaluateCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 
   LobeVariance(p.beta_m, v);
   const f32 s = AzimuthalScale(p.beta_n);
 
-  const f32 sin_a = ::sin(p.alpha);
+  const f32 sin_a = ::sinf(p.alpha);
   const f32 cos_a = SafeSqrt(1.0f - sin_a * sin_a);
   const f32 sin2a = 2.0f * sin_a * cos_a;
   const f32 cos2a = cos_a * cos_a - sin_a * sin_a;
@@ -304,7 +304,7 @@ void HairEvaluateCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 
       sto = sin_theta_o * cos4a + cos_theta_o * sin4a;
       cto = cos_theta_o * cos4a - sin_theta_o * sin4a;
     }
-    cto = ::abs(cto);
+    cto = ::fabsf(cto);
     const f32 m = Mp(cos_theta_i, cto, sin_theta_i, sto, v[lobe]);
     const f32 n = Np(phi, lobe, s, gamma_o, gamma_t);
     for (int c = 0; c < 3; ++c) out_rgb[c] += m * ap[lobe][c] * n;
@@ -323,7 +323,7 @@ void HairShadeCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[
                   f32 strand_count, f32 out_rgb[3]) {
   const f32 cos_theta_i = SafeSqrt(1.0f - wi[0] * wi[0]);
   const f32 cos_theta_d =
-      ::cos(0.5f * (SafeAsin(wi[0]) - SafeAsin(wo[0])));
+      ::cosf(0.5f * (SafeAsin(wi[0]) - SafeAsin(wo[0])));
 
   if (!p.dual_scattering) {
     HairEvaluateCpu(p, wo, wi, h, out_rgb);
@@ -332,9 +332,9 @@ void HairShadeCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[
   }
 
   f32 a_f[3], a_b[3];
-  AverageAttenuation(p, ::abs(cos_theta_d), a_f, a_b);
+  AverageAttenuation(p, ::fabsf(cos_theta_d), a_f, a_b);
   const f32 n = rx::Max(strand_count, 0.0f) * rx::Max(p.density, 0.0f);
-  const f32 spread = ::sqrt(n) * 0.4f * (0.2f + rx::Clamp(p.beta_m, 0.0f, 1.0f));
+  const f32 spread = ::sqrtf(n) * 0.4f * (0.2f + rx::Clamp(p.beta_m, 0.0f, 1.0f));
 
   f32 direct[3];
   HairEvaluateCpu(p, wo, wi, h, direct);
@@ -345,9 +345,9 @@ void HairShadeCpu(const HairSurfaceParameters& p, const f32 wo[3], const f32 wi[
   f32 scattered[3];
   HairEvaluateCpu(blunt, wo, wi, 0.0f, scattered);
 
-  const f32 density_term = 1.0f - ::exp(-0.35f * n);
+  const f32 density_term = 1.0f - ::expf(-0.35f * n);
   for (int c = 0; c < 3; ++c) {
-    const f32 forward = ::exp(::log(rx::Max(a_f[c], 1e-6f)) * n);
+    const f32 forward = ::expf(::logf(rx::Max(a_f[c], 1e-6f)) * n);
     const f32 back = a_b[c] * density_term * rx::Max(p.scatter_scale, 0.0f);
     out_rgb[c] = (direct[c] * forward + scattered[c] * forward * back) * cos_theta_i;
   }

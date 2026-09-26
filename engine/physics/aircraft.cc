@@ -29,8 +29,8 @@ f32 SmoothStep(f32 edge0, f32 edge1, f32 x) {
 // `alpha`. A logistic centred on the stall angle blends the attached linear
 // lift curve into a flat-plate curve; `half_width` (rad) sets how abruptly.
 f32 StallBlend(f32 alpha, f32 stall_alpha, f32 half_width) {
-  f32 x = (::fabs(alpha) - stall_alpha) / rx::Max(half_width, 1e-3f);
-  return 1.0f / (1.0f + ::exp(-4.0f * x));
+  f32 x = (::fabsf(alpha) - stall_alpha) / rx::Max(half_width, 1e-3f);
+  return 1.0f / (1.0f + ::expf(-4.0f * x));
 }
 
 }  // namespace
@@ -143,7 +143,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   // Filter flap deflection toward the quantized command (mechanical lag).
   {
     const u32 steps = rx::Max(1u, desc_.flap_steps);
-    const f32 quantized = ::round(Clampf(input.flaps, 0.0f, 1.0f) * steps) / steps;
+    const f32 quantized = ::roundf(Clampf(input.flaps, 0.0f, 1.0f) * steps) / steps;
     const f32 rate = 0.5f;  // full travel in ~2 s
     flaps_ += Clampf(quantized - flaps_, -rate * dt, rate * dt);
   }
@@ -155,8 +155,8 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   const f32 f_com = Dot(vair_com, fwd);
   const f32 u_com = Dot(vair_com, up);
   const f32 s_com = Dot(vair_com, right);
-  const f32 alpha_com = ::atan2(-u_com, f_com);
-  const f32 beta_com = ::atan2(s_com, rx::Max(::fabs(f_com), 1e-3f));
+  const f32 alpha_com = ::atan2f(-u_com, f_com);
+  const f32 beta_com = ::atan2f(s_com, rx::Max(::fabsf(f_com), 1e-3f));
 
   // wing halves: strip theory at each half's aerodynamic centre
   // Each half is evaluated at its OWN point velocity (GetPointVelocity), so
@@ -181,13 +181,13 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     }
     const f32 fc = Dot(v, fwd);
     const f32 uc = Dot(v, up);
-    const f32 alpha = ::atan2(-uc, fc);
+    const f32 alpha = ::atan2f(-uc, fc);
 
     // Attached linear curve (with flap + aileron camber) blended into a
     // flat-plate curve past the stall; drag rises with the flat-plate term.
     const f32 cl_attached = desc_.wing_cl_alpha * (alpha - desc_.wing_zero_lift_alpha_rad) +
                             flap_cl + cl_bias;
-    const f32 cl_flat = ::sin(2.0f * alpha);  // 2 sin a cos a, flat plate
+    const f32 cl_flat = ::sinf(2.0f * alpha);  // 2 sin a cos a, flat plate
     const f32 blend = StallBlend(alpha, desc_.wing_stall_alpha_rad, desc_.post_stall_decay);
     const f32 cl = (1.0f - blend) * cl_attached + blend * cl_flat;
     *stalled = blend > 0.5f;
@@ -195,7 +195,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     // Induced drag from this half's lift; parasitic drag is applied once at the
     // CoM below. Post-stall separation adds a flat-plate drag bump.
     const f32 cd_induced = cl_attached * cl_attached / (kPi * aspect_ratio * desc_.oswald_efficiency);
-    const f32 cd = (1.0f - blend) * cd_induced + blend * (0.15f + 2.0f * ::sin(alpha) * ::sin(alpha));
+    const f32 cd = (1.0f - blend) * cd_induced + blend * (0.15f + 2.0f * ::sinf(alpha) * ::sinf(alpha));
 
     const f32 qh = 0.5f * kAirDensity * vlen * vlen;
     const f32 lift = qh * half_area * cl;
@@ -226,7 +226,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   // fuselage side drag (sideslip): damps lateral sliding through the air
   {
     const f32 vside = Dot(vair_com, right);
-    const f32 fside = -0.5f * kAirDensity * ::fabs(vside) * vside * desc_.fuselage_side_cd *
+    const f32 fside = -0.5f * kAirDensity * ::fabsf(vside) * vside * desc_.fuselage_side_cd *
                       desc_.fuselage_side_area_m2;
     world_.AddForce(body_, right * (fside * aero_fade));
   }
@@ -244,7 +244,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     if (vlen > 1e-3f) {
       const f32 fc = Dot(v, fwd);
       const f32 uc = Dot(v, up);
-      const f32 alpha_t = ::atan2(-uc, fc);
+      const f32 alpha_t = ::atan2f(-uc, fc);
       const f32 cl_t = desc_.tail_cl_alpha * alpha_t - desc_.elevator_authority * input.pitch;
       const f32 qt = 0.5f * kAirDensity * vlen * vlen;
       const f32 lift = qt * desc_.tail_area_m2 * cl_t;
@@ -264,7 +264,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     if (vlen > 1e-3f) {
       const f32 fc = Dot(v, fwd);
       const f32 sc = Dot(v, right);
-      const f32 beta_f = ::atan2(sc, rx::Max(::fabs(fc), 1e-3f));
+      const f32 beta_f = ::atan2f(sc, rx::Max(::fabsf(fc), 1e-3f));
       // Side force opposes sideslip (weathervane) and responds to rudder. +yaw
       // input yaws the nose right (toward body -X): with +Z fwd / +Y up / +X
       // left, a nose-right yaw is a NEGATIVE rotation about +Y, which the fin

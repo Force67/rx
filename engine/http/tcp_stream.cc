@@ -31,6 +31,16 @@ i64 StreamLimits::remaining_ms() const {
 
 namespace {
 
+// The resolver's message for a getaddrinfo error. Under UNICODE, which Windows
+// builds define, gai_strerror is the wide-character variant.
+const char* ResolveErrorText(int rc) {
+#if defined(_WIN32)
+  return ::gai_strerrorA(rc);
+#else
+  return ::gai_strerror(rc);
+#endif
+}
+
 #ifdef _WIN32
 using SocketHandle = SOCKET;
 using SockLen = int;
@@ -188,7 +198,7 @@ class TcpStream final : public Stream {
     if (rc != 0 || resolved == nullptr) {
       char buffer[256] = {};
       ::snprintf(buffer, sizeof(buffer), "cannot resolve %s: %s", host.c_str(),
-                    rc != 0 ? ::gai_strerror(rc) : "the resolver returned no addresses");
+                 rc != 0 ? ResolveErrorText(rc) : "the resolver returned no addresses");
       *error = base::String(buffer);
       if (resolved != nullptr)
         ::freeaddrinfo(resolved);

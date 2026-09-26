@@ -85,11 +85,11 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
   scratch_grid_.clear();
   for (u32 bi = 0; bi < scratch_bubbles_.size(); ++bi) {
     const BubbleRef& b = scratch_bubbles_[bi];
-    const f32 exit = ::sqrt(b.exit_sq);
-    const i32 min_x = static_cast<i32>(::floor((b.center[0] - exit) * inv_cell));
-    const i32 max_x = static_cast<i32>(::floor((b.center[0] + exit) * inv_cell));
-    const i32 min_z = static_cast<i32>(::floor((b.center[2] - exit) * inv_cell));
-    const i32 max_z = static_cast<i32>(::floor((b.center[2] + exit) * inv_cell));
+    const f32 exit = ::sqrtf(b.exit_sq);
+    const i32 min_x = static_cast<i32>(::floorf((b.center[0] - exit) * inv_cell));
+    const i32 max_x = static_cast<i32>(::floorf((b.center[0] + exit) * inv_cell));
+    const i32 min_z = static_cast<i32>(::floorf((b.center[2] - exit) * inv_cell));
+    const i32 max_z = static_cast<i32>(::floorf((b.center[2] + exit) * inv_cell));
     for (i32 cx = min_x; cx <= max_x; ++cx) {
       for (i32 cz = min_z; cz <= max_z; ++cz) {
         const u64 key = CellKey(cx, cz);
@@ -133,8 +133,8 @@ void InterestMap::Update(ecs::World& world, u64 tick) {
         seen_ids.insert(id.value, u8{1});
         candidates.clear();
 
-        const i32 cx = static_cast<i32>(::floor(t.position[0] * inv_cell));
-        const i32 cz = static_cast<i32>(::floor(t.position[2] * inv_cell));
+        const i32 cx = static_cast<i32>(::floorf(t.position[0] * inv_cell));
+        const i32 cz = static_cast<i32>(::floorf(t.position[2] * inv_cell));
         const base::Vector<u32>* bucket = scratch_grid_.find(CellKey(cx, cz));
         u32 avatar_peer = kNoPeer;
         if (bucket) {
@@ -240,8 +240,8 @@ void InterestMap::RemovePeer(u32 peer) {
 
 u32 PeerColor(u32 peer) {
   // Golden-angle hue walk: well-spread, stable, no table.
-  const f32 hue = ::fmod(static_cast<f32>(peer) * 137.50776f, 360.0f) / 60.0f;
-  const f32 x = 1.0f - ::fabs(::fmod(hue, 2.0f) - 1.0f);
+  const f32 hue = ::fmodf(static_cast<f32>(peer) * 137.50776f, 360.0f) / 60.0f;
+  const f32 x = 1.0f - ::fabsf(::fmodf(hue, 2.0f) - 1.0f);
   f32 r = 0, g = 0, b = 0;
   switch (static_cast<int>(hue)) {
     case 0: r = 1; g = x; break;
