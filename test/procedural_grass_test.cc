@@ -1,8 +1,8 @@
+#include "base/numeric_limits.h"
 #include "render/geometry/procedural_grass.h"
 
-#include <cmath>
-#include <cstdio>
-#include <limits>
+#include <math.h>
+#include <stdio.h>
 
 namespace {
 
@@ -11,12 +11,12 @@ int failures = 0;
 void Check(bool condition, const char* message) {
   if (condition)
     return;
-  std::fprintf(stderr, "procedural_grass_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "procedural_grass_test: FAIL: %s\n", message);
   ++failures;
 }
 
 bool Near(rx::f32 a, rx::f32 b) {
-  return std::fabs(a - b) < 1e-5f;
+  return ::fabs(a - b) < 1e-5f;
 }
 
 void SetPoint(rx::f32 point[3], rx::f32 x, rx::f32 y, rx::f32 z) {
@@ -64,16 +64,16 @@ int main() {
   Check(safe.max_blades == 1, "blade capacity has a nonzero minimum");
 
   GrassGenerationSettings non_finite;
-  non_finite.candidate_spacing = std::numeric_limits<rx::f32>::quiet_NaN();
-  non_finite.stream_radius = std::numeric_limits<rx::f32>::infinity();
-  non_finite.fade_end = std::numeric_limits<rx::f32>::quiet_NaN();
-  non_finite.bend_recovery_time = std::numeric_limits<rx::f32>::infinity();
+  non_finite.candidate_spacing = NAN;
+  non_finite.stream_radius = INFINITY;
+  non_finite.fade_end = NAN;
+  non_finite.bend_recovery_time = INFINITY;
   const GrassGenerationSettings finite = SanitizeGrassSettings(non_finite);
-  Check(std::isfinite(finite.candidate_spacing), "non-finite spacing uses a default");
-  Check(std::isfinite(finite.stream_radius), "non-finite radius uses a default");
+  Check(::isfinite(finite.candidate_spacing), "non-finite spacing uses a default");
+  Check(::isfinite(finite.stream_radius), "non-finite radius uses a default");
   Check(finite.fade_end <= finite.stream_radius,
         "fade completes inside the stream radius");
-  Check(std::isfinite(finite.bend_recovery_time),
+  Check(::isfinite(finite.bend_recovery_time),
         "non-finite bend recovery uses a default");
 
   GrassGenerationSettings distant;
@@ -103,14 +103,14 @@ int main() {
   SetPoint(triangle.p1, 1e9f, 0.0f, 0.0f);
   SetPoint(triangle.p2, 0.0f, 0.0f, 1e9f);
   Check(
-      GrassSurfaceCandidateCount(triangle, 0.08f) == std::numeric_limits<rx::u32>::max(),
+      GrassSurfaceCandidateCount(triangle, 0.08f) == base::MinMax<rx::u32>::max(),
       "oversized candidate counts clamp before integer conversion");
 
   SetPoint(triangle.p1, 2.0f, 0.0f, 0.0f);
   SetPoint(triangle.p2, 4.0f, 0.0f, 0.0f);
   Check(GrassSurfaceCandidateCount(triangle, 0.5f) == 0,
         "degenerate triangles are rejected");
-  triangle.p2[0] = std::numeric_limits<rx::f32>::infinity();
+  triangle.p2[0] = INFINITY;
   Check(GrassSurfaceCandidateCount(triangle, 0.5f) == 0,
         "non-finite triangles are rejected");
 
@@ -125,6 +125,6 @@ int main() {
 
   if (failures != 0)
     return 1;
-  std::printf("procedural_grass_test: PASS\n");
+  ::printf("procedural_grass_test: PASS\n");
   return 0;
 }

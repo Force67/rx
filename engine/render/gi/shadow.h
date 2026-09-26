@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_SHADOW_H_
 #define RX_RENDER_SHADOW_H_
 
-#include <functional>
 
+#include "base/functional/function.h"
 #include "core/math.h"
 #include "render/rhi/device.h"
 #include "render/pipeline/mesh_pipeline.h"
@@ -81,7 +81,7 @@ class ShadowPass {
   // opaque draws inside, binding pipeline() for static and skinned_pipeline()
   // for animated casters (both share one binding/push interface).
   void Render(CommandList& cmd, TextureView atlas_view,
-              const std::function<void(CommandList&, const Mat4&)>& draw);
+              const base::Function<void(CommandList&, const Mat4&)>& draw);
 
   const GpuBuffer& cascade_buffer(u32 frame_slot) const { return cascades_[frame_slot]; }
   u64 cascade_buffer_size() const { return sizeof(CascadeData); }

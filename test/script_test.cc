@@ -4,13 +4,17 @@
 // scene components directly (no gateway); the test exercises them purely from a
 // ScriptValue stack. Pure CPU logic; plain ctest runs it.
 
-#include <cmath>
-#include <cstdio>
-#include <limits>
-#include <new>
-#include <string>
-#include <utility>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
 
+#include "base/memory/move.h"
+#include "base/numeric_limits.h"
+#include "base/strings/xstring.h"
 #include "core/math.h"
 #include "ecs/entity.h"
 #include "ecs/world.h"
@@ -25,12 +29,32 @@
 
 namespace {
 
+// True when `fn` ends the process instead of returning. POSIX only; elsewhere
+// the check is skipped and counts as passing.
+template <typename Fn>
+bool DiesInChild(Fn fn) {
+#if defined(_WIN32)
+  (void)fn;
+  return true;
+#else
+  ::fflush(nullptr);
+  const pid_t child = ::fork();
+  if (child == 0) {
+    fn();
+    ::_exit(0);  // returned: the request was not refused
+  }
+  int status = 0;
+  if (child < 0 || ::waitpid(child, &status, 0) < 0) return false;
+  return WIFSIGNALED(status);
+#endif
+}
+
 int g_failures = 0;
 
 #define CHECK(cond)                                                \
   do {                                                             \
     if (!(cond)) {                                                 \
-      std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);  \
+      ::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);  \
       ++g_failures;                                                \
     }                                                              \
   } while (0)
@@ -41,20 +65,20 @@ namespace ecs = rx::ecs;
 using rx::f32;
 using rx::Vec3;
 
-std::string g_log;
+base::String g_log;
 void LogSink(void* user, script::ScriptStringView msg) {
-  static_cast<std::string*>(user)->assign(msg.view());
+  static_cast<base::String*>(user)->assign(msg.view());
 }
 
 void TestScriptString() {
   script::ScriptString s("hello");
   CHECK(s.size() == 5);
   CHECK(s == script::ScriptStringView("hello", 5));
-  CHECK(std::string(s.c_str()) == "hello");
+  CHECK(base::String(s.c_str()) == "hello");
 
   script::ScriptString copy = s;  // copy ctor -> deep copy
   CHECK(copy == s);
-  script::ScriptString moved = std::move(copy);  // move ctor
+  script::ScriptString moved = base::move(copy);  // move ctor
   CHECK(moved == s);
   CHECK(moved.view().view() == "hello");
 
@@ -65,42 +89,26 @@ void TestScriptString() {
 
   script::ScriptString empty;
   CHECK(empty.empty());
-  CHECK(std::string(empty.c_str()).empty());
+  CHECK(base::String(empty.c_str()).empty());
 
-  bool rejected = false;
-  try {
+  // Invalid requests end the process (there are no exceptions to catch), so
+  // each is run in a child that must die rather than return.
+  CHECK(DiesInChild([] {
     script::ScriptString too_large(
-        script::ScriptStringView(nullptr, std::numeric_limits<rx::u32>::max()));
-  } catch (const std::bad_array_new_length&) {
-    rejected = true;
-  }
-  CHECK(rejected);
-
-  script::ScriptArena arena(16);
-  rejected = false;
-  try {
-    script::ArenaCopy(
-        arena, script::ScriptStringView(nullptr, std::numeric_limits<rx::u32>::max()));
-  } catch (const std::bad_array_new_length&) {
-    rejected = true;
-  }
-  CHECK(rejected);
-
-  rejected = false;
-  try {
-    arena.Alloc(std::numeric_limits<size_t>::max(), alignof(std::max_align_t));
-  } catch (const std::bad_array_new_length&) {
-    rejected = true;
-  }
-  CHECK(rejected);
-
-  rejected = false;
-  try {
+        script::ScriptStringView(nullptr, base::MinMax<rx::u32>::max()));
+  }));
+  CHECK(DiesInChild([] {
+    script::ScriptArena arena(16);
+    script::ArenaCopy(arena, script::ScriptStringView(nullptr, base::MinMax<rx::u32>::max()));
+  }));
+  CHECK(DiesInChild([] {
+    script::ScriptArena arena(16);
+    arena.Alloc(SIZE_MAX, alignof(max_align_t));
+  }));
+  CHECK(DiesInChild([] {
+    script::ScriptArena arena(16);
     arena.Alloc(1, 3);
-  } catch (const std::bad_array_new_length&) {
-    rejected = true;
-  }
-  CHECK(rejected);
+  }));
 }
 
 void TestInterner() {
@@ -169,7 +177,7 @@ void TestDispatch() {
 
   rig.Call("World.SetScale", {V::EntityRef(e), V::Float(3.0)});
   ret = rig.Call("World.GetScale", {V::EntityRef(e)});
-  CHECK(std::fabs(ret.as_float() - 3.0) < 1e-5);
+  CHECK(::fabs(ret.as_float() - 3.0) < 1e-5);
 
   ret = rig.Call("World.IsValid", {V::EntityRef(e)});
   CHECK(ret.as_bool() == true);
@@ -213,21 +221,21 @@ void TestWorldSpaceDispatch() {
   rig.world.Add(child, scene::Parent{parent});
 
   V ret = rig.Call("World.GetPosition", {V::EntityRef(child)});
-  CHECK(std::fabs(ret.as_vec3().x - 10.0f) < 1e-4f);
-  CHECK(std::fabs(ret.as_vec3().y - 2.0f) < 1e-4f);
+  CHECK(::fabs(ret.as_vec3().x - 10.0f) < 1e-4f);
+  CHECK(::fabs(ret.as_vec3().y - 2.0f) < 1e-4f);
 
   rig.Call("World.Teleport", {V::EntityRef(child), V::Vec(Vec3{8, 0, 0})});
   scene::Transform* local = rig.world.Get<scene::Transform>(child);
-  CHECK(std::fabs(local->position[0] - 0.0f) < 1e-4f);
-  CHECK(std::fabs(local->position[1] - 1.0f) < 1e-4f);
+  CHECK(::fabs(local->position[0] - 0.0f) < 1e-4f);
+  CHECK(::fabs(local->position[1] - 1.0f) < 1e-4f);
   ret = rig.Call("World.GetPosition", {V::EntityRef(child)});
-  CHECK(std::fabs(ret.as_vec3().x - 8.0f) < 1e-4f);
-  CHECK(std::fabs(ret.as_vec3().y - 0.0f) < 1e-4f);
+  CHECK(::fabs(ret.as_vec3().x - 8.0f) < 1e-4f);
+  CHECK(::fabs(ret.as_vec3().y - 0.0f) < 1e-4f);
 
   ecs::Entity other = rig.world.Create();
   rig.world.Add(other, scene::Transform{{8, 0, 0}});
   ret = rig.Call("World.DistanceBetween", {V::EntityRef(child), V::EntityRef(other)});
-  CHECK(std::fabs(ret.as_float()) < 1e-4);
+  CHECK(::fabs(ret.as_float()) < 1e-4);
 
   // Any nonzero parent scale is invertible, even below the editor's normal
   // range. Teleport must not silently reject it as singular.
@@ -238,7 +246,7 @@ void TestWorldSpaceDispatch() {
   rig.world.Add(tiny_child, scene::Parent{tiny_parent});
   rig.Call("World.Teleport", {V::EntityRef(tiny_child), V::Vec(Vec3{1, 0, 0})});
   ret = rig.Call("World.GetPosition", {V::EntityRef(tiny_child)});
-  CHECK(std::fabs(ret.as_vec3().x - 1.0f) < 1e-4f);
+  CHECK(::fabs(ret.as_vec3().x - 1.0f) < 1e-4f);
 
   // Over-depth hierarchies are rejected consistently: reads report no position
   // and writes leave the local transform untouched.
@@ -306,9 +314,9 @@ int main() {
   TestWorldSpaceDispatch();
   TestSymbolsAndArena();
   if (g_failures == 0) {
-    std::printf("script_test: all checks passed\n");
+    ::printf("script_test: all checks passed\n");
     return 0;
   }
-  std::printf("script_test: %d failure(s)\n", g_failures);
+  ::printf("script_test: %d failure(s)\n", g_failures);
   return 1;
 }

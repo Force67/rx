@@ -1,9 +1,9 @@
 #ifndef RX_RUNTIME_FEATURE_GYM_FEATURE_GYM_H_
 #define RX_RUNTIME_FEATURE_GYM_FEATURE_GYM_H_
 
-#include <memory>
-#include <string_view>
 
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
 #include "core/types.h"
 
 #if defined(__ANDROID__)
@@ -43,11 +43,11 @@ class FeatureGym {
   bool BuildTour(ShowcaseCamera& camera);
   void SetTourTime(f32 seconds);
 
-  std::string_view active_area() const;
+  base::StringRef active_area() const;
 
  private:
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  base::UniquePointer<Impl> impl_;
 };
 
 }  // namespace rx

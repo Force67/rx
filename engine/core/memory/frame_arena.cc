@@ -1,7 +1,7 @@
 #include "core/memory/frame_arena.h"
 
-#include <cassert>
-#include <cstdint>
+#include <assert.h>
+#include <stdint.h>
 #include <new>
 
 namespace rx::mem {

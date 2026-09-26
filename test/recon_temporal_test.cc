@@ -1,10 +1,9 @@
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <limits>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/vector.h"
 #include "core/math.h"
 #include "render/rhi/device.h"
 #include "shaders/recon_temporal_cs_hlsl.h"
@@ -29,19 +28,19 @@ struct Push {
 
 int main() {
   DeviceDesc desc;
-  const char* backend = std::getenv("RX_RHI");
-  desc.backend = backend && std::strcmp(backend, "d3d12") == 0
+  const char* backend = ::getenv("RX_RHI");
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0
                      ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = false;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
-    std::printf("recon_temporal_test: SKIP, GPU unavailable\n");
+    ::printf("recon_temporal_test: SKIP, GPU unavailable\n");
     return 77;
   }
   int failures = 0;
   auto check = [&](bool ok, const char* message) {
-    if (!ok) { std::printf("FAIL: %s\n", message); ++failures; }
+    if (!ok) { ::printf("FAIL: %s\n", message); ++failures; }
   };
   ComputePipelineDesc pipeline_desc;
   pipeline_desc.shader = RX_SHADER(k_recon_temporal_cs_hlsl);
@@ -53,17 +52,17 @@ int main() {
   pipeline_desc.debug_name = "recon_temporal_test";
   PipelineHandle pipeline = device->CreateComputePipeline(pipeline_desc);
   if (!pipeline) return 1;
-  std::vector<GpuImage> owned;
+  base::Vector<GpuImage> owned;
   auto input = [&](Format format, const void* data, u32 size) {
     GpuImage image = device->CreateImage2D(
         format, {3, 1}, kTextureUsageSampled | kTextureUsageTransferDst);
     GpuBuffer staging = device->CreateBufferWithData(
-        {static_cast<const u8*>(data), size}, kBufferUsageTransferSrc);
-    if (!image || !staging) std::exit(1);
+        ByteSpan(static_cast<const u8*>(data), size), kBufferUsageTransferSrc);
+    if (!image || !staging) ::exit(1);
     device->ImmediateSubmit([&](CommandList& cmd) {
       cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
       const BufferTextureCopy copy{.extent = {3, 1}};
-      cmd.CopyBufferToTexture(staging, image, {&copy, 1});
+      cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
       cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadCompute));
     });
     device->DestroyBuffer(staging);
@@ -76,7 +75,7 @@ int main() {
   const u32 material[3] = {};
   const f32 motion[6] = {};
   f32 history[12] = {};
-  for (f32& v : history) v = std::numeric_limits<f32>::infinity();
+  for (f32& v : history) v = INFINITY;
   GpuImage curr = input(Format::kRGBA32Float, noisy, sizeof(noisy));
   GpuImage nr = input(Format::kRGBA32Float, normals, sizeof(normals));
   GpuImage vz = input(Format::kR32Float, depth, sizeof(depth));
@@ -120,8 +119,8 @@ int main() {
     f32 values[12]{};
     check(device->ReadbackImage(moments, ResourceState::kGeneral, values, sizeof(values)),
           "read back temporal moments");
-    for (f32 value : values) check(std::isfinite(value), "HDR moments must remain finite");
-    check(std::abs(values[5] - 1000000.0f) < 1.0f, "squared HDR luminance must not overflow");
+    for (f32 value : values) check(::isfinite(value), "HDR moments must remain finite");
+    check(::abs(values[5] - 1000000.0f) < 1.0f, "squared HDR luminance must not overflow");
     check(values[7] == 1.0f, "reset or invalid history must seed one frame");
     u16 half[12]{};
     check(device->ReadbackImage(accum, ResourceState::kGeneral, half, sizeof(half)),
@@ -133,6 +132,6 @@ int main() {
   device->DestroyImage(accum);
   device->DestroyImage(moments);
   device->DestroyPipeline(pipeline);
-  std::printf("recon_temporal_test: %d failures\n", failures);
+  ::printf("recon_temporal_test: %d failures\n", failures);
   return failures ? 1 : 0;
 }

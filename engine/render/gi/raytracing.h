@@ -1,11 +1,11 @@
 #ifndef RX_RENDER_RAYTRACING_H_
 #define RX_RENDER_RAYTRACING_H_
 
-#include <memory>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "core/types.h"
 #include "render/gi/rt_slot_tracker.h"
@@ -84,7 +84,7 @@ class RayTracingContext {
   };
   static_assert(sizeof(MotionRecord) == 80);
 
-  static std::unique_ptr<RayTracingContext> Create(Device& device);
+  static base::UniquePointer<RayTracingContext> Create(Device& device);
   ~RayTracingContext();
 
   RayTracingContext(const RayTracingContext&) = delete;

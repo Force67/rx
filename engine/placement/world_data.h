@@ -1,11 +1,11 @@
 #ifndef RX_PLACEMENT_WORLD_DATA_H_
 #define RX_PLACEMENT_WORLD_DATA_H_
 
-#include <span>
-#include <string>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -27,18 +27,18 @@ class RX_PLACEMENT_EXPORT WorldData {
 
   // Adds a map filled with `fill` and returns its index (the slot density
   // programs reference).
-  u32 AddMap(std::string name, f32 fill = 0.0f);
+  u32 AddMap(base::String name, f32 fill = 0.0f);
 
   u32 map_count() const { return static_cast<u32>(maps_.size()); }
-  const std::string& map_name(u32 map) const { return maps_[map].name; }
+  const base::String& map_name(u32 map) const { return maps_[map].name; }
   u32 resolution() const { return resolution_; }
   f32 origin_x() const { return origin_x_; }
   f32 origin_z() const { return origin_z_; }
   f32 extent() const { return extent_; }
   f32 meters_per_texel() const { return extent_ / static_cast<f32>(resolution_); }
 
-  std::span<f32> texels(u32 map);
-  std::span<const f32> texels(u32 map) const;
+  base::Span<f32> texels(u32 map);
+  base::Span<const f32> texels(u32 map) const;
   f32& At(u32 map, u32 x, u32 z);
 
   // Bilinear sample at a world position, clamped at the region border.
@@ -75,7 +75,7 @@ class RX_PLACEMENT_EXPORT WorldData {
   u32 resolution_ = 0;
 
   struct Map {
-    std::string name;
+    base::String name;
     base::Vector<f32> texels;
   };
   base::Vector<Map> maps_;

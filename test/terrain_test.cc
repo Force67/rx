@@ -1,21 +1,24 @@
+#include "base/containers/array.h"
+#include "base/numeric_limits.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "terrain/terrain.h"
+#include "base/random/random.h"
+#include "core/file_system.h"
+#include "core/scalar.h"
 
-#include <array>
-#include <bit>
-#include <cmath>
-#include <cstdio>
-#include <filesystem>
-#include <fstream>
-#include <limits>
-#include <random>
-#include <string>
-#include <vector>
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 namespace {
 
 using namespace rx::terrain;
 namespace asset = rx::asset;
 namespace scene = rx::scene;
+namespace fs = rx::fs;
 using rx::f32;
 using rx::u32;
 using rx::u64;
@@ -27,14 +30,14 @@ int failures = 0;
 void Check(bool condition, const char *message) {
   if (condition)
     return;
-  std::fprintf(stderr, "terrain_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "terrain_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char *message, f32 epsilon = 1e-4f) {
-  if (std::abs(actual - expected) <= epsilon)
+  if (::abs(actual - expected) <= epsilon)
     return;
-  std::fprintf(stderr, "terrain_test: FAIL: %s (got %.6f, expected %.6f)\n",
+  ::fprintf(stderr, "terrain_test: FAIL: %s (got %.6f, expected %.6f)\n",
                message, actual, expected);
   ++failures;
 }
@@ -55,8 +58,8 @@ u32 WeightSum(TerrainWeights weights) {
 
 void TestSeamsAndBrushes() {
   Terrain terrain(BasicDesc());
-  const std::array<f32, 9> flat = {};
-  const std::array<f32, 9> right = {3, 3, 3, 4, 4, 4, 5, 5, 5};
+  const base::Array<f32, 9> flat = {};
+  const base::Array<f32, 9> right = {3, 3, 3, 4, 4, 4, 5, 5, 5};
   Check(terrain.AddOrReplaceTile({0, 0}, flat), "left tile is added");
   Check(terrain.AddOrReplaceTile({1, 0}, right), "right tile is added");
   const TerrainTile *left = terrain.FindTile({0, 0});
@@ -153,11 +156,11 @@ void TestSeamsAndBrushes() {
   Check(terrain.RevertChange(smooth_change), "smooth snapshot reverts");
 
   Terrain extreme(BasicDesc());
-  Check(extreme.AddOrReplaceTile({std::numeric_limits<rx::i32>::max(), 0}, flat),
+  Check(extreme.AddOrReplaceTile({base::MinMax<rx::i32>::max(), 0}, flat),
         "extreme positive tile key is accepted");
   TerrainBrush edge_brush = raise;
   edge_brush.center_x = static_cast<f32>(
-      static_cast<double>(std::numeric_limits<rx::i32>::max()) * 2.0 + 1.0);
+      static_cast<double>(base::MinMax<rx::i32>::max()) * 2.0 + 1.0);
   edge_brush.center_z = 1;
   edge_brush.radius = 4;
   Check(!extreme.ApplyBrush(edge_brush).empty(),
@@ -166,14 +169,14 @@ void TestSeamsAndBrushes() {
 
 void TestNeighborInvalidation() {
   Terrain terrain(BasicDesc());
-  const std::array<f32, 9> left = {};
-  const std::array<f32, 9> right = {0, 1, 2, 0, 1, 2, 0, 1, 2};
+  const base::Array<f32, 9> left = {};
+  const base::Array<f32, 9> right = {0, 1, 2, 0, 1, 2, 0, 1, 2};
   Check(terrain.AddOrReplaceTile({0, 0}, left),
         "normal-invalidation left tile is added");
   Check(terrain.AddOrReplaceTile({1, 0}, right),
         "normal-invalidation right tile is added");
   const u64 revision = terrain.FindTile({0, 0})->revision;
-  const std::array<f32, 9> changed_interior =
+  const base::Array<f32, 9> changed_interior =
       {0, 8, 9, 0, 8, 9, 0, 8, 9};
   Check(terrain.AddOrReplaceTile({1, 0}, changed_interior),
         "normal-invalidation neighbor is replaced");
@@ -185,8 +188,8 @@ void TestDiagonalAndNegativeInvalidation() {
   // Negative-key cardinal border: adding {0,0} after {-1,0} synchronizes the
   // shared column through the FloorDiv/PositiveMod signed-coordinate paths.
   Terrain terrain(BasicDesc());
-  const std::array<f32, 9> west = {1, 2, 3, 1, 2, 3, 1, 2, 3};
-  const std::array<f32, 9> flat = {};
+  const base::Array<f32, 9> west = {1, 2, 3, 1, 2, 3, 1, 2, 3};
+  const base::Array<f32, 9> flat = {};
   Check(terrain.AddOrReplaceTile({-1, 0}, west), "negative west tile is added");
   Check(terrain.AddOrReplaceTile({0, 0}, flat), "origin tile is added");
   const TerrainTile *west_tile = terrain.FindTile({-1, 0});
@@ -204,7 +207,7 @@ void TestDiagonalAndNegativeInvalidation() {
   // normal reads the new tile's samples (1,0)/(0,1) through GridHeight.
   Check(terrain.AddOrReplaceTile({-1, -1}, flat), "diagonal tile is added");
   const u64 diagonal_revision = terrain.FindTile({-1, -1})->revision;
-  const std::array<f32, 9> edge_changed = {0, 5, 0, 5, 0, 0, 0, 0, 0};
+  const base::Array<f32, 9> edge_changed = {0, 5, 0, 5, 0, 0, 0, 0, 0};
   Check(terrain.AddOrReplaceTile({0, 0}, edge_changed),
         "origin tile is replaced with the corner sample unchanged");
   Check(terrain.FindTile({-1, -1})->revision > diagonal_revision,
@@ -237,9 +240,9 @@ void TestDiagonalAndNegativeInvalidation() {
 void TestMeshAndRaycast() {
   TerrainDesc desc = BasicDesc();
   Terrain terrain(desc);
-  const std::array<f32, 9> left = {0, 1, 4, 0, 1, 4, 0, 1, 4};
-  const std::array<f32, 9> right = {4, 9, 16, 4, 9, 16, 4, 9, 16};
-  std::array<TerrainWeights, 9> blend;
+  const base::Array<f32, 9> left = {0, 1, 4, 0, 1, 4, 0, 1, 4};
+  const base::Array<f32, 9> right = {4, 9, 16, 4, 9, 16, 4, 9, 16};
+  base::Array<TerrainWeights, 9> blend;
   blend.fill(TerrainWeights{{128, 127, 0, 0}});
   Check(terrain.AddOrReplaceTile({0, 0}, left, blend),
         "mesh source tile is added");
@@ -247,7 +250,7 @@ void TestMeshAndRaycast() {
         "normal neighbor tile is added");
 
   const asset::AssetId material{77};
-  const std::optional<asset::Mesh> mesh =
+  const base::Optional<asset::Mesh> mesh =
       terrain.BuildTileMesh({0, 0}, material);
   Check(mesh.has_value(), "tile mesh builds");
   if (mesh) {
@@ -277,21 +280,21 @@ void TestMeshAndRaycast() {
           "layer debug colors are blended into vertex colors");
     Near(mesh->bounds_center[0], 1, "mesh bounds center x is tile-local");
     Near(mesh->bounds_center[1], 2, "mesh bounds center includes height range");
-    Near(mesh->bounds_radius, std::sqrt(6.0f),
+    Near(mesh->bounds_radius, ::sqrt(6.0f),
          "mesh sphere contains xz and height extents");
   }
 
   Terrain ray_terrain(BasicDesc());
-  const std::array<f32, 9> plane = {0, 1, 2, 2, 3, 4, 4, 5, 6};
+  const base::Array<f32, 9> plane = {0, 1, 2, 2, 3, 4, 4, 5, 6};
   Check(ray_terrain.AddOrReplaceTile({0, 0}, plane), "raycast plane is added");
-  const std::optional<f32> sampled = ray_terrain.SampleHeight(0.25f, 0.25f);
+  const base::Optional<f32> sampled = ray_terrain.SampleHeight(0.25f, 0.25f);
   Check(sampled.has_value(), "world height samples inside a sparse tile");
   if (sampled)
     Near(*sampled, 0.75f, "height sampling follows the mesh triangles");
   Check(!ray_terrain.SampleHeight(10, 10).has_value(),
         "height sampling reports sparse holes");
 
-  const std::optional<TerrainRayHit> hit =
+  const base::Optional<TerrainRayHit> hit =
       ray_terrain.Raycast({0.25f, 10, 0.25f}, {0, -2, 0}, 20);
   Check(hit.has_value(), "vertical terrain ray hits");
   if (hit) {
@@ -308,7 +311,7 @@ void TestMeshAndRaycast() {
          "tile AABB broad phase rejects a ray over a sparse hole");
   Check(!ray_terrain
              .Raycast({0.25f, 10, 0.25f},
-                      {std::numeric_limits<f32>::denorm_min(), 0, 0}, 20)
+                      {FLT_TRUE_MIN, 0, 0}, 20)
              .has_value(),
         "subnormal ray directions cannot produce a non-finite hit");
 
@@ -326,8 +329,8 @@ void TestStreaming() {
   desc.origin = {100, 10, -50};
   desc.sample_spacing = 2;
   Terrain terrain(desc);
-  const std::array<f32, 9> near_heights = {-2, 0, 1, 0, 1, 2, 1, 2, 3};
-  const std::array<f32, 9> far_heights = {};
+  const base::Array<f32, 9> near_heights = {-2, 0, 1, 0, 1, 2, 1, 2, 3};
+  const base::Array<f32, 9> far_heights = {};
   Check(terrain.AddOrReplaceTile({2, 0}, far_heights),
         "far stream tile is added");
   Check(terrain.AddOrReplaceTile({-1, 0}, near_heights),
@@ -335,7 +338,7 @@ void TestStreaming() {
   Check(terrain.tiles()[0].key == TerrainTileKey{-1, 0},
         "terrain keeps signed tile keys sorted");
 
-  const std::optional<scene::WorldStreamRegion> region =
+  const base::Optional<scene::WorldStreamRegion> region =
       terrain.TileRegion({-1, 0}, 1, 7);
   Check(region.has_value(), "terrain tile produces a stream region");
   if (region) {
@@ -378,24 +381,17 @@ void TestStreaming() {
         "swept stream query conservatively gathers crossed tiles");
 }
 
-std::vector<u8> ReadBytes(const std::string &path) {
-  std::ifstream input(path, std::ios::binary | std::ios::ate);
-  if (!input)
-    return {};
-  const std::streamsize size = input.tellg();
-  input.seekg(0);
-  std::vector<u8> bytes(static_cast<size_t>(size));
-  input.read(reinterpret_cast<char *>(bytes.data()), size);
+base::Vector<u8> ReadBytes(const base::String &path) {
+  base::Vector<u8> bytes;
+  fs::ReadFile(path, &bytes);
   return bytes;
 }
 
-void WriteBytes(const std::string &path, const std::vector<u8> &bytes) {
-  std::ofstream output(path, std::ios::binary | std::ios::trunc);
-  output.write(reinterpret_cast<const char *>(bytes.data()),
-               static_cast<std::streamsize>(bytes.size()));
+void WriteBytes(const base::String &path, const base::Vector<u8> &bytes) {
+  fs::WriteFile(path, bytes);
 }
 
-u64 Checksum(const std::vector<u8> &bytes, size_t size) {
+u64 Checksum(const base::Vector<u8> &bytes, size_t size) {
   u64 hash = 0xcbf29ce484222325ull;
   for (size_t i = 0; i < size; ++i) {
     hash ^= bytes[i];
@@ -404,32 +400,31 @@ u64 Checksum(const std::vector<u8> &bytes, size_t size) {
   return hash;
 }
 
-void StoreU64(std::vector<u8> *bytes, size_t offset, u64 value) {
+void StoreU64(base::Vector<u8> *bytes, size_t offset, u64 value) {
   for (u32 shift = 0; shift < 64; shift += 8) {
     (*bytes)[offset + shift / 8] = static_cast<u8>(value >> shift);
   }
 }
 
 void TestSerialization() {
-  const std::filesystem::path root =
-      std::filesystem::temp_directory_path() /
-      ("rx-terrain-test-" + std::to_string(std::random_device{}()));
-  std::filesystem::create_directories(root);
-  const std::string first_path = (root / "a.rxterrain").string();
-  const std::string second_path = (root / "b.rxterrain").string();
-  const std::string loaded_path = (root / "loaded.rxterrain").string();
-  const std::string loaded_again_path =
-      (root / "loaded-again.rxterrain").string();
-  const std::string corrupt_path = (root / "corrupt.rxterrain").string();
-  const std::string truncated_path = (root / "truncated.rxterrain").string();
-  const std::string nonfinite_path = (root / "nonfinite.rxterrain").string();
-  const std::string zero_id_path = (root / "zero-id.rxterrain").string();
-  const std::array<std::string, 8> paths = {
+  const base::String root =
+      fs::Join(fs::TempDirectory(), "rx-terrain-test-" + rx::ToString(base::RandomUint()));
+  fs::CreateDirectories(root);
+  const base::String first_path = (fs::Join(root, "a.rxterrain"));
+  const base::String second_path = (fs::Join(root, "b.rxterrain"));
+  const base::String loaded_path = (fs::Join(root, "loaded.rxterrain"));
+  const base::String loaded_again_path =
+      (fs::Join(root, "loaded-again.rxterrain"));
+  const base::String corrupt_path = (fs::Join(root, "corrupt.rxterrain"));
+  const base::String truncated_path = (fs::Join(root, "truncated.rxterrain"));
+  const base::String nonfinite_path = (fs::Join(root, "nonfinite.rxterrain"));
+  const base::String zero_id_path = (fs::Join(root, "zero-id.rxterrain"));
+  const base::Array<base::String, 8> paths = {
       first_path,   second_path,    loaded_path,   loaded_again_path,
       corrupt_path, truncated_path, nonfinite_path, zero_id_path};
-  for (const std::string &path : paths) {
-    std::filesystem::remove(path);
-    std::filesystem::remove(path + ".tmp");
+  for (const base::String &path : paths) {
+    fs::Remove(path);
+    fs::Remove(path + ".tmp");
   }
 
   TerrainDesc desc = BasicDesc();
@@ -440,10 +435,10 @@ void TestSerialization() {
   desc.layers[1].albedo = asset::AssetId{21};
   desc.layers[1].normal = asset::AssetId{22};
   Terrain terrain(desc);
-  const std::array<f32, 9> a = {-10.25f, -2, 0.5f, 1.25f, 3,
+  const base::Array<f32, 9> a = {-10.25f, -2, 0.5f, 1.25f, 3,
                                 8.75f,   9,  12,   20.5f};
-  const std::array<f32, 9> b = {7, 6, 5, 4, 3, 2, 1, 0, -1};
-  std::array<TerrainWeights, 9> weights;
+  const base::Array<f32, 9> b = {7, 6, 5, 4, 3, 2, 1, 0, -1};
+  base::Array<TerrainWeights, 9> weights;
   for (u32 i = 0; i < weights.size(); ++i) {
     weights[i] =
         TerrainWeights{{static_cast<u8>(255 - i), static_cast<u8>(i), 0, 0}};
@@ -453,17 +448,17 @@ void TestSerialization() {
   Check(terrain.AddOrReplaceTile({-2, 3}, a, weights),
         "serialization tile a is added");
 
-  std::string error;
+  base::String error;
   Check(SaveTerrain(terrain, first_path, &error), "terrain saves to rxterrain");
   Check(SaveTerrain(terrain, first_path, &error),
         "terrain atomically replaces an existing destination");
   Check(SaveTerrain(terrain, second_path, &error),
         "terrain saves a second time");
-  const std::vector<u8> first_bytes = ReadBytes(first_path);
-  const std::vector<u8> second_bytes = ReadBytes(second_path);
+  const base::Vector<u8> first_bytes = ReadBytes(first_path);
+  const base::Vector<u8> second_bytes = ReadBytes(second_path);
   Check(!first_bytes.empty() && first_bytes == second_bytes,
         "saving unchanged terrain produces deterministic bytes");
-  Check(!std::filesystem::exists(first_path + ".tmp"),
+  Check(!fs::Exists(first_path + ".tmp"),
         "successful save leaves no temporary file");
 
   Terrain loaded;
@@ -493,7 +488,7 @@ void TestSerialization() {
             ReadBytes(loaded_path) == ReadBytes(loaded_again_path),
         "a loaded terrain also saves deterministically");
 
-  std::vector<u8> corrupt = first_bytes;
+  base::Vector<u8> corrupt = first_bytes;
   if (!corrupt.empty())
     corrupt[0] ^= 0xff;
   WriteBytes(corrupt_path, corrupt);
@@ -501,16 +496,16 @@ void TestSerialization() {
   Check(!LoadTerrain(corrupt_path, &rejected, &error),
         "corrupt terrain is rejected");
 
-  std::vector<u8> truncated = first_bytes;
+  base::Vector<u8> truncated = first_bytes;
   if (truncated.size() > 3)
     truncated.resize(truncated.size() - 3);
   WriteBytes(truncated_path, truncated);
   Check(!LoadTerrain(truncated_path, &rejected, &error),
         "truncated terrain is rejected");
 
-  std::vector<u8> nonfinite = first_bytes;
+  base::Vector<u8> nonfinite = first_bytes;
   if (nonfinite.size() >= 44) {
-    const u32 infinity = std::bit_cast<u32>(INFINITY);
+    const u32 infinity = rx::BitCast<u32>(INFINITY);
     for (u32 shift = 0; shift < 32; shift += 8) {
       nonfinite[36 + shift / 8] = static_cast<u8>(infinity >> shift);
     }
@@ -521,7 +516,7 @@ void TestSerialization() {
   Check(!LoadTerrain(nonfinite_path, &rejected, &error),
          "non-finite terrain metadata is rejected even with a valid checksum");
 
-  std::vector<u8> zero_id = first_bytes;
+  base::Vector<u8> zero_id = first_bytes;
   if (zero_id.size() >= 20) {
     StoreU64(&zero_id, 12, 0);
     StoreU64(&zero_id, zero_id.size() - 8,
@@ -531,11 +526,11 @@ void TestSerialization() {
   Check(!LoadTerrain(zero_id_path, &rejected, &error),
         "a zero terrain identity is rejected even with a valid checksum");
 
-  for (const std::string &path : paths) {
-    std::filesystem::remove(path);
-    std::filesystem::remove(path + ".tmp");
+  for (const base::String &path : paths) {
+    fs::Remove(path);
+    fs::Remove(path + ".tmp");
   }
-  std::filesystem::remove(root);
+  fs::Remove(root);
 }
 
 } // namespace
@@ -548,9 +543,9 @@ int main() {
   TestStreaming();
   TestSerialization();
   if (failures != 0) {
-    std::fprintf(stderr, "terrain_test: %d failure(s)\n", failures);
+    ::fprintf(stderr, "terrain_test: %d failure(s)\n", failures);
     return 1;
   }
-  std::printf("terrain_test: PASS\n");
+  ::printf("terrain_test: PASS\n");
   return 0;
 }

@@ -10,12 +10,13 @@
 //   (e) airborne WASD accelerates horizontally faster burning than in free fall.
 //   (f) NaN-free under random input, and the plain jump still works pack-off.
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
 #include "character/character.h"
 #include "character/jetpack.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "physics/physics_world.h"
 #include "scene/components.h"
@@ -30,7 +31,7 @@ namespace {
 constexpr f32 kDt = 1.0f / 60.0f;
 
 int Fail(const char* what) {
-  std::fprintf(stderr, "jetpack_test FAIL: %s\n", what);
+  ::fprintf(stderr, "jetpack_test FAIL: %s\n", what);
   return 1;
 }
 
@@ -46,7 +47,7 @@ struct Scene {
     physics.AddStaticBox({0, -0.5f, 0}, {200, 0.5f, 200});  // ground top at y = 0
 
     CharacterShape shape;
-    const f32 half = std::max(shape.standing_height * 0.5f - shape.standing_radius, 0.01f);
+    const f32 half = rx::Max(shape.standing_height * 0.5f - shape.standing_radius, 0.01f);
     const f32 total_half = half + shape.standing_radius;
     const Vec3 center = feet + Vec3{0, total_half, 0};
     physics::CharacterId id = physics.CreateCharacter(center, shape.standing_radius, half);
@@ -87,7 +88,7 @@ struct Scene {
   }
 };
 
-f32 HSpeed(const Vec3& v) { return std::sqrt(v.x * v.x + v.z * v.z); }
+f32 HSpeed(const Vec3& v) { return ::sqrt(v.x * v.x + v.z * v.z); }
 
 }  // namespace
 
@@ -95,7 +96,7 @@ int main() {
   {
     physics::PhysicsWorld probe;
     if (!probe.Initialize()) {
-      std::fprintf(stderr, "jetpack_test: physics stub, skipping\n");
+      ::fprintf(stderr, "jetpack_test: physics stub, skipping\n");
       return 0;
     }
   }
@@ -113,10 +114,10 @@ int main() {
       s.jin().enabled = true;
       s.jin().thrust = true;
       s.Step(1);
-      peak = std::max(peak, s.feet_y());
+      peak = rx::Max(peak, s.feet_y());
     }
     const bool airborne = !s.state().grounded;
-    std::fprintf(stderr, "(a) climb: y0=%.2f peak=%.2f gain=%.2f m  airborne=%d  fuel=%.2f\n", y0,
+    ::fprintf(stderr, "(a) climb: y0=%.2f peak=%.2f gain=%.2f m  airborne=%d  fuel=%.2f\n", y0,
                  peak, peak - y0, airborne, s.jst().fuel);
     if (peak - y0 < 1.5f) return Fail("(a) jetpack did not lift the character off");
     if (peak - y0 > 80.0f) return Fail("(a) climb implausibly large");
@@ -134,13 +135,13 @@ int main() {
       s.jin().enabled = true;
       s.jin().thrust = true;
       s.Step(1);
-      peak = std::max(peak, s.feet_y());
+      peak = rx::Max(peak, s.feet_y());
       if (empty_step < 0 && s.jst().fuel <= 0.0f) empty_step = i;
     }
     const f32 t_empty = empty_step / 60.0f;
     // After the tank is dry, thrust must have died and the character fallen.
     const f32 y_after = s.feet_y();
-    std::fprintf(stderr, "(b) empty at %.2f s (cap %.1f)  thrust=%.2f  peak=%.2f y_after=%.2f\n",
+    ::fprintf(stderr, "(b) empty at %.2f s (cap %.1f)  thrust=%.2f  peak=%.2f y_after=%.2f\n",
                  t_empty, jp.fuel_capacity_s, s.jst().thrust, peak, y_after);
     if (empty_step < 0) return Fail("(b) tank never emptied");
     if (t_empty < jp.fuel_capacity_s * 0.8f || t_empty > jp.fuel_capacity_s * 1.6f)
@@ -179,7 +180,7 @@ int main() {
       s.Step(1);
       fuel_air = s.jst().fuel;
     }
-    std::fprintf(stderr, "(c) fuel low=%.2f -> grounded=%.2f ; airborne stays=%.2f\n", fuel_low,
+    ::fprintf(stderr, "(c) fuel low=%.2f -> grounded=%.2f ; airborne stays=%.2f\n", fuel_low,
                  fuel_grounded, fuel_air);
     if (fuel_grounded <= fuel_low + 0.05f) return Fail("(c) grounded refuel did not restore fuel");
     if (fuel_air > 0.5f + 1e-3f) return Fail("(c) airborne wrongly refuelled");
@@ -203,7 +204,7 @@ int main() {
       if (i == n_early) thrust_early = s.jst().thrust;
       if (i == n_spool) thrust_spool = s.jst().thrust;
     }
-    std::fprintf(stderr, "(d) thrust @ t/3=%.2f  @ spool_time=%.2f (target 0.90)\n", thrust_early,
+    ::fprintf(stderr, "(d) thrust @ t/3=%.2f  @ spool_time=%.2f (target 0.90)\n", thrust_early,
                  thrust_spool);
     if (thrust_early > 0.75f) return Fail("(d) thrust rose too fast (no spool lag)");
     if (thrust_spool < 0.82f || thrust_spool > 0.97f)
@@ -232,7 +233,7 @@ int main() {
     };
     const f32 drift = lateral_gain(false);
     const f32 powered = lateral_gain(true);
-    std::fprintf(stderr, "(e) lateral speed  free-fall=%.2f  burning=%.2f m/s\n", drift, powered);
+    ::fprintf(stderr, "(e) lateral speed  free-fall=%.2f  burning=%.2f m/s\n", drift, powered);
     if (powered <= drift + 0.5f)
       return Fail("(e) burning did not out-accelerate free-fall drift horizontally");
   }
@@ -244,16 +245,16 @@ int main() {
     s.Step(20);
     for (int i = 0; i < 60 * 20; ++i) {
       const f32 t = i * kDt;
-      s.jin().enabled = std::sin(t * 3.1f) > 0.0f;
-      s.jin().thrust = std::sin(t * 7.3f) > 0.0f;
-      s.intent().move = {std::sin(t * 2.0f), 0, std::cos(t * 1.3f)};
-      if (std::sin(t * 5.0f) > 0.9f) s.intent().jump = true;
+      s.jin().enabled = ::sin(t * 3.1f) > 0.0f;
+      s.jin().thrust = ::sin(t * 7.3f) > 0.0f;
+      s.intent().move = {::sin(t * 2.0f), 0, ::cos(t * 1.3f)};
+      if (::sin(t * 5.0f) > 0.9f) s.intent().jump = true;
       s.Step(1);
-      if (!std::isfinite(s.feet_y()) || !std::isfinite(s.jst().fuel) ||
-          !std::isfinite(s.state().velocity.y))
+      if (!::isfinite(s.feet_y()) || !::isfinite(s.jst().fuel) ||
+          !::isfinite(s.state().velocity.y))
         return Fail("(f) NaN under random input");
     }
-    std::fprintf(stderr, "(f) random 20 s: finite, fuel=%.2f y=%.2f\n", s.jst().fuel, s.feet_y());
+    ::fprintf(stderr, "(f) random 20 s: finite, fuel=%.2f y=%.2f\n", s.jst().fuel, s.feet_y());
 
     // Pack OFF: a plain jump must still leave the ground and come back.
     Scene j;
@@ -265,9 +266,9 @@ int main() {
     f32 jump_peak = ground_y;
     for (int i = 0; i < 90; ++i) {
       j.Step(1);
-      jump_peak = std::max(jump_peak, j.feet_y());
+      jump_peak = rx::Max(jump_peak, j.feet_y());
     }
-    std::fprintf(stderr, "(f) pack-off jump: ground=%.2f peak=%.2f (height ~%.2f m)\n", ground_y,
+    ::fprintf(stderr, "(f) pack-off jump: ground=%.2f peak=%.2f (height ~%.2f m)\n", ground_y,
                  jump_peak, jump_peak - ground_y);
     if (jump_peak - ground_y < 0.6f) return Fail("(f) plain jump broken with pack off");
     if (!j.state().grounded) return Fail("(f) character never landed after the jump");
@@ -299,10 +300,10 @@ int main() {
     f32 vmax_after = 0;
     for (int i = 0; i < 60 * 2; ++i) {
       s.Step(1);
-      peak_after = std::max(peak_after, s.feet_y());
-      vmax_after = std::max(vmax_after, s.state().velocity.y);
+      peak_after = rx::Max(peak_after, s.feet_y());
+      vmax_after = rx::Max(vmax_after, s.state().velocity.y);
     }
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(g) ceiling: blocked_y=%.2f post-removal peak=%.2f (gain %.2f) vmax_up=%.2f\n",
                  blocked_y, peak_after, peak_after - blocked_y, vmax_after);
     if (blocked_y < 0.5f) return Fail("(g) thrust did not press the character up under the ceiling");
@@ -312,6 +313,6 @@ int main() {
     if (vmax_after > 3.0f) return Fail("(g) super-jump: retained upward velocity too high");
   }
 
-  std::fprintf(stderr, "jetpack_test: all checks passed\n");
+  ::fprintf(stderr, "jetpack_test: all checks passed\n");
   return 0;
 }

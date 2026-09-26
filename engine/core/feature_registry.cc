@@ -1,7 +1,6 @@
 #include "core/feature_registry.h"
 
-#include <cstdlib>
-#include <string_view>
+#include <stdlib.h>
 
 #include "core/log.h"
 
@@ -14,6 +13,7 @@ namespace {
 // runs from engine startup, so the linker keeps it: no static-init stripping.
 base::Feature g_features[] = {
 #define RX_FEATURE(id, name, enabled) {name, enabled},
+#include "base/strings/string_ref.h"
 #include "core/features.def"
 #undef RX_FEATURE
 };
@@ -24,7 +24,7 @@ static_assert(sizeof(g_features) / sizeof(g_features[0]) == kCount,
 
 // Flip the flag whose name matches `name`. Returns false if there is no such
 // flag.
-bool ApplyOne(std::string_view name, bool enabled) {
+bool ApplyOne(base::StringRef name, bool enabled) {
   for (auto& f : g_features) {
     if (name == f.name) {
       f.enabled = enabled;
@@ -45,14 +45,14 @@ base::Span<base::Feature> Features() {
 }
 
 void InitFeatures() {
-  const char* spec = std::getenv("RX_FEATURES");
+  const char* spec = ::getenv("RX_FEATURES");
   if (!spec || !*spec) return;
 
-  std::string_view rest(spec);
+  base::StringRef rest(spec);
   while (!rest.empty()) {
     const auto end = rest.find_first_of(", \t");
-    std::string_view tok = rest.substr(0, end);
-    rest = end == std::string_view::npos ? std::string_view{} : rest.substr(end + 1);
+    base::StringRef tok = rest.substr(0, end);
+    rest = end == base::StringRef::npos ? base::StringRef{} : rest.substr(end + 1);
     if (tok.empty()) continue;
 
     bool enabled = true;
@@ -61,8 +61,8 @@ void InitFeatures() {
     } else if (tok.front() == '-') {
       enabled = false;
       tok.remove_prefix(1);
-    } else if (const auto eq = tok.find('='); eq != std::string_view::npos) {
-      std::string_view val = tok.substr(eq + 1);
+    } else if (const auto eq = tok.find('='); eq != base::StringRef::npos) {
+      base::StringRef val = tok.substr(eq + 1);
       enabled = !(val == "0" || val == "false" || val == "off");
       tok = tok.substr(0, eq);
     }

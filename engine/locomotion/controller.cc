@@ -15,11 +15,11 @@
 
 #include "locomotion/controller.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
+#include "core/scalar.h"
 #include "locomotion/internal_math.h"
 #include "locomotion/whole_body.h"
 #include "physics/physics_world.h"
@@ -30,7 +30,7 @@ namespace {
 
 // Angle (rad) between two directions, both assumed roughly unit-length.
 f32 AngleBetween(const Vec3& a, const Vec3& b) {
-  return std::acos(Clampf(Dot(a, b), -1.0f, 1.0f));
+  return ::acos(Clampf(Dot(a, b), -1.0f, 1.0f));
 }
 
 }  // namespace
@@ -69,7 +69,7 @@ void LocomotionController::ApplyJointDrive(RigJoint j, f32 torque) {
   // SetJointDrive walks Jolt constraint settings, so re-issue it only when the
   // effective torque budget moved > 1%.
   const f32 ref = applied_torque_[idx] > 1e-3f ? applied_torque_[idx] : 1.0f;
-  if (std::fabs(torque - applied_torque_[idx]) > 0.01f * ref) {
+  if (::fabs(torque - applied_torque_[idx]) > 0.01f * ref) {
     rig_.SetJointDrive(*physics_, j, params_.joint_frequency, params_.joint_damping, torque);
     applied_torque_[idx] = torque;
   }
@@ -175,9 +175,9 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   if (FiniteV(requested_facing) && Length(requested_facing) > 1e-4f) {
     requested_facing = Normalize(requested_facing);
     const f32 turn_error =
-        std::atan2(Cross(controlled_facing_, requested_facing).y,
+        ::atan2(Cross(controlled_facing_, requested_facing).y,
                    Clampf(Dot(controlled_facing_, requested_facing), -1.0f, 1.0f));
-    const f32 turn_rate = FiniteScalar(params_.max_turn_rate) ? std::max(params_.max_turn_rate, 0.0f)
+    const f32 turn_rate = FiniteScalar(params_.max_turn_rate) ? rx::Max(params_.max_turn_rate, 0.0f)
                                                               : 0.0f;
     const f32 turn_step = Clampf(turn_error, -turn_rate * dt, turn_rate * dt);
     controlled_facing_ =
@@ -222,7 +222,7 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   // a lead of ~desired_velocity/omega ahead of the support (that IS forward
   // locomotion, not a fall); subtracting that lead keeps `margin` near zero while
   // walking and only grows on genuine, uncommanded imbalance.
-  const f32 omega = std::sqrt(m.gravity / com_height);
+  const f32 omega = ::sqrt(m.gravity / com_height);
   const Vec3 expected_lead = Planar(resolved_intent.desired_velocity) * (1.0f / omega);
   const f32 margin =
       PlanarLength(Planar(cp) - Planar(contacts_.support_center) - expected_lead);
@@ -514,9 +514,9 @@ void LocomotionController::Tick(const LocomotionIntent& intent, const PhysicalMo
   debug_.mode_time = mode_time_;
 
   // Optional env-gated trace (cheap, matches the debug-visibility requirement).
-  static const bool kTrace = std::getenv("RX_LOCO_DEBUG") != nullptr;
+  static const bool kTrace = ::getenv("RX_LOCO_DEBUG") != nullptr;
   if (kTrace && tick_count_ % 10 == 0) {
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "[loco] t=%llu mode=%d blend=%.2f pelvis_y=%.3f com=(%.2f,%.2f,%.2f) vz=%.2f "
                  "cp_margin=%.3f tilt=%.2f phase=%.2f sup=%u ph0=%.2f/%d ph1=%.2f/%d "
                  "f0z=%.2f tgt0z=%.2f f1z=%.2f tgt1z=%.2f\n",

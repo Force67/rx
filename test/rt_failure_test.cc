@@ -1,9 +1,13 @@
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <unordered_set>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/span.h"
+#include "base/containers/unordered_set.h"
+#include "base/functional/function.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "render/gi/path_tracer.h"
 #include "render/gi/raytracing.h"
 #include "render/gi/recon_path_tracer.h"
@@ -20,22 +24,22 @@ namespace {
 
 int g_failures = 0;
 #define CHECK(condition) do { if (!(condition)) { \
-  std::printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #condition); ++g_failures; \
+  ::printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #condition); ++g_failures; \
 } } while (0)
 
 class TestCommandList final : public CommandList {
  public:
   void BindPipeline(PipelineHandle) override {}
   void BindSet(u32, BindingSetHandle) override {}
-  void BindTransient(u32, std::span<const BindingItem>) override {}
-  std::string pass;
+  void BindTransient(u32, base::Span<const BindingItem>) override {}
+  base::String pass;
   bool expect_reset = false;
   u32 temporal_dispatches = 0;
   void PushConstants(const void* data, u32 size, u32) override {
     if (pass != "recon_temporal" && pass != "recon_spec_temporal") return;
     CHECK(size >= 108);
     f32 reset;
-    std::memcpy(&reset, static_cast<const u8*>(data) + 104, sizeof(reset));
+    base::MemCopy(&reset, static_cast<const u8*>(data) + 104, sizeof(reset));
     CHECK((reset != 0.0f) == expect_reset);
     ++temporal_dispatches;
   }
@@ -50,12 +54,12 @@ class TestCommandList final : public CommandList {
   void DrawIndexed(u32, u32, u32, i32, u32) override {}
   void DrawIndexedIndirect(const GpuBuffer&, rx::u64, u32, u32) override {}
   void DrawMeshTasks(u32, u32, u32) override {}
-  void TextureBarriers(std::span<const TextureBarrier> barriers) override {
+  void TextureBarriers(base::Span<const TextureBarrier> barriers) override {
     for (const auto& b : barriers) CHECK(b.texture);
   }
   void MemoryBarrier(BarrierScope, BarrierScope) override {}
   void CopyBufferToTexture(const GpuBuffer&, const GpuImage&,
-                           std::span<const BufferTextureCopy>) override {}
+                           base::Span<const BufferTextureCopy>) override {}
   void CopyTextureToBuffer(const GpuImage&, const GpuBuffer&,
                            const BufferTextureCopy&) override {}
   void CopyBuffer(const GpuBuffer&, rx::u64, const GpuBuffer&, rx::u64, rx::u64) override {}
@@ -89,31 +93,31 @@ class TestDevice final : public Device {
   u32 fail_at = 0;
   u32 attempts = 0;
   rx::u64 next_id = 1;
-  std::unordered_set<rx::u64> live;
+  base::UnorderedSet<rx::u64> live;
   rx::u64 Allocate() {
     if (++attempts == fail_at) return 0;
     const rx::u64 id = next_id++;
     live.insert(id);
     return id;
   }
-  void Free(rx::u64 id) { if (id) CHECK(live.erase(id) == 1); }
+  void Free(rx::u64 id) { if (id) CHECK(live.erase(id)); }
 
   void WaitIdle() override {}
   bool RecreateSurface(Window&) override { return false; }
   void DestroySurface() override {}
-  std::unique_ptr<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
+  base::UniquePointer<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
   MemoryBudget memory_budget() const override { return {}; }
 
   GpuBuffer CreateBuffer(rx::u64 size, BufferUsageFlags, bool host) override {
     const rx::u64 id = Allocate();
     if (!id) return {};
-    return {.handle = {id}, .size = size, .mapped = host ? std::calloc(1, size) : nullptr,
+    return {.handle = {id}, .size = size, .mapped = host ? ::calloc(1, size) : nullptr,
             .address = id * 4096};
   }
   GpuBuffer CreateBufferWithData(ByteSpan, BufferUsageFlags) override { return {}; }
   void DestroyBuffer(GpuBuffer& buffer) override {
     Free(buffer.handle.value);
-    std::free(buffer.mapped);
+    ::free(buffer.mapped);
     buffer = {};
   }
   GpuImage CreateImage2D(Format format, Extent2D extent, TextureUsageFlags, u32, u32) override {
@@ -135,7 +139,7 @@ class TestDevice final : public Device {
   void DestroyBindingLayout(BindingLayoutHandle) override {}
   BindingSetHandle CreateBindingSet(BindingLayoutHandle, u32) override { return {}; }
   void DestroyBindingSet(BindingSetHandle) override {}
-  void UpdateBindingSet(BindingSetHandle, std::span<const BindingItem>) override {}
+  void UpdateBindingSet(BindingSetHandle, base::Span<const BindingItem>) override {}
 
   AccelSizes GetBlasSizes(const BlasBuildDesc&) override { return {1024, 1024, 512}; }
   AccelSizes GetTlasSizes(u32) override { return {1024, 1024}; }
@@ -147,7 +151,7 @@ class TestDevice final : public Device {
   void DestroyTimestampPool(TimestampPoolHandle) override {}
   bool GetTimestamps(TimestampPoolHandle, u32, u32, rx::u64*) override { return false; }
 
-  void ImmediateSubmit(const std::function<void(CommandList&)>& record) override {
+  void ImmediateSubmit(const base::Function<void(CommandList&)>& record) override {
     TestCommandList cmd;
     record(cmd);
   }
@@ -311,7 +315,7 @@ int main() {
     CHECK(cmd.instances == 1);
     rt->RemoveSkinnedBlasDeferred(42);
     CHECK(!rt->TlasValid(0));
-    rt.reset();
+    rt.Reset();
     CHECK(device.live.empty());
   }
   {
@@ -376,9 +380,9 @@ int main() {
     tracer.Resize(device, {19, 11});
     run(true);
     tracer.Destroy(device);
-    rt.reset();
+    rt.Reset();
     CHECK(device.live.empty());
   }
-  std::printf("rt_failure_test: %d failures\n", g_failures);
+  ::printf("rt_failure_test: %d failures\n", g_failures);
   return g_failures ? 1 : 0;
 }

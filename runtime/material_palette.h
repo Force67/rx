@@ -1,7 +1,8 @@
 #ifndef RX_RUNTIME_MATERIAL_PALETTE_H_
 #define RX_RUNTIME_MATERIAL_PALETTE_H_
 
-#include <string>
+#include "base/strings/xstring.h"
+
 
 namespace rx {
 
@@ -20,7 +21,7 @@ namespace rx {
 //
 // False (having said which file and why) on a directory that is not there, a
 // directory with no presets in it, and a preset that does not load.
-bool DumpMaterialPalette(const std::string& dir);
+bool DumpMaterialPalette(const base::String& dir);
 
 }  // namespace rx
 

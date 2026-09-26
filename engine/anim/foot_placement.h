@@ -1,11 +1,11 @@
 #ifndef RX_ANIM_FOOT_PLACEMENT_H_
 #define RX_ANIM_FOOT_PLACEMENT_H_
 
-#include <functional>
-#include <memory>
 
 #include "anim/anim_graph.h"
 #include "anim/pose.h"
+#include "base/functional/function.h"
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 
 namespace rx::anim {
@@ -15,7 +15,7 @@ namespace rx::anim {
 // app wraps its physics world and converts to/from the actor model space -
 // engine/anim links no physics, exactly as kinema itself keeps raycasts out of
 // its solvers.
-using GroundProbe = std::function<bool(const Vec3& origin, Vec3* hit, Vec3* normal)>;
+using GroundProbe = base::Function<bool(const Vec3& origin, Vec3* hit, Vec3* normal)>;
 
 // Grounds a kinema-driven pose: probes under each foot, drops the pelvis to the
 // lower foot and runs analytic two-bone leg IK onto the contacts
@@ -44,7 +44,7 @@ class FootPlacement {
 
  private:
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  base::UniquePointer<Impl> impl_;
 };
 
 }  // namespace rx::anim

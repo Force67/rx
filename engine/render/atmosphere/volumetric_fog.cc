@@ -1,7 +1,8 @@
 #include "render/atmosphere/volumetric_fog.h"
 
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
@@ -77,7 +78,7 @@ ResourceHandle VolumetricFog::AddToGraph(RenderGraph& graph, RayTracingContext& 
       },
       [this, &raytracing, tlas_slot, color, depth, fogged, extent, frame, slot](PassContext& ctx) {
         const FogCamera camera{frame.inv_view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
         FogPush push{};
         push.camera_pos[0] = frame.camera_pos.x;

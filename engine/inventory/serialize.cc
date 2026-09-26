@@ -1,7 +1,8 @@
 #include "inventory/serialize.h"
 
-#include <unordered_map>
-
+#include "base/containers/unordered_map.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
 #include "ecs/world.h"
 #include "inventory/byte_io.h"
 #include "inventory/components.h"
@@ -23,7 +24,7 @@ constexpr u32 kInventoryEntryBytes = 4 + 4 + 8;       // item, count, payload
 constexpr u32 kEquipmentSlotBytes = 4 + 4 + 8 + 1;    // tag, item, payload, occupied
 constexpr u32 kInventoryRecordMinBytes = 8 + 16 + 1;  // guid, inventory header, has_eq
 
-void WriteInventory(std::vector<u8>& b, const Inventory& inv) {
+void WriteInventory(base::Vector<u8>& b, const Inventory& inv) {
   PutF32(b, inv.max_weight);
   PutU32(b, inv.max_entries);
   PutU32(b, inv.revision);
@@ -61,7 +62,7 @@ Inventory ReadInventory(Reader& r) {
   return inv;
 }
 
-void WriteEquipment(std::vector<u8>& b, const Equipment& eq) {
+void WriteEquipment(base::Vector<u8>& b, const Equipment& eq) {
   PutU32(b, eq.revision);
   PutU32(b, u32(eq.slots.size()));
   for (const auto& s : eq.slots) {
@@ -94,14 +95,14 @@ Equipment ReadEquipment(Reader& r) {
 
 }  // namespace
 
-std::vector<u8> SaveInventories(ecs::World& world) {
+base::Vector<u8> SaveInventories(ecs::World& world) {
   struct Record {
     u64 guid;
     Inventory inv;
     bool has_eq;
     Equipment eq;
   };
-  std::vector<Record> records;
+  base::Vector<Record> records;
   world.Each<scene::Guid, Inventory>([&](ecs::Entity e, scene::Guid& guid, Inventory& inv) {
     Record rec;
     rec.guid = guid.value;
@@ -109,10 +110,10 @@ std::vector<u8> SaveInventories(ecs::World& world) {
     Equipment* eq = world.Get<Equipment>(e);
     rec.has_eq = eq != nullptr;
     if (eq) rec.eq = *eq;
-    records.push_back(std::move(rec));
+    records.push_back(base::move(rec));
   });
 
-  std::vector<u8> b;
+  base::Vector<u8> b;
   b.push_back(kMagic0);
   b.push_back(kMagic1);
   b.push_back(kMagic2);
@@ -128,7 +129,7 @@ std::vector<u8> SaveInventories(ecs::World& world) {
   return b;
 }
 
-bool LoadInventories(ecs::World& world, const std::vector<u8>& blob) {
+bool LoadInventories(ecs::World& world, const base::Vector<u8>& blob) {
   Reader r(blob);
   if (r.U8() != kMagic0 || r.U8() != kMagic1 || r.U8() != kMagic2 || r.U8() != kMagic3) return false;
   if (r.U32() != kVersion) return false;
@@ -145,7 +146,7 @@ bool LoadInventories(ecs::World& world, const std::vector<u8>& blob) {
     bool has_eq;
     Equipment eq;
   };
-  std::vector<Parsed> parsed;
+  base::Vector<Parsed> parsed;
   parsed.reserve(count);
   for (u32 i = 0; i < count && r.ok; ++i) {
     Parsed p;
@@ -154,32 +155,31 @@ bool LoadInventories(ecs::World& world, const std::vector<u8>& blob) {
     p.has_eq = r.U8() != 0;
     if (p.has_eq) p.eq = ReadEquipment(r);
     if (!r.ok) break;
-    parsed.push_back(std::move(p));
+    parsed.push_back(base::move(p));
   }
   if (!r.ok || r.Remaining() != 0) return false;
 
-  std::unordered_map<u64, ecs::Entity> by_guid;
+  base::UnorderedMap<u64, ecs::Entity> by_guid;
   world.Each<scene::Guid>([&](ecs::Entity e, scene::Guid& g) { by_guid[g.value] = e; });
 
   for (auto& rec : parsed) {
     ecs::Entity e;
-    auto it = by_guid.find(rec.guid);
-    if (it != by_guid.end()) {
-      e = it->second;
+    if (const ecs::Entity* found = by_guid.find(rec.guid)) {
+      e = *found;
     } else {
       e = world.Create();
       world.Add(e, scene::Guid{rec.guid});
       by_guid[rec.guid] = e;
     }
     if (world.Has<Inventory>(e))
-      *world.Get<Inventory>(e) = std::move(rec.inv);
+      *world.Get<Inventory>(e) = base::move(rec.inv);
     else
-      world.Add(e, std::move(rec.inv));
+      world.Add(e, base::move(rec.inv));
     if (rec.has_eq) {
       if (world.Has<Equipment>(e))
-        *world.Get<Equipment>(e) = std::move(rec.eq);
+        *world.Get<Equipment>(e) = base::move(rec.eq);
       else
-        world.Add(e, std::move(rec.eq));
+        world.Add(e, base::move(rec.eq));
     }
   }
   return true;

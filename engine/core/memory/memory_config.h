@@ -1,11 +1,11 @@
 #ifndef RX_CORE_MEMORY_MEMORY_CONFIG_H_
 #define RX_CORE_MEMORY_MEMORY_CONFIG_H_
 
-#include <cstddef>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <stddef.h>
 
+#include "base/containers/vector.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -17,18 +17,18 @@ namespace rx::mem {
 // a memory.ini overlays them, so a shipped game can tune Steam Deck or mobile
 // footprints without recompiling.
 struct MemoryConfig {
-  std::string preset = "desktop";
+  base::String preset = "desktop";
   size_t frame_arena_bytes = 8u << 20;
   size_t ecs_chunk_reserve = 256;  // 16 KiB chunks (4 MiB)
   struct Budget {
-    std::string name;
+    base::String name;
     u64 bytes = 0;
   };
-  std::vector<Budget> budgets;
+  base::Vector<Budget> budgets;
 };
 
 // Preset table: "desktop" (default), "steamdeck", "mobile".
-RX_CORE_EXPORT MemoryConfig DefaultMemoryConfig(std::string_view preset);
+RX_CORE_EXPORT MemoryConfig DefaultMemoryConfig(base::StringRef preset);
 
 // Overlays ini text onto `config`. Format:
 //   preset is chosen before parsing (RX_MEMORY_PRESET); sections:
@@ -36,7 +36,7 @@ RX_CORE_EXPORT MemoryConfig DefaultMemoryConfig(std::string_view preset);
 //   [pools]   ecs_chunks = 256
 //   [budgets] ecs = 64        ; MiB, one line per category
 // Unknown keys are ignored so configs stay forward-compatible.
-RX_CORE_EXPORT void ParseMemoryConfigText(std::string_view text, MemoryConfig& config);
+RX_CORE_EXPORT void ParseMemoryConfigText(base::StringRef text, MemoryConfig& config);
 
 // DefaultMemoryConfig(RX_MEMORY_PRESET or "desktop"), then overlays the file
 // named by RX_MEMORY_INI (falling back to ./memory.ini when present).

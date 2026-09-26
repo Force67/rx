@@ -1,14 +1,14 @@
 #ifndef RX_ENGINE_APP_HOST_H_
 #define RX_ENGINE_APP_HOST_H_
 
-#include <atomic>
-#include <memory>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
 #include "app/application.h"
 #include "app/services.h"
+#include "base/atomic.h"
+#include "base/memory/unique_pointer.h"
 #include "core/export.h"
 #include "core/frame_timer.h"
 #include "ui/splash.h"
@@ -32,7 +32,7 @@ class RX_APP_EXPORT Host {
   // brought up (the destructor calls Shutdown), so callers need not Shutdown
   // after a failure. `app` must outlive the host.
   bool Initialize(const AppConfig& config, Application& app,
-                  std::unique_ptr<Window> window = nullptr);
+                  base::UniquePointer<Window> window = nullptr);
   int Run();
   // One iteration of the main loop. Returns false when the host wants to
   // stop. Platforms that own the loop drive this directly instead of the
@@ -45,7 +45,7 @@ class RX_APP_EXPORT Host {
   void OnSurfaceCreated();
 
   // Safe to call from a signal handler; Run() returns after the current frame.
-  void RequestQuit() { quit_.store(true, std::memory_order_relaxed); }
+  void RequestQuit() { quit_.store(true, base::memory_order_relaxed); }
 
   Services& services() { return services_; }
 
@@ -75,8 +75,8 @@ class RX_APP_EXPORT Host {
   AppConfig config_;
   Application* app_ = nullptr;
 
-  std::unique_ptr<Window> window_;
-  std::unique_ptr<JobSystem> jobs_;
+  base::UniquePointer<Window> window_;
+  base::UniquePointer<JobSystem> jobs_;
   FrameTimer timer_;
   // The clock driving the day/night cycle; applications derive sun/sky from
   // it (or ignore it entirely).
@@ -86,11 +86,11 @@ class RX_APP_EXPORT Host {
   ecs::Scheduler scheduler_;
 
   asset::Vfs vfs_;
-  std::unique_ptr<audio::AudioSystem> audio_;
+  base::UniquePointer<audio::AudioSystem> audio_;
 
   render::Renderer renderer_;
   // Alive only until the plate is spent, then dropped mid-run (RunFrame).
-  std::unique_ptr<ui::Splash> splash_;
+  base::UniquePointer<ui::Splash> splash_;
   physics::PhysicsWorld physics_;
   base::Vector<PhysicsBinding> physics_bindings_;
   base::Vector<HairStrandBinding> hair_bindings_;
@@ -109,7 +109,7 @@ class RX_APP_EXPORT Host {
 
   Services services_;
 
-  std::atomic<bool> quit_ = false;
+  base::Atomic<bool> quit_ = false;
   bool shut_down_ = false;
 };
 

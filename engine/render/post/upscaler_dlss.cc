@@ -1,7 +1,6 @@
 #include "render/post/upscaler.h"
 
-#include <cstdlib>
-#include <string>
+#include <stdlib.h>
 
 #include <base/option.h>
 
@@ -10,6 +9,7 @@
 #include "render/rhi/device.h"
 // Vulkan escape hatch: NGX speaks raw Vulkan. Also pulls volk
 // (VK_NO_PROTOTYPES) before the ngx vk header.
+#include "base/memory/unique_pointer.h"
 #include "render/rhi/vulkan_interop.h"
 
 #include <nvsdk_ngx.h>
@@ -190,8 +190,8 @@ class DlssUpscaler final : public Upscaler {
 
 }  // namespace
 
-std::unique_ptr<Upscaler> CreateDlssUpscaler(const UpscalerDesc& desc, Device& device) {
-  auto upscaler = std::make_unique<DlssUpscaler>(device);
+base::UniquePointer<Upscaler> CreateDlssUpscaler(const UpscalerDesc& desc, Device& device) {
+  auto upscaler = base::MakeUnique<DlssUpscaler>(device);
   if (!upscaler->Initialize(desc)) return nullptr;
   return upscaler;
 }

@@ -1,13 +1,15 @@
 #include "render/gi/sdf_scene.h"
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/atomic.h"
+#include "base/memory/mem_ops.h"
+#include "base/time/time.h"
 #include "core/log.h"
 #include "core/math.h"
+#include "core/scalar.h"
 
 namespace rx::render {
 namespace {
@@ -53,7 +55,7 @@ bool AxisRayCross(const Vec3& p, u32 axis, const Tri& t, f32& s) {
   Vec3 e1 = t.b - t.a, e2 = t.c - t.a;
   Vec3 pv = Cross(dir, e2);
   f32 det = Dot(e1, pv);
-  if (std::fabs(det) < 1e-12f) return false;
+  if (::fabs(det) < 1e-12f) return false;
   f32 inv = 1.0f / det;
   Vec3 tv = p - t.a;
   f32 u = Dot(tv, pv) * inv;
@@ -75,8 +77,8 @@ struct Grid {
 
   int Index(int x, int y, int z) const { return (z * n[1] + y) * n[0] + x; }
   int ClampCell(f32 v, int axis) const {
-    int c = static_cast<int>(std::floor((v - (&origin.x)[axis]) / cell));
-    return std::clamp(c, 0, n[axis] - 1);
+    int c = static_cast<int>(::floor((v - (&origin.x)[axis]) / cell));
+    return rx::Clamp(c, 0, n[axis] - 1);
   }
 };
 
@@ -85,16 +87,16 @@ void BuildGrid(Grid& g, const base::Vector<Tri>& tris, const Vec3& box_min, cons
   g.origin = box_min;
   g.cell = cell;
   for (int a = 0; a < 3; ++a)
-    g.n[a] = std::max(1, static_cast<int>(std::ceil((&box_ext.x)[a] / cell)));
+    g.n[a] = rx::Max(1, static_cast<int>(::ceil((&box_ext.x)[a] / cell)));
   const int cells = g.n[0] * g.n[1] * g.n[2];
   base::Vector<u32> counts;
   counts.resize(static_cast<size_t>(cells) + 1, 0u);
   auto tri_cell_range = [&](const Tri& t, int lo[3], int hi[3]) {
     for (int a = 0; a < 3; ++a) {
-      f32 mn = std::min({(&t.a.x)[a], (&t.b.x)[a], (&t.c.x)[a]});
-      f32 mx = std::max({(&t.a.x)[a], (&t.b.x)[a], (&t.c.x)[a]});
-      lo[a] = std::clamp(static_cast<int>(std::floor((mn - (&box_min.x)[a]) / cell)), 0, g.n[a] - 1);
-      hi[a] = std::clamp(static_cast<int>(std::floor((mx - (&box_min.x)[a]) / cell)), 0, g.n[a] - 1);
+      f32 mn = rx::Min({(&t.a.x)[a], (&t.b.x)[a], (&t.c.x)[a]});
+      f32 mx = rx::Max({(&t.a.x)[a], (&t.b.x)[a], (&t.c.x)[a]});
+      lo[a] = rx::Clamp(static_cast<int>(::floor((mn - (&box_min.x)[a]) / cell)), 0, g.n[a] - 1);
+      hi[a] = rx::Clamp(static_cast<int>(::floor((mx - (&box_min.x)[a]) / cell)), 0, g.n[a] - 1);
     }
   };
   for (const Tri& t : tris) {
@@ -173,7 +175,7 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   }
   if (input.vertex_count == 0) return false;
 
-  const auto t0 = std::chrono::steady_clock::now();
+  const auto t0 = base::TimeTicks::Now();
 
   // Gather triangles and the local-space AABB.
   auto pos = [&](u32 v) -> Vec3 {
@@ -186,8 +188,8 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   tris.reserve(tri_count);
   Vec3 gmin{1e30f, 1e30f, 1e30f}, gmax{-1e30f, -1e30f, -1e30f};
   auto grow = [&](const Vec3& v) {
-    gmin = {std::min(gmin.x, v.x), std::min(gmin.y, v.y), std::min(gmin.z, v.z)};
-    gmax = {std::max(gmax.x, v.x), std::max(gmax.y, v.y), std::max(gmax.z, v.z)};
+    gmin = {rx::Min(gmin.x, v.x), rx::Min(gmin.y, v.y), rx::Min(gmin.z, v.z)};
+    gmax = {rx::Max(gmax.x, v.x), rx::Max(gmax.y, v.y), rx::Max(gmax.z, v.z)};
   };
   for (u32 t = 0; t < tri_count; ++t) {
     u32 i0, i1, i2;
@@ -210,7 +212,7 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   if (tris.empty()) return false;
 
   const Vec3 ext = gmax - gmin;
-  const f32 maxext = std::max({ext.x, ext.y, ext.z, 1e-4f});
+  const f32 maxext = rx::Max({ext.x, ext.y, ext.z, 1e-4f});
   const Vec3 center = (gmin + gmax) * 0.5f;
   constexpr int kPad = 2;  // voxels of padding beyond the geometry AABB
   f32 voxel = maxext / 36.0f;
@@ -218,8 +220,8 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   u32 res[3];
   auto compute_res = [&]() {
     for (int a = 0; a < 3; ++a) {
-      u32 interior = static_cast<u32>(std::ceil((&ext.x)[a] / voxel));
-      res[a] = std::clamp(interior + 2u * kPad, 16u, 64u);
+      u32 interior = static_cast<u32>(::ceil((&ext.x)[a] / voxel));
+      res[a] = rx::Clamp(interior + 2u * kPad, 16u, 64u);
     }
   };
   compute_res();
@@ -237,8 +239,8 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
     out.res[a] = res[a];
     out.box_min[a] = (&center.x)[a] - res[a] * voxel * 0.5f;  // centred, symmetric padding
   }
-  std::memcpy(out.albedo, input.albedo, sizeof(f32) * 3);
-  std::memcpy(out.emissive, input.emissive, sizeof(f32) * 3);
+  base::MemCopy(out.albedo, input.albedo, sizeof(f32) * 3);
+  base::MemCopy(out.emissive, input.emissive, sizeof(f32) * 3);
   const Vec3 box_min{out.box_min[0], out.box_min[1], out.box_min[2]};
   const Vec3 box_ext{res[0] * voxel, res[1] * voxel, res[2] * voxel};
 
@@ -274,7 +276,7 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
                 if (y2 < 0 || y2 >= grid.n[1]) continue;
                 for (int dx = -r; dx <= r; ++dx) {
                   // Only the shell of the r-cube (interior handled at smaller r).
-                  if (r > 0 && std::abs(dx) != r && std::abs(dy) != r && std::abs(dz) != r) continue;
+                  if (r > 0 && ::abs(dx) != r && ::abs(dy) != r && ::abs(dz) != r) continue;
                   int x2 = cx + dx;
                   if (x2 < 0 || x2 >= grid.n[0]) continue;
                   int ci = grid.Index(x2, y2, z2);
@@ -286,7 +288,7 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
               }
             }
           }
-          f32 dist = std::sqrt(best_sq);
+          f32 dist = ::sqrt(best_sq);
 
           // Sign: 3-axis ray parity. An axis-aligned ray stays in one cell row,
           // so we only test that row; a hit counts once (cell-ownership dedup).
@@ -319,21 +321,21 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
   };
 
   // Chunk the z range across the job system; small meshes run inline.
-  const u32 workers = std::max(1u, jobs_.thread_count());
+  const u32 workers = rx::Max(1u, jobs_.thread_count());
   if (res[2] <= 2 || workers == 1) {
     solve_slice(0, res[2]);
   } else {
-    std::atomic<u32> done{0};
-    const u32 chunks = std::min(workers * 2, res[2]);
+    base::Atomic<u32> done{0};
+    const u32 chunks = rx::Min(workers * 2, res[2]);
     const u32 per = (res[2] + chunks - 1) / chunks;
     u32 submitted = 0;
     for (u32 c = 0; c < chunks; ++c) {
-      u32 z0 = c * per, z1 = std::min(z0 + per, res[2]);
+      u32 z0 = c * per, z1 = rx::Min(z0 + per, res[2]);
       if (z0 >= z1) break;
       ++submitted;
       jobs_.Submit([&solve_slice, z0, z1, &done]() {
         solve_slice(z0, z1);
-        done.fetch_add(1, std::memory_order_release);
+        done.fetch_add(1, base::memory_order_release);
       });
     }
     jobs_.WaitIdle();
@@ -348,8 +350,8 @@ bool SdfScene::RegisterMesh(u64 mesh_key, const MeshInput& input) {
     return false;
   }
 
-  const auto t1 = std::chrono::steady_clock::now();
-  out.gen_ms = std::chrono::duration<f32, std::milli>(t1 - t0).count();
+  const auto t1 = base::TimeTicks::Now();
+  out.gen_ms = static_cast<f32>((t1 - t0).InSecondsF() * 1000.0);
   last_gen_ms_ = out.gen_ms;
   total_gen_ms_ += out.gen_ms;
   total_bytes_ += out.sdf.size;

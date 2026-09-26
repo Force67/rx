@@ -3,13 +3,13 @@
 
 #include <volk.h>
 
-#include <cstdint>
-#include <unordered_map>
-#include <vector>
+#include <stdint.h>
 
 #include <ugui/render/draw_data.h>
 #include <ugui/render/texture_backend.h>
 #include <ugui/rhi/rhi_types.h>
+#include "base/containers/unordered_map.h"
+#include "base/containers/vector.h"
 
 namespace rx::ui {
 
@@ -109,16 +109,16 @@ class GuiRenderBackend final : public ugui::TextureBackend {
   VkDescriptorPool descriptor_pool_ = VK_NULL_HANDLE;
   Texture white_{};
   Texture font_{};
-  std::unordered_map<ugui::TextureId, UserTexture> user_textures_;
+  base::UnorderedMap<ugui::TextureId, UserTexture> user_textures_;
   ugui::TextureId next_user_id_ = 1;
-  std::vector<FrameBuffers> frames_;
+  base::Vector<FrameBuffers> frames_;
   uint32_t frame_index_ = 0;
 
   // Backdrop-blur (frosted glass): the renderer hands a blurred copy of what is
   // behind the UI each frame; frost commands sample it via a per-frame set.
   VkImageView backdrop_view_ = VK_NULL_HANDLE;
   VkSampler backdrop_sampler_ = VK_NULL_HANDLE;
-  std::vector<VkDescriptorSet> frost_sets_;
+  base::Vector<VkDescriptorSet> frost_sets_;
 };
 
 }  // namespace rx::ui

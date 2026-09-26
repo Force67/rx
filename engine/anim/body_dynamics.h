@@ -1,14 +1,14 @@
 #ifndef RX_ANIM_BODY_DYNAMICS_H_
 #define RX_ANIM_BODY_DYNAMICS_H_
 
-#include <string>
-#include <string_view>
 
 #include <base/containers/vector.h>
 
 #include "anim/pose.h"
 #include "asset/mesh.h"
 #include "asset/skeleton.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
@@ -26,7 +26,7 @@ enum class BodyDeformationSignal : u8 {
 };
 
 struct BodyMorphBinding {
-  std::string target;
+  base::String target;
   BodyDeformationSignal signal = BodyDeformationSignal::kStretch;
   f32 gain = 1;
   f32 bias = 0;
@@ -39,9 +39,9 @@ struct BodyMorphBinding {
 // rotation. Usually the driven bone is a dedicated tissue/helper bone; it can
 // equal the driver for simpler rigs. All vectors use the driver's local frame.
 struct BodyRegionConfig {
-  std::string name;
-  std::string driver_bone;
-  std::string driven_bone;
+  base::String name;
+  base::String driver_bone;
+  base::String driven_bone;
 
   // Physical response. Frequency controls firmness and damping_ratio controls
   // decay (1 = critical, <1 = a decaying jiggle). These values describe a
@@ -88,8 +88,8 @@ enum class BodyRegionKind : u8 {
 };
 
 RX_ANIM_EXPORT BodyRegionConfig MakeBodyRegionPreset(
-    BodyRegionKind kind, std::string_view name, std::string_view driver_bone,
-    std::string_view driven_bone);
+    BodyRegionKind kind, base::StringRef name, base::StringRef driver_bone,
+    base::StringRef driven_bone);
 
 // Motion not visible in the skeleton pose (for example, entity locomotion)
 // must be supplied here in skeleton/model axes. Animation-induced acceleration

@@ -1,13 +1,16 @@
 #include "app/host.h"
 
-#include <chrono>
-#include <cstring>
-#include <thread>
-#include <utility>
+#include <string.h>
 
 #include <base/option.h>
 
 #include "asset/engine_archives.h"
+#include "base/algorithm.h"
+#include "base/atomic.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/thread.h"
 #include "core/feature_registry.h"
 #include "core/log.h"
 #include "core/math.h"
@@ -47,7 +50,7 @@ base::Option<float> SplashSeconds{"splash.seconds", ui::Splash::kDefaultSeconds,
 }  // namespace
 
 bool Host::Initialize(const AppConfig& config, Application& app,
-                      std::unique_ptr<Window> window) {
+                      base::UniquePointer<Window> window) {
   config_ = config;
   app_ = &app;
   InitFeatures();              // apply RX_FEATURES overrides before any flag read
@@ -55,7 +58,7 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   // Memory plan first, so the pools are pre-reserved and the budgets are in
   // place before any subsystem starts allocating in earnest.
   mem::ApplyMemoryConfig(mem::LoadMemoryConfig());
-  jobs_ = std::make_unique<JobSystem>();
+  jobs_ = base::MakeUnique<JobSystem>();
   ConfigureClock(20.0f);
   // An app that asked for lockstep (AppConfig::fixed_delta, i.e. a capture run)
   // gets it unless the caller spoke about the clock themselves: RX_FIXED_DT set
@@ -77,7 +80,7 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   if (config_.height > 0) desc.height = config_.height;
   if (!config_.headless) {
     desc.touch_emits_mouse = TouchMouse;
-    window_ = window ? std::move(window) : Window::Create(desc);
+    window_ = window ? base::move(window) : Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
     ApplyRenderPreset();
   } else if (config_.offscreen) {
@@ -89,7 +92,7 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   // Audio comes up before content loads (it reads sound bytes lazily through
   // the Vfs). Headless runs and mute (RX_AUDIO_MUTE) open no device and run
   // silent; the rest of the engine is unaffected either way.
-  audio_ = std::make_unique<audio::AudioSystem>();
+  audio_ = base::MakeUnique<audio::AudioSystem>();
   audio_->Initialize(&vfs_);
 
   if (physics_.Initialize()) {
@@ -106,7 +109,7 @@ bool Host::Initialize(const AppConfig& config, Application& app,
           transform->position[0] = position.x;
           transform->position[1] = position.y;
           transform->position[2] = position.z;
-          std::memcpy(transform->rotation, rotation, sizeof(rotation));
+          base::MemCopy(transform->rotation, rotation, sizeof(rotation));
         }
       }
     });
@@ -115,15 +118,15 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   // Hand the application every service it may wire against. Addresses are
   // host members, stable until Shutdown.
   services_.host = this;
-  services_.window = window_.get();
-  services_.jobs = jobs_.get();
+  services_.window = window_.Get_UseOnlyIfYouKnowWhatYouareDoing();
+  services_.jobs = jobs_.Get_UseOnlyIfYouKnowWhatYouareDoing();
   services_.clock = &clock_;
   services_.world = &world_;
   services_.scheduler = &scheduler_;
   services_.renderer = &renderer_;
   services_.physics = &physics_;
   services_.vfs = &vfs_;
-  services_.audio = audio_.get();
+  services_.audio = audio_.Get_UseOnlyIfYouKnowWhatYouareDoing();
   services_.input_map = &input_map_;
   services_.actions = &actions_;
   services_.physics_bindings = &physics_bindings_;
@@ -134,9 +137,9 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   // the plate parks (ui::Splash::Initialize) is the one the application is
   // about to build its own UI into.
   if (WantsSplash()) {
-    auto splash = std::make_unique<ui::Splash>();
+    auto splash = base::MakeUnique<ui::Splash>();
     if (splash->Initialize(*window_, renderer_, vfs_, SplashSeconds.get()))
-      splash_ = std::move(splash);
+      splash_ = base::move(splash);
   }
 
   return app_->OnInitialize(services_);
@@ -280,7 +283,7 @@ void Host::ConfigureClock(f32 base_timescale) {
 }
 
 bool Host::RunFrame() {
-  if (quit_.load(std::memory_order_relaxed)) return false;
+  if (quit_.load(base::memory_order_relaxed)) return false;
   mem::MainFrameArena().Reset();
   if (FixedDt.get() > 0.0f) timer_.set_fixed_delta(static_cast<f64>(FixedDt.get()));
   if (window_ && !window_->PumpEvents()) return false;
@@ -337,7 +340,7 @@ bool Host::RunFrame() {
         // is the one stall the splash costs, and it lands on the frame the
         // application becomes visible, before anything is animating.
         renderer_.WaitIdle();
-        splash_.reset();
+        splash_.Reset();
       }
     }
     // Move the audio listener to this frame's viewpoint, so positional
@@ -352,9 +355,9 @@ bool Host::RunFrame() {
   } else {
     // No vsync to pace the loop; yield between fixed steps instead of
     // spinning a core.
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    base::SleepForMilliseconds(1);
   }
-  return !quit_.load(std::memory_order_relaxed);
+  return !quit_.load(base::memory_order_relaxed);
 }
 
 namespace {
@@ -419,7 +422,7 @@ void Host::GatherEntityDraws(render::FrameView& view) {
           emit(entity, world_matrix(entity), renderable.mesh);
         });
   }
-  std::swap(prev_transforms_, transforms_scratch_);
+  base::Swap(prev_transforms_, transforms_scratch_);
 }
 
 int Host::Run() {
@@ -447,7 +450,7 @@ void Host::Shutdown() {
   if (rendering()) renderer_.WaitIdle();
   // A run that quit inside the first seconds still owns a plate; drop it while
   // the device it uploaded through is alive.
-  splash_.reset();
+  splash_.Reset();
   // Destroy app-provided frame callbacks while the renderer and application
   // resources they may own are still alive.
   renderer_.ClearFrameCallbacks();

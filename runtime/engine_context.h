@@ -1,7 +1,6 @@
 #ifndef RX_RUNTIME_ENGINE_CONTEXT_H_
 #define RX_RUNTIME_ENGINE_CONTEXT_H_
 
-#include <string>
 
 #include <base/containers/vector.h>
 
@@ -9,6 +8,7 @@
 #include "asset/asset_database.h"
 #include "asset/vfs.h"
 #include "audio/audio_system.h"
+#include "base/strings/xstring.h"
 #include "core/input_actions.h"
 #include "core/math.h"
 #include "debug_ui.h"
@@ -25,8 +25,8 @@ namespace rx {
 // The viewer's boot configuration: the app::AppConfig fields plus the
 // front-door content selection (main.cc maps the overlap into AppConfig).
 struct EngineConfig {
-  std::string scene_path;  // standalone gltf/glb or usd scene (e.g. sponza)
-  std::string demo_scene;  // builtin demo scene id ("water", "materials", ...)
+  base::String scene_path;  // standalone gltf/glb or usd scene (e.g. sponza)
+  base::String demo_scene;  // builtin demo scene id ("water", "materials", ...)
   // Prim paths whose authored `visibility` is overridden when loading a usd
   // stage. Scenes ship alternative configurations (day/night lighting rigs,
   // set dressing variants) toggled by visibility, and picking one is a
@@ -46,7 +46,7 @@ struct EngineConfig {
   // --shot: write the frame after `shot_frames` as a png and quit. Empty falls
   // back to the RX_UI_SHOT env var (viewer.cc), which existing capture scripts
   // drive; 0 frames falls back to RX_UI_SHOT_FRAMES.
-  std::string shot_path;
+  base::String shot_path;
   int shot_frames = 0;
   // --camera-at / --camera-look / --camera-fov: override the scene's own
   // viewpoint for this run without editing it. Looking at an authored scene
@@ -55,8 +55,8 @@ struct EngineConfig {
   // the side, a street with nothing in its middle distance - and having to edit
   // the file to do it means the check costs an edit to undo, so it does not get
   // made. Empty leaves the scene's Camera alone; `camera_fov` 0 does the same.
-  std::string camera_at;
-  std::string camera_look;
+  base::String camera_at;
+  base::String camera_look;
   f32 camera_fov = 0.0f;
   // --world <archive.rxp>: mount a baked world and stream it around the camera
   // instead of loading a scene whole. `world_name` is the name it was cooked
@@ -67,13 +67,13 @@ struct EngineConfig {
   // the editor's Bake World opens with a bare `--world`. Only an archive baked
   // under a name that is not its filename, or one holding more than one world,
   // needs --world-name to say which.
-  std::string world_path;
-  std::string world_name;
+  base::String world_path;
+  base::String world_name;
   // --authoring-endpoint: serve the script commands on this unix socket path
   // while the engine runs, so a tool can spawn/move/inspect without a restart.
   // Empty (the default) means no endpoint is bound at all; see
   // authoring/command_bridge.h for why that is not merely a convenience.
-  std::string authoring_socket;
+  base::String authoring_socket;
 };
 
 // A dynamic physics body the host mirrors into an ECS transform after each

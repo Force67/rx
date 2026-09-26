@@ -10,11 +10,12 @@
 // Skips cleanly (exit 0) when no Vulkan driver is present (null backend) or the
 // adapter has no ray tracing. Run under vkrun to exercise the real GPU path.
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
 
@@ -23,7 +24,7 @@ using namespace rx::render;
 namespace {
 
 int Fail(const char* msg) {
-  std::fprintf(stderr, "compaction_test: FAIL: %s\n", msg);
+  ::fprintf(stderr, "compaction_test: FAIL: %s\n", msg);
   return 1;
 }
 
@@ -33,24 +34,24 @@ u64 AlignUp(u64 v, u64 a) { return (v + a - 1) & ~(a - 1); }
 
 int main() {
   DeviceDesc desc;
-  const char* rhi = std::getenv("RX_RHI");
-  desc.backend = (rhi && std::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
+  const char* rhi = ::getenv("RX_RHI");
+  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = true;
-  desc.enable_validation = std::getenv("RX_VALIDATION") != nullptr;
-  std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
+  desc.enable_validation = ::getenv("RX_VALIDATION") != nullptr;
+  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
 
   if (device->is_stub()) {
-    std::printf("compaction_test: no %s driver, skipping (null backend)\n",
+    ::printf("compaction_test: no %s driver, skipping (null backend)\n",
                 BackendName(desc.backend));
     return 0;
   }
   if (!device->caps().raytracing) {
-    std::printf("compaction_test: adapter '%s' has no ray tracing, skipping\n",
+    ::printf("compaction_test: adapter '%s' has no ray tracing, skipping\n",
                 device->caps().adapter_name.c_str());
     return 0;
   }
-  std::printf("compaction_test: device '%s'\n", device->caps().adapter_name.c_str());
+  ::printf("compaction_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   // a single opaque triangle in a host-visible, AS-build-input buffer
   const f32 verts[9] = {-0.5f, -0.5f, 0.0f, 0.5f, -0.5f, 0.0f, 0.0f, 0.5f, 0.0f};
@@ -58,7 +59,7 @@ int main() {
                                        kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress,
                                        /*host_visible=*/true);
   if (!vbo || !vbo.mapped || vbo.address == 0) return Fail("vertex buffer creation failed");
-  std::memcpy(vbo.mapped, verts, sizeof(verts));
+  base::MemCopy(vbo.mapped, verts, sizeof(verts));
 
   AccelTriangles tri{.vertex_address = vbo.address,
                      .vertex_stride = 3 * sizeof(f32),
@@ -66,11 +67,11 @@ int main() {
                      .vertex_format = Format::kRGB32Float,
                      .index_count = 0,  // non-indexed soup
                      .opaque = true};
-  BlasBuildDesc build_desc{.geometries = {&tri, 1}, .fast_trace = true, .allow_compaction = true};
+  BlasBuildDesc build_desc{.geometries = base::Span(&tri, 1), .fast_trace = true, .allow_compaction = true};
 
   AccelSizes sizes = device->GetBlasSizes(build_desc);
   if (sizes.accel_bytes == 0) return Fail("GetBlasSizes returned 0");
-  std::printf("compaction_test: original blas = %llu bytes, scratch = %llu bytes\n",
+  ::printf("compaction_test: original blas = %llu bytes, scratch = %llu bytes\n",
               (unsigned long long)sizes.accel_bytes, (unsigned long long)sizes.scratch_bytes);
 
   AccelStructHandle fat = device->CreateAccelStruct(AccelStructType::kBlas, sizes.accel_bytes);
@@ -95,12 +96,12 @@ int main() {
   // Non-blocking poll: legal to return false while the frame is still in flight.
   rx::u64 compacted = 0;
   const bool ready_before = device->GetCompactedSizes(query, &compacted, 1);
-  std::printf("compaction_test: poll before wait -> %s\n", ready_before ? "ready" : "not ready");
+  ::printf("compaction_test: poll before wait -> %s\n", ready_before ? "ready" : "not ready");
 
   device->WaitIdle();  // the frame's fence has now signalled
   if (!device->GetCompactedSizes(query, &compacted, 1))
     return Fail("GetCompactedSizes false after the fence signalled");
-  std::printf("compaction_test: compacted blas = %llu bytes (%.1f%% of original)\n",
+  ::printf("compaction_test: compacted blas = %llu bytes (%.1f%% of original)\n",
               (unsigned long long)compacted, 100.0 * (double)compacted / (double)sizes.accel_bytes);
 
   if (compacted == 0) return Fail("compacted size is 0");
@@ -125,7 +126,7 @@ int main() {
     GpuBuffer instances = device->CreateBuffer(
         sizeof(TlasInstance), kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress, true);
     if (!instances || !instances.mapped) return Fail("instance buffer creation failed");
-    std::memcpy(instances.mapped, &inst, sizeof(inst));
+    base::MemCopy(instances.mapped, &inst, sizeof(inst));
 
     AccelSizes tlas_sizes = device->GetTlasSizes(1);
     AccelStructHandle tlas = device->CreateAccelStruct(AccelStructType::kTlas, tlas_sizes.accel_bytes);
@@ -136,13 +137,13 @@ int main() {
     device->ImmediateSubmit(
         [&](CommandList& c) { c.BuildTlas(tlas, instances, 1, tlas_scratch); });
     device->WaitIdle();
-    std::printf("compaction_test: built tlas over the compacted blas (ray_query)\n");
+    ::printf("compaction_test: built tlas over the compacted blas (ray_query)\n");
 
     device->DestroyAccelStruct(tlas);
     device->DestroyBuffer(tlas_scratch);
     device->DestroyBuffer(instances);
   } else {
-    std::printf("compaction_test: no ray_query; proved compacted sizes + copy only\n");
+    ::printf("compaction_test: no ray_query; proved compacted sizes + copy only\n");
   }
 
   // Retire the fat BLAS through the frame-safe graveyard; drained at teardown.
@@ -153,6 +154,6 @@ int main() {
   device->DestroyBuffer(scratch);
   device->DestroyBuffer(vbo);
 
-  std::printf("compaction_test: PASS\n");
+  ::printf("compaction_test: PASS\n");
   return 0;
 }

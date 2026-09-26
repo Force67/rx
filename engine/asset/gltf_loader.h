@@ -1,9 +1,9 @@
 #ifndef RX_ASSET_GLTF_LOADER_H_
 #define RX_ASSET_GLTF_LOADER_H_
 
-#include <string>
 
 #include "asset/scene_import.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 
 namespace rx::asset {
@@ -12,7 +12,7 @@ namespace rx::asset {
 // images. Skinned mesh-node transforms are ignored as required by glTF.
 // Generates tangents from uv derivatives when the source has none. Returns
 // false and logs on malformed input.
-RX_ASSET_EXPORT bool LoadGltfScene(const std::string &path, ImportedScene *out);
+RX_ASSET_EXPORT bool LoadGltfScene(const base::String &path, ImportedScene *out);
 
 } // namespace rx::asset
 

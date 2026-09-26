@@ -4,10 +4,12 @@
 // ContactEstimator hysteresis. Style follows test/character_test.cc: hand-rolled
 // Check/Near and a failure counter, plain main returning the count.
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "core/math.h"
+#include "core/scalar.h"
 #include "locomotion/controller.h"
 #include "locomotion/estimator.h"
 #include "locomotion/rig.h"
@@ -26,13 +28,13 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "locomotion_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "locomotion_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-2f) {
-  if (std::abs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "locomotion_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
+  if (::abs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "locomotion_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
 }
@@ -88,19 +90,19 @@ Vec3 BodyPos(const physics::PhysicsWorld& phys, physics::BodyId id) {
 }
 
 bool FiniteVec(const Vec3& v) {
-  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
 }
 
 bool MeasurementsFinite(const CharacterMeasurements& m) {
-  bool ok = FiniteVec(m.root_position) && std::isfinite(m.root_rotation.x) &&
-            std::isfinite(m.root_rotation.w) && FiniteVec(m.root_linear_velocity) &&
+  bool ok = FiniteVec(m.root_position) && ::isfinite(m.root_rotation.x) &&
+            ::isfinite(m.root_rotation.w) && FiniteVec(m.root_linear_velocity) &&
             FiniteVec(m.root_angular_velocity) && FiniteVec(m.com_position) &&
             FiniteVec(m.com_velocity) && FiniteVec(m.ground_normal) &&
-            std::isfinite(m.estimated_body_height);
+            ::isfinite(m.estimated_body_height);
   for (u32 f = 0; f < kFootCount; ++f) {
     ok = ok && FiniteVec(m.foot[f].position) && FiniteVec(m.foot[f].velocity) &&
-         FiniteVec(m.foot[f].contact_normal) && std::isfinite(m.foot[f].contact_impulse) &&
-         std::isfinite(m.foot[f].slip_speed);
+         FiniteVec(m.foot[f].contact_normal) && ::isfinite(m.foot[f].contact_impulse) &&
+         ::isfinite(m.foot[f].slip_speed);
   }
   return ok;
 }
@@ -145,7 +147,7 @@ void TestBuild() {
   Check(sole_r.y > -0.01f && sole_r.y < 0.05f, "right sole near y in [0, 0.05]");
 
   bool binds_ok = true;
-  for (u32 j = 0; j < kRigJointCount; ++j) binds_ok = binds_ok && std::abs(rig.bind_constraint[j].w) > 0.99f;
+  for (u32 j = 0; j < kRigJointCount; ++j) binds_ok = binds_ok && ::abs(rig.bind_constraint[j].w) > 0.99f;
   Check(binds_ok, "every bind constraint orientation is near identity (|w| > 0.99)");
 
   Check(rig.leg_length > 0 && rig.upper_leg_length > 0 && rig.lower_leg_length > 0 &&
@@ -193,10 +195,10 @@ void TestStandingHold() {
   // COM planar position within the feet span (plus a small margin).
   const Vec3 fl = m.foot[0].position;
   const Vec3 fr = m.foot[1].position;
-  const f32 min_x = std::min(fl.x, fr.x) - 0.15f;
-  const f32 max_x = std::max(fl.x, fr.x) + 0.15f;
-  const f32 min_z = std::min(fl.z, fr.z) - 0.25f;
-  const f32 max_z = std::max(fl.z, fr.z) + 0.25f;
+  const f32 min_x = rx::Min(fl.x, fr.x) - 0.15f;
+  const f32 max_x = rx::Max(fl.x, fr.x) + 0.15f;
+  const f32 min_z = rx::Min(fl.z, fr.z) - 0.25f;
+  const f32 max_z = rx::Max(fl.z, fr.z) + 0.25f;
   Check(m.com_position.x > min_x && m.com_position.x < max_x, "COM x within the feet span");
   Check(m.com_position.z > min_z && m.com_position.z < max_z, "COM z within the feet span");
 
@@ -464,19 +466,19 @@ void CheckFinite(const physics::PhysicsWorld& phys, const LocomotionController& 
     phys.GetBodyTransform(rig.body[i], &p, r);
     Vec3 lin, ang;
     phys.GetBodyVelocity(rig.body[i], &lin, &ang);
-    ok = ok && FiniteVec(p) && std::isfinite(r[0]) && std::isfinite(r[1]) && std::isfinite(r[2]) &&
-         std::isfinite(r[3]) && FiniteVec(lin) && FiniteVec(ang);
+    ok = ok && FiniteVec(p) && ::isfinite(r[0]) && ::isfinite(r[1]) && ::isfinite(r[2]) &&
+         ::isfinite(r[3]) && FiniteVec(lin) && FiniteVec(ang);
   }
   const DebugState& d = c.debug();
   ok = ok && FiniteVec(d.desired_velocity) && FiniteVec(d.controlled_facing) &&
        FiniteVec(d.measured_velocity) &&
        FiniteVec(d.com_position) && FiniteVec(d.com_velocity) && FiniteVec(d.capture_point) &&
-       FiniteVec(d.support_center) && std::isfinite(d.gait_phase) &&
-       std::isfinite(d.max_torque_saturation) && std::isfinite(d.mode_time);
+       FiniteVec(d.support_center) && ::isfinite(d.gait_phase) &&
+       ::isfinite(d.max_torque_saturation) && ::isfinite(d.mode_time);
   for (u32 f = 0; f < kFootCount; ++f)
     ok = ok && FiniteVec(d.foot_target[f]) && FiniteVec(d.swing_position[f]);
   if (!ok) {
-    std::fprintf(stderr, "locomotion_test: FAIL: non-finite state at %s\n", where);
+    ::fprintf(stderr, "locomotion_test: FAIL: non-finite state at %s\n", where);
     ++failures;
   }
 }
@@ -523,10 +525,10 @@ void TestStand() {
     if (c.mode() == ControlMode::kCorrectiveStep) ++corrective;
     if (c.mode() == ControlMode::kControlledFall || c.mode() == ControlMode::kGrounded) ++fell;
     const f32 py = PelvisY(c, s.physics);
-    min_pelvis = std::min(min_pelvis, py);
-    max_pelvis = std::max(max_pelvis, py);
+    min_pelvis = rx::Min(min_pelvis, py);
+    max_pelvis = rx::Max(max_pelvis, py);
     const Vec3 com = c.measurements().com_position;
-    max_drift = std::max(max_drift, std::sqrt((com.x - com0.x) * (com.x - com0.x) +
+    max_drift = rx::Max(max_drift, ::sqrt((com.x - com0.x) * (com.x - com0.x) +
                                               (com.z - com0.z) * (com.z - com0.z)));
   }
 
@@ -569,15 +571,15 @@ void TestPushes() {
     StepN(s, c, intent, mods, 120);  // 2 s recovery window
 
     char msg[96];
-    std::snprintf(msg, sizeof msg, "push %s recovers to kStable", names[d]);
+    ::snprintf(msg, sizeof msg, "push %s recovers to kStable", names[d]);
     Check(c.mode() == ControlMode::kStable, msg);
     const f32 py = PelvisY(c, s.physics);
-    std::snprintf(msg, sizeof msg, "push %s pelvis recovers > 0.85x nominal (got %.2f)", names[d],
+    ::snprintf(msg, sizeof msg, "push %s pelvis recovers > 0.85x nominal (got %.2f)", names[d],
                   py);
     Check(py > 0.85f * nominal, msg);
     const Vec3 v = c.measurements().com_velocity;
-    const f32 planar = std::sqrt(v.x * v.x + v.z * v.z);
-    std::snprintf(msg, sizeof msg, "push %s planar COM speed < 0.3 (got %.2f)", names[d], planar);
+    const f32 planar = ::sqrt(v.x * v.x + v.z * v.z);
+    ::snprintf(msg, sizeof msg, "push %s planar COM speed < 0.3 (got %.2f)", names[d], planar);
     Check(planar < 0.3f, msg);
     CheckFinite(s.physics, c, "push");
   }
@@ -627,9 +629,9 @@ void TestWalk() {
       s.physics.Update(kDt);
       if (c.mode() == ControlMode::kControlledFall || c.mode() == ControlMode::kGrounded)
         fell = true;
-      min_pelvis = std::min(min_pelvis, PelvisY(c, s.physics));
+      min_pelvis = rx::Min(min_pelvis, PelvisY(c, s.physics));
       const Vec3 com = c.measurements().com_position;
-      peak_forward = std::max(peak_forward, com0.z - com.z);  // forward = -Z
+      peak_forward = rx::Max(peak_forward, com0.z - com.z);  // forward = -Z
       if (i >= 30 && i < active_end) {
         vz_sum += c.measurements().com_velocity.z;
         ++vz_count;
@@ -642,21 +644,21 @@ void TestWalk() {
     char msg[112];
     if (v < 1.0f) {
       // Achievable: honest stable low-speed walk.
-      std::snprintf(msg, sizeof msg, "walk v=%.1f never falls (achievable regime)", v);
+      ::snprintf(msg, sizeof msg, "walk v=%.1f never falls (achievable regime)", v);
       Check(!fell, msg);
-      std::snprintf(msg, sizeof msg, "walk v=%.1f pelvis > 0.75x nominal (got %.2f)", v, min_pelvis);
+      ::snprintf(msg, sizeof msg, "walk v=%.1f pelvis > 0.75x nominal (got %.2f)", v, min_pelvis);
       Check(min_pelvis > 0.75f * nominal, msg);
-      std::snprintf(msg, sizeof msg, "walk v=%.1f moves forward in the active window (vz=%.2f)", v,
+      ::snprintf(msg, sizeof msg, "walk v=%.1f moves forward in the active window (vz=%.2f)", v,
                     -mean_vz);
       Check(-mean_vz > 0.10f, msg);
-      std::snprintf(msg, sizeof msg, "walk v=%.1f net forward progress > 0.15 m (got %.2f)", v,
+      ::snprintf(msg, sizeof msg, "walk v=%.1f net forward progress > 0.15 m (got %.2f)", v,
                     net_travel);
       Check(net_travel > 0.15f, msg);
     } else {
       // Not achievable: assert graceful handling; the mode machine falls rather
       // than exploding. (Sustained tracking of this speed is not achieved; peak
       // forward reached %.2f m before the controller gave up.)
-      std::snprintf(msg, sizeof msg,
+      ::snprintf(msg, sizeof msg,
                     "walk v=%.1f cannot be sustained; controller falls gracefully (peak fwd "
                     "%.2f m)",
                     v, peak_forward);
@@ -718,7 +720,7 @@ void TestStartStop() {
   Check(!fell, "start/stop never falls");
   Check(c.mode() == ControlMode::kStable, "settles to kStable after stop");
   const Vec3 vs = c.measurements().com_velocity;
-  Check(std::sqrt(vs.x * vs.x + vs.z * vs.z) < 0.3f, "planar speed < 0.3 after stop");
+  Check(::sqrt(vs.x * vs.x + vs.z * vs.z) < 0.3f, "planar speed < 0.3 after stop");
 
   // Second walk: verify the gait RE-ENGAGES on the renewed command. Net forward
   // distance is not asserted (relaxed from the spec's "> 0.7 m/s") because by
@@ -731,8 +733,8 @@ void TestStartStop() {
     s.physics.Update(kDt);
     if (c.mode() == ControlMode::kControlledFall || c.mode() == ControlMode::kGrounded)
       fell = true;
-    phase_lo = std::min(phase_lo, c.debug().gait_phase);
-    phase_hi = std::max(phase_hi, c.debug().gait_phase);
+    phase_lo = rx::Min(phase_lo, c.debug().gait_phase);
+    phase_hi = rx::Max(phase_hi, c.debug().gait_phase);
   }
   Check(!fell, "start/stop never falls (second walk)");
   Check(phase_hi - phase_lo > 0.3f, "commanding walk again re-engages the gait (phase advances)");
@@ -781,7 +783,7 @@ void TestTurn() {
   for (int i = 0; i < 5 * 60; ++i) {
     c.Tick(left, mods, kDt);
     s.physics.Update(kDt);
-    peak_neg_x = std::max(peak_neg_x, com_turn.x - c.measurements().com_position.x);
+    peak_neg_x = rx::Max(peak_neg_x, com_turn.x - c.measurements().com_position.x);
   }
   (void)fell;
   Check(peak_neg_x > 0.3f, "after the turn the body drives toward -X (peak displacement)");
@@ -808,7 +810,7 @@ void TestTurnRate() {
   c.Tick(left, mods, kDt);
   s.physics.Update(kDt);
   const Vec3 first = c.debug().controlled_facing;
-  const f32 first_angle = std::atan2(Cross(Vec3{0, 0, -1}, first).y,
+  const f32 first_angle = ::atan2(Cross(Vec3{0, 0, -1}, first).y,
                                       Dot(Vec3{0, 0, -1}, first));
   Check(first_angle > 0, "turn target starts moving toward requested facing");
   Check(first_angle <= params.max_turn_rate * kDt + 1e-4f,
@@ -855,7 +857,7 @@ void TestUnrecoverablePush() {
   for (int i = 0; i < total; ++i) {
     c.Tick(intent, mods, kDt);
     s.physics.Update(kDt);
-    max_ke = std::max(max_ke, KineticEnergy(s.physics, c));
+    max_ke = rx::Max(max_ke, KineticEnergy(s.physics, c));
     if (c.mode() == ControlMode::kControlledFall && !entered_fall) {
       entered_fall = true;
       fall_tick = i;
@@ -869,7 +871,7 @@ void TestUnrecoverablePush() {
   Check(entered_fall && fall_tick < 60, "enters kControlledFall within 1 s");
   Check(reached_grounded && grounded_tick < 4 * 60, "reaches kGrounded within 4 s");
   char msg[96];
-  std::snprintf(msg, sizeof msg, "KE proxy never exceeds 3x push value (%.0f vs %.0f)", max_ke,
+  ::snprintf(msg, sizeof msg, "KE proxy never exceeds 3x push value (%.0f vs %.0f)", max_ke,
                 ke_at_push);
   Check(max_ke < 3.0f * ke_at_push + 1.0f, msg);
   Check(PelvisY(c, s.physics) < 0.6f * nominal, "ends below 0.6x nominal pelvis height");
@@ -904,8 +906,8 @@ void TestDebugState() {
     s.physics.Update(kDt);
     const DebugState& d = c.debug();
     cp_finite = cp_finite && FiniteVec(d.capture_point);
-    phase_min = std::min(phase_min, d.gait_phase);
-    phase_max = std::max(phase_max, d.gait_phase);
+    phase_min = rx::Min(phase_min, d.gait_phase);
+    phase_max = rx::Max(phase_max, d.gait_phase);
     if (Length(d.foot_target[0]) > 1e-3f || Length(d.foot_target[1]) > 1e-3f)
       foot_targets_nonzero = true;
     if (c.mode() != ControlMode::kStable && c.mode() != ControlMode::kCorrectiveStep)
@@ -976,9 +978,9 @@ int main() {
   TestControllerResetPath();
 
   if (failures == 0) {
-    std::printf("locomotion_test: all checks passed\n");
+    ::printf("locomotion_test: all checks passed\n");
     return 0;
   }
-  std::fprintf(stderr, "locomotion_test: %d checks failed\n", failures);
+  ::fprintf(stderr, "locomotion_test: %d checks failed\n", failures);
   return 1;
 }

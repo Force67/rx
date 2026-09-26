@@ -1,12 +1,10 @@
 #include "physics/physics_world.h"
 
-#include <algorithm>
-#include <atomic>
-#include <cmath>
-#include <cstdarg>
-#include <cstdio>
-#include <limits>
-#include <mutex>
+#include <float.h>
+#include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <Jolt/Jolt.h>
 
@@ -54,8 +52,16 @@
 
 #include <base/containers/unordered_map.h>
 
+#include "base/algorithm.h"
+#include "base/atomic.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
+#include "base/threading/thread.h"
 #include "core/feature_registry.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "physics/cloth_collision.h"
 
 static_assert(JPH_VERSION_MAJOR > 5 || (JPH_VERSION_MAJOR == 5 && JPH_VERSION_MINOR >= 6),
@@ -126,7 +132,7 @@ void TraceCallback(const char* fmt, ...) {
   char buffer[1024];
   va_list args;
   va_start(args, fmt);
-  std::vsnprintf(buffer, sizeof(buffer), fmt, args);
+  ::vsnprintf(buffer, sizeof(buffer), fmt, args);
   va_end(args);
   RX_INFO("jolt: {}", buffer);
 }
@@ -141,12 +147,12 @@ JPH::Mat44 ToJolt(const Mat4& m) {
 }
 
 bool IsFinite(const Vec3& value) {
-  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+  return ::isfinite(value.x) && ::isfinite(value.y) && ::isfinite(value.z);
 }
 
 bool IsFinite(const Mat4& value) {
   for (f32 element : value.m) {
-    if (!std::isfinite(element)) return false;
+    if (!::isfinite(element)) return false;
   }
   return true;
 }
@@ -237,7 +243,7 @@ const char* SurfaceName(SurfaceType s) {
 // Rain wetness (0..1) scaling of a surface's grip, lerped toward its wet value.
 f32 WetGripMultiplier(SurfaceType s, f32 wetness) {
   const f32 wet = kSurfaceGrip[static_cast<u32>(s)].wet;
-  return 1.0f + (wet - 1.0f) * std::clamp(wetness, 0.0f, 1.0f);
+  return 1.0f + (wet - 1.0f) * rx::Clamp(wetness, 0.0f, 1.0f);
 }
 
 // Aquaplaning: grip fades as the contact patch floods (depth relative to the
@@ -247,10 +253,10 @@ f32 WetGripMultiplier(SurfaceType s, f32 wetness) {
 // onset speed or on a dry patch this is a no-op (returns 1).
 f32 AquaplaneGrip(f32 wading_depth, f32 wheel_radius, f32 speed) {
   if (wading_depth <= 0.0f || wheel_radius <= 0.0f) return 1.0f;
-  const f32 depth_frac = std::min(wading_depth / (0.5f * wheel_radius), 1.0f);
+  const f32 depth_frac = rx::Min(wading_depth / (0.5f * wheel_radius), 1.0f);
   constexpr f32 kOnset = 8.0f;
   constexpr f32 kFull = 25.0f;
-  const f32 speed_frac = std::clamp((speed - kOnset) / (kFull - kOnset), 0.0f, 1.0f);
+  const f32 speed_frac = rx::Clamp((speed - kOnset) / (kFull - kOnset), 0.0f, 1.0f);
   return 1.0f - 0.9f * depth_frac * speed_frac;
 }
 
@@ -260,13 +266,13 @@ f32 AquaplaneGrip(f32 wading_depth, f32 wheel_radius, f32 speed) {
 // so a caller-supplied count above the array size can never read past its end.
 template <class Point, size_t N>
 void ApplyTorqueCurve(JPH::VehicleEngineSettings& engine, const Point (&curve)[N], u32 count) {
-  count = std::min(count, static_cast<u32>(N));
+  count = rx::Min(count, static_cast<u32>(N));
   if (count == 0) return;
   engine.mNormalizedTorque.Clear();
   engine.mNormalizedTorque.Reserve(count);
   for (u32 i = 0; i < count; ++i) {
-    engine.mNormalizedTorque.AddPoint(std::clamp(curve[i].rpm_fraction, 0.0f, 1.0f),
-                                      std::max(curve[i].torque_fraction, 0.0f));
+    engine.mNormalizedTorque.AddPoint(rx::Clamp(curve[i].rpm_fraction, 0.0f, 1.0f),
+                                      rx::Max(curve[i].torque_fraction, 0.0f));
   }
   engine.mNormalizedTorque.Sort();
 }
@@ -275,7 +281,7 @@ void ApplyTorqueCurve(JPH::VehicleEngineSettings& engine, const Point (&curve)[N
 // `fade_speed` (m/s), then held. fraction >= 1 or fade_speed <= 0 = no fade.
 f32 SteerFadeScale(f32 fraction, f32 fade_speed, f32 speed) {
   if (fade_speed <= 0.0f || fraction >= 1.0f) return 1.0f;
-  const f32 t = std::clamp(std::fabs(speed) / fade_speed, 0.0f, 1.0f);
+  const f32 t = rx::Clamp(::fabs(speed) / fade_speed, 0.0f, 1.0f);
   return 1.0f - (1.0f - fraction) * t;
 }
 
@@ -285,10 +291,10 @@ struct PhysicsWorld::Impl {
   BroadPhaseLayers broad_phase_layers;
   ObjectVsBroadPhase object_vs_broad_phase;
   ObjectLayerPair object_layer_pair;
-  std::unique_ptr<JPH::TempAllocator> temp_allocator;
+  base::UniquePointer<JPH::TempAllocator> temp_allocator;
   JPH::TempAllocatorImplWithMallocFallback skin_allocator{1024 * 1024};
-  std::unique_ptr<JPH::JobSystemThreadPool> job_system;
-  std::unique_ptr<JPH::PhysicsSystem> system;
+  base::UniquePointer<JPH::JobSystemThreadPool> job_system;
+  base::UniquePointer<JPH::PhysicsSystem> system;
   base::Vector<JPH::BodyID> dynamic_bodies;
   base::UnorderedMap<u64, JPH::RefConst<JPH::Shape>> mesh_shapes;
   // One PhysicsMaterial per SurfaceType, created lazily. Installed on tagged
@@ -438,9 +444,9 @@ struct PhysicsWorld::Impl {
   // watch/unwatch, reading) still takes `mutex`, and `watched_count` is only
   // written while holding it.
   struct ContactRecorder final : public JPH::ContactListener {
-    std::mutex mutex;
+    base::Mutex mutex;
     base::Vector<WatchedContacts> watched;
-    std::atomic<u32> watched_count{0};
+    base::Atomic<u32> watched_count{0};
 
     // Caller must hold `mutex`.
     WatchedContacts* Find(JPH::BodyID id) {
@@ -458,13 +464,13 @@ struct PhysicsWorld::Impl {
     // since step 2) and push. Behavior is identical to a single-lock version.
     void Record(const JPH::Body& body1, const JPH::Body& body2,
                 const JPH::ContactManifold& manifold, const JPH::ContactSettings& settings) {
-      if (watched_count.load(std::memory_order_acquire) == 0) return;
+      if (watched_count.load(base::memory_order_acquire) == 0) return;
       const JPH::BodyID id1 = body1.GetID();
       const JPH::BodyID id2 = body2.GetID();
       bool watch1;
       bool watch2;
       {
-        std::lock_guard<std::mutex> guard(mutex);
+        base::LockGuard<base::Mutex> guard(mutex);
         watch1 = Find(id1) != nullptr;
         watch2 = Find(id2) != nullptr;
       }
@@ -490,9 +496,9 @@ struct PhysicsWorld::Impl {
                                      settings.mCombinedRestitution);
       f32 impulse = 0;
       for (f32 point_impulse : estimate.mContactImpulse) impulse += point_impulse;
-      impulse = std::abs(impulse);
+      impulse = ::abs(impulse);
 
-      std::lock_guard<std::mutex> guard(mutex);
+      base::LockGuard<base::Mutex> guard(mutex);
       if (watch1) {
         if (WatchedContacts* w1 = Find(id1)) {
           PhysicsWorld::BodyContact contact;
@@ -533,7 +539,7 @@ PhysicsWorld::PhysicsWorld() = default;
 
 PhysicsWorld::~PhysicsWorld() {
   if (impl_) {
-    impl_.reset();
+    impl_.Reset();
     JPH::UnregisterTypes();
     delete JPH::Factory::sInstance;
     JPH::Factory::sInstance = nullptr;
@@ -546,17 +552,17 @@ bool PhysicsWorld::Initialize() {
   JPH::Factory::sInstance = new JPH::Factory();
   JPH::RegisterTypes();
 
-  impl_ = std::make_unique<Impl>();
+  impl_ = base::MakeUnique<Impl>();
   // Large cloth batches can exceed the fixed arena. The normal path remains a
   // lock-free stack allocation; exceptional peaks fall back instead of
   // aborting.
   impl_->temp_allocator =
-      std::make_unique<JPH::TempAllocatorImplWithMallocFallback>(32 * 1024 * 1024);
-  impl_->job_system = std::make_unique<JPH::JobSystemThreadPool>(
+      base::MakeUnique<JPH::TempAllocatorImplWithMallocFallback>(32 * 1024 * 1024);
+  impl_->job_system = base::MakeUnique<JPH::JobSystemThreadPool>(
       JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
-      static_cast<int>(std::thread::hardware_concurrency()) - 1);
+      static_cast<int>(base::GetProcessorCount()) - 1);
 
-  impl_->system = std::make_unique<JPH::PhysicsSystem>();
+  impl_->system = base::MakeUnique<JPH::PhysicsSystem>();
   impl_->system->Init(65536, 0, 65536, 10240, impl_->broad_phase_layers,
                       impl_->object_vs_broad_phase, impl_->object_layer_pair);
   impl_->system->SetGravity({0, -9.81f, 0});
@@ -572,7 +578,7 @@ void PhysicsWorld::Update(f32 dt) {
   // Drop last step's recorded contacts before the listener refills them during
   // this step's collision detection; the buffers keep their capacity.
   {
-    std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+    base::LockGuard<base::Mutex> guard(impl_->contacts.mutex);
     for (Impl::WatchedContacts& entry : impl_->contacts.watched) entry.contacts.clear();
   }
 
@@ -654,7 +660,7 @@ void PhysicsWorld::Update(f32 dt) {
         bodies.AddForce(entry.body, press);
       } else {
         const JPH::RVec3 com = bodies.GetCenterOfMassPosition(entry.body);
-        const f32 fb = std::clamp(entry.downforce_balance, 0.0f, 1.0f);
+        const f32 fb = rx::Clamp(entry.downforce_balance, 0.0f, 1.0f);
         bodies.AddForce(entry.body, press * fb, com + rotation * JPH::Vec3(0, 0, entry.front_z));
         bodies.AddForce(entry.body, press * (1.0f - fb),
                         com + rotation * JPH::Vec3(0, 0, entry.rear_z));
@@ -684,7 +690,7 @@ void PhysicsWorld::Update(f32 dt) {
         f32 surface_h = 0;
         Vec3 flow{};
         if (!SampleWater(p, &surface_h, &flow) || p.y >= surface_h) continue;
-        const f32 depth = std::min(surface_h - p.y, 2.0f * wheel->GetSettings()->mRadius);
+        const f32 depth = rx::Min(surface_h - p.y, 2.0f * wheel->GetSettings()->mRadius);
         // The VEHICLE's velocity at the contact point (the chassis ploughing
         // through the water), not Wheel::GetContactPointVelocity() - that is the
         // velocity of the contacted GROUND body, which is zero on a static road
@@ -695,7 +701,7 @@ void PhysicsWorld::Update(f32 dt) {
         if (speed < 0.1f) continue;
         const f32 area = wheel->GetSettings()->mWidth * depth;
         f32 mag = 0.5f * kWaterDensity * kWheelDragCd * area * speed * speed;
-        mag = std::min(mag, 8000.0f);  // per-wheel cap keeps a deep, fast entry stable
+        mag = rx::Min(mag, 8000.0f);  // per-wheel cap keeps a deep, fast entry stable
         const JPH::Vec3 force = rel * (-mag / speed);
         bodies.AddForce(entry.body, force, cp);
       }
@@ -740,13 +746,13 @@ void PhysicsWorld::Update(f32 dt) {
 
       const JPH::Mat44 to_local =
           body.GetCenterOfMassTransform().InversedRotationTranslation().ToMat44();
-      const f32 pin_duration = std::max(entry.pin_time_remaining, dt);
+      const f32 pin_duration = rx::Max(entry.pin_time_remaining, dt);
       for (size_t i = 0; i < entry.pinned.size(); ++i) {
         JPH::SoftBodyVertex& vertex = vertices[entry.pinned[i]];
         const JPH::Vec3 target = to_local * ToJolt(entry.targets[i]);
         vertex.mVelocity = (target - vertex.mPosition) / pin_duration;
       }
-      entry.pin_time_remaining = std::max(entry.pin_time_remaining - dt, 0.0f);
+      entry.pin_time_remaining = rx::Max(entry.pin_time_remaining - dt, 0.0f);
 
       if (entry.aerodynamic_drag > 0) {
         const JPH::Quat inverse_rotation = body.GetRotation().Conjugated();
@@ -766,9 +772,9 @@ void PhysicsWorld::Update(f32 dt) {
           const JPH::Vec3 cloth_velocity = (a.mVelocity + b.mVelocity + c.mVelocity) / 3.0f;
           const f32 normal_speed = (local_wind - cloth_velocity).Dot(normal);
           const JPH::Vec3 force = normal * (0.25f * kAirDensity * entry.aerodynamic_drag *
-                                             area_twice * normal_speed * std::abs(normal_speed));
-          if (!std::isfinite(force.GetX()) || !std::isfinite(force.GetY()) ||
-              !std::isfinite(force.GetZ())) {
+                                             area_twice * normal_speed * ::abs(normal_speed));
+          if (!::isfinite(force.GetX()) || !::isfinite(force.GetY()) ||
+              !::isfinite(force.GetZ())) {
             continue;
           }
           for (JPH::SoftBodyVertex* vertex : {&a, &b, &c}) {
@@ -777,12 +783,12 @@ void PhysicsWorld::Update(f32 dt) {
             // Explicit quadratic drag must not overshoot the air velocity in
             // one face contribution or it can oscillate and hit the speed cap.
             const f32 max_delta =
-                std::min(entry.max_linear_velocity * 0.25f, std::abs(normal_speed));
-            if (delta_sq > max_delta * max_delta) delta *= max_delta / std::sqrt(delta_sq);
+                rx::Min(entry.max_linear_velocity * 0.25f, ::abs(normal_speed));
+            if (delta_sq > max_delta * max_delta) delta *= max_delta / ::sqrt(delta_sq);
             vertex->mVelocity += delta;
             const f32 speed_sq = vertex->mVelocity.LengthSq();
             if (speed_sq > entry.max_linear_velocity * entry.max_linear_velocity) {
-              vertex->mVelocity *= entry.max_linear_velocity / std::sqrt(speed_sq);
+              vertex->mVelocity *= entry.max_linear_velocity / ::sqrt(speed_sq);
             }
           }
         }
@@ -818,7 +824,7 @@ void PhysicsWorld::Update(f32 dt) {
   }
 
   const JPH::EPhysicsUpdateError error =
-      impl_->system->Update(dt, 1, impl_->temp_allocator.get(), impl_->job_system.get());
+      impl_->system->Update(dt, 1, impl_->temp_allocator.Get_UseOnlyIfYouKnowWhatYouareDoing(), impl_->job_system.Get_UseOnlyIfYouKnowWhatYouareDoing());
   if (error != JPH::EPhysicsUpdateError::None) {
     RX_WARN("jolt update capacity error mask: {}", static_cast<u32>(error));
   }
@@ -856,7 +862,7 @@ BodyId PhysicsWorld::AddStaticMesh(const asset::Mesh& mesh, const Vec3& position
   JPH::PhysicsMaterialList materials;
   if (const JPH::PhysicsMaterial* m = impl_->material_for(surface)) materials.push_back(m);
   JPH::Ref<JPH::ShapeSettings> shape_settings =
-      new JPH::MeshShapeSettings(std::move(vertices), std::move(triangles), std::move(materials));
+      new JPH::MeshShapeSettings(base::move(vertices), base::move(triangles), base::move(materials));
   if (scale != 1.0f) {
     shape_settings = new JPH::ScaledShapeSettings(shape_settings, JPH::Vec3::sReplicate(scale));
   }
@@ -890,7 +896,7 @@ bool PhysicsWorld::RegisterMeshShape(u64 key, const asset::Mesh& mesh) {
   for (size_t i = 0; i + 2 < lod.indices.size(); i += 3) {
     triangles.push_back({lod.indices[i], lod.indices[i + 1], lod.indices[i + 2], 0});
   }
-  JPH::MeshShapeSettings settings(std::move(vertices), std::move(triangles));
+  JPH::MeshShapeSettings settings(base::move(vertices), base::move(triangles));
   JPH::ShapeSettings::ShapeResult result = settings.Create();
   if (result.HasError()) return false;
   impl_->mesh_shapes.insert(key, result.Get());
@@ -1198,7 +1204,7 @@ JointId PhysicsWorld::AddSwingTwistJoint(BodyId a, BodyId b, const f32 frame_a[1
   Impl::JointEntry entry;
   entry.constraint = constraint;
   entry.hinge = false;
-  impl_->joints.push_back(std::move(entry));
+  impl_->joints.push_back(base::move(entry));
   return static_cast<JointId>(impl_->joints.size());
 }
 
@@ -1228,7 +1234,7 @@ JointId PhysicsWorld::AddHingeJoint(BodyId a, BodyId b, const f32 frame_a[12],
   Impl::JointEntry entry;
   entry.constraint = constraint;
   entry.hinge = true;
-  impl_->joints.push_back(std::move(entry));
+  impl_->joints.push_back(base::move(entry));
   return static_cast<JointId>(impl_->joints.size());
 }
 
@@ -1260,7 +1266,7 @@ void PhysicsWorld::SetJointMotorTarget(JointId joint, const f32 target_quat[4]) 
   if (entry.hinge) {
     auto* hinge = static_cast<JPH::HingeConstraint*>(entry.constraint.GetPtr());
     // Twist angle about the hinge axis (constraint-space X) of the target.
-    f32 angle = 2.0f * std::atan2(q.GetX(), q.GetW());
+    f32 angle = 2.0f * ::atan2(q.GetX(), q.GetW());
     hinge->SetTargetAngle(angle);
   } else {
     auto* st = static_cast<JPH::SwingTwistConstraint*>(entry.constraint.GetPtr());
@@ -1526,7 +1532,7 @@ CharacterId PhysicsWorld::CreateCharacter(const Vec3& position, f32 radius, f32 
   // Accept ground contacts on the lower hemisphere so slopes register.
   settings->mSupportingVolume = JPH::Plane(JPH::Vec3::sAxisY(), -radius);
   JPH::Ref<JPH::CharacterVirtual> character = new JPH::CharacterVirtual(
-      settings, ToJolt(position), JPH::Quat::sIdentity(), 0, impl_->system.get());
+      settings, ToJolt(position), JPH::Quat::sIdentity(), 0, impl_->system.Get_UseOnlyIfYouKnowWhatYouareDoing());
   impl_->characters.push_back({character, 0.0f});
   return impl_->characters.size();  // id = index + 1
 }
@@ -1610,13 +1616,13 @@ void PhysicsWorld::ConfigureCharacter(CharacterId id, f32 max_slope_angle, f32 s
   if (!impl_ || id == 0 || id > impl_->characters.size()) return;
   Impl::CharacterEntry& entry = impl_->characters[id - 1];
   entry.character->SetMaxSlopeAngle(max_slope_angle);
-  entry.step_height = std::max(step_height, 0.0f);
+  entry.step_height = rx::Max(step_height, 0.0f);
 }
 
 bool PhysicsWorld::SetCharacterShape(CharacterId id, f32 radius, f32 half_height) {
   if (!impl_ || id == 0 || id > impl_->characters.size()) return false;
   JPH::CharacterVirtual* character = impl_->characters[id - 1].character;
-  JPH::Ref<JPH::CapsuleShape> shape = new JPH::CapsuleShape(std::max(half_height, 0.0f), radius);
+  JPH::Ref<JPH::CapsuleShape> shape = new JPH::CapsuleShape(rx::Max(half_height, 0.0f), radius);
   // A small penetration tolerance keeps a graze from vetoing an otherwise-clear
   // stand-up; a genuinely blocked capsule overlaps far deeper than this.
   return character->SetShape(
@@ -1628,7 +1634,7 @@ bool PhysicsWorld::SphereCast(const Vec3& origin, const Vec3& direction, f32 max
                               f32 radius, RayHit* out) const {
   if (!impl_) return false;
   Vec3 dir = Normalize(direction);
-  JPH::Ref<JPH::SphereShape> sphere = new JPH::SphereShape(std::max(radius, 1e-3f));
+  JPH::Ref<JPH::SphereShape> sphere = new JPH::SphereShape(rx::Max(radius, 1e-3f));
   JPH::RShapeCast shape_cast(sphere, JPH::Vec3::sReplicate(1.0f),
                              JPH::RMat44::sTranslation(ToJolt(origin)),
                              ToJolt(dir) * max_distance);
@@ -1712,14 +1718,14 @@ void PhysicsWorld::RemoveBody(BodyId id) {
   // Drop any watched-contact entry for this body so the recorder's list does not
   // grow forever (and a later body reusing the BodyID sequence cannot alias it).
   {
-    std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+    base::LockGuard<base::Mutex> guard(impl_->contacts.mutex);
     base::Vector<Impl::WatchedContacts>& watched = impl_->contacts.watched;
     for (size_t i = 0; i < watched.size(); ++i) {
       if (watched[i].body == body) {
-        watched[i] = std::move(watched.back());
+        watched[i] = base::move(watched.back());
         watched.pop_back();
         impl_->contacts.watched_count.store(static_cast<u32>(watched.size()),
-                                            std::memory_order_release);
+                                            base::memory_order_release);
         break;
       }
     }
@@ -1779,7 +1785,7 @@ VehicleId PhysicsWorld::CreateVehicle(const VehicleDesc& desc, const Vec3& posit
     if (desc.max_brake_torque > 0 || desc.brake_bias_front != 0.5f) {
       const f32 base = desc.max_brake_torque > 0 ? desc.max_brake_torque : 1500.0f;
       const f32 share = front ? desc.brake_bias_front : (1.0f - desc.brake_bias_front);
-      w->mMaxBrakeTorque = base * 2.0f * std::clamp(share, 0.0f, 1.0f);
+      w->mMaxBrakeTorque = base * 2.0f * rx::Clamp(share, 0.0f, 1.0f);
     }
     // Suspension spring: per-axle frequency (falls back to the shared value,
     // then Jolt's default); shared damping.
@@ -1951,7 +1957,7 @@ VehicleId PhysicsWorld::CreateMotorcycle(const MotorcycleDesc& desc, const Vec3&
   front->mPosition = JPH::Vec3(0, attach_y, desc.front_z);
   front->mMaxSteerAngle = desc.max_steer_angle;
   // Caster: the fork rakes back, and the steering axis follows the fork.
-  front->mSuspensionDirection = JPH::Vec3(0, -1, std::tan(desc.caster_angle)).Normalized();
+  front->mSuspensionDirection = JPH::Vec3(0, -1, ::tan(desc.caster_angle)).Normalized();
   front->mSteeringAxis = -front->mSuspensionDirection;
   front->mRadius = desc.wheel_radius;
   front->mWidth = desc.wheel_width;
@@ -2081,8 +2087,8 @@ void PhysicsWorld::InstallVehicleFriction(u32 vehicle_index) {
     const Impl::VehicleEntry& entry = impl_->vehicles[vehicle_index];
     if (IsLooseSurface(surf)) {
       const SurfaceGripEntry& hard = kSurfaceGrip[static_cast<u32>(SurfaceType::kAsphalt)];
-      grip_long = std::min(grip_long * entry.offroad_grip, hard.longitudinal * wet);
-      grip_lat = std::min(grip_lat * entry.offroad_grip, hard.lateral * wet);
+      grip_long = rx::Min(grip_long * entry.offroad_grip, hard.longitudinal * wet);
+      grip_lat = rx::Min(grip_lat * entry.offroad_grip, hard.lateral * wet);
     }
 
     // Aquaplaning from the per-wheel water cache filled on the game thread at the
@@ -2101,7 +2107,7 @@ void PhysicsWorld::InstallVehicleFriction(u32 vehicle_index) {
 }
 
 void PhysicsWorld::set_surface_wetness(f32 wetness) {
-  surface_wetness_ = std::clamp(wetness, 0.0f, 1.0f);
+  surface_wetness_ = rx::Clamp(wetness, 0.0f, 1.0f);
 }
 
 void PhysicsWorld::SetManualTransmission(VehicleId id, bool manual) {
@@ -2146,7 +2152,7 @@ void PhysicsWorld::DriveVehicle(VehicleId id, const VehicleInput& input) {
   entry.manual_shifting = shifted;
   // Clutch: 1 = fully disengaged -> 0 friction, so the engine spins free of the
   // wheels. Applied every step so the pedal tracks continuously between shifts.
-  trans.Set(gear, std::clamp(1.0f - input.clutch, 0.0f, 1.0f));
+  trans.Set(gear, rx::Clamp(1.0f - input.clutch, 0.0f, 1.0f));
   // Route the throttle through the same traction-control shaping as the
   // automatic path so manual mode keeps the driver aid instead of bypassing it.
   const f32 throttle = TractionControlThrottle(id - 1, input.throttle);
@@ -2172,19 +2178,19 @@ f32 PhysicsWorld::TractionControlThrottle(u32 vehicle_index, f32 forward) {
   JPH::BodyInterface& bodies = impl_->system->GetBodyInterface();
   const JPH::Vec3 velocity = bodies.GetLinearVelocity(entry.body);
   const JPH::Vec3 fwd_axis = bodies.GetRotation(entry.body) * JPH::Vec3::sAxisZ();
-  if (std::fabs(velocity.Dot(fwd_axis)) > 5.0f) {
+  if (::fabs(velocity.Dot(fwd_axis)) > 5.0f) {
     f32 max_slip = 0;
     for (u32 i = 0; i < entry.wheel_count; ++i) {
       const auto* wheel = static_cast<const JPH::WheelWV*>(entry.constraint->GetWheel(i));
-      if (wheel->HasContact()) max_slip = std::max(max_slip, wheel->mLongitudinalSlip);
+      if (wheel->HasContact()) max_slip = rx::Max(max_slip, wheel->mLongitudinalSlip);
     }
     // Proportional tracker: aim the throttle at the fraction that would put the
     // worst wheel on the slip target, smoothed so cut and recovery move at the
     // same rate (a ratcheting governor parks at its floor).
     constexpr f32 kSlipTarget = 0.09f;
-    const f32 target = max_slip > kSlipTarget ? std::max(0.12f, kSlipTarget / max_slip) : 1.0f;
+    const f32 target = max_slip > kSlipTarget ? rx::Max(0.12f, kSlipTarget / max_slip) : 1.0f;
     entry.tc_scale += (target - entry.tc_scale) * 0.25f;
-    forward *= std::min(1.0f, std::max(0.12f, entry.tc_scale));
+    forward *= rx::Min(1.0f, rx::Max(0.12f, entry.tc_scale));
   } else {
     entry.tc_scale = 1;
   }
@@ -2274,11 +2280,11 @@ bool PhysicsWorld::GetVehicleState(VehicleId id, VehicleState* out) const {
   // ~0 to the wheels even though the engine still revs. GetTorque is linear in
   // its input, so load == delivered/max at this rpm.
   const f32 clutch = trans.GetClutchFriction();
-  const f32 applied = std::fabs(controller->GetForwardInput()) * clutch;
+  const f32 applied = ::fabs(controller->GetForwardInput()) * clutch;
   const f32 max_torque_at_rpm = engine.GetTorque(1.0f);
   out->engine_torque = engine.GetTorque(applied);
   out->engine_load =
-      max_torque_at_rpm > 1.0e-3f ? std::clamp(out->engine_torque / max_torque_at_rpm, 0.0f, 1.0f)
+      max_torque_at_rpm > 1.0e-3f ? rx::Clamp(out->engine_torque / max_torque_at_rpm, 0.0f, 1.0f)
                                   : 0.0f;
   // is_shifting means a ratio change is in progress. The automatic box slips its
   // clutch through a change (clutch < 1 flags it); manual mode's clutch is the
@@ -2298,7 +2304,7 @@ bool PhysicsWorld::GetVehicleState(VehicleId id, VehicleState* out) const {
     const f32 travel = settings->mSuspensionMaxLength - settings->mSuspensionMinLength;
     ws.suspension_compression =
         travel > 1.0e-4f
-            ? std::clamp((settings->mSuspensionMaxLength - wheel->GetSuspensionLength()) / travel,
+            ? rx::Clamp((settings->mSuspensionMaxLength - wheel->GetSuspensionLength()) / travel,
                          0.0f, 1.0f)
             : 0.0f;
     ws.longitudinal_slip = wheel->mLongitudinalSlip;
@@ -2469,7 +2475,7 @@ StrandGroomId PhysicsWorld::CreateStrandGroom(const StrandGroomDesc& desc,
     }
   }
 
-  impl_->strand_grooms.push_back(std::move(entry));
+  impl_->strand_grooms.push_back(base::move(entry));
   return impl_->strand_grooms.size();
 }
 
@@ -2567,22 +2573,22 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
       !IsFinite(transform)) {
     return 0;
   }
-  if (!std::isfinite(desc.areal_density) || desc.areal_density <= 0 ||
-      !std::isfinite(desc.warp_compliance) || desc.warp_compliance < 0 ||
-      !std::isfinite(desc.weft_compliance) || desc.weft_compliance < 0 ||
-      !std::isfinite(desc.shear_compliance) || desc.shear_compliance < 0 ||
-      !std::isfinite(desc.bend_compliance) || desc.bend_compliance < 0 ||
-      !std::isfinite(desc.max_stretch) || desc.max_stretch < 1 ||
-      !std::isfinite(desc.collision_radius) || desc.collision_radius < 0 ||
-      !std::isfinite(desc.self_collision_distance) || desc.self_collision_distance < 0 ||
-      !std::isfinite(desc.self_collision_relaxation) || desc.self_collision_relaxation < 0 ||
+  if (!::isfinite(desc.areal_density) || desc.areal_density <= 0 ||
+      !::isfinite(desc.warp_compliance) || desc.warp_compliance < 0 ||
+      !::isfinite(desc.weft_compliance) || desc.weft_compliance < 0 ||
+      !::isfinite(desc.shear_compliance) || desc.shear_compliance < 0 ||
+      !::isfinite(desc.bend_compliance) || desc.bend_compliance < 0 ||
+      !::isfinite(desc.max_stretch) || desc.max_stretch < 1 ||
+      !::isfinite(desc.collision_radius) || desc.collision_radius < 0 ||
+      !::isfinite(desc.self_collision_distance) || desc.self_collision_distance < 0 ||
+      !::isfinite(desc.self_collision_relaxation) || desc.self_collision_relaxation < 0 ||
       desc.self_collision_relaxation > 1 ||
-      !std::isfinite(desc.aerodynamic_drag) || desc.aerodynamic_drag < 0 ||
-      !std::isfinite(desc.damping) || desc.damping < 0 ||
-      !std::isfinite(desc.gravity_factor) || !std::isfinite(desc.friction) || desc.friction < 0 ||
-      !std::isfinite(desc.restitution) || desc.restitution < 0 ||
-      !std::isfinite(desc.pressure) || desc.pressure < 0 ||
-      !std::isfinite(desc.max_linear_velocity) || desc.max_linear_velocity <= 0 ||
+      !::isfinite(desc.aerodynamic_drag) || desc.aerodynamic_drag < 0 ||
+      !::isfinite(desc.damping) || desc.damping < 0 ||
+      !::isfinite(desc.gravity_factor) || !::isfinite(desc.friction) || desc.friction < 0 ||
+      !::isfinite(desc.restitution) || desc.restitution < 0 ||
+      !::isfinite(desc.pressure) || desc.pressure < 0 ||
+      !::isfinite(desc.max_linear_velocity) || desc.max_linear_velocity <= 0 ||
       desc.iterations > 64 || desc.self_collision_iterations > 8 ||
       (desc.self_collision_distance > 0 && desc.self_collision_iterations == 0)) {
     RX_WARN("cloth rejected: invalid material or collision parameters");
@@ -2608,7 +2614,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
     return 0;
   }
   const bool pressure_capable = topology.closed && topology.component_count == 1 &&
-                                std::isfinite(topology.signed_volume) &&
+                                ::isfinite(topology.signed_volume) &&
                                 topology.signed_volume > 1.0e-9f;
   if (desc.pressure > 0 && !pressure_capable) {
     RX_WARN("cloth rejected: pressure requires one closed, outward-wound volume");
@@ -2616,7 +2622,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   }
   if (desc.uvs) {
     for (u32 i = 0; i < desc.vertex_count * 2; ++i) {
-      if (!std::isfinite(desc.uvs[i])) {
+      if (!::isfinite(desc.uvs[i])) {
         RX_WARN("cloth rejected: non-finite material UV");
         return 0;
       }
@@ -2625,7 +2631,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
 
   base::Vector<u8> pin_mask;
   pin_mask.resize(desc.vertex_count);
-  std::fill(pin_mask.begin(), pin_mask.end(), 0);
+  base::Fill(pin_mask.begin(), pin_mask.end(), 0);
   for (u32 i = 0; i < desc.pin_count; ++i) {
     const u32 vertex = desc.pins[i];
     if (vertex >= desc.vertex_count || pin_mask[vertex]) {
@@ -2647,14 +2653,14 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   skinned.resize(desc.vertex_count);
   hard_skinned.resize(desc.vertex_count);
   backstopped.resize(desc.vertex_count);
-  std::fill(skinned.begin(), skinned.end(), 0);
-  std::fill(hard_skinned.begin(), hard_skinned.end(), 0);
-  std::fill(backstopped.begin(), backstopped.end(), 0);
+  base::Fill(skinned.begin(), skinned.end(), 0);
+  base::Fill(hard_skinned.begin(), hard_skinned.end(), 0);
+  base::Fill(backstopped.begin(), backstopped.end(), 0);
   for (u32 i = 0; i < desc.skin_constraint_count; ++i) {
     const ClothSkinConstraint& skin = desc.skin_constraints[i];
     if (skin.vertex >= desc.vertex_count || skinned[skin.vertex] || pin_mask[skin.vertex] ||
-        !std::isfinite(skin.max_distance) || skin.max_distance < 0 ||
-        !std::isfinite(skin.backstop_distance) || !std::isfinite(skin.backstop_radius) ||
+        !::isfinite(skin.max_distance) || skin.max_distance < 0 ||
+        !::isfinite(skin.backstop_distance) || !::isfinite(skin.backstop_radius) ||
         skin.backstop_radius < 0) {
       RX_WARN("cloth rejected: invalid skin constraint");
       return 0;
@@ -2662,7 +2668,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
     u32 weight_count = 0;
     for (const ClothSkinWeight& weight : skin.weights) {
       if (weight.weight == 0) continue;
-      if (!std::isfinite(weight.weight) || weight.weight < 0 || weight.joint >= desc.joint_count ||
+      if (!::isfinite(weight.weight) || weight.weight < 0 || weight.joint >= desc.joint_count ||
           weight_count >= JPH::SoftBodySharedSettings::Skinned::cMaxSkinWeights) {
         RX_WARN("cloth rejected: invalid skin weight");
         return 0;
@@ -2679,7 +2685,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   }
   base::Vector<u32> skinned_face_counts;
   skinned_face_counts.resize(desc.vertex_count);
-  std::fill(skinned_face_counts.begin(), skinned_face_counts.end(), 0);
+  base::Fill(skinned_face_counts.begin(), skinned_face_counts.end(), 0);
   for (u32 face = 0; face < desc.index_count; face += 3) {
     const u32 a = desc.indices[face + 0];
     const u32 b = desc.indices[face + 1];
@@ -2701,7 +2707,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   inverse_masses.resize(desc.vertex_count);
   if (desc.inverse_masses) {
     for (u32 i = 0; i < desc.vertex_count; ++i) {
-      if (!std::isfinite(desc.inverse_masses[i]) || desc.inverse_masses[i] < 0) {
+      if (!::isfinite(desc.inverse_masses[i]) || desc.inverse_masses[i] < 0) {
         RX_WARN("cloth rejected: inverse masses must be finite and non-negative");
         return 0;
       }
@@ -2710,22 +2716,22 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   } else {
     base::Vector<f64> masses;
     masses.resize(desc.vertex_count);
-    std::fill(masses.begin(), masses.end(), 0.0);
+    base::Fill(masses.begin(), masses.end(), 0.0);
     for (size_t i = 0; i < topology.indices.size(); i += 3) {
       const u32 a = topology.indices[i + 0];
       const u32 b = topology.indices[i + 1];
       const u32 c = topology.indices[i + 2];
       const f64 triangle_mass =
           static_cast<f64>(topology.triangle_areas[i / 3]) * desc.areal_density;
-      if (!std::isfinite(triangle_mass)) return 0;
+      if (!::isfinite(triangle_mass)) return 0;
       masses[a] += triangle_mass / 3.0;
       masses[b] += triangle_mass / 3.0;
       masses[c] += triangle_mass / 3.0;
     }
     for (u32 i = 0; i < desc.vertex_count; ++i) {
       const f64 inverse_mass = 1.0 / masses[i];
-      if (masses[i] <= 1.0e-8 || !std::isfinite(masses[i]) ||
-          !std::isfinite(inverse_mass) || inverse_mass > std::numeric_limits<f32>::max()) {
+      if (masses[i] <= 1.0e-8 || !::isfinite(masses[i]) ||
+          !::isfinite(inverse_mass) || inverse_mass > FLT_MAX) {
         RX_WARN("cloth rejected: every vertex must belong to a non-degenerate face");
         return 0;
       }
@@ -2785,7 +2791,7 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   // extra non-diagonal springs in distance-bend mode retain bend compliance.
   if (desc.uvs) {
     auto is_topology_edge = [&](u32 a, u32 b) {
-      if (a > b) std::swap(a, b);
+      if (a > b) base::Swap(a, b);
       size_t low = 0, high = topology.edges.size() / 2;
       while (low < high) {
         const size_t middle = (low + high) / 2;
@@ -2800,9 +2806,9 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
              topology.edges[low * 2 + 1] == b;
     };
     for (JPH::SoftBodySharedSettings::Edge& edge : shared->mEdgeConstraints) {
-      const f32 du = std::abs(desc.uvs[edge.mVertex[1] * 2 + 0] -
+      const f32 du = ::abs(desc.uvs[edge.mVertex[1] * 2 + 0] -
                               desc.uvs[edge.mVertex[0] * 2 + 0]);
-      const f32 dv = std::abs(desc.uvs[edge.mVertex[1] * 2 + 1] -
+      const f32 dv = ::abs(desc.uvs[edge.mVertex[1] * 2 + 1] -
                               desc.uvs[edge.mVertex[0] * 2 + 1]);
       const bool warp = du > 2.0f * dv;
       const bool weft = dv > 2.0f * du;
@@ -2851,14 +2857,14 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
 
   JPH::SoftBodyCreationSettings body(shared, ToJolt(origin), JPH::Quat::sIdentity(),
                                       layers::kDynamic);
-  body.mNumIterations = std::max(desc.iterations, 1u);
-  body.mLinearDamping = std::max(desc.damping, 0.0f);
+  body.mNumIterations = rx::Max(desc.iterations, 1u);
+  body.mLinearDamping = rx::Max(desc.damping, 0.0f);
   body.mGravityFactor = desc.gravity_factor;
-  body.mFriction = std::max(desc.friction, 0.0f);
-  body.mRestitution = std::max(desc.restitution, 0.0f);
+  body.mFriction = rx::Max(desc.friction, 0.0f);
+  body.mRestitution = rx::Max(desc.restitution, 0.0f);
   body.mPressure = desc.pressure;
   body.mVertexRadius = desc.collision_radius;
-  body.mMaxLinearVelocity = std::max(desc.max_linear_velocity, 0.01f);
+  body.mMaxLinearVelocity = rx::Max(desc.max_linear_velocity, 0.01f);
   body.mUpdatePosition = desc.update_position;
   body.mMakeRotationIdentity = true;
   body.mAllowSleeping = desc.allow_sleeping;
@@ -2876,8 +2882,8 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
   entry.aerodynamic_drag = desc.aerodynamic_drag;
   entry.gravity_factor = desc.gravity_factor;
   entry.max_linear_velocity = desc.max_linear_velocity;
-  entry.collision_inverse_masses = std::move(inverse_masses);
-  entry.topology = std::move(topology);
+  entry.collision_inverse_masses = base::move(inverse_masses);
+  entry.topology = base::move(topology);
   entry.self_collision.distance = desc.self_collision_distance;
   entry.self_collision.relaxation = desc.self_collision_relaxation;
   entry.self_collision.max_velocity = desc.max_linear_velocity;
@@ -2899,13 +2905,13 @@ ClothId PhysicsWorld::CreateCloth(const ClothDesc& desc, const Mat4& transform) 
         static_cast<JPH::SoftBodyMotionProperties*>(lock.GetBody().GetMotionProperties());
     soft->SetEnableSkinConstraints(false);
   }
-  impl_->cloth.push_back(std::move(entry));
+  impl_->cloth.push_back(base::move(entry));
   return impl_->cloth.size();
 }
 
 bool PhysicsWorld::SetClothTransform(ClothId id, const Mat4& transform, f32 dt) {
   if (!impl_ || id == 0 || id > impl_->cloth.size() || !IsFinite(transform) ||
-      !std::isfinite(dt) || dt < 0) {
+      !::isfinite(dt) || dt < 0) {
     return false;
   }
   Impl::ClothEntry& entry = impl_->cloth[id - 1];
@@ -2919,7 +2925,7 @@ bool PhysicsWorld::SetClothTransform(ClothId id, const Mat4& transform, f32 dt) 
 }
 
 bool PhysicsWorld::SetClothPinTargets(ClothId id, const Vec3* targets, u32 target_count, f32 dt) {
-  if (!impl_ || id == 0 || id > impl_->cloth.size() || !std::isfinite(dt) || dt < 0) return false;
+  if (!impl_ || id == 0 || id > impl_->cloth.size() || !::isfinite(dt) || dt < 0) return false;
   Impl::ClothEntry& entry = impl_->cloth[id - 1];
   if (!entry.alive || target_count != entry.pinned.size() || (target_count > 0 && !targets)) {
     return false;
@@ -2966,7 +2972,7 @@ bool PhysicsWorld::SetClothJointTransforms(ClothId id, const Mat4* world_joints,
     if (!IsFinite(world_joints[i])) return false;
     if (!changed) {
       for (u32 element = 0; element < 16; ++element) {
-        if (std::abs(world_joints[i].m[element] - entry.last_joint_transforms[i].m[element]) >
+        if (::abs(world_joints[i].m[element] - entry.last_joint_transforms[i].m[element]) >
             1.0e-7f) {
           changed = true;
           break;
@@ -3007,7 +3013,7 @@ void PhysicsWorld::SetClothWind(ClothId id, const Vec3& velocity) {
 }
 
 void PhysicsWorld::SetClothPressure(ClothId id, f32 pressure) {
-  if (!impl_ || id == 0 || id > impl_->cloth.size() || !std::isfinite(pressure) || pressure < 0) {
+  if (!impl_ || id == 0 || id > impl_->cloth.size() || !::isfinite(pressure) || pressure < 0) {
     return;
   }
   Impl::ClothEntry& entry = impl_->cloth[id - 1];
@@ -3111,38 +3117,38 @@ bool PhysicsWorld::GetBodyTransform(BodyId id, Vec3* position, f32 rotation[4]) 
 void PhysicsWorld::WatchBodyContacts(BodyId id) {
   if (!impl_ || id == 0) return;
   JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
-  std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+  base::LockGuard<base::Mutex> guard(impl_->contacts.mutex);
   if (impl_->contacts.Find(body)) return;
   Impl::WatchedContacts entry;
   entry.body = body;
-  impl_->contacts.watched.push_back(std::move(entry));
+  impl_->contacts.watched.push_back(base::move(entry));
   impl_->contacts.watched_count.store(static_cast<u32>(impl_->contacts.watched.size()),
-                                      std::memory_order_release);
+                                      base::memory_order_release);
 }
 
 void PhysicsWorld::UnwatchBodyContacts(BodyId id) {
   if (!impl_ || id == 0) return;
   JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
-  std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+  base::LockGuard<base::Mutex> guard(impl_->contacts.mutex);
   base::Vector<Impl::WatchedContacts>& watched = impl_->contacts.watched;
   for (size_t i = 0; i < watched.size(); ++i) {
     if (watched[i].body == body) {
-      watched[i] = std::move(watched.back());
+      watched[i] = base::move(watched.back());
       watched.pop_back();
       break;
     }
   }
   impl_->contacts.watched_count.store(static_cast<u32>(watched.size()),
-                                      std::memory_order_release);
+                                      base::memory_order_release);
 }
 
 u32 PhysicsWorld::GetBodyContacts(BodyId id, BodyContact* out, u32 max_contacts) const {
   if (!impl_ || id == 0 || out == nullptr) return 0;
   JPH::BodyID body(static_cast<JPH::uint32>(id - 1));
-  std::lock_guard<std::mutex> guard(impl_->contacts.mutex);
+  base::LockGuard<base::Mutex> guard(impl_->contacts.mutex);
   Impl::WatchedContacts* entry = impl_->contacts.Find(body);
   if (!entry) return 0;
-  const u32 count = std::min<u32>(max_contacts, static_cast<u32>(entry->contacts.size()));
+  const u32 count = rx::Min<u32>(max_contacts, static_cast<u32>(entry->contacts.size()));
   for (u32 i = 0; i < count; ++i) out[i] = entry->contacts[i];
   return count;
 }

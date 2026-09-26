@@ -1,9 +1,13 @@
 #include "demo_world.h"
 
-#include <cmath>
+#include <math.h>
 
 #include "asset/pack.h"
 #include "asset/primitives.h"
+#include "base/containers/span.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "core/log.h"
 #include "scene/components.h"
 #include "world/world_bake.h"
@@ -57,8 +61,8 @@ void WorldStreamDemo::RegisterMeshes(render::Renderer* renderer, bool headless) 
 }
 
 bool WorldStreamDemo::Init(asset::Vfs& vfs, render::Renderer* renderer, ecs::World& ecs,
-                           bool headless, const std::string& archive_path,
-                           const std::string& world_name) {
+                           bool headless, const base::String& archive_path,
+                           const base::String& world_name) {
   // The cook's own default, so an archive baked without --name opens without
   // --world-name. Asking world_bake for it rather than reimplementing the stem
   // is the point: two answers here would be two answers about where the index
@@ -70,10 +74,10 @@ bool WorldStreamDemo::Init(asset::Vfs& vfs, render::Renderer* renderer, ecs::Wor
     RX_ERROR("--world {}: not a readable .rxp archive", archive_path);
     return false;
   }
-  vfs.Mount("world", std::move(provider));
+  vfs.Mount("world", base::move(provider));
 
-  const std::string index_path = "world://" + world_name_ + "/" + world_name_ + ".rxworld";
-  std::string error;
+  const base::String index_path = "world://" + world_name_ + "/" + world_name_ + ".rxworld";
+  base::String error;
   if (!map_.Load(vfs, index_path, &error)) {
     RX_ERROR("--world {}: {}", archive_path, error);
     return false;
@@ -118,11 +122,11 @@ void WorldStreamDemo::Update(f32 frame_delta, const Vec3& camera_position) {
   // The world is a plane; height should not decide what is resident.
   observer.axes = scene::kWorldStreamXZ;
 
-  streamer_->Update(std::span<const scene::WorldStreamObservation>(&observer, 1));
+  streamer_->Update(base::Span<const scene::WorldStreamObservation>(&observer, 1));
 
   // A refused payload is a cook or archive bug, so say so once rather than
   // every frame for as long as the cell stays in range.
-  const std::span<const std::string> errors = streamer_->errors();
+  const base::Span<const base::String> errors = streamer_->errors();
   for (size_t i = reported_errors_; i < errors.size(); ++i) RX_ERROR("world: {}", errors[i]);
   reported_errors_ = errors.size();
 }
@@ -132,15 +136,15 @@ void WorldStreamDemo::EmitToView(render::FrameView& view) {
 
   streamer_->ResidentCells(world::Domain::kRepresentation, &resident_scratch_);
   for (u64 cell : resident_scratch_) {
-    const std::span<const world::ResidentInstance> instances = streamer_->Instances(cell);
+    const base::Span<const world::ResidentInstance> instances = streamer_->Instances(cell);
     if (instances.empty()) continue;
 
     // The page stores a prototype index; the names it indexes are the cell's,
     // and the mesh each resolves to is this host's business.
-    const std::span<const std::string> prototypes = streamer_->Prototypes(cell);
+    const base::Span<const base::String> prototypes = streamer_->Prototypes(cell);
     prototype_ids_scratch_.clear();
     prototype_ids_scratch_.reserve(prototypes.size());
-    for (const std::string& name : prototypes) {
+    for (const base::String& name : prototypes) {
       prototype_ids_scratch_.push_back(asset::MakeAssetId(name).hash);
     }
 
@@ -166,19 +170,19 @@ void WorldStreamDemo::Shutdown() {
   loader_.Reset();
 }
 
-std::string WorldStreamDemo::StatusLine() const {
+base::String WorldStreamDemo::StatusLine() const {
   if (!streamer_) return {};
   const world::WorldStreamerStats stats = streamer_->stats();
   // Resident is (cell, domain) pairs, not cells: the whole point is that a
   // cell's domains come and go independently, so one number for "cells" would
   // be the wrong shape.
-  std::string line = "WORLD " + std::to_string(stats.resident) + "/" +
-                     std::to_string(map_.index().cells.size() * 2) + " res";
-  if (stats.pending != 0) line += " +" + std::to_string(stats.pending);
-  line += "  " + std::to_string(stats.entities) + "e " + std::to_string(stats.instances) + "i  " +
-          std::to_string(stats.resident_bytes / 1024) + "K";
-  if (stats.suppressed != 0) line += "  " + std::to_string(stats.suppressed) + " SUPPRESSED";
-  if (stats.errors_total != 0) line += "  " + std::to_string(stats.errors_total) + " ERR";
+  base::String line = "WORLD " + rx::ToString(stats.resident) + "/" +
+                     rx::ToString(map_.index().cells.size() * 2) + " res";
+  if (stats.pending != 0) line += " +" + rx::ToString(stats.pending);
+  line += "  " + rx::ToString(stats.entities) + "e " + rx::ToString(stats.instances) + "i  " +
+          rx::ToString(stats.resident_bytes / 1024) + "K";
+  if (stats.suppressed != 0) line += "  " + rx::ToString(stats.suppressed) + " SUPPRESSED";
+  if (stats.errors_total != 0) line += "  " + rx::ToString(stats.errors_total) + " ERR";
   return line;
 }
 

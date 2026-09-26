@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_UPSCALER_H_
 #define RX_RENDER_UPSCALER_H_
 
-#include <memory>
 
+#include "base/memory/unique_pointer.h"
 #include "core/types.h"
 #include "render/core/render_graph.h"
 
@@ -61,7 +61,7 @@ class Upscaler {
 
 // Returns null if the SDK for the requested kind is not compiled in or the
 // device does not support it. Caller falls back to TAA.
-std::unique_ptr<Upscaler> CreateUpscaler(const UpscalerDesc& desc, class Device& device);
+base::UniquePointer<Upscaler> CreateUpscaler(const UpscalerDesc& desc, class Device& device);
 
 // The spelling the --upscaler flag and the settings ini use, for logging which
 // backend a fallback actually landed on.

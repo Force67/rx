@@ -1,10 +1,11 @@
 #include "render/pipeline/human_material.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 
 namespace rx::render {
 namespace {
@@ -18,7 +19,7 @@ V3 Load(const f32 v[3]) { return {v[0], v[1], v[2]}; }
 f32 Dot(V3 a, V3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 V3 Add(V3 a, V3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 V3 Norm(V3 a) {
-  f32 len = std::sqrt(std::max(Dot(a, a), 1e-20f));
+  f32 len = ::sqrt(rx::Max(Dot(a, a), 1e-20f));
   return {a.x / len, a.y / len, a.z / len};
 }
 f32 Sat(f32 x) { return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x); }
@@ -26,13 +27,13 @@ f32 Sat(f32 x) { return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x); }
 f32 D_GGX(f32 ndh, f32 a) {
   f32 a2 = a * a;
   f32 d = ndh * ndh * (a2 - 1.0f) + 1.0f;
-  return a2 / std::max(kPi * d * d, 1e-7f);
+  return a2 / rx::Max(kPi * d * d, 1e-7f);
 }
 f32 V_Smith(f32 ndv, f32 ndl, f32 a) {
   f32 a2 = a * a;
-  f32 gv = ndl * std::sqrt(ndv * ndv * (1.0f - a2) + a2);
-  f32 gl = ndv * std::sqrt(ndl * ndl * (1.0f - a2) + a2);
-  return 0.5f / std::max(gv + gl, 1e-5f);
+  f32 gv = ndl * ::sqrt(ndv * ndv * (1.0f - a2) + a2);
+  f32 gl = ndv * ::sqrt(ndl * ndl * (1.0f - a2) + a2);
+  return 0.5f / rx::Max(gv + gl, 1e-5f);
 }
 
 }  // namespace
@@ -229,7 +230,7 @@ HumanTier HumanTierForScreenHeight(f32 pixels) {
 }
 
 HumanRange HumanSafeRange(const char* field) {
-  auto is = [&](const char* n) { return std::strcmp(field, n) == 0; };
+  auto is = [&](const char* n) { return ::strcmp(field, n) == 0; };
   // Outside these the model stops being energy-sane: a diffuse Fresnel peak
   // above 1 can more than double the grazing diffuse, a terminator length above
   // ~0.5 wraps light onto the far side of a sphere, a secondary roughness scale
@@ -287,7 +288,7 @@ HumanSurfaceParameters HumanResolve(const asset::Material::HumanParams& a) {
   p.mean_free_path = a.mean_free_path;
   p.subsurface_scale = a.subsurface_scale;
   p.transmission = a.transmission;
-  std::memcpy(p.transmission_tint, a.transmission_tint, sizeof(f32) * 3);
+  base::MemCopy(p.transmission_tint, a.transmission_tint, sizeof(f32) * 3);
   p.extinction_scale = a.extinction_scale;
   p.thickness_scale = a.thickness_scale;
   p.corneal_wetness = a.corneal_wetness;
@@ -321,7 +322,7 @@ void HumanStore(const HumanSurfaceParameters& p, asset::Material::HumanParams& a
   a.mean_free_path = p.mean_free_path;
   a.subsurface_scale = p.subsurface_scale;
   a.transmission = p.transmission;
-  std::memcpy(a.transmission_tint, p.transmission_tint, sizeof(f32) * 3);
+  base::MemCopy(a.transmission_tint, p.transmission_tint, sizeof(f32) * 3);
   a.extinction_scale = p.extinction_scale;
   a.thickness_scale = p.thickness_scale;
   a.corneal_wetness = p.corneal_wetness;
@@ -348,13 +349,13 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
   V3 v = Load(v_in), l = Load(l_in);
 
   f32 ndl_d = Dot(nd, l);
-  f32 ndv_d = std::max(Dot(nd, v), 1e-4f);
+  f32 ndv_d = rx::Max(Dot(nd, v), 1e-4f);
   f32 ndl_g = Dot(ng, l);
 
   // diffuse cosine with the energy-normalized wrap
   f32 cos_d = Sat(ndl_d);
   if (p.smooth_terminator_amount > 0.0f) {
-    f32 w = std::max(p.smooth_terminator_length, 0.0f);
+    f32 w = rx::Max(p.smooth_terminator_length, 0.0f);
     f32 soft = Sat((ndl_d + w) / ((1.0f + w) * (1.0f + w)));
     f32 gate = Sat(ndl_g * 4.0f + 1.0f);
     f32 amount = Sat(p.smooth_terminator_amount) * gate;
@@ -364,23 +365,23 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
   if (cos_d > 0.0f) {
     V3 hd = Norm(Add(l, v));
     f32 ldh = Sat(Dot(l, hd));
-    f32 gv = std::pow(Sat(1.0f - ndv_d), std::max(p.diffuse_fresnel_falloff, 1e-2f));
-    f32 gl = std::pow(Sat(1.0f - Sat(ndl_d)),
-                      std::max(p.diffuse_fresnel_tangent_falloff, 1e-2f));
+    f32 gv = ::pow(Sat(1.0f - ndv_d), rx::Max(p.diffuse_fresnel_falloff, 1e-2f));
+    f32 gl = ::pow(Sat(1.0f - Sat(ndl_d)),
+                      rx::Max(p.diffuse_fresnel_tangent_falloff, 1e-2f));
     f32 fresnel = (1.0f + p.diffuse_fresnel_peak * gv) * (1.0f + p.diffuse_fresnel_peak * gl);
     f32 fd90 = p.retroreflection_peak * ldh * ldh;
-    f32 rv = 1.0f + fd90 * std::pow(Sat(1.0f - ndv_d),
-                                    std::max(p.retroreflection_tangent_falloff, 1e-2f));
-    f32 rl = 1.0f + fd90 * std::pow(Sat(1.0f - Sat(ndl_d)),
-                                    std::max(p.retroreflection_falloff, 1e-2f));
-    f32 shaping = std::max(fresnel * rv * rl, 0.0f);
+    f32 rv = 1.0f + fd90 * ::pow(Sat(1.0f - ndv_d),
+                                    rx::Max(p.retroreflection_tangent_falloff, 1e-2f));
+    f32 rl = 1.0f + fd90 * ::pow(Sat(1.0f - Sat(ndl_d)),
+                                    rx::Max(p.retroreflection_falloff, 1e-2f));
+    f32 shaping = rx::Max(fresnel * rv * rl, 0.0f);
     for (int c = 0; c < 3; ++c) out.diffuse[c] = base_color[c] * (1.0f / kPi) * shaping * cos_d;
   }
 
   f32 ndl_s = Dot(ns, l);
   if (ndl_s > 0.0f) {
     f32 ndl = Sat(ndl_s);
-    f32 ndv = std::max(Dot(ns, v), 1e-4f);
+    f32 ndv = rx::Max(Dot(ns, v), 1e-4f);
     V3 h = Norm(Add(l, v));
     f32 ndh = Sat(Dot(ns, h));
     f32 vdh = Sat(Dot(v, h));
@@ -388,27 +389,27 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
     f32 rough = roughness;
     solid_angle *= Sat(p.light_shape_response);
     if (solid_angle > 0.0f) {
-      f32 widen = Sat(std::sqrt(solid_angle / kPi) * 0.5f);
-      rough = Sat(std::sqrt(roughness * roughness + widen * widen));
+      f32 widen = Sat(::sqrt(solid_angle / kPi) * 0.5f);
+      rough = Sat(::sqrt(roughness * roughness + widen * widen));
     }
-    f32 a1 = std::max(rough * rough, 1e-5f);
+    f32 a1 = rx::Max(rough * rough, 1e-5f);
     f32 core = D_GGX(ndh, a1) * V_Smith(ndv, ndl, a1);
     f32 lobe = core;
     if (p.secondary_specular_weight > 0.0f) {
-      f32 rough2 = Sat(rough * std::max(p.secondary_roughness_scale, 1e-2f));
-      f32 a2 = std::max(rough2 * rough2, 1e-5f);
+      f32 rough2 = Sat(rough * rx::Max(p.secondary_roughness_scale, 1e-2f));
+      f32 a2 = rx::Max(rough2 * rough2, 1e-5f);
       f32 tail = D_GGX(ndh, a2) * V_Smith(ndv, ndl, a2);
       f32 w = Sat(p.secondary_specular_weight);
       lobe = core + (tail - core) * w;
     }
-    f32 fpow = std::pow(Sat(1.0f - vdh), std::max(p.specular_fresnel_falloff, 1e-2f));
+    f32 fpow = ::pow(Sat(1.0f - vdh), rx::Max(p.specular_fresnel_falloff, 1e-2f));
     for (int c = 0; c < 3; ++c) {
       f32 f = f0[c] + (1.0f - f0[c]) * fpow;
       out.specular[c] = lobe * f * ndl;
     }
     if (p.corneal_wetness > 0.0f) {
-      f32 wa = std::max(0.02f * 0.02f, 1e-5f);
-      f32 wf = (0.02f + 0.98f * std::pow(Sat(1.0f - vdh), 5.0f)) * Sat(p.corneal_wetness);
+      f32 wa = rx::Max(0.02f * 0.02f, 1e-5f);
+      f32 wf = (0.02f + 0.98f * ::pow(Sat(1.0f - vdh), 5.0f)) * Sat(p.corneal_wetness);
       f32 wet = D_GGX(ndh, wa) * V_Smith(ndv, ndl, wa) * ndl;
       for (int c = 0; c < 3; ++c) {
         out.specular[c] = out.specular[c] * (1.0f - wf) + wet * wf;
@@ -419,8 +420,8 @@ HumanBrdfSample HumanEvaluateCpu(const HumanSurfaceParameters& p, const f32 base
 
   if (p.transmission > 0.0f && ndl_d < 0.35f) {
     f32 optical =
-        std::max(p.extinction_scale * thickness / std::max(p.mean_free_path * p.subsurface_scale, 1e-4f), 0.0f);
-    f32 attenuation = std::exp(-optical);
+        rx::Max(p.extinction_scale * thickness / rx::Max(p.mean_free_path * p.subsurface_scale, 1e-4f), 0.0f);
+    f32 attenuation = ::exp(-optical);
     f32 back = Sat(Dot(v, {-l.x, -l.y, -l.z}));
     f32 lobe = back * back * Sat(0.35f - ndl_d) / 0.35f;
     for (int c = 0; c < 3; ++c) {
@@ -439,16 +440,16 @@ f32 HumanTerminatorMultiplierCpu(const HumanSurfaceParameters& p, const f32 geom
 
   f32 cos_soft = ndl;
   if (p.smooth_terminator_amount > 0.0f) {
-    const f32 w = std::max(p.smooth_terminator_length, 0.0f);
+    const f32 w = rx::Max(p.smooth_terminator_length, 0.0f);
     const f32 soft = Sat((ndl_shading + w) / ((1.0f + w) * (1.0f + w)));
     const f32 gate = Sat(Dot(ng, rep) * 4.0f + 1.0f);
     cos_soft = ndl + (soft - ndl) * Sat(p.smooth_terminator_amount) * gate;
   }
 
-  const f32 wrap = std::max(p.smooth_terminator_length, 0.0f);
+  const f32 wrap = rx::Max(p.smooth_terminator_length, 0.0f);
   const f32 amount = Sat(p.smooth_terminator_amount);
   const f32 max_lift = (1.0f - amount) + amount * 2.0f / ((1.0f + wrap) * (1.0f + wrap));
-  return std::min(cos_soft / std::max(ndl, 1e-4f), max_lift);
+  return rx::Min(cos_soft / rx::Max(ndl, 1e-4f), max_lift);
 }
 
 HumanBrdfSample StockBrdfCpu(const f32 base_color[3], f32 roughness, const f32 f0[3],
@@ -456,13 +457,13 @@ HumanBrdfSample StockBrdfCpu(const f32 base_color[3], f32 roughness, const f32 f
   HumanBrdfSample out;
   V3 n = Load(n_in), v = Load(v_in), l = Load(l_in);
   f32 ndl = Sat(Dot(n, l));
-  f32 ndv = std::max(Dot(n, v), 1e-4f);
+  f32 ndv = rx::Max(Dot(n, v), 1e-4f);
   V3 h = Norm(Add(l, v));
   f32 ndh = Sat(Dot(n, h));
   f32 vdh = Sat(Dot(v, h));
-  f32 a = std::max(roughness * roughness, 1e-5f);
+  f32 a = rx::Max(roughness * roughness, 1e-5f);
   f32 lobe = D_GGX(ndh, a) * V_Smith(ndv, ndl, a);
-  f32 fpow = std::pow(Sat(1.0f - vdh), 5.0f);
+  f32 fpow = ::pow(Sat(1.0f - vdh), 5.0f);
   for (int c = 0; c < 3; ++c) {
     out.diffuse[c] = base_color[c] * (1.0f / kPi) * ndl;
     f32 f = f0[c] + (1.0f - f0[c]) * fpow;

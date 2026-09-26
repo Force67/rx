@@ -1,7 +1,9 @@
 #include "render/util/gpu_profiler.h"
 
 #include <base/option.h>
+#include <stdio.h>
 
+#include "base/memory/move.h"
 #include "core/log.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
@@ -23,13 +25,13 @@ bool GpuProfiler::Initialize(Device& device, u32 frames_in_flight) {
     fp.pool = device.CreateTimestampPool(kInitialPasses * kQueriesPerPass);
     if (!fp.pool) return false;
     fp.capacity = kInitialPasses;
-    frames_.push_back(std::move(fp));
+    frames_.push_back(base::move(fp));
   }
   device_ = &device;
   if (const char* path = TimingFile.get(); path && *path) {
-    timing_file_ = std::fopen(path, "w");
+    timing_file_ = ::fopen(path, "w");
     if (timing_file_) {
-      std::fprintf(timing_file_, "frame\tpass\tms\n");
+      ::fprintf(timing_file_, "frame\tpass\tms\n");
     } else {
       RX_ERROR("Cannot open GPU timing file: {}", path);
     }
@@ -46,7 +48,7 @@ void GpuProfiler::Shutdown() {
   frames_.clear();
   device_ = nullptr;
   if (timing_file_) {
-    std::fclose(timing_file_);
+    ::fclose(timing_file_);
     timing_file_ = nullptr;
   }
 }
@@ -70,7 +72,7 @@ void GpuProfiler::BeginFrame(CommandList& cmd, u32 frame_slot) {
         results_.push_back({fp.names[i], ms});
         total_ms_ += ms;
         if (timing_file_) {
-          std::fprintf(timing_file_, "%llu\t%s\t%.6f\n",
+          ::fprintf(timing_file_, "%llu\t%s\t%.6f\n",
                        static_cast<unsigned long long>(resolved_frames_), fp.names[i].c_str(), ms);
         }
       }

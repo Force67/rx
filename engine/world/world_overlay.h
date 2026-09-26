@@ -1,11 +1,11 @@
 #ifndef RX_WORLD_WORLD_OVERLAY_H_
 #define RX_WORLD_WORLD_OVERLAY_H_
 
-#include <span>
-#include <string>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
@@ -63,11 +63,11 @@ class RX_WORLD_EXPORT WorldOverlay {
   bool empty() const { return destroyed_.empty() && moves_.empty(); }
   size_t destroyed_count() const { return destroyed_.size(); }
   size_t move_count() const { return moves_.size(); }
-  std::span<const u64> destroyed() const {
-    return std::span<const u64>(destroyed_.data(), destroyed_.size());
+  base::Span<const u64> destroyed() const {
+    return base::Span<const u64>(destroyed_.data(), destroyed_.size());
   }
-  std::span<const OverlayMove> moves() const {
-    return std::span<const OverlayMove>(moves_.data(), moves_.size());
+  base::Span<const OverlayMove> moves() const {
+    return base::Span<const OverlayMove>(moves_.data(), moves_.size());
   }
 
   // Whether anything at all is recorded for a cell's stable-id range. The
@@ -75,8 +75,8 @@ class RX_WORLD_EXPORT WorldOverlay {
   // takes the bulk copy path rather than the row-by-row one.
   bool TouchesRange(u64 first, u32 count) const;
 
-  bool Encode(base::Vector<u8>* out, std::string* error) const;
-  static bool Decode(std::span<const u8> bytes, WorldOverlay* out, std::string* error);
+  bool Encode(base::Vector<u8>* out, base::String* error) const;
+  static bool Decode(base::Span<const u8> bytes, WorldOverlay* out, base::String* error);
 
  private:
   base::Vector<u64> destroyed_;      // sorted

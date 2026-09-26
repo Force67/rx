@@ -1,20 +1,14 @@
+#include "base/containers/span.h"
+#include "base/memory/move.h"
+#include "base/numeric_limits.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 #include "terrain/terrain.h"
 
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <filesystem>
-#include <fstream>
-#include <iterator>
-#include <limits>
-#include <span>
-#include <string_view>
-#include <system_error>
+#include <math.h>
 
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#endif
+#include "core/file_system.h"
 
 namespace rx::terrain {
 namespace {
@@ -28,9 +22,9 @@ constexpr u32 kMaximumTiles = 1'000'000;
 constexpr u64 kMaximumTotalSamples = 64'000'000;
 constexpr u64 kMaximumFileBytes = 2ull * 1024 * 1024 * 1024;
 
-void SetError(std::string *error, std::string message) {
+void SetError(base::String *error, base::String message) {
   if (error)
-    *error = std::move(message);
+    *error = base::move(message);
 }
 
 void AppendU8(base::Vector<u8> *bytes, u8 value) { bytes->push_back(value); }
@@ -51,15 +45,15 @@ void AppendU64(base::Vector<u8> *bytes, u64 value) {
 }
 
 void AppendF32(base::Vector<u8> *bytes, f32 value) {
-  AppendU32(bytes, std::bit_cast<u32>(value));
+  AppendU32(bytes, rx::BitCast<u32>(value));
 }
 
-void AppendString(base::Vector<u8> *bytes, std::string_view value) {
+void AppendString(base::Vector<u8> *bytes, base::StringRef value) {
   AppendU32(bytes, static_cast<u32>(value.size()));
   bytes->insert(bytes->end(), value.begin(), value.end());
 }
 
-u64 Checksum(std::span<const u8> bytes) {
+u64 Checksum(base::Span<const u8> bytes) {
   u64 hash = 0xcbf29ce484222325ull;
   for (u8 byte : bytes) {
     hash ^= byte;
@@ -88,24 +82,24 @@ bool GetSampleCount(u32 quads, u32 *count) {
     return false;
   const u64 side = static_cast<u64>(quads) + 1;
   const u64 samples = side * side;
-  if (samples > std::numeric_limits<u32>::max())
+  if (samples > base::MinMax<u32>::max())
     return false;
   *count = static_cast<u32>(samples);
   return true;
 }
 
 bool ValidateTerrain(const Terrain &terrain, u32 *sample_count,
-                     std::string *error) {
+                     base::String *error) {
   const TerrainDesc &desc = terrain.desc();
-  if (!desc.id || !std::isfinite(desc.origin.x) || !std::isfinite(desc.origin.y) ||
-      !std::isfinite(desc.origin.z) || !std::isfinite(desc.sample_spacing) ||
+  if (!desc.id || !::isfinite(desc.origin.x) || !::isfinite(desc.origin.y) ||
+      !::isfinite(desc.origin.z) || !::isfinite(desc.sample_spacing) ||
       desc.sample_spacing <= 0 ||
       !GetSampleCount(desc.tile_quads, sample_count)) {
     SetError(error, "terrain has invalid dimensions or non-finite metadata");
     return false;
   }
   const f32 tile_width = desc.tile_quads * desc.sample_spacing;
-  if (!std::isfinite(tile_width)) {
+  if (!::isfinite(tile_width)) {
     SetError(error, "terrain tile width is not finite");
     return false;
   }
@@ -138,7 +132,7 @@ bool ValidateTerrain(const Terrain &terrain, u32 *sample_count,
     previous = tile.key;
     has_previous = true;
     for (u32 i = 0; i < *sample_count; ++i) {
-      if (!std::isfinite(tile.heights[i]) ||
+      if (!::isfinite(tile.heights[i]) ||
           !IsNormalized(tile.weights[i],
                         static_cast<u32>(desc.layers.size()))) {
         SetError(error, "terrain tile contains invalid height or weight data");
@@ -151,7 +145,7 @@ bool ValidateTerrain(const Terrain &terrain, u32 *sample_count,
 
 class Reader {
 public:
-  explicit Reader(std::span<const u8> bytes) : bytes_(bytes) {}
+  explicit Reader(base::Span<const u8> bytes) : bytes_(bytes) {}
 
   bool ReadU8(u8 *value) {
     if (remaining() < 1)
@@ -193,7 +187,7 @@ public:
     u32 bits = 0;
     if (!ReadU32(&bits))
       return false;
-    *value = std::bit_cast<i32>(bits);
+    *value = rx::BitCast<i32>(bits);
     return true;
   }
 
@@ -201,11 +195,11 @@ public:
     u32 bits = 0;
     if (!ReadU32(&bits))
       return false;
-    *value = std::bit_cast<f32>(bits);
+    *value = rx::BitCast<f32>(bits);
     return true;
   }
 
-  bool ReadString(u32 maximum_size, std::string *value) {
+  bool ReadString(u32 maximum_size, base::String *value) {
     u32 size = 0;
     if (!ReadU32(&size) || size > maximum_size || remaining() < size)
       return false;
@@ -218,52 +212,36 @@ public:
   size_t remaining() const { return bytes_.size() - offset_; }
 
 private:
-  std::span<const u8> bytes_;
+  base::Span<const u8> bytes_;
   size_t offset_ = 0;
 };
 
-bool ReadFile(const std::string &file_path, base::Vector<u8> *bytes,
-              std::string *error) {
-  std::ifstream input(file_path, std::ios::binary | std::ios::ate);
-  if (!input) {
+bool ReadFile(const base::String &file_path, base::Vector<u8> *bytes,
+              base::String *error) {
+  base::File input =
+      fs::OpenFile(file_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
+  if (!input.IsValid()) {
     SetError(error, "cannot open terrain file for reading");
     return false;
   }
-  const std::streamoff size = input.tellg();
-  if (size < 0 || static_cast<u64>(size) > kMaximumFileBytes) {
+  base::File::Info info;
+  if (!input.GetInfo(&info) || info.size < 0 ||
+      static_cast<u64>(info.size) > kMaximumFileBytes) {
     SetError(error, "terrain file size is invalid");
     return false;
   }
-  bytes->resize(static_cast<size_t>(size));
-  input.seekg(0);
-  if (!bytes->empty()) {
-    input.read(reinterpret_cast<char *>(bytes->data()),
-               static_cast<std::streamsize>(bytes->size()));
-  }
-  if (!input) {
+  bytes->resize(static_cast<size_t>(info.size));
+  if (!fs::ReadAt(input, 0, base::Span<u8>(bytes->data(), bytes->size()))) {
     SetError(error, "terrain file is truncated");
     return false;
   }
   return true;
 }
 
-bool ReplaceFile(const std::filesystem::path& temporary,
-                 const std::filesystem::path& target,
-                 std::error_code* error) {
-  std::filesystem::rename(temporary, target, *error);
-#if defined(_WIN32)
-  if (*error && MoveFileExW(temporary.c_str(), target.c_str(),
-                           MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-    error->clear();
-  }
-#endif
-  return !*error;
-}
-
 } // namespace
 
-bool SaveTerrain(const Terrain &terrain, const std::string &file_path,
-                 std::string *error) {
+bool SaveTerrain(const Terrain &terrain, const base::String &file_path,
+                 base::String *error) {
   if (error)
     error->clear();
   u32 sample_count = 0;
@@ -271,7 +249,7 @@ bool SaveTerrain(const Terrain &terrain, const std::string &file_path,
     return false;
 
   base::Vector<u8> bytes;
-  bytes.insert(bytes.end(), std::begin(kMagic), std::end(kMagic));
+  bytes.insert(bytes.end(), kMagic, kMagic + sizeof(kMagic));
   AppendU32(&bytes, kVersion);
   const TerrainDesc &desc = terrain.desc();
   AppendU64(&bytes, desc.id.hash);
@@ -291,14 +269,19 @@ bool SaveTerrain(const Terrain &terrain, const std::string &file_path,
   }
 
   for (const TerrainTile &tile : terrain.tiles()) {
-    AppendU32(&bytes, std::bit_cast<u32>(tile.key.x));
-    AppendU32(&bytes, std::bit_cast<u32>(tile.key.z));
+    AppendU32(&bytes, rx::BitCast<u32>(tile.key.x));
+    AppendU32(&bytes, rx::BitCast<u32>(tile.key.z));
     AppendU64(&bytes, tile.revision);
-    const auto [minimum_it, maximum_it] =
-        std::minmax_element(tile.heights.begin(), tile.heights.end());
+    // std::minmax_element's picks: the first smallest, the last largest.
+    const f32* minimum_it = tile.heights.begin();
+    const f32* maximum_it = tile.heights.begin();
+    for (const f32* it = tile.heights.begin(); it != tile.heights.end(); ++it) {
+      if (*it < *minimum_it) minimum_it = it;
+      if (!(*it < *maximum_it)) maximum_it = it;
+    }
     const f32 minimum = *minimum_it;
     const f32 range = *maximum_it - minimum;
-    if (!std::isfinite(range)) {
+    if (!::isfinite(range)) {
       SetError(error, "terrain tile height range is not finite");
       return false;
     }
@@ -312,7 +295,7 @@ bool SaveTerrain(const Terrain &terrain, const std::string &file_path,
         const double normalized = (static_cast<double>(height) - minimum) /
                                   static_cast<double>(range);
         quantized = static_cast<u16>(
-            std::clamp(std::llround(normalized * 65535.0), 0ll, 65535ll));
+            rx::Clamp(::llround(normalized * 65535.0), 0ll, 65535ll));
       }
       AppendU16(&bytes, quantized);
     }
@@ -323,37 +306,33 @@ bool SaveTerrain(const Terrain &terrain, const std::string &file_path,
   }
   AppendU64(&bytes, Checksum(bytes));
 
-  const std::filesystem::path target(file_path);
-  std::filesystem::path temporary = target;
-  temporary += ".tmp";
-  std::error_code filesystem_error;
-  std::filesystem::remove(temporary, filesystem_error);
-  std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
-  if (!output) {
+  const base::String temporary = file_path + ".tmp";
+  fs::Remove(temporary);
+  base::File output =
+      fs::OpenFile(temporary, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
+  if (!output.IsValid()) {
     SetError(error, "cannot open terrain temporary file for writing");
     return false;
   }
-  output.write(reinterpret_cast<const char *>(bytes.data()),
-               static_cast<std::streamsize>(bytes.size()));
-  output.flush();
-  const bool wrote = static_cast<bool>(output);
-  output.close();
+  const bool wrote = fs::WriteAll(output, base::Span<const u8>(bytes.data(), bytes.size())) &&
+                     output.Flush();
+  output.Close();
   if (!wrote) {
-    std::filesystem::remove(temporary, filesystem_error);
+    fs::Remove(temporary);
     SetError(error, "failed writing terrain temporary file");
     return false;
   }
 
-  if (!ReplaceFile(temporary, target, &filesystem_error)) {
-    std::filesystem::remove(temporary, filesystem_error);
+  if (!fs::Rename(temporary, file_path)) {
+    fs::Remove(temporary);
     SetError(error, "failed renaming terrain temporary file");
     return false;
   }
   return true;
 }
 
-bool LoadTerrain(const std::string &file_path, Terrain *terrain,
-                 std::string *error) {
+bool LoadTerrain(const base::String &file_path, Terrain *terrain,
+                 base::String *error) {
   if (error)
     error->clear();
   if (!terrain) {
@@ -374,12 +353,12 @@ bool LoadTerrain(const std::string &file_path, Terrain *terrain,
                        << shift;
   }
   if (stored_checksum !=
-      Checksum(std::span<const u8>(bytes.data(), payload_size))) {
+      Checksum(base::Span<const u8>(bytes.data(), payload_size))) {
     SetError(error, "terrain file checksum mismatch");
     return false;
   }
 
-  Reader reader(std::span<const u8>(bytes.data(), payload_size));
+  Reader reader(base::Span<const u8>(bytes.data(), payload_size));
   for (u8 expected : kMagic) {
     u8 actual = 0;
     if (!reader.ReadU8(&actual) || actual != expected) {
@@ -405,12 +384,12 @@ bool LoadTerrain(const std::string &file_path, Terrain *terrain,
     return false;
   }
   u32 sample_count = 0;
-  if (!desc.id || !std::isfinite(desc.origin.x) ||
-      !std::isfinite(desc.origin.y) ||
-      !std::isfinite(desc.origin.z) || !std::isfinite(desc.sample_spacing) ||
+  if (!desc.id || !::isfinite(desc.origin.x) ||
+      !::isfinite(desc.origin.y) ||
+      !::isfinite(desc.origin.z) || !::isfinite(desc.sample_spacing) ||
       desc.sample_spacing <= 0 ||
       !GetSampleCount(desc.tile_quads, &sample_count) ||
-      !std::isfinite(desc.tile_quads * desc.sample_spacing) ||
+      !::isfinite(desc.tile_quads * desc.sample_spacing) ||
       layer_count == 0 || layer_count > kMaximumLayers ||
       tile_count > kMaximumTiles ||
       static_cast<u64>(tile_count) * sample_count > kMaximumTotalSamples) {
@@ -434,7 +413,7 @@ bool LoadTerrain(const std::string &file_path, Terrain *terrain,
     }
   }
 
-  Terrain decoded(std::move(desc));
+  Terrain decoded(base::move(desc));
   base::Vector<u64> revisions;
   revisions.reserve(tile_count);
   TerrainTileKey previous;
@@ -453,8 +432,8 @@ bool LoadTerrain(const std::string &file_path, Terrain *terrain,
       SetError(error, "terrain tile header is truncated");
       return false;
     }
-    if ((has_previous && !KeyLess(previous, key)) || !std::isfinite(minimum) ||
-        !std::isfinite(range) || range < 0 || !std::isfinite(minimum + range) ||
+    if ((has_previous && !KeyLess(previous, key)) || !::isfinite(minimum) ||
+        !::isfinite(range) || range < 0 || !::isfinite(minimum + range) ||
         stored_samples != sample_count ||
         stored_weight_bytes != sample_count * 4 ||
         reader.remaining() < static_cast<size_t>(sample_count) * 6) {
@@ -472,7 +451,7 @@ bool LoadTerrain(const std::string &file_path, Terrain *terrain,
         return false;
       }
       height = minimum + range * (static_cast<f32>(quantized) / 65535.0f);
-      if (!std::isfinite(height)) {
+      if (!::isfinite(height)) {
         SetError(error, "terrain height data is not finite");
         return false;
       }
@@ -502,7 +481,7 @@ bool LoadTerrain(const std::string &file_path, Terrain *terrain,
   }
   for (u32 i = 0; i < tile_count; ++i)
     decoded.tiles_[i].revision = revisions[i];
-  *terrain = std::move(decoded);
+  *terrain = base::move(decoded);
   return true;
 }
 

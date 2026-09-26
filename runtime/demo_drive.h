@@ -1,12 +1,11 @@
 #ifndef RX_RUNTIME_DEMO_DRIVE_H_
 #define RX_RUNTIME_DEMO_DRIVE_H_
 
-#include <memory>
-#include <string>
-#include <utility>
-#include <vector>
-
 #include "audio/vehicle_audio.h"
+#include "base/containers/pair.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "core/input.h"
 #include "core/input_actions.h"
 #include "core/math.h"
@@ -62,7 +61,7 @@ class DriveDemo {
   // the .glb was absent, so callers fall back to graybox geometry.
   struct Model {
     bool loaded = false;
-    std::vector<std::pair<u64, Mat4>> parts;
+    base::Vector<base::Pair<u64, Mat4>> parts;
     Vec3 aabb_min{0, 0, 0};
     Vec3 aabb_max{0, 0, 0};
   };
@@ -79,7 +78,7 @@ class DriveDemo {
   // sourced from that glTF mesh (the truck's rigid wheel mesh, replaced by the
   // suspension-driven wheel cylinders). Returns false (and leaves out->loaded
   // false) when the file is missing.
-  bool LoadModel(const std::string& path, i32 skip_mesh_index, Model* out);
+  bool LoadModel(const base::String& path, i32 skip_mesh_index, Model* out);
   // Recenter + scale-to-fit + yaw a model into a unit placement frame, so the
   // final draw is `place * NormalizeXform(...) * part.local`. sit_on_ground puts
   // the model's min-Y at the frame origin (parked pieces); else its centre.
@@ -112,9 +111,9 @@ class DriveDemo {
 
   // vehicles
   physics::VehicleId car_ = 0;
-  std::unique_ptr<physics::Boat> boat_;
-  std::unique_ptr<physics::Aircraft> aircraft_;
-  std::unique_ptr<physics::Kite> kite_;
+  base::UniquePointer<physics::Boat> boat_;
+  base::UniquePointer<physics::Aircraft> aircraft_;
+  base::UniquePointer<physics::Kite> kite_;
   Vehicle active_ = Vehicle::kCar;
 
   // Active handling profile (0..5: sports/muscle/hatch/suv/van/semi) and the
@@ -171,14 +170,14 @@ class DriveDemo {
   f32 wetness_ = 0;
 
   // procedural audio (one voice set per vehicle)
-  std::unique_ptr<audio::VehicleAudio> car_audio_;
-  std::unique_ptr<audio::VehicleAudio> boat_audio_;
-  std::unique_ptr<audio::VehicleAudio> plane_audio_;
+  base::UniquePointer<audio::VehicleAudio> car_audio_;
+  base::UniquePointer<audio::VehicleAudio> boat_audio_;
+  base::UniquePointer<audio::VehicleAudio> plane_audio_;
 
   // visuals
   Model car_model_;
   Model plane_model_;
-  std::vector<std::pair<Model, Mat4>> showcase_;  // parked pieces + baked placement
+  base::Vector<base::Pair<Model, Mat4>> showcase_;  // parked pieces + baked placement
   Mat4 car_norm_ = Mat4::Identity();
   Mat4 plane_norm_ = Mat4::Identity();
   u64 wheel_mesh_ = 0;    // engine-drawn suspension wheel cylinder

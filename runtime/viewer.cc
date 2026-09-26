@@ -1,11 +1,10 @@
 #include "viewer.h"
 
-#include <cmath>
-#include <cstdlib>
-#include <algorithm>
-#include <cstring>
-#include <sstream>
-#include <utility>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+// std::sort stays for the scene light order (see there).
 
 #include <base/option.h>
 
@@ -21,8 +20,19 @@
 #include <stb_image.h>
 #include "scene/components.h"
 
+#include "base/algorithm.h"
+#include "base/containers/pair.h"
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 #include "demo_scenes.h"
 #include "scene_authoring.h"
+#include "core/text_reader.h"
+#include "core/sort.h"
 
 // Viewer lifecycle and per-frame policy: the front-door content dispatch
 // (glTF scene or builtin demo), the day/night sun, the debug overlay and the
@@ -96,7 +106,7 @@ Viewer::Viewer(const EngineConfig& config) : config_(config) {}
 
 Viewer::~Viewer() {
   if (cam_record_) {
-    std::fclose(cam_record_);
+    ::fclose(cam_record_);
     cam_record_ = nullptr;
   }
 }
@@ -141,7 +151,7 @@ bool Viewer::OnInitialize(app::Services& services) {
   ctx_.physics_entities = physics_entities_;
   ctx_.hair_bindings = services.hair_bindings;
   ctx_.actions = actions_;
-  demos_ = std::make_unique<DemoScenes>(ctx_);
+  demos_ = base::MakeUnique<DemoScenes>(ctx_);
 
   if (physics_->initialized()) CreatePhysicsCubeAsset();
 
@@ -182,9 +192,9 @@ bool Viewer::OnInitialize(app::Services& services) {
 // the flag exists to be typed by hand, and a run that quietly used the authored
 // camera would be read as "the change did nothing".
 void Viewer::ApplyCameraOverride() {
-  auto triple = [](const std::string& text, Vec3* out) {
-    std::istringstream in(text);
-    return static_cast<bool>(in >> out->x >> out->y >> out->z);
+  auto triple = [](const base::String& text, Vec3* out) {
+    TokenReader in(text);
+    return in.Next(&out->x) && in.Next(&out->y) && in.Next(&out->z);
   };
   Vec3 eye = camera_.position();
   Vec3 target = camera_.target();
@@ -224,12 +234,12 @@ void Viewer::StartAuthoringEndpoint() {
   script_ctx_.log_sink = [](void*, script::ScriptStringView message) {
     RX_INFO("authoring: {}", message.view());
   };
-  bridge_ = std::make_unique<authoring::CommandBridge>(commands_, script_ctx_);
+  bridge_ = base::MakeUnique<authoring::CommandBridge>(commands_, script_ctx_);
 
-  std::string error;
+  base::String error;
   if (!authoring_endpoint_.Start(config_.authoring_socket, &error)) {
     RX_ERROR("authoring endpoint: {}", error);
-    bridge_.reset();
+    bridge_.Reset();
     return;
   }
   RX_INFO("authoring endpoint listening on {} ({} command(s))", config_.authoring_socket,
@@ -276,7 +286,7 @@ bool Viewer::LoadRxScene() {
   // Resolves Renderable asset paths (a shape-authored scene has none) and holds
   // the textures BuildSceneShapes synthesizes for the scene's patterns.
   asset::AssetDatabase db(*ctx_.vfs);
-  std::string error;
+  base::String error;
   if (!edit::LoadScene(*world_, db, config_.scene_path, &error, /*strict=*/true)) {
     RX_ERROR("rxscene: {}", error);
     return false;
@@ -379,7 +389,7 @@ bool Viewer::LoadSceneFile() {
     for (const asset::Mesh& mesh : scene.meshes) renderer_->UploadMesh(mesh);
   }
 
-  base::Vector<std::pair<u32, ecs::Entity>> instance_entities;
+  base::Vector<base::Pair<u32, ecs::Entity>> instance_entities;
   for (const asset::ImportedScene::Instance& instance : scene.instances) {
     const asset::Mesh& mesh = scene.meshes[instance.mesh_index];
     // Morphed instances stay out of the ECS gather; EmitMorphedInstances
@@ -397,17 +407,17 @@ bool Viewer::LoadSceneFile() {
       if (const char* spec = MorphWeights.get()) {
         // "name=w,name=w": resolve each name against this mesh's targets.
         morphed.pinned = true;
-        std::string s(spec);
+        base::String s(spec);
         size_t pos = 0;
         while (pos < s.size()) {
           size_t comma = s.find(',', pos);
-          if (comma == std::string::npos) comma = s.size();
-          std::string entry = s.substr(pos, comma - pos);
+          if (comma == base::String::npos) comma = s.size();
+          base::String entry = s.substr(pos, comma - pos);
           pos = comma + 1;
           size_t eq = entry.find('=');
-          if (eq == std::string::npos) continue;
-          std::string name = entry.substr(0, eq);
-          f32 weight = std::strtof(entry.c_str() + eq + 1, nullptr);
+          if (eq == base::String::npos) continue;
+          base::String name = entry.substr(0, eq);
+          f32 weight = ::strtof(entry.c_str() + eq + 1, nullptr);
           i32 index = mesh.FindMorphTarget(asset::MakeAssetId(name).hash);
           if (index >= 0) morphed.weights[static_cast<u32>(index)] = weight;
         }
@@ -433,7 +443,7 @@ bool Viewer::LoadSceneFile() {
           expression_demo_ = true;
         }
       }
-      morphed_.push_back(std::move(morphed));
+      morphed_.push_back(base::move(morphed));
       continue;
     }
     ecs::Entity entity = world_->Create();
@@ -441,7 +451,7 @@ bool Viewer::LoadSceneFile() {
     transform.position[0] = instance.position.x;
     transform.position[1] = instance.position.y;
     transform.position[2] = instance.position.z;
-    std::memcpy(transform.rotation, instance.rotation, sizeof(transform.rotation));
+    base::MemCopy(transform.rotation, instance.rotation, sizeof(transform.rotation));
     transform.scale = instance.scale;
     world_->Add(entity, transform);
     world_->Add(entity, scene::Renderable{scene.meshes[instance.mesh_index].id});
@@ -471,7 +481,7 @@ bool Viewer::LoadSceneFile() {
 // tile the receiver is biased onto - a Genesis-style body lays its zones out
 // across u in [0,7), and only the anchored zone can take the decal.
 void Viewer::StampTattoos(const asset::ImportedScene& scene,
-                          std::span<const std::pair<u32, ecs::Entity>> instances) {
+                          base::Span<const base::Pair<u32, ecs::Entity>> instances) {
   const char* spec = Tattoo.get();
   if (!spec || config_.headless || instances.empty()) return;
 
@@ -505,22 +515,22 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
   Vec3 lo{vertices[0].position[0], vertices[0].position[1], vertices[0].position[2]};
   Vec3 hi = lo;
   for (const asset::Vertex& v : vertices) {
-    lo = {std::min(lo.x, v.position[0]), std::min(lo.y, v.position[1]),
-          std::min(lo.z, v.position[2])};
-    hi = {std::max(hi.x, v.position[0]), std::max(hi.y, v.position[1]),
-          std::max(hi.z, v.position[2])};
+    lo = {rx::Min(lo.x, v.position[0]), rx::Min(lo.y, v.position[1]),
+          rx::Min(lo.z, v.position[2])};
+    hi = {rx::Max(hi.x, v.position[0]), rx::Max(hi.y, v.position[1]),
+          rx::Max(hi.z, v.position[2])};
   }
 
   if (const char* atlas_path = TattooAtlas.get()) {
-    std::FILE* file = std::fopen(atlas_path, "rb");
+    FILE* file = ::fopen(atlas_path, "rb");
     if (!file) {
       RX_WARN("RX_TATTOO_ATLAS: cannot open {}", atlas_path);
     } else {
-      std::fseek(file, 0, SEEK_END);
-      const long bytes = std::ftell(file);
-      std::fseek(file, 0, SEEK_SET);
+      ::fseek(file, 0, SEEK_END);
+      const long bytes = ::ftell(file);
+      ::fseek(file, 0, SEEK_SET);
       const u64 texels = bytes > 0 ? static_cast<u64>(bytes) / 4 : 0;
-      const u64 side = static_cast<u64>(std::lround(std::sqrt(static_cast<f64>(texels))));
+      const u64 side = static_cast<u64>(::lround(::sqrt(static_cast<f64>(texels))));
       if (bytes <= 0 || side * side * 4 != static_cast<u64>(bytes)) {
         RX_WARN("RX_TATTOO_ATLAS: {} is {} bytes, not a square rgba8 image", atlas_path, bytes);
       } else {
@@ -531,7 +541,7 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
         ink.height = static_cast<u32>(side);
         ink.is_srgb = true;
         ink.data.resize(static_cast<size_t>(bytes));
-        if (std::fread(ink.data.data(), 1, static_cast<size_t>(bytes), file) ==
+        if (::fread(ink.data.data(), 1, static_cast<size_t>(bytes), file) ==
             static_cast<size_t>(bytes)) {
           renderer_->UploadTexture(ink);
           renderer_->SetDecalAtlas(ink.id);
@@ -540,7 +550,7 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
                   atlas_path);
         }
       }
-      std::fclose(file);
+      ::fclose(file);
     }
   }
 
@@ -555,12 +565,12 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
   bool tile_chosen = false;
   i32 tile_u = 0, tile_v = 0;
   u32 stamped = 0;
-  std::string s(spec);
+  base::String s(spec);
   size_t pos = 0;
   while (pos < s.size()) {
     size_t end = s.find(';', pos);
-    if (end == std::string::npos) end = s.size();
-    const std::string entry = s.substr(pos, end - pos);
+    if (end == base::String::npos) end = s.size();
+    const base::String entry = s.substr(pos, end - pos);
     pos = end + 1;
     f32 f[4] = {0.5f, 0.5f, 0.5f, 0.08f};
     u32 parsed = 0;
@@ -570,7 +580,7 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
       // strtof returns 0 on failure, so only commit the value once the parse is
       // known good: a trailing space would otherwise zero the size and build a
       // degenerate projector (all-zero rows, NaN facing test).
-      const f32 value = std::strtof(cursor, &next);
+      const f32 value = ::strtof(cursor, &next);
       if (next == cursor) break;
       f[parsed] = value;
       ++parsed;
@@ -596,8 +606,8 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
     // One draw carries one layer tile, so every tattoo has to live in the zone
     // the first anchor picked; a later anchor on another zone would bake
     // outside the tile and shade nothing.
-    const i32 anchor_tile_u = static_cast<i32>(std::floor(nearest->uv[0]));
-    const i32 anchor_tile_v = static_cast<i32>(std::floor(nearest->uv[1]));
+    const i32 anchor_tile_u = static_cast<i32>(::floor(nearest->uv[0]));
+    const i32 anchor_tile_v = static_cast<i32>(::floor(nearest->uv[1]));
     if (!tile_chosen) {
       tile_u = anchor_tile_u;
       tile_v = anchor_tile_v;
@@ -615,7 +625,7 @@ void Viewer::StampTattoos(const asset::ImportedScene& scene,
     const Vec3 normal = Normalize(TransformDir(
         to_world, {nearest->normal[0], nearest->normal[1], nearest->normal[2]}));
     Vec3 up{0, 1, 0};
-    if (std::abs(Dot(up, normal)) > 0.9f) up = {0, 0, 1};
+    if (::abs(Dot(up, normal)) > 0.9f) up = {0, 0, 1};
     render::DecalStamp tattoo;
     tattoo.receiver = receiver;
     const f32 world_size = f[3] * placement_scale;
@@ -668,16 +678,16 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
   u32 punctual = 0, dropped = 0, distant_count = 0, dome_count = 0;
 
   for (const asset::ImportedScene::Light& light : scene.lights) {
-    const f32 gain = light.intensity * std::exp2(light.exposure);
+    const f32 gain = light.intensity * ::exp2(light.exposure);
     if (light.kind == Kind::kDistant) {
       // Brightest distant light wins: a rig may carry a fill as well as a key.
       ++distant_count;
-      if (!sun || gain > sun->intensity * std::exp2(sun->exposure)) sun = &light;
+      if (!sun || gain > sun->intensity * ::exp2(sun->exposure)) sun = &light;
       continue;
     }
     if (light.kind == Kind::kDome) {
       ++dome_count;
-      if (!dome || gain > dome->intensity * std::exp2(dome->exposure)) dome = &light;
+      if (!dome || gain > dome->intensity * ::exp2(dome->exposure)) dome = &light;
       continue;
     }
     render::PointLight pl;
@@ -699,7 +709,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     }
     // Influence radius from an inverse-square falloff down to a ~1/255 cutoff,
     // clamped so a bright practical does not light the entire stage.
-    pl.pos_radius[3] = std::min(30.0f, std::max(1.0f, std::sqrt(intensity * 255.0f)));
+    pl.pos_radius[3] = rx::Min(30.0f, rx::Max(1.0f, ::sqrt(intensity * 255.0f)));
     pl.color_intensity[0] = light.color[0];
     pl.color_intensity[1] = light.color[1];
     pl.color_intensity[2] = light.color[2];
@@ -717,7 +727,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
       case Kind::kDisk:
       case Kind::kCylinder:
         pl.direction_type[3] = 2.0f;  // sphere area light
-        pl.params[0] = std::max(0.01f, light.radius);
+        pl.params[0] = rx::Max(0.01f, light.radius);
         break;
       default:
         pl.direction_type[3] = 0.0f;
@@ -727,9 +737,9 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     if (light.cone_angle < 89.9f && light.kind != Kind::kRect) {
       pl.direction_type[3] = 1.0f;
       const f32 outer = light.cone_angle * 3.14159265358979f / 180.0f;
-      const f32 inner = outer * (1.0f - std::clamp(light.cone_softness, 0.0f, 1.0f));
-      pl.params[0] = std::cos(inner);
-      pl.params[1] = std::cos(outer);
+      const f32 inner = outer * (1.0f - rx::Clamp(light.cone_softness, 0.0f, 1.0f));
+      pl.params[0] = ::cos(inner);
+      pl.params[1] = ::cos(outer);
     }
     scene_lights_.push_back(pl);
     ++punctual;
@@ -738,10 +748,12 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
   // The renderer uploads only the first kMaxFrameLights and clusters only the
   // first few per cluster, both silently. Ordering brightest-first means what
   // survives a truncation is what matters most, and the count is reported.
-  std::sort(scene_lights_.begin(), scene_lights_.end(),
-            [](const render::PointLight &a, const render::PointLight &b) {
-              return a.color_intensity[3] > b.color_intensity[3];
-            });
+  // Stable: equal intensities keep import order, which decides which lights
+  // survive truncation and the per-cluster light order.
+  rx::StableSort(scene_lights_.data(), scene_lights_.data() + scene_lights_.size(),
+                 [](const render::PointLight &a, const render::PointLight &b) {
+                   return a.color_intensity[3] > b.color_intensity[3];
+                 });
   if (scene_lights_.size() > 256) {
     RX_WARN("usd lighting: {} punctual lights imported but the renderer uploads "
             "256 per frame; the dimmest {} will not light the scene",
@@ -752,7 +764,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     s.sun_direction = sun->direction;
     s.sun_color = {sun->color[0], sun->color[1], sun->color[2]};
     s.sun_intensity =
-        sun->intensity * std::exp2(sun->exposure) * UsdSunScale.get();
+        sun->intensity * ::exp2(sun->exposure) * UsdSunScale.get();
     ctx_.scene_owns_sun = true;
     drive_sun_from_clock_ = false;
   }
@@ -767,7 +779,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     if (f32* pixels = stbi_loadf(dome->texture.c_str(), &w, &h, &channels, 4)) {
       const Vec3 tint{dome->color[0], dome->color[1], dome->color[2]};
       const f32 gain =
-          dome->intensity * std::exp2(dome->exposure) * UsdDomeScale.get();
+          dome->intensity * ::exp2(dome->exposure) * UsdDomeScale.get();
       dome_ibl = renderer_->SetEnvironmentMap(pixels, static_cast<u32>(w),
                                               static_cast<u32>(h), tint, gain,
                                               UsdDomeRotation.get());
@@ -815,7 +827,7 @@ void Viewer::ApplySceneLighting(const asset::ImportedScene& scene) {
     s.clouds = false;
     s.aerial_perspective = 0.0f;
     const f32 dome_gain =
-        dome ? dome->intensity * std::exp2(dome->exposure) * UsdDomeScale.get()
+        dome ? dome->intensity * ::exp2(dome->exposure) * UsdDomeScale.get()
              : 0.05f;
     // The dome's tint multiplies its environment map, so the fill colour is
     // both together - the tint alone is not the colour of the sky.
@@ -906,8 +918,8 @@ void Viewer::ApplySceneCamera(const asset::ImportedScene& scene) {
                                   camera.rotation[2], camera.rotation[3]);
   const Vec3 forward = TransformDir(basis, {0.0f, 0.0f, -1.0f});
   camera_.set_position(camera.position);
-  camera_.set_yaw_pitch(std::atan2(forward.x, -forward.z),
-                        std::asin(std::clamp(forward.y, -1.0f, 1.0f)));
+  camera_.set_yaw_pitch(::atan2(forward.x, -forward.z),
+                        ::asin(rx::Clamp(forward.y, -1.0f, 1.0f)));
   camera_.speed = 4.0f;
   // Framing is the lens as much as the pose: a 18mm wide-angle stage camera
   // shows a different scene through the engine's default 60 degrees.
@@ -922,7 +934,7 @@ void Viewer::DriveSunFromClock() {
   // frame for sub-degree motion.
   if (!drive_sun_from_clock_ || ctx_.scene_owns_sun) return;
   const f32 hour = clock_->hour();
-  if (last_sky_hour_ >= -100.0f && std::abs(hour - last_sky_hour_) < 0.02f) return;
+  if (last_sky_hour_ >= -100.0f && ::abs(hour - last_sky_hour_) < 0.02f) return;
   last_sky_hour_ = hour;
   const SkyLighting sky = ComputeSkyLighting(hour);
   auto& s = renderer_->settings();
@@ -1011,9 +1023,9 @@ void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
     // Cycle the stock poses; the life layer keeps blinking through the holds.
     expression_hold_ -= frame_delta;
     if (expression_hold_ <= 0) {
-      static constexpr std::string_view kCycle[] = {"neutral", "smile",  "angry",      "surprised",
+      static const base::StringRef kCycle[] = {"neutral", "smile",  "angry",      "surprised",
                                                     "smirk",   "pucker", "eyes_closed"};
-      expression_.SetExpression(kCycle[expression_pose_ % std::size(kCycle)]);
+      expression_.SetExpression(kCycle[expression_pose_ % (sizeof(kCycle) / sizeof(kCycle[0]))]);
       ++expression_pose_;
       expression_hold_ = 3.0f;
     }
@@ -1024,11 +1036,11 @@ void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
       // RX_MORPH_WEIGHTS: weights were fixed at load; skip track/sweep.
     } else if (!instance.animation.times.empty()) {
       f32 time = instance.animation.duration > 0
-                     ? std::fmod(morph_time_, instance.animation.duration)
+                     ? ::fmod(morph_time_, instance.animation.duration)
                      : 0.0f;
       anim::SampleMorphWeights(instance.animation, time, &instance.weights);
     } else if (!instance.expression_map.empty()) {
-      std::fill(instance.weights.begin(), instance.weights.end(), 0.0f);
+      base::Fill(instance.weights.begin(), instance.weights.end(), 0.0f);
       for (u32 c = 0; c < instance.expression_map.size(); ++c) {
         i32 index = instance.expression_map[c];
         if (index >= 0) instance.weights[static_cast<u32>(index)] = expression_.channel_weight(c);
@@ -1036,11 +1048,11 @@ void Viewer::EmitMorphedInstances(f32 frame_delta, render::FrameView& view) {
     } else if (!instance.weights.empty()) {
       // No imported track (e.g. an ARKit-style blendshape face): sweep one
       // target at a time, eased in and out, so the expressions cycle live.
-      std::fill(instance.weights.begin(), instance.weights.end(), 0.0f);
+      base::Fill(instance.weights.begin(), instance.weights.end(), 0.0f);
       const f32 period = 1.2f;  // seconds per target
       u32 index = static_cast<u32>(morph_time_ / period) % instance.weights.size();
-      f32 phase = std::fmod(morph_time_, period) / period;
-      instance.weights[index] = std::sin(phase * 3.14159265f);
+      f32 phase = ::fmod(morph_time_, period) / period;
+      instance.weights[index] = ::sin(phase * 3.14159265f);
     }
     render::DrawItem draw;
     draw.mesh = instance.mesh;
@@ -1077,7 +1089,7 @@ void Viewer::OnFrameEnd() {
       // written by the next RenderFrame), then quit once the last one landed.
       if (ui_shot_frames <= ui_shot_target) {
         char path[512];
-        std::snprintf(path, sizeof(path), "%s_%04d.png", shot, ui_shot_frames);
+        ::snprintf(path, sizeof(path), "%s_%04d.png", shot, ui_shot_frames);
         renderer_->CaptureScreenshot(path);
       } else {
         host_->RequestQuit();
@@ -1102,7 +1114,7 @@ void Viewer::OnShutdown() {
   // the socket file goes away at the moment the engine stops serving it rather
   // than whenever the viewer is destroyed.
   authoring_endpoint_.Stop();
-  bridge_.reset();
+  bridge_.Reset();
   // Release demo GPU resources (scenehook raw pipelines) before the host tears
   // the renderer's device down.
   if (tattoo_receiver_ != 0 && renderer_) {

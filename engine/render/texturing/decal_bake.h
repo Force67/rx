@@ -23,10 +23,10 @@
 // [0,7) gets a full-resolution layer); geometry outside 0..1 after the
 // transform takes no decal at all.
 
-#include <span>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "render/core/render_graph.h"
@@ -125,7 +125,7 @@ class DecalBaker {
   // `source_albedo` / `source_normal` are the authored decal atlas the stamps'
   // uv_rect indexes; either may be null, and a built-in white / flat page
   // stands in.
-  void AddToGraph(RenderGraph& graph, std::span<const Target> targets, u32 frame_slot,
+  void AddToGraph(RenderGraph& graph, base::Span<const Target> targets, u32 frame_slot,
                   u64 frame_index, TextureView source_albedo, TextureView source_normal);
 
   TextureView albedo_view() const { return albedo_.view; }

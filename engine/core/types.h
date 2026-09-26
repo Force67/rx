@@ -1,28 +1,30 @@
 #ifndef RX_CORE_TYPES_H_
 #define RX_CORE_TYPES_H_
 
-#include <cstdint>
-#include <span>
-#include <string>
-#include <string_view>
-#include <vector>
+#include "base/arch.h"
+#include "base/containers/span.h"
+#include "base/strings/string_ref.h"
 
 namespace rx {
 
-using i8 = std::int8_t;
-using i16 = std::int16_t;
-using i32 = std::int32_t;
-using i64 = std::int64_t;
-using u8 = std::uint8_t;
-using u16 = std::uint16_t;
-using u32 = std::uint32_t;
-using u64 = std::uint64_t;
-using f32 = float;
-using f64 = double;
+// base's fixed-width types. u64 is unsigned long long there, not the
+// unsigned long uint64_t is on LP64: same width, but a distinct type for
+// overloads, pointer parameters and printf, so C APIs taking uint64_t* need
+// their own variable.
+using arch_types::f32;
+using arch_types::f64;
+using arch_types::i16;
+using arch_types::i32;
+using arch_types::i64;
+using arch_types::i8;
+using arch_types::u16;
+using arch_types::u32;
+using arch_types::u64;
+using arch_types::u8;
 
-using ByteSpan = std::span<const u8>;
+using ByteSpan = base::Span<const u8>;
 
-constexpr u64 Fnv1a(std::string_view str) {
+inline u64 Fnv1a(base::StringRef str) {
   u64 hash = 0xcbf29ce484222325ull;
   for (char c : str) {
     hash ^= static_cast<u8>(c);

@@ -1,9 +1,12 @@
 #include "audio/ffmpeg_codec.h"
 
-#include <cstdio>
-#include <cstring>
-#include <vector>
+#include <stdio.h>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 
 extern "C" {
@@ -35,7 +38,7 @@ int ReadPacket(void* opaque, u8* buf, int want) {
   const size_t remaining = src->size - src->pos;
   if (remaining == 0) return AVERROR_EOF;
   const int n = static_cast<int>(want < static_cast<int>(remaining) ? want : remaining);
-  std::memcpy(buf, src->data + src->pos, static_cast<size_t>(n));
+  base::MemCopy(buf, src->data + src->pos, static_cast<size_t>(n));
   src->pos += static_cast<size_t>(n);
   return n;
 }
@@ -77,7 +80,7 @@ struct Decode {
 
 }  // namespace
 
-std::unique_ptr<Decoder> OpenFfmpegDecoder(ByteSpan bytes) {
+base::UniquePointer<Decoder> OpenFfmpegDecoder(ByteSpan bytes) {
   if (bytes.empty()) return nullptr;
   MemorySource source{bytes.data(), bytes.size(), 0};
   Decode d;
@@ -139,7 +142,7 @@ std::unique_ptr<Decoder> OpenFfmpegDecoder(ByteSpan bytes) {
   AudioClip clip;
   clip.channels = static_cast<u32>(out_channels);
   clip.sample_rate = static_cast<u32>(out_rate);
-  std::vector<float> convert;
+  base::Vector<float> convert;
 
   auto drain = [&](bool flush) {
     while (true) {
@@ -180,7 +183,7 @@ std::unique_ptr<Decoder> OpenFfmpegDecoder(ByteSpan bytes) {
   }
   RX_INFO("audio: FFmpeg decoded {} frames, {} ch, {} Hz", clip.frames(), clip.channels,
            clip.sample_rate);
-  return MakeClipDecoder(std::move(clip));
+  return MakeClipDecoder(base::move(clip));
 }
 
 bool FfmpegAvailable() { return true; }

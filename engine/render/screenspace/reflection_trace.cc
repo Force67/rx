@@ -1,7 +1,8 @@
 #include "render/screenspace/reflection_trace.h"
 
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
@@ -178,7 +179,7 @@ ResourceHandle ReflectionTrace::AddToGraph(
         camera.camera_pos[0] = frame.camera_pos.x;
         camera.camera_pos[1] = frame.camera_pos.y;
         camera.camera_pos[2] = frame.camera_pos.z;
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
         base::Vector<BindingItem> items;
         items.push_back(Bind::Storage(0, ctx.graph->image(raw)));
@@ -233,7 +234,7 @@ ResourceHandle ReflectionTrace::AddToGraph(
                     (fog_on ? kFlagFog : 0u) | (sh_valid ? kFlagShSkip : 0u) |
                     (rcgi.active ? kFlagRcgi : 0u);
         ctx.cmd->BindPipeline(pipeline_);
-        ctx.cmd->BindTransient(0, {items.data(), items.size()});
+        ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->BindSet(1, bindless_set);
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(trace);

@@ -1,11 +1,12 @@
 #ifndef RX_RENDER_RENDER_GRAPH_H_
 #define RX_RENDER_RENDER_GRAPH_H_
 
-#include <functional>
-#include <string>
 
 #include <base/containers/vector.h>
 
+#include "base/functional/function.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
 #include "core/types.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/resources.h"
@@ -33,7 +34,7 @@ enum class ResourceUsage : u8 {
 };
 
 struct TransientTextureDesc {
-  std::string name;
+  base::String name;
   Format format = Format::kRGBA16Float;
   u32 width = 0;
   u32 height = 0;
@@ -103,16 +104,16 @@ class RenderGraph {
   };
 
   // These callbacks accept arbitrary application captures, including
-  // non-trivially relocatable types such as std::string and std::function.
-  using SetupFn = std::function<void(PassBuilder&)>;
-  using ExecuteFn = std::function<void(PassContext&)>;
+  // non-trivially relocatable types such as base::String and base::Function.
+  using SetupFn = base::Function<void(PassBuilder&)>;
+  using ExecuteFn = base::Function<void(PassContext&)>;
 
   ResourceHandle CreateTexture(const TransientTextureDesc& desc);
 
   // Persistent images (TAA history, path-trace ping-pongs) enter the graph
   // here. The graph reads the starting state from *state and writes the state
   // the image is left in back to it, so the owner can re-import next frame.
-  ResourceHandle ImportImage(std::string name, const GpuImage& image, ResourceState* state);
+  ResourceHandle ImportImage(base::String name, const GpuImage& image, ResourceState* state);
 
   // Imported swapchain image. Contents are discarded on first use and the
   // graph appends a transition to `final_state` after the last pass. Override
@@ -121,15 +122,15 @@ class RenderGraph {
   ResourceHandle ImportBackbuffer(const GpuImage& image,
                                   ResourceState final_state = ResourceState::kPresent);
 
-  void AddPass(std::string name, SetupFn setup, ExecuteFn execute);
+  void AddPass(base::String name, SetupFn setup, ExecuteFn execute);
 
   // Optional per-pass brackets (gpu profiler timestamps + debug labels). Begin
   // runs before the pass barriers, end after the pass executes.
-  using PassBegin = std::function<void(CommandList&, const char*)>;
-  using PassEnd = std::function<void(CommandList&)>;
+  using PassBegin = base::Function<void(CommandList&, const char*)>;
+  using PassEnd = base::Function<void(CommandList&)>;
   void SetPassHooks(PassBegin begin, PassEnd end) {
-    pass_begin_ = std::move(begin);
-    pass_end_ = std::move(end);
+    pass_begin_ = base::move(begin);
+    pass_end_ = base::move(end);
   }
 
   bool Compile(Device& device, TransientPool& pool);
@@ -147,13 +148,13 @@ class RenderGraph {
   // and totals. Captured at the end of Compile.
   struct Stats {
     struct Pass {
-      std::string name;
+      base::String name;
       u32 reads = 0;
       u32 writes = 0;
       u32 barriers = 0;
     };
     struct Resource {
-      std::string name;
+      base::String name;
       u32 width = 0;
       u32 height = 0;
       u64 bytes = 0;
@@ -190,7 +191,7 @@ class RenderGraph {
   };
 
   struct Pass {
-    std::string name;
+    base::String name;
     PassBuilder builder;
     ExecuteFn execute;
     base::Vector<TextureBarrier> barriers;

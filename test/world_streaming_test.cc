@@ -1,10 +1,11 @@
+#include "base/containers/span.h"
 #include "scene/world_streaming.h"
 #include "scene/world_streaming_ecs.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <limits>
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 namespace {
 
@@ -19,13 +20,13 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "world_streaming_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "world_streaming_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-4f) {
-  if (std::abs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "world_streaming_test: FAIL: %s (got %.6f, expected %.6f)\n", message,
+  if (::abs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "world_streaming_test: FAIL: %s (got %.6f, expected %.6f)\n", message,
                actual, expected);
   ++failures;
 }
@@ -55,7 +56,7 @@ const WorldStreamAction* FindAction(const base::Vector<WorldStreamAction>& actio
 WorldStreamTicket PrepareOne(WorldStreamPlan& plan, const WorldStreamObservation& observer,
                              const WorldStreamRegion& region) {
   base::Vector<WorldStreamAction> actions;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&region, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&region, 1), {}, &actions);
   Check(actions.size() == 1 && actions[0].kind == WorldStreamActionKind::kPrepare,
         "an entering region emits one prepare");
   return actions.empty() ? WorldStreamTicket{} : actions[0].ticket;
@@ -66,7 +67,7 @@ void MakeResident(WorldStreamPlan& plan, const WorldStreamObservation& observer,
   Check(ApplyWorldStreamPrepareResult(plan, ticket, WorldStreamPrepareResult::kReady),
         "current prepare result is accepted");
   base::Vector<WorldStreamAction> actions;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&region, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&region, 1), {}, &actions);
   const WorldStreamAction* commit = FindAction(actions, WorldStreamActionKind::kCommit, region.id);
   Check(commit != nullptr, "a ready region emits a commit quantum");
   if (commit) {
@@ -131,18 +132,18 @@ void TestDemandAndQueries() {
   demand = EvaluateWorldStreamDemand(observer, region);
   Check(demand.load, "invalid ignored-axis position does not disable observation");
 
-  const f32 maximum = std::numeric_limits<f32>::max();
+  const f32 maximum = FLT_MAX;
   observer = Observer({maximum, 0, 0}, 1, 2);
   observer.velocity = {maximum, maximum, 0};
   observer.prediction_seconds = maximum;
   observer.maximum_prediction_distance = maximum;
   query = BuildWorldStreamQuery(observer);
-  Check(std::isfinite(query.predicted.x), "large finite prediction remains finite");
+  Check(::isfinite(query.predicted.x), "large finite prediction remains finite");
   demand = EvaluateWorldStreamDemand(observer, Region(3, -maximum, 0, -maximum, 1));
   Check(!demand.load, "overflow-scale distances do not spuriously load a region");
 
   const f32 large = 1.0e30f;
-  const f32 adjacent = std::nextafter(large, maximum);
+  const f32 adjacent = ::nextafter(large, maximum);
   observer = Observer({large, 0, 0}, 0, 0);
   observer.velocity = {adjacent - large, 0, 0};
   observer.prediction_seconds = 1;
@@ -161,17 +162,17 @@ void TestLifecycleAndHysteresis() {
 
   observer.position.x = -9;
   base::Vector<WorldStreamAction> actions;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&region, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&region, 1), {}, &actions);
   Check(actions.empty(), "resident content is stable in the hysteresis band");
 
   observer.position.x = -11;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&region, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&region, 1), {}, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kUnload, region.id) != nullptr,
         "resident content unloads beyond the retain distance");
   Check(!IsWorldStreamTicketCurrent(plan, first), "unload invalidates the old generation");
 
   observer.position = {};
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&region, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&region, 1), {}, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, region.id) == nullptr,
         "re-entry waits for old-generation retirement");
   Check(ApplyWorldStreamRetireResult(plan, first), "synchronous unload retirement is accepted");
@@ -181,7 +182,7 @@ void TestLifecycleAndHysteresis() {
         "a late result from the old generation is rejected");
 
   observer.position.x = -20;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&region, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&region, 1), {}, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kCancel, region.id) != nullptr,
         "departing in-flight work emits cancellation");
   Check(!IsWorldStreamTicketCurrent(plan, second), "cancellation invalidates immediately");
@@ -197,7 +198,7 @@ void TestBudgetsPriorityAndFairness() {
   budget.maximum_prepare_starts = 2;
   budget.maximum_pending = 1;
   base::Vector<WorldStreamAction> actions;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), regions, budget, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), regions, budget, &actions);
   Check(actions.size() == 1 && actions[0].ticket.region == 2,
          "priority wins and the pending-work limit caps starts");
   if (actions.empty()) return;
@@ -205,7 +206,7 @@ void TestBudgetsPriorityAndFairness() {
   const WorldStreamTicket first = actions[0].ticket;
   ApplyWorldStreamPrepareResult(plan, first, WorldStreamPrepareResult::kReady);
   budget.maximum_pending = 3;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), regions, budget, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), regions, budget, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, 1) != nullptr,
         "nearest equal-priority region starts next");
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, 3) != nullptr,
@@ -222,13 +223,13 @@ void TestBudgetsPriorityAndFairness() {
 
   budget.maximum_prepare_starts = 0;
   budget.maximum_commit_steps = 1;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), regions, budget, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), regions, budget, &actions);
   Check(actions.size() == 1 && actions[0].kind == WorldStreamActionKind::kCommit,
          "commit work is bounded to one quantum");
   if (actions.empty()) return;
   const u64 served_first = actions[0].ticket.region;
   ApplyWorldStreamCommitResult(plan, actions[0].ticket, WorldStreamCommitResult::kMoreWork);
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), regions, budget, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), regions, budget, &actions);
   Check(actions.size() == 1 && actions[0].ticket.region != served_first,
         "round-robin age prevents a long commit from starving ready peers");
 
@@ -239,7 +240,7 @@ void TestBudgetsPriorityAndFairness() {
   one_start.maximum_pending = 1;
   const WorldStreamRegion low = Region(20, 1, 0, 2, 1, 0);
   const WorldStreamRegion high = Region(21, 2, 0, 3, 1, 100);
-  AdvanceWorldStreaming(retry_priority, std::span(&observer, 1), std::span(&low, 1), one_start,
+  AdvanceWorldStreaming(retry_priority, base::Span(&observer, 1), base::Span(&low, 1), one_start,
                         &actions);
   if (actions.empty()) {
     Check(false, "retry setup emits a prepare");
@@ -247,26 +248,26 @@ void TestBudgetsPriorityAndFairness() {
   }
   ApplyWorldStreamPrepareResult(retry_priority, actions[0].ticket,
                                 WorldStreamPrepareResult::kFailed);
-  AdvanceWorldStreaming(retry_priority, std::span(&observer, 1), std::span(&low, 1), one_start,
+  AdvanceWorldStreaming(retry_priority, base::Span(&observer, 1), base::Span(&low, 1), one_start,
                         &actions);
   const WorldStreamAction* cleanup = FindAction(actions, WorldStreamActionKind::kCancel, low.id);
   Check(cleanup != nullptr, "failed preparation requests cleanup before retry");
   if (!cleanup) return;
   ApplyWorldStreamRetireResult(retry_priority, cleanup->ticket);
   const WorldStreamRegion retry_candidates[] = {low, high};
-  AdvanceWorldStreaming(retry_priority, std::span(&observer, 1), retry_candidates, one_start,
+  AdvanceWorldStreaming(retry_priority, base::Span(&observer, 1), retry_candidates, one_start,
                         &actions);
   Check(actions.size() == 1 && actions[0].ticket.region == high.id,
          "a low-priority retry cannot starve fresh high-priority demand");
 
   WorldStreamPlan large_distance;
   const f32 farther = 1.0e30f;
-  const f32 nearer = std::nextafter(farther, 0.0f);
+  const f32 nearer = ::nextafter(farther, 0.0f);
   const WorldStreamObservation maximum_range =
-      Observer({0, 0, 0}, std::numeric_limits<f32>::max(), std::numeric_limits<f32>::max());
+      Observer({0, 0, 0}, FLT_MAX, FLT_MAX);
   const WorldStreamRegion distant[] = {Region(1, farther, 0, farther, 1),
                                        Region(2, nearer, 0, nearer, 1)};
-  AdvanceWorldStreaming(large_distance, std::span(&maximum_range, 1), distant, one_start,
+  AdvanceWorldStreaming(large_distance, base::Span(&maximum_range, 1), distant, one_start,
                         &actions);
   Check(actions.size() == 1 && actions[0].ticket.region == 2,
         "large finite distances retain nearest-first priority ordering");
@@ -277,7 +278,7 @@ void TestBudgetsPriorityAndFairness() {
   WorldStreamTicket continuation_ticket = PrepareOne(continuation, observer, long_commit);
   ApplyWorldStreamPrepareResult(continuation, continuation_ticket,
                                 WorldStreamPrepareResult::kReady);
-  AdvanceWorldStreaming(continuation, std::span(&observer, 1), std::span(&long_commit, 1), {},
+  AdvanceWorldStreaming(continuation, base::Span(&observer, 1), base::Span(&long_commit, 1), {},
                         &actions);
   const WorldStreamAction* initial_commit =
       FindAction(actions, WorldStreamActionKind::kCommit, long_commit.id);
@@ -289,7 +290,7 @@ void TestBudgetsPriorityAndFairness() {
   WorldStreamFrameBudget admit_fresh;
   admit_fresh.maximum_commit_steps = 0;
   admit_fresh.maximum_pending = 2;
-  AdvanceWorldStreaming(continuation, std::span(&observer, 1), commit_candidates, admit_fresh,
+  AdvanceWorldStreaming(continuation, base::Span(&observer, 1), commit_candidates, admit_fresh,
                         &actions);
   const WorldStreamAction* fresh_prepare =
       FindAction(actions, WorldStreamActionKind::kPrepare, fresh_commit.id);
@@ -301,7 +302,7 @@ void TestBudgetsPriorityAndFairness() {
   one_commit.maximum_prepare_starts = 0;
   one_commit.maximum_commit_steps = 1;
   one_commit.maximum_pending = 2;
-  AdvanceWorldStreaming(continuation, std::span(&observer, 1), commit_candidates, one_commit,
+  AdvanceWorldStreaming(continuation, base::Span(&observer, 1), commit_candidates, one_commit,
                         &actions);
   Check(actions.size() == 1 && actions[0].ticket.region == long_commit.id,
         "fresh ready work cannot starve an older commit continuation");
@@ -314,14 +315,14 @@ void TestBudgetsPriorityAndFairness() {
   ApplyWorldStreamPrepareResult(retry_fairness, failure_ticket,
                                 WorldStreamPrepareResult::kFailed);
   const WorldStreamRegion fairness_candidates[] = {repeated_failure, waiting_fresh};
-  AdvanceWorldStreaming(retry_fairness, std::span(&observer, 1), fairness_candidates, one_start,
+  AdvanceWorldStreaming(retry_fairness, base::Span(&observer, 1), fairness_candidates, one_start,
                         &actions);
   const WorldStreamAction* first_cleanup =
       FindAction(actions, WorldStreamActionKind::kCancel, repeated_failure.id);
   Check(first_cleanup != nullptr, "retry fairness setup emits cleanup");
   if (!first_cleanup) return;
   ApplyWorldStreamRetireResult(retry_fairness, first_cleanup->ticket);
-  AdvanceWorldStreaming(retry_fairness, std::span(&observer, 1), fairness_candidates, one_start,
+  AdvanceWorldStreaming(retry_fairness, base::Span(&observer, 1), fairness_candidates, one_start,
                         &actions);
   Check(actions.size() == 1 && actions[0].ticket.region == repeated_failure.id,
         "an older retry gets its next fair prepare turn");
@@ -329,14 +330,14 @@ void TestBudgetsPriorityAndFairness() {
   failure_ticket = actions[0].ticket;
   ApplyWorldStreamPrepareResult(retry_fairness, failure_ticket,
                                 WorldStreamPrepareResult::kFailed);
-  AdvanceWorldStreaming(retry_fairness, std::span(&observer, 1), fairness_candidates, one_start,
+  AdvanceWorldStreaming(retry_fairness, base::Span(&observer, 1), fairness_candidates, one_start,
                         &actions);
   const WorldStreamAction* second_cleanup =
       FindAction(actions, WorldStreamActionKind::kCancel, repeated_failure.id);
   Check(second_cleanup != nullptr, "repeated failure emits another cleanup");
   if (!second_cleanup) return;
   ApplyWorldStreamRetireResult(retry_fairness, second_cleanup->ticket);
-  AdvanceWorldStreaming(retry_fairness, std::span(&observer, 1), fairness_candidates, one_start,
+  AdvanceWorldStreaming(retry_fairness, base::Span(&observer, 1), fairness_candidates, one_start,
                         &actions);
   Check(actions.size() == 1 && actions[0].ticket.region == waiting_fresh.id,
         "a repeatedly failing retry cannot starve older fresh demand");
@@ -349,7 +350,7 @@ base::Vector<u64> PrepareOrder(const WorldStreamRegion* regions, size_t count) {
   budget.maximum_prepare_starts = 10;
   budget.maximum_pending = 10;
   base::Vector<WorldStreamAction> actions;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(regions, count), budget, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(regions, count), budget, &actions);
   base::Vector<u64> order;
   for (const WorldStreamAction& action : actions) order.push_back(action.ticket.region);
   return order;
@@ -387,9 +388,9 @@ void TestDeterminismAndMultipleObservers() {
   cleanup_budget.maximum_prepare_starts = 3;
   cleanup_budget.maximum_pending = 3;
   const WorldStreamObservation broad = Observer({0, 0, 0}, 100, 110);
-  AdvanceWorldStreaming(cleanup, std::span(&broad, 1), reverse, cleanup_budget, &actions);
+  AdvanceWorldStreaming(cleanup, base::Span(&broad, 1), reverse, cleanup_budget, &actions);
   const WorldStreamObservation departed = Observer({1000, 0, 1000}, 1, 2);
-  AdvanceWorldStreaming(cleanup, std::span(&departed, 1), reverse, cleanup_budget, &actions);
+  AdvanceWorldStreaming(cleanup, base::Span(&departed, 1), reverse, cleanup_budget, &actions);
   Check(actions.size() == 3 && actions[0].ticket.region == 2 && actions[1].ticket.region == 5 &&
             actions[2].ticket.region == 9,
         "cancellation order is stable by region id");
@@ -404,7 +405,7 @@ void TestRetryResetAndGather() {
   ApplyWorldStreamPrepareResult(plan, failed, WorldStreamPrepareResult::kFailed);
 
   base::Vector<WorldStreamAction> actions;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&region, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&region, 1), {}, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, region.id) == nullptr,
          "failed work observes its retry delay");
   const WorldStreamAction* failed_cleanup =
@@ -412,7 +413,7 @@ void TestRetryResetAndGather() {
   Check(failed_cleanup != nullptr, "failed work is cleaned before its retry delay");
   if (!failed_cleanup) return;
   ApplyWorldStreamRetireResult(plan, failed_cleanup->ticket);
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&region, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&region, 1), {}, &actions);
   const WorldStreamAction* retry = FindAction(actions, WorldStreamActionKind::kPrepare, region.id);
   Check(retry && retry->ticket.generation != failed.generation,
         "retry starts with a new generation after the delay");
@@ -471,13 +472,13 @@ void TestRetirementMetadataAndPendingPayloads() {
 
   WorldStreamRegion moved = Region(10, 20, 0, 21, 1);
   base::Vector<WorldStreamAction> actions;
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&moved, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&moved, 1), {}, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kCancel, moved.id) != nullptr,
         "identity-affecting metadata changes retire the old payload");
   Check(!ApplyWorldStreamPrepareResult(plan, old, WorldStreamPrepareResult::kReady),
         "metadata retirement rejects the old preparation result");
 
-  AdvanceWorldStreaming(plan, std::span(&observer, 1), std::span(&moved, 1), {}, &actions);
+  AdvanceWorldStreaming(plan, base::Span(&observer, 1), base::Span(&moved, 1), {}, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, moved.id) == nullptr,
         "replacement does not overlap a retiring payload");
   Check(ApplyWorldStreamRetireResult(plan, old), "metadata cleanup retirement is accepted");
@@ -490,11 +491,11 @@ void TestRetirementMetadataAndPendingPayloads() {
   budget.maximum_prepare_starts = 2;
   budget.maximum_commit_steps = 0;
   budget.maximum_pending = 1;
-  AdvanceWorldStreaming(bounded, std::span(&observer, 1), regions, budget, &actions);
+  AdvanceWorldStreaming(bounded, base::Span(&observer, 1), regions, budget, &actions);
   Check(actions.size() == 1, "pending cap admits only one preparation");
   if (actions.empty()) return;
   ApplyWorldStreamPrepareResult(bounded, actions[0].ticket, WorldStreamPrepareResult::kReady);
-  AdvanceWorldStreaming(bounded, std::span(&observer, 1), regions, budget, &actions);
+  AdvanceWorldStreaming(bounded, base::Span(&observer, 1), regions, budget, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, 2) == nullptr,
         "prepared payloads continue to consume the pending cap");
 
@@ -502,14 +503,14 @@ void TestRetirementMetadataAndPendingPayloads() {
   ConfigureWorldStreaming(failed_metadata, {.retry_delay_ticks = 100});
   const WorldStreamTicket failed = PrepareOne(failed_metadata, observer, original);
   ApplyWorldStreamPrepareResult(failed_metadata, failed, WorldStreamPrepareResult::kFailed);
-  AdvanceWorldStreaming(failed_metadata, std::span(&observer, 1), std::span(&moved, 1), {},
+  AdvanceWorldStreaming(failed_metadata, base::Span(&observer, 1), base::Span(&moved, 1), {},
                         &actions);
   const WorldStreamAction* metadata_cleanup =
       FindAction(actions, WorldStreamActionKind::kCancel, original.id);
   Check(metadata_cleanup != nullptr, "failed old metadata is cleaned before replacement");
   if (!metadata_cleanup) return;
   ApplyWorldStreamRetireResult(failed_metadata, metadata_cleanup->ticket);
-  AdvanceWorldStreaming(failed_metadata, std::span(&observer, 1), std::span(&moved, 1), {},
+  AdvanceWorldStreaming(failed_metadata, base::Span(&observer, 1), base::Span(&moved, 1), {},
                         &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, moved.id) != nullptr,
          "new metadata is not held behind an old generation's retry delay");
@@ -525,14 +526,14 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   WorldStreamTicket ticket = PrepareOne(prepare_failure, observer, region);
   ApplyWorldStreamPrepareResult(prepare_failure, ticket, WorldStreamPrepareResult::kFailed);
   observer.position.x = -6;
-  AdvanceWorldStreaming(prepare_failure, std::span(&observer, 1), std::span(&region, 1), {},
+  AdvanceWorldStreaming(prepare_failure, base::Span(&observer, 1), base::Span(&region, 1), {},
                         &actions);
   const WorldStreamAction* prepare_cleanup =
       FindAction(actions, WorldStreamActionKind::kCancel, region.id);
   Check(prepare_cleanup != nullptr, "prepare failure requests partial-payload cleanup");
   if (!prepare_cleanup) return;
   ApplyWorldStreamRetireResult(prepare_failure, prepare_cleanup->ticket);
-  AdvanceWorldStreaming(prepare_failure, std::span(&observer, 1), std::span(&region, 1), {},
+  AdvanceWorldStreaming(prepare_failure, base::Span(&observer, 1), base::Span(&region, 1), {},
                         &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, region.id) != nullptr,
          "failed requested content retries in the retain-only band");
@@ -542,7 +543,7 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   observer.position = {};
   ticket = PrepareOne(commit_failure, observer, region);
   ApplyWorldStreamPrepareResult(commit_failure, ticket, WorldStreamPrepareResult::kReady);
-  AdvanceWorldStreaming(commit_failure, std::span(&observer, 1), std::span(&region, 1), {},
+  AdvanceWorldStreaming(commit_failure, base::Span(&observer, 1), base::Span(&region, 1), {},
                         &actions);
   const WorldStreamAction* commit = FindAction(actions, WorldStreamActionKind::kCommit, region.id);
   Check(commit != nullptr, "prepared content reaches commit before failure test");
@@ -551,12 +552,12 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
     ticket = commit->ticket;
   }
   observer.position.x = -6;
-  AdvanceWorldStreaming(commit_failure, std::span(&observer, 1), std::span(&region, 1), {},
+  AdvanceWorldStreaming(commit_failure, base::Span(&observer, 1), base::Span(&region, 1), {},
                         &actions);
   Check(FindAction(actions, WorldStreamActionKind::kCancel, region.id) != nullptr,
         "failed partial commit requests cleanup");
   ApplyWorldStreamRetireResult(commit_failure, ticket);
-  AdvanceWorldStreaming(commit_failure, std::span(&observer, 1), std::span(&region, 1), {},
+  AdvanceWorldStreaming(commit_failure, base::Span(&observer, 1), base::Span(&region, 1), {},
                         &actions);
   Check(FindAction(actions, WorldStreamActionKind::kPrepare, region.id) != nullptr,
         "commit failure restarts while retained");
@@ -564,7 +565,7 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   WorldStreamPlan removed_pending;
   observer.position = {};
   ticket = PrepareOne(removed_pending, observer, region);
-  AdvanceWorldStreaming(removed_pending, std::span(&observer, 1), {}, {}, &actions);
+  AdvanceWorldStreaming(removed_pending, base::Span(&observer, 1), {}, {}, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kCancel, region.id) != nullptr,
         "catalog removal cancels pending content");
   ApplyWorldStreamRetireResult(removed_pending, ticket);
@@ -574,15 +575,15 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   MakeResident(delayed_unload, observer, region, ticket);
   WorldStreamFrameBudget no_unload;
   no_unload.maximum_unloads = 0;
-  AdvanceWorldStreaming(delayed_unload, std::span(&observer, 1), {}, no_unload, &actions);
+  AdvanceWorldStreaming(delayed_unload, base::Span(&observer, 1), {}, no_unload, &actions);
   Check(actions.empty() && GetWorldStreamStats(delayed_unload).resident == 1 &&
             IsWorldStreamTicketCurrent(delayed_unload, ticket),
         "resident content stays current until an unload slot is admitted");
-  AdvanceWorldStreaming(delayed_unload, std::span(&observer, 1), std::span(&region, 1), no_unload,
+  AdvanceWorldStreaming(delayed_unload, base::Span(&observer, 1), base::Span(&region, 1), no_unload,
                         &actions);
   Check(actions.empty() && GetWorldStreamStats(delayed_unload).resident == 1,
         "re-entry before unload dispatch keeps the resident generation");
-  AdvanceWorldStreaming(delayed_unload, std::span(&observer, 1), {}, {}, &actions);
+  AdvanceWorldStreaming(delayed_unload, base::Span(&observer, 1), {}, {}, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kUnload, region.id) != nullptr,
         "catalog removal unloads resident content once admitted");
 
@@ -593,11 +594,11 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   fill.maximum_prepare_starts = 3;
   fill.maximum_commit_steps = 3;
   fill.maximum_pending = 3;
-  AdvanceWorldStreaming(bounded_unloads, std::span(&observer, 1), regions, fill, &actions);
+  AdvanceWorldStreaming(bounded_unloads, base::Span(&observer, 1), regions, fill, &actions);
   for (const WorldStreamAction& action : actions) {
     ApplyWorldStreamPrepareResult(bounded_unloads, action.ticket, WorldStreamPrepareResult::kReady);
   }
-  AdvanceWorldStreaming(bounded_unloads, std::span(&observer, 1), regions, fill, &actions);
+  AdvanceWorldStreaming(bounded_unloads, base::Span(&observer, 1), regions, fill, &actions);
   for (const WorldStreamAction& action : actions) {
     ApplyWorldStreamCommitResult(bounded_unloads, action.ticket,
                                  WorldStreamCommitResult::kComplete);
@@ -605,7 +606,7 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   WorldStreamFrameBudget retire;
   retire.maximum_unloads = 3;
   retire.maximum_pending = 2;
-  AdvanceWorldStreaming(bounded_unloads, std::span(&observer, 1), {}, retire, &actions);
+  AdvanceWorldStreaming(bounded_unloads, base::Span(&observer, 1), {}, retire, &actions);
   const WorldStreamStats stats = GetWorldStreamStats(bounded_unloads);
   Check(actions.size() == 2 && stats.retiring == 2 && stats.resident == 1,
          "unload admission cannot exceed the pending payload cap");
@@ -621,7 +622,7 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   one_pending.maximum_prepare_starts = 1;
   one_pending.maximum_unloads = 1;
   one_pending.maximum_pending = 1;
-  AdvanceWorldStreaming(cleanup_first, std::span(&moved_observer, 1), moved_candidates,
+  AdvanceWorldStreaming(cleanup_first, base::Span(&moved_observer, 1), moved_candidates,
                         one_pending, &actions);
   Check(FindAction(actions, WorldStreamActionKind::kUnload, old_region.id) != nullptr &&
             FindAction(actions, WorldStreamActionKind::kPrepare, fresh_region.id) == nullptr,
@@ -636,13 +637,13 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   fill_two.maximum_prepare_starts = 2;
   fill_two.maximum_commit_steps = 2;
   fill_two.maximum_pending = 2;
-  AdvanceWorldStreaming(unload_fairness, std::span(&broad, 1), resident_regions, fill_two,
+  AdvanceWorldStreaming(unload_fairness, base::Span(&broad, 1), resident_regions, fill_two,
                         &actions);
   for (const WorldStreamAction& action : actions) {
     ApplyWorldStreamPrepareResult(unload_fairness, action.ticket,
                                   WorldStreamPrepareResult::kReady);
   }
-  AdvanceWorldStreaming(unload_fairness, std::span(&broad, 1), resident_regions, fill_two,
+  AdvanceWorldStreaming(unload_fairness, base::Span(&broad, 1), resident_regions, fill_two,
                         &actions);
   for (const WorldStreamAction& action : actions) {
     ApplyWorldStreamCommitResult(unload_fairness, action.ticket,
@@ -654,11 +655,11 @@ void TestFailuresCatalogRemovalAndUnloadAdmission() {
   hold_unloads.maximum_commit_steps = 0;
   hold_unloads.maximum_unloads = 0;
   hold_unloads.maximum_pending = 1;
-  AdvanceWorldStreaming(unload_fairness, std::span(&near_low, 1), resident_regions, hold_unloads,
+  AdvanceWorldStreaming(unload_fairness, base::Span(&near_low, 1), resident_regions, hold_unloads,
                         &actions);
   const WorldStreamObservation far_away = Observer({1000, 0, 0}, 1, 2);
   hold_unloads.maximum_unloads = 1;
-  AdvanceWorldStreaming(unload_fairness, std::span(&far_away, 1), resident_regions, hold_unloads,
+  AdvanceWorldStreaming(unload_fairness, base::Span(&far_away, 1), resident_regions, hold_unloads,
                         &actions);
   Check(actions.size() == 1 && actions[0].ticket.region == high_id.id,
         "the oldest unload request wins before a newly obsolete lower id");
@@ -680,7 +681,7 @@ void TestBoundedTraversalStress() {
       candidates.push_back(
           Region(static_cast<u64>(x + 1000), static_cast<f32>(x), 0, static_cast<f32>(x + 1), 1));
     }
-    AdvanceWorldStreaming(plan, std::span(&observer, 1), candidates, budget, &actions);
+    AdvanceWorldStreaming(plan, base::Span(&observer, 1), candidates, budget, &actions);
     for (const WorldStreamAction& action : actions) {
       if (action.kind == WorldStreamActionKind::kPrepare) {
         ApplyWorldStreamPrepareResult(plan, action.ticket, WorldStreamPrepareResult::kReady);
@@ -712,9 +713,9 @@ int main() {
   TestBoundedTraversalStress();
 
   if (failures != 0) {
-    std::fprintf(stderr, "world_streaming_test: %d failure(s)\n", failures);
+    ::fprintf(stderr, "world_streaming_test: %d failure(s)\n", failures);
     return 1;
   }
-  std::printf("world_streaming_test: PASS\n");
+  ::printf("world_streaming_test: PASS\n");
   return 0;
 }

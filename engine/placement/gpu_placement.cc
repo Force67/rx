@@ -1,9 +1,11 @@
 #include "placement/gpu_placement.h"
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "placement/placement_pattern.h"
 #include "render/rhi/command_list.h"
 #include "shaders/placement_density_cs_hlsl.h"
@@ -149,22 +151,22 @@ bool GpuPlacement::Initialize(render::Device& device, const PlacementSystem& sys
     for (const DensityOp& op : layer.density.ops()) {
       u32 raw[4];
       raw[0] = static_cast<u32>(op.op);
-      std::memcpy(&raw[1], &op.a, sizeof(f32));
-      std::memcpy(&raw[2], &op.b, sizeof(f32));
-      std::memcpy(&raw[3], &op.c, sizeof(f32));
+      base::MemCopy(&raw[1], &op.a, sizeof(f32));
+      base::MemCopy(&raw[2], &op.b, sizeof(f32));
+      base::MemCopy(&raw[3], &op.c, sizeof(f32));
       for (u32 v : raw) ops.push_back(v);
     }
   }
   if (ops.empty()) ops.resize(4, 0u);  // dummy so the buffer exists
 
   ops_ = device.CreateBufferWithData(
-      {reinterpret_cast<const u8*>(ops.data()), ops.size() * sizeof(u32)},
+      ByteSpan(reinterpret_cast<const u8*>(ops.data()), ops.size() * sizeof(u32)),
       render::kBufferUsageStorage);
   layers_ = device.CreateBufferWithData(
-      {reinterpret_cast<const u8*>(layers.data()), layers.size() * sizeof(LayerGpu)},
+      ByteSpan(reinterpret_cast<const u8*>(layers.data()), layers.size() * sizeof(LayerGpu)),
       render::kBufferUsageStorage);
   pattern_ = device.CreateBufferWithData(
-      {reinterpret_cast<const u8*>(kPatternXY), sizeof(kPatternXY)},
+      ByteSpan(reinterpret_cast<const u8*>(kPatternXY), sizeof(kPatternXY)),
       render::kBufferUsageStorage);
 
   world_sampler_ = device.GetSampler({
@@ -228,10 +230,10 @@ void GpuPlacement::SyncWorldData(render::Device& device, const WorldData& world)
 
   for (u32 map = 0; map < map_count; ++map) {
     if (synced_revisions_[map] == world.revision(map)) continue;
-    std::span<const f32> texels = world.texels(map);
+    base::Span<const f32> texels = world.texels(map);
     render::GpuBuffer staging = device.CreateBuffer(
         texels.size() * sizeof(f32), render::kBufferUsageTransferSrc, true);
-    std::memcpy(staging.mapped, texels.data(), texels.size() * sizeof(f32));
+    base::MemCopy(staging.mapped, texels.data(), texels.size() * sizeof(f32));
     const bool first_upload = synced_revisions_[map] == 0;
     device.ImmediateSubmit([&](render::CommandList& cmd) {
       cmd.Barrier(render::Transition(world_maps_,
@@ -240,7 +242,7 @@ void GpuPlacement::SyncWorldData(render::Device& device, const WorldData& world)
                                      ResourceState::kCopyDst));
       render::BufferTextureCopy copy;
       copy.array_layer = map;
-      cmd.CopyBufferToTexture(staging, world_maps_, {&copy, 1});
+      cmd.CopyBufferToTexture(staging, world_maps_, base::Span(&copy, 1));
       cmd.Barrier(render::Transition(world_maps_, ResourceState::kCopyDst,
                                      ResourceState::kShaderReadCompute));
     });
@@ -250,7 +252,7 @@ void GpuPlacement::SyncWorldData(render::Device& device, const WorldData& world)
 }
 
 void GpuPlacement::RecordBatch(render::CommandList& cmd, const PlacementSystem& system,
-                               std::span<const TileKey> tiles, BufferSet& set) {
+                               base::Span<const TileKey> tiles, BufferSet& set) {
   const WorldData& world = system.world();
   const f32 map_inv_extent = 1.0f / world.extent();
 
@@ -328,19 +330,19 @@ void GpuPlacement::RecordBatch(render::CommandList& cmd, const PlacementSystem& 
 void GpuPlacement::RecordJobs(render::CommandList& cmd, PlacementSystem& system, u32 slot) {
   BufferSet& set = sets_[slot];
   set.jobs.clear();
-  std::span<const TileKey> pending = system.pending();
-  const u32 count = std::min<u32>(static_cast<u32>(pending.size()), max_jobs_);
+  base::Span<const TileKey> pending = system.pending();
+  const u32 count = rx::Min<u32>(static_cast<u32>(pending.size()), max_jobs_);
   if (count == 0) return;
   for (u32 i = 0; i < count; ++i) {
     set.jobs.push_back(pending[i]);
     system.MarkInFlight(pending[i]);
   }
-  RecordBatch(cmd, system, {set.jobs.data(), set.jobs.size()}, set);
+  RecordBatch(cmd, system, base::Span(set.jobs.data(), set.jobs.size()), set);
 }
 
 void GpuPlacement::ReadResults(const BufferSet& set, base::Vector<PlacedInstance>& out) const {
   u32 count = *reinterpret_cast<const u32*>(set.counts.mapped);
-  count = std::min(count, point_capacity_);
+  count = rx::Min(count, point_capacity_);
   const auto* records = reinterpret_cast<const InstanceGpu*>(set.instances.mapped);
   for (u32 i = 0; i < count; ++i) {
     PlacedInstance instance;
@@ -367,12 +369,12 @@ void GpuPlacement::Consume(u32 slot, PlacementSystem& system,
 }
 
 void GpuPlacement::GenerateImmediate(render::Device& device, PlacementSystem& system,
-                                     std::span<const TileKey> tiles,
+                                     base::Span<const TileKey> tiles,
                                      base::Vector<PlacedInstance>& out) {
   BufferSet& set = sets_[kBufferSets - 1];
   for (u32 offset = 0; offset < tiles.size(); offset += max_jobs_) {
-    const u32 count = std::min<u32>(static_cast<u32>(tiles.size()) - offset, max_jobs_);
-    std::span<const TileKey> batch = tiles.subspan(offset, count);
+    const u32 count = rx::Min<u32>(static_cast<u32>(tiles.size()) - offset, max_jobs_);
+    base::Span<const TileKey> batch = tiles.subspan(offset, count);
     device.ImmediateSubmit(
         [&](render::CommandList& cmd) { RecordBatch(cmd, system, batch, set); });
     ReadResults(set, out);

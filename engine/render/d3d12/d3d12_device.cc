@@ -8,14 +8,20 @@
 #define INITGUID
 #include "render/d3d12/d3d12_backend.h"
 
-#include <algorithm>
-#include <cstring>
-#include <string>
+#include <string.h>
 
 #include "core/log.h"
 
 // Internal blit shaders (BlitMip lowers to a fullscreen draw; D3D12 has no
 // filtered copy). Embedded by the build like every pass shader.
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/functional/function.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/blit_ps_slang.h"
 
@@ -92,7 +98,7 @@ void SafeRelease(T*& p) {
 // pipeline desc's attributes (sorted by location) pair 1:1 with the
 // signature's non-system-value elements (sorted by register).
 struct SignatureElement {
-  std::string name;
+  base::String name;
   u32 semantic_index = 0;
   u32 reg = 0;
 };
@@ -101,34 +107,34 @@ bool ParseInputSignature(const void* dxil, size_t size, base::Vector<SignatureEl
   const u8* bytes = static_cast<const u8*>(dxil);
   auto rd = [&](size_t offset) -> u32 {
     u32 v;
-    std::memcpy(&v, bytes + offset, 4);
+    base::MemCopy(&v, bytes + offset, 4);
     return v;
   };
-  if (size < 32 || std::memcmp(bytes, "DXBC", 4) != 0) return false;
+  if (size < 32 || base::MemCompare(bytes, "DXBC", 4) != 0) return false;
   u32 part_count = rd(28);
   for (u32 p = 0; p < part_count; ++p) {
     u32 part_offset = rd(32 + p * 4);
     if (part_offset + 8 > size) return false;
-    if (std::memcmp(bytes + part_offset, "ISG1", 4) != 0) continue;
+    if (base::MemCompare(bytes + part_offset, "ISG1", 4) != 0) continue;
     const u8* data = bytes + part_offset + 8;
     u32 count = 0, header = 0;
-    std::memcpy(&count, data, 4);
-    std::memcpy(&header, data + 4, 4);
+    base::MemCopy(&count, data, 4);
+    base::MemCopy(&header, data + 4, 4);
     const u8* e = data + header;  // header dwords include count+size
     for (u32 i = 0; i < count; ++i, e += 32) {
       // ISG1 element: stream, name_offset, semantic_index, sysval,
       // component_type, register, mask/rw_mask, min_precision (8 dwords).
       u32 name_offset, semantic_index, sysval, reg;
-      std::memcpy(&name_offset, e + 4, 4);
-      std::memcpy(&semantic_index, e + 8, 4);
-      std::memcpy(&sysval, e + 12, 4);
-      std::memcpy(&reg, e + 20, 4);
+      base::MemCopy(&name_offset, e + 4, 4);
+      base::MemCopy(&semantic_index, e + 8, 4);
+      base::MemCopy(&sysval, e + 12, 4);
+      base::MemCopy(&reg, e + 20, 4);
       if (sysval != 0) continue;  // SV_VertexID etc: not vertex-buffer fed
       SignatureElement element;
       element.name = reinterpret_cast<const char*>(data + name_offset);
       element.semantic_index = semantic_index;
       element.reg = reg;
-      out->push_back(std::move(element));
+      out->push_back(base::move(element));
     }
     return true;
   }
@@ -242,8 +248,8 @@ void CpuDescriptorPool::Free(u32 index) { free_.push_back(index); }
 
 // device creation
 
-std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* window) {
-  auto device = std::unique_ptr<D3D12Device>(new D3D12Device());
+base::UniquePointer<Device> D3D12Device::Create(const DeviceDesc& desc, Window* window) {
+  auto device = base::UniquePointer<D3D12Device>(new D3D12Device());
   // Unused on linux (offscreen swapchain). Null for an offscreen device, and
   // for any window backend that has no OS handle to give.
   device->platform_window_ = window ? window->native_handles().platform_window : nullptr;
@@ -337,11 +343,11 @@ std::unique_ptr<Device> D3D12Device::Create(const DeviceDesc& desc, Window* wind
   return device;
 }
 
-std::unique_ptr<Device> CreateD3D12Device(const DeviceDesc& desc, Window& window) {
+base::UniquePointer<Device> CreateD3D12Device(const DeviceDesc& desc, Window& window) {
   return D3D12Device::Create(desc, &window);
 }
 
-std::unique_ptr<Device> CreateD3D12DeviceOffscreen(const DeviceDesc& desc) {
+base::UniquePointer<Device> CreateD3D12DeviceOffscreen(const DeviceDesc& desc) {
   return D3D12Device::Create(desc, nullptr);
 }
 
@@ -428,7 +434,7 @@ bool D3D12Device::InitResources() {
     void* mapped = nullptr;
     ring.push_ring->Map(0, nullptr, &mapped);
     ring.push_mapped = static_cast<u8*>(mapped);
-    ring.wrapper = std::make_unique<D3D12CommandList>(*this, ring.list, i);
+    ring.wrapper = base::MakeUnique<D3D12CommandList>(*this, ring.list, i);
   }
   return true;
 }
@@ -442,7 +448,7 @@ void D3D12Device::ShutdownResources() {
     SafeRelease(ring.fence);
     SafeRelease(ring.list);
     SafeRelease(ring.alloc);
-    ring.wrapper.reset();
+    ring.wrapper.Reset();
   }
   for (auto entry : blit_pipeline_cache_) DestroyPipeline(entry.value);
   blit_pipeline_cache_.clear();
@@ -490,7 +496,7 @@ void D3D12Device::WaitIdle() {
   if (queue_) SignalAndWait();
 }
 
-std::unique_ptr<Swapchain> D3D12Device::CreateSwapchain(u32 width, u32 height, bool vsync,
+base::UniquePointer<Swapchain> D3D12Device::CreateSwapchain(u32 width, u32 height, bool vsync,
                                                         bool /*hdr*/) {
   return D3D12Swapchain::Create(*this, width, height, vsync);
 }
@@ -583,7 +589,7 @@ GpuBuffer D3D12Device::CreateBuffer(u64 size, BufferUsageFlags usage, bool host_
 GpuBuffer D3D12Device::CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) {
   GpuBuffer staging = CreateBuffer(data.size(), kBufferUsageTransferSrc, true);
   if (!staging.mapped) return {};
-  std::memcpy(staging.mapped, data.data(), data.size());
+  base::MemCopy(staging.mapped, data.data(), data.size());
 
   GpuBuffer buffer = CreateBuffer(data.size(), usage | kBufferUsageTransferDst, false);
   ImmediateSubmit(
@@ -936,7 +942,7 @@ SamplerHandle D3D12Device::GetSampler(const SamplerDesc& desc) {
   sampler.AddressV = ToAddressMode(desc.address_v);
   sampler.AddressW = ToAddressMode(desc.address_w);
   if (desc.max_anisotropy > 1.0f) {
-    sampler.MaxAnisotropy = static_cast<UINT>(std::min(desc.max_anisotropy, 16.0f));
+    sampler.MaxAnisotropy = static_cast<UINT>(rx::Min(desc.max_anisotropy, 16.0f));
   }
   sampler.MinLOD = desc.min_lod;
   sampler.MaxLOD = desc.max_lod;
@@ -1005,7 +1011,7 @@ SetLayout* D3D12Device::GetOrCreateSetLayout(const BindingLayoutDesc& desc) {
   return layout;
 }
 
-ID3D12RootSignature* D3D12Device::GetOrCreateRootSignature(std::span<SetLayout* const> sets,
+ID3D12RootSignature* D3D12Device::GetOrCreateRootSignature(base::Span<SetLayout* const> sets,
                                                            u32 push_size,
                                                            bool push_root_constants,
                                                            PipelineRecord* out) {
@@ -1090,7 +1096,7 @@ ID3D12RootSignature* D3D12Device::GetOrCreateRootSignature(std::span<SetLayout* 
     }
 
     if (!view_ranges.empty()) {
-      range_storage.push_back(std::move(view_ranges));
+      range_storage.push_back(base::move(view_ranges));
       D3D12_ROOT_PARAMETER param = {};
       param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
       param.DescriptorTable.NumDescriptorRanges = static_cast<u32>(range_storage.back().size());
@@ -1100,7 +1106,7 @@ ID3D12RootSignature* D3D12Device::GetOrCreateRootSignature(std::span<SetLayout* 
       params.push_back(param);
     }
     if (!sampler_ranges.empty()) {
-      range_storage.push_back(std::move(sampler_ranges));
+      range_storage.push_back(base::move(sampler_ranges));
       D3D12_ROOT_PARAMETER param = {};
       param.ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
       param.DescriptorTable.NumDescriptorRanges = static_cast<u32>(range_storage.back().size());
@@ -1363,7 +1369,7 @@ void D3D12Device::WriteViewDescriptor(const SetLayout::Slot& slot, const Binding
   }
 }
 
-void D3D12Device::UpdateBindingSet(BindingSetHandle set, std::span<const BindingItem> items) {
+void D3D12Device::UpdateBindingSet(BindingSetHandle set, base::Span<const BindingItem> items) {
   BindingSetRecord* record = Rec(set);
   for (const BindingItem& item : items) {
     const SetLayout::Slot* slot = record->layout->Find(item.slot);
@@ -1454,7 +1460,7 @@ PipelineHandle D3D12Device::CreateComputePipeline(const ComputePipelineDesc& des
   record->compute = true;
   record->push_size = desc.push_constant_size;
   record->push_root_constants = desc.push_constant_size <= kMaxRootConstantBytes;
-  record->root = GetOrCreateRootSignature({set_layouts.data(), set_layouts.size()},
+  record->root = GetOrCreateRootSignature(base::Span(set_layouts.data(), set_layouts.size()),
                                           desc.push_constant_size, record->push_root_constants,
                                           record);
   if (!record->root) {
@@ -1505,7 +1511,7 @@ PipelineHandle D3D12Device::CreateGraphicsPipeline(const GraphicsPipelineDesc& d
   record->topology = DrawTopology(desc.topology);
   record->push_size = desc.push_constant_size;
   record->push_root_constants = desc.push_constant_size <= kMaxRootConstantBytes;
-  record->root = GetOrCreateRootSignature({set_layouts.data(), set_layouts.size()},
+  record->root = GetOrCreateRootSignature(base::Span(set_layouts.data(), set_layouts.size()),
                                           desc.push_constant_size, record->push_root_constants,
                                           record);
   if (!record->root) {
@@ -1594,12 +1600,15 @@ PipelineHandle D3D12Device::CreateGraphicsPipeline(const GraphicsPipelineDesc& d
         attributes.push_back({&attribute, binding});
       }
     }
-    std::sort(attributes.begin(), attributes.end(),
-              [](const AttributeRef& a, const AttributeRef& b) {
-                return a.attribute->location < b.attribute->location;
-              });
-    std::sort(signature.begin(), signature.end(),
-              [](const SignatureElement& a, const SignatureElement& b) { return a.reg < b.reg; });
+    // Attribute locations are unique within a pipeline and vertex shader
+    // inputs are never register-packed, so both keys are unique and any
+    // correct sort agrees.
+    base::Sort(attributes.data(), attributes.data() + attributes.size(),
+               [](const AttributeRef& a, const AttributeRef& b) {
+                 return a.attribute->location < b.attribute->location;
+               });
+    base::Sort(signature.data(), signature.data() + signature.size(),
+               [](const SignatureElement& a, const SignatureElement& b) { return a.reg < b.reg; });
     if (attributes.size() != signature.size()) {
       RX_ERROR("d3d12: vertex attribute count {} != shader input count {} ({})",
                 attributes.size(), signature.size(), name);
@@ -1705,7 +1714,7 @@ PipelineHandle D3D12Device::GetBlitPipeline(Format format) {
   desc.color_formats.push_back(format);
   PipelineBindings set;
   set.slots.push_back({0, BindingType::kCombinedTextureSampler});
-  desc.sets.push_back(std::move(set));
+  desc.sets.push_back(base::move(set));
   desc.debug_name = "blit_mip";
   PipelineHandle pipeline = CreateGraphicsPipeline(desc);
   blit_pipeline_cache_.insert(key, pipeline);
@@ -1840,7 +1849,7 @@ void D3D12Device::DestroyTimestampPool(TimestampPoolHandle pool) {
 bool D3D12Device::GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, u64* out) {
   TimestampPoolRecord* record = Rec(pool);
   if (!record->mapped || first + count > record->count) return false;
-  std::memcpy(out, static_cast<const u64*>(record->mapped) + first, count * sizeof(u64));
+  base::MemCopy(out, static_cast<const u64*>(record->mapped) + first, count * sizeof(u64));
   return true;
 }
 
@@ -1904,7 +1913,7 @@ bool D3D12Device::GetCompactedSizes(AccelCompactionQueryHandle query, u64* out, 
   // Not ready until the fence of the submission that carried the matching
   // QueryCompactedSizes has signalled (the non-blocking poll contract).
   if (!record->fence || record->fence->GetCompletedValue() < record->fence_target) return false;
-  std::memcpy(out, record->mapped, static_cast<size_t>(count) * sizeof(u64));
+  base::MemCopy(out, record->mapped, static_cast<size_t>(count) * sizeof(u64));
   return true;
 }
 
@@ -1922,7 +1931,7 @@ D3D12CommandList* D3D12Device::BeginRing(u32 ring_index) {
   ring.view_cursor = 0;
   ring.push_cursor = 0;
   ring.wrapper->OnBeginRecording();
-  return ring.wrapper.get();
+  return ring.wrapper.Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
 void D3D12Device::CloseAndExecute(u32 ring_index) {
@@ -1935,7 +1944,7 @@ void D3D12Device::CloseAndExecute(u32 ring_index) {
   queue_->Signal(ring.fence, ring.fence_value);
 }
 
-void D3D12Device::ImmediateSubmit(const std::function<void(CommandList&)>& record) {
+void D3D12Device::ImmediateSubmit(const base::Function<void(CommandList&)>& record) {
   Ring& ring = rings_[kImmediateRing];
   D3D12CommandList* cmd = BeginRing(kImmediateRing);
   record(*cmd);
@@ -1970,7 +1979,7 @@ CommandList* D3D12Device::BeginFrame(u32 slot) {
 PresentResult D3D12Device::SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) {
   (void)image_index;  // the swapchain tracked it at Acquire
   for (u32 i = 0; i < kMaxFramesInFlight; ++i) {
-    if (rings_[i].wrapper.get() == cmd) {
+    if (rings_[i].wrapper.Get_UseOnlyIfYouKnowWhatYouareDoing() == cmd) {
       CloseAndExecute(i);
       // DXGI Present on windows; no-op against the offscreen ring on linux.
       return static_cast<D3D12Swapchain&>(swapchain).Present();
@@ -1981,7 +1990,7 @@ PresentResult D3D12Device::SubmitFrame(CommandList* cmd, Swapchain& swapchain, u
 
 void D3D12Device::SubmitFrame(CommandList* cmd) {
   for (u32 i = 0; i < kMaxFramesInFlight; ++i) {
-    if (rings_[i].wrapper.get() == cmd) {
+    if (rings_[i].wrapper.Get_UseOnlyIfYouKnowWhatYouareDoing() == cmd) {
       CloseAndExecute(i);  // signals the slot fence; no Acquire, no Present
       return;
     }
@@ -2011,7 +2020,7 @@ bool D3D12Device::ReadbackImage(const GpuImage& image, ResourceState current, vo
     // READBACK heap; no extra barrier is needed under the d3d12 memory model.
   });
 
-  std::memcpy(out, staging.mapped, needed);
+  base::MemCopy(out, staging.mapped, needed);
   DestroyBuffer(staging);
   return true;
 }

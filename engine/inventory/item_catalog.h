@@ -1,9 +1,9 @@
 #ifndef RX_INVENTORY_ITEM_CATALOG_H_
 #define RX_INVENTORY_ITEM_CATALOG_H_
 
-#include <unordered_map>
-
 #include "asset/asset_id.h"
+#include "base/containers/unordered_map.h"
+#include "base/memory/unique_pointer.h"
 #include "core/types.h"
 #include "inventory/export.h"
 #include "physics/shape_desc.h"
@@ -56,7 +56,9 @@ class RX_INVENTORY_EXPORT ItemCatalog {
   size_t size() const { return defs_.size(); }
 
  private:
-  std::unordered_map<ItemDefId, ItemDef> defs_;
+  // Boxed: Find promises a pointer that outlives later inserts, and the map
+  // moves its values when it grows.
+  base::UnorderedMap<ItemDefId, base::UniquePointer<ItemDef>> defs_;
   ItemDefId next_id_ = 1;
 };
 

@@ -1,11 +1,13 @@
 #ifndef RX_NET_WIRE_H_
 #define RX_NET_WIRE_H_
 
-#include <cstring>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/types.h"
 
 namespace rx::net {
@@ -30,22 +32,22 @@ class ByteWriter {
   }
   void F32(f32 v) {
     u32 bits;
-    std::memcpy(&bits, &v, 4);
+    base::MemCopy(&bits, &v, 4);
     U32(bits);
   }
   void Bool(bool v) { U8(v ? 1 : 0); }
   // Length-prefixed (u16) string; longer input is truncated.
-  void Str(std::string_view s) {
+  void Str(base::StringRef s) {
     const u16 len = static_cast<u16>(s.size() > 0xffff ? 0xffff : s.size());
     U16(len);
     buf_.insert(buf_.end(), s.data(), s.data() + len);
   }
 
-  std::vector<u8> Take() { return std::move(buf_); }
+  base::Vector<u8> Take() { return base::move(buf_); }
   size_t size() const { return buf_.size(); }
 
  private:
-  std::vector<u8> buf_;
+  base::Vector<u8> buf_;
 };
 
 class ByteReader {
@@ -79,14 +81,14 @@ class ByteReader {
   f32 F32() {
     const u32 bits = U32();
     f32 v;
-    std::memcpy(&v, &bits, 4);
+    base::MemCopy(&v, &bits, 4);
     return v;
   }
   bool Bool() { return U8() != 0; }
-  std::string Str() {
+  base::String Str() {
     const u16 len = U16();
     if (!Want(len)) return {};
-    std::string s(reinterpret_cast<const char*>(data_ + pos_), len);
+    base::String s(reinterpret_cast<const char*>(data_ + pos_), len);
     pos_ += len;
     return s;
   }

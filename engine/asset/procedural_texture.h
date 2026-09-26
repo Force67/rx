@@ -1,9 +1,9 @@
 #ifndef RX_ASSET_PROCEDURAL_TEXTURE_H_
 #define RX_ASSET_PROCEDURAL_TEXTURE_H_
 
-#include <string_view>
 
 #include "asset/texture.h"
+#include "base/strings/string_ref.h"
 #include "core/export.h"
 
 namespace rx::asset {
@@ -29,7 +29,7 @@ enum class PatternKind : u8 {
 // Resolves a pattern name ("checker", "grid", "brick", "gradient", "noise") or
 // returns false, so a caller can reject an unknown name instead of substituting
 // one. Case sensitive, like the rest of the scene-file vocabulary.
-RX_ASSET_EXPORT bool ParsePatternKind(std::string_view name, PatternKind* out);
+RX_ASSET_EXPORT bool ParsePatternKind(base::StringRef name, PatternKind* out);
 
 struct PatternDesc {
   PatternKind kind = PatternKind::kChecker;

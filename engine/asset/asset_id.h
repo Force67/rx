@@ -1,10 +1,10 @@
 #ifndef RX_ASSET_ASSET_ID_H_
 #define RX_ASSET_ASSET_ID_H_
 
-#include <optional>
-#include <string>
-#include <string_view>
 
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -30,19 +30,19 @@ struct AssetId {
   explicit operator bool() const { return hash != 0; }
 };
 
-RX_ASSET_EXPORT AssetId MakeAssetId(std::string_view normalized_path);
+RX_ASSET_EXPORT AssetId MakeAssetId(base::StringRef normalized_path);
 
 // Lowercases and converts backslashes to forward slashes (e.g. Bethesda-style
 // backslash asset paths normalize the same as forward-slash ones).
-RX_ASSET_EXPORT std::string NormalizePath(std::string_view path);
+RX_ASSET_EXPORT base::String NormalizePath(base::StringRef path);
 
 // Process-global id -> source-path table for tooling (scene serialization needs
 // to write a human-readable, relocatable path for a Renderable's AssetId rather
 // than a raw hash). The AssetDatabase records every path it is asked to load,
 // so a saver with no database handle can still resolve ids it produced. The
 // path stored is already normalized; recording is idempotent per id.
-RX_ASSET_EXPORT void RecordAssetPath(AssetId id, std::string_view normalized_path);
-RX_ASSET_EXPORT std::optional<std::string> LookupAssetPath(AssetId id);
+RX_ASSET_EXPORT void RecordAssetPath(AssetId id, base::StringRef normalized_path);
+RX_ASSET_EXPORT base::Optional<base::String> LookupAssetPath(AssetId id);
 
 }  // namespace rx::asset
 

@@ -1,13 +1,19 @@
+#include "base/containers/span.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
+#include "core/scalar.h"
 #include "world/world_map.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 namespace rx::world {
 namespace {
 
-void SetError(std::string* error, std::string message) {
-  if (error) *error = std::move(message);
+void SetError(base::String* error, base::String message) {
+  if (error) *error = base::move(message);
 }
 
 // The directory an index sits in, which is the prefix its payloads share.
@@ -15,33 +21,33 @@ void SetError(std::string* error, std::string message) {
 // last slash there belongs to the scheme separator, and cutting there would
 // leave "world:/", which resolves to no mount at all and would turn every
 // payload read into a missing entry while the index itself loaded fine.
-std::string DirectoryOf(std::string_view path) {
+base::String DirectoryOf(base::StringRef path) {
   const size_t scheme = path.find("://");
-  const size_t first = scheme == std::string_view::npos ? 0 : scheme + 3;
+  const size_t first = scheme == base::StringRef::npos ? 0 : scheme + 3;
   const size_t slash = path.find_last_of('/');
-  if (slash == std::string_view::npos || slash < first) {
-    return scheme == std::string_view::npos ? std::string() : std::string(path.substr(0, first));
+  if (slash == base::StringRef::npos || slash < first) {
+    return scheme == base::StringRef::npos ? base::String() : base::String(path.substr(0, first));
   }
-  return std::string(path.substr(0, slash));
+  return base::String(path.substr(0, slash));
 }
 
 }  // namespace
 
-bool WorldMap::Load(const asset::Vfs& vfs, std::string_view index_path, std::string* error) {
+bool WorldMap::Load(const asset::Vfs& vfs, base::StringRef index_path, base::String* error) {
   loaded_ = false;
   index_ = WorldIndexData{};
   payload_prefix_.clear();
   index_path_.assign(index_path);
 
-  std::optional<base::Vector<u8>> bytes = vfs.Read(index_path);
+  base::Optional<base::Vector<u8>> bytes = vfs.Read(index_path);
   if (!bytes) {
-    SetError(error, std::string(index_path) + ": no such world index in the mounted archives");
+    SetError(error, base::String(index_path) + ": no such world index in the mounted archives");
     return false;
   }
-  std::string decode_error;
-  if (!DecodeWorldIndex(std::span<const u8>(bytes->data(), bytes->size()), &index_,
+  base::String decode_error;
+  if (!DecodeWorldIndex(base::Span<const u8>(bytes->data(), bytes->size()), &index_,
                         &decode_error)) {
-    SetError(error, std::string(index_path) + ": " + decode_error);
+    SetError(error, base::String(index_path) + ": " + decode_error);
     index_ = WorldIndexData{};
     return false;
   }
@@ -51,16 +57,16 @@ bool WorldMap::Load(const asset::Vfs& vfs, std::string_view index_path, std::str
 }
 
 bool WorldMap::ReadPayload(const asset::Vfs& vfs, u64 cell, Domain domain, Tier tier,
-                           WorldCellPayload* out, std::string* error) const {
+                           WorldCellPayload* out, base::String* error) const {
   if (!out) return false;
-  const std::string path = CellPayloadPath(payload_prefix_, cell, domain, tier);
-  std::optional<base::Vector<u8>> bytes = vfs.Read(path);
+  const base::String path = CellPayloadPath(payload_prefix_, cell, domain, tier);
+  base::Optional<base::Vector<u8>> bytes = vfs.Read(path);
   if (!bytes) {
     SetError(error, path + ": the index lists this payload, but the archive has no such entry");
     return false;
   }
-  std::string decode_error;
-  if (!DecodeCellPayload(std::span<const u8>(bytes->data(), bytes->size()), out, &decode_error)) {
+  base::String decode_error;
+  if (!DecodeCellPayload(base::Span<const u8>(bytes->data(), bytes->size()), out, &decode_error)) {
     SetError(error, path + ": " + decode_error);
     return false;
   }
@@ -68,14 +74,14 @@ bool WorldMap::ReadPayload(const asset::Vfs& vfs, u64 cell, Domain domain, Tier 
   // payload to be fixed up: it means the index and the archive came from
   // different cooks, and every other cell is suspect too.
   if (out->bake_id != index_.bake_id) {
-    SetError(error, path + ": baked by " + std::to_string(out->bake_id) + ", but " + index_path_ +
-                        " was baked by " + std::to_string(index_.bake_id));
+    SetError(error, path + ": baked by " + rx::ToString(out->bake_id) + ", but " + index_path_ +
+                        " was baked by " + rx::ToString(index_.bake_id));
     return false;
   }
   if (out->cell_id != cell || out->domain != domain || out->tier != tier) {
-    SetError(error, path + ": holds cell " + std::to_string(out->cell_id) + " " +
+    SetError(error, path + ": holds cell " + rx::ToString(out->cell_id) + " " +
                         DomainName(out->domain) + "/" + TierName(out->tier) + ", not cell " +
-                        std::to_string(cell) + " " + DomainName(domain) + "/" + TierName(tier));
+                        rx::ToString(cell) + " " + DomainName(domain) + "/" + TierName(tier));
     return false;
   }
 
@@ -95,19 +101,19 @@ bool WorldMap::ReadPayload(const asset::Vfs& vfs, u64 cell, Domain domain, Tier 
   for (const WorldArchetypeRecord& archetype : out->archetypes) {
     for (u64 stable_id : out->StableIds(archetype)) {
       if (owned(stable_id)) continue;
-      SetError(error, path + ": stable id " + std::to_string(stable_id) +
+      SetError(error, path + ": stable id " + rx::ToString(stable_id) +
                           " is outside the range the index gives this cell (" +
-                          std::to_string(record->stable_id_first) + "+" +
-                          std::to_string(record->stable_id_count) + ")");
+                          rx::ToString(record->stable_id_first) + "+" +
+                          rx::ToString(record->stable_id_count) + ")");
       return false;
     }
   }
   for (const WorldInstanceRecord& instance : out->instances) {
     if (owned(instance.stable_id)) continue;
-    SetError(error, path + ": instance stable id " + std::to_string(instance.stable_id) +
+    SetError(error, path + ": instance stable id " + rx::ToString(instance.stable_id) +
                         " is outside the range the index gives this cell (" +
-                        std::to_string(record->stable_id_first) + "+" +
-                        std::to_string(record->stable_id_count) + ")");
+                        rx::ToString(record->stable_id_first) + "+" +
+                        rx::ToString(record->stable_id_count) + ")");
     return false;
   }
   return true;
@@ -130,13 +136,13 @@ void WorldMap::GatherRegions(const scene::WorldStreamObservation& observer, Doma
     const scene::WorldStreamRegion region{cell.id, cell.minimum, cell.maximum, 0, channel};
     const scene::WorldStreamDemand demand = scene::EvaluateWorldStreamDemand(observer, region);
     if (!demand.retain) continue;
-    out->push_back({region, std::min(demand.current_distance, demand.predicted_distance),
+    out->push_back({region, rx::Min(demand.current_distance, demand.predicted_distance),
                     /*from_claim=*/false});
   }
 }
 
 WorldStreamPolicy DefaultWorldStreamPolicy(f32 scale) {
-  const f32 unit = std::isfinite(scale) && scale > 0 ? scale : 1.0f;
+  const f32 unit = ::isfinite(scale) && scale > 0 ? scale : 1.0f;
   WorldStreamPolicy policy;
   auto set = [&](Domain domain, f32 load, f32 retain, f32 full, u32 rows_per_commit) {
     DomainStreamPolicy& target = policy[domain];
@@ -178,7 +184,7 @@ bool MakeDomainObservation(const scene::WorldStreamObservation& observer, Domain
   if ((observer.channels & channel) == 0) return false;
   *out = observer;
   out->load_distance = domain_policy.load_distance;
-  out->retain_distance = std::max(domain_policy.load_distance, domain_policy.retain_distance);
+  out->retain_distance = rx::Max(domain_policy.load_distance, domain_policy.retain_distance);
   out->channels = channel;
   return true;
 }
@@ -187,7 +193,7 @@ bool InNearTierBand(const DomainStreamPolicy& policy, f32 distance, bool current
   const f32 margin = policy.tier_hysteresis > 1.0f ? policy.tier_hysteresis : 1.0f;
   const f32 threshold =
       currently_near ? policy.full_tier_distance * margin : policy.full_tier_distance;
-  return std::isfinite(distance) && distance <= threshold;
+  return ::isfinite(distance) && distance <= threshold;
 }
 
 Tier ResolveTier(const WorldIndexData& index, const WorldCellRecord& cell, Domain domain,

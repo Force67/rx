@@ -1,10 +1,11 @@
 #include "asset/simplify.h"
+#include "base/algorithm.h"
+#include "base/containers/unordered_map.h"
+#include "base/containers/unordered_set.h"
+#include "base/containers/vector.h"
+#include "core/scalar.h"
 
-#include <algorithm>
-#include <cmath>
-#include <queue>
-#include <unordered_map>
-#include <unordered_set>
+#include <math.h>
 
 namespace rx::asset {
 namespace {
@@ -40,11 +41,58 @@ struct Candidate {
   f64 cost;
   u32 from, to;
   u32 stamp;  // from-vertex version when queued; stale entries are skipped
-  bool operator<(const Candidate& other) const { return cost > other.cost; }  // min-heap
+};
+
+// Cheapest first, and a total order beyond the cost: flat regions produce
+// many exactly equal (zero) costs, and breaking those ties by content makes
+// the collapse sequence a function of the mesh alone, not of the order edges
+// were queued in or of any container's iteration order.
+bool CollapsesBefore(const Candidate& a, const Candidate& b) {
+  if (a.cost != b.cost) return a.cost < b.cost;
+  if (a.from != b.from) return a.from < b.from;
+  if (a.to != b.to) return a.to < b.to;
+  return a.stamp < b.stamp;
+}
+
+// Binary min-heap over CollapsesBefore.
+class CandidateHeap {
+ public:
+  bool empty() const { return items_.empty(); }
+  const Candidate& top() const { return items_[0]; }
+
+  void push(const Candidate& c) {
+    items_.push_back(c);
+    mem_size i = items_.size() - 1;
+    while (i > 0) {
+      const mem_size parent = (i - 1) / 2;
+      if (!CollapsesBefore(items_[i], items_[parent])) break;
+      base::Swap(items_[i], items_[parent]);
+      i = parent;
+    }
+  }
+
+  void pop() {
+    items_[0] = items_.back();
+    items_.pop_back();
+    const mem_size n = items_.size();
+    mem_size i = 0;
+    for (;;) {
+      const mem_size left = 2 * i + 1;
+      if (left >= n) break;
+      mem_size best = left;
+      if (left + 1 < n && CollapsesBefore(items_[left + 1], items_[left])) best = left + 1;
+      if (!CollapsesBefore(items_[best], items_[i])) break;
+      base::Swap(items_[i], items_[best]);
+      i = best;
+    }
+  }
+
+ private:
+  base::Vector<Candidate> items_;
 };
 
 u64 EdgeKey(u32 a, u32 b) {
-  return (static_cast<u64>(std::min(a, b)) << 32) | std::max(a, b);
+  return (static_cast<u64>(rx::Min(a, b)) << 32) | rx::Max(a, b);
 }
 
 // The actual collapse loop, over a DENSE vertex range: every scratch array is
@@ -52,31 +100,31 @@ u64 EdgeKey(u32 a, u32 b) {
 // wrapper below does). Called once per cluster group during the DAG build -
 // sizing scratch by the whole source mesh instead made thousands of group
 // calls over a multi-million-vertex mesh spend all their time in allocation.
-std::vector<u32> SimplifyDense(const Vec3* positions, u32 vertex_count, const u32* indices,
+base::Vector<u32> SimplifyDense(const Vec3* positions, u32 vertex_count, const u32* indices,
                                u32 index_count, u32 target_index_count, const u8* locked,
                                f32* out_error) {
-  std::vector<u32> result(indices, indices + index_count);
+  base::Vector<u32> result(indices, indices + index_count);
 
   // Union-find style remap: collapsed vertices forward to their target.
-  std::vector<u32> remap(vertex_count);
+  base::Vector<u32> remap(vertex_count);
   for (u32 i = 0; i < vertex_count; ++i) remap[i] = i;
   auto resolve = [&](u32 v) {
     while (remap[v] != v) v = remap[v];
     return v;
   };
 
-  std::vector<Quadric> quadrics(vertex_count);
-  std::vector<u32> version(vertex_count, 0);
+  base::Vector<Quadric> quadrics(vertex_count);
+  base::Vector<u32> version(vertex_count, 0);
   // Adjacency: triangles per vertex (triangle ids into result/3).
-  std::vector<std::vector<u32>> vertex_tris(vertex_count);
+  base::Vector<base::Vector<u32>> vertex_tris(vertex_count);
   u32 live_triangles = index_count / 3;
-  std::vector<bool> tri_dead(live_triangles, false);
+  base::Vector<bool> tri_dead(live_triangles, false);
 
   for (u32 t = 0; t < index_count / 3; ++t) {
     u32 i0 = result[t * 3], i1 = result[t * 3 + 1], i2 = result[t * 3 + 2];
     Vec3 p0 = positions[i0], p1 = positions[i1], p2 = positions[i2];
     Vec3 n = Cross(p1 - p0, p2 - p0);
-    f64 len = std::sqrt(static_cast<f64>(n.x) * n.x + static_cast<f64>(n.y) * n.y +
+    f64 len = ::sqrt(static_cast<f64>(n.x) * n.x + static_cast<f64>(n.y) * n.y +
                         static_cast<f64>(n.z) * n.z);
     if (len < 1e-12) {
       tri_dead[t] = true;
@@ -98,37 +146,38 @@ std::vector<u32> SimplifyDense(const Vec3* positions, u32 vertex_count, const u3
 
   // Border edges of the SUBMESH itself (used by one triangle only) also lock:
   // collapsing them would erode the patch outline even without a lock array.
-  std::unordered_map<u64, u32> edge_use;
+  base::UnorderedMap<u64, u32> edge_use;
   for (u32 t = 0; t < index_count / 3; ++t) {
     if (tri_dead[t]) continue;
     for (u32 e = 0; e < 3; ++e) {
       ++edge_use[EdgeKey(result[t * 3 + e], result[t * 3 + (e + 1) % 3])];
     }
   }
-  std::vector<u8> border(vertex_count, 0);
-  for (const auto& entry : edge_use) {
-    if (entry.second == 1) {
-      border[static_cast<u32>(entry.first >> 32)] = 1;
-      border[static_cast<u32>(entry.first & 0xffffffffu)] = 1;
+  base::Vector<u8> border(vertex_count, 0);
+  // Order-free: only marks vertices.
+  for (auto entry : edge_use) {
+    if (entry.value == 1) {
+      border[static_cast<u32>(entry.key >> 32)] = 1;
+      border[static_cast<u32>(entry.key & 0xffffffffu)] = 1;
     }
   }
   auto is_locked = [&](u32 v) { return (locked && locked[v]) || border[v]; };
 
-  std::priority_queue<Candidate> heap;
+  CandidateHeap heap;
   auto push_edge = [&](u32 a, u32 b) {
     if (is_locked(a)) return;  // half-edge collapse a -> b
     Quadric q = quadrics[a];
     q.Add(quadrics[b]);
-    f64 cost = std::max(q.Evaluate(positions[b]), 0.0);
+    f64 cost = rx::Max(q.Evaluate(positions[b]), 0.0);
     heap.push({cost, a, b, version[a]});
   };
   {
-    std::unordered_set<u64> seen;
+    base::UnorderedSet<u64> seen;
     for (u32 t = 0; t < index_count / 3; ++t) {
       if (tri_dead[t]) continue;
       for (u32 e = 0; e < 3; ++e) {
         u32 a = result[t * 3 + e], b = result[t * 3 + (e + 1) % 3];
-        if (seen.insert(EdgeKey(a, b)).second) {
+        if (seen.insert(EdgeKey(a, b))) {
           push_edge(a, b);
           push_edge(b, a);
         }
@@ -170,7 +219,7 @@ std::vector<u32> SimplifyDense(const Vec3* positions, u32 vertex_count, const u3
     remap[a] = b;
     ++version[a];
     quadrics[b].Add(quadrics[a]);
-    max_cost = std::max(max_cost, top.cost);
+    max_cost = rx::Max(max_cost, top.cost);
     for (u32 t : vertex_tris[a]) {
       if (tri_dead[t]) continue;
       u32 v[3] = {resolve(result[t * 3]), resolve(result[t * 3 + 1]), resolve(result[t * 3 + 2])};
@@ -182,7 +231,7 @@ std::vector<u32> SimplifyDense(const Vec3* positions, u32 vertex_count, const u3
       vertex_tris[b].push_back(t);
     }
     // Refresh collapse candidates around b.
-    std::unordered_set<u32> neighbors;
+    base::UnorderedSet<u32> neighbors;
     for (u32 t : vertex_tris[b]) {
       if (tri_dead[t]) continue;
       for (u32 k = 0; k < 3; ++k) {
@@ -190,13 +239,13 @@ std::vector<u32> SimplifyDense(const Vec3* positions, u32 vertex_count, const u3
         if (v != b) neighbors.insert(v);
       }
     }
-    for (u32 n : neighbors) {
+    neighbors.ForEach([&](u32 n) {
       push_edge(n, b);
       push_edge(b, n);
-    }
+    });
   }
 
-  std::vector<u32> out;
+  base::Vector<u32> out;
   out.reserve(live_triangles * 3);
   for (u32 t = 0; t < index_count / 3; ++t) {
     if (tri_dead[t]) continue;
@@ -207,41 +256,41 @@ std::vector<u32> SimplifyDense(const Vec3* positions, u32 vertex_count, const u3
     out.push_back(v1);
     out.push_back(v2);
   }
-  if (out_error) *out_error = static_cast<f32>(std::sqrt(std::max(max_cost, 0.0)));
+  if (out_error) *out_error = static_cast<f32>(::sqrt(rx::Max(max_cost, 0.0)));
   return out;
 }
 
 }  // namespace
 
-std::vector<u32> SimplifyIndices(const Vec3* positions, u32 vertex_count, const u32* indices,
+base::Vector<u32> SimplifyIndices(const Vec3* positions, u32 vertex_count, const u32* indices,
                                  u32 index_count, u32 target_index_count, const u8* locked,
                                  f32* out_error) {
   if (out_error) *out_error = 0.0f;
   if (index_count <= target_index_count || index_count < 12) {
-    return std::vector<u32>(indices, indices + index_count);
+    return base::Vector<u32>(indices, indices + index_count);
   }
   (void)vertex_count;
 
   // Compact to the vertices this submesh actually references, simplify in
   // that dense space, then map the survivors back to source indices.
-  std::unordered_map<u32, u32> to_local;
+  base::UnorderedMap<u32, u32> to_local;
   to_local.reserve(index_count);
-  std::vector<u32> to_global;
-  std::vector<Vec3> local_positions;
-  std::vector<u8> local_locked;
-  std::vector<u32> local_indices(index_count);
+  base::Vector<u32> to_global;
+  base::Vector<Vec3> local_positions;
+  base::Vector<u8> local_locked;
+  base::Vector<u32> local_indices(index_count);
   for (u32 i = 0; i < index_count; ++i) {
     u32 g = indices[i];
-    auto [it, inserted] = to_local.emplace(g, static_cast<u32>(to_global.size()));
+    auto [local, inserted] = to_local.emplace(g, static_cast<u32>(to_global.size()));
     if (inserted) {
       to_global.push_back(g);
       local_positions.push_back(positions[g]);
       local_locked.push_back(locked ? locked[g] : 0);
     }
-    local_indices[i] = it->second;
+    local_indices[i] = *local;
   }
 
-  std::vector<u32> out = SimplifyDense(local_positions.data(),
+  base::Vector<u32> out = SimplifyDense(local_positions.data(),
                                        static_cast<u32>(to_global.size()),
                                        local_indices.data(), index_count,
                                        target_index_count, local_locked.data(), out_error);

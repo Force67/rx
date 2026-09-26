@@ -8,19 +8,22 @@
 // configured interval window, a pose that holds the eyes closed absorbs
 // them, and a fixed seed + fixed dt replays bit-identically.
 
-#include <cmath>
-#include <cstdio>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "anim/expression.h"
 #include "asset/asset_id.h"
+#include "base/memory/mem_ops.h"
+#include "core/scalar.h"
 
 using namespace rx;
 
 namespace {
 
 int Fail(const char* msg) {
-  std::fprintf(stderr, "expression_test: FAIL: %s\n", msg);
+  ::fprintf(stderr, "expression_test: FAIL: %s\n", msg);
   return 1;
 }
 
@@ -51,20 +54,20 @@ int TestTransition() {
     controller.Update(dt);
     const f32 weight = controller.Weight(smile);
     const f32 v = (weight - previous) / dt;
-    if (i > 0) max_jump = std::max(max_jump, std::abs(v - velocity));
+    if (i > 0) max_jump = rx::Max(max_jump, ::abs(v - velocity));
     previous = weight;
     velocity = v;
   }
-  std::printf("expression_test: max velocity jump %g /s per step\n", max_jump);
+  ::printf("expression_test: max velocity jump %g /s per step\n", max_jump);
   if (max_jump > 1.5f) return Fail("velocity discontinuity across a retarget");
-  if (std::abs(controller.Weight(smile) - 0.75f) > 1e-3f) {
+  if (::abs(controller.Weight(smile) - 0.75f) > 1e-3f) {
     return Fail("smile did not converge to its pose weight");
   }
-  if (std::abs(velocity) > 1e-2f) return Fail("velocity did not settle");
+  if (::abs(velocity) > 1e-2f) return Fail("velocity did not settle");
 
   controller.SetExpression("neutral");
   for (int i = 0; i < 2 * 240; ++i) controller.Update(dt);
-  if (std::abs(controller.Weight(smile)) > 1e-3f) return Fail("neutral did not release");
+  if (::abs(controller.Weight(smile)) > 1e-3f) return Fail("neutral did not release");
   return 0;
 }
 
@@ -103,13 +106,13 @@ int TestBlink() {
     time += dt;
     const bool now = controller.Weight(blink) > 0.5f;
     if (now && !closed) {
-      if (blinks > 0) max_gap = std::max(max_gap, time - last_start);
+      if (blinks > 0) max_gap = rx::Max(max_gap, time - last_start);
       last_start = time;
       ++blinks;
     }
     closed = now;
   }
-  std::printf("expression_test: %d blinks in 30 s, max gap %.2f s\n", blinks, max_gap);
+  ::printf("expression_test: %d blinks in 30 s, max gap %.2f s\n", blinks, max_gap);
   // 2-6 s intervals plus occasional double blinks: 5..25 in 30 s.
   if (blinks < 5 || blinks > 25) return Fail("blink count outside the interval window");
   if (max_gap > 6.6f) return Fail("blink gap exceeded the configured maximum");
@@ -143,7 +146,7 @@ int TestDeterminism() {
     for (u32 ch = 0; ch < a.channel_count(); ++ch) {
       const f32 wa = a.channel_weight(ch);
       const f32 wb = b.channel_weight(ch);
-      if (std::memcmp(&wa, &wb, sizeof(f32)) != 0) return Fail("same seed diverged");
+      if (base::MemCompare(&wa, &wb, sizeof(f32)) != 0) return Fail("same seed diverged");
       if (wa != c.channel_weight(ch)) diverged = true;
     }
   }
@@ -158,6 +161,6 @@ int main() {
   if (int rc = TestClamped()) return rc;
   if (int rc = TestBlink()) return rc;
   if (int rc = TestDeterminism()) return rc;
-  std::printf("expression_test: PASS\n");
+  ::printf("expression_test: PASS\n");
   return 0;
 }

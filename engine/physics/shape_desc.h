@@ -7,8 +7,8 @@
 // collision/ragdolls) and, eventually, NIF bhk blocks; nothing in here is
 // format-specific.
 
-#include <vector>
 
+#include "base/containers/vector.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -20,8 +20,8 @@ struct ShapeDesc {
   f32 radius = 0;       // sphere; capsule
   Vec3 a{}, b{};        // capsule segment ends (local space)
   Vec3 half_extents{};  // box
-  std::vector<Vec3> vertices;      // convex hull
-  std::vector<ShapeDesc> children;  // compound members / the placed child
+  base::Vector<Vec3> vertices;      // convex hull
+  base::Vector<ShapeDesc> children;  // compound members / the placed child
   // kPlaced child placement: four float4 COLUMNS (basis c0, c1, c2, origin).
   f32 transform[16] = {};
 };

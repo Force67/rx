@@ -1,8 +1,9 @@
 #include "render/gi/light_grid.h"
 
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "shaders/light_grid_cs_hlsl.h"
 
@@ -55,9 +56,9 @@ void LightGrid::AddToGraph(RenderGraph& graph, const GpuBuffer& lights, u32 ligh
   for (u32 c = 0; c < kCascades; ++c) {
     f32 extent = kCascade0Extent * static_cast<f32>(1u << c);
     f32 cell_size = extent / static_cast<f32>(kCells);
-    Vec3 origin{std::floor((camera.x - extent * 0.5f) / cell_size) * cell_size,
-                std::floor((camera.y - extent * 0.5f) / cell_size) * cell_size,
-                std::floor((camera.z - extent * 0.5f) / cell_size) * cell_size};
+    Vec3 origin{::floor((camera.x - extent * 0.5f) / cell_size) * cell_size,
+                ::floor((camera.y - extent * 0.5f) / cell_size) * cell_size,
+                ::floor((camera.z - extent * 0.5f) / cell_size) * cell_size};
     params.cascade[c][0] = origin.x;
     params.cascade[c][1] = origin.y;
     params.cascade[c][2] = origin.z;
@@ -68,7 +69,7 @@ void LightGrid::AddToGraph(RenderGraph& graph, const GpuBuffer& lights, u32 ligh
   params.info[2] = kMaxPerCell;
   params.info[3] = 0;
   GpuBuffer& params_buffer = params_buffers_[frame_index % 2];
-  std::memcpy(params_buffer.mapped, &params, sizeof(params));
+  base::MemCopy(params_buffer.mapped, &params, sizeof(params));
 
   u32 capped = light_count < kMaxLights ? light_count : kMaxLights;
   graph.AddPass(

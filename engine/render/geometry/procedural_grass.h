@@ -1,13 +1,13 @@
 #ifndef RX_RENDER_PROCEDURAL_GRASS_H_
 #define RX_RENDER_PROCEDURAL_GRASS_H_
 
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <limits>
-#include <span>
+#include <math.h>
 
+#include "base/containers/array.h"
+#include "base/containers/span.h"
+#include "base/numeric_limits.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 
@@ -84,7 +84,7 @@ struct GrassGenerationSettings {
 inline GrassGenerationSettings SanitizeGrassSettings(GrassGenerationSettings settings) {
   const GrassGenerationSettings defaults;
   auto finite_or = [](f32 value, f32 fallback) {
-    return std::isfinite(value) ? value : fallback;
+    return ::isfinite(value) ? value : fallback;
   };
   settings.candidate_spacing =
       finite_or(settings.candidate_spacing, defaults.candidate_spacing);
@@ -107,33 +107,33 @@ inline GrassGenerationSettings SanitizeGrassSettings(GrassGenerationSettings set
   settings.bend_recovery_time =
       finite_or(settings.bend_recovery_time, defaults.bend_recovery_time);
 
-  settings.candidate_spacing = std::clamp(settings.candidate_spacing, 0.08f, 8.0f);
-  settings.stream_tile_size = std::clamp(settings.stream_tile_size, 1.0f, 512.0f);
+  settings.candidate_spacing = rx::Clamp(settings.candidate_spacing, 0.08f, 8.0f);
+  settings.stream_tile_size = rx::Clamp(settings.stream_tile_size, 1.0f, 512.0f);
   settings.stream_radius =
-      std::clamp(settings.stream_radius, settings.candidate_spacing, 512.0f);
+      rx::Clamp(settings.stream_radius, settings.candidate_spacing, 512.0f);
   if (settings.far_radius > settings.stream_radius) {
     settings.far_radius =
-        std::min({settings.far_radius, settings.stream_radius * 8.0f, 4096.0f});
+        rx::Min({settings.far_radius, settings.stream_radius * 8.0f, 4096.0f});
   } else {
     settings.far_radius = 0.0f;
   }
-  settings.density_lod_start = std::max(settings.density_lod_start, 0.0f);
-  settings.density_lod_end = std::max(
+  settings.density_lod_start = rx::Max(settings.density_lod_start, 0.0f);
+  settings.density_lod_end = rx::Max(
       settings.density_lod_end, settings.density_lod_start + settings.candidate_spacing);
-  settings.far_density = std::clamp(settings.far_density, 0.0f, 1.0f);
-  settings.geometry_lod_start = std::max(settings.geometry_lod_start, 0.0f);
+  settings.far_density = rx::Clamp(settings.far_density, 0.0f, 1.0f);
+  settings.geometry_lod_start = rx::Max(settings.geometry_lod_start, 0.0f);
   settings.geometry_lod_end =
-      std::max(settings.geometry_lod_end,
+      rx::Max(settings.geometry_lod_end,
                settings.geometry_lod_start + settings.candidate_spacing);
   const f32 latest_fade_start =
-      std::max(settings.stream_radius - settings.candidate_spacing, 0.0f);
-  settings.fade_start = std::clamp(settings.fade_start, 0.0f, latest_fade_start);
+      rx::Max(settings.stream_radius - settings.candidate_spacing, 0.0f);
+  settings.fade_start = rx::Clamp(settings.fade_start, 0.0f, latest_fade_start);
   settings.fade_end =
-      std::clamp(settings.fade_end, settings.fade_start + settings.candidate_spacing,
+      rx::Clamp(settings.fade_end, settings.fade_start + settings.candidate_spacing,
                  settings.stream_radius);
-  settings.max_slope_cos = std::clamp(settings.max_slope_cos, 0.0f, 1.0f);
-  settings.bend_recovery_time = std::clamp(settings.bend_recovery_time, 0.0f, 3600.0f);
-  settings.max_blades = std::clamp(settings.max_blades, 1u, 262144u);
+  settings.max_slope_cos = rx::Clamp(settings.max_slope_cos, 0.0f, 1.0f);
+  settings.bend_recovery_time = rx::Clamp(settings.bend_recovery_time, 0.0f, 3600.0f);
+  settings.max_blades = rx::Clamp(settings.max_blades, 1u, 262144u);
   return settings;
 }
 
@@ -143,14 +143,14 @@ inline u32 GrassSurfaceCandidateCount(const GrassSurfaceTriangle& triangle,
   const Vec3 b{triangle.p1[0], triangle.p1[1], triangle.p1[2]};
   const Vec3 c{triangle.p2[0], triangle.p2[1], triangle.p2[2]};
   const f32 area = 0.5f * Length(Cross(b - a, c - a));
-  const f32 spacing = std::clamp(
-      std::isfinite(candidate_spacing) ? candidate_spacing : 0.42f, 0.08f, 8.0f);
-  if (!std::isfinite(area) || area <= 1e-6f)
+  const f32 spacing = rx::Clamp(
+      ::isfinite(candidate_spacing) ? candidate_spacing : 0.42f, 0.08f, 8.0f);
+  if (!::isfinite(area) || area <= 1e-6f)
     return 0;
   const f64 candidates =
-      std::ceil(static_cast<f64>(area) / (static_cast<f64>(spacing) * spacing));
+      ::ceil(static_cast<f64>(area) / (static_cast<f64>(spacing) * spacing));
   return static_cast<u32>(
-      std::clamp(candidates, 1.0, static_cast<f64>(std::numeric_limits<u32>::max())));
+      rx::Clamp(candidates, 1.0, static_cast<f64>(base::MinMax<u32>::max())));
 }
 
 // Non-owning semantic field submitted for one RenderFrame call. The heightfield
@@ -238,7 +238,7 @@ class ProceduralGrass {
   bool EnsureSampleCount(Device& device, u32 samples);
 
   bool Prepare(const GrassDomain& domain,
-               std::span<const GrassInteraction> interactions,
+               base::Span<const GrassInteraction> interactions,
                const Frame& frame,
                u32 frame_slot);
   void AddGeneration(RenderGraph& graph, u32 frame_slot);
@@ -348,7 +348,7 @@ class ProceduralGrass {
     f32 bend_update_time = 0.0f;
     f32 bend_max_strength = 0.0f;
     bool bend_active = false;
-    std::array<GenerationPush, kMaxGenerationPhases> generation{};
+    base::Array<GenerationPush, kMaxGenerationPhases> generation{};
     u32 generation_count = 0;
     DrawPush draw{};
     FieldUploadState field_upload;

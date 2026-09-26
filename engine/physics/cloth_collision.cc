@@ -1,10 +1,13 @@
+#include "base/algorithm.h"
+#include "base/memory/move.h"
+#include "core/scalar.h"
 #include "physics/cloth_collision.h"
+#include "core/sort.h"
 
-#include <algorithm>
-#include <cassert>
-#include <cmath>
-#include <limits>
-#include <numeric>
+#include <assert.h>
+#include <float.h>
+#include <math.h>
+#include <stdlib.h>
 
 namespace rx::physics::detail {
 namespace {
@@ -41,7 +44,7 @@ bool SameFace(const FaceKey& a, const FaceKey& b) {
 }
 
 bool IsFinite(const Vec3& p) {
-  return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
+  return ::isfinite(p.x) && ::isfinite(p.y) && ::isfinite(p.z);
 }
 
 f64 TriangleAreaTwice(const Vec3& a, const Vec3& b, const Vec3& c) {
@@ -54,7 +57,7 @@ f64 TriangleAreaTwice(const Vec3& a, const Vec3& b, const Vec3& c) {
   const f64 x = aby * acz - abz * acy;
   const f64 y = abz * acx - abx * acz;
   const f64 z = abx * acy - aby * acx;
-  return std::sqrt(x * x + y * y + z * z);
+  return ::sqrt(x * x + y * y + z * z);
 }
 
 f64 SignedVolumeContribution(const Vec3& a, const Vec3& b, const Vec3& c) {
@@ -71,17 +74,19 @@ Edge MakeEdge(u32 a, u32 b) {
 }
 
 FaceKey MakeFaceKey(u32 a, u32 b, u32 c) {
-  if (a > b) std::swap(a, b);
-  if (b > c) std::swap(b, c);
-  if (a > b) std::swap(a, b);
+  if (a > b) base::Swap(a, b);
+  if (b > c) base::Swap(b, c);
+  if (a > b) base::Swap(a, b);
   return {a, b, c};
 }
 
 bool IsTopologyNeighbor(const ClothTopology& topology, u32 vertex, u32 other) {
   const u32 begin = topology.neighbor_offsets[vertex];
   const u32 end = topology.neighbor_offsets[vertex + 1];
-  return std::binary_search(topology.neighbors.begin() + begin,
-                            topology.neighbors.begin() + end, other);
+  const u32* first = topology.neighbors.data() + begin;
+  const u32* last = topology.neighbors.data() + end;
+  const u32* it = base::LowerBound<const u32>(first, last, other);
+  return it != last && !(other < *it);
 }
 
 Vec3 ClosestPointOnSegment(const Vec3& p, const Vec3& a, const Vec3& b,
@@ -89,7 +94,7 @@ Vec3 ClosestPointOnSegment(const Vec3& p, const Vec3& a, const Vec3& b,
   const Vec3 ab = b - a;
   const f32 denominator = Dot(ab, ab);
   *t = denominator > 1.0e-12f
-           ? std::clamp(Dot(p - a, ab) / denominator, 0.0f, 1.0f)
+           ? rx::Clamp(Dot(p - a, ab) / denominator, 0.0f, 1.0f)
            : 0;
   return a + ab * *t;
 }
@@ -200,42 +205,42 @@ f64 Dot64(const Vec3& a, const Vec3& b) {
 
 u32 FindCubicRoots(f64 c0, f64 c1, f64 c2, f64 c3, f32 roots[4]) {
   const f64 scale =
-      std::abs(c0) + std::abs(c1) + std::abs(c2) + std::abs(c3) + 1.0;
+      ::abs(c0) + ::abs(c1) + ::abs(c2) + ::abs(c3) + 1.0;
   const f64 epsilon = scale * 1.0e-10;
   f64 points[4] = {0, 1, 0, 0};
   u32 point_count = 2;
   const f64 da = 3 * c3;
   const f64 db = 2 * c2;
   const f64 dc = c1;
-  if (std::abs(da) > epsilon) {
+  if (::abs(da) > epsilon) {
     const f64 discriminant = db * db - 4 * da * dc;
     if (discriminant >= 0) {
-      const f64 root = std::sqrt(discriminant);
+      const f64 root = ::sqrt(discriminant);
       const f64 t0 = (-db - root) / (2 * da);
       const f64 t1 = (-db + root) / (2 * da);
       if (t0 > 0 && t0 < 1 && point_count < 4) points[point_count++] = t0;
       if (t1 > 0 && t1 < 1 && point_count < 4) points[point_count++] = t1;
     }
-  } else if (std::abs(db) > epsilon) {
+  } else if (::abs(db) > epsilon) {
     const f64 t = -dc / db;
     if (t > 0 && t < 1 && point_count < 4) points[point_count++] = t;
   }
   for (u32 i = 1; i < point_count; ++i) {
     for (u32 j = i; j > 0 && points[j] < points[j - 1]; --j)
-      std::swap(points[j], points[j - 1]);
+      base::Swap(points[j], points[j - 1]);
   }
   auto evaluate = [&](f64 t) { return ((c3 * t + c2) * t + c1) * t + c0; };
   u32 root_count = 0;
   auto add_root = [&](f64 root) {
     if (root < -epsilon || root > 1 + epsilon) return;
-    const f32 value = static_cast<f32>(std::clamp(root, 0.0, 1.0));
+    const f32 value = static_cast<f32>(rx::Clamp(root, 0.0, 1.0));
     if (root_count < 4 && (root_count == 0 ||
-                           std::abs(value - roots[root_count - 1]) > 1.0e-5f)) {
+                           ::abs(value - roots[root_count - 1]) > 1.0e-5f)) {
       roots[root_count++] = value;
     }
   };
   for (u32 i = 0; i < point_count; ++i) {
-    if (std::abs(evaluate(points[i])) <= epsilon) add_root(points[i]);
+    if (::abs(evaluate(points[i])) <= epsilon) add_root(points[i]);
     if (i + 1 == point_count) continue;
     f64 low = points[i], high = points[i + 1];
     f64 low_value = evaluate(low);
@@ -253,7 +258,9 @@ u32 FindCubicRoots(f64 c0, f64 c1, f64 c2, f64 c3, f32 roots[4]) {
     }
     add_root(0.5 * (low + high));
   }
-  std::sort(roots, roots + root_count);
+  // At most four roots: libstdc++ and base both insertion-sort a range this
+  // short, and insertion sort is stable, so the result is identical.
+  base::Sort(roots, roots + root_count);
   return root_count;
 }
 
@@ -283,7 +290,7 @@ bool FindVertexFaceContact(const Vec3& p0, const Vec3& p1, const Vec3& a0,
   const Vec3 vb = b1 - b0;
   const Vec3 vc = c1 - c0;
   const f32 speed =
-      std::max({Length(vp - va), Length(vp - vb), Length(vp - vc)});
+      rx::Max({Length(vp - va), Length(vp - vb), Length(vp - vc)});
   f32 time = 0;
   for (u32 step = 0; step < 64 && time <= 1; ++step) {
     const Vec3 p = Lerp(p0, p1, time);
@@ -325,10 +332,10 @@ bool FindVertexFaceContact(const Vec3& p0, const Vec3& p1, const Vec3& a0,
     const Vec3 c = Lerp(c0, c1, root);
     f32 wa = 0, wb = 0, wc = 0;
     const Vec3 closest = ClosestPointOnTriangle(p, a, b, c, &wa, &wb, &wc);
-    if (Length(p - closest) > std::max(distance * 0.1f, 1.0e-5f)) continue;
+    if (Length(p - closest) > rx::Max(distance * 0.1f, 1.0e-5f)) continue;
     Vec3 normal = Normalize(Cross(b - a, c - a));
     if (Length(normal) < 0.5f) continue;
-    const f32 before = std::max(root - 1.0e-4f, 0.0f);
+    const f32 before = rx::Max(root - 1.0e-4f, 0.0f);
     const Vec3 before_p = Lerp(p0, p1, before);
     const Vec3 before_a = Lerp(a0, a1, before);
     const Vec3 before_b = Lerp(b0, b1, before);
@@ -357,25 +364,25 @@ void ClosestPointsOnSegments(const Vec3& p1, const Vec3& q1, const Vec3& p2,
     *s = *t = 0;
   } else if (a <= 1.0e-12f) {
     *s = 0;
-    *t = std::clamp(f / e, 0.0f, 1.0f);
+    *t = rx::Clamp(f / e, 0.0f, 1.0f);
   } else {
     const f32 c = Dot(d1, r);
     if (e <= 1.0e-12f) {
       *t = 0;
-      *s = std::clamp(-c / a, 0.0f, 1.0f);
+      *s = rx::Clamp(-c / a, 0.0f, 1.0f);
     } else {
       const f32 b = Dot(d1, d2);
       const f32 denominator = a * e - b * b;
       *s = denominator != 0
-               ? std::clamp((b * f - c * e) / denominator, 0.0f, 1.0f)
+               ? rx::Clamp((b * f - c * e) / denominator, 0.0f, 1.0f)
                : 0;
       *t = (b * *s + f) / e;
       if (*t < 0) {
         *t = 0;
-        *s = std::clamp(-c / a, 0.0f, 1.0f);
+        *s = rx::Clamp(-c / a, 0.0f, 1.0f);
       } else if (*t > 1) {
         *t = 1;
-        *s = std::clamp((b - c) / a, 0.0f, 1.0f);
+        *s = rx::Clamp((b - c) / a, 0.0f, 1.0f);
       }
     }
   }
@@ -397,7 +404,7 @@ bool FindEdgeContact(const Vec3& a0, const Vec3& a1, const Vec3& b0,
   const Vec3 vb = b1 - b0;
   const Vec3 vc = c1 - c0;
   const Vec3 vd = d1 - d0;
-  const f32 speed = std::max(
+  const f32 speed = rx::Max(
       {Length(va - vc), Length(va - vd), Length(vb - vc), Length(vb - vd)});
   f32 time = 0;
   for (u32 step = 0; step < 64 && time <= 1; ++step) {
@@ -434,11 +441,11 @@ bool FindEdgeContact(const Vec3& a0, const Vec3& a1, const Vec3& b0,
     f32 edge_a = 0, edge_b = 0;
     Vec3 point_a, point_b;
     ClosestPointsOnSegments(a, b, c, d, &edge_a, &edge_b, &point_a, &point_b);
-    if (Length(point_a - point_b) > std::max(distance * 0.1f, 1.0e-5f))
+    if (Length(point_a - point_b) > rx::Max(distance * 0.1f, 1.0e-5f))
       continue;
     Vec3 normal = Normalize(Cross(b - a, d - c));
     if (Length(normal) < 0.5f) continue;
-    const f32 before = std::max(root - 1.0e-4f, 0.0f);
+    const f32 before = rx::Max(root - 1.0e-4f, 0.0f);
     f32 before_a_weight = 0, before_b_weight = 0;
     Vec3 before_a, before_b;
     ClosestPointsOnSegments(Lerp(a0, a1, before), Lerp(b0, b1, before),
@@ -455,17 +462,17 @@ bool FindEdgeContact(const Vec3& a0, const Vec3& a1, const Vec3& b0,
 using Bounds = ClothSelfCollisionScratch::Bounds;
 
 Bounds EmptyBounds() {
-  const f32 inf = std::numeric_limits<f32>::infinity();
+  const f32 inf = INFINITY;
   return {{inf, inf, inf}, {-inf, -inf, -inf}};
 }
 
 void Expand(Bounds* bounds, const Vec3& point) {
-  bounds->low = {std::min(bounds->low.x, point.x),
-                 std::min(bounds->low.y, point.y),
-                 std::min(bounds->low.z, point.z)};
-  bounds->high = {std::max(bounds->high.x, point.x),
-                  std::max(bounds->high.y, point.y),
-                  std::max(bounds->high.z, point.z)};
+  bounds->low = {rx::Min(bounds->low.x, point.x),
+                 rx::Min(bounds->low.y, point.y),
+                 rx::Min(bounds->low.z, point.z)};
+  bounds->high = {rx::Max(bounds->high.x, point.x),
+                  rx::Max(bounds->high.y, point.y),
+                  rx::Max(bounds->high.z, point.z)};
 }
 
 void Expand(Bounds* bounds, const Bounds& other) {
@@ -511,10 +518,13 @@ u32 BuildBvhNode(u32 begin, u32 end, ClothSelfCollisionScratch* scratch) {
     const Vec3 center = (primitive_bounds.low + primitive_bounds.high) * 0.5f;
     return axis == 0 ? center.x : (axis == 1 ? center.y : center.z);
   };
-  std::nth_element(scratch->primitives.begin() + begin,
-                   scratch->primitives.begin() + middle,
-                   scratch->primitives.begin() + end,
-                   [&](u32 a, u32 b) { return coordinate(a) < coordinate(b); });
+  // Ties on the axis break by primitive id: with a total order, which
+  // primitives land on each side is fixed by the mesh alone.
+  u32* primitives = scratch->primitives.data();
+  rx::NthElement(primitives + begin, primitives + middle, primitives + end, [&](u32 a, u32 b) {
+    const f32 ca = coordinate(a), cb = coordinate(b);
+    return ca != cb ? ca < cb : a < b;
+  });
   const u32 left = BuildBvhNode(begin, middle, scratch);
   const u32 right = BuildBvhNode(middle, end, scratch);
   scratch->bvh[node_index].left = left;
@@ -598,8 +608,8 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     }
     const f64 area_twice =
         TriangleAreaTwice(positions[a], positions[b], positions[c]);
-    if (!std::isfinite(area_twice) || area_twice < kMinAreaTwice ||
-        area_twice > std::numeric_limits<f32>::max()) {
+    if (!::isfinite(area_twice) || area_twice < kMinAreaTwice ||
+        area_twice > FLT_MAX) {
       return false;
     }
     triangle_areas.push_back(static_cast<f32>(area_twice * 0.5));
@@ -609,7 +619,7 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     faces.push_back(MakeFaceKey(a, b, c));
     const f64 volume =
         SignedVolumeContribution(positions[a], positions[b], positions[c]);
-    if (!std::isfinite(volume)) return false;
+    if (!::isfinite(volume)) return false;
     signed_volume += volume;
     neighbors.push_back({a, b});
     neighbors.push_back({a, c});
@@ -622,7 +632,8 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     links.push_back({c, a, b});
   }
 
-  std::sort(faces.begin(), faces.end(), [](const FaceKey& a, const FaceKey& b) {
+  // The key is the whole struct, so equal elements are indistinguishable.
+  base::Sort(faces.data(), faces.data() + faces.size(), [](const FaceKey& a, const FaceKey& b) {
     return a.a < b.a ||
            (a.a == b.a && (a.b < b.b || (a.b == b.b && a.c < b.c)));
   });
@@ -630,7 +641,9 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     if (SameFace(faces[i - 1], faces[i])) return false;
   }
 
-  std::sort(edges.begin(), edges.end(), [](const Edge& a, const Edge& b) {
+  // Ties differ only in `forward`, which is compared symmetrically within a
+  // group and never read from unique_edges, so their order cannot matter.
+  base::Sort(edges.data(), edges.data() + edges.size(), [](const Edge& a, const Edge& b) {
     return a.a < b.a || (a.a == b.a && a.b < b.b);
   });
   bool closed = true;
@@ -648,32 +661,40 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     const f64 dx = static_cast<f64>(b.x) - a.x;
     const f64 dy = static_cast<f64>(b.y) - a.y;
     const f64 dz = static_cast<f64>(b.z) - a.z;
-    const f64 length = std::sqrt(dx * dx + dy * dy + dz * dz);
-    if (!std::isfinite(length)) return false;
+    const f64 length = ::sqrt(dx * dx + dy * dy + dz * dz);
+    if (!::isfinite(length)) return false;
     edge_length += length;
     ++edge_count;
     i = end;
   }
 
-  std::sort(neighbors.begin(), neighbors.end(),
-            [](const Neighbor& a, const Neighbor& b) {
-              return a.vertex < b.vertex ||
-                     (a.vertex == b.vertex && a.neighbor < b.neighbor);
-            });
-  neighbors.erase(std::unique(neighbors.begin(), neighbors.end(),
-                              [](const Neighbor& a, const Neighbor& b) {
-                                return a.vertex == b.vertex &&
-                                       a.neighbor == b.neighbor;
-                              }),
-                  neighbors.end());
+  // The key is the whole struct, so equal elements are indistinguishable.
+  base::Sort(neighbors.data(), neighbors.data() + neighbors.size(),
+             [](const Neighbor& a, const Neighbor& b) {
+               return a.vertex < b.vertex ||
+                      (a.vertex == b.vertex && a.neighbor < b.neighbor);
+             });
+  {
+    size_t kept = 0;
+    for (size_t i = 0; i < neighbors.size(); ++i) {
+      if (kept > 0 && neighbors[kept - 1].vertex == neighbors[i].vertex &&
+          neighbors[kept - 1].neighbor == neighbors[i].neighbor) {
+        continue;
+      }
+      neighbors[kept++] = neighbors[i];
+    }
+    neighbors.resize(kept);
+  }
 
   // A manifold vertex has one connected link: a cycle in the interior or a
   // path on a boundary. This rejects bow-tie vertices where otherwise valid
   // sheets touch only at one particle.
-  std::sort(links.begin(), links.end(),
-            [](const VertexLink& a, const VertexLink& b) {
-              return a.vertex < b.vertex;
-            });
+  // Ties share a vertex; the per-vertex check below only sorts, counts degree
+  // and unions over the group, none of which depends on its order.
+  base::Sort(links.data(), links.data() + links.size(),
+             [](const VertexLink& a, const VertexLink& b) {
+               return a.vertex < b.vertex;
+             });
   size_t link_at = 0;
   for (u32 vertex = 0; vertex < vertex_count; ++vertex) {
     const size_t begin = link_at;
@@ -685,16 +706,16 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
       local_vertices.push_back(links[i].a);
       local_vertices.push_back(links[i].b);
     }
-    std::sort(local_vertices.begin(), local_vertices.end());
+    base::Sort(local_vertices.data(), local_vertices.data() + local_vertices.size());
     local_vertices.erase(
-        std::unique(local_vertices.begin(), local_vertices.end()),
+        base::Unique(local_vertices.data(), local_vertices.data() + local_vertices.size()),
         local_vertices.end());
     base::Vector<u32> parent;
     base::Vector<u32> degree;
     parent.resize(local_vertices.size());
     degree.resize(local_vertices.size());
-    std::iota(parent.begin(), parent.end(), 0u);
-    std::fill(degree.begin(), degree.end(), 0);
+    base::Iota(parent.begin(), parent.end(), 0u);
+    base::Fill(degree.begin(), degree.end(), 0);
     auto root = [&](u32 node) {
       while (parent[node] != node) {
         parent[node] = parent[parent[node]];
@@ -704,13 +725,15 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
     };
     for (size_t i = begin; i < link_at; ++i) {
       const u32 a =
-          static_cast<u32>(std::lower_bound(local_vertices.begin(),
-                                            local_vertices.end(), links[i].a) -
-                           local_vertices.begin());
+          static_cast<u32>(base::LowerBound(local_vertices.data(),
+                                            local_vertices.data() + local_vertices.size(),
+                                            links[i].a) -
+                           local_vertices.data());
       const u32 b =
-          static_cast<u32>(std::lower_bound(local_vertices.begin(),
-                                            local_vertices.end(), links[i].b) -
-                           local_vertices.begin());
+          static_cast<u32>(base::LowerBound(local_vertices.data(),
+                                            local_vertices.data() + local_vertices.size(),
+                                            links[i].b) -
+                           local_vertices.data());
       if (++degree[a] > 2 || ++degree[b] > 2) return false;
       const u32 ra = root(a), rb = root(b);
       if (ra != rb) parent[rb] = ra;
@@ -727,7 +750,7 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
 
   base::Vector<u32> component_parent;
   component_parent.resize(vertex_count);
-  std::iota(component_parent.begin(), component_parent.end(), 0u);
+  base::Iota(component_parent.begin(), component_parent.end(), 0u);
   auto component_root = [&](u32 node) {
     while (component_parent[node] != node) {
       component_parent[node] = component_parent[component_parent[node]];
@@ -746,7 +769,7 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
 
   ClothTopology result;
   result.indices.assign(indices, indices + index_count);
-  result.triangle_areas = std::move(triangle_areas);
+  result.triangle_areas = base::move(triangle_areas);
   result.edges.reserve(unique_edges.size() * 2);
   for (const Edge& edge : unique_edges) {
     result.edges.push_back(edge.a);
@@ -764,17 +787,17 @@ bool BuildClothTopology(const Vec3* positions, u32 vertex_count,
   result.neighbor_offsets[vertex_count] =
       static_cast<u32>(result.neighbors.size());
   const f64 average_edge_length = edge_count > 0 ? edge_length / edge_count : 0;
-  if (!std::isfinite(average_edge_length) ||
-      average_edge_length > std::numeric_limits<f32>::max() ||
-      !std::isfinite(signed_volume) ||
-      std::abs(signed_volume) > std::numeric_limits<f32>::max()) {
+  if (!::isfinite(average_edge_length) ||
+      average_edge_length > FLT_MAX ||
+      !::isfinite(signed_volume) ||
+      ::abs(signed_volume) > FLT_MAX) {
     return false;
   }
   result.average_edge_length = static_cast<f32>(average_edge_length);
   result.signed_volume = static_cast<f32>(signed_volume);
   result.component_count = component_count;
   result.closed = closed;
-  *out = std::move(result);
+  *out = base::move(result);
   return true;
 }
 
@@ -791,13 +814,13 @@ u32 SolveClothSelfCollision(const ClothTopology& topology,
     return 0;
   }
 
-  const f32 relaxation = std::max(0.0f, std::min(config.relaxation, 1.0f));
-  const f32 max_correction = std::max(config.max_velocity, 0.01f) * dt;
+  const f32 relaxation = rx::Max(0.0f, rx::Min(config.relaxation, 1.0f));
+  const f32 max_correction = rx::Max(config.max_velocity, 0.01f) * dt;
   const u32 triangle_count = static_cast<u32>(topology.indices.size() / 3);
   scratch->predicted.resize(positions.size());
   for (size_t i = 0; i < positions.size(); ++i) {
     if (!IsFinite(positions[i]) || !IsFinite((*velocities)[i]) ||
-        !std::isfinite(inverse_masses[i]) || inverse_masses[i] < 0) {
+        !::isfinite(inverse_masses[i]) || inverse_masses[i] < 0) {
       return 0;
     }
     scratch->predicted[i] = positions[i] + (*velocities)[i] * dt;
@@ -805,7 +828,7 @@ u32 SolveClothSelfCollision(const ClothTopology& topology,
   }
 
   u32 total_contacts = 0;
-  for (u32 iteration = 0; iteration < std::max(config.iterations, 1u);
+  for (u32 iteration = 0; iteration < rx::Max(config.iterations, 1u);
        ++iteration) {
     BuildBvh(
         triangle_count,
@@ -858,7 +881,7 @@ u32 SolveClothSelfCollision(const ClothTopology& topology,
         Vec3 correction = contact.normal * ((config.distance - separation) *
                                             relaxation / denominator);
         const f32 correction_length = Length(correction);
-        if (!IsFinite(correction) || !std::isfinite(correction_length)) return;
+        if (!IsFinite(correction) || !::isfinite(correction_length)) return;
         if (correction_length > max_correction) {
           correction = correction * (max_correction / correction_length);
         }
@@ -929,7 +952,7 @@ u32 SolveClothSelfCollision(const ClothTopology& topology,
         Vec3 correction = contact.normal * ((config.distance - separation) *
                                             relaxation / denominator);
         const f32 correction_length = Length(correction);
-        if (!IsFinite(correction) || !std::isfinite(correction_length)) return;
+        if (!IsFinite(correction) || !::isfinite(correction_length)) return;
         if (correction_length > max_correction) {
           correction = correction * (max_correction / correction_length);
         }

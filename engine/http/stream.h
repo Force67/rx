@@ -3,10 +3,9 @@
 
 #include <base/strings/xstring.h>
 
-#include <atomic>
-#include <chrono>
-#include <memory>
-
+#include "base/atomic.h"
+#include "base/memory/unique_pointer.h"
+#include "base/time/time.h"
 #include "core/types.h"
 
 namespace rx::http {
@@ -19,18 +18,18 @@ struct StreamLimits {
   // Idle timeout: how long the peer may say NOTHING before the exchange fails.
   // A server that keeps sending keeps the call alive; a stalled one does not.
   u32 idle_ms = 10'000;
-  // Wall-clock end of the whole exchange, connect and body included. Default
-  // constructed (the epoch) means no overall bound, only the idle timeout.
-  std::chrono::steady_clock::time_point deadline{};
+  // Wall-clock end of the whole exchange, connect and body included. Null
+  // (default constructed) means no overall bound, only the idle timeout.
+  base::TimeTicks deadline;
   // Raised by the caller to abandon the exchange. Owned by the caller, read
   // from this thread, so it has to outlive the call.
-  const std::atomic<bool>* cancel = nullptr;
+  const base::Atomic<bool>* cancel = nullptr;
 
   bool has_deadline() const {
-    return deadline != std::chrono::steady_clock::time_point{};
+    return !deadline.is_null();
   }
   bool cancelled() const {
-    return cancel != nullptr && cancel->load(std::memory_order_relaxed);
+    return cancel != nullptr && cancel->load(base::memory_order_relaxed);
   }
   // Milliseconds left before the deadline, or -1 when there is none. 0 means
   // it has passed.
@@ -76,11 +75,11 @@ struct TlsOptions {
   bool verify_peer = true;
 };
 
-std::unique_ptr<Stream> MakeTcpStream();
+base::UniquePointer<Stream> MakeTcpStream();
 
 // Null when the build has no TLS backend compiled in (RX_HTTP_TLS off), which
 // is what turns an https URL into a clear error instead of a silent downgrade.
-std::unique_ptr<Stream> MakeTlsStream(const TlsOptions& options);
+base::UniquePointer<Stream> MakeTlsStream(const TlsOptions& options);
 
 }  // namespace rx::http
 

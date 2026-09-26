@@ -1,13 +1,14 @@
 #include "render/gi/path_tracer.h"
 
-#include <cstring>
-#include <limits>
+#include <string.h>
 
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
 #include "shaders/pathtrace_cs_hlsl.h"
 #if defined(RX_HAS_NRD)
+#include "base/memory/mem_ops.h"
+#include "base/numeric_limits.h"
 #include "shaders/pathtrace_composite_cs_hlsl.h"
 #include "shaders/pathtrace_gbuffer_cs_hlsl.h"
 #endif
@@ -170,7 +171,7 @@ void PathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
                             BindingSetHandle bindless_set, TextureView sky_view,
                             SamplerHandle sky_sampler, ResourceHandle output, const Frame& frame) {
   if (!available()) return;
-  if (frame.reset || accumulated_samples_ > std::numeric_limits<u32>::max() - spp_)
+  if (frame.reset || accumulated_samples_ > base::MinMax<u32>::max() - spp_)
     accumulated_samples_ = 0;
   u32 sample_base = accumulated_samples_;
   accumulated_samples_ += spp_;
@@ -186,7 +187,7 @@ void PathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
        frame, sample_base](PassContext& ctx) {
         const u32 slot = frame.frame_index % 2;
         const PathCamera camera{frame.inv_view_proj, frame.view_proj, frame.prev_view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
         PathPush push{};
         push.camera_pos[0] = frame.camera_pos.x;
@@ -247,7 +248,7 @@ void PathTracer::AddGbufferPass(RenderGraph& graph, RayTracingContext& raytracin
 
         const u32 slot = frame.frame_index % 2;
         const PathCamera camera{frame.inv_view_proj, frame.view_proj, frame.prev_view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
         items.push_back(Bind::Uniform(8, camera_[slot], 0, sizeof(PathCamera)));
         items.push_back(Bind::StorageBuffer(9, raytracing.motion_buffer(tlas_slot)));
 
@@ -270,7 +271,7 @@ void PathTracer::AddGbufferPass(RenderGraph& graph, RayTracingContext& raytracin
         push.bounces = bounces_;
 
         ctx.cmd->BindPipeline(gbuffer_pipeline_);
-        ctx.cmd->BindTransient(0, {items.data(), items.size()});
+        ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->BindSet(1, bindless_set);
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch2D(extent_);

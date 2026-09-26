@@ -1,9 +1,10 @@
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
 #include "anim/body_dynamics.h"
 #include "asset/asset_id.h"
+#include "base/memory/move.h"
+#include "core/scalar.h"
 
 namespace {
 
@@ -15,14 +16,14 @@ int failures = 0;
 void Check(bool condition, const char *message) {
   if (condition)
     return;
-  std::fprintf(stderr, "body_dynamics_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "body_dynamics_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, f32 tolerance, const char *message) {
-  if (std::fabs(actual - expected) <= tolerance)
+  if (::fabs(actual - expected) <= tolerance)
     return;
-  std::fprintf(
+  ::fprintf(
       stderr,
       "body_dynamics_test: FAIL: %s (got %.6f, expected %.6f +/- %.6f)\n",
       message, actual, expected, tolerance);
@@ -69,10 +70,10 @@ BodyRegionSample Simulate(f32 step, f32 seconds,
   BodyDynamics dynamics;
   dynamics.AddRegion(TestRegion());
   dynamics.Update(skeleton, frame, step, &pose); // initialize
-  const u32 count = static_cast<u32>(std::ceil(seconds / step));
+  const u32 count = static_cast<u32>(::ceil(seconds / step));
   for (u32 i = 0; i < count; ++i) {
     pose.ResetToBind(skeleton);
-    dynamics.Update(skeleton, frame, std::min(step, seconds - i * step), &pose);
+    dynamics.Update(skeleton, frame, rx::Min(step, seconds - i * step), &pose);
   }
   return dynamics.sample(0);
 }
@@ -81,7 +82,7 @@ void TestGravityAndInertia() {
   BodyDynamicsFrame gravity;
   const BodyRegionSample sag = Simulate(1.0f / 120.0f, 2.0f, gravity);
   const f32 expected =
-      -9.81f / std::pow(2.0f * 3.14159265358979323846f * 2.0f, 2.0f);
+      -9.81f / ::pow(2.0f * 3.14159265358979323846f * 2.0f, 2.0f);
   Near(sag.translation.y, expected, 0.0005f,
        "settled sag follows the spring's physical equilibrium");
 
@@ -129,9 +130,9 @@ void TestLimitsAndTeleport() {
   pose.ResetToBind(skeleton);
   dynamics.Update(skeleton, frame, 1.0f / 60.0f, &pose);
   BodyRegionSample sample = dynamics.sample(0);
-  Check(std::fabs(sample.translation.x) <= 0.010001f &&
-            std::fabs(sample.translation.y) <= 0.020001f &&
-            std::fabs(sample.translation.z) <= 0.030001f,
+  Check(::fabs(sample.translation.x) <= 0.010001f &&
+            ::fabs(sample.translation.y) <= 0.020001f &&
+            ::fabs(sample.translation.z) <= 0.030001f,
         "per-axis anatomical limits hold under extreme impulses");
 
   frame = {};
@@ -147,7 +148,7 @@ void TestLimitsAndTeleport() {
   frame.linear_impulse = {0, -1, 0};
   pose.ResetToBind(skeleton);
   dynamics.Update(skeleton, frame, 1.0f / 60.0f, &pose);
-  Check(std::fabs(dynamics.sample(0).translation.y) > 0,
+  Check(::fabs(dynamics.sample(0).translation.y) > 0,
         "region resumes simulation on the frame after a teleport");
 }
 
@@ -168,7 +169,7 @@ void TestPoseAndMorphOutput() {
   BodyDynamicsFrame frame;
   base::Vector<BodyMorphWeight> weights;
   dynamics.Update(skeleton, frame, 1.0f / 60.0f, &pose, &weights);
-  Check(weights.size() == 1 && std::fabs(weights[0].weight - 0.15f) < 1e-6f,
+  Check(weights.size() == 1 && ::fabs(weights[0].weight - 0.15f) < 1e-6f,
         "morph bias is emitted on the rest/initialization frame");
   frame.linear_impulse = {0, -1, 0};
   pose.ResetToBind(skeleton);
@@ -182,11 +183,11 @@ void TestPoseAndMorphOutput() {
   asset::MorphTarget compression;
   compression.name = "softCompression";
   compression.name_hash = asset::MakeAssetId(compression.name).hash;
-  mesh.morph_targets.push_back(std::move(compression));
+  mesh.morph_targets.push_back(base::move(compression));
   asset::MorphTarget unrelated;
   unrelated.name = "expression";
   unrelated.name_hash = asset::MakeAssetId(unrelated.name).hash;
-  mesh.morph_targets.push_back(std::move(unrelated));
+  mesh.morph_targets.push_back(base::move(unrelated));
   base::Vector<f32> dense;
   dense.push_back(0.1f);
   dense.push_back(0.7f);
@@ -240,7 +241,7 @@ void TestModelUnitScale() {
   const BodyRegionSample result = dynamics.sample(0);
   Check(result.active,
         "changing the source-unit scale keeps the region active");
-  Check(std::fabs(result.translation.y) > 0,
+  Check(::fabs(result.translation.y) > 0,
         "source-unit scaled simulation responds to a physical impulse");
   Near((pose.translation[2].y - skeleton.bones[2].bind_translation.y) / 100.0f,
        result.translation.y, 1e-6f,
@@ -257,9 +258,9 @@ int main() {
   TestPresetsAndMissingBones();
   TestModelUnitScale();
   if (failures == 0) {
-    std::printf("body_dynamics_test: all checks passed\n");
+    ::printf("body_dynamics_test: all checks passed\n");
     return 0;
   }
-  std::fprintf(stderr, "body_dynamics_test: %d checks failed\n", failures);
+  ::fprintf(stderr, "body_dynamics_test: %d checks failed\n", failures);
   return 1;
 }

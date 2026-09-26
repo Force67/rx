@@ -9,8 +9,8 @@
 // panel must not open a slot nothing can ever release. Needs no window, so it
 // runs in the ctest gate.
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
 #include "core/input.h"
 
@@ -19,13 +19,13 @@ namespace {
 int g_failures = 0;
 
 void Check(const char* what, bool ok) {
-  std::printf("  [%s] %s\n", ok ? "ok" : "FAIL", what);
+  ::printf("  [%s] %s\n", ok ? "ok" : "FAIL", what);
   if (!ok)
     ++g_failures;
 }
 
 bool Near(rx::f32 a, rx::f32 b) {
-  return std::fabs(a - b) < 1e-4f;
+  return ::fabs(a - b) < 1e-4f;
 }
 
 using rx::TouchState;
@@ -34,7 +34,7 @@ using Phase = rx::TouchState::Phase;
 // One finger: down, drag, lift. The lift has to survive a pump so a frame that
 // only samples state still sees the tap end.
 void TestSingleContactLifecycle() {
-  std::printf("single contact lifecycle\n");
+  ::printf("single contact lifecycle\n");
   TouchState t;
 
   t.BeginPump();
@@ -73,7 +73,7 @@ void TestSingleContactLifecycle() {
 
 // Slots must compact, and the survivor must keep its own identity/position.
 void TestCompactionKeepsSurvivors() {
-  std::printf("compaction keeps survivors\n");
+  ::printf("compaction keeps survivors\n");
   TouchState t;
 
   t.BeginPump();
@@ -97,7 +97,7 @@ void TestCompactionKeepsSurvivors() {
 
 // Events for ids we never saw must not corrupt anything.
 void TestUnknownIdsIgnored() {
-  std::printf("unknown ids ignored\n");
+  ::printf("unknown ids ignored\n");
   TouchState t;
 
   t.BeginPump();
@@ -114,7 +114,7 @@ void TestUnknownIdsIgnored() {
 
 // More fingers than we track must drop cleanly rather than overrun the array.
 void TestOverflowDropsCleanly() {
-  std::printf("overflow drops cleanly\n");
+  ::printf("overflow drops cleanly\n");
   TouchState t;
 
   t.BeginPump();
@@ -133,7 +133,7 @@ void TestOverflowDropsCleanly() {
 
 // A canceled gesture reports kUp, so consumers only handle one end state.
 void TestCancelEndsContact() {
-  std::printf("cancel ends the contact\n");
+  ::printf("cancel ends the contact\n");
   TouchState t;
 
   t.BeginPump();
@@ -151,7 +151,7 @@ void TestCancelEndsContact() {
 // lift resolves to the first slot) and so never released, and BeginPump only
 // reclaims released slots, so it would sit there claiming a finger forever.
 void TestDuplicateDownDoesNotStrand() {
-  std::printf("duplicate down does not strand a contact\n");
+  ::printf("duplicate down does not strand a contact\n");
   TouchState t;
 
   t.BeginPump();
@@ -172,7 +172,7 @@ void TestDuplicateDownDoesNotStrand() {
 // end still has to be visible, and the new contact must get that pump's motion
 // rather than have it applied to the slot that already ended.
 void TestRedownWithinAPump() {
-  std::printf("re-down within one pump\n");
+  ::printf("re-down within one pump\n");
   TouchState t;
 
   t.BeginPump();
@@ -194,7 +194,7 @@ void TestRedownWithinAPump() {
 }  // namespace
 
 int main() {
-  std::printf("touch contact state machine\n");
+  ::printf("touch contact state machine\n");
   TestSingleContactLifecycle();
   TestCompactionKeepsSurvivors();
   TestUnknownIdsIgnored();
@@ -204,9 +204,9 @@ int main() {
   TestRedownWithinAPump();
 
   if (g_failures != 0) {
-    std::printf("%d check(s) failed\n", g_failures);
+    ::printf("%d check(s) failed\n", g_failures);
     return 1;
   }
-  std::printf("all checks passed\n");
+  ::printf("all checks passed\n");
   return 0;
 }

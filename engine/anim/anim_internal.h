@@ -8,15 +8,15 @@
 // public rx header includes <kinema/kinema.h>. cmake/install.cmake excludes
 // *_internal.h from the package for this reason.
 
-#include <cstddef>
-#include <memory>
-#include <string>
-#include <vector>
+#include <stddef.h>
 
 #include <kinema/kinema.h>
 
 #include "anim/pose.h"
 #include "asset/skeleton.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "core/math.h"
 
 namespace rx::anim::detail {
@@ -49,10 +49,10 @@ kinema::Skeleton BuildKinemaSkeleton(const asset::Skeleton& skeleton);
 // AnimGraph and shared by every character of the archetype.
 struct GraphState {
   kinema::Skeleton skeleton;
-  std::vector<std::unique_ptr<kinema::OwnedClip>> clips;  // stable Clip addresses
-  std::unique_ptr<kinema::BlendSpace> locomotion_space;
+  base::Vector<base::UniquePointer<kinema::OwnedClip>> clips;  // stable Clip addresses
+  base::UniquePointer<kinema::BlendSpace> locomotion_space;
   kinema::StateMachine machine;
-  std::vector<std::string> param_names;  // index == parameter id
+  base::Vector<base::String> param_names;  // index == parameter id
 
   // Locomotion archetype roles (indices into `clips`, -1 if absent).
   int idle_clip = -1, walk_clip = -1, run_clip = -1;

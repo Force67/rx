@@ -1,11 +1,19 @@
 #include "asset/pack.h"
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
 #include <miniz.h>
 
 #include "asset/asset_id.h"
+#include "base/algorithm.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "base/threading/lock_guard.h"
+#include "core/file_system.h"
+#include "core/scalar.h"
 
 namespace rx::asset {
 
@@ -49,15 +57,16 @@ u64 AlignUp(u64 value, u64 alignment) { return (value + alignment - 1) & ~(align
 
 // read side
 
-base::UniquePointer<PackFile> PackFile::Open(std::string archive_path) {
+base::UniquePointer<PackFile> PackFile::Open(base::String archive_path) {
   base::UniquePointer<PackFile> pack(new PackFile());
-  pack->path_ = std::move(archive_path);
-  pack->file_.open(pack->path_, std::ios::binary);
-  if (!pack->file_) return nullptr;
+  pack->path_ = base::move(archive_path);
+  pack->file_ = fs::OpenFile(pack->path_, base::File::FLAG_OPEN | base::File::FLAG_READ);
+  if (!pack->file_.IsValid()) return nullptr;
 
   PackHeader header{};
-  if (!pack->file_.read(reinterpret_cast<char*>(&header), sizeof(header))) return nullptr;
-  if (std::memcmp(header.magic, kMagic, sizeof(kMagic)) != 0) return nullptr;
+  if (!fs::ReadAt(pack->file_, 0, base::Span<u8>(reinterpret_cast<u8*>(&header), sizeof(header))))
+    return nullptr;
+  if (base::MemCompare(header.magic, kMagic, sizeof(kMagic)) != 0) return nullptr;
   if (header.version != kVersion) return nullptr;
 
   const u64 toc_size = u64{header.entry_count} * sizeof(PackEntry);
@@ -65,11 +74,12 @@ base::UniquePointer<PackFile> PackFile::Open(std::string archive_path) {
   if (header.data_offset < header.names_offset + header.names_size) return nullptr;
 
   pack->toc_.resize(toc_size);
-  if (!pack->file_.read(reinterpret_cast<char*>(pack->toc_.data()),
-                        static_cast<std::streamsize>(toc_size)))
+  if (!fs::ReadAt(pack->file_, sizeof(PackHeader), base::Span<u8>(pack->toc_.data(), toc_size)))
     return nullptr;
   pack->names_.resize(header.names_size);
-  if (!pack->file_.read(pack->names_.data(), static_cast<std::streamsize>(header.names_size)))
+  if (!fs::ReadAt(
+          pack->file_, header.names_offset,
+          base::Span<u8>(reinterpret_cast<u8*>(pack->names_.data()), header.names_size)))
     return nullptr;
 
   mz_ulong crc = mz_crc32(MZ_CRC32_INIT, pack->toc_.data(), pack->toc_.size());
@@ -91,7 +101,7 @@ PackEntryView PackFile::entry(size_t index) const {
   const PackEntry* entries = reinterpret_cast<const PackEntry*>(toc_.data());
   const PackEntry& e = entries[index];
   return PackEntryView{
-      .path = std::string_view(&names_[e.name_offset]),
+      .path = base::StringRef(&names_[e.name_offset]),
       .size = e.size,
       .stored_size = e.stored_size,
       .compression = static_cast<PackCompression>(e.compression),
@@ -99,39 +109,36 @@ PackEntryView PackFile::entry(size_t index) const {
   };
 }
 
-std::optional<size_t> PackFile::Find(std::string_view normalized_path) const {
+base::Optional<size_t> PackFile::Find(base::StringRef normalized_path) const {
   const u64 hash = Fnv1a(normalized_path);
   const PackEntry* entries = reinterpret_cast<const PackEntry*>(toc_.data());
   const size_t count = entry_count();
-  const PackEntry* it = std::lower_bound(
+  const PackEntry* it = base::LowerBound(
       entries, entries + count, hash,
       [](const PackEntry& e, u64 value) { return e.path_hash < value; });
   for (; it != entries + count && it->path_hash == hash; ++it) {
-    if (std::string_view(&names_[it->name_offset]) == normalized_path)
+    if (base::StringRef(&names_[it->name_offset]) == normalized_path)
       return static_cast<size_t>(it - entries);
   }
-  return std::nullopt;
+  return base::nullopt;
 }
 
-std::optional<base::Vector<u8>> PackFile::ReadEntry(size_t index) const {
+base::Optional<base::Vector<u8>> PackFile::ReadEntry(size_t index) const {
   const PackEntry* entries = reinterpret_cast<const PackEntry*>(toc_.data());
   const PackEntry& e = entries[index];
 
   base::Vector<u8> stored(e.stored_size);
   {
-    std::scoped_lock lock(io_mutex_);
-    file_.clear();
-    file_.seekg(static_cast<std::streamoff>(e.offset));
+    base::LockGuard lock(io_mutex_);
     if (e.stored_size > 0 &&
-        !file_.read(reinterpret_cast<char*>(stored.data()),
-                    static_cast<std::streamsize>(e.stored_size)))
-      return std::nullopt;
+        !fs::ReadAt(file_, e.offset, base::Span<u8>(stored.data(), e.stored_size)))
+      return base::nullopt;
   }
 
   base::Vector<u8> out;
   switch (static_cast<PackCompression>(e.compression)) {
     case PackCompression::kStore:
-      out = std::move(stored);
+      out = base::move(stored);
       break;
     case PackCompression::kDeflate: {
       out.resize(e.size);
@@ -139,23 +146,23 @@ std::optional<base::Vector<u8>> PackFile::ReadEntry(size_t index) const {
       if (mz_uncompress(out.data(), &out_size, stored.data(),
                         static_cast<mz_ulong>(stored.size())) != MZ_OK ||
           out_size != e.size)
-        return std::nullopt;
+        return base::nullopt;
       break;
     }
     default:
-      return std::nullopt;
+      return base::nullopt;
   }
 
-  if (out.size() != e.size) return std::nullopt;
-  if (Crc32(out.data(), out.size()) != e.crc32) return std::nullopt;
+  if (out.size() != e.size) return base::nullopt;
+  if (Crc32(out.data(), out.size()) != e.crc32) return base::nullopt;
   return out;
 }
 
 // write side
 
-void PackWriter::Add(std::string_view virtual_path, base::Vector<u8> bytes,
+void PackWriter::Add(base::StringRef virtual_path, base::Vector<u8> bytes,
                      PackCompression compression) {
-  std::string normalized = NormalizePath(virtual_path);
+  base::String normalized = NormalizePath(virtual_path);
   const u64 hash = Fnv1a(normalized);
   base::Vector<u32>* staged = staged_.find(hash);
   if (staged != nullptr) {
@@ -164,7 +171,7 @@ void PackWriter::Add(std::string_view virtual_path, base::Vector<u8> bytes,
     for (u32 index : *staged) {
       Pending& pending = pending_[index];
       if (pending.path != normalized) continue;
-      pending.bytes = std::move(bytes);
+      pending.bytes = base::move(bytes);
       pending.compression = compression;
       return;
     }
@@ -173,10 +180,10 @@ void PackWriter::Add(std::string_view virtual_path, base::Vector<u8> bytes,
     staged = staged_.find(hash);
   }
   staged->push_back(static_cast<u32>(pending_.size()));
-  pending_.push_back(Pending{std::move(normalized), std::move(bytes), compression});
+  pending_.push_back(Pending{base::move(normalized), base::move(bytes), compression});
 }
 
-bool PackWriter::WriteTo(const std::string& file_path) {
+bool PackWriter::WriteTo(const base::String& file_path) {
   struct Staged {
     const Pending* source;
     u64 hash;
@@ -197,14 +204,16 @@ bool PackWriter::WriteTo(const std::string& file_path) {
                        static_cast<mz_ulong>(pending.bytes.size()), compression_level_) == MZ_OK &&
           compressed_size < pending.bytes.size()) {
         compressed.resize(compressed_size);
-        s.compressed = std::move(compressed);
+        s.compressed = base::move(compressed);
         s.method = PackCompression::kDeflate;
       }
     }
-    staged.push_back(std::move(s));
+    staged.push_back(base::move(s));
   }
 
-  std::sort(staged.begin(), staged.end(), [](const Staged& a, const Staged& b) {
+  // (hash, path) is unique, since Add replaces a repeated path, so any
+  // correct sort gives this order.
+  base::Sort(staged.data(), staged.data() + staged.size(), [](const Staged& a, const Staged& b) {
     if (a.hash != b.hash) return a.hash < b.hash;
     return a.source->path < b.source->path;
   });
@@ -226,7 +235,7 @@ bool PackWriter::WriteTo(const std::string& file_path) {
   }
 
   PackHeader header{};
-  std::memcpy(header.magic, kMagic, sizeof(kMagic));
+  base::MemCopy(header.magic, kMagic, sizeof(kMagic));
   header.version = kVersion;
   header.entry_count = static_cast<u32>(entries.size());
   header.names_offset = sizeof(PackHeader) + entries.size() * sizeof(PackEntry);
@@ -244,25 +253,33 @@ bool PackWriter::WriteTo(const std::string& file_path) {
   toc_crc = mz_crc32(toc_crc, reinterpret_cast<const u8*>(names.data()), names.size());
   header.toc_crc32 = static_cast<u32>(toc_crc);
 
-  std::ofstream out(file_path, std::ios::binary | std::ios::trunc);
-  if (!out) return false;
-  out.write(reinterpret_cast<const char*>(&header), sizeof(header));
-  out.write(reinterpret_cast<const char*>(entries.data()),
-            static_cast<std::streamsize>(entries.size() * sizeof(PackEntry)));
-  out.write(names.data(), static_cast<std::streamsize>(names.size()));
+  base::File out =
+      fs::OpenFile(file_path, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
+  if (!out.IsValid()) return false;
+  bool ok = fs::WriteAll(out, 
+      base::Span<const u8>(reinterpret_cast<const u8*>(&header), sizeof(header)));
+  ok = ok && fs::WriteAll(out, base::Span<const u8>(
+                 reinterpret_cast<const u8*>(entries.data()), entries.size() * sizeof(PackEntry)));
+  ok = ok && fs::WriteAll(out, 
+                 base::Span<const u8>(reinterpret_cast<const u8*>(names.data()), names.size()));
 
+  static const u8 kZeros[kPayloadAlignment] = {};
   u64 written = header.names_offset + header.names_size;
-  for (size_t i = 0; i < staged.size(); ++i) {
+  for (size_t i = 0; ok && i < staged.size(); ++i) {
     const Staged& s = staged[i];
     const PackEntry& e = entries[i];
-    for (; written < e.offset; ++written) out.put('\0');
+    while (ok && written < e.offset) {
+      const u64 pad = rx::Min<u64>(e.offset - written, sizeof(kZeros));
+      ok = fs::WriteAll(out, base::Span<const u8>(kZeros, pad));
+      written += pad;
+    }
     const u8* payload =
         s.method == PackCompression::kStore ? s.source->bytes.data() : s.compressed.data();
-    out.write(reinterpret_cast<const char*>(payload), static_cast<std::streamsize>(e.stored_size));
+    ok = ok && (e.stored_size == 0 ||
+                fs::WriteAll(out, base::Span<const u8>(payload, e.stored_size)));
     written += e.stored_size;
   }
-  out.flush();
-  return static_cast<bool>(out);
+  return ok;
 }
 
 // Vfs provider
@@ -271,29 +288,29 @@ namespace {
 
 class PackFileProvider final : public FileProvider {
  public:
-  explicit PackFileProvider(base::UniquePointer<PackFile> pack) : pack_(std::move(pack)) {}
+  explicit PackFileProvider(base::UniquePointer<PackFile> pack) : pack_(base::move(pack)) {}
 
-  bool Contains(std::string_view normalized_path) const override {
+  bool Contains(base::StringRef normalized_path) const override {
     return pack_->Find(normalized_path).has_value();
   }
 
-  std::optional<base::Vector<u8>> Read(std::string_view normalized_path) const override {
-    const std::optional<size_t> index = pack_->Find(normalized_path);
-    if (!index) return std::nullopt;
+  base::Optional<base::Vector<u8>> Read(base::StringRef normalized_path) const override {
+    const base::Optional<size_t> index = pack_->Find(normalized_path);
+    if (!index) return base::nullopt;
     return pack_->ReadEntry(*index);
   }
 
-  std::optional<u64> Size(std::string_view normalized_path) const override {
-    const std::optional<size_t> index = pack_->Find(normalized_path);
-    if (!index) return std::nullopt;
+  base::Optional<u64> Size(base::StringRef normalized_path) const override {
+    const base::Optional<size_t> index = pack_->Find(normalized_path);
+    if (!index) return base::nullopt;
     return pack_->entry(*index).size;
   }
 
-  void Enumerate(const std::function<void(std::string_view)>& fn) const override {
+  void Enumerate(base::FunctionRef<void(base::StringRef)> fn) const override {
     for (size_t i = 0; i < pack_->entry_count(); ++i) fn(pack_->entry(i).path);
   }
 
-  std::string name() const override { return pack_->path(); }
+  base::String name() const override { return pack_->path(); }
 
  private:
   base::UniquePointer<PackFile> pack_;
@@ -301,10 +318,10 @@ class PackFileProvider final : public FileProvider {
 
 }  // namespace
 
-base::UniquePointer<FileProvider> MakePackFileProvider(std::string archive_path) {
-  base::UniquePointer<PackFile> pack = PackFile::Open(std::move(archive_path));
+base::UniquePointer<FileProvider> MakePackFileProvider(base::String archive_path) {
+  base::UniquePointer<PackFile> pack = PackFile::Open(base::move(archive_path));
   if (!pack) return nullptr;
-  return base::MakeUnique<PackFileProvider>(std::move(pack));
+  return base::MakeUnique<PackFileProvider>(base::move(pack));
 }
 
 }  // namespace rx::asset

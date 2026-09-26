@@ -1,11 +1,14 @@
 #include "render/gi/raytracing.h"
 
-#include <algorithm>
-#include <cstring>
-#include <limits>
+#include <string.h>
 
 #include "asset/mesh.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/numeric_limits.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/rhi/device.h"
 
 namespace rx::render {
@@ -45,9 +48,9 @@ base::Vector<AccelTriangles> BlasGeometries(const GpuMesh& mesh) {
 
 }  // namespace
 
-std::unique_ptr<RayTracingContext> RayTracingContext::Create(Device& device) {
+base::UniquePointer<RayTracingContext> RayTracingContext::Create(Device& device) {
   if (!device.caps().raytracing) return nullptr;
-  auto context = std::unique_ptr<RayTracingContext>(new RayTracingContext(device));
+  auto context = base::UniquePointer<RayTracingContext>(new RayTracingContext(device));
   if (!context->EnsureTlasCapacity(context->fallback_tlas_, 1)) {
     RX_ERROR("fallback tlas allocation failed");
     return nullptr;
@@ -99,7 +102,7 @@ bool RayTracingContext::BuildBlasFromGeometries(
   // stroke boundaries, so avoid a second blocking submit for compaction there.
   AccelCompactionQueryHandle query =
       skip_compaction ? AccelCompactionQueryHandle{} : device_.CreateCompactionQuery(1);
-  BlasBuildDesc desc{.geometries = {geometries.data(), geometries.size()},
+  BlasBuildDesc desc{.geometries = base::Span(geometries.data(), geometries.size()),
                      .allow_compaction = static_cast<bool>(query)};
   AccelSizes sizes = device_.GetBlasSizes(desc);
   if (sizes.accel_bytes == 0) {
@@ -250,7 +253,7 @@ bool RayTracingContext::ReserveSkinnedBlas(u64 key,
 
   // No compaction: a compacted structure cannot be refit, which is the whole
   // point of this path.
-  BlasBuildDesc desc{.geometries = {geometries.data(), geometries.size()},
+  BlasBuildDesc desc{.geometries = base::Span(geometries.data(), geometries.size()),
                      .allow_update = true};
   AccelSizes sizes = device_.GetBlasSizes(desc);
   if (sizes.accel_bytes == 0) return false;
@@ -262,7 +265,7 @@ bool RayTracingContext::ReserveSkinnedBlas(u64 key,
   // One arena covering both the initial full build and every later refit; the
   // refit is the smaller of the two, so this is dominated by the one-off build.
   const u32 alignment = device_.caps().accel_scratch_alignment;
-  const u64 scratch_bytes = std::max(sizes.scratch_bytes, sizes.update_scratch_bytes);
+  const u64 scratch_bytes = rx::Max(sizes.scratch_bytes, sizes.update_scratch_bytes);
   entry.scratch = device_.CreateBuffer(scratch_bytes + alignment, kBufferUsageAccelScratch);
   if (!entry.scratch) {
     device_.DestroyAccelStruct(entry.blas.handle);
@@ -271,14 +274,14 @@ bool RayTracingContext::ReserveSkinnedBlas(u64 key,
   entry.scratch_offset = AlignUp(entry.scratch.address, alignment) - entry.scratch.address;
   entry.blas.address = device_.accel_address(entry.blas.handle);
   entry.geometries = geometries;
-  skinned_blas_.emplace(key, std::move(entry));
+  skinned_blas_.emplace(key, base::move(entry));
   return true;
 }
 
 void RayTracingContext::RecordSkinnedBlas(CommandList& cmd, u64 key, u64 src_key) {
   SkinnedBlas* entry = skinned_blas_.find(key);
   if (!entry) return;
-  BlasBuildDesc desc{.geometries = {entry->geometries.data(), entry->geometries.size()},
+  BlasBuildDesc desc{.geometries = base::Span(entry->geometries.data(), entry->geometries.size()),
                      .allow_update = true};
   // Refit from the partner slot when it holds a completed build; a full build
   // otherwise, which is the case for an actor's first two frames (neither slot
@@ -306,7 +309,7 @@ bool RayTracingContext::EnsureTlasCapacity(Tlas& tlas, u32 instance_count) {
 
   u32 capacity = 64;
   while (capacity < instance_count) {
-    if (capacity > std::numeric_limits<u32>::max() / 2) return false;
+    if (capacity > base::MinMax<u32>::max() / 2) return false;
     capacity *= 2;
   }
 
@@ -347,7 +350,7 @@ bool RayTracingContext::ReserveTlas(u32 slot, u32 instance_count) {
   // Reserve for the upper bound (some instances may lack a BLAS and drop out in
   // BuildTlas, but never more than this); a stall/realloc here is safe.
   const AccelStructHandle previous = tlas_[slot].handle;
-  if (EnsureTlasCapacity(tlas_[slot], std::max(instance_count, 1u))) {
+  if (EnsureTlasCapacity(tlas_[slot], rx::Max(instance_count, 1u))) {
     if (tlas_[slot].handle != previous) slot_tracker_.Invalidate(slot);
     return true;
   }
@@ -392,14 +395,14 @@ void RayTracingContext::BuildTlas(CommandList& cmd, u32 slot, u32 frame_index,
 
   u32 count = static_cast<u32>(gpu_instances.size());
   if (!tlas.handle || !tlas.instances.mapped || !tlas.motion.mapped || !tlas.scratch ||
-      tlas.capacity < std::max(count, 1u)) {
+      tlas.capacity < rx::Max(count, 1u)) {
     slot_tracker_.Invalidate(slot);
     RX_ERROR("tlas slot {} was not reserved; using the empty fallback", slot);
     return;
   }
   if (count > 0) {
-    std::memcpy(tlas.instances.mapped, gpu_instances.data(), count * sizeof(TlasInstance));
-    std::memcpy(tlas.motion.mapped, motion.data(), count * sizeof(MotionRecord));
+    base::MemCopy(tlas.instances.mapped, gpu_instances.data(), count * sizeof(TlasInstance));
+    base::MemCopy(tlas.motion.mapped, motion.data(), count * sizeof(MotionRecord));
     device_.FlushBuffer(tlas.instances, 0, count * sizeof(TlasInstance));
     device_.FlushBuffer(tlas.motion, 0, count * sizeof(MotionRecord));
   }

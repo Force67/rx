@@ -1,6 +1,6 @@
 #include "render/gi/shadow_trace.h"
 
-#include <cmath>
+#include <math.h>
 
 #include "core/log.h"
 #include "render/gi/denoiser_nrd.h"
@@ -77,7 +77,7 @@ ResourceHandle ShadowTracePass::AddToGraph(RenderGraph& graph, RayTracingContext
         push.near_plane = near_plane;
         push.inv_size[0] = 1.0f / static_cast<f32>(extent_.width);
         push.inv_size[1] = 1.0f / static_cast<f32>(extent_.height);
-        push.tan_angular_radius = std::tan(angular_radius > 0.0f ? angular_radius : 0.0045f);
+        push.tan_angular_radius = ::tan(angular_radius > 0.0f ? angular_radius : 0.0045f);
         push.max_distance = 1000.0f;
         push.jitter[0] = jitter_x;
         push.jitter[1] = jitter_y;

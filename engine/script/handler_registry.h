@@ -1,10 +1,11 @@
 #ifndef RX_SCRIPT_HANDLER_REGISTRY_H_
 #define RX_SCRIPT_HANDLER_REGISTRY_H_
 
-#include <cassert>
+#include <assert.h>
 #include <initializer_list>
-#include <vector>
 
+#include "base/containers/vector.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "script/script_string.h"
@@ -15,12 +16,12 @@ namespace rx::script {
 struct HandlerContext;  // the per-call service locator (handler_context.h)
 
 // A bound script handler: the file-private unpacking trampoline a category emits.
-// A plain function pointer, not std::function: no capture, no allocation, and a
+// A plain function pointer, not base::Function: no capture, no allocation, and a
 // stable calling convention every runtime and the wire path can share.
 using HandlerFn = ScriptValue (*)(HandlerContext&, ScriptArgs&);
 
 // Upper bound on a handler's parameter count. Script functions never approach
-// this; keeping the params inline (no std::vector) means registration allocates
+// this; keeping the params inline (no base::Vector) means registration allocates
 // nothing per command.
 inline constexpr u32 kMaxHandlerParams = 12;
 
@@ -48,7 +49,7 @@ struct HandlerDesc {
   HandlerFn fn = nullptr;
   HandlerSig sig;
   // Points at the caller's name bytes. Command names are string literals (static
-  // storage), so this is a view, never a copied std::string; zero allocation.
+  // storage), so this is a view, never a copied base::String; zero allocation.
   ScriptStringView name;
 };
 
@@ -90,7 +91,7 @@ class HandlerRegistry {
     u64 key;  // HashStr(name)
     HandlerDesc desc;
   };
-  std::vector<Entry> table_;  // sorted by key
+  base::Vector<Entry> table_;  // sorted by key
 };
 
 }  // namespace rx::script

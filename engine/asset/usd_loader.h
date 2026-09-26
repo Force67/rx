@@ -1,12 +1,12 @@
 #ifndef RX_ASSET_USD_LOADER_H_
 #define RX_ASSET_USD_LOADER_H_
 
-#include <string>
-#include <string_view>
 
 #include <base/containers/vector.h>
 
 #include "asset/scene_import.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 
 namespace rx::asset {
@@ -18,13 +18,13 @@ namespace rx::asset {
 // editing the stage. Paths are absolute prim paths and cover their subtrees;
 // `hide` wins over `show`.
 struct UsdLoadOptions {
-  base::Vector<std::string> show;
-  base::Vector<std::string> hide;
+  base::Vector<base::String> show;
+  base::Vector<base::String> hide;
 };
 
 // True for the four OpenUSD file extensions: .usd (either encoding), .usda
 // (ascii), .usdc (crate binary), .usdz (zip package).
-RX_ASSET_EXPORT bool IsUsdPath(std::string_view path);
+RX_ASSET_EXPORT bool IsUsdPath(base::StringRef path);
 
 // Loads a USD stage into an ImportedScene. Composition (sublayers, references,
 // payloads, variants, class inherits) is resolved first, then the composed
@@ -39,7 +39,7 @@ RX_ASSET_EXPORT bool IsUsdPath(std::string_view path);
 // Returns false and logs on a stage that fails to open. A stage that opens but
 // carries geometry the importer cannot represent still returns true, with the
 // skipped prims logged.
-RX_ASSET_EXPORT bool LoadUsdScene(const std::string &path, ImportedScene *out,
+RX_ASSET_EXPORT bool LoadUsdScene(const base::String &path, ImportedScene *out,
                                   const UsdLoadOptions &options = {});
 
 } // namespace rx::asset

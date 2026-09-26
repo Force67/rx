@@ -1,4 +1,4 @@
-#include <cstdio>
+#include <stdio.h>
 
 #include "asset/material.h"
 #include "asset/mesh.h"
@@ -14,7 +14,7 @@ int main() {
   desc.enable_validation = true;
   if (!renderer.InitializeOffscreen(desc, 32, 32)) return 1;
   if (!renderer.caps() || !renderer.caps()->ray_query) {
-    std::printf("path_material_test: SKIP, ray queries unavailable\n");
+    ::printf("path_material_test: SKIP, ray queries unavailable\n");
     return 77;
   }
   RenderSettings& settings = renderer.settings();
@@ -67,12 +67,12 @@ int main() {
   view.camera_cut = true;
   renderer.RenderFrame(view);
   const u32 cut_samples = renderer.path_trace_samples();
-  std::printf("rigid motion: static=%u moving=%u stopped=%u cut=%u\n",
+  ::printf("rigid motion: static=%u moving=%u stopped=%u cut=%u\n",
                static_samples, moving_samples, stopped_samples, cut_samples);
   renderer.Shutdown();
   const bool ok = accumulated > 0 && restarted > 0 && restarted < accumulated &&
                   resumed == 2 * restarted && !missing_updated && after_missing == 3 * restarted;
-  std::printf("path_material_test: accumulated=%u restarted=%u resumed=%u after_missing=%u\n",
+  ::printf("path_material_test: accumulated=%u restarted=%u resumed=%u after_missing=%u\n",
                accumulated, restarted, resumed, after_missing);
   return ok && static_samples == 2 * moving_samples && stopped_samples == static_samples &&
          cut_samples == moving_samples ? 0 : 1;

@@ -1,11 +1,11 @@
 #ifndef RX_RUNTIME_DEMO_GYM_H_
 #define RX_RUNTIME_DEMO_GYM_H_
 
-#include <memory>
-#include <string>
-#include <vector>
 
 #include "audio/vehicle_audio.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "core/input.h"
 #include "core/input_actions.h"
 #include "core/math.h"
@@ -96,7 +96,7 @@ class GymDemo {
 
   // Jetpack: a LightJetPreset voice at the player, N1 tracking the spooled thrust
   // and the roar the burn demand; ducked/muffled when the tank runs dry.
-  std::unique_ptr<audio::VehicleAudio> jetpack_audio_;
+  base::UniquePointer<audio::VehicleAudio> jetpack_audio_;
 
   Vec3 spawn_feet_{0, 0, 8};
   f32 spawn_yaw_ = 0;
@@ -114,9 +114,9 @@ class GymDemo {
   // Env-gated scripted input for staged, headless-style captures (RX_GYM_SCRIPT).
   struct ScriptStep {
     f32 time = 0;
-    std::string token;
+    base::String token;
   };
-  std::vector<ScriptStep> script_;
+  base::Vector<ScriptStep> script_;
   f32 script_time_ = 0;
   u32 script_cursor_ = 0;
   // Movement the active script segment holds until the next segment.

@@ -3,8 +3,8 @@
 
 #include <base/containers/vector.h>
 
-#include <span>
 
+#include "base/containers/span.h"
 #include "core/math.h"
 #include "render/rhi/device.h"
 
@@ -44,9 +44,9 @@ class InstanceStore {
     bool has_submitted_state = false;
   };
 
-  InstanceGroupHandle Create(Device &device, u64 mesh, std::span<const Mat4> transforms,
+  InstanceGroupHandle Create(Device &device, u64 mesh, base::Span<const Mat4> transforms,
                              const f32 mesh_center[3], f32 mesh_radius);
-  bool Replace(Device &device, InstanceGroupHandle handle, std::span<const Mat4> transforms,
+  bool Replace(Device &device, InstanceGroupHandle handle, base::Span<const Mat4> transforms,
                const f32 mesh_center[3], f32 mesh_radius);
   bool Destroy(Device &device, InstanceGroupHandle handle);
   void RefreshMesh(Device &device, u64 mesh, const f32 mesh_center[3], f32 mesh_radius,
@@ -61,7 +61,7 @@ class InstanceStore {
  private:
   Group *Resolve(InstanceGroupHandle handle);
   static void ComputeBounds(Group &group, const f32 mesh_center[3], f32 mesh_radius);
-  static GpuBuffer Upload(Device &device, std::span<const Mat4> transforms);
+  static GpuBuffer Upload(Device &device, base::Span<const Mat4> transforms);
 
   base::Vector<Group> groups_;
   base::Vector<u32> free_;

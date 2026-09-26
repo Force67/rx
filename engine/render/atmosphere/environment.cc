@@ -1,8 +1,10 @@
 #include "render/atmosphere/environment.h"
 
-#include <cstring>
-#include <utility>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 #include "render/atmosphere/ltc_tables.h"
 #include "render/pipeline/mesh_pipeline.h"
@@ -51,8 +53,8 @@ struct LutPush {
 
 }  // namespace
 
-std::unique_ptr<EnvironmentSystem> EnvironmentSystem::Create(Device& device) {
-  auto env = std::unique_ptr<EnvironmentSystem>(new EnvironmentSystem(device));
+base::UniquePointer<EnvironmentSystem> EnvironmentSystem::Create(Device& device) {
+  auto env = base::UniquePointer<EnvironmentSystem>(new EnvironmentSystem(device));
 
   env->sampler_ = device.GetSampler({.min_filter = Filter::kLinear,
                                      .mag_filter = Filter::kLinear,
@@ -149,7 +151,7 @@ bool EnvironmentSystem::CreateDummies() {
   dummy_volume_ = device_.CreateBuffer(512, kBufferUsageUniform, true);
   dummy_storage_ = device_.CreateBuffer(512, kBufferUsageStorage, true);
   if (!dummy_volume_.mapped) return false;
-  std::memset(dummy_volume_.mapped, 0, 512);
+  base::MemSet(dummy_volume_.mapped, 0, 512);
 
   device_.ImmediateSubmit([&](CommandList& cmd) {
     for (GpuImage* image : {&white_, &black_array_, &flat_normal_, &black_}) {
@@ -184,8 +186,8 @@ bool EnvironmentSystem::CreateDummies() {
   if (!ltc_matrix_ || !ltc_amplitude_) return false;
   GpuBuffer ltc_staging = device_.CreateBuffer(kLtcBytes * 2, kBufferUsageTransferSrc, true);
   if (!ltc_staging.mapped) return false;
-  std::memcpy(ltc_staging.mapped, kLtc1, kLtcBytes);
-  std::memcpy(static_cast<u8*>(ltc_staging.mapped) + kLtcBytes, kLtc2, kLtcBytes);
+  base::MemCopy(ltc_staging.mapped, kLtc1, kLtcBytes);
+  base::MemCopy(static_cast<u8*>(ltc_staging.mapped) + kLtcBytes, kLtc2, kLtcBytes);
   device_.ImmediateSubmit([&](CommandList& cmd) {
     BufferTextureCopy region1{.buffer_offset = 0, .mip = 0,
                               .extent = {kLtcLutSize, kLtcLutSize}};
@@ -193,8 +195,8 @@ bool EnvironmentSystem::CreateDummies() {
                               .extent = {kLtcLutSize, kLtcLutSize}};
     cmd.Barrier(Transition(ltc_matrix_, ResourceState::kUndefined, ResourceState::kCopyDst));
     cmd.Barrier(Transition(ltc_amplitude_, ResourceState::kUndefined, ResourceState::kCopyDst));
-    cmd.CopyBufferToTexture(ltc_staging, ltc_matrix_, {&region1, 1});
-    cmd.CopyBufferToTexture(ltc_staging, ltc_amplitude_, {&region2, 1});
+    cmd.CopyBufferToTexture(ltc_staging, ltc_matrix_, base::Span(&region1, 1));
+    cmd.CopyBufferToTexture(ltc_staging, ltc_amplitude_, base::Span(&region2, 1));
     cmd.Barrier(Transition(ltc_matrix_, ResourceState::kCopyDst,
                            ResourceState::kShaderReadFragment));
     cmd.Barrier(Transition(ltc_amplitude_, ResourceState::kCopyDst,
@@ -217,7 +219,7 @@ bool EnvironmentSystem::CreatePipelines() {
     }
     ComputePipelineDesc desc;
     desc.shader = shader;
-    desc.sets.push_back(std::move(set));
+    desc.sets.push_back(base::move(set));
     desc.push_constant_size = push_size;
     desc.debug_name = name;
     *pipeline = device_.CreateComputePipeline(desc);
@@ -494,7 +496,7 @@ bool EnvironmentSystem::SetEnvironmentMap(const f32* rgba, u32 width, u32 height
     has_envmap_ = false;
     return false;
   }
-  std::memcpy(staging.mapped, rgba, bytes);
+  base::MemCopy(staging.mapped, rgba, bytes);
   // Host-visible memory is not guaranteed coherent, so the write has to be
   // flushed before the copy reads it; the other staging uploads in the engine
   // (material_system, vk_device) do the same.
@@ -502,7 +504,7 @@ bool EnvironmentSystem::SetEnvironmentMap(const f32* rgba, u32 width, u32 height
   device_.ImmediateSubmit([&](CommandList& cmd) {
     BufferTextureCopy region{.buffer_offset = 0, .mip = 0, .extent = {width, height}};
     cmd.Barrier(Transition(envmap_, ResourceState::kUndefined, ResourceState::kCopyDst));
-    cmd.CopyBufferToTexture(staging, envmap_, {&region, 1});
+    cmd.CopyBufferToTexture(staging, envmap_, base::Span(&region, 1));
     cmd.Barrier(Transition(envmap_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
   });
   device_.DestroyBuffer(staging);

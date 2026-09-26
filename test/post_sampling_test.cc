@@ -1,10 +1,10 @@
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "core/scalar.h"
 #include "render/post/depth_of_field.h"
 #include "render/post/motion_blur.h"
 #include "shaders/motion_tilemax_cs_hlsl.h"
@@ -17,7 +17,7 @@ constexpr u32 kW = 256, kH = 128;
 f32 Half(u16 b) {
   if ((b & 0x7c00u) == 0x7c00u) return INFINITY;
   const int exponent = (b >> 10) & 31;
-  return std::ldexp(float((b & 1023) + (exponent ? 1024 : 0)),
+  return ::ldexp(float((b & 1023) + (exponent ? 1024 : 0)),
                     exponent ? exponent - 25 : -24) * ((b & 0x8000) ? -1.f : 1.f);
 }
 struct TilePush {
@@ -32,33 +32,33 @@ struct TilePush {
 
 int main() {
   DeviceDesc desc;
-  const char* backend = std::getenv("RX_RHI");
-  desc.backend = backend && std::strcmp(backend, "d3d12") == 0 ? Backend::kD3D12 : Backend::kVulkan;
+  const char* backend = ::getenv("RX_RHI");
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0 ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = false;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
-    std::printf("post_sampling_test: SKIP, GPU unavailable\n");
+    ::printf("post_sampling_test: SKIP, GPU unavailable\n");
     return 77;
   }
   TransientPool pool(*device);
-  std::vector<GpuImage> owned;
-  auto input = [&](Format format, Extent2D extent, const std::vector<f32>& data) {
+  base::Vector<GpuImage> owned;
+  auto input = [&](Format format, Extent2D extent, const base::Vector<f32>& data) {
     GpuImage image = device->CreateImage2D(format, extent, kTextureUsageSampled | kTextureUsageTransferDst);
     GpuBuffer staging = device->CreateBufferWithData(
-        {reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)}, kBufferUsageTransferSrc);
-    if (!image || !staging) std::exit(1);
+        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), kBufferUsageTransferSrc);
+    if (!image || !staging) ::exit(1);
     device->ImmediateSubmit([&](CommandList& cmd) {
       cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
       BufferTextureCopy copy{.extent = extent};
-      cmd.CopyBufferToTexture(staging, image, {&copy, 1});
+      cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
       cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadCompute));
     });
     device->DestroyBuffer(staging);
     owned.push_back(image);
     return image;
   };
-  std::vector<f32> colors(kW*kH*4);
+  base::Vector<f32> colors(kW*kH*4);
   for (u32 y = 0; y < kH; ++y) for (u32 x = 0; x < kW; ++x) {
     for (u32 c = 0; c < 3; ++c) colors[(y*kW+x)*4+c] = (x/4) % 2 ? 1 : 0;
     colors[(y*kW+x)*4+3] = 1;
@@ -68,11 +68,11 @@ int main() {
   for (u32 i = 0; i < 3; ++i) {
     const u32 divisor = i == 1 ? 2 : 1;
     depths[i] = input(Format::kR32Float, {kW/divisor,kH/divisor},
-                      std::vector<f32>(kW*kH/(divisor*divisor), i == 2 ? .025f : .05f));
+                      base::Vector<f32>(kW*kH/(divisor*divisor), i == 2 ? .025f : .05f));
   }
   int failures = 0;
   auto check = [&](bool ok, const char* name, double error) {
-    std::printf("%s: %s, error=%g\n", name, ok ? "PASS" : "FAIL", error);
+    ::printf("%s: %s, error=%g\n", name, ok ? "PASS" : "FAIL", error);
     if (!ok) ++failures;
   };
   auto render = [&](auto& pass, GpuImage guide, const auto& frame) {
@@ -85,26 +85,26 @@ int main() {
     graph.AddPass("readback", [out](RenderGraph::PassBuilder& b) {
       b.Read(out, ResourceUsage::kResolveSrc);
     }, [](PassContext&) {});
-    if (!graph.Compile(*device, pool)) std::exit(1);
+    if (!graph.Compile(*device, pool)) ::exit(1);
     device->ImmediateSubmit([&](CommandList& cmd) {
-      PassContext ctx{.cmd = &cmd, .device = device.get(), .graph = &graph};
+      PassContext ctx{.cmd = &cmd, .device = device.Get_UseOnlyIfYouKnowWhatYouareDoing(), .graph = &graph};
       graph.Execute(ctx);
     });
-    std::vector<u16> bits(kW*kH*4);
+    base::Vector<u16> bits(kW*kH*4);
     if (!device->ReadbackImage(graph.image(out), ResourceState::kResolveSrc,
-                               bits.data(), bits.size()*sizeof(u16))) std::exit(1);
-    std::vector<f32> pixels(bits.size());
+                               bits.data(), bits.size()*sizeof(u16))) ::exit(1);
+    base::Vector<f32> pixels(bits.size());
     for (u32 i = 0; i < bits.size(); ++i) pixels[i] = Half(bits[i]);
     return pixels;
   };
-  auto difference = [](const std::vector<f32>& a, const std::vector<f32>& b,
+  auto difference = [](const base::Vector<f32>& a, const base::Vector<f32>& b,
                        u32 left = 0, u32 right = kW, u32 top = 0, u32 bottom = kH) {
     double error = 0;
     for (u32 y = top; y < bottom; ++y) for (u32 x = left; x < right; ++x)
       for (u32 c = 0; c < 3; ++c) {
         const u32 i = (y*kW+x)*4+c;
-        if (!std::isfinite(a[i]) || !std::isfinite(b[i])) return double(INFINITY);
-        error = std::max(error, double(std::abs(a[i]-b[i])));
+        if (!::isfinite(a[i]) || !::isfinite(b[i])) return double(INFINITY);
+        error = rx::Max(error, double(::abs(a[i]-b[i])));
       }
     return error;
   };
@@ -151,10 +151,10 @@ int main() {
   MotionBlurPass::Frame frame;
   frame.shutter = 1;
   frame.samples = 32;
-  std::vector<f32> native;
+  base::Vector<f32> native;
   for (u32 divisor = 1; divisor <= 2; ++divisor) {
     const u32 w = kW/divisor, h = kH/divisor;
-    std::vector<f32> velocities(w*h*2);
+    base::Vector<f32> velocities(w*h*2);
     for (u32 y = 32/divisor; y < 96/divisor; ++y)
       for (u32 x = 192/divisor; x < w; ++x) velocities[(y*w+x)*2] = -16.f/kW;
     GpuImage motion = input(Format::kRG32Float, {w,h}, velocities);
@@ -169,7 +169,7 @@ int main() {
     }
   }
   {
-    std::vector<f32> velocities(kW*kH*2);
+    base::Vector<f32> velocities(kW*kH*2);
     auto pixels = render(blur, input(Format::kRG32Float, {kW,kH}, velocities), frame);
     double error = difference(pixels, colors);
     check(error < .001, "Motion blur static frame", error);
@@ -185,7 +185,7 @@ int main() {
   }
   blur.Destroy(*device);
   // The longer screen-space vector must win, even on a non-square image.
-  std::vector<f32> velocities(kW*kH*2);
+  base::Vector<f32> velocities(kW*kH*2);
   for (u32 p = 0; p < kW*kH; ++p) velocities[p*2+(p%2)] = p%2 ? -8.f/kH : -12.f/kW;
   GpuImage motion = input(Format::kRG32Float, {kW,kH}, velocities);
   GpuImage tiles = device->CreateImage2D(Format::kRG16Float, {kW/16,kH/16},
@@ -202,11 +202,11 @@ int main() {
     cmd.Push(TilePush{});
     cmd.Dispatch2D({kW/16,kH/16});
   });
-  std::vector<u16> bits(kW/16*kH/16*2);
+  base::Vector<u16> bits(kW/16*kH/16*2);
   if (!device->ReadbackImage(tiles, ResourceState::kGeneral, bits.data(), bits.size()*sizeof(u16))) return 1;
   double error = 0;
   for (u32 p = 0; p < bits.size()/2; ++p)
-    error = std::max(error, double(std::abs(Half(bits[p*2])-12.f/kW) + std::abs(Half(bits[p*2+1]))));
+    error = rx::Max(error, double(::abs(Half(bits[p*2])-12.f/kW) + ::abs(Half(bits[p*2+1]))));
   check(error < .0001, "Motion blur aspect-correct maximum", error);
   device->WaitIdle();
   device->DestroyPipeline(pipeline);

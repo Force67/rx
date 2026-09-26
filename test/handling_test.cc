@@ -14,12 +14,12 @@
 //   (f) downforce: the sports car's grip grows with speed, the hatch's doesn't
 //   (g) every profile is NaN-free, settles at rest, and respects surface grip
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
 
+#include "base/containers/vector.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "physics/physics_world.h"
 #include "physics/vehicle_profiles.h"
 
@@ -37,7 +37,7 @@ constexpr f32 kKmh = 1.0f / 3.6f;  // km/h -> m/s
 int g_failures = 0;
 void Check(bool ok, const char* what) {
   if (!ok) {
-    std::fprintf(stderr, "handling_test FAIL: %s\n", what);
+    ::fprintf(stderr, "handling_test FAIL: %s\n", what);
     ++g_failures;
   }
 }
@@ -48,7 +48,7 @@ physics::BodyId AddFlatGround(PhysicsWorld& world, SurfaceType surface) {
   // vehicle fell into the void). Flat, so the coarse sampling is exact.
   constexpr u32 kSamples = 96;
   constexpr f32 kSize = 24000.0f;
-  std::vector<f32> heights(static_cast<size_t>(kSamples) * kSamples, 0.0f);
+  base::Vector<f32> heights(static_cast<size_t>(kSamples) * kSamples, 0.0f);
   return world.AddHeightField(Vec3{-kSize * 0.5f, 0.0f, -kSize * 0.5f}, heights.data(), kSamples,
                               kSize, surface);
 }
@@ -65,12 +65,12 @@ VehicleId SpawnSettled(PhysicsWorld& world, const Desc& d) {
 
 f32 Heading(const f32 q[4]) {
   const Vec3 f = Rotate(Quat{q[0], q[1], q[2], q[3]}, Vec3{0, 0, 1});
-  return std::atan2(f.x, f.z);
+  return ::atan2(f.x, f.z);
 }
 
 f32 RollAngle(const f32 q[4]) {
   const Vec3 right = Rotate(Quat{q[0], q[1], q[2], q[3]}, Vec3{1, 0, 0});
-  return std::asin(std::clamp(right.y, -1.0f, 1.0f));
+  return ::asin(rx::Clamp(right.y, -1.0f, 1.0f));
 }
 
 f32 WrapPi(f32 a) {
@@ -115,10 +115,10 @@ f32 BrakeDistance(const Desc& d, f32 entry) {
     world.DriveVehicle(id, 0.0f, 0.0f, 1.0f, 0.0f);
     world.Update(kDt);
     world.GetVehicleTransform(id, &last, rot);
-    if (std::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
+    if (::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
   }
   const f32 dx = last.x - start.x, dz = last.z - start.z;
-  return std::sqrt(dx * dx + dz * dz);
+  return ::sqrt(dx * dx + dz * dz);
 }
 
 struct SteerResult {
@@ -152,11 +152,11 @@ SteerResult StepSteer(const Desc& d, f32 entry) {
     world.DriveVehicle(id, 0.35f, 0.30f, 0.0f, 0.0f);
     world.Update(kDt);
     world.GetVehicleTransform(id, &pos, rot);
-    r.peak_roll_deg = std::max(r.peak_roll_deg, std::fabs(RollAngle(rot)) * 57.2958f);
-    min_speed = std::min(min_speed, std::fabs(world.VehicleForwardSpeed(id)));
+    r.peak_roll_deg = rx::Max(r.peak_roll_deg, ::fabs(RollAngle(rot)) * 57.2958f);
+    min_speed = rx::Min(min_speed, ::fabs(world.VehicleForwardSpeed(id)));
   }
   world.GetVehicleTransform(id, &pos, rot);
-  r.heading_change_deg = std::fabs(WrapPi(Heading(rot) - start_heading)) * 57.2958f;
+  r.heading_change_deg = ::fabs(WrapPi(Heading(rot) - start_heading)) * 57.2958f;
   r.speed_lost_mps = entry_speed - min_speed;
   return r;
 }
@@ -189,10 +189,10 @@ SlipResult CornerSlip(const Desc& d) {
     if (i < 40) continue;  // let the corner develop
     PhysicsWorld::VehicleState st;
     if (!world.GetVehicleState(id, &st)) continue;
-    const f32 f = 0.5f * (std::fabs(st.wheels[0].lateral_slip) + std::fabs(st.wheels[1].lateral_slip));
-    const f32 rr = 0.5f * (std::fabs(st.wheels[2].lateral_slip) + std::fabs(st.wheels[3].lateral_slip));
-    r.front = std::max(r.front, f);
-    r.rear = std::max(r.rear, rr);
+    const f32 f = 0.5f * (::fabs(st.wheels[0].lateral_slip) + ::fabs(st.wheels[1].lateral_slip));
+    const f32 rr = 0.5f * (::fabs(st.wheels[2].lateral_slip) + ::fabs(st.wheels[3].lateral_slip));
+    r.front = rx::Max(r.front, f);
+    r.rear = rx::Max(r.rear, rr);
   }
   return r;
 }
@@ -222,22 +222,22 @@ f32 LateralAccel(const Desc& d, f32 target) {
     world.Update(kDt);
     world.GetVehicleTransform(id, &pos, rot);
     const f32 h = Heading(rot);
-    const f32 yaw_rate = std::fabs(WrapPi(h - prev_heading)) / kDt;
+    const f32 yaw_rate = ::fabs(WrapPi(h - prev_heading)) / kDt;
     prev_heading = h;
     if (i < 8) continue;  // skip the initial transient
-    peak = std::max(peak, std::fabs(world.VehicleForwardSpeed(id)) * yaw_rate);
+    peak = rx::Max(peak, ::fabs(world.VehicleForwardSpeed(id)) * yaw_rate);
   }
   return peak;
 }
 
-bool Finite(const Vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
+bool Finite(const Vec3& v) { return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z); }
 
 }  // namespace
 
 int main() {
   PhysicsWorld probe;
   if (!probe.Initialize()) {
-    std::fprintf(stderr, "handling_test: physics unavailable, skipping\n");
+    ::fprintf(stderr, "handling_test: physics unavailable, skipping\n");
     return 0;
   }
 
@@ -257,7 +257,7 @@ int main() {
     const f32 u = ZeroToSpeed(suv, t100, SurfaceType::kAsphalt, 45.0f);
     const f32 v = ZeroToSpeed(van, t100, SurfaceType::kAsphalt, 60.0f);
     const f32 sm = ZeroToSpeed(semi, t100, SurfaceType::kAsphalt, 90.0f);
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(a) 0-100 km/h: sports=%.2fs muscle=%.2fs hatch=%.2fs suv=%.2fs van=%.2fs "
                  "semi=%.2fs\n",
                  s, m, h, u, v, sm);
@@ -293,7 +293,7 @@ int main() {
     const f32 u = BrakeDistance(suv, entry);
     const f32 v = BrakeDistance(van, entry);
     const f32 sm = BrakeDistance(semi, entry);
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(b) 100-0 braking: sports=%.1fm muscle=%.1fm hatch=%.1fm suv=%.1fm van=%.1fm "
                  "semi=%.1fm\n",
                  s, m, h, u, v, sm);
@@ -312,10 +312,10 @@ int main() {
     const SteerResult u = StepSteer(suv, entry);
     const SteerResult v = StepSteer(van, entry);
     const SteerResult sm = StepSteer(semi, entry);
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(c) step-steer roll: sports=%.1fdeg suv=%.1fdeg van=%.1fdeg semi=%.1fdeg\n",
                  s.peak_roll_deg, u.peak_roll_deg, v.peak_roll_deg, sm.peak_roll_deg);
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(c) speed lost: sports=%.1f suv=%.1f van=%.1f semi=%.1f m/s | heading chg: "
                  "sports=%.0f van=%.0f semi=%.0f deg\n",
                  s.speed_lost_mps, u.speed_lost_mps, v.speed_lost_mps, sm.speed_lost_mps,
@@ -332,7 +332,7 @@ int main() {
     const f32 t40 = 40.0f * kKmh;
     const f32 u = ZeroToSpeed(suv, t40, SurfaceType::kGrass, 25.0f);
     const f32 m = ZeroToSpeed(muscle, t40, SurfaceType::kGrass, 25.0f);
-    std::fprintf(stderr, "(d) grass 0-40 km/h: AWD suv=%.2fs RWD muscle=%.2fs\n", u, m);
+    ::fprintf(stderr, "(d) grass 0-40 km/h: AWD suv=%.2fs RWD muscle=%.2fs\n", u, m);
     Check(u < m * 0.85f, "(d) AWD SUV not materially quicker than RWD muscle on grass");
   }
 
@@ -340,7 +340,7 @@ int main() {
   {
     const SlipResult h = CornerSlip(hatch);
     const SlipResult m = CornerSlip(muscle);
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(e) corner slip (rad): hatch front=%.3f rear=%.3f | muscle front=%.3f rear=%.3f\n",
                  h.front, h.rear, m.front, m.rear);
     Check(h.front > h.rear, "(e) FWD hatch front slip not above rear (no understeer)");
@@ -355,7 +355,7 @@ int main() {
     const f32 s_hi = LateralAccel(sports, hi);
     const f32 h_lo = LateralAccel(hatch, lo);
     const f32 h_hi = LateralAccel(hatch, hi);
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(f) lat accel (m/s^2): sports 60=%.2f 120=%.2f (x%.2f) | hatch 60=%.2f 120=%.2f "
                  "(x%.2f)\n",
                  s_lo, s_hi, s_hi / s_lo, h_lo, h_hi, h_hi / h_lo);
@@ -379,7 +379,7 @@ int main() {
       Vec3 pos{};
       f32 rot[4];
       world.GetVehicleTransform(id, &pos, rot);
-      const f32 rest_speed = std::fabs(world.VehicleForwardSpeed(id));
+      const f32 rest_speed = ::fabs(world.VehicleForwardSpeed(id));
       Check(Finite(pos), "(g) profile position went non-finite");
       Check(rest_speed < 0.5f, "(g) profile did not settle at rest");
       // Drive full throttle 2 s; must move and stay finite.
@@ -388,10 +388,10 @@ int main() {
         world.Update(kDt);
       }
       world.GetVehicleTransform(id, &pos, rot);
-      Check(Finite(pos) && std::isfinite(world.VehicleForwardSpeed(id)),
+      Check(Finite(pos) && ::isfinite(world.VehicleForwardSpeed(id)),
             "(g) profile went non-finite under throttle");
       Check(world.VehicleForwardSpeed(id) > 1.0f, "(g) profile did not accelerate");
-      std::fprintf(stderr, "(g) %s: rest_speed=%.3f moved_to=%.1f m/s (finite)\n", it.name,
+      ::fprintf(stderr, "(g) %s: rest_speed=%.3f moved_to=%.1f m/s (finite)\n", it.name,
                    rest_speed, world.VehicleForwardSpeed(id));
     }
     // Surface respect: the sports car stops far longer on ice than asphalt, and
@@ -416,9 +416,9 @@ int main() {
         world.DriveVehicle(id, 0.0f, 0.0f, 1.0f, 0.0f);
         world.Update(kDt);
         world.GetVehicleTransform(id, &b, r);
-        if (std::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
+        if (::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
       }
-      ice = std::sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
+      ice = ::sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
     }
     {
       PhysicsWorld world;
@@ -439,19 +439,19 @@ int main() {
         world.DriveVehicle(id, 0.0f, 0.0f, 1.0f, 0.0f);
         world.Update(kDt);
         world.GetVehicleTransform(id, &b, r);
-        if (std::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
+        if (::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
       }
-      wet = std::sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
+      wet = ::sqrt((b.x - a.x) * (b.x - a.x) + (b.z - a.z) * (b.z - a.z));
     }
-    std::fprintf(stderr, "(g) sports 80-0: dry=%.1fm ice=%.1fm wet=%.1fm\n", dry, ice, wet);
+    ::fprintf(stderr, "(g) sports 80-0: dry=%.1fm ice=%.1fm wet=%.1fm\n", dry, ice, wet);
     Check(ice > dry * 2.0f, "(g) ice not much longer than asphalt");
     Check(wet > dry * 1.1f, "(g) wetness did not lengthen the asphalt stop");
   }
 
   if (g_failures == 0) {
-    std::fprintf(stderr, "handling_test: all checks passed\n");
+    ::fprintf(stderr, "handling_test: all checks passed\n");
     return 0;
   }
-  std::fprintf(stderr, "handling_test: %d check(s) FAILED\n", g_failures);
+  ::fprintf(stderr, "handling_test: %d check(s) FAILED\n", g_failures);
   return 1;
 }

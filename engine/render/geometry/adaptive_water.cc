@@ -1,10 +1,9 @@
 #include "render/geometry/adaptive_water.h"
 
-#include <algorithm>
-#include <vector>
-
 #include "asset/mesh.h"
+#include "base/containers/vector.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/adaptive_water_cs_hlsl.h"
 
 namespace rx::render {
@@ -33,8 +32,8 @@ bool AdaptiveWaterMesh::Initialize(Device& device) {
   });
   if (!pipeline_) return false;
 
-  std::vector<u32> zero_states(kNodeCount, 0);
-  std::vector<DrawCommand> zero_commands(kMaxTriangles, DrawCommand{});
+  base::Vector<u32> zero_states(kNodeCount, 0);
+  base::Vector<DrawCommand> zero_commands(kMaxTriangles, DrawCommand{});
   const u32 counters[4] = {2, 0, 0, 0};
   states_ = device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8*>(zero_states.data()), zero_states.size() * sizeof(u32)),
@@ -69,14 +68,14 @@ void AdaptiveWaterMesh::Update(CommandList& cmd, const UpdateParams& params) {
   if (!available()) return;
   AdaptivePush push{};
   push.local_to_clip = params.local_to_clip;
-  std::copy_n(params.bounds, 4, push.bounds);
+  for (int k = 0; k < 4; ++k) push.bounds[k] = params.bounds[k];
   push.camera_height_time[0] = params.camera_local.x;
   push.camera_height_time[1] = params.camera_local.z;
   push.camera_height_time[2] = params.height;
   push.camera_height_time[3] = params.time;
-  push.metrics[0] = std::max(params.target_pixels, 1.0f);
-  push.metrics[1] = static_cast<f32>(std::max(params.render_width, 1u));
-  push.metrics[2] = static_cast<f32>(std::max(params.render_height, 1u));
+  push.metrics[0] = rx::Max(params.target_pixels, 1.0f);
+  push.metrics[1] = static_cast<f32>(rx::Max(params.render_width, 1u));
+  push.metrics[2] = static_cast<f32>(rx::Max(params.render_height, 1u));
   push.control[1] = kNodesPerTree;
   push.control[2] = kMaxDepth;
   push.control[3] = SanitizeBudget(params.triangle_budget);

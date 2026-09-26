@@ -1,9 +1,14 @@
 #include "anim/expression.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
 #include "asset/asset_id.h"
+#include "base/algorithm.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 
 namespace rx::anim {
 namespace {
@@ -12,10 +17,10 @@ namespace {
 // dt). `halflife` is the time the remaining offset takes to roughly halve; no
 // overshoot from rest and only vanishing overshoot from a carried velocity.
 void Damp(f32* x, f32* v, f32 goal, f32 halflife, f32 dt) {
-  const f32 y = (2.0f * 0.69314718f) / std::max(halflife, 1e-4f);
+  const f32 y = (2.0f * 0.69314718f) / rx::Max(halflife, 1e-4f);
   const f32 j0 = *x - goal;
   const f32 j1 = *v + j0 * y;
-  const f32 e = std::exp(-y * dt);
+  const f32 e = ::exp(-y * dt);
   *x = goal + (j0 + j1 * dt) * e;
   *v = (*v - j1 * y * dt) * e;
 }
@@ -32,7 +37,7 @@ f32 ToUnit(u64 value) { return static_cast<f32>(value >> 40) * (1.0f / 16777216.
 // Stateless value noise in [-1, 1]: random knots at integer positions of `s`,
 // smoothstep between them - smooth drift, never jitter.
 f32 SmoothNoise(u64 seed, u32 lane, f32 s) {
-  const f32 floor = std::floor(s);
+  const f32 floor = ::floor(s);
   const i64 knot = static_cast<i64>(floor);
   auto knot_value = [&](i64 k) {
     u64 state = seed ^ (static_cast<u64>(lane) * 0xD6E8FEB86659FD93ull) ^
@@ -46,7 +51,7 @@ f32 SmoothNoise(u64 seed, u32 lane, f32 s) {
 }
 
 f32 SmoothStep01(f32 x) {
-  x = std::clamp(x, 0.0f, 1.0f);
+  x = rx::Clamp(x, 0.0f, 1.0f);
   return x * x * (3.0f - 2.0f * x);
 }
 
@@ -55,8 +60,8 @@ f32 SmoothStep01(f32 x) {
 constexpr f32 kDefaultTransition = 0.4f;
 
 // Life-layer channel names: blinks, then the brow micro-motion lanes.
-constexpr std::string_view kBlinkTargets[] = {"eyeBlinkLeft", "eyeBlinkRight"};
-constexpr std::string_view kMicroTargets[] = {"browInnerUp", "browOuterUpLeft",
+const base::StringRef kBlinkTargets[] = {"eyeBlinkLeft", "eyeBlinkRight"};
+const base::StringRef kMicroTargets[] = {"browInnerUp", "browOuterUpLeft",
                                               "browOuterUpRight"};
 
 }  // namespace
@@ -70,9 +75,9 @@ ExpressionController::ExpressionController() {
       {"cheek", 0.10f, 0.03f}, {"viseme", 0.12f, 0.04f}, {"mouth", 0.12f, 0.05f},
       {"jaw", 0.14f, 0.06f},   {"", 0.10f, 0.02f},
   };
-  SetRegions(defaults, static_cast<u32>(std::size(defaults)));
-  for (std::string_view name : kBlinkTargets) channels_[EnsureChannel(name)].blink = true;
-  for (u32 lane = 0; lane < std::size(kMicroTargets); ++lane) {
+  SetRegions(defaults, static_cast<u32>((sizeof(defaults) / sizeof(defaults[0]))));
+  for (base::StringRef name : kBlinkTargets) channels_[EnsureChannel(name)].blink = true;
+  for (u32 lane = 0; lane < (sizeof(kMicroTargets) / sizeof(kMicroTargets[0])); ++lane) {
     channels_[EnsureChannel(kMicroTargets[lane])].micro = static_cast<i32>(lane);
   }
   set_seed(0);
@@ -83,13 +88,13 @@ void ExpressionController::SetRegions(const Region* regions, u32 count) {
   for (u32 i = 0; i < count; ++i) regions_.push_back(regions[i]);
 }
 
-u32 ExpressionController::EnsureChannel(std::string_view name) {
+u32 ExpressionController::EnsureChannel(base::StringRef name) {
   const u64 target = asset::MakeAssetId(name).hash;
   for (u32 i = 0; i < channels_.size(); ++i) {
     if (channels_[i].target == target) return i;
   }
   Channel channel;
-  channel.name = std::string(name);
+  channel.name = base::String(name);
   channel.target = target;
   // First matching prefix wins; an empty prefix matches everything.
   for (const Region& region : regions_) {
@@ -98,11 +103,11 @@ u32 ExpressionController::EnsureChannel(std::string_view name) {
     channel.base_delay = region.delay;
     break;
   }
-  channels_.push_back(std::move(channel));
+  channels_.push_back(base::move(channel));
   return static_cast<u32>(channels_.size() - 1);
 }
 
-void ExpressionController::AddPose(std::string_view name, const PoseEntry* entries, u32 count) {
+void ExpressionController::AddPose(base::StringRef name, const PoseEntry* entries, u32 count) {
   Pose pose;
   pose.name_hash = asset::MakeAssetId(name).hash;
   for (u32 i = 0; i < count; ++i) {
@@ -111,10 +116,10 @@ void ExpressionController::AddPose(std::string_view name, const PoseEntry* entri
   }
   for (Pose& existing : poses_) {
     if (existing.name_hash != pose.name_hash) continue;
-    existing = std::move(pose);
+    existing = base::move(pose);
     return;
   }
-  poses_.push_back(std::move(pose));
+  poses_.push_back(base::move(pose));
 }
 
 void ExpressionController::AddDefaultPoses() {
@@ -158,7 +163,7 @@ void ExpressionController::AddDefaultPoses() {
                     {"cheekSquintLeft", 0.3f}});
 }
 
-bool ExpressionController::SetExpression(std::string_view name, f32 transition_time) {
+bool ExpressionController::SetExpression(base::StringRef name, f32 transition_time) {
   return SetExpression(asset::MakeAssetId(name).hash, transition_time);
 }
 
@@ -172,7 +177,7 @@ bool ExpressionController::SetExpression(u64 pose_hash, f32 transition_time) {
 
   const f32 scale = transition_time > 0 ? transition_time / kDefaultTransition : 1.0f;
   scratch_.resize(channels_.size());
-  std::fill(scratch_.begin(), scratch_.end(), 0.0f);
+  base::Fill(scratch_.begin(), scratch_.end(), 0.0f);
   for (u32 i = 0; i < pose->channel.size(); ++i) scratch_[pose->channel[i]] = pose->weight[i];
   for (u32 i = 0; i < channels_.size(); ++i) {
     Channel& channel = channels_[i];
@@ -249,7 +254,7 @@ void ExpressionController::UpdateBlink(f32 dt) {
 }
 
 void ExpressionController::Update(f32 dt) {
-  dt = std::max(dt, 0.0f);
+  dt = rx::Max(dt, 0.0f);
   life_time_ += dt;
   if (life_.enabled) {
     UpdateBlink(dt);
@@ -268,13 +273,13 @@ void ExpressionController::Update(f32 dt) {
     f32 out = channel.value;
     if (life_.enabled && channel.micro >= 0) {
       // Micro-motion fades as the expression takes the channel over.
-      const f32 headroom = 1.0f - std::min(std::abs(channel.value), 1.0f);
+      const f32 headroom = 1.0f - rx::Min(::abs(channel.value), 1.0f);
       out += life_.micro_amplitude * headroom *
              SmoothNoise(seed_, static_cast<u32>(channel.micro), life_time_ * life_.micro_hz);
     }
     // max() lets a pose that already holds the eyes closed absorb the blink.
-    if (life_.enabled && channel.blink) out = std::max(out, blink_env_);
-    channel.out = std::clamp(out, 0.0f, 1.0f);
+    if (life_.enabled && channel.blink) out = rx::Max(out, blink_env_);
+    channel.out = rx::Clamp(out, 0.0f, 1.0f);
   }
 }
 

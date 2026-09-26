@@ -1,9 +1,9 @@
 #include "render/atmosphere/lightning.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/core/settings.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "shaders/lightning_bolt_ps_hlsl.h"
@@ -81,7 +81,7 @@ u32 LightningSystem::AppendLights(PointLight* dst, u32 remaining_capacity,
   if (remaining_capacity == 0) return 0;
   if (weather.strike_age < 0.0f || weather.strike_age >= kStrikeDuration) return 0;
   f32 env = Envelope(weather.strike_age, weather.strike_seed);
-  f32 intensity = env * std::clamp(weather.strike_energy, 0.0f, 1.0f) * kFlashIntensity;
+  f32 intensity = env * rx::Clamp(weather.strike_energy, 0.0f, 1.0f) * kFlashIntensity;
   if (intensity <= 1.0f) return 0;
   // One cool blue-white omni at the channel's mid height. Because it rides
   // the normal frame-light path it clusters, claims local-shadow faces, fills
@@ -126,7 +126,7 @@ void LightningSystem::AddToGraph(RenderGraph& graph, ResourceHandle color, Resou
         push.strike_pos[2] = frame.strike_pos.z;
         push.age = frame.strike_age;
         push.seed = frame.strike_seed;
-        push.energy = std::clamp(frame.strike_energy, 0.0f, 1.0f);
+        push.energy = rx::Clamp(frame.strike_energy, 0.0f, 1.0f);
         push.jitter[0] = frame.jitter[0];
         push.jitter[1] = frame.jitter[1];
 

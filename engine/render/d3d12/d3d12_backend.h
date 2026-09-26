@@ -11,11 +11,13 @@
 
 #include "render/d3d12/d3d12_headers.h"
 
-#include <memory>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
+#include "base/functional/function.h"
+#include "base/memory/unique_pointer.h"
 #include "render/rhi/device.h"
 #include "render/rhi/swapchain.h"
 
@@ -220,7 +222,7 @@ class D3D12CommandList final : public CommandList {
 
   void BindPipeline(PipelineHandle pipeline) override;
   void BindSet(u32 set_index, BindingSetHandle set) override;
-  void BindTransient(u32 set_index, std::span<const BindingItem> items) override;
+  void BindTransient(u32 set_index, base::Span<const BindingItem> items) override;
   void PushConstants(const void* data, u32 size, u32 offset) override;
   void Dispatch(u32 x, u32 y, u32 z) override;
   void DispatchIndirect(const GpuBuffer& args, u64 offset) override;
@@ -243,10 +245,10 @@ class D3D12CommandList final : public CommandList {
                              u32 stride) override;
   void DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
                                   u64 count_offset, u32 max_draws, u32 stride) override;
-  void TextureBarriers(std::span<const TextureBarrier> barriers) override;
+  void TextureBarriers(base::Span<const TextureBarrier> barriers) override;
   void MemoryBarrier(BarrierScope src, BarrierScope dst) override;
   void CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
-                           std::span<const BufferTextureCopy> regions) override;
+                           base::Span<const BufferTextureCopy> regions) override;
   void CopyTextureToBuffer(const GpuImage& src, const GpuBuffer& dst,
                            const BufferTextureCopy& region) override;
   void CopyBuffer(const GpuBuffer& src, u64 src_offset, const GpuBuffer& dst, u64 dst_offset,
@@ -320,7 +322,7 @@ class D3D12CommandList final : public CommandList {
 // no-op, and the whole frame graph plus RX_UI_SHOT readback runs unchanged.
 class D3D12Swapchain final : public Swapchain {
  public:
-  static std::unique_ptr<D3D12Swapchain> Create(D3D12Device& device, u32 width, u32 height,
+  static base::UniquePointer<D3D12Swapchain> Create(D3D12Device& device, u32 width, u32 height,
                                                 bool vsync);
   ~D3D12Swapchain() override;
 
@@ -354,7 +356,7 @@ class D3D12Device final : public Device {
  public:
   // `window` may be null: an offscreen device has no HWND and never creates a
   // swapchain (frames complete through the swapchainless SubmitFrame overload).
-  static std::unique_ptr<Device> Create(const DeviceDesc& desc, Window* window);
+  static base::UniquePointer<Device> Create(const DeviceDesc& desc, Window* window);
   ~D3D12Device() override;
 
   void WaitIdle() override;
@@ -362,7 +364,7 @@ class D3D12Device final : public Device {
   void DestroySurface() override {}
   // `hdr` is accepted but not yet honored: the offscreen Linux swapchain has
   // no display pipe, and the DXGI path needs CheckColorSpaceSupport wiring.
-  std::unique_ptr<Swapchain> CreateSwapchain(u32 width, u32 height, bool vsync,
+  base::UniquePointer<Swapchain> CreateSwapchain(u32 width, u32 height, bool vsync,
                                              bool hdr) override;
   MemoryBudget memory_budget() const override;
 
@@ -393,7 +395,7 @@ class D3D12Device final : public Device {
   void DestroyBindingLayout(BindingLayoutHandle layout) override;
   BindingSetHandle CreateBindingSet(BindingLayoutHandle layout, u32 variable_count) override;
   void DestroyBindingSet(BindingSetHandle set) override;
-  void UpdateBindingSet(BindingSetHandle set, std::span<const BindingItem> items) override;
+  void UpdateBindingSet(BindingSetHandle set, base::Span<const BindingItem> items) override;
 
   AccelSizes GetBlasSizes(const BlasBuildDesc& desc) override;
   AccelSizes GetTlasSizes(u32 instance_count) override;
@@ -408,7 +410,7 @@ class D3D12Device final : public Device {
   void DestroyTimestampPool(TimestampPoolHandle pool) override;
   bool GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, u64* out) override;
 
-  void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
+  void ImmediateSubmit(const base::Function<void(CommandList&)>& record) override;
   CommandList* BeginFrame(u32 slot) override;
   PresentResult SubmitFrame(CommandList* cmd, Swapchain& swapchain, u32 image_index) override;
   void SubmitFrame(CommandList* cmd) override;
@@ -472,7 +474,7 @@ class D3D12Device final : public Device {
   CpuDescriptorPool& dsv_pool() { return dsv_pool_; }
 
   SetLayout* GetOrCreateSetLayout(const BindingLayoutDesc& desc);
-  ID3D12RootSignature* GetOrCreateRootSignature(std::span<SetLayout* const> sets, u32 push_size,
+  ID3D12RootSignature* GetOrCreateRootSignature(base::Span<SetLayout* const> sets, u32 push_size,
                                                 bool push_root_constants,
                                                 PipelineRecord* out_params);
   ID3D12CommandSignature* GetDrawIndexedSignature(u32 stride);
@@ -545,7 +547,7 @@ class D3D12Device final : public Device {
     ID3D12Resource* push_ring = nullptr;
     u8* push_mapped = nullptr;
     u64 push_cursor = 0;
-    std::unique_ptr<D3D12CommandList> wrapper;
+    base::UniquePointer<D3D12CommandList> wrapper;
     base::Vector<ID3D12Resource*> deferred;
     // Public frame-safe deferred destruction: whole records (resource + views)
     // retired here are freed once this ring's fence proves the GPU is done,

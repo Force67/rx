@@ -1,10 +1,9 @@
 #ifndef RX_INVENTORY_WORLD_ITEM_H_
 #define RX_INVENTORY_WORLD_ITEM_H_
 
-#include <functional>
-#include <unordered_map>
-#include <vector>
-
+#include "base/containers/map.h"
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
 #include "core/math.h"
 #include "core/types.h"
 #include "ecs/entity.h"
@@ -52,9 +51,9 @@ class RX_INVENTORY_WORLD_EXPORT WorldItemStore {
   // Removes and returns every record whose cell overlaps the query sphere. The
   // cell granularity means a few records just outside `radius` may come back;
   // that is harmless (they re-hibernate next sweep).
-  std::vector<WorldItemRecord> TakeNear(const Vec3& center, f32 radius);
+  base::Vector<WorldItemRecord> TakeNear(const Vec3& center, f32 radius);
   // Visits every record (for serialization). The callback must not mutate.
-  void ForEach(const std::function<void(const WorldItemRecord&)>& fn) const;
+  void ForEach(const base::Function<void(const WorldItemRecord&)>& fn) const;
   size_t size() const { return count_; }
   void Clear();
 
@@ -62,13 +61,17 @@ class RX_INVENTORY_WORLD_EXPORT WorldItemStore {
   struct CellKey {
     i32 x = 0, y = 0, z = 0;
     bool operator==(const CellKey&) const = default;
-  };
-  struct CellKeyHash {
-    size_t operator()(const CellKey& key) const;
+    bool operator<(const CellKey& o) const {
+      if (x != o.x) return x < o.x;
+      if (y != o.y) return y < o.y;
+      return z < o.z;
+    }
   };
   CellKey CellOf(const Vec3& p) const;
 
-  std::unordered_map<CellKey, std::vector<WorldItemRecord>, CellKeyHash> cells_;
+  // Ordered, so ForEach (and the save it feeds) walks cells in key order: the
+  // bytes then follow from the records alone, not from a hash table's layout.
+  base::Map<CellKey, base::Vector<WorldItemRecord>> cells_;
   f32 cell_size_ = 32.0f;
   size_t count_ = 0;
 };
@@ -133,13 +136,13 @@ RX_INVENTORY_WORLD_EXPORT void ReserveWorldItemId(u64 seen_id);
 
 // Serializes every live WorldItem entity AND every record in `store` into one
 // versioned little-endian blob; live/dormant status is preserved.
-RX_INVENTORY_WORLD_EXPORT std::vector<u8> SaveWorldItems(ecs::World& world,
+RX_INVENTORY_WORLD_EXPORT base::Vector<u8> SaveWorldItems(ecs::World& world,
                                                          const WorldItemStore& store);
 // Restores a SaveWorldItems blob: live records become entities + bodies,
 // dormant records go into `store`. Returns false on a corrupt/unsupported blob.
 RX_INVENTORY_WORLD_EXPORT bool LoadWorldItems(ecs::World& world, physics::PhysicsWorld& physics,
                                               const ItemCatalog& catalog, WorldItemStore& store,
-                                              const std::vector<u8>& blob);
+                                              const base::Vector<u8>& blob);
 
 }  // namespace rx::inventory
 

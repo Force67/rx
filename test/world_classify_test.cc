@@ -7,9 +7,9 @@
 // is pinned here rather than left to be checked by baking things and looking.
 #include "world/world_bake.h"
 
-#include <cstdio>
-#include <string>
+#include <stdio.h>
 
+#include "base/strings/xstring.h"
 #include "ecs/world.h"
 #include "scene/components.h"
 
@@ -32,7 +32,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                        \
   do {                                                                     \
     if (!(cond)) {                                                         \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                        \
     }                                                                      \
   } while (0)
@@ -86,7 +86,7 @@ void TestClassifyIgnoresWhatTheDropWouldRemove() {
   rx::ecs::World world;
   const WorldBakeOptions options = Options();
 
-  // Name holds a std::string, so it cannot be baked and is dropped. The entity
+  // Name holds a base::String, so it cannot be baked and is dropped. The entity
   // is still an entity: classifying after the drop would quietly turn a named,
   // authored thing into a page row with no identity at all.
   const Entity named = world.Create();
@@ -113,7 +113,7 @@ void TestRefusals() {
   world.Add(child, Parent{parent});
   const BakeVerdict parented = ClassifyForBake(world, child, options);
   CHECK(parented.role == BakeRole::kRefused);
-  CHECK(parented.refusal.find("Parent") != std::string::npos);
+  CHECK(parented.refusal.find("Parent") != base::String::npos);
 
   // No Transform: the cook has nowhere to put it.
   const Entity placeless = world.Create();
@@ -205,9 +205,9 @@ int main() {
   TestCellAndBounds();
   TestInstanceSetIsConfigurable();
   if (g_failures) {
-    std::fprintf(stderr, "world_classify_test: %d failure(s)\n", g_failures);
+    ::fprintf(stderr, "world_classify_test: %d failure(s)\n", g_failures);
     return 1;
   }
-  std::puts("world_classify_test: ok");
+  ::puts("world_classify_test: ok");
   return 0;
 }

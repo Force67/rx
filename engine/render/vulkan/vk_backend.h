@@ -5,23 +5,22 @@
 // include this; pass code sees rhi/ headers exclusively.
 
 #include <volk.h>
-#include <atomic>
-#include <condition_variable>
-#include <deque>
-#include <functional>
-#include <mutex>
-#include <thread>
-#include <vector>
-
 
 #include <vk_mem_alloc.h>
-
-#include <memory>
-#include <string>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
+#include "base/atomic.h"
+#include "base/containers/span.h"
+#include "base/memory/unique_pointer.h"
+#include "base/containers/deque.h"
+#include "base/functional/function.h"
+#include "base/strings/xstring.h"
+#include "base/threading/condition_variable.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
+#include "base/threading/thread.h"
 #include "render/rhi/device.h"
 #include "render/rhi/swapchain.h"
 #include "render/rhi/vulkan_interop.h"
@@ -72,7 +71,7 @@ struct PipelineRecord {
   base::Vector<VkDescriptorSetLayout> set_layouts;
   // Batched creation compiles on a worker thread; readers wait via
   // WaitPipelineReady before touching any other field.
-  std::atomic<u32> build_state{kBuilt};
+  base::Atomic<u32> build_state{kBuilt};
 };
 
 struct AccelStructRecord {
@@ -157,7 +156,7 @@ class VulkanCommandList final : public CommandList {
 
   void BindPipeline(PipelineHandle pipeline) override;
   void BindSet(u32 set_index, BindingSetHandle set) override;
-  void BindTransient(u32 set_index, std::span<const BindingItem> items) override;
+  void BindTransient(u32 set_index, base::Span<const BindingItem> items) override;
   void PushConstants(const void* data, u32 size, u32 offset) override;
   void Dispatch(u32 x, u32 y, u32 z) override;
   void DispatchIndirect(const GpuBuffer& args, u64 offset) override;
@@ -180,10 +179,10 @@ class VulkanCommandList final : public CommandList {
                              u32 stride) override;
   void DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 offset, const GpuBuffer& count_buffer,
                                   u64 count_offset, u32 max_draws, u32 stride) override;
-  void TextureBarriers(std::span<const TextureBarrier> barriers) override;
+  void TextureBarriers(base::Span<const TextureBarrier> barriers) override;
   void MemoryBarrier(BarrierScope src, BarrierScope dst) override;
   void CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
-                           std::span<const BufferTextureCopy> regions) override;
+                           base::Span<const BufferTextureCopy> regions) override;
   void CopyTexture(const GpuImage& src, const GpuImage& dst) override;
   void CopyTextureToBuffer(const GpuImage& src, const GpuBuffer& dst,
                            const BufferTextureCopy& region) override;
@@ -225,7 +224,7 @@ class VulkanCommandList final : public CommandList {
 
 class VulkanSwapchain final : public Swapchain {
  public:
-  static std::unique_ptr<VulkanSwapchain> Create(VulkanDevice& device, u32 width, u32 height,
+  static base::UniquePointer<VulkanSwapchain> Create(VulkanDevice& device, u32 width, u32 height,
                                                  bool vsync, bool hdr);
   ~VulkanSwapchain() override;
 
@@ -260,16 +259,16 @@ class VulkanSwapchain final : public Swapchain {
 
 class VulkanDevice final : public Device {
  public:
-  static std::unique_ptr<Device> Create(const DeviceDesc& desc, Window& window);
+  static base::UniquePointer<Device> Create(const DeviceDesc& desc, Window& window);
   // Surfaceless device: no window, no surface, no swapchain extension. Same
   // adapter selection, feature enablement and caps as the windowed path.
-  static std::unique_ptr<Device> CreateOffscreen(const DeviceDesc& desc);
+  static base::UniquePointer<Device> CreateOffscreen(const DeviceDesc& desc);
   ~VulkanDevice() override;
 
   void WaitIdle() override;
   bool RecreateSurface(Window& window) override;
   void DestroySurface() override;
-  std::unique_ptr<Swapchain> CreateSwapchain(u32 width, u32 height, bool vsync,
+  base::UniquePointer<Swapchain> CreateSwapchain(u32 width, u32 height, bool vsync,
                                              bool hdr) override;
   MemoryBudget memory_budget() const override;
 
@@ -307,7 +306,7 @@ class VulkanDevice final : public Device {
   void DestroyBindingLayout(BindingLayoutHandle layout) override;
   BindingSetHandle CreateBindingSet(BindingLayoutHandle layout, u32 variable_count) override;
   void DestroyBindingSet(BindingSetHandle set) override;
-  void UpdateBindingSet(BindingSetHandle set, std::span<const BindingItem> items) override;
+  void UpdateBindingSet(BindingSetHandle set, base::Span<const BindingItem> items) override;
 
   AccelSizes GetBlasSizes(const BlasBuildDesc& desc) override;
   AccelSizes GetTlasSizes(u32 instance_count) override;
@@ -322,14 +321,14 @@ class VulkanDevice final : public Device {
   void DestroyTimestampPool(TimestampPoolHandle pool) override;
   bool GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count, u64* out) override;
 
-  void ImmediateSubmit(const std::function<void(CommandList&)>& record) override;
+  void ImmediateSubmit(const base::Function<void(CommandList&)>& record) override;
   void BeginUploadBatch() override;
   void FlushUploadBatch() override;
   bool UploadBatchActive() const override {
     CheckUploadBatchThread("UploadBatchActive");
     return upload_batch_depth_ > 0;
   }
-  void RecordUpload(const std::function<void(CommandList&)>& record) override;
+  void RecordUpload(const base::Function<void(CommandList&)>& record) override;
   void ParkBatchStaging(GpuBuffer& buffer) override;
   bool ReadbackImage(const GpuImage& image, ResourceState current, void* out,
                      size_t out_size) override;
@@ -352,10 +351,10 @@ class VulkanDevice final : public Device {
   VmaAllocator allocator() const { return allocator_; }
 
   // Descriptor writes shared by BindTransient and UpdateBindingSet.
-  void WriteDescriptors(VkDescriptorSet set, std::span<const BindingItem> items);
+  void WriteDescriptors(VkDescriptorSet set, base::Span<const BindingItem> items);
   bool BuildComputePipeline(const ComputePipelineDesc& desc, PipelineRecord* record);
   bool BuildGraphicsPipeline(const GraphicsPipelineDesc& desc, PipelineRecord* record);
-  void EnqueuePipelineJob(std::function<void()> job);
+  void EnqueuePipelineJob(base::Function<void()> job);
 
   // Inside a batch the build runs on a worker with a deep copy of the desc
   // (the desc's vectors copy; debug_name is re-pointed at an owned string);
@@ -370,23 +369,26 @@ class VulkanDevice final : public Device {
       }
       return MakeHandle<PipelineHandle>(record);
     }
-    record->build_state.store(PipelineRecord::kBuilding, std::memory_order_relaxed);
+    record->build_state.store(PipelineRecord::kBuilding, base::memory_order_relaxed);
     EnqueuePipelineJob([this, copy = Desc(desc),
-                        name = std::string(desc.debug_name ? desc.debug_name : ""), record,
+                        name = base::String(desc.debug_name ? desc.debug_name : ""), record,
                         build]() mutable {
       copy.debug_name = name.empty() ? nullptr : name.c_str();
       const bool ok = build(copy, record);
-      if (!ok) pipeline_batch_failures_.fetch_add(1, std::memory_order_relaxed);
+      if (!ok) pipeline_batch_failures_.fetch_add(1, base::memory_order_relaxed);
       record->build_state.store(ok ? PipelineRecord::kBuilt : PipelineRecord::kFailed,
-                                std::memory_order_release);
-      record->build_state.notify_all();
+                                base::memory_order_release);
+      // Passing through the mutex orders the store before any waiter's
+      // predicate check that could otherwise miss it and sleep.
+      { base::LockGuard lock(pipeline_ready_mutex_); }
+      pipeline_ready_cv_.NotifyAll();
     });
     return MakeHandle<PipelineHandle>(record);
   }
 
   // Fails (and says why) when push_size is past the adapter's
   // maxPushConstantsSize instead of letting the driver reject the layout.
-  VkPipelineLayout GetOrCreatePipelineLayout(std::span<const VkDescriptorSetLayout> sets,
+  VkPipelineLayout GetOrCreatePipelineLayout(base::Span<const VkDescriptorSetLayout> sets,
                                              VkShaderStageFlags push_stages, u32 push_size,
                                              const char* debug_name);
   VkDescriptorSetLayout GetOrCreateSetLayout(const BindingLayoutDesc& desc);
@@ -399,7 +401,7 @@ class VulkanDevice final : public Device {
   // swapchain device extension, and the graphics family is picked without a
   // present-support requirement. Everything else (adapter scoring, feature
   // enablement, caps, queues, resources) is identical.
-  static std::unique_ptr<Device> CreateImpl(const DeviceDesc& desc, Window* window);
+  static base::UniquePointer<Device> CreateImpl(const DeviceDesc& desc, Window* window);
 
   bool InitResources();
   void ShutdownResources();
@@ -427,7 +429,7 @@ class VulkanDevice final : public Device {
     VkSemaphore image_available_fg = VK_NULL_HANDLE;
     VkFence in_flight = VK_NULL_HANDLE;
     VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-    std::unique_ptr<VulkanCommandList> list;
+    base::UniquePointer<VulkanCommandList> list;
     bool fence_armed = false;  // submit happened; next BeginFrame must wait
     // Async compute: extra graphics segments (fork/join splits) + the compute
     // queue's list, all reset with the shared pool. The fork semaphore gates
@@ -435,10 +437,10 @@ class VulkanDevice final : public Device {
     // gates the final segment behind the compute work.
     static constexpr u32 kMaxSegments = 3;
     VkCommandBuffer seg_cmds[kMaxSegments - 1] = {};
-    std::unique_ptr<VulkanCommandList> seg_lists[kMaxSegments - 1];
+    base::UniquePointer<VulkanCommandList> seg_lists[kMaxSegments - 1];
     VkCommandPool async_pool = VK_NULL_HANDLE;  // compute-family pool when dedicated
     VkCommandBuffer async_cmd = VK_NULL_HANDLE;
-    std::unique_ptr<VulkanCommandList> async_list;
+    base::UniquePointer<VulkanCommandList> async_list;
     VkSemaphore fork_sem = VK_NULL_HANDLE;
     VkSemaphore async_sem = VK_NULL_HANDLE;
     u32 active_segment = 0;
@@ -459,7 +461,7 @@ class VulkanDevice final : public Device {
   u32 push_constant_budget_ = 128;
   u32 api_version_ = VK_API_VERSION_1_3;
   VkPipelineCache pipeline_cache_ = VK_NULL_HANDLE;
-  std::string pipeline_cache_path_;
+  base::String pipeline_cache_path_;
   VkQueue graphics_queue_ = VK_NULL_HANDLE;
   VkQueue compute_queue_ = VK_NULL_HANDLE;  // async compute (dedicated family when available)
   u32 graphics_family_ = 0;
@@ -480,7 +482,7 @@ class VulkanDevice final : public Device {
   // Main-thread only, like every other immediate_* member.
   u32 upload_batch_depth_ = 0;
   VkCommandBuffer upload_batch_cmd_ = VK_NULL_HANDLE;
-  std::unique_ptr<VulkanCommandList> upload_batch_list_;
+  base::UniquePointer<VulkanCommandList> upload_batch_list_;
   base::Vector<GpuBuffer> upload_batch_stagings_;
   // Host-visible bytes currently parked in upload_batch_stagings_. When it
   // crosses the budget the pending copies are submitted early (batch stays
@@ -491,7 +493,7 @@ class VulkanDevice final : public Device {
   u32 upload_batch_records_ = 0;
   // The thread the device was created on; the batch state above is
   // unsynchronized, so every batch entry point enforces thread affinity.
-  std::thread::id upload_batch_thread_ = std::this_thread::get_id();
+  u32 upload_batch_thread_ = base::GetCurrentThreadIndex();
   void CheckUploadBatchThread(const char* what) const;
   // Lazily begins the batch command buffer on the first copy (null if that
   // fails: the caller falls back to an unbatched ImmediateSubmit); submits any
@@ -526,7 +528,7 @@ class VulkanDevice final : public Device {
   // tell whether a batch might still reference what it is about to free.
   // Atomic because deferred destroys run off the device thread; the device
   // thread is the only writer.
-  std::atomic<u64> upload_park_serial_{0};
+  base::Atomic<u64> upload_park_serial_{0};
   VkFence AcquireUploadBatchFence();
   void RetireCompletedUploadBatches();  // frees batches whose fence has signaled
   void DrainUploadBatchesInFlight();    // blocks until every in-flight batch retires
@@ -547,12 +549,12 @@ class VulkanDevice final : public Device {
     u64 upload_serial = 0;
   };
   Graveyard graveyard_[kMaxFramesInFlight];
-  std::mutex graveyard_mutex_;
+  base::Mutex graveyard_mutex_;
   void NoteGraveyardUploadSerial(u32 slot);  // graveyard_mutex_ held
 
   // Caches, keyed by content hash; entries live for the device's lifetime.
   // The layout caches are shared with pipeline-batch worker threads.
-  std::mutex layout_cache_mutex_;
+  base::Mutex layout_cache_mutex_;
   base::UnorderedMap<u64, VkDescriptorSetLayout> set_layout_cache_;
   base::UnorderedMap<u64, VkPipelineLayout> pipeline_layout_cache_;
 
@@ -560,11 +562,15 @@ class VulkanDevice final : public Device {
   // while the main thread keeps issuing Create*Pipeline calls.
   bool pipeline_batch_active_ = false;
   bool pipeline_workers_quit_ = false;
-  std::mutex pipeline_queue_mutex_;
-  std::condition_variable pipeline_queue_cv_;
-  std::deque<std::function<void()>> pipeline_jobs_;
-  std::vector<std::thread> pipeline_workers_;
-  std::atomic<u32> pipeline_batch_failures_{0};
+  base::Mutex pipeline_queue_mutex_;
+  base::ConditionVariable pipeline_queue_cv_;
+  base::SimpleDeque<base::Function<void()>> pipeline_jobs_;
+  // base::Thread is not movable; the vector must not relocate live threads.
+  base::Vector<base::UniquePointer<base::Thread>> pipeline_workers_;
+  // Signalled whenever a batched pipeline leaves kBuilding.
+  base::Mutex pipeline_ready_mutex_;
+  base::ConditionVariable pipeline_ready_cv_;
+  base::Atomic<u32> pipeline_batch_failures_{0};
   base::UnorderedMap<u64, VkSampler> sampler_cache_;
 
   friend class VulkanSwapchain;

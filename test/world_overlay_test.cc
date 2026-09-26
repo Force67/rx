@@ -1,12 +1,13 @@
 // The mutable third layer: what a save file records on top of an immutable
 // bake, and the invariants that let the streamer consult it with a binary
 // search while a cell materializes.
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/strings/xstring.h"
 #include "world/world_overlay.h"
 
-#include <algorithm>
-#include <cstdio>
-#include <limits>
-#include <string>
+#include <math.h>
+#include <stdio.h>
 
 namespace {
 
@@ -23,19 +24,19 @@ int g_failures = 0;
 #define CHECK(cond)                                                        \
   do {                                                                     \
     if (!(cond)) {                                                         \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                        \
     }                                                                      \
   } while (0)
 
-void CheckRejected(bool decoded, const std::string& error, const char* what) {
+void CheckRejected(bool decoded, const base::String& error, const char* what) {
   if (decoded) {
-    std::fprintf(stderr, "FAIL: %s was accepted\n", what);
+    ::fprintf(stderr, "FAIL: %s was accepted\n", what);
     ++g_failures;
     return;
   }
   if (error.empty()) {
-    std::fprintf(stderr, "FAIL: %s was rejected without a message\n", what);
+    ::fprintf(stderr, "FAIL: %s was rejected without a message\n", what);
     ++g_failures;
   }
 }
@@ -75,9 +76,9 @@ void TestDeltas() {
 
   // And a value the decoder would refuse never reaches the file: a save that
   // writes and then cannot be loaded is worse than one that says no.
-  const f32 nan = std::numeric_limits<f32>::quiet_NaN();
+  const f32 nan = NAN;
   CHECK(!overlay.Move(11, {nan, 0, 0}, {0, 0, 0, 1}, 1.0f));
-  CHECK(!overlay.Move(11, {0, 0, 0}, {0, 0, 0, 1}, std::numeric_limits<f32>::infinity()));
+  CHECK(!overlay.Move(11, {0, 0, 0}, {0, 0, 0, 1}, INFINITY));
   CHECK(overlay.FindMove(11) == nullptr);
   CHECK(overlay.Move(11, {1, 2, 3}, {0, 0, 0, 1}, 1.0f));
   CHECK(overlay.FindMove(11) != nullptr);
@@ -121,12 +122,12 @@ void TestRoundTrip() {
   overlay.Move(50, {-1, -2, -3}, {0, 0, 0, 1}, 0.25f);
 
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   CHECK(overlay.Encode(&bytes, &error));
   CHECK(error.empty());
 
   WorldOverlay decoded;
-  CHECK(WorldOverlay::Decode(std::span<const u8>(bytes.data(), bytes.size()), &decoded, &error));
+  CHECK(WorldOverlay::Decode(base::Span<const u8>(bytes.data(), bytes.size()), &decoded, &error));
   // The bake it was recorded against travels with it, or the ids it holds mean
   // nothing checkable.
   CHECK(decoded.bake_id() == 0xfeedfacecafebeefull);
@@ -146,7 +147,7 @@ void TestRoundTrip() {
   CHECK(fresh.Encode(&empty_bytes, &error));
   WorldOverlay empty_decoded;
   empty_decoded.Destroy(1);
-  CHECK(WorldOverlay::Decode(std::span<const u8>(empty_bytes.data(), empty_bytes.size()),
+  CHECK(WorldOverlay::Decode(base::Span<const u8>(empty_bytes.data(), empty_bytes.size()),
                              &empty_decoded, &error));
   CHECK(empty_decoded.empty());  // Decode replaces, it does not merge
 }
@@ -156,38 +157,38 @@ void TestRefusesCorruptedBytes() {
   overlay.Destroy(100);
   overlay.Move(250, {1, 2, 3}, {0, 0, 0, 1}, 1.0f);
   base::Vector<u8> good;
-  std::string error;
+  base::String error;
   CHECK(overlay.Encode(&good, &error));
 
   WorldOverlay decoded;
   {
     base::Vector<u8> bad(good);
     bad[2] = 'X';
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "a bad magic");
   }
   {
     base::Vector<u8> bad(good);
     bad[bad.size() - 1] ^= 0xff;
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "a flipped body byte");
   }
   {
     base::Vector<u8> bad(good);
     bad.erase(bad.end() - 1);
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "a truncated body");
   }
   {
     base::Vector<u8> bad;
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "an empty file");
   }
-  CHECK(WorldOverlay::Decode(std::span<const u8>(good.data(), good.size()), &decoded, &error));
+  CHECK(WorldOverlay::Decode(base::Span<const u8>(good.data(), good.size()), &decoded, &error));
 }
 
 // Rewrites the file's checksum after an edit, so only the structural check
@@ -217,7 +218,7 @@ void TestRefusesInconsistentFiles() {
   overlay.Move(10, {1, 2, 3}, {0, 0, 0, 1}, 1.0f);
   overlay.Move(20, {4, 5, 6}, {0, 0, 0, 1}, 1.0f);
   base::Vector<u8> good;
-  std::string error;
+  base::String error;
   CHECK(overlay.Encode(&good, &error));
 
   WorldOverlay decoded;
@@ -225,9 +226,9 @@ void TestRefusesInconsistentFiles() {
     // Swap the two moves so the list is no longer sorted by stable id.
     base::Vector<u8> bad(good);
     constexpr size_t kMove = 40;
-    for (u32 i = 0; i < kMove; ++i) std::swap(bad[32 + i], bad[32 + kMove + i]);
+    for (u32 i = 0; i < kMove; ++i) base::Swap(bad[32 + i], bad[32 + kMove + i]);
     RepairChecksum(&bad);
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "an unsorted move list");
   }
@@ -238,7 +239,7 @@ void TestRefusesInconsistentFiles() {
       bad[32 + 36 + shift / 8] = static_cast<u8>(0x7fc00000u >> shift);
     }
     RepairChecksum(&bad);
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "a move with a non-finite transform");
   }
@@ -249,7 +250,7 @@ void TestRefusesInconsistentFiles() {
     bad[20] = 1;  // destroyed_count
     bad[24] = 1;  // move_count
     RepairChecksum(&bad);
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "an id that is both destroyed and moved");
   }
@@ -257,7 +258,7 @@ void TestRefusesInconsistentFiles() {
     base::Vector<u8> bad(good);
     bad[8] = 9;  // version
     RepairChecksum(&bad);
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "a future version");
   }
@@ -267,11 +268,11 @@ void TestRefusesInconsistentFiles() {
     // checksum instead.
     base::Vector<u8> bad(good);
     for (u32 i = 0; i < 8; ++i) bad[12 + i] = 0;
-    CheckRejected(WorldOverlay::Decode(std::span<const u8>(bad.data(), bad.size()), &decoded,
+    CheckRejected(WorldOverlay::Decode(base::Span<const u8>(bad.data(), bad.size()), &decoded,
                                        &error),
                   error, "a zeroed bake id");
   }
-  CHECK(WorldOverlay::Decode(std::span<const u8>(good.data(), good.size()), &decoded, &error));
+  CHECK(WorldOverlay::Decode(base::Span<const u8>(good.data(), good.size()), &decoded, &error));
   CHECK(decoded.bake_id() == 7);
 
   // And the same for the destroyed list, which IsDestroyed binary searches: out
@@ -281,10 +282,10 @@ void TestRefusesInconsistentFiles() {
   destroys.Destroy(20);
   base::Vector<u8> sorted;
   CHECK(destroys.Encode(&sorted, &error));
-  for (u32 i = 0; i < 8; ++i) std::swap(sorted[32 + i], sorted[32 + 8 + i]);
+  for (u32 i = 0; i < 8; ++i) base::Swap(sorted[32 + i], sorted[32 + 8 + i]);
   RepairChecksum(&sorted);
   CheckRejected(
-      WorldOverlay::Decode(std::span<const u8>(sorted.data(), sorted.size()), &decoded, &error),
+      WorldOverlay::Decode(base::Span<const u8>(sorted.data(), sorted.size()), &decoded, &error),
       error, "an unsorted destroyed list");
 }
 
@@ -297,9 +298,9 @@ int main() {
   TestRefusesCorruptedBytes();
   TestRefusesInconsistentFiles();
   if (g_failures) {
-    std::fprintf(stderr, "world_overlay_test: %d failure(s)\n", g_failures);
+    ::fprintf(stderr, "world_overlay_test: %d failure(s)\n", g_failures);
     return 1;
   }
-  std::puts("world_overlay_test: ok");
+  ::puts("world_overlay_test: ok");
   return 0;
 }

@@ -1,7 +1,7 @@
 #include "anim/foot_ik.h"
+#include "core/scalar.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 namespace rx::anim {
 namespace {
@@ -59,7 +59,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
     Vec3 knee_pos = Translation((*bone_model)[p.knee]);
     Vec3 ankle_pos = Translation((*bone_model)[p.ankle]);
     f32 leg = Length(knee_pos - hip_pos) + Length(ankle_pos - knee_pos);
-    leg_span = std::max(leg_span, leg);
+    leg_span = rx::Max(leg_span, leg);
     Vec3 hit, normal;
     // Start the down-ray well above the foot, scaled to the leg so it works in
     // metres (test rig) or game units alike.
@@ -69,7 +69,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
     p.target = hit + up * ankle_height;
     p.lift = Dot(p.target - ankle_pos, up);
     // Only planted feet pull the pelvis down (a lifting swing foot must not).
-    if (p.weight >= 0.5f) lowest_lift = std::min(lowest_lift, p.lift);
+    if (p.weight >= 0.5f) lowest_lift = rx::Min(lowest_lift, p.lift);
     any = true;
   }
   if (!any) return;
@@ -79,7 +79,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
   i32 pelvis = skeleton.Find("NPC Pelvis [Pelv]");
   if (pelvis < 0) pelvis = skeleton.Find("NPC Root [Root]");
   if (pelvis >= 0 && lowest_lift < 0) {
-    f32 drop = std::max(lowest_lift, -leg_span * 0.5f);  // clamp so we never fold up
+    f32 drop = rx::Max(lowest_lift, -leg_span * 0.5f);  // clamp so we never fold up
     pose->translation[pelvis] += up * drop;
     ComputeModelMatrices(skeleton, *pose, bone_model);
   }
@@ -96,7 +96,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
     if (l_thigh < 1e-4f || l_calf < 1e-4f) continue;
 
     Vec3 to_target = p.target - a;
-    f32 reach = Clamp(Length(to_target), std::fabs(l_thigh - l_calf) + 1e-3f,
+    f32 reach = Clamp(Length(to_target), ::fabs(l_thigh - l_calf) + 1e-3f,
                       l_thigh + l_calf - 1e-3f);
     Vec3 dir = Normalize(to_target);
     Vec3 effective_target = a + dir * reach;
@@ -106,7 +106,7 @@ void SolveFootIk(const asset::Skeleton& skeleton, const GroundQuery& ground, con
     f32 cos_hip = Clamp((l_thigh * l_thigh + reach * reach - l_calf * l_calf) /
                             (2.0f * l_thigh * reach),
                         -1.0f, 1.0f);
-    f32 hip_angle = std::acos(cos_hip);
+    f32 hip_angle = ::acos(cos_hip);
     Vec3 plane_n = Cross(dir, forward);
     if (Length(plane_n) < 1e-4f) plane_n = Cross(dir, up);
     plane_n = Normalize(plane_n);

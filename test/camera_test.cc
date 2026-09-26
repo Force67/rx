@@ -1,11 +1,13 @@
 #include "scene/camera.h"
 
 #include <base/containers/vector.h>
+#include <stdlib.h>
 
-#include <cmath>
-#include <cstdint>
-#include <cstdio>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
 
+#include "core/scalar.h"
 #include "ecs/world.h"
 
 namespace {
@@ -23,13 +25,13 @@ struct alignas(64) OverAlignedComponent {
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "camera_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "camera_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-4f) {
-  if (std::abs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "camera_test: FAIL: %s (got %.6f, expected %.6f)\n", message, actual,
+  if (::abs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "camera_test: FAIL: %s (got %.6f, expected %.6f)\n", message, actual,
                expected);
   ++failures;
 }
@@ -221,8 +223,8 @@ void TestLensAndOrientationInterpolation() {
 
   CameraView half = InterpolateCameraView(source, destination, 0.5f);
   const f32 expected_fov =
-      2.0f * std::atan(std::lerp(std::tan(source.lens.fov_y * 0.5f),
-                                 std::tan(destination.lens.fov_y * 0.5f), 0.5f));
+      2.0f * ::atan(rx::Lerp(::tan(source.lens.fov_y * 0.5f),
+                                 ::tan(destination.lens.fov_y * 0.5f), 0.5f));
   Near(half.lens.fov_y, expected_fov, "field of view blends in focal scale");
   Near(rx::Length(CameraForward(half)), 1.0f, "slerped orientation remains normalized");
 
@@ -251,9 +253,9 @@ int main() {
   TestLensAndOrientationInterpolation();
 
   if (failures != 0) {
-    std::fprintf(stderr, "camera_test: %d failure(s)\n", failures);
+    ::fprintf(stderr, "camera_test: %d failure(s)\n", failures);
     return 1;
   }
-  std::printf("camera_test: PASS\n");
+  ::printf("camera_test: PASS\n");
   return 0;
 }

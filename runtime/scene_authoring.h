@@ -1,11 +1,11 @@
 #ifndef RX_RUNTIME_SCENE_AUTHORING_H_
 #define RX_RUNTIME_SCENE_AUTHORING_H_
 
-#include <string>
-#include <string_view>
-#include <vector>
 
 #include "asset/asset_database.h"
+#include "base/containers/vector.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/types.h"
 #include "ecs/world.h"
 #include "render/core/renderer.h"
@@ -30,7 +30,7 @@ namespace rx {
 // every other kind lacks is SceneStretch, which is its own component so that it
 // composes with a prefab's Shape instead of replacing it.
 struct SceneShape {
-  std::string kind = "box";
+  base::String kind = "box";
   f32 size[3] = {0.5f, 0.5f, 0.5f};
 };
 
@@ -82,7 +82,7 @@ struct SceneSurface {
   // A MaterialX document to take the whole material from instead of the fields
   // above. Relative to the working directory; a document that will not load
   // fails the scene load rather than falling back to the authored values.
-  std::string materialx;
+  base::String materialx;
   // Image maps, each a path RELATIVE TO THE WORKING DIRECTORY (like materialx
   // and Model.path: a scene points at external art rather than owning it).
   // They LAYER ON the constants above, exactly as the glTF equivalent does:
@@ -94,21 +94,21 @@ struct SceneSurface {
   // no default texture, because a substituted checkerboard is a render that
   // looks authored and is not. Refused together with a Pattern on one entity
   // (BuildSceneShapes): both bind the same three material slots.
-  std::string base_color_map;
+  base::String base_color_map;
   // Tangent space, OpenGL green-up (+y is +v), which is the convention the
   // engine's shaders and its own generated normal maps use. A DirectX-style map
   // (ambientCG ships both, _NormalDX and _NormalGL) lights inverted along v and
   // nothing here can tell the two apart, so pick the GL one.
-  std::string normal_map;
+  base::String normal_map;
   // Greyscale. Roughness and metallic are separate maps rather than one packed
   // ORM because that is how a CC0 texture set ships them; a scene wanting glTF
   // packing has the file's own material through Model.
-  std::string roughness_map;
-  std::string metallic_map;
+  base::String roughness_map;
+  base::String metallic_map;
   // Greyscale ambient occlusion, multiplying the INDIRECT light only. Direct
   // sun is unaffected, which is what keeps it from reading as painted-on dirt.
-  std::string occlusion_map;
-  std::string emissive_map;
+  base::String occlusion_map;
+  base::String emissive_map;
 };
 
 // A procedural texture bound to the entity's SceneSurface, generated at load.
@@ -116,7 +116,7 @@ struct SceneSurface {
 // roughness maps, so a surface's relief always describes the same bricks its
 // albedo does. Without one the surface is a flat colour.
 struct ScenePattern {
-  std::string kind = "checker";
+  base::String kind = "checker";
   // Cells across the shape's uv square, per axis: [0] along u, [1] along v.
   // Every primitive's uv covers 0..1 once, so this is the only thing that
   // decides how often the pattern repeats.
@@ -160,7 +160,7 @@ struct ScenePattern {
 // covered: skinning and animation (bind pose at the origin) and the file's own
 // lights and cameras, which lose to the scene's.
 struct SceneModel {
-  std::string path;
+  base::String path;
 };
 
 // Another .rxscene instanced here: the only reuse mechanism. `path` resolves
@@ -177,7 +177,7 @@ struct SceneModel {
 // this Prefab line instead of the expansion (same treatment as a glTF's
 // instances).
 struct ScenePrefab {
-  std::string path;
+  base::String path;
 };
 
 // Orientation in degrees, because a quaternion is not something an author
@@ -243,8 +243,8 @@ struct SceneStretch {
 // Anchors resolve in dependency order, so anchoring to something itself
 // anchored works; a cycle fails the load naming the loop.
 struct SceneAnchor {
-  std::string target;
-  std::string mode = "on";
+  base::String target;
+  base::String mode = "on";
   f32 offset[3] = {0, 0, 0};
 };
 
@@ -260,8 +260,8 @@ struct SceneAnchor {
 // Members are laid out before prefabs expand, so expanded entities cannot be
 // members: a grid lays out what the file declares.
 struct SceneGrid {
-  std::string of;
-  std::string cell;
+  base::String of;
+  base::String cell;
   // Cells along x, y and z. Fractional values truncate; the format has no
   // integer vector.
   f32 count[3] = {1, 1, 1};
@@ -339,7 +339,7 @@ void RegisterSceneComponents();
 // a capsule of half height 0 is a legal sphere, so only its radius is required.
 // BuildSceneShapes and --validate both go through here, so neither can accept a
 // kind, or condemn a size, the other would not.
-u32 ShapeRequiredSizeAxes(std::string_view kind);
+u32 ShapeRequiredSizeAxes(base::StringRef kind);
 
 // Parents every SceneGrid member to the container it names, at the cell its
 // declaration order earns it, and hands it the container's `cell` prefab when
@@ -351,7 +351,7 @@ u32 ShapeRequiredSizeAxes(std::string_view kind);
 // non-positive cell count, a member that is its own container, and a grid asked
 // to hold more members than it has cells - the last of which would otherwise
 // stack two cells on one coordinate, which reads as a missing object.
-bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::string* error);
+bool BuildSceneGrids(ecs::World& world, const base::String& scene_path, base::String* error);
 
 // Expands every ScenePrefab entity: merges the prefab root's components into it
 // and adds one scene::Transient child per further entity of the prefab file
@@ -362,7 +362,7 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
 //
 // False + *error on a prefab that does not load and on a prefab that reaches
 // itself, which would otherwise expand until memory ran out.
-bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::string* error);
+bool BuildScenePrefabs(ecs::World& world, const base::String& scene_path, base::String* error);
 
 // Resolves every SceneRotation into its entity's Transform.rotation, adding a
 // Transform to an entity that has none. Runs after BuildScenePrefabs, so a
@@ -382,7 +382,7 @@ void BuildSceneRotations(ecs::World& world);
 // agree on (two entities of that Name), a target with no geometry to measure,
 // an unknown mode, and a cycle - each of which would otherwise leave an object
 // at the origin, which reads as a scene that failed to place it.
-bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::string* error);
+bool BuildSceneAnchors(ecs::World& world, const base::String& scene_path, base::String* error);
 
 // Builds one mesh + material per SceneShape entity, uploads them (`renderer`
 // null skips the GPU side) and points each entity's Renderable at the result.
@@ -401,19 +401,19 @@ bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::st
 // Also on a Surface texture map that names no image, and on an entity carrying
 // both a Pattern and a Surface texture map (see SceneSurface).
 bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
-                      const std::string& scene_path, std::string* error);
+                      const base::String& scene_path, base::String* error);
 
 // Why a Surface texture-map path names no image that can be bound, or empty
 // when it does. Only the header is read, so this costs no decode; the point is
 // that BuildSceneShapes and --validate go through one function, and neither can
 // accept a map the other would reject. Same role SceneModelProblem plays for
 // Model.path.
-std::string SceneSurfaceMapProblem(const std::string& path);
+base::String SceneSurfaceMapProblem(const base::String& path);
 
 // One Surface prop that names an image, and what this surface writes in it.
 struct SceneSurfaceMapRef {
   const char* prop;         // "base_color_map", "normal_map", ...
-  const std::string* path;  // the authored value, empty when the prop is unset
+  const base::String* path;  // the authored value, empty when the prop is unset
 };
 
 // Every texture-map prop of `surface`, set or not, in declaration order. One
@@ -421,14 +421,14 @@ struct SceneSurfaceMapRef {
 // disagree about which props are maps: a map added to SceneSurface and not to
 // the table behind this drops out of ShapeKey, and two surfaces differing only
 // in it then collide onto one material.
-std::vector<SceneSurfaceMapRef> SceneSurfaceMaps(const SceneSurface& surface);
+base::Vector<SceneSurfaceMapRef> SceneSurfaceMaps(const SceneSurface& surface);
 
 // Why a Model.path names no geometry that can be placed, or empty when it does:
 // the clause a caller puts behind a `path:line:`. Imports the file to answer,
 // because nothing short of that can tell a real file from a plausible name, or
 // know how many meshes are in it. BuildSceneModels and --validate both go
 // through here, so neither can accept a reference the other would reject.
-std::string SceneModelProblem(const std::string& path);
+base::String SceneModelProblem(const base::String& path);
 
 // Imports every Model entity's file (once per file, however many entities name
 // it), publishes its meshes, materials and textures into `db` and onto the gpu
@@ -438,7 +438,7 @@ std::string SceneModelProblem(const std::string& path);
 // it. False + *error on a reference that resolves to nothing, which would
 // otherwise leave a hole exactly where the author asked for a model.
 bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
-                      const std::string& scene_path, std::string* error);
+                      const base::String& scene_path, base::String* error);
 
 // Writes the first SceneSun and SceneAtmosphere the scene declares into
 // `settings`, and returns whether a Sun was among them - which the caller has

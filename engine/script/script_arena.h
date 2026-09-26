@@ -1,7 +1,7 @@
 #ifndef RX_SCRIPT_SCRIPT_ARENA_H_
 #define RX_SCRIPT_SCRIPT_ARENA_H_
 
-#include <cstddef>
+#include <stddef.h>
 
 #include "core/export.h"
 #include "core/types.h"
@@ -28,10 +28,10 @@ class ScriptArena {
   ScriptArena& operator=(const ScriptArena&) = delete;
 
   // Bump-allocate `bytes` with a nonzero power-of-two `align` no greater than
-  // max_align_t. Never returns null; rejects invalid/overflowing requests with
-  // std::bad_array_new_length and propagates std::bad_alloc from the backing new.
+  // max_align_t. Never returns null; an invalid or overflowing request is a
+  // programmer error and ends the process (BASE_FATAL_CHECK).
   // Lifetime: until the next Reset().
-  RX_SCRIPT_EXPORT void* Alloc(size_t bytes, size_t align = alignof(std::max_align_t));
+  RX_SCRIPT_EXPORT void* Alloc(size_t bytes, size_t align = alignof(max_align_t));
 
   // Reclaim everything at once. Blocks are retained for reuse, not freed.
   RX_SCRIPT_EXPORT void Reset();

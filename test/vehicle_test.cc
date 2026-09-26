@@ -4,11 +4,12 @@
 // aquaplaning. Each scenario builds its own flat height-field world so the
 // tagged ground surface is fixed for the run.
 
-#include <cmath>
-#include <cstdio>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
 
+#include "base/containers/vector.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "physics/physics_world.h"
 
 using namespace rx;
@@ -21,7 +22,7 @@ namespace {
 constexpr f32 kDt = 1.0f / 60.0f;
 
 int Fail(const char* what) {
-  std::fprintf(stderr, "vehicle_test FAIL: %s\n", what);
+  ::fprintf(stderr, "vehicle_test FAIL: %s\n", what);
   return 1;
 }
 
@@ -29,7 +30,7 @@ int Fail(const char* what) {
 physics::BodyId AddFlatGround(PhysicsWorld& world, SurfaceType surface) {
   constexpr u32 kSamples = 64;
   constexpr f32 kSize = 1024.0f;
-  std::vector<f32> heights(static_cast<size_t>(kSamples) * kSamples, 0.0f);
+  base::Vector<f32> heights(static_cast<size_t>(kSamples) * kSamples, 0.0f);
   return world.AddHeightField(Vec3{-kSize * 0.5f, 0.0f, -kSize * 0.5f}, heights.data(), kSamples,
                               kSize, surface);
 }
@@ -60,7 +61,7 @@ VehicleId SpawnSettledCar(PhysicsWorld& world, const PhysicsWorld::VehicleDesc& 
 f32 HorizontalDistance(const Vec3& a, const Vec3& b) {
   const f32 dx = a.x - b.x;
   const f32 dz = a.z - b.z;
-  return std::sqrt(dx * dx + dz * dz);
+  return ::sqrt(dx * dx + dz * dz);
 }
 
 // Full-throttle until the car reaches `target` m/s or `max_steps` elapse.
@@ -85,7 +86,7 @@ f32 BrakeToStop(PhysicsWorld& world, VehicleId id, int max_steps) {
     world.DriveVehicle(id, 0.0f, 0.0f, 1.0f, 0.0f);
     world.Update(kDt);
     world.GetVehicleTransform(id, &last, rot);
-    if (std::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
+    if (::fabs(world.VehicleForwardSpeed(id)) < 0.5f) break;
   }
   return HorizontalDistance(start, last);
 }
@@ -108,7 +109,7 @@ f32 StoppingDistance(SurfaceType surface, f32 wetness) {
 int main() {
   PhysicsWorld probe;
   if (!probe.Initialize()) {
-    std::fprintf(stderr, "vehicle_test: physics unavailable, skipping\n");
+    ::fprintf(stderr, "vehicle_test: physics unavailable, skipping\n");
     return 0;
   }
 
@@ -125,10 +126,10 @@ int main() {
       world.Update(kDt);
       PhysicsWorld::VehicleState st;
       world.GetVehicleState(car, &st);
-      max_gear = std::max(max_gear, st.gear);
-      max_speed = std::max(max_speed, world.VehicleForwardSpeed(car));
+      max_gear = rx::Max(max_gear, st.gear);
+      max_speed = rx::Max(max_speed, world.VehicleForwardSpeed(car));
     }
-    std::fprintf(stderr, "(a) max_speed=%.2f m/s max_gear=%d\n", max_speed, max_gear);
+    ::fprintf(stderr, "(a) max_speed=%.2f m/s max_gear=%d\n", max_speed, max_gear);
     if (max_speed < 10.0f) return Fail("(a) car did not accelerate");
     if (max_gear < 2) return Fail("(a) automatic box did not shift past 1st");
   }
@@ -137,7 +138,7 @@ int main() {
   {
     const f32 asphalt = StoppingDistance(SurfaceType::kAsphalt, 0.0f);
     const f32 ice = StoppingDistance(SurfaceType::kIce, 0.0f);
-    std::fprintf(stderr, "(b) asphalt stop=%.2f m, ice stop=%.2f m\n", asphalt, ice);
+    ::fprintf(stderr, "(b) asphalt stop=%.2f m, ice stop=%.2f m\n", asphalt, ice);
     if (asphalt <= 0 || ice <= 0) return Fail("(b) stopping distance measurement failed");
     if (ice < asphalt * 2.0f) return Fail("(b) ice braking not much longer than asphalt");
   }
@@ -146,7 +147,7 @@ int main() {
   {
     const f32 dry = StoppingDistance(SurfaceType::kAsphalt, 0.0f);
     const f32 wet = StoppingDistance(SurfaceType::kAsphalt, 1.0f);
-    std::fprintf(stderr, "(c) dry stop=%.2f m, wet stop=%.2f m (x%.2f)\n", dry, wet, wet / dry);
+    ::fprintf(stderr, "(c) dry stop=%.2f m, wet stop=%.2f m (x%.2f)\n", dry, wet, wet / dry);
     if (dry <= 0 || wet <= 0) return Fail("(c) stopping distance measurement failed");
     // Grip-limited (see DefaultCar): soaked asphalt is ~0.7 of dry grip, so the
     // stop is ~1.4x longer. Assert a ratio with slack that still proves the loss.
@@ -171,10 +172,10 @@ int main() {
       PhysicsWorld::VehicleState st;
       world.GetVehicleState(car, &st);
       gear_before_shift = st.gear;
-      peak_rpm = std::max(peak_rpm, st.rpm);
+      peak_rpm = rx::Max(peak_rpm, st.rpm);
       if (st.gear != 1) break;
     }
-    std::fprintf(stderr, "(d) held gear=%d at peak_rpm=%.0f\n", gear_before_shift, peak_rpm);
+    ::fprintf(stderr, "(d) held gear=%d at peak_rpm=%.0f\n", gear_before_shift, peak_rpm);
     if (gear_before_shift != 1) return Fail("(d) manual mode did not hold 1st gear");
     // A single shift_up edge advances one gear.
     PhysicsWorld::VehicleInput up = in;
@@ -183,7 +184,7 @@ int main() {
     world.Update(kDt);
     PhysicsWorld::VehicleState st;
     world.GetVehicleState(car, &st);
-    std::fprintf(stderr, "(d) gear after shift_up=%d\n", st.gear);
+    ::fprintf(stderr, "(d) gear after shift_up=%d\n", st.gear);
     if (st.gear != 2) return Fail("(d) shift_up did not advance a gear");
   }
 
@@ -212,7 +213,7 @@ int main() {
         }
       }
     }
-    std::fprintf(stderr, "(e) telemetry ranges OK\n");
+    ::fprintf(stderr, "(e) telemetry ranges OK\n");
   }
 
   // (f) Aquaplaning: a fast car over a water plane loses lateral grip vs dry.
@@ -242,13 +243,13 @@ int main() {
         world.Update(kDt);
         Vec3 pos;
         world.GetVehicleTransform(car, &pos, rot);
-        peak = std::max(peak, std::fabs(pos.x - start.x));
+        peak = rx::Max(peak, ::fabs(pos.x - start.x));
       }
       return peak;
     };
     const f32 dry = lateral_offset(false);
     const f32 wet = lateral_offset(true);
-    std::fprintf(stderr, "(f) dry lateral offset=%.2f m, aquaplane offset=%.2f m\n", dry, wet);
+    ::fprintf(stderr, "(f) dry lateral offset=%.2f m, aquaplane offset=%.2f m\n", dry, wet);
     if (dry <= wet * 1.3f) return Fail("(f) aquaplaning did not reduce cornering grip");
   }
 
@@ -273,13 +274,13 @@ int main() {
       for (int i = 0; i < 60 * 25; ++i) {  // 25 s of full throttle down a straight
         world.DriveVehicle(car, 1.0f, 0.0f, 0.0f, 0.0f);
         world.Update(kDt);
-        peak = std::max(peak, world.VehicleForwardSpeed(car));
+        peak = rx::Max(peak, world.VehicleForwardSpeed(car));
       }
       return peak;
     };
     const f32 dry = top_speed(false);
     const f32 wet = top_speed(true);
-    std::fprintf(stderr, "(g) top speed: dry=%.2f m/s standing-water=%.2f m/s (x%.2f)\n", dry, wet,
+    ::fprintf(stderr, "(g) top speed: dry=%.2f m/s standing-water=%.2f m/s (x%.2f)\n", dry, wet,
                  wet / dry);
     if (dry <= 0) return Fail("(g) dry top-speed measurement failed");
     if (wet >= dry * 0.9f) return Fail("(g) standing water did not drag top speed down");
@@ -303,9 +304,9 @@ int main() {
       world.Update(kDt);
     }
     const f32 self_driven = world.VehicleForwardSpeed(trailer);
-    std::fprintf(stderr, "(h) free-rolling self-driven speed after 3 s throttle=%.3f m/s\n",
+    ::fprintf(stderr, "(h) free-rolling self-driven speed after 3 s throttle=%.3f m/s\n",
                  self_driven);
-    if (std::fabs(self_driven) > 1.0f) return Fail("(h) free-rolling vehicle drove itself");
+    if (::fabs(self_driven) > 1.0f) return Fail("(h) free-rolling vehicle drove itself");
 
     // (3) Tow it: a steady forward (+Z) force on the chassis body makes it roll.
     const physics::BodyId body = world.GetVehicleBody(trailer);
@@ -319,14 +320,14 @@ int main() {
       world.Update(kDt);
     }
     const f32 towed = world.VehicleForwardSpeed(trailer);
-    std::fprintf(stderr, "(h) free-rolling towed speed after 4 s=%.3f m/s\n", towed);
+    ::fprintf(stderr, "(h) free-rolling towed speed after 4 s=%.3f m/s\n", towed);
     if (towed < 2.0f) return Fail("(h) free-rolling vehicle did not roll forward when towed");
 
     // (4) Steering still works: hold a tow force and full lock, heading changes.
     Vec3 p0{};
     f32 r0[4];
     world.GetVehicleTransform(trailer, &p0, r0);
-    const f32 start_heading = std::atan2(Rotate(Quat{r0[0], r0[1], r0[2], r0[3]}, Vec3{0, 0, 1}).x,
+    const f32 start_heading = ::atan2(Rotate(Quat{r0[0], r0[1], r0[2], r0[3]}, Vec3{0, 0, 1}).x,
                                          Rotate(Quat{r0[0], r0[1], r0[2], r0[3]}, Vec3{0, 0, 1}).z);
     for (int i = 0; i < 60 * 3; ++i) {
       Vec3 pos{};
@@ -340,13 +341,13 @@ int main() {
     f32 r1[4];
     world.GetVehicleTransform(trailer, &p1, r1);
     const Vec3 fdir = Rotate(Quat{r1[0], r1[1], r1[2], r1[3]}, Vec3{0, 0, 1});
-    const f32 end_heading = std::atan2(fdir.x, fdir.z);
+    const f32 end_heading = ::atan2(fdir.x, fdir.z);
     f32 dh = end_heading - start_heading;
     while (dh > 3.14159265f) dh -= 6.2831853f;
     while (dh < -3.14159265f) dh += 6.2831853f;
-    std::fprintf(stderr, "(h) free-rolling heading change while steering=%.1f deg\n",
+    ::fprintf(stderr, "(h) free-rolling heading change while steering=%.1f deg\n",
                  dh * 57.2958f);
-    if (std::fabs(dh) < 0.05f) return Fail("(h) free-rolling front axle did not steer");
+    if (::fabs(dh) < 0.05f) return Fail("(h) free-rolling front axle did not steer");
   }
 
   // (i) Manual transmission routes through traction control: on ice, TC-on holds
@@ -369,12 +370,12 @@ int main() {
         world.Update(kDt);
         // Only sample once rolling: TC (like a real system) is disengaged at
         // launch, where the slip-ratio denominator makes the reading meaningless.
-        if (std::fabs(world.VehicleForwardSpeed(car)) < 5.0f) continue;
+        if (::fabs(world.VehicleForwardSpeed(car)) < 5.0f) continue;
         PhysicsWorld::VehicleState st;
         if (!world.GetVehicleState(car, &st)) continue;
         f32 peak = 0;
         for (u32 w = 0; w < st.wheel_count; ++w)
-          peak = std::max(peak, std::fabs(st.wheels[w].longitudinal_slip));
+          peak = rx::Max(peak, ::fabs(st.wheels[w].longitudinal_slip));
         slip_sum += peak;
         ++slip_n;
       }
@@ -382,7 +383,7 @@ int main() {
     };
     const f32 tc_off = mean_slip_on_ice(false);
     const f32 tc_on = mean_slip_on_ice(true);
-    std::fprintf(stderr, "(i) manual ice mean driven slip: TC-off=%.3f TC-on=%.3f\n", tc_off,
+    ::fprintf(stderr, "(i) manual ice mean driven slip: TC-off=%.3f TC-on=%.3f\n", tc_off,
                  tc_on);
     if (tc_off <= 0.0f) return Fail("(i) manual ice run never got rolling to measure slip");
     if (tc_on >= tc_off * 0.9f) return Fail("(i) manual mode did not apply traction control");
@@ -405,7 +406,7 @@ int main() {
     }
     PhysicsWorld::VehicleState dis;
     if (!world.GetVehicleState(car, &dis)) return Fail("(j) telemetry read failed");
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(j) clutch held: engine_torque=%.1f Nm rpm=%.0f is_shifting=%d load=%.3f\n",
                  dis.engine_torque, dis.rpm, dis.is_shifting ? 1 : 0, dis.engine_load);
     if (dis.engine_torque > 1.0f) return Fail("(j) disengaged clutch still delivers wheel torque");
@@ -419,10 +420,10 @@ int main() {
     }
     PhysicsWorld::VehicleState eng;
     world.GetVehicleState(car, &eng);
-    std::fprintf(stderr, "(j) clutch engaged: engine_torque=%.1f Nm\n", eng.engine_torque);
+    ::fprintf(stderr, "(j) clutch engaged: engine_torque=%.1f Nm\n", eng.engine_torque);
     if (eng.engine_torque <= 1.0f) return Fail("(j) engaged clutch delivered no torque");
   }
 
-  std::fprintf(stderr, "vehicle_test: all checks passed\n");
+  ::fprintf(stderr, "vehicle_test: all checks passed\n");
   return 0;
 }

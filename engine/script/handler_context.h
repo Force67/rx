@@ -1,7 +1,7 @@
 #ifndef RX_SCRIPT_HANDLER_CONTEXT_H_
 #define RX_SCRIPT_HANDLER_CONTEXT_H_
 
-#include <cassert>
+#include <assert.h>
 
 #include "script/script_arena.h"
 #include "script/script_string.h"
@@ -34,7 +34,7 @@ struct HandlerContext {
   // mid-call) or a returned ScriptStringView dangles.
   ScriptArena* scratch = nullptr;
 
-  // A portable log sink (function pointer + user data, no std::function) so the
+  // A portable log sink (function pointer + user data, no base::Function) so the
   // context stays a plain struct any runtime can populate.
   void (*log_sink)(void* user, ScriptStringView msg) = nullptr;
   void* log_user = nullptr;

@@ -1,15 +1,7 @@
 #ifndef RX_EDITOR_APP_H_
 #define RX_EDITOR_APP_H_
 
-#include <cstdint>
-#include <map>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
+#include <stdint.h>
 
 #include "anim/body_dynamics.h"
 #include "anim/locomotion.h"
@@ -20,6 +12,14 @@
 #include "core/input.h"
 #include "core/math.h"
 
+#include "base/containers/map.h"
+#include "base/containers/pair.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/containers/unordered_map.h"
+#include "base/strings/xstring.h"
 #include "edit/hierarchy.h"
 #include "edit/reflect.h"
 #include "world/world_bake.h"
@@ -49,16 +49,16 @@ enum class WalkPreviewMode { kAuto, kHipSway, kMarch };
 
 // A content-browser entry discovered by scanning the mounted asset dir.
 struct AssetEntry {
-  std::string path; // built-in URI or source filesystem path
-  std::string name; // basename
-  std::string kind; // mesh/terrain/texture/material/audio/scene/model
+  base::String path; // built-in URI or source filesystem path
+  base::String name; // basename
+  base::String kind; // mesh/terrain/texture/material/audio/scene/model
 };
 
 // A CPU copy of an uploaded mesh, kept for ray-vs-triangle picking (the
 // renderer does not read geometry back).
 struct MeshRecord {
   asset::Mesh mesh;
-  std::string name;
+  base::String name;
 };
 
 struct ImportedSkin {
@@ -87,9 +87,9 @@ struct ImportedInstance {
 };
 
 struct ImportedModel {
-  std::string source_path;
-  std::vector<ImportedSkin> skins;
-  std::vector<ImportedInstance> instances;
+  base::String source_path;
+  base::Vector<ImportedSkin> skins;
+  base::Vector<ImportedInstance> instances;
   ecs::Entity turntable_entity;
   Vec3 turntable_center;
   f32 preview_time = 0;
@@ -126,26 +126,30 @@ struct TerrainTileVisual {
   asset::AssetId mesh;
 };
 
+inline base::Pair<i32, i32> TerrainTileMapKey(terrain::TerrainTileKey key) {
+  return {key.x, key.z};
+}
+
 struct TerrainStroke {
   bool active = false;
   terrain::TerrainChange change;
   Vec3 last_dab{};
   f32 flatten_target = 0;
-  std::string label;
+  base::String label;
 };
 
 struct PlacementBrush {
   bool armed = false;
   bool dragging = false;
   asset::AssetId mesh;
-  std::string name;
+  base::String name;
   f32 spacing = 1.5f;
   Vec3 last_position{};
 };
 
 class Editor final : public app::Application {
 public:
-  explicit Editor(std::string open_path) : open_path_(std::move(open_path)) {}
+  explicit Editor(base::String open_path) : open_path_(base::move(open_path)) {}
 
   bool OnInitialize(app::Services &services) override;
   void OnUpdate(f32 dt) override;
@@ -156,12 +160,12 @@ public:
 private:
   // scene / assets (editor_app.cc)
   void SetupDefaultScene();
-  asset::AssetId UploadPrimitive(const std::string &name,
+  asset::AssetId UploadPrimitive(const base::String &name,
                                  const asset::Mesh &mesh);
-  ecs::Entity SpawnMesh(const std::string &mesh_name, asset::AssetId mesh,
-                        const Vec3 &pos, const std::string &label);
+  ecs::Entity SpawnMesh(const base::String &mesh_name, asset::AssetId mesh,
+                        const Vec3 &pos, const base::String &label);
   void ScanAssets();
-  bool LoadModelDocument(const std::string &path);
+  bool LoadModelDocument(const base::String &path);
   void UpdateImportedModels(f32 dt);
   u32 ConfigureImportedBody(ImportedSkin *skin);
 
@@ -185,35 +189,35 @@ private:
   void SetupDefaultTerrain();
   void ClearTerrainVisuals();
   void RebuildTerrainVisuals();
-  void RebuildTerrainTiles(std::span<const terrain::TerrainTileKey> keys,
+  void RebuildTerrainTiles(base::Span<const terrain::TerrainTileKey> keys,
                            bool live);
   ecs::Entity SpawnTerrainTile(terrain::TerrainTileKey key,
                                asset::AssetId mesh);
   bool IsTerrainVisual(ecs::Entity entity) const;
-  std::pair<Vec3, Vec3> ViewportCameraRay(f32 mx, f32 my) const;
+  base::Pair<Vec3, Vec3> ViewportCameraRay(f32 mx, f32 my) const;
   void UpdateModeInteraction(bool lmb_down, bool lmb_edge);
   void FinishTerrainStroke();
   void FinishPlacementDrag();
   void SetEditorMode(EditorMode mode);
-  void AppendInteractionPreview(std::vector<render::DebugLine> *lines) const;
-  void LoadTerrainAsset(const std::string &path);
+  void AppendInteractionPreview(base::Vector<render::DebugLine> *lines) const;
+  void LoadTerrainAsset(const base::String &path);
   void ArmPlacement(const AssetEntry &asset);
   asset::AssetId ResolvePlacementMesh(const AssetEntry &asset);
   void RecordTerrainChange(terrain::TerrainChange change,
-                           const std::string &label);
-  void OnTerrainCommandReplayed(std::span<const terrain::TerrainTileKey> keys);
-  void SyncTerrainRayTracing(std::span<const terrain::TerrainTileKey> keys);
+                           const base::String &label);
+  void OnTerrainCommandReplayed(base::Span<const terrain::TerrainTileKey> keys);
+  void SyncTerrainRayTracing(base::Span<const terrain::TerrainTileKey> keys);
 
   // file ops (editor_app.cc)
   void NewScene();
-  void DoSave(const std::string &path);
+  void DoSave(const base::String &path);
   // Bake World: save first, then cook what was saved into <scene>.rxp. The cook
   // reads the file rather than this live world - the editor's world holds
   // transients the author never wrote (terrain tile visuals, preview models),
   // and edit::SaveScene already knows which of those to leave out.
   void DoBakeWorld();
-  void DoLoad(const std::string &path);
-  void OpenDocument(const std::string &path);
+  void DoLoad(const base::String &path);
+  void OpenDocument(const base::String &path);
   void OpenFileDialog();
   void RunAutopilot(); // RX_EDITOR_AUTOPILOT smoke driver
 
@@ -223,26 +227,26 @@ private:
   void UiFeedInput(f32 dt);
   void UiPerFrameText();
   void UiRebuild();
-  std::string UiBuildDoc();
-  std::string BuildHierarchy();
-  std::string BuildInspector();
-  std::string BuildContent();
-  std::string BuildDialog();
-  std::string BuildModeToolbar();
-  std::string BuildInspectorTabs();
-  std::string BuildTerrainInspector();
-  std::string BuildPlacementInspector();
+  base::String UiBuildDoc();
+  base::String BuildHierarchy();
+  base::String BuildInspector();
+  base::String BuildContent();
+  base::String BuildDialog();
+  base::String BuildModeToolbar();
+  base::String BuildInspectorTabs();
+  base::String BuildTerrainInspector();
+  base::String BuildPlacementInspector();
   void UiHotReloadCheck(f32 dt);
   void UpdateGizmoWidgets();
   void OnUiClick(ugui::wid w, ugui::MouseButton btn);
-  void OnUiTextSubmit(const std::string &widget, const std::string &value);
-  bool RouteClick(const std::string &name, ugui::MouseButton btn);
+  void OnUiTextSubmit(const base::String &widget, const base::String &value);
+  bool RouteClick(const base::String &name, ugui::MouseButton btn);
   void MarkDirty() { ui_dirty_ = true; }
   void SetDocDirty(bool d) { doc_dirty_ = d; }
 
   // helpers
   const MeshRecord *FindMesh(u64 hash) const;
-  std::string EntityLabel(ecs::Entity e) const;
+  base::String EntityLabel(ecs::Entity e) const;
 
   app::Services *services_ = nullptr;
   app::Host *host_ = nullptr;
@@ -254,51 +258,53 @@ private:
   asset::Vfs *vfs_ = nullptr;
   bool headless_ = false;
 
-  std::string open_path_; // scene/gltf passed on argv
+  base::String open_path_; // scene/gltf passed on argv
 
   // editor state
   FlyCamera camera_;
   edit::Selection selection_;
   edit::UndoStack undo_;
-  std::optional<asset::AssetDatabase> assets_; // constructed once vfs is known
+  base::Optional<asset::AssetDatabase> assets_; // constructed once vfs is known
   GizmoMode gizmo_mode_ = GizmoMode::kTranslate;
   EditorMode editor_mode_ = EditorMode::kSelect;
   Scrub scrub_;
   GizmoDrag gizmo_drag_;
 
-  std::string scene_path_ = "untitled.rxscene";
+  base::String scene_path_ = "untitled.rxscene";
   // Held once, so the Bake World action and the inspector's per-entity verdict
   // cannot disagree about the partition. The cell size in particular is not
   // scene data, and a label computed against a different one than the archive
   // was cooked with would be quietly wrong.
   world::WorldBakeOptions world_bake_options_;
-  std::string terrain_path_ = "untitled.rxterrain";
-  std::string asset_root_ = "assets";
+  base::String terrain_path_ = "untitled.rxterrain";
+  base::String asset_root_ = "assets";
   bool doc_dirty_ = false; // scene has unsaved changes
   bool terrain_dirty_ = false;
   bool terrain_command_replayed_ = false;
-  std::string status_message_;
+  base::String status_message_;
   bool playing_ = false;
   WalkPreviewMode walk_preview_mode_ = WalkPreviewMode::kAuto;
   bool material_tab_ = false;
   bool add_menu_open_ = false;
   bool dialog_open_ = false;
-  std::vector<std::string> dialog_files_;
+  base::Vector<base::String> dialog_files_;
 
-  std::string search_filter_;
-  std::string content_filter_;
+  base::String search_filter_;
+  base::String content_filter_;
 
-  std::unordered_map<uint64_t, MeshRecord> meshes_;
+  base::UnorderedMap<u64, MeshRecord> meshes_;
   asset::AssetId cube_mesh_, sphere_mesh_, plane_mesh_, terrain_material_;
-  std::vector<AssetEntry> assets_list_;
-  std::unordered_map<std::string, asset::AssetId> placement_meshes_;
-  std::vector<ImportedModel> imported_models_;
+  base::Vector<AssetEntry> assets_list_;
+  base::UnorderedMap<base::String, asset::AssetId> placement_meshes_;
+  base::Vector<ImportedModel> imported_models_;
   // Full entity handle -> (model index, instance index). Including the
   // generation prevents a reused ECS slot from inheriting stale skin state.
-  std::unordered_map<u64, std::pair<u32, u32>> imported_entities_;
+  base::UnorderedMap<u64, base::Pair<u32, u32>> imported_entities_;
 
   terrain::Terrain terrain_;
-  std::map<terrain::TerrainTileKey, TerrainTileVisual> terrain_tiles_;
+  // Ordered by (x, z): save respawns tiles in key order, which fixes their
+  // entity ids. Keyed by a Pair because TerrainTileKey has no ordering.
+  base::Map<base::Pair<i32, i32>, TerrainTileVisual> terrain_tiles_;
   terrain::TerrainBrushMode terrain_brush_mode_ =
       terrain::TerrainBrushMode::kRaise;
   f32 terrain_brush_radius_ = 2.0f;
@@ -307,25 +313,25 @@ private:
   u32 terrain_brush_layer_ = 0;
   TerrainStroke terrain_stroke_;
   PlacementBrush placement_;
-  std::optional<terrain::TerrainRayHit> terrain_cursor_hit_;
-  std::optional<Vec3> placement_preview_;
+  base::Optional<terrain::TerrainRayHit> terrain_cursor_hit_;
+  base::Optional<Vec3> placement_preview_;
 
   // per-entity tint override (0 = none), for material-tint editing.
-  std::unordered_map<uint64_t, uint32_t> tints_;
+  base::UnorderedMap<u64, u32> tints_;
 
   // Display names live in scene::Name components (the ECS column-relocation
-  // bug that corrupted std::string components is fixed on feature/editor-core).
-  void SetName(ecs::Entity e, const std::string &name);
-  std::string GetName(ecs::Entity e) const;
+  // bug that corrupted base::String components is fixed on feature/editor-core).
+  void SetName(ecs::Entity e, const base::String &name);
+  base::String GetName(ecs::Entity e) const;
 
   // Engine GPU picking: pick_id -> entity map rebuilt each gather, plus the
   // in-flight request (results arrive 1-2 frames later).
-  std::unordered_map<u32, ecs::Entity> pick_map_;
+  base::UnorderedMap<u32, ecs::Entity> pick_map_;
   bool pick_pending_ = false;
 
   // Debug-line storage for the frame (FrameView holds spans into these).
-  std::vector<render::DebugLine> grid_lines_;
-  std::vector<render::DebugLine> gizmo_lines_;
+  base::Vector<render::DebugLine> grid_lines_;
+  base::Vector<render::DebugLine> gizmo_lines_;
 
   // input edge tracking
   bool prev_lmb_ = false, prev_rmb_ = false;
@@ -342,7 +348,7 @@ private:
   const ugui::DrawData *draw_data_ = nullptr;
   bool ui_ready_ = false;
   bool ui_dirty_ = true; // widget tree needs a rebuild
-  std::string ui_dir_;
+  base::String ui_dir_;
   int64_t ui_mtime_ = 0;
   f32 reload_timer_ = 0;
 };

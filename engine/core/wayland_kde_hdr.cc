@@ -3,10 +3,13 @@
 #include <poll.h>
 #include <string.h>
 
-#include <vector>
 
 #include <wayland-client.h>
 
+#include "base/algorithm.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 #include "core/types.h"
 #include "kde-output-device-v2-client-protocol.h"
@@ -86,18 +89,18 @@ struct KdeOutputHdrMonitor::Impl {
   wl_display* display = nullptr;
   wl_registry* registry = nullptr;
   // unique_ptr so the listener user-data pointer stays stable across growth.
-  std::vector<std::unique_ptr<Device>> devices;
+  base::Vector<base::UniquePointer<Device>> devices;
 
   static void RegistryGlobal(void* data, wl_registry* registry, u32 id, const char* interface,
                              u32 version) {
     Impl* impl = static_cast<Impl*>(data);
     if (strcmp(interface, kde_output_device_v2_interface.name) != 0) return;
-    auto device = std::make_unique<Device>();
+    auto device = base::MakeUnique<Device>();
     u32 bind_version = version < 23u ? version : 23u;  // what the vendored glue supports
     device->proxy = static_cast<kde_output_device_v2*>(
         wl_registry_bind(registry, id, &kde_output_device_v2_interface, bind_version));
-    kde_output_device_v2_add_listener(device->proxy, &kDeviceListener, device.get());
-    impl->devices.push_back(std::move(device));
+    kde_output_device_v2_add_listener(device->proxy, &kDeviceListener, device.Get_UseOnlyIfYouKnowWhatYouareDoing());
+    impl->devices.push_back(base::move(device));
   }
   static void RegistryGlobalRemove(void*, wl_registry*, u32) {}
 
@@ -110,13 +113,13 @@ struct KdeOutputHdrMonitor::Impl {
   }
 };
 
-std::unique_ptr<KdeOutputHdrMonitor> KdeOutputHdrMonitor::Create() {
+base::UniquePointer<KdeOutputHdrMonitor> KdeOutputHdrMonitor::Create() {
   wl_display* display = wl_display_connect(nullptr);
   if (!display) return nullptr;
 
-  auto monitor = std::unique_ptr<KdeOutputHdrMonitor>(new KdeOutputHdrMonitor());
-  monitor->impl_ = std::make_unique<Impl>();
-  Impl* impl = monitor->impl_.get();
+  auto monitor = base::UniquePointer<KdeOutputHdrMonitor>(new KdeOutputHdrMonitor());
+  monitor->impl_ = base::MakeUnique<Impl>();
+  Impl* impl = monitor->impl_.Get_UseOnlyIfYouKnowWhatYouareDoing();
   impl->display = display;
   impl->registry = wl_display_get_registry(display);
   static constexpr wl_registry_listener kRegistryListener = {Impl::RegistryGlobal,
@@ -133,7 +136,7 @@ std::unique_ptr<KdeOutputHdrMonitor> KdeOutputHdrMonitor::Create() {
 KdeOutputHdrMonitor::~KdeOutputHdrMonitor() = default;
 
 bool KdeOutputHdrMonitor::AnyHdrEnabled() {
-  Impl* impl = impl_.get();
+  Impl* impl = impl_.Get_UseOnlyIfYouKnowWhatYouareDoing();
   // Non-blocking pump: only read the socket when data is already waiting, so a
   // per-frame poll never stalls on the compositor.
   while (wl_display_prepare_read(impl->display) != 0) {
@@ -148,7 +151,7 @@ bool KdeOutputHdrMonitor::AnyHdrEnabled() {
   }
   wl_display_dispatch_pending(impl->display);
 
-  std::erase_if(impl->devices, [](const std::unique_ptr<Device>& device) {
+  base::EraseIf(impl->devices, [](const base::UniquePointer<Device>& device) {
     if (!device->removed) return false;
     kde_output_device_v2_destroy(device->proxy);
     return true;

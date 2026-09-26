@@ -1,9 +1,9 @@
 #ifndef RX_RENDER_LIGHTNING_ENVELOPE_H_
 #define RX_RENDER_LIGHTNING_ENVELOPE_H_
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
+#include "core/scalar.h"
 #include "core/types.h"
 
 namespace rx::render {
@@ -14,7 +14,7 @@ inline constexpr f32 kLightningStrikeDuration = 0.45f;
 // Kept header-only so gameplay/weather code can schedule matching flashes
 // without linking the GPU renderer implementation.
 inline f32 LightningEnvelope(f32 age, u32 seed) {
-  if (!std::isfinite(age) || age < 0.0f || age >= kLightningStrikeDuration)
+  if (!::isfinite(age) || age < 0.0f || age >= kLightningStrikeDuration)
     return 0.0f;
   auto pcg_hash = [](u32 v) {
     v = v * 747796405u + 2891336453u;
@@ -31,17 +31,17 @@ inline f32 LightningEnvelope(f32 age, u32 seed) {
   f32 hz = static_cast<f32>(c) * kInv;
   f32 hw = static_cast<f32>(d) * kInv;
 
-  f32 envelope = std::exp(-age * 26.0f);
+  f32 envelope = ::exp(-age * 26.0f);
   f32 t1 = 0.10f + 0.08f * hx;
   if (age > t1)
-    envelope += (0.5f + 0.4f * hy) * std::exp(-(age - t1) * 30.0f);
+    envelope += (0.5f + 0.4f * hy) * ::exp(-(age - t1) * 30.0f);
   if (hz > 0.35f) {
     f32 t2 = 0.22f + 0.10f * hw;
     if (age > t2)
-      envelope += (0.35f + 0.30f * hx) * std::exp(-(age - t2) * 30.0f);
+      envelope += (0.35f + 0.30f * hx) * ::exp(-(age - t2) * 30.0f);
   }
   return envelope *
-         std::clamp((kLightningStrikeDuration - age) * 20.0f, 0.0f, 1.0f);
+         rx::Clamp((kLightningStrikeDuration - age) * 20.0f, 0.0f, 1.0f);
 }
 
 } // namespace rx::render

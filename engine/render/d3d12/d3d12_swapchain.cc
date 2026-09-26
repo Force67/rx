@@ -12,13 +12,14 @@
 
 #include "render/d3d12/d3d12_backend.h"
 
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 
 namespace rx::render::d3d12 {
 
-std::unique_ptr<D3D12Swapchain> D3D12Swapchain::Create(D3D12Device& device, u32 width, u32 height,
+base::UniquePointer<D3D12Swapchain> D3D12Swapchain::Create(D3D12Device& device, u32 width, u32 height,
                                                        bool vsync) {
-  auto swapchain = std::unique_ptr<D3D12Swapchain>(new D3D12Swapchain(device));
+  auto swapchain = base::UniquePointer<D3D12Swapchain>(new D3D12Swapchain(device));
   if (!swapchain->Init(width, height, vsync)) return nullptr;
   return swapchain;
 }

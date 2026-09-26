@@ -2,6 +2,8 @@
 #define RX_RENDER2D_TYPES2D_H_
 
 #include "core/math.h"
+
+#include <math.h>
 #include "core/types.h"
 
 // Small value types shared across the 2D renderer. Kept header-only and free of
@@ -23,7 +25,7 @@ struct Vec2 {
 };
 
 inline f32 Dot(Vec2 a, Vec2 b) { return a.x * b.x + a.y * b.y; }
-inline f32 Length(Vec2 v) { return std::sqrt(Dot(v, v)); }
+inline f32 Length(Vec2 v) { return ::sqrt(Dot(v, v)); }
 inline Vec2 Lerp(Vec2 a, Vec2 b, f32 t) { return a + (b - a) * t; }
 inline Vec2 Normalize(Vec2 v) {
   f32 l = Length(v);

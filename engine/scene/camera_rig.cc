@@ -1,8 +1,9 @@
 #include "scene/camera_rig.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
+#include "core/scalar.h"
 #include "ecs/world.h"
 
 namespace rx::scene {
@@ -13,14 +14,14 @@ constexpr f32 kTwoPi = 2.0f * kPi;
 
 f32 BlendForHalfLife(f32 half_life, f32 dt) {
   if (half_life <= 0) return 1.0f;
-  return 1.0f - std::exp2(-dt / half_life);
+  return 1.0f - ::exp2(-dt / half_life);
 }
 
 f32 MoveAngle(f32 current, f32 target, f32 amount) {
-  return current + std::remainder(target - current, kTwoPi) * amount;
+  return current + ::remainder(target - current, kTwoPi) * amount;
 }
 
-f32 YawFromDirection(const Vec3& direction) { return std::atan2(direction.x, -direction.z); }
+f32 YawFromDirection(const Vec3& direction) { return ::atan2(direction.x, -direction.z); }
 
 Quat OrbitRotation(f32 yaw, f32 pitch) {
   return Normalize(QuatFromAxisAngle({0, -1, 0}, yaw) * QuatFromAxisAngle({1, 0, 0}, pitch));
@@ -34,9 +35,9 @@ Quat LookRotation(const Vec3& direction, const Vec3& up_reference, const Quat& f
   if (Length(right) <= 1e-5f) right = Cross(forward, Rotate(fallback, Vec3{0, 1, 0}));
   if (Length(right) <= 1e-5f) {
     const Vec3 axis =
-        std::abs(forward.x) <= std::abs(forward.y) && std::abs(forward.x) <= std::abs(forward.z)
+        ::abs(forward.x) <= ::abs(forward.y) && ::abs(forward.x) <= ::abs(forward.z)
             ? Vec3{1, 0, 0}
-            : (std::abs(forward.y) <= std::abs(forward.z) ? Vec3{0, 1, 0} : Vec3{0, 0, 1});
+            : (::abs(forward.y) <= ::abs(forward.z) ? Vec3{0, 1, 0} : Vec3{0, 0, 1});
     right = Cross(forward, axis);
   }
   right = Normalize(right);
@@ -84,7 +85,7 @@ void UpdateDeadZone(CameraFollowDeadZone& dead_zone, const Vec3& anchor) {
   }
 
   auto update_axis = [](f32 value, f32 extent, f32* center) {
-    extent = std::max(extent, 0.0f);
+    extent = rx::Max(extent, 0.0f);
     if (value < *center - extent) *center = value + extent;
     if (value > *center + extent) *center = value - extent;
   };
@@ -98,13 +99,13 @@ CameraLens DampLens(const CameraLens& current, const CameraLens& target, f32 amo
 
   CameraLens lens = target;
   if (target.projection == CameraProjection::kPerspective) {
-    const f32 current_scale = std::tan(current.fov_y * 0.5f);
-    const f32 target_scale = std::tan(target.fov_y * 0.5f);
-    lens.fov_y = 2.0f * std::atan(std::lerp(current_scale, target_scale, amount));
+    const f32 current_scale = ::tan(current.fov_y * 0.5f);
+    const f32 target_scale = ::tan(target.fov_y * 0.5f);
+    lens.fov_y = 2.0f * ::atan(rx::Lerp(current_scale, target_scale, amount));
   } else {
-    lens.ortho_height = std::lerp(current.ortho_height, target.ortho_height, amount);
-    lens.ortho_near = std::lerp(current.ortho_near, target.ortho_near, amount);
-    lens.ortho_far = std::lerp(current.ortho_far, target.ortho_far, amount);
+    lens.ortho_height = rx::Lerp(current.ortho_height, target.ortho_height, amount);
+    lens.ortho_near = rx::Lerp(current.ortho_near, target.ortho_near, amount);
+    lens.ortho_far = rx::Lerp(current.ortho_far, target.ortho_far, amount);
   }
   return lens;
 }
@@ -112,7 +113,7 @@ CameraLens DampLens(const CameraLens& current, const CameraLens& target, f32 amo
 }  // namespace
 
 void BuildCameraRigs(ecs::World& world, f32 dt) {
-  if (!std::isfinite(dt) || dt < 0) dt = 0;
+  if (!::isfinite(dt) || dt < 0) dt = 0;
 
   world.Each<CameraRigPose, CameraAnchor, CameraMode>([&](ecs::Entity entity, CameraRigPose& pose,
                                                           CameraAnchor& anchor, CameraMode& mode) {
@@ -137,8 +138,8 @@ void BuildCameraRigs(ecs::World& world, f32 dt) {
     }
 
     if (CameraLookAhead* look_ahead = world.Get<CameraLookAhead>(entity)) {
-      const Vec3 offset = ClampLength(anchor.velocity * std::max(look_ahead->seconds, 0.0f),
-                                      std::max(look_ahead->maximum_distance, 0.0f));
+      const Vec3 offset = ClampLength(anchor.velocity * rx::Max(look_ahead->seconds, 0.0f),
+                                      rx::Max(look_ahead->maximum_distance, 0.0f));
       pose.pivot += offset;
       pose.desired.position = pose.pivot;
     }
@@ -159,12 +160,12 @@ void BuildCameraRigs(ecs::World& world, f32 dt) {
         const f32 pitch_delta = intent ? intent->pitch_delta : 0;
         orbit.yaw += yaw_delta;
         orbit.pitch =
-            std::clamp(orbit.pitch + pitch_delta, std::min(orbit.min_pitch, orbit.max_pitch),
-                       std::max(orbit.min_pitch, orbit.max_pitch));
+            rx::Clamp(orbit.pitch + pitch_delta, rx::Min(orbit.min_pitch, orbit.max_pitch),
+                       rx::Max(orbit.min_pitch, orbit.max_pitch));
         const Quat anchor_rotation = Normalize(anchor.orientation);
 
         if (CameraRecenter* recenter = world.Get<CameraRecenter>(entity)) {
-          const bool manual = std::abs(yaw_delta) > 1e-6f || std::abs(pitch_delta) > 1e-6f;
+          const bool manual = ::abs(yaw_delta) > 1e-6f || ::abs(pitch_delta) > 1e-6f;
           if (manual) {
             recenter->idle_time = 0;
           } else {
@@ -177,8 +178,8 @@ void BuildCameraRigs(ecs::World& world, f32 dt) {
           const Vec3 horizontal_velocity{recenter_velocity.x, 0, recenter_velocity.z};
           const bool requested = intent && intent->recenter;
           const bool moving = Length(horizontal_velocity) >
-                              std::max(std::max(recenter->minimum_speed, 0.0f), 1e-5f);
-          if (requested || (moving && recenter->idle_time >= std::max(recenter->delay, 0.0f))) {
+                              rx::Max(rx::Max(recenter->minimum_speed, 0.0f), 1e-5f);
+          if (requested || (moving && recenter->idle_time >= rx::Max(recenter->delay, 0.0f))) {
             const f32 target_yaw =
                 moving ? YawFromDirection(horizontal_velocity)
                        : (orbit.space == CameraOrbitSpace::kAnchor
@@ -212,7 +213,7 @@ void BuildCameraRigs(ecs::World& world, f32 dt) {
         const Vec3 forward = Rotate(pose.desired.orientation, {0, 0, -1});
         const Vec3 right = Rotate(pose.desired.orientation, {1, 0, 0});
         const Vec3 up = Rotate(pose.desired.orientation, {0, 1, 0});
-        pose.desired.position = pose.pivot + forward * -std::max(boom.distance, 0.0f) +
+        pose.desired.position = pose.pivot + forward * -rx::Max(boom.distance, 0.0f) +
                                 right * boom.shoulder_offset + up * boom.height_offset;
       });
 
@@ -220,14 +221,14 @@ void BuildCameraRigs(ecs::World& world, f32 dt) {
       [&](ecs::Entity entity, CameraRigPose& pose, CameraLensDrive& drive, CameraMode&) {
         if (CameraIntent* intent = world.Get<CameraIntent>(entity)) {
           if (drive.lens.projection == CameraProjection::kPerspective) {
-            drive.lens.fov_y = std::clamp(drive.lens.fov_y - intent->zoom_delta * drive.zoom_speed,
-                                          std::min(drive.minimum_fov, drive.maximum_fov),
-                                          std::max(drive.minimum_fov, drive.maximum_fov));
+            drive.lens.fov_y = rx::Clamp(drive.lens.fov_y - intent->zoom_delta * drive.zoom_speed,
+                                          rx::Min(drive.minimum_fov, drive.maximum_fov),
+                                          rx::Max(drive.minimum_fov, drive.maximum_fov));
           } else {
             drive.lens.ortho_height =
-                std::clamp(drive.lens.ortho_height - intent->zoom_delta * drive.zoom_speed,
-                           std::min(drive.minimum_ortho_height, drive.maximum_ortho_height),
-                           std::max(drive.minimum_ortho_height, drive.maximum_ortho_height));
+                rx::Clamp(drive.lens.ortho_height - intent->zoom_delta * drive.zoom_speed,
+                           rx::Min(drive.minimum_ortho_height, drive.maximum_ortho_height),
+                           rx::Max(drive.minimum_ortho_height, drive.maximum_ortho_height));
           }
           intent->zoom_delta = 0;
         }
@@ -236,7 +237,7 @@ void BuildCameraRigs(ecs::World& world, f32 dt) {
 }
 
 void PrepareCameraRigConstraints(ecs::World& world, f32 dt) {
-  if (!std::isfinite(dt) || dt < 0) dt = 0;
+  if (!::isfinite(dt) || dt < 0) dt = 0;
 
   world.Each<CameraRigPose, CameraAnchor, CameraMode>(
       [&](ecs::Entity entity, CameraRigPose& pose, CameraAnchor&, CameraMode&) {
@@ -264,7 +265,7 @@ void PrepareCameraRigConstraints(ecs::World& world, f32 dt) {
 }
 
 void ResolveCameraRigs(ecs::World& world, f32 dt) {
-  if (!std::isfinite(dt) || dt < 0) dt = 0;
+  if (!::isfinite(dt) || dt < 0) dt = 0;
 
   world.Each<CameraRigPose, CameraAnchor, CameraMode>([&](ecs::Entity entity, CameraRigPose& pose,
                                                           CameraAnchor& anchor, CameraMode& mode) {
@@ -296,7 +297,7 @@ void ResolveCameraRigs(ecs::World& world, f32 dt) {
         if (Length(to_target) > 1e-5f) {
           target_orientation =
               Slerp(target_orientation, LookRotation(to_target, up, target_orientation),
-                    std::clamp(framing->weight, 0.0f, 1.0f));
+                    rx::Clamp(framing->weight, 0.0f, 1.0f));
         }
       }
 

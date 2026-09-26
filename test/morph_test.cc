@@ -12,20 +12,22 @@
 // reference. Vulkan only - the shader reads through buffer device addresses
 // like the skinned path - and skips cleanly when no driver is present.
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <string>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "anim/morph.h"
 #include "asset/gltf_loader.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
+#include "core/scalar.h"
 #include "shaders/morph_apply_cs_hlsl.h"
 
 using namespace rx;
@@ -33,7 +35,7 @@ using namespace rx;
 namespace {
 
 int Fail(const char* msg) {
-  std::fprintf(stderr, "morph_test: FAIL: %s\n", msg);
+  ::fprintf(stderr, "morph_test: FAIL: %s\n", msg);
   return 1;
 }
 
@@ -75,19 +77,19 @@ constexpr char kNamedTargetsGltf[] = R"({
   "buffers": [{"byteLength": 132, "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgD8AAIA+AABAPwAAgD8AAAAA"}]
 })";
 
-bool Near(f32 a, f32 b, f32 tolerance = 1e-5f) { return std::abs(a - b) <= tolerance; }
+bool Near(f32 a, f32 b, f32 tolerance = 1e-5f) { return ::abs(a - b) <= tolerance; }
 
 int TestNamedTargets() {
-  std::filesystem::path path =
-      std::filesystem::temp_directory_path() / "rx_morph_named_targets.gltf";
-  std::FILE* file = std::fopen(path.string().c_str(), "wb");
+  base::String path =
+      rx::fs::Join(rx::fs::TempDirectory(), "rx_morph_named_targets.gltf");
+  FILE* file = ::fopen(path.c_str(), "wb");
   if (!file) return Fail("cannot write the generated gltf");
-  std::fwrite(kNamedTargetsGltf, 1, sizeof(kNamedTargetsGltf) - 1, file);
-  std::fclose(file);
+  ::fwrite(kNamedTargetsGltf, 1, sizeof(kNamedTargetsGltf) - 1, file);
+  ::fclose(file);
 
   asset::ImportedScene scene;
-  bool loaded = asset::LoadGltfScene(path.string(), &scene);
-  std::filesystem::remove(path);
+  bool loaded = asset::LoadGltfScene(path, &scene);
+  rx::fs::Remove(path);
   if (!loaded || scene.meshes.size() != 1) return Fail("generated gltf did not load");
 
   const asset::Mesh& mesh = scene.meshes[0];
@@ -137,7 +139,7 @@ int TestAnimatedMorphCube(const char* path) {
     if (target.position_deltas.size() != verts * 3) return Fail("position delta size");
     if (target.normal_deltas.size() != verts * 3) return Fail("normal delta size");
     if (target.tangent_deltas.size() != verts * 3) return Fail("tangent delta size");
-    for (f32 d : target.position_deltas) magnitude = std::max(magnitude, std::abs(d));
+    for (f32 d : target.position_deltas) magnitude = rx::Max(magnitude, ::abs(d));
   }
   if (magnitude <= 0) return Fail("all position deltas are zero");
 
@@ -174,9 +176,9 @@ int TestAnimatedMorphCube(const char* path) {
 // and compares against the CPU accumulation.
 int TestGpuEvaluation(const char* path) {
   using namespace rx::render;
-  if (const char* rhi = std::getenv("RX_RHI")) {
-    if (std::strcmp(rhi, "vulkan") != 0) {
-      std::printf("morph_test: gpu section is vulkan-only (bda compute), skipping\n");
+  if (const char* rhi = ::getenv("RX_RHI")) {
+    if (::strcmp(rhi, "vulkan") != 0) {
+      ::printf("morph_test: gpu section is vulkan-only (bda compute), skipping\n");
       return 0;
     }
   }
@@ -191,35 +193,35 @@ int TestGpuEvaluation(const char* path) {
   DeviceDesc desc;
   desc.backend = Backend::kVulkan;
   desc.request_raytracing = false;
-  std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
-    std::printf("morph_test: no vulkan driver, skipping the gpu section\n");
+    ::printf("morph_test: no vulkan driver, skipping the gpu section\n");
     return 0;
   }
-  std::printf("morph_test: device '%s'\n", device->caps().adapter_name.c_str());
+  ::printf("morph_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   // Delta buffer in the GpuMesh::morph_deltas layout.
-  std::vector<f32> deltas(static_cast<size_t>(targets) * verts * 9, 0.0f);
+  base::Vector<f32> deltas(static_cast<size_t>(targets) * verts * 9, 0.0f);
   for (u32 t = 0; t < targets; ++t) {
     const asset::MorphTarget& target = mesh.morph_targets[t];
     for (u32 v = 0; v < verts; ++v) {
       f32* out = &deltas[(static_cast<size_t>(t) * verts + v) * 9];
-      std::memcpy(out, &target.position_deltas[v * 3], sizeof(f32) * 3);
+      base::MemCopy(out, &target.position_deltas[v * 3], sizeof(f32) * 3);
       if (!target.normal_deltas.empty()) {
-        std::memcpy(out + 3, &target.normal_deltas[v * 3], sizeof(f32) * 3);
+        base::MemCopy(out + 3, &target.normal_deltas[v * 3], sizeof(f32) * 3);
       }
       if (!target.tangent_deltas.empty()) {
-        std::memcpy(out + 6, &target.tangent_deltas[v * 3], sizeof(f32) * 3);
+        base::MemCopy(out + 6, &target.tangent_deltas[v * 3], sizeof(f32) * 3);
       }
     }
   }
-  std::vector<f32> base(static_cast<size_t>(verts) * 9);
+  base::Vector<f32> base(static_cast<size_t>(verts) * 9);
   for (u32 v = 0; v < verts; ++v) {
     const asset::Vertex& vertex = lod.vertices[v];
-    std::memcpy(&base[v * 9 + 0], vertex.position, sizeof(f32) * 3);
-    std::memcpy(&base[v * 9 + 3], vertex.normal, sizeof(f32) * 3);
-    std::memcpy(&base[v * 9 + 6], vertex.tangent, sizeof(f32) * 3);
+    base::MemCopy(&base[v * 9 + 0], vertex.position, sizeof(f32) * 3);
+    base::MemCopy(&base[v * 9 + 3], vertex.normal, sizeof(f32) * 3);
+    base::MemCopy(&base[v * 9 + 6], vertex.tangent, sizeof(f32) * 3);
   }
   struct Pair {
     u32 target;
@@ -275,10 +277,10 @@ int TestGpuEvaluation(const char* path) {
       for (const Pair& pair : pairs) {
         expected += pair.weight * deltas[(static_cast<size_t>(pair.target) * verts + v) * 9 + c];
       }
-      worst = std::max(worst, std::abs(result[v * 9 + c] - expected));
+      worst = rx::Max(worst, ::abs(result[v * 9 + c] - expected));
     }
   }
-  std::printf("morph_test: gpu vs cpu max error %g\n", worst);
+  ::printf("morph_test: gpu vs cpu max error %g\n", worst);
   if (worst > 1e-5f) return Fail("gpu evaluation diverges from the cpu reference");
 
   device->DestroyPipeline(pipeline);
@@ -296,6 +298,6 @@ int main(int argc, char** argv) {
   if (int rc = TestNamedTargets()) return rc;
   if (int rc = TestAnimatedMorphCube(argv[1])) return rc;
   if (int rc = TestGpuEvaluation(argv[1])) return rc;
-  std::printf("morph_test: PASS\n");
+  ::printf("morph_test: PASS\n");
   return 0;
 }

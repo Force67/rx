@@ -1,8 +1,6 @@
 #ifndef RX_RUNTIME_DEMO_SCENES_H_
 #define RX_RUNTIME_DEMO_SCENES_H_
 
-#include <memory>
-#include <vector>
 
 #include <base/containers/vector.h>
 
@@ -11,6 +9,8 @@
 #include "anim/pose.h"
 #include "anim/rig_player.h"
 #include "asset/skeleton.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "engine_context.h"
 #include "net/bubble.h"
@@ -52,19 +52,19 @@ class DemoScenes {
 
   // The character/inventory gym (--demo gym), or null for any other scene. The
   // gym drives its own camera + input, so the Viewer routes OnUpdate to it.
-  GymDemo* gym() { return gym_.get(); }
+  GymDemo* gym() { return gym_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
   // The FPS range (--demo shooter), or null. Owns its camera + input like the
   // gym, so the Viewer routes OnUpdate to it.
-  ShooterDemo* shooter() { return shooter_.get(); }
+  ShooterDemo* shooter() { return shooter_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
   // The character reference lab (--demo lookdev), or null. Owns its camera
   // (frozen framings are the point), so the Viewer routes OnUpdate to it.
-  LookdevDemo* lookdev() { return lookdev_.get(); }
+  LookdevDemo* lookdev() { return lookdev_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
   // The locomotion puppet (--demo puppet), or null. Keeps the free-fly camera;
   // the Viewer forwards raw keys to it (1/2/3) without an early return.
-  PuppetDemo* puppet() { return puppet_.get(); }
+  PuppetDemo* puppet() { return puppet_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
   // The driving gym (--demo drive), or null for any other scene. Like the gym it
   // owns its camera + input, so the Viewer routes OnUpdate to it.
-  DriveDemo* drive() { return drive_.get(); }
+  DriveDemo* drive() { return drive_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
   // Reapplies demo-specific renderer constraints after the debug UI changes
   // settings. Most demos have none; cloth requires the raster skinning path.
   void ApplyRenderPolicy();
@@ -168,8 +168,8 @@ class DemoScenes {
   // --demo fluid: the GPU heightfield solver's world domain. The bed and
   // initial-water arrays are CPU-authoritative and live in these members (the
   // FluidDomainDesc holds pointers into them, so they must outlive it).
-  std::vector<f32> fluid_bed_;
-  std::vector<f32> fluid_initial_water_;
+  base::Vector<f32> fluid_bed_;
+  base::Vector<f32> fluid_initial_water_;
   render::FluidDomainDesc fluid_domain_{};
   bool fluid_scene_ = false;
   bool dam_up_ = true;
@@ -179,7 +179,7 @@ class DemoScenes {
   f32 fluid_dam_box_y0_ = 0;               // rest Y of the dam boxes
   f32 fluid_dam_sink_ = -1.0f;             // >=0 once breaking: seconds elapsed
   // --demo sky: the weather layer scheduling the cloudscape deck.
-  std::unique_ptr<weather::WeatherSystem> weather_sys_;
+  base::UniquePointer<weather::WeatherSystem> weather_sys_;
   bool sky_scene_ = false;
   bool swamp_scene_ = false;  // pins surface wetness (standing water)
   bool sky_tornado_seen_ = false;  // touchdown log edge detector
@@ -265,51 +265,51 @@ class DemoScenes {
 
   // --demo scenehook: an app-owned raw-Vulkan GPU pass recorded through rx's
   // scene hooks. Non-null only for that demo.
-  std::unique_ptr<SceneHookDemo> scene_hook_;
+  base::UniquePointer<SceneHookDemo> scene_hook_;
   // --demo scenehook-rhi: the same acceptance scene driven purely through the
   // backend-agnostic RHI. Non-null only for that demo.
-  std::unique_ptr<SceneHookRhiDemo> scene_hook_rhi_;
+  base::UniquePointer<SceneHookRhiDemo> scene_hook_rhi_;
 
   // --demo ship: the procedural sailing-ship slice (hull/sails/rigging/cannons
   // on the ocean stack). Non-null only for that demo.
-  std::unique_ptr<ShipDemo> ship_;
+  base::UniquePointer<ShipDemo> ship_;
 
   // --demo nav: the navigation chase slice (cost-aware pathfinding over rough
   // terrain, porter vs mule pack). Non-null only for that demo.
-  std::unique_ptr<NavDemo> nav_;
+  base::UniquePointer<NavDemo> nav_;
 
   // --demo placement: GPU procedural placement (density programs + ordered
   // dithering streaming a forest around the camera). Non-null only for that
   // demo.
-  std::unique_ptr<PlacementDemo> placement_;
+  base::UniquePointer<PlacementDemo> placement_;
 
   // --demo grass: GPU-generated cubic-Bezier blades over semantic hills.
-  std::unique_ptr<GrassDemo> grass_;
+  base::UniquePointer<GrassDemo> grass_;
 
   // --demo gym: the character/inventory reference gym (graybox + tuning panel).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
-  std::unique_ptr<GymDemo> gym_;
+  base::UniquePointer<GymDemo> gym_;
   // The character reference lab (--demo lookdev).
-  std::unique_ptr<LookdevDemo> lookdev_;
+  base::UniquePointer<LookdevDemo> lookdev_;
 
   // --demo shooter: the FPS range over engine/combat (weapons, targets, HUD).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
-  std::unique_ptr<ShooterDemo> shooter_;
+  base::UniquePointer<ShooterDemo> shooter_;
 
   // --demo puppet: the physics-first locomotion proving ground (graybox arena +
   // rx::locomotion ragdoll + debug overlay). Non-null only for that demo.
-  std::unique_ptr<PuppetDemo> puppet_;
+  base::UniquePointer<PuppetDemo> puppet_;
 
   // --demo drive: the GTA-style driving gym (car/boat/plane on mixed terrain).
   // Non-null only for that demo; the Viewer drives its Update from OnUpdate.
-  std::unique_ptr<DriveDemo> drive_;
-  std::unique_ptr<FeatureGym> feature_gym_;
+  base::UniquePointer<DriveDemo> drive_;
+  base::UniquePointer<FeatureGym> feature_gym_;
 
   // --demo bubbles: the streaming-bubble interest map driven locally (no
   // transport), plus its wire-sphere visualizer. Non-null only for that demo.
   bool bubbles_enabled_ = false;
   net::InterestMap bubble_map_;
-  std::unique_ptr<net::BubbleVisualizer> bubble_viz_;
+  base::UniquePointer<net::BubbleVisualizer> bubble_viz_;
   u64 bubble_tick_ = 0;
 };
 

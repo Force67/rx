@@ -1,9 +1,9 @@
 #ifndef RX_AUDIO_XWMA_H_
 #define RX_AUDIO_XWMA_H_
 
-#include <memory>
 
 #include "audio/audio_clip.h"
+#include "base/memory/unique_pointer.h"
 #include "core/types.h"
 
 namespace rx::audio {
@@ -18,7 +18,7 @@ enum class CompressedKind { kXwma, kFuz, kWem };
 // decoded natively; the WMA and Wwise codecs are routed to the optional FFmpeg
 // backend (see ffmpeg_codec.h), which is null when the engine was built without
 // it. Returns null when nothing can decode the data.
-std::unique_ptr<Decoder> OpenCompressed(ByteSpan bytes, CompressedKind kind);
+base::UniquePointer<Decoder> OpenCompressed(ByteSpan bytes, CompressedKind kind);
 
 }  // namespace rx::audio
 

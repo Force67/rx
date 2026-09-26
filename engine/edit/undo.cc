@@ -1,8 +1,13 @@
 #include "edit/undo.h"
 
-#include <format>
-#include <random>
-
+#include "base/containers/pair.h"
+#include "base/containers/vector.h"
+#include "base/external/xoshiro256ss/xoshiro256ss.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/random/random.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "core/math.h"
 #include "edit/hierarchy.h"
 #include "scene/components.h"
@@ -11,7 +16,10 @@ namespace rx::edit {
 namespace {
 
 u64 RandomGuid() {
-  static thread_local std::mt19937_64 rng{std::random_device{}()};
+  // Guids only need to be unique, not reproducible: a per-thread 64-bit
+  // generator seeded once from the OS keeps every draw full width without a
+  // syscall per id.
+  static thread_local base::xoshiro256ss rng{base::SourceTrueRandomSeed()};
   u64 v = 0;
   while (v == 0)
     v = rng();
@@ -23,11 +31,11 @@ u64 RandomGuid() {
 // they survive the target being destroyed and recreated.
 struct CompSnap {
   const ComponentDesc *comp;
-  std::vector<std::pair<const PropDesc *, PropValue>> props;
+  base::Vector<base::Pair<const PropDesc *, PropValue>> props;
 };
 
-std::vector<CompSnap> SnapshotEntity(ecs::World &world, ecs::Entity entity) {
-  std::vector<CompSnap> out;
+base::Vector<CompSnap> SnapshotEntity(ecs::World &world, ecs::Entity entity) {
+  base::Vector<CompSnap> out;
   for (const ComponentDesc *comp : ComponentsOn(world, entity)) {
     CompSnap snap{comp, {}};
     for (u32 i = 0; i < comp->prop_count; ++i) {
@@ -39,15 +47,15 @@ std::vector<CompSnap> SnapshotEntity(ecs::World &world, ecs::Entity entity) {
         v.u = (v.e && world.IsAlive(v.e)) ? EnsureGuid(world, v.e)
                                           : 0; // stash target guid
       }
-      snap.props.emplace_back(&prop, std::move(v));
+      snap.props.emplace_back(&prop, base::move(v));
     }
-    out.push_back(std::move(snap));
+    out.push_back(base::move(snap));
   }
   return out;
 }
 
 void RestoreComponents(ecs::World &world, ecs::Entity entity,
-                       const std::vector<CompSnap> &snaps) {
+                       const base::Vector<CompSnap> &snaps) {
   for (const CompSnap &snap : snaps) {
     AddComponentByDesc(world, entity, *snap.comp);
     for (const auto &[prop, value] : snap.props) {
@@ -89,10 +97,10 @@ public:
   SetPropCommand(ecs::World &world, ecs::Entity entity,
                  const ComponentDesc &comp, const PropDesc &prop,
                  PropValue new_value)
-      : comp_(&comp), prop_(&prop), new_value_(std::move(new_value)) {
+      : comp_(&comp), prop_(&prop), new_value_(base::move(new_value)) {
     guid_ = EnsureGuid(world, entity);
     GetProp(world, entity, comp, prop, &old_value_);
-    label_ = std::format("Set {}.{}", comp.name, prop.name);
+    label_ = rx::StrFormat("Set {}.{}", comp.name, prop.name);
   }
   void Apply(ecs::World &world) override {
     if (ecs::Entity e = FindByGuid(world, guid_))
@@ -110,18 +118,18 @@ private:
   const PropDesc *prop_;
   PropValue old_value_;
   PropValue new_value_;
-  std::string label_;
+  base::String label_;
 };
 
 class CreateEntityCommand : public Command {
 public:
   CreateEntityCommand(
-      std::vector<
-          std::pair<const ComponentDesc *,
-                    std::vector<std::pair<const PropDesc *, PropValue>>>>
+      base::Vector<
+          base::Pair<const ComponentDesc *,
+                    base::Vector<base::Pair<const PropDesc *, PropValue>>>>
           initial,
       ecs::Entity *out)
-      : initial_(std::move(initial)), out_(out), guid_(RandomGuid()) {}
+      : initial_(base::move(initial)), out_(out), guid_(RandomGuid()) {}
 
   void Apply(ecs::World &world) override {
     ecs::Entity e = world.Create();
@@ -147,8 +155,8 @@ public:
   const char *label() const override { return "Create entity"; }
 
 private:
-  std::vector<std::pair<const ComponentDesc *,
-                        std::vector<std::pair<const PropDesc *, PropValue>>>>
+  base::Vector<base::Pair<const ComponentDesc *,
+                        base::Vector<base::Pair<const PropDesc *, PropValue>>>>
       initial_;
   ecs::Entity *out_;
   u64 guid_;
@@ -173,7 +181,7 @@ public:
 
 private:
   u64 guid_;
-  std::vector<CompSnap> snapshot_;
+  base::Vector<CompSnap> snapshot_;
 };
 
 class ReparentCommand : public Command {
@@ -239,7 +247,7 @@ public:
       : comp_(&comp) {
     guid_ = EnsureGuid(world, entity);
     existed_ = world.HasRaw(entity, comp.id);
-    label_ = std::format("Add {}", comp.name);
+    label_ = rx::StrFormat("Add {}", comp.name);
   }
   void Apply(ecs::World &world) override {
     if (existed_)
@@ -259,7 +267,7 @@ private:
   u64 guid_;
   const ComponentDesc *comp_;
   bool existed_;
-  std::string label_;
+  base::String label_;
 };
 
 class RemoveComponentCommand : public Command {
@@ -277,10 +285,10 @@ public:
           continue;
         if (prop.type == PropType::kEntity)
           v.u = (v.e && world.IsAlive(v.e)) ? EnsureGuid(world, v.e) : 0;
-        props_.emplace_back(&prop, std::move(v));
+        props_.emplace_back(&prop, base::move(v));
       }
     }
-    label_ = std::format("Remove {}", comp.name);
+    label_ = rx::StrFormat("Remove {}", comp.name);
   }
   void Apply(ecs::World &world) override {
     if (!existed_)
@@ -308,15 +316,15 @@ private:
   u64 guid_;
   const ComponentDesc *comp_;
   bool existed_;
-  std::vector<std::pair<const PropDesc *, PropValue>> props_;
-  std::string label_;
+  base::Vector<base::Pair<const PropDesc *, PropValue>> props_;
+  base::String label_;
 };
 
 class CompositeCommand : public Command {
 public:
-  CompositeCommand(std::vector<std::unique_ptr<Command>> children,
-                   std::string label)
-      : children_(std::move(children)), label_(std::move(label)) {}
+  CompositeCommand(base::Vector<base::UniquePointer<Command>> children,
+                   base::String label)
+      : children_(base::move(children)), label_(base::move(label)) {}
   void Apply(ecs::World &world) override {
     for (auto &c : children_)
       c->Apply(world);
@@ -328,26 +336,26 @@ public:
   const char *label() const override { return label_.c_str(); }
 
 private:
-  std::vector<std::unique_ptr<Command>> children_;
-  std::string label_;
+  base::Vector<base::UniquePointer<Command>> children_;
+  base::String label_;
 };
 
 } // namespace
 
-void UndoStack::Push(ecs::World &world, std::unique_ptr<Command> cmd) {
+void UndoStack::Push(ecs::World &world, base::UniquePointer<Command> cmd) {
   if (!cmd)
     return;
   cmd->Apply(world);
-  RecordApplied(std::move(cmd));
+  RecordApplied(base::move(cmd));
 }
 
-void UndoStack::RecordApplied(std::unique_ptr<Command> cmd) {
+void UndoStack::RecordApplied(base::UniquePointer<Command> cmd) {
   if (!cmd)
     return;
   if (group_depth_ > 0) {
-    group_buffer_.push_back(std::move(cmd));
+    group_buffer_.push_back(base::move(cmd));
   } else {
-    undo_.push_back(std::move(cmd));
+    undo_.push_back(base::move(cmd));
     redo_.clear();
   }
 }
@@ -355,20 +363,20 @@ void UndoStack::RecordApplied(std::unique_ptr<Command> cmd) {
 bool UndoStack::Undo(ecs::World &world) {
   if (undo_.empty())
     return false;
-  std::unique_ptr<Command> cmd = std::move(undo_.back());
+  base::UniquePointer<Command> cmd = base::move(undo_.back());
   undo_.pop_back();
   cmd->Revert(world);
-  redo_.push_back(std::move(cmd));
+  redo_.push_back(base::move(cmd));
   return true;
 }
 
 bool UndoStack::Redo(ecs::World &world) {
   if (redo_.empty())
     return false;
-  std::unique_ptr<Command> cmd = std::move(redo_.back());
+  base::UniquePointer<Command> cmd = base::move(redo_.back());
   redo_.pop_back();
   cmd->Apply(world);
-  undo_.push_back(std::move(cmd));
+  undo_.push_back(base::move(cmd));
   return true;
 }
 
@@ -383,7 +391,7 @@ void UndoStack::EndGroup() {
   if (group_depth_ == 0)
     return;
   if (--group_depth_ == 0 && !group_buffer_.empty()) {
-    undo_.push_back(std::make_unique<CompositeCommand>(std::move(group_buffer_),
+    undo_.push_back(base::MakeUnique<CompositeCommand>(base::move(group_buffer_),
                                                        group_label_));
     group_buffer_.clear();
     redo_.clear();
@@ -399,41 +407,41 @@ void UndoStack::Clear() {
 
 // Factories
 
-std::unique_ptr<Command> MakeSetProp(ecs::World &world, ecs::Entity entity,
+base::UniquePointer<Command> MakeSetProp(ecs::World &world, ecs::Entity entity,
                                      const ComponentDesc &comp,
                                      const PropDesc &prop,
                                      PropValue new_value) {
-  return std::make_unique<SetPropCommand>(world, entity, comp, prop,
-                                          std::move(new_value));
+  return base::MakeUnique<SetPropCommand>(world, entity, comp, prop,
+                                          base::move(new_value));
 }
 
-std::unique_ptr<Command> MakeCreateEntity(
-    std::vector<std::pair<const ComponentDesc *,
-                          std::vector<std::pair<const PropDesc *, PropValue>>>>
+base::UniquePointer<Command> MakeCreateEntity(
+    base::Vector<base::Pair<const ComponentDesc *,
+                          base::Vector<base::Pair<const PropDesc *, PropValue>>>>
         initial,
     ecs::Entity *out_entity) {
-  return std::make_unique<CreateEntityCommand>(std::move(initial), out_entity);
+  return base::MakeUnique<CreateEntityCommand>(base::move(initial), out_entity);
 }
 
-std::unique_ptr<Command> MakeDestroyEntity(ecs::World &world,
+base::UniquePointer<Command> MakeDestroyEntity(ecs::World &world,
                                            ecs::Entity entity) {
-  return std::make_unique<DestroyEntityCommand>(world, entity);
+  return base::MakeUnique<DestroyEntityCommand>(world, entity);
 }
 
-std::unique_ptr<Command> MakeReparent(ecs::World &world, ecs::Entity entity,
+base::UniquePointer<Command> MakeReparent(ecs::World &world, ecs::Entity entity,
                                       ecs::Entity new_parent) {
-  return std::make_unique<ReparentCommand>(world, entity, new_parent);
+  return base::MakeUnique<ReparentCommand>(world, entity, new_parent);
 }
 
-std::unique_ptr<Command> MakeAddComponent(ecs::World &world, ecs::Entity entity,
+base::UniquePointer<Command> MakeAddComponent(ecs::World &world, ecs::Entity entity,
                                           const ComponentDesc &comp) {
-  return std::make_unique<AddComponentCommand>(world, entity, comp);
+  return base::MakeUnique<AddComponentCommand>(world, entity, comp);
 }
 
-std::unique_ptr<Command> MakeRemoveComponent(ecs::World &world,
+base::UniquePointer<Command> MakeRemoveComponent(ecs::World &world,
                                              ecs::Entity entity,
                                              const ComponentDesc &comp) {
-  return std::make_unique<RemoveComponentCommand>(world, entity, comp);
+  return base::MakeUnique<RemoveComponentCommand>(world, entity, comp);
 }
 
 } // namespace rx::edit

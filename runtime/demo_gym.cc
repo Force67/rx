@@ -1,12 +1,14 @@
 #include "demo_gym.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "asset/primitives.h"
 #include "asset/material.h"
@@ -47,7 +49,7 @@ asset::Texture MakeChecker(asset::AssetId id, u32 res, u32 cells, Rgb a, Rgb b, 
   tex.is_srgb = true;
   tex.data.resize(res * res * 4);
   const u32 cell_px = res / cells;
-  const u32 line_w = std::max(1u, res / 128);  // ~2px grid lines
+  const u32 line_w = rx::Max(1u, res / 128);  // ~2px grid lines
   for (u32 y = 0; y < res; ++y) {
     for (u32 x = 0; x < res; ++x) {
       const u32 cx = x / cell_px;
@@ -63,7 +65,7 @@ asset::Texture MakeChecker(asset::AssetId id, u32 res, u32 cells, Rgb a, Rgb b, 
         c = Rgb{0xE0, 0x82, 0x28};
         const f32 fx = static_cast<f32>(x % cell_px) / static_cast<f32>(cell_px);
         const f32 fy = static_cast<f32>(y % cell_px) / static_cast<f32>(cell_px);
-        if (fx + std::fabs(fy - 0.5f) < 0.55f && fx > 0.15f) c = Rgb{0x18, 0x18, 0x18};
+        if (fx + ::fabs(fy - 0.5f) < 0.55f && fx > 0.15f) c = Rgb{0x18, 0x18, 0x18};
       }
       u8* p = &tex.data[(y * res + x) * 4];
       p[0] = c.r;
@@ -121,9 +123,9 @@ void PushVert(MeshBuilder& b, const Vec3& p, const Vec3& n, const Vec3& tan, f32
 void AddBox(MeshBuilder& b, const Vec3& c, const Vec3& h, f32 uv_scale) {
   for (const Face& f : kFaces) {
     const u32 base = static_cast<u32>(b.lod().vertices.size());
-    const f32 hu = std::fabs(Dot(f.u, h));
-    const f32 hv = std::fabs(Dot(f.v, h));
-    const Vec3 fc = c + f.n * std::fabs(Dot(f.n, h));
+    const f32 hu = ::fabs(Dot(f.u, h));
+    const f32 hv = ::fabs(Dot(f.v, h));
+    const Vec3 fc = c + f.n * ::fabs(Dot(f.n, h));
     const Vec3 corners[4] = {
         fc - f.u * hu - f.v * hv,
         fc + f.u * hu - f.v * hv,
@@ -140,9 +142,9 @@ void AddBox(MeshBuilder& b, const Vec3& c, const Vec3& h, f32 uv_scale) {
 void AddRotatedBox(MeshBuilder& b, const Vec3& c, const Vec3& h, const Quat& q, f32 uv_scale) {
   for (const Face& f : kFaces) {
     const u32 base = static_cast<u32>(b.lod().vertices.size());
-    const f32 hu = std::fabs(Dot(f.u, h));
-    const f32 hv = std::fabs(Dot(f.v, h));
-    const Vec3 fc_local = f.n * std::fabs(Dot(f.n, h));
+    const f32 hu = ::fabs(Dot(f.u, h));
+    const f32 hv = ::fabs(Dot(f.v, h));
+    const Vec3 fc_local = f.n * ::fabs(Dot(f.n, h));
     const Vec3 local[4] = {
         fc_local - f.u * hu - f.v * hv,
         fc_local + f.u * hu - f.v * hv,
@@ -194,7 +196,7 @@ asset::Mesh MakeUnitCylinder(asset::AssetId id, u32 segments) {
   for (u32 i = 0; i <= segments; ++i) {
     const f32 t = static_cast<f32>(i) / segments;
     const f32 a = t * 2.0f * kPi;
-    const Vec3 n{std::cos(a), 0, std::sin(a)};
+    const Vec3 n{::cos(a), 0, ::sin(a)};
     for (int k = 0; k < 2; ++k) {
       asset::Vertex v{};
       v.position[0] = n.x;
@@ -234,8 +236,8 @@ Quat HeadingQuat(f32 yaw) { return QuatFromAxisAngle({0, -1, 0}, yaw); }
 // physics). Mirror the Host's fixed step: RX_FIXED_DT when set, else the
 // FrameTimer default of 1/60 s.
 f32 GymFixedStep() {
-  if (const char* env = std::getenv("RX_FIXED_DT")) {
-    const f32 v = std::strtof(env, nullptr);
+  if (const char* env = ::getenv("RX_FIXED_DT")) {
+    const f32 v = ::strtof(env, nullptr);
     if (v > 0.0f) return v;
   }
   return 1.0f / 60.0f;
@@ -265,41 +267,41 @@ void GymDemo::Create() {
 
   // Env-gated staging for captures. RX_GYM_VIEW=fp|tp, RX_GYM_SPAWN="x,z"[,y],
   // RX_GYM_YAW=<radians>, RX_GYM_SCRIPT="t:token,t:token,...".
-  if (const char* spawn = std::getenv("RX_GYM_SPAWN")) {
+  if (const char* spawn = ::getenv("RX_GYM_SPAWN")) {
     Vec3 p = spawn_feet_;
-    if (std::sscanf(spawn, "%f,%f,%f", &p.x, &p.z, &p.y) >= 2) {
+    if (::sscanf(spawn, "%f,%f,%f", &p.x, &p.z, &p.y) >= 2) {
       spawn_feet_ = p;
       ResetPlayer();
     }
   }
-  if (const char* yaw = std::getenv("RX_GYM_YAW")) {
-    spawn_yaw_ = std::strtof(yaw, nullptr);
+  if (const char* yaw = ::getenv("RX_GYM_YAW")) {
+    spawn_yaw_ = ::strtof(yaw, nullptr);
     if (auto* st = ctx_.world->Get<character::CharacterState>(player_)) st->yaw = spawn_yaw_;
   }
-  if (const char* pitch = std::getenv("RX_GYM_PITCH")) {
+  if (const char* pitch = ::getenv("RX_GYM_PITCH")) {
     if (auto* orbit = ctx_.world->Get<scene::CameraOrbit>(player_))
-      orbit->pitch = std::strtof(pitch, nullptr);
+      orbit->pitch = ::strtof(pitch, nullptr);
   }
-  if (const char* view = std::getenv("RX_GYM_VIEW")) {
-    const bool want_tp = std::strcmp(view, "tp") == 0;
+  if (const char* view = ::getenv("RX_GYM_VIEW")) {
+    const bool want_tp = ::strcmp(view, "tp") == 0;
     auto* vm = ctx_.world->Get<character::CharacterViewMode>(player_);
     if (vm && ((vm->kind == character::CharacterViewKind::kThirdPerson) != want_tp)) {
       character::ToggleCharacterViewMode(*ctx_.world, player_, camera_output_, player_,
                                          view_settings_, {.duration = 0.0f});
     }
   }
-  if (const char* script = std::getenv("RX_GYM_SCRIPT")) {
-    std::string s(script);
+  if (const char* script = ::getenv("RX_GYM_SCRIPT")) {
+    base::String s(script);
     size_t pos = 0;
     while (pos < s.size()) {
       size_t comma = s.find(',', pos);
-      if (comma == std::string::npos) comma = s.size();
-      std::string entry = s.substr(pos, comma - pos);
+      if (comma == base::String::npos) comma = s.size();
+      base::String entry = s.substr(pos, comma - pos);
       pos = comma + 1;
       size_t colon = entry.find(':');
-      if (colon == std::string::npos) continue;
+      if (colon == base::String::npos) continue;
       ScriptStep step;
-      step.time = std::strtof(entry.substr(0, colon).c_str(), nullptr);
+      step.time = ::strtof(entry.substr(0, colon).c_str(), nullptr);
       step.token = entry.substr(colon + 1);
       script_.push_back(step);
     }
@@ -414,7 +416,7 @@ void GymDemo::BuildContent() {
     const f32 ang = deg * kPi / 180.0f;
     const f32 run = 3.0f, w = 1.4f, thick = 0.15f;
     const Quat q = QuatFromAxisAngle({1, 0, 0}, -ang);  // tilt up toward -Z
-    const Vec3 center{x, std::sin(ang) * run * 0.5f + 0.05f, z - std::cos(ang) * run * 0.5f};
+    const Vec3 center{x, ::sin(ang) * run * 0.5f + 0.05f, z - ::cos(ang) * run * 0.5f};
     AddRotatedBox(st, center, {w * 0.5f, thick * 0.5f, run * 0.5f}, q, 1.0f);
     physics::ShapeDesc box;
     box.kind = physics::ShapeDesc::Kind::kBox;
@@ -518,7 +520,7 @@ void GymDemo::BuildPlayer() {
   character::CharacterMovementSettings move;
   const f32 total_half = character::CharacterShape{}.standing_height * 0.5f;  // 0.9 to capsule tip
   const f32 radius = shape.standing_radius;
-  const f32 half_height = std::max(shape.standing_height * 0.5f - radius, 0.01f);
+  const f32 half_height = rx::Max(shape.standing_height * 0.5f - radius, 0.01f);
 
   player_ = world.Create();
   world.Add(player_, scene::Transform{.position = {spawn_feet_.x, spawn_feet_.y, spawn_feet_.z}});
@@ -538,7 +540,7 @@ void GymDemo::BuildPlayer() {
   world.Add(player_, character::JetpackInput{});
   world.Add(player_, character::JetpackState{});
   if (ctx_.audio)
-    jetpack_audio_ = std::make_unique<audio::VehicleAudio>(ctx_.audio->mixer(),
+    jetpack_audio_ = base::MakeUnique<audio::VehicleAudio>(ctx_.audio->mixer(),
                                                            audio::LightJetPreset());
 
   // Inventory with a handful of crates to drop.
@@ -558,7 +560,7 @@ void GymDemo::BuildPlayer() {
 }
 
 void GymDemo::ResetPlayer() {
-  spawn_feet_.y = std::max(spawn_feet_.y, 0.0f);
+  spawn_feet_.y = rx::Max(spawn_feet_.y, 0.0f);
   character::TeleportCharacter(*ctx_.world, *ctx_.physics, player_, spawn_feet_);
   if (auto* st = ctx_.world->Get<character::CharacterState>(player_)) st->yaw = spawn_yaw_;
 }
@@ -619,7 +621,7 @@ void GymDemo::FillIntent(const InputState& input, const ActionState& actions, bo
 void GymDemo::RunScript(f32 dt) {
   script_time_ += dt;
   while (script_cursor_ < script_.size() && script_[script_cursor_].time <= script_time_) {
-    const std::string& t = script_[script_cursor_].token;
+    const base::String& t = script_[script_cursor_].token;
     ++script_cursor_;
     if (t == "fwd") { script_move_fwd_ = 1; script_move_right_ = 0; }
     else if (t == "fwdhalf") { script_move_fwd_ = 0.5f; script_move_right_ = 0; }  // analog: half stick
@@ -644,7 +646,7 @@ void GymDemo::SyncViewSettingsToRig() {
   if (auto* boom = world.Get<scene::CameraBoom>(player_)) {
     boom->shoulder_offset = vs.tp_shoulder_offset;
     boom->height_offset = vs.tp_height_offset;
-    boom->distance = std::clamp(boom->distance, vs.tp_min_distance, vs.tp_max_distance);
+    boom->distance = rx::Clamp(boom->distance, vs.tp_min_distance, vs.tp_max_distance);
   }
   if (auto* ob = world.Get<scene::CameraObstruction>(player_)) {
     ob->radius = vs.tp_obstruction_radius;
@@ -763,7 +765,7 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
     // spiral of death) so the physics-coupled update advances on the engine's
     // Jolt cadence rather than the raw render frame delta.
     static f32 sim_accum = 0.0f;
-    sim_accum += std::min(dt, 0.25f);
+    sim_accum += rx::Min(dt, 0.25f);
     steps = 0;
     while (sim_accum >= fixed) {
       sim_accum -= fixed;
@@ -787,7 +789,7 @@ void GymDemo::Update(f32 dt, const InputState& input, const ActionState& actions
     // Moving platform: ping-pong along X, driven kinematically so a standing body
     // could ride it (character platform-riding is not yet folded into the module).
     platform_time_ += fixed;
-    const f32 offset = std::sin(platform_time_ * 0.6f) * platform_span_;
+    const f32 offset = ::sin(platform_time_ * 0.6f) * platform_span_;
     const Vec3 target{platform_center_.x + offset, platform_center_.y, platform_center_.z};
     const f32 identity_rot[4] = {0, 0, 0, 1};
     if (platform_body_) phys.MoveBodyKinematic(platform_body_, target, identity_rot, fixed);
@@ -856,7 +858,7 @@ void GymDemo::Emit(f32 dt, render::FrameView& view) {
   const bool third_person = vm && vm->kind == character::CharacterViewKind::kThirdPerson;
   if (third_person && body && tr && st) {
     const f32 radius = body->radius;
-    const f32 cyl_len = std::max(2.0f * body->half_height, 0.01f);
+    const f32 cyl_len = rx::Max(2.0f * body->half_height, 0.01f);
     const Vec3 feet{tr->position[0], tr->position[1], tr->position[2]};
     const f32 center_y = feet.y + radius + cyl_len * 0.5f;
     // Body faces the smoothed facing yaw (turn smoothing); in third person it
@@ -906,14 +908,14 @@ void GymDemo::DrawPanel() {
   if (!shape || !move || !state) return;
 
   ImGui::SetNextWindowSize(ImVec2(340, 820), ImGuiCond_FirstUseEver);
-  const f32 panel_x = std::max(20.0f, ImGui::GetIO().DisplaySize.x - 360.0f);
+  const f32 panel_x = rx::Max(20.0f, ImGui::GetIO().DisplaySize.x - 360.0f);
   ImGui::SetNextWindowPos(ImVec2(panel_x, 20), ImGuiCond_FirstUseEver);
   if (ImGui::Begin("Gym - character tuning")) {
     const char* stance = state->stance == character::CharacterStance::kCrouching ? "crouch" : "stand";
     const bool tp = vm && vm->kind == character::CharacterViewKind::kThirdPerson;
     ImGui::Text("view: %s   stance: %s   %s", tp ? "third-person" : "first-person", stance,
                 state->grounded ? "grounded" : "airborne");
-    const f32 speed = std::sqrt(state->velocity.x * state->velocity.x +
+    const f32 speed = ::sqrt(state->velocity.x * state->velocity.x +
                                 state->velocity.z * state->velocity.z);
     ImGui::Text("speed: %.2f m/s   eye: %.2f m   crouch: %.0f%%", speed, state->eye_height,
                 state->crouch_blend * 100.0f);
@@ -936,7 +938,7 @@ void GymDemo::DrawPanel() {
       const char* tag = jst->refueling ? "  refuel" : (jst->burning ? "  BURN" : "");
       ImGui::Text("jetpack: %s%s   (J toggle, hold Space to burn)", on ? "ON" : "off", tag);
       char label[32];
-      std::snprintf(label, sizeof(label), "fuel %.0f%%", jst->fuel * 100.0f);
+      ::snprintf(label, sizeof(label), "fuel %.0f%%", jst->fuel * 100.0f);
       ImGui::ProgressBar(jst->fuel, ImVec2(-1.0f, 0.0f), label);
       ImGui::Text("thrust %.0f%%", jst->thrust * 100.0f);
     }

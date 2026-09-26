@@ -1,11 +1,14 @@
 #include "render/gi/local_shadows.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/functional/function.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/gi/shadow.h"
+#include "core/sort.h"
 
 namespace rx::render {
 namespace {
@@ -68,12 +71,13 @@ void LocalShadows::Assign(PointLight* lights, u32 count, const Vec3& camera, u32
     f32 dist2 = dx * dx + dy * dy + dz * dz;
     if (dist2 > kMaxShadowDistance * kMaxShadowDistance) continue;
     candidates[candidate_count++] = {
-        i, light.color_intensity[3] * radius * radius / std::max(dist2, 1.0f),
+        i, light.color_intensity[3] * radius * radius / rx::Max(dist2, 1.0f),
         type == 0 ? 6u : 1u};
     if (candidate_count == kMaxCandidates) break;
   }
-  std::sort(candidates, candidates + candidate_count,
-            [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
+  // Stable: equal scores keep light order, which decides who gets faces.
+  rx::StableSort(candidates, candidates + candidate_count,
+                 [](const Candidate& a, const Candidate& b) { return a.score > b.score; });
 
   face_count_ = 0;
   FaceData* upload = static_cast<FaceData*>(face_buffers_[frame_slot].mapped);
@@ -84,7 +88,7 @@ void LocalShadows::Assign(PointLight* lights, u32 count, const Vec3& camera, u32
     light.params[3] = static_cast<f32>(face_count_ + 1);
 
     Vec3 pos{light.pos_radius[0], light.pos_radius[1], light.pos_radius[2]};
-    f32 far = std::max(light.pos_radius[3], 0.25f);
+    f32 far = rx::Max(light.pos_radius[3], 0.25f);
     u32 type = static_cast<u32>(light.direction_type[3] + 0.5f);
     for (u32 f = 0; f < cand.faces; ++f) {
       Mat4 view;
@@ -92,10 +96,10 @@ void LocalShadows::Assign(PointLight* lights, u32 count, const Vec3& camera, u32
       if (type == 1) {  // spot: one face down the cone, slightly overscanned
         Vec3 dir = Normalize(Vec3{light.direction_type[0], light.direction_type[1],
                                   light.direction_type[2]});
-        Vec3 up = std::abs(dir.y) < 0.99f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+        Vec3 up = ::abs(dir.y) < 0.99f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
         view = LookAt(pos, pos + dir, up);
-        f32 outer = std::acos(std::clamp(light.params[1], -1.0f, 1.0f));
-        fov = std::clamp(2.2f * outer, 0.2f, 2.9f);
+        f32 outer = ::acos(rx::Clamp(light.params[1], -1.0f, 1.0f));
+        fov = rx::Clamp(2.2f * outer, 0.2f, 2.9f);
       } else {  // point: 95-degree cube faces so the sampling inset stays valid
         view = LookAt(pos, pos + kFaceDirs[f], kFaceUps[f]);
         fov = 1.658f;
@@ -121,13 +125,13 @@ void LocalShadows::Assign(PointLight* lights, u32 count, const Vec3& camera, u32
 }
 
 void LocalShadows::Render(CommandList& cmd, PipelineHandle pipeline,
-                          const std::function<void(CommandList&, const Face&)>& draw) {
+                          const base::Function<void(CommandList&, const Face&)>& draw) {
   // Persistent atlas: shader-read between frames, depth target while writing.
   TextureBarrier to_write = Transition(
       atlas_, atlas_initialized_ ? ResourceState::kShaderReadFragment : ResourceState::kUndefined,
       ResourceState::kDepthTarget);
   atlas_initialized_ = true;
-  cmd.TextureBarriers({&to_write, 1});
+  cmd.TextureBarriers(base::Span(&to_write, 1));
 
   DepthAttachment depth{
       .view = atlas_.view, .load = LoadOp::kClear, .store = StoreOp::kStore, .clear = 1.0f};
@@ -147,7 +151,7 @@ void LocalShadows::Render(CommandList& cmd, PipelineHandle pipeline,
 
   TextureBarrier to_read =
       Transition(atlas_, ResourceState::kDepthTarget, ResourceState::kShaderReadFragment);
-  cmd.TextureBarriers({&to_read, 1});
+  cmd.TextureBarriers(base::Span(&to_read, 1));
   // The froxel volume samples the atlas from compute; widen visibility (the
   // layout above already suits any sampled read).
   cmd.MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeRead);

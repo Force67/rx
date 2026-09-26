@@ -17,7 +17,7 @@
 
 #include "locomotion/rig.h"
 
-#include <cmath>
+#include <math.h>
 
 #include "core/math.h"
 
@@ -208,8 +208,8 @@ bool BipedRig::Build(physics::PhysicsWorld& physics, const ControllerParameters&
 
   // Yaw about -Y, matching rx::character::HeadingQuat(yaw) =
   // QuatFromAxisAngle({0, -1, 0}, yaw) = {0, -sin(yaw/2), 0, cos(yaw/2)}.
-  const f32 hy = std::sin(yaw * 0.5f);
-  const f32 hcw = std::cos(yaw * 0.5f);
+  const f32 hy = ::sin(yaw * 0.5f);
+  const f32 hcw = ::cos(yaw * 0.5f);
   const Quat yawq{0, -hy, 0, hcw};
   const f32 rot[4] = {0, -hy, 0, hcw};
   auto world = [&](const Vec3& local) { return feet_position + Rotate(yawq, local); };

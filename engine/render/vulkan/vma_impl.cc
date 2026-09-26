@@ -5,4 +5,5 @@
 #define VMA_IMPLEMENTATION
 #define VMA_STATIC_VULKAN_FUNCTIONS 0
 #define VMA_DYNAMIC_VULKAN_FUNCTIONS 1
+#define VMA_CONFIGURATION_USER_INCLUDES_H "render/vulkan/vma_config.h"
 #include <vk_mem_alloc.h>

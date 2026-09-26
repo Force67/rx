@@ -1,5 +1,7 @@
 #include "net/protocol.h"
 
+#include "base/containers/vector.h"
+#include "base/optional.h"
 #include "net/wire.h"
 
 namespace rx::net {
@@ -32,23 +34,23 @@ EntityState TakeEntityState(ByteReader& r) {
 
 }  // namespace
 
-std::vector<u8> ClientJoin::Encode() const {
+base::Vector<u8> ClientJoin::Encode() const {
   ByteWriter w;
   w.U32(protocol);
   w.Str(player_name);
   return w.Take();
 }
 
-std::optional<ClientJoin> ClientJoin::Decode(const u8* data, size_t size) {
+base::Optional<ClientJoin> ClientJoin::Decode(const u8* data, size_t size) {
   ByteReader r(data, size);
   ClientJoin m;
   m.protocol = r.U32();
   m.player_name = r.Str();
-  if (!r.ok()) return std::nullopt;
+  if (!r.ok()) return base::nullopt;
   return m;
 }
 
-std::vector<u8> JoinAccept::Encode() const {
+base::Vector<u8> JoinAccept::Encode() const {
   ByteWriter w;
   w.U64(player_entity);
   w.U64(server_tick);
@@ -59,7 +61,7 @@ std::vector<u8> JoinAccept::Encode() const {
   return w.Take();
 }
 
-std::optional<JoinAccept> JoinAccept::Decode(const u8* data, size_t size) {
+base::Optional<JoinAccept> JoinAccept::Decode(const u8* data, size_t size) {
   ByteReader r(data, size);
   JoinAccept m;
   m.player_entity = r.U64();
@@ -68,27 +70,27 @@ std::optional<JoinAccept> JoinAccept::Decode(const u8* data, size_t size) {
   m.client_id = r.U32();
   m.tick_rate = r.U16();
   m.snapshot_rate = r.U16();
-  if (!r.ok()) return std::nullopt;
+  if (!r.ok()) return base::nullopt;
   return m;
 }
 
-std::vector<u8> JoinRefuse::Encode() const {
+base::Vector<u8> JoinRefuse::Encode() const {
   ByteWriter w;
   w.U8(static_cast<u8>(reason));
   w.Str(detail);
   return w.Take();
 }
 
-std::optional<JoinRefuse> JoinRefuse::Decode(const u8* data, size_t size) {
+base::Optional<JoinRefuse> JoinRefuse::Decode(const u8* data, size_t size) {
   ByteReader r(data, size);
   JoinRefuse m;
   m.reason = static_cast<DisconnectReason>(r.U8());
   m.detail = r.Str();
-  if (!r.ok()) return std::nullopt;
+  if (!r.ok()) return base::nullopt;
   return m;
 }
 
-std::vector<u8> Snapshot::Encode() const {
+base::Vector<u8> Snapshot::Encode() const {
   ByteWriter w;
   w.U64(server_tick);
   w.Bool(full);
@@ -99,26 +101,26 @@ std::vector<u8> Snapshot::Encode() const {
   return w.Take();
 }
 
-std::optional<Snapshot> Snapshot::Decode(const u8* data, size_t size) {
+base::Optional<Snapshot> Snapshot::Decode(const u8* data, size_t size) {
   ByteReader r(data, size);
   Snapshot m;
   m.server_tick = r.U64();
   m.full = r.Bool();
   const u32 entity_count = r.U32();
   if (static_cast<size_t>(entity_count) * kEntityRecordBytes > r.remaining()) {
-    return std::nullopt;
+    return base::nullopt;
   }
   m.entities.reserve(entity_count);
   for (u32 i = 0; i < entity_count; ++i) m.entities.push_back(TakeEntityState(r));
   const u32 despawn_count = r.U32();
-  if (static_cast<size_t>(despawn_count) * 8 > r.remaining()) return std::nullopt;
+  if (static_cast<size_t>(despawn_count) * 8 > r.remaining()) return base::nullopt;
   m.despawned.reserve(despawn_count);
   for (u32 i = 0; i < despawn_count; ++i) m.despawned.push_back(r.U64());
-  if (!r.ok()) return std::nullopt;
+  if (!r.ok()) return base::nullopt;
   return m;
 }
 
-std::vector<u8> PlayerInput::Encode() const {
+base::Vector<u8> PlayerInput::Encode() const {
   ByteWriter w;
   w.U64(client_tick);
   w.F32(move_x);
@@ -130,7 +132,7 @@ std::vector<u8> PlayerInput::Encode() const {
   return w.Take();
 }
 
-std::optional<PlayerInput> PlayerInput::Decode(const u8* data, size_t size) {
+base::Optional<PlayerInput> PlayerInput::Decode(const u8* data, size_t size) {
   ByteReader r(data, size);
   PlayerInput m;
   m.client_tick = r.U64();
@@ -140,11 +142,11 @@ std::optional<PlayerInput> PlayerInput::Decode(const u8* data, size_t size) {
   m.yaw = r.F32();
   m.pitch = r.F32();
   m.buttons = r.U32();
-  if (!r.ok()) return std::nullopt;
+  if (!r.ok()) return base::nullopt;
   return m;
 }
 
-std::vector<u8> EncodeBubbleSync(const base::Vector<BubbleState>& bubbles) {
+base::Vector<u8> EncodeBubbleSync(const base::Vector<BubbleState>& bubbles) {
   ByteWriter w;
   w.U32(static_cast<u32>(bubbles.size()));
   for (const BubbleState& b : bubbles) {
@@ -157,11 +159,11 @@ std::vector<u8> EncodeBubbleSync(const base::Vector<BubbleState>& bubbles) {
   return w.Take();
 }
 
-std::optional<base::Vector<BubbleState>> DecodeBubbleSync(const u8* data, size_t size) {
+base::Optional<base::Vector<BubbleState>> DecodeBubbleSync(const u8* data, size_t size) {
   ByteReader r(data, size);
   const u32 count = r.U32();
   if (static_cast<size_t>(count) * kBubbleRecordBytes > r.remaining()) {
-    return std::nullopt;
+    return base::nullopt;
   }
   base::Vector<BubbleState> out;
   out.reserve(count);
@@ -174,7 +176,7 @@ std::optional<base::Vector<BubbleState>> DecodeBubbleSync(const u8* data, size_t
     b.owned_count = r.U32();
     out.push_back(b);
   }
-  if (!r.ok()) return std::nullopt;
+  if (!r.ok()) return base::nullopt;
   return out;
 }
 

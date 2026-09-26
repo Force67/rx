@@ -1,6 +1,6 @@
 #include "render/geometry/shore_wetting.h"
 
-#include <cmath>
+#include <math.h>
 
 #include "core/log.h"
 #include "shaders/shore_wetting_cs_hlsl.h"
@@ -86,8 +86,8 @@ void ShoreWetting::BeginFrame(const Vec3& camera_eye) {
   // Snap the origin to the texel grid so the field does not shimmer as the
   // camera slides; the min corner sits half an extent behind the eye.
   const f32 texel = kExtent / static_cast<f32>(kResolution);
-  origin_[0] = std::floor((camera_eye.x - kExtent * 0.5f) / texel) * texel;
-  origin_[1] = std::floor((camera_eye.z - kExtent * 0.5f) / texel) * texel;
+  origin_[0] = ::floor((camera_eye.x - kExtent * 0.5f) / texel) * texel;
+  origin_[1] = ::floor((camera_eye.z - kExtent * 0.5f) / texel) * texel;
   if (!have_prev_) {
     prev_origin_[0] = origin_[0];
     prev_origin_[1] = origin_[1];

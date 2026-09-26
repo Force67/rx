@@ -1,21 +1,22 @@
 #include "material_palette.h"
 
-#include <algorithm>
-#include <cstdio>
-#include <filesystem>
-#include <fstream>
-#include <memory>
-#include <string>
-#include <string_view>
-#include <vector>
+#include <stdio.h>
 
 #include "asset/asset_database.h"
 #include "asset/vfs.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
 #include "ecs/world.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
 #include "scene_authoring.h"
+#include "base/algorithm.h"
+#include "core/file_system.h"
+#include "core/text_reader.h"
 
 namespace rx {
 namespace {
@@ -29,13 +30,13 @@ struct Preset {
   ecs::World world;
 };
 
-void PrintJsonString(std::string_view s) {
-  std::putchar('"');
+void PrintJsonString(base::StringRef s) {
+  ::putchar('"');
   for (char c : s) {
-    if (c == '"' || c == '\\') std::putchar('\\');
-    std::putchar(c);
+    if (c == '"' || c == '\\') ::putchar('\\');
+    ::putchar(c);
   }
-  std::putchar('"');
+  ::putchar('"');
 }
 
 // The file's first comment paragraph, joined into one line: the lines from the
@@ -43,24 +44,26 @@ void PrintJsonString(std::string_view s) {
 // preset opens with, and it stops before the blank line ahead of `entity`, so
 // the summary is what the author wrote about the material and not the whole
 // header of a file that happens to carry more.
-std::string LeadingComment(const std::filesystem::path& path) {
-  std::ifstream in(path, std::ios::binary);
-  std::string line;
-  std::string summary;
+base::String LeadingComment(const base::String& path) {
+  base::String contents;
+  fs::ReadTextFile(path, &contents);
+  LineReader in(contents);
+  base::StringRef line;
+  base::String summary;
   bool started = false;
-  while (std::getline(in, line)) {
+  while (in.Next(&line)) {
     const size_t a = line.find_first_not_of(" \t\r\n");
-    const bool comment = a != std::string::npos && line[a] == '#';
+    const bool comment = a != base::StringRef::npos && line[a] == '#';
     if (!comment) {
       if (started) break;
       continue;
     }
     started = true;
     size_t text = line.find_first_not_of("# \t", a);
-    if (text == std::string::npos) continue;  // a '#' on its own separates paragraphs
+    if (text == base::StringRef::npos) continue;  // a '#' on its own separates paragraphs
     const size_t end = line.find_last_not_of(" \t\r\n");
     if (!summary.empty()) summary += ' ';
-    summary.append(line, text, end - text + 1);
+    summary.append(line.data() + text, end - text + 1);
   }
   return summary;
 }
@@ -105,32 +108,32 @@ void PrintValue(const edit::PropValue& value) {
     return;
   }
   if (value.type == edit::PropType::kBool) {
-    std::printf("%s", value.b ? "true" : "false");
+    ::printf("%s", value.b ? "true" : "false");
     return;
   }
   if (const u32 lanes = FloatLanes(value.type); lanes != 0) {
     if (lanes == 1) {
-      std::printf("%g", value.f[0]);
+      ::printf("%g", value.f[0]);
       return;
     }
-    std::printf("[");
-    for (u32 lane = 0; lane < lanes; ++lane) std::printf("%s%g", lane ? ", " : "", value.f[lane]);
-    std::printf("]");
+    ::printf("[");
+    for (u32 lane = 0; lane < lanes; ++lane) ::printf("%s%g", lane ? ", " : "", value.f[lane]);
+    ::printf("]");
     return;
   }
   // i32 is the one integer the reader signs, and it lives in a different field.
   if (value.type == edit::PropType::kI32) {
-    std::printf("%lld", static_cast<long long>(value.i));
+    ::printf("%lld", static_cast<long long>(value.i));
     return;
   }
-  std::printf("%llu", static_cast<unsigned long long>(value.u));
+  ::printf("%llu", static_cast<unsigned long long>(value.u));
 }
 
 // One preset's components, as `{"Surface": {"roughness": 0.35, ...}, ...}`.
 // `defaults` is a scratch entity of the same world, borrowed one component at a
 // time to read what an unset prop would have been.
 void PrintComponents(ecs::World& world, ecs::Entity entity, ecs::Entity defaults) {
-  std::printf("{");
+  ::printf("{");
   bool first_comp = true;
   for (const edit::ComponentDesc* comp : edit::ComponentsOn(world, entity)) {
     // A component the registry cannot default-construct has no "unset" to
@@ -139,9 +142,9 @@ void PrintComponents(ecs::World& world, ecs::Entity entity, ecs::Entity defaults
     // worse than a verbose one.
     const bool has_defaults = edit::AddComponentByDesc(world, defaults, *comp);
     bool first_prop = true;
-    std::printf("%s\n        ", first_comp ? "" : ",");
+    ::printf("%s\n        ", first_comp ? "" : ",");
     PrintJsonString(comp->name);
-    std::printf(": {");
+    ::printf(": {");
     for (u32 p = 0; p < comp->prop_count; ++p) {
       const edit::PropDesc& prop = comp->props[p];
       edit::PropValue value;
@@ -153,32 +156,32 @@ void PrintComponents(ecs::World& world, ecs::Entity entity, ecs::Entity defaults
       // default, and a listing that dropped it would read as no kind at all.
       const bool named = prop.type == edit::PropType::kString && !value.s.empty();
       if (!named && compare && SameAsDefault(value, fallback)) continue;
-      std::printf("%s", first_prop ? "" : ", ");
+      ::printf("%s", first_prop ? "" : ", ");
       first_prop = false;
       PrintJsonString(prop.name);
-      std::printf(": ");
+      ::printf(": ");
       PrintValue(value);
     }
-    std::printf("}");
+    ::printf("}");
     first_comp = false;
     if (has_defaults) edit::RemoveComponentByDesc(world, defaults, *comp);
   }
-  std::printf("%s}", first_comp ? "" : "\n      ");
+  ::printf("%s}", first_comp ? "" : "\n      ");
 }
 
 }  // namespace
 
-bool DumpMaterialPalette(const std::string& dir) {
-  std::error_code ec;
-  if (!std::filesystem::is_directory(dir, ec)) {
+bool DumpMaterialPalette(const base::String& dir) {
+  if (!fs::IsDirectory(dir)) {
     RX_ERROR("no material palette at '{}' (the path is relative to the working directory)", dir);
     return false;
   }
-  std::vector<std::filesystem::path> files;
-  for (const std::filesystem::directory_entry& entry :
-       std::filesystem::directory_iterator(dir, ec)) {
-    if (entry.is_regular_file() && entry.path().extension() == ".rxscene") {
-      files.push_back(entry.path());
+  base::Vector<base::String> files;
+  base::Vector<fs::DirEntry> entries;
+  fs::ListDirectory(dir, &entries);
+  for (const fs::DirEntry& entry : entries) {
+    if (entry.is_regular && fs::Extension(entry.path) == ".rxscene") {
+      files.push_back(entry.path);
     }
   }
   if (files.empty()) {
@@ -187,50 +190,52 @@ bool DumpMaterialPalette(const std::string& dir) {
   }
   // Directory order is whatever the filesystem hands back; sorting is what
   // makes two dumps of the same palette diffable.
-  std::sort(files.begin(), files.end());
+  // One directory, so the paths differ only in their unique file names and a
+  // byte-wise sort orders them as path comparison did.
+  base::Sort(files.data(), files.data() + files.size());
 
   // Every preset is loaded before anything is printed, so a palette with a bad
   // entry in it fails with no output rather than with half a json document a
   // caller then has to parse to find out it is half.
   RegisterSceneComponents();
-  std::vector<std::unique_ptr<Preset>> presets;
-  for (const std::filesystem::path& file : files) {
+  base::Vector<base::UniquePointer<Preset>> presets;
+  for (const base::String& file : files) {
     // One world per preset: the first entity of the file is the preset (the
     // same INVARIANT Prefab.path merges by - World::Create hands out ascending
     // indices and LoadScene calls it once per `entity` block), and a shared
     // world would make "first" mean the first entity of the first file.
-    auto preset = std::make_unique<Preset>();
-    std::string error;
-    if (!edit::LoadScene(preset->world, preset->db, file.string(), &error, /*strict=*/true)) {
-      RX_ERROR("material preset '{}' does not load: {}", file.string(), error);
+    auto preset = base::MakeUnique<Preset>();
+    base::String error;
+    if (!edit::LoadScene(preset->world, preset->db, file, &error, /*strict=*/true)) {
+      RX_ERROR("material preset '{}' does not load: {}", file, error);
       return false;
     }
     if (!preset->world.IsAlive(ecs::Entity{0, 0})) {
-      RX_ERROR("material preset '{}' declares no entity", file.string());
+      RX_ERROR("material preset '{}' declares no entity", file);
       return false;
     }
-    presets.push_back(std::move(preset));
+    presets.push_back(base::move(preset));
   }
 
-  std::printf("{\n  \"directory\": ");
+  ::printf("{\n  \"directory\": ");
   PrintJsonString(dir);
-  std::printf(",\n  \"materials\": [\n");
+  ::printf(",\n  \"materials\": [\n");
   for (size_t i = 0; i < files.size(); ++i) {
     ecs::World& world = presets[i]->world;
-    std::printf("    {\"name\": ");
-    PrintJsonString(files[i].stem().string());
-    std::printf(", \"path\": ");
-    PrintJsonString(files[i].generic_string());
-    std::printf(", \"summary\": ");
+    ::printf("    {\"name\": ");
+    PrintJsonString(base::String(fs::Stem(files[i])));
+    ::printf(", \"path\": ");
+    PrintJsonString(fs::GenericString(files[i]));
+    ::printf(", \"summary\": ");
     PrintJsonString(LeadingComment(files[i]));
-    std::printf(", \"sets\": ");
+    ::printf(", \"sets\": ");
     // A scratch entity to default-construct each component onto, which is where
     // "the author did not set this" comes from: the registry knows the
     // defaults, so nothing here has to repeat them.
     PrintComponents(world, ecs::Entity{0, 0}, world.Create());
-    std::printf("}%s\n", i + 1 < files.size() ? "," : "");
+    ::printf("}%s\n", i + 1 < files.size() ? "," : "");
   }
-  std::printf("  ]\n}\n");
+  ::printf("  ]\n}\n");
   return true;
 }
 

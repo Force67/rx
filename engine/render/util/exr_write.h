@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_EXR_WRITE_H_
 #define RX_RENDER_EXR_WRITE_H_
 
-#include <string>
 
+#include "base/strings/xstring.h"
 #include "core/types.h"
 
 namespace rx::render {
@@ -11,7 +11,7 @@ namespace rx::render {
 // is width*height*3 floats, row-major, top row first. Returns false on a file
 // error. Minimal but spec-correct: enough for compositors (Nuke, Resolve, oiio,
 // ffmpeg) to read the engine's linear-hdr captures as a production container.
-bool WriteExrRgbF32(const std::string& path, u32 width, u32 height, const f32* rgb);
+bool WriteExrRgbF32(const base::String& path, u32 width, u32 height, const f32* rgb);
 
 }  // namespace rx::render
 

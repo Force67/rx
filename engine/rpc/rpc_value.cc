@@ -1,51 +1,60 @@
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
 #include "rpc/rpc_value.h"
 
 namespace rx::rpc {
 
-RpcValue::RpcValue() : v_(std::monostate{}) {}
-RpcValue::RpcValue(bool v) : v_(v) {}
-RpcValue::RpcValue(i64 v) : v_(v) {}
-RpcValue::RpcValue(f64 v) : v_(v) {}
-RpcValue::RpcValue(std::string v) : v_(std::move(v)) {}
-RpcValue::RpcValue(std::vector<u8> v) : v_(std::move(v)) {}
+RpcValue::RpcValue() = default;
+RpcValue::RpcValue(bool v) : type_(Type::kBool), bool_(v) {}
+RpcValue::RpcValue(i64 v) : type_(Type::kInt), int_(v) {}
+RpcValue::RpcValue(f64 v) : type_(Type::kFloat), float_(v) {}
+RpcValue::RpcValue(base::String v) : type_(Type::kString), string_(base::move(v)) {}
+RpcValue::RpcValue(base::Vector<u8> v) : type_(Type::kBlob), blob_(base::move(v)) {}
 
 RpcValue::Type RpcValue::type() const {
-  return static_cast<Type>(v_.index());
+  return type_;
 }
 
 bool RpcValue::is_null() const {
-  return std::holds_alternative<std::monostate>(v_);
+  return type_ == Type::kNull;
 }
 
 bool RpcValue::as_bool(bool def) const {
-  if (const bool* p = std::get_if<bool>(&v_)) return *p;
-  return def;
+  return type_ == Type::kBool ? bool_ : def;
 }
 
 i64 RpcValue::as_int(i64 def) const {
-  if (const i64* p = std::get_if<i64>(&v_)) return *p;
-  return def;
+  return type_ == Type::kInt ? int_ : def;
 }
 
 f64 RpcValue::as_float(f64 def) const {
-  if (const f64* p = std::get_if<f64>(&v_)) return *p;
-  return def;
+  return type_ == Type::kFloat ? float_ : def;
 }
 
-const std::string& RpcValue::as_string() const {
-  static const std::string kEmpty;
-  if (const std::string* p = std::get_if<std::string>(&v_)) return *p;
-  return kEmpty;
+const base::String& RpcValue::as_string() const {
+  static const base::String kEmpty;
+  return type_ == Type::kString ? string_ : kEmpty;
 }
 
-const std::vector<u8>& RpcValue::as_blob() const {
-  static const std::vector<u8> kEmpty;
-  if (const std::vector<u8>* p = std::get_if<std::vector<u8>>(&v_)) return *p;
-  return kEmpty;
+const base::Vector<u8>& RpcValue::as_blob() const {
+  static const base::Vector<u8> kEmpty;
+  return type_ == Type::kBlob ? blob_ : kEmpty;
 }
 
+// std::variant's equality: same alternative, then that alternative's ==. The
+// float compares as a double does, so NaN is unequal to itself.
 bool RpcValue::operator==(const RpcValue& other) const {
-  return v_ == other.v_;
+  if (type_ != other.type_) return false;
+  switch (type_) {
+    case Type::kNull: return true;
+    case Type::kBool: return bool_ == other.bool_;
+    case Type::kInt: return int_ == other.int_;
+    case Type::kFloat: return float_ == other.float_;
+    case Type::kString: return string_ == other.string_;
+    case Type::kBlob: return blob_ == other.blob_;
+  }
+  return false;
 }
 
 }  // namespace rx::rpc

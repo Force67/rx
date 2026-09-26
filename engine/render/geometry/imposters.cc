@@ -1,13 +1,13 @@
 #include "render/geometry/imposters.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/span.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/imposter_bake_ps_hlsl.h"
 #include "shaders/imposter_bake_vs_hlsl.h"
 #include "shaders/imposter_ps_hlsl.h"
@@ -50,7 +50,7 @@ Vec3 HemiOctDecode(f32 u, f32 v) {
   Vec3 d;
   d.x = (ex - ey) * 0.5f;
   d.z = (ex + ey) * 0.5f;
-  d.y = 1.0f - std::abs(d.x) - std::abs(d.z);
+  d.y = 1.0f - ::abs(d.x) - ::abs(d.z);
   return Normalize(d);
 }
 
@@ -115,7 +115,7 @@ bool ImposterPass::Initialize(Device& device, Format color_format, Format depth_
     cmd.TextureBarriers(to_dst);
     BufferTextureCopy copy;
     copy.extent = {1, 1};
-    cmd.CopyBufferToTexture(staging, white_, {&copy, 1});
+    cmd.CopyBufferToTexture(staging, white_, base::Span(&copy, 1));
     TextureBarrier to_read[1] = {Transition(white_, ResourceState::kCopyDst,
                                             ResourceState::kShaderReadFragment)};
     cmd.TextureBarriers(to_read);
@@ -142,7 +142,7 @@ void ImposterPass::Destroy(Device& device) {
 }
 
 u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
-                       std::span<const BakeMaterial> materials) {
+                       base::Span<const BakeMaterial> materials) {
   if (!bake_pipeline_ || mesh.lods.empty()) return kNoMesh;
   if (mesh_count_ >= kMaxMeshes) {
     RX_WARN("imposter atlas is full at {} meshes; this one is not baked", kMaxMeshes);
@@ -156,14 +156,14 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
   // Bounds of the mesh (bake frames fit this sphere).
   Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
   for (const asset::Vertex& v : lod.vertices) {
-    lo = {std::min(lo.x, v.position[0]), std::min(lo.y, v.position[1]),
-          std::min(lo.z, v.position[2])};
-    hi = {std::max(hi.x, v.position[0]), std::max(hi.y, v.position[1]),
-          std::max(hi.z, v.position[2])};
+    lo = {rx::Min(lo.x, v.position[0]), rx::Min(lo.y, v.position[1]),
+          rx::Min(lo.z, v.position[2])};
+    hi = {rx::Max(hi.x, v.position[0]), rx::Max(hi.y, v.position[1]),
+          rx::Max(hi.z, v.position[2])};
   }
   Vec3 center = (lo + hi) * 0.5f;
   Vec3 ext = (hi - lo) * 0.5f;
-  const f32 radius = std::sqrt(ext.x * ext.x + ext.y * ext.y + ext.z * ext.z);
+  const f32 radius = ::sqrt(ext.x * ext.x + ext.y * ext.y + ext.z * ext.z);
 
   if (first) {
     albedo_atlas_ = device.CreateImage2D(
@@ -212,14 +212,14 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
     colors[0] = {.view = albedo_atlas_.view, .load = load, .clear = {0, 0, 0, 0}};
     colors[1] = {.view = normal_atlas_.view, .load = load, .clear = {0.5f, 1, 0.5f, 0}};
     DepthAttachment depth{.view = bake_depth.view, .load = LoadOp::kClear, .clear = 1.0f};
-    cmd.BeginRendering({.extent = {kAtlas, kAtlas}, .colors = {colors, 2}, .depth = &depth});
+    cmd.BeginRendering({.extent = {kAtlas, kAtlas}, .colors = base::Span(colors, 2), .depth = &depth});
     cmd.BindPipeline(bake_pipeline_);
     cmd.BindVertexBuffer(0, vertices, 0);
     cmd.BindIndexBuffer(indices, 0, IndexType::kUint32);
     for (u32 j = 0; j < kGrid; ++j) {
       for (u32 i = 0; i < kGrid; ++i) {
         Vec3 dir = HemiOctDecode((i + 0.5f) / kGrid, (j + 0.5f) / kGrid);
-        Vec3 up = std::abs(dir.y) > 0.98f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
+        Vec3 up = ::abs(dir.y) > 0.98f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
         Mat4 view = LookAt(center + dir * (radius * 2.0f), center, up);
         Mat4 proj = Orthographic(-radius, radius, -radius, radius, 0.1f, radius * 4.0f);
         const f32 x = static_cast<f32>(tile_x + i * kCell);
@@ -229,7 +229,7 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
         // One draw per submesh, because the albedo map and the cutoff are the
         // material's: a tree is bark plus an alpha-masked foliage sheet, and
         // baking the two through one state loses the leaf shape entirely.
-        const u32 draws = std::max<u32>(1, static_cast<u32>(lod.submeshes.size()));
+        const u32 draws = rx::Max<u32>(1, static_cast<u32>(lod.submeshes.size()));
         for (u32 s = 0; s < draws; ++s) {
           const BakeMaterial material = s < materials.size() ? materials[s] : BakeMaterial{};
           const GpuImage& albedo = material.base_color ? *material.base_color : white_;
@@ -291,7 +291,7 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
   UploadMeshParams(device);
 
   // RX_IMPOSTER_DUMP=<path.ppm> writes the baked albedo atlas for inspection.
-  if (const char* dump = std::getenv("RX_IMPOSTER_DUMP")) {
+  if (const char* dump = ::getenv("RX_IMPOSTER_DUMP")) {
     GpuBuffer readback = device.CreateBuffer(static_cast<u64>(kAtlas) * kAtlas * 4,
                                              kBufferUsageTransferDst, true);
     device.ImmediateSubmit([&](CommandList& cmd) {
@@ -312,12 +312,12 @@ u32 ImposterPass::Bake(Device& device, const asset::Mesh& mesh,
       cmd.TextureBarriers(back);
     });
     if (readback.mapped) {
-      std::FILE* f = std::fopen(dump, "wb");
+      FILE* f = ::fopen(dump, "wb");
       if (f) {
-        std::fprintf(f, "P6\n%u %u\n255\n", kAtlas, kAtlas);
+        ::fprintf(f, "P6\n%u %u\n255\n", kAtlas, kAtlas);
         const u8* px = static_cast<const u8*>(readback.mapped);
-        for (u32 i = 0; i < kAtlas * kAtlas; ++i) std::fwrite(px + i * 4, 1, 3, f);
-        std::fclose(f);
+        for (u32 i = 0; i < kAtlas * kAtlas; ++i) ::fwrite(px + i * 4, 1, 3, f);
+        ::fclose(f);
         RX_INFO("imposter atlas dumped to {}", dump);
       }
     }
@@ -334,7 +334,7 @@ void ImposterPass::UploadMeshParams(Device& device) {
       Span(meshes_, mesh_count_ * sizeof(MeshParams)), kBufferUsageStorage);
 }
 
-void ImposterPass::SetInstances(Device& device, std::span<const Instance> instances) {
+void ImposterPass::SetInstances(Device& device, base::Span<const Instance> instances) {
   // Deferred: the split is rebuilt as the camera moves, so the buffer this
   // replaces may still be read by a submitted frame.
   if (instances_) device.DestroyBufferDeferred(instances_);
@@ -374,7 +374,7 @@ void ImposterPass::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
 
         ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
         DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
-        ctx.cmd->BeginRendering({.extent = extent, .colors = {&att, 1}, .depth = &depth_att});
+        ctx.cmd->BeginRendering({.extent = extent, .colors = base::Span(&att, 1), .depth = &depth_att});
         ctx.cmd->BindPipeline(draw_pipeline_);
         ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, instances_, 0, instances_.size),
                                    Bind::Combined(1, albedo_atlas_.view, sampler_),

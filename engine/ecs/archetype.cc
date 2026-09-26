@@ -1,8 +1,10 @@
 #include "ecs/archetype.h"
 
-#include <cassert>
+#include <assert.h>
 #include <new>
 
+#include "base/algorithm.h"
+#include "base/memory/move.h"
 #include "core/memory/chunk_pool.h"
 
 namespace rx::ecs {
@@ -13,7 +15,7 @@ u32 AlignUp(u32 value, u32 align) { return (value + align - 1) & ~(align - 1); }
 
 }  // namespace
 
-Archetype::Archetype(Signature signature) : signature_(std::move(signature)) {
+Archetype::Archetype(Signature signature) : signature_(base::move(signature)) {
   columns_.reserve(signature_.size());
   u32 total_stride = 0;
   u32 max_align = 1;
@@ -133,7 +135,7 @@ u32 Archetype::ChunkRowCount(u32 chunk) const {
 }
 
 int Archetype::ColumnIndex(ComponentId id) const {
-  auto it = std::lower_bound(signature_.begin(), signature_.end(), id);
+  const ComponentId* it = base::LowerBound(signature_.begin(), signature_.end(), id);
   if (it == signature_.end() || *it != id) return -1;
   return static_cast<int>(it - signature_.begin());
 }

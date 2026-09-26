@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_DDGI_H_
 #define RX_RENDER_DDGI_H_
 
-#include <memory>
 
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "render/core/bindless.h"
 #include "render/atmosphere/environment.h"
@@ -38,7 +38,7 @@ class DdgiSystem {
     f32 energy_scale = 1.0f;
   };
 
-  static std::unique_ptr<DdgiSystem> Create(Device& device, TextureView sky_view,
+  static base::UniquePointer<DdgiSystem> Create(Device& device, TextureView sky_view,
                                             SamplerHandle sky_sampler, BindlessRegistry& bindless);
   ~DdgiSystem();
 

@@ -1,13 +1,14 @@
 #include "render/geometry/hair_groom.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
 #include <base/containers/unordered_map.h>
 
 #include "asset/bc_encode.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 
 namespace rx::render {
 namespace {
@@ -55,8 +56,8 @@ void DecodeBc4Alpha(const u8* block, f32 out[16]) {
 
 void DecodeBc1Colors(const u8* block, bool bc3, u8 out[16][3]) {
   u16 c0, c1;
-  std::memcpy(&c0, block, 2);
-  std::memcpy(&c1, block + 2, 2);
+  base::MemCopy(&c0, block, 2);
+  base::MemCopy(&c1, block + 2, 2);
   auto expand = [](u16 c, u8 rgb[3]) {
     rgb[0] = static_cast<u8>(((c >> 11) & 0x1f) * 255 / 31);
     rgb[1] = static_cast<u8>(((c >> 5) & 0x3f) * 255 / 63);
@@ -76,7 +77,7 @@ void DecodeBc1Colors(const u8* block, bool bc3, u8 out[16][3]) {
     }
   }
   u32 bits;
-  std::memcpy(&bits, block + 4, 4);
+  base::MemCopy(&bits, block + 4, 4);
   for (int i = 0; i < 16; ++i) {
     u32 idx = (bits >> (i * 2)) & 0x3;
     for (int k = 0; k < 3; ++k) out[i][k] = pal[idx][k];
@@ -88,13 +89,13 @@ size_t MipOffset(const asset::Texture& t, u32 mip, u32* w, u32* h) {
   size_t block = (t.format == asset::TextureFormat::kBc1) ? 8 : 16;
   size_t offset = 0;
   for (u32 m = 0; m < mip; ++m) {
-    u32 mw = std::max(1u, t.width >> m);
-    u32 mh = std::max(1u, t.height >> m);
+    u32 mw = rx::Max(1u, t.width >> m);
+    u32 mh = rx::Max(1u, t.height >> m);
     offset += compressed ? ((mw + 3) / 4) * ((mh + 3) / 4) * block
                          : static_cast<size_t>(mw) * mh * 4;
   }
-  *w = std::max(1u, t.width >> mip);
-  *h = std::max(1u, t.height >> mip);
+  *w = rx::Max(1u, t.width >> mip);
+  *h = rx::Max(1u, t.height >> mip);
   return offset;
 }
 
@@ -108,7 +109,7 @@ bool DecodeDiffuse(const asset::Texture& t, u32 target_max, DecodedTex* out) {
   }
   u32 mip = 0;
   for (u32 m = 0; m + 1 < t.mip_count; ++m) {
-    if (std::max(t.width >> m, t.height >> m) <= target_max) break;
+    if (rx::Max(t.width >> m, t.height >> m) <= target_max) break;
     mip = m + 1;
   }
   u32 w, h;
@@ -118,7 +119,7 @@ bool DecodeDiffuse(const asset::Texture& t, u32 target_max, DecodedTex* out) {
   out->rgba.resize(static_cast<size_t>(w) * h * 4);
   auto to_lin = [&](u8 c) {
     f32 x = c / 255.0f;
-    return t.is_srgb ? std::pow(x, 2.2f) : x;
+    return t.is_srgb ? ::pow(x, 2.2f) : x;
   };
   if (t.format == asset::TextureFormat::kRgba8) {
     if (offset + static_cast<size_t>(w) * h * 4 > t.data.size()) return false;
@@ -153,10 +154,10 @@ bool DecodeDiffuse(const asset::Texture& t, u32 target_max, DecodedTex* out) {
           // DXT1 1-bit alpha: the punch-through palette index (only in the
           // 3-colour mode) is transparent; opaque cards decode to 1.
           u16 c0, c1;
-          std::memcpy(&c0, blk, 2);
-          std::memcpy(&c1, blk + 2, 2);
+          base::MemCopy(&c0, blk, 2);
+          base::MemCopy(&c1, blk + 2, 2);
           u32 bits;
-          std::memcpy(&bits, blk + 4, 4);
+          base::MemCopy(&bits, blk + 4, 4);
           bool four = c0 > c1;
           for (int i = 0; i < 16; ++i) {
             u32 idx = (bits >> (i * 2)) & 0x3;
@@ -186,9 +187,9 @@ struct Texel {
 
 // Bilinear tap, returns linear rgb + coverage alpha.
 Texel SampleTex(const DecodedTex& t, f32 u, f32 v) {
-  auto wrap = [](f32 x) { return x - std::floor(x); };
+  auto wrap = [](f32 x) { return x - ::floor(x); };
   f32 fx = wrap(u) * t.w - 0.5f, fy = wrap(v) * t.h - 0.5f;
-  i32 x0 = static_cast<i32>(std::floor(fx)), y0 = static_cast<i32>(std::floor(fy));
+  i32 x0 = static_cast<i32>(::floor(fx)), y0 = static_cast<i32>(::floor(fy));
   f32 tx = fx - x0, ty = fy - y0;
   auto at = [&](i32 x, i32 y) {
     x = ((x % (i32)t.w) + t.w) % t.w;
@@ -253,7 +254,7 @@ Vec3 ChainStep(const Comp& comp, const base::Vector<GVert>& verts, f32 target_a,
     f32 dc = AcrossOf(comp, gv) - c;
     Vec3 dw = gv.p - prev;
     f32 e = da * da * inv_ha + dc * dc * inv_hc + Dot(dw, dw) * inv_hw;
-    f32 w = std::exp(-e);
+    f32 w = ::exp(-e);
     acc = acc + gv.p * w;
     wsum += w;
   }
@@ -265,13 +266,13 @@ Vec3 ChainStep(const Comp& comp, const base::Vector<GVert>& verts, f32 target_a,
 // interpolate the scalp edge continuously instead of snapping to those few verts.
 Vec3 RootAt(const Comp& comp, const base::Vector<GVert>& verts, f32 c) {
   f32 n = static_cast<f32>(comp.root_verts.size());
-  f32 h = std::max((comp.c_max - comp.c_min) / std::max(1.0f, n - 1.0f), 1e-4f) * 1.2f;
+  f32 h = rx::Max((comp.c_max - comp.c_min) / rx::Max(1.0f, n - 1.0f), 1e-4f) * 1.2f;
   f32 inv = 1.0f / (h * h);
   Vec3 acc{0, 0, 0};
   f32 wsum = 0;
   for (u32 vi : comp.root_verts) {
     f32 dc = AcrossOf(comp, verts[vi]) - c;
-    f32 w = std::exp(-dc * dc * inv);
+    f32 w = ::exp(-dc * dc * inv);
     acc = acc + verts[vi].p * w;
     wsum += w;
   }
@@ -352,14 +353,14 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
       Vec3 dp = verts[vi].p - pbar;
       suu += du * du; svv += dv * dv; suv += du * dv;
       sup = sup + dp * du; svp = svp + dp * dv;
-      bmin = {std::min(bmin.x, verts[vi].p.x), std::min(bmin.y, verts[vi].p.y),
-              std::min(bmin.z, verts[vi].p.z)};
-      bmax = {std::max(bmax.x, verts[vi].p.x), std::max(bmax.y, verts[vi].p.y),
-              std::max(bmax.z, verts[vi].p.z)};
+      bmin = {rx::Min(bmin.x, verts[vi].p.x), rx::Min(bmin.y, verts[vi].p.y),
+              rx::Min(bmin.z, verts[vi].p.z)};
+      bmax = {rx::Max(bmax.x, verts[vi].p.x), rx::Max(bmax.y, verts[vi].p.y),
+              rx::Max(bmax.z, verts[vi].p.z)};
     }
     f32 det = suu * svv - suv * suv;
     Vec3 dpu, dpv;  // world metres per unit u / v
-    if (std::fabs(det) > 1e-12f) {
+    if (::fabs(det) > 1e-12f) {
       dpu = (sup * svv - svp * suv) * (1.0f / det);
       dpv = (svp * suu - sup * suv) * (1.0f / det);
     } else {
@@ -369,8 +370,8 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     // Compare world span (metres/uv * uv-extent) on each axis to pick the length.
     f32 umin = 1e30f, umax = -1e30f, vmin = 1e30f, vmax = -1e30f;
     for (u32 vi : comp.verts) {
-      umin = std::min(umin, verts[vi].u); umax = std::max(umax, verts[vi].u);
-      vmin = std::min(vmin, verts[vi].v); vmax = std::max(vmax, verts[vi].v);
+      umin = rx::Min(umin, verts[vi].u); umax = rx::Max(umax, verts[vi].u);
+      vmin = rx::Min(vmin, verts[vi].v); vmax = rx::Max(vmax, verts[vi].v);
     }
     f32 span_u = Length(dpu) * (umax - umin);
     f32 span_v = Length(dpv) * (vmax - vmin);
@@ -378,8 +379,8 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     for (u32 vi : comp.verts) {
       f32 a = AlongOf(comp, verts[vi]);
       f32 c = AcrossOf(comp, verts[vi]);
-      amin = std::min(amin, a); amax = std::max(amax, a);
-      cmin = std::min(cmin, c); cmax = std::max(cmax, c);
+      amin = rx::Min(amin, a); amax = rx::Max(amax, a);
+      cmin = rx::Min(cmin, c); cmax = rx::Max(cmax, c);
     }
     comp.c_min = cmin;
     comp.c_max = cmax;
@@ -390,7 +391,7 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     comp.across_dir = comp.world_per_c > 1e-9f ? across_grad * (1.0f / comp.world_per_c)
                                                : Vec3{1, 0, 0};
     comp.across_world = comp.world_per_c * (cmax - cmin);
-    comp.hw = std::clamp(0.5f * comp.across_world, 0.006f, 0.05f);
+    comp.hw = rx::Clamp(0.5f * comp.across_world, 0.006f, 0.05f);
     Vec3 nrm = Cross(dpu, dpv);
     f32 nl = Length(nrm);
     comp.normal = nl > 1e-9f ? nrm * (1.0f / nl) : Vec3{0, 0, 1};
@@ -411,9 +412,9 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     else { comp.a_root = amax; comp.a_tip = amin; }
     // Root-edge verts: the scalp-side band. Strands are seeded only here so they
     // start at the scalp and trace the full card length, never mid-card.
-    f32 root_band = 0.14f * std::fabs(comp.a_tip - comp.a_root) + 1e-6f;
+    f32 root_band = 0.14f * ::fabs(comp.a_tip - comp.a_root) + 1e-6f;
     for (u32 vi : comp.verts) {
-      if (std::fabs(AlongOf(comp, verts[vi]) - comp.a_root) <= root_band) {
+      if (::fabs(AlongOf(comp, verts[vi]) - comp.a_root) <= root_band) {
         comp.root_verts.push_back(vi);
       }
     }
@@ -489,26 +490,26 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     }
     Vec3 color = (have_tex && a_acc > 1e-3f) ? col_acc * (1.0f / a_acc) : Vec3{1, 1, 1};
 
-    f32 ha = 0.8f * std::fabs(comp.a_tip - comp.a_root) / (P - 1) + 1e-4f;
-    f32 hc = 0.06f * std::fabs(comp.c_max - comp.c_min) + 1e-4f;
+    f32 ha = 0.8f * ::fabs(comp.a_tip - comp.a_root) / (P - 1) + 1e-4f;
+    f32 hc = 0.06f * ::fabs(comp.c_max - comp.c_min) + 1e-4f;
     // Per-strand flyaway: a fixed random bend that grows toward the tip, applied
     // to the stored point only (not the chain anchor) so neighbouring strands from
     // the same card fan apart into individual locks instead of a flat card-slab.
     f32 fang = randf() * 6.2831853f;
     f32 fh = randf();
-    Vec3 fdir{std::cos(fang), -0.15f - 0.3f * fh, std::sin(fang)};  // outward + slight droop
+    Vec3 fdir{::cos(fang), -0.15f - 0.3f * fh, ::sin(fang)};  // outward + slight droop
     // A few strands only (fh near 1) get a real flyaway; most stay tidy so the
     // silhouette reads as groomed hair, not frizz. Curl already separates strands.
-    f32 famp = std::clamp(comp.hw * 0.3f, 0.002f, 0.008f) * (fh > 0.7f ? fh : 0.15f * fh) *
+    f32 famp = rx::Clamp(comp.hw * 0.3f, 0.002f, 0.008f) * (fh > 0.7f ? fh : 0.15f * fh) *
                params.frizz;
     // Lock cross-section: quantise across into ~10 mm locks and bulge each out
     // along the card normal (round tube, not flat sheet).
     const f32 kLockWorld = 0.010f;
     f32 lock_c = comp.world_per_c > 1e-6f ? kLockWorld / comp.world_per_c : (comp.c_max - comp.c_min);
-    lock_c = std::min(std::max(lock_c, 1e-6f), comp.c_max - comp.c_min + 1e-6f);
-    f32 lock_center = comp.c_min + (std::floor((c_seed - comp.c_min) / lock_c) + 0.5f) * lock_c;
-    f32 an = std::clamp((c_seed - lock_center) / (0.5f * lock_c), -1.0f, 1.0f);
-    f32 profile = std::sqrt(std::max(0.0f, 1.0f - an * an));
+    lock_c = rx::Min(rx::Max(lock_c, 1e-6f), comp.c_max - comp.c_min + 1e-6f);
+    f32 lock_center = comp.c_min + (::floor((c_seed - comp.c_min) / lock_c) + 0.5f) * lock_c;
+    f32 an = rx::Clamp((c_seed - lock_center) / (0.5f * lock_c), -1.0f, 1.0f);
+    f32 profile = ::sqrt(rx::Max(0.0f, 1.0f - an * an));
     f32 bulge = 0.5f * lock_c * comp.world_per_c * (profile * 0.9f + (randf() - 0.4f) * 0.4f);
     // Per-strand curl: a two-frequency wave (in-plane + out-of-plane) unique to
     // each strand, growing toward the tip, so coplanar strands of one flat card
@@ -521,7 +522,7 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
     // plus fine detail that breaks flat card facets. Independent of `frizz`: the
     // wave is what de-slabs coplanar cards into locks, so it must stay strong even
     // for "groomed" (low-flyaway) facegen styles, or the cards read as metal foil.
-    f32 camp = std::clamp(comp.hw * 0.85f, 0.010f, 0.020f) * (0.6f + 0.8f * randf());
+    f32 camp = rx::Clamp(comp.hw * 0.85f, 0.010f, 0.020f) * (0.6f + 0.8f * randf());
     // Trace root->tip, anchored on the scalp vertex and holding across = c_seed so
     // it follows one card strip (narrow world bandwidth prevents slab merging).
     Vec3 chain_prev = root_pos;
@@ -535,16 +536,16 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
         f32 tt = static_cast<f32>(k) / (P - 1);
         f32 a = comp.a_root + (comp.a_tip - comp.a_root) * tt;
         chain_prev = ChainStep(comp, verts, a, c_seed, chain_prev, ha, hc);
-        f32 ramp = std::min(1.0f, tt / 0.18f);  // keep roots on the scalp
+        f32 ramp = rx::Min(1.0f, tt / 0.18f);  // keep roots on the scalp
         // Curl carries a small base amount near the root (not zero) so short,
         // crown-only cards break out of the coplanar slab too, then grows to the
         // tip; the very first point stays pinned on the scalp (k==0 above).
         f32 wv = camp * (0.2f + 0.8f * tt);
         Vec3 curl =
-            comp.normal * ((std::sin(cfreq * tt + cph1) + 0.4f * std::sin(cfreq * 2.7f * tt + cph3)) * wv) +
+            comp.normal * ((::sin(cfreq * tt + cph1) + 0.4f * ::sin(cfreq * 2.7f * tt + cph3)) * wv) +
             comp.across_dir *
-                ((std::sin(cfreq * 0.7f * tt + cph2) + 0.4f * std::sin(cfreq * 2.3f * tt + cph4)) * wv * 0.6f);
-        pos = chain_prev + comp.normal * (bulge * ramp) + curl + fdir * (famp * std::pow(tt, 1.4f));
+                ((::sin(cfreq * 0.7f * tt + cph2) + 0.4f * ::sin(cfreq * 2.3f * tt + cph4)) * wv * 0.6f);
+        pos = chain_prev + comp.normal * (bulge * ramp) + curl + fdir * (famp * ::pow(tt, 1.4f));
       }
       pts[(static_cast<size_t>(emitted) * P + k) * 3 + 0] = pos.x;
       pts[(static_cast<size_t>(emitted) * P + k) * 3 + 1] = pos.y;
@@ -579,8 +580,8 @@ bool BuildHairGroom(const asset::Mesh& mesh, const GroomParams& params, GroomDat
   f32 head_r = 0;
   for (u32 i = 0; i < emitted; ++i) {
     Vec3 rp{roots[i * 3], roots[i * 3 + 1], roots[i * 3 + 2]};
-    f32 horiz = std::sqrt((rp.x - scalp.x) * (rp.x - scalp.x) + (rp.z - scalp.z) * (rp.z - scalp.z));
-    head_r = std::max(head_r, horiz);
+    f32 horiz = ::sqrt((rp.x - scalp.x) * (rp.x - scalp.x) + (rp.z - scalp.z) * (rp.z - scalp.z));
+    head_r = rx::Max(head_r, horiz);
   }
   if (params.recenter) {
     for (size_t i = 0; i < pts.size(); i += 3) {
@@ -630,9 +631,9 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
   auto cap_normal = [&](u32 s, u32 count) {
     f32 t = (static_cast<f32>(s) + 0.5f) / count;
     f32 y = 0.35f + 0.6f * t;
-    f32 r = std::sqrt(std::max(0.0f, 1.0f - y * y));
+    f32 r = ::sqrt(rx::Max(0.0f, 1.0f - y * y));
     f32 a = 2.399963f * static_cast<f32>(s);
-    return Vec3{r * std::cos(a), y, r * std::sin(a)};
+    return Vec3{r * ::cos(a), y, r * ::sin(a)};
   };
 
   out->points.reserve(static_cast<size_t>(guide_count) * P * 3);
@@ -654,7 +655,7 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
         for (u32 k = 0; k < P; ++k) {
           if (k > 0) {
             f32 t = static_cast<f32>(k) / (P - 1);
-            Vec3 dir = Normalize(Lerp(nrm, {0, -1, 0}, std::pow(t, 0.7f)));
+            Vec3 dir = Normalize(Lerp(nrm, {0, -1, 0}, ::pow(t, 0.7f)));
             p = p + dir * segment;
             length_sum += Length(p - prev);
             prev = p;
@@ -672,7 +673,7 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
       // strand binds to the next strand of its bundle (bundle cohesion), the
       // bundle leaders bind where their rest paths cross (the plait), and all
       // three leaders bind at the tip (the elastic).
-      const u32 per_bundle = std::max(1u, guide_count / 3);
+      const u32 per_bundle = rx::Max(1u, guide_count / 3);
       const u32 count = per_bundle * 3;
       const Vec3 nape{0, -0.15f * head_r, -0.98f * head_r};
       const f32 len = 0.34f;
@@ -684,8 +685,8 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
         for (u32 k = 0; k < P; ++k) {
           f32 t = static_cast<f32>(k) / (P - 1);
           f32 w = 18.849556f * t + phase;  // three full crossings down the braid
-          centers[b * P + k] = nape + Vec3{amp * std::sin(w), -len * t,
-                                           -0.02f * t - 0.5f * amp * std::cos(2.0f * w)};
+          centers[b * P + k] = nape + Vec3{amp * ::sin(w), -len * t,
+                                           -0.02f * t - 0.5f * amp * ::cos(2.0f * w)};
         }
       }
       for (u32 b = 0; b < 3; ++b) {
@@ -693,8 +694,8 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
           u32 s = b * per_bundle + i;
           // Per-strand offset within the bundle, tapering to the tip.
           f32 ang = randf() * 6.2831853f;
-          f32 rad = 0.004f * std::sqrt(randf());
-          Vec3 off{rad * std::cos(ang), 0, rad * std::sin(ang)};
+          f32 rad = 0.004f * ::sqrt(randf());
+          Vec3 off{rad * ::cos(ang), 0, rad * ::sin(ang)};
           Vec3 root = Normalize(centers[b * P] + off * 2.0f) * head_r;
           push_root(root);
           Vec3 prev{};
@@ -751,8 +752,8 @@ bool BuildTestGroom(TestGroomStyle style, u32 guide_count, u32 seed, GroomData* 
         Vec3 root = nrm * head_r;
         // Small spread at the tie so the tail keeps volume.
         f32 ang = randf() * 6.2831853f;
-        f32 rad = 0.006f * std::sqrt(randf());
-        Vec3 tie_off{rad * std::cos(ang), 0, rad * std::sin(ang)};
+        f32 rad = 0.006f * ::sqrt(randf());
+        Vec3 tie_off{rad * ::cos(ang), 0, rad * ::sin(ang)};
         f32 tail_len = 0.30f + 0.05f * randf();
         push_root(root);
         Vec3 prev{};

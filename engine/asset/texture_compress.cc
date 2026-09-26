@@ -1,17 +1,9 @@
 #include "asset/texture_compress.h"
 
-#include <algorithm>
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <mutex>
-#include <thread>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #ifdef _WIN32
 #include <process.h>
@@ -21,10 +13,23 @@
 
 #include "asset/asset_id.h"
 #include "asset/bc_encode.h"
+#include "base/atomic.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/thread.h"
+#include "base/time/time.h"
+#include "core/format.h"
+#include "core/file_system.h"
 #include "core/log.h"
+#include "core/scalar.h"
 
 namespace rx::asset {
-namespace fs = std::filesystem;
 namespace {
 
 // Bumped whenever the encoder or the mip filter changes what it produces.
@@ -35,10 +40,10 @@ namespace {
 constexpr u32 kCodecVersion = 1;
 constexpr char kCacheMagic[4] = {'R', 'X', 'T', 'C'};
 
-std::atomic<bool> g_supported{false};
-std::atomic<bool> g_compress_normals{false};
+base::Atomic<bool> g_supported{false};
+base::Atomic<bool> g_compress_normals{false};
 
-std::mutex g_stats_mutex;
+base::Mutex g_stats_mutex;
 TextureCompressionStats g_stats;
 
 // colour space
@@ -48,7 +53,7 @@ const f32* SrgbToLinearTable() {
     auto* values = new f32[256];
     for (u32 i = 0; i < 256; ++i) {
       const f32 c = static_cast<f32>(i) / 255.0f;
-      values[i] = c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+      values[i] = c <= 0.04045f ? c / 12.92f : ::pow((c + 0.055f) / 1.055f, 2.4f);
     }
     return values;
   }();
@@ -56,16 +61,16 @@ const f32* SrgbToLinearTable() {
 }
 
 u8 LinearToSrgb(f32 v) {
-  v = std::clamp(v, 0.0f, 1.0f);
-  const f32 s = v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
-  return static_cast<u8>(std::clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
+  v = rx::Clamp(v, 0.0f, 1.0f);
+  const f32 s = v <= 0.0031308f ? v * 12.92f : 1.055f * ::pow(v, 1.0f / 2.4f) - 0.055f;
+  return static_cast<u8>(rx::Clamp(s * 255.0f + 0.5f, 0.0f, 255.0f));
 }
 
 u32 FullMipChainLength(u32 width, u32 height) {
   u32 levels = 1;
   while (width > 1 || height > 1) {
-    width = std::max(1u, width / 2);
-    height = std::max(1u, height / 2);
+    width = rx::Max(1u, width / 2);
+    height = rx::Max(1u, height / 2);
     ++levels;
   }
   return levels;
@@ -83,16 +88,16 @@ void Downsample(const u8* src, u32 sw, u32 sh, u8* dst, u32 dw, u32 dh, bool srg
   const f32 scale_y = static_cast<f32>(sh) / static_cast<f32>(dh);
   for (u32 y = 0; y < dh; ++y) {
     const f32 fy = (static_cast<f32>(y) + 0.5f) * scale_y - 0.5f;
-    const i32 y0 = static_cast<i32>(std::floor(fy));
+    const i32 y0 = static_cast<i32>(::floor(fy));
     const f32 wy = fy - static_cast<f32>(y0);
-    const u32 ya = static_cast<u32>(std::clamp(y0, 0, static_cast<i32>(sh) - 1));
-    const u32 yb = static_cast<u32>(std::clamp(y0 + 1, 0, static_cast<i32>(sh) - 1));
+    const u32 ya = static_cast<u32>(rx::Clamp(y0, 0, static_cast<i32>(sh) - 1));
+    const u32 yb = static_cast<u32>(rx::Clamp(y0 + 1, 0, static_cast<i32>(sh) - 1));
     for (u32 x = 0; x < dw; ++x) {
       const f32 fx = (static_cast<f32>(x) + 0.5f) * scale_x - 0.5f;
-      const i32 x0 = static_cast<i32>(std::floor(fx));
+      const i32 x0 = static_cast<i32>(::floor(fx));
       const f32 wx = fx - static_cast<f32>(x0);
-      const u32 xa = static_cast<u32>(std::clamp(x0, 0, static_cast<i32>(sw) - 1));
-      const u32 xb = static_cast<u32>(std::clamp(x0 + 1, 0, static_cast<i32>(sw) - 1));
+      const u32 xa = static_cast<u32>(rx::Clamp(x0, 0, static_cast<i32>(sw) - 1));
+      const u32 xb = static_cast<u32>(rx::Clamp(x0 + 1, 0, static_cast<i32>(sw) - 1));
       const u8* p00 = src + (static_cast<size_t>(ya) * sw + xa) * 4;
       const u8* p10 = src + (static_cast<size_t>(ya) * sw + xb) * 4;
       const u8* p01 = src + (static_cast<size_t>(yb) * sw + xa) * 4;
@@ -110,7 +115,7 @@ void Downsample(const u8* src, u32 sw, u32 sh, u8* dst, u32 dw, u32 dh, bool srg
         } else {
           const f32 v = static_cast<f32>(p00[c]) * w00 + static_cast<f32>(p10[c]) * w10 +
                         static_cast<f32>(p01[c]) * w01 + static_cast<f32>(p11[c]) * w11;
-          out[c] = static_cast<u8>(std::clamp(v + 0.5f, 0.0f, 255.0f));
+          out[c] = static_cast<u8>(rx::Clamp(v + 0.5f, 0.0f, 255.0f));
         }
       }
     }
@@ -162,7 +167,7 @@ void EncodeBlock(TextureFormat format, const u8* rgba, u8* out) {
       // block that is at least deterministic.
       RX_ERROR("EncodeBlock: no encoder for texture format {}, writing an empty block",
                static_cast<int>(format));
-      std::memset(out, 0, BlockBytes(format));
+      base::MemSet(out, 0, BlockBytes(format));
       return;
   }
 }
@@ -183,10 +188,10 @@ void EncodeSurface(const u8* rgba, u32 width, u32 height, TextureFormat format, 
           // Edges that are not a multiple of four replicate the last real
           // texel into the padding. Leaving it zero would pull the endpoint
           // fit toward black on every edge block.
-          const u32 sy = std::min(by * 4 + ty, height - 1);
+          const u32 sy = rx::Min(by * 4 + ty, height - 1);
           for (u32 tx = 0; tx < 4; ++tx) {
-            const u32 sx = std::min(bx * 4 + tx, width - 1);
-            std::memcpy(block + (ty * 4 + tx) * 4, rgba + (static_cast<size_t>(sy) * width + sx) * 4,
+            const u32 sx = rx::Min(bx * 4 + tx, width - 1);
+            base::MemCopy(block + (ty * 4 + tx) * 4, rgba + (static_cast<size_t>(sy) * width + sx) * 4,
                         4);
           }
         }
@@ -196,24 +201,25 @@ void EncodeSurface(const u8* rgba, u32 width, u32 height, TextureFormat format, 
     }
   };
 
-  unsigned threads = std::thread::hardware_concurrency();
-  if (threads == 0) threads = 1;
-  threads = std::min<unsigned>(threads, blocks_y);
+  unsigned threads = base::GetProcessorCount();
+  threads = rx::Min<unsigned>(threads, blocks_y);
   if (threads <= 1) {
     encode_rows(0, blocks_y);
     return;
   }
-  std::vector<std::thread> workers;
+  // base::Thread is not movable; the vector must not relocate live threads.
+  base::Vector<base::UniquePointer<base::Thread>> workers;
   workers.reserve(threads - 1);
   const u32 per_thread = (blocks_y + threads - 1) / threads;
   for (unsigned t = 1; t < threads; ++t) {
-    const u32 first = std::min(blocks_y, t * per_thread);
-    const u32 last = std::min(blocks_y, first + per_thread);
+    const u32 first = rx::Min(blocks_y, t * per_thread);
+    const u32 last = rx::Min(blocks_y, first + per_thread);
     if (first >= last) break;
-    workers.emplace_back([&, first, last] { encode_rows(first, last); });
+    workers.push_back(base::MakeUnique<base::Thread>(
+        "rx-bc-encode", [&, first, last] { encode_rows(first, last); }, /*start_now=*/true));
   }
-  encode_rows(0, std::min(blocks_y, per_thread));
-  for (std::thread& worker : workers) worker.join();
+  encode_rows(0, rx::Min(blocks_y, per_thread));
+  for (auto& worker : workers) worker->Join();
 }
 
 // format choice
@@ -244,33 +250,32 @@ TextureFormat FormatForRole(const Texture& texture, TextureRole role) {
 
 // disk cache
 
-std::string CacheRoot() {
-  if (const char* override_dir = std::getenv("RX_TEXCACHE_DIR")) return override_dir;
-  if (const char* xdg = std::getenv("XDG_CACHE_HOME")) return (fs::path(xdg) / "rx/texcache").string();
+base::String CacheRoot() {
+  if (const char* override_dir = ::getenv("RX_TEXCACHE_DIR")) return override_dir;
+  if (const char* xdg = ::getenv("XDG_CACHE_HOME")) return fs::Join(xdg, "rx/texcache");
 #if defined(_WIN32)
-  if (const char* local = std::getenv("LOCALAPPDATA"))
-    return (fs::path(local) / "rx/texcache").string();
+  if (const char* local = ::getenv("LOCALAPPDATA")) return fs::Join(local, "rx/texcache");
 #else
-  if (const char* home = std::getenv("HOME")) return (fs::path(home) / ".cache/rx/texcache").string();
+  if (const char* home = ::getenv("HOME")) return fs::Join(home, ".cache/rx/texcache");
 #endif
-  return (fs::temp_directory_path() / "rx/texcache").string();
+  return fs::Join(fs::TempDirectory(), "rx/texcache");
 }
 
 // Keyed on the SOURCE PIXELS, not on the file path: the same image embedded in
 // forty glb files, or reached through two different relative paths, is one
 // cache entry and one encode. The cost is hashing the decoded mip 0 on every
 // load, which is a couple of milliseconds against an encode measured in tens.
-std::string CacheKey(const Texture& texture, TextureFormat format) {
+base::String CacheKey(const Texture& texture, TextureFormat format) {
   const u64 content =
-      MakeAssetId(std::string_view(reinterpret_cast<const char*>(texture.data.data()),
+      MakeAssetId(base::StringRef(reinterpret_cast<const char*>(texture.data.data()),
                                    texture.data.size()))
           .hash;
   char shape[96];
-  std::snprintf(shape, sizeof(shape), "%016llx:%u:%u:%u:%u:%u",
+  ::snprintf(shape, sizeof(shape), "%016llx:%u:%u:%u:%u:%u",
                 static_cast<unsigned long long>(content), texture.width, texture.height,
                 static_cast<u32>(format), texture.is_srgb ? 1u : 0u, kCodecVersion);
   char key[17];
-  std::snprintf(key, sizeof(key), "%016llx",
+  ::snprintf(key, sizeof(key), "%016llx",
                 static_cast<unsigned long long>(MakeAssetId(shape).hash));
   return key;
 }
@@ -286,13 +291,13 @@ struct CacheHeader {
   u64 data_bytes;
 };
 
-bool ReadCache(const fs::path& path, Texture* texture, TextureFormat format) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) return false;
+bool ReadCache(base::StringRef path, Texture* texture, TextureFormat format) {
+  base::File file = fs::OpenFile(path, base::File::FLAG_OPEN | base::File::FLAG_READ);
+  if (!file.IsValid()) return false;
   CacheHeader header{};
-  file.read(reinterpret_cast<char*>(&header), sizeof(header));
-  if (!file) return false;
-  if (std::memcmp(header.magic, kCacheMagic, 4) != 0 || header.version != kCodecVersion) return false;
+  if (!fs::ReadAt(file, 0, base::Span<u8>(reinterpret_cast<u8*>(&header), sizeof(header))))
+    return false;
+  if (base::MemCompare(header.magic, kCacheMagic, 4) != 0 || header.version != kCodecVersion) return false;
   // The key already covers all of this; a mismatch means a hash collision or a
   // hand-edited cache, and trusting it would upload a texture of the wrong
   // shape. Cheaper to re-encode than to debug that.
@@ -303,17 +308,15 @@ bool ReadCache(const fs::path& path, Texture* texture, TextureFormat format) {
   if (header.data_bytes == 0 || header.data_bytes > (1ull << 32)) return false;
   if (header.mip_count != FullMipChainLength(texture->width, texture->height)) return false;
   base::Vector<u8> data(static_cast<size_t>(header.data_bytes));
-  file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
-  if (!file) return false;
+  if (!fs::ReadAt(file, sizeof(header), base::Span<u8>(data.data(), data.size()))) return false;
   texture->format = format;
   texture->mip_count = header.mip_count;
-  texture->data = std::move(data);
+  texture->data = base::move(data);
   return true;
 }
 
-void WriteCache(const fs::path& path, const Texture& texture) {
-  std::error_code error;
-  fs::create_directories(path.parent_path(), error);
+void WriteCache(base::StringRef path, const Texture& texture) {
+  fs::CreateDirectories(fs::ParentPath(path));
   // Write beside the target and rename: two processes loading the same scene,
   // or one killed mid-write, must not leave a truncated file that the next run
   // reads back as a valid texture.
@@ -326,12 +329,13 @@ void WriteCache(const fs::path& path, const Texture& texture) {
 #else
   const int pid = getpid();
 #endif
-  const fs::path temp = fs::path(path).concat("." + std::to_string(pid) + ".tmp");
+  const base::String temp = base::String(path) + "." + rx::ToString(pid) + ".tmp";
   {
-    std::ofstream file(temp, std::ios::binary | std::ios::trunc);
-    if (!file) return;
+    base::File file =
+        fs::OpenFile(temp, base::File::FLAG_CREATE_ALWAYS | base::File::FLAG_WRITE);
+    if (!file.IsValid()) return;
     CacheHeader header{};
-    std::memcpy(header.magic, kCacheMagic, 4);
+    base::MemCopy(header.magic, kCacheMagic, 4);
     header.version = kCodecVersion;
     header.format = static_cast<u32>(texture.format);
     header.width = texture.width;
@@ -339,17 +343,17 @@ void WriteCache(const fs::path& path, const Texture& texture) {
     header.mip_count = texture.mip_count;
     header.srgb = texture.is_srgb ? 1u : 0u;
     header.data_bytes = texture.data.size();
-    file.write(reinterpret_cast<const char*>(&header), sizeof(header));
-    file.write(reinterpret_cast<const char*>(texture.data.data()),
-               static_cast<std::streamsize>(texture.data.size()));
-    if (!file) {
-      file.close();
-      fs::remove(temp, error);
+    const bool written =
+        fs::WriteAll(file, base::Span<const u8>(reinterpret_cast<const u8*>(&header),
+                                                sizeof(header))) &&
+        fs::WriteAll(file, base::Span<const u8>(texture.data.data(), texture.data.size()));
+    if (!written) {
+      file.Close();
+      fs::Remove(temp);
       return;
     }
   }
-  fs::rename(temp, path, error);
-  if (error) fs::remove(temp, error);
+  if (!fs::Rename(temp, path)) fs::Remove(temp);
 }
 
 }  // namespace
@@ -363,9 +367,9 @@ TextureCompressionOptions TextureCompressionSettings() {
   return {g_supported.load(), g_compress_normals.load()};
 }
 
-bool CompressTexture(Texture* texture, TextureRole role, std::string_view identity) {
+bool CompressTexture(Texture* texture, TextureRole role, base::StringRef identity) {
   auto skip = [] {
-    std::lock_guard<std::mutex> lock(g_stats_mutex);
+    base::LockGuard<base::Mutex> lock(g_stats_mutex);
     ++g_stats.skipped;
     return false;
   };
@@ -400,11 +404,11 @@ bool CompressTexture(Texture* texture, TextureRole role, std::string_view identi
   const TextureFormat format = FormatForRole(*texture, role);
   if (BlockBytes(format) == 0) return skip();
 
-  const std::string key = CacheKey(*texture, format);
-  const fs::path cache_path = fs::path(CacheRoot()) / (key + ".rxtc");
+  const base::String key = CacheKey(*texture, format);
+  const base::String cache_path = fs::Join(CacheRoot(), key + ".rxtc");
   const u64 source_bytes = texture->data.size();
   if (!identity.empty() && ReadCache(cache_path, texture, format)) {
-    std::lock_guard<std::mutex> lock(g_stats_mutex);
+    base::LockGuard<base::Mutex> lock(g_stats_mutex);
     ++g_stats.compressed;
     ++g_stats.cache_hits;
     g_stats.source_bytes += source_bytes;
@@ -412,7 +416,7 @@ bool CompressTexture(Texture* texture, TextureRole role, std::string_view identi
     return true;
   }
 
-  const auto started = std::chrono::steady_clock::now();
+  const base::TimeTicks started = base::TimeTicks::Now();
   const u32 mip_count = FullMipChainLength(texture->width, texture->height);
   u64 total = 0;
   {
@@ -420,8 +424,8 @@ bool CompressTexture(Texture* texture, TextureRole role, std::string_view identi
     u32 h = texture->height;
     for (u32 mip = 0; mip < mip_count; ++mip) {
       total += SurfaceBytes(format, w, h);
-      w = std::max(1u, w / 2);
-      h = std::max(1u, h / 2);
+      w = rx::Max(1u, w / 2);
+      h = rx::Max(1u, h / 2);
     }
   }
   base::Vector<u8> out(static_cast<size_t>(total));
@@ -431,8 +435,8 @@ bool CompressTexture(Texture* texture, TextureRole role, std::string_view identi
   // averaged xy shorten is what makes a minified normal map flatten instead of
   // sparkle.
   const bool filter_srgb = texture->is_srgb;
-  std::vector<u8> level(texture->data.data(), texture->data.data() + expected);
-  std::vector<u8> next;
+  base::Vector<u8> level(texture->data.data(), texture->data.data() + expected);
+  base::Vector<u8> next;
   u32 w = texture->width;
   u32 h = texture->height;
   u64 offset = 0;
@@ -440,8 +444,8 @@ bool CompressTexture(Texture* texture, TextureRole role, std::string_view identi
     EncodeSurface(level.data(), w, h, format, out.data() + offset);
     offset += SurfaceBytes(format, w, h);
     if (mip + 1 == mip_count) break;
-    const u32 nw = std::max(1u, w / 2);
-    const u32 nh = std::max(1u, h / 2);
+    const u32 nw = rx::Max(1u, w / 2);
+    const u32 nh = rx::Max(1u, h / 2);
     next.resize(static_cast<size_t>(nw) * nh * 4);
     Downsample(level.data(), w, h, next.data(), nw, nh, filter_srgb);
     level.swap(next);
@@ -451,11 +455,11 @@ bool CompressTexture(Texture* texture, TextureRole role, std::string_view identi
 
   texture->format = format;
   texture->mip_count = mip_count;
-  texture->data = std::move(out);
-  const f64 seconds = std::chrono::duration<f64>(std::chrono::steady_clock::now() - started).count();
+  texture->data = base::move(out);
+  const f64 seconds = (base::TimeTicks::Now() - started).InSecondsF();
   if (!identity.empty()) WriteCache(cache_path, *texture);
   {
-    std::lock_guard<std::mutex> lock(g_stats_mutex);
+    base::LockGuard<base::Mutex> lock(g_stats_mutex);
     ++g_stats.compressed;
     g_stats.source_bytes += source_bytes;
     g_stats.compressed_bytes += texture->data.size();
@@ -465,7 +469,7 @@ bool CompressTexture(Texture* texture, TextureRole role, std::string_view identi
 }
 
 TextureCompressionStats CompressionTotals() {
-  std::lock_guard<std::mutex> lock(g_stats_mutex);
+  base::LockGuard<base::Mutex> lock(g_stats_mutex);
   return g_stats;
 }
 

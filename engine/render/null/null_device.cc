@@ -2,6 +2,9 @@
 // engine's control flow alive (headless servers, machines without a GPU or
 // loader) and proves the rhi interface implementable without any graphics API.
 
+#include "base/containers/span.h"
+#include "base/functional/function.h"
+#include "base/memory/unique_pointer.h"
 #include "render/rhi/device.h"
 #include "render/rhi/swapchain.h"
 
@@ -12,7 +15,7 @@ class NullCommandList final : public CommandList {
  public:
   void BindPipeline(PipelineHandle) override {}
   void BindSet(u32, BindingSetHandle) override {}
-  void BindTransient(u32, std::span<const BindingItem>) override {}
+  void BindTransient(u32, base::Span<const BindingItem>) override {}
   void PushConstants(const void*, u32, u32) override {}
   void Dispatch(u32, u32, u32) override {}
   void BeginRendering(const RenderingInfo&) override {}
@@ -25,10 +28,10 @@ class NullCommandList final : public CommandList {
   void DrawIndexed(u32, u32, u32, i32, u32) override {}
   void DrawIndexedIndirect(const GpuBuffer&, u64, u32, u32) override {}
   void DrawMeshTasks(u32, u32, u32) override {}
-  void TextureBarriers(std::span<const TextureBarrier>) override {}
+  void TextureBarriers(base::Span<const TextureBarrier>) override {}
   void MemoryBarrier(BarrierScope, BarrierScope) override {}
   void CopyBufferToTexture(const GpuBuffer&, const GpuImage&,
-                           std::span<const BufferTextureCopy>) override {}
+                           base::Span<const BufferTextureCopy>) override {}
   void CopyTextureToBuffer(const GpuImage&, const GpuBuffer&,
                            const BufferTextureCopy&) override {}
   void CopyBuffer(const GpuBuffer&, u64, const GpuBuffer&, u64, u64) override {}
@@ -54,7 +57,7 @@ class NullDevice final : public Device {
   void WaitIdle() override {}
   bool RecreateSurface(Window&) override { return false; }
   void DestroySurface() override {}
-  std::unique_ptr<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
+  base::UniquePointer<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return nullptr; }
   MemoryBudget memory_budget() const override { return {}; }
 
   GpuBuffer CreateBuffer(u64, BufferUsageFlags, bool) override { return {}; }
@@ -75,7 +78,7 @@ class NullDevice final : public Device {
   void DestroyBindingLayout(BindingLayoutHandle) override {}
   BindingSetHandle CreateBindingSet(BindingLayoutHandle, u32) override { return {}; }
   void DestroyBindingSet(BindingSetHandle) override {}
-  void UpdateBindingSet(BindingSetHandle, std::span<const BindingItem>) override {}
+  void UpdateBindingSet(BindingSetHandle, base::Span<const BindingItem>) override {}
 
   AccelSizes GetBlasSizes(const BlasBuildDesc&) override { return {}; }
   AccelSizes GetTlasSizes(u32) override { return {}; }
@@ -87,7 +90,7 @@ class NullDevice final : public Device {
   void DestroyTimestampPool(TimestampPoolHandle) override {}
   bool GetTimestamps(TimestampPoolHandle, u32, u32, u64*) override { return false; }
 
-  void ImmediateSubmit(const std::function<void(CommandList&)>& record) override {
+  void ImmediateSubmit(const base::Function<void(CommandList&)>& record) override {
     NullCommandList cmd;
     record(cmd);
   }
@@ -102,6 +105,6 @@ class NullDevice final : public Device {
 
 }  // namespace
 
-std::unique_ptr<Device> CreateNullDevice() { return std::make_unique<NullDevice>(); }
+base::UniquePointer<Device> CreateNullDevice() { return base::MakeUnique<NullDevice>(); }
 
 }  // namespace rx::render::null

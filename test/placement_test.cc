@@ -4,10 +4,12 @@
 // (same-footprint layers never collide), exclusion masks, local stability
 // under WorldData edits, and streaming ring bookkeeping. No GPU.
 
-#include <cmath>
-#include <cstdio>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "core/scalar.h"
 #include "placement/density_program.h"
 #include "placement/ecotope.h"
 #include "placement/placement.h"
@@ -24,23 +26,23 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "placement_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "placement_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-3f) {
-  if (std::fabs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "placement_test: FAIL: %s (got %.4f, expected %.4f)\n", message,
+  if (::fabs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "placement_test: FAIL: %s (got %.4f, expected %.4f)\n", message,
                actual, expected);
   ++failures;
 }
 
 f32 ToroidalDistance(f32 ax, f32 ay, f32 bx, f32 by) {
-  f32 dx = std::fabs(ax - bx);
-  f32 dy = std::fabs(ay - by);
-  dx = std::min(dx, 1.0f - dx);
-  dy = std::min(dy, 1.0f - dy);
-  return std::sqrt(dx * dx + dy * dy);
+  f32 dx = ::fabs(ax - bx);
+  f32 dy = ::fabs(ay - by);
+  dx = rx::Min(dx, 1.0f - dx);
+  dy = rx::Min(dy, 1.0f - dy);
+  return ::sqrt(dx * dx + dy * dy);
 }
 
 // The two pattern-generator rules: even threshold coverage at every prefix,
@@ -57,20 +59,20 @@ void TestPattern() {
     f32 min_dist = 10.0f;
     for (u32 i = 0; i < prefix; ++i) {
       for (u32 j = i + 1; j < prefix; ++j) {
-        min_dist = std::min(
+        min_dist = rx::Min(
             min_dist, ToroidalDistance(kPatternXY[i * 2], kPatternXY[i * 2 + 1],
                                        kPatternXY[j * 2], kPatternXY[j * 2 + 1]));
       }
     }
-    f32 ideal = std::sqrt(1.0f / static_cast<f32>(prefix));
+    f32 ideal = ::sqrt(1.0f / static_cast<f32>(prefix));
     Check(min_dist >= 0.5f * ideal, "pattern prefix keeps half the ideal spacing");
   }
 
   // Even coverage: every 4x4 cell holds its fair share of the full pattern.
   u32 cells[16] = {};
   for (u32 i = 0; i < kPatternPoints; ++i) {
-    u32 cx = std::min(static_cast<u32>(kPatternXY[i * 2] * 4.0f), 3u);
-    u32 cy = std::min(static_cast<u32>(kPatternXY[i * 2 + 1] * 4.0f), 3u);
+    u32 cx = rx::Min(static_cast<u32>(kPatternXY[i * 2] * 4.0f), 3u);
+    u32 cy = rx::Min(static_cast<u32>(kPatternXY[i * 2 + 1] * 4.0f), 3u);
     ++cells[cy * 4 + cx];
   }
   for (u32 c = 0; c < 16; ++c) {
@@ -168,7 +170,7 @@ void TestDeterminismAndSpacing() {
   WorldData world(0.0f, 0.0f, 512.0f, 256);
   u32 height = world.AddMap("height");
   world.Generate(height, [](f32 x, f32 z) {
-    return 4.0f * std::sin(x * 0.02f) + 3.0f * std::cos(z * 0.015f);
+    return 4.0f * ::sin(x * 0.02f) + 3.0f * ::cos(z * 0.015f);
   });
   u32 forest = world.AddMap("forest", 1.0f);
   u32 road = world.AddMap("road");
@@ -182,7 +184,7 @@ void TestDeterminismAndSpacing() {
   Check(a.size() == b.size() && !a.empty(), "regeneration reproduces the count");
   bool identical = a.size() == b.size();
   for (u32 i = 0; identical && i < a.size(); ++i) {
-    identical = std::memcmp(&a[i], &b[i], sizeof(PlacedInstance)) == 0;
+    identical = base::MemCompare(&a[i], &b[i], sizeof(PlacedInstance)) == 0;
   }
   Check(identical, "regeneration reproduces instances bit for bit");
 
@@ -195,7 +197,7 @@ void TestDeterminismAndSpacing() {
     for (u32 j = i + 1; j < a.size(); ++j) {
       f32 dx = a[i].transform.m[12] - a[j].transform.m[12];
       f32 dz = a[i].transform.m[14] - a[j].transform.m[14];
-      min_dist = std::min(min_dist, std::sqrt(dx * dx + dz * dz));
+      min_dist = rx::Min(min_dist, ::sqrt(dx * dx + dz * dz));
     }
   }
   Check(min_dist >= 0.6f * stack.footprint, "instances keep footprint spacing");
@@ -223,7 +225,7 @@ void TestDeterminismAndSpacing() {
     f32 z = instance.transform.m[14];
     Near(instance.transform.m[13], world.Sample(height, x, z), "instance sits on ground",
          0.01f);
-    f32 sx = std::sqrt(instance.transform.m[0] * instance.transform.m[0] +
+    f32 sx = ::sqrt(instance.transform.m[0] * instance.transform.m[0] +
                        instance.transform.m[1] * instance.transform.m[1] +
                        instance.transform.m[2] * instance.transform.m[2]);
     Check(sx >= 0.79f && sx <= 1.31f, "instance scale within layer range");
@@ -272,7 +274,7 @@ void TestLocalStability() {
   Check(near_after.size() < near_before.size(), "clearing removes trees locally");
   bool far_identical = far_before.size() == far_after.size();
   for (u32 i = 0; far_identical && i < far_before.size(); ++i) {
-    far_identical = std::memcmp(&far_before[i], &far_after[i], sizeof(PlacedInstance)) == 0;
+    far_identical = base::MemCompare(&far_before[i], &far_after[i], sizeof(PlacedInstance)) == 0;
   }
   Check(far_identical, "distant tile unaffected by the edit");
 
@@ -332,6 +334,6 @@ int main() {
   TestExclusionMask();
   TestLocalStability();
   TestStreamingRing();
-  if (failures == 0) std::printf("placement_test: all checks passed\n");
+  if (failures == 0) ::printf("placement_test: all checks passed\n");
   return failures;
 }

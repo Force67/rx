@@ -1,31 +1,31 @@
 #include "scene_validate.h"
 
-#include <algorithm>
-#include <climits>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <format>
-#include <fstream>
-#include <optional>
-#include <sstream>
-#include <string>
-#include <string_view>
-#include <unordered_map>
-#include <utility>
-#include <vector>
+#include <limits.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "asset/asset_database.h"
 #include "asset/asset_id.h"
 #include "asset/materialx.h"
 #include "asset/procedural_texture.h"
 #include "asset/vfs.h"
+#include "base/algorithm.h"
+#include "base/containers/unordered_map.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "core/log.h"
 #include "ecs/world.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
 #include "scene/components.h"
 #include "scene_authoring.h"
+#include "core/file_system.h"
+#include "core/text_reader.h"
 
 namespace rx {
 namespace {
@@ -33,23 +33,23 @@ namespace {
 struct Finding {
   bool error = true;
   const char* check = "";
-  std::string entity;  // Name.value, empty when the entity is unnamed
+  base::String entity;  // Name.value, empty when the entity is unnamed
   int line = 0;        // source line of the entity's `entity` keyword, 0 = file-wide
-  std::string message;
+  base::String message;
 };
 
 // One `Component.prop = value` assignment as it was written.
 struct SourceAssign {
   u32 entity_index = 0;
   int line = 0;
-  std::string comp;
-  std::string prop;
-  std::string raw;
+  base::String comp;
+  base::String prop;
+  base::String raw;
 };
 
 struct Source {
-  std::vector<int> entity_lines;  // source line of each `entity` keyword, in order
-  std::vector<SourceAssign> assigns;
+  base::Vector<int> entity_lines;  // source line of each `entity` keyword, in order
+  base::Vector<SourceAssign> assigns;
 };
 
 // Re-reads the file the way the loader tokenizes it (trim, skip blank and #/;
@@ -57,17 +57,19 @@ struct Source {
 // LoadScene throws away: pointing a finding at a line rather than an entity
 // ordinal, and seeing what the value parser silently DID with a literal, which
 // is not recoverable from the value it produced.
-Source ScanSource(const std::string& path) {
+Source ScanSource(const base::String& path) {
   Source source;
-  std::ifstream in(path, std::ios::binary);
-  std::string line;
+  base::String contents;
+  fs::ReadTextFile(path, &contents);
+  LineReader in(contents);
+  base::StringRef line;
   int line_no = 0;
-  while (std::getline(in, line)) {
+  while (in.Next(&line)) {
     ++line_no;
     const size_t a = line.find_first_not_of(" \t\r\n");
-    if (a == std::string::npos) continue;
+    if (a == base::StringRef::npos) continue;
     const size_t b = line.find_last_not_of(" \t\r\n");
-    const std::string_view t(line.data() + a, b - a + 1);
+    const base::StringRef t(line.data() + a, b - a + 1);
     if (t[0] == '#' || t[0] == ';') continue;
     if (t == "entity") {
       source.entity_lines.push_back(line_no);
@@ -75,17 +77,17 @@ Source ScanSource(const std::string& path) {
     }
     if (source.entity_lines.empty()) continue;  // stray line before the first entity
     const size_t eq = t.find('=');
-    if (eq == std::string_view::npos) continue;  // tag component
-    std::string_view key = t.substr(0, eq);
+    if (eq == base::StringRef::npos) continue;  // tag component
+    base::StringRef key = t.substr(0, eq);
     while (!key.empty() && (key.back() == ' ' || key.back() == '\t')) key.remove_suffix(1);
     const size_t dot = key.find('.');
-    if (dot == std::string_view::npos) continue;
-    std::string_view raw = t.substr(eq + 1);
+    if (dot == base::StringRef::npos) continue;
+    base::StringRef raw = t.substr(eq + 1);
     const size_t raw_start = raw.find_first_not_of(" \t");
-    raw = raw_start == std::string_view::npos ? std::string_view{} : raw.substr(raw_start);
+    raw = raw_start == base::StringRef::npos ? base::StringRef{} : raw.substr(raw_start);
     source.assigns.push_back({static_cast<u32>(source.entity_lines.size() - 1), line_no,
-                              std::string(key.substr(0, dot)), std::string(key.substr(dot + 1)),
-                              std::string(raw)});
+                              base::String(key.substr(0, dot)), base::String(key.substr(dot + 1)),
+                              base::String(raw)});
   }
   return source;
 }
@@ -97,8 +99,8 @@ Source ScanSource(const std::string& path) {
 // ordinal, which is what turns a finding into a file:line, what lets a source
 // assignment name the entity it belongs to, and what lets the walk below reach
 // every entity at all (the ecs has no all-entities iterator, only Each<T...>).
-std::vector<ecs::Entity> AllEntities(ecs::World& world) {
-  std::vector<ecs::Entity> out;
+base::Vector<ecs::Entity> AllEntities(ecs::World& world) {
+  base::Vector<ecs::Entity> out;
   const size_t count = world.entity_count();
   for (size_t index = 0; index < count; ++index) {
     const ecs::Entity entity{static_cast<u32>(index), 0};
@@ -109,46 +111,57 @@ std::vector<ecs::Entity> AllEntities(ecs::World& world) {
 
 class Report {
  public:
-  Report(ecs::World& world, std::vector<int> entity_lines)
-      : world_(world), entity_lines_(std::move(entity_lines)) {}
+  Report(ecs::World& world, base::Vector<int> entity_lines)
+      : world_(world), entity_lines_(base::move(entity_lines)) {}
 
-  void Error(ecs::Entity entity, const char* check, std::string message) {
-    Add(true, entity, 0, check, std::move(message));
+  void Error(ecs::Entity entity, const char* check, base::String message) {
+    Add(true, entity, 0, check, base::move(message));
   }
-  void Warn(ecs::Entity entity, const char* check, std::string message) {
-    Add(false, entity, 0, check, std::move(message));
+  void Warn(ecs::Entity entity, const char* check, base::String message) {
+    Add(false, entity, 0, check, base::move(message));
   }
   // For the checks that read the source text and so know the exact assignment,
   // not just the entity block it sits in.
-  void ErrorAt(ecs::Entity entity, int line, const char* check, std::string message) {
-    Add(true, entity, line, check, std::move(message));
+  void ErrorAt(ecs::Entity entity, int line, const char* check, base::String message) {
+    Add(true, entity, line, check, base::move(message));
   }
-  void WarnAt(ecs::Entity entity, int line, const char* check, std::string message) {
-    Add(false, entity, line, check, std::move(message));
+  void WarnAt(ecs::Entity entity, int line, const char* check, base::String message) {
+    Add(false, entity, line, check, base::move(message));
   }
   // A finding about the file as a whole rather than about one entity.
-  void FileError(const char* check, std::string message) {
-    findings_.push_back({true, check, {}, 0, std::move(message)});
+  void FileError(const char* check, base::String message) {
+    findings_.push_back({true, check, {}, 0, base::move(message)});
     ++errors_;
   }
-  void FileWarn(const char* check, std::string message) {
-    findings_.push_back({false, check, {}, 0, std::move(message)});
+  void FileWarn(const char* check, base::String message) {
+    findings_.push_back({false, check, {}, 0, base::move(message)});
   }
 
   // File order, so the report reads down the scene the way the author wrote it.
   // File-wide findings carry no line and go last.
   void SortByLine() {
-    std::stable_sort(findings_.begin(), findings_.end(), [](const Finding& a, const Finding& b) {
-      return (a.line ? a.line : INT_MAX) < (b.line ? b.line : INT_MAX);
+    // A stable sort: ties on line keep insertion order. The index tiebreak
+    // makes every key unique, so any correct sort yields the stable order.
+    auto key = [](const Finding& f) { return f.line ? f.line : INT_MAX; };
+    base::Vector<u32> order(findings_.size());
+    base::Iota(order.begin(), order.end(), 0u);
+    base::Sort(order.data(), order.data() + order.size(), [&](u32 a, u32 b) {
+      const int ka = key(findings_[a]);
+      const int kb = key(findings_[b]);
+      return ka < kb || (ka == kb && a < b);
     });
+    base::Vector<Finding> sorted;
+    sorted.reserve(findings_.size());
+    for (u32 i : order) sorted.push_back(base::move(findings_[i]));
+    findings_ = base::move(sorted);
   }
 
-  const std::vector<Finding>& findings() const { return findings_; }
+  const base::Vector<Finding>& findings() const { return findings_; }
   u32 errors() const { return errors_; }
   u32 warnings() const { return static_cast<u32>(findings_.size()) - errors_; }
 
  private:
-  void Add(bool error, ecs::Entity entity, int line, const char* check, std::string message) {
+  void Add(bool error, ecs::Entity entity, int line, const char* check, base::String message) {
     Finding finding;
     finding.error = error;
     finding.check = check;
@@ -156,14 +169,14 @@ class Report {
     finding.line = line;
     if (line == 0 && entity.index < entity_lines_.size())
       finding.line = entity_lines_[entity.index];
-    finding.message = std::move(message);
-    findings_.push_back(std::move(finding));
+    finding.message = base::move(message);
+    findings_.push_back(base::move(finding));
     if (error) ++errors_;
   }
 
   ecs::World& world_;
-  std::vector<int> entity_lines_;
-  std::vector<Finding> findings_;
+  base::Vector<int> entity_lines_;
+  base::Vector<Finding> findings_;
   u32 errors_ = 0;
 };
 
@@ -186,9 +199,9 @@ u32 FloatLanes(edit::PropType type) {
 // is the only way to tell a number from something that merely starts with one:
 // strtoll stops at the 'x' of "12x" and hands back 12 without complaint. Base 0,
 // matching the loader: an 0x-prefixed guid is hex.
-bool FullyParsedInteger(const std::string& text) {
+bool FullyParsedInteger(const base::String& text) {
   char* end = nullptr;
-  std::strtoll(text.c_str(), &end, 0);
+  ::strtoll(text.c_str(), &end, 0);
   return end != text.c_str() && *end == '\0';
 }
 
@@ -217,7 +230,7 @@ void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report
         prop->type == edit::PropType::kU64) {
       if (!FullyParsedInteger(assign.raw)) {
         report.ErrorAt(entity, assign.line, "unparsed_number",
-                       std::format("{}.{} = {} is not a number; the loader keeps whatever prefix "
+                       rx::StrFormat("{}.{} = {} is not a number; the loader keeps whatever prefix "
                                    "parsed and discards the rest",
                                    comp->name, prop->name, assign.raw));
       }
@@ -225,17 +238,17 @@ void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report
     }
     const u32 lanes = FloatLanes(prop->type);
     if (lanes == 0) continue;
-    std::istringstream in{assign.raw};
-    std::string token;
-    for (u32 lane = 0; lane < lanes && (in >> token); ++lane) {
+    TokenReader in(assign.raw);
+    base::String token;
+    for (u32 lane = 0; lane < lanes && in.Next(&token); ++lane) {
       char* end = nullptr;
       // strtof, not strtod: 1e40 is a perfectly good double and an inf f32, and
       // it is the f32 the loader keeps.
-      const f32 value = std::strtof(token.c_str(), &end);
-      if (end != token.c_str() && *end == '\0' && std::isfinite(value)) continue;
+      const f32 value = ::strtof(token.c_str(), &end);
+      if (end != token.c_str() && *end == '\0' && ::isfinite(value)) continue;
       const bool number = end != token.c_str() && *end == '\0';
       report.ErrorAt(entity, assign.line, number ? "non_finite" : "unparsed_number",
-                     std::format("{}.{} = {}: '{}' {}; a strict load refuses the file and a "
+                     rx::StrFormat("{}.{} = {}: '{}' {}; a strict load refuses the file and a "
                                  "lenient one reads 0 from here on",
                                  comp->name, prop->name, assign.raw, token,
                                  number ? "is not finite (nan, inf, or past the f32 range)"
@@ -249,24 +262,24 @@ void CheckNumberLiterals(ecs::World& world, const Source& source, Report& report
 // token, zero-padding a short list. False means a lane its own reader refuses,
 // which CheckNumberLiterals has already condemned by line, so the caller drops
 // the assignment rather than reporting it twice under a second name.
-bool ReadLanes(const std::string& raw, u32 lanes, f32* out) {
-  std::istringstream in{raw};
-  std::string token;
+bool ReadLanes(const base::String& raw, u32 lanes, f32* out) {
+  TokenReader in(raw);
+  base::String token;
   for (u32 lane = 0; lane < lanes; ++lane) {
-    if (!(in >> token)) return true;  // the legal short form; the rest stay 0
+    if (!in.Next(&token)) return true;  // the legal short form; the rest stay 0
     char* end = nullptr;
-    const f32 value = std::strtof(token.c_str(), &end);
-    if (end == token.c_str() || *end != '\0' || !std::isfinite(value)) return false;
+    const f32 value = ::strtof(token.c_str(), &end);
+    if (end == token.c_str() || *end != '\0' || !::isfinite(value)) return false;
     out[lane] = value;
   }
   return true;
 }
 
-std::string LaneList(const f32* v, u32 lanes) {
-  std::string out;
+base::String LaneList(const f32* v, u32 lanes) {
+  base::String out;
   for (u32 lane = 0; lane < lanes; ++lane) {
     if (lane) out += ' ';
-    out += std::format("{}", v[lane]);
+    out += rx::StrFormat("{}", v[lane]);
   }
   return out;
 }
@@ -298,21 +311,21 @@ void CheckDiscardedTransform(ecs::World& world, const Source& source, bool grids
     // What replaced it, and the assignment to reach for instead. A pass that
     // failed left the field alone, so its finding is the one to read and a
     // disagreement here means nothing.
-    std::string by;
-    std::string instead;
+    base::String by;
+    base::String instead;
     if (rotation) {
       if (!world.Has<SceneRotation>(entity)) continue;
       const SceneRotation& turn = *world.Get<SceneRotation>(entity);
-      by = std::format("Rotation.euler = {}", LaneList(turn.euler, 3));
+      by = rx::StrFormat("Rotation.euler = {}", LaneList(turn.euler, 3));
       instead = "author the angle there and drop the quaternion";
     } else if (world.Has<SceneAnchor>(entity)) {
       if (!anchors_built) continue;
       const SceneAnchor& anchor = *world.Get<SceneAnchor>(entity);
-      by = std::format("Anchor.target = \"{}\"", anchor.target);
+      by = rx::StrFormat("Anchor.target = \"{}\"", anchor.target);
       instead = "Anchor.offset is the displacement the solve reads";
     } else if (const SceneGrid* grid = world.Get<SceneGrid>(entity); grid && !grid->of.empty()) {
       if (!grids_built) continue;
-      by = std::format("Grid.of = \"{}\"", grid->of);
+      by = rx::StrFormat("Grid.of = \"{}\"", grid->of);
       instead = "a member's cell comes from the order it is declared in, not from a coordinate";
     } else {
       continue;
@@ -324,12 +337,12 @@ void CheckDiscardedTransform(ecs::World& world, const Source& source, bool grids
     if (!ReadLanes(assign.raw, lanes, authored)) continue;
     bool differs = false;
     for (u32 lane = 0; lane < lanes; ++lane) {
-      differs = differs || std::abs(authored[lane] - solved[lane]) > kDiscardedEpsilon;
+      differs = differs || ::abs(authored[lane] - solved[lane]) > kDiscardedEpsilon;
     }
     if (!differs) continue;
 
     report.WarnAt(entity, assign.line, "discarded_transform",
-                  std::format("Transform.{} = {} is discarded: {} replaces it with {}. It is not "
+                  rx::StrFormat("Transform.{} = {} is discarded: {} replaces it with {}. It is not "
                               "added to, so this line moves nothing ({})",
                               assign.prop, assign.raw, by, LaneList(solved, lanes), instead));
   }
@@ -340,7 +353,7 @@ void CheckTransform(ecs::World& world, ecs::Entity entity, Report& report) {
   if (!transform) return;
   if (transform->scale <= 0.0f) {
     report.Error(entity, "degenerate_scale",
-                 std::format("Transform.scale is {}; the mesh collapses to a point (negative "
+                 rx::StrFormat("Transform.scale is {}; the mesh collapses to a point (negative "
                              "also turns it inside out)", transform->scale));
   }
   // MakeFromQuat is the raw quaternion-to-matrix form with no normalize, so the
@@ -356,12 +369,12 @@ void CheckTransform(ecs::World& world, ecs::Entity entity, Report& report) {
     report.Error(entity, "degenerate_rotation",
                  "Transform.rotation is the zero quaternion; the mesh collapses to a point "
                  "(identity is 0 0 0 1)");
-  } else if (std::abs(std::sqrt(length_sq) - 1.0f) > 0.05f) {
+  } else if (::abs(::sqrt(length_sq) - 1.0f) > 0.05f) {
     // 5% is far outside anything hand-rounding a unit quaternion produces
     // (0.7 0 0 0.7 is only 1% short) and well inside a visible mis-scale.
     report.Warn(entity, "non_unit_rotation",
-                std::format("Transform.rotation has length {}, so it scales the mesh by that "
-                            "on top of Transform.scale", std::sqrt(length_sq)));
+                rx::StrFormat("Transform.rotation has length {}, so it scales the mesh by that "
+                            "on top of Transform.scale", ::sqrt(length_sq)));
   }
 }
 
@@ -381,7 +394,7 @@ void CheckShape(ecs::World& world, ecs::Entity entity, Report& report) {
     if ((required & (1u << axis)) == 0) continue;
     if (shape->size[axis] > 0.0f) continue;
     report.Error(entity, "degenerate_shape_size",
-                 std::format("Shape.size {} is {} for kind '{}', which needs it positive "
+                 rx::StrFormat("Shape.size {} is {} for kind '{}', which needs it positive "
                              "(--dump-schema documents the axes per kind)",
                              "xyz"[axis], shape->size[axis], shape->kind));
   }
@@ -399,7 +412,7 @@ void CheckShape(ecs::World& world, ecs::Entity entity, Report& report) {
 // it was going to render with, so it is not a fragment and still gets both
 // findings. The blind spot is a file that has nothing at all but a Surface,
 // which is indistinguishable from a preset by construction.
-bool IsFragment(ecs::World& world, const std::vector<ecs::Entity>& entities) {
+bool IsFragment(ecs::World& world, const base::Vector<ecs::Entity>& entities) {
   if (entities.empty()) return false;  // an empty file is a broken scene, not a fragment
   for (ecs::Entity entity : entities) {
     if (world.Has<SceneShape>(entity) || world.Has<SceneModel>(entity) ||
@@ -414,7 +427,7 @@ bool IsFragment(ecs::World& world, const std::vector<ecs::Entity>& entities) {
 void CheckSurface(ecs::World& world, ecs::Entity entity, bool fragment, Report& report) {
   const SceneSurface* surface = world.Get<SceneSurface>(entity);
   if (!surface) return;
-  const std::vector<SceneSurfaceMapRef> maps = SceneSurfaceMaps(*surface);
+  const base::Vector<SceneSurfaceMapRef> maps = SceneSurfaceMaps(*surface);
   bool any_map = false;
   for (const SceneSurfaceMapRef& map : maps) any_map = any_map || !map.path->empty();
   if (!fragment && !world.Has<SceneShape>(entity)) {
@@ -429,17 +442,17 @@ void CheckSurface(ecs::World& world, ecs::Entity entity, bool fragment, Report& 
     // here is one that binds there. It touches the filesystem, which makes this
     // (with materialx and Model.path) one of the checks whose answer depends on
     // where the tool is run from.
-    const std::string problem = SceneSurfaceMapProblem(*map.path);
+    const base::String problem = SceneSurfaceMapProblem(*map.path);
     if (!problem.empty()) {
       report.Error(entity, "map_not_loaded",
-                   std::format("Surface.{} '{}' {}", map.prop, *map.path, problem));
+                   rx::StrFormat("Surface.{} '{}' {}", map.prop, *map.path, problem));
     }
     // Both write the base colour, normal and roughness of one material; the
     // loader refuses the pair rather than picking a winner, so a report that
     // stayed quiet would leave a failed load with no finding behind it.
     if (world.Has<ScenePattern>(entity)) {
       report.Error(entity, "pattern_and_map",
-                   std::format("Surface.{} is on an entity that also declares a Pattern; both "
+                   rx::StrFormat("Surface.{} is on an entity that also declares a Pattern; both "
                                "bind the same material slots, so the load refuses the pair. "
                                "Author the maps or the Pattern, not both", map.prop));
     }
@@ -459,14 +472,14 @@ void CheckSurface(ecs::World& world, ecs::Entity entity, bool fragment, Report& 
   // A document resolves its image nodes to files beside itself, and the load
   // fails on one that is not there. Reported per file, since a set is usually
   // missing one map rather than all of them.
-  for (const std::string* file : {&document_maps.base_color, &document_maps.normal,
+  for (const base::String* file : {&document_maps.base_color, &document_maps.normal,
                                   &document_maps.roughness, &document_maps.metallic,
                                   &document_maps.occlusion, &document_maps.emissive}) {
     if (file->empty()) continue;
-    const std::string problem = SceneSurfaceMapProblem(*file);
+    const base::String problem = SceneSurfaceMapProblem(*file);
     if (problem.empty()) continue;
     report.Error(entity, "materialx_map_not_loaded",
-                 std::format("Surface.materialx '{}' names an image '{}' that {}",
+                 rx::StrFormat("Surface.materialx '{}' names an image '{}' that {}",
                              surface->materialx, *file, problem));
   }
 }
@@ -491,7 +504,7 @@ void CheckPattern(ecs::World& world, ecs::Entity entity, bool fragment, Report& 
   for (u32 axis = 0; axis < 2; ++axis) {
     if (pattern->scale[axis] > 0.0f) continue;
     report.Error(entity, "degenerate_pattern_scale",
-                 std::format("Pattern.scale {} is {}; the prop is cells across BY cells up and "
+                 rx::StrFormat("Pattern.scale {} is {}; the prop is cells across BY cells up and "
                              "both have to be positive (one number pads with a zero)",
                              axis == 0 ? "u" : "v", pattern->scale[axis]));
   }
@@ -508,7 +521,7 @@ void CheckStretch(ecs::World& world, ecs::Entity entity, bool fragment, Report& 
   for (u32 axis = 0; axis < 3; ++axis) {
     if (stretch->scale[axis] > 0.0f) continue;
     report.Error(entity, "degenerate_stretch",
-                 std::format("Stretch.scale {} is {}, which the mesh bake divides the normals "
+                 rx::StrFormat("Stretch.scale {} is {}, which the mesh bake divides the normals "
                              "by; every axis has to be positive (1 1 1 is no stretch)",
                              "xyz"[axis], stretch->scale[axis]));
   }
@@ -526,10 +539,10 @@ void CheckModel(ecs::World& world, ecs::Entity entity, Report& report) {
   // validates here is one that places geometry there. It imports the file,
   // which makes this (with Surface.materialx) one of the two checks whose
   // answer depends on where the tool is run from.
-  const std::string problem = SceneModelProblem(model->path);
+  const base::String problem = SceneModelProblem(model->path);
   if (!problem.empty()) {
     report.Error(entity, "unresolved_mesh",
-                 std::format("Model.path '{}' {}", model->path, problem));
+                 rx::StrFormat("Model.path '{}' {}", model->path, problem));
   }
 }
 
@@ -545,12 +558,12 @@ void CheckLight(ecs::World& world, ecs::Entity entity, Report& report) {
   }
   if (light->intensity <= 0.0f) {
     report.Error(entity, "light_cannot_contribute",
-                 std::format("Light.intensity is {}; the light contributes nothing",
+                 rx::StrFormat("Light.intensity is {}; the light contributes nothing",
                              light->intensity));
   }
   if (light->radius <= 0.0f) {
     report.Error(entity, "light_cannot_contribute",
-                 std::format("Light.radius is {}; the influence cutoff excludes every point",
+                 rx::StrFormat("Light.radius is {}; the influence cutoff excludes every point",
                              light->radius));
   }
 }
@@ -574,7 +587,7 @@ void CheckCamera(ecs::World& world, ecs::Entity entity, Report& report) {
   }
   if (camera->fov_degrees <= 0.0f || camera->fov_degrees >= 180.0f) {
     report.Error(entity, "degenerate_camera_fov",
-                 std::format("Camera.fov_degrees is {}; a projection needs it in (0, 180)",
+                 rx::StrFormat("Camera.fov_degrees is {}; a projection needs it in (0, 180)",
                              camera->fov_degrees));
   }
 }
@@ -588,7 +601,7 @@ void CheckSun(ecs::World& world, ecs::Entity entity, Report& report) {
   if (!sun) return;
   if (sun->intensity <= 0.0f) {
     report.Warn(entity, "dark_sun",
-                std::format("Sun.intensity is {}; the scene keeps the sun it declares and gets "
+                rx::StrFormat("Sun.intensity is {}; the scene keeps the sun it declares and gets "
                             "no light from it, leaving only Sun.ambient and any Lights",
                             sun->intensity));
   }
@@ -623,12 +636,12 @@ void CheckRenderable(ecs::World& world, asset::AssetDatabase& db, ecs::Entity en
   // text scene reaches real geometry through Model instead, which imports the
   // file itself and hands the meshes to the database; a hand-written
   // Renderable path still resolves to nothing.
-  const std::optional<std::string> path = asset::LookupAssetPath(renderable->mesh);
+  const base::Optional<base::String> path = asset::LookupAssetPath(renderable->mesh);
   report.Error(entity, "unresolved_mesh",
-               std::format("Renderable.mesh '{}' resolves to no uploaded mesh; a .rxscene has "
+               rx::StrFormat("Renderable.mesh '{}' resolves to no uploaded mesh; a .rxscene has "
                            "no mesh converters, so name the file from a Model (or author a "
                            "Shape) instead",
-                           path ? *path : std::format("hash:0x{:016x}", renderable->mesh.hash)));
+                           path ? *path : rx::StrFormat("hash:0x{:016x}", renderable->mesh.hash)));
 }
 
 void CheckParent(ecs::World& world, ecs::Entity entity, Report& report) {
@@ -660,69 +673,69 @@ void CheckParent(ecs::World& world, ecs::Entity entity, Report& report) {
   }
 }
 
-void CheckDuplicateGuids(ecs::World& world, const std::vector<ecs::Entity>& entities,
+void CheckDuplicateGuids(ecs::World& world, const base::Vector<ecs::Entity>& entities,
                          Report& report) {
   // A guid is how a scene names an entity across a save/load, so two entities
   // sharing one make every reference to it resolve to whichever the loader
   // mapped last, and make a re-save drop the other.
-  std::unordered_map<u64, ecs::Entity> by_guid;
+  base::UnorderedMap<u64, ecs::Entity> by_guid;
   for (ecs::Entity entity : entities) {
     const scene::Guid* guid = world.Get<scene::Guid>(entity);
     if (!guid || guid->value == 0) continue;
-    auto [it, inserted] = by_guid.emplace(guid->value, entity);
+    auto [first, inserted] = by_guid.emplace(guid->value, entity);
     if (inserted) continue;
     report.Error(entity, "duplicate_guid",
-                 std::format("Guid.value 0x{:016x} is already used by entity index {}; "
+                 rx::StrFormat("Guid.value 0x{:016x} is already used by entity index {}; "
                              "references to it resolve to only one of the two",
-                             guid->value, it->second.index));
+                             guid->value, first->index));
   }
 }
 
-void PrintJsonString(std::string_view s) {
-  std::putchar('"');
+void PrintJsonString(base::StringRef s) {
+  ::putchar('"');
   for (char c : s) {
-    if (c == '"' || c == '\\') std::putchar('\\');
-    std::putchar(c);
+    if (c == '"' || c == '\\') ::putchar('\\');
+    ::putchar(c);
   }
-  std::putchar('"');
+  ::putchar('"');
 }
 
-void PrintJson(const std::string& path, const Report& report) {
-  std::printf("{\n  \"scene\": ");
+void PrintJson(const base::String& path, const Report& report) {
+  ::printf("{\n  \"scene\": ");
   PrintJsonString(path);
-  std::printf(",\n  \"errors\": %u,\n  \"warnings\": %u,\n  \"findings\": [", report.errors(),
+  ::printf(",\n  \"errors\": %u,\n  \"warnings\": %u,\n  \"findings\": [", report.errors(),
               report.warnings());
-  const std::vector<Finding>& findings = report.findings();
+  const base::Vector<Finding>& findings = report.findings();
   for (size_t i = 0; i < findings.size(); ++i) {
     const Finding& finding = findings[i];
-    std::printf("%s\n    {\"severity\": \"%s\", \"check\": ", i ? "," : "",
+    ::printf("%s\n    {\"severity\": \"%s\", \"check\": ", i ? "," : "",
                 finding.error ? "error" : "warning");
     PrintJsonString(finding.check);
-    std::printf(", \"line\": %d, \"entity\": ", finding.line);
+    ::printf(", \"line\": %d, \"entity\": ", finding.line);
     PrintJsonString(finding.entity);
-    std::printf(", \"message\": ");
+    ::printf(", \"message\": ");
     PrintJsonString(finding.message);
-    std::printf("}");
+    ::printf("}");
   }
-  std::printf("%s]\n}\n", findings.empty() ? "" : "\n  ");
+  ::printf("%s]\n}\n", findings.empty() ? "" : "\n  ");
 }
 
 // Compiler-style, so an editor and a grep both find the offending line.
-void PrintHuman(const std::string& path, const Report& report) {
+void PrintHuman(const base::String& path, const Report& report) {
   for (const Finding& finding : report.findings()) {
-    std::printf("%s:", path.c_str());
-    if (finding.line) std::printf("%d:", finding.line);
-    std::printf(" %s: %s: ", finding.error ? "error" : "warning", finding.check);
-    if (!finding.entity.empty()) std::printf("'%s': ", finding.entity.c_str());
-    std::printf("%s\n", finding.message.c_str());
+    ::printf("%s:", path.c_str());
+    if (finding.line) ::printf("%d:", finding.line);
+    ::printf(" %s: %s: ", finding.error ? "error" : "warning", finding.check);
+    if (!finding.entity.empty()) ::printf("'%s': ", finding.entity.c_str());
+    ::printf("%s\n", finding.message.c_str());
   }
-  std::printf("%s: %u error(s), %u warning(s)\n", path.c_str(), report.errors(),
+  ::printf("%s: %u error(s), %u warning(s)\n", path.c_str(), report.errors(),
               report.warnings());
 }
 
 }  // namespace
 
-bool ValidateSceneFile(const std::string& path, bool json) {
+bool ValidateSceneFile(const base::String& path, bool json) {
   // RX_INFO writes to stdout, which the json report has to have to itself.
   if (json) SetLogLevel(LogLevel::kWarn);
 
@@ -738,7 +751,7 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // nothing, though, and a report that stopped there would cost the author the
   // other twenty findings, so fall back to a lenient load of the same file: the
   // gate says no, and this still explains the whole document.
-  std::string error;
+  base::String error;
   const bool strict_loaded = edit::LoadScene(world, db, path, &error, /*strict=*/true);
   if (!strict_loaded) edit::LoadScene(world, db, path, nullptr, /*strict=*/false);
 
@@ -761,7 +774,7 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // been resolved into yet.
   BuildSceneRotations(world);
 
-  const std::vector<ecs::Entity> entities = AllEntities(world);
+  const base::Vector<ecs::Entity> entities = AllEntities(world);
   // Decided once, after the two expansion passes: an instance that took its
   // Shape from a prefab is not a fragment, and the file it took it from is.
   const bool fragment = IsFragment(world, entities);
@@ -821,7 +834,7 @@ bool ValidateSceneFile(const std::string& path, bool json) {
     // in archetype order, not file order, so which one wins is not something
     // the file decides.
     report.FileWarn("multiple_cameras",
-                    std::format("{} Camera components; which one the viewer takes is "
+                    rx::StrFormat("{} Camera components; which one the viewer takes is "
                                 "archetype order, not file order", cameras));
   }
   // Same walk, same ambiguity, and worse to debug: two Suns render as one of
@@ -829,12 +842,12 @@ bool ValidateSceneFile(const std::string& path, bool json) {
   // authored light that did nothing.
   if (suns > 1) {
     report.FileWarn("multiple_suns",
-                    std::format("{} Sun components; which one lights the scene is archetype "
+                    rx::StrFormat("{} Sun components; which one lights the scene is archetype "
                                 "order, not file order", suns));
   }
   if (atmospheres > 1) {
     report.FileWarn("multiple_atmospheres",
-                    std::format("{} Atmosphere components; which one the viewer takes is "
+                    rx::StrFormat("{} Atmosphere components; which one the viewer takes is "
                                 "archetype order, not file order", atmospheres));
   }
 

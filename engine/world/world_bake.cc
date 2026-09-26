@@ -1,20 +1,28 @@
 #include "world/world_bake.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstring>
-#include <optional>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "asset/asset_database.h"
 #include "asset/asset_id.h"
 #include "asset/pack.h"
 #include "asset/vfs.h"
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
+#include "core/scalar.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
 #include "scene/components.h"
 #include "world/world_format.h"
 #include "world/world_stream.h"
+#include "core/sort.h"
 
 namespace rx::world {
 namespace {
@@ -24,8 +32,8 @@ namespace {
 // than fail. Far beyond any real world: at 64 m cells this is 2^29 * 64 m.
 constexpr i64 kMaximumCellCoord = i64{1} << 29;
 
-void SetError(std::string* error, std::string message) {
-  if (error) *error = std::move(message);
+void SetError(base::String* error, base::String message) {
+  if (error) *error = base::move(message);
 }
 
 // One entity as the cook sees it: where it goes, and what it is made of.
@@ -43,7 +51,7 @@ struct Authored {
 // ever classify as static decoration; the stable id replaces it, and carrying
 // both would mean the instance page's rows each needed an ECS row to hold one.
 bool IdentityOnly(const edit::ComponentDesc& desc) {
-  return std::strcmp(desc.name, "Guid") == 0;
+  return ::strcmp(desc.name, "Guid") == 0;
 }
 
 // The grid. Cells are ids on a 2D lattice over XZ (vertical extent is the
@@ -63,7 +71,7 @@ u64 CellIdFor(i64 x, i64 z) {
 // entities binned into it - computing the two separately in different
 // precisions puts an AABB one square away from its own contents.
 i64 CellCoord(f32 value, f32 size) {
-  return static_cast<i64>(std::floor(static_cast<double>(value) / size));
+  return static_cast<i64>(::floor(static_cast<double>(value) / size));
 }
 
 f32 CellOrigin(i64 coord, f32 size) { return static_cast<f32>(static_cast<double>(coord) * size); }
@@ -75,11 +83,11 @@ f32 CellOrigin(i64 coord, f32 size) { return static_cast<f32>(static_cast<double
 // is wrong rather than one that fails to load.
 bool InLattice(const scene::Transform& transform, f32 cell_size) {
   for (u32 axis = 0; axis < 3; ++axis) {
-    if (!std::isfinite(transform.position[axis])) return false;
+    if (!::isfinite(transform.position[axis])) return false;
   }
   for (u32 axis = 0; axis < 3; axis += 2) {
     const double quotient = static_cast<double>(transform.position[axis]) / cell_size;
-    if (!(std::abs(quotient) < static_cast<double>(kMaximumCellCoord))) return false;
+    if (!(::abs(quotient) < static_cast<double>(kMaximumCellCoord))) return false;
   }
   return true;
 }
@@ -110,7 +118,7 @@ u64 HashBytes(u64 hash, const void* data, size_t size) {
 // it makes the hash ambiguous: {"A", "BC"} and {"AB", "C"} feed it the same
 // sequence, so two cooks that cut the world differently would claim the same
 // bake id and each accept the other's saves.
-u64 HashString(u64 hash, std::string_view value) {
+u64 HashString(u64 hash, base::StringRef value) {
   const u64 size = value.size();
   hash = HashBytes(hash, &size, sizeof(size));
   return HashBytes(hash, value.data(), value.size());
@@ -125,28 +133,28 @@ u64 HashString(u64 hash, std::string_view value) {
 // actually writes. Only those: folding in the whole registry would move every
 // world's bake id whenever an unrelated component was added anywhere in the
 // engine, invalidating the saves the id exists to protect.
-u64 HashCook(const std::string& scene_path, const WorldBakeOptions& options,
-             const base::Vector<std::string>& schema) {
-  std::FILE* file = std::fopen(scene_path.c_str(), "rb");
+u64 HashCook(const base::String& scene_path, const WorldBakeOptions& options,
+             const base::Vector<base::String>& schema) {
+  FILE* file = ::fopen(scene_path.c_str(), "rb");
   if (!file) return 0;
   u64 hash = 0xcbf29ce484222325ull;
   u8 buffer[4096];
   size_t read = 0;
-  while ((read = std::fread(buffer, 1, sizeof(buffer), file)) > 0) {
+  while ((read = ::fread(buffer, 1, sizeof(buffer), file)) > 0) {
     hash = HashBytes(hash, buffer, read);
   }
-  std::fclose(file);
+  ::fclose(file);
   hash = HashString(hash, options.name);
   hash = HashBytes(hash, &options.cell_size, sizeof(options.cell_size));
   hash = HashBytes(hash, &options.skip_unknown, sizeof(options.skip_unknown));
   const u64 instance_count = options.instance_components.size();
   hash = HashBytes(hash, &instance_count, sizeof(instance_count));
-  for (const std::string& component : options.instance_components) {
+  for (const base::String& component : options.instance_components) {
     hash = HashString(hash, component);
   }
   const u64 schema_count = schema.size();
   hash = HashBytes(hash, &schema_count, sizeof(schema_count));
-  for (const std::string& entry : schema) hash = HashString(hash, entry);
+  for (const base::String& entry : schema) hash = HashString(hash, entry);
   return hash == 0 ? 1 : hash;  // 0 means "unreadable"
 }
 
@@ -159,9 +167,9 @@ bool SameComponents(const Authored& a, const Authored& b) {
 }
 
 // The instance set the options ask for, with the default filled in.
-base::Vector<std::string> InstanceComponents(const WorldBakeOptions& options) {
+base::Vector<base::String> InstanceComponents(const WorldBakeOptions& options) {
   if (!options.instance_components.empty()) return options.instance_components;
-  base::Vector<std::string> defaults;
+  base::Vector<base::String> defaults;
   defaults.push_back("Transform");
   defaults.push_back("Renderable");
   return defaults;
@@ -169,13 +177,13 @@ base::Vector<std::string> InstanceComponents(const WorldBakeOptions& options) {
 
 }  // namespace
 
-std::string WorldNameForArchive(std::string_view archive_path) {
+base::String WorldNameForArchive(base::StringRef archive_path) {
   const size_t slash = archive_path.find_last_of("/\\");
-  const std::string_view file =
-      slash == std::string_view::npos ? archive_path : archive_path.substr(slash + 1);
+  const base::StringRef file =
+      slash == base::StringRef::npos ? archive_path : archive_path.substr(slash + 1);
   const size_t dot = file.find_last_of('.');
   // A leading dot is the whole name of a dotfile, not an extension.
-  return std::string(dot == std::string_view::npos || dot == 0 ? file : file.substr(0, dot));
+  return base::String(dot == base::StringRef::npos || dot == 0 ? file : file.substr(0, dot));
 }
 
 const char* BakeRoleName(BakeRole role) {
@@ -190,7 +198,7 @@ const char* BakeRoleName(BakeRole role) {
 BakeVerdict ClassifyForBake(ecs::World& world, ecs::Entity entity,
                             const WorldBakeOptions& options) {
   BakeVerdict verdict;
-  const base::Vector<std::string> instance_set = InstanceComponents(options);
+  const base::Vector<base::String> instance_set = InstanceComponents(options);
 
   const scene::Transform* transform = world.Get<scene::Transform>(entity);
   if (!transform) {
@@ -203,7 +211,7 @@ BakeVerdict ClassifyForBake(ecs::World& world, ecs::Entity entity,
     verdict.refusal = "has a Parent, which is an ecs handle no baked cell can carry";
     return verdict;
   }
-  const f32 cell_size = options.cell_size > 0 && std::isfinite(options.cell_size)
+  const f32 cell_size = options.cell_size > 0 && ::isfinite(options.cell_size)
                             ? options.cell_size
                             : 64.0f;
   if (!InLattice(*transform, cell_size)) {
@@ -230,7 +238,7 @@ BakeVerdict ClassifyForBake(ecs::World& world, ecs::Entity entity,
     if (!IdentityOnly(*desc)) {
       ++authored_count;
       bool named = false;
-      for (const std::string& want : instance_set) named |= want == desc->name;
+      for (const base::String& want : instance_set) named |= want == desc->name;
       only_instance_components &= named;
     }
     if (!Bakeable(*desc)) verdict.dropped.push_back(desc->name);
@@ -241,13 +249,13 @@ BakeVerdict ClassifyForBake(ecs::World& world, ecs::Entity entity,
   return verdict;
 }
 
-bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_options,
-               const std::string& archive_path, WorldBakeResult* result, std::string* error) {
+bool BakeWorld(const base::String& scene_path, const WorldBakeOptions& input_options,
+               const base::String& archive_path, WorldBakeResult* result, base::String* error) {
   if (!result) return false;
   *result = WorldBakeResult{};
 
   WorldBakeOptions options = input_options;
-  if (!(options.cell_size > 0) || !std::isfinite(options.cell_size)) {
+  if (!(options.cell_size > 0) || !::isfinite(options.cell_size)) {
     SetError(error, "cell size must be a positive, finite number");
     return false;
   }
@@ -256,7 +264,7 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
   // The name becomes a directory inside the archive and half of every payload
   // path, so a name that is not a single path segment would silently scatter
   // the world somewhere the index's own prefix convention cannot find it again.
-  if (options.name.empty() || options.name.find_first_of("/\\") != std::string::npos) {
+  if (options.name.empty() || options.name.find_first_of("/\\") != base::String::npos) {
     SetError(error, "world name must be one path segment; '" + options.name + "' is not");
     return false;
   }
@@ -267,7 +275,7 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
   // entity indices are the file's order, so two cooks of one file replay the
   // same creation sequence and hand out the same ids.
   ecs::World source;
-  std::string load_error;
+  base::String load_error;
   // Strict by default: a component this build does not register is dropped
   // silently otherwise, and the cell that needed it bakes without the thing it
   // was authored to place.
@@ -307,37 +315,38 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
       if (!IdentityOnly(*desc)) {
         ++authored_count;
         bool named = false;
-        for (const std::string& want : options.instance_components) named |= want == desc->name;
+        for (const base::String& want : options.instance_components) named |= want == desc->name;
         only_instance_components &= named;
       }
       if (!Bakeable(*desc)) {
         bool seen = false;
-        for (const std::string& name : result->dropped) seen |= name == desc->name;
+        for (const base::String& name : result->dropped) seen |= name == desc->name;
         if (!seen) result->dropped.push_back(desc->name);
         continue;
       }
       record.components.push_back(desc);
     }
-    std::sort(record.components.begin(), record.components.end(),
-              [](const edit::ComponentDesc* a, const edit::ComponentDesc* b) {
-                return std::strcmp(a->name, b->name) < 0;
-              });
+    // Stable: registration does not force unique names.
+    rx::StableSort(record.components.data(), record.components.data() + record.components.size(),
+                   [](const edit::ComponentDesc* a, const edit::ComponentDesc* b) {
+                     return ::strcmp(a->name, b->name) < 0;
+                   });
     record.instance =
         only_instance_components && authored_count == options.instance_components.size();
-    authored.push_back(std::move(record));
+    authored.push_back(base::move(record));
   });
 
   // A Parent link is an ecs::Entity handle, and a handle cannot survive a bake,
   // let alone a streaming boundary. Refusing is the honest answer: silently
   // dropping the link would move the child into world space.
   if (parented != 0) {
-    SetError(error, std::to_string(parented) +
+    SetError(error, rx::ToString(parented) +
                         " entities have a Parent; flatten the hierarchy before baking (a parent "
                         "link is an ecs handle, which no baked cell can carry)");
     return false;
   }
   if (off_lattice != 0) {
-    SetError(error, std::to_string(off_lattice) +
+    SetError(error, rx::ToString(off_lattice) +
                         " entities have a Transform.position that is not finite, or so far out "
                         "that its cell would alias onto another; either way the archive would "
                         "cook and be wrong");
@@ -349,17 +358,17 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
   }
 
   // Group by cell, then by component set. Sorting once gives both.
-  std::sort(authored.begin(), authored.end(), [](const Authored& a, const Authored& b) {
+  base::Sort(authored.begin(), authored.end(), [](const Authored& a, const Authored& b) {
     if (a.cell != b.cell) return a.cell < b.cell;
     if (a.instance != b.instance) return a.instance < b.instance;
     if (a.components.size() != b.components.size()) {
       return a.components.size() < b.components.size();
     }
     for (size_t i = 0; i < a.components.size(); ++i) {
-      const int order = std::strcmp(a.components[i]->name, b.components[i]->name);
+      const int order = ::strcmp(a.components[i]->name, b.components[i]->name);
       if (order != 0) return order < 0;
     }
-    // A total order, so std::sort's instability cannot decide which entity gets
+    // A total order, so the sort's instability cannot decide which entity gets
     // which stable id. The index is deterministic because the cook loaded this
     // file into a fresh world, so index order is file order; cooking a lived-in
     // world would order ties by that session's history instead, which is why
@@ -378,20 +387,20 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
       if (!seen) written.push_back(desc);
     }
   }
-  std::sort(written.begin(), written.end(),
-            [](const edit::ComponentDesc* a, const edit::ComponentDesc* b) {
-              return std::strcmp(a->name, b->name) < 0;
-            });
-  base::Vector<std::string> schema;
+  rx::StableSort(written.data(), written.data() + written.size(),
+                 [](const edit::ComponentDesc* a, const edit::ComponentDesc* b) {
+                   return ::strcmp(a->name, b->name) < 0;
+                 });
+  base::Vector<base::String> schema;
   schema.reserve(written.size());
   for (const edit::ComponentDesc* desc : written) {
     u32 stride = 0;
     u64 layout = 0;
     if (!RuntimeComponentLayout(desc->name, &stride, &layout)) {
-      SetError(error, std::string("component '") + desc->name + "' has no reflected layout");
+      SetError(error, base::String("component '") + desc->name + "' has no reflected layout");
       return false;
     }
-    schema.push_back(std::string(desc->name) + " " + std::to_string(layout));
+    schema.push_back(base::String(desc->name) + " " + rx::ToString(layout));
   }
 
   if (options.bake_id == 0) options.bake_id = HashCook(scene_path, options, schema);
@@ -405,10 +414,10 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
   index.set_bake_id(options.bake_id);
   index.set_grid(options.cell_size, {0, 0, 0});
   asset::PackWriter pack;
-  const std::string prefix = options.name;
+  const base::String prefix = options.name;
 
   u64 next_stable_id = 1;  // 0 is reserved for "no id"
-  std::string encode_error;
+  base::String encode_error;
 
   for (size_t cell_begin = 0; cell_begin < authored.size();) {
     const u64 cell = authored[cell_begin].cell;
@@ -429,8 +438,8 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
     for (size_t i = cell_begin; i < cell_end; ++i) {
       const scene::Transform* transform = source.Get<scene::Transform>(authored[i].entity);
       if (!transform) continue;
-      low_y = first_y ? transform->position[1] : std::min(low_y, transform->position[1]);
-      high_y = first_y ? transform->position[1] : std::max(high_y, transform->position[1]);
+      low_y = first_y ? transform->position[1] : rx::Min(low_y, transform->position[1]);
+      high_y = first_y ? transform->position[1] : rx::Max(high_y, transform->position[1]);
       first_y = false;
     }
     const f32 base_x = CellOrigin(authored[cell_begin].cell_x, options.cell_size);
@@ -475,14 +484,14 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
                      "is; --instance must name a set that includes Renderable");
             return false;
           }
-          const std::optional<std::string> mesh_path = asset::LookupAssetPath(renderable->mesh);
+          const base::Optional<base::String> mesh_path = asset::LookupAssetPath(renderable->mesh);
           if (!mesh_path) {
-            SetError(error, "Renderable.mesh " + std::to_string(renderable->mesh.hash) +
+            SetError(error, "Renderable.mesh " + rx::ToString(renderable->mesh.hash) +
                                 " resolves to no asset path, so the instance page would name a "
                                 "prototype no host can look up; author the mesh by path");
             return false;
           }
-          const std::string& prototype = *mesh_path;
+          const base::String& prototype = *mesh_path;
           instances.AddInstance(
               next_stable_id + (i - cell_begin), instances.AddPrototype(prototype),
               {transform->position[0], transform->position[1], transform->position[2]},
@@ -501,13 +510,13 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
       for (size_t i = group_begin; i < group_end; ++i) {
         ids.push_back(next_stable_id + (i - cell_begin));
       }
-      entities.SetStableIds(archetype, std::span<const u64>(ids.data(), ids.size()));
+      entities.SetStableIds(archetype, base::Span<const u64>(ids.data(), ids.size()));
 
       for (const edit::ComponentDesc* desc : authored[group_begin].components) {
         u32 stride = 0;
         u64 layout = 0;
         if (!RuntimeComponentLayout(desc->name, &stride, &layout)) {
-          SetError(error, std::string("component '") + desc->name + "' has no reflected layout");
+          SetError(error, base::String("component '") + desc->name + "' has no reflected layout");
           return false;
         }
         base::Vector<u8> column;
@@ -515,14 +524,14 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
         for (size_t i = group_begin; i < group_end; ++i) {
           const void* value = source.GetRaw(authored[i].entity, desc->id);
           if (!value) {
-            SetError(error, std::string("component '") + desc->name + "' vanished mid-bake");
+            SetError(error, base::String("component '") + desc->name + "' vanished mid-bake");
             return false;
           }
           const u8* bytes = static_cast<const u8*>(value);
           column.insert(column.end(), bytes, bytes + stride);
         }
         entities.AddColumn(archetype, desc->name, stride, layout,
-                           std::span<const u8>(column.data(), column.size()));
+                           base::Span<const u8>(column.data(), column.size()));
         cell_entity_bytes += column.size();
       }
       // What the rows cost once they are ECS rows, which is the number the
@@ -540,7 +549,7 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
         return false;
       }
       index.AddPayload(cell, Domain::kGameplay, Tier::kStandard, cell_entity_bytes, cell_entities);
-      pack.Add(CellPayloadPath(prefix, cell, Domain::kGameplay, Tier::kStandard), std::move(bytes));
+      pack.Add(CellPayloadPath(prefix, cell, Domain::kGameplay, Tier::kStandard), base::move(bytes));
       result->entities += cell_entities;
     }
     if (cell_instances != 0) {
@@ -552,7 +561,7 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
       index.AddPayload(cell, Domain::kRepresentation, Tier::kFull,
                        static_cast<u64>(cell_instances) * sizeof(ResidentInstance), cell_instances);
       pack.Add(CellPayloadPath(prefix, cell, Domain::kRepresentation, Tier::kFull),
-               std::move(bytes));
+               base::move(bytes));
       result->instances += cell_instances;
     }
 
@@ -565,7 +574,7 @@ bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& input_opti
     SetError(error, encode_error);
     return false;
   }
-  pack.Add(prefix + "/" + options.name + ".rxworld", std::move(index_bytes));
+  pack.Add(prefix + "/" + options.name + ".rxworld", base::move(index_bytes));
 
   if (!pack.WriteTo(archive_path)) {
     SetError(error, archive_path + ": cannot be written");

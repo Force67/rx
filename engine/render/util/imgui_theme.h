@@ -12,11 +12,12 @@
 // here, it compiles into the caller and touches the caller's context - the same
 // reason ImGuiRenderer itself calls no global ImGui:: function.
 
-#include <cstddef>
-#include <cstring>
+#include <stddef.h>
+#include <string.h>
 
 #include <imgui.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/types.h"
 
 namespace rx::render {
@@ -151,7 +152,7 @@ inline ImFont* LoadRxImGuiFont(const void* ttf, size_t size,
                                f32 size_pixels = kRxDefaultFontSize) {
   if (ttf == nullptr || size == 0) return nullptr;
   void* owned = IM_ALLOC(size);
-  std::memcpy(owned, ttf, size);
+  base::MemCopy(owned, ttf, size);
   return ImGui::GetIO().Fonts->AddFontFromMemoryTTF(owned, static_cast<int>(size), size_pixels);
 }
 

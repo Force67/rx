@@ -1,8 +1,11 @@
 #include "net/session.h"
 
-#include <cmath>
+#include <math.h>
 
 #include "asset/asset_id.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 #include "net/rpc_channel.h"
 #include "net/znet_util.h"
@@ -26,14 +29,14 @@ void DefaultSimulatePlayer(ecs::World& world, ecs::Entity player,
   t->position[2] += ClampAxis(input.move_z) * kDefaultPlayerSpeed * dt;
   const f32 half_yaw = input.yaw * 0.5f;
   t->rotation[0] = 0;
-  t->rotation[1] = std::sin(half_yaw);
+  t->rotation[1] = ::sin(half_yaw);
   t->rotation[2] = 0;
-  t->rotation[3] = std::cos(half_yaw);
+  t->rotation[3] = ::cos(half_yaw);
 }
 
 }  // namespace
 
-ServerSession::ServerSession(SessionConfig config) : config_(std::move(config)) {
+ServerSession::ServerSession(SessionConfig config) : config_(base::move(config)) {
   interest_.Configure(config_.interest);
 }
 
@@ -56,7 +59,7 @@ bool ServerSession::Start() {
     return false;
   }
   started_ = true;
-  rpc_ = std::make_unique<RpcServerChannel>(server_);
+  rpc_ = base::MakeUnique<RpcServerChannel>(server_);
   RX_INFO("net: server listening on {} (bubbles {})", config_.port,
           config_.bubble_radius > 0 ? "on" : "off");
   return true;
@@ -173,7 +176,7 @@ void ServerSession::HandleJoin(ecs::World& world, u32 peer, const ClientJoin& jo
       world.Add(fresh.player, InterestBubble{peer, config_.bubble_radius});
     }
     fresh.player_net_id = net_id.value;
-    clients_.insert(peer, std::move(fresh));
+    clients_.insert(peer, base::move(fresh));
     client = clients_.find(peer);
     if (player_spawn_sink_) player_spawn_sink_(world, client->player, peer);
     RX_INFO("net: peer {} joined as '{}' ({} clients)", peer, client->name.c_str(),
@@ -255,7 +258,7 @@ void ServerSession::SendSnapshots(ecs::World& world) {
 
     // Snapshots stay unreliable by design: the next one supersedes a lost one
     // and keyframes repair anything structural.
-    std::vector<u8> blob = snapshot_.Encode();
+    base::Vector<u8> blob = snapshot_.Encode();
     stats_.snapshots_sent += 1;
     stats_.snapshot_records_sent += written;
     stats_.snapshot_bytes_sent += blob.size();
@@ -274,12 +277,12 @@ void ServerSession::SendSnapshots(ecs::World& world) {
   }
 }
 
-void ServerSession::SendTo(u32 peer, u16 type, const std::vector<u8>& payload,
+void ServerSession::SendTo(u32 peer, u16 type, const base::Vector<u8>& payload,
                            bool reliable, tx::network::PacketPriority priority) {
   server_.Push(MakePacket(peer, type, payload, reliable, priority));
 }
 
-void ServerSession::Broadcast(u16 type, const std::vector<u8>& payload, bool reliable,
+void ServerSession::Broadcast(u16 type, const base::Vector<u8>& payload, bool reliable,
                               tx::network::PacketPriority priority) {
   if (clients_.size() == 0) return;
   server_.Push(MakePacket(tx::network::ZPeerId::to_all, type, payload, reliable, priority));
@@ -295,7 +298,7 @@ u64 ServerSession::PlayerNetId(u32 peer) const {
   return client ? client->player_net_id : 0;
 }
 
-ClientSession::ClientSession(SessionConfig config) : config_(std::move(config)) {
+ClientSession::ClientSession(SessionConfig config) : config_(base::move(config)) {
   if (config_.snapshot_interval_ticks > 0 && config_.tick_rate > 0) {
     snapshot_dt_ = static_cast<f32>(config_.snapshot_interval_ticks) /
                    static_cast<f32>(config_.tick_rate);
@@ -320,7 +323,7 @@ bool ClientSession::Start() {
              config_.port);
     return false;
   }
-  rpc_ = std::make_unique<RpcClientChannel>(client_);
+  rpc_ = base::MakeUnique<RpcClientChannel>(client_);
   RX_INFO("net: connecting to {}:{}", config_.address.c_str(), config_.port);
   return true;
 }
@@ -386,7 +389,7 @@ void ClientSession::Tick(ecs::World& world, f32 dt) {
   ++tick_;
 }
 
-void ClientSession::SendToServer(u16 type, const std::vector<u8>& payload, bool reliable,
+void ClientSession::SendToServer(u16 type, const base::Vector<u8>& payload, bool reliable,
                                  tx::network::PacketPriority priority) {
   client_.Push(MakePacket(tx::network::ZPeerId::to_server, type, payload, reliable, priority));
 }
@@ -433,7 +436,7 @@ void ClientSession::PollMessages(ecs::World& world) {
       }
       case MessageType::kBubbleSync: {
         if (auto bubbles = DecodeBubbleSync(PacketData(packet), packet.data.size())) {
-          bubbles_ = std::move(*bubbles);
+          bubbles_ = base::move(*bubbles);
         }
         break;
       }

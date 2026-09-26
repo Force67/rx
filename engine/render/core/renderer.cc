@@ -1,11 +1,10 @@
 #include "render/core/renderer.h"
 
-#include <algorithm>
-#include <chrono>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 
 #include <base/option.h>
 
@@ -13,8 +12,18 @@
 
 #include "asset/primitives.h"
 #include "asset/texture_compress.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
+#include "base/time/time.h"
 #include "core/log.h"
 #include "core/memory/memory_tracker.h"
+#include "core/scalar.h"
 #include "render/util/exr_write.h"
 #include "shaders/blit_ps_slang.h"
 #include "shaders/cloud_shadow_cs_hlsl.h"
@@ -29,6 +38,7 @@
 #include "shaders/pick_id_ps_hlsl.h"
 #include "shaders/pick_id_vs_hlsl.h"
 #include "shaders/sss_blur_cs_hlsl.h"
+#include "core/sort.h"
 
 namespace rx::render {
 namespace {
@@ -235,8 +245,8 @@ u32 SelectLod(const GpuMesh &mesh, f32 distance) {
   u32 lod_count = 1u + static_cast<u32>(mesh.lods.size());
   if (lod_count <= 1)
     return 0;
-  f32 unit = std::max(mesh.bounds_radius, 0.25f) * 2.5f;
-  u32 lod = static_cast<u32>(distance / std::max(unit, 0.5f));
+  f32 unit = rx::Max(mesh.bounds_radius, 0.25f) * 2.5f;
+  u32 lod = static_cast<u32>(distance / rx::Max(unit, 0.5f));
   return lod < lod_count ? lod : lod_count - 1;
 }
 
@@ -263,32 +273,32 @@ bool SupportsStaticInstances(const GpuMesh &mesh,
   return true;
 }
 
-bool HasUniformScale(std::span<const Mat4> transforms) {
+bool HasUniformScale(base::Span<const Mat4> transforms) {
   for (const Mat4 &transform : transforms) {
     const f32 *m = transform.m;
     for (u32 i = 0; i < 16; ++i)
-      if (!std::isfinite(m[i]))
+      if (!::isfinite(m[i]))
         return false;
-    if (std::abs(m[3]) > 1e-5f || std::abs(m[7]) > 1e-5f ||
-        std::abs(m[11]) > 1e-5f || std::abs(m[15] - 1.0f) > 1e-5f)
+    if (::abs(m[3]) > 1e-5f || ::abs(m[7]) > 1e-5f ||
+        ::abs(m[11]) > 1e-5f || ::abs(m[15] - 1.0f) > 1e-5f)
       return false;
-    const f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-    const f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-    const f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-    const f32 tolerance = std::max({sx, sy, sz}) * 1e-4f;
-    if (sx <= 1e-6f || std::abs(sx - sy) > tolerance ||
-        std::abs(sx - sz) > tolerance)
+    const f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+    const f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+    const f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+    const f32 tolerance = rx::Max({sx, sy, sz}) * 1e-4f;
+    if (sx <= 1e-6f || ::abs(sx - sy) > tolerance ||
+        ::abs(sx - sz) > tolerance)
       return false;
     const f32 orthogonal_tolerance = sx * sx * 1e-4f;
     const f32 determinant = m[0] * (m[5] * m[10] - m[6] * m[9]) -
                             m[4] * (m[1] * m[10] - m[2] * m[9]) +
                             m[8] * (m[1] * m[6] - m[2] * m[5]);
     if (determinant <= 0 ||
-        std::abs(m[0] * m[4] + m[1] * m[5] + m[2] * m[6]) >
+        ::abs(m[0] * m[4] + m[1] * m[5] + m[2] * m[6]) >
             orthogonal_tolerance ||
-        std::abs(m[0] * m[8] + m[1] * m[9] + m[2] * m[10]) >
+        ::abs(m[0] * m[8] + m[1] * m[9] + m[2] * m[10]) >
             orthogonal_tolerance ||
-        std::abs(m[4] * m[8] + m[5] * m[9] + m[6] * m[10]) >
+        ::abs(m[4] * m[8] + m[5] * m[9] + m[6] * m[10]) >
             orthogonal_tolerance)
       return false;
   }
@@ -297,7 +307,7 @@ bool HasUniformScale(std::span<const Mat4> transforms) {
 
 f32 InstanceGroupDistance(const InstanceStore::Group &group, const Vec3 &eye) {
   const Vec3 delta = eye - group.bounds_center;
-  return std::max(std::sqrt(Dot(delta, delta)) - group.bounds_radius, 0.0f) /
+  return rx::Max(::sqrt(Dot(delta, delta)) - group.bounds_radius, 0.0f) /
          group.lod_scale;
 }
 
@@ -320,7 +330,7 @@ void ExtractFrustumPlanes(const Mat4 &vp, f32 out[5][4]) {
   };
   for (int i = 0; i < 5; ++i) {
     f32 len =
-        std::sqrt(p[i][0] * p[i][0] + p[i][1] * p[i][1] + p[i][2] * p[i][2]);
+        ::sqrt(p[i][0] * p[i][0] + p[i][1] * p[i][1] + p[i][2] * p[i][2]);
     if (len < 1e-8f)
       len = 1.0f;
     for (int c = 0; c < 4; ++c)
@@ -383,7 +393,7 @@ f32 MaskedSubmeshOpacity(const base::Vector<asset::Vertex> &verts,
                  c.position[2] - a.position[2]};
     f32 cx = e1[1] * e2[2] - e1[2] * e2[1], cy = e1[2] * e2[0] - e1[0] * e2[2],
         cz = e1[0] * e2[1] - e1[1] * e2[0];
-    f32 area = 0.5f * std::sqrt(cx * cx + cy * cy + cz * cz);
+    f32 area = 0.5f * ::sqrt(cx * cx + cy * cy + cz * cz);
     weighted += static_cast<f64>(mean_a) * area;
     area_sum += area;
   }
@@ -470,7 +480,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // RX_RHI=vulkan|d3d12|null|auto overrides the graphics backend.
   Backend backend = desc.backend;
   if (const char *name = RhiBackend.get()) {
-    std::string value = name;
+    base::String value = name;
     if (value == "vulkan")
       backend = Backend::kVulkan;
     else if (value == "d3d12")
@@ -512,8 +522,8 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
         device.EndPipelineBatch();
     }
   } pipeline_batch{*device_};
-  auto t_batch0 = std::chrono::steady_clock::now();
-  const char *pso_batch_env = std::getenv("RX_PSO_BATCH");
+  auto t_batch0 = base::TimeTicks::Now();
+  const char *pso_batch_env = ::getenv("RX_PSO_BATCH");
   if (!pso_batch_env || pso_batch_env[0] != '0')
     device_->BeginPipelineBatch();
 
@@ -526,7 +536,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   swapchain_ =
       window ? device_->CreateSwapchain(output_width_, output_height_,
                                         settings_.vsync, swapchain_hdr_request_)
-             : std::make_unique<OffscreenSwapchain>(
+             : base::MakeUnique<OffscreenSwapchain>(
                    Format::kBGRA8Unorm, Extent2D{output_width_, output_height_});
   if (!swapchain_ || !CreateFrameResources())
     return false;
@@ -562,7 +572,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
                                                    : "no textureCompressionBC");
   }
 
-  transient_pool_ = std::make_unique<TransientPool>(*device_);
+  transient_pool_ = base::MakeUnique<TransientPool>(*device_);
   // The bindless registry has no ray-tracing dependency (buffers + an
   // update-after-bind set): the forward terrain splat and textured particles
   // sample through it too, so it exists on every real device. Mesh/geometry
@@ -570,7 +580,7 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   bindless_ = BindlessRegistry::Create(*device_);
   if (!bindless_)
     return false;
-  material_system_ = MaterialSystem::Create(*device_, bindless_.get());
+  material_system_ = MaterialSystem::Create(*device_, bindless_.Get_UseOnlyIfYouKnowWhatYouareDoing());
   if (!material_system_)
     return false;
   environment_ = EnvironmentSystem::Create(*device_);
@@ -950,10 +960,10 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // Debug captures without window manager screenshots:
   // RX_SCREENSHOT=/tmp/frame.png:12 saves the frame at t=12s.
   if (const char *spec = Screenshot.get()) {
-    std::string value = spec;
+    base::String value = spec;
     size_t colon = value.find_last_of(':');
-    if (colon != std::string::npos) {
-      screenshot_at_ = std::atof(value.c_str() + colon + 1);
+    if (colon != base::String::npos) {
+      screenshot_at_ = ::atof(value.c_str() + colon + 1);
       value.resize(colon);
     }
     screenshot_path_ = value;
@@ -961,8 +971,8 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
 
   // RX_SEQ=prefix:startsec:count[:stride] dumps a burst of composited frames.
   if (const char *spec = Sequence.get()) {
-    std::string value = spec;
-    base::Vector<std::string> fields;
+    base::String value = spec;
+    base::Vector<base::String> fields;
     size_t start = 0;
     for (size_t i = 0; i <= value.size(); ++i) {
       if (i == value.size() || value[i] == ':') {
@@ -972,10 +982,10 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
     }
     if (fields.size() >= 3) {
       seq_prefix_ = fields[0];
-      seq_at_ = std::atof(fields[1].c_str());
-      seq_count_ = std::atoi(fields[2].c_str());
+      seq_at_ = ::atof(fields[1].c_str());
+      seq_count_ = ::atoi(fields[2].c_str());
       seq_stride_ =
-          fields.size() >= 4 ? std::max(1, std::atoi(fields[3].c_str())) : 1;
+          fields.size() >= 4 ? rx::Max(1, ::atoi(fields[3].c_str())) : 1;
     } else {
       RX_WARN(
           "RX_SEQ ignored, expected prefix:startsec:count[:stride], got '{}'",
@@ -986,10 +996,10 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // RX_HDR=/tmp/frame.hdr:12 exports the linear-hdr frame (radiance rgbe) at
   // t=12s.
   if (const char *spec = Hdr.get()) {
-    std::string value = spec;
+    base::String value = spec;
     size_t colon = value.find_last_of(':');
-    if (colon != std::string::npos) {
-      hdr_at_ = std::atof(value.c_str() + colon + 1);
+    if (colon != base::String::npos) {
+      hdr_at_ = ::atof(value.c_str() + colon + 1);
       value.resize(colon);
     }
     hdr_path_ = value;
@@ -1045,8 +1055,8 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // lighting/shadow tests (normalized; y clamped below the horizon).
   if (const char *sd = SunDir.get()) {
     Vec3 d{};
-    if (std::sscanf(sd, "%f,%f,%f", &d.x, &d.y, &d.z) == 3) {
-      f32 len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+    if (::sscanf(sd, "%f,%f,%f", &d.x, &d.y, &d.z) == 3) {
+      f32 len = ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
       if (len > 1e-4f)
         settings_.sun_direction = {d.x / len, d.y / len, d.z / len};
     }
@@ -1144,15 +1154,15 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   if (ProceduralGrassOpt.overridden())
     settings_.procedural_grass = ProceduralGrassOpt;
   if (PathtraceSpp.overridden())
-    settings_.path_trace_spp = static_cast<u32>(std::max(1, int(PathtraceSpp)));
+    settings_.path_trace_spp = static_cast<u32>(rx::Max(1, int(PathtraceSpp)));
   if (PathtraceAccum.overridden())
     settings_.path_trace_accum =
-        static_cast<u32>(std::max(1, int(PathtraceAccum)));
+        static_cast<u32>(rx::Max(1, int(PathtraceAccum)));
   if (PathtraceRecon.overridden())
     settings_.path_trace_recon = PathtraceRecon;
   if (PathtraceReconDebug.overridden())
     settings_.path_trace_recon_debug =
-        static_cast<u32>(std::max(0, int(PathtraceReconDebug)));
+        static_cast<u32>(rx::Max(0, int(PathtraceReconDebug)));
   if (PathtraceRestir.overridden())
     settings_.path_trace_restir = PathtraceRestir;
   if (PathtraceRestirDi.overridden())
@@ -1216,18 +1226,16 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // is what makes the software path possible, but the ~85 MiB RCGI cache itself
   // is deferred so a device that never enables it pays nothing.
 
-  auto t_batch1 = std::chrono::steady_clock::now();
+  auto t_batch1 = base::TimeTicks::Now();
   if (!pipeline_batch.End()) {
     RX_ERROR("pipeline batch reported failed compilations");
     return false;
   }
-  auto t_batch2 = std::chrono::steady_clock::now();
+  auto t_batch2 = base::TimeTicks::Now();
   RX_INFO(
       "renderer init: {} ms (pipeline batch joined in {} ms)",
-      std::chrono::duration_cast<std::chrono::milliseconds>(t_batch1 - t_batch0)
-          .count(),
-      std::chrono::duration_cast<std::chrono::milliseconds>(t_batch2 - t_batch1)
-          .count());
+      (t_batch1 - t_batch0).InMilliseconds(),
+      (t_batch2 - t_batch1).InMilliseconds());
 
   // Grass is optional and creates nonstandard push-constant layouts. Build its
   // baseline pipelines outside the startup batch so a device that cannot
@@ -1252,12 +1260,12 @@ bool Renderer::InitializeCommon(const RendererDesc &desc, Window *window,
   // batch (lazily in ApplySettings during RenderFrame), so a failure there
   // returns a null system and is handled non-fatally at that call site too.)
   if (want_sdf) {
-    sdf_scene_ = std::make_unique<SdfScene>(*device_);
-    sdf_clipmap_ = std::make_unique<SdfClipmap>(*device_);
+    sdf_scene_ = base::MakeUnique<SdfScene>(*device_);
+    sdf_clipmap_ = base::MakeUnique<SdfClipmap>(*device_);
     if (!sdf_clipmap_->Initialize()) {
       RX_WARN("sdf: clipmap unavailable, disabling the SDF path");
-      sdf_clipmap_.reset();
-      sdf_scene_.reset();
+      sdf_clipmap_.Reset();
+      sdf_scene_.Reset();
     } else {
       sdf_available_ = true; // immutable for the session once creation succeeds
     }
@@ -1282,7 +1290,7 @@ void Renderer::ClearEnvironmentMap() {
   environment_->ClearEnvironmentMap();
 }
 
-void Renderer::CaptureScreenshot(const std::string &path) {
+void Renderer::CaptureScreenshot(const base::String &path) {
   screenshot_path_ = path;
   screenshot_at_ = -1;
 }
@@ -1351,7 +1359,7 @@ void Renderer::DumpFgImage(const GpuImage &image, ResourceState state,
   }
 }
 
-void Renderer::WriteBackbufferPng(const std::string &path) {
+void Renderer::WriteBackbufferPng(const base::String &path) {
   device_->WaitIdle();
   Extent2D extent = swapchain_->extent();
   u64 size = static_cast<u64>(extent.width) * extent.height * 4;
@@ -1475,11 +1483,11 @@ void Renderer::UpdateRenderResolution() {
     // No upscaler: render at output * render_scale. >1 supersamples (the post
     // pass samples this image into the swapchain, so it downscales for free).
     // Dynamic resolution multiplies in as a <=1 factor while active.
-    f32 rs = std::clamp(settings_.render_scale * drs_.scale(), 0.25f, 2.0f);
+    f32 rs = rx::Clamp(settings_.render_scale * drs_.scale(), 0.25f, 2.0f);
     render_width_ =
-        std::max(1u, static_cast<u32>(static_cast<f32>(output_width_) * rs));
+        rx::Max(1u, static_cast<u32>(static_cast<f32>(output_width_) * rs));
     render_height_ =
-        std::max(1u, static_cast<u32>(static_cast<f32>(output_height_) * rs));
+        rx::Max(1u, static_cast<u32>(static_cast<f32>(output_height_) * rs));
   }
 }
 
@@ -1558,7 +1566,7 @@ void Renderer::ApplySettings() {
         material_system_->set_layout(), environment_->env_set_layout(),
         bindless_ ? bindless_->set_layout() : BindingLayoutHandle{}, want_msaa);
     if (rebuilt) {
-      mesh_pipeline_ = std::move(rebuilt);
+      mesh_pipeline_ = base::move(rebuilt);
       applied_msaa_samples_ = want_msaa;
       RX_INFO("msaa: mesh pipelines rebuilt at {}x", want_msaa);
     } else {
@@ -1599,7 +1607,7 @@ void Renderer::ApplySettings() {
                           drs_.scale() != applied_dynamic_scale_;
   if (upscaler_changed) {
     device_->WaitIdle();
-    upscaler_.reset();
+    upscaler_.Reset();
     if (settings_.upscaler != UpscalerKind::kNone) {
       if (!CreateUpscalerWithFallback()) {
         RX_WARN("upscaler unavailable, falling back to taa");
@@ -1649,7 +1657,7 @@ void Renderer::ApplySettings() {
       {.radius = settings_.ao_radius,
        .intensity = settings_.ao_intensity * 1.8f,
        .power = 1.5f,
-       .sample_count = std::clamp(settings_.ao_rays * 8u, 4u, 32u)});
+       .sample_count = rx::Clamp(settings_.ao_rays * 8u, 4u, 32u)});
   shadow_.Configure({.cascade_count = ShadowPass::kMaxCascades,
                      .resolution = settings_.shadow_resolution,
                      .distance = settings_.shadow_distance});
@@ -1695,7 +1703,7 @@ void Renderer::ApplySettings() {
       RX_ERROR("rcgi: creation failed; feature unavailable this session");
       if (rcgi_)
         light_grid_.Destroy(*device_);
-      rcgi_.reset();
+      rcgi_.Reset();
       rcgi_create_failed_ = true; // do not retry every frame
     }
   }
@@ -1730,11 +1738,11 @@ void Renderer::UploadVirtualGeometryMesh(const asset::Mesh &mesh) {
   vgeo_.Upload(*device_, mesh);
 }
 
-void Renderer::SetVirtualGeometryInstances(std::span<const Mat4> transforms) {
+void Renderer::SetVirtualGeometryInstances(base::Span<const Mat4> transforms) {
   vgeo_.SetInstances(transforms);
 }
 
-void Renderer::SetInteriorVolumes(std::span<const InteriorVolume> volumes) {
+void Renderer::SetInteriorVolumes(base::Span<const InteriorVolume> volumes) {
   interior_volumes_.assign(volumes.begin(), volumes.end());
 }
 
@@ -1814,22 +1822,22 @@ u32 Renderer::BakeImposter(const asset::Mesh &mesh) {
       materials.push_back({base.image, base.alpha_cutoff});
     }
   }
-  return imposters_.Bake(*device_, mesh, {materials.data(), materials.size()});
+  return imposters_.Bake(*device_, mesh, base::Span(materials.data(), materials.size()));
 }
 
 void Renderer::SetImposterInstances(
-    std::span<const ImposterPass::Instance> instances) {
+    base::Span<const ImposterPass::Instance> instances) {
   if (!device_ || device_->is_stub())
     return;
   imposters_.SetInstances(*device_, instances);
 }
 
 InstanceGroupHandle
-Renderer::CreateInstanceGroup(u64 mesh, std::span<const Mat4> transforms) {
+Renderer::CreateInstanceGroup(u64 mesh, base::Span<const Mat4> transforms) {
   if (!device_ || device_->is_stub())
     return {};
   const GpuMesh *gpu = meshes_.find(mesh);
-  if (!gpu || !SupportsStaticInstances(*gpu, material_system_.get()) ||
+  if (!gpu || !SupportsStaticInstances(*gpu, material_system_.Get_UseOnlyIfYouKnowWhatYouareDoing()) ||
       mesh_emitters_.find(mesh) || !HasUniformScale(transforms))
     return {};
   InstanceGroupHandle handle = instances_.Create(
@@ -1840,7 +1848,7 @@ Renderer::CreateInstanceGroup(u64 mesh, std::span<const Mat4> transforms) {
 }
 
 bool Renderer::UpdateInstanceGroup(InstanceGroupHandle handle,
-                                   std::span<const Mat4> transforms) {
+                                   base::Span<const Mat4> transforms) {
   if (!device_ || device_->is_stub() ||
       handle.index >= instances_.groups().size())
     return false;
@@ -1881,7 +1889,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
           }
           e.texture = index; // now a bindless index, 0xffffffff = untextured
         }
-        mesh_emitters_[mesh_key] = std::move(emitters);
+        mesh_emitters_[mesh_key] = base::move(emitters);
       };
   // Emitter-only NIFs (smoke columns, dust wisps) carry no geometry but still
   // need their particle pools: register the emitters and accept the upload so
@@ -1973,13 +1981,13 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
       f32 *out = deltas.data() + t * verts * 9;
       for (size_t v = 0; v < verts; ++v, out += 9) {
         if (target.position_deltas.size() >= (v + 1) * 3) {
-          std::memcpy(out, &target.position_deltas[v * 3], sizeof(f32) * 3);
+          base::MemCopy(out, &target.position_deltas[v * 3], sizeof(f32) * 3);
         }
         if (target.normal_deltas.size() >= (v + 1) * 3) {
-          std::memcpy(out + 3, &target.normal_deltas[v * 3], sizeof(f32) * 3);
+          base::MemCopy(out + 3, &target.normal_deltas[v * 3], sizeof(f32) * 3);
         }
         if (target.tangent_deltas.size() >= (v + 1) * 3) {
-          std::memcpy(out + 6, &target.tangent_deltas[v * 3], sizeof(f32) * 3);
+          base::MemCopy(out + 6, &target.tangent_deltas[v * 3], sizeof(f32) * 3);
         }
       }
     }
@@ -2023,7 +2031,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     GpuLod glod;
     glod.vertex_offset = vertex_bases[i];
     build_submeshes(src->lods[i], index_bases[i], glod.submeshes);
-    gpu.lods.push_back(std::move(glod));
+    gpu.lods.push_back(base::move(glod));
   }
   gpu.all_blend = true;
   bool all_water = !gpu.submeshes.empty();
@@ -2038,15 +2046,15 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
     f32 min_y = lod.vertices[0].position[1], max_y = min_y;
     f32 min_z = lod.vertices[0].position[2], max_z = min_z;
     for (const asset::Vertex &vertex : lod.vertices) {
-      min_x = std::min(min_x, vertex.position[0]);
-      max_x = std::max(max_x, vertex.position[0]);
-      min_y = std::min(min_y, vertex.position[1]);
-      max_y = std::max(max_y, vertex.position[1]);
-      min_z = std::min(min_z, vertex.position[2]);
-      max_z = std::max(max_z, vertex.position[2]);
+      min_x = rx::Min(min_x, vertex.position[0]);
+      max_x = rx::Max(max_x, vertex.position[0]);
+      min_y = rx::Min(min_y, vertex.position[1]);
+      max_y = rx::Max(max_y, vertex.position[1]);
+      min_z = rx::Min(min_z, vertex.position[2]);
+      max_z = rx::Max(max_z, vertex.position[2]);
     }
-    const f32 horizontal_extent = std::max(max_x - min_x, max_z - min_z);
-    const f32 planar_tolerance = std::max(0.02f, horizontal_extent * 1e-4f);
+    const f32 horizontal_extent = rx::Max(max_x - min_x, max_z - min_z);
+    const f32 planar_tolerance = rx::Max(0.02f, horizontal_extent * 1e-4f);
     gpu.planar_water =
         horizontal_extent > 1.0f && max_y - min_y <= planar_tolerance;
     if (gpu.planar_water) {
@@ -2057,7 +2065,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
       gpu.water_height = (min_y + max_y) * 0.5f;
     }
   }
-  std::memcpy(gpu.bounds_center, mesh.bounds_center, sizeof(f32) * 3);
+  base::MemCopy(gpu.bounds_center, mesh.bounds_center, sizeof(f32) * 3);
   gpu.bounds_radius = mesh.bounds_radius;
   gpu.no_rt = mesh.exclude_from_rt;
   gpu.terrain_lod = mesh.terrain_lod;
@@ -2222,7 +2230,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
                     all_verts, all_indices, submesh,
                     material_system_->material_base_alpha(submesh.material))
               : 1.0f;
-      const f32 s = std::sqrt(std::clamp(opacity, 0.02f, 1.0f));
+      const f32 s = ::sqrt(rx::Clamp(opacity, 0.02f, 1.0f));
       const u32 base_index = static_cast<u32>(approx_indices.size());
       for (u32 e = 0; e + 3 <= submesh.index_count; e += 3) {
         const u32 idx[3] = {all_indices[submesh.index_offset + e],
@@ -2294,7 +2302,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   if (GpuMesh *previous = meshes_.find(mesh_key)) {
     device_->WaitIdle(); // uploads happen at load time; never per frame
     skinned_rt_.InvalidateMesh(
-        *device_, raytracing_.get(), mesh_key,
+        *device_, raytracing_.Get_UseOnlyIfYouKnowWhatYouareDoing(), mesh_key,
         retired_bindless_meshes_[(frame_index_ + 1) % kFramesInFlight]);
     if (raytracing_) {
       raytracing_->RemoveBlas(mesh_key);
@@ -2333,7 +2341,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
   meshes_[mesh_key] = gpu;
   instances_.RefreshMesh(*device_, mesh_key, gpu.bounds_center,
                          gpu.bounds_radius,
-                         SupportsStaticInstances(gpu, material_system_.get()) &&
+                         SupportsStaticInstances(gpu, material_system_.Get_UseOnlyIfYouKnowWhatYouareDoing()) &&
                              mesh.emitters.empty());
   // NIF particle emitters ride along with the mesh; every placed draw of it
   // feeds a cpu pool (see emitter_sim_ in BuildFrameGraph).
@@ -2396,7 +2404,7 @@ bool Renderer::UploadMesh(const asset::Mesh &mesh, u64 id_salt) {
       if (material_system_) {
         MaterialSystem::MaterialColor mc =
             material_system_->material_color(sm.material);
-        u64 w = std::max<u64>(sm.index_count, 1);
+        u64 w = rx::Max<u64>(sm.index_count, 1);
         for (int k = 0; k < 3; ++k) {
           albedo[k] += mc.albedo[k] * static_cast<f32>(w);
           emissive[k] += mc.emissive[k] * static_cast<f32>(w);
@@ -2478,7 +2486,7 @@ bool Renderer::UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt) {
     raytracing_->RemoveBlasDeferred(key);
   GpuBuffer previous = gpu->vertices;
   gpu->vertices = replacement;
-  std::memcpy(gpu->bounds_center, mesh.bounds_center,
+  base::MemCopy(gpu->bounds_center, mesh.bounds_center,
               sizeof(gpu->bounds_center));
   gpu->bounds_radius = mesh.bounds_radius;
   device_->DestroyBufferDeferred(previous);
@@ -2500,7 +2508,7 @@ bool Renderer::UpdateDynamicMesh(const asset::Mesh &mesh, u64 id_salt) {
   }
   instances_.RefreshMesh(
       *device_, mesh.id.hash ^ id_salt, gpu->bounds_center, gpu->bounds_radius,
-      SupportsStaticInstances(*gpu, material_system_.get()) &&
+      SupportsStaticInstances(*gpu, material_system_.Get_UseOnlyIfYouKnowWhatYouareDoing()) &&
           mesh.emitters.empty());
   ++scene_revision_;
   return true;
@@ -2602,7 +2610,7 @@ bool Renderer::RemoveDynamicMesh(asset::AssetId mesh, u64 id_salt) {
   }
   meshes_.erase(key);
   skinned_rt_.InvalidateMesh(
-      *device_, raytracing_.get(), key,
+      *device_, raytracing_.Get_UseOnlyIfYouKnowWhatYouareDoing(), key,
       retired_bindless_meshes_[(frame_index_ + 1) % kFramesInFlight]);
   ++scene_revision_;
   return true;
@@ -2696,7 +2704,7 @@ u32 Renderer::AcquireSkinnedRt() { return skinned_rt_.Acquire(); }
 void Renderer::ReleaseSkinnedRt(u32 actor) {
   if (!device_)
     return;
-  skinned_rt_.Release(*device_, raytracing_.get(), actor,
+  skinned_rt_.Release(*device_, raytracing_.Get_UseOnlyIfYouKnowWhatYouareDoing(), actor,
                       retired_bindless_meshes_[(frame_index_ + 1) % kFramesInFlight]);
 }
 
@@ -2900,7 +2908,7 @@ void Renderer::RenderFrame(const FrameView &view) {
 
   PassContext ctx;
   ctx.cmd = cmd;
-  ctx.device = device_.get();
+  ctx.device = device_.Get_UseOnlyIfYouKnowWhatYouareDoing();
   ctx.graph = &graph_;
   // With per-pass detail off the whole frame gets one bracket so
   // gpu_frame_ms() (dynamic resolution's input) stays fed.
@@ -2915,8 +2923,8 @@ void Renderer::RenderFrame(const FrameView &view) {
   const bool sequence_due = !seq_prefix_.empty() && seq_written_ < seq_count_ &&
                             time_seconds_ >= seq_at_;
   bool dump_due = false;
-  if (const char *dump = std::getenv("RX_FRAMEGEN_DUMP")) {
-    u64 dump_frame = std::strtoull(dump, nullptr, 10);
+  if (const char *dump = ::getenv("RX_FRAMEGEN_DUMP")) {
+    u64 dump_frame = ::strtoull(dump, nullptr, 10);
     dump_due = fg_frame &&
                (frame_index_ == dump_frame || frame_index_ == dump_frame + 1);
   }
@@ -2949,7 +2957,7 @@ void Renderer::RenderFrame(const FrameView &view) {
     {
       TextureBarrier to_read = Transition(backbuffer, ResourceState::kPresent,
                                           ResourceState::kShaderReadCompute);
-      final_cmd->TextureBarriers({&to_read, 1});
+      final_cmd->TextureBarriers(base::Span(&to_read, 1));
     }
     FrameGenInputs fin;
     fin.backbuffer = &backbuffer;
@@ -2983,7 +2991,7 @@ void Renderer::RenderFrame(const FrameView &view) {
       if (view.hud_draw || view.ui_draw) {
         ColorAttachment ui_color{.view = target.view, .load = LoadOp::kLoad};
         final_cmd->BeginRendering(
-            {.extent = target.extent, .colors = {&ui_color, 1}});
+            {.extent = target.extent, .colors = base::Span(&ui_color, 1)});
         if (view.hud_draw)
           view.hud_draw(*final_cmd);
         if (view.ui_draw)
@@ -3019,8 +3027,8 @@ void Renderer::RenderFrame(const FrameView &view) {
 
     // Debug: RX_FRAMEGEN_DUMP=<frame> writes real frame N, the interpolated
     // N->N+1 midpoint and real frame N+1 as pngs in the working directory.
-    if (const char *dump = std::getenv("RX_FRAMEGEN_DUMP")) {
-      u64 dump_frame = std::strtoull(dump, nullptr, 10);
+    if (const char *dump = ::getenv("RX_FRAMEGEN_DUMP")) {
+      u64 dump_frame = ::strtoull(dump, nullptr, 10);
       if (frame_index_ == dump_frame && capture_ready) {
         DumpFgImage(capture_image_, ResourceState::kCopySrc,
                     true, "fg_dump_real0.png");
@@ -3069,7 +3077,7 @@ void Renderer::RenderFrame(const FrameView &view) {
   if (sequence_due) {
     if (seq_frame_ctr_ % seq_stride_ == 0 && capture_ready) {
       char path[512];
-      std::snprintf(path, sizeof(path), "%s_%04d.png", seq_prefix_.c_str(),
+      ::snprintf(path, sizeof(path), "%s_%04d.png", seq_prefix_.c_str(),
                     seq_written_);
       WriteBackbufferPng(path);
       ++seq_written_;
@@ -3152,7 +3160,7 @@ namespace {
 // right*x + up*y). Unlisted characters draw nothing.
 void AppendGlyphBillboard(char c, f32 ox, f32 oy, f32 scale, const Vec3 &origin,
                           const Vec3 &right, const Vec3 &up, u32 rgba,
-                          std::vector<DebugLine> &out) {
+                          base::Vector<DebugLine> &out) {
   auto seg = [&](f32 x0, f32 y0, f32 x1, f32 y1) {
     out.push_back({origin + right * ((ox + x0) * scale) + up * ((oy + y0) * scale),
                    origin + right * ((ox + x1) * scale) + up * ((oy + y1) * scale), rgba});
@@ -3204,13 +3212,13 @@ void AppendGlyphBillboard(char c, f32 ox, f32 oy, f32 scale, const Vec3 &origin,
 }
 
 void TessellateWorldText(const WorldText &t, const Vec3 &right, const Vec3 &up,
-                         std::vector<DebugLine> &out) {
+                         base::Vector<DebugLine> &out) {
   const f32 scale = t.size / 6.0f;
   const f32 advance = 5.0f;  // grid units per glyph cell
   const f32 line_h = 8.0f;   // grid units per line
   size_t line_index = 0;
   size_t start = 0;
-  const std::string &s = t.text;
+  const base::String &s = t.text;
   for (size_t i = 0; i <= s.size(); ++i) {
     if (i != s.size() && s[i] != '\n')
       continue;
@@ -3240,7 +3248,7 @@ void Renderer::DrawDebugLines(CommandList &cmd, const FrameView &view,
     text_right = Vec3{1, 0, 0};
   text_right = Normalize(text_right);
   const Vec3 text_up = Normalize(Cross(text_right, Normalize(view.camera.target - view.camera.eye)));
-  std::vector<DebugLine> text_depth, text_overlay;
+  base::Vector<DebugLine> text_depth, text_overlay;
   for (const WorldText &t : view.world_texts)
     TessellateWorldText(t, text_right, text_up, t.overlay ? text_overlay : text_depth);
 
@@ -3324,9 +3332,9 @@ void Renderer::RequestPick(u32 x, u32 y) {
   pick_y_ = y;
 }
 
-std::optional<PickResult> Renderer::TakePickResult() {
+base::Optional<PickResult> Renderer::TakePickResult() {
   if (!pick_result_ready_)
-    return std::nullopt;
+    return base::nullopt;
   pick_result_ready_ = false;
   return PickResult{pick_result_id_};
 }
@@ -3399,7 +3407,7 @@ void Renderer::RenderPickPass(const FrameView &view) {
     DepthAttachment depth{
         .view = pick_depth_image_.view, .load = LoadOp::kClear, .clear = 0.0f};
     cmd.BeginRendering({.extent = {render_width_, render_height_},
-                        .colors = {&color, 1},
+                        .colors = base::Span(&color, 1),
                         .depth = &depth});
     cmd.SetViewport(0, 0, static_cast<f32>(render_width_),
                     static_cast<f32>(render_height_));
@@ -3424,7 +3432,7 @@ void Renderer::RenderPickPass(const FrameView &view) {
 
   // Read back the whole id target and sample the requested pixel (in output
   // pixels, scaled to render resolution).
-  std::vector<u32> pixels(static_cast<size_t>(render_width_) * render_height_);
+  base::Vector<u32> pixels(static_cast<size_t>(render_width_) * render_height_);
   if (!device_->ReadbackImage(pick_id_image_, ResourceState::kColorTarget,
                               pixels.data(), pixels.size() * sizeof(u32))) {
     return;
@@ -3757,7 +3765,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                 : ms_dummy_hiz_.view;
           items.push_back(Bind::SampledView(2, hiz));
         }
-        device_->UpdateBindingSet(globals_set, {items.data(), items.size()});
+        device_->UpdateBindingSet(globals_set, base::Span(items.data(), items.size()));
       };
 
   // Water + transparency over an opaque base. A lambda (rather than inline) so
@@ -3779,10 +3787,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           ResourceHandle sun_shadow, ResourceHandle shadow_atlas, bool csm_on,
           u32 shadow_slot, u32 water_tlas_slot, bool globals_written,
           ResourceHandle rcgi_irr = kInvalidResource) -> ResourceHandle {
-    std::sort(transparent.begin(), transparent.end(),
-              [](const TransparentDraw &a, const TransparentDraw &b) {
-                return a.distance_sq > b.distance_sq;
-              });
+    // Stable: equal distances keep submission order.
+    rx::StableSort(transparent.data(), transparent.data() + transparent.size(),
+                   [](const TransparentDraw &a, const TransparentDraw &b) {
+                     return a.distance_sq > b.distance_sq;
+                   });
 
     // Transparency renders into a copy of the opaque result and refracts by
     // sampling the original, which never returns to attachment layout
@@ -3829,7 +3838,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
          water_tlas_slot, use_rt_frag, ddgi_active, water_pipeline_active,
          csm_on, shadow_slot, shadow_atlas, globals_set, globals_written,
          update_globals_set, frame_slot, adaptive_water_item,
-         adaptive_water_submesh, transparent = std::move(transparent), rcgi_irr,
+         adaptive_water_submesh, transparent = base::move(transparent), rcgi_irr,
          rcgi_world, &frame, &view](PassContext &ctx) {
           if (!globals_written) {
             update_globals_set(ctx, kInvalidResource, false,
@@ -3906,14 +3915,14 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             if (const GpuMesh *adaptive_mesh =
                     meshes_.find(adaptive_water_item->mesh)) {
               const f32 aspect = static_cast<f32>(render_width_) /
-                                 static_cast<f32>(std::max(render_height_, 1u));
+                                 static_cast<f32>(rx::Max(render_height_, 1u));
               Mat4 vp = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f) *
                         LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
               Vec3 camera_local = TransformPoint(
                   Inverse(adaptive_water_item->transform), view.camera.eye);
               AdaptiveWaterMesh::UpdateParams params;
               params.local_to_clip = vp * adaptive_water_item->transform;
-              std::copy_n(adaptive_mesh->water_bounds, 4, params.bounds);
+              for (int k = 0; k < 4; ++k) params.bounds[k] = adaptive_mesh->water_bounds[k];
               params.camera_local = camera_local;
               params.height = adaptive_mesh->water_height;
               params.time = static_cast<f32>(time_seconds_);
@@ -3934,7 +3943,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           DepthAttachment depth_attachment{.view = ctx.graph->image(depth).view,
                                            .load = LoadOp::kLoad};
           ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
-                                   .colors = {colors, 2},
+                                   .colors = base::Span(colors, 2),
                                    .depth = &depth_attachment});
 
           // Effect-shader fire/glows use the additive blend pipeline; the same
@@ -4068,10 +4077,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       Vec3 wc{m[0] * c[0] + m[4] * c[1] + m[8] * c[2] + m[12],
               m[1] * c[0] + m[5] * c[1] + m[9] * c[2] + m[13],
               m[2] * c[0] + m[6] * c[1] + m[10] * c[2] + m[14]};
-      f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-      f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-      f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-      f32 radius = mesh->bounds_radius * std::max(sx, std::max(sy, sz));
+      f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+      f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+      f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+      f32 radius = mesh->bounds_radius * rx::Max(sx, rx::Max(sy, sz));
       if (radius > 0.0f && SphereOutsideFrustum(touch_planes, wc, radius))
         continue;
       for (const GpuSubmesh &submesh : mesh->submeshes) {
@@ -4103,7 +4112,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // FSR-style phase count grows with the scale factor squared.
       f32 scale =
           static_cast<f32>(output_width_) / static_cast<f32>(render_width_);
-      sample_count = static_cast<u32>(std::ceil(8.0f * scale * scale));
+      sample_count = static_cast<u32>(::ceil(8.0f * scale * scale));
     }
     JitterSequence::Sample(frame_index_, sample_count, &jitter_x, &jitter_y);
   }
@@ -4215,9 +4224,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
 
   // Dynamic point lights: copy into the host-visible frame buffer (capped).
   u32 light_count =
-      std::min<u32>(static_cast<u32>(view.lights.size()), kMaxFrameLights);
+      rx::Min<u32>(static_cast<u32>(view.lights.size()), kMaxFrameLights);
   if (light_count > 0) {
-    std::memcpy(frame.lights.mapped, view.lights.data(),
+    base::MemCopy(frame.lights.mapped, view.lights.data(),
                 light_count * sizeof(PointLight));
   }
   // Active lightning strike: append the positioned flash light after the copy
@@ -4239,9 +4248,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     local_shadows_active_ = local_shadows_.face_count() > 0;
   }
   u32 decal_count =
-      std::min<u32>(static_cast<u32>(view.decals.size()), kMaxFrameDecals);
+      rx::Min<u32>(static_cast<u32>(view.decals.size()), kMaxFrameDecals);
   if (decal_count > 0) {
-    std::memcpy(frame.decals.mapped, view.decals.data(),
+    base::MemCopy(frame.decals.mapped, view.decals.data(),
                 decal_count * sizeof(Decal));
   }
   globals.light_count = light_count;
@@ -4332,8 +4341,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   if (settings_.skin_dynamics) {
     constexpr f32 kTwoPi = 6.28318530718f;
     f32 phase = static_cast<f32>(time_seconds_) * settings_.skin_heart_rate * kTwoPi;
-    globals.skin_dynamics[0] = std::fmod(phase, kTwoPi);
-    globals.skin_dynamics[1] = std::clamp(settings_.skin_perfusion, -0.5f, 0.5f);
+    globals.skin_dynamics[0] = ::fmod(phase, kTwoPi);
+    globals.skin_dynamics[1] = rx::Clamp(settings_.skin_perfusion, -0.5f, 0.5f);
     globals.skin_dynamics[2] = settings_.skin_pulse_amplitude;
     globals.skin_dynamics[3] = settings_.skin_tension_gain;
     globals.flags |= kFrameFlagSkinDynamics;
@@ -4349,21 +4358,21 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   {
     // Froxel slicing: exponential view-z between the near plane and 500 m.
     constexpr f32 kNear = 0.1f, kFar = 500.0f;
-    f32 scale = static_cast<f32>(kClusterSlices) / std::log2(kFar / kNear);
+    f32 scale = static_cast<f32>(kClusterSlices) / ::log2(kFar / kNear);
     globals.cluster_params[0] = scale;
-    globals.cluster_params[1] = -std::log2(kNear) * scale;
+    globals.cluster_params[1] = -::log2(kNear) * scale;
     globals.cluster_params[2] =
         static_cast<f32>(render_width_) / static_cast<f32>(kClusterTilesX);
     globals.cluster_params[3] =
         static_cast<f32>(render_height_) / static_cast<f32>(kClusterTilesY);
   }
-  std::memcpy(frame.globals.mapped, &globals, sizeof(globals));
+  base::MemCopy(frame.globals.mapped, &globals, sizeof(globals));
   prev_view_proj_ = view_proj;
   has_prev_frame_ = true;
 
   // Skinning palette for every skinned draw this frame, read by device address.
   if (!view.bone_matrices.empty() && frame.bone_palette.mapped) {
-    u32 count = std::min<u32>(static_cast<u32>(view.bone_matrices.size()),
+    u32 count = rx::Min<u32>(static_cast<u32>(view.bone_matrices.size()),
                               kMaxFrameBones);
 #ifndef NDEBUG
     // The skinning path blends raw upper-3x3 blocks and carries normals with
@@ -4374,11 +4383,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     if (!warned_anisotropic_bone) {
       for (u32 i = 0; i < count && !warned_anisotropic_bone; ++i) {
         const f32* m = view.bone_matrices[i].m;
-        const f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-        const f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-        const f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-        const f32 lo = std::min({sx, sy, sz});
-        const f32 hi = std::max({sx, sy, sz});
+        const f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+        const f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+        const f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+        const f32 lo = rx::Min({sx, sy, sz});
+        const f32 hi = rx::Max({sx, sy, sz});
         if (lo > 1e-6f && hi > lo * 1.01f) {
           RX_WARN(
               "bone {} carries anisotropic scale ({:.3f}/{:.3f}/{:.3f}); skinned "
@@ -4389,7 +4398,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       }
     }
 #endif
-    std::memcpy(frame.bone_palette.mapped, view.bone_matrices.data(),
+    base::MemCopy(frame.bone_palette.mapped, view.bone_matrices.data(),
                 count * sizeof(Mat4));
   }
   // Last frame's poses, in the palette's second half. Written every frame like
@@ -4398,18 +4407,18 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // PrevSkinOffset) and never reads this range at all.
   prev_bone_base_ = 0;
   if (!view.prev_bone_matrices.empty() && frame.bone_palette.mapped) {
-    const u32 count = std::min<u32>(static_cast<u32>(view.prev_bone_matrices.size()),
+    const u32 count = rx::Min<u32>(static_cast<u32>(view.prev_bone_matrices.size()),
                                     kMaxFrameBones);
     prev_bone_base_ = kMaxFrameBones;
-    std::memcpy(static_cast<u8*>(frame.bone_palette.mapped) +
+    base::MemCopy(static_cast<u8*>(frame.bone_palette.mapped) +
                     static_cast<u64>(prev_bone_base_) * sizeof(Mat4),
                 view.prev_bone_matrices.data(), count * sizeof(Mat4));
   }
   // Active morph target weights for every morphed draw, read by device address.
   if (!view.morph_weights.empty() && frame.morph_weights.mapped) {
-    u32 count = std::min<u32>(static_cast<u32>(view.morph_weights.size()),
+    u32 count = rx::Min<u32>(static_cast<u32>(view.morph_weights.size()),
                               kMaxFrameMorphWeights);
-    std::memcpy(frame.morph_weights.mapped, view.morph_weights.data(),
+    base::MemCopy(frame.morph_weights.mapped, view.morph_weights.data(),
                 count * sizeof(MorphWeight));
   }
   // Per-draw transforms for every pass that walks view.draws this frame. One
@@ -4514,7 +4523,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
 
   // Baked decal layers: assign tiles to the receivers on screen and record the
   // stamps queued for them. Records nothing in a frame where nothing changed.
-  decal_baker_.AddToGraph(graph_, {decal_targets_.data(), decal_targets_.size()},
+  decal_baker_.AddToGraph(graph_, base::Span(decal_targets_.data(), decal_targets_.size()),
                           frame_slot, frame_index_, decal_atlas_view_,
                           decal_normal_atlas_view_);
 
@@ -4571,11 +4580,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     f32 night = settings_.night;
     if (night < 0.0f) { // legacy fallback: infer from the sun's elevation
       f32 to_sun_y = -applied_sun_direction_.y;
-      night = std::clamp((0.04f - to_sun_y) / 0.14f, 0.0f, 1.0f);
+      night = rx::Clamp((0.04f - to_sun_y) / 0.14f, 0.0f, 1.0f);
       night = night * night * (3.0f - 2.0f * night);
     }
     env_aurora =
-        settings_.weather.aurora_intensity * std::clamp(night, 0.0f, 1.0f);
+        settings_.weather.aurora_intensity * rx::Clamp(night, 0.0f, 1.0f);
   }
   // An active aurora writhes: refresh the cubemap whenever its 0.4 s animation
   // step ticks over, so the curtains also move in the IBL and reflections. The
@@ -4583,8 +4592,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // the aurora off does not leave the last green bake in the IBL forever.
   constexpr f64 kAuroraBakeStep = 0.4;
   if (env_aurora > 0.0f &&
-      std::floor(time_seconds_ / kAuroraBakeStep) !=
-          std::floor((time_seconds_ - view.frame_delta_seconds) /
+      ::floor(time_seconds_ / kAuroraBakeStep) !=
+          ::floor((time_seconds_ - view.frame_delta_seconds) /
                      kAuroraBakeStep)) {
     environment_dirty_ = true;
   }
@@ -4637,7 +4646,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       const f32 wy = mm[1] * c.x + mm[5] * c.y + mm[9] * c.z + mm[13];
       const f32 wz = mm[2] * c.x + mm[6] * c.y + mm[10] * c.z + mm[14];
       const f32 dx = wx - eye.x, dy = wy - eye.y, dz = wz - eye.z;
-      return std::sqrt(dx * dx + dy * dy + dz * dz);
+      return ::sqrt(dx * dx + dy * dy + dz * dz);
     };
     // Resolves the RT LOD for one instance: LOD0 inside the near radius (raster
     // and rays agree there, avoiding the self-intersection disparity the AC
@@ -4760,7 +4769,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       const base::Vector<u8> *visible =
           group_cull ? &rt_cull_.UpdateGroup(
                            gi, group.generation, group.revision,
-                           {group.transforms.data(), group.transforms.size()},
+                           base::Span(group.transforms.data(), group.transforms.size()),
                            mesh_center(*mesh), mesh->bounds_radius)
                      : nullptr;
       for (u32 ii = 0; ii < group.transforms.size(); ++ii) {
@@ -4788,7 +4797,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     }
     if (path_trace) {
       path_scene_moved = pt_scene_history_.Update(
-          instances, {view.bone_matrices.data(), view.bone_matrices.size()});
+          instances, base::Span(view.bone_matrices.data(), view.bone_matrices.size()));
     } else {
       pt_scene_history_ = {};
     }
@@ -4830,7 +4839,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               b.Async(); // build next frame's slot on the compute queue
           },
           [this, tlas_build_slot, frame_index = frame_index_,
-           instances = std::move(instances)](PassContext &ctx) {
+           instances = base::move(instances)](PassContext &ctx) {
             raytracing_->BuildTlas(*ctx.cmd, tlas_build_slot, frame_index,
                                    instances);
           });
@@ -4875,7 +4884,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       }
     }
     sdf_clipmap_->AddComposeToGraph(graph_, *sdf_scene_,
-                                    std::move(sdf_instances), view.camera.eye,
+                                    base::move(sdf_instances), view.camera.eye,
                                     frame_index_);
   }
 
@@ -4915,10 +4924,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     Vec3 rcgi_sun_col = settings_.interior
                             ? settings_.interior_directional_color
                             : applied_sun_color_;
-    rcgi_->AddToGraph(graph_, raytracing_.get(), tlas_slot, light_grid_,
+    rcgi_->AddToGraph(graph_, raytracing_.Get_UseOnlyIfYouKnowWhatYouareDoing(), tlas_slot, light_grid_,
                       frame.lights, view.camera.eye, rcgi_sun_dir, rcgi_sun_int,
                       rcgi_sun_col, frame_index_, rcgi_cfg, rcgi_async,
-                      rcgi_software ? sdf_clipmap_.get() : nullptr);
+                      rcgi_software ? sdf_clipmap_.Get_UseOnlyIfYouKnowWhatYouareDoing() : nullptr);
   }
 
   // The path tracer takes over the whole frame: it writes scene_color directly
@@ -4937,12 +4946,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     pt.sun_radius = settings_.sun_angular_radius;
     pt.frame_index = frame_index_;
     bool moved =
-        std::memcmp(&view_proj, &pt_prev_view_proj_, sizeof(Mat4)) != 0;
+        base::MemCompare(&view_proj, &pt_prev_view_proj_, sizeof(Mat4)) != 0;
     bool lit_changed =
         settings_.sun_intensity != pt_prev_sun_intensity_ ||
         settings_.sun_angular_radius != pt_prev_sun_radius_ ||
-        std::memcmp(&settings_.sun_direction, &pt_prev_sun_direction_, sizeof(Vec3)) != 0 ||
-        std::memcmp(&settings_.sun_color, &pt_prev_sun_color_, sizeof(Vec3)) != 0;
+        base::MemCompare(&settings_.sun_direction, &pt_prev_sun_direction_, sizeof(Vec3)) != 0 ||
+        base::MemCompare(&settings_.sun_color, &pt_prev_sun_color_, sizeof(Vec3)) != 0;
     bool scene_changed = scene_revision_ != pt_prev_scene_revision_;
     bool denoised_path = false;
 
@@ -4979,7 +4988,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       rf.sun_intensity = settings_.sun_intensity;
       rf.sun_color = settings_.sun_color;
       rf.sun_radius = settings_.sun_angular_radius;
-      rf.pixel_spread = 2.0f * std::tan(view.camera.fov_y * 0.5f) /
+      rf.pixel_spread = 2.0f * ::tan(view.camera.fov_y * 0.5f) /
                         static_cast<f32>(render_height_);
       rf.spp = settings_.path_trace_spp;
       rf.frame_index = frame_index_;
@@ -5041,7 +5050,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       denoised_path = true;
       pt.spp = settings_.path_trace_spp;
       // Ray-cone spread for texture lod: vertical fov radians per pixel.
-      pt.pixel_spread = 2.0f * std::tan(view.camera.fov_y * 0.5f) /
+      pt.pixel_spread = 2.0f * ::tan(view.camera.fov_y * 0.5f) /
                         static_cast<f32>(render_height_);
       PathTracer::GbufferTargets t;
       auto guide = [&](const char *name, Format format) {
@@ -5198,12 +5207,12 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                               mesh->bounds_center[1],
                                               mesh->bounds_center[2]});
                     const f32 *m = item.transform.m;
-                    f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-                    f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+                    f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+                    f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
                     f32 sz =
-                        std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+                        ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
                     f32 wr =
-                        mesh->bounds_radius * std::max(sx, std::max(sy, sz));
+                        mesh->bounds_radius * rx::Max(sx, rx::Max(sy, sz));
                     Vec3 d{wc.x - face.light_pos.x, wc.y - face.light_pos.y,
                            wc.z - face.light_pos.z};
                     f32 reach = face.light_radius + wr;
@@ -5349,7 +5358,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                                     mesh->bounds_center[1],
                                                     mesh->bounds_center[2]});
           Vec3 d = view.camera.eye - wc;
-          lod = SelectLod(*mesh, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
+          lod = SelectLod(*mesh, ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
         }
         const base::Vector<GpuSubmesh> &lod_subs =
             lod == 0 ? mesh->submeshes : mesh->lods[lod - 1].submeshes;
@@ -5413,11 +5422,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // width clamp. m[5] is negative under the reversed-Z Y-flip projection.
       grass_frame.pixel_scale =
           proj.m[5] != 0.0f
-              ? 2.0f / (std::fabs(proj.m[5]) * static_cast<f32>(render_height_))
+              ? 2.0f / (::fabs(proj.m[5]) * static_cast<f32>(render_height_))
               : 0.0f;
       grass_active = procedural_grass_.Prepare(
           *view.grass_domain,
-          {view.grass_interactions.data(), view.grass_interactions.size()},
+          base::Span(view.grass_interactions.data(), view.grass_interactions.size()),
           grass_frame, frame_slot);
       if (grass_active) procedural_grass_.AddGeneration(graph_, frame_slot);
     }
@@ -5472,15 +5481,15 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         // Cpu frustum skip: a conservative world radius (bounds scaled by the
         // largest transform axis) lets off-screen instances cost no dispatch.
         const f32 *m = item.transform.m;
-        f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-        f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-        f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-        f32 ms_radius = mesh->bounds_radius * std::max(sx, std::max(sy, sz));
+        f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+        f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+        f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+        f32 ms_radius = mesh->bounds_radius * rx::Max(sx, rx::Max(sy, sz));
         if (ms_radius > 0.0f &&
             SphereOutsideFrustum(ms_planes, ms_wc, ms_radius))
           continue;
         u32 ms_lod =
-            SelectLod(*mesh, std::sqrt(ms_d.x * ms_d.x + ms_d.y * ms_d.y +
+            SelectLod(*mesh, ::sqrt(ms_d.x * ms_d.x + ms_d.y * ms_d.y +
                                        ms_d.z * ms_d.z));
         const base::Vector<GpuSubmesh> &ms_subs =
             ms_lod == 0 ? mesh->submeshes : mesh->lods[ms_lod - 1].submeshes;
@@ -5529,7 +5538,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               .clear = 0.0f}; // reversed z clears to far = 0
           ctx.cmd->BeginRendering(
               {.extent = {render_width_, render_height_},
-               .colors = {colors, 3},
+               .colors = base::Span(colors, 3),
                .depth = &depth_attachment,
                .shading_rate = vrs_active_ ? vrs_.rate_view() : TextureView{}});
 
@@ -5576,7 +5585,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               push.draw_index =
                   static_cast<u32>(&item - view.draws.data()) + 1u;
               if (mesh->terrain_lod) {
-                std::memcpy(push.detail_rect, view.detail_rect,
+                base::MemCopy(push.detail_rect, view.detail_rect,
                             sizeof(push.detail_rect));
               }
               if (draw_skinned && item.skin_offset >= 0) {
@@ -5735,7 +5744,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       WaterField::UpdateParams wf{};
       wf.camera_pos = view.camera.eye;
       wf.time = static_cast<f32>(time_seconds_);
-      wf.dt = std::min(view.frame_delta_seconds,
+      wf.dt = rx::Min(view.frame_delta_seconds,
                        1.0f / 30.0f); // clamp for stability
       wf.frame_slot = frame_slot;
       wf.fft_ocean = fft_ocean_active;
@@ -5767,11 +5776,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     if (fluid_sim_active_) {
       FluidSim::UpdateParams fp{};
       fp.domain = view.fluid_domain;
-      fp.dt = std::min(view.frame_delta_seconds, 1.0f / 30.0f);
+      fp.dt = rx::Min(view.frame_delta_seconds, 1.0f / 30.0f);
       fp.frame_slot = frame_slot;
       fp.sources = view.fluid_sources.data();
       fp.source_count =
-          std::min<u32>(static_cast<u32>(view.fluid_sources.size()), FluidSim::kMaxSources);
+          rx::Min<u32>(static_cast<u32>(view.fluid_sources.size()), FluidSim::kMaxSources);
       fluid_sim_.AddToGraph(graph_, fp);
     }
 
@@ -5878,7 +5887,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
              view_proj = globals.view_proj,
              inv_view_proj = globals.inv_view_proj](PassContext &ctx) {
               const ContactCamera camera{view_proj, inv_view_proj};
-              std::memcpy(contact_camera_[frame_slot].mapped, &camera,
+              base::MemCopy(contact_camera_[frame_slot].mapped, &camera,
                           sizeof(camera));
               struct ContactPush {
                 f32 sun_dir[3];
@@ -5963,9 +5972,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                 p.top = 4200.0f;
                 // Same drift velocity as clouds.cs, so the shadows track the
                 // deck.
-                p.wind = std::cos(settings_.weather.wind_yaw) *
+                p.wind = ::cos(settings_.weather.wind_yaw) *
                          settings_.weather.wind_speed;
-                p.wind_z = std::sin(settings_.weather.wind_yaw) *
+                p.wind_z = ::sin(settings_.weather.wind_yaw) *
                            settings_.weather.wind_speed;
                 p.strength = 0.75f;
                 ctx.cmd->BindPipeline(cloud_shadow_pipeline_);
@@ -6144,10 +6153,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           p.near_plane = 0.1f;
           constexpr f32 kNear = 0.1f, kFar = 500.0f;
           p.slice_scale =
-              static_cast<f32>(kClusterSlices) / std::log2(kFar / kNear);
-          p.slice_bias = -std::log2(kNear) * p.slice_scale;
+              static_cast<f32>(kClusterSlices) / ::log2(kFar / kNear);
+          p.slice_bias = -::log2(kNear) * p.slice_scale;
           p.light_count = light_count;
-          p.tan_half_fov_y = std::tan(view.camera.fov_y * 0.5f);
+          p.tan_half_fov_y = ::tan(view.camera.fov_y * 0.5f);
           p.aspect = static_cast<f32>(render_width_) /
                      static_cast<f32>(render_height_);
           p.decal_count = decal_count;
@@ -6299,7 +6308,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               .view = ctx.graph->image(geom_depth).view,
               .load = LoadOp::kLoad}; // prepass depth, tested EQUAL
           ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
-                                   .colors = {colors, 3},
+                                   .colors = base::Span(colors, 3),
                                    .depth = &depth_attachment});
 
           BindingSetHandle bindless_set =
@@ -6336,7 +6345,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               push.draw_index =
                   static_cast<u32>(&item - view.draws.data()) + 1u;
               if (mesh->terrain_lod) {
-                std::memcpy(push.detail_rect, view.detail_rect,
+                base::MemCopy(push.detail_rect, view.detail_rect,
                             sizeof(push.detail_rect));
               }
               if (draw_skinned && item.skin_offset >= 0) {
@@ -6477,7 +6486,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                   .view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
               ctx.cmd->BeginRendering(
                   {.extent = {render_width_, render_height_},
-                   .colors = {colors, 3},
+                   .colors = base::Span(colors, 3),
                    .depth = &depth_attachment});
               environment_->DrawSky(*ctx.cmd, globals_set);
               ctx.cmd->EndRendering();
@@ -6492,7 +6501,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
     // so the graph barriers them; the callback opens its own dynamic-rendering
     // section.
     auto add_scene_hook =
-        [&](const std::function<void(const SceneHookContext &)> &hook,
+        [&](const base::Function<void(const SceneHookContext &)> &hook,
             ScenePhase phase, ResourceHandle color_h, ResourceHandle depth_h,
             ResourceHandle export_h, ResourceHandle motion_h) {
           const f32 jx = globals.jitter[0], jy = globals.jitter[1];
@@ -6584,10 +6593,10 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         // Pixels per meter at view depth 1. The projection bakes the vulkan
         // y-flip into m[5], so it is negative - take the magnitude.
         p.proj_scale =
-            std::abs(proj.m[5]) * 0.5f * static_cast<f32>(render_height_);
+            ::abs(proj.m[5]) * 0.5f * static_cast<f32>(render_height_);
         p.max_radius = 24.0f;
         p.strength =
-            std::getenv("RX_SSS_DEBUG") ? -1.0f : 1.0f; // <0 = mask debug view
+            ::getenv("RX_SSS_DEBUG") ? -1.0f : 1.0f; // <0 = mask debug view
       };
       ResourceHandle sss_tmp =
           graph_.CreateTexture({.name = "sss_tmp",
@@ -6692,8 +6701,8 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         settings_.weather.snow ? 0.0f : settings_.weather.precipitation;
     const f32 live_snow =
         settings_.weather.snow ? settings_.weather.precipitation : 0.0f;
-    const f32 surface_wetness = std::max(settings_.weather.wetness, live_rain);
-    const f32 surface_snow = std::max(settings_.weather.snow_cover, live_snow);
+    const f32 surface_wetness = rx::Max(settings_.weather.wetness, live_rain);
+    const f32 surface_snow = rx::Max(settings_.weather.snow_cover, live_snow);
     if ((surface_wetness > 0.0f || surface_snow > 0.0f) && !path_trace &&
         normals != kInvalidResource) {
       SurfaceWeather::Frame sf;
@@ -6794,9 +6803,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       cf.sun_color = settings_.sun_color;
       cf.coverage = settings_.cloud_coverage;
       cf.wind_x =
-          std::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+          ::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
       cf.wind_z =
-          std::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+          ::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
       lit = clouds_.AddToGraph(graph_, lit, depth_export,
                                {render_width_, render_height_}, cf);
     }
@@ -6852,7 +6861,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       ff.height_falloff = settings_.fog_height_falloff;
       ff.base_height = settings_.fog_base_height;
       ff.start_distance = settings_.froxel_start_distance;
-      std::memcpy(ff.cluster_params, globals.cluster_params,
+      base::MemCopy(ff.cluster_params, globals.cluster_params,
                   sizeof(ff.cluster_params));
       ff.screen_size[0] = static_cast<f32>(render_width_);
       ff.screen_size[1] = static_cast<f32>(render_height_);
@@ -6887,7 +6896,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       ff.comparison_sampler = environment_->comparison_sampler();
       froxel_fog_.AddToGraph(graph_, lit, depth_export,
                              csm_active ? shadow_atlas : kInvalidResource,
-                             raytracing_.get(), tlas_slot,
+                             raytracing_.Get_UseOnlyIfYouKnowWhatYouareDoing(), tlas_slot,
                              {render_width_, render_height_}, ff);
     }
 
@@ -6921,7 +6930,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       Vec3 sun_col = applied_sun_color_ * applied_sun_intensity_;
       fur_.AddToGraph(graph_, lit, depth, model, view_proj,
                       applied_sun_direction_, sun_col,
-                      std::max(settings_.ambient, 0.12f), FurPass::Params{});
+                      rx::Max(settings_.ambient, 0.12f), FurPass::Params{});
     }
 
     // Order-independent transparency (weighted blended) over the lit scene.
@@ -6931,7 +6940,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       oit_light.lights = frame.lights;
       oit_light.cluster_counts = cluster_counts_;
       oit_light.cluster_indices = cluster_indices_;
-      std::memcpy(oit_light.cluster_params, globals.cluster_params,
+      base::MemCopy(oit_light.cluster_params, globals.cluster_params,
                   sizeof(oit_light.cluster_params));
       oit_light.froxel_volume = froxel_fog_.integrated().view;
       oit_light.froxel_sampler = froxel_fog_.volume_sampler();
@@ -6940,7 +6949,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       oit_light.froxel_enabled = froxel_on;
       lit = wboit_.AddToGraph(graph_, lit, depth, view.oit, view_proj,
                               applied_sun_direction_, sun_col,
-                              std::max(settings_.ambient, 0.12f), render_width_,
+                              rx::Max(settings_.ambient, 0.12f), render_width_,
                               render_height_, oit_light);
     }
 
@@ -6963,16 +6972,16 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       vf.sun_direction = applied_sun_direction_;
       vf.sun_color = applied_sun_color_;
       vf.sun_intensity = applied_sun_intensity_;
-      vf.ambient = std::max(settings_.ambient, 0.02f);
+      vf.ambient = rx::Max(settings_.ambient, 0.02f);
       vf.time = static_cast<f32>(time_seconds_);
       vf.dt = view.frame_delta_seconds;
       vf.intensity = settings_.weather.precipitation;
       vf.snow = settings_.weather.snow;
       // Wind yaw is the direction the wind blows toward; decompose to xz.
       vf.wind[0] =
-          std::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+          ::cos(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
       vf.wind[1] =
-          std::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
+          ::sin(settings_.weather.wind_yaw) * settings_.weather.wind_speed;
       vf.gustiness = settings_.weather.gustiness;
       vf.lightning = settings_.weather.lightning;
       vf.jitter[0] = globals.jitter[0];
@@ -6986,7 +6995,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       vf.froxel_sampler = froxel_fog_.volume_sampler();
       vf.rt_shadows = precip_rt; // matched to the TLAS build request above
       precip_volume_.AddToGraph(graph_, lit, depth_export, motion,
-                                raytracing_.get(), tlas_slot, vf);
+                                raytracing_.Get_UseOnlyIfYouKnowWhatYouareDoing(), tlas_slot, vf);
       precip_volume_drawn = true;
     }
 
@@ -7020,13 +7029,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       pf.sun_direction = settings_.sun_direction;
       pf.sun_color = settings_.sun_color;
       pf.sun_intensity = settings_.sun_intensity;
-      pf.ambient = std::max(settings_.ambient, 0.15f);
+      pf.ambient = rx::Max(settings_.ambient, 0.15f);
       pf.near_plane = 0.1f;
       pf.soft_fade = 0.6f;
       pf.jitter[0] = globals.jitter[0];
       pf.jitter[1] = globals.jitter[1];
       // Lit translucency inputs: clustered lights + shadows + the fog volume.
-      std::memcpy(pf.cluster_params, globals.cluster_params,
+      base::MemCopy(pf.cluster_params, globals.cluster_params,
                   sizeof(pf.cluster_params));
       pf.froxel_near = FroxelFog::kNear;
       pf.froxel_far = FroxelFog::kFar;
@@ -7098,7 +7107,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                           view.camera.eye, frame_index_);
     }
     // Distant foliage imposters: instanced octahedral billboards with depth.
-    const char *imposters_env = std::getenv("RX_IMPOSTERS");
+    const char *imposters_env = ::getenv("RX_IMPOSTERS");
     if (imposters_.active() && (!imposters_env || imposters_env[0] != '0')) {
       ImposterPass::Frame imf;
       imf.view_proj = view_proj;
@@ -7129,9 +7138,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       // Screen pixels per world unit at distance 1 (|proj.m5| carries the
       // vulkan y-flip, hence the fabs).
       vf.proj_scale =
-          std::fabs(proj.m[5]) * static_cast<f32>(render_height_) * 0.5f;
-      vf.proj_m00 = std::fabs(proj.m[0]);
-      vf.proj_m11 = std::fabs(proj.m[5]);
+          ::fabs(proj.m[5]) * static_cast<f32>(render_height_) * 0.5f;
+      vf.proj_m00 = ::fabs(proj.m[0]);
+      vf.proj_m11 = ::fabs(proj.m[5]);
       vf.error_pixels = VgeoError.get() > 0.0f ? VgeoError.get() : 1.0f;
       // Reversed-z infinite far: proj m[14] is the near plane distance.
       vf.near_plane = proj.m[14] > 0.0f ? proj.m[14] : 0.1f;
@@ -7139,7 +7148,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       vf.depth = depth;
       vf.width = render_width_;
       vf.height = render_height_;
-      vf.debug = static_cast<u32>(std::max(VgeoDebug.get(), 0));
+      vf.debug = static_cast<u32>(rx::Max(VgeoDebug.get(), 0));
       vf.slot = frame_index_;
       vgeo_.AddToGraph(*device_, graph_, vf);
     }
@@ -7234,7 +7243,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               da = {.view = ctx.graph->image(depth).view,
                     .load = LoadOp::kLoad};
             ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
-                                     .colors = {&ca, 1},
+                                     .colors = base::Span(&ca, 1),
                                      .depth = have_depth ? &da : nullptr});
             DrawDebugLines(*ctx.cmd, view, view_proj,
                            {render_width_, render_height_});
@@ -7304,7 +7313,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
               .view = ctx.graph->image(pt_depth).view,
               .clear = 0.0f}; // reversed z clears to far = 0
           ctx.cmd->BeginRendering({.extent = {render_width_, render_height_},
-                                   .colors = {colors, 3},
+                                   .colors = base::Span(colors, 3),
                                    .depth = &depth_attachment});
 
           environment_->WriteEnvSet(
@@ -7330,7 +7339,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
             MeshPushConstants push{};
             push.draw_index = static_cast<u32>(&item - view.draws.data()) + 1u;
             if (mesh->terrain_lod) {
-              std::memcpy(push.detail_rect, view.detail_rect,
+              base::MemCopy(push.detail_rect, view.detail_rect,
                           sizeof(push.detail_rect));
             }
             if (draw_skinned && item.skin_offset >= 0) {
@@ -7527,7 +7536,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                .load = LoadOp::kDontCare,
                                .store = StoreOp::kStore};
           ctx.cmd->BeginRendering(
-              {.extent = {post_width, post_height}, .colors = {&copy, 1}});
+              {.extent = {post_width, post_height}, .colors = base::Span(&copy, 1)});
           ctx.cmd->BindPipeline(hdr_overlay_copy_pipeline_);
           ctx.cmd->BindTransient(
               0, {Bind::Combined(0, source.view, hdr_overlay_sampler_)});
@@ -7539,7 +7548,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
         [overlay_target](RenderGraph::PassBuilder& builder) {
           builder.Write(overlay_target, ResourceUsage::kColorAttachment);
         },
-        [this, overlay = std::move(overlay), overlay_target, post_width,
+        [this, overlay = base::move(overlay), overlay_target, post_width,
          post_height](PassContext& ctx) {
           const GpuImage& color = ctx.graph->image(overlay_target);
           HdrOverlayContext hc;
@@ -7721,7 +7730,7 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
                                                            : SamplerHandle{};
           ctx.cmd->BeginRendering(
               {.extent = ctx.graph->image(backbuffer).extent,
-               .colors = {&color, 1}});
+               .colors = base::Span(&color, 1)});
           if (view.hud_draw)
             view.hud_draw(*ctx.cmd);
           if (view.ui_draw)
@@ -7845,7 +7854,7 @@ void Renderer::RecreateSwapchain() {
   if (width == 0 || height == 0)
     return; // minimized
   device_->WaitIdle();
-  swapchain_.reset();
+  swapchain_.Reset();
   swapchain_starved_ = false; // a fresh swapchain is worth probing again
   swapchain_hdr_request_ = WantHdrSwapchain();
   swapchain_ = device_->CreateSwapchain(width, height, settings_.vsync,
@@ -7860,7 +7869,7 @@ void Renderer::RecreateSwapchain() {
   // and dropping a working upscale to taa on a window resize is not something
   // anyone would connect back to the resize.
   if (upscaler_) {
-    upscaler_.reset();
+    upscaler_.Reset();
     if (!CreateUpscalerWithFallback()) {
       settings_.upscaler = UpscalerKind::kNone;
       settings_.aa_mode = AntiAliasingMode::kTaa;
@@ -7868,7 +7877,7 @@ void Renderer::RecreateSwapchain() {
     }
   }
   // The frame generator is sized for the swapchain; lazily recreated.
-  framegen_.reset();
+  framegen_.Reset();
   framegen_attempted_ = false;
   framegen_was_active_ = false;
   UpdateRenderResolution();
@@ -7887,7 +7896,7 @@ void Renderer::DestroySurface() {
   if (!device_ || device_->is_stub())
     return;
   device_->WaitIdle();
-  swapchain_.reset();
+  swapchain_.Reset();
   device_->DestroySurface();
 }
 
@@ -7939,8 +7948,8 @@ void Renderer::Shutdown() {
       light_grid_.Destroy(*device_); // rcgi_ (unique_ptr) frees itself
     // Free SDF GPU resources while the device is still valid (the unique_ptr
     // destructors call DestroyImage/DestroyBuffer/DestroyPipeline).
-    sdf_clipmap_.reset();
-    sdf_scene_.reset();
+    sdf_clipmap_.Reset();
+    sdf_scene_.Reset();
     device_->DestroyPipeline(hdr_pipeline_);
     hdr_pipeline_ = {};
     device_->DestroyBuffer(hdr_readback_);
@@ -8043,27 +8052,27 @@ void Renderer::Shutdown() {
     precip_volume_.Destroy(*device_);
     lightning_.Destroy(*device_);
     surface_weather_.Destroy(*device_);
-    water_.reset();
-    fluid_surface_.reset();
-    ddgi_.reset();
-    rcgi_.reset(); // owns GPU resources through device_; destroy before device
+    water_.Reset();
+    fluid_surface_.Reset();
+    ddgi_.Reset();
+    rcgi_.Reset(); // owns GPU resources through device_; destroy before device
                    // teardown
-    environment_.reset();
-    material_system_.reset();
-    bindless_.reset();
-    transient_pool_.reset();
+    environment_.Reset();
+    material_system_.Reset();
+    bindless_.Reset();
+    transient_pool_.Reset();
   }
   graph_.Reset();
   if (capture_image_.handle)
     device_->DestroyImage(capture_image_); // before device_ goes away
-  post_.reset();
-  ui_blur_.reset(); // holds a Device& + backend handles; destroy before device_
-  mesh_pipeline_.reset();
-  swapchain_.reset();
-  framegen_.reset(); // ffx contexts destroy through the device
-  upscaler_.reset();
-  raytracing_.reset();
-  device_.reset();
+  post_.Reset();
+  ui_blur_.Reset(); // holds a Device& + backend handles; destroy before device_
+  mesh_pipeline_.Reset();
+  swapchain_.Reset();
+  framegen_.Reset(); // ffx contexts destroy through the device
+  upscaler_.Reset();
+  raytracing_.Reset();
+  device_.Reset();
 }
 
 void Renderer::LogTextureMemory() const {

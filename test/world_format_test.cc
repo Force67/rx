@@ -1,12 +1,15 @@
 // The baked map formats: round trip, the cook-time consistency checks that keep
 // a broken world from ever reaching an archive, and the load-time checks that
 // make a corrupted or stale one fail loudly instead of materializing garbage.
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "world/world_format.h"
 
-#include <cmath>
-#include <cstdio>
-#include <cstring>
-#include <string>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 namespace {
 
@@ -23,19 +26,19 @@ int g_failures = 0;
 #define CHECK(cond)                                                        \
   do {                                                                     \
     if (!(cond)) {                                                         \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                        \
     }                                                                      \
   } while (0)
 
-void CheckRejected(bool decoded, const std::string& error, const char* what) {
+void CheckRejected(bool decoded, const base::String& error, const char* what) {
   if (decoded) {
-    std::fprintf(stderr, "FAIL: %s was accepted\n", what);
+    ::fprintf(stderr, "FAIL: %s was accepted\n", what);
     ++g_failures;
     return;
   }
   if (error.empty()) {
-    std::fprintf(stderr, "FAIL: %s was rejected without a message\n", what);
+    ::fprintf(stderr, "FAIL: %s was rejected without a message\n", what);
     ++g_failures;
   }
 }
@@ -79,12 +82,12 @@ void TestIndexRoundTrip() {
   writer.AddPayload(3, Domain::kGameplay, Tier::kStandard, 5000, 13);
 
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&bytes, &error));
   CHECK(error.empty());
 
   WorldIndexData index;
-  CHECK(DecodeWorldIndex(std::span<const u8>(bytes.data(), bytes.size()), &index, &error));
+  CHECK(DecodeWorldIndex(base::Span<const u8>(bytes.data(), bytes.size()), &index, &error));
   CHECK(error.empty());
   CHECK(index.world_id == 0xfeedu);
   CHECK(index.bake_id == kBakeId);
@@ -139,12 +142,12 @@ void TestStableIdLookupIgnoresCellOrder() {
   writer.AddPayload(1, Domain::kGameplay, Tier::kStandard, 16, 1);
 
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&bytes, &error));
   CHECK(error.empty());
 
   WorldIndexData index;
-  CHECK(DecodeWorldIndex(std::span<const u8>(bytes.data(), bytes.size()), &index, &error));
+  CHECK(DecodeWorldIndex(base::Span<const u8>(bytes.data(), bytes.size()), &index, &error));
   CHECK(index.stable_id_order.size() == 3);  // only the cells that own ids
 
   CHECK(index.FindCellByStableId(950) == index.FindCell(1));
@@ -160,7 +163,7 @@ void TestStableIdLookupIgnoresCellOrder() {
 }
 
 void TestIndexRefusesInconsistentWorlds() {
-  std::string error;
+  base::String error;
   base::Vector<u8> bytes;
   {
     WorldIndexWriter writer;
@@ -203,41 +206,41 @@ void TestIndexRefusesCorruptedBytes() {
   writer.AddCell(2, {16, 0, 0}, {32, 16, 16}, 0, 4, 4);
   writer.AddPayload(1, Domain::kGameplay, Tier::kStandard, 64, 4);
   base::Vector<u8> good;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&good, &error));
 
   WorldIndexData index;
   {
     base::Vector<u8> bad(good);
     bad[0] = 'X';
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a bad magic");
   }
   {
     base::Vector<u8> bad(good);
     bad[8] = 9;  // version
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a future version");
   }
   {
     // Flip a byte in the body: the checksum must catch it.
     base::Vector<u8> bad(good);
     bad[bad.size() - 1] ^= 0xff;
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a flipped body byte");
   }
   {
     base::Vector<u8> bad(good);
     bad.erase(bad.end() - 1);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a truncated body");
   }
   {
     base::Vector<u8> bad;
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "an empty file");
   }
-  CHECK(DecodeWorldIndex(std::span<const u8>(good.data(), good.size()), &index, &error));
+  CHECK(DecodeWorldIndex(base::Span<const u8>(good.data(), good.size()), &index, &error));
 }
 
 void TestEntityPayloadRoundTrip() {
@@ -250,16 +253,16 @@ void TestEntityPayloadRoundTrip() {
   const u32 archetype = writer.BeginArchetype(3);
   const base::Vector<u8> column = BytesOf(positions, sizeof(positions));
   writer.AddColumn(archetype, "Position", sizeof(Position), layout,
-                   std::span<const u8>(column.data(), column.size()));
-  writer.SetStableIds(archetype, std::span<const u64>(ids, 3));
+                   base::Span<const u8>(column.data(), column.size()));
+  writer.SetStableIds(archetype, base::Span<const u64>(ids, 3));
 
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&bytes, &error));
   CHECK(error.empty());
 
   WorldCellPayload payload;
-  CHECK(DecodeCellPayload(std::span<const u8>(bytes.data(), bytes.size()), &payload, &error));
+  CHECK(DecodeCellPayload(base::Span<const u8>(bytes.data(), bytes.size()), &payload, &error));
   CHECK(payload.kind == PayloadKind::kEntities);
   CHECK(payload.cell_id == 42);
   CHECK(payload.bake_id == kBakeId);
@@ -275,11 +278,11 @@ void TestEntityPayloadRoundTrip() {
   CHECK(payload.columns[0].stride == sizeof(Position));
   CHECK(payload.columns[0].layout_hash == layout);
 
-  const std::span<const u8> decoded = payload.ColumnBytes(payload.columns[0]);
+  const base::Span<const u8> decoded = payload.ColumnBytes(payload.columns[0]);
   CHECK(decoded.size() == sizeof(positions));
-  CHECK(std::memcmp(decoded.data(), positions, sizeof(positions)) == 0);
+  CHECK(base::MemCompare(decoded.data(), positions, sizeof(positions)) == 0);
 
-  const std::span<const u64> decoded_ids = payload.StableIds(payload.archetypes[0]);
+  const base::Span<const u64> decoded_ids = payload.StableIds(payload.archetypes[0]);
   CHECK(decoded_ids.size() == 3);
   CHECK(decoded_ids.size() == 3 && decoded_ids[0] == 10 && decoded_ids[2] == 12);
 }
@@ -294,11 +297,11 @@ void TestInstancePayloadRoundTrip() {
   writer.AddInstance(501, tree, {4, 5, 6}, {0, 0.7071f, 0, 0.7071f}, 2.0f);
 
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&bytes, &error));
 
   WorldCellPayload payload;
-  CHECK(DecodeCellPayload(std::span<const u8>(bytes.data(), bytes.size()), &payload, &error));
+  CHECK(DecodeCellPayload(base::Span<const u8>(bytes.data(), bytes.size()), &payload, &error));
   CHECK(payload.kind == PayloadKind::kInstances);
   CHECK(payload.prototypes.size() == 2);
   CHECK(payload.instances.size() == 2);
@@ -313,7 +316,7 @@ void TestInstancePayloadRoundTrip() {
 
 void TestPayloadRefusesInconsistentContent() {
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   const u64 layout = HashComponentLayout("Position", sizeof(Position), {}, {}, {});
   const Position positions[2] = {{}, {}};
   const base::Vector<u8> two_rows = BytesOf(positions, sizeof(positions));
@@ -323,43 +326,43 @@ void TestPayloadRefusesInconsistentContent() {
     CellPayloadWriter writer(1, Domain::kGameplay, Tier::kStandard);
     const u32 archetype = writer.BeginArchetype(3);  // three rows, two rows of bytes
     writer.AddColumn(archetype, "Position", sizeof(Position), layout,
-                     std::span<const u8>(two_rows.data(), two_rows.size()));
+                     base::Span<const u8>(two_rows.data(), two_rows.size()));
     const u64 three[3] = {1, 2, 3};
-    writer.SetStableIds(archetype, std::span<const u64>(three, 3));
+    writer.SetStableIds(archetype, base::Span<const u64>(three, 3));
     CheckRejected(writer.Encode(&bytes, &error), error, "a column short of its row count");
   }
   {
     CellPayloadWriter writer(1, Domain::kGameplay, Tier::kStandard);
     const u32 archetype = writer.BeginArchetype(2);
     writer.AddColumn(archetype, "Position", sizeof(Position), layout,
-                     std::span<const u8>(two_rows.data(), two_rows.size()));
+                     base::Span<const u8>(two_rows.data(), two_rows.size()));
     CheckRejected(writer.Encode(&bytes, &error), error, "an archetype with no stable ids");
   }
   {
     CellPayloadWriter writer(1, Domain::kGameplay, Tier::kStandard);
     const u32 archetype = writer.BeginArchetype(2);
     writer.AddColumn(archetype, "Position", sizeof(Position), layout,
-                     std::span<const u8>(two_rows.data(), two_rows.size()));
+                     base::Span<const u8>(two_rows.data(), two_rows.size()));
     writer.AddColumn(archetype, "Position", sizeof(Position), layout,
-                     std::span<const u8>(two_rows.data(), two_rows.size()));
-    writer.SetStableIds(archetype, std::span<const u64>(ids, 2));
+                     base::Span<const u8>(two_rows.data(), two_rows.size()));
+    writer.SetStableIds(archetype, base::Span<const u64>(ids, 2));
     CheckRejected(writer.Encode(&bytes, &error), error, "one component listed twice");
   }
   {
     CellPayloadWriter writer(1, Domain::kGameplay, Tier::kStandard);
     const u32 archetype = writer.BeginArchetype(2);
     writer.AddColumn(archetype, "Position", sizeof(Position), layout,
-                     std::span<const u8>(two_rows.data(), two_rows.size()));
+                     base::Span<const u8>(two_rows.data(), two_rows.size()));
     const u64 duplicated[2] = {5, 5};
-    writer.SetStableIds(archetype, std::span<const u64>(duplicated, 2));
+    writer.SetStableIds(archetype, base::Span<const u64>(duplicated, 2));
     CheckRejected(writer.Encode(&bytes, &error), error, "a duplicated stable id");
   }
   {
     CellPayloadWriter writer(1, Domain::kGameplay, Tier::kStandard);
     const u32 archetype = writer.BeginArchetype(2);
     writer.AddColumn(archetype, "Position", sizeof(Position), layout,
-                     std::span<const u8>(two_rows.data(), two_rows.size()));
-    writer.SetStableIds(archetype, std::span<const u64>(ids, 2));
+                     base::Span<const u8>(two_rows.data(), two_rows.size()));
+    writer.SetStableIds(archetype, base::Span<const u64>(ids, 2));
     writer.AddInstance(1, writer.AddPrototype("prop/rock"), {}, {}, 1);
     CheckRejected(writer.Encode(&bytes, &error), error, "entity and instance content mixed");
   }
@@ -374,17 +377,17 @@ void TestPayloadRefusesCorruptedBytes() {
   const u32 archetype = writer.BeginArchetype(2);
   writer.AddColumn(archetype, "Position", sizeof(Position),
                    HashComponentLayout("Position", sizeof(Position), {}, {}, {}),
-                   std::span<const u8>(column.data(), column.size()));
-  writer.SetStableIds(archetype, std::span<const u64>(ids, 2));
+                   base::Span<const u8>(column.data(), column.size()));
+  writer.SetStableIds(archetype, base::Span<const u64>(ids, 2));
   base::Vector<u8> good;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&good, &error));
 
   WorldCellPayload payload;
   {
     base::Vector<u8> bad(good);
     bad[3] = 'X';
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "a payload with a bad magic");
   }
   {
@@ -392,22 +395,22 @@ void TestPayloadRefusesCorruptedBytes() {
     // otherwise be copied into an entity column verbatim.
     base::Vector<u8> bad(good);
     bad[bad.size() - 5] ^= 0x01;
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "a flipped byte in the data section");
   }
   {
     base::Vector<u8> bad(good);
     bad.erase(bad.end() - 4);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "a truncated payload");
   }
   {
     base::Vector<u8> bad;
     bad.insert(bad.end(), good.begin(), good.begin() + 10);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "a payload cut off inside its header");
   }
-  CHECK(DecodeCellPayload(std::span<const u8>(good.data(), good.size()), &payload, &error));
+  CHECK(DecodeCellPayload(base::Span<const u8>(good.data(), good.size()), &payload, &error));
 }
 
 // The checksum now covers the header, so a structural field cannot be edited
@@ -450,10 +453,10 @@ void TestPayloadRefusesCraftedStructure() {
   const u32 archetype = writer.BeginArchetype(2);
   writer.AddColumn(archetype, "Position", sizeof(Position),
                    HashComponentLayout("Position", sizeof(Position), {}, {}, {}),
-                   std::span<const u8>(column.data(), column.size()));
-  writer.SetStableIds(archetype, std::span<const u64>(ids, 2));
+                   base::Span<const u8>(column.data(), column.size()));
+  writer.SetStableIds(archetype, base::Span<const u64>(ids, 2));
   base::Vector<u8> good;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&good, &error));
 
   WorldCellPayload payload;
@@ -463,21 +466,21 @@ void TestPayloadRefusesCraftedStructure() {
     base::Vector<u8> bad(good);
     WriteU32(&bad, kPayloadHeaderBytes + 4, 1);  // column_first past the single column
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "an archetype whose columns start past the table");
   }
   {
     base::Vector<u8> bad(good);
     WriteU32(&bad, kPayloadHeaderBytes + 8, 2);  // two columns where one exists
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "an archetype claiming more columns than exist");
   }
   {
     base::Vector<u8> bad(good);
     WriteU32(&bad, kPayloadHeaderBytes, 3);  // three rows of a two-row column
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "a row count its columns cannot fill");
   }
   {
@@ -485,28 +488,28 @@ void TestPayloadRefusesCraftedStructure() {
     base::Vector<u8> bad(good);
     WriteU32(&bad, kPayloadHeaderBytes + 20, 9999);
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "a column name outside the string table");
   }
   {
     base::Vector<u8> bad(good);
     WriteU32(&bad, 12, 7);  // kind
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "an unknown payload kind");
   }
   {
     base::Vector<u8> bad(good);
     WriteU32(&bad, 12, static_cast<u32>(PayloadKind::kInstances));
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "an instance payload carrying entity tables");
   }
   {
     base::Vector<u8> bad(good);
     bad[8] = 2;  // version
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "a future payload version");
   }
   {
@@ -516,7 +519,7 @@ void TestPayloadRefusesCraftedStructure() {
     base::Vector<u8> bad(good);
     for (u32 i = 0; i < 8; ++i) bad[bad.size() - 8 + i] = bad[bad.size() - 16 + i];
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "two rows sharing a stable id");
   }
   {
@@ -526,7 +529,7 @@ void TestPayloadRefusesCraftedStructure() {
     base::Vector<u8> bad(good);
     WriteU32(&bad, kPayloadHeaderBytes, 0xffffffffu);  // row_count
     RepairChecksum(&bad, kPayloadHeaderBytes);
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "more rows than a cell may hold");
   }
   {
@@ -534,10 +537,10 @@ void TestPayloadRefusesCraftedStructure() {
     // than reaching the cross-check that used to be its only guard.
     base::Vector<u8> bad(good);
     bad[24] ^= 0xff;
-    CheckRejected(DecodeCellPayload(std::span<const u8>(bad.data(), bad.size()), &payload, &error),
+    CheckRejected(DecodeCellPayload(base::Span<const u8>(bad.data(), bad.size()), &payload, &error),
                   error, "a header field edited without repairing the checksum");
   }
-  CHECK(DecodeCellPayload(std::span<const u8>(good.data(), good.size()), &payload, &error));
+  CHECK(DecodeCellPayload(base::Span<const u8>(good.data(), good.size()), &payload, &error));
 }
 
 // The grid fields sit in the header: cell_size at 32, grid_origin at 36..48.
@@ -549,11 +552,11 @@ void TestIndexRefusesCorruptGrid() {
   writer.set_grid(64.0f, {1, 2, 3});
   writer.AddCell(1, {}, {16, 16, 16}, 0, 0, 4);
   base::Vector<u8> good;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&good, &error));
 
   WorldIndexData index;
-  CHECK(DecodeWorldIndex(std::span<const u8>(good.data(), good.size()), &index, &error));
+  CHECK(DecodeWorldIndex(base::Span<const u8>(good.data(), good.size()), &index, &error));
   CHECK(index.cell_size == 64.0f);
 
   const u32 kNaN = 0x7fc00000;
@@ -561,21 +564,21 @@ void TestIndexRefusesCorruptGrid() {
     base::Vector<u8> bad(good);
     WriteU32(&bad, 32, kNaN);
     RepairChecksum(&bad, kIndexHeaderBytes);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a non-finite grid cell size");
   }
   {
     base::Vector<u8> bad(good);
     WriteU32(&bad, 32, 0xbf800000);  // -1.0f
     RepairChecksum(&bad, kIndexHeaderBytes);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a negative grid cell size");
   }
   {
     base::Vector<u8> bad(good);
     WriteU32(&bad, 40, kNaN);  // grid_origin.y
     RepairChecksum(&bad, kIndexHeaderBytes);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a non-finite grid origin");
   }
   {
@@ -585,7 +588,7 @@ void TestIndexRefusesCorruptGrid() {
     WriteU32(&fine, 32, 0);
     RepairChecksum(&fine, kIndexHeaderBytes);
     WorldIndexData off_grid;
-    CHECK(DecodeWorldIndex(std::span<const u8>(fine.data(), fine.size()), &off_grid, &error));
+    CHECK(DecodeWorldIndex(base::Span<const u8>(fine.data(), fine.size()), &off_grid, &error));
     CHECK(off_grid.cell_size == 0.0f);
   }
 
@@ -593,14 +596,14 @@ void TestIndexRefusesCorruptGrid() {
   // an archive its own loader will not open.
   {
     WorldIndexWriter nan_grid;
-    nan_grid.set_grid(std::nanf(""), {});
+    nan_grid.set_grid(::nanf(""), {});
     nan_grid.AddCell(1, {}, {16, 16, 16}, 0, 0, 4);
     base::Vector<u8> bytes;
     CheckRejected(nan_grid.Encode(&bytes, &error), error, "encoding a non-finite grid cell size");
   }
   {
     WorldIndexWriter nan_bounds;
-    nan_bounds.AddCell(1, {}, {std::nanf(""), 16, 16}, 0, 0, 4);
+    nan_bounds.AddCell(1, {}, {::nanf(""), 16, 16}, 0, 0, 4);
     base::Vector<u8> bytes;
     CheckRejected(nan_bounds.Encode(&bytes, &error), error, "encoding non-finite cell bounds");
   }
@@ -610,7 +613,7 @@ void TestIndexRefusesCorruptGrid() {
 // the false return holding half a world stamped with the bad file's bake id,
 // which every cross-check downstream then accepts.
 void TestRefusedDecodeLeavesTheOutputAlone() {
-  std::string error;
+  base::String error;
 
   WorldIndexWriter writer;
   writer.set_world_id(0x1234);
@@ -621,13 +624,13 @@ void TestRefusedDecodeLeavesTheOutputAlone() {
   CHECK(writer.Encode(&good, &error));
 
   WorldIndexData index;
-  CHECK(DecodeWorldIndex(std::span<const u8>(good.data(), good.size()), &index, &error));
+  CHECK(DecodeWorldIndex(base::Span<const u8>(good.data(), good.size()), &index, &error));
   CHECK(index.cells.size() == 2);
 
   base::Vector<u8> bad(good);
   WriteU32(&bad, kIndexHeaderBytes + 16, 0x7fc00000);  // cell 1 minimum.z = NaN
   RepairChecksum(&bad, kIndexHeaderBytes);
-  CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+  CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                 error, "an index with non-finite bounds");
   CHECK(index.cells.size() == 2);
   CHECK(index.world_id == 0x1234);
@@ -640,14 +643,14 @@ void TestRefusedDecodeLeavesTheOutputAlone() {
   CHECK(payload_writer.Encode(&payload_bytes, &error));
 
   WorldCellPayload payload;
-  CHECK(DecodeCellPayload(std::span<const u8>(payload_bytes.data(), payload_bytes.size()), &payload,
+  CHECK(DecodeCellPayload(base::Span<const u8>(payload_bytes.data(), payload_bytes.size()), &payload,
                           &error));
   CHECK(payload.instances.size() == 1);
 
   base::Vector<u8> truncated(payload_bytes);
   truncated.pop_back();
   CheckRejected(
-      DecodeCellPayload(std::span<const u8>(truncated.data(), truncated.size()), &payload, &error),
+      DecodeCellPayload(base::Span<const u8>(truncated.data(), truncated.size()), &payload, &error),
       error, "a truncated payload");
   CHECK(payload.instances.size() == 1);
   CHECK(payload.cell_id == 1);
@@ -660,7 +663,7 @@ void TestIndexRefusesCraftedStructure() {
   writer.AddCell(2, {16, 0, 0}, {32, 16, 16}, 0, 4, 4);
   writer.AddPayload(1, Domain::kGameplay, Tier::kStandard, 64, 4);
   base::Vector<u8> good;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&good, &error));
 
   WorldIndexData index;
@@ -669,7 +672,7 @@ void TestIndexRefusesCraftedStructure() {
     base::Vector<u8> bad(good);
     WriteU32(&bad, kIndexHeaderBytes + 52, 5);  // payload_first past the table
     RepairChecksum(&bad, kIndexHeaderBytes);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a cell spanning past the payload table");
   }
   {
@@ -677,21 +680,21 @@ void TestIndexRefusesCraftedStructure() {
     // Give cell 1 a range that swallows cell 2's.
     WriteU32(&bad, kIndexHeaderBytes + 48, 100);  // stable_id_count
     RepairChecksum(&bad, kIndexHeaderBytes);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "overlapping stable-id ranges on the read side");
   }
   {
     base::Vector<u8> bad(good);
     WriteU32(&bad, kIndexHeaderBytes + 16, 0x7fc00000);  // minimum.z = NaN
     RepairChecksum(&bad, kIndexHeaderBytes);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a cell with non-finite bounds");
   }
   {
     base::Vector<u8> bad(good);
     WriteU32(&bad, kIndexHeaderBytes + 16, 0x42c80000);  // minimum.z = 100 > maximum.z
     RepairChecksum(&bad, kIndexHeaderBytes);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a cell with inverted bounds");
   }
   {
@@ -700,14 +703,14 @@ void TestIndexRefusesCraftedStructure() {
     base::Vector<u8> bad(good);
     bad[kIndexHeaderBytes + 2 * 60 + 12] = 42;  // domain
     RepairChecksum(&bad, kIndexHeaderBytes);
-    CheckRejected(DecodeWorldIndex(std::span<const u8>(bad.data(), bad.size()), &index, &error),
+    CheckRejected(DecodeWorldIndex(base::Span<const u8>(bad.data(), bad.size()), &index, &error),
                   error, "a payload with an unknown domain");
   }
-  CHECK(DecodeWorldIndex(std::span<const u8>(good.data(), good.size()), &index, &error));
+  CHECK(DecodeWorldIndex(base::Span<const u8>(good.data(), good.size()), &index, &error));
 }
 
 void TestLayoutHashSeparatesShapes() {
-  const std::string_view names[2] = {"x", "y"};
+  const base::StringRef names[2] = {"x", "y"};
   const u32 types[2] = {4, 4};
   const u32 offsets[2] = {0, 4};
   const u32 moved[2] = {0, 8};
@@ -719,11 +722,11 @@ void TestLayoutHashSeparatesShapes() {
   CHECK(base_hash != HashComponentLayout("Health", 8, names, types, moved));
   const u32 retyped[2] = {4, 5};
   CHECK(base_hash != HashComponentLayout("Health", 8, names, retyped, offsets));
-  const std::string_view renamed[2] = {"x", "z"};
+  const base::StringRef renamed[2] = {"x", "z"};
   CHECK(base_hash != HashComponentLayout("Health", 8, renamed, types, offsets));
   // A prefix of the fields is not the same shape as all of them.
-  CHECK(base_hash != HashComponentLayout("Health", 8, std::span(names).first(1),
-                                         std::span(types).first(1), std::span(offsets).first(1)));
+  CHECK(base_hash != HashComponentLayout("Health", 8, base::Span(names).first(1),
+                                         base::Span(types).first(1), base::Span(offsets).first(1)));
 }
 
 }  // namespace
@@ -744,9 +747,9 @@ int main() {
   TestRefusedDecodeLeavesTheOutputAlone();
   TestLayoutHashSeparatesShapes();
   if (g_failures) {
-    std::fprintf(stderr, "world_format_test: %d failure(s)\n", g_failures);
+    ::fprintf(stderr, "world_format_test: %d failure(s)\n", g_failures);
     return 1;
   }
-  std::puts("world_format_test: ok");
+  ::puts("world_format_test: ok");
   return 0;
 }

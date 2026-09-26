@@ -1,8 +1,11 @@
 #include "asset/bc_encode.h"
+#include "base/algorithm.h"
+#include "base/memory/mem_ops.h"
+#include "core/scalar.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 namespace rx::asset {
 namespace {
@@ -48,8 +51,8 @@ void FitLine(const f32* points, f32* e0, f32* e1) {
     }
     for (u32 i = 1; i < kBlockTexels; ++i) {
       for (int c = 0; c < N; ++c) {
-        lo[c] = std::min(lo[c], points[i * N + c]);
-        hi[c] = std::max(hi[c], points[i * N + c]);
+        lo[c] = rx::Min(lo[c], points[i * N + c]);
+        hi[c] = rx::Max(hi[c], points[i * N + c]);
       }
     }
     f32 len = 0;
@@ -61,7 +64,7 @@ void FitLine(const f32* points, f32* e0, f32* e1) {
       // Single-colour block: any axis works, the projection collapses anyway.
       for (int c = 0; c < N; ++c) axis[c] = c == 0 ? 1.0f : 0.0f;
     } else {
-      const f32 inv = 1.0f / std::sqrt(len);
+      const f32 inv = 1.0f / ::sqrt(len);
       for (int c = 0; c < N; ++c) axis[c] *= inv;
     }
   }
@@ -73,7 +76,7 @@ void FitLine(const f32* points, f32* e0, f32* e1) {
     f32 len = 0;
     for (int c = 0; c < N; ++c) len += next[c] * next[c];
     if (len < 1e-12f) break;
-    const f32 inv = 1.0f / std::sqrt(len);
+    const f32 inv = 1.0f / ::sqrt(len);
     for (int c = 0; c < N; ++c) axis[c] = next[c] * inv;
   }
 
@@ -82,12 +85,12 @@ void FitLine(const f32* points, f32* e0, f32* e1) {
   for (u32 i = 0; i < kBlockTexels; ++i) {
     f32 t = 0;
     for (int c = 0; c < N; ++c) t += (points[i * N + c] - mean[c]) * axis[c];
-    tmin = std::min(tmin, t);
-    tmax = std::max(tmax, t);
+    tmin = rx::Min(tmin, t);
+    tmax = rx::Max(tmax, t);
   }
   for (int c = 0; c < N; ++c) {
-    e0[c] = std::clamp(mean[c] + axis[c] * tmin, 0.0f, 255.0f);
-    e1[c] = std::clamp(mean[c] + axis[c] * tmax, 0.0f, 255.0f);
+    e0[c] = rx::Clamp(mean[c] + axis[c] * tmin, 0.0f, 255.0f);
+    e1[c] = rx::Clamp(mean[c] + axis[c] * tmax, 0.0f, 255.0f);
   }
 }
 
@@ -114,20 +117,20 @@ void RefitEndpoints(const f32* points, const f32* weights, f32* e0, f32* e1) {
     }
   }
   const f32 det = aa * bb - ab * ab;
-  if (std::abs(det) < 1e-6f) return;
+  if (::abs(det) < 1e-6f) return;
   const f32 inv = 1.0f / det;
   for (int c = 0; c < N; ++c) {
-    e0[c] = std::clamp((bb * ax[c] - ab * bx[c]) * inv, 0.0f, 255.0f);
-    e1[c] = std::clamp((aa * bx[c] - ab * ax[c]) * inv, 0.0f, 255.0f);
+    e0[c] = rx::Clamp((bb * ax[c] - ab * bx[c]) * inv, 0.0f, 255.0f);
+    e1[c] = rx::Clamp((aa * bx[c] - ab * ax[c]) * inv, 0.0f, 255.0f);
   }
 }
 
 // BC1 colour block
 
 u16 Quantize565(const f32* c) {
-  const int r = std::clamp(static_cast<int>(c[0] * (31.0f / 255.0f) + 0.5f), 0, 31);
-  const int g = std::clamp(static_cast<int>(c[1] * (63.0f / 255.0f) + 0.5f), 0, 63);
-  const int b = std::clamp(static_cast<int>(c[2] * (31.0f / 255.0f) + 0.5f), 0, 31);
+  const int r = rx::Clamp(static_cast<int>(c[0] * (31.0f / 255.0f) + 0.5f), 0, 31);
+  const int g = rx::Clamp(static_cast<int>(c[1] * (63.0f / 255.0f) + 0.5f), 0, 63);
+  const int b = rx::Clamp(static_cast<int>(c[2] * (31.0f / 255.0f) + 0.5f), 0, 31);
   return static_cast<u16>((r << 11) | (g << 5) | b);
 }
 
@@ -153,8 +156,8 @@ f32 FitColor(const f32* points, f32* f0, f32* f1, ColorFit* fit) {
   u16 q0 = Quantize565(f0);
   u16 q1 = Quantize565(f1);
   if (q0 < q1) {
-    std::swap(q0, q1);
-    for (int c = 0; c < 3; ++c) std::swap(f0[c], f1[c]);
+    base::Swap(q0, q1);
+    for (int c = 0; c < 3; ++c) base::Swap(f0[c], f1[c]);
   }
   f32 palette[4][3];
   Unquantize565(q0, palette[0]);
@@ -221,8 +224,8 @@ void EncodeColorBlock(const u8* rgba, u8* out) {
     if (error >= best_error) break;
     best_error = error;
     best = candidate;
-    std::memcpy(e0, n0, sizeof(e0));
-    std::memcpy(e1, n1, sizeof(e1));
+    base::MemCopy(e0, n0, sizeof(e0));
+    base::MemCopy(e1, n1, sizeof(e1));
   }
   PackColorBlock(best, out);
 }
@@ -238,11 +241,11 @@ struct AlphaFit {
 f32 FitAlpha(const f32* values, f32* f0, f32* f1, AlphaFit* fit) {
   // The 8-value mode is selected by r0 > r1; r0 is the endpoint index 0 lands
   // on, so the pair is ordered high-first.
-  int q0 = std::clamp(static_cast<int>(*f0 + 0.5f), 0, 255);
-  int q1 = std::clamp(static_cast<int>(*f1 + 0.5f), 0, 255);
+  int q0 = rx::Clamp(static_cast<int>(*f0 + 0.5f), 0, 255);
+  int q1 = rx::Clamp(static_cast<int>(*f1 + 0.5f), 0, 255);
   if (q0 < q1) {
-    std::swap(q0, q1);
-    std::swap(*f0, *f1);
+    base::Swap(q0, q1);
+    base::Swap(*f0, *f1);
   }
   f32 palette[8];
   palette[0] = static_cast<f32>(q0);
@@ -285,8 +288,8 @@ void EncodeChannelBlock(const f32* values, u8* out) {
   f32 lo = values[0];
   f32 hi = values[0];
   for (u32 i = 1; i < kBlockTexels; ++i) {
-    lo = std::min(lo, values[i]);
-    hi = std::max(hi, values[i]);
+    lo = rx::Min(lo, values[i]);
+    hi = rx::Max(hi, values[i]);
   }
   f32 e0 = hi;
   f32 e1 = lo;
@@ -314,7 +317,7 @@ void EncodeChannelBlock(const f32* values, u8* out) {
 // The endpoint's low bit is the shared p-bit, so a component quantizes to the
 // nearest 8-bit value of the requested parity.
 u8 QuantizeWithParity(f32 v, u32 p) {
-  const int q = std::clamp(static_cast<int>((v - static_cast<f32>(p)) * 0.5f + 0.5f), 0, 127);
+  const int q = rx::Clamp(static_cast<int>((v - static_cast<f32>(p)) * 0.5f + 0.5f), 0, 127);
   return static_cast<u8>((q << 1) | p);
 }
 
@@ -343,10 +346,10 @@ f32 AssignBc7Indices(const f32* points, const u8* e0, const u8* e1, u8* index) {
       f32 t = 0;
       for (int c = 0; c < 4; ++c) t += (points[i * 4 + c] - static_cast<f32>(e0[c])) * dir[c];
       t /= dir_len2;
-      guess = static_cast<u32>(std::clamp(static_cast<int>(t * 15.0f + 0.5f), 0, 15));
+      guess = static_cast<u32>(rx::Clamp(static_cast<int>(t * 15.0f + 0.5f), 0, 15));
     }
     const u32 first = guess > 0 ? guess - 1 : 0;
-    const u32 last = std::min(15u, guess + 1);
+    const u32 last = rx::Min(15u, guess + 1);
     f32 best = 1e30f;
     u32 best_index = guess;
     for (u32 k = first; k <= last; ++k) {
@@ -446,9 +449,9 @@ void EncodeBc7Block(const u8* rgba, u8* out) {
       best_error = error;
       best_p0 = p0;
       best_p1 = p1;
-      std::memcpy(best0, q0, sizeof(best0));
-      std::memcpy(best1, q1, sizeof(best1));
-      std::memcpy(best_index, index, sizeof(best_index));
+      base::MemCopy(best0, q0, sizeof(best0));
+      base::MemCopy(best1, q1, sizeof(best1));
+      base::MemCopy(best_index, index, sizeof(best_index));
     }
   }
 
@@ -456,12 +459,12 @@ void EncodeBc7Block(const u8* rgba, u8* out) {
   // spends on the mode), so a block whose first texel sits past the middle of
   // the ramp has to be stored with its endpoints the other way round.
   if (best_index[0] > 7) {
-    for (int c = 0; c < 4; ++c) std::swap(best0[c], best1[c]);
-    std::swap(best_p0, best_p1);
+    for (int c = 0; c < 4; ++c) base::Swap(best0[c], best1[c]);
+    base::Swap(best_p0, best_p1);
     for (u32 i = 0; i < kBlockTexels; ++i) best_index[i] = static_cast<u8>(15 - best_index[i]);
   }
 
-  std::memset(out, 0, 16);
+  base::MemSet(out, 0, 16);
   BitWriter writer{out};
   writer.Put(1u << 6, 7);  // mode 6: six zeros then a one
   for (int c = 0; c < 3; ++c) {

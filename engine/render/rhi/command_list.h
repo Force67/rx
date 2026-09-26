@@ -2,8 +2,8 @@
 #define RX_RENDER_RHI_COMMAND_LIST_H_
 
 #include <initializer_list>
-#include <span>
 
+#include "base/containers/span.h"
 #include "core/types.h"
 #include "render/rhi/bindings.h"
 #include "render/rhi/resources.h"
@@ -43,7 +43,7 @@ struct DepthAttachment {
 
 struct RenderingInfo {
   Extent2D extent;
-  std::span<const ColorAttachment> colors;
+  base::Span<const ColorAttachment> colors;
   const DepthAttachment* depth = nullptr;  // null = no depth attachment
   // Optional VRS rate image (kShadingRate state, R8Uint, one texel per
   // caps().shading_rate_texel block). Null = full rate.
@@ -74,7 +74,7 @@ struct AccelTriangles {
 };
 
 struct BlasBuildDesc {
-  std::span<const AccelTriangles> geometries;
+  base::Span<const AccelTriangles> geometries;
   bool fast_trace = true;  // PREFER_FAST_TRACE; false = PREFER_FAST_BUILD
   // Builds with ALLOW_COMPACTION so a later CommandList::CopyAccelStruct(compact)
   // can shrink the structure into a tight buffer. The flag must be set both here
@@ -127,9 +127,9 @@ class CommandList {
   // Transient bindings against the bound pipeline's layout: allocated from a
   // per-frame pool, written and bound in one call. This replaces the
   // allocate/update/bind descriptor dance.
-  virtual void BindTransient(u32 set_index, std::span<const BindingItem> items) = 0;
+  virtual void BindTransient(u32 set_index, base::Span<const BindingItem> items) = 0;
   void BindTransient(u32 set_index, std::initializer_list<BindingItem> items) {
-    BindTransient(set_index, std::span<const BindingItem>(items.begin(), items.size()));
+    BindTransient(set_index, base::Span<const BindingItem>(items.begin(), items.size()));
   }
   // offset allows partial updates of a larger push block (e.g. a per-cascade
   // matrix at 0 with per-draw model matrices behind it). Maps to
@@ -193,9 +193,9 @@ class CommandList {
                                           u32 /*max_draws*/, u32 /*stride*/) {}
 
   // synchronization
-  virtual void TextureBarriers(std::span<const TextureBarrier> barriers) = 0;
+  virtual void TextureBarriers(base::Span<const TextureBarrier> barriers) = 0;
   void Barrier(const TextureBarrier& barrier) {
-    TextureBarriers(std::span<const TextureBarrier>(&barrier, 1));
+    TextureBarriers(base::Span<const TextureBarrier>(&barrier, 1));
   }
   // Global execution+memory barrier for buffer hazards (compute -> indirect
   // args, transfer -> shader read, AS build -> ray query, ...).
@@ -203,7 +203,7 @@ class CommandList {
 
   // transfer
   virtual void CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
-                                   std::span<const BufferTextureCopy> regions) = 0;
+                                   base::Span<const BufferTextureCopy> regions) = 0;
   virtual void CopyTextureToBuffer(const GpuImage& src, const GpuBuffer& dst,
                                    const BufferTextureCopy& region) = 0;
   // Full-extent mip-0 image copy (matching size; formats may differ in

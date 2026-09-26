@@ -1,7 +1,5 @@
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <string>
+#include <math.h>
+#include <stdio.h>
 
 #include "anim/body_dynamics.h"
 #include "anim/locomotion.h"
@@ -9,6 +7,9 @@
 #include "asset/asset_id.h"
 #include "asset/blend_import.h"
 #include "asset/gltf_loader.h"
+#include "base/algorithm.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 
 namespace {
 
@@ -16,27 +17,27 @@ using namespace rx;
 
 bool Check(bool condition, const char *message) {
   if (!condition)
-    std::fprintf(stderr, "blend_jiggle_test: FAIL: %s\n", message);
+    ::fprintf(stderr, "blend_jiggle_test: FAIL: %s\n", message);
   return condition;
 }
 
 f32 MatrixDifference(const Mat4 &a, const Mat4 &b) {
   f32 difference = 0;
   for (u32 i = 0; i < 16; ++i)
-    difference = std::max(difference, std::fabs(a.m[i] - b.m[i]));
+    difference = rx::Max(difference, ::fabs(a.m[i] - b.m[i]));
   return difference;
 }
 
 f32 RotationDifference(const Quat &a, const Quat &b) {
-  const f32 dot = std::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
-  return 1.0f - std::min(dot, 1.0f);
+  const f32 dot = ::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
+  return 1.0f - rx::Min(dot, 1.0f);
 }
 
-int TestBlend(const std::string &blend_path, const std::string &script) {
+int TestBlend(const base::String &blend_path, const base::String &script) {
   asset::BlendImportOptions options;
   options.converter_script = script;
   asset::BlendImportResult converted;
-  std::string error;
+  base::String error;
   const bool converted_ok =
       asset::ConvertBlendScene(blend_path, options, &converted, &error);
   if (!Check(converted_ok,
@@ -172,8 +173,8 @@ int TestBlend(const std::string &blend_path, const std::string &script) {
   anim::BuildSkinPalette(moved_model, body_mesh->skin, remap, &moved_palette);
 
   const i32 left_palette = static_cast<i32>(
-      std::find(body_mesh->skin.bones.begin(), body_mesh->skin.bones.end(),
-                std::string("pectoral.L")) -
+      base::Find(body_mesh->skin.bones.begin(), body_mesh->skin.bones.end(),
+                base::String("pectoral.L")) -
       body_mesh->skin.bones.begin());
   if (!Check(left_palette >= 0 &&
                  left_palette < static_cast<i32>(moved_palette.size()),
@@ -197,7 +198,7 @@ int TestBlend(const std::string &blend_path, const std::string &script) {
              "landing impulse activates Lara's authored flatten morph"))
     return 1;
 
-  std::printf(
+  ::printf(
       "blend_jiggle_test: PASS: %llu meshes, %llu instances, %llu bones, "
       "%llu body vertices, palette delta %.6f, flatten weight %.4f, "
       "walk styles Hip Sway/March%s\n",
@@ -214,7 +215,7 @@ int TestBlend(const std::string &blend_path, const std::string &script) {
 
 int main(int argc, char **argv) {
   if (argc > 1) {
-    const std::string script = argc > 2 ? argv[2] : RX_BLEND_CONVERTER_SCRIPT;
+    const base::String script = argc > 2 ? argv[2] : RX_BLEND_CONVERTER_SCRIPT;
     return TestBlend(argv[1], script);
   }
 
@@ -223,13 +224,13 @@ int main(int argc, char **argv) {
   asset::BlendImportOptions options;
   options.converter_script = RX_BLEND_CONVERTER_SCRIPT;
   asset::BlendImportResult result;
-  std::string error;
+  base::String error;
   if (!Check(
           !asset::ConvertBlendScene("missing.blend", options, &result, &error),
           "missing .blend is rejected"))
     return 1;
   if (!Check(!error.empty(), "missing .blend reports a useful error"))
     return 1;
-  std::puts("blend_jiggle_test: PASS: converter API validation");
+  ::puts("blend_jiggle_test: PASS: converter API validation");
   return 0;
 }

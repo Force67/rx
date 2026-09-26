@@ -1,7 +1,7 @@
 #ifndef RX_RENDER2D_CAMERA2D_H_
 #define RX_RENDER2D_CAMERA2D_H_
 
-#include <cmath>
+#include <math.h>
 
 #include "core/math.h"
 #include "render2d/types2d.h"
@@ -30,7 +30,7 @@ class Camera2D {
   void MoveBy(Vec2 delta) { center_ += delta; }
   // Pixels per world unit. Clamped positive so the mapping stays invertible.
   void SetZoom(f32 zoom) {
-    zoom_ = std::isfinite(zoom) && zoom > 1e-3f ? zoom : 1e-3f;
+    zoom_ = ::isfinite(zoom) && zoom > 1e-3f ? zoom : 1e-3f;
   }
 
   Vec2 center() const { return center_; }

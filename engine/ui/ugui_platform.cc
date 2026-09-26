@@ -6,7 +6,7 @@
 
 #include <ugui/platform/platform.h>
 
-#include <chrono>
+#include "base/time/time.h"
 
 // Quoted relative, not "ui/...": this file is compiled into the ultragui
 // library, which does not see rx's engine include root.
@@ -17,7 +17,7 @@ namespace ugui {
 struct Platform::Impl {
   rx::ui::UguiHostState* host = nullptr;
   InputQueue queue;
-  std::chrono::steady_clock::time_point start{};
+  base::TimeTicks start;
 };
 
 Platform::Platform() : impl_(new Impl()) {}
@@ -25,7 +25,7 @@ Platform::~Platform() { delete impl_; }
 
 bool Platform::Init(const WindowConfig& config) {
   impl_->host = static_cast<rx::ui::UguiHostState*>(config.external_window);
-  impl_->start = std::chrono::steady_clock::now();
+  impl_->start = base::TimeTicks::Now();
   return true;
 }
 
@@ -49,8 +49,7 @@ Vec2 Platform::framebuffer_size() const { return window_size(); }
 f32 Platform::dpi_scale() const { return impl_->host ? impl_->host->dpi_scale : 1.0f; }
 
 f64 Platform::time() const {
-  auto now = std::chrono::steady_clock::now();
-  return std::chrono::duration<f64>(now - impl_->start).count();
+  return (base::TimeTicks::Now() - impl_->start).InSecondsF();
 }
 
 void* Platform::native_handle() const { return impl_->host; }

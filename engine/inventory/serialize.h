@@ -1,8 +1,8 @@
 #ifndef RX_INVENTORY_SERIALIZE_H_
 #define RX_INVENTORY_SERIALIZE_H_
 
-#include <vector>
 
+#include "base/containers/vector.h"
 #include "core/types.h"
 #include "inventory/export.h"
 
@@ -23,11 +23,11 @@ namespace rx::inventory {
 // its Equipment, if present) into a versioned blob, keyed by Guid so the data
 // survives ECS handle reuse across a save/load. Entities without a Guid are
 // skipped (a scene needs a stable identity to reattach state to).
-RX_INVENTORY_EXPORT std::vector<u8> SaveInventories(ecs::World& world);
+RX_INVENTORY_EXPORT base::Vector<u8> SaveInventories(ecs::World& world);
 // Restores a SaveInventories blob. Each record attaches to the live entity
 // whose scene::Guid matches; if none exists, a new entity is created carrying
 // that Guid. Returns false on a corrupt or unsupported blob.
-RX_INVENTORY_EXPORT bool LoadInventories(ecs::World& world, const std::vector<u8>& blob);
+RX_INVENTORY_EXPORT bool LoadInventories(ecs::World& world, const base::Vector<u8>& blob);
 
 }  // namespace rx::inventory
 

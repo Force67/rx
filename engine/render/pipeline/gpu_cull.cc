@@ -1,8 +1,9 @@
 #include "render/pipeline/gpu_cull.h"
 
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "shaders/bounds_ps_hlsl.h"
@@ -47,7 +48,7 @@ void ExtractPlanes(const Mat4& vp, f32 out[5][4]) {
       {row(2, 0), row(2, 1), row(2, 2), row(2, 3)},  // near: clip.z >= 0
   };
   for (int i = 0; i < 5; ++i) {
-    f32 len = std::sqrt(p[i][0] * p[i][0] + p[i][1] * p[i][1] + p[i][2] * p[i][2]);
+    f32 len = ::sqrt(p[i][0] * p[i][0] + p[i][1] * p[i][1] + p[i][2] * p[i][2]);
     if (len < 1e-8f) len = 1.0f;
     for (int c = 0; c < 4; ++c) out[i][c] = p[i][c] / len;
   }
@@ -186,7 +187,7 @@ void GpuCull::AddBoundsPass(RenderGraph& graph, ResourceHandle color, const Mat4
       [this, color, instances, view_proj, instance_count](PassContext& ctx) {
         const GpuImage& target = ctx.graph->image(color);
         ColorAttachment attachment{.view = target.view, .load = LoadOp::kLoad};
-        ctx.cmd->BeginRendering({.extent = target.extent, .colors = {&attachment, 1}});
+        ctx.cmd->BeginRendering({.extent = target.extent, .colors = base::Span(&attachment, 1)});
         ctx.cmd->BindPipeline(bounds_pipeline_);
         ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, instances)});
         ctx.cmd->Push(view_proj);
@@ -215,7 +216,7 @@ void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& 
 
   bool occ = occlusion && hiz != kInvalidResource;
   const CullReproject reproject{prev_view_proj};
-  std::memcpy(reproject_[slot].mapped, &reproject, sizeof(reproject));
+  base::MemCopy(reproject_[slot].mapped, &reproject, sizeof(reproject));
 
   CullPush push{};
   ExtractPlanes(view_proj, push.planes);
@@ -249,7 +250,7 @@ void GpuCull::AddToGraph(RenderGraph& graph, const Mat4& view_proj, const Mat4& 
         items.push_back(Bind::StorageBuffer(2, counts));
         if (has_hiz) items.push_back(Bind::Sampled(3, ctx.graph->image(hiz)));
         items.push_back(Bind::Uniform(4, reproject_buffer, 0, sizeof(CullReproject)));
-        ctx.cmd->BindTransient(0, {items.data(), items.size()});
+        ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch((instance_count + 63) / 64, 1, 1);
 

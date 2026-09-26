@@ -1,6 +1,7 @@
 #include "render/post/overdraw.h"
 
 #include "asset/mesh.h"
+#include "base/functional/function.h"
 #include "core/log.h"
 #include "render/gi/shadow.h"
 #include "shaders/overdraw_ps_hlsl.h"
@@ -67,12 +68,12 @@ bool OverdrawPass::Initialize(Device& device, Format color_format) {
 
 void OverdrawPass::Render(CommandList& cmd, TextureView color_view, Extent2D extent,
                           const Mat4& view_proj,
-                          const std::function<void(CommandList&)>& draw) {
+                          const base::Function<void(CommandList&)>& draw) {
   ColorAttachment color{.view = color_view,
                         .load = LoadOp::kClear,  // start from black, then accumulate
                         .store = StoreOp::kStore,
                         .clear = {0.0f, 0.0f, 0.0f, 1.0f}};
-  cmd.BeginRendering({.extent = extent, .colors = {&color, 1}});
+  cmd.BeginRendering({.extent = extent, .colors = base::Span(&color, 1)});
   cmd.BindPipeline(pipeline_);
   cmd.PushConstants(&view_proj, sizeof(Mat4), ShadowPass::kLightMatrixOffset);
   draw(cmd);

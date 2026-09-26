@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_ENVIRONMENT_H_
 #define RX_RENDER_ENVIRONMENT_H_
 
-#include <memory>
 
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "render/rhi/device.h"
 
@@ -28,7 +28,7 @@ class EnvironmentSystem {
   static constexpr u32 kTransmittanceH = 64;
   static constexpr u32 kMultiScatterSize = 32;
 
-  static std::unique_ptr<EnvironmentSystem> Create(Device& device);
+  static base::UniquePointer<EnvironmentSystem> Create(Device& device);
   ~EnvironmentSystem();
 
   // Builds the sky background pipeline; needs the mesh pipeline's set 0

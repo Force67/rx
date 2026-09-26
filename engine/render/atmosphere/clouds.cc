@@ -1,7 +1,8 @@
 #include "render/atmosphere/clouds.h"
 
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "shaders/clouds_cs_hlsl.h"
@@ -78,7 +79,7 @@ ResourceHandle Clouds::AddToGraph(RenderGraph& graph, ResourceHandle color, Reso
       },
       [this, color, depth, out, extent, frame, slot](PassContext& ctx) {
         const CloudCamera camera{frame.inv_view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
         CloudPush push{};
         push.camera_pos[0] = frame.camera_pos.x;

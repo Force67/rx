@@ -1,8 +1,9 @@
+#include "core/scalar.h"
 #include "render/pipeline/hair_material.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 // Regression tests for the hair BSDF (render/shaders/hair_bsdf.hlsli, mirrored
 // on the CPU in hair_material.cc). The contracts that matter for hair:
@@ -25,7 +26,7 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "hair_bsdf_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "hair_bsdf_test: FAIL: %s\n", message);
   ++failures;
 }
 
@@ -34,9 +35,9 @@ constexpr float kPi = 3.14159265358979323846f;
 // A direction in the strand frame: theta is the longitudinal angle off the
 // normal plane, phi the azimuth around the fibre.
 void Dir(float theta, float phi, rx::f32 out[3]) {
-  out[0] = std::sin(theta);
-  out[1] = std::cos(theta) * std::cos(phi);
-  out[2] = std::cos(theta) * std::sin(phi);
+  out[0] = ::sin(theta);
+  out[1] = ::cos(theta) * ::cos(phi);
+  out[2] = ::cos(theta) * ::sin(phi);
 }
 
 float Luma(const rx::f32 rgb[3]) {
@@ -64,7 +65,7 @@ int main() {
               "a non-absorbing fibre reflects essentially all of it (the residual lobe closes "
               "the gap Marschner's three leave open)");
         if (albedo > 1.02f || albedo < 0.93f) {
-          std::fprintf(stderr, "  beta %.2f theta_o %+.2f -> albedo %.4f\n", beta, theta_o,
+          ::fprintf(stderr, "  beta %.2f theta_o %+.2f -> albedo %.4f\n", beta, theta_o,
                        albedo);
         }
       }
@@ -106,10 +107,10 @@ int main() {
           best_phi = phi;
         }
       }
-      worst = std::max(worst, std::abs(best_phi - (-2.0f * std::asin(h))));
+      worst = rx::Max(worst, ::abs(best_phi - (-2.0f * ::asin(h))));
     }
     Check(worst < 0.01f, "the surface lobe peaks where the cylinder geometry says it should");
-    if (worst >= 0.01f) std::fprintf(stderr, "  worst azimuthal peak error: %.4f rad\n", worst);
+    if (worst >= 0.01f) ::fprintf(stderr, "  worst azimuthal peak error: %.4f rad\n", worst);
 
     // ... and h has to matter. A model evaluated at h = 0 everywhere loses the
     // variation across the strand's width entirely.
@@ -119,7 +120,7 @@ int main() {
     rx::f32 centre[3], edge[3];
     HairEvaluateCpu(brown, wo, wi, 0.0f, centre);
     HairEvaluateCpu(brown, wo, wi, 0.85f, edge);
-    Check(std::abs(Luma(centre) - Luma(edge)) > 0.01f * std::max(Luma(centre), Luma(edge)),
+    Check(::abs(Luma(centre) - Luma(edge)) > 0.01f * rx::Max(Luma(centre), Luma(edge)),
           "the response varies across the fibre's width");
   }
 
@@ -141,22 +142,22 @@ int main() {
       rx::f32 a[3], b[3];
       HairEvaluateCpu(p, samples[i][0], samples[i][1], 0.3f, a);
       HairEvaluateCpu(p, samples[i][1], samples[i][0], -0.3f, b);
-      for (int c = 0; c < 3; ++c) peak = std::max(peak, std::max(a[c], b[c]));
+      for (int c = 0; c < 3; ++c) peak = rx::Max(peak, rx::Max(a[c], b[c]));
     }
     for (int i = 0; i < 40; ++i) {
       rx::f32 a[3], b[3];
       HairEvaluateCpu(p, samples[i][0], samples[i][1], 0.3f, a);
       HairEvaluateCpu(p, samples[i][1], samples[i][0], -0.3f, b);
       for (int c = 0; c < 3; ++c) {
-        const float m = std::max(a[c], b[c]);
+        const float m = rx::Max(a[c], b[c]);
         if (m < 0.05f * peak) continue;
-        worst = std::max(worst, std::abs(a[c] - b[c]) / m);
+        worst = rx::Max(worst, ::abs(a[c] - b[c]) / m);
       }
     }
     Check(worst < 0.75f,
           "the model's known non-reciprocity stays within the range the published "
           "formulation produces");
-    if (worst >= 0.75f) std::fprintf(stderr, "  asymmetry: %.3f\n", worst);
+    if (worst >= 0.75f) ::fprintf(stderr, "  asymmetry: %.3f\n", worst);
   }
 
   // 2c. the lobes are what they claim to be
@@ -173,9 +174,9 @@ int main() {
     Dir(0.0f, 0.0f, wo);
     Dir(0.0f, 0.0f, wi);  // phi = 0: the R lobe's peak at h = 0
     HairEvaluateCpu(black, wo, wi, 0.0f, rgb);
-    const float spread = (std::max({rgb[0], rgb[1], rgb[2]}) -
-                          std::min({rgb[0], rgb[1], rgb[2]})) /
-                         std::max({rgb[0], rgb[1], rgb[2], 1e-6f});
+    const float spread = (rx::Max({rgb[0], rgb[1], rgb[2]}) -
+                          rx::Min({rgb[0], rgb[1], rgb[2]})) /
+                         rx::Max({rgb[0], rgb[1], rgb[2], 1e-6f});
     Check(spread < 0.02f, "the surface lobe is achromatic even on a heavily pigmented fibre");
 
     // The transmission lobe, by contrast, has to be strongly coloured.
@@ -185,7 +186,7 @@ int main() {
     rx::f32 through[3];
     Dir(0.0f, kPi, wi);  // straight through the fibre
     HairEvaluateCpu(red, wo, wi, 0.0f, through);
-    const float tint = through[0] / std::max(through[2], 1e-6f);
+    const float tint = through[0] / rx::Max(through[2], 1e-6f);
     Check(tint > 2.0f, "the transmission lobe carries the pigment's colour");
   }
 
@@ -212,8 +213,8 @@ int main() {
     rx::f32 red_rgb[3], brown_rgb[3];
     HairEvaluateCpu(red, wo, wi, 0.0f, red_rgb);
     HairEvaluateCpu(brown, wo, wi, 0.0f, brown_rgb);
-    Check(red_rgb[0] / std::max(red_rgb[2], 1e-6f) >
-              brown_rgb[0] / std::max(brown_rgb[2], 1e-6f),
+    Check(red_rgb[0] / rx::Max(red_rgb[2], 1e-6f) >
+              brown_rgb[0] / rx::Max(brown_rgb[2], 1e-6f),
           "pheomelanin reddens rather than merely darkening");
 
     // The colour inversion. Chiang's fit targets the colour a GROOM settles at
@@ -262,24 +263,24 @@ int main() {
                 rx::f32 wi[3], rgb[3];
                 Dir(theta, phi, wi);
                 HairShadeCpu(q, w_out, wi, 0.0f, depth, rgb);
-                total += static_cast<double>(rgb[1]) * std::cos(theta);
+                total += static_cast<double>(rgb[1]) * ::cos(theta);
               }
             }
           }
           return total;
         };
-        return static_cast<float>(integrate(p) / std::max(integrate(clear), 1e-12));
+        return static_cast<float>(integrate(p) / rx::Max(integrate(clear), 1e-12));
       };
       float worst = 0.0f;
       for (const float depth : {3.0f, 6.0f, 10.0f}) {
         for (const float target : {0.85f, 0.65f, 0.45f, 0.28f, 0.15f, 0.07f}) {
-          worst = std::max(worst, std::abs(shaded_albedo(target, depth) - target));
+          worst = rx::Max(worst, ::abs(shaded_albedo(target, depth) - target));
         }
       }
       Check(worst < 0.02f,
             "the fitted colour inversion renders the colour it was asked for, at every "
             "reference depth");
-      if (worst >= 0.02f) std::fprintf(stderr, "  worst colour round-trip error: %.4f\n", worst);
+      if (worst >= 0.02f) ::fprintf(stderr, "  worst colour round-trip error: %.4f\n", worst);
 
       // And the published constants must NOT be silently substituted: they are
       // right for a path tracer and wrong here, which is the whole reason the
@@ -321,8 +322,8 @@ int main() {
     HairShadeCpu(blonde, wo, wi, 0.0f, 6.0f, blonde_on);
     HairShadeCpu(black_noscatter, wo, wi, 0.0f, 6.0f, black_off);
     HairShadeCpu(black, wo, wi, 0.0f, 6.0f, black_on);
-    const float blonde_gain = Luma(blonde_on) / std::max(Luma(blonde_off), 1e-9f);
-    const float black_gain = Luma(black_on) / std::max(Luma(black_off), 1e-9f);
+    const float blonde_gain = Luma(blonde_on) / rx::Max(Luma(blonde_off), 1e-9f);
+    const float black_gain = Luma(black_on) / rx::Max(Luma(black_off), 1e-9f);
     Check(blonde_gain > 1.05f, "multiple scattering lifts a light fibre");
     Check(blonde_gain > black_gain,
           "and lifts a light fibre more than a black one (a black fibre absorbs before it "
@@ -365,7 +366,7 @@ int main() {
     };
     const float flat_peak = peak_theta(flat, 1);
     const float tilted_peak = peak_theta(tilted, 1);
-    Check(std::abs(tilted_peak - flat_peak) > 0.01f,
+    Check(::abs(tilted_peak - flat_peak) > 0.01f,
           "the cuticle tilt shifts the highlight off the specular direction");
   }
 
@@ -407,7 +408,7 @@ int main() {
       rx::f32 shallow[3], deep[3];
       HairShadeCpu(distant, wo, wi, 0.0f, 1.0f, shallow);
       HairShadeCpu(distant, wo, wi, 0.0f, 40.0f, deep);
-      Check(std::abs(shallow[0] - deep[0]) < 1e-6f && std::abs(shallow[2] - deep[2]) < 1e-6f,
+      Check(::abs(shallow[0] - deep[0]) < 1e-6f && ::abs(shallow[2] - deep[2]) < 1e-6f,
             "with multiple scattering off, fibre depth changes nothing");
 
       rx::f32 lit_hero[3];
@@ -460,6 +461,6 @@ int main() {
           "blonde is darker than white");
   }
 
-  if (failures == 0) std::fprintf(stderr, "hair_bsdf_test: all checks passed\n");
+  if (failures == 0) ::fprintf(stderr, "hair_bsdf_test: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

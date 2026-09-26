@@ -6,10 +6,13 @@
 
 #include "render/d3d12/d3d12_backend.h"
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 
 namespace rx::render::d3d12 {
 namespace {
@@ -37,7 +40,7 @@ constexpr u32 kPlacementAlign = 512;  // D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT
 
 void D3D12CommandList::OnBeginRecording() {
   bound_ = nullptr;
-  std::memset(push_shadow_, 0, sizeof(push_shadow_));
+  base::MemSet(push_shadow_, 0, sizeof(push_shadow_));
   for (PendingVertexBuffer& vb : pending_vb_) vb = {};
   vb_dirty_ = false;
   buffer_states_.clear();
@@ -142,7 +145,7 @@ void D3D12CommandList::BindSet(u32 set_index, BindingSetHandle set) {
   }
 }
 
-void D3D12CommandList::BindTransient(u32 set_index, std::span<const BindingItem> items) {
+void D3D12CommandList::BindTransient(u32 set_index, base::Span<const BindingItem> items) {
   if (!bound_ || set_index >= bound_->sets.size()) return;
   const PipelineRecord::SetParams& params = bound_->sets[set_index];
   SetLayout* layout = params.layout;
@@ -205,8 +208,8 @@ void D3D12CommandList::BindTransient(u32 set_index, std::span<const BindingItem>
 void D3D12CommandList::PushConstants(const void* data, u32 size, u32 offset) {
   if (!bound_ || bound_->push_param < 0) return;
   if (offset + size > sizeof(push_shadow_)) return;
-  std::memcpy(push_shadow_ + offset, data, size);
-  u32 block = std::min<u32>(bound_->push_size, sizeof(push_shadow_));
+  base::MemCopy(push_shadow_ + offset, data, size);
+  u32 block = rx::Min<u32>(bound_->push_size, sizeof(push_shadow_));
   if (bound_->push_root_constants) {
     if (bound_->compute) {
       list_->SetComputeRoot32BitConstants(bound_->push_param, block / 4, push_shadow_, 0);
@@ -225,7 +228,7 @@ void D3D12CommandList::PushConstants(const void* data, u32 size, u32 offset) {
   auto bind_push_address = [&](i32 param, u32 byte_offset) {
     if (param < 0 || offset > byte_offset || offset + size < byte_offset + 8) return;
     u64 address = 0;
-    std::memcpy(&address, push_shadow_ + byte_offset, sizeof(address));
+    base::MemCopy(&address, push_shadow_ + byte_offset, sizeof(address));
     if (address == 0) return;
     if (bound_->compute) {
       list_->SetComputeRootShaderResourceView(param, address);
@@ -240,9 +243,9 @@ void D3D12CommandList::PushConstants(const void* data, u32 size, u32 offset) {
 
 void D3D12CommandList::SetPushRootCbv() {
   void* cpu = nullptr;
-  u32 block = std::min<u32>(bound_->push_size, sizeof(push_shadow_));
+  u32 block = rx::Min<u32>(bound_->push_size, sizeof(push_shadow_));
   u64 va = device_.AllocPushSlice(ring_, block, &cpu);
-  std::memcpy(cpu, push_shadow_, block);
+  base::MemCopy(cpu, push_shadow_, block);
   if (bound_->compute) {
     list_->SetComputeRootConstantBufferView(bound_->push_param, va);
   } else {
@@ -435,7 +438,7 @@ void D3D12CommandList::DrawMeshTasksIndirectCount(const GpuBuffer& args, u64 off
 
 // synchronization
 
-void D3D12CommandList::TextureBarriers(std::span<const TextureBarrier> barriers) {
+void D3D12CommandList::TextureBarriers(base::Span<const TextureBarrier> barriers) {
   for (const TextureBarrier& barrier : barriers) {
     TextureRecord* texture = Rec(barrier.texture);
     if (!texture) continue;
@@ -468,7 +471,7 @@ void D3D12CommandList::MemoryBarrier(BarrierScope src, BarrierScope dst) {
 // transfer
 
 void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
-                                           std::span<const BufferTextureCopy> regions) {
+                                           base::Span<const BufferTextureCopy> regions) {
   TextureRecord* texture = Rec(dst.handle);
   BufferRecord* buffer = Rec(src.handle);
 
@@ -478,9 +481,9 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
   bool aligned = true;
   for (const BufferTextureCopy& region : regions) {
     u32 width = region.extent.width ? region.extent.width
-                                    : std::max(dst.extent.width >> region.mip, 1u);
+                                    : rx::Max(dst.extent.width >> region.mip, 1u);
     u32 height = region.extent.height ? region.extent.height
-                                      : std::max(dst.extent.height >> region.mip, 1u);
+                                      : rx::Max(dst.extent.height >> region.mip, 1u);
     RowInfo rows = RowInfoOf(dst.format, width, height);
     if ((rows.row_bytes % kRowPitchAlign) != 0 || (region.buffer_offset % kPlacementAlign) != 0) {
       aligned = false;
@@ -503,9 +506,9 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
     for (size_t i = 0; i < regions.size(); ++i) {
       const BufferTextureCopy& region = regions[i];
       u32 width = region.extent.width ? region.extent.width
-                                      : std::max(dst.extent.width >> region.mip, 1u);
+                                      : rx::Max(dst.extent.width >> region.mip, 1u);
       u32 height = region.extent.height ? region.extent.height
-                                        : std::max(dst.extent.height >> region.mip, 1u);
+                                        : rx::Max(dst.extent.height >> region.mip, 1u);
       RowInfo rows = RowInfoOf(dst.format, width, height);
       u64 pitch = (rows.row_bytes + kRowPitchAlign - 1) & ~static_cast<u64>(kRowPitchAlign - 1);
       total = (total + kPlacementAlign - 1) & ~static_cast<u64>(kPlacementAlign - 1);
@@ -538,16 +541,16 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
     for (size_t i = 0; i < regions.size(); ++i) {
       const BufferTextureCopy& region = regions[i];
       u32 width = region.extent.width ? region.extent.width
-                                      : std::max(dst.extent.width >> region.mip, 1u);
+                                      : rx::Max(dst.extent.width >> region.mip, 1u);
       u32 height = region.extent.height ? region.extent.height
-                                        : std::max(dst.extent.height >> region.mip, 1u);
+                                        : rx::Max(dst.extent.height >> region.mip, 1u);
       RowInfo rows = RowInfoOf(dst.format, width, height);
       u64 pitch = (rows.row_bytes + kRowPitchAlign - 1) & ~static_cast<u64>(kRowPitchAlign - 1);
       for (u32 row = 0; row < rows.row_count; ++row) {
         const u64 src_offset = region.buffer_offset + static_cast<u64>(row) * rows.row_bytes;
         const u64 dst_offset = staged_offsets[i] + row * pitch;
         if (mapped)
-          std::memcpy(out + dst_offset, mapped + src_offset, rows.row_bytes);
+          base::MemCopy(out + dst_offset, mapped + src_offset, rows.row_bytes);
         else
           list_->CopyBufferRegion(staging, dst_offset, buffer->resource, src_offset,
                                   rows.row_bytes);
@@ -573,9 +576,9 @@ void D3D12CommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage&
   for (size_t i = 0; i < regions.size(); ++i) {
     const BufferTextureCopy& region = regions[i];
     u32 width = region.extent.width ? region.extent.width
-                                    : std::max(dst.extent.width >> region.mip, 1u);
+                                    : rx::Max(dst.extent.width >> region.mip, 1u);
     u32 height = region.extent.height ? region.extent.height
-                                      : std::max(dst.extent.height >> region.mip, 1u);
+                                      : rx::Max(dst.extent.height >> region.mip, 1u);
     RowInfo rows = RowInfoOf(dst.format, width, height);
     u64 pitch = aligned
                     ? rows.row_bytes
@@ -604,9 +607,9 @@ void D3D12CommandList::CopyTextureToBuffer(const GpuImage& src, const GpuBuffer&
   TextureRecord* texture = Rec(src.handle);
   BufferRecord* buffer = Rec(dst.handle);
   u32 width = region.extent.width ? region.extent.width
-                                  : std::max(src.extent.width >> region.mip, 1u);
+                                  : rx::Max(src.extent.width >> region.mip, 1u);
   u32 height = region.extent.height ? region.extent.height
-                                    : std::max(src.extent.height >> region.mip, 1u);
+                                    : rx::Max(src.extent.height >> region.mip, 1u);
   RowInfo rows = RowInfoOf(src.format, width, height);
 
   bool aligned =
@@ -708,11 +711,11 @@ void D3D12CommandList::BlitMip(const GpuImage& image, u32 src_mip, Extent2D src_
   color.load = LoadOp::kDontCare;
   RenderingInfo info;
   info.extent = dst_extent;
-  info.colors = std::span<const ColorAttachment>(&color, 1);
+  info.colors = base::Span<const ColorAttachment>(&color, 1);
   BeginRendering(info);
   BindPipeline(blit);
   BindingItem blit_src = Bind::Combined(0, src_view, device_.blit_sampler());
-  BindTransient(0, std::span<const BindingItem>(&blit_src, 1));
+  BindTransient(0, base::Span<const BindingItem>(&blit_src, 1));
   Draw(3, 1, 0, 0);
   EndRendering();
 
@@ -909,7 +912,7 @@ void D3D12CommandList::QueryCompactedSizes(AccelCompactionQueryHandle query,
   list_->ResourceBarrier(1, &to_copy);
   list_->CopyBufferRegion(record->readback, 0, record->gpu, 0,
                           static_cast<u64>(count) * sizeof(u64));
-  std::swap(to_copy.Transition.StateBefore, to_copy.Transition.StateAfter);
+  base::Swap(to_copy.Transition.StateBefore, to_copy.Transition.StateAfter);
   list_->ResourceBarrier(1, &to_copy);
 
   // Readiness = this list's ring fence reaching the value CloseAndExecute
@@ -947,7 +950,7 @@ void D3D12CommandList::WriteTimestamp(TimestampPoolHandle pool, u32 index, bool 
   u64 key = reinterpret_cast<u64>(record);
   u32* max = timestamp_max_.find(key);
   if (max) {
-    *max = std::max(*max, index + 1);
+    *max = rx::Max(*max, index + 1);
   } else {
     timestamp_max_.insert(key, index + 1);
   }

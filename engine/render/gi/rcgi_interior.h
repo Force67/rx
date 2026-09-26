@@ -1,7 +1,7 @@
 #ifndef RX_RENDER_RCGI_INTERIOR_H_
 #define RX_RENDER_RCGI_INTERIOR_H_
 
-#include <cmath>
+#include <math.h>
 
 #include "core/math.h"
 
@@ -54,7 +54,7 @@ inline u32 RcgiPackOffset(const Vec3& frac) {
   auto lane = [](f32 f) -> u32 {
     f32 n = f / kRcgiRelocMaxOffset;
     n = n < -1.0f ? -1.0f : (n > 1.0f ? 1.0f : n);
-    i32 q = static_cast<i32>(std::lround(n * 511.0f)) + 512;  // [1, 1023] around 512
+    i32 q = static_cast<i32>(::lround(n * 511.0f)) + 512;  // [1, 1023] around 512
     if (q < 0) q = 0;
     if (q > 1023) q = 1023;
     return static_cast<u32>(q);

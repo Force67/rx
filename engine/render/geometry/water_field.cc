@@ -1,11 +1,12 @@
 #include "render/geometry/water_field.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <span>
+#include <math.h>
+#include <string.h>
 
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/water_field_cs_hlsl.h"
 
 namespace rx::render {
@@ -137,7 +138,7 @@ bool WaterField::Initialize(Device& device) {
             Transition(rings_[r][p], ResourceState::kUndefined, ResourceState::kGeneral);
     for (u32 p = 0; p < 2; ++p)
       to_general[n++] = Transition(mask_[p], ResourceState::kUndefined, ResourceState::kGeneral);
-    cmd.TextureBarriers(std::span<const TextureBarrier>(to_general, n));
+    cmd.TextureBarriers(base::Span<const TextureBarrier>(to_general, n));
   });
   return true;
 }
@@ -174,8 +175,8 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
     prev_origin[r][0] = origin_[r][0];
     prev_origin[r][1] = origin_[r][1];
     texel_world[r] = 2.0f * kRingHalfExtent[r] / static_cast<f32>(kSize);
-    origin_[r][0] = std::round(params.camera_pos.x / texel_world[r]) * texel_world[r];
-    origin_[r][1] = std::round(params.camera_pos.z / texel_world[r]) * texel_world[r];
+    origin_[r][0] = ::round(params.camera_pos.x / texel_world[r]) * texel_world[r];
+    origin_[r][1] = ::round(params.camera_pos.z / texel_world[r]) * texel_world[r];
     if (!centered_) {  // first frame: no history, resample lands out of bounds
       prev_origin[r][0] = origin_[r][0] + 1e6f;
       prev_origin[r][1] = origin_[r][1] + 1e6f;
@@ -194,16 +195,16 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
     gp.ring[r][2] = kRingHalfExtent[r];
     gp.ring[r][3] = texel_world[r];
   }
-  std::memcpy(params_[slot].mapped, &gp, sizeof(gp));
+  base::MemCopy(params_[slot].mapped, &gp, sizeof(gp));
 
   // Interaction matrices: identical for every ring/phase, so one CB per frame.
   const WaterFieldCamera camera{params.view_proj, params.inv_view_proj};
-  std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+  base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
   // Object disturbances for this frame (bounded).
-  u32 disturbance_count = std::min(params.disturbance_count, kMaxDisturbances);
+  u32 disturbance_count = rx::Min(params.disturbance_count, kMaxDisturbances);
   if (disturbance_count > 0 && params.disturbances) {
-    std::memcpy(disturbances_[slot].mapped, params.disturbances,
+    base::MemCopy(disturbances_[slot].mapped, params.disturbances,
                 disturbance_count * sizeof(GpuDisturbance));
   }
 
@@ -230,7 +231,7 @@ void WaterField::AddToGraph(RenderGraph& graph, const UpdateParams& params,
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);
         ctx.cmd->BindPipeline(pipeline_);
 
-        f32 inv = kDriftSpeed / std::sqrt(kDriftDirX * kDriftDirX + kDriftDirZ * kDriftDirZ);
+        f32 inv = kDriftSpeed / ::sqrt(kDriftDirX * kDriftDirX + kDriftDirZ * kDriftDirZ);
         f32 drift_x = kDriftDirX * inv;
         f32 drift_z = kDriftDirZ * inv;
         // Depth for slot 4: the real prepass depth when available, else the ring

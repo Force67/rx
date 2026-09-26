@@ -1,8 +1,8 @@
 #include "render/post/ui_blur.h"
 
-#include <algorithm>
-
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/ui_blur_ps_hlsl.h"
 
@@ -15,8 +15,8 @@ struct BlurPush {
 };
 }  // namespace
 
-std::unique_ptr<UiBlurPass> UiBlurPass::Create(Device& device) {
-  auto pass = std::unique_ptr<UiBlurPass>(new UiBlurPass(device));
+base::UniquePointer<UiBlurPass> UiBlurPass::Create(Device& device) {
+  auto pass = base::UniquePointer<UiBlurPass>(new UiBlurPass(device));
 
   pass->sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
                                       .address_v = AddressMode::kClampToEdge,
@@ -45,7 +45,7 @@ UiBlurPass::~UiBlurPass() { device_.DestroyPipeline(pipeline_); }
 void UiBlurPass::Record(PassContext& ctx, TextureView input, TextureView output, Extent2D extent,
                         float dx, float dy) {
   ColorAttachment color{.view = output, .load = LoadOp::kDontCare, .store = StoreOp::kStore};
-  ctx.cmd->BeginRendering({.extent = extent, .colors = {&color, 1}});
+  ctx.cmd->BeginRendering({.extent = extent, .colors = base::Span(&color, 1)});
   ctx.cmd->BindPipeline(pipeline_);
   ctx.cmd->BindTransient(0, {Bind::Combined(0, input, sampler_)});
   BlurPush push{{dx, dy}};
@@ -56,8 +56,8 @@ void UiBlurPass::Record(PassContext& ctx, TextureView input, TextureView output,
 
 ResourceHandle UiBlurPass::AddToGraph(RenderGraph& graph, ResourceHandle src, u32 width,
                                       u32 height) {
-  const u32 dw = std::max(1u, width / 4);
-  const u32 dh = std::max(1u, height / 4);
+  const u32 dw = rx::Max(1u, width / 4);
+  const u32 dh = rx::Max(1u, height / 4);
   ResourceHandle h_blur =
       graph.CreateTexture({.name = "ui_frost_h", .format = kFrostFormat, .width = dw, .height = dh});
   ResourceHandle frost =

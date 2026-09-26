@@ -1,8 +1,9 @@
 #include "render/geometry/wboit.h"
 
-#include <cstring>
+#include <string.h>
 
 #include "asset/primitives.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "shaders/fullscreen_vs_slang.h"
@@ -140,7 +141,7 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
 
   WboitFrame constants{};
   constants.view_proj = view_proj;
-  std::memcpy(constants.cluster_params, lighting.cluster_params,
+  base::MemCopy(constants.cluster_params, lighting.cluster_params,
               sizeof(constants.cluster_params));
   constants.froxel_params[0] = lighting.froxel_near;
   constants.froxel_params[1] = lighting.froxel_far;
@@ -170,7 +171,7 @@ ResourceHandle WboitPass::AddToGraph(RenderGraph& graph, ResourceHandle color, R
         ctx.cmd->BeginRendering(
             {.extent = {width, height}, .colors = colors, .depth = &depth_att});
         ctx.cmd->BindPipeline(geom_pipeline_);
-        std::memcpy(frames_[slot].mapped, &constants, sizeof(constants));
+        base::MemCopy(frames_[slot].mapped, &constants, sizeof(constants));
         ctx.cmd->BindTransient(
             0, {Bind::StorageBuffer(0, lighting.lights, 0, lighting.lights.size),
                 Bind::StorageBuffer(1, lighting.cluster_counts, 0, lighting.cluster_counts.size),

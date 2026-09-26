@@ -1,7 +1,7 @@
 #ifndef RX_CORE_MEMORY_MEMORY_TRACKER_H_
 #define RX_CORE_MEMORY_MEMORY_TRACKER_H_
 
-#include <cstddef>
+#include <stddef.h>
 
 #include "core/export.h"
 #include "core/types.h"

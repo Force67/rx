@@ -1,10 +1,12 @@
 #include "render/geometry/instance_store.h"
 
-#include <algorithm>
-#include <cmath>
-#include <limits>
+#include <float.h>
+#include <math.h>
 
+#include "base/algorithm.h"
+#include "base/containers/span.h"
 #include "core/log.h"
+#include "core/scalar.h"
 
 namespace rx::render {
 
@@ -12,15 +14,15 @@ namespace {
 
 f32 MaxScale(const Mat4 &transform) {
   const f32 *m = transform.m;
-  const f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-  const f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-  const f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-  return std::max(sx, std::max(sy, sz));
+  const f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+  const f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+  const f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+  return rx::Max(sx, rx::Max(sy, sz));
 }
 
 }  // namespace
 
-GpuBuffer InstanceStore::Upload(Device &device, std::span<const Mat4> transforms) {
+GpuBuffer InstanceStore::Upload(Device &device, base::Span<const Mat4> transforms) {
   if (transforms.empty()) return {};
   return device.CreateBufferWithData(
       ByteSpan(reinterpret_cast<const u8 *>(transforms.data()), transforms.size_bytes()),
@@ -30,35 +32,35 @@ GpuBuffer InstanceStore::Upload(Device &device, std::span<const Mat4> transforms
 void InstanceStore::ComputeBounds(Group &group, const f32 mesh_center[3], f32 mesh_radius) {
   group.cullable = mesh_radius > 0;
   group.lod_scale = 0;
-  Vec3 lo{std::numeric_limits<f32>::max(), std::numeric_limits<f32>::max(),
-          std::numeric_limits<f32>::max()};
-  Vec3 hi{-std::numeric_limits<f32>::max(), -std::numeric_limits<f32>::max(),
-          -std::numeric_limits<f32>::max()};
+  Vec3 lo{FLT_MAX, FLT_MAX,
+          FLT_MAX};
+  Vec3 hi{-FLT_MAX, -FLT_MAX,
+          -FLT_MAX};
   for (const Mat4 &transform : group.transforms) {
     const Vec3 center = TransformPoint(transform, {mesh_center[0], mesh_center[1], mesh_center[2]});
     const f32 scale = MaxScale(transform);
     const f32 radius = mesh_radius * scale;
-    group.lod_scale = std::max(group.lod_scale, scale);
-    lo.x = std::min(lo.x, center.x - radius);
-    lo.y = std::min(lo.y, center.y - radius);
-    lo.z = std::min(lo.z, center.z - radius);
-    hi.x = std::max(hi.x, center.x + radius);
-    hi.y = std::max(hi.y, center.y + radius);
-    hi.z = std::max(hi.z, center.z + radius);
+    group.lod_scale = rx::Max(group.lod_scale, scale);
+    lo.x = rx::Min(lo.x, center.x - radius);
+    lo.y = rx::Min(lo.y, center.y - radius);
+    lo.z = rx::Min(lo.z, center.z - radius);
+    hi.x = rx::Max(hi.x, center.x + radius);
+    hi.y = rx::Max(hi.y, center.y + radius);
+    hi.z = rx::Max(hi.z, center.z + radius);
   }
-  group.lod_scale = std::max(group.lod_scale, 1e-6f);
+  group.lod_scale = rx::Max(group.lod_scale, 1e-6f);
   group.bounds_center = (lo + hi) * 0.5f;
   group.bounds_radius = 0;
   for (const Mat4 &transform : group.transforms) {
     const Vec3 center = TransformPoint(transform, {mesh_center[0], mesh_center[1], mesh_center[2]});
     const Vec3 delta = center - group.bounds_center;
-    group.bounds_radius = std::max(
-        group.bounds_radius, std::sqrt(Dot(delta, delta)) + mesh_radius * MaxScale(transform));
+    group.bounds_radius = rx::Max(
+        group.bounds_radius, ::sqrt(Dot(delta, delta)) + mesh_radius * MaxScale(transform));
   }
 }
 
 InstanceGroupHandle InstanceStore::Create(Device &device, u64 mesh,
-                                          std::span<const Mat4> transforms,
+                                          base::Span<const Mat4> transforms,
                                           const f32 mesh_center[3], f32 mesh_radius) {
   if (mesh == 0 || transforms.empty()) return {};
   GpuBuffer buffer = Upload(device, transforms);
@@ -93,7 +95,7 @@ InstanceStore::Group *InstanceStore::Resolve(InstanceGroupHandle handle) {
 }
 
 bool InstanceStore::Replace(Device &device, InstanceGroupHandle handle,
-                            std::span<const Mat4> transforms, const f32 mesh_center[3],
+                            base::Span<const Mat4> transforms, const f32 mesh_center[3],
                             f32 mesh_radius) {
   Group *group = Resolve(handle);
   if (!group || transforms.empty()) return false;
@@ -117,7 +119,7 @@ bool InstanceStore::Replace(Device &device, InstanceGroupHandle handle,
       // submitted prefix and make newly appended instances spawn in place.
       base::Vector<Mat4> previous;
       previous.assign(transforms.begin(), transforms.end());
-      std::copy(submitted.begin(), submitted.end(), previous.begin());
+      base::Copy(submitted.begin(), submitted.end(), previous.begin());
       GpuBuffer previous_buffer = Upload(device, previous);
       if (!previous_buffer) {
         device.DestroyBuffer(replacement);

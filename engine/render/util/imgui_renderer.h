@@ -18,9 +18,9 @@
 // Compiled only when the vendored imgui target exists; engine/render never
 // hard-depends on imgui.
 
-#include <cstddef>
-#include <vector>
+#include <stddef.h>
 
+#include "base/containers/vector.h"
 #include "core/export.h"
 #include "render/rhi/device.h"
 #include "render/rhi/types.h"
@@ -86,7 +86,7 @@ class RX_RENDER_EXPORT ImGuiRenderer {
   // Textures this backend created (owns the GPU backing behind BackendUserData),
   // tracked so Shutdown frees them without a global ImGui:: call (RX_SHARED keeps
   // one imgui context in the app DSO, not this one).
-  std::vector<ImTextureData*> textures_;
+  base::Vector<ImTextureData*> textures_;
 };
 
 }  // namespace rx::render

@@ -5,11 +5,13 @@
 // cleanly (exit 0) when no driver is present; run under vkrun for the real
 // GPU path. The backend follows RX_RHI (vulkan|d3d12).
 
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
 #include "placement/ecotope.h"
 #include "placement/gpu_placement.h"
 #include "placement/placement.h"
@@ -26,7 +28,7 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "placement_gpu_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "placement_gpu_test: FAIL: %s\n", message);
   ++failures;
 }
 
@@ -55,32 +57,32 @@ void SortInstances(base::Vector<PlacedInstance>& instances) {
 
 int main() {
   render::DeviceDesc desc;
-  const char* rhi = std::getenv("RX_RHI");
-  desc.backend = (rhi && std::strcmp(rhi, "d3d12") == 0) ? render::Backend::kD3D12
+  const char* rhi = ::getenv("RX_RHI");
+  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? render::Backend::kD3D12
                                                          : render::Backend::kVulkan;
   desc.request_raytracing = false;
-  std::unique_ptr<render::Device> device = render::Device::CreateOffscreen(desc);
+  base::UniquePointer<render::Device> device = render::Device::CreateOffscreen(desc);
   if (!device) {
-    std::fprintf(stderr, "placement_gpu_test: CreateOffscreen returned null\n");
+    ::fprintf(stderr, "placement_gpu_test: CreateOffscreen returned null\n");
     return 1;
   }
   if (device->is_stub()) {
-    std::printf("placement_gpu_test: no %s driver, skipping (null backend)\n",
+    ::printf("placement_gpu_test: no %s driver, skipping (null backend)\n",
                 render::BackendName(desc.backend));
     return 0;
   }
-  std::printf("placement_gpu_test: device '%s'\n", device->caps().adapter_name.c_str());
+  ::printf("placement_gpu_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   // A small world with smooth maps (smooth densities keep the CPU/GPU
   // bilinear paths away from threshold knife edges).
   WorldData world(0.0f, 0.0f, 512.0f, 128);
   u32 height = world.AddMap("height");
   world.Generate(height, [](f32 x, f32 z) {
-    return 6.0f * std::sin(x * 0.011f) + 4.0f * std::cos(z * 0.017f);
+    return 6.0f * ::sin(x * 0.011f) + 4.0f * ::cos(z * 0.017f);
   });
   u32 forest = world.AddMap("forest");
   world.Generate(forest, [](f32 x, f32 z) {
-    return 0.5f + 0.5f * std::sin(x * 0.007f) * std::cos(z * 0.009f);
+    return 0.5f + 0.5f * ::sin(x * 0.007f) * ::cos(z * 0.009f);
   });
 
   PlacementConfig config;
@@ -116,7 +118,7 @@ int main() {
 
   GpuPlacement gpu;
   if (!gpu.Initialize(*device, system)) {
-    std::fprintf(stderr, "placement_gpu_test: Initialize failed\n");
+    ::fprintf(stderr, "placement_gpu_test: Initialize failed\n");
     return 1;
   }
   gpu.SyncWorldData(*device, world);
@@ -124,9 +126,9 @@ int main() {
   const TileKey tiles[] = {{0, 0, 0}, {0, 1, 0}, {0, -1, 2}, {1, 3, 5}, {1, -2, -2}};
 
   base::Vector<PlacedInstance> gpu_a;
-  gpu.GenerateImmediate(*device, system, {tiles, 5}, gpu_a);
+  gpu.GenerateImmediate(*device, system, base::Span(tiles, 5), gpu_a);
   base::Vector<PlacedInstance> gpu_b;
-  gpu.GenerateImmediate(*device, system, {tiles, 5}, gpu_b);
+  gpu.GenerateImmediate(*device, system, base::Span(tiles, 5), gpu_b);
 
   base::Vector<PlacedInstance> cpu;
   for (const TileKey& tile : tiles) system.EmitTileCpu(tile, cpu);
@@ -140,11 +142,11 @@ int main() {
 
   bool reruns_identical = gpu_a.size() == gpu_b.size();
   for (u32 i = 0; reruns_identical && i < gpu_a.size(); ++i) {
-    reruns_identical = std::memcmp(&gpu_a[i], &gpu_b[i], sizeof(PlacedInstance)) == 0;
+    reruns_identical = base::MemCompare(&gpu_a[i], &gpu_b[i], sizeof(PlacedInstance)) == 0;
   }
   Check(reruns_identical, "GPU rerun reproduces instances bit for bit");
 
-  std::printf("placement_gpu_test: gpu=%u cpu=%u instances\n",
+  ::printf("placement_gpu_test: gpu=%u cpu=%u instances\n",
               static_cast<u32>(gpu_a.size()), static_cast<u32>(cpu.size()));
   Check(gpu_a.size() == cpu.size(), "GPU matches CPU reference count");
   if (gpu_a.size() == cpu.size()) {
@@ -155,7 +157,7 @@ int main() {
         continue;
       }
       for (u32 e = 0; e < 16; ++e) {
-        if (std::fabs(gpu_a[i].transform.m[e] - cpu[i].transform.m[e]) > 2e-3f) {
+        if (::fabs(gpu_a[i].transform.m[e] - cpu[i].transform.m[e]) > 2e-3f) {
           ++mismatches;
           break;
         }
@@ -163,11 +165,11 @@ int main() {
     }
     Check(mismatches == 0, "GPU instances match the CPU reference");
     if (mismatches != 0) {
-      std::fprintf(stderr, "placement_gpu_test: %u mismatching instances\n", mismatches);
+      ::fprintf(stderr, "placement_gpu_test: %u mismatching instances\n", mismatches);
     }
   }
 
   gpu.Shutdown(*device);
-  if (failures == 0) std::printf("placement_gpu_test: all checks passed\n");
+  if (failures == 0) ::printf("placement_gpu_test: all checks passed\n");
   return failures;
 }

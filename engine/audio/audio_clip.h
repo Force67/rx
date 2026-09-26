@@ -1,10 +1,10 @@
 #ifndef RX_AUDIO_AUDIO_CLIP_H_
 #define RX_AUDIO_AUDIO_CLIP_H_
 
-#include <memory>
-#include <string_view>
-#include <vector>
 
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
 #include "core/types.h"
 
 namespace rx::audio {
@@ -16,7 +16,7 @@ namespace rx::audio {
 struct AudioClip {
   u32 channels = 0;
   u32 sample_rate = 0;
-  std::vector<float> samples;  // interleaved, channels per frame
+  base::Vector<float> samples;  // interleaved, channels per frame
 
   u64 frames() const { return channels ? samples.size() / channels : 0; }
   bool valid() const { return channels > 0 && sample_rate > 0 && !samples.empty(); }
@@ -48,16 +48,16 @@ class Decoder {
 // magic-number fallback (a .fuz is really a wrapped xWMA, a mod's loose file may
 // lie about its extension). `bytes` is copied into the decoder, so the caller's
 // buffer need not outlive it. Null when no decoder handles the data.
-std::unique_ptr<Decoder> OpenDecoder(ByteSpan bytes, std::string_view extension);
+base::UniquePointer<Decoder> OpenDecoder(ByteSpan bytes, base::StringRef extension);
 
 // Decodes `bytes` completely into an AudioClip. Returns an invalid clip (see
 // AudioClip::valid) when the format is unsupported or the data is malformed.
-AudioClip DecodeClip(ByteSpan bytes, std::string_view extension);
+AudioClip DecodeClip(ByteSpan bytes, base::StringRef extension);
 
 // Wraps an already-decoded clip in a streaming Decoder (a cursor over its
 // samples), so a cached one-shot can be handed to the mixer like any other
 // source. The clip is moved in; play a copy to fire the same sound twice.
-std::unique_ptr<Decoder> MakeClipDecoder(AudioClip clip);
+base::UniquePointer<Decoder> MakeClipDecoder(AudioClip clip);
 
 }  // namespace rx::audio
 

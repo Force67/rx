@@ -1,16 +1,19 @@
 #include "render/gi/sdf_clipmap.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <limits>
+#include <float.h>
+#include <math.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/gi/sdf_scene.h"
 #include "render/rhi/bindings.h"
 #include "shaders/sdf_clear_cs_hlsl.h"
 #include "shaders/sdf_compose_cs_hlsl.h"
 #include "shaders/sdf_debug_cs_hlsl.h"
+#include "core/sort.h"
 
 namespace rx::render {
 namespace {
@@ -177,9 +180,9 @@ Vec3 SdfClipmap::SnapOrigin(const Vec3& camera, u32 clip) const {
   // backstop covers that window.
   const f32 snap = voxel * 8.0f;
   f32 half = extent * 0.5f;
-  return Vec3{std::floor((camera.x - half) / snap) * snap,
-             std::floor((camera.y - half) / snap) * snap,
-             std::floor((camera.z - half) / snap) * snap};
+  return Vec3{::floor((camera.x - half) / snap) * snap,
+             ::floor((camera.y - half) / snap) * snap,
+             ::floor((camera.z - half) / snap) * snap};
 }
 
 void SdfClipmap::WriteGlobals(u32 frame_index, const Vec3& camera) {
@@ -197,7 +200,7 @@ void SdfClipmap::WriteGlobals(u32 frame_index, const Vec3& camera) {
   g.camera_pos[0] = camera.x;
   g.camera_pos[1] = camera.y;
   g.camera_pos[2] = camera.z;
-  std::memcpy(globals_buffers_[frame_index % 2].mapped, &g, sizeof(g));
+  base::MemCopy(globals_buffers_[frame_index % 2].mapped, &g, sizeof(g));
 }
 
 void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
@@ -229,7 +232,7 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
   const SdfScene* scene_ptr = &scene;
   graph.AddPass(
       "sdf_compose", [](RenderGraph::PassBuilder&) {},
-      [this, scene_ptr, jobs = std::move(jobs), instances = std::move(instances), camera,
+      [this, scene_ptr, jobs = base::move(jobs), instances = base::move(instances), camera,
        frame_index](PassContext& ctx) {
         CommandList* cmd = ctx.cmd;
         // Order this frame's writes after any prior-frame reads of the volumes.
@@ -258,19 +261,19 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             const Vec3 local_max{mesh->box_min[0] + mesh->voxel * mesh->res[0],
                                  mesh->box_min[1] + mesh->voxel * mesh->res[1],
                                  mesh->box_min[2] + mesh->voxel * mesh->res[2]};
-            Vec3 world_min{std::numeric_limits<f32>::max(), std::numeric_limits<f32>::max(),
-                           std::numeric_limits<f32>::max()};
-            Vec3 world_max{-std::numeric_limits<f32>::max(), -std::numeric_limits<f32>::max(),
-                           -std::numeric_limits<f32>::max()};
+            Vec3 world_min{FLT_MAX, FLT_MAX,
+                           FLT_MAX};
+            Vec3 world_max{-FLT_MAX, -FLT_MAX,
+                           -FLT_MAX};
             for (u32 corner = 0; corner < 8; ++corner) {
               const Vec3 local{corner & 1 ? local_max.x : local_min.x,
                                corner & 2 ? local_max.y : local_min.y,
                                corner & 4 ? local_max.z : local_min.z};
               const Vec3 world = TransformPoint(inst.transform, local);
-              world_min = {std::min(world_min.x, world.x), std::min(world_min.y, world.y),
-                           std::min(world_min.z, world.z)};
-              world_max = {std::max(world_max.x, world.x), std::max(world_max.y, world.y),
-                           std::max(world_max.z, world.z)};
+              world_min = {rx::Min(world_min.x, world.x), rx::Min(world_min.y, world.y),
+                           rx::Min(world_min.z, world.z)};
+              world_max = {rx::Max(world_max.x, world.x), rx::Max(world_max.y, world.y),
+                           rx::Max(world_max.z, world.z)};
             }
 
             const Vec3 clip_min{j.origin[0], j.origin[1], j.origin[2]};
@@ -283,20 +286,22 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
                 world_min.x > clip_max.x || world_min.y > clip_max.y || world_min.z > clip_max.z)
               continue;
 
-            const Vec3 closest{std::clamp(camera.x, world_min.x, world_max.x),
-                               std::clamp(camera.y, world_min.y, world_max.y),
-                               std::clamp(camera.z, world_min.z, world_max.z)};
+            const Vec3 closest{rx::Clamp(camera.x, world_min.x, world_max.x),
+                               rx::Clamp(camera.y, world_min.y, world_max.y),
+                               rx::Clamp(camera.z, world_min.z, world_max.z)};
             const Vec3 delta = closest - camera;
             ComposeCandidate candidate{&inst, mesh, Dot(delta, delta)};
             (inst.bounded_quality ? bounded_quality : unbounded).push_back(candidate);
           }
 
-          std::sort(bounded_quality.begin(), bounded_quality.end(),
-                    [](const ComposeCandidate& a, const ComposeCandidate& b) {
-                      return a.distance_sq < b.distance_sq;
-                    });
+          // Stable: every instance around the camera ties at 0, and the order
+          // decides which of them fit under the cap.
+          rx::StableSort(bounded_quality.data(), bounded_quality.data() + bounded_quality.size(),
+                         [](const ComposeCandidate& a, const ComposeCandidate& b) {
+                           return a.distance_sq < b.distance_sq;
+                         });
           const size_t bounded_quality_count =
-              std::min(static_cast<size_t>(bounded_quality.size()),
+              rx::Min(static_cast<size_t>(bounded_quality.size()),
                        kMaxBoundedQualityInstancesPerClip);
 
           auto compose = [&](const ComposeCandidate& candidate) {
@@ -308,10 +313,10 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             // trace never overshoots. (The max axis would be correct only for a
             // non-overshooting bound.)
             const f32* m = inst.transform.m;
-            f32 sx = std::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
-            f32 sy = std::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
-            f32 sz = std::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
-            f32 min_scale = std::min(sx, std::min(sy, sz));
+            f32 sx = ::sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]);
+            f32 sy = ::sqrt(m[4] * m[4] + m[5] * m[5] + m[6] * m[6]);
+            f32 sz = ::sqrt(m[8] * m[8] + m[9] * m[9] + m[10] * m[10]);
+            f32 min_scale = rx::Min(sx, rx::Min(sy, sz));
 
             ComposePush pp{};
             pp.inv_transform = Inverse(inst.transform);
@@ -323,8 +328,8 @@ void SdfClipmap::AddComposeToGraph(RenderGraph& graph, const SdfScene& scene,
             pp.mesh_res[1] = mesh->res[1];
             pp.mesh_res[2] = mesh->res[2];
             pp.mesh_res[3] = j.clip;
-            std::memcpy(pp.albedo, mesh->albedo, sizeof(f32) * 3);
-            std::memcpy(pp.emissive, mesh->emissive, sizeof(f32) * 3);
+            base::MemCopy(pp.albedo, mesh->albedo, sizeof(f32) * 3);
+            base::MemCopy(pp.emissive, mesh->emissive, sizeof(f32) * 3);
             pp.albedo[3] = min_scale;
 
             cmd->BindPipeline(compose_pipeline_);

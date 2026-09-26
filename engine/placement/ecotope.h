@@ -1,10 +1,10 @@
 #ifndef RX_PLACEMENT_ECOTOPE_H_
 #define RX_PLACEMENT_ECOTOPE_H_
 
-#include <string>
 
 #include <base/containers/vector.h>
 
+#include "base/strings/xstring.h"
 #include "core/types.h"
 #include "placement/density_program.h"
 
@@ -15,7 +15,7 @@ namespace rx::placement {
 // effective diameter the object occupies in the placement pattern - a 6 m
 // tree and a 1 m fern run through the same algorithm at different scales.
 struct PlacementLayer {
-  std::string name;
+  base::String name;
   u64 mesh = 0;  // renderer mesh id instances are drawn with
   f32 footprint = 1.0f;
 
@@ -35,7 +35,7 @@ struct PlacementLayer {
 // footprint are stacked into one dither interval, which is what keeps a
 // pine and a fir from ever claiming the same sample point.
 struct Ecotope {
-  std::string name;
+  base::String name;
   base::Vector<PlacementLayer> layers;
 };
 

@@ -1,10 +1,10 @@
 #ifndef RX_PLACEMENT_DENSITY_PROGRAM_H_
 #define RX_PLACEMENT_DENSITY_PROGRAM_H_
 
-#include <span>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -69,7 +69,7 @@ class RX_PLACEMENT_EXPORT DensityProgram {
   }
   DensityProgram& Pow(f32 exponent) { return Push({DensityOpCode::kPow, exponent}); }
 
-  std::span<const DensityOp> ops() const { return {ops_.data(), ops_.size()}; }
+  base::Span<const DensityOp> ops() const { return base::Span(ops_.data(), ops_.size()); }
   bool empty() const { return ops_.empty(); }
 
  private:
@@ -83,7 +83,7 @@ class RX_PLACEMENT_EXPORT DensityProgram {
 
 // CPU reference evaluator; mirrors placement_density.cs.hlsl op for op. The
 // result is already saturated (density is a probability).
-RX_PLACEMENT_EXPORT f32 EvalDensityProgram(std::span<const DensityOp> ops,
+RX_PLACEMENT_EXPORT f32 EvalDensityProgram(base::Span<const DensityOp> ops,
                                            const WorldData& world, f32 world_x,
                                            f32 world_z);
 

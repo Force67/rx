@@ -1,11 +1,12 @@
 #include "scene_hook_rhi_demo.h"
 
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
 #include "core/log.h"
 #include "render/rhi/bindings.h"
 
+#include "base/memory/mem_ops.h"
 #include "shaders/scenehook_rhi_cull_cs_hlsl.h"
 #include "shaders/scenehook_rhi_ms_hlsl.h"
 #include "shaders/scenehook_rhi_ps_hlsl.h"
@@ -77,7 +78,7 @@ bool SceneHookRhiDemo::CreateTextureArray() {
     RX_ERROR("scenehook-rhi: texture staging buffer failed");
     return false;
   }
-  std::memcpy(staging.mapped, pixels.data(), pixels.size());
+  base::MemCopy(staging.mapped, pixels.data(), pixels.size());
 
   device_->ImmediateSubmit([&](render::CommandList& cmd) {
     cmd.Barrier(render::Transition(tex_array_, render::ResourceState::kUndefined,
@@ -89,7 +90,7 @@ bool SceneHookRhiDemo::CreateTextureArray() {
                     .array_layer = l,
                     .extent = {kTexSize, kTexSize}};
     }
-    cmd.CopyBufferToTexture(staging, tex_array_, {regions.data(), regions.size()});
+    cmd.CopyBufferToTexture(staging, tex_array_, base::Span(regions.data(), regions.size()));
     cmd.Barrier(render::Transition(tex_array_, render::ResourceState::kCopyDst,
                                    render::ResourceState::kShaderReadFragment));
   });
@@ -237,7 +238,7 @@ void SceneHookRhiDemo::Record(const render::SceneHookContext& ctx) {
   colors[0] = {.view = ctx.color_view, .load = render::LoadOp::kLoad};
   colors[1] = {.view = ctx.depth_export_view, .load = render::LoadOp::kLoad};
   render::DepthAttachment depth{.view = ctx.depth_view, .load = render::LoadOp::kLoad};
-  ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = {colors, 2}, .depth = &depth});
+  ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(colors, 2), .depth = &depth});
 
   ctx.cmd->BindPipeline(draw_pipeline_);
   ctx.cmd->BindTransient(0, {render::Bind::Combined(0, tex_array_.view, sampler_)});

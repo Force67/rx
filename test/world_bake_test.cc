@@ -5,22 +5,23 @@
 // apart in a way neither half's own tests can see.
 //
 // argv[1] is the rxworld binary (CMake passes $<TARGET_FILE:rxworld>).
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <string>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "asset/pack.h"
 #include "asset/vfs.h"
+#include "base/containers/span.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
 #include "ecs/world.h"
 #include "scene/components.h"
 #include "world/world_map.h"
 #include "world/world_stream.h"
+#include "core/file_system.h"
 
 namespace {
 
-namespace fs = std::filesystem;
+namespace fs = rx::fs;
 using namespace rx::world;
 using rx::asset::Vfs;
 using rx::f32;
@@ -35,7 +36,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                        \
   do {                                                                     \
     if (!(cond)) {                                                         \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                        \
     }                                                                      \
   } while (0)
@@ -81,7 +82,7 @@ Renderable.mesh = "meshes/tree.gltf"
 
 void Tick(WorldStreamer* streamer, const WorldStreamObservation& observer, u32 count) {
   for (u32 i = 0; i < count; ++i) {
-    streamer->Update(std::span<const WorldStreamObservation>(&observer, 1));
+    streamer->Update(base::Span<const WorldStreamObservation>(&observer, 1));
   }
 }
 
@@ -108,41 +109,37 @@ WorldStreamPolicy Policy(f32 load, f32 retain) {
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::fprintf(stderr, "usage: world_bake_test <path to rxworld>\n");
+    ::fprintf(stderr, "usage: world_bake_test <path to rxworld>\n");
     return 2;
   }
-  const std::string rxworld = argv[1];
+  const base::String rxworld = argv[1];
 
-  const fs::path tmp = fs::temp_directory_path() / "rx_world_bake_test";
-  fs::remove_all(tmp);
-  fs::create_directories(tmp);
-  const fs::path scene = tmp / "town.rxscene";
-  const fs::path archive = tmp / "town.rxp";
-  {
-    std::ofstream file(scene);
-    file << kScene;
-    CHECK(file.good());
-  }
+  const base::String tmp = fs::Join(fs::TempDirectory(), "rx_world_bake_test");
+  fs::RemoveAll(tmp);
+  fs::CreateDirectories(tmp);
+  const base::String scene = fs::Join(tmp, "town.rxscene");
+  const base::String archive = fs::Join(tmp, "town.rxp");
+  CHECK(fs::WriteTextFile(scene, kScene));
 
-  const std::string command = "\"" + rxworld + "\" bake \"" + scene.string() + "\" \"" +
-                              archive.string() + "\" --name town --cell-size 32";
-  const int status = std::system(command.c_str());
+  const base::String command = "\"" + rxworld + "\" bake \"" + scene + "\" \"" +
+                              archive + "\" --name town --cell-size 32";
+  const int status = ::system(command.c_str());
   if (status != 0) {
-    std::fprintf(stderr, "FAIL: rxworld bake exited %d\n", status);
-    fs::remove_all(tmp);
+    ::fprintf(stderr, "FAIL: rxworld bake exited %d\n", status);
+    fs::RemoveAll(tmp);
     return 1;
   }
-  CHECK(fs::exists(archive));
+  CHECK(fs::Exists(archive));
 
   // Everything past here is the engine reading what the tool wrote.
   Vfs vfs;
-  auto provider = rx::asset::MakePackFileProvider(archive.string());
+  auto provider = rx::asset::MakePackFileProvider(archive);
   CHECK(provider != nullptr);
   if (!provider) return 1;
-  vfs.Mount("world", std::move(provider));
+  vfs.Mount("world", base::move(provider));
 
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://town/town.rxworld", &error));
   CHECK(error.empty());
   CHECK(map.index().cells.size() == 2);
@@ -163,8 +160,8 @@ int main(int argc, char** argv) {
   Tick(&streamer, At(10, 10), 30);
   CHECK(streamer.errors().empty());
   if (!streamer.errors().empty()) {
-    for (const std::string& message : streamer.errors()) {
-      std::fprintf(stderr, "  error: %s\n", message.c_str());
+    for (const base::String& message : streamer.errors()) {
+      ::fprintf(stderr, "  error: %s\n", message.c_str());
     }
   }
   // Three plain entities became ECS rows; the two renderables became instance
@@ -209,15 +206,15 @@ int main(int argc, char** argv) {
 
   // Re-baking the same input must produce the same bake id, or every overlay
   // and save keyed to it is invalidated by a no-op rebuild.
-  const fs::path second = tmp / "town2.rxp";
-  const std::string again = "\"" + rxworld + "\" bake \"" + scene.string() + "\" \"" +
-                            second.string() + "\" --name town --cell-size 32";
-  CHECK(std::system(again.c_str()) == 0);
+  const base::String second = fs::Join(tmp, "town2.rxp");
+  const base::String again = "\"" + rxworld + "\" bake \"" + scene + "\" \"" +
+                            second + "\" --name town --cell-size 32";
+  CHECK(::system(again.c_str()) == 0);
   Vfs second_vfs;
-  auto second_provider = rx::asset::MakePackFileProvider(second.string());
+  auto second_provider = rx::asset::MakePackFileProvider(second);
   CHECK(second_provider != nullptr);
   if (second_provider) {
-    second_vfs.Mount("world", std::move(second_provider));
+    second_vfs.Mount("world", base::move(second_provider));
     WorldMap second_map;
     CHECK(second_map.Load(second_vfs, "world://town/town.rxworld", &error));
     CHECK(second_map.index().bake_id == map.index().bake_id);
@@ -226,24 +223,24 @@ int main(int argc, char** argv) {
 
   // A different cook of the same scene is a different bake, so its payloads
   // must not be readable through the first index.
-  const fs::path other = tmp / "town3.rxp";
-  const std::string different = "\"" + rxworld + "\" bake \"" + scene.string() + "\" \"" +
-                                other.string() + "\" --name town --cell-size 64";
-  CHECK(std::system(different.c_str()) == 0);
+  const base::String other = fs::Join(tmp, "town3.rxp");
+  const base::String different = "\"" + rxworld + "\" bake \"" + scene + "\" \"" +
+                                other + "\" --name town --cell-size 64";
+  CHECK(::system(different.c_str()) == 0);
   Vfs other_vfs;
-  auto other_provider = rx::asset::MakePackFileProvider(other.string());
+  auto other_provider = rx::asset::MakePackFileProvider(other);
   if (other_provider) {
-    other_vfs.Mount("world", std::move(other_provider));
+    other_vfs.Mount("world", base::move(other_provider));
     WorldMap other_map;
     CHECK(other_map.Load(other_vfs, "world://town/town.rxworld", &error));
     CHECK(other_map.index().bake_id != map.index().bake_id);
   }
 
-  fs::remove_all(tmp);
+  fs::RemoveAll(tmp);
   if (g_failures) {
-    std::fprintf(stderr, "world_bake_test: %d failure(s)\n", g_failures);
+    ::fprintf(stderr, "world_bake_test: %d failure(s)\n", g_failures);
     return 1;
   }
-  std::puts("world_bake_test: ok");
+  ::puts("world_bake_test: ok");
   return 0;
 }

@@ -8,11 +8,12 @@
 // Three quads sharing one set of accessors, so the only difference between them
 // is the material each names.
 
-#include <cmath>
-#include <cstdio>
-#include <filesystem>
+#include <math.h>
+#include <stdio.h>
 
 #include "asset/gltf_loader.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 
 namespace {
 
@@ -67,7 +68,7 @@ int failures = 0;
 void Check(bool condition, const char *message) {
   if (condition)
     return;
-  std::fprintf(stderr, "gltf_texture_transform_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "gltf_texture_transform_test: FAIL: %s\n", message);
   ++failures;
 }
 
@@ -75,25 +76,25 @@ bool UvIs(const asset::Mesh &mesh, u32 vertex, f32 u, f32 v) {
   if (mesh.lods.empty() || mesh.lods[0].vertices.size() <= vertex)
     return false;
   const asset::Vertex &out = mesh.lods[0].vertices[vertex];
-  return std::fabs(out.uv[0] - u) < 1e-5f && std::fabs(out.uv[1] - v) < 1e-5f;
+  return ::fabs(out.uv[0] - u) < 1e-5f && ::fabs(out.uv[1] - v) < 1e-5f;
 }
 
 } // namespace
 
 int main() {
-  const std::filesystem::path path =
-      std::filesystem::temp_directory_path() / "rx_texture_transform.gltf";
-  std::FILE *file = std::fopen(path.string().c_str(), "wb");
+  const base::String path =
+      rx::fs::Join(rx::fs::TempDirectory(), "rx_texture_transform.gltf");
+  FILE *file = ::fopen(path.c_str(), "wb");
   if (!file) {
-    std::fprintf(stderr, "gltf_texture_transform_test: cannot create fixture\n");
+    ::fprintf(stderr, "gltf_texture_transform_test: cannot create fixture\n");
     return 1;
   }
-  std::fwrite(kDocument, 1, sizeof(kDocument) - 1, file);
-  std::fclose(file);
+  ::fwrite(kDocument, 1, sizeof(kDocument) - 1, file);
+  ::fclose(file);
 
   asset::ImportedScene scene;
-  const bool loaded = asset::LoadGltfScene(path.string(), &scene);
-  std::filesystem::remove(path);
+  const bool loaded = asset::LoadGltfScene(path, &scene);
+  rx::fs::Remove(path);
   Check(loaded, "generated glTF loads");
   if (!loaded)
     return 1;
@@ -122,7 +123,7 @@ int main() {
         "conflicting slots resolve to the base colour's transform");
 
   if (failures == 0) {
-    std::puts("gltf_texture_transform_test: PASS");
+    ::puts("gltf_texture_transform_test: PASS");
     return 0;
   }
   return 1;

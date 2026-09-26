@@ -1,11 +1,11 @@
 #include "render/geometry/fluid_sim.h"
 
-#include <algorithm>
-#include <cstring>
-#include <span>
-#include <vector>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/fluid_sim_cs_hlsl.h"
 
 namespace rx::render {
@@ -142,7 +142,7 @@ void FluidSim::Configure(Device& device, const FluidDomainDesc& desc) {
 
   const u32 cells = desc.resolution * desc.resolution;
   // Initial state: r=water depth, g=lava depth 0, b=T ambient, a=crust 0.
-  std::vector<f32> init(static_cast<size_t>(cells) * 4, 0.0f);
+  base::Vector<f32> init(static_cast<size_t>(cells) * 4, 0.0f);
   for (u32 i = 0; i < cells; ++i) {
     init[i * 4 + 0] = desc.initial_water ? desc.initial_water[i] : 0.0f;
     init[i * 4 + 2] = desc.ambient_temperature;
@@ -162,22 +162,22 @@ void FluidSim::Configure(Device& device, const FluidDomainDesc& desc) {
     disabled_ = true;
     return;
   }
-  std::memcpy(bed_stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
-  std::memcpy(state_stage.mapped, init.data(), init.size() * sizeof(f32));
+  base::MemCopy(bed_stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
+  base::MemCopy(state_stage.mapped, init.data(), init.size() * sizeof(f32));
 
   device.ImmediateSubmit([&](CommandList& cmd) {
     const f32 zero[4] = {0, 0, 0, 0};
     BufferTextureCopy copy;
 
     cmd.Barrier(Transition(bed_, ResourceState::kUndefined, ResourceState::kCopyDst));
-    cmd.CopyBufferToTexture(bed_stage, bed_, {&copy, 1});
+    cmd.CopyBufferToTexture(bed_stage, bed_, base::Span(&copy, 1));
     cmd.Barrier(Transition(bed_, ResourceState::kCopyDst, ResourceState::kGeneral));
 
     // Seed both ping-pong slots (each substep writes B then A, but a clean
     // start keeps the very first sampled reads well defined).
     for (GpuImage& s : state_) {
       cmd.Barrier(Transition(s, ResourceState::kUndefined, ResourceState::kCopyDst));
-      cmd.CopyBufferToTexture(state_stage, s, {&copy, 1});
+      cmd.CopyBufferToTexture(state_stage, s, base::Span(&copy, 1));
       cmd.Barrier(Transition(s, ResourceState::kCopyDst, ResourceState::kGeneral));
     }
     for (GpuImage* img : {&flux_water_, &flux_lava_, &velocity_}) {
@@ -208,7 +208,7 @@ void FluidSim::UploadBed(Device& device, const FluidDomainDesc& desc) {
     bed_version_ = desc.bed_version;  // consume the bump; do not retry-spam
     return;
   }
-  std::memcpy(stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
+  base::MemCopy(stage.mapped, desc.bed, static_cast<size_t>(cells) * sizeof(f32));
   device.ImmediateSubmit([&](CommandList& cmd) {
     BufferTextureCopy copy;
     // kUndefined-as-source orders behind ALL prior work (the engine's
@@ -217,7 +217,7 @@ void FluidSim::UploadBed(Device& device, const FluidDomainDesc& desc) {
     // wait on compute. Contents are discarded, but the copy rewrites the whole
     // image.
     cmd.Barrier(Transition(bed_, ResourceState::kUndefined, ResourceState::kCopyDst));
-    cmd.CopyBufferToTexture(stage, bed_, {&copy, 1});
+    cmd.CopyBufferToTexture(stage, bed_, base::Span(&copy, 1));
     cmd.Barrier(Transition(bed_, ResourceState::kCopyDst, ResourceState::kGeneral));
   });
   device.DestroyBuffer(stage);
@@ -253,12 +253,12 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
   gp.extent = desc.extent;
   gp.texel = l;
   gp.resolution = static_cast<f32>(desc.resolution);
-  std::memcpy(params_[slot].mapped, &gp, sizeof(gp));
+  base::MemCopy(params_[slot].mapped, &gp, sizeof(gp));
 
   // Bounded per-frame sources, packed for the shader. A null pointer means no
   // sources regardless of the count; the shader must never consume the slot's
   // stale records from a previous frame.
-  u32 source_count = params.sources ? std::min(params.source_count, kMaxSources) : 0u;
+  u32 source_count = params.sources ? rx::Min(params.source_count, kMaxSources) : 0u;
   if (source_count > 0) {
     GpuSource* dst = static_cast<GpuSource*>(sources_[slot].mapped);
     for (u32 i = 0; i < source_count; ++i) {
@@ -276,14 +276,14 @@ void FluidSim::AddToGraph(RenderGraph& graph, const UpdateParams& params) {
 
   // Fixed substeps with a per-frame cap; the remainder carries across frames so
   // the sim is frame-rate independent and deterministic.
-  accum_ += std::max(params.dt, 0.0f);
+  accum_ += rx::Max(params.dt, 0.0f);
   u32 substeps = static_cast<u32>(accum_ / kSubstepDt);
-  substeps = std::min(substeps, kMaxSubsteps);
+  substeps = rx::Min(substeps, kMaxSubsteps);
   accum_ -= static_cast<f32>(substeps) * kSubstepDt;
   // A dt larger than the per-frame substep budget must not accumulate as time
   // debt (it would spiral: every later frame runs the cap and never catches
   // up). Drop the excess: the sim slows down instead of death-spiralling.
-  accum_ = std::min(accum_, kSubstepDt);
+  accum_ = rx::Min(accum_, kSubstepDt);
   if (substeps == 0) return;  // read side unchanged; renderer still has state
 
   FluidPush push{};

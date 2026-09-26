@@ -1,14 +1,14 @@
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 #include "showcase_camera.h"
-
-#include <algorithm>
-#include <utility>
 
 namespace rx {
 
 void ShowcaseCamera::Add(Waypoint wp) {
-  total_ = keys_.empty() ? 0.0f : total_ + std::max(0.0f, wp.travel);
+  total_ = keys_.empty() ? 0.0f : total_ + rx::Max(0.0f, wp.travel);
   arrive_.push_back(total_);
-  keys_.push_back(std::move(wp));
+  keys_.push_back(base::move(wp));
 }
 
 namespace {
@@ -25,7 +25,7 @@ Vec3 CatmullRom(const Vec3& p0, const Vec3& p1, const Vec3& p2, const Vec3& p3, 
 ShowcasePose ShowcaseCamera::Sample(f32 t) const {
   if (keys_.empty()) return {};
   if (keys_.size() == 1) return {keys_[0].eye, keys_[0].look};
-  t = std::clamp(t, 0.0f, total_);
+  t = rx::Clamp(t, 0.0f, total_);
 
   // Segment [a, b] of the timeline that contains t.
   size_t b = 1;
@@ -43,7 +43,7 @@ ShowcasePose ShowcaseCamera::Sample(f32 t) const {
   return pose;
 }
 
-int ShowcaseCamera::CaptureCrossed(f32 prev_t, f32 t, std::string* label) const {
+int ShowcaseCamera::CaptureCrossed(f32 prev_t, f32 t, base::String* label) const {
   for (size_t i = 0; i < keys_.size(); ++i) {
     if (!keys_[i].capture) continue;
     if (arrive_[i] > prev_t && arrive_[i] <= t) {
@@ -55,3 +55,4 @@ int ShowcaseCamera::CaptureCrossed(f32 prev_t, f32 t, std::string* label) const 
 }
 
 }  // namespace rx
+

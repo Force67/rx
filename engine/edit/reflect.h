@@ -1,13 +1,16 @@
 #ifndef RX_EDIT_REFLECT_H_
 #define RX_EDIT_REFLECT_H_
 
-#include <span>
-#include <string>
-#include <string_view>
-#include <type_traits>
-#include <vector>
+#include <stdint.h>
 
 #include "asset/asset_id.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/memory/cxx_lifetime.h"
+#include "base/memory/move.h"
+#include "base/meta/traits.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
@@ -50,7 +53,7 @@ struct PropValue {
   i64 i = 0;
   u64 u = 0;
   f32 f[4] = {};
-  std::string s;
+  base::String s;
   ecs::Entity e{};
 
   static PropValue Bool(bool v) { PropValue p; p.type = PropType::kBool; p.b = v; return p; }
@@ -73,8 +76,8 @@ struct PropValue {
   static PropValue Color(f32 r, f32 g, f32 b, f32 a) {
     PropValue p; p.type = PropType::kColor; p.f[0] = r; p.f[1] = g; p.f[2] = b; p.f[3] = a; return p;
   }
-  static PropValue String(std::string v) {
-    PropValue p; p.type = PropType::kString; p.s = std::move(v); return p;
+  static PropValue String(base::String v) {
+    PropValue p; p.type = PropType::kString; p.s = base::move(v); return p;
   }
   static PropValue AssetIdV(u64 hash) { PropValue p; p.type = PropType::kAssetId; p.u = hash; return p; }
   static PropValue EntityV(ecs::Entity v) { PropValue p; p.type = PropType::kEntity; p.e = v; return p; }
@@ -121,37 +124,37 @@ u32 MemberOffset(M T::* member) {
 }
 
 // Maps a member's C++ type to a PropType. Handles the engine math structs, the
-// scalar types, std::string, asset::AssetId, ecs::Entity, and raw f32[N] arrays
+// scalar types, base::String, asset::AssetId, ecs::Entity, and raw f32[N] arrays
 // (the engine Transform stores position/rotation as arrays).
 template <typename M>
 constexpr PropType DeducePropType() {
-  using T = std::remove_cvref_t<M>;
-  if constexpr (std::is_array_v<T>) {
-    constexpr size_t n = std::extent_v<T>;
-    static_assert(std::is_same_v<std::remove_extent_t<T>, f32>, "only f32[N] arrays are reflectable");
+  using T = base::remove_cvref_t<M>;
+  if constexpr (base::is_array_v<T>) {
+    constexpr size_t n = base::extent_v<T>;
+    static_assert(base::is_same_v<base::remove_extent_t<T>, f32>, "only f32[N] arrays are reflectable");
     static_assert(n >= 2 && n <= 4, "only f32[2..4] arrays are reflectable");
     if constexpr (n == 2) return PropType::kVec2;
     else if constexpr (n == 3) return PropType::kVec3;
     else return PropType::kVec4;
-  } else if constexpr (std::is_same_v<T, bool>) {
+  } else if constexpr (base::is_same_v<T, bool>) {
     return PropType::kBool;
-  } else if constexpr (std::is_same_v<T, i32>) {
+  } else if constexpr (base::is_same_v<T, i32>) {
     return PropType::kI32;
-  } else if constexpr (std::is_same_v<T, u32>) {
+  } else if constexpr (base::is_same_v<T, u32>) {
     return PropType::kU32;
-  } else if constexpr (std::is_same_v<T, u64>) {
+  } else if constexpr (base::is_same_v<T, u64>) {
     return PropType::kU64;
-  } else if constexpr (std::is_same_v<T, f32>) {
+  } else if constexpr (base::is_same_v<T, f32>) {
     return PropType::kF32;
-  } else if constexpr (std::is_same_v<T, Vec3>) {
+  } else if constexpr (base::is_same_v<T, Vec3>) {
     return PropType::kVec3;
-  } else if constexpr (std::is_same_v<T, Quat>) {
+  } else if constexpr (base::is_same_v<T, Quat>) {
     return PropType::kQuat;
-  } else if constexpr (std::is_same_v<T, std::string>) {
+  } else if constexpr (base::is_same_v<T, base::String>) {
     return PropType::kString;
-  } else if constexpr (std::is_same_v<T, asset::AssetId>) {
+  } else if constexpr (base::is_same_v<T, asset::AssetId>) {
     return PropType::kAssetId;
-  } else if constexpr (std::is_same_v<T, ecs::Entity>) {
+  } else if constexpr (base::is_same_v<T, ecs::Entity>) {
     return PropType::kEntity;
   } else {
     static_assert(sizeof(T) == 0, "unreflectable member type");
@@ -208,7 +211,7 @@ ComponentReflector<T>& ReflectComponent(const char* name) {
   // constructor is captured when available (AddComponentByDesc needs it); a
   // component without one is still reflectable, just not addable by desc.
   constexpr auto default_ctor = [] {
-    if constexpr (std::is_default_constructible_v<T>)
+    if constexpr (base::is_default_constructible_v<T>)
       return +[](void* slot) { new (slot) T(); };
     else
       return static_cast<void (*)(void*)>(nullptr);
@@ -219,11 +222,11 @@ ComponentReflector<T>& ReflectComponent(const char* name) {
 }
 
 // Every registered component (builtins are registered on first use).
-RX_EDIT_EXPORT std::span<const ComponentDesc* const> AllComponents();
+RX_EDIT_EXPORT base::Span<const ComponentDesc* const> AllComponents();
 RX_EDIT_EXPORT const ComponentDesc* FindComponent(ecs::ComponentId id);
-RX_EDIT_EXPORT const ComponentDesc* FindComponentByName(std::string_view name);
+RX_EDIT_EXPORT const ComponentDesc* FindComponentByName(base::StringRef name);
 // Reflected components present on `entity`, in registration order.
-RX_EDIT_EXPORT std::vector<const ComponentDesc*> ComponentsOn(ecs::World& world, ecs::Entity entity);
+RX_EDIT_EXPORT base::Vector<const ComponentDesc*> ComponentsOn(ecs::World& world, ecs::Entity entity);
 
 // Reads/writes a single field. False if the component is absent on the entity.
 RX_EDIT_EXPORT bool GetProp(ecs::World& world, ecs::Entity entity, const ComponentDesc& comp,

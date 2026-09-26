@@ -1,13 +1,13 @@
 #ifndef RX_RENDER_MATERIAL_SYSTEM_H_
 #define RX_RENDER_MATERIAL_SYSTEM_H_
 
-#include <memory>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
 #include "asset/material.h"
 #include "asset/texture.h"
+#include "base/memory/unique_pointer.h"
 #include "render/core/bindless.h"
 #include "render/rhi/device.h"
 
@@ -167,7 +167,7 @@ class MaterialSystem {
   const GpuImage* find_texture(u64 hash) const;
 
   // registry may be null (no raytracing); hit-shading tables are skipped.
-  static std::unique_ptr<MaterialSystem> Create(Device& device, BindlessRegistry* registry);
+  static base::UniquePointer<MaterialSystem> Create(Device& device, BindlessRegistry* registry);
   ~MaterialSystem();
 
   MaterialSystem(const MaterialSystem&) = delete;
@@ -397,7 +397,7 @@ class MaterialSystem {
   u64 staging_bytes_ = 0;
 
   base::Vector<GpuBuffer> param_buffers_;  // one per pool, host visible
-  base::Vector<std::unique_ptr<TextureRecord>> texture_records_;
+  base::Vector<base::UniquePointer<TextureRecord>> texture_records_;
   base::Vector<MaterialRuntime> material_records_;
   base::Vector<Retired> retired_;
   base::UnorderedMap<u64, u32> textures_;   // texture hash -> texture_records_

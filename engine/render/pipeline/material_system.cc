@@ -2,14 +2,17 @@
 
 #include "render/pipeline/human_material.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <limits>
+#include <math.h>
+#include <string.h>
 
 #include "asset/bc_encode.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/numeric_limits.h"
 #include "core/log.h"
 #include "core/memory/small_vector.h"
+#include "core/scalar.h"
 
 namespace rx::render {
 namespace {
@@ -30,20 +33,20 @@ SkinCoeffs ComputeSkinCoeffs(const asset::Material::SkinParams& p) {
   SkinCoeffs c;
   c.g = p.anisotropy_g;
   c.ior = p.ior;
-  c.perfusion = std::clamp(p.perfusion, 0.0f, 1.0f);
-  const f32 scale = std::max(p.scatter_scale, 1e-4f);
+  c.perfusion = rx::Clamp(p.perfusion, 0.0f, 1.0f);
+  const f32 scale = rx::Max(p.scatter_scale, 1e-4f);
   for (int i = 0; i < 3; ++i) {
-    const f32 col = std::clamp(p.scatter_color[i], 0.0f, 1.0f);
+    const f32 col = rx::Clamp(p.scatter_color[i], 0.0f, 1.0f);
     c.scatter_color[i] = col;
     // Kulla-Conty 2017: invert the multiple-scattering albedo so the authored
     // colour is what's seen. Per channel; s is the surface-albedo scale factor.
     const f32 s = 4.09712f + 4.20863f * col -
-                  std::sqrt(std::max(0.0f, 9.59217f + 41.6808f * col +
+                  ::sqrt(rx::Max(0.0f, 9.59217f + 41.6808f * col +
                                               17.7126f * col * col));
     const f32 s2 = s * s;
-    const f32 alpha = std::clamp((1.0f - s2) / (1.0f - c.g * s2), 0.0f, 0.999f);
+    const f32 alpha = rx::Clamp((1.0f - s2) / (1.0f - c.g * s2), 0.0f, 0.999f);
     // mfp authored in mm; the renderer's world unit is metres (1 mm = 0.001 m).
-    const f32 mfp_world = std::max(p.mfp[i] * scale * 0.001f, 1e-6f);
+    const f32 mfp_world = rx::Max(p.mfp[i] * scale * 0.001f, 1e-6f);
     c.sigma_t[i] = 1.0f / mfp_world;
     c.sigma_s[i] = alpha * c.sigma_t[i];
   }
@@ -87,8 +90,8 @@ u64 MipSizeBytes(const FormatInfo& info, u32 width, u32 height) {
 u32 FullMipChainLength(u32 width, u32 height) {
   u32 levels = 1;
   while (width > 1 || height > 1) {
-    width = std::max(1u, width / 2);
-    height = std::max(1u, height / 2);
+    width = rx::Max(1u, width / 2);
+    height = rx::Max(1u, height / 2);
     ++levels;
   }
   return levels;
@@ -128,13 +131,13 @@ bool DecodeAlphaGrid(const asset::Texture& tex, MaterialSystem::AlphaCoverage& o
   const u32 w = tex.width, h = tex.height;
   if (w == 0 || h == 0 || tex.data.empty()) return false;
   const u8* src = tex.data.data();
-  const u32 gw = std::min(w, kAlphaGridDim);
-  const u32 gh = std::min(h, kAlphaGridDim);
+  const u32 gw = rx::Min(w, kAlphaGridDim);
+  const u32 gh = rx::Min(h, kAlphaGridDim);
   base::Vector<u64> sum(static_cast<size_t>(gw) * gh);  // value-initialized to 0
   base::Vector<u32> cnt(static_cast<size_t>(gw) * gh);
   auto add = [&](u32 x, u32 y, u32 a) {
-    u32 cx = std::min(gw - 1, x * gw / w);
-    u32 cy = std::min(gh - 1, y * gh / h);
+    u32 cx = rx::Min(gw - 1, x * gw / w);
+    u32 cy = rx::Min(gh - 1, y * gh / h);
     size_t c = static_cast<size_t>(cy) * gw + cx;
     sum[c] += a;
     ++cnt[c];
@@ -241,16 +244,16 @@ bool DecodeAlphaGrid(const asset::Texture& tex, MaterialSystem::AlphaCoverage& o
 
 }  // namespace
 
-std::unique_ptr<MaterialSystem> MaterialSystem::Create(Device& device,
+base::UniquePointer<MaterialSystem> MaterialSystem::Create(Device& device,
                                                        BindlessRegistry* registry) {
-  auto system = std::unique_ptr<MaterialSystem>(new MaterialSystem(device));
+  auto system = base::UniquePointer<MaterialSystem>(new MaterialSystem(device));
   system->registry_ = registry;
 
   // Trilinear repeat sampler, anisotropic when the device supports it. Cached
   // by the device, never destroyed here.
   SamplerDesc sampler_desc{};
   if (device.caps().max_anisotropy > 1.0f) {
-    sampler_desc.max_anisotropy = std::min(16.0f, device.caps().max_anisotropy);
+    sampler_desc.max_anisotropy = rx::Min(16.0f, device.caps().max_anisotropy);
   }
   system->sampler_ = device.GetSampler(sampler_desc);
 
@@ -310,7 +313,7 @@ bool MaterialSystem::CreateDefaults() {
   default_material.roughness_factor = 0.8f;
   if (registry_) {
     BindlessRegistry::MaterialRecord record;
-    std::memcpy(record.base_color_factor, default_material.base_color_factor, sizeof(f32) * 4);
+    base::MemCopy(record.base_color_factor, default_material.base_color_factor, sizeof(f32) * 4);
     registry_->RegisterMaterial(record);  // index 0, the fallback
   }
   default_set_ = AllocateSet();
@@ -336,8 +339,8 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
   // mips in the asset and cannot be blitted. Partial (streamed) uploads only
   // happen on baked chains, never through the generate path.
   bool generate_mips = texture.mip_count == 1 && info.block_dim == 1;
-  u32 top_width = std::max(1u, texture.width >> first_mip);
-  u32 top_height = std::max(1u, texture.height >> first_mip);
+  u32 top_width = rx::Max(1u, texture.width >> first_mip);
+  u32 top_height = rx::Max(1u, texture.height >> first_mip);
   u32 mip_count = generate_mips ? FullMipChainLength(texture.width, texture.height)
                                 : texture.mip_count - first_mip;
   u32 upload_mips = generate_mips ? 1 : mip_count;
@@ -349,8 +352,8 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
     u32 height = texture.height;
     for (u32 mip = 0; mip < first_mip; ++mip) {
       skip += MipSizeBytes(info, width, height);
-      width = std::max(1u, width / 2);
-      height = std::max(1u, height / 2);
+      width = rx::Max(1u, width / 2);
+      height = rx::Max(1u, height / 2);
     }
   }
   u64 upload_bytes = 0;
@@ -359,8 +362,8 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
     u32 height = top_height;
     for (u32 mip = 0; mip < upload_mips; ++mip) {
       upload_bytes += MipSizeBytes(info, width, height);
-      width = std::max(1u, width / 2);
-      height = std::max(1u, height / 2);
+      width = rx::Max(1u, width / 2);
+      height = rx::Max(1u, height / 2);
     }
   }
   // upload_bytes is always positive here: every mip is at least one block of a
@@ -399,7 +402,7 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
       return {};
     }
   }
-  std::memcpy(staging->mapped, texture.data.data() + skip, upload_bytes);
+  base::MemCopy(staging->mapped, texture.data.data() + skip, upload_bytes);
   device_.FlushBuffer(*staging, 0, upload_bytes);
 
   device_.RecordUpload([&](CommandList& cmd) {
@@ -412,10 +415,10 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
     for (u32 mip = 0; mip < upload_mips; ++mip) {
       regions.push_back({.buffer_offset = offset, .mip = mip, .extent = {width, height}});
       offset += MipSizeBytes(info, width, height);
-      width = std::max(1u, width / 2);
-      height = std::max(1u, height / 2);
+      width = rx::Max(1u, width / 2);
+      height = rx::Max(1u, height / 2);
     }
-    cmd.CopyBufferToTexture(*staging, image, {regions.data(), regions.size()});
+    cmd.CopyBufferToTexture(*staging, image, base::Span(regions.data(), regions.size()));
 
     if (generate_mips && mip_count > 1) {
       u32 src_width = texture.width;
@@ -426,8 +429,8 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
                      .after = ResourceState::kCopySrc,
                      .base_mip = mip - 1,
                      .mip_count = 1});
-        u32 dst_width = std::max(1u, src_width / 2);
-        u32 dst_height = std::max(1u, src_height / 2);
+        u32 dst_width = rx::Max(1u, src_width / 2);
+        u32 dst_height = rx::Max(1u, src_height / 2);
         cmd.BlitMip(image, mip - 1, {src_width, src_height}, mip, {dst_width, dst_height});
         src_width = dst_width;
         src_height = dst_height;
@@ -445,7 +448,7 @@ GpuImage MaterialSystem::UploadTextureImage(const asset::Texture& texture, u32 f
            .after = ResourceState::kShaderReadAll,
            .base_mip = mip_count - 1,
            .mip_count = 1}};
-      cmd.TextureBarriers({finals, 2});
+      cmd.TextureBarriers(base::Span(finals, 2));
     } else {
       cmd.Barrier({.texture = image.handle,
                    .before = ResourceState::kCopyDst,
@@ -464,7 +467,7 @@ GpuBuffer* MaterialSystem::AcquireStaging(u64 bytes) {
     // Round up so a stream of slightly-growing textures re-creates the buffer
     // a handful of times instead of once per texture.
     constexpr u64 kGranule = 4u << 20;
-    if (bytes > std::numeric_limits<u64>::max() - (kGranule - 1)) return nullptr;
+    if (bytes > base::MinMax<u64>::max() - (kGranule - 1)) return nullptr;
     const u64 grown_bytes = (bytes + kGranule - 1) / kGranule * kGranule;
     GpuBuffer grown = device_.CreateBuffer(grown_bytes, kBufferUsageTransferSrc, true);
     if (!grown.mapped) {
@@ -485,8 +488,8 @@ u64 MaterialSystem::BytesForMips(const asset::Texture& texture, u32 first_mip) c
   u32 height = texture.height;
   for (u32 mip = 0; mip < texture.mip_count; ++mip) {
     if (mip >= first_mip) bytes += MipSizeBytes(info, width, height);
-    width = std::max(1u, width / 2);
-    height = std::max(1u, height / 2);
+    width = rx::Max(1u, width / 2);
+    height = rx::Max(1u, height / 2);
   }
   return bytes;
 }
@@ -497,7 +500,7 @@ bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
   GpuImage image = UploadTextureImage(texture);
   if (!image) return false;
 
-  auto record = std::make_unique<TextureRecord>();
+  auto record = base::MakeUnique<TextureRecord>();
   record->key = key;
   record->image = image;
   record->format = texture.format;
@@ -508,7 +511,7 @@ bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
   record->full_bytes = baked ? texture.data.size() : texture.data.size() * 4 / 3;
   record->resident_bytes = record->full_bytes;
   if (baked) {
-    u32 dim = std::max(texture.width, texture.height);
+    u32 dim = rx::Max(texture.width, texture.height);
     u32 tail = 0;
     while (tail + 1 < texture.mip_count && (dim >> tail) > kTailMaxDim) ++tail;
     record->tail_first_mip = tail;
@@ -527,12 +530,12 @@ bool MaterialSystem::UploadTexture(const asset::Texture& texture, u64 id_salt) {
     // to a full-size (opacity 1) stand-in, i.e. today's behavior.
     AlphaCoverage cov;
     if (DecodeAlphaGrid(texture, cov) && cov.mean < kOpaqueMeanThreshold) {
-      texture_alpha_.insert(key, std::move(cov));
+      texture_alpha_.insert(key, base::move(cov));
     }
   }
   resident_bytes_ += record->resident_bytes;
   u32 index = static_cast<u32>(texture_records_.size());
-  texture_records_.push_back(std::move(record));
+  texture_records_.push_back(base::move(record));
   textures_.insert(key, index);
   return true;
 }
@@ -559,7 +562,7 @@ BindingSetHandle MaterialSystem::AllocateSet() {
 MaterialSystem::TextureRecord* MaterialSystem::record_for(u64 hash) {
   if (hash == 0) return nullptr;
   const u32* index = textures_.find(hash);
-  return index ? texture_records_[*index].get() : nullptr;
+  return index ? texture_records_[*index].Get_UseOnlyIfYouKnowWhatYouareDoing() : nullptr;
 }
 
 const GpuImage* MaterialSystem::texture_or(u64 hash, const GpuImage& fallback) const {
@@ -617,8 +620,8 @@ void MaterialSystem::WriteSetBindings(BindingSetHandle set, const MaterialRuntim
 // nobody could act on.
 void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, Params& params,
                                  u64 out_map_keys[12]) {
-  std::memcpy(params.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
-  std::memcpy(params.emissive_factor, material.emissive_factor, sizeof(f32) * 3);
+  base::MemCopy(params.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
+  base::MemCopy(params.emissive_factor, material.emissive_factor, sizeof(f32) * 3);
   params.metallic_factor = material.metallic_factor;
   params.roughness_factor = material.roughness_factor;
   params.ao_strength = material.ao_strength;
@@ -627,16 +630,16 @@ void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
   params.clearcoat_roughness = material.clearcoat_roughness;
   params.anisotropy = material.anisotropy;
   params.ior = material.ior;
-  std::memcpy(params.sheen_color, material.sheen_color, sizeof(f32) * 3);
+  base::MemCopy(params.sheen_color, material.sheen_color, sizeof(f32) * 3);
   params.sheen_roughness = material.sheen_roughness;
-  std::memcpy(params.subsurface_color, material.subsurface_color, sizeof(f32) * 3);
+  base::MemCopy(params.subsurface_color, material.subsurface_color, sizeof(f32) * 3);
   params.subsurface = material.subsurface;
   params.iridescence = material.iridescence;
   params.iridescence_thickness = material.iridescence_thickness;
   params.transmission = material.transmission;
-  std::memcpy(params.openpbr_specular_color, material.openpbr_specular_color, sizeof(f32) * 3);
+  base::MemCopy(params.openpbr_specular_color, material.openpbr_specular_color, sizeof(f32) * 3);
   params.specular_weight = material.specular_weight;
-  std::memcpy(params.coat_color, material.coat_color, sizeof(f32) * 3);
+  base::MemCopy(params.coat_color, material.coat_color, sizeof(f32) * 3);
   params.coat_ior = material.coat_ior;
   params.base_diffuse_roughness = material.base_diffuse_roughness;
   params.coat_darkening = material.coat_darkening;
@@ -645,7 +648,7 @@ void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
   params.uv_scroll[1] = material.uv_scroll_v;
   params.emissive_pulse[0] = material.emissive_pulse[0];
   params.emissive_pulse[1] = material.emissive_pulse[1];
-  std::memcpy(params.specular_color, material.specular_color, sizeof(f32) * 3);
+  base::MemCopy(params.specular_color, material.specular_color, sizeof(f32) * 3);
   params.specular_strength = material.specular_strength;
   params.env_reflect = material.env_reflect;
   params.soft_lighting = material.soft_lighting;
@@ -669,9 +672,9 @@ void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
   if (material.skin) {
     params.flags |= kFlagSkin;
     const SkinCoeffs c = ComputeSkinCoeffs(material.skin_params);
-    std::memcpy(params.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
-    std::memcpy(params.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
-    std::memcpy(params.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
+    base::MemCopy(params.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
+    base::MemCopy(params.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
+    base::MemCopy(params.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
     params.sss_anisotropy_g = c.g;
     params.sss_perfusion = c.perfusion;
     params.sss_ior = c.ior;
@@ -698,7 +701,7 @@ void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
     params.human_transport[1] = h.transmission;
     params.human_transport[2] = h.extinction_scale;
     params.human_transport[3] = h.corneal_wetness;
-    std::memcpy(params.human_tint, h.transmission_tint, sizeof(f32) * 3);
+    base::MemCopy(params.human_tint, h.transmission_tint, sizeof(f32) * 3);
     params.human_tint[3] = h.residual_weight;
     params.human_layer[0] = h.cavity_occlusion;
     params.human_layer[1] = h.specular_normal_strength;
@@ -739,7 +742,7 @@ void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
   if (material.hair) {
     params.flags |= kFlagHair;
     const asset::Material::HairParams& h = material.hair_params;
-    std::memcpy(params.hair0, h.sigma_a, sizeof(f32) * 3);
+    base::MemCopy(params.hair0, h.sigma_a, sizeof(f32) * 3);
     params.hair0[3] = h.beta_m;
     params.hair1[0] = h.beta_n;
     params.hair1[1] = h.alpha;
@@ -806,7 +809,7 @@ void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
   // would leave the params stale. Any unresolvable layer keeps the whole
   // material on the legacy 3-layer path (flag unset).
   if (material.is_terrain && material.terrain_layer_count > 0 && registry_) {
-    u32 count = std::min(material.terrain_layer_count, 8u);
+    u32 count = rx::Min(material.terrain_layer_count, 8u);
     bool complete = true;
     for (u32 s = 0; s < count && complete; ++s) {
       u64 albedo_key = material.terrain_layers[s].hash ^ id_salt;
@@ -853,13 +856,13 @@ bool MaterialSystem::WriteSet(BindingSetHandle set, u32 pool, u32 param_index,
 
   GpuBuffer& buffer = param_buffers_[pool];
   u64 offset = static_cast<u64>(param_index) * kParamStride;
-  std::memcpy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
+  base::MemCopy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
 
   MaterialRuntime runtime;
   runtime.set = set;
   runtime.pool = pool;
   runtime.param_index = param_index;
-  std::memcpy(runtime.map_keys, out_map_keys, sizeof(runtime.map_keys));
+  base::MemCopy(runtime.map_keys, out_map_keys, sizeof(runtime.map_keys));
   WriteSetBindings(set, runtime);
   return true;
 }
@@ -872,8 +875,8 @@ const GpuImage* MaterialSystem::find_texture(u64 hash) const {
 BindlessRegistry::MaterialRecord MaterialSystem::BuildBindlessRecord(
     const asset::Material& material, u64 id_salt, asset::AlphaMode mode) {
   BindlessRegistry::MaterialRecord record;
-  std::memcpy(record.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
-  std::memcpy(record.emissive, material.emissive_factor, sizeof(f32) * 3);
+  base::MemCopy(record.base_color_factor, material.base_color_factor, sizeof(f32) * 4);
+  base::MemCopy(record.emissive, material.emissive_factor, sizeof(f32) * 3);
   record.roughness = material.roughness_factor;
   record.metallic = material.metallic_factor;
   if (TextureRecord* base = record_for(material.base_color.hash ^ id_salt)) {
@@ -890,9 +893,9 @@ BindlessRegistry::MaterialRecord MaterialSystem::BuildBindlessRecord(
   if (material.skin) {
     record.flags |= BindlessRegistry::kMaterialSkin;
     const SkinCoeffs c = ComputeSkinCoeffs(material.skin_params);
-    std::memcpy(record.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
-    std::memcpy(record.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
-    std::memcpy(record.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
+    base::MemCopy(record.sss_sigma_t, c.sigma_t, sizeof(f32) * 3);
+    base::MemCopy(record.sss_sigma_s, c.sigma_s, sizeof(f32) * 3);
+    base::MemCopy(record.sss_scatter_color, c.scatter_color, sizeof(f32) * 3);
     record.sss_anisotropy_g = c.g;
     record.sss_perfusion = c.perfusion;
     record.sss_ior = c.ior;
@@ -916,7 +919,7 @@ BindlessRegistry::MaterialRecord MaterialSystem::BuildBindlessRecord(
     record.human_spec[2] = h.secondary_specular_weight;
     record.human_spec[3] = h.mean_free_path;
     record.human_transmission[0] = h.transmission;
-    std::memcpy(record.human_transmission + 1, h.transmission_tint, sizeof(f32) * 3);
+    base::MemCopy(record.human_transmission + 1, h.transmission_tint, sizeof(f32) * 3);
     record.human_extra[0] = h.light_shape_response;
     record.human_extra[1] = h.thickness_scale;
     record.human_extra[2] = h.subsurface_scale;
@@ -964,7 +967,7 @@ bool MaterialSystem::UpdateMaterialParams(const asset::Material& material, u64 i
   BuildParams(material, id_salt, params, keys);
   GpuBuffer& buffer = param_buffers_[runtime.pool];
   const u64 offset = static_cast<u64>(runtime.param_index) * kParamStride;
-  std::memcpy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
+  base::MemCopy(static_cast<u8*>(buffer.mapped) + offset, &params, sizeof(params));
   return true;
 }
 
@@ -987,8 +990,8 @@ bool MaterialSystem::UploadMaterial(const asset::Material& material, u64 id_salt
   blend_modes_.insert(key, static_cast<u8>(mode));
   if (mode == asset::AlphaMode::kMask) runtime.alpha_cutoff = material.alpha_cutoff;
   MaterialColor color;
-  std::memcpy(color.albedo, material.base_color_factor, sizeof(f32) * 3);
-  std::memcpy(color.emissive, material.emissive_factor, sizeof(f32) * 3);
+  base::MemCopy(color.albedo, material.base_color_factor, sizeof(f32) * 3);
+  base::MemCopy(color.emissive, material.emissive_factor, sizeof(f32) * 3);
   colors_.insert(key, color);
   if (material.is_water) water_.insert(key, 1);
   if (material.effect) effects_.insert(key, material.effect_additive ? 2 : 1);
@@ -1220,11 +1223,11 @@ MaterialSystem::MaterialColor MaterialSystem::material_color(u64 material_hash) 
 
 f32 MaterialSystem::AlphaCoverage::Sample(f32 u, f32 v) const {
   if (alpha.empty() || width == 0 || height == 0) return mean;
-  u -= std::floor(u);  // wrap into [0,1)
-  v -= std::floor(v);
+  u -= ::floor(u);  // wrap into [0,1)
+  v -= ::floor(v);
   f32 fx = u * static_cast<f32>(width) - 0.5f;
   f32 fy = v * static_cast<f32>(height) - 0.5f;
-  i32 x0 = static_cast<i32>(std::floor(fx)), y0 = static_cast<i32>(std::floor(fy));
+  i32 x0 = static_cast<i32>(::floor(fx)), y0 = static_cast<i32>(::floor(fy));
   f32 tx = fx - static_cast<f32>(x0), ty = fy - static_cast<f32>(y0);
   auto at = [&](i32 x, i32 y) -> f32 {
     x = ((x % static_cast<i32>(width)) + static_cast<i32>(width)) % static_cast<i32>(width);

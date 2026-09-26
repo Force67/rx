@@ -1,9 +1,9 @@
 #ifndef RX_SCRIPT_SCRIPT_VALUE_H_
 #define RX_SCRIPT_SCRIPT_VALUE_H_
 
-#include <type_traits>
-#include <vector>
 
+#include "base/containers/vector.h"
+#include "base/meta/traits.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
@@ -86,10 +86,10 @@ class ScriptValue {
 };
 
 // The point of the hand-rolled union: the value stack is a flat POD buffer.
-static_assert(std::is_trivially_copyable_v<ScriptValue>,
+static_assert(base::is_trivially_copyable_v<ScriptValue>,
               "ScriptValue must stay a POD so the argument stack is memcpy-able");
 
-using ScriptStack = std::vector<ScriptValue>;
+using ScriptStack = base::Vector<ScriptValue>;
 
 // A thin typed reader over the argument stack. This is the surface the unpacking
 // trampolines use (a.Ent(0), a.Vec(1), a.Str(0)), so a handler's generated

@@ -1,10 +1,11 @@
 #include "render/atmosphere/precip_volume.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/gi/raytracing.h"
 #include "shaders/precip_splash_ps_hlsl.h"
 #include "shaders/precip_splash_vs_hlsl.h"
@@ -147,7 +148,7 @@ void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
                               ResourceHandle motion, RayTracingContext* raytracing, u32 tlas_slot,
                               const Frame& frame) {
   if (!available()) return;
-  f32 intensity = std::clamp(frame.intensity, 0.0f, 1.0f);
+  f32 intensity = rx::Clamp(frame.intensity, 0.0f, 1.0f);
   u32 max_drops = frame.snow ? kMaxSnow : kMaxRain;
   u32 drop_count = static_cast<u32>(static_cast<f32>(max_drops) * intensity);
   // Splash cells thin by intensity in the shader; keep the instance count flat
@@ -170,7 +171,7 @@ void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
       [this, color, depth, motion, raytracing, tlas_slot, frame, drop_count, splash_count, rt,
        slot](PassContext& ctx) {
         const PrecipCamera camera{frame.view_proj, frame.prev_view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
         PrecipPush push{};
         push.cam_right[0] = frame.cam_right.x;
@@ -197,7 +198,7 @@ void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
         push.wind[1] = frame.wind[1];
         push.wind[2] = frame.gustiness;
         push.wind[3] = frame.lightning;
-        std::memcpy(push.occl, frame.occl, sizeof(push.occl));
+        base::MemCopy(push.occl, frame.occl, sizeof(push.occl));
         push.jitter[0] = frame.jitter[0];
         push.jitter[1] = frame.jitter[1];
         push.dt = frame.dt;
@@ -224,7 +225,7 @@ void PrecipVolume::AddToGraph(RenderGraph& graph, ResourceHandle color, Resource
         items.push_back(InGeneral(Bind::Combined(2, froxel_view, froxel_sampler)));
         if (rt) items.push_back(Bind::Accel(3, raytracing->tlas(tlas_slot)));
         items.push_back(Bind::Uniform(4, camera_[slot], 0, sizeof(PrecipCamera)));
-        ctx.cmd->BindTransient(0, {items.data(), items.size()});
+        ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->Push(push);
         ctx.cmd->Draw(4, drop_count, 0, 0);
 

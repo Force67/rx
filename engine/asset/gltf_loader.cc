@@ -1,16 +1,22 @@
 #include "asset/gltf_loader.h"
 
-#include <algorithm>
-#include <cctype>
-#include <cmath>
-#include <cstring>
-#include <filesystem>
-#include <string_view>
+#include <ctype.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "asset/asset_id.h"
 #include "asset/texture_compress.h"
+#include "base/memory/mem_ops.h"
+#include "base/algorithm.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
+#include "core/file_system.h"
 #include "core/log.h"
 #include "core/memory/memory_tracker.h"
+#include "core/scalar.h"
 
 #define CGLTF_IMPLEMENTATION
 #include <cgltf.h>
@@ -22,14 +28,14 @@
 namespace rx::asset {
 namespace {
 
-AssetId ScopedId(const std::string &path, const char *kind, size_t index) {
-  return MakeAssetId(path + "#" + kind + std::to_string(index));
+AssetId ScopedId(const base::String &path, const char *kind, size_t index) {
+  return MakeAssetId(path + "#" + kind + rx::ToString(index));
 }
 
 // Decodes one glTF image to rgba8, from an external file, a GLB buffer view
 // or a base64 data uri.
 bool DecodeImage(const cgltf_image *image,
-                 const std::filesystem::path &base_dir, Texture *out) {
+                 base::StringRef base_dir, Texture *out) {
   stbi_uc *pixels = nullptr;
   int width = 0, height = 0, channels = 0;
 
@@ -41,14 +47,14 @@ bool DecodeImage(const cgltf_image *image,
         stbi_load_from_memory(bytes, static_cast<int>(image->buffer_view->size),
                               &width, &height, &channels, 4);
   } else if (image->uri) {
-    if (std::strncmp(image->uri, "data:", 5) == 0) {
-      const char *comma = std::strchr(image->uri, ',');
+    if (::strncmp(image->uri, "data:", 5) == 0) {
+      const char *comma = ::strchr(image->uri, ',');
       if (!comma)
         return false;
       void *decoded = nullptr;
       cgltf_options options{};
       // Base64 length to byte count: every 4 chars carry 3 bytes.
-      cgltf_size size = (std::strlen(comma + 1) / 4) * 3;
+      cgltf_size size = (::strlen(comma + 1) / 4) * 3;
       if (cgltf_load_buffer_base64(&options, size, comma + 1, &decoded) !=
           cgltf_result_success) {
         return false;
@@ -59,11 +65,11 @@ bool DecodeImage(const cgltf_image *image,
       CGLTF_FREE(decoded);
     } else {
       char decoded_uri[1024];
-      std::strncpy(decoded_uri, image->uri, sizeof(decoded_uri) - 1);
+      ::strncpy(decoded_uri, image->uri, sizeof(decoded_uri) - 1);
       decoded_uri[sizeof(decoded_uri) - 1] = 0;
       cgltf_decode_uri(decoded_uri);
-      std::filesystem::path file = base_dir / decoded_uri;
-      pixels = stbi_load(file.string().c_str(), &width, &height, &channels, 4);
+      const base::String file = fs::Join(base_dir, decoded_uri);
+      pixels = stbi_load(file.c_str(), &width, &height, &channels, 4);
     }
   }
   if (!pixels)
@@ -74,7 +80,7 @@ bool DecodeImage(const cgltf_image *image,
   out->height = static_cast<u32>(height);
   out->mip_count = 1;
   out->data.resize(static_cast<size_t>(width) * height * 4);
-  std::memcpy(out->data.data(), pixels, out->data.size());
+  base::MemCopy(out->data.data(), pixels, out->data.size());
   stbi_image_free(pixels);
   return true;
 }
@@ -105,7 +111,7 @@ void GenerateTangents(MeshLod *lod, u32 vertex_offset, u32 index_offset) {
     f32 du1 = v1.uv[0] - v0.uv[0], dv1 = v1.uv[1] - v0.uv[1];
     f32 du2 = v2.uv[0] - v0.uv[0], dv2 = v2.uv[1] - v0.uv[1];
     f32 det = du1 * dv2 - du2 * dv1;
-    if (std::abs(det) < 1e-12f)
+    if (::abs(det) < 1e-12f)
       continue;
     f32 inv = 1.0f / det;
     Vec3 tangent = (e1 * dv2 + e2 * -dv1) * inv;
@@ -121,7 +127,7 @@ void GenerateTangents(MeshLod *lod, u32 vertex_offset, u32 index_offset) {
     Vec3 t = tangents[i] - n * Dot(n, tangents[i]);
     if (Dot(t, t) < 1e-12f) {
       // Degenerate uvs; any frame orthogonal to n will do.
-      t = std::abs(n.y) < 0.99f ? Cross(n, {0, 1, 0}) : Cross(n, {1, 0, 0});
+      t = ::abs(n.y) < 0.99f ? Cross(n, {0, 1, 0}) : Cross(n, {1, 0, 0});
     }
     t = Normalize(t);
     vertex.tangent[0] = t.x;
@@ -142,25 +148,25 @@ void QuatFromMatrix(const f32 m[16], const Vec3 &scale, f32 out[4]) {
   }
   f32 trace = r[0] + r[4] + r[8];
   if (trace > 0) {
-    f32 s = std::sqrt(trace + 1.0f) * 2;
+    f32 s = ::sqrt(trace + 1.0f) * 2;
     out[3] = 0.25f * s;
     out[0] = (r[7] - r[5]) / s;
     out[1] = (r[2] - r[6]) / s;
     out[2] = (r[3] - r[1]) / s;
   } else if (r[0] > r[4] && r[0] > r[8]) {
-    f32 s = std::sqrt(1.0f + r[0] - r[4] - r[8]) * 2;
+    f32 s = ::sqrt(1.0f + r[0] - r[4] - r[8]) * 2;
     out[3] = (r[7] - r[5]) / s;
     out[0] = 0.25f * s;
     out[1] = (r[1] + r[3]) / s;
     out[2] = (r[2] + r[6]) / s;
   } else if (r[4] > r[8]) {
-    f32 s = std::sqrt(1.0f + r[4] - r[0] - r[8]) * 2;
+    f32 s = ::sqrt(1.0f + r[4] - r[0] - r[8]) * 2;
     out[3] = (r[2] - r[6]) / s;
     out[0] = (r[1] + r[3]) / s;
     out[1] = 0.25f * s;
     out[2] = (r[5] + r[7]) / s;
   } else {
-    f32 s = std::sqrt(1.0f + r[8] - r[0] - r[4]) * 2;
+    f32 s = ::sqrt(1.0f + r[8] - r[0] - r[4]) * 2;
     out[3] = (r[3] - r[1]) / s;
     out[0] = (r[2] + r[6]) / s;
     out[1] = (r[5] + r[7]) / s;
@@ -234,8 +240,8 @@ void MergeUvTransform(const cgltf_texture_view &view, const char *slot,
 
 // uv' = T * R * S * uv, spelt out from the extension's own sample shader.
 void ApplyUvTransform(const UvTransform &transform, f32 uv[2]) {
-  const f32 cos_r = std::cos(transform.rotation);
-  const f32 sin_r = std::sin(transform.rotation);
+  const f32 cos_r = ::cos(transform.rotation);
+  const f32 sin_r = ::sin(transform.rotation);
   const f32 u = uv[0] * transform.scale[0];
   const f32 v = uv[1] * transform.scale[1];
   uv[0] = cos_r * u - sin_r * v + transform.offset[0];
@@ -256,7 +262,7 @@ void Decompose(const Mat4 &matrix, Vec3 *translation, Quat *rotation,
 
 } // namespace
 
-bool LoadGltfScene(const std::string &path, ImportedScene *out) {
+bool LoadGltfScene(const base::String &path, ImportedScene *out) {
   static const mem::Category kAssetCategory = mem::RegisterCategory("assets");
   mem::CategoryScope mem_scope(kAssetCategory);
   cgltf_options options{};
@@ -271,7 +277,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
     cgltf_free(data);
     return false;
   }
-  std::filesystem::path base_dir = std::filesystem::path(path).parent_path();
+  const base::String base_dir(fs::ParentPath(path));
 
   // Base color and emissive sample as srgb, data maps stay linear. The same
   // walk records which slot each image is bound as, because that - not the
@@ -320,7 +326,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
     } else if (slots & kSlotColor) {
       role = TextureRole::kColor;
     }
-    CompressTexture(&texture, role, path + "#image" + std::to_string(i));
+    CompressTexture(&texture, role, path + "#image" + rx::ToString(i));
   }
 
   auto texture_id = [&](const cgltf_texture *texture) -> AssetId {
@@ -359,7 +365,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
     }
     if (src.has_pbr_metallic_roughness) {
       const auto &pbr = src.pbr_metallic_roughness;
-      std::memcpy(material.base_color_factor, pbr.base_color_factor,
+      base::MemCopy(material.base_color_factor, pbr.base_color_factor,
                   sizeof(f32) * 4);
       material.metallic_factor = pbr.metallic_factor;
       material.roughness_factor = pbr.roughness_factor;
@@ -369,7 +375,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
     }
     material.normal = texture_id(src.normal_texture.texture);
     material.emissive = texture_id(src.emissive_texture.texture);
-    std::memcpy(material.emissive_factor, src.emissive_factor, sizeof(f32) * 3);
+    base::MemCopy(material.emissive_factor, src.emissive_factor, sizeof(f32) * 3);
     material.alpha_cutoff = src.alpha_cutoff;
     material.alpha_mode =
         src.alpha_mode == cgltf_alpha_mode_opaque ? AlphaMode::kOpaque
@@ -389,7 +395,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
     if (src.has_transmission)
       material.transmission = src.transmission.transmission_factor;
     if (src.has_sheen) {
-      std::memcpy(material.sheen_color, src.sheen.sheen_color_factor,
+      base::MemCopy(material.sheen_color, src.sheen.sheen_color_factor,
                   sizeof(f32) * 3);
       material.sheen_roughness = src.sheen.sheen_roughness_factor;
     }
@@ -398,29 +404,29 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
     // holds for typical hanging drapery unwraps.
     if (src.name) {
       material.name = src.name;
-      std::string n = src.name;
+      base::String n = src.name;
       for (char &c : n)
-        c = static_cast<char>(std::tolower(c));
-      if (n.find("curtain") != std::string::npos ||
-          n.find("banner") != std::string::npos ||
-          n.find("flag") != std::string::npos ||
-          n.find("cloth") != std::string::npos ||
-          n.find("fabric") != std::string::npos ||
-          n.find("drape") != std::string::npos) {
+        c = static_cast<char>(::tolower(c));
+      if (n.find("curtain") != base::String::npos ||
+          n.find("banner") != base::String::npos ||
+          n.find("flag") != base::String::npos ||
+          n.find("cloth") != base::String::npos ||
+          n.find("fabric") != base::String::npos ||
+          n.find("drape") != base::String::npos) {
         material.wind = true;
       }
       // Water heuristic: glTF has no water extension either, so name-tag water
       // surfaces onto the dedicated water pipeline (waves, refraction, and the
       // sims/caustics that key off a water submesh being present). Whole-token
       // matches only, so "watermelon" and "waterfall" stay ordinary materials.
-      auto has_token = [&n](std::string_view token) {
+      auto has_token = [&n](base::StringRef token) {
         size_t pos = 0;
-        while ((pos = n.find(token, pos)) != std::string::npos) {
+        while ((pos = n.find(token, pos)) != base::String::npos) {
           bool starts =
-              pos == 0 || !std::isalpha(static_cast<unsigned char>(n[pos - 1]));
+              pos == 0 || !::isalpha(static_cast<unsigned char>(n[pos - 1]));
           size_t end = pos + token.size();
           bool ends = end >= n.size() ||
-                      !std::isalpha(static_cast<unsigned char>(n[end]));
+                      !::isalpha(static_cast<unsigned char>(n[end]));
           if (starts && ends)
             return true;
           ++pos;
@@ -449,7 +455,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
     binding.inverse_bind.resize(src.joints_count);
     base::Vector<Mat4> bind_model(src.joints_count);
     base::Vector<i32> source_parent(src.joints_count);
-    std::fill(source_parent.begin(), source_parent.end(), -1);
+    base::Fill(source_parent.begin(), source_parent.end(), -1);
     for (size_t joint = 0; joint < src.joints_count; ++joint) {
       Mat4 inverse_bind = Mat4::Identity();
       const bool has_inverse_bind =
@@ -457,7 +463,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
           joint < src.inverse_bind_matrices->count;
       binding.bones.push_back(src.joints[joint]->name
                                   ? src.joints[joint]->name
-                                  : "joint_" + std::to_string(joint));
+                                  : "joint_" + rx::ToString(joint));
       if (has_inverse_bind) {
         cgltf_accessor_read_float(src.inverse_bind_matrices, joint,
                                   inverse_bind.m, 16);
@@ -487,7 +493,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
     // topological bone order. Mesh::skin remains in source palette order and
     // BuildBoneRemap connects the two by name.
     base::Vector<i32> source_to_bone(src.joints_count);
-    std::fill(source_to_bone.begin(), source_to_bone.end(), -1);
+    base::Fill(source_to_bone.begin(), source_to_bone.end(), -1);
     skeleton.bones.reserve(src.joints_count);
     while (skeleton.bones.size() < src.joints_count) {
       bool progressed = false;
@@ -502,7 +508,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
         Bone bone;
         bone.name = src.joints[joint]->name
                         ? src.joints[joint]->name
-                        : "joint_" + std::to_string(joint);
+                        : "joint_" + rx::ToString(joint);
         bone.parent = source_parent_index >= 0
                           ? source_to_bone[static_cast<u32>(source_parent_index)]
                           : -1;
@@ -514,7 +520,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
         Decompose(local, &bone.bind_translation, &bone.bind_rotation,
                   &bone.bind_scale);
         source_to_bone[joint] = static_cast<i32>(skeleton.bones.size());
-        skeleton.bones.push_back(std::move(bone));
+        skeleton.bones.push_back(base::move(bone));
         progressed = true;
       }
       if (progressed)
@@ -529,7 +535,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
   // first binding for compatibility with mesh-only consumers; ImportedScene users
   // use Instance::skeleton_index with skin_bindings for the exact binding.
   base::Vector<i32> mesh_skin(data->meshes_count);
-  std::fill(mesh_skin.begin(), mesh_skin.end(), -1);
+  base::Fill(mesh_skin.begin(), mesh_skin.end(), -1);
   for (size_t node_index = 0; node_index < data->nodes_count; ++node_index) {
     const cgltf_node &node = data->nodes[node_index];
     if (!node.mesh || !node.skin)
@@ -608,13 +614,13 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
 
       ReadFloats(position, 3, &scratch);
       for (u32 v = 0; v < vertex_count; ++v) {
-        std::memcpy(lod.vertices[vertex_offset + v].position, &scratch[v * 3],
+        base::MemCopy(lod.vertices[vertex_offset + v].position, &scratch[v * 3],
                     sizeof(f32) * 3);
       }
       if (normal && normal->count == vertex_count) {
         ReadFloats(normal, 3, &scratch);
         for (u32 v = 0; v < vertex_count; ++v) {
-          std::memcpy(lod.vertices[vertex_offset + v].normal, &scratch[v * 3],
+          base::MemCopy(lod.vertices[vertex_offset + v].normal, &scratch[v * 3],
                       sizeof(f32) * 3);
         }
       } else {
@@ -630,7 +636,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
         ReadFloats(uv, 2, &scratch);
         for (u32 v = 0; v < vertex_count; ++v) {
           Vertex &vertex = lod.vertices[vertex_offset + v];
-          std::memcpy(vertex.uv, &scratch[v * 2], sizeof(f32) * 2);
+          base::MemCopy(vertex.uv, &scratch[v * 2], sizeof(f32) * 2);
           // Safe per primitive because this loader appends a fresh vertex range
           // per primitive, so no two materials ever share a vertex to disagree
           // over. Before the tangent generation below, which derives the frame
@@ -648,7 +654,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
           f32 b = components > 2 ? scratch[v * components + 2] : r;
           f32 a = components > 3 ? scratch[v * components + 3] : 1.0f;
           auto to_u8 = [](f32 value) {
-            return static_cast<u32>(std::clamp(value, 0.0f, 1.0f) * 255.0f +
+            return static_cast<u32>(rx::Clamp(value, 0.0f, 1.0f) * 255.0f +
                                     0.5f);
           };
           lod.vertices[vertex_offset + v].color =
@@ -665,20 +671,20 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
           SkinnedVertexExtra &extra = lod.skinning[vertex_offset + v];
           f32 total = 0;
           for (f32 weight : source_weights)
-            total += std::max(weight, 0.0f);
+            total += rx::Max(weight, 0.0f);
           u32 quantized = 0;
           for (u32 lane = 0; lane < 4; ++lane) {
             extra.bone_indices[lane] =
                 source_joints[lane] < 256 ? static_cast<u8>(source_joints[lane])
                                           : 0;
             const f32 normalized =
-                total > 1e-8f ? std::max(source_weights[lane], 0.0f) / total
+                total > 1e-8f ? rx::Max(source_weights[lane], 0.0f) / total
                               : (lane == 0 ? 1.0f : 0.0f);
             const u32 byte_weight =
-                lane == 3 ? 255 - std::min(quantized, 255u)
+                lane == 3 ? 255 - rx::Min(quantized, 255u)
                           : static_cast<u32>(normalized * 255.0f + 0.5f);
             extra.bone_weights[lane] =
-                static_cast<u8>(std::min(byte_weight, 255u));
+                static_cast<u8>(rx::Min(byte_weight, 255u));
             quantized += extra.bone_weights[lane];
           }
         }
@@ -712,7 +718,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
         }
         ReadFloats(tangent, 4, &scratch);
         for (u32 v = 0; v < vertex_count; ++v) {
-          std::memcpy(lod.vertices[vertex_offset + v].tangent, &scratch[v * 4],
+          base::MemCopy(lod.vertices[vertex_offset + v].tangent, &scratch[v * 4],
                       sizeof(f32) * 4);
         }
       } else {
@@ -749,7 +755,7 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
           ReadFloats(attribute.data, 3, &scratch);
           deltas->resize((static_cast<size_t>(vertex_offset) + vertex_count) *
                          3);
-          std::memcpy(deltas->data() + static_cast<size_t>(vertex_offset) * 3,
+          base::MemCopy(deltas->data() + static_cast<size_t>(vertex_offset) * 3,
                       scratch.data(), vertex_count * sizeof(f32) * 3);
         }
       }
@@ -799,9 +805,9 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
         f32 dx = vertex.position[0] - mesh.bounds_center[0];
         f32 dy = vertex.position[1] - mesh.bounds_center[1];
         f32 dz = vertex.position[2] - mesh.bounds_center[2];
-        radius_sq = std::max(radius_sq, dx * dx + dy * dy + dz * dz);
+        radius_sq = rx::Max(radius_sq, dx * dx + dy * dy + dz * dz);
       }
-      mesh.bounds_radius = std::sqrt(radius_sq);
+      mesh.bounds_radius = ::sqrt(radius_sq);
     }
   }
 
@@ -838,9 +844,9 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
       track.weights.resize(track.times.size() * targets);
       for (size_t k = 0; k < track.times.size(); ++k) {
         const f32 *row = &scratch[k * stride + (cubic ? targets : 0)];
-        std::memcpy(&track.weights[k * targets], row, targets * sizeof(f32));
+        base::MemCopy(&track.weights[k * targets], row, targets * sizeof(f32));
       }
-      mesh.morph_animations.push_back(std::move(track));
+      mesh.morph_animations.push_back(base::move(track));
     }
   }
 
@@ -856,11 +862,11 @@ bool LoadGltfScene(const std::string &path, ImportedScene *out) {
       f32 world[16];
       cgltf_node_transform_world(&node, world);
       instance.position = {world[12], world[13], world[14]};
-      Vec3 scale{std::sqrt(world[0] * world[0] + world[1] * world[1] +
+      Vec3 scale{::sqrt(world[0] * world[0] + world[1] * world[1] +
                            world[2] * world[2]),
-                 std::sqrt(world[4] * world[4] + world[5] * world[5] +
+                 ::sqrt(world[4] * world[4] + world[5] * world[5] +
                            world[6] * world[6]),
-                 std::sqrt(world[8] * world[8] + world[9] * world[9] +
+                 ::sqrt(world[8] * world[8] + world[9] * world[9] +
                            world[10] * world[10])};
       instance.scale = (scale.x + scale.y + scale.z) / 3.0f;
       QuatFromMatrix(world, scale, instance.rotation);

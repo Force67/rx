@@ -1,11 +1,12 @@
 #include "combat/weapon.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
 #include <base/containers/vector.h>
 
 #include "combat/projectile.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 
 namespace rx::combat {
@@ -36,7 +37,7 @@ f32 RandomSigned(u32& state) { return RandomUnit(state) * 2.0f - 1.0f; }
 
 f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
   const f32 d = target - current;
-  if (std::abs(d) <= max_delta) return target;
+  if (::abs(d) <= max_delta) return target;
   return current + (d > 0 ? max_delta : -max_delta);
 }
 
@@ -44,11 +45,11 @@ f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
 // of the remaining gap closed over `dt` for a given half-life.
 f32 ApproachFraction(f32 half_life, f32 dt) {
   if (half_life <= 0) return 1.0f;
-  return 1.0f - std::exp2(-dt / half_life);
+  return 1.0f - ::exp2(-dt / half_life);
 }
 
 void Basis(const Vec3& forward, Vec3* right, Vec3* up) {
-  const Vec3 reference = std::abs(forward.y) > 0.99f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
+  const Vec3 reference = ::abs(forward.y) > 0.99f ? Vec3{1, 0, 0} : Vec3{0, 1, 0};
   *right = Normalize(Cross(forward, reference));
   *up = Cross(*right, forward);
 }
@@ -59,23 +60,23 @@ void Basis(const Vec3& forward, Vec3* right, Vec3* up) {
 Vec3 ConeDirection(const Vec3& forward, f32 spread, u32& rng) {
   if (spread <= 0) return forward;
   const f32 angle = RandomUnit(rng) * kTwoPi;
-  const f32 radius = std::sqrt(RandomUnit(rng)) * std::tan(spread);
+  const f32 radius = ::sqrt(RandomUnit(rng)) * ::tan(spread);
   Vec3 right;
   Vec3 up;
   Basis(forward, &right, &up);
-  return Normalize(forward + right * (std::cos(angle) * radius) +
-                   up * (std::sin(angle) * radius));
+  return Normalize(forward + right * (::cos(angle) * radius) +
+                   up * (::sin(angle) * radius));
 }
 
 Vec3 SafeDirection(const Vec3& v) {
   const f32 length = Length(v);
-  if (!std::isfinite(length) || length < 1e-6f) return {0, 0, -1};
+  if (!::isfinite(length) || length < 1e-6f) return {0, 0, -1};
   return v * (1.0f / length);
 }
 
 void CompleteMagazineReload(WeaponState& weapon, const WeaponDef& def) {
   const u32 needed = def.magazine > weapon.ammo ? def.magazine - weapon.ammo : 0;
-  const u32 taken = std::min(needed, weapon.reserve);
+  const u32 taken = rx::Min(needed, weapon.reserve);
   weapon.ammo += taken;
   weapon.reserve -= taken;
   weapon.reload_timer = 0;
@@ -192,7 +193,7 @@ i8 GiveWeapon(Loadout& loadout, const WeaponCatalog& catalog, WeaponDefId def_id
   weapon = WeaponState{};
   weapon.def = def_id;
   weapon.ammo = def->magazine;
-  weapon.reserve = def->reserve_max > 0 ? std::min(reserve, def->reserve_max) : reserve;
+  weapon.reserve = def->reserve_max > 0 ? rx::Min(reserve, def->reserve_max) : reserve;
   // A distinct jitter stream per slot, so two identical rifles do not fire the
   // same pattern in lockstep.
   weapon.rng = 0x9E3779B9u ^ (def_id * 0x85EBCA6Bu) ^ ((slot + 1u) * 0xC2B2AE35u);
@@ -210,7 +211,7 @@ u32 AddAmmo(Loadout& loadout, const WeaponCatalog& catalog, WeaponDefId def_id, 
                          ? (def->reserve_max > weapon.reserve ? def->reserve_max - weapon.reserve
                                                               : 0)
                          : rounds - taken;
-    const u32 give = std::min(room, rounds - taken);
+    const u32 give = rx::Min(room, rounds - taken);
     weapon.reserve += give;
     taken += give;
   }
@@ -244,19 +245,19 @@ bool StartReload(WeaponState& weapon, const WeaponDef& def) {
 }
 
 f32 EffectiveSpread(const WeaponDef& def, const WeaponState& weapon, const WeaponIntent& intent) {
-  const f32 bloom = std::clamp(weapon.bloom, 0.0f, 1.0f);
+  const f32 bloom = rx::Clamp(weapon.bloom, 0.0f, 1.0f);
   f32 spread = def.spread_min + (def.spread_max - def.spread_min) * bloom;
   if (intent.airborne) {
     spread *= def.spread_air_scale;
   } else {
     const f32 move = def.spread_move_speed > 0
-                         ? std::clamp(intent.speed / def.spread_move_speed, 0.0f, 1.0f)
+                         ? rx::Clamp(intent.speed / def.spread_move_speed, 0.0f, 1.0f)
                          : 0.0f;
     spread *= 1.0f + (def.spread_move_scale - 1.0f) * move;
     if (intent.crouched) spread *= def.spread_crouch_scale;
   }
-  spread *= 1.0f + (def.spread_ads_scale - 1.0f) * std::clamp(weapon.ads, 0.0f, 1.0f);
-  return std::max(spread, 0.0f);
+  spread *= 1.0f + (def.spread_ads_scale - 1.0f) * rx::Clamp(weapon.ads, 0.0f, 1.0f);
+  return rx::Max(spread, 0.0f);
 }
 
 f32 AimFovScale(const Loadout& loadout, const WeaponCatalog& catalog) {
@@ -264,12 +265,12 @@ f32 AimFovScale(const Loadout& loadout, const WeaponCatalog& catalog) {
   if (!weapon) return 1.0f;
   const WeaponDef* def = catalog.Find(weapon->def);
   if (!def) return 1.0f;
-  return 1.0f + (def->ads_fov_scale - 1.0f) * std::clamp(weapon->ads, 0.0f, 1.0f);
+  return 1.0f + (def->ads_fov_scale - 1.0f) * rx::Clamp(weapon->ads, 0.0f, 1.0f);
 }
 
 void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const WeaponCatalog& catalog,
                  const HitRegistry& registry, CombatEvents& events, f32 dt) {
-  if (!std::isfinite(dt) || dt <= 0) return;
+  if (!::isfinite(dt) || dt <= 0) return;
 
   // Projectile entities are created after the walk: spawning inside World::Each
   // is a structural change that can skip or revisit rows.
@@ -289,7 +290,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
     if (loadout.active >= loadout.count) loadout.active = 0;
 
     if (loadout.swap_timer > 0) {
-      loadout.swap_timer = std::max(0.0f, loadout.swap_timer - dt);
+      loadout.swap_timer = rx::Max(0.0f, loadout.swap_timer - dt);
       if (loadout.swap_timer == 0 && loadout.pending < loadout.count) {
         loadout.active = loadout.pending;
       }
@@ -304,7 +305,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
         lowered.burst_remaining = 0;
         const WeaponDef* raised = catalog.Find(loadout.slots[slot].def);
         loadout.pending = slot;
-        loadout.swap_timer = raised ? std::max(raised->swap_time, 0.0f) : 0.0f;
+        loadout.swap_timer = raised ? rx::Max(raised->swap_time, 0.0f) : 0.0f;
         if (loadout.swap_timer <= 0) loadout.active = slot;
       }
     }
@@ -321,8 +322,8 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
     const f32 ads_target = intent.aim && !swapping ? 1.0f : 0.0f;
     weapon.ads = MoveTowardScalar(weapon.ads, ads_target,
                                   def.ads_time > 0 ? dt / def.ads_time : 1.0f);
-    weapon.cooldown = std::max(0.0f, weapon.cooldown - dt);
-    weapon.bloom = std::max(0.0f, weapon.bloom - def.spread_decay * dt);
+    weapon.cooldown = rx::Max(0.0f, weapon.cooldown - dt);
+    weapon.bloom = rx::Max(0.0f, weapon.bloom - def.spread_decay * dt);
 
     if (swapping) {
       weapon.burst_remaining = 0;
@@ -381,7 +382,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
     ++weapon.shots_fired;
 
     if (def.mode == FireMode::kBurst) {
-      if (weapon.burst_remaining == 0) weapon.burst_remaining = std::max(def.burst_count, 1u);
+      if (weapon.burst_remaining == 0) weapon.burst_remaining = rx::Max(def.burst_count, 1u);
       --weapon.burst_remaining;
     }
     const f32 interval = ShotInterval(def);
@@ -391,17 +392,17 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
 
     const Vec3 aim = SafeDirection(intent.direction);
     const f32 spread = EffectiveSpread(def, weapon, intent);
-    weapon.bloom = std::min(1.0f, weapon.bloom + def.spread_per_shot);
+    weapon.bloom = rx::Min(1.0f, weapon.bloom + def.spread_per_shot);
 
     if (ViewRecoil* recoil = world.Get<ViewRecoil>(entity)) {
-      const f32 scale = 1.0f + (def.recoil_ads_scale - 1.0f) * std::clamp(weapon.ads, 0.0f, 1.0f);
+      const f32 scale = 1.0f + (def.recoil_ads_scale - 1.0f) * rx::Clamp(weapon.ads, 0.0f, 1.0f);
       recoil->pending_pitch += def.recoil_pitch * scale;
       recoil->pending_yaw +=
           (def.recoil_yaw + RandomSigned(weapon.rng) * def.recoil_yaw_variance) * scale;
       recoil->time_since_shot = 0;
     }
     if (Viewmodel* viewmodel = world.Get<Viewmodel>(entity)) {
-      viewmodel->punch = std::min(viewmodel->punch + viewmodel->punch_scale,
+      viewmodel->punch = rx::Min(viewmodel->punch + viewmodel->punch_scale,
                                   viewmodel->punch_scale * 3.0f);
     }
 
@@ -410,14 +411,14 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
     shot.weapon = weapon.def;
     shot.origin = intent.origin;
     shot.direction = aim;
-    shot.pellets = std::max(def.pellets, 1u);
+    shot.pellets = rx::Max(def.pellets, 1u);
     shot.ammo_left = weapon.ammo;
     events.shots.push_back(shot);
 
     physics::BodyId ignore[kMaxIgnoredBodies];
     u32 ignore_count = 0;
     if (const HitIgnoreList* list = world.Get<HitIgnoreList>(entity)) {
-      const u8 count = std::min<u8>(list->count, kMaxIgnoredBodies);
+      const u8 count = rx::Min<u8>(list->count, kMaxIgnoredBodies);
       for (u8 i = 0; i < count; ++i) {
         if (list->bodies[i] != 0) ignore[ignore_count++] = list->bodies[i];
       }
@@ -456,7 +457,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
       round.blast_min_scale = def.blast_min_scale;
       round.blast_impulse = def.blast_impulse;
       round.explode_on_expire = def.explode_on_expire;
-      round.ignore_count = static_cast<u8>(std::min<u32>(ignore_count, kMaxIgnoredBodies));
+      round.ignore_count = static_cast<u8>(rx::Min<u32>(ignore_count, kMaxIgnoredBodies));
       for (u8 i = 0; i < round.ignore_count; ++i) round.ignore[i] = ignore[i];
       spawned.push_back(round);
     }
@@ -471,7 +472,7 @@ void StepWeapons(ecs::World& world, physics::PhysicsWorld& physics, const Weapon
 }
 
 void StepViewRecoil(ecs::World& world, f32 dt) {
-  if (!std::isfinite(dt) || dt <= 0) return;
+  if (!::isfinite(dt) || dt <= 0) return;
   world.Each<ViewRecoil>([dt](ecs::Entity, ViewRecoil& recoil) {
     recoil.time_since_shot += dt;
     f32 pitch = 0;
@@ -485,7 +486,7 @@ void StepViewRecoil(ecs::World& world, f32 dt) {
     pitch += kick_pitch;
     yaw += kick_yaw;
 
-    const f32 keep = std::clamp(recoil.recovery_fraction, 0.0f, 1.0f);
+    const f32 keep = rx::Clamp(recoil.recovery_fraction, 0.0f, 1.0f);
     recoil.recoverable_pitch += kick_pitch * keep;
     recoil.recoverable_yaw += kick_yaw * keep;
 
@@ -505,7 +506,7 @@ void StepViewRecoil(ecs::World& world, f32 dt) {
 }
 
 void StepViewmodels(ecs::World& world, f32 dt) {
-  if (!std::isfinite(dt) || dt <= 0) return;
+  if (!::isfinite(dt) || dt <= 0) return;
   world.Each<Viewmodel, WeaponIntent>([&](ecs::Entity entity, Viewmodel& viewmodel,
                                           WeaponIntent& intent) {
     // Sway trails the look RATE, so a flick throws the weapon and holding still
@@ -513,27 +514,27 @@ void StepViewmodels(ecs::World& world, f32 dt) {
     const f32 yaw_rate = intent.look_yaw_delta / dt;
     const f32 pitch_rate = intent.look_pitch_delta / dt;
     const f32 sway_x =
-        std::clamp(-yaw_rate * viewmodel.sway_scale, -viewmodel.sway_max, viewmodel.sway_max);
+        rx::Clamp(-yaw_rate * viewmodel.sway_scale, -viewmodel.sway_max, viewmodel.sway_max);
     const f32 sway_y =
-        std::clamp(-pitch_rate * viewmodel.sway_scale, -viewmodel.sway_max, viewmodel.sway_max);
+        rx::Clamp(-pitch_rate * viewmodel.sway_scale, -viewmodel.sway_max, viewmodel.sway_max);
     const f32 sway_blend = ApproachFraction(viewmodel.sway_half_life, dt);
 
     const f32 speed_ratio =
         viewmodel.bob_reference_speed > 0
-            ? std::clamp(intent.speed / viewmodel.bob_reference_speed, 0.0f, 1.0f)
+            ? rx::Clamp(intent.speed / viewmodel.bob_reference_speed, 0.0f, 1.0f)
             : 0.0f;
     const f32 bob_target = intent.airborne ? 0.0f : speed_ratio;
     viewmodel.bob_weight +=
         (bob_target - viewmodel.bob_weight) * ApproachFraction(viewmodel.bob_half_life, dt);
     viewmodel.bob_phase =
-        std::fmod(viewmodel.bob_phase + viewmodel.bob_rate * speed_ratio * dt, kTwoPi);
+        ::fmod(viewmodel.bob_phase + viewmodel.bob_rate * speed_ratio * dt, kTwoPi);
 
     viewmodel.punch -= viewmodel.punch * ApproachFraction(viewmodel.punch_half_life, dt);
 
     f32 ads = 0;
     if (const Loadout* loadout = world.Get<Loadout>(entity)) {
       if (const WeaponState* weapon = ActiveWeapon(*loadout)) {
-        ads = std::clamp(weapon->ads, 0.0f, 1.0f);
+        ads = rx::Clamp(weapon->ads, 0.0f, 1.0f);
       }
     }
     // Aiming pulls the weapon to the eye line: sights are steady, so bob and
@@ -542,8 +543,8 @@ void StepViewmodels(ecs::World& world, f32 dt) {
 
     const f32 bob = viewmodel.bob_amplitude * viewmodel.bob_weight * hip;
     Vec3 target;
-    target.x = sway_x * hip + std::sin(viewmodel.bob_phase) * bob;
-    target.y = sway_y * hip + std::sin(viewmodel.bob_phase * 2.0f) * bob * 0.5f;
+    target.x = sway_x * hip + ::sin(viewmodel.bob_phase) * bob;
+    target.y = sway_y * hip + ::sin(viewmodel.bob_phase * 2.0f) * bob * 0.5f;
     target.z = -viewmodel.punch;
     target += viewmodel.ads_offset * ads;
 

@@ -1,11 +1,11 @@
 #ifndef RX_UI_SPLASH_H_
 #define RX_UI_SPLASH_H_
 
-#include <optional>
 
 #include <ugui/ui_context.h>
 
 #include "asset/vfs.h"
+#include "base/optional.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "core/window.h"
@@ -90,8 +90,8 @@ class RX_UI_EXPORT Splash {
   // the thread's active WidgetRegistry, and `park_` hands that slot straight
   // back to whatever held it (see the note in Initialize). Declared in this
   // order so park_ unwinds before the context that displaced it.
-  std::optional<ugui::UIContext> ui_;
-  std::optional<ugui::WidgetRegistry::ScopedActive> park_;
+  base::Optional<ugui::UIContext> ui_;
+  base::Optional<ugui::WidgetRegistry::ScopedActive> park_;
   GuiRenderBackend backend_;
   UguiHostState host_state_;
   const ugui::DrawData* draw_data_ = nullptr;

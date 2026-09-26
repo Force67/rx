@@ -2,13 +2,15 @@
 // exact-size column resize was O(n^2) and relocated rows bitwise), non-POD
 // components with interior pointers (bitwise relocation would corrupt them),
 // archetype transitions, swap-remove churn and chunk reclamation.
-#include <algorithm>
-#include <cstdint>
-#include <cstdio>
-#include <string>
-#include <vector>
+#include <stdint.h>
+#include <stdio.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "core/memory/chunk_pool.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 
 namespace {
@@ -18,7 +20,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                        \
   do {                                                                     \
     if (!(cond)) {                                                         \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                        \
     }                                                                      \
   } while (0)
@@ -40,12 +42,12 @@ struct Tag {
 // self pointing at the stale block.
 struct SelfRef {
   SelfRef* self;
-  std::string payload;
+  base::String payload;
   int id;
 
-  explicit SelfRef(int i) : self(this), payload("payload-" + std::to_string(i)), id(i) {}
+  explicit SelfRef(int i) : self(this), payload("payload-" + rx::ToString(i)), id(i) {}
   SelfRef(SelfRef&& other) noexcept
-      : self(this), payload(std::move(other.payload)), id(other.id) {}
+      : self(this), payload(base::move(other.payload)), id(other.id) {}
   bool valid() const { return self == this; }
 };
 
@@ -83,7 +85,7 @@ void TestSpawnStormAndIteration() {
   rx::ecs::World world;
   constexpr int kCount = 20000;  // thousands of rows -> many chunks per archetype
 
-  std::vector<rx::ecs::Entity> entities;
+  base::Vector<rx::ecs::Entity> entities;
   entities.reserve(kCount);
   for (int i = 0; i < kCount; ++i) {
     rx::ecs::Entity entity = world.Create();
@@ -114,7 +116,7 @@ void TestNonPodRelocation() {
   rx::ecs::World world;
   constexpr int kCount = 5000;
 
-  std::vector<rx::ecs::Entity> entities;
+  base::Vector<rx::ecs::Entity> entities;
   for (int i = 0; i < kCount; ++i) {
     rx::ecs::Entity entity = world.Create();
     world.Add(entity, SelfRef(i));
@@ -123,7 +125,7 @@ void TestNonPodRelocation() {
 
   int valid = 0;
   world.Each<SelfRef>([&](rx::ecs::Entity, SelfRef& ref) {
-    if (ref.valid() && ref.payload == "payload-" + std::to_string(ref.id)) ++valid;
+    if (ref.valid() && ref.payload == "payload-" + rx::ToString(ref.id)) ++valid;
   });
   CHECK(valid == kCount);
 
@@ -161,7 +163,7 @@ void TestChunkReclamation() {
   const size_t free_before = rx::mem::GlobalChunkPool().stats().free_chunks;
   {
     rx::ecs::World world;
-    std::vector<rx::ecs::Entity> entities;
+    base::Vector<rx::ecs::Entity> entities;
     for (int i = 0; i < 10000; ++i) {
       rx::ecs::Entity entity = world.Create();
       world.Add(entity, Position{});
@@ -202,7 +204,7 @@ void TestCreateBatchFillsColumnRuns() {
 
   // Enough rows to cross several 16 KiB chunks for a 24-byte row.
   constexpr rx::u32 kCount = 5000;
-  std::vector<rx::ecs::Entity> created;
+  base::Vector<rx::ecs::Entity> created;
   world.CreateBatch(signature, kCount, [&](const rx::ecs::EntityBatch& batch) {
     CHECK(batch.count() == kCount);
     rx::u32 covered = 0;
@@ -222,7 +224,7 @@ void TestCreateBatchFillsColumnRuns() {
       // optimization: the caller memcpys `run` rows from one pointer, so a run
       // that overstates the chunk writes into the next one.
       const rx::u32 rows_per_chunk = 16 * 1024 / (sizeof(Position) + sizeof(Velocity));
-      CHECK(run == std::min(rows_per_chunk - covered % rows_per_chunk, batch.count() - covered));
+      CHECK(run == rx::Min(rows_per_chunk - covered % rows_per_chunk, batch.count() - covered));
       for (rx::u32 i = 0; i < run; ++i) {
         new (positions + i) Position{static_cast<float>(covered + i), 0, 0};
         new (velocities + i) Velocity{0, static_cast<float>(covered + i), 0};
@@ -262,7 +264,7 @@ void TestCreateBatchFillsColumnRuns() {
   // column pointers have to be offset by the rows already there. Filling only
   // the second batch and reading back both is what catches an implementation
   // that ignores where the batch begins.
-  std::vector<rx::ecs::Entity> second;
+  base::Vector<rx::ecs::Entity> second;
   world.CreateBatch(signature, 700, [&](const rx::ecs::EntityBatch& batch) {
     rx::u32 covered = 0;
     while (covered < batch.count()) {
@@ -392,9 +394,9 @@ int main() {
   TestCreateBatchFillsColumnRuns();
   TestCreateBatchReusesSlotsAndSkipsEmpty();
   if (g_failures) {
-    std::fprintf(stderr, "ecs_test: %d failure(s)\n", g_failures);
+    ::fprintf(stderr, "ecs_test: %d failure(s)\n", g_failures);
     return 1;
   }
-  std::puts("ecs_test: ok");
+  ::puts("ecs_test: ok");
   return 0;
 }

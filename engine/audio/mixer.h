@@ -1,12 +1,12 @@
 #ifndef RX_AUDIO_MIXER_H_
 #define RX_AUDIO_MIXER_H_
 
-#include <memory>
-#include <mutex>
-#include <vector>
 
 #include "audio/audio_clip.h"
 #include "audio/spatial.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/mutex.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -38,7 +38,7 @@ class Mixer {
   // engine thread
   // Starts `decoder` as a new voice and returns its id (0 if decoder is null).
   // The returned id stays valid for Stop/SetVoice* until the voice finishes.
-  u32 Play(std::unique_ptr<Decoder> decoder, const PlayParams& params);
+  u32 Play(base::UniquePointer<Decoder> decoder, const PlayParams& params);
   void Stop(u32 voice, f32 fade_out = 0.05f);
   void StopAll();
   void SetVoiceGain(u32 voice, f32 gain);
@@ -54,10 +54,10 @@ class Mixer {
  private:
   struct Voice {
     u32 id = 0;
-    std::unique_ptr<Decoder> decoder;
+    base::UniquePointer<Decoder> decoder;
     PlayParams params;
     // Decoded-but-not-yet-resampled source frames, consumed from `head`.
-    std::vector<float> src;
+    base::Vector<float> src;
     size_t head = 0;        // first unconsumed source frame
     f64 frac = 0.0;         // fractional position between head and head+1
     u32 src_channels = 1;
@@ -83,26 +83,26 @@ class Mixer {
     u32 voice = 0;
     f32 value = 0.0f;
     Vec3 position{};
-    std::unique_ptr<Decoder> decoder;
+    base::UniquePointer<Decoder> decoder;
     PlayParams params;
     Listener listener;
   };
 
   u32 output_rate_ = 48000;
-  std::mutex mutex_;
-  std::vector<Command> pending_;
+  base::Mutex mutex_;
+  base::Vector<Command> pending_;
   u32 next_id_ = 1;
 
   // Device-thread-only state below.
-  std::vector<Voice> voices_;
+  base::Vector<Voice> voices_;
   Listener listener_;
   f32 master_ = 1.0f;
   // Reusable scratch: the mixer runs on the realtime audio callback, where a
   // heap allocation can miss the deadline and glitch. Both keep their
   // capacity across callbacks (commands_scratch_ ping-pongs storage with
   // pending_ via swap).
-  std::vector<Command> commands_scratch_;
-  std::vector<float> decode_scratch_;
+  base::Vector<Command> commands_scratch_;
+  base::Vector<float> decode_scratch_;
 };
 
 }  // namespace rx::audio

@@ -1,10 +1,10 @@
 #ifndef RX_CORE_MEMORY_CHUNK_POOL_H_
 #define RX_CORE_MEMORY_CHUNK_POOL_H_
 
-#include <cstddef>
-#include <mutex>
-#include <vector>
+#include <stddef.h>
 
+#include "base/containers/vector.h"
+#include "base/threading/mutex.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -47,9 +47,9 @@ class RX_CORE_EXPORT ChunkPool {
 
   void AddSlabLocked();
 
-  mutable std::mutex mutex_;
-  std::vector<void*> slabs_;
-  std::vector<void*> free_;
+  mutable base::Mutex mutex_;
+  base::Vector<void*> slabs_;
+  base::Vector<void*> free_;
   size_t total_ = 0;
 };
 

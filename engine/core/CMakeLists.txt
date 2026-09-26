@@ -1,6 +1,9 @@
 rx_add_module(core
   log.cc
   paths.cc
+  file_system.cc
+  format.cc
+  text_reader.cc
   job_system.cc
   frame_timer.cc
   world_clock.cc

@@ -1,13 +1,17 @@
 #include "edit/hierarchy.h"
 
-#include <random>
+#include "base/external/xoshiro256ss/xoshiro256ss.h"
+#include "base/random/random.h"
 
 namespace rx::edit {
 
 namespace {
 
 u64 RandomGuid() {
-  static thread_local std::mt19937_64 rng{std::random_device{}()};
+  // Guids only need to be unique, not reproducible: a per-thread 64-bit
+  // generator seeded once from the OS keeps every draw full width without a
+  // syscall per id.
+  static thread_local base::xoshiro256ss rng{base::SourceTrueRandomSeed()};
   u64 v = 0;
   while (v == 0) v = rng();  // never hand out the 0 sentinel
   return v;

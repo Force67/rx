@@ -8,14 +8,17 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#include <cstdio>
-#include <cstring>
-#include <optional>
-#include <string>
-#include <vector>
+#include <stdio.h>
+#include <string.h>
 
 #include "authoring/command_bridge.h"
 #include "authoring/command_endpoint.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "ecs/world.h"
 #include "rpc/rpc_message.h"
 #include "scene/components.h"
@@ -32,7 +35,7 @@ int g_failures = 0;
 #define CHECK(cond)                                               \
   do {                                                            \
     if (!(cond)) {                                                \
-      std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                               \
     }                                                             \
   } while (0)
@@ -52,7 +55,7 @@ struct Rig {
   script::ScriptArena scratch;
   script::HandlerRegistry commands;
   script::HandlerContext ctx;
-  std::optional<authoring::CommandBridge> bridge;  // built after the registry is filled
+  base::Optional<authoring::CommandBridge> bridge;  // built after the registry is filled
 
   Rig() {
     scene::SetupSceneCommands(commands);
@@ -62,9 +65,9 @@ struct Rig {
     bridge.emplace(commands, ctx);
   }
 
-  authoring::CommandBridge::Reply Call(std::string name, rpc::RpcArgs args) {
+  authoring::CommandBridge::Reply Call(base::String name, rpc::RpcArgs args) {
     const rpc::RpcContext local{authoring::kLocalSender, /*from_server=*/false};
-    return bridge->Invoke(local, rpc::RpcCall{std::move(name), std::move(args)});
+    return bridge->Invoke(local, rpc::RpcCall{base::move(name), base::move(args)});
   }
 };
 
@@ -75,7 +78,7 @@ void TestMarshalling() {
 
   // World.Spawn(symbol, vec3, float): 3 params, 5 wire args.
   authoring::CommandBridge::Reply reply =
-      rig.Call("World.Spawn", {rpc::RpcValue(std::string("crate")), rpc::RpcValue(1.0),
+      rig.Call("World.Spawn", {rpc::RpcValue(base::String("crate")), rpc::RpcValue(1.0),
                                rpc::RpcValue(2.0), rpc::RpcValue(3.0), rpc::RpcValue(rx::i64(2))});
   CHECK(reply.ok);
   CHECK(reply.values.size() == 1);
@@ -98,7 +101,7 @@ void TestMarshalling() {
 
   // A string round trip: in as a borrowed view, out of the scratch arena and
   // copied into the reply, so resetting the arena cannot invalidate it.
-  rig.Call("World.SetName", {rpc::RpcValue(entity), rpc::RpcValue(std::string("Crate 01"))});
+  rig.Call("World.SetName", {rpc::RpcValue(entity), rpc::RpcValue(base::String("Crate 01"))});
   reply = rig.Call("World.GetName", {rpc::RpcValue(entity)});
   rig.scratch.Reset();
   CHECK(reply.ok && reply.values.size() == 1);
@@ -123,24 +126,24 @@ void TestRejection() {
   // Too few args for the signature.
   authoring::CommandBridge::Reply reply = rig.Call("World.Teleport", {rpc::RpcValue(rx::i64(1))});
   CHECK(!reply.ok);
-  CHECK(reply.error.find("expects 4 arg(s) for (entity, vec3)") != std::string::npos);
+  CHECK(reply.error.find("expects 4 arg(s) for (entity, vec3)") != base::String::npos);
 
   // Right arity, wrong type: a float where an entity id is wanted is a caller
   // bug, and truncating it would move some other entity.
   reply = rig.Call("World.Teleport", {rpc::RpcValue(1.5), rpc::RpcValue(0.0),
                                       rpc::RpcValue(0.0), rpc::RpcValue(0.0)});
   CHECK(!reply.ok);
-  CHECK(reply.error.find("arg 0 expects entity, got float") != std::string::npos);
+  CHECK(reply.error.find("arg 0 expects entity, got float") != base::String::npos);
 
   // A string where a number is wanted, inside the vec3 expansion.
   reply = rig.Call("World.Teleport", {rpc::RpcValue(rx::i64(1)), rpc::RpcValue(0.0),
-                                      rpc::RpcValue(std::string("up")), rpc::RpcValue(0.0)});
+                                      rpc::RpcValue(base::String("up")), rpc::RpcValue(0.0)});
   CHECK(!reply.ok);
-  CHECK(reply.error.find("arg 2 expects float") != std::string::npos);
+  CHECK(reply.error.find("arg 2 expects float") != base::String::npos);
 
   reply = rig.Call("World.DoesNotExist", {});
   CHECK(!reply.ok);
-  CHECK(reply.error.find("unknown command") != std::string::npos);
+  CHECK(reply.error.find("unknown command") != base::String::npos);
 }
 
 void TestTrustGate() {
@@ -155,7 +158,7 @@ void TestTrustGate() {
   // A remote game peer: any peer id the net path could attribute a packet to.
   authoring::CommandBridge::Reply reply = rig.bridge->Invoke(rpc::RpcContext{7, false}, move);
   CHECK(!reply.ok);
-  CHECK(reply.error.find("local-endpoint only") != std::string::npos);
+  CHECK(reply.error.find("local-endpoint only") != base::String::npos);
 
   // The host, on a client build. Also not the local authoring endpoint.
   reply = rig.bridge->Invoke(rpc::RpcContext{authoring::kLocalSender, true}, move);
@@ -174,10 +177,10 @@ void TestTrustGate() {
 void TestEndpoint() {
   Rig rig;
   authoring::CommandEndpoint endpoint;
-  const std::string path = "/tmp/rx_command_test_" + std::to_string(::getpid()) + ".sock";
-  std::string error;
+  const base::String path = "/tmp/rx_command_test_" + rx::ToString(::getpid()) + ".sock";
+  base::String error;
   if (!endpoint.Start(path, &error)) {
-    std::printf("FAIL endpoint start: %s\n", error.c_str());
+    ::printf("FAIL endpoint start: %s\n", error.c_str());
     ++g_failures;
     return;
   }
@@ -189,7 +192,7 @@ void TestEndpoint() {
 
   sockaddr_un addr{};
   addr.sun_family = AF_UNIX;
-  std::memcpy(addr.sun_path, path.c_str(), path.size());
+  base::MemCopy(addr.sun_path, path.c_str(), path.size());
   const int fd = ::socket(AF_UNIX, SOCK_STREAM, 0);
   CHECK(fd >= 0);
   CHECK(::connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0);
@@ -199,8 +202,8 @@ void TestEndpoint() {
   const rpc::RpcCall call{"World.Teleport",
                           {rpc::RpcValue(static_cast<rx::i64>(e.index)), rpc::RpcValue(1.0),
                            rpc::RpcValue(2.0), rpc::RpcValue(3.0)}};
-  const std::vector<u8> payload = rpc::EncodeCall(call);
-  std::vector<u8> frame;
+  const base::Vector<u8> payload = rpc::EncodeCall(call);
+  base::Vector<u8> frame;
   for (int i = 0; i < 4; ++i)
     frame.push_back(static_cast<u8>(static_cast<u32>(payload.size()) >> (8 * i)));
   frame.insert(frame.end(), payload.begin(), payload.end());
@@ -212,9 +215,9 @@ void TestEndpoint() {
   CHECK(::read(fd, header, 4) == 4);
   const u32 length = u32(header[0]) | u32(header[1]) << 8 | u32(header[2]) << 16 |
                      u32(header[3]) << 24;
-  std::vector<u8> reply_bytes(length);
+  base::Vector<u8> reply_bytes(length);
   CHECK(::read(fd, reply_bytes.data(), length) == static_cast<ssize_t>(length));
-  std::optional<rpc::RpcCall> reply = rpc::DecodeCall(reply_bytes.data(), reply_bytes.size());
+  base::Optional<rpc::RpcCall> reply = rpc::DecodeCall(reply_bytes.data(), reply_bytes.size());
   CHECK(reply && reply->name == "ok");
   CHECK(rig.world.Get<scene::Transform>(e)->position[2] == 3.0f);
 
@@ -247,9 +250,9 @@ int main() {
   TestTrustGate();
   TestEndpoint();
   if (g_failures == 0) {
-    std::printf("command_bridge_test: all checks passed\n");
+    ::printf("command_bridge_test: all checks passed\n");
     return 0;
   }
-  std::printf("command_bridge_test: %d failure(s)\n", g_failures);
+  ::printf("command_bridge_test: %d failure(s)\n", g_failures);
   return 1;
 }

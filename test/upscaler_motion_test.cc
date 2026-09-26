@@ -1,13 +1,13 @@
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "render/post/antialiasing.h"
 #include "render/post/upscaler.h"
 #include "render/rhi/device.h"
 #if defined(RX_HAS_DLSS) && !defined(__aarch64__)
+#include "base/containers/vector.h"
 #include "render/gi/denoiser_rr.h"
 #endif
 
@@ -17,12 +17,12 @@ using namespace rx::render;
 namespace {
 constexpr u32 kW = 96, kH = 64, kOutW = 192, kOutH = 128;
 float Pattern(float x, float y, u32 channel) {
-  if (channel == 0) return .5f + .4f * std::sin(x * 1.1f);
-  if (channel == 1) return .5f + .4f * std::sin(y * .9f);
-  return .5f + .3f * std::sin(x * .6f + y * .7f);
+  if (channel == 0) return .5f + .4f * ::sin(x * 1.1f);
+  if (channel == 1) return .5f + .4f * ::sin(y * .9f);
+  return .5f + .3f * ::sin(x * .6f + y * .7f);
 }
 float Half(u16 bits) {
-  return std::ldexp(float((bits & 1023) | 1024), int((bits >> 10) & 31) - 25) *
+  return ::ldexp(float((bits & 1023) | 1024), int((bits >> 10) & 31) - 25) *
          ((bits & 0x8000) ? -1.f : 1.f);
 }
 }  // namespace
@@ -33,14 +33,14 @@ int main() {
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
-    std::printf("upscaler_motion_test: SKIP, GPU unavailable\n");
+    ::printf("upscaler_motion_test: SKIP, GPU unavailable\n");
     return 77;
   }
-  const char* name = std::getenv("RX_TEST_UPSCALER");
-  const UpscalerKind kind = name && std::strcmp(name, "dlss") == 0 ? UpscalerKind::kDlss : UpscalerKind::kFsr3;
+  const char* name = ::getenv("RX_TEST_UPSCALER");
+  const UpscalerKind kind = name && ::strcmp(name, "dlss") == 0 ? UpscalerKind::kDlss : UpscalerKind::kFsr3;
   auto upscaler = CreateUpscaler({.kind = kind, .render_width = kW, .render_height = kH,
                                  .output_width = kOutW, .output_height = kOutH}, *device);
-  if (!upscaler) { std::printf("upscaler_motion_test: SKIP, backend unavailable\n"); return 77; }
+  if (!upscaler) { ::printf("upscaler_motion_test: SKIP, backend unavailable\n"); return 77; }
 #if defined(RX_HAS_DLSS) && !defined(__aarch64__)
   if (kind == UpscalerKind::kDlss) {
     RrDenoiser rr;
@@ -60,14 +60,14 @@ int main() {
   if (!color || !depth || !motion) return 1;
   ResourceState color_state = ResourceState::kUndefined, depth_state = ResourceState::kUndefined,
                 motion_state = ResourceState::kUndefined;
-  std::vector<f32> colors(kW * kH * 4), depths(kW * kH, .1f), motions(kW * kH * 2, 0);
-  auto upload = [&](GpuImage image, ResourceState& state, const std::vector<f32>& data) {
+  base::Vector<f32> colors(kW * kH * 4), depths(kW * kH, .1f), motions(kW * kH * 2, 0);
+  auto upload = [&](GpuImage image, ResourceState& state, const base::Vector<f32>& data) {
     GpuBuffer staging = device->CreateBufferWithData(
-        {reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)}, kBufferUsageTransferSrc);
+        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), kBufferUsageTransferSrc);
     device->ImmediateSubmit([&](CommandList& cmd) {
       cmd.Barrier(Transition(image, state, ResourceState::kCopyDst));
       BufferTextureCopy copy{.extent = {kW, kH}};
-      cmd.CopyBufferToTexture(staging, image, {&copy, 1});
+      cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
     });
     state = ResourceState::kCopyDst;
     device->DestroyBuffer(staging);
@@ -104,21 +104,21 @@ int main() {
       graph.AddPass("readback_state", [output](RenderGraph::PassBuilder& b) {
         b.Read(output, ResourceUsage::kResolveSrc);
       }, [](PassContext&) {});
-      if (!graph.Compile(*device, pool)) std::exit(1);
+      if (!graph.Compile(*device, pool)) ::exit(1);
       device->ImmediateSubmit([&](CommandList& cmd) {
-        PassContext ctx{.cmd = &cmd, .device = device.get(), .graph = &graph};
+        PassContext ctx{.cmd = &cmd, .device = device.Get_UseOnlyIfYouKnowWhatYouareDoing(), .graph = &graph};
         graph.Execute(ctx);
       });
       if (frame >= 24) {
-        std::vector<u16> pixels(kOutW * kOutH * 4);
+        base::Vector<u16> pixels(kOutW * kOutH * 4);
         if (!device->ReadbackImage(graph.image(output), ResourceState::kResolveSrc,
-                                   pixels.data(), pixels.size() * sizeof(u16))) std::exit(1);
+                                   pixels.data(), pixels.size() * sizeof(u16))) ::exit(1);
         for (u32 y = 16; y < kOutH - 16; ++y) for (u32 x = 16; x < kOutW - 16; ++x)
           for (u32 c = 0; c < 3; ++c) {
             const u16 bits = pixels[4 * (y * kOutW + x) + c];
             if ((bits & 0x7c00u) == 0x7c00u) {
-              std::printf("FAIL: upscaler produced non-finite color\n");
-              std::exit(1);
+              ::printf("FAIL: upscaler produced non-finite color\n");
+              ::exit(1);
             }
             double delta = Half(bits) -
                 Pattern((x + .5f) * .5f - velocity * frame, (y + .5f) * .5f, c);
@@ -132,16 +132,16 @@ int main() {
   const double negative = measure(-1, 0, 0);
   const double moving_correct = measure(1, .75f, -1);
   const double moving_wrong = measure(1, .75f, 1);
-  std::printf("upscaler_motion_test %s: jitter positive MSE=%g negative MSE=%g; motion correct=%g reversed=%g\n",
+  ::printf("upscaler_motion_test %s: jitter positive MSE=%g negative MSE=%g; motion correct=%g reversed=%g\n",
                UpscalerName(kind), positive, negative, moving_correct, moving_wrong);
   const double resumed = measure(1, 0, 0, 1);
   const double reset = measure(1, 0, 0, 2);
-  std::printf("skipped-frame reset MSE=%g explicit-reset MSE=%g\n", resumed, reset);
+  ::printf("skipped-frame reset MSE=%g explicit-reset MSE=%g\n", resumed, reset);
   device->WaitIdle();
-  upscaler.reset();
+  upscaler.Reset();
   pool.Clear();
   device->DestroyImage(color);
   device->DestroyImage(depth);
   device->DestroyImage(motion);
-  return positive < negative && moving_correct < moving_wrong && std::abs(resumed - reset) < 1e-6 ? 0 : 1;
+  return positive < negative && moving_correct < moving_wrong && ::abs(resumed - reset) < 1e-6 ? 0 : 1;
 }

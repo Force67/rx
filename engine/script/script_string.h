@@ -1,18 +1,18 @@
 #ifndef RX_SCRIPT_SCRIPT_STRING_H_
 #define RX_SCRIPT_SCRIPT_STRING_H_
 
-#include <limits>
-#include <new>
-#include <string_view>
-
+#include "base/check.h"
+#include "base/numeric_limits.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 
 namespace rx::script {
 
-// The string type at the script-handler boundary. Deliberately NOT std::string:
+// The string type at the script-handler boundary. Deliberately NOT base::String:
 // handlers are bound to several script runtimes (the Papyrus VM, the managed
-// host, the RPC/net path, a console), and std::string's layout is compiler- and
+// host, the RPC/net path, a console), and base::String's layout is compiler- and
 // stdlib-specific, so it cannot cross a runtime or DSO boundary safely. These
 // two types give a stable, self-owned representation instead, decoupled from any
 // one runtime and from any game (rx only, no Skyrim/recreation types leak in).
@@ -31,33 +31,31 @@ struct ScriptStringView {
       : data(s), size(0) {
     size_t length = 0;
     while (s && s[length] != '\0') {
-      if (length == std::numeric_limits<u32>::max())
-        throw std::bad_array_new_length();
+      BASE_FATAL_CHECK(length < base::MinMax<u32>::max(), "script string longer than u32");
       ++length;
     }
     size = static_cast<u32>(length);
   }
-  ScriptStringView(std::string_view s)  // NOLINT(google-explicit-constructor)
+  ScriptStringView(base::StringRef s)  // NOLINT(google-explicit-constructor)
       : data(s.data()) {
-    if (s.size() > std::numeric_limits<u32>::max())
-      throw std::bad_array_new_length();
+    BASE_FATAL_CHECK(s.size() <= base::MinMax<u32>::max(), "script string longer than u32");
     size = static_cast<u32>(s.size());
   }
 
-  constexpr std::string_view view() const { return {data, size}; }
-  constexpr operator std::string_view() const { return view(); }  // NOLINT
+  constexpr base::StringRef view() const { return {data, size}; }
+  constexpr operator base::StringRef() const { return view(); }  // NOLINT
   bool empty() const { return size == 0; }
 };
 static_assert(sizeof(ScriptStringView) == 16, "ABI-boundary layout must stay fixed");
 
 // The owning value: what a handler that RETURNS or STORES a string yields. Owns
-// a null-terminated UTF-8 buffer with an explicit layout (not std::string), and
+// a null-terminated UTF-8 buffer with an explicit layout (not base::String), and
 // serializes as a u32 length followed by its bytes.
 class ScriptString {
  public:
   ScriptString() = default;
   RX_SCRIPT_EXPORT ScriptString(ScriptStringView s);  // NOLINT
-  ScriptString(std::string_view s) : ScriptString(ScriptStringView(s)) {}  // NOLINT
+  ScriptString(base::StringRef s) : ScriptString(ScriptStringView(s)) {}  // NOLINT
   RX_SCRIPT_EXPORT ScriptString(const char* s);  // NOLINT
   RX_SCRIPT_EXPORT ScriptString(const ScriptString& o);
   RX_SCRIPT_EXPORT ScriptString(ScriptString&& o) noexcept;
@@ -88,7 +86,7 @@ class ScriptString {
 // name once and dispatch by id.
 enum class StrId : u64 {};
 
-constexpr StrId HashStr(std::string_view s) {
+constexpr StrId HashStr(base::StringRef s) {
   return static_cast<StrId>(Fnv1a(s));
 }
 

@@ -1,11 +1,9 @@
 #include "demo_lookdev.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstring>
-#include <filesystem>
-#include <span>
+#include <ctype.h>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 #if defined(RX_HAS_IMGUI)
 #include <imgui.h>
@@ -16,10 +14,18 @@
 #include "asset/gltf_loader.h"
 #include "asset/primitives.h"
 #include "asset/scene_import.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "render/post/reference_compare.h"
 #include "scene/components.h"
+#include "core/file_system.h"
 
 namespace rx {
 namespace {
@@ -103,10 +109,9 @@ const char* RegionName(HumanRegion r) {
 // named submeshes and nothing else; guessing from the name is what makes the
 // lab usable on a downloaded asset instead of only on hand-authored content.
 // It is a guess - the panel lets it be overridden per material.
-HumanRegion RegionFromName(std::string name) {
-  std::transform(name.begin(), name.end(), name.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  auto has = [&](const char* needle) { return name.find(needle) != std::string::npos; };
+HumanRegion RegionFromName(base::String name) {
+  for (char& c : name) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  auto has = [&](const char* needle) { return name.find(needle) != base::String::npos; };
   if (has("cornea")) return HumanRegion::kCornea;
   if (has("iris") || has("pupil")) return HumanRegion::kIris;
   if (has("sclera") || has("eyeball") || has("eye")) return HumanRegion::kSclera;
@@ -162,8 +167,8 @@ constexpr FitField kFitFields[] = {
 
 }  // namespace
 
-std::span<const LookdevDemo::LightStop> LookdevDemo::light_stops() { return kLightStops; }
-std::span<const LookdevDemo::CameraStop> LookdevDemo::camera_stops() { return kCameraStops; }
+base::Span<const LookdevDemo::LightStop> LookdevDemo::light_stops() { return kLightStops; }
+base::Span<const LookdevDemo::CameraStop> LookdevDemo::camera_stops() { return kCameraStops; }
 
 // A procedural sweat / sebum normal map, bound as the SPECULAR normal (Ns).
 // This is the one layer that proves the split is worth having: droplets have to
@@ -177,7 +182,7 @@ asset::Texture MakeSweatNormal(u32 size) {
   texture.width = size;
   texture.height = size;
   texture.is_srgb = false;  // a normal map is data, not colour
-  texture.data.resize(static_cast<std::size_t>(size) * size * 4);
+  texture.data.resize(static_cast<size_t>(size) * size * 4);
 
   // Deterministic droplet field: a fixed hash, so two runs of the lab produce
   // the same surface and a capture diff stays a renderer diff.
@@ -204,12 +209,12 @@ asset::Texture MakeSweatNormal(u32 size) {
           const f32 radius = cell * (0.18f + 0.22f * (static_cast<f32>((h >> 24) & 255u) / 255.0f));
           const f32 dx = static_cast<f32>(px) - (static_cast<f32>(gx) + jx) * cell;
           const f32 dy = static_cast<f32>(py) - (static_cast<f32>(gy) + jy) * cell;
-          const f32 d = std::sqrt(dx * dx + dy * dy);
+          const f32 d = ::sqrt(dx * dx + dy * dy);
           if (d >= radius || radius <= 0.0f) continue;
           // Hemispherical bead: the slope grows toward the rim.
           const f32 t = d / radius;
-          const f32 slope = t / std::sqrt(std::max(1.0f - t * t, 1e-3f));
-          const f32 k = std::min(slope, 3.0f) / 3.0f;
+          const f32 slope = t / ::sqrt(rx::Max(1.0f - t * t, 1e-3f));
+          const f32 k = rx::Min(slope, 3.0f) / 3.0f;
           if (d > 1e-4f) {
             nx += (dx / d) * k;
             ny += (dy / d) * k;
@@ -217,11 +222,11 @@ asset::Texture MakeSweatNormal(u32 size) {
         }
       }
       Vec3 n{nx, ny, 1.0f};
-      const f32 len = std::sqrt(n.x * n.x + n.y * n.y + 1.0f);
-      const std::size_t o = (static_cast<std::size_t>(py) * size + px) * 4;
-      texture.data[o + 0] = static_cast<u8>(std::clamp((n.x / len) * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f);
-      texture.data[o + 1] = static_cast<u8>(std::clamp((n.y / len) * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f);
-      texture.data[o + 2] = static_cast<u8>(std::clamp((1.0f / len) * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f);
+      const f32 len = ::sqrt(n.x * n.x + n.y * n.y + 1.0f);
+      const size_t o = (static_cast<size_t>(py) * size + px) * 4;
+      texture.data[o + 0] = static_cast<u8>(rx::Clamp((n.x / len) * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f);
+      texture.data[o + 1] = static_cast<u8>(rx::Clamp((n.y / len) * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f);
+      texture.data[o + 2] = static_cast<u8>(rx::Clamp((1.0f / len) * 0.5f + 0.5f, 0.0f, 1.0f) * 255.0f);
       texture.data[o + 3] = 255;
     }
   }
@@ -254,13 +259,13 @@ struct LookdevDemo::Impl {
     HumanRegion region = HumanRegion::kSkin;
     HumanSurfaceParameters params;
     bool enabled = true;
-    std::string name;
+    base::String name;
   };
-  std::vector<Part> parts;
-  std::vector<ecs::Entity> entities;
+  base::Vector<Part> parts;
+  base::Vector<ecs::Entity> entities;
   Vec3 subject_center{0.0f, 1.6f, 0.0f};
   f32 subject_radius = 0.12f;   // metres; the head's bounding radius
-  std::string subject_path;
+  base::String subject_path;
   bool procedural_subject = false;
   // Ns for the sweat/sebum layer; bound on every skin part, off until dialled.
   asset::AssetId sweat_normal{};
@@ -275,8 +280,8 @@ struct LookdevDemo::Impl {
   f32 gpu_budget_ms = 8.0f;  // OLAT purity: no environment unless asked for
 
   // comparison
-  std::string reference_path;
-  std::string mask_path;
+  base::String reference_path;
+  base::String mask_path;
   char reference_input[256] = {};
   char mask_input[256] = {};
 
@@ -284,8 +289,8 @@ struct LookdevDemo::Impl {
   // Parameter history: look-dev is a search, and a search without an undo is a
   // walk. Each entry is the whole part table, which is small and makes the
   // restore exact rather than field-by-field.
-  std::vector<std::vector<Part>> history;
-  std::size_t history_cursor = 0;
+  base::Vector<base::Vector<Part>> history;
+  size_t history_cursor = 0;
   f32 history_cooldown = 0.0f;
   bool dirty = false;
   bool pending_history = false;
@@ -305,16 +310,16 @@ struct LookdevDemo::Impl {
     f32 step_scale = 0.25f;
     int passes_left = 0;
     HumanRegion region = HumanRegion::kSkin;
-    std::vector<int> stops = {3, 5, 6, 7, 8};
+    base::Vector<int> stops = {3, 5, 6, 7, 8};
     f32 saved = 0.0f;
-    std::string log;
+    base::String log;
   } fit;
 
   // deterministic capture
   struct Capture {
     bool running = false;
     bool finished = false;
-    std::string dir;
+    base::String dir;
     int light = 0;
     int camera = 0;
     int settle = 0;
@@ -332,8 +337,8 @@ struct LookdevDemo::Impl {
   void SelectCamera(int index);
   void StepFit();
   void StepCapture();
-  void SavePreset(const std::string& path) const;
-  bool LoadPreset(const std::string& path);
+  void SavePreset(const base::String& path) const;
+  bool LoadPreset(const base::String& path);
   void DrawPanel();
   render::CameraPose ResolveCamera() const;
   void EmitLights(render::FrameView& view);
@@ -352,9 +357,9 @@ void LookdevDemo::Impl::BuildProceduralSubject() {
     part.name = name;
     part.region = region;
     part.params = render::HumanPreset(region);
-    part.material.id = asset::MakeAssetId(std::string("builtin/lookdev/mat_") + name);
+    part.material.id = asset::MakeAssetId(base::String("builtin/lookdev/mat_") + name);
     part.material.name = name;
-    std::memcpy(part.material.base_color_factor, color, sizeof(f32) * 3);
+    base::MemCopy(part.material.base_color_factor, color, sizeof(f32) * 3);
     part.material.base_color_factor[3] = 1.0f;
     part.material.roughness_factor = roughness;
     part.material.human = true;
@@ -389,7 +394,7 @@ void LookdevDemo::Impl::BuildProceduralSubject() {
     ctx.world->Add(e, t);
     ctx.world->Add(e, scene::Renderable{mesh.id});
     entities.push_back(e);
-    parts.push_back(std::move(part));
+    parts.push_back(base::move(part));
   };
 
   const f32 skin_color[3] = {0.62f, 0.44f, 0.35f};
@@ -429,7 +434,7 @@ void LookdevDemo::Impl::LoadSubject() {
     ctx.renderer->UploadTexture(sweat);
     sweat_normal = sweat.id;
   }
-  std::string path;
+  base::String path;
   if (const char* explicit_path = LookdevSubject.get()) path = explicit_path;
   if (path.empty() && ctx.config && !ctx.config->scene_path.empty()) path = ctx.config->scene_path;
   if (path.empty()) {
@@ -439,13 +444,13 @@ void LookdevDemo::Impl::LoadSubject() {
     // tree, so it predates this work). Pass it explicitly if you want it.
     const char* candidates[] = {"assets/head/head.glb", "assets/head/lps_head.glb"};
     for (const char* candidate : candidates) {
-      if (std::filesystem::exists(candidate)) {
+      if (fs::Exists(candidate)) {
         path = candidate;
         break;
       }
     }
   }
-  if (path.empty() || !std::filesystem::exists(path)) {
+  if (path.empty() || !fs::Exists(path)) {
     RX_INFO("lookdev: no head asset found, using the procedural stand-in "
             "(run tools/get_head_scan.sh, or pass RX_LOOKDEV_SUBJECT=<file.glb>)");
     BuildProceduralSubject();
@@ -471,8 +476,8 @@ void LookdevDemo::Impl::LoadSubject() {
       Vec3 p{v.position[0] * instance.scale + instance.position.x,
              v.position[1] * instance.scale + instance.position.y,
              v.position[2] * instance.scale + instance.position.z};
-      lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-      hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+      lo = {rx::Min(lo.x, p.x), rx::Min(lo.y, p.y), rx::Min(lo.z, p.z)};
+      hi = {rx::Max(hi.x, p.x), rx::Max(hi.y, p.y), rx::Max(hi.z, p.z)};
     }
   }
   Vec3 extent{hi.x - lo.x, hi.y - lo.y, hi.z - lo.z};
@@ -509,13 +514,13 @@ void LookdevDemo::Impl::LoadSubject() {
                  v.position[2] * instance.scale + instance.position.z};
           if (p.y < slice_floor) continue;
           const Vec3 d{p.x - subject_center.x, p.y - subject_center.y, p.z - subject_center.z};
-          r2 = std::max(r2, d.x * d.x + d.y * d.y + d.z * d.z);
+          r2 = rx::Max(r2, d.x * d.x + d.y * d.y + d.z * d.z);
         }
       }
-      subject_radius = std::max(std::sqrt(r2), 1e-3f);
+      subject_radius = rx::Max(::sqrt(r2), 1e-3f);
     } else {
       subject_center = {(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
-      subject_radius = 0.5f * std::max({extent.x, extent.y, extent.z});
+      subject_radius = 0.5f * rx::Max({extent.x, extent.y, extent.z});
     }
   }
 
@@ -526,7 +531,7 @@ void LookdevDemo::Impl::LoadSubject() {
   }
   for (asset::Material& material : scene.materials) {
     Part part;
-    part.name = material.name.empty() ? std::string("material") : material.name;
+    part.name = material.name.empty() ? base::String("material") : material.name;
     part.region = RegionFromName(part.name);
     part.params = render::HumanPreset(part.region);
     part.material = material;
@@ -545,7 +550,7 @@ void LookdevDemo::Impl::LoadSubject() {
       part.material.skin_params.mfp[2] = mfp_mm * 0.2f;
     }
     if (!ctx.config->headless) ctx.renderer->UploadMaterial(part.material);
-    parts.push_back(std::move(part));
+    parts.push_back(base::move(part));
   }
   if (!ctx.config->headless) {
     for (const asset::Mesh& mesh : scene.meshes) ctx.renderer->UploadMesh(mesh);
@@ -557,7 +562,7 @@ void LookdevDemo::Impl::LoadSubject() {
     t.position[0] = instance.position.x;
     t.position[1] = instance.position.y;
     t.position[2] = instance.position.z;
-    std::memcpy(t.rotation, instance.rotation, sizeof(f32) * 4);
+    base::MemCopy(t.rotation, instance.rotation, sizeof(f32) * 4);
     t.scale = instance.scale;
     ctx.world->Add(e, t);
     ctx.world->Add(e, scene::Renderable{mesh.id});
@@ -582,8 +587,8 @@ void LookdevDemo::Impl::ApplyPartsToRenderer() {
 // rig
 
 render::CameraPose LookdevDemo::Impl::ResolveCamera() const {
-  const CameraStop& stop = kCameraStops[std::clamp(camera_index, 0,
-                                                   static_cast<int>(std::size(kCameraStops)) - 1)];
+  const CameraStop& stop = kCameraStops[rx::Clamp(camera_index, 0,
+                                                   static_cast<int>((sizeof(kCameraStops) / sizeof(kCameraStops[0]))) - 1)];
   const f32 yaw = stop.yaw_degrees * kDeg;
   const f32 pitch = stop.pitch_degrees * kDeg;
   // Distances are authored for a head of ~0.115 m radius; scaling by the actual
@@ -592,15 +597,15 @@ render::CameraPose LookdevDemo::Impl::ResolveCamera() const {
   const f32 distance = stop.distance * scale;
   render::CameraPose pose;
   pose.target = subject_center;
-  pose.eye = {subject_center.x + std::sin(yaw) * std::cos(pitch) * distance,
-              subject_center.y - std::sin(pitch) * distance,
-              subject_center.z - std::cos(yaw) * std::cos(pitch) * distance};
+  pose.eye = {subject_center.x + ::sin(yaw) * ::cos(pitch) * distance,
+              subject_center.y - ::sin(pitch) * distance,
+              subject_center.z - ::cos(yaw) * ::cos(pitch) * distance};
   pose.fov_y = stop.fov_degrees * kDeg;
   return pose;
 }
 
 void LookdevDemo::Impl::SelectLight(int index) {
-  const int count = static_cast<int>(std::size(kLightStops));
+  const int count = static_cast<int>((sizeof(kLightStops) / sizeof(kLightStops[0])));
   light_index = ((index % count) + count) % count;
   const LightStop& stop = kLightStops[light_index];
   render::RenderSettings& s = ctx.renderer->settings();
@@ -621,7 +626,7 @@ void LookdevDemo::Impl::SelectLight(int index) {
 }
 
 void LookdevDemo::Impl::SelectCamera(int index) {
-  const int count = static_cast<int>(std::size(kCameraStops));
+  const int count = static_cast<int>((sizeof(kCameraStops) / sizeof(kCameraStops[0])));
   camera_index = ((index % count) + count) % count;
 }
 
@@ -632,7 +637,7 @@ void LookdevDemo::Impl::EmitLights(render::FrameView& view) {
   const Vec3 t = Normalize(stop.travel);
   // Place the emitter a fixed multiple of the subject size back along the light
   // direction, so a stop frames the same way on any asset.
-  const f32 distance = std::max(subject_radius * 6.0f, 0.6f);
+  const f32 distance = rx::Max(subject_radius * 6.0f, 0.6f);
   // An area light's `intensity` is RADIANCE, so a 0.9 m panel and an 8 mm ball
   // at the same number differ by three orders of magnitude in how much light
   // they put on the face. The stops are authored as an ILLUMINANCE target (the
@@ -643,7 +648,7 @@ void LookdevDemo::Impl::EmitLights(render::FrameView& view) {
     render::PointLight light;
     const Vec3 d = Normalize(travel);
     const f32 area = (type == 3u) ? (2.0f * size) * (2.0f * size) : kPi * size * size;
-    const f32 solid_angle = std::max(area / std::max(distance * distance, 1e-6f), 1e-6f);
+    const f32 solid_angle = rx::Max(area / rx::Max(distance * distance, 1e-6f), 1e-6f);
     const f32 intensity = illuminance / solid_angle;
     light.pos_radius[0] = subject_center.x - d.x * distance;
     light.pos_radius[1] = subject_center.y - d.y * distance;
@@ -715,7 +720,7 @@ void LookdevDemo::Impl::StepFit() {
     fit.running = false;
     return;
   }
-  const int field_count = static_cast<int>(std::size(kFitFields));
+  const int field_count = static_cast<int>((sizeof(kFitFields) / sizeof(kFitFields[0])));
   // Skip fields above the current stage.
   while (fit.field < field_count && kFitFields[fit.field].stage > fit.stage) ++fit.field;
   if (fit.field >= field_count) {
@@ -747,7 +752,7 @@ void LookdevDemo::Impl::StepFit() {
   if (!range.known) {
     // Stepping a field over a made-up range is not a fit, it is a random walk.
     fit.running = false;
-    fit.log = std::string("no safe range for ") + field.name;
+    fit.log = base::String("no safe range for ") + field.name;
     return;
   }
   f32& value = target->params.*(field.member);
@@ -777,23 +782,23 @@ void LookdevDemo::Impl::StepFit() {
   const f32 step = span * fit.step_scale * 0.25f;
   if (fit.probe == 0) {
     fit.saved = value;
-    value = std::clamp(fit.saved - step, range.lo, range.hi);
+    value = rx::Clamp(fit.saved - step, range.lo, range.hi);
     fit.probe = 1;
   } else if (fit.probe == 1) {
-    value = std::clamp(fit.saved + step, range.lo, range.hi);
+    value = rx::Clamp(fit.saved + step, range.lo, range.hi);
     fit.probe = 2;
   } else {
     const bool minus = fit.error[1] < fit.error[0] && fit.error[1] <= fit.error[2];
     const bool plus = fit.error[2] < fit.error[0] && fit.error[2] < fit.error[1];
     if (minus) {
-      value = std::clamp(fit.saved - step, range.lo, range.hi);
+      value = rx::Clamp(fit.saved - step, range.lo, range.hi);
     } else if (plus) {
-      value = std::clamp(fit.saved + step, range.lo, range.hi);
+      value = rx::Clamp(fit.saved + step, range.lo, range.hi);
     } else {
       value = fit.saved;  // neither direction helped; leave it alone
     }
     char line[192];
-    std::snprintf(line, sizeof(line), "%s %.4f (%s)\n", field.name, value,
+    ::snprintf(line, sizeof(line), "%s %.4f (%s)\n", field.name, value,
                   minus ? "-" : (plus ? "+" : "="));
     fit.log += line;
     ++fit.field;
@@ -818,8 +823,8 @@ void LookdevDemo::Impl::StepCapture() {
     --capture.settle;
     return;
   }
-  const int lights = static_cast<int>(std::size(kLightStops));
-  const int cameras = static_cast<int>(std::size(kCameraStops));
+  const int lights = static_cast<int>((sizeof(kLightStops) / sizeof(kLightStops[0])));
+  const int cameras = static_cast<int>((sizeof(kCameraStops) / sizeof(kCameraStops[0])));
   if (capture.light >= lights) {
     capture.running = false;
     capture.finished = true;
@@ -827,7 +832,7 @@ void LookdevDemo::Impl::StepCapture() {
     return;
   }
   char name[512];
-  std::snprintf(name, sizeof(name), "%s/lookdev_%02d_%s__%s.png", capture.dir.c_str(),
+  ::snprintf(name, sizeof(name), "%s/lookdev_%02d_%s__%s.png", capture.dir.c_str(),
                 capture.light, kLightStops[capture.light].name + 3,
                 kCameraStops[capture.camera].name);
   // Spaces in a stop name would make the filename awkward to script over.
@@ -849,57 +854,57 @@ void LookdevDemo::Impl::StepCapture() {
 // A flat key=value file, one section per part. Deliberately not a binary blob:
 // a validation preset is something people diff, review and paste into a bug.
 
-void LookdevDemo::Impl::SavePreset(const std::string& path) const {
-  FILE* f = std::fopen(path.c_str(), "wb");
+void LookdevDemo::Impl::SavePreset(const base::String& path) const {
+  FILE* f = ::fopen(path.c_str(), "wb");
   if (!f) {
     RX_WARN("lookdev: cannot write {}", path);
     return;
   }
-  std::fprintf(f, "# rx character look-dev preset\n");
-  std::fprintf(f, "model_version %u\n", render::kHumanModelVersion);
-  std::fprintf(f, "subject %s\n", subject_path.empty() ? "<procedural>" : subject_path.c_str());
-  std::fprintf(f, "light %d\ncamera %d\ntier %d\nexposure %.6f\n", light_index, camera_index,
+  ::fprintf(f, "# rx character look-dev preset\n");
+  ::fprintf(f, "model_version %u\n", render::kHumanModelVersion);
+  ::fprintf(f, "subject %s\n", subject_path.empty() ? "<procedural>" : subject_path.c_str());
+  ::fprintf(f, "light %d\ncamera %d\ntier %d\nexposure %.6f\n", light_index, camera_index,
                static_cast<int>(tier), exposure_scale);
   for (const Part& part : parts) {
     const HumanSurfaceParameters& p = part.params;
-    std::fprintf(f, "\n[part] %s\nregion %s\nenabled %d\n", part.name.c_str(),
+    ::fprintf(f, "\n[part] %s\nregion %s\nenabled %d\n", part.name.c_str(),
                  RegionName(part.region), part.enabled ? 1 : 0);
-    std::fprintf(f, "diffuse_fresnel %.6f %.6f %.6f\n", p.diffuse_fresnel_peak,
+    ::fprintf(f, "diffuse_fresnel %.6f %.6f %.6f\n", p.diffuse_fresnel_peak,
                  p.diffuse_fresnel_falloff, p.diffuse_fresnel_tangent_falloff);
-    std::fprintf(f, "retro %.6f %.6f %.6f\n", p.retroreflection_peak, p.retroreflection_falloff,
+    ::fprintf(f, "retro %.6f %.6f %.6f\n", p.retroreflection_peak, p.retroreflection_falloff,
                  p.retroreflection_tangent_falloff);
-    std::fprintf(f, "terminator %.6f %.6f\n", p.smooth_terminator_amount,
+    ::fprintf(f, "terminator %.6f %.6f\n", p.smooth_terminator_amount,
                  p.smooth_terminator_length);
-    std::fprintf(f, "specular %.6f %.6f %.6f\n", p.specular_fresnel_falloff,
+    ::fprintf(f, "specular %.6f %.6f %.6f\n", p.specular_fresnel_falloff,
                  p.secondary_roughness_scale, p.secondary_specular_weight);
-    std::fprintf(f, "transport %.6f %.6f %.6f %.6f %.6f\n", p.mean_free_path, p.subsurface_scale,
+    ::fprintf(f, "transport %.6f %.6f %.6f %.6f %.6f\n", p.mean_free_path, p.subsurface_scale,
                  p.transmission, p.extinction_scale, p.thickness_scale);
-    std::fprintf(f, "tint %.6f %.6f %.6f\n", p.transmission_tint[0], p.transmission_tint[1],
+    ::fprintf(f, "tint %.6f %.6f %.6f\n", p.transmission_tint[0], p.transmission_tint[1],
                  p.transmission_tint[2]);
-    std::fprintf(f, "layer %.6f %.6f %.6f\n", p.corneal_wetness, p.cavity_occlusion,
+    ::fprintf(f, "layer %.6f %.6f %.6f\n", p.corneal_wetness, p.cavity_occlusion,
                  p.specular_normal_strength);
-    std::fprintf(f, "eye %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n", p.iris_depth, p.iris_radius,
+    ::fprintf(f, "eye %.6f %.6f %.6f %.6f %.6f %.6f %.6f\n", p.iris_depth, p.iris_radius,
                  p.pupil_scale, p.limbal_ring_size, p.limbal_ring_power, p.cornea_ior,
                  p.iris_shadow_depth);
-    std::fprintf(f, "residual %.6f\n", p.residual_weight);
+    ::fprintf(f, "residual %.6f\n", p.residual_weight);
   }
-  std::fclose(f);
+  ::fclose(f);
   RX_INFO("lookdev: preset written to {}", path);
 }
 
-bool LookdevDemo::Impl::LoadPreset(const std::string& path) {
-  FILE* f = std::fopen(path.c_str(), "rb");
+bool LookdevDemo::Impl::LoadPreset(const base::String& path) {
+  FILE* f = ::fopen(path.c_str(), "rb");
   if (!f) return false;
   char line[512];
   Part* current = nullptr;
-  while (std::fgets(line, sizeof(line), f)) {
+  while (::fgets(line, sizeof(line), f)) {
     if (line[0] == '#' || line[0] == '\n') continue;
     char key[64] = {};
-    if (std::sscanf(line, "%63s", key) != 1) continue;
-    const char* rest = line + std::strlen(key);
-    if (std::strcmp(key, "[part]") == 0) {
+    if (::sscanf(line, "%63s", key) != 1) continue;
+    const char* rest = line + ::strlen(key);
+    if (::strcmp(key, "[part]") == 0) {
       char name[192] = {};
-      std::sscanf(rest, " %191[^\n]", name);
+      ::sscanf(rest, " %191[^\n]", name);
       current = nullptr;
       for (Part& part : parts) {
         if (part.name == name) {
@@ -909,9 +914,9 @@ bool LookdevDemo::Impl::LoadPreset(const std::string& path) {
       }
       continue;
     }
-    if (std::strcmp(key, "model_version") == 0) {
+    if (::strcmp(key, "model_version") == 0) {
       u32 version = 0;
-      std::sscanf(rest, " %u", &version);
+      ::sscanf(rest, " %u", &version);
       if (version != render::kHumanModelVersion) {
         // Fitted numbers are measurements against a specific model. Loading
         // them under a different one produces plausible-looking values that are
@@ -919,63 +924,63 @@ bool LookdevDemo::Impl::LoadPreset(const std::string& path) {
         RX_WARN("lookdev: preset {} was fitted against model version {}, this build is {} - "
                 "not loading",
                 path, version, render::kHumanModelVersion);
-        std::fclose(f);
+        ::fclose(f);
         return false;
       }
       continue;
     }
-    if (std::strcmp(key, "light") == 0) {
-      std::sscanf(rest, " %d", &light_index);
+    if (::strcmp(key, "light") == 0) {
+      ::sscanf(rest, " %d", &light_index);
       continue;
     }
-    if (std::strcmp(key, "camera") == 0) {
-      std::sscanf(rest, " %d", &camera_index);
+    if (::strcmp(key, "camera") == 0) {
+      ::sscanf(rest, " %d", &camera_index);
       continue;
     }
-    if (std::strcmp(key, "tier") == 0) {
+    if (::strcmp(key, "tier") == 0) {
       int t = 0;
-      std::sscanf(rest, " %d", &t);
-      tier = static_cast<HumanTier>(std::clamp(t, 0, 2));
+      ::sscanf(rest, " %d", &t);
+      tier = static_cast<HumanTier>(rx::Clamp(t, 0, 2));
       continue;
     }
-    if (std::strcmp(key, "exposure") == 0) {
-      std::sscanf(rest, " %f", &exposure_scale);
+    if (::strcmp(key, "exposure") == 0) {
+      ::sscanf(rest, " %f", &exposure_scale);
       continue;
     }
     if (!current) continue;
     HumanSurfaceParameters& p = current->params;
-    if (std::strcmp(key, "diffuse_fresnel") == 0) {
-      std::sscanf(rest, " %f %f %f", &p.diffuse_fresnel_peak, &p.diffuse_fresnel_falloff,
+    if (::strcmp(key, "diffuse_fresnel") == 0) {
+      ::sscanf(rest, " %f %f %f", &p.diffuse_fresnel_peak, &p.diffuse_fresnel_falloff,
                   &p.diffuse_fresnel_tangent_falloff);
-    } else if (std::strcmp(key, "retro") == 0) {
-      std::sscanf(rest, " %f %f %f", &p.retroreflection_peak, &p.retroreflection_falloff,
+    } else if (::strcmp(key, "retro") == 0) {
+      ::sscanf(rest, " %f %f %f", &p.retroreflection_peak, &p.retroreflection_falloff,
                   &p.retroreflection_tangent_falloff);
-    } else if (std::strcmp(key, "terminator") == 0) {
-      std::sscanf(rest, " %f %f", &p.smooth_terminator_amount, &p.smooth_terminator_length);
-    } else if (std::strcmp(key, "specular") == 0) {
-      std::sscanf(rest, " %f %f %f", &p.specular_fresnel_falloff, &p.secondary_roughness_scale,
+    } else if (::strcmp(key, "terminator") == 0) {
+      ::sscanf(rest, " %f %f", &p.smooth_terminator_amount, &p.smooth_terminator_length);
+    } else if (::strcmp(key, "specular") == 0) {
+      ::sscanf(rest, " %f %f %f", &p.specular_fresnel_falloff, &p.secondary_roughness_scale,
                   &p.secondary_specular_weight);
-    } else if (std::strcmp(key, "transport") == 0) {
-      std::sscanf(rest, " %f %f %f %f %f", &p.mean_free_path, &p.subsurface_scale, &p.transmission,
+    } else if (::strcmp(key, "transport") == 0) {
+      ::sscanf(rest, " %f %f %f %f %f", &p.mean_free_path, &p.subsurface_scale, &p.transmission,
                   &p.extinction_scale, &p.thickness_scale);
-    } else if (std::strcmp(key, "tint") == 0) {
-      std::sscanf(rest, " %f %f %f", &p.transmission_tint[0], &p.transmission_tint[1],
+    } else if (::strcmp(key, "tint") == 0) {
+      ::sscanf(rest, " %f %f %f", &p.transmission_tint[0], &p.transmission_tint[1],
                   &p.transmission_tint[2]);
-    } else if (std::strcmp(key, "layer") == 0) {
-      std::sscanf(rest, " %f %f %f", &p.corneal_wetness, &p.cavity_occlusion,
+    } else if (::strcmp(key, "layer") == 0) {
+      ::sscanf(rest, " %f %f %f", &p.corneal_wetness, &p.cavity_occlusion,
                   &p.specular_normal_strength);
-    } else if (std::strcmp(key, "eye") == 0) {
-      std::sscanf(rest, " %f %f %f %f %f %f %f", &p.iris_depth, &p.iris_radius, &p.pupil_scale,
+    } else if (::strcmp(key, "eye") == 0) {
+      ::sscanf(rest, " %f %f %f %f %f %f %f", &p.iris_depth, &p.iris_radius, &p.pupil_scale,
                   &p.limbal_ring_size, &p.limbal_ring_power, &p.cornea_ior, &p.iris_shadow_depth);
-    } else if (std::strcmp(key, "residual") == 0) {
-      std::sscanf(rest, " %f", &p.residual_weight);
-    } else if (std::strcmp(key, "enabled") == 0) {
+    } else if (::strcmp(key, "residual") == 0) {
+      ::sscanf(rest, " %f", &p.residual_weight);
+    } else if (::strcmp(key, "enabled") == 0) {
       int e = 1;
-      std::sscanf(rest, " %d", &e);
+      ::sscanf(rest, " %d", &e);
       current->enabled = e != 0;
     }
   }
-  std::fclose(f);
+  ::fclose(f);
   ApplyPartsToRenderer();
   SelectLight(light_index);
   RX_INFO("lookdev: preset loaded from {}", path);
@@ -1000,14 +1005,14 @@ void LookdevDemo::Impl::DrawPanel() {
     if (ImGui::CollapsingHeader("Rig", ImGuiTreeNodeFlags_DefaultOpen)) {
       int light = light_index;
       if (ImGui::SliderInt("OLAT light", &light, 0,
-                           static_cast<int>(std::size(kLightStops)) - 1,
+                           static_cast<int>((sizeof(kLightStops) / sizeof(kLightStops[0]))) - 1,
                            kLightStops[light_index].name)) {
         SelectLight(light);
       }
       ImGui::TextDisabled("left/right arrows cycle lights, up/down cycle cameras");
       int camera = camera_index;
       if (ImGui::SliderInt("Camera", &camera, 0,
-                           static_cast<int>(std::size(kCameraStops)) - 1,
+                           static_cast<int>((sizeof(kCameraStops) / sizeof(kCameraStops[0]))) - 1,
                            kCameraStops[camera_index].name)) {
         SelectCamera(camera);
       }
@@ -1026,9 +1031,9 @@ void LookdevDemo::Impl::DrawPanel() {
                            "preset caps this hardware at tier %d", cap);
       }
       const f32 head_px = ImGui::GetIO().DisplaySize.y * 2.0f * subject_radius /
-                          std::max(kCameraStops[camera_index].distance *
+                          rx::Max(kCameraStops[camera_index].distance *
                                        (subject_radius / 0.115f) *
-                                       std::tan(kCameraStops[camera_index].fov_degrees * kDeg * 0.5f) *
+                                       ::tan(kCameraStops[camera_index].fov_degrees * kDeg * 0.5f) *
                                        2.0f,
                                    1e-4f);
       ImGui::Text("subject height: %.0f px -> tier %d suggested", head_px,
@@ -1071,7 +1076,7 @@ void LookdevDemo::Impl::DrawPanel() {
       cs.exposure_scale = exposure_scale;
       if (cs.collect_stats) {
         const Compare::Stats stats = compare.stats(cs.region);
-        ImGui::Text("rmse %.5f   mae %.5f   coverage %.0f px", std::sqrt(stats.mean_squared_error),
+        ImGui::Text("rmse %.5f   mae %.5f   coverage %.0f px", ::sqrt(stats.mean_squared_error),
                     stats.mean_absolute_error, stats.coverage);
       }
       ImGui::SliderFloat("frozen exposure", &exposure_scale, 0.05f, 8.0f, "%.3f",
@@ -1092,9 +1097,10 @@ void LookdevDemo::Impl::DrawPanel() {
         for (Part& part : parts) ReseedShaping(part.params, render::HumanNeutral());
         dirty = true;
       }
-      ImGui::TextDisabled("history %zu/%zu", history_cursor, history.size());
+      ImGui::TextDisabled("history %zu/%zu", history_cursor,
+                           static_cast<size_t>(history.size()));
 
-      for (std::size_t i = 0; i < parts.size(); ++i) {
+      for (size_t i = 0; i < parts.size(); ++i) {
         Part& part = parts[i];
         ImGui::PushID(static_cast<int>(i));
         if (ImGui::TreeNodeEx(part.name.c_str(),
@@ -1196,8 +1202,7 @@ void LookdevDemo::Impl::DrawPanel() {
         capture = Capture{};
         capture.running = true;
         capture.dir = LookdevShots.get() ? LookdevShots.get() : "build/lookdev-shots";
-        std::error_code ec;
-        std::filesystem::create_directories(capture.dir, ec);
+        fs::CreateDirectories(capture.dir);
         SelectLight(0);
         SelectCamera(0);
         capture.settle = 12;
@@ -1228,7 +1233,7 @@ void LookdevDemo::Impl::DrawPanel() {
 
 // public
 
-LookdevDemo::LookdevDemo(EngineContext& ctx) : impl_(std::make_unique<Impl>(ctx)) {}
+LookdevDemo::LookdevDemo(EngineContext& ctx) : impl_(base::MakeUnique<Impl>(ctx)) {}
 LookdevDemo::~LookdevDemo() = default;
 
 void LookdevDemo::Create() {
@@ -1280,7 +1285,7 @@ void LookdevDemo::Create() {
   auto& compare = impl_->ctx.renderer->reference_compare();
   if (const char* ref = LookdevReference.get()) {
     impl_->reference_path = ref;
-    std::snprintf(impl_->reference_input, sizeof(impl_->reference_input), "%s", ref);
+    ::snprintf(impl_->reference_input, sizeof(impl_->reference_input), "%s", ref);
     compare.LoadReference(*impl_->ctx.renderer->device(), impl_->reference_path);
     compare.settings().mode = Compare::Mode::kWipe;
   }
@@ -1288,8 +1293,7 @@ void LookdevDemo::Create() {
   if (const char* shots = LookdevShots.get()) {
     impl_->capture.running = true;
     impl_->capture.dir = shots;
-    std::error_code ec;
-    std::filesystem::create_directories(impl_->capture.dir, ec);
+    fs::CreateDirectories(impl_->capture.dir);
     impl_->SelectLight(0);
     impl_->SelectCamera(0);
     impl_->capture.settle = 16;
@@ -1337,7 +1341,7 @@ void LookdevDemo::Emit(f32 dt, render::FrameView& view) {
     impl_->PushHistory();
     impl_->pending_history = false;
   }
-  impl_->history_cooldown = std::max(impl_->history_cooldown - dt, 0.0f);
+  impl_->history_cooldown = rx::Max(impl_->history_cooldown - dt, 0.0f);
 
   impl_->StepFit();
   impl_->StepCapture();

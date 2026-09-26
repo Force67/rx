@@ -1,7 +1,9 @@
+#include "core/scalar.h"
 #include "nav/navmesh.h"
+#include "core/sort.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
 namespace rx::nav {
 
@@ -14,8 +16,8 @@ NavMesh::NavMesh(const NavMeshConfig& config) : config_(config) {
 
 void NavMesh::SetAreaCost(AreaId area, f32 traverse_multiplier, f32 entry_cost) {
   if (area >= kMaxAreas) return;
-  traverse_mult_[area] = std::max(traverse_multiplier, 0.01f);
-  entry_cost_[area] = std::max(entry_cost, 0.0f);
+  traverse_mult_[area] = rx::Max(traverse_multiplier, 0.01f);
+  entry_cost_[area] = rx::Max(entry_cost, 0.0f);
 }
 
 bool NavMesh::BuildTile(i32 tx, i32 tz, SampleFn& sample) {
@@ -43,10 +45,10 @@ bool NavMesh::BuildTile(i32 tx, i32 tz, SampleFn& sample) {
 
 u32 NavMesh::EnsureBubble(const Vec3& center, f32 radius, SampleFn& sample, u32 max_tiles) {
   const f32 tile_m = config_.cell_size * static_cast<f32>(config_.tile_cells);
-  const i32 t0x = static_cast<i32>(std::floor((center.x - radius) / tile_m));
-  const i32 t1x = static_cast<i32>(std::floor((center.x + radius) / tile_m));
-  const i32 t0z = static_cast<i32>(std::floor((center.z - radius) / tile_m));
-  const i32 t1z = static_cast<i32>(std::floor((center.z + radius) / tile_m));
+  const i32 t0x = static_cast<i32>(::floor((center.x - radius) / tile_m));
+  const i32 t1x = static_cast<i32>(::floor((center.x + radius) / tile_m));
+  const i32 t0z = static_cast<i32>(::floor((center.z - radius) / tile_m));
+  const i32 t1z = static_cast<i32>(::floor((center.z + radius) / tile_m));
 
   // Missing tiles, then nearest-first so the ground under the agents exists
   // before the bubble rim does.
@@ -66,8 +68,9 @@ u32 NavMesh::EnsureBubble(const Vec3& center, f32 radius, SampleFn& sample, u32 
       missing.push_back({tx, tz, d2});
     }
   }
-  std::sort(missing.begin(), missing.end(),
-            [](const Want& a, const Want& b) { return a.dist2 < b.dist2; });
+  // Stable: symmetric tiles tie, and max_tiles cuts the list.
+  rx::StableSort(missing.data(), missing.data() + missing.size(),
+                 [](const Want& a, const Want& b) { return a.dist2 < b.dist2; });
   u32 built = 0;
   for (const Want& w : missing) {
     if (built >= max_tiles) break;
@@ -93,10 +96,10 @@ u32 NavMesh::RemoveTilesBeyond(const Vec3& center, f32 radius) {
 void NavMesh::PaintDisc(const Vec3& center, f32 radius, AreaId area) {
   if (area >= kMaxAreas) return;
   const f32 cs = config_.cell_size;
-  const i32 c0x = static_cast<i32>(std::floor((center.x - radius) / cs));
-  const i32 c1x = static_cast<i32>(std::floor((center.x + radius) / cs));
-  const i32 c0z = static_cast<i32>(std::floor((center.z - radius) / cs));
-  const i32 c1z = static_cast<i32>(std::floor((center.z + radius) / cs));
+  const i32 c0x = static_cast<i32>(::floor((center.x - radius) / cs));
+  const i32 c1x = static_cast<i32>(::floor((center.x + radius) / cs));
+  const i32 c0z = static_cast<i32>(::floor((center.z - radius) / cs));
+  const i32 c1z = static_cast<i32>(::floor((center.z + radius) / cs));
   const i32 n = static_cast<i32>(config_.tile_cells);
   u64 last_tile = ~0ull;
   Tile* tile = nullptr;
@@ -170,13 +173,13 @@ u32 NavMesh::TileVersionByKey(u64 key) const {
 
 CellRef NavMesh::CellAt(const Vec3& pos) const {
   const f32 cs = config_.cell_size;
-  return {static_cast<i32>(std::floor(pos.x / cs)), static_cast<i32>(std::floor(pos.z / cs))};
+  return {static_cast<i32>(::floor(pos.x / cs)), static_cast<i32>(::floor(pos.z / cs))};
 }
 
 Vec3 NavMesh::CellCenter(CellRef cell) const {
   const f32 cs = config_.cell_size;
   f32 y = CellHeight(cell);
-  if (std::isnan(y)) y = 0;
+  if (::isnan(y)) y = 0;
   return {(static_cast<f32>(cell.x) + 0.5f) * cs, y, (static_cast<f32>(cell.z) + 0.5f) * cs};
 }
 
@@ -198,8 +201,8 @@ bool NavMesh::HeightAt(f32 x, f32 z, f32* out_height) const {
   // Sample space where integer coordinates sit on cell centers.
   const f32 sx = x / cs - 0.5f;
   const f32 sz = z / cs - 0.5f;
-  const i32 x0 = static_cast<i32>(std::floor(sx));
-  const i32 z0 = static_cast<i32>(std::floor(sz));
+  const i32 x0 = static_cast<i32>(::floor(sx));
+  const i32 z0 = static_cast<i32>(::floor(sz));
   const f32 fx = sx - static_cast<f32>(x0);
   const f32 fz = sz - static_cast<f32>(z0);
   f32 h[4];
@@ -208,7 +211,7 @@ bool NavMesh::HeightAt(f32 x, f32 z, f32* out_height) const {
   f32 weight_sum = 0, height_sum = 0;
   for (int i = 0; i < 4; ++i) {
     h[i] = CellHeight(cells[i]);
-    if (std::isnan(h[i])) continue;
+    if (::isnan(h[i])) continue;
     weight_sum += w[i];
     height_sum += h[i] * w[i];
   }
@@ -222,13 +225,13 @@ bool NavMesh::Reachable(CellRef from, CellRef to) const {
   const Tile* ta = TileOf(from, &ia);
   const Tile* tb = TileOf(to, &ib);
   if (!ta || !tb || ta->area[ia] == kAreaNone || tb->area[ib] == kAreaNone) return false;
-  return std::fabs(ta->height[ia] - tb->height[ib]) <= config_.max_step;
+  return ::fabs(ta->height[ia] - tb->height[ib]) <= config_.max_step;
 }
 
 CellRef NavMesh::ClampToWalkable(const Vec3& pos, f32 max_radius) const {
   const CellRef at = CellAt(pos);
   if (Walkable(at)) return at;
-  const i32 rings = static_cast<i32>(std::ceil(max_radius / config_.cell_size));
+  const i32 rings = static_cast<i32>(::ceil(max_radius / config_.cell_size));
   // Ring scan outward; within a ring prefer the cell nearest to pos.
   for (i32 r = 1; r <= rings; ++r) {
     CellRef best;
@@ -279,7 +282,7 @@ NavRaycast NavMesh::Raycast(const Vec3& from, const Vec3& to) const {
   // Amanatides & Woo traversal over the cell grid.
   const f32 dx = to.x - from.x;
   const f32 dz = to.z - from.z;
-  const f32 len = std::sqrt(dx * dx + dz * dz);
+  const f32 len = ::sqrt(dx * dx + dz * dz);
   const i32 step_x = dx > 0 ? 1 : -1;
   const i32 step_z = dz > 0 ? 1 : -1;
   const f32 inv_dx = dx != 0 ? 1.0f / dx : 0;
@@ -293,16 +296,16 @@ NavRaycast NavMesh::Raycast(const Vec3& from, const Vec3& to) const {
   AreaId prev_area = Area(cell);
   // Generous bound: the traversal visits at most dx+dz+1 cells.
   const i32 max_steps =
-      std::abs(end.x - cell.x) + std::abs(end.z - cell.z) + 2;
+      ::abs(end.x - cell.x) + ::abs(end.z - cell.z) + 2;
   for (i32 i = 0; i < max_steps && !(cell == end); ++i) {
     CellRef next = cell;
     f32 t;
     if (t_max_x < t_max_z) {
-      t = std::min(t_max_x, 1.0f);
+      t = rx::Min(t_max_x, 1.0f);
       next.x += step_x;
       t_max_x += t_delta_x;
     } else {
-      t = std::min(t_max_z, 1.0f);
+      t = rx::Min(t_max_z, 1.0f);
       next.z += step_z;
       t_max_z += t_delta_z;
     }

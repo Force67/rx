@@ -1,6 +1,6 @@
 #include "edit/selection.h"
 
-#include <algorithm>
+#include "base/algorithm.h"
 
 namespace rx::edit {
 
@@ -27,7 +27,7 @@ void Selection::Add(ecs::Entity entity) {
 
 void Selection::Toggle(ecs::Entity entity) {
   if (!entity) return;
-  auto it = std::find(entities_.begin(), entities_.end(), entity);
+  auto it = base::Find(entities_.begin(), entities_.end(), entity);
   if (it != entities_.end()) {
     entities_.erase(it);
     if (primary_ == entity) primary_ = entities_.empty() ? ecs::kInvalidEntity : entities_.back();
@@ -38,7 +38,7 @@ void Selection::Toggle(ecs::Entity entity) {
 }
 
 bool Selection::Contains(ecs::Entity entity) const {
-  return std::find(entities_.begin(), entities_.end(), entity) != entities_.end();
+  return base::Find(entities_.begin(), entities_.end(), entity) != entities_.end();
 }
 
 }  // namespace rx::edit

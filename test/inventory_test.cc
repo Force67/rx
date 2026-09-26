@@ -2,10 +2,11 @@
 // equip/unequip, and the world-item lifecycle on real Jolt (drop -> settle ->
 // pick up / hibernate / wake) plus save/load roundtrips for inventories AND
 // world items (including hibernated records).
-#include <cmath>
-#include <cstdio>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
+#include "base/containers/vector.h"
 #include "ecs/world.h"
 #include "inventory/inventory.h"
 #include "inventory/item_catalog.h"
@@ -21,7 +22,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                        \
   do {                                                                     \
     if (!(cond)) {                                                         \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                        \
     }                                                                      \
   } while (0)
@@ -147,7 +148,7 @@ void TestInventorySaveLoad() {
   a.Add(e1, inv1);
   AddItem(*a.Get<Inventory>(e1), catalog, gem, 3);
 
-  std::vector<rx::u8> blob = SaveInventories(a);
+  base::Vector<rx::u8> blob = SaveInventories(a);
   CHECK(!blob.empty());
 
   // Load into a fresh world; entities are recreated by Guid.
@@ -170,7 +171,7 @@ void TestInventorySaveLoad() {
   CHECK(seen == 2);
 
   // Corrupt blob is rejected.
-  std::vector<rx::u8> junk = {0, 1, 2, 3};
+  base::Vector<rx::u8> junk = {0, 1, 2, 3};
   CHECK(LoadInventories(b, junk) == false);
 }
 
@@ -262,7 +263,7 @@ void TestHibernateWakeAndWorldSave() {
   CHECK(live == 0);
 
   // Save while one item is hibernated; then wake near the origin.
-  std::vector<rx::u8> blob = SaveWorldItems(world, store);
+  base::Vector<rx::u8> blob = SaveWorldItems(world, store);
 
   WakeWorldItemsNear(world, physics, catalog, store, Vec3{0, 0, 0}, 40.0f);
   CHECK(store.size() == 0);
@@ -273,7 +274,7 @@ void TestHibernateWakeAndWorldSave() {
     CHECK(wi.body != 0);
   });
   CHECK(woken.index != 0xffffffff);
-  CHECK(std::abs(world.Get<scene::Transform>(woken)->position[1] - rest_y) < 0.01f);
+  CHECK(::abs(world.Get<scene::Transform>(woken)->position[1] - rest_y) < 0.01f);
 
   // Load the saved blob (item was hibernated at save time) into a fresh world:
   // it restores as a dormant store record with the same persistent id.
@@ -299,7 +300,7 @@ void TestHibernateWakeAndWorldSave() {
       DropItem(live_world, physics, catalog, live_dropper, 0, 1, s2, Vec3{0, 0, 0});
   rx::u64 live_pid = live_world.Get<WorldItem>(live_item)->persistent_id;
   WorldItemStore empty_store;
-  std::vector<rx::u8> live_blob = SaveWorldItems(live_world, empty_store);
+  base::Vector<rx::u8> live_blob = SaveWorldItems(live_world, empty_store);
 
   ecs::World reload;
   WorldItemStore reload_store;
@@ -339,7 +340,7 @@ void TestCorruptWorldItemRejection() {
   DropItem(src, physics, catalog, dropper, 0, 1, s, Vec3{0, 0, 0});
   DropItem(src, physics, catalog, dropper, 0, 1, s, Vec3{0, 0, 0});
   WorldItemStore empty;
-  std::vector<u8> blob = SaveWorldItems(src, empty);
+  base::Vector<u8> blob = SaveWorldItems(src, empty);
   CHECK(blob.size() > 16);
 
   const u32 bodies_before = physics.dynamic_body_count();
@@ -349,7 +350,7 @@ void TestCorruptWorldItemRejection() {
   // (which must fail after full parse, before any commit). Every case must be
   // rejected with no entity and no store record created.
   for (size_t cut = 8; cut < blob.size(); ++cut) {
-    std::vector<u8> truncated(blob.begin(), blob.begin() + cut);
+    base::Vector<u8> truncated(blob.begin(), blob.begin() + cut);
     ecs::World dst;
     WorldItemStore store;
     CHECK(LoadWorldItems(dst, physics, catalog, store, truncated) == false);
@@ -374,9 +375,9 @@ int main() {
   TestCorruptWorldItemRejection();
 
   if (g_failures == 0) {
-    std::printf("inventory_test: all checks passed\n");
+    ::printf("inventory_test: all checks passed\n");
     return 0;
   }
-  std::fprintf(stderr, "inventory_test: %d checks failed\n", g_failures);
+  ::fprintf(stderr, "inventory_test: %d checks failed\n", g_failures);
   return 1;
 }

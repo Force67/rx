@@ -1,9 +1,9 @@
 #ifndef RX_EDIT_SCENE_IO_H_
 #define RX_EDIT_SCENE_IO_H_
 
-#include <string>
 
 #include "asset/asset_database.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "ecs/world.h"
 
@@ -21,8 +21,8 @@ namespace rx::edit {
 // or on a nan/inf float: the format has no literal for one that reads back, so
 // it is refused (before the file is opened) rather than written as a value that
 // silently reloads as 0.
-RX_EDIT_EXPORT bool SaveScene(ecs::World& world, const std::string& file_path,
-                              std::string* error = nullptr);
+RX_EDIT_EXPORT bool SaveScene(ecs::World& world, const base::String& file_path,
+                              base::String* error = nullptr);
 
 // Loads a scene into `world`, creating fresh entities, remapping Guid-based
 // references and resolving Renderable paths through `db`. Existing entities in
@@ -37,7 +37,7 @@ RX_EDIT_EXPORT bool SaveScene(ecs::World& world, const std::string& file_path,
 // rejected strict load creates no entities. The editor stays lenient so a scene
 // saved by a build that had extra components still opens.
 RX_EDIT_EXPORT bool LoadScene(ecs::World& world, asset::AssetDatabase& db,
-                              const std::string& file_path, std::string* error = nullptr,
+                              const base::String& file_path, base::String* error = nullptr,
                               bool strict = false);
 
 }  // namespace rx::edit

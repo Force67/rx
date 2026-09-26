@@ -1,6 +1,8 @@
 #include <android/native_window.h>
 #include <volk.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 #include "core/window.h"
 
@@ -33,7 +35,7 @@ class AndroidWindow final : public AndroidWindowBase {
     return window_ ? static_cast<u32>(ANativeWindow_getHeight(window_)) : 0;
   }
 
-  std::vector<const char*> vulkan_instance_extensions() const override {
+  base::Vector<const char*> vulkan_instance_extensions() const override {
     return {"VK_KHR_surface", "VK_KHR_android_surface"};
   }
 
@@ -75,8 +77,8 @@ class AndroidWindow final : public AndroidWindowBase {
 
 }  // namespace
 
-std::unique_ptr<AndroidWindowBase> CreateAndroidWindow(ANativeWindow* window) {
-  return std::make_unique<AndroidWindow>(window);
+base::UniquePointer<AndroidWindowBase> CreateAndroidWindow(ANativeWindow* window) {
+  return base::MakeUnique<AndroidWindow>(window);
 }
 
 }  // namespace rx

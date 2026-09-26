@@ -1,10 +1,11 @@
 #ifndef RX_ECS_COMPONENT_H_
 #define RX_ECS_COMPONENT_H_
 
-#include <type_traits>
 
 #include <base/hashing/fnv1a.h>
 
+#include "base/memory/move.h"
+#include "base/meta/traits.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -46,7 +47,7 @@ consteval u64 ComponentTypeKey() {
 
 template <typename T>
 ComponentId ComponentIdFor() {
-  static_assert(std::is_move_constructible_v<T>);
+  static_assert(base::is_move_constructible_v<T>);
   static const ComponentId id = [] {
     return ResolveComponentId(
         ComponentTypeKey<T>(),
@@ -54,9 +55,9 @@ ComponentId ComponentIdFor() {
             .size = sizeof(T),
             .align = alignof(T),
             .move_construct = [](void* dst,
-                                 void* src) { new (dst) T(std::move(*static_cast<T*>(src))); },
+                                 void* src) { new (dst) T(base::move(*static_cast<T*>(src))); },
             .destruct = [](void* ptr) { static_cast<T*>(ptr)->~T(); },
-            .trivially_copyable = std::is_trivially_copyable_v<T>,
+            .trivially_copyable = base::is_trivially_copyable_v<T>,
         });
   }();
   return id;
@@ -66,7 +67,7 @@ ComponentId ComponentIdFor() {
 
 template <typename T>
 ComponentId GetComponentId() {
-  return detail::ComponentIdFor<std::remove_cvref_t<T>>();
+  return detail::ComponentIdFor<base::remove_cvref_t<T>>();
 }
 
 RX_ECS_EXPORT const ComponentInfo& GetComponentInfo(ComponentId id);

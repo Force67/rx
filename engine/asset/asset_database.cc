@@ -1,33 +1,37 @@
 #include "asset/asset_database.h"
 
-#include <mutex>
 
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
 #include "core/log.h"
 
 namespace rx::asset {
 namespace {
 
-base::String ExtensionOf(std::string_view normalized_path) {
+base::String ExtensionOf(base::StringRef normalized_path) {
   size_t dot = normalized_path.rfind('.');
-  if (dot == std::string_view::npos)
+  if (dot == base::StringRef::npos)
     return {};
-  std::string_view extension = normalized_path.substr(dot);
+  base::StringRef extension = normalized_path.substr(dot);
   return base::String(extension.data(), extension.size());
 }
 
 template <typename Asset, typename Converter>
 const Asset *
-LoadWith(std::mutex &mutex, Vfs &vfs, std::string_view path,
+LoadWith(base::Mutex &mutex, Vfs &vfs, base::StringRef path,
          const base::UnorderedMap<base::String, Converter> &converters,
          base::UnorderedMap<u64, base::UniquePointer<Asset>> &cache) {
-  std::string normalized = NormalizePath(path);
+  base::String normalized = NormalizePath(path);
   AssetId id = MakeAssetId(normalized);
   // Record the id -> path mapping so tooling (scene serialization) can write a
   // relocatable path for this asset even without a database handle. Done before
   // the cache check so it survives repeated lookups and cached failures.
   RecordAssetPath(id, normalized);
   {
-    std::scoped_lock lock(mutex);
+    base::LockGuard lock(mutex);
     if (auto *cached = cache.find(id.hash))
       return cached->Get_UseOnlyIfYouKnowWhatYouareDoing();
   }
@@ -59,9 +63,9 @@ LoadWith(std::mutex &mutex, Vfs &vfs, std::string_view path,
   // so `asset` still holds ours when the key was taken; the `asset` test keeps
   // this honest for a container that moves first (it would just mean the
   // existing entry always wins, never a use-after-move).
-  std::scoped_lock lock(mutex);
-  auto result = cache.emplace(id.hash, std::move(asset));
-  if (!result.second && asset && !*result.first) *result.first = std::move(asset);
+  base::LockGuard lock(mutex);
+  auto result = cache.emplace(id.hash, base::move(asset));
+  if (!result.second && asset && !*result.first) *result.first = base::move(asset);
   return result.first->Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
@@ -77,33 +81,33 @@ FindIn(const base::UnorderedMap<u64, base::UniquePointer<Asset>> &cache,
 
 void AssetDatabase::RegisterMeshConverter(base::String extension,
                                           MeshConverter converter) {
-  mesh_converters_.emplace(extension, std::move(converter));
+  mesh_converters_.emplace(extension, base::move(converter));
 }
 
 void AssetDatabase::RegisterTextureConverter(base::String extension,
                                              TextureConverter converter) {
-  texture_converters_.emplace(extension, std::move(converter));
+  texture_converters_.emplace(extension, base::move(converter));
 }
 
 void AssetDatabase::RegisterMaterialConverter(base::String extension,
                                               MaterialConverter converter) {
-  material_converters_.emplace(extension, std::move(converter));
+  material_converters_.emplace(extension, base::move(converter));
 }
 
-const Mesh *AssetDatabase::LoadMesh(std::string_view path) {
+const Mesh *AssetDatabase::LoadMesh(base::StringRef path) {
   return LoadWith(mutex_, vfs_, path, mesh_converters_, meshes_);
 }
 
-const Texture *AssetDatabase::LoadTexture(std::string_view path) {
+const Texture *AssetDatabase::LoadTexture(base::StringRef path) {
   return LoadWith(mutex_, vfs_, path, texture_converters_, textures_);
 }
 
-const Material *AssetDatabase::LoadMaterial(std::string_view path) {
+const Material *AssetDatabase::LoadMaterial(base::StringRef path) {
   return LoadWith(mutex_, vfs_, path, material_converters_, materials_);
 }
 
 void AssetDatabase::AddMaterial(const Material &material) {
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   if (auto *existing = materials_.find(material.id.hash)) {
     if (!*existing)
       *existing = base::MakeUnique<Material>(material);
@@ -114,66 +118,66 @@ void AssetDatabase::AddMaterial(const Material &material) {
 
 const Mesh *AssetDatabase::AddMesh(Mesh mesh) {
   u64 hash = mesh.id.hash;
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   if (auto *existing = meshes_.find(hash)) {
     if (!*existing)
-      *existing = base::MakeUnique<Mesh>(std::move(mesh));
+      *existing = base::MakeUnique<Mesh>(base::move(mesh));
     return existing->Get_UseOnlyIfYouKnowWhatYouareDoing();
   }
-  return meshes_.emplace(hash, base::MakeUnique<Mesh>(std::move(mesh)))
+  return meshes_.emplace(hash, base::MakeUnique<Mesh>(base::move(mesh)))
       .first->Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
 const Mesh *AssetDatabase::ReplaceMesh(Mesh mesh) {
   const u64 hash = mesh.id.hash;
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   if (auto *existing = meshes_.find(hash)) {
     Mesh *value = existing->Get_UseOnlyIfYouKnowWhatYouareDoing();
     if (value) {
-      *value = std::move(mesh);
+      *value = base::move(mesh);
       return value;
     }
     meshes_.erase(hash);
   }
-  return meshes_.emplace(hash, base::MakeUnique<Mesh>(std::move(mesh)))
+  return meshes_.emplace(hash, base::MakeUnique<Mesh>(base::move(mesh)))
       .first->Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
 bool AssetDatabase::RemoveMesh(AssetId id) {
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   return meshes_.erase(id.hash) != 0;
 }
 
 const Texture *AssetDatabase::AddTexture(Texture texture) {
   u64 hash = texture.id.hash;
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   if (auto *existing = textures_.find(hash)) {
     if (!*existing)
-      *existing = base::MakeUnique<Texture>(std::move(texture));
+      *existing = base::MakeUnique<Texture>(base::move(texture));
     return existing->Get_UseOnlyIfYouKnowWhatYouareDoing();
   }
-  return textures_.emplace(hash, base::MakeUnique<Texture>(std::move(texture)))
+  return textures_.emplace(hash, base::MakeUnique<Texture>(base::move(texture)))
       .first->Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
 const Material *AssetDatabase::FindMaterial(AssetId id) const {
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   return FindIn(materials_, id);
 }
 
 Material *AssetDatabase::FindMaterialMutable(AssetId id) {
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   auto *cached = materials_.find(id.hash);
   return cached ? cached->Get_UseOnlyIfYouKnowWhatYouareDoing() : nullptr;
 }
 
 const Texture *AssetDatabase::FindTexture(AssetId id) const {
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   return FindIn(textures_, id);
 }
 
 const Mesh *AssetDatabase::FindMesh(AssetId id) const {
-  std::scoped_lock lock(mutex_);
+  base::LockGuard lock(mutex_);
   return FindIn(meshes_, id);
 }
 

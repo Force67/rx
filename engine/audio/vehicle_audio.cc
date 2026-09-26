@@ -1,11 +1,13 @@
 #include "audio/vehicle_audio.h"
 
-#include <algorithm>
-#include <cmath>
-#include <memory>
+#include <math.h>
+#include <stdlib.h>
 
 #include "audio/aux_synth.h"
 #include "audio/mixer.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "core/scalar.h"
 
 namespace rx::audio {
 namespace {
@@ -45,8 +47,8 @@ f32 Dist2(const Vec3& a, const Vec3& b) {
 VehicleAudio::VehicleAudio(Mixer& mixer, const EnginePreset& preset) : mixer_(&mixer) {
   const u32 rate = mixer.output_rate();
 
-  auto start = [&](Layer& layer, std::unique_ptr<Synth> model, const Attenuation& atten) {
-    auto voice = std::make_unique<SynthVoice>(rate, std::move(model));
+  auto start = [&](Layer& layer, base::UniquePointer<Synth> model, const Attenuation& atten) {
+    auto voice = base::MakeUnique<SynthVoice>(rate, base::move(model));
     // Share the parameter mailbox before handing the voice to the mixer: the
     // mailbox outlives the voice, so Update can keep publishing after the mixer
     // retires and deletes the SynthVoice (no dangling pointer to dereference).
@@ -55,20 +57,20 @@ VehicleAudio::VehicleAudio(Mixer& mixer, const EnginePreset& preset) : mixer_(&m
     params.positional = true;
     params.gain = 0.0f;  // rise in from silence as Update feeds telemetry
     params.atten = atten;
-    layer.voice = mixer.Play(std::move(voice), params);
+    layer.voice = mixer.Play(base::move(voice), params);
     layer.sent_gain = 0.0f;
   };
 
-  start(engine_, std::make_unique<EngineSynth>(preset, rate), EngineAtten());
-  start(skid_, std::make_unique<SkidSynth>(rate), AuxAtten());
-  start(wind_, std::make_unique<WindSynth>(rate), AuxAtten());
+  start(engine_, base::MakeUnique<EngineSynth>(preset, rate), EngineAtten());
+  start(skid_, base::MakeUnique<SkidSynth>(rate), AuxAtten());
+  start(wind_, base::MakeUnique<WindSynth>(rate), AuxAtten());
 }
 
 VehicleAudio::~VehicleAudio() { Stop(); }
 
 void VehicleAudio::SetLayerGain(Layer& layer, f32 gain) {
   if (!layer.voice) return;
-  if (std::abs(gain - layer.sent_gain) < kGainEpsilon) return;
+  if (::abs(gain - layer.sent_gain) < kGainEpsilon) return;
   mixer_->SetVoiceGain(layer.voice, gain);
   layer.sent_gain = gain;
 }
@@ -83,9 +85,9 @@ void VehicleAudio::Update(const VehicleAudioState& state) {
   f32 skid_bias = 0.0f;  // -1 rear .. +1 front, shades the skid band
   f32 lat_bias = 0.0f;   // -1 left .. +1 right, pans the skid voice sideways
   if (state.wheel_count > 0) {
-    const u32 n = std::min<u32>(state.wheel_count, 4u);
+    const u32 n = rx::Min<u32>(state.wheel_count, 4u);
     f32 mx = 0.0f;
-    for (u32 w = 0; w < n; ++w) mx = std::max(mx, state.wheel_slip[w]);
+    for (u32 w = 0; w < n; ++w) mx = rx::Max(mx, state.wheel_slip[w]);
     slip = mx;  // intensity from the worst-slipping wheel
     if (n >= 4) {
       // Order is FL FR RL RR. Bias by which side / axle washes more.
@@ -120,7 +122,7 @@ void VehicleAudio::Update(const VehicleAudioState& state) {
   SynthParams params;
   params.rpm = state.rpm;
   params.load = state.load;
-  params.throttle = std::fabs(state.throttle);  // signed input (astern); use its magnitude
+  params.throttle = ::fabs(state.throttle);  // signed input (astern); use its magnitude
   params.speed_mps = state.speed_mps;
   params.slip = slip;
   params.muffle = state.submerged ? 1.0f : 0.0f;  // synth-side dark/duck (smoothed)
@@ -173,7 +175,7 @@ void VehicleAudio::Stop() {
   if (engine_.voice) mixer_->Stop(engine_.voice, 0.08f);
   if (skid_.voice) mixer_->Stop(skid_.voice, 0.08f);
   if (wind_.voice) mixer_->Stop(wind_.voice, 0.08f);
-  engine_.params = skid_.params = wind_.params = nullptr;
+  engine_.params = skid_.params = wind_.params = Shared<ParamMailbox>();
   engine_.voice = skid_.voice = wind_.voice = 0;
   stopped_ = true;
 }

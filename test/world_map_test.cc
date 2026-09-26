@@ -3,16 +3,17 @@
 // refusals that keep a stale or mismatched archive from being streamed.
 #include "world/world_map.h"
 
-#include <cstdio>
-#include <filesystem>
-#include <string>
+#include <stdio.h>
 
 #include "asset/pack.h"
 #include "asset/vfs.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 
 namespace {
 
-namespace fs = std::filesystem;
+namespace fs = rx::fs;
 using namespace rx::world;
 using rx::asset::PackWriter;
 using rx::asset::Vfs;
@@ -27,7 +28,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                        \
   do {                                                                     \
     if (!(cond)) {                                                         \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                        \
     }                                                                      \
   } while (0)
@@ -59,16 +60,16 @@ base::Vector<u8> BakeIndex() {
   writer.AddPayload(0, Domain::kCollision, Tier::kStandard, 512, 1);
 
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   if (!writer.Encode(&bytes, &error)) {
-    std::fprintf(stderr, "FAIL: baking the index: %s\n", error.c_str());
+    ::fprintf(stderr, "FAIL: baking the index: %s\n", error.c_str());
     ++g_failures;
   }
   return bytes;
 }
 
 // Writes the world into an archive at `archive` and mounts it at "world://".
-void MountWorld(const fs::path& archive, Vfs* vfs, bool skip_one_payload = false,
+void MountWorld(base::StringRef archive, Vfs* vfs, bool skip_one_payload = false,
                 u64 payload_bake_id = kBakeId) {
   PackWriter pack;
   pack.Add("city/city.rxworld", BakeIndex());
@@ -81,27 +82,27 @@ void MountWorld(const fs::path& archive, Vfs* vfs, bool skip_one_payload = false
       const u32 prototype = writer.AddPrototype("prop/rock");
       writer.AddInstance(id * 100, prototype, {}, {0, 0, 0, 1}, 1.0f);
       base::Vector<u8> bytes;
-      std::string error;
+      base::String error;
       if (!writer.Encode(&bytes, &error)) {
-        std::fprintf(stderr, "FAIL: baking a payload: %s\n", error.c_str());
+        ::fprintf(stderr, "FAIL: baking a payload: %s\n", error.c_str());
         ++g_failures;
       }
-      pack.Add(CellPayloadPath("city", id, Domain::kRepresentation, Tier::kFull), std::move(bytes));
+      pack.Add(CellPayloadPath("city", id, Domain::kRepresentation, Tier::kFull), base::move(bytes));
     }
   }
-  CHECK(pack.WriteTo(archive.string()));
-  auto provider = rx::asset::MakePackFileProvider(archive.string());
+  CHECK(pack.WriteTo(archive));
+  auto provider = rx::asset::MakePackFileProvider(archive);
   CHECK(provider != nullptr);
-  if (provider) vfs->Mount("world", std::move(provider));
+  if (provider) vfs->Mount("world", base::move(provider));
 }
 
-void TestLoadFromArchive(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestLoadFromArchive(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "city.rxp", &vfs);
+  MountWorld(fs::Join(directory, "city.rxp"), &vfs);
 
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
   CHECK(error.empty());
   CHECK(map.loaded());
@@ -131,9 +132,9 @@ void TestLoadFromArchive(const fs::path& directory) {
 // "world://city.rxworld" belongs to the scheme separator - cutting there gives
 // "world:/", which matches no mount, so the index would load and every single
 // payload read would then fail as a missing entry.
-void TestIndexAtTheRootOfItsScheme(const fs::path& directory) {
-  fs::create_directories(directory);
-  const fs::path archive = directory / "root.rxp";
+void TestIndexAtTheRootOfItsScheme(base::StringRef directory) {
+  fs::CreateDirectories(directory);
+  const base::String archive = fs::Join(directory, "root.rxp");
   PackWriter pack;
   pack.Add("city.rxworld", BakeIndex());
   CellPayloadWriter writer(CellId(0, 0), Domain::kRepresentation, Tier::kFull);
@@ -141,18 +142,18 @@ void TestIndexAtTheRootOfItsScheme(const fs::path& directory) {
   const u32 prototype = writer.AddPrototype("prop/rock");
   writer.AddInstance(0, prototype, {}, {0, 0, 0, 1}, 1.0f);
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&bytes, &error));
   // Empty prefix: the payloads sit beside the index, at the scheme root.
   pack.Add(CellPayloadPath("", CellId(0, 0), Domain::kRepresentation, Tier::kFull),
-           std::move(bytes));
-  CHECK(pack.WriteTo(archive.string()));
+           base::move(bytes));
+  CHECK(pack.WriteTo(archive));
 
   Vfs vfs;
-  auto provider = rx::asset::MakePackFileProvider(archive.string());
+  auto provider = rx::asset::MakePackFileProvider(archive);
   CHECK(provider != nullptr);
   if (!provider) return;
-  vfs.Mount("world", std::move(provider));
+  vfs.Mount("world", base::move(provider));
 
   WorldMap map;
   CHECK(map.Load(vfs, "world://city.rxworld", &error));
@@ -162,12 +163,12 @@ void TestIndexAtTheRootOfItsScheme(const fs::path& directory) {
   CHECK(payload.instances.size() == 1);
 }
 
-void TestMissingAndStaleArchives(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestMissingAndStaleArchives(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   {
     Vfs vfs;
     WorldMap map;
-    std::string error;
+    base::String error;
     CHECK(!map.Load(vfs, "world://city/city.rxworld", &error));
     CHECK(!error.empty());
     CHECK(!map.loaded());
@@ -176,26 +177,26 @@ void TestMissingAndStaleArchives(const fs::path& directory) {
     // The index lists cell 3's payload; the archive does not carry it. The read
     // must name the path rather than quietly produce an empty cell.
     Vfs vfs;
-    MountWorld(directory / "holes.rxp", &vfs, /*skip_one_payload=*/true);
+    MountWorld(fs::Join(directory, "holes.rxp"), &vfs, /*skip_one_payload=*/true);
     WorldMap map;
-    std::string error;
+    base::String error;
     CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
     WorldCellPayload payload;
     CHECK(!map.ReadPayload(vfs, 3, Domain::kRepresentation, Tier::kFull, &payload, &error));
-    CHECK(error.find("0000000000000003") != std::string::npos);
+    CHECK(error.find("0000000000000003") != base::String::npos);
   }
   {
     // Payloads from a different cook than the index. This is the failure the
     // bake id exists for: every byte decodes, and every entity would be wrong.
     Vfs vfs;
-    MountWorld(directory / "stale.rxp", &vfs, /*skip_one_payload=*/false,
+    MountWorld(fs::Join(directory, "stale.rxp"), &vfs, /*skip_one_payload=*/false,
                /*payload_bake_id=*/kBakeId + 1);
     WorldMap map;
-    std::string error;
+    base::String error;
     CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
     WorldCellPayload payload;
     CHECK(!map.ReadPayload(vfs, 0, Domain::kRepresentation, Tier::kFull, &payload, &error));
-    CHECK(error.find("baked by") != std::string::npos);
+    CHECK(error.find("baked by") != base::String::npos);
   }
 }
 
@@ -204,8 +205,8 @@ void TestMissingAndStaleArchives(const fs::path& directory) {
 // an id outside its cell's range would be unreachable by Resolve and silently
 // exempt from every overlay delta - a fence that comes back after the player
 // broke it - so it is refused rather than loaded.
-void TestPayloadIdsMustLieInTheCellsRange(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestPayloadIdsMustLieInTheCellsRange(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   WorldIndexWriter writer;
   writer.set_bake_id(kBakeId);
   writer.AddCell(1, {}, {64, 32, 64}, 0, 100, 10);
@@ -213,7 +214,7 @@ void TestPayloadIdsMustLieInTheCellsRange(const fs::path& directory) {
   writer.AddPayload(1, Domain::kRepresentation, Tier::kFull, 64, 2);
   writer.AddPayload(2, Domain::kRepresentation, Tier::kFull, 64, 1);
   base::Vector<u8> index_bytes;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&index_bytes, &error));
 
   auto page = [&](u64 cell, u64 first_id, u32 count) {
@@ -229,50 +230,50 @@ void TestPayloadIdsMustLieInTheCellsRange(const fs::path& directory) {
   };
 
   PackWriter pack;
-  pack.Add("city/city.rxworld", std::move(index_bytes));
+  pack.Add("city/city.rxworld", base::move(index_bytes));
   // Cell 1's page strays one id past its range; cell 2's is written under
   // cell 1's path, so it decodes and describes the wrong cell.
   pack.Add(CellPayloadPath("city", 1, Domain::kRepresentation, Tier::kFull), page(1, 109, 2));
   pack.Add(CellPayloadPath("city", 2, Domain::kRepresentation, Tier::kFull), page(1, 100, 1));
-  CHECK(pack.WriteTo((directory / "ranges.rxp").string()));
+  CHECK(pack.WriteTo(fs::Join(directory, "ranges.rxp")));
 
   Vfs vfs;
-  auto provider = rx::asset::MakePackFileProvider((directory / "ranges.rxp").string());
+  auto provider = rx::asset::MakePackFileProvider(fs::Join(directory, "ranges.rxp"));
   CHECK(provider != nullptr);
   if (!provider) return;
-  vfs.Mount("world", std::move(provider));
+  vfs.Mount("world", base::move(provider));
   WorldMap map;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   WorldCellPayload payload;
   CHECK(!map.ReadPayload(vfs, 1, Domain::kRepresentation, Tier::kFull, &payload, &error));
-  CHECK(error.find("outside the range") != std::string::npos);
+  CHECK(error.find("outside the range") != base::String::npos);
   CHECK(!map.ReadPayload(vfs, 2, Domain::kRepresentation, Tier::kFull, &payload, &error));
-  CHECK(error.find("not cell 2") != std::string::npos);
+  CHECK(error.find("not cell 2") != base::String::npos);
 
   // The same page inside the range loads.
   PackWriter good;
   base::Vector<u8> good_index;
   CHECK(writer.Encode(&good_index, &error));
-  good.Add("city/city.rxworld", std::move(good_index));
+  good.Add("city/city.rxworld", base::move(good_index));
   good.Add(CellPayloadPath("city", 1, Domain::kRepresentation, Tier::kFull), page(1, 100, 2));
-  CHECK(good.WriteTo((directory / "ok.rxp").string()));
+  CHECK(good.WriteTo(fs::Join(directory, "ok.rxp")));
   Vfs ok_vfs;
-  auto ok_provider = rx::asset::MakePackFileProvider((directory / "ok.rxp").string());
+  auto ok_provider = rx::asset::MakePackFileProvider(fs::Join(directory, "ok.rxp"));
   if (!ok_provider) return;
-  ok_vfs.Mount("world", std::move(ok_provider));
+  ok_vfs.Mount("world", base::move(ok_provider));
   WorldMap ok_map;
   CHECK(ok_map.Load(ok_vfs, "world://city/city.rxworld", &error));
   CHECK(ok_map.ReadPayload(ok_vfs, 1, Domain::kRepresentation, Tier::kFull, &payload, &error));
   CHECK(payload.instances.size() == 2);
 }
 
-void TestPerDomainBubbles(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestPerDomainBubbles(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "bubbles.rxp", &vfs);
+  MountWorld(fs::Join(directory, "bubbles.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   WorldStreamPolicy policy;
@@ -332,25 +333,25 @@ void TestPerDomainBubbles(const fs::path& directory) {
 // reaches much further than the cell's own box along its short axis. A gather
 // that missed it would read to the planner as the cell having left the world,
 // and the resident cell would be retired on the spot, retain radius ignored.
-void TestMovingObserverRetainsElongatedCells(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestMovingObserverRetainsElongatedCells(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   WorldIndexWriter writer;
   writer.set_bake_id(kBakeId);
   // 100 m wide on x, 2 m deep on z: bounding radius about 50, box depth 1.
   writer.AddCell(1, {-50, -1, 0}, {50, 1, 2}, 0, 0, 0);
   writer.AddPayload(1, Domain::kGameplay, Tier::kStandard, 64, 1);
   base::Vector<u8> index_bytes;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&index_bytes, &error));
 
   PackWriter pack;
-  pack.Add("thin/thin.rxworld", std::move(index_bytes));
-  CHECK(pack.WriteTo((directory / "thin.rxp").string()));
+  pack.Add("thin/thin.rxworld", base::move(index_bytes));
+  CHECK(pack.WriteTo(fs::Join(directory, "thin.rxp")));
   Vfs vfs;
-  auto provider = rx::asset::MakePackFileProvider((directory / "thin.rxp").string());
+  auto provider = rx::asset::MakePackFileProvider(fs::Join(directory, "thin.rxp"));
   CHECK(provider != nullptr);
   if (!provider) return;
-  vfs.Mount("world", std::move(provider));
+  vfs.Mount("world", base::move(provider));
 
   WorldMap map;
   CHECK(map.Load(vfs, "world://thin/thin.rxworld", &error));
@@ -386,12 +387,12 @@ void TestMovingObserverRetainsElongatedCells(const fs::path& directory) {
   CHECK(gathered.empty());
 }
 
-void TestTargetTier(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestTargetTier(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "tiers.rxp", &vfs);
+  MountWorld(fs::Join(directory, "tiers.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
   const WorldCellRecord* cell = map.index().FindCell(0);
   CHECK(cell != nullptr);
@@ -419,23 +420,23 @@ void TestTargetTier(const fs::path& directory) {
 }  // namespace
 
 int main() {
-  const fs::path tmp = fs::temp_directory_path() / "rx_world_map_test";
-  fs::remove_all(tmp);
-  fs::create_directories(tmp);
+  const base::String tmp = fs::Join(fs::TempDirectory(), "rx_world_map_test");
+  fs::RemoveAll(tmp);
+  fs::CreateDirectories(tmp);
 
-  TestLoadFromArchive(tmp / "load");
-  TestIndexAtTheRootOfItsScheme(tmp / "schemeroot");
-  TestMissingAndStaleArchives(tmp / "stale");
-  TestPayloadIdsMustLieInTheCellsRange(tmp / "ranges");
-  TestPerDomainBubbles(tmp / "bubbles");
-  TestMovingObserverRetainsElongatedCells(tmp / "thin");
-  TestTargetTier(tmp / "tiers");
+  TestLoadFromArchive(fs::Join(tmp, "load"));
+  TestIndexAtTheRootOfItsScheme(fs::Join(tmp, "schemeroot"));
+  TestMissingAndStaleArchives(fs::Join(tmp, "stale"));
+  TestPayloadIdsMustLieInTheCellsRange(fs::Join(tmp, "ranges"));
+  TestPerDomainBubbles(fs::Join(tmp, "bubbles"));
+  TestMovingObserverRetainsElongatedCells(fs::Join(tmp, "thin"));
+  TestTargetTier(fs::Join(tmp, "tiers"));
 
-  fs::remove_all(tmp);
+  fs::RemoveAll(tmp);
   if (g_failures) {
-    std::fprintf(stderr, "world_map_test: %d failure(s)\n", g_failures);
+    ::fprintf(stderr, "world_map_test: %d failure(s)\n", g_failures);
     return 1;
   }
-  std::puts("world_map_test: ok");
+  ::puts("world_map_test: ok");
   return 0;
 }

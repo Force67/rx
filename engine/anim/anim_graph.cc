@@ -1,9 +1,13 @@
 #include "anim/anim_graph.h"
 
-#include <cmath>
+#include <math.h>
 
 #include "anim/anim_internal.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
 #include "core/math.h"
+#include "core/scalar.h"
 
 namespace rx::anim {
 
@@ -96,7 +100,7 @@ kinema::OwnedClip BakeGait(const kinema::Skeleton& sk, u32 frames, f32 rate, con
   for (u32 fr = 0; fr < frames; ++fr) {
     const f32 phase = static_cast<f32>(fr) / static_cast<f32>(frames - 1);  // 0..1, wraps
     const f32 theta = phase * kTwoPi;
-    const f32 leg = std::sin(theta);
+    const f32 leg = ::sin(theta);
 
     for (u32 bone = 0; bone < bones; ++bone) {
       kinema::Quat rot = sk.bind_rotation[bone];
@@ -104,20 +108,20 @@ kinema::OwnedClip BakeGait(const kinema::Skeleton& sk, u32 frames, f32 rate, con
       if (is(j.l_thigh)) rot = Compose(rot, x, amp.thigh * leg);
       else if (is(j.r_thigh)) rot = Compose(rot, x, -amp.thigh * leg);
       else if (is(j.l_calf))
-        rot = Compose(rot, x, -amp.knee * Clamp01(-std::sin(theta - 0.6f)));
+        rot = Compose(rot, x, -amp.knee * Clamp01(-::sin(theta - 0.6f)));
       else if (is(j.r_calf))
-        rot = Compose(rot, x, -amp.knee * Clamp01(-std::sin(theta + kPi - 0.6f)));
+        rot = Compose(rot, x, -amp.knee * Clamp01(-::sin(theta + kPi - 0.6f)));
       else if (is(j.l_arm)) rot = Compose(rot, x, -amp.arm * leg);
       else if (is(j.r_arm)) rot = Compose(rot, x, amp.arm * leg);
-      else if (is(j.spine1)) rot = Compose(rot, z, amp.spine * std::cos(theta));
+      else if (is(j.spine1)) rot = Compose(rot, z, amp.spine * ::cos(theta));
       else if (is(j.spine)) rot = Compose(rot, x, amp.lean);  // constant forward lean
       b.SetSample(fr, bone, sk.bind_translation[bone], rot, sk.bind_scale[bone]);
     }
     if (curve >= 0) {
       // Two intensity pulses per cycle, peaking at the footfalls.
-      f32 pL = std::exp(-std::pow((phase - 0.25f) * 6.0f, 2.0f));
-      f32 pR = std::exp(-std::pow((phase - 0.75f) * 6.0f, 2.0f));
-      b.SetCurveSample(fr, static_cast<u32>(curve), std::max(pL, pR));
+      f32 pL = ::exp(-::pow((phase - 0.25f) * 6.0f, 2.0f));
+      f32 pR = ::exp(-::pow((phase - 0.75f) * 6.0f, 2.0f));
+      b.SetCurveSample(fr, static_cast<u32>(curve), rx::Max(pL, pR));
     }
   }
   return kinema::OwnedClip(b.Build());
@@ -126,7 +130,7 @@ kinema::OwnedClip BakeGait(const kinema::Skeleton& sk, u32 frames, f32 rate, con
 }  // namespace
 
 AnimGraph BuildBipedLocomotionGraph(const asset::Skeleton& skeleton) {
-  auto state = std::make_shared<GraphState>();
+  auto state = base::MakeUnique<GraphState>();
   state->skeleton = detail::BuildKinemaSkeleton(skeleton);
   const kinema::Skeleton& sk = state->skeleton;
 
@@ -139,7 +143,7 @@ AnimGraph BuildBipedLocomotionGraph(const asset::Skeleton& skeleton) {
   // a 1 s walk cycle and a punchier 0.6 s run cycle. Walk and run carry matched
   // footfall markers so the sync group and blend space stay foot-aligned.
   auto push = [&](kinema::OwnedClip c) {
-    state->clips.push_back(std::make_unique<kinema::OwnedClip>(std::move(c)));
+    state->clips.push_back(base::MakeUnique<kinema::OwnedClip>(base::move(c)));
     return static_cast<int>(state->clips.size()) - 1;
   };
   state->idle_clip = push(BakeGait(sk, 61, 30.0f, GaitAmp{0.03f, 0.04f, 0.05f, 0.05f, 0.0f},
@@ -153,7 +157,7 @@ AnimGraph BuildBipedLocomotionGraph(const asset::Skeleton& skeleton) {
 
   // 1D walk<->run blend space keyed on the "speed" parameter (idle is a separate
   // state, so the space is exactly the two synced gaits).
-  state->locomotion_space = std::make_unique<kinema::BlendSpace>(kinema::BlendSpace::Dim::k1D);
+  state->locomotion_space = base::MakeUnique<kinema::BlendSpace>(kinema::BlendSpace::Dim::k1D);
   state->locomotion_space->Add(state->clip(state->walk_clip), state->walk_speed);
   state->locomotion_space->Add(state->clip(state->run_clip), state->run_speed);
   state->locomotion_space->Finalize();
@@ -169,7 +173,7 @@ AnimGraph BuildBipedLocomotionGraph(const asset::Skeleton& skeleton) {
   loco.kind = kinema::PoseOp::Kind::kBlendSpace;
   loco.dst = 0;
   loco.a = 1;  // scratch register
-  loco.space = state->locomotion_space.get();
+  loco.space = state->locomotion_space.Get_UseOnlyIfYouKnowWhatYouareDoing();
   loco.coord_param = static_cast<kinema::i16>(state->speed_param);
   loco.time_param = static_cast<kinema::i16>(state->phase_param);
   const f32 walk_dur = state->clip(state->walk_clip)->duration();
@@ -189,12 +193,19 @@ AnimGraph BuildBipedLocomotionGraph(const asset::Skeleton& skeleton) {
   smb.AddTransition(state->loco_state, state->idle_state, stop, &halting, 1);
 
   state->machine = smb.Build();
-  return AnimGraph(std::move(state));
+  return AnimGraph(base::move(state));
 }
+
+// Out of line: GraphState is only complete in this translation unit.
+AnimGraph::AnimGraph() = default;
+AnimGraph::AnimGraph(base::UniquePointer<GraphState> state) : state_(base::move(state)) {}
+AnimGraph::AnimGraph(AnimGraph&&) noexcept = default;
+AnimGraph& AnimGraph::operator=(AnimGraph&&) noexcept = default;
+AnimGraph::~AnimGraph() = default;
 
 u32 AnimGraph::bone_count() const { return state_ ? state_->skeleton.count() : 0; }
 
-int AnimGraph::ParamIndex(std::string_view name) const {
+int AnimGraph::ParamIndex(base::StringRef name) const {
   if (!state_) return -1;
   for (size_t i = 0; i < state_->param_names.size(); ++i) {
     if (state_->param_names[i] == name) return static_cast<int>(i);

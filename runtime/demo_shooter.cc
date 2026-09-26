@@ -1,15 +1,16 @@
 #include "demo_shooter.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "asset/material.h"
 #include "asset/primitives.h"
+#include "base/containers/span.h"
 #include "combat/projectile.h"
 #include "character/character.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "scene/camera.h"
 #include "scene/camera_rig.h"
@@ -26,8 +27,8 @@ namespace rx {
 namespace {
 
 f32 ShooterFixedStep() {
-  if (const char* env = std::getenv("RX_FIXED_DT")) {
-    const f32 v = std::strtof(env, nullptr);
+  if (const char* env = ::getenv("RX_FIXED_DT")) {
+    const f32 v = ::strtof(env, nullptr);
     if (v > 0.0f) return v;
   }
   return 1.0f / 60.0f;
@@ -49,7 +50,7 @@ Mat4 BoxTransform(const Vec3& center, const Vec3& half_extent) {
 Quat HeadingQuat(f32 yaw) { return QuatFromAxisAngle({0, -1, 0}, yaw); }
 
 u32 Rgba(u32 rgb, f32 alpha) {
-  const u32 a = static_cast<u32>(std::clamp(alpha, 0.0f, 1.0f) * 255.0f);
+  const u32 a = static_cast<u32>(rx::Clamp(alpha, 0.0f, 1.0f) * 255.0f);
   return (rgb << 8) | a;
 }
 
@@ -85,8 +86,8 @@ void ShooterDemo::Create() {
   BuildWeapons();
   BuildPlayer();
 
-  if (const char* autofire = std::getenv("RX_SHOOTER_AUTOFIRE")) {
-    autofire_ = std::strtol(autofire, nullptr, 10) != 0;
+  if (const char* autofire = ::getenv("RX_SHOOTER_AUTOFIRE")) {
+    autofire_ = ::strtol(autofire, nullptr, 10) != 0;
     if (autofire_) {
       mouse_captured_ = false;  // scripted run: leave the cursor alone
       RX_INFO("shooter: RX_SHOOTER_AUTOFIRE, holding the trigger on the nearest target");
@@ -275,7 +276,7 @@ void ShooterDemo::BuildPlayer() {
   character::CharacterShape shape;
   character::CharacterMovementSettings move;
   const f32 radius = shape.standing_radius;
-  const f32 half_height = std::max(shape.standing_height * 0.5f - radius, 0.01f);
+  const f32 half_height = rx::Max(shape.standing_height * 0.5f - radius, 0.01f);
 
   player_ = world.Create();
   world.Add(player_, scene::Transform{.position = {spawn_feet_.x, spawn_feet_.y, spawn_feet_.z}});
@@ -469,7 +470,7 @@ void ShooterDemo::StepTargets(f32 dt) {
     target.strafe_phase += dt * 0.7f;
     Vec3 position = target.home;
     if (target.strafe_span > 0) {
-      position.x += std::sin(target.strafe_phase) * target.strafe_span;
+      position.x += ::sin(target.strafe_phase) * target.strafe_span;
     }
     // A downed target drops through the floor and pops back up on respawn,
     // which also takes its hitboxes out of the line of fire.
@@ -508,7 +509,7 @@ void ShooterDemo::DrainEvents() {
       ++hits_;
       hitmarker_ = 0.12f;
       char text[32];
-      std::snprintf(text, sizeof(text), "%d", static_cast<int>(damage.applied + 0.5f));
+      ::snprintf(text, sizeof(text), "%d", static_cast<int>(damage.applied + 0.5f));
       const u32 color = damage.zone == combat::HitZone::kHead ? 0xffd24a : 0xffffff;
       popups_.push_back(Popup{damage.position, text, Rgba(color, 1.0f), 1.0f});
     }
@@ -534,7 +535,7 @@ void ShooterDemo::AgePresentation(f32 dt) {
   AgeOut(tracers_, dt);
   AgeOut(marks_, dt);
   AgeOut(popups_, dt);
-  hitmarker_ = std::max(0.0f, hitmarker_ - dt);
+  hitmarker_ = rx::Max(0.0f, hitmarker_ - dt);
   for (Popup& popup : popups_) popup.position.y += dt * 0.35f;
 }
 
@@ -555,7 +556,7 @@ void ShooterDemo::Update(f32 dt, const InputState& input, const ActionState& act
     if (input.key_pressed(Key::kM)) show_panel_ = !show_panel_;
     if (input.wheel != 0) {
       if (auto* loadout = world.Get<combat::Loadout>(player_)) {
-        const int count = std::max<int>(loadout->count, 1);
+        const int count = rx::Max<int>(loadout->count, 1);
         const int step = input.wheel > 0 ? 1 : -1;
         pending_switch_ = static_cast<i8>((loadout->active + count + step) % count);
       }
@@ -572,7 +573,7 @@ void ShooterDemo::Update(f32 dt, const InputState& input, const ActionState& act
   const f32 fixed = ShooterFixedStep();
   FillLookAndMove(input, actions, allow_keyboard, allow_mouse, dt);
 
-  sim_accum_ += std::min(dt, 0.25f);
+  sim_accum_ += rx::Min(dt, 0.25f);
   int steps = 0;
   while (sim_accum_ >= fixed) {
     sim_accum_ -= fixed;
@@ -711,7 +712,7 @@ void ShooterDemo::Emit(f32 dt, render::FrameView& view) {
     const f32 wounded = health->max_hp > 0 ? health->hp / health->max_hp : 0.0f;
     // The torso's red dims as it takes damage, so a half-dead target reads at a
     // glance; the head stays bright, because it is the thing worth hitting.
-    const u32 red = static_cast<u32>(60.0f + 150.0f * std::clamp(wounded, 0.0f, 1.0f));
+    const u32 red = static_cast<u32>(60.0f + 150.0f * rx::Clamp(wounded, 0.0f, 1.0f));
     const u32 torso_tint = health->dead ? 0x2a2c30 : (red << 16) | 0x1c1c;
     render::DrawItem torso{};
     torso.mesh = cube_mesh_;
@@ -733,7 +734,7 @@ void ShooterDemo::Emit(f32 dt, render::FrameView& view) {
     render::DrawItem draw{};
     draw.mesh = sphere_mesh_;
     draw.transform = MakeTranslation(round.position) *
-                     MakeScale(std::max(round.radius, 0.08f) * 2.0f);
+                     MakeScale(rx::Max(round.radius, 0.08f) * 2.0f);
     draw.prev_transform = draw.transform;
     draw.tint = 0x30d040;
     view.draws.push_back(draw);
@@ -754,7 +755,7 @@ void ShooterDemo::Emit(f32 dt, render::FrameView& view) {
   for (const Tracer& tracer : tracers_) {
     lines_.push_back(render::DebugLine{tracer.from, tracer.to, Rgba(0xffd070, tracer.life / 0.05f)});
   }
-  view.debug_lines = std::span<const render::DebugLine>(lines_.begin(), lines_.size());
+  view.debug_lines = base::Span<const render::DebugLine>(lines_.begin(), lines_.size());
 
   for (const Popup& popup : popups_) {
     render::WorldText text;
@@ -786,10 +787,10 @@ void ShooterDemo::DrawHud() {
   const ImVec2 middle{size.x * 0.5f, size.y * 0.5f};
   if (def && weapon && cam_fov_ > 0) {
     const f32 spread = combat::EffectiveSpread(*def, *weapon, *intent);
-    const f32 pixels = std::clamp(
-        std::tan(spread) / std::tan(cam_fov_ * 0.5f) * size.y * 0.5f, 3.0f, size.y * 0.45f);
+    const f32 pixels = rx::Clamp(
+        ::tan(spread) / ::tan(cam_fov_ * 0.5f) * size.y * 0.5f, 3.0f, size.y * 0.45f);
     const u32 color = IM_COL32(235, 240, 245, 210);
-    const f32 arm = std::max(4.0f, pixels * 0.35f);
+    const f32 arm = rx::Max(4.0f, pixels * 0.35f);
     draw->AddLine({middle.x - pixels - arm, middle.y}, {middle.x - pixels, middle.y}, color, 1.6f);
     draw->AddLine({middle.x + pixels, middle.y}, {middle.x + pixels + arm, middle.y}, color, 1.6f);
     draw->AddLine({middle.x, middle.y - pixels - arm}, {middle.x, middle.y - pixels}, color, 1.6f);

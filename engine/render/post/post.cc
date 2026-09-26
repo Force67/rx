@@ -1,19 +1,22 @@
 #include "render/post/post.h"
 
-#include <cstdlib>
-#include <fstream>
-#include <sstream>
+#include <stdlib.h>
 
 #include <base/containers/vector.h>
 
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 #include "core/log.h"
+#include "core/text_reader.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/tonemap_ps_hlsl.h"
 
 namespace rx::render {
 
-std::unique_ptr<PostPass> PostPass::Create(Device& device, Format output_format) {
-  auto pass = std::unique_ptr<PostPass>(new PostPass(device));
+base::UniquePointer<PostPass> PostPass::Create(Device& device, Format output_format) {
+  auto pass = base::UniquePointer<PostPass>(new PostPass(device));
 
   pass->sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
                                       .address_v = AddressMode::kClampToEdge,
@@ -92,18 +95,19 @@ struct CubeLut {
 
 // Parses LUT_3D_SIZE + the triple list. Ignores comments, TITLE and DOMAIN_*;
 // rejects 1D luts and malformed files. Returns false on any error.
-bool ParseCube(std::istream& in, CubeLut* out) {
-  std::string line;
+bool ParseCube(base::StringRef text, CubeLut* out) {
+  LineReader lines(text);
+  base::StringRef line;
   base::Vector<f32> data;
   u32 size = 0;
-  while (std::getline(in, line)) {
+  while (lines.Next(&line)) {
     size_t s = line.find_first_not_of(" \t\r\n");
-    if (s == std::string::npos || line[s] == '#') continue;
-    std::istringstream ls(line.substr(s));
-    std::string tok;
-    ls >> tok;
+    if (s == base::StringRef::npos || line[s] == '#') continue;
+    TokenReader ls(line.substr(s));
+    base::String tok;
+    ls.Next(&tok);
     if (tok == "LUT_3D_SIZE") {
-      ls >> size;
+      ls.Next(&size);
       if (size < 2 || size > 128) return false;
     } else if (tok == "LUT_1D_SIZE") {
       return false;  // 1D luts are not supported by the strip path
@@ -112,8 +116,8 @@ bool ParseCube(std::istream& in, CubeLut* out) {
       continue;
     } else {
       f32 r, g, b;
-      std::istringstream vs(line.substr(s));
-      if (!(vs >> r >> g >> b)) continue;  // tolerate stray lines
+      TokenReader vs(line.substr(s));
+      if (!(vs.Next(&r) && vs.Next(&g) && vs.Next(&b))) continue;  // tolerate stray lines
       data.push_back(r);
       data.push_back(g);
       data.push_back(b);
@@ -121,7 +125,7 @@ bool ParseCube(std::istream& in, CubeLut* out) {
   }
   if (size == 0 || data.size() != static_cast<size_t>(size) * size * size * 3) return false;
   out->size = size;
-  out->rgb = std::move(data);
+  out->rgb = base::move(data);
   return true;
 }
 
@@ -185,7 +189,7 @@ void PostPass::UploadLutPixels(base::Vector<u8>& pixels) {
   const u32 size = kLutSize;
   const u32 width = size * size;
   GpuBuffer staging =
-      device_.CreateBufferWithData({pixels.data(), pixels.size()}, kBufferUsageTransferSrc);
+      device_.CreateBufferWithData(ByteSpan(pixels.data(), pixels.size()), kBufferUsageTransferSrc);
   bool first = !lut_ready_;
   device_.ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(
@@ -193,7 +197,7 @@ void PostPass::UploadLutPixels(base::Vector<u8>& pixels) {
         ResourceState::kCopyDst));
 
     BufferTextureCopy copy{.extent = {width, size}};
-    cmd.CopyBufferToTexture(staging, lut_, {&copy, 1});
+    cmd.CopyBufferToTexture(staging, lut_, base::Span(&copy, 1));
 
     cmd.Barrier(Transition(lut_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment));
   });
@@ -201,14 +205,14 @@ void PostPass::UploadLutPixels(base::Vector<u8>& pixels) {
   lut_ready_ = true;
 }
 
-bool PostPass::LoadCubeLut(const std::string& path) {
-  std::ifstream file(path);
-  if (!file) {
+bool PostPass::LoadCubeLut(const base::String& path) {
+  base::String text;
+  if (!fs::ReadTextFile(path, &text)) {
     RX_WARN("cube lut: cannot open {}", path);
     return false;
   }
   CubeLut cube;
-  if (!ParseCube(file, &cube)) {
+  if (!ParseCube(text, &cube)) {
     RX_WARN("cube lut: failed to parse {} (need a valid 3D .cube)", path);
     return false;
   }
@@ -255,7 +259,7 @@ void PostPass::Record(PassContext& ctx, TextureView input, TextureView bloom, Te
                       Extent2D output_extent, const Params& params) {
   ColorAttachment color{.view = output, .load = LoadOp::kDontCare,  // fully overwritten
                         .store = StoreOp::kStore};
-  ctx.cmd->BeginRendering({.extent = output_extent, .colors = {&color, 1}});
+  ctx.cmd->BeginRendering({.extent = output_extent, .colors = base::Span(&color, 1)});
   ctx.cmd->BindPipeline(pipeline_);
   ctx.cmd->BindTransient(0, {Bind::Combined(0, input, sampler_),
                              Bind::Combined(1, bloom, sampler_),

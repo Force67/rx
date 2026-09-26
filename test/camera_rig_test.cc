@@ -1,7 +1,8 @@
 #include "scene/camera_rig.h"
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "ecs/world.h"
 
@@ -19,20 +20,20 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "camera_rig_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "camera_rig_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-4f) {
-  if (std::abs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "camera_rig_test: FAIL: %s (got %.6f, expected %.6f)\n", message, actual,
+  if (::abs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "camera_rig_test: FAIL: %s (got %.6f, expected %.6f)\n", message, actual,
                expected);
   ++failures;
 }
 
 void NearVec(const Vec3& actual, const Vec3& expected, const char* message, f32 epsilon = 1e-4f) {
   if (Length(actual - expected) <= epsilon) return;
-  std::fprintf(stderr,
+  ::fprintf(stderr,
                "camera_rig_test: FAIL: %s (got %.4f, %.4f, %.4f; expected "
                "%.4f, %.4f, %.4f)\n",
                message, actual.x, actual.y, actual.z, expected.x, expected.y, expected.z);
@@ -292,9 +293,9 @@ int main() {
   TestFramingDampingAndDegenerateUp();
 
   if (failures != 0) {
-    std::fprintf(stderr, "camera_rig_test: %d failure(s)\n", failures);
+    ::fprintf(stderr, "camera_rig_test: %d failure(s)\n", failures);
     return 1;
   }
-  std::printf("camera_rig_test: PASS\n");
+  ::printf("camera_rig_test: PASS\n");
   return 0;
 }

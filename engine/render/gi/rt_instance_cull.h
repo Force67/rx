@@ -1,10 +1,10 @@
 #ifndef RX_RENDER_RT_INSTANCE_CULL_H_
 #define RX_RENDER_RT_INSTANCE_CULL_H_
 
-#include <span>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -63,7 +63,7 @@ class RtInstanceCuller {
   // its sweep index comes back around). transforms are the per-instance world
   // transforms; (mesh_center, mesh_radius) is the mesh's model-space sphere.
   const base::Vector<u8>& UpdateGroup(u32 group_id, u32 generation, u32 revision,
-                                      std::span<const Mat4> transforms,
+                                      base::Span<const Mat4> transforms,
                                       const Vec3& mesh_center, f32 mesh_radius);
 
  private:

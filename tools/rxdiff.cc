@@ -21,15 +21,15 @@
 //
 // Exit 0 within tolerance, 1 when either metric is over, 2 on usage/io error.
 
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <string>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <stb_image.h>
 #include <stb_image_write.h>
+#include "base/containers/vector.h"
+#include "base/strings/xstring.h"
 
 namespace {
 
@@ -57,8 +57,8 @@ struct Image {
   unsigned char* pixels = nullptr;  // rgb8, stbi-owned
 };
 
-int Fail(const std::string& message) {
-  std::fprintf(stderr, "rxdiff: %s\n", message.c_str());
+int Fail(const base::String& message) {
+  ::fprintf(stderr, "rxdiff: %s\n", message.c_str());
   return 2;
 }
 
@@ -80,7 +80,7 @@ struct Result {
 };
 
 Result Compare(const Image& a, const Image& b, float hot_delta,
-               std::vector<unsigned char>* diff) {
+               base::Vector<unsigned char>* diff) {
   Result result;
   result.total_pixels = static_cast<long long>(a.width) * a.height;
   if (diff) diff->assign(static_cast<size_t>(result.total_pixels) * 3, 0);
@@ -97,7 +97,7 @@ Result Compare(const Image& a, const Image& b, float hot_delta,
             (static_cast<float>(a.pixels[base + c]) - static_cast<float>(b.pixels[base + c])) /
             255.0f;
         sum_squares += static_cast<double>(delta) * delta;
-        const float magnitude = std::fabs(delta);
+        const float magnitude = ::fabs(delta);
         if (magnitude > worst) worst = magnitude;
         // Amplified so a difference the eye cannot find in the source frames is
         // obvious in the diff; saturating is the point, not a defect.
@@ -115,7 +115,7 @@ Result Compare(const Image& a, const Image& b, float hot_delta,
       if (y > result.max_y) result.max_y = y;
     }
   }
-  result.rmse = std::sqrt(sum_squares / (static_cast<double>(result.total_pixels) * 3.0));
+  result.rmse = ::sqrt(sum_squares / (static_cast<double>(result.total_pixels) * 3.0));
   return result;
 }
 
@@ -131,11 +131,11 @@ int main(int argc, char** argv) {
   bool json = false;
 
   for (int i = 1; i < argc; ++i) {
-    const std::string arg = argv[i];
+    const base::String arg = argv[i];
     auto next = [&]() -> const char* { return i + 1 < argc ? argv[++i] : ""; };
-    if (arg == "--rmse") rmse_limit = std::strtof(next(), nullptr);
-    else if (arg == "--hot") hot_limit = std::strtof(next(), nullptr);
-    else if (arg == "--hot-delta") hot_delta = std::strtof(next(), nullptr);
+    if (arg == "--rmse") rmse_limit = ::strtof(next(), nullptr);
+    else if (arg == "--hot") hot_limit = ::strtof(next(), nullptr);
+    else if (arg == "--hot-delta") hot_delta = ::strtof(next(), nullptr);
     else if (arg == "--diff") diff_path = next();
     else if (arg == "--json") json = true;
     else if (!path_a) path_a = argv[i];
@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
     else return Fail("unexpected argument '" + arg + "'");
   }
   if (!path_a || !path_b) {
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "usage: rxdiff <a.png> <b.png> [--rmse <t>] [--hot <f>] [--hot-delta <d>]\n"
                  "               [--diff <out.png>] [--json]\n"
                  "  defaults: --rmse %g --hot %g --hot-delta %g, measured against this "
@@ -155,19 +155,19 @@ int main(int argc, char** argv) {
 
   Image a;
   Image b;
-  if (!Load(path_a, &a)) return Fail(std::string("cannot read '") + path_a + "'");
-  if (!Load(path_b, &b)) return Fail(std::string("cannot read '") + path_b + "'");
+  if (!Load(path_a, &a)) return Fail(base::String("cannot read '") + path_a + "'");
+  if (!Load(path_b, &b)) return Fail(base::String("cannot read '") + path_b + "'");
   if (a.width != b.width || a.height != b.height) {
     char message[160];
-    std::snprintf(message, sizeof(message), "size mismatch: %dx%d vs %dx%d", a.width, a.height,
+    ::snprintf(message, sizeof(message), "size mismatch: %dx%d vs %dx%d", a.width, a.height,
                   b.width, b.height);
     return Fail(message);
   }
 
-  std::vector<unsigned char> diff;
+  base::Vector<unsigned char> diff;
   const Result result = Compare(a, b, hot_delta, diff_path ? &diff : nullptr);
   if (diff_path && !stbi_write_png(diff_path, a.width, a.height, 3, diff.data(), a.width * 3)) {
-    return Fail(std::string("cannot write '") + diff_path + "'");
+    return Fail(base::String("cannot write '") + diff_path + "'");
   }
 
   const double hot_fraction =
@@ -175,31 +175,31 @@ int main(int argc, char** argv) {
   const bool pass = result.rmse <= rmse_limit && hot_fraction <= hot_limit;
 
   if (json) {
-    std::printf("{\n  \"a\": \"%s\",\n  \"b\": \"%s\",\n  \"width\": %d,\n  \"height\": %d,\n",
+    ::printf("{\n  \"a\": \"%s\",\n  \"b\": \"%s\",\n  \"width\": %d,\n  \"height\": %d,\n",
                 path_a, path_b, a.width, a.height);
-    std::printf("  \"rmse\": %.6f,\n  \"rmse_limit\": %.6f,\n", result.rmse,
+    ::printf("  \"rmse\": %.6f,\n  \"rmse_limit\": %.6f,\n", result.rmse,
                 static_cast<double>(rmse_limit));
-    std::printf("  \"max_delta\": %.6f,\n  \"hot_pixels\": %lld,\n  \"hot_fraction\": %.6f,\n"
+    ::printf("  \"max_delta\": %.6f,\n  \"hot_pixels\": %lld,\n  \"hot_fraction\": %.6f,\n"
                 "  \"hot_limit\": %.6f,\n",
                 result.max_delta, result.hot_pixels, hot_fraction,
                 static_cast<double>(hot_limit));
     if (result.max_x >= result.min_x) {
-      std::printf("  \"hot_bounds\": {\"x\": %d, \"y\": %d, \"w\": %d, \"h\": %d},\n",
+      ::printf("  \"hot_bounds\": {\"x\": %d, \"y\": %d, \"w\": %d, \"h\": %d},\n",
                   result.min_x, result.min_y, result.max_x - result.min_x + 1,
                   result.max_y - result.min_y + 1);
     }
-    std::printf("  \"pass\": %s\n}\n", pass ? "true" : "false");
+    ::printf("  \"pass\": %s\n}\n", pass ? "true" : "false");
   } else {
-    std::printf("%s vs %s (%dx%d): rmse %.5f (limit %.5f), max delta %.5f, "
+    ::printf("%s vs %s (%dx%d): rmse %.5f (limit %.5f), max delta %.5f, "
                 "%lld hot pixel(s) = %.4f%% (limit %.4f%%)\n",
                 path_a, path_b, a.width, a.height, result.rmse,
                 static_cast<double>(rmse_limit), result.max_delta, result.hot_pixels,
                 hot_fraction * 100.0, static_cast<double>(hot_limit) * 100.0);
     if (result.max_x >= result.min_x) {
-      std::printf("  hot region: %dx%d at %d,%d\n", result.max_x - result.min_x + 1,
+      ::printf("  hot region: %dx%d at %d,%d\n", result.max_x - result.min_x + 1,
                   result.max_y - result.min_y + 1, result.min_x, result.min_y);
     }
-    std::printf("  %s\n", pass ? "PASS" : "FAIL");
+    ::printf("  %s\n", pass ? "PASS" : "FAIL");
   }
 
   stbi_image_free(a.pixels);

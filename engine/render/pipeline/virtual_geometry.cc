@@ -1,14 +1,18 @@
 #include "render/pipeline/virtual_geometry.h"
 
-#include <algorithm>
-#include <cfloat>
-#include <cmath>
-#include <cstring>
-#include <unordered_map>
-#include <vector>
+#include <float.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "asset/simplify.h"
+#include "base/containers/span.h"
+#include "base/containers/unordered_map.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/pipeline/meshlet.h"
 #include "shaders/fullscreen_vs_slang.h"
 #include "shaders/meshlet_ps_hlsl.h"
@@ -21,6 +25,7 @@
 #include "shaders/vgeo_sw_cs_hlsl.h"
 #include "shaders/vgeo_vis_ms_hlsl.h"
 #include "shaders/vgeo_vis_ps_hlsl.h"
+#include "core/sort.h"
 
 namespace rx::render {
 namespace {
@@ -227,7 +232,7 @@ bool VirtualGeometryPass::Initialize(Device& device, Format color_format, Format
 
   SamplerDesc albedo_sampler_desc{};
   if (device.caps().max_anisotropy > 1.0f) {
-    albedo_sampler_desc.max_anisotropy = std::min(16.0f, device.caps().max_anisotropy);
+    albedo_sampler_desc.max_anisotropy = rx::Min(16.0f, device.caps().max_anisotropy);
   }
   albedo_sampler_ = device.GetSampler(albedo_sampler_desc);
 
@@ -276,7 +281,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
   const asset::MeshLod& lod = mesh.lods[0];
   const u32 vertex_count = static_cast<u32>(lod.vertices.size());
 
-  std::vector<Vec3> positions(vertex_count);
+  base::Vector<Vec3> positions(vertex_count);
   for (u32 i = 0; i < vertex_count; ++i) {
     positions[i] = {lod.vertices[i].position[0], lod.vertices[i].position[1],
                     lod.vertices[i].position[2]};
@@ -287,13 +292,13 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
   // created it. Level 0 clusters are exact (error 0, own bounds).
   struct WorkCluster {
     Meshlet m;                 // bounds/cone from the meshlet build
-    std::vector<u32> indices;  // global triangle list
+    base::Vector<u32> indices;  // global triangle list
     f32 self_error = 0.0f;
     f32 self_sphere[4] = {0, 0, 0, 0};
     u32 dag_index = 0;         // where it landed in the output array
   };
 
-  std::vector<DagMeshlet> dag;
+  base::Vector<DagMeshlet> dag;
   base::Vector<u32> all_vertex_indices;
   base::Vector<u32> all_triangles;
 
@@ -301,10 +306,10 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
   // 8-bit indexing; inputs come from BuildMeshletGeometry so <=64 uniques).
   auto emit = [&](WorkCluster& c, u32 level) {
     DagMeshlet d{};
-    std::memcpy(d.center_radius, c.m.center_radius, sizeof(d.center_radius));
-    std::memcpy(d.cone, c.m.cone, sizeof(d.cone));
-    std::memcpy(d.self_sphere, c.self_sphere, sizeof(d.self_sphere));
-    std::memcpy(d.parent_sphere, c.self_sphere, sizeof(d.parent_sphere));
+    base::MemCopy(d.center_radius, c.m.center_radius, sizeof(d.center_radius));
+    base::MemCopy(d.cone, c.m.cone, sizeof(d.cone));
+    base::MemCopy(d.self_sphere, c.self_sphere, sizeof(d.self_sphere));
+    base::MemCopy(d.parent_sphere, c.self_sphere, sizeof(d.parent_sphere));
     d.self_error = c.self_error;
     d.parent_error = FLT_MAX;
     d.lod = level;
@@ -341,8 +346,8 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
   // Turns an index list into work clusters via the meshlet builder (cone
   // splitting off: coarse levels would fragment into tiny clusters whose
   // locked borders stall further simplification).
-  auto make_clusters = [&](const std::vector<u32>& indices, f32 self_error,
-                           const f32 self_sphere[4], std::vector<WorkCluster>* out) {
+  auto make_clusters = [&](const base::Vector<u32>& indices, f32 self_error,
+                           const f32 self_sphere[4], base::Vector<WorkCluster>* out) {
     MeshletGeometry geo =
         BuildMeshletGeometry(lod.vertices.data(), vertex_count, indices.data(),
                              static_cast<u32>(indices.size()), /*cone_split=*/false);
@@ -351,9 +356,9 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
       c.m = m;
       c.self_error = self_error;
       if (self_sphere) {
-        std::memcpy(c.self_sphere, self_sphere, sizeof(c.self_sphere));
+        base::MemCopy(c.self_sphere, self_sphere, sizeof(c.self_sphere));
       } else {
-        std::memcpy(c.self_sphere, m.center_radius, sizeof(c.self_sphere));
+        base::MemCopy(c.self_sphere, m.center_radius, sizeof(c.self_sphere));
       }
       c.indices.reserve(static_cast<size_t>(m.triangle_count) * 3);
       for (u32 t = 0; t < m.triangle_count; ++t) {
@@ -362,13 +367,13 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
           c.indices.push_back(geo.vertex_indices[m.vertex_offset + ((packed >> (8 * k)) & 0xffu)]);
         }
       }
-      out->push_back(std::move(c));
+      out->push_back(base::move(c));
     }
   };
 
-  std::vector<WorkCluster> current;
+  base::Vector<WorkCluster> current;
   {
-    std::vector<u32> root_indices(lod.indices.begin(), lod.indices.end());
+    base::Vector<u32> root_indices(lod.indices.begin(), lod.indices.end());
     make_clusters(root_indices, 0.0f, nullptr, &current);
   }
 
@@ -382,18 +387,19 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
 
     // Morton-order the clusters so group seeds walk spatial patches.
     const u32 count = static_cast<u32>(current.size());
-    std::vector<u32> order(count);
+    base::Vector<u32> order(count);
     for (u32 i = 0; i < count; ++i) order[i] = i;
     Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
     for (const WorkCluster& c : current) {
-      lo = {std::min(lo.x, c.m.center_radius[0]), std::min(lo.y, c.m.center_radius[1]),
-            std::min(lo.z, c.m.center_radius[2])};
-      hi = {std::max(hi.x, c.m.center_radius[0]), std::max(hi.y, c.m.center_radius[1]),
-            std::max(hi.z, c.m.center_radius[2])};
+      lo = {rx::Min(lo.x, c.m.center_radius[0]), rx::Min(lo.y, c.m.center_radius[1]),
+            rx::Min(lo.z, c.m.center_radius[2])};
+      hi = {rx::Max(hi.x, c.m.center_radius[0]), rx::Max(hi.y, c.m.center_radius[1]),
+            rx::Max(hi.z, c.m.center_radius[2])};
     }
-    Vec3 ext{std::max(hi.x - lo.x, 1e-6f), std::max(hi.y - lo.y, 1e-6f),
-             std::max(hi.z - lo.z, 1e-6f)};
-    std::sort(order.begin(), order.end(), [&](u32 a, u32 b) {
+    Vec3 ext{rx::Max(hi.x - lo.x, 1e-6f), rx::Max(hi.y - lo.y, 1e-6f),
+             rx::Max(hi.z - lo.z, 1e-6f)};
+    // Stable: quantized codes tie often, and the order seeds grouping.
+    rx::StableSort(order.data(), order.data() + order.size(), [&](u32 a, u32 b) {
       auto code = [&](u32 i) {
         const f32* c = current[i].m.center_radius;
         return Morton3(static_cast<u32>((c[0] - lo.x) / ext.x * 1023.0f),
@@ -405,7 +411,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
 
     // Vertex use counts across the level: a vertex referenced outside the
     // group is a border and must be locked.
-    std::vector<u32> use_count(vertex_count, 0);
+    base::Vector<u32> use_count(vertex_count, 0);
     for (const WorkCluster& c : current) {
       for (u32 v : c.indices) ++use_count[v];
     }
@@ -414,7 +420,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
     // connectivity instead of raw morton runs, so fewer vertices sit on group
     // borders and the locked-edge simplification keeps making progress on the
     // coarse levels (morton runs used to strand groups that refuse to shrink).
-    std::unordered_map<u32, std::vector<u32>> vertex_clusters;
+    base::UnorderedMap<u32, base::Vector<u32>> vertex_clusters;
     for (u32 i = 0; i < count; ++i) {
       for (u32 v : current[i].indices) {
         auto& list = vertex_clusters[v];
@@ -422,16 +428,16 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
       }
     }
 
-    std::vector<u8> grouped(count, 0);
-    std::vector<u32> score(count, 0);
-    std::vector<u32> touched;
+    base::Vector<u8> grouped(count, 0);
+    base::Vector<u32> score(count, 0);
+    base::Vector<u32> touched;
     // Group-local scratch, level-sized once and reset via the touched list:
     // allocating these per group is quadratic in vertex count (fatal on
     // multi-million-vertex source meshes).
-    std::vector<u32> group_use(vertex_count, 0);
-    std::vector<u8> lock(vertex_count, 0);
-    std::vector<u32> group_verts;
-    std::vector<WorkCluster> next;
+    base::Vector<u32> group_use(vertex_count, 0);
+    base::Vector<u8> lock(vertex_count, 0);
+    base::Vector<u32> group_verts;
+    base::Vector<WorkCluster> next;
     bool progressed = false;
     for (u32 seed_pos = 0; seed_pos < count; ++seed_pos) {
       u32 seed = order[seed_pos];
@@ -439,7 +445,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
 
       // Greedy fill: repeatedly take the ungrouped neighbor sharing the most
       // vertices with the group so far.
-      std::vector<u32> members;
+      base::Vector<u32> members;
       touched.clear();
       auto add_member = [&](u32 ci) {
         members.push_back(ci);
@@ -467,7 +473,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
       }
       for (u32 nb : touched) score[nb] = 0;
 
-      std::vector<u32> group_indices;
+      base::Vector<u32> group_indices;
       group_verts.clear();
       f32 max_child_error = 0.0f;
       Vec3 center{};
@@ -478,7 +484,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
           if (group_use[v] == 0) group_verts.push_back(v);
           ++group_use[v];
         }
-        max_child_error = std::max(max_child_error, c.self_error);
+        max_child_error = rx::Max(max_child_error, c.self_error);
         center = center + Vec3{c.self_sphere[0], c.self_sphere[1], c.self_sphere[2]};
       }
       center = center * (1.0f / static_cast<f32>(members.size()));
@@ -486,8 +492,8 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
       for (u32 ci : members) {
         const WorkCluster& c = current[ci];
         Vec3 d = Vec3{c.self_sphere[0], c.self_sphere[1], c.self_sphere[2]} - center;
-        radius = std::max(radius,
-                          std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + c.self_sphere[3]);
+        radius = rx::Max(radius,
+                          ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z) + c.self_sphere[3]);
       }
       f32 group_sphere[4] = {center.x, center.y, center.z, radius};
 
@@ -496,7 +502,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
       }
 
       f32 err = 0.0f;
-      std::vector<u32> simplified = asset::SimplifyIndices(
+      base::Vector<u32> simplified = asset::SimplifyIndices(
           positions.data(), vertex_count, group_indices.data(),
           static_cast<u32>(group_indices.size()),
           static_cast<u32>(group_indices.size()) / 2, lock.data(), &err);
@@ -510,12 +516,12 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
       progressed = true;
 
       // Monotonic error up the DAG.
-      f32 group_error = std::max(err, max_child_error);
+      f32 group_error = rx::Max(err, max_child_error);
       for (u32 ci : members) {
         WorkCluster& c = current[ci];
         DagMeshlet& d = dag[c.dag_index];
         d.parent_error = group_error;
-        std::memcpy(d.parent_sphere, group_sphere, sizeof(d.parent_sphere));
+        base::MemCopy(d.parent_sphere, group_sphere, sizeof(d.parent_sphere));
       }
       // The group's replacement clusters inherit the exact same sphere+error
       // pair their children compare against: the cut cannot leave gaps.
@@ -526,7 +532,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
     for (const WorkCluster& c : next) next_tris += static_cast<u32>(c.indices.size() / 3);
     RX_INFO("vgeo dag: level {} {} clusters -> level {} {} clusters ({} tris)", level, count,
              level + 1, next.size(), next_tris);
-    current = std::move(next);
+    current = base::move(next);
     ++level;
   }
 
@@ -534,7 +540,7 @@ void VirtualGeometryPass::Upload(Device& device, const asset::Mesh& mesh) {
   meshlet_count_ = static_cast<u32>(dag.size());
   if (meshlet_count_ == 0) return;
 
-  std::vector<MeshletPass::Vertex> verts;
+  base::Vector<MeshletPass::Vertex> verts;
   verts.reserve(lod.vertices.size());
   for (const asset::Vertex& v : lod.vertices) {
     verts.push_back({v.position[0], v.position[1], v.position[2], v.normal[0], v.normal[1],
@@ -579,9 +585,9 @@ void VirtualGeometryPass::SetAlbedo(Device& device, ByteSpan rgba_mips, u32 size
     for (u32 mip = 0; mip < mips; ++mip) {
       regions.push_back({.buffer_offset = offset, .mip = mip, .extent = {extent, extent}});
       offset += u64(extent) * extent * 4;
-      extent = std::max(1u, extent / 2);
+      extent = rx::Max(1u, extent / 2);
     }
-    cmd.CopyBufferToTexture(staging, albedo_, {regions.data(), regions.size()});
+    cmd.CopyBufferToTexture(staging, albedo_, base::Span(regions.data(), regions.size()));
     cmd.Barrier(Transition(albedo_, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
   });
   device.DestroyBuffer(staging);
@@ -589,7 +595,7 @@ void VirtualGeometryPass::SetAlbedo(Device& device, ByteSpan rgba_mips, u32 size
   RX_INFO("vgeo albedo: {}x{}, {} mips", size, size, mips);
 }
 
-void VirtualGeometryPass::SetInstances(std::span<const Mat4> transforms) {
+void VirtualGeometryPass::SetInstances(base::Span<const Mat4> transforms) {
   pending_instances_.clear();
   u32 mirrored = 0;
   for (const Mat4& m : transforms) {
@@ -683,7 +689,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
       dst[0] = Mat4::Identity();
       instance_count_ = 1;
     } else {
-      std::memcpy(dst, pending_instances_.data(), pending_instances_.size() * sizeof(Mat4));
+      base::MemCopy(dst, pending_instances_.data(), pending_instances_.size() * sizeof(Mat4));
       instance_count_ = static_cast<u32>(pending_instances_.size());
     }
   }
@@ -692,7 +698,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
     Params p{};
     p.view_proj = frame.view_proj;
     p.prev_view_proj = has_prev_ ? prev_view_proj_ : frame.view_proj;
-    std::memcpy(p.planes, frame.planes, sizeof(p.planes));
+    base::MemCopy(p.planes, frame.planes, sizeof(p.planes));
     p.camera[0] = frame.eye.x;
     p.camera[1] = frame.eye.y;
     p.camera[2] = frame.eye.z;
@@ -715,12 +721,12 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
     p.width = frame.width;
     p.height = frame.height;
     p.sw_threshold = kSwThresholdPx;
-    if (const char* env = std::getenv("RX_VGEO_SW_EDGE")) {
-      p.sw_threshold = static_cast<u32>(std::max(std::atoi(env), 0));
+    if (const char* env = ::getenv("RX_VGEO_SW_EDGE")) {
+      p.sw_threshold = static_cast<u32>(rx::Max(::atoi(env), 0));
     }
     p.debug = frame.debug;
     p.max_visible = kMaxVisible;
-    std::memcpy(params_[slot].mapped, &p, sizeof(p));
+    base::MemCopy(params_[slot].mapped, &p, sizeof(p));
   }
 
   if (frame.debug != 0 && frame.slot % 60 == 30) {
@@ -899,7 +905,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
         DepthAttachment depth_att{.view = ctx.graph->image(depth).view,
                                   .load = LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = ctx.graph->image(color).extent,
-                                 .colors = {&att, 1},
+                                 .colors = base::Span(&att, 1),
                                  .depth = &depth_att});
         ctx.cmd->BindPipeline(resolve_pipeline_);
         ctx.cmd->BindTransient(
@@ -930,7 +936,7 @@ void VirtualGeometryPass::AddToGraph(Device& device, RenderGraph& graph, const F
 
 void VirtualGeometryPass::AddLegacyPass(RenderGraph& graph, const Frame& frame) {
   LegacyPush push{};
-  std::memcpy(push.planes, frame.planes, sizeof(push.planes));
+  base::MemCopy(push.planes, frame.planes, sizeof(push.planes));
   push.camera[0] = frame.eye.x;
   push.camera[1] = frame.eye.y;
   push.camera[2] = frame.eye.z;
@@ -949,13 +955,13 @@ void VirtualGeometryPass::AddLegacyPass(RenderGraph& graph, const Frame& frame) 
         const GpuBuffer& counter = legacy_counters_[slot];
         if (counter.mapped) static_cast<u32*>(counter.mapped)[0] = 0;
         const LegacyCamera camera{view_proj};
-        std::memcpy(legacy_camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(legacy_camera_[slot].mapped, &camera, sizeof(camera));
 
         ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
         DepthAttachment depth_att{.view = ctx.graph->image(depth).view,
                                   .load = LoadOp::kLoad};
         ctx.cmd->BeginRendering({.extent = ctx.graph->image(color).extent,
-                                 .colors = {&att, 1},
+                                 .colors = base::Span(&att, 1),
                                  .depth = &depth_att});
         ctx.cmd->BindPipeline(legacy_pipeline_);
         ctx.cmd->BindTransient(

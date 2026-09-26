@@ -1,10 +1,11 @@
 #include "asset/primitives.h"
 
-#include <algorithm>
-#include <cmath>
-#include <unordered_map>
+#include <math.h>
 
+#include "base/containers/unordered_map.h"
+#include "base/memory/move.h"
 #include "core/math.h"
+#include "core/scalar.h"
 
 namespace rx::asset {
 namespace {
@@ -34,12 +35,12 @@ constexpr f32 kLodReduction = 0.7f;
 // border vertices coincide; a border that moved would tear a lit gap at every
 // seam.
 MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u32 g) {
-  f32 cell[3] = {std::max(ext.x, 1e-5f) / g, std::max(ext.y, 1e-5f) / g,
-                 std::max(ext.z, 1e-5f) / g};
+  f32 cell[3] = {rx::Max(ext.x, 1e-5f) / g, rx::Max(ext.y, 1e-5f) / g,
+                 rx::Max(ext.z, 1e-5f) / g};
   auto cell_of = [&](const Vertex& v) -> u64 {
-    u32 cx = std::min(static_cast<u32>((v.position[0] - bmin.x) / cell[0]), g - 1);
-    u32 cy = std::min(static_cast<u32>((v.position[1] - bmin.y) / cell[1]), g - 1);
-    u32 cz = std::min(static_cast<u32>((v.position[2] - bmin.z) / cell[2]), g - 1);
+    u32 cx = rx::Min(static_cast<u32>((v.position[0] - bmin.x) / cell[0]), g - 1);
+    u32 cy = rx::Min(static_cast<u32>((v.position[1] - bmin.y) / cell[1]), g - 1);
+    u32 cz = rx::Min(static_cast<u32>((v.position[2] - bmin.z) / cell[2]), g - 1);
     return (static_cast<u64>(cz) * g + cy) * g + cx;
   };
 
@@ -48,7 +49,7 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
     f64 p[3] = {0, 0, 0};
     u32 count = 0;
   };
-  std::unordered_map<u64, CellPosition> cell_position;
+  base::UnorderedMap<u64, CellPosition> cell_position;
   for (const Vertex& v : src.vertices) {
     CellPosition& c = cell_position[cell_of(v)];
     for (int k = 0; k < 3; ++k) c.p[k] += v.position[k];
@@ -61,7 +62,7 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
   // them as a boundary. Positions are compared on a fine grid rather than bit
   // for bit, because the copies rarely agree to the last bit (a lathe's seam
   // column closes on sin(2 pi), not on 0).
-  const f32 quantum = std::max({ext.x, ext.y, ext.z, 1e-5f}) / 65536.0f;
+  const f32 quantum = rx::Max({ext.x, ext.y, ext.z, 1e-5f}) / 65536.0f;
   struct GridPosition {
     i32 p[3];
     bool operator==(const GridPosition&) const = default;
@@ -76,15 +77,15 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
   base::Vector<u32> position_id(src.vertices.size());
   u32 position_count = 0;
   {
-    std::unordered_map<GridPosition, u32, GridHash> seen;
+    base::UnorderedMap<GridPosition, u32, GridHash> seen;
     for (size_t i = 0; i < src.vertices.size(); ++i) {
       const Vertex& v = src.vertices[i];
-      GridPosition q{{static_cast<i32>(std::lround((v.position[0] - bmin.x) / quantum)),
-                      static_cast<i32>(std::lround((v.position[1] - bmin.y) / quantum)),
-                      static_cast<i32>(std::lround((v.position[2] - bmin.z) / quantum))}};
-      auto it = seen.find(q);
-      if (it == seen.end()) it = seen.emplace(q, position_count++).first;
-      position_id[i] = it->second;
+      GridPosition q{{static_cast<i32>(::lround((v.position[0] - bmin.x) / quantum)),
+                      static_cast<i32>(::lround((v.position[1] - bmin.y) / quantum)),
+                      static_cast<i32>(::lround((v.position[2] - bmin.z) / quantum))}};
+      u32* id = seen.find(q);
+      if (!id) id = seen.emplace(q, position_count++).first;
+      position_id[i] = *id;
     }
   }
   // Locked per position, not per vertex: the copies an importer split apart all
@@ -96,7 +97,7 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
   // leave nothing to decimate.
   base::Vector<u8> locked(position_count);
   {
-    const f32 border = std::max({ext.x, ext.y, ext.z, 1e-5f}) * 1e-4f;
+    const f32 border = rx::Max({ext.x, ext.y, ext.z, 1e-5f}) * 1e-4f;
     auto on_bounds = [&](u32 index) {
       const Vertex& v = src.vertices[index];
       const f32 lo[3] = {bmin.x, bmin.y, bmin.z};
@@ -106,10 +107,10 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
       }
       return false;
     };
-    std::unordered_map<u64, u32> edge_uses;
+    base::UnorderedMap<u64, u32> edge_uses;
     auto edge = [&](u32 a, u32 b) {
-      u32 lo = std::min(position_id[a], position_id[b]);
-      u32 hi = std::max(position_id[a], position_id[b]);
+      u32 lo = rx::Min(position_id[a], position_id[b]);
+      u32 hi = rx::Max(position_id[a], position_id[b]);
       return (static_cast<u64>(lo) << 32) | hi;
     };
     for (size_t i = 0; i + 3 <= src.indices.size(); i += 3) {
@@ -153,7 +154,7 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
   MeshLod out;
   constexpr u32 kUnmapped = 0xffffffffu;
   base::Vector<u32> remap(src.vertices.size());
-  std::unordered_map<u64, u32> cell_to_new;
+  base::UnorderedMap<u64, u32> cell_to_new;
   for (size_t s = 0; s < sub_count; ++s) {
     // Both are per submesh: a source vertex shared by two submeshes has to map
     // to a separate representative in each.
@@ -168,8 +169,8 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
         // merges with its own split copies and with nothing else.
         const bool lock = locked[position_id[index]];
         const u64 key = lock ? (1ull << 63) | position_id[index] : cell_of(v);
-        auto it = cell_to_new.find(key);
-        if (it == cell_to_new.end()) {
+        const u32* found = cell_to_new.find(key);
+        if (!found) {
           slot = static_cast<u32>(accum.size());
           cell_to_new.emplace(key, slot);
           Accum a;
@@ -179,7 +180,7 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
           a.color = v.color;
           accum.push_back(a);
         } else {
-          slot = it->second;
+          slot = *found;
         }
         Accum& a = accum[slot];
         for (int k = 0; k < 3; ++k) {
@@ -194,8 +195,8 @@ MeshLod ClusterDecimate(const MeshLod& src, const Vec3& bmin, const Vec3& ext, u
     };
 
     const u32 first = static_cast<u32>(out.indices.size());
-    const size_t begin = std::min<size_t>(subs[s].index_offset, src.indices.size());
-    const size_t end = std::min<size_t>(begin + subs[s].index_count, src.indices.size());
+    const size_t begin = rx::Min<size_t>(subs[s].index_offset, src.indices.size());
+    const size_t end = rx::Min<size_t>(begin + subs[s].index_count, src.indices.size());
     for (size_t i = begin; i + 3 <= end; i += 3) {
       u32 a = representative(src.indices[i]);
       u32 b = representative(src.indices[i + 1]);
@@ -265,7 +266,7 @@ void AddLathe(MeshLod* lod, const base::Vector<LatheRing>& rings, u32 segments) 
   for (size_t i = 1; i < rings.size(); ++i) {
     f32 dr = rings[i].radius - rings[i - 1].radius;
     f32 dy = rings[i].y - rings[i - 1].y;
-    travelled += std::sqrt(dr * dr + dy * dy);
+    travelled += ::sqrt(dr * dr + dy * dy);
     v[i] = travelled;
   }
   const f32 inv_travelled = travelled > 0.0f ? 1.0f / travelled : 0.0f;
@@ -277,7 +278,7 @@ void AddLathe(MeshLod* lod, const base::Vector<LatheRing>& rings, u32 segments) 
     for (u32 x = 0; x <= segments; ++x) {
       f32 u = static_cast<f32>(x) / static_cast<f32>(segments);
       f32 theta = u * 6.2831853f;
-      f32 sin_theta = std::sin(theta), cos_theta = std::cos(theta);
+      f32 sin_theta = ::sin(theta), cos_theta = ::cos(theta);
       Vertex vertex{};
       vertex.position[0] = ring.radius * cos_theta;
       vertex.position[1] = ring.y;
@@ -332,7 +333,7 @@ void AddDisc(MeshLod* lod, f32 radius, f32 y, f32 sign, u32 segments) {
   push(0.0f, 0.0f, 0.5f, 0.5f);
   for (u32 x = 0; x <= segments; ++x) {
     f32 theta = static_cast<f32>(x) / static_cast<f32>(segments) * 6.2831853f;
-    f32 cos_theta = std::cos(theta), sin_theta = std::sin(theta);
+    f32 cos_theta = ::cos(theta), sin_theta = ::sin(theta);
     push(radius * cos_theta, radius * sin_theta, 0.5f + 0.5f * cos_theta,
          0.5f + 0.5f * sin_theta);
   }
@@ -409,8 +410,8 @@ UvCell BoxUvCell(u32 box_index, u32 box_count) {
 // Append an axis-aligned box spanning a..b inflated by `thick`, all vertices
 // weighted fully to `bone`, with its faces packed into `cell` of the uv atlas.
 void AddBox(MeshLod* lod, const Vec3& a, const Vec3& b, f32 thick, u8 bone, const UvCell& cell) {
-  f32 lo[3] = {std::min(a.x, b.x) - thick, std::min(a.y, b.y) - thick, std::min(a.z, b.z) - thick};
-  f32 hi[3] = {std::max(a.x, b.x) + thick, std::max(a.y, b.y) + thick, std::max(a.z, b.z) + thick};
+  f32 lo[3] = {rx::Min(a.x, b.x) - thick, rx::Min(a.y, b.y) - thick, rx::Min(a.z, b.z) - thick};
+  f32 hi[3] = {rx::Max(a.x, b.x) + thick, rx::Max(a.y, b.y) + thick, rx::Max(a.z, b.z) + thick};
   static constexpr int kFace[6][3] = {{0, 1, 2}, {0, 1, 2}, {1, 0, 2},
                                       {1, 0, 2}, {2, 0, 1}, {2, 0, 1}};
   static constexpr f32 kSign[6] = {1, -1, 1, -1, 1, -1};
@@ -493,7 +494,7 @@ Mesh MakeBox(f32 hx, f32 hy, f32 hz, AssetId id) {
     for (u32 index : {0u, 1u, 2u, 0u, 2u, 3u}) lod.indices.push_back(base + index);
   }
 
-  mesh.bounds_radius = std::sqrt(hx * hx + hy * hy + hz * hz);
+  mesh.bounds_radius = ::sqrt(hx * hx + hy * hy + hz * hz);
   return mesh;
 }
 
@@ -511,11 +512,11 @@ Mesh MakeSphere(f32 radius, u32 rings, u32 segments, AssetId id) {
   for (u32 y = 0; y <= rings; ++y) {
     f32 v = static_cast<f32>(y) / static_cast<f32>(rings);
     f32 phi = v * 3.14159265f;  // 0..pi, pole to pole
-    f32 sin_phi = std::sin(phi), cos_phi = std::cos(phi);
+    f32 sin_phi = ::sin(phi), cos_phi = ::cos(phi);
     for (u32 x = 0; x <= segments; ++x) {
       f32 u = static_cast<f32>(x) / static_cast<f32>(segments);
       f32 theta = u * 6.2831853f;
-      f32 sin_theta = std::sin(theta), cos_theta = std::cos(theta);
+      f32 sin_theta = ::sin(theta), cos_theta = ::cos(theta);
       Vec3 n{sin_phi * cos_theta, cos_phi, sin_phi * sin_theta};
       Vertex vertex{};
       vertex.position[0] = n.x * radius;
@@ -568,7 +569,7 @@ Mesh MakePlane(f32 hx, f32 hz, AssetId id) {
   // Corners run ccw in the xz plane, which is clockwise seen from +Y, so the
   // winding is reversed to keep the visible face the one the normal points at.
   for (u32 index : {0u, 3u, 2u, 0u, 2u, 1u}) lod.indices.push_back(index);
-  return FinishPrimitive(std::move(mesh), std::sqrt(hx * hx + hz * hz));
+  return FinishPrimitive(base::move(mesh), ::sqrt(hx * hx + hz * hz));
 }
 
 Mesh MakeCylinder(f32 radius, f32 half_height, u32 segments, AssetId id) {
@@ -581,8 +582,8 @@ Mesh MakeCylinder(f32 radius, f32 half_height, u32 segments, AssetId id) {
   AddLathe(&lod, side, segments);
   AddDisc(&lod, radius, half_height, 1.0f, segments);
   AddDisc(&lod, radius, -half_height, -1.0f, segments);
-  return FinishPrimitive(std::move(mesh),
-                         std::sqrt(radius * radius + half_height * half_height));
+  return FinishPrimitive(base::move(mesh),
+                         ::sqrt(radius * radius + half_height * half_height));
 }
 
 Mesh MakeCone(f32 radius, f32 half_height, u32 segments, AssetId id) {
@@ -597,8 +598,8 @@ Mesh MakeCone(f32 radius, f32 half_height, u32 segments, AssetId id) {
   side.push_back({0.0f, half_height, normal_r, radius});
   AddLathe(&lod, side, segments);
   AddDisc(&lod, radius, -half_height, -1.0f, segments);
-  return FinishPrimitive(std::move(mesh),
-                         std::sqrt(radius * radius + half_height * half_height));
+  return FinishPrimitive(base::move(mesh),
+                         ::sqrt(radius * radius + half_height * half_height));
 }
 
 Mesh MakeTorus(f32 major_radius, f32 minor_radius, u32 rings, u32 segments, AssetId id) {
@@ -611,12 +612,12 @@ Mesh MakeTorus(f32 major_radius, f32 minor_radius, u32 rings, u32 segments, Asse
   // than wrapping the uv back to 0 across the seam quad.
   for (u32 i = 0; i <= rings; ++i) {
     f32 angle = static_cast<f32>(i) / static_cast<f32>(rings) * 6.2831853f;
-    f32 cos_angle = std::cos(angle), sin_angle = std::sin(angle);
+    f32 cos_angle = ::cos(angle), sin_angle = ::sin(angle);
     profile.push_back({major_radius + minor_radius * cos_angle, minor_radius * sin_angle,
                        cos_angle, sin_angle});
   }
   AddLathe(&lod, profile, segments);
-  return FinishPrimitive(std::move(mesh), major_radius + minor_radius);
+  return FinishPrimitive(base::move(mesh), major_radius + minor_radius);
 }
 
 Mesh MakeCapsule(f32 radius, f32 half_height, u32 rings, u32 segments, AssetId id) {
@@ -630,18 +631,18 @@ Mesh MakeCapsule(f32 radius, f32 half_height, u32 rings, u32 segments, AssetId i
   // them needs no samples of its own.
   for (u32 i = 0; i <= cap_rings; ++i) {
     f32 angle = -1.5707963f + static_cast<f32>(i) / static_cast<f32>(cap_rings) * 1.5707963f;
-    f32 cos_angle = std::cos(angle), sin_angle = std::sin(angle);
+    f32 cos_angle = ::cos(angle), sin_angle = ::sin(angle);
     profile.push_back({radius * cos_angle, -half_height + radius * sin_angle, cos_angle,
                        sin_angle});
   }
   for (u32 i = 0; i <= cap_rings; ++i) {
     f32 angle = static_cast<f32>(i) / static_cast<f32>(cap_rings) * 1.5707963f;
-    f32 cos_angle = std::cos(angle), sin_angle = std::sin(angle);
+    f32 cos_angle = ::cos(angle), sin_angle = ::sin(angle);
     profile.push_back({radius * cos_angle, half_height + radius * sin_angle, cos_angle,
                        sin_angle});
   }
   AddLathe(&lod, profile, segments);
-  return FinishPrimitive(std::move(mesh), half_height + radius);
+  return FinishPrimitive(base::move(mesh), half_height + radius);
 }
 
 Mesh MakeLodSphere(f32 radius, AssetId id) {
@@ -652,7 +653,7 @@ Mesh MakeLodSphere(f32 radius, AssetId id) {
   const u32 tess[][2] = {{48, 64}, {16, 22}, {6, 8}};
   for (const auto& t : tess) {
     Mesh level = MakeSphere(radius, t[0], t[1], id);
-    mesh.lods.push_back(std::move(level.lods[0]));
+    mesh.lods.push_back(base::move(level.lods[0]));
   }
   mesh.bounds_radius = radius;
   return mesh;
@@ -674,12 +675,12 @@ void GenerateLods(Mesh* mesh) {
 
   Vec3 bmin{1e30f, 1e30f, 1e30f}, bmax{-1e30f, -1e30f, -1e30f};
   for (const Vertex& v : base.vertices) {
-    bmin.x = std::min(bmin.x, v.position[0]);
-    bmin.y = std::min(bmin.y, v.position[1]);
-    bmin.z = std::min(bmin.z, v.position[2]);
-    bmax.x = std::max(bmax.x, v.position[0]);
-    bmax.y = std::max(bmax.y, v.position[1]);
-    bmax.z = std::max(bmax.z, v.position[2]);
+    bmin.x = rx::Min(bmin.x, v.position[0]);
+    bmin.y = rx::Min(bmin.y, v.position[1]);
+    bmin.z = rx::Min(bmin.z, v.position[2]);
+    bmax.x = rx::Max(bmax.x, v.position[0]);
+    bmax.y = rx::Max(bmax.y, v.position[1]);
+    bmax.z = rx::Max(bmax.z, v.position[2]);
   }
   Vec3 ext{bmax.x - bmin.x, bmax.y - bmin.y, bmax.z - bmin.z};
 
@@ -696,7 +697,7 @@ void GenerateLods(Mesh* mesh) {
         static_cast<f32>(lod.indices.size()) > kLodReduction * static_cast<f32>(previous)) {
       break;
     }
-    mesh->lods.push_back(std::move(lod));
+    mesh->lods.push_back(base::move(lod));
   }
 }
 
@@ -713,7 +714,7 @@ void MakeSkinnedBiped(AssetId mesh_id, Skeleton* out_skeleton, Mesh* out_mesh) {
     bone.bind_translation = kBiped[i].offset;
     bone.bind_rotation = {0, 0, 0, 1};
     bone.bind_scale = 1.0f;
-    out_skeleton->bones.push_back(std::move(bone));
+    out_skeleton->bones.push_back(base::move(bone));
     world[i] = kBiped[i].parent >= 0 ? world[kBiped[i].parent] + kBiped[i].offset
                                      : kBiped[i].offset;
   }

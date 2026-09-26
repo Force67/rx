@@ -1,4 +1,5 @@
 #include "anim/pose.h"
+#include "base/strings/xstring.h"
 
 namespace rx::anim {
 
@@ -18,7 +19,7 @@ base::Vector<i32> BuildBoneRemap(const asset::Skeleton& skeleton,
                                  const asset::SkinBinding& skin) {
   base::Vector<i32> remap;
   remap.reserve(skin.bones.size());
-  for (const std::string& name : skin.bones) remap.push_back(skeleton.Find(name));
+  for (const base::String& name : skin.bones) remap.push_back(skeleton.Find(name));
   return remap;
 }
 

@@ -1,16 +1,20 @@
 #include "render/post/upscaler.h"
 
-#include <cfloat>
-#include <cstdlib>
-#include <cstring>
-#include <string>
+#include <float.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "core/log.h"
 #include "render/rhi/device.h"
 // Vulkan escape hatch: the FFX backend speaks raw Vulkan. Also pulls volk
 // (VK_NO_PROTOTYPES) before the ffx vk header.
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "render/rhi/vulkan_interop.h"
 
+// ffx_util.h calls std::popcount without including <bit>; FidelityFX is
+// vendored C++ we do not edit, so the include it forgot is supplied here.
+#include <bit>
 #include <FidelityFX/host/ffx_fsr3upscaler.h>
 #include <FidelityFX/host/backends/vk/ffx_vk.h>
 
@@ -50,17 +54,17 @@ FfxResourceDescription DescribeImage(const GpuImage& image, FfxResourceUsage usa
 PFN_vkVoidFunction DeviceProcAddr(VkDevice device, const char* name) {
   PFN_vkVoidFunction fn = vkGetDeviceProcAddr(device, name);
   if (fn) return fn;
-  size_t len = std::strlen(name);
-  if (len > 3 && (std::strcmp(name + len - 3, "KHR") == 0 ||
-                  std::strcmp(name + len - 3, "EXT") == 0)) {
-    std::string core(name, len - 3);
+  size_t len = ::strlen(name);
+  if (len > 3 && (::strcmp(name + len - 3, "KHR") == 0 ||
+                  ::strcmp(name + len - 3, "EXT") == 0)) {
+    base::String core(name, len - 3);
     fn = vkGetDeviceProcAddr(device, core.c_str());
   }
   return fn;
 }
 
 void MessageCallback(FfxMsgType type, const wchar_t* message) {
-  std::string narrow;
+  base::String narrow;
   for (const wchar_t* c = message; c && *c; ++c) {
     narrow.push_back(*c < 128 ? static_cast<char>(*c) : '?');
   }
@@ -107,7 +111,7 @@ class Fsr3Upscaler final : public Upscaler {
     FfxDevice ffx_device = ffxGetDeviceVK(&device_context);
     scratch_size_ = ffxGetScratchMemorySizeVK(h.physical_device,
                                               FFX_FSR3UPSCALER_CONTEXT_COUNT);
-    scratch_ = std::calloc(1, scratch_size_);
+    scratch_ = ::calloc(1, scratch_size_);
     if (!scratch_) return false;
     FfxErrorCode err = ffxGetInterfaceVK(&interface_, ffx_device, scratch_, scratch_size_,
                                          FFX_FSR3UPSCALER_CONTEXT_COUNT);
@@ -213,7 +217,7 @@ class Fsr3Upscaler final : public Upscaler {
         barriers[i] =
             Transition(shared_[i], ResourceState::kUndefined, ResourceState::kGeneral);
       }
-      cmd.TextureBarriers({barriers, kSharedCount});
+      cmd.TextureBarriers(base::Span(barriers, kSharedCount));
     });
     return true;
   }
@@ -287,7 +291,7 @@ class Fsr3Upscaler final : public Upscaler {
       if (image) device_.DestroyImage(image);
     }
     if (scratch_) {
-      std::free(scratch_);
+      ::free(scratch_);
       scratch_ = nullptr;
     }
   }
@@ -309,8 +313,8 @@ class Fsr3Upscaler final : public Upscaler {
 
 }  // namespace
 
-std::unique_ptr<Upscaler> CreateFsr3Upscaler(const UpscalerDesc& desc, Device& device) {
-  auto upscaler = std::make_unique<Fsr3Upscaler>(device);
+base::UniquePointer<Upscaler> CreateFsr3Upscaler(const UpscalerDesc& desc, Device& device) {
+  auto upscaler = base::MakeUnique<Fsr3Upscaler>(device);
   if (!upscaler->Initialize(desc)) return nullptr;
   return upscaler;
 }

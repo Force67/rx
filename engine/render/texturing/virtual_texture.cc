@@ -1,11 +1,15 @@
 #include "render/texturing/virtual_texture.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <unordered_set>
+#include <math.h>
+#include <string.h>
 
+#include "base/containers/unordered_set.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/threading/lock_guard.h"
 #include "core/log.h"
+#include "core/scalar.h"
 
 namespace rx::render {
 namespace {
@@ -58,7 +62,7 @@ bool VirtualTexture::Initialize(Device& device) {
     pages_[m].assign(static_cast<size_t>(PagesAt(m)) * PagesAt(m), PageState{});
     indirection_cpu_[m].assign(static_cast<size_t>(PagesAt(m)) * PagesAt(m) * 4, 0);
   }
-  for (GpuBuffer& rb : readback_) std::memset(rb.mapped, 0, sizeof(u32));
+  for (GpuBuffer& rb : readback_) base::MemSet(rb.mapped, 0, sizeof(u32));
 
   device.ImmediateSubmit([this](CommandList& cmd) {
     TextureBarrier init[2] = {
@@ -69,12 +73,12 @@ bool VirtualTexture::Initialize(Device& device) {
     cmd.FillBuffer(feedback_, 0, sizeof(u32), 0);
   });
 
-  worker_ = std::thread([this] {
+  worker_ = base::MakeUnique<base::Thread>("rx-vt-pages", [this] {
     for (;;) {
       PageKey key;
       {
-        std::unique_lock lock(queue_mutex_);
-        queue_cv_.wait(lock, [this] { return worker_quit_ || !requests_.empty(); });
+        base::UniqueLock<base::Mutex> lock(queue_mutex_);
+        queue_cv_.Wait(lock, [this] { return worker_quit_ || !requests_.empty(); });
         if (worker_quit_) return;
         key = requests_.front();
         requests_.pop_front();
@@ -82,29 +86,30 @@ bool VirtualTexture::Initialize(Device& device) {
       GeneratedPage page;
       page.key = key;
       GeneratePage(key, &page.pixels);
-      std::lock_guard lock(queue_mutex_);
-      completed_.push_back(std::move(page));
+      base::LockGuard lock(queue_mutex_);
+      completed_.push_back(base::move(page));
     }
-  });
+  }, /*start_now=*/true);
 
   // Seed the coarsest page so every pixel has a fallback from frame one.
   {
-    std::lock_guard lock(queue_mutex_);
+    base::LockGuard lock(queue_mutex_);
     requests_.push_back({kMips - 1, 0, 0});
     Page({kMips - 1, 0, 0}).pending = true;
   }
-  queue_cv_.notify_one();
+  queue_cv_.NotifyOne();
   return true;
 }
 
 void VirtualTexture::Destroy(Device& device) {
-  if (worker_.joinable()) {
+  if (worker_) {
     {
-      std::lock_guard lock(queue_mutex_);
+      base::LockGuard lock(queue_mutex_);
       worker_quit_ = true;
     }
-    queue_cv_.notify_all();
-    worker_.join();
+    queue_cv_.NotifyAll();
+    worker_->Join();
+    worker_.Reset();
   }
   if (atlas_) device.DestroyImage(atlas_);
   atlas_ = {};
@@ -121,7 +126,7 @@ void VirtualTexture::Destroy(Device& device) {
 // The demo "megatexture": a continuous survey pattern over the whole virtual
 // space - kilometer-grid lines, a hue that drifts across the space, per-page
 // hairlines and a mip tint, so residency, borders and LOD are all visible.
-void VirtualTexture::GeneratePage(const PageKey& key, std::vector<u8>* pixels) const {
+void VirtualTexture::GeneratePage(const PageKey& key, base::Vector<u8>* pixels) const {
   pixels->resize(kPageBytes);
   const f32 scale = static_cast<f32>(1u << key.mip);  // virtual texels per texel here
   const f32 virtual_size = static_cast<f32>(kVirtualPages) * kPayload;
@@ -136,15 +141,15 @@ void VirtualTexture::GeneratePage(const PageKey& key, std::vector<u8>* pixels) c
       f32 u = vx / virtual_size, v = vy / virtual_size;
 
       // Base: two-tone checker drifting through hue across the space.
-      f32 checker = (static_cast<i32>(std::floor(vx / 64.0f)) ^
-                     static_cast<i32>(std::floor(vy / 64.0f))) & 1
+      f32 checker = (static_cast<i32>(::floor(vx / 64.0f)) ^
+                     static_cast<i32>(::floor(vy / 64.0f))) & 1
                         ? 0.55f
                         : 0.45f;
       f32 r = checker * (0.6f + 0.4f * u);
       f32 g = checker * (0.6f + 0.4f * v);
       f32 b = checker * (0.6f + 0.4f * (1.0f - u));
       // Coarse grid lines every 1024 virtual texels.
-      f32 gx = std::fmod(vx, 1024.0f), gy = std::fmod(vy, 1024.0f);
+      f32 gx = ::fmod(vx, 1024.0f), gy = ::fmod(vy, 1024.0f);
       if (gx < 3.0f * scale || gy < 3.0f * scale) {
         r = g = b = 0.05f;
       }
@@ -154,9 +159,9 @@ void VirtualTexture::GeneratePage(const PageKey& key, std::vector<u8>* pixels) c
       g = g * (1.3f - 0.6f * t);
 
       size_t o = (static_cast<size_t>(y) * kPageStored + x) * 4;
-      (*pixels)[o + 0] = static_cast<u8>(std::clamp(r, 0.0f, 1.0f) * 255.0f);
-      (*pixels)[o + 1] = static_cast<u8>(std::clamp(g, 0.0f, 1.0f) * 255.0f);
-      (*pixels)[o + 2] = static_cast<u8>(std::clamp(b, 0.0f, 1.0f) * 255.0f);
+      (*pixels)[o + 0] = static_cast<u8>(rx::Clamp(r, 0.0f, 1.0f) * 255.0f);
+      (*pixels)[o + 1] = static_cast<u8>(rx::Clamp(g, 0.0f, 1.0f) * 255.0f);
+      (*pixels)[o + 2] = static_cast<u8>(rx::Clamp(b, 0.0f, 1.0f) * 255.0f);
       (*pixels)[o + 3] = 255;
     }
   }
@@ -177,7 +182,7 @@ void VirtualTexture::WriteIndirection(const PageKey& key) {
       return;
     }
   }
-  std::memset(&indirection_cpu_[mip][static_cast<size_t>(PageIndex(key)) * 4], 0, 4);
+  base::MemSet(&indirection_cpu_[mip][static_cast<size_t>(PageIndex(key)) * 4], 0, 4);
 }
 
 // Refresh every indirection cell in the page's footprint (its own cell plus
@@ -230,12 +235,12 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
   // safely past the fence) and turn misses into generation requests.
   const GpuBuffer& rb = readback_[frame_index % kReadbackRing];
   const u32* data = static_cast<const u32*>(rb.mapped);
-  u32 count = std::min(data[0], kFeedbackCapacity);
-  std::unordered_set<u32> seen;
+  u32 count = rx::Min(data[0], kFeedbackCapacity);
+  base::UnorderedSet<u32> seen;
   u32 enqueued = 0;
   for (u32 i = 0; i < count; ++i) {
     u32 packed = data[1 + i];
-    if (!seen.insert(packed).second) continue;
+    if (!seen.insert(packed)) continue;
     PageKey key{packed >> 24, packed & 0xfffu, (packed >> 12) & 0xfffu};
     if (key.mip >= kMips) continue;
     u32 pages = PagesAt(key.mip);
@@ -245,19 +250,19 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
     if (state.atlas_slot != 0xffff || state.pending) continue;
     state.pending = true;
     {
-      std::lock_guard lock(queue_mutex_);
+      base::LockGuard lock(queue_mutex_);
       requests_.push_back(key);
     }
     ++enqueued;
   }
-  if (enqueued > 0) queue_cv_.notify_one();
+  if (enqueued > 0) queue_cv_.NotifyOne();
 
   // 2) Collect finished pages (bounded per frame by the staging budget).
-  std::vector<GeneratedPage> ready;
+  base::Vector<GeneratedPage> ready;
   {
-    std::lock_guard lock(queue_mutex_);
+    base::LockGuard lock(queue_mutex_);
     while (!completed_.empty() && ready.size() < kMaxUploadsPerFrame) {
-      ready.push_back(std::move(completed_.front()));
+      ready.push_back(base::move(completed_.front()));
       completed_.pop_front();
     }
   }
@@ -265,14 +270,14 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
     PageKey key;
     u16 slot;
   };
-  std::vector<Upload> uploads;
+  base::Vector<Upload> uploads;
   for (size_t i = 0; i < ready.size(); ++i) {
     GeneratedPage& page = ready[i];
     PageState& state = Page(page.key);
     state.pending = false;
     u16 slot = AcquireSlot(frame_index);
     if (slot == 0xffff) continue;  // atlas exhausted this frame
-    std::memcpy(static_cast<u8*>(upload_staging_.mapped) + uploads.size() * kPageBytes,
+    base::MemCopy(static_cast<u8*>(upload_staging_.mapped) + uploads.size() * kPageBytes,
                 page.pixels.data(), kPageBytes);
     state.atlas_slot = slot;
     state.last_used = frame_index;
@@ -289,14 +294,14 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
     if (upload_indirection) {
       u64 offset = 0;
       for (u32 m = 0; m < kMips; ++m) {
-        std::memcpy(static_cast<u8*>(indirection_staging_.mapped) + offset,
+        base::MemCopy(static_cast<u8*>(indirection_staging_.mapped) + offset,
                     indirection_cpu_[m].data(), indirection_cpu_[m].size());
         offset += indirection_cpu_[m].size();
       }
     }
     graph.AddPass(
         "vt_upload", [](RenderGraph::PassBuilder&) {},
-        [this, uploads = std::move(uploads), upload_indirection](PassContext& ctx) {
+        [this, uploads = base::move(uploads), upload_indirection](PassContext& ctx) {
           if (!uploads.empty()) {
             TextureBarrier to_copy[1] = {Transition(atlas_, ResourceState::kShaderReadFragment,
                                                     ResourceState::kCopyDst)};
@@ -311,7 +316,7 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
               regions.push_back(copy);
             }
             ctx.cmd->CopyBufferToTexture(upload_staging_, atlas_,
-                                         {regions.data(), regions.size()});
+                                         base::Span(regions.data(), regions.size()));
             TextureBarrier to_read[1] = {
                 Transition(atlas_, ResourceState::kCopyDst, ResourceState::kShaderReadFragment)};
             ctx.cmd->TextureBarriers(to_read);
@@ -330,7 +335,7 @@ void VirtualTexture::AddToGraph(RenderGraph& graph, u64 frame_index) {
               offset += static_cast<u64>(PagesAt(m)) * PagesAt(m) * 4;
             }
             ctx.cmd->CopyBufferToTexture(indirection_staging_, indirection_,
-                                         {regions.data(), regions.size()});
+                                         base::Span(regions.data(), regions.size()));
             TextureBarrier to_read[1] = {Transition(indirection_, ResourceState::kCopyDst,
                                                     ResourceState::kShaderReadFragment)};
             ctx.cmd->TextureBarriers(to_read);

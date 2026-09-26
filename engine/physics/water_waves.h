@@ -1,7 +1,7 @@
 #ifndef RX_PHYSICS_WATER_WAVES_H_
 #define RX_PHYSICS_WATER_WAVES_H_
 
-#include <cmath>
+#include <math.h>
 
 #include "core/math.h"
 #include "core/types.h"
@@ -53,10 +53,10 @@ inline f32 GerstnerWaveHeight(f32 x, f32 z, f32 t, Vec3* flow = nullptr,
   f32 flow_x = 0.0f, flow_z = 0.0f, vy = 0.0f;
   for (const GerstnerWaveParam& g : kGerstnerWaves) {
     const f32 k = kWaterTau / g.wavelength;
-    const f32 w = std::sqrt(kGravity * k);  // deep-water dispersion
+    const f32 w = ::sqrt(kGravity * k);  // deep-water dispersion
     const f32 phase = k * (g.dir_x * x + g.dir_z * z) + w * t;
-    const f32 s = std::sin(phase);
-    const f32 c = std::cos(phase);
+    const f32 s = ::sin(phase);
+    const f32 c = ::cos(phase);
     height += g.amplitude * s;
     // Horizontal displacement amplitude q*amp = chop / (4k); its time
     // derivative (orbital velocity) is -dir * q*amp * w * sin(phase).

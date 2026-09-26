@@ -1,8 +1,9 @@
 #include "render/geometry/fur.h"
 
-#include <cstring>
+#include <string.h>
 
 #include "asset/primitives.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "shaders/fur_ps_hlsl.h"
@@ -101,7 +102,7 @@ void FurPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceHandl
 
         ctx.cmd->BindPipeline(pipeline_);
         const FurCamera camera{view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
         ctx.cmd->BindTransient(0,
                                {Bind::Uniform(0, camera_[slot], 0, sizeof(FurCamera))});
 

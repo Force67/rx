@@ -1,7 +1,8 @@
 #ifndef RX_CORE_WAYLAND_KDE_HDR_H_
 #define RX_CORE_WAYLAND_KDE_HDR_H_
 
-#include <memory>
+#include "base/memory/unique_pointer.h"
+
 
 namespace rx {
 
@@ -17,7 +18,7 @@ class KdeOutputHdrMonitor {
   // Connects and takes the initial output snapshot. Returns null when there is
   // no wayland display or the compositor is not KWin (no kde_output_device_v2
   // globals) - callers then fall back to SDL's property.
-  static std::unique_ptr<KdeOutputHdrMonitor> Create();
+  static base::UniquePointer<KdeOutputHdrMonitor> Create();
   ~KdeOutputHdrMonitor();
 
   KdeOutputHdrMonitor(const KdeOutputHdrMonitor&) = delete;
@@ -33,7 +34,7 @@ class KdeOutputHdrMonitor {
   KdeOutputHdrMonitor() = default;
 
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  base::UniquePointer<Impl> impl_;
 };
 
 }  // namespace rx

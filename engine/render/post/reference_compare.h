@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_REFERENCE_COMPARE_H_
 #define RX_RENDER_REFERENCE_COMPARE_H_
 
-#include <string>
 
+#include "base/strings/xstring.h"
 #include "core/types.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
@@ -71,9 +71,9 @@ class ReferenceCompare {
   // Loads a scene-linear reference. .hdr / .exr-style float sources load
   // as-is; 8-bit sources are de-gamma'd to linear on the way in. Returns false
   // and keeps the previous reference on a read error.
-  bool LoadReference(Device& device, const std::string& path);
+  bool LoadReference(Device& device, const base::String& path);
   // Loads the four-channel region mask (r skin, g eyes, b lips, a teeth).
-  bool LoadRegionMask(Device& device, const std::string& path);
+  bool LoadRegionMask(Device& device, const base::String& path);
   bool has_reference() const { return static_cast<bool>(reference_); }
 
   Settings& settings() { return settings_; }

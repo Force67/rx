@@ -3,6 +3,8 @@
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "engine_context.h"
 #include "placement/gpu_placement.h"
@@ -44,12 +46,12 @@ class PlacementDemo {
   void BuildWorldData();
   void BuildEcotopes();
   void BuildTerrainMesh();
-  void ApplyResults(std::span<const placement::PlacedInstance> instances);
+  void ApplyResults(base::Span<const placement::PlacedInstance> instances);
   void DestroyTileGroups(const placement::TileKey& key);
 
   EngineContext& ctx_;
   placement::WorldData world_;
-  std::unique_ptr<placement::PlacementSystem> system_;
+  base::UniquePointer<placement::PlacementSystem> system_;
   placement::GpuPlacement gpu_;
   bool gpu_ready_ = false;
 

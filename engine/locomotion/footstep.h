@@ -30,7 +30,7 @@ struct GroundHit {
 // Terrain probe supplied by the controller (wraps a physics raycast). Probes
 // straight down from `probe_start` for up to `max_depth` metres; returns true
 // and fills `*out` on a hit, false when nothing is within reach. `context` is
-// the opaque pointer passed to FootstepPlanner::Update; no std::function, no
+// the opaque pointer passed to FootstepPlanner::Update; no base::Function, no
 // captured state, so the planner stays allocation- and heap-free.
 using GroundProbeFn = bool (*)(void* context, const Vec3& probe_start, f32 max_depth,
                                GroundHit* out);

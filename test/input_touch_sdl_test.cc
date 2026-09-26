@@ -12,8 +12,8 @@
 // exactly as from a panel; no touchscreen or uinput needed. Needs a display to
 // open a window; skips cleanly without one.
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
 #include <SDL3/SDL.h>
 
@@ -24,13 +24,13 @@ namespace {
 int g_failures = 0;
 
 void Check(const char* what, bool ok) {
-  std::printf("  [%s] %s\n", ok ? "ok" : "FAIL", what);
+  ::printf("  [%s] %s\n", ok ? "ok" : "FAIL", what);
   if (!ok)
     ++g_failures;
 }
 
 bool Near(rx::f32 a, rx::f32 b, rx::f32 eps = 1.0f) {
-  return std::fabs(a - b) < eps;  // a pixel of slack: normalized -> pixel rounds
+  return ::fabs(a - b) < eps;  // a pixel of slack: normalized -> pixel rounds
 }
 
 constexpr SDL_TouchID kTouch = 1;
@@ -56,7 +56,7 @@ void PushFinger(Uint32 type, SDL_FingerID finger, float nx, float ny, float pres
 }  // namespace
 
 int main() {
-  std::printf("sdl finger event translation\n");
+  ::printf("sdl finger event translation\n");
 
   rx::WindowDesc desc;
   desc.width = 640;
@@ -67,7 +67,7 @@ int main() {
 
   auto window = rx::Window::Create(desc);
   if (!window || !window->native_handles().window) {
-    std::printf("  no display available, skipping\n");
+    ::printf("  no display available, skipping\n");
     return 0;
   }
 
@@ -80,10 +80,10 @@ int main() {
   const rx::f32 w = static_cast<rx::f32>(window->width());
   const rx::f32 h = static_cast<rx::f32>(window->height());
   const rx::f32 lw = static_cast<rx::f32>(layout_w);
-  std::printf("  window is %.0fx%.0f pixels, laid out at %dx%d (density %.2f)\n", w, h, layout_w,
+  ::printf("  window is %.0fx%.0f pixels, laid out at %dx%d (density %.2f)\n", w, h, layout_w,
               layout_h, static_cast<double>(window->pixel_density()));
   if (w <= 0 || h <= 0) {
-    std::printf("  degenerate window, skipping\n");
+    ::printf("  degenerate window, skipping\n");
     return 0;
   }
 
@@ -102,7 +102,7 @@ int main() {
     if (!Near(lw, w))
       Check("scaled by the pixel size, not the layout size", !Near(t.points[0].x, 0.25f * lw));
     else
-      std::printf("  [--] unscaled display, the two sizes cannot be told apart here\n");
+      ::printf("  [--] unscaled display, the two sizes cannot be told apart here\n");
     Check("press edge reported", t.points[0].pressed);
     Check("pressure carried through", Near(t.points[0].pressure, 1.0f, 0.01f));
     Check("id carried through", t.points[0].id == static_cast<rx::i64>(kFinger));
@@ -145,9 +145,9 @@ int main() {
     Check("second contact scaled independently", Near(window->touch().Find(2)->x, 0.9f * w));
 
   if (g_failures != 0) {
-    std::printf("%d check(s) failed\n", g_failures);
+    ::printf("%d check(s) failed\n", g_failures);
     return 1;
   }
-  std::printf("all checks passed\n");
+  ::printf("all checks passed\n");
   return 0;
 }

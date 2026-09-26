@@ -1,7 +1,8 @@
 #include "nav/agent.h"
 
-#include <cmath>
+#include <math.h>
 
+#include "core/scalar.h"
 #include "scene/components.h"
 
 namespace rx::nav {
@@ -14,7 +15,7 @@ Vec3 ReadPosition(const scene::Transform& t) {
 f32 PlanarDist(const Vec3& a, const Vec3& b) {
   const f32 dx = a.x - b.x;
   const f32 dz = a.z - b.z;
-  return std::sqrt(dx * dx + dz * dz);
+  return ::sqrt(dx * dx + dz * dz);
 }
 
 // Face the move direction: yaw-only quaternion around +Y. The engine is
@@ -22,11 +23,11 @@ f32 PlanarDist(const Vec3& a, const Vec3& b) {
 void FaceVelocity(scene::Transform& t, const Vec3& velocity) {
   const f32 planar = velocity.x * velocity.x + velocity.z * velocity.z;
   if (planar < 1e-6f) return;
-  const f32 yaw = std::atan2(velocity.x, velocity.z);
+  const f32 yaw = ::atan2(velocity.x, velocity.z);
   t.rotation[0] = 0;
-  t.rotation[1] = std::sin(yaw * 0.5f);
+  t.rotation[1] = ::sin(yaw * 0.5f);
   t.rotation[2] = 0;
-  t.rotation[3] = std::cos(yaw * 0.5f);
+  t.rotation[3] = ::cos(yaw * 0.5f);
 }
 
 }  // namespace
@@ -94,12 +95,12 @@ void UpdateAgents(ecs::World& world, NavMesh& mesh, const AgentUpdateConfig& con
     }
     agent.corner = corner;
     const Vec3 to_corner{corner.x - pos.x, 0, corner.z - pos.z};
-    const f32 dist = std::sqrt(Dot(to_corner, to_corner));
+    const f32 dist = ::sqrt(Dot(to_corner, to_corner));
     if (dist < 1e-4f) {
       agent.status = AgentStatus::kMoving;
       return;
     }
-    const f32 step_speed = std::min(agent.speed, dist / std::max(dt, 1e-4f));
+    const f32 step_speed = rx::Min(agent.speed, dist / rx::Max(dt, 1e-4f));
     agent.velocity = to_corner * (step_speed / dist);
     agent.status = AgentStatus::kMoving;
 

@@ -13,7 +13,7 @@
 // integer cell grid; tiles group tile_cells^2 cells and are versioned, which is
 // how corridors notice the world changed under them (path.h, RepathReason).
 
-#include <cstdint>
+#include <stdint.h>
 
 #include <base/containers/static_function.h>
 #include <base/containers/unordered_map.h>

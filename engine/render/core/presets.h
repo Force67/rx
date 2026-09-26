@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_PRESETS_H_
 #define RX_RENDER_PRESETS_H_
 
-#include <string>
 
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "render/rhi/device.h"
@@ -37,7 +37,7 @@ inline QualityPreset ResolvePreset(QualityPreset preset, const DeviceCaps& caps)
 }
 
 RX_RENDER_EXPORT const char* PresetName(QualityPreset preset);
-RX_RENDER_EXPORT QualityPreset ParsePreset(const std::string& name);  // kAuto on no match
+RX_RENDER_EXPORT QualityPreset ParsePreset(const base::String& name);  // kAuto on no match
 
 }  // namespace rx::render
 

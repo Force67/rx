@@ -1,11 +1,14 @@
 #include "asset/asset_database.h"
+#include "base/containers/array.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "base/threading/thread.h"
 
 #include <base/memory/unique_pointer.h>
 
-#include <array>
-#include <cstdio>
-#include <string>
-#include <thread>
+#include <stdio.h>
 
 namespace asset = rx::asset;
 
@@ -16,23 +19,23 @@ int failures = 0;
 #define CHECK(cond)                                                                             \
   do {                                                                                          \
     if (!(cond)) {                                                                              \
-      std::fprintf(stderr, "asset_database_test: FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "asset_database_test: FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++failures;                                                                               \
     }                                                                                           \
   } while (0)
 
 class MemoryProvider final : public asset::FileProvider {
  public:
-  bool Contains(std::string_view) const override { return true; }
+  bool Contains(base::StringRef) const override { return true; }
 
-  std::optional<base::Vector<rx::u8>> Read(std::string_view) const override {
+  base::Optional<base::Vector<rx::u8>> Read(base::StringRef) const override {
     base::Vector<rx::u8> bytes;
     bytes.push_back(1);
     return bytes;
   }
 
-  void Enumerate(const std::function<void(std::string_view)>&) const override {}
-  std::string name() const override { return "memory"; }
+  void Enumerate(base::FunctionRef<void(base::StringRef)>) const override {}
+  base::String name() const override { return "memory"; }
 };
 
 void TestAddSupersedesFailure() {
@@ -43,14 +46,14 @@ void TestAddSupersedesFailure() {
   CHECK(db.LoadMesh("missing.mesh") == nullptr);
   asset::Mesh mesh;
   mesh.id = mesh_id;
-  CHECK(db.AddMesh(std::move(mesh)) != nullptr);
+  CHECK(db.AddMesh(base::move(mesh)) != nullptr);
   CHECK(db.FindMesh(mesh_id) != nullptr);
 
   const asset::AssetId texture_id = asset::MakeAssetId("missing.tex");
   CHECK(db.LoadTexture("missing.tex") == nullptr);
   asset::Texture texture;
   texture.id = texture_id;
-  CHECK(db.AddTexture(std::move(texture)) != nullptr);
+  CHECK(db.AddTexture(base::move(texture)) != nullptr);
   CHECK(db.FindTexture(texture_id) != nullptr);
 
   const asset::AssetId material_id = asset::MakeAssetId("missing.mat");
@@ -66,12 +69,12 @@ void TestConcurrentRecursiveLoad() {
   vfs.Mount(base::MakeUnique<MemoryProvider>());
   asset::AssetDatabase db(vfs);
 
-  db.RegisterTextureConverter(".tex", [](rx::ByteSpan, asset::AssetId id, std::string_view) {
+  db.RegisterTextureConverter(".tex", [](rx::ByteSpan, asset::AssetId id, base::StringRef) {
     auto texture = base::MakeUnique<asset::Texture>();
     texture->id = id;
     return texture;
   });
-  db.RegisterMeshConverter(".mesh", [&db](rx::ByteSpan, asset::AssetId id, std::string_view) {
+  db.RegisterMeshConverter(".mesh", [&db](rx::ByteSpan, asset::AssetId id, base::StringRef) {
     if (!db.LoadTexture("shared.tex")) return base::UniquePointer<asset::Mesh>();
     asset::Material material;
     material.id = asset::MakeAssetId("shared.mat");
@@ -81,12 +84,14 @@ void TestConcurrentRecursiveLoad() {
     return mesh;
   });
 
-  std::array<const asset::Mesh*, 8> results{};
-  std::array<std::thread, 8> threads;
+  base::Array<const asset::Mesh*, 8> results{};
+  base::Array<base::UniquePointer<base::Thread>, 8> threads;
   for (size_t i = 0; i < threads.size(); ++i) {
-    threads[i] = std::thread([&db, &results, i] { results[i] = db.LoadMesh("shared.mesh"); });
+    threads[i] = base::MakeUnique<base::Thread>(
+        "asset_load", [&db, &results, i] { results[i] = db.LoadMesh("shared.mesh"); },
+        /*start_now=*/true);
   }
-  for (std::thread& thread : threads) thread.join();
+  for (base::UniquePointer<base::Thread>& thread : threads) thread->Join();
 
   for (const asset::Mesh* result : results) CHECK(result == results[0]);
   CHECK(results[0] != nullptr);
@@ -99,6 +104,6 @@ void TestConcurrentRecursiveLoad() {
 int main() {
   TestAddSupersedesFailure();
   TestConcurrentRecursiveLoad();
-  if (failures == 0) std::printf("asset_database_test: PASS\n");
+  if (failures == 0) ::printf("asset_database_test: PASS\n");
   return failures == 0 ? 0 : 1;
 }

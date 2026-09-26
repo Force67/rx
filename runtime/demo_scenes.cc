@@ -1,13 +1,8 @@
 #include "demo_scenes.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <span>
-#include <string>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <base/option.h>
 
@@ -17,8 +12,16 @@
 #include "audio/thunder_synth.h"
 #include "asset/materialx.h"
 #include "asset/primitives.h"
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
+#include "core/format.h"
 #include "core/log.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "physics/water_waves.h"
 #include "render/atmosphere/lightning.h"
 #include "render/geometry/hair_groom.h"
@@ -66,10 +69,10 @@ void DemoScenes::CreateSceneHookDemoScene() {
   camera_.speed = 4.0f;
 
   if (!config_.headless) {
-    scene_hook_ = std::make_unique<SceneHookDemo>();
+    scene_hook_ = base::MakeUnique<SceneHookDemo>();
     if (!scene_hook_->Init(renderer_)) {
       RX_WARN("scenehook demo unavailable; showing the rx geometry only");
-      scene_hook_.reset();
+      scene_hook_.Reset();
     }
   }
 }
@@ -96,10 +99,10 @@ void DemoScenes::CreateSceneHookRhiDemoScene() {
   camera_.speed = 4.0f;
 
   if (!config_.headless) {
-    scene_hook_rhi_ = std::make_unique<SceneHookRhiDemo>();
+    scene_hook_rhi_ = base::MakeUnique<SceneHookRhiDemo>();
     if (!scene_hook_rhi_->Init(renderer_)) {
       RX_WARN("scenehook-rhi demo unavailable; showing the rx geometry only");
-      scene_hook_rhi_.reset();
+      scene_hook_rhi_.Reset();
     }
   }
 }
@@ -166,8 +169,8 @@ void DemoScenes::CreateBubbleDemoScene() {
     world.Each<BubbleAgent, scene::Transform>(
         [dt](ecs::Entity, BubbleAgent& agent, scene::Transform& t) {
           agent.time += dt;
-          t.position[0] = std::sin(agent.time * agent.rate_x) * agent.extent;
-          t.position[2] = std::cos(agent.time * agent.rate_z) * agent.extent;
+          t.position[0] = ::sin(agent.time * agent.rate_x) * agent.extent;
+          t.position[2] = ::cos(agent.time * agent.rate_z) * agent.extent;
         });
   });
 
@@ -179,10 +182,10 @@ void DemoScenes::CreateBubbleDemoScene() {
   camera_.speed = 10.0f;
 
   if (!config_.headless) {
-    bubble_viz_ = std::make_unique<net::BubbleVisualizer>();
+    bubble_viz_ = base::MakeUnique<net::BubbleVisualizer>();
     if (!bubble_viz_->Init(renderer_)) {
       RX_WARN("bubble visualizer unavailable; tinting only");
-      bubble_viz_.reset();
+      bubble_viz_.Reset();
     }
   }
   RX_INFO("bubbles demo: 3 wandering players, 169 replicated pawns, RX_NET_BUBBLES=0 hides the spheres");
@@ -202,9 +205,9 @@ void DemoScenes::EmitBubbles(render::FrameView& view) {
 void DemoScenes::Shutdown() {
   if (placement_) {
     placement_->Shutdown();
-    placement_.reset();
+    placement_.Reset();
   }
-  grass_.reset();
+  grass_.Reset();
   if (cloth_ != 0) {
     physics_.RemoveCloth(cloth_);
     cloth_ = 0;
@@ -212,14 +215,14 @@ void DemoScenes::Shutdown() {
   // Retire service-owning demos while the host's physics and audio systems are
   // still alive. main.cc destroys Host before Viewer, so leaving these until the
   // DemoScenes destructor would make their teardown call through dead services.
-  puppet_.reset();
-  drive_.reset();
-  gym_.reset();
-  shooter_.reset();
-  feature_gym_.reset();
-  scene_hook_.reset();
-  scene_hook_rhi_.reset();
-  bubble_viz_.reset();
+  puppet_.Reset();
+  drive_.Reset();
+  gym_.Reset();
+  shooter_.Reset();
+  feature_gym_.Reset();
+  scene_hook_.Reset();
+  scene_hook_rhi_.Reset();
+  bubble_viz_.Reset();
 }
 
 bool DemoScenes::BuildFeatureGymTour(ShowcaseCamera& camera) {
@@ -245,7 +248,7 @@ void DemoScenes::ApplyRenderPolicy() {
     settings.weather = weather_demo_weather_;
     settings.cloud_coverage = 0.68f;
     settings.cloudscape_controls = weather_demo_controls_;
-    settings.sun_intensity = std::min(settings.sun_intensity, 1.3f);
+    settings.sun_intensity = rx::Min(settings.sun_intensity, 1.3f);
     settings.ibl_intensity = 0.4f;
     settings.ddgi = false;
     settings.ssgi = false;
@@ -283,10 +286,10 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // keeps driving so RX_GAME_HOUR still turns the demo to night). The deck's
   // gloom is a cap on the direct light, not an absolute, so re-clamp per frame.
   if (weather_scene_) {
-    renderer_.settings().sun_intensity = std::min(renderer_.settings().sun_intensity, 1.3f);
+    renderer_.settings().sun_intensity = rx::Min(renderer_.settings().sun_intensity, 1.3f);
     const render::WeatherSettings &weather = renderer_.settings().weather;
     weather_map_offset_ +=
-        Vec2{std::cos(weather.wind_yaw), std::sin(weather.wind_yaw)} * (weather.wind_speed * dt);
+        Vec2{::cos(weather.wind_yaw), ::sin(weather.wind_yaw)} * (weather.wind_speed * dt);
     renderer_.settings().cloudscape_controls.map_offset = weather_map_offset_;
   }
   if (storm_enabled_) UpdateStorm(dt);
@@ -323,8 +326,8 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
       // path traces real shadows from it).
       fire_time_ += dt;
       f32 t = fire_time_;
-      f32 flicker = 0.82f + 0.12f * std::sin(t * 11.7f) + 0.06f * std::sin(t * 23.3f + 1.7f) +
-                    0.05f * std::sin(t * 5.1f + 0.6f);
+      f32 flicker = 0.82f + 0.12f * ::sin(t * 11.7f) + 0.06f * ::sin(t * 23.3f + 1.7f) +
+                    0.05f * ::sin(t * 5.1f + 0.6f);
       render::PointLight l;
       l.pos_radius[0] = gpu_particle_emitter_.x;
       l.pos_radius[1] = gpu_particle_emitter_.y + 0.55f;
@@ -352,17 +355,17 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // and lags as the head bobs.
   if (!hair_sims_.empty()) {
     hair_time_ += dt;
-    Vec3 wind = Vec3{0.5f, 0.0f, 0.25f} * (0.6f + 0.4f * std::sin(hair_time_ * 2.1f)) +
-                Vec3{0.0f, 0.15f * std::sin(hair_time_ * 3.7f), 0.0f};
+    Vec3 wind = Vec3{0.5f, 0.0f, 0.25f} * (0.6f + 0.4f * ::sin(hair_time_ * 2.1f)) +
+                Vec3{0.0f, 0.15f * ::sin(hair_time_ * 3.7f), 0.0f};
     for (physics::StrandGroomId sim : hair_sims_) physics_.SetStrandGroomWind(sim, wind);
     if (hair_orbit_strands_ != 0) {
       f32 a = hair_time_ * 0.9f;
       // Mostly a head turn (rotation keeps the head under the hair) plus a
       // small bob, so the hair sways without exposing the scalp.
-      Vec3 pos{hair_orbit_center_.x + 0.03f * std::sin(a),
-               hair_orbit_center_.y + 0.02f * std::sin(a * 1.7f), hair_orbit_center_.z};
+      Vec3 pos{hair_orbit_center_.x + 0.03f * ::sin(a),
+               hair_orbit_center_.y + 0.02f * ::sin(a * 1.7f), hair_orbit_center_.z};
       Mat4 m =
-          MakeTranslation(pos) * MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * std::sin(a)));
+          MakeTranslation(pos) * MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * ::sin(a)));
       physics_.SetStrandGroomTransform(hair_orbit_strands_, m, dt);
       renderer_.SetHairGroomTransform(hair_orbit_groom_, m);
     }
@@ -374,7 +377,7 @@ void DemoScenes::EmitToView(f32 dt, render::FrameView& view) {
   // floaters on its own, with no CPU-fed foam confusing the picture.
   if (!water_cubes_.empty()) {
     water_time_ += dt;  // wave clock for the Gerstner buoyancy proxy
-    const char* disturb = std::getenv("RX_WATER_DISTURB");
+    const char* disturb = ::getenv("RX_WATER_DISTURB");
     if (!(disturb && disturb[0] == '0')) EmitWaterDisturbances(dt, view);
   }
 }
@@ -384,14 +387,14 @@ void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
   // hard it moves; a still cube leaves only a faint standing ripple. A moving
   // cube stretches its splat into a directional wake (elongation), and a cube
   // slamming into the surface throws a one-shot splash (foam pulse + spray).
-  const f32 inv_dt = 1.0f / std::max(dt, 1e-4f);
+  const f32 inv_dt = 1.0f / rx::Max(dt, 1e-4f);
   for (u32 i = 0; i < water_cubes_.size(); ++i) {
     Vec3 pos;
     f32 rot[4];
     if (!physics_.GetBodyTransform(water_cubes_[i], &pos, rot)) continue;
     Vec3 vel = (pos - water_cube_prev_[i]) * inv_dt;
     water_cube_prev_[i] = pos;
-    water_cube_slam_cd_[i] = std::max(water_cube_slam_cd_[i] - dt, 0.0f);
+    water_cube_slam_cd_[i] = rx::Max(water_cube_slam_cd_[i] - dt, 0.0f);
 
     // Local wave surface (height + its vertical velocity) under the cube, from
     // the same Gerstner proxy the buoyancy rides, so slam is measured against
@@ -399,20 +402,20 @@ void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
     f32 surface_vy = 0.0f;
     f32 surface = physics::GerstnerWaveHeight(pos.x, pos.z, water_time_, nullptr, &surface_vy);
 
-    f32 horiz = std::sqrt(vel.x * vel.x + vel.z * vel.z);
-    f32 vert = std::fabs(vel.y);
+    f32 horiz = ::sqrt(vel.x * vel.x + vel.z * vel.z);
+    f32 vert = ::fabs(vel.y);
     f32 motion = horiz + vert;
     render::WaterDisturbance d;
     d.position = {pos.x, 0.0f, pos.z};
     d.radius = 2.2f;
     // Rates (per second); the field integrates them over the foam time constant.
-    d.ripple_strength = std::min(motion * 0.4f, 2.0f);
-    d.foam_amount = std::min(std::max(motion - 0.2f, 0.0f) * 0.7f, 1.8f);
+    d.ripple_strength = rx::Min(motion * 0.4f, 2.0f);
+    d.foam_amount = rx::Min(rx::Max(motion - 0.2f, 0.0f) * 0.7f, 1.8f);
     d.velocity_x = vel.x;
     d.velocity_z = vel.z;
     // Faster horizontal motion stretches the wake down-track; cubes carry no
     // meaningful yaw, so no turn skew (a ship would pass its hull yaw rate).
-    d.elongation = std::min(horiz * 0.35f, 2.5f);
+    d.elongation = rx::Min(horiz * 0.35f, 2.5f);
     d.angular_velocity = 0.0f;
     view.water_disturbances.push_back(d);
 
@@ -423,15 +426,15 @@ void DemoScenes::EmitWaterDisturbances(f32 dt, render::FrameView& view) {
     const f32 rel_vy = vel.y - surface_vy;
     const f32 kSlamSpeed = 2.5f;         // m/s of downward closing speed
     const f32 kWaterlineBand = 1.4f;     // cube half-height + margin
-    if (rel_vy < -kSlamSpeed && std::fabs(pos.y - surface) < kWaterlineBand &&
+    if (rel_vy < -kSlamSpeed && ::fabs(pos.y - surface) < kWaterlineBand &&
         water_cube_slam_cd_[i] <= 0.0f) {
       water_cube_slam_cd_[i] = 0.6f;
-      f32 slam = std::min(-rel_vy, 12.0f);
+      f32 slam = rx::Min(-rel_vy, 12.0f);
       render::WaterDisturbance s;
       s.position = {pos.x, 0.0f, pos.z};
       s.radius = 3.4f;                   // splashes ring wider than the wake
       s.ripple_strength = slam * 0.9f;   // sharp pressure pulse
-      s.foam_amount = std::min(1.5f + slam * 0.25f, 4.0f);  // big whitewater burst
+      s.foam_amount = rx::Min(1.5f + slam * 0.25f, 4.0f);  // big whitewater burst
       s.velocity_x = 0.0f;               // radial: an impact has no heading
       s.velocity_z = 0.0f;
       s.elongation = 0.0f;
@@ -460,8 +463,8 @@ void DemoScenes::SpawnSplashSpray(const Vec3& pos, f32 surface, f32 strength) {
     p.position = {pos.x + (rnd() - 0.5f) * 1.6f, surface + 0.1f, pos.z + (rnd() - 0.5f) * 1.6f};
     f32 ang = rnd() * 6.2831853f;
     f32 spread = 0.6f + rnd() * (0.5f + 0.15f * strength);
-    p.velocity = {std::cos(ang) * spread, 2.0f + rnd() * (1.0f + 0.25f * strength),
-                  std::sin(ang) * spread};
+    p.velocity = {::cos(ang) * spread, 2.0f + rnd() * (1.0f + 0.25f * strength),
+                  ::sin(ang) * spread};
     p.max_life = 0.5f + rnd() * 0.4f;
     p.life = p.max_life;
     p.size = 0.03f + rnd() * 0.03f;
@@ -481,7 +484,7 @@ struct Spin {
 // Hermite smoothstep. Robust to reversed edges (e0 > e1), so a feature can ramp
 // in either direction of z below.
 inline f32 SmoothStep(f32 e0, f32 e1, f32 x) {
-  f32 t = std::clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
+  f32 t = rx::Clamp((x - e0) / (e1 - e0), 0.0f, 1.0f);
   return t * t * (3.0f - 2.0f * t);
 }
 
@@ -495,7 +498,7 @@ f32 FluidDemoBed(f32 x, f32 z) {
   // Lower basin is the datum (~0). Everything is built up from here.
   // Domain-edge rim: the outer ~12 m rises to ~2.5 m on every side so the flood
   // can't visibly spill out of the 128 m domain.
-  f32 edge = std::max(std::fabs(x), std::fabs(z));
+  f32 edge = rx::Max(::fabs(x), ::fabs(z));
   f32 h = 2.5f * SmoothStep(52.0f, 64.0f, edge);
 
   // Upper reservoir plateau (~6 m), gated to the central x band so it walls the
@@ -504,29 +507,29 @@ f32 FluidDemoBed(f32 x, f32 z) {
   // channel throat stays above the 5.2 m fill level; a longer ramp (the first
   // cut used -12..-24) leaves a ~4 m shoulder the reservoir quietly drains
   // around, dam or no dam.
-  f32 plateau_x = 1.0f - SmoothStep(22.0f, 32.0f, std::fabs(x));
+  f32 plateau_x = 1.0f - SmoothStep(22.0f, 32.0f, ::fabs(x));
   f32 plateau = 6.0f * SmoothStep(-13.0f, -19.0f, z) * plateau_x;
 
   // Carve the reservoir bowl into the plateau: floor ~3.5 m, centred (0,-40),
   // radius ~18 m (a smooth radial depression).
-  f32 rb = std::sqrt(x * x + (z + 40.0f) * (z + 40.0f));
+  f32 rb = ::sqrt(x * x + (z + 40.0f) * (z + 40.0f));
   f32 bowl = 2.5f * (1.0f - SmoothStep(6.0f, 18.0f, rb));
-  h = std::max(h, plateau - bowl);
+  h = rx::Max(h, plateau - bowl);
 
   // Channel notch: the reservoir's only outlet. A 10 m gap at x in [-5,5] whose
   // floor descends 3.5 m -> 0.5 m as z runs -24 -> -12, min-blended through the
   // plateau lip (1 m feather in x, ramps in/out over ~1 m in z).
   f32 channel_floor = 3.5f - 3.0f * SmoothStep(-24.0f, -12.0f, z);
-  f32 cmask = (1.0f - SmoothStep(5.0f, 6.0f, std::fabs(x))) *
+  f32 cmask = (1.0f - SmoothStep(5.0f, 6.0f, ::fabs(x))) *
               SmoothStep(-25.0f, -24.0f, z) * (1.0f - SmoothStep(-13.0f, -12.0f, z));
-  h -= std::max(0.0f, h - channel_floor) * cmask;
+  h -= rx::Max(0.0f, h - channel_floor) * cmask;
 
   // Lava hill on the +x side: a smooth ridge ~8 m peaking near (35,-30). Its +z
   // flank runs ~30+ m downhill into the lower basin (slope ~15 deg), so the vent
   // near its top feeds a flow that runs, slows and solidifies before pooling.
   f32 hx = x - 35.0f, hz = z + 30.0f;
-  f32 hill = 8.0f * std::exp(-(hx * hx + hz * hz) / (2.0f * 12.0f * 12.0f));
-  h = std::max(h, hill);
+  f32 hill = 8.0f * ::exp(-(hx * hx + hz * hz) / (2.0f * 12.0f * 12.0f));
+  h = rx::Max(h, hill);
 
   return h;
 }
@@ -621,7 +624,7 @@ void DemoScenes::CreateWaterDemoScene() {
   for (int i = 0; i < 6; ++i) {
     ecs::Entity block = world_.Create();
     f32 angle = static_cast<f32>(i) * 1.047f;
-    Vec3 position{std::cos(angle) * 6.0f, 2.0f + (i % 3), std::sin(angle) * 6.0f};
+    Vec3 position{::cos(angle) * 6.0f, 2.0f + (i % 3), ::sin(angle) * 6.0f};
     world_.Add(block, scene::Transform{.position = {position.x, position.y, position.z}});
     world_.Add(block, scene::Renderable{cube.id});
     // Density 450 kg/m^3 against the 1.2x buoyancy factor settles the cubes at
@@ -684,7 +687,7 @@ void DemoScenes::CreateWaterDemoScene() {
     for (u32 gx = 0; gx <= kIslandGrid; ++gx) {
       f32 lx = -kRadius + 2.0f * kRadius * static_cast<f32>(gx) / kIslandGrid;
       f32 lz = -kRadius + 2.0f * kRadius * static_cast<f32>(gy) / kIslandGrid;
-      f32 g = std::exp(-(lx * lx + lz * lz) / (2.0f * kSigma * kSigma));
+      f32 g = ::exp(-(lx * lx + lz * lz) / (2.0f * kSigma * kSigma));
       f32 slope = kPeak * 2.0f * g / (kSigma * kSigma);  // -dh/dr factor
       Vec3 n = Normalize(Vec3{slope * lx, 1.0f, slope * lz});
       asset::Vertex v{};
@@ -727,7 +730,7 @@ void DemoScenes::CreateWaterDemoScene() {
   // Turn the wetting field on and point it at this beach.
   // RX_SHORE_WETTING=0 must survive as a kill switch for A/B captures even
   // though this scene opts in.
-  const char* shore_env = std::getenv("RX_SHORE_WETTING");
+  const char* shore_env = ::getenv("RX_SHORE_WETTING");
   renderer_.settings().shore_wetting = !(shore_env && shore_env[0] == '0');
   renderer_.settings().shore_island[0] = kIslandCenterX;
   renderer_.settings().shore_island[1] = kIslandCenterZ;
@@ -756,9 +759,9 @@ void DemoScenes::RebuildFluidBed() {
         // The wall's flat top must run past the notch shoulders (bed ~5.2-5.9 m
         // at |x| 5.5-6.5): the startup slosh piles water ~1 m above the rest
         // level and spills over anything lower than ~6.5 m there.
-        f32 dmx = 1.0f - SmoothStep(7.0f, 8.5f, std::fabs(x));
+        f32 dmx = 1.0f - SmoothStep(7.0f, 8.5f, ::fabs(x));
         f32 dmz = SmoothStep(-18.5f, -17.5f, z) * (1.0f - SmoothStep(-14.5f, -13.5f, z));
-        h = std::max(h, 8.5f * dmx * dmz);
+        h = rx::Max(h, 8.5f * dmx * dmz);
       }
       fluid_bed_[static_cast<size_t>(j) * res + i] = h;
     }
@@ -791,8 +794,8 @@ void DemoScenes::CreateFluidDemoScene() {
     f32 z = fluid_domain_.origin[1] + (static_cast<f32>(j) + 0.5f) * l;
     for (u32 i = 0; i < res; ++i) {
       f32 x = fluid_domain_.origin[0] + (static_cast<f32>(i) + 0.5f) * l;
-      f32 rb = std::sqrt(x * x + (z + 40.0f) * (z + 40.0f));
-      bool in_reservoir = rb < 19.0f || (std::fabs(x) < 6.0f && z < -18.0f && z > -25.0f);
+      f32 rb = ::sqrt(x * x + (z + 40.0f) * (z + 40.0f));
+      bool in_reservoir = rb < 19.0f || (::fabs(x) < 6.0f && z < -18.0f && z > -25.0f);
       if (!in_reservoir) continue;
       f32 depth = 5.2f - FluidDemoBed(x, z);
       if (depth > 0.0f) fluid_initial_water_[static_cast<size_t>(j) * res + i] = depth;
@@ -826,8 +829,8 @@ void DemoScenes::CreateFluidDemoScene() {
     for (u32 gx = 0; gx <= kGrid; ++gx) {
       f32 x = -kSkirt + 2.0f * kSkirt * static_cast<f32>(gx) / kGrid;
       f32 z = -kSkirt + 2.0f * kSkirt * static_cast<f32>(gy) / kGrid;
-      f32 sx = std::clamp(x, -64.0f, 64.0f);  // skirt clamps to the domain edge
-      f32 sz = std::clamp(z, -64.0f, 64.0f);
+      f32 sx = rx::Clamp(x, -64.0f, 64.0f);  // skirt clamps to the domain edge
+      f32 sz = rx::Clamp(z, -64.0f, 64.0f);
       f32 y = FluidDemoBed(sx, sz);
       Vec3 n = Normalize(Vec3{FluidDemoBed(sx - kEps, sz) - FluidDemoBed(sx + kEps, sz),
                               2.0f * kEps,
@@ -924,9 +927,9 @@ void DemoScenes::EmitFluid(f32 dt, render::FrameView& view) {
   // bump bed_version so the solver re-uploads, and start sinking the boxes.
   if (dam_up_) {
     bool trigger = false;
-    const char* frame_env = std::getenv("RX_FLUID_DAM_FRAME");
+    const char* frame_env = ::getenv("RX_FLUID_DAM_FRAME");
     if (frame_env && frame_env[0]) {
-      trigger = fluid_frame_ >= static_cast<u64>(std::strtoull(frame_env, nullptr, 10));
+      trigger = fluid_frame_ >= static_cast<u64>(::strtoull(frame_env, nullptr, 10));
     } else {
       trigger = fluid_time_ >= 10.0f;
     }
@@ -956,7 +959,7 @@ void DemoScenes::EmitFluid(f32 dt, render::FrameView& view) {
   render::FluidSource lava;
   lava.position = {35.0f, 0.0f, -30.0f};
   lava.radius = 2.5f;
-  lava.rate = 0.35f * (1.0f + 0.3f * std::sin(fluid_time_ * 0.7f));
+  lava.rate = 0.35f * (1.0f + 0.3f * ::sin(fluid_time_ * 0.7f));
   lava.fluid = 1;
   lava.temperature = 1250.0f;
   view.fluid_sources.push_back(lava);
@@ -979,7 +982,7 @@ void DemoScenes::CreateMaterialDemoScene() {
 
   int counter = 0;
   auto spawn = [&](Vec3 pos, asset::Material mat) {
-    std::string tag = "builtin/matdemo/" + std::to_string(counter++);
+    base::String tag = "builtin/matdemo/" + rx::ToString(counter++);
     mat.id = asset::MakeAssetId(tag + "/mat");
     asset::Mesh sphere = asset::MakeSphere(0.5f, 32, 48, asset::MakeAssetId(tag + "/mesh"));
     sphere.lods[0].submeshes[0].material = mat.id;
@@ -1092,7 +1095,7 @@ void DemoScenes::UpdateParticles(f32 dt, render::FrameView& view) {
     p.position = particle_emitter_;
     f32 ang = rnd() * 6.2831853f;
     f32 spread = rnd() * 0.65f;
-    p.velocity = {std::cos(ang) * spread, 2.8f + rnd() * 1.4f, std::sin(ang) * spread};
+    p.velocity = {::cos(ang) * spread, 2.8f + rnd() * 1.4f, ::sin(ang) * spread};
     p.max_life = 0.8f + rnd() * 0.6f;
     p.life = p.max_life;
     p.size = 0.02f + rnd() * 0.02f;
@@ -1160,9 +1163,9 @@ void DemoScenes::CreateGaussianDemoScene() {
   for (u32 i = 0; i < kCount; ++i) {
     f32 t = (static_cast<f32>(i) + 0.5f) / static_cast<f32>(kCount);
     f32 y = 1.0f - 2.0f * t;
-    f32 r = std::sqrt(std::max(0.0f, 1.0f - y * y));
+    f32 r = ::sqrt(rx::Max(0.0f, 1.0f - y * y));
     f32 phi = static_cast<f32>(i) * golden;
-    Vec3 dir{std::cos(phi) * r, y, std::sin(phi) * r};
+    Vec3 dir{::cos(phi) * r, y, ::sin(phi) * r};
     render::GaussianInstance g;
     g.position[0] = dir.x * radius;
     g.position[1] = dir.y * radius + 1.8f;
@@ -1207,7 +1210,7 @@ void DemoScenes::CreateLodDemoScene() {
   // Three spheres at increasing distance, landing on lod 0 / 1 / 2 in turn.
   const Vec3 pos[3] = {{-1.6f, 0.9f, 4.5f}, {1.5f, 0.9f, 2.0f}, {-1.3f, 0.9f, -0.5f}};
   for (int i = 0; i < 3; ++i) {
-    std::string tag = "builtin/loddemo/" + std::to_string(i);
+    base::String tag = "builtin/loddemo/" + rx::ToString(i);
     asset::Mesh sphere = asset::MakeLodSphere(1.2f, asset::MakeAssetId(tag + "/mesh"));
     for (asset::MeshLod& lod : sphere.lods) lod.submeshes[0].material = mat.id;
     if (!config_.headless) renderer_.UploadMesh(sphere);
@@ -1253,7 +1256,7 @@ void DemoScenes::CreateCornellDemoScene() {
     world_.Add(e, scene::Renderable{mesh.id});
   };
   auto box = [&](f32 hx, f32 hy, f32 hz) {
-    return asset::MakeBox(hx, hy, hz, asset::MakeAssetId("builtin/cornell/" + std::to_string(counter++)));
+    return asset::MakeBox(hx, hy, hz, asset::MakeAssetId("builtin/cornell/" + rx::ToString(counter++)));
   };
 
   add(box(2.0f, 0.1f, 2.0f), white, {0, -0.1f, 0});   // floor (top at y = 0)
@@ -1306,7 +1309,7 @@ void DemoScenes::CreateInteriorDemoScene() {
   };
   auto box = [&](f32 hx, f32 hy, f32 hz) {
     return asset::MakeBox(hx, hy, hz,
-                          asset::MakeAssetId("builtin/interior/" + std::to_string(counter++)));
+                          asset::MakeAssetId("builtin/interior/" + rx::ToString(counter++)));
   };
 
   // Shell: 4 m x 3 m x 4 m interior (half-extents 2, 1.5, 2).
@@ -1342,7 +1345,7 @@ void DemoScenes::CreateInteriorDemoScene() {
   s.interior_ambient = {0.015f, 0.015f, 0.02f};
   s.interior_directional_intensity = 0.0f;  // no fill: isolate the lamp + GI
   const render::InteriorVolume room{Vec3{-2.0f, 0.0f, -2.0f}, Vec3{2.0f, 3.0f, 2.0f}};
-  renderer_.SetInteriorVolumes(std::span<const render::InteriorVolume>(&room, 1));
+  renderer_.SetInteriorVolumes(base::Span<const render::InteriorVolume>(&room, 1));
 
   camera_.set_position({0.0f, 1.4f, 1.3f});
   camera_.set_yaw_pitch(0.0f, -0.05f);  // face the back wall from just inside the door
@@ -1382,7 +1385,7 @@ void DemoScenes::CreateImposterDemoScene() {
   auto push_vertex = [&](f32 x, f32 y, f32 z, f32 nx, f32 ny, f32 nz, u32 color) {
     asset::Vertex v{};
     v.position[0] = x; v.position[1] = y; v.position[2] = z;
-    f32 len = std::sqrt(nx * nx + ny * ny + nz * nz);
+    f32 len = ::sqrt(nx * nx + ny * ny + nz * nz);
     v.normal[0] = nx / len; v.normal[1] = ny / len; v.normal[2] = nz / len;
     v.tangent[3] = 1.0f;
     v.color = color;
@@ -1400,9 +1403,9 @@ void DemoScenes::CreateImposterDemoScene() {
   const f32 tw = 0.14f, th = 1.1f;
   for (int s = 0; s < 4; ++s) {
     f32 a0 = s * 1.5708f, a1 = a0 + 1.5708f;
-    f32 x0 = std::cos(a0) * tw, z0 = std::sin(a0) * tw;
-    f32 x1 = std::cos(a1) * tw, z1 = std::sin(a1) * tw;
-    f32 nx = std::cos(a0 + 0.7854f), nz = std::sin(a0 + 0.7854f);
+    f32 x0 = ::cos(a0) * tw, z0 = ::sin(a0) * tw;
+    f32 x1 = ::cos(a1) * tw, z1 = ::sin(a1) * tw;
+    f32 nx = ::cos(a0 + 0.7854f), nz = ::sin(a0 + 0.7854f);
     u32 v0 = push_vertex(x0, 0.0f, z0, nx, 0, nz, kBrown);
     u32 v1 = push_vertex(x1, 0.0f, z1, nx, 0, nz, kBrown);
     u32 v2 = push_vertex(x1, th, z1, nx, 0, nz, kBrown);
@@ -1416,13 +1419,13 @@ void DemoScenes::CreateImposterDemoScene() {
     const int kSegs = 10;
     for (int s = 0; s < kSegs; ++s) {
       f32 a0 = s * 6.2831853f / kSegs, a1 = (s + 1) * 6.2831853f / kSegs;
-      f32 x0 = std::cos(a0) * radius, z0 = std::sin(a0) * radius;
-      f32 x1 = std::cos(a1) * radius, z1 = std::sin(a1) * radius;
+      f32 x0 = ::cos(a0) * radius, z0 = ::sin(a0) * radius;
+      f32 x1 = ::cos(a1) * radius, z1 = ::sin(a1) * radius;
       f32 am = (a0 + a1) * 0.5f;
       u32 color = (s & 1) ? kGreen : kGreenDark;
       u32 v0 = push_vertex(x0, base, z0, x0, radius * 0.6f, z0, color);
       u32 v1 = push_vertex(x1, base, z1, x1, radius * 0.6f, z1, color);
-      u32 v2 = push_vertex(0.0f, tip, 0.0f, std::cos(am), 0.8f, std::sin(am), color);
+      u32 v2 = push_vertex(0.0f, tip, 0.0f, ::cos(am), 0.8f, ::sin(am), color);
       lod.indices.push_back(v0);
       lod.indices.push_back(v2);
       lod.indices.push_back(v1);
@@ -1458,14 +1461,14 @@ void DemoScenes::CreateImposterDemoScene() {
   };
   const u32 baked = config_.headless ? render::ImposterPass::kNoMesh
                                      : renderer_.BakeImposter(tree);
-  std::vector<render::ImposterPass::Instance> instances;
+  base::Vector<render::ImposterPass::Instance> instances;
   for (int i = 0; i < 4000; ++i) {
     f32 ang = next_rand() * 6.2831853f;
     f32 dist = 22.0f + next_rand() * 170.0f;
     render::ImposterPass::Instance inst;
-    inst.position[0] = std::cos(ang) * dist;
+    inst.position[0] = ::cos(ang) * dist;
     inst.position[1] = 0.0f;
-    inst.position[2] = std::sin(ang) * dist;
+    inst.position[2] = ::sin(ang) * dist;
     inst.scale = 0.8f + next_rand() * 0.7f;
     inst.mesh = baked == render::ImposterPass::kNoMesh ? 0 : baked;
     instances.push_back(inst);
@@ -1474,8 +1477,8 @@ void DemoScenes::CreateImposterDemoScene() {
     f32 ang = next_rand() * 6.2831853f;
     f32 dist = 6.0f + next_rand() * 12.0f;
     ecs::Entity t = world_.Create();
-    world_.Add(t, scene::Transform{.position = {std::cos(ang) * dist, 0.0f,
-                                                std::sin(ang) * dist}});
+    world_.Add(t, scene::Transform{.position = {::cos(ang) * dist, 0.0f,
+                                                ::sin(ang) * dist}});
     world_.Add(t, scene::Renderable{tree.id});
   }
   if (baked != render::ImposterPass::kNoMesh) renderer_.SetImposterInstances(instances);
@@ -1617,8 +1620,8 @@ void DemoScenes::CreateStrandHairDemoScene() {
     f32 hr = head_radius;
     renderer_.HairGroomHead(id, &hc, &hr);
     asset::Mesh head = asset::MakeSphere(hr * 0.92f, 24, 36,
-                                         asset::MakeAssetId(std::string("builtin/strands/head") +
-                                                            std::to_string(i)));
+                                         asset::MakeAssetId(base::String("builtin/strands/head") +
+                                                            rx::ToString(i)));
     head.lods[0].submeshes.push_back({0, static_cast<u32>(head.lods[0].indices.size()), skin.id});
     renderer_.UploadMesh(head);
     ecs::Entity h = world_.Create();
@@ -1812,7 +1815,7 @@ void DemoScenes::EmitCloth(render::FrameView& view) {
     return;
   }
 
-  std::fill(cloth_normals_.begin(), cloth_normals_.end(), Vec3{});
+  base::Fill(cloth_normals_.begin(), cloth_normals_.end(), Vec3{});
   cloth_lines_.clear();
   for (size_t i = 0; i < cloth_indices_.size(); i += 3) {
     const u32 a = cloth_indices_[i + 0];
@@ -1862,7 +1865,7 @@ void DemoScenes::EmitCloth(render::FrameView& view) {
   view.draws.push_back(
       {cloth_mesh_, Mat4::Identity(), Mat4::Identity(), skin_offset});
   view.debug_lines_overlay =
-      std::span<const render::DebugLine>(cloth_lines_.data(), cloth_lines_.size());
+      base::Span<const render::DebugLine>(cloth_lines_.data(), cloth_lines_.size());
 }
 
 void DemoScenes::CreateVirtualGeometryDemoScene() {
@@ -1877,17 +1880,17 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
   // 30). 2048^2 is a ~8.4M-triangle source mesh.
   u32 kGrid = 640;
   f32 kSize = 300.0f;
-  std::vector<f32> dem;
+  base::Vector<f32> dem;
   f32 hm_step = 30.0f;
-  if (const char* hm = std::getenv("RX_VGEO_HEIGHTMAP")) {
+  if (const char* hm = ::getenv("RX_VGEO_HEIGHTMAP")) {
     u32 n = 2048;
-    if (const char* e = std::getenv("RX_VGEO_HM_SIZE")) n = std::max(2, std::atoi(e));
-    if (const char* e = std::getenv("RX_VGEO_HM_STEP")) hm_step = std::atof(e);
-    std::ifstream f(hm, std::ios::binary);
-    if (f) {
+    if (const char* e = ::getenv("RX_VGEO_HM_SIZE")) n = rx::Max(2, ::atoi(e));
+    if (const char* e = ::getenv("RX_VGEO_HM_STEP")) hm_step = ::atof(e);
+    base::File f = fs::OpenFile(hm, base::File::FLAG_OPEN | base::File::FLAG_READ);
+    if (f.IsValid()) {
       dem.resize(static_cast<size_t>(n) * n);
-      f.read(reinterpret_cast<char*>(dem.data()), dem.size() * sizeof(f32));
-      if (f.gcount() == static_cast<std::streamsize>(dem.size() * sizeof(f32))) {
+      if (fs::ReadAt(f, 0,
+                     base::Span<u8>(reinterpret_cast<u8*>(dem.data()), dem.size() * sizeof(f32)))) {
         kGrid = n - 1;
         kSize = static_cast<f32>(n - 1) * hm_step;
         RX_INFO("vgeo demo: heightmap {} ({}x{}, {:.1f} km)", hm, n, n, kSize / 1000.0f);
@@ -1905,9 +1908,9 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
   asset::MeshLod& lod = terrain.lods[0];
   lod.vertices.reserve(static_cast<size_t>(kGrid + 1) * (kGrid + 1));
   auto analytic = [](f32 x, f32 z) {
-    return 3.0f * std::sin(x * 0.05f) * std::cos(z * 0.045f) +
-           0.8f * std::sin(x * 0.31f + 1.7f) * std::sin(z * 0.27f) +
-           0.15f * std::sin(x * 1.7f) * std::cos(z * 1.9f);
+    return 3.0f * ::sin(x * 0.05f) * ::cos(z * 0.045f) +
+           0.8f * ::sin(x * 0.31f + 1.7f) * ::sin(z * 0.27f) +
+           0.15f * ::sin(x * 1.7f) * ::cos(z * 1.9f);
   };
   const u32 hm_n = kGrid + 1;
   auto height = [&](f32 wx, f32 wz, u32 xi, u32 zi) {
@@ -1928,7 +1931,7 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
       f32 hx = height(wx + e, wz, x1, z) - height(wx - e, wz, x0, z);
       f32 hz = height(wx, wz + e, x, z1) - height(wx, wz - e, x, z0);
       f32 nx = -hx / (2.0f * e), nz = -hz / (2.0f * e);
-      f32 len = std::sqrt(nx * nx + 1.0f + nz * nz);
+      f32 len = ::sqrt(nx * nx + 1.0f + nz * nz);
       v.normal[0] = nx / len;
       v.normal[1] = 1.0f / len;
       v.normal[2] = nz / len;
@@ -1954,18 +1957,19 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
   // RX_VGEO_ALBEDO=<file.rgba> drapes an image over the terrain by planar xz
   // projection: raw RGBA8 full mip chain, RX_VGEO_ALBEDO_SIZE px at mip 0
   // (default 4096). Shown by the default-shaded (debug 0) resolve mode.
-  if (const char* al = std::getenv("RX_VGEO_ALBEDO")) {
+  if (const char* al = ::getenv("RX_VGEO_ALBEDO")) {
     u32 an = 4096;
-    if (const char* e = std::getenv("RX_VGEO_ALBEDO_SIZE")) an = std::max(1, std::atoi(e));
+    if (const char* e = ::getenv("RX_VGEO_ALBEDO_SIZE")) an = rx::Max(1, ::atoi(e));
     size_t bytes = 0;
     for (u32 m = an;; m /= 2) {
       bytes += static_cast<size_t>(m) * m * 4;
       if (m == 1) break;
     }
-    std::ifstream f(al, std::ios::binary);
-    std::vector<rx::u8> mips(bytes);
-    if (f && f.read(reinterpret_cast<char*>(mips.data()), bytes) && !config_.headless) {
-      renderer_.SetVirtualGeometryAlbedo({mips.data(), mips.size()}, an, 1.0f / kSize);
+    base::File f = fs::OpenFile(al, base::File::FLAG_OPEN | base::File::FLAG_READ);
+    base::Vector<rx::u8> mips(bytes);
+    if (f.IsValid() && fs::ReadAt(f, 0, base::Span<u8>(mips.data(), mips.size())) &&
+        !config_.headless) {
+      renderer_.SetVirtualGeometryAlbedo(ByteSpan(mips.data(), mips.size()), an, 1.0f / kSize);
     } else {
       RX_ERROR("vgeo demo: albedo {} unreadable or short", al);
     }
@@ -1973,9 +1977,9 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
   // RX_VGEO_INSTANCES=N tiles the terrain N x N: N^2 x 800k source triangles
   // feed the gpu cull while the rastered count stays bounded by the screen.
   int grid = 1;
-  if (const char* env = std::getenv("RX_VGEO_INSTANCES")) grid = std::max(1, std::atoi(env));
+  if (const char* env = ::getenv("RX_VGEO_INSTANCES")) grid = rx::Max(1, ::atoi(env));
   if (grid > 1 && !config_.headless) {
-    std::vector<rx::Mat4> instances;
+    base::Vector<rx::Mat4> instances;
     instances.reserve(static_cast<size_t>(grid) * grid);
     for (int z = 0; z < grid; ++z) {
       for (int x = 0; x < grid; ++x) {
@@ -2001,9 +2005,9 @@ void DemoScenes::CreateVirtualGeometryDemoScene() {
     camera_.speed = 300.0f;
   }
   // RX_VGEO_CAM="x,y,z,yaw,pitch" pins the fly camera for repeatable captures.
-  if (const char* cam = std::getenv("RX_VGEO_CAM")) {
+  if (const char* cam = ::getenv("RX_VGEO_CAM")) {
     f32 v[5] = {0, 0, 0, 0, 0};
-    if (std::sscanf(cam, "%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4]) == 5) {
+    if (::sscanf(cam, "%f,%f,%f,%f,%f", &v[0], &v[1], &v[2], &v[3], &v[4]) == 5) {
       camera_.set_position({v[0], v[1], v[2]});
       camera_.set_yaw_pitch(v[3], v[4]);
     }
@@ -2058,13 +2062,13 @@ void DemoScenes::CreateBrickDemoScene() {
     // Two-course running bond with rounded mortar channels.
     f32 row = v * 8.0f;
     f32 col = u * 4.0f + (static_cast<int>(row) % 2 ? 0.5f : 0.0f);
-    f32 fy = row - std::floor(row);
-    f32 fx = col - std::floor(col);
+    f32 fy = row - ::floor(row);
+    f32 fx = col - ::floor(col);
     auto channel = [](f32 t, f32 w) {
-      f32 d = std::min(t, 1.0f - t) / w;  // distance to the mortar line
-      return std::min(d, 1.0f);
+      f32 d = rx::Min(t, 1.0f - t) / w;  // distance to the mortar line
+      return rx::Min(d, 1.0f);
     };
-    f32 h = std::min(channel(fx, 0.06f), channel(fy, 0.10f));
+    f32 h = rx::Min(channel(fx, 0.06f), channel(fy, 0.10f));
     h = h * h * (3.0f - 2.0f * h);  // rounded shoulder
     // Slight per-brick height variation + surface grain.
     u32 bx = static_cast<u32>(col), by = static_cast<u32>(row);
@@ -2096,7 +2100,7 @@ void DemoScenes::CreateBrickDemoScene() {
       f32 hx = brick_height(u + e, v) - brick_height(u - e, v);
       f32 hy = brick_height(u, v + e) - brick_height(u, v - e);
       f32 nx = -hx * 6.0f, ny = -hy * 6.0f, nz = 1.0f;
-      f32 len = std::sqrt(nx * nx + ny * ny + nz * nz);
+      f32 len = ::sqrt(nx * nx + ny * ny + nz * nz);
       normal.data[o] = static_cast<u8>((nx / len * 0.5f + 0.5f) * 255.0f);
       normal.data[o + 1] = static_cast<u8>((ny / len * 0.5f + 0.5f) * 255.0f);
       normal.data[o + 2] = static_cast<u8>((nz / len * 0.5f + 0.5f) * 255.0f);
@@ -2171,11 +2175,11 @@ void DemoScenes::CreateBrickDemoScene() {
   auto blob = [](f32 u, f32 v, u32 seed_base, int arms) {
     // Irregular radial blob: radius modulated by a few sine lobes.
     f32 du = u - 0.5f, dv = v - 0.5f;
-    f32 r = std::sqrt(du * du + dv * dv) * 2.2f;
-    f32 ang = std::atan2(dv, du);
-    f32 rim = 0.75f + 0.18f * std::sin(ang * arms + seed_base) +
-              0.12f * std::sin(ang * (arms * 2 + 1) + seed_base * 1.7f);
-    return std::max(0.0f, 1.0f - r / rim);
+    f32 r = ::sqrt(du * du + dv * dv) * 2.2f;
+    f32 ang = ::atan2(dv, du);
+    f32 rim = 0.75f + 0.18f * ::sin(ang * arms + seed_base) +
+              0.12f * ::sin(ang * (arms * 2 + 1) + seed_base * 1.7f);
+    return rx::Max(0.0f, 1.0f - r / rim);
   };
   for (u32 y = 0; y < atlas.height; ++y) {
     for (u32 x = 0; x < atlas.width; ++x) {
@@ -2184,7 +2188,7 @@ void DemoScenes::CreateBrickDemoScene() {
       if (x < 256) {  // blood
         f32 u = (x + 0.5f) / 256.0f;
         f32 m = blob(u, v, 3, 7);
-        f32 a = m > 0.02f ? std::min(1.0f, m * 2.2f) : 0.0f;
+        f32 a = m > 0.02f ? rx::Min(1.0f, m * 2.2f) : 0.0f;
         atlas.data[o] = static_cast<u8>(90 + 40 * m);
         atlas.data[o + 1] = static_cast<u8>(8 + 10 * m);
         atlas.data[o + 2] = static_cast<u8>(8 + 8 * m);
@@ -2192,8 +2196,8 @@ void DemoScenes::CreateBrickDemoScene() {
       } else {  // moss
         f32 u = (x - 256 + 0.5f) / 256.0f;
         f32 m = blob(u, v, 11, 9);
-        f32 grain = 0.7f + 0.3f * blob(std::fmod(u * 5.0f, 1.0f), std::fmod(v * 5.0f, 1.0f), 5, 5);
-        f32 a = m > 0.05f ? std::min(1.0f, m * 1.6f) * grain : 0.0f;
+        f32 grain = 0.7f + 0.3f * blob(::fmod(u * 5.0f, 1.0f), ::fmod(v * 5.0f, 1.0f), 5, 5);
+        f32 a = m > 0.05f ? rx::Min(1.0f, m * 1.6f) * grain : 0.0f;
         atlas.data[o] = static_cast<u8>(40 + 25 * m);
         atlas.data[o + 1] = static_cast<u8>(85 + 60 * m * grain);
         atlas.data[o + 2] = static_cast<u8>(28 + 15 * m);
@@ -2213,7 +2217,7 @@ void DemoScenes::CreateBrickDemoScene() {
   channels.data.resize(static_cast<size_t>(channels.width) * channels.height * 4);
   auto moss_height = [&](f32 u, f32 v) {
     f32 m = blob(u, v, 11, 9);
-    f32 grain = 0.7f + 0.3f * blob(std::fmod(u * 5.0f, 1.0f), std::fmod(v * 5.0f, 1.0f), 5, 5);
+    f32 grain = 0.7f + 0.3f * blob(::fmod(u * 5.0f, 1.0f), ::fmod(v * 5.0f, 1.0f), 5, 5);
     return m * grain;
   };
   for (u32 y = 0; y < channels.height; ++y) {
@@ -2227,7 +2231,7 @@ void DemoScenes::CreateBrickDemoScene() {
         nx = (moss_height(u - e, v) - moss_height(u + e, v)) * 3.0f;
         ny = (moss_height(u, v - e) - moss_height(u, v + e)) * 3.0f;
       }
-      f32 nz = std::sqrt(std::max(1.0f - nx * nx - ny * ny, 0.05f));
+      f32 nz = ::sqrt(rx::Max(1.0f - nx * nx - ny * ny, 0.05f));
       channels.data[o] = static_cast<u8>((nx * 0.5f + 0.5f) * 255.0f);
       channels.data[o + 1] = static_cast<u8>((ny * 0.5f + 0.5f) * 255.0f);
       channels.data[o + 2] = static_cast<u8>((nz * 0.5f + 0.5f) * 255.0f);
@@ -2302,10 +2306,10 @@ void DemoScenes::CreateSilhouettePomDemoScene() {
     // Grid of rounded domes; deep flat gaps between them give the limb something
     // to carve. Round-shouldered so the normal map stays smooth.
     f32 cu = u * kTilesU, cv = v * kTilesV;
-    f32 fu = cu - std::floor(cu) - 0.5f;
-    f32 fv = cv - std::floor(cv) - 0.5f;
-    f32 d = std::sqrt(fu * fu + fv * fv) * 2.0f;  // 0 centre .. ~1.4 corner
-    f32 h = std::max(0.0f, 1.0f - d / 0.82f);
+    f32 fu = cu - ::floor(cu) - 0.5f;
+    f32 fv = cv - ::floor(cv) - 0.5f;
+    f32 d = ::sqrt(fu * fu + fv * fv) * 2.0f;  // 0 centre .. ~1.4 corner
+    f32 h = rx::Max(0.0f, 1.0f - d / 0.82f);
     return h * h * (3.0f - 2.0f * h);  // smoothstep dome
   };
   asset::Texture height;
@@ -2329,7 +2333,7 @@ void DemoScenes::CreateSilhouettePomDemoScene() {
       f32 hx = stud_height(u + e, v) - stud_height(u - e, v);
       f32 hy = stud_height(u, v + e) - stud_height(u, v - e);
       f32 nx = -hx * 6.0f, ny = -hy * 6.0f, nz = 1.0f;
-      f32 len = std::sqrt(nx * nx + ny * ny + nz * nz);
+      f32 len = ::sqrt(nx * nx + ny * ny + nz * nz);
       normal.data[o] = static_cast<u8>((nx / len * 0.5f + 0.5f) * 255.0f);
       normal.data[o + 1] = static_cast<u8>((ny / len * 0.5f + 0.5f) * 255.0f);
       normal.data[o + 2] = static_cast<u8>((nz / len * 0.5f + 0.5f) * 255.0f);
@@ -2422,7 +2426,7 @@ void DemoScenes::CreateSssDemoScene() {
 
   auto spawn_sphere = [&](Vec3 pos, f32 radius, bool skin, f32 perfusion, const char* tag) {
     asset::Material mat;
-    mat.id = asset::MakeAssetId(std::string("builtin/sss/mat_") + tag);
+    mat.id = asset::MakeAssetId(base::String("builtin/sss/mat_") + tag);
     mat.base_color_factor[0] = 0.62f;
     mat.base_color_factor[1] = 0.44f;
     mat.base_color_factor[2] = 0.34f;
@@ -2441,7 +2445,7 @@ void DemoScenes::CreateSssDemoScene() {
     mat.skin_params.mfp[2] = 0.20f;
     mat.skin_params.perfusion = perfusion;
     asset::Mesh sphere =
-        asset::MakeSphere(radius, 48, 64, asset::MakeAssetId(std::string("builtin/sss/") + tag));
+        asset::MakeSphere(radius, 48, 64, asset::MakeAssetId(base::String("builtin/sss/") + tag));
     sphere.lods[0].submeshes[0].material = mat.id;
     if (!config_.headless) {
       renderer_.UploadMaterial(mat);
@@ -2465,14 +2469,14 @@ void DemoScenes::CreateSssDemoScene() {
   // the left is the plain ggx control blob.
   auto spawn_hair = [&](Vec3 pos, bool hair, const char* tag) {
     asset::Material mat;
-    mat.id = asset::MakeAssetId(std::string("builtin/sss/hairmat_") + tag);
+    mat.id = asset::MakeAssetId(base::String("builtin/sss/hairmat_") + tag);
     mat.base_color_factor[0] = 0.16f;
     mat.base_color_factor[1] = 0.10f;
     mat.base_color_factor[2] = 0.06f;
     mat.roughness_factor = 0.45f;
     mat.hair = hair;
     asset::Mesh sphere = asset::MakeSphere(
-        0.45f, 48, 64, asset::MakeAssetId(std::string("builtin/sss/hair_") + tag));
+        0.45f, 48, 64, asset::MakeAssetId(base::String("builtin/sss/hair_") + tag));
     sphere.lods[0].submeshes[0].material = mat.id;
     if (!config_.headless) {
       renderer_.UploadMaterial(mat);
@@ -2551,8 +2555,8 @@ void DemoScenes::CreateFireDemoScene() {
     f32 a = static_cast<f32>(i) * 1.2566f;
     Quat q = QuatFromAxisAngle({0, 1, 0}, a);
     ecs::Entity e = world_.Create();
-    world_.Add(e, scene::Transform{.position = {std::cos(a) * 0.28f, 0.10f + 0.02f * i,
-                                                std::sin(a) * 0.28f},
+    world_.Add(e, scene::Transform{.position = {::cos(a) * 0.28f, 0.10f + 0.02f * i,
+                                                ::sin(a) * 0.28f},
                                    .rotation = {q.x, q.y, q.z, q.w}});
     world_.Add(e, scene::Renderable{log.id});
   }
@@ -2822,7 +2826,7 @@ void DemoScenes::CreateOcclusionDemoScene() {
       f32 x = -1.1f + gx * 0.2f;
       f32 y = 0.7f + gy * 0.2f;
       f32 z = -2.0f - (gx % 3) * 0.6f;
-      std::string tag = "builtin/occl/c" + std::to_string(idx++);
+      base::String tag = "builtin/occl/c" + rx::ToString(idx++);
       add_box(asset::MakeCube(0.04f, asset::MakeAssetId(tag)), cube_mat, {x, y, z});
     }
   }
@@ -2856,7 +2860,7 @@ void DemoScenes::CreatePointLightDemoScene() {
   // A few low bumps so the lights wrap over shapes, not just a flat plane.
   for (int i = 0; i < 5; ++i) {
     f32 x = -3.2f + i * 1.6f;
-    std::string tag = "builtin/lights/bump" + std::to_string(i);
+    base::String tag = "builtin/lights/bump" + rx::ToString(i);
     asset::Mesh s = asset::MakeSphere(0.6f, 24, 32, asset::MakeAssetId(tag));
     s.lods[0].submeshes.push_back({0, static_cast<u32>(s.lods[0].indices.size()), floor_mat.id});
     if (!config_.headless) renderer_.UploadMesh(s);
@@ -2889,11 +2893,11 @@ void DemoScenes::CreatePointLightDemoScene() {
     spot.color_intensity[0] = 1.0f; spot.color_intensity[1] = 0.95f;
     spot.color_intensity[2] = 0.8f; spot.color_intensity[3] = 20.0f;
     f32 dir[3] = {0.35f, -0.85f, -0.4f};
-    f32 len = std::sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
+    f32 len = ::sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
     spot.direction_type[0] = dir[0]/len; spot.direction_type[1] = dir[1]/len;
     spot.direction_type[2] = dir[2]/len; spot.direction_type[3] = 1.0f;  // spot
-    spot.params[0] = std::cos(0.28f);  // inner ~16 deg
-    spot.params[1] = std::cos(0.45f);  // outer ~26 deg
+    spot.params[0] = ::cos(0.28f);  // inner ~16 deg
+    spot.params[1] = ::cos(0.45f);  // outer ~26 deg
     demo_lights_.push_back(spot);
 
     render::PointLight ball;
@@ -3157,7 +3161,7 @@ void DemoScenes::CreateSkyDemoScene() {
 
   // The weather layer: four states spanning the model's range. Dwell and
   // transition times shrink under RX_SKY_FAST so a capture sees a change.
-  weather_sys_ = std::make_unique<weather::WeatherSystem>(7u);
+  weather_sys_ = base::MakeUnique<weather::WeatherSystem>(7u);
   const bool fast = bool(SkyFast);
   auto tune = [&](weather::WeatherState s) {
     if (fast) {
@@ -3314,9 +3318,9 @@ void DemoScenes::CreateSwampDemoScene() {
     // Small-angle lean as a quaternion straight from the half-angles: the
     // snags list drunkenly instead of standing surveyor-straight.
     f32 hx = tilt_x * 0.5f, hz = tilt_z * 0.5f;
-    t.rotation[0] = std::sin(hx);
-    t.rotation[2] = std::sin(hz);
-    t.rotation[3] = std::cos(hx) * std::cos(hz);
+    t.rotation[0] = ::sin(hx);
+    t.rotation[2] = ::sin(hz);
+    t.rotation[3] = ::cos(hx) * ::cos(hz);
     world_.Add(e, t);
     world_.Add(e, scene::Renderable{mesh.id});
   };
@@ -3335,7 +3339,7 @@ void DemoScenes::CreateSwampDemoScene() {
     f32 z = (next01() - 0.5f) * 120.0f;
     f32 w = 2.5f + next01() * 4.0f;
     char tag[64];
-    std::snprintf(tag, sizeof(tag), "builtin/swamp/hummock_%d", i);
+    ::snprintf(tag, sizeof(tag), "builtin/swamp/hummock_%d", i);
     f32 h = 0.5f + next01() * 0.5f;
     add_box(tag, w, h, w * (0.7f + next01() * 0.6f), moss_mat, {x, h * 0.5f, z}, 0, 0);
   }
@@ -3343,19 +3347,19 @@ void DemoScenes::CreateSwampDemoScene() {
   for (int i = 0; i < 26; ++i) {
     f32 x = (next01() - 0.5f) * 140.0f;
     f32 z = (next01() - 0.5f) * 140.0f;
-    if (std::fabs(x) < 4.0f && std::fabs(z) < 4.0f) continue;  // keep the spawn clear
+    if (::fabs(x) < 4.0f && ::fabs(z) < 4.0f) continue;  // keep the spawn clear
     f32 h = next01() < 0.3f ? 3.0f + next01() * 3.0f : 8.0f + next01() * 9.0f;
     f32 w = 0.25f + next01() * 0.35f;
     f32 tx = (next01() - 0.5f) * 0.16f;
     f32 tz = (next01() - 0.5f) * 0.16f;
     char tag[64];
-    std::snprintf(tag, sizeof(tag), "builtin/swamp/snag_%d", i);
+    ::snprintf(tag, sizeof(tag), "builtin/swamp/snag_%d", i);
     add_box(tag, w, h, w, snag_mat, {x, h * 0.5f, z}, tx, tz);
   }
 
   // One forced swamp state: low thin stratus lid, still air, thick shallow
   // mist. Wetness is pinned in EmitSky so the mud keeps its puddle sheen.
-  weather_sys_ = std::make_unique<weather::WeatherSystem>(3u);
+  weather_sys_ = base::MakeUnique<weather::WeatherSystem>(3u);
   weather::WeatherState swamp;
   swamp.name = "swamp";
   swamp.coverage = 0.68f;
@@ -3402,7 +3406,7 @@ void DemoScenes::EmitSky(f32 dt) {
   if (swamp_scene_) {
     // Standing water never dries: pin the surface response so the mud keeps
     // its puddle sheen without any rain falling.
-    rs.weather.wetness = std::max(rs.weather.wetness, 0.8f);
+    rs.weather.wetness = rx::Max(rs.weather.wetness, 0.8f);
   }
   sky_controls_ = rs.cloudscape_controls;
   sky_weather_ = rs.weather;
@@ -3412,9 +3416,9 @@ void DemoScenes::EmitSky(f32 dt) {
     Vec3 cam = camera_.position();
     f32 dx = cc.tornado_pos.x - cam.x;
     f32 dz = cc.tornado_pos.y - cam.z;
-    f32 flat = std::sqrt(dx * dx + dz * dz);
+    f32 flat = ::sqrt(dx * dx + dz * dz);
     // forward() is (sin yaw, sin pitch, -cos yaw): aim a third up the funnel.
-    camera_.set_yaw_pitch(std::atan2(dx, -dz), std::atan2(300.0f - cam.y, flat));
+    camera_.set_yaw_pitch(::atan2(dx, -dz), ::atan2(300.0f - cam.y, flat));
   }
   if (cc.tornado_strength > 0.05f && !sky_tornado_seen_) {
     sky_tornado_seen_ = true;
@@ -3440,7 +3444,7 @@ void DemoScenes::EmitSky(f32 dt) {
     Vec3 cam = camera_.position();
     f32 dx = w.strike_pos.x - cam.x, dy = w.strike_pos.y + 400.0f - cam.y;
     f32 dz = w.strike_pos.z - cam.z;
-    f32 dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+    f32 dist = ::sqrt(dx * dx + dy * dy + dz * dz);
     sky_thunder_.push_back({dist / 343.0f, w.strike_pos, w.strike_seed, w.strike_energy, dist});
   }
   for (u32 i = 0; i < sky_thunder_.size();) {
@@ -3480,8 +3484,8 @@ void DemoScenes::UpdateStorm(f32 dt) {
     f32 env = render::LightningSystem::Envelope(w.strike_age, w.strike_seed);
     // Peak ~0.35: the global consumers multiply hard (sun +9x, ambient +0.5
     // at flash 1.0) and would white the staged overcast frame out above that.
-    w.lightning = std::min(
-        1.0f, w.strike_energy * (0.22f * std::exp(-w.strike_age * 9.0f) + 0.35f * env));
+    w.lightning = rx::Min(
+        1.0f, w.strike_energy * (0.22f * ::exp(-w.strike_age * 9.0f) + 0.35f * env));
     if (w.strike_age > 1.2f) {  // envelope + afterglow both spent
       w.strike_age = -1.0f;
       w.lightning = 0.0f;
@@ -3500,7 +3504,7 @@ void DemoScenes::UpdateStorm(f32 dt) {
   if (test_dist > 0.0f) {
     // Deterministic: directly in front of the camera at the given distance.
     Vec3 fwd = camera_.forward();
-    f32 len = std::sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
+    f32 len = ::sqrt(fwd.x * fwd.x + fwd.z * fwd.z);
     Vec3 dir = len > 1e-4f ? Vec3{fwd.x / len, 0.0f, fwd.z / len} : Vec3{0, 0, -1};
     Vec3 eye = camera_.position();
     w.strike_pos = {eye.x + dir.x * test_dist, 0.0f, eye.z + dir.z * test_dist};
@@ -3511,7 +3515,7 @@ void DemoScenes::UpdateStorm(f32 dt) {
     f32 az = hash01(w.strike_seed * 3u + 1u) * 6.2831853f;
     f32 dist = 300.0f + 600.0f * hash01(w.strike_seed * 3u + 2u);
     Vec3 eye = camera_.position();
-    w.strike_pos = {eye.x + std::cos(az) * dist, 0.0f, eye.z + std::sin(az) * dist};
+    w.strike_pos = {eye.x + ::cos(az) * dist, 0.0f, eye.z + ::sin(az) * dist};
     w.strike_energy = 0.65f + 0.35f * hash01(w.strike_seed * 3u + 3u);
     storm_next_strike_ = storm_time_ + 6.0f + 3.0f * hash01(w.strike_seed * 7u + 5u);
   }
@@ -3544,9 +3548,9 @@ void DemoScenes::CreateMaterialXDemoScene() {
   world_.Add(floor, scene::Transform{.position = {0, -8.6f, 0}});  // top at y = -0.6
   world_.Add(floor, scene::Renderable{ground.id});
 
-  base::Vector<std::string> paths;
+  base::Vector<base::String> paths;
   if (const char* env = Mtlx.get()) {
-    std::string s = env, cur;
+    base::String s = env, cur;
     for (char c : s) {
       if (c == ',') {
         if (!cur.empty()) paths.push_back(cur);
@@ -3562,10 +3566,10 @@ void DemoScenes::CreateMaterialXDemoScene() {
   int n = static_cast<int>(paths.size());
   for (int i = 0; i < n; ++i) {
     asset::Material mat;
-    mat.id = asset::MakeAssetId("builtin/mtlx/mat" + std::to_string(i));
+    mat.id = asset::MakeAssetId("builtin/mtlx/mat" + rx::ToString(i));
     if (!asset::LoadMaterialX(paths[i], &mat)) continue;
     if (!config_.headless) renderer_.UploadMaterial(mat);
-    std::string tag = "builtin/mtlx/sphere" + std::to_string(i);
+    base::String tag = "builtin/mtlx/sphere" + rx::ToString(i);
     asset::Mesh sphere = asset::MakeSphere(0.6f, 40, 60, asset::MakeAssetId(tag));
     sphere.lods[0].submeshes[0].material = mat.id;
     if (!config_.headless) renderer_.UploadMesh(sphere);
@@ -3653,7 +3657,7 @@ void DemoScenes::CreateDemoScene() {
   if (config_.demo_scene == "lookdev") {
     // The character reference lab: OLAT rig, frozen framings, reference
     // comparison and live material fitting. See docs/CHARACTER_RENDERING.md.
-    lookdev_ = std::make_unique<LookdevDemo>(ctx_);
+    lookdev_ = base::MakeUnique<LookdevDemo>(ctx_);
     lookdev_->Create();
     return;
   }
@@ -3714,47 +3718,47 @@ void DemoScenes::CreateDemoScene() {
     return;
   }
   if (config_.demo_scene == "ship") {
-    ship_ = std::make_unique<ShipDemo>(ctx_);
+    ship_ = base::MakeUnique<ShipDemo>(ctx_);
     ship_->Create();
     return;
   }
   if (config_.demo_scene == "nav") {
-    nav_ = std::make_unique<NavDemo>(ctx_);
+    nav_ = base::MakeUnique<NavDemo>(ctx_);
     nav_->Create();
     return;
   }
   if (config_.demo_scene == "placement") {
-    placement_ = std::make_unique<PlacementDemo>(ctx_);
+    placement_ = base::MakeUnique<PlacementDemo>(ctx_);
     placement_->Create();
     return;
   }
   if (config_.demo_scene == "grass") {
-    grass_ = std::make_unique<GrassDemo>(ctx_);
+    grass_ = base::MakeUnique<GrassDemo>(ctx_);
     grass_->Create();
     return;
   }
   if (config_.demo_scene == "gym") {
-    gym_ = std::make_unique<GymDemo>(ctx_);
+    gym_ = base::MakeUnique<GymDemo>(ctx_);
     gym_->Create();
     return;
   }
   if (config_.demo_scene == "shooter" || config_.demo_scene == "fps") {
-    shooter_ = std::make_unique<ShooterDemo>(ctx_);
+    shooter_ = base::MakeUnique<ShooterDemo>(ctx_);
     shooter_->Create();
     return;
   }
   if (config_.demo_scene == "puppet") {
-    puppet_ = std::make_unique<PuppetDemo>(ctx_);
+    puppet_ = base::MakeUnique<PuppetDemo>(ctx_);
     puppet_->Create();
     return;
   }
   if (config_.demo_scene == "drive") {
-    drive_ = std::make_unique<DriveDemo>(ctx_);
+    drive_ = base::MakeUnique<DriveDemo>(ctx_);
     drive_->Create();
     return;
   }
   if (config_.demo_scene == "featuregym" || config_.demo_scene == "feature-gym") {
-    feature_gym_ = std::make_unique<FeatureGym>(ctx_);
+    feature_gym_ = base::MakeUnique<FeatureGym>(ctx_);
     feature_gym_->Create();
     return;
   }
@@ -3778,8 +3782,8 @@ void DemoScenes::CreateDemoScene() {
   scheduler_.AddSystem(ecs::Stage::kSim, "demo_spin", [](ecs::World& world, f32 dt) {
     world.Each<Spin, scene::Transform>([dt](ecs::Entity, Spin& spin, scene::Transform& t) {
       spin.angle += spin.speed * dt;
-      t.rotation[1] = std::sin(spin.angle * 0.5f);
-      t.rotation[3] = std::cos(spin.angle * 0.5f);
+      t.rotation[1] = ::sin(spin.angle * 0.5f);
+      t.rotation[3] = ::cos(spin.angle * 0.5f);
     });
   });
   RX_INFO("no scene given, spinning a cube instead");
@@ -3880,9 +3884,9 @@ void DemoScenes::EmitLocomotion(f32 dt, render::FrameView& view) {
   if (ctx_.actions) {
     f32 mx = ctx_.actions->axis(Axis::kMoveX);
     f32 my = ctx_.actions->axis(Axis::kMoveY);
-    f32 mag = std::sqrt(mx * mx + my * my);
+    f32 mag = ::sqrt(mx * mx + my * my);
     if (mag > 0.05f) {
-      speed = std::min(mag, 1.0f) * 4.5f;  // full stick -> run
+      speed = rx::Min(mag, 1.0f) * 4.5f;  // full stick -> run
       input_driven = true;
     }
   }

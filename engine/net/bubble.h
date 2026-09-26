@@ -1,11 +1,12 @@
 #ifndef RX_NET_BUBBLE_H_
 #define RX_NET_BUBBLE_H_
 
-#include <functional>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
+#include "base/functional/function.h"
+#include "base/memory/move.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "ecs/world.h"
@@ -70,8 +71,8 @@ class RX_NET_EXPORT InterestMap {
 
   // Invoked from Update for every ownership handoff (old_peer/new_peer are
   // kNoPeer for the server side).
-  void SetOwnerChangedSink(std::function<void(u64 net_id, u32 old_peer, u32 new_peer)> sink) {
-    owner_changed_ = std::move(sink);
+  void SetOwnerChangedSink(base::Function<void(u64 net_id, u32 old_peer, u32 new_peer)> sink) {
+    owner_changed_ = base::move(sink);
   }
 
  private:
@@ -87,7 +88,7 @@ class RX_NET_EXPORT InterestMap {
   base::UnorderedMap<u32, PeerData> peers_;
   base::UnorderedMap<u64, Ownership> owners_;
   base::Vector<BubbleState> bubbles_;
-  std::function<void(u64, u32, u32)> owner_changed_;
+  base::Function<void(u64, u32, u32)> owner_changed_;
 
   // Scratch, kept across updates for capacity.
   struct BubbleRef {

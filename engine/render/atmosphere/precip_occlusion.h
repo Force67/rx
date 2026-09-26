@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_PRECIP_OCCLUSION_H_
 #define RX_RENDER_PRECIP_OCCLUSION_H_
 
-#include <functional>
 
+#include "base/functional/function.h"
 #include "core/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
@@ -55,7 +55,7 @@ class PrecipOcclusion {
   // view-proj and records the casters, same contract as ShadowPass::Render's
   // callback (the caller binds the depth-only pipelines and pushes matrices).
   void AddToGraph(RenderGraph& graph,
-                  const std::function<void(CommandList&, const Mat4&)>& draw);
+                  const base::Function<void(CommandList&, const Mat4&)>& draw);
 
  private:
   GpuImage map_;            // persistent D16, parked shader-read between renders

@@ -1,9 +1,9 @@
 #ifndef RX_ENGINE_APP_APPLICATION_H_
 #define RX_ENGINE_APP_APPLICATION_H_
 
-#include <functional>
 
 #include "app/services.h"
+#include "base/functional/function.h"
 #include "render/core/presets.h"
 
 namespace rx::app {
@@ -48,7 +48,7 @@ struct AppConfig {
   // hand; anything an app tuned earlier is lost in that replacement. This runs
   // after all of it, so an app-level profile (recreation's platform .ini)
   // cannot be clobbered by the preset it sits on top of.
-  std::function<void(render::RenderSettings&)> tune_settings;
+  base::Function<void(render::RenderSettings&)> tune_settings;
 };
 
 // The game's side of the host contract. Host::RunFrame drives these in order:

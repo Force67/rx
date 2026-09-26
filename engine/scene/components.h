@@ -1,9 +1,9 @@
 #ifndef RX_SCENE_COMPONENTS_H_
 #define RX_SCENE_COMPONENTS_H_
 
-#include <string>
 
 #include "asset/asset_id.h"
+#include "base/strings/xstring.h"
 #include "core/types.h"
 #include "ecs/entity.h"
 
@@ -46,7 +46,7 @@ struct DecalReceiver {
 // A human-readable label for an entity (editor outliner, scene text). Optional:
 // unnamed entities simply lack it.
 struct Name {
-  std::string value;
+  base::String value;
 };
 
 // A stable identity independent of the ecs handle (which is reused after a

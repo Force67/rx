@@ -1,14 +1,15 @@
 #ifndef RX_WORLD_WORLD_STREAM_H_
 #define RX_WORLD_WORLD_STREAM_H_
 
-#include <span>
-#include <string>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 #include <base/memory/unique_pointer.h>
 
 #include "asset/vfs.h"
+#include "base/containers/span.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "ecs/world.h"
 #include "edit/reflect.h"
@@ -60,7 +61,7 @@ struct CellLoadResult {
   Domain domain = Domain::kGameplay;
   Tier tier = Tier::kAbsent;
   bool ok = false;
-  std::string error;
+  base::String error;
   WorldCellPayload payload;
 };
 
@@ -165,7 +166,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   // One tick. `observers` are world-space streaming sources - the player, the
   // camera, a teleport destination, an AI route request; the streamer derives
   // one bubble per domain from each.
-  void Update(std::span<const scene::WorldStreamObservation> observers);
+  void Update(base::Span<const scene::WorldStreamObservation> observers);
 
   // Retires everything and drains it in this call, so the ecs::World can be
   // destroyed afterwards. Terminal and idempotent: Update does nothing after
@@ -185,7 +186,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   //
   // The span is invalidated by the next Update, which may move or free the
   // cell's storage; copy anything that has to outlive the tick.
-  std::span<const ResidentInstance> Instances(u64 cell,
+  base::Span<const ResidentInstance> Instances(u64 cell,
                                               Domain domain = Domain::kRepresentation) const;
 
   // Every cell of a domain that is published right now, in ascending id order.
@@ -198,7 +199,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   // cell for as long as it is resident, because the payload they were decoded
   // from is dropped the moment the cell is published. Same span lifetime as
   // Instances.
-  std::span<const std::string> Prototypes(u64 cell,
+  base::Span<const base::String> Prototypes(u64 cell,
                                           Domain domain = Domain::kRepresentation) const;
   // The instance carrying `stable_id`, or null.
   const ResidentInstance* FindInstance(u64 stable_id) const;
@@ -224,7 +225,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   // payload is a cook or archive bug, so the messages are kept rather than
   // counted: knowing which cell and why is the whole value. The span is
   // invalidated by the next failure.
-  std::span<const std::string> errors() const;
+  base::Span<const base::String> errors() const;
 
  private:
   struct StableEntity {
@@ -262,7 +263,7 @@ class RX_WORLD_EXPORT WorldStreamer {
     base::Vector<ResidentInstance> instances;
     // Lifted out of the payload before it is dropped, so a resident instance
     // can still say what it is.
-    base::Vector<std::string> prototypes;
+    base::Vector<base::String> prototypes;
     // Whether the overlay has anything to say about this cell's stable-id
     // range. Decided once, when the payload arrives, so an untouched cell takes
     // the bulk copy path rather than the row-by-row one.
@@ -312,7 +313,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   void Erase(DomainState& state, u64 cell);
 
   void DrainLoader();
-  void UpdateDomain(Domain domain, std::span<const scene::WorldStreamObservation> observers);
+  void UpdateDomain(Domain domain, base::Span<const scene::WorldStreamObservation> observers);
   void GatherClaims(Domain domain, DomainState& state);
   // Folds this tick's per-observer demands into one candidate per cell: nearest
   // distance wins, the resolved tier joins the region's identity, claims raise
@@ -324,12 +325,12 @@ class RX_WORLD_EXPORT WorldStreamer {
 
   // The reflected layout hash of a component as this build sees it, memoized.
   u64 LayoutHash(const edit::ComponentDesc& desc) const;
-  bool ResolveSchema(DomainCell& cell, std::string* error) const;
+  bool ResolveSchema(DomainCell& cell, base::String* error) const;
   // Materializes at most `rows` rows; true when the cell is fully published.
   bool MaterializeStep(DomainCell& cell, u32 rows);
   // Destroys at most `rows` rows; true when nothing of the cell is left.
   bool TeardownStep(DomainCell& cell, u32 rows);
-  void RecordError(std::string message);
+  void RecordError(base::String message);
 
   const WorldMap& map_;
   CellLoader& loader_;
@@ -342,7 +343,7 @@ class RX_WORLD_EXPORT WorldStreamer {
   base::Vector<u32> rows_scratch_;
   // Component id to its reflected layout hash; see LayoutHash.
   mutable base::UnorderedMap<ecs::ComponentId, u64> layout_hashes_;
-  base::Vector<std::string> errors_;
+  base::Vector<base::String> errors_;
   u32 error_count_ = 0;
   u64 tick_ = 0;
   bool shut_down_ = false;
@@ -351,7 +352,7 @@ class RX_WORLD_EXPORT WorldStreamer {
 // The reflected layout of a component as the running build sees it, in the same
 // terms HashComponentLayout hashes at cook time. A cook and a runtime that
 // disagree here disagree about the bytes of the struct.
-RX_WORLD_EXPORT bool RuntimeComponentLayout(std::string_view component, u32* stride,
+RX_WORLD_EXPORT bool RuntimeComponentLayout(base::StringRef component, u32* stride,
                                             u64* layout_hash);
 
 }  // namespace rx::world

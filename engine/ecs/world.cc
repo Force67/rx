@@ -1,11 +1,14 @@
 #include "ecs/world.h"
 
-#include <cassert>
-#include <mutex>
+#include <assert.h>
 
 #include <base/check.h>
 
+#include "base/algorithm.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
 #include "core/memory/memory_tracker.h"
+#include "core/scalar.h"
 
 namespace rx::ecs {
 
@@ -19,7 +22,7 @@ struct Registry {
   // Generous ceiling; the engine + a large game register on the order of a few
   // hundred component types. Overflow is a hard error, not silent corruption.
   static constexpr u32 kMaxComponents = 4096;
-  std::mutex mutex;
+  base::Mutex mutex;
   u32 count = 0;
   u64 keys[kMaxComponents]{};
   ComponentInfo infos[kMaxComponents]{};
@@ -34,7 +37,7 @@ Registry& TheRegistry() {
 
 ComponentId ResolveComponentId(u64 type_key, const ComponentInfo& info) {
   Registry& registry = TheRegistry();
-  std::lock_guard lock(registry.mutex);
+  base::LockGuard lock(registry.mutex);
   for (u32 id = 0; id < registry.count; ++id) {
     if (registry.keys[id] != type_key) continue;
     BASE_BUGCHECK(registry.infos[id].size == info.size && registry.infos[id].align == info.align,
@@ -54,7 +57,7 @@ ComponentId ResolveComponentId(u64 type_key, const ComponentInfo& info) {
 const ComponentInfo& GetComponentInfo(ComponentId id) {
   detail::Registry& registry = detail::TheRegistry();
 #ifndef NDEBUG
-  std::lock_guard lock(registry.mutex);
+  base::LockGuard lock(registry.mutex);
   assert(id < registry.count && "unregistered component id");
 #endif
   return registry.infos[id];
@@ -108,7 +111,7 @@ void* EntityBatch::Column(ComponentId id, u32 row, u32* run) const {
   if (run) {
     // The run ends at whichever comes first: the end of this chunk's rows or
     // the end of the batch.
-    *run = std::min(archetype_->ChunkRowCount(chunk) - in_chunk, count_ - row);
+    *run = rx::Min(archetype_->ChunkRowCount(chunk) - in_chunk, count_ - row);
   }
   return static_cast<u8*>(base) + static_cast<size_t>(in_chunk) * GetComponentInfo(id).size;
 }
@@ -119,8 +122,9 @@ EntityBatch World::BeginBatch(const Signature& signature, u32 count) {
   if (count == 0) return batch;
 
   Signature sorted(signature);
-  std::sort(sorted.begin(), sorted.end());
-  sorted.erase(std::unique(sorted.begin(), sorted.end()), sorted.end());
+  // Equal ids are indistinguishable, so any correct sort agrees.
+  base::Sort(sorted.begin(), sorted.end());
+  sorted.erase(base::Unique(sorted.begin(), sorted.end()), sorted.end());
 
   Archetype* archetype = GetOrCreateArchetype(sorted);
   batch.archetype_ = archetype;
@@ -172,7 +176,7 @@ void* World::AddRaw(Entity entity, ComponentId id) {
     return existing;
   }
   Signature signature = record.archetype->signature();
-  signature.insert(std::lower_bound(signature.begin(), signature.end(), id), id);
+  signature.insert(base::LowerBound(signature.begin(), signature.end(), id), id);
   MoveEntity(entity, record, GetOrCreateArchetype(signature));
   return record.archetype->ComponentAt(id, record.row);
 }
@@ -182,7 +186,7 @@ void World::RemoveRaw(Entity entity, ComponentId id) {
   EntityRecord& record = records_[entity.index];
   if (!SignatureContains(record.archetype->signature(), id)) return;
   Signature signature = record.archetype->signature();
-  signature.erase(std::lower_bound(signature.begin(), signature.end(), id));
+  signature.erase(base::LowerBound(signature.begin(), signature.end(), id));
   MoveEntity(entity, record, GetOrCreateArchetype(signature));
 }
 

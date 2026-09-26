@@ -1,12 +1,12 @@
 #ifndef RX_ASSET_MESH_H_
 #define RX_ASSET_MESH_H_
 
-#include <string>
 
 #include <base/containers/vector.h>
 
 #include "asset/asset_id.h"
 #include "asset/skeleton.h"
+#include "base/strings/xstring.h"
 #include "core/types.h"
 
 namespace rx::asset {
@@ -32,7 +32,7 @@ struct SkinnedVertexExtra {
 // Position deltas are always present; normal/tangent deltas are empty when the
 // source carries none. Deltas apply before skinning, in mesh space.
 struct MorphTarget {
-  std::string name;  // source target name (e.g. "jawOpen"), empty if unnamed
+  base::String name;  // source target name (e.g. "jawOpen"), empty if unnamed
   u64 name_hash = 0; // MakeAssetId(name).hash, 0 when unnamed
   base::Vector<f32> position_deltas; // 3 floats per lod 0 vertex
   base::Vector<f32> normal_deltas;   // 3 floats per vertex, or empty
@@ -42,7 +42,7 @@ struct MorphTarget {
 // Keyframed weight animation over a mesh's morph targets (a glTF "weights"
 // channel). weights holds one row of morph_targets.size() values per key.
 struct MorphAnimation {
-  std::string name;
+  base::String name;
   f32 duration = 0;  // seconds, last key time
   bool step = false; // hold each key instead of lerping (STEP interpolation)
   base::Vector<f32> times;

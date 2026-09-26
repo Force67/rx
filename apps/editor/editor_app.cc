@@ -1,10 +1,12 @@
 #include "editor_app.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <filesystem>
-#include <limits>
+#include <ctype.h>
+#include <errno.h>
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "anim/morph.h"
 #include "app/host.h"
@@ -13,16 +15,31 @@
 #include "asset/usd_loader.h"
 #include "asset/primitives.h"
 #include "asset/vfs.h"
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
+#include "core/format.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "edit/hierarchy.h"
 #include "editor_input.h"
 #include "render/core/settings.h"
 #include "scene/components.h"
 
 namespace rx::editor {
-namespace fs = std::filesystem;
 
 namespace {
+base::String LowerExtension(base::StringRef path) {
+  base::String extension(fs::Extension(path));
+  for (char &c : extension)
+    c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  return extension;
+}
+
 Mat4 MatOf(const scene::Transform &t) {
   return MakeTransform(
       {t.position[0], t.position[1], t.position[2]},
@@ -65,7 +82,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
   const u32 top_ring = static_cast<u32>(lod.vertices.size());
   for (u32 i = 0; i <= kSegments; ++i) {
     const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
-    const f32 x = std::cos(angle), z = std::sin(angle);
+    const f32 x = ::cos(angle), z = ::sin(angle);
     lod.vertices.push_back(vertex({x * radius, half_height, z * radius},
                                   {0, 1, 0}, x * 0.5f + 0.5f,
                                   z * 0.5f + 0.5f));
@@ -75,7 +92,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
   const u32 bottom_ring = static_cast<u32>(lod.vertices.size());
   for (u32 i = 0; i <= kSegments; ++i) {
     const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
-    const f32 x = std::cos(angle), z = std::sin(angle);
+    const f32 x = ::cos(angle), z = ::sin(angle);
     lod.vertices.push_back(vertex({x * radius, -half_height, z * radius},
                                   {0, -1, 0}, x * 0.5f + 0.5f,
                                   z * 0.5f + 0.5f));
@@ -83,7 +100,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
   const u32 side_ring = static_cast<u32>(lod.vertices.size());
   for (u32 i = 0; i <= kSegments; ++i) {
     const f32 angle = static_cast<f32>(i) / kSegments * 6.28318530718f;
-    const f32 x = std::cos(angle), z = std::sin(angle);
+    const f32 x = ::cos(angle), z = ::sin(angle);
     lod.vertices.push_back(
         vertex({x * radius, half_height, z * radius}, {x, 0, z},
                static_cast<f32>(i) / kSegments, 0));
@@ -108,7 +125,7 @@ asset::Mesh MakeTurntable(f32 radius, f32 half_height, asset::AssetId id,
   }
   lod.submeshes.push_back(
       {0, static_cast<u32>(lod.indices.size()), material});
-  mesh.bounds_radius = std::sqrt(radius * radius + half_height * half_height);
+  mesh.bounds_radius = ::sqrt(radius * radius + half_height * half_height);
   return mesh;
 }
 } // namespace
@@ -127,7 +144,7 @@ bool Editor::OnInitialize(app::Services &s) {
 
   RegisterEditorInput(*input_map_);
 
-  if (vfs_ && fs::exists(asset_root_))
+  if (vfs_ && fs::Exists(asset_root_))
     vfs_->Mount(asset::MakeLooseFileProvider(asset_root_));
   if (vfs_)
     assets_.emplace(*vfs_);
@@ -140,8 +157,8 @@ bool Editor::OnInitialize(app::Services &s) {
 
   camera_.set_position({6.0f, 4.5f, 6.0f});
   Vec3 d = Normalize(Vec3{0, 1.0f, 0} - camera_.position());
-  camera_.set_yaw_pitch(std::atan2(d.x, -d.z),
-                        std::asin(std::clamp(d.y, -1.0f, 1.0f)));
+  camera_.set_yaw_pitch(::atan2(d.x, -d.z),
+                        ::asin(rx::Clamp(d.y, -1.0f, 1.0f)));
 
   // Load a scene or authoring model passed on argv.
   if (!open_path_.empty()) {
@@ -223,7 +240,7 @@ void Editor::SetupDefaultScene() {
   selection_.Set(cube_e);
 }
 
-asset::AssetId Editor::UploadPrimitive(const std::string &name,
+asset::AssetId Editor::UploadPrimitive(const base::String &name,
                                        const asset::Mesh &mesh) {
   asset::Mesh copy = mesh; // keep a CPU copy for picking
   if (renderer_)
@@ -232,8 +249,8 @@ asset::AssetId Editor::UploadPrimitive(const std::string &name,
   return copy.id;
 }
 
-ecs::Entity Editor::SpawnMesh(const std::string &mesh_name, asset::AssetId mesh,
-                              const Vec3 &pos, const std::string &label) {
+ecs::Entity Editor::SpawnMesh(const base::String &mesh_name, asset::AssetId mesh,
+                              const Vec3 &pos, const base::String &label) {
   ecs::Entity e = world_->Create();
   world_->Add(e, scene::Transform{.position = {pos.x, pos.y, pos.z}});
   world_->Add(e, scene::Renderable{mesh});
@@ -243,14 +260,14 @@ ecs::Entity Editor::SpawnMesh(const std::string &mesh_name, asset::AssetId mesh,
   return e;
 }
 
-void Editor::SetName(ecs::Entity e, const std::string &name) {
+void Editor::SetName(ecs::Entity e, const base::String &name) {
   if (scene::Name *n = world_->Get<scene::Name>(e))
     n->value = name;
   else
     world_->Add(e, scene::Name{name});
 }
 
-std::string Editor::GetName(ecs::Entity e) const {
+base::String Editor::GetName(ecs::Entity e) const {
   if (scene::Name *n = world_->Get<scene::Name>(e))
     return n->value;
   return "";
@@ -265,15 +282,13 @@ void Editor::ScanAssets() {
   assets_list_.push_back({"assets://meshes/plane.mesh", "plane.mesh", "mesh"});
 
   // Loose files under the asset root, if it exists.
-  if (fs::exists(asset_root_)) {
-    for (auto &p : fs::recursive_directory_iterator(asset_root_)) {
-      if (!p.is_regular_file())
+  base::Vector<fs::DirEntry> files;
+  if (fs::Exists(asset_root_) && fs::ListDirectory(asset_root_, &files, /*recursive=*/true)) {
+    for (const fs::DirEntry &p : files) {
+      if (!p.is_regular)
         continue;
-      std::string ext = p.path().extension().string();
-      std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-      });
-      std::string kind;
+      const base::String ext = LowerExtension(p.path);
+      base::String kind;
       if (ext == ".rxscene")
         kind = "scene";
       else if (ext == ".rxterrain")
@@ -292,8 +307,7 @@ void Editor::ScanAssets() {
         kind = "audio";
       else
         continue;
-      assets_list_.push_back(
-          {p.path().string(), p.path().filename().string(), kind});
+      assets_list_.push_back({p.path, base::String(fs::Filename(p.path)), kind});
     }
   }
 }
@@ -303,7 +317,7 @@ u32 Editor::ConfigureImportedBody(ImportedSkin *skin) {
     return 0;
   const asset::Skeleton &skeleton = skin->skeleton;
   u32 count = 0;
-  auto available = [&](std::string_view name) {
+  auto available = [&](base::StringRef name) {
     return skeleton.Find(name) >= 0;
   };
   auto add_chest = [&](const char *side, const char *driven,
@@ -312,7 +326,7 @@ u32 Editor::ConfigureImportedBody(ImportedSkin *skin) {
       return;
     const char *driver = available("chest.twk") ? "chest.twk" : driven;
     anim::BodyRegionConfig region = anim::MakeBodyRegionPreset(
-        anim::BodyRegionKind::kChest, std::string("chest.") + side, driver,
+        anim::BodyRegionKind::kChest, base::String("chest.") + side, driver,
         driven);
     // On this Genesis rig the chest bones are true deformation helpers.
     // Gravity/inertial displacement drives them, while source-authored shapes
@@ -348,7 +362,7 @@ u32 Editor::ConfigureImportedBody(ImportedSkin *skin) {
     region.translation_gain = {};
     region.rotation_gain = {};
     region.frequency_hz *= 0.86f;
-    region.damping_ratio = std::max(0.5f, region.damping_ratio - 0.16f);
+    region.damping_ratio = rx::Max(0.5f, region.damping_ratio - 0.16f);
     region.morphs.push_back(
         {impact_morph, anim::BodyDeformationSignal::kImpact, 0.38f});
     region.morphs.push_back(
@@ -375,7 +389,7 @@ u32 Editor::ConfigureImportedBody(ImportedSkin *skin) {
     // Preview tuning is intentionally readable at turntable distance while
     // remaining inside the anatomical clamps supplied by each preset.
     region.frequency_hz *= 0.82f;
-    region.damping_ratio = std::max(0.52f, region.damping_ratio - 0.17f);
+    region.damping_ratio = rx::Max(0.52f, region.damping_ratio - 0.17f);
     region.translation_gain = {1.25f, 1.25f, 1.25f};
     region.rotation_gain = {1.2f, 1.2f, 1.2f};
     if (morph && *morph) {
@@ -400,14 +414,14 @@ u32 Editor::ConfigureImportedBody(ImportedSkin *skin) {
   return count;
 }
 
-bool Editor::LoadModelDocument(const std::string &path) {
-  std::string load_path = path;
+bool Editor::LoadModelDocument(const base::String &path) {
+  base::String load_path = path;
   bool reused_cache = false;
-  if (fs::path(path).extension() == ".blend") {
+  if (fs::Extension(path) == ".blend") {
     asset::BlendImportOptions options;
     options.converter_script = RX_BLEND_CONVERTER_SCRIPT;
     asset::BlendImportResult converted;
-    std::string error;
+    base::String error;
     if (!asset::ConvertBlendScene(path, options, &converted, &error)) {
       status_message_ = "Blend import failed: " + error;
       RX_WARN("editor: {}", status_message_);
@@ -435,8 +449,8 @@ bool Editor::LoadModelDocument(const std::string &path) {
       renderer_->UploadMaterial(material);
   }
   for (u32 i = 0; i < imported_scene.meshes.size(); ++i) {
-    UploadPrimitive(fs::path(path).filename().string() + "#" +
-                        std::to_string(i),
+    UploadPrimitive(base::String(fs::Filename(path)) + "#" +
+                        rx::ToString(i),
                     imported_scene.meshes[i]);
   }
 
@@ -446,9 +460,9 @@ bool Editor::LoadModelDocument(const std::string &path) {
   u32 region_count = 0;
   for (u32 i = 0; i < imported_scene.skeletons.size(); ++i) {
     ImportedSkin &skin = model.skins[i];
-    skin.skeleton = std::move(imported_scene.skeletons[i]);
+    skin.skeleton = base::move(imported_scene.skeletons[i]);
     if (i < imported_scene.skin_bindings.size())
-      skin.binding = std::move(imported_scene.skin_bindings[i]);
+      skin.binding = base::move(imported_scene.skin_bindings[i]);
     skin.pose.ResetToBind(skin.skeleton);
     region_count += ConfigureImportedBody(&skin);
   }
@@ -461,16 +475,16 @@ bool Editor::LoadModelDocument(const std::string &path) {
     transform.position[0] = source.position.x;
     transform.position[1] = source.position.y;
     transform.position[2] = source.position.z;
-    std::copy(std::begin(source.rotation), std::end(source.rotation),
-              transform.rotation);
+    for (size_t k = 0; k < 4; ++k)
+      transform.rotation[k] = source.rotation[k];
     transform.scale = source.scale;
     ecs::Entity entity = world_->Create();
     world_->Add(entity, transform);
     world_->Add(entity,
                 scene::Renderable{imported_scene.meshes[source.mesh_index].id});
     world_->Add(entity, scene::Transient{});
-    SetName(entity, fs::path(path).stem().string() + " " +
-                        std::to_string(model.instances.size() + 1));
+    SetName(entity, base::String(fs::Stem(path)) + " " +
+                        rx::ToString(model.instances.size() + 1));
 
     ImportedInstance instance;
     instance.entity = entity;
@@ -487,16 +501,16 @@ bool Editor::LoadModelDocument(const std::string &path) {
                                model.skins[instance.skin].binding);
     }
     const u32 instance_index = static_cast<u32>(model.instances.size());
-    model.instances.push_back(std::move(instance));
+    model.instances.push_back(base::move(instance));
     imported_entities_[ImportedEntityKey(entity)] = {model_index,
                                                      instance_index};
   }
-  imported_models_.push_back(std::move(model));
+  imported_models_.push_back(base::move(model));
 
   // Frame character imports from the skinned pieces. Authoring scenes often
   // include a huge cyclorama or ground plane; including those static props in
   // the focus bounds makes the actual character microscopic in the viewport.
-  const bool has_skinned_instances = std::any_of(
+  const bool has_skinned_instances = base::AnyOf(
       imported_scene.instances.begin(), imported_scene.instances.end(),
       [](const asset::ImportedScene::Instance &instance) {
         return instance.skeleton_index >= 0;
@@ -536,7 +550,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
     const Vec3 instance_center = TransformPoint(
         transform,
         {mesh.bounds_center[0], mesh.bounds_center[1], mesh.bounds_center[2]});
-    radius = std::max(radius, Length(instance_center - center) +
+    radius = rx::Max(radius, Length(instance_center - center) +
                                   mesh.bounds_radius * instance.scale);
   }
   ImportedModel &stored_model = imported_models_.back();
@@ -544,7 +558,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
   // Give character imports a dedicated studio turntable. Its top sits at the
   // lowest skinned bound and it rotates in lockstep with every skinned piece.
   if (has_skinned_instances) {
-    f32 floor_y = std::numeric_limits<f32>::max();
+    f32 floor_y = FLT_MAX;
     for (const asset::ImportedScene::Instance &instance : imported_scene.instances) {
       if (instance.mesh_index >= imported_scene.meshes.size() ||
           instance.skeleton_index < 0)
@@ -558,19 +572,19 @@ bool Editor::LoadModelDocument(const std::string &path) {
       if (mesh.lods.empty())
         continue;
       for (const asset::Vertex &vertex : mesh.lods[0].vertices) {
-        floor_y = std::min(
+        floor_y = rx::Min(
             floor_y,
             TransformPoint(transform, {vertex.position[0], vertex.position[1],
                                        vertex.position[2]})
                 .y);
       }
     }
-    if (!std::isfinite(floor_y))
+    if (!::isfinite(floor_y))
       floor_y = center.y - radius;
     constexpr f32 kPlateHalfHeight = 0.055f;
     const f32 surface_y =
         terrain_.SampleHeight(center.x, center.z).value_or(floor_y);
-    const f32 plate_top = std::max(floor_y, surface_y + 0.035f);
+    const f32 plate_top = rx::Max(floor_y, surface_y + 0.035f);
     const f32 character_lift = plate_top - floor_y;
     center.y += character_lift;
     for (ImportedInstance &instance : stored_model.instances) {
@@ -582,9 +596,9 @@ bool Editor::LoadModelDocument(const std::string &path) {
         transform->position[1] += character_lift;
       }
     }
-    const f32 plate_radius = std::max(0.9f, radius * 0.72f);
+    const f32 plate_radius = rx::Max(0.9f, radius * 0.72f);
     const asset::AssetId plate_material = asset::MakeAssetId(
-        path + "#editor-turntable-material-" + std::to_string(model_index));
+        path + "#editor-turntable-material-" + rx::ToString(model_index));
     asset::Material material;
     material.id = plate_material;
     material.base_color_factor[0] = 0.055f;
@@ -596,7 +610,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
     if (renderer_)
       renderer_->UploadMaterial(material);
     const asset::AssetId plate_mesh = asset::MakeAssetId(
-        path + "#editor-turntable-mesh-" + std::to_string(model_index));
+        path + "#editor-turntable-mesh-" + rx::ToString(model_index));
     UploadPrimitive("turntable.mesh",
                     MakeTurntable(plate_radius, kPlateHalfHeight, plate_mesh,
                                   plate_material));
@@ -615,11 +629,11 @@ bool Editor::LoadModelDocument(const std::string &path) {
   camera_.set_position(center +
                        Vec3{radius * 1.4f, radius * 0.75f, radius * 1.8f});
   Vec3 direction = Normalize(center - camera_.position());
-  camera_.set_yaw_pitch(std::atan2(direction.x, -direction.z),
-                        std::asin(std::clamp(direction.y, -1.0f, 1.0f)));
-  status_message_ = "Imported " + fs::path(path).filename().string() + ": " +
-                    std::to_string(imported_scene.meshes.size()) + " meshes, " +
-                    std::to_string(region_count) + " jiggle regions" +
+  camera_.set_yaw_pitch(::atan2(direction.x, -direction.z),
+                        ::asin(rx::Clamp(direction.y, -1.0f, 1.0f)));
+  status_message_ = "Imported " + base::String(fs::Filename(path)) + ": " +
+                    rx::ToString(imported_scene.meshes.size()) + " meshes, " +
+                    rx::ToString(region_count) + " jiggle regions" +
                     (reused_cache ? " (cached)" : "");
   RX_INFO("editor: {}", status_message_);
   playing_ = region_count > 0; // imported characters preview immediately
@@ -629,7 +643,7 @@ bool Editor::LoadModelDocument(const std::string &path) {
 
 void Editor::UpdateImportedModels(f32 dt) {
   for (ImportedModel &model : imported_models_) {
-    const f32 preview_dt = playing_ ? std::max(dt, 0.0f) : 0.0f;
+    const f32 preview_dt = playing_ ? rx::Max(dt, 0.0f) : 0.0f;
     model.preview_time += preview_dt;
 
     // Auto preview holds each style for five seconds and crossfades for one,
@@ -646,7 +660,7 @@ void Editor::UpdateImportedModels(f32 dt) {
       model.active_walk_style = anim::WalkStyleKind::kMarch;
       walk_style = march;
     } else {
-      const f32 cycle = std::fmod(model.preview_time, 12.0f);
+      const f32 cycle = ::fmod(model.preview_time, 12.0f);
       if (cycle < 5.0f) {
         model.active_walk_style = anim::WalkStyleKind::kHipSway;
         walk_style = hip_sway;
@@ -723,14 +737,14 @@ void Editor::UpdateImportedModels(f32 dt) {
       anim::BodyDynamicsFrame frame;
       if (playing_) {
         frame.linear_acceleration = {
-            std::sin(model.preview_time * 2.7f) * 7.0f,
-            std::sin(model.preview_time * 5.4f) * 5.5f,
-            std::cos(model.preview_time * 2.1f) * 6.0f,
+            ::sin(model.preview_time * 2.7f) * 7.0f,
+            ::sin(model.preview_time * 5.4f) * 5.5f,
+            ::cos(model.preview_time * 2.1f) * 6.0f,
         };
         frame.angular_acceleration = {
-            std::sin(model.preview_time * 2.3f) * 2.8f,
-            std::cos(model.preview_time * 1.7f) * 3.5f,
-            std::sin(model.preview_time * 3.2f) * 3.0f,
+            ::sin(model.preview_time * 2.3f) * 2.8f,
+            ::cos(model.preview_time * 1.7f) * 3.5f,
+            ::sin(model.preview_time * 3.2f) * 3.0f,
         };
         if (fire_event) {
           if (event_kind == 0)
@@ -758,16 +772,15 @@ void Editor::UpdateImportedModels(f32 dt) {
 }
 
 const MeshRecord *Editor::FindMesh(u64 hash) const {
-  auto it = meshes_.find(hash);
-  return it == meshes_.end() ? nullptr : &it->second;
+  return meshes_.find(hash);
 }
 
-std::string Editor::EntityLabel(ecs::Entity e) const {
-  std::string n = GetName(e);
+base::String Editor::EntityLabel(ecs::Entity e) const {
+  base::String n = GetName(e);
   if (!n.empty())
     return n;
   char buf[32];
-  std::snprintf(buf, sizeof(buf), "Entity %u", e.index);
+  ::snprintf(buf, sizeof(buf), "Entity %u", e.index);
   return buf;
 }
 
@@ -789,7 +802,7 @@ void Editor::OnUpdate(f32 dt) {
   bool lmb_edge = lmb && !prev_lmb_;
   bool over_vp = CursorOverViewport();
 
-  static const bool input_log = std::getenv("RX_EDITOR_INPUT_LOG") != nullptr;
+  static const bool input_log = ::getenv("RX_EDITOR_INPUT_LOG") != nullptr;
   if (input_log && lmb_edge)
     RX_INFO("editor: lmb down at {:.0f},{:.0f} over_vp={}", in.mouse_x,
             in.mouse_y, over_vp);
@@ -826,7 +839,7 @@ void Editor::OnUpdate(f32 dt) {
 
   UpdateCamera(dt);
 
-  if (std::getenv("RX_EDITOR_AUTOPILOT"))
+  if (::getenv("RX_EDITOR_AUTOPILOT"))
     RunAutopilot();
 
   // keyboard shortcuts
@@ -904,8 +917,8 @@ void Editor::FocusSelection() {
   Vec3 eye = center - camera_.forward() * 4.0f;
   camera_.set_position(eye);
   Vec3 d = Normalize(center - eye);
-  camera_.set_yaw_pitch(std::atan2(d.x, -d.z),
-                        std::asin(std::clamp(d.y, -1.0f, 1.0f)));
+  camera_.set_yaw_pitch(::atan2(d.x, -d.z),
+                        ::asin(rx::Clamp(d.y, -1.0f, 1.0f)));
 }
 
 // Picking. The engine GPU path (DrawItem::pick_id + Renderer::RequestPick /
@@ -934,11 +947,11 @@ void Editor::PollScenePick() {
     return;
   if (auto result = renderer_->TakePickResult()) {
     pick_pending_ = false;
-    auto it = pick_map_.find(result->pick_id);
-    if (it != pick_map_.end() && world_->IsAlive(it->second)) {
-      selection_.Set(it->second);
+    const ecs::Entity *picked = pick_map_.find(result->pick_id);
+    if (picked && world_->IsAlive(*picked)) {
+      selection_.Set(*picked);
       RX_INFO("editor: pick id {} -> {}", result->pick_id,
-              EntityLabel(it->second));
+              EntityLabel(*picked));
     } else {
       selection_.Clear(); // background
       RX_INFO("editor: pick id {} -> background", result->pick_id);
@@ -953,7 +966,7 @@ bool RayTriangle(const Vec3 &o, const Vec3 &d, const Vec3 &a, const Vec3 &b,
   Vec3 e1 = b - a, e2 = c - a;
   Vec3 p = Cross(d, e2);
   f32 det = Dot(e1, p);
-  if (std::fabs(det) < 1e-8f)
+  if (::fabs(det) < 1e-8f)
     return false;
   f32 inv = 1.0f / det;
   Vec3 tv = o - a;
@@ -1039,7 +1052,7 @@ Vec2 Editor::ProjectToScreen(const Vec3 &world, bool *in_front) const {
   f32 w = vp.m[3] * world.x + vp.m[7] * world.y + vp.m[11] * world.z + vp.m[15];
   if (in_front)
     *in_front = w > 1e-4f;
-  if (std::fabs(w) < 1e-6f)
+  if (::fabs(w) < 1e-6f)
     w = 1e-6f;
   f32 ndc_x = x / w, ndc_y = y / w;
   return {(ndc_x * 0.5f + 0.5f) * window_->width(),
@@ -1087,7 +1100,7 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
 
   // Not dragging: on click, test the three axis-handle tips.
   if (lmb_edge) {
-    f32 len = std::max(0.5f, Length(origin - camera_.position()) * 0.18f);
+    f32 len = rx::Max(0.5f, Length(origin - camera_.position()) * 0.18f);
     for (int a = 0; a < 3; ++a) {
       Vec3 axis{a == 0 ? 1.0f : 0.0f, a == 1 ? 1.0f : 0.0f,
                 a == 2 ? 1.0f : 0.0f};
@@ -1099,7 +1112,7 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
       // distance from cursor to the handle tip. The tolerance is authored at
       // 1x and both operands are pixels, so it scales with the buffer or the
       // handle gets relatively harder to grab the denser the display.
-      f32 d = std::hypot(mx - s1.x, my - s1.y);
+      f32 d = ::hypot(mx - s1.x, my - s1.y);
       if (d < 14.0f * window_->pixel_density()) {
         gizmo_drag_.active = true;
         gizmo_drag_.axis = a;
@@ -1108,7 +1121,7 @@ void Editor::UpdateGizmo(f32 mx, f32 my, bool lmb_down, bool lmb_edge) {
         gizmo_drag_.grab_mouse_x = mx;
         gizmo_drag_.grab_mouse_y = my;
         Vec2 sd{s1.x - s0.x, s1.y - s0.y};
-        f32 sl = std::max(1.0f, std::hypot(sd.x, sd.y));
+        f32 sl = rx::Max(1.0f, ::hypot(sd.x, sd.y));
         gizmo_drag_.axis_screen_dir = {sd.x / sl, sd.y / sl};
         gizmo_drag_.world_per_pixel = len / sl;
         undo_.BeginGroup("Move");
@@ -1129,7 +1142,7 @@ void Editor::NewScene() {
     undo_.EndGroup();
   gizmo_drag_.active = false;
   ClearTerrainVisuals();
-  std::vector<ecs::Entity> all;
+  base::Vector<ecs::Entity> all;
   world_->Each<scene::Transform>(
       [&](ecs::Entity e, scene::Transform &) { all.push_back(e); });
   for (ecs::Entity e : all)
@@ -1150,11 +1163,8 @@ void Editor::NewScene() {
   MarkDirty();
 }
 
-void Editor::OpenDocument(const std::string &path) {
-  std::string extension = fs::path(path).extension().string();
-  std::transform(
-      extension.begin(), extension.end(), extension.begin(),
-      [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+void Editor::OpenDocument(const base::String &path) {
+  const base::String extension = LowerExtension(path);
   if (extension == ".rxscene") {
     DoLoad(path);
   } else if (extension == ".gltf" || extension == ".glb" ||
@@ -1180,57 +1190,55 @@ void Editor::DoBakeWorld() {
     DoSave(scene_path_);
   }
 
-  const fs::path archive = fs::path(scene_path_).replace_extension(".rxp");
+  const base::String archive = fs::ReplaceExtension(scene_path_, ".rxp");
   // Stage and rename, so a failed cook cannot leave a half-written archive
   // where a whole one was. No backup chain: unlike the scene, this is a derived
   // artifact regenerable from the scene and the code, and a drift of numbered
   // backups of a build product serves nobody.
-  const fs::path stage = archive.string() + ".editor-stage";
-  std::error_code ignored;
-  fs::remove(stage, ignored);
+  const base::String stage = archive + ".editor-stage";
+  fs::Remove(stage);
 
   // Named for where the archive lands, not for where it is written. The cook
   // takes an unset name from the path it is given, and that path is the staging
   // file here, so leaving it unset would bury the world under a directory named
   // after a temporary nobody will ever open the archive by.
   world::WorldBakeOptions options = world_bake_options_;
-  if (options.name.empty()) options.name = world::WorldNameForArchive(archive.string());
+  if (options.name.empty()) options.name = world::WorldNameForArchive(archive);
 
   world::WorldBakeResult result;
-  std::string error;
-  if (!world::BakeWorld(scene_path_, options, stage.string(), &result, &error)) {
-    fs::remove(stage, ignored);
+  base::String error;
+  if (!world::BakeWorld(scene_path_, options, stage, &result, &error)) {
+    fs::Remove(stage);
     // The refusals are the point of having this button in the editor at all:
     // they land where the author is looking instead of in a terminal.
     status_message_ = "Bake failed: " + error;
     RX_ERROR("bake world: {}", error);
     return;
   }
-  std::error_code rename_error;
-  fs::rename(stage, archive, rename_error);
-  if (rename_error) {
-    fs::remove(stage, ignored);
-    status_message_ = "Bake failed: cannot replace " + archive.string();
+  if (!fs::Rename(stage, archive)) {
+    fs::Remove(stage);
+    status_message_ = "Bake failed: cannot replace " + archive;
     return;
   }
 
-  std::string message = "Baked " + archive.filename().string() + ": " +
-                        std::to_string(result.cells) + " cells, " +
-                        std::to_string(result.entities) + " entities, " +
-                        std::to_string(result.instances) + " instances";
+  base::String message = "Baked " + base::String(fs::Filename(archive)) + ": " +
+                        rx::ToString(result.cells) + " cells, " +
+                        rx::ToString(result.entities) + " entities, " +
+                        rx::ToString(result.instances) + " instances";
   if (!result.dropped.empty()) {
     message += " (dropped ";
     for (size_t i = 0; i < result.dropped.size(); ++i) {
-      message += (i != 0 ? ", " : "") + result.dropped[i];
+      if (i != 0) message += ", ";
+      message += result.dropped[i];
     }
     message += ")";
   }
   status_message_ = message;
-  RX_INFO("bake world: {} -> {} ({} cells, bake {})", scene_path_, archive.string(), result.cells,
+  RX_INFO("bake world: {} -> {} ({} cells, bake {})", scene_path_, archive, result.cells,
           result.bake_id);
 }
 
-void Editor::DoSave(const std::string &path) {
+void Editor::DoSave(const base::String &path) {
   FinishTerrainStroke();
   FinishPlacementDrag();
   if (scrub_.active)
@@ -1239,22 +1247,20 @@ void Editor::DoSave(const std::string &path) {
   if (gizmo_drag_.active)
     undo_.EndGroup();
   gizmo_drag_.active = false;
-  const fs::path scene_path(path);
-  const fs::path terrain_path = fs::path(path).replace_extension(".rxterrain");
-  const fs::path scene_stage = scene_path.string() + ".editor-stage";
-  const fs::path terrain_stage = terrain_path.string() + ".editor-stage";
-  auto backup_path = [](const fs::path &target) {
-    fs::path candidate = target.string() + ".editor-backup";
-    for (u32 suffix = 1; fs::exists(candidate); ++suffix)
-      candidate = target.string() + ".editor-backup." + std::to_string(suffix);
+  const base::String &scene_path = path;
+  const base::String terrain_path = fs::ReplaceExtension(path, ".rxterrain");
+  const base::String scene_stage = scene_path + ".editor-stage";
+  const base::String terrain_stage = terrain_path + ".editor-stage";
+  auto backup_path = [](const base::String &target) {
+    base::String candidate = target + ".editor-backup";
+    for (u32 suffix = 1; fs::Exists(candidate); ++suffix)
+      candidate = target + ".editor-backup." + rx::ToString(suffix);
     return candidate;
   };
-  const fs::path scene_backup = backup_path(scene_path);
-  const fs::path terrain_backup = backup_path(terrain_path);
-  std::error_code ignored;
-  for (const fs::path &temporary : {scene_stage, terrain_stage}) {
-    fs::remove(temporary, ignored);
-  }
+  const base::String scene_backup = backup_path(scene_path);
+  const base::String terrain_backup = backup_path(terrain_path);
+  fs::Remove(scene_stage);
+  fs::Remove(terrain_stage);
 
   // Terrain tiles are transient visualization entities. The authored data is
   // the sidecar, so omit those entities from the generic scene serializer.
@@ -1263,25 +1269,25 @@ void Editor::DoSave(const std::string &path) {
     if (world_->IsAlive(visual.entity))
       world_->Destroy(visual.entity);
   }
-  std::string scene_error;
+  base::String scene_error;
   bool scene_saved =
-      edit::SaveScene(*world_, scene_stage.string(), &scene_error);
-  for (auto &[key, visual] : terrain_tiles_)
-    visual.entity = SpawnTerrainTile(key, visual.mesh);
+      edit::SaveScene(*world_, scene_stage, &scene_error);
+  for (auto &[key, visual] : terrain_tiles_) {
+    (void)key;
+    visual.entity = SpawnTerrainTile(visual.key, visual.mesh);
+  }
 
   const bool has_terrain = static_cast<bool>(terrain_.desc().id);
-  std::string terrain_error;
+  base::String terrain_error;
   bool terrain_saved =
       !has_terrain ||
-      terrain::SaveTerrain(terrain_, terrain_stage.string(), &terrain_error);
+      terrain::SaveTerrain(terrain_, terrain_stage, &terrain_error);
 
-  auto move = [](const fs::path &from, const fs::path &to, std::string *error) {
-    std::error_code filesystem_error;
-    fs::rename(from, to, filesystem_error);
-    if (!filesystem_error)
+  auto move = [](const base::String &from, const base::String &to, base::String *error) {
+    if (fs::Rename(from, to))
       return true;
     if (error)
-      *error = filesystem_error.message();
+      *error = ::strerror(errno);
     return false;
   };
   bool scene_backed_up = false;
@@ -1289,21 +1295,21 @@ void Editor::DoSave(const std::string &path) {
   bool scene_committed = false;
   if (scene_saved && terrain_saved) {
     scene_backed_up =
-        fs::exists(scene_path) && move(scene_path, scene_backup, &scene_error);
-    if (fs::exists(scene_path) && !scene_backed_up)
+        fs::Exists(scene_path) && move(scene_path, scene_backup, &scene_error);
+    if (fs::Exists(scene_path) && !scene_backed_up)
       scene_saved = false;
     // Only a document that owns terrain may touch the sidecar. Without this
     // gate a no-terrain document saved onto a stem with an existing sidecar
     // would move it to the backup, then delete the backup on success, silently
     // destroying the user's terrain.
     if (has_terrain) {
-      terrain_backed_up = fs::exists(terrain_path) &&
+      terrain_backed_up = fs::Exists(terrain_path) &&
                           move(terrain_path, terrain_backup, &terrain_error);
-      if (fs::exists(terrain_path) && !terrain_backed_up)
+      if (fs::Exists(terrain_path) && !terrain_backed_up)
         terrain_saved = false;
-    } else if (fs::exists(terrain_path)) {
+    } else if (fs::Exists(terrain_path)) {
       RX_WARN("editor: leaving unrelated terrain sidecar untouched: {}",
-              terrain_path.string());
+              terrain_path);
     }
   }
   if (scene_saved && terrain_saved) {
@@ -1314,53 +1320,45 @@ void Editor::DoSave(const std::string &path) {
     terrain_saved = move(terrain_stage, terrain_path, &terrain_error);
 
   if (!scene_saved || !terrain_saved) {
-    if (scene_committed) {
-      std::error_code remove_error;
-      fs::remove(scene_path, remove_error);
-      if (remove_error) {
-        scene_saved = false;
-        scene_error =
-            "rollback could not remove new scene: " + remove_error.message();
-      }
+    // An error only when the path is there and would not go, as
+    // std::filesystem::remove reports it.
+    if (scene_committed && !fs::Remove(scene_path) && fs::Exists(scene_path)) {
+      scene_saved = false;
+      scene_error = base::String("rollback could not remove new scene: ") + ::strerror(errno);
     }
-    if (has_terrain && fs::exists(terrain_path) && terrain_backed_up) {
-      std::error_code remove_error;
-      fs::remove(terrain_path, remove_error);
-      if (remove_error) {
-        terrain_saved = false;
-        terrain_error =
-            "rollback could not remove new terrain: " + remove_error.message();
-      }
+    if (has_terrain && fs::Exists(terrain_path) && terrain_backed_up &&
+        !fs::Remove(terrain_path) && fs::Exists(terrain_path)) {
+      terrain_saved = false;
+      terrain_error = base::String("rollback could not remove new terrain: ") + ::strerror(errno);
     }
     if (scene_backed_up && !move(scene_backup, scene_path, &scene_error)) {
       scene_saved = false;
       scene_error = "rollback failed; backup preserved at " +
-                    scene_backup.string() + ": " + scene_error;
+                    scene_backup + ": " + scene_error;
     }
     if (terrain_backed_up &&
         !move(terrain_backup, terrain_path, &terrain_error)) {
       terrain_saved = false;
       terrain_error = "rollback failed; backup preserved at " +
-                      terrain_backup.string() + ": " + terrain_error;
+                      terrain_backup + ": " + terrain_error;
     }
   }
-  for (const fs::path &temporary : {scene_stage, terrain_stage}) {
-    fs::remove(temporary, ignored);
-  }
+  fs::Remove(scene_stage);
+  fs::Remove(terrain_stage);
   if (scene_saved && terrain_saved) {
-    fs::remove(scene_backup, ignored);
-    fs::remove(terrain_backup, ignored);
+    fs::Remove(scene_backup);
+    fs::Remove(terrain_backup);
   }
 
   if (scene_saved && terrain_saved) {
     scene_path_ = path;
-    terrain_path_ = terrain_path.string();
+    terrain_path_ = terrain_path;
     doc_dirty_ = false;
     terrain_dirty_ = false;
     status_message_ = has_terrain ? "Saved scene + terrain" : "Saved scene";
     RX_INFO("editor: saved {}{}", path,
-            has_terrain ? " and " + terrain_path.string()
-                        : " without a terrain sidecar");
+            has_terrain ? " and " + terrain_path
+                        : base::String(" without a terrain sidecar"));
     ScanAssets();
   } else {
     doc_dirty_ = true;
@@ -1375,7 +1373,7 @@ void Editor::DoSave(const std::string &path) {
   MarkDirty();
 }
 
-void Editor::DoLoad(const std::string &path) {
+void Editor::DoLoad(const base::String &path) {
   FinishTerrainStroke();
   FinishPlacementDrag();
   if (gizmo_drag_.active)
@@ -1388,11 +1386,11 @@ void Editor::DoLoad(const std::string &path) {
     RX_WARN("editor: no asset database (headless vfs?); cannot load scenes");
     return;
   }
-  const fs::path terrain_path = fs::path(path).replace_extension(".rxterrain");
-  const bool has_terrain = fs::exists(terrain_path);
+  const base::String terrain_path = fs::ReplaceExtension(path, ".rxterrain");
+  const bool has_terrain = fs::Exists(terrain_path);
   terrain::Terrain loaded_terrain;
-  std::string terrain_error;
-  if (has_terrain && !terrain::LoadTerrain(terrain_path.string(),
+  base::String terrain_error;
+  if (has_terrain && !terrain::LoadTerrain(terrain_path,
                                            &loaded_terrain, &terrain_error)) {
     status_message_ = "Terrain load failed: " + terrain_error;
     RX_WARN("editor: {}", status_message_);
@@ -1402,10 +1400,10 @@ void Editor::DoLoad(const std::string &path) {
 
   // The engine LoadScene leaves existing entities untouched; replacing the open
   // document is editor policy, so clear the current scene entities first.
-  std::vector<ecs::Entity> old;
+  base::Vector<ecs::Entity> old;
   world_->Each<scene::Transform>(
       [&](ecs::Entity e, scene::Transform &) { old.push_back(e); });
-  std::string err;
+  base::String err;
   if (edit::LoadScene(*world_, *assets_, path, &err)) {
     // Resolve meshes that are not already resident (notably glTF assets placed
     // by the surface brush) before discarding the old document's entities.
@@ -1416,7 +1414,7 @@ void Editor::DoLoad(const std::string &path) {
       const auto source = asset::LookupAssetPath(renderable.mesh);
       if (!source)
         return;
-      AssetEntry entry{*source, fs::path(*source).filename().string(), "mesh"};
+      AssetEntry entry{*source, base::String(fs::Filename(*source)), "mesh"};
       if (asset::AssetId resolved = ResolvePlacementMesh(entry))
         renderable.mesh = resolved;
     });
@@ -1425,12 +1423,12 @@ void Editor::DoLoad(const std::string &path) {
     imported_models_.clear();
     imported_entities_.clear();
     ClearTerrainVisuals();
-    terrain_ = has_terrain ? std::move(loaded_terrain) : terrain::Terrain{};
+    terrain_ = has_terrain ? base::move(loaded_terrain) : terrain::Terrain{};
     terrain_brush_layer_ = 0;
     if (has_terrain)
       RebuildTerrainVisuals();
     scene_path_ = path;
-    terrain_path_ = terrain_path.string();
+    terrain_path_ = terrain_path;
     doc_dirty_ = false;
     terrain_dirty_ = false;
     undo_.Clear();
@@ -1484,24 +1482,24 @@ void Editor::PerformRedo() {
 
 void Editor::OpenFileDialog() {
   dialog_files_.clear();
-  auto supported = [](const fs::path &path) {
-    std::string extension = path.extension().string();
-    std::transform(
-        extension.begin(), extension.end(), extension.begin(),
-        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  auto supported = [](base::StringRef path) {
+    const base::String extension = LowerExtension(path);
     return extension == ".rxscene" || extension == ".gltf" ||
            extension == ".glb" || extension == ".blend" ||
-           asset::IsUsdPath(path.string());
+           asset::IsUsdPath(path);
   };
-  if (fs::exists(asset_root_)) {
-    for (auto &p : fs::recursive_directory_iterator(asset_root_))
-      if (p.is_regular_file() && supported(p.path()))
-        dialog_files_.push_back(p.path().string());
+  base::Vector<fs::DirEntry> entries;
+  if (fs::Exists(asset_root_) && fs::ListDirectory(asset_root_, &entries, /*recursive=*/true)) {
+    for (const fs::DirEntry &p : entries)
+      if (p.is_regular && supported(p.path))
+        dialog_files_.push_back(p.path);
   }
   // Also supported documents in the working dir.
-  for (auto &p : fs::directory_iterator(fs::current_path()))
-    if (p.is_regular_file() && supported(p.path()))
-      dialog_files_.push_back(p.path().filename().string());
+  entries.clear();
+  fs::ListDirectory(fs::CurrentPath(), &entries);
+  for (const fs::DirEntry &p : entries)
+    if (p.is_regular && supported(p.path))
+      dialog_files_.push_back(base::String(fs::Filename(p.path)));
   dialog_open_ = true;
   MarkDirty();
 }
@@ -1539,7 +1537,7 @@ void Editor::RunAutopilot() {
     BeginScenePick(px.x, px.y);
   };
   auto check_sel = [&](const char *expect) {
-    std::string got =
+    base::String got =
         selection_.primary() ? EntityLabel(selection_.primary()) : "(none)";
     RX_INFO("autopilot: selection = '{}' expected '{}' -> {}", got, expect,
             got == expect ? "PASS" : "FAIL");
@@ -1587,7 +1585,7 @@ void Editor::RunAutopilot() {
     scene::Transform *t = world_->Get<scene::Transform>(find_named("Cube"));
     RX_INFO("autopilot: undo -> cube z={:.2f} expected 0 -> {}",
             t ? t->position[2] : -99.f,
-            (t && std::fabs(t->position[2]) < 1e-3f) ? "PASS" : "FAIL");
+            (t && ::fabs(t->position[2]) < 1e-3f) ? "PASS" : "FAIL");
     MarkDirty();
     break;
   }
@@ -1596,7 +1594,7 @@ void Editor::RunAutopilot() {
     scene::Transform *t = world_->Get<scene::Transform>(find_named("Cube"));
     RX_INFO("autopilot: redo -> cube z={:.2f} expected 2 -> {}",
             t ? t->position[2] : -99.f,
-            (t && std::fabs(t->position[2] - 2.0f) < 1e-3f) ? "PASS" : "FAIL");
+            (t && ::fabs(t->position[2] - 2.0f) < 1e-3f) ? "PASS" : "FAIL");
     MarkDirty();
     break;
   }
@@ -1614,12 +1612,12 @@ void Editor::RunAutopilot() {
     brush.falloff = 1.0f;
     terrain::TerrainChange change = terrain_.ApplyBrush(brush);
     RebuildTerrainTiles(
-        std::span<const terrain::TerrainTileKey>(change.dirty_tiles.data(),
+        base::Span<const terrain::TerrainTileKey>(change.dirty_tiles.data(),
                                                  change.dirty_tiles.size()),
         true);
     terrain_after = terrain_.SampleHeight(0, 0).value_or(-99.0f);
     const bool pass = !change.empty() && terrain_after > terrain_before;
-    RecordTerrainChange(std::move(change), "Autopilot Terrain Stroke");
+    RecordTerrainChange(base::move(change), "Autopilot Terrain Stroke");
     terrain_dirty_ = true;
     RX_INFO("autopilot: terrain stroke {:.3f} -> {:.3f} -> {}", terrain_before,
             terrain_after, pass ? "PASS" : "FAIL");
@@ -1630,7 +1628,7 @@ void Editor::RunAutopilot() {
     const f32 height = terrain_.SampleHeight(0, 0).value_or(-99.0f);
     RX_INFO("autopilot: terrain undo height={:.3f} expected {:.3f} -> {}",
             height, terrain_before,
-            std::fabs(height - terrain_before) < 1e-4f ? "PASS" : "FAIL");
+            ::fabs(height - terrain_before) < 1e-4f ? "PASS" : "FAIL");
     break;
   }
   case 520: {
@@ -1638,7 +1636,7 @@ void Editor::RunAutopilot() {
     const f32 height = terrain_.SampleHeight(0, 0).value_or(-99.0f);
     RX_INFO("autopilot: terrain redo height={:.3f} expected {:.3f} -> {}",
             height, terrain_after,
-            std::fabs(height - terrain_after) < 1e-4f ? "PASS" : "FAIL");
+            ::fabs(height - terrain_after) < 1e-4f ? "PASS" : "FAIL");
     break;
   }
   case 530:
@@ -1663,10 +1661,10 @@ void Editor::RunAutopilot() {
     scene::Transform *t = e ? world_->Get<scene::Transform>(e) : nullptr;
     RX_INFO("autopilot: after load cube z={:.2f} expected 2 -> {}",
             t ? t->position[2] : -99.f,
-            (t && std::fabs(t->position[2] - 2.0f) < 1e-3f) ? "PASS" : "FAIL");
+            (t && ::fabs(t->position[2] - 2.0f) < 1e-3f) ? "PASS" : "FAIL");
     const f32 height = terrain_.SampleHeight(0, 0).value_or(-99.0f);
-    const bool sidecar_pass = fs::exists("scene_saved.rxterrain") &&
-                              std::fabs(height - terrain_after) < 2e-3f;
+    const bool sidecar_pass = fs::Exists("scene_saved.rxterrain") &&
+                              ::fabs(height - terrain_after) < 2e-3f;
     RX_INFO("autopilot: terrain sidecar height={:.3f} expected {:.3f} -> {}",
             height, terrain_after, sidecar_pass ? "PASS" : "FAIL");
     break;
@@ -1688,7 +1686,7 @@ void Editor::RunAutopilot() {
     scene_path_ = "scene_saved.rxscene";
     doc_dirty_ = false;
     DoBakeWorld();
-    const bool baked = fs::exists("scene_saved.rxp");
+    const bool baked = fs::Exists("scene_saved.rxp");
     RX_INFO("autopilot: bake world -> {} -> {}", status_message_, baked ? "PASS" : "FAIL");
     break;
   }
@@ -1709,28 +1707,28 @@ void Editor::OnFrameEnd() {
   //   capture RX_EDITOR_QUIT_FRAME=n     quit at frame n
   static int frames = 0;
   ++frames;
-  if (const char *p = std::getenv("RX_EDITOR_SHOT"); p && renderer_) {
-    int every = std::getenv("RX_EDITOR_SHOT_EVERY")
-                    ? std::atoi(std::getenv("RX_EDITOR_SHOT_EVERY"))
+  if (const char *p = ::getenv("RX_EDITOR_SHOT"); p && renderer_) {
+    int every = ::getenv("RX_EDITOR_SHOT_EVERY")
+                    ? ::atoi(::getenv("RX_EDITOR_SHOT_EVERY"))
                     : 0;
-    int at = std::getenv("RX_EDITOR_SHOT_FRAME")
-                 ? std::atoi(std::getenv("RX_EDITOR_SHOT_FRAME"))
+    int at = ::getenv("RX_EDITOR_SHOT_FRAME")
+                 ? ::atoi(::getenv("RX_EDITOR_SHOT_FRAME"))
                  : 20;
     if (every > 0) {
       if (frames % every == 0) {
         char path[1024];
-        std::snprintf(path, sizeof(path), "%s.%03d.png", p, frames / every);
+        ::snprintf(path, sizeof(path), "%s.%03d.png", p, frames / every);
         renderer_->CaptureScreenshot(path);
       }
     } else {
       if (frames == at)
         renderer_->CaptureScreenshot(p);
-      if (frames == at + 4 && std::getenv("RX_EDITOR_SHOT_QUIT"))
+      if (frames == at + 4 && ::getenv("RX_EDITOR_SHOT_QUIT"))
         host_->RequestQuit();
     }
   }
-  if (const char *q = std::getenv("RX_EDITOR_QUIT_FRAME")) {
-    if (frames >= std::atoi(q))
+  if (const char *q = ::getenv("RX_EDITOR_QUIT_FRAME")) {
+    if (frames >= ::atoi(q))
       host_->RequestQuit();
   }
 }

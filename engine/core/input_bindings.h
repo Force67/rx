@@ -1,10 +1,10 @@
 #ifndef RX_CORE_INPUT_BINDINGS_H_
 #define RX_CORE_INPUT_BINDINGS_H_
 
-#include <functional>
-#include <string>
-#include <vector>
 
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/input.h"
 #include "core/input_actions.h"
@@ -67,7 +67,7 @@ class RX_CORE_EXPORT InputMap {
   // The application's default-binding routine (it calls AddBinding/AddAxisBinding
   // for its whole set). Stored so ResetToDefaults() can reapply it, and invoked
   // immediately to seed the built-in layout.
-  void SetDefaultsFn(std::function<void(InputMap&)> fn);
+  void SetDefaultsFn(base::Function<void(InputMap&)> fn);
 
   // Reapplies the registered defaults (bindings only).
   void LoadDefaults();
@@ -79,11 +79,11 @@ class RX_CORE_EXPORT InputMap {
 
   // Rebinding (used by the settings UI)
   template <class A>
-  const std::vector<Binding>& bindings(A a) const {
+  const base::Vector<Binding>& bindings(A a) const {
     return action_[static_cast<int>(a)];
   }
   template <class X>
-  const std::vector<Binding>& axis_bindings(X a) const {
+  const base::Vector<Binding>& axis_bindings(X a) const {
     return axis_[static_cast<int>(a)];
   }
   template <class A>
@@ -131,12 +131,12 @@ class RX_CORE_EXPORT InputMap {
   u8 led_r = 0, led_g = 60, led_b = 120;  // DualSense lightbar
 
   // Persistence
-  bool LoadFromIni(const std::string& path);
-  bool SaveToIni(const std::string& path) const;
+  bool LoadFromIni(const base::String& path);
+  bool SaveToIni(const base::String& path) const;
 
   // Default controls path: $XDG_CONFIG_HOME/rx/controls.ini (or the
   // platform equivalent). Empty if no home directory can be found.
-  static std::string DefaultConfigPath();
+  static base::String DefaultConfigPath();
 
  private:
   struct Fold {
@@ -162,25 +162,25 @@ class RX_CORE_EXPORT InputMap {
   bool SourceHeld(const Binding& b, const InputState& kbm, const GamepadState& pad) const;
   f32 AxisValue(const Binding& b, const GamepadState& pad) const;
 
-  std::vector<Binding> action_[kMaxActions];
-  std::vector<Binding> axis_[kMaxAxes];
+  base::Vector<Binding> action_[kMaxActions];
+  base::Vector<Binding> axis_[kMaxAxes];
   bool prev_held_[kMaxActions] = {};
 
   const char* action_names_[kMaxActions] = {};
   const char* axis_names_[kMaxAxes] = {};
   int action_count_ = 0;  // one past the highest registered action id
   int axis_count_ = 0;    // one past the highest registered axis id
-  std::vector<Fold> folds_;
-  std::function<void(InputMap&)> defaults_;
+  base::Vector<Fold> folds_;
+  base::Function<void(InputMap&)> defaults_;
 
   InputDevice last_device_ = InputDevice::kKeyboardMouse;
 };
 
 // Source token, e.g. "key:W", "mouse:left", "pad:south", "padaxis:lefty+".
-std::string BindingToken(const Binding& b);
+base::String BindingToken(const Binding& b);
 bool BindingFromToken(const char* token, Binding* out);
 // Short label for a binding as shown next to an action in the settings list.
-std::string BindingLabel(const Binding& b);
+base::String BindingLabel(const Binding& b);
 
 }  // namespace rx
 

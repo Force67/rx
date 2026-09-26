@@ -1,7 +1,9 @@
 #include "asset/image_file.h"
+#include "base/memory/mem_ops.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 
-#include <cstring>
-#include <format>
+#include <string.h>
 
 // The implementation lives in third_party/stb_impl.c (rx::stb_impl); this is
 // only the declarations.
@@ -9,7 +11,7 @@
 
 namespace rx::asset {
 
-std::string ImageFileProblem(const std::string& path) {
+base::String ImageFileProblem(const base::String& path) {
   if (path.empty()) return "is empty; there is nothing to load";
   int width = 0;
   int height = 0;
@@ -18,11 +20,11 @@ std::string ImageFileProblem(const std::string& path) {
   // stb's reason separates "fopen failed" from a decode it refuses, which is
   // the difference between a mistyped path and a format this build cannot read.
   const char* reason = stbi_failure_reason();
-  return std::format("does not read as an image ({}); the path is relative to the working "
+  return rx::StrFormat("does not read as an image ({}); the path is relative to the working "
                      "directory", reason ? reason : "unknown");
 }
 
-bool LoadImageFile(const std::string& path, bool srgb, AssetId id, Texture* out) {
+bool LoadImageFile(const base::String& path, bool srgb, AssetId id, Texture* out) {
   int width = 0;
   int height = 0;
   int channels = 0;
@@ -36,7 +38,7 @@ bool LoadImageFile(const std::string& path, bool srgb, AssetId id, Texture* out)
   out->array_layers = 1;
   out->is_srgb = srgb;
   out->data.resize(static_cast<size_t>(width) * height * 4);
-  std::memcpy(out->data.data(), pixels, out->data.size());
+  base::MemCopy(out->data.data(), pixels, out->data.size());
   stbi_image_free(pixels);
   return true;
 }

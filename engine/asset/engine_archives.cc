@@ -1,10 +1,13 @@
 #include "asset/engine_archives.h"
 
-#include <filesystem>
 
 #include <base/option.h>
 
 #include "asset/pack.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 #include "core/log.h"
 #include "core/paths.h"
 
@@ -24,22 +27,21 @@ constexpr EngineArchive kEngineArchives[] = {{"rx_fonts.rxp", "fonts"}};
 
 }  // namespace
 
-std::string FindEngineArchive(std::string_view file_name) {
-  std::error_code ec;
-  auto try_dir = [&](const std::filesystem::path& dir) {
-    const std::filesystem::path candidate = dir / file_name;
-    return std::filesystem::is_regular_file(candidate, ec) ? candidate.string() : std::string();
+base::String FindEngineArchive(base::StringRef file_name) {
+  auto try_dir = [&](base::StringRef dir) {
+    base::String candidate = fs::Join(dir, file_name);
+    return fs::IsRegularFile(candidate) ? candidate : base::String();
   };
 
   if (const char* dir = EngineArchivesDir.get(); dir != nullptr && *dir != '\0') {
-    if (std::string found = try_dir(dir); !found.empty()) return found;
+    if (base::String found = try_dir(dir); !found.empty()) return found;
   }
-  if (std::string found = try_dir("."); !found.empty()) return found;
+  if (base::String found = try_dir("."); !found.empty()) return found;
   // A shipped build carries the archives beside the executable, and is started
   // from wherever the launcher happens to be.
-  if (std::string found = try_dir(ExecutableDirectory()); !found.empty()) return found;
+  if (base::String found = try_dir(ExecutableDirectory()); !found.empty()) return found;
 #ifdef RX_ENGINE_ARCHIVES_DIR_DEFAULT
-  if (std::string found = try_dir(RX_ENGINE_ARCHIVES_DIR_DEFAULT); !found.empty()) return found;
+  if (base::String found = try_dir(RX_ENGINE_ARCHIVES_DIR_DEFAULT); !found.empty()) return found;
 #endif
   return {};
 }
@@ -47,7 +49,7 @@ std::string FindEngineArchive(std::string_view file_name) {
 size_t MountEngineArchives(Vfs& vfs) {
   size_t mounted = 0;
   for (const EngineArchive& archive : kEngineArchives) {
-    const std::string path = FindEngineArchive(archive.file_name);
+    const base::String path = FindEngineArchive(archive.file_name);
     if (path.empty()) {
       RX_WARN("engine archive {} not found (set RX_ENGINE_ARCHIVES)", archive.file_name);
       continue;
@@ -57,7 +59,7 @@ size_t MountEngineArchives(Vfs& vfs) {
       RX_WARN("engine archive {} could not be opened", path);
       continue;
     }
-    vfs.Mount(archive.mount_point, std::move(provider));
+    vfs.Mount(archive.mount_point, base::move(provider));
     ++mounted;
     RX_INFO("mounted {} at {}://", path, archive.mount_point);
   }

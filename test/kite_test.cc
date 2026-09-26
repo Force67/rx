@@ -10,10 +10,11 @@
 //   (e) anchor towed at 8 m/s in calm air flies the kite on apparent wind.
 //   (f) 60 s of gusting wind is NaN-free and never exceeds the tension cap.
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
 #include "core/math.h"
+#include "core/scalar.h"
 #include "physics/kite.h"
 #include "physics/physics_world.h"
 
@@ -30,7 +31,7 @@ namespace {
 constexpr f32 kDt = 1.0f / 60.0f;
 
 int Fail(const char* what) {
-  std::fprintf(stderr, "kite_test FAIL: %s\n", what);
+  ::fprintf(stderr, "kite_test FAIL: %s\n", what);
   return 1;
 }
 
@@ -56,7 +57,7 @@ int main() {
   {
     PhysicsWorld probe;
     if (!probe.Initialize()) {
-      std::fprintf(stderr, "kite_test: physics stub, skipping\n");
+      ::fprintf(stderr, "kite_test: physics stub, skipping\n");
       return 0;  // physics compiled as a stub: nothing to exercise
     }
   }
@@ -78,7 +79,7 @@ int main() {
     // Give it a few seconds to launch and climb into equilibrium.
     Run(world, kite, {}, 60 * 8);
     const KiteState s = kite.state();
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(a) equilibrium: altitude=%.2f m  tension=%.1f N  airspeed=%.2f m/s  "
                  "alpha=%.1f deg  taut=%d  line=%.1f m\n",
                  s.altitude_m, s.tension_n, s.airspeed_mps, s.alpha_deg, s.taut, s.line_length_m);
@@ -95,11 +96,11 @@ int main() {
     for (int i = 0; i < 60 * 30; ++i) {
       Step(world, kite, {});
       const f32 a = kite.state().altitude_m;
-      if (!std::isfinite(a)) return Fail("(a) NaN altitude");
-      lo = std::min(lo, a);
-      hi = std::max(hi, a);
+      if (!::isfinite(a)) return Fail("(a) NaN altitude");
+      lo = rx::Min(lo, a);
+      hi = rx::Max(hi, a);
     }
-    std::fprintf(stderr, "(a) 30 s hover band: [%.2f, %.2f] m\n", lo, hi);
+    ::fprintf(stderr, "(a) 30 s hover band: [%.2f, %.2f] m\n", lo, hi);
     if (lo < line * 0.4f) return Fail("(a) kite fell out of the sky during hover");
   }
 
@@ -114,7 +115,7 @@ int main() {
     const f32 flying = Run(world, kite, {}, 60 * 8).altitude_m;  // aloft first
     world.set_wind({0, 0, 0});                                    // wind dies
     const f32 settled = Run(world, kite, {}, 60 * 20).altitude_m;
-    std::fprintf(stderr, "(b) altitude flying=%.2f m -> settled=%.2f m\n", flying, settled);
+    ::fprintf(stderr, "(b) altitude flying=%.2f m -> settled=%.2f m\n", flying, settled);
     if (settled >= flying - 5.0f) return Fail("(b) kite did not descend when the wind died");
     // Damped by its own form drag, a lift-less kite sinks slowly and settles near
     // the ground (it hangs/rests low, not pinned to y=0).
@@ -139,8 +140,8 @@ int main() {
     };
     const f32 left = steered_x(-1.0f);
     const f32 right = steered_x(+1.0f);
-    std::fprintf(stderr, "(c) steer dX  left=%.2f m  right=%.2f m\n", left, right);
-    if (std::fabs(left) < 0.5f || std::fabs(right) < 0.5f)
+    ::fprintf(stderr, "(c) steer dX  left=%.2f m  right=%.2f m\n", left, right);
+    if (::fabs(left) < 0.5f || ::fabs(right) < 0.5f)
       return Fail("(c) steering produced no lateral displacement");
     if ((left > 0) == (right > 0)) return Fail("(c) left/right steer did not oppose");
   }
@@ -162,11 +163,11 @@ int main() {
     f32 min_alt = alt0;
     for (int i = 0; i < 60 * 5; ++i) {
       Step(world, kite, in);
-      min_alt = std::min(min_alt, kite.state().altitude_m);
+      min_alt = rx::Min(min_alt, kite.state().altitude_m);
     }
     const f32 line1 = kite.line_length();
     const f32 alt1 = kite.state().altitude_m;
-    std::fprintf(stderr, "(d) reel-in line %.1f -> %.1f m   altitude %.2f -> %.2f m (min %.2f)\n",
+    ::fprintf(stderr, "(d) reel-in line %.1f -> %.1f m   altitude %.2f -> %.2f m (min %.2f)\n",
                  line0, line1, alt0, alt1, min_alt);
     if (line1 >= line0 - 1.0f) return Fail("(d) line did not shorten");
     if (alt1 >= alt0 - 0.5f) return Fail("(d) altitude did not follow the shorter line down");
@@ -194,10 +195,10 @@ int main() {
       kite.set_anchor(anc);
       Step(world, kite, in);
       const f32 a = kite.state().altitude_m;  // height above the (moving) anchor
-      if (!std::isfinite(a)) return Fail("(e) NaN while towed");
-      max_alt = std::max(max_alt, a);
+      if (!::isfinite(a)) return Fail("(e) NaN while towed");
+      max_alt = rx::Max(max_alt, a);
     }
-    std::fprintf(stderr, "(e) towed max altitude=%.2f m  tension=%.1f N\n", max_alt,
+    ::fprintf(stderr, "(e) towed max altitude=%.2f m  tension=%.1f N\n", max_alt,
                  kite.state().tension_n);
     if (max_alt < 2.0f) return Fail("(e) towed kite never left the ground");
     if (kite.state().tension_n > desc.tether_max_tension)
@@ -216,22 +217,22 @@ int main() {
       const f32 t = i * kDt;
       // Violent gusting: base wind plus large multi-frequency swings and a
       // rotating cross-component.
-      const f32 base = 8.0f + 7.0f * std::sin(t * 1.3f) + 4.0f * std::sin(t * 5.1f + 0.7f);
-      const f32 cross = 6.0f * std::sin(t * 0.9f + 2.0f);
-      world.set_wind({cross, 2.0f * std::sin(t * 3.3f), base});
+      const f32 base = 8.0f + 7.0f * ::sin(t * 1.3f) + 4.0f * ::sin(t * 5.1f + 0.7f);
+      const f32 cross = 6.0f * ::sin(t * 0.9f + 2.0f);
+      world.set_wind({cross, 2.0f * ::sin(t * 3.3f), base});
       // Also jerk the anchor around to stress the one-sided spring.
-      kite.set_anchor(Vec3{2.0f * std::sin(t * 2.0f), 0.0f, 2.0f * std::cos(t * 2.0f)});
+      kite.set_anchor(Vec3{2.0f * ::sin(t * 2.0f), 0.0f, 2.0f * ::cos(t * 2.0f)});
       KiteInput in;
-      in.steer = std::sin(t * 4.0f);
+      in.steer = ::sin(t * 4.0f);
       Step(world, kite, in);
       const KiteState s = kite.state();
-      if (!std::isfinite(s.position.x) || !std::isfinite(s.position.y) ||
-          !std::isfinite(s.position.z) || !std::isfinite(s.tension_n) ||
-          !std::isfinite(s.alpha_deg))
+      if (!::isfinite(s.position.x) || !::isfinite(s.position.y) ||
+          !::isfinite(s.position.z) || !::isfinite(s.tension_n) ||
+          !::isfinite(s.alpha_deg))
         return Fail("(f) NaN under gusting");
-      max_tension = std::max(max_tension, s.tension_n);
+      max_tension = rx::Max(max_tension, s.tension_n);
     }
-    std::fprintf(stderr, "(f) 60 s gust: max tension=%.1f N (cap %.0f)\n", max_tension,
+    ::fprintf(stderr, "(f) 60 s gust: max tension=%.1f N (cap %.0f)\n", max_tension,
                  desc.tether_max_tension);
     if (max_tension > desc.tether_max_tension + 1e-3f)
       return Fail("(f) tension exceeded the documented cap");
@@ -258,11 +259,11 @@ int main() {
     for (int i = 0; i < 30; ++i) world.Update(kDt);  // crash-free after removal
     PhysicsWorld::RayHit hit;
     const bool after = world.SphereCast(Vec3{p.x, p.y + 3.0f, p.z}, Vec3{0, -1, 0}, 6.0f, 0.6f, &hit);
-    std::fprintf(stderr, "(g) sail cast before destroy=%d after=%d\n", before, after);
+    ::fprintf(stderr, "(g) sail cast before destroy=%d after=%d\n", before, after);
     if (!before) return Fail("(g) sail body not present before destroy");
     if (after) return Fail("(g) sail body still present after destroy");
   }
 
-  std::fprintf(stderr, "kite_test: all checks passed\n");
+  ::fprintf(stderr, "kite_test: all checks passed\n");
   return 0;
 }

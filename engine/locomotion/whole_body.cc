@@ -5,7 +5,7 @@
 
 #include "locomotion/whole_body.h"
 
-#include <cmath>
+#include <math.h>
 
 #include "locomotion/internal_math.h"
 
@@ -20,7 +20,7 @@ constexpr f32 kPi = 3.14159265358979f;
 Quat ClampCone(Quat q, f32 max_angle) {
   q = Normalize(q);
   if (q.w < 0.0f) q = {-q.x, -q.y, -q.z, -q.w};  // pick the shortest hemisphere
-  f32 angle = 2.0f * std::acos(Clampf(q.w, -1.0f, 1.0f));
+  f32 angle = 2.0f * ::acos(Clampf(q.w, -1.0f, 1.0f));
   if (angle <= max_angle) return q;
   Vec3 axis{q.x, q.y, q.z};
   if (Length(axis) < 1e-6f) return {0, 0, 0, 1};
@@ -72,7 +72,7 @@ LegIkResult SolveLegIk(const Vec3& hip_to_sole, const Vec3& sole_normal_parent, 
   const f32 u = upper_length;
   const f32 l = lower_length;
   const f32 eps = 1e-4f;
-  const f32 d_min = std::fabs(u - l) + eps;
+  const f32 d_min = ::fabs(u - l) + eps;
   const f32 d_max = u + l - eps;
 
   f32 d = raw;
@@ -91,7 +91,7 @@ LegIkResult SolveLegIk(const Vec3& hip_to_sole, const Vec3& sole_normal_parent, 
   // folded (d = |u-l|) -> pi. Never negative.
   f32 cos_knee = (u * u + l * l - d * d) / (2.0f * u * l);
   cos_knee = Clampf(cos_knee, -1.0f, 1.0f);
-  r.knee_flexion = kPi - std::acos(cos_knee);
+  r.knee_flexion = kPi - ::acos(cos_knee);
   if (r.knee_flexion < 0.0f) r.knee_flexion = 0.0f;
 
   // Triangle angle at the hip between the thigh (bind -Y) and the hip->ankle
@@ -104,7 +104,7 @@ LegIkResult SolveLegIk(const Vec3& hip_to_sole, const Vec3& sole_normal_parent, 
   // where V0 is the bent chain's ankle in the pre-hip frame.
   f32 cos_alpha = (u * u + d * d - l * l) / (2.0f * u * d);
   cos_alpha = Clampf(cos_alpha, -1.0f, 1.0f);
-  const f32 alpha = std::acos(cos_alpha);
+  const f32 alpha = ::acos(cos_alpha);
   r.hip = QuatBetween(down_y, a_hat) * QuatFromAxisAngle(knee_axis, -alpha);
 
   // Ankle: after hip+knee, rotate the foot's bind normal (+Y) onto n. Solve in
@@ -200,7 +200,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
       solved_forward = Normalize(solved_forward);
       desired_forward = Normalize(desired_forward);
       const f32 yaw_error =
-          std::atan2(Cross(solved_forward, desired_forward).y,
+          ::atan2(Cross(solved_forward, desired_forward).y,
                      Clampf(Dot(solved_forward, desired_forward), -1.0f, 1.0f));
       ankle = ClampCone(ankle * QuatFromAxisAngle(up_y, yaw_error), 0.5f);
     }
@@ -229,8 +229,8 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
 
   // 5. Arms: gait-phase counter-swing (arm opposes the same-side leg)
   const f32 speed_ratio = Clampf(gait.speed_ratio, 0.0f, 4.0f);
-  const f32 swing_l = 0.45f * speed_ratio * std::cos(2.0f * kPi * GaitClock::FootPhase(gait, 1));
-  const f32 swing_r = 0.45f * speed_ratio * std::cos(2.0f * kPi * GaitClock::FootPhase(gait, 0));
+  const f32 swing_l = 0.45f * speed_ratio * ::cos(2.0f * kPi * GaitClock::FootPhase(gait, 1));
+  const f32 swing_r = 0.45f * speed_ratio * ::cos(2.0f * kPi * GaitClock::FootPhase(gait, 0));
   const f32 elbow_flex = 0.25f + 0.25f * speed_ratio;
   out->joint_target[static_cast<u32>(RigJoint::kShoulderL)] = QuatFromAxisAngle({1, 0, 0}, swing_l);
   out->joint_target[static_cast<u32>(RigJoint::kShoulderR)] = QuatFromAxisAngle({1, 0, 0}, swing_r);
@@ -275,7 +275,7 @@ void BuildWholeBodyTargets(const CharacterMeasurements& m, const ContactEstimate
     const Vec3 up_target = Rotate(q_d, up_y);
     const Vec3 cross = Cross(up_world, up_target);
     const f32 sin_a = Length(cross);
-    const f32 angle = std::acos(Clampf(Dot(up_world, up_target), -1.0f, 1.0f));
+    const f32 angle = ::acos(Clampf(Dot(up_world, up_target), -1.0f, 1.0f));
     const Vec3 axis = sin_a > 1e-6f ? cross * (1.0f / sin_a) : Vec3{0, 0, 0};
     assist_torque = axis * (params.torso_orientation_gain * angle) -
                     m.root_angular_velocity * params.torso_angular_damping;

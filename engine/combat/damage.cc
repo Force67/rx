@@ -1,8 +1,8 @@
 #include "combat/damage.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "scene/components.h"
 
@@ -76,7 +76,7 @@ bool ApplyDamage(ecs::World& world, const DamageRequest& request, CombatEvents* 
 
   f32 absorbed = 0;
   if (health->armor > 0) {
-    absorbed = std::min(health->armor, amount * std::clamp(health->armor_absorb, 0.0f, 1.0f));
+    absorbed = rx::Min(health->armor, amount * rx::Clamp(health->armor_absorb, 0.0f, 1.0f));
     health->armor -= absorbed;
   }
   const f32 applied = amount - absorbed;
@@ -123,20 +123,20 @@ bool ApplyDamage(ecs::World& world, const DamageRequest& request, CombatEvents* 
 f32 Heal(ecs::World& world, ecs::Entity entity, f32 amount) {
   Health* health = world.Get<Health>(entity);
   if (!health || health->dead || amount <= 0) return 0;
-  const f32 given = std::min(amount, health->max_hp - health->hp);
+  const f32 given = rx::Min(amount, health->max_hp - health->hp);
   if (given <= 0) return 0;
   health->hp += given;
   return given;
 }
 
 void StepHealth(ecs::World& world, f32 dt) {
-  if (!std::isfinite(dt) || dt <= 0) return;
+  if (!::isfinite(dt) || dt <= 0) return;
   world.Each<Health>([dt](ecs::Entity, Health& health) {
     if (health.dead) return;
     health.time_since_damage += dt;
     if (health.regen_rate <= 0) return;
     if (health.time_since_damage < health.regen_delay) return;
-    health.hp = std::min(health.max_hp, health.hp + health.regen_rate * dt);
+    health.hp = rx::Min(health.max_hp, health.hp + health.regen_rate * dt);
   });
 }
 
@@ -153,7 +153,7 @@ u32 ApplyExplosion(ecs::World& world, physics::PhysicsWorld& physics, const HitR
     events->explosions.push_back(event);
   }
 
-  const f32 min_scale = std::clamp(params.min_scale, 0.0f, 1.0f);
+  const f32 min_scale = rx::Clamp(params.min_scale, 0.0f, 1.0f);
   u32 damaged = 0;
 
   world.Each<Health, scene::Transform>([&](ecs::Entity entity, Health& health,

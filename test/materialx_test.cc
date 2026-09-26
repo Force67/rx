@@ -6,39 +6,37 @@
 // cannot evaluate leaves the slot empty rather than guessing, and that the
 // constant-input path a hand-written standard_surface uses still works.
 
-#include <cmath>
-#include <cstdio>
-#include <filesystem>
-#include <fstream>
-#include <string>
+#include <math.h>
+#include <stdio.h>
 
 #include "asset/materialx.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 
 namespace {
 
 using namespace rx;
 
-namespace fs = std::filesystem;
+namespace fs = rx::fs;
 
 int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "materialx_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "materialx_test: FAIL: %s\n", message);
   ++failures;
 }
 
-fs::path Write(const char* name, const std::string& text) {
-  const fs::path path = fs::temp_directory_path() / name;
-  std::ofstream out(path, std::ios::binary);
-  out << text;
+base::String Write(const char* name, const base::String& text) {
+  const base::String path = fs::Join(fs::TempDirectory(), name);
+  fs::WriteTextFile(path, text);
   return path;
 }
 
 // Filenames resolve against the document, so every expectation is the temp
 // directory plus the name the document wrote.
-std::string Beside(const char* file) {
-  return (fs::temp_directory_path() / file).lexically_normal().string();
+base::String Beside(const char* file) {
+  return fs::LexicallyNormal(fs::Join(fs::TempDirectory(), file));
 }
 
 // What ambientCG ships: MaterialX 1.39, a flat list of nodes at the root, an
@@ -103,10 +101,10 @@ constexpr char kConstantsOnly[] = R"(<?xml version="1.0"?>
 )";
 
 void TestOpenPbrImages() {
-  const fs::path path = Write("rx_openpbr.mtlx", kOpenPbrWithImages);
+  const base::String path = Write("rx_openpbr.mtlx", kOpenPbrWithImages);
   asset::Material material;
   asset::MaterialXMaps maps;
-  Check(asset::LoadMaterialX(path.string(), &material, &maps),
+  Check(asset::LoadMaterialX(path, &material, &maps),
         "an open_pbr_surface document loads (a texture library ships nothing else)");
   Check(maps.base_color == Beside("stone_color.png"), "base colour resolves beside the document");
   // Through the normalmap node, which only converts the encoding the engine
@@ -116,7 +114,7 @@ void TestOpenPbrImages() {
   Check(maps.metallic.empty(), "a constant input leaves its map slot empty");
   // OpenPBR spells it base_metalness; the engine field is the same one
   // standard_surface's metalness fills.
-  Check(std::fabs(material.metallic_factor - 0.25f) < 1e-6f,
+  Check(::fabs(material.metallic_factor - 0.25f) < 1e-6f,
         "the OpenPBR spelling of a constant input maps onto the same field");
   // The shader multiplies each map by its factor. The OpenPBR defaults seeded
   // before parsing (0.8 base colour, 0.3 roughness) must not survive onto a
@@ -124,14 +122,14 @@ void TestOpenPbrImages() {
   Check(material.base_color_factor[0] == 1.0f && material.base_color_factor[2] == 1.0f,
         "a mapped base colour leaves its factor at 1");
   Check(material.roughness_factor == 1.0f, "a mapped roughness leaves its factor at 1");
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 void TestNodegraphAndUnsupportedNode() {
-  const fs::path path = Write("rx_nodegraph.mtlx", kNodegraphStandardSurface);
+  const base::String path = Write("rx_nodegraph.mtlx", kNodegraphStandardSurface);
   asset::Material material;
   asset::MaterialXMaps maps;
-  Check(asset::LoadMaterialX(path.string(), &material, &maps),
+  Check(asset::LoadMaterialX(path, &material, &maps),
         "a nodegraph-style standard_surface document loads");
   Check(maps.base_color == Beside("brick_color.png"),
         "a nodegraph output resolves to the image behind it");
@@ -139,24 +137,24 @@ void TestNodegraphAndUnsupportedNode() {
   // empty (and warning by name) is the honest answer; binding the operand as if
   // it were the result would render a material nobody authored.
   Check(maps.roughness.empty(), "a connection through an unevaluated node binds nothing");
-  Check(std::fabs(material.ior - 1.7f) < 1e-6f, "constants beside a connection still load");
-  fs::remove(path);
+  Check(::fabs(material.ior - 1.7f) < 1e-6f, "constants beside a connection still load");
+  fs::Remove(path);
 }
 
 void TestConstantsStillLoad() {
-  const fs::path path = Write("rx_constants.mtlx", kConstantsOnly);
+  const base::String path = Write("rx_constants.mtlx", kConstantsOnly);
   asset::Material material;
-  Check(asset::LoadMaterialX(path.string(), &material, nullptr),
+  Check(asset::LoadMaterialX(path, &material, nullptr),
         "a constants-only document loads with no maps requested");
   // base is a weight on base_color, not a field of its own.
-  Check(std::fabs(material.base_color_factor[0] - 0.1f) < 1e-6f &&
-            std::fabs(material.base_color_factor[2] - 0.3f) < 1e-6f,
+  Check(::fabs(material.base_color_factor[0] - 0.1f) < 1e-6f &&
+            ::fabs(material.base_color_factor[2] - 0.3f) < 1e-6f,
         "base weight multiplies base_color");
-  Check(std::fabs(material.metallic_factor - 1.0f) < 1e-6f &&
-            std::fabs(material.roughness_factor - 0.3f) < 1e-6f &&
-            std::fabs(material.clearcoat - 0.75f) < 1e-6f,
+  Check(::fabs(material.metallic_factor - 1.0f) < 1e-6f &&
+            ::fabs(material.roughness_factor - 0.3f) < 1e-6f &&
+            ::fabs(material.clearcoat - 0.75f) < 1e-6f,
         "the standard_surface constants map onto the engine's lobes");
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 }  // namespace
@@ -166,7 +164,7 @@ int main() {
   TestNodegraphAndUnsupportedNode();
   TestConstantsStillLoad();
   if (failures == 0) {
-    std::puts("materialx_test: PASS");
+    ::puts("materialx_test: PASS");
     return 0;
   }
   return 1;

@@ -1,8 +1,10 @@
 #include "character/character.h"
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "physics/physics_world.h"
 #include "scene/camera.h"
@@ -21,13 +23,13 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "character_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "character_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-2f) {
-  if (std::abs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "character_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
+  if (::abs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "character_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
 }
@@ -44,7 +46,7 @@ struct Scene {
     physics.AddStaticBox({0, -0.5f, 0}, {60, 0.5f, 60});  // top at y = 0
 
     CharacterShape shape;  // defaults: standing 1.8/0.3, crouched 1.2/0.3
-    const f32 half = std::max(shape.standing_height * 0.5f - shape.standing_radius, 0.01f);
+    const f32 half = rx::Max(shape.standing_height * 0.5f - shape.standing_radius, 0.01f);
     const f32 total_half = half + shape.standing_radius;
     const Vec3 center = feet + Vec3{0, total_half, 0};
     physics::CharacterId id = physics.CreateCharacter(center, shape.standing_radius, half);
@@ -82,7 +84,7 @@ struct Scene {
 };
 
 f32 HorizontalSpeed(const CharacterState& s) {
-  return std::sqrt(s.velocity.x * s.velocity.x + s.velocity.z * s.velocity.z);
+  return ::sqrt(s.velocity.x * s.velocity.x + s.velocity.z * s.velocity.z);
 }
 
 void TestGaitSpeeds() {
@@ -329,7 +331,7 @@ void TestTurnSmoothingConverges() {
 
   // Movement direction with heading yaw ~1.0 rad.
   const f32 theta = 1.0f;
-  s.intent().move = {std::sin(theta), 0, -std::cos(theta)};
+  s.intent().move = {::sin(theta), 0, -::cos(theta)};
   s.intent().gait = CharacterGait::kRun;
 
   f32 prev = s.state().facing_yaw;
@@ -362,7 +364,7 @@ void TestQuickPivotIsFaster() {
     move->pivot_angle = pivot_angle;
     s.Settle();
     const f32 theta = 2.6f;  // ~149 deg from the +? forward: a near reversal
-    s.intent().move = {std::sin(theta), 0, -std::cos(theta)};
+    s.intent().move = {::sin(theta), 0, -::cos(theta)};
     s.intent().gait = CharacterGait::kRun;
     for (int i = 0; i < steps; ++i) {
       StepCharacters(s.world, s.physics, kDt);
@@ -467,7 +469,7 @@ void TestAnchorVerticalSmoothing() {
     SyncCharacterCameraAnchors(s.world);
     const CharacterState& st = s.state();
     const f32 raw_eye = s.transform().position[1] + st.eye_height;
-    max_lag = std::max(max_lag, raw_eye - st.anchor_eye_y);  // smoothed lags a rising step
+    max_lag = rx::Max(max_lag, raw_eye - st.anchor_eye_y);  // smoothed lags a rising step
   }
   Check(s.transform().position[1] > 0.25f, "character climbed the step");
   Check(max_lag > 0.05f, "anchor eye Y lags a sudden step-up (glide, not pop)");
@@ -491,7 +493,7 @@ void TestLandingDip() {
   bool landed = false;
   for (int i = 0; i < 400; ++i) {
     s.Step(1);
-    peak_dip = std::max(peak_dip, s.state().landing_dip);
+    peak_dip = rx::Max(peak_dip, s.state().landing_dip);
     if (s.state().grounded && i > 2) {
       landed = true;
       break;
@@ -583,9 +585,9 @@ int main() {
   TestViewModeToggleTransition();
 
   if (failures == 0) {
-    std::printf("character_test: all checks passed\n");
+    ::printf("character_test: all checks passed\n");
     return 0;
   }
-  std::fprintf(stderr, "character_test: %d checks failed\n", failures);
+  ::fprintf(stderr, "character_test: %d checks failed\n", failures);
   return 1;
 }
