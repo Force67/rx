@@ -115,6 +115,20 @@ class MaterialSystem {
     f32 hair0[4] = {0.06f, 0.10f, 0.20f, 0.3f};  // xyz sigma_a, w beta_m
     f32 hair1[4] = {0.3f, 0.0349066f, 1.55f, 1.0f};  // beta_n, alpha, eta, scatter scale
     f32 hair2[4] = {6.0f, 5.0f, 1.0f, 0};  // colour ref depth, assumed depth, colour-from-albedo, unused
+    // OpenPBR Surface lobes, appended last so no existing offset moves. Defaults are
+    // the neutral ones: white openpbr_specular_color reduces the F82-tint metal Fresnel
+    // to plain Schlick and leaves the dielectric untinted, white coat_color is a
+    // clear coat, zero base_diffuse_roughness keeps the Lambert diffuse path,
+    // and zero coat_darkening disables the darkening compensation. See
+    // asset/material.h and docs/OPENPBR.md.
+    f32 openpbr_specular_color[3] = {1, 1, 1};
+    f32 specular_weight = 1.0f;
+    f32 coat_color[3] = {1, 1, 1};
+    f32 coat_ior = 1.5f;
+    f32 base_diffuse_roughness = 0;
+    f32 coat_darkening = 0;
+    f32 thin_film_ior = 1.3f;
+    f32 openpbr_pad = 0;
   };
   static constexpr u32 kFlagAlphaMask = 1u << 0;
   static constexpr u32 kFlagHasNormalMap = 1u << 1;
@@ -292,7 +306,7 @@ class MaterialSystem {
   // 256 bytes when the skin sss rows landed: every write then spilled 16 bytes
   // into the next material's slot and the last slot of each pool ran off the end
   // of the mapped buffer (VUID-VkDescriptorBufferInfo-range-00342).
-  static constexpr u32 kParamStride = 512;
+  static constexpr u32 kParamStride = 768;
   static_assert(sizeof(Params) <= kParamStride,
                 "kParamStride must cover sizeof(Params); bump it by 256");
   // Streaming tuning. Tail = the always-resident low mips (top mip at most

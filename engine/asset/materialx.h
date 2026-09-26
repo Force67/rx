@@ -37,6 +37,12 @@ struct MaterialXMaps {
 // dropped every map. A connection this build cannot follow is warned about by
 // name rather than dropped in silence.
 //
+// An open_pbr_surface is read as OpenPBR, not as standard_surface under other
+// names: the spec's defaults are seeded first (they differ from the engine's
+// glTF ones), thin_film_thickness is micrometres rather than nanometres, and
+// the anisotropy parametrization is converted. An input that resolves to a map
+// leaves its factor at 1, since the shader multiplies the two.
+//
 // False on a read/parse error or a document with no surface shader; `out` keeps
 // its defaults for whatever the document omits.
 RX_ASSET_EXPORT bool LoadMaterialX(const std::string& path, Material* out,

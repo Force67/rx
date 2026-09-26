@@ -634,6 +634,13 @@ void MaterialSystem::BuildParams(const asset::Material& material, u64 id_salt, P
   params.iridescence = material.iridescence;
   params.iridescence_thickness = material.iridescence_thickness;
   params.transmission = material.transmission;
+  std::memcpy(params.openpbr_specular_color, material.openpbr_specular_color, sizeof(f32) * 3);
+  params.specular_weight = material.specular_weight;
+  std::memcpy(params.coat_color, material.coat_color, sizeof(f32) * 3);
+  params.coat_ior = material.coat_ior;
+  params.base_diffuse_roughness = material.base_diffuse_roughness;
+  params.coat_darkening = material.coat_darkening;
+  params.thin_film_ior = material.thin_film_ior;
   params.uv_scroll[0] = material.uv_scroll_u;
   params.uv_scroll[1] = material.uv_scroll_v;
   params.emissive_pulse[0] = material.emissive_pulse[0];

@@ -15,7 +15,7 @@ place of the game.
 * [Authoring scenes](docs/AUTHORING.md): the `.rxscene` text format, `--dump-schema`, `--validate`, `--shot`
 * [Character rendering](docs/CHARACTER_RENDERING.md)
 * [Hair](docs/HAIR.md)
-* [Slang in the shader pipeline](docs/SLANG.md), [OpenUSD loading](docs/USD.md)
+* [Slang in the shader pipeline](docs/SLANG.md), [OpenUSD loading](docs/USD.md), [OpenPBR Surface](docs/OPENPBR.md)
 
 ## Quick start (Linux)
 

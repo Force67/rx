@@ -118,6 +118,12 @@ void TestOpenPbrImages() {
   // standard_surface's metalness fills.
   Check(std::fabs(material.metallic_factor - 0.25f) < 1e-6f,
         "the OpenPBR spelling of a constant input maps onto the same field");
+  // The shader multiplies each map by its factor. The OpenPBR defaults seeded
+  // before parsing (0.8 base colour, 0.3 roughness) must not survive onto a
+  // mapped input, or every texture set renders darker and glossier than shipped.
+  Check(material.base_color_factor[0] == 1.0f && material.base_color_factor[2] == 1.0f,
+        "a mapped base colour leaves its factor at 1");
+  Check(material.roughness_factor == 1.0f, "a mapped roughness leaves its factor at 1");
   fs::remove(path);
 }
 

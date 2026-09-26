@@ -240,11 +240,20 @@ bool LoadMaterialX(const std::string& path, Material* out, MaterialXMaps* maps) 
     return false;
   }
 
+  // The alias table only unifies spelling. OpenPBR also differs in defaults,
+  // units and parametrization, and taking the glTF-derived engine value for an
+  // input the document leaves unauthored would shade something nobody wrote.
+  const bool open_pbr = surface->category == "open_pbr_surface";
+  if (open_pbr) ApplyOpenPbrDefaults(out);
+
   // Surface inputs that are not 1:1 engine fields get combined below.
   f32 base_weight = 1.0f;
   f32 sheen_weight = 0.0f, sheen_color[3] = {1, 1, 1};
   f32 emission_weight = 0.0f, emission_color[3] = {1, 1, 1};
-  f32 thin_film_thickness = 0.0f;
+  // standard_surface: nanometres, 0 = no film. OpenPBR: micrometres, weighted
+  // by thin_film_weight, with a spec default of 0.5.
+  f32 thin_film_thickness = open_pbr ? 0.5f : 0.0f;
+  f32 opacity = 1.0f;
 
   for (const Input& input : surface->inputs) {
     const std::string name = Canonical(input.name);
@@ -263,6 +272,16 @@ bool LoadMaterialX(const std::string& path, Material* out, MaterialXMaps* maps) 
                 "for it; that map is DROPPED", path, input.name, image);
       } else if (maps) {
         maps->*slot = ResolveAgainstDocument(path, image);
+        // The shader multiplies a map by its factor, so the map has to carry
+        // the value alone. Left at the document default, an OpenPBR base
+        // colour map renders at 0.8x and a metalness map at 0x.
+        if (name == "base_color") {
+          for (int i = 0; i < 3; ++i) out->base_color_factor[i] = 1.0f;
+        } else if (name == "specular_roughness") {
+          out->roughness_factor = 1.0f;
+        } else if (name == "metalness") {
+          out->metallic_factor = 1.0f;
+        }
       }
       continue;
     }
@@ -301,6 +320,28 @@ bool LoadMaterialX(const std::string& path, Material* out, MaterialXMaps* maps) 
       ParseFloats(input.value, emission_color, 3);
     } else if (name == "thin_film_thickness") {
       ParseFloats(input.value, &thin_film_thickness, 1);
+    } else if (open_pbr) {
+      // Inputs only OpenPBR has, or where standard_surface's input of the same
+      // name means something else.
+      if (name == "base_diffuse_roughness") {
+        ParseFloats(input.value, &out->base_diffuse_roughness, 1);
+      } else if (name == "specular_weight") {
+        ParseFloats(input.value, &out->specular_weight, 1);
+      } else if (name == "specular_color") {
+        ParseFloats(input.value, out->openpbr_specular_color, 3);
+      } else if (name == "coat_color") {
+        ParseFloats(input.value, out->coat_color, 3);
+      } else if (name == "coat_ior") {
+        ParseFloats(input.value, &out->coat_ior, 1);
+      } else if (name == "coat_darkening") {
+        ParseFloats(input.value, &out->coat_darkening, 1);
+      } else if (name == "thin_film_weight") {
+        ParseFloats(input.value, &out->iridescence, 1);
+      } else if (name == "thin_film_ior") {
+        ParseFloats(input.value, &out->thin_film_ior, 1);
+      } else if (name == "geometry_opacity") {
+        ParseFloats(input.value, &opacity, 1);
+      }
     }
   }
 
@@ -309,11 +350,17 @@ bool LoadMaterialX(const std::string& path, Material* out, MaterialXMaps* maps) 
     out->sheen_color[i] = sheen_color[i] * sheen_weight;
     out->emissive_factor[i] = emission_color[i] * emission_weight;
   }
-  if (thin_film_thickness > 0.0f) {
+  if (open_pbr) {
+    out->iridescence_thickness = thin_film_thickness * 1000.0f;
+    out->anisotropy = OpenPbrAnisotropyToEngine(out->anisotropy);
+    out->base_color_factor[3] = opacity;
+  } else if (thin_film_thickness > 0.0f) {
     out->iridescence = 1.0f;
     out->iridescence_thickness = thin_film_thickness;
   }
-  if (out->transmission > 0.0f) out->alpha_mode = AlphaMode::kBlend;
+  if (out->transmission > 0.0f || out->base_color_factor[3] < 1.0f) {
+    out->alpha_mode = AlphaMode::kBlend;
+  }
   RX_INFO("materialx: loaded <{}> from {}", surface->category, path);
   return true;
 }
