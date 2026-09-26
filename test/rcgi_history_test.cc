@@ -1,6 +1,6 @@
 #include "render/gi/rcgi_history.h"
 
-#include <cstdio>
+#include <stdio.h>
 
 using namespace rx;
 using namespace rx::render;
@@ -11,7 +11,7 @@ int failures = 0;
 #define CHECK(condition)                                                        \
   do {                                                                          \
     if (!(condition)) {                                                         \
-      std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #condition);          \
+      ::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #condition);          \
       ++failures;                                                               \
     }                                                                           \
   } while (0)
@@ -68,6 +68,6 @@ int main() {
   dormant_b.interior_ambient = {0, 1, 0};
   CHECK(!ShouldInvalidateRcgiHistory(dormant_a, dormant_b));
 
-  if (failures == 0) std::printf("rcgi_history_test: all checks passed\n");
+  if (failures == 0) ::printf("rcgi_history_test: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

@@ -1,11 +1,11 @@
 #ifndef RX_NET_REPLICATION_H_
 #define RX_NET_REPLICATION_H_
 
-#include <functional>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
+#include "base/functional/function.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "ecs/world.h"
@@ -58,10 +58,10 @@ RX_NET_EXPORT void TickInterpolation(ecs::World& world, f32 dt);
 struct ReplicationHooks {
   // Server capture: the tag stored for an entity (0 = none), e.g. a game
   // packs its form/record id here.
-  std::function<u64(ecs::World&, ecs::Entity)> capture_user_tag;
+  base::Function<u64(ecs::World&, ecs::Entity)> capture_user_tag;
   // Client apply: called once when a replica spawns with a non-zero tag, so
   // the game attaches whatever component the tag denotes.
-  std::function<void(ecs::World&, ecs::Entity, u64 user_tag)> on_replica_spawned;
+  base::Function<void(ecs::World&, ecs::Entity, u64 user_tag)> on_replica_spawned;
 };
 
 // Set of net ids relevant to one peer. Bubble membership feeds this; a

@@ -1,9 +1,9 @@
 #ifndef RX_AUTHORING_COMMAND_ENDPOINT_H_
 #define RX_AUTHORING_COMMAND_ENDPOINT_H_
 
-#include <string>
-#include <vector>
 
+#include "base/containers/vector.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -34,7 +34,7 @@ class RX_AUTHORING_EXPORT CommandEndpoint {
   // Binds and listens on `path`, replacing a stale socket file left by a crashed
   // run. False + *error on any failure (a path in a missing directory, a path
   // already served by a live process, an unsupported platform).
-  bool Start(const std::string& path, std::string* error);
+  bool Start(const base::String& path, base::String* error);
 
   // Accepts new connections and serves every complete frame that has arrived,
   // then returns. Nonblocking: a caller mid-frame is left buffered for the next
@@ -51,9 +51,9 @@ class RX_AUTHORING_EXPORT CommandEndpoint {
   bool Serve(int index, CommandBridge& bridge);
 
   int listener_ = -1;
-  std::string path_;
-  std::vector<int> clients_;
-  std::vector<std::vector<u8>> inbox_;  // per client, parallel to clients_
+  base::String path_;
+  base::Vector<int> clients_;
+  base::Vector<base::Vector<u8>> inbox_;  // per client, parallel to clients_
 };
 
 }  // namespace rx::authoring

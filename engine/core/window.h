@@ -1,11 +1,12 @@
 #ifndef RX_CORE_WINDOW_H_
 #define RX_CORE_WINDOW_H_
 
-#include <functional>
-#include <memory>
-#include <string>
-#include <vector>
 
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/input.h"
 #include "core/types.h"
@@ -17,7 +18,7 @@ struct ANativeWindow;
 namespace rx {
 
 struct WindowDesc {
-  std::string title = "rx";
+  base::String title = "rx";
   u32 width = 1920;
   u32 height = 1080;
   bool fullscreen = false;
@@ -117,24 +118,24 @@ class RX_CORE_EXPORT Window {
 
   // Called for every native event before the window handles it. With the
   // SDL3 backend the pointer is an SDL_Event. ImGui hooks in here.
-  void set_event_hook(std::function<void(const void* native_event)> hook) {
-    event_hook_ = std::move(hook);
+  void set_event_hook(base::Function<void(const void* native_event)> hook) {
+    event_hook_ = base::move(hook);
   }
 
   // Vulkan glue. Backends that can present return the instance extensions
   // they need and write a VkSurfaceKHR through the opaque out pointer.
   // Headless windows return nothing, which tells the renderer to stay off.
-  virtual std::vector<const char*> vulkan_instance_extensions() const { return {}; }
+  virtual base::Vector<const char*> vulkan_instance_extensions() const { return {}; }
   virtual bool CreateVulkanSurface(void* vk_instance, void* out_vk_surface) { return false; }
 
   // Returns a platform window, or a headless stub when none is available.
-  static std::unique_ptr<Window> Create(const WindowDesc& desc);
+  static base::UniquePointer<Window> Create(const WindowDesc& desc);
 
  protected:
   InputState input_;
   GamepadState gamepad_;
   TouchState touch_;
-  std::function<void(const void*)> event_hook_;
+  base::Function<void(const void*)> event_hook_;
 };
 
 #if defined(__ANDROID__)
@@ -151,7 +152,7 @@ class AndroidWindowBase : public Window {
   virtual void SetNativeWindow(::ANativeWindow* window) = 0;
 };
 
-std::unique_ptr<AndroidWindowBase> CreateAndroidWindow(::ANativeWindow* window);
+base::UniquePointer<AndroidWindowBase> CreateAndroidWindow(::ANativeWindow* window);
 #endif
 
 }  // namespace rx

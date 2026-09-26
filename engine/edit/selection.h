@@ -1,9 +1,9 @@
 #ifndef RX_EDIT_SELECTION_H_
 #define RX_EDIT_SELECTION_H_
 
-#include <span>
-#include <vector>
 
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
 #include "core/export.h"
 #include "ecs/entity.h"
 
@@ -25,12 +25,12 @@ class RX_EDIT_EXPORT Selection {
   bool Contains(ecs::Entity entity) const;
 
   ecs::Entity primary() const { return primary_; }
-  std::span<const ecs::Entity> entities() const { return entities_; }
+  base::Span<const ecs::Entity> entities() const { return entities_; }
   bool empty() const { return entities_.empty(); }
   size_t size() const { return entities_.size(); }
 
  private:
-  std::vector<ecs::Entity> entities_;
+  base::Vector<ecs::Entity> entities_;
   ecs::Entity primary_{};
 };
 

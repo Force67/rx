@@ -1,18 +1,20 @@
 #include "render/util/imgui_renderer.h"
 
-#include <algorithm>
-#include <cstddef>
-#include <cstring>
-#include <utility>
+#include <stddef.h>
+#include <string.h>
 
 #include <imgui.h>
 
+#include "base/algorithm.h"
 #include "core/log.h"
 #include "render/rhi/bindings.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/pipeline.h"
 
 // Build-embedded imgui shaders (engine/render/shaders/util/imgui.{vs,ps}.hlsl).
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "core/scalar.h"
 #include "shaders/imgui_vs_hlsl.h"
 #include "shaders/imgui_ps_hlsl.h"
 
@@ -64,7 +66,7 @@ bool ImGuiRenderer::Initialize(Device& device, Format target_format) {
       {.location = 1, .format = Format::kRG32Float, .offset = offsetof(ImDrawVert, uv)});
   vb.attributes.push_back(
       {.location = 2, .format = Format::kRGBA8Unorm, .offset = offsetof(ImDrawVert, col)});
-  pd.vertex_buffers.push_back(std::move(vb));
+  pd.vertex_buffers.push_back(base::move(vb));
 
   pd.color_formats.push_back(target_format);
   // Premultiplied, not straight alpha: the pixel stage resolves the widget tint
@@ -78,7 +80,7 @@ bool ImGuiRenderer::Initialize(Device& device, Format target_format) {
   set0.stages = kShaderStageFragment;
   set0.slots.push_back({.binding = 0, .type = BindingType::kCombinedTextureSampler});
   set0.slots.push_back({.binding = 1, .type = BindingType::kCombinedTextureSampler});
-  pd.sets.push_back(std::move(set0));
+  pd.sets.push_back(base::move(set0));
 
   pd.push_constant_size = PushSize<ImGuiPush>();
   pd.debug_name = "imgui";
@@ -104,7 +106,7 @@ void ImGuiRenderer::DestroyTexture(ImTextureData* tex) {
   tex->SetTexID(ImTextureID_Invalid);
   tex->BackendUserData = nullptr;
   tex->SetStatus(ImTextureStatus_Destroyed);
-  textures_.erase(std::remove(textures_.begin(), textures_.end(), tex), textures_.end());
+  base::EraseIf(textures_, [tex](ImTextureData* t) { return t == tex; });
 }
 
 void ImGuiRenderer::UpdateTexture(ImTextureData* tex) {
@@ -138,13 +140,13 @@ void ImGuiRenderer::UpdateTexture(ImTextureData* tex) {
   // simple and correct - imgui only issues updates when glyphs are added.
   const u64 size = static_cast<u64>(tex->Width) * tex->Height * 4;
   GpuBuffer staging = device_->CreateBuffer(size, kBufferUsageTransferSrc, true);
-  std::memcpy(staging.mapped, tex->GetPixels(), size);
+  base::MemCopy(staging.mapped, tex->GetPixels(), size);
   device_->ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(backend->image,
                            create ? ResourceState::kUndefined : ResourceState::kShaderReadFragment,
                            ResourceState::kCopyDst));
     BufferTextureCopy region{};  // whole mip 0 at the origin
-    cmd.CopyBufferToTexture(staging, backend->image, {&region, 1});
+    cmd.CopyBufferToTexture(staging, backend->image, base::Span(&region, 1));
     cmd.Barrier(Transition(backend->image, ResourceState::kCopyDst,
                            ResourceState::kShaderReadFragment));
   });
@@ -157,7 +159,8 @@ void ImGuiRenderer::Render(ImDrawData* draw_data, CommandList& cmd) {
 
   // One backdrop per Render, so a frame that sets none cannot resample the
   // previous frame's blur texture (a render-graph transient, long recycled).
-  const TextureView backdrop = std::exchange(backdrop_, TextureView{});
+  const TextureView backdrop = backdrop_;
+  backdrop_ = TextureView{};
   const SamplerHandle backdrop_sampler = backdrop_sampler_ ? backdrop_sampler_ : sampler_;
 
   // Service texture create/update/destroy requests before drawing.
@@ -178,19 +181,19 @@ void ImGuiRenderer::Render(ImDrawData* draw_data, CommandList& cmd) {
   const u64 idx_size = static_cast<u64>(draw_data->TotalIdxCount) * sizeof(ImDrawIdx);
   if (!rb.vertices || rb.vertices.size < vtx_size) {
     if (rb.vertices) device_->DestroyBufferDeferred(rb.vertices);
-    rb.vertices = device_->CreateBuffer(std::max<u64>(vtx_size, 1), kBufferUsageVertex, true);
+    rb.vertices = device_->CreateBuffer(rx::Max<u64>(vtx_size, 1), kBufferUsageVertex, true);
   }
   if (!rb.indices || rb.indices.size < idx_size) {
     if (rb.indices) device_->DestroyBufferDeferred(rb.indices);
-    rb.indices = device_->CreateBuffer(std::max<u64>(idx_size, 1), kBufferUsageIndex, true);
+    rb.indices = device_->CreateBuffer(rx::Max<u64>(idx_size, 1), kBufferUsageIndex, true);
   }
   if (!rb.vertices.mapped || !rb.indices.mapped) return;
 
   auto* vtx_dst = static_cast<ImDrawVert*>(rb.vertices.mapped);
   auto* idx_dst = static_cast<ImDrawIdx*>(rb.indices.mapped);
   for (const ImDrawList* list : draw_data->CmdLists) {
-    std::memcpy(vtx_dst, list->VtxBuffer.Data, list->VtxBuffer.Size * sizeof(ImDrawVert));
-    std::memcpy(idx_dst, list->IdxBuffer.Data, list->IdxBuffer.Size * sizeof(ImDrawIdx));
+    base::MemCopy(vtx_dst, list->VtxBuffer.Data, list->VtxBuffer.Size * sizeof(ImDrawVert));
+    base::MemCopy(idx_dst, list->IdxBuffer.Data, list->IdxBuffer.Size * sizeof(ImDrawIdx));
     vtx_dst += list->VtxBuffer.Size;
     idx_dst += list->IdxBuffer.Size;
   }
@@ -225,10 +228,10 @@ void ImGuiRenderer::Render(ImDrawData* draw_data, CommandList& cmd) {
       f32 min_y = (pcmd.ClipRect.y - clip_off.y) * clip_scale.y;
       f32 max_x = (pcmd.ClipRect.z - clip_off.x) * clip_scale.x;
       f32 max_y = (pcmd.ClipRect.w - clip_off.y) * clip_scale.y;
-      min_x = std::max(min_x, 0.0f);
-      min_y = std::max(min_y, 0.0f);
-      max_x = std::min(max_x, static_cast<f32>(fb_width));
-      max_y = std::min(max_y, static_cast<f32>(fb_height));
+      min_x = rx::Max(min_x, 0.0f);
+      min_y = rx::Max(min_y, 0.0f);
+      max_x = rx::Min(max_x, static_cast<f32>(fb_width));
+      max_y = rx::Min(max_y, static_cast<f32>(fb_height));
       if (max_x <= min_x || max_y <= min_y) continue;
       cmd.SetScissor(static_cast<i32>(min_x), static_cast<i32>(min_y),
                      static_cast<u32>(max_x - min_x), static_cast<u32>(max_y - min_y));

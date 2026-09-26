@@ -1,5 +1,6 @@
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "combat/damage.h"
 #include "combat/projectile.h"
@@ -20,13 +21,13 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "combat_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "combat_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-3f) {
-  if (std::abs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "combat_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
+  if (::abs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "combat_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
 }
@@ -609,9 +610,9 @@ int main() {
   TestHitRegistryLifetime();
 
   if (failures == 0) {
-    std::printf("combat_test: all checks passed\n");
+    ::printf("combat_test: all checks passed\n");
     return 0;
   }
-  std::fprintf(stderr, "combat_test: %d checks failed\n", failures);
+  ::fprintf(stderr, "combat_test: %d checks failed\n", failures);
   return 1;
 }

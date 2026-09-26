@@ -1,19 +1,29 @@
 #include "asset/usd_loader.h"
 
-#include <algorithm>
-#include <cctype>
-#include <cmath>
-#include <cstring>
-#include <map>
-#include <string>
+#include <ctype.h>
+#include <math.h>
+#include <string.h>
 
+// tinyusdz speaks std::string, std::vector, std::map and (for composition)
+// std::unique_ptr. Those types appear in this file only where one of its
+// signatures requires them; everything the engine keeps is base.
+#include <map>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "core/file_system.h"
 #include "core/log.h"
 
 #if defined(RX_HAVE_USD)
-#include <filesystem>
-#include <vector>
 
 #include "asset/asset_id.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
+#include "core/format.h"
+#include "core/scalar.h"
 
 #include <asset-resolution.hh>
 #include <composition.hh>
@@ -29,19 +39,19 @@
 
 namespace rx::asset {
 
-bool IsUsdPath(std::string_view path) {
+bool IsUsdPath(base::StringRef path) {
   const size_t dot = path.find_last_of('.');
-  if (dot == std::string_view::npos)
+  if (dot == base::StringRef::npos)
     return false;
-  std::string ext(path.substr(dot));
+  base::String ext(path.substr(dot));
   for (char &c : ext)
-    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
   return ext == ".usd" || ext == ".usda" || ext == ".usdc" || ext == ".usdz";
 }
 
 #if !defined(RX_HAVE_USD)
 
-bool LoadUsdScene(const std::string &path, ImportedScene *,
+bool LoadUsdScene(const base::String &path, ImportedScene *,
                   const UsdLoadOptions &) {
   RX_ERROR("usd {}: this build has no USD support, reconfigure with RX_USD=ON",
            path);
@@ -53,8 +63,8 @@ bool LoadUsdScene(const std::string &path, ImportedScene *,
 namespace {
 namespace tt = tinyusdz::tydra;
 
-AssetId ScopedId(const std::string &path, const char *kind, size_t index) {
-  return MakeAssetId(path + "#" + kind + std::to_string(index));
+AssetId ScopedId(const base::String &path, const char *kind, size_t index) {
+  return MakeAssetId(path + "#" + kind + rx::ToString(index));
 }
 
 // Tydra decodes images into RenderScene::buffers keeping the source channel
@@ -105,7 +115,7 @@ bool ConvertImage(const tt::RenderScene &scene, const tt::TextureImage &image,
       d[3] = 255;
       break;
     default:
-      std::memcpy(d, s, 4);
+      base::MemCopy(d, s, 4);
       break;
     }
   }
@@ -393,13 +403,13 @@ bool ConvertMesh(const tt::RenderMesh &src,
     vertex.position[0] = src.points[v][0];
     vertex.position[1] = src.points[v][1];
     vertex.position[2] = src.points[v][2];
-    lo = {std::min(lo.x, vertex.position[0]), std::min(lo.y, vertex.position[1]),
-          std::min(lo.z, vertex.position[2])};
-    hi = {std::max(hi.x, vertex.position[0]), std::max(hi.y, vertex.position[1]),
-          std::max(hi.z, vertex.position[2])};
+    lo = {rx::Min(lo.x, vertex.position[0]), rx::Min(lo.y, vertex.position[1]),
+          rx::Min(lo.z, vertex.position[2])};
+    hi = {rx::Max(hi.x, vertex.position[0]), rx::Max(hi.y, vertex.position[1]),
+          rx::Max(hi.z, vertex.position[2])};
 
     if (normals)
-      std::memcpy(vertex.normal, normals + v * 3, 3 * sizeof(f32));
+      base::MemCopy(vertex.normal, normals + v * 3, 3 * sizeof(f32));
     else
       vertex.normal[1] = 1.0f;
 
@@ -410,7 +420,7 @@ bool ConvertMesh(const tt::RenderMesh &src,
     }
 
     if (tangents) {
-      std::memcpy(vertex.tangent, tangents + v * 3, 3 * sizeof(f32));
+      base::MemCopy(vertex.tangent, tangents + v * 3, 3 * sizeof(f32));
       // Handedness the shader needs to rebuild the bitangent: compare the
       // authored binormal against the one the TBN would generate.
       f32 w = 1.0f;
@@ -430,7 +440,7 @@ bool ConvertMesh(const tt::RenderMesh &src,
     if (colors) {
       const f32 alpha = opacities ? opacities[v] : 1.0f;
       const auto quantize = [](f32 c) {
-        return static_cast<u32>(std::clamp(c, 0.0f, 1.0f) * 255.0f + 0.5f);
+        return static_cast<u32>(rx::Clamp(c, 0.0f, 1.0f) * 255.0f + 0.5f);
       };
       vertex.color = quantize(colors[v * 3 + 0]) |
                      (quantize(colors[v * 3 + 1]) << 8) |
@@ -444,7 +454,7 @@ bool ConvertMesh(const tt::RenderMesh &src,
   out->bounds_center[2] = (lo.z + hi.z) * 0.5f;
   const Vec3 extent{hi.x - lo.x, hi.y - lo.y, hi.z - lo.z};
   out->bounds_radius =
-      0.5f * std::sqrt(extent.x * extent.x + extent.y * extent.y +
+      0.5f * ::sqrt(extent.x * extent.x + extent.y * extent.y +
                        extent.z * extent.z);
 
   const auto material_of = [&](int id) -> AssetId {
@@ -473,7 +483,8 @@ bool ConvertMesh(const tt::RenderMesh &src,
     // A materialBind GeomSubset selects faces, not index ranges, so gather each
     // subset's triangles into one contiguous run and give the faces no subset
     // claims a trailing submesh on the mesh-wide material.
-    std::vector<bool> claimed(triangles, false);
+    base::Vector<bool> claimed;
+    claimed.resize(triangles, false);
     for (const auto &[name, subset] : src.material_subsetMap) {
       Submesh submesh;
       submesh.index_offset = static_cast<u32>(lod.indices.size());
@@ -505,7 +516,7 @@ bool ConvertMesh(const tt::RenderMesh &src,
 
   if (lod.submeshes.empty())
     return false;
-  out->lods.push_back(std::move(lod));
+  out->lods.push_back(base::move(lod));
   return true;
 }
 
@@ -528,7 +539,7 @@ ImportedScene::Instance MakeInstance(u32 mesh_index, const Mat4 &world) {
   instance.position = {world.m[12], world.m[13], world.m[14]};
   const auto axis_length = [&](int col) {
     const f32 *c = &world.m[col * 4];
-    return std::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
+    return ::sqrt(c[0] * c[0] + c[1] * c[1] + c[2] * c[2]);
   };
   instance.scale = (axis_length(0) + axis_length(1) + axis_length(2)) / 3.0f;
   const Quat rotation = QuatFromMat4(world);
@@ -587,8 +598,9 @@ bool LoadTextureAsset(const tinyusdz::value::AssetPath &asset_path,
                       const tinyusdz::AssetResolutionResolver &,
                       tt::TextureImage *out, std::vector<u8> *pixels,
                       void *userdata, std::string *, std::string *err) {
-  const auto *base_dir = static_cast<const std::string *>(userdata);
-  const std::string asset = asset_path.GetAssetPath();
+  const auto *base_dir = static_cast<const base::String *>(userdata);
+  const std::string &authored = asset_path.GetAssetPath();
+  const base::String asset(authored.data(), authored.size());
   if (asset.empty()) {
     if (err)
       *err += "empty texture asset path\n";
@@ -598,27 +610,30 @@ bool LoadTextureAsset(const tinyusdz::value::AssetPath &asset_path,
   // Composition rewrites a referenced layer's asset paths to be reachable from
   // the process working directory, so the path usually resolves as authored;
   // one that does not is layer-relative and needs the stage's directory.
-  std::filesystem::path resolved(asset);
-  if (!std::filesystem::exists(resolved) && resolved.is_relative() && base_dir &&
+  base::String resolved = asset;
+  if (!fs::Exists(resolved) && !fs::IsAbsolute(resolved) && base_dir &&
       !base_dir->empty()) {
-    resolved = std::filesystem::path(*base_dir) / asset;
+    resolved = fs::Join(*base_dir, asset);
   }
-  if (!std::filesystem::exists(resolved)) {
+  if (!fs::Exists(resolved)) {
     if (err)
-      *err += "texture not found: " + asset + "\n";
+      *err += "texture not found: " + authored + "\n";
     return false;
   }
 
   int width = 0, height = 0, channels = 0;
   stbi_uc *decoded =
-      stbi_load(resolved.string().c_str(), &width, &height, &channels, 0);
+      stbi_load(resolved.c_str(), &width, &height, &channels, 0);
   if (!decoded) {
-    if (err)
-      *err += "could not decode texture: " + resolved.string() + "\n";
+    if (err) {
+      *err += "could not decode texture: ";
+      *err += resolved.c_str();
+      *err += "\n";
+    }
     return false;
   }
 
-  out->asset_identifier = resolved.string();
+  out->asset_identifier = resolved.c_str();
   out->width = width;
   out->height = height;
   out->channels = channels;
@@ -648,7 +663,7 @@ u32 NormalizeColorSpaceTokens(tinyusdz::PrimSpec &spec) {
     const std::string authored = metas.get_colorSpace().str();
     std::string lowered = authored;
     for (char &c : lowered)
-      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
     if (lowered != authored) {
       metas.set_colorSpace(lowered);
       ++changed;
@@ -661,7 +676,7 @@ u32 NormalizeColorSpaceTokens(tinyusdz::PrimSpec &spec) {
 
 Vec3 TransformDirectionNormalized(const Mat4 &m, const Vec3 &v) {
   Vec3 d = TransformDir(m, v);
-  const f32 len = std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
+  const f32 len = ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z);
   if (len > 1e-8f) {
     d.x /= len;
     d.y /= len;
@@ -674,23 +689,21 @@ Vec3 TransformDirectionNormalized(const Mat4 &m, const Vec3 &v) {
 // declares it, which for a lighting rig kept in a subdirectory is one level
 // below the root stage. Try the authored spelling, then the stage directory,
 // then the stage directory with the leading parent hops folded away.
-std::string ResolveLightTexture(const std::string &asset,
-                                const std::string &base_dir) {
+base::String ResolveLightTexture(base::StringRef asset, base::StringRef base_dir) {
   if (asset.empty())
     return {};
-  namespace fs = std::filesystem;
-  if (fs::exists(asset))
-    return asset;
+  if (fs::Exists(asset))
+    return base::String(asset);
   if (!base_dir.empty()) {
-    const fs::path direct = fs::path(base_dir) / asset;
-    if (fs::exists(direct))
-      return direct.string();
-    std::string trimmed = asset;
-    while (trimmed.rfind("../", 0) == 0)
+    base::String direct = fs::Join(base_dir, asset);
+    if (fs::Exists(direct))
+      return direct;
+    base::StringRef trimmed = asset;
+    while (trimmed.starts_with("../"))
       trimmed = trimmed.substr(3);
-    const fs::path folded = fs::path(base_dir) / trimmed;
-    if (fs::exists(folded))
-      return folded.string();
+    base::String folded = fs::Join(base_dir, trimmed);
+    if (fs::Exists(folded))
+      return folded;
   }
   return {};
 }
@@ -699,7 +712,7 @@ std::string ResolveLightTexture(const std::string &asset,
 // normalized to unit luminance. Rows are weighted by sin(theta) because an
 // equirect image oversamples the poles; without that a bright horizon sun reads
 // as far less of the average than it really is.
-bool AverageEnvmapColor(const std::string &path, f32 out_rgb[3]) {
+bool AverageEnvmapColor(const base::String &path, f32 out_rgb[3]) {
   int width = 0, height = 0, channels = 0;
   f32 *pixels = stbi_loadf(path.c_str(), &width, &height, &channels, 3);
   if (!pixels)
@@ -708,17 +721,17 @@ bool AverageEnvmapColor(const std::string &path, f32 out_rgb[3]) {
   f64 sum[3] = {0, 0, 0};
   f64 weight_total = 0;
   // A few hundred rows is plenty for an average and keeps a 4k map cheap.
-  const int row_step = std::max(1, height / 256);
-  const int col_step = std::max(1, width / 512);
+  const int row_step = rx::Max(1, height / 256);
+  const int col_step = rx::Max(1, width / 512);
   for (int y = 0; y < height; y += row_step) {
     const f64 theta = (static_cast<f64>(y) + 0.5) / height * 3.14159265358979;
-    const f64 weight = std::sin(theta);
+    const f64 weight = ::sin(theta);
     for (int x = 0; x < width; x += col_step) {
       const f32 *p = pixels + (static_cast<size_t>(y) * width + x) * 3;
       // Guard against inf/nan, which show up in the wild in exr-sourced hdr.
       for (int c = 0; c < 3; ++c) {
         const f32 v = p[c];
-        if (std::isfinite(v) && v > 0.0f) sum[c] += weight * v;
+        if (::isfinite(v) && v > 0.0f) sum[c] += weight * v;
       }
       weight_total += weight;
     }
@@ -759,21 +772,22 @@ const char *const kLuxLegacyInputs[] = {
     "shaping:ies:angleScale",              "shaping:ies:normalize",
 };
 
-bool IsLightTypeName(const std::string &type_name) {
+bool IsLightTypeName(base::StringRef type_name) {
   // UsdLuxDomeLight, SphereLight, RectLight, DiskLight, CylinderLight,
   // DistantLight, GeometryLight, PortalLight - all end in "Light".
-  return type_name.size() > 5 &&
-         type_name.compare(type_name.size() - 5, 5, "Light") == 0;
+  return type_name.size() > 5 && type_name.ends_with("Light");
 }
 
 // Renames legacy light attributes and records prims hidden by `visibility`.
 // Visibility is inherited, so an invisible ancestor hides the whole subtree;
 // the Attic keeps a full second lighting rig and a 500-bulb string-light strand
 // switched off exactly this way, and importing them would double-light it.
-u32 NormalizeLuxSchema(tinyusdz::PrimSpec &spec, const std::string &parent_path,
+u32 NormalizeLuxSchema(tinyusdz::PrimSpec &spec, base::StringRef parent_path,
                        bool parent_hidden,
-                       base::Vector<std::string> *hidden_paths) {
-  const std::string path = parent_path + "/" + spec.name();
+                       base::Vector<base::String> *hidden_paths) {
+  base::String path(parent_path);
+  path.append("/");
+  path.append(spec.name().data(), spec.name().size());
 
   bool hidden = parent_hidden;
   if (!hidden) {
@@ -797,7 +811,7 @@ u32 NormalizeLuxSchema(tinyusdz::PrimSpec &spec, const std::string &parent_path,
       if (spec.props().count(modern)) continue; // authored both ways: keep new
       tinyusdz::Property moved = it->second;
       spec.props().erase(it);
-      spec.props().emplace(modern, std::move(moved));
+      spec.props().emplace(modern, base::move(moved));
       ++renamed;
     }
   }
@@ -807,19 +821,18 @@ u32 NormalizeLuxSchema(tinyusdz::PrimSpec &spec, const std::string &parent_path,
   return renamed;
 }
 
-bool CoveredBy(const std::string &abs_path,
-               const base::Vector<std::string> &prefixes) {
-  for (const std::string &prefix : prefixes) {
-    if (abs_path.size() >= prefix.size() &&
-        abs_path.compare(0, prefix.size(), prefix) == 0 &&
+bool CoveredBy(base::StringRef abs_path,
+               const base::Vector<base::String> &prefixes) {
+  for (const base::String &prefix : prefixes) {
+    if (abs_path.starts_with(prefix) &&
         (abs_path.size() == prefix.size() || abs_path[prefix.size()] == '/'))
       return true;
   }
   return false;
 }
 
-bool IsHidden(const std::string &abs_path,
-              const base::Vector<std::string> &hidden_paths,
+bool IsHidden(base::StringRef abs_path,
+              const base::Vector<base::String> &hidden_paths,
               const UsdLoadOptions &options) {
   if (CoveredBy(abs_path, options.hide)) return true;
   if (CoveredBy(abs_path, options.show)) return false;
@@ -828,8 +841,8 @@ bool IsHidden(const std::string &abs_path,
 
 void ConvertLights(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
                    f32 meters_per_unit,
-                   const base::Vector<std::string> &hidden_paths,
-                   const UsdLoadOptions &options, const std::string &base_dir,
+                   const base::Vector<base::String> &hidden_paths,
+                   const UsdLoadOptions &options, base::StringRef base_dir,
                    ImportedScene *out) {
   using Kind = ImportedScene::Light::Kind;
   u32 skipped = 0;
@@ -889,22 +902,22 @@ void ConvertLights(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
       f32 rgb[3] = {3.2406f * X - 1.5372f * Y - 0.4986f * Z,
                     -0.9689f * X + 1.8758f * Y + 0.0415f * Z,
                     0.0557f * X - 0.2040f * Y + 1.0570f * Z};
-      f32 peak = std::max(rgb[0], std::max(rgb[1], rgb[2]));
+      f32 peak = rx::Max(rgb[0], rx::Max(rgb[1], rgb[2]));
       if (peak <= 0.0f) peak = 1.0f;
       // UsdLux multiplies the blackbody colour into `inputs:color`; it does not
       // replace it (see tinyusdz usdLux.cc GetColorTemperatureRGB callers).
       for (int c = 0; c < 3; ++c)
-        light.color[c] *= std::max(0.0f, rgb[c] / peak);
+        light.color[c] *= rx::Max(0.0f, rgb[c] / peak);
     }
 
-    out->lights.push_back(std::move(light));
+    out->lights.push_back(base::move(light));
   }
   if (skipped)
     RX_DEBUG("usd: skipped {} hidden or unsupported light(s)", skipped);
 }
 
 void ConvertCameras(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
-                    const base::Vector<std::string> &hidden_paths,
+                    const base::Vector<base::String> &hidden_paths,
                     const UsdLoadOptions &options, ImportedScene *out) {
   // RenderCamera carries no transform of its own - Tydra keeps it on the node -
   // so pair each camera with the node that addresses it.
@@ -944,7 +957,7 @@ void ConvertCameras(const tt::RenderScene &scene, const Mat4 &stage_to_engine,
     camera.rotation[2] = rotation.z;
     camera.rotation[3] = rotation.w;
     if (src.focalLength > 1e-6f) {
-      camera.yfov = 2.0f * std::atan(0.5f * src.verticalAperture / src.focalLength);
+      camera.yfov = 2.0f * ::atan(0.5f * src.verticalAperture / src.focalLength);
     }
     camera.znear = src.znear;
     camera.zfar = src.zfar;
@@ -1030,12 +1043,12 @@ void ParseRenderSettings(const tinyusdz::Layer &layer,
 // default options and so rejects the parent-relative asset paths below.
 bool ComposeStage(const std::string &path, const std::string &base_dir,
                   tinyusdz::Stage *stage,
-                  base::Vector<std::string> *hidden_paths,
+                  base::Vector<base::String> *hidden_paths,
                   ImportedScene::RenderSettings *render_settings) {
   std::string warn, err;
   tinyusdz::Layer layer;
   if (!tinyusdz::LoadLayerFromFile(path, &layer, &warn, &err)) {
-    RX_ERROR("usd {}: {}", path, err.empty() ? "failed to open layer" : err);
+    RX_ERROR("usd {}: {}", path.c_str(), err.empty() ? "failed to open layer" : err.c_str());
     return false;
   }
 
@@ -1065,10 +1078,10 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
     tinyusdz::Layer composited;
     if (!tinyusdz::CompositeSublayers(resolver, layer, &composited, &warn, &err,
                                       sublayer_options)) {
-      RX_ERROR("usd {}: subLayer composition failed: {}", path, err);
+      RX_ERROR("usd {}: subLayer composition failed: {}", path.c_str(), err.c_str());
       return false;
     }
-    layer = std::move(composited);
+    layer = base::move(composited);
   }
 
   bool settled = false;
@@ -1082,32 +1095,32 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
     if (layer.check_unresolved_references()) {
       pending = true;
       if (!tinyusdz::CompositeReferencesInPlace(
-              resolver, std::make_unique<tinyusdz::Layer>(std::move(layer)),
+              resolver, std::make_unique<tinyusdz::Layer>(base::move(layer)),
               &composited, &warn, &err, reference_options)) {
-        RX_ERROR("usd {}: `references` composition failed: {}", path, err);
+        RX_ERROR("usd {}: `references` composition failed: {}", path.c_str(), err.c_str());
         return false;
       }
-      layer = std::move(composited);
+      layer = base::move(composited);
     }
 
     if (layer.check_unresolved_payload()) {
       pending = true;
       if (!tinyusdz::CompositePayloadInPlace(
-              resolver, std::make_unique<tinyusdz::Layer>(std::move(layer)),
+              resolver, std::make_unique<tinyusdz::Layer>(base::move(layer)),
               &composited, &warn, &err, payload_options)) {
-        RX_ERROR("usd {}: `payload` composition failed: {}", path, err);
+        RX_ERROR("usd {}: `payload` composition failed: {}", path.c_str(), err.c_str());
         return false;
       }
-      layer = std::move(composited);
+      layer = base::move(composited);
     }
 
     if (layer.check_unresolved_inherits()) {
       pending = true;
       if (!tinyusdz::CompositeInherits(layer, &composited, &warn, &err)) {
-        RX_ERROR("usd {}: `inherits` composition failed: {}", path, err);
+        RX_ERROR("usd {}: `inherits` composition failed: {}", path.c_str(), err.c_str());
         return false;
       }
-      layer = std::move(composited);
+      layer = base::move(composited);
     }
 
     if (layer.check_unresolved_variant()) {
@@ -1117,20 +1130,20 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
       // those to resolve rather than binding to an empty placeholder.
       if (!tinyusdz::ShouldDeferVariantComposition(layer)) {
         if (!tinyusdz::CompositeVariant(layer, &composited, &warn, &err)) {
-          RX_ERROR("usd {}: `variantSet` composition failed: {}", path, err);
+          RX_ERROR("usd {}: `variantSet` composition failed: {}", path.c_str(), err.c_str());
           return false;
         }
-        layer = std::move(composited);
+        layer = base::move(composited);
       }
     }
 
     if (layer.check_unresolved_specializes()) {
       pending = true;
       if (!tinyusdz::CompositeSpecializes(layer, &composited, &warn, &err)) {
-        RX_ERROR("usd {}: `specializes` composition failed: {}", path, err);
+        RX_ERROR("usd {}: `specializes` composition failed: {}", path.c_str(), err.c_str());
         return false;
       }
-      layer = std::move(composited);
+      layer = base::move(composited);
     }
 
     settled = !pending;
@@ -1138,7 +1151,7 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
   if (!settled) {
     RX_WARN("usd {}: composition did not settle in {} passes; some arcs are "
             "left unresolved",
-            path, kMaxCompositionPasses);
+            path.c_str(), kMaxCompositionPasses);
   }
   // The layer is fully composed now, so bake the apiSchemas list-ops to
   // explicit form the way `usdcat --flatten` does.
@@ -1148,24 +1161,24 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
   for (auto &[name, spec] : layer.primspecs())
     recased += NormalizeColorSpaceTokens(spec);
   if (recased > 0)
-    RX_DEBUG("usd {}: normalized {} colorSpace token(s)", path, recased);
+    RX_DEBUG("usd {}: normalized {} colorSpace token(s)", path.c_str(), recased);
 
   u32 relux = 0;
   for (auto &[name, spec] : layer.primspecs())
     relux += NormalizeLuxSchema(spec, "", false, hidden_paths);
   if (relux > 0)
     RX_DEBUG("usd {}: moved {} pre-21.02 light attribute(s) into `inputs:`",
-             path, relux);
+             path.c_str(), relux);
 
   if (!warn.empty())
-    RX_WARN("usd {}: {}", path, warn);
+    RX_WARN("usd {}: {}", path.c_str(), warn.c_str());
 
   // Read before LayerToStage: the layer is moved from there.
   ParseRenderSettings(layer, render_settings);
 
-  if (!tinyusdz::LayerToStage(std::move(layer), stage, &warn, &err)) {
+  if (!tinyusdz::LayerToStage(base::move(layer), stage, &warn, &err)) {
     RX_ERROR("usd {}: could not build a stage from the composed layer: {}",
-             path, err);
+             path.c_str(), err.c_str());
     return false;
   }
   return true;
@@ -1173,26 +1186,28 @@ bool ComposeStage(const std::string &path, const std::string &base_dir,
 
 } // namespace
 
-bool LoadUsdScene(const std::string &path, ImportedScene *out,
+bool LoadUsdScene(const base::String &path, ImportedScene *out,
                   const UsdLoadOptions &options) {
   std::string warn, err;
   tinyusdz::Stage stage;
-  base::Vector<std::string> hidden_paths;
-  const std::string base_dir = tinyusdz::io::GetBaseDir(path);
-  const bool is_usdz = tinyusdz::IsUSDZ(path);
+  base::Vector<base::String> hidden_paths;
+  const std::string usd_path(path.data(), path.size());
+  const std::string base_dir = tinyusdz::io::GetBaseDir(usd_path);
+  const base::String texture_base_dir(base_dir.data(), base_dir.size());
+  const bool is_usdz = tinyusdz::IsUSDZ(usd_path);
   // usdz goes through the same path as a loose stage: a package selects its own
   // root layer (first .usdc, else first .usda), and tinyusdz's layer reader
   // picks it the same way its stage reader does. Reading it as a layer is what
   // gives a package the legacy-UsdLux normalization and the visibility pass
   // below - loading it straight to a Stage skips both, so packaged legacy
   // lights reconstruct as defaults and authored-invisible prims stay lit.
-  if (!ComposeStage(path, base_dir, &stage, &hidden_paths,
+  if (!ComposeStage(usd_path, base_dir, &stage, &hidden_paths,
                     &out->render_settings)) {
     return false;
   }
 
   tt::RenderSceneConverterEnv env(stage);
-  env.usd_filename = path;
+  env.usd_filename = usd_path;
   env.mesh_config.triangulate = true;
   // Make every vertex attribute share one index buffer, which is what the
   // engine's vertex format needs; without it uvs and normals stay facevarying.
@@ -1207,14 +1222,14 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
     // resolver, which is the only thing that can see those entries.
     env.material_config.texture_image_loader_function = LoadTextureAsset;
     env.material_config.texture_image_loader_function_userdata =
-        const_cast<std::string *>(&base_dir);
+        const_cast<base::String *>(&texture_base_dir);
   }
 
   tinyusdz::USDZAsset usdz_asset;
   if (is_usdz) {
     // Textures live inside the zip; resolve them through it.
-    if (!tinyusdz::ReadUSDZAssetInfoFromFile(path, &usdz_asset, &warn, &err)) {
-      RX_ERROR("usd {}: unreadable usdz package: {}", path, err);
+    if (!tinyusdz::ReadUSDZAssetInfoFromFile(usd_path, &usdz_asset, &warn, &err)) {
+      RX_ERROR("usd {}: unreadable usdz package: {}", path, err.c_str());
       return false;
     }
     if (!tinyusdz::SetupUSDZAssetResolution(env.asset_resolver, &usdz_asset)) {
@@ -1228,11 +1243,11 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
   tt::RenderScene render_scene;
   tt::RenderSceneConverter converter;
   if (!converter.ConvertToRenderScene(env, &render_scene)) {
-    RX_ERROR("usd {}: {}", path, converter.GetError());
+    RX_ERROR("usd {}: {}", path, converter.GetError().c_str());
     return false;
   }
   if (const std::string convert_warn = converter.GetWarning(); !convert_warn.empty())
-    RX_WARN("usd {}: {}", path, convert_warn);
+    RX_WARN("usd {}: {}", path, convert_warn.c_str());
 
   base::Vector<AssetId> image_ids;
   image_ids.resize(static_cast<u32>(render_scene.images.size()));
@@ -1245,7 +1260,7 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
       continue;
     }
     image_ids[static_cast<u32>(i)] = texture.id;
-    out->textures.push_back(std::move(texture));
+    out->textures.push_back(base::move(texture));
   }
 
   base::Vector<AssetId> material_ids;
@@ -1262,7 +1277,7 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
     ConvertMaterial(render_scene, render_scene.materials[i], image_ids,
                     &material);
     material_ids[static_cast<u32>(i)] = material.id;
-    out->materials.push_back(std::move(material));
+    out->materials.push_back(base::move(material));
   }
 
   // Mesh indices have to stay aligned with RenderScene::meshes because nodes
@@ -1274,9 +1289,9 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
     if (!ConvertMesh(render_scene.meshes[i], material_ids, &mesh)) {
       ++skipped_meshes;
       RX_DEBUG("usd {}: skipped mesh {}", path,
-               render_scene.meshes[i].abs_path);
+               render_scene.meshes[i].abs_path.c_str());
     }
-    out->meshes.push_back(std::move(mesh));
+    out->meshes.push_back(base::move(mesh));
   }
 
   // Normalize the stage's own conventions away: rotate a z-up stage into the
@@ -1312,7 +1327,7 @@ bool LoadUsdScene(const std::string &path, ImportedScene *out,
           "{} lights, {} cameras (upAxis {}, {} m/unit)",
           path, out->meshes.size() - skipped_meshes, out->materials.size(),
           out->textures.size(), out->instances.size(), out->lights.size(),
-          out->cameras.size(), render_scene.meta.upAxis, meters_per_unit);
+          out->cameras.size(), render_scene.meta.upAxis.c_str(), meters_per_unit);
   if (openpbr_shaders)
     RX_INFO("usd {}: {} OpenPBR material(s)", path, openpbr_shaders);
   if (skipped_meshes || undecoded || unsupported_shaders || walk.mirrored) {

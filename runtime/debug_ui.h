@@ -3,10 +3,6 @@
 
 // The overlay records through the engine's RHI imgui render backend
 // (render/util/imgui_renderer.h) - no raw Vulkan, no volk here.
-#include <functional>
-#include <string>
-#include <utility>
-#include <vector>
 
 #include "core/types.h"
 #include "core/window.h"
@@ -14,6 +10,9 @@
 #include "render/core/renderer.h"
 
 #if defined(RX_HAS_IMGUI)
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
 #include "render/util/imgui_renderer.h"
 #endif
 
@@ -54,7 +53,7 @@ class DebugUi {
   // One line of baked-world streaming state for the status bar, refreshed each
   // frame by the viewer. Empty leaves the section out entirely, which is what
   // every run without --world sees.
-  void set_world_status(std::string status) { world_status_ = std::move(status); }
+  void set_world_status(base::String status) { world_status_ = base::move(status); }
 
   // The day/night clock, so the Lighting panel can scrub the time of day and the
   // timescale. Null leaves those controls out.
@@ -100,16 +99,16 @@ class DebugUi {
   bool gpu_timings_forced_ = false;
   bool show_demo_ = false;
   WorldClock* clock_ = nullptr;  // day/night cycle, for the Lighting time controls
-  std::string world_status_;     // --world: one status-bar line, empty when off
+  base::String world_status_;     // --world: one status-bar line, empty when off
   int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
   // Editable .ini render presets (engine/render/presets): the discovered file
   // list (lazy-scanned, rescannable), the combo selection, the save-as name
   // buffer and the last load/save status line.
-  std::vector<std::string> preset_files_;
+  base::Vector<base::String> preset_files_;
   bool preset_files_scanned_ = false;
   int preset_file_choice_ = 0;
   char preset_save_name_[64] = "custom";
-  std::string preset_status_;
+  base::String preset_status_;
 #if defined(RX_HAS_IMGUI)
   render::ImGuiRenderer imgui_renderer_;  // RHI imgui render backend
 #endif

@@ -1,3 +1,4 @@
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "render/rhi/swapchain.h"
@@ -8,15 +9,15 @@ namespace rx::render {
 // build-time property (RX_RHI_*); returning null means "not available
 // on this machine", and Create falls through to the next candidate.
 namespace vk {
-std::unique_ptr<Device> CreateVulkanDevice(const DeviceDesc& desc, Window& window);
-std::unique_ptr<Device> CreateVulkanDeviceOffscreen(const DeviceDesc& desc);
+base::UniquePointer<Device> CreateVulkanDevice(const DeviceDesc& desc, Window& window);
+base::UniquePointer<Device> CreateVulkanDeviceOffscreen(const DeviceDesc& desc);
 }
 namespace d3d12 {
-std::unique_ptr<Device> CreateD3D12Device(const DeviceDesc& desc, Window& window);
-std::unique_ptr<Device> CreateD3D12DeviceOffscreen(const DeviceDesc& desc);
+base::UniquePointer<Device> CreateD3D12Device(const DeviceDesc& desc, Window& window);
+base::UniquePointer<Device> CreateD3D12DeviceOffscreen(const DeviceDesc& desc);
 }
 namespace null {
-std::unique_ptr<Device> CreateNullDevice();
+base::UniquePointer<Device> CreateNullDevice();
 }
 
 const char* BackendName(Backend backend) {
@@ -29,8 +30,8 @@ const char* BackendName(Backend backend) {
   return "?";
 }
 
-std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
-  std::unique_ptr<Device> device;
+base::UniquePointer<Device> Device::Create(const DeviceDesc& desc, Window& window) {
+  base::UniquePointer<Device> device;
   switch (desc.backend) {
     case Backend::kVulkan:
 #if defined(RX_RHI_VULKAN)
@@ -65,8 +66,8 @@ std::unique_ptr<Device> Device::Create(const DeviceDesc& desc, Window& window) {
   return device;
 }
 
-std::unique_ptr<Device> Device::CreateOffscreen(const DeviceDesc& desc) {
-  std::unique_ptr<Device> device;
+base::UniquePointer<Device> Device::CreateOffscreen(const DeviceDesc& desc) {
+  base::UniquePointer<Device> device;
   // Offscreen devices have no surface/swapchain; frames complete through the
   // swapchainless SubmitFrame. kAuto keeps the Vulkan-first order of Create.
   if (desc.backend == Backend::kVulkan || desc.backend == Backend::kAuto) {

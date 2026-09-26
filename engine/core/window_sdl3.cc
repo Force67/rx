@@ -1,13 +1,15 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
-#include <algorithm>
-#include <cstring>
-#include <memory>
+#include <string.h>
 
 #include "core/log.h"
 #include "core/window.h"
 #if defined(RX_HAS_WAYLAND_KDE_HDR)
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
+#include "core/scalar.h"
 #include "core/wayland_kde_hdr.h"
 #endif
 
@@ -133,11 +135,11 @@ class Sdl3Window final : public Window {
     input_.wheel = 0;
     input_.text_len = 0;
     input_.text[0] = '\0';
-    std::memset(input_.pressed, 0, sizeof(input_.pressed));
-    std::memset(input_.repeated, 0, sizeof(input_.repeated));
-    std::memset(input_.mouse_pressed, 0, sizeof(input_.mouse_pressed));
-    std::memset(input_.mouse_released, 0, sizeof(input_.mouse_released));
-    std::memset(gamepad_.pressed, 0, sizeof(gamepad_.pressed));
+    base::MemSet(input_.pressed, 0, sizeof(input_.pressed));
+    base::MemSet(input_.repeated, 0, sizeof(input_.repeated));
+    base::MemSet(input_.mouse_pressed, 0, sizeof(input_.mouse_pressed));
+    base::MemSet(input_.mouse_released, 0, sizeof(input_.mouse_released));
+    base::MemSet(gamepad_.pressed, 0, sizeof(gamepad_.pressed));
     touch_.BeginPump();
 
     // SDL reports pointers in the units the desktop lays the window out in,
@@ -235,7 +237,7 @@ class Sdl3Window final : public Window {
           bool trigger = a == GamepadAxis::kLeftTrigger || a == GamepadAxis::kRightTrigger;
           // Sticks span the full i16 range; triggers run 0..32767.
           f32 v = trigger ? event.gaxis.value / 32767.0f : event.gaxis.value / 32768.0f;
-          gamepad_.axes[static_cast<u8>(a)] = std::clamp(v, -1.0f, 1.0f);
+          gamepad_.axes[static_cast<u8>(a)] = rx::Clamp(v, -1.0f, 1.0f);
           break;
         }
         default:
@@ -293,7 +295,7 @@ class Sdl3Window final : public Window {
 
   void SetRumble(f32 low_freq, f32 high_freq, u32 duration_ms) override {
     if (!pad_) return;
-    auto scale = [](f32 v) { return static_cast<Uint16>(std::clamp(v, 0.0f, 1.0f) * 65535.0f); };
+    auto scale = [](f32 v) { return static_cast<Uint16>(rx::Clamp(v, 0.0f, 1.0f) * 65535.0f); };
     SDL_RumbleGamepad(pad_, scale(low_freq), scale(high_freq), duration_ms);
   }
 
@@ -354,7 +356,7 @@ class Sdl3Window final : public Window {
 
   f32 pixel_density() const override { return SDL_GetWindowPixelDensity(window_); }
 
-  std::vector<const char*> vulkan_instance_extensions() const override {
+  base::Vector<const char*> vulkan_instance_extensions() const override {
     Uint32 count = 0;
     const char* const* extensions = SDL_Vulkan_GetInstanceExtensions(&count);
     if (!extensions) return {};
@@ -423,8 +425,8 @@ class Sdl3Window final : public Window {
     // 0x04 = right trigger, 0x08 = left trigger.
     Uint8 report[48] = {};
     report[0] = static_cast<Uint8>((right ? 0x04 : 0) | (left ? 0x08 : 0));
-    if (right) std::memcpy(&report[10], right_fx, sizeof(right_fx));
-    if (left) std::memcpy(&report[21], left_fx, sizeof(left_fx));
+    if (right) base::MemCopy(&report[10], right_fx, sizeof(right_fx));
+    if (left) base::MemCopy(&report[21], left_fx, sizeof(left_fx));
     SDL_SendGamepadEffect(pad_, report, sizeof(report));
   }
 
@@ -435,13 +437,13 @@ class Sdl3Window final : public Window {
 #if defined(RX_HAS_WAYLAND_KDE_HDR)
   // Lazily created by hdr_enabled() (a const query), hence mutable.
   mutable bool kde_hdr_checked_ = false;
-  mutable std::unique_ptr<KdeOutputHdrMonitor> kde_hdr_;
+  mutable base::UniquePointer<KdeOutputHdrMonitor> kde_hdr_;
 #endif
 };
 
 }  // namespace
 
-std::unique_ptr<Window> CreateSdl3Window(const WindowDesc& desc) {
+base::UniquePointer<Window> CreateSdl3Window(const WindowDesc& desc) {
   // Must be set before the video subsystem starts synthesizing. Off means the
   // panel only feeds Window::touch(), so mouse look cannot be dragged by a
   // thumb resting on the screen.
@@ -472,7 +474,7 @@ std::unique_ptr<Window> CreateSdl3Window(const WindowDesc& desc) {
     // Non-fatal: keyboard/mouse still work, gamepads just won't be seen.
     RX_WARN("sdl gamepad subsystem init failed: {}", SDL_GetError());
   }
-  return std::make_unique<Sdl3Window>(window);
+  return base::MakeUnique<Sdl3Window>(window);
 }
 
 }  // namespace rx

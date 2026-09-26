@@ -9,8 +9,8 @@
 // it before the real frame (Device::SubmitFrameGen); under FIFO the two
 // presents land a vblank apart, which is the whole pacing story.
 
-#include <memory>
 
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "render/rhi/device.h"
 
@@ -54,7 +54,7 @@ class FrameGenerator {
 };
 
 // Returns null when FSR3 is not compiled in or the device is not vulkan.
-std::unique_ptr<FrameGenerator> CreateFrameGenerator(Device& device, const FrameGenDesc& desc);
+base::UniquePointer<FrameGenerator> CreateFrameGenerator(Device& device, const FrameGenDesc& desc);
 
 }  // namespace rx::render
 

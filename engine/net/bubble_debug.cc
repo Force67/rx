@@ -8,6 +8,7 @@
 #include "render/rhi/vulkan_interop.h"
 #include "render/util/shader_util.h"
 
+#include "base/memory/move.h"
 #include "shaders/bubble_wire_ps_hlsl.h"
 #include "shaders/bubble_wire_vs_hlsl.h"
 
@@ -162,7 +163,7 @@ void BubbleVisualizer::Record(const render::SceneHookContext& ctx) {
   VkCommandBuffer cb = render::GetVkCommandBuffer(*ctx.cmd);
   render::ColorAttachment color{.view = ctx.color_view, .load = render::LoadOp::kLoad};
   render::DepthAttachment depth{.view = ctx.depth_view, .load = render::LoadOp::kLoad};
-  ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = {&color, 1}, .depth = &depth});
+  ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&color, 1), .depth = &depth});
   vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_);
 
   BubblePush push{};
@@ -194,7 +195,7 @@ void BubbleVisualizer::Emit(render::FrameView& view,
   bubbles_.clear();
   for (const BubbleState& b : bubbles) bubbles_.push_back(b);
   // Compose with whatever transparent-phase pass the app already installed.
-  auto previous = std::move(view.scene_transparent);
+  auto previous = base::move(view.scene_transparent);
   view.scene_transparent = [this, previous](const render::SceneHookContext& ctx) {
     if (previous) previous(ctx);
     Record(ctx);

@@ -1,10 +1,14 @@
 #include "render/geometry/procedural_grass.h"
 
-#include <bit>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
+#include "base/containers/array.h"
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
+#include "base/numeric_limits.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/procedural_grass_bend_cs_hlsl.h"
 #include "shaders/procedural_grass_generate_cs_hlsl.h"
 #include "shaders/procedural_grass_prepass_ps_hlsl.h"
@@ -56,40 +60,40 @@ bool BuildCandidateRing(const Vec3& camera,
   const f64 spacing = static_cast<f64>(base_spacing) * stride;
   const f64 padded_radius = outer_radius + tile_size * 0.5;
   const u64 requested_side =
-      static_cast<u64>(std::ceil(padded_radius * 2.0 / spacing)) + 1u;
+      static_cast<u64>(::ceil(padded_radius * 2.0 / spacing)) + 1u;
   const u64 requested = requested_side * requested_side;
   const bool capped = requested > budget;
   const u32 cells = capped
-                        ? static_cast<u32>(std::floor(std::sqrt(static_cast<f64>(budget))))
+                        ? static_cast<u32>(::floor(::sqrt(static_cast<f64>(budget))))
                         : static_cast<u32>(requested_side);
   if (cells == 0)
     return false;
 
   const f64 center_x = capped ? camera.x : snapped_x;
   const f64 center_z = capped ? camera.z : snapped_z;
-  const f64 center_cell_x = std::floor(center_x / spacing);
-  const f64 center_cell_z = std::floor(center_z / spacing);
+  const f64 center_cell_x = ::floor(center_x / spacing);
+  const f64 center_cell_z = ::floor(center_z / spacing);
   const f64 min_fine_x =
       (center_cell_x - static_cast<f64>(cells / 2u)) * stride;
   const f64 min_fine_z =
       (center_cell_z - static_cast<f64>(cells / 2u)) * stride;
   const f64 max_fine_x = min_fine_x + static_cast<f64>(cells - 1u) * stride;
   const f64 max_fine_z = min_fine_z + static_cast<f64>(cells - 1u) * stride;
-  if (min_fine_x < std::numeric_limits<i32>::min() ||
-      min_fine_x > std::numeric_limits<i32>::max() ||
-      min_fine_z < std::numeric_limits<i32>::min() ||
-      min_fine_z > std::numeric_limits<i32>::max() ||
-      max_fine_x > std::numeric_limits<i32>::max() ||
-      max_fine_z > std::numeric_limits<i32>::max())
+  if (min_fine_x < base::MinMax<i32>::min() ||
+      min_fine_x > base::MinMax<i32>::max() ||
+      min_fine_z < base::MinMax<i32>::min() ||
+      min_fine_z > base::MinMax<i32>::max() ||
+      max_fine_x > base::MinMax<i32>::max() ||
+      max_fine_z > base::MinMax<i32>::max())
     return false;
 
   f32 actual_outer = outer_radius;
   if (capped) {
     const f32 covered_radius =
-        std::max((static_cast<f32>(cells) * 0.5f - 1.0f) *
+        rx::Max((static_cast<f32>(cells) * 0.5f - 1.0f) *
                      static_cast<f32>(spacing),
                  0.0f);
-    actual_outer = std::min(actual_outer, covered_radius);
+    actual_outer = rx::Min(actual_outer, covered_radius);
   }
   if (actual_outer <= inner_radius)
     return false;
@@ -106,7 +110,7 @@ bool BuildCandidateRing(const Vec3& camera,
 
 bool AllFinite(const f32* values, u32 count) {
   for (u32 i = 0; i < count; ++i) {
-    if (!std::isfinite(values[i]))
+    if (!::isfinite(values[i]))
       return false;
   }
   return true;
@@ -415,7 +419,7 @@ void ProceduralGrass::Destroy(Device& device) {
 }
 
 bool ProceduralGrass::Prepare(const GrassDomain& domain,
-                              std::span<const GrassInteraction> interactions,
+                              base::Span<const GrassInteraction> interactions,
                               const Frame& frame,
                               u32 frame_slot) {
   if (!available() || frame_slot >= kFramesInFlight)
@@ -423,19 +427,19 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   Slot& slot = slots_[frame_slot];
   slot.active = false;
 
-  const u32 type_count = std::min(domain.type_count, kMaxTypes);
+  const u32 type_count = rx::Min(domain.type_count, kMaxTypes);
   const u32 surface_count =
-      domain.surfaces ? std::min(domain.surface_count, kMaxSurfaces) : 0;
+      domain.surfaces ? rx::Min(domain.surface_count, kMaxSurfaces) : 0;
   const bool valid_field =
       domain.samples && domain.sample_width >= 2 && domain.sample_height >= 2 &&
       domain.sample_width <= kMaxFieldDimension &&
-      domain.sample_height <= kMaxFieldDimension && std::isfinite(domain.origin_x) &&
-      std::isfinite(domain.origin_z) && std::isfinite(domain.extent_x) &&
-      std::isfinite(domain.extent_z) && domain.extent_x > 0.0f && domain.extent_z > 0.0f;
+      domain.sample_height <= kMaxFieldDimension && ::isfinite(domain.origin_x) &&
+      ::isfinite(domain.origin_z) && ::isfinite(domain.extent_x) &&
+      ::isfinite(domain.extent_z) && domain.extent_x > 0.0f && domain.extent_z > 0.0f;
   if (type_count == 0 || !domain.types || (!valid_field && surface_count == 0))
     return false;
-  if (!std::isfinite(frame.camera_pos.x) || !std::isfinite(frame.camera_pos.y) ||
-      !std::isfinite(frame.camera_pos.z))
+  if (!::isfinite(frame.camera_pos.x) || !::isfinite(frame.camera_pos.y) ||
+      !::isfinite(frame.camera_pos.z))
     return false;
   if (!AllFinite(frame.view_proj.m, 16) || !AllFinite(frame.prev_view_proj.m, 16))
     return false;
@@ -455,7 +459,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
     for (const f32* values :
          {type.base_color, type.tip_color, type.dimensions, type.shape, type.material}) {
       for (u32 value = 0; value < 4; ++value) {
-        if (!std::isfinite(values[value]))
+        if (!::isfinite(values[value]))
           return false;
       }
     }
@@ -465,7 +469,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
 
   GrassGenerationSettings settings = SanitizeGrassSettings(domain.settings);
   const u32 max_surface_candidates = valid_field ? kMaxCandidates / 4u : kMaxCandidates;
-  const u32 spacing_bits = std::bit_cast<u32>(settings.candidate_spacing);
+  const u32 spacing_bits = rx::BitCast<u32>(settings.candidate_spacing);
   SurfaceUploadState& surface_upload = slot.surface_upload;
   const bool cache_surface_source = domain.surface_revision != 0 && domain.surfaces;
   const bool surface_source_hit =
@@ -490,20 +494,20 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   }
 
   const f64 snapped_x =
-      std::floor(static_cast<f64>(frame.camera_pos.x) / settings.stream_tile_size + 0.5) *
+      ::floor(static_cast<f64>(frame.camera_pos.x) / settings.stream_tile_size + 0.5) *
       settings.stream_tile_size;
   const f64 snapped_z =
-      std::floor(static_cast<f64>(frame.camera_pos.z) / settings.stream_tile_size + 0.5) *
+      ::floor(static_cast<f64>(frame.camera_pos.z) / settings.stream_tile_size + 0.5) *
       settings.stream_tile_size;
-  std::array<CandidateRing, 6> rings{};
+  base::Array<CandidateRing, 6> rings{};
   u32 ring_count = 0;
   u32 terrain_candidates = 0;
   f32 terrain_radius = 0.0f;
   f32 far_edge = 0.0f;
   bool far_active = false;
   if (valid_field) {
-    const f32 lod_start = std::min(settings.density_lod_start, settings.stream_radius);
-    const f32 lod_end = std::min(settings.density_lod_end, settings.stream_radius);
+    const f32 lod_start = rx::Min(settings.density_lod_start, settings.stream_radius);
+    const f32 lod_end = rx::Min(settings.density_lod_end, settings.stream_radius);
     const f32 lod_mid = (lod_start + lod_end) * 0.5f;
     const f32 desired_inner[3] = {0.0f, lod_start, lod_mid};
     const f32 ring_outer[3] = {lod_mid, lod_end, settings.stream_radius};
@@ -511,7 +515,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
     f32 covered_radius = 0.0f;
     for (u32 i = 0; i < 3; ++i) {
       CandidateRing ring;
-      const f32 inner_radius = std::min(desired_inner[i], covered_radius);
+      const f32 inner_radius = rx::Min(desired_inner[i], covered_radius);
       if (!BuildCandidateRing(frame.camera_pos, snapped_x, snapped_z,
                                settings.stream_tile_size,
                                settings.candidate_spacing, inner_radius,
@@ -532,7 +536,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
       const u32 distant_strides[3] = {8u, 16u, 32u};
       for (u32 i = 0; i < 3 && far_edge < settings.far_radius; ++i) {
         CandidateRing ring;
-        const f32 outer = std::min(settings.far_radius, far_edge * 2.0f);
+        const f32 outer = rx::Min(settings.far_radius, far_edge * 2.0f);
         if (!BuildCandidateRing(frame.camera_pos, snapped_x, snapped_z,
                                  settings.stream_tile_size,
                                  settings.candidate_spacing, far_edge * 0.75f,
@@ -562,7 +566,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   if (valid_field && !field_hit) {
     const u64 field_bytes = static_cast<u64>(domain.sample_width) *
                             domain.sample_height * sizeof(GrassFieldSample);
-    std::memcpy(slot.field.mapped, domain.samples, field_bytes);
+    base::MemCopy(slot.field.mapped, domain.samples, field_bytes);
     device_->FlushBuffer(slot.field, 0, field_bytes);
     if (domain.sample_revision != 0) {
       field_upload = {.source = domain.samples,
@@ -584,7 +588,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
                         type_upload.count == type_count;
   if (!type_hit) {
     const u64 type_bytes = static_cast<u64>(type_count) * sizeof(GrassType);
-    std::memcpy(slot.types.mapped, domain.types, type_bytes);
+    base::MemCopy(slot.types.mapped, domain.types, type_bytes);
     device_->FlushBuffer(slot.types, 0, type_bytes);
     if (domain.type_revision != 0) {
       type_upload = {.source = domain.types,
@@ -597,11 +601,11 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   }
 
   const u32 interaction_count =
-      std::min(static_cast<u32>(interactions.size()), kMaxInteractions);
+      rx::Min(static_cast<u32>(interactions.size()), kMaxInteractions);
   if (interaction_count > 0) {
     const u64 interaction_bytes =
         static_cast<u64>(interaction_count) * sizeof(GrassInteraction);
-    std::memcpy(slot.interactions.mapped, interactions.data(), interaction_bytes);
+    base::MemCopy(slot.interactions.mapped, interactions.data(), interaction_bytes);
     device_->FlushBuffer(slot.interactions, 0, interaction_bytes);
   }
 
@@ -617,25 +621,25 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
     auto* gpu_surfaces = static_cast<GpuSurface*>(slot.surfaces.mapped);
     for (u32 i = 0; i < surface_count; ++i) {
       const GrassSurfaceTriangle& src = domain.surfaces[i];
-      if (!std::isfinite(src.density) || src.density <= 0.0f ||
-          !std::isfinite(src.growth) || src.growth <= 0.0f)
+      if (!::isfinite(src.density) || src.density <= 0.0f ||
+          !::isfinite(src.growth) || src.growth <= 0.0f)
         continue;
       u32 count = GrassSurfaceCandidateCount(src, settings.candidate_spacing);
       const u32 remaining = max_surface_candidates - surface_candidates;
-      count = std::min(count, remaining);
+      count = rx::Min(count, remaining);
       if (count == 0)
         continue;
       GpuSurface& dst = gpu_surfaces[copied_surfaces++];
-      std::copy_n(src.p0, 3, dst.p0_density);
-      dst.p0_density[3] = std::clamp(src.density, 0.0f, 1.0f);
-      std::copy_n(src.p1, 3, dst.p1_growth);
-      dst.p1_growth[3] = std::max(src.growth, 0.0f);
-      std::copy_n(src.p2, 3, dst.p2_pad);
+      for (int k = 0; k < 3; ++k) dst.p0_density[k] = src.p0[k];
+      dst.p0_density[3] = rx::Clamp(src.density, 0.0f, 1.0f);
+      for (int k = 0; k < 3; ++k) dst.p1_growth[k] = src.p1[k];
+      dst.p1_growth[3] = rx::Max(src.growth, 0.0f);
+      for (int k = 0; k < 3; ++k) dst.p2_pad[k] = src.p2[k];
       dst.p2_pad[3] = 0.0f;
       dst.meta[0] = surface_candidates;
       dst.meta[1] = count;
       dst.meta[2] = src.surface_id;
-      dst.meta[3] = std::min(src.type, type_count - 1);
+      dst.meta[3] = rx::Min(src.type, type_count - 1);
       surface_candidates += count;
       if (surface_candidates >= max_surface_candidates)
         break;
@@ -665,9 +669,9 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   const f32 bend_extent = settings.stream_radius * 2.0f;
   const f32 bend_texel = bend_extent / static_cast<f32>(kBendResolution);
   const f32 bend_origin_x =
-      std::floor((frame.camera_pos.x - bend_extent * 0.5f) / bend_texel) * bend_texel;
+      ::floor((frame.camera_pos.x - bend_extent * 0.5f) / bend_texel) * bend_texel;
   const f32 bend_origin_z =
-      std::floor((frame.camera_pos.z - bend_extent * 0.5f) / bend_texel) * bend_texel;
+      ::floor((frame.camera_pos.z - bend_extent * 0.5f) / bend_texel) * bend_texel;
   const bool fields_overlap =
       preserve_bend_history && bend_origin_x < bend_origin_[0] + bend_extent_ &&
       bend_origin_x + bend_extent > bend_origin_[0] &&
@@ -677,39 +681,39 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
       preserve_bend_history && bend_history_active_
           ? (frame.time >= bend_last_update_time_
                  ? frame.time - bend_last_update_time_
-                 : std::max(frame.delta_time, 0.0f))
+                 : rx::Max(frame.delta_time, 0.0f))
           : 0.0f;
   f32 bend_max_strength = fields_overlap ? bend_max_strength_ : 0.0f;
   if (settings.bend_recovery_time > 0.0f) {
     bend_max_strength *=
-        std::exp2(-recovery_elapsed / settings.bend_recovery_time);
+        ::exp2(-recovery_elapsed / settings.bend_recovery_time);
   }
-  const f32 bend_height_origin = std::floor(frame.camera_pos.y / 64.0f) * 64.0f;
+  const f32 bend_height_origin = ::floor(frame.camera_pos.y / 64.0f) * 64.0f;
   for (u32 i = 0; i < interaction_count; ++i) {
     const GrassInteraction& interaction = interactions[i];
     if (!AllFinite(interaction.position_radius, 4) ||
         !AllFinite(interaction.direction_strength, 4) ||
         interaction.position_radius[3] <= 0.0f ||
-        std::fabs(interaction.direction_strength[3]) <= 1e-4f)
+        ::fabs(interaction.direction_strength[3]) <= 1e-4f)
       continue;
-    const f32 closest_x = std::clamp(interaction.position_radius[0], bend_origin_x,
+    const f32 closest_x = rx::Clamp(interaction.position_radius[0], bend_origin_x,
                                      bend_origin_x + bend_extent);
-    const f32 closest_z = std::clamp(interaction.position_radius[2], bend_origin_z,
+    const f32 closest_z = rx::Clamp(interaction.position_radius[2], bend_origin_z,
                                      bend_origin_z + bend_extent);
     const f32 dx = interaction.position_radius[0] - closest_x;
     const f32 dz = interaction.position_radius[2] - closest_z;
-    const f32 effective_radius = std::min(
-        std::max(interaction.position_radius[3], bend_texel * 0.75f), bend_extent);
+    const f32 effective_radius = rx::Min(
+        rx::Max(interaction.position_radius[3], bend_texel * 0.75f), bend_extent);
     if (dx * dx + dz * dz > effective_radius * effective_radius)
       continue;
     const f32 strength =
-        std::min(std::fabs(interaction.direction_strength[3]), 2.0f);
+        rx::Min(::fabs(interaction.direction_strength[3]), 2.0f);
     const f32 relative_height = interaction.position_radius[1] - bend_height_origin;
     const f32 radius = effective_radius;
-    if (std::fabs(relative_height) * strength > 60000.0f ||
+    if (::fabs(relative_height) * strength > 60000.0f ||
         radius * strength > 60000.0f)
       continue;
-    bend_max_strength = std::max(bend_max_strength, strength);
+    bend_max_strength = rx::Max(bend_max_strength, strength);
   }
   const bool bend_active = bend_max_strength > 1e-3f;
 
@@ -722,7 +726,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   bend.prev_field[1] = bend_origin_[1];
   bend.prev_field[2] = bend_extent_;
   bend.prev_field[3] = 1.0f / bend_extent_;
-  bend.params[0] = std::max(frame.delta_time, 0.0f);
+  bend.params[0] = rx::Max(frame.delta_time, 0.0f);
   bend.params[1] = recovery_elapsed;
   bend.params[2] = settings.bend_recovery_time;
   bend.params[3] = static_cast<f32>(interaction_count);
@@ -758,7 +762,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   generation_domain.bend_field[1] = bend.field[1];
   generation_domain.bend_field[2] = bend.height[0];
   generation_domain.bend_field[3] = bend_active ? bend.field[3] : 0.0f;
-  std::memcpy(slot.generation_domain.mapped, &generation_domain,
+  base::MemCopy(slot.generation_domain.mapped, &generation_domain,
               sizeof(generation_domain));
 
   GenerationPush common{};
@@ -768,7 +772,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   common.camera_stream[3] = settings.stream_radius;
   common.placement[0] = settings.candidate_spacing;
   common.counts[1] = copied_surfaces;
-  common.counts[2] = std::min(settings.max_blades, kMaxBlades);
+  common.counts[2] = rx::Min(settings.max_blades, kMaxBlades);
   common.counts[3] = kMaxBlades;
   common.geometry_fade[0] = settings.geometry_lod_start;
   common.geometry_fade[1] = settings.geometry_lod_end;
@@ -804,12 +808,12 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
       // there instead of at the stream boundary so the handoff between the
       // detailed and distant tiers has no height seam.
       generation.camera_stream[3] = far_edge;
-      generation.geometry_fade[2] = std::max(
-          far_edge - std::max(far_edge * 0.08f, settings.candidate_spacing), 0.0f);
+      generation.geometry_fade[2] = rx::Max(
+          far_edge - rx::Max(far_edge * 0.08f, settings.candidate_spacing), 0.0f);
       generation.geometry_fade[3] = far_edge;
     } else if (terrain_radius < settings.fade_end) {
       const f32 fade_length = settings.fade_end - settings.fade_start;
-      generation.geometry_fade[2] = std::max(terrain_radius - fade_length, 0.0f);
+      generation.geometry_fade[2] = rx::Max(terrain_radius - fade_length, 0.0f);
       generation.geometry_fade[3] = terrain_radius;
     }
     generation.control[0] = 1;
@@ -823,7 +827,7 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   slot.generation[slot.generation_count++] = finalize;
 
   const DrawCamera draw_camera{frame.view_proj, frame.prev_view_proj};
-  std::memcpy(slot.draw_camera.mapped, &draw_camera, sizeof(draw_camera));
+  base::MemCopy(slot.draw_camera.mapped, &draw_camera, sizeof(draw_camera));
 
   DrawPush draw{};
   draw.camera_time[0] = frame.camera_pos.x;
@@ -841,12 +845,12 @@ bool ProceduralGrass::Prepare(const GrassDomain& domain,
   draw.wind[0] = frame.wind_speed;
   draw.wind[1] = frame.wind_yaw;
   draw.wind[2] = frame.gustiness;
-  draw.wind[3] = std::clamp(frame.delta_time, 0.0f, 0.1f);
+  draw.wind[3] = rx::Clamp(frame.delta_time, 0.0f, 0.1f);
   draw.jitter_lod[0] = frame.jitter[0];
   draw.jitter_lod[1] = frame.jitter[1];
   draw.jitter_lod[2] = settings.geometry_lod_start;
   draw.jitter_lod[3] = settings.geometry_lod_end;
-  draw.control[0] = std::bit_cast<u32>(std::max(frame.pixel_scale, 0.0f));
+  draw.control[0] = rx::BitCast<u32>(rx::Max(frame.pixel_scale, 0.0f));
   draw.control[1] = type_count;
   // control[2] (segment count) and control[3] (arena base) are per-draw; the
   // three tier draws fill them in Draw().
@@ -867,7 +871,7 @@ void ProceduralGrass::AddGeneration(RenderGraph& graph, u32 frame_slot) {
   const GrassSurfaceTriangle* bend_surface_source = slot.bend_surface_source;
   const f32 bend_update_time = slot.bend_update_time;
   const f32 bend_max_strength = slot.bend_max_strength;
-  const std::array<GenerationPush, kMaxGenerationPhases> phases = slot.generation;
+  const base::Array<GenerationPush, kMaxGenerationPhases> phases = slot.generation;
   const u32 phase_count = slot.generation_count;
   graph.AddPass(
       "procedural_grass_generate", [](RenderGraph::PassBuilder&) {},

@@ -12,15 +12,16 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <atomic>
-#include <chrono>
-#include <cstdio>
-#include <cstdlib>
-#include <thread>
-#include <utility>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <base/option.h>
 
+#include "base/atomic.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "http/http.h"
 #include "http/url.h"
 
@@ -31,7 +32,7 @@ int g_failures = 0;
 #define CHECK(cond)                                               \
   do {                                                            \
     if (!(cond)) {                                                \
-      std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                               \
     }                                                             \
   } while (0)
@@ -218,7 +219,7 @@ class CannedServer {
   // what makes the client read a body across several calls: the chunked decoder
   // resumes from a cursor, and only a sliced body exercises that.
   CannedServer(base::String reply, bool reset = false, size_t slice = 0)
-      : reply_(std::move(reply)), reset_(reset), slice_(slice) {
+      : reply_(base::move(reply)), reset_(reset), slice_(slice) {
     listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
     const int on = 1;
     ::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
@@ -231,25 +232,24 @@ class CannedServer {
     socklen_t len = sizeof(addr);
     ::getsockname(listener_, reinterpret_cast<sockaddr*>(&addr), &len);
     port_ = ntohs(addr.sin_port);
-    thread_ = std::thread([this] { Serve(); });
+    thread_ = base::MakeUnique<base::Thread>("canned_server", [this] { Serve(); },
+                                             /*start_now=*/true);
   }
 
   ~CannedServer() {
-    if (thread_.joinable())
-      thread_.join();
+    thread_->Join();
     ::close(listener_);
   }
 
   base::String url(const char* path = "/") const {
     char buffer[64] = {};
-    std::snprintf(buffer, sizeof(buffer), "http://127.0.0.1:%u%s", unsigned(port_), path);
+    ::snprintf(buffer, sizeof(buffer), "http://127.0.0.1:%u%s", unsigned(port_), path);
     return base::String(buffer);
   }
 
   // What the client actually put on the wire, for the injection checks.
   base::String request() {
-    if (thread_.joinable())
-      thread_.join();
+    thread_->Join();
     return request_;
   }
 
@@ -268,7 +268,7 @@ class CannedServer {
       for (size_t at = 0; at < reply_.size(); at += slice_) {
         const size_t left = reply_.size() - at;
         ::send(client, reply_.c_str() + at, left < slice_ ? left : slice_, MSG_NOSIGNAL);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        base::SleepForMilliseconds(1);
       }
     }
     if (reset_) {
@@ -285,7 +285,7 @@ class CannedServer {
   size_t slice_ = 0;
   int listener_ = -1;
   u16 port_ = 0;
-  std::thread thread_;
+  base::UniquePointer<base::Thread> thread_;
   base::String request_;
 };
 
@@ -381,16 +381,14 @@ void TestBodyFraming() {
     http::Request request;
     request.url = server.url();
     request.max_body_bytes = 32u * 1024 * 1024;  // http.h invites raising it
-    const auto began = std::chrono::steady_clock::now();
+    const base::TimeTicks began = base::TimeTicks::Now();
     const http::Response r = http::Fetch(request);
-    const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::steady_clock::now() - began)
-                          .count();
+    const i64 took = (base::TimeTicks::Now() - began).InMilliseconds();
     CHECK_EQ(r.status, u16{200});
     CHECK_EQ(r.body.size(), kChunk * kChunks);
     CHECK(took < 3000);
     if (took >= 3000)
-      std::printf("  chunked 16 MB took %lld ms\n", static_cast<long long>(took));
+      ::printf("  chunked 16 MB took %lld ms\n", static_cast<long long>(took));
   }
   {
     // A chunk that declares 2^64-1 bytes: the guards have to survive the
@@ -464,35 +462,34 @@ class SilentServer {
     socklen_t len = sizeof(addr);
     ::getsockname(listener_, reinterpret_cast<sockaddr*>(&addr), &len);
     port_ = ntohs(addr.sin_port);
-    thread_ = std::thread([this] {
+    thread_ = base::MakeUnique<base::Thread>("silent_server", [this] {
       const int client = ::accept(listener_, nullptr, nullptr);
       if (client < 0)
         return;
       // Hold the connection open, saying nothing, until the test is done.
       while (!done_.load())
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        base::SleepForMilliseconds(10);
       ::close(client);
-    });
+    }, /*start_now=*/true);
   }
 
   ~SilentServer() {
     done_ = true;
-    if (thread_.joinable())
-      thread_.join();
+    thread_->Join();
     ::close(listener_);
   }
 
   base::String url() const {
     char buffer[64] = {};
-    std::snprintf(buffer, sizeof(buffer), "http://127.0.0.1:%u/", unsigned(port_));
+    ::snprintf(buffer, sizeof(buffer), "http://127.0.0.1:%u/", unsigned(port_));
     return base::String(buffer);
   }
 
  private:
   int listener_ = -1;
   u16 port_ = 0;
-  std::atomic<bool> done_{false};
-  std::thread thread_;
+  base::Atomic<bool> done_{false};
+  base::UniquePointer<base::Thread> thread_;
 };
 
 void TestDeadline() {
@@ -502,21 +499,19 @@ void TestDeadline() {
   request.timeout_ms = 30'000;      // the idle timeout alone would hold for 30 s
   request.total_timeout_ms = 700;   // the deadline is what ends this
 
-  const auto began = std::chrono::steady_clock::now();
+  const base::TimeTicks began = base::TimeTicks::Now();
   const http::Response r = http::Fetch(request);
-  const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - began)
-                        .count();
+  const i64 took = (base::TimeTicks::Now() - began).InMilliseconds();
   CHECK_EQ(r.status, u16{0});
   CHECK(!r.cancelled);  // it ran out of time, nobody cancelled it
   CHECK(took >= 600 && took < 3000);
   if (took >= 3000)
-    std::printf("  deadline took %lld ms\n", static_cast<long long>(took));
+    ::printf("  deadline took %lld ms\n", static_cast<long long>(took));
 }
 
 void TestCancel() {
   SilentServer server;
-  std::atomic<bool> cancel{false};
+  base::Atomic<bool> cancel{false};
 
   http::Request request;
   request.url = server.url();
@@ -525,27 +520,25 @@ void TestCancel() {
   request.cancel = &cancel;
 
   // What a shutdown does: raise the flag on another thread and join.
-  std::thread raiser([&cancel] {
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  base::Thread raiser("raiser", [&cancel] {
+    base::SleepForMilliseconds(300);
     cancel = true;
-  });
+  }, /*start_now=*/true);
 
-  const auto began = std::chrono::steady_clock::now();
+  const base::TimeTicks began = base::TimeTicks::Now();
   const http::Response r = http::Fetch(request);
-  const auto took = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - began)
-                        .count();
-  raiser.join();
+  const i64 took = (base::TimeTicks::Now() - began).InMilliseconds();
+  raiser.Join();
 
   CHECK_EQ(r.status, u16{0});
   CHECK(r.cancelled);  // the caller's doing, not the peer's: do not log a fault
   // Within a wake tick or so of the flag going up, not 30 seconds later.
   CHECK(took < 2000);
   if (took >= 2000)
-    std::printf("  cancel took %lld ms\n", static_cast<long long>(took));
+    ::printf("  cancel took %lld ms\n", static_cast<long long>(took));
 
   // A flag already raised means the call never opens a socket at all.
-  std::atomic<bool> already{true};
+  base::Atomic<bool> already{true};
   http::Request second = request;
   second.cancel = &already;
   const http::Response none = http::Fetch(second);
@@ -555,25 +548,25 @@ void TestCancel() {
 
 // Off by default: reaches the network, so it only runs when asked.
 void TestLive() {
-  const char* target = std::getenv("RX_HTTP_LIVE");
+  const char* target = ::getenv("RX_HTTP_LIVE");
   if (target == nullptr || *target == '\0')
     return;
-  std::printf("http_test: live fetch of %s (tls backend: %s)\n", target,
+  ::printf("http_test: live fetch of %s (tls backend: %s)\n", target,
               http::TlsAvailable() ? "yes" : "no");
   const http::Response response = http::Get(target);
-  std::printf("  status %u, %zu bytes, error '%s'\n", unsigned(response.status),
+  ::printf("  status %u, %zu bytes, error '%s'\n", unsigned(response.status),
               size_t(response.body.size()), response.error.c_str());
   // The first line or so of the body, which is how a probe endpoint (say
   // howsmyssl) is read back: the answer is the point of the fetch. The whole
   // body goes to RX_HTTP_LIVE_OUT when the interesting part is further in.
   if (!response.body.empty()) {
     const size_t shown = response.body.size() < 240 ? response.body.size() : 240;
-    std::printf("  body: %.*s\n", int(shown), response.body.c_str());
-    if (const char* out = std::getenv("RX_HTTP_LIVE_OUT"); out != nullptr && *out != '\0') {
-      if (std::FILE* file = std::fopen(out, "wb"); file != nullptr) {
-        std::fwrite(response.body.c_str(), 1, response.body.size(), file);
-        std::fclose(file);
-        std::printf("  body written to %s\n", out);
+    ::printf("  body: %.*s\n", int(shown), response.body.c_str());
+    if (const char* out = ::getenv("RX_HTTP_LIVE_OUT"); out != nullptr && *out != '\0') {
+      if (FILE* file = ::fopen(out, "wb"); file != nullptr) {
+        ::fwrite(response.body.c_str(), 1, response.body.size(), file);
+        ::fclose(file);
+        ::printf("  body written to %s\n", out);
       }
     }
   }
@@ -598,9 +591,9 @@ int main() {
   TestCancel();
   TestLive();
   if (g_failures == 0) {
-    std::printf("http_test: all passed\n");
+    ::printf("http_test: all passed\n");
     return 0;
   }
-  std::printf("http_test: %d failure(s)\n", g_failures);
+  ::printf("http_test: %d failure(s)\n", g_failures);
   return 1;
 }

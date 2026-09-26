@@ -1,9 +1,9 @@
 #ifndef RX_ASSET_MATERIAL_H_
 #define RX_ASSET_MATERIAL_H_
 
-#include <string>
 
 #include "asset/asset_id.h"
+#include "base/strings/xstring.h"
 #include "core/types.h"
 
 namespace rx::asset {
@@ -19,7 +19,7 @@ struct Material {
   // heuristics below, but a game routing submeshes to its own shading model
   // has nothing else to key on: the AssetId is a hash and does not invert.
   // Empty when the source is unnamed.
-  std::string name;
+  base::String name;
   AssetId base_color;
   AssetId normal;
   // Model-space normal map (_msn): the map stores the surface normal in the

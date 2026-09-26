@@ -1,10 +1,13 @@
 #include "render/gi/rcgi.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/gi/raytracing.h"
 #include "render/gi/sdf_clipmap.h"
 #include "render/rhi/bindings.h"
@@ -100,10 +103,10 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
   f32 u3 = static_cast<f32>(hash(frame_index + 2) & 0xffffff) / 16777215.0f;
   f32 angle = u1 * 6.2831853f;
   f32 z = u2 * 2.0f - 1.0f;
-  f32 r = std::sqrt(std::max(0.0f, 1.0f - z * z));
+  f32 r = ::sqrt(rx::Max(0.0f, 1.0f - z * z));
   f32 phi = u3 * 6.2831853f;
-  Vec3 axis{r * std::cos(phi), r * std::sin(phi), z};
-  f32 c = std::cos(angle), s = std::sin(angle), t = 1.0f - c;
+  Vec3 axis{r * ::cos(phi), r * ::sin(phi), z};
+  f32 c = ::cos(angle), s = ::sin(angle), t = 1.0f - c;
   f32 rows[12] = {
       t * axis.x * axis.x + c,          t * axis.x * axis.y - s * axis.z,
       t * axis.x * axis.z + s * axis.y, 0,
@@ -112,15 +115,15 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
       t * axis.x * axis.z - s * axis.y, t * axis.y * axis.z + s * axis.x,
       t * axis.z * axis.z + c,          0,
   };
-  std::memcpy(out_rows, rows, sizeof(rows));
+  base::MemCopy(out_rows, rows, sizeof(rows));
 }
 
 }  // namespace
 
-std::unique_ptr<RcgiSystem> RcgiSystem::Create(Device& device, TextureView sky_view,
+base::UniquePointer<RcgiSystem> RcgiSystem::Create(Device& device, TextureView sky_view,
                                                SamplerHandle sky_sampler,
                                                BindlessRegistry& bindless, bool rt_available) {
-  auto rcgi = std::unique_ptr<RcgiSystem>(new RcgiSystem(device));
+  auto rcgi = base::UniquePointer<RcgiSystem>(new RcgiSystem(device));
   rcgi->sky_view_ = sky_view;
   rcgi->sky_sampler_ = sky_sampler;
   rcgi->bindless_ = &bindless;
@@ -131,9 +134,9 @@ std::unique_ptr<RcgiSystem> RcgiSystem::Create(Device& device, TextureView sky_v
 Vec3 RcgiSystem::SnapOrigin(const Vec3& camera, u32 cascade) const {
   f32 spacing = kBaseSpacing * static_cast<f32>(1u << cascade);
   f32 half = (kProbesPerAxis - 1) * spacing * 0.5f;
-  return Vec3{std::floor((camera.x - half) / spacing) * spacing,
-             std::floor((camera.y - half) / spacing) * spacing,
-             std::floor((camera.z - half) / spacing) * spacing};
+  return Vec3{::floor((camera.x - half) / spacing) * spacing,
+             ::floor((camera.y - half) / spacing) * spacing,
+             ::floor((camera.z - half) / spacing) * spacing};
 }
 
 bool RcgiSystem::CreateResources() {
@@ -207,7 +210,7 @@ bool RcgiSystem::CreateResources() {
     volumes = device_.CreateBuffer(static_cast<u64>(kInteriorVolFloat4s) * 4 * sizeof(f32),
                                    kBufferUsageStorage, true);
     if (!volumes.mapped) return false;
-    std::memset(volumes.mapped, 0,
+    base::MemSet(volumes.mapped, 0,
                 static_cast<size_t>(kInteriorVolFloat4s) * 4 * sizeof(f32));
   }
   if (!probe_meta_) return false;
@@ -498,7 +501,7 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
                             bool async, const SdfClipmap* sdf) {
   // A camera teleport (bigger than cascade 0's extent) invalidates the whole
   // world cache; zero it before this frame's inserts.
-  f32 jump = std::sqrt((camera.x - last_camera_.x) * (camera.x - last_camera_.x) +
+  f32 jump = ::sqrt((camera.x - last_camera_.x) * (camera.x - last_camera_.x) +
                        (camera.y - last_camera_.y) * (camera.y - last_camera_.y) +
                        (camera.z - last_camera_.z) * (camera.z - last_camera_.z));
   if (history_valid_ && jump > kBaseSpacing * kProbesPerAxis) {
@@ -608,9 +611,9 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
   g.interior[3] = config.probe_ao_scale;
   g.gi_flags[0] = gi_bits;
   g.gi_flags[1] = interior_volume_count_;
-  std::memcpy(&g.gi_flags[2], &config.probe_ao_bias, sizeof(f32));
+  base::MemCopy(&g.gi_flags[2], &config.probe_ao_bias, sizeof(f32));
   g.gi_flags[3] = 0;
-  std::memcpy(globals_buffers_[frame_index % 2].mapped, &g, sizeof(g));
+  base::MemCopy(globals_buffers_[frame_index % 2].mapped, &g, sizeof(g));
 
   RotationPush trace_push{};
   FrameRotation(frame_index, trace_push.rotation);
@@ -761,7 +764,7 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
         // Blend rays into the current cascade's irradiance + visibility slabs.
         auto blend = [&](const GpuImage& atlas, u32 mode) {
           BlendPush push{};
-          std::memcpy(push.rotation, trace_push.rotation, sizeof(push.rotation));
+          base::MemCopy(push.rotation, trace_push.rotation, sizeof(push.rotation));
           push.mode = mode;
           push.reset = reset ? 1u : 0u;
           ctx.cmd->BindPipeline(blend_pipeline_);
@@ -799,7 +802,7 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
         // frame's trace/blend and this frame's downstream irradiance samples.
         if (relocate) {
           MetaPush mp{};
-          std::memcpy(mp.rotation, trace_push.rotation, sizeof(mp.rotation));
+          base::MemCopy(mp.rotation, trace_push.rotation, sizeof(mp.rotation));
           mp.reset = reset ? 1u : 0u;
           ctx.cmd->BindPipeline(probe_meta_pipeline_);
           ctx.cmd->BindTransient(0, {Bind::Storage(0, rays_),
@@ -815,8 +818,8 @@ void RcgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext* raytracing, u
       });
 }
 
-void RcgiSystem::SetInteriorVolumes(std::span<const InteriorVolume> volumes, u32 frame_index) {
-  u32 count = static_cast<u32>(std::min<size_t>(volumes.size(), kMaxInteriorVolumes));
+void RcgiSystem::SetInteriorVolumes(base::Span<const InteriorVolume> volumes, u32 frame_index) {
+  u32 count = static_cast<u32>(rx::Min<size_t>(volumes.size(), kMaxInteriorVolumes));
   interior_volume_count_ = count;
   GpuBuffer& buffer = interior_volumes_[frame_index % 2];
   if (!buffer.mapped) return;
@@ -855,7 +858,7 @@ ResourceHandle RcgiSystem::AddResolvePass(RenderGraph& graph, ResourceHandle dep
         const GpuBuffer& globals = globals_buffers_[frame_index % 2];
         const GpuImage& out_img = ctx.graph->image(out);
         ResolvePush push{};
-        std::memcpy(push.inv_view_proj, &inv_view_proj, sizeof(push.inv_view_proj));
+        base::MemCopy(push.inv_view_proj, &inv_view_proj, sizeof(push.inv_view_proj));
         push.inv_size[0] = 1.0f / static_cast<f32>(out_img.extent.width);
         push.inv_size[1] = 1.0f / static_cast<f32>(out_img.extent.height);
         push.camera_pos[0] = camera.x;
@@ -940,9 +943,9 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
         const GpuBuffer& globals = globals_buffers_[frame_index % 2];
         const GpuBuffer& gather_camera = gather_camera_[frame_index % 2];
         GatherCamera gc{};
-        std::memcpy(gc.inv_view_proj, &inv_view_proj, sizeof(gc.inv_view_proj));
-        std::memcpy(gc.prev_view_proj, &prev_view_proj, sizeof(gc.prev_view_proj));
-        std::memcpy(gather_camera.mapped, &gc, sizeof(gc));
+        base::MemCopy(gc.inv_view_proj, &inv_view_proj, sizeof(gc.inv_view_proj));
+        base::MemCopy(gc.prev_view_proj, &prev_view_proj, sizeof(gc.prev_view_proj));
+        base::MemCopy(gather_camera.mapped, &gc, sizeof(gc));
 
         GatherPush p{};
         p.camera_pos[0] = camera.x; p.camera_pos[1] = camera.y; p.camera_pos[2] = camera.z;
@@ -951,7 +954,7 @@ ResourceHandle RcgiSystem::AddGatherChain(RenderGraph& graph, RayTracingContext&
         p.dims[2] = gather.width; p.dims[3] = gather.height;
         p.misc[0] = frame_index;
         p.misc[1] = screen_valid ? 1u : 0u;
-        std::memcpy(&p.misc[2], &ray_max, sizeof(f32));
+        base::MemCopy(&p.misc[2], &ray_max, sizeof(f32));
         ctx.cmd->BindPipeline(gather_pipeline_);
         ctx.cmd->BindTransient(
             0, {Bind::Storage(0, ctx.graph->image(a_r)), Bind::Storage(1, ctx.graph->image(a_g)),

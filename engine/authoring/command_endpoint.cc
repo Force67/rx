@@ -1,6 +1,12 @@
 #include "authoring/command_endpoint.h"
 
 #include "authoring/command_bridge.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "core/log.h"
 #include "rpc/rpc_message.h"
 
@@ -11,11 +17,9 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#include <cerrno>
-#include <cstddef>
-#include <cstring>
-#include <optional>
-#include <utility>
+#include <errno.h>
+#include <stddef.h>
+#include <string.h>
 #endif
 
 namespace rx::authoring {
@@ -49,7 +53,7 @@ constexpr int kSendFlags = 0;  // apple: SO_NOSIGPIPE is set on the socket inste
 // there rather than growing a second transport.
 CommandEndpoint::~CommandEndpoint() = default;
 
-bool CommandEndpoint::Start(const std::string& path, std::string* error) {
+bool CommandEndpoint::Start(const base::String& path, base::String* error) {
   (void)path;
   if (error) *error = "the authoring endpoint needs a posix unix socket";
   return false;
@@ -102,7 +106,7 @@ bool PeerUid(int fd, uid_t* uid) {
 #endif
 }
 
-void PutU32(std::vector<u8>& out, u32 v) {
+void PutU32(base::Vector<u8>& out, u32 v) {
   for (int i = 0; i < 4; ++i) out.push_back(static_cast<u8>(v >> (8 * i)));
 }
 
@@ -114,9 +118,9 @@ u32 ReadU32(const u8* p) {
 
 CommandEndpoint::~CommandEndpoint() { Stop(); }
 
-bool CommandEndpoint::Start(const std::string& path, std::string* error) {
-  auto fail = [&](std::string message) {
-    if (error) *error = std::move(message);
+bool CommandEndpoint::Start(const base::String& path, base::String* error) {
+  auto fail = [&](base::String message) {
+    if (error) *error = base::move(message);
     if (listener_ >= 0) {
       ::close(listener_);
       listener_ = -1;
@@ -128,23 +132,23 @@ bool CommandEndpoint::Start(const std::string& path, std::string* error) {
   addr.sun_family = AF_UNIX;
   if (path.size() >= sizeof(addr.sun_path)) {
     return fail("socket path is longer than " +
-                std::to_string(sizeof(addr.sun_path) - 1) + " bytes");
+                rx::ToString(sizeof(addr.sun_path) - 1) + " bytes");
   }
-  std::memcpy(addr.sun_path, path.c_str(), path.size());
+  base::MemCopy(addr.sun_path, path.c_str(), path.size());
 
   if (SocketIsLive(addr)) return fail("another process is already serving " + path);
   ::unlink(path.c_str());
 
   listener_ = ::socket(AF_UNIX, SOCK_STREAM, 0);
-  if (listener_ < 0) return fail(std::string("socket: ") + std::strerror(errno));
-  if (!SetNonBlocking(listener_)) return fail(std::string("fcntl: ") + std::strerror(errno));
+  if (listener_ < 0) return fail(base::String("socket: ") + ::strerror(errno));
+  if (!SetNonBlocking(listener_)) return fail(base::String("fcntl: ") + ::strerror(errno));
   if (::bind(listener_, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0)
-    return fail(std::string("bind: ") + std::strerror(errno));
+    return fail(base::String("bind: ") + ::strerror(errno));
   // The uid check at accept is the real gate; the mode keeps a call from another
   // account from even reaching it.
   if (::chmod(path.c_str(), S_IRUSR | S_IWUSR) != 0)
-    return fail(std::string("chmod: ") + std::strerror(errno));
-  if (::listen(listener_, 4) != 0) return fail(std::string("listen: ") + std::strerror(errno));
+    return fail(base::String("chmod: ") + ::strerror(errno));
+  if (::listen(listener_, 4) != 0) return fail(base::String("listen: ") + ::strerror(errno));
 
   path_ = path;
   return true;
@@ -194,7 +198,7 @@ void CommandEndpoint::Accept() {
 
 bool CommandEndpoint::Serve(int index, CommandBridge& bridge) {
   const int fd = clients_[static_cast<size_t>(index)];
-  std::vector<u8>& buffer = inbox_[static_cast<size_t>(index)];
+  base::Vector<u8>& buffer = inbox_[static_cast<size_t>(index)];
 
   u8 chunk[4096];
   for (;;) {
@@ -221,10 +225,10 @@ bool CommandEndpoint::Serve(int index, CommandBridge& bridge) {
     const u8* payload = buffer.data() + consumed + 4;
 
     rpc::RpcCall reply;
-    std::optional<rpc::RpcCall> call = rpc::DecodeCall(payload, length);
+    base::Optional<rpc::RpcCall> call = rpc::DecodeCall(payload, length);
     if (!call) {
       reply.name = "error";
-      reply.args.emplace_back(std::string("malformed rpc frame"));
+      reply.args.emplace_back(base::String("malformed rpc frame"));
     } else {
       // The uid check at accept is what makes this a trusted origin; the sender
       // id is how that fact reaches the bridge (see kLocalSender).
@@ -232,14 +236,14 @@ bool CommandEndpoint::Serve(int index, CommandBridge& bridge) {
       CommandBridge::Reply result = bridge.Invoke(ctx, *call);
       reply.name = result.ok ? "ok" : "error";
       if (result.ok)
-        reply.args = std::move(result.values);
+        reply.args = base::move(result.values);
       else
-        reply.args.emplace_back(std::move(result.error));
+        reply.args.emplace_back(base::move(result.error));
     }
     consumed += 4 + length;
 
-    std::vector<u8> frame;
-    const std::vector<u8> encoded = rpc::EncodeCall(reply);
+    base::Vector<u8> frame;
+    const base::Vector<u8> encoded = rpc::EncodeCall(reply);
     PutU32(frame, static_cast<u32>(encoded.size()));
     frame.insert(frame.end(), encoded.begin(), encoded.end());
     // A reply is tens of bytes against a socket buffer of hundreds of kilobytes,

@@ -1,13 +1,14 @@
-#include <algorithm>
 
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/vulkan/vk_backend.h"
 
 namespace rx::render::vk {
 
-std::unique_ptr<VulkanSwapchain> VulkanSwapchain::Create(VulkanDevice& device, u32 width,
+base::UniquePointer<VulkanSwapchain> VulkanSwapchain::Create(VulkanDevice& device, u32 width,
                                                          u32 height, bool vsync, bool hdr) {
-  auto swapchain = std::unique_ptr<VulkanSwapchain>(new VulkanSwapchain(device));
+  auto swapchain = base::UniquePointer<VulkanSwapchain>(new VulkanSwapchain(device));
   if (!swapchain->Init(width, height, vsync, hdr)) return nullptr;
   return swapchain;
 }
@@ -85,15 +86,15 @@ bool VulkanSwapchain::Init(u32 width, u32 height, bool vsync, bool hdr) {
   if (caps.currentExtent.width != 0xffffffff) {
     extent_ = {caps.currentExtent.width, caps.currentExtent.height};
   } else {
-    extent_.width = std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width);
-    extent_.height = std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);
+    extent_.width = rx::Clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width);
+    extent_.height = rx::Clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height);
   }
 
   // +2 over the minimum: frame generation acquires two images per engine frame
   // (interpolated + real); the extra slack keeps the second acquire's
   // forward-progress guarantee (outstanding acquires <= count - min).
   u32 image_count = caps.minImageCount + 2;
-  if (caps.maxImageCount > 0) image_count = std::min(image_count, caps.maxImageCount);
+  if (caps.maxImageCount > 0) image_count = rx::Min(image_count, caps.maxImageCount);
 
   // Desktop surfaces support OPAQUE; Android surfaces often only offer INHERIT.
   // Pick the first supported value rather than assuming OPAQUE.

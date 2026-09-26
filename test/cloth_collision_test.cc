@@ -1,16 +1,17 @@
+#include "core/scalar.h"
 #include "physics/cloth_collision.h"
 
 #include <base/containers/vector.h>
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
 using namespace rx;
 
 namespace {
 
 int Fail(const char* what) {
-  std::fprintf(stderr, "cloth_collision_test FAIL: %s\n", what);
+  ::fprintf(stderr, "cloth_collision_test FAIL: %s\n", what);
   return 1;
 }
 
@@ -22,8 +23,8 @@ physics::detail::ClothTopology ManualTopology(u32 vertex_count) {
 
 bool Finite(const base::Vector<Vec3>& values) {
   for (const Vec3& value : values) {
-    if (!std::isfinite(value.x) || !std::isfinite(value.y) ||
-        !std::isfinite(value.z)) {
+    if (!::isfinite(value.x) || !::isfinite(value.y) ||
+        !::isfinite(value.z)) {
       return false;
     }
   }
@@ -134,7 +135,7 @@ int TestEdgeEdgeCcd() {
   }
   const f32 z2 = positions[2].z + velocities[2].z / 60.0f;
   const f32 z3 = positions[3].z + velocities[3].z / 60.0f;
-  if (!Finite(velocities) || std::min(z2, z3) < 0.015f) {
+  if (!Finite(velocities) || rx::Min(z2, z3) < 0.015f) {
     return Fail("edge crossed through edge");
   }
   return 0;
@@ -166,6 +167,6 @@ int main() {
   if (int rc = TestHighTangentialCcd()) return rc;
   if (int rc = TestEdgeEdgeCcd()) return rc;
   if (int rc = TestRuntimeDegenerateTriangle()) return rc;
-  std::printf("cloth_collision_test OK\n");
+  ::printf("cloth_collision_test OK\n");
   return 0;
 }

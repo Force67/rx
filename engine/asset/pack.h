@@ -1,17 +1,17 @@
 #ifndef RX_ASSET_PACK_H_
 #define RX_ASSET_PACK_H_
 
-#include <mutex>
-#include <fstream>
-#include <optional>
-#include <string>
-#include <string_view>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 #include <base/memory/unique_pointer.h>
 
 #include "asset/vfs.h"
+#include "base/filesystem/file.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "base/threading/mutex.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -37,7 +37,7 @@ enum class PackCompression : u8 {
 };
 
 struct PackEntryView {
-  std::string_view path;  // normalized virtual path
+  base::StringRef path;  // normalized virtual path
   u64 size = 0;           // uncompressed
   u64 stored_size = 0;    // bytes occupied in the archive
   PackCompression compression = PackCompression::kStore;
@@ -50,18 +50,18 @@ class RX_ASSET_EXPORT PackFile {
  public:
   // Null when the file is missing, truncated, has a bad magic/version, or its
   // table of contents fails the checksum.
-  static base::UniquePointer<PackFile> Open(std::string archive_path);
+  static base::UniquePointer<PackFile> Open(base::String archive_path);
 
   size_t entry_count() const { return entry_count_; }
   PackEntryView entry(size_t index) const;
 
   // `normalized_path` as produced by NormalizePath (lowercase, forward slashes).
-  std::optional<size_t> Find(std::string_view normalized_path) const;
+  base::Optional<size_t> Find(base::StringRef normalized_path) const;
 
   // Decompresses and checksum-verifies; nullopt on any mismatch or IO failure.
-  std::optional<base::Vector<u8>> ReadEntry(size_t index) const;
+  base::Optional<base::Vector<u8>> ReadEntry(size_t index) const;
 
-  const std::string& path() const { return path_; }
+  const base::String& path() const { return path_; }
 
   PackFile(const PackFile&) = delete;
   PackFile& operator=(const PackFile&) = delete;
@@ -69,12 +69,12 @@ class RX_ASSET_EXPORT PackFile {
  private:
   PackFile() = default;
 
-  std::string path_;
+  base::String path_;
   size_t entry_count_ = 0;
   base::Vector<u8> toc_;      // raw PackEntry records
   base::Vector<char> names_;  // name table backing entry() string views
-  mutable std::mutex io_mutex_;
-  mutable std::ifstream file_;
+  mutable base::Mutex io_mutex_;
+  mutable base::File file_;
 };
 
 // Write side: stage payloads in memory, then emit the archive in one pass.
@@ -83,7 +83,7 @@ class RX_ASSET_EXPORT PackWriter {
  public:
   // `virtual_path` is normalized on the way in; adding the same path twice
   // replaces the earlier payload.
-  void Add(std::string_view virtual_path, base::Vector<u8> bytes,
+  void Add(base::StringRef virtual_path, base::Vector<u8> bytes,
            PackCompression compression = PackCompression::kDeflate);
 
   // miniz level 1..10; default 6 balances ratio and packing time.
@@ -91,11 +91,11 @@ class RX_ASSET_EXPORT PackWriter {
 
   size_t entry_count() const { return pending_.size(); }
 
-  bool WriteTo(const std::string& file_path);
+  bool WriteTo(const base::String& file_path);
 
  private:
   struct Pending {
-    std::string path;
+    base::String path;
     base::Vector<u8> bytes;
     PackCompression compression;
   };
@@ -109,7 +109,7 @@ class RX_ASSET_EXPORT PackWriter {
 };
 
 // Serves an .rxp archive as a Vfs provider. Null when the archive fails to open.
-RX_ASSET_EXPORT base::UniquePointer<FileProvider> MakePackFileProvider(std::string archive_path);
+RX_ASSET_EXPORT base::UniquePointer<FileProvider> MakePackFileProvider(base::String archive_path);
 
 }  // namespace rx::asset
 

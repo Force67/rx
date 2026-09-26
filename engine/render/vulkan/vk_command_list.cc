@@ -1,4 +1,6 @@
+#include "base/containers/span.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/vulkan/vk_backend.h"
 
 namespace rx::render::vk {
@@ -18,7 +20,7 @@ void VulkanCommandList::BindSet(u32 set_index, BindingSetHandle set) {
                           nullptr);
 }
 
-void VulkanCommandList::BindTransient(u32 set_index, std::span<const BindingItem> items) {
+void VulkanCommandList::BindTransient(u32 set_index, base::Span<const BindingItem> items) {
   VkDescriptorSetAllocateInfo info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
   info.descriptorPool = transient_pool_;
   info.descriptorSetCount = 1;
@@ -105,7 +107,8 @@ void VulkanCommandList::SetScissor(i32 x, i32 y, u32 width, u32 height) {
 
 void VulkanCommandList::BindVertexBuffer(u32 binding, const GpuBuffer& buffer, u64 offset) {
   VkBuffer handle = Rec(buffer.handle)->buffer;
-  vkCmdBindVertexBuffers(cmd_, binding, 1, &handle, &offset);
+  const VkDeviceSize vk_offset = offset;
+  vkCmdBindVertexBuffers(cmd_, binding, 1, &handle, &vk_offset);
 }
 
 void VulkanCommandList::BindIndexBuffer(const GpuBuffer& buffer, u64 offset, IndexType type) {
@@ -196,11 +199,11 @@ VkAccessFlags2 VulkanCommandList::FilterAccess(VkAccessFlags2 access) const {
   return access & kComputeLegal;
 }
 
-void VulkanCommandList::TextureBarriers(std::span<const TextureBarrier> barriers) {
+void VulkanCommandList::TextureBarriers(base::Span<const TextureBarrier> barriers) {
   VkImageMemoryBarrier2 image_barriers[16];
   size_t offset = 0;
   while (offset < barriers.size()) {
-    size_t batch = std::min<size_t>(barriers.size() - offset, 16);
+    size_t batch = rx::Min<size_t>(barriers.size() - offset, 16);
     for (size_t i = 0; i < batch; ++i) {
       const TextureBarrier& src = barriers[offset + i];
       const TextureRecord* texture = Rec(src.texture);
@@ -242,13 +245,13 @@ void VulkanCommandList::MemoryBarrier(BarrierScope src, BarrierScope dst) {
 }
 
 void VulkanCommandList::CopyBufferToTexture(const GpuBuffer& src, const GpuImage& dst,
-                                            std::span<const BufferTextureCopy> regions) {
+                                            base::Span<const BufferTextureCopy> regions) {
   const TextureRecord* texture = Rec(dst.handle);
   base::Vector<VkBufferImageCopy> copies(regions.size());
   for (size_t i = 0; i < regions.size(); ++i) {
     const BufferTextureCopy& r = regions[i];
-    u32 width = r.extent.width ? r.extent.width : std::max(dst.extent.width >> r.mip, 1u);
-    u32 height = r.extent.height ? r.extent.height : std::max(dst.extent.height >> r.mip, 1u);
+    u32 width = r.extent.width ? r.extent.width : rx::Max(dst.extent.width >> r.mip, 1u);
+    u32 height = r.extent.height ? r.extent.height : rx::Max(dst.extent.height >> r.mip, 1u);
     copies[i] = {};
     copies[i].bufferOffset = r.buffer_offset;
     copies[i].imageSubresource = {texture->aspect, r.mip, r.array_layer, 1};
@@ -264,9 +267,9 @@ void VulkanCommandList::CopyTextureToBuffer(const GpuImage& src, const GpuBuffer
                                             const BufferTextureCopy& region) {
   const TextureRecord* texture = Rec(src.handle);
   u32 width = region.extent.width ? region.extent.width
-                                  : std::max(src.extent.width >> region.mip, 1u);
+                                  : rx::Max(src.extent.width >> region.mip, 1u);
   u32 height = region.extent.height ? region.extent.height
-                                    : std::max(src.extent.height >> region.mip, 1u);
+                                    : rx::Max(src.extent.height >> region.mip, 1u);
   VkBufferImageCopy copy{};
   copy.bufferOffset = region.buffer_offset;
   copy.imageSubresource = {texture->aspect, region.mip, region.array_layer, 1};

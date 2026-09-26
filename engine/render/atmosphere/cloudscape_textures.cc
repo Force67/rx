@@ -1,9 +1,9 @@
 #include "render/atmosphere/cloudscape_textures.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/cloudscape_base_noise_cs_hlsl.h"
 #include "shaders/cloudscape_curl_cs_hlsl.h"
 #include "shaders/cloudscape_detail_noise_cs_hlsl.h"
@@ -33,7 +33,7 @@ bool StateEqual(const CloudscapeMapState& a, const CloudscapeMapState& b) {
 
 f32 QuantizeBlend(f32 blend) {
   constexpr f32 kSteps = 64.0f;
-  return std::round(std::clamp(blend, 0.0f, 1.0f) * kSteps) / kSteps;
+  return ::round(rx::Clamp(blend, 0.0f, 1.0f) * kSteps) / kSteps;
 }
 
 }  // namespace

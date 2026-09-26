@@ -1,11 +1,10 @@
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <string>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <base/option.h>
 
 #include "app/host.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
 #include "edit/reflect.h"
 #include "material_palette.h"
@@ -15,6 +14,7 @@
 #include "script/handler_registry.h"
 #include "script/script_value.h"
 #include "viewer.h"
+#include "core/file_system.h"
 
 namespace {
 
@@ -63,7 +63,7 @@ void PrintUsage() {
   RX_INFO("  --validation          enable vulkan validation layers");
 }
 
-rx::render::UpscalerKind ParseUpscaler(const std::string& id) {
+rx::render::UpscalerKind ParseUpscaler(const base::String& id) {
   if (id == "fsr3") return rx::render::UpscalerKind::kFsr3;
   if (id == "dlss") return rx::render::UpscalerKind::kDlss;
   if (id == "xess") return rx::render::UpscalerKind::kXess;
@@ -71,12 +71,12 @@ rx::render::UpscalerKind ParseUpscaler(const std::string& id) {
 }
 
 void PrintJsonString(const char* s) {
-  std::putchar('"');
+  ::putchar('"');
   for (const char* c = s; *c; ++c) {
-    if (*c == '"' || *c == '\\') std::putchar('\\');
-    std::putchar(*c);
+    if (*c == '"' || *c == '\\') ::putchar('\\');
+    ::putchar(*c);
   }
-  std::putchar('"');
+  ::putchar('"');
 }
 
 // The .rxscene authoring surface, generated from the live reflection registry
@@ -84,32 +84,32 @@ void PrintJsonString(const char* s) {
 // anything writing scene files by hand.
 void DumpSchema() {
   rx::RegisterSceneComponents();
-  std::printf("{\n  \"components\": [\n");
+  ::printf("{\n  \"components\": [\n");
   const auto components = rx::edit::AllComponents();
   for (size_t i = 0; i < components.size(); ++i) {
     const rx::edit::ComponentDesc& comp = *components[i];
-    std::printf("    {\n      \"name\": ");
+    ::printf("    {\n      \"name\": ");
     PrintJsonString(comp.name);
-    std::printf(",\n      \"props\": [");
+    ::printf(",\n      \"props\": [");
     for (rx::u32 p = 0; p < comp.prop_count; ++p) {
       const rx::edit::PropDesc& prop = comp.props[p];
-      std::printf("%s\n        {\"name\": ", p ? "," : "");
+      ::printf("%s\n        {\"name\": ", p ? "," : "");
       PrintJsonString(prop.name);
-      std::printf(", \"type\": ");
+      ::printf(", \"type\": ");
       PrintJsonString(rx::edit::PropTypeName(prop.type));
       // 0/0 is "unbounded" (PropDesc), so only a real Range prints.
       if (prop.min != 0.0f || prop.max != 0.0f)
-        std::printf(", \"min\": %g, \"max\": %g", prop.min, prop.max);
+        ::printf(", \"min\": %g, \"max\": %g", prop.min, prop.max);
       if (prop.hint) {
-        std::printf(", \"hint\": ");
+        ::printf(", \"hint\": ");
         PrintJsonString(prop.hint);
       }
-      std::printf("}");
+      ::printf("}");
     }
-    std::printf("%s]\n    }%s\n", comp.prop_count ? "\n      " : "",
+    ::printf("%s]\n    }%s\n", comp.prop_count ? "\n      " : "",
                 i + 1 < components.size() ? "," : "");
   }
-  std::printf("  ]\n}\n");
+  ::printf("  ]\n}\n");
 }
 
 // The live command surface (--authoring-endpoint), generated from the registry
@@ -119,24 +119,24 @@ void DumpSchema() {
 void DumpCommands() {
   rx::script::HandlerRegistry commands;
   rx::scene::SetupSceneCommands(commands);
-  std::printf("{\n  \"commands\": [\n");
+  ::printf("{\n  \"commands\": [\n");
   for (size_t i = 0; i < commands.size(); ++i) {
     const rx::script::HandlerDesc& desc = commands.at(i);
-    std::printf("    {\"name\": ");
-    PrintJsonString(std::string(desc.name.view()).c_str());
-    std::printf(", \"params\": [");
+    ::printf("    {\"name\": ");
+    PrintJsonString(base::String(desc.name.view()).c_str());
+    ::printf(", \"params\": [");
     rx::u32 wire_args = 0;
     for (rx::u32 p = 0; p < desc.sig.count; ++p) {
       const rx::script::ScriptType type = desc.sig.params[p];
       wire_args += type == rx::script::ScriptType::kVec3 ? 3 : 1;
-      std::printf("%s", p ? ", " : "");
+      ::printf("%s", p ? ", " : "");
       PrintJsonString(rx::script::ScriptTypeName(type));
     }
-    std::printf("], \"wire_args\": %u, \"returns\": ", wire_args);
+    ::printf("], \"wire_args\": %u, \"returns\": ", wire_args);
     PrintJsonString(rx::script::ScriptTypeName(desc.sig.ret));
-    std::printf("}%s\n", i + 1 < commands.size() ? "," : "");
+    ::printf("}%s\n", i + 1 < commands.size() ? "," : "");
   }
-  std::printf("  ]\n}\n");
+  ::printf("  ]\n}\n");
 }
 
 }  // namespace
@@ -151,13 +151,13 @@ int main(int argc, char** argv) {
   // Where this repo's palette lives, so asking what materials exist is one word
   // from the source root; the optional argument is for a project that ships its
   // own directory of presets.
-  std::string materials_dir = "runtime/scenes/materials";
-  std::string validate_path;
+  base::String materials_dir = "runtime/scenes/materials";
+  base::String validate_path;
   bool json = false;
 
   for (int i = 1; i < argc; ++i) {
-    std::string arg = argv[i];
-    auto next = [&]() -> std::string { return i + 1 < argc ? argv[++i] : ""; };
+    base::String arg = argv[i];
+    auto next = [&]() -> base::String { return i + 1 < argc ? argv[++i] : ""; };
 
     if (arg == "--gltf" || arg == "--usd" || arg == "--scene") config.scene_path = next();
     else if (arg == "--demo") config.demo_scene = next();
@@ -180,12 +180,12 @@ int main(int argc, char** argv) {
     else if (arg == "--authoring-endpoint") config.authoring_socket = next();
     else if (arg == "--headless") no_window = true;
     else if (arg == "--shot") config.shot_path = next();
-    else if (arg == "--shot-frames") config.shot_frames = std::atoi(next().c_str());
+    else if (arg == "--shot-frames") config.shot_frames = ::atoi(next().c_str());
     else if (arg == "--camera-at") config.camera_at = next();
     else if (arg == "--camera-look") config.camera_look = next();
-    else if (arg == "--camera-fov") config.camera_fov = std::strtof(next().c_str(), nullptr);
-    else if (arg == "--width") app_config.width = static_cast<rx::u32>(std::atoi(next().c_str()));
-    else if (arg == "--height") app_config.height = static_cast<rx::u32>(std::atoi(next().c_str()));
+    else if (arg == "--camera-fov") config.camera_fov = ::strtof(next().c_str(), nullptr);
+    else if (arg == "--width") app_config.width = static_cast<rx::u32>(::atoi(next().c_str()));
+    else if (arg == "--height") app_config.height = static_cast<rx::u32>(::atoi(next().c_str()));
     else if (arg == "--preset") config.preset = rx::render::ParsePreset(next());
     else if (arg == "--no-taa") config.renderer.aa_mode = rx::render::AntiAliasingMode::kNone;
     else if (arg == "--upscaler") config.renderer.upscaler = ParseUpscaler(next());
@@ -220,11 +220,11 @@ int main(int argc, char** argv) {
   // The env var is the older spelling of --shot and still drives existing
   // capture scripts; resolve both here because whether a capture is armed decides
   // whether a windowless run needs the gpu at all.
-  std::string shot = config.shot_path;
+  base::String shot = config.shot_path;
   if (shot.empty()) {
-    if (const char* env = std::getenv("RX_UI_SHOT")) shot = env;
+    if (const char* env = ::getenv("RX_UI_SHOT")) shot = env;
   }
-  const char* showcase_shots = std::getenv("RX_SHOWCASE_SHOTS");
+  const char* showcase_shots = ::getenv("RX_SHOWCASE_SHOTS");
   const bool capture = !shot.empty() || (showcase_shots && showcase_shots[0]);
   config.offscreen = no_window && capture;
   config.headless = no_window && !config.offscreen;
@@ -243,8 +243,8 @@ int main(int argc, char** argv) {
   if (capture) app_config.fixed_delta = kCaptureDelta;
 
   // A stale png from an earlier run would otherwise pass the check below.
-  const bool verify_shot = !config.shot_path.empty() && !std::getenv("RX_UI_SHOT_SEQ");
-  if (verify_shot) std::filesystem::remove(config.shot_path);
+  const bool verify_shot = !config.shot_path.empty() && !::getenv("RX_UI_SHOT_SEQ");
+  if (verify_shot) rx::fs::Remove(config.shot_path);
 
 #if defined(RX_SHARED_BUILD)
   // The viewer's own base::Option knobs (viewer.cc, camera_input.cc,
@@ -267,7 +267,7 @@ int main(int argc, char** argv) {
   // The capture is the whole point of a --shot run, so its absence (no device,
   // a scene that rendered nothing, a quit before the write landed) has to be
   // visible in the exit code rather than only in the log.
-  if (rc == 0 && verify_shot && !std::filesystem::exists(config.shot_path)) {
+  if (rc == 0 && verify_shot && !rx::fs::Exists(config.shot_path)) {
     RX_ERROR("no screenshot written to '{}'", config.shot_path);
     return 1;
   }

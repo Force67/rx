@@ -1,11 +1,12 @@
 #include "render/geometry/ocean_fft.h"
 
-#include <cmath>
-#include <cstring>
-#include <random>
-#include <vector>
+#include <math.h>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/types.h"
 #include "shaders/ocean_fft_cs_hlsl.h"
 #include "shaders/ocean_finalize_cs_hlsl.h"
 #include "shaders/ocean_normals_cs_hlsl.h"
@@ -13,6 +14,84 @@
 
 namespace rx::render {
 namespace {
+
+// The spectrum below was authored, and golden-imaged, against libstdc++'s
+// std::mt19937 and std::normal_distribution<float>. These reproduce both bit
+// for bit: the engine's algorithm and seeding are fixed by the standard, and
+// the distribution follows libstdc++ (Marsaglia's polar method over
+// generate_canonical<float, 24>, the second deviate cached), including where
+// its arithmetic is float and where it is double.
+class Mt19937 {
+ public:
+  explicit Mt19937(u32 seed) {
+    state_[0] = seed;
+    for (u32 i = 1; i < kN; ++i) {
+      state_[i] = 1812433253u * (state_[i - 1] ^ (state_[i - 1] >> 30)) + i;
+    }
+  }
+
+  u32 operator()() {
+    if (index_ >= kN) Twist();
+    u32 y = state_[index_++];
+    y ^= y >> 11;
+    y ^= (y << 7) & 0x9d2c5680u;
+    y ^= (y << 15) & 0xefc60000u;
+    y ^= y >> 18;
+    return y;
+  }
+
+ private:
+  static constexpr u32 kN = 624;
+  static constexpr u32 kM = 397;
+
+  void Twist() {
+    for (u32 i = 0; i < kN; ++i) {
+      const u32 y = (state_[i] & 0x80000000u) | (state_[(i + 1) % kN] & 0x7fffffffu);
+      state_[i] = state_[(i + kM) % kN] ^ (y >> 1) ^ ((y & 1u) ? 0x9908b0dfu : 0u);
+    }
+    index_ = 0;
+  }
+
+  u32 state_[kN];
+  u32 index_ = kN;
+};
+
+// std::normal_distribution<float> with mean 0 and stddev 1, as libstdc++.
+class StandardNormal {
+ public:
+  f32 operator()(Mt19937& rng) {
+    f32 result;
+    if (saved_available_) {
+      saved_available_ = false;
+      result = saved_;
+    } else {
+      f32 x, y, r2;
+      do {
+        x = static_cast<f32>(static_cast<f64>(2.0f * Canonical(rng)) - 1.0);
+        y = static_cast<f32>(static_cast<f64>(2.0f * Canonical(rng)) - 1.0);
+        r2 = x * x + y * y;
+      } while (r2 > 1.0 || r2 == 0.0);
+      const f32 mult = ::sqrtf(-2 * ::logf(r2) / r2);
+      saved_ = x * mult;
+      saved_available_ = true;
+      result = y * mult;
+    }
+    // The distribution's own scale and shift: 1 and 0, but +0 still turns a
+    // -0 into +0.
+    return result * 1.0f + 0.0f;
+  }
+
+ private:
+  // generate_canonical<float, 24>: one 32-bit draw, clamped below 1.
+  static f32 Canonical(Mt19937& rng) {
+    const f32 value = static_cast<f32>(rng()) / 4294967296.0f;
+    return value >= 1.0f ? ::nextafterf(1.0f, 0.0f) : value;
+  }
+
+  f32 saved_ = 0;
+  bool saved_available_ = false;
+};
+
 
 struct SpectrumPush {
   u32 size;
@@ -46,13 +125,13 @@ f32 Phillips(f32 kx, f32 kz, f32 wind_speed, f32 wind_x, f32 wind_z) {
   if (k2 < 1e-8f) return 0.0f;
   const f32 g = 9.81f;
   f32 l = wind_speed * wind_speed / g;  // largest wave from this wind
-  f32 k = std::sqrt(k2);
+  f32 k = ::sqrt(k2);
   f32 kdw = (kx * wind_x + kz * wind_z) / k;
   constexpr f32 kAmplitude = 0.6f;
-  f32 p = kAmplitude * std::exp(-1.0f / (k2 * l * l)) / (k2 * k2) * (kdw * kdw);
+  f32 p = kAmplitude * ::exp(-1.0f / (k2 * l * l)) / (k2 * k2) * (kdw * kdw);
   if (kdw < 0.0f) p *= 0.25f;               // damp waves running against the wind
   const f32 small_cut = 0.35f;               // meters
-  p *= std::exp(-k2 * small_cut * small_cut);
+  p *= ::exp(-k2 * small_cut * small_cut);
   return p;
 }
 
@@ -110,20 +189,20 @@ bool OceanFft::Initialize(Device& device) {
 
   // h0(k) on the CPU with a FIXED seed: the whole animation is then a pure
   // function of time, which the golden-image harness depends on.
-  std::mt19937 rng(1337);
-  std::normal_distribution<f32> gauss(0.0f, 1.0f);
+  Mt19937 rng(1337);
+  StandardNormal gauss;
   const f32 wind_speed = 7.5f;
   const f32 inv_sqrt2 = 0.70710678f;
   f32 wind_x = 0.8f, wind_z = 0.6f;
-  std::vector<f32> h0(static_cast<size_t>(kSize) * kSize * 4);
+  base::Vector<f32> h0(static_cast<size_t>(kSize) * kSize * 4);
   for (u32 y = 0; y < kSize; ++y) {
     for (u32 x = 0; x < kSize; ++x) {
       f32 n = static_cast<f32>(x) - kSize * 0.5f;
       f32 m = static_cast<f32>(y) - kSize * 0.5f;
       f32 kx = 2.0f * 3.14159265f * n / kPatchSize;
       f32 kz = 2.0f * 3.14159265f * m / kPatchSize;
-      f32 ph = std::sqrt(Phillips(kx, kz, wind_speed, wind_x, wind_z));
-      f32 phm = std::sqrt(Phillips(-kx, -kz, wind_speed, wind_x, wind_z));
+      f32 ph = ::sqrt(Phillips(kx, kz, wind_speed, wind_x, wind_z));
+      f32 phm = ::sqrt(Phillips(-kx, -kz, wind_speed, wind_x, wind_z));
       size_t o = (static_cast<size_t>(y) * kSize + x) * 4;
       h0[o + 0] = gauss(rng) * inv_sqrt2 * ph;
       h0[o + 1] = gauss(rng) * inv_sqrt2 * ph;
@@ -133,11 +212,11 @@ bool OceanFft::Initialize(Device& device) {
   }
   GpuBuffer staging = device.CreateBuffer(h0.size() * sizeof(f32), kBufferUsageTransferSrc, true);
   if (!staging.mapped) return false;
-  std::memcpy(staging.mapped, h0.data(), h0.size() * sizeof(f32));
+  base::MemCopy(staging.mapped, h0.data(), h0.size() * sizeof(f32));
   device.ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(h0_, ResourceState::kUndefined, ResourceState::kCopyDst));
     BufferTextureCopy copy;
-    cmd.CopyBufferToTexture(staging, h0_, {&copy, 1});
+    cmd.CopyBufferToTexture(staging, h0_, base::Span(&copy, 1));
     cmd.Barrier(Transition(h0_, ResourceState::kCopyDst, ResourceState::kShaderReadCompute));
     TextureBarrier to_general[4] = {
         Transition(spectrum_[0], ResourceState::kUndefined, ResourceState::kGeneral),

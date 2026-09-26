@@ -1,11 +1,11 @@
 #include "asset/materialx.h"
 
-#include <filesystem>
-#include <fstream>
-#include <sstream>
-#include <vector>
 
+#include "base/containers/vector.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 #include "core/log.h"
+#include "core/text_reader.h"
 
 namespace rx::asset {
 namespace {
@@ -14,45 +14,45 @@ namespace {
 // start at a word boundary: `name="` also occurs inside `nodename="`, and a
 // document that writes the connection first (which is the order MaterialX
 // exporters emit) then hands every input the name of the node it connects to.
-std::string Attr(const std::string& tag, const char* key) {
-  const std::string pat = std::string(key) + "=\"";
+base::String Attr(const base::String& tag, const char* key) {
+  const base::String pat = base::String(key) + "=\"";
   size_t p = 0;
-  while ((p = tag.find(pat, p)) != std::string::npos) {
+  while ((p = tag.find(pat, p)) != base::String::npos) {
     const char before = p == 0 ? '<' : tag[p - 1];
     p += pat.size();
     if (before != ' ' && before != '\t' && before != '\n' && before != '\r' && before != '<') {
       continue;
     }
     const size_t e = tag.find('"', p);
-    return e == std::string::npos ? std::string() : tag.substr(p, e - p);
+    return e == base::String::npos ? base::String() : tag.substr(p, e - p);
   }
   return "";
 }
 
 // MaterialX vector/color values are comma separated; parse up to n floats.
-void ParseFloats(const std::string& value, f32* out, int n) {
-  std::string s = value;
+void ParseFloats(const base::String& value, f32* out, int n) {
+  base::String s = value;
   for (char& c : s) {
     if (c == ',') c = ' ';
   }
-  std::istringstream ss(s);
+  TokenReader ss(s);
   f32 v;
-  for (int i = 0; i < n && (ss >> v); ++i) out[i] = v;
+  for (int i = 0; i < n && ss.Next(&v); ++i) out[i] = v;
 }
 
 struct Input {
-  std::string name;
-  std::string value;     // a constant
-  std::string nodename;  // a connection to another node in the same scope
-  std::string nodegraph;  // a connection into a nodegraph's output
-  std::string output;     // which output of that nodegraph
+  base::String name;
+  base::String value;     // a constant
+  base::String nodename;  // a connection to another node in the same scope
+  base::String nodegraph;  // a connection into a nodegraph's output
+  base::String output;     // which output of that nodegraph
 };
 
 struct Node {
-  std::string category;  // "tiledimage", "normalmap", "open_pbr_surface", "output", ...
-  std::string name;
-  std::string nodename;  // an <output> element's source node
-  std::vector<Input> inputs;
+  base::String category;  // "tiledimage", "normalmap", "open_pbr_surface", "output", ...
+  base::String name;
+  base::String nodename;  // an <output> element's source node
+  base::Vector<Input> inputs;
 };
 
 // The document as a flat list of elements, which is all this needs: MaterialX
@@ -61,24 +61,24 @@ struct Node {
 // ambientCG's 1.39 exporter emits) carries no information a lookup by name does
 // not already have. <input> elements attach to the last element that opened and
 // did not close itself, which is the node they belong to under either layout.
-std::vector<Node> ScanElements(const std::string& doc) {
-  std::vector<Node> nodes;
+base::Vector<Node> ScanElements(const base::String& doc) {
+  base::Vector<Node> nodes;
   size_t p = 0;
-  size_t current = std::string::npos;  // an index, since push_back moves the storage
-  while ((p = doc.find('<', p)) != std::string::npos) {
+  size_t current = base::String::npos;  // an index, since push_back moves the storage
+  while ((p = doc.find('<', p)) != base::String::npos) {
     const size_t end = doc.find('>', p);
-    if (end == std::string::npos) break;
-    const std::string tag = doc.substr(p, end - p);
+    if (end == base::String::npos) break;
+    const base::String tag = doc.substr(p, end - p);
     p = end + 1;
     if (tag.size() < 2 || tag[1] == '/' || tag[1] == '?' || tag[1] == '!') continue;
 
     size_t name_end = tag.find_first_of(" \t\r\n", 1);
-    if (name_end == std::string::npos) name_end = tag.size();
-    const std::string category = tag.substr(1, name_end - 1);
+    if (name_end == base::String::npos) name_end = tag.size();
+    const base::String category = tag.substr(1, name_end - 1);
     const bool self_closing = tag.back() == '/';
 
     if (category == "input") {
-      if (current == std::string::npos) continue;
+      if (current == base::String::npos) continue;
       nodes[current].inputs.push_back({Attr(tag, "name"), Attr(tag, "value"),
                                        Attr(tag, "nodename"), Attr(tag, "nodegraph"),
                                        Attr(tag, "output")});
@@ -92,7 +92,7 @@ std::vector<Node> ScanElements(const std::string& doc) {
   return nodes;
 }
 
-const Node* FindNode(const std::vector<Node>& nodes, const std::string& name) {
+const Node* FindNode(const base::Vector<Node>& nodes, const base::String& name) {
   if (name.empty()) return nullptr;
   for (const Node& node : nodes) {
     if (node.name == name) return &node;
@@ -113,7 +113,7 @@ const Input* FindInput(const Node& node, const char* name) {
 // feeding it. Anything else is a graph this build does not evaluate, and saying
 // which node it gave up on is the difference between a fixable document and a
 // material that came back flat for no stated reason.
-std::string ResolveImage(const std::vector<Node>& nodes, const Input& input, std::string* why) {
+base::String ResolveImage(const base::Vector<Node>& nodes, const Input& input, base::String* why) {
   const Node* node = FindNode(nodes, input.nodename);
   if (!node && !input.nodegraph.empty()) {
     // <input nodegraph="NG" output="out_color"/>: the graph's <output> element
@@ -152,12 +152,11 @@ std::string ResolveImage(const std::vector<Node>& nodes, const Input& input, std
 }
 
 // A document-relative filename made absolute against the document's directory.
-std::string ResolveAgainstDocument(const std::string& document, const std::string& file) {
-  const std::filesystem::path relative(file);
-  if (file.empty() || relative.is_absolute()) return file;
-  const std::filesystem::path dir = std::filesystem::path(document).parent_path();
+base::String ResolveAgainstDocument(const base::String& document, const base::String& file) {
+  if (file.empty() || fs::IsAbsolute(file)) return file;
+  const base::StringRef dir = fs::ParentPath(document);
   if (dir.empty()) return file;
-  return (dir / relative).lexically_normal().string();
+  return fs::LexicallyNormal(fs::Join(dir, file));
 }
 
 // standard_surface and open_pbr_surface name the same lobes differently, and a
@@ -183,7 +182,7 @@ constexpr InputAlias kInputAliases[] = {
     {"geometry_normal", "normal"},
 };
 
-std::string Canonical(const std::string& name) {
+base::String Canonical(const base::String& name) {
   for (const InputAlias& alias : kInputAliases) {
     if (name == alias.name) return alias.canonical;
   }
@@ -191,7 +190,7 @@ std::string Canonical(const std::string& name) {
 }
 
 // Which map slot a surface input fills when it is connected to an image.
-auto MapSlot(const std::string& canonical) -> std::string MaterialXMaps::* {
+auto MapSlot(const base::String& canonical) -> base::String MaterialXMaps::* {
   if (canonical == "base_color") return &MaterialXMaps::base_color;
   if (canonical == "normal") return &MaterialXMaps::normal;
   if (canonical == "specular_roughness") return &MaterialXMaps::roughness;
@@ -203,31 +202,28 @@ auto MapSlot(const std::string& canonical) -> std::string MaterialXMaps::* {
 
 }  // namespace
 
-bool LoadMaterialX(const std::string& path, Material* out, MaterialXMaps* maps) {
-  std::ifstream file(path);
-  if (!file) {
+bool LoadMaterialX(const base::String& path, Material* out, MaterialXMaps* maps) {
+  base::String doc;
+  if (!fs::ReadTextFile(path, &doc)) {
     RX_WARN("materialx: cannot open {}", path);
     return false;
   }
-  std::stringstream buf;
-  buf << file.rdbuf();
-  const std::string doc = buf.str();
 
   // MaterialX lets a document prefix every filename it names. "./" is the no-op
   // ambientCG writes and the only one honoured; anything else would put the
   // maps somewhere the resolution below does not look, and losing a whole
   // texture set to one unread attribute is worth saying out loud.
-  if (const size_t root = doc.find("<materialx"); root != std::string::npos) {
+  if (const size_t root = doc.find("<materialx"); root != base::String::npos) {
     const size_t end = doc.find('>', root);
-    const std::string prefix =
-        Attr(doc.substr(root, end == std::string::npos ? end : end - root), "fileprefix");
+    const base::String prefix =
+        Attr(doc.substr(root, end == base::String::npos ? end : end - root), "fileprefix");
     if (!prefix.empty() && prefix != "./") {
       RX_WARN("materialx: {}: fileprefix=\"{}\" is not applied; filenames resolve against the "
               "document's own directory", path, prefix);
     }
   }
 
-  const std::vector<Node> nodes = ScanElements(doc);
+  const base::Vector<Node> nodes = ScanElements(doc);
   const Node* surface = nullptr;
   for (const Node& node : nodes) {
     if (node.category == "standard_surface" || node.category == "open_pbr_surface") {
@@ -256,15 +252,15 @@ bool LoadMaterialX(const std::string& path, Material* out, MaterialXMaps* maps) 
   f32 opacity = 1.0f;
 
   for (const Input& input : surface->inputs) {
-    const std::string name = Canonical(input.name);
+    const base::String name = Canonical(input.name);
     if (input.value.empty()) {
       // A connected input. Resolving it to a texture is the whole point of
       // pointing rx at a library document; one this build cannot follow is
       // named rather than dropped in silence, since the render it produces
       // (a flat colour) looks exactly like a material authored that way.
-      std::string why;
-      const std::string image = ResolveImage(nodes, input, &why);
-      std::string MaterialXMaps::*slot = MapSlot(name);
+      base::String why;
+      const base::String image = ResolveImage(nodes, input, &why);
+      base::String MaterialXMaps::*slot = MapSlot(name);
       if (image.empty()) {
         RX_WARN("materialx: {}: input '{}' {}; that map is DROPPED", path, input.name, why);
       } else if (!slot) {

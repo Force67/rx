@@ -5,8 +5,10 @@
 // else vkd3d's headers provide the identical API surface natively
 // (vkd3d_windows.h supplies the COM/Windows base types, vkd3d_d3d12.h the API,
 // vkd3d_utils.h D3D12CreateDevice/D3D12SerializeRootSignature and the event
-// helpers). Include this before any engine header that uses std::min/max:
-// vkd3d_windows.h defines min/max macros which are undone below.
+// helpers). Engine code uses rx::Min/Max, but a lowercase min/max macro would
+// still break any member or function of that name (numeric limits, bounds
+// structs), so vkd3d_windows.h's min/max macros are undone below and
+// windows.h gets NOMINMAX.
 
 #if defined(_WIN32)
 
@@ -14,7 +16,7 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
-#define NOMINMAX  // engine headers use std::min/max
+#define NOMINMAX  // min/max macros would break any min/max name that follows
 #endif
 
 #include <d3d12.h>
@@ -41,7 +43,7 @@ inline void DestroyFenceEvent(HANDLE event) { CloseHandle(event); }
 #include <sys/eventfd.h>
 #include <unistd.h>
 
-#include <cstdint>
+#include <stdint.h>
 
 #ifdef min
 #undef min

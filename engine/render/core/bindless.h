@@ -1,10 +1,10 @@
 #ifndef RX_RENDER_BINDLESS_H_
 #define RX_RENDER_BINDLESS_H_
 
-#include <memory>
 
 #include <base/containers/vector.h>
 
+#include "base/memory/unique_pointer.h"
 #include "core/types.h"
 #include "render/rhi/device.h"
 
@@ -97,7 +97,7 @@ class BindlessRegistry {
   // RX_MATERIAL_FLAG_HUMAN so the raster and RT flag namespaces agree.
   static constexpr u32 kMaterialHuman = 1u << 22;
 
-  static std::unique_ptr<BindlessRegistry> Create(Device& device);
+  static base::UniquePointer<BindlessRegistry> Create(Device& device);
   ~BindlessRegistry();
 
   BindlessRegistry(const BindlessRegistry&) = delete;

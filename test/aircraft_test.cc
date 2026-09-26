@@ -6,11 +6,12 @@
 // including deliberate post-stall tumbling. Each scenario builds its own flat
 // height-field runway at y = 0.
 
-#include <cmath>
-#include <cstdio>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
 
+#include "base/containers/vector.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "physics/aircraft.h"
 #include "physics/physics_world.h"
 
@@ -27,27 +28,27 @@ namespace {
 constexpr f32 kDt = 1.0f / 60.0f;
 
 int Fail(const char* what) {
-  std::fprintf(stderr, "aircraft_test FAIL: %s\n", what);
+  ::fprintf(stderr, "aircraft_test FAIL: %s\n", what);
   return 1;
 }
 
 void AddRunway(PhysicsWorld& world) {
   constexpr u32 kSamples = 64;
   constexpr f32 kSize = 3000.0f;  // long enough for a full takeoff roll
-  std::vector<f32> heights(static_cast<size_t>(kSamples) * kSamples, 0.0f);
+  base::Vector<f32> heights(static_cast<size_t>(kSamples) * kSamples, 0.0f);
   world.AddHeightField(Vec3{-kSize * 0.5f, 0.0f, -kSize * 0.5f}, heights.data(), kSamples, kSize,
                        SurfaceType::kConcrete);
 }
 
 bool IsFinite(const Vec3& v) {
-  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
 }
 
 bool StateFinite(const AircraftState& s) {
-  return std::isfinite(s.airspeed_mps) && std::isfinite(s.vertical_speed_mps) &&
-         std::isfinite(s.alpha_deg) && std::isfinite(s.beta_deg) && std::isfinite(s.rpm) &&
-         std::isfinite(s.engine_load) && IsFinite(s.position) && std::isfinite(s.rotation.x) &&
-         std::isfinite(s.rotation.y) && std::isfinite(s.rotation.z) && std::isfinite(s.rotation.w);
+  return ::isfinite(s.airspeed_mps) && ::isfinite(s.vertical_speed_mps) &&
+         ::isfinite(s.alpha_deg) && ::isfinite(s.beta_deg) && ::isfinite(s.rpm) &&
+         ::isfinite(s.engine_load) && IsFinite(s.position) && ::isfinite(s.rotation.x) &&
+         ::isfinite(s.rotation.y) && ::isfinite(s.rotation.z) && ::isfinite(s.rotation.w);
 }
 
 // Spawns a plane a little high and lets the suspension settle under zero input.
@@ -64,7 +65,7 @@ Aircraft* SpawnSettled(PhysicsWorld& world, const AircraftDesc& desc, Aircraft* 
 // Heading (yaw) of the plane in radians about +Y, from its forward axis.
 f32 Heading(const Aircraft& a) {
   Vec3 fwd = Rotate(a.state().rotation, Vec3{0, 0, 1});
-  return std::atan2(fwd.x, fwd.z);
+  return ::atan2(fwd.x, fwd.z);
 }
 
 // Wrap a heading delta into (-pi, pi] so a signed turn reads correctly even if
@@ -80,7 +81,7 @@ f32 WrapPi(f32 a) {
 int main() {
   PhysicsWorld probe;
   if (!probe.Initialize()) {
-    std::fprintf(stderr, "aircraft_test: physics unavailable, skipping\n");
+    ::fprintf(stderr, "aircraft_test: physics unavailable, skipping\n");
     return 0;
   }
 
@@ -99,12 +100,12 @@ int main() {
       world.Update(kDt);
     }
     const AircraftState& s = a->state();
-    std::fprintf(stderr, "(a) rest y=%.3f vy=%.3f speed=%.3f on_ground=%d comp=%.2f/%.2f/%.2f\n",
+    ::fprintf(stderr, "(a) rest y=%.3f vy=%.3f speed=%.3f on_ground=%d comp=%.2f/%.2f/%.2f\n",
                  s.position.y, s.vertical_speed_mps, s.airspeed_mps, s.on_ground,
                  s.gear_compression[0], s.gear_compression[1], s.gear_compression[2]);
     if (!s.on_ground) return Fail("(a) not resting on the gear");
     if (s.position.y < 0.5f) return Fail("(a) sank through the runway");
-    if (std::fabs(s.vertical_speed_mps) > 0.2f || s.airspeed_mps > 0.3f)
+    if (::fabs(s.vertical_speed_mps) > 0.2f || s.airspeed_mps > 0.3f)
       return Fail("(a) not settled/stationary");
     a->~Aircraft();
   }
@@ -131,15 +132,15 @@ int main() {
       const AircraftState& s = a->state();
       if (!StateFinite(s)) return Fail("(b) NaN during takeoff");
       const f32 alt = s.position.y - ground_y;
-      max_alt = std::max(max_alt, alt);
+      max_alt = rx::Max(max_alt, alt);
       if (!airborne && !s.on_ground && alt > 0.5f) {
         airborne = true;
         liftoff_speed = s.airspeed_mps;
         normal_liftoff_dist = s.position.z;
       }
-      if (airborne) peak_climb = std::max(peak_climb, s.vertical_speed_mps);
+      if (airborne) peak_climb = rx::Max(peak_climb, s.vertical_speed_mps);
     }
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(b) Vr=%.1f Vlof=%.1f liftoff_dist=%.0fm max_alt=%.1fm peak_climb=%.2f m/s\n",
                  rotate_speed, liftoff_speed, normal_liftoff_dist, max_alt, peak_climb);
     if (max_alt < 8.0f) return Fail("(b) did not lift off / gain altitude");
@@ -176,7 +177,7 @@ int main() {
         const AircraftState& s = a->state();
         if (!StateFinite(s)) return false;
         if (*roll_dist < 0 && s.airspeed_mps >= ref_speed) *roll_dist = s.position.z - start_z;
-        *max_alt = std::max(*max_alt, s.position.y - ground_y);
+        *max_alt = rx::Max(*max_alt, s.position.y - ground_y);
         if (i > 60 * 43) *late_vs = s.vertical_speed_mps;
       }
       a->~Aircraft();
@@ -188,7 +189,7 @@ int main() {
     f32 heavy_roll, heavy_alt, heavy_vs;
     takeoff_run(220.0f, kRef, &light_roll, &light_alt, &light_vs);
     const bool over = takeoff_run(470.0f, kRef, &heavy_roll, &heavy_alt, &heavy_vs);
-    std::fprintf(stderr,
+    ::fprintf(stderr,
                  "(c) light: roll_to_%.0f=%.0fm alt=%.1f vs=%.2f | heavy(over_mtom=%d): "
                  "roll=%.0fm alt=%.1f vs=%.2f\n",
                  kRef, light_roll, light_alt, light_vs, over, heavy_roll, heavy_alt, heavy_vs);
@@ -220,10 +221,10 @@ int main() {
       const AircraftState& s = a->state();
       if (!StateFinite(s)) return Fail("(d) NaN during stall");
       if (s.stalled_left || s.stalled_right) saw_stall = true;
-      min_vs = std::min(min_vs, s.vertical_speed_mps);
+      min_vs = rx::Min(min_vs, s.vertical_speed_mps);
     }
     const AircraftState& s = a->state();
-    std::fprintf(stderr, "(d) stalled_l=%d stalled_r=%d alpha=%.1f min_vs=%.1f end_vs=%.1f\n",
+    ::fprintf(stderr, "(d) stalled_l=%d stalled_r=%d alpha=%.1f min_vs=%.1f end_vs=%.1f\n",
                  s.stalled_left, s.stalled_right, s.alpha_deg, min_vs, s.vertical_speed_mps);
     if (!saw_stall) return Fail("(d) wing never stalled");
     if (min_vs > -3.0f) return Fail("(d) stalled wing did not sink");
@@ -258,7 +259,7 @@ int main() {
     };
     const f32 clean = liftoff_distance(0.0f);
     const f32 flapped = liftoff_distance(1.0f);
-    std::fprintf(stderr, "(e) clean liftoff=%.0fm  full-flap liftoff=%.0fm\n", clean, flapped);
+    ::fprintf(stderr, "(e) clean liftoff=%.0fm  full-flap liftoff=%.0fm\n", clean, flapped);
     if (clean <= 0 || flapped <= 0) return Fail("(e) a config never lifted off");
     if (flapped >= clean * 0.95f) return Fail("(e) flaps did not shorten the takeoff");
   }
@@ -293,7 +294,7 @@ int main() {
     };
     const f32 coast = roll_distance(false);
     const f32 braked = roll_distance(true);
-    std::fprintf(stderr, "(f) coast dist=%.0fm  braked dist=%.0fm\n", coast, braked);
+    ::fprintf(stderr, "(f) coast dist=%.0fm  braked dist=%.0fm\n", coast, braked);
     if (braked >= coast * 0.6f) return Fail("(f) brakes did not stop it much shorter");
   }
 
@@ -355,7 +356,7 @@ int main() {
       air_yaw += WrapPi(h - aprev);
       aprev = h;
     }
-    std::fprintf(stderr, "(g) ground yaw=%.1f deg  air yaw=%.1f deg (signed; -ve = nose right)\n",
+    ::fprintf(stderr, "(g) ground yaw=%.1f deg  air yaw=%.1f deg (signed; -ve = nose right)\n",
                  ground_yaw * 57.2958f, air_yaw * 57.2958f);
     b->~Aircraft();
     if (ground_yaw > -0.15f)
@@ -373,16 +374,16 @@ int main() {
     for (int i = 0; i < 60 * 180; ++i) {
       AircraftInput in;
       in.throttle = (i / 30) % 2 ? 1.0f : 0.0f;
-      in.pitch = std::sin(i * 0.05f);
-      in.roll = std::sin(i * 0.11f);
-      in.yaw = std::cos(i * 0.07f);
+      in.pitch = ::sin(i * 0.05f);
+      in.roll = ::sin(i * 0.11f);
+      in.yaw = ::cos(i * 0.07f);
       in.flaps = (i / 120) % 2 ? 1.0f : 0.0f;
       in.brakes = (i % 90) < 10 ? 1.0f : 0.0f;
       a->Update(in, kDt);
       world.Update(kDt);
       if (!StateFinite(a->state())) return Fail("(h) NaN during tumbling abuse");
     }
-    std::fprintf(stderr, "(h) survived 180s of tumbling, y=%.1f speed=%.1f\n", a->state().position.y,
+    ::fprintf(stderr, "(h) survived 180s of tumbling, y=%.1f speed=%.1f\n", a->state().position.y,
                  a->state().airspeed_mps);
     a->~Aircraft();
   }
@@ -419,7 +420,7 @@ int main() {
     };
     const f32 calm = ground_roll(0.0f);
     const f32 head = ground_roll(10.0f);
-    std::fprintf(stderr, "(i) calm roll=%.0fm  headwind(10 m/s) roll=%.0fm\n", calm, head);
+    ::fprintf(stderr, "(i) calm roll=%.0fm  headwind(10 m/s) roll=%.0fm\n", calm, head);
     if (calm <= 0 || head <= 0) return Fail("(i) a config never lifted off");
     if (head >= calm * 0.85f) return Fail("(i) headwind did not shorten the ground roll");
   }
@@ -462,11 +463,11 @@ int main() {
     f32 calm_dx = 0, calm_yaw = 0, cross_dx = 0, cross_yaw = 0;
     if (fly(0.0f, &calm_dx, &calm_yaw)) return 1;
     if (fly(12.0f, &cross_dx, &cross_yaw)) return 1;
-    std::fprintf(stderr, "(ii) calm dx=%.1f yaw=%.2f | crosswind dx=%.1f yaw=%.2f deg\n", calm_dx,
+    ::fprintf(stderr, "(ii) calm dx=%.1f yaw=%.2f | crosswind dx=%.1f yaw=%.2f deg\n", calm_dx,
                  calm_yaw * 57.2958f, cross_dx, cross_yaw * 57.2958f);
-    if (std::fabs(cross_yaw) < 0.15f)
+    if (::fabs(cross_yaw) < 0.15f)
       return Fail("(ii) crosswind did not weathervane the nose");
-    if (std::fabs(cross_yaw) <= std::fabs(calm_yaw) + 0.1f)
+    if (::fabs(cross_yaw) <= ::fabs(calm_yaw) + 0.1f)
       return Fail("(ii) crosswind weathervane not distinct from calm");
   }
 
@@ -484,11 +485,11 @@ int main() {
     a->~Aircraft();
     for (int i = 0; i < 5; ++i) world.Update(kDt);  // crash-free after removal
     const bool after = world.Raycast(Vec3{0, 8.0f, 0}, Vec3{0, -1, 0}, 6.0f, &hit);
-    std::fprintf(stderr, "(jj) hull ray before destroy=%d after=%d\n", before, after);
+    ::fprintf(stderr, "(jj) hull ray before destroy=%d after=%d\n", before, after);
     if (!before) return Fail("(jj) fuselage body not present before destroy");
     if (after) return Fail("(jj) fuselage body still present after destroy");
   }
 
-  std::fprintf(stderr, "aircraft_test: all checks passed\n");
+  ::fprintf(stderr, "aircraft_test: all checks passed\n");
   return 0;
 }

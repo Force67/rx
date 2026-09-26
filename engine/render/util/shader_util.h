@@ -7,7 +7,7 @@
 
 #include <volk.h>
 
-#include <cstddef>
+#include <stddef.h>
 
 #include "core/export.h"
 

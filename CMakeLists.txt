@@ -256,9 +256,16 @@ if(NOT TARGET equilibrium::base)
     message(FATAL_ERROR
       "equilibrium submodule missing; run: git submodule update --init third_party/equilibrium")
   endif()
-  set(EQ_USE_STD_ATOMIC ON CACHE BOOL "" FORCE)
+  # base::Atomic on its native backend, not std::atomic. Forced so a build
+  # directory configured when rx still needed the std mode (for zetanet's
+  # std::memory_order arguments) does not keep it from its cache.
+  set(EQ_USE_STD_ATOMIC OFF CACHE BOOL "" FORCE)
   set(EQ_BUILD_TESTS OFF CACHE BOOL "" FORCE)
   add_subdirectory(third_party/equilibrium equilibrium EXCLUDE_FROM_ALL)
+  # base's std::formatter specializations exist for consumers that format base
+  # strings with <format>; nothing here does, and they drag <format> into every
+  # TU that names a base::String.
+  target_compile_definitions(eq_base PUBLIC BASE_NO_STD_FORMAT)
 endif()
 
 add_subdirectory(third_party)
@@ -304,13 +311,16 @@ endif()
 # kinema: the skeletal animation runtime, its own repo since 2026-07
 # (github.com/Force67/kinema), consumed as a sibling checkout like the other
 # co-developed libraries. A parent project may already vendor it; only add it
-# when the target is absent.
+# when the target is absent. KINEMA_USE_BASE is kinema's equilibrium
+# configuration: no STL, no exceptions, base types across its API, built on the
+# equilibrium::base target vendored above.
 if(NOT TARGET kinema)
   set(RX_KINEMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../kinema" CACHE PATH "Path to a kinema checkout")
   if(NOT EXISTS "${RX_KINEMA_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
       "kinema not found at ${RX_KINEMA_DIR}; clone https://github.com/Force67/kinema next to rx (or set RX_KINEMA_DIR)")
   endif()
+  set(KINEMA_USE_BASE ON CACHE BOOL "" FORCE)
   set(KINEMA_BUILD_TESTS ${RX_BUILD_TESTS})
   add_subdirectory(${RX_KINEMA_DIR} kinema)
 endif()
@@ -318,24 +328,16 @@ endif()
 # zetanet: the UDP transport rx::net's sessions ride, consumed as an optional
 # sibling checkout. A parent project may already provide the target; without
 # either, rx::net still builds its transport-free half (codec, replication,
-# interest bubbles) and only the sessions are absent. Zetanet hard-codes
-# add_subdirectory(vendor/equilibrium); rather than patch upstream,
-# add_subdirectory is locally overridden so that one call reuses the
-# equilibrium::base vendored above instead of compiling a second, conflicting
-# copy.
+# interest bubbles) and only the sessions are absent. ZNET_USE_STL=OFF is
+# zetanet's equilibrium configuration: it builds on base alone, without the STL
+# or exceptions, and reuses the equilibrium::base target vendored above rather
+# than compiling its own copy.
 if(NOT TARGET zetanet AND "net" IN_LIST RX_MODULES)
   set(RX_ZETANET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../zetanet" CACHE PATH
     "Path to a zetanet checkout (develop branch); missing disables the net sessions")
   if(EXISTS "${RX_ZETANET_DIR}/CMakeLists.txt")
     set(ZNET_USE_STL OFF CACHE BOOL "" FORCE)
     set(ZNET_BUILD_SAMPLES OFF CACHE BOOL "" FORCE)
-    function(add_subdirectory _dir)
-      get_filename_component(_leaf "${_dir}" NAME)
-      if(_leaf STREQUAL "equilibrium" AND TARGET equilibrium::base)
-        return()  # zetanet's vendored copy: reuse the one vendored above
-      endif()
-      _add_subdirectory("${_dir}" ${ARGN})
-    endfunction()
     add_subdirectory(${RX_ZETANET_DIR} zetanet EXCLUDE_FROM_ALL)
   else()
     message(STATUS "rx: no zetanet at ${RX_ZETANET_DIR}, net sessions disabled")
@@ -604,7 +606,7 @@ endif()
 # links stb and nothing else and starts instantly in a CI loop.
 if(RX_BUILD_TOOLS)
   add_executable(rxdiff tools/rxdiff.cc)
-  target_link_libraries(rxdiff PRIVATE rx::stb_impl)
+  target_link_libraries(rxdiff PRIVATE rx::stb_impl equilibrium::base)
   rx_set_warnings(rxdiff)
 endif()
 
@@ -1333,6 +1335,33 @@ if(RX_BUILD_TESTS AND RX_JOLT AND "character" IN_LIST RX_MODULES)
   target_link_libraries(jetpack_test PRIVATE rx::character rx::physics rx::scene rx::ecs rx::core)
   add_test(NAME jetpack_test COMMAND jetpack_test)
 endif()
+
+# Exceptions are not used anywhere in rx: every target defined in rx's own
+# directories builds without them, so a throw, try or catch fails to compile
+# instead of creeping back in. Third-party directories keep their own flags.
+function(rx_forbid_exceptions dir)
+  get_property(targets DIRECTORY ${dir} PROPERTY BUILDSYSTEM_TARGETS)
+  foreach(target ${targets})
+    get_target_property(type ${target} TYPE)
+    if(type MATCHES "^(STATIC_LIBRARY|SHARED_LIBRARY|MODULE_LIBRARY|OBJECT_LIBRARY|EXECUTABLE)$")
+      if(MSVC)
+        target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/EHs-c->)
+        target_compile_definitions(${target} PRIVATE _HAS_EXCEPTIONS=0)
+      else()
+        target_compile_options(${target} PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>)
+      endif()
+    endif()
+  endforeach()
+  get_property(subdirs DIRECTORY ${dir} PROPERTY SUBDIRECTORIES)
+  foreach(subdir ${subdirs})
+    cmake_path(IS_PREFIX PROJECT_SOURCE_DIR "${subdir}" NORMALIZE inside)
+    string(FIND "${subdir}" "${PROJECT_SOURCE_DIR}/third_party" third_party_at)
+    if(inside AND NOT third_party_at EQUAL 0)
+      rx_forbid_exceptions(${subdir})
+    endif()
+  endforeach()
+endfunction()
+rx_forbid_exceptions(${CMAKE_CURRENT_SOURCE_DIR})
 
 # install()/export rules, generated last so every module target (and the
 # RX_INSTALL_* feature flags the modules set) already exists.

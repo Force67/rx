@@ -1,11 +1,11 @@
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <string>
-#include <string_view>
+#include <math.h>
+#include <stdio.h>
 
 #include "anim/body_dynamics.h"
 #include "asset/asset_id.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 
 namespace {
 
@@ -41,7 +41,7 @@ asset::Skeleton MakeExampleRig() {
 }
 
 f32 MorphWeight(const base::Vector<BodyMorphWeight> &weights,
-                std::string_view name) {
+                base::StringRef name) {
   const rx::u64 hash = asset::MakeAssetId(name).hash;
   for (const BodyMorphWeight &weight : weights) {
     if (weight.target == hash)
@@ -50,13 +50,13 @@ f32 MorphWeight(const base::Vector<BodyMorphWeight> &weights,
   return 0;
 }
 
-std::string Meter(f32 displacement) {
+base::String Meter(f32 displacement) {
   constexpr int kHalfWidth = 12;
   // One cell is 4 mm. Positive motion appears right of the rest marker.
   const int cell =
-      std::clamp(static_cast<int>(std::round(displacement / 0.004f)),
+      rx::Clamp(static_cast<int>(::round(displacement / 0.004f)),
                  -kHalfWidth, kHalfWidth);
-  std::string meter(kHalfWidth * 2 + 1, ' ');
+  base::String meter(kHalfWidth * 2 + 1, ' ');
   meter[kHalfWidth] = '|';
   if (cell != 0)
     meter[kHalfWidth + cell] = 'o';
@@ -89,9 +89,9 @@ int main() {
   constexpr rx::u32 kFrames = 240;
   base::Vector<BodyMorphWeight> morphs;
 
-  std::puts(
+  ::puts(
       "Body jiggle example (o = vertical helper-bone displacement, | = rest)");
-  std::puts(" event        time  chest                     abdomen             "
+  ::puts(" event        time  chest                     abdomen             "
             "      compress impact");
 
   for (rx::u32 frame_index = 0; frame_index < kFrames; ++frame_index) {
@@ -99,7 +99,7 @@ int main() {
     pose.ResetToBind(skeleton); // base animation/IK would write the pose here
 
     // A subtle gait bob exercises animation-derived driver acceleration.
-    pose.translation[1].y += std::sin(time * 3.14159265f * 4.0f) * 0.006f;
+    pose.translation[1].y += ::sin(time * 3.14159265f * 4.0f) * 0.006f;
 
     BodyDynamicsFrame frame;
     const char *event = "settle";
@@ -126,15 +126,15 @@ int main() {
     const BodyRegionSample abdomen_sample = body.sample(1);
     const f32 compression = MorphWeight(morphs, "chestCompression");
     const f32 impact = MorphWeight(morphs, "chestImpact");
-    std::printf(" %-10s %5.2f  [%s]  [%s]    %5.2f   %5.2f\n", event, time,
+    ::printf(" %-10s %5.2f  [%s]  [%s]    %5.2f   %5.2f\n", event, time,
                 Meter(chest_sample.translation.y).c_str(),
                 Meter(abdomen_sample.translation.y).c_str(), compression,
                 impact);
   }
 
-  std::puts("\nIn a renderer, upload pose after BodyDynamics::Update and add "
+  ::puts("\nIn a renderer, upload pose after BodyDynamics::Update and add "
             "the emitted");
-  std::puts("body morph weights to the character's existing dense morph-weight "
+  ::puts("body morph weights to the character's existing dense morph-weight "
             "array.");
   return 0;
 }

@@ -8,8 +8,8 @@
 #include "nav/path.h"
 #include "nav/query.h"
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
 #include "ecs/world.h"
 #include "scene/components.h"
@@ -23,13 +23,13 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "nav_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "nav_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-3f) {
-  if (std::fabs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "nav_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
+  if (::fabs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "nav_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
 }
@@ -84,7 +84,7 @@ void TestBuildAndQueries(NavMesh& mesh) {
   Check(mesh.Area(mesh.CellAt({14, 0, 8})) == kAreaRock, "rock band painted by sampler");
   Check(mesh.Area(mesh.CellAt({16, 0, 25})) == kAreaWater, "river present");
   f32 h = 1;
-  Check(mesh.HeightAt(10, 10, &h) && std::fabs(h) < 1e-3f, "surface height on open ground");
+  Check(mesh.HeightAt(10, 10, &h) && ::fabs(h) < 1e-3f, "surface height on open ground");
 
   const CellRef clamp = mesh.ClampToWalkable({5.0f, 0, 5.0f}, 3.0f);
   Check(clamp.valid() && mesh.Walkable(clamp), "off-mesh point clamps to walkable cell");
@@ -399,6 +399,6 @@ int main() {
     NavMesh mesh = MakeWorld();
     TestTileRemoval(mesh);
   }
-  if (failures == 0) std::printf("nav_test: all checks passed\n");
+  if (failures == 0) ::printf("nav_test: all checks passed\n");
   return failures;
 }

@@ -1,8 +1,8 @@
 #include "physics/aircraft.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
+#include "core/scalar.h"
 #include "physics/shape_desc.h"
 
 namespace rx::physics {
@@ -29,8 +29,8 @@ f32 SmoothStep(f32 edge0, f32 edge1, f32 x) {
 // `alpha`. A logistic centred on the stall angle blends the attached linear
 // lift curve into a flat-plate curve; `half_width` (rad) sets how abruptly.
 f32 StallBlend(f32 alpha, f32 stall_alpha, f32 half_width) {
-  f32 x = (std::fabs(alpha) - stall_alpha) / std::max(half_width, 1e-3f);
-  return 1.0f / (1.0f + std::exp(-4.0f * x));
+  f32 x = (::fabs(alpha) - stall_alpha) / rx::Max(half_width, 1e-3f);
+  return 1.0f / (1.0f + ::exp(-4.0f * x));
 }
 
 }  // namespace
@@ -62,7 +62,7 @@ Aircraft::Aircraft(PhysicsWorld& world, const AircraftDesc& desc, const Vec3& po
     : world_(world), desc_(desc) {
   // Clamp payload to the hard structural limit; the plane still spawns when
   // loaded between MTOM and the limit, it just flies badly (see over_mtom()).
-  const f32 max_payload = std::max(0.0f, desc_.structural_mass_limit_kg - desc_.empty_mass_kg);
+  const f32 max_payload = rx::Max(0.0f, desc_.structural_mass_limit_kg - desc_.empty_mass_kg);
   const f32 payload = Clampf(desc_.payload_kg, 0.0f, max_payload);
   desc_.payload_kg = payload;
   total_mass_ = desc_.empty_mass_kg + payload;
@@ -142,8 +142,8 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
 
   // Filter flap deflection toward the quantized command (mechanical lag).
   {
-    const u32 steps = std::max(1u, desc_.flap_steps);
-    const f32 quantized = std::round(Clampf(input.flaps, 0.0f, 1.0f) * steps) / steps;
+    const u32 steps = rx::Max(1u, desc_.flap_steps);
+    const f32 quantized = ::round(Clampf(input.flaps, 0.0f, 1.0f) * steps) / steps;
     const f32 rate = 0.5f;  // full travel in ~2 s
     flaps_ += Clampf(quantized - flaps_, -rate * dt, rate * dt);
   }
@@ -155,8 +155,8 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   const f32 f_com = Dot(vair_com, fwd);
   const f32 u_com = Dot(vair_com, up);
   const f32 s_com = Dot(vair_com, right);
-  const f32 alpha_com = std::atan2(-u_com, f_com);
-  const f32 beta_com = std::atan2(s_com, std::max(std::fabs(f_com), 1e-3f));
+  const f32 alpha_com = ::atan2(-u_com, f_com);
+  const f32 beta_com = ::atan2(s_com, rx::Max(::fabs(f_com), 1e-3f));
 
   // wing halves: strip theory at each half's aerodynamic centre
   // Each half is evaluated at its OWN point velocity (GetPointVelocity), so
@@ -181,13 +181,13 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     }
     const f32 fc = Dot(v, fwd);
     const f32 uc = Dot(v, up);
-    const f32 alpha = std::atan2(-uc, fc);
+    const f32 alpha = ::atan2(-uc, fc);
 
     // Attached linear curve (with flap + aileron camber) blended into a
     // flat-plate curve past the stall; drag rises with the flat-plate term.
     const f32 cl_attached = desc_.wing_cl_alpha * (alpha - desc_.wing_zero_lift_alpha_rad) +
                             flap_cl + cl_bias;
-    const f32 cl_flat = std::sin(2.0f * alpha);  // 2 sin a cos a, flat plate
+    const f32 cl_flat = ::sin(2.0f * alpha);  // 2 sin a cos a, flat plate
     const f32 blend = StallBlend(alpha, desc_.wing_stall_alpha_rad, desc_.post_stall_decay);
     const f32 cl = (1.0f - blend) * cl_attached + blend * cl_flat;
     *stalled = blend > 0.5f;
@@ -195,7 +195,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     // Induced drag from this half's lift; parasitic drag is applied once at the
     // CoM below. Post-stall separation adds a flat-plate drag bump.
     const f32 cd_induced = cl_attached * cl_attached / (kPi * aspect_ratio * desc_.oswald_efficiency);
-    const f32 cd = (1.0f - blend) * cd_induced + blend * (0.15f + 2.0f * std::sin(alpha) * std::sin(alpha));
+    const f32 cd = (1.0f - blend) * cd_induced + blend * (0.15f + 2.0f * ::sin(alpha) * ::sin(alpha));
 
     const f32 qh = 0.5f * kAirDensity * vlen * vlen;
     const f32 lift = qh * half_area * cl;
@@ -226,7 +226,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   // fuselage side drag (sideslip): damps lateral sliding through the air
   {
     const f32 vside = Dot(vair_com, right);
-    const f32 fside = -0.5f * kAirDensity * std::fabs(vside) * vside * desc_.fuselage_side_cd *
+    const f32 fside = -0.5f * kAirDensity * ::fabs(vside) * vside * desc_.fuselage_side_cd *
                       desc_.fuselage_side_area_m2;
     world_.AddForce(body_, right * (fside * aero_fade));
   }
@@ -244,7 +244,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     if (vlen > 1e-3f) {
       const f32 fc = Dot(v, fwd);
       const f32 uc = Dot(v, up);
-      const f32 alpha_t = std::atan2(-uc, fc);
+      const f32 alpha_t = ::atan2(-uc, fc);
       const f32 cl_t = desc_.tail_cl_alpha * alpha_t - desc_.elevator_authority * input.pitch;
       const f32 qt = 0.5f * kAirDensity * vlen * vlen;
       const f32 lift = qt * desc_.tail_area_m2 * cl_t;
@@ -264,7 +264,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     if (vlen > 1e-3f) {
       const f32 fc = Dot(v, fwd);
       const f32 sc = Dot(v, right);
-      const f32 beta_f = std::atan2(sc, std::max(std::fabs(fc), 1e-3f));
+      const f32 beta_f = ::atan2(sc, rx::Max(::fabs(fc), 1e-3f));
       // Side force opposes sideslip (weathervane) and responds to rudder. +yaw
       // input yaws the nose right (toward body -X): with +Z fwd / +Y up / +X
       // left, a nose-right yaw is a NEGATIVE rotation about +Y, which the fin
@@ -292,22 +292,22 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
   f32 engine_load = 0.0f;
   f32 telemetry_rpm = 0.0f;
   if (desc_.propulsion == AircraftDesc::Propulsion::kProp) {
-    const f32 idle_frac = Clampf(desc_.prop_idle_rpm / std::max(desc_.prop_max_rpm, 1.0f), 0.0f, 1.0f);
-    const f32 target = std::max(idle_frac, Clampf(input.throttle, 0.0f, 1.0f));
-    const f32 tau = std::max(desc_.engine_spool_time_s, 1e-3f);
+    const f32 idle_frac = Clampf(desc_.prop_idle_rpm / rx::Max(desc_.prop_max_rpm, 1.0f), 0.0f, 1.0f);
+    const f32 target = rx::Max(idle_frac, Clampf(input.throttle, 0.0f, 1.0f));
+    const f32 tau = rx::Max(desc_.engine_spool_time_s, 1e-3f);
     engine_spin_ += (target - engine_spin_) * Clampf(dt / tau, 0.0f, 1.0f);
     // Momentum-theory-flavoured thrust: power/velocity, capped near static.
     // Shaft power of a fixed-pitch prop grows ~ rpm^3, so idle thrust is tiny
     // (a parked plane at throttle 0 barely creeps) while full power is unchanged.
     const f32 power = desc_.prop_max_power_w * engine_spin_ * engine_spin_ * engine_spin_;
-    const f32 v_eff = std::max(speed, desc_.prop_min_airspeed_mps);
+    const f32 v_eff = rx::Max(speed, desc_.prop_min_airspeed_mps);
     const f32 cap = desc_.prop_static_thrust_cap_n * engine_spin_;
-    thrust = std::min(power * desc_.prop_efficiency / v_eff, cap);
-    engine_load = Clampf(thrust / std::max(desc_.prop_static_thrust_cap_n, 1.0f), 0.0f, 1.0f);
+    thrust = rx::Min(power * desc_.prop_efficiency / v_eff, cap);
+    engine_load = Clampf(thrust / rx::Max(desc_.prop_static_thrust_cap_n, 1.0f), 0.0f, 1.0f);
     telemetry_rpm = engine_spin_ * desc_.prop_max_rpm;
   } else {
     const f32 target = Clampf(input.throttle, 0.0f, 1.0f);
-    const f32 tau = std::max(desc_.jet_spool_time_s, 1e-3f);
+    const f32 tau = rx::Max(desc_.jet_spool_time_s, 1e-3f);
     engine_spin_ += (target - engine_spin_) * Clampf(dt / tau, 0.0f, 1.0f);
     thrust = desc_.jet_max_thrust_n * engine_spin_;
     engine_load = engine_spin_;
@@ -335,7 +335,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     if (compression <= 0.0f) continue;
     const f32 comp = Clampf(compression, 0.0f, w.travel);
     on_ground = true;
-    state_.gear_compression[i] = comp / std::max(w.travel, 1e-3f);
+    state_.gear_compression[i] = comp / rx::Max(w.travel, 1e-3f);
 
     const Vec3 contact = hit.position;
     Vec3 n = hit.normal;
@@ -348,7 +348,7 @@ void Aircraft::Update(const AircraftInput& input, f32 dt) {
     // Suspension spring-damper; never pulls the wheel toward the ground.
     const f32 f_spring = w.spring * comp;
     const f32 f_damp = -w.damper * vn;
-    const f32 fn = std::max(f_spring + f_damp, 0.0f);
+    const f32 fn = rx::Max(f_spring + f_damp, 0.0f);
     Vec3 gear_force = n * fn;
 
     // Ground-plane tire frame: rolling direction = body forward projected onto

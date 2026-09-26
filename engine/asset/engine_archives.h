@@ -1,10 +1,10 @@
 #ifndef RX_ASSET_ENGINE_ARCHIVES_H_
 #define RX_ASSET_ENGINE_ARCHIVES_H_
 
-#include <string>
-#include <string_view>
 
 #include "asset/vfs.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -20,7 +20,7 @@ namespace rx::asset {
 // Where MountEngineArchives looks, in order: RX_ENGINE_ARCHIVES if set, the
 // working directory, the directory the executable sits in, then the build
 // directory the engine was compiled in.
-RX_ASSET_EXPORT std::string FindEngineArchive(std::string_view file_name);
+RX_ASSET_EXPORT base::String FindEngineArchive(base::StringRef file_name);
 
 // Mounts every engine archive found. Returns how many mounted; 0 just means the
 // engine runs without its built-in content (the callers all degrade).

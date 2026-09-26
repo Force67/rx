@@ -1,10 +1,11 @@
 #ifndef RX_PHYSICS_PHYSICS_WORLD_H_
 #define RX_PHYSICS_PHYSICS_WORLD_H_
 
-#include <functional>
-#include <memory>
 
 #include "asset/mesh.h"
+#include "base/functional/function.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
@@ -52,7 +53,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
  public:
   // Returns true with the surface height and flow velocity when `position`
   // is over water. Flow drags floating bodies (rivers carry them).
-  using WaterHeightFn = std::function<bool(const Vec3& position, f32* height, Vec3* flow)>;
+  using WaterHeightFn = base::Function<bool(const Vec3& position, f32* height, Vec3* flow)>;
 
   PhysicsWorld();
   ~PhysicsWorld();
@@ -69,7 +70,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   // tire-friction path samples each wheel's water into a per-vehicle cache on
   // the game thread and the in-step friction callback reads that cache, so a
   // callback touching thread-affine terrain data or physics queries is safe.
-  void set_water_height(WaterHeightFn fn) { water_height_ = std::move(fn); }
+  void set_water_height(WaterHeightFn fn) { water_height_ = base::move(fn); }
 
   // Global uniform wind velocity (m/s, world space) the force-based aero
   // simulators sample as their ambient airmass. Default zero (still air). Cars
@@ -752,7 +753,7 @@ class RX_PHYSICS_EXPORT PhysicsWorld {
   f32 TractionControlThrottle(u32 vehicle_index, f32 forward);
 
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  base::UniquePointer<Impl> impl_;
   WaterHeightFn water_height_;
   Vec3 wind_{};              // global uniform wind velocity, m/s, world space
   f32 surface_wetness_ = 0;  // global rain wetness, 0..1

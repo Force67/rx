@@ -1,8 +1,10 @@
 #include "inventory/world_item.h"
 
-#include <atomic>
-#include <cmath>
+#include <math.h>
 
+#include "base/atomic.h"
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
 #include "ecs/world.h"
 #include "inventory/byte_io.h"
 #include "inventory/inventory.h"
@@ -16,7 +18,7 @@ using namespace detail;
 // The one piece of process-stateful module state: monotonic persistent-id
 // minting. Kept off the functional path (systems still take no globals) and
 // reconciled against loaded ids via ReserveWorldItemId.
-std::atomic<u64> g_next_world_item_id{1};
+base::Atomic<u64> g_next_world_item_id{1};
 
 // The physics layer exposes no body sleep-state or velocity query, so rest is
 // inferred from how little the body moves between syncs. A settled/sleeping
@@ -79,7 +81,7 @@ constexpr u32 kTransformBytes = 12 + 16 + 4;                     // pos, rot, sc
 constexpr u32 kLiveRecordBytes = 8 + 4 + 4 + 8 + kTransformBytes + 1;  // + at_rest flag
 constexpr u32 kDormantRecordBytes = 8 + 4 + 4 + 8 + kTransformBytes;
 
-void WriteTransform(std::vector<u8>& b, const scene::Transform& t) {
+void WriteTransform(base::Vector<u8>& b, const scene::Transform& t) {
   for (int i = 0; i < 3; ++i) PutF32(b, t.position[i]);
   for (int i = 0; i < 4; ++i) PutF32(b, t.rotation[i]);
   PutF32(b, t.scale);
@@ -104,21 +106,9 @@ void ReserveWorldItemId(u64 seen_id) {
   }
 }
 
-size_t WorldItemStore::CellKeyHash::operator()(const CellKey& key) const {
-  u64 h = 1469598103934665603ull;  // FNV-1a 64 offset basis
-  auto mix = [&](i32 v) {
-    h ^= u32(v);
-    h *= 1099511628211ull;
-  };
-  mix(key.x);
-  mix(key.y);
-  mix(key.z);
-  return size_t(h);
-}
-
 WorldItemStore::CellKey WorldItemStore::CellOf(const Vec3& p) const {
-  return CellKey{i32(std::floor(p.x / cell_size_)), i32(std::floor(p.y / cell_size_)),
-                 i32(std::floor(p.z / cell_size_))};
+  return CellKey{i32(::floor(p.x / cell_size_)), i32(::floor(p.y / cell_size_)),
+                 i32(::floor(p.z / cell_size_))};
 }
 
 void WorldItemStore::Insert(const WorldItemRecord& record) {
@@ -128,25 +118,26 @@ void WorldItemStore::Insert(const WorldItemRecord& record) {
   ++count_;
 }
 
-std::vector<WorldItemRecord> WorldItemStore::TakeNear(const Vec3& center, f32 radius) {
-  std::vector<WorldItemRecord> out;
-  const i32 span = i32(std::ceil(radius / cell_size_));
+base::Vector<WorldItemRecord> WorldItemStore::TakeNear(const Vec3& center, f32 radius) {
+  base::Vector<WorldItemRecord> out;
+  const i32 span = i32(::ceil(radius / cell_size_));
   const CellKey c = CellOf(center);
   for (i32 z = c.z - span; z <= c.z + span; ++z) {
     for (i32 y = c.y - span; y <= c.y + span; ++y) {
       for (i32 x = c.x - span; x <= c.x + span; ++x) {
-        auto it = cells_.find(CellKey{x, y, z});
-        if (it == cells_.end()) continue;
-        for (const auto& rec : it->second) out.push_back(rec);
-        count_ -= it->second.size();
-        cells_.erase(it);
+        const CellKey key{x, y, z};
+        const base::Vector<WorldItemRecord>* bucket = cells_.Find(key);
+        if (!bucket) continue;
+        for (const auto& rec : *bucket) out.push_back(rec);
+        count_ -= bucket->size();
+        cells_.erase(key);
       }
     }
   }
   return out;
 }
 
-void WorldItemStore::ForEach(const std::function<void(const WorldItemRecord&)>& fn) const {
+void WorldItemStore::ForEach(const base::Function<void(const WorldItemRecord&)>& fn) const {
   for (const auto& [key, bucket] : cells_)
     for (const auto& rec : bucket) fn(rec);
 }
@@ -225,7 +216,7 @@ void SyncWorldItems(ecs::World& world, physics::PhysicsWorld& physics) {
     // between the two unit quaternions (|dot| handles the double-cover sign).
     const f32 rdot = t.rotation[0] * rot[0] + t.rotation[1] * rot[1] + t.rotation[2] * rot[2] +
                      t.rotation[3] * rot[3];
-    const f32 ang_delta = 1.0f - std::fabs(rdot);
+    const f32 ang_delta = 1.0f - ::fabs(rdot);
 
     t.position[0] = pos.x;
     t.position[1] = pos.y;
@@ -253,8 +244,8 @@ void HibernateDistantWorldItems(ecs::World& world, physics::PhysicsWorld& physic
                                 WorldItemStore& store, const Vec3& center, f32 radius) {
   const f32 r2 = radius * radius;
   // Collect first: mutating the ECS (Destroy) mid-Each can skip/revisit rows.
-  std::vector<ecs::Entity> victims;
-  std::vector<WorldItemRecord> records;
+  base::Vector<ecs::Entity> victims;
+  base::Vector<WorldItemRecord> records;
   world.Each<scene::Transform, WorldItem>([&](ecs::Entity e, scene::Transform& t, WorldItem& wi) {
     if (!wi.at_rest) return;
     const f32 dx = t.position[0] - center.x;
@@ -278,7 +269,7 @@ void HibernateDistantWorldItems(ecs::World& world, physics::PhysicsWorld& physic
 void WakeWorldItemsNear(ecs::World& world, physics::PhysicsWorld& physics,
                         const ItemCatalog& catalog, WorldItemStore& store, const Vec3& center,
                         f32 radius) {
-  std::vector<WorldItemRecord> woken = store.TakeNear(center, radius);
+  base::Vector<WorldItemRecord> woken = store.TakeNear(center, radius);
   for (const auto& rec : woken) {
     const ItemDef* def = catalog.Find(rec.item);
     ecs::Entity e = MaterializeWorldItem(world, physics, def, rec.transform, rec.item, rec.count,
@@ -292,7 +283,7 @@ void WakeWorldItemsNear(ecs::World& world, physics::PhysicsWorld& physics,
 
 // persistence (world items)
 
-std::vector<u8> SaveWorldItems(ecs::World& world, const WorldItemStore& store) {
+base::Vector<u8> SaveWorldItems(ecs::World& world, const WorldItemStore& store) {
   struct Live {
     scene::Transform transform;
     ItemDefId item;
@@ -301,14 +292,14 @@ std::vector<u8> SaveWorldItems(ecs::World& world, const WorldItemStore& store) {
     u64 persistent_id;
     u8 at_rest;
   };
-  std::vector<Live> live;
+  base::Vector<Live> live;
   world.Each<scene::Transform, WorldItem>([&](ecs::Entity, scene::Transform& t, WorldItem& wi) {
     live.push_back(Live{t, wi.item, wi.count, wi.payload, wi.persistent_id, u8(wi.at_rest ? 1 : 0)});
   });
-  std::vector<WorldItemRecord> dormant;
+  base::Vector<WorldItemRecord> dormant;
   store.ForEach([&](const WorldItemRecord& rec) { dormant.push_back(rec); });
 
-  std::vector<u8> b;
+  base::Vector<u8> b;
   b.push_back(kMagic0);
   b.push_back(kMagic1);
   b.push_back(kMagic2);
@@ -336,7 +327,7 @@ std::vector<u8> SaveWorldItems(ecs::World& world, const WorldItemStore& store) {
 }
 
 bool LoadWorldItems(ecs::World& world, physics::PhysicsWorld& physics, const ItemCatalog& catalog,
-                    WorldItemStore& store, const std::vector<u8>& blob) {
+                    WorldItemStore& store, const base::Vector<u8>& blob) {
   Reader r(blob);
   if (r.U8() != kMagic0 || r.U8() != kMagic1 || r.U8() != kMagic2 || r.U8() != kMagic3) return false;
   if (r.U32() != kVersion) return false;
@@ -347,7 +338,7 @@ bool LoadWorldItems(ecs::World& world, physics::PhysicsWorld& physics, const Ite
   // leave the world and store untouched, not half-loaded.
   u32 live = r.U32();
   if (!r.ok || live > r.Remaining() / kLiveRecordBytes) return false;
-  std::vector<WorldItemRecord> live_recs;
+  base::Vector<WorldItemRecord> live_recs;
   live_recs.reserve(live);
   for (u32 i = 0; i < live && r.ok; ++i) {
     WorldItemRecord rec;
@@ -363,7 +354,7 @@ bool LoadWorldItems(ecs::World& world, physics::PhysicsWorld& physics, const Ite
 
   u32 dormant = r.U32();
   if (!r.ok || dormant > r.Remaining() / kDormantRecordBytes) return false;
-  std::vector<WorldItemRecord> dorm_recs;
+  base::Vector<WorldItemRecord> dorm_recs;
   dorm_recs.reserve(dormant);
   for (u32 i = 0; i < dormant && r.ok; ++i) {
     WorldItemRecord rec;

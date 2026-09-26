@@ -1,7 +1,7 @@
 #ifndef RX_RENDER2D_ISO_H_
 #define RX_RENDER2D_ISO_H_
 
-#include <cmath>
+#include <math.h>
 
 #include "render2d/types2d.h"
 
@@ -49,7 +49,7 @@ struct IsoGrid {
   // Nearest integer cell for a world point (floor of the fractional map).
   Vec2i WorldToCell(Vec2 world) const {
     Vec2 f = WorldToCellF(world);
-    return {static_cast<i32>(std::floor(f.x)), static_cast<i32>(std::floor(f.y))};
+    return {static_cast<i32>(::floor(f.x)), static_cast<i32>(::floor(f.y))};
   }
 
   // Painter's-order sort key: cells with a larger (col+row) are nearer the

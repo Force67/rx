@@ -1,7 +1,8 @@
 #include "render/atmosphere/surface_weather.h"
 
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "shaders/surface_weather_cs_hlsl.h"
@@ -82,7 +83,7 @@ ResourceHandle SurfaceWeather::AddToGraph(RenderGraph& graph, ResourceHandle col
       [this, color, normals, depth, out, sky_view, sky_sampler, extent, frame,
        slot](PassContext& ctx) {
         const SurfaceCamera camera{frame.inv_view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
         SurfacePush push{};
         push.camera_pos[0] = frame.camera_pos.x;
@@ -92,7 +93,7 @@ ResourceHandle SurfaceWeather::AddToGraph(RenderGraph& graph, ResourceHandle col
         push.params[1] = frame.snow_cover;
         push.params[2] = frame.time;
         push.params[3] = frame.rain;
-        std::memcpy(push.occl, frame.occl, sizeof(push.occl));
+        base::MemCopy(push.occl, frame.occl, sizeof(push.occl));
         push.occl2[0] = frame.occlusion ? frame.occl_range : 0.0f;
         push.size[0] = extent.width;
         push.size[1] = extent.height;

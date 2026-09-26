@@ -1,3 +1,4 @@
+#include "base/memory/unique_pointer.h"
 #include "http/stream.h"
 
 #ifdef _WIN32
@@ -16,20 +17,16 @@
 #include <unistd.h>
 #endif
 
-#include <chrono>
-#include <cstdio>
-#include <cstring>
-#include <mutex>
+#include <stdio.h>
+#include <string.h>
 
 namespace rx::http {
 
 i64 StreamLimits::remaining_ms() const {
   if (!has_deadline())
     return -1;
-  const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        deadline - std::chrono::steady_clock::now())
-                        .count();
-  return left > 0 ? static_cast<i64>(left) : 0;
+  const i64 left = (deadline - base::TimeTicks::Now()).InMilliseconds();
+  return left > 0 ? left : 0;
 }
 
 namespace {
@@ -84,11 +81,12 @@ void SetTimeouts(SocketHandle s, u32 timeout_ms) {
 // in rx guarantees it ran: zetanet does its own, and rx::http builds without
 // zetanet.
 void EnsureSocketLibrary() {
-  static std::once_flag once;
-  std::call_once(once, [] {
+  static const bool started = [] {
     WSADATA data{};
     ::WSAStartup(MAKEWORD(2, 2), &data);
-  });
+    return true;
+  }();
+  (void)started;
 }
 #else
 using SocketHandle = int;
@@ -154,10 +152,10 @@ base::String SocketError(const char* what, int err) {
     if (text[i] == '\r' || text[i] == '\n')
       text[i] = ' ';
   }
-  std::snprintf(buffer, sizeof(buffer), "%s: %s (%d)", what,
+  ::snprintf(buffer, sizeof(buffer), "%s: %s (%d)", what,
                 written != 0 ? text : "socket error", err);
 #else
-  std::snprintf(buffer, sizeof(buffer), "%s: %s (%d)", what, std::strerror(err), err);
+  ::snprintf(buffer, sizeof(buffer), "%s: %s (%d)", what, ::strerror(err), err);
 #endif
   return base::String(buffer);
 }
@@ -179,7 +177,7 @@ class TcpStream final : public Stream {
       return false;
 
     char service[8] = {};
-    std::snprintf(service, sizeof(service), "%u", static_cast<unsigned>(port));
+    ::snprintf(service, sizeof(service), "%u", static_cast<unsigned>(port));
 
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
@@ -189,7 +187,7 @@ class TcpStream final : public Stream {
     const int rc = ::getaddrinfo(host.c_str(), service, &hints, &resolved);
     if (rc != 0 || resolved == nullptr) {
       char buffer[256] = {};
-      std::snprintf(buffer, sizeof(buffer), "cannot resolve %s: %s", host.c_str(),
+      ::snprintf(buffer, sizeof(buffer), "cannot resolve %s: %s", host.c_str(),
                     rc != 0 ? ::gai_strerror(rc) : "the resolver returned no addresses");
       *error = base::String(buffer);
       if (resolved != nullptr)
@@ -217,7 +215,7 @@ class TcpStream final : public Stream {
     }
     ::freeaddrinfo(resolved);
     char buffer[320] = {};
-    std::snprintf(buffer, sizeof(buffer), "cannot connect to %s:%u (%s)", host.c_str(),
+    ::snprintf(buffer, sizeof(buffer), "cannot connect to %s:%u (%s)", host.c_str(),
                   static_cast<unsigned>(port), last.c_str());
     *error = base::String(buffer);
     return false;
@@ -304,11 +302,10 @@ class TcpStream final : public Stream {
     return false;
   }
 
-  void MarkProgress() { last_progress_ = std::chrono::steady_clock::now(); }
+  void MarkProgress() { last_progress_ = base::TimeTicks::Now(); }
 
   u32 Idle() const {
-    const auto since = std::chrono::steady_clock::now() - last_progress_;
-    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(since).count();
+    const i64 ms = (base::TimeTicks::Now() - last_progress_).InMilliseconds();
     return ms < 0 ? 0u : static_cast<u32>(ms);
   }
 
@@ -352,8 +349,7 @@ class TcpStream final : public Stream {
       // cover it), so a process with a periodic timer would see a spurious
       // "connect failed". Wait in ticks instead, which also gives the cancel
       // flag and the deadline a look in between.
-      const auto give_up =
-          std::chrono::steady_clock::now() + std::chrono::milliseconds(limits_.idle_ms);
+      const base::TimeTicks give_up = base::TimeTicks::Now() + base::Milliseconds(limits_.idle_ms);
       int ready = 0;
       for (;;) {
         ready = PollWritable(sock, static_cast<int>(tick_ms));
@@ -367,7 +363,7 @@ class TcpStream final : public Stream {
           CloseSocket(sock);
           return false;
         }
-        if (std::chrono::steady_clock::now() >= give_up) {
+        if (base::TimeTicks::Now() >= give_up) {
           ready = 0;
           break;
         }
@@ -397,14 +393,14 @@ class TcpStream final : public Stream {
 
   SocketHandle socket_ = kInvalidSocket;
   StreamLimits limits_;
-  std::chrono::steady_clock::time_point last_progress_ = std::chrono::steady_clock::now();
+  base::TimeTicks last_progress_ = base::TimeTicks::Now();
   bool cancelled_ = false;
 };
 
 }  // namespace
 
-std::unique_ptr<Stream> MakeTcpStream() {
-  return std::make_unique<TcpStream>();
+base::UniquePointer<Stream> MakeTcpStream() {
+  return base::MakeUnique<TcpStream>();
 }
 
 }  // namespace rx::http

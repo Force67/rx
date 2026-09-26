@@ -1,12 +1,12 @@
 #ifndef RX_ASSET_SKELETON_H_
 #define RX_ASSET_SKELETON_H_
 
-#include <string>
-#include <string_view>
 
 #include <base/containers/vector.h>
 
 #include "asset/asset_id.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/math.h"
 #include "core/types.h"
 
@@ -18,7 +18,7 @@ namespace rx::asset {
 // static source geometry. Stored decomposed so animation can layer rotation
 // deltas onto the rest orientation.
 struct Bone {
-  std::string name;
+  base::String name;
   i32 parent = -1;  // index into Skeleton::bones, -1 = root
   Vec3 bind_translation;
   Quat bind_rotation;
@@ -32,7 +32,7 @@ struct Skeleton {
   AssetId id;
   base::Vector<Bone> bones;
 
-  i32 Find(std::string_view name) const {
+  i32 Find(base::StringRef name) const {
     for (u32 i = 0; i < bones.size(); ++i) {
       if (bones[i].name == name) return static_cast<i32>(i);
     }
@@ -47,7 +47,7 @@ struct Skeleton {
 // palette is
 // `bone_model[skeleton.Find(bones[i])] * inverse_bind[i]`.
 struct SkinBinding {
-  base::Vector<std::string> bones;
+  base::Vector<base::String> bones;
   base::Vector<Mat4> inverse_bind;
 
   bool empty() const { return bones.empty(); }

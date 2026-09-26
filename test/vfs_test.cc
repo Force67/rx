@@ -3,18 +3,20 @@
 // override order, the pack writer/reader round trip (store + deflate + the
 // incompressible fallback), checksum tamper detection, and enumeration.
 
-#include <cstdio>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
-#include <random>
-#include <string>
+#include <stdio.h>
+#include <string.h>
 
 #include "asset/asset_id.h"
 #include "asset/pack.h"
 #include "asset/vfs.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 
-namespace fs = std::filesystem;
+namespace fs = rx::fs;
 namespace asset = rx::asset;
 
 namespace {
@@ -24,20 +26,50 @@ int failures = 0;
 #define CHECK(cond)                                                          \
   do {                                                                       \
     if (!(cond)) {                                                           \
-      std::fprintf(stderr, "vfs_test: FAIL %s:%d: %s\n", __FILE__, __LINE__, \
+      ::fprintf(stderr, "vfs_test: FAIL %s:%d: %s\n", __FILE__, __LINE__, \
                    #cond);                                                   \
       ++failures;                                                            \
     }                                                                        \
   } while (0)
 
-void WriteFile(const fs::path& path, std::string_view contents) {
-  fs::create_directories(path.parent_path());
-  std::ofstream out(path, std::ios::binary | std::ios::trunc);
-  out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
+void WriteFile(base::StringRef path, base::StringRef contents) {
+  fs::CreateDirectories(fs::ParentPath(path));
+  fs::WriteTextFile(path, contents);
 }
 
-std::string AsString(const base::Vector<u8>& bytes) {
-  return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+// Mersenne Twister, as std::mt19937 specifies it. The incompressible payload
+// was std::mt19937(1234) output, so this reproduces those exact bytes.
+class Mt19937 {
+ public:
+  explicit Mt19937(u32 seed) {
+    state_[0] = seed;
+    for (u32 i = 1; i < kN; ++i)
+      state_[i] = 1812433253u * (state_[i - 1] ^ (state_[i - 1] >> 30)) + i;
+  }
+  u32 operator()() {
+    if (index_ == kN) Twist();
+    u32 y = state_[index_++];
+    y ^= y >> 11;
+    y ^= (y << 7) & 0x9d2c5680u;
+    y ^= (y << 15) & 0xefc60000u;
+    return y ^ (y >> 18);
+  }
+
+ private:
+  static constexpr u32 kN = 624;
+  void Twist() {
+    for (u32 i = 0; i < kN; ++i) {
+      const u32 y = (state_[i] & 0x80000000u) | (state_[(i + 1) % kN] & 0x7fffffffu);
+      state_[i] = state_[(i + 397) % kN] ^ (y >> 1) ^ ((y & 1) ? 0x9908b0dfu : 0u);
+    }
+    index_ = 0;
+  }
+  u32 state_[kN];
+  u32 index_ = kN;
+};
+
+base::String AsString(const base::Vector<u8>& bytes) {
+  return base::String(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
 
 void TestSplitVirtualPath() {
@@ -53,27 +85,27 @@ void TestSplitVirtualPath() {
   CHECK(vp.mount.empty() && vp.path == "a/b://c");
 }
 
-void TestMounts(const fs::path& tmp) {
-  const fs::path base_dir = tmp / "base";
-  const fs::path patch_dir = tmp / "patch";
-  const fs::path dlc_dir = tmp / "dlc";
-  WriteFile(base_dir / "textures/rock.dds", "base rock");
-  WriteFile(base_dir / "readme.txt", "base readme");
-  WriteFile(patch_dir / "textures/rock.dds", "patched rock");
-  WriteFile(dlc_dir / "extra.txt", "dlc extra");
+void TestMounts(base::StringRef tmp) {
+  const base::String base_dir = fs::Join(tmp, "base");
+  const base::String patch_dir = fs::Join(tmp, "patch");
+  const base::String dlc_dir = fs::Join(tmp, "dlc");
+  WriteFile(fs::Join(base_dir, "textures/rock.dds"), "base rock");
+  WriteFile(fs::Join(base_dir, "readme.txt"), "base readme");
+  WriteFile(fs::Join(patch_dir, "textures/rock.dds"), "patched rock");
+  WriteFile(fs::Join(dlc_dir, "extra.txt"), "dlc extra");
 
   asset::Vfs vfs;
 
   // Legacy root namespace with override order: later mounts win.
-  vfs.Mount(asset::MakeLooseFileProvider(base_dir.string()));
-  vfs.Mount(asset::MakeLooseFileProvider(patch_dir.string()));
+  vfs.Mount(asset::MakeLooseFileProvider(base_dir));
+  vfs.Mount(asset::MakeLooseFileProvider(patch_dir));
   auto rock = vfs.Read("Textures\\Rock.DDS");  // normalization on the way in
   CHECK(rock && AsString(*rock) == "patched rock");
   auto readme = vfs.Read("readme.txt");
   CHECK(readme && AsString(*readme) == "base readme");
 
   // Named mount, addressed by scheme; the scheme is case-insensitive.
-  vfs.Mount("game", asset::MakeLooseFileProvider(base_dir.string()));
+  vfs.Mount("game", asset::MakeLooseFileProvider(base_dir));
   auto via_scheme = vfs.Read("GAME://Readme.TXT");
   CHECK(via_scheme && AsString(*via_scheme) == "base readme");
   CHECK(vfs.Contains("game://textures/rock.dds"));
@@ -81,24 +113,24 @@ void TestMounts(const fs::path& tmp) {
   CHECK(!vfs.Contains("nosuch://readme.txt"));
 
   // Nested mount point: the provider's files appear under game://dlc/.
-  vfs.Mount("game://dlc/", asset::MakeLooseFileProvider(dlc_dir.string()));
+  vfs.Mount("game://dlc/", asset::MakeLooseFileProvider(dlc_dir));
   auto extra = vfs.Read("game://dlc/extra.txt");
   CHECK(extra && AsString(*extra) == "dlc extra");
   CHECK(vfs.Contains("game://dlc/extra.txt"));
   CHECK(!vfs.Contains("dlc/extra.txt"));  // not in the root namespace
 
   // A later mount on the same scheme overrides the earlier one.
-  vfs.Mount("game://", asset::MakeLooseFileProvider(patch_dir.string()));
+  vfs.Mount("game://", asset::MakeLooseFileProvider(patch_dir));
   auto patched = vfs.Read("game://textures/rock.dds");
   CHECK(patched && AsString(*patched) == "patched rock");
 
   // Size without reading.
-  CHECK(vfs.Size("game://dlc/extra.txt") == std::optional<rx::u64>(9));
+  CHECK(vfs.Size("game://dlc/extra.txt").value_or(0) == 9);
   CHECK(!vfs.Size("game://dlc/none.txt"));
 
   // Enumerate emits full virtual paths; root entries stay schemeless.
   bool saw_root = false, saw_dlc = false, saw_game = false;
-  vfs.Enumerate([&](std::string_view path) {
+  vfs.Enumerate([&](base::StringRef path) {
     if (path == "readme.txt") saw_root = true;
     if (path == "game://dlc/extra.txt") saw_dlc = true;
     if (path == "game://readme.txt") saw_game = true;
@@ -106,7 +138,7 @@ void TestMounts(const fs::path& tmp) {
   CHECK(saw_root && saw_dlc && saw_game);
 
   bool mount_scoped_dlc = false, mount_scoped_root = false;
-  vfs.EnumerateMount("game", [&](std::string_view path) {
+  vfs.EnumerateMount("game", [&](base::StringRef path) {
     if (path == "game://dlc/extra.txt") mount_scoped_dlc = true;
     if (path == "readme.txt") mount_scoped_root = true;
   });
@@ -116,21 +148,21 @@ void TestMounts(const fs::path& tmp) {
   CHECK(vfs.Unmount("game://dlc/") == 1);
   CHECK(!vfs.Contains("game://dlc/extra.txt"));
   const size_t before = vfs.mount_count();
-  CHECK(vfs.UnmountByPrefix(patch_dir.string()) == 2);  // root + game:// copies
+  CHECK(vfs.UnmountByPrefix(patch_dir) == 2);  // root + game:// copies
   CHECK(vfs.mount_count() == before - 2);
   auto unpatched = vfs.Read("game://textures/rock.dds");
   CHECK(unpatched && AsString(*unpatched) == "base rock");
 }
 
-void TestPackRoundTrip(const fs::path& tmp) {
-  fs::create_directories(tmp);
-  const fs::path archive = tmp / "test.rxp";
+void TestPackRoundTrip(base::StringRef tmp) {
+  fs::CreateDirectories(tmp);
+  const base::String archive = fs::Join(tmp, "test.rxp");
 
-  std::string compressible(64 * 1024, 'a');
+  base::String compressible(64 * 1024, 'a');
   for (size_t i = 0; i < compressible.size(); i += 7) compressible[i] = 'b';
 
   base::Vector<u8> incompressible(4096);
-  std::mt19937 rng(1234);
+  Mt19937 rng(1234);
   for (size_t i = 0; i < incompressible.size(); ++i)
     incompressible[i] = static_cast<u8>(rng());
 
@@ -138,30 +170,30 @@ void TestPackRoundTrip(const fs::path& tmp) {
   writer.Add("Meshes\\Rock.NIF", base::Vector<u8>(), asset::PackCompression::kStore);
   {
     base::Vector<u8> bytes(compressible.size());
-    std::memcpy(bytes.data(), compressible.data(), compressible.size());
-    writer.Add("textures/big.dds", std::move(bytes));
+    base::MemCopy(bytes.data(), compressible.data(), compressible.size());
+    writer.Add("textures/big.dds", base::move(bytes));
   }
-  writer.Add("sound/noise.bin", std::move(incompressible));  // deflate must fall back
+  writer.Add("sound/noise.bin", base::move(incompressible));  // deflate must fall back
   {
     base::Vector<u8> bytes(5);
-    std::memcpy(bytes.data(), "wrong", 5);
-    writer.Add("dup.txt", std::move(bytes));
+    base::MemCopy(bytes.data(), "wrong", 5);
+    writer.Add("dup.txt", base::move(bytes));
   }
   {
     base::Vector<u8> bytes(5);
-    std::memcpy(bytes.data(), "right", 5);
-    writer.Add("DUP.txt", std::move(bytes));  // replaces: same normalized path
+    base::MemCopy(bytes.data(), "right", 5);
+    writer.Add("DUP.txt", base::move(bytes));  // replaces: same normalized path
   }
   CHECK(writer.entry_count() == 4);
-  CHECK(writer.WriteTo(archive.string()));
+  CHECK(writer.WriteTo(archive));
 
-  base::UniquePointer<asset::PackFile> pack = asset::PackFile::Open(archive.string());
+  base::UniquePointer<asset::PackFile> pack = asset::PackFile::Open(archive);
   CHECK(pack);
   if (!pack) return;
   CHECK(pack->entry_count() == 4);
 
   // Entries land under their normalized paths.
-  std::optional<size_t> rock = pack->Find("meshes/rock.nif");
+  base::Optional<size_t> rock = pack->Find("meshes/rock.nif");
   CHECK(rock);
   if (rock) {
     CHECK(pack->entry(*rock).size == 0);
@@ -169,7 +201,7 @@ void TestPackRoundTrip(const fs::path& tmp) {
     CHECK(bytes && bytes->empty());
   }
 
-  std::optional<size_t> big = pack->Find("textures/big.dds");
+  base::Optional<size_t> big = pack->Find("textures/big.dds");
   CHECK(big);
   if (big) {
     const asset::PackEntryView entry = pack->entry(*big);
@@ -179,7 +211,7 @@ void TestPackRoundTrip(const fs::path& tmp) {
     CHECK(bytes && AsString(*bytes) == compressible);
   }
 
-  std::optional<size_t> noise = pack->Find("sound/noise.bin");
+  base::Optional<size_t> noise = pack->Find("sound/noise.bin");
   CHECK(noise);
   if (noise) {
     const asset::PackEntryView entry = pack->entry(*noise);
@@ -187,7 +219,7 @@ void TestPackRoundTrip(const fs::path& tmp) {
     CHECK(entry.stored_size == entry.size);
   }
 
-  std::optional<size_t> dup = pack->Find("dup.txt");
+  base::Optional<size_t> dup = pack->Find("dup.txt");
   CHECK(dup);
   if (dup) {
     auto bytes = pack->ReadEntry(*dup);
@@ -197,66 +229,68 @@ void TestPackRoundTrip(const fs::path& tmp) {
 
   // Served through the Vfs under a named mount.
   asset::Vfs vfs;
-  auto provider = asset::MakePackFileProvider(archive.string());
+  auto provider = asset::MakePackFileProvider(archive);
   CHECK(provider);
-  vfs.Mount("pak", std::move(provider));
+  vfs.Mount("pak", base::move(provider));
   auto via_vfs = vfs.Read("pak://dup.txt");
   CHECK(via_vfs && AsString(*via_vfs) == "right");
-  CHECK(vfs.Size("pak://textures/big.dds") == std::optional<rx::u64>(compressible.size()));
+  CHECK(vfs.Size("pak://textures/big.dds").value_or(0) == compressible.size());
 }
 
-void TestPackTamper(const fs::path& tmp) {
-  fs::create_directories(tmp);
-  const fs::path archive = tmp / "tamper.rxp";
+void TestPackTamper(base::StringRef tmp) {
+  fs::CreateDirectories(tmp);
+  const base::String archive = fs::Join(tmp, "tamper.rxp");
   asset::PackWriter writer;
   {
     base::Vector<u8> bytes(11);
-    std::memcpy(bytes.data(), "hello world", 11);
-    writer.Add("a.txt", std::move(bytes), asset::PackCompression::kStore);
+    base::MemCopy(bytes.data(), "hello world", 11);
+    writer.Add("a.txt", base::move(bytes), asset::PackCompression::kStore);
   }
-  CHECK(writer.WriteTo(archive.string()));
+  CHECK(writer.WriteTo(archive));
 
   // Flip one payload byte: the entry checksum must catch it.
   {
-    std::fstream f(archive, std::ios::binary | std::ios::in | std::ios::out);
-    f.seekp(-1, std::ios::end);
-    f.put('X');
+    FILE* f = ::fopen(archive.c_str(), "r+b");
+    ::fseek(f, -1, SEEK_END);
+    ::fputc('X', f);
+    ::fclose(f);
   }
-  base::UniquePointer<asset::PackFile> pack = asset::PackFile::Open(archive.string());
+  base::UniquePointer<asset::PackFile> pack = asset::PackFile::Open(archive);
   CHECK(pack);
   if (pack) {
-    std::optional<size_t> index = pack->Find("a.txt");
+    base::Optional<size_t> index = pack->Find("a.txt");
     CHECK(index && !pack->ReadEntry(*index));
   }
 
   // Corrupt the table of contents: Open must refuse the archive.
   {
-    std::fstream f(archive, std::ios::binary | std::ios::in | std::ios::out);
-    f.seekp(56);  // inside the first TOC entry
-    f.put('X');
+    FILE* f = ::fopen(archive.c_str(), "r+b");
+    ::fseek(f, 56, SEEK_SET);  // inside the first TOC entry
+    ::fputc('X', f);
+    ::fclose(f);
   }
-  CHECK(!asset::PackFile::Open(archive.string()));
+  CHECK(!asset::PackFile::Open(archive));
 
-  CHECK(!asset::PackFile::Open((tmp / "missing.rxp").string()));
+  CHECK(!asset::PackFile::Open(fs::Join(tmp, "missing.rxp")));
 }
 
 }  // namespace
 
 int main() {
-  const fs::path tmp = fs::temp_directory_path() / "rx_vfs_test";
-  fs::remove_all(tmp);
-  fs::create_directories(tmp);
+  const base::String tmp = fs::Join(fs::TempDirectory(), "rx_vfs_test");
+  fs::RemoveAll(tmp);
+  fs::CreateDirectories(tmp);
 
   TestSplitVirtualPath();
-  TestMounts(tmp / "mounts");
-  TestPackRoundTrip(tmp / "pack");
-  TestPackTamper(tmp / "tamper");
+  TestMounts(fs::Join(tmp, "mounts"));
+  TestPackRoundTrip(fs::Join(tmp, "pack"));
+  TestPackTamper(fs::Join(tmp, "tamper"));
 
-  fs::remove_all(tmp);
+  fs::RemoveAll(tmp);
   if (failures) {
-    std::fprintf(stderr, "vfs_test: %d failures\n", failures);
+    ::fprintf(stderr, "vfs_test: %d failures\n", failures);
     return 1;
   }
-  std::printf("vfs_test: OK\n");
+  ::printf("vfs_test: OK\n");
   return 0;
 }

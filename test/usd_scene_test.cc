@@ -1,8 +1,9 @@
-#include <cmath>
-#include <cstdio>
-#include <filesystem>
+#include <math.h>
+#include <stdio.h>
 
 #include "asset/usd_loader.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 
 namespace {
 
@@ -174,20 +175,20 @@ int failures = 0;
 void Check(bool condition, const char *message) {
   if (condition)
     return;
-  std::fprintf(stderr, "usd_scene_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "usd_scene_test: FAIL: %s\n", message);
   ++failures;
 }
 
-bool Write(const std::filesystem::path &path, const char *text, size_t size) {
-  std::FILE *file = std::fopen(path.string().c_str(), "wb");
+bool Write(const base::String &path, const char *text, size_t size) {
+  FILE *file = ::fopen(path.c_str(), "wb");
   if (!file)
     return false;
-  const bool ok = std::fwrite(text, 1, size, file) == size;
-  std::fclose(file);
+  const bool ok = ::fwrite(text, 1, size, file) == size;
+  ::fclose(file);
   return ok;
 }
 
-bool Near(f32 value, f32 expected) { return std::fabs(value - expected) < 1e-4f; }
+bool Near(f32 value, f32 expected) { return ::fabs(value - expected) < 1e-4f; }
 
 } // namespace
 
@@ -199,22 +200,22 @@ int main() {
             !asset::IsUsdPath("no_extension"),
         "non-usd paths are not claimed");
 
-  const std::filesystem::path dir = std::filesystem::temp_directory_path();
-  const std::filesystem::path prop = dir / "rx_usd_prop.usda";
-  const std::filesystem::path stage = dir / "rx_usd_stage.usda";
+  const base::String dir = rx::fs::TempDirectory();
+  const base::String prop = rx::fs::Join(dir, "rx_usd_prop.usda");
+  const base::String stage = rx::fs::Join(dir, "rx_usd_stage.usda");
   if (!Write(prop, kPropLayer, sizeof(kPropLayer) - 1) ||
       !Write(stage, kStage, sizeof(kStage) - 1)) {
-    std::fprintf(stderr, "usd_scene_test: cannot create fixture\n");
+    ::fprintf(stderr, "usd_scene_test: cannot create fixture\n");
     return 1;
   }
 
   asset::ImportedScene scene;
-  const bool loaded = asset::LoadUsdScene(stage.string(), &scene);
-  std::filesystem::remove(prop);
-  std::filesystem::remove(stage);
+  const bool loaded = asset::LoadUsdScene(stage, &scene);
+  rx::fs::Remove(prop);
+  rx::fs::Remove(stage);
   Check(loaded, "referenced usda stage loads");
   if (!loaded) {
-    std::fprintf(stderr, "usd_scene_test: FAIL\n");
+    ::fprintf(stderr, "usd_scene_test: FAIL\n");
     return 1;
   }
 
@@ -259,15 +260,15 @@ int main() {
 
   // OpenPBR: tydra parses it into a separate slot on RenderMaterial, so the
   // importer has to reach for it instead of falling back to engine defaults.
-  const std::filesystem::path openpbr_stage = dir / "rx_usd_openpbr.usda";
+  const base::String openpbr_stage = rx::fs::Join(dir, "rx_usd_openpbr.usda");
   if (!Write(openpbr_stage, kOpenPbrStage, sizeof(kOpenPbrStage) - 1)) {
-    std::fprintf(stderr, "usd_scene_test: cannot create openpbr fixture\n");
+    ::fprintf(stderr, "usd_scene_test: cannot create openpbr fixture\n");
     return 1;
   }
   asset::ImportedScene openpbr_scene;
   const bool openpbr_loaded =
-      asset::LoadUsdScene(openpbr_stage.string(), &openpbr_scene);
-  std::filesystem::remove(openpbr_stage);
+      asset::LoadUsdScene(openpbr_stage, &openpbr_scene);
+  rx::fs::Remove(openpbr_stage);
   Check(openpbr_loaded, "an OpenPBR stage loads");
 
   if (openpbr_loaded && openpbr_scene.materials.size() == 1) {
@@ -301,18 +302,18 @@ int main() {
     Check(false, "the OpenPBR stage yields exactly one material");
   }
 
-  const std::filesystem::path textured_stage = dir / "rx_usd_textured.usda";
-  const std::filesystem::path grey = dir / "rx_usd_grey.png";
+  const base::String textured_stage = rx::fs::Join(dir, "rx_usd_textured.usda");
+  const base::String grey = rx::fs::Join(dir, "rx_usd_grey.png");
   if (!Write(textured_stage, kTexturedStage, sizeof(kTexturedStage) - 1) ||
       !Write(grey, kGreyPng, sizeof(kGreyPng) - 1)) {
-    std::fprintf(stderr, "usd_scene_test: cannot create textured fixture\n");
+    ::fprintf(stderr, "usd_scene_test: cannot create textured fixture\n");
     return 1;
   }
   asset::ImportedScene textured_scene;
   const bool textured_loaded =
-      asset::LoadUsdScene(textured_stage.string(), &textured_scene);
-  std::filesystem::remove(textured_stage);
-  std::filesystem::remove(grey);
+      asset::LoadUsdScene(textured_stage, &textured_scene);
+  rx::fs::Remove(textured_stage);
+  rx::fs::Remove(grey);
   Check(textured_loaded, "a textured UsdPreviewSurface stage loads");
   if (textured_loaded && textured_scene.materials.size() == 1) {
     const asset::Material &m = textured_scene.materials[0];
@@ -327,7 +328,7 @@ int main() {
   }
 
   if (failures == 0) {
-    std::puts("usd_scene_test: PASS");
+    ::puts("usd_scene_test: PASS");
     return 0;
   }
   return 1;

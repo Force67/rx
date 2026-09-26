@@ -1,5 +1,7 @@
 #include "render/core/render_graph.h"
 
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 
@@ -102,10 +104,10 @@ ResourceHandle RenderGraph::CreateTexture(const TransientTextureDesc& desc) {
   return static_cast<ResourceHandle>(resources_.size());
 }
 
-ResourceHandle RenderGraph::ImportImage(std::string name, const GpuImage& image,
+ResourceHandle RenderGraph::ImportImage(base::String name, const GpuImage& image,
                                         ResourceState* state) {
   Resource resource;
-  resource.desc.name = std::move(name);
+  resource.desc.name = base::move(name);
   resource.desc.format = image.format;
   resource.image = image;
   resource.imported = true;
@@ -132,10 +134,10 @@ ResourceHandle RenderGraph::ImportBackbuffer(const GpuImage& image, ResourceStat
   return static_cast<ResourceHandle>(resources_.size());
 }
 
-void RenderGraph::AddPass(std::string name, SetupFn setup, ExecuteFn execute) {
-  Pass pass{.name = std::move(name), .builder = {}, .execute = std::move(execute), .barriers = {}};
+void RenderGraph::AddPass(base::String name, SetupFn setup, ExecuteFn execute) {
+  Pass pass{.name = base::move(name), .builder = {}, .execute = base::move(execute), .barriers = {}};
   setup(pass.builder);
-  passes_.push_back(std::move(pass));
+  passes_.push_back(base::move(pass));
 }
 
 bool RenderGraph::Compile(Device& device, TransientPool& pool) {
@@ -199,7 +201,7 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
     }
     entry.barriers = static_cast<u32>(pass.barriers.size());
     stats_.barrier_count += entry.barriers;
-    stats_.passes.push_back(std::move(entry));
+    stats_.passes.push_back(base::move(entry));
   }
   for (const Resource& resource : resources_) {
     Stats::Resource entry;
@@ -213,7 +215,7 @@ bool RenderGraph::Compile(Device& device, TransientPool& pool) {
       stats_.transient_bytes += entry.bytes;
       ++stats_.transient_count;
     }
-    stats_.resources.push_back(std::move(entry));
+    stats_.resources.push_back(base::move(entry));
   }
   return true;
 }
@@ -223,7 +225,7 @@ CommandList* RenderGraph::Execute(PassContext& ctx) {
   auto run_pass = [&](Pass& pass) {
     if (pass_begin_) pass_begin_(*ctx.cmd, pass.name.c_str());
     if (!pass.barriers.empty()) {
-      ctx.cmd->TextureBarriers({pass.barriers.data(), pass.barriers.size()});
+      ctx.cmd->TextureBarriers(base::Span(pass.barriers.data(), pass.barriers.size()));
     }
     if (pass.execute) pass.execute(ctx);
     if (pass_end_) pass_end_(*ctx.cmd);
@@ -258,7 +260,7 @@ CommandList* RenderGraph::Execute(PassContext& ctx) {
   if (!do_async) {
     for (Pass& pass : passes_) run_pass(pass);
     if (!final_barriers_.empty()) {
-      ctx.cmd->TextureBarriers({final_barriers_.data(), final_barriers_.size()});
+      ctx.cmd->TextureBarriers(base::Span(final_barriers_.data(), final_barriers_.size()));
     }
     return ctx.cmd;
   }
@@ -297,7 +299,7 @@ CommandList* RenderGraph::Execute(PassContext& ctx) {
     if (!passes_[i].builder.async) run_pass(passes_[i]);
   }
   if (!final_barriers_.empty()) {
-    ctx.cmd->TextureBarriers({final_barriers_.data(), final_barriers_.size()});
+    ctx.cmd->TextureBarriers(base::Span(final_barriers_.data(), final_barriers_.size()));
   }
   return ctx.cmd;
 }

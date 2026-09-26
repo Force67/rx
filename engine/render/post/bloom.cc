@@ -1,8 +1,7 @@
 #include "render/post/bloom.h"
 
-#include <algorithm>
-
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/rhi/device.h"
 #include "shaders/bloom_down_cs_hlsl.h"
 #include "shaders/bloom_up_cs_hlsl.h"
@@ -62,8 +61,8 @@ ResourceHandle BloomPass::AddToGraph(RenderGraph& graph, ResourceHandle input, u
   u32 mip_width = width;
   u32 mip_height = height;
   for (u32 i = 0; i < kMips; ++i) {
-    mip_width = std::max(1u, mip_width / 2);
-    mip_height = std::max(1u, mip_height / 2);
+    mip_width = rx::Max(1u, mip_width / 2);
+    mip_height = rx::Max(1u, mip_height / 2);
     widths[i] = mip_width;
     heights[i] = mip_height;
     mips[i] = graph.CreateTexture({.name = "bloom_mip",

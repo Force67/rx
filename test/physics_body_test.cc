@@ -1,8 +1,9 @@
 // Exercises the body/joint adapter surface a physics-first locomotion feedback
 // controller reads and drives: body velocity/mass/COM, force/torque injection,
 // gravity, joint motor torque limits, and per-foot contact recording.
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "physics/physics_world.h"
 
@@ -17,23 +18,23 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "physics_body_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "physics_body_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-2f) {
-  if (std::abs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "physics_body_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
+  if (::abs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "physics_body_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
 }
 
 // `actual` within `frac` (fraction, e.g. 0.1 = 10%) of `expected`.
 void NearRel(f32 actual, f32 expected, f32 frac, const char* message) {
-  Near(actual, expected, message, frac * std::abs(expected));
+  Near(actual, expected, message, frac * ::abs(expected));
 }
 
-bool Finite(f32 v) { return std::isfinite(v); }
+bool Finite(f32 v) { return ::isfinite(v); }
 bool Finite(const Vec3& v) { return Finite(v.x) && Finite(v.y) && Finite(v.z); }
 
 void CheckFinite(const Vec3& v, const char* message) { Check(Finite(v), message); }
@@ -152,7 +153,7 @@ void TestApplyTorque() {
   Check(w.GetBodyVelocity(box, &lin, &ang1), "angular velocity readable");
   CheckFinite(ang1, "angular velocity finite (early)");
   Check(ang1.y > 0, "torque about +Y spins the body positively about Y");
-  Check(std::abs(ang1.y) > std::abs(ang1.x) && std::abs(ang1.y) > std::abs(ang1.z),
+  Check(::abs(ang1.y) > ::abs(ang1.x) && ::abs(ang1.y) > ::abs(ang1.z),
         "spin stays about the applied (Y) axis");
 
   spin(20);
@@ -219,7 +220,7 @@ void TestContacts() {
       Check(Finite(c.impulse), "contact impulse finite");
       // Normal points INTO the box, i.e. up for a box resting on the floor;
       // the contact sits at the box's bottom face (y ~ 0).
-      if (c.normal.y > 0.7f && std::abs(c.position.y) < 0.1f) floor_like = true;
+      if (c.normal.y > 0.7f && ::abs(c.position.y) < 0.1f) floor_like = true;
     }
   }
   Check(saw_contact, "a box landing on the floor reports at least one contact");
@@ -275,7 +276,7 @@ void TestMotors() {
     Check(w.GetJointOrientation(joint, q), "joint orientation readable");
     Check(Finite(q[0]) && Finite(q[1]) && Finite(q[2]) && Finite(q[3]), "joint orientation finite");
     // |dot| of unit quaternions = cos(half-angle); 1 means aligned.
-    return std::abs(q[0] * target[0] + q[1] * target[1] + q[2] * target[2] + q[3] * target[3]);
+    return ::abs(q[0] * target[0] + q[1] * target[1] + q[2] * target[2] + q[3] * target[3]);
   };
 
   step(120);  // 2 s
@@ -303,7 +304,7 @@ void TestMotors() {
   step(20);
   f32 after[4] = {0, 0, 0, 1};
   w.GetJointOrientation(joint, after);
-  const f32 moved = std::abs(before[0] * after[0] + before[1] * after[1] + before[2] * after[2] +
+  const f32 moved = ::abs(before[0] * after[0] + before[1] * after[1] + before[2] * after[2] +
                              before[3] * after[3]);
   Check(moved < 0.999f, "disabled motors let the joint swing free");
 }
@@ -393,9 +394,9 @@ int main() {
   TestWatchedContactReuse();
 
   if (failures == 0) {
-    std::printf("physics_body_test: all checks passed\n");
+    ::printf("physics_body_test: all checks passed\n");
     return 0;
   }
-  std::fprintf(stderr, "physics_body_test: %d checks failed\n", failures);
+  ::fprintf(stderr, "physics_body_test: %d checks failed\n", failures);
   return 1;
 }

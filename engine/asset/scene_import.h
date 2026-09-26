@@ -1,7 +1,6 @@
 #ifndef RX_ASSET_SCENE_IMPORT_H_
 #define RX_ASSET_SCENE_IMPORT_H_
 
-#include <string>
 
 #include <base/containers/vector.h>
 
@@ -9,6 +8,7 @@
 #include "asset/mesh.h"
 #include "asset/skeleton.h"
 #include "asset/texture.h"
+#include "base/strings/xstring.h"
 #include "core/math.h"
 
 namespace rx::asset {
@@ -65,7 +65,7 @@ struct ImportedScene {
     f32 cone_angle = 180.0f; // ShapingAPI cone, degrees (180 = no cone)
     f32 cone_softness = 0.0f;
     bool normalize = false; // divide by area (UsdLux `normalize`)
-    std::string texture;    // dome/rect environment map, resolved to disk
+    base::String texture;    // dome/rect environment map, resolved to disk
     // Chromaticity of `texture`, solid-angle averaged and normalized to unit
     // luminance, or (1,1,1) with no texture. A dome's `color` is only a tint on
     // top of its environment map, so the map is what decides what colour the

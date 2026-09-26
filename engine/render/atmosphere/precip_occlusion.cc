@@ -1,7 +1,8 @@
 #include "render/atmosphere/precip_occlusion.h"
 
-#include <cmath>
+#include <math.h>
 
+#include "base/functional/function.h"
 #include "core/log.h"
 
 namespace rx::render {
@@ -41,9 +42,9 @@ void PrecipOcclusion::BeginFrame(const Vec3& eye, u32 frame_index) {
   // Quantize the anchor to the coarse cell: the projection window only ever
   // moves in whole cells (which are whole texels), so map content never
   // shimmers under camera motion; between cells the map is simply reused.
-  f32 ax = std::floor(eye.x / kAnchorCell + 0.5f) * kAnchorCell;
-  f32 ay = std::floor(eye.y / kAnchorCell + 0.5f) * kAnchorCell;
-  f32 az = std::floor(eye.z / kAnchorCell + 0.5f) * kAnchorCell;
+  f32 ax = ::floor(eye.x / kAnchorCell + 0.5f) * kAnchorCell;
+  f32 ay = ::floor(eye.y / kAnchorCell + 0.5f) * kAnchorCell;
+  f32 az = ::floor(eye.z / kAnchorCell + 0.5f) * kAnchorCell;
   if (ax != center_[0] || ay != center_[1] || az != center_[2]) dirty_ = true;
   // Cheap steady-state refresh so doors/moving cover eventually update.
   if (frame_index % kRefreshFrames == 0) dirty_ = true;
@@ -60,7 +61,7 @@ void PrecipOcclusion::Params(f32 out[4]) const {
 }
 
 void PrecipOcclusion::AddToGraph(RenderGraph& graph,
-                                 const std::function<void(CommandList&, const Mat4&)>& draw) {
+                                 const base::Function<void(CommandList&, const Mat4&)>& draw) {
   if (!available() || !dirty_) return;
   dirty_ = false;
 
@@ -91,7 +92,7 @@ void PrecipOcclusion::AddToGraph(RenderGraph& graph,
             map_, rendered_ ? ResourceState::kShaderReadAll : ResourceState::kUndefined,
             ResourceState::kDepthTarget);
         rendered_ = true;
-        ctx.cmd->TextureBarriers({&to_write, 1});
+        ctx.cmd->TextureBarriers(base::Span(&to_write, 1));
 
         DepthAttachment depth{
             .view = map_.view, .load = LoadOp::kClear, .store = StoreOp::kStore, .clear = 1.0f};
@@ -106,7 +107,7 @@ void PrecipOcclusion::AddToGraph(RenderGraph& graph,
         // compute; kShaderReadAll covers both.
         TextureBarrier to_read =
             Transition(map_, ResourceState::kDepthTarget, ResourceState::kShaderReadAll);
-        ctx.cmd->TextureBarriers({&to_read, 1});
+        ctx.cmd->TextureBarriers(base::Span(&to_read, 1));
         ctx.cmd->MemoryBarrier(BarrierScope::kAllCommands, BarrierScope::kComputeRead);
       });
 }

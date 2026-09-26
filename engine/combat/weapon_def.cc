@@ -1,6 +1,5 @@
 #include "combat/weapon_def.h"
-
-#include <algorithm>
+#include "core/scalar.h"
 
 namespace rx::combat {
 
@@ -30,7 +29,7 @@ void WeaponCatalog::Clear() {
 f32 FalloffScale(const WeaponDef& def, f32 distance) {
   if (def.falloff_end <= def.falloff_start) return 1.0f;
   if (distance <= def.falloff_start) return 1.0f;
-  const f32 min_scale = std::clamp(def.falloff_min_scale, 0.0f, 1.0f);
+  const f32 min_scale = rx::Clamp(def.falloff_min_scale, 0.0f, 1.0f);
   if (distance >= def.falloff_end) return min_scale;
   const f32 t = (distance - def.falloff_start) / (def.falloff_end - def.falloff_start);
   return 1.0f + (min_scale - 1.0f) * t;

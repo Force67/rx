@@ -1,10 +1,10 @@
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <string>
+#include <math.h>
+#include <stdio.h>
 
 #include "anim/locomotion.h"
 #include "asset/asset_id.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 
 namespace {
 
@@ -16,13 +16,13 @@ int failures = 0;
 void Check(bool condition, const char *message) {
   if (condition)
     return;
-  std::fprintf(stderr, "walk_style_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "walk_style_test: FAIL: %s\n", message);
   ++failures;
 }
 
 f32 RotationDelta(const Quat &a, const Quat &b) {
-  const f32 dot = std::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
-  return 1.0f - std::min(dot, 1.0f);
+  const f32 dot = ::fabs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w);
+  return 1.0f - rx::Min(dot, 1.0f);
 }
 
 void AddBone(asset::Skeleton *skeleton, const char *name, i32 parent,
@@ -73,8 +73,8 @@ void TestPresetsAndBlend() {
   const f32 sway_phase = AdvancePhase(0, 1.35f, 0.25f, sway);
   const f32 march_phase = AdvancePhase(0, 1.35f, 0.25f, march);
   Check(march_phase > sway_phase, "style cadence affects phase advance");
-  Check(std::string(WalkStyleName(WalkStyleKind::kHipSway)) == "Hip Sway" &&
-            std::string(WalkStyleName(WalkStyleKind::kMarch)) == "March",
+  Check(base::String(WalkStyleName(WalkStyleKind::kHipSway)) == "Hip Sway" &&
+            base::String(WalkStyleName(WalkStyleKind::kMarch)) == "March",
         "walk styles have stable editor-facing names");
 }
 
@@ -102,8 +102,8 @@ void TestGenesisAliases() {
                           march_pose.rotation[hip]) *
                 2.0f,
         "Genesis aliases receive stronger Hip Sway pelvis rotation");
-  Check(std::fabs(sway_pose.translation[hip].x) >
-            std::fabs(march_pose.translation[hip].x) * 4.0f,
+  Check(::fabs(sway_pose.translation[hip].x) >
+            ::fabs(march_pose.translation[hip].x) * 4.0f,
         "Genesis hip receives stronger Hip Sway lateral travel");
   Check(RotationDelta(skeleton.bones[thigh].bind_rotation,
                       march_pose.rotation[thigh]) >
@@ -122,7 +122,7 @@ void TestGenesisAliases() {
         "styled Genesis pose produces a complete model palette");
   for (const Mat4 &matrix : matrices)
     for (f32 value : matrix.m)
-      Check(std::isfinite(value), "styled pose matrices stay finite");
+      Check(::isfinite(value), "styled pose matrices stay finite");
 }
 
 } // namespace
@@ -131,9 +131,9 @@ int main() {
   TestPresetsAndBlend();
   TestGenesisAliases();
   if (failures == 0) {
-    std::puts("walk_style_test: PASS");
+    ::puts("walk_style_test: PASS");
     return 0;
   }
-  std::fprintf(stderr, "walk_style_test: %d failure(s)\n", failures);
+  ::fprintf(stderr, "walk_style_test: %d failure(s)\n", failures);
   return 1;
 }

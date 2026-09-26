@@ -1,11 +1,7 @@
 #ifndef RX_RUNTIME_VIEWER_H_
 #define RX_RUNTIME_VIEWER_H_
 
-#include <cstdio>
-#include <memory>
-#include <span>
-#include <string>
-#include <utility>
+#include <stdio.h>
 
 #include <base/containers/vector.h>
 
@@ -22,6 +18,10 @@
 #include "script/script_arena.h"
 #include "script/script_symbols.h"
 
+#include "base/containers/pair.h"
+#include "base/containers/span.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "debug_ui.h"
 #include "demo_world.h"
 #include "engine_context.h"
@@ -57,7 +57,7 @@ class Viewer : public app::Application {
   bool LoadRxScene();
   // RX_TATTOO capture hook: bakes decal layers onto the heaviest imported mesh.
   void StampTattoos(const asset::ImportedScene& scene,
-                    std::span<const std::pair<u32, ecs::Entity>> instances);
+                    base::Span<const base::Pair<u32, ecs::Entity>> instances);
   // Held for the session so OnShutdown can hand it back; DecalBaker reuses
   // handles with no generation counter, so a leaked one would be handed to the
   // next acquirer complete with this scene's baked decals.
@@ -156,7 +156,7 @@ class Viewer : public app::Application {
   bool cam_init_ = false;
   bool cam_orbit_ = false;
   f32 cam_time_ = 0;
-  std::FILE* cam_record_ = nullptr;
+  FILE* cam_record_ = nullptr;
   base::Vector<CamKey> cam_replay_;
 
   // Cinematic showcase (RX_SHOWCASE): a smooth drone flythrough over the
@@ -166,7 +166,7 @@ class Viewer : public app::Application {
   bool cam_showcase_ = false;
   bool showcase_done_ = false;
   bool showcase_quit_ = false;  // RX_SHOWCASE_QUIT: exit when the pass ends
-  std::string showcase_shot_dir_;
+  base::String showcase_shot_dir_;
   f32 showcase_dt_min_ = 1e9f;
   f32 showcase_dt_max_ = 0;
   f32 showcase_bench_time_ = 0;  // summed dt of benchmarked frames (excludes load hitches)
@@ -180,12 +180,12 @@ class Viewer : public app::Application {
   script::ScriptSymbols symbols_;
   script::ScriptArena script_scratch_;
   script::HandlerContext script_ctx_;
-  std::unique_ptr<authoring::CommandBridge> bridge_;
+  base::UniquePointer<authoring::CommandBridge> bridge_;
   authoring::CommandEndpoint authoring_endpoint_;
 
   // Shared service bundle handed to the demo scenes and the debug overlay.
   EngineContext ctx_;
-  std::unique_ptr<DemoScenes> demos_;
+  base::UniquePointer<DemoScenes> demos_;
 };
 
 }  // namespace rx

@@ -1,9 +1,8 @@
 #include "ui/splash.h"
 
-#include <cstddef>
-#include <cstring>
-#include <filesystem>
-#include <system_error>
+#include <stddef.h>
+#include <stdio.h>
+#include <string.h>
 
 #include <ugui/core/color.h>
 #include <ugui/style/style.h>
@@ -12,6 +11,10 @@
 #include <ugui/widgets/image.h>
 #include <ugui/widgets/widget.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "core/file_system.h"
 #include "core/log.h"
 #include "render/rhi/vulkan_interop.h"
 #include "ui/brand/rx_engine_svg.h"
@@ -20,8 +23,6 @@
 // embedded wordmark, lay out the title card and fade it off the screen.
 namespace rx::ui {
 namespace {
-
-namespace fs = std::filesystem;
 
 // Fractions of the window the logo is allowed to take. Height leads (the plate
 // reads as a band across the middle); the width clamp keeps the wordmark off
@@ -44,8 +45,7 @@ const char* SystemFont() {
       "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
   };
   for (const char* candidate : kCandidates) {
-    std::error_code ec;
-    if (fs::exists(candidate, ec)) return candidate;
+    if (rx::fs::Exists(candidate)) return candidate;
   }
   return nullptr;
 }
@@ -80,9 +80,9 @@ void TrimTransparentBorder(ugui::SvgImage& image) {
   for (u32 y = 0; y < out_h; ++y) {
     const u8* src = &image.pixels[((y + min_y) * w + min_x) * 4];
     u8* dst = &image.pixels[y * out_w * 4];
-    std::memmove(dst, src, static_cast<std::size_t>(out_w) * 4);
+    base::MemMove(dst, src, static_cast<size_t>(out_w) * 4);
   }
-  image.pixels.resize(static_cast<std::size_t>(out_w) * out_h * 4);
+  image.pixels.resize(static_cast<size_t>(out_w) * out_h * 4);
   image.width = out_w;
   image.height = out_h;
 }
@@ -153,7 +153,7 @@ bool Splash::Initialize(Window& window, render::Renderer& renderer, asset::Vfs& 
 }
 
 bool Splash::LoadFont(asset::Vfs& vfs) {
-  if (std::optional<base::Vector<u8>> bytes = vfs.Read(kFontAsset)) {
+  if (base::Optional<base::Vector<u8>> bytes = vfs.Read(kFontAsset)) {
     const ugui::FontHandle font = ui_->LoadFontMemory(
         reinterpret_cast<const char*>(bytes->data()), bytes->size());
     if (font != ugui::kInvalidFont) {
@@ -266,7 +266,7 @@ void Splash::BuildDocument() {
   // box has to hold the aspect of the upload. Fractional px, because rounding
   // the two sides apart skews it. flex-shrink: 0, because a column short on
   // room takes the height back and leaves the width alone.
-  std::snprintf(doc, sizeof(doc),
+  ::snprintf(doc, sizeof(doc),
                 "panel splash_root {\n"
                 "  width: %d; height: %d; margin: %d 0 0 %d;\n"
                 "  background: #f4f4f5;\n"
@@ -338,7 +338,7 @@ void Splash::Draw(render::FrameView& view) {
   // underneath still records: drop it and the fade dissolves to the bare scene
   // rather than to the application's first screen, which on a game is a world
   // that has not finished streaming.
-  view.hud_draw = [this, under = std::move(view.hud_draw)](render::CommandList& cmd) {
+  view.hud_draw = [this, under = base::move(view.hud_draw)](render::CommandList& cmd) {
     if (under) under(cmd);
     if (draw_data_) backend_.Render(*draw_data_, render::GetVkCommandBuffer(cmd));
   };

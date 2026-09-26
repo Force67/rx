@@ -1,10 +1,13 @@
 #include "audio/xwma.h"
 
-#include <cstring>
-#include <vector>
+#include <string.h>
 
 #include "audio/ffmpeg_codec.h"
 #include "audio/wav.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
 #include "core/log.h"
 
 namespace rx::audio {
@@ -39,8 +42,8 @@ Chunk FindChunk(ByteSpan riff, u32 tag) {
 
 // Builds a standard RIFF/WAVE file around a raw fmt chunk and PCM data, so a Wwise
 // PCM payload can be decoded by the native WAV path instead of a codec backend.
-std::vector<u8> WrapAsWave(const Chunk& fmt, const Chunk& data) {
-  std::vector<u8> w;
+base::Vector<u8> WrapAsWave(const Chunk& fmt, const Chunk& data) {
+  base::Vector<u8> w;
   auto tag = [&](const char* t) {
     for (int i = 0; i < 4; ++i) w.push_back(static_cast<u8>(t[i]));
   };
@@ -63,7 +66,7 @@ std::vector<u8> WrapAsWave(const Chunk& fmt, const Chunk& data) {
 
 // Wwise PCM and IEEE float can be decoded natively; everything else (Wwise Vorbis,
 // xWMA, WMA) needs a codec backend.
-std::unique_ptr<Decoder> OpenWem(ByteSpan bytes) {
+base::UniquePointer<Decoder> OpenWem(ByteSpan bytes) {
   Chunk fmt = FindChunk(bytes, FourCc('f', 'm', 't', ' '));
   Chunk data = FindChunk(bytes, FourCc('d', 'a', 't', 'a'));
   if (fmt.data && fmt.size >= 16 && data.data) {
@@ -72,9 +75,9 @@ std::unique_ptr<Decoder> OpenWem(ByteSpan bytes) {
     u16 real = codec;
     if (codec == kExtensible && fmt.size >= 26) real = ReadU16LE(fmt.data + 24);
     if (real == kPcm || real == kFloat) {
-      std::vector<u8> wave = WrapAsWave(fmt, data);
+      base::Vector<u8> wave = WrapAsWave(fmt, data);
       AudioClip clip;
-      if (DecodeWav(ByteSpan{wave.data(), wave.size()}, &clip)) return MakeClipDecoder(std::move(clip));
+      if (DecodeWav(ByteSpan{wave.data(), wave.size()}, &clip)) return MakeClipDecoder(base::move(clip));
     }
   }
   // Compressed Wwise media (typically Wwise Vorbis): best-effort through FFmpeg.
@@ -83,15 +86,15 @@ std::unique_ptr<Decoder> OpenWem(ByteSpan bytes) {
 
 // FUZ = "FUZE" magic, a version, a LIP (lipsync) block, then an embedded xWMA
 // RIFF. Strip the header and lip block and decode the audio that follows.
-std::unique_ptr<Decoder> OpenFuz(ByteSpan bytes) {
+base::UniquePointer<Decoder> OpenFuz(ByteSpan bytes) {
   if (bytes.size() < 12) return nullptr;
   const u32 lip_size = ReadU32LE(bytes.data() + 8);
   size_t audio_off = 12 + lip_size;
   if (audio_off + 12 > bytes.size()) {
     // Some tools omit/!align the lip size; fall back to scanning for the RIFF.
-    audio_off = std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size())
+    audio_off = base::StringRef(reinterpret_cast<const char*>(bytes.data()), bytes.size())
                     .find("RIFF", 12);
-    if (audio_off == std::string_view::npos) return nullptr;
+    if (audio_off == base::StringRef::npos) return nullptr;
   }
   ByteSpan audio = bytes.subspan(audio_off);
   return OpenFfmpegDecoder(audio);
@@ -99,7 +102,7 @@ std::unique_ptr<Decoder> OpenFuz(ByteSpan bytes) {
 
 }  // namespace
 
-std::unique_ptr<Decoder> OpenCompressed(ByteSpan bytes, CompressedKind kind) {
+base::UniquePointer<Decoder> OpenCompressed(ByteSpan bytes, CompressedKind kind) {
   switch (kind) {
     case CompressedKind::kXwma:
       return OpenFfmpegDecoder(bytes);

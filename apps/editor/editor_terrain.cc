@@ -1,21 +1,28 @@
 #include "editor_app.h"
 
-#include <algorithm>
-#include <cmath>
-#include <filesystem>
-#include <functional>
-#include <limits>
-#include <string>
-#include <utility>
+#include <float.h>
+#include <math.h>
 
 #include "asset/gltf_loader.h"
+#include "base/algorithm.h"
+#include "base/containers/array.h"
+#include "base/containers/pair.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
+#include "core/file_system.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "edit/reflect.h"
 #include "render/core/renderer.h"
 #include "scene/components.h"
 
 namespace rx::editor {
-namespace fs = std::filesystem;
 
 namespace {
 
@@ -30,19 +37,19 @@ const char* BrushLabel(terrain::TerrainBrushMode mode) {
   return "Edit Terrain";
 }
 
-u32 PackRgba(const std::array<u8, 4>& color) {
+u32 PackRgba(const base::Array<u8, 4>& color) {
   return (static_cast<u32>(color[0]) << 24) | (static_cast<u32>(color[1]) << 16) |
          (static_cast<u32>(color[2]) << 8) | color[3];
 }
 
 class TerrainCommand final : public edit::Command {
  public:
-  using Refresh = std::function<void(std::span<const terrain::TerrainTileKey>)>;
+  using Refresh = base::Function<void(base::Span<const terrain::TerrainTileKey>)>;
 
-  TerrainCommand(terrain::Terrain* target, terrain::TerrainChange change, std::string label,
+  TerrainCommand(terrain::Terrain* target, terrain::TerrainChange change, base::String label,
                  Refresh refresh)
-      : target_(target), change_(std::move(change)), label_(std::move(label)),
-        refresh_(std::move(refresh)) {}
+      : target_(target), change_(base::move(change)), label_(base::move(label)),
+        refresh_(base::move(refresh)) {}
 
   void Apply(ecs::World&) override {
     // A failed apply means the terrain no longer matches the recorded
@@ -65,13 +72,13 @@ class TerrainCommand final : public edit::Command {
 
  private:
   void RefreshTiles() {
-    refresh_(std::span<const terrain::TerrainTileKey>(change_.dirty_tiles.data(),
+    refresh_(base::Span<const terrain::TerrainTileKey>(change_.dirty_tiles.data(),
                                                       change_.dirty_tiles.size()));
   }
 
   terrain::Terrain* target_;
   terrain::TerrainChange change_;
-  std::string label_;
+  base::String label_;
   Refresh refresh_;
 };
 
@@ -84,11 +91,11 @@ void Editor::SetupDefaultTerrain() {
   desc.tile_quads = 16;
   desc.sample_spacing = 0.5f;
 
-  auto add_layer = [&](const char* name, std::array<u8, 4> color) {
+  auto add_layer = [&](const char* name, base::Array<u8, 4> color) {
     terrain::TerrainLayer layer;
     layer.name = name;
     layer.debug_rgba = color;
-    desc.layers.push_back(std::move(layer));
+    desc.layers.push_back(base::move(layer));
   };
   add_layer("Meadow", {82, 122, 67, 255});
   add_layer("Earth", {126, 87, 55, 255});
@@ -96,15 +103,15 @@ void Editor::SetupDefaultTerrain() {
   add_layer("Sand", {184, 157, 103, 255});
 
   ClearTerrainVisuals();
-  terrain_ = terrain::Terrain(std::move(desc));
+  terrain_ = terrain::Terrain(base::move(desc));
   // The previous terrain may have had more layers; a stale out-of-range
   // selection makes every paint dab silently no-op.
   terrain_brush_layer_ = 0;
   const u32 side = terrain_.samples_per_side();
   const u32 quads = terrain_.desc().tile_quads;
   const f32 spacing = terrain_.desc().sample_spacing;
-  std::vector<f32> heights(static_cast<size_t>(side) * side);
-  std::vector<terrain::TerrainWeights> weights(heights.size());
+  base::Vector<f32> heights(static_cast<size_t>(side) * side);
+  base::Vector<terrain::TerrainWeights> weights(heights.size());
 
   for (i32 tile_z = -2; tile_z < 2; ++tile_z) {
     for (i32 tile_x = -2; tile_x < 2; ++tile_x) {
@@ -114,14 +121,14 @@ void Editor::SetupDefaultTerrain() {
           const i32 grid_z = tile_z * static_cast<i32>(quads) + static_cast<i32>(z);
           const f32 world_x = grid_x * spacing;
           const f32 world_z = grid_z * spacing;
-          const f32 broad = 0.46f * std::sin(world_x * 0.22f) * std::cos(world_z * 0.18f);
-          const f32 detail = 0.17f * std::sin((world_x + world_z) * 0.48f) +
-                             0.10f * std::cos((world_x - world_z) * 0.61f);
-          const f32 knoll = 0.30f * std::exp(-(world_x * world_x + world_z * world_z) / 95.0f);
+          const f32 broad = 0.46f * ::sin(world_x * 0.22f) * ::cos(world_z * 0.18f);
+          const f32 detail = 0.17f * ::sin((world_x + world_z) * 0.48f) +
+                             0.10f * ::cos((world_x - world_z) * 0.61f);
+          const f32 knoll = 0.30f * ::exp(-(world_x * world_x + world_z * world_z) / 95.0f);
           const size_t sample = static_cast<size_t>(z) * side + x;
           heights[sample] = broad + detail + knoll;
 
-          const f32 patch = std::sin(world_x * 0.31f) * std::cos(world_z * 0.27f);
+          const f32 patch = ::sin(world_x * 0.31f) * ::cos(world_z * 0.27f);
           if (heights[sample] > 0.62f) {
             weights[sample].rgba = {40, 25, 190, 0};
           } else if (heights[sample] < -0.25f) {
@@ -173,7 +180,7 @@ void Editor::ClearTerrainVisuals() {
 void Editor::RebuildTerrainVisuals() {
   ClearTerrainVisuals();
   for (const terrain::TerrainTile& tile : terrain_.tiles()) {
-    std::optional<asset::Mesh> mesh = terrain_.BuildTileMesh(tile.key, terrain_material_);
+    base::Optional<asset::Mesh> mesh = terrain_.BuildTileMesh(tile.key, terrain_material_);
     if (!mesh) {
       RX_WARN("editor: failed to build terrain tile {},{}", tile.key.x, tile.key.z);
       continue;
@@ -184,22 +191,23 @@ void Editor::RebuildTerrainVisuals() {
               tile.key.z);
     }
     const asset::AssetId mesh_id = mesh->id;
-    const std::string name = "Terrain [" + std::to_string(tile.key.x) + "," +
-                             std::to_string(tile.key.z) + "]";
-    meshes_[mesh_id.hash] = MeshRecord{std::move(*mesh), name};
+    const base::String name = "Terrain [" + rx::ToString(tile.key.x) + "," +
+                             rx::ToString(tile.key.z) + "]";
+    meshes_[mesh_id.hash] = MeshRecord{base::move(*mesh), name};
     ecs::Entity entity = SpawnTerrainTile(tile.key, mesh_id);
-    terrain_tiles_.emplace(tile.key, TerrainTileVisual{tile.key, entity, mesh_id});
+    terrain_tiles_.emplace(TerrainTileMapKey(tile.key),
+                           TerrainTileVisual{tile.key, entity, mesh_id});
   }
 }
 
-void Editor::RebuildTerrainTiles(std::span<const terrain::TerrainTileKey> keys, bool live) {
+void Editor::RebuildTerrainTiles(base::Span<const terrain::TerrainTileKey> keys, bool live) {
   for (terrain::TerrainTileKey key : keys) {
-    auto visual = terrain_tiles_.find(key);
+    auto visual = terrain_tiles_.find(TerrainTileMapKey(key));
     if (visual == terrain_tiles_.end()) {
       RX_WARN("editor: no visual mapping for dirty terrain tile {},{}", key.x, key.z);
       continue;
     }
-    std::optional<asset::Mesh> mesh = terrain_.BuildTileMesh(key, terrain_material_);
+    base::Optional<asset::Mesh> mesh = terrain_.BuildTileMesh(key, terrain_material_);
     if (!mesh) continue;
     if (renderer_) {
       const bool updated = live ? renderer_->UpdateDynamicMesh(*mesh)
@@ -208,9 +216,9 @@ void Editor::RebuildTerrainTiles(std::span<const terrain::TerrainTileKey> keys, 
         RX_WARN("editor: failed to {} terrain tile {},{}",
                 live ? "update" : "upload", key.x, key.z);
     }
-    const std::string name = "Terrain [" + std::to_string(key.x) + "," +
-                             std::to_string(key.z) + "]";
-    meshes_[mesh->id.hash] = MeshRecord{std::move(*mesh), name};
+    const base::String name = "Terrain [" + rx::ToString(key.x) + "," +
+                             rx::ToString(key.z) + "]";
+    meshes_[mesh->id.hash] = MeshRecord{base::move(*mesh), name};
   }
 }
 
@@ -222,12 +230,12 @@ bool Editor::IsTerrainVisual(ecs::Entity entity) const {
   return false;
 }
 
-std::pair<Vec3, Vec3> Editor::ViewportCameraRay(f32 mx, f32 my) const {
+base::Pair<Vec3, Vec3> Editor::ViewportCameraRay(f32 mx, f32 my) const {
   const f32 width = static_cast<f32>(window_->width());
   const f32 height = static_cast<f32>(window_->height());
   const f32 ndc_x = 2.0f * mx / width - 1.0f;
   const f32 ndc_y = 1.0f - 2.0f * my / height;
-  const f32 tan_half_fov = std::tan(1.0472f * 0.5f);
+  const f32 tan_half_fov = ::tan(1.0472f * 0.5f);
   const Vec3 forward = camera_.forward();
   const Vec3 right = Normalize(Cross(forward, {0, 1, 0}));
   const Vec3 up = Cross(right, forward);
@@ -236,14 +244,14 @@ std::pair<Vec3, Vec3> Editor::ViewportCameraRay(f32 mx, f32 my) const {
   return {camera_.position(), direction};
 }
 
-void Editor::RecordTerrainChange(terrain::TerrainChange change, const std::string& label) {
+void Editor::RecordTerrainChange(terrain::TerrainChange change, const base::String& label) {
   if (change.empty()) return;
-  undo_.RecordApplied(std::make_unique<TerrainCommand>(
-      &terrain_, std::move(change), label,
-      [this](std::span<const terrain::TerrainTileKey> keys) { OnTerrainCommandReplayed(keys); }));
+  undo_.RecordApplied(base::MakeUnique<TerrainCommand>(
+      &terrain_, base::move(change), label,
+      [this](base::Span<const terrain::TerrainTileKey> keys) { OnTerrainCommandReplayed(keys); }));
 }
 
-void Editor::OnTerrainCommandReplayed(std::span<const terrain::TerrainTileKey> keys) {
+void Editor::OnTerrainCommandReplayed(base::Span<const terrain::TerrainTileKey> keys) {
   terrain_command_replayed_ = true;
   terrain_dirty_ = true;
   RebuildTerrainTiles(keys, true);
@@ -252,10 +260,10 @@ void Editor::OnTerrainCommandReplayed(std::span<const terrain::TerrainTileKey> k
 }
 
 void Editor::SyncTerrainRayTracing(
-    std::span<const terrain::TerrainTileKey> keys) {
+    base::Span<const terrain::TerrainTileKey> keys) {
   if (!renderer_) return;
   for (terrain::TerrainTileKey key : keys) {
-    const auto visual = terrain_tiles_.find(key);
+    const auto visual = terrain_tiles_.find(TerrainTileMapKey(key));
     if (visual == terrain_tiles_.end()) continue;
     const MeshRecord* record = FindMesh(visual->second.mesh.hash);
     if (record) renderer_->SyncDynamicMeshRayTracing(record->mesh);
@@ -266,7 +274,7 @@ void Editor::FinishTerrainStroke() {
   if (!terrain_stroke_.active) return;
   if (!terrain_stroke_.change.empty()) {
     SyncTerrainRayTracing(terrain_stroke_.change.dirty_tiles);
-    RecordTerrainChange(std::move(terrain_stroke_.change), terrain_stroke_.label);
+    RecordTerrainChange(base::move(terrain_stroke_.change), terrain_stroke_.label);
   }
   terrain_stroke_ = {};
 }
@@ -354,7 +362,7 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
       for (terrain::TerrainTileKey key : dab.dirty_tiles)
         dirty_tiles.push_back(key);
       if (terrain_stroke_.change.empty()) {
-        terrain_stroke_.change = std::move(dab);
+        terrain_stroke_.change = base::move(dab);
       } else if (!terrain::MergeTerrainChanges(&terrain_stroke_.change, dab)) {
         RX_WARN("editor: could not merge terrain brush dab into stroke");
       }
@@ -362,8 +370,14 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
       MarkDirty();
     };
     auto upload_dirty_tiles = [&] {
-      std::sort(dirty_tiles.begin(), dirty_tiles.end());
-      dirty_tiles.erase(std::unique(dirty_tiles.begin(), dirty_tiles.end()),
+      // Duplicates compare equal in every field, so after Unique any correct
+      // sort leaves the same sequence.
+      base::Sort(dirty_tiles.data(), dirty_tiles.data() + dirty_tiles.size(),
+                 [](terrain::TerrainTileKey a, terrain::TerrainTileKey b) {
+                   return TerrainTileMapKey(a) < TerrainTileMapKey(b);
+                 });
+      dirty_tiles.erase(base::Unique(dirty_tiles.data(),
+                                     dirty_tiles.data() + dirty_tiles.size()),
                         dirty_tiles.end());
       RebuildTerrainTiles(dirty_tiles, true);
     };
@@ -377,10 +391,10 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
     }
     const Vec3 delta = current - terrain_stroke_.last_dab;
     const f32 distance = Length(delta);
-    const f32 spacing = std::max(terrain_.desc().sample_spacing * 0.5f,
+    const f32 spacing = rx::Max(terrain_.desc().sample_spacing * 0.5f,
                                  terrain_brush_radius_ * 0.20f);
     if (distance < spacing) return;
-    const int steps = std::min(64, static_cast<int>(distance / spacing));
+    const int steps = rx::Min(64, static_cast<int>(distance / spacing));
     const Vec3 start = terrain_stroke_.last_dab;
     for (int i = 1; i <= steps; ++i)
       apply_dab(start + delta * (static_cast<f32>(i) * spacing / distance));
@@ -399,9 +413,9 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
   f32 vertical_offset = 0;
   if (const MeshRecord* record = FindMesh(placement_.mesh.hash);
       record && !record->mesh.lods.empty() && !record->mesh.lods[0].vertices.empty()) {
-    f32 min_y = std::numeric_limits<f32>::max();
+    f32 min_y = FLT_MAX;
     for (const asset::Vertex& vertex : record->mesh.lods[0].vertices)
-      min_y = std::min(min_y, vertex.position[1]);
+      min_y = rx::Min(min_y, vertex.position[1]);
     vertical_offset = -min_y;
   }
   if (over_viewport) {
@@ -411,7 +425,7 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
     if (terrain_cursor_hit_) {
       position = terrain_cursor_hit_->position;
     } else {
-      const f32 plane_t = std::fabs(direction.y) > 1e-5f ? -origin.y / direction.y : -1.0f;
+      const f32 plane_t = ::fabs(direction.y) > 1e-5f ? -origin.y / direction.y : -1.0f;
       position = plane_t > 0 ? origin + direction * plane_t : origin + direction * 5.0f;
     }
     position.y += vertical_offset;
@@ -429,8 +443,8 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
     const edit::ComponentDesc* renderable = edit::FindComponentByName("Renderable");
     const edit::ComponentDesc* name = edit::FindComponentByName("Name");
     if (!transform || !renderable || !name) return;
-    std::vector<std::pair<const edit::ComponentDesc*,
-                          std::vector<std::pair<const edit::PropDesc*, edit::PropValue>>>>
+    base::Vector<base::Pair<const edit::ComponentDesc*,
+                          base::Vector<base::Pair<const edit::PropDesc*, edit::PropValue>>>>
         initial;
     initial.push_back(
         {transform, {{&transform->props[0], edit::PropValue::Vec3(position.x, position.y,
@@ -438,13 +452,13 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
     initial.push_back(
         {renderable, {{&renderable->props[0], edit::PropValue::AssetIdV(placement_.mesh.hash)}}});
     initial.push_back({name, {{&name->props[0], edit::PropValue::String(placement_.name)}}});
-    undo_.Push(*world_, edit::MakeCreateEntity(std::move(initial), nullptr));
+    undo_.Push(*world_, edit::MakeCreateEntity(base::move(initial), nullptr));
     doc_dirty_ = true;
     MarkDirty();
   };
 
   if (lmb_edge) {
-    const std::string label = "Place " + placement_.name;
+    const base::String label = "Place " + placement_.name;
     undo_.BeginGroup(label.c_str());
     placement_.dragging = true;
     placement_.last_position = *placement_preview_;
@@ -456,10 +470,10 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
   const f32 distance = Length(delta);
   if (distance < placement_.spacing) return;
   const Vec3 start = placement_.last_position;
-  const int steps = std::min(64, static_cast<int>(distance / placement_.spacing));
+  const int steps = rx::Min(64, static_cast<int>(distance / placement_.spacing));
   for (int i = 1; i <= steps; ++i) {
     Vec3 position = start + delta * (static_cast<f32>(i) * placement_.spacing / distance);
-    if (std::optional<f32> height = terrain_.SampleHeight(position.x, position.z))
+    if (base::Optional<f32> height = terrain_.SampleHeight(position.x, position.z))
       position.y = *height + vertical_offset;
     place(position);
   }
@@ -467,7 +481,7 @@ void Editor::UpdateModeInteraction(bool lmb_down, bool lmb_edge) {
       start + delta * (static_cast<f32>(steps) * placement_.spacing / distance);
 }
 
-void Editor::AppendInteractionPreview(std::vector<render::DebugLine>* lines) const {
+void Editor::AppendInteractionPreview(base::Vector<render::DebugLine>* lines) const {
   if (!lines) return;
   Vec3 center;
   f32 radius = 0;
@@ -502,24 +516,24 @@ void Editor::AppendInteractionPreview(std::vector<render::DebugLine>* lines) con
   Vec3 previous;
   for (int i = 0; i <= kSegments; ++i) {
     const f32 angle = static_cast<f32>(i) * 6.2831853f / kSegments;
-    Vec3 point{center.x + std::cos(angle) * radius, center.y + 0.035f,
-               center.z + std::sin(angle) * radius};
+    Vec3 point{center.x + ::cos(angle) * radius, center.y + 0.035f,
+               center.z + ::sin(angle) * radius};
     if (editor_mode_ == EditorMode::kTerrain) {
-      if (std::optional<f32> y = terrain_.SampleHeight(point.x, point.z)) point.y = *y + 0.035f;
+      if (base::Optional<f32> y = terrain_.SampleHeight(point.x, point.z)) point.y = *y + 0.035f;
     }
     if (i > 0) lines->push_back({previous, point, color});
     previous = point;
   }
-  const f32 cross = std::max(0.18f, radius * 0.22f);
+  const f32 cross = rx::Max(0.18f, radius * 0.22f);
   lines->push_back({{center.x - cross, center.y + 0.045f, center.z},
                     {center.x + cross, center.y + 0.045f, center.z}, color});
   lines->push_back({{center.x, center.y + 0.045f, center.z - cross},
                     {center.x, center.y + 0.045f, center.z + cross}, color});
 }
 
-void Editor::LoadTerrainAsset(const std::string& path) {
+void Editor::LoadTerrainAsset(const base::String& path) {
   terrain::Terrain loaded;
-  std::string error;
+  base::String error;
   if (!terrain::LoadTerrain(path, &loaded, &error)) {
     status_message_ = "Terrain load failed: " + error;
     RX_WARN("editor: {}", status_message_);
@@ -529,14 +543,14 @@ void Editor::LoadTerrainAsset(const std::string& path) {
   FinishTerrainStroke();
   FinishPlacementDrag();
   ClearTerrainVisuals();
-  terrain_ = std::move(loaded);
-  terrain_path_ = fs::path(scene_path_).replace_extension(".rxterrain").string();
+  terrain_ = base::move(loaded);
+  terrain_path_ = fs::ReplaceExtension(scene_path_, ".rxterrain");
   terrain_dirty_ = true;  // activating an asset imports it into this scene
   terrain_brush_layer_ = 0;
   undo_.Clear();
   RebuildTerrainVisuals();
   SetEditorMode(EditorMode::kTerrain);
-  status_message_ = "Activated " + fs::path(path).filename().string();
+  status_message_ = "Activated " + base::String(fs::Filename(path));
   RX_INFO("editor: loaded terrain {}", path);
   MarkDirty();
 }
@@ -545,14 +559,13 @@ asset::AssetId Editor::ResolvePlacementMesh(const AssetEntry& entry) {
   if (entry.name == "cube.mesh") return cube_mesh_;
   if (entry.name == "sphere.mesh") return sphere_mesh_;
   if (entry.name == "plane.mesh") return plane_mesh_;
-  if (auto cached = placement_meshes_.find(entry.path); cached != placement_meshes_.end())
-    return cached->second;
+  if (const asset::AssetId* cached = placement_meshes_.find(entry.path)) return *cached;
 
-  const std::string extension = fs::path(entry.path).extension().string();
+  const base::String extension(fs::Extension(entry.path));
   if (extension == ".gltf" || extension == ".glb") {
     asset::ImportedScene scene;
     if (!asset::LoadGltfScene(entry.path, &scene) || scene.meshes.empty()) return {};
-    const std::string source_path = asset::NormalizePath(entry.path);
+    const base::String source_path = asset::NormalizePath(entry.path);
     scene.meshes[0].id = asset::MakeAssetId(source_path);
     asset::RecordAssetPath(scene.meshes[0].id, source_path);
     if (renderer_) {
@@ -569,9 +582,7 @@ asset::AssetId Editor::ResolvePlacementMesh(const AssetEntry& entry) {
   }
 
   if (assets_) {
-    std::error_code error;
-    std::string asset_path = fs::relative(entry.path, asset_root_, error).generic_string();
-    if (error) asset_path = entry.path;
+    const base::String asset_path = fs::GenericString(fs::Relative(entry.path, asset_root_));
     if (const asset::Mesh* mesh = assets_->LoadMesh(asset_path)) {
       asset::AssetId id = UploadPrimitive(entry.name, *mesh);
       placement_meshes_[entry.path] = id;

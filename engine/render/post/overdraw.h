@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_OVERDRAW_H_
 #define RX_RENDER_OVERDRAW_H_
 
-#include <functional>
 
+#include "base/functional/function.h"
 #include "core/math.h"
 #include "render/rhi/device.h"
 
@@ -22,7 +22,7 @@ class OverdrawPass {
   // 128-byte block (push constants always start at offset 0 in the RHI) and
   // issues the draws. view_proj is also pushed up front.
   void Render(CommandList& cmd, TextureView color_view, Extent2D extent, const Mat4& view_proj,
-              const std::function<void(CommandList&)>& draw);
+              const base::Function<void(CommandList&)>& draw);
   void BindInstanced(CommandList& cmd, const Mat4& view_proj);
 
  private:

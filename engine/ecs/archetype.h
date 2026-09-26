@@ -1,12 +1,13 @@
 #ifndef RX_ECS_ARCHETYPE_H_
 #define RX_ECS_ARCHETYPE_H_
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
 #include <base/containers/vector.h>
 #include <base/hashing/fnv1a.h>
 
+#include "base/algorithm.h"
+#include "base/memory/mem_ops.h"
 #include "ecs/component.h"
 #include "ecs/entity.h"
 
@@ -17,21 +18,31 @@ using Signature = base::Vector<ComponentId>;
 
 inline Signature MakeSignature(std::initializer_list<ComponentId> ids) {
   Signature sig(ids);
-  std::sort(sig.begin(), sig.end());
+  // A signature's ids are distinct, so any correct sort agrees.
+  base::Sort(sig.data(), sig.data() + sig.size());
   return sig;
 }
 
 inline bool SignatureContains(const Signature& sig, ComponentId id) {
-  return std::binary_search(sig.begin(), sig.end(), id);
+  const ComponentId* at = base::LowerBound(sig.begin(), sig.end(), id);
+  return at != sig.end() && !(id < *at);
+}
+
+// Allocation-free variant for queries (`ids` must be sorted): std::includes.
+inline bool SignatureContainsAll(const Signature& sig, const ComponentId* ids, size_t count) {
+  const ComponentId* have = sig.begin();
+  const ComponentId* want = ids;
+  const ComponentId* want_end = ids + count;
+  while (want != want_end) {
+    if (have == sig.end() || *want < *have) return false;
+    if (!(*have < *want)) ++want;
+    ++have;
+  }
+  return true;
 }
 
 inline bool SignatureContainsAll(const Signature& sig, const Signature& subset) {
-  return std::includes(sig.begin(), sig.end(), subset.begin(), subset.end());
-}
-
-// Allocation-free variant for queries (`ids` must be sorted).
-inline bool SignatureContainsAll(const Signature& sig, const ComponentId* ids, size_t count) {
-  return std::includes(sig.begin(), sig.end(), ids, ids + count);
+  return SignatureContainsAll(sig, subset.data(), subset.size());
 }
 
 // Functors for hashing signatures as raw bytes (sorted ids make this stable).
@@ -46,7 +57,7 @@ struct SignatureEqual {
   bool operator()(const Signature& a, const Signature& b) const {
     return a.size() == b.size() &&
            (a.empty() ||
-            std::memcmp(a.data(), b.data(), a.size() * sizeof(ComponentId)) == 0);
+            base::MemCompare(a.data(), b.data(), a.size() * sizeof(ComponentId)) == 0);
   }
 };
 

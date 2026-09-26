@@ -57,7 +57,7 @@ class RX_LOCOMOTION_EXPORT LocomotionController {
  private:
   // Downward terrain probe wrapping physics_->Raycast, passed to the footstep
   // planner. `context` is the controller (this), so it reaches physics_ without
-  // a std::function or captured state.
+  // a base::Function or captured state.
   static bool GroundProbe(void* context, const Vec3& probe_start, f32 max_depth, GroundHit* out);
 
   // True when `watched` (pelvis/torso) touches something that is not part of the

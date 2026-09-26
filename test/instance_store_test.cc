@@ -1,10 +1,14 @@
 #include "render/geometry/instance_store.h"
 
-#include <cmath>
-#include <cstdio>
-#include <cstring>
-#include <memory>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/span.h"
+#include "base/functional/function.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
 #include "render/rhi/swapchain.h"
 
 namespace {
@@ -19,7 +23,7 @@ class TestDevice final : public Device {
   void WaitIdle() override {}
   bool RecreateSurface(Window&) override { return false; }
   void DestroySurface() override {}
-  std::unique_ptr<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return {}; }
+  base::UniquePointer<Swapchain> CreateSwapchain(u32, u32, bool, bool) override { return {}; }
   MemoryBudget memory_budget() const override { return {}; }
 
   GpuBuffer CreateBuffer(rx::u64 size, BufferUsageFlags, bool) override {
@@ -30,7 +34,7 @@ class TestDevice final : public Device {
   GpuBuffer CreateBufferWithData(ByteSpan data, BufferUsageFlags usage) override {
     ++data_uploads_;
     GpuBuffer buffer = CreateBuffer(data.size(), usage, true);
-    std::memcpy(buffer.mapped, data.data(), data.size());
+    base::MemCopy(buffer.mapped, data.data(), data.size());
     return buffer;
   }
   void DestroyBuffer(GpuBuffer& buffer) override {
@@ -55,7 +59,7 @@ class TestDevice final : public Device {
   void DestroyBindingLayout(BindingLayoutHandle) override {}
   BindingSetHandle CreateBindingSet(BindingLayoutHandle, u32) override { return {}; }
   void DestroyBindingSet(BindingSetHandle) override {}
-  void UpdateBindingSet(BindingSetHandle, std::span<const BindingItem>) override {}
+  void UpdateBindingSet(BindingSetHandle, base::Span<const BindingItem>) override {}
   AccelSizes GetBlasSizes(const BlasBuildDesc&) override { return {}; }
   AccelSizes GetTlasSizes(u32) override { return {}; }
   AccelStructHandle CreateAccelStruct(AccelStructType, rx::u64) override { return {}; }
@@ -64,7 +68,7 @@ class TestDevice final : public Device {
   TimestampPoolHandle CreateTimestampPool(u32) override { return {}; }
   void DestroyTimestampPool(TimestampPoolHandle) override {}
   bool GetTimestamps(TimestampPoolHandle, u32, u32, rx::u64*) override { return false; }
-  void ImmediateSubmit(const std::function<void(CommandList&)>&) override {}
+  void ImmediateSubmit(const base::Function<void(CommandList&)>&) override {}
   CommandList* BeginFrame(u32) override { return nullptr; }
   PresentResult SubmitFrame(CommandList*, Swapchain&, u32) override {
     return PresentResult::kFailed;
@@ -78,14 +82,14 @@ class TestDevice final : public Device {
   size_t data_uploads_ = 0;
 };
 
-bool Near(f32 a, f32 b) { return std::abs(a - b) < 1e-5f; }
+bool Near(f32 a, f32 b) { return ::abs(a - b) < 1e-5f; }
 
 f32 TranslationX(const GpuBuffer& buffer, size_t index = 0) {
   return static_cast<const Mat4*>(buffer.mapped)[index].m[12];
 }
 
 int Fail(const char* message) {
-  std::fprintf(stderr, "instance_store_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "instance_store_test: FAIL: %s\n", message);
   return 1;
 }
 
@@ -112,7 +116,7 @@ int main() {
   }
 
   Mat4 replacement = MakeTranslation({20.0f, 0.0f, 0.0f});
-  const std::span<const Mat4> replacement_span{&replacement, 1};
+  const base::Span<const Mat4> replacement_span{&replacement, 1};
   if (!store.Replace(device, first, replacement_span, mesh_center, 2.0f))
     return Fail("replace");
   if (store.instance_count() != 1 || device.live_buffers() != 1)
@@ -128,7 +132,7 @@ int main() {
     return Fail("submission did not establish instance history");
 
   Mat4 moved = MakeTranslation({30.0f, 0.0f, 0.0f});
-  if (!store.Replace(device, first, std::span<const Mat4>{&moved, 1}, mesh_center, 2.0f))
+  if (!store.Replace(device, first, base::Span<const Mat4>{&moved, 1}, mesh_center, 2.0f))
     return Fail("submitted replacement");
   const InstanceStore::Group& moving = store.groups()[first.index];
   if (!moving.previous_buffer || device.live_buffers() != 2 ||
@@ -137,7 +141,7 @@ int main() {
     return Fail("replacement motion streams");
 
   moved = MakeTranslation({40.0f, 0.0f, 0.0f});
-  if (!store.Replace(device, first, std::span<const Mat4>{&moved, 1}, mesh_center, 2.0f))
+  if (!store.Replace(device, first, base::Span<const Mat4>{&moved, 1}, mesh_center, 2.0f))
     return Fail("repeated replacement");
   const InstanceStore::Group& repeated = store.groups()[first.index];
   if (device.live_buffers() != 2 || !Near(TranslationX(repeated.previous_buffer), 20.0f) ||
@@ -195,6 +199,6 @@ int main() {
 
   store.Shutdown(device);
   if (device.live_buffers() != 0) return Fail("shutdown buffer ownership");
-  std::printf("instance_store_test: PASS\n");
+  ::printf("instance_store_test: PASS\n");
   return 0;
 }

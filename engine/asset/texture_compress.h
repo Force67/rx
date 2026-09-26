@@ -1,10 +1,8 @@
 #ifndef RX_ASSET_TEXTURE_COMPRESS_H_
 #define RX_ASSET_TEXTURE_COMPRESS_H_
 
-#include <string>
-#include <string_view>
-
 #include "asset/texture.h"
+#include "base/strings/string_ref.h"
 #include "core/export.h"
 
 namespace rx::asset {
@@ -82,7 +80,7 @@ RX_ASSET_EXPORT TextureCompressionOptions TextureCompressionSettings();
 // renderer prints the tally, because a change that quietly compressed nothing
 // would otherwise look exactly like one that worked.
 RX_ASSET_EXPORT bool CompressTexture(Texture* texture, TextureRole role,
-                                     std::string_view identity);
+                                     base::StringRef identity);
 
 struct TextureCompressionStats {
   u64 source_bytes = 0;      // rgba8 mip 0 handed in

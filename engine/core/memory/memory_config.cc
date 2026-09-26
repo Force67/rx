@@ -1,25 +1,26 @@
 #include "core/memory/memory_config.h"
 
-#include <cstdlib>
-#include <fstream>
-#include <sstream>
+#include <stdlib.h>
 
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/memory/chunk_pool.h"
 #include "core/memory/frame_arena.h"
 #include "core/memory/memory_tracker.h"
+#include "core/file_system.h"
 
 namespace rx::mem {
 namespace {
 
 constexpr u64 kMiB = 1u << 20;
 
-std::string_view Trim(std::string_view s) {
+base::StringRef Trim(base::StringRef s) {
   while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
   while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) s.remove_suffix(1);
   return s;
 }
 
-bool ParseU64(std::string_view s, u64& out) {
+bool ParseU64(base::StringRef s, u64& out) {
   if (s.empty()) return false;
   u64 value = 0;
   for (char c : s) {
@@ -30,19 +31,19 @@ bool ParseU64(std::string_view s, u64& out) {
   return true;
 }
 
-void SetBudget(MemoryConfig& config, std::string_view name, u64 bytes) {
+void SetBudget(MemoryConfig& config, base::StringRef name, u64 bytes) {
   for (auto& budget : config.budgets) {
     if (budget.name == name) {
       budget.bytes = bytes;
       return;
     }
   }
-  config.budgets.push_back({std::string(name), bytes});
+  config.budgets.push_back({base::String(name), bytes});
 }
 
 }  // namespace
 
-MemoryConfig DefaultMemoryConfig(std::string_view preset) {
+MemoryConfig DefaultMemoryConfig(base::StringRef preset) {
   MemoryConfig config;
   config.preset = preset;
   if (preset == "steamdeck") {
@@ -65,28 +66,28 @@ MemoryConfig DefaultMemoryConfig(std::string_view preset) {
   return config;
 }
 
-void ParseMemoryConfigText(std::string_view text, MemoryConfig& config) {
-  std::string section;
+void ParseMemoryConfigText(base::StringRef text, MemoryConfig& config) {
+  base::String section;
   size_t start = 0;
   while (start <= text.size()) {
     const size_t end = text.find('\n', start);
-    std::string_view line = text.substr(start, end == std::string_view::npos ? end : end - start);
-    start = end == std::string_view::npos ? text.size() + 1 : end + 1;
+    base::StringRef line = text.substr(start, end == base::StringRef::npos ? end : end - start);
+    start = end == base::StringRef::npos ? text.size() + 1 : end + 1;
 
-    if (const size_t comment = line.find_first_of(";#"); comment != std::string_view::npos) {
+    if (const size_t comment = line.find_first_of(";#"); comment != base::StringRef::npos) {
       line = line.substr(0, comment);
     }
     line = Trim(line);
     if (line.empty()) continue;
 
     if (line.front() == '[' && line.back() == ']') {
-      section = std::string(Trim(line.substr(1, line.size() - 2)));
+      section = base::String(Trim(line.substr(1, line.size() - 2)));
       continue;
     }
 
     const size_t equals = line.find('=');
-    if (equals == std::string_view::npos) continue;
-    const std::string_view key = Trim(line.substr(0, equals));
+    if (equals == base::StringRef::npos) continue;
+    const base::StringRef key = Trim(line.substr(0, equals));
     u64 value = 0;
     if (!ParseU64(Trim(line.substr(equals + 1)), value)) continue;
 
@@ -101,16 +102,12 @@ void ParseMemoryConfigText(std::string_view text, MemoryConfig& config) {
 }
 
 MemoryConfig LoadMemoryConfig() {
-  const char* preset = std::getenv("RX_MEMORY_PRESET");
+  const char* preset = ::getenv("RX_MEMORY_PRESET");
   MemoryConfig config = DefaultMemoryConfig(preset ? preset : "desktop");
 
-  const char* path = std::getenv("RX_MEMORY_INI");
-  std::ifstream file(path ? path : "memory.ini");
-  if (file) {
-    std::ostringstream text;
-    text << file.rdbuf();
-    ParseMemoryConfigText(text.str(), config);
-  }
+  const char* path = ::getenv("RX_MEMORY_INI");
+  base::String text;
+  if (fs::ReadTextFile(path ? path : "memory.ini", &text)) ParseMemoryConfigText(text, config);
   return config;
 }
 

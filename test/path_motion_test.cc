@@ -1,7 +1,7 @@
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "asset/mesh.h"
 #include "render/core/bindless.h"
@@ -10,6 +10,9 @@
 #include "render/rhi/device.h"
 #include "shaders/path_motion_recon_cs_hlsl.h"
 #ifdef RX_HAS_NRD
+#include "base/algorithm.h"
+#include "base/memory/mem_ops.h"
+#include "core/scalar.h"
 #include "shaders/path_motion_nrd_cs_hlsl.h"
 #endif
 
@@ -19,7 +22,7 @@ using namespace rx::render;
 int main() {
   int failures = 0;
   auto check = [&](bool ok, const char* message) {
-    if (!ok) { std::printf("FAIL: %s\n", message); ++failures; }
+    if (!ok) { ::printf("FAIL: %s\n", message); ++failures; }
   };
   PathSceneHistory history;
   base::Vector<RayTracingContext::Instance> instances(2);
@@ -38,14 +41,14 @@ int main() {
   check(instances[0].history_id == first && instances[0].previous_mesh == 7,
         "rigid motion retains valid surface history");
   instances[0].previous_transform = instances[0].transform;
-  std::swap(instances[0], instances[1]);
+  base::Swap(instances[0], instances[1]);
   check(history.Update(instances, {}), "draw reorder resets reference accumulation");
   check(instances[0].history_id != first && instances[0].history_id != second &&
         instances[0].previous_mesh == 0xffffffffu, "reordered instances cannot inherit another object's history");
   Mat4 bone = Mat4::Identity();
-  history.Update(instances, {&bone, 1});
+  history.Update(instances, base::Span(&bone, 1));
   bone = MakeTranslation({0, 0, 1});
-  check(history.Update(instances, {&bone, 1}), "pose changes reset reference accumulation");
+  check(history.Update(instances, base::Span(&bone, 1)), "pose changes reset reference accumulation");
   instances.clear();
   check(history.Update(instances, {}), "removed geometry resets reference accumulation");
 
@@ -54,7 +57,7 @@ int main() {
   desc.request_raytracing = true;
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub() || !device->caps().ray_query) {
-    std::printf("path_motion_test: GPU checks SKIP, %d CPU failures\n", failures);
+    ::printf("path_motion_test: GPU checks SKIP, %d CPU failures\n", failures);
     return failures ? 1 : 77;
   }
   auto rt = RayTracingContext::Create(*device);
@@ -66,10 +69,10 @@ int main() {
   const u32 indices[3] = {0, 1, 2};
   GpuMesh mesh;
   mesh.vertices = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(vertices), sizeof(vertices)},
+      ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)),
       kBufferUsageStorage | kBufferUsageDeviceAddress | kBufferUsageAccelBuildInput);
   mesh.indices = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(indices), sizeof(indices)},
+      ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)),
       kBufferUsageStorage | kBufferUsageDeviceAddress | kBufferUsageAccelBuildInput);
   mesh.vertex_count = mesh.index_count = 3;
   mesh.submeshes.push_back({.index_count = 3});
@@ -78,7 +81,7 @@ int main() {
   const u32 current_mesh = bindless->RegisterMesh(mesh.vertices, mesh.indices, &geometry, 1);
   for (auto& vertex : vertices) vertex.position[0] -= .25f;
   GpuBuffer previous_vertices = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(vertices), sizeof(vertices)}, kBufferUsageStorage | kBufferUsageDeviceAddress);
+      ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)), kBufferUsageStorage | kBufferUsageDeviceAddress);
   const u32 previous_mesh = bindless->RegisterMesh(previous_vertices, mesh.indices, &geometry, 1);
   if (!rt->BuildBlas(1, mesh) || !rt->ReserveTlas(0, 2)) return 1;
   GpuBuffer result = device->CreateBuffer(8 * sizeof(f32), kBufferUsageStorage | kBufferUsageTransferSrc);
@@ -110,14 +113,14 @@ int main() {
     });
     device->InvalidateBuffer(readback, 0, 8 * sizeof(f32));
     f32 data[8];
-    std::memcpy(data, readback.mapped, sizeof(data));
-    std::printf("%s previous=%u pos=(%g,%g,%g) motion=(%g,%g) id=%g\n",
+    base::MemCopy(data, readback.mapped, sizeof(data));
+    ::printf("%s previous=%u pos=(%g,%g,%g) motion=(%g,%g) id=%g\n",
                  recon ? "recon" : "nrd", previous, data[0], data[1], data[2], data[4], data[5], data[6]);
     check(data[7] == 1 && data[3] == (valid ? 1 : 0), "trace hit and motion validity");
     if (valid) {
-      check(std::abs(data[0] - expected_x) < 1e-5f && std::abs(data[1] - .5f) < 1e-5f,
+      check(::abs(data[0] - expected_x) < 1e-5f && ::abs(data[1] - .5f) < 1e-5f,
             "previous position includes rigid transform and previous vertex pose");
-      check(std::abs(data[4] - std::clamp(expected_x * .5f, -2.f, 2.f)) < 1e-5f && std::abs(data[5] - .25f) < 1e-5f,
+      check(::abs(data[4] - rx::Clamp(expected_x * .5f, -2.f, 2.f)) < 1e-5f && ::abs(data[5] - .25f) < 1e-5f,
             "motion is current-to-previous in UV units");
     } else {
       check(data[4] == 2 && data[5] == 2, "missing surface history rejects reprojection");
@@ -137,13 +140,13 @@ int main() {
   run(RX_SHADER(k_path_motion_nrd_cs_hlsl), 6, 9, false, current_mesh, 1e6f, true, 1e6f);
 #endif
   device->WaitIdle();
-  rt.reset();
-  bindless.reset();
+  rt.Reset();
+  bindless.Reset();
   device->DestroyBuffer(mesh.vertices);
   device->DestroyBuffer(mesh.indices);
   device->DestroyBuffer(previous_vertices);
   device->DestroyBuffer(result);
   device->DestroyBuffer(readback);
-  std::printf("path_motion_test: %d failures\n", failures);
+  ::printf("path_motion_test: %d failures\n", failures);
   return failures ? 1 : 0;
 }

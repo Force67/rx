@@ -1,9 +1,10 @@
 #ifndef RX_RENDER_PATH_SCENE_HISTORY_H_
 #define RX_RENDER_PATH_SCENE_HISTORY_H_
 
-#include <cstring>
-#include <span>
+#include <string.h>
 
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
 #include "render/gi/raytracing.h"
 
 namespace rx::render {
@@ -11,10 +12,10 @@ namespace rx::render {
 class PathSceneHistory {
  public:
   bool Update(base::Vector<RayTracingContext::Instance>& instances,
-              std::span<const Mat4> bones) {
+              base::Span<const Mat4> bones) {
     bool changed = instances.size() != previous_.size() || bones.size() != bones_.size();
     if (!changed && !bones.empty())
-      changed = std::memcmp(bones.data(), bones_.data(), bones.size_bytes()) != 0;
+      changed = base::MemCompare(bones.data(), bones_.data(), bones.size_bytes()) != 0;
     if (instances.size() > 0xfffffffeu - next_id_) {
       previous_.clear();
       next_id_ = 0;
@@ -36,7 +37,7 @@ class PathSceneHistory {
 
  private:
   static bool SameTransform(const Mat4& a, const Mat4& b) {
-    return std::memcmp(&a, &b, sizeof(Mat4)) == 0;
+    return base::MemCompare(&a, &b, sizeof(Mat4)) == 0;
   }
   static bool SameGeometry(const RayTracingContext::Instance& a,
                             const RayTracingContext::Instance& b) {

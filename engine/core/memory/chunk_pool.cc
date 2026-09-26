@@ -2,6 +2,7 @@
 
 #include <new>
 
+#include "base/threading/lock_guard.h"
 #include "core/memory/memory_tracker.h"
 
 namespace rx::mem {
@@ -22,7 +23,7 @@ void ChunkPool::AddSlabLocked() {
 }
 
 void* ChunkPool::Acquire() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   if (free_.empty()) AddSlabLocked();
   void* chunk = free_.back();
   free_.pop_back();
@@ -31,17 +32,17 @@ void* ChunkPool::Acquire() {
 
 void ChunkPool::Release(void* chunk) {
   if (!chunk) return;
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   free_.push_back(chunk);
 }
 
 void ChunkPool::Reserve(size_t chunk_count) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   while (total_ < chunk_count) AddSlabLocked();
 }
 
 ChunkPool::Stats ChunkPool::stats() const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   return Stats{.total_chunks = total_, .free_chunks = free_.size()};
 }
 

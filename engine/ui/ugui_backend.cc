@@ -1,10 +1,11 @@
 #include "ui/ugui_backend.h"
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
 #include <ugui/render/vertex.h>
 
+#include "base/memory/mem_ops.h"
+#include "core/scalar.h"
 #include "render/util/shader_util.h"
 #include "shaders/ugui_frost_ps_hlsl.h"
 #include "shaders/ugui_frost_vs_hlsl.h"
@@ -78,13 +79,13 @@ void GuiRenderBackend::UploadBuffer(GpuBuffer& b, VkBufferUsageFlags usage, cons
   if (bytes == 0) return;
   if (b.capacity < bytes) {
     DestroyBuffer(b);
-    VkDeviceSize cap = std::max<VkDeviceSize>(bytes, 4096);
+    VkDeviceSize cap = rx::Max<VkDeviceSize>(bytes, 4096);
     CreateBuffer(cap, usage,
                  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, b);
   }
   void* dst = nullptr;
   vkMapMemory(info_.device, b.memory, 0, bytes, 0, &dst);
-  std::memcpy(dst, src, static_cast<size_t>(bytes));
+  base::MemCopy(dst, src, static_cast<size_t>(bytes));
   vkUnmapMemory(info_.device, b.memory);
 }
 
@@ -224,7 +225,7 @@ GuiRenderBackend::Texture GuiRenderBackend::MakeTexture(uint32_t w, uint32_t h, 
                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staging);
   void* data = nullptr;
   vkMapMemory(info_.device, staging.memory, 0, size, 0, &data);
-  std::memcpy(data, pixels, static_cast<size_t>(size));
+  base::MemCopy(data, pixels, static_cast<size_t>(size));
   vkUnmapMemory(info_.device, staging.memory);
 
   VkImageCreateInfo ici{.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
@@ -406,7 +407,8 @@ void GuiRenderBackend::Shutdown() {
     DestroyBuffer(f.text_idx);
   }
   frames_.clear();
-  for (auto& kv : user_textures_) FreeTexture(kv.second.tex);
+  // Teardown only: the order textures are freed in has no effect.
+  for (auto kv : user_textures_) FreeTexture(kv.value.tex);
   user_textures_.clear();
   FreeTexture(font_);
   FreeTexture(white_);
@@ -502,21 +504,21 @@ void GuiRenderBackend::Render(const ugui::DrawData& dd, VkCommandBuffer cmd) {
     } else if (c.texture_id == ugui::kNullTextureId) {
       set = white_.set;
     } else {
-      auto it = user_textures_.find(c.texture_id);
-      set = it != user_textures_.end() ? it->second.tex.set : white_.set;
+      const UserTexture* user = user_textures_.find(c.texture_id);
+      set = user ? user->tex.set : white_.set;
     }
     if (set == VK_NULL_HANDLE) set = white_.set;
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout_, 0, 1, &set, 0,
                             nullptr);
 
     VkRect2D scissor{};
-    float x0 = std::max(0.0f, c.clip_rect.x) * sx;
-    float y0 = std::max(0.0f, c.clip_rect.y) * sy;
-    float x1 = std::max(0.0f, c.clip_rect.x + c.clip_rect.w) * sx;
-    float y1 = std::max(0.0f, c.clip_rect.y + c.clip_rect.h) * sy;
+    float x0 = rx::Max(0.0f, c.clip_rect.x) * sx;
+    float y0 = rx::Max(0.0f, c.clip_rect.y) * sy;
+    float x1 = rx::Max(0.0f, c.clip_rect.x + c.clip_rect.w) * sx;
+    float y1 = rx::Max(0.0f, c.clip_rect.y + c.clip_rect.h) * sy;
     scissor.offset = {static_cast<int32_t>(x0), static_cast<int32_t>(y0)};
-    scissor.extent = {static_cast<uint32_t>(std::max(0.0f, x1 - x0)),
-                      static_cast<uint32_t>(std::max(0.0f, y1 - y0))};
+    scissor.extent = {static_cast<uint32_t>(rx::Max(0.0f, x1 - x0)),
+                      static_cast<uint32_t>(rx::Max(0.0f, y1 - y0))};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     GpuBuffer& vb = c.is_text ? fb.text_vtx : fb.quad_vtx;
@@ -546,20 +548,20 @@ ugui::TextureId GuiRenderBackend::CreateTexture(uint32_t width, uint32_t height,
 }
 
 void GuiRenderBackend::UpdateTexture(ugui::TextureId id, const void* pixels) {
-  auto it = user_textures_.find(id);
-  if (it == user_textures_.end() || !pixels) return;
-  UserTexture& ut = it->second;
+  UserTexture* found = user_textures_.find(id);
+  if (!found || !pixels) return;
+  UserTexture& ut = *found;
   vkDeviceWaitIdle(info_.device);
   FreeTexture(ut.tex);
   ut.tex = MakeTexture(ut.width, ut.height, ut.fmt, ut.pixel_size, pixels, ut.sampler);
 }
 
 void GuiRenderBackend::DestroyTexture(ugui::TextureId id) {
-  auto it = user_textures_.find(id);
-  if (it == user_textures_.end()) return;
+  UserTexture* found = user_textures_.find(id);
+  if (!found) return;
   vkDeviceWaitIdle(info_.device);
-  FreeTexture(it->second.tex);
-  user_textures_.erase(it);
+  FreeTexture(found->tex);
+  user_textures_.erase(id);
 }
 
 }  // namespace rx::ui

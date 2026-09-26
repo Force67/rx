@@ -1,7 +1,8 @@
 #include "render/atmosphere/froxel_fog.h"
 
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/gi/raytracing.h"
 #include "shaders/froxel_apply_cs_hlsl.h"
@@ -119,7 +120,7 @@ bool FroxelFog::Initialize(Device& device, bool ray_query) {
                                 .address_w = AddressMode::kClampToEdge});
   dummy_uniform_ = device.CreateBuffer(512, kBufferUsageUniform, true);
   if (!dummy_uniform_.mapped) return false;
-  std::memset(dummy_uniform_.mapped, 0, 512);
+  base::MemSet(dummy_uniform_.mapped, 0, 512);
 
   // One per in-flight frame: the pass rewrites it while the previous frame may
   // still be reading its own copy.
@@ -182,7 +183,7 @@ void FroxelFog::AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandl
       },
       [this, slot, cascade_atlas_handle, raytracing, tlas_slot, rt, frame](PassContext& ctx) {
         const ScatterCamera camera{frame.inv_view_proj, frame.prev_view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
         ScatterPush push{};
         push.camera_pos[0] = frame.camera_pos.x;
@@ -207,7 +208,7 @@ void FroxelFog::AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandl
         push.volume_params[2] = static_cast<f32>(kSizeZ);
         // 0 none / 1 cascade / 2 ray query, matching the shader's constants.
         push.volume_params[3] = rt ? 2.0f : (frame.csm_active ? 1.0f : 0.0f);
-        std::memcpy(push.cluster_params, frame.cluster_params, sizeof(push.cluster_params));
+        base::MemCopy(push.cluster_params, frame.cluster_params, sizeof(push.cluster_params));
         push.screen_size[0] = frame.screen_size[0];
         push.screen_size[1] = frame.screen_size[1];
         push.screen_size[3] = frame.start_distance;
@@ -229,7 +230,7 @@ void FroxelFog::AddToGraph(RenderGraph& graph, ResourceHandle lit, ResourceHandl
             Bind::Combined(8, cascade_view, frame.comparison_sampler)};
         if (rt) items.push_back(Bind::Accel(9, raytracing->tlas(tlas_slot)));
         items.push_back(Bind::Uniform(10, camera_[slot], 0, sizeof(ScatterCamera)));
-        ctx.cmd->BindTransient(0, {items.data(), items.size()});
+        ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->Push(push);
         ctx.cmd->Dispatch((kSizeX + 3) / 4, (kSizeY + 3) / 4, (kSizeZ + 3) / 4);
         ctx.cmd->MemoryBarrier(BarrierScope::kComputeWrite, BarrierScope::kComputeRead);

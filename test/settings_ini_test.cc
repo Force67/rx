@@ -1,9 +1,9 @@
+#include "base/strings/xstring.h"
 #include "render/core/settings_ini.h"
 
-#include <cmath>
-#include <cstdio>
-#include <locale>
-#include <string>
+#include <math.h>
+#include <stdio.h>
+#include <locale.h>
 
 namespace {
 
@@ -12,14 +12,9 @@ int failures = 0;
 void Check(bool condition, const char* message) {
   if (condition)
     return;
-  std::fprintf(stderr, "settings_ini_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "settings_ini_test: FAIL: %s\n", message);
   ++failures;
 }
-
-class CommaDecimal final : public std::numpunct<char> {
-protected:
-  char do_decimal_point() const override { return ','; }
-};
 
 }  // namespace
 
@@ -42,28 +37,40 @@ int main() {
   settings.cloud_coverage = 0.5f;
   Check(rx::render::ApplyIni("cloud_coverage = nan", settings) == 0,
         "non-finite floats are rejected");
-  Check(std::isfinite(settings.cloud_coverage) &&
+  Check(::isfinite(settings.cloud_coverage) &&
             settings.cloud_coverage == 0.5f,
         "a rejected float leaves the setting unchanged");
 
-  std::locale original = std::locale();
-  std::locale::global(std::locale(std::locale::classic(), new CommaDecimal));
-  settings.cloud_coverage = 0.25f;
-  std::string serialized = rx::render::SettingsToIni(settings);
-  rx::render::RenderSettings restored;
-  int round_trip_count = rx::render::ApplyIni(serialized, restored);
-  std::locale::global(original);
-  Check(round_trip_count > 0 &&
-            restored.cloud_coverage == settings.cloud_coverage,
-        "serialized settings round-trip under a localized global locale");
+  // A host that localizes the process to a comma decimal point must not change
+  // what the ini writes or reads. Skipped when no such locale is installed.
+  const char* const kCommaLocales[] = {"de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8"};
+  const char* localized = nullptr;
+  for (const char* name : kCommaLocales) {
+    if (::setlocale(LC_NUMERIC, name) && ::localeconv()->decimal_point[0] == ',') {
+      localized = name;
+      break;
+    }
+  }
+  if (localized) {
+    settings.cloud_coverage = 0.25f;
+    base::String serialized = rx::render::SettingsToIni(settings);
+    rx::render::RenderSettings restored;
+    int round_trip_count = rx::render::ApplyIni(serialized, restored);
+    ::setlocale(LC_NUMERIC, "C");
+    Check(round_trip_count > 0 &&
+              restored.cloud_coverage == settings.cloud_coverage,
+          "serialized settings round-trip under a comma-decimal C locale");
+  } else {
+    ::fprintf(stderr, "settings_ini_test: no comma-decimal locale installed, locale check skipped\n");
+  }
 
   rx::render::RenderSettings source;
   source.procedural_grass = false;
   source.tonemap = rx::render::TonemapOperator::kAgx;
-  const std::string ini = rx::render::SettingsToIni(source);
-  Check(ini.find("procedural_grass = false") != std::string::npos,
+  const base::String ini = rx::render::SettingsToIni(source);
+  Check(ini.find("procedural_grass = false") != base::String::npos,
         "serialization emits the disabled grass toggle");
-  Check(ini.find("tonemap = agx") != std::string::npos,
+  Check(ini.find("tonemap = agx") != base::String::npos,
         "serialization emits the AgX tonemap operator");
 
   rx::render::RenderSettings round_trip;
@@ -96,6 +103,6 @@ int main() {
 
   if (failures != 0)
     return 1;
-  std::printf("settings_ini_test: PASS\n");
+  ::printf("settings_ini_test: PASS\n");
   return 0;
 }

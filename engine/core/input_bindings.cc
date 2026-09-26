@@ -1,13 +1,18 @@
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/algorithm.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
+#include "base/strings/format.h"
+#include "core/file_system.h"
 #include "core/input_bindings.h"
+#include "core/scalar.h"
+#include "core/text_reader.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
-#include <sstream>
-#include <utility>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 namespace rx {
 namespace {
@@ -50,7 +55,7 @@ static_assert(sizeof(kPadAxisTokens) / sizeof(kPadAxisTokens[0]) ==
 
 int FindToken(const char* name, const char* const* table, int count) {
   for (int i = 0; i < count; ++i)
-    if (std::strcmp(name, table[i]) == 0) return i;
+    if (::strcmp(name, table[i]) == 0) return i;
   return -1;
 }
 
@@ -58,22 +63,22 @@ int FindToken(const char* name, const char* const* table, int count) {
 
 // Binding tokens (device-only, independent of the game's action set)
 
-std::string BindingToken(const Binding& b) {
+base::String BindingToken(const Binding& b) {
   switch (b.kind) {
     case SourceKind::kKey:
-      if (b.code < static_cast<u16>(Key::kCount)) return std::string("key:") + kKeyTokens[b.code];
+      if (b.code < static_cast<u16>(Key::kCount)) return base::String("key:") + kKeyTokens[b.code];
       break;
     case SourceKind::kMouseButton:
       if (b.code < static_cast<u16>(MouseButton::kCount))
-        return std::string("mouse:") + kMouseTokens[b.code];
+        return base::String("mouse:") + kMouseTokens[b.code];
       break;
     case SourceKind::kGamepadButton:
       if (b.code < static_cast<u16>(GamepadButton::kCount))
-        return std::string("pad:") + kPadButtonTokens[b.code];
+        return base::String("pad:") + kPadButtonTokens[b.code];
       break;
     case SourceKind::kGamepadAxis:
       if (b.code < static_cast<u16>(GamepadAxis::kCount)) {
-        std::string s = std::string("padaxis:") + kPadAxisTokens[b.code];
+        base::String s = base::String("padaxis:") + kPadAxisTokens[b.code];
         if (b.axis_dir > 0) s += '+';
         else if (b.axis_dir < 0) s += '-';
         return s;
@@ -86,10 +91,10 @@ std::string BindingToken(const Binding& b) {
 }
 
 bool BindingFromToken(const char* token, Binding* out) {
-  const char* colon = std::strchr(token, ':');
+  const char* colon = ::strchr(token, ':');
   if (!colon) return false;
-  std::string kind(token, colon - token);
-  std::string rest(colon + 1);
+  base::String kind(token, colon - token);
+  base::String rest(colon + 1);
   Binding b;
   if (kind == "key") {
     int i = FindToken(rest.c_str(), kKeyTokens, static_cast<int>(Key::kCount));
@@ -124,21 +129,21 @@ bool BindingFromToken(const char* token, Binding* out) {
   return true;
 }
 
-std::string BindingLabel(const Binding& b) {
+base::String BindingLabel(const Binding& b) {
   switch (b.kind) {
     case SourceKind::kKey:
       return b.code < static_cast<u16>(Key::kCount) ? kKeyTokens[b.code] : "?";
     case SourceKind::kMouseButton:
       return b.code < static_cast<u16>(MouseButton::kCount)
-                 ? std::string("Mouse ") + kMouseTokens[b.code]
+                 ? base::String("Mouse ") + kMouseTokens[b.code]
                  : "?";
     case SourceKind::kGamepadButton:
       return b.code < static_cast<u16>(GamepadButton::kCount)
-                 ? std::string("Pad ") + kPadButtonTokens[b.code]
+                 ? base::String("Pad ") + kPadButtonTokens[b.code]
                  : "?";
     case SourceKind::kGamepadAxis: {
       if (b.code >= static_cast<u16>(GamepadAxis::kCount)) return "?";
-      std::string s = std::string("Pad ") + kPadAxisTokens[b.code];
+      base::String s = base::String("Pad ") + kPadAxisTokens[b.code];
       if (b.axis_dir > 0) s += "+";
       else if (b.axis_dir < 0) s += "-";
       return s;
@@ -167,8 +172,8 @@ void InputMap::RegisterFoldId(AxisId axis, ActionId positive, ActionId negative)
   folds_.push_back({axis, positive, negative});
 }
 
-void InputMap::SetDefaultsFn(std::function<void(InputMap&)> fn) {
-  defaults_ = std::move(fn);
+void InputMap::SetDefaultsFn(base::Function<void(InputMap&)> fn) {
+  defaults_ = base::move(fn);
   LoadDefaults();
 }
 
@@ -182,7 +187,7 @@ const char* InputMap::AxisName(AxisId a) const {
 
 bool InputMap::ActionFromName(const char* name, ActionId* out) const {
   for (int i = 0; i < action_count_; ++i)
-    if (action_names_[i] && std::strcmp(name, action_names_[i]) == 0) {
+    if (action_names_[i] && ::strcmp(name, action_names_[i]) == 0) {
       *out = static_cast<ActionId>(i);
       return true;
     }
@@ -191,7 +196,7 @@ bool InputMap::ActionFromName(const char* name, ActionId* out) const {
 
 bool InputMap::AxisFromName(const char* name, AxisId* out) const {
   for (int i = 0; i < axis_count_; ++i)
-    if (axis_names_[i] && std::strcmp(name, axis_names_[i]) == 0) {
+    if (axis_names_[i] && ::strcmp(name, axis_names_[i]) == 0) {
       *out = static_cast<AxisId>(i);
       return true;
     }
@@ -208,14 +213,14 @@ void InputMap::AddActionBinding(ActionId a, Binding b) {
   if (a >= kMaxActions) return;
   auto& v = action_[a];
   if (static_cast<int>(v.size()) >= kMaxBindings) return;
-  if (std::find(v.begin(), v.end(), b) == v.end()) v.push_back(b);
+  if (base::Find(v.begin(), v.end(), b) == v.end()) v.push_back(b);
 }
 
 void InputMap::AddAxisBindingId(AxisId a, Binding b) {
   if (a >= kMaxAxes) return;
   auto& v = axis_[a];
   if (static_cast<int>(v.size()) >= kMaxBindings) return;
-  if (std::find(v.begin(), v.end(), b) == v.end()) v.push_back(b);
+  if (base::Find(v.begin(), v.end(), b) == v.end()) v.push_back(b);
 }
 
 namespace {
@@ -231,13 +236,11 @@ void InputMap::RebindAction(ActionId a, Binding b) {
   if (a >= kMaxActions) return;
   // Remove this source from every action so it isn't bound twice.
   for (auto& v : action_)
-    v.erase(std::remove(v.begin(), v.end(), b), v.end());
+    base::EraseIf(v, [&](const Binding& x) { return x == b; });
   // Drop the target's existing same-family binding, then add the new one.
   auto& t = action_[a];
   const int fam = SourceFamily(b.kind);
-  t.erase(std::remove_if(t.begin(), t.end(),
-                         [&](const Binding& x) { return SourceFamily(x.kind) == fam; }),
-          t.end());
+  base::EraseIf(t, [&](const Binding& x) { return SourceFamily(x.kind) == fam; });
   if (static_cast<int>(t.size()) < kMaxBindings) t.push_back(b);
   else t.back() = b;
 }
@@ -258,7 +261,7 @@ void InputMap::ResetToDefaults() {
 
 ActionId InputMap::ConflictingAction(const Binding& b) const {
   for (int a = 0; a < action_count_; ++a)
-    if (std::find(action_[a].begin(), action_[a].end(), b) != action_[a].end())
+    if (base::Find(action_[a].begin(), action_[a].end(), b) != action_[a].end())
       return static_cast<ActionId>(a);
   return static_cast<ActionId>(action_count_);
 }
@@ -282,7 +285,7 @@ bool InputMap::SourceHeld(const Binding& b, const InputState& kbm, const Gamepad
       f32 thr = trigger ? trigger_threshold : stick_deadzone;
       if (b.axis_dir > 0) return v > thr;
       if (b.axis_dir < 0) return v < -thr;
-      return std::fabs(v) > thr;
+      return ::fabs(v) > thr;
     }
     case SourceKind::kNone:
       return false;
@@ -295,11 +298,11 @@ f32 InputMap::AxisValue(const Binding& b, const GamepadState& pad) const {
       b.code >= static_cast<u16>(GamepadAxis::kCount))
     return 0;
   f32 v = pad.axes[b.code];
-  if (std::fabs(v) < stick_deadzone) return 0;
+  if (::fabs(v) < stick_deadzone) return 0;
   // Rescale so the value ramps from 0 at the deadzone edge to 1 at full throw.
-  f32 s = (std::fabs(v) - stick_deadzone) / (1.0f - stick_deadzone);
-  s = std::clamp(s, 0.0f, 1.0f);
-  return std::copysign(s, v);
+  f32 s = (::fabs(v) - stick_deadzone) / (1.0f - stick_deadzone);
+  s = rx::Clamp(s, 0.0f, 1.0f);
+  return ::copysign(s, v);
 }
 
 void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const TouchState& touch,
@@ -308,7 +311,7 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const Tou
   for (int a = 0; a < axis_count_; ++a) {
     f32 v = 0;
     for (const Binding& b : axis_[a]) v += AxisValue(b, pad);
-    out->analog[a] = std::clamp(v, -1.0f, 1.0f);
+    out->analog[a] = rx::Clamp(v, -1.0f, 1.0f);
   }
 
   // Digital actions: a source held => action held; edge from the previous pump.
@@ -330,7 +333,7 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const Tou
     f32 v = out->analog[f.axis];
     if (out->held[f.positive]) v += 1.0f;
     if (out->held[f.negative]) v -= 1.0f;
-    out->analog[f.axis] = std::clamp(v, -1.0f, 1.0f);
+    out->analog[f.axis] = rx::Clamp(v, -1.0f, 1.0f);
   }
 
   // Track the most recently active device for prompt glyphs.
@@ -347,7 +350,7 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const Tou
       bool trigger = x == static_cast<int>(GamepadAxis::kLeftTrigger) ||
                      x == static_cast<int>(GamepadAxis::kRightTrigger);
       f32 thr = trigger ? trigger_threshold : stick_deadzone;
-      if (std::fabs(pad.axes[x]) > thr) pad_active = true;
+      if (::fabs(pad.axes[x]) > thr) pad_active = true;
     }
   }
   // A finger landing wins over a stale pointer position: on a handheld the
@@ -367,60 +370,62 @@ void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const Tou
 
 namespace {
 
-std::string Trim(const std::string& s) {
+base::String Trim(const base::String& s) {
   size_t a = s.find_first_not_of(" \t\r\n");
-  if (a == std::string::npos) return "";
+  if (a == base::String::npos) return "";
   size_t b = s.find_last_not_of(" \t\r\n");
   return s.substr(a, b - a + 1);
 }
 
 }  // namespace
 
-std::string InputMap::DefaultConfigPath() {
+base::String InputMap::DefaultConfigPath() {
 #if defined(_WIN32)
-  if (const char* appdata = std::getenv("APPDATA"))
-    return std::string(appdata) + "\\rx\\controls.ini";
+  if (const char* appdata = ::getenv("APPDATA"))
+    return base::String(appdata) + "\\rx\\controls.ini";
   return "";
 #elif defined(__APPLE__)
-  if (const char* home = std::getenv("HOME"))
-    return std::string(home) + "/Library/Application Support/rx/controls.ini";
+  if (const char* home = ::getenv("HOME"))
+    return base::String(home) + "/Library/Application Support/rx/controls.ini";
   return "";
 #else
-  if (const char* xdg = std::getenv("XDG_CONFIG_HOME"))
-    return std::string(xdg) + "/rx/controls.ini";
-  if (const char* home = std::getenv("HOME"))
-    return std::string(home) + "/.config/rx/controls.ini";
+  if (const char* xdg = ::getenv("XDG_CONFIG_HOME"))
+    return base::String(xdg) + "/rx/controls.ini";
+  if (const char* home = ::getenv("HOME"))
+    return base::String(home) + "/.config/rx/controls.ini";
   return "";
 #endif
 }
 
-bool InputMap::LoadFromIni(const std::string& path) {
-  std::ifstream in(path);
-  if (!in) return false;
+bool InputMap::LoadFromIni(const base::String& path) {
+  base::String text;
+  if (!fs::ReadTextFile(path, &text)) return false;
 
-  std::string section, line;
-  while (std::getline(in, line)) {
-    std::string t = Trim(line);
+  base::String section;
+  LineReader lines(text);
+  base::StringRef line;
+  while (lines.Next(&line)) {
+    base::String t = Trim(base::String(line.data(), line.size()));
     if (t.empty() || t[0] == '#' || t[0] == ';') continue;
-    if (t.front() == '[' && t.back() == ']') {
+    if (t[0] == '[' && t.back() == ']') {
       section = t.substr(1, t.size() - 2);
       continue;
     }
     size_t eq = t.find('=');
-    if (eq == std::string::npos) continue;
-    std::string key = Trim(t.substr(0, eq));
-    std::string value = Trim(t.substr(eq + 1));
+    if (eq == base::String::npos) continue;
+    base::String key = Trim(t.substr(0, eq));
+    base::String value = Trim(t.substr(eq + 1));
 
     if (section == "options") {
-      if (key == "look_sens_kbm") look_sens_kbm = std::strtof(value.c_str(), nullptr);
-      else if (key == "look_sens_pad") look_sens_pad = std::strtof(value.c_str(), nullptr);
+      if (key == "look_sens_kbm") look_sens_kbm = ::strtof(value.c_str(), nullptr);
+      else if (key == "look_sens_pad") look_sens_pad = ::strtof(value.c_str(), nullptr);
       else if (key == "invert_y") invert_y = value == "1" || value == "true";
-      else if (key == "stick_deadzone") stick_deadzone = std::strtof(value.c_str(), nullptr);
-      else if (key == "trigger_threshold") trigger_threshold = std::strtof(value.c_str(), nullptr);
+      else if (key == "stick_deadzone") stick_deadzone = ::strtof(value.c_str(), nullptr);
+      else if (key == "trigger_threshold") trigger_threshold = ::strtof(value.c_str(), nullptr);
       else if (key == "rumble") rumble = value == "1" || value == "true";
       else if (key == "adaptive_triggers") adaptive_triggers = value == "1" || value == "true";
       else if (key == "led" && value.size() == 6) {
-        auto hex = [&](int i) { return static_cast<u8>(std::strtol(value.substr(i, 2).c_str(), nullptr, 16)); };
+        auto hex = [&](int i) { return static_cast<u8>(::strtol(value.substr(i, 2).c_str(), nullptr, 16)); };
         led_r = hex(0);
         led_g = hex(2);
         led_b = hex(4);
@@ -429,10 +434,10 @@ bool InputMap::LoadFromIni(const std::string& path) {
       ActionId a;
       if (!ActionFromName(key.c_str(), &a)) continue;
       action_[a].clear();  // file overrides the default for this action
-      std::stringstream ss(value);
-      std::string tok;
-      while (std::getline(ss, tok, ',')) {
-        tok = Trim(tok);
+      LineReader tokens(value, ',');
+      base::StringRef piece;
+      while (tokens.Next(&piece)) {
+        base::String tok = Trim(base::String(piece.data(), piece.size()));
         Binding b;
         if (!tok.empty() && BindingFromToken(tok.c_str(), &b)) AddActionBinding(a, b);
       }
@@ -440,10 +445,10 @@ bool InputMap::LoadFromIni(const std::string& path) {
       AxisId ax;
       if (!AxisFromName(key.c_str(), &ax)) continue;
       axis_[ax].clear();
-      std::stringstream ss(value);
-      std::string tok;
-      while (std::getline(ss, tok, ',')) {
-        tok = Trim(tok);
+      LineReader tokens(value, ',');
+      base::StringRef piece;
+      while (tokens.Next(&piece)) {
+        base::String tok = Trim(base::String(piece.data(), piece.size()));
         Binding b;
         if (!tok.empty() && BindingFromToken(tok.c_str(), &b)) AddAxisBindingId(ax, b);
       }
@@ -452,45 +457,45 @@ bool InputMap::LoadFromIni(const std::string& path) {
   return true;
 }
 
-bool InputMap::SaveToIni(const std::string& path) const {
-  std::ofstream out(path, std::ios::trunc);
-  if (!out) return false;
-
-  out << "# rx controls. Tokens: key:W mouse:left pad:south padaxis:lefty+\n";
-  out << "[options]\n";
-  out << "look_sens_kbm=" << look_sens_kbm << "\n";
-  out << "look_sens_pad=" << look_sens_pad << "\n";
-  out << "invert_y=" << (invert_y ? 1 : 0) << "\n";
-  out << "stick_deadzone=" << stick_deadzone << "\n";
-  out << "trigger_threshold=" << trigger_threshold << "\n";
-  out << "rumble=" << (rumble ? 1 : 0) << "\n";
-  out << "adaptive_triggers=" << (adaptive_triggers ? 1 : 0) << "\n";
+bool InputMap::SaveToIni(const base::String& path) const {
+  base::String out;
+  out.append("# rx controls. Tokens: key:W mouse:left pad:south padaxis:lefty+\n");
+  out.append("[options]\n");
+  // {} on a float is printf's %g, which is what the ostream this replaced
+  // wrote, so existing files round-trip byte for byte.
+  base::FormatTo(out, "look_sens_kbm={}\n", look_sens_kbm);
+  base::FormatTo(out, "look_sens_pad={}\n", look_sens_pad);
+  base::FormatTo(out, "invert_y={}\n", invert_y ? 1 : 0);
+  base::FormatTo(out, "stick_deadzone={}\n", stick_deadzone);
+  base::FormatTo(out, "trigger_threshold={}\n", trigger_threshold);
+  base::FormatTo(out, "rumble={}\n", rumble ? 1 : 0);
+  base::FormatTo(out, "adaptive_triggers={}\n", adaptive_triggers ? 1 : 0);
   char led[8];
-  std::snprintf(led, sizeof(led), "%02x%02x%02x", led_r, led_g, led_b);
-  out << "led=" << led << "\n\n";
+  ::snprintf(led, sizeof(led), "%02x%02x%02x", led_r, led_g, led_b);
+  base::FormatTo(out, "led={}\n\n", led);
 
-  auto write_tokens = [&out](const std::vector<Binding>& v) {
+  auto write_tokens = [&out](const base::Vector<Binding>& v) {
     for (size_t i = 0; i < v.size(); ++i) {
-      if (i) out << ",";
-      out << BindingToken(v[i]);
+      if (i) out.append(",");
+      out.append(BindingToken(v[i]));
     }
   };
 
-  out << "[actions]\n";
+  out.append("[actions]\n");
   for (int a = 0; a < action_count_; ++a) {
     if (!action_names_[a]) continue;
-    out << action_names_[a] << "=";
+    base::FormatTo(out, "{}=", action_names_[a]);
     write_tokens(action_[a]);
-    out << "\n";
+    out.append("\n");
   }
-  out << "\n[axes]\n";
+  out.append("\n[axes]\n");
   for (int x = 0; x < axis_count_; ++x) {
     if (!axis_names_[x]) continue;
-    out << axis_names_[x] << "=";
+    base::FormatTo(out, "{}=", axis_names_[x]);
     write_tokens(axis_[x]);
-    out << "\n";
+    out.append("\n");
   }
-  return static_cast<bool>(out);
+  return fs::WriteTextFile(path, out);
 }
 
 }  // namespace rx

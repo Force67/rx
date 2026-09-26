@@ -1,6 +1,7 @@
 #include "render/geometry/water.h"
 
 #include "asset/mesh.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "shaders/copy_cs_hlsl.h"
@@ -9,13 +10,13 @@
 
 namespace rx::render {
 
-std::unique_ptr<WaterPass> WaterPass::Create(Device& device, Format color_format,
+base::UniquePointer<WaterPass> WaterPass::Create(Device& device, Format color_format,
                                              Format motion_format, Format depth_format,
                                              BindingLayoutHandle globals_layout,
                                              BindingLayoutHandle material_layout,
                                              BindingLayoutHandle environment_layout,
                                              BindingLayoutHandle bindless_layout) {
-  auto pass = std::unique_ptr<WaterPass>(new WaterPass(device));
+  auto pass = base::UniquePointer<WaterPass>(new WaterPass(device));
 
   pass->sampler_ = device.GetSampler({.address_u = AddressMode::kClampToEdge,
                                       .address_v = AddressMode::kClampToEdge,

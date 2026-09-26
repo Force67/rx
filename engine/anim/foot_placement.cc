@@ -1,8 +1,9 @@
 #include "anim/foot_placement.h"
 
-#include <vector>
 
 #include "anim/anim_internal.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
 
 namespace rx::anim {
 
@@ -15,16 +16,16 @@ struct FootPlacement::Impl {
   bool ok = false;
   f32 ankle_height = 0.08f;
   // Model-space scratch (kinema fills it via LocalToModel); sized once at Bind.
-  std::vector<kinema::Vec3> mt;
-  std::vector<kinema::Quat> mr;
-  std::vector<f32> ms;
+  base::Vector<kinema::Vec3> mt;
+  base::Vector<kinema::Quat> mr;
+  base::Vector<f32> ms;
 
   kinema::PoseView model() {
     return kinema::PoseView{mt.data(), mr.data(), ms.data(), static_cast<u32>(mt.size())};
   }
 };
 
-FootPlacement::FootPlacement() : impl_(std::make_unique<Impl>()) {}
+FootPlacement::FootPlacement() : impl_(base::MakeUnique<Impl>()) {}
 FootPlacement::~FootPlacement() = default;
 FootPlacement::FootPlacement(FootPlacement&&) noexcept = default;
 FootPlacement& FootPlacement::operator=(FootPlacement&&) noexcept = default;

@@ -1,7 +1,8 @@
 #include "script/handler_registry.h"
 
-#include <algorithm>
-#include <cassert>
+#include <assert.h>
+
+#include "base/algorithm.h"
 
 namespace rx::script {
 
@@ -9,7 +10,7 @@ namespace {
 // Lower-bound the sorted table by key. Returns the first entry with key >= want.
 template <class Vec>
 auto LowerBound(Vec& table, u64 want) {
-  return std::lower_bound(table.begin(), table.end(), want,
+  return base::LowerBound(table.begin(), table.end(), want,
                           [](const auto& e, u64 k) { return e.key < k; });
 }
 }  // namespace

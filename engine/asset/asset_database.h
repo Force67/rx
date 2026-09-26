@@ -1,8 +1,6 @@
 #ifndef RX_ASSET_ASSET_DATABASE_H_
 #define RX_ASSET_ASSET_DATABASE_H_
 
-#include <functional>
-#include <mutex>
 
 #include <base/containers/unordered_map.h>
 #include <base/memory/unique_pointer.h>
@@ -13,6 +11,9 @@
 #include "asset/mesh.h"
 #include "asset/texture.h"
 #include "asset/vfs.h"
+#include "base/functional/function.h"
+#include "base/strings/string_ref.h"
+#include "base/threading/mutex.h"
 #include "core/export.h"
 
 namespace rx::asset {
@@ -23,12 +24,12 @@ namespace rx::asset {
 // touching this module. The normalized source path rides along for converters
 // that key behavior off naming conventions (e.g. _n.dds normal maps stay
 // linear).
-using MeshConverter = std::function<base::UniquePointer<Mesh>(
-    ByteSpan, AssetId, std::string_view path)>;
-using TextureConverter = std::function<base::UniquePointer<Texture>(
-    ByteSpan, AssetId, std::string_view path)>;
-using MaterialConverter = std::function<base::UniquePointer<Material>(
-    ByteSpan, AssetId, std::string_view path)>;
+using MeshConverter = base::Function<base::UniquePointer<Mesh>(
+    ByteSpan, AssetId, base::StringRef path)>;
+using TextureConverter = base::Function<base::UniquePointer<Texture>(
+    ByteSpan, AssetId, base::StringRef path)>;
+using MaterialConverter = base::Function<base::UniquePointer<Material>(
+    ByteSpan, AssetId, base::StringRef path)>;
 
 class RX_ASSET_EXPORT AssetDatabase {
 public:
@@ -47,9 +48,9 @@ public:
   // background prefetch must not stall the main thread for a whole convert).
   // Concurrent loads of the same key may both convert; the first insert wins,
   // except that a successful convert supersedes a concurrently cached failure.
-  const Mesh *LoadMesh(std::string_view path);
-  const Texture *LoadTexture(std::string_view path);
-  const Material *LoadMaterial(std::string_view path);
+  const Mesh *LoadMesh(base::StringRef path);
+  const Texture *LoadTexture(base::StringRef path);
+  const Material *LoadMaterial(base::StringRef path);
 
   // Side channel for converters that synthesize assets while converting
   // another (NIF shader properties become materials) and for procedurally
@@ -81,7 +82,7 @@ private:
   // heap objects behind UniquePointers, stable across rehash. Invariant:
   // background prefetch threads only ADD (LoadMesh/LoadTexture); Remove* and
   // Replace* stay main-thread-only and must not race a convert on the same key.
-  mutable std::mutex mutex_;
+  mutable base::Mutex mutex_;
   base::UnorderedMap<u64, base::UniquePointer<Mesh>> meshes_;
   base::UnorderedMap<u64, base::UniquePointer<Texture>> textures_;
   base::UnorderedMap<u64, base::UniquePointer<Material>> materials_;

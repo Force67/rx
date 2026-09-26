@@ -1,9 +1,7 @@
 #include "authoring/command_bridge.h"
 
-#include <format>
-#include <string_view>
-#include <utility>
-
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "core/log.h"
 #include "ecs/entity.h"
 #include "script/handler_context.h"
@@ -50,8 +48,8 @@ const char* WireTypeName(rpc::RpcValue::Type type) {
 
 // "(entity, vec3)", the signature as the caller has to spell it, for a
 // mismatch message that says what was wanted rather than only what was wrong.
-std::string SigText(const script::HandlerSig& sig) {
-  std::string text = "(";
+base::String SigText(const script::HandlerSig& sig) {
+  base::String text = "(";
   for (u8 i = 0; i < sig.count; ++i) {
     if (i) text += ", ";
     text += script::ScriptTypeName(sig.params[i]);
@@ -72,8 +70,8 @@ ecs::Entity UnpackEntity(i64 packed) {
   return ecs::Entity{static_cast<u32>(bits), static_cast<u32>(bits >> 32)};
 }
 
-std::string TypeError(size_t index, ScriptType want, const rpc::RpcValue& got) {
-  return std::format("arg {} expects {}, got {}", index, script::ScriptTypeName(want),
+base::String TypeError(size_t index, ScriptType want, const rpc::RpcValue& got) {
+  return rx::StrFormat("arg {} expects {}, got {}", index, script::ScriptTypeName(want),
                      WireTypeName(got.type()));
 }
 
@@ -82,11 +80,11 @@ std::string TypeError(size_t index, ScriptType want, const rpc::RpcValue& got) {
 // member out of a defaulted ScriptValue.
 bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
                 script::HandlerContext& ctx, script::ScriptStack* stack,
-                std::string* error) {
+                base::String* error) {
   size_t want = 0;
   for (u8 p = 0; p < sig.count; ++p) want += WireSlots(sig.params[p]);
   if (args.size() != want) {
-    *error = std::format("expects {} arg(s) for {}, got {}", want, SigText(sig),
+    *error = rx::StrFormat("expects {} arg(s) for {}, got {}", want, SigText(sig),
                          args.size());
     return false;
   }
@@ -153,7 +151,7 @@ bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
             ScriptValue::Symbol(ctx.Syms().Intern(script::ScriptStringView(value.as_string()))));
         break;
       case ScriptType::kVoid:
-        *error = std::format("arg {} has no wire representation (void)", at);
+        *error = rx::StrFormat("arg {} has no wire representation (void)", at);
         return false;
     }
     at += WireSlots(sig.params[p]);
@@ -165,7 +163,7 @@ bool BuildStack(const script::HandlerSig& sig, const rpc::RpcArgs& args,
 // context's scratch arena here: the arena is reset once the caller is done
 // polling, and the reply outlives that.
 bool BuildReply(ScriptType ret, const ScriptValue& value, script::HandlerContext& ctx,
-                rpc::RpcArgs* out, std::string* error) {
+                rpc::RpcArgs* out, base::String* error) {
   switch (ret) {
     case ScriptType::kVoid:
       return true;
@@ -189,10 +187,10 @@ bool BuildReply(ScriptType ret, const ScriptValue& value, script::HandlerContext
       return true;
     }
     case ScriptType::kString:
-      out->emplace_back(std::string(value.as_str().view()));
+      out->emplace_back(base::String(value.as_str().view()));
       return true;
     case ScriptType::kSymbol:
-      out->emplace_back(std::string(ctx.Syms().Resolve(value.as_symbol()).view()));
+      out->emplace_back(base::String(ctx.Syms().Resolve(value.as_symbol()).view()));
       return true;
   }
   *error = "command returns a type with no wire representation";
@@ -210,7 +208,7 @@ CommandBridge::CommandBridge(script::HandlerRegistry& commands, script::HandlerC
     // captures the HandlerDesc address, which a later Add would relocate.
     const script::ScriptStringView name = desc.name;
     const script::HandlerSig sig = desc.sig;
-    registry_.On(std::string(name.view()),
+    registry_.On(base::String(name.view()),
                  [this, name, sig](const rpc::RpcContext&, const rpc::RpcArgs& args) {
                    // No reply slot means this Dispatch did not come through
                    // Invoke, so it never passed the trust check: do nothing.
@@ -218,15 +216,15 @@ CommandBridge::CommandBridge(script::HandlerRegistry& commands, script::HandlerC
                    Reply& reply = *pending_;
                    script::ScriptStack stack;
                    stack.reserve(sig.count);
-                   std::string detail;
+                   base::String detail;
                    if (!BuildStack(sig, args, ctx_, &stack, &detail)) {
-                     reply.error = std::format("{}: {}", name.view(), detail);
+                     reply.error = rx::StrFormat("{}: {}", name.view(), detail);
                      return;
                    }
                    script::ScriptArgs script_args(stack);
                    const ScriptValue result = commands_.Dispatch(ctx_, name, script_args);
                    reply.ok = BuildReply(sig.ret, result, ctx_, &reply.values, &detail);
-                   if (!reply.ok) reply.error = std::format("{}: {}", name.view(), detail);
+                   if (!reply.ok) reply.error = rx::StrFormat("{}: {}", name.view(), detail);
                  });
   }
 }
@@ -245,7 +243,7 @@ CommandBridge::Reply CommandBridge::Invoke(const rpc::RpcContext& ctx,
   pending_ = &reply;
   const bool dispatched = registry_.Dispatch(ctx, call);
   pending_ = nullptr;
-  if (!dispatched) reply.error = std::format("unknown command '{}'", call.name);
+  if (!dispatched) reply.error = rx::StrFormat("unknown command '{}'", call.name);
   return reply;
 }
 

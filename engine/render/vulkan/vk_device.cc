@@ -1,14 +1,21 @@
-#include <algorithm>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <vector>
-#include <cstring>
+#include <stdlib.h>
+#include <string.h>
 
-#include <base/containers/vector.h>
-
+#include "base/algorithm.h"
+#include "base/atomic.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
+#include "base/threading/lock_guard.h"
+#include "core/format.h"
+#include "core/file_system.h"
 #include "core/log.h"
 #include "core/memory/small_vector.h"
+#include "core/scalar.h"
 #include "render/vulkan/vk_backend.h"
 
 #if defined(RX_HAS_DLSS)
@@ -38,8 +45,8 @@ bool HasValidationLayer() {
   vkEnumerateInstanceLayerProperties(&count, nullptr);
   base::Vector<VkLayerProperties> layers(count);
   vkEnumerateInstanceLayerProperties(&count, layers.data());
-  return std::ranges::any_of(layers, [](const auto& layer) {
-    return std::strcmp(layer.layerName, kValidationLayer) == 0;
+  return base::AnyOf(layers.begin(), layers.end(), [](const auto& layer) {
+    return ::strcmp(layer.layerName, kValidationLayer) == 0;
   });
 }
 
@@ -52,8 +59,9 @@ base::Vector<VkExtensionProperties> DeviceExtensions(VkPhysicalDevice physical) 
 }
 
 bool HasExtension(const base::Vector<VkExtensionProperties>& available, const char* name) {
-  return std::ranges::any_of(
-      available, [name](const auto& ext) { return std::strcmp(ext.extensionName, name) == 0; });
+  return base::AnyOf(available.begin(), available.end(), [name](const auto& ext) {
+    return ::strcmp(ext.extensionName, name) == 0;
+  });
 }
 
 bool HasInstanceExtension(const char* name) {
@@ -117,21 +125,21 @@ constexpr PromotedExtension kPromotedExtensions[] = {
 // this. It exists because the extension path is otherwise unreachable on any
 // hardware we have, and dead code that nobody runs is code that does not work.
 u32 ApiVersionBudget() {
-  const char* env = std::getenv("RX_VK_MAX_VERSION");
+  const char* env = ::getenv("RX_VK_MAX_VERSION");
   if (!env) return kMaxApiVersion;
   char* end = nullptr;
-  const unsigned long major = std::strtoul(env, &end, 10);
+  const unsigned long major = ::strtoul(env, &end, 10);
   if (end == env || *end != '.') {
     RX_WARN("RX_VK_MAX_VERSION=\"{}\" is not major.minor, ignoring", env);
     return kMaxApiVersion;
   }
-  const unsigned long minor = std::strtoul(end + 1, nullptr, 10);
+  const unsigned long minor = ::strtoul(end + 1, nullptr, 10);
   const u32 budget = VK_MAKE_API_VERSION(0, major, minor, 0);
   if (budget < kMinApiVersion) {
     RX_WARN("RX_VK_MAX_VERSION={} is below the 1.1 floor, using 1.1", env);
     return kMinApiVersion;
   }
-  return std::min(kMaxApiVersion, budget);
+  return rx::Min(kMaxApiVersion, budget);
 }
 
 // Promoted extensions `available` still has to supply at `api_version`; the
@@ -151,8 +159,8 @@ base::Vector<const char*> PromotedExtensionsFor(
   return needed;
 }
 
-std::string JoinNames(const base::Vector<const char*>& names) {
-  std::string joined;
+base::String JoinNames(const base::Vector<const char*>& names) {
+  base::String joined;
   for (const char* name : names) {
     if (!joined.empty()) joined += ", ";
     joined += name;
@@ -309,7 +317,7 @@ VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, u
     auto available = DeviceExtensions(candidate);
     if (need_present && !HasExtension(available, VK_KHR_SWAPCHAIN_EXTENSION_NAME)) continue;
     base::Vector<const char*> missing;
-    PromotedExtensionsFor(available, std::min(props.apiVersion, budget), &missing);
+    PromotedExtensionsFor(available, rx::Min(props.apiVersion, budget), &missing);
     if (!missing.empty()) {
       RX_WARN("{}: vulkan {}.{} without {}", props.deviceName,
               VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
@@ -318,7 +326,7 @@ VkPhysicalDevice PickPhysicalDevice(VkInstance instance, VkSurfaceKHR surface, u
     }
 
     base::Vector<const char*> unmet;
-    BaselineFeatures(candidate, std::min(props.apiVersion, budget), &unmet);
+    BaselineFeatures(candidate, rx::Min(props.apiVersion, budget), &unmet);
     if (!unmet.empty()) {
       RX_WARN("{}: vulkan {}.{} without {}", props.deviceName,
               VK_API_VERSION_MAJOR(props.apiVersion), VK_API_VERSION_MINOR(props.apiVersion),
@@ -341,7 +349,7 @@ VkShaderModule CreateModule(VkDevice device, const ShaderBlob& blob) {
   if (!blob.valid() || blob.format != ShaderFormat::kSpirv) return VK_NULL_HANDLE;
   // The embedded arrays are byte aligned, spirv wants words, so copy.
   base::Vector<u32> words((blob.size + 3) / 4);
-  std::memcpy(words.data(), blob.data, blob.size);
+  base::MemCopy(words.data(), blob.data, blob.size);
   VkShaderModuleCreateInfo info{.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
   info.codeSize = words.size() * 4;
   info.pCode = words.data();
@@ -419,7 +427,7 @@ constexpr VkDescriptorPoolSize kTransientPoolSizes[] = {
 VkDescriptorPool CreateTransientPool(VkDevice device, bool with_accel) {
   VkDescriptorPoolCreateInfo info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   info.maxSets = kTransientMaxSets;
-  info.poolSizeCount = static_cast<u32>(std::size(kTransientPoolSizes)) - (with_accel ? 0 : 1);
+  info.poolSizeCount = static_cast<u32>((sizeof(kTransientPoolSizes) / sizeof(kTransientPoolSizes[0]))) - (with_accel ? 0 : 1);
   info.pPoolSizes = kTransientPoolSizes;
   VkDescriptorPool pool = VK_NULL_HANDLE;
   vkCreateDescriptorPool(device, &info, nullptr, &pool);
@@ -428,20 +436,20 @@ VkDescriptorPool CreateTransientPool(VkDevice device, bool with_accel) {
 
 }  // namespace
 
-std::unique_ptr<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& window) {
+base::UniquePointer<Device> VulkanDevice::Create(const DeviceDesc& desc, Window& window) {
   return CreateImpl(desc, &window);
 }
 
-std::unique_ptr<Device> VulkanDevice::CreateOffscreen(const DeviceDesc& desc) {
+base::UniquePointer<Device> VulkanDevice::CreateOffscreen(const DeviceDesc& desc) {
   return CreateImpl(desc, nullptr);
 }
 
-std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window* window) {
-  auto device = std::unique_ptr<VulkanDevice>(new VulkanDevice());
+base::UniquePointer<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window* window) {
+  auto device = base::UniquePointer<VulkanDevice>(new VulkanDevice());
 
   // A windowed device needs the platform surface instance extensions; an
   // offscreen device (window == nullptr) creates no surface and needs none.
-  std::vector<const char*> surface_extensions;
+  base::Vector<const char*> surface_extensions;
   if (window) {
     surface_extensions = window->vulkan_instance_extensions();
     if (surface_extensions.empty()) {
@@ -462,7 +470,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   // Never ask the instance for more than the loader has or the budget allows:
   // the promoted core entry points are only legal up to this version, and
   // LoadVulkanEntryPoints picks the KHR spelling for everything above it.
-  const u32 api_budget = std::min(volkGetInstanceVersion(), ApiVersionBudget());
+  const u32 api_budget = rx::Min(volkGetInstanceVersion(), ApiVersionBudget());
   if (api_budget < kMaxApiVersion) {
     RX_INFO("vulkan: capped to {}.{} (loader {}.{})", VK_API_VERSION_MAJOR(api_budget),
              VK_API_VERSION_MINOR(api_budget), VK_API_VERSION_MAJOR(volkGetInstanceVersion()),
@@ -508,9 +516,8 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
         NVSDK_NGX_Result_Success) {
       for (unsigned i = 0; i < ngx_instance_ext_count; ++i) {
         const char* name = ngx_instance_exts[i];
-        if (std::ranges::none_of(instance_extensions, [name](const char* e) {
-              return std::strcmp(e, name) == 0;
-            })) {
+        if (!base::AnyOf(instance_extensions.begin(), instance_extensions.end(),
+                         [name](const char* e) { return ::strcmp(e, name) == 0; })) {
           instance_extensions.push_back(name);
         }
       }
@@ -572,7 +579,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   device->caps_.api_version = props.apiVersion;
   // caps_.api_version stays the adapter's own report; this is only what rx
   // spends of it, and it is what decides core-vs-extension everywhere below.
-  device->api_version_ = std::min(props.apiVersion, api_budget);
+  device->api_version_ = rx::Min(props.apiVersion, api_budget);
   device->caps_.integrated = props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU;
   device->caps_.max_push_constant_bytes = props.limits.maxPushConstantsSize;
   // Desktop adapters hand out 256 bytes and up, so a block that only fits here
@@ -582,14 +589,14 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   // the adapter: caps_ keeps reporting what the driver said, so nothing else
   // concludes the hardware is smaller than it is.
   device->push_constant_budget_ = device->caps_.max_push_constant_bytes;
-  if (const char* push_limit = std::getenv("RX_MAX_PUSH_CONSTANTS")) {
+  if (const char* push_limit = ::getenv("RX_MAX_PUSH_CONSTANTS")) {
     char* end = nullptr;
-    const unsigned long parsed = std::strtoul(push_limit, &end, 10);
+    const unsigned long parsed = ::strtoul(push_limit, &end, 10);
     if (end == push_limit || *end != '\0' || parsed < 4) {
       RX_WARN("RX_MAX_PUSH_CONSTANTS='{}' is not a byte count; ignoring", push_limit);
     } else {
       device->push_constant_budget_ =
-          std::min<u32>(device->push_constant_budget_, static_cast<u32>(parsed));
+          rx::Min<u32>(device->push_constant_budget_, static_cast<u32>(parsed));
     }
   }
 
@@ -787,11 +794,11 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   // feature bits, when core / 1.1-1.3, are already enabled by the full-features
   // query below; extensions carrying their own feature struct would need the app
   // to also supply it, which this generic path does not chain.
-  for (const std::string& name : desc.extra_device_extensions) {
+  for (const base::String& name : desc.extra_device_extensions) {
     if (!HasExtension(available, name.c_str())) continue;
     const char* cname = name.c_str();
-    if (std::ranges::any_of(device_extensions,
-                            [cname](const char* e) { return std::strcmp(e, cname) == 0; })) {
+    if (base::AnyOf(device_extensions.begin(), device_extensions.end(),
+                    [cname](const char* e) { return ::strcmp(e, cname) == 0; })) {
       device->caps_.extra_extensions.push_back(name);
       continue;
     }
@@ -808,9 +815,9 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     // Core-1.2 bufferDeviceAddress is enabled; the EXT variant NGX asks for
     // conflicts with it at device creation (VUID 04748). NGX works with the
     // core feature.
-    if (!std::strcmp(name, "VK_EXT_buffer_device_address")) continue;
-    if (std::ranges::any_of(device_extensions,
-                            [name](const char* e) { return std::strcmp(e, name) == 0; })) {
+    if (!::strcmp(name, "VK_EXT_buffer_device_address")) continue;
+    if (base::AnyOf(device_extensions.begin(), device_extensions.end(),
+                    [name](const char* e) { return ::strcmp(e, name) == 0; })) {
       continue;
     }
     device_extensions.push_back(name);
@@ -844,8 +851,8 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     props2.pNext = &fsr_props;
     vkGetPhysicalDeviceProperties2(device->physical_device_, &props2);
     device->caps_.shading_rate_texel =
-        std::max(fsr_props.minFragmentShadingRateAttachmentTexelSize.width, 1u);
-    device->caps_.shading_rate_max_size = std::max(fsr_props.maxFragmentSize.width, 1u);
+        rx::Max(fsr_props.minFragmentShadingRateAttachmentTexelSize.width, 1u);
+    device->caps_.shading_rate_max_size = rx::Max(fsr_props.maxFragmentSize.width, 1u);
   }
   device->caps_.fill_mode_non_solid = features.features.fillModeNonSolid;
   device->caps_.texture_compression_bc = features.features.textureCompressionBC;
@@ -865,7 +872,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     props2.pNext = &accel_props;
     vkGetPhysicalDeviceProperties2(device->physical_device_, &props2);
     device->caps_.accel_scratch_alignment =
-        std::max<u32>(accel_props.minAccelerationStructureScratchOffsetAlignment, 1);
+        rx::Max<u32>(accel_props.minAccelerationStructureScratchOffsetAlignment, 1);
   }
 
   // Async compute queue: prefer a dedicated compute-only family (its own
@@ -882,7 +889,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
     // RX_ASYNC_DEDICATED=0 forces the same-family fallback (diagnostics;
     // also the only way to exercise that path on hardware with a dedicated
     // compute family).
-    const char* dedicated_env = std::getenv("RX_ASYNC_DEDICATED");
+    const char* dedicated_env = ::getenv("RX_ASYNC_DEDICATED");
     if (!dedicated_env || dedicated_env[0] != '0') {
       for (u32 i = 0; i < count; ++i) {
         const VkQueueFlags flags = families[i].queueFlags;
@@ -895,7 +902,7 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   }
   const bool dedicated_compute = device->compute_family_ != VK_QUEUE_FAMILY_IGNORED;
   const u32 queue_count =
-      dedicated_compute ? 1 : std::min<u32>(family_queue_count, 2);
+      dedicated_compute ? 1 : rx::Min<u32>(family_queue_count, 2);
   device->caps_.async_compute = dedicated_compute || queue_count >= 2;
   if (!dedicated_compute) device->compute_family_ = device->graphics_family_;
 
@@ -938,15 +945,12 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   // happen once per driver/app version. Stale or corrupt blobs are rejected by
   // the driver, so loading is fire-and-forget.
   {
-    const char* home = std::getenv("HOME");
-    std::string dir = std::string(home ? home : ".") + "/.cache/rx";
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
+    const char* home = ::getenv("HOME");
+    base::String dir = base::String(home ? home : ".") + "/.cache/rx";
+    fs::CreateDirectories(dir);
     device->pipeline_cache_path_ = dir + "/pipeline.cache";
-    std::vector<char> blob;
-    if (std::ifstream in{device->pipeline_cache_path_, std::ios::binary}) {
-      blob.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-    }
+    base::Vector<u8> blob;
+    fs::ReadFile(device->pipeline_cache_path_, &blob);
     VkPipelineCacheCreateInfo cache_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
     cache_info.initialDataSize = blob.size();
     cache_info.pInitialData = blob.empty() ? nullptr : blob.data();
@@ -975,10 +979,10 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   }
   // Two versions when they differ: what the adapter reports, then what rx is
   // actually driving it at, so a capped run cannot be mistaken for the default.
-  std::string api = std::format("{}.{}", VK_API_VERSION_MAJOR(props.apiVersion),
+  base::String api = rx::StrFormat("{}.{}", VK_API_VERSION_MAJOR(props.apiVersion),
                                 VK_API_VERSION_MINOR(props.apiVersion));
   if (device->api_version_ != props.apiVersion) {
-    api += std::format(" driven as {}.{}", VK_API_VERSION_MAJOR(device->api_version_),
+    api += rx::StrFormat(" driven as {}.{}", VK_API_VERSION_MAJOR(device->api_version_),
                        VK_API_VERSION_MINOR(device->api_version_));
   }
   RX_INFO("gpu: {} ({}{}, {} MB, vk {}, rt={} rayquery={} mesh={} vrs={})",
@@ -997,11 +1001,11 @@ std::unique_ptr<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Window*
   return device;
 }
 
-std::unique_ptr<Device> CreateVulkanDevice(const DeviceDesc& desc, Window& window) {
+base::UniquePointer<Device> CreateVulkanDevice(const DeviceDesc& desc, Window& window) {
   return VulkanDevice::Create(desc, window);
 }
 
-std::unique_ptr<Device> CreateVulkanDeviceOffscreen(const DeviceDesc& desc) {
+base::UniquePointer<Device> CreateVulkanDeviceOffscreen(const DeviceDesc& desc) {
   return VulkanDevice::CreateOffscreen(desc);
 }
 
@@ -1051,7 +1055,7 @@ bool VulkanDevice::InitResources() {
     frame_fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     vkCreateFence(device_, &frame_fence, nullptr, &frame.in_flight);
     frame.descriptor_pool = CreateTransientPool(device_, caps_.raytracing);
-    frame.list = std::make_unique<VulkanCommandList>(*this, frame.cmd, frame.descriptor_pool);
+    frame.list = base::MakeUnique<VulkanCommandList>(*this, frame.cmd, frame.descriptor_pool);
 
     if (caps_.async_compute) {
       // Segment command buffers (graphics splits) share the frame's pool; the
@@ -1064,7 +1068,7 @@ bool VulkanDevice::InitResources() {
       for (u32 i = 0; i + 1 < FrameRing::kMaxSegments; ++i) {
         frame.seg_cmds[i] = extra[i];
         frame.seg_lists[i] =
-            std::make_unique<VulkanCommandList>(*this, extra[i], frame.descriptor_pool);
+            base::MakeUnique<VulkanCommandList>(*this, extra[i], frame.descriptor_pool);
       }
       VkCommandPoolCreateInfo async_pool{.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
       async_pool.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
@@ -1078,7 +1082,7 @@ bool VulkanDevice::InitResources() {
       async_alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
       async_alloc.commandBufferCount = 1;
       vkAllocateCommandBuffers(device_, &async_alloc, &frame.async_cmd);
-      frame.async_list = std::make_unique<VulkanCommandList>(
+      frame.async_list = base::MakeUnique<VulkanCommandList>(
           *this, frame.async_cmd, frame.descriptor_pool,
           /*compute_only=*/compute_family_ != graphics_family_);
       vkCreateSemaphore(device_, &semaphore_info, nullptr, &frame.fork_sem);
@@ -1136,11 +1140,9 @@ VulkanDevice::~VulkanDevice() {
       size_t size = 0;
       vkGetPipelineCacheData(device_, pipeline_cache_, &size, nullptr);
       if (size > 0 && !pipeline_cache_path_.empty()) {
-        std::vector<char> blob(size);
+        base::Vector<u8> blob(size);
         if (vkGetPipelineCacheData(device_, pipeline_cache_, &size, blob.data()) == VK_SUCCESS) {
-          if (std::ofstream out{pipeline_cache_path_, std::ios::binary}) {
-            out.write(blob.data(), static_cast<std::streamsize>(size));
-          }
+          fs::WriteFile(pipeline_cache_path_, base::Span<const u8>(blob.data(), size));
         }
       }
       vkDestroyPipelineCache(device_, pipeline_cache_, nullptr);
@@ -1188,7 +1190,7 @@ void VulkanDevice::DestroySurface() {
   }
 }
 
-std::unique_ptr<Swapchain> VulkanDevice::CreateSwapchain(u32 width, u32 height, bool vsync,
+base::UniquePointer<Swapchain> VulkanDevice::CreateSwapchain(u32 width, u32 height, bool vsync,
                                                          bool hdr) {
   return VulkanSwapchain::Create(*this, width, height, vsync, hdr);
 }
@@ -1245,7 +1247,7 @@ GpuBuffer VulkanDevice::CreateBuffer(u64 size, BufferUsageFlags usage, bool host
     return {};
   }
 
-  if (std::getenv("RX_BUFFER_TRACE")) {
+  if (::getenv("RX_BUFFER_TRACE")) {
     RX_INFO("buffer created: {:#x} ({} bytes, usage {:#x})",
              reinterpret_cast<u64>(buffer), size, static_cast<u64>(usage));
   }
@@ -1267,7 +1269,7 @@ GpuBuffer VulkanDevice::CreateBufferWithData(ByteSpan data, BufferUsageFlags usa
   CheckUploadBatchThread("CreateBufferWithData");
   GpuBuffer staging = CreateBuffer(data.size(), kBufferUsageTransferSrc, true);
   if (!staging.mapped) return {};
-  std::memcpy(staging.mapped, data.data(), data.size());
+  base::MemCopy(staging.mapped, data.data(), data.size());
   FlushBuffer(staging, 0, data.size());
 
   GpuBuffer buffer = CreateBuffer(data.size(), usage | kBufferUsageTransferDst, false);
@@ -1309,11 +1311,11 @@ void VulkanDevice::InvalidateBuffer(const GpuBuffer& buffer, u64 offset, u64 siz
 }
 
 void VulkanDevice::CheckUploadBatchThread(const char* what) const {
-  if (std::this_thread::get_id() != upload_batch_thread_) {
+  if (base::GetCurrentThreadIndex() != upload_batch_thread_) {
     RX_ERROR("{} called off the device thread; the upload batch is unsynchronized and this "
              "would corrupt it. Convert on workers, upload on the device thread.",
              what);
-    std::abort();
+    ::abort();
   }
 }
 
@@ -1341,13 +1343,13 @@ VulkanCommandList* VulkanDevice::EnsureUploadBatchCmd() {
       return nullptr;
     }
     upload_batch_list_ =
-        std::make_unique<VulkanCommandList>(*this, upload_batch_cmd_, immediate_descriptor_pool_);
+        base::MakeUnique<VulkanCommandList>(*this, upload_batch_cmd_, immediate_descriptor_pool_);
     // Anything retired from here on may be read by this batch, which will carry
     // the next serial.
-    upload_park_serial_.store(upload_batch_serial_ + 1, std::memory_order_release);
+    upload_park_serial_.store(upload_batch_serial_ + 1, base::memory_order_release);
   }
   ++upload_batch_records_;  // one recorded upload per call; reported if the batch is dropped
-  return upload_batch_list_.get();
+  return upload_batch_list_.Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
 VkFence VulkanDevice::AcquireUploadBatchFence() {
@@ -1378,7 +1380,7 @@ void VulkanDevice::ResetPendingUploadBatch() {
     vkFreeCommandBuffers(device_, immediate_pool_, 1, &upload_batch_cmd_);
     upload_batch_cmd_ = VK_NULL_HANDLE;
   }
-  upload_batch_list_.reset();
+  upload_batch_list_.Reset();
   for (GpuBuffer& staging : upload_batch_stagings_) DestroyBuffer(staging);
   upload_batch_stagings_.clear();
   upload_batch_staging_bytes_ = 0;
@@ -1389,9 +1391,9 @@ void VulkanDevice::DiscardPendingUploadBatch() {
   // The discarded copies never run, so the projected serial they would have
   // carried must be removed from both future and already-parked resources.
   const u64 canceled = upload_batch_serial_ + 1;
-  upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+  upload_park_serial_.store(upload_batch_serial_, base::memory_order_release);
   {
-    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    base::LockGuard<base::Mutex> lock(graveyard_mutex_);
     for (Graveyard& graveyard : graveyard_) {
       if (graveyard.upload_serial == canceled) graveyard.upload_serial = upload_batch_serial_;
     }
@@ -1477,16 +1479,16 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
       // retires, which proves this one did too by submission order.
       ReportDroppedUploadBatch("fallback drain failed");
       upload_batch_cmd_ = VK_NULL_HANDLE;
-      upload_batch_list_.reset();  // wrapper only; the VkCommandBuffer stays alive
+      upload_batch_list_.Reset();  // wrapper only; the VkCommandBuffer stays alive
       upload_batch_stagings_.clear();
       upload_batch_staging_bytes_ = 0;
       upload_batch_records_ = 0;
-      upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+      upload_park_serial_.store(upload_batch_serial_, base::memory_order_release);
       return;
     }
     // The queue drain is the completion proof a fence would normally provide.
     upload_retired_serial_ = ++upload_batch_serial_;
-    upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+    upload_park_serial_.store(upload_batch_serial_, base::memory_order_release);
     ResetPendingUploadBatch();
     return;
   }
@@ -1501,19 +1503,19 @@ void VulkanDevice::SubmitUploadBatchIfPending() {
   UploadBatchInFlight in_flight;
   in_flight.cmd = upload_batch_cmd_;
   in_flight.fence = fence;
-  in_flight.stagings = std::move(upload_batch_stagings_);
+  in_flight.stagings = base::move(upload_batch_stagings_);
   in_flight.staging_bytes = upload_batch_staging_bytes_;
   in_flight.serial = ++upload_batch_serial_;
   upload_inflight_staging_bytes_ += upload_batch_staging_bytes_;
-  upload_batches_in_flight_.push_back(std::move(in_flight));
+  upload_batches_in_flight_.push_back(base::move(in_flight));
   upload_batch_cmd_ = VK_NULL_HANDLE;
-  upload_batch_list_.reset();
+  upload_batch_list_.Reset();
   upload_batch_stagings_.clear();
   upload_batch_staging_bytes_ = 0;
   upload_batch_records_ = 0;
   // Nothing is recording now, so a retire from here on is only covered by the
   // batch just submitted.
-  upload_park_serial_.store(upload_batch_serial_, std::memory_order_release);
+  upload_park_serial_.store(upload_batch_serial_, base::memory_order_release);
 
   // Hard cap on outstanding staging memory: without a wait anywhere, a burst
   // could submit 64 MiB chunks faster than the GPU copies them and grow the
@@ -1574,7 +1576,7 @@ void VulkanDevice::ParkBatchStaging(GpuBuffer& buffer) {
   if (upload_batch_staging_bytes_ >= kStagingBudget) SubmitUploadBatchIfPending();
 }
 
-void VulkanDevice::RecordUpload(const std::function<void(CommandList&)>& record) {
+void VulkanDevice::RecordUpload(const base::Function<void(CommandList&)>& record) {
   CheckUploadBatchThread("RecordUpload");
   // Batched: record into the shared batch command buffer (submitted at flush).
   // Otherwise a blocking ImmediateSubmit, exactly as the caller would have done.
@@ -1600,13 +1602,13 @@ void VulkanDevice::DestroyBuffer(GpuBuffer& buffer) {
 // Records the upload batch that may still be reading whatever is being parked.
 // Call with graveyard_mutex_ held.
 void VulkanDevice::NoteGraveyardUploadSerial(u32 slot) {
-  const u64 serial = upload_park_serial_.load(std::memory_order_acquire);
+  const u64 serial = upload_park_serial_.load(base::memory_order_acquire);
   if (serial > graveyard_[slot].upload_serial) graveyard_[slot].upload_serial = serial;
 }
 
 void VulkanDevice::DestroyBufferDeferred(GpuBuffer& buffer) {
   if (BufferRecord* record = Rec(buffer.handle)) {
-    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    base::LockGuard<base::Mutex> lock(graveyard_mutex_);
     const u32 slot = current_slot_;
     graveyard_[slot].buffers.push_back(record);
     NoteGraveyardUploadSerial(slot);
@@ -1616,7 +1618,7 @@ void VulkanDevice::DestroyBufferDeferred(GpuBuffer& buffer) {
 
 void VulkanDevice::DestroyImageDeferred(GpuImage& image) {
   if (TextureRecord* record = Rec(image.handle)) {
-    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    base::LockGuard<base::Mutex> lock(graveyard_mutex_);
     const u32 slot = current_slot_;
     graveyard_[slot].images.push_back(record);
     NoteGraveyardUploadSerial(slot);
@@ -1626,7 +1628,7 @@ void VulkanDevice::DestroyImageDeferred(GpuImage& image) {
 
 void VulkanDevice::DestroyAccelStructDeferred(AccelStructHandle accel) {
   if (AccelStructRecord* record = Rec(accel)) {
-    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    base::LockGuard<base::Mutex> lock(graveyard_mutex_);
     const u32 slot = current_slot_;
     graveyard_[slot].accels.push_back(record);
     NoteGraveyardUploadSerial(slot);
@@ -1641,9 +1643,9 @@ void VulkanDevice::DrainGraveyard(u32 slot) {
   RetireCompletedUploadBatches();
   Graveyard drained;
   {
-    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    base::LockGuard<base::Mutex> lock(graveyard_mutex_);
     if (graveyard_[slot].upload_serial > upload_retired_serial_) return;
-    std::swap(drained, graveyard_[slot]);
+    base::Swap(drained, graveyard_[slot]);
   }
   for (BufferRecord* record : drained.buffers) FreeBufferRecord(record);
   for (TextureRecord* record : drained.images) FreeTextureRecord(record);
@@ -1921,7 +1923,7 @@ SamplerHandle VulkanDevice::GetSampler(const SamplerDesc& desc) {
   info.addressModeW = address(desc.address_w);
   if (desc.max_anisotropy > 1.0f && caps_.max_anisotropy > 1.0f) {
     info.anisotropyEnable = VK_TRUE;
-    info.maxAnisotropy = std::min(desc.max_anisotropy, caps_.max_anisotropy);
+    info.maxAnisotropy = rx::Min(desc.max_anisotropy, caps_.max_anisotropy);
   }
   info.minLod = desc.min_lod;
   info.maxLod = desc.max_lod;
@@ -1947,7 +1949,7 @@ SamplerHandle VulkanDevice::GetSampler(const SamplerDesc& desc) {
 // bindings
 
 VkDescriptorSetLayout VulkanDevice::GetOrCreateSetLayout(const BindingLayoutDesc& desc) {
-  std::lock_guard lock(layout_cache_mutex_);
+  base::LockGuard lock(layout_cache_mutex_);
   u64 key = HashLayoutDesc(desc);
   if (VkDescriptorSetLayout* cached = set_layout_cache_.find(key)) return *cached;
 
@@ -1996,7 +1998,7 @@ VkDescriptorSetLayout VulkanDevice::GetOrCreateSetLayout(const BindingLayoutDesc
 }
 
 VkPipelineLayout VulkanDevice::GetOrCreatePipelineLayout(
-    std::span<const VkDescriptorSetLayout> sets, VkShaderStageFlags push_stages, u32 push_size,
+    base::Span<const VkDescriptorSetLayout> sets, VkShaderStageFlags push_stages, u32 push_size,
     const char* debug_name) {
   // The one place a push block reaches the driver, so the one place worth
   // checking it. Over the limit the layout is invalid and the pass would be
@@ -2010,7 +2012,7 @@ VkPipelineLayout VulkanDevice::GetOrCreatePipelineLayout(
     return VK_NULL_HANDLE;
   }
 
-  std::lock_guard lock(layout_cache_mutex_);
+  base::LockGuard lock(layout_cache_mutex_);
   u64 key = HashBytes(sets.data(), sets.size() * sizeof(VkDescriptorSetLayout));
   key = HashBytes(&push_stages, sizeof(push_stages), key);
   key = HashBytes(&push_size, sizeof(push_size), key);
@@ -2050,12 +2052,12 @@ BindingSetHandle VulkanDevice::CreateBindingSet(BindingLayoutHandle layout, u32 
   // Dedicated pool sized exactly for this set; persistent sets are few.
   base::Vector<VkDescriptorPoolSize> sizes;
   for (const BindingSlot& slot : layout_record->desc.slots) {
-    sizes.push_back({ToVkDescriptorType(slot.type), std::max(slot.count, 1u)});
+    sizes.push_back({ToVkDescriptorType(slot.type), rx::Max(slot.count, 1u)});
   }
   VkDescriptorPoolCreateInfo pool_info{.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
   if (layout_record->desc.update_after_bind ||
-      std::ranges::any_of(layout_record->desc.slots,
-                          [](const BindingSlot& s) { return s.variable_count; })) {
+      base::AnyOf(layout_record->desc.slots.begin(), layout_record->desc.slots.end(),
+                  [](const BindingSlot& s) { return s.variable_count; })) {
     pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
   }
   pool_info.maxSets = 1;
@@ -2089,7 +2091,7 @@ void VulkanDevice::DestroyBindingSet(BindingSetHandle set) {
   }
 }
 
-void VulkanDevice::WriteDescriptors(VkDescriptorSet set, std::span<const BindingItem> items) {
+void VulkanDevice::WriteDescriptors(VkDescriptorSet set, base::Span<const BindingItem> items) {
   // Hot path: dozens of BindTransient calls per frame, almost always with a
   // handful of items; inline storage keeps this allocation-free. The write
   // entries point into the side arrays, which is safe because each is sized
@@ -2158,7 +2160,7 @@ void VulkanDevice::WriteDescriptors(VkDescriptorSet set, std::span<const Binding
   vkUpdateDescriptorSets(device_, static_cast<u32>(writes.size()), writes.data(), 0, nullptr);
 }
 
-void VulkanDevice::UpdateBindingSet(BindingSetHandle set, std::span<const BindingItem> items) {
+void VulkanDevice::UpdateBindingSet(BindingSetHandle set, base::Span<const BindingItem> items) {
   WriteDescriptors(Rec(set)->set, items);
 }
 
@@ -2192,23 +2194,23 @@ void VulkanDevice::BeginPipelineBatch() {
   if (pipeline_batch_active_) return;
   pipeline_batch_active_ = true;
   pipeline_workers_quit_ = false;
-  pipeline_batch_failures_.store(0, std::memory_order_relaxed);
-  const u32 workers = std::clamp(std::thread::hardware_concurrency(), 2u, 16u);
+  pipeline_batch_failures_.store(0, base::memory_order_relaxed);
+  const u32 workers = rx::Clamp(base::GetProcessorCount(), 2u, 16u);
   for (u32 i = 0; i < workers; ++i) {
-    pipeline_workers_.emplace_back([this] {
+    pipeline_workers_.push_back(base::MakeUnique<base::Thread>("rx-vk-pipelines", [this] {
       for (;;) {
-        std::function<void()> job;
+        base::Function<void()> job;
         {
-          std::unique_lock lock(pipeline_queue_mutex_);
-          pipeline_queue_cv_.wait(
+          base::UniqueLock<base::Mutex> lock(pipeline_queue_mutex_);
+          pipeline_queue_cv_.Wait(
               lock, [this] { return pipeline_workers_quit_ || !pipeline_jobs_.empty(); });
           if (pipeline_jobs_.empty()) return;
-          job = std::move(pipeline_jobs_.front());
+          job = base::move(pipeline_jobs_.front());
           pipeline_jobs_.pop_front();
         }
         job();
       }
-    });
+    }, /*start_now=*/true));
   }
 }
 
@@ -2216,28 +2218,31 @@ bool VulkanDevice::EndPipelineBatch() {
   if (!pipeline_batch_active_) return true;
   pipeline_batch_active_ = false;
   {
-    std::lock_guard lock(pipeline_queue_mutex_);
+    base::LockGuard lock(pipeline_queue_mutex_);
     pipeline_workers_quit_ = true;
   }
-  pipeline_queue_cv_.notify_all();
-  for (std::thread& worker : pipeline_workers_) worker.join();
+  pipeline_queue_cv_.NotifyAll();
+  for (auto& worker : pipeline_workers_) worker->Join();
   pipeline_workers_.clear();
-  return pipeline_batch_failures_.load(std::memory_order_relaxed) == 0;
+  return pipeline_batch_failures_.load(base::memory_order_relaxed) == 0;
 }
 
-void VulkanDevice::EnqueuePipelineJob(std::function<void()> job) {
+void VulkanDevice::EnqueuePipelineJob(base::Function<void()> job) {
   {
-    std::lock_guard lock(pipeline_queue_mutex_);
-    pipeline_jobs_.push_back(std::move(job));
+    base::LockGuard lock(pipeline_queue_mutex_);
+    pipeline_jobs_.push_back(base::move(job));
   }
-  pipeline_queue_cv_.notify_one();
+  pipeline_queue_cv_.NotifyOne();
 }
 
 bool VulkanDevice::WaitPipelineReady(PipelineRecord* record) {
-  u32 state = record->build_state.load(std::memory_order_acquire);
-  while (state == PipelineRecord::kBuilding) {
-    record->build_state.wait(PipelineRecord::kBuilding, std::memory_order_acquire);
-    state = record->build_state.load(std::memory_order_acquire);
+  u32 state = record->build_state.load(base::memory_order_acquire);
+  if (state == PipelineRecord::kBuilding) {
+    base::UniqueLock<base::Mutex> lock(pipeline_ready_mutex_);
+    pipeline_ready_cv_.Wait(lock, [&] {
+      state = record->build_state.load(base::memory_order_acquire);
+      return state != PipelineRecord::kBuilding;
+    });
   }
   return state == PipelineRecord::kBuilt;
 }
@@ -2248,7 +2253,7 @@ bool VulkanDevice::BuildComputePipeline(const ComputePipelineDesc& desc,
   if (!ResolveSetLayouts(*this, desc.sets, kShaderStageCompute, &set_layouts)) return false;
 
   VkPipelineLayout layout = GetOrCreatePipelineLayout(
-      {set_layouts.data(), set_layouts.size()}, VK_SHADER_STAGE_COMPUTE_BIT,
+      base::Span(set_layouts.data(), set_layouts.size()), VK_SHADER_STAGE_COMPUTE_BIT,
       desc.push_constant_size, desc.debug_name);
   if (layout == VK_NULL_HANDLE) return false;
 
@@ -2279,7 +2284,7 @@ bool VulkanDevice::BuildComputePipeline(const ComputePipelineDesc& desc,
   record->bind_point = VK_PIPELINE_BIND_POINT_COMPUTE;
   record->push_stages = VK_SHADER_STAGE_COMPUTE_BIT;
   record->push_size = desc.push_constant_size;
-  record->set_layouts = std::move(set_layouts);
+  record->set_layouts = base::move(set_layouts);
   return true;
 }
 
@@ -2301,7 +2306,7 @@ bool VulkanDevice::BuildGraphicsPipeline(const GraphicsPipelineDesc& desc,
 
   VkShaderStageFlags push_stages = ToVkStages(all_stages);
   VkPipelineLayout layout = GetOrCreatePipelineLayout(
-      {set_layouts.data(), set_layouts.size()}, push_stages, desc.push_constant_size,
+      base::Span(set_layouts.data(), set_layouts.size()), push_stages, desc.push_constant_size,
       desc.debug_name);
   if (layout == VK_NULL_HANDLE) return false;
 
@@ -2488,7 +2493,7 @@ bool VulkanDevice::BuildGraphicsPipeline(const GraphicsPipelineDesc& desc,
   record->bind_point = VK_PIPELINE_BIND_POINT_GRAPHICS;
   record->push_stages = push_stages;
   record->push_size = desc.push_constant_size;
-  record->set_layouts = std::move(set_layouts);
+  record->set_layouts = base::move(set_layouts);
   return true;
 }
 
@@ -2688,7 +2693,7 @@ bool VulkanDevice::GetTimestamps(TimestampPoolHandle pool, u32 first, u32 count,
 
 // recording & submission
 
-void VulkanDevice::ImmediateSubmit(const std::function<void(CommandList&)>& record) {
+void VulkanDevice::ImmediateSubmit(const base::Function<void(CommandList&)>& record) {
   // A buffer batched but not yet submitted must land before this submit's work,
   // which may read it (e.g. a BLAS build over just-created vertex/index buffers).
   SubmitUploadBatchIfPending();
@@ -2753,7 +2758,7 @@ bool VulkanDevice::ReadbackImage(const GpuImage& image, ResourceState current, v
   });
 
   vmaInvalidateAllocation(allocator_, allocation, 0, VK_WHOLE_SIZE);
-  std::memcpy(out, mapped.pMappedData, needed);
+  base::MemCopy(out, mapped.pMappedData, needed);
   vmaDestroyBuffer(allocator_, buffer, allocation);
   return true;
 }
@@ -2771,7 +2776,7 @@ CommandList* VulkanDevice::BeginFrame(u32 slot) {
   if (frame.async_pool) vkResetCommandPool(device_, frame.async_pool, 0);
   vkResetDescriptorPool(device_, frame.descriptor_pool, 0);
   {
-    std::lock_guard<std::mutex> lock(graveyard_mutex_);
+    base::LockGuard<base::Mutex> lock(graveyard_mutex_);
     current_slot_ = slot;
   }
   frame.active_segment = 0;
@@ -2781,7 +2786,7 @@ CommandList* VulkanDevice::BeginFrame(u32 slot) {
   VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.cmd, &begin);
-  return frame.list.get();
+  return frame.list.Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
 CommandList* VulkanDevice::SplitFrame(CommandList* cmd, bool signal_fork) {
@@ -2820,7 +2825,7 @@ CommandList* VulkanDevice::SplitFrame(CommandList* cmd, bool signal_fork) {
   VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(next, &begin);
-  return frame.seg_lists[frame.active_segment - 1].get();
+  return frame.seg_lists[frame.active_segment - 1].Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
 CommandList* VulkanDevice::BeginAsync() {
@@ -2829,7 +2834,7 @@ CommandList* VulkanDevice::BeginAsync() {
   VkCommandBufferBeginInfo begin{.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
   vkBeginCommandBuffer(frame.async_cmd, &begin);
-  return frame.async_list.get();
+  return frame.async_list.Get_UseOnlyIfYouKnowWhatYouareDoing();
 }
 
 void VulkanDevice::SubmitAsync(CommandList*) {
@@ -2883,9 +2888,9 @@ PresentResult VulkanDevice::SubmitFrame(CommandList* cmd, Swapchain& swapchain, 
   auto& vk_swapchain = static_cast<VulkanSwapchain&>(swapchain);
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
-    if (candidate.list.get() == cmd) frame = &candidate;
+    if (candidate.list.Get_UseOnlyIfYouKnowWhatYouareDoing() == cmd) frame = &candidate;
     for (const auto& seg : candidate.seg_lists) {
-      if (seg && seg.get() == cmd) frame = &candidate;
+      if (seg && seg.Get_UseOnlyIfYouKnowWhatYouareDoing() == cmd) frame = &candidate;
     }
   }
   if (!frame) return PresentResult::kFailed;
@@ -2946,9 +2951,9 @@ void VulkanDevice::SubmitFrame(CommandList* cmd) {
   SubmitUploadBatchIfPending();  // see the presenting overload
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
-    if (candidate.list.get() == cmd) frame = &candidate;
+    if (candidate.list.Get_UseOnlyIfYouKnowWhatYouareDoing() == cmd) frame = &candidate;
     for (const auto& seg : candidate.seg_lists) {
-      if (seg && seg.get() == cmd) frame = &candidate;
+      if (seg && seg.Get_UseOnlyIfYouKnowWhatYouareDoing() == cmd) frame = &candidate;
     }
   }
   if (!frame) return;
@@ -2982,9 +2987,9 @@ PresentResult VulkanDevice::SubmitFrameGen(CommandList* cmd, Swapchain& swapchai
   auto& vk_swapchain = static_cast<VulkanSwapchain&>(swapchain);
   FrameRing* frame = nullptr;
   for (FrameRing& candidate : frames_) {
-    if (candidate.list.get() == cmd) frame = &candidate;
+    if (candidate.list.Get_UseOnlyIfYouKnowWhatYouareDoing() == cmd) frame = &candidate;
     for (const auto& seg : candidate.seg_lists) {
-      if (seg && seg.get() == cmd) frame = &candidate;
+      if (seg && seg.Get_UseOnlyIfYouKnowWhatYouareDoing() == cmd) frame = &candidate;
     }
   }
   if (!frame) return PresentResult::kFailed;

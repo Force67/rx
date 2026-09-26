@@ -1,11 +1,12 @@
 #ifndef RX_AUDIO_SYNTH_VOICE_H_
 #define RX_AUDIO_SYNTH_VOICE_H_
 
-#include <atomic>
-#include <memory>
 
 #include "audio/audio_clip.h"
+#include "base/atomic.h"
+#include "base/memory/unique_pointer.h"
 #include "core/export.h"
+#include "core/shared.h"
 #include "core/types.h"
 
 namespace rx::audio {
@@ -59,10 +60,9 @@ struct SynthParams {
 // slot the other holds; the only shared mutation is one atomic exchange per
 // Publish / Fetch, which makes both sides wait-free (no spin, no retry).
 //
-// It is reference-counted (held by shared_ptr) so the writer may outlive the
-// reader: when the mixer retires and deletes a SynthVoice, a VehicleAudio still
-// feeding telemetry publishes into a mailbox that is still alive, never freed
-// memory. Publish sanitises the telemetry (NaN -> 0, ranges clamped) so the audio
+// It is shared (rx::Shared) so the writer may outlive the reader: when the
+// mixer retires and deletes a SynthVoice, a VehicleAudio still feeding
+// telemetry publishes into a mailbox that is still alive, never freed memory. Publish sanitises the telemetry (NaN -> 0, ranges clamped) so the audio
 // thread always fetches values the oscillators can trust.
 class RX_AUDIO_EXPORT ParamMailbox {
  public:
@@ -81,7 +81,7 @@ class RX_AUDIO_EXPORT ParamMailbox {
   // Holds the index of the last-published slot plus the dirty flag. Starts on
   // slot 2 (default-constructed, not dirty); the producer owns slot 0 and the
   // consumer owns slot 1 to begin with, keeping all three roles disjoint.
-  std::atomic<u32> shared_{2};
+  base::Atomic<u32> shared_{2};
   u32 write_ = 0;  // producer-private slot index
   u32 read_ = 1;   // consumer-private slot index
 };
@@ -111,7 +111,7 @@ class RX_AUDIO_EXPORT SynthVoice final : public Decoder {
  public:
   // `output_rate` must be the mixer's mix rate (Mixer::output_rate) so Read
   // needs no resampling. `synth` is the model rendered; it is owned here.
-  SynthVoice(u32 output_rate, std::unique_ptr<Synth> synth);
+  SynthVoice(u32 output_rate, base::UniquePointer<Synth> synth);
 
   // device thread (mixer)
   u32 channels() const override { return 1; }
@@ -129,17 +129,17 @@ class RX_AUDIO_EXPORT SynthVoice final : public Decoder {
   void SetParams(const SynthParams& p) { params_->Publish(p); }
 
   // The parameter endpoint. A caller that outlives this voice (VehicleAudio,
-  // whose voices the mixer may retire and delete first) keeps its own shared_ptr
+  // whose voices the mixer may retire and delete first) keeps its own reference
   // and publishes through that, so a late update never touches a freed voice.
-  const std::shared_ptr<ParamMailbox>& params() const { return params_; }
+  const Shared<ParamMailbox>& params() const { return params_; }
 
  private:
   u32 rate_;
-  std::unique_ptr<Synth> synth_;
+  base::UniquePointer<Synth> synth_;
 
   // Shared parameter hand-off (see ParamMailbox). Owned jointly with whoever
   // feeds this voice, so the writer may outlive the reader.
-  std::shared_ptr<ParamMailbox> params_ = std::make_shared<ParamMailbox>();
+  Shared<ParamMailbox> params_ = Shared<ParamMailbox>::Make();
 
   // Device-thread-only smoothing state.
   SynthParams target_{};  // latest fetched value, held between Fetches

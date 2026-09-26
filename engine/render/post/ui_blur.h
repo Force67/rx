@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_UI_BLUR_H_
 #define RX_RENDER_UI_BLUR_H_
 
-#include <memory>
 
+#include "base/memory/unique_pointer.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 
@@ -14,7 +14,7 @@ namespace rx::render {
 // by the UI backend and sampled in screen space by frosted quads.
 class UiBlurPass {
  public:
-  static std::unique_ptr<UiBlurPass> Create(Device& device);
+  static base::UniquePointer<UiBlurPass> Create(Device& device);
   ~UiBlurPass();
 
   UiBlurPass(const UiBlurPass&) = delete;

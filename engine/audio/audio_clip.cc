@@ -1,21 +1,26 @@
 #include "audio/audio_clip.h"
 
-#include <algorithm>
-#include <cctype>
-#include <cstring>
+#include <ctype.h>
+#include <string.h>
 
 #include "audio/wav.h"
 #include "audio/xwma.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
+#include "core/scalar.h"
 
 namespace rx::audio {
 namespace {
 
-std::string LowerExt(std::string_view extension) {
-  std::string e(extension);
+base::String LowerExt(base::StringRef extension) {
+  base::String e(extension);
   if (!e.empty() && e.front() == '.') e.erase(e.begin());
-  std::transform(e.begin(), e.end(), e.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  for (char& c : e) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
   return e;
 }
 
@@ -33,8 +38,8 @@ u32 TagAt(ByteSpan bytes, size_t offset) {
 // fallback so the dispatch is robust to misnamed files.
 enum class Container { kUnknown, kWav, kXwma, kFuz, kWem };
 
-Container Classify(ByteSpan bytes, std::string_view extension) {
-  const std::string ext = LowerExt(extension);
+Container Classify(ByteSpan bytes, base::StringRef extension) {
+  const base::String ext = LowerExt(extension);
   if (ext == "wav") return Container::kWav;
   if (ext == "xwm") return Container::kXwma;
   if (ext == "fuz") return Container::kFuz;
@@ -56,7 +61,7 @@ Container Classify(ByteSpan bytes, std::string_view extension) {
 // talks to the Decoder interface whatever the source was.
 class ClipDecoder final : public Decoder {
  public:
-  explicit ClipDecoder(AudioClip clip) : clip_(std::move(clip)) {}
+  explicit ClipDecoder(AudioClip clip) : clip_(base::move(clip)) {}
 
   u32 channels() const override { return clip_.channels; }
   u32 sample_rate() const override { return clip_.sample_rate; }
@@ -64,9 +69,9 @@ class ClipDecoder final : public Decoder {
 
   u32 Read(float* out, u32 frames) override {
     const u64 remaining = clip_.frames() - cursor_;
-    const u32 n = static_cast<u32>(std::min<u64>(frames, remaining));
+    const u32 n = static_cast<u32>(rx::Min<u64>(frames, remaining));
     if (n > 0) {
-      std::memcpy(out, clip_.samples.data() + cursor_ * clip_.channels,
+      base::MemCopy(out, clip_.samples.data() + cursor_ * clip_.channels,
                   static_cast<size_t>(n) * clip_.channels * sizeof(float));
       cursor_ += n;
     }
@@ -99,7 +104,7 @@ AudioClip DrainToClip(Decoder* decoder) {
   clip.channels = decoder->channels();
   clip.sample_rate = decoder->sample_rate();
   constexpr u32 kChunk = 4096;
-  std::vector<float> buffer(static_cast<size_t>(kChunk) * std::max(1u, clip.channels));
+  base::Vector<float> buffer(static_cast<size_t>(kChunk) * rx::Max(1u, clip.channels));
   for (;;) {
     const u32 got = decoder->Read(buffer.data(), kChunk);
     if (got == 0) break;
@@ -111,7 +116,7 @@ AudioClip DrainToClip(Decoder* decoder) {
 
 }  // namespace
 
-AudioClip DecodeClip(ByteSpan bytes, std::string_view extension) {
+AudioClip DecodeClip(ByteSpan bytes, base::StringRef extension) {
   const Container container = Classify(bytes, extension);
   if (container == Container::kWav) {
     AudioClip clip;
@@ -120,21 +125,21 @@ AudioClip DecodeClip(ByteSpan bytes, std::string_view extension) {
   }
   if (container == Container::kUnknown) return {};
   // Compressed: decode through the codec backend, then collapse to a clip.
-  return DrainToClip(OpenCompressed(bytes, ToCompressedKind(container)).get());
+  return DrainToClip(OpenCompressed(bytes, ToCompressedKind(container)).Get_UseOnlyIfYouKnowWhatYouareDoing());
 }
 
-std::unique_ptr<Decoder> MakeClipDecoder(AudioClip clip) {
+base::UniquePointer<Decoder> MakeClipDecoder(AudioClip clip) {
   if (!clip.valid()) return nullptr;
-  return std::make_unique<ClipDecoder>(std::move(clip));
+  return base::MakeUnique<ClipDecoder>(base::move(clip));
 }
 
-std::unique_ptr<Decoder> OpenDecoder(ByteSpan bytes, std::string_view extension) {
+base::UniquePointer<Decoder> OpenDecoder(ByteSpan bytes, base::StringRef extension) {
   const Container container = Classify(bytes, extension);
   switch (container) {
     case Container::kWav: {
       AudioClip clip;
       DecodeWav(bytes, &clip);
-      return MakeClipDecoder(std::move(clip));
+      return MakeClipDecoder(base::move(clip));
     }
     case Container::kXwma:
     case Container::kFuz:

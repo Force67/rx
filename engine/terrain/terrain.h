@@ -1,17 +1,16 @@
 #ifndef RX_TERRAIN_TERRAIN_H_
 #define RX_TERRAIN_TERRAIN_H_
 
-#include <array>
-#include <compare>
-#include <limits>
-#include <optional>
-#include <span>
-#include <string>
+#include <math.h>
 
 #include <base/containers/vector.h>
 
 #include "asset/asset_id.h"
 #include "asset/mesh.h"
+#include "base/containers/array.h"
+#include "base/containers/span.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "scene/world_streaming.h"
@@ -23,20 +22,19 @@ struct TerrainTileKey {
   i32 z = 0;
 
   bool operator==(const TerrainTileKey &) const = default;
-  auto operator<=>(const TerrainTileKey &) const = default;
 };
 
 struct TerrainWeights {
-  std::array<u8, 4> rgba = {255, 0, 0, 0};
+  base::Array<u8, 4> rgba = {255, 0, 0, 0};
 
   bool operator==(const TerrainWeights &) const = default;
 };
 
 struct TerrainLayer {
-  std::string name;
+  base::String name;
   asset::AssetId albedo;
   asset::AssetId normal;
-  std::array<u8, 4> debug_rgba = {96, 128, 64, 255};
+  base::Array<u8, 4> debug_rgba = {96, 128, 64, 255};
 
   bool operator==(const TerrainLayer &) const = default;
 };
@@ -114,8 +112,8 @@ public:
   explicit Terrain(TerrainDesc desc);
 
   const TerrainDesc &desc() const { return desc_; }
-  std::span<const TerrainTile> tiles() const {
-    return {tiles_.data(), tiles_.size()};
+  base::Span<const TerrainTile> tiles() const {
+    return base::Span(tiles_.data(), tiles_.size());
   }
   u32 samples_per_side() const { return desc_.tile_quads + 1; }
 
@@ -123,12 +121,12 @@ public:
 
   // Replaces a tile and makes its supplied border authoritative over any
   // existing cardinal or diagonal neighbors. Empty weights select layer zero.
-  bool AddOrReplaceTile(TerrainTileKey key, std::span<const f32> heights,
-                        std::span<const TerrainWeights> weights = {});
+  bool AddOrReplaceTile(TerrainTileKey key, base::Span<const f32> heights,
+                        base::Span<const TerrainWeights> weights = {});
 
-  std::optional<f32> SampleHeight(f32 world_x, f32 world_z) const;
+  base::Optional<f32> SampleHeight(f32 world_x, f32 world_z) const;
   asset::AssetId TileAssetId(TerrainTileKey key) const;
-  std::optional<scene::WorldStreamRegion> TileRegion(TerrainTileKey key,
+  base::Optional<scene::WorldStreamRegion> TileRegion(TerrainTileKey key,
                                                      u32 channels = ~u32{0},
                                                      i32 priority = 0) const;
 
@@ -138,11 +136,11 @@ public:
                            base::Vector<scene::WorldStreamRegion> *regions,
                            u32 channels = ~u32{0}, i32 priority = 0) const;
 
-  std::optional<asset::Mesh> BuildTileMesh(TerrainTileKey key,
+  base::Optional<asset::Mesh> BuildTileMesh(TerrainTileKey key,
                                            asset::AssetId material) const;
-  std::optional<TerrainRayHit>
+  base::Optional<TerrainRayHit>
   Raycast(Vec3 origin, Vec3 direction,
-          f32 maximum_distance = std::numeric_limits<f32>::infinity()) const;
+          f32 maximum_distance = INFINITY) const;
 
   TerrainChange ApplyBrush(const TerrainBrush &brush);
   bool ApplyChange(const TerrainChange &change);
@@ -150,14 +148,14 @@ public:
 
 private:
   TerrainTile *FindTileMutable(TerrainTileKey key);
-  std::optional<f32> GridHeight(i64 grid_x, i64 grid_z) const;
+  base::Optional<f32> GridHeight(i64 grid_x, i64 grid_z) const;
   void RecalculateBounds(TerrainTile *tile);
   bool SetChangeState(const TerrainChange &change, bool use_new);
 
   TerrainDesc desc_;
   base::Vector<TerrainTile> tiles_;
 
-  friend bool LoadTerrain(const std::string &, Terrain *, std::string *);
+  friend bool LoadTerrain(const base::String &, Terrain *, base::String *);
 };
 
 // Appends a later, already-applied dab to a stroke. Repeated samples retain the
@@ -166,11 +164,11 @@ RX_TERRAIN_EXPORT bool MergeTerrainChanges(TerrainChange *stroke,
                                            const TerrainChange &dab);
 
 RX_TERRAIN_EXPORT bool SaveTerrain(const Terrain &terrain,
-                                   const std::string &file_path,
-                                   std::string *error = nullptr);
-RX_TERRAIN_EXPORT bool LoadTerrain(const std::string &file_path,
+                                   const base::String &file_path,
+                                   base::String *error = nullptr);
+RX_TERRAIN_EXPORT bool LoadTerrain(const base::String &file_path,
                                    Terrain *terrain,
-                                   std::string *error = nullptr);
+                                   base::String *error = nullptr);
 
 } // namespace rx::terrain
 

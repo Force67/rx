@@ -1,8 +1,10 @@
+#include "base/atomic.h"
+#include "base/strings/string_ref.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
 #include "core/log.h"
 
-#include <atomic>
-#include <cstdio>
-#include <mutex>
+#include <stdio.h>
 
 #if defined(__ANDROID__)
 #include <android/log.h>
@@ -11,8 +13,8 @@
 namespace rx {
 namespace {
 
-std::atomic<LogLevel> g_level{LogLevel::kInfo};
-std::mutex g_mutex;
+base::Atomic<LogLevel> g_level{LogLevel::kInfo};
+base::Mutex g_mutex;
 
 const char* LevelTag(LogLevel level) {
   switch (level) {
@@ -31,14 +33,14 @@ void SetLogLevel(LogLevel level) { g_level.store(level); }
 
 namespace detail {
 
-void LogMessage(LogLevel level, std::string_view message) {
+void LogMessage(LogLevel level, base::StringRef message) {
   if (level < g_level.load()) return;
 #if defined(__ANDROID__)
   __android_log_print(ANDROID_LOG_INFO, "rx", "[%s] %.*s", LevelTag(level),
                       static_cast<int>(message.size()), message.data());
 #else
-  std::scoped_lock lock(g_mutex);
-  std::fprintf(level >= LogLevel::kWarn ? stderr : stdout, "[%s] %.*s\n", LevelTag(level),
+  base::LockGuard lock(g_mutex);
+  ::fprintf(level >= LogLevel::kWarn ? stderr : stdout, "[%s] %.*s\n", LevelTag(level),
                static_cast<int>(message.size()), message.data());
 #endif
 }

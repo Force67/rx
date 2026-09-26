@@ -13,14 +13,14 @@
 // The vehicle Update-before-PhysicsWorld::Update contract is honoured: every
 // simulator stages its forces for the frame, then the world integrates once.
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
 
 #include "audio/engine_synth.h"
 #include "audio/synth_voice.h"
+#include "base/containers/vector.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "physics/aircraft.h"
 #include "physics/boat.h"
 #include "physics/physics_world.h"
@@ -56,32 +56,32 @@ constexpr f32 kLakeX = 1500.0f;
 f32 g_wave_t = 0.0f;
 
 int Fail(const char* what) {
-  std::fprintf(stderr, "vehicle_integration_test FAIL: %s\n", what);
+  ::fprintf(stderr, "vehicle_integration_test FAIL: %s\n", what);
   return 1;
 }
 
 bool IsFinite(const Vec3& v) {
-  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
 }
 
 // audio buffer helpers (mirror vehicle_audio_test)
-bool AllFinite(const std::vector<f32>& b) {
+bool AllFinite(const base::Vector<f32>& b) {
   for (f32 v : b)
-    if (!std::isfinite(v)) return false;
+    if (!::isfinite(v)) return false;
   return true;
 }
-f32 MaxAbs(const std::vector<f32>& b) {
+f32 MaxAbs(const base::Vector<f32>& b) {
   f32 m = 0.0f;
-  for (f32 v : b) m = std::max(m, std::fabs(v));
+  for (f32 v : b) m = rx::Max(m, ::fabs(v));
   return m;
 }
 // RMS over the half-open sample window [lo, hi).
-f32 RmsWindow(const std::vector<f32>& b, size_t lo, size_t hi) {
-  hi = std::min(hi, b.size());
+f32 RmsWindow(const base::Vector<f32>& b, size_t lo, size_t hi) {
+  hi = rx::Min<size_t>(hi, b.size());
   if (lo >= hi) return 0.0f;
   f64 acc = 0.0;
   for (size_t i = lo; i < hi; ++i) acc += static_cast<f64>(b[i]) * b[i];
-  return static_cast<f32>(std::sqrt(acc / static_cast<f64>(hi - lo)));
+  return static_cast<f32>(::sqrt(acc / static_cast<f64>(hi - lo)));
 }
 
 // World up projected onto the boat's up axis: 1 = upright, 0 = on its side.
@@ -92,7 +92,7 @@ f32 Uprightness(const Quat& q) { return Rotate(q, Vec3{0, 1, 0}).y; }
 int main() {
   PhysicsWorld probe;
   if (!probe.Initialize()) {
-    std::fprintf(stderr, "vehicle_integration_test: physics unavailable, skipping\n");
+    ::fprintf(stderr, "vehicle_integration_test: physics unavailable, skipping\n");
     return 0;
   }
 
@@ -104,7 +104,7 @@ int main() {
   {
     constexpr u32 kSamples = 64;
     constexpr f32 kSize = 2000.0f;
-    std::vector<f32> heights(static_cast<size_t>(kSamples) * kSamples, 0.0f);
+    base::Vector<f32> heights(static_cast<size_t>(kSamples) * kSamples, 0.0f);
     world.AddHeightField(Vec3{-kSize * 0.5f, 0.0f, -kSize * 0.5f}, heights.data(), kSamples, kSize,
                          SurfaceType::kAsphalt);
   }
@@ -151,9 +151,9 @@ int main() {
   EngineSynth car_synth(audio::InlineFourCarPreset(), kRate);
   EngineSynth boat_synth(audio::InboardBoatPreset(), kRate);
   EngineSynth plane_synth(audio::SinglePropPlanePreset(), kRate);
-  std::vector<f32> car_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
-  std::vector<f32> boat_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
-  std::vector<f32> plane_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
+  base::Vector<f32> car_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
+  base::Vector<f32> boat_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
+  base::Vector<f32> plane_audio(static_cast<size_t>(kSteps) * kBlock, 0.0f);
 
   // Car audio load-response windows: an early idle stretch vs a later
   // full-throttle stretch (throttle schedule below drives the change).
@@ -181,7 +181,7 @@ int main() {
 
     // (a) Car: idle briefly, then full throttle with a mild weave.
     const f32 car_throttle = frame < kIdleEnd ? 0.0f : 1.0f;
-    const f32 car_steer = frame < kIdleEnd ? 0.0f : 0.25f * std::sin(frame * 0.02f);
+    const f32 car_steer = frame < kIdleEnd ? 0.0f : 0.25f * ::sin(frame * 0.02f);
     world.DriveVehicle(car, car_throttle, car_steer, 0.0f, 0.0f);
 
     // (b) Boat: straight-ahead throttle across the chop.
@@ -206,28 +206,28 @@ int main() {
     if (!world.GetVehicleState(car, &cst)) return Fail("(a) car telemetry read failed");
     if (cst.rpm < 0.0f || cst.rpm > car_redline + 50.0f) return Fail("(a) car rpm out of range");
     if (cst.engine_load < 0.0f || cst.engine_load > 1.0f) return Fail("(a) car load out of [0,1]");
-    car_max_gear = std::max(car_max_gear, cst.gear);
+    car_max_gear = rx::Max(car_max_gear, cst.gear);
     const f32 car_speed = world.VehicleForwardSpeed(car);
-    car_max_speed = std::max(car_max_speed, car_speed);
+    car_max_speed = rx::Max(car_max_speed, car_speed);
     f32 car_slip = 0.0f;
     for (u32 w = 0; w < cst.wheel_count; ++w)
-      car_slip = std::max(car_slip, cst.wheels[w].longitudinal_slip);
+      car_slip = rx::Max(car_slip, cst.wheels[w].longitudinal_slip);
 
     const physics::BoatState& bst = boat.state();
-    boat_max_fwd = std::max(boat_max_fwd, bst.forward_speed);
-    boat_max_wetted = std::max(boat_max_wetted, bst.wetted);
+    boat_max_fwd = rx::Max(boat_max_fwd, bst.forward_speed);
+    boat_max_wetted = rx::Max(boat_max_wetted, bst.wetted);
 
     const physics::AircraftState& ast = plane.state();
-    plane_max_alt = std::max(plane_max_alt, ast.position.y - plane_ground_y);
-    if (!ast.on_ground) plane_peak_climb = std::max(plane_peak_climb, ast.vertical_speed_mps);
+    plane_max_alt = rx::Max(plane_max_alt, ast.position.y - plane_ground_y);
+    if (!ast.on_ground) plane_peak_climb = rx::Max(plane_peak_climb, ast.vertical_speed_mps);
 
     // Per-frame NaN gate: three simulators must never poison the shared world.
-    if (!std::isfinite(car_speed) || !std::isfinite(cst.rpm)) return Fail("(a) car NaN in telemetry");
-    if (!IsFinite(bst.position) || !std::isfinite(bst.rpm) || !std::isfinite(bst.forward_speed) ||
-        !std::isfinite(bst.rotation.w))
+    if (!::isfinite(car_speed) || !::isfinite(cst.rpm)) return Fail("(a) car NaN in telemetry");
+    if (!IsFinite(bst.position) || !::isfinite(bst.rpm) || !::isfinite(bst.forward_speed) ||
+        !::isfinite(bst.rotation.w))
       return Fail("(b) boat NaN in telemetry");
-    if (!IsFinite(ast.position) || !std::isfinite(ast.airspeed_mps) ||
-        !std::isfinite(ast.vertical_speed_mps) || !std::isfinite(ast.rotation.w))
+    if (!IsFinite(ast.position) || !::isfinite(ast.airspeed_mps) ||
+        !::isfinite(ast.vertical_speed_mps) || !::isfinite(ast.rotation.w))
       return Fail("(c) aircraft NaN in telemetry");
 
     // (d) Telemetry -> SynthParams -> one rendered block per vehicle.
@@ -235,14 +235,14 @@ int main() {
     cp.rpm = cst.rpm;
     cp.load = cst.engine_load;
     cp.throttle = car_throttle;
-    cp.speed_mps = std::fabs(car_speed);
+    cp.speed_mps = ::fabs(car_speed);
     cp.slip = car_slip;
     car_synth.Render(&car_audio[static_cast<size_t>(frame) * kBlock], kBlock, cp);
 
     SynthParams bp;
     bp.rpm = bst.rpm;
     bp.load = bst.engine_load;
-    bp.throttle = std::max(0.0f, bst.throttle);
+    bp.throttle = rx::Max(0.0f, bst.throttle);
     bp.speed_mps = bst.speed_mps;
     boat_synth.Render(&boat_audio[static_cast<size_t>(frame) * kBlock], kBlock, bp);
 
@@ -260,8 +260,8 @@ int main() {
     f32 rot[4];
     world.GetVehicleTransform(car, &pos, rot);
     const f32 dx = pos.x - car_start.x, dz = pos.z - car_start.z;
-    const f32 travelled = std::sqrt(dx * dx + dz * dz);
-    std::fprintf(stderr, "(a) car: travelled=%.1f m max_speed=%.1f m/s max_gear=%d\n", travelled,
+    const f32 travelled = ::sqrt(dx * dx + dz * dz);
+    ::fprintf(stderr, "(a) car: travelled=%.1f m max_speed=%.1f m/s max_gear=%d\n", travelled,
                  car_max_speed, car_max_gear);
     if (travelled < 20.0f) return Fail("(a) car did not drive");
     if (car_max_speed < 10.0f) return Fail("(a) car did not reach speed");
@@ -270,7 +270,7 @@ int main() {
 
   // (b) The boat throttled forward and is still afloat.
   const physics::BoatState& bfin = boat.state();
-  std::fprintf(stderr,
+  ::fprintf(stderr,
                "(b) boat: max_fwd=%.1f m/s pos=(%.0f,%.2f,%.1f) wetted=%.2f max_wetted=%.2f "
                "up=%.2f\n",
                boat_max_fwd, bfin.position.x, bfin.position.y, bfin.position.z, bfin.wetted,
@@ -282,7 +282,7 @@ int main() {
 
   // (c) The aircraft climbed away from the runway.
   const physics::AircraftState& afin = plane.state();
-  std::fprintf(stderr,
+  ::fprintf(stderr,
                "(c) aircraft: max_alt_gain=%.1f m peak_climb=%.2f m/s airspeed=%.1f m/s "
                "on_ground=%d\n",
                plane_max_alt, plane_peak_climb, afin.airspeed_mps, afin.on_ground);
@@ -293,7 +293,7 @@ int main() {
             plane_peak = MaxAbs(plane_audio);
   const f32 car_idle_rms = RmsWindow(car_audio, idle_lo, idle_hi);
   const f32 car_load_rms = RmsWindow(car_audio, load_lo, load_hi);
-  std::fprintf(stderr,
+  ::fprintf(stderr,
                "(d) audio peaks car=%.3f boat=%.3f plane=%.3f | car rms idle=%.4f load=%.4f\n",
                car_peak, boat_peak, plane_peak, car_idle_rms, car_load_rms);
   if (!AllFinite(car_audio) || !AllFinite(boat_audio) || !AllFinite(plane_audio))
@@ -316,7 +316,7 @@ int main() {
     for (u32 w = 0; w < cst.wheel_count; ++w) car_grounded |= cst.wheels[w].contact;
     if (!IsFinite(cpos)) return Fail("(e) car position NaN");
     if (!car_grounded) return Fail("(e) car left the ground");
-    if (std::fabs(cpos.y) > 5.0f) return Fail("(e) car position drifted off the surface");
+    if (::fabs(cpos.y) > 5.0f) return Fail("(e) car position drifted off the surface");
 
     if (!IsFinite(bfin.position)) return Fail("(e) boat position NaN");
     if (boat_max_wetted <= 0.0f) return Fail("(e) boat never touched the water");
@@ -325,6 +325,6 @@ int main() {
     if (!IsFinite(afin.position)) return Fail("(e) aircraft position NaN");
   }
 
-  std::fprintf(stderr, "vehicle_integration_test: all checks passed\n");
+  ::fprintf(stderr, "vehicle_integration_test: all checks passed\n");
   return 0;
 }

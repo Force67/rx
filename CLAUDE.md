@@ -51,8 +51,20 @@ should not move the picture can be **proven** not to:
 ## Conventions
 
 - Namespace `rx::`; env knobs are `RX_*`. Grep for `base::Option`.
-- The tree mixes `base::` containers and std. Match the file you are editing;
-  do not convert either direction.
+- The C++ standard library is banned, and so are exceptions (rx builds with
+  `-fno-exceptions`). Use `base::` (third_party/equilibrium/base) and the rx
+  helpers in `engine/core/`: `scalar.h` (`rx::Min/Max/Clamp`, std semantics;
+  never `base::Min/Max/Clamp`, which differ on NaN), `format.h`
+  (`rx::StrFormat`/`ToString`, exact `std::format`/`to_string` text),
+  `file_system.h` (`rx::fs`), `text_reader.h`/`text_writer.h` (getline, `>>`,
+  ostream), `sort.h` (`rx::StableSort`, `rx::NthElement`), `shared.h`. Allowed
+  std: `std::initializer_list`, placement new, `std::align_val_t`/`nothrow_t`
+  in operator new/delete, and third-party signatures that demand std types
+  (tinyusdz in `usd_loader.cc`, libultragui's `ugui::String`).
+- `base::Sort` is not `std::sort`: replace a sort only where keys are unique,
+  or use `rx::StableSort`.
+- A check that must stop the process is `BASE_FATAL_CHECK`. `BASE_BUGCHECK` and
+  `BASE_DCHECK` only break into a debugger and continue.
 - Comments explain **why**, and document invariants and failure modes. They do
   not restate the line.
 - Prefer failing a load loudly with a `path:line:` message over substituting a

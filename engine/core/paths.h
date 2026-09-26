@@ -1,7 +1,7 @@
 #ifndef RX_CORE_PATHS_H_
 #define RX_CORE_PATHS_H_
 
-#include <filesystem>
+#include "base/strings/xstring.h"
 
 #include "core/export.h"
 
@@ -12,7 +12,7 @@ namespace rx {
 // carries next to itself: the working directory is whatever the shell or the
 // launcher happened to be in, and the build-tree paths baked in at compile time
 // exist only on the machine that did the build.
-RX_CORE_EXPORT std::filesystem::path ExecutableDirectory();
+RX_CORE_EXPORT base::String ExecutableDirectory();
 
 }  // namespace rx
 

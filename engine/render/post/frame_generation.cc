@@ -1,13 +1,14 @@
 #include "render/post/frame_generation.h"
 
-#include <cfloat>
-#include <cstdlib>
-#include <cstring>
-#include <string>
+#include <float.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "core/log.h"
 // Vulkan escape hatch: the FFX backend speaks raw Vulkan. Also pulls volk
 // (VK_NO_PROTOTYPES) before the ffx vk headers.
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "render/rhi/vulkan_interop.h"
 
 #include <FidelityFX/host/ffx_frameinterpolation.h>
@@ -43,10 +44,10 @@ FfxResourceDescription DescribeImage(const GpuImage& image, FfxResourceUsage usa
 PFN_vkVoidFunction DeviceProcAddr(VkDevice device, const char* name) {
   PFN_vkVoidFunction fn = vkGetDeviceProcAddr(device, name);
   if (fn) return fn;
-  size_t len = std::strlen(name);
-  if (len > 3 && (std::strcmp(name + len - 3, "KHR") == 0 ||
-                  std::strcmp(name + len - 3, "EXT") == 0)) {
-    std::string core(name, len - 3);
+  size_t len = ::strlen(name);
+  if (len > 3 && (::strcmp(name + len - 3, "KHR") == 0 ||
+                  ::strcmp(name + len - 3, "EXT") == 0)) {
+    base::String core(name, len - 3);
     fn = vkGetDeviceProcAddr(device, core.c_str());
   }
   return fn;
@@ -70,7 +71,7 @@ class FfxFrameGenerator final : public FrameGenerator {
     FfxDevice ffx_device = ffxGetDeviceVK(&device_context);
     constexpr u32 kContexts = 2;  // optical flow + frame interpolation
     scratch_size_ = ffxGetScratchMemorySizeVK(h.physical_device, kContexts);
-    scratch_ = std::calloc(1, scratch_size_);
+    scratch_ = ::calloc(1, scratch_size_);
     if (!scratch_) return false;
     FfxErrorCode err =
         ffxGetInterfaceVK(&interface_, ffx_device, scratch_, scratch_size_, kContexts);
@@ -246,10 +247,10 @@ class FfxFrameGenerator final : public FrameGenerator {
       }
       barriers[kSharedCount] =
           Transition(interpolated_, ResourceState::kUndefined, ResourceState::kGeneral);
-      cmd.TextureBarriers({barriers, kSharedCount + 1});
+      cmd.TextureBarriers(base::Span(barriers, kSharedCount + 1));
       TextureBarrier hudless_init =
           Transition(hudless_, ResourceState::kUndefined, ResourceState::kShaderReadCompute);
-      cmd.TextureBarriers({&hudless_init, 1});
+      cmd.TextureBarriers(base::Span(&hudless_init, 1));
     });
     return true;
   }
@@ -280,7 +281,7 @@ class FfxFrameGenerator final : public FrameGenerator {
     if (interpolated_) device_.DestroyImage(interpolated_);
     if (hudless_) device_.DestroyImage(hudless_);
     if (scratch_) {
-      std::free(scratch_);
+      ::free(scratch_);
       scratch_ = nullptr;
     }
   }
@@ -302,8 +303,8 @@ class FfxFrameGenerator final : public FrameGenerator {
 
 }  // namespace
 
-std::unique_ptr<FrameGenerator> CreateFrameGenerator(Device& device, const FrameGenDesc& desc) {
-  auto generator = std::make_unique<FfxFrameGenerator>(device);
+base::UniquePointer<FrameGenerator> CreateFrameGenerator(Device& device, const FrameGenDesc& desc) {
+  auto generator = base::MakeUnique<FfxFrameGenerator>(device);
   if (!generator->Initialize(desc)) return nullptr;
   return generator;
 }

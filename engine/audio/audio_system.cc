@@ -1,11 +1,16 @@
 #include "audio/audio_system.h"
 
-#include <algorithm>
-
 #include <base/option.h>
 
 #include "asset/vfs.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
+#include "core/scalar.h"
 
 namespace rx::audio {
 namespace {
@@ -19,10 +24,10 @@ base::Option<float> Volume{"audio.volume", 1.0f, "RX_AUDIO_VOLUME",
                            "master output volume, 0..1"};
 
 // Pulls the extension (including the dot) off a path for decoder dispatch.
-std::string_view ExtensionOf(std::string_view path) {
+base::StringRef ExtensionOf(base::StringRef path) {
   const size_t dot = path.find_last_of('.');
   const size_t slash = path.find_last_of("/\\");
-  if (dot == std::string_view::npos || (slash != std::string_view::npos && dot < slash))
+  if (dot == base::StringRef::npos || (slash != base::StringRef::npos && dot < slash))
     return {};
   return path.substr(dot);
 }
@@ -39,7 +44,7 @@ bool AudioSystem::Initialize(asset::Vfs* vfs) {
 #endif
   vfs_ = vfs;
   muted_ = Mute.get();
-  master_ = std::clamp(Volume.get(), 0.0f, 1.0f);
+  master_ = rx::Clamp(Volume.get(), 0.0f, 1.0f);
 
   if (muted_) {
     RX_INFO("audio: suppressed (RX_AUDIO_MUTE), running silent");
@@ -67,40 +72,42 @@ void AudioSystem::SetListener(const Vec3& position, const Vec3& forward, const V
   mixer_.SetListener(listener);
 }
 
-bool AudioSystem::HasAsset(std::string_view path) const {
+bool AudioSystem::HasAsset(base::StringRef path) const {
   return vfs_ && vfs_->Contains(path);
 }
 
-bool AudioSystem::ReadAsset(std::string_view path, std::vector<u8>* out) {
+bool AudioSystem::ReadAsset(base::StringRef path, base::Vector<u8>* out) {
   out->clear();
   if (!vfs_) return false;
-  std::optional<base::Vector<u8>> bytes = vfs_->Read(path);
+  base::Optional<base::Vector<u8>> bytes = vfs_->Read(path);
   if (!bytes || bytes->size() == 0) return false;
   out->assign(bytes->data(), bytes->data() + bytes->size());
   return true;
 }
 
-const AudioClip* AudioSystem::GetClip(std::string_view path) {
-  const std::string key(path);
-  auto it = clip_cache_.find(key);
-  if (it != clip_cache_.end()) return it->second.valid() ? &it->second : nullptr;
+const AudioClip* AudioSystem::GetClip(base::StringRef path) {
+  const base::String key(path);
+  if (const base::UniquePointer<AudioClip>* cached = clip_cache_.find(key)) {
+    return (*cached)->valid() ? &**cached : nullptr;
+  }
 
-  std::vector<u8> bytes;
-  AudioClip clip;
+  base::Vector<u8> bytes;
+  auto clip = base::MakeUnique<AudioClip>();
   if (ReadAsset(path, &bytes))
-    clip = DecodeClip(ByteSpan{bytes.data(), bytes.size()}, ExtensionOf(path));
-  if (!clip.valid()) RX_WARN("audio: could not decode '{}'", key);
-  auto inserted = clip_cache_.emplace(key, std::move(clip)).first;
-  return inserted->second.valid() ? &inserted->second : nullptr;
+    *clip = DecodeClip(ByteSpan{bytes.data(), bytes.size()}, ExtensionOf(path));
+  if (!clip->valid()) RX_WARN("audio: could not decode '{}'", key);
+  const AudioClip* result = clip->valid() ? &*clip : nullptr;
+  clip_cache_.insert(key, base::move(clip));
+  return result;
 }
 
-std::unique_ptr<Decoder> AudioSystem::OpenStream(std::string_view path) {
-  std::vector<u8> bytes;
+base::UniquePointer<Decoder> AudioSystem::OpenStream(base::StringRef path) {
+  base::Vector<u8> bytes;
   if (!ReadAsset(path, &bytes)) return nullptr;
   return OpenDecoder(ByteSpan{bytes.data(), bytes.size()}, ExtensionOf(path));
 }
 
-u32 AudioSystem::PlayUi(std::string_view path, f32 gain) {
+u32 AudioSystem::PlayUi(base::StringRef path, f32 gain) {
   if (!active()) return 0;
   const AudioClip* clip = GetClip(path);
   if (!clip) return 0;
@@ -110,7 +117,7 @@ u32 AudioSystem::PlayUi(std::string_view path, f32 gain) {
   return mixer_.Play(MakeClipDecoder(*clip), params);
 }
 
-u32 AudioSystem::PlayAt(std::string_view path, const Vec3& position, PlayParams params) {
+u32 AudioSystem::PlayAt(base::StringRef path, const Vec3& position, PlayParams params) {
   if (!active()) return 0;
   const AudioClip* clip = GetClip(path);
   if (!clip) return 0;
@@ -119,12 +126,12 @@ u32 AudioSystem::PlayAt(std::string_view path, const Vec3& position, PlayParams 
   return mixer_.Play(MakeClipDecoder(*clip), params);
 }
 
-u32 AudioSystem::PlayLoop(std::string_view path, PlayParams params) {
+u32 AudioSystem::PlayLoop(base::StringRef path, PlayParams params) {
   if (!active()) return 0;
-  std::unique_ptr<Decoder> decoder = OpenStream(path);
+  base::UniquePointer<Decoder> decoder = OpenStream(path);
   if (!decoder) return 0;
   params.loop = true;
-  return mixer_.Play(std::move(decoder), params);
+  return mixer_.Play(base::move(decoder), params);
 }
 
 void AudioSystem::Stop(u32 voice, f32 fade) {
@@ -142,7 +149,7 @@ void AudioSystem::SetVoiceGain(u32 voice, f32 gain) {
 }
 
 void AudioSystem::SetMasterVolume(f32 volume) {
-  master_ = std::clamp(volume, 0.0f, 1.0f);
+  master_ = rx::Clamp(volume, 0.0f, 1.0f);
   mixer_.SetMasterGain(master_);
 }
 

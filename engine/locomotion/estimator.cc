@@ -4,7 +4,8 @@
 
 #include "locomotion/estimator.h"
 
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
 #include "locomotion/internal_math.h"
 
@@ -129,11 +130,11 @@ void StateEstimator::Measure(const physics::PhysicsWorld& physics, const BipedRi
   bool finite = FiniteV(out->root_position) && FiniteQ(out->root_rotation) &&
                 FiniteV(out->root_linear_velocity) && FiniteV(out->root_angular_velocity) &&
                 FiniteV(out->com_position) && FiniteV(out->com_velocity) &&
-                FiniteV(out->ground_normal) && std::isfinite(out->estimated_body_height);
+                FiniteV(out->ground_normal) && ::isfinite(out->estimated_body_height);
   for (u32 f = 0; f < kFootCount; ++f) {
     const FootMeasurement& fm = out->foot[f];
     finite = finite && FiniteV(fm.position) && FiniteV(fm.velocity) && FiniteV(fm.contact_normal) &&
-             std::isfinite(fm.contact_impulse) && std::isfinite(fm.slip_speed);
+             ::isfinite(fm.contact_impulse) && ::isfinite(fm.slip_speed);
   }
 
   if (ok && finite) {
@@ -166,7 +167,7 @@ void ContactEstimator::Update(const CharacterMeasurements& m, f32 dt) {
     if (!fm.in_contact) {
       raw = FootPhase::kSwinging;
     } else if (fm.slip_speed >= 0.6f || fm.contact_normal.y <= 0.6f ||
-               std::abs(fm.velocity.y) >= 0.35f) {
+               ::abs(fm.velocity.y) >= 0.35f) {
       raw = FootPhase::kSliding;
     } else {
       raw = FootPhase::kSupporting;

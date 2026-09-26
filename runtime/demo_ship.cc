@@ -1,13 +1,15 @@
 #include "demo_ship.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 #include "asset/asset_id.h"
 #include "asset/material.h"
 #include "asset/mesh.h"
 #include "asset/primitives.h"
+#include "base/algorithm.h"
+#include "base/memory/move.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/geometry/water_field.h"
 #include "scene/components.h"
 
@@ -96,7 +98,7 @@ void AddCylinder(MeshBuild& mb, const Vec3& a, const Vec3& b, f32 r0, f32 r1, u3
     f32 r = ring == 0 ? r0 : r1;
     for (u32 s = 0; s < seg; ++s) {
       f32 t = 2.0f * kPi * static_cast<f32>(s) / seg;
-      Vec3 local{std::cos(t) * r, 0, std::sin(t) * r};
+      Vec3 local{::cos(t) * r, 0, ::sin(t) * r};
       mb.Add(center + Rotate(q, local), static_cast<f32>(s) / seg, static_cast<f32>(ring), color);
     }
   }
@@ -129,7 +131,7 @@ asset::Mesh Finish(MeshBuild& mb, const char* id, const asset::Material& mat) {
   // Bounds from the local extent (a loose sphere is enough for cull).
   f32 r = 0;
   for (const asset::Vertex& vert : mb.v) {
-    r = std::max(r, std::sqrt(vert.position[0] * vert.position[0] +
+    r = rx::Max(r, ::sqrt(vert.position[0] * vert.position[0] +
                               vert.position[1] * vert.position[1] +
                               vert.position[2] * vert.position[2]));
   }
@@ -310,8 +312,8 @@ void ShipDemo::BuildFlagship() {
   auto width_scale = [](f32 z) -> f32 {
     // 1 amidships, tapering to a fine stem at the bow (+Z) and a transom aft.
     f32 tn = z / kHalfLen;  // -1..1
-    if (tn > 0) return std::max(0.06f, 1.0f - tn * tn * 0.98f);      // pointed bow
-    return std::max(0.55f, 1.0f - tn * tn * 0.45f);                  // fuller transom
+    if (tn > 0) return rx::Max(0.06f, 1.0f - tn * tn * 0.98f);      // pointed bow
+    return rx::Max(0.55f, 1.0f - tn * tn * 0.45f);                  // fuller transom
   };
   auto sheer = [](f32 z) -> f32 {
     f32 tn = z / kHalfLen;
@@ -324,8 +326,8 @@ void ShipDemo::BuildFlagship() {
     f32 deck = sheer(z);
     for (u32 pj = 0; pj <= kProfile; ++pj) {
       f32 th = kPi * static_cast<f32>(pj) / kProfile;  // 0 = starboard rail .. pi = port rail
-      f32 x = -kBeam * ws * std::cos(th);
-      f32 y = deck - (deck - kKeelY) * std::pow(std::sin(th), 0.62f);
+      f32 x = -kBeam * ws * ::cos(th);
+      f32 y = deck - (deck - kKeelY) * ::pow(::sin(th), 0.62f);
       hb.Add({x, y, z}, static_cast<f32>(pj) / kProfile, z / 8.0f);
     }
   }
@@ -412,7 +414,7 @@ void ShipDemo::BuildFlagship() {
         f32 x = (a - 0.5f) * 2.0f * s.halfw;
         f32 y = s.top - b * height;
         // Bulge downwind (+Z), max at centre, fuller toward the foot.
-        f32 bulge = std::sin(kPi * a) * (0.25f + 0.75f * b) * billow;
+        f32 bulge = ::sin(kPi * a) * (0.25f + 0.75f * b) * billow;
         Vec3 p = Vec3{x, y, s.z} + kWindDir * bulge;
         // uv.y drives the mesh.vs cloth-sway weight (0 = pinned head). Cap the
         // free-edge weight below 1 so the strong default wind flutters the foot
@@ -471,7 +473,7 @@ void ShipDemo::BuildRopes() {
       r.pos.push_back(p);
       r.prev.push_back(p);
     }
-    ropes_.push_back(std::move(r));
+    ropes_.push_back(base::move(r));
   };
 
   // Forestays: masthead down to the bowsprit / bow.
@@ -525,7 +527,7 @@ void ShipDemo::UpdateShipMotion(f32 dt, render::FrameView& view) {
     hull_pos_ = pos;
     hull_rot_ = {rot[0], rot[1], rot[2], rot[3]};
   }
-  hull_vel_ = (hull_pos_ - hull_prev_pos_) * (1.0f / std::max(dt, 1e-4f));
+  hull_vel_ = (hull_pos_ - hull_prev_pos_) * (1.0f / rx::Max(dt, 1e-4f));
   hull_prev_pos_ = hull_pos_;
   hull_prev_xform_ = hull_xform_;
   hull_xform_ = MakeTransform(hull_pos_, hull_rot_, 1.0f);
@@ -557,7 +559,7 @@ void ShipDemo::UpdateSailsAndRopes(f32 dt, render::FrameView& view) {
   // frame; the ship barely yaws so the constant approximation is fine.
   const f32 h2 = dt * dt;
   Vec3 gravity{0, -9.8f, 0};
-  f32 gust = 0.6f + 0.4f * std::sin(time_ * 2.3f);
+  f32 gust = 0.6f + 0.4f * ::sin(time_ * 2.3f);
   Vec3 wind = Rotate(QuatBetween(Rotate(hull_rot_, {0, 0, 1}), {0, 0, 1}), kWindDir) *
               (4.5f * gust);
   MeshBuild rm;
@@ -710,7 +712,7 @@ void ShipDemo::UpdateParticles(f32 dt, render::FrameView& view) {
         sp.pos = d.position;
         f32 ang = Rand() * 2.0f * kPi;
         f32 spread = Rand() * 2.2f;
-        sp.vel = {std::cos(ang) * spread, 3.5f + Rand() * 3.5f, std::sin(ang) * spread};
+        sp.vel = {::cos(ang) * spread, 3.5f + Rand() * 3.5f, ::sin(ang) * spread};
         sp.color = {0.9f, 1.0f, 1.1f};
         sp.max_life = sp.life = 0.6f + Rand() * 0.5f;
         sp.size = 0.14f + Rand() * 0.14f;
@@ -718,9 +720,7 @@ void ShipDemo::UpdateParticles(f32 dt, render::FrameView& view) {
       }
     }
   }
-  projectiles_.erase(std::remove_if(projectiles_.begin(), projectiles_.end(),
-                                    [](const Projectile& p) { return !p.alive; }),
-                     projectiles_.end());
+  base::EraseIf(projectiles_, [](const Projectile& p) { return !p.alive; });
 
   // Integrate + emit the additive billboard pool.
   for (size_t i = 0; i < particles_.size();) {
@@ -759,7 +759,7 @@ void ShipDemo::UpdateParticles(f32 dt, render::FrameView& view) {
 // Hull-waterline wake: bow/stern/side impulses scaled by cruise speed, the same
 // WaterDisturbance path the water-demo cubes use, so the field draws the trail.
 void ShipDemo::EmitWake(render::FrameView& view) {
-  f32 speed = std::sqrt(hull_vel_.x * hull_vel_.x + hull_vel_.z * hull_vel_.z);
+  f32 speed = ::sqrt(hull_vel_.x * hull_vel_.x + hull_vel_.z * hull_vel_.z);
   const Vec3 local_pts[5] = {{0, 0, kHalfLen * 0.9f},   // bow
                              {0, 0, -kHalfLen * 0.9f},  // stern
                              {kBeam, 0, 0},             // port beam
@@ -770,8 +770,8 @@ void ShipDemo::EmitWake(render::FrameView& view) {
     render::WaterDisturbance d;
     d.position = {w.x, kWaterY, w.z};
     d.radius = k == 4 ? 3.4f : 2.4f;
-    d.ripple_strength = std::min(speed * 0.5f + (k == 0 ? 0.4f : 0.0f), 2.0f);
-    d.foam_amount = std::min(speed * (k == 0 ? 0.7f : 0.45f), 1.6f);
+    d.ripple_strength = rx::Min(speed * 0.5f + (k == 0 ? 0.4f : 0.0f), 2.0f);
+    d.foam_amount = rx::Min(speed * (k == 0 ? 0.7f : 0.45f), 1.6f);
     d.velocity_x = hull_vel_.x;
     d.velocity_z = hull_vel_.z;
     view.water_disturbances.push_back(d);
@@ -781,18 +781,18 @@ void ShipDemo::EmitWake(render::FrameView& view) {
 void ShipDemo::FollowCamera() {
   // Unattended framing: a 3/4 stern chase unless the player is steering.
   if (ctx_.actions) {
-    f32 mag = std::fabs(ctx_.actions->axis(Axis::kLookX)) +
-              std::fabs(ctx_.actions->axis(Axis::kLookY)) +
-              std::fabs(ctx_.actions->axis(Axis::kMoveX)) +
-              std::fabs(ctx_.actions->axis(Axis::kMoveY));
+    f32 mag = ::fabs(ctx_.actions->axis(Axis::kLookX)) +
+              ::fabs(ctx_.actions->axis(Axis::kLookY)) +
+              ::fabs(ctx_.actions->axis(Axis::kMoveX)) +
+              ::fabs(ctx_.actions->axis(Axis::kMoveY));
     if (mag > 0.05f) return;  // hand control to the fly camera
   }
   Vec3 offset = Rotate(hull_rot_, Vec3{-13.0f, 8.5f, -14.0f});
   Vec3 cam = hull_pos_ + offset;
   Vec3 target = hull_pos_ + Vec3{0, 4.0f, 2.0f};
   Vec3 dir = Normalize(target - cam);
-  f32 yaw = std::atan2(dir.x, -dir.z);
-  f32 pitch = std::asin(std::clamp(dir.y, -1.0f, 1.0f));
+  f32 yaw = ::atan2(dir.x, -dir.z);
+  f32 pitch = ::asin(rx::Clamp(dir.y, -1.0f, 1.0f));
   camera_.set_position(cam);
   camera_.set_yaw_pitch(yaw, pitch);
 }

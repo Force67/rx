@@ -1,19 +1,21 @@
 #include "render2d/sprite_renderer.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <utility>
+#include <math.h>
+#include <string.h>
 
 #include "core/log.h"
 #include "render/rhi/bindings.h"
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "core/scalar.h"
 #include "shaders/sprite_vs_hlsl.h"
 #include "shaders/sprite_ps_hlsl.h"
 #include "shaders/light2d_vs_hlsl.h"
 #include "shaders/light2d_ps_hlsl.h"
 #include "shaders/composite_vs_hlsl.h"
 #include "shaders/composite_ps_hlsl.h"
+#include "core/sort.h"
 
 namespace rx::render2d {
 
@@ -161,14 +163,14 @@ TextureId SpriteRenderer::CreateTexture(u32 width, u32 height, const u8* rgba,
     device_->DestroyImage(image);
     return 0;
   }
-  std::memcpy(staging.mapped, rgba, bytes);
+  base::MemCopy(staging.mapped, rgba, bytes);
   device_->FlushBuffer(staging, 0, bytes);
 
   device_->ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
     BufferTextureCopy region{.buffer_offset = 0, .mip = 0, .array_layer = 0,
                              .extent = {width, height}};
-    cmd.CopyBufferToTexture(staging, image, {&region, 1});
+    cmd.CopyBufferToTexture(staging, image, base::Span(&region, 1));
     cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadFragment));
   });
   device_->DestroyBuffer(staging);
@@ -220,7 +222,7 @@ void SpriteRenderer::DrawSprite(const SpriteParams& s) {
   q.texture = (s.texture != 0 && s.texture < textures_.size() && textures_[s.texture].valid)
                   ? s.texture
                   : kWhiteTexture;
-  q.sort_key = std::isfinite(s.sort_key) ? s.sort_key : 0.0f;
+  q.sort_key = ::isfinite(s.sort_key) ? s.sort_key : 0.0f;
   queue_.push_back(q);
 }
 
@@ -236,21 +238,21 @@ void SpriteRenderer::DrawQuad(Vec2 pos, Vec2 size, Color color, f32 sort_key) {
 
 void SpriteRenderer::DrawTileMap(TextureId tileset_texture, const TileMap& map,
                                  const Camera2D& camera) {
-  if (!(map.tile_size > 0.0f) || !std::isfinite(map.tile_size)) return;
+  if (!(map.tile_size > 0.0f) || !::isfinite(map.tile_size)) return;
   Rect view = camera.VisibleRect();
   for (const TileLayer& layer : map.layers) {
     // Parallax shifts a distant layer so it scrolls slower than the camera.
     Vec2 offset = camera.center() * (1.0f - layer.parallax);
     // Visible tile range in this layer's own space (undo the parallax offset).
     f32 x0 = view.x - offset.x, y0 = view.y - offset.y;
-    i32 tx0 = static_cast<i32>(std::floor(x0 / map.tile_size)) - 1;
-    i32 ty0 = static_cast<i32>(std::floor(y0 / map.tile_size)) - 1;
-    i32 tx1 = static_cast<i32>(std::floor((x0 + view.w) / map.tile_size)) + 1;
-    i32 ty1 = static_cast<i32>(std::floor((y0 + view.h) / map.tile_size)) + 1;
-    tx0 = std::max(tx0, 0);
-    ty0 = std::max(ty0, 0);
-    tx1 = std::min(tx1, static_cast<i32>(layer.width) - 1);
-    ty1 = std::min(ty1, static_cast<i32>(layer.height) - 1);
+    i32 tx0 = static_cast<i32>(::floor(x0 / map.tile_size)) - 1;
+    i32 ty0 = static_cast<i32>(::floor(y0 / map.tile_size)) - 1;
+    i32 tx1 = static_cast<i32>(::floor((x0 + view.w) / map.tile_size)) + 1;
+    i32 ty1 = static_cast<i32>(::floor((y0 + view.h) / map.tile_size)) + 1;
+    tx0 = rx::Max(tx0, 0);
+    ty0 = rx::Max(ty0, 0);
+    tx1 = rx::Min(tx1, static_cast<i32>(layer.width) - 1);
+    ty1 = rx::Min(ty1, static_cast<i32>(layer.height) - 1);
     for (i32 ty = ty0; ty <= ty1; ++ty) {
       for (i32 tx = tx0; tx <= tx1; ++tx) {
         i32 id = layer.At(tx, ty);
@@ -289,8 +291,8 @@ void SpriteRenderer::AddLight(const Light2D& l) {
 
 void SpriteRenderer::InstallInto(render::FrameView& view) {
   if (!ready_) return;
-  auto previous = std::move(view.hdr_overlay);
-  view.hdr_overlay = [this, previous = std::move(previous)](const HdrOverlayContext& ctx) {
+  auto previous = base::move(view.hdr_overlay);
+  view.hdr_overlay = [this, previous = base::move(previous)](const HdrOverlayContext& ctx) {
     if (previous) {
       previous(ctx);
       ctx.cmd->Barrier(Transition(*ctx.color, ResourceState::kColorTarget,
@@ -302,7 +304,7 @@ void SpriteRenderer::InstallInto(render::FrameView& view) {
 
 bool SpriteRenderer::EnsureSprites(FrameSlot& slot, u32 count) {
   if (slot.sprite_cap >= count && slot.sprites.mapped) return true;
-  u32 cap = std::max<u32>(count, 256);
+  u32 cap = rx::Max<u32>(count, 256);
   cap = cap + cap / 2;  // headroom
   if (slot.sprites) device_->DestroyBufferDeferred(slot.sprites);
   slot.sprites = device_->CreateBuffer(static_cast<u64>(cap) * sizeof(GpuSprite),
@@ -313,7 +315,7 @@ bool SpriteRenderer::EnsureSprites(FrameSlot& slot, u32 count) {
 
 bool SpriteRenderer::EnsureLights(FrameSlot& slot, u32 count) {
   if (slot.light_cap >= count && slot.lights.mapped) return true;
-  u32 cap = std::max<u32>(count, 64);
+  u32 cap = rx::Max<u32>(count, 64);
   cap = cap + cap / 2;
   if (slot.lights) device_->DestroyBufferDeferred(slot.lights);
   slot.lights = device_->CreateBuffer(static_cast<u64>(cap) * sizeof(GpuLight),
@@ -338,10 +340,10 @@ u32 SpriteRenderer::UploadSprites(FrameSlot& slot) {
   if (count == 0) return 0;
   // Stable painter's order. DrawSpriteRuns still batches adjacent sprites that
   // use the same atlas without changing the caller's order for equal keys.
-  std::stable_sort(queue_.data(), queue_.data() + count,
-                   [](const QueuedSprite& a, const QueuedSprite& b) {
-                     return a.sort_key < b.sort_key;
-                   });
+  rx::StableSort(queue_.data(), queue_.data() + count,
+                 [](const QueuedSprite& a, const QueuedSprite& b) {
+                   return a.sort_key < b.sort_key;
+                 });
   if (!EnsureSprites(slot, count)) return 0;
   GpuSprite* dst = static_cast<GpuSprite*>(slot.sprites.mapped);
   for (u32 i = 0; i < count; ++i) dst[i] = queue_[i].gpu;
@@ -384,7 +386,7 @@ void SpriteRenderer::RecordUnlit(const HdrOverlayContext& ctx, FrameSlot& slot) 
     color.clear[2] = scene_clear_.b;
     color.clear[3] = scene_clear_.a;
   }
-  ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = {&color, 1}});
+  ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&color, 1)});
   if (count > 0) DrawSpriteRuns(*ctx.cmd, slot, count);
   ctx.cmd->EndRendering();
 }
@@ -397,7 +399,7 @@ void SpriteRenderer::RecordLit(const HdrOverlayContext& ctx, FrameSlot& slot) {
   u32 sprite_count = UploadSprites(slot);
   u32 light_count = static_cast<u32>(lights_.size());
   if (light_count > 0 && EnsureLights(slot, light_count)) {
-    std::memcpy(slot.lights.mapped, lights_.data(), light_count * sizeof(GpuLight));
+    base::MemCopy(slot.lights.mapped, lights_.data(), light_count * sizeof(GpuLight));
     device_->FlushBuffer(slot.lights, 0, static_cast<u64>(light_count) * sizeof(GpuLight));
   } else {
     light_count = 0;
@@ -407,7 +409,7 @@ void SpriteRenderer::RecordLit(const HdrOverlayContext& ctx, FrameSlot& slot) {
   ctx.cmd->Barrier(Transition(slot.albedo, ResourceState::kUndefined, ResourceState::kColorTarget));
   {
     ColorAttachment a{.view = slot.albedo.view, .load = LoadOp::kClear, .clear = {0, 0, 0, 0}};
-    ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = {&a, 1}});
+    ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&a, 1)});
     if (sprite_count > 0) DrawSpriteRuns(*ctx.cmd, slot, sprite_count);
     ctx.cmd->EndRendering();
   }
@@ -421,7 +423,7 @@ void SpriteRenderer::RecordLit(const HdrOverlayContext& ctx, FrameSlot& slot) {
     ColorAttachment lc{.view = slot.light_target.view,
                        .load = LoadOp::kClear,
                        .clear = {ambient_.r, ambient_.g, ambient_.b, 1.0f}};
-    ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = {&lc, 1}});
+    ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&lc, 1)});
     if (light_count > 0) {
       ctx.cmd->BindPipeline(light_pipeline_);
       ctx.cmd->Push(view_proj_);
@@ -442,7 +444,7 @@ void SpriteRenderer::RecordLit(const HdrOverlayContext& ctx, FrameSlot& slot) {
     sc.clear[2] = scene_clear_.b;
     sc.clear[3] = scene_clear_.a;
   }
-  ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = {&sc, 1}});
+  ctx.cmd->BeginRendering({.extent = ctx.extent, .colors = base::Span(&sc, 1)});
   ctx.cmd->BindPipeline(composite_pipeline_);
   ctx.cmd->BindTransient(0, {Bind::Combined(0, slot.albedo.view, sampler_),
                              Bind::Combined(1, slot.light_target.view, sampler_)});

@@ -1,8 +1,8 @@
 #ifndef RX_AUDIO_AUDIO_DEVICE_H_
 #define RX_AUDIO_AUDIO_DEVICE_H_
 
-#include <vector>
 
+#include "base/containers/vector.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -35,7 +35,7 @@ class RX_AUDIO_EXPORT AudioDevice {
  private:
   void* stream_ = nullptr;  // SDL_AudioStream*, opaque so the header stays SDL-free
   Mixer* mixer_ = nullptr;
-  std::vector<float> scratch_;  // audio-thread-only render buffer
+  base::Vector<float> scratch_;  // audio-thread-only render buffer
   bool active_ = false;
 };
 

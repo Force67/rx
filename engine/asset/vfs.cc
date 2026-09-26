@@ -1,17 +1,21 @@
 #include "asset/vfs.h"
 
-#include <algorithm>
-#include <filesystem>
-#include <fstream>
-#include <mutex>
+#include <ctype.h>
 
 #include <base/containers/unordered_map.h>
 
 #include "asset/asset_id.h"
+#include "base/memory/move.h"
+#include "base/optional.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
+#include "core/file_system.h"
 
 namespace rx::asset {
 
-AssetId MakeAssetId(std::string_view normalized_path) { return AssetId{Fnv1a(normalized_path)}; }
+AssetId MakeAssetId(base::StringRef normalized_path) { return AssetId{Fnv1a(normalized_path)}; }
 
 namespace {
 
@@ -19,8 +23,8 @@ namespace {
 // system), lookups from tooling on the main thread. Small and cold, so a plain
 // mutex is fine.
 struct PathTable {
-  std::mutex mutex;
-  base::UnorderedMap<u64, std::string> paths;
+  base::Mutex mutex;
+  base::UnorderedMap<u64, base::String> paths;
 };
 
 PathTable& ThePathTable() {
@@ -30,45 +34,44 @@ PathTable& ThePathTable() {
 
 }  // namespace
 
-void RecordAssetPath(AssetId id, std::string_view normalized_path) {
+void RecordAssetPath(AssetId id, base::StringRef normalized_path) {
   if (!id) return;
   PathTable& table = ThePathTable();
-  std::lock_guard<std::mutex> lock(table.mutex);
-  if (std::string* existing = table.paths.find(id.hash))
-    *existing = std::string(normalized_path);
+  base::LockGuard<base::Mutex> lock(table.mutex);
+  if (base::String* existing = table.paths.find(id.hash))
+    *existing = base::String(normalized_path);
   else
-    table.paths.emplace(id.hash, std::string(normalized_path));
+    table.paths.emplace(id.hash, base::String(normalized_path));
 }
 
-std::optional<std::string> LookupAssetPath(AssetId id) {
+base::Optional<base::String> LookupAssetPath(AssetId id) {
   PathTable& table = ThePathTable();
-  std::lock_guard<std::mutex> lock(table.mutex);
-  if (const std::string* found = table.paths.find(id.hash)) return *found;
-  return std::nullopt;
+  base::LockGuard<base::Mutex> lock(table.mutex);
+  if (const base::String* found = table.paths.find(id.hash)) return *found;
+  return base::nullopt;
 }
 
-std::string NormalizePath(std::string_view path) {
-  std::string out(path);
-  std::ranges::transform(out, out.begin(), [](char c) {
-    if (c == '\\') return '/';
-    return static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-  });
+base::String NormalizePath(base::StringRef path) {
+  base::String out(path);
+  for (char& c : out) {
+    c = c == '\\' ? '/' : static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  }
   return out;
 }
 
-VirtualPath SplitVirtualPath(std::string_view path) {
+VirtualPath SplitVirtualPath(base::StringRef path) {
   const size_t pos = path.find("://");
   // A mount name is a bare identifier: "a/b://c" or "://c" is not a mount.
-  if (pos == std::string_view::npos || pos == 0 ||
-      path.substr(0, pos).find_first_of("/\\") != std::string_view::npos) {
-    return {std::string_view(), path};
+  if (pos == base::StringRef::npos || pos == 0 ||
+      path.substr(0, pos).find_first_of("/\\") != base::StringRef::npos) {
+    return {base::StringRef(), path};
   }
   return {path.substr(0, pos), path.substr(pos + 3)};
 }
 
-std::optional<u64> FileProvider::Size(std::string_view normalized_path) const {
-  const std::optional<base::Vector<u8>> bytes = Read(normalized_path);
-  if (!bytes) return std::nullopt;
+base::Optional<u64> FileProvider::Size(base::StringRef normalized_path) const {
+  const base::Optional<base::Vector<u8>> bytes = Read(normalized_path);
+  if (!bytes) return base::nullopt;
   return bytes->size();
 }
 
@@ -77,11 +80,11 @@ namespace {
 // A mount point ("", "game", "game://", "game://dlc/") split into its
 // normalized mount name and subtree prefix (trailing slash enforced).
 struct MountPoint {
-  std::string mount;
-  std::string prefix;
+  base::String mount;
+  base::String prefix;
 };
 
-MountPoint ParseMountPoint(std::string_view mount_point) {
+MountPoint ParseMountPoint(base::StringRef mount_point) {
   const VirtualPath split = SplitVirtualPath(mount_point);
   MountPoint out;
   if (split.mount.empty()) {
@@ -97,16 +100,16 @@ MountPoint ParseMountPoint(std::string_view mount_point) {
 
 }  // namespace
 
-void Vfs::Mount(std::string_view mount_point, base::UniquePointer<FileProvider> provider) {
+void Vfs::Mount(base::StringRef mount_point, base::UniquePointer<FileProvider> provider) {
   MountPoint at = ParseMountPoint(mount_point);
-  mounts_.push_back(MountEntry{std::move(at.mount), std::move(at.prefix), std::move(provider)});
+  mounts_.push_back(MountEntry{base::move(at.mount), base::move(at.prefix), base::move(provider)});
 }
 
 void Vfs::Mount(base::UniquePointer<FileProvider> provider) {
-  Mount(std::string_view(), std::move(provider));
+  Mount(base::StringRef(), base::move(provider));
 }
 
-size_t Vfs::Unmount(std::string_view mount_point) {
+size_t Vfs::Unmount(base::StringRef mount_point) {
   const MountPoint at = ParseMountPoint(mount_point);
   base::Vector<MountEntry> kept;
   size_t removed = 0;
@@ -114,74 +117,73 @@ size_t Vfs::Unmount(std::string_view mount_point) {
     if (mounts_[i].mount == at.mount && mounts_[i].prefix == at.prefix) {
       ++removed;
     } else {
-      kept.push_back(std::move(mounts_[i]));
+      kept.push_back(base::move(mounts_[i]));
     }
   }
-  mounts_ = std::move(kept);
+  mounts_ = base::move(kept);
   return removed;
 }
 
-size_t Vfs::UnmountByPrefix(std::string_view prefix) {
+size_t Vfs::UnmountByPrefix(base::StringRef prefix) {
   base::Vector<MountEntry> kept;
   size_t removed = 0;
   for (size_t i = 0; i < mounts_.size(); ++i) {
-    const std::string name = mounts_[i].provider->name();
-    if (name.size() >= prefix.size() &&
-        name.compare(0, prefix.size(), prefix.data(), prefix.size()) == 0) {
+    const base::String name = mounts_[i].provider->name();
+    if (base::StringRef(name).starts_with(prefix)) {
       ++removed;
     } else {
-      kept.push_back(std::move(mounts_[i]));
+      kept.push_back(base::move(mounts_[i]));
     }
   }
-  mounts_ = std::move(kept);
+  mounts_ = base::move(kept);
   return removed;
 }
 
-const FileProvider* Vfs::Resolve(std::string_view path, std::string* relative) const {
+const FileProvider* Vfs::Resolve(base::StringRef path, base::String* relative) const {
   const VirtualPath split = SplitVirtualPath(path);
-  const std::string mount = NormalizePath(split.mount);
-  const std::string normalized = NormalizePath(split.path);
+  const base::String mount = NormalizePath(split.mount);
+  const base::String normalized = NormalizePath(split.path);
   for (size_t i = mounts_.size(); i-- > 0;) {
     const MountEntry& entry = mounts_[i];
     if (entry.mount != mount) continue;
     if (!normalized.starts_with(entry.prefix)) continue;
-    std::string sub = normalized.substr(entry.prefix.size());
+    base::String sub = normalized.substr(entry.prefix.size());
     if (!entry.provider->Contains(sub)) continue;
-    *relative = std::move(sub);
+    *relative = base::move(sub);
     return &*entry.provider;
   }
   return nullptr;
 }
 
-std::optional<base::Vector<u8>> Vfs::Read(std::string_view path) const {
-  std::string relative;
+base::Optional<base::Vector<u8>> Vfs::Read(base::StringRef path) const {
+  base::String relative;
   if (const FileProvider* provider = Resolve(path, &relative)) return provider->Read(relative);
-  return std::nullopt;
+  return base::nullopt;
 }
 
-bool Vfs::Contains(std::string_view path) const {
-  std::string relative;
+bool Vfs::Contains(base::StringRef path) const {
+  base::String relative;
   return Resolve(path, &relative) != nullptr;
 }
 
-std::optional<u64> Vfs::Size(std::string_view path) const {
-  std::string relative;
+base::Optional<u64> Vfs::Size(base::StringRef path) const {
+  base::String relative;
   if (const FileProvider* provider = Resolve(path, &relative)) return provider->Size(relative);
-  return std::nullopt;
+  return base::nullopt;
 }
 
 namespace {
 
-void EnumerateEntryAsVirtualPaths(const std::string& mount, const std::string& prefix,
+void EnumerateEntryAsVirtualPaths(const base::String& mount, const base::String& prefix,
                                   const FileProvider& provider,
-                                  const std::function<void(std::string_view)>& fn) {
+                                  base::FunctionRef<void(base::StringRef)> fn) {
   if (mount.empty() && prefix.empty()) {
     // Root mount: schemeless, exactly the provider's own paths.
     provider.Enumerate(fn);
     return;
   }
-  std::string full;
-  provider.Enumerate([&](std::string_view path) {
+  base::String full;
+  provider.Enumerate([&](base::StringRef path) {
     full.clear();
     if (!mount.empty()) {
       full += mount;
@@ -195,13 +197,13 @@ void EnumerateEntryAsVirtualPaths(const std::string& mount, const std::string& p
 
 }  // namespace
 
-void Vfs::Enumerate(const std::function<void(std::string_view)>& fn) const {
+void Vfs::Enumerate(base::FunctionRef<void(base::StringRef)> fn) const {
   for (const MountEntry& entry : mounts_)
     EnumerateEntryAsVirtualPaths(entry.mount, entry.prefix, *entry.provider, fn);
 }
 
-void Vfs::EnumerateMount(std::string_view mount_point,
-                         const std::function<void(std::string_view)>& fn) const {
+void Vfs::EnumerateMount(base::StringRef mount_point,
+                         base::FunctionRef<void(base::StringRef)> fn) const {
   const MountPoint at = ParseMountPoint(mount_point);
   for (const MountEntry& entry : mounts_) {
     if (entry.mount != at.mount || !entry.prefix.starts_with(at.prefix)) continue;
@@ -213,47 +215,41 @@ namespace {
 
 class LooseFileProvider final : public FileProvider {
  public:
-  explicit LooseFileProvider(std::string root) : root_(std::move(root)) {}
+  explicit LooseFileProvider(base::String root) : root_(base::move(root)) {}
 
-  bool Contains(std::string_view normalized_path) const override {
-    return std::filesystem::is_regular_file(root_ / std::filesystem::path(normalized_path));
+  bool Contains(base::StringRef normalized_path) const override {
+    return fs::IsRegularFile(fs::Join(root_, normalized_path));
   }
 
-  std::optional<base::Vector<u8>> Read(std::string_view normalized_path) const override {
-    std::ifstream file(root_ / std::filesystem::path(normalized_path),
-                       std::ios::binary | std::ios::ate);
-    if (!file) return std::nullopt;
-    base::Vector<u8> data(static_cast<size_t>(file.tellg()));
-    file.seekg(0);
-    file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(data.size()));
+  base::Optional<base::Vector<u8>> Read(base::StringRef normalized_path) const override {
+    base::Vector<u8> data;
+    if (!fs::ReadFile(fs::Join(root_, normalized_path), &data)) return base::nullopt;
     return data;
   }
 
-  std::optional<u64> Size(std::string_view normalized_path) const override {
-    std::error_code ec;
-    const auto size = std::filesystem::file_size(root_ / std::filesystem::path(normalized_path), ec);
-    if (ec) return std::nullopt;
-    return size;
+  base::Optional<u64> Size(base::StringRef normalized_path) const override {
+    return fs::FileSize(fs::Join(root_, normalized_path));
   }
 
-  void Enumerate(const std::function<void(std::string_view)>& fn) const override {
-    std::error_code ec;
-    for (const auto& entry : std::filesystem::recursive_directory_iterator(root_, ec)) {
-      if (!entry.is_regular_file()) continue;
-      fn(NormalizePath(std::filesystem::relative(entry.path(), root_).generic_string()));
+  void Enumerate(base::FunctionRef<void(base::StringRef)> fn) const override {
+    base::Vector<fs::DirEntry> entries;
+    fs::ListDirectory(root_, &entries, /*recursive=*/true);
+    for (const fs::DirEntry& entry : entries) {
+      if (!entry.is_regular) continue;
+      fn(NormalizePath(fs::GenericString(fs::Relative(entry.path, root_))));
     }
   }
 
-  std::string name() const override { return root_.string(); }
+  base::String name() const override { return root_; }
 
  private:
-  std::filesystem::path root_;
+  base::String root_;
 };
 
 }  // namespace
 
-base::UniquePointer<FileProvider> MakeLooseFileProvider(std::string root_directory) {
-  return base::MakeUnique<LooseFileProvider>(std::move(root_directory));
+base::UniquePointer<FileProvider> MakeLooseFileProvider(base::String root_directory) {
+  return base::MakeUnique<LooseFileProvider>(base::move(root_directory));
 }
 
 }  // namespace rx::asset

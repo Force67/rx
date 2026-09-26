@@ -1,8 +1,8 @@
 #ifndef RX_AUTHORING_COMMAND_BRIDGE_H_
 #define RX_AUTHORING_COMMAND_BRIDGE_H_
 
-#include <string>
 
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "rpc/rpc_message.h"
@@ -62,7 +62,7 @@ class RX_AUTHORING_EXPORT CommandBridge {
     // a void command. Strings are copied out of the context's scratch arena, so
     // the reply stays valid after the arena is reset.
     rpc::RpcArgs values;
-    std::string error;  // set only when !ok, safe to show a caller
+    base::String error;  // set only when !ok, safe to show a caller
   };
 
   // Checks, marshals, dispatches. Never throws and never asserts on caller data:

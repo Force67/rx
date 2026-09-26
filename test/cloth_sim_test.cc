@@ -1,10 +1,12 @@
 #include <base/containers/vector.h>
+#include <stdlib.h>
 
-#include <chrono>
-#include <cmath>
-#include <cstdio>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
 
+#include "base/containers/pair.h"
+#include "base/time/time.h"
 #include "core/feature_registry.h"
 #include "core/math.h"
 #include "physics/physics_world.h"
@@ -16,12 +18,12 @@ namespace {
 constexpr f32 kDt = 1.0f / 60.0f;
 
 int Fail(const char* what) {
-  std::fprintf(stderr, "cloth_sim_test FAIL: %s\n", what);
+  ::fprintf(stderr, "cloth_sim_test FAIL: %s\n", what);
   return 1;
 }
 
 bool IsFinite(const Vec3& p) {
-  return std::isfinite(p.x) && std::isfinite(p.y) && std::isfinite(p.z);
+  return ::isfinite(p.x) && ::isfinite(p.y) && ::isfinite(p.z);
 }
 
 struct Mesh {
@@ -72,7 +74,7 @@ Mesh MakeSkirt(u32 segments, u32 rings) {
       const f32 angle = 6.28318530718f * static_cast<f32>(segment) /
                         static_cast<f32>(segments);
       mesh.positions.push_back(
-          {radius * std::cos(angle), -0.7f * t, radius * std::sin(angle)});
+          {radius * ::cos(angle), -0.7f * t, radius * ::sin(angle)});
     }
   }
   for (u32 ring = 0; ring + 1 < rings; ++ring) {
@@ -122,7 +124,7 @@ bool ReadCloth(physics::PhysicsWorld& world, physics::ClothId id,
   if (!world.GetClothPositions(id, positions->data(), count)) return false;
   for (u32 i = 0; i < positions->size(); ++i) {
     if (!IsFinite((*positions)[i])) {
-      std::fprintf(stderr, "non-finite cloth vertex %u: %g %g %g\n", i,
+      ::fprintf(stderr, "non-finite cloth vertex %u: %g %g %g\n", i,
                    (*positions)[i].x, (*positions)[i].y, (*positions)[i].z);
       return false;
     }
@@ -164,7 +166,7 @@ int TestCurtain(physics::PhysicsWorld& world) {
     const u32 a = mesh.indices[i + 0], b = mesh.indices[i + 1],
               c = mesh.indices[i + 2];
     for (const auto edge :
-         {std::pair{a, b}, std::pair{b, c}, std::pair{c, a}}) {
+         {base::Pair{a, b}, base::Pair{b, c}, base::Pair{c, a}}) {
       const f32 rest_length =
           Length(mesh.positions[edge.first] - mesh.positions[edge.second]);
       if (Length(positions[edge.first] - positions[edge.second]) >
@@ -232,7 +234,7 @@ int TestSkirt(physics::PhysicsWorld& world) {
   for (u32 ring = 1; ring < kRings; ++ring) {
     for (u32 segment = 0; segment < kSegments; ++segment) {
       const Vec3 p = positions[ring * kSegments + segment] - Vec3{1.4f, 0, 0};
-      if (std::sqrt(p.x * p.x + p.z * p.z) < 0.27f) {
+      if (::sqrt(p.x * p.x + p.z * p.z) < 0.27f) {
         return Fail("skirt penetrated character capsule");
       }
     }
@@ -361,7 +363,7 @@ int TestPressureAndValidation(physics::PhysicsWorld& world) {
   for (const Vec3& p : positions) final_radius += Length(p - Vec3{0, 1, -1});
   final_radius /= static_cast<f32>(positions.size());
   if (final_radius <= initial_radius + 1.0e-6f) {
-    std::fprintf(stderr, "pressure radius: initial=%g final=%g\n",
+    ::fprintf(stderr, "pressure radius: initial=%g final=%g\n",
                  initial_radius, final_radius);
     return Fail("closed pressure body did not expand");
   }
@@ -401,7 +403,7 @@ int TestSelfCollision(physics::PhysicsWorld& world) {
     lower += positions[i].z;
     upper += positions[i + 3].z;
   }
-  if (std::abs(upper - lower) / 3.0f < 0.025f) {
+  if (::abs(upper - lower) / 3.0f < 0.025f) {
     return Fail("self-collision did not separate overlapping panels");
   }
   world.RemoveCloth(cloth);
@@ -414,20 +416,19 @@ int main(int argc, char** argv) {
   InitFeatures();
   physics::PhysicsWorld world;
   if (!world.Initialize()) return Fail("physics init (Jolt missing?)");
-  if (argc == 2 && std::strcmp(argv[1], "--feature-off") == 0) {
+  if (argc == 2 && ::strcmp(argv[1], "--feature-off") == 0) {
     const Mesh mesh = MakeCurtain(3, 3, 0.1f);
     if (world.CreateCloth(DescFor(mesh), Mat4::Identity()) != 0) {
       return Fail("disabled physics.cloth feature created cloth");
     }
-    std::printf("cloth feature gate OK\n");
+    ::printf("cloth feature gate OK\n");
     return 0;
   }
   auto run = [&](const char* name, auto test) {
-    const auto begin = std::chrono::steady_clock::now();
+    const base::TimeTicks begin = base::TimeTicks::Now();
     const int result = test(world);
-    const auto elapsed =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - begin);
-    std::printf("%s: %.3f s\n", name, elapsed.count());
+    const base::TimeDelta elapsed = base::TimeTicks::Now() - begin;
+    ::printf("%s: %.3f s\n", name, elapsed.InSecondsF());
     return result;
   };
   if (int rc = run("curtain", TestCurtain)) return rc;
@@ -435,6 +436,6 @@ int main(int argc, char** argv) {
   if (int rc = run("skinning", TestSkinning)) return rc;
   if (int rc = run("pressure", TestPressureAndValidation)) return rc;
   if (int rc = run("self collision", TestSelfCollision)) return rc;
-  std::printf("cloth_sim_test OK\n");
+  ::printf("cloth_sim_test OK\n");
   return 0;
 }

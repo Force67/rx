@@ -1,11 +1,11 @@
 #ifndef RX_CORE_MEMORY_FRAME_ARENA_H_
 #define RX_CORE_MEMORY_FRAME_ARENA_H_
 
-#include <cstddef>
-#include <type_traits>
-#include <utility>
-#include <vector>
+#include <stddef.h>
 
+#include "base/containers/pair.h"
+#include "base/containers/vector.h"
+#include "base/meta/traits.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -38,7 +38,7 @@ class RX_CORE_EXPORT FrameArena {
   // Uninitialized storage for `count` Ts; the arena never runs destructors.
   template <typename T>
   T* AllocArray(size_t count) {
-    static_assert(std::is_trivially_destructible_v<T>);
+    static_assert(base::is_trivially_destructible_v<T>);
     return static_cast<T*>(Alloc(count * sizeof(T), alignof(T)));
   }
 
@@ -59,7 +59,7 @@ class RX_CORE_EXPORT FrameArena {
   size_t capacity_ = 0;
   size_t offset_ = 0;
   size_t high_water_ = 0;
-  std::vector<std::pair<void*, size_t>> overflow_;  // block, alignment
+  base::Vector<base::Pair<void*, size_t>> overflow_;  // block, alignment
   u64 overflow_allocs_ = 0;
   size_t overflow_bytes_ = 0;
 };

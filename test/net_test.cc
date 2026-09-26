@@ -3,9 +3,10 @@
 // streaming bubbles (membership hysteresis + sticky deterministic ownership).
 // Pure CPU logic, no GPU, driver or transport involved.
 
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
+#include "base/containers/vector.h"
 #include "ecs/world.h"
 #include "net/bubble.h"
 #include "net/protocol.h"
@@ -20,7 +21,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                     \
   do {                                                                  \
     if (!(cond)) {                                                      \
-      std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);       \
+      ::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);       \
       ++g_failures;                                                     \
     }                                                                   \
   } while (0)
@@ -73,7 +74,7 @@ void TestWireRoundtrip() {
   w.F32(3.5f);
   w.Bool(true);
   w.Str("bubble");
-  std::vector<u8> buf = w.Take();
+  base::Vector<u8> buf = w.Take();
 
   net::ByteReader r(buf.data(), buf.size());
   CHECK_EQ(r.U8(), 7);
@@ -107,7 +108,7 @@ void TestProtocolRoundtrip() {
     accept.server_tick = 1234;
     accept.client_id = 3;
     accept.snapshot_rate = 20;
-    std::vector<u8> blob = accept.Encode();
+    base::Vector<u8> blob = accept.Encode();
     auto decoded = net::JoinAccept::Decode(blob.data(), blob.size());
     CHECK(decoded && decoded->player_entity == 99 && decoded->server_tick == 1234 &&
           decoded->client_id == 3 && decoded->snapshot_rate == 20);
@@ -122,7 +123,7 @@ void TestProtocolRoundtrip() {
     e.user_tag = 0xdef;
     snap.entities.push_back(e);
     snap.despawned.push_back(11);
-    std::vector<u8> blob = snap.Encode();
+    base::Vector<u8> blob = snap.Encode();
     auto decoded = net::Snapshot::Decode(blob.data(), blob.size());
     CHECK(decoded && decoded->server_tick == 77 && decoded->full);
     CHECK(decoded->entities.size() == 1 && decoded->entities[0] == e);
@@ -139,7 +140,7 @@ void TestProtocolRoundtrip() {
     b.entity_count = 7;
     b.owned_count = 4;
     bubbles.push_back(b);
-    std::vector<u8> blob = net::EncodeBubbleSync(bubbles);
+    base::Vector<u8> blob = net::EncodeBubbleSync(bubbles);
     auto decoded = net::DecodeBubbleSync(blob.data(), blob.size());
     CHECK(decoded && decoded->size() == 1 && (*decoded)[0] == b);
   }
@@ -149,7 +150,7 @@ void TestProtocolRoundtrip() {
     input.move_x = -1;
     input.yaw = 0.5f;
     input.buttons = 3;
-    std::vector<u8> blob = input.Encode();
+    base::Vector<u8> blob = input.Encode();
     auto decoded = net::PlayerInput::Decode(blob.data(), blob.size());
     CHECK(decoded && decoded->client_tick == 9 && decoded->move_x == -1.0f &&
           decoded->yaw == 0.5f && decoded->buttons == 3);
@@ -287,9 +288,9 @@ void TestInterpolation() {
 
   net::TickInterpolation(world, 0.5f);
   const scene::Transform* now = world.Get<scene::Transform>(e);
-  CHECK(std::fabs(now->position[0] - 5.0f) < 1e-4f);
+  CHECK(::fabs(now->position[0] - 5.0f) < 1e-4f);
   const net::ReplicatedGait* gait = world.Get<net::ReplicatedGait>(e);
-  CHECK(gait->moving && std::fabs(gait->speed - 10.0f) < 1e-3f);
+  CHECK(gait->moving && ::fabs(gait->speed - 10.0f) < 1e-3f);
 
   net::TickInterpolation(world, 0.6f);
   now = world.Get<scene::Transform>(e);
@@ -434,9 +435,9 @@ int main() {
   TestBubbleOwnership();
   TestBubbleCounts();
   if (g_failures == 0) {
-    std::printf("net_test: all passed\n");
+    ::printf("net_test: all passed\n");
     return 0;
   }
-  std::printf("net_test: %d failure(s)\n", g_failures);
+  ::printf("net_test: %d failure(s)\n", g_failures);
   return 1;
 }

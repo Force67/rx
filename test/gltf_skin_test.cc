@@ -1,8 +1,9 @@
-#include <cmath>
-#include <cstdio>
-#include <filesystem>
+#include <math.h>
+#include <stdio.h>
 
 #include "asset/gltf_loader.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 
 namespace {
 
@@ -47,35 +48,35 @@ int failures = 0;
 void Check(bool condition, const char *message) {
   if (condition)
     return;
-  std::fprintf(stderr, "gltf_skin_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "gltf_skin_test: FAIL: %s\n", message);
   ++failures;
 }
 
 bool IdentityTransform(const asset::ImportedScene::Instance &instance) {
   return Length(instance.position) < 1e-7f &&
-         std::fabs(instance.rotation[0]) < 1e-7f &&
-         std::fabs(instance.rotation[1]) < 1e-7f &&
-         std::fabs(instance.rotation[2]) < 1e-7f &&
-         std::fabs(instance.rotation[3] - 1.0f) < 1e-7f &&
-         std::fabs(instance.scale - 1.0f) < 1e-7f;
+         ::fabs(instance.rotation[0]) < 1e-7f &&
+         ::fabs(instance.rotation[1]) < 1e-7f &&
+         ::fabs(instance.rotation[2]) < 1e-7f &&
+         ::fabs(instance.rotation[3] - 1.0f) < 1e-7f &&
+         ::fabs(instance.scale - 1.0f) < 1e-7f;
 }
 
 } // namespace
 
 int main() {
-  const std::filesystem::path path =
-      std::filesystem::temp_directory_path() / "rx_shared_mesh_skins.gltf";
-  std::FILE *file = std::fopen(path.string().c_str(), "wb");
+  const base::String path =
+      rx::fs::Join(rx::fs::TempDirectory(), "rx_shared_mesh_skins.gltf");
+  FILE *file = ::fopen(path.c_str(), "wb");
   if (!file) {
-    std::fprintf(stderr, "gltf_skin_test: cannot create fixture\n");
+    ::fprintf(stderr, "gltf_skin_test: cannot create fixture\n");
     return 1;
   }
-  std::fwrite(kSharedMeshSkins, 1, sizeof(kSharedMeshSkins) - 1, file);
-  std::fclose(file);
+  ::fwrite(kSharedMeshSkins, 1, sizeof(kSharedMeshSkins) - 1, file);
+  ::fclose(file);
 
   asset::ImportedScene scene;
-  const bool loaded = asset::LoadGltfScene(path.string(), &scene);
-  std::filesystem::remove(path);
+  const bool loaded = asset::LoadGltfScene(path, &scene);
+  rx::fs::Remove(path);
   Check(loaded, "generated glTF loads");
   if (loaded) {
     Check(scene.meshes.size() == 1 && scene.meshes[0].skinned,
@@ -97,7 +98,7 @@ int main() {
   }
 
   if (failures == 0) {
-    std::puts("gltf_skin_test: PASS");
+    ::puts("gltf_skin_test: PASS");
     return 0;
   }
   return 1;

@@ -1,8 +1,9 @@
 #include "placement/placement.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
+#include "base/memory/move.h"
+#include "core/scalar.h"
 #include "placement/density_program.h"
 #include "placement/placement_math.h"
 #include "placement/placement_pattern.h"
@@ -24,7 +25,7 @@ void PlacementSystem::Compile() {
   sorted.reserve(layers_.size());
   base::Vector<bool> taken;
   taken.resize(layers_.size(), false);
-  for (std::size_t i = 0; i < layers_.size(); ++i) {
+  for (size_t i = 0; i < layers_.size(); ++i) {
     if (taken[i]) continue;
     PlacementStack stack;
     stack.footprint = layers_[i].footprint;
@@ -32,7 +33,7 @@ void PlacementSystem::Compile() {
     stack.stream_radius =
         stack.tile_size * (static_cast<f32>(config_.radius_tiles) + 0.5f);
     stack.first_layer = static_cast<u32>(sorted.size());
-    for (std::size_t j = i; j < layers_.size(); ++j) {
+    for (size_t j = i; j < layers_.size(); ++j) {
       if (taken[j] || layers_[j].footprint != stack.footprint) continue;
       if (stack.layer_count == kMaxStackLayers) break;
       sorted.push_back(layers_[j]);
@@ -41,7 +42,7 @@ void PlacementSystem::Compile() {
     }
     stacks_.push_back(stack);
   }
-  layers_ = std::move(sorted);
+  layers_ = base::move(sorted);
 }
 
 Vec3 PlacementSystem::TileOrigin(const TileKey& key) const {
@@ -74,7 +75,7 @@ void PlacementSystem::Update(const Vec3& viewer) {
     f32 cz = (static_cast<f32>(tile.key.z) + 0.5f) * stack.tile_size;
     f32 dx = viewer.x - cx;
     f32 dz = viewer.z - cz;
-    bool outside = std::sqrt(dx * dx + dz * dz) > stack.stream_radius;
+    bool outside = ::sqrt(dx * dx + dz * dz) > stack.stream_radius;
     if (tile.state == 2 && (outside || tile.stale)) evicted_.push_back(tile.key);
   }
 
@@ -83,8 +84,8 @@ void PlacementSystem::Update(const Vec3& viewer) {
   for (u32 s = 0; s < stacks_.size() && budget > 0; ++s) {
     const PlacementStack& stack = stacks_[s];
     i32 r = static_cast<i32>(config_.radius_tiles);
-    i32 center_x = static_cast<i32>(std::floor(viewer.x / stack.tile_size));
-    i32 center_z = static_cast<i32>(std::floor(viewer.z / stack.tile_size));
+    i32 center_x = static_cast<i32>(::floor(viewer.x / stack.tile_size));
+    i32 center_z = static_cast<i32>(::floor(viewer.z / stack.tile_size));
     for (i32 dz = -r; dz <= r && budget > 0; ++dz) {
       for (i32 dx = -r; dx <= r && budget > 0; ++dx) {
         TileKey key{s, center_x + dx, center_z + dz};
@@ -92,7 +93,7 @@ void PlacementSystem::Update(const Vec3& viewer) {
         f32 cz = (static_cast<f32>(key.z) + 0.5f) * stack.tile_size;
         f32 ddx = viewer.x - cx;
         f32 ddz = viewer.z - cz;
-        if (std::sqrt(ddx * ddx + ddz * ddz) > stack.stream_radius) continue;
+        if (::sqrt(ddx * ddx + ddz * ddz) > stack.stream_radius) continue;
         if (Find(key)) continue;
         pending_.push_back(key);
         --budget;
@@ -119,7 +120,7 @@ void PlacementSystem::MarkLive(const TileKey& key) {
 }
 
 void PlacementSystem::Release(const TileKey& key) {
-  for (std::size_t i = 0; i < tiles_.size(); ++i) {
+  for (size_t i = 0; i < tiles_.size(); ++i) {
     if (tiles_[i].key != key) continue;
     tiles_[i] = tiles_[tiles_.size() - 1];
     tiles_.pop_back();
@@ -155,7 +156,7 @@ void PlacementSystem::EmitTileCpu(const TileKey& key, base::Vector<PlacedInstanc
   // DENSITYMAP: cumulative density per layer per texel (layered dithering -
   // layer k owns the threshold interval [cum[k-1], cum[k]) at each texel).
   base::Vector<f32> density;
-  density.resize(static_cast<std::size_t>(kDensityResolution) * kDensityResolution *
+  density.resize(static_cast<size_t>(kDensityResolution) * kDensityResolution *
                      stack.layer_count,
                  0.0f);
   for (u32 tz = 0; tz < kDensityResolution; ++tz) {
@@ -166,8 +167,8 @@ void PlacementSystem::EmitTileCpu(const TileKey& key, base::Vector<PlacedInstanc
       for (u32 layer = 0; layer < stack.layer_count; ++layer) {
         const PlacementLayer& desc = layers_[stack.first_layer + layer];
         cumulative += EvalDensityProgram(desc.density.ops(), *world_, wx, wz);
-        cumulative = std::min(cumulative, 1.0f);
-        density[(static_cast<std::size_t>(layer) * kDensityResolution + tz) *
+        cumulative = rx::Min(cumulative, 1.0f);
+        density[(static_cast<size_t>(layer) * kDensityResolution + tz) *
                     kDensityResolution +
                 tx] = cumulative;
       }
@@ -190,13 +191,13 @@ void PlacementSystem::EmitTileCpu(const TileKey& key, base::Vector<PlacedInstanc
     }
 
     f32 threshold = (static_cast<f32>(i) + 0.5f) / static_cast<f32>(kPatternPointCount);
-    u32 texel_x = std::min(static_cast<u32>(local_x / texel_size), kDensityResolution - 1);
-    u32 texel_z = std::min(static_cast<u32>(local_z / texel_size), kDensityResolution - 1);
+    u32 texel_x = rx::Min(static_cast<u32>(local_x / texel_size), kDensityResolution - 1);
+    u32 texel_z = rx::Min(static_cast<u32>(local_z / texel_size), kDensityResolution - 1);
 
     u32 selected = kMaxStackLayers;
     f32 below = 0.0f;
     for (u32 layer = 0; layer < stack.layer_count; ++layer) {
-      f32 cumulative = density[(static_cast<std::size_t>(layer) * kDensityResolution +
+      f32 cumulative = density[(static_cast<size_t>(layer) * kDensityResolution +
                                 texel_z) *
                                    kDensityResolution +
                                texel_x];
@@ -223,7 +224,7 @@ void PlacementSystem::EmitTileCpu(const TileKey& key, base::Vector<PlacedInstanc
     f32 dhz = world_->Sample(height_map_, world_x, world_z + h) -
               world_->Sample(height_map_, world_x, world_z - h);
     Vec3 normal{-dhx, 2.0f * h, -dhz};
-    f32 nlen = std::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
+    f32 nlen = ::sqrt(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z);
     point.normal = {normal.x / nlen, normal.y / nlen, normal.z / nlen};
 
     u32 seed = InstanceSeed(config_.seed, key.x, key.z, i, layer_index);

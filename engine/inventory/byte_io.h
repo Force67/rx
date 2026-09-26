@@ -1,9 +1,10 @@
 #ifndef RX_INVENTORY_BYTE_IO_H_
 #define RX_INVENTORY_BYTE_IO_H_
 
-#include <cstring>
-#include <vector>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
 #include "core/types.h"
 
 // Minimal explicit-little-endian byte writer/reader shared by the serializers.
@@ -11,24 +12,24 @@
 
 namespace rx::inventory::detail {
 
-inline void PutU8(std::vector<u8>& b, u8 v) { b.push_back(v); }
+inline void PutU8(base::Vector<u8>& b, u8 v) { b.push_back(v); }
 
-inline void PutU16(std::vector<u8>& b, u16 v) {
+inline void PutU16(base::Vector<u8>& b, u16 v) {
   b.push_back(u8(v));
   b.push_back(u8(v >> 8));
 }
 
-inline void PutU32(std::vector<u8>& b, u32 v) {
+inline void PutU32(base::Vector<u8>& b, u32 v) {
   for (int i = 0; i < 4; ++i) b.push_back(u8(v >> (8 * i)));
 }
 
-inline void PutU64(std::vector<u8>& b, u64 v) {
+inline void PutU64(base::Vector<u8>& b, u64 v) {
   for (int i = 0; i < 8; ++i) b.push_back(u8(v >> (8 * i)));
 }
 
-inline void PutF32(std::vector<u8>& b, f32 v) {
+inline void PutF32(base::Vector<u8>& b, f32 v) {
   u32 u;
-  std::memcpy(&u, &v, 4);
+  base::MemCopy(&u, &v, 4);
   PutU32(b, u);
 }
 
@@ -39,7 +40,7 @@ struct Reader {
   const u8* end;
   bool ok = true;
 
-  explicit Reader(const std::vector<u8>& b) : p(b.data()), end(b.data() + b.size()) {}
+  explicit Reader(const base::Vector<u8>& b) : p(b.data()), end(b.data() + b.size()) {}
 
   // Bytes not yet consumed. Lets callers bound a serialized count against the
   // input before reserving/allocating, and check for full consumption.
@@ -84,7 +85,7 @@ struct Reader {
   f32 F32() {
     u32 u = U32();
     f32 v;
-    std::memcpy(&v, &u, 4);
+    base::MemCopy(&v, &u, 4);
     return v;
   }
 };

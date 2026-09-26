@@ -1,12 +1,18 @@
 #include "world/world_stream.h"
 
-#include <algorithm>
-#include <cstring>
-#include <limits>
-#include <utility>
+#include <math.h>
+#include <string.h>
 
 #include <base/check.h>
 
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
+#include "core/scalar.h"
 #include "edit/reflect.h"
 #include "scene/components.h"
 
@@ -52,10 +58,10 @@ Tier TierFromChannels(u32 channels) {
 // reference is refused outright. What cannot is a member nobody reflected -
 // neither this nor the layout hash can see one - so a component meant to be
 // baked has to be fully reflected, and that is a rule for whoever writes it.
-bool BakeableContents(const edit::ComponentDesc& desc, std::string* error) {
+bool BakeableContents(const edit::ComponentDesc& desc, base::String* error) {
   for (u32 i = 0; i < desc.prop_count; ++i) {
     if (desc.props[i].type != edit::PropType::kEntity) continue;
-    *error = std::string("field '") + desc.props[i].name +
+    *error = base::String("field '") + desc.props[i].name +
              "' is an entity reference, which does not survive a bake; refer across a cell by "
              "stable id instead";
     return false;
@@ -64,14 +70,14 @@ bool BakeableContents(const edit::ComponentDesc& desc, std::string* error) {
 }
 
 const ResidentInstance* FindSorted(const base::Vector<ResidentInstance>& instances, u64 stable_id) {
-  auto it = std::lower_bound(
+  auto it = base::LowerBound(
       instances.begin(), instances.end(), stable_id,
       [](const ResidentInstance& instance, u64 wanted) { return instance.stable_id < wanted; });
   return it != instances.end() && it->stable_id == stable_id ? it : nullptr;
 }
 
 ResidentInstance* FindSortedMutable(base::Vector<ResidentInstance>* instances, u64 stable_id) {
-  auto it = std::lower_bound(
+  auto it = base::LowerBound(
       instances->begin(), instances->end(), stable_id,
       [](const ResidentInstance& instance, u64 wanted) { return instance.stable_id < wanted; });
   return it != instances->end() && it->stable_id == stable_id ? it : nullptr;
@@ -90,7 +96,7 @@ class ArchiveCellLoader final : public CellLoader {
     result.ok = map_.ReadPayload(vfs_, request.cell, request.domain, request.tier, &result.payload,
                                 &result.error);
     if (!result.ok) result.payload = WorldCellPayload{};
-    ready_.push_back(std::move(result));
+    ready_.push_back(base::move(result));
   }
 
   void Cancel(const CellLoadRequest& request) override {
@@ -107,7 +113,7 @@ class ArchiveCellLoader final : public CellLoader {
 
   void Poll(base::Vector<CellLoadResult>* out) override {
     if (!out) return;
-    for (CellLoadResult& result : ready_) out->push_back(std::move(result));
+    for (CellLoadResult& result : ready_) out->push_back(base::move(result));
     ready_.clear();
   }
 
@@ -123,11 +129,11 @@ base::UniquePointer<CellLoader> MakeArchiveCellLoader(const WorldMap& map, const
   return base::MakeUnique<ArchiveCellLoader>(map, vfs);
 }
 
-bool RuntimeComponentLayout(std::string_view component, u32* stride, u64* layout_hash) {
+bool RuntimeComponentLayout(base::StringRef component, u32* stride, u64* layout_hash) {
   const edit::ComponentDesc* desc = edit::FindComponentByName(component);
   if (!desc) return false;
   const ecs::ComponentInfo& info = ecs::GetComponentInfo(desc->id);
-  base::Vector<std::string_view> names;
+  base::Vector<base::StringRef> names;
   base::Vector<u32> types;
   base::Vector<u32> offsets;
   names.reserve(desc->prop_count);
@@ -141,9 +147,9 @@ bool RuntimeComponentLayout(std::string_view component, u32* stride, u64* layout
   if (stride) *stride = info.size;
   if (layout_hash) {
     *layout_hash = HashComponentLayout(
-        component, info.size, std::span<const std::string_view>(names.data(), names.size()),
-        std::span<const u32>(types.data(), types.size()),
-        std::span<const u32>(offsets.data(), offsets.size()));
+        component, info.size, base::Span<const base::StringRef>(names.data(), names.size()),
+        base::Span<const u32>(types.data(), types.size()),
+        base::Span<const u32>(offsets.data(), offsets.size()));
   }
   return true;
 }
@@ -165,8 +171,8 @@ bool WorldStreamer::SetOverlay(const WorldOverlay* overlay) {
   // cook order, so applying it here would delete and move whatever rows now
   // happen to carry those ids.
   if (overlay->bake_id() != 0 && overlay->bake_id() != map_.index().bake_id) {
-    RecordError("overlay was recorded against bake " + std::to_string(overlay->bake_id()) +
-                ", this world is bake " + std::to_string(map_.index().bake_id));
+    RecordError("overlay was recorded against bake " + rx::ToString(overlay->bake_id()) +
+                ", this world is bake " + rx::ToString(map_.index().bake_id));
     overlay_ = nullptr;
     return false;
   }
@@ -175,38 +181,38 @@ bool WorldStreamer::SetOverlay(const WorldOverlay* overlay) {
 }
 
 WorldStreamer::DomainCell* WorldStreamer::Find(DomainState& state, u64 cell) {
-  auto it = std::lower_bound(state.cells.begin(), state.cells.end(), cell,
+  auto it = base::LowerBound(state.cells.begin(), state.cells.end(), cell,
                              [](const DomainCell& entry, u64 wanted) { return entry.cell < wanted; });
   return it != state.cells.end() && it->cell == cell ? it : nullptr;
 }
 
 const WorldStreamer::DomainCell* WorldStreamer::Find(const DomainState& state, u64 cell) const {
-  auto it = std::lower_bound(state.cells.begin(), state.cells.end(), cell,
+  auto it = base::LowerBound(state.cells.begin(), state.cells.end(), cell,
                              [](const DomainCell& entry, u64 wanted) { return entry.cell < wanted; });
   return it != state.cells.end() && it->cell == cell ? it : nullptr;
 }
 
 WorldStreamer::DomainCell& WorldStreamer::Emplace(DomainState& state, u64 cell) {
-  auto it = std::lower_bound(state.cells.begin(), state.cells.end(), cell,
+  auto it = base::LowerBound(state.cells.begin(), state.cells.end(), cell,
                              [](const DomainCell& entry, u64 wanted) { return entry.cell < wanted; });
   if (it != state.cells.end() && it->cell == cell) return *it;
   DomainCell created;
   created.cell = cell;
-  return *state.cells.insert(it, std::move(created));
+  return *state.cells.insert(it, base::move(created));
 }
 
 void WorldStreamer::Erase(DomainState& state, u64 cell) {
   if (DomainCell* entry = Find(state, cell)) state.cells.erase(entry);
 }
 
-void WorldStreamer::RecordError(std::string message) {
+void WorldStreamer::RecordError(base::String message) {
   ++error_count_;
   if (errors_.size() >= kMaximumRetainedErrors) return;
-  errors_.push_back(std::move(message));
+  errors_.push_back(base::move(message));
 }
 
-std::span<const std::string> WorldStreamer::errors() const {
-  return std::span<const std::string>(errors_.data(), errors_.size());
+base::Span<const base::String> WorldStreamer::errors() const {
+  return base::Span<const base::String>(errors_.data(), errors_.size());
 }
 
 u64 WorldStreamer::LayoutHash(const edit::ComponentDesc& desc) const {
@@ -226,7 +232,7 @@ u64 WorldStreamer::LayoutHash(const edit::ComponentDesc& desc) const {
   return hash;
 }
 
-bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
+bool WorldStreamer::ResolveSchema(DomainCell& cell, base::String* error) const {
   cell.resolved.clear();
   const WorldCellPayload& payload = cell.payload;
   if (payload.kind == PayloadKind::kInstances) return true;
@@ -235,7 +241,7 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
   for (u32 a = 0; a < payload.archetypes.size(); ++a) {
     const WorldArchetypeRecord& archetype = payload.archetypes[a];
     if (payload.StableIds(archetype).size() != archetype.row_count) {
-      *error = "archetype " + std::to_string(a) + " has no readable stable-id array";
+      *error = "archetype " + rx::ToString(a) + " has no readable stable-id array";
       return false;
     }
     ResolvedArchetype resolved;
@@ -243,15 +249,15 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
     resolved.column_ids.reserve(archetype.column_count);
     for (u32 c = 0; c < archetype.column_count; ++c) {
       const WorldColumnRecord& column = payload.columns[archetype.column_first + c];
-      const std::string_view name = payload.String(column.name);
+      const base::StringRef name = payload.String(column.name);
       if (payload.ColumnBytes(column).size() != column.data_bytes) {
-        *error = "archetype " + std::to_string(a) + " column '" + std::string(name) +
+        *error = "archetype " + rx::ToString(a) + " column '" + base::String(name) +
                  "' is not readable";
         return false;
       }
       const edit::ComponentDesc* desc = edit::FindComponentByName(name);
       if (!desc) {
-        *error = "component '" + std::string(name) +
+        *error = "component '" + base::String(name) +
                  "' is not registered in this build; the cook and the runtime disagree about what "
                  "a world may contain";
         return false;
@@ -262,27 +268,27 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
       }
       const ecs::ComponentInfo& info = ecs::GetComponentInfo(desc->id);
       if (!info.trivially_copyable) {
-        *error = "component '" + std::string(name) +
+        *error = "component '" + base::String(name) +
                  "' needs a constructor and cannot be restored by copying bytes";
         return false;
       }
       if (!BakeableContents(*desc, error)) {
-        *error = "component '" + std::string(name) + "' " + *error;
+        *error = "component '" + base::String(name) + "' " + *error;
         return false;
       }
       if (info.size != column.stride) {
-        *error = "component '" + std::string(name) + "' is " + std::to_string(info.size) +
-                 " bytes here, " + std::to_string(column.stride) + " in the bake";
+        *error = "component '" + base::String(name) + "' is " + rx::ToString(info.size) +
+                 " bytes here, " + rx::ToString(column.stride) + " in the bake";
         return false;
       }
       if (LayoutHash(*desc) != column.layout_hash) {
-        *error = "component '" + std::string(name) +
+        *error = "component '" + base::String(name) +
                  "' has a different field layout here than it had at bake time";
         return false;
       }
       for (ecs::ComponentId existing : resolved.column_ids) {
         if (existing != desc->id) continue;
-        *error = "archetype " + std::to_string(a) + " lists component '" + std::string(name) +
+        *error = "archetype " + rx::ToString(a) + " lists component '" + base::String(name) +
                  "' twice";
         return false;
       }
@@ -292,8 +298,9 @@ bool WorldStreamer::ResolveSchema(DomainCell& cell, std::string* error) const {
       resolved.signature.push_back(desc->id);
       resolved.column_ids.push_back(desc->id);
     }
-    std::sort(resolved.signature.begin(), resolved.signature.end());
-    cell.resolved.push_back(std::move(resolved));
+    // Equal ids are indistinguishable, so any correct sort agrees.
+    base::Sort(resolved.signature.begin(), resolved.signature.end());
+    cell.resolved.push_back(base::move(resolved));
   }
   return true;
 }
@@ -307,11 +314,11 @@ bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
     if (cell.prototypes.empty() && !payload.prototypes.empty()) {
       cell.prototypes.reserve(payload.prototypes.size());
       for (const WorldPrototypeRecord& prototype : payload.prototypes) {
-        cell.prototypes.push_back(std::string(payload.String(prototype.name)));
+        cell.prototypes.push_back(base::String(payload.String(prototype.name)));
       }
     }
     const u32 total = static_cast<u32>(payload.instances.size());
-    const u32 take = std::min(rows, total - cell.next_instance);
+    const u32 take = rx::Min(rows, total - cell.next_instance);
     for (u32 i = 0; i < take; ++i) {
       const WorldInstanceRecord& source = payload.instances[cell.next_instance + i];
       if (overlaid && overlay_->IsDestroyed(source.stable_id)) continue;
@@ -341,9 +348,9 @@ bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
       continue;
     }
     const ResolvedArchetype& resolved = cell.resolved[cell.next_archetype];
-    const std::span<const u64> stable_ids = payload.StableIds(archetype);
+    const base::Span<const u64> stable_ids = payload.StableIds(archetype);
     const u32 first = cell.next_row;
-    const u32 take = std::min(remaining, budget);
+    const u32 take = rx::Min(remaining, budget);
     const u64 owning_cell = cell.cell;
 
     // A destroyed row is skipped here rather than created and destroyed after
@@ -363,7 +370,7 @@ bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
         auto source_row = [&](u32 i) { return overlaid ? rows_scratch_[i] : first + i; };
         for (u32 c = 0; c < archetype.column_count; ++c) {
           const WorldColumnRecord& column = payload.columns[archetype.column_first + c];
-          const std::span<const u8> bytes = payload.ColumnBytes(column);
+          const base::Span<const u8> bytes = payload.ColumnBytes(column);
           const ecs::ComponentId id = resolved.column_ids[c];
           if (!overlaid) {
             const u8* source = bytes.data() + static_cast<size_t>(first) * column.stride;
@@ -375,7 +382,7 @@ bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
               // was created from, so a missing run would mean the batch is not
               // the archetype we asked for.
               BASE_BUGCHECK(destination != nullptr && run != 0, "world batch column vanished");
-              std::memcpy(destination, source + static_cast<size_t>(written) * column.stride,
+              base::MemCopy(destination, source + static_cast<size_t>(written) * column.stride,
                           static_cast<size_t>(run) * column.stride);
               written += run;
             }
@@ -385,7 +392,7 @@ bool WorldStreamer::MaterializeStep(DomainCell& cell, u32 rows) {
             u32 run = 0;
             void* destination = batch.Column(id, i, &run);
             BASE_BUGCHECK(destination != nullptr && run != 0, "world batch column vanished");
-            std::memcpy(destination,
+            base::MemCopy(destination,
                         bytes.data() + static_cast<size_t>(source_row(i)) * column.stride,
                         column.stride);
           }
@@ -465,7 +472,7 @@ void WorldStreamer::DrainLoader() {
     // own, so it indexes an array only after it has been checked.
     if (static_cast<u32>(result.domain) >= kDomainCount) {
       RecordError("a cell loader returned an unknown domain for cell " +
-                  std::to_string(result.cell));
+                  rx::ToString(result.cell));
       continue;
     }
     DomainState& state = domains_[static_cast<u32>(result.domain)];
@@ -476,21 +483,21 @@ void WorldStreamer::DrainLoader() {
 
     // A read failure already names the path it failed on; a schema failure is
     // about the payload's contents and does not.
-    std::string error;
+    base::String error;
     if (result.ok) {
-      cell->payload = std::move(result.payload);
+      cell->payload = base::move(result.payload);
       if (!ResolveSchema(*cell, &error)) {
         result.ok = false;
         error = CellPayloadPath(map_.payload_prefix(), result.cell, result.domain, result.tier) +
                 ": " + error;
       }
     } else {
-      error = std::move(result.error);
+      error = base::move(result.error);
     }
 
     if (!result.ok) {
       NoteLoadFailure(state, result.cell);
-      RecordError(std::move(error));
+      RecordError(base::move(error));
       cell->payload = WorldCellPayload{};
       cell->resolved.clear();
       // Out of kLoading, so a loader that delivers the same ticket twice cannot
@@ -510,7 +517,7 @@ void WorldStreamer::DrainLoader() {
     }
     // A load that succeeds clears the cell's tally: only a run of failures
     // should latch, and a transient one followed by a read is not that.
-    auto failed = std::lower_bound(
+    auto failed = base::LowerBound(
         state.failed.begin(), state.failed.end(), cell->cell,
         [](const FailedCell& entry, u64 wanted) { return entry.cell < wanted; });
     if (failed != state.failed.end() && failed->cell == cell->cell) state.failed.erase(failed);
@@ -525,7 +532,7 @@ void WorldStreamer::DrainLoader() {
 }
 
 void WorldStreamer::AdvanceRetirements(Domain domain, DomainState& state) {
-  const u32 rows = std::max(1u, policy_[domain].rows_per_commit);
+  const u32 rows = rx::Max(1u, policy_[domain].rows_per_commit);
   for (size_t i = 0; i < state.cells.size();) {
     DomainCell& cell = state.cells[i];
     if (cell.phase != CellPhase::kRetiring) {
@@ -584,7 +591,7 @@ void WorldStreamer::GatherClaims(Domain domain, DomainState& state) {
     // the near tier for as long as the lease lived. One that does ask counts
     // exactly like an observer standing there, which is what it is.
     state.demands.push_back({region,
-                             std::min(demand.current_distance, demand.predicted_distance),
+                             rx::Min(demand.current_distance, demand.predicted_distance),
                              /*from_claim=*/!entry.claim.full_detail});
   }
 }
@@ -593,11 +600,14 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
   const DomainStreamPolicy& domain_policy = policy_[domain];
   const u32 channel = 1u << static_cast<u32>(domain);
 
-  std::sort(state.demands.begin(), state.demands.end(),
-            [](const CellDemand& a, const CellDemand& b) {
-              if (a.region.id != b.region.id) return a.region.id < b.region.id;
-              return a.distance < b.distance;
-            });
+  // Every demand for one id carries the same region (built from that cell's
+  // record for this domain), and the run below reads only that region and an
+  // order-free minimum, so any correct sort agrees.
+  base::Sort(state.demands.begin(), state.demands.end(),
+             [](const CellDemand& a, const CellDemand& b) {
+               if (a.region.id != b.region.id) return a.region.id < b.region.id;
+               return a.distance < b.distance;
+             });
 
   state.candidates.clear();
   state.bands_scratch.clear();
@@ -612,10 +622,10 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
     // stands at the cell's own middle, so letting it into this would mean that
     // taking or dropping a lease evicts and rebuilds a cell that was already
     // resident and correct, in both directions.
-    f32 band_distance = std::numeric_limits<f32>::infinity();
+    f32 band_distance = INFINITY;
     for (size_t d = i; d < end; ++d) {
       if (state.demands[d].from_claim) continue;
-      band_distance = std::min(band_distance, state.demands[d].distance);
+      band_distance = rx::Min(band_distance, state.demands[d].distance);
     }
     i = end;
 
@@ -624,7 +634,7 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
     const WorldCellRecord* record = map_.index().FindCell(id);
     if (!record) continue;
 
-    auto previous = std::lower_bound(
+    auto previous = base::LowerBound(
         state.bands.begin(), state.bands.end(), id,
         [](const CellBand& entry, u64 wanted) { return entry.cell < wanted; });
     const bool was_near =
@@ -641,14 +651,14 @@ void WorldStreamer::MergeCandidates(Domain domain, DomainState& state) {
     region.channels = channel | TierChannel(tier);
     // Correctness is admitted before quality: a hard claim's cell outranks a
     // nearer cell that only the picture depends on.
-    if (claims_) region.priority = std::max(region.priority, claims_->Priority(id, channel));
+    if (claims_) region.priority = rx::Max(region.priority, claims_->Priority(id, channel));
     state.candidates.push_back(region);
   }
   state.bands = state.bands_scratch;
 }
 
 void WorldStreamer::NoteLoadFailure(DomainState& state, u64 cell) {
-  auto it = std::lower_bound(state.failed.begin(), state.failed.end(), cell,
+  auto it = base::LowerBound(state.failed.begin(), state.failed.end(), cell,
                              [](const FailedCell& entry, u64 wanted) { return entry.cell < wanted; });
   if (it == state.failed.end() || it->cell != cell) {
     it = state.failed.insert(it, FailedCell{cell, 0, 0});
@@ -658,7 +668,7 @@ void WorldStreamer::NoteLoadFailure(DomainState& state, u64 cell) {
 }
 
 bool WorldStreamer::Suppressed(const DomainState& state, u64 cell) const {
-  auto it = std::lower_bound(state.failed.begin(), state.failed.end(), cell,
+  auto it = base::LowerBound(state.failed.begin(), state.failed.end(), cell,
                              [](const FailedCell& entry, u64 wanted) { return entry.cell < wanted; });
   if (it == state.failed.end() || it->cell != cell) return false;
   return it->attempts >= kMaximumLoadAttempts && tick_ < it->retry_at_tick;
@@ -669,7 +679,7 @@ void WorldStreamer::ClearFailures() {
 }
 
 void WorldStreamer::UpdateDomain(Domain domain,
-                                 std::span<const scene::WorldStreamObservation> observers) {
+                                 base::Span<const scene::WorldStreamObservation> observers) {
   DomainState& state = domains_[static_cast<u32>(domain)];
   const DomainStreamPolicy& domain_policy = policy_[domain];
 
@@ -687,9 +697,9 @@ void WorldStreamer::UpdateDomain(Domain domain,
   AdvanceRetirements(domain, state);
 
   scene::AdvanceWorldStreaming(
-      state.plan, std::span<const scene::WorldStreamObservation>(state.observations.data(),
+      state.plan, base::Span<const scene::WorldStreamObservation>(state.observations.data(),
                                                                  state.observations.size()),
-      std::span<const scene::WorldStreamRegion>(state.candidates.data(), state.candidates.size()),
+      base::Span<const scene::WorldStreamRegion>(state.candidates.data(), state.candidates.size()),
       domain_policy.budget, &state.actions);
 
   for (const scene::WorldStreamAction& action : state.actions) {
@@ -701,7 +711,7 @@ void WorldStreamer::UpdateDomain(Domain domain,
         const WorldCellRecord* record = map_.index().FindCell(action.region.id);
         const Tier tier = TierFromChannels(action.region.channels);
         if (!record || tier == Tier::kAbsent) {
-          RecordError("cell " + std::to_string(action.region.id) + " " + DomainName(domain) +
+          RecordError("cell " + rx::ToString(action.region.id) + " " + DomainName(domain) +
                       ": prepared with no tier the index knows");
           scene::ApplyWorldStreamPrepareResult(state.plan, action.ticket,
                                                scene::WorldStreamPrepareResult::kFailed);
@@ -734,25 +744,27 @@ void WorldStreamer::UpdateDomain(Domain domain,
           // Unreachable: the plan only commits what it saw prepared. Recorded
           // rather than swallowed so that if it ever does happen, the message
           // is the thing that says so.
-          RecordError("cell " + std::to_string(action.ticket.region) + " " + DomainName(domain) +
+          RecordError("cell " + rx::ToString(action.ticket.region) + " " + DomainName(domain) +
                       ": commit arrived for a cell that is not decoded");
           scene::ApplyWorldStreamCommitResult(state.plan, action.ticket,
                                               scene::WorldStreamCommitResult::kFailed);
           break;
         }
-        if (!MaterializeStep(*cell, std::max(1u, domain_policy.rows_per_commit))) {
+        if (!MaterializeStep(*cell, rx::Max(1u, domain_policy.rows_per_commit))) {
           scene::ApplyWorldStreamCommitResult(state.plan, action.ticket,
                                               scene::WorldStreamCommitResult::kMoreWork);
           break;
         }
-        std::sort(cell->entities.begin(), cell->entities.end(),
-                  [](const StableEntity& a, const StableEntity& b) {
-                    return a.stable_id < b.stable_id;
-                  });
-        std::sort(cell->instances.begin(), cell->instances.end(),
-                  [](const ResidentInstance& a, const ResidentInstance& b) {
-                    return a.stable_id < b.stable_id;
-                  });
+        // Stable ids are unique within a cell (the payload decoder refuses a
+        // duplicate), so any correct sort agrees.
+        base::Sort(cell->entities.begin(), cell->entities.end(),
+                   [](const StableEntity& a, const StableEntity& b) {
+                     return a.stable_id < b.stable_id;
+                   });
+        base::Sort(cell->instances.begin(), cell->instances.end(),
+                   [](const ResidentInstance& a, const ResidentInstance& b) {
+                     return a.stable_id < b.stable_id;
+                   });
         cell->phase = CellPhase::kPublished;
         // The payload's bytes have served their purpose; the ECS and the
         // instance page own the state now.
@@ -790,7 +802,7 @@ void WorldStreamer::UpdateDomain(Domain domain,
   }
 }
 
-void WorldStreamer::Update(std::span<const scene::WorldStreamObservation> observers) {
+void WorldStreamer::Update(base::Span<const scene::WorldStreamObservation> observers) {
   if (shut_down_) return;
   ++tick_;
   DrainLoader();
@@ -832,7 +844,7 @@ ecs::Entity WorldStreamer::Resolve(u64 stable_id) const {
     // A cell that is still materializing, or already dying, has no answer to
     // give: half its rows exist and the other half never will.
     if (!cell || cell->phase != CellPhase::kPublished) continue;
-    auto it = std::lower_bound(
+    auto it = base::LowerBound(
         cell->entities.begin(), cell->entities.end(), stable_id,
         [](const StableEntity& entry, u64 wanted) { return entry.stable_id < wanted; });
     // A game that destroys a cell's entity itself leaves the record behind
@@ -845,11 +857,11 @@ ecs::Entity WorldStreamer::Resolve(u64 stable_id) const {
   return {};
 }
 
-std::span<const ResidentInstance> WorldStreamer::Instances(u64 cell_id, Domain domain) const {
+base::Span<const ResidentInstance> WorldStreamer::Instances(u64 cell_id, Domain domain) const {
   if (static_cast<u32>(domain) >= kDomainCount) return {};
   const DomainCell* cell = Find(domains_[static_cast<u32>(domain)], cell_id);
   if (!cell || cell->phase != CellPhase::kPublished) return {};
-  return std::span<const ResidentInstance>(cell->instances.data(), cell->instances.size());
+  return base::Span<const ResidentInstance>(cell->instances.data(), cell->instances.size());
 }
 
 void WorldStreamer::ResidentCells(Domain domain, base::Vector<u64>* out) const {
@@ -862,11 +874,11 @@ void WorldStreamer::ResidentCells(Domain domain, base::Vector<u64>* out) const {
   }
 }
 
-std::span<const std::string> WorldStreamer::Prototypes(u64 cell_id, Domain domain) const {
+base::Span<const base::String> WorldStreamer::Prototypes(u64 cell_id, Domain domain) const {
   if (static_cast<u32>(domain) >= kDomainCount) return {};
   const DomainCell* cell = Find(domains_[static_cast<u32>(domain)], cell_id);
   if (!cell || cell->phase != CellPhase::kPublished) return {};
-  return std::span<const std::string>(cell->prototypes.data(), cell->prototypes.size());
+  return base::Span<const base::String>(cell->prototypes.data(), cell->prototypes.size());
 }
 
 const ResidentInstance* WorldStreamer::FindInstance(u64 stable_id) const {
@@ -889,7 +901,7 @@ ecs::Entity WorldStreamer::Promote(u64 stable_id) {
     if (!cell || cell->phase != CellPhase::kPublished) continue;
     ResidentInstance* instance = FindSortedMutable(&cell->instances, stable_id);
     if (!instance) continue;
-    auto slot = std::lower_bound(
+    auto slot = base::LowerBound(
         cell->entities.begin(), cell->entities.end(), stable_id,
         [](const StableEntity& entry, u64 wanted) { return entry.stable_id < wanted; });
     if (slot != cell->entities.end() && slot->stable_id == stable_id) return {};  // already promoted

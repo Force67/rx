@@ -1,15 +1,16 @@
 #ifndef RX_WORLD_WORLD_FORMAT_H_
 #define RX_WORLD_WORLD_FORMAT_H_
 
-#include <span>
-#include <string>
-#include <string_view>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "core/types.h"
 
 // The baked map formats. Two files, two jobs:
@@ -69,7 +70,7 @@ RX_WORLD_EXPORT const char* TierName(Tier tier);
 // Where one (domain, tier) of one cell lives, and what it costs resident. The
 // path is not stored: it is this, and only this.
 //   <prefix>/<cell id, 16 hex digits>.<domain>.<tier>.rxcell
-RX_WORLD_EXPORT std::string CellPayloadPath(std::string_view prefix, u64 cell, Domain domain,
+RX_WORLD_EXPORT base::String CellPayloadPath(base::StringRef prefix, u64 cell, Domain domain,
                                             Tier tier);
 
 struct WorldPayloadRecord {
@@ -135,8 +136,8 @@ struct WorldIndexData {
   Tier BestTier(const WorldCellRecord& cell, Domain domain, Tier ceiling) const;
 };
 
-RX_WORLD_EXPORT bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out,
-                                      std::string* error);
+RX_WORLD_EXPORT bool DecodeWorldIndex(base::Span<const u8> bytes, WorldIndexData* out,
+                                      base::String* error);
 
 // Cook side. Cells and payloads arrive in any order; Encode sorts and flattens.
 // Re-adding the same cell, or the same (cell, domain, tier), replaces the
@@ -160,7 +161,7 @@ class RX_WORLD_EXPORT WorldIndexWriter {
   // id, or two cells whose stable-id ranges overlap. Catching an overlapping
   // range here is the whole point: at runtime it would resolve a stable id to
   // the wrong cell, silently, forever.
-  bool Encode(base::Vector<u8>* out, std::string* error) const;
+  bool Encode(base::Vector<u8>* out, base::String* error) const;
 
  private:
   struct PendingCell {
@@ -173,7 +174,7 @@ class RX_WORLD_EXPORT WorldIndexWriter {
     u32 stable_id_count = 0;
     // Whether AddCell was handed finite bounds. Recorded rather than inferred
     // from the stored values, because the min/max canonicalization below throws
-    // a NaN away - std::min(0, NaN) is 0 - so by the time the bounds are stored
+    // a NaN away - rx::Min(0, NaN) is 0 - so by the time the bounds are stored
     // the only trace of one is an extent that silently collapsed.
     bool finite_bounds = true;
   };
@@ -264,14 +265,14 @@ struct WorldCellPayload {
   base::Vector<u8> data;         // column bytes and stable-id arrays
   base::Vector<u64> stable_ids;  // every archetype's ids, in archetype order
 
-  std::string_view String(u32 offset) const;
-  std::span<const u8> ColumnBytes(const WorldColumnRecord& column) const;
-  std::span<const u64> StableIds(const WorldArchetypeRecord& archetype) const;
+  base::StringRef String(u32 offset) const;
+  base::Span<const u8> ColumnBytes(const WorldColumnRecord& column) const;
+  base::Span<const u64> StableIds(const WorldArchetypeRecord& archetype) const;
   u32 total_row_count() const;
 };
 
-RX_WORLD_EXPORT bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out,
-                                       std::string* error);
+RX_WORLD_EXPORT bool DecodeCellPayload(base::Span<const u8> bytes, WorldCellPayload* out,
+                                       base::String* error);
 
 // Cook side for one payload. The writer owns the data section, so callers never
 // compute an offset.
@@ -284,24 +285,24 @@ class RX_WORLD_EXPORT CellPayloadWriter {
   // Entity payloads: open an archetype, add one column per component holding
   // the full row_count worth of bytes, then close it with the stable ids.
   u32 BeginArchetype(u32 row_count);
-  void AddColumn(u32 archetype, std::string_view component, u32 stride, u64 layout_hash,
-                 std::span<const u8> bytes);
-  void SetStableIds(u32 archetype, std::span<const u64> ids);
+  void AddColumn(u32 archetype, base::StringRef component, u32 stride, u64 layout_hash,
+                 base::Span<const u8> bytes);
+  void SetStableIds(u32 archetype, base::Span<const u64> ids);
 
   // Instance payloads.
-  u32 AddPrototype(std::string_view name);
+  u32 AddPrototype(base::StringRef name);
   void AddInstance(u64 stable_id, u32 prototype, Vec3 position, Quat rotation, f32 scale);
 
   // False, with `error` set, when the payload is internally inconsistent: a
   // column whose bytes are not stride * row_count, an archetype missing stable
   // ids, a duplicate component in one archetype, a duplicate stable id, or
   // entity and instance content mixed into one payload.
-  bool Encode(base::Vector<u8>* out, std::string* error) const;
+  bool Encode(base::Vector<u8>* out, base::String* error) const;
 
  private:
   struct PendingColumn {
     u32 archetype = 0;
-    std::string component;
+    base::String component;
     u32 stride = 0;
     u64 layout_hash = 0;
     base::Vector<u8> bytes;
@@ -317,17 +318,17 @@ class RX_WORLD_EXPORT CellPayloadWriter {
   Tier tier_ = Tier::kAbsent;
   base::Vector<PendingArchetype> archetypes_;
   base::Vector<PendingColumn> columns_;
-  base::Vector<std::string> prototypes_;
+  base::Vector<base::String> prototypes_;
   base::Vector<WorldInstanceRecord> instances_;
 };
 
 // fnv1a-64 over the reflected shape of a component: its name, its stride, and
 // every field's name, type and offset. Two builds that agree on this agree on
 // the bytes of the struct, which is what makes a column safe to memcpy.
-RX_WORLD_EXPORT u64 HashComponentLayout(std::string_view component, u32 stride,
-                                        std::span<const std::string_view> field_names,
-                                        std::span<const u32> field_types,
-                                        std::span<const u32> field_offsets);
+RX_WORLD_EXPORT u64 HashComponentLayout(base::StringRef component, u32 stride,
+                                        base::Span<const base::StringRef> field_names,
+                                        base::Span<const u32> field_types,
+                                        base::Span<const u32> field_offsets);
 
 }  // namespace rx::world
 

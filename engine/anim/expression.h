@@ -2,11 +2,11 @@
 #define RX_ANIM_EXPRESSION_H_
 
 #include <initializer_list>
-#include <string>
-#include <string_view>
 
 #include <base/containers/vector.h>
 
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -35,7 +35,7 @@ class RX_ANIM_EXPORT ExpressionController {
   // One channel of a pose: a morph target by source name (e.g. "jawOpen"),
   // hashed with MakeAssetId to match asset::MorphTarget::name_hash.
   struct PoseEntry {
-    std::string_view target;
+    base::StringRef target;
     f32 weight = 0;
   };
 
@@ -45,7 +45,7 @@ class RX_ANIM_EXPORT ExpressionController {
   // for that long after SetExpression, staggering the region behind faster
   // ones.
   struct Region {
-    std::string prefix;
+    base::String prefix;
     f32 halflife = 0.1f;  // seconds
     f32 delay = 0;        // seconds
   };
@@ -70,8 +70,8 @@ class RX_ANIM_EXPORT ExpressionController {
   // targets no earlier pose mentioned. AddDefaultPoses ships the stock set
   // (neutral, smile, angry, surprised, eyes_closed, pucker, smirk), built for
   // ARKit-style target names.
-  void AddPose(std::string_view name, const PoseEntry* entries, u32 count);
-  void AddPose(std::string_view name, std::initializer_list<PoseEntry> entries) {
+  void AddPose(base::StringRef name, const PoseEntry* entries, u32 count);
+  void AddPose(base::StringRef name, std::initializer_list<PoseEntry> entries) {
     AddPose(name, entries.begin(), static_cast<u32>(entries.size()));
   }
   void AddDefaultPoses();
@@ -85,7 +85,7 @@ class RX_ANIM_EXPORT ExpressionController {
   // zero. `transition_time` scales the per-region response and delay (an
   // approximate settle time; <= 0 keeps the defaults, which settle in about
   // 0.4 s). Returns false when no such pose was added.
-  bool SetExpression(std::string_view name, f32 transition_time = 0);
+  bool SetExpression(base::StringRef name, f32 transition_time = 0);
   bool SetExpression(u64 pose_hash, f32 transition_time = 0);
   u64 expression() const { return active_pose_; }
 
@@ -106,7 +106,7 @@ class RX_ANIM_EXPORT ExpressionController {
 
  private:
   struct Channel {
-    std::string name;
+    base::String name;
     u64 target = 0;
     f32 value = 0;
     f32 velocity = 0;
@@ -127,7 +127,7 @@ class RX_ANIM_EXPORT ExpressionController {
   };
   enum class BlinkPhase : u8 { kWait, kClose, kHold, kOpen };
 
-  u32 EnsureChannel(std::string_view name);
+  u32 EnsureChannel(base::StringRef name);
   void UpdateBlink(f32 dt);
   f32 NextRand01();
 

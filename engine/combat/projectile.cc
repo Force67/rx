@@ -1,10 +1,10 @@
 #include "combat/projectile.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 #include <base/containers/vector.h>
 
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "scene/components.h"
 
@@ -12,7 +12,7 @@ namespace rx::combat {
 namespace {
 
 bool IsIgnored(const Projectile& round, physics::BodyId body) {
-  const u8 count = std::min<u8>(round.ignore_count, kMaxIgnoredBodies);
+  const u8 count = rx::Min<u8>(round.ignore_count, kMaxIgnoredBodies);
   for (u8 i = 0; i < count; ++i) {
     if (round.ignore[i] == body) return true;
   }
@@ -48,7 +48,7 @@ ExplosionParams BlastFrom(const Projectile& round, const Vec3& position) {
 ecs::Entity SpawnProjectile(ecs::World& world, const Projectile& desc) {
   const ecs::Entity entity = world.Create();
   Projectile round = desc;
-  round.ignore_count = std::min<u8>(round.ignore_count, kMaxIgnoredBodies);
+  round.ignore_count = rx::Min<u8>(round.ignore_count, kMaxIgnoredBodies);
   world.Add(entity, round);
   scene::Transform transform;
   transform.position[0] = desc.position.x;
@@ -60,7 +60,7 @@ ecs::Entity SpawnProjectile(ecs::World& world, const Projectile& desc) {
 
 void StepProjectiles(ecs::World& world, physics::PhysicsWorld& physics,
                      const HitRegistry& registry, CombatEvents& events, f32 dt) {
-  if (!std::isfinite(dt) || dt <= 0) return;
+  if (!::isfinite(dt) || dt <= 0) return;
 
   base::Vector<ecs::Entity> spent;
   base::Vector<ExplosionParams> blasts;
@@ -73,7 +73,7 @@ void StepProjectiles(ecs::World& world, physics::PhysicsWorld& physics,
     if (round.drag > 0) {
       // drag is per metre travelled, so the decay over a step depends on how
       // far the round actually gets: fast rounds bleed speed faster.
-      velocity = velocity * std::exp(-round.drag * Length(velocity) * dt);
+      velocity = velocity * ::exp(-round.drag * Length(velocity) * dt);
     }
 
     const Vec3 from = round.position;

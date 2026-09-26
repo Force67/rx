@@ -1,9 +1,9 @@
 #include "http/http.h"
 
-#include <chrono>
-#include <cstdio>
+#include <stdio.h>
 #include <initializer_list>
 
+#include "base/memory/unique_pointer.h"
 #include "http/stream.h"
 
 namespace rx::http {
@@ -58,7 +58,7 @@ base::String Trim(const base::String& text) {
 
 base::String Decimal(u64 value) {
   char buffer[24] = {};
-  std::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(value));
+  ::snprintf(buffer, sizeof(buffer), "%llu", static_cast<unsigned long long>(value));
   return base::String(buffer);
 }
 
@@ -267,7 +267,7 @@ Response Exchange(const Request& request,
                   const StreamLimits& limits) {
   Response response;
 
-  std::unique_ptr<Stream> stream;
+  base::UniquePointer<Stream> stream;
   if (url.tls) {
     TlsOptions options;
     options.ca_file = request.ca_file;
@@ -551,8 +551,7 @@ Response Fetch(const Request& request) {
                        ? 1u
                        : (request.timeout_ms > 3600000u ? 3600000u : request.timeout_ms);
   if (request.total_timeout_ms > 0) {
-    limits.deadline = std::chrono::steady_clock::now() +
-                      std::chrono::milliseconds(request.total_timeout_ms);
+    limits.deadline = base::TimeTicks::Now() + base::Milliseconds(request.total_timeout_ms);
   }
   limits.cancel = request.cancel;
 

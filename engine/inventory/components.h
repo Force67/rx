@@ -1,8 +1,8 @@
 #ifndef RX_INVENTORY_COMPONENTS_H_
 #define RX_INVENTORY_COMPONENTS_H_
 
-#include <vector>
 
+#include "base/containers/vector.h"
 #include "core/types.h"
 #include "inventory/item_catalog.h"
 
@@ -23,7 +23,7 @@ struct InventoryEntry {
 // capacity and the revision counter stay consistent. Non-POD (owns a vector);
 // the ECS relocates it through its move constructor, which is supported.
 struct Inventory {
-  std::vector<InventoryEntry> entries;
+  base::Vector<InventoryEntry> entries;
   f32 max_weight = 0;   // 0 == unlimited
   u32 max_entries = 0;  // 0 == unlimited (max distinct non-empty stacks)
   u32 revision = 0;     // bumped on every change; UIs diff against it
@@ -44,7 +44,7 @@ struct EquipmentSlot {
 // created on demand by Equip; games may also pre-populate `slots` with the tags
 // they support.
 struct Equipment {
-  std::vector<EquipmentSlot> slots;
+  base::Vector<EquipmentSlot> slots;
   u32 revision = 0;
 };
 

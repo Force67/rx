@@ -4,8 +4,8 @@
 #include <base/containers/vector.h>
 #include <base/strings/xstring.h>
 
-#include <atomic>
 
+#include "base/atomic.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "http/url.h"
@@ -51,7 +51,7 @@ struct RX_HTTP_EXPORT Request {
   // second, including mid-handshake and mid-body. The flag has to outlive the
   // call. This is how a worker thread is made joinable on demand: without it,
   // "run it on a worker" means "wait for the timeout to quit".
-  const std::atomic<bool>* cancel = nullptr;
+  const base::Atomic<bool>* cancel = nullptr;
   // A response larger than this fails instead of growing the heap. Raise it
   // deliberately for an endpoint known to answer with more.
   u32 max_body_bytes = 4u * 1024 * 1024;

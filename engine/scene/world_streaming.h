@@ -3,8 +3,8 @@
 
 #include <base/containers/vector.h>
 
-#include <span>
 
+#include "base/containers/span.h"
 #include "core/export.h"
 #include "core/math.h"
 
@@ -198,8 +198,8 @@ class WorldStreamPlan {
   u64 TakeGeneration();
 
   friend void ConfigureWorldStreaming(WorldStreamPlan&, const WorldStreamSettings&);
-  friend void AdvanceWorldStreaming(WorldStreamPlan&, std::span<const WorldStreamObservation>,
-                                    std::span<const WorldStreamRegion>,
+  friend void AdvanceWorldStreaming(WorldStreamPlan&, base::Span<const WorldStreamObservation>,
+                                    base::Span<const WorldStreamRegion>,
                                     const WorldStreamFrameBudget&,
                                     base::Vector<WorldStreamAction>*);
   friend bool ApplyWorldStreamPrepareResult(WorldStreamPlan&, WorldStreamTicket,
@@ -224,8 +224,8 @@ RX_SCENE_EXPORT void ConfigureWorldStreaming(WorldStreamPlan& plan,
 // observers' retain-radius queries; omission means a region left the catalog.
 // Candidate order does not affect action order.
 RX_SCENE_EXPORT void AdvanceWorldStreaming(WorldStreamPlan& plan,
-                                           std::span<const WorldStreamObservation> observers,
-                                           std::span<const WorldStreamRegion> candidates,
+                                           base::Span<const WorldStreamObservation> observers,
+                                           base::Span<const WorldStreamRegion> candidates,
                                            const WorldStreamFrameBudget& budget,
                                            base::Vector<WorldStreamAction>* actions);
 

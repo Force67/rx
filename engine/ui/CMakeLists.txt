@@ -25,6 +25,9 @@ if(NOT TARGET ultragui)
   set(ULTRAGUI_VIDEO          OFF CACHE BOOL "" FORCE)
   set(ULTRAGUI_PLATFORM_GLFW  OFF CACHE BOOL "" FORCE)
   set(ULTRAGUI_BUILD_SHADERS  OFF CACHE BOOL "" FORCE)
+  # No STL, no exceptions: ugui's containers are base's (ugui::String is
+  # base::String), built against rx's own equilibrium::base.
+  set(ULTRAGUI_USE_BASE       ON  CACHE BOOL "" FORCE)
   set(ULTRAGUI_PLATFORM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ugui_platform.cc"
       CACHE FILEPATH "" FORCE)
   set(ULTRAGUI_RHI_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/ugui_rhi.cc"

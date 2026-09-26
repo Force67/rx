@@ -5,11 +5,11 @@
 // the transport is available (RX_NET_HAS_ZETANET); the codec/interest halves
 // of the module never include this.
 
-#include <vector>
 
 #include <znet/z_packets.h>
 #include <znet/z_peer.h>
 
+#include "base/containers/vector.h"
 #include "core/types.h"
 #include "net/protocol.h"
 
@@ -22,7 +22,7 @@ inline tx::network::PacketType ToPacketType(u16 type) {
 // Wraps an encoded payload in an outgoing zetanet packet. Snapshots stay
 // unreliable by design, joins and keyframes ride the reliable path.
 inline tx::network::OutgoingPacket MakePacket(
-    u32 destination, u16 type, const std::vector<u8>& payload, bool reliable,
+    u32 destination, u16 type, const base::Vector<u8>& payload, bool reliable,
     tx::network::PacketPriority priority = tx::network::PacketPriority::Medium) {
   const tx::network::PackageFlags flags{
       .reliable = reliable ? u8{1} : u8{0},
@@ -41,7 +41,7 @@ inline tx::network::OutgoingPacket MakePacket(
 }
 
 inline tx::network::OutgoingPacket MakePacket(
-    u32 destination, MessageType type, const std::vector<u8>& payload, bool reliable,
+    u32 destination, MessageType type, const base::Vector<u8>& payload, bool reliable,
     tx::network::PacketPriority priority = tx::network::PacketPriority::Medium) {
   return MakePacket(destination, static_cast<u16>(type), payload, reliable, priority);
 }

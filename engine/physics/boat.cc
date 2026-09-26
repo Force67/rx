@@ -1,7 +1,7 @@
+#include "core/scalar.h"
 #include "physics/boat.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 namespace rx::physics {
 
@@ -23,15 +23,15 @@ f32 SmoothStep(f32 edge0, f32 edge1, f32 x) {
 
 // Yaw quaternion about +Y (x,y,z,w), for spawn orientation.
 Quat YawQuat(f32 yaw_radians) {
-  return {0.0f, std::sin(yaw_radians * 0.5f), 0.0f, std::cos(yaw_radians * 0.5f)};
+  return {0.0f, ::sin(yaw_radians * 0.5f), 0.0f, ::cos(yaw_radians * 0.5f)};
 }
 
 // v * |v|: signed quadratic term (drag ~ v^2 but keeps the sign of v).
-f32 SignedSquare(f32 v) { return v * std::fabs(v); }
+f32 SignedSquare(f32 v) { return v * ::fabs(v); }
 
 // Guards a force/torque against NaN/Inf before it reaches the solver.
 bool Finite(const Vec3& v) {
-  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
 }
 
 }  // namespace
@@ -42,7 +42,7 @@ Boat::Boat(PhysicsWorld& world, const BoatDesc& desc, const Vec3& position, f32 
   // derives exactly desc.mass. Buoyancy and drag are our model's job, not the
   // shape's, so the shape density only sets the mass here.
   const Vec3& he = desc_.hull_half_extent;
-  const f32 volume = std::max(8.0f * he.x * he.y * he.z, 1e-3f);
+  const f32 volume = rx::Max(8.0f * he.x * he.y * he.z, 1e-3f);
   const f32 density = desc_.mass / volume;
   const Quat q = YawQuat(yaw_radians);
   const f32 rot[4] = {q.x, q.y, q.z, q.w};
@@ -108,10 +108,10 @@ void Boat::Update(const BoatInput& input, f32 dt) {
 
   // engine spool: rpm chases the throttle target with a first-order lag
   const f32 target_rpm =
-      desc_.idle_rpm + std::fabs(throttle) * (desc_.max_rpm - desc_.idle_rpm);
-  const f32 spool = desc_.spool_time > 0 ? (1.0f - std::exp(-dt / desc_.spool_time)) : 1.0f;
+      desc_.idle_rpm + ::fabs(throttle) * (desc_.max_rpm - desc_.idle_rpm);
+  const f32 spool = desc_.spool_time > 0 ? (1.0f - ::exp(-dt / desc_.spool_time)) : 1.0f;
   rpm_ += (target_rpm - rpm_) * spool;
-  const f32 rpm_span = std::max(desc_.max_rpm - desc_.idle_rpm, 1.0f);
+  const f32 rpm_span = rx::Max(desc_.max_rpm - desc_.idle_rpm, 1.0f);
   const f32 thrust_frac = Clamp((rpm_ - desc_.idle_rpm) / rpm_span, 0.0f, 1.0f);
   // Signed thrust magnitude: astern is throttled down by reverse_fraction.
   f32 thrust_mag = desc_.max_thrust * thrust_frac;
@@ -126,13 +126,13 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   // A per-sample vertical damper bleeds heave/roll/pitch so the springs settle
   // without ringing. Because buoyancy is distributed through the volume, the
   // centre of buoyancy migrates to the submerged side and rights the hull.
-  const u32 nx = std::max<u32>(desc_.grid_beam, 1);
-  const u32 ny = std::max<u32>(desc_.grid_height, 1);
-  const u32 nz = std::max<u32>(desc_.grid_len, 1);
+  const u32 nx = rx::Max<u32>(desc_.grid_beam, 1);
+  const u32 ny = rx::Max<u32>(desc_.grid_height, 1);
+  const u32 nz = rx::Max<u32>(desc_.grid_len, 1);
   const Vec3& he = desc_.hull_half_extent;
   const f32 hull_volume = 8.0f * he.x * he.y * he.z;
   const f32 subvol = hull_volume / static_cast<f32>(nx * ny * nz);
-  const f32 layer_thickness = std::max(2.0f * he.y / static_cast<f32>(ny), 1e-3f);
+  const f32 layer_thickness = rx::Max(2.0f * he.y / static_cast<f32>(ny), 1e-3f);
   const f32 buoy_per_sample = kWaterDensity * kGravity * subvol;
   u32 bottom_wet = 0;  // submerged samples in the bottom layer -> wetted/planing
   const u32 bottom_total = nx * nz;
@@ -184,10 +184,10 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   const f32 v_fwd = Dot(vrel, forward);
   const f32 v_lat = Dot(vrel, right);
   const f32 v_vert = Dot(vel, up);
-  const f32 speed = std::sqrt(vel.x * vel.x + vel.z * vel.z);
+  const f32 speed = ::sqrt(vel.x * vel.x + vel.z * vel.z);
 
   // Planing fraction from forward speed; drives bow lift + drag drop.
-  const f32 planing = SmoothStep(desc_.hull_speed, desc_.plane_full_speed, std::fabs(v_fwd));
+  const f32 planing = SmoothStep(desc_.hull_speed, desc_.plane_full_speed, ::fabs(v_fwd));
 
   // Longitudinal: fore drag < aft drag; wetted-scaled; dropped by planing when
   // moving ahead. Lateral: strong keel drag so the hull carves rather than
@@ -208,7 +208,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   // Applied at a modest forward lever so the bow rises a few degrees.
   if (planing > 0.0f && desc_.plane_lift > 0.0f && v_fwd > 0.0f && wetted > 0.0f) {
     f32 lift = desc_.plane_lift * v_fwd * v_fwd * planing;
-    lift = std::min(lift, desc_.plane_lift_cap * weight) * wetted;
+    lift = rx::Min(lift, desc_.plane_lift_cap * weight) * wetted;
     const Vec3 bow = pos + Rotate(q, Vec3{0.0f, -he.y, he.z * 0.35f});
     const Vec3 lift_force{0.0f, lift, 0.0f};  // world up: lifts and pitches bow up
     if (Finite(lift_force)) world_.AddForceAtPoint(body_, lift_force, bow);
@@ -231,7 +231,7 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   // Authority scales with the water speed over the rudder (|v_fwd|^2) plus the
   // propeller wash (proportional to thrust), so the boat still answers the helm
   // on the wash at a standstill. Only the wash term needs the prop submerged.
-  const f32 wash = (prop_submerged ? desc_.rudder_wash_gain * std::fabs(thrust_mag) : 0.0f);
+  const f32 wash = (prop_submerged ? desc_.rudder_wash_gain * ::fabs(thrust_mag) : 0.0f);
   const f32 rudder_mag = steer * (desc_.rudder_speed_gain * v_fwd * v_fwd + wash);
   if (rudder_mag != 0.0f) {
     const Vec3 rudder_pt = pos + Rotate(q, desc_.rudder_offset);
@@ -247,13 +247,13 @@ void Boat::Update(const BoatInput& input, f32 dt) {
   // little as it shoves it downwind. Conservative coefficient (see wind_drag).
   if (desc_.wind_drag > 0.0f && exposed > 0.0f) {
     const Vec3 vrel_wind = world_.wind() - vel;  // air velocity relative to hull
-    const f32 wind_speed = std::sqrt(Dot(vrel_wind, vrel_wind));
+    const f32 wind_speed = ::sqrt(Dot(vrel_wind, vrel_wind));
     if (wind_speed > 1e-3f) {
       const Vec3 wdir = vrel_wind * (1.0f / wind_speed);
       const f32 side_area = (2.0f * he.z) * (2.0f * he.y);   // beam-on profile
       const f32 front_area = (2.0f * he.x) * (2.0f * he.y);  // head-on profile
       const f32 area =
-          std::fabs(Dot(wdir, right)) * side_area + std::fabs(Dot(wdir, forward)) * front_area;
+          ::fabs(Dot(wdir, right)) * side_area + ::fabs(Dot(wdir, forward)) * front_area;
       const f32 mag =
           0.5f * kAirDensity * desc_.wind_drag * area * exposed * wind_speed * wind_speed;
       const Vec3 wind_force = wdir * mag;

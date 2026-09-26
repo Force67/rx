@@ -12,9 +12,11 @@
 #include <znet/z_client.h>
 #include <znet/z_server.h>
 
-#include <functional>
-#include <memory>
 
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
 #include "core/export.h"
 #include "ecs/world.h"
 #include "net/bubble.h"
@@ -83,47 +85,47 @@ class RX_NET_EXPORT ServerSession : public Session {
   // Every data-channel message with id >= kFirstGameMessage lands here,
   // undecoded, attributed to its peer. Unset drops them.
   void SetGameMessageSink(
-      std::function<void(u32 peer, u16 type, const u8* data, size_t size)> sink) {
-    game_message_sink_ = std::move(sink);
+      base::Function<void(u32 peer, u16 type, const u8* data, size_t size)> sink) {
+    game_message_sink_ = base::move(sink);
   }
 
   // Called after the server spawns a joiner's player entity (Transform +
   // NetworkId + optional Renderable + InterestBubble already attached), so
   // the game adds its own components or moves the spawn.
-  void SetPlayerSpawnSink(std::function<void(ecs::World&, ecs::Entity, u32 peer)> sink) {
-    player_spawn_sink_ = std::move(sink);
+  void SetPlayerSpawnSink(base::Function<void(ecs::World&, ecs::Entity, u32 peer)> sink) {
+    player_spawn_sink_ = base::move(sink);
   }
 
   // Integrates one player's newest input each fixed step. Unset runs a plain
   // fly-move (demo default); a game replaces it with its actual locomotion.
   void SetPlayerSimulator(
-      std::function<void(ecs::World&, ecs::Entity, const PlayerInput&, f32 dt)> sim) {
-    player_simulator_ = std::move(sim);
+      base::Function<void(ecs::World&, ecs::Entity, const PlayerInput&, f32 dt)> sim) {
+    player_simulator_ = base::move(sim);
   }
 
   // Per-entity replication payload (user tags) capture, and (through the
   // same hooks type) what a client does when a tagged replica spawns.
-  void SetReplicationHooks(ReplicationHooks hooks) { hooks_ = std::move(hooks); }
+  void SetReplicationHooks(ReplicationHooks hooks) { hooks_ = base::move(hooks); }
 
   // Join/leave notifications, the fundamental multiplayer hooks for
   // server-side game logic. Fired for every peer; unset sinks drop the notice.
-  void SetClientJoinedSink(std::function<void(u32)> sink) {
-    client_joined_sink_ = std::move(sink);
+  void SetClientJoinedSink(base::Function<void(u32)> sink) {
+    client_joined_sink_ = base::move(sink);
   }
-  void SetClientLeftSink(std::function<void(u32)> sink) {
-    client_left_sink_ = std::move(sink);
+  void SetClientLeftSink(base::Function<void(u32)> sink) {
+    client_left_sink_ = base::move(sink);
   }
 
   // sending
 
   // Ships a game payload to one client / every client on the data channel.
-  void SendTo(u32 peer, u16 type, const std::vector<u8>& payload, bool reliable,
+  void SendTo(u32 peer, u16 type, const base::Vector<u8>& payload, bool reliable,
               tx::network::PacketPriority priority = tx::network::PacketPriority::Medium);
-  void Broadcast(u16 type, const std::vector<u8>& payload, bool reliable,
+  void Broadcast(u16 type, const base::Vector<u8>& payload, bool reliable,
                  tx::network::PacketPriority priority = tx::network::PacketPriority::Medium);
 
   // The server's scripting RPC channel. Always present once Start succeeds.
-  RpcServerChannel* rpc() { return rpc_.get(); }
+  RpcServerChannel* rpc() { return rpc_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
 
   // Escape hatch for game layers that ride zetanet features directly (file
   // transfer, manifests): the raw transport. Everything sent through it must
@@ -144,7 +146,7 @@ class RX_NET_EXPORT ServerSession : public Session {
 
   // Visits every admitted peer id (game layers pushing per-peer payloads,
   // e.g. re-offering an asset manifest after a live reload).
-  void ForEachPeer(const std::function<void(u32 peer)>& fn) const {
+  void ForEachPeer(const base::Function<void(u32 peer)>& fn) const {
     for (auto entry : clients_) fn(entry.key);
   }
 
@@ -173,12 +175,12 @@ class RX_NET_EXPORT ServerSession : public Session {
   base::UnorderedMap<u32, RemoteClient> clients_;
   base::Vector<u32> scratch_dropped_;
   ReplicationHooks hooks_;
-  std::function<void(u32, u16, const u8*, size_t)> game_message_sink_;
-  std::function<void(ecs::World&, ecs::Entity, u32)> player_spawn_sink_;
-  std::function<void(ecs::World&, ecs::Entity, const PlayerInput&, f32)> player_simulator_;
-  std::function<void(u32)> client_joined_sink_;
-  std::function<void(u32)> client_left_sink_;
-  std::unique_ptr<RpcServerChannel> rpc_;
+  base::Function<void(u32, u16, const u8*, size_t)> game_message_sink_;
+  base::Function<void(ecs::World&, ecs::Entity, u32)> player_spawn_sink_;
+  base::Function<void(ecs::World&, ecs::Entity, const PlayerInput&, f32)> player_simulator_;
+  base::Function<void(u32)> client_joined_sink_;
+  base::Function<void(u32)> client_left_sink_;
+  base::UniquePointer<RpcServerChannel> rpc_;
   NetStats stats_;
   u64 tick_ = 0;
   bool force_keyframe_ = false;
@@ -198,31 +200,31 @@ class RX_NET_EXPORT ClientSession : public Session {
 
   // Every data-channel message with id >= kFirstGameMessage lands here,
   // undecoded. Unset drops them.
-  void SetGameMessageSink(std::function<void(u16 type, const u8* data, size_t size)> sink) {
-    game_message_sink_ = std::move(sink);
+  void SetGameMessageSink(base::Function<void(u16 type, const u8* data, size_t size)> sink) {
+    game_message_sink_ = base::move(sink);
   }
 
   // What a replica spawn with a user tag means to this game (hooks are the
   // client half of ReplicationHooks; capture is unused here).
-  void SetReplicationHooks(ReplicationHooks hooks) { hooks_ = std::move(hooks); }
+  void SetReplicationHooks(ReplicationHooks hooks) { hooks_ = base::move(hooks); }
 
   // Control-channel packets zetanet classifies as file transfers, polled
   // before Update() would discard them. A game's asset streaming taps here.
-  void SetFilePacketSink(std::function<void(const tx::network::IncomingPacket&)> sink) {
-    file_packet_sink_ = std::move(sink);
+  void SetFilePacketSink(base::Function<void(const tx::network::IncomingPacket&)> sink) {
+    file_packet_sink_ = base::move(sink);
   }
 
   // Fired once when the server accepts the join.
-  void SetJoinedSink(std::function<void(const JoinAccept&)> sink) {
-    joined_sink_ = std::move(sink);
+  void SetJoinedSink(base::Function<void(const JoinAccept&)> sink) {
+    joined_sink_ = base::move(sink);
   }
 
   // Ships a game payload to the server on the data channel.
-  void SendToServer(u16 type, const std::vector<u8>& payload, bool reliable,
+  void SendToServer(u16 type, const base::Vector<u8>& payload, bool reliable,
                     tx::network::PacketPriority priority = tx::network::PacketPriority::Medium);
 
   // The client's scripting RPC channel. Always present once Start succeeds.
-  RpcClientChannel* rpc() { return rpc_.get(); }
+  RpcClientChannel* rpc() { return rpc_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
 
   // Escape hatch: the raw transport (see ServerSession::raw).
   tx::network::ZClient& raw() { return client_; }
@@ -247,10 +249,10 @@ class RX_NET_EXPORT ClientSession : public Session {
   tx::network::ZClient client_;
   SnapshotApplier applier_;
   ReplicationHooks hooks_;
-  std::unique_ptr<RpcClientChannel> rpc_;
-  std::function<void(u16, const u8*, size_t)> game_message_sink_;
-  std::function<void(const tx::network::IncomingPacket&)> file_packet_sink_;
-  std::function<void(const JoinAccept&)> joined_sink_;
+  base::UniquePointer<RpcClientChannel> rpc_;
+  base::Function<void(u16, const u8*, size_t)> game_message_sink_;
+  base::Function<void(const tx::network::IncomingPacket&)> file_packet_sink_;
+  base::Function<void(const JoinAccept&)> joined_sink_;
   base::Vector<BubbleState> bubbles_;
   PlayerInput input_;
   u64 player_net_id_ = 0;

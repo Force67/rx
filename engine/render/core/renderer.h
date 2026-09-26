@@ -1,17 +1,18 @@
 #ifndef RX_RENDER_RENDERER_H_
 #define RX_RENDER_RENDERER_H_
 
-#include <functional>
-#include <memory>
-#include <optional>
-#include <span>
-#include <string>
-#include <vector>
 
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 
 #include "asset/mesh.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "core/window.h"
@@ -104,7 +105,7 @@ namespace rx::render {
 struct VulkanDeviceExtras {
   // Enabled if the adapter advertises them; the granted set is reported in
   // Renderer::caps()->extra_extensions.
-  base::Vector<std::string> extensions;
+  base::Vector<base::String> extensions;
 };
 
 struct RendererDesc {
@@ -289,7 +290,7 @@ struct DebugLine {
 // blank. Filled per frame into FrameView::world_texts. No font atlas or asset.
 struct WorldText {
   Vec3 position{};        // world anchor
-  std::string text;       // label content ('\n' = new line)
+  base::String text;       // label content ('\n' = new line)
   f32 size = 1.0f;        // glyph height, world units
   u32 rgba = 0xffffffff;  // packed 0xRRGGBBAA
   f32 align = 0.5f;       // per-line horizontal anchor: 0 left, 0.5 centre, 1 right
@@ -383,8 +384,8 @@ struct FrameView {
   // Recorded inside the final ui pass with the backbuffer bound as the
   // color attachment. hud_draw (the libultragui HUD/menu) records first, then
   // ui_draw (the debug ImGui overlay) on top.
-  std::function<void(CommandList &)> hud_draw;
-  std::function<void(CommandList &)> ui_draw;
+  base::Function<void(CommandList &)> hud_draw;
+  base::Function<void(CommandList &)> ui_draw;
 
   // App-provided GPU passes recorded into the scene, depth-interleaved with
   // rx's own geometry (a game with its own GPU-driven pipeline: compute cull,
@@ -394,26 +395,26 @@ struct FrameView {
   // render- graph pass (so barriers are handled) and only when set, on the
   // Vulkan backend. Zero cost when unset: no pass is added. See
   // SceneHookContext.
-  std::function<void(const SceneHookContext &)> scene_opaque;
-  std::function<void(const SceneHookContext &)> scene_transparent;
+  base::Function<void(const SceneHookContext &)> scene_opaque;
+  base::Function<void(const SceneHookContext &)> scene_transparent;
 
   // Color-only resolved HDR content. Unlike the scene hooks this runs after
   // temporal/depth-aware effects, making it suitable for sprites that should
   // remain crisp without producing motion vectors. Exposure, bloom and
   // tonemapping still run afterward.
-  std::function<void(const HdrOverlayContext&)> hdr_overlay;
+  base::Function<void(const HdrOverlayContext&)> hdr_overlay;
 
   // Debug line lists for this frame (non-owning; valid for the RenderFrame
   // call). debug_lines are depth-tested against the resolved scene depth;
   // overlay lines draw on top. Both are drawn just before the UI pass. Empty =
   // no line pass.
-  std::span<const DebugLine> debug_lines;
-  std::span<const DebugLine> debug_lines_overlay;
+  base::Span<const DebugLine> debug_lines;
+  base::Span<const DebugLine> debug_lines_overlay;
 
   // World-space text labels for this frame, drawn as camera-facing stroke-font
   // billboards in the debug-line pass. Empty = no text. Owned here (unlike the
   // debug-line spans) so callers can build them from temporaries.
-  std::vector<WorldText> world_texts;
+  base::Vector<WorldText> world_texts;
 
   // Backdrop blur: when a frosted (backdrop-blur) widget is present, the UI
   // sets needs_blur so the renderer captures + blurs the backbuffer before the
@@ -430,16 +431,16 @@ struct FrameView {
   // frame. New container members must be added to the move-dance here.
   void Clear() {
     FrameView fresh;
-    fresh.draws = std::move(draws);
-    fresh.decals = std::move(decals);
-    fresh.decal_stamps = std::move(decal_stamps);
-    fresh.lights = std::move(lights);
-    fresh.bone_matrices = std::move(bone_matrices);
-    fresh.prev_bone_matrices = std::move(prev_bone_matrices);
-    fresh.particles = std::move(particles);
-    fresh.grass_interactions = std::move(grass_interactions);
-    fresh.oit = std::move(oit);
-    fresh.gaussians = std::move(gaussians);
+    fresh.draws = base::move(draws);
+    fresh.decals = base::move(decals);
+    fresh.decal_stamps = base::move(decal_stamps);
+    fresh.lights = base::move(lights);
+    fresh.bone_matrices = base::move(bone_matrices);
+    fresh.prev_bone_matrices = base::move(prev_bone_matrices);
+    fresh.particles = base::move(particles);
+    fresh.grass_interactions = base::move(grass_interactions);
+    fresh.oit = base::move(oit);
+    fresh.gaussians = base::move(gaussians);
     fresh.draws.clear();
     fresh.decals.clear();
     fresh.decal_stamps.clear();
@@ -450,7 +451,7 @@ struct FrameView {
     fresh.grass_interactions.clear();
     fresh.oit.clear();
     fresh.gaussians.clear();
-    *this = std::move(fresh);
+    *this = base::move(fresh);
   }
 };
 
@@ -481,7 +482,7 @@ public:
 
   // Saves the next presented frame as png. Also armed by the
   // RX_SCREENSHOT env var ("path.png:seconds") for headless captures.
-  void CaptureScreenshot(const std::string &path);
+  void CaptureScreenshot(const base::String &path);
 
   // Editor picking. RequestPick arms an entity-id pass for the next frame that
   // rasterizes the opaque draw list into an R32_UINT target and reads back the
@@ -489,7 +490,7 @@ public:
   // (1-2 frames later); poll TakePickResult, which returns and clears the
   // pending result when it is ready. pick_id 0 means background/unpickable.
   void RequestPick(u32 x, u32 y);
-  std::optional<PickResult> TakePickResult();
+  base::Optional<PickResult> TakePickResult();
 
   // Makes a mesh drawable, keyed by its asset id. Materials referenced by
   // submeshes should be uploaded first. No-op without a device. id_salt
@@ -524,9 +525,9 @@ public:
   // Updates preserve object motion by treating overlapping array indices as
   // stable identities; newly appended indices spawn with zero object velocity.
   InstanceGroupHandle CreateInstanceGroup(u64 mesh,
-                                          std::span<const Mat4> transforms);
+                                          base::Span<const Mat4> transforms);
   bool UpdateInstanceGroup(InstanceGroupHandle handle,
-                           std::span<const Mat4> transforms);
+                           base::Span<const Mat4> transforms);
   void DestroyInstanceGroup(InstanceGroupHandle handle);
   // Same per-domain salt as UploadMesh; it must match so a mesh's submesh
   // material references resolve to this domain's materials/textures.
@@ -544,7 +545,7 @@ public:
   void UploadVirtualGeometryMesh(const asset::Mesh &mesh);
   // World transforms the virtual-geometry mesh draws with (default: one
   // identity instance). The gpu culls every cluster of every instance.
-  void SetVirtualGeometryInstances(std::span<const Mat4> transforms);
+  void SetVirtualGeometryInstances(base::Span<const Mat4> transforms);
   // Planar world-xz-projected albedo for the virtual-geometry resolve: a full
   // RGBA8 mip chain (size x size at mip 0, levels concatenated).
   void SetVirtualGeometryAlbedo(ByteSpan rgba_mips, u32 size, f32 world_to_uv);
@@ -553,7 +554,7 @@ public:
   // probes and gather samples indoor/outdoor against these and refuses to blend
   // across the boundary, killing the outdoor-probe-through-a-doorway leak. Cheap;
   // forward every frame or on change. Empty span disables classification.
-  void SetInteriorVolumes(std::span<const InteriorVolume> volumes);
+  void SetInteriorVolumes(base::Span<const InteriorVolume> volumes);
   // Seeds simulated hair strands on a head sphere (--demo strands).
   void SeedHairStrands(const Vec3 &head_center, f32 head_radius, u32 strands,
                        f32 length);
@@ -586,7 +587,7 @@ public:
   u32 BakeImposter(const asset::Mesh &mesh);
   // The distant instances drawn as billboards. Replaces the previous set, so
   // a game re-splitting near/far as the camera moves calls this again.
-  void SetImposterInstances(std::span<const ImposterPass::Instance> instances);
+  void SetImposterInstances(base::Span<const ImposterPass::Instance> instances);
 
   // Live tunables. Mutate freely; RenderFrame diffs against the applied
   // state and reconfigures, including full upscaler swaps.
@@ -645,7 +646,7 @@ public:
 
   const DeviceCaps *caps() const;
   bool raytracing_available() const { return rt_available_; }
-  Device *device() { return device_.get(); }
+  Device *device() { return device_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
   Format swapchain_format() const;
   u32 swapchain_image_count() const;
   u32 render_width() const { return render_width_; }
@@ -664,7 +665,7 @@ public:
   u32 mesh_count() const { return static_cast<u32>(meshes_.size()); }
   size_t instance_group_count() const { return instances_.group_count(); }
   size_t instance_count() const { return instances_.instance_count(); }
-  const MaterialSystem *materials() const { return material_system_.get(); }
+  const MaterialSystem *materials() const { return material_system_.Get_UseOnlyIfYouKnowWhatYouareDoing(); }
   // One line of resident material-texture memory and what import-time
   // compression did to get there. Called after a --shot capture; a headless
   // run has no overlay, and this is the number a memory change is judged on.
@@ -794,15 +795,15 @@ private:
   // The HDR request the current swapchain was built with; when WantHdrSwapchain
   // diverges (OS toggle flipped, setting changed) the frame loop rebuilds.
   bool swapchain_hdr_request_ = false;
-  std::unique_ptr<Device> device_;
-  std::unique_ptr<Swapchain> swapchain_;
-  std::unique_ptr<TransientPool> transient_pool_;
-  std::unique_ptr<BindlessRegistry> bindless_;
+  base::UniquePointer<Device> device_;
+  base::UniquePointer<Swapchain> swapchain_;
+  base::UniquePointer<TransientPool> transient_pool_;
+  base::UniquePointer<BindlessRegistry> bindless_;
   base::Vector<u32> retired_bindless_meshes_[kFramesInFlight];
-  std::unique_ptr<MaterialSystem> material_system_;
-  std::unique_ptr<EnvironmentSystem> environment_;
-  std::unique_ptr<DdgiSystem> ddgi_;
-  std::unique_ptr<RcgiSystem>
+  base::UniquePointer<MaterialSystem> material_system_;
+  base::UniquePointer<EnvironmentSystem> environment_;
+  base::UniquePointer<DdgiSystem> ddgi_;
+  base::UniquePointer<RcgiSystem>
       rcgi_; // idTech8-style radiance-cached GI (RX_RCGI), lazily created
   bool rcgi_create_failed_ = false; // lazy creation failed once; do not retry
   bool rcgi_sw_unavailable_logged_ =
@@ -822,13 +823,13 @@ private:
   // quality preset can never turn the seeded software path off (see
   // RendererDesc::software_gi).
   bool sdf_available_ = false;
-  std::unique_ptr<SdfScene> sdf_scene_;
-  std::unique_ptr<SdfClipmap> sdf_clipmap_;
-  std::unique_ptr<WaterPass> water_;
-  std::unique_ptr<FluidSurfacePass> fluid_surface_;
-  std::unique_ptr<MeshPipeline> mesh_pipeline_;
-  std::unique_ptr<PostPass> post_;
-  std::unique_ptr<UiBlurPass>
+  base::UniquePointer<SdfScene> sdf_scene_;
+  base::UniquePointer<SdfClipmap> sdf_clipmap_;
+  base::UniquePointer<WaterPass> water_;
+  base::UniquePointer<FluidSurfacePass> fluid_surface_;
+  base::UniquePointer<MeshPipeline> mesh_pipeline_;
+  base::UniquePointer<PostPass> post_;
+  base::UniquePointer<UiBlurPass>
       ui_blur_; // frosted-glass backdrop blur for the UI
   base::UnorderedMap<u64, GpuMesh> meshes_;
   FrameResources frames_[kFramesInFlight];
@@ -839,11 +840,11 @@ private:
   BindingSetHandle env_scene_sets_[kFramesInFlight];
   BindingSetHandle env_transparent_sets_[kFramesInFlight];
   BindingSetHandle env_prepass_sets_[kFramesInFlight]; // dummies + ocean maps
-  std::unique_ptr<Upscaler> upscaler_;
+  base::UniquePointer<Upscaler> upscaler_;
   // FSR3 frame generation (RX_FRAMEGEN): lazily created when the FSR3
   // upscaler is active (its dilated guides are reused); the present-rate
   // counters feed the periodic log line.
-  std::unique_ptr<FrameGenerator> framegen_;
+  base::UniquePointer<FrameGenerator> framegen_;
   bool framegen_attempted_ = false;
   bool framegen_was_active_ = false;
   bool fg_active_frame_ =
@@ -869,7 +870,7 @@ private:
   // Allocates capture_image_ at the swapchain's format/extent on first use.
   // False if the image cannot be created, so the caller skips the frame.
   bool EnsureCaptureImage();
-  std::unique_ptr<RayTracingContext> raytracing_;
+  base::UniquePointer<RayTracingContext> raytracing_;
   // Compute skinning + refittable per-actor BLASes for skinned draws that carry
   // a DrawItem::rt_skin handle. Inert (no pipeline) without ray tracing.
   SkinnedRayTracing skinned_rt_;
@@ -1045,18 +1046,18 @@ private:
   GpuImage pick_depth_image_; // D32, render resolution
   u32 pick_image_w_ = 0, pick_image_h_ = 0;
 
-  void WriteBackbufferPng(const std::string &path);
+  void WriteBackbufferPng(const base::String &path);
   void WriteScreenshot();
   void DumpFgImage(const GpuImage &image, ResourceState state, bool bgra,
                    const char *path);
   void WriteHdr(); // reads back the captured linear hdr buffer to a .hdr file
 
-  std::string screenshot_path_;
+  base::String screenshot_path_;
   f64 screenshot_at_ = -1; // seconds; <0 means immediately when armed
 
   // Frame-burst capture (RX_SEQ=prefix:startsec:count[:stride]) for stitching
   // an animation clip from the inbuilt framebuffer capture.
-  std::string seq_prefix_;
+  base::String seq_prefix_;
   f64 seq_at_ = -1;
   int seq_count_ = 0;
   int seq_written_ = 0;
@@ -1064,7 +1065,7 @@ private:
   int seq_frame_ctr_ = 0;
 
   // Linear-hdr frame export (radiance .hdr). RX_HDR=<path>[:seconds].
-  std::string hdr_path_;
+  base::String hdr_path_;
   f64 hdr_at_ = -1;
   bool hdr_pending_ =
       false; // the copy pass ran this frame; read it back after submit

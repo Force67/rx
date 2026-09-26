@@ -1,6 +1,6 @@
 #include "script/script_symbols.h"
 
-#include <cassert>
+#include "base/check.h"
 
 namespace rx::script {
 
@@ -9,11 +9,10 @@ ScriptSymbols::ScriptSymbols() = default;
 StrId ScriptSymbols::Intern(ScriptStringView text) {
   const StrId id = HashStr(text);
   const u64 key = static_cast<u64>(id);
-  auto it = table_.find(key);
-  if (it != table_.end()) {
+  if (const ScriptStringView* known = table_.find(key)) {
     // Same id must mean same bytes; a mismatch is a hash collision we refuse to
     // silently alias.
-    assert(it->second.view() == text.view() && "StrId collision between symbols");
+    BASE_DCHECK(known->view() == text.view(), "StrId collision between symbols");
     return id;
   }
   // Store canonical, null-terminated bytes in the grow-only arena and map the id
@@ -24,12 +23,12 @@ StrId ScriptSymbols::Intern(ScriptStringView text) {
 }
 
 ScriptStringView ScriptSymbols::Resolve(StrId id) const {
-  auto it = table_.find(static_cast<u64>(id));
-  return it == table_.end() ? ScriptStringView{} : it->second;
+  const ScriptStringView* found = table_.find(static_cast<u64>(id));
+  return found ? *found : ScriptStringView{};
 }
 
 bool ScriptSymbols::Has(StrId id) const {
-  return table_.find(static_cast<u64>(id)) != table_.end();
+  return table_.contains(static_cast<u64>(id));
 }
 
 }  // namespace rx::script

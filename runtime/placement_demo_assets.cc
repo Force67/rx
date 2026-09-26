@@ -1,9 +1,10 @@
 #include "placement_demo_assets.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
 #include "core/math.h"
+#include "core/scalar.h"
 
 namespace rx {
 namespace {
@@ -41,7 +42,7 @@ u32 PushVertex(asset::MeshLod* lod, const Vec3& p, const Vec3& n) {
   v.normal[2] = n.z;
   // A stable tangent roughly perpendicular to the normal keeps the tangent
   // frame finite for normal-mapped materials; exact orientation is unimportant.
-  Vec3 t = std::abs(n.y) < 0.99f ? Normalize(Cross(Vec3{0, 1, 0}, n)) : Vec3{1, 0, 0};
+  Vec3 t = ::abs(n.y) < 0.99f ? Normalize(Cross(Vec3{0, 1, 0}, n)) : Vec3{1, 0, 0};
   v.tangent[0] = t.x;
   v.tangent[1] = t.y;
   v.tangent[2] = t.z;
@@ -55,7 +56,7 @@ u32 PushVertex(asset::MeshLod* lod, const Vec3& p, const Vec3& n) {
 
 // An orthonormal basis (t, b) spanning the plane perpendicular to axis `d`.
 void Basis(const Vec3& d, Vec3* t, Vec3* b) {
-  Vec3 up = std::abs(d.y) < 0.99f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
+  Vec3 up = ::abs(d.y) < 0.99f ? Vec3{0, 1, 0} : Vec3{1, 0, 0};
   *t = Normalize(Cross(up, d));
   *b = Cross(d, *t);
 }
@@ -71,7 +72,7 @@ void AddTube(asset::MeshLod* lod, const Vec3& p0, f32 r0, const Vec3& p1, f32 r1
   u32 base = static_cast<u32>(lod->vertices.size());
   for (u32 k = 0; k < sides; ++k) {
     f32 a = kTau * static_cast<f32>(k) / static_cast<f32>(sides);
-    Vec3 radial = t * std::cos(a) + b * std::sin(a);
+    Vec3 radial = t * ::cos(a) + b * ::sin(a);
     PushVertex(lod, p0 + radial * r0, radial);
     PushVertex(lod, p1 + radial * r1, radial);
   }
@@ -92,8 +93,8 @@ void AddCone(asset::MeshLod* lod, const Vec3& base_center, f32 radius, f32 heigh
   for (u32 k = 0; k < sides; ++k) {
     f32 a0 = kTau * static_cast<f32>(k) / static_cast<f32>(sides);
     f32 a1 = kTau * static_cast<f32>(k + 1) / static_cast<f32>(sides);
-    Vec3 p0 = base_center + Vec3{std::cos(a0) * radius, 0, std::sin(a0) * radius};
-    Vec3 p1 = base_center + Vec3{std::cos(a1) * radius, 0, std::sin(a1) * radius};
+    Vec3 p0 = base_center + Vec3{::cos(a0) * radius, 0, ::sin(a0) * radius};
+    Vec3 p1 = base_center + Vec3{::cos(a1) * radius, 0, ::sin(a1) * radius};
     Vec3 n = Normalize(Cross(p1 - p0, apex - p0));
     u32 i0 = PushVertex(lod, p0, n);
     u32 i1 = PushVertex(lod, p1, n);
@@ -112,10 +113,10 @@ void AddEllipsoid(asset::MeshLod* lod, const Vec3& center, const Vec3& scale, u3
   u32 base = static_cast<u32>(lod->vertices.size());
   for (u32 y = 0; y <= rings; ++y) {
     f32 phi = kPi * static_cast<f32>(y) / static_cast<f32>(rings);
-    f32 sp = std::sin(phi), cp = std::cos(phi);
+    f32 sp = ::sin(phi), cp = ::cos(phi);
     for (u32 x = 0; x <= segments; ++x) {
       f32 theta = kTau * static_cast<f32>(x) / static_cast<f32>(segments);
-      Vec3 u{sp * std::cos(theta), cp, sp * std::sin(theta)};
+      Vec3 u{sp * ::cos(theta), cp, sp * ::sin(theta)};
       Vec3 p{center.x + u.x * scale.x, center.y + u.y * scale.y, center.z + u.z * scale.z};
       // Ellipsoid surface normal: unit-sphere normal divided by the scale.
       Vec3 n = Normalize(Vec3{u.x / scale.x, u.y / scale.y, u.z / scale.z});
@@ -207,18 +208,18 @@ void Finalize(asset::Mesh* mesh, asset::AssetId id) {
   const asset::MeshLod& lod = mesh->lods[0];
   Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
   for (const asset::Vertex& v : lod.vertices) {
-    lo.x = std::min(lo.x, v.position[0]);
-    lo.y = std::min(lo.y, v.position[1]);
-    lo.z = std::min(lo.z, v.position[2]);
-    hi.x = std::max(hi.x, v.position[0]);
-    hi.y = std::max(hi.y, v.position[1]);
-    hi.z = std::max(hi.z, v.position[2]);
+    lo.x = rx::Min(lo.x, v.position[0]);
+    lo.y = rx::Min(lo.y, v.position[1]);
+    lo.z = rx::Min(lo.z, v.position[2]);
+    hi.x = rx::Max(hi.x, v.position[0]);
+    hi.y = rx::Max(hi.y, v.position[1]);
+    hi.z = rx::Max(hi.z, v.position[2]);
   }
   Vec3 center = (lo + hi) * 0.5f;
   f32 r = 0;
   for (const asset::Vertex& v : lod.vertices) {
     Vec3 p{v.position[0], v.position[1], v.position[2]};
-    r = std::max(r, Length(p - center));
+    r = rx::Max(r, Length(p - center));
   }
   mesh->bounds_center[0] = center.x;
   mesh->bounds_center[1] = center.y;
@@ -334,10 +335,10 @@ asset::Mesh MakeRock(f32 radius, u32 seed, u64 material, asset::AssetId id) {
 
   for (u32 y = 0; y <= rings; ++y) {
     f32 phi = kPi * static_cast<f32>(y) / static_cast<f32>(rings);
-    f32 sp = std::sin(phi), cp = std::cos(phi);
+    f32 sp = ::sin(phi), cp = ::cos(phi);
     for (u32 x = 0; x <= segments; ++x) {
       f32 theta = kTau * static_cast<f32>(x) / static_cast<f32>(segments);
-      Vec3 u{sp * std::cos(theta), cp, sp * std::sin(theta)};
+      Vec3 u{sp * ::cos(theta), cp, sp * ::sin(theta)};
       f32 lump;
       if (y == 0) {
         lump = pole_top;
@@ -361,7 +362,7 @@ asset::Mesh MakeRock(f32 radius, u32 seed, u64 material, asset::AssetId id) {
   }
   // Lift so the lowest point sits at y = 0 (rests on the ground).
   f32 min_y = 1e30f;
-  for (const asset::Vertex& v : lod.vertices) min_y = std::min(min_y, v.position[1]);
+  for (const asset::Vertex& v : lod.vertices) min_y = rx::Min(min_y, v.position[1]);
   for (asset::Vertex& v : lod.vertices) v.position[1] -= min_y;
 
   RecomputeNormals(&lod, vbegin, static_cast<u32>(lod.vertices.size()), ibegin,
@@ -382,7 +383,7 @@ asset::Mesh MakeGrassTuft(f32 height, u64 material, asset::AssetId id) {
   for (u32 i = 0; i < kBlades; ++i) {
     // Deterministic per-blade angle, height and lean.
     f32 angle = kTau * (static_cast<f32>(i) / kBlades) + Hash11(i * 31u + 1u) * 0.4f;
-    Vec3 dir{std::cos(angle), 0, std::sin(angle)};
+    Vec3 dir{::cos(angle), 0, ::sin(angle)};
     Vec3 base{Hash11(i * 7u + 3u) * width * 0.3f, 0, Hash11(i * 13u + 5u) * width * 0.3f};
     f32 h = height * (0.7f + 0.3f * Hash01(i * 17u + 9u));
     Vec3 lean{Hash11(i * 23u + 2u) * height * 0.25f, 0, Hash11(i * 29u + 4u) * height * 0.25f};
@@ -411,7 +412,7 @@ asset::Mesh MakeDeadTree(f32 height, u64 material, asset::AssetId id) {
     f32 f = static_cast<f32>(b) / kBranches;
     f32 y = height * (0.5f + 0.32f * f);
     f32 angle = kTau * f + Hash11(static_cast<u32>(b) * 41u + 7u) * 0.5f;
-    Vec3 dir = Normalize(Vec3{std::cos(angle), 0.8f, std::sin(angle)});
+    Vec3 dir = Normalize(Vec3{::cos(angle), 0.8f, ::sin(angle)});
     f32 len = height * (0.28f - 0.06f * f);
     Vec3 root{0, y, 0};
     f32 r = trunk_r * (0.55f - 0.12f * f);

@@ -18,8 +18,8 @@
 
 #include <base/containers/vector.h>
 
-#include <functional>
 
+#include "base/functional/function.h"
 #include "core/export.h"
 #include "core/math.h" // Vec2 (weather map XZ offset), Vec3
 #include "core/types.h"
@@ -124,7 +124,7 @@ class RX_WEATHER_EXPORT WeatherSystem {
 public:
   // Optional ground-height sampler: lightning strikes ask it for the ground y
   // at a world XZ. Defaults to the y=0 plane.
-  using GroundHeightFn = std::function<f32(f32 x, f32 z)>;
+  using GroundHeightFn = base::Function<f32(f32 x, f32 z)>;
 
   explicit WeatherSystem(u32 rng_seed = 1);
 

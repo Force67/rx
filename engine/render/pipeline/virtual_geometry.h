@@ -30,9 +30,9 @@
 // without 64-bit buffer atomics; inert without mesh shaders. Cluster
 // pages/streaming are out of scope: the whole DAG stays resident.
 
-#include <span>
 
 #include "asset/mesh.h"
+#include "base/containers/span.h"
 #include "core/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
@@ -70,7 +70,7 @@ class VirtualGeometryPass {
   // World transforms drawn next frame; empty keeps a single identity instance.
   // Mirrored (negative determinant) transforms are dropped with a warning: the
   // cluster rasterizers cull by winding and cannot flip it per instance.
-  void SetInstances(std::span<const Mat4> transforms);
+  void SetInstances(base::Span<const Mat4> transforms);
   // Albedo the resolve drapes over the mesh by planar world-xz projection
   // (uv = world.xz * world_to_uv + 0.5): rgba_mips is a full RGBA8 mip chain,
   // size x size at mip 0, levels concatenated. The pass owns the upload.

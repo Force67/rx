@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_WATER_H_
 #define RX_RENDER_WATER_H_
 
-#include <memory>
 
+#include "base/memory/unique_pointer.h"
 #include "render/core/bindless.h"
 #include "render/core/render_graph.h"
 #include "render/geometry/adaptive_water.h"
@@ -18,7 +18,7 @@ class WaterPass {
  public:
   // Set layouts mirror the water.ps bindings: 0 mesh globals (+tlas),
   // 1 material, 2 environment, 3 bindless, 4 the opaque snapshot.
-  static std::unique_ptr<WaterPass> Create(Device& device, Format color_format,
+  static base::UniquePointer<WaterPass> Create(Device& device, Format color_format,
                                            Format motion_format, Format depth_format,
                                            BindingLayoutHandle globals_layout,
                                            BindingLayoutHandle material_layout,

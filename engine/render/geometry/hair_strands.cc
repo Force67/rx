@@ -1,10 +1,13 @@
 #include "render/geometry/hair_strands.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/hair_dom_ps_hlsl.h"
 #include "shaders/hair_ps_hlsl.h"
 #include "shaders/hair_vs_hlsl.h"
@@ -179,7 +182,7 @@ void HairStrands::WriteGroomMaterial(Groom& g) {
   HairTierCaps caps = HairTierApply(g.tier, hair);
   if (!depth_pipeline_ || !dom_pipeline_) caps.transmittance_volume = false;
   GroomMaterial m;
-  std::memcpy(m.sigma_a, hair.sigma_a, sizeof(f32) * 3);
+  base::MemCopy(m.sigma_a, hair.sigma_a, sizeof(f32) * 3);
   m.beta_m = hair.beta_m;
   m.beta_n = hair.beta_n;
   m.alpha = hair.alpha;
@@ -190,7 +193,7 @@ void HairStrands::WriteGroomMaterial(Groom& g) {
   m.caps = static_cast<f32>(PackCaps(caps) |
                             (hair.color_mode == HairColorMode::kAuthored ? kCapAuthoredColor
                                                                         : 0u));
-  std::memcpy(g.material.mapped, &m, sizeof(m));
+  base::MemCopy(g.material.mapped, &m, sizeof(m));
 }
 
 void HairStrands::SetGroomHair(u32 id, const HairSurfaceParameters& params) {
@@ -214,8 +217,8 @@ bool HairStrands::WorldBounds(Vec3* lo, Vec3* hi) const {
   for (const Groom& g : grooms_) {
     if (!g.alive) continue;
     for (const HairPoint& p : g.host_points) {
-      mn = {std::min(mn.x, p.pos[0]), std::min(mn.y, p.pos[1]), std::min(mn.z, p.pos[2])};
-      mx = {std::max(mx.x, p.pos[0]), std::max(mx.y, p.pos[1]), std::max(mx.z, p.pos[2])};
+      mn = {rx::Min(mn.x, p.pos[0]), rx::Min(mn.y, p.pos[1]), rx::Min(mn.z, p.pos[2])};
+      mx = {rx::Max(mx.x, p.pos[0]), rx::Max(mx.y, p.pos[1]), rx::Max(mx.z, p.pos[2])};
       any = true;
     }
   }
@@ -291,7 +294,7 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
   Groom g;
   g.host_points.resize(static_cast<size_t>(n) * kPointsPerStrand);
   g.local_points.resize(static_cast<size_t>(n) * kPointsPerStrand * 3);
-  std::memcpy(g.local_points.data(), data.points.data(),
+  base::MemCopy(g.local_points.data(), data.points.data(),
               g.local_points.size() * sizeof(f32));
   base::Vector<f32> host_colors;
   host_colors.resize(static_cast<size_t>(n) * 4);
@@ -341,7 +344,7 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
       }
       return 0;
     }
-    std::memcpy(g.points[i].mapped, g.host_points.data(), points_bytes);
+    base::MemCopy(g.points[i].mapped, g.host_points.data(), points_bytes);
   }
   g.colors = device.CreateBufferWithData(
       Span(host_colors.data(), host_colors.size() * sizeof(f32)), kBufferUsageStorage);
@@ -362,7 +365,7 @@ u32 HairStrands::Upload(Device& device, const GroomData& data, const GroomParams
   g.hair = HairPresetParams(HairPreset::kBrown);
   g.id = next_id_++;
   g.alive = true;
-  grooms_.push_back(std::move(g));
+  grooms_.push_back(base::move(g));
   WriteGroomMaterial(grooms_.back());
   RX_INFO("hair: groom {} uploaded, {} guides x{} children, {} ribbon tris", grooms_.back().id, n,
            children, grooms_.back().index_count / 3);
@@ -398,7 +401,7 @@ void HairStrands::SetGroomPoints(u32 id, const f32* positions, u32 count) {
   Groom* g = Find(id);
   if (!g || !positions) return;
   const size_t nodes =
-      std::min<size_t>(static_cast<size_t>(count) / 3, g->host_points.size());
+      rx::Min<size_t>(static_cast<size_t>(count) / 3, g->host_points.size());
   for (size_t i = 0; i < nodes; ++i) {
     HairPoint& hp = g->host_points[i];
     hp.prev[0] = hp.pos[0];
@@ -448,9 +451,9 @@ void HairStrands::SeedCap(Device& device, const Vec3& head_center, f32 head_radi
   for (u32 s = 0; s < strand_count; ++s) {
     f32 t = (static_cast<f32>(s) + 0.5f) / strand_count;
     f32 y = 0.45f + 0.55f * t;
-    f32 r = std::sqrt(std::max(0.0f, 1.0f - y * y));
+    f32 r = ::sqrt(rx::Max(0.0f, 1.0f - y * y));
     f32 a = golden * static_cast<f32>(s);
-    Vec3 nrm{r * std::cos(a), y, r * std::sin(a)};
+    Vec3 nrm{r * ::cos(a), y, r * ::sin(a)};
     Vec3 root = nrm * head_radius;  // local: scalp at origin
     for (u32 i = 0; i < kPointsPerStrand; ++i) {
       Vec3 p = root + nrm * (segment * static_cast<f32>(i));
@@ -510,7 +513,7 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
     idle.ambient[2] = frame.ambient.z;
     idle.ambient[3] = frame.shadow_density;
     idle.debug[0] = static_cast<f32>(frame.debug_view);
-    std::memcpy(volume_params_[volume_slot_].mapped, &idle, sizeof(idle));
+    base::MemCopy(volume_params_[volume_slot_].mapped, &idle, sizeof(idle));
   }
   if (!active() || !frame.transmittance || !depth_pipeline_ || !dom_pipeline_ || !device_) return;
 
@@ -523,13 +526,13 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
   const Vec3 centre{(lo.x + hi.x) * 0.5f, (lo.y + hi.y) * 0.5f, (lo.z + hi.z) * 0.5f};
   const Vec3 extent_v{hi.x - lo.x, hi.y - lo.y, hi.z - lo.z};
   const f32 radius =
-      0.5f * std::sqrt(extent_v.x * extent_v.x + extent_v.y * extent_v.y +
+      0.5f * ::sqrt(extent_v.x * extent_v.x + extent_v.y * extent_v.y +
                        extent_v.z * extent_v.z) +
       0.02f;
   const Vec3 dir = Normalize(frame.sun_direction);
   const Vec3 eye{centre.x - dir.x * (radius * 2.0f), centre.y - dir.y * (radius * 2.0f),
                  centre.z - dir.z * (radius * 2.0f)};
-  const Vec3 up_ref = std::abs(dir.y) > 0.99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
+  const Vec3 up_ref = ::abs(dir.y) > 0.99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
   const f32 depth_range = radius * 4.0f;
   const Mat4 light_vp = Orthographic(-radius, radius, -radius, radius, 0.0f, depth_range) *
                         LookAt(eye, centre, up_ref);
@@ -549,14 +552,14 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
     // needs it and it is a property of the volume, not of a groom.
     params.ambient[3] = frame.shadow_density;
     params.debug[0] = static_cast<f32>(frame.debug_view);
-    std::memcpy(volume_params_[slot].mapped, &params, sizeof(params));
+    base::MemCopy(volume_params_[slot].mapped, &params, sizeof(params));
   }
 
   // Publish this frame's simulated positions before either pass reads them.
   const u32 slot_bit = 1u << slot;
   for (Groom& g : grooms_) {
     if (!g.alive || !(g.stale & slot_bit)) continue;
-    std::memcpy(g.points[slot].mapped, g.host_points.data(),
+    base::MemCopy(g.points[slot].mapped, g.host_points.data(),
                 g.host_points.size() * sizeof(HairPoint));
     g.stale &= ~slot_bit;
   }
@@ -621,7 +624,7 @@ void HairStrands::AddTransmittanceToGraph(RenderGraph& graph, const Frame& frame
       },
       [this, layers, res, record_grooms](PassContext& ctx) {
         ColorAttachment att{.view = ctx.graph->image(layers).view, .load = LoadOp::kClear};
-        ctx.cmd->BeginRendering({.extent = res, .colors = {&att, 1}});
+        ctx.cmd->BeginRendering({.extent = res, .colors = base::Span(&att, 1)});
         ctx.cmd->BindPipeline(dom_pipeline_);
         record_grooms(ctx, true);
         ctx.cmd->EndRendering();
@@ -640,7 +643,7 @@ void HairStrands::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
   const u32 slot_bit = 1u << slot;
   for (Groom& g : grooms_) {
     if (!g.alive || !(g.stale & slot_bit)) continue;
-    std::memcpy(g.points[slot].mapped, g.host_points.data(),
+    base::MemCopy(g.points[slot].mapped, g.host_points.data(),
                 g.host_points.size() * sizeof(HairPoint));
     g.stale &= ~slot_bit;
   }
@@ -658,7 +661,7 @@ void HairStrands::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
       [this, color, depth, extent, frame, slot](PassContext& ctx) {
         ColorAttachment att{.view = ctx.graph->image(color).view, .load = LoadOp::kLoad};
         DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
-        ctx.cmd->BeginRendering({.extent = extent, .colors = {&att, 1}, .depth = &depth_att});
+        ctx.cmd->BeginRendering({.extent = extent, .colors = base::Span(&att, 1), .depth = &depth_att});
         ctx.cmd->BindPipeline(draw_pipeline_);
         Vec3 sun = Normalize(frame.sun_direction);
         for (Groom& g : grooms_) {

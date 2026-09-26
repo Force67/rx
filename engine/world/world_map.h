@@ -1,13 +1,11 @@
 #ifndef RX_WORLD_WORLD_MAP_H_
 #define RX_WORLD_WORLD_MAP_H_
 
-#include <span>
-#include <string>
-#include <string_view>
-
 #include <base/containers/vector.h>
 
 #include "asset/vfs.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "scene/world_streaming.h"
 #include "world/world_format.h"
@@ -39,11 +37,11 @@ class RX_WORLD_EXPORT WorldMap {
  public:
   // `index_path` is a virtual path ("world://city/city.rxworld"). Payloads are
   // read from the same directory, under the CellPayloadPath convention.
-  bool Load(const asset::Vfs& vfs, std::string_view index_path, std::string* error);
+  bool Load(const asset::Vfs& vfs, base::StringRef index_path, base::String* error);
 
   bool loaded() const { return loaded_; }
   const WorldIndexData& index() const { return index_; }
-  const std::string& payload_prefix() const { return payload_prefix_; }
+  const base::String& payload_prefix() const { return payload_prefix_; }
 
   // Reads and decodes one payload. Fails when the entry is missing, corrupt,
   // describes a different cell, domain, tier or bake than the index promised,
@@ -51,7 +49,7 @@ class RX_WORLD_EXPORT WorldMap {
   // payload that disagrees with the index it was addressed through means the
   // archive and the index came from different cooks.
   bool ReadPayload(const asset::Vfs& vfs, u64 cell, Domain domain, Tier tier,
-                   WorldCellPayload* out, std::string* error) const;
+                   WorldCellPayload* out, base::String* error) const;
 
   // Every cell this observer retains that has any payload for `domain`.
   //
@@ -73,8 +71,8 @@ class RX_WORLD_EXPORT WorldMap {
 
  private:
   WorldIndexData index_;
-  std::string payload_prefix_;
-  std::string index_path_;
+  base::String payload_prefix_;
+  base::String index_path_;
   bool loaded_ = false;
 };
 

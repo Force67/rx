@@ -3,11 +3,12 @@
 
 // Compiled only when the transport is available (RX_NET_HAS_ZETANET).
 
-#include <cstddef>
+#include <stddef.h>
 
 #include <znet/z_client.h>
 #include <znet/z_server.h>
 
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "rpc/rpc_message.h"
@@ -35,11 +36,11 @@ class RX_NET_EXPORT RpcServerChannel {
   // Sends a call to one client. Returns false if the encoded call exceeds the
   // single-datagram limit (the caller should split its payload).
   bool EmitToClient(u32 peer, const rpc::RpcCall& call);
-  bool EmitToClient(u32 peer, std::string name, rpc::RpcArgs args);
+  bool EmitToClient(u32 peer, base::String name, rpc::RpcArgs args);
 
   // Sends a call to every connected client.
   bool Broadcast(const rpc::RpcCall& call);
-  bool Broadcast(std::string name, rpc::RpcArgs args);
+  bool Broadcast(base::String name, rpc::RpcArgs args);
 
  private:
   bool Send(u32 destination, const rpc::RpcCall& call);
@@ -61,7 +62,7 @@ class RX_NET_EXPORT RpcClientChannel {
   // Sends a call to the host. Returns false if the encoded call exceeds the
   // single-datagram limit.
   bool EmitToServer(const rpc::RpcCall& call);
-  bool EmitToServer(std::string name, rpc::RpcArgs args);
+  bool EmitToServer(base::String name, rpc::RpcArgs args);
 
  private:
   tx::network::ZClient& client_;

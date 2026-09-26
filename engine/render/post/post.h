@@ -1,11 +1,11 @@
 #ifndef RX_RENDER_POST_H_
 #define RX_RENDER_POST_H_
 
-#include <memory>
-#include <string>
 
 #include <base/containers/vector.h>
 
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
 #include "render/core/settings.h"
@@ -18,7 +18,7 @@ namespace rx::render {
 // sampler until a real upscaler owns it.
 class PostPass {
  public:
-  static std::unique_ptr<PostPass> Create(Device& device, Format output_format);
+  static base::UniquePointer<PostPass> Create(Device& device, Format output_format);
   ~PostPass();
 
   PostPass(const PostPass&) = delete;
@@ -49,7 +49,7 @@ class PostPass {
   // Loads a Resolve/Adobe .cube 3D lut from disk, resampled into the strip lut.
   // Leaves the grade marked kCustom so SetGrade does not bake over it. Returns
   // false (and keeps the current lut) on a parse or read error.
-  bool LoadCubeLut(const std::string& path);
+  bool LoadCubeLut(const base::String& path);
 
   // bloom/flare may be the input view when bloom is off (still bound, not
   // read; flare_intensity is zeroed alongside). `flare` is the tight 1/4-res

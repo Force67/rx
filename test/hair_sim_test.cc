@@ -3,8 +3,8 @@
 // a moving head transform, and asserts the hairstyle constraints hold: nodes
 // stay finite, pinned nodes (roots and the ponytail tie) track the transform,
 // braid strands stay woven, and no node ends up inside the head sphere.
-#include <cmath>
-#include <cstdio>
+#include <math.h>
+#include <stdio.h>
 
 #include <base/containers/vector.h>
 
@@ -19,7 +19,7 @@ namespace {
 constexpr u32 kPointsPerStrand = render::kGroomPointsPerStrand;
 
 int Fail(const char* what) {
-  std::fprintf(stderr, "hair_sim_test FAIL: %s\n", what);
+  ::fprintf(stderr, "hair_sim_test FAIL: %s\n", what);
   return 1;
 }
 
@@ -68,8 +68,8 @@ int CheckGroom(physics::PhysicsWorld& world, Groom& g, const Mat4& transform,
     return Fail("GetStrandGroomPositions");
   }
   for (u32 i = 0; i < count; ++i) {
-    if (!std::isfinite(g.positions[i])) {
-      std::fprintf(stderr, "  groom %s\n", name);
+    if (!::isfinite(g.positions[i])) {
+      ::fprintf(stderr, "  groom %s\n", name);
       return Fail("non-finite node position");
     }
   }
@@ -82,13 +82,13 @@ int CheckGroom(physics::PhysicsWorld& world, Groom& g, const Mat4& transform,
   };
   for (u32 s = 0; s < g.data.guide_count; ++s) {
     if (!check_pin(s, 0)) {
-      std::fprintf(stderr, "  groom %s strand %u\n", name, s);
+      ::fprintf(stderr, "  groom %s strand %u\n", name, s);
       return Fail("root not pinned");
     }
   }
   for (size_t i = 0; i + 1 < g.data.pins.size(); i += 2) {
     if (!check_pin(g.data.pins[i], g.data.pins[i + 1])) {
-      std::fprintf(stderr, "  groom %s pin %zu\n", name, i / 2);
+      ::fprintf(stderr, "  groom %s pin %zu\n", name, i / 2);
       return Fail("style pin not held");
     }
   }
@@ -103,7 +103,7 @@ int CheckGroom(physics::PhysicsWorld& world, Groom& g, const Mat4& transform,
     Vec3 rb{g.data.points[ib], g.data.points[ib + 1], g.data.points[ib + 2]};
     f32 rest = Length(ra - rb);
     if (Length(a - b) > rest + 0.01f) {
-      std::fprintf(stderr, "  groom %s bind %zu: %.4f vs rest %.4f\n", name, i / 4,
+      ::fprintf(stderr, "  groom %s bind %zu: %.4f vs rest %.4f\n", name, i / 4,
                    Length(a - b), rest);
       return Fail("bind did not hold");
     }
@@ -115,7 +115,7 @@ int CheckGroom(physics::PhysicsWorld& world, Groom& g, const Mat4& transform,
     for (u32 k = 1; k < kPointsPerStrand; ++k) {
       f32 d = Length(NodeAt(g.positions, s, k) - head_center);
       if (d < g.head.radius * 0.85f) {
-        std::fprintf(stderr, "  groom %s strand %u node %u: %.4f into r=%.4f\n", name, s, k, d,
+        ::fprintf(stderr, "  groom %s strand %u node %u: %.4f into r=%.4f\n", name, s, k, d,
                      g.head.radius);
         return Fail("node inside the head sphere");
       }
@@ -164,7 +164,7 @@ int main() {
   {
     Vec3 root = NodeAt(braid.positions, 0, 0);
     Vec3 tip = NodeAt(braid.positions, 0, kPointsPerStrand - 1);
-    std::printf("braid: root y=%.3f tip y=%.3f\n", root.y, tip.y);
+    ::printf("braid: root y=%.3f tip y=%.3f\n", root.y, tip.y);
     if (tip.y > root.y - 0.15f) return Fail("braid does not hang");
   }
 
@@ -173,8 +173,8 @@ int main() {
   Mat4 moving = rest_transform;
   for (int i = 1; i <= 240; ++i) {
     f32 a = static_cast<f32>(i) * dt * 3.0f;
-    moving = MakeTranslation({0.05f * std::sin(a), 1.6f + 0.03f * std::sin(a * 1.7f), 0}) *
-             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * std::sin(a)));
+    moving = MakeTranslation({0.05f * ::sin(a), 1.6f + 0.03f * ::sin(a * 1.7f), 0}) *
+             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.8f * ::sin(a)));
     world.SetStrandGroomTransform(braid.sim, moving, dt);
     world.SetStrandGroomTransform(ponytail.sim, moving, dt);
     world.Update(dt);
@@ -190,6 +190,6 @@ int main() {
 
   world.RemoveStrandGroom(braid.sim);
   world.RemoveStrandGroom(ponytail.sim);
-  std::printf("hair_sim_test OK\n");
+  ::printf("hair_sim_test OK\n");
   return 0;
 }

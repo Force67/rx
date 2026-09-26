@@ -1,17 +1,17 @@
 // rx editor entry point. Boots app::Host with the editor Application. An
 // optional .rxscene, .gltf/.glb, or .blend path may be passed to open on start;
 // otherwise a small built-in default scene keeps the editor from being empty.
-#include <string>
 
 #include <base/option.h>
 
 #include "app/host.h"
+#include "base/strings/xstring.h"
 #include "editor_app.h"
 
 int main(int argc, char** argv) {
-  std::string open_path;
+  base::String open_path;
   for (int i = 1; i < argc; ++i) {
-    std::string a = argv[i];
+    base::String a = argv[i];
     if (!a.empty() && a[0] != '-') open_path = a;
   }
 

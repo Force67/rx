@@ -1,8 +1,8 @@
 #ifndef RX_RENDER_FLUID_SURFACE_H_
 #define RX_RENDER_FLUID_SURFACE_H_
 
-#include <memory>
 
+#include "base/memory/unique_pointer.h"
 #include "render/core/render_graph.h"
 #include "render/geometry/fluid_sim.h"
 #include "render/rhi/device.h"
@@ -34,7 +34,7 @@ class FluidSurfacePass {
   // render pass stays compatible. bindless_layout is accepted for call-site
   // parity with the other transparent passes but this pass needs no bindless
   // table (IBL comes through the environment set).
-  static std::unique_ptr<FluidSurfacePass> Create(Device& device, Format color_format,
+  static base::UniquePointer<FluidSurfacePass> Create(Device& device, Format color_format,
                                                   Format motion_format, Format depth_format,
                                                   BindingLayoutHandle globals_layout,
                                                   BindingLayoutHandle environment_layout,

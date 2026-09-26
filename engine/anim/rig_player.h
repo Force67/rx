@@ -1,12 +1,12 @@
 #ifndef RX_ANIM_RIG_PLAYER_H_
 #define RX_ANIM_RIG_PLAYER_H_
 
-#include <functional>
-#include <memory>
-#include <string_view>
 
 #include "anim/anim_graph.h"
 #include "anim/pose.h"
+#include "base/functional/function.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
 #include "core/math.h"
 
 namespace rx::anim {
@@ -44,10 +44,10 @@ class RigPlayer {
   // and is valid for the duration of the callback only.
   struct Event {
     u64 name_hash = 0;
-    std::string_view name;
+    base::StringRef name;
     enum class Phase : u8 { kPoint, kEnter, kActive, kExit } phase = Phase::kPoint;
   };
-  using EventSink = std::function<void(const Event&)>;
+  using EventSink = base::Function<void(const Event&)>;
 
   // Advance the graph by dt, write this frame's local pose into `out` (sized to
   // the skeleton) and return the model-space root-translation delta for this
@@ -62,7 +62,7 @@ class RigPlayer {
 
  private:
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  base::UniquePointer<Impl> impl_;
 };
 
 }  // namespace rx::anim

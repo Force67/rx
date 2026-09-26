@@ -1,23 +1,22 @@
+#include "base/strings/xstring.h"
 #include "render/core/presets.h"
 
-#include <algorithm>
-#include <cctype>
+#include <ctype.h>
 #include <initializer_list>
 
 namespace rx::render {
 namespace {
 
-std::string Lower(std::string s) {
-  std::transform(s.begin(), s.end(), s.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+base::String Lower(base::String s) {
+  for (char& c : s) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
   return s;
 }
 
-bool IsMobileGpu(const std::string& name) {
-  const std::string n = Lower(name);
+bool IsMobileGpu(const base::String& name) {
+  const base::String n = Lower(name);
   for (const char* marker :
        {"adreno", "mali", "powervr", "apple", "xclipse", "immortalis", "vivante"}) {
-    if (n.find(marker) != std::string::npos) return true;
+    if (n.find(marker) != base::String::npos) return true;
   }
   return false;
 }
@@ -28,7 +27,7 @@ f32 Degrees(f32 deg) { return deg / 57.29578f; }
 // The renderer falls back to taa if the chosen backend is not compiled or the
 // gpu cannot run it, so this only expresses a preference.
 UpscalerKind PreferredUpscaler(const DeviceCaps& caps) {
-  return Lower(caps.adapter_name).find("nvidia") != std::string::npos ? UpscalerKind::kDlss
+  return Lower(caps.adapter_name).find("nvidia") != base::String::npos ? UpscalerKind::kDlss
                                                                       : UpscalerKind::kFsr3;
 }
 
@@ -185,7 +184,7 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
   // every non-rt tier (and forced-low on capable gpus) still casts sun shadows.
   if (!s.rt_shadows) s.shadow_maps = true;
   if (s.upscaler == UpscalerKind::kDlss &&
-      Lower(caps.adapter_name).find("nvidia") == std::string::npos) {
+      Lower(caps.adapter_name).find("nvidia") == base::String::npos) {
     s.upscaler = UpscalerKind::kFsr3;
   }
   if (s.aa_mode == AntiAliasingMode::kUpscaler && s.upscaler == UpscalerKind::kNone) {
@@ -220,8 +219,8 @@ const char* PresetName(QualityPreset preset) {
   return "auto";
 }
 
-QualityPreset ParsePreset(const std::string& name) {
-  const std::string n = Lower(name);
+QualityPreset ParsePreset(const base::String& name) {
+  const base::String n = Lower(name);
   if (n == "android" || n == "mobile") return QualityPreset::kAndroid;
   if (n == "steamdeck" || n == "deck") return QualityPreset::kSteamDeck;
   if (n == "low" || n == "lowend") return QualityPreset::kLowEnd;

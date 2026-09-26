@@ -1,7 +1,8 @@
 #include "audio/aux_synth.h"
+#include "base/algorithm.h"
+#include "core/scalar.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 namespace rx::audio {
 namespace {
@@ -18,7 +19,7 @@ constexpr f32 kWindFullSpeed = 55.0f;
 constexpr f32 kSlipFloor = 0.08f;
 
 f32 Smoothstep(f32 edge0, f32 edge1, f32 x) {
-  const f32 t = std::clamp((x - edge0) / std::max(1e-4f, edge1 - edge0), 0.0f, 1.0f);
+  const f32 t = rx::Clamp((x - edge0) / rx::Max(1e-4f, edge1 - edge0), 0.0f, 1.0f);
   return t * t * (3.0f - 2.0f * t);
 }
 
@@ -35,8 +36,8 @@ f32 SkidSynth::Noise() {
 }
 
 void SkidSynth::Render(f32* out, u32 frames, const SynthParams& p) {
-  const f32 slip = std::clamp(p.slip, 0.0f, 1.0f);
-  const f32 speed = std::max(0.0f, p.speed_mps);
+  const f32 slip = rx::Clamp(p.slip, 0.0f, 1.0f);
+  const f32 speed = rx::Max(0.0f, p.speed_mps);
 
   // Gate: slip opens the layer above the floor, speed scales how loud a slide of
   // a given slip is. No slip or no motion -> exactly silent.
@@ -44,17 +45,17 @@ void SkidSynth::Render(f32* out, u32 frames, const SynthParams& p) {
   const f32 speed_scale = Smoothstep(0.5f, kSkidFullSpeed, speed);
   const f32 level = slip_gate * speed_scale * 0.6f;
   if (level <= 0.0f) {
-    std::fill(out, out + frames, 0.0f);
+    base::Fill(out, out + frames, 0.0f);
     return;
   }
 
   // Band-pass centre climbs a little with speed; a fast slide squeals higher. A
   // front/rear slip bias (skid_bias, -1 rear .. +1 front) nudges it subtly (up to
   // ~12%) so a front-end wash reads a touch brighter than a rear break-away.
-  const f32 bias = std::clamp(p.skid_bias, -1.0f, 1.0f);
+  const f32 bias = rx::Clamp(p.skid_bias, -1.0f, 1.0f);
   const f32 centre_hz =
-      std::clamp((900.0f + speed * 25.0f) * (1.0f + 0.12f * bias), 300.0f, rate_ * 0.4f);
-  const f32 f = std::clamp(2.0f * std::sin(kPi * centre_hz / rate_), 0.0f, 1.0f);
+      rx::Clamp((900.0f + speed * 25.0f) * (1.0f + 0.12f * bias), 300.0f, rate_ * 0.4f);
+  const f32 f = rx::Clamp(2.0f * ::sin(kPi * centre_hz / rate_), 0.0f, 1.0f);
   const f32 q = 0.28f;  // moderate resonance: a band, not a whistle
 
   for (u32 i = 0; i < frames; ++i) {
@@ -64,8 +65,8 @@ void SkidSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     const f32 high = in - svf_low_ - q * svf_band_;
     svf_band_ += f * high;
     f32 s = svf_band_ * level;
-    s = std::tanh(s);
-    out[i] = std::isfinite(s) ? s : 0.0f;
+    s = ::tanh(s);
+    out[i] = ::isfinite(s) ? s : 0.0f;
   }
 }
 
@@ -80,19 +81,19 @@ f32 WindSynth::Noise() {
 }
 
 void WindSynth::Render(f32* out, u32 frames, const SynthParams& p) {
-  const f32 speed = std::max(0.0f, p.speed_mps);
+  const f32 speed = rx::Max(0.0f, p.speed_mps);
   // Presence grows faster than linearly so wind is a non-issue around town and
   // dominant on the motorway.
   const f32 t = Smoothstep(3.0f, kWindFullSpeed, speed);
   const f32 level = t * t * 0.5f;
   if (level <= 0.0f) {
-    std::fill(out, out + frames, 0.0f);
+    base::Fill(out, out + frames, 0.0f);
     return;
   }
 
   // Cutoff opens with speed: faster air reads brighter, not just louder.
-  const f32 cutoff = std::clamp(300.0f + speed * 55.0f, 200.0f, rate_ * 0.45f);
-  const f32 alpha = std::clamp(1.0f - std::exp(-2.0f * kPi * cutoff / rate_), 0.0f, 1.0f);
+  const f32 cutoff = rx::Clamp(300.0f + speed * 55.0f, 200.0f, rate_ * 0.45f);
+  const f32 alpha = rx::Clamp(1.0f - ::exp(-2.0f * kPi * cutoff / rate_), 0.0f, 1.0f);
 
   for (u32 i = 0; i < frames; ++i) {
     const f32 white = Noise();
@@ -101,8 +102,8 @@ void WindSynth::Render(f32* out, u32 frames, const SynthParams& p) {
     // rather than a low roar.
     const f32 band = lp_ - hp_prev_ * 0.02f;
     hp_prev_ = lp_;
-    f32 s = std::tanh(band * level);
-    out[i] = std::isfinite(s) ? s : 0.0f;
+    f32 s = ::tanh(band * level);
+    out[i] = ::isfinite(s) ? s : 0.0f;
   }
 }
 

@@ -15,9 +15,9 @@
 // whose leaf shape lives entirely in a texture's alpha channel - baking their
 // vertex colours would produce untextured blobs.
 
-#include <span>
 
 #include "asset/mesh.h"
+#include "base/containers/span.h"
 #include "core/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
@@ -56,8 +56,8 @@ class ImposterPass {
   // it by, or kNoMesh when the atlas is full or the mesh is empty. `materials`
   // is parallel to lod 0's submeshes; a short span leaves the rest untextured.
   u32 Bake(Device& device, const asset::Mesh& mesh,
-           std::span<const BakeMaterial> materials = {});
-  void SetInstances(Device& device, std::span<const Instance> instances);
+           base::Span<const BakeMaterial> materials = {});
+  void SetInstances(Device& device, base::Span<const Instance> instances);
 
   struct Frame {
     Mat4 view_proj;

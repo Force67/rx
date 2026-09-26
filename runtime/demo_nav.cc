@@ -1,9 +1,10 @@
 #include "demo_nav.h"
 
-#include <cmath>
-#include <cstdlib>
+#include <math.h>
+#include <stdlib.h>
 
 #include "asset/primitives.h"
+#include "base/containers/span.h"
 #include "core/log.h"
 #include "nav/nav_debug.h"
 #include "nav/path.h"
@@ -38,7 +39,7 @@ struct Mesa {
 };
 constexpr Mesa kMesas[] = {{18, 74, 7.0f, 5.0f}, {76, 14, 8.0f, 6.0f}};
 
-f32 RiverCenter(f32 x) { return 48.0f + 7.0f * std::sin(x * 0.07f); }
+f32 RiverCenter(f32 x) { return 48.0f + 7.0f * ::sin(x * 0.07f); }
 constexpr f32 kRiverHalfWidth = 3.2f;
 
 f32 Smoothstep(f32 t) {
@@ -68,20 +69,20 @@ NavDemo::NavDemo(EngineContext& ctx)
 NavDemo::Ground NavDemo::SampleGround(f32 x, f32 z) const {
   Ground g;
   // Rolling hills, three octaves.
-  g.height = 2.2f * std::sin(x * 0.06f) * std::cos(z * 0.05f) +
-             1.1f * std::sin(x * 0.13f + 1.7f) * std::sin(z * 0.11f + 0.6f) +
-             0.4f * std::sin(x * 0.31f) * std::cos(z * 0.29f);
+  g.height = 2.2f * ::sin(x * 0.06f) * ::cos(z * 0.05f) +
+             1.1f * ::sin(x * 0.13f + 1.7f) * ::sin(z * 0.11f + 0.6f) +
+             0.4f * ::sin(x * 0.31f) * ::cos(z * 0.29f);
 
   // Mesas: flat tops, steep unwalkable flanks (the slope check below).
   for (const Mesa& mesa : kMesas) {
     const f32 dx = x - mesa.x;
     const f32 dz = z - mesa.z;
-    const f32 d = std::sqrt(dx * dx + dz * dz);
+    const f32 d = ::sqrt(dx * dx + dz * dz);
     g.height += mesa.height * Smoothstep((mesa.radius - d) / 3.0f);
   }
 
   // The river carves a bed below the banks.
-  const f32 river_d = std::fabs(z - RiverCenter(x));
+  const f32 river_d = ::fabs(z - RiverCenter(x));
   if (river_d < kRiverHalfWidth + 1.5f) {
     const f32 t = Smoothstep((kRiverHalfWidth + 1.5f - river_d) / (kRiverHalfWidth + 1.5f));
     g.height -= 2.0f * t;
@@ -136,8 +137,8 @@ void NavDemo::BuildTerrainMesh() {
       v.tangent[3] = 1;
       v.uv[0] = x / 8.0f;
       v.uv[1] = z / 8.0f;
-      const f32 slope = std::sqrt(hx * hx + hz * hz) / 0.8f;
-      u32 tone = PackColor(0.13f + 0.04f * std::sin(x * 0.9f) * std::sin(z * 0.77f), 0.34f,
+      const f32 slope = ::sqrt(hx * hx + hz * hz) / 0.8f;
+      u32 tone = PackColor(0.13f + 0.04f * ::sin(x * 0.9f) * ::sin(z * 0.77f), 0.34f,
                            0.10f);  // grass, gently mottled
       if (g.area == kAreaRock) tone = PackColor(0.32f, 0.30f, 0.27f);
       if (g.area == kAreaWater) tone = PackColor(0.10f, 0.16f, 0.30f);
@@ -233,15 +234,15 @@ void NavDemo::BuildTerrainMesh() {
     for (int i = 0; i < 9; ++i) {
       const f32 angle = RandRange(rng, 0, 6.2831f);
       const f32 r = RandRange(rng, 0.3f, field.radius - 0.5f);
-      const f32 x = field.x + std::cos(angle) * r;
-      const f32 z = field.z + std::sin(angle) * r;
+      const f32 x = field.x + ::cos(angle) * r;
+      const f32 z = field.z + ::sin(angle) * r;
       ecs::Entity rock = ctx_.world->Create();
       scene::Transform t;
       t.position[0] = x;
       t.position[1] = SampleGround(x, z).height + 0.05f;
       t.position[2] = z;
-      t.rotation[1] = std::sin(angle * 0.5f);
-      t.rotation[3] = std::cos(angle * 0.5f);
+      t.rotation[1] = ::sin(angle * 0.5f);
+      t.rotation[3] = ::cos(angle * 0.5f);
       t.scale = RandRange(rng, 0.35f, 0.9f);
       ctx_.world->Add(rock, t);
       ctx_.world->Add(rock, scene::Renderable{boulder.id});
@@ -308,7 +309,7 @@ void NavDemo::Create() {
   BuildTerrainMesh();
   SpawnActors();
 
-  if (const char* lines_env = std::getenv("RX_NAV_LINES")) {
+  if (const char* lines_env = ::getenv("RX_NAV_LINES")) {
     draw_lines_ = lines_env[0] != '0';
   }
 
@@ -383,7 +384,7 @@ void NavDemo::Emit(f32 dt, render::FrameView& view) {
         nav::AppendAgentLines(mesh_, {t.position[0], t.position[1], t.position[2]}, agent,
                               &lines_);
       });
-  view.debug_lines = std::span<const render::DebugLine>(lines_.begin(), lines_.size());
+  view.debug_lines = base::Span<const render::DebugLine>(lines_.begin(), lines_.size());
 }
 
 }  // namespace rx

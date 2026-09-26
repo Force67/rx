@@ -1,12 +1,14 @@
 #include "render/pipeline/meshlet.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <utility>
-#include <vector>
+#include <math.h>
+#include <string.h>
 
+#include "base/algorithm.h"
+#include "base/containers/pair.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/rhi/device.h"
 #include "shaders/meshlet_ms_hlsl.h"
 #include "shaders/meshlet_ps_hlsl.h"
@@ -68,7 +70,7 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
     f32 radius = 0.0f;
     for (u32 i = 0; i < local_count; ++i) {
       Vec3 d = P(local_global[i]) - center;
-      radius = std::max(radius, std::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
+      radius = rx::Max(radius, ::sqrt(d.x * d.x + d.y * d.y + d.z * d.z));
     }
     m.center_radius[0] = center.x;
     m.center_radius[1] = center.y;
@@ -82,10 +84,10 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
       u32 packed = out.triangles[t];
       Vec3 n = Cross(P(local_global[(packed >> 8) & 0xff]) - P(local_global[packed & 0xff]),
                      P(local_global[(packed >> 16) & 0xff]) - P(local_global[packed & 0xff]));
-      f32 len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+      f32 len = ::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
       if (len > 1e-8f) axis = axis + n * (1.0f / len);
     }
-    f32 alen = std::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
+    f32 alen = ::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
     if (alen > 1e-6f) {
       axis = axis * (1.0f / alen);
       f32 min_c = 1.0f;
@@ -93,13 +95,13 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
         u32 packed = out.triangles[t];
         Vec3 n = Cross(P(local_global[(packed >> 8) & 0xff]) - P(local_global[packed & 0xff]),
                        P(local_global[(packed >> 16) & 0xff]) - P(local_global[packed & 0xff]));
-        f32 len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
-        if (len > 1e-8f) min_c = std::min(min_c, (n.x * axis.x + n.y * axis.y + n.z * axis.z) / len);
+        f32 len = ::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+        if (len > 1e-8f) min_c = rx::Min(min_c, (n.x * axis.x + n.y * axis.y + n.z * axis.z) / len);
       }
       m.cone[0] = axis.x;
       m.cone[1] = axis.y;
       m.cone[2] = axis.z;
-      m.cone[3] = min_c > 0.0f ? std::sqrt(1.0f - min_c * min_c) : 2.0f;  // 2 = never cull
+      m.cone[3] = min_c > 0.0f ? ::sqrt(1.0f - min_c * min_c) : 2.0f;  // 2 = never cull
     } else {
       m.cone[3] = 2.0f;  // degenerate, never cone-cull
     }
@@ -118,19 +120,21 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
   Vec3 lo{1e30f, 1e30f, 1e30f}, hi{-1e30f, -1e30f, -1e30f};
   for (u32 i = 0; i < vertex_count; ++i) {
     Vec3 p = P(i);
-    lo = {std::min(lo.x, p.x), std::min(lo.y, p.y), std::min(lo.z, p.z)};
-    hi = {std::max(hi.x, p.x), std::max(hi.y, p.y), std::max(hi.z, p.z)};
+    lo = {rx::Min(lo.x, p.x), rx::Min(lo.y, p.y), rx::Min(lo.z, p.z)};
+    hi = {rx::Max(hi.x, p.x), rx::Max(hi.y, p.y), rx::Max(hi.z, p.z)};
   }
-  Vec3 ext{std::max(hi.x - lo.x, 1e-6f), std::max(hi.y - lo.y, 1e-6f), std::max(hi.z - lo.z, 1e-6f)};
-  std::vector<std::pair<u32, u32>> order(tri_total);  // (morton, triangle index)
+  Vec3 ext{rx::Max(hi.x - lo.x, 1e-6f), rx::Max(hi.y - lo.y, 1e-6f), rx::Max(hi.z - lo.z, 1e-6f)};
+  base::Vector<base::Pair<u32, u32>> order(tri_total);  // (morton, triangle index)
   for (size_t t = 0; t < tri_total; ++t) {
     Vec3 c = (P(indices[t * 3]) + P(indices[t * 3 + 1]) + P(indices[t * 3 + 2])) * (1.0f / 3.0f);
-    u32 qx = static_cast<u32>(std::clamp((c.x - lo.x) / ext.x, 0.0f, 1.0f) * 1023.0f);
-    u32 qy = static_cast<u32>(std::clamp((c.y - lo.y) / ext.y, 0.0f, 1.0f) * 1023.0f);
-    u32 qz = static_cast<u32>(std::clamp((c.z - lo.z) / ext.z, 0.0f, 1.0f) * 1023.0f);
+    u32 qx = static_cast<u32>(rx::Clamp((c.x - lo.x) / ext.x, 0.0f, 1.0f) * 1023.0f);
+    u32 qy = static_cast<u32>(rx::Clamp((c.y - lo.y) / ext.y, 0.0f, 1.0f) * 1023.0f);
+    u32 qz = static_cast<u32>(rx::Clamp((c.z - lo.z) / ext.z, 0.0f, 1.0f) * 1023.0f);
     order[t] = {Morton3(qx, qy, qz), static_cast<u32>(t)};
   }
-  std::sort(order.begin(), order.end());
+  // Keys are unique (the triangle index breaks every tie), so any correct
+  // sort yields this order.
+  base::Sort(order.data(), order.data() + order.size());
 
   for (const auto& ord : order) {
     size_t i = static_cast<size_t>(ord.second) * 3;
@@ -151,13 +155,13 @@ MeshletGeometry BuildImpl(const asset::Vertex* verts, u32 vertex_count, const u3
     // This triangle's unit normal, to keep the meshlet's normal cone tight.
     Vec3 pa = P(g[0]);
     Vec3 n = Cross(P(g[1]) - pa, P(g[2]) - pa);
-    f32 nlen = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+    f32 nlen = ::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
     if (nlen > 1e-8f) n = n * (1.0f / nlen);
     // Bound the cone half-angle (~45deg from the running mean) so backface cone
     // culling stays effective; finalize early when a triangle would widen it.
     bool cone_break = false;
     if (cone_split && local_count > 0) {
-      f32 slen = std::sqrt(cone_sum.x * cone_sum.x + cone_sum.y * cone_sum.y + cone_sum.z * cone_sum.z);
+      f32 slen = ::sqrt(cone_sum.x * cone_sum.x + cone_sum.y * cone_sum.y + cone_sum.z * cone_sum.z);
       if (slen > 1e-6f && (n.x * cone_sum.x + n.y * cone_sum.y + n.z * cone_sum.z) / slen < 0.85f) {
         cone_break = true;
       }
@@ -257,7 +261,7 @@ void MeshletPass::Upload(Device& device, const asset::Mesh& mesh) {
   if (meshlet_count_ == 0) return;
 
   // The demo shader pulls a compact position+normal vertex (24 bytes).
-  std::vector<Vertex> verts;
+  base::Vector<Vertex> verts;
   verts.reserve(lod.vertices.size());
   for (const asset::Vertex& v : lod.vertices) {
     verts.push_back({v.position[0], v.position[1], v.position[2], v.normal[0], v.normal[1],
@@ -290,10 +294,10 @@ void MeshletPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
   if (counters_[slot].mapped) *static_cast<u32*>(counters_[slot].mapped) = 0;
 
   const MeshletCamera cam{view_proj};
-  std::memcpy(camera_[slot].mapped, &cam, sizeof(cam));
+  base::MemCopy(camera_[slot].mapped, &cam, sizeof(cam));
 
   MeshletPush push{};
-  std::memcpy(push.planes, planes, sizeof(push.planes));
+  base::MemCopy(push.planes, planes, sizeof(push.planes));
   push.camera[0] = camera.x;
   push.camera[1] = camera.y;
   push.camera[2] = camera.z;
@@ -311,7 +315,7 @@ void MeshletPass::AddToGraph(RenderGraph& graph, ResourceHandle color, ResourceH
         ColorAttachment color_att{.view = target.view, .load = LoadOp::kLoad};
         DepthAttachment depth_att{.view = ctx.graph->image(depth).view, .load = LoadOp::kLoad};
         ctx.cmd->BeginRendering(
-            {.extent = target.extent, .colors = {&color_att, 1}, .depth = &depth_att});
+            {.extent = target.extent, .colors = base::Span(&color_att, 1), .depth = &depth_att});
         ctx.cmd->BindPipeline(pipeline_);
         ctx.cmd->BindTransient(0, {Bind::StorageBuffer(0, meshlets_),
                                    Bind::StorageBuffer(1, meshlet_vertices_),

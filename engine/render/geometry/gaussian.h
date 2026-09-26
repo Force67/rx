@@ -1,10 +1,10 @@
 #ifndef RX_RENDER_GAUSSIAN_H_
 #define RX_RENDER_GAUSSIAN_H_
 
-#include <string>
 
 #include <base/containers/vector.h>
 
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "render/core/render_graph.h"
@@ -63,7 +63,7 @@ class GaussianSplat {
 // GaussianInstances, applying the standard activations: sigmoid opacity, exp
 // scale, sh band-0 dc color, normalized wxyz->xyzw rotation. Returns false on a
 // read/parse error. Caps at the renderer's gaussian budget (logs if truncated).
-RX_RENDER_EXPORT bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* out);
+RX_RENDER_EXPORT bool LoadGaussianPly(const base::String& path, base::Vector<GaussianInstance>* out);
 
 }  // namespace rx::render
 

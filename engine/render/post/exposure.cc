@@ -1,6 +1,6 @@
 #include "render/post/exposure.h"
 
-#include <cstring>
+#include <string.h>
 
 #include "core/log.h"
 #include "render/rhi/device.h"

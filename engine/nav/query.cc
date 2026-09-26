@@ -1,8 +1,10 @@
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "core/scalar.h"
 #include "nav/query.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
+#include <math.h>
+#include <stdint.h>
 
 namespace rx::nav {
 namespace {
@@ -26,7 +28,7 @@ struct FloodHeap {
     while (i > 0) {
       const u32 p = (i - 1) / 2;
       if (items[i].weighted >= items[p].weighted) break;
-      std::swap(items[i], items[p]);
+      base::Swap(items[i], items[p]);
       i = p;
     }
   }
@@ -43,7 +45,7 @@ struct FloodHeap {
       if (l < count && items[l].weighted < items[m].weighted) m = l;
       if (r < count && items[r].weighted < items[m].weighted) m = r;
       if (m == i) break;
-      std::swap(items[i], items[m]);
+      base::Swap(items[i], items[m]);
       i = m;
     }
     return top;
@@ -57,7 +59,7 @@ bool DiagonalAllowed(const NavMesh& mesh, CellRef from, CellRef to) {
 }  // namespace
 
 size_t EvaluatePositions(const NavMesh& mesh, const PositionQueryParams& params,
-                         std::span<PositionCandidate> candidates) {
+                         base::Span<PositionCandidate> candidates) {
   const CellRef source = mesh.ClampToWalkable(params.origin, params.clamp_radius * 2.0f);
   for (PositionCandidate& c : candidates) c.reachable = false;
   if (!source.valid() || candidates.empty()) return SIZE_MAX;
@@ -120,7 +122,7 @@ size_t EvaluatePositions(const NavMesh& mesh, const PositionQueryParams& params,
     // over the same time window", so an agent already in the river is pushed
     // toward the bank (staying put pads at water cost) instead of freezing
     // because every move would add delta.
-    const f32 pad = std::max(params.virtual_length - settled->raw, 0.0f);
+    const f32 pad = rx::Max(params.virtual_length - settled->raw, 0.0f);
     c.score = c.delta_cost + pad * (mesh.TraverseMultiplier(mesh.Area(cell)) - 1.0f);
     if (winner == SIZE_MAX || c.score < candidates[winner].score ||
         (c.score == candidates[winner].score && c.raw_length < candidates[winner].raw_length)) {

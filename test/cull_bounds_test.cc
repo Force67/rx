@@ -15,11 +15,12 @@
 // default vulkan). Skips cleanly (exit 0) when no driver is present; run under
 // vkrun for the real GPU path.
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "render/pipeline/gpu_cull.h"
 #include "render/rhi/command_list.h"
@@ -35,12 +36,12 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "cull_bounds_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "cull_bounds_test: FAIL: %s\n", message);
   ++failures;
 }
 
 int Fail(const char* message) {
-  std::fprintf(stderr, "cull_bounds_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "cull_bounds_test: FAIL: %s\n", message);
   return 1;
 }
 
@@ -70,17 +71,17 @@ Mat4 RotatedScale(f32 radians, const Vec3& scale, f32 tx) {
 
 int main() {
   DeviceDesc desc;
-  const char* rhi = std::getenv("RX_RHI");
-  desc.backend = (rhi && std::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
-  desc.enable_validation = std::getenv("RX_VALIDATION") != nullptr;
-  std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
+  const char* rhi = ::getenv("RX_RHI");
+  desc.backend = (rhi && ::strcmp(rhi, "d3d12") == 0) ? Backend::kD3D12 : Backend::kVulkan;
+  desc.enable_validation = ::getenv("RX_VALIDATION") != nullptr;
+  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
-    std::printf("cull_bounds_test: no %s driver, skipping (null backend)\n",
+    ::printf("cull_bounds_test: no %s driver, skipping (null backend)\n",
                 BackendName(desc.backend));
     return 0;
   }
-  std::printf("cull_bounds_test: device '%s'\n", device->caps().adapter_name.c_str());
+  ::printf("cull_bounds_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   // Same set layout as GpuCull::Initialize.
   PipelineHandle pipeline = device->CreateComputePipeline({
@@ -138,7 +139,7 @@ int main() {
   for (u32 i = 0; i < kInstances; ++i) cmd_data[i] = {.index_count = 3, .instance_count = 1};
   *static_cast<u32*>(counts.mapped) = 0;
   const Mat4 identity = Mat4::Identity();
-  std::memcpy(reproject.mapped, &identity, sizeof(identity));
+  base::MemCopy(reproject.mapped, &identity, sizeof(identity));
 
   CullPush push{};
   // Plane 0 is the one under test: inside is x <= 0, so an instance at x = t
@@ -148,7 +149,7 @@ int main() {
                             {0, 1, 0, 1000},
                             {0, -1, 0, 1000},
                             {0, 0, 1, 1000}};
-  std::memcpy(push.planes, planes, sizeof(planes));
+  base::MemCopy(push.planes, planes, sizeof(planes));
   push.misc[0] = kInstances;
   push.misc[1] = 1;  // frustum on
   push.misc[2] = 0;  // occlusion off: no hi-z to bind
@@ -166,7 +167,7 @@ int main() {
   const u32 kept0 = cmd_data[0].instance_count;
   const u32 kept1 = cmd_data[1].instance_count;
   const u32 kept2 = cmd_data[2].instance_count;
-  std::printf("cull_bounds_test: instanceCount = {%u, %u, %u}, visible = %u\n", kept0, kept1,
+  ::printf("cull_bounds_test: instanceCount = {%u, %u, %u}, visible = %u\n", kept0, kept1,
               kept2, *static_cast<const u32*>(counts.mapped));
 
   Check(kept0 == 1, "rotated non-uniform instance kept (column radius 4 clears the 3.4 plane)");
@@ -181,6 +182,6 @@ int main() {
   device->DestroyBuffer(counts);
   device->DestroyBuffer(reproject);
 
-  if (failures == 0) std::printf("cull_bounds_test: all checks passed\n");
+  if (failures == 0) ::printf("cull_bounds_test: all checks passed\n");
   return failures;
 }

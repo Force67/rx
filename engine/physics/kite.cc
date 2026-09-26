@@ -1,7 +1,7 @@
+#include "core/scalar.h"
 #include "physics/kite.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 namespace rx::physics {
 
@@ -14,12 +14,12 @@ f32 Clamp(f32 v, f32 lo, f32 hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 // Yaw quaternion about +Y (x,y,z,w), for spawn orientation.
 Quat YawQuat(f32 yaw_radians) {
-  return {0.0f, std::sin(yaw_radians * 0.5f), 0.0f, std::cos(yaw_radians * 0.5f)};
+  return {0.0f, ::sin(yaw_radians * 0.5f), 0.0f, ::cos(yaw_radians * 0.5f)};
 }
 
 // Guards a force/torque against NaN/Inf before it reaches the solver.
 bool Finite(const Vec3& v) {
-  return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+  return ::isfinite(v.x) && ::isfinite(v.y) && ::isfinite(v.z);
 }
 
 }  // namespace
@@ -31,10 +31,10 @@ Kite::Kite(PhysicsWorld& world, const KiteDesc& desc, const Vec3& anchor, const 
   // from the box density (density = mass / volume) so Jolt derives exactly
   // desc.mass_kg; the aero model supplies all flight forces, gravity stays
   // Jolt's (the kite is heavier-than-air, so no buoyancy exemption).
-  const Vec3 he{std::max(desc_.span_m, 0.05f) * 0.5f, std::max(desc_.height_m, 0.05f) * 0.5f,
-                std::max(desc_.thickness_m, 0.01f) * 0.5f};
-  const f32 volume = std::max(8.0f * he.x * he.y * he.z, 1e-4f);
-  const f32 density = std::max(desc_.mass_kg, 1e-3f) / volume;
+  const Vec3 he{rx::Max(desc_.span_m, 0.05f) * 0.5f, rx::Max(desc_.height_m, 0.05f) * 0.5f,
+                rx::Max(desc_.thickness_m, 0.01f) * 0.5f};
+  const f32 volume = rx::Max(8.0f * he.x * he.y * he.z, 1e-4f);
+  const f32 density = rx::Max(desc_.mass_kg, 1e-3f) / volume;
   // Spawn in a launch-ready attitude, not flat: a flat plate cannot catch the
   // wind (you prop a real kite up to launch it). Pitch the sail back about its
   // span so its belly presents to a tailwind at roughly the trim incidence, then
@@ -54,9 +54,9 @@ Kite::Kite(PhysicsWorld& world, const KiteDesc& desc, const Vec3& anchor, const 
   // "added air mass" (the air it swings) that a rigid plate ignores; this floors
   // the tensor to that effective value so the attitude PD is stable. Scales with
   // the sail so bigger kites turn more slowly.
-  const f32 s = std::max(desc_.span_m, 0.1f);
-  const f32 h = std::max(desc_.height_m, 0.1f);
-  const f32 inertia = std::max(desc_.mass_kg, 1e-3f) * 0.5f * (s * s + h * h) / 12.0f + 0.08f;
+  const f32 s = rx::Max(desc_.span_m, 0.1f);
+  const f32 h = rx::Max(desc_.height_m, 0.1f);
+  const f32 inertia = rx::Max(desc_.mass_kg, 1e-3f) * 0.5f * (s * s + h * h) / 12.0f + 0.08f;
   world_.SetBodyInertia(body_, Vec3{inertia, inertia, inertia});
   line_length_ = Clamp(desc_.line_length_m, desc_.min_line_m, desc_.max_line_m);
   state_.position = position;
@@ -90,7 +90,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
   Vec3 ambient = world_.wind();
   if (desc_.gust_amplitude_mps > 0.0f) {
     // Two-octave sinusoid: a cheap, bounded, deterministic gust. Along gust_dir.
-    const f32 g = 0.6f * std::sin(gust_time_ * 0.7f) + 0.4f * std::sin(gust_time_ * 2.3f + 1.7f);
+    const f32 g = 0.6f * ::sin(gust_time_ * 0.7f) + 0.4f * ::sin(gust_time_ * 2.3f + 1.7f);
     ambient += Normalize(desc_.gust_dir) * (desc_.gust_amplitude_mps * g);
   }
 
@@ -108,7 +108,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
   if (speed > desc_.min_airspeed_mps) {
     const f32 wn = Dot(w, sail_normal);        // signed normal component
     const Vec3 w_tan = w - sail_normal * wn;   // tangential component
-    const f32 q_area = 0.5f * kAirDensity * std::max(desc_.sail_area_m2, 1e-3f);
+    const f32 q_area = 0.5f * kAirDensity * rx::Max(desc_.sail_area_m2, 1e-3f);
     // Pressure normal force: F = q_area * cn * (w.n) * |w|, along the normal.
     // Effective CN = cn * sin(alpha), the flat-plate linear region.
     const Vec3 f_normal = sail_normal * (q_area * desc_.normal_coeff * wn * speed);
@@ -117,7 +117,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     const Vec3 f_aero = f_normal + f_tan;
     if (Finite(f_aero)) world_.AddForceAtPoint(body_, f_aero, ac_world);
     // Angle of attack (sail incidence to the wind): sin(alpha) = (w.n)/|w|.
-    const f32 alpha = std::asin(Clamp(wn / speed, -1.0f, 1.0f));
+    const f32 alpha = ::asin(Clamp(wn / speed, -1.0f, 1.0f));
     alpha_deg = alpha * kRadToDeg;
 
     // attitude trim: align the belly normal to a belly-UP target
@@ -135,7 +135,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
       wind_ref_primed_ = true;
     } else {
       constexpr f32 kAttTau = 0.35f;  // s, attitude-target smoothing time constant
-      wind_ref_ += (w - wind_ref_) * (1.0f - std::exp(-dt / kAttTau));
+      wind_ref_ += (w - wind_ref_) * (1.0f - ::exp(-dt / kAttTau));
     }
     const f32 ref_speed = Length(wind_ref_);
     if (desc_.attitude_stiffness > 0.0f && ref_speed > desc_.min_airspeed_mps) {
@@ -147,8 +147,8 @@ void Kite::Update(const KiteInput& input, f32 dt) {
       // target stays well-defined (no divide-by-zero, no snap).
       up_perp = upl > 1e-3f ? up_perp * (1.0f / upl)
                             : Normalize(sail_normal - w_hat * Dot(sail_normal, w_hat));
-      const f32 st = std::sin(desc_.trim_alpha_rad);
-      const f32 ct = std::cos(desc_.trim_alpha_rad);
+      const f32 st = ::sin(desc_.trim_alpha_rad);
+      const f32 ct = ::cos(desc_.trim_alpha_rad);
       const Vec3 n_target = w_hat * st + up_perp * ct;
       const f32 q_dyn = q_area * speed * speed;  // 0.5 rho A |w|^2
       const Vec3 align_torque = Cross(sail_normal, n_target) * (desc_.attitude_stiffness * q_dyn);
@@ -180,7 +180,7 @@ void Kite::Update(const KiteInput& input, f32 dt) {
     const f32 losd = Length(los);
     if (losd > 1e-3f) {
       const Vec3 los_dir = los * (1.0f / losd);
-      const f32 dyn = 0.5f * kAirDensity * std::max(desc_.sail_area_m2, 1e-3f) * speed * speed;
+      const f32 dyn = 0.5f * kAirDensity * rx::Max(desc_.sail_area_m2, 1e-3f) * speed * speed;
       const Vec3 steer_torque = los_dir * (steer * desc_.steer_authority * dyn);
       if (Finite(steer_torque)) world_.AddTorque(body_, steer_torque);
     }

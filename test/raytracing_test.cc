@@ -1,9 +1,10 @@
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "asset/mesh.h"
+#include "base/memory/mem_ops.h"
 #include "render/gi/raytracing.h"
 #include "render/gi/skinned_rt.h"
 #include "render/pipeline/material_system.h"
@@ -15,19 +16,19 @@ using namespace rx::render;
 
 int main() {
   DeviceDesc desc;
-  const char* backend = std::getenv("RX_RHI");
-  desc.backend = backend && std::strcmp(backend, "d3d12") == 0
+  const char* backend = ::getenv("RX_RHI");
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0
                      ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = true;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub() || !device->caps().ray_query) {
-    std::printf("raytracing_test: SKIP, ray queries unavailable\n");
+    ::printf("raytracing_test: SKIP, ray queries unavailable\n");
     return 77;
   }
   int failures = 0;
   auto check = [&](bool ok, const char* message) {
-    if (!ok) { std::printf("FAIL: %s\n", message); ++failures; }
+    if (!ok) { ::printf("FAIL: %s\n", message); ++failures; }
   };
   auto rt = RayTracingContext::Create(*device);
   if (!rt) return 1;
@@ -48,7 +49,7 @@ int main() {
     });
     device->InvalidateBuffer(readback, 0, sizeof(f32));
     f32 distance;
-    std::memcpy(&distance, readback.mapped, sizeof(distance));
+    base::MemCopy(&distance, readback.mapped, sizeof(distance));
     return distance;
   };
   check(trace(0) == -1.0f, "unbuilt slot must miss through fallback");
@@ -59,10 +60,10 @@ int main() {
   const u32 indices[3] = {0, 1, 2};
   GpuMesh mesh;
   mesh.vertices = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(vertices), sizeof(vertices)},
+      ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)),
       kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress | kBufferUsageStorage);
   mesh.indices = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(indices), sizeof(indices)},
+      ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)),
       kBufferUsageAccelBuildInput | kBufferUsageDeviceAddress | kBufferUsageStorage);
   mesh.vertex_count = mesh.index_count = 3;
   mesh.submeshes.push_back({.index_count = 3});
@@ -74,12 +75,12 @@ int main() {
     device->ImmediateSubmit([&](CommandList& cmd) { rt->BuildTlas(cmd, 0, frame, instances); });
   };
   build(0);
-  check(std::abs(trace(0) - 1.0f) < 1e-5f, "compacted triangle must hit at distance 1");
+  check(::abs(trace(0) - 1.0f) < 1e-5f, "compacted triangle must hit at distance 1");
   check(rt->ReserveTlas(0, 65), "grow built TLAS");
   check(!rt->TlasValid(0), "replacement remains invalid until built");
   check(trace(0) == -1.0f, "replacement must use fallback before build");
   build(1);
-  check(std::abs(trace(0) - 1.0f) < 1e-5f, "grown TLAS must hit after build");
+  check(::abs(trace(0) - 1.0f) < 1e-5f, "grown TLAS must hit after build");
   rt->RemoveBlasDeferred(1);
   check(trace(0) == -1.0f, "retired BLAS must invalidate TLAS");
   build(2);
@@ -100,7 +101,7 @@ int main() {
     cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelBuildWrite);
     rt->BuildTlas(cmd, 0, 4, instances);
   });
-  check(std::abs(trace(0) - 1.0f) < 1e-5f, "built skinned BLAS must hit");
+  check(::abs(trace(0) - 1.0f) < 1e-5f, "built skinned BLAS must hit");
   check(rt->ReserveSkinnedBlas(3, geometry), "reserve refit target");
   instances[0].mesh_key = 3;
   device->ImmediateSubmit([&](CommandList& cmd) {
@@ -108,18 +109,18 @@ int main() {
     cmd.MemoryBarrier(BarrierScope::kAccelBuildWrite, BarrierScope::kAccelBuildWrite);
     rt->BuildTlas(cmd, 0, 5, instances);
   });
-  check(std::abs(trace(0) - 1.0f) < 1e-5f, "refitted BLAS must hit");
+  check(::abs(trace(0) - 1.0f) < 1e-5f, "refitted BLAS must hit");
 
   rt->RemoveSkinnedBlasDeferred(2);
   rt->RemoveSkinnedBlasDeferred(3);
   auto bindless = BindlessRegistry::Create(*device);
-  auto materials = MaterialSystem::Create(*device, bindless.get());
+  auto materials = MaterialSystem::Create(*device, bindless.Get_UseOnlyIfYouKnowWhatYouareDoing());
   SkinnedRayTracing skin;
   if (!bindless || !materials || !skin.Initialize(*device)) return 1;
   asset::SkinnedVertexExtra weights[3]{};
   for (auto& weight : weights) weight.bone_weights[0] = 255;
   mesh.skinning = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(weights), sizeof(weights)}, kBufferUsageStorage);
+      ByteSpan(reinterpret_cast<const u8*>(weights), sizeof(weights)), kBufferUsageStorage);
   mesh.skinned = true;
   GpuBuffer bones = device->CreateBuffer(sizeof(Mat4), kBufferUsageStorage, true);
   if (!mesh.skinning || !bones.mapped) return 1;
@@ -130,7 +131,7 @@ int main() {
   requests.push_back({.handle = actor, .mesh_key = 7});
   auto pose = [&](f32 z, u32 frame) {
     Mat4 bone = MakeTranslation(Vec3{0, 0, z});
-    std::memcpy(bones.mapped, &bone, sizeof(bone));
+    base::MemCopy(bones.mapped, &bone, sizeof(bone));
     device->FlushBuffer(bones, 0, sizeof(bone));
     check(skin.Prepare(*device, *bindless, *materials, *rt, meshes, requests) == 1,
           "prepare posed actor");
@@ -140,7 +141,7 @@ int main() {
       skin.Record(cmd, *rt, bones);
       rt->BuildTlas(cmd, 0, frame, instances);
     });
-    check(std::abs(trace(0) - (z + 1.0f)) < 1e-5f, "ray must hit the current skinned pose");
+    check(::abs(trace(0) - (z + 1.0f)) < 1e-5f, "ray must hit the current skinned pose");
   };
   pose(1, 6);
   check(skin.previous_custom_index(actor) == SkinnedRayTracing::kInvalidIndex,
@@ -154,31 +155,31 @@ int main() {
         skin.previous_custom_index(actor) != skin.custom_index(actor),
         "second skin pose must expose the previous buffer for motion");
   base::Vector<u32> retired;
-  skin.InvalidateMesh(*device, rt.get(), 7, retired);
+  skin.InvalidateMesh(*device, rt.Get_UseOnlyIfYouKnowWhatYouareDoing(), 7, retired);
   check(!skin.active(actor) && !rt->TlasValid(0), "mesh replacement must retire posed geometry");
   device->WaitIdle();
   for (u32 index : retired) bindless->ReleaseMesh(index);
   retired.clear();
   pose(3, 8);
-  skin.Release(*device, rt.get(), actor, retired);
-  skin.Release(*device, rt.get(), actor, retired);
+  skin.Release(*device, rt.Get_UseOnlyIfYouKnowWhatYouareDoing(), actor, retired);
+  skin.Release(*device, rt.Get_UseOnlyIfYouKnowWhatYouareDoing(), actor, retired);
   const u32 reused = skin.Acquire();
   check(reused == actor && skin.Acquire() != reused, "duplicate release must not alias live actors");
   device->WaitIdle();
   for (u32 index : retired) bindless->ReleaseMesh(index);
   skin.Destroy(*device);
-  materials.reset();
-  bindless.reset();
+  materials.Reset();
+  bindless.Reset();
   device->DestroyBuffer(mesh.skinning);
   device->DestroyBuffer(bones);
 
   device->WaitIdle();
-  rt.reset();
+  rt.Reset();
   device->DestroyBuffer(mesh.vertices);
   device->DestroyBuffer(mesh.indices);
   device->DestroyBuffer(result);
   device->DestroyBuffer(readback);
   device->DestroyPipeline(pipeline);
-  std::printf("raytracing_test: %d failures\n", failures);
+  ::printf("raytracing_test: %d failures\n", failures);
   return failures ? 1 : 0;
 }

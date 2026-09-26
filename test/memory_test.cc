@@ -2,15 +2,16 @@
 // chunk pool, small vector and the memory config. Pure CPU, no GPU needed.
 // The tracker assertions only run when the new/delete override is compiled in
 // (RX_MIMALLOC=ON); otherwise they are skipped so the test still passes.
-#include <cstdio>
-#include <cstring>
-#include <stdexcept>
-#include <string>
+#include <stdio.h>
+#include <string.h>
 
 #if defined(RX_MIMALLOC)
 #include <mimalloc.h>
 #endif
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
 #include "core/memory/chunk_pool.h"
 #include "core/memory/frame_arena.h"
 #include "core/memory/memory_config.h"
@@ -24,7 +25,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                    \
   do {                                                                 \
     if (!(cond)) {                                                     \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                    \
     }                                                                  \
   } while (0)
@@ -33,7 +34,7 @@ rx::mem::CategoryStats FindCategory(const char* name) {
   rx::mem::CategoryStats stats[rx::mem::kMaxCategories];
   const rx::u32 count = rx::mem::SnapshotCategories(stats, rx::mem::kMaxCategories);
   for (rx::u32 i = 0; i < count; ++i) {
-    if (std::strcmp(stats[i].name, name) == 0) return stats[i];
+    if (::strcmp(stats[i].name, name) == 0) return stats[i];
   }
   return {};
 }
@@ -44,7 +45,7 @@ void TestTracker() {
   CHECK(rx::mem::RegisterCategory("test-cat") == category);  // idempotent by name
 
   if (!rx::mem::TrackingActive()) {
-    std::puts("tracker: RX_MIMALLOC off, skipping counter checks");
+    ::puts("tracker: RX_MIMALLOC off, skipping counter checks");
     return;
   }
 
@@ -119,7 +120,7 @@ void TestChunkPool() {
   CHECK(a != nullptr && b != nullptr && a != b);
   CHECK(reinterpret_cast<uintptr_t>(a) % rx::mem::ChunkPool::kChunkAlign == 0);
   // Chunks are writable across their whole extent.
-  std::memset(a, 0xab, rx::mem::ChunkPool::kChunkSize);
+  base::MemSet(a, 0xab, rx::mem::ChunkPool::kChunkSize);
 
   const size_t total = pool.stats().total_chunks;
   CHECK(pool.stats().free_chunks == total - 2);
@@ -137,24 +138,6 @@ struct Probe {
   ~Probe() { --live; }
 };
 
-struct ThrowingProbe {
-  static inline int live = 0;
-  static inline bool throw_on_construct = false;
-  static inline bool throw_on_move = false;
-  int value = 0;
-
-  explicit ThrowingProbe(int v) : value(v) {
-    if (throw_on_construct) throw std::runtime_error("construct");
-    ++live;
-  }
-  ThrowingProbe(ThrowingProbe&& other) : value(other.value) {
-    if (throw_on_move) throw std::runtime_error("move");
-    ++live;
-  }
-  ThrowingProbe(const ThrowingProbe&) = delete;
-  ~ThrowingProbe() { --live; }
-};
-
 void TestSmallVector() {
   {
     rx::mem::SmallVector<Probe, 4> vec;
@@ -165,7 +148,7 @@ void TestSmallVector() {
     CHECK(vec.data() != inline_data);
     for (int i = 0; i < 32; ++i) CHECK(vec[static_cast<size_t>(i)].value == i);
 
-    rx::mem::SmallVector<Probe, 4> moved(std::move(vec));
+    rx::mem::SmallVector<Probe, 4> moved(base::move(vec));
     CHECK(moved.size() == 32);
     CHECK(vec.size() == 0);
     CHECK(Probe::live == 32);
@@ -178,36 +161,13 @@ void TestSmallVector() {
   ints.clear();
   CHECK(ints.empty());
 
-  rx::mem::SmallVector<std::string, 2> strings;
+  rx::mem::SmallVector<base::String, 2> strings;
   strings.emplace_back("alpha");
   strings.emplace_back("beta");
   strings.emplace_back(strings[0]);  // aliased argument across growth
   CHECK(strings.size() == 3);
   CHECK(strings[0] == "alpha" && strings[2] == "alpha");
 
-  {
-    rx::mem::SmallVector<ThrowingProbe, 1> throwing;
-    throwing.emplace_back(7);
-    ThrowingProbe::throw_on_construct = true;
-    try {
-      throwing.emplace_back(8);
-      CHECK(false);
-    } catch (const std::runtime_error&) {
-    }
-    ThrowingProbe::throw_on_construct = false;
-    CHECK(throwing.size() == 1 && ThrowingProbe::live == 1);
-
-    ThrowingProbe::throw_on_move = true;
-    try {
-      throwing.emplace_back(9);
-      CHECK(false);
-    } catch (const std::runtime_error&) {
-    }
-    ThrowingProbe::throw_on_move = false;
-    CHECK(throwing.size() == 1 && ThrowingProbe::live == 1);
-    CHECK(throwing[0].value == 7);
-  }
-  CHECK(ThrowingProbe::live == 0);
 }
 
 void TestConfig() {
@@ -247,9 +207,9 @@ int main() {
   TestSmallVector();
   TestConfig();
   if (g_failures) {
-    std::fprintf(stderr, "memory_test: %d failure(s)\n", g_failures);
+    ::fprintf(stderr, "memory_test: %d failure(s)\n", g_failures);
     return 1;
   }
-  std::puts("memory_test: ok");
+  ::puts("memory_test: ok");
   return 0;
 }

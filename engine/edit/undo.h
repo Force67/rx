@@ -1,11 +1,10 @@
 #ifndef RX_EDIT_UNDO_H_
 #define RX_EDIT_UNDO_H_
 
-#include <memory>
-#include <string>
-#include <utility>
-#include <vector>
-
+#include "base/containers/pair.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "ecs/entity.h"
 #include "ecs/world.h"
@@ -30,11 +29,11 @@ class RX_EDIT_EXPORT UndoStack {
 public:
   // Applies `cmd` immediately, then records it (clearing the redo stack).
   // Inside a group the command is applied and buffered into the group.
-  void Push(ecs::World &world, std::unique_ptr<Command> cmd);
+  void Push(ecs::World &world, base::UniquePointer<Command> cmd);
 
   // Records an interaction that already updated its target live (for example a
   // terrain brush stroke). Undo calls Revert; redo calls Apply as usual.
-  void RecordApplied(std::unique_ptr<Command> cmd);
+  void RecordApplied(base::UniquePointer<Command> cmd);
 
   bool Undo(ecs::World &world);
   bool Redo(ecs::World &world);
@@ -58,15 +57,15 @@ public:
   size_t size() const { return undo_.size(); }
 
 private:
-  std::vector<std::unique_ptr<Command>> undo_;
-  std::vector<std::unique_ptr<Command>> redo_;
-  std::vector<std::unique_ptr<Command>> group_buffer_;
-  std::string group_label_;
+  base::Vector<base::UniquePointer<Command>> undo_;
+  base::Vector<base::UniquePointer<Command>> redo_;
+  base::Vector<base::UniquePointer<Command>> group_buffer_;
+  base::String group_label_;
   int group_depth_ = 0;
 };
 
 // Sets a single reflected field. Captures the current value for Revert.
-RX_EDIT_EXPORT std::unique_ptr<Command>
+RX_EDIT_EXPORT base::UniquePointer<Command>
 MakeSetProp(ecs::World &world, ecs::Entity entity, const ComponentDesc &comp,
             const PropDesc &prop, PropValue new_value);
 
@@ -74,30 +73,30 @@ MakeSetProp(ecs::World &world, ecs::Entity entity, const ComponentDesc &comp,
 // entity's Guid is stable across undo/redo; *out_entity (may be null) receives
 // the live handle from the initial Apply inside UndoStack::Push only; a stack
 // address is safe, later undo/redo never writes through it.
-RX_EDIT_EXPORT std::unique_ptr<Command> MakeCreateEntity(
-    std::vector<std::pair<const ComponentDesc *,
-                          std::vector<std::pair<const PropDesc *, PropValue>>>>
+RX_EDIT_EXPORT base::UniquePointer<Command> MakeCreateEntity(
+    base::Vector<base::Pair<const ComponentDesc *,
+                          base::Vector<base::Pair<const PropDesc *, PropValue>>>>
         initial,
     ecs::Entity *out_entity);
 
 // Destroys an entity; snapshots all reflected components and their props (and
 // its Guid) so Revert recreates it faithfully.
-RX_EDIT_EXPORT std::unique_ptr<Command> MakeDestroyEntity(ecs::World &world,
+RX_EDIT_EXPORT base::UniquePointer<Command> MakeDestroyEntity(ecs::World &world,
                                                           ecs::Entity entity);
 
 // Reparents an entity, preserving its world transform. An invalid new_parent
 // unparents it.
-RX_EDIT_EXPORT std::unique_ptr<Command>
+RX_EDIT_EXPORT base::UniquePointer<Command>
 MakeReparent(ecs::World &world, ecs::Entity entity, ecs::Entity new_parent);
 
 // Adds a default-constructed component (no-op if already present). Revert
 // removes it (only if this command added it).
-RX_EDIT_EXPORT std::unique_ptr<Command>
+RX_EDIT_EXPORT base::UniquePointer<Command>
 MakeAddComponent(ecs::World &world, ecs::Entity entity,
                  const ComponentDesc &comp);
 
 // Removes a component; snapshots its props so Revert restores them.
-RX_EDIT_EXPORT std::unique_ptr<Command>
+RX_EDIT_EXPORT base::UniquePointer<Command>
 MakeRemoveComponent(ecs::World &world, ecs::Entity entity,
                     const ComponentDesc &comp);
 

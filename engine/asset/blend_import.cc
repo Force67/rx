@@ -1,12 +1,10 @@
 #include "asset/blend_import.h"
 
-#include <algorithm>
-#include <cctype>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <string_view>
-#include <vector>
+#include <ctype.h>
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #if defined(_WIN32)
 #include <process.h>
@@ -17,56 +15,49 @@ extern char **environ;
 #endif
 
 #include "asset/asset_id.h"
+#include "base/containers/vector.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
+#include "core/format.h"
 #include "core/log.h"
 
 namespace rx::asset {
-namespace fs = std::filesystem;
 namespace {
 
-std::string CacheRoot(const BlendImportOptions &options) {
+base::String CacheRoot(const BlendImportOptions &options) {
   if (!options.cache_directory.empty())
     return options.cache_directory;
-  if (const char *xdg = std::getenv("XDG_CACHE_HOME"))
-    return (fs::path(xdg) / "rx/blend").string();
+  if (const char *xdg = ::getenv("XDG_CACHE_HOME"))
+    return fs::Join(xdg, "rx/blend");
 #if defined(_WIN32)
-  if (const char *local = std::getenv("LOCALAPPDATA"))
-    return (fs::path(local) / "rx/blend").string();
+  if (const char *local = ::getenv("LOCALAPPDATA"))
+    return fs::Join(local, "rx/blend");
 #else
-  if (const char *home = std::getenv("HOME"))
-    return (fs::path(home) / ".cache/rx/blend").string();
+  if (const char *home = ::getenv("HOME"))
+    return fs::Join(home, ".cache/rx/blend");
 #endif
-  return (fs::temp_directory_path() / "rx/blend").string();
+  return fs::Join(fs::TempDirectory(), "rx/blend");
 }
 
-std::string CacheKey(const fs::path &source, const fs::path &script) {
-  std::error_code error;
-  const auto source_size = fs::file_size(source, error);
-  if (error)
+base::String CacheKey(base::StringRef source, base::StringRef script) {
+  const base::Optional<u64> source_size = fs::FileSize(source);
+  const base::Optional<i64> source_time = fs::LastWriteTime(source);
+  const base::Optional<i64> script_time = fs::LastWriteTime(script);
+  if (!source_size || !source_time || !script_time)
     return {};
-  const auto source_time =
-      fs::last_write_time(source, error).time_since_epoch().count();
-  if (error)
-    return {};
-  const auto script_time =
-      fs::last_write_time(script, error).time_since_epoch().count();
-  if (error)
-    return {};
-  // file_time_type::rep is not a fixed type across standard libraries (libc++
-  // on windows makes it wider than long long), so name the width here.
-  const std::string identity =
-      fs::weakly_canonical(source).string() + ":" + std::to_string(source_size) + ":" +
-      std::to_string(static_cast<long long>(source_time)) + ":" +
-      std::to_string(static_cast<long long>(script_time));
+  const base::String identity =
+      fs::WeaklyCanonical(source) + ":" + rx::ToString(*source_size) + ":" +
+      rx::ToString(*source_time) + ":" + rx::ToString(*script_time);
   char key[17];
-  std::snprintf(key, sizeof(key), "%016llx",
+  ::snprintf(key, sizeof(key), "%016llx",
                 static_cast<unsigned long long>(MakeAssetId(identity).hash));
   return key;
 }
 
-int Run(const std::vector<std::string> &arguments) {
-  std::vector<char *> argv;
+int Run(const base::Vector<base::String> &arguments) {
+  base::Vector<char *> argv;
   argv.reserve(arguments.size() + 1);
-  for (const std::string &argument : arguments)
+  for (const base::String &argument : arguments)
     argv.push_back(const_cast<char *>(argument.c_str()));
   argv.push_back(nullptr);
 #if defined(_WIN32)
@@ -84,79 +75,79 @@ int Run(const std::vector<std::string> &arguments) {
 #endif
 }
 
+bool NonEmptyFile(base::StringRef path) {
+  const base::Optional<u64> size = fs::FileSize(path);
+  return size && *size > 0;
+}
+
 } // namespace
 
-bool ConvertBlendScene(const std::string &blend_path,
+bool ConvertBlendScene(const base::String &blend_path,
                        const BlendImportOptions &options,
-                       BlendImportResult *out, std::string *error) {
+                       BlendImportResult *out, base::String *error) {
   if (!out)
     return false;
   *out = {};
-  const fs::path source = fs::absolute(blend_path);
-  const fs::path script = fs::absolute(options.converter_script);
-  std::string extension = source.extension().string();
-  std::transform(extension.begin(), extension.end(), extension.begin(),
-                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-  if (extension != ".blend" || !fs::is_regular_file(source)) {
+  const base::String source = fs::Absolute(blend_path);
+  const base::String script = fs::Absolute(options.converter_script);
+  base::String extension(fs::Extension(source));
+  for (char &c : extension)
+    c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+  if (extension != ".blend" || !fs::IsRegularFile(source)) {
     if (error)
-      *error = "not a readable .blend file: " + source.string();
+      *error = "not a readable .blend file: " + source;
     return false;
   }
-  if (options.converter_script.empty() || !fs::is_regular_file(script)) {
+  if (options.converter_script.empty() || !fs::IsRegularFile(script)) {
     if (error)
-      *error = "Blender converter script not found: " + script.string();
+      *error = "Blender converter script not found: " + script;
     return false;
   }
-  const std::string key = CacheKey(source, script);
+  const base::String key = CacheKey(source, script);
   if (key.empty()) {
     if (error)
       *error = "could not stat Blender source or converter";
     return false;
   }
-  std::error_code fs_error;
-  const fs::path cache = fs::path(CacheRoot(options)) / key;
-  fs::create_directories(cache, fs_error);
-  if (fs_error) {
+  const base::String cache = fs::Join(CacheRoot(options), key);
+  fs::CreateDirectories(cache);
+  if (!fs::IsDirectory(cache)) {
     if (error)
-      *error = "could not create Blender cache: " + fs_error.message();
+      *error = base::String("could not create Blender cache: ") + ::strerror(errno);
     return false;
   }
-  const fs::path glb = cache / "scene.glb";
-  const fs::path manifest = cache / "scene.rxblend";
-  if (!options.force && fs::is_regular_file(glb) &&
-      fs::file_size(glb, fs_error) > 0 && fs::is_regular_file(manifest)) {
-    out->glb_path = glb.string();
-    out->manifest_path = manifest.string();
+  const base::String glb = fs::Join(cache, "scene.glb");
+  const base::String manifest = fs::Join(cache, "scene.rxblend");
+  if (!options.force && NonEmptyFile(glb) && fs::IsRegularFile(manifest)) {
+    out->glb_path = glb;
+    out->manifest_path = manifest;
     out->reused_cache = true;
     return true;
   }
 
-  RX_INFO("blend: converting {} with {}", source.string(),
-          options.blender_executable);
-  const std::vector<std::string> arguments = {
-      options.blender_executable,
-      "--background",
-      source.string(),
-      "--python",
-      script.string(),
-      "--",
-      "--output",
-      glb.string(),
-      "--manifest",
-      manifest.string(),
-  };
+  RX_INFO("blend: converting {} with {}", source, options.blender_executable);
+  base::Vector<base::String> arguments;
+  arguments.push_back(options.blender_executable);
+  arguments.push_back("--background");
+  arguments.push_back(source);
+  arguments.push_back("--python");
+  arguments.push_back(script);
+  arguments.push_back("--");
+  arguments.push_back("--output");
+  arguments.push_back(glb);
+  arguments.push_back("--manifest");
+  arguments.push_back(manifest);
   const int result = Run(arguments);
-  if (result != 0 || !fs::is_regular_file(glb) ||
-      fs::file_size(glb, fs_error) == 0) {
-    fs::remove(glb, fs_error);
-    fs::remove(manifest, fs_error);
+  if (result != 0 || !NonEmptyFile(glb)) {
+    fs::Remove(glb);
+    fs::Remove(manifest);
     if (error)
       *error =
-          "Blender conversion failed (exit " + std::to_string(result) + ")";
+          "Blender conversion failed (exit " + rx::ToString(result) + ")";
     return false;
   }
-  out->glb_path = glb.string();
-  out->manifest_path = manifest.string();
+  out->glb_path = glb;
+  out->manifest_path = manifest;
   return true;
 }
 

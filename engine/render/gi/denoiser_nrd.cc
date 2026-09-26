@@ -1,7 +1,8 @@
 #include "render/gi/denoiser_nrd.h"
 
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "render/rhi/vulkan_interop.h"
@@ -56,7 +57,7 @@ Format ToFormat(nrd::Format format) {
 }
 
 void CopyMatrix(float (&dst)[16], const Mat4& m) {
-  std::memcpy(dst, m.m, sizeof(float) * 16);
+  base::MemCopy(dst, m.m, sizeof(float) * 16);
 }
 
 }  // namespace
@@ -78,7 +79,7 @@ bool NrdDenoiser::Initialize(Device& device, Extent2D extent) {
   };
   nrd::InstanceCreationDesc creation{};
   creation.denoisers = denoiser_descs;
-  creation.denoisersNum = static_cast<u32>(std::size(denoiser_descs));
+  creation.denoisersNum = static_cast<u32>((sizeof(denoiser_descs) / sizeof(denoiser_descs[0])));
   if (nrd::CreateInstance(creation, instance_) != nrd::Result::SUCCESS || !instance_) {
     RX_ERROR("nrd: instance creation failed");
     instance_ = nullptr;
@@ -401,7 +402,7 @@ void NrdDenoiser::CreatePools(Device& device, Extent2D extent) {
     add(out_shadow_);
     add(out_diffuse_);
     add(out_specular_);
-    cmd.TextureBarriers({barriers.data(), barriers.size()});
+    cmd.TextureBarriers(base::Span(barriers.data(), barriers.size()));
   });
 }
 
@@ -681,7 +682,7 @@ void NrdDenoiser::RecordDispatches(PassContext& ctx, u32 identifier) {
         constant_cursor_ = 0;  // overflow guard; should not happen
       }
       dynamic_offset = static_cast<u32>(constant_cursor_ * constant_slot_size_);
-      std::memcpy(static_cast<u8*>(constant_ring_.mapped) + dynamic_offset, d.constantBufferData,
+      base::MemCopy(static_cast<u8*>(constant_ring_.mapped) + dynamic_offset, d.constantBufferData,
                   d.constantBufferDataSize);
       constant_cursor_++;
     }

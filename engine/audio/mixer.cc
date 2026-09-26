@@ -1,8 +1,13 @@
 #include "audio/mixer.h"
 
+#include "base/algorithm.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/lock_guard.h"
 #include "core/memory/memory_tracker.h"
-#include <algorithm>
-#include <cmath>
+#include "core/scalar.h"
+#include <math.h>
 
 namespace rx::audio {
 namespace {
@@ -22,74 +27,74 @@ f32 RampStep(f32 seconds, u32 rate) {
 
 }  // namespace
 
-u32 Mixer::Play(std::unique_ptr<Decoder> decoder, const PlayParams& params) {
+u32 Mixer::Play(base::UniquePointer<Decoder> decoder, const PlayParams& params) {
   if (!decoder || decoder->channels() == 0 || decoder->sample_rate() == 0) return 0;
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   const u32 id = next_id_++;
   Command cmd;
   cmd.type = CmdType::kPlay;
   cmd.voice = id;
-  cmd.decoder = std::move(decoder);
+  cmd.decoder = base::move(decoder);
   cmd.params = params;
-  pending_.push_back(std::move(cmd));
+  pending_.push_back(base::move(cmd));
   return id;
 }
 
 void Mixer::Stop(u32 voice, f32 fade_out) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   Command cmd;
   cmd.type = CmdType::kStop;
   cmd.voice = voice;
   cmd.value = fade_out;
-  pending_.push_back(std::move(cmd));
+  pending_.push_back(base::move(cmd));
 }
 
 void Mixer::StopAll() {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   Command cmd;
   cmd.type = CmdType::kStopAll;
-  pending_.push_back(std::move(cmd));
+  pending_.push_back(base::move(cmd));
 }
 
 void Mixer::SetVoiceGain(u32 voice, f32 gain) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   Command cmd;
   cmd.type = CmdType::kGain;
   cmd.voice = voice;
   cmd.value = gain;
-  pending_.push_back(std::move(cmd));
+  pending_.push_back(base::move(cmd));
 }
 
 void Mixer::SetVoicePosition(u32 voice, const Vec3& position) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   Command cmd;
   cmd.type = CmdType::kPosition;
   cmd.voice = voice;
   cmd.position = position;
-  pending_.push_back(std::move(cmd));
+  pending_.push_back(base::move(cmd));
 }
 
 void Mixer::SetListener(const Listener& listener) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   Command cmd;
   cmd.type = CmdType::kListener;
   cmd.listener = listener;
-  pending_.push_back(std::move(cmd));
+  pending_.push_back(base::move(cmd));
 }
 
 void Mixer::SetMasterGain(f32 gain) {
-  std::lock_guard<std::mutex> lock(mutex_);
+  base::LockGuard<base::Mutex> lock(mutex_);
   Command cmd;
   cmd.type = CmdType::kMaster;
   cmd.value = gain;
-  pending_.push_back(std::move(cmd));
+  pending_.push_back(base::move(cmd));
 }
 
 void Mixer::ApplyCommands() {
-  std::vector<Command>& commands = commands_scratch_;
+  base::Vector<Command>& commands = commands_scratch_;
   commands.clear();
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    base::LockGuard<base::Mutex> lock(mutex_);
     commands.swap(pending_);
   }
   for (Command& cmd : commands) {
@@ -99,8 +104,8 @@ void Mixer::ApplyCommands() {
         voice.id = cmd.voice;
         voice.params = cmd.params;
         voice.gain = cmd.params.gain;
-        voice.src_channels = std::max(1u, cmd.decoder->channels());
-        voice.decoder = std::move(cmd.decoder);
+        voice.src_channels = rx::Max(1u, cmd.decoder->channels());
+        voice.decoder = base::move(cmd.decoder);
         if (cmd.params.fade_in > 0.0f) {
           voice.env = 0.0f;
           voice.env_rate = RampStep(cmd.params.fade_in, output_rate_);
@@ -108,7 +113,7 @@ void Mixer::ApplyCommands() {
           voice.env = 1.0f;
           voice.env_rate = 0.0f;
         }
-        voices_.push_back(std::move(voice));
+        voices_.push_back(base::move(voice));
         break;
       }
       case CmdType::kStop:
@@ -147,10 +152,10 @@ bool Mixer::FillSource(Voice& voice, size_t frames) {
   // Reclaim space ahead of the read cursor before topping up.
   if (voice.head > kCompactThreshold) {
     voice.src.erase(voice.src.begin(),
-                    voice.src.begin() + static_cast<std::ptrdiff_t>(voice.head) * ch);
+                    voice.src.begin() + static_cast<ptrdiff_t>(voice.head) * ch);
     voice.head = 0;
   }
-  std::vector<float>& chunk = decode_scratch_;
+  base::Vector<float>& chunk = decode_scratch_;
   chunk.resize(static_cast<size_t>(kDecodeChunkFrames) * ch);
   while (voice.src.size() / ch - voice.head < frames) {
     if (voice.ended) return voice.src.size() / ch > voice.head;
@@ -161,7 +166,7 @@ bool Mixer::FillSource(Voice& voice, size_t frames) {
       return voice.src.size() / ch > voice.head;
     }
     voice.src.insert(voice.src.end(), chunk.begin(),
-                     chunk.begin() + static_cast<std::ptrdiff_t>(got) * ch);
+                     chunk.begin() + static_cast<ptrdiff_t>(got) * ch);
   }
   return true;
 }
@@ -169,7 +174,7 @@ bool Mixer::FillSource(Voice& voice, size_t frames) {
 void Mixer::MixInto(float* out, u32 frames) {
   mem::CategoryScope mem_scope(kAudioCategory);
   ApplyCommands();
-  std::fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
+  base::Fill(out, out + static_cast<size_t>(frames) * 2, 0.0f);
 
   for (Voice& voice : voices_) {
     const u32 ch = voice.src_channels;
@@ -193,7 +198,7 @@ void Mixer::MixInto(float* out, u32 frames) {
       const size_t available = voice.src.size() / ch;
       if (available <= voice.head) break;
       const size_t i0 = voice.head;
-      const size_t i1 = std::min(i0 + 1, available - 1);
+      const size_t i1 = rx::Min(i0 + 1, available - 1);
       const f32 t = static_cast<f32>(voice.frac);
 
       f32 sl, sr;
@@ -217,7 +222,7 @@ void Mixer::MixInto(float* out, u32 frames) {
         voice.dead = true;
         break;
       }
-      const f32 e = std::clamp(voice.env, 0.0f, 1.0f);
+      const f32 e = rx::Clamp(voice.env, 0.0f, 1.0f);
 
       if (voice.params.positional) {
         const f32 mono = 0.5f * (sl + sr);
@@ -240,19 +245,17 @@ void Mixer::MixInto(float* out, u32 frames) {
   }
 
   // Drop finished voices (end of stream, or a fade-out that completed).
-  voices_.erase(std::remove_if(voices_.begin(), voices_.end(),
-                               [](const Voice& v) {
-                                 const size_t available = v.src.size() / std::max(1u, v.src_channels);
-                                 return v.dead || (v.ended && available <= v.head);
-                               }),
-                voices_.end());
+  base::EraseIf(voices_, [](const Voice& v) {
+    const size_t available = v.src.size() / rx::Max(1u, v.src_channels);
+    return v.dead || (v.ended && available <= v.head);
+  });
 
   // Master gain and a soft clip, so a dense mix saturates gracefully instead of
   // wrapping. tanh is gentle near unity and only bends the peaks.
   const f32 m = master_;
   for (u32 i = 0; i < frames * 2; ++i) {
     f32 s = out[i] * m;
-    if (s > 1.0f || s < -1.0f) s = std::tanh(s);
+    if (s > 1.0f || s < -1.0f) s = ::tanh(s);
     out[i] = s;
   }
 }

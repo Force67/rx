@@ -1,12 +1,14 @@
 #ifndef RX_RENDER_RHI_DEVICE_H_
 #define RX_RENDER_RHI_DEVICE_H_
 
-#include <functional>
-#include <memory>
-#include <string>
+#include <initializer_list>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
+#include "base/functional/function.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/xstring.h"
 #include "core/types.h"
 #include "core/window.h"
 #include "render/rhi/bindings.h"
@@ -40,7 +42,7 @@ struct DeviceDesc {
   // baseline rx enables (BDA, descriptor indexing, timeline, dynamic rendering,
   // sync2, and every core / Vulkan 1.1-1.3 feature bit the driver reports, plus
   // mesh-shader and ray-query when present) does not need listing here.
-  base::Vector<std::string> extra_device_extensions;
+  base::Vector<base::String> extra_device_extensions;
 };
 
 // What the picked GPU actually supports. Optional features are queried,
@@ -50,7 +52,7 @@ struct DeviceDesc {
 // semaphores; D3D12 feature level 12_1 with SM 6.6 and enhanced barriers.
 struct DeviceCaps {
   Backend backend = Backend::kNull;
-  std::string adapter_name;
+  base::String adapter_name;
   u32 api_version = 0;
   bool raytracing = false;  // acceleration structures + ray tracing pipeline
   bool ray_query = false;
@@ -82,7 +84,7 @@ struct DeviceCaps {
   // App-requested device extensions (DeviceDesc::extra_device_extensions) that
   // the adapter actually granted. An app checks this to know whether its custom
   // GPU pass can use a given extension.
-  base::Vector<std::string> extra_extensions;
+  base::Vector<base::String> extra_extensions;
 };
 
 enum class AccelStructType : u8 { kBlas, kTlas };
@@ -112,7 +114,7 @@ class Device {
  public:
   static constexpr u32 kMaxFramesInFlight = 2;
 
-  static std::unique_ptr<Device> Create(const DeviceDesc& desc, Window& window);
+  static base::UniquePointer<Device> Create(const DeviceDesc& desc, Window& window);
 
   // Surfaceless device: a real GPU device with the same feature enablement and
   // caps as the windowed path, but with no presentation surface or swapchain.
@@ -123,7 +125,7 @@ class Device {
   // to the null backend when no Vulkan driver is present (is_stub() true), so
   // callers get a valid, safe device on any machine. D3D12 offscreen is not
   // wired yet (it also falls back to null).
-  static std::unique_ptr<Device> CreateOffscreen(const DeviceDesc& desc);
+  static base::UniquePointer<Device> CreateOffscreen(const DeviceDesc& desc);
   virtual ~Device() = default;
 
   Device(const Device&) = delete;
@@ -145,7 +147,7 @@ class Device {
 
   // `hdr` requests an HDR-capable surface format (HDR10 PQ preferred, scRGB
   // fallback); silently falls back to SDR when the surface has neither.
-  virtual std::unique_ptr<Swapchain> CreateSwapchain(u32 width, u32 height, bool vsync,
+  virtual base::UniquePointer<Swapchain> CreateSwapchain(u32 width, u32 height, bool vsync,
                                                      bool hdr = false) = 0;
 
   // Live gpu memory usage, summed over the device-local heaps, for the debug
@@ -229,9 +231,9 @@ class Device {
   virtual BindingSetHandle CreateBindingSet(BindingLayoutHandle layout,
                                             u32 variable_count = 0) = 0;
   virtual void DestroyBindingSet(BindingSetHandle set) = 0;
-  virtual void UpdateBindingSet(BindingSetHandle set, std::span<const BindingItem> items) = 0;
+  virtual void UpdateBindingSet(BindingSetHandle set, base::Span<const BindingItem> items) = 0;
   void UpdateBindingSet(BindingSetHandle set, std::initializer_list<BindingItem> items) {
-    UpdateBindingSet(set, std::span<const BindingItem>(items.begin(), items.size()));
+    UpdateBindingSet(set, base::Span<const BindingItem>(items.begin(), items.size()));
   }
 
   // acceleration structures (caps().ray_query gated)
@@ -282,7 +284,7 @@ class Device {
   // recording & submission
   // Records into a transient command list and blocks until execution
   // finished. For uploads and one-off transitions, not the frame path.
-  virtual void ImmediateSubmit(const std::function<void(CommandList&)>& record) = 0;
+  virtual void ImmediateSubmit(const base::Function<void(CommandList&)>& record) = 0;
 
   // coalesced uploads
   // While the batch is open, CreateBufferWithData records its staging copy into
@@ -315,7 +317,7 @@ class Device {
   // transfer work (copies/blits/barriers) and must not allocate binding sets:
   // the shared immediate descriptor pool is only reset by ImmediateSubmit, so
   // sets allocated inside a batch would accumulate until it exhausts.
-  virtual void RecordUpload(const std::function<void(CommandList&)>& record) {
+  virtual void RecordUpload(const base::Function<void(CommandList&)>& record) {
     ImmediateSubmit(record);
   }
   // Hands a staging buffer to the open batch to free once its copies have run

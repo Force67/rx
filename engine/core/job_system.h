@@ -1,15 +1,15 @@
 #ifndef RX_CORE_JOB_SYSTEM_H_
 #define RX_CORE_JOB_SYSTEM_H_
 
-#include <atomic>
-#include <condition_variable>
-#include <mutex>
-#include <thread>
-
 #include <base/containers/deque.h>
 #include <base/containers/static_function.h>
 #include <base/containers/vector.h>
 
+#include "base/atomic.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/condition_variable.h"
+#include "base/threading/mutex.h"
+#include "base/threading/thread.h"
 #include "core/export.h"
 
 namespace rx {
@@ -33,12 +33,13 @@ class RX_CORE_EXPORT JobSystem {
  private:
   void WorkerLoop();
 
-  base::Vector<std::thread> workers_;
+  // base::Thread is not movable; the vector must not relocate live threads.
+  base::Vector<base::UniquePointer<base::Thread>> workers_;
   base::SimpleDeque<JobFn> queue_;
-  std::mutex mutex_;
-  std::condition_variable wake_;
-  std::condition_variable idle_;
-  std::atomic<unsigned> in_flight_{0};
+  base::Mutex mutex_;
+  base::ConditionVariable wake_;
+  base::ConditionVariable idle_;
+  base::Atomic<unsigned> in_flight_{0};
   bool stop_ = false;
 };
 

@@ -1,10 +1,16 @@
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
+#include "core/scalar.h"
 #include "world/world_format.h"
+#include "core/sort.h"
 
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <cstring>
-#include <utility>
+#include <math.h>
+#include <string.h>
 
 namespace rx::world {
 namespace {
@@ -38,11 +44,11 @@ constexpr u32 kColumnBytes = 32;
 constexpr u32 kPrototypeBytes = 4;
 constexpr u32 kInstanceBytes = 44;
 
-void SetError(std::string* error, std::string message) {
-  if (error) *error = std::move(message);
+void SetError(base::String* error, base::String message) {
+  if (error) *error = base::move(message);
 }
 
-u64 Checksum(u64 hash, std::span<const u8> bytes) {
+u64 Checksum(u64 hash, base::Span<const u8> bytes) {
   for (u8 byte : bytes) {
     hash ^= byte;
     hash *= 0x100000001b3ull;
@@ -54,7 +60,7 @@ u64 Checksum(u64 hash, std::span<const u8> bytes) {
 // cell, the domain, the tier and every table count were guarded only by the
 // cross-checks that read them, and a zeroed field passes a cross-check by
 // looking like "unset".
-u64 Checksum(std::span<const u8> header, std::span<const u8> body) {
+u64 Checksum(base::Span<const u8> header, base::Span<const u8> body) {
   return Checksum(Checksum(0xcbf29ce484222325ull, header), body);
 }
 
@@ -82,7 +88,7 @@ void AppendU64(base::Vector<u8>* bytes, u64 value) {
   for (u32 shift = 0; shift < 64; shift += 8) AppendU8(bytes, static_cast<u8>(value >> shift));
 }
 
-void AppendF32(base::Vector<u8>* bytes, f32 value) { AppendU32(bytes, std::bit_cast<u32>(value)); }
+void AppendF32(base::Vector<u8>* bytes, f32 value) { AppendU32(bytes, rx::BitCast<u32>(value)); }
 
 void AppendVec3(base::Vector<u8>* bytes, const Vec3& value) {
   AppendF32(bytes, value.x);
@@ -94,7 +100,7 @@ void AppendVec3(base::Vector<u8>* bytes, const Vec3& value) {
 // goes false it stays false, so a caller may read a whole record and test once.
 class Cursor {
  public:
-  explicit Cursor(std::span<const u8> bytes) : bytes_(bytes) {}
+  explicit Cursor(base::Span<const u8> bytes) : bytes_(bytes) {}
 
   bool ok() const { return ok_; }
   size_t offset() const { return offset_; }
@@ -132,7 +138,7 @@ class Cursor {
     return value;
   }
 
-  f32 F32() { return std::bit_cast<f32>(U32()); }
+  f32 F32() { return rx::BitCast<f32>(U32()); }
 
   Vec3 ReadVec3() {
     Vec3 value;
@@ -143,7 +149,7 @@ class Cursor {
   }
 
  private:
-  std::span<const u8> bytes_;
+  base::Span<const u8> bytes_;
   size_t offset_ = 0;
   bool ok_ = true;
 };
@@ -156,12 +162,12 @@ class StringTable {
  public:
   StringTable() { bytes_.push_back('\0'); }
 
-  u32 Intern(std::string_view value) {
+  u32 Intern(base::StringRef value) {
     if (value.empty()) return 0;
     for (u32 offset : offsets_) {
       const char* existing = bytes_.data() + offset;
-      if (value.size() == std::char_traits<char>::length(existing) &&
-          std::memcmp(existing, value.data(), value.size()) == 0) {
+      if (value.size() == ::strlen(existing) &&
+          base::MemCompare(existing, value.data(), value.size()) == 0) {
         return offset;
       }
     }
@@ -179,12 +185,12 @@ class StringTable {
   base::Vector<u32> offsets_;
 };
 
-std::string_view StringAt(const base::Vector<char>& table, u32 offset) {
+base::StringRef StringAt(const base::Vector<char>& table, u32 offset) {
   if (offset >= table.size()) return {};
   const char* begin = table.data() + offset;
   const size_t limit = table.size() - offset;
-  const size_t length = std::char_traits<char>::length(begin);
-  return length < limit ? std::string_view(begin, length) : std::string_view();
+  const size_t length = ::strlen(begin);
+  return length < limit ? base::StringRef(begin, length) : base::StringRef();
 }
 
 // A string table is only usable if its last byte terminates; otherwise a view
@@ -194,13 +200,13 @@ bool StringTableTerminated(const base::Vector<char>& table) {
 }
 
 bool IsFinite(const Vec3& value) {
-  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+  return ::isfinite(value.x) && ::isfinite(value.y) && ::isfinite(value.z);
 }
 
 bool ValidDomain(u8 value) { return value < kDomainCount; }
 bool ValidTier(u8 value) { return value < kTierCount; }
 
-void AppendHex64(std::string* out, u64 value) {
+void AppendHex64(base::String* out, u64 value) {
   static const char kDigits[] = "0123456789abcdef";
   for (int shift = 60; shift >= 0; shift -= 4) out->push_back(kDigits[(value >> shift) & 0xf]);
 }
@@ -229,8 +235,8 @@ const char* TierName(Tier tier) {
   return "unknown";
 }
 
-std::string CellPayloadPath(std::string_view prefix, u64 cell, Domain domain, Tier tier) {
-  std::string path(prefix);
+base::String CellPayloadPath(base::StringRef prefix, u64 cell, Domain domain, Tier tier) {
+  base::String path(prefix);
   if (!path.empty() && path.back() != '/') path.push_back('/');
   AppendHex64(&path, cell);
   path.push_back('.');
@@ -241,14 +247,14 @@ std::string CellPayloadPath(std::string_view prefix, u64 cell, Domain domain, Ti
   return path;
 }
 
-u64 HashComponentLayout(std::string_view component, u32 stride,
-                        std::span<const std::string_view> field_names,
-                        std::span<const u32> field_types, std::span<const u32> field_offsets) {
+u64 HashComponentLayout(base::StringRef component, u32 stride,
+                        base::Span<const base::StringRef> field_names,
+                        base::Span<const u32> field_types, base::Span<const u32> field_offsets) {
   u64 hash = 0xcbf29ce484222325ull;
   hash = HashBytes(hash, component.data(), component.size());
   hash = HashBytes(hash, &stride, sizeof(stride));
   const size_t count =
-      std::min(field_names.size(), std::min(field_types.size(), field_offsets.size()));
+      rx::Min(field_names.size(), rx::Min(field_types.size(), field_offsets.size()));
   const u32 field_count = static_cast<u32>(count);
   hash = HashBytes(hash, &field_count, sizeof(field_count));
   for (size_t i = 0; i < count; ++i) {
@@ -260,7 +266,7 @@ u64 HashComponentLayout(std::string_view component, u32 stride,
 }
 
 const WorldCellRecord* WorldIndexData::FindCell(u64 id) const {
-  auto it = std::lower_bound(cells.begin(), cells.end(), id,
+  auto it = base::LowerBound(cells.begin(), cells.end(), id,
                              [](const WorldCellRecord& cell, u64 wanted) { return cell.id < wanted; });
   return it != cells.end() && it->id == id ? it : nullptr;
 }
@@ -268,7 +274,7 @@ const WorldCellRecord* WorldIndexData::FindCell(u64 id) const {
 const WorldCellRecord* WorldIndexData::FindCellByStableId(u64 stable_id) const {
   // Ranges never overlap (the writer refuses a world where they do), so the
   // last range starting at or below the id is the only candidate.
-  auto it = std::upper_bound(stable_id_order.begin(), stable_id_order.end(), stable_id,
+  auto it = base::UpperBound(stable_id_order.begin(), stable_id_order.end(), stable_id,
                              [this](u64 wanted, u32 index) {
                                return wanted < cells[index].stable_id_first;
                              });
@@ -310,10 +316,10 @@ WorldIndexWriter::PendingCell* WorldIndexWriter::Find(u64 id) {
 void WorldIndexWriter::AddCell(u64 id, Vec3 minimum, Vec3 maximum, u32 zone, u64 stable_id_first,
                                u32 stable_id_count) {
   const bool finite = IsFinite(minimum) && IsFinite(maximum);
-  const Vec3 low{std::min(minimum.x, maximum.x), std::min(minimum.y, maximum.y),
-                 std::min(minimum.z, maximum.z)};
-  const Vec3 high{std::max(minimum.x, maximum.x), std::max(minimum.y, maximum.y),
-                  std::max(minimum.z, maximum.z)};
+  const Vec3 low{rx::Min(minimum.x, maximum.x), rx::Min(minimum.y, maximum.y),
+                 rx::Min(minimum.z, maximum.z)};
+  const Vec3 high{rx::Max(minimum.x, maximum.x), rx::Max(minimum.y, maximum.y),
+                  rx::Max(minimum.z, maximum.z)};
   if (PendingCell* existing = Find(id)) {
     // Every field, flags included. Re-adding replaces the record, so what a
     // cell ends up with must not depend on whether SetCellFlags ran before or
@@ -356,7 +362,7 @@ void WorldIndexWriter::AddPayload(u64 cell, Domain domain, Tier tier, u64 reside
   payloads_.push_back({cell, resident_bytes, row_count, domain, tier});
 }
 
-bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
+bool WorldIndexWriter::Encode(base::Vector<u8>* out, base::String* error) const {
   if (!out) return false;
   if (cells_.size() > kMaximumCells) {
     SetError(error, "world index: too many cells");
@@ -371,7 +377,7 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
   // same things here is what keeps the cook from succeeding on an archive its
   // own loader will not open: a bake that fails at the end of a cook is a bad
   // afternoon, one that fails at the start of a play session is a bug report.
-  if (!std::isfinite(cell_size_) || cell_size_ < 0) {
+  if (!::isfinite(cell_size_) || cell_size_ < 0) {
     SetError(error, "world index: grid cell size is not a finite, non-negative number");
     return false;
   }
@@ -382,16 +388,18 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
   for (const PendingCell& cell : cells_) {
     if (cell.finite_bounds && IsFinite(cell.minimum) && IsFinite(cell.maximum)) continue;
     SetError(error,
-             "world index: cell " + std::to_string(cell.id) + " has non-finite bounds");
+             "world index: cell " + rx::ToString(cell.id) + " has non-finite bounds");
     return false;
   }
 
   base::Vector<PendingCell> cells(cells_);
-  std::sort(cells.begin(), cells.end(),
-            [](const PendingCell& a, const PendingCell& b) { return a.id < b.id; });
+  // Tied ids are refused just below with a message naming only the id, so any
+  // correct sort agrees.
+  base::Sort(cells.begin(), cells.end(),
+             [](const PendingCell& a, const PendingCell& b) { return a.id < b.id; });
   for (size_t i = 1; i < cells.size(); ++i) {
     if (cells[i].id == cells[i - 1].id) {
-      SetError(error, "world index: duplicate cell id " + std::to_string(cells[i].id));
+      SetError(error, "world index: duplicate cell id " + rx::ToString(cells[i].id));
       return false;
     }
   }
@@ -404,13 +412,15 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
   for (const PendingCell& cell : cells) {
     if (cell.stable_id_count != 0) ranged.push_back(&cell);
   }
-  std::sort(ranged.begin(), ranged.end(), [](const PendingCell* a, const PendingCell* b) {
+  // Cell ids are unique by now, so the order is total and any correct sort
+  // agrees.
+  base::Sort(ranged.begin(), ranged.end(), [](const PendingCell* a, const PendingCell* b) {
     if (a->stable_id_first != b->stable_id_first) return a->stable_id_first < b->stable_id_first;
     return a->id < b->id;
   });
   for (const PendingCell* cell : ranged) {
     if (cell->stable_id_first > ~u64{0} - cell->stable_id_count) {
-      SetError(error, "world index: cell " + std::to_string(cell->id) +
+      SetError(error, "world index: cell " + rx::ToString(cell->id) +
                           " stable-id range wraps past the end of the id space");
       return false;
     }
@@ -419,15 +429,15 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
     const PendingCell& previous = *ranged[i - 1];
     const PendingCell& current = *ranged[i];
     if (previous.stable_id_first + previous.stable_id_count > current.stable_id_first) {
-      SetError(error, "world index: cells " + std::to_string(previous.id) + " and " +
-                          std::to_string(current.id) + " have overlapping stable-id ranges");
+      SetError(error, "world index: cells " + rx::ToString(previous.id) + " and " +
+                          rx::ToString(current.id) + " have overlapping stable-id ranges");
       return false;
     }
   }
 
   auto known_cell = [&](u64 id) {
     auto it =
-        std::lower_bound(cells.begin(), cells.end(), id,
+        base::LowerBound(cells.begin(), cells.end(), id,
                          [](const PendingCell& cell, u64 wanted) { return cell.id < wanted; });
     return it != cells.end() && it->id == id;
   };
@@ -435,20 +445,23 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
   base::Vector<PendingPayload> payloads(payloads_);
   for (const PendingPayload& payload : payloads) {
     if (!known_cell(payload.cell)) {
-      SetError(error, "world index: payload names unknown cell " + std::to_string(payload.cell));
+      SetError(error, "world index: payload names unknown cell " + rx::ToString(payload.cell));
       return false;
     }
     if (payload.tier == Tier::kAbsent) {
-      SetError(error, "world index: cell " + std::to_string(payload.cell) + " " +
+      SetError(error, "world index: cell " + rx::ToString(payload.cell) + " " +
                           DomainName(payload.domain) + " payload is baked at tier absent");
       return false;
     }
   }
-  std::sort(payloads.begin(), payloads.end(), [](const PendingPayload& a, const PendingPayload& b) {
-    if (a.cell != b.cell) return a.cell < b.cell;
-    if (a.domain != b.domain) return a.domain < b.domain;
-    return a.tier < b.tier;
-  });
+  // AddPayload keeps one entry per cell, domain and tier, so the order is total
+  // and any correct sort agrees.
+  base::Sort(payloads.begin(), payloads.end(),
+             [](const PendingPayload& a, const PendingPayload& b) {
+               if (a.cell != b.cell) return a.cell < b.cell;
+               if (a.domain != b.domain) return a.domain < b.domain;
+               return a.tier < b.tier;
+             });
 
   base::Vector<u8> body;
   size_t payload_cursor = 0;
@@ -477,7 +490,7 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
   }
 
   out->clear();
-  out->insert(out->end(), std::begin(kIndexMagic), std::end(kIndexMagic));
+  out->insert(out->end(), kIndexMagic, kIndexMagic + sizeof(kIndexMagic));
   AppendU32(out, kIndexVersion);
   AppendU32(out, 0);  // flags, reserved
   AppendU64(out, world_id_);
@@ -486,25 +499,25 @@ bool WorldIndexWriter::Encode(base::Vector<u8>* out, std::string* error) const {
   AppendVec3(out, grid_origin_);
   AppendU32(out, static_cast<u32>(cells.size()));
   AppendU32(out, static_cast<u32>(payloads.size()));
-  AppendU64(out, Checksum(std::span<const u8>(out->data(), out->size()),
-                          std::span<const u8>(body.data(), body.size())));
+  AppendU64(out, Checksum(base::Span<const u8>(out->data(), out->size()),
+                          base::Span<const u8>(body.data(), body.size())));
   out->insert(out->end(), body.begin(), body.end());
   return true;
 }
 
-bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::string* error) {
+bool DecodeWorldIndex(base::Span<const u8> bytes, WorldIndexData* out, base::String* error) {
   if (!out) return false;
   Cursor header(bytes);
   const u8* magic = nullptr;
   if (!header.Take(sizeof(kIndexMagic), &magic) ||
-      std::memcmp(magic, kIndexMagic, sizeof(kIndexMagic)) != 0) {
+      base::MemCompare(magic, kIndexMagic, sizeof(kIndexMagic)) != 0) {
     SetError(error, "world index: not an RXWORLDI file");
     return false;
   }
   const u32 version = header.U32();
   if (version != kIndexVersion) {
-    SetError(error, "world index: version " + std::to_string(version) + ", expected " +
-                        std::to_string(kIndexVersion));
+    SetError(error, "world index: version " + rx::ToString(version) + ", expected " +
+                        rx::ToString(kIndexVersion));
     return false;
   }
   header.U32();  // flags, reserved
@@ -528,11 +541,11 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
   const u64 expected_body = static_cast<u64>(cell_count) * kIndexCellBytes +
                             static_cast<u64>(payload_count) * kIndexPayloadBytes;
   if (bytes.size() - body_offset != expected_body) {
-    SetError(error, "world index: body is " + std::to_string(bytes.size() - body_offset) +
-                        " bytes, header describes " + std::to_string(expected_body));
+    SetError(error, "world index: body is " + rx::ToString(bytes.size() - body_offset) +
+                        " bytes, header describes " + rx::ToString(expected_body));
     return false;
   }
-  const std::span<const u8> body = bytes.subspan(body_offset);
+  const base::Span<const u8> body = bytes.subspan(body_offset);
   if (Checksum(bytes.first(body_offset - sizeof(u64)), body) != checksum) {
     SetError(error, "world index: checksum mismatch");
     return false;
@@ -542,7 +555,7 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
   // is not a finite, non-negative number is a corrupt header, and substituting
   // zero for it would read as that legitimate answer. Both fields are inside
   // the checksum, so reaching here with either wrong means a wrong cook.
-  if (!std::isfinite(cell_size) || cell_size < 0) {
+  if (!::isfinite(cell_size) || cell_size < 0) {
     SetError(error, "world index: grid cell size is not a finite, non-negative number");
     return false;
   }
@@ -576,25 +589,25 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
     cell.payload_first = cursor.U32();
     cell.payload_count = cursor.U32();
     if (!IsFinite(cell.minimum) || !IsFinite(cell.maximum)) {
-      SetError(error, "world index: cell " + std::to_string(cell.id) + " has non-finite bounds");
+      SetError(error, "world index: cell " + rx::ToString(cell.id) + " has non-finite bounds");
       return false;
     }
     if (cell.minimum.x > cell.maximum.x || cell.minimum.y > cell.maximum.y ||
         cell.minimum.z > cell.maximum.z) {
-      SetError(error, "world index: cell " + std::to_string(cell.id) + " has inverted bounds");
+      SetError(error, "world index: cell " + rx::ToString(cell.id) + " has inverted bounds");
       return false;
     }
     if (i > 0 && cell.id <= decoded.cells[i - 1].id) {
-      SetError(error, "world index: cells are not sorted by id at " + std::to_string(i));
+      SetError(error, "world index: cells are not sorted by id at " + rx::ToString(i));
       return false;
     }
     if (static_cast<u64>(cell.payload_first) + cell.payload_count > payload_count) {
-      SetError(error, "world index: cell " + std::to_string(cell.id) +
+      SetError(error, "world index: cell " + rx::ToString(cell.id) +
                           " spans past the payload table");
       return false;
     }
     if (cell.stable_id_count != 0 && cell.stable_id_first > ~u64{0} - cell.stable_id_count) {
-      SetError(error, "world index: cell " + std::to_string(cell.id) +
+      SetError(error, "world index: cell " + rx::ToString(cell.id) +
                           " stable-id range wraps past the end of the id space");
       return false;
     }
@@ -608,16 +621,18 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
   for (u32 i = 0; i < decoded.cells.size(); ++i) {
     if (decoded.cells[i].stable_id_count != 0) decoded.stable_id_order.push_back(i);
   }
-  std::sort(decoded.stable_id_order.begin(), decoded.stable_id_order.end(),
-            [&](u32 a, u32 b) {
-              return decoded.cells[a].stable_id_first < decoded.cells[b].stable_id_first;
-            });
+  // Stable: ties only on an overlap, and then cell order picks the ids named.
+  rx::StableSort(decoded.stable_id_order.data(),
+                 decoded.stable_id_order.data() + decoded.stable_id_order.size(),
+                 [&](u32 a, u32 b) {
+                   return decoded.cells[a].stable_id_first < decoded.cells[b].stable_id_first;
+                 });
   for (size_t i = 1; i < decoded.stable_id_order.size(); ++i) {
     const WorldCellRecord& previous = decoded.cells[decoded.stable_id_order[i - 1]];
     const WorldCellRecord& current = decoded.cells[decoded.stable_id_order[i]];
     if (previous.stable_id_first + previous.stable_id_count > current.stable_id_first) {
-      SetError(error, "world index: cells " + std::to_string(previous.id) + " and " +
-                          std::to_string(current.id) + " have overlapping stable-id ranges");
+      SetError(error, "world index: cells " + rx::ToString(previous.id) + " and " +
+                          rx::ToString(current.id) + " have overlapping stable-id ranges");
       return false;
     }
   }
@@ -631,7 +646,7 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
     const u8 tier = cursor.U8();
     cursor.U16();
     if (!ValidDomain(domain) || !ValidTier(tier) || tier == static_cast<u8>(Tier::kAbsent)) {
-      SetError(error, "world index: payload " + std::to_string(i) + " has an unknown domain/tier");
+      SetError(error, "world index: payload " + rx::ToString(i) + " has an unknown domain/tier");
       return false;
     }
     payload.domain = static_cast<Domain>(domain);
@@ -642,7 +657,7 @@ bool DecodeWorldIndex(std::span<const u8> bytes, WorldIndexData* out, std::strin
     SetError(error, "world index: truncated body");
     return false;
   }
-  *out = std::move(decoded);
+  *out = base::move(decoded);
   return true;
 }
 
@@ -654,29 +669,29 @@ u32 CellPayloadWriter::BeginArchetype(u32 row_count) {
   return static_cast<u32>(archetypes_.size() - 1);
 }
 
-void CellPayloadWriter::AddColumn(u32 archetype, std::string_view component, u32 stride,
-                                  u64 layout_hash, std::span<const u8> bytes) {
+void CellPayloadWriter::AddColumn(u32 archetype, base::StringRef component, u32 stride,
+                                  u64 layout_hash, base::Span<const u8> bytes) {
   PendingColumn column;
   column.archetype = archetype;
   column.component.assign(component);
   column.stride = stride;
   column.layout_hash = layout_hash;
   column.bytes.insert(column.bytes.end(), bytes.begin(), bytes.end());
-  columns_.push_back(std::move(column));
+  columns_.push_back(base::move(column));
 }
 
-void CellPayloadWriter::SetStableIds(u32 archetype, std::span<const u64> ids) {
+void CellPayloadWriter::SetStableIds(u32 archetype, base::Span<const u64> ids) {
   if (archetype >= archetypes_.size()) return;
   base::Vector<u64>& target = archetypes_[archetype].stable_ids;
   target.clear();
   target.insert(target.end(), ids.begin(), ids.end());
 }
 
-u32 CellPayloadWriter::AddPrototype(std::string_view name) {
+u32 CellPayloadWriter::AddPrototype(base::StringRef name) {
   for (size_t i = 0; i < prototypes_.size(); ++i) {
     if (prototypes_[i] == name) return static_cast<u32>(i);
   }
-  prototypes_.push_back(std::string(name));
+  prototypes_.push_back(base::String(name));
   return static_cast<u32>(prototypes_.size() - 1);
 }
 
@@ -685,7 +700,7 @@ void CellPayloadWriter::AddInstance(u64 stable_id, u32 prototype, Vec3 position,
   instances_.push_back({stable_id, prototype, position, rotation, scale});
 }
 
-bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const {
+bool CellPayloadWriter::Encode(base::Vector<u8>* out, base::String* error) const {
   if (!out) return false;
 
   const bool has_entities = !archetypes_.empty() || !columns_.empty();
@@ -705,7 +720,7 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
   for (const PendingColumn& column : columns_) {
     if (column.archetype >= archetypes_.size()) {
       SetError(error, "cell payload: column '" + column.component + "' names unknown archetype " +
-                          std::to_string(column.archetype));
+                          rx::ToString(column.archetype));
       return false;
     }
     if (column.stride == 0) {
@@ -715,16 +730,16 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
     const u64 expected = static_cast<u64>(column.stride) * archetypes_[column.archetype].row_count;
     if (column.bytes.size() != expected) {
       SetError(error, "cell payload: column '" + column.component + "' has " +
-                          std::to_string(column.bytes.size()) + " bytes, expected " +
-                          std::to_string(expected));
+                          rx::ToString(column.bytes.size()) + " bytes, expected " +
+                          rx::ToString(expected));
       return false;
     }
   }
   for (size_t a = 0; a < archetypes_.size(); ++a) {
     if (archetypes_[a].stable_ids.size() != archetypes_[a].row_count) {
-      SetError(error, "cell payload: archetype " + std::to_string(a) + " has " +
-                          std::to_string(archetypes_[a].stable_ids.size()) + " stable ids for " +
-                          std::to_string(archetypes_[a].row_count) + " rows");
+      SetError(error, "cell payload: archetype " + rx::ToString(a) + " has " +
+                          rx::ToString(archetypes_[a].stable_ids.size()) + " stable ids for " +
+                          rx::ToString(archetypes_[a].row_count) + " rows");
       return false;
     }
   }
@@ -736,26 +751,26 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
     seen_ids.insert(seen_ids.end(), archetype.stable_ids.begin(), archetype.stable_ids.end());
   }
   for (const WorldInstanceRecord& instance : instances_) seen_ids.push_back(instance.stable_id);
-  std::sort(seen_ids.begin(), seen_ids.end());
+  base::Sort(seen_ids.begin(), seen_ids.end());
   for (size_t i = 1; i < seen_ids.size(); ++i) {
     if (seen_ids[i] == seen_ids[i - 1]) {
-      SetError(error, "cell payload: stable id " + std::to_string(seen_ids[i]) + " appears twice");
+      SetError(error, "cell payload: stable id " + rx::ToString(seen_ids[i]) + " appears twice");
       return false;
     }
   }
 
   for (const WorldInstanceRecord& instance : instances_) {
     if (instance.prototype >= prototypes_.size()) {
-      SetError(error, "cell payload: instance " + std::to_string(instance.stable_id) +
-                          " names unknown prototype " + std::to_string(instance.prototype));
+      SetError(error, "cell payload: instance " + rx::ToString(instance.stable_id) +
+                          " names unknown prototype " + rx::ToString(instance.prototype));
       return false;
     }
     // A transform nothing can draw, refused where it was produced rather than
     // on the machine that tries to load the cell.
-    if (!IsFinite(instance.position) || !std::isfinite(instance.rotation.x) ||
-        !std::isfinite(instance.rotation.y) || !std::isfinite(instance.rotation.z) ||
-        !std::isfinite(instance.rotation.w) || !std::isfinite(instance.scale)) {
-      SetError(error, "cell payload: instance " + std::to_string(instance.stable_id) +
+    if (!IsFinite(instance.position) || !::isfinite(instance.rotation.x) ||
+        !::isfinite(instance.rotation.y) || !::isfinite(instance.rotation.z) ||
+        !::isfinite(instance.rotation.w) || !::isfinite(instance.scale)) {
+      SetError(error, "cell payload: instance " + rx::ToString(instance.stable_id) +
                           " has a non-finite transform");
       return false;
     }
@@ -770,7 +785,7 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
       if (column.archetype != a) continue;
       for (size_t seen = first; seen < ordered.size(); ++seen) {
         if (ordered[seen]->component == column.component) {
-          SetError(error, "cell payload: archetype " + std::to_string(a) + " lists component '" +
+          SetError(error, "cell payload: archetype " + rx::ToString(a) + " lists component '" +
                               column.component + "' twice");
           return false;
         }
@@ -817,7 +832,7 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
 
   base::Vector<u32> prototype_names;
   prototype_names.reserve(prototypes_.size());
-  for (const std::string& name : prototypes_) prototype_names.push_back(strings.Intern(name));
+  for (const base::String& name : prototypes_) prototype_names.push_back(strings.Intern(name));
 
   if (strings.bytes().size() > kMaximumStringBytes) {
     SetError(error, "cell payload: string table too large");
@@ -857,7 +872,7 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
   body.insert(body.end(), data.begin(), data.end());
 
   out->clear();
-  out->insert(out->end(), std::begin(kPayloadMagic), std::end(kPayloadMagic));
+  out->insert(out->end(), kPayloadMagic, kPayloadMagic + sizeof(kPayloadMagic));
   AppendU32(out, kPayloadVersion);
   AppendU32(out, static_cast<u32>(kind));
   AppendU64(out, cell_id_);
@@ -871,28 +886,28 @@ bool CellPayloadWriter::Encode(base::Vector<u8>* out, std::string* error) const 
   AppendU32(out, static_cast<u32>(instances_.size()));
   AppendU32(out, static_cast<u32>(strings.bytes().size()));
   AppendU64(out, data.size());
-  AppendU64(out, Checksum(std::span<const u8>(out->data(), out->size()),
-                          std::span<const u8>(body.data(), body.size())));
+  AppendU64(out, Checksum(base::Span<const u8>(out->data(), out->size()),
+                          base::Span<const u8>(body.data(), body.size())));
   out->insert(out->end(), body.begin(), body.end());
   return true;
 }
 
-std::string_view WorldCellPayload::String(u32 offset) const { return StringAt(strings, offset); }
+base::StringRef WorldCellPayload::String(u32 offset) const { return StringAt(strings, offset); }
 
-std::span<const u8> WorldCellPayload::ColumnBytes(const WorldColumnRecord& column) const {
+base::Span<const u8> WorldCellPayload::ColumnBytes(const WorldColumnRecord& column) const {
   if (column.data_offset > data.size() || data.size() - column.data_offset < column.data_bytes) {
     return {};
   }
-  return std::span<const u8>(data.data() + column.data_offset,
+  return base::Span<const u8>(data.data() + column.data_offset,
                              static_cast<size_t>(column.data_bytes));
 }
 
-std::span<const u64> WorldCellPayload::StableIds(const WorldArchetypeRecord& archetype) const {
+base::Span<const u64> WorldCellPayload::StableIds(const WorldArchetypeRecord& archetype) const {
   if (archetype.stable_id_index > stable_ids.size() ||
       stable_ids.size() - archetype.stable_id_index < archetype.row_count) {
     return {};
   }
-  return std::span<const u64>(stable_ids.data() + archetype.stable_id_index, archetype.row_count);
+  return base::Span<const u64>(stable_ids.data() + archetype.stable_id_index, archetype.row_count);
 }
 
 u32 WorldCellPayload::total_row_count() const {
@@ -901,24 +916,24 @@ u32 WorldCellPayload::total_row_count() const {
   return total;
 }
 
-bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::string* error) {
+bool DecodeCellPayload(base::Span<const u8> bytes, WorldCellPayload* out, base::String* error) {
   if (!out) return false;
   Cursor header(bytes);
   const u8* magic = nullptr;
   if (!header.Take(sizeof(kPayloadMagic), &magic) ||
-      std::memcmp(magic, kPayloadMagic, sizeof(kPayloadMagic)) != 0) {
+      base::MemCompare(magic, kPayloadMagic, sizeof(kPayloadMagic)) != 0) {
     SetError(error, "cell payload: not an RXCELLPL file");
     return false;
   }
   const u32 version = header.U32();
   if (version != kPayloadVersion) {
-    SetError(error, "cell payload: version " + std::to_string(version) + ", expected " +
-                        std::to_string(kPayloadVersion));
+    SetError(error, "cell payload: version " + rx::ToString(version) + ", expected " +
+                        rx::ToString(kPayloadVersion));
     return false;
   }
   const u32 kind = header.U32();
   if (kind > static_cast<u32>(PayloadKind::kInstances)) {
-    SetError(error, "cell payload: unknown kind " + std::to_string(kind));
+    SetError(error, "cell payload: unknown kind " + rx::ToString(kind));
     return false;
   }
   const u64 cell_id = header.U64();
@@ -965,11 +980,11 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
                             static_cast<u64>(instance_count) * kInstanceBytes + string_bytes +
                             data_bytes;
   if (bytes.size() - body_offset != expected_body) {
-    SetError(error, "cell payload: body is " + std::to_string(bytes.size() - body_offset) +
-                        " bytes, header describes " + std::to_string(expected_body));
+    SetError(error, "cell payload: body is " + rx::ToString(bytes.size() - body_offset) +
+                        " bytes, header describes " + rx::ToString(expected_body));
     return false;
   }
-  const std::span<const u8> body = bytes.subspan(body_offset);
+  const base::Span<const u8> body = bytes.subspan(body_offset);
   if (Checksum(bytes.first(body_offset - sizeof(u64)), body) != checksum) {
     SetError(error, "cell payload: checksum mismatch");
     return false;
@@ -995,13 +1010,13 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     record.column_count = cursor.U32();
     record.stable_id_offset = cursor.U64();
     if (static_cast<u64>(record.column_first) + record.column_count > column_count) {
-      SetError(error, "cell payload: archetype " + std::to_string(i) + " spans past the columns");
+      SetError(error, "cell payload: archetype " + rx::ToString(i) + " spans past the columns");
       return false;
     }
     const u64 stable_bytes = static_cast<u64>(record.row_count) * sizeof(u64);
     if (record.stable_id_offset > data_bytes ||
         data_bytes - record.stable_id_offset < stable_bytes) {
-      SetError(error, "cell payload: archetype " + std::to_string(i) +
+      SetError(error, "cell payload: archetype " + rx::ToString(i) +
                           " stable ids fall outside the data section");
       return false;
     }
@@ -1017,15 +1032,15 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     record.data_offset = cursor.U64();
     record.data_bytes = cursor.U64();
     if (record.name >= string_bytes) {
-      SetError(error, "cell payload: column " + std::to_string(i) + " name is out of range");
+      SetError(error, "cell payload: column " + rx::ToString(i) + " name is out of range");
       return false;
     }
     if (record.stride == 0) {
-      SetError(error, "cell payload: column " + std::to_string(i) + " has a zero stride");
+      SetError(error, "cell payload: column " + rx::ToString(i) + " has a zero stride");
       return false;
     }
     if (record.data_offset > data_bytes || data_bytes - record.data_offset < record.data_bytes) {
-      SetError(error, "cell payload: column " + std::to_string(i) +
+      SetError(error, "cell payload: column " + rx::ToString(i) +
                           " falls outside the data section");
       return false;
     }
@@ -1036,8 +1051,8 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     for (u32 c = 0; c < archetype.column_count; ++c) {
       const WorldColumnRecord& column = decoded.columns[archetype.column_first + c];
       if (column.data_bytes != static_cast<u64>(column.stride) * archetype.row_count) {
-        SetError(error, "cell payload: archetype " + std::to_string(a) + " column " +
-                            std::to_string(c) + " byte count disagrees with its row count");
+        SetError(error, "cell payload: archetype " + rx::ToString(a) + " column " +
+                            rx::ToString(c) + " byte count disagrees with its row count");
         return false;
       }
     }
@@ -1048,7 +1063,7 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     WorldPrototypeRecord record;
     record.name = cursor.U32();
     if (record.name >= string_bytes) {
-      SetError(error, "cell payload: prototype " + std::to_string(i) + " name is out of range");
+      SetError(error, "cell payload: prototype " + rx::ToString(i) + " name is out of range");
       return false;
     }
     decoded.prototypes.push_back(record);
@@ -1066,14 +1081,14 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
     record.rotation.w = cursor.F32();
     record.scale = cursor.F32();
     if (record.prototype >= prototype_count) {
-      SetError(error, "cell payload: instance " + std::to_string(i) + " names unknown prototype " +
-                          std::to_string(record.prototype));
+      SetError(error, "cell payload: instance " + rx::ToString(i) + " names unknown prototype " +
+                          rx::ToString(record.prototype));
       return false;
     }
-    if (!IsFinite(record.position) || !std::isfinite(record.rotation.x) ||
-        !std::isfinite(record.rotation.y) || !std::isfinite(record.rotation.z) ||
-        !std::isfinite(record.rotation.w) || !std::isfinite(record.scale)) {
-      SetError(error, "cell payload: instance " + std::to_string(i) +
+    if (!IsFinite(record.position) || !::isfinite(record.rotation.x) ||
+        !::isfinite(record.rotation.y) || !::isfinite(record.rotation.z) ||
+        !::isfinite(record.rotation.w) || !::isfinite(record.scale)) {
+      SetError(error, "cell payload: instance " + rx::ToString(i) +
                           " has a non-finite transform");
       return false;
     }
@@ -1108,14 +1123,14 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
   u64 total_ids = 0;
   for (const WorldArchetypeRecord& archetype : decoded.archetypes) total_ids += archetype.row_count;
   if (total_ids > kMaximumTotalRows) {
-    SetError(error, "cell payload: " + std::to_string(total_ids) +
+    SetError(error, "cell payload: " + rx::ToString(total_ids) +
                         " rows across its archetypes, more than a cell may hold");
     return false;
   }
   decoded.stable_ids.reserve(static_cast<size_t>(total_ids));
   for (WorldArchetypeRecord& archetype : decoded.archetypes) {
     archetype.stable_id_index = static_cast<u32>(decoded.stable_ids.size());
-    Cursor ids(std::span<const u8>(decoded.data.data(), decoded.data.size()));
+    Cursor ids(base::Span<const u8>(decoded.data.data(), decoded.data.size()));
     const u8* skipped = nullptr;
     ids.Take(static_cast<size_t>(archetype.stable_id_offset), &skipped);
     for (u32 row = 0; row < archetype.row_count; ++row) decoded.stable_ids.push_back(ids.U64());
@@ -1132,13 +1147,13 @@ bool DecodeCellPayload(std::span<const u8> bytes, WorldCellPayload* out, std::st
   seen.reserve(decoded.stable_ids.size() + decoded.instances.size());
   seen.insert(seen.end(), decoded.stable_ids.begin(), decoded.stable_ids.end());
   for (const WorldInstanceRecord& instance : decoded.instances) seen.push_back(instance.stable_id);
-  std::sort(seen.begin(), seen.end());
+  base::Sort(seen.begin(), seen.end());
   for (size_t i = 1; i < seen.size(); ++i) {
     if (seen[i] != seen[i - 1]) continue;
-    SetError(error, "cell payload: stable id " + std::to_string(seen[i]) + " appears twice");
+    SetError(error, "cell payload: stable id " + rx::ToString(seen[i]) + " appears twice");
     return false;
   }
-  *out = std::move(decoded);
+  *out = base::move(decoded);
   return true;
 }
 

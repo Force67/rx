@@ -1,9 +1,12 @@
 #include "render/gi/ddgi.h"
 
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/gi/raytracing.h"
 #include "shaders/ddgi_blend_cs_hlsl.h"
 #include "shaders/ddgi_border_cs_hlsl.h"
@@ -57,12 +60,12 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
   f32 u3 = static_cast<f32>(hash(frame_index + 2) & 0xffffff) / 16777215.0f;
   f32 angle = u1 * 6.2831853f;
   f32 z = u2 * 2.0f - 1.0f;
-  f32 r = std::sqrt(std::max(0.0f, 1.0f - z * z));
+  f32 r = ::sqrt(rx::Max(0.0f, 1.0f - z * z));
   f32 phi = u3 * 6.2831853f;
-  Vec3 axis{r * std::cos(phi), r * std::sin(phi), z};
+  Vec3 axis{r * ::cos(phi), r * ::sin(phi), z};
 
-  f32 c = std::cos(angle);
-  f32 s = std::sin(angle);
+  f32 c = ::cos(angle);
+  f32 s = ::sin(angle);
   f32 t = 1.0f - c;
   f32 rows[12] = {
       t * axis.x * axis.x + c,          t * axis.x * axis.y - s * axis.z,
@@ -72,15 +75,15 @@ void FrameRotation(u32 frame_index, f32 out_rows[12]) {
       t * axis.x * axis.z - s * axis.y, t * axis.y * axis.z + s * axis.x,
       t * axis.z * axis.z + c,          0,
   };
-  std::memcpy(out_rows, rows, sizeof(rows));
+  base::MemCopy(out_rows, rows, sizeof(rows));
 }
 
 }  // namespace
 
-std::unique_ptr<DdgiSystem> DdgiSystem::Create(Device& device, TextureView sky_view,
+base::UniquePointer<DdgiSystem> DdgiSystem::Create(Device& device, TextureView sky_view,
                                                SamplerHandle sky_sampler,
                                                BindlessRegistry& bindless) {
-  auto ddgi = std::unique_ptr<DdgiSystem>(new DdgiSystem(device));
+  auto ddgi = base::UniquePointer<DdgiSystem>(new DdgiSystem(device));
   ddgi->sky_view_ = sky_view;
   ddgi->sky_sampler_ = sky_sampler;
   ddgi->bindless_ = &bindless;
@@ -173,9 +176,9 @@ void DdgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   // every probe represents, so history resets and re-converges.
   f32 spacing = settings_.probe_spacing;
   Vec3 extent{(kProbesX - 1) * spacing, (kProbesY - 1) * spacing, (kProbesZ - 1) * spacing};
-  Vec3 origin{std::floor((camera.x - extent.x * 0.5f) / spacing) * spacing,
-              std::floor((camera.y - extent.y * 0.5f) / spacing) * spacing,
-              std::floor((camera.z - extent.z * 0.5f) / spacing) * spacing};
+  Vec3 origin{::floor((camera.x - extent.x * 0.5f) / spacing) * spacing,
+              ::floor((camera.y - extent.y * 0.5f) / spacing) * spacing,
+              ::floor((camera.z - extent.z * 0.5f) / spacing) * spacing};
   bool snapped = origin.x != origin_.x || origin.y != origin_.y || origin.z != origin_.z;
   origin_ = origin;
   bool reset = !history_valid_ || snapped;
@@ -195,7 +198,7 @@ void DdgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
   volume.params[2] = spacing * 4.0f;  // max ray distance
   volume.params[3] = settings_.energy_scale;
   GpuBuffer& volume_buffer = volume_buffers_[frame_index % 2];
-  std::memcpy(volume_buffer.mapped, &volume, sizeof(volume));
+  base::MemCopy(volume_buffer.mapped, &volume, sizeof(volume));
 
   RaysPush rays_push{};
   FrameRotation(frame_index, rays_push.rotation);
@@ -244,7 +247,7 @@ void DdgiSystem::AddToGraph(RenderGraph& graph, RayTracingContext& raytracing, u
         // Blend rays into both atlases.
         auto blend = [&](TextureView atlas_view, u32 mode, u32 width, u32 height) {
           BlendPush push{};
-          std::memcpy(push.rotation, rays_push.rotation, sizeof(push.rotation));
+          base::MemCopy(push.rotation, rays_push.rotation, sizeof(push.rotation));
           push.mode = mode;
           push.ray_count = kRaysPerProbe;
           push.reset = reset ? 1u : 0u;

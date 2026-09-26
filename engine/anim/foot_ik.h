@@ -1,10 +1,10 @@
 #ifndef RX_ANIM_FOOT_IK_H_
 #define RX_ANIM_FOOT_IK_H_
 
-#include <functional>
 
 #include "anim/pose.h"
 #include "asset/skeleton.h"
+#include "base/functional/function.h"
 #include "core/math.h"
 
 namespace rx::anim {
@@ -12,7 +12,7 @@ namespace rx::anim {
 // Raycast straight down from a model-space origin; on a hit fill the model-space
 // ground point and surface normal. The engine wraps the physics world (which
 // works in engine/world space) and converts to/from the actor model space.
-using GroundQuery = std::function<bool(const Vec3& origin, Vec3* hit, Vec3* normal)>;
+using GroundQuery = base::Function<bool(const Vec3& origin, Vec3* hit, Vec3* normal)>;
 
 // SOTA-ish foot IK for a biped: drops the pelvis so the lower foot can reach,
 // then analytic two-bone IK plants each foot on the ground and pitches it to

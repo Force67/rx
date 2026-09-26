@@ -1,12 +1,12 @@
 #ifndef RX_NET_PROTOCOL_H_
 #define RX_NET_PROTOCOL_H_
 
-#include <optional>
-#include <string>
-#include <vector>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/vector.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
 
@@ -50,10 +50,10 @@ enum class DisconnectReason : u8 {
 // both sides must agree on it, engine and game payloads alike.
 struct RX_NET_EXPORT ClientJoin {
   u32 protocol = 0;
-  std::string player_name;
+  base::String player_name;
 
-  std::vector<u8> Encode() const;
-  static std::optional<ClientJoin> Decode(const u8* data, size_t size);
+  base::Vector<u8> Encode() const;
+  static base::Optional<ClientJoin> Decode(const u8* data, size_t size);
 };
 
 // Server reply admitting a client to the session.
@@ -65,17 +65,17 @@ struct RX_NET_EXPORT JoinAccept {
   u16 tick_rate = 60;
   u16 snapshot_rate = 20;
 
-  std::vector<u8> Encode() const;
-  static std::optional<JoinAccept> Decode(const u8* data, size_t size);
+  base::Vector<u8> Encode() const;
+  static base::Optional<JoinAccept> Decode(const u8* data, size_t size);
 };
 
 // Server reply turning a client away.
 struct RX_NET_EXPORT JoinRefuse {
   DisconnectReason reason = DisconnectReason::kUnknown;
-  std::string detail;
+  base::String detail;
 
-  std::vector<u8> Encode() const;
-  static std::optional<JoinRefuse> Decode(const u8* data, size_t size);
+  base::Vector<u8> Encode() const;
+  static base::Optional<JoinRefuse> Decode(const u8* data, size_t size);
 };
 
 // State of one replicated entity: the transform plus two opaque payload slots.
@@ -102,8 +102,8 @@ struct RX_NET_EXPORT Snapshot {
   base::Vector<EntityState> entities;
   base::Vector<u64> despawned;
 
-  std::vector<u8> Encode() const;
-  static std::optional<Snapshot> Decode(const u8* data, size_t size);
+  base::Vector<u8> Encode() const;
+  static base::Optional<Snapshot> Decode(const u8* data, size_t size);
 };
 
 // Client-to-server input for its player entity.
@@ -116,8 +116,8 @@ struct RX_NET_EXPORT PlayerInput {
   f32 pitch = 0;
   u32 buttons = 0;
 
-  std::vector<u8> Encode() const;
-  static std::optional<PlayerInput> Decode(const u8* data, size_t size);
+  base::Vector<u8> Encode() const;
+  static base::Optional<PlayerInput> Decode(const u8* data, size_t size);
 };
 
 // One player's interest bubble as the server sees it, replicated to every
@@ -133,8 +133,8 @@ struct RX_NET_EXPORT BubbleState {
   bool operator==(const BubbleState&) const = default;
 };
 
-RX_NET_EXPORT std::vector<u8> EncodeBubbleSync(const base::Vector<BubbleState>& bubbles);
-RX_NET_EXPORT std::optional<base::Vector<BubbleState>> DecodeBubbleSync(const u8* data,
+RX_NET_EXPORT base::Vector<u8> EncodeBubbleSync(const base::Vector<BubbleState>& bubbles);
+RX_NET_EXPORT base::Optional<base::Vector<BubbleState>> DecodeBubbleSync(const u8* data,
                                                                         size_t size);
 
 }  // namespace rx::net

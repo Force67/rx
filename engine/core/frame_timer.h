@@ -1,7 +1,7 @@
 #ifndef RX_CORE_FRAME_TIMER_H_
 #define RX_CORE_FRAME_TIMER_H_
 
-#include <chrono>
+#include "base/time/time.h"
 
 #include "core/export.h"
 #include "core/types.h"
@@ -31,14 +31,12 @@ class RX_CORE_EXPORT FrameTimer {
   u64 frame_index() const { return frame_index_; }
 
  private:
-  using Clock = std::chrono::steady_clock;
-
   f64 fixed_step_;
   f64 fixed_delta_ = 0.0;  // > 0 = lockstep
   f64 accumulator_ = 0.0;
   f64 frame_delta_ = 0.0;
   u64 frame_index_ = 0;
-  Clock::time_point last_;
+  base::TimeTicks last_;
 };
 
 }  // namespace rx

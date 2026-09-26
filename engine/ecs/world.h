@@ -1,18 +1,30 @@
 #ifndef RX_ECS_WORLD_H_
 #define RX_ECS_WORLD_H_
 
-#include <tuple>
-#include <utility>
-
 #include <base/containers/unordered_map.h>
 #include <base/containers/vector.h>
 #include <base/memory/unique_pointer.h>
 
+#include "base/algorithm.h"
+#include "base/memory/move.h"
+#include "base/meta/traits.h"
 #include "ecs/archetype.h"
 #include "ecs/component.h"
 #include "ecs/entity.h"
 
 namespace rx::ecs {
+
+namespace detail {
+// Position of T in Us. Each's component types are distinct, as the query
+// that fetches one column per type requires.
+template <typename T, typename... Us>
+constexpr mem_size IndexOf() {
+  mem_size index = 0;
+  bool found = false;
+  ((found = found || base::is_same_v<T, Us>, index += found ? 0 : 1), ...);
+  return index;
+}
+}  // namespace detail
 
 // A run of freshly appended rows in one archetype, handed to a
 // World::CreateBatch callback. Component memory is uninitialized, exactly as
@@ -49,7 +61,7 @@ class RX_ECS_EXPORT World {
   template <typename T>
   T& Add(Entity entity, T value) {
     void* slot = AddRaw(entity, GetComponentId<T>());
-    return *new (slot) T(std::move(value));
+    return *new (slot) T(base::move(value));
   }
 
   template <typename T>
@@ -75,7 +87,8 @@ class RX_ECS_EXPORT World {
   void Each(Fn&& fn) {
     static_assert(sizeof...(Ts) > 0);
     ComponentId required[sizeof...(Ts)] = {GetComponentId<Ts>()...};
-    std::sort(std::begin(required), std::end(required));
+    // Component ids in one query are distinct, so any correct sort agrees.
+    base::Sort(required, required + sizeof...(Ts));
     // Archetypes themselves are stable, but structural changes in a callback
     // may reallocate archetypes_ or shrink the current chunk. Iterate the
     // original archetype set by pointer and revalidate the row each time.
@@ -91,11 +104,9 @@ class RX_ECS_EXPORT World {
            row < initial_row_count && row < archetype->row_count(); ++row) {
         const u32 chunk = row / rows_per_chunk;
         const u32 in_chunk = row % rows_per_chunk;
-        std::tuple<Ts*...> columns = [&]<size_t... Is>(std::index_sequence<Is...>) {
-          return std::tuple<Ts*...>{
-              static_cast<Ts*>(archetype->ChunkColumnData(chunk, indices[Is]))...};
-        }(std::index_sequence_for<Ts...>{});
-        fn(archetype->entity_at(row), std::get<Ts*>(columns)[in_chunk]...);
+        fn(archetype->entity_at(row),
+           static_cast<Ts*>(archetype->ChunkColumnData(
+               chunk, indices[detail::IndexOf<Ts, Ts...>()]))[in_chunk]...);
       }
     }
   }

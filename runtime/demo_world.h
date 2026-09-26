@@ -1,12 +1,12 @@
 #ifndef RX_RUNTIME_DEMO_WORLD_H_
 #define RX_RUNTIME_DEMO_WORLD_H_
 
-#include <string>
 
 #include <base/containers/vector.h>
 #include <base/memory/unique_pointer.h>
 
 #include "asset/vfs.h"
+#include "base/strings/xstring.h"
 #include "ecs/world.h"
 #include "render/core/renderer.h"
 #include "world/world_claim.h"
@@ -38,7 +38,7 @@ class WorldStreamDemo {
   // will not load. `world_name` is the name the archive was baked under, which
   // is also the directory the index sits in.
   bool Init(asset::Vfs& vfs, render::Renderer* renderer, ecs::World& ecs, bool headless,
-            const std::string& archive_path, const std::string& world_name);
+            const base::String& archive_path, const base::String& world_name);
 
   bool active() const { return streamer_ != nullptr; }
 
@@ -56,7 +56,7 @@ class WorldStreamDemo {
   void Shutdown();
 
   // Overlay line: what is resident, what is in flight, what failed.
-  std::string StatusLine() const;
+  base::String StatusLine() const;
 
  private:
   void RegisterMeshes(render::Renderer* renderer, bool headless);
@@ -65,7 +65,7 @@ class WorldStreamDemo {
   base::UniquePointer<world::CellLoader> loader_;
   base::UniquePointer<world::WorldStreamer> streamer_;
   world::ClaimSet claims_;
-  std::string world_name_;
+  base::String world_name_;
 
   Vec3 previous_position_;
   bool have_previous_ = false;

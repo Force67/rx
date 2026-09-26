@@ -1,9 +1,9 @@
 #ifndef RX_AUDIO_FFMPEG_CODEC_H_
 #define RX_AUDIO_FFMPEG_CODEC_H_
 
-#include <memory>
 
 #include "audio/audio_clip.h"
+#include "base/memory/unique_pointer.h"
 #include "core/types.h"
 
 namespace rx::audio {
@@ -19,7 +19,7 @@ namespace rx::audio {
 // a build option and out of the default build means the CI matrix stays free of a
 // heavyweight system dependency; enable it (and ship its shared libraries beside
 // the executable) to hear the games' compressed music, ambience and voice.
-std::unique_ptr<Decoder> OpenFfmpegDecoder(ByteSpan bytes);
+base::UniquePointer<Decoder> OpenFfmpegDecoder(ByteSpan bytes);
 
 // Whether the FFmpeg backend is compiled in. False for the stub.
 bool FfmpegAvailable();

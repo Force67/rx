@@ -1,5 +1,6 @@
 #include "core/window.h"
 
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 
 namespace rx {
@@ -24,15 +25,15 @@ class HeadlessWindow final : public Window {
 }  // namespace
 
 #if defined(RX_HAS_SDL3)
-std::unique_ptr<Window> CreateSdl3Window(const WindowDesc& desc);
+base::UniquePointer<Window> CreateSdl3Window(const WindowDesc& desc);
 #endif
 
-std::unique_ptr<Window> Window::Create(const WindowDesc& desc) {
+base::UniquePointer<Window> Window::Create(const WindowDesc& desc) {
 #if defined(RX_HAS_SDL3)
   if (auto window = CreateSdl3Window(desc)) return window;
 #endif
   RX_WARN("no window backend available, running headless");
-  return std::make_unique<HeadlessWindow>(desc);
+  return base::MakeUnique<HeadlessWindow>(desc);
 }
 
 }  // namespace rx

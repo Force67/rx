@@ -1,10 +1,12 @@
 #include "render/post/reference_compare.h"
 
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <string.h>
 
 #include <stb_image.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
 #include "shaders/reference_compare_cs_hlsl.h"
 
@@ -60,7 +62,7 @@ bool ReferenceCompare::Initialize(Device& device) {
     pipeline_ = {};
     return false;
   }
-  std::memset(stats_buffer_.mapped, 0, stats_bytes);
+  base::MemSet(stats_buffer_.mapped, 0, stats_bytes);
 
   // "No mask loaded" must mean "every region is everywhere", not "nothing is
   // anything" - otherwise turning stats on before authoring a mask silently
@@ -70,11 +72,11 @@ bool ReferenceCompare::Initialize(Device& device) {
   if (white_mask_) {
     const u8 px[4] = {255, 255, 255, 255};
     GpuBuffer staging = device.CreateBuffer(4, kBufferUsageTransferSrc, true);
-    std::memcpy(staging.mapped, px, 4);
+    base::MemCopy(staging.mapped, px, 4);
     device.ImmediateSubmit([&](CommandList& cmd) {
       cmd.Barrier(Transition(white_mask_, ResourceState::kUndefined, ResourceState::kCopyDst));
       BufferTextureCopy region{};
-      cmd.CopyBufferToTexture(staging, white_mask_, {&region, 1});
+      cmd.CopyBufferToTexture(staging, white_mask_, base::Span(&region, 1));
       cmd.Barrier(Transition(white_mask_, ResourceState::kCopyDst,
                              ResourceState::kShaderReadFragment));
     });
@@ -113,11 +115,11 @@ GpuImage UploadFloatImage(Device& device, const f32* rgba, u32 width, u32 height
     device.DestroyImage(image);
     return {};
   }
-  std::memcpy(staging.mapped, rgba, bytes);
+  base::MemCopy(staging.mapped, rgba, bytes);
   device.ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
     BufferTextureCopy region{};
-    cmd.CopyBufferToTexture(staging, image, {&region, 1});
+    cmd.CopyBufferToTexture(staging, image, base::Span(&region, 1));
     cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadFragment));
   });
   device.DestroyBuffer(staging);
@@ -126,7 +128,7 @@ GpuImage UploadFloatImage(Device& device, const f32* rgba, u32 width, u32 height
 
 }  // namespace
 
-bool ReferenceCompare::LoadReference(Device& device, const std::string& path) {
+bool ReferenceCompare::LoadReference(Device& device, const base::String& path) {
   int w = 0, h = 0, comp = 0;
   // stbi_loadf returns scene-linear for .hdr and de-gammas 8-bit sources on the
   // way in, which is the contract this pass needs: everything downstream of
@@ -145,7 +147,7 @@ bool ReferenceCompare::LoadReference(Device& device, const std::string& path) {
   return true;
 }
 
-bool ReferenceCompare::LoadRegionMask(Device& device, const std::string& path) {
+bool ReferenceCompare::LoadRegionMask(Device& device, const base::String& path) {
   int w = 0, h = 0, comp = 0;
   f32* pixels = stbi_loadf(path.c_str(), &w, &h, &comp, 4);
   if (!pixels) {

@@ -5,13 +5,15 @@
 // was cancelled, and a cook whose component layout no longer matches the build.
 #include "world/world_stream.h"
 
-#include <cstdio>
-#include <cstring>
-#include <filesystem>
-#include <string>
+#include <stdio.h>
+#include <string.h>
 
 #include "asset/pack.h"
 #include "asset/vfs.h"
+#include "base/containers/span.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 #include "ecs/world.h"
 #include "scene/components.h"
 #include "world/world_map.h"
@@ -19,7 +21,7 @@
 
 namespace {
 
-namespace fs = std::filesystem;
+namespace fs = rx::fs;
 using namespace rx::world;
 using rx::asset::PackWriter;
 using rx::asset::Vfs;
@@ -37,7 +39,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                        \
   do {                                                                     \
     if (!(cond)) {                                                         \
-      std::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++g_failures;                                                        \
     }                                                                      \
   } while (0)
@@ -96,14 +98,14 @@ base::Vector<u8> BakeGameplay(u64 cell, const BakeOptions& options,
                      : options.entity_reference_component ? "Parent"
                                                          : "Transform";
   writer.AddColumn(archetype, name, stride, layout,
-                   std::span<const u8>(reinterpret_cast<const u8*>(transforms.data()),
+                   base::Span<const u8>(reinterpret_cast<const u8*>(transforms.data()),
                                        transforms.size() * sizeof(Transform)));
-  writer.SetStableIds(archetype, std::span<const u64>(ids.data(), ids.size()));
+  writer.SetStableIds(archetype, base::Span<const u64>(ids.data(), ids.size()));
 
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   if (!writer.Encode(&bytes, &error)) {
-    std::fprintf(stderr, "FAIL: baking gameplay: %s\n", error.c_str());
+    ::fprintf(stderr, "FAIL: baking gameplay: %s\n", error.c_str());
     ++g_failures;
   }
   return bytes;
@@ -118,9 +120,9 @@ base::Vector<u8> BakeRepresentation(u64 cell, const BakeOptions& options) {
                        {static_cast<f32>(cell), static_cast<f32>(i), 0}, {0, 0, 0, 1}, 1.0f);
   }
   base::Vector<u8> bytes;
-  std::string error;
+  base::String error;
   if (!writer.Encode(&bytes, &error)) {
-    std::fprintf(stderr, "FAIL: baking representation: %s\n", error.c_str());
+    ::fprintf(stderr, "FAIL: baking representation: %s\n", error.c_str());
     ++g_failures;
   }
   return bytes;
@@ -128,7 +130,7 @@ base::Vector<u8> BakeRepresentation(u64 cell, const BakeOptions& options) {
 
 // A 2x2 grid of 64 m cells on XZ, each with a gameplay and a representation
 // payload, packed into a real .rxp and mounted at world://.
-void MountWorld(const fs::path& archive, Vfs* vfs, const BakeOptions& options = {}) {
+void MountWorld(base::StringRef archive, Vfs* vfs, const BakeOptions& options = {}) {
   WorldIndexWriter index;
   index.set_world_id(7);
   index.set_bake_id(kBakeId);
@@ -156,14 +158,14 @@ void MountWorld(const fs::path& archive, Vfs* vfs, const BakeOptions& options = 
     }
   }
   base::Vector<u8> index_bytes;
-  std::string error;
+  base::String error;
   CHECK(index.Encode(&index_bytes, &error));
-  pack.Add("city/city.rxworld", std::move(index_bytes));
-  CHECK(pack.WriteTo(archive.string()));
+  pack.Add("city/city.rxworld", base::move(index_bytes));
+  CHECK(pack.WriteTo(archive));
 
-  auto provider = rx::asset::MakePackFileProvider(archive.string());
+  auto provider = rx::asset::MakePackFileProvider(archive);
   CHECK(provider != nullptr);
-  if (provider) vfs->Mount("world", std::move(provider));
+  if (provider) vfs->Mount("world", base::move(provider));
 }
 
 WorldStreamPolicy TestPolicy(u32 rows_per_commit = 4096) {
@@ -191,7 +193,7 @@ WorldStreamObservation At(f32 x, f32 z) {
 
 void Tick(WorldStreamer* streamer, const WorldStreamObservation& observer, u32 count) {
   for (u32 i = 0; i < count; ++i) {
-    streamer->Update(std::span<const WorldStreamObservation>(&observer, 1));
+    streamer->Update(base::Span<const WorldStreamObservation>(&observer, 1));
   }
 }
 
@@ -221,7 +223,7 @@ class QueuedLoader final : public CellLoader {
   }
 
   void Poll(base::Vector<CellLoadResult>* out) override {
-    for (CellLoadResult& result : ready_) out->push_back(std::move(result));
+    for (CellLoadResult& result : ready_) out->push_back(base::move(result));
     ready_.clear();
   }
 
@@ -254,7 +256,7 @@ class QueuedLoader final : public CellLoader {
       result.ok = map_.ReadPayload(vfs_, request.cell, request.domain, request.tier,
                                    &result.payload, &result.error);
     }
-    ready_.push_back(std::move(result));
+    ready_.push_back(base::move(result));
   }
 
   const WorldMap& map_;
@@ -276,12 +278,12 @@ void Settle(WorldStreamer* streamer, QueuedLoader* loader, const WorldStreamObse
   }
 }
 
-void TestStreamInAndOut(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestStreamInAndOut(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "world.rxp", &vfs);
+  MountWorld(fs::Join(directory, "world.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -358,12 +360,12 @@ void TestStreamInAndOut(const fs::path& directory) {
   CHECK(reloaded_transform && reloaded_transform->position[1] == 3.0f);
 }
 
-void TestWideBubbleLoadsEveryCell(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestWideBubbleLoadsEveryCell(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "wide.rxp", &vfs);
+  MountWorld(fs::Join(directory, "wide.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -387,12 +389,12 @@ void TestWideBubbleLoadsEveryCell(const fs::path& directory) {
   }
 }
 
-void TestBudgetedCommitIsNotResolvableHalfway(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestBudgetedCommitIsNotResolvableHalfway(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "budget.rxp", &vfs);
+  MountWorld(fs::Join(directory, "budget.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -424,12 +426,12 @@ void TestBudgetedCommitIsNotResolvableHalfway(const fs::path& directory) {
   CHECK(streamer.stats().entities == kEntitiesPerCell);
 }
 
-void TestUnloadDuringCommitDestroysExactlyWhatWasMade(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestUnloadDuringCommitDestroysExactlyWhatWasMade(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "interrupt.rxp", &vfs);
+  MountWorld(fs::Join(directory, "interrupt.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -460,12 +462,12 @@ void TestUnloadDuringCommitDestroysExactlyWhatWasMade(const fs::path& directory)
   CHECK(world.IsAlive(bystander));
 }
 
-void TestLateResultAfterCancelIsNotPublished(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestLateResultAfterCancelIsNotPublished(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "late.rxp", &vfs);
+  MountWorld(fs::Join(directory, "late.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -504,7 +506,7 @@ void TestLateResultAfterCancelIsNotPublished(const fs::path& directory) {
   CHECK(world.IsAlive(streamer.Resolve(EntityStableId(0, 0))));
 }
 
-void TestSchemaDriftIsRefusedLoudly(const fs::path& directory) {
+void TestSchemaDriftIsRefusedLoudly(base::StringRef directory) {
   struct Case {
     const char* name;
     BakeOptions options;
@@ -521,12 +523,12 @@ void TestSchemaDriftIsRefusedLoudly(const fs::path& directory) {
   };
 
   for (const Case& test_case : cases) {
-    const fs::path sub = directory / test_case.name;
-    fs::create_directories(sub);
+    const base::String sub = fs::Join(directory, test_case.name);
+    fs::CreateDirectories(sub);
     Vfs vfs;
-    MountWorld(sub / "drift.rxp", &vfs, test_case.options);
+    MountWorld(fs::Join(sub, "drift.rxp"), &vfs, test_case.options);
     WorldMap map;
-    std::string error;
+    base::String error;
     CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
     rx::ecs::World world;
@@ -539,26 +541,26 @@ void TestSchemaDriftIsRefusedLoudly(const fs::path& directory) {
     CHECK(streamer.stats().entities == 0);
     CHECK(world.entity_count() == 0);
     bool named = false;
-    for (const std::string& message : streamer.errors()) {
-      if (message.find(test_case.expect) != std::string::npos) named = true;
+    for (const base::String& message : streamer.errors()) {
+      if (message.find(test_case.expect) != base::String::npos) named = true;
     }
     if (!named) {
-      std::fprintf(stderr, "FAIL: %s drift produced no message mentioning '%s'\n", test_case.name,
+      ::fprintf(stderr, "FAIL: %s drift produced no message mentioning '%s'\n", test_case.name,
                    test_case.expect);
-      for (const std::string& message : streamer.errors()) {
-        std::fprintf(stderr, "  had: %s\n", message.c_str());
+      for (const base::String& message : streamer.errors()) {
+        ::fprintf(stderr, "  had: %s\n", message.c_str());
       }
       ++g_failures;
     }
   }
 }
 
-void TestPromoteAnInstance(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestPromoteAnInstance(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "promote.rxp", &vfs);
+  MountWorld(fs::Join(directory, "promote.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -605,12 +607,12 @@ void TestPromoteAnInstance(const fs::path& directory) {
   CHECK(!world.IsAlive(promoted));
 }
 
-void TestShutdownEmptiesTheWorld(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestShutdownEmptiesTheWorld(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "shutdown.rxp", &vfs);
+  MountWorld(fs::Join(directory, "shutdown.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -626,12 +628,12 @@ void TestShutdownEmptiesTheWorld(const fs::path& directory) {
   CHECK(world.entity_count() == 0);
 }
 
-void TestOverlayShapesTheCellOnTheWayIn(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestOverlayShapesTheCellOnTheWayIn(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "overlay.rxp", &vfs);
+  MountWorld(fs::Join(directory, "overlay.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   WorldOverlay overlay;
@@ -700,12 +702,12 @@ void TestOverlayShapesTheCellOnTheWayIn(const fs::path& directory) {
 
 // An overlay recorded against a different cook names different rows. Applying
 // it would not fail: it would delete and move whatever now carries those ids.
-void TestOverlayFromAnotherBakeIsRefused(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestOverlayFromAnotherBakeIsRefused(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "mismatch.rxp", &vfs);
+  MountWorld(fs::Join(directory, "mismatch.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -733,12 +735,12 @@ void TestOverlayFromAnotherBakeIsRefused(const fs::path& directory) {
   CHECK(streamer.SetOverlay(nullptr));
 }
 
-void TestOverlayThatDeletesEverythingLeavesNothing(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestOverlayThatDeletesEverythingLeavesNothing(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "wipe.rxp", &vfs);
+  MountWorld(fs::Join(directory, "wipe.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   WorldOverlay overlay;
@@ -797,7 +799,7 @@ void TestClaimSet() {
   claims.Explain(2, ~u32{0}, &why);
   CHECK(why.size() == 2);
   CHECK(why.size() == 2 && why[0].kind == ClaimKind::kHard);
-  CHECK(why.size() == 2 && std::string(why[0].reason) == "the player is standing on it");
+  CHECK(why.size() == 2 && base::String(why[0].reason) == "the player is standing on it");
 
   // Pressure revokes the weak and never the hard.
   claims.set_weakest_honored(ClaimKind::kSoft);
@@ -821,12 +823,12 @@ void TestClaimSet() {
   CHECK(claims.empty());
 }
 
-void TestClaimKeepsACellResident(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestClaimKeepsACellResident(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "claims.rxp", &vfs);
+  MountWorld(fs::Join(directory, "claims.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -876,14 +878,14 @@ void TestClaimKeepsACellResident(const fs::path& directory) {
 // observer closes on it. Without this the near tier is unreachable: a cell
 // always enters at roughly the load radius, which is by definition the far
 // band, and would keep that tier for as long as it stayed resident.
-void TestTierRefinesWhenTheObserverCloses(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestTierRefinesWhenTheObserverCloses(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
   BakeOptions options;
   options.tiered = true;
-  MountWorld(directory / "tiers.rxp", &vfs, options);
+  MountWorld(fs::Join(directory, "tiers.rxp"), &vfs, options);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -936,12 +938,12 @@ void TestTierRefinesWhenTheObserverCloses(const fs::path& directory) {
 // A world baked at one tier per domain must not churn: both bands resolve to
 // the same payload, so nothing about the region changes as the observer moves
 // and the cell is never reloaded.
-void TestSingleTierWorldNeverReloads(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestSingleTierWorldNeverReloads(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "single.rxp", &vfs);  // gameplay at kStandard only
+  MountWorld(fs::Join(directory, "single.rxp"), &vfs);  // gameplay at kStandard only
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -969,14 +971,14 @@ void TestSingleTierWorldNeverReloads(const fs::path& directory) {
 // A cook error is deterministic: the same payload fails the same way every
 // time. Left alone the planner retries it for as long as the cell is in range,
 // re-reading and re-decoding broken bytes forever.
-void TestPersistentFailuresStopRetrying(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestPersistentFailuresStopRetrying(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
   BakeOptions options;
   options.corrupt_layout_hash = true;
-  MountWorld(directory / "broken.rxp", &vfs, options);
+  MountWorld(fs::Join(directory, "broken.rxp"), &vfs, options);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -995,7 +997,7 @@ void TestPersistentFailuresStopRetrying(const fs::path& directory) {
   // slack means the retry loop is still running.
   const u32 attempts = loader.begun();
   if (attempts > 8) {
-    std::fprintf(stderr, "FAIL: a broken cell was read %u times in 400 ticks\n", attempts);
+    ::fprintf(stderr, "FAIL: a broken cell was read %u times in 400 ticks\n", attempts);
     ++g_failures;
   }
 
@@ -1007,12 +1009,12 @@ void TestPersistentFailuresStopRetrying(const fs::path& directory) {
 
 // Teardown is budgeted on both paths. A cancel is the observer moving fast,
 // which is exactly when a whole cell destroyed in one frame would show.
-void TestTeardownRespectsTheBudget(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestTeardownRespectsTheBudget(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "teardown.rxp", &vfs);
+  MountWorld(fs::Join(directory, "teardown.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1047,14 +1049,14 @@ void TestTeardownRespectsTheBudget(const fs::path& directory) {
 // claim's own source stands at the cell's middle, so taking or dropping a lease
 // would evict and rebuild a cell that was already resident and correct - and a
 // lease that is re-issued periodically would put the cell on a treadmill.
-void TestClaimDoesNotChangeAResidentCellsTier(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestClaimDoesNotChangeAResidentCellsTier(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
   BakeOptions options;
   options.tiered = true;
-  MountWorld(directory / "claimtier.rxp", &vfs, options);
+  MountWorld(fs::Join(directory, "claimtier.rxp"), &vfs, options);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1110,14 +1112,14 @@ void TestClaimDoesNotChangeAResidentCellsTier(const fs::path& directory) {
 // Suppression throttles a failing cell rather than removing it from the world
 // forever: the streamer cannot tell a broken cook from an archive that was
 // missing for a moment.
-void TestSuppressionIsAThrottleNotABan(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestSuppressionIsAThrottleNotABan(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
   BakeOptions options;
   options.corrupt_layout_hash = true;
-  MountWorld(directory / "throttle.rxp", &vfs, options);
+  MountWorld(fs::Join(directory, "throttle.rxp"), &vfs, options);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1139,7 +1141,7 @@ void TestSuppressionIsAThrottleNotABan(const fs::path& directory) {
   const u32 after = loader.begun();
   CHECK(after > throttled);
   if (after - throttled > 4) {
-    std::fprintf(stderr, "FAIL: a suppressed cell was retried %u times in 1800 ticks\n",
+    ::fprintf(stderr, "FAIL: a suppressed cell was retried %u times in 1800 ticks\n",
                  after - throttled);
     ++g_failures;
   }
@@ -1161,8 +1163,8 @@ void TestSuppressionIsAThrottleNotABan(const fs::path& directory) {
 // It is also the only cell here big enough to cross an ECS chunk, so it is what
 // proves the bulk copy advances by the run it is handed instead of assuming one
 // pointer covers the batch.
-void TestManyArchetypesColumnsAndChunks(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestManyArchetypesColumnsAndChunks(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   using rx::scene::Guid;
   using rx::scene::SpawnedFrom;
 
@@ -1196,22 +1198,22 @@ void TestManyArchetypesColumnsAndChunks(const fs::path& directory) {
   writer.set_bake_id(kBakeId);
   const u32 wide = writer.BeginArchetype(kWide);
   writer.AddColumn(wide, "Transform", transform_stride, transform_layout,
-                   std::span<const u8>(reinterpret_cast<const u8*>(wide_transforms.data()),
+                   base::Span<const u8>(reinterpret_cast<const u8*>(wide_transforms.data()),
                                        wide_transforms.size() * sizeof(Transform)));
   writer.AddColumn(wide, "Guid", guid_stride, guid_layout,
-                   std::span<const u8>(reinterpret_cast<const u8*>(wide_guids.data()),
+                   base::Span<const u8>(reinterpret_cast<const u8*>(wide_guids.data()),
                                        wide_guids.size() * sizeof(Guid)));
-  writer.SetStableIds(wide, std::span<const u64>(wide_ids.data(), wide_ids.size()));
+  writer.SetStableIds(wide, base::Span<const u64>(wide_ids.data(), wide_ids.size()));
 
   const u32 second = writer.BeginArchetype(2);
   writer.AddColumn(second, "SpawnedFrom", spawned_stride, spawned_layout,
-                   std::span<const u8>(reinterpret_cast<const u8*>(spawned), sizeof(spawned)));
+                   base::Span<const u8>(reinterpret_cast<const u8*>(spawned), sizeof(spawned)));
   writer.AddColumn(second, "Transform", transform_stride, transform_layout,
-                   std::span<const u8>(reinterpret_cast<const u8*>(narrow), sizeof(narrow)));
-  writer.SetStableIds(second, std::span<const u64>(narrow_ids, 2));
+                   base::Span<const u8>(reinterpret_cast<const u8*>(narrow), sizeof(narrow)));
+  writer.SetStableIds(second, base::Span<const u64>(narrow_ids, 2));
 
   base::Vector<u8> payload;
-  std::string error;
+  base::String error;
   CHECK(writer.Encode(&payload, &error));
 
   WorldIndexWriter index;
@@ -1222,14 +1224,14 @@ void TestManyArchetypesColumnsAndChunks(const fs::path& directory) {
   CHECK(index.Encode(&index_bytes, &error));
 
   PackWriter pack;
-  pack.Add("city/city.rxworld", std::move(index_bytes));
-  pack.Add(CellPayloadPath("city", 0, Domain::kGameplay, Tier::kStandard), std::move(payload));
-  CHECK(pack.WriteTo((directory / "wide.rxp").string()));
+  pack.Add("city/city.rxworld", base::move(index_bytes));
+  pack.Add(CellPayloadPath("city", 0, Domain::kGameplay, Tier::kStandard), base::move(payload));
+  CHECK(pack.WriteTo(fs::Join(directory, "wide.rxp")));
   Vfs vfs;
-  auto provider = rx::asset::MakePackFileProvider((directory / "wide.rxp").string());
+  auto provider = rx::asset::MakePackFileProvider(fs::Join(directory, "wide.rxp"));
   CHECK(provider != nullptr);
   if (!provider) return;
-  vfs.Mount("world", std::move(provider));
+  vfs.Mount("world", base::move(provider));
 
   WorldMap map;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
@@ -1254,8 +1256,8 @@ void TestManyArchetypesColumnsAndChunks(const fs::path& directory) {
   Settle(&streamer, &loader, At(32, 32), 60);
 
   CHECK(streamer.errors().empty());
-  for (const std::string& message : streamer.errors()) {
-    std::fprintf(stderr, "  error: %s\n", message.c_str());
+  for (const base::String& message : streamer.errors()) {
+    ::fprintf(stderr, "  error: %s\n", message.c_str());
   }
   CHECK(streamer.stats().entities == kWide + 2 - 2);
   CHECK(world.entity_count() == kWide + 2 - 2);
@@ -1269,7 +1271,7 @@ void TestManyArchetypesColumnsAndChunks(const fs::path& directory) {
     }
     const Entity entity = streamer.Resolve(i);
     if (!world.IsAlive(entity)) {
-      std::fprintf(stderr, "FAIL: row %u did not materialize\n", i);
+      ::fprintf(stderr, "FAIL: row %u did not materialize\n", i);
       ++g_failures;
       break;
     }
@@ -1277,7 +1279,7 @@ void TestManyArchetypesColumnsAndChunks(const fs::path& directory) {
     const Guid* guid = world.Get<Guid>(entity);
     if (!transform || !guid || guid->value != 1000 + i ||
         (i != 400 && transform->position[0] != static_cast<f32>(i))) {
-      std::fprintf(stderr, "FAIL: row %u came back wrong\n", i);
+      ::fprintf(stderr, "FAIL: row %u came back wrong\n", i);
       ++g_failures;
       break;
     }
@@ -1310,14 +1312,14 @@ void TestManyArchetypesColumnsAndChunks(const fs::path& directory) {
 // Several observers in one tick: the merge has to fold them to one candidate
 // per cell at the nearest distance, or a far observer's view of a cell decides
 // its tier.
-void TestManyObserversFoldToTheNearest(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestManyObserversFoldToTheNearest(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
   BakeOptions options;
   options.tiered = true;
-  MountWorld(directory / "observers.rxp", &vfs, options);
+  MountWorld(fs::Join(directory, "observers.rxp"), &vfs, options);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1334,7 +1336,7 @@ void TestManyObserversFoldToTheNearest(const fs::path& directory) {
   const WorldStreamObservation observers[2] = {At(32, 32), At(96, 96)};
   for (u32 i = 0; i < 40; ++i) {
     loader.CompleteAll();
-    streamer.Update(std::span<const WorldStreamObservation>(observers, 2));
+    streamer.Update(base::Span<const WorldStreamObservation>(observers, 2));
   }
   CHECK(streamer.errors().empty());
   CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));  // full tier, six rows
@@ -1343,7 +1345,7 @@ void TestManyObserversFoldToTheNearest(const fs::path& directory) {
   const WorldStreamObservation reversed[2] = {At(96, 96), At(32, 32)};
   for (u32 i = 0; i < 10; ++i) {
     loader.CompleteAll();
-    streamer.Update(std::span<const WorldStreamObservation>(reversed, 2));
+    streamer.Update(base::Span<const WorldStreamObservation>(reversed, 2));
   }
   CHECK(world.IsAlive(streamer.Resolve(EntityStableId(3, 5))));
 }
@@ -1352,14 +1354,14 @@ void TestManyObserversFoldToTheNearest(const fs::path& directory) {
 // same cell is in flight. The two differ in tier, so adopting the stale one is
 // visible: the cell would publish the two rows of the proxy payload under the
 // generation that asked for the six of the full one.
-void TestStalePayloadIsNotAdoptedByANewGeneration(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestStalePayloadIsNotAdoptedByANewGeneration(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
   BakeOptions options;
   options.tiered = true;
-  MountWorld(directory / "stalegen.rxp", &vfs, options);
+  MountWorld(fs::Join(directory, "stalegen.rxp"), &vfs, options);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1403,12 +1405,12 @@ void TestStalePayloadIsNotAdoptedByANewGeneration(const fs::path& directory) {
 // A cell that fails once and then reads cleanly must not carry the failure
 // forward: three unrelated transient failures over a session would otherwise
 // suppress a cell whose cook is fine.
-void TestATransientFailureIsForgottenOnSuccess(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestATransientFailureIsForgottenOnSuccess(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "transient.rxp", &vfs);
+  MountWorld(fs::Join(directory, "transient.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1440,12 +1442,12 @@ void TestATransientFailureIsForgottenOnSuccess(const fs::path& directory) {
 // destroys a streamed entity itself leaves the record behind until the cell
 // unloads, and handing that handle out is precisely the dangling reference
 // stable ids exist to prevent.
-void TestResolveRefusesAnEntityTheGameDestroyed(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestResolveRefusesAnEntityTheGameDestroyed(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "destroyed.rxp", &vfs);
+  MountWorld(fs::Join(directory, "destroyed.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1466,14 +1468,14 @@ void TestResolveRefusesAnEntityTheGameDestroyed(const fs::path& directory) {
 
 // The shipped defaults have to produce a world that actually streams, or every
 // game starts by discovering they do not.
-void TestDefaultPolicyStreams(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestDefaultPolicyStreams(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
   BakeOptions options;
   options.tiered = true;
-  MountWorld(directory / "defaults.rxp", &vfs, options);
+  MountWorld(fs::Join(directory, "defaults.rxp"), &vfs, options);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1502,12 +1504,12 @@ void TestDefaultPolicyStreams(const fs::path& directory) {
 // observer moves fast, so it is the one that can least afford to destroy a
 // whole cell in a frame. A cell big enough for the budget to matter, cancelled
 // while it is still committing.
-void TestCancelDuringCommitIsAlsoBudgeted(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestCancelDuringCommitIsAlsoBudgeted(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "cancelbudget.rxp", &vfs);
+  MountWorld(fs::Join(directory, "cancelbudget.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1552,12 +1554,12 @@ void TestCancelDuringCommitIsAlsoBudgeted(const fs::path& directory) {
 
 // Shutdown has to hold with work still in flight, not only from a settled
 // world, because that is when a host swaps worlds or quits.
-void TestShutdownMidFlight(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestShutdownMidFlight(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "midflight.rxp", &vfs);
+  MountWorld(fs::Join(directory, "midflight.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1596,12 +1598,12 @@ void TestShutdownMidFlight(const fs::path& directory) {
 // carry the identical ticket. Cancelling one must not take the other's read
 // with it: the survivor would sit in the planner waiting for a result nobody
 // is going to produce, holding a pending slot, with no retry and no timeout.
-void TestCancellingOneDomainLeavesTheOthersRead(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestCancellingOneDomainLeavesTheOthersRead(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "twodomains.rxp", &vfs);
+  MountWorld(fs::Join(directory, "twodomains.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   rx::ecs::World world;
@@ -1630,12 +1632,12 @@ void TestCancellingOneDomainLeavesTheOthersRead(const fs::path& directory) {
   CHECK(streamer.stats().entities == 0);  // gameplay really did go
 }
 
-void TestDeterministicAcrossRuns(const fs::path& directory) {
-  fs::create_directories(directory);
+void TestDeterministicAcrossRuns(base::StringRef directory) {
+  fs::CreateDirectories(directory);
   Vfs vfs;
-  MountWorld(directory / "deterministic.rxp", &vfs);
+  MountWorld(fs::Join(directory, "deterministic.rxp"), &vfs);
   WorldMap map;
-  std::string error;
+  base::String error;
   CHECK(map.Load(vfs, "world://city/city.rxworld", &error));
 
   auto run = [&] {
@@ -1672,45 +1674,45 @@ void TestDeterministicAcrossRuns(const fs::path& directory) {
 }  // namespace
 
 int main() {
-  const fs::path tmp = fs::temp_directory_path() / "rx_world_stream_test";
-  fs::remove_all(tmp);
-  fs::create_directories(tmp);
+  const base::String tmp = fs::Join(fs::TempDirectory(), "rx_world_stream_test");
+  fs::RemoveAll(tmp);
+  fs::CreateDirectories(tmp);
 
-  TestStreamInAndOut(tmp / "roundtrip");
-  TestWideBubbleLoadsEveryCell(tmp / "wide");
-  TestBudgetedCommitIsNotResolvableHalfway(tmp / "budget");
-  TestUnloadDuringCommitDestroysExactlyWhatWasMade(tmp / "interrupt");
-  TestLateResultAfterCancelIsNotPublished(tmp / "late");
-  TestSchemaDriftIsRefusedLoudly(tmp / "drift");
-  TestOverlayShapesTheCellOnTheWayIn(tmp / "overlay");
-  TestOverlayFromAnotherBakeIsRefused(tmp / "mismatch");
-  TestOverlayThatDeletesEverythingLeavesNothing(tmp / "wipe");
-  TestPromoteAnInstance(tmp / "promote");
-  TestShutdownEmptiesTheWorld(tmp / "shutdown");
-  TestTierRefinesWhenTheObserverCloses(tmp / "tiers");
-  TestSingleTierWorldNeverReloads(tmp / "single");
-  TestPersistentFailuresStopRetrying(tmp / "broken");
-  TestTeardownRespectsTheBudget(tmp / "teardown");
+  TestStreamInAndOut(fs::Join(tmp, "roundtrip"));
+  TestWideBubbleLoadsEveryCell(fs::Join(tmp, "wide"));
+  TestBudgetedCommitIsNotResolvableHalfway(fs::Join(tmp, "budget"));
+  TestUnloadDuringCommitDestroysExactlyWhatWasMade(fs::Join(tmp, "interrupt"));
+  TestLateResultAfterCancelIsNotPublished(fs::Join(tmp, "late"));
+  TestSchemaDriftIsRefusedLoudly(fs::Join(tmp, "drift"));
+  TestOverlayShapesTheCellOnTheWayIn(fs::Join(tmp, "overlay"));
+  TestOverlayFromAnotherBakeIsRefused(fs::Join(tmp, "mismatch"));
+  TestOverlayThatDeletesEverythingLeavesNothing(fs::Join(tmp, "wipe"));
+  TestPromoteAnInstance(fs::Join(tmp, "promote"));
+  TestShutdownEmptiesTheWorld(fs::Join(tmp, "shutdown"));
+  TestTierRefinesWhenTheObserverCloses(fs::Join(tmp, "tiers"));
+  TestSingleTierWorldNeverReloads(fs::Join(tmp, "single"));
+  TestPersistentFailuresStopRetrying(fs::Join(tmp, "broken"));
+  TestTeardownRespectsTheBudget(fs::Join(tmp, "teardown"));
   TestClaimSet();
-  TestClaimKeepsACellResident(tmp / "claims");
-  TestClaimDoesNotChangeAResidentCellsTier(tmp / "claimtier");
-  TestSuppressionIsAThrottleNotABan(tmp / "throttle");
-  TestManyArchetypesColumnsAndChunks(tmp / "wide");
-  TestManyObserversFoldToTheNearest(tmp / "observers");
-  TestStalePayloadIsNotAdoptedByANewGeneration(tmp / "stalegen");
-  TestATransientFailureIsForgottenOnSuccess(tmp / "transient");
-  TestResolveRefusesAnEntityTheGameDestroyed(tmp / "destroyed");
-  TestDefaultPolicyStreams(tmp / "defaults");
-  TestCancelDuringCommitIsAlsoBudgeted(tmp / "cancelbudget");
-  TestShutdownMidFlight(tmp / "midflight");
-  TestCancellingOneDomainLeavesTheOthersRead(tmp / "twodomains");
-  TestDeterministicAcrossRuns(tmp / "deterministic");
+  TestClaimKeepsACellResident(fs::Join(tmp, "claims"));
+  TestClaimDoesNotChangeAResidentCellsTier(fs::Join(tmp, "claimtier"));
+  TestSuppressionIsAThrottleNotABan(fs::Join(tmp, "throttle"));
+  TestManyArchetypesColumnsAndChunks(fs::Join(tmp, "wide"));
+  TestManyObserversFoldToTheNearest(fs::Join(tmp, "observers"));
+  TestStalePayloadIsNotAdoptedByANewGeneration(fs::Join(tmp, "stalegen"));
+  TestATransientFailureIsForgottenOnSuccess(fs::Join(tmp, "transient"));
+  TestResolveRefusesAnEntityTheGameDestroyed(fs::Join(tmp, "destroyed"));
+  TestDefaultPolicyStreams(fs::Join(tmp, "defaults"));
+  TestCancelDuringCommitIsAlsoBudgeted(fs::Join(tmp, "cancelbudget"));
+  TestShutdownMidFlight(fs::Join(tmp, "midflight"));
+  TestCancellingOneDomainLeavesTheOthersRead(fs::Join(tmp, "twodomains"));
+  TestDeterministicAcrossRuns(fs::Join(tmp, "deterministic"));
 
-  fs::remove_all(tmp);
+  fs::RemoveAll(tmp);
   if (g_failures) {
-    std::fprintf(stderr, "world_stream_test: %d failure(s)\n", g_failures);
+    ::fprintf(stderr, "world_stream_test: %d failure(s)\n", g_failures);
     return 1;
   }
-  std::puts("world_stream_test: ok");
+  ::puts("world_stream_test: ok");
   return 0;
 }

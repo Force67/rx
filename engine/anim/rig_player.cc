@@ -1,8 +1,10 @@
 #include "anim/rig_player.h"
 
-#include <vector>
 
 #include "anim/anim_internal.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
 
 namespace rx::anim {
 
@@ -13,11 +15,11 @@ struct RigPlayer::Impl {
   kinema::StateMachineInstance sm;
   kinema::PoseArena arena;
   kinema::SyncGroup sync;
-  std::vector<f32> params;
+  base::Vector<f32> params;
   f32 prev_phase = 0.0f;  // last frame's normalized locomotion phase [0,1)
 };
 
-RigPlayer::RigPlayer() : impl_(std::make_unique<Impl>()) {}
+RigPlayer::RigPlayer() : impl_(base::MakeUnique<Impl>()) {}
 RigPlayer::~RigPlayer() = default;
 RigPlayer::RigPlayer(RigPlayer&&) noexcept = default;
 RigPlayer& RigPlayer::operator=(RigPlayer&&) noexcept = default;
@@ -92,14 +94,14 @@ Vec3 RigPlayer::Update(f32 dt, SkeletonPose* out, const EventSink& on_event) {
       const f32 t0 = d.prev_phase * dur;
       const f32 t1 = phase * dur;
       c->EventsInRange(t0, t1, [&](const kinema::ClipEvent& e) {
-        on_event(Event{e.name_hash, e.name ? std::string_view(e.name) : std::string_view{},
+        on_event(Event{e.name_hash, e.name ? base::StringRef(e.name) : base::StringRef{},
                        Event::Phase::kPoint});
       });
       c->RangedEventsInRange(t0, t1, [&](const kinema::ClipRangedEvent& r, kinema::RangePhase p) {
         Event::Phase ph = p == kinema::RangePhase::kEnter    ? Event::Phase::kEnter
                           : p == kinema::RangePhase::kActive ? Event::Phase::kActive
                                                              : Event::Phase::kExit;
-        on_event(Event{r.name_hash, r.name ? std::string_view(r.name) : std::string_view{}, ph});
+        on_event(Event{r.name_hash, r.name ? base::StringRef(r.name) : base::StringRef{}, ph});
       });
     }
   }

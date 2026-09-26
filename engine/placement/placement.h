@@ -1,11 +1,9 @@
 #ifndef RX_PLACEMENT_PLACEMENT_H_
 #define RX_PLACEMENT_PLACEMENT_H_
 
-#include <compare>
-#include <span>
-
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
@@ -37,7 +35,6 @@ struct TileKey {
   i32 z = 0;
 
   bool operator==(const TileKey&) const = default;
-  auto operator<=>(const TileKey&) const = default;
 };
 
 // One placed object as produced by the PLACEMENT stage (and the CPU
@@ -89,14 +86,14 @@ class RX_PLACEMENT_EXPORT PlacementSystem {
   const WorldData& world() const { return *world_; }
   u32 height_map() const { return height_map_; }
   const PlacementConfig& config() const { return config_; }
-  std::span<const PlacementLayer> layers() const { return {layers_.data(), layers_.size()}; }
-  std::span<const PlacementStack> stacks() const { return {stacks_.data(), stacks_.size()}; }
+  base::Span<const PlacementLayer> layers() const { return base::Span(layers_.data(), layers_.size()); }
+  base::Span<const PlacementStack> stacks() const { return base::Span(stacks_.data(), stacks_.size()); }
 
   // Streaming bookkeeping. Update() diffs the wanted set around the viewer
   // against live/in-flight tiles and refreshes pending()/evicted().
   void Update(const Vec3& viewer);
-  std::span<const TileKey> pending() const { return {pending_.data(), pending_.size()}; }
-  std::span<const TileKey> evicted() const { return {evicted_.data(), evicted_.size()}; }
+  base::Span<const TileKey> pending() const { return base::Span(pending_.data(), pending_.size()); }
+  base::Span<const TileKey> evicted() const { return base::Span(evicted_.data(), evicted_.size()); }
   void MarkInFlight(const TileKey& key);
   void MarkLive(const TileKey& key);
   // Forgets a tile entirely (after its instances are destroyed).

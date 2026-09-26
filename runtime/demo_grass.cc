@@ -1,12 +1,12 @@
 #include "demo_grass.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 #include <base/option.h>
 
 #include "asset/primitives.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "scene/components.h"
 
 namespace rx {
@@ -25,23 +25,23 @@ base::Option<float> GrassFarRadius{"demo.grass.far_radius", 960.0f, "RX_GRASS_FA
 
 u32 PackColor(f32 r, f32 g, f32 b) {
   auto to8 = [](f32 value) {
-    return static_cast<u32>(std::clamp(value, 0.0f, 1.0f) * 255.0f);
+    return static_cast<u32>(rx::Clamp(value, 0.0f, 1.0f) * 255.0f);
   };
   return 0xff000000u | (to8(b) << 16u) | (to8(g) << 8u) | to8(r);
 }
 
 f32 SmoothStep(f32 a, f32 b, f32 value) {
-  f32 t = std::clamp((value - a) / (b - a), 0.0f, 1.0f);
+  f32 t = rx::Clamp((value - a) / (b - a), 0.0f, 1.0f);
   return t * t * (3.0f - 2.0f * t);
 }
 
 }  // namespace
 
 f32 GrassDemo::TerrainHeight(f32 x, f32 z) const {
-  f32 broad = std::sin(x * 0.025f) * 4.8f + std::cos(z * 0.031f) * 3.6f;
-  f32 crossing = std::sin((x + z) * 0.019f + 0.8f) * 3.1f;
-  f32 detail = std::sin(x * 0.071f - z * 0.049f) * 0.75f +
-               std::cos(x * 0.043f + z * 0.063f) * 0.55f;
+  f32 broad = ::sin(x * 0.025f) * 4.8f + ::cos(z * 0.031f) * 3.6f;
+  f32 crossing = ::sin((x + z) * 0.019f + 0.8f) * 3.1f;
+  f32 detail = ::sin(x * 0.071f - z * 0.049f) * 0.75f +
+               ::cos(x * 0.043f + z * 0.063f) * 0.55f;
   return broad + crossing + detail;
 }
 
@@ -120,13 +120,13 @@ void GrassDemo::BuildField() {
       const f32 world_z = kOrigin + static_cast<f32>(z) * kStep;
       render::GrassFieldSample& sample = samples_[z * kResolution + x];
       sample.height = TerrainHeight(world_x, world_z);
-      const f32 patch = 0.5f + 0.25f * std::sin(world_x * 0.057f + world_z * 0.031f) +
-                        0.20f * std::cos(world_x * 0.021f - world_z * 0.069f);
-      const f32 path_center = std::sin(world_x * 0.035f) * 7.0f - 4.0f;
-      const f32 path_distance = std::fabs(world_z - path_center);
+      const f32 patch = 0.5f + 0.25f * ::sin(world_x * 0.057f + world_z * 0.031f) +
+                        0.20f * ::cos(world_x * 0.021f - world_z * 0.069f);
+      const f32 path_center = ::sin(world_x * 0.035f) * 7.0f - 4.0f;
+      const f32 path_distance = ::fabs(world_z - path_center);
       // Wide enough to survive the coarser kilometre-scale field texels.
       const f32 path_mask = SmoothStep(3.0f, 14.0f, path_distance);
-      sample.density = std::clamp((0.90f + patch * 0.14f) * path_mask, 0.0f, 1.0f);
+      sample.density = rx::Clamp((0.90f + patch * 0.14f) * path_mask, 0.0f, 1.0f);
       sample.growth = 0.90f + patch * 0.34f;
       const bool golden_ridge = sample.height > 4.2f && patch > 0.5f;
       const bool cool_hollow = sample.height < -2.4f || patch < 0.27f;
@@ -146,7 +146,7 @@ void GrassDemo::BuildField() {
   domain_.seed = 0x7a6b5c4du;
   domain_.sample_revision = 1;
   domain_.type_revision = 1;
-  domain_.settings.candidate_spacing = std::clamp(GrassSpacing.get(), 0.08f, 1.0f);
+  domain_.settings.candidate_spacing = rx::Clamp(GrassSpacing.get(), 0.08f, 1.0f);
   domain_.settings.stream_tile_size = 18.0f;
   domain_.settings.stream_radius = 120.0f;
   domain_.settings.density_lod_start = 40.0f;
@@ -158,10 +158,10 @@ void GrassDemo::BuildField() {
   domain_.settings.fade_end = 120.0f;
   // Distant one-segment rings out to roughly a kilometre (RX_GRASS_FAR=0
   // restores the classic stream-bounded field).
-  domain_.settings.far_radius = std::clamp(GrassFarRadius.get(), 0.0f, 4096.0f);
+  domain_.settings.far_radius = rx::Clamp(GrassFarRadius.get(), 0.0f, 4096.0f);
   domain_.settings.max_slope_cos = 0.50f;
   domain_.settings.max_blades =
-      static_cast<u32>(std::clamp(GrassMaxBlades.get(), 1, 262144));
+      static_cast<u32>(rx::Clamp(GrassMaxBlades.get(), 1, 262144));
 }
 
 void GrassDemo::BuildTerrain() {
@@ -343,11 +343,11 @@ void GrassDemo::Create() {
 
 void GrassDemo::Update(f32 dt) {
   time_ += dt;
-  const f32 x = std::sin(time_ * 0.34f) * 12.0f - 3.0f;
-  const f32 z = std::cos(time_ * 0.27f) * 7.0f + 4.0f;
+  const f32 x = ::sin(time_ * 0.34f) * 12.0f - 3.0f;
+  const f32 z = ::cos(time_ * 0.27f) * 7.0f + 4.0f;
   const f32 y = TerrainHeight(x, z) + 0.62f;
   interaction_position_ = {x, y, z};
-  interaction_direction_ = {std::cos(time_ * 0.34f), 0.0f, -std::sin(time_ * 0.27f)};
+  interaction_direction_ = {::cos(time_ * 0.34f), 0.0f, -::sin(time_ * 0.27f)};
   if (scene::Transform* transform =
           ctx_.world->Get<scene::Transform>(interaction_marker_)) {
     transform->position[0] = x;

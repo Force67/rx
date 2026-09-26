@@ -1,12 +1,15 @@
 #include "render/texturing/decal_bake.h"
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
 #include <base/option.h>
 
 #include "asset/mesh.h"
+#include "base/containers/span.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/decal_bake_ps_hlsl.h"
 #include "shaders/decal_bake_skin_vs_hlsl.h"
 #include "shaders/decal_bake_vs_hlsl.h"
@@ -35,7 +38,7 @@ struct DilatePush {
 u32 MipCountFor(u32 tile_size) {
   u32 mips = 1;
   while ((tile_size >> mips) >= kMinMipTexels) ++mips;
-  return std::min(mips, 5u);
+  return rx::Min(mips, 5u);
 }
 
 void WriteRow(const Vec3& axis, f32 half_extent, const Vec3& origin, f32 out[4]) {
@@ -79,12 +82,12 @@ bool DecalBaker::Initialize(Device& device, const Desc& desc) {
     return false;
   }
   tiles_per_row_ = desc_.atlas_size / desc_.tile_size;
-  tile_count_ = std::min(tiles_per_row_ * tiles_per_row_, kMaxTiles);
+  tile_count_ = rx::Min(tiles_per_row_ * tiles_per_row_, kMaxTiles);
   tile_uv_ = static_cast<f32>(desc_.tile_size) / static_cast<f32>(desc_.atlas_size);
   mip_count_ = MipCountFor(desc_.tile_size);
   // A rebake replays the whole journal in one frame, so a journal longer than
   // the frame budget could never fit and that receiver would defer forever.
-  desc_.journal_limit = std::clamp(desc_.journal_limit, 1u, kMaxFrameStamps);
+  desc_.journal_limit = rx::Clamp(desc_.journal_limit, 1u, kMaxFrameStamps);
 
   if (!CreateAtlases(device) || !CreatePipelines(device)) {
     Destroy(device);
@@ -159,7 +162,7 @@ bool DecalBaker::CreateAtlases(Device& device) {
     return false;
   }
   u8* bytes = static_cast<u8*>(clear_staging_.mapped);
-  std::memset(bytes + clear_albedo_offset_, 0, texels * 4);
+  base::MemSet(bytes + clear_albedo_offset_, 0, texels * 4);
   for (u64 i = 0; i < texels; ++i) {
     u8* fx = bytes + clear_fx_offset_ + i * 4;
     fx[0] = 128;
@@ -167,7 +170,7 @@ bool DecalBaker::CreateAtlases(Device& device) {
     fx[2] = 128;
     fx[3] = 0;
   }
-  std::memset(bytes + clear_chart_offset_, 0, texels);
+  base::MemSet(bytes + clear_chart_offset_, 0, texels);
 
   // Per-tile uv mapping, read by the forward pass to reproduce what the bake
   // did. Identity until a receiver claims the tile and says otherwise.
@@ -341,7 +344,7 @@ u32 DecalBaker::AcquireReceiver() {
   }
   Receiver fresh;
   fresh.alive = true;
-  receivers_.push_back(std::move(fresh));
+  receivers_.push_back(base::move(fresh));
   ++stats_.receivers;
   return static_cast<u32>(receivers_.size());
 }
@@ -363,12 +366,12 @@ bool DecalBaker::Stamp(const DecalStamp& stamp) {
   Receiver* r = find(stamp.receiver);
   if (!r) return false;
   GpuStamp gpu;
-  std::memcpy(gpu.row0, stamp.projector.row0, sizeof(gpu.row0));
-  std::memcpy(gpu.row1, stamp.projector.row1, sizeof(gpu.row1));
-  std::memcpy(gpu.row2, stamp.projector.row2, sizeof(gpu.row2));
-  std::memcpy(gpu.uv_rect, stamp.projector.uv_rect, sizeof(gpu.uv_rect));
-  std::memcpy(gpu.tint_blend, stamp.projector.tint_blend, sizeof(gpu.tint_blend));
-  std::memcpy(gpu.params2, stamp.projector.params2, sizeof(gpu.params2));
+  base::MemCopy(gpu.row0, stamp.projector.row0, sizeof(gpu.row0));
+  base::MemCopy(gpu.row1, stamp.projector.row1, sizeof(gpu.row1));
+  base::MemCopy(gpu.row2, stamp.projector.row2, sizeof(gpu.row2));
+  base::MemCopy(gpu.uv_rect, stamp.projector.uv_rect, sizeof(gpu.uv_rect));
+  base::MemCopy(gpu.tint_blend, stamp.projector.tint_blend, sizeof(gpu.tint_blend));
+  base::MemCopy(gpu.params2, stamp.projector.params2, sizeof(gpu.params2));
 
   r->journal.push_back(gpu);
   if (r->journal.size() > desc_.journal_limit) {
@@ -444,7 +447,7 @@ u32 DecalBaker::AcquireTile(u32 receiver, u64 frame_index) {
   return victim;
 }
 
-void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets, u32 frame_slot,
+void DecalBaker::AddToGraph(RenderGraph& graph, base::Span<const Target> targets, u32 frame_slot,
                             u64 frame_index, TextureView source_albedo, TextureView source_normal) {
   stats_.bakes = 0;
   if (!available()) return;
@@ -535,7 +538,7 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
     draw.uv_bias[0] = r->uv_bias[0];
     draw.uv_bias[1] = r->uv_bias[1];
     if (count > 0) {
-      std::memcpy(mapped + cursor, run.data(), count * sizeof(GpuStamp));
+      base::MemCopy(mapped + cursor, run.data(), count * sizeof(GpuStamp));
       cursor += count;
     }
     draws.push_back(draw);
@@ -548,7 +551,7 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
 
   graph.AddPass(
       "decal_bake", [](RenderGraph::PassBuilder&) {},
-      [this, draws = std::move(draws), frame_slot, source_albedo,
+      [this, draws = base::move(draws), frame_slot, source_albedo,
        source_normal](PassContext& ctx) {
         CommandList& cmd = *ctx.cmd;
         ResourceState atlas = atlas_state_;
@@ -572,11 +575,11 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
             const i32 y = static_cast<i32>((draw.tile / tiles_per_row_) * desc_.tile_size);
             BufferTextureCopy region{.offset = {x, y}, .extent = {desc_.tile_size, desc_.tile_size}};
             region.buffer_offset = clear_albedo_offset_;
-            cmd.CopyBufferToTexture(clear_staging_, albedo_, {&region, 1});
+            cmd.CopyBufferToTexture(clear_staging_, albedo_, base::Span(&region, 1));
             region.buffer_offset = clear_fx_offset_;
-            cmd.CopyBufferToTexture(clear_staging_, fx_, {&region, 1});
+            cmd.CopyBufferToTexture(clear_staging_, fx_, base::Span(&region, 1));
             region.buffer_offset = clear_chart_offset_;
-            cmd.CopyBufferToTexture(clear_staging_, chart_, {&region, 1});
+            cmd.CopyBufferToTexture(clear_staging_, chart_, base::Span(&region, 1));
           }
         }
 
@@ -591,7 +594,7 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
         colors[1] = {.view = fx_mip0_, .load = LoadOp::kLoad};
         colors[2] = {.view = chart_.view, .load = LoadOp::kLoad};
         cmd.BeginRendering({.extent = {desc_.atlas_size, desc_.atlas_size},
-                            .colors = {colors, 3}});
+                            .colors = base::Span(colors, 3)});
         PipelineHandle bound{};
         for (const BakeDraw& draw : draws) {
           if (draw.stamp_count == 0) continue;
@@ -677,7 +680,7 @@ void DecalBaker::AddToGraph(RenderGraph& graph, std::span<const Target> targets,
           u32 size = desc_.atlas_size;
           for (u32 mip = 1; mip < mip_count_; ++mip) {
             const Extent2D src{size, size};
-            const Extent2D dst{std::max(size >> 1, 1u), std::max(size >> 1, 1u)};
+            const Extent2D dst{rx::Max(size >> 1, 1u), rx::Max(size >> 1, 1u)};
             cmd.BlitMip(albedo_, mip - 1, src, mip, dst);
             cmd.BlitMip(fx_, mip - 1, src, mip, dst);
             if (mip + 1 < mip_count_) {

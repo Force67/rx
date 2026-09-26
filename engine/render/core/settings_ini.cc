@@ -1,25 +1,26 @@
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "base/containers/unordered_map.h"
+#include "core/file_system.h"
+#include "core/text_reader.h"
+#include "core/text_writer.h"
 #include "render/core/settings_ini.h"
 
-#include <charconv>
-#include <cctype>
-#include <cmath>
-#include <fstream>
-#include <locale>
-#include <map>
-#include <sstream>
+#include <ctype.h>
+#include <math.h>
 
 namespace rx::render {
 namespace {
 
-std::string Trim(std::string_view sv) {
+base::String Trim(base::StringRef sv) {
   size_t b = 0, e = sv.size();
-  while (b < e && std::isspace(static_cast<unsigned char>(sv[b]))) ++b;
-  while (e > b && std::isspace(static_cast<unsigned char>(sv[e - 1]))) --e;
-  return std::string(sv.substr(b, e - b));
+  while (b < e && ::isspace(static_cast<unsigned char>(sv[b]))) ++b;
+  while (e > b && ::isspace(static_cast<unsigned char>(sv[e - 1]))) --e;
+  return base::String(sv.substr(b, e - b));
 }
 
-std::string Lower(std::string s) {
-  for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+base::String Lower(base::String s) {
+  for (char& c : s) c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
   return s;
 }
 
@@ -34,7 +35,7 @@ const char* Name(AntiAliasingMode m) {
   }
   return "taa";
 }
-bool Parse(const std::string& v, AntiAliasingMode& out) {
+bool Parse(const base::String& v, AntiAliasingMode& out) {
   if (v == "none") out = AntiAliasingMode::kNone;
   else if (v == "taa") out = AntiAliasingMode::kTaa;
   else if (v == "upscaler") out = AntiAliasingMode::kUpscaler;
@@ -52,7 +53,7 @@ const char* Name(UpscalerKind k) {
   }
   return "none";
 }
-bool Parse(const std::string& v, UpscalerKind& out) {
+bool Parse(const base::String& v, UpscalerKind& out) {
   if (v == "none") out = UpscalerKind::kNone;
   else if (v == "fsr3" || v == "fsr") out = UpscalerKind::kFsr3;
   else if (v == "dlss") out = UpscalerKind::kDlss;
@@ -70,7 +71,7 @@ const char* Name(UpscalerQuality q) {
   }
   return "quality";
 }
-bool Parse(const std::string& v, UpscalerQuality& out) {
+bool Parse(const base::String& v, UpscalerQuality& out) {
   if (v == "native" || v == "nativeaa" || v == "dlaa") out = UpscalerQuality::kNativeAa;
   else if (v == "quality") out = UpscalerQuality::kQuality;
   else if (v == "balanced") out = UpscalerQuality::kBalanced;
@@ -88,7 +89,7 @@ const char* Name(HumanQualityTier t) {
   return "hero";
 }
 
-bool Parse(const std::string& v, HumanQualityTier& out) {
+bool Parse(const base::String& v, HumanQualityTier& out) {
   if (v == "hero") out = HumanQualityTier::kHero;
   else if (v == "standard") out = HumanQualityTier::kStandard;
   else if (v == "distant") out = HumanQualityTier::kDistant;
@@ -105,7 +106,7 @@ const char* Name(TonemapOperator t) {
   }
   return "aces";
 }
-bool Parse(const std::string& v, TonemapOperator& out) {
+bool Parse(const base::String& v, TonemapOperator& out) {
   if (v == "aces") out = TonemapOperator::kAces;
   else if (v == "reinhard") out = TonemapOperator::kReinhard;
   else if (v == "none") out = TonemapOperator::kNone;
@@ -118,9 +119,8 @@ const char* Bool(bool b) { return b ? "true" : "false"; }
 
 }  // namespace
 
-std::string SettingsToIni(const RenderSettings& s) {
-  std::ostringstream o;
-  o.imbue(std::locale::classic());
+base::String SettingsToIni(const RenderSettings& s) {
+  TextWriter o;
   o << "# Rx render preset. Editable. Load/save it from the debug ui\n"
     << "# (Renderer panel -> Platform preset). Unlisted keys keep their value.\n\n";
 
@@ -242,56 +242,55 @@ std::string SettingsToIni(const RenderSettings& s) {
   o << "adaptation_speed = " << s.adaptation_speed << "\n";
   o << "exposure = " << s.exposure << "\n";
   o << "tonemap = " << Name(s.tonemap) << "\n";
-  return o.str();
+  return o.Take();
 }
 
-int ApplyIni(std::string_view text, RenderSettings& s) {
+int ApplyIni(base::StringRef text, RenderSettings& s) {
   // Collect "key = value" pairs (lowercased keys), ignoring sections/comments.
-  std::map<std::string, std::string> kv;
-  std::istringstream in{std::string(text)};
-  std::string line;
-  while (std::getline(in, line)) {
-    if (auto hash = line.find_first_of(";#"); hash != std::string::npos) line.resize(hash);
-    std::string t = Trim(line);
-    if (t.empty() || t.front() == '[') continue;
+  base::UnorderedMap<base::String, base::String> kv;
+  LineReader lines(text);
+  base::StringRef piece;
+  while (lines.Next(&piece)) {
+    base::String line(piece.data(), piece.size());
+    if (auto hash = line.find_first_of(";#"); hash != base::String::npos) line.resize(hash);
+    base::String t = Trim(line);
+    if (t.empty() || t[0] == '[') continue;
     auto eq = t.find('=');
-    if (eq == std::string::npos) continue;
-    kv[Lower(Trim(std::string_view(t).substr(0, eq)))] = Trim(std::string_view(t).substr(eq + 1));
+    if (eq == base::String::npos) continue;
+    kv[Lower(Trim(base::StringRef(t).substr(0, eq)))] = Trim(base::StringRef(t).substr(eq + 1));
   }
   if (kv.empty()) return 0;
 
   int applied = 0;
   auto take = [&](const char* key, auto&& fn) {
-    auto it = kv.find(key);
-    if (it != kv.end() && fn(it->second)) ++applied;
+    const base::String* value = kv.find(key);
+    if (value && fn(*value)) ++applied;
   };
-  auto as_bool = [](const std::string& v, bool& out) {
-    const std::string l = Lower(v);
+  auto as_bool = [](const base::String& v, bool& out) {
+    const base::String l = Lower(v);
     if (l == "true" || l == "1" || l == "on" || l == "yes") { out = true; return true; }
     if (l == "false" || l == "0" || l == "off" || l == "no") { out = false; return true; }
     return false;
   };
-  auto as_f32 = [](const std::string& v, f32& out) {
+  auto as_f32 = [](const base::String& v, f32& out) {
     f32 parsed = 0.0f;
-    auto [end, ec] = std::from_chars(v.data(), v.data() + v.size(), parsed);
-    if (ec != std::errc{} || end != v.data() + v.size() || !std::isfinite(parsed)) return false;
+    if (!ParseWholeF32(v, &parsed) || !::isfinite(parsed)) return false;
     out = parsed;
     return true;
   };
-  auto as_u32 = [](const std::string& v, u32& out) {
-    if (v.empty() || v.front() == '-') return false;
+  auto as_u32 = [](const base::String& v, u32& out) {
+    if (v.empty() || v[0] == '-') return false;
     u32 parsed = 0;
-    auto [end, ec] = std::from_chars(v.data(), v.data() + v.size(), parsed);
-    if (ec != std::errc{} || end != v.data() + v.size()) return false;
+    if (!ParseWholeU32(v, &parsed)) return false;
     out = parsed;
     return true;
   };
 
-  auto b = [&](const char* k, bool& f) { take(k, [&](const std::string& v) { return as_bool(v, f); }); };
-  auto fl = [&](const char* k, f32& f) { take(k, [&](const std::string& v) { return as_f32(v, f); }); };
-  auto u = [&](const char* k, u32& f) { take(k, [&](const std::string& v) { return as_u32(v, f); }); };
+  auto b = [&](const char* k, bool& f) { take(k, [&](const base::String& v) { return as_bool(v, f); }); };
+  auto fl = [&](const char* k, f32& f) { take(k, [&](const base::String& v) { return as_f32(v, f); }); };
+  auto u = [&](const char* k, u32& f) { take(k, [&](const base::String& v) { return as_u32(v, f); }); };
   auto en = [&](const char* k, auto& f) {
-    take(k, [&](const std::string& v) { return Parse(Lower(v), f); });
+    take(k, [&](const base::String& v) { return Parse(Lower(v), f); });
   };
 
   en("aa_mode", s.aa_mode);
@@ -400,20 +399,15 @@ int ApplyIni(std::string_view text, RenderSettings& s) {
   return applied;
 }
 
-bool LoadSettingsIni(const std::filesystem::path& path, RenderSettings& s) {
-  std::ifstream f(path, std::ios::binary);
-  if (!f) return false;
-  std::ostringstream buf;
-  buf << f.rdbuf();
-  ApplyIni(buf.str(), s);
+bool LoadSettingsIni(base::StringRef path, RenderSettings& s) {
+  base::String text;
+  if (!fs::ReadTextFile(path, &text)) return false;
+  ApplyIni(text, s);
   return true;
 }
 
-bool SaveSettingsIni(const std::filesystem::path& path, const RenderSettings& s) {
-  std::ofstream f(path, std::ios::binary | std::ios::trunc);
-  if (!f) return false;
-  f << SettingsToIni(s);
-  return f.good();
+bool SaveSettingsIni(base::StringRef path, const RenderSettings& s) {
+  return fs::WriteTextFile(path, SettingsToIni(s));
 }
 
 }  // namespace rx::render

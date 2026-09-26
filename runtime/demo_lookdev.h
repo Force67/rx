@@ -1,11 +1,9 @@
 #ifndef RX_RUNTIME_DEMO_LOOKDEV_H_
 #define RX_RUNTIME_DEMO_LOOKDEV_H_
 
-#include <memory>
-#include <string>
-#include <vector>
-
 #include "asset/material.h"
+#include "base/containers/span.h"
+#include "base/memory/unique_pointer.h"
 #include "core/input.h"
 #include "core/input_actions.h"
 #include "core/math.h"
@@ -72,12 +70,12 @@ class LookdevDemo {
     f32 distance;       // metres from the head centre
     f32 fov_degrees;
   };
-  static std::span<const LightStop> light_stops();
-  static std::span<const CameraStop> camera_stops();
+  static base::Span<const LightStop> light_stops();
+  static base::Span<const CameraStop> camera_stops();
 
  private:
   struct Impl;
-  std::unique_ptr<Impl> impl_;
+  base::UniquePointer<Impl> impl_;
 };
 
 }  // namespace rx

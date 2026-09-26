@@ -3,17 +3,17 @@
 // world-transform composition. No GPU, no game assets. Exits non-zero on the
 // first failure so it slots into ctest.
 
-#include <algorithm>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <limits>
-#include <string>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "asset/asset_database.h"
 #include "asset/asset_id.h"
 #include "asset/vfs.h"
+#include "base/algorithm.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 #include "core/math.h"
 #include "ecs/world.h"
 #include "edit/hierarchy.h"
@@ -33,12 +33,12 @@ int failures = 0;
 #define CHECK(cond)                                                  \
   do {                                                               \
     if (!(cond)) {                                                   \
-      std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
+      ::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);    \
       ++failures;                                                    \
     }                                                                \
   } while (0)
 
-#define CHECK_NEAR(a, b, eps) CHECK(std::abs((a) - (b)) <= (eps))
+#define CHECK_NEAR(a, b, eps) CHECK(::abs((a) - (b)) <= (eps))
 
 // A component exercising every PropType.
 struct TestAll {
@@ -52,7 +52,7 @@ struct TestAll {
   f32 v4[4] = {};
   Quat q{};
   f32 col[4] = {};
-  std::string s;
+  base::String s;
   asset::AssetId aid;
   ecs::Entity ent;
 };
@@ -75,7 +75,7 @@ void RegisterTestComponent() {
       .Prop("ent", &TestAll::ent);
 }
 
-const PropDesc* FindProp(const ComponentDesc& c, std::string_view name) {
+const PropDesc* FindProp(const ComponentDesc& c, base::StringRef name) {
   for (u32 i = 0; i < c.prop_count; ++i)
     if (name == c.props[i].name) return &c.props[i];
   return nullptr;
@@ -149,7 +149,7 @@ void TestReflection() {
 
   // ComponentsOn reports the component; removal drops it.
   auto on = ComponentsOn(world, e);
-  CHECK(std::find(on.begin(), on.end(), desc) != on.end());
+  CHECK(base::Find(on.begin(), on.end(), desc) != on.end());
   CHECK(RemoveComponentByDesc(world, e, *desc));
   CHECK(!world.HasRaw(e, desc->id));
 }
@@ -182,7 +182,7 @@ bool DeepEqual(ecs::World& wa, ecs::Entity a, ecs::World& wb, ecs::Entity b) {
         if (va.b != vb.b) return false;
       } else {
         for (int k = 0; k < 4; ++k)
-          if (std::abs(va.f[k] - vb.f[k]) > 1e-5f) return false;
+          if (::abs(va.f[k] - vb.f[k]) > 1e-5f) return false;
       }
     }
   }
@@ -190,8 +190,7 @@ bool DeepEqual(ecs::World& wa, ecs::Entity a, ecs::World& wb, ecs::Entity b) {
 }
 
 void TestSceneRoundTrip() {
-  namespace fs = std::filesystem;
-  fs::path path = fs::temp_directory_path() / "rx_edit_roundtrip.rxscene";
+  base::String path = rx::fs::Join(rx::fs::TempDirectory(), "rx_edit_roundtrip.rxscene");
 
   // A parent with a named, renderable child that references the parent.
   ecs::World src;
@@ -223,17 +222,17 @@ void TestSceneRoundTrip() {
   src.Add(transient, scene::Name{"Editor preview"});
   src.Add(transient, scene::Transient{});
 
-  std::string err;
-  CHECK(SaveScene(src, path.string(), &err));
-  if (!err.empty()) std::printf("save error: %s\n", err.c_str());
+  base::String err;
+  CHECK(SaveScene(src, path, &err));
+  if (!err.empty()) ::printf("save error: %s\n", err.c_str());
 
   // Reload into a fresh world.
   asset::Vfs vfs;
   asset::AssetDatabase db(vfs);
   ecs::World dst;
   err.clear();
-  CHECK(LoadScene(dst, db, path.string(), &err));
-  if (!err.empty()) std::printf("load error: %s\n", err.c_str());
+  CHECK(LoadScene(dst, db, path, &err));
+  if (!err.empty()) ::printf("load error: %s\n", err.c_str());
 
   // Same number of identity entities and per-entity deep equality (matched by guid).
   size_t src_count = 0;
@@ -259,27 +258,26 @@ void TestSceneRoundTrip() {
     CHECK(dst.Get<scene::SpawnedFrom>(dchild)->prefab == 0x123456789abcdef0ull);
   }
 
-  fs::remove(path);
+  rx::fs::Remove(path);
 }
 
 // Hand-authored scenes load strict: a misspelt name has to fail loudly and
 // point at the line, or a typo silently drops the object it was meant to place.
 void TestStrictLoad() {
-  namespace fs = std::filesystem;
-  fs::path path = fs::temp_directory_path() / "rx_edit_strict.rxscene";
+  base::String path = rx::fs::Join(rx::fs::TempDirectory(), "rx_edit_strict.rxscene");
 
   auto write = [&](const char* body) {
-    std::FILE* f = std::fopen(path.string().c_str(), "wb");
+    FILE* f = ::fopen(path.c_str(), "wb");
     CHECK(f != nullptr);
     if (!f) return;
-    std::fputs(body, f);
-    std::fclose(f);
+    ::fputs(body, f);
+    ::fclose(f);
   };
-  auto load = [&](bool strict, std::string* error) {
+  auto load = [&](bool strict, base::String* error) {
     asset::Vfs vfs;
     asset::AssetDatabase db(vfs);
     ecs::World world;
-    bool ok = LoadScene(world, db, path.string(), error, strict);
+    bool ok = LoadScene(world, db, path, error, strict);
     // A rejected load must leave nothing behind.
     size_t entities = 0;
     world.Each<scene::Transform>([&](ecs::Entity, scene::Transform&) { ++entities; });
@@ -288,25 +286,25 @@ void TestStrictLoad() {
   };
 
   write("rxscene 1\n\nentity\nTransform.position = 1 2 3\nNaem.value = \"oops\"\n");
-  std::string error;
+  base::String error;
   CHECK(load(/*strict=*/false, &error));  // lenient: the editor keeps opening it
   CHECK(!load(/*strict=*/true, &error));
-  CHECK(error.find("Naem") != std::string::npos);
-  CHECK(error.find(":5:") != std::string::npos);
+  CHECK(error.find("Naem") != base::String::npos);
+  CHECK(error.find(":5:") != base::String::npos);
 
   write("rxscene 1\n\nentity\nTransform.postion = 1 2 3\n");
   error.clear();
   CHECK(!load(/*strict=*/true, &error));
-  CHECK(error.find("Transform") != std::string::npos);
-  CHECK(error.find("postion") != std::string::npos);
-  CHECK(error.find(":4:") != std::string::npos);
+  CHECK(error.find("Transform") != base::String::npos);
+  CHECK(error.find("postion") != base::String::npos);
+  CHECK(error.find(":4:") != base::String::npos);
 
   // A clean file still loads under strict.
   write("rxscene 1\n\nentity\nTransform.position = 1 2 3\nName.value = \"ok\"\n");
   error.clear();
   CHECK(load(/*strict=*/true, &error));
 
-  fs::remove(path);
+  rx::fs::Remove(path);
 }
 
 // Numbers. A malformed or unrepresentable literal used to load as a silent
@@ -316,15 +314,14 @@ void TestStrictLoad() {
 // keeps its old zero-padded value with a warning so the editor still opens the
 // file.
 void TestNumberLiterals() {
-  namespace fs = std::filesystem;
-  fs::path path = fs::temp_directory_path() / "rx_edit_numbers.rxscene";
+  base::String path = rx::fs::Join(rx::fs::TempDirectory(), "rx_edit_numbers.rxscene");
 
-  auto write = [&](const std::string& body) {
-    std::FILE* f = std::fopen(path.string().c_str(), "wb");
+  auto write = [&](const base::String& body) {
+    FILE* f = ::fopen(path.c_str(), "wb");
     CHECK(f != nullptr);
     if (!f) return;
-    std::fputs(("rxscene 1\n\nentity\n" + body).c_str(), f);
-    std::fclose(f);
+    ::fputs(("rxscene 1\n\nentity\n" + body).c_str(), f);
+    ::fclose(f);
   };
   // Loads leniently and hands back the entity's Transform, which is what the
   // editor would show for the same file.
@@ -332,7 +329,7 @@ void TestNumberLiterals() {
     asset::Vfs vfs;
     asset::AssetDatabase db(vfs);
     ecs::World world;
-    CHECK(LoadScene(world, db, path.string(), nullptr, /*strict=*/false));
+    CHECK(LoadScene(world, db, path, nullptr, /*strict=*/false));
     bool found = false;
     world.Each<scene::Transform>([&](ecs::Entity, scene::Transform& t) {
       if (!found) *out = t;
@@ -344,8 +341,8 @@ void TestNumberLiterals() {
     asset::Vfs vfs;
     asset::AssetDatabase db(vfs);
     ecs::World world;
-    std::string error;
-    CHECK(!LoadScene(world, db, path.string(), &error, /*strict=*/true));
+    base::String error;
+    CHECK(!LoadScene(world, db, path, &error, /*strict=*/true));
     // A rejected load must leave nothing behind, numbers included.
     size_t entities = 0;
     world.Each<scene::Transform>([&](ecs::Entity, scene::Transform&) { ++entities; });
@@ -357,10 +354,10 @@ void TestNumberLiterals() {
 
   // A token that is not a number: rejected by name, with its line.
   write("Transform.position = 1 abc 3\n");
-  std::string error = strict_error();
-  CHECK(error.find("abc") != std::string::npos);
-  CHECK(error.find("not a number") != std::string::npos);
-  CHECK(error.find(":4:") != std::string::npos);
+  base::String error = strict_error();
+  CHECK(error.find("abc") != base::String::npos);
+  CHECK(error.find("not a number") != base::String::npos);
+  CHECK(error.find(":4:") != base::String::npos);
   lenient(&t);  // unchanged from before the fix: the bad lane and the rest zero
   CHECK_NEAR(t.position[0], 1.f, 1e-6f);
   CHECK_NEAR(t.position[1], 0.f, 1e-6f);
@@ -370,27 +367,27 @@ void TestNumberLiterals() {
   // refused in both a lane and a scalar, which is the agreement that was
   // missing: only the scalar path used to accept these.
   for (const char* literal : {"1e40", "inf", "-inf", "nan"}) {
-    write(std::string("Transform.position = 0 ") + literal + " 0\n");
+    write(base::String("Transform.position = 0 ") + literal + " 0\n");
     error = strict_error();
-    CHECK(error.find(literal) != std::string::npos);
-    CHECK(error.find("not finite") != std::string::npos);
+    CHECK(error.find(literal) != base::String::npos);
+    CHECK(error.find("not finite") != base::String::npos);
     lenient(&t);
     CHECK_NEAR(t.position[1], 0.f, 1e-6f);
-    CHECK(std::isfinite(t.position[1]));
+    CHECK(::isfinite(t.position[1]));
 
-    write(std::string("Transform.scale = ") + literal + "\n");
+    write(base::String("Transform.scale = ") + literal + "\n");
     error = strict_error();
-    CHECK(error.find("not finite") != std::string::npos);
+    CHECK(error.find("not finite") != base::String::npos);
     lenient(&t);
-    CHECK(std::isfinite(t.scale));
+    CHECK(::isfinite(t.scale));
   }
 
   // A trailing suffix is not a number either, in the scalar path where strtof
   // used to keep the prefix and drop it.
   write("Transform.scale = 0.6f\n");
   error = strict_error();
-  CHECK(error.find("0.6f") != std::string::npos);
-  CHECK(error.find("not a number") != std::string::npos);
+  CHECK(error.find("0.6f") != base::String::npos);
+  CHECK(error.find("not a number") != base::String::npos);
 
   // A short list is the authored short form, not an error: it pads with zeros.
   write("Transform.position = 1 2\n");
@@ -398,7 +395,7 @@ void TestNumberLiterals() {
     asset::Vfs vfs;
     asset::AssetDatabase db(vfs);
     ecs::World world;
-    CHECK(LoadScene(world, db, path.string(), nullptr, /*strict=*/true));
+    CHECK(LoadScene(world, db, path, nullptr, /*strict=*/true));
   }
   lenient(&t);
   CHECK_NEAR(t.position[0], 1.f, 1e-6f);
@@ -412,16 +409,16 @@ void TestNumberLiterals() {
   // authored, with --validate reporting the file clean.
   write("Transform.position = 1 2 3 4\n");
   error = strict_error();
-  CHECK(error.find("takes 3 values") != std::string::npos);
-  CHECK(error.find("'4'") != std::string::npos);
-  CHECK(error.find(":4:") != std::string::npos);
+  CHECK(error.find("takes 3 values") != base::String::npos);
+  CHECK(error.find("'4'") != base::String::npos);
+  CHECK(error.find(":4:") != base::String::npos);
 
   // Including a surplus that is not a number: the count is what is wrong, and
   // reporting it as a bad literal would send the author looking at the value.
   write("Transform.scale = 2 unrelated\n");
   error = strict_error();
-  CHECK(error.find("takes 1 value") != std::string::npos);
-  CHECK(error.find("unrelated") != std::string::npos);
+  CHECK(error.find("takes 1 value") != base::String::npos);
+  CHECK(error.find("unrelated") != base::String::npos);
   // Lenient keeps the lanes it could read, so the editor still opens the file.
   lenient(&t);
   CHECK_NEAR(t.scale, 2.f, 1e-6f);
@@ -430,13 +427,13 @@ void TestNumberLiterals() {
   // whole quaternion is zero and MakeFromQuat collapses the mesh to a point.
   write("Transform.rotation = 0 0 0\n");
   error = strict_error();
-  CHECK(error.find("zero quaternion") != std::string::npos);
+  CHECK(error.find("zero quaternion") != base::String::npos);
 
   // Non-unit: MakeFromQuat does not normalize, so this scales the mesh by 0.707
   // on top of Transform.scale.
   write("Transform.rotation = 0 0.5 0 0.5\n");
   error = strict_error();
-  CHECK(error.find("length") != std::string::npos);
+  CHECK(error.find("length") != base::String::npos);
 
   // Hand-rounded unit quaternions stay legal; 0.7 0 0 0.7 is 1% short.
   write("Transform.rotation = 0.7 0 0 0.7\nTransform.position = 0 0 0\n");
@@ -444,39 +441,38 @@ void TestNumberLiterals() {
     asset::Vfs vfs;
     asset::AssetDatabase db(vfs);
     ecs::World world;
-    std::string clean;
-    CHECK(LoadScene(world, db, path.string(), &clean, /*strict=*/true));
+    base::String clean;
+    CHECK(LoadScene(world, db, path, &clean, /*strict=*/true));
   }
 
-  fs::remove(path);
+  rx::fs::Remove(path);
 }
 
 // A non-finite float has no literal the loader reads back, so saving one would
 // be silent data loss on the next load. The save has to refuse, and refuse
 // before it has replaced whatever was on disk.
 void TestSaveRejectsNonFinite() {
-  namespace fs = std::filesystem;
-  fs::path path = fs::temp_directory_path() / "rx_edit_nonfinite.rxscene";
-  fs::remove(path);
+  base::String path = rx::fs::Join(rx::fs::TempDirectory(), "rx_edit_nonfinite.rxscene");
+  rx::fs::Remove(path);
 
   ecs::World world;
   ecs::Entity e = world.Create();
-  world.Add(e, scene::Transform{{0, std::numeric_limits<f32>::quiet_NaN(), 0}, {0, 0, 0, 1}, 1.f});
+  world.Add(e, scene::Transform{{0, NAN, 0}, {0, 0, 0, 1}, 1.f});
   world.Add(e, scene::Name{"Poisoned"});
 
-  std::string error;
-  CHECK(!SaveScene(world, path.string(), &error));
-  CHECK(error.find("Transform.position") != std::string::npos);
-  CHECK(error.find("Poisoned") != std::string::npos);
-  CHECK(!fs::exists(path));  // nothing written, not a truncated file
+  base::String error;
+  CHECK(!SaveScene(world, path, &error));
+  CHECK(error.find("Transform.position") != base::String::npos);
+  CHECK(error.find("Poisoned") != base::String::npos);
+  CHECK(!rx::fs::Exists(path));  // nothing written, not a truncated file
 
   // The same scene saves once the value is one the format can spell.
   world.Get<scene::Transform>(e)->position[1] = 2.f;
   error.clear();
-  CHECK(SaveScene(world, path.string(), &error));
-  CHECK(fs::exists(path));
+  CHECK(SaveScene(world, path, &error));
+  CHECK(rx::fs::Exists(path));
 
-  fs::remove(path);
+  rx::fs::Remove(path);
 }
 
 // The schema dump names every PropType, so an unmapped one would silently
@@ -487,7 +483,7 @@ void TestPropTypeNames() {
                            PropType::kVec3,  PropType::kVec4,   PropType::kQuat,
                            PropType::kColor, PropType::kString, PropType::kAssetId,
                            PropType::kEntity};
-  for (PropType type : kAll) CHECK(std::string(PropTypeName(type)) != "?");
+  for (PropType type : kAll) CHECK(base::String(PropTypeName(type)) != "?");
   CHECK(!AllComponents().empty());
 }
 
@@ -630,6 +626,6 @@ int main() {
   TestUndo();
   TestHierarchy();
   TestSelection();
-  if (failures == 0) std::printf("edit_test: all passed\n");
+  if (failures == 0) ::printf("edit_test: all passed\n");
   return failures == 0 ? 0 : 1;
 }

@@ -1,5 +1,6 @@
 #include "audio/ffmpeg_codec.h"
 
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 
 // Compiled when the FFmpeg backend is off (the default, and the whole CI matrix):
@@ -7,7 +8,7 @@
 // note rather than failing the build or crashing at runtime.
 namespace rx::audio {
 
-std::unique_ptr<Decoder> OpenFfmpegDecoder(ByteSpan) {
+base::UniquePointer<Decoder> OpenFfmpegDecoder(ByteSpan) {
   static bool warned = false;
   if (!warned) {
     warned = true;

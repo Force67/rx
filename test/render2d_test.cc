@@ -3,9 +3,9 @@
 #include "render2d/sprite_renderer.h"
 #include "render2d/tile_map.h"
 
-#include <cmath>
-#include <cstdio>
-#include <limits>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 namespace {
 
@@ -15,13 +15,13 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "render2d_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "render2d_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(float actual, float expected, const char* message, float epsilon = 1e-4f) {
-  if (std::abs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "render2d_test: FAIL: %s (got %.6f, expected %.6f)\n", message, actual,
+  if (::abs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "render2d_test: FAIL: %s (got %.6f, expected %.6f)\n", message, actual,
                expected);
   ++failures;
 }
@@ -47,11 +47,11 @@ void TestCameraRoundTrip() {
 void TestCameraRejectsDegenerateInputs() {
   Camera2D camera;
   camera.SetViewport(0, 0);
-  camera.SetZoom(std::numeric_limits<float>::infinity());
+  camera.SetZoom(INFINITY);
   const rx::Mat4 view_proj = camera.ViewProj();
   Check(camera.viewport().x == 1.0f && camera.viewport().y == 1.0f,
         "zero viewport is kept invertible");
-  Check(std::isfinite(view_proj.m[0]) && std::isfinite(view_proj.m[5]),
+  Check(::isfinite(view_proj.m[0]) && ::isfinite(view_proj.m[5]),
         "degenerate camera inputs produce a finite matrix");
 }
 
@@ -105,7 +105,7 @@ void TestTileMapQueries() {
   Check(!map.IsSolidWorld({100.0f, 100.0f}), "invalid tile size is never solid");
   Check(map.WorldBounds().w == 0.0f, "invalid tile size has empty bounds");
   map.tile_size = 1.0f;
-  Check(!map.IsSolidWorld({std::numeric_limits<float>::infinity(), 0.0f}),
+  Check(!map.IsSolidWorld({INFINITY, 0.0f}),
         "non-finite world position is never solid");
 }
 
@@ -125,9 +125,9 @@ int main() {
   TestRendererStartsInert();
 
   if (failures != 0) {
-    std::fprintf(stderr, "render2d_test: %d failure(s)\n", failures);
+    ::fprintf(stderr, "render2d_test: %d failure(s)\n", failures);
     return 1;
   }
-  std::puts("render2d_test: all tests passed");
+  ::puts("render2d_test: all tests passed");
   return 0;
 }

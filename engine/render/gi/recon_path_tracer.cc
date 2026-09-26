@@ -1,9 +1,10 @@
 #include "render/gi/recon_path_tracer.h"
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/gi/raytracing.h"
 #include "render/rhi/device.h"
 #include "shaders/recon_atrous_cs_hlsl.h"
@@ -432,7 +433,7 @@ bool ReconPathTracer::CreateBuffers(Device& device, Extent2D extent) {
                                       ResourceState::kGeneral));
         pp->state[i] = ResourceState::kGeneral;
       }
-    cmd.TextureBarriers({barriers.data(), barriers.size()});
+    cmd.TextureBarriers(base::Span(barriers.data(), barriers.size()));
   });
   buffers_ready_ = true;
   return true;
@@ -515,7 +516,7 @@ void ReconPathTracer::RunTemporal(RenderGraph& graph, ResourceHandle noisy, Reso
         p.reset = frame.reset ? 1.0f : 0.0f;
         p.spec_mode = spec ? 1u : 0u;
         ctx.cmd->BindPipeline(temporal_pipeline_);
-        ctx.cmd->BindTransient(0, {items.data(), items.size()});
+        ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent_);
       });
@@ -587,7 +588,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
   // same matrices, and this frame's copy must not disturb the one the previous
   // in-flight frame is still reading.
   const ReconCamera camera{frame.inv_view_proj, frame.view_proj, frame.prev_view_proj};
-  std::memcpy(camera_[cur].mapped, &camera, sizeof(camera));
+  base::MemCopy(camera_[cur].mapped, &camera, sizeof(camera));
   auto imp = [&](const char* name, PingPong& pp, u32 i) {
     return graph.ImportImage(name, pp.image[i], &pp.state[i]);
   };
@@ -690,7 +691,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         p.bounces = (bounces_ & 0xffu) | (frame.restir ? 0x100u : 0u) | (rr ? 0x200u : 0u) |
                     (di ? 0x400u : 0u);
         ctx.cmd->BindPipeline(gbuffer_pipeline_);
-        ctx.cmd->BindTransient(0, {items.data(), items.size()});
+        ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->BindSet(1, bindless_set);
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent_);
@@ -785,7 +786,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           p.jitter_delta[0] = jitter_delta.x;
           p.jitter_delta[1] = jitter_delta.y;
           ctx.cmd->BindPipeline(restir_di_temporal_pipeline_);
-          ctx.cmd->BindTransient(0, {items.data(), items.size()});
+          ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch2D(extent_);
         });
@@ -829,7 +830,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           p.sample_count = kRestirDiSpatialSamples;
           p.radius = kRestirDiSpatialRadius;
           ctx.cmd->BindPipeline(restir_di_spatial_pipeline_);
-          ctx.cmd->BindTransient(0, {items.data(), items.size()});
+          ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
           ctx.cmd->BindSet(1, bindless_set);
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch2D(extent_);
@@ -879,7 +880,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           p.jitter_delta[0] = jitter_delta.x;
           p.jitter_delta[1] = jitter_delta.y;
           ctx.cmd->BindPipeline(restir_temporal_pipeline_);
-          ctx.cmd->BindTransient(0, {items.data(), items.size()});
+          ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch2D(extent_);
         });
@@ -913,7 +914,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           // channel (the composite's mode-1 lighting view displays it).
           p.debug = frame.debug_mode >= 8 ? frame.debug_mode - 7 : 0;
           ctx.cmd->BindPipeline(restir_spatial_pipeline_);
-          ctx.cmd->BindTransient(0, {items.data(), items.size()});
+          ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch2D(extent_);
         });
@@ -962,7 +963,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           p.reset = frame.reset ? 1.0f : 0.0f;
           p.full_size[0] = extent_.width; p.full_size[1] = extent_.height;
           ctx.cmd->BindPipeline(fog_pipeline_);
-          ctx.cmd->BindTransient(0, {items.data(), items.size()});
+          ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch2D(half);
         });
@@ -994,7 +995,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
           p.max_history = 1.0f;
           p.fog = fog_on ? 1u : 0u;
           ctx.cmd->BindPipeline(composite_pipeline_);
-          ctx.cmd->BindTransient(0, {items.data(), items.size()});
+          ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
           ctx.cmd->Push(p);
           ctx.cmd->Dispatch2D(extent_);
         });
@@ -1015,7 +1016,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
               motion, p_pos, /*spec=*/true, frame);
 
   // 3. a-trous (N passes, ping-pong) for each signal
-  u32 passes = std::clamp(frame.atrous_passes, 1u, 8u);
+  u32 passes = rx::Clamp(frame.atrous_passes, 1u, 8u);
   ResourceHandle denoised = RunAtrous(graph, ac_c, ping, pong, nr_c, vz_c, mo_c, passes, false);
   ResourceHandle spec_denoised =
       RunAtrous(graph, sac_c, spec_ping, spec_pong, nr_c, vz_c, smo_c, passes, true);
@@ -1044,7 +1045,7 @@ void ReconPathTracer::AddToGraph(RenderGraph& graph, RayTracingContext& raytraci
         p.max_history = static_cast<f32>(frame.max_history);
         p.fog = fog_on ? 1u : 0u;
         ctx.cmd->BindPipeline(composite_pipeline_);
-        ctx.cmd->BindTransient(0, {items.data(), items.size()});
+        ctx.cmd->BindTransient(0, base::Span(items.data(), items.size()));
         ctx.cmd->Push(p);
         ctx.cmd->Dispatch2D(extent_);
       });

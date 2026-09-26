@@ -1,8 +1,8 @@
 #include "character/jetpack.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
+#include "core/scalar.h"
 #include "ecs/world.h"
 
 namespace rx::character {
@@ -18,7 +18,7 @@ constexpr f32 kLn10 = 2.302585093f;
 }  // namespace
 
 void StepJetpacks(ecs::World& world, f32 dt) {
-  if (!std::isfinite(dt) || dt <= 0.0f) return;
+  if (!::isfinite(dt) || dt <= 0.0f) return;
 
   world.Each<JetpackDesc, JetpackInput, JetpackState, CharacterMovementSettings, CharacterState,
              CharacterIntent>(
@@ -31,11 +31,11 @@ void StepJetpacks(ecs::World& world, f32 dt) {
         const bool want = in.enabled && in.thrust && st.fuel > 0.0f;
         const f32 demand = want ? 1.0f : 0.0f;
         const f32 tau = d.spool_time > 1e-4f ? d.spool_time / kLn10 : 0.0f;
-        const f32 a = tau > 0.0f ? 1.0f - std::exp(-dt / tau) : 1.0f;
+        const f32 a = tau > 0.0f ? 1.0f - ::exp(-dt / tau) : 1.0f;
         st.thrust = Clamp01(st.thrust + (demand - st.thrust) * a);
 
         // fuel: drain by actual thrust; refuel grounded + idle only
-        const f32 cap = std::max(d.fuel_capacity_s, 1e-3f);
+        const f32 cap = rx::Max(d.fuel_capacity_s, 1e-3f);
         if (st.thrust > 1e-3f) {
           st.fuel -= st.thrust * (dt / cap);  // full thrust empties the tank in `cap` s
         } else if (grounded && d.refuel_rate > 0.0f) {
@@ -49,16 +49,16 @@ void StepJetpacks(ecs::World& world, f32 dt) {
         // Vertical: TWR * gravity, so it competes with weight and only climbs
         // when thrust_to_weight * thrust > 1. Lateral: along the horizontal move
         // intent, scaled by thrust: the in-air lean that beats free-fall drift.
-        const f32 g = std::max(move.gravity, 0.0f);
+        const f32 g = rx::Max(move.gravity, 0.0f);
         Vec3 accel{0.0f, st.thrust * d.thrust_to_weight * g, 0.0f};
         const Vec3 mh{intent.move.x, 0.0f, intent.move.z};
-        const f32 mlen = std::sqrt(mh.x * mh.x + mh.z * mh.z);
+        const f32 mlen = ::sqrt(mh.x * mh.x + mh.z * mh.z);
         if (mlen > 1e-4f) {
           const f32 s = (st.thrust * d.lateral_accel) / mlen;
           accel.x += mh.x * s;
           accel.z += mh.z * s;
         }
-        if (std::isfinite(accel.x) && std::isfinite(accel.y) && std::isfinite(accel.z))
+        if (::isfinite(accel.x) && ::isfinite(accel.y) && ::isfinite(accel.z))
           intent.external_acceleration += accel;  // compose (StepCharacters clears it)
       });
 }

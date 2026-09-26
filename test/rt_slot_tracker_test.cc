@@ -5,7 +5,7 @@
 // unbuilt slot, reading a slot whose BLASes were replaced) are guarded off-GPU.
 #include "render/gi/rt_slot_tracker.h"
 
-#include <cstdio>
+#include <stdio.h>
 #include <initializer_list>
 
 using namespace rx;
@@ -17,7 +17,7 @@ int g_failures = 0;
 #define CHECK(cond)                                                            \
   do {                                                                         \
     if (!(cond)) {                                                             \
-      std::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);              \
+      ::printf("FAIL %s:%d  %s\n", __FILE__, __LINE__, #cond);              \
       ++g_failures;                                                            \
     }                                                                          \
   } while (0)
@@ -178,9 +178,9 @@ int main() {
   }
 
   if (g_failures == 0) {
-    std::printf("rt_slot_tracker_test: all checks passed\n");
+    ::printf("rt_slot_tracker_test: all checks passed\n");
     return 0;
   }
-  std::printf("rt_slot_tracker_test: %d checks FAILED\n", g_failures);
+  ::printf("rt_slot_tracker_test: %d checks FAILED\n", g_failures);
   return 1;
 }

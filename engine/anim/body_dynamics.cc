@@ -1,10 +1,11 @@
 #include "anim/body_dynamics.h"
 
-#include <algorithm>
-#include <cmath>
-#include <utility>
+#include <math.h>
 
 #include "asset/asset_id.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 
 namespace rx::anim {
 namespace {
@@ -23,9 +24,9 @@ Vec3 ClampMagnitude(Vec3 value, f32 maximum) {
 
 void ClampAxes(Vec3 *value, Vec3 *velocity, const Vec3 &limit) {
   auto clamp = [](f32 *x, f32 *v, f32 extent) {
-    extent = std::max(extent, 0.0f);
+    extent = rx::Max(extent, 0.0f);
     const f32 before = *x;
-    *x = std::clamp(*x, -extent, extent);
+    *x = rx::Clamp(*x, -extent, extent);
     if (*x != before && ((*x > 0 && *v > 0) || (*x < 0 && *v < 0)))
       *v = 0;
   };
@@ -39,33 +40,33 @@ void ClampAxes(Vec3 *value, Vec3 *velocity, const Vec3 &limit) {
 // and over-damped authored material responses.
 void Spring(f32 *x, f32 *velocity, f32 force, f32 frequency, f32 damping,
             f32 dt) {
-  const f32 w = 2.0f * kPi * std::max(frequency, 0.01f);
+  const f32 w = 2.0f * kPi * rx::Max(frequency, 0.01f);
   const f32 target = force / (w * w);
   const f32 y = *x - target;
   const f32 v = *velocity;
-  const f32 z = std::max(damping, 0.0f);
+  const f32 z = rx::Max(damping, 0.0f);
 
   if (z < 1.0f - 1e-4f) {
-    const f32 wd = w * std::sqrt(1.0f - z * z);
-    const f32 e = std::exp(-z * w * dt);
-    const f32 c = std::cos(wd * dt);
-    const f32 s = std::sin(wd * dt);
+    const f32 wd = w * ::sqrt(1.0f - z * z);
+    const f32 e = ::exp(-z * w * dt);
+    const f32 c = ::cos(wd * dt);
+    const f32 s = ::sin(wd * dt);
     const f32 a = (v + z * w * y) / wd;
     *x = target + e * (y * c + a * s);
     *velocity = e * (v * c - ((z * w * v + w * w * y) / wd) * s);
   } else if (z <= 1.0f + 1e-4f) {
-    const f32 e = std::exp(-w * dt);
+    const f32 e = ::exp(-w * dt);
     const f32 a = v + w * y;
     *x = target + (y + a * dt) * e;
     *velocity = (v - w * a * dt) * e;
   } else {
-    const f32 root = std::sqrt(z * z - 1.0f);
+    const f32 root = ::sqrt(z * z - 1.0f);
     const f32 r1 = -w * (z - root);
     const f32 r2 = -w * (z + root);
     const f32 c1 = (v - r2 * y) / (r1 - r2);
     const f32 c2 = y - c1;
-    const f32 e1 = std::exp(r1 * dt);
-    const f32 e2 = std::exp(r2 * dt);
+    const f32 e1 = ::exp(r1 * dt);
+    const f32 e2 = ::exp(r2 * dt);
     *x = target + c1 * e1 + c2 * e2;
     *velocity = r1 * c1 * e1 + r2 * c2 * e2;
   }
@@ -79,7 +80,7 @@ void Spring(Vec3 *x, Vec3 *velocity, const Vec3 &force, f32 frequency,
 }
 
 Vec3 ExpSmooth(const Vec3 &previous, const Vec3 &value, f32 halflife, f32 dt) {
-  const f32 t = 1.0f - std::exp(-0.69314718f * dt / std::max(halflife, 1e-4f));
+  const f32 t = 1.0f - ::exp(-0.69314718f * dt / rx::Max(halflife, 1e-4f));
   return Lerp(previous, value, t);
 }
 
@@ -90,11 +91,11 @@ Vec3 QuaternionVelocity(Quat previous, Quat current, f32 dt) {
   if (delta.w < 0)
     delta = {-delta.x, -delta.y, -delta.z, -delta.w};
   const f32 sin_half =
-      std::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
+      ::sqrt(delta.x * delta.x + delta.y * delta.y + delta.z * delta.z);
   if (sin_half < 1e-6f || dt <= 0)
     return {};
   const f32 angle =
-      2.0f * std::atan2(sin_half, std::clamp(delta.w, -1.0f, 1.0f));
+      2.0f * ::atan2(sin_half, rx::Clamp(delta.w, -1.0f, 1.0f));
   return Vec3{delta.x, delta.y, delta.z} * (angle / (sin_half * dt));
 }
 
@@ -129,7 +130,7 @@ void AppendMorphSignals(const BodyRegionConfig &config,
     BodyMorphWeight weight;
     weight.target = asset::MakeAssetId(binding.target).hash;
     weight.weight =
-        std::clamp(binding.bias + binding.gain * Signal(sample, binding.signal),
+        rx::Clamp(binding.bias + binding.gain * Signal(sample, binding.signal),
                    binding.min_weight, binding.max_weight);
     if (weight.target == 0 || weight.weight == 0)
       continue;
@@ -149,13 +150,13 @@ void AppendMorphSignals(const BodyRegionConfig &config,
 } // namespace
 
 BodyRegionConfig MakeBodyRegionPreset(BodyRegionKind kind,
-                                      std::string_view name,
-                                      std::string_view driver_bone,
-                                      std::string_view driven_bone) {
+                                      base::StringRef name,
+                                      base::StringRef driver_bone,
+                                      base::StringRef driven_bone) {
   BodyRegionConfig out;
-  out.name = std::string(name);
-  out.driver_bone = std::string(driver_bone);
-  out.driven_bone = std::string(driven_bone);
+  out.name = base::String(name);
+  out.driver_bone = base::String(driver_bone);
+  out.driven_bone = base::String(driven_bone);
   switch (kind) {
   case BodyRegionKind::kChest:
     out.frequency_hz = 3.1f;
@@ -282,15 +283,15 @@ void BodyDynamics::Update(const asset::Skeleton &skeleton,
       states_.size() != regions_.size()) {
     Resolve(skeleton);
   }
-  const f32 model_units_per_metre = std::max(
-      std::isfinite(frame.model_units_per_metre) ? frame.model_units_per_metre
+  const f32 model_units_per_metre = rx::Max(
+      ::isfinite(frame.model_units_per_metre) ? frame.model_units_per_metre
                                                  : 1.0f,
       1e-6f);
-  if (std::fabs(model_units_per_metre - model_units_per_metre_) > 1e-5f) {
+  if (::fabs(model_units_per_metre - model_units_per_metre_) > 1e-5f) {
     Reset();
     model_units_per_metre_ = model_units_per_metre;
   }
-  if (frame.teleport || !std::isfinite(dt) || dt <= 0 || dt > 0.25f)
+  if (frame.teleport || !::isfinite(dt) || dt <= 0 || dt > 0.25f)
     Reset();
 
   ComputeModelMatrices(skeleton, *pose, &model_);
@@ -380,13 +381,13 @@ void BodyDynamics::Update(const asset::Skeleton &skeleton,
     ClampAxes(&state.rotation, &state.angular_velocity, config.max_rotation);
 
     const f32 impact_from_acceleration =
-        std::max(Length(acceleration_local) - config.impact_threshold, 0.0f) /
-        std::max(max_acceleration_ - config.impact_threshold, 1.0f);
+        rx::Max(Length(acceleration_local) - config.impact_threshold, 0.0f) /
+        rx::Max(max_acceleration_ - config.impact_threshold, 1.0f);
     const f32 impact_from_impulse = Length(frame.linear_impulse) / 2.0f;
-    state.impact = std::max(
+    state.impact = rx::Max(
         state.impact *
-            std::exp(-0.69314718f * dt / std::max(config.impact_decay, 1e-4f)),
-        std::clamp(std::max(impact_from_acceleration, impact_from_impulse),
+            ::exp(-0.69314718f * dt / rx::Max(config.impact_decay, 1e-4f)),
+        rx::Clamp(rx::Max(impact_from_acceleration, impact_from_impulse),
                    0.0f, 1.0f));
 
     // Translate from the driver's local axes into model space, then into the
@@ -434,19 +435,19 @@ BodyRegionSample BodyDynamics::sample(u32 index) const {
   const Vec3 axis = Normalize(config.deformation_axis);
   const f32 axial = Dot(state.translation, axis);
   const f32 normalizer =
-      std::max(Length(Multiply(axis, config.max_translation)), 1e-5f);
-  out.stretch = std::clamp(axial / normalizer, 0.0f, 1.0f);
-  out.compression = std::clamp(-axial / normalizer, 0.0f, 1.0f);
+      rx::Max(Length(Multiply(axis, config.max_translation)), 1e-5f);
+  out.stretch = rx::Clamp(axial / normalizer, 0.0f, 1.0f);
+  out.compression = rx::Clamp(-axial / normalizer, 0.0f, 1.0f);
   const Vec3 lateral = state.translation - axis * axial;
-  out.shear = std::clamp(Length(lateral) /
-                             std::max(Length(config.max_translation -
+  out.shear = rx::Clamp(Length(lateral) /
+                             rx::Max(Length(config.max_translation -
                                              Multiply(Multiply(axis, axis),
                                                       config.max_translation)),
                                       1e-5f),
                          0.0f, 1.0f);
-  out.speed = std::clamp(
+  out.speed = rx::Clamp(
       Length(state.velocity) /
-          std::max(Length(config.max_translation) * config.frequency_hz, 1e-5f),
+          rx::Max(Length(config.max_translation) * config.frequency_hz, 1e-5f),
       0.0f, 1.0f);
   return out;
 }
@@ -462,7 +463,7 @@ void ApplyBodyMorphWeights(const asset::Mesh &mesh,
     const i32 target = mesh.FindMorphTarget(body_weight.target);
     if (target < 0)
       continue;
-    (*dense)[target] = std::clamp((*dense)[target] + body_weight.weight,
+    (*dense)[target] = rx::Clamp((*dense)[target] + body_weight.weight,
                                   min_weight, max_weight);
   }
 }

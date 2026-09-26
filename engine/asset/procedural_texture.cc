@@ -1,18 +1,20 @@
 #include "asset/procedural_texture.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
+#include "base/strings/string_ref.h"
 #include "core/math.h"
+#include "core/scalar.h"
 
 namespace rx::asset {
 namespace {
 
-f32 Fract(f32 x) { return x - std::floor(x); }
+f32 Fract(f32 x) { return x - ::floor(x); }
 
 f32 Smoothstep(f32 edge0, f32 edge1, f32 x) {
   if (edge1 <= edge0) return x < edge0 ? 0.0f : 1.0f;
-  f32 t = std::clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
+  f32 t = rx::Clamp((x - edge0) / (edge1 - edge0), 0.0f, 1.0f);
   return t * t * (3.0f - 2.0f * t);
 }
 
@@ -24,15 +26,15 @@ constexpr f32 kEdgeSoftness = 0.02f;
 // 0 at the cell boundary, 1 at the cell centre.
 f32 EdgeDistance(f32 t) {
   f32 f = Fract(t);
-  return std::min(f, 1.0f - f) * 2.0f;
+  return rx::Min(f, 1.0f - f) * 2.0f;
 }
 
 // A square wave alternating 0 and 1 per unit cell of `t`, crossfaded across the
 // cell boundary rather than stepped. Both cells reach exactly 0.5 at the
 // boundary, which is what keeps it continuous (and the checker antialiased).
 f32 SoftSquare(f32 t) {
-  f32 cell = std::floor(t);
-  f32 parity = std::fmod(std::abs(cell), 2.0f) >= 1.0f ? 1.0f : 0.0f;
+  f32 cell = ::floor(t);
+  f32 parity = ::fmod(::abs(cell), 2.0f) >= 1.0f ? 1.0f : 0.0f;
   f32 inside = 0.5f + 0.5f * Smoothstep(0.0f, kEdgeSoftness * 2.0f, EdgeDistance(t));
   return parity * inside + (1.0f - parity) * (1.0f - inside);
 }
@@ -50,7 +52,7 @@ u32 HashLattice(i32 x, i32 y, u32 seed) {
 f32 ValueNoise(f32 x, f32 y, i32 px, i32 py, u32 seed) {
   if (px < 1) px = 1;
   if (py < 1) py = 1;
-  i32 x0 = static_cast<i32>(std::floor(x)), y0 = static_cast<i32>(std::floor(y));
+  i32 x0 = static_cast<i32>(::floor(x)), y0 = static_cast<i32>(::floor(y));
   f32 fx = x - static_cast<f32>(x0), fy = y - static_cast<f32>(y0);
   auto wrap = [](i32 v, i32 period) { return ((v % period) + period) % period; };
   auto corner = [&](i32 cx, i32 cy) {
@@ -66,21 +68,21 @@ f32 ValueNoise(f32 x, f32 y, i32 px, i32 py, u32 seed) {
 // Encodes a linear channel with the sRGB transfer function, for the textures
 // bound to a slot the GPU samples as sRGB.
 u8 EncodeSrgb(f32 linear) {
-  f32 v = std::clamp(linear, 0.0f, 1.0f);
-  f32 encoded = v <= 0.0031308f ? v * 12.92f : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
-  return static_cast<u8>(std::lround(encoded * 255.0f));
+  f32 v = rx::Clamp(linear, 0.0f, 1.0f);
+  f32 encoded = v <= 0.0031308f ? v * 12.92f : 1.055f * ::pow(v, 1.0f / 2.4f) - 0.055f;
+  return static_cast<u8>(::lround(encoded * 255.0f));
 }
 
 u8 EncodeLinear(f32 v) {
-  return static_cast<u8>(std::lround(std::clamp(v, 0.0f, 1.0f) * 255.0f));
+  return static_cast<u8>(::lround(rx::Clamp(v, 0.0f, 1.0f) * 255.0f));
 }
 
 Texture BeginTexture(const PatternDesc& desc, bool srgb, AssetId id) {
   Texture texture;
   texture.id = id;
   texture.format = TextureFormat::kRgba8;
-  texture.width = std::max(desc.width, 1u);
-  texture.height = std::max(desc.height, 1u);
+  texture.width = rx::Max(desc.width, 1u);
+  texture.height = rx::Max(desc.height, 1u);
   texture.is_srgb = srgb;
   texture.data.resize(static_cast<size_t>(texture.width) * texture.height * 4);
   return texture;
@@ -88,7 +90,7 @@ Texture BeginTexture(const PatternDesc& desc, bool srgb, AssetId id) {
 
 }  // namespace
 
-bool ParsePatternKind(std::string_view name, PatternKind* out) {
+bool ParsePatternKind(base::StringRef name, PatternKind* out) {
   if (name == "checker") *out = PatternKind::kChecker;
   else if (name == "grid") *out = PatternKind::kGrid;
   else if (name == "brick") *out = PatternKind::kBrick;
@@ -99,39 +101,39 @@ bool ParsePatternKind(std::string_view name, PatternKind* out) {
 }
 
 f32 SamplePattern(const PatternDesc& desc, f32 u, f32 v) {
-  const f32 su = std::max(desc.scale[0], 0.0001f);
-  const f32 sv = std::max(desc.scale[1], 0.0001f);
-  const f32 line = std::clamp(desc.line_width, 0.0f, 0.9f);
+  const f32 su = rx::Max(desc.scale[0], 0.0001f);
+  const f32 sv = rx::Max(desc.scale[1], 0.0001f);
+  const f32 line = rx::Clamp(desc.line_width, 0.0f, 0.9f);
   switch (desc.kind) {
     case PatternKind::kChecker: {
       f32 a = SoftSquare(u * su), b = SoftSquare(v * sv);
       return a + b - 2.0f * a * b;  // soft xor
     }
     case PatternKind::kGrid: {
-      f32 d = std::min(EdgeDistance(u * su), EdgeDistance(v * sv));
+      f32 d = rx::Min(EdgeDistance(u * su), EdgeDistance(v * sv));
       return Smoothstep(line - kEdgeSoftness, line + kEdgeSoftness, d);
     }
     case PatternKind::kBrick: {
       // scale is bricks across by courses up, and every other course is offset
       // by half a brick.
-      f32 course = std::floor(v * sv);
-      f32 across = u * su + (std::fmod(std::abs(course), 2.0f) >= 1.0f ? 0.5f : 0.0f);
+      f32 course = ::floor(v * sv);
+      f32 across = u * su + (::fmod(::abs(course), 2.0f) >= 1.0f ? 0.5f : 0.0f);
       // `line` is a fraction of a COURSE, and the joint has to come out the
       // same uv width both ways, so the fraction across is rescaled by how much
       // wider a brick is than a course is tall. A wall 4 bricks across and 20
       // courses up has bricks 5x as wide, so the vertical joint is 1/5 of the
       // cell the horizontal one is.
-      f32 line_u = std::clamp(line * su / sv, 0.0f, 0.9f);
+      f32 line_u = rx::Clamp(line * su / sv, 0.0f, 0.9f);
       f32 dv = Smoothstep(line - kEdgeSoftness, line + kEdgeSoftness, EdgeDistance(v * sv));
       f32 du = Smoothstep(line_u - kEdgeSoftness, line_u + kEdgeSoftness, EdgeDistance(across));
       return du * dv;
     }
     case PatternKind::kGradient:
-      return std::clamp(v, 0.0f, 1.0f);
+      return rx::Clamp(v, 0.0f, 1.0f);
     case PatternKind::kNoise: {
       f32 sum = 0.0f, amplitude = 1.0f, total = 0.0f;
-      i32 px = std::max(1, static_cast<i32>(std::lround(su)));
-      i32 py = std::max(1, static_cast<i32>(std::lround(sv)));
+      i32 px = rx::Max(1, static_cast<i32>(::lround(su)));
+      i32 py = rx::Max(1, static_cast<i32>(::lround(sv)));
       for (int octave = 0; octave < 4; ++octave) {
         sum += ValueNoise(u * static_cast<f32>(px), v * static_cast<f32>(py), px, py,
                           desc.seed + static_cast<u32>(octave) * 7919u) *

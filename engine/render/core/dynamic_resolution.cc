@@ -1,7 +1,8 @@
+#include "core/scalar.h"
 #include "render/core/dynamic_resolution.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
 namespace rx::render {
 
@@ -14,7 +15,7 @@ bool DynamicResolution::Update(f32 gpu_ms) {
   }
 
   const f32 target = settings_.target_ms;
-  const f32 min_scale = std::clamp(settings_.min_scale, 0.25f, 1.0f);
+  const f32 min_scale = rx::Clamp(settings_.min_scale, 0.25f, 1.0f);
 
   if (ema_ms_ > target * kOvershoot) {
     under_ = 0;
@@ -25,13 +26,13 @@ bool DynamicResolution::Update(f32 gpu_ms) {
     if (++over_ < kDownFrames) return false;
     // Cost is ~quadratic in the per-axis scale: jump to the step predicted to
     // land just under the target instead of walking down one step per cycle.
-    f32 fit = scale_ * std::sqrt(target * 0.95f / ema_ms_);
-    f32 next = std::floor(fit / kStep) * kStep;
-    return Apply(std::clamp(next, min_scale, scale_ - kStep));
+    f32 fit = scale_ * ::sqrt(target * 0.95f / ema_ms_);
+    f32 next = ::floor(fit / kStep) * kStep;
+    return Apply(rx::Clamp(next, min_scale, scale_ - kStep));
   }
 
   over_ = 0;
-  f32 raised = std::min(1.0f, scale_ + kStep);
+  f32 raised = rx::Min(1.0f, scale_ + kStep);
   if (raised > scale_ + 1e-4f) {
     // The predicted cost at the next step up must still fit with margin, or
     // the controller would oscillate across the target.
@@ -46,8 +47,8 @@ bool DynamicResolution::Update(f32 gpu_ms) {
 }
 
 bool DynamicResolution::Apply(f32 next) {
-  next = std::round(next / kStep) * kStep;  // stay on the grid, no float drift
-  if (std::abs(next - scale_) < 1e-4f) {
+  next = ::round(next / kStep) * kStep;  // stay on the grid, no float drift
+  if (::abs(next - scale_) < 1e-4f) {
     over_ = under_ = 0;
     return false;
   }

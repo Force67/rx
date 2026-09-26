@@ -25,11 +25,11 @@
 // clang-format on
 #endif
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <mutex>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 
 namespace rx::http {
@@ -48,19 +48,20 @@ void TraceMbed(void*, int level, const char* file, int line, const char* message
 // application has to start exactly once before the first handshake. Harmless
 // on a 3.x build that only negotiates 1.2.
 void EnsurePsaCrypto() {
-  static std::once_flag once;
-  std::call_once(once, [] {
+  static const bool started = [] {
     const psa_status_t status = psa_crypto_init();
     if (status != PSA_SUCCESS)
       RX_WARN("http: psa_crypto_init failed ({}), tls handshakes may fail", int(status));
-  });
+    return true;
+  }();
+  (void)started;
 }
 
 base::String MbedError(const char* what, int code) {
   char text[128] = {};
   mbedtls_strerror(code, text, sizeof(text));
   char buffer[256] = {};
-  std::snprintf(buffer, sizeof(buffer), "%s: %s (-0x%04x)", what, text,
+  ::snprintf(buffer, sizeof(buffer), "%s: %s (-0x%04x)", what, text,
                 static_cast<unsigned>(-code));
   return base::String(buffer);
 }
@@ -133,8 +134,9 @@ bool LoadTrustStore(mbedtls_x509_crt* chain,
   // request. Falling through to the system store would hand an operator who
   // pinned one CA the full public root set instead, with a warning as the only
   // sign of it.
-  for (const char* key : {"RX_HTTP_CA_FILE", "SSL_CERT_FILE"}) {
-    const char* env = std::getenv(key);
+  static const char* const kCaFileKeys[] = {"RX_HTTP_CA_FILE", "SSL_CERT_FILE"};
+  for (const char* key : kCaFileKeys) {
+    const char* env = ::getenv(key);
     if (env == nullptr || *env == '\0')
       continue;
     if (load(chain, env))
@@ -202,7 +204,7 @@ class TlsStream final : public Stream {
     const int seeded = mbedtls_ctr_drbg_seed(
         &drbg_, mbedtls_entropy_func, &entropy_,
         reinterpret_cast<const unsigned char*>(personalization),
-        std::strlen(personalization));
+        ::strlen(personalization));
     if (seeded != 0) {
       *error = MbedError("cannot seed the rng", seeded);
       return false;
@@ -260,7 +262,7 @@ class TlsStream final : public Stream {
         char info[512] = {};
         mbedtls_x509_crt_verify_info(info, sizeof(info), "", flags);
         char buffer[640] = {};
-        std::snprintf(buffer, sizeof(buffer), "certificate rejected for %s: %s",
+        ::snprintf(buffer, sizeof(buffer), "certificate rejected for %s: %s",
                       host.c_str(), info);
         *error = base::String(buffer);
         return false;
@@ -338,7 +340,7 @@ class TlsStream final : public Stream {
   }
 
   TlsOptions options_;
-  std::unique_ptr<Stream> inner_;
+  base::UniquePointer<Stream> inner_;
   base::String inner_error_;  // the socket's reason for the last BIO failure
   bool handshaked_ = false;
   mbedtls_ssl_context ssl_{};
@@ -352,8 +354,8 @@ class TlsStream final : public Stream {
 
 }  // namespace
 
-std::unique_ptr<Stream> MakeTlsStream(const TlsOptions& options) {
-  return std::make_unique<TlsStream>(options);
+base::UniquePointer<Stream> MakeTlsStream(const TlsOptions& options) {
+  return base::MakeUnique<TlsStream>(options);
 }
 
 }  // namespace rx::http
@@ -362,7 +364,7 @@ std::unique_ptr<Stream> MakeTlsStream(const TlsOptions& options) {
 
 namespace rx::http {
 
-std::unique_ptr<Stream> MakeTlsStream(const TlsOptions&) {
+base::UniquePointer<Stream> MakeTlsStream(const TlsOptions&) {
   return nullptr;
 }
 

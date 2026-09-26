@@ -1,14 +1,16 @@
 #include "render/core/bindless.h"
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
+#include "base/algorithm.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 
 namespace rx::render {
 
-std::unique_ptr<BindlessRegistry> BindlessRegistry::Create(Device& device) {
-  auto registry = std::unique_ptr<BindlessRegistry>(new BindlessRegistry(device));
+base::UniquePointer<BindlessRegistry> BindlessRegistry::Create(Device& device) {
+  auto registry = base::UniquePointer<BindlessRegistry>(new BindlessRegistry(device));
   if (!registry->Initialize()) return nullptr;
   return registry;
 }
@@ -106,7 +108,7 @@ u32 BindlessRegistry::RegisterMaterial(const MaterialRecord& record) {
     return kInvalidIndex;
   }
   u32 index = material_count_++;
-  std::memcpy(static_cast<u8*>(material_table_.mapped) + index * sizeof(MaterialRecord), &record,
+  base::MemCopy(static_cast<u8*>(material_table_.mapped) + index * sizeof(MaterialRecord), &record,
               sizeof(record));
   return index;
 }
@@ -162,11 +164,11 @@ u32 BindlessRegistry::RegisterMesh(const GpuBuffer& vertices, const GpuBuffer& i
   index_srv.array_index = record.index_srv;
   device_.UpdateBindingSet(set_, {vertex_srv, index_srv});
   if (geometry_count != 0) {
-    std::memcpy(static_cast<u8*>(geometry_table_.mapped) +
+    base::MemCopy(static_cast<u8*>(geometry_table_.mapped) +
                     geometry_offset * sizeof(GeometryRecord),
                 geometries, geometry_count * sizeof(GeometryRecord));
   }
-  std::memcpy(static_cast<u8*>(mesh_table_.mapped) + index * sizeof(MeshRecord), &record,
+  base::MemCopy(static_cast<u8*>(mesh_table_.mapped) + index * sizeof(MeshRecord), &record,
               sizeof(record));
   active_meshes_[index] = 1;
   mesh_geometry_counts_[index] = geometry_count;
@@ -180,10 +182,13 @@ void BindlessRegistry::ReleaseMesh(u32 index) {
   const u32 geometry_count = mesh_geometry_counts_[index];
   if (geometry_count != 0) {
     free_geometry_ranges_.push_back({record->geometry_offset, geometry_count});
-    std::sort(free_geometry_ranges_.begin(), free_geometry_ranges_.end(),
-              [](const GeometryRange& a, const GeometryRange& b) {
-                return a.offset < b.offset;
-              });
+    // Free ranges are disjoint and never empty, so offsets are unique and any
+    // correct sort agrees.
+    base::Sort(free_geometry_ranges_.data(),
+               free_geometry_ranges_.data() + free_geometry_ranges_.size(),
+               [](const GeometryRange& a, const GeometryRange& b) {
+                 return a.offset < b.offset;
+               });
     for (size_t i = 1; i < free_geometry_ranges_.size();) {
       GeometryRange& previous = free_geometry_ranges_[i - 1];
       const GeometryRange current = free_geometry_ranges_[i];

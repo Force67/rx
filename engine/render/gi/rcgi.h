@@ -1,9 +1,9 @@
 #ifndef RX_RENDER_RCGI_H_
 #define RX_RENDER_RCGI_H_
 
-#include <memory>
-#include <span>
 
+#include "base/containers/span.h"
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "render/core/bindless.h"
 #include "render/core/render_graph.h"
@@ -68,7 +68,7 @@ class RcgiSystem {
   // hardware). When false, ONLY the software variants + the shared/probes-only
   // pipelines are created; a SPIR-V module declaring RayQuery can fail pipeline
   // creation on a non-ray-query device, so the hw pipelines are skipped entirely.
-  static std::unique_ptr<RcgiSystem> Create(Device& device, TextureView sky_view,
+  static base::UniquePointer<RcgiSystem> Create(Device& device, TextureView sky_view,
                                             SamplerHandle sky_sampler, BindlessRegistry& bindless,
                                             bool rt_available);
   ~RcgiSystem();
@@ -99,7 +99,7 @@ class RcgiSystem {
   // do not blend with outdoor probes (item 9b). Empty span disables classify.
   // Cheap: just repacks a small host-visible buffer, so it may be called each
   // frame from the game's forwarding path.
-  void SetInteriorVolumes(std::span<const InteriorVolume> volumes, u32 frame_index);
+  void SetInteriorVolumes(base::Span<const InteriorVolume> volumes, u32 frame_index);
 
   // M1 filler: full-res irradiance from the cascades, sampled per screen pixel.
   // Reads the prepass depth + oct normals; returns the "rcgi_irradiance"

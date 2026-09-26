@@ -1,11 +1,11 @@
 #ifndef RX_WORLD_WORLD_BAKE_H_
 #define RX_WORLD_WORLD_BAKE_H_
 
-#include <string>
-#include <string_view>
 
 #include <base/containers/vector.h>
 
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/math.h"
 #include "core/types.h"
@@ -35,12 +35,12 @@ namespace rx::world {
 // constant default would have them agree only by accident. It also keeps two
 // worlds from colliding when they are merged into one archive, which naming
 // every world the same thing would guarantee.
-RX_WORLD_EXPORT std::string WorldNameForArchive(std::string_view archive_path);
+RX_WORLD_EXPORT base::String WorldNameForArchive(base::StringRef archive_path);
 
 struct WorldBakeOptions {
   // Names the world, and the directory its index and payloads sit in inside the
   // archive: <name>/<name>.rxworld. Empty means WorldNameForArchive.
-  std::string name;
+  base::String name;
   f32 cell_size = 64.0f;
   // 0 hashes the cook: the scene's bytes, these settings, and the reflected
   // layout of every component actually written. An explicit value overrides it,
@@ -52,7 +52,7 @@ struct WorldBakeOptions {
   bool skip_unknown = false;
   // An entity whose authored component set is exactly this becomes an instance
   // page row rather than an ECS entity. Empty means Transform + Renderable.
-  base::Vector<std::string> instance_components;
+  base::Vector<base::String> instance_components;
 };
 
 // What the cook makes of one entity.
@@ -79,9 +79,9 @@ struct BakeVerdict {
   Vec3 cell_minimum;
   Vec3 cell_maximum;
   // Reflected components that cannot be baked and are dropped from it.
-  base::Vector<std::string> dropped;
+  base::Vector<base::String> dropped;
   // Why, when role is kRefused.
-  std::string refusal;
+  base::String refusal;
 };
 
 RX_WORLD_EXPORT BakeVerdict ClassifyForBake(ecs::World& world, ecs::Entity entity,
@@ -92,23 +92,23 @@ struct WorldBakeResult {
   // The name the world was actually cooked under, which is what `--world-name`
   // has to be given to open it. Reported rather than left to the caller to
   // recompute, because an empty options.name means the cook decided it.
-  std::string name;
+  base::String name;
   u32 cells = 0;
   u32 entities = 0;
   u32 instances = 0;
   // Components dropped because they cannot be restored by copying bytes, once
   // each. Not an error - a cook can legitimately carry them - but the author
   // has to be told, because every entity that had one no longer does.
-  base::Vector<std::string> dropped;
+  base::Vector<base::String> dropped;
 };
 
 // Cooks `scene_path` into a .rxp at `archive_path`. False, with `error` set to
 // something naming the scene and the problem, on anything the cook refuses: a
 // Parent link, an entity off the lattice, a component this build cannot bake or
 // does not know, an empty scene, or a file it cannot read or write.
-RX_WORLD_EXPORT bool BakeWorld(const std::string& scene_path, const WorldBakeOptions& options,
-                               const std::string& archive_path, WorldBakeResult* result,
-                               std::string* error);
+RX_WORLD_EXPORT bool BakeWorld(const base::String& scene_path, const WorldBakeOptions& options,
+                               const base::String& archive_path, WorldBakeResult* result,
+                               base::String* error);
 
 }  // namespace rx::world
 

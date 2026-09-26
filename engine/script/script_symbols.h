@@ -1,12 +1,12 @@
 #ifndef RX_SCRIPT_SCRIPT_SYMBOLS_H_
 #define RX_SCRIPT_SCRIPT_SYMBOLS_H_
 
-#include <unordered_map>
 
 #include "core/export.h"
 #include "core/types.h"
 #include "script/script_arena.h"
 #include "script/script_string.h"
+#include "base/containers/unordered_map.h"
 
 namespace rx::script {
 
@@ -38,7 +38,7 @@ class ScriptSymbols {
 
  private:
   ScriptArena storage_;  // grow-only canonical bytes (never Reset)
-  std::unordered_map<u64, ScriptStringView> table_;  // StrId -> canonical view
+  base::UnorderedMap<u64, ScriptStringView> table_;  // StrId -> canonical view
 };
 
 }  // namespace rx::script

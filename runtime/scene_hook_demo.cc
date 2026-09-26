@@ -1,6 +1,6 @@
 #include "scene_hook_demo.h"
 
-#include <cstring>
+#include <string.h>
 
 #include "core/log.h"
 #include "render/rhi/vulkan_interop.h"
@@ -211,7 +211,7 @@ void SceneHookDemo::Record(const render::SceneHookContext& ctx) {
   colors[1] = {.view = ctx.depth_export_view, .load = render::LoadOp::kLoad};
   render::DepthAttachment depth{.view = ctx.depth_view, .load = render::LoadOp::kLoad};
   ctx.cmd->BeginRendering(
-      {.extent = ctx.extent, .colors = {colors, 2}, .depth = &depth});
+      {.extent = ctx.extent, .colors = base::Span(colors, 2), .depth = &depth});
   vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, graphics_);
   vkCmdPushConstants(cb, layout_, kPushStages, 0, sizeof(push), &push);
   vkCmdDraw(cb, 36, instance_count_, 0, 0);  // 12 tris per box, instanced

@@ -14,13 +14,13 @@
 // pattern that makes residency and mip level visible); the machinery -
 // feedback, residency, indirection maintenance, streaming - is the product.
 
-#include <atomic>
-#include <condition_variable>
-#include <deque>
-#include <mutex>
-#include <thread>
-#include <vector>
 
+#include "base/containers/deque.h"
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/condition_variable.h"
+#include "base/threading/mutex.h"
+#include "base/threading/thread.h"
 #include "core/math.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/device.h"
@@ -61,7 +61,7 @@ class VirtualTexture {
   };
   struct GeneratedPage {
     PageKey key;
-    std::vector<u8> pixels;  // kPageStored^2 RGBA8, border included
+    base::Vector<u8> pixels;  // kPageStored^2 RGBA8, border included
   };
   struct PageState {
     u16 atlas_slot = 0xffff;  // 0xffff = not resident
@@ -71,7 +71,7 @@ class VirtualTexture {
 
   u32 PageIndex(const PageKey& key) const;
   PageState& Page(const PageKey& key);
-  void GeneratePage(const PageKey& key, std::vector<u8>* pixels) const;
+  void GeneratePage(const PageKey& key, base::Vector<u8>* pixels) const;
   void WriteIndirection(const PageKey& key);
   void PropagateIndirection(const PageKey& key);
   u16 AcquireSlot(u64 frame_index);
@@ -86,20 +86,20 @@ class VirtualTexture {
   GpuBuffer indirection_staging_;  // full pyramid, re-uploaded when dirty
 
   // CPU residency state, indexed per mip then page.
-  std::vector<PageState> pages_[kMips];
+  base::Vector<PageState> pages_[kMips];
   // CPU indirection mirror (RGBA8 per entry), uploaded when dirty.
-  std::vector<u8> indirection_cpu_[kMips];
-  std::vector<PageKey> slot_owner_ = std::vector<PageKey>(kAtlasPages * kAtlasPages);
-  std::vector<bool> slot_used_ = std::vector<bool>(kAtlasPages * kAtlasPages, false);
+  base::Vector<u8> indirection_cpu_[kMips];
+  base::Vector<PageKey> slot_owner_ = base::Vector<PageKey>(kAtlasPages * kAtlasPages);
+  base::Vector<bool> slot_used_ = base::Vector<bool>(kAtlasPages * kAtlasPages, false);
   u32 resident_count_ = 0;
   bool indirection_dirty_ = true;
 
   // Generation worker.
-  std::thread worker_;
-  std::mutex queue_mutex_;
-  std::condition_variable queue_cv_;
-  std::deque<PageKey> requests_;
-  std::deque<GeneratedPage> completed_;
+  base::UniquePointer<base::Thread> worker_;
+  base::Mutex queue_mutex_;
+  base::ConditionVariable queue_cv_;
+  base::SimpleDeque<PageKey> requests_;
+  base::SimpleDeque<GeneratedPage> completed_;
   bool worker_quit_ = false;
 };
 

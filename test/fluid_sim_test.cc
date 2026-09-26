@@ -10,12 +10,14 @@
 // Skips cleanly (exit 0) when no Vulkan driver is present (null backend), like
 // offscreen_test; run under vkrun to exercise the real GPU path.
 
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/unique_pointer.h"
+#include "core/scalar.h"
 #include "render/core/render_graph.h"
 #include "render/geometry/fluid_sim.h"
 #include "render/rhi/device.h"
@@ -25,7 +27,7 @@ using namespace rx::render;
 namespace {
 
 int Fail(const char* msg) {
-  std::fprintf(stderr, "fluid_sim_test: FAIL: %s\n", msg);
+  ::fprintf(stderr, "fluid_sim_test: FAIL: %s\n", msg);
   return 1;
 }
 
@@ -44,18 +46,18 @@ f32 BowlBed(u32 x, u32 y) {
 int main() {
   DeviceDesc desc;
   desc.request_raytracing = false;
-  std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
+  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
-    std::printf("fluid_sim_test: no Vulkan driver, skipping (null backend)\n");
+    ::printf("fluid_sim_test: no Vulkan driver, skipping (null backend)\n");
     return 0;
   }
-  std::printf("fluid_sim_test: device '%s'\n", device->caps().adapter_name.c_str());
+  ::printf("fluid_sim_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   // Bed with the ridge (a dam down the middle) and bed without it (dam removed).
-  std::vector<f32> bed_ridge(static_cast<size_t>(kRes) * kRes);
-  std::vector<f32> bed_open(static_cast<size_t>(kRes) * kRes);
-  std::vector<f32> water0(static_cast<size_t>(kRes) * kRes, 0.0f);
+  base::Vector<f32> bed_ridge(static_cast<size_t>(kRes) * kRes);
+  base::Vector<f32> bed_open(static_cast<size_t>(kRes) * kRes);
+  base::Vector<f32> water0(static_cast<size_t>(kRes) * kRes, 0.0f);
   f32 initial_volume = 0.0f;
   for (u32 y = 0; y < kRes; ++y) {
     for (u32 x = 0; x < kRes; ++x) {
@@ -121,7 +123,7 @@ int main() {
       if (!graph.Compile(*device, pool)) return false;
       PassContext ctx;
       ctx.cmd = cmd;
-      ctx.device = device.get();
+      ctx.device = device.Get_UseOnlyIfYouKnowWhatYouareDoing();
       ctx.graph = &graph;
       graph.Execute(ctx);
       device->SubmitFrame(cmd);
@@ -130,7 +132,7 @@ int main() {
     return true;
   };
 
-  auto readback = [&](std::vector<f32>& out) -> bool {
+  auto readback = [&](base::Vector<f32>& out) -> bool {
     out.assign(static_cast<size_t>(kRes) * kRes * 4, 0.0f);
     const GpuImage& state = FluidSimProbe::state(sim);
     return device->ReadbackImage(state, ResourceState::kGeneral, out.data(),
@@ -139,19 +141,19 @@ int main() {
 
   // Verify the upload landed before stepping (bed + water, flat pond).
   {
-    std::vector<f32> s0;
+    base::Vector<f32> s0;
     if (!readback(s0)) return Fail("ReadbackImage failed (pre-step)");
     f32 v = 0;
     for (u32 i = 0; i < kRes * kRes; ++i) v += s0[i * 4 + 0];
-    std::printf("fluid_sim_test: uploaded water volume %.3f (cpu %.3f)\n", v, initial_volume);
-    if (std::fabs(v - initial_volume) > 0.01f * initial_volume)
+    ::printf("fluid_sim_test: uploaded water volume %.3f (cpu %.3f)\n", v, initial_volume);
+    if (::fabs(v - initial_volume) > 0.01f * initial_volume)
       return Fail("uploaded water volume does not match the CPU fill");
   }
 
   // Phase 1: settle behind the ridge, then check conservation + sanity
   if (!run(dom, 75)) return Fail("frame loop failed (phase 1)");  // ~300 substeps
 
-  std::vector<f32> s1;
+  base::Vector<f32> s1;
   if (!readback(s1)) return Fail("ReadbackImage failed (phase 1)");
 
   f32 vol1 = 0.0f;
@@ -160,13 +162,13 @@ int main() {
     const f32 dl = s1[i * 4 + 1];
     const f32 T = s1[i * 4 + 2];
     const f32 C = s1[i * 4 + 3];
-    if (!std::isfinite(dw) || !std::isfinite(dl) || !std::isfinite(T) || !std::isfinite(C))
+    if (!::isfinite(dw) || !::isfinite(dl) || !::isfinite(T) || !::isfinite(C))
       return Fail("non-finite value in state");
     if (dw < -1e-4f || dl < -1e-4f || C < -1e-4f) return Fail("negative depth/crust in state");
     vol1 += dw;
   }
-  const f32 drift = std::fabs(vol1 - initial_volume) / std::max(initial_volume, 1e-6f);
-  std::printf("fluid_sim_test: initial volume %.3f, after settle %.3f (drift %.3f%%)\n",
+  const f32 drift = ::fabs(vol1 - initial_volume) / rx::Max(initial_volume, 1e-6f);
+  ::printf("fluid_sim_test: initial volume %.3f, after settle %.3f (drift %.3f%%)\n",
               initial_volume, vol1, drift * 100.0f);
   if (drift > 0.01f) return Fail("water volume not conserved within 1%");
 
@@ -182,7 +184,7 @@ int main() {
   // so the flickering shoreline does not dominate the spread.
   constexpr f32 kLevelTol = 0.05f;  // "a few cm"
   constexpr u32 kMaxChunks = 40;    // 40 * 100 frames = 16000 substeps cap
-  std::vector<f32> s2;
+  base::Vector<f32> s2;
   f32 spread = 1e9f;
   u32 wet = 0;
   for (u32 chunk = 0; chunk < kMaxChunks && spread > kLevelTol; ++chunk) {
@@ -192,24 +194,24 @@ int main() {
     wet = 0;
     for (u32 i = 0; i < kRes * kRes; ++i) {
       const f32 dw = s2[i * 4 + 0];
-      if (!std::isfinite(dw)) return Fail("non-finite depth after flood");
+      if (!::isfinite(dw)) return Fail("non-finite depth after flood");
       if (dw < -1e-4f) return Fail("negative depth after flood");
       vol2 += dw;
       if (dw > 0.5f) {  // core pond; shoreline partial cells sit below the plane
         const f32 surface = bed_open[i] + dw;
-        mn = std::fmin(mn, surface);
-        mx = std::fmax(mx, surface);
+        mn = ::fmin(mn, surface);
+        mx = ::fmax(mx, surface);
         ++wet;
       }
     }
     spread = (wet > 0) ? mx - mn : 1e9f;
-    std::printf("fluid_sim_test: flood %u frames, volume %.3f, wet %u, spread %.3f m\n",
+    ::printf("fluid_sim_test: flood %u frames, volume %.3f, wet %u, spread %.3f m\n",
                 (chunk + 1) * 100, vol2, wet, spread);
   }
   if (wet < 16) return Fail("too few wet cells after flood (sim collapsed?)");
   if (spread > kLevelTol) return Fail("flooded surface not level within tolerance");
 
   sim.Destroy(*device);
-  std::printf("fluid_sim_test: PASS\n");
+  ::printf("fluid_sim_test: PASS\n");
   return 0;
 }

@@ -1,7 +1,10 @@
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "core/scalar.h"
 #include "render/gi/rt_instance_cull.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
 namespace rx::render {
 namespace {
@@ -14,11 +17,11 @@ f32 MaxScale(const Mat4& t) {
   for (u32 i = 0; i < 3; ++i) {
     f32 row = 0.0f;
     for (u32 j = 0; j < 3; ++j)
-      row += std::abs(m[4 * i] * m[4 * j] + m[4 * i + 1] * m[4 * j + 1] +
+      row += ::abs(m[4 * i] * m[4 * j] + m[4 * i + 1] * m[4 * j + 1] +
                       m[4 * i + 2] * m[4 * j + 2]);
-    bound = std::max(bound, row);
+    bound = rx::Max(bound, row);
   }
-  return std::sqrt(bound);
+  return ::sqrt(bound);
 }
 
 }  // namespace
@@ -32,7 +35,7 @@ bool RtInstanceCuller::DrawVisible(const Mat4& transform, const Vec3& mesh_cente
 bool RtInstanceCuller::Cull(const Vec3& c, f32 radius) const {
   if (radius <= 0.0f) return false;  // unknown bounds (radius 0): never cull
   const f32 dx = c.x - eye_.x, dy = c.y - eye_.y, dz = c.z - eye_.z;
-  const f32 dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+  const f32 dist = ::sqrt(dx * dx + dy * dy + dz * dz);
   if (dist <= start_distance_) return false;  // near field is always kept
   // Angular radius ~= radius / dist; drop when it is below the threshold.
   return radius < angle_threshold_ * dist;
@@ -47,7 +50,7 @@ void RtInstanceCuller::BeginFrame(const Vec3& camera_eye) {
       teleported_ = true;
       // Accept-all everywhere; the incremental sweeps re-cull over ~1 s.
       for (GroupState& gs : groups_) {
-        std::fill(gs.visible.begin(), gs.visible.end(), u8{1});
+        base::Fill(gs.visible.begin(), gs.visible.end(), u8{1});
         gs.cursor = 0;
       }
     }
@@ -57,7 +60,7 @@ void RtInstanceCuller::BeginFrame(const Vec3& camera_eye) {
 }
 
 const base::Vector<u8>& RtInstanceCuller::UpdateGroup(u32 group_id, u32 generation, u32 revision,
-                                                      std::span<const Mat4> transforms,
+                                                      base::Span<const Mat4> transforms,
                                                       const Vec3& mesh_center, f32 mesh_radius) {
   if (group_id >= groups_.size()) groups_.resize(group_id + 1);
   GroupState& gs = groups_[group_id];
@@ -89,8 +92,8 @@ const base::Vector<u8>& RtInstanceCuller::UpdateGroup(u32 group_id, u32 generati
 
   // Re-test a bounded slice, wrapping around; a full sweep lands over
   // ~kSweepFrames frames regardless of group size.
-  u32 slice = std::max(kMinSlice, (n + kSweepFrames - 1) / kSweepFrames);
-  slice = std::min(slice, n);
+  u32 slice = rx::Max(kMinSlice, (n + kSweepFrames - 1) / kSweepFrames);
+  slice = rx::Min(slice, n);
   for (u32 k = 0; k < slice; ++k) {
     const u32 i = (gs.cursor + k) % n;
     const Vec3 c = TransformPoint(transforms[i], mesh_center);

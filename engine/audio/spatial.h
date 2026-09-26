@@ -1,10 +1,10 @@
 #ifndef RX_AUDIO_SPATIAL_H_
 #define RX_AUDIO_SPATIAL_H_
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
 
 #include "core/math.h"
+#include "core/scalar.h"
 #include "core/types.h"
 
 namespace rx::audio {
@@ -42,8 +42,8 @@ inline f32 DistanceGain(f32 distance, const Attenuation& a) {
   const f32 inv = a.ref_dist / distance;  // inverse-distance law
   // Fade the inverse curve to exactly zero over the last stretch so there is no
   // audible pop when a voice crosses max_dist.
-  const f32 fade = (a.max_dist - distance) / std::max(0.001f, a.max_dist - a.ref_dist);
-  return inv * std::clamp(fade, 0.0f, 1.0f);
+  const f32 fade = (a.max_dist - distance) / rx::Max(0.001f, a.max_dist - a.ref_dist);
+  return inv * rx::Clamp(fade, 0.0f, 1.0f);
 }
 
 // Constant-power stereo pan from the listener to a world-space source. The result
@@ -64,12 +64,12 @@ inline StereoGains PanForSource(const Listener& listener, const Vec3& source,
   const Vec3 up = Normalize(listener.up);
   const Vec3 right = Normalize(Cross(forward, up));
   f32 pan = 0.0f;
-  if (distance > 1e-4f) pan = std::clamp(Dot(to_source * (1.0f / distance), right), -1.0f, 1.0f);
+  if (distance > 1e-4f) pan = rx::Clamp(Dot(to_source * (1.0f / distance), right), -1.0f, 1.0f);
 
   // Map pan [-1,1] -> angle [0, pi/2] and take cos/sin for equal-power gains.
   const f32 angle = (pan * 0.5f + 0.5f) * 1.57079633f;
-  f32 l = std::cos(angle);
-  f32 r = std::sin(angle);
+  f32 l = ::cos(angle);
+  f32 r = ::sin(angle);
   l = min_bleed + (1.0f - min_bleed) * l;
   r = min_bleed + (1.0f - min_bleed) * r;
   return {l * gain, r * gain};

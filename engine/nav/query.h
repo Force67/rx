@@ -12,10 +12,10 @@
 // that, an agent already standing in a river would rank "stand still" (delta
 // 0) above every move, since any path it can take touches water.
 
-#include <span>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
 #include "core/export.h"
 #include "nav/navmesh.h"
 #include "nav/path.h"
@@ -44,7 +44,7 @@ struct PositionCandidate {
 // ties), or SIZE_MAX when none are reachable. The flood is one search shared
 // by all candidates); adding candidates is nearly free.
 RX_NAV_EXPORT size_t EvaluatePositions(const NavMesh& mesh, const PositionQueryParams& params,
-                                       std::span<PositionCandidate> candidates);
+                                       base::Span<PositionCandidate> candidates);
 
 }  // namespace rx::nav
 

@@ -1,29 +1,33 @@
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "base/memory/move.h"
+#include "base/numeric_limits.h"
+#include "base/optional.h"
+#include "core/scalar.h"
 #include "terrain/terrain.h"
 
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <cstddef>
-#include <iterator>
-#include <limits>
-#include <utility>
+#include <float.h>
+#include <math.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 namespace rx::terrain {
 namespace {
 
 bool IsFinite(Vec3 value) {
-  return std::isfinite(value.x) && std::isfinite(value.y) &&
-         std::isfinite(value.z);
+  return ::isfinite(value.x) && ::isfinite(value.y) &&
+         ::isfinite(value.z);
 }
 
 bool CheckedSampleCount(u32 quads, size_t *count) {
   if (quads == 0 || quads > 65534)
     return false;
   const size_t side = static_cast<size_t>(quads) + 1;
-  if (side > std::numeric_limits<size_t>::max() / side)
+  if (side > SIZE_MAX / side)
     return false;
   *count = side * side;
-  return *count <= std::numeric_limits<u32>::max();
+  return *count <= base::MinMax<u32>::max();
 }
 
 bool KeyLess(TerrainTileKey a, TerrainTileKey b) {
@@ -36,12 +40,21 @@ bool ChangeLess(const TerrainSampleChange &a, const TerrainSampleChange &b) {
   return a.sample < b.sample;
 }
 
+template <typename T, typename Less>
+bool IsSorted(const base::Vector<T> &values, Less less) {
+  for (size_t i = 1; i < values.size(); ++i) {
+    if (less(values[i], values[i - 1]))
+      return false;
+  }
+  return true;
+}
+
 u32 ActiveLayerCount(const TerrainDesc &desc) {
-  return static_cast<u32>(std::min<size_t>(desc.layers.size(), 4));
+  return static_cast<u32>(rx::Min<size_t>(desc.layers.size(), 4));
 }
 
 TerrainWeights NormalizeWeights(TerrainWeights value, u32 layer_count) {
-  layer_count = std::clamp(layer_count, 1u, 4u);
+  layer_count = rx::Clamp(layer_count, 1u, 4u);
   u32 total = 0;
   for (u32 i = 0; i < layer_count; ++i)
     total += value.rgba[i];
@@ -64,10 +77,11 @@ TerrainWeights NormalizeWeights(TerrainWeights value, u32 layer_count) {
     assigned += normalized.rgba[i];
     remainders[i] = {i, scaled % total};
   }
-  std::sort(remainders, remainders + layer_count,
-            [](const Remainder &a, const Remainder &b) {
-              return a.value != b.value ? a.value > b.value : a.layer < b.layer;
-            });
+  // Layers are distinct, so the order is total and any correct sort agrees.
+  base::Sort(remainders, remainders + layer_count,
+             [](const Remainder &a, const Remainder &b) {
+               return a.value != b.value ? a.value > b.value : a.layer < b.layer;
+             });
   for (u32 i = 0; assigned < 255; ++i, ++assigned) {
     ++normalized.rgba[remainders[i % layer_count].layer];
   }
@@ -89,10 +103,10 @@ bool IsNormalized(TerrainWeights value, u32 layer_count) {
 
 TerrainWeights PaintWeights(TerrainWeights old, u32 target, f32 amount,
                             u32 layer_count) {
-  amount = std::clamp(amount, 0.0f, 1.0f);
+  amount = rx::Clamp(amount, 0.0f, 1.0f);
   const u32 old_target = old.rgba[target];
-  const u32 new_target = static_cast<u32>(std::clamp(
-      std::lround(old_target + (255.0f - old_target) * amount), 0l, 255l));
+  const u32 new_target = static_cast<u32>(rx::Clamp(
+      ::lround(old_target + (255.0f - old_target) * amount), 0l, 255l));
   const u32 old_others = 255 - old_target;
   const u32 new_others = 255 - new_target;
 
@@ -122,7 +136,7 @@ TerrainWeights PaintWeights(TerrainWeights old, u32 target, f32 amount,
   };
   for (u32 i = 0; i < remainder_count; ++i) {
     for (u32 j = i + 1; j < remainder_count; ++j) {
-      if (better(remainders[j], remainders[i])) std::swap(remainders[i], remainders[j]);
+      if (better(remainders[j], remainders[i])) base::Swap(remainders[i], remainders[j]);
     }
   }
   for (u32 i = 0; assigned < new_others; ++i, ++assigned) {
@@ -184,7 +198,7 @@ bool RayBounds(Vec3 origin, Vec3 direction,
   const f32 minima[3] = {bounds.minimum.x, bounds.minimum.y, bounds.minimum.z};
   const f32 maxima[3] = {bounds.maximum.x, bounds.maximum.y, bounds.maximum.z};
   for (u32 axis = 0; axis < 3; ++axis) {
-    if (std::abs(directions[axis]) < 1e-12f) {
+    if (::abs(directions[axis]) < 1e-12f) {
       if (origins[axis] < minima[axis] || origins[axis] > maxima[axis])
         return false;
       continue;
@@ -194,9 +208,9 @@ bool RayBounds(Vec3 origin, Vec3 direction,
     double b =
         (static_cast<double>(maxima[axis]) - origins[axis]) / directions[axis];
     if (a > b)
-      std::swap(a, b);
-    minimum_t = std::max(minimum_t, a);
-    maximum_t = std::min(maximum_t, b);
+      base::Swap(a, b);
+    minimum_t = rx::Max(minimum_t, a);
+    maximum_t = rx::Min(maximum_t, b);
     if (minimum_t > maximum_t)
       return false;
   }
@@ -210,19 +224,19 @@ bool RayTriangle(Vec3 origin, Vec3 direction, Vec3 a, Vec3 b, Vec3 c,
   const Vec3 edge_b = c - a;
   const Vec3 p = Cross(direction, edge_b);
   const f32 determinant = Dot(edge_a, p);
-  if (!std::isfinite(determinant) || std::abs(determinant) < 1e-8f)
+  if (!::isfinite(determinant) || ::abs(determinant) < 1e-8f)
     return false;
   const f32 inverse = 1.0f / determinant;
   const Vec3 relative = origin - a;
   const f32 u = Dot(relative, p) * inverse;
-  if (!std::isfinite(u) || u < 0 || u > 1)
+  if (!::isfinite(u) || u < 0 || u > 1)
     return false;
   const Vec3 q = Cross(relative, edge_a);
   const f32 v = Dot(direction, q) * inverse;
-  if (!std::isfinite(v) || v < 0 || u + v > 1)
+  if (!::isfinite(v) || v < 0 || u + v > 1)
     return false;
   const f32 hit = Dot(edge_b, q) * inverse;
-  if (!std::isfinite(hit) || hit < 0 || hit > maximum_distance)
+  if (!::isfinite(hit) || hit < 0 || hit > maximum_distance)
     return false;
   *distance = hit;
   *normal = Normalize(Cross(edge_a, edge_b));
@@ -235,17 +249,17 @@ bool RayTriangle(Vec3 origin, Vec3 direction, Vec3 a, Vec3 b, Vec3 c,
 
 Terrain::Terrain() : Terrain(TerrainDesc{}) {}
 
-Terrain::Terrain(TerrainDesc desc) : desc_(std::move(desc)) {
+Terrain::Terrain(TerrainDesc desc) : desc_(base::move(desc)) {
   if (desc_.tile_quads == 0)
     desc_.tile_quads = 32;
-  if (!std::isfinite(desc_.sample_spacing) || desc_.sample_spacing <= 0) {
+  if (!::isfinite(desc_.sample_spacing) || desc_.sample_spacing <= 0) {
     desc_.sample_spacing = 1.0f;
   }
-  if (!std::isfinite(desc_.origin.x))
+  if (!::isfinite(desc_.origin.x))
     desc_.origin.x = 0;
-  if (!std::isfinite(desc_.origin.y))
+  if (!::isfinite(desc_.origin.y))
     desc_.origin.y = 0;
-  if (!std::isfinite(desc_.origin.z))
+  if (!::isfinite(desc_.origin.z))
     desc_.origin.z = 0;
   if (desc_.layers.empty())
     desc_.layers.push_back(TerrainLayer{"Layer 0"});
@@ -255,7 +269,7 @@ Terrain::Terrain(TerrainDesc desc) : desc_(std::move(desc)) {
 
 const TerrainTile *Terrain::FindTile(TerrainTileKey key) const {
   const auto found =
-      std::lower_bound(tiles_.begin(), tiles_.end(), key,
+      base::LowerBound(tiles_.begin(), tiles_.end(), key,
                        [](const TerrainTile &tile, TerrainTileKey wanted) {
                          return KeyLess(tile.key, wanted);
                        });
@@ -264,7 +278,7 @@ const TerrainTile *Terrain::FindTile(TerrainTileKey key) const {
 
 TerrainTile *Terrain::FindTileMutable(TerrainTileKey key) {
   auto found =
-      std::lower_bound(tiles_.begin(), tiles_.end(), key,
+      base::LowerBound(tiles_.begin(), tiles_.end(), key,
                        [](const TerrainTile &tile, TerrainTileKey wanted) {
                          return KeyLess(tile.key, wanted);
                        });
@@ -274,23 +288,31 @@ TerrainTile *Terrain::FindTileMutable(TerrainTileKey key) {
 void Terrain::RecalculateBounds(TerrainTile *tile) {
   if (!tile || tile->heights.empty())
     return;
-  const auto [minimum, maximum] =
-      std::minmax_element(tile->heights.begin(), tile->heights.end());
+  // std::minmax_element's picks: the first smallest and the last largest.
+  const f32 *minimum = tile->heights.begin();
+  const f32 *maximum = tile->heights.begin();
+  for (const f32 *it = tile->heights.begin() + 1; it != tile->heights.end();
+       ++it) {
+    if (*it < *minimum)
+      minimum = it;
+    if (!(*it < *maximum))
+      maximum = it;
+  }
   tile->minimum_height = *minimum;
   tile->maximum_height = *maximum;
 }
 
-bool Terrain::AddOrReplaceTile(TerrainTileKey key, std::span<const f32> heights,
-                               std::span<const TerrainWeights> weights) {
+bool Terrain::AddOrReplaceTile(TerrainTileKey key, base::Span<const f32> heights,
+                               base::Span<const TerrainWeights> weights) {
   size_t sample_count = 0;
   if (!CheckedSampleCount(desc_.tile_quads, &sample_count) ||
       heights.size() != sample_count ||
       (!weights.empty() && weights.size() != sample_count) ||
-      !std::isfinite(desc_.tile_quads * desc_.sample_spacing)) {
+      !::isfinite(desc_.tile_quads * desc_.sample_spacing)) {
     return false;
   }
   for (f32 height : heights) {
-    if (!std::isfinite(height))
+    if (!::isfinite(height))
       return false;
   }
 
@@ -305,20 +327,20 @@ bool Terrain::AddOrReplaceTile(TerrainTileKey key, std::span<const f32> heights,
     }
   }
   RecalculateBounds(&replacement);
-  if (!std::isfinite(replacement.maximum_height - replacement.minimum_height))
+  if (!::isfinite(replacement.maximum_height - replacement.minimum_height))
     return false;
 
   auto insertion =
-      std::lower_bound(tiles_.begin(), tiles_.end(), key,
+      base::LowerBound(tiles_.begin(), tiles_.end(), key,
                        [](const TerrainTile &tile, TerrainTileKey wanted) {
                          return KeyLess(tile.key, wanted);
                        });
   if (insertion != tiles_.end() && insertion->key == key) {
     replacement.revision = insertion->revision + 1;
-    *insertion = std::move(replacement);
+    *insertion = base::move(replacement);
   } else {
     replacement.revision = 1;
-    insertion = tiles_.insert(insertion, std::move(replacement));
+    insertion = tiles_.insert(insertion, base::move(replacement));
   }
 
   TerrainTile *source = &*insertion;
@@ -352,10 +374,10 @@ bool Terrain::AddOrReplaceTile(TerrainTileKey key, std::span<const f32> heights,
                                 bool normal_dependent, auto copy_samples) {
     const i64 neighbor_x = static_cast<i64>(key.x) + offset_x;
     const i64 neighbor_z = static_cast<i64>(key.z) + offset_z;
-    if (neighbor_x < std::numeric_limits<i32>::min() ||
-        neighbor_x > std::numeric_limits<i32>::max() ||
-        neighbor_z < std::numeric_limits<i32>::min() ||
-        neighbor_z > std::numeric_limits<i32>::max()) {
+    if (neighbor_x < base::MinMax<i32>::min() ||
+        neighbor_x > base::MinMax<i32>::max() ||
+        neighbor_z < base::MinMax<i32>::min() ||
+        neighbor_z > base::MinMax<i32>::max()) {
       return;
     }
     synchronize({static_cast<i32>(neighbor_x), static_cast<i32>(neighbor_z)},
@@ -392,7 +414,7 @@ bool Terrain::AddOrReplaceTile(TerrainTileKey key, std::span<const f32> heights,
   return true;
 }
 
-std::optional<f32> Terrain::GridHeight(i64 grid_x, i64 grid_z) const {
+base::Optional<f32> Terrain::GridHeight(i64 grid_x, i64 grid_z) const {
   const i64 quads = desc_.tile_quads;
   const i64 base_x = FloorDiv(grid_x, quads);
   const i64 base_z = FloorDiv(grid_z, quads);
@@ -405,10 +427,10 @@ std::optional<f32> Terrain::GridHeight(i64 grid_x, i64 grid_z) const {
   const u32 side = desc_.tile_quads + 1;
   for (u32 z = 0; z < count_z; ++z) {
     for (u32 x = 0; x < count_x; ++x) {
-      if (candidate_x[x] < std::numeric_limits<i32>::min() ||
-          candidate_x[x] > std::numeric_limits<i32>::max() ||
-          candidate_z[z] < std::numeric_limits<i32>::min() ||
-          candidate_z[z] > std::numeric_limits<i32>::max()) {
+      if (candidate_x[x] < base::MinMax<i32>::min() ||
+          candidate_x[x] > base::MinMax<i32>::max() ||
+          candidate_z[z] < base::MinMax<i32>::min() ||
+          candidate_z[z] > base::MinMax<i32>::max()) {
         continue;
       }
       const TerrainTile *tile = FindTile(
@@ -422,28 +444,28 @@ std::optional<f32> Terrain::GridHeight(i64 grid_x, i64 grid_z) const {
       return tile->heights[SampleIndex(side, local_x, local_z)];
     }
   }
-  return std::nullopt;
+  return base::nullopt;
 }
 
-std::optional<f32> Terrain::SampleHeight(f32 world_x, f32 world_z) const {
-  if (!std::isfinite(world_x) || !std::isfinite(world_z) || tiles_.empty())
-    return std::nullopt;
+base::Optional<f32> Terrain::SampleHeight(f32 world_x, f32 world_z) const {
+  if (!::isfinite(world_x) || !::isfinite(world_z) || tiles_.empty())
+    return base::nullopt;
   const double grid_x =
       (static_cast<double>(world_x) - desc_.origin.x) / desc_.sample_spacing;
   const double grid_z =
       (static_cast<double>(world_z) - desc_.origin.z) / desc_.sample_spacing;
   const double quads = desc_.tile_quads;
-  const double tile_floor_x = std::floor(grid_x / quads);
-  const double tile_floor_z = std::floor(grid_z / quads);
+  const double tile_floor_x = ::floor(grid_x / quads);
+  const double tile_floor_z = ::floor(grid_z / quads);
   if (tile_floor_x <=
-          static_cast<double>(std::numeric_limits<i64>::min()) + 1 ||
+          static_cast<double>(base::MinMax<i64>::min()) + 1 ||
       tile_floor_x >=
-          static_cast<double>(std::numeric_limits<i64>::max()) - 1 ||
+          static_cast<double>(base::MinMax<i64>::max()) - 1 ||
       tile_floor_z <=
-          static_cast<double>(std::numeric_limits<i64>::min()) + 1 ||
+          static_cast<double>(base::MinMax<i64>::min()) + 1 ||
       tile_floor_z >=
-          static_cast<double>(std::numeric_limits<i64>::max()) - 1) {
-    return std::nullopt;
+          static_cast<double>(base::MinMax<i64>::max()) - 1) {
+    return base::nullopt;
   }
   const i64 base_x = static_cast<i64>(tile_floor_x);
   const i64 base_z = static_cast<i64>(tile_floor_z);
@@ -452,18 +474,18 @@ std::optional<f32> Terrain::SampleHeight(f32 world_x, f32 world_z) const {
   constexpr double kBoundaryEpsilon = 1e-6;
   const i64 candidate_x[2] = {base_x, base_x - 1};
   const i64 candidate_z[2] = {base_z, base_z - 1};
-  const u32 count_x = std::abs(edge_x) <= kBoundaryEpsilon ? 2 : 1;
-  const u32 count_z = std::abs(edge_z) <= kBoundaryEpsilon ? 2 : 1;
+  const u32 count_x = ::abs(edge_x) <= kBoundaryEpsilon ? 2 : 1;
+  const u32 count_z = ::abs(edge_z) <= kBoundaryEpsilon ? 2 : 1;
   const u32 side = desc_.tile_quads + 1;
 
   for (u32 cz = 0; cz < count_z; ++cz) {
     for (u32 cx = 0; cx < count_x; ++cx) {
       const i64 tile_x = candidate_x[cx];
       const i64 tile_z = candidate_z[cz];
-      if (tile_x < std::numeric_limits<i32>::min() ||
-          tile_x > std::numeric_limits<i32>::max() ||
-          tile_z < std::numeric_limits<i32>::min() ||
-          tile_z > std::numeric_limits<i32>::max()) {
+      if (tile_x < base::MinMax<i32>::min() ||
+          tile_x > base::MinMax<i32>::max() ||
+          tile_z < base::MinMax<i32>::min() ||
+          tile_z > base::MinMax<i32>::max()) {
         continue;
       }
       const TerrainTile *tile =
@@ -476,12 +498,12 @@ std::optional<f32> Terrain::SampleHeight(f32 world_x, f32 world_z) const {
           local_z < -kBoundaryEpsilon || local_z > quads + kBoundaryEpsilon) {
         continue;
       }
-      local_x = std::clamp(local_x, 0.0, quads);
-      local_z = std::clamp(local_z, 0.0, quads);
+      local_x = rx::Clamp(local_x, 0.0, quads);
+      local_z = rx::Clamp(local_z, 0.0, quads);
       const u32 cell_x =
-          std::min(static_cast<u32>(std::floor(local_x)), desc_.tile_quads - 1);
+          rx::Min(static_cast<u32>(::floor(local_x)), desc_.tile_quads - 1);
       const u32 cell_z =
-          std::min(static_cast<u32>(std::floor(local_z)), desc_.tile_quads - 1);
+          rx::Min(static_cast<u32>(::floor(local_z)), desc_.tile_quads - 1);
       const f32 fraction_x = static_cast<f32>(local_x - cell_x);
       const f32 fraction_z = static_cast<f32>(local_z - cell_z);
       const f32 a = tile->heights[SampleIndex(side, cell_x, cell_z)];
@@ -493,14 +515,14 @@ std::optional<f32> Terrain::SampleHeight(f32 world_x, f32 world_z) const {
                              : d + (1.0f - fraction_x) * (c - d) +
                                    (1.0f - fraction_z) * (b - d);
       const double world_height = static_cast<double>(desc_.origin.y) + height;
-      if (!std::isfinite(world_height) ||
-          std::abs(world_height) > std::numeric_limits<f32>::max()) {
-        return std::nullopt;
+      if (!::isfinite(world_height) ||
+          ::abs(world_height) > FLT_MAX) {
+        return base::nullopt;
       }
       return static_cast<f32>(world_height);
     }
   }
-  return std::nullopt;
+  return base::nullopt;
 }
 
 asset::AssetId Terrain::TileAssetId(TerrainTileKey key) const {
@@ -510,17 +532,17 @@ asset::AssetId Terrain::TileAssetId(TerrainTileKey key) const {
   for (char c : tag)
     HashByte(&hash, static_cast<u8>(c));
   HashU64(&hash, desc_.id.hash);
-  HashU32(&hash, std::bit_cast<u32>(key.x));
-  HashU32(&hash, std::bit_cast<u32>(key.z));
+  HashU32(&hash, rx::BitCast<u32>(key.x));
+  HashU32(&hash, rx::BitCast<u32>(key.z));
   return asset::AssetId{hash == 0 ? 1 : hash};
 }
 
-std::optional<scene::WorldStreamRegion>
+base::Optional<scene::WorldStreamRegion>
 Terrain::TileRegion(TerrainTileKey key, u32 channels, i32 priority) const {
-  if (!desc_.id) return std::nullopt;
+  if (!desc_.id) return base::nullopt;
   const TerrainTile *tile = FindTile(key);
   if (!tile)
-    return std::nullopt;
+    return base::nullopt;
   const double width =
       static_cast<double>(desc_.tile_quads) * desc_.sample_spacing;
   const double minimum_x = desc_.origin.x + static_cast<double>(key.x) * width;
@@ -531,13 +553,13 @@ Terrain::TileRegion(TerrainTileKey key, u32 channels, i32 priority) const {
       static_cast<double>(desc_.origin.y) + tile->minimum_height;
   const double maximum_y =
       static_cast<double>(desc_.origin.y) + tile->maximum_height;
-  const double maximum_float = std::numeric_limits<f32>::max();
+  const double maximum_float = FLT_MAX;
   const double values[] = {minimum_x, minimum_y, minimum_z,
                            maximum_x, maximum_y, maximum_z};
   for (double value : values) {
-    if (!std::isfinite(value) || value < -maximum_float ||
+    if (!::isfinite(value) || value < -maximum_float ||
         value > maximum_float) {
-      return std::nullopt;
+      return base::nullopt;
     }
   }
   return scene::WorldStreamRegion{
@@ -557,7 +579,7 @@ void Terrain::GatherStreamRegions(
   if (!regions)
     return;
   regions->clear();
-  if ((query.channels & channels) == 0 || !std::isfinite(query.radius) ||
+  if ((query.channels & channels) == 0 || !::isfinite(query.radius) ||
       query.radius < 0)
     return;
   u8 axes = query.axes & scene::kWorldStreamXYZ;
@@ -565,7 +587,7 @@ void Terrain::GatherStreamRegions(
     axes = scene::kWorldStreamXYZ;
   auto valid_axis = [&](u8 axis, f32 origin, f32 predicted) {
     return (axes & axis) == 0 ||
-           (std::isfinite(origin) && std::isfinite(predicted));
+           (::isfinite(origin) && ::isfinite(predicted));
   };
   if (!valid_axis(scene::kWorldStreamX, query.origin.x, query.predicted.x) ||
       !valid_axis(scene::kWorldStreamY, query.origin.y, query.predicted.y) ||
@@ -578,13 +600,13 @@ void Terrain::GatherStreamRegions(
     if ((axes & axis) == 0)
       return true;
     const double query_minimum =
-        std::min(start, end) - static_cast<double>(query.radius);
+        rx::Min(start, end) - static_cast<double>(query.radius);
     const double query_maximum =
-        std::max(start, end) + static_cast<double>(query.radius);
+        rx::Max(start, end) + static_cast<double>(query.radius);
     return maximum >= query_minimum && minimum <= query_maximum;
   };
   for (const TerrainTile &tile : tiles_) {
-    const std::optional<scene::WorldStreamRegion> region =
+    const base::Optional<scene::WorldStreamRegion> region =
         TileRegion(tile.key, channels, priority);
     if (!region)
       continue;
@@ -599,16 +621,16 @@ void Terrain::GatherStreamRegions(
   }
 }
 
-std::optional<asset::Mesh>
+base::Optional<asset::Mesh>
 Terrain::BuildTileMesh(TerrainTileKey key, asset::AssetId material) const {
   const TerrainTile *tile = FindTile(key);
   if (!tile)
-    return std::nullopt;
+    return base::nullopt;
   const u32 quads = desc_.tile_quads;
   const u32 side = quads + 1;
   const f32 width = static_cast<f32>(quads) * desc_.sample_spacing;
-  if (!std::isfinite(width))
-    return std::nullopt;
+  if (!::isfinite(width))
+    return base::nullopt;
 
   asset::Mesh mesh;
   mesh.id = TileAssetId(key);
@@ -623,10 +645,10 @@ Terrain::BuildTileMesh(TerrainTileKey key, asset::AssetId material) const {
       const f32 center = tile->heights[index];
       const i64 grid_x = static_cast<i64>(key.x) * quads + x;
       const i64 grid_z = static_cast<i64>(key.z) * quads + z;
-      const std::optional<f32> left = GridHeight(grid_x - 1, grid_z);
-      const std::optional<f32> right = GridHeight(grid_x + 1, grid_z);
-      const std::optional<f32> down = GridHeight(grid_x, grid_z - 1);
-      const std::optional<f32> up = GridHeight(grid_x, grid_z + 1);
+      const base::Optional<f32> left = GridHeight(grid_x - 1, grid_z);
+      const base::Optional<f32> right = GridHeight(grid_x + 1, grid_z);
+      const base::Optional<f32> down = GridHeight(grid_x, grid_z - 1);
+      const base::Optional<f32> up = GridHeight(grid_x, grid_z + 1);
       const f32 dx = left && right
                          ? (*right - *left) / (2 * desc_.sample_spacing)
                      : right ? (*right - center) / desc_.sample_spacing
@@ -674,27 +696,27 @@ Terrain::BuildTileMesh(TerrainTileKey key, asset::AssetId material) const {
                           (tile->maximum_height - tile->minimum_height) * 0.5f;
   mesh.bounds_center[2] = width * 0.5f;
   const f32 half_height = (tile->maximum_height - tile->minimum_height) * 0.5f;
-  mesh.bounds_radius = std::hypot(width * 0.5f, width * 0.5f, half_height);
+  mesh.bounds_radius = ::hypot(width * 0.5f, width * 0.5f, half_height);
   return mesh;
 }
 
-std::optional<TerrainRayHit> Terrain::Raycast(Vec3 origin, Vec3 direction,
+base::Optional<TerrainRayHit> Terrain::Raycast(Vec3 origin, Vec3 direction,
                                               f32 maximum_distance) const {
   if (!IsFinite(origin) || !IsFinite(direction) ||
-      std::isnan(maximum_distance) || maximum_distance < 0) {
-    return std::nullopt;
+      ::isnan(maximum_distance) || maximum_distance < 0) {
+    return base::nullopt;
   }
-  const double length = std::hypot(direction.x, direction.y, direction.z);
-  if (!std::isfinite(length) || length <= 0)
-    return std::nullopt;
+  const double length = ::hypot(direction.x, direction.y, direction.z);
+  if (!::isfinite(length) || length <= 0)
+    return base::nullopt;
   direction = {static_cast<f32>(static_cast<double>(direction.x) / length),
                static_cast<f32>(static_cast<double>(direction.y) / length),
                static_cast<f32>(static_cast<double>(direction.z) / length)};
   if (!IsFinite(direction))
-    return std::nullopt;
+    return base::nullopt;
 
   f32 nearest = maximum_distance;
-  std::optional<TerrainRayHit> result;
+  base::Optional<TerrainRayHit> result;
   const u32 quads = desc_.tile_quads;
   const u32 side = quads + 1;
   for (const TerrainTile &tile : tiles_) {
@@ -711,8 +733,8 @@ std::optional<TerrainRayHit> Terrain::Raycast(Vec3 origin, Vec3 direction,
                              minimum_x + width, maximum_y, minimum_z + width};
     bool valid_bounds = true;
     for (double value : values) {
-      if (!std::isfinite(value) ||
-          std::abs(value) > std::numeric_limits<f32>::max()) {
+      if (!::isfinite(value) ||
+          ::abs(value) > FLT_MAX) {
         valid_bounds = false;
         break;
       }
@@ -764,12 +786,12 @@ std::optional<TerrainRayHit> Terrain::Raycast(Vec3 origin, Vec3 direction,
 TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
   TerrainChange change;
   change.terrain = desc_.id;
-  if (!std::isfinite(brush.center_x) || !std::isfinite(brush.center_z) ||
-      !std::isfinite(brush.radius) || brush.radius <= 0 ||
-      !std::isfinite(brush.strength) || brush.strength <= 0 ||
-      !std::isfinite(brush.falloff) || brush.falloff < 0 ||
+  if (!::isfinite(brush.center_x) || !::isfinite(brush.center_z) ||
+      !::isfinite(brush.radius) || brush.radius <= 0 ||
+      !::isfinite(brush.strength) || brush.strength <= 0 ||
+      !::isfinite(brush.falloff) || brush.falloff < 0 ||
       (brush.mode == TerrainBrushMode::kFlatten &&
-       !std::isfinite(brush.flatten_target)) ||
+       !::isfinite(brush.flatten_target)) ||
       (brush.mode == TerrainBrushMode::kPaintLayer &&
        brush.layer >= ActiveLayerCount(desc_))) {
     return change;
@@ -799,12 +821,12 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
         const double world_z =
             desc_.origin.z + static_cast<double>(grid_z) * desc_.sample_spacing;
         const f32 distance = static_cast<f32>(
-            std::hypot(world_x - brush.center_x, world_z - brush.center_z));
+            ::hypot(world_x - brush.center_x, world_z - brush.center_z));
         if (distance > brush.radius)
           continue;
-        const f32 radial = std::max(0.0f, 1.0f - distance / brush.radius);
+        const f32 radial = rx::Max(0.0f, 1.0f - distance / brush.radius);
         const f32 influence =
-            brush.falloff == 0 ? 1.0f : std::pow(radial, brush.falloff);
+            brush.falloff == 0 ? 1.0f : ::pow(radial, brush.falloff);
         if (influence <= 0)
           continue;
 
@@ -819,12 +841,12 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
           new_value.height -= brush.strength * influence;
           break;
         case TerrainBrushMode::kSmooth: {
-          const std::optional<f32> neighbors[] = {
+          const base::Optional<f32> neighbors[] = {
               GridHeight(grid_x - 1, grid_z), GridHeight(grid_x + 1, grid_z),
               GridHeight(grid_x, grid_z - 1), GridHeight(grid_x, grid_z + 1)};
           f32 total = 0;
           u32 count = 0;
-          for (std::optional<f32> neighbor : neighbors) {
+          for (base::Optional<f32> neighbor : neighbors) {
             if (neighbor) {
               total += *neighbor;
               ++count;
@@ -832,13 +854,13 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
           }
           if (count > 0) {
             const f32 amount =
-                std::clamp(brush.strength * influence, 0.0f, 1.0f);
+                rx::Clamp(brush.strength * influence, 0.0f, 1.0f);
             new_value.height += (total / count - old_value.height) * amount;
           }
           break;
         }
         case TerrainBrushMode::kFlatten: {
-          const f32 amount = std::clamp(brush.strength * influence, 0.0f, 1.0f);
+          const f32 amount = rx::Clamp(brush.strength * influence, 0.0f, 1.0f);
           const f32 target = brush.flatten_target - desc_.origin.y;
           new_value.height += (target - old_value.height) * amount;
           break;
@@ -846,11 +868,11 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
         case TerrainBrushMode::kPaintLayer:
           new_value.weights =
               PaintWeights(old_value.weights, brush.layer,
-                           std::clamp(brush.strength * influence, 0.0f, 1.0f),
+                           rx::Clamp(brush.strength * influence, 0.0f, 1.0f),
                            ActiveLayerCount(desc_));
           break;
         }
-        if (!std::isfinite(new_value.height) || new_value == old_value)
+        if (!::isfinite(new_value.height) || new_value == old_value)
           continue;
         change.samples.push_back({tile.key, index, old_value, new_value});
       }
@@ -863,24 +885,24 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
   // even though none of their authored samples changed.
   base::Vector<TerrainTileKey> normal_dependents;
   auto neighbor = [&](TerrainTileKey key, i32 dx,
-                      i32 dz) -> std::optional<TerrainTileKey> {
+                      i32 dz) -> base::Optional<TerrainTileKey> {
     const i64 x = static_cast<i64>(key.x) + dx;
     const i64 z = static_cast<i64>(key.z) + dz;
-    if (x < std::numeric_limits<i32>::min() ||
-        x > std::numeric_limits<i32>::max() ||
-        z < std::numeric_limits<i32>::min() ||
-        z > std::numeric_limits<i32>::max()) {
-      return std::nullopt;
+    if (x < base::MinMax<i32>::min() ||
+        x > base::MinMax<i32>::max() ||
+        z < base::MinMax<i32>::min() ||
+        z > base::MinMax<i32>::max()) {
+      return base::nullopt;
     }
     return TerrainTileKey{static_cast<i32>(x), static_cast<i32>(z)};
   };
   for (const TerrainSampleChange& sample : change.samples) {
     const u32 local_x = sample.sample % side;
     const u32 local_z = sample.sample / side;
-    const std::optional<TerrainTileKey> west = neighbor(sample.tile, -1, 0);
-    const std::optional<TerrainTileKey> east = neighbor(sample.tile, 1, 0);
-    const std::optional<TerrainTileKey> south = neighbor(sample.tile, 0, -1);
-    const std::optional<TerrainTileKey> north = neighbor(sample.tile, 0, 1);
+    const base::Optional<TerrainTileKey> west = neighbor(sample.tile, -1, 0);
+    const base::Optional<TerrainTileKey> east = neighbor(sample.tile, 1, 0);
+    const base::Optional<TerrainTileKey> south = neighbor(sample.tile, 0, -1);
+    const base::Optional<TerrainTileKey> north = neighbor(sample.tile, 0, 1);
     if (local_x == 1 && west && FindTile(*west)) normal_dependents.push_back(*west);
     if (local_x + 1 == quads && east && FindTile(*east)) normal_dependents.push_back(*east);
     if (local_z == 1 && south && FindTile(*south)) normal_dependents.push_back(*south);
@@ -890,10 +912,10 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
     // border copy reaches the diagonal through the pushes above, but in sparse
     // layouts (corner tile present, edge tile missing) that indirection breaks,
     // so mark the diagonal directly.
-    const std::optional<TerrainTileKey> southwest = neighbor(sample.tile, -1, -1);
-    const std::optional<TerrainTileKey> southeast = neighbor(sample.tile, 1, -1);
-    const std::optional<TerrainTileKey> northwest = neighbor(sample.tile, -1, 1);
-    const std::optional<TerrainTileKey> northeast = neighbor(sample.tile, 1, 1);
+    const base::Optional<TerrainTileKey> southwest = neighbor(sample.tile, -1, -1);
+    const base::Optional<TerrainTileKey> southeast = neighbor(sample.tile, 1, -1);
+    const base::Optional<TerrainTileKey> northwest = neighbor(sample.tile, -1, 1);
+    const base::Optional<TerrainTileKey> northeast = neighbor(sample.tile, 1, 1);
     if (((local_x == 1 && local_z == 0) || (local_x == 0 && local_z == 1)) &&
         southwest && FindTile(*southwest))
       normal_dependents.push_back(*southwest);
@@ -911,9 +933,11 @@ TerrainChange Terrain::ApplyBrush(const TerrainBrush &brush) {
       normal_dependents.push_back(*northeast);
   }
   for (TerrainTileKey key : normal_dependents) change.dirty_tiles.push_back(key);
-  std::sort(change.dirty_tiles.begin(), change.dirty_tiles.end(), KeyLess);
+  // A key is all its value, so equal keys are identical and any correct sort
+  // agrees.
+  base::Sort(change.dirty_tiles.begin(), change.dirty_tiles.end(), KeyLess);
   change.dirty_tiles.erase(
-      std::unique(change.dirty_tiles.begin(), change.dirty_tiles.end()),
+      base::Unique(change.dirty_tiles.begin(), change.dirty_tiles.end()),
       change.dirty_tiles.end());
   if (!change.empty() && !ApplyChange(change))
     return TerrainChange{};
@@ -938,16 +962,18 @@ bool Terrain::SetChangeState(const TerrainChange &change, bool use_new) {
     previous = sample;
     has_previous = true;
     TerrainTile *tile = FindTileMutable(sample.tile);
+    const TerrainTileKey *dirty =
+        base::LowerBound(change.dirty_tiles.begin(), change.dirty_tiles.end(),
+                         sample.tile, KeyLess);
     if (!tile || sample.sample >= tile->heights.size() ||
-        !std::binary_search(change.dirty_tiles.begin(),
-                            change.dirty_tiles.end(), sample.tile, KeyLess)) {
+        dirty == change.dirty_tiles.end() || KeyLess(sample.tile, *dirty)) {
       return false;
     }
     const TerrainSampleState &wanted =
         use_new ? sample.new_value : sample.old_value;
     const TerrainSampleState &expected =
         use_new ? sample.old_value : sample.new_value;
-    if (!std::isfinite(wanted.height) ||
+    if (!::isfinite(wanted.height) ||
         !IsNormalized(wanted.weights, layer_count) ||
         tile->heights[sample.sample] != expected.height ||
         tile->weights[sample.sample] != expected.weights) {
@@ -988,13 +1014,10 @@ bool MergeTerrainChanges(TerrainChange *stroke, const TerrainChange &dab) {
     return true;
   }
   if (stroke->terrain != dab.terrain ||
-      !std::is_sorted(stroke->samples.begin(), stroke->samples.end(),
-                      ChangeLess) ||
-      !std::is_sorted(dab.samples.begin(), dab.samples.end(), ChangeLess) ||
-      !std::is_sorted(stroke->dirty_tiles.begin(), stroke->dirty_tiles.end(),
-                      KeyLess) ||
-      !std::is_sorted(dab.dirty_tiles.begin(), dab.dirty_tiles.end(),
-                      KeyLess)) {
+      !IsSorted(stroke->samples, ChangeLess) ||
+      !IsSorted(dab.samples, ChangeLess) ||
+      !IsSorted(stroke->dirty_tiles, KeyLess) ||
+      !IsSorted(dab.dirty_tiles, KeyLess)) {
     return false;
   }
 
@@ -1023,10 +1046,24 @@ bool MergeTerrainChanges(TerrainChange *stroke, const TerrainChange &dab) {
 
   merged.dirty_tiles.reserve(stroke->dirty_tiles.size() +
                              dab.dirty_tiles.size());
-  std::set_union(stroke->dirty_tiles.begin(), stroke->dirty_tiles.end(),
-                 dab.dirty_tiles.begin(), dab.dirty_tiles.end(),
-                 std::back_inserter(merged.dirty_tiles), KeyLess);
-  *stroke = std::move(merged);
+  // std::set_union: on equal keys the stroke's copy is kept.
+  size_t old_tile = 0;
+  size_t dab_tile = 0;
+  while (old_tile < stroke->dirty_tiles.size()) {
+    if (dab_tile == dab.dirty_tiles.size()) {
+      merged.dirty_tiles.push_back(stroke->dirty_tiles[old_tile++]);
+    } else if (KeyLess(dab.dirty_tiles[dab_tile],
+                       stroke->dirty_tiles[old_tile])) {
+      merged.dirty_tiles.push_back(dab.dirty_tiles[dab_tile++]);
+    } else {
+      if (!KeyLess(stroke->dirty_tiles[old_tile], dab.dirty_tiles[dab_tile]))
+        ++dab_tile;
+      merged.dirty_tiles.push_back(stroke->dirty_tiles[old_tile++]);
+    }
+  }
+  while (dab_tile < dab.dirty_tiles.size())
+    merged.dirty_tiles.push_back(dab.dirty_tiles[dab_tile++]);
+  *stroke = base::move(merged);
   return true;
 }
 

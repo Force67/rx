@@ -1,12 +1,13 @@
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "asset/mesh.h"
 #include "render/core/bindless.h"
 #include "shaders/path_alpha_recon_cs_hlsl.h"
 #include "shaders/path_alpha_di_cs_hlsl.h"
 #ifdef RX_HAS_NRD
+#include "base/memory/mem_ops.h"
 #include "shaders/path_alpha_nrd_cs_hlsl.h"
 #endif
 
@@ -15,13 +16,13 @@ using namespace rx::render;
 
 int main() {
   DeviceDesc desc;
-  const char* backend = std::getenv("RX_RHI");
-  desc.backend = backend && std::strcmp(backend, "d3d12") == 0
+  const char* backend = ::getenv("RX_RHI");
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0
                      ? Backend::kD3D12 : Backend::kVulkan;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
-    std::printf("path_alpha_test: SKIP, GPU unavailable\n");
+    ::printf("path_alpha_test: SKIP, GPU unavailable\n");
     return 77;
   }
   auto bindless = BindlessRegistry::Create(*device);
@@ -31,10 +32,10 @@ int main() {
                               {.position = {0, 1, 0}}};
   const u32 indices[3] = {0, 1, 2};
   GpuBuffer vb = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(vertices), sizeof(vertices)},
+      ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)),
       kBufferUsageStorage | kBufferUsageDeviceAddress);
   GpuBuffer ib = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(indices), sizeof(indices)},
+      ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)),
       kBufferUsageStorage | kBufferUsageDeviceAddress);
   const f32 alphas[8] = {0, .49f, .5f, 1, 0, 0, .75f, .75f};
   const f32 cutoffs[8] = {.5f, .5f, .5f, .5f, .5f, 0, .8f, .7f};
@@ -69,10 +70,10 @@ int main() {
     });
     device->InvalidateBuffer(readback, 0, sizeof(expected));
     u32 actual[8];
-    std::memcpy(actual, readback.mapped, sizeof(actual));
+    base::MemCopy(actual, readback.mapped, sizeof(actual));
     for (u32 i = 0; i < 8; ++i) {
       if (actual[i] == expected[i]) continue;
-      std::printf("FAIL: %s alpha=%g cutoff=%g got=%u expected=%u\n",
+      ::printf("FAIL: %s alpha=%g cutoff=%g got=%u expected=%u\n",
                   name, alphas[i], cutoffs[i], actual[i], expected[i]);
       ++failures;
     }
@@ -84,11 +85,11 @@ int main() {
   run(RX_SHADER(k_path_alpha_nrd_cs_hlsl), "nrd");
 #endif
   device->WaitIdle();
-  bindless.reset();
+  bindless.Reset();
   device->DestroyBuffer(vb);
   device->DestroyBuffer(ib);
   device->DestroyBuffer(result);
   device->DestroyBuffer(readback);
-  std::printf("path_alpha_test: %d failures\n", failures);
+  ::printf("path_alpha_test: %d failures\n", failures);
   return failures ? 1 : 0;
 }

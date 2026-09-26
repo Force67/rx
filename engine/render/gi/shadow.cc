@@ -1,13 +1,16 @@
 #include "render/gi/shadow.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstddef>
-#include <cstring>
+#include <math.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 #include <initializer_list>
 
 #include "asset/mesh.h"
+#include "base/functional/function.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/shadow_instance_vs_hlsl.h"
 #include "shaders/shadow_ps_hlsl.h"
 #include "shaders/shadow_skin_vs_hlsl.h"
@@ -119,14 +122,14 @@ bool ShadowPass::Initialize(Device& device, BindingLayoutHandle material_layout,
   for (u32 i = 0; i < kFramesInFlight; ++i) {
     cascades_[i] = device.CreateBuffer(sizeof(CascadeData), kBufferUsageUniform, true);
     if (!cascades_[i].mapped) return false;
-    std::memset(cascades_[i].mapped, 0, sizeof(CascadeData));
+    base::MemSet(cascades_[i].mapped, 0, sizeof(CascadeData));
   }
   return true;
 }
 
 void ShadowPass::Configure(const Settings& settings) {
   settings_ = settings;
-  settings_.cascade_count = std::clamp(settings_.cascade_count, 1u, kMaxCascades);
+  settings_.cascade_count = rx::Clamp(settings_.cascade_count, 1u, kMaxCascades);
 }
 
 void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right, const Vec3& up,
@@ -134,7 +137,7 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
   const u32 count = settings_.cascade_count;
   const f32 near_plane = 0.1f;
   const f32 far_plane = settings_.distance;
-  const f32 tan_half = std::tan(fov_y * 0.5f);
+  const f32 tan_half = ::tan(fov_y * 0.5f);
   const f32 lambda = 0.7f;       // log/uniform split blend
   const f32 back_pad = 80.0f;    // caster range behind the slice, toward the sun
 
@@ -142,13 +145,13 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
   splits[0] = near_plane;
   for (u32 i = 1; i <= count; ++i) {
     f32 p = static_cast<f32>(i) / static_cast<f32>(count);
-    f32 log_split = near_plane * std::pow(far_plane / near_plane, p);
+    f32 log_split = near_plane * ::pow(far_plane / near_plane, p);
     f32 uniform_split = near_plane + (far_plane - near_plane) * p;
     splits[i] = lambda * log_split + (1.0f - lambda) * uniform_split;
   }
 
   Vec3 light_dir = Normalize(sun_direction);  // travel direction = look direction
-  Vec3 up_ref = std::abs(light_dir.y) > 0.99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
+  Vec3 up_ref = ::abs(light_dir.y) > 0.99f ? Vec3{0, 0, 1} : Vec3{0, 1, 0};
 
   current_ = CascadeData{};
   for (u32 i = 0; i < count; ++i) {
@@ -169,9 +172,9 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
     f32 radius = 0.0f;
     for (const Vec3& p : corners) {
       Vec3 v = {p.x - center.x, p.y - center.y, p.z - center.z};
-      radius = std::max(radius, std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z));
+      radius = rx::Max(radius, ::sqrt(v.x * v.x + v.y * v.y + v.z * v.z));
     }
-    radius = std::ceil(radius * 16.0f) / 16.0f;  // quantize so it stops pulsing
+    radius = ::ceil(radius * 16.0f) / 16.0f;  // quantize so it stops pulsing
 
     Vec3 light_eye = {center.x - light_dir.x * (radius + back_pad),
                       center.y - light_dir.y * (radius + back_pad),
@@ -187,8 +190,8 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
     f32 half_res = settings_.resolution * 0.5f;
     f32 sx = origin_ndc.x * half_res;
     f32 sy = origin_ndc.y * half_res;
-    f32 dx = (std::round(sx) - sx) / half_res;
-    f32 dy = (std::round(sy) - sy) / half_res;
+    f32 dx = (::round(sx) - sx) / half_res;
+    f32 dy = (::round(sy) - sy) / half_res;
     light_vp.m[12] += dx;
     light_vp.m[13] += dy;
 
@@ -203,11 +206,11 @@ void ShadowPass::Update(const Vec3& eye, const Vec3& forward, const Vec3& right,
   current_.p1[1] = 0.0f;
   current_.p1[2] = settings_.normal_bias;
   current_.p1[3] = 0.0f;
-  std::memcpy(cascades_[frame_slot].mapped, &current_, sizeof(CascadeData));
+  base::MemCopy(cascades_[frame_slot].mapped, &current_, sizeof(CascadeData));
 }
 
 void ShadowPass::Render(CommandList& cmd, TextureView atlas_view,
-                        const std::function<void(CommandList&, const Mat4&)>& draw) {
+                        const base::Function<void(CommandList&, const Mat4&)>& draw) {
   const u32 res = settings_.resolution;
 
   // The graph already put the atlas in the depth-target state for this write.

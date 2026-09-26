@@ -8,14 +8,17 @@
 // ParkBatchStaging with an image, as MaterialSystem uploads textures.
 // Skips cleanly (exit 0) when no Vulkan driver is present (null backend).
 
-#include <barrier>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
-#include <thread>
-#include <vector>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
+#include "base/threading/condition_variable.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
+#include "base/threading/thread.h"
 #include "render/pipeline/material_system.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
@@ -26,13 +29,36 @@ namespace asset = rx::asset;
 namespace {
 
 int Fail(const char* msg) {
-  std::fprintf(stderr, "upload_batch_test: FAIL: %s\n", msg);
+  ::fprintf(stderr, "upload_batch_test: FAIL: %s\n", msg);
   return 1;
 }
 
+// std::barrier(2)'s reusable phase: each ArriveAndWait blocks until both
+// parties of the current phase arrived.
+class TwoPartyBarrier {
+ public:
+  void ArriveAndWait() {
+    base::UniqueLock<base::Mutex> lock(mutex_);
+    const u64 phase = phase_;
+    if (++arrived_ == 2) {
+      arrived_ = 0;
+      ++phase_;
+      cv_.NotifyAll();
+      return;
+    }
+    cv_.Wait(lock, [&] { return phase_ != phase; });
+  }
+
+ private:
+  base::Mutex mutex_;
+  base::ConditionVariable cv_;
+  int arrived_ = 0;
+  u64 phase_ = 0;
+};
+
 // Uploads `bytes` of a deterministic per-buffer pattern and returns the device
 // buffer (created batched when a batch is open).
-GpuBuffer UploadPattern(Device& device, u64 bytes, u8 seed, std::vector<u8>& expect) {
+GpuBuffer UploadPattern(Device& device, u64 bytes, u8 seed, base::Vector<u8>& expect) {
   expect.resize(bytes);
   for (u64 i = 0; i < bytes; ++i) expect[i] = static_cast<u8>(seed + i * 31);
   return device.CreateBufferWithData(rx::ByteSpan(expect.data(), expect.size()),
@@ -40,7 +66,7 @@ GpuBuffer UploadPattern(Device& device, u64 bytes, u8 seed, std::vector<u8>& exp
 }
 
 // Copies `buffer` back to the host and compares against `expect`.
-bool VerifyContents(Device& device, const GpuBuffer& buffer, const std::vector<u8>& expect) {
+bool VerifyContents(Device& device, const GpuBuffer& buffer, const base::Vector<u8>& expect) {
   GpuBuffer readback =
       device.CreateBuffer(expect.size(), kBufferUsageTransferDst, /*host_visible=*/true);
   if (!readback || !readback.mapped) return false;
@@ -49,7 +75,7 @@ bool VerifyContents(Device& device, const GpuBuffer& buffer, const std::vector<u
     cmd.MemoryBarrier(BarrierScope::kTransferWrite, BarrierScope::kHostRead);
   });
   device.InvalidateBuffer(readback, 0, expect.size());
-  const bool ok = std::memcmp(readback.mapped, expect.data(), expect.size()) == 0;
+  const bool ok = base::MemCompare(readback.mapped, expect.data(), expect.size()) == 0;
   GpuBuffer retire = readback;
   device.DestroyBuffer(retire);
   return ok;
@@ -60,18 +86,18 @@ bool VerifyContents(Device& device, const GpuBuffer& buffer, const std::vector<u
 int main() {
   DeviceDesc desc;
   desc.backend = Backend::kVulkan;
-  desc.enable_validation = std::getenv("RX_VALIDATION") != nullptr;
-  std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
+  desc.enable_validation = ::getenv("RX_VALIDATION") != nullptr;
+  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
   if (!device) return Fail("CreateOffscreen returned null");
   if (device->is_stub()) {
-    std::printf("upload_batch_test: no vulkan driver, skipping (null backend)\n");
+    ::printf("upload_batch_test: no vulkan driver, skipping (null backend)\n");
     return 0;
   }
-  std::printf("upload_batch_test: device '%s'\n", device->caps().adapter_name.c_str());
+  ::printf("upload_batch_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   // batched uploads, nested scopes, verified after the outermost flush
   device->BeginUploadBatch();
-  std::vector<u8> expect_a, expect_b;
+  base::Vector<u8> expect_a, expect_b;
   GpuBuffer a = UploadPattern(*device, 64 * 1024, 1, expect_a);
   device->BeginUploadBatch();  // nested: must not submit at the inner flush
   GpuBuffer b = UploadPattern(*device, 3 * 1024 + 7, 2, expect_b);
@@ -85,7 +111,7 @@ int main() {
 
   // implicit flush: ImmediateSubmit must see a still-batched buffer
   device->BeginUploadBatch();
-  std::vector<u8> expect_c;
+  base::Vector<u8> expect_c;
   GpuBuffer c = UploadPattern(*device, 16 * 1024, 3, expect_c);
   if (!c) return Fail("batched buffer creation failed (implicit-flush case)");
   // VerifyContents runs an ImmediateSubmit while the batch is still open; the
@@ -97,7 +123,7 @@ int main() {
   // every buffer must still verify (early chunks and the final flush alike) ---
   constexpr u64 kChunk = 24ull << 20;  // 3 x 24 MiB crosses the 64 MiB budget
   device->BeginUploadBatch();
-  std::vector<u8> expect_big[3];
+  base::Vector<u8> expect_big[3];
   GpuBuffer big[3];
   for (int i = 0; i < 3; ++i) {
     big[i] = UploadPattern(*device, kChunk, static_cast<u8>(10 + i), expect_big[i]);
@@ -114,7 +140,7 @@ int main() {
   // transfer->all barrier are the only things ordering the copy against the
   // frame, which is what streaming mid-frame relies on. ---
   device->BeginUploadBatch();
-  std::vector<u8> expect_d;
+  base::Vector<u8> expect_d;
   GpuBuffer d = UploadPattern(*device, 128 * 1024, 4, expect_d);
   if (!d) return Fail("batched buffer creation failed (frame case)");
   GpuBuffer frame_readback =
@@ -127,7 +153,7 @@ int main() {
   device->SubmitFrame(frame);
   device->WaitIdle();
   device->InvalidateBuffer(frame_readback, 0, expect_d.size());
-  if (std::memcmp(frame_readback.mapped, expect_d.data(), expect_d.size()) != 0)
+  if (base::MemCompare(frame_readback.mapped, expect_d.data(), expect_d.size()) != 0)
     return Fail("frame read a batched buffer before its copy landed");
   device->FlushUploadBatch();
 
@@ -135,7 +161,7 @@ int main() {
   // does it. The staging must survive to the flush and the image must come out
   // in kShaderReadAll with the right pixels. ---
   constexpr u32 kDim = 64;
-  std::vector<u8> expect_tex(kDim * kDim * 4);
+  base::Vector<u8> expect_tex(kDim * kDim * 4);
   for (size_t i = 0; i < expect_tex.size(); ++i) expect_tex[i] = static_cast<u8>(i * 7 + 3);
   device->BeginUploadBatch();
   GpuImage image = device->CreateImage2D(
@@ -145,22 +171,22 @@ int main() {
   GpuBuffer tex_staging =
       device->CreateBuffer(expect_tex.size(), kBufferUsageTransferSrc, /*host_visible=*/true);
   if (!tex_staging.mapped) return Fail("texture staging creation failed");
-  std::memcpy(tex_staging.mapped, expect_tex.data(), expect_tex.size());
+  base::MemCopy(tex_staging.mapped, expect_tex.data(), expect_tex.size());
   device->FlushBuffer(tex_staging, 0, expect_tex.size());
   if (!device->UploadBatchActive()) return Fail("batch not active for the texture case");
   device->RecordUpload([&](CommandList& cmd) {
     cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
     BufferTextureCopy region{.mip = 0, .extent = {kDim, kDim}};
-    cmd.CopyBufferToTexture(tex_staging, image, {&region, 1});
+    cmd.CopyBufferToTexture(tex_staging, image, base::Span(&region, 1));
     cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
   });
   device->ParkBatchStaging(tex_staging);
   if (tex_staging) return Fail("ParkBatchStaging left the caller's handle live");
   device->FlushUploadBatch();
-  std::vector<u8> got_tex(expect_tex.size());
+  base::Vector<u8> got_tex(expect_tex.size());
   if (!device->ReadbackImage(image, ResourceState::kShaderReadAll, got_tex.data(), got_tex.size()))
     return Fail("ReadbackImage failed");
-  if (std::memcmp(got_tex.data(), expect_tex.data(), expect_tex.size()) != 0)
+  if (base::MemCompare(got_tex.data(), expect_tex.data(), expect_tex.size()) != 0)
     return Fail("batched texture contents wrong after flush");
   device->DestroyImage(image);
 
@@ -189,23 +215,23 @@ int main() {
     buffer = device->CreateBuffer(16, kBufferUsageStorage, true);
     if (!buffer) return Fail("CreateBuffer returned null (off-thread destroy case)");
   }
-  std::barrier start(2);
-  std::jthread retire([&] {
+  TwoPartyBarrier start;
+  base::Thread retire("retire", [&] {
     for (GpuBuffer& buffer : race_buffers) {
-      start.arrive_and_wait();
+      start.ArriveAndWait();
       device->DestroyBufferDeferred(buffer);
     }
-  });
+  }, /*start_now=*/true);
   bool race_frames_ok = true;
   for (int i = 0; i < kRaceIterations; ++i) {
-    start.arrive_and_wait();  // every iteration must arrive, or the worker hangs
+    start.ArriveAndWait();  // every iteration must arrive, or the worker hangs
     if (CommandList* frame_cmd = device->BeginFrame(i % Device::kMaxFramesInFlight)) {
       device->SubmitFrame(frame_cmd);
     } else {
       race_frames_ok = false;
     }
   }
-  retire.join();
+  retire.Join();
   if (!race_frames_ok) return Fail("BeginFrame returned null (off-thread destroy case)");
 
   // deferred destroy of a resource a submitted-but-unfinished batch is
@@ -220,12 +246,12 @@ int main() {
   GpuBuffer doomed_staging =
       device->CreateBuffer(expect_tex.size(), kBufferUsageTransferSrc, /*host_visible=*/true);
   if (!doomed_staging.mapped) return Fail("staging creation failed (deferred-destroy case)");
-  std::memcpy(doomed_staging.mapped, expect_tex.data(), expect_tex.size());
+  base::MemCopy(doomed_staging.mapped, expect_tex.data(), expect_tex.size());
   device->FlushBuffer(doomed_staging, 0, expect_tex.size());
   device->RecordUpload([&](CommandList& cmd) {
     cmd.Barrier(Transition(doomed, ResourceState::kUndefined, ResourceState::kCopyDst));
     BufferTextureCopy region{.mip = 0, .extent = {kDim, kDim}};
-    cmd.CopyBufferToTexture(doomed_staging, doomed, {&region, 1});
+    cmd.CopyBufferToTexture(doomed_staging, doomed, base::Span(&region, 1));
     cmd.Barrier(Transition(doomed, ResourceState::kCopyDst, ResourceState::kShaderReadAll));
   });
   device->ParkBatchStaging(doomed_staging);
@@ -243,6 +269,6 @@ int main() {
   for (GpuBuffer* buffer : {&a, &b, &c, &d, &frame_readback, &big[0], &big[1], &big[2]})
     device->DestroyBuffer(*buffer);
   device->WaitIdle();
-  std::printf("upload_batch_test: PASS\n");
+  ::printf("upload_batch_test: PASS\n");
   return 0;
 }

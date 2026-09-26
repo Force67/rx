@@ -4,12 +4,12 @@
 // lightning integrals it writes into the two renderer value structs. No GPU, no
 // device: everything here runs on plain scalars and the module's own PRNG.
 
+#include "core/scalar.h"
 #include "weather/weather.h"
 
-#include <cmath>
-#include <cstdio>
-#include <limits>
-#include <vector>
+#include <float.h>
+#include <math.h>
+#include <stdio.h>
 
 namespace {
 
@@ -20,13 +20,13 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "weather_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "weather_test: FAIL: %s\n", message);
   ++failures;
 }
 
 void Near(f32 actual, f32 expected, const char* message, f32 epsilon = 1e-3f) {
-  if (std::fabs(actual - expected) <= epsilon) return;
-  std::fprintf(stderr, "weather_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
+  if (::fabs(actual - expected) <= epsilon) return;
+  ::fprintf(stderr, "weather_test: FAIL: %s (got %.4f, expected %.4f)\n", message, actual,
                expected);
   ++failures;
 }
@@ -94,7 +94,7 @@ void TestDeterministic() {
     lhs.Update(0.5f, Vec3{0, 0, 0}, 0.5f);
     rhs.Update(0.5f, Vec3{0, 0, 0}, 0.5f);
     if (lhs.active_state() != rhs.active_state() || lhs.target_state() != rhs.target_state() ||
-        std::fabs(lhs.transition() - rhs.transition()) > 1e-6f) {
+        ::fabs(lhs.transition() - rhs.transition()) > 1e-6f) {
       identical = false;
     }
     if (lhs.active_state() != last) saw_change = true;
@@ -159,8 +159,8 @@ void TestTransitionBlend() {
   sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
   {
     const render::CloudscapeControls& mid = sys.cloudscape();
-    f32 lo_b = std::min(s0.base_altitude, s1.base_altitude);
-    f32 hi_b = std::max(s0.base_altitude, s1.base_altitude);
+    f32 lo_b = rx::Min(s0.base_altitude, s1.base_altitude);
+    f32 hi_b = rx::Max(s0.base_altitude, s1.base_altitude);
     Check(mid.bottom > lo_b && mid.bottom < hi_b, "shell base blends through the transition");
     Check(mid.darkness > s0.darkness && mid.darkness < s1.darkness,
           "darkness blends through the transition");
@@ -254,7 +254,7 @@ void TestWindYawWrap() {
   sys.ForceState(0, 0.0f);
   sys.ForceState(1, 4.0f);
   sys.Update(2.0f, Vec3{0, 0, 0}, 0.5f);
-  Check(std::fabs(sys.cloudscape().wind_yaw) > 3.0f,
+  Check(::fabs(sys.cloudscape().wind_yaw) > 3.0f,
         "wind yaw crosses the wrap without reversing through zero");
 }
 
@@ -323,7 +323,7 @@ void TestInvalidRegionInputs() {
     sys.AddState(global);
     sys.AddState(regional);
     WeatherRegion invalid;
-    invalid.min_xz = {std::numeric_limits<f32>::quiet_NaN(), -10.0f};
+    invalid.min_xz = {NAN, -10.0f};
     invalid.max_xz = {10.0f, 10.0f};
     invalid.states.push_back(1u);
     sys.AddRegion(invalid);
@@ -343,7 +343,7 @@ void TestInvalidRegionInputs() {
     region.min_xz = {-10.0f, -10.0f};
     region.max_xz = {10.0f, 10.0f};
     region.states.push_back(1u);
-    region.weights.push_back(std::numeric_limits<f32>::infinity());
+    region.weights.push_back(INFINITY);
     sys.AddRegion(region);
     sys.ForceState(0, 0.0f);
     sys.ClearForced();
@@ -423,7 +423,7 @@ void TestInvalidDeltaTime() {
   sys.Update(1.0f, Vec3{0, 0, 0}, 0.5f);
   f32 offset = sys.cloudscape().map_offset.x;
   sys.Update(-1.0f, Vec3{0, 0, 0}, 0.5f);
-  sys.Update(std::numeric_limits<f32>::quiet_NaN(), Vec3{0, 0, 0}, 0.5f);
+  sys.Update(NAN, Vec3{0, 0, 0}, 0.5f);
   Near(sys.cloudscape().map_offset.x, offset,
        "negative and non-finite delta time leave integrals unchanged");
 }
@@ -432,27 +432,27 @@ void TestHugeDeltaTimeIsBounded() {
   WeatherSystem sys(21u);
   sys.AddState(Clear(1));
   sys.ForceState(0, 0.0f);
-  sys.Update(std::numeric_limits<f32>::max(), Vec3{0, 0, 0}, 0.5f);
-  Check(std::isfinite(sys.cloudscape().map_offset.x),
+  sys.Update(FLT_MAX, Vec3{0, 0, 0}, 0.5f);
+  Check(::isfinite(sys.cloudscape().map_offset.x),
         "a huge finite delta is bounded and returns finite output");
 }
 
 void TestStateValidation() {
   WeatherSystem sys(18u);
   WeatherState invalid = Storm(1);
-  invalid.coverage = std::numeric_limits<f32>::quiet_NaN();
+  invalid.coverage = NAN;
   invalid.density = -2.0f;
   invalid.base_altitude = 5000.0f;
   invalid.top_altitude = 1000.0f;
   invalid.fog_height = -4.0f;
   sys.AddState(invalid);
   sys.SetGroundHeight([](f32, f32) {
-    return std::numeric_limits<f32>::quiet_NaN();
+    return NAN;
   });
   sys.ForceState(0, 0.0f);
   sys.Update(0.0f, Vec3{0, 0, 0}, 0.5f);
   const render::CloudscapeControls& controls = sys.cloudscape();
-  Check(std::isfinite(controls.map_a.coverage) && controls.map_a.coverage == 0.0f,
+  Check(::isfinite(controls.map_a.coverage) && controls.map_a.coverage == 0.0f,
         "non-finite state controls are sanitized at registration");
   Check(controls.density == 0.0f, "negative density is clamped");
   Check(controls.top > controls.bottom, "cloud shell keeps a positive thickness");
@@ -532,7 +532,7 @@ void TestLightning() {
       if (w.strike_age >= 0.0f) {
         struck = true;
         f32 dx = w.strike_pos.x - player.x, dz = w.strike_pos.z - player.z;
-        f32 d = std::sqrt(dx * dx + dz * dz);
+        f32 d = ::sqrt(dx * dx + dz * dz);
         if (d < 90.0f || d > 320.0f) in_range = false;
       }
       if (w.lightning > 0.0f) flashed = true;
@@ -607,9 +607,9 @@ int main() {
   TestTornadoLifecycle();
 
   if (failures == 0) {
-    std::printf("weather_test: OK\n");
+    ::printf("weather_test: OK\n");
     return 0;
   }
-  std::fprintf(stderr, "weather_test: %d failure(s)\n", failures);
+  ::fprintf(stderr, "weather_test: %d failure(s)\n", failures);
   return failures;
 }

@@ -8,15 +8,16 @@
 // what the encoder currently reaches, so a real regression trips them and a
 // harmless change in the fit does not.
 
-#include <cmath>
-#include <cstdio>
-#include <cstring>
-#include <filesystem>
-#include <string>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <string.h>
 
 #include "asset/bc_encode.h"
 #include "asset/texture_compress.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 
 namespace {
 
@@ -26,7 +27,7 @@ int failures = 0;
 
 void Check(bool condition, const char* message) {
   if (condition) return;
-  std::fprintf(stderr, "bc_encode_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "bc_encode_test: FAIL: %s\n", message);
   ++failures;
 }
 
@@ -68,7 +69,7 @@ void DecodeBc1(const u8* block, u8* rgba) {
   const u32 indices = block[4] | (block[5] << 8) | (block[6] << 16) |
                       (static_cast<u32>(block[7]) << 24);
   for (u32 t = 0; t < 16; ++t) {
-    std::memcpy(rgba + t * 4, palette[(indices >> (t * 2)) & 3u], 4);
+    base::MemCopy(rgba + t * 4, palette[(indices >> (t * 2)) & 3u], 4);
   }
 }
 
@@ -135,7 +136,7 @@ bool DecodeBc7Mode6(const u8* block, u8* rgba) {
 
 // helpers
 
-f64 Psnr(const std::vector<u8>& a, const std::vector<u8>& b, u32 channels, u32 stride) {
+f64 Psnr(const base::Vector<u8>& a, const base::Vector<u8>& b, u32 channels, u32 stride) {
   f64 sum = 0;
   u32 count = 0;
   for (size_t t = 0; t * stride < a.size(); ++t) {
@@ -148,7 +149,7 @@ f64 Psnr(const std::vector<u8>& a, const std::vector<u8>& b, u32 channels, u32 s
   if (count == 0) return 0;
   const f64 mse = sum / static_cast<f64>(count);
   if (mse <= 0.0) return 99.0;
-  return 10.0 * std::log10(255.0 * 255.0 / mse);
+  return 10.0 * ::log10(255.0 * 255.0 / mse);
 }
 
 // Encodes a whole 4-multiple surface block by block and decodes it back, so the
@@ -156,9 +157,9 @@ f64 Psnr(const std::vector<u8>& a, const std::vector<u8>& b, u32 channels, u32 s
 using BlockEncode = void (*)(const u8*, u8*);
 using BlockDecode = void (*)(const u8*, u8*);
 
-std::vector<u8> RoundTrip(const std::vector<u8>& rgba, u32 width, u32 height, u32 block_bytes,
+base::Vector<u8> RoundTrip(const base::Vector<u8>& rgba, u32 width, u32 height, u32 block_bytes,
                           BlockEncode encode, BlockDecode decode) {
-  std::vector<u8> out(rgba.size());
+  base::Vector<u8> out(rgba.size());
   u8 block[64];
   u8 packed[16];
   u8 decoded[64];
@@ -166,18 +167,18 @@ std::vector<u8> RoundTrip(const std::vector<u8>& rgba, u32 width, u32 height, u3
     for (u32 bx = 0; bx < width / 4; ++bx) {
       for (u32 ty = 0; ty < 4; ++ty) {
         for (u32 tx = 0; tx < 4; ++tx) {
-          std::memcpy(block + (ty * 4 + tx) * 4,
+          base::MemCopy(block + (ty * 4 + tx) * 4,
                       rgba.data() + ((static_cast<size_t>(by) * 4 + ty) * width + bx * 4 + tx) * 4,
                       4);
         }
       }
-      std::memset(packed, 0, sizeof(packed));
+      base::MemSet(packed, 0, sizeof(packed));
       encode(block, packed);
       (void)block_bytes;
       decode(packed, decoded);
       for (u32 ty = 0; ty < 4; ++ty) {
         for (u32 tx = 0; tx < 4; ++tx) {
-          std::memcpy(out.data() + ((static_cast<size_t>(by) * 4 + ty) * width + bx * 4 + tx) * 4,
+          base::MemCopy(out.data() + ((static_cast<size_t>(by) * 4 + ty) * width + bx * 4 + tx) * 4,
                       decoded + (ty * 4 + tx) * 4, 4);
         }
       }
@@ -187,7 +188,7 @@ std::vector<u8> RoundTrip(const std::vector<u8>& rgba, u32 width, u32 height, u3
 }
 
 void DecodeBc7Wrapper(const u8* block, u8* rgba) {
-  if (!DecodeBc7Mode6(block, rgba)) std::memset(rgba, 0, 64);
+  if (!DecodeBc7Mode6(block, rgba)) base::MemSet(rgba, 0, 64);
 }
 
 u32 Rand(u32& state) {
@@ -197,8 +198,8 @@ u32 Rand(u32& state) {
 
 // A plausible albedo: low-frequency colour plus fine grain, which is the mix
 // that separates a usable encoder from one that only handles flat blocks.
-std::vector<u8> MakeAlbedo(u32 size) {
-  std::vector<u8> image(static_cast<size_t>(size) * size * 4);
+base::Vector<u8> MakeAlbedo(u32 size) {
+  base::Vector<u8> image(static_cast<size_t>(size) * size * 4);
   u32 state = 12345;
   for (u32 y = 0; y < size; ++y) {
     for (u32 x = 0; x < size; ++x) {
@@ -206,10 +207,10 @@ std::vector<u8> MakeAlbedo(u32 size) {
       const f32 v = static_cast<f32>(y) / static_cast<f32>(size);
       const f32 grain = static_cast<f32>(Rand(state) % 32) - 16.0f;
       u8* p = image.data() + (static_cast<size_t>(y) * size + x) * 4;
-      p[0] = static_cast<u8>(std::fmin(255.0f, std::fmax(0.0f, 180.0f * u + 40.0f + grain)));
-      p[1] = static_cast<u8>(std::fmin(255.0f, std::fmax(0.0f, 140.0f * v + 60.0f + grain)));
+      p[0] = static_cast<u8>(::fmin(255.0f, ::fmax(0.0f, 180.0f * u + 40.0f + grain)));
+      p[1] = static_cast<u8>(::fmin(255.0f, ::fmax(0.0f, 140.0f * v + 60.0f + grain)));
       p[2] = static_cast<u8>(
-          std::fmin(255.0f, std::fmax(0.0f, 90.0f * (u + v) * 0.5f + 30.0f + grain)));
+          ::fmin(255.0f, ::fmax(0.0f, 90.0f * (u + v) * 0.5f + 30.0f + grain)));
       p[3] = 255;
     }
   }
@@ -217,8 +218,8 @@ std::vector<u8> MakeAlbedo(u32 size) {
 }
 
 // A bumpy tangent-space normal map, encoded the way content ships it.
-std::vector<u8> MakeNormalMap(u32 size) {
-  std::vector<u8> image(static_cast<size_t>(size) * size * 4);
+base::Vector<u8> MakeNormalMap(u32 size) {
+  base::Vector<u8> image(static_cast<size_t>(size) * size * 4);
   for (u32 y = 0; y < size; ++y) {
     for (u32 x = 0; x < size; ++x) {
       // Built the way content is: normalize the gradient of a height field.
@@ -228,9 +229,9 @@ std::vector<u8> MakeNormalMap(u32 size) {
       // angle. Roughly the spatial frequency a 1k tiling material carries.
       const f32 u = static_cast<f32>(x) * 0.09f;
       const f32 v = static_cast<f32>(y) * 0.07f;
-      f32 n[3] = {-(0.55f * std::cos(u) + 0.2f * std::cos(u * 3.1f + v)),
-                  -(0.55f * std::sin(v) + 0.2f * std::sin(u * 2.3f)), 1.0f};
-      const f32 len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      f32 n[3] = {-(0.55f * ::cos(u) + 0.2f * ::cos(u * 3.1f + v)),
+                  -(0.55f * ::sin(v) + 0.2f * ::sin(u * 2.3f)), 1.0f};
+      const f32 len = ::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
       u8* p = image.data() + (static_cast<size_t>(y) * size + x) * 4;
       for (u32 c = 0; c < 3; ++c) {
         p[c] = static_cast<u8>((n[c] / len) * 127.5f + 127.5f);
@@ -243,22 +244,22 @@ std::vector<u8> MakeNormalMap(u32 size) {
 
 void TestBc7Color() {
   const u32 size = 64;
-  const std::vector<u8> source = MakeAlbedo(size);
-  const std::vector<u8> decoded =
+  const base::Vector<u8> source = MakeAlbedo(size);
+  const base::Vector<u8> decoded =
       RoundTrip(source, size, size, 16, asset::EncodeBc7Block, DecodeBc7Wrapper);
   const f64 psnr = Psnr(source, decoded, 3, 4);
-  std::printf("bc_encode_test: BC7 albedo psnr %.2f dB\n", psnr);
+  ::printf("bc_encode_test: BC7 albedo psnr %.2f dB\n", psnr);
   Check(psnr > 33.0, "BC7 albedo psnr below 33 dB");
 }
 
 void TestBc7BeatsBc1() {
   const u32 size = 64;
-  const std::vector<u8> source = MakeAlbedo(size);
+  const base::Vector<u8> source = MakeAlbedo(size);
   const f64 bc7 =
       Psnr(source, RoundTrip(source, size, size, 16, asset::EncodeBc7Block, DecodeBc7Wrapper), 3, 4);
   const f64 bc1 =
       Psnr(source, RoundTrip(source, size, size, 8, asset::EncodeBc1Block, DecodeBc1), 3, 4);
-  std::printf("bc_encode_test: BC1 albedo psnr %.2f dB\n", bc1);
+  ::printf("bc_encode_test: BC1 albedo psnr %.2f dB\n", bc1);
   // The whole reason colour goes to BC7 and not to the half-size BC1.
   Check(bc7 > bc1 + 2.0, "BC7 is not clearly ahead of BC1 on albedo");
   Check(bc1 > 26.0, "BC1 albedo psnr below 26 dB");
@@ -269,7 +270,7 @@ void TestBc7GreyData() {
   // very nearly lossless. This is the case that justifies not using BC4/BC5 for
   // data maps.
   const u32 size = 64;
-  std::vector<u8> source(static_cast<size_t>(size) * size * 4);
+  base::Vector<u8> source(static_cast<size_t>(size) * size * 4);
   for (u32 y = 0; y < size; ++y) {
     for (u32 x = 0; x < size; ++x) {
       const u8 v = static_cast<u8>((x * 2 + y) * 255 / (size * 3 - 3));
@@ -280,20 +281,20 @@ void TestBc7GreyData() {
       p[3] = 255;
     }
   }
-  const std::vector<u8> decoded =
+  const base::Vector<u8> decoded =
       RoundTrip(source, size, size, 16, asset::EncodeBc7Block, DecodeBc7Wrapper);
   const f64 psnr = Psnr(source, decoded, 3, 4);
-  std::printf("bc_encode_test: BC7 orm psnr %.2f dB\n", psnr);
+  ::printf("bc_encode_test: BC7 orm psnr %.2f dB\n", psnr);
   Check(psnr > 36.0, "BC7 orm psnr below 36 dB");
 }
 
 void TestBc5Normal() {
   const u32 size = 64;
-  const std::vector<u8> source = MakeNormalMap(size);
-  const std::vector<u8> decoded =
+  const base::Vector<u8> source = MakeNormalMap(size);
+  const base::Vector<u8> decoded =
       RoundTrip(source, size, size, 16, asset::EncodeBc5Block, DecodeBc5);
   const f64 psnr = Psnr(source, decoded, 2, 4);
-  std::printf("bc_encode_test: BC5 normal xy psnr %.2f dB\n", psnr);
+  ::printf("bc_encode_test: BC5 normal xy psnr %.2f dB\n", psnr);
   Check(psnr > 44.0, "BC5 normal xy psnr below 44 dB");
 
   // What actually matters is the angle after the shader reconstructs z, since
@@ -306,22 +307,22 @@ void TestBc5Normal() {
     auto decode = [](const u8* p, f32* n) {
       n[0] = static_cast<f32>(p[0]) / 127.5f - 1.0f;
       n[1] = static_cast<f32>(p[1]) / 127.5f - 1.0f;
-      n[2] = std::sqrt(std::fmax(0.0f, 1.0f - n[0] * n[0] - n[1] * n[1]));
-      const f32 len = std::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      n[2] = ::sqrt(::fmax(0.0f, 1.0f - n[0] * n[0] - n[1] * n[1]));
+      const f32 len = ::sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
       for (u32 c = 0; c < 3; ++c) n[c] /= len;
     };
     f32 a[3];
     f32 b[3];
     decode(source.data() + t * 4, a);
     decode(decoded.data() + t * 4, b);
-    const f32 dot = std::fmin(1.0f, std::fmax(-1.0f, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
-    const f64 degrees = std::acos(dot) * 57.2957795;
-    worst_degrees = std::fmax(worst_degrees, degrees);
+    const f32 dot = ::fmin(1.0f, ::fmax(-1.0f, a[0] * b[0] + a[1] * b[1] + a[2] * b[2]));
+    const f64 degrees = ::acos(dot) * 57.2957795;
+    worst_degrees = ::fmax(worst_degrees, degrees);
     mean_degrees += degrees;
     ++samples;
   }
   mean_degrees /= static_cast<f64>(samples);
-  std::printf("bc_encode_test: BC5 normal angle mean %.3f deg, worst %.3f deg\n", mean_degrees,
+  ::printf("bc_encode_test: BC5 normal angle mean %.3f deg, worst %.3f deg\n", mean_degrees,
               worst_degrees);
   // Banded lighting is a mean-error symptom; the worst texel is a single
   // pixel and gets filtered away.
@@ -329,16 +330,16 @@ void TestBc5Normal() {
   Check(worst_degrees < 2.0, "BC5 worst reconstructed normal angle above 2 degrees");
 
   // And the comparison the format choice rests on.
-  const std::vector<u8> as_bc7 =
+  const base::Vector<u8> as_bc7 =
       RoundTrip(source, size, size, 16, asset::EncodeBc7Block, DecodeBc7Wrapper);
   const f64 bc7_psnr = Psnr(source, as_bc7, 2, 4);
-  std::printf("bc_encode_test: BC7 normal xy psnr %.2f dB\n", bc7_psnr);
+  ::printf("bc_encode_test: BC7 normal xy psnr %.2f dB\n", bc7_psnr);
   Check(psnr > bc7_psnr + 3.0, "BC5 is not clearly ahead of BC7 on a normal map");
 }
 
 void TestBc3Alpha() {
   const u32 size = 64;
-  std::vector<u8> source(static_cast<size_t>(size) * size * 4);
+  base::Vector<u8> source(static_cast<size_t>(size) * size * 4);
   u32 state = 777;
   for (u32 y = 0; y < size; ++y) {
     for (u32 x = 0; x < size; ++x) {
@@ -353,7 +354,7 @@ void TestBc3Alpha() {
       p[3] = dx * dx * 0.6f + dy * dy < 400.0f ? 255 : 0;
     }
   }
-  const std::vector<u8> decoded =
+  const base::Vector<u8> decoded =
       RoundTrip(source, size, size, 16, asset::EncodeBc3Block, DecodeBc3);
   u32 wrong = 0;
   for (size_t t = 0; t * 4 < source.size(); ++t) {
@@ -361,7 +362,7 @@ void TestBc3Alpha() {
     const bool got = decoded[t * 4 + 3] >= 128;
     if (want != got) ++wrong;
   }
-  std::printf("bc_encode_test: BC3 cutout mismatches %u of %u\n", wrong,
+  ::printf("bc_encode_test: BC3 cutout mismatches %u of %u\n", wrong,
               static_cast<u32>(source.size() / 4));
   Check(wrong == 0, "BC3 changed which texels pass a 0.5 alpha cutoff");
 }
@@ -383,7 +384,7 @@ void TestBc7AlphaDecode() {
   Check(DecodeBc7Mode6(packed, reference), "encoder did not emit BC7 mode 6");
   u8 decoded[64];
   Check(asset::DecodeBc7Block(packed, decoded), "DecodeBc7Block rejected a mode 6 block");
-  Check(std::memcmp(decoded, reference, sizeof(decoded)) == 0,
+  Check(base::MemCompare(decoded, reference, sizeof(decoded)) == 0,
         "DecodeBc7Block disagrees with an independent mode 6 decode");
 
   u8 not_mode6[16] = {};
@@ -414,7 +415,7 @@ void TestFlatBlocks() {
     }
     Check(exact, "BC7 did not reproduce a flat block exactly");
 
-    std::memset(packed, 0, sizeof(packed));
+    base::MemSet(packed, 0, sizeof(packed));
     asset::EncodeBc5Block(block, packed);
     DecodeBc5(packed, decoded);
     Check(decoded[0] == value && decoded[1] == value, "BC5 did not reproduce a flat block exactly");
@@ -423,30 +424,28 @@ void TestFlatBlocks() {
 
 // CompressTexture
 
-asset::Texture MakeTexture(const std::vector<u8>& rgba, u32 size, bool srgb) {
+asset::Texture MakeTexture(const base::Vector<u8>& rgba, u32 size, bool srgb) {
   asset::Texture texture;
   texture.format = asset::TextureFormat::kRgba8;
   texture.width = size;
   texture.height = size;
   texture.is_srgb = srgb;
   texture.data.resize(rgba.size());
-  std::memcpy(texture.data.data(), rgba.data(), rgba.size());
+  base::MemCopy(texture.data.data(), rgba.data(), rgba.size());
   return texture;
 }
 
 void TestCompressTexture() {
-  namespace fs = std::filesystem;
-  const fs::path cache = fs::temp_directory_path() / "rx_bc_encode_test_cache";
-  std::error_code error;
-  fs::remove_all(cache, error);
+  const base::String cache = rx::fs::Join(rx::fs::TempDirectory(), "rx_bc_encode_test_cache");
+  rx::fs::RemoveAll(cache);
 #if defined(_WIN32)
-  _putenv_s("RX_TEXCACHE_DIR", cache.string().c_str());
+  _putenv_s("RX_TEXCACHE_DIR", cache.c_str());
 #else
-  setenv("RX_TEXCACHE_DIR", cache.string().c_str(), 1);
+  setenv("RX_TEXCACHE_DIR", cache.c_str(), 1);
 #endif
 
   const u32 size = 64;
-  const std::vector<u8> albedo = MakeAlbedo(size);
+  const base::Vector<u8> albedo = MakeAlbedo(size);
 
   // Off by default: with no gpu nothing may start emitting block formats.
   asset::Texture untouched = MakeTexture(albedo, size, true);
@@ -483,7 +482,7 @@ void TestCompressTexture() {
         "data did not compress");
   Check(data.format == asset::TextureFormat::kBc7, "data did not pick BC7");
 
-  std::vector<u8> masked = albedo;
+  base::Vector<u8> masked = albedo;
   masked[3] = 0;
   asset::Texture cutout = MakeTexture(masked, size, true);
   Check(asset::CompressTexture(&cutout, asset::TextureRole::kColor, "test/cutout"),
@@ -516,11 +515,11 @@ void TestCompressTexture() {
   const asset::TextureCompressionStats after = asset::CompressionTotals();
   Check(after.cache_hits == before.cache_hits + 1, "content-keyed cache did not hit");
   Check(cached.data.size() == color.data.size() &&
-            std::memcmp(cached.data.data(), color.data.data(), color.data.size()) == 0,
+            base::MemCompare(cached.data.data(), color.data.data(), color.data.size()) == 0,
         "cache returned different bytes than the encoder");
 
   asset::SetTextureCompression({});
-  fs::remove_all(cache, error);
+  rx::fs::RemoveAll(cache);
 }
 
 }  // namespace
@@ -534,6 +533,6 @@ int main() {
   TestBc7AlphaDecode();
   TestFlatBlocks();
   TestCompressTexture();
-  if (failures == 0) std::printf("bc_encode_test: ok\n");
+  if (failures == 0) ::printf("bc_encode_test: ok\n");
   return failures == 0 ? 0 : 1;
 }

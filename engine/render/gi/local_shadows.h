@@ -9,8 +9,8 @@
 // The claimed light's params.w carries 1 + its first face index (0 =
 // unshadowed), so the shader side needs no extra per-light buffer.
 
-#include <functional>
 
+#include "base/functional/function.h"
 #include "core/math.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "render/rhi/device.h"
@@ -51,7 +51,7 @@ class LocalShadows {
   // face for the caller's culled submissions. Handles the atlas transitions
   // (persistent image: shader-read between frames).
   void Render(CommandList& cmd, PipelineHandle pipeline,
-              const std::function<void(CommandList&, const Face&)>& draw);
+              const base::Function<void(CommandList&, const Face&)>& draw);
 
   u32 face_count() const { return face_count_; }
   const GpuImage& atlas() const { return atlas_; }

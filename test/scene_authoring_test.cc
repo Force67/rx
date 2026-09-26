@@ -9,22 +9,22 @@
 // half of the stretch (the normals) is proved by render instead. Exits non-zero
 // on the first failure so it slots into ctest.
 
-#include <cmath>
-#include <cstdio>
-#include <filesystem>
-#include <format>
-#include <fstream>
-#include <sstream>
-#include <string>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "asset/asset_database.h"
 #include "asset/vfs.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
 #include "core/math.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "edit/hierarchy.h"
 #include "edit/scene_io.h"
 #include "scene/components.h"
 #include "scene_authoring.h"
+#include "core/file_system.h"
 
 using namespace rx;
 
@@ -35,47 +35,45 @@ int failures = 0;
 #define CHECK(cond)                                               \
   do {                                                            \
     if (!(cond)) {                                                \
-      std::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+      ::printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); \
       ++failures;                                                 \
     }                                                             \
   } while (0)
 
-#define CHECK_NEAR(a, b, eps) CHECK(std::abs((a) - (b)) <= (eps))
+#define CHECK_NEAR(a, b, eps) CHECK(::abs((a) - (b)) <= (eps))
 
-namespace fs = std::filesystem;
+namespace fs = rx::fs;
 
-fs::path WriteScene(const char* name, const std::string& body) {
-  const fs::path path = fs::temp_directory_path() / name;
-  std::ofstream out(path, std::ios::binary);
-  out << "rxscene 1\n" << body;
+base::String WriteScene(const char* name, const base::String& body) {
+  const base::String path = fs::Join(fs::TempDirectory(), name);
+  fs::WriteTextFile(path, "rxscene 1\n" + body);
   return path;
 }
 
-std::string ReadFile(const fs::path& path) {
-  std::ifstream in(path, std::ios::binary);
-  std::ostringstream text;
-  text << in.rdbuf();
-  return text.str();
+base::String ReadFile(const base::String& path) {
+  base::String text;
+  fs::ReadTextFile(path, &text);
+  return text;
 }
 
 // The viewer's own pass order (Viewer::LoadRxScene), so what this test measures
 // is what a render would draw. False when any of them refuses the file.
-bool LoadAndBuild(ecs::World& world, asset::AssetDatabase& db, const fs::path& path) {
-  std::string error;
-  const std::string file = path.string();
+bool LoadAndBuild(ecs::World& world, asset::AssetDatabase& db, const base::String& path) {
+  base::String error;
+  const base::String file = path;
   if (!edit::LoadScene(world, db, file, &error, /*strict=*/true)) {
-    std::printf("load error: %s\n", error.c_str());
+    ::printf("load error: %s\n", error.c_str());
     return false;
   }
   if (!BuildSceneGrids(world, file, &error) || !BuildScenePrefabs(world, file, &error)) {
-    std::printf("layout error: %s\n", error.c_str());
+    ::printf("layout error: %s\n", error.c_str());
     return false;
   }
   BuildSceneRotations(world);
   if (!BuildSceneShapes(world, db, /*renderer=*/nullptr, file, &error) ||
       !BuildSceneModels(world, db, /*renderer=*/nullptr, file, &error) ||
       !BuildSceneAnchors(world, file, &error)) {
-    std::printf("build error: %s\n", error.c_str());
+    ::printf("build error: %s\n", error.c_str());
     return false;
   }
   return true;
@@ -83,9 +81,9 @@ bool LoadAndBuild(ecs::World& world, asset::AssetDatabase& db, const fs::path& p
 
 // The same pass order, kept quiet and handing back the refusal: for the files
 // that are supposed to fail, where the message is the thing under test.
-std::string LoadAndBuildError(ecs::World& world, asset::AssetDatabase& db, const fs::path& path) {
-  std::string error;
-  const std::string file = path.string();
+base::String LoadAndBuildError(ecs::World& world, asset::AssetDatabase& db, const base::String& path) {
+  base::String error;
+  const base::String file = path;
   if (!edit::LoadScene(world, db, file, &error, /*strict=*/true)) return error;
   if (!BuildSceneGrids(world, file, &error) || !BuildScenePrefabs(world, file, &error)) {
     return error;
@@ -99,7 +97,7 @@ std::string LoadAndBuildError(ecs::World& world, asset::AssetDatabase& db, const
   return {};
 }
 
-ecs::Entity FindByName(ecs::World& world, const std::string& name) {
+ecs::Entity FindByName(ecs::World& world, const base::String& name) {
   ecs::Entity found = ecs::kInvalidEntity;
   world.Each<scene::Name>([&](ecs::Entity entity, scene::Name& value) {
     if (value.value == name) found = entity;
@@ -116,7 +114,7 @@ Quat WorldRotation(ecs::World& world, ecs::Entity entity) {
 // tell it from every other one: which way a positive angle turns, and which
 // order the three axes compose in.
 void TestEulerConvention() {
-  const fs::path path = WriteScene("rx_rotation_convention.rxscene", R"(
+  const base::String path = WriteScene("rx_rotation_convention.rxscene", R"(
 entity
 Name.value = "Yawed"
 Shape.kind = "box"
@@ -153,10 +151,10 @@ Rotation.euler = 90 90 0
   // --validate's non_unit_rotation warns past 5%, and MakeFromQuat does not
   // normalize, so a euler that did not resolve to a unit quaternion would scale
   // every mesh it is written to.
-  const f32 length = std::sqrt(yaw.x * yaw.x + yaw.y * yaw.y + yaw.z * yaw.z + yaw.w * yaw.w);
+  const f32 length = ::sqrt(yaw.x * yaw.x + yaw.y * yaw.y + yaw.z * yaw.z + yaw.w * yaw.w);
   CHECK_NEAR(length, 1.0f, 1e-5f);
 
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 // Write it, load it, save it, load THAT and save again: the two saved files have
@@ -164,7 +162,7 @@ Rotation.euler = 90 90 0
 // author did not touch. The first save is what settles the random guids, so the
 // comparison starts from it rather than from the source text.
 void TestRoundTrip() {
-  const fs::path path = WriteScene("rx_rotation_roundtrip.rxscene", R"(
+  const base::String path = WriteScene("rx_rotation_roundtrip.rxscene", R"(
 entity
 Name.value = "Plinth"
 Transform.position = 0 0.5 0
@@ -184,20 +182,20 @@ Shape.size = 0.3 0.3 0.3
   ecs::World first;
   CHECK(LoadAndBuild(first, db, path));
 
-  const fs::path saved_a = fs::temp_directory_path() / "rx_rotation_roundtrip_a.rxscene";
-  const fs::path saved_b = fs::temp_directory_path() / "rx_rotation_roundtrip_b.rxscene";
-  std::string error;
-  CHECK(edit::SaveScene(first, saved_a.string(), &error));
+  const base::String saved_a = fs::Join(fs::TempDirectory(), "rx_rotation_roundtrip_a.rxscene");
+  const base::String saved_b = fs::Join(fs::TempDirectory(), "rx_rotation_roundtrip_b.rxscene");
+  base::String error;
+  CHECK(edit::SaveScene(first, saved_a, &error));
 
   ecs::World second;
   CHECK(LoadAndBuild(second, db, saved_a));
-  CHECK(edit::SaveScene(second, saved_b.string(), &error));
+  CHECK(edit::SaveScene(second, saved_b, &error));
   CHECK(ReadFile(saved_a) == ReadFile(saved_b));
 
   // The source declaration survives alongside the value it resolved into: a
   // save that dropped Rotation would leave a bare quaternion no one can edit,
   // and one that re-applied it on load would turn the entity twice.
-  CHECK(ReadFile(saved_a).find("Rotation.euler") != std::string::npos);
+  CHECK(ReadFile(saved_a).find("Rotation.euler") != base::String::npos);
   const Quat before = WorldRotation(first, FindByName(first, "Tilted"));
   const Quat after = WorldRotation(second, FindByName(second, "Tilted"));
   CHECK_NEAR(before.x, after.x, 1e-6f);
@@ -205,16 +203,16 @@ Shape.size = 0.3 0.3 0.3
   CHECK_NEAR(before.z, after.z, 1e-6f);
   CHECK_NEAR(before.w, after.w, 1e-6f);
 
-  fs::remove(path);
-  fs::remove(saved_a);
-  fs::remove(saved_b);
+  fs::Remove(path);
+  fs::Remove(saved_a);
+  fs::Remove(saved_b);
 }
 
 // An anchor stands one box on another by measuring both, and a turned box has a
 // taller footprint than the one it was authored with. Standing it on the
 // unrotated extent would bury a corner in the plinth.
 void TestAnchorOnRotated() {
-  const fs::path path = WriteScene("rx_rotation_anchor.rxscene", R"(
+  const base::String path = WriteScene("rx_rotation_anchor.rxscene", R"(
 entity
 Name.value = "Plinth"
 Transform.position = 0 0.5 0
@@ -246,12 +244,12 @@ Shape.size = 0.5 0.5 0.5
   const scene::Transform* upright = world.Get<scene::Transform>(FindByName(world, "Upright"));
   CHECK_NEAR(upright->position[1], 1.5f, 1e-4f);
   const scene::Transform* cornered = world.Get<scene::Transform>(FindByName(world, "Cornered"));
-  CHECK_NEAR(cornered->position[1], 1.0f + 0.5f * std::sqrt(2.0f), 1e-4f);
+  CHECK_NEAR(cornered->position[1], 1.0f + 0.5f * ::sqrt(2.0f), 1e-4f);
   // The two axes the mode does not stack along still centre on the target.
   CHECK_NEAR(cornered->position[0], 0.0f, 1e-4f);
   CHECK_NEAR(cornered->position[2], 0.0f, 1e-4f);
 
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 // Anchor.offset is what makes a ground plane usable as a target: centring is
@@ -261,7 +259,7 @@ Shape.size = 0.5 0.5 0.5
 // naming any of their heights, and go on landing on it when a Stretch changes
 // one of them.
 void TestAnchorOffset() {
-  const fs::path path = WriteScene("rx_anchor_offset.rxscene", R"(
+  const base::String path = WriteScene("rx_anchor_offset.rxscene", R"(
 entity
 Name.value = "Ground"
 Transform.position = 0 0 0
@@ -308,10 +306,10 @@ Stretch.scale = 1 4 1
   // Transform.position instead, every round trip would walk the object another
   // offset along - which is the bug the anchor replaces rather than offsets to
   // avoid in the first place.
-  const fs::path saved = fs::temp_directory_path() / "rx_anchor_offset_saved.rxscene";
-  std::string error;
-  CHECK(edit::SaveScene(world, saved.string(), &error));
-  CHECK(ReadFile(saved).find("Anchor.offset") != std::string::npos);
+  const base::String saved = fs::Join(fs::TempDirectory(), "rx_anchor_offset_saved.rxscene");
+  base::String error;
+  CHECK(edit::SaveScene(world, saved, &error));
+  CHECK(ReadFile(saved).find("Anchor.offset") != base::String::npos);
 
   ecs::World reloaded;
   CHECK(LoadAndBuild(reloaded, db, saved));
@@ -320,15 +318,15 @@ Stretch.scale = 1 4 1
   CHECK_NEAR(again->position[1], 6.0f, 1e-4f);
   CHECK_NEAR(again->position[2], -3.0f, 1e-4f);
 
-  fs::remove(path);
-  fs::remove(saved);
+  fs::Remove(path);
+  fs::Remove(saved);
 }
 
 // A grid member is a child of its container, so a rotation on either composes
 // the way a parent chain does: the container's turns the whole layout about its
 // own origin, the member's turns only that cell.
 void TestRotatedGrid() {
-  const fs::path path = WriteScene("rx_rotation_grid.rxscene", R"(
+  const base::String path = WriteScene("rx_rotation_grid.rxscene", R"(
 entity
 Name.value = "Row"
 Transform.position = 0 0 0
@@ -362,27 +360,27 @@ Shape.size = 0.5 0.5 0.5
   // ... and the member's own 45 adds to the container's 90, so its +z face ends
   // up 135 degrees round.
   const Vec3 facing = Rotate(WorldRotation(world, FindByName(world, "Second")), {0, 0, 1});
-  CHECK_NEAR(facing.x, std::sin(135.0f * 3.14159265f / 180.0f), 1e-4f);
-  CHECK_NEAR(facing.z, std::cos(135.0f * 3.14159265f / 180.0f), 1e-4f);
+  CHECK_NEAR(facing.x, ::sin(135.0f * 3.14159265f / 180.0f), 1e-4f);
+  CHECK_NEAR(facing.z, ::cos(135.0f * 3.14159265f / 180.0f), 1e-4f);
 
   const Vec3 unrotated = Rotate(WorldRotation(world, FindByName(world, "First")), {0, 0, 1});
   CHECK_NEAR(unrotated.x, 1.0f, 1e-4f);
 
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 // The prefab override rule is per component, so an instance that says anything
 // about Rotation owns its orientation and one that says nothing takes the
 // prefab's, exactly like Shape and Surface.
 void TestPrefabRotation() {
-  const fs::path prefab = WriteScene("rx_rotation_prefab_cell.rxscene", R"(
+  const base::String prefab = WriteScene("rx_rotation_prefab_cell.rxscene", R"(
 entity
 Name.value = "Cell"
 Rotation.euler = 0 90 0
 Shape.kind = "box"
 Shape.size = 0.5 0.5 0.5
 )");
-  const fs::path path = WriteScene("rx_rotation_prefab.rxscene",
+  const base::String path = WriteScene("rx_rotation_prefab.rxscene",
                                    R"(
 entity
 Name.value = "Inherits"
@@ -405,8 +403,8 @@ Prefab.path = "rx_rotation_prefab_cell.rxscene"
   const Vec3 overridden = Rotate(WorldRotation(world, FindByName(world, "Overrides")), {0, 0, 1});
   CHECK_NEAR(overridden.z, -1.0f, 1e-4f);
 
-  fs::remove(prefab);
-  fs::remove(path);
+  fs::Remove(prefab);
+  fs::Remove(path);
 }
 
 // Stretch.scale multiplies the built geometry per axis, so a box may reach the
@@ -414,7 +412,7 @@ Prefab.path = "rx_rotation_prefab_cell.rxscene"
 // the key has to keep them apart, or the second entity draws the first's
 // geometry.
 void TestStretchComposesWithSize() {
-  const fs::path path = WriteScene("rx_stretch_compose.rxscene", R"(
+  const base::String path = WriteScene("rx_stretch_compose.rxscene", R"(
 entity
 Name.value = "Sized"
 Shape.kind = "box"
@@ -464,7 +462,7 @@ Shape.size = 0.5 0.5 0.5
   CHECK(by_stretch.hash == twin.hash);
   CHECK(by_stretch.hash != plain.hash);
 
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 // A prefab of more than one piece has to stretch WHOLE, or the only shape that
@@ -472,7 +470,7 @@ Shape.size = 0.5 0.5 0.5
 // authored building a rectangle. Each part's offset scales, so the crown stays
 // on the shaft, and each part's geometry scales, so it widens with it.
 void TestPrefabStretchReachesParts() {
-  const fs::path prefab = WriteScene("rx_stretch_parts_cell.rxscene", R"(
+  const base::String prefab = WriteScene("rx_stretch_parts_cell.rxscene", R"(
 entity
 Name.value = "Podium"
 Shape.kind = "box"
@@ -491,7 +489,7 @@ Shape.kind = "box"
 Shape.size = 1.5 1 1.5
 Stretch.scale = 1 0.5 1
 )");
-  const fs::path path = WriteScene("rx_stretch_parts.rxscene", R"(
+  const base::String path = WriteScene("rx_stretch_parts.rxscene", R"(
 entity
 Name.value = "Plain"
 Transform.position = 0 0 0
@@ -524,8 +522,8 @@ Prefab.path = "rx_stretch_parts_cell.rxscene"
   CHECK(count == 2);
   // One crown stayed at 10, the other doubled to 20 with the y stretch. Without
   // the offset scaling it would have stayed at 10 and sat inside the shaft.
-  const f32 low = std::min(heights[0], heights[1]);
-  const f32 high = std::max(heights[0], heights[1]);
+  const f32 low = rx::Min(heights[0], heights[1]);
+  const f32 high = rx::Max(heights[0], heights[1]);
   CHECK_NEAR(low, 10.0f, 1e-4f);
   CHECK_NEAR(high, 20.0f, 1e-4f);
 
@@ -544,14 +542,14 @@ Prefab.path = "rx_stretch_parts_cell.rxscene"
       });
   CHECK(checked_crown);
 
-  fs::remove(prefab);
-  fs::remove(path);
+  fs::Remove(prefab);
+  fs::Remove(path);
 }
 
 // A turned part cannot take a per-axis stretch: that is a shear, and nothing in
 // the transform path carries one. Refused by name rather than rendered wrong.
 void TestPrefabStretchRefusesShear() {
-  const fs::path prefab = WriteScene("rx_stretch_shear_cell.rxscene", R"(
+  const base::String prefab = WriteScene("rx_stretch_shear_cell.rxscene", R"(
 entity
 Name.value = "Base"
 Shape.kind = "box"
@@ -564,7 +562,7 @@ Rotation.euler = 0 30 0
 Shape.kind = "box"
 Shape.size = 1 0.2 0.4
 )");
-  const fs::path path = WriteScene("rx_stretch_shear.rxscene", R"(
+  const base::String path = WriteScene("rx_stretch_shear.rxscene", R"(
 entity
 Name.value = "Sheared"
 Transform.position = 0 0 0
@@ -574,12 +572,12 @@ Prefab.path = "rx_stretch_shear_cell.rxscene"
   asset::Vfs vfs;
   asset::AssetDatabase db(vfs);
   ecs::World world;
-  const std::string error = LoadAndBuildError(world, db, path);
-  CHECK(error.find("Fin") != std::string::npos);
-  CHECK(error.find("shear") != std::string::npos);
+  const base::String error = LoadAndBuildError(world, db, path);
+  CHECK(error.find("Fin") != base::String::npos);
+  CHECK(error.find("shear") != base::String::npos);
 
   // A UNIFORM stretch of the same prefab is a similarity, so it is allowed.
-  const fs::path uniform = WriteScene("rx_stretch_shear_uniform.rxscene", R"(
+  const base::String uniform = WriteScene("rx_stretch_shear_uniform.rxscene", R"(
 entity
 Name.value = "Scaled"
 Transform.position = 0 0 0
@@ -589,9 +587,9 @@ Prefab.path = "rx_stretch_shear_cell.rxscene"
   ecs::World fine;
   CHECK(LoadAndBuild(fine, db, uniform));
 
-  fs::remove(prefab);
-  fs::remove(path);
-  fs::remove(uniform);
+  fs::Remove(prefab);
+  fs::Remove(path);
+  fs::Remove(uniform);
 }
 
 // The reason Stretch is a component of its own: prefab merge is per component,
@@ -600,7 +598,7 @@ Prefab.path = "rx_stretch_shear_cell.rxscene"
 // all - authoring any part of Shape replaces the prefab's whole Shape, which
 // silently loses the kind and size and draws a default box.
 void TestPrefabStretch() {
-  const fs::path prefab = WriteScene("rx_stretch_prefab_cell.rxscene", R"(
+  const base::String prefab = WriteScene("rx_stretch_prefab_cell.rxscene", R"(
 entity
 Name.value = "Tower"
 Shape.kind = "box"
@@ -608,7 +606,7 @@ Shape.size = 1 4 1
 Surface.base_color = 0.2 0.4 0.6
 Surface.roughness = 0.35
 )");
-  const fs::path path = WriteScene("rx_stretch_prefab.rxscene", R"(
+  const base::String path = WriteScene("rx_stretch_prefab.rxscene", R"(
 entity
 Name.value = "Plain"
 Transform.position = 0 0 0
@@ -647,7 +645,7 @@ Prefab.path = "rx_stretch_prefab_cell.rxscene"
     // ... and the facade rides along, which is the other half of "the instance
     // owns only what it authored".
     const SceneSurface* surface = world.Get<SceneSurface>(entity);
-    CHECK(surface && std::abs(surface->base_color[2] - 0.6f) < 1e-6f);
+    CHECK(surface && ::abs(surface->base_color[2] - 0.6f) < 1e-6f);
   }
 
   // Three proportions of one prefab are three meshes, never a shared one.
@@ -660,10 +658,10 @@ Prefab.path = "rx_stretch_prefab_cell.rxscene"
 
   // A save of the expanded scene reloads onto the same proportions: the
   // instance's Stretch survives beside the Shape the expansion left on it.
-  const fs::path saved = fs::temp_directory_path() / "rx_stretch_prefab_saved.rxscene";
-  std::string error;
-  CHECK(edit::SaveScene(world, saved.string(), &error));
-  CHECK(ReadFile(saved).find("Stretch.scale = 2 0.5 1") != std::string::npos);
+  const base::String saved = fs::Join(fs::TempDirectory(), "rx_stretch_prefab_saved.rxscene");
+  base::String error;
+  CHECK(edit::SaveScene(world, saved, &error));
+  CHECK(ReadFile(saved).find("Stretch.scale = 2 0.5 1") != base::String::npos);
   ecs::World reloaded;
   CHECK(LoadAndBuild(reloaded, db, saved));
   const SceneBounds* before = world.Get<SceneBounds>(FindByName(world, "Wide"));
@@ -671,9 +669,9 @@ Prefab.path = "rx_stretch_prefab_cell.rxscene"
   CHECK(before && after);
   for (int axis = 0; axis < 3; ++axis) CHECK_NEAR(before->max[axis], after->max[axis], 1e-6f);
 
-  fs::remove(saved);
-  fs::remove(prefab);
-  fs::remove(path);
+  fs::Remove(saved);
+  fs::Remove(prefab);
+  fs::Remove(path);
 }
 
 // An anchor measures built geometry, and after this change the built geometry is
@@ -681,7 +679,7 @@ Prefab.path = "rx_stretch_prefab_cell.rxscene"
 // this is the check that the bake really did reach SceneBounds rather than
 // leaving the placement to be worked out from the authored Shape.size.
 void TestAnchorOnStretched() {
-  const fs::path path = WriteScene("rx_stretch_anchor.rxscene", R"(
+  const base::String path = WriteScene("rx_stretch_anchor.rxscene", R"(
 entity
 Name.value = "Plinth"
 Transform.position = 0 1 0
@@ -720,14 +718,14 @@ Stretch.scale = 4 1 1
   CHECK_NEAR(beside->position[0], 1.0f + 2.0f, 1e-3f);
   CHECK_NEAR(beside->position[1], 1.0f, 1e-3f);
 
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 // A grid steps by Grid.step whatever its members are made of, so a stretched
 // cell lands on the same coordinate an unstretched one would. The point of the
 // check is that the bake did not move the geometry off its own origin.
 void TestStretchedGrid() {
-  const fs::path path = WriteScene("rx_stretch_grid.rxscene", R"(
+  const base::String path = WriteScene("rx_stretch_grid.rxscene", R"(
 entity
 Name.value = "Row"
 Transform.position = 0 0 0
@@ -765,13 +763,13 @@ Stretch.scale = 1 1 2
   CHECK_NEAR(bounds->min[0], -0.5f, 1e-4f);
   CHECK_NEAR(bounds->min[2], -1.0f, 1e-4f);
 
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 // Zero would make the normal bake divide by it and hand the whole mesh nans, so
 // the load says no and names the line rather than uploading the wreckage.
 void TestDegenerateStretchFailsTheLoad() {
-  const fs::path path = WriteScene("rx_stretch_degenerate.rxscene", R"(
+  const base::String path = WriteScene("rx_stretch_degenerate.rxscene", R"(
 entity
 Name.value = "Flattened"
 Shape.kind = "sphere"
@@ -781,18 +779,18 @@ Stretch.scale = 1 0 1
   asset::Vfs vfs;
   asset::AssetDatabase db(vfs);
   ecs::World world;
-  const std::string error = LoadAndBuildError(world, db, path);
-  CHECK(error.find("rx_stretch_degenerate.rxscene:7:") != std::string::npos);
-  CHECK(error.find("Stretch.scale") != std::string::npos);
+  const base::String error = LoadAndBuildError(world, db, path);
+  CHECK(error.find("rx_stretch_degenerate.rxscene:7:") != base::String::npos);
+  CHECK(error.find("Stretch.scale") != base::String::npos);
 
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 // Same round trip the rotation test makes: a saved scene reloads and re-saves
 // byte-identically, so a live edit of a stretched scene does not rewrite the
 // proportions the author set.
 void TestStretchRoundTrip() {
-  const fs::path path = WriteScene("rx_stretch_roundtrip.rxscene", R"(
+  const base::String path = WriteScene("rx_stretch_roundtrip.rxscene", R"(
 entity
 Name.value = "Tower"
 Transform.position = 0 6 0
@@ -805,44 +803,45 @@ Stretch.scale = 2.5 6 1.75
   ecs::World first;
   CHECK(LoadAndBuild(first, db, path));
 
-  const fs::path saved_a = fs::temp_directory_path() / "rx_stretch_roundtrip_a.rxscene";
-  const fs::path saved_b = fs::temp_directory_path() / "rx_stretch_roundtrip_b.rxscene";
-  std::string error;
-  CHECK(edit::SaveScene(first, saved_a.string(), &error));
+  const base::String saved_a = fs::Join(fs::TempDirectory(), "rx_stretch_roundtrip_a.rxscene");
+  const base::String saved_b = fs::Join(fs::TempDirectory(), "rx_stretch_roundtrip_b.rxscene");
+  base::String error;
+  CHECK(edit::SaveScene(first, saved_a, &error));
   ecs::World second;
   CHECK(LoadAndBuild(second, db, saved_a));
-  CHECK(edit::SaveScene(second, saved_b.string(), &error));
+  CHECK(edit::SaveScene(second, saved_b, &error));
   CHECK(ReadFile(saved_a) == ReadFile(saved_b));
-  CHECK(ReadFile(saved_a).find("Stretch.scale = 2.5 6 1.75") != std::string::npos);
+  CHECK(ReadFile(saved_a).find("Stretch.scale = 2.5 6 1.75") != base::String::npos);
 
   const SceneBounds* before = first.Get<SceneBounds>(FindByName(first, "Tower"));
   const SceneBounds* after = second.Get<SceneBounds>(FindByName(second, "Tower"));
   CHECK(before && after);
   for (int axis = 0; axis < 3; ++axis) CHECK_NEAR(before->max[axis], after->max[axis], 1e-6f);
 
-  fs::remove(path);
-  fs::remove(saved_a);
-  fs::remove(saved_b);
+  fs::Remove(path);
+  fs::Remove(saved_a);
+  fs::Remove(saved_b);
 }
 
 // A tiny uncompressed 24-bit TGA of one colour. Written rather than checked in
 // because what these tests need from an image is only that it decodes: an
 // 18-byte header and three bytes a pixel is the whole format, and a binary
 // fixture in the tree would have to be explained to everyone who greps for it.
-fs::path WriteImage(const char* name, u8 r, u8 g, u8 b) {
-  const fs::path path = fs::temp_directory_path() / name;
+base::String WriteImage(const char* name, u8 r, u8 g, u8 b) {
+  const base::String path = fs::Join(fs::TempDirectory(), name);
   const int size = 4;
   u8 header[18] = {};
   header[2] = 2;  // uncompressed true-colour
   header[12] = static_cast<u8>(size);
   header[14] = static_cast<u8>(size);
   header[16] = 24;
-  std::ofstream out(path, std::ios::binary);
-  out.write(reinterpret_cast<const char*>(header), sizeof(header));
+  base::Vector<u8> bytes;
+  bytes.insert(bytes.end(), header, header + sizeof(header));
   for (int pixel = 0; pixel < size * size; ++pixel) {
     const u8 bgr[3] = {b, g, r};  // TGA stores blue first
-    out.write(reinterpret_cast<const char*>(bgr), sizeof(bgr));
+    bytes.insert(bytes.end(), bgr, bgr + sizeof(bgr));
   }
+  fs::WriteFile(path, bytes);
   return path;
 }
 
@@ -852,9 +851,9 @@ fs::path WriteImage(const char* name, u8 r, u8 g, u8 b) {
 // one material - the second entity would silently draw the first one's texture,
 // which looks like a scene that was authored that way.
 void TestSurfaceMapsKeyApart() {
-  const fs::path red = WriteImage("rx_map_red.tga", 220, 30, 30);
-  const fs::path blue = WriteImage("rx_map_blue.tga", 30, 30, 220);
-  const fs::path path = WriteScene("rx_surface_maps.rxscene", std::format(R"(
+  const base::String red = WriteImage("rx_map_red.tga", 220, 30, 30);
+  const base::String blue = WriteImage("rx_map_blue.tga", 30, 30, 220);
+  const base::String path = WriteScene("rx_surface_maps.rxscene", rx::StrFormat(R"(
 entity
 Name.value = "Red"
 Shape.kind = "box"
@@ -872,7 +871,7 @@ Name.value = "RedAgain"
 Shape.kind = "box"
 Shape.size = 1 1 1
 Surface.base_color_map = "{}"
-)", red.string(), blue.string(), red.string()));
+)", red, blue, red));
   asset::Vfs vfs;
   asset::AssetDatabase db(vfs);
   ecs::World world;
@@ -887,16 +886,16 @@ Surface.base_color_map = "{}"
   // every textured entity in a scene would pay for its own copy of the set.
   CHECK(a->mesh == c->mesh);
 
-  fs::remove(path);
-  fs::remove(red);
-  fs::remove(blue);
+  fs::Remove(path);
+  fs::Remove(red);
+  fs::Remove(blue);
 }
 
 // A map that names no image fails the load on the line that wrote it, rather
 // than binding the material system's 1x1 default and rendering a flat colour
 // the author would have to reverse-engineer.
 void TestSurfaceMapMissingFailsTheLoad() {
-  const fs::path path = WriteScene("rx_surface_map_missing.rxscene", R"(
+  const base::String path = WriteScene("rx_surface_map_missing.rxscene", R"(
 entity
 Name.value = "Wall"
 Shape.kind = "box"
@@ -906,20 +905,20 @@ Surface.normal_map = "no/such/concrete_normal.png"
   asset::Vfs vfs;
   asset::AssetDatabase db(vfs);
   ecs::World world;
-  const std::string error = LoadAndBuildError(world, db, path);
-  CHECK(error.find("rx_surface_map_missing.rxscene:7:") != std::string::npos);
-  CHECK(error.find("Surface.normal_map") != std::string::npos);
-  CHECK(error.find("working directory") != std::string::npos);
+  const base::String error = LoadAndBuildError(world, db, path);
+  CHECK(error.find("rx_surface_map_missing.rxscene:7:") != base::String::npos);
+  CHECK(error.find("Surface.normal_map") != base::String::npos);
+  CHECK(error.find("working directory") != base::String::npos);
 
-  fs::remove(path);
+  fs::Remove(path);
 }
 
 // A Pattern and a texture map both write base colour, normal and roughness on
 // the one material the entity gets, so the pair is refused by name instead of
 // given a silent precedence.
 void TestSurfaceMapRefusesPattern() {
-  const fs::path image = WriteImage("rx_map_pattern.tga", 200, 200, 200);
-  const fs::path path = WriteScene("rx_surface_map_pattern.rxscene", std::format(R"(
+  const base::String image = WriteImage("rx_map_pattern.tga", 200, 200, 200);
+  const base::String path = WriteScene("rx_surface_map_pattern.rxscene", rx::StrFormat(R"(
 entity
 Name.value = "Facade"
 Shape.kind = "box"
@@ -927,17 +926,17 @@ Shape.size = 1 1 1
 Surface.base_color_map = "{}"
 Pattern.kind = "brick"
 Pattern.scale = 6 8
-)", image.string()));
+)", image));
   asset::Vfs vfs;
   asset::AssetDatabase db(vfs);
   ecs::World world;
-  const std::string error = LoadAndBuildError(world, db, path);
-  CHECK(error.find("rx_surface_map_pattern.rxscene:7:") != std::string::npos);
-  CHECK(error.find("Surface.base_color_map") != std::string::npos);
-  CHECK(error.find("Pattern") != std::string::npos);
+  const base::String error = LoadAndBuildError(world, db, path);
+  CHECK(error.find("rx_surface_map_pattern.rxscene:7:") != base::String::npos);
+  CHECK(error.find("Surface.base_color_map") != base::String::npos);
+  CHECK(error.find("Pattern") != base::String::npos);
 
-  fs::remove(path);
-  fs::remove(image);
+  fs::Remove(path);
+  fs::Remove(image);
 }
 
 }  // namespace
@@ -961,6 +960,6 @@ int main() {
   TestSurfaceMapsKeyApart();
   TestSurfaceMapMissingFailsTheLoad();
   TestSurfaceMapRefusesPattern();
-  if (failures == 0) std::printf("scene_authoring_test: all checks passed\n");
+  if (failures == 0) ::printf("scene_authoring_test: all checks passed\n");
   return failures == 0 ? 0 : 1;
 }

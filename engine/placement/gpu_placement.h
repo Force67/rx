@@ -3,6 +3,7 @@
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "placement/placement.h"
@@ -41,7 +42,7 @@ class RX_PLACEMENT_GPU_EXPORT GpuPlacement {
   // the batch through ImmediateSubmit and reads the results back before
   // returning. Uses a reserved buffer set, safe while frames are idle.
   void GenerateImmediate(render::Device& device, PlacementSystem& system,
-                         std::span<const TileKey> tiles, base::Vector<PlacedInstance>& out);
+                         base::Span<const TileKey> tiles, base::Vector<PlacedInstance>& out);
 
   bool initialized() const { return initialized_; }
 
@@ -58,7 +59,7 @@ class RX_PLACEMENT_GPU_EXPORT GpuPlacement {
   };
 
   void RecordBatch(render::CommandList& cmd, const PlacementSystem& system,
-                   std::span<const TileKey> tiles, BufferSet& set);
+                   base::Span<const TileKey> tiles, BufferSet& set);
   void ReadResults(const BufferSet& set, base::Vector<PlacedInstance>& out) const;
 
   bool initialized_ = false;

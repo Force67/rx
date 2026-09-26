@@ -8,14 +8,15 @@
 // the projector math at the top is pure CPU and always runs. Run under vkrun to
 // exercise the GPU path.
 
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "asset/mesh.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/unique_pointer.h"
 #include "render/core/render_graph.h"
 #include "render/rhi/command_list.h"
 #include "render/rhi/device.h"
@@ -31,7 +32,7 @@ int failures = 0;
 
 void Check(bool ok, const char* what) {
   if (ok) return;
-  std::fprintf(stderr, "decal_bake_test: FAIL: %s\n", what);
+  ::fprintf(stderr, "decal_bake_test: FAIL: %s\n", what);
   ++failures;
 }
 
@@ -41,7 +42,7 @@ Vec3 ToDecalSpace(const Decal& d, const Vec3& world) {
           d.row2[0] * world.x + d.row2[1] * world.y + d.row2[2] * world.z + d.row2[3]};
 }
 
-bool Near(f32 a, f32 b) { return std::fabs(a - b) < 1e-4f; }
+bool Near(f32 a, f32 b) { return ::fabs(a - b) < 1e-4f; }
 
 // A unit quad in the XZ plane, uv0 covering the full 0..1 chart. World x maps to
 // u and world z to v, so a projector at the origin lands in the middle of the
@@ -58,9 +59,9 @@ GpuMesh CreateQuad(Device& device, f32 udim_u = 0) {
   const u32 indices[6] = {0, 1, 2, 0, 2, 3};
   GpuMesh mesh;
   mesh.vertices = device.CreateBufferWithData(
-      {reinterpret_cast<const u8*>(vertices), sizeof(vertices)}, kBufferUsageVertex);
+      rx::ByteSpan(reinterpret_cast<const u8*>(vertices), sizeof(vertices)), kBufferUsageVertex);
   mesh.indices = device.CreateBufferWithData(
-      {reinterpret_cast<const u8*>(indices), sizeof(indices)}, kBufferUsageIndex);
+      rx::ByteSpan(reinterpret_cast<const u8*>(indices), sizeof(indices)), kBufferUsageIndex);
   mesh.index_count = 6;
   mesh.vertex_count = 4;
   return mesh;
@@ -84,7 +85,7 @@ void RunBake(Device& device, DecalBaker& baker, TransientPool& pool,
              const DecalBaker::Target& target, u64 frame_index, TextureView source) {
   RenderGraph graph;
   pool.BeginFrame();
-  baker.AddToGraph(graph, {&target, 1}, 0, frame_index, source, source);
+  baker.AddToGraph(graph, base::Span(&target, 1), 0, frame_index, source, source);
   CommandList* cmd = device.BeginFrame(0);
   if (!cmd || !graph.Compile(device, pool)) {
     Check(false, "frame and graph setup");
@@ -108,12 +109,12 @@ int main() {
           "the projector centre is the origin of decal space");
     // Half the FULL width along a plane axis is the box edge.
     const Vec3 edge = ToDecalSpace(d, {2, 3, 5});
-    Check(Near(std::fabs(edge.x) + std::fabs(edge.y), 1.0f) && Near(edge.z, 0),
+    Check(Near(::fabs(edge.x) + ::fabs(edge.y), 1.0f) && Near(edge.z, 0),
           "a point at half the width sits on the box edge");
     const Vec3 above = ToDecalSpace(d, {2, 3.5f, 4});
     Check(Near(above.z, 1.0f), "the box depth runs along the surface normal");
     const Vec3 outside = ToDecalSpace(d, {5, 3, 4});
-    Check(std::fabs(outside.x) > 1.0f, "a point past the box falls outside");
+    Check(::fabs(outside.x) > 1.0f, "a point past the box falls outside");
   }
 
   DeviceDesc desc;
@@ -121,17 +122,17 @@ int main() {
   desc.request_raytracing = false;
   // RX_VALIDATION=1 runs the bake through the Vulkan validation layers, which
   // is where the pass's hand-written image barriers get checked.
-  desc.enable_validation = std::getenv("RX_VALIDATION") != nullptr;
-  std::unique_ptr<Device> device = Device::CreateOffscreen(desc);
+  desc.enable_validation = ::getenv("RX_VALIDATION") != nullptr;
+  base::UniquePointer<Device> device = Device::CreateOffscreen(desc);
   if (!device) {
-    std::fprintf(stderr, "decal_bake_test: FAIL: CreateOffscreen returned null\n");
+    ::fprintf(stderr, "decal_bake_test: FAIL: CreateOffscreen returned null\n");
     return 1;
   }
   if (device->is_stub()) {
-    std::printf("decal_bake_test: no vulkan driver, skipping the gpu half\n");
+    ::printf("decal_bake_test: no vulkan driver, skipping the gpu half\n");
     return failures == 0 ? 0 : 1;
   }
-  std::printf("decal_bake_test: device '%s'\n", device->caps().adapter_name.c_str());
+  ::printf("decal_bake_test: device '%s'\n", device->caps().adapter_name.c_str());
 
   // One tile only: the second receiver has to evict the first, which is exactly
   // the path the journal exists for.
@@ -140,7 +141,7 @@ int main() {
   bd.atlas_size = 64;
   bd.tile_size = 64;
   if (!baker.Initialize(*device, bd)) {
-    std::fprintf(stderr, "decal_bake_test: FAIL: baker initialize\n");
+    ::fprintf(stderr, "decal_bake_test: FAIL: baker initialize\n");
     return 1;
   }
   Check(baker.stats().tile_capacity == 1, "a 64/64 atlas holds exactly one tile");
@@ -148,7 +149,7 @@ int main() {
   GpuMesh quad = CreateQuad(*device);
   GpuImage source = CreateWhiteSource(*device);
   if (!quad.vertices || !quad.indices || !source) {
-    std::fprintf(stderr, "decal_bake_test: FAIL: test resource creation\n");
+    ::fprintf(stderr, "decal_bake_test: FAIL: test resource creation\n");
     return 1;
   }
   TransientPool pool(*device);
@@ -158,12 +159,12 @@ int main() {
   Check(first != 0 && second != 0 && first != second, "receivers get distinct handles");
   Check(baker.tile_slot(first) == 0, "a receiver holds no tile before its first stamp");
 
-  std::vector<u8> pixels(static_cast<size_t>(bd.atlas_size) * bd.atlas_size * 4);
+  base::Vector<u8> pixels(static_cast<size_t>(bd.atlas_size) * bd.atlas_size * 4);
   auto coverage_at = [&](u32 x, u32 y) -> u32 {
     return pixels[(static_cast<size_t>(y) * bd.atlas_size + x) * 4 + 3];
   };
   auto read_atlas = [&] {
-    std::memset(pixels.data(), 0, pixels.size());
+    base::MemSet(pixels.data(), 0, pixels.size());
     Check(device->ReadbackImage(baker.albedo_atlas(), ResourceState::kShaderReadFragment,
                                 pixels.data(), pixels.size()),
           "reading the layer atlas back");
@@ -195,7 +196,7 @@ int main() {
 
   read_atlas();
   const u32 mid = bd.tile_size / 2;
-  std::printf("decal_bake_test: centre coverage %u, corner coverage %u\n", coverage_at(mid, mid),
+  ::printf("decal_bake_test: centre coverage %u, corner coverage %u\n", coverage_at(mid, mid),
               coverage_at(2, 2));
   Check(coverage_at(mid, mid) > 240, "the projector covers the middle of the tile");
   Check(coverage_at(2, 2) == 0, "the tile corner is outside the projector");
@@ -216,7 +217,7 @@ int main() {
   RunBake(*device, baker, pool, target, 3, source.view);
   Check(baker.tile_slot(first) == 1, "the returning receiver reclaimed the tile");
   read_atlas();
-  std::printf("decal_bake_test: rebaked centre coverage %u\n", coverage_at(mid, mid));
+  ::printf("decal_bake_test: rebaked centre coverage %u\n", coverage_at(mid, mid));
   Check(coverage_at(mid, mid) > 240, "the journal replayed the decal into the fresh tile");
   Check(coverage_at(2, 2) == 0, "the reclaimed tile was cleared of the other receiver");
 
@@ -276,12 +277,12 @@ int main() {
       }
       RenderGraph graph;
       pool.BeginFrame();
-      budget.AddToGraph(graph, {t3, 2}, 0, 1, source.view, source.view);
+      budget.AddToGraph(graph, base::Span(t3, 2), 0, 1, source.view, source.view);
       CommandList* cmd = device->BeginFrame(0);
       if (cmd && graph.Compile(*device, pool)) {
         PassContext ctx;
         ctx.cmd = cmd;
-        ctx.device = device.get();
+        ctx.device = device.Get_UseOnlyIfYouKnowWhatYouareDoing();
         device->SubmitFrame(graph.Execute(ctx));
         device->WaitIdle();
       }
@@ -323,7 +324,7 @@ int main() {
       t2.mesh = &quad2;
       RunBake(*device, burst, pool, t2, 1, source.view);
 
-      std::vector<u8> tile(256ull * 256 * 4);
+      base::Vector<u8> tile(256ull * 256 * 4);
       Check(device->ReadbackImage(burst.albedo_atlas(), ResourceState::kShaderReadFragment,
                                   tile.data(), tile.size()),
             "reading the burst atlas back");
@@ -338,7 +339,7 @@ int main() {
           if (first_landed == kSpots) first_landed = i;
         }
       }
-      std::printf("decal_bake_test: burst of %u with journal_limit 8 -> %u landed, first index %u\n",
+      ::printf("decal_bake_test: burst of %u with journal_limit 8 -> %u landed, first index %u\n",
                   kSpots, landed, first_landed);
       Check(landed == bd2.journal_limit, "a burst keeps exactly journal_limit stamps");
       Check(first_landed == kSpots - bd2.journal_limit, "the OLDEST stamps are the ones dropped");
@@ -369,7 +370,7 @@ int main() {
   baker.SetReceiverUv(shifted, 1.0f, 1.0f, -2.0f, 0.0f);
   RunBake(*device, baker, pool, target, 6, source.view);
   read_atlas();
-  std::printf("decal_bake_test: udim centre coverage %u\n", coverage_at(mid, mid));
+  ::printf("decal_bake_test: udim centre coverage %u\n", coverage_at(mid, mid));
   Check(coverage_at(mid, mid) > 240, "biasing onto the uv tile bakes the decal");
   Check(coverage_at(2, 2) == 0, "the tile corner is still outside the projector");
   baker.ReleaseReceiver(shifted);
@@ -381,6 +382,6 @@ int main() {
   device->DestroyBuffer(quad.vertices);
   device->DestroyBuffer(quad.indices);
 
-  std::printf("decal_bake_test: %s\n", failures == 0 ? "PASS" : "FAIL");
+  ::printf("decal_bake_test: %s\n", failures == 0 ? "PASS" : "FAIL");
   return failures == 0 ? 0 : 1;
 }

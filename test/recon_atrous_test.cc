@@ -1,9 +1,9 @@
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/vector.h"
 #include "render/rhi/device.h"
 #include "shaders/recon_atrous_cs_hlsl.h"
 
@@ -21,20 +21,20 @@ struct Push {
 };
 f32 Half(u16 b) {
   const int exponent = (b >> 10) & 31;
-  return std::ldexp(float((b & 1023) + (exponent ? 1024 : 0)),
+  return ::ldexp(float((b & 1023) + (exponent ? 1024 : 0)),
                     exponent ? exponent - 25 : -24) * ((b & 0x8000) ? -1.f : 1.f);
 }
 }
 
 int main() {
   DeviceDesc desc;
-  const char* backend = std::getenv("RX_RHI");
-  desc.backend = backend && std::strcmp(backend, "d3d12") == 0 ? Backend::kD3D12 : Backend::kVulkan;
+  const char* backend = ::getenv("RX_RHI");
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0 ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = false;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
-    std::printf("recon_atrous_test: SKIP, GPU unavailable\n");
+    ::printf("recon_atrous_test: SKIP, GPU unavailable\n");
     return 77;
   }
   PipelineHandle pipeline = device->CreateComputePipeline({
@@ -44,16 +44,16 @@ int main() {
                           {4, BindingType::kSampledImage}}}},
       .push_constant_size = sizeof(Push)});
   if (!pipeline) return 1;
-  std::vector<GpuImage> owned;
-  auto input = [&](Format format, const std::vector<f32>& data) {
+  base::Vector<GpuImage> owned;
+  auto input = [&](Format format, const base::Vector<f32>& data) {
     GpuImage image = device->CreateImage2D(format, {kSize, kSize}, kTextureUsageSampled | kTextureUsageTransferDst);
     GpuBuffer staging = device->CreateBufferWithData(
-        {reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)}, kBufferUsageTransferSrc);
-    if (!image || !staging) std::exit(1);
+        ByteSpan(reinterpret_cast<const u8*>(data.data()), data.size() * sizeof(f32)), kBufferUsageTransferSrc);
+    if (!image || !staging) ::exit(1);
     device->ImmediateSubmit([&](CommandList& cmd) {
       cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
       BufferTextureCopy copy{.extent = {kSize, kSize}};
-      cmd.CopyBufferToTexture(staging, image, {&copy, 1});
+      cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
       cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadCompute));
     });
     device->DestroyBuffer(staging);
@@ -63,7 +63,7 @@ int main() {
   int failures = 0;
   // Flat noisy reflections, a noiseless sharp reflection, and a depth boundary.
   for (u32 mode = 0; mode < 3; ++mode) {
-    std::vector<f32> colors(kPixels * 4), normals(kPixels * 4), depths(kPixels, 1);
+    base::Vector<f32> colors(kPixels * 4), normals(kPixels * 4), depths(kPixels, 1);
     u32 rng = 7;
     for (u32 p = 0; p < kPixels; ++p) {
       rng = rng * 1664525u + 1013904223u;
@@ -98,7 +98,7 @@ int main() {
       });
       current = last = output;
     }
-    std::vector<u16> pixels(kPixels * 4);
+    base::Vector<u16> pixels(kPixels * 4);
     if (!device->ReadbackImage(last, ResourceState::kShaderReadCompute, pixels.data(), pixels.size() * sizeof(u16))) return 1;
     double mse = 0, mean = 0;
     bool finite = true;
@@ -109,9 +109,9 @@ int main() {
       mse += (value - expected) * (value - expected) / kPixels;
       mean += value / kPixels;
     }
-    std::printf("specular mode=%u RMS=%g mean=%g\n", mode, std::sqrt(mse), mean);
-    const bool ok = finite && (mode == 0 ? std::sqrt(mse) < .14 && std::abs(mean - 1) < .03 : std::sqrt(mse) < .005);
-    if (!ok) { std::printf("FAIL: reflection noise reduction / edge preservation\n"); ++failures; }
+    ::printf("specular mode=%u RMS=%g mean=%g\n", mode, ::sqrt(mse), mean);
+    const bool ok = finite && (mode == 0 ? ::sqrt(mse) < .14 && ::abs(mean - 1) < .03 : ::sqrt(mse) < .005);
+    if (!ok) { ::printf("FAIL: reflection noise reduction / edge preservation\n"); ++failures; }
   }
   device->WaitIdle();
   for (auto& image : owned) device->DestroyImage(image);

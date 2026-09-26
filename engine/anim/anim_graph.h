@@ -1,10 +1,10 @@
 #ifndef RX_ANIM_ANIM_GRAPH_H_
 #define RX_ANIM_ANIM_GRAPH_H_
 
-#include <memory>
-#include <string_view>
-
 #include "asset/skeleton.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
 #include "core/types.h"
 
 namespace rx::anim {
@@ -16,31 +16,34 @@ struct GraphState;
 // The shared, immutable animation archetype: a skeleton binding plus a compiled
 // state graph (states, transitions, blend spaces and the clips they sample),
 // built once and shared by every character that plays it. Carries no per-frame
-// state - that lives in RigPlayer. Copies are cheap (a shared_ptr to the
-// compiled payload), so a whole crowd of RigPlayers shares one AnimGraph.
+// state - that lives in RigPlayer. Move-only: a whole crowd of RigPlayers binds
+// to one AnimGraph by reference, and it must outlive them.
 //
 // The graph is authored kinema-side (kinema stays a private detail of
 // engine/anim, so it never appears in this header); BuildBipedLocomotionGraph is
 // the first such archetype factory.
 class AnimGraph {
  public:
-  AnimGraph() = default;
-  explicit AnimGraph(std::shared_ptr<detail::GraphState> state) : state_(std::move(state)) {}
+  AnimGraph();
+  explicit AnimGraph(base::UniquePointer<detail::GraphState> state);
+  AnimGraph(AnimGraph&&) noexcept;
+  AnimGraph& operator=(AnimGraph&&) noexcept;
+  ~AnimGraph();
 
-  bool valid() const { return static_cast<bool>(state_); }
+  bool valid() const { return !state_.empty(); }
   u32 bone_count() const;
 
   // Parameter id for a named live input (e.g. "speed"), or -1 if the archetype
   // has no such parameter. RigPlayer::SetParam takes this id.
-  int ParamIndex(std::string_view name) const;
+  int ParamIndex(base::StringRef name) const;
 
   // Internal handle to the compiled payload. Returns a detail type, so it is
   // only usable in a translation unit that includes anim_internal.h (RigPlayer /
   // FootPlacement); ordinary callers cannot reach kinema through it.
-  const detail::GraphState* state() const { return state_.get(); }
+  const detail::GraphState* state() const { return state_ ? &*state_ : nullptr; }
 
  private:
-  std::shared_ptr<detail::GraphState> state_;
+  base::UniquePointer<detail::GraphState> state_;
 };
 
 // Author an idle / walk / run locomotion archetype for a biped built on the

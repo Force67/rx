@@ -1,10 +1,10 @@
 #ifndef RX_WORLD_WORLD_CLAIM_H_
 #define RX_WORLD_WORLD_CLAIM_H_
 
-#include <span>
 
 #include <base/containers/vector.h>
 
+#include "base/containers/span.h"
 #include "core/export.h"
 #include "core/types.h"
 #include "world/world_format.h"
@@ -84,8 +84,8 @@ class RX_WORLD_EXPORT ClaimSet {
 
   bool Honors(const ResidencyClaim& claim) const { return claim.kind <= weakest_honored_; }
 
-  std::span<const ClaimEntry> entries() const {
-    return std::span<const ClaimEntry>(entries_.data(), entries_.size());
+  base::Span<const ClaimEntry> entries() const {
+    return base::Span<const ClaimEntry>(entries_.data(), entries_.size());
   }
   size_t size() const { return entries_.size(); }
   bool empty() const { return entries_.empty(); }

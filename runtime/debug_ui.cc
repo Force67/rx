@@ -4,15 +4,10 @@
 
 #if defined(RX_HAS_IMGUI)
 
-#include <algorithm>
-#include <cctype>
-#include <cfloat>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <optional>
-#include <string>
-#include <vector>
+#include <ctype.h>
+#include <float.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include <base/option.h>
 #include <base/process/process_metrics.h>
@@ -22,14 +17,20 @@
 #include <imgui_impl_sdl3.h>
 
 #include "asset/vfs.h"
+#include "base/containers/vector.h"
+#include "base/optional.h"
+#include "base/strings/xstring.h"
 #include "core/log.h"
 #include "core/memory/chunk_pool.h"
 #include "core/memory/frame_arena.h"
 #include "core/memory/memory_tracker.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "render/core/presets.h"
 #include "render/core/settings_ini.h"
 #include "render/util/imgui_theme.h"
+#include "base/algorithm.h"
+#include "core/file_system.h"
 
 #ifndef RX_BUILD_ID
 #define RX_BUILD_ID "unknown"
@@ -53,12 +54,12 @@ base::Option<const char*> PresetsDirOpt{"presets.dir", nullptr, "RX_PRESETS_DIR"
 
 // Directory holding the .ini render presets: RX_PRESETS_DIR, else the
 // compiled-in source path, else a cwd-relative fallback.
-std::filesystem::path PresetDir() {
+base::String PresetDir() {
   if (const char* env = PresetsDirOpt.get(); env && *env) return env;
 #ifdef RX_PRESETS_DIR_DEFAULT
-  return std::filesystem::path(RX_PRESETS_DIR_DEFAULT);
+  return RX_PRESETS_DIR_DEFAULT;
 #else
-  return std::filesystem::path("engine/render/presets");
+  return "engine/render/presets";
 #endif
 }
 
@@ -95,15 +96,15 @@ constexpr const char* kBuildMode = "DEBUG";
 constexpr const char* kBuildModeTiny = "D";
 #endif
 
-void FormatMemoryValue(char* out, std::size_t out_size, u64 bytes) {
+void FormatMemoryValue(char* out, size_t out_size, u64 bytes) {
   constexpr u64 kMiB = 1024u * 1024u;
   constexpr u64 kGiB = 1024u * kMiB;
   if (bytes == 0)
-    std::snprintf(out, out_size, "--");
+    ::snprintf(out, out_size, "--");
   else if (bytes >= kGiB)
-    std::snprintf(out, out_size, "%.1fG", static_cast<f64>(bytes) / kGiB);
+    ::snprintf(out, out_size, "%.1fG", static_cast<f64>(bytes) / kGiB);
   else
-    std::snprintf(out, out_size, "%.0fM", static_cast<f64>(bytes) / kMiB);
+    ::snprintf(out, out_size, "%.0fM", static_cast<f64>(bytes) / kMiB);
 }
 
 ImU32 PressureColor(u64 used, u64 limit) {
@@ -147,7 +148,7 @@ bool DebugUi::Initialize(Window& window, render::Renderer& renderer, asset::Vfs*
 
   // Roboto out of the engine's fonts:// archive. imgui's built-in font is the
   // fallback when the archive is absent (an unpacked source tree, say).
-  std::optional<base::Vector<u8>> ttf;
+  base::Optional<base::Vector<u8>> ttf;
   if (vfs) ttf = vfs->Read(render::kRxDefaultFontPath);
   if (!ttf || !render::LoadRxImGuiFont(ttf->data(), ttf->size())) {
     RX_WARN("debug ui: {} unavailable, using the built-in font",
@@ -208,7 +209,7 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
 
   frame_times_[frame_time_cursor_] = frame_delta * 1000.0f;
   frame_time_cursor_ = (frame_time_cursor_ + 1) % IM_ARRAYSIZE(frame_times_);
-  frame_time_count_ = std::min<u32>(frame_time_count_ + 1, IM_ARRAYSIZE(frame_times_));
+  frame_time_count_ = rx::Min<u32>(frame_time_count_ + 1, IM_ARRAYSIZE(frame_times_));
 
   // Per-pass GPU timestamps cost real frame time (barriers per pass), so the
   // renderer only records them while this overlay displays them (the GPU
@@ -295,18 +296,18 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
       if (ImGui::CollapsingHeader("Platform preset (.ini)")) {
         if (!preset_files_scanned_) ScanPresetFiles();
         if (preset_files_.empty()) {
-          ImGui::TextDisabled("no .ini in %s", PresetDir().string().c_str());
+          ImGui::TextDisabled("no .ini in %s", PresetDir().c_str());
         } else {
-          std::vector<const char*> names;
+          base::Vector<const char*> names;
           names.reserve(preset_files_.size());
           for (const auto& f : preset_files_) names.push_back(f.c_str());
           ImGui::Combo("File", &preset_file_choice_, names.data(), static_cast<int>(names.size()));
           if (ImGui::Button("Load")) {
-            const auto path = PresetDir() / preset_files_[preset_file_choice_];
+            const base::String path = fs::Join(PresetDir(), preset_files_[preset_file_choice_]);
             if (render::LoadSettingsIni(path, settings)) {
               preset_choice_ = 0;  // settings are file-tuned now, not a hardware tier
               preset_status_ = "loaded " + preset_files_[preset_file_choice_];
-              RX_INFO("render preset: loaded {}", path.string());
+              RX_INFO("render preset: loaded {}", path);
             } else {
               preset_status_ = "could not open " + preset_files_[preset_file_choice_];
             }
@@ -318,12 +319,12 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
         ImGui::InputText("##presetname", preset_save_name_, sizeof(preset_save_name_));
         ImGui::SameLine();
         if (ImGui::Button("Save")) {
-          std::string fn = preset_save_name_[0] ? preset_save_name_ : "custom";
-          if (fn.size() < 4 || fn.compare(fn.size() - 4, 4, ".ini") != 0) fn += ".ini";
-          const auto path = PresetDir() / fn;
+          base::String fn = preset_save_name_[0] ? preset_save_name_ : "custom";
+          if (!fn.ends_with(".ini")) fn += ".ini";
+          const base::String path = fs::Join(PresetDir(), fn);
           if (render::SaveSettingsIni(path, settings)) {
             preset_status_ = "saved " + fn;
-            RX_INFO("render preset: saved {}", path.string());
+            RX_INFO("render preset: saved {}", path);
             ScanPresetFiles();
           } else {
             preset_status_ = "could not write " + fn;
@@ -762,7 +763,7 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, FlyCamera& camera,
               ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.9f, 0.25f, 0.2f, 1.0f));
             }
             char overlay[32];
-            std::snprintf(overlay, sizeof overlay, "%.0f MB", c.budget_bytes * mb);
+            ::snprintf(overlay, sizeof overlay, "%.0f MB", c.budget_bytes * mb);
             ImGui::ProgressBar(fill, {-1, 0}, overlay);
             if (fill > 1.0f) ImGui::PopStyleColor();
           } else {
@@ -790,7 +791,7 @@ void DebugUi::DrawDiagnosticsTab(render::Renderer& renderer, FlyCamera& camera,
 
   if (const render::RenderGraph::Stats& g = renderer.graph_stats();
       !g.passes.empty() && ImGui::CollapsingHeader("Frame graph")) {
-    ImGui::Text("%zu passes, %u barriers", g.passes.size(), g.barrier_count);
+    ImGui::Text("%zu passes, %u barriers", static_cast<size_t>(g.passes.size()), g.barrier_count);
     if (ImGui::BeginTable("fg_passes", 4,
                           ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
                               ImGuiTableFlags_SizingStretchProp,
@@ -851,43 +852,43 @@ void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
   const bool compact = viewport->WorkSize.x < 1440.0f;
   const bool narrow = viewport->WorkSize.x < 760.0f;
   const f32 section_gap = compact ? 6.0f : 18.0f;
-  const f32 graph_width = std::clamp(viewport->WorkSize.x * 0.22f, 64.0f, 280.0f);
+  const f32 graph_width = rx::Clamp(viewport->WorkSize.x * 0.22f, 64.0f, 280.0f);
   const ImVec2 graph_min = {bar_max.x - kPadding - graph_width, bar_min.y + 4.0f};
   const ImVec2 graph_max = {bar_max.x - kPadding, bar_max.y - 4.0f};
 
   char fps_text[48];
   const f32 fps = frame_delta > 0.0f ? 1.0f / frame_delta : 0.0f;
   if (narrow)
-    std::snprintf(fps_text, sizeof(fps_text), "%.0fF", fps);
+    ::snprintf(fps_text, sizeof(fps_text), "%.0fF", fps);
   else if (compact)
-    std::snprintf(fps_text, sizeof(fps_text), "%.0f FPS", fps);
+    ::snprintf(fps_text, sizeof(fps_text), "%.0f FPS", fps);
   else
-    std::snprintf(fps_text, sizeof(fps_text), "FPS %.0f  %.2f ms", fps,
+    ::snprintf(fps_text, sizeof(fps_text), "FPS %.0f  %.2f ms", fps,
                   frame_delta * 1000.0f);
   char location_text[80];
   if (narrow)
-    std::snprintf(location_text, sizeof(location_text), "%.0f %.0f %.0f", view.camera.eye.x,
+    ::snprintf(location_text, sizeof(location_text), "%.0f %.0f %.0f", view.camera.eye.x,
                   view.camera.eye.y, view.camera.eye.z);
   else if (compact)
-    std::snprintf(location_text, sizeof(location_text), "XYZ %.1f %.1f %.1f", view.camera.eye.x,
+    ::snprintf(location_text, sizeof(location_text), "XYZ %.1f %.1f %.1f", view.camera.eye.x,
                   view.camera.eye.y, view.camera.eye.z);
   else
-    std::snprintf(location_text, sizeof(location_text), "XYZ %.2f  %.2f  %.2f",
+    ::snprintf(location_text, sizeof(location_text), "XYZ %.2f  %.2f  %.2f",
                   view.camera.eye.x, view.camera.eye.y, view.camera.eye.z);
   char build_text[96];
   if (narrow)
-    std::snprintf(build_text, sizeof(build_text), "%.6s", RX_BUILD_ID);
+    ::snprintf(build_text, sizeof(build_text), "%.6s", RX_BUILD_ID);
   else if (compact)
-    std::snprintf(build_text, sizeof(build_text), "%s@%.8s", RX_VERSION, RX_BUILD_ID);
+    ::snprintf(build_text, sizeof(build_text), "%s@%.8s", RX_VERSION, RX_BUILD_ID);
   else
-    std::snprintf(build_text, sizeof(build_text), "BUILD %s (%s)", RX_VERSION, RX_BUILD_ID);
+    ::snprintf(build_text, sizeof(build_text), "BUILD %s (%s)", RX_VERSION, RX_BUILD_ID);
   char config_text[64];
   if (narrow)
-    std::snprintf(config_text, sizeof(config_text), "%s", kBuildModeTiny);
+    ::snprintf(config_text, sizeof(config_text), "%s", kBuildModeTiny);
   else if (compact)
-    std::snprintf(config_text, sizeof(config_text), "%s", kBuildMode);
+    ::snprintf(config_text, sizeof(config_text), "%s", kBuildMode);
   else
-    std::snprintf(config_text, sizeof(config_text), "%s / %s", RX_BUILD_CONFIG, kBuildMode);
+    ::snprintf(config_text, sizeof(config_text), "%s / %s", RX_BUILD_CONFIG, kBuildMode);
 
   char cpu_memory_value[16];
   char gpu_memory_value[16];
@@ -895,11 +896,11 @@ void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
   FormatMemoryValue(gpu_memory_value, sizeof(gpu_memory_value), gpu_memory_bytes_);
   char cpu_memory_text[24];
   char gpu_memory_text[24];
-  std::snprintf(cpu_memory_text, sizeof(cpu_memory_text), narrow     ? "C%s"
+  ::snprintf(cpu_memory_text, sizeof(cpu_memory_text), narrow     ? "C%s"
                                                           : compact ? "C %s"
                                                                     : "CPU %s",
                 cpu_memory_value);
-  std::snprintf(gpu_memory_text, sizeof(gpu_memory_text), narrow     ? "G%s"
+  ::snprintf(gpu_memory_text, sizeof(gpu_memory_text), narrow     ? "G%s"
                                                           : compact ? "G %s"
                                                                     : "GPU %s",
                 gpu_memory_value);
@@ -913,22 +914,22 @@ void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
   char ecs_text[64];
   if (narrow) {
     if (ecs_under_one_percent)
-      std::snprintf(ecs_text, sizeof(ecs_text), "E%u P<1", ecs_stats.entity_count);
+      ::snprintf(ecs_text, sizeof(ecs_text), "E%u P<1", ecs_stats.entity_count);
     else
-      std::snprintf(ecs_text, sizeof(ecs_text), "E%u P%.0f", ecs_stats.entity_count, ecs_pressure);
+      ::snprintf(ecs_text, sizeof(ecs_text), "E%u P%.0f", ecs_stats.entity_count, ecs_pressure);
   } else if (compact) {
     if (ecs_under_one_percent)
-      std::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u A%u P<1", ecs_stats.entity_count,
+      ::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u A%u P<1", ecs_stats.entity_count,
                     ecs_stats.entity_slots, ecs_stats.archetype_count);
     else
-      std::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u A%u P%.0f", ecs_stats.entity_count,
+      ::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u A%u P%.0f", ecs_stats.entity_count,
                     ecs_stats.entity_slots, ecs_stats.archetype_count, ecs_pressure);
   } else {
     if (ecs_under_one_percent)
-      std::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u ent  %u arch  <1%% store",
+      ::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u ent  %u arch  <1%% store",
                     ecs_stats.entity_count, ecs_stats.entity_slots, ecs_stats.archetype_count);
     else
-      std::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u ent  %u arch  %.0f%% store",
+      ::snprintf(ecs_text, sizeof(ecs_text), "ECS %u/%u ent  %u arch  %.0f%% store",
                     ecs_stats.entity_count, ecs_stats.entity_slots, ecs_stats.archetype_count,
                     ecs_pressure);
   }
@@ -941,9 +942,9 @@ void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
   }
   char stream_text[80];
   if (!streaming_active) {
-    std::snprintf(stream_text, sizeof(stream_text), narrow ? "S-OFF" : "STREAM OFF");
+    ::snprintf(stream_text, sizeof(stream_text), narrow ? "S-OFF" : "STREAM OFF");
   } else if (streaming.streamable_count == 0) {
-    std::snprintf(stream_text, sizeof(stream_text), narrow     ? "S-IDLE"
+    ::snprintf(stream_text, sizeof(stream_text), narrow     ? "S-IDLE"
                                                     : compact ? "S IDLE"
                                                               : "STREAM IDLE");
   } else {
@@ -952,13 +953,13 @@ void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
     FormatMemoryValue(resident, sizeof(resident), streaming.resident_bytes);
     FormatMemoryValue(budget, sizeof(budget), streaming.budget_bytes);
     if (narrow)
-      std::snprintf(stream_text, sizeof(stream_text), "S%s/%s D%u", resident, budget,
+      ::snprintf(stream_text, sizeof(stream_text), "S%s/%s D%u", resident, budget,
                     streaming.demoted_count);
     else if (compact)
-      std::snprintf(stream_text, sizeof(stream_text), "STREAM %s/%s D%u", resident, budget,
+      ::snprintf(stream_text, sizeof(stream_text), "STREAM %s/%s D%u", resident, budget,
                     streaming.demoted_count);
     else
-      std::snprintf(stream_text, sizeof(stream_text), "STREAM ON %s/%s  %u/%u demoted", resident,
+      ::snprintf(stream_text, sizeof(stream_text), "STREAM ON %s/%s  %u/%u demoted", resident,
                     budget, streaming.demoted_count, streaming.streamable_count);
   }
 
@@ -1004,7 +1005,7 @@ void DebugUi::DrawStatusBar(render::Renderer& renderer, const ecs::World& world,
     for (u32 i = 0; i < frame_time_count_; ++i) {
       const f32 frame_ms = frame_times_[(oldest + i) % capacity];
       const f32 sample_fps = frame_ms > 0.0f ? 1000.0f / frame_ms : 0.0f;
-      const f32 normalized = std::clamp(sample_fps / kStatusGraphMaxFps, 0.0f, 1.0f);
+      const f32 normalized = rx::Clamp(sample_fps / kStatusGraphMaxFps, 0.0f, 1.0f);
       points[i] = {graph_min.x + sample_step * static_cast<f32>(i),
                    graph_max.y - graph_height * normalized};
     }
@@ -1024,11 +1025,17 @@ void DebugUi::DrawStageChart(render::Renderer& renderer, f32 bottom_offset) {
   struct Bar {
     const char* name;
     f32 ms;
+    u32 pass;
   };
-  std::vector<Bar> bars;
+  base::Vector<Bar> bars;
   bars.reserve(timings.size());
-  for (const auto& t : timings) bars.push_back({t.name.c_str(), t.ms});
-  std::sort(bars.begin(), bars.end(), [](const Bar& a, const Bar& b) { return a.ms > b.ms; });
+  for (const auto& t : timings)
+    bars.push_back({t.name.c_str(), t.ms, static_cast<u32>(bars.size())});
+  // Tied stages fall back to pass order. The ms values are live GPU
+  // measurements, so no tie order was ever reproducible to preserve.
+  base::Sort(bars.data(), bars.data() + bars.size(), [](const Bar& a, const Bar& b) {
+    return a.ms > b.ms || (a.ms == b.ms && a.pass < b.pass);
+  });
 
   constexpr int kMaxBars = 6;
   f32 other_ms = 0.0f;
@@ -1036,7 +1043,7 @@ void DebugUi::DrawStageChart(render::Renderer& renderer, f32 bottom_offset) {
     for (size_t i = kMaxBars; i < bars.size(); ++i) other_ms += bars[i].ms;
     bars.resize(kMaxBars);
   }
-  if (other_ms > 0.0f) bars.push_back({"other", other_ms});
+  if (other_ms > 0.0f) bars.push_back({"other", other_ms, 0});
   if (bars.empty()) return;
 
   const f32 max_ms = bars.front().ms > 0.0f ? bars.front().ms : 1.0f;
@@ -1071,7 +1078,7 @@ void DebugUi::DrawStageChart(render::Renderer& renderer, f32 bottom_offset) {
   const f32 head_y = p0.y + pad;
   dl->AddText(font, font_size, {content_x, head_y}, IM_COL32(206, 214, 232, 255), "GPU STAGES");
   char buf[32];
-  std::snprintf(buf, sizeof(buf), "%.2f ms", renderer.gpu_frame_ms());
+  ::snprintf(buf, sizeof(buf), "%.2f ms", renderer.gpu_frame_ms());
   const ImVec2 total_sz = ImGui::CalcTextSize(buf);
   dl->AddText(font, font_size, {p1.x - pad - total_sz.x, head_y}, IM_COL32(170, 182, 205, 255),
               buf);
@@ -1094,7 +1101,7 @@ void DebugUi::DrawStageChart(render::Renderer& renderer, f32 bottom_offset) {
     }
 
     const f32 ty = y + (row_h - text_h) * 0.5f;
-    std::snprintf(buf, sizeof(buf), "%.2f", bar.ms);
+    ::snprintf(buf, sizeof(buf), "%.2f", bar.ms);
     const ImVec2 vsz = ImGui::CalcTextSize(buf);
     const f32 val_x = content_x + content_w - 6.0f - vsz.x;
     // Clip the label so a long pass name never runs into the ms value.
@@ -1110,12 +1117,14 @@ void DebugUi::DrawStageChart(render::Renderer& renderer, f32 bottom_offset) {
 void DebugUi::ScanPresetFiles() {
   preset_files_.clear();
   preset_files_scanned_ = true;
-  std::error_code ec;
-  for (const auto& entry : std::filesystem::directory_iterator(PresetDir(), ec)) {
-    if (entry.is_regular_file(ec) && entry.path().extension() == ".ini")
-      preset_files_.push_back(entry.path().filename().string());
+  base::Vector<fs::DirEntry> entries;
+  fs::ListDirectory(PresetDir(), &entries);
+  for (const fs::DirEntry& entry : entries) {
+    if (entry.is_regular && fs::Extension(entry.path) == ".ini")
+      preset_files_.push_back(base::String(fs::Filename(entry.path)));
   }
-  std::sort(preset_files_.begin(), preset_files_.end());
+  // File names in one directory are unique, so any correct sort agrees.
+  base::Sort(preset_files_.data(), preset_files_.data() + preset_files_.size());
   if (preset_file_choice_ >= static_cast<int>(preset_files_.size())) preset_file_choice_ = 0;
 }
 

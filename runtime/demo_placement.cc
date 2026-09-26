@@ -1,10 +1,13 @@
 #include "demo_placement.h"
 
-#include <cmath>
-#include <cstdlib>
+#include <math.h>
+#include <stdlib.h>
 
 #include "asset/primitives.h"
+#include "base/containers/span.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "placement/placement_math.h"
 #include "placement_demo_assets.h"
 #include "scene/components.h"
@@ -21,7 +24,7 @@ constexpr u32 kWorldResolution = 512;
 constexpr u32 kTerrainGrid = 384;
 
 // The road winds north-south through the world.
-f32 RoadCenter(f32 z) { return 90.0f * std::sin(z * 0.004f) + 30.0f * std::sin(z * 0.011f); }
+f32 RoadCenter(f32 z) { return 90.0f * ::sin(z * 0.004f) + 30.0f * ::sin(z * 0.011f); }
 constexpr f32 kRoadHalfWidth = 4.5f;
 
 // The lake basin carved into the height field.
@@ -51,9 +54,9 @@ f32 Fbm(f32 x, f32 z, f32 base_size, u32 seed, u32 octaves) {
 
 PlacementDemo::PlacementDemo(EngineContext& ctx)
     : ctx_(ctx), world_(kWorldOrigin, kWorldOrigin, kWorldExtent, kWorldResolution) {
-  const char* lines = std::getenv("RX_PLACEMENT_LINES");
+  const char* lines = ::getenv("RX_PLACEMENT_LINES");
   draw_lines_ = lines && lines[0] == '1';
-  const char* fly = std::getenv("RX_PLACEMENT_FLY");
+  const char* fly = ::getenv("RX_PLACEMENT_FLY");
   autopilot_ = fly && fly[0] == '1';
 }
 
@@ -63,13 +66,13 @@ f32 PlacementDemo::TerrainHeight(f32 x, f32 z) const {
   // Rolling hills with a broad ridge, softened toward the road and carved
   // into a basin around the lake.
   f32 height = 10.0f * Fbm(x, z, 420.0f, 101u, 4) + 3.0f * Fbm(x, z, 90.0f, 202u, 3);
-  f32 road_dist = std::fabs(x - RoadCenter(z));
-  f32 road_blend = std::min(road_dist / 22.0f, 1.0f);
+  f32 road_dist = ::fabs(x - RoadCenter(z));
+  f32 road_blend = rx::Min(road_dist / 22.0f, 1.0f);
   road_blend = road_blend * road_blend * (3.0f - 2.0f * road_blend);
   f32 dx = x - kLakeX;
   f32 dz = z - kLakeZ;
-  f32 lake_dist = std::sqrt(dx * dx + dz * dz);
-  f32 basin = std::min(lake_dist / kLakeRadius, 1.0f);
+  f32 lake_dist = ::sqrt(dx * dx + dz * dz);
+  f32 basin = rx::Min(lake_dist / kLakeRadius, 1.0f);
   basin = basin * basin * (3.0f - 2.0f * basin);
   height = height * (0.35f + 0.65f * road_blend);  // road hugs gentler ground
   height = height * basin + (kWaterLevel - 4.5f) * (1.0f - basin);
@@ -90,12 +93,12 @@ void PlacementDemo::BuildWorldData() {
     f32 base = placement::ValueNoise(x, z, 340.0f, 11u);
     f32 detail = placement::ValueNoise(x, z, 130.0f, 12u);
     f32 v = base * 0.7f + detail * 0.3f;
-    f32 t = std::clamp((v - 0.38f) / 0.34f, 0.0f, 1.0f);
+    f32 t = rx::Clamp((v - 0.38f) / 0.34f, 0.0f, 1.0f);
     return t * t * (3.0f - 2.0f * t);
   });
   world_.Generate(map_road_, [](f32 x, f32 z) {
-    f32 d = std::fabs(x - RoadCenter(z));
-    return std::clamp(1.0f - (d - kRoadHalfWidth) / 4.0f, 0.0f, 1.0f);
+    f32 d = ::fabs(x - RoadCenter(z));
+    return rx::Clamp(1.0f - (d - kRoadHalfWidth) / 4.0f, 0.0f, 1.0f);
   });
   world_.Generate(map_water_, [this](f32 x, f32 z) {
     return TerrainHeight(x, z) < kWaterLevel + 0.4f ? 1.0f : 0.0f;
@@ -113,7 +116,7 @@ void PlacementDemo::BuildEcotopes() {
 
   placement::PlacementConfig config;
   config.radius_tiles = 3;
-  system_ = std::make_unique<placement::PlacementSystem>(&world_, map_height_, config);
+  system_ = base::MakeUnique<placement::PlacementSystem>(&world_, map_height_, config);
 
   auto exclude = [this](DensityProgram& p) {
     p.Map(map_road_).OneMinus().Mul().Map(map_water_).OneMinus().Mul();
@@ -259,7 +262,7 @@ void PlacementDemo::BuildTerrainMesh() {
       const f32 dhz =
           world_.Sample(map_height_, x, z + h) - world_.Sample(map_height_, x, z - h);
       const f32 inv =
-          1.0f / std::sqrt(dhx * dhx + dhz * dhz + 4.0f * h * h);
+          1.0f / ::sqrt(dhx * dhx + dhz * dhz + 4.0f * h * h);
       v.normal[0] = -dhx * inv;
       v.normal[1] = 2.0f * h * inv;
       v.normal[2] = -dhz * inv;
@@ -428,12 +431,12 @@ void PlacementDemo::Create() {
     if (system_->pending().empty()) break;
     gpu_.GenerateImmediate(*ctx_.renderer->device(), *system_, system_->pending(), initial);
   }
-  ApplyResults({initial.data(), initial.size()});
+  ApplyResults(base::Span(initial.data(), initial.size()));
   RX_INFO("placement demo: {} instances across {} tiles at spawn", initial.size(),
           live_.size());
 }
 
-void PlacementDemo::ApplyResults(std::span<const placement::PlacedInstance> instances) {
+void PlacementDemo::ApplyResults(base::Span<const placement::PlacedInstance> instances) {
   if (instances.empty()) return;
   // Bucket by (layer, tile) and build one instance group per bucket; groups
   // attach to their tile so eviction can retire them.
@@ -465,7 +468,7 @@ void PlacementDemo::ApplyResults(std::span<const placement::PlacedInstance> inst
     placement::TileKey key{layer_stacks_[bucket.layer], bucket.tile_x, bucket.tile_z};
     render::InstanceGroupHandle group = ctx_.renderer->CreateInstanceGroup(
         layer_meshes_[bucket.layer],
-        {bucket.transforms.data(), bucket.transforms.size()});
+        base::Span(bucket.transforms.data(), bucket.transforms.size()));
     if (!group) {
       RX_WARN("placement demo: instance group rejected (layer {}, {} instances)",
               bucket.layer, bucket.transforms.size());
@@ -514,7 +517,7 @@ void PlacementDemo::Emit(f32 dt, render::FrameView& view) {
   // Instance groups harvested by last frame's hook become renderer state
   // here, outside command recording.
   if (!harvested_tiles_.empty() || !harvested_.empty()) {
-    ApplyResults({harvested_.data(), harvested_.size()});
+    ApplyResults(base::Span(harvested_.data(), harvested_.size()));
     harvested_.clear();
     harvested_tiles_.clear();
   }
@@ -547,7 +550,7 @@ void PlacementDemo::Emit(f32 dt, render::FrameView& view) {
                         {origin.x, y, origin.z + size}, color});
       lines_.push_back({{origin.x, y, origin.z + size}, {origin.x, y, origin.z}, color});
     }
-    view.debug_lines_overlay = {lines_.data(), lines_.size()};
+    view.debug_lines_overlay = base::Span(lines_.data(), lines_.size());
   }
 }
 

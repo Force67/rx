@@ -1,9 +1,10 @@
 #include "render/geometry/particles.h"
 
-#include <algorithm>
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "shaders/particle_ps_hlsl.h"
 #include "shaders/particle_sim_cs_hlsl.h"
 #include "shaders/particle_tex_ps_hlsl.h"
@@ -145,7 +146,7 @@ bool ParticleSystem::Initialize(Device& device, Format color_format,
   sim_state_ =
       device.CreateBuffer(static_cast<u64>(kMaxParticles) * 64, kBufferUsageStorage, true);
   if (!sim_state_.mapped) return false;
-  std::memset(sim_state_.mapped, 0, static_cast<size_t>(kMaxParticles) * 64);
+  base::MemSet(sim_state_.mapped, 0, static_cast<size_t>(kMaxParticles) * 64);
   return true;
 }
 
@@ -156,22 +157,22 @@ void ParticleSystem::AddToGraph(RenderGraph& graph, ResourceHandle color, Resour
                                 u32 frame_slot, BindingSetHandle bindless) {
   // Both sets share the slot's buffer: lit at 0, additive at the next
   // 256-aligned offset (safe for any minStorageBufferOffsetAlignment).
-  u32 count = std::min(static_cast<u32>(particles.size()), kMaxParticles);
+  u32 count = rx::Min(static_cast<u32>(particles.size()), kMaxParticles);
   u64 additive_offset = (static_cast<u64>(count) * sizeof(ParticleInstance) + 255) & ~255ull;
   u64 capacity = static_cast<u64>(kMaxParticles) * sizeof(ParticleInstance);
-  u64 additive_room = (capacity - std::min(capacity, additive_offset)) / sizeof(ParticleInstance);
+  u64 additive_room = (capacity - rx::Min(capacity, additive_offset)) / sizeof(ParticleInstance);
   u32 additive_count =
-      std::min(static_cast<u32>(additive.size()), static_cast<u32>(additive_room));
+      rx::Min(static_cast<u32>(additive.size()), static_cast<u32>(additive_room));
   if (count == 0 && additive_count == 0) return;
   u8* mapped = static_cast<u8*>(buffers_[frame_slot].mapped);
-  if (count > 0) std::memcpy(mapped, particles.data(), count * sizeof(ParticleInstance));
+  if (count > 0) base::MemCopy(mapped, particles.data(), count * sizeof(ParticleInstance));
   if (additive_count > 0) {
-    std::memcpy(mapped + additive_offset, additive.data(),
+    base::MemCopy(mapped + additive_offset, additive.data(),
                 additive_count * sizeof(ParticleInstance));
   }
   GpuBuffer buffer = buffers_[frame_slot];
   const ParticleCamera cam{frame.view_proj, frame.prev_view_proj};
-  std::memcpy(camera_[frame_slot].mapped, &cam, sizeof(cam));
+  base::MemCopy(camera_[frame_slot].mapped, &cam, sizeof(cam));
   GpuBuffer camera = camera_[frame_slot];
 
   graph.AddPass(
@@ -246,7 +247,7 @@ void ParticleSystem::RecordSet(PassContext& ctx, ResourceHandle depth, const Gpu
   push.sun_color[1] = frame.sun_color.y;
   push.sun_color[2] = frame.sun_color.z;
   push.ambient = frame.ambient;
-  std::memcpy(push.cluster_params, frame.cluster_params, sizeof(push.cluster_params));
+  base::MemCopy(push.cluster_params, frame.cluster_params, sizeof(push.cluster_params));
   push.froxel_params[0] = frame.froxel_near;
   push.froxel_params[1] = frame.froxel_far;
   push.froxel_params[2] = frame.froxel_enabled ? 1.0f : 0.0f;
@@ -261,12 +262,12 @@ void ParticleSystem::RecordSet(PassContext& ctx, ResourceHandle depth, const Gpu
 void ParticleSystem::SimulateAndDraw(RenderGraph& graph, ResourceHandle color, ResourceHandle depth,
                                      ResourceHandle motion, const Sim& sim, const Frame& frame,
                                      u32 frame_slot, BindingSetHandle bindless) {
-  u32 count = std::min(sim.count, kMaxParticles);
+  u32 count = rx::Min(sim.count, kMaxParticles);
   if (count == 0) return;
   GpuBuffer instances = buffers_[frame_slot];
   GpuBuffer state = sim_state_;
   const ParticleCamera cam{frame.view_proj, frame.prev_view_proj};
-  std::memcpy(camera_[frame_slot].mapped, &cam, sizeof(cam));
+  base::MemCopy(camera_[frame_slot].mapped, &cam, sizeof(cam));
   GpuBuffer camera = camera_[frame_slot];
 
   graph.AddPass(

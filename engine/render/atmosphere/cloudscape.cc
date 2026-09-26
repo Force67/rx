@@ -1,10 +1,12 @@
 #include "render/atmosphere/cloudscape.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/rhi/device.h"
 #include "shaders/cloudscape_apply_cs_hlsl.h"
 #include "shaders/cloudscape_funnel_cs_hlsl.h"
@@ -90,9 +92,9 @@ bool SameMapState(const CloudscapeMapState &a, const CloudscapeMapState &b) {
 
 bool MapStateDiscontinuous(const CloudscapeMapState &a,
                            const CloudscapeMapState &b) {
-  return a.seed != b.seed || std::abs(a.coverage - b.coverage) > 0.25f ||
-         std::abs(a.cloud_type - b.cloud_type) > 0.25f ||
-         std::abs(a.precipitation - b.precipitation) > 0.25f;
+  return a.seed != b.seed || ::abs(a.coverage - b.coverage) > 0.25f ||
+         ::abs(a.cloud_type - b.cloud_type) > 0.25f ||
+         ::abs(a.precipitation - b.precipitation) > 0.25f;
 }
 
 bool DensityFieldDiscontinuous(const CloudscapeControls &previous,
@@ -116,21 +118,21 @@ bool DensityFieldDiscontinuous(const CloudscapeControls &previous,
       return true;
   }
   if (!endpoint_relabel &&
-      std::abs(current.map_blend - previous.map_blend) > 0.25f)
+      ::abs(current.map_blend - previous.map_blend) > 0.25f)
     return true;
 
-  const f32 thickness = std::max(previous.top - previous.bottom, 1.0f);
+  const f32 thickness = rx::Max(previous.top - previous.bottom, 1.0f);
   const Vec2 map_delta = current.map_offset - previous.map_offset;
-  const f32 wind_alignment = std::cos(current.wind_yaw - previous.wind_yaw);
-  return std::abs(current.bottom - previous.bottom) > std::max(250.0f, thickness * 0.15f) ||
-         std::abs(current.top - previous.top) > std::max(500.0f, thickness * 0.15f) ||
-         std::abs(current.density - previous.density) > 0.25f ||
-         std::abs(current.anvil - previous.anvil) > 0.25f ||
-         std::abs(current.darkness - previous.darkness) > 0.25f ||
+  const f32 wind_alignment = ::cos(current.wind_yaw - previous.wind_yaw);
+  return ::abs(current.bottom - previous.bottom) > rx::Max(250.0f, thickness * 0.15f) ||
+         ::abs(current.top - previous.top) > rx::Max(500.0f, thickness * 0.15f) ||
+         ::abs(current.density - previous.density) > 0.25f ||
+         ::abs(current.anvil - previous.anvil) > 0.25f ||
+         ::abs(current.darkness - previous.darkness) > 0.25f ||
          map_delta.x * map_delta.x + map_delta.y * map_delta.y > 250000.0f ||
          wind_alignment < 0.94f ||
-         std::abs(current.vertical_skew - previous.vertical_skew) > 250.0f ||
-         std::abs(current.turbulence - previous.turbulence) > 0.25f;
+         ::abs(current.vertical_skew - previous.vertical_skew) > 250.0f ||
+         ::abs(current.turbulence - previous.turbulence) > 0.25f;
 }
 
 } // namespace
@@ -259,7 +261,7 @@ ResourceHandle Cloudscape::AddFunnelToGraph(RenderGraph &graph,
   push.jitter[0] = frame.jitter[0];
   push.jitter[1] = frame.jitter[1];
   const u32 param_slot = frame.frame_index % kFramesInFlight;
-  std::memcpy(funnel_params_[param_slot].mapped, &push, sizeof(push));
+  base::MemCopy(funnel_params_[param_slot].mapped, &push, sizeof(push));
   graph.AddPass(
       "cloudscape_funnel",
       [&](RenderGraph::PassBuilder &b) {
@@ -306,12 +308,12 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
   push.sun_color[2] = frame.sun_color.z;
   push.sun_color[3] = frame.flash;
   const CloudscapeControls &c = frame.controls;
-  push.wind[0] = std::cos(c.wind_yaw);
-  push.wind[1] = std::sin(c.wind_yaw);
+  push.wind[0] = ::cos(c.wind_yaw);
+  push.wind[1] = ::sin(c.wind_yaw);
   push.wind[2] = c.vertical_skew;
   push.wind[3] = c.darkness;
   push.fog[0] = c.fog_density;
-  push.fog[1] = std::max(c.fog_height, 0.1f);
+  push.fog[1] = rx::Max(c.fog_height, 0.1f);
   push.fog[2] = c.fog_ground;
   push.fog[3] = c.anvil;
   push.map[0] = c.map_offset.x;
@@ -323,7 +325,7 @@ ResourceHandle Cloudscape::AddHazeToGraph(RenderGraph &graph,
   push.shell[0] = c.bottom;
   push.shell[1] = c.top;
   const u32 param_slot = frame.frame_index % kFramesInFlight;
-  std::memcpy(haze_params_[param_slot].mapped, &push, sizeof(push));
+  base::MemCopy(haze_params_[param_slot].mapped, &push, sizeof(push));
   graph.AddPass(
       "cloudscape_haze",
       [&](RenderGraph::PassBuilder &b) {
@@ -387,8 +389,8 @@ void Cloudscape::AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
   push.sun_dir[2] = sun.z;
   push.near_plane = 0.1f;
   const CloudscapeControls &c = frame.controls;
-  push.wind[0] = std::cos(c.wind_yaw);
-  push.wind[1] = std::sin(c.wind_yaw);
+  push.wind[0] = ::cos(c.wind_yaw);
+  push.wind[1] = ::sin(c.wind_yaw);
   push.wind[2] = c.wind_speed;
   push.wind[3] = c.vertical_skew;
   push.shape[0] = c.bottom;
@@ -403,7 +405,7 @@ void Cloudscape::AddShadowToGraph(RenderGraph &graph, ResourceHandle sun_shadow,
   push.jitter[1] = frame.jitter[1];
   push.strength = strength;
   const u32 param_slot = frame.frame_index % kFramesInFlight;
-  std::memcpy(shadow_params_[param_slot].mapped, &push, sizeof(push));
+  base::MemCopy(shadow_params_[param_slot].mapped, &push, sizeof(push));
   graph.AddPass(
       "cloudscape_shadow",
       [&](RenderGraph::PassBuilder &b) {
@@ -492,10 +494,10 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
   Vec3 current_sun = Normalize(frame.sun_direction);
   bool lighting_cut = has_last_frame_ &&
                       (Dot(current_sun, last_sun_direction_) < 0.98f ||
-                       std::abs(frame.sun_intensity - last_sun_intensity_) > 0.5f ||
+                       ::abs(frame.sun_intensity - last_sun_intensity_) > 0.5f ||
                        Dot(frame.sun_color - last_sun_color_,
                            frame.sun_color - last_sun_color_) > 0.04f ||
-                       std::abs(frame.ambient - last_ambient_) > 0.1f);
+                       ::abs(frame.ambient - last_ambient_) > 0.1f);
   bool history = history_valid_ && contiguous && !frame.reset_history &&
                  !camera_cut && !density_cut && !lighting_cut;
   MarchPush march_push{};
@@ -515,8 +517,8 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
   march_push.sun_color[2] = frame.sun_color.z;
   march_push.sun_color[3] = frame.ambient;
   const CloudscapeControls &c = frame.controls;
-  march_push.wind[0] = std::cos(c.wind_yaw);
-  march_push.wind[1] = std::sin(c.wind_yaw);
+  march_push.wind[0] = ::cos(c.wind_yaw);
+  march_push.wind[1] = ::sin(c.wind_yaw);
   march_push.wind[2] = c.wind_speed;
   march_push.wind[3] = c.vertical_skew;
   march_push.shape[0] = c.bottom;
@@ -532,11 +534,11 @@ ResourceHandle Cloudscape::AddToGraph(RenderGraph &graph, ResourceHandle color,
   march_push.prev_jitter[0] = last_jitter_[0];
   march_push.prev_jitter[1] = last_jitter_[1];
   march_push.frame_index = frame.frame_index;
-  march_push.steps = std::clamp(frame.steps, 8u, 128u);
+  march_push.steps = rx::Clamp(frame.steps, 8u, 128u);
   march_push.flags = history ? 1u : 0u;
   march_push.darkness = c.darkness;
   const u32 param_slot = frame.frame_index % kFramesInFlight;
-  std::memcpy(march_params_[param_slot].mapped, &march_push, sizeof(march_push));
+  base::MemCopy(march_params_[param_slot].mapped, &march_push, sizeof(march_push));
   graph.AddPass(
       "cloudscape_march",
       [&](RenderGraph::PassBuilder &b) {

@@ -1,15 +1,18 @@
 #include "render/geometry/gaussian.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstring>
-#include <fstream>
-#include <sstream>
-#include <string>
+#include <math.h>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 #include "core/log.h"
+#include "core/scalar.h"
+#include "core/text_reader.h"
 #include "shaders/gsplat_ps_hlsl.h"
 #include "shaders/gsplat_vs_hlsl.h"
+#include "core/sort.h"
 
 namespace rx::render {
 namespace {
@@ -24,7 +27,7 @@ struct GaussianPush {
   f32 pad[3];
 };
 
-u32 PlyTypeSize(const std::string& t) {
+u32 PlyTypeSize(const base::String& t) {
   if (t == "char" || t == "uchar" || t == "int8" || t == "uint8") return 1;
   if (t == "short" || t == "ushort" || t == "int16" || t == "uint16") return 2;
   if (t == "int" || t == "uint" || t == "int32" || t == "uint32" || t == "float" || t == "float32")
@@ -33,7 +36,7 @@ u32 PlyTypeSize(const std::string& t) {
   return 0;
 }
 
-f32 Sigmoid(f32 x) { return 1.0f / (1.0f + std::exp(-x)); }
+f32 Sigmoid(f32 x) { return 1.0f / (1.0f + ::exp(-x)); }
 
 }  // namespace
 
@@ -68,7 +71,7 @@ void GaussianSplat::AddToGraph(RenderGraph& graph, ResourceHandle color,
                                const base::Vector<GaussianInstance>& gaussians, const Frame& frame,
                                u32 frame_slot) {
   if (gaussians.empty()) return;
-  u32 count = std::min(static_cast<u32>(gaussians.size()), kMaxGaussians);
+  u32 count = rx::Min(static_cast<u32>(gaussians.size()), kMaxGaussians);
 
   // Sort back-to-front by view depth (front = -z, so most-negative first).
   base::Vector<u32> order(count);
@@ -78,7 +81,9 @@ void GaussianSplat::AddToGraph(RenderGraph& graph, ResourceHandle color,
     const GaussianInstance& g = gaussians[i];
     return v.m[2] * g.position[0] + v.m[6] * g.position[1] + v.m[10] * g.position[2] + v.m[14];
   };
-  std::sort(order.begin(), order.end(), [&](u32 a, u32 b) { return view_z(a) < view_z(b); });
+  // Stable: equal depths keep splat order.
+  rx::StableSort(order.data(), order.data() + order.size(),
+                 [&](u32 a, u32 b) { return view_z(a) < view_z(b); });
 
   GaussianInstance* dst = static_cast<GaussianInstance*>(buffers_[frame_slot].mapped);
   for (u32 i = 0; i < count; ++i) dst[i] = gaussians[order[i]];
@@ -115,25 +120,28 @@ void GaussianSplat::Destroy(Device& device) {
   for (u32 i = 0; i < kFramesInFlight; ++i) device.DestroyBuffer(buffers_[i]);
 }
 
-bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* out) {
-  std::ifstream file(path, std::ios::binary);
-  if (!file) {
+bool LoadGaussianPly(const base::String& path, base::Vector<GaussianInstance>* out) {
+  base::Vector<u8> bytes;
+  if (!fs::ReadFile(path, &bytes)) {
     RX_WARN("gaussian ply: cannot open {}", path);
     return false;
   }
-  std::string line;
-  if (!std::getline(file, line) || line.compare(0, 3, "ply") != 0) {
+  // The header is text lines, the body binary or more lines, both read from
+  // this one cursor.
+  LineReader lines(base::StringRef(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
+  base::StringRef line;
+  if (!lines.Next(&line) || !line.starts_with("ply")) {
     RX_WARN("gaussian ply: {} is not a ply file", path);
     return false;
   }
 
   struct Prop {
-    std::string name;
+    base::String name;
     u32 size = 0;
     u32 offset = 0;
   };
   struct Elem {
-    std::string name;
+    base::String name;
     u64 count = 0;
     base::Vector<Prop> props;
     u32 stride = 0;
@@ -141,32 +149,35 @@ bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* ou
   };
   base::Vector<Elem> elems;
   bool binary = false, little = true;
-  while (std::getline(file, line)) {
-    std::istringstream ls(line);
-    std::string tok;
-    ls >> tok;
+  while (lines.Next(&line)) {
+    TokenReader ls(line);
+    base::String tok;
+    ls.Next(&tok);
     if (tok == "end_header") break;
     if (tok == "format") {
-      std::string fmt;
-      ls >> fmt;
-      binary = fmt.compare(0, 6, "binary") == 0;
+      base::String fmt;
+      ls.Next(&fmt);
+      binary = fmt.starts_with("binary");
       little = fmt != "binary_big_endian";
     } else if (tok == "element") {
       Elem e;
-      ls >> e.name >> e.count;
-      elems.push_back(std::move(e));
+      ls.Next(&e.name);
+      ls.Next(&e.count);
+      elems.push_back(base::move(e));
     } else if (tok == "property" && !elems.empty()) {
-      std::string type;
-      ls >> type;
+      base::String type;
+      ls.Next(&type);
       Elem& e = elems.back();
       if (type == "list") {  // face index lists; not present on splat vertices
-        std::string a, b, nm;
-        ls >> a >> b >> nm;
+        base::String a, b, nm;
+        ls.Next(&a);
+        ls.Next(&b);
+        ls.Next(&nm);
         e.props.push_back({nm, 0, 0});
         e.has_list = true;
       } else {
-        std::string nm;
-        ls >> nm;
+        base::String nm;
+        ls.Next(&nm);
         u32 sz = PlyTypeSize(type);
         e.props.push_back({nm, sz, e.stride});
         e.stride += sz;
@@ -177,6 +188,7 @@ bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* ou
     RX_WARN("gaussian ply: big-endian binary is not supported");
     return false;
   }
+  u64 body = lines.position();
 
   const f32 kC0 = 0.28209479177387814f;  // sh band 0 constant
   const u64 kCap = 1u << 18;             // matches the renderer's gaussian budget
@@ -188,9 +200,9 @@ bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* ou
           RX_WARN("gaussian ply: variable-size element before vertex is unsupported");
           return false;
         }
-        file.seekg(static_cast<std::streamoff>(e.count * e.stride), std::ios::cur);
+        body += e.count * e.stride;
       } else {
-        for (u64 i = 0; i < e.count && std::getline(file, line); ++i) {
+        for (u64 i = 0; i < e.count && lines.Next(&line); ++i) {
         }
       }
       continue;
@@ -215,17 +227,17 @@ bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* ou
     auto decode = [](const u8* rec, const Prop& p) -> f32 {
       if (p.size == 4) {
         float v;
-        std::memcpy(&v, rec + p.offset, 4);
+        base::MemCopy(&v, rec + p.offset, 4);
         return v;
       }
       if (p.size == 8) {
         double v;
-        std::memcpy(&v, rec + p.offset, 8);
+        base::MemCopy(&v, rec + p.offset, 8);
         return static_cast<f32>(v);
       }
       if (p.size == 2) {
         u16 v;
-        std::memcpy(&v, rec + p.offset, 2);
+        base::MemCopy(&v, rec + p.offset, 2);
         return static_cast<f32>(v);
       }
       if (p.size == 1) return static_cast<f32>(rec[p.offset]);
@@ -237,15 +249,16 @@ bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* ou
     bool truncated = false;
     for (u64 i = 0; i < e.count; ++i) {
       if (binary) {
-        file.read(reinterpret_cast<char*>(rec.data()), e.stride);
-        if (!file) break;
+        if (body > bytes.size() || bytes.size() - body < e.stride) break;
+        base::MemCopy(rec.data(), bytes.data() + body, e.stride);
+        body += e.stride;
         for (size_t k = 0; k < e.props.size(); ++k) vals[k] = decode(rec.data(), e.props[k]);
       } else {
-        if (!std::getline(file, line)) break;
-        std::istringstream vs(line);
+        if (!lines.Next(&line)) break;
+        TokenReader vs(line);
         for (size_t k = 0; k < e.props.size(); ++k) {
           f32 v = 0.0f;
-          vs >> v;
+          vs.Next(&v);
           vals[k] = v;
         }
       }
@@ -260,18 +273,18 @@ bool LoadGaussianPly(const std::string& path, base::Vector<GaussianInstance>* ou
       g.position[2] = at(iz);
       if (iop >= 0) g.opacity = Sigmoid(at(iop));
       if (is0 >= 0 && is1 >= 0 && is2 >= 0) {
-        g.scale[0] = std::exp(at(is0));
-        g.scale[1] = std::exp(at(is1));
-        g.scale[2] = std::exp(at(is2));
+        g.scale[0] = ::exp(at(is0));
+        g.scale[1] = ::exp(at(is1));
+        g.scale[2] = ::exp(at(is2));
       }
       if (if0 >= 0 && if1 >= 0 && if2 >= 0) {
-        g.color[0] = std::clamp(0.5f + kC0 * at(if0), 0.0f, 1.0f);
-        g.color[1] = std::clamp(0.5f + kC0 * at(if1), 0.0f, 1.0f);
-        g.color[2] = std::clamp(0.5f + kC0 * at(if2), 0.0f, 1.0f);
+        g.color[0] = rx::Clamp(0.5f + kC0 * at(if0), 0.0f, 1.0f);
+        g.color[1] = rx::Clamp(0.5f + kC0 * at(if1), 0.0f, 1.0f);
+        g.color[2] = rx::Clamp(0.5f + kC0 * at(if2), 0.0f, 1.0f);
       }
       if (ir0 >= 0 && ir1 >= 0 && ir2 >= 0 && ir3 >= 0) {
         f32 w = at(ir0), x = at(ir1), y = at(ir2), z = at(ir3);  // inria stores wxyz
-        f32 len = std::sqrt(w * w + x * x + y * y + z * z);
+        f32 len = ::sqrt(w * w + x * x + y * y + z * z);
         if (len < 1e-8f) len = 1.0f;
         g.rotation[0] = x / len;
         g.rotation[1] = y / len;

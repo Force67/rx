@@ -1,7 +1,9 @@
 #include "audio/wav.h"
 
-#include <cstring>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "core/types.h"
 
@@ -66,8 +68,8 @@ struct Format {
   u16 samples_per_block = 0;
   // MS-ADPCM predictor coefficients (pairs), defaulted to the standard 7 the
   // encoder uses unless the file ships its own table.
-  std::vector<i16> coef1;
-  std::vector<i16> coef2;
+  base::Vector<i16> coef1;
+  base::Vector<i16> coef2;
 };
 
 float SampleU8(u8 v) { return (static_cast<float>(v) - 128.0f) / 128.0f; }
@@ -90,7 +92,7 @@ bool DecodePcm(Reader& r, const Format& fmt, AudioClip* out) {
     if (fmt.tag == kFormatIeeeFloat && fmt.bits == 32) {
       u32 bits = r.U32();
       float f;
-      std::memcpy(&f, &bits, sizeof(f));
+      base::MemCopy(&f, &bits, sizeof(f));
       out->samples.push_back(f);
     } else if (fmt.bits == 8) {
       out->samples.push_back(SampleU8(r.U8()));
@@ -142,8 +144,8 @@ int ImaNibble(u8 nibble, int& predictor, int& index) {
 bool DecodeImaAdpcm(Reader& r, const Format& fmt, AudioClip* out) {
   const u32 ch = fmt.channels;
   if (ch == 0 || fmt.block_align < 4u * ch) return false;
-  std::vector<u8> block(fmt.block_align);
-  std::vector<int> predictor(ch), index(ch);
+  base::Vector<u8> block(fmt.block_align);
+  base::Vector<int> predictor(ch), index(ch);
   while (r.left >= fmt.block_align && r.ok) {
     for (u16 i = 0; i < fmt.block_align; ++i) block[i] = r.U8();
     const u8* b = block.data();
@@ -159,7 +161,7 @@ bool DecodeImaAdpcm(Reader& r, const Format& fmt, AudioClip* out) {
     // Decode each channel's word into a staging row, then emit the 8 frames
     // interleaved so the output stays channel-major per frame.
     const u8* end = block.data() + fmt.block_align;
-    std::vector<int> staged(static_cast<size_t>(ch) * 8);
+    base::Vector<int> staged(static_cast<size_t>(ch) * 8);
     while (b + 4u * ch <= end) {
       for (u32 c = 0; c < ch; ++c) {
         for (int n = 0; n < 4; ++n) {
@@ -199,7 +201,7 @@ int MsNibble(u8 nibble, int& samp1, int& samp2, int& delta, i16 coef1, i16 coef2
 bool DecodeMsAdpcm(Reader& r, const Format& fmt, AudioClip* out) {
   const u32 ch = fmt.channels;
   if (ch == 0 || ch > 2 || fmt.block_align < 7u * ch) return false;
-  std::vector<u8> block(fmt.block_align);
+  base::Vector<u8> block(fmt.block_align);
   while (r.left >= fmt.block_align && r.ok) {
     for (u16 i = 0; i < fmt.block_align; ++i) block[i] = r.U8();
     const u8* b = block.data();

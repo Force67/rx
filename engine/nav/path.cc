@@ -1,8 +1,10 @@
+#include "base/algorithm.h"
+#include "core/scalar.h"
 #include "nav/path.h"
 
-#include <algorithm>
-#include <cmath>
-#include <cstdint>
+#include <math.h>
+#include <stdint.h>
+#include <stdlib.h>
 
 namespace rx::nav {
 namespace {
@@ -21,14 +23,14 @@ f32 TriArea2(const Vec3& a, const Vec3& b, const Vec3& c) {
 f32 PlanarDist(const Vec3& a, const Vec3& b) {
   const f32 dx = a.x - b.x;
   const f32 dz = a.z - b.z;
-  return std::sqrt(dx * dx + dz * dz);
+  return ::sqrt(dx * dx + dz * dz);
 }
 
 f32 Octile(CellRef a, CellRef b, f32 cell_size) {
-  const f32 dx = std::fabs(static_cast<f32>(a.x - b.x));
-  const f32 dz = std::fabs(static_cast<f32>(a.z - b.z));
-  const f32 lo = std::min(dx, dz);
-  const f32 hi = std::max(dx, dz);
+  const f32 dx = ::fabs(static_cast<f32>(a.x - b.x));
+  const f32 dz = ::fabs(static_cast<f32>(a.z - b.z));
+  const f32 lo = rx::Min(dx, dz);
+  const f32 hi = rx::Max(dx, dz);
   return (hi + 0.41421356f * lo) * cell_size;
 }
 
@@ -41,7 +43,7 @@ void HeapPush(PathScratch& s, u32 node) {
     const PathScratch::Node& a = s.nodes[s.heap[i]];
     const PathScratch::Node& b = s.nodes[s.heap[parent]];
     if (a.g + a.h >= b.g + b.h) break;
-    std::swap(s.heap[i], s.heap[parent]);
+    base::Swap(s.heap[i], s.heap[parent]);
     i = parent;
   }
 }
@@ -63,7 +65,7 @@ u32 HeapPop(PathScratch& s) {
     if (l < count && f(l) < f(smallest)) smallest = l;
     if (r < count && f(r) < f(smallest)) smallest = r;
     if (smallest == i) break;
-    std::swap(s.heap[i], s.heap[smallest]);
+    base::Swap(s.heap[i], s.heap[smallest]);
     i = smallest;
   }
   return top;
@@ -121,7 +123,7 @@ bool TraceCells(const NavMesh& mesh, const Vec3& from, const Vec3& to,
   f32 t_max_z = dz != 0 ? ((static_cast<f32>(cell.z + (step_z > 0)) * cs) - from.z) * inv_dz : 2.0f;
   const f32 t_delta_x = dx != 0 ? cs * static_cast<f32>(step_x) * inv_dx : 0;
   const f32 t_delta_z = dz != 0 ? cs * static_cast<f32>(step_z) * inv_dz : 0;
-  const i32 max_steps = std::abs(end.x - cell.x) + std::abs(end.z - cell.z) + 2;
+  const i32 max_steps = ::abs(end.x - cell.x) + ::abs(end.z - cell.z) + 2;
   for (i32 i = 0; i < max_steps && !(cell == end); ++i) {
     CellRef next = cell;
     if (t_max_x < t_max_z) {
@@ -151,7 +153,7 @@ void ShortcutPass(const NavMesh& mesh, base::Vector<CellRef>* cells, u32 max_spa
   while (i + 1 < count) {
     u32 chosen = i + 1;
     if (i + 2 < count) {
-      const u32 far = std::min(i + max_span, count - 1);
+      const u32 far = rx::Min(i + max_span, count - 1);
       // Corridor cost of the stretch being challenged.
       f32 stretch_cost = 0;
       prefix.clear();
@@ -230,7 +232,7 @@ Portal MakePortal(const NavMesh& mesh, CellRef from, CellRef to, f32 radius) {
   // clearance belongs in cell walkability (paint margins around obstacles),
   // not in portals a third the agent's width.
   const f32 half_len = cs * 0.5f;
-  const f32 t = std::min(radius, half_len * 0.33f) / half_len;
+  const f32 t = rx::Min(radius, half_len * 0.33f) / half_len;
   portal.left = Lerp(portal.left, mid, t);
   portal.right = Lerp(portal.right, mid, t);
   return portal;
@@ -261,7 +263,7 @@ bool AdvanceProgress(const NavMesh& mesh, Corridor* corridor, const Vec3& agent_
   const u32 lo = corridor->progress > 1 ? corridor->progress - 1 : 0;
   for (u32 k = lo; k < count && k <= corridor->progress + window; ++k) {
     const CellRef c = corridor->cells[k];
-    const i32 d = std::max(std::abs(c.x - at.x), std::abs(c.z - at.z));
+    const i32 d = rx::Max(::abs(c.x - at.x), ::abs(c.z - at.z));
     // Prefer the farthest matching cell so progress is monotonic even when
     // the agent straddles several corridor cells.
     if (d <= best_d && d <= 1) {
@@ -270,7 +272,7 @@ bool AdvanceProgress(const NavMesh& mesh, Corridor* corridor, const Vec3& agent_
     }
   }
   if (best == UINT32_MAX) return false;
-  corridor->progress = std::max(corridor->progress, best);
+  corridor->progress = rx::Max(corridor->progress, best);
   corridor->entered = true;
   return true;
 }
@@ -361,7 +363,7 @@ PathStatus FindPath(const NavMesh& mesh, const PathRequest& request, PathScratch
   for (i32 walk = static_cast<i32>(last); walk >= 0; walk = scratch.nodes[walk].parent) {
     out->cells.push_back(scratch.nodes[walk].cell);
   }
-  std::reverse(out->cells.begin(), out->cells.end());
+  base::Reverse(out->cells.begin(), out->cells.end());
   out->cost = scratch.nodes[last].g;
   out->status = complete ? PathStatus::kComplete : PathStatus::kPartial;
   // A partial "path" that never left the start cell helps nobody: fail so the
@@ -384,9 +386,9 @@ void ShortcutCorridor(const NavMesh& mesh, Corridor* corridor, u32 max_span) {
     // Second sweep from the far end: reverse, straighten, restore. Entry
     // costs are direction-sensitive, so the reversed comparison is
     // approximate; the epsilon in ShortcutPass keeps it conservative.
-    std::reverse(corridor->cells.begin(), corridor->cells.end());
+    base::Reverse(corridor->cells.begin(), corridor->cells.end());
     ShortcutPass(mesh, &corridor->cells, max_span, &line, &scratch);
-    std::reverse(corridor->cells.begin(), corridor->cells.end());
+    base::Reverse(corridor->cells.begin(), corridor->cells.end());
     corridor->cost = CorridorCost(mesh, corridor->cells);
   }
   StampTiles(mesh, corridor);

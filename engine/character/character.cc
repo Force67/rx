@@ -1,8 +1,9 @@
 #include "character/character.h"
 
-#include <algorithm>
-#include <cmath>
+#include <math.h>
+#include <stdlib.h>
 
+#include "core/scalar.h"
 #include "ecs/world.h"
 #include "scene/camera_rig.h"
 #include "scene/components.h"
@@ -12,7 +13,7 @@ namespace {
 
 constexpr f32 kTwoPi = 6.28318530717958647692f;
 
-f32 WrapAngle(f32 a) { return std::remainder(a, kTwoPi); }
+f32 WrapAngle(f32 a) { return ::remainder(a, kTwoPi); }
 
 // Heading quaternion: yaw about -Y so a character's forward (-Z at yaw 0) agrees
 // with scene::CameraOrbit's yaw and the camera it drives.
@@ -20,7 +21,7 @@ Quat HeadingQuat(f32 yaw) { return QuatFromAxisAngle({0, -1, 0}, yaw); }
 
 f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
   const f32 d = target - current;
-  if (std::abs(d) <= max_delta) return target;
+  if (::abs(d) <= max_delta) return target;
   return current + (d > 0 ? max_delta : -max_delta);
 }
 
@@ -28,7 +29,7 @@ f32 MoveTowardScalar(f32 current, f32 target, f32 max_delta) {
 // `half_life` seconds. Converges without overshoot; half_life <= 0 snaps.
 f32 ExpApproach(f32 current, f32 target, f32 half_life, f32 dt) {
   if (half_life <= 0.0f) return target;
-  const f32 t = 1.0f - std::exp2(-dt / half_life);
+  const f32 t = 1.0f - ::exp2(-dt / half_life);
   return current + (target - current) * t;
 }
 
@@ -36,13 +37,13 @@ f32 ExpApproach(f32 current, f32 target, f32 half_life, f32 dt) {
 f32 ExpApproachAngle(f32 current, f32 target, f32 half_life, f32 dt) {
   const f32 diff = WrapAngle(target - current);
   if (half_life <= 0.0f) return WrapAngle(current + diff);
-  const f32 t = 1.0f - std::exp2(-dt / half_life);
+  const f32 t = 1.0f - ::exp2(-dt / half_life);
   return WrapAngle(current + diff * t);
 }
 
 // Heading yaw for a horizontal world direction, inverse of HeadingQuat's forward
 // (forward at yaw 0 is -Z, yaw increases toward +X): forward = (sin y, 0, -cos y).
-f32 YawFromDir(const Vec3& d) { return std::atan2(d.x, -d.z); }
+f32 YawFromDir(const Vec3& d) { return ::atan2(d.x, -d.z); }
 
 Vec3 MoveTowardVec(const Vec3& current, const Vec3& target, f32 max_delta) {
   const Vec3 d = target - current;
@@ -66,7 +67,7 @@ f32 GaitSpeed(const CharacterMovementSettings& s, CharacterGait gait) {
 // Jolt cylinder half-height (excludes the two radius hemispheres) for a total
 // tip-to-tip capsule height.
 f32 CylinderHalf(f32 total_height, f32 radius) {
-  return std::max(total_height * 0.5f - radius, 0.01f);
+  return rx::Max(total_height * 0.5f - radius, 0.01f);
 }
 
 Vec3 TransformFeet(const scene::Transform& t) {
@@ -87,7 +88,7 @@ void RemoveIfPresent(ecs::World& world, ecs::Entity e) {
 }  // namespace
 
 void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
-  if (!std::isfinite(dt) || dt <= 0) return;
+  if (!::isfinite(dt) || dt <= 0) return;
 
   world.Each<CharacterMovementSettings, CharacterShape, CharacterIntent, CharacterState,
              CharacterBody, scene::Transform>(
@@ -126,7 +127,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         } else if (stance == CharacterStance::kCrouching) {
           // Crouch exit needs headroom: sweep a sphere up through the gap the
           // standing capsule would reclaim.
-          const f32 gap = std::max(shape.standing_height - shape.crouched_height, 0.0f);
+          const f32 gap = rx::Max(shape.standing_height - shape.crouched_height, 0.0f);
           bool clear = true;
           if (gap > 1e-4f) {
             const Vec3 origin = feet + up * (shape.crouched_height - shape.standing_radius);
@@ -142,15 +143,15 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         const f32 target_blend = stance == CharacterStance::kCrouching ? 1.0f : 0.0f;
         f32 blend =
             MoveTowardScalar(prev_blend, target_blend, shape.crouch_blend_speed * dt);
-        blend = std::clamp(blend, 0.0f, 1.0f);
+        blend = rx::Clamp(blend, 0.0f, 1.0f);
 
-        const f32 radius = std::lerp(shape.standing_radius, shape.crouched_radius, blend);
-        const f32 height = std::lerp(shape.standing_height, shape.crouched_height, blend);
+        const f32 radius = rx::Lerp(shape.standing_radius, shape.crouched_radius, blend);
+        const f32 height = rx::Lerp(shape.standing_height, shape.crouched_height, blend);
         const f32 half_height = CylinderHalf(height, radius);
         const f32 new_total_half = half_height + radius;
 
-        const bool dims_changed = std::abs(new_total_half - old_total_half) > 1e-4f ||
-                                  std::abs(radius - body.radius) > 1e-4f;
+        const bool dims_changed = ::abs(new_total_half - old_total_half) > 1e-4f ||
+                                  ::abs(radius - body.radius) > 1e-4f;
         if (dims_changed && have_center) {
           const Vec3 new_center = feet + up * new_total_half;
           physics.SetCharacterPosition(body.id, new_center);
@@ -165,11 +166,11 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         }
         state.crouch_blend = blend;
         state.eye_height =
-            std::lerp(shape.standing_eye_height, shape.crouched_eye_height, blend);
+            rx::Lerp(shape.standing_eye_height, shape.crouched_eye_height, blend);
 
         // Analog move intent
         const Vec3 move_h{intent.move.x, 0, intent.move.z};
-        const f32 throttle = std::clamp(Length(move_h), 0.0f, 1.0f);
+        const f32 throttle = rx::Clamp(Length(move_h), 0.0f, 1.0f);
         const Vec3 dir = throttle > 1e-4f ? Normalize(move_h) : Vec3{0, 0, 0};
 
         // Body facing (turn smoothing)
@@ -184,7 +185,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
           state.facing_yaw = state.yaw;  // locked, raw
         } else if (throttle > 1e-3f) {
           const f32 target_yaw = YawFromDir(dir);
-          const f32 gap = std::abs(WrapAngle(target_yaw - state.facing_yaw));
+          const f32 gap = ::abs(WrapAngle(target_yaw - state.facing_yaw));
           // Sticky pivot: a reversal past pivot_angle latches the faster rate and
           // holds it through the bulk of the turn (released near completion), so a
           // 180 spins on the spot instead of arcing then stalling.
@@ -199,7 +200,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         const f32 raw_gait = stance == CharacterStance::kCrouching
                                  ? settings.crouch_speed
                                  : GaitSpeed(settings, intent.gait);
-        const f32 span = std::max(settings.sprint_speed - settings.walk_speed, 0.0f);
+        const f32 span = rx::Max(settings.sprint_speed - settings.walk_speed, 0.0f);
         if (settings.speed_blend_time > 0.0f && span > 1e-4f) {
           state.gait_speed =
               MoveTowardScalar(state.gait_speed, raw_gait, (span / settings.speed_blend_time) * dt);
@@ -211,7 +212,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         Vec3 horizontal{state.integration_velocity.x, 0, state.integration_velocity.z};
         f32 accel = throttle > 1e-4f ? settings.ground_acceleration : settings.ground_deceleration;
         if (!state.grounded) accel = settings.ground_acceleration * settings.air_control;
-        horizontal = MoveTowardVec(horizontal, target_h, std::max(accel, 0.0f) * dt);
+        horizontal = MoveTowardVec(horizontal, target_h, rx::Max(accel, 0.0f) * dt);
         // Crisp stop: no ice-skate tail below the epsilon when input is released.
         if (throttle <= 1e-4f && Length(horizontal) < settings.stop_speed_epsilon)
           horizontal = {0, 0, 0};
@@ -223,9 +224,9 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         // Jump buffer: a fresh press refills the window; otherwise it drains.
         const bool jump_pressed = intent.jump;
         if (jump_pressed) {
-          state.jump_buffer_timer = std::max(settings.jump_buffer_time, 0.0f);
+          state.jump_buffer_timer = rx::Max(settings.jump_buffer_time, 0.0f);
         } else {
-          state.jump_buffer_timer = std::max(0.0f, state.jump_buffer_timer - dt);
+          state.jump_buffer_timer = rx::Max(0.0f, state.jump_buffer_timer - dt);
         }
         const bool jump_wanted = jump_pressed || state.jump_buffer_timer > 0.0f;
         const bool coyote_ok =
@@ -235,8 +236,8 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         f32 vy = state.integration_velocity.y;
         if (grounded_prev && vy < 0) vy = 0;
         if (jump_wanted && coyote_ok) {
-          vy = std::sqrt(2.0f * std::max(settings.gravity, 0.0f) *
-                         std::max(settings.jump_height, 0.0f));
+          vy = ::sqrt(2.0f * rx::Max(settings.gravity, 0.0f) *
+                         rx::Max(settings.jump_height, 0.0f));
           state.jump_buffer_timer = 0;
           state.jump_consumed = true;
         }
@@ -250,7 +251,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         // out-thrust weight to lift off) and the ground clamp below still stops
         // any downward component, so this never bypasses fall/land handling.
         const Vec3& ext = intent.external_acceleration;
-        if (std::isfinite(ext.x) && std::isfinite(ext.y) && std::isfinite(ext.z))
+        if (::isfinite(ext.x) && ::isfinite(ext.y) && ::isfinite(ext.z))
           velocity += ext * dt;
 
         // Drive the controller
@@ -261,7 +262,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         const Vec3 out_feet = out_pos - up * (body.half_height + body.radius);
 
         const bool just_landed = !grounded_prev && grounded;
-        const f32 impact_speed = std::max(0.0f, -velocity.y);  // pre-ground-clamp descent speed
+        const f32 impact_speed = rx::Max(0.0f, -velocity.y);  // pre-ground-clamp descent speed
         state.grounded = grounded;
         // The velocity the resolved feet displacement actually realized (dt > 0 is
         // guaranteed at entry): the speed a wall or ceiling actually allowed.
@@ -275,7 +276,7 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         // the character the instant the obstruction clears. The grounded clamp
         // above covers the blocked-descent case.
         if (velocity.y > 0.0f && realized_velocity.y < velocity.y)
-          velocity.y = std::max(realized_velocity.y, 0.0f);
+          velocity.y = rx::Max(realized_velocity.y, 0.0f);
         // Keep the integrated (requested, now collision-reconciled) velocity as
         // the stepper's own gravity/accel bookkeeping for next step, and publish
         // the realized velocity for consumers (animation, camera, gameplay).
@@ -304,13 +305,13 @@ void StepCharacters(ecs::World& world, physics::PhysicsWorld& physics, f32 dt) {
         }
         if (just_landed && shape.landing_dip_scale > 0.0f &&
             impact_speed > shape.landing_dip_min_speed) {
-          const f32 dip = std::min((impact_speed - shape.landing_dip_min_speed) *
+          const f32 dip = rx::Min((impact_speed - shape.landing_dip_min_speed) *
                                        shape.landing_dip_scale,
-                                   std::max(shape.landing_dip_max, 0.0f));
-          state.landing_dip = std::max(state.landing_dip, dip);
+                                   rx::Max(shape.landing_dip_max, 0.0f));
+          state.landing_dip = rx::Max(state.landing_dip, dip);
         }
         state.landing_dip = shape.landing_dip_half_life > 0.0f
-                                ? state.landing_dip * std::exp2(-dt / shape.landing_dip_half_life)
+                                ? state.landing_dip * ::exp2(-dt / shape.landing_dip_half_life)
                                 : 0.0f;
         state.anchor_eye_y = state.eye_base_y - state.landing_dip;
         state.view_initialized = true;
@@ -355,7 +356,7 @@ void AnswerCameraObstructions(ecs::World& world, physics::PhysicsWorld& physics)
     const Vec3 dir = delta * (1.0f / distance);
     physics::PhysicsWorld::RayHit hit;
     if (physics.SphereCast(o.origin, dir, distance, o.radius, &hit)) {
-      const f32 safe = std::clamp(hit.distance - o.margin, 0.0f, distance);
+      const f32 safe = rx::Clamp(hit.distance - o.margin, 0.0f, distance);
       scene::SetCameraObstructionResult(o, o.request_id, o.origin + dir * safe, true);
     } else {
       scene::SetCameraObstructionResult(o, o.request_id, o.desired_position, false);
@@ -384,7 +385,7 @@ void ApplyCharacterViewMode(ecs::World& world, ecs::Entity entity,
   if (kind == CharacterViewKind::kFirstPerson) {
     orbit.min_pitch = -settings.fp_pitch_limit;
     orbit.max_pitch = settings.fp_pitch_limit;
-    orbit.pitch = std::clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch);
+    orbit.pitch = rx::Clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch);
     // Eye-anchored, zero lag, no boom or obstruction.
     RemoveIfPresent<scene::CameraLocalOffset>(world, entity);
     RemoveIfPresent<scene::CameraBoom>(world, entity);
@@ -394,9 +395,9 @@ void ApplyCharacterViewMode(ecs::World& world, ecs::Entity entity,
   } else {
     orbit.min_pitch = settings.tp_pitch_min;
     orbit.max_pitch = settings.tp_pitch_max;
-    orbit.pitch = std::clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch);
+    orbit.pitch = rx::Clamp(orbit.pitch, orbit.min_pitch, orbit.max_pitch);
     scene::CameraBoom& boom = Ensure<scene::CameraBoom>(world, entity);
-    boom.distance = std::clamp(boom.distance == 0 ? settings.tp_distance : boom.distance,
+    boom.distance = rx::Clamp(boom.distance == 0 ? settings.tp_distance : boom.distance,
                                settings.tp_min_distance, settings.tp_max_distance);
     boom.shoulder_offset = settings.tp_shoulder_offset;
     boom.height_offset = settings.tp_height_offset;
@@ -462,7 +463,7 @@ bool ApplyCharacterZoom(ecs::World& world, ecs::Entity entity, f32 zoom_delta,
     }
     if (boom) {
       boom->distance =
-          std::clamp(desired, settings.tp_min_distance, settings.tp_max_distance);
+          rx::Clamp(desired, settings.tp_min_distance, settings.tp_max_distance);
     }
     return false;
   }

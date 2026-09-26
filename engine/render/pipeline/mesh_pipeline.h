@@ -1,9 +1,9 @@
 #ifndef RX_RENDER_MESH_PIPELINE_H_
 #define RX_RENDER_MESH_PIPELINE_H_
 
-#include <cstddef>
-#include <memory>
+#include <stddef.h>
 
+#include "base/memory/unique_pointer.h"
 #include "core/math.h"
 #include "render/rhi/device.h"
 
@@ -249,7 +249,7 @@ class MeshPipeline {
   // samples > 1 builds the opaque/prepass raster pipelines multisampled
   // (kMsaa mode). Blend pipelines stay single-sampled: the transparent pass
   // always runs after the resolve.
-  static std::unique_ptr<MeshPipeline> Create(Device& device, Format color_format,
+  static base::UniquePointer<MeshPipeline> Create(Device& device, Format color_format,
                                               Format motion_format, Format normal_format,
                                               Format depth_format,
                                               BindingLayoutHandle material_layout,

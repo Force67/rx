@@ -1,10 +1,10 @@
 #ifndef RX_RUNTIME_DEMO_SHOOTER_H_
 #define RX_RUNTIME_DEMO_SHOOTER_H_
 
-#include <string>
 
 #include <base/containers/vector.h>
 
+#include "base/strings/xstring.h"
 #include "combat/damage.h"
 #include "combat/events.h"
 #include "combat/weapon.h"
@@ -92,7 +92,7 @@ class ShooterDemo {
   };
   struct Popup {
     Vec3 position;
-    std::string text;
+    base::String text;
     u32 rgba = 0xffffffff;
     f32 life = 0;
   };

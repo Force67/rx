@@ -1,6 +1,7 @@
+#include "core/scalar.h"
 #include "world/world_claim.h"
+#include "core/sort.h"
 
-#include <algorithm>
 
 namespace rx::world {
 
@@ -78,7 +79,7 @@ i32 ClaimSet::Priority(u64 cell, u32 domains) const {
     const i32 candidate = entry.claim.kind == ClaimKind::kHard      ? 3
                           : entry.claim.kind == ClaimKind::kSoft    ? 2
                                                                     : 1;
-    priority = std::max(priority, candidate);
+    priority = rx::Max(priority, candidate);
   }
   return priority;
 }
@@ -91,10 +92,12 @@ void ClaimSet::Explain(u64 cell, u32 domains, base::Vector<ResidencyClaim>* out)
     if (!Honors(entry.claim)) continue;
     out->push_back(entry.claim);
   }
-  std::sort(out->begin(), out->end(), [](const ResidencyClaim& a, const ResidencyClaim& b) {
-    if (a.kind != b.kind) return a.kind < b.kind;
-    return a.owner < b.owner;
-  });
+  // Stable: one owner may hold several claims of a kind on a cell.
+  rx::StableSort(out->data(), out->data() + out->size(),
+                 [](const ResidencyClaim& a, const ResidencyClaim& b) {
+                   if (a.kind != b.kind) return a.kind < b.kind;
+                   return a.owner < b.owner;
+                 });
 }
 
 }  // namespace rx::world

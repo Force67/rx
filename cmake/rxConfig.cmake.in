@@ -38,7 +38,7 @@ if(NOT TARGET equilibrium::base)
     IMPORTED_LOCATION "${_rx_deps_lib}/libeq_base.a"
     INTERFACE_INCLUDE_DIRECTORIES
       "${_rx_deps_inc}/equilibrium;${_rx_deps_inc}/equilibrium/base"
-    INTERFACE_COMPILE_DEFINITIONS "OS_LINUX;OS_POSIX;BASE_USE_STD_ATOMIC=1"
+    INTERFACE_COMPILE_DEFINITIONS "OS_LINUX;OS_POSIX;BASE_NO_STD_FORMAT"
     INTERFACE_LINK_LIBRARIES "Threads::Threads")
 endif()
 
@@ -56,12 +56,15 @@ if(@RX_INSTALL_UI@ AND NOT TARGET ultragui)
   add_library(yogacore STATIC IMPORTED)
   set_target_properties(yogacore PROPERTIES
     IMPORTED_LOCATION "${_rx_deps_lib}/libyogacore.a")
+  # Built with ULTRAGUI_USE_BASE (engine/ui/CMakeLists.txt): its headers pick
+  # base containers only when the define is seen, so it travels with them.
   add_library(ultragui STATIC IMPORTED)
   set_target_properties(ultragui PROPERTIES
     IMPORTED_LOCATION "${_rx_deps_lib}/libultragui.a"
     INTERFACE_INCLUDE_DIRECTORIES "${_rx_deps_inc}"
+    INTERFACE_COMPILE_DEFINITIONS "ULTRAGUI_USE_BASE"
     INTERFACE_LINK_LIBRARIES
-      "yogacore;PkgConfig::FREETYPE;PkgConfig::HARFBUZZ")
+      "equilibrium::base;yogacore;PkgConfig::FREETYPE;PkgConfig::HARFBUZZ")
 endif()
 
 # Vulkan headers / volk / VMA (PUBLIC via rhi/vulkan_interop.h)
@@ -85,7 +88,14 @@ if(NOT TARGET GPUOpen::VulkanMemoryAllocator)
 endif()
 
 # PRIVATE static archives (link-only for the consumer)
-_rx_import_static(kinema::kinema libkinema.a)
+# rx builds kinema in its equilibrium configuration (KINEMA_USE_BASE): its
+# containers are base's, so the archive links against libeq_base.
+if(NOT TARGET kinema::kinema)
+  _rx_import_static(kinema::kinema libkinema.a)
+  set_target_properties(kinema::kinema PROPERTIES
+    INTERFACE_COMPILE_DEFINITIONS KINEMA_USE_BASE
+    INTERFACE_LINK_LIBRARIES equilibrium::base)
+endif()
 _rx_import_static(rx::stb_impl librx_stb_impl.a)
 if(@RX_INSTALL_JOLT@)
   _rx_import_static(Jolt libJolt.a)

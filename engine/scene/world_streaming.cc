@@ -1,11 +1,12 @@
 #include "scene/world_streaming.h"
 
+#include "base/algorithm.h"
+#include "base/containers/span.h"
+#include "core/scalar.h"
 #include "scene/world_streaming_ecs.h"
 
-#include <algorithm>
-#include <bit>
-#include <cmath>
-#include <limits>
+#include <float.h>
+#include <math.h>
 
 namespace rx::scene {
 namespace {
@@ -13,10 +14,10 @@ namespace {
 constexpr f32 kDistanceQuantization = 1024.0f;
 
 bool IsFinite(const Vec3& value) {
-  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+  return ::isfinite(value.x) && ::isfinite(value.y) && ::isfinite(value.z);
 }
 
-f32 NonNegative(f32 value) { return std::isfinite(value) && value > 0 ? value : 0; }
+f32 NonNegative(f32 value) { return ::isfinite(value) && value > 0 ? value : 0; }
 
 u8 SanitizeAxes(u8 axes) {
   axes &= kWorldStreamXYZ;
@@ -26,43 +27,43 @@ u8 SanitizeAxes(u8 axes) {
 WorldStreamObservation SanitizeObservation(WorldStreamObservation observer) {
   observer.axes = SanitizeAxes(observer.axes);
   auto sanitize_axis = [&](u8 axis, f32* position, f32* velocity) {
-    if ((observer.axes & axis) == 0 && !std::isfinite(*position)) *position = 0;
-    if (!std::isfinite(*velocity)) *velocity = 0;
+    if ((observer.axes & axis) == 0 && !::isfinite(*position)) *position = 0;
+    if (!::isfinite(*velocity)) *velocity = 0;
   };
   sanitize_axis(kWorldStreamX, &observer.position.x, &observer.velocity.x);
   sanitize_axis(kWorldStreamY, &observer.position.y, &observer.velocity.y);
   sanitize_axis(kWorldStreamZ, &observer.position.z, &observer.velocity.z);
   observer.load_distance = NonNegative(observer.load_distance);
   observer.retain_distance =
-      std::max(observer.load_distance, NonNegative(observer.retain_distance));
+      rx::Max(observer.load_distance, NonNegative(observer.retain_distance));
   observer.prediction_seconds = NonNegative(observer.prediction_seconds);
   observer.maximum_prediction_distance = NonNegative(observer.maximum_prediction_distance);
   return observer;
 }
 
 bool HasFiniteActivePosition(const WorldStreamObservation& observer) {
-  return ((observer.axes & kWorldStreamX) == 0 || std::isfinite(observer.position.x)) &&
-         ((observer.axes & kWorldStreamY) == 0 || std::isfinite(observer.position.y)) &&
-         ((observer.axes & kWorldStreamZ) == 0 || std::isfinite(observer.position.z));
+  return ((observer.axes & kWorldStreamX) == 0 || ::isfinite(observer.position.x)) &&
+         ((observer.axes & kWorldStreamY) == 0 || ::isfinite(observer.position.y)) &&
+         ((observer.axes & kWorldStreamZ) == 0 || ::isfinite(observer.position.z));
 }
 
 bool SanitizeRegion(const WorldStreamRegion& source, WorldStreamRegion* result) {
   if (!IsFinite(source.minimum) || !IsFinite(source.maximum)) return false;
   *result = source;
-  result->minimum = {std::min(source.minimum.x, source.maximum.x),
-                     std::min(source.minimum.y, source.maximum.y),
-                     std::min(source.minimum.z, source.maximum.z)};
-  result->maximum = {std::max(source.minimum.x, source.maximum.x),
-                     std::max(source.minimum.y, source.maximum.y),
-                     std::max(source.minimum.z, source.maximum.z)};
+  result->minimum = {rx::Min(source.minimum.x, source.maximum.x),
+                     rx::Min(source.minimum.y, source.maximum.y),
+                     rx::Min(source.minimum.z, source.maximum.z)};
+  result->maximum = {rx::Max(source.minimum.x, source.maximum.x),
+                     rx::Max(source.minimum.y, source.maximum.y),
+                     rx::Max(source.minimum.z, source.maximum.z)};
   return true;
 }
 
 f32 SafeDistance(double distance) {
-  if (!std::isfinite(distance) || distance > std::numeric_limits<f32>::max()) {
-    return std::numeric_limits<f32>::infinity();
+  if (!::isfinite(distance) || distance > FLT_MAX) {
+    return INFINITY;
   }
-  return static_cast<f32>(std::max(0.0, distance));
+  return static_cast<f32>(rx::Max(0.0, distance));
 }
 
 Vec3 PredictedPosition(const WorldStreamObservation& observer) {
@@ -81,11 +82,11 @@ Vec3 PredictedPosition(const WorldStreamObservation& observer) {
           ? static_cast<double>(observer.velocity.z) * observer.prediction_seconds
           : 0.0,
   };
-  const double length = std::hypot(offset[0], offset[1], offset[2]);
+  const double length = ::hypot(offset[0], offset[1], offset[2]);
   if (length <= 0) return observer.position;
   const double scale =
-      std::min(1.0, static_cast<double>(observer.maximum_prediction_distance) / length);
-  const f32 maximum = std::numeric_limits<f32>::max();
+      rx::Min(1.0, static_cast<double>(observer.maximum_prediction_distance) / length);
+  const f32 maximum = FLT_MAX;
   auto advance = [&](f32 position, double delta) {
     const double value = static_cast<double>(position) + delta * scale;
     if (value >= maximum) return maximum;
@@ -108,7 +109,7 @@ f32 PointBoundsDistance(const Vec3& point, const WorldStreamRegion& region, u8 a
   accumulate(kWorldStreamX, point.x, region.minimum.x, region.maximum.x);
   accumulate(kWorldStreamY, point.y, region.minimum.y, region.maximum.y);
   accumulate(kWorldStreamZ, point.z, region.minimum.z, region.maximum.z);
-  return SafeDistance(std::sqrt(distance_sq));
+  return SafeDistance(::sqrt(distance_sq));
 }
 
 double PointSegmentDistance(double point_x, double point_y, double point_z, Vec3 start, Vec3 end,
@@ -124,12 +125,12 @@ double PointSegmentDistance(double point_x, double point_y, double point_z, Vec3
       segment[0] * segment[0] + segment[1] * segment[1] + segment[2] * segment[2];
   double t = 0;
   if (length_sq > 0) {
-    t = std::clamp(
+    t = rx::Clamp(
         (relative[0] * segment[0] + relative[1] * segment[1] + relative[2] * segment[2]) /
             length_sq,
         0.0, 1.0);
   }
-  return std::hypot(relative[0] - segment[0] * t, relative[1] - segment[1] * t,
+  return ::hypot(relative[0] - segment[0] * t, relative[1] - segment[1] * t,
                     relative[2] - segment[2] * t);
 }
 
@@ -155,12 +156,12 @@ f32 SweptBoundsDistance(const Vec3& start, const Vec3& end, const WorldStreamReg
       (axes & kWorldStreamZ) ? (static_cast<double>(region.maximum.z) - region.minimum.z) * 0.5
                              : 0.0,
   };
-  const double radius = std::hypot(extent[0], extent[1], extent[2]);
+  const double radius = ::hypot(extent[0], extent[1], extent[2]);
   const double distance = PointSegmentDistance(center[0], center[1], center[2], start, end, axes);
-  if (!std::isfinite(distance) || !std::isfinite(radius)) {
+  if (!::isfinite(distance) || !::isfinite(radius)) {
     return PointBoundsDistance(start, region, axes);
   }
-  return SafeDistance(std::max(0.0, distance - radius));
+  return SafeDistance(rx::Max(0.0, distance - radius));
 }
 
 WorldStreamDemand EvaluateSanitizedDemand(const WorldStreamObservation& observer,
@@ -168,14 +169,14 @@ WorldStreamDemand EvaluateSanitizedDemand(const WorldStreamObservation& observer
                                           const WorldStreamRegion& region) {
   const f32 current = PointBoundsDistance(observer.position, region, observer.axes);
   const f32 swept = SweptBoundsDistance(observer.position, predicted, region, observer.axes);
-  const f32 prediction = std::min(current, swept);
+  const f32 prediction = rx::Min(current, swept);
   const bool load = prediction <= observer.load_distance;
   return {load, prediction <= observer.retain_distance, load && current > observer.load_distance,
           current, prediction};
 }
 
 u64 DistanceKey(f32 distance) {
-  if (std::isnan(distance) || distance <= 0) return 0;
+  if (::isnan(distance) || distance <= 0) return 0;
   // Keep millimetre-scale ordering at ordinary world distances. Above the
   // fixed-point range, positive IEEE-754 bits are monotonic, so the second
   // range preserves ordering through every finite f32 value and infinity.
@@ -184,17 +185,17 @@ u64 DistanceKey(f32 distance) {
   if (distance < kLinearLimit) {
     return static_cast<u64>(distance * kDistanceQuantization + 0.5f);
   }
-  const u32 bits = std::bit_cast<u32>(distance);
-  const u32 limit_bits = std::bit_cast<u32>(kLinearLimit);
+  const u32 bits = rx::BitCast<u32>(distance);
+  const u32 limit_bits = rx::BitCast<u32>(kLinearLimit);
   return (u64{1} << 32) + static_cast<u64>(bits - limit_bits);
 }
 
-WorldStreamDemand DemandFromObservers(std::span<const WorldStreamObservation> observers,
-                                      std::span<const Vec3> predictions,
+WorldStreamDemand DemandFromObservers(base::Span<const WorldStreamObservation> observers,
+                                      base::Span<const Vec3> predictions,
                                       const WorldStreamRegion& region) {
   WorldStreamDemand combined;
-  combined.current_distance = std::numeric_limits<f32>::infinity();
-  combined.predicted_distance = std::numeric_limits<f32>::infinity();
+  combined.current_distance = INFINITY;
+  combined.predicted_distance = INFINITY;
   bool any_current_load = false;
   for (size_t i = 0; i < observers.size(); ++i) {
     const WorldStreamObservation& observer = observers[i];
@@ -203,15 +204,15 @@ WorldStreamDemand DemandFromObservers(std::span<const WorldStreamObservation> ob
     combined.load |= demand.load;
     combined.retain |= demand.retain;
     any_current_load |= demand.load && !demand.prediction_only;
-    combined.current_distance = std::min(combined.current_distance, demand.current_distance);
-    combined.predicted_distance = std::min(combined.predicted_distance, demand.predicted_distance);
+    combined.current_distance = rx::Min(combined.current_distance, demand.current_distance);
+    combined.predicted_distance = rx::Min(combined.predicted_distance, demand.predicted_distance);
   }
   combined.prediction_only = combined.load && !any_current_load;
   return combined;
 }
 
 f32 PriorityDistance(const WorldStreamDemand& demand) {
-  return std::min(demand.current_distance, demand.predicted_distance);
+  return rx::Min(demand.current_distance, demand.predicted_distance);
 }
 
 u8 Urgency(const WorldStreamDemand& demand) {
@@ -246,7 +247,7 @@ WorldStreamAction ActionFor(WorldStreamActionKind kind, const WorldStreamRegion&
 
 WorldStreamPlan::TrackedRegion* WorldStreamPlan::FindRegion(u64 id) {
   if (regions_.empty()) return nullptr;
-  auto it = std::lower_bound(
+  auto it = base::LowerBound(
       regions_.begin(), regions_.end(), id,
       [](const TrackedRegion& region, u64 wanted) { return region.region.id < wanted; });
   return it != regions_.end() && it->region.id == id ? it : nullptr;
@@ -254,7 +255,7 @@ WorldStreamPlan::TrackedRegion* WorldStreamPlan::FindRegion(u64 id) {
 
 const WorldStreamPlan::TrackedRegion* WorldStreamPlan::FindRegion(u64 id) const {
   if (regions_.empty()) return nullptr;
-  auto it = std::lower_bound(
+  auto it = base::LowerBound(
       regions_.begin(), regions_.end(), id,
       [](const TrackedRegion& region, u64 wanted) { return region.region.id < wanted; });
   return it != regions_.end() && it->region.id == id ? it : nullptr;
@@ -308,8 +309,8 @@ WorldStreamDemand EvaluateWorldStreamDemand(const WorldStreamObservation& source
   WorldStreamRegion region;
   if (!HasFiniteActivePosition(observer) || !SanitizeRegion(source_region, &region) ||
       (observer.channels & source_region.channels) == 0) {
-    return {false, false, false, std::numeric_limits<f32>::infinity(),
-            std::numeric_limits<f32>::infinity()};
+    return {false, false, false, INFINITY,
+            INFINITY};
   }
 
   const Vec3 predicted = PredictedPosition(observer);
@@ -332,8 +333,8 @@ void ConfigureWorldStreaming(WorldStreamPlan& plan, const WorldStreamSettings& s
   plan.settings_ = settings;
 }
 
-void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObservation> observers,
-                           std::span<const WorldStreamRegion> candidates,
+void AdvanceWorldStreaming(WorldStreamPlan& plan, base::Span<const WorldStreamObservation> observers,
+                           base::Span<const WorldStreamRegion> candidates,
                            const WorldStreamFrameBudget& budget,
                            base::Vector<WorldStreamAction>* actions) {
   if (!actions) return;
@@ -365,12 +366,15 @@ void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObs
     WorldStreamRegion region;
     if (SanitizeRegion(source, &region)) canonical.push_back(region);
   }
-  std::sort(canonical.begin(), canonical.end(), RegionMetadataLess);
-  canonical.erase(std::unique(canonical.begin(), canonical.end(),
-                              [](const WorldStreamRegion& a, const WorldStreamRegion& b) {
-                                return a.id == b.id;
-                              }),
-                  canonical.end());
+  // RegionMetadataLess compares every field, so regions it ties are equal in
+  // value (a bound can differ only in the sign of a zero) and any correct sort
+  // keeps an equivalent survivor per id.
+  base::Sort(canonical.begin(), canonical.end(), RegionMetadataLess);
+  size_t kept = 0;
+  for (size_t i = 0; i < canonical.size(); ++i) {
+    if (kept == 0 || canonical[kept - 1].id != canonical[i].id) canonical[kept++] = canonical[i];
+  }
+  canonical.erase(canonical.begin() + kept, canonical.end());
 
   using ScoredRegion = WorldStreamPlan::ScoredRegion;
   using ResidentRetirement = WorldStreamPlan::ResidentRetirement;
@@ -392,7 +396,7 @@ void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObs
 
   auto score_for = [&](u64 id) -> ScoredRegion* {
     if (scored.empty()) return nullptr;
-    auto it = std::lower_bound(
+    auto it = base::LowerBound(
         scored.begin(), scored.end(), id,
         [](const ScoredRegion& score, u64 wanted) { return score.region.id < wanted; });
     return it != scored.end() && it->region.id == id ? it : nullptr;
@@ -426,8 +430,8 @@ void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObs
   for (WorldStreamPlan::TrackedRegion& tracked : plan.regions_) {
     ScoredRegion* current = score_for(tracked.region.id);
     WorldStreamDemand demand;
-    demand.current_distance = std::numeric_limits<f32>::infinity();
-    demand.predicted_distance = std::numeric_limits<f32>::infinity();
+    demand.current_distance = INFINITY;
+    demand.predicted_distance = INFINITY;
     if (current) demand = current->demand;
     if (tracked.phase == WorldStreamPlan::Phase::kPreparing ||
         tracked.phase == WorldStreamPlan::Phase::kReady ||
@@ -514,7 +518,7 @@ void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObs
 
   for (const ScoredRegion& score : scored) {
     if (!score.demand.load || plan.FindRegion(score.region.id)) continue;
-    auto waiting = std::lower_bound(
+    auto waiting = base::LowerBound(
         plan.waiting_.begin(), plan.waiting_.end(), score.region.id,
         [](const WorldStreamPlan::WaitingRegion& region, u64 wanted) { return region.id < wanted; });
     if (waiting == plan.waiting_.end() || waiting->id != score.region.id) {
@@ -527,11 +531,14 @@ void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObs
 
   // Admit cleanup before new work so continual demand cannot keep obsolete
   // resident payloads alive by consuming every pending slot first.
-  std::sort(resident_retirements.begin(), resident_retirements.end(),
-            [](const ResidentRetirement& a, const ResidentRetirement& b) {
-              if (a.request_tick != b.request_tick) return a.request_tick < b.request_tick;
-              return a.id < b.id;
-            });
+  // Each tracked region contributes at most one entry to resident_retirements,
+  // prepare and commit, and all three comparators end on the id, so any
+  // correct sort agrees.
+  base::Sort(resident_retirements.begin(), resident_retirements.end(),
+             [](const ResidentRetirement& a, const ResidentRetirement& b) {
+               if (a.request_tick != b.request_tick) return a.request_tick < b.request_tick;
+               return a.id < b.id;
+             });
   u32 unloads = 0;
   for (const ResidentRetirement& retirement : resident_retirements) {
     if (unloads >= budget.maximum_unloads || pending >= budget.maximum_pending) break;
@@ -549,7 +556,7 @@ void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObs
     ++pending;
   }
 
-  std::sort(prepare.begin(), prepare.end(), [](const ScoredRegion& a, const ScoredRegion& b) {
+  base::Sort(prepare.begin(), prepare.end(), [](const ScoredRegion& a, const ScoredRegion& b) {
     if (a.urgency != b.urgency) return a.urgency < b.urgency;
     if (a.region.priority != b.region.priority) return a.region.priority > b.region.priority;
     if (a.last_prepare_tick != b.last_prepare_tick) {
@@ -570,11 +577,11 @@ void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObs
       WorldStreamPlan::TrackedRegion created;
       created.region = score.region;
       created.generation = plan.TakeGeneration();
-      auto insertion = std::lower_bound(plan.regions_.begin(), plan.regions_.end(), score.region.id,
+      auto insertion = base::LowerBound(plan.regions_.begin(), plan.regions_.end(), score.region.id,
                                         [](const WorldStreamPlan::TrackedRegion& region,
                                            u64 wanted) { return region.region.id < wanted; });
       tracked = plan.regions_.insert(insertion, created);
-      auto waiting = std::lower_bound(
+      auto waiting = base::LowerBound(
           plan.waiting_.begin(), plan.waiting_.end(), score.region.id,
           [](const WorldStreamPlan::WaitingRegion& region, u64 wanted) {
             return region.id < wanted;
@@ -597,7 +604,7 @@ void AdvanceWorldStreaming(WorldStreamPlan& plan, std::span<const WorldStreamObs
     ++pending;
   }
 
-  std::sort(commit.begin(), commit.end(), [](const ScoredRegion& a, const ScoredRegion& b) {
+  base::Sort(commit.begin(), commit.end(), [](const ScoredRegion& a, const ScoredRegion& b) {
     if (a.urgency != b.urgency) return a.urgency < b.urgency;
     if (a.last_commit_tick != b.last_commit_tick) return a.last_commit_tick < b.last_commit_tick;
     if (a.region.priority != b.region.priority) return a.region.priority > b.region.priority;

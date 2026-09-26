@@ -1,6 +1,5 @@
 #include "render/post/ngx_context.h"
 
-#include <string>
 
 #include <base/option.h>
 
@@ -8,6 +7,7 @@
 #include "render/rhi/device.h"
 // Vulkan escape hatch: NGX speaks raw Vulkan. Also pulls volk
 // (VK_NO_PROTOTYPES) before the ngx vk header.
+#include "base/strings/xstring.h"
 #include "render/rhi/vulkan_interop.h"
 
 #include <nvsdk_ngx.h>
@@ -25,13 +25,13 @@ constexpr const char* kProjectId = "8d4a1f60-3c2e-4b8a-9f17-c4035c19df04";
 base::Option<const char*> DlssLibDir{"dlss.lib.dir", nullptr, "RX_DLSS_LIB_DIR"};
 
 void NgxLog(const char* message, NVSDK_NGX_Logging_Level, NVSDK_NGX_Feature) {
-  std::string line(message ? message : "");
+  base::String line(message ? message : "");
   while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
   if (!line.empty()) RX_WARN("ngx: {}", line);
 }
 
-std::wstring ToWide(const char* s) {
-  std::wstring w;
+base::StringW ToWide(const char* s) {
+  base::StringW w;
   for (; s && *s; ++s) w.push_back(static_cast<wchar_t>(*s));
   return w;
 }
@@ -41,7 +41,7 @@ struct Context {
   bool initialized = false;
   VkDevice vk_device = VK_NULL_HANDLE;
   NVSDK_NGX_Parameter* capability = nullptr;
-  std::wstring snippet_dir;
+  base::StringW snippet_dir;
   const wchar_t* snippet_path = nullptr;
 };
 Context g_context;

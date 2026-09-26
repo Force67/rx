@@ -1,7 +1,8 @@
 #include "render/screenspace/ssr.h"
 
-#include <cstring>
+#include <string.h>
 
+#include "base/memory/mem_ops.h"
 #include "core/log.h"
 #include "render/rhi/device.h"
 #include "shaders/ssr_cs_hlsl.h"
@@ -85,7 +86,7 @@ ResourceHandle SsrPass::AddToGraph(RenderGraph& graph, ResourceHandle scene_colo
       [this, scene_color, depth, normals, out, view_proj, inv_view_proj, camera_pos, frame_index,
        slot = frame_index % 2](PassContext& ctx) {
         const SsrCamera camera{view_proj, inv_view_proj};
-        std::memcpy(camera_[slot].mapped, &camera, sizeof(camera));
+        base::MemCopy(camera_[slot].mapped, &camera, sizeof(camera));
 
         SsrPush push{};
         push.camera_pos[0] = camera_pos.x;

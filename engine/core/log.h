@@ -1,24 +1,26 @@
 #ifndef RX_CORE_LOG_H_
 #define RX_CORE_LOG_H_
 
-#include <format>
-#include <string_view>
 
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
 #include "core/export.h"
+#include "core/format.h"
 
 namespace rx {
 
 enum class LogLevel { kTrace, kDebug, kInfo, kWarn, kError };
 
 namespace detail {
-RX_CORE_EXPORT void LogMessage(LogLevel level, std::string_view message);
+RX_CORE_EXPORT void LogMessage(LogLevel level, base::StringRef message);
 }
 
 RX_CORE_EXPORT void SetLogLevel(LogLevel level);
 
 template <typename... Args>
-void Log(LogLevel level, std::format_string<Args...> fmt, Args&&... args) {
-  detail::LogMessage(level, std::format(fmt, std::forward<Args>(args)...));
+void Log(LogLevel level, FormatString<typename format_detail::Identity<Args>::type...> fmt,
+         const Args&... args) {
+  detail::LogMessage(level, StrFormat<Args...>(fmt, args...));
 }
 
 #define RX_TRACE(...) ::rx::Log(::rx::LogLevel::kTrace, __VA_ARGS__)

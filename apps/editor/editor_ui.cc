@@ -1,15 +1,11 @@
 // The editor's ugui layer: draw-data-mode UIContext driven by the recreation-
 // style GuiRenderBackend through FrameView::hud_draw, plus the C++ that
 // generates the .ugui document from editor state and routes widget events.
-#include <cmath>
-#include <cstdarg>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <functional>
-#include <string>
-#include <string_view>
+#include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include <ugui/core/color.h>
 #include <ugui/style/style.h>
@@ -19,20 +15,27 @@
 #include <ugui/widgets/widget.h>
 #include <ugui/widgets/widget_registry.h>
 
+#include "core/file_system.h"
 #include "core/log.h"
 #include "edit/hierarchy.h"
 #include "editor_app.h"
 
 #include "anim/morph.h"
+#include "base/algorithm.h"
+#include "base/containers/pair.h"
+#include "base/containers/vector.h"
+#include "base/functional/function.h"
+#include "base/memory/move.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/scalar.h"
 #include "render/rhi/vulkan_interop.h"
 #include "scene/components.h"
 
 namespace rx::editor {
-namespace fs = std::filesystem;
-
 namespace {
 const char *FindFont() {
-  static std::string resolved;
+  static base::String resolved;
   if (FILE *p = popen("fc-match -f '%{file}' sans 2>/dev/null", "r")) {
     char buf[1024];
     size_t n = fread(buf, 1, sizeof(buf) - 1, p);
@@ -40,7 +43,7 @@ const char *FindFont() {
     if (n > 0) {
       buf[n] = '\0';
       resolved = buf;
-      if (fs::exists(resolved))
+      if (fs::Exists(resolved))
         return resolved.c_str();
     }
   }
@@ -51,12 +54,12 @@ const char *FindFont() {
       "/run/current-system/sw/share/X11/fonts/DejaVuSans.ttf",
   };
   for (auto *c : candidates)
-    if (fs::exists(c))
+    if (fs::Exists(c))
       return c;
   return nullptr;
 }
 
-std::string F(const char *fmt, ...) {
+base::String F(const char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
   va_list measure;
@@ -67,14 +70,14 @@ std::string F(const char *fmt, ...) {
     va_end(ap);
     return {};
   }
-  std::string result(static_cast<size_t>(size), '\0');
+  base::String result(static_cast<size_t>(size), '\0');
   vsnprintf(result.data(), result.size() + 1, fmt, ap);
   va_end(ap);
   return result;
 }
 
-std::string EscapeUguiString(std::string_view value) {
-  std::string escaped;
+base::String EscapeUguiString(base::StringRef value) {
+  base::String escaped;
   escaped.reserve(value.size());
   for (char c : value) {
     switch (c) {
@@ -104,13 +107,13 @@ std::string EscapeUguiString(std::string_view value) {
 void QuatToEuler(const Quat &q, f32 out_deg[3]) {
   f32 sinr = 2 * (q.w * q.x + q.y * q.z);
   f32 cosr = 1 - 2 * (q.x * q.x + q.y * q.y);
-  f32 x = std::atan2(sinr, cosr);
+  f32 x = ::atan2(sinr, cosr);
   f32 sinp = 2 * (q.w * q.y - q.z * q.x);
   f32 y =
-      std::fabs(sinp) >= 1 ? std::copysign(1.5707963f, sinp) : std::asin(sinp);
+      ::fabs(sinp) >= 1 ? ::copysign(1.5707963f, sinp) : ::asin(sinp);
   f32 siny = 2 * (q.w * q.z + q.x * q.y);
   f32 cosy = 1 - 2 * (q.y * q.y + q.z * q.z);
-  f32 z = std::atan2(siny, cosy);
+  f32 z = ::atan2(siny, cosy);
   const f32 r2d = 57.29578f;
   out_deg[0] = x * r2d;
   out_deg[1] = y * r2d;
@@ -118,9 +121,9 @@ void QuatToEuler(const Quat &q, f32 out_deg[3]) {
 }
 Quat EulerToQuat(const f32 deg[3]) {
   const f32 d2r = 0.0174533f;
-  f32 cx = std::cos(deg[0] * d2r * 0.5f), sx = std::sin(deg[0] * d2r * 0.5f);
-  f32 cy = std::cos(deg[1] * d2r * 0.5f), sy = std::sin(deg[1] * d2r * 0.5f);
-  f32 cz = std::cos(deg[2] * d2r * 0.5f), sz = std::sin(deg[2] * d2r * 0.5f);
+  f32 cx = ::cos(deg[0] * d2r * 0.5f), sx = ::sin(deg[0] * d2r * 0.5f);
+  f32 cy = ::cos(deg[1] * d2r * 0.5f), sy = ::sin(deg[1] * d2r * 0.5f);
+  f32 cz = ::cos(deg[2] * d2r * 0.5f), sz = ::sin(deg[2] * d2r * 0.5f);
   return Normalize(
       Quat{sx * cy * cz - cx * sy * sz, cx * sy * cz + sx * cy * sz,
            cx * cy * sz - sx * sy * cz, cx * cy * cz + sx * sy * sz});
@@ -128,8 +131,8 @@ Quat EulerToQuat(const f32 deg[3]) {
 
 // Engine reflection registers lowercase prop names ("position"); display them
 // capitalized in the inspector.
-std::string DisplayName(const char *n) {
-  std::string s = n ? n : "";
+base::String DisplayName(const char *n) {
+  base::String s = n ? n : "";
   if (!s.empty() && s[0] >= 'a' && s[0] <= 'z')
     s[0] = (char)(s[0] - 'a' + 'A');
   return s;
@@ -144,7 +147,7 @@ const char *AxisColor(int i) {
          : i == 2 ? "#5a8dee"
                   : "#c9a25a";
 }
-std::string KindColor(const std::string &k) {
+base::String KindColor(const base::String &k) {
   if (k == "mesh")
     return "#2f7f6a";
   if (k == "terrain")
@@ -204,7 +207,7 @@ bool Editor::UiInit() {
 #ifdef RX_EDITOR_UI_DIR
   ui_dir_ = RX_EDITOR_UI_DIR;
 #endif
-  if (const char *env = std::getenv("RX_EDITOR_UI_DIR"))
+  if (const char *env = ::getenv("RX_EDITOR_UI_DIR"))
     ui_dir_ = env;
 
   ui_ready_ = true;
@@ -289,7 +292,7 @@ void Editor::UiFeedInput(f32) {
 
 // Per-frame text + gizmo widget updates
 void Editor::UiPerFrameText() {
-  auto set = [&](const char *name, const std::string &v) {
+  auto set = [&](const char *name, const base::String &v) {
     ugui::wid w = ui_.FindWidget(name);
     if (w.valid())
       ugui::SetText(w, v);
@@ -335,7 +338,7 @@ void Editor::UpdateGizmoWidgets() {
   scene::Transform wt =
       e ? edit::WorldTransform(*world_, e) : scene::Transform{};
   Vec3 origin{wt.position[0], wt.position[1], wt.position[2]};
-  f32 len = e ? std::max(0.5f, Length(origin - camera_.position()) * 0.18f) : 0;
+  f32 len = e ? rx::Max(0.5f, Length(origin - camera_.position()) * 0.18f) : 0;
   for (int a = 0; a < 3; ++a) {
     ugui::wid w = ui_.FindWidget(F("gizmo_%c", "xyz"[a]).c_str());
     if (!w.valid())
@@ -365,21 +368,21 @@ void Editor::UpdateGizmoWidgets() {
 void Editor::UiRebuild() {
   if (!ui_ready_)
     return;
-  std::string doc = UiBuildDoc();
+  base::String doc = UiBuildDoc();
   ui_.LoadUiString(doc.c_str(), "editor");
   ui_.InvalidateWidgetCache();
 
   // Wire text-input handlers (they survive until the next rebuild).
   if (ugui::wid s = ui_.FindWidget("hier_search"); s.valid()) {
     ugui::SetTextInputValue(s, search_filter_);
-    ugui::SetTextInputChange(s, [this](const ugui::String &v) {
+    ugui::SetTextInputChange(s, [this](const base::String &v) {
       search_filter_ = v;
       MarkDirty();
     });
   }
   if (ugui::wid c = ui_.FindWidget("content_filter"); c.valid()) {
     ugui::SetTextInputValue(c, content_filter_);
-    ugui::SetTextInputChange(c, [this](const ugui::String &v) {
+    ugui::SetTextInputChange(c, [this](const base::String &v) {
       content_filter_ = v;
       MarkDirty();
     });
@@ -388,34 +391,34 @@ void Editor::UiRebuild() {
     if (ecs::Entity e = selection_.primary(); e && world_->IsAlive(e))
       ugui::SetTextInputValue(n, EntityLabel(e));
     ugui::SetTextInputSubmit(
-        n, [this](const ugui::String &v) { OnUiTextSubmit("insp_name", v); });
+        n, [this](const base::String &v) { OnUiTextSubmit("insp_name", v); });
   }
   ui_.input().RefreshHover(ui_.root());
   UiPerFrameText();
   ui_dirty_ = false;
 }
 
-std::string Editor::UiBuildDoc() {
-  std::string tmpl;
-  std::string path =
-      (ui_dir_.empty() ? std::string("apps/editor/ui") : ui_dir_) +
+base::String Editor::UiBuildDoc() {
+  base::String tmpl;
+  base::String path =
+      (ui_dir_.empty() ? base::String("apps/editor/ui") : ui_dir_) +
       "/editor.ugui";
-  if (FILE *f = std::fopen(path.c_str(), "rb")) {
+  if (FILE *f = ::fopen(path.c_str(), "rb")) {
     char buf[4096];
     size_t n;
-    while ((n = std::fread(buf, 1, sizeof(buf), f)) > 0)
+    while ((n = ::fread(buf, 1, sizeof(buf), f)) > 0)
       tmpl.append(buf, n);
-    std::fclose(f);
-    ui_mtime_ = (int64_t)fs::last_write_time(path).time_since_epoch().count();
+    ::fclose(f);
+    ui_mtime_ = fs::LastWriteTime(path).value_or(0);
   } else {
     RX_WARN("editor: cannot read {}", path);
     return "panel root { background: #101113; text t { text: \"missing "
            "editor.ugui\"; color:#f00; } }";
   }
-  auto replace = [&](const char *marker, const std::string &with) {
+  auto replace = [&](const char *marker, const base::String &with) {
     size_t p = tmpl.find(marker);
-    if (p != std::string::npos)
-      tmpl.replace(p, std::strlen(marker), with);
+    if (p != base::String::npos)
+      tmpl = tmpl.substr(0, p) + with + tmpl.substr(p + ::strlen(marker));
   };
   replace("//@@HIERARCHY@@", BuildHierarchy());
   replace("//@@MODES@@", BuildModeToolbar());
@@ -434,17 +437,17 @@ std::string Editor::UiBuildDoc() {
   return tmpl;
 }
 
-std::string Editor::BuildHierarchy() {
-  std::string out;
+base::String Editor::BuildHierarchy() {
+  base::String out;
   // Recursive emit respecting Parent; filter by search.
-  std::function<void(ecs::Entity, int)> emit = [&](ecs::Entity e, int depth) {
+  base::Function<void(ecs::Entity, int)> emit = [&](ecs::Entity e, int depth) {
     if (IsTerrainVisual(e))
       return;
-    std::string label = EntityLabel(e);
+    base::String label = EntityLabel(e);
     bool match = search_filter_.empty() ||
-                 label.find(search_filter_) != std::string::npos;
+                 label.find(search_filter_) != base::String::npos;
     if (match) {
-      const std::string escaped_label = EscapeUguiString(label);
+      const base::String escaped_label = EscapeUguiString(label);
       bool sel = selection_.Contains(e);
       const char *icon =
           world_->Has<scene::Renderable>(e) ? "#e0b06a" : "#c78ad6";
@@ -479,7 +482,7 @@ std::string Editor::BuildHierarchy() {
   return out;
 }
 
-std::string Editor::BuildInspector() {
+base::String Editor::BuildInspector() {
   if (editor_mode_ == EditorMode::kTerrain)
     return BuildTerrainInspector();
   if (editor_mode_ == EditorMode::kPlace)
@@ -489,8 +492,8 @@ std::string Editor::BuildInspector() {
     return "text nosel { text: \"No selection\"; font-size: 13; color: "
            "#6a6d73; padding: 16; }\n";
 
-  std::string out;
-  const std::string escaped_entity_label = EscapeUguiString(EntityLabel(e));
+  base::String out;
+  const base::String escaped_entity_label = EscapeUguiString(EntityLabel(e));
   out += "panel name_row { layout: row; align: center; padding: 10 12; gap: 8; "
          "border-color:#101113; border-width:0 0 1 0;\n";
   out += "  panel ni { width: 8; height: 8; corner-radius: 4; background: "
@@ -512,7 +515,7 @@ std::string Editor::BuildInspector() {
     int subs = 0;
     if (rec && !rec->mesh.lods.empty())
       subs = (int)rec->mesh.lods[0].submeshes.size();
-    const std::string escaped_mesh_name =
+    const base::String escaped_mesh_name =
         EscapeUguiString(rec ? rec->name : "(none)");
     out += F("panel matb { layout: column; padding: 10 12; gap: 8;\n"
              "  panel mrow { layout: row; gap: 8; align:center; text ml { "
@@ -524,7 +527,7 @@ std::string Editor::BuildInspector() {
              "panel sv { class: field; text svv { class: field_val; text: "
              "\"%d\"; } } }\n",
              escaped_mesh_name.c_str(), subs);
-    uint32_t tint = tints_.count(e.index) ? tints_[e.index] : 0xffffff;
+    uint32_t tint = tints_.contains(e.index) ? tints_[e.index] : 0xffffff;
     out += F("  panel trow { layout: row; gap: 8; align:center; text tl { "
              "class: row_label; text: \"Tint\"; }\n"
              "    panel tsw { width: 26; height: 26; corner-radius: 5; "
@@ -571,7 +574,7 @@ std::string Editor::BuildInspector() {
       const f32 to_max_x = verdict.cell_maximum.x - t->position[0];
       const f32 to_min_z = t->position[2] - verdict.cell_minimum.z;
       const f32 to_max_z = verdict.cell_maximum.z - t->position[2];
-      const f32 nearest = std::min(std::min(to_min_x, to_max_x), std::min(to_min_z, to_max_z));
+      const f32 nearest = rx::Min(rx::Min(to_min_x, to_max_x), rx::Min(to_min_z, to_max_z));
       out += F("  text bakecell { text: \"cell %016llx   [%.0f, %.0f]..[%.0f, %.0f] @ %g m\"; "
                "font-size: 11; color: #a8abb2; }\n",
                static_cast<unsigned long long>(verdict.cell),
@@ -588,7 +591,7 @@ std::string Editor::BuildInspector() {
                static_cast<double>(nearest), nearest < 1.0f ? "#e0b06a" : "#6a6d73");
     }
     if (!verdict.dropped.empty()) {
-      std::string dropped;
+      base::String dropped;
       for (size_t i = 0; i < verdict.dropped.size(); ++i) {
         dropped += (i != 0 ? ", " : "") + verdict.dropped[i];
       }
@@ -601,13 +604,13 @@ std::string Editor::BuildInspector() {
 
   // Inspector tab: one section per component.
   for (const edit::ComponentDesc *comp : edit::ComponentsOn(*world_, e)) {
-    if (std::string(comp->name) == "Guid")
+    if (base::String(comp->name) == "Guid")
       continue; // internal
     out += "panel ch { class: comp_header;\n";
     out += F("  text ct { class: comp_title; text: \"%s\"; }\n", comp->name);
     out += "  panel csp { flex-grow: 1; }\n";
-    if (std::string(comp->name) != "Transform" &&
-        std::string(comp->name) != "Name")
+    if (base::String(comp->name) != "Transform" &&
+        base::String(comp->name) != "Name")
       out += F("  button insp_rm_%u { text: \"x\"; font-size: 13; color: "
                "#7a7d83; cursor: pointer; :hover { color:#e0655f; } }\n",
                comp->id);
@@ -627,7 +630,7 @@ std::string Editor::BuildInspector() {
           : (v.type == edit::PropType::kVec2) ? 2
                                               : 1;
       if (v.type == edit::PropType::kString) {
-        const std::string escaped_value = EscapeUguiString(v.s);
+        const base::String escaped_value = EscapeUguiString(v.s);
         out += F("    panel fv { class: field; text vv { class: field_val; "
                  "text: \"%s\"; } }\n",
                  escaped_value.c_str());
@@ -639,7 +642,7 @@ std::string Editor::BuildInspector() {
       } else if (v.type == edit::PropType::kU64 ||
                  v.type == edit::PropType::kAssetId ||
                  v.type == edit::PropType::kEntity) {
-        std::string txt;
+        base::String txt;
         if (v.type == edit::PropType::kEntity)
           txt = F("entity %u", v.e.index);
         else
@@ -680,10 +683,10 @@ std::string Editor::BuildInspector() {
     for (const edit::ComponentDesc *comp : edit::AllComponents()) {
       if (world_->HasRaw(e, comp->id))
         continue;
-      if (std::string(comp->name) == "Guid")
+      if (base::String(comp->name) == "Guid")
         continue;
-      if (std::string(comp->name) == "Name")
-        continue; // ECS std::string unsafe; edited via side table
+      if (base::String(comp->name) == "Name")
+        continue; // ECS base::String unsafe; edited via side table
       out += F("    button insp_add_%u { text: \"%s\"; font-size: 12; "
                "color:#c9ccd2; padding: 7 10; corner-radius:4; cursor: "
                "pointer; :hover { background:#2c2f34; } }\n",
@@ -695,13 +698,13 @@ std::string Editor::BuildInspector() {
   return out;
 }
 
-std::string Editor::BuildModeToolbar() {
+base::String Editor::BuildModeToolbar() {
   auto mode_button = [&](const char *id, const char *label, bool active,
                          int width) {
     return F("button %s { class: %s; width: %d; text: \"%s\"; }\n", id,
              active ? "tool_btn_on" : "tool_btn", width, label);
   };
-  std::string out;
+  base::String out;
   out += mode_button("mode_select", "Select",
                      editor_mode_ == EditorMode::kSelect, 56);
   out += mode_button("mode_terrain", "Terrain",
@@ -736,7 +739,7 @@ std::string Editor::BuildModeToolbar() {
   return out;
 }
 
-std::string Editor::BuildInspectorTabs() {
+base::String Editor::BuildInspectorTabs() {
   if (editor_mode_ == EditorMode::kTerrain) {
     return "text terrain_tab { text: \"TERRAIN WORKSPACE\"; class: "
            "header_label; color: #d8e2ca; "
@@ -747,7 +750,7 @@ std::string Editor::BuildInspectorTabs() {
            "color: #e7cf9d; "
            "padding: 0 16; }\n";
   }
-  std::string out;
+  base::String out;
   out += F("button tab_inspector { text: \"INSPECTOR\"; class: header_label; "
            "padding: 0 16; "
            "height: 32; layout: row; align: center; cursor: pointer; color: "
@@ -765,7 +768,7 @@ std::string Editor::BuildInspectorTabs() {
   return out;
 }
 
-std::string Editor::BuildTerrainInspector() {
+base::String Editor::BuildTerrainInspector() {
   const char *tool_names[] = {"Raise", "Lower", "Smooth", "Flatten", "Paint"};
   const terrain::TerrainBrushMode tool_modes[] = {
       terrain::TerrainBrushMode::kRaise, terrain::TerrainBrushMode::kLower,
@@ -773,7 +776,7 @@ std::string Editor::BuildTerrainInspector() {
       terrain::TerrainBrushMode::kPaintLayer};
   const char *tool_ids[] = {"terrain_raise", "terrain_lower", "terrain_smooth",
                             "terrain_flatten", "terrain_paint"};
-  std::string out;
+  base::String out;
   out += "panel terrain_asset { layout: column; padding: 12; gap: 6; "
          "background: #1c211d; "
          "border-color: #344238; border-width: 0 0 1 0;\n";
@@ -783,7 +786,7 @@ std::string Editor::BuildTerrainInspector() {
          "TERRAIN\"; "
          "font-size: 11; font-weight: bold; letter-spacing: 1; color: #cbd8c0; "
          "} }\n";
-  const std::string escaped_path = EscapeUguiString(terrain_path_);
+  const base::String escaped_path = EscapeUguiString(terrain_path_);
   out += F("  text ta_path { text: \"%s\"; font-size: 11; color: #8e9b8a; }\n",
            escaped_path.c_str());
   out += F("  text ta_state { text: \"%s\"; font-size: 11; color: %s; }\n",
@@ -830,7 +833,7 @@ std::string Editor::BuildTerrainInspector() {
   for (u32 i = 0; i < terrain_.desc().layers.size(); ++i) {
     const terrain::TerrainLayer &layer = terrain_.desc().layers[i];
     const auto &c = layer.debug_rgba;
-    const std::string escaped_name = EscapeUguiString(layer.name);
+    const base::String escaped_name = EscapeUguiString(layer.name);
     out += F("  button terrain_layer_%u { layout: row; align: center; gap: 10; "
              "height: 34; "
              "padding: 0 8; background: %s; corner-radius: 6; border-color: "
@@ -859,9 +862,9 @@ std::string Editor::BuildTerrainInspector() {
   return out;
 }
 
-std::string Editor::BuildPlacementInspector() {
-  std::string out;
-  const std::string escaped_name = EscapeUguiString(placement_.name);
+base::String Editor::BuildPlacementInspector() {
+  base::String out;
+  const base::String escaped_name = EscapeUguiString(placement_.name);
   out += "panel place_asset { layout: column; padding: 14; gap: 7; background: "
          "#211f19; "
          "border-color: #4a402d; border-width: 0 0 1 0;\n";
@@ -898,12 +901,12 @@ std::string Editor::BuildPlacementInspector() {
   return out;
 }
 
-std::string Editor::BuildContent() {
-  std::string out;
+base::String Editor::BuildContent() {
+  base::String out;
   size_t idx = 0;
   for (const AssetEntry &a : assets_list_) {
     if (!content_filter_.empty() &&
-        a.name.find(content_filter_) == std::string::npos) {
+        a.name.find(content_filter_) == base::String::npos) {
       ++idx;
       continue;
     }
@@ -918,7 +921,7 @@ std::string Editor::BuildContent() {
              "color: %s; } }\n",
              idx, KindColor(a.kind).c_str(), a.kind.c_str(),
              KindColor(a.kind).c_str());
-    const std::string escaped_name = EscapeUguiString(a.name);
+    const base::String escaped_name = EscapeUguiString(a.name);
     out += F("  text cn { text: \"%s\"; font-size: 11; color: #b7bac0; }\n",
              escaped_name.c_str());
     out += "}\n";
@@ -930,10 +933,10 @@ std::string Editor::BuildContent() {
   return out;
 }
 
-std::string Editor::BuildDialog() {
+base::String Editor::BuildDialog() {
   if (!dialog_open_)
     return "";
-  std::string out = "panel dialog_scrim { position: absolute; left: 0; top: 0; "
+  base::String out = "panel dialog_scrim { position: absolute; left: 0; top: 0; "
                     "width: 100vw; height: 100vh; "
                     "layout: column; justify: center; align: center; "
                     "background: #000000aa;\n";
@@ -948,7 +951,7 @@ std::string Editor::BuildDialog() {
     out += "      text de { text: \"No .rxscene files found\"; font-size: 12; "
            "color:#6a6d73; padding: 8; }\n";
   for (size_t i = 0; i < dialog_files_.size(); ++i) {
-    const std::string escaped_path = EscapeUguiString(dialog_files_[i]);
+    const base::String escaped_path = EscapeUguiString(dialog_files_[i]);
     out += F("      button dlg_%zu { text: \"%s\"; font-size: 13; "
              "color:#c9ccd2; padding: 8 10; corner-radius: 5; "
              "cursor: pointer; :hover { background:#2f4368; color:#fff; } }\n",
@@ -969,14 +972,13 @@ void Editor::UiHotReloadCheck(f32 dt) {
   if (reload_timer_ < 0.3f)
     return;
   reload_timer_ = 0;
-  std::string path =
-      (ui_dir_.empty() ? std::string("apps/editor/ui") : ui_dir_) +
+  base::String path =
+      (ui_dir_.empty() ? base::String("apps/editor/ui") : ui_dir_) +
       "/editor.ugui";
-  std::error_code ec;
-  auto t = fs::last_write_time(path, ec);
-  if (ec)
+  const base::Optional<i64> t = fs::LastWriteTime(path);
+  if (!t)
     return;
-  int64_t m = (int64_t)t.time_since_epoch().count();
+  int64_t m = *t;
   if (m != ui_mtime_ && ui_mtime_ != 0)
     MarkDirty();
 }
@@ -984,11 +986,11 @@ void Editor::UiHotReloadCheck(f32 dt) {
 // Event routing
 namespace {
 // Climb up to `max` ancestors, returning the first non-empty widget name.
-std::string NamedAncestor(ugui::UIContext &ui, ugui::wid w, int max = 5) {
+base::String NamedAncestor(ugui::UIContext &ui, ugui::wid w, int max = 5) {
   for (int i = 0; i < max && w.valid(); ++i) {
     if (ugui::WidgetNode *n = ui.world().Get<ugui::WidgetNode>(w)) {
       if (!n->name.empty())
-        return std::string(n->name.c_str());
+        return base::String(n->name.c_str());
     }
     ugui::Hierarchy *h = ui.world().Get<ugui::Hierarchy>(w);
     w = h ? h->parent : ugui::wid{};
@@ -998,16 +1000,16 @@ std::string NamedAncestor(ugui::UIContext &ui, ugui::wid w, int max = 5) {
 } // namespace
 
 void Editor::OnUiClick(ugui::wid w, ugui::MouseButton btn) {
-  std::string name = NamedAncestor(ui_, w);
+  base::String name = NamedAncestor(ui_, w);
   if (name.empty())
     return;
   RouteClick(name, btn);
 }
 
-bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
+bool Editor::RouteClick(const base::String &name, ugui::MouseButton) {
   auto starts = [&](const char *p) { return name.rfind(p, 0) == 0; };
   auto tail_u = [&](const char *p) -> unsigned {
-    return (unsigned)std::strtoul(name.c_str() + std::strlen(p), nullptr, 10);
+    return (unsigned)::strtoul(name.c_str() + ::strlen(p), nullptr, 10);
   };
 
   if (name == "menu_new") {
@@ -1130,32 +1132,32 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
     return true;
   }
   if (name == "terrain_radius_minus") {
-    terrain_brush_radius_ = std::max(0.25f, terrain_brush_radius_ - 0.25f);
+    terrain_brush_radius_ = rx::Max(0.25f, terrain_brush_radius_ - 0.25f);
     MarkDirty();
     return true;
   }
   if (name == "terrain_radius_plus") {
-    terrain_brush_radius_ = std::min(24.0f, terrain_brush_radius_ + 0.25f);
+    terrain_brush_radius_ = rx::Min(24.0f, terrain_brush_radius_ + 0.25f);
     MarkDirty();
     return true;
   }
   if (name == "terrain_strength_minus") {
-    terrain_brush_strength_ = std::max(0.01f, terrain_brush_strength_ - 0.05f);
+    terrain_brush_strength_ = rx::Max(0.01f, terrain_brush_strength_ - 0.05f);
     MarkDirty();
     return true;
   }
   if (name == "terrain_strength_plus") {
-    terrain_brush_strength_ = std::min(2.0f, terrain_brush_strength_ + 0.05f);
+    terrain_brush_strength_ = rx::Min(2.0f, terrain_brush_strength_ + 0.05f);
     MarkDirty();
     return true;
   }
   if (name == "terrain_falloff_minus") {
-    terrain_brush_falloff_ = std::max(0.0f, terrain_brush_falloff_ - 0.25f);
+    terrain_brush_falloff_ = rx::Max(0.0f, terrain_brush_falloff_ - 0.25f);
     MarkDirty();
     return true;
   }
   if (name == "terrain_falloff_plus") {
-    terrain_brush_falloff_ = std::min(8.0f, terrain_brush_falloff_ + 0.25f);
+    terrain_brush_falloff_ = rx::Min(8.0f, terrain_brush_falloff_ + 0.25f);
     MarkDirty();
     return true;
   }
@@ -1164,18 +1166,18 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
         terrain_.desc().layers.empty()
             ? 0
             : static_cast<u32>(terrain_.desc().layers.size() - 1);
-    terrain_brush_layer_ = std::min<u32>(tail_u("terrain_layer_"), last_layer);
+    terrain_brush_layer_ = rx::Min<u32>(tail_u("terrain_layer_"), last_layer);
     terrain_brush_mode_ = terrain::TerrainBrushMode::kPaintLayer;
     MarkDirty();
     return true;
   }
   if (name == "place_spacing_minus") {
-    placement_.spacing = std::max(0.25f, placement_.spacing - 0.25f);
+    placement_.spacing = rx::Max(0.25f, placement_.spacing - 0.25f);
     MarkDirty();
     return true;
   }
   if (name == "place_spacing_plus") {
-    placement_.spacing = std::min(20.0f, placement_.spacing + 0.25f);
+    placement_.spacing = rx::Min(20.0f, placement_.spacing + 0.25f);
     MarkDirty();
     return true;
   }
@@ -1184,14 +1186,14 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
     ecs::Entity out;
     const edit::ComponentDesc *xf = edit::FindComponentByName("Transform");
     const edit::ComponentDesc *nm = edit::FindComponentByName("Name");
-    std::vector<std::pair<
+    base::Vector<base::Pair<
         const edit::ComponentDesc *,
-        std::vector<std::pair<const edit::PropDesc *, edit::PropValue>>>>
+        base::Vector<base::Pair<const edit::PropDesc *, edit::PropValue>>>>
         initial;
     initial.push_back({xf, {}});
     initial.push_back(
         {nm, {{&nm->props[0], edit::PropValue::String("Empty")}}});
-    undo_.Push(*world_, edit::MakeCreateEntity(std::move(initial), &out));
+    undo_.Push(*world_, edit::MakeCreateEntity(base::move(initial), &out));
     selection_.Set(out);
     doc_dirty_ = true;
     MarkDirty();
@@ -1209,7 +1211,7 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
   if (starts("hier_")) {
     // hier_<index>_<gen>
     unsigned index = 0, gen = 0;
-    if (std::sscanf(name.c_str() + 5, "%u_%u", &index, &gen) == 2) {
+    if (::sscanf(name.c_str() + 5, "%u_%u", &index, &gen) == 2) {
       ecs::Entity e{index, gen};
       if (world_->IsAlive(e)) {
         selection_.Set(e);
@@ -1245,9 +1247,9 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
     return true;
   }
   // toggle bool field (field_<compid>_<prop>_0 on a bool)
-  if (starts("field_") && name.find("_tint_") == std::string::npos) {
+  if (starts("field_") && name.find("_tint_") == base::String::npos) {
     unsigned cid = 0, pi = 0, ax = 0;
-    if (std::sscanf(name.c_str() + 6, "%u_%u_%u", &cid, &pi, &ax) == 3) {
+    if (::sscanf(name.c_str() + 6, "%u_%u_%u", &cid, &pi, &ax) == 3) {
       const edit::ComponentDesc *c = edit::FindComponent(cid);
       ecs::Entity e = selection_.primary();
       if (c && e && pi < c->prop_count &&
@@ -1294,11 +1296,11 @@ bool Editor::RouteClick(const std::string &name, ugui::MouseButton) {
   return false;
 }
 
-void Editor::OnUiTextSubmit(const std::string &widget,
-                            const std::string &value) {
+void Editor::OnUiTextSubmit(const base::String &widget,
+                            const base::String &value) {
   if (widget == "insp_name") {
     if (ecs::Entity e = selection_.primary()) {
-      SetName(e, value); // side table (ECS std::string is unsafe today)
+      SetName(e, value); // side table (ECS base::String is unsafe today)
       doc_dirty_ = true;
       MarkDirty();
     }
@@ -1328,13 +1330,14 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
         d.prev_transform = d.transform;
         uint32_t tint = terrain_visual
                             ? 0u
-                            : (tints_.count(e.index) ? tints_[e.index] : 0u);
+                            : (tints_.contains(e.index) ? tints_[e.index] : 0u);
         if (!terrain_visual && e == primary)
           tint = 0xffa64d; // selection highlight
         d.tint = tint;
-        auto imported = imported_entities_.find(ImportedEntityKey(e));
-        if (imported != imported_entities_.end()) {
-          const auto [model_index, instance_index] = imported->second;
+        const base::Pair<u32, u32> *imported =
+            imported_entities_.find(ImportedEntityKey(e));
+        if (imported) {
+          const auto [model_index, instance_index] = *imported;
           if (model_index < imported_models_.size() &&
               instance_index < imported_models_[model_index].instances.size()) {
             ImportedModel &model = imported_models_[model_index];
@@ -1350,8 +1353,8 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
                 view.bone_matrices.push_back(matrix);
 
               instance.morph_weights.resize(record->mesh.morph_targets.size());
-              std::fill(instance.morph_weights.begin(),
-                        instance.morph_weights.end(), 0.0f);
+              base::Fill(instance.morph_weights.begin(),
+                         instance.morph_weights.end(), 0.0f);
               anim::ApplyBodyMorphWeights(record->mesh, skin.morphs,
                                           &instance.morph_weights);
               d.morph_offset = static_cast<i32>(view.morph_weights.size());
@@ -1390,7 +1393,7 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
       gizmo_mode_ == GizmoMode::kTranslate) {
     scene::Transform wt = edit::WorldTransform(*world_, primary);
     Vec3 o{wt.position[0], wt.position[1], wt.position[2]};
-    f32 len = std::max(0.5f, Length(o - camera_.position()) * 0.18f);
+    f32 len = rx::Max(0.5f, Length(o - camera_.position()) * 0.18f);
     gizmo_lines_.push_back({o, {o.x + len, o.y, o.z}, 0xe0655fff}); // X red
     gizmo_lines_.push_back({o, {o.x, o.y + len, o.z}, 0x7fb96aff}); // Y green
     gizmo_lines_.push_back({o, {o.x, o.y, o.z + len}, 0x5a8deeff}); // Z blue
@@ -1430,12 +1433,12 @@ void Editor::OnBuildView(f32 dt, render::FrameView &view) {
 
 // scrub helpers implemented here (need ugui hovered name + reflect)
 bool Editor::TryStartScrub(f32 mx) {
-  std::string name = NamedAncestor(ui_, ui_.input().hovered_widget());
+  base::String name = NamedAncestor(ui_, ui_.input().hovered_widget());
   if (name.rfind("field_", 0) != 0)
     return false;
   unsigned cid = 0, pi = 0, ax = 0;
-  if (name.find("_tint_") != std::string::npos) {
-    if (std::sscanf(name.c_str() + std::strlen("field_tint_"), "%u_%u", &pi,
+  if (name.find("_tint_") != base::String::npos) {
+    if (::sscanf(name.c_str() + ::strlen("field_tint_"), "%u_%u", &pi,
                     &ax) == 2) {
       // tint scrub: live edit of tints_ (not undo-tracked)
       scrub_ = {};
@@ -1444,7 +1447,7 @@ bool Editor::TryStartScrub(f32 mx) {
       scrub_.comp = nullptr; // signals tint
       scrub_.axis = (int)ax;
       scrub_.start_mouse = mx;
-      uint32_t t = tints_.count(scrub_.entity.index)
+      uint32_t t = tints_.contains(scrub_.entity.index)
                        ? tints_[scrub_.entity.index]
                        : 0xffffff;
       scrub_.base_value = (f32)((t >> (16 - ax * 8)) & 0xFF);
@@ -1453,7 +1456,7 @@ bool Editor::TryStartScrub(f32 mx) {
     }
     return false;
   }
-  if (std::sscanf(name.c_str() + 6, "%u_%u_%u", &cid, &pi, &ax) != 3)
+  if (::sscanf(name.c_str() + 6, "%u_%u_%u", &cid, &pi, &ax) != 3)
     return false;
   const edit::ComponentDesc *c = edit::FindComponent(cid);
   ecs::Entity e = selection_.primary();
@@ -1495,8 +1498,8 @@ void Editor::UpdateScrub() {
 
   if (!scrub_.comp) { // tint live edit
     ecs::Entity e = scrub_.entity;
-    int iv = (int)std::clamp(nv, 0.0f, 255.0f);
-    uint32_t t = tints_.count(e.index) ? tints_[e.index] : 0xffffff;
+    int iv = (int)rx::Clamp(nv, 0.0f, 255.0f);
+    uint32_t t = tints_.contains(e.index) ? tints_[e.index] : 0xffffff;
     int shift = 16 - scrub_.axis * 8;
     t = (t & ~(0xFFu << shift)) | ((uint32_t)iv << shift);
     tints_[e.index] = t;
@@ -1517,7 +1520,7 @@ void Editor::UpdateScrub() {
                                  edit::PropValue::Quat(q.x, q.y, q.z, q.w)));
   } else {
     if (pd.min != pd.max)
-      nv = std::clamp(nv, pd.min, pd.max);
+      nv = rx::Clamp(nv, pd.min, pd.max);
     edit::PropValue out = v;
     out.f[scrub_.axis] = nv;
     undo_.Push(*world_, edit::MakeSetProp(*world_, scrub_.entity, *scrub_.comp,

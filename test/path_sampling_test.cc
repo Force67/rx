@@ -1,9 +1,10 @@
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <vector>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
 #include "render/rhi/device.h"
 #include "render/core/bindless.h"
 #include "render/gi/raytracing.h"
@@ -40,19 +41,19 @@ struct Push {
 
 int main() {
   DeviceDesc desc;
-  const char* backend = std::getenv("RX_RHI");
-  desc.backend = backend && std::strcmp(backend, "d3d12") == 0
+  const char* backend = ::getenv("RX_RHI");
+  desc.backend = backend && ::strcmp(backend, "d3d12") == 0
                      ? Backend::kD3D12 : Backend::kVulkan;
   desc.request_raytracing = true;
   desc.enable_validation = true;
   auto device = Device::CreateOffscreen(desc);
   if (!device || device->is_stub()) {
-    std::printf("path_sampling_test: SKIP, GPU unavailable\n");
+    ::printf("path_sampling_test: SKIP, GPU unavailable\n");
     return 77;
   }
   int failures = 0;
   auto check = [&](bool ok, const char* message) {
-    if (!ok) { std::printf("FAIL: %s\n", message); ++failures; }
+    if (!ok) { ::printf("FAIL: %s\n", message); ++failures; }
   };
   ComputePipelineDesc pd;
   pd.shader = RX_SHADER(k_recon_restir_di_temporal_cs_hlsl);
@@ -68,20 +69,20 @@ int main() {
   PipelineHandle pipeline = device->CreateComputePipeline(pd);
   if (!pipeline) return 1;
 
-  std::vector<GpuImage> owned;
+  base::Vector<GpuImage> owned;
   auto input = [&](Format format, const void* pixel, u32 pixel_bytes) {
-    std::vector<u8> data(kPixels * pixel_bytes);
+    base::Vector<u8> data(kPixels * pixel_bytes);
     for (u32 i = 0; i < kPixels; ++i)
-      std::memcpy(data.data() + i * pixel_bytes, pixel, pixel_bytes);
+      base::MemCopy(data.data() + i * pixel_bytes, pixel, pixel_bytes);
     GpuImage image = device->CreateImage2D(
         format, {kWidth, kHeight}, kTextureUsageSampled | kTextureUsageTransferDst);
     GpuBuffer staging = device->CreateBufferWithData(
-        {data.data(), data.size()}, kBufferUsageTransferSrc);
-    if (!image || !staging) std::exit(1);
+        ByteSpan(data.data(), data.size()), kBufferUsageTransferSrc);
+    if (!image || !staging) ::exit(1);
     device->ImmediateSubmit([&](CommandList& cmd) {
       cmd.Barrier(Transition(image, ResourceState::kUndefined, ResourceState::kCopyDst));
       BufferTextureCopy copy{.extent = {kWidth, kHeight}};
-      cmd.CopyBufferToTexture(staging, image, {&copy, 1});
+      cmd.CopyBufferToTexture(staging, image, base::Span(&copy, 1));
       cmd.Barrier(Transition(image, ResourceState::kCopyDst, ResourceState::kShaderReadCompute));
     });
     device->DestroyBuffer(staging);
@@ -113,23 +114,23 @@ int main() {
 
   f32 light[16] = {0, 1, 0, 10, 1, 1, 1, 0};
   GpuBuffer lights = device->CreateBuffer(sizeof(light), kBufferUsageStorage, true);
-  std::vector<f32> cdf(1 + kSkyH + 2 * kSkyW * kSkyH);
-  const f32 omega = 2 * kPi / kSkyW * (1 - std::cos(kPi / kSkyH));
+  base::Vector<f32> cdf(1 + kSkyH + 2 * kSkyW * kSkyH);
+  const f32 omega = 2 * kPi / kSkyW * (1 - ::cos(kPi / kSkyH));
   cdf[0] = omega;
   for (u32 r = 0; r < kSkyH; ++r) cdf[1 + r] = omega;
   for (u32 c = 0; c < kSkyW; ++c) cdf[1 + kSkyH + c] = 1;
   cdf[1 + kSkyH + kSkyW * kSkyH] = 1;
   GpuBuffer table = device->CreateBufferWithData(
-      {reinterpret_cast<const u8*>(cdf.data()), cdf.size() * sizeof(f32)}, kBufferUsageStorage);
+      ByteSpan(reinterpret_cast<const u8*>(cdf.data()), cdf.size() * sizeof(f32)), kBufferUsageStorage);
   if (!lights.mapped || !table) return 1;
   SamplerHandle sampler = device->GetSampler({});
-  std::vector<f32> values[4];
+  base::Vector<f32> values[4];
   for (auto& value : values) value.resize(kPixels * 4);
   bool first = true;
   auto run = [&](Push push, f32 point_target, GpuImage prev0 = {}, GpuImage prev1 = {},
                  GpuImage prev2 = {}, GpuImage prev3 = {}) {
     light[7] = point_target / (.99f * .99f);
-    std::memcpy(lights.mapped, light, sizeof(light));
+    base::MemCopy(lights.mapped, light, sizeof(light));
     device->FlushBuffer(lights, 0, sizeof(light));
     device->ImmediateSubmit([&](CommandList& cmd) {
       if (!first)
@@ -163,8 +164,8 @@ int main() {
       f32 expected = mode == 2 ? 2 : 1;
       bool correct = true;
       for (u32 p = 0; p < kPixels; ++p)
-        correct &= std::abs(values[1][4 * p + 2] - expected) < 1e-4f;
-      std::printf("candidates=%u mode=%u W=%g expected=%g\n", candidates, mode,
+        correct &= ::abs(values[1][4 * p + 2] - expected) < 1e-4f;
+      ::printf("candidates=%u mode=%u W=%g expected=%g\n", candidates, mode,
                    values[1][2], expected);
       check(correct, "candidate count must not change total light energy");
     }
@@ -172,17 +173,17 @@ int main() {
   Push push;
   push.candidates = 0;
   run(push, 1);
-  check(std::abs(values[1][2] - 1) < 1e-5f, "zero point proposals retain sun energy");
+  check(::abs(values[1][2] - 1) < 1e-5f, "zero point proposals retain sun energy");
   push.candidates = 8;
   push.light_count = 0;
   run(push, 0);
-  check(std::abs(values[1][2] - 1) < 1e-5f, "sun-only scene retains its energy");
+  check(::abs(values[1][2] - 1) < 1e-5f, "sun-only scene retains its energy");
   push.sun_direction[3] = 0;
   push.sky_candidates = 1;
   run(push, 0);
   double mean = 0;
   u32 lower_half = 0, samples = 0;
-  const double cap = 1.0 - std::cos(double(kPi) / kSkyH);
+  const double cap = 1.0 - ::cos(double(kPi) / kSkyH);
   for (u32 p = 0; p < kPixels; ++p) {
     // Direction-to-cell rounding can place boundary samples in a dark neighbor.
     if (values[2][4 * p + 3] > -1.5f) continue;
@@ -193,11 +194,11 @@ int main() {
   }
   mean /= samples ? samples : 1;
   const double fraction = double(lower_half) / (samples ? samples : 1);
-  std::printf("sky solid-angle mean=%g lower-half fraction=%g retained=%u/%u\n",
+  ::printf("sky solid-angle mean=%g lower-half fraction=%g retained=%u/%u\n",
                mean, fraction, samples, kPixels);
   check(samples >= kPixels - 8, "sky proposals must retain positive target mass");
-  check(std::abs(mean - .5) < .015, "sky cells must be uniform in solid angle");
-  check(std::abs(fraction - .5) < .02, "sky PDF must match cell samples");
+  check(::abs(mean - .5) < .015, "sky cells must be uniform in solid angle");
+  check(::abs(fraction - .5) < .02, "sky PDF must match cell samples");
 
   const f32 dead_id[4] = {0, 0, 0, -1}, light_id[4] = {0, 0, 0, 1};
   const f32 dead_mass[4] = {0, 2, 0, 0}, live_mass[4] = {4, 2, 2, 0};
@@ -211,12 +212,12 @@ int main() {
   reuse.reset = 0;
   run(reuse, 1, dead_sample, dead_history);
   const f32 dark_estimate = values[1][2];
-  check(std::abs(values[1][1] - 4) < 1e-5f, "zero-weight DI history retains sample count");
+  check(::abs(values[1][1] - 4) < 1e-5f, "zero-weight DI history retains sample count");
   run(reuse, 1, live_sample, live_history);
   const f32 bright_estimate = values[1][2];
-  std::printf("DI reuse: dark=%g bright=%g mean=%g expected=1\n",
+  ::printf("DI reuse: dark=%g bright=%g mean=%g expected=1\n",
                dark_estimate, bright_estimate, (dark_estimate + bright_estimate) / 2);
-  check(std::abs((dark_estimate + bright_estimate) / 2 - 1) < 1e-5f,
+  check(::abs((dark_estimate + bright_estimate) / 2 - 1) < 1e-5f,
         "equally likely zero and double-energy histories must preserve expected energy");
   reuse.pad[1] = 1;
   run(reuse, 1, live_sample, live_history);
@@ -225,7 +226,7 @@ int main() {
   reuse.light_count = 0;
   reuse.sky_candidates = 1;
   run(reuse, 0, {}, {}, dead_sample, dead_history);
-  check(std::abs(values[3][1] - 3) < 1e-5f, "zero-weight sky history retains sample count");
+  check(::abs(values[3][1] - 3) < 1e-5f, "zero-weight sky history retains sample count");
   check(values[3][4 * (kWidth - 1) + 1] == 1,
         "sky reservoir reprojection includes the jitter delta");
 
@@ -261,16 +262,16 @@ int main() {
     });
     const u32 center = 4 * ((kHeight / 2) * kWidth + kWidth / 2) + channel;
     if (mass.format == Format::kRGBA16Float) {
-      std::vector<u16> data(kPixels * 4);
+      base::Vector<u16> data(kPixels * 4);
       check(device->ReadbackImage(mass, ResourceState::kGeneral, data.data(), data.size() * sizeof(u16)),
             "read half reservoir count");
-      std::printf("%s: M half bits=%04x\n", name, data[center]);
+      ::printf("%s: M half bits=%04x\n", name, data[center]);
       check(data[center] > 0x4000 && data[center] < 0x7c00, name);
     } else {
       check(device->ReadbackImage(mass, ResourceState::kGeneral, values[0].data(), values[0].size() * sizeof(f32)),
             "read reservoir count");
-      std::printf("%s: M=%g\n", name, values[0][center]);
-      check(values[0][center] > 2 && std::isfinite(values[0][center]), name);
+      ::printf("%s: M=%g\n", name, values[0][center]);
+      check(values[0][center] > 2 && ::isfinite(values[0][center]), name);
     }
     device->ImmediateSubmit([&](CommandList& cmd) {
       cmd.Barrier(Transition(mass, ResourceState::kCopySrc, ResourceState::kGeneral));
@@ -298,7 +299,7 @@ int main() {
       Bind::Sampled(9, vz), Bind::Sampled(10, vz), Bind::Sampled(11, id), Bind::Sampled(12, id),
       Bind::Sampled(13, motion), Bind::Sampled(14, empty), Bind::Sampled(15, gi_history),
       Bind::Sampled(16, empty), Bind::Sampled(17, position)}, half_out, 3, "zero-weight GI temporal history retains sample count");
-  std::vector<u16> jitter_counts(kPixels * 4);
+  base::Vector<u16> jitter_counts(kPixels * 4);
   check(device->ReadbackImage(half_out, ResourceState::kGeneral, jitter_counts.data(),
                               jitter_counts.size() * sizeof(u16)), "read GI jitter reprojection");
   check(jitter_counts[3] == 0x4200 && jitter_counts[4 * (kWidth - 1) + 3] == 0x3c00,
@@ -321,8 +322,8 @@ int main() {
       "GI temporal reconnection retains sample count");
   check(device->ReadbackImage(out[0], ResourceState::kGeneral, values[0].data(), values[0].size() * sizeof(f32)),
         "read GI reconnection weight");
-  std::printf("GI reconnection W=%g expected=%g\n", values[0][3], kPi * .5f);
-  check(std::abs(values[0][3] - kPi * .5f) < 1e-5f, "temporal GI must convert source solid angle to current solid angle");
+  ::printf("GI reconnection W=%g expected=%g\n", values[0][3], kPi * .5f);
+  check(::abs(values[0][3] - kPi * .5f) < 1e-5f, "temporal GI must convert source solid angle to current solid angle");
   device->ImmediateSubmit([&](CommandList& cmd) {
     cmd.Barrier(Transition(out[0], ResourceState::kCopySrc, ResourceState::kGeneral));
   });
@@ -346,7 +347,7 @@ int main() {
         Bind::Storage(9, out[0]), Bind::Storage(10, out[1]), Bind::Combined(11, sky.view, sampler),
         Bind::StorageBuffer(12, table), Bind::Sampled(13, dead_sample), Bind::Sampled(14, dead_history),
         Bind::Storage(15, out[2]), Bind::Storage(16, out[3])}, out[1], 1,
-        "zero-weight DI spatial neighbors retain sample count", bindless.get());
+        "zero-weight DI spatial neighbors retain sample count", bindless.Get_UseOnlyIfYouKnowWhatYouareDoing());
     check(device->ReadbackImage(out[3], ResourceState::kGeneral, values[0].data(), values[0].size() * sizeof(f32)),
           "read spatial sky count");
     check(values[0][4 * ((kHeight / 2) * kWidth + kWidth / 2) + 1] > 2,
@@ -366,7 +367,7 @@ int main() {
         Bind::Storage(12, out[1])}, half_out, 3,
         "zero-weight GI spatial neighbors retain sample count");
   } else {
-    std::printf("path_sampling_test: spatial checks SKIP, ray queries unavailable\n");
+    ::printf("path_sampling_test: spatial checks SKIP, ray queries unavailable\n");
   }
   PipelineHandle continuation = device->CreateComputePipeline({
       .shader = RX_SHADER(k_path_continue_cs_hlsl),
@@ -384,8 +385,8 @@ int main() {
   for (u32 p = 0; p < kPixels; ++p)
     for (u32 c = 0; c < 3; ++c) energy[c] += values[0][4 * p + c] / kPixels;
   for (u32 c = 0; c < 3; ++c)
-    check(std::abs(energy[c] - .001 * (c + 1)) < .00015, "roulette retains expected energy of dim paths");
-  std::printf("dim-path expected energy=(.001,.002,.003), measured=(%g,%g,%g)\n", energy[0], energy[1], energy[2]);
+    check(::abs(energy[c] - .001 * (c + 1)) < .00015, "roulette retains expected energy of dim paths");
+  ::printf("dim-path expected energy=(.001,.002,.003), measured=(%g,%g,%g)\n", energy[0], energy[1], energy[2]);
   device->DestroyPipeline(continuation);
   device->DestroyImage(half_out);
   device->DestroyImage(shaded);
@@ -397,6 +398,6 @@ int main() {
   device->DestroyBuffer(lights);
   device->DestroyBuffer(table);
   device->DestroyPipeline(pipeline);
-  std::printf("path_sampling_test: %d failures\n", failures);
+  ::printf("path_sampling_test: %d failures\n", failures);
   return failures ? 1 : (device->caps().ray_query ? 0 : 77);
 }

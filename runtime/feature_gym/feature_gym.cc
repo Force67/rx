@@ -1,17 +1,9 @@
 #include "feature_gym.h"
 
-#include <algorithm>
-#include <array>
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <limits>
-#include <span>
-#include <string>
-#include <utility>
-#include <vector>
+#include <math.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "../engine_context.h"
 #include "../showcase_camera.h"
@@ -26,6 +18,8 @@
 #include "asset/texture.h"
 #include "audio/audio_clip.h"
 #include "audio/mixer.h"
+#include "core/file_system.h"
+#include "core/shared.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/paths.h"
@@ -55,6 +49,17 @@
 #include <unistd.h>
 #endif
 
+#include "base/algorithm.h"
+#include "base/containers/array.h"
+#include "base/containers/pair.h"
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/format.h"
+#include "core/scalar.h"
 #include "net/bubble.h"
 #include "net/bubble_debug.h"
 
@@ -230,21 +235,21 @@ asset::Mesh WithMaterial(asset::Mesh mesh, asset::AssetId material) {
   return mesh;
 }
 
-std::filesystem::path FeatureAssetPath(const char* file) {
-  if (const char* root = std::getenv("RX_FEATURE_GYM_ASSET_DIR"))
-    return std::filesystem::path(root) / file;
-  return std::filesystem::path(RX_FEATURE_GYM_ASSET_DIR) / file;
+base::String FeatureAssetPath(const char* file) {
+  if (const char* root = ::getenv("RX_FEATURE_GYM_ASSET_DIR"))
+    return fs::Join(root, file);
+  return fs::Join(RX_FEATURE_GYM_ASSET_DIR, file);
 }
 
-std::vector<u8> ReadBytes(const std::filesystem::path& requested_path) {
+base::Vector<u8> ReadBytes(const base::String& requested_path) {
 #if defined(__ANDROID__)
   if (g_feature_gym_asset_manager) {
-    const std::string name = requested_path.filename().string();
+    const base::String name(fs::Filename(requested_path));
     AAsset* asset =
         AAssetManager_open(g_feature_gym_asset_manager, name.c_str(), AASSET_MODE_STREAMING);
     if (asset) {
       const off64_t size = AAsset_getLength64(asset);
-      std::vector<u8> bytes(size > 0 ? static_cast<size_t>(size) : 0);
+      base::Vector<u8> bytes(size > 0 ? static_cast<size_t>(size) : 0);
       const int read = bytes.empty() ? 0 : AAsset_read(asset, bytes.data(), bytes.size());
       AAsset_close(asset);
       if (read == static_cast<int>(bytes.size())) return bytes;
@@ -252,20 +257,13 @@ std::vector<u8> ReadBytes(const std::filesystem::path& requested_path) {
   }
 #endif
 
-  std::filesystem::path path = requested_path;
-  std::ifstream input(path, std::ios::binary | std::ios::ate);
-  if (!input && path.is_relative()) {
-    path = ExecutableDirectory() / path;
-    input = std::ifstream(path, std::ios::binary | std::ios::ate);
+  base::Vector<u8> bytes;
+  if (fs::ReadFile(requested_path, &bytes)) return bytes;
+  if (!fs::IsAbsolute(requested_path) &&
+      fs::ReadFile(fs::Join(ExecutableDirectory(), requested_path), &bytes)) {
+    return bytes;
   }
-  if (!input) return {};
-  const std::streamsize size = input.tellg();
-  if (size <= 0) return {};
-  std::vector<u8> bytes(static_cast<size_t>(size));
-  input.seekg(0);
-  input.read(reinterpret_cast<char*>(bytes.data()), size);
-  if (!input) return {};
-  return bytes;
+  return {};
 }
 
 asset::Texture LoadRawTexture(const char* file, const char* id, bool srgb) {
@@ -275,11 +273,11 @@ asset::Texture LoadRawTexture(const char* file, const char* id, bool srgb) {
   texture.width = kTextureSize;
   texture.height = kTextureSize;
   texture.is_srgb = srgb;
-  const std::filesystem::path path = FeatureAssetPath(file);
-  std::vector<u8> bytes = ReadBytes(path);
+  const base::String path = FeatureAssetPath(file);
+  base::Vector<u8> bytes = ReadBytes(path);
   const size_t expected = static_cast<size_t>(kTextureSize) * kTextureSize * 4;
   if (bytes.size() != expected) {
-    RX_WARN("feature gym: {} has {} bytes, expected {} (run generate_assets.py)", path.string(),
+    RX_WARN("feature gym: {} has {} bytes, expected {} (run generate_assets.py)", path,
             bytes.size(), expected);
     return texture;
   }
@@ -287,28 +285,28 @@ asset::Texture LoadRawTexture(const char* file, const char* id, bool srgb) {
   return texture;
 }
 
-std::vector<u8> BuildRgbaMipChain(const asset::Texture& texture) {
+base::Vector<u8> BuildRgbaMipChain(const asset::Texture& texture) {
   const size_t expected = static_cast<size_t>(texture.width) * texture.height * 4;
   if (texture.width != texture.height || texture.data.size() != expected || texture.width == 0)
     return {};
 
   u32 extent = texture.width;
-  std::vector<u8> level(texture.data.begin(), texture.data.end());
-  std::vector<u8> mips;
+  base::Vector<u8> level(texture.data.begin(), texture.data.end());
+  base::Vector<u8> mips;
   mips.reserve(expected * 4 / 3);
   while (true) {
     mips.insert(mips.end(), level.begin(), level.end());
     if (extent == 1) break;
-    const u32 next_extent = std::max(1u, extent / 2);
-    std::vector<u8> next(static_cast<size_t>(next_extent) * next_extent * 4);
+    const u32 next_extent = rx::Max(1u, extent / 2);
+    base::Vector<u8> next(static_cast<size_t>(next_extent) * next_extent * 4);
     for (u32 y = 0; y < next_extent; ++y) {
       for (u32 x = 0; x < next_extent; ++x) {
         for (u32 channel = 0; channel < 4; ++channel) {
           u32 sum = 0;
           for (u32 oy = 0; oy < 2; ++oy) {
             for (u32 ox = 0; ox < 2; ++ox) {
-              const u32 sx = std::min(extent - 1, x * 2 + ox);
-              const u32 sy = std::min(extent - 1, y * 2 + oy);
+              const u32 sx = rx::Min(extent - 1, x * 2 + ox);
+              const u32 sy = rx::Min(extent - 1, y * 2 + oy);
               sum += level[(static_cast<size_t>(sy) * extent + sx) * 4 + channel];
             }
           }
@@ -317,7 +315,7 @@ std::vector<u8> BuildRgbaMipChain(const asset::Texture& texture) {
         }
       }
     }
-    level = std::move(next);
+    level = base::move(next);
     extent = next_extent;
   }
   return mips;
@@ -506,8 +504,8 @@ asset::Mesh MakeTree(asset::AssetId id, asset::AssetId material) {
     for (int side = 0; side < 10; ++side) {
       const f32 a0 = side * 2.0f * kPi / 10.0f;
       const f32 a1 = (side + 1) * 2.0f * kPi / 10.0f;
-      triangle({std::cos(a0) * radius, base, std::sin(a0) * radius}, {0, tip, 0},
-               {std::cos(a1) * radius, base, std::sin(a1) * radius},
+      triangle({::cos(a0) * radius, base, ::sin(a0) * radius}, {0, tip, 0},
+               {::cos(a1) * radius, base, ::sin(a1) * radius},
                side & 1 ? 0xff245a27 : 0xff377a31);
     }
   }
@@ -580,7 +578,7 @@ struct FeatureGym::Impl {
   void CreatePost();
   void CreateCameraExhibit();
   void CreateLabels();
-  void AddLabel(const Vec3& anchor, std::string_view text, f32 height, u32 color);
+  void AddLabel(const Vec3& anchor, base::StringRef text, f32 height, u32 color);
   void StartAudio();
   void AddSimulation();
   void Emit(f32 dt, render::FrameView& view);
@@ -601,13 +599,13 @@ struct FeatureGym::Impl {
   void ApplyTourMode(TourMode mode);
   bool SoftwareGiOnly() const;
 
-  asset::AssetId AddMaterial(const std::string& name,
+  asset::AssetId AddMaterial(const base::String& name,
                              Vec3 color,
                              f32 roughness = 0.7f,
                              f32 metallic = 0.0f);
   asset::AssetId UploadMesh(asset::Mesh mesh, asset::AssetId material, bool trace = false);
   ecs::Entity Spawn(asset::AssetId mesh, Vec3 position, f32 scale = 1.0f, Quat rotation = {});
-  ecs::Entity SpawnBox(const std::string& name,
+  ecs::Entity SpawnBox(const base::String& name,
                        Vec3 half_extent,
                        Vec3 position,
                        asset::AssetId material,
@@ -630,8 +628,8 @@ struct FeatureGym::Impl {
     f32 time = 0;
     TourMode mode = TourMode::kOverview;
   };
-  std::vector<Activation> activations;
-  size_t applied_activation = std::numeric_limits<size_t>::max();
+  base::Vector<Activation> activations;
+  size_t applied_activation = SIZE_MAX;
 
   asset::AssetId checker{};
   asset::AssetId albedo{};
@@ -653,14 +651,14 @@ struct FeatureGym::Impl {
   // transforms cannot leak into any other stop's capture.
   u64 skew_sphere_mesh = 0;
   u64 skew_torus_mesh = 0;
-  std::vector<u8> virtual_geometry_albedo;
+  base::Vector<u8> virtual_geometry_albedo;
 
   base::Vector<render::PointLight> lights;
   base::Vector<render::Decal> decals;
   base::Vector<render::WboitInstance> oit;
   base::Vector<render::GaussianInstance> gaussians;
   base::Vector<render::DebugLine> lines;
-  std::vector<render::WorldText> labels;
+  base::Vector<render::WorldText> labels;
 
   u64 morph_mesh = 0;
   Mat4 morph_transform = Mat4::Identity();
@@ -680,7 +678,7 @@ struct FeatureGym::Impl {
   base::Vector<f32> strand_positions;
 
   net::InterestMap bubble_map;
-  std::unique_ptr<net::BubbleVisualizer> bubble_viz;
+  base::UniquePointer<net::BubbleVisualizer> bubble_viz;
   u64 bubble_tick = 0;
 
   ecs::Entity camera_base_mode{};
@@ -734,16 +732,19 @@ struct FeatureGym::Impl {
   u64 bike_mesh = 0;
   Mat4 car_previous = Mat4::Identity();
   Mat4 bike_previous = Mat4::Identity();
-  std::array<Mat4, 4> car_wheel_previous{};
-  std::array<Mat4, 2> bike_wheel_previous{};
+  base::Array<Mat4, 4> car_wheel_previous{};
+  base::Array<Mat4, 2> bike_wheel_previous{};
   bool car_previous_valid = false;
   bool bike_previous_valid = false;
-  std::array<bool, 4> car_wheel_previous_valid{};
-  std::array<bool, 2> bike_wheel_previous_valid{};
+  base::Array<bool, 4> car_wheel_previous_valid{};
+  base::Array<bool, 2> bike_wheel_previous_valid{};
   f32 physics_active_time = 0;
   f32 sim_time = 0;
   int jump_cycle = -1;
-  std::shared_ptr<bool> simulation_alive = std::make_shared<bool>(true);
+  // Shared, not owned: the scheduler (Host-owned) has no RemoveSystem and keeps
+  // copies of the gym's system closures after ~Impl, so the flag they check
+  // must outlive this object.
+  Shared<bool> simulation_alive = Shared<bool>::Make(true);
 
   base::Vector<physics::BodyId> water_bodies;
   base::Vector<Vec3> water_previous;
@@ -761,14 +762,14 @@ struct FeatureGym::Impl {
   f32 circuit_time = 0;
   Mat4 circuit_previous = Mat4::Identity();
   bool circuit_previous_valid = false;
-  std::array<Mat4, 4> circuit_wheel_previous{};
-  std::array<bool, 4> circuit_wheel_previous_valid{};
+  base::Array<Mat4, 4> circuit_wheel_previous{};
+  base::Array<bool, 4> circuit_wheel_previous_valid{};
 
   // Marina: a force-simulated physics::Boat that floats on the water-district
   // lake. Update() must run every fixed step to keep it buoyant (the hull is
   // exempt from the world's generic buoyancy); it idles at its berth and runs a
   // slow circuit during the boat stop. Meshes are a hull + cabin box.
-  std::unique_ptr<physics::Boat> boat;
+  base::UniquePointer<physics::Boat> boat;
   u64 boat_hull_mesh = 0;
   u64 boat_cabin_mesh = 0;
   Vec3 boat_berth{};
@@ -787,7 +788,7 @@ struct FeatureGym::Impl {
   // around a circle at altitude over the circuit (closed-loop heading + altitude
   // hold), then falls away unseen once the stop ends. Update() runs every step
   // so the gear holds it on the apron while idle.
-  std::unique_ptr<physics::Aircraft> aircraft;
+  base::UniquePointer<physics::Aircraft> aircraft;
   u64 plane_body_mesh = 0;
   u64 plane_wing_mesh = 0;
   u64 plane_tail_mesh = 0;
@@ -807,8 +808,8 @@ FeatureGym::Impl::~Impl() {
   if (audio_voice && ctx.audio) ctx.audio->Stop(audio_voice, 0);
   if (camera_activation) scene::ReleaseCameraMode(world, camera_activation, {.duration = 0});
   if (cloth_id) physics.RemoveCloth(cloth_id);
-  boat.reset();      // removes the hull body while `physics` is still alive
-  aircraft.reset();  // removes the fuselage body while `physics` is still alive
+  boat.Reset();      // removes the hull body while `physics` is still alive
+  aircraft.Reset();  // removes the fuselage body while `physics` is still alive
   if (car) physics.RemoveVehicle(car);
   if (bike) physics.RemoveVehicle(bike);
   if (circuit_car) physics.RemoveVehicle(circuit_car);
@@ -826,7 +827,7 @@ bool FeatureGym::Impl::SoftwareGiOnly() const {
          (ctx.config->renderer.software_gi_fallback && !renderer.raytracing_available());
 }
 
-asset::AssetId FeatureGym::Impl::AddMaterial(const std::string& name,
+asset::AssetId FeatureGym::Impl::AddMaterial(const base::String& name,
                                              Vec3 color,
                                              f32 roughness,
                                              f32 metallic) {
@@ -842,7 +843,7 @@ asset::AssetId FeatureGym::Impl::AddMaterial(const std::string& name,
 }
 
 asset::AssetId FeatureGym::Impl::UploadMesh(asset::Mesh mesh, asset::AssetId material, bool trace) {
-  mesh = WithMaterial(std::move(mesh), material);
+  mesh = WithMaterial(base::move(mesh), material);
   if (SoftwareGiOnly() && !trace) mesh.exclude_from_rt = true;
   const asset::AssetId id = mesh.id;
   if (!headless) renderer.UploadMesh(mesh);
@@ -858,7 +859,7 @@ ecs::Entity FeatureGym::Impl::Spawn(asset::AssetId mesh, Vec3 position, f32 scal
   return entity;
 }
 
-ecs::Entity FeatureGym::Impl::SpawnBox(const std::string& name,
+ecs::Entity FeatureGym::Impl::SpawnBox(const base::String& name,
                                        Vec3 half_extent,
                                        Vec3 position,
                                        asset::AssetId material,
@@ -949,7 +950,7 @@ void FeatureGym::Impl::Create() {
 
   ctx.camera->set_position({0, 50, 56});
   const Vec3 direction = Normalize(Vec3{0, 0, -14} - ctx.camera->position());
-  ctx.camera->set_yaw_pitch(std::atan2(direction.x, -direction.z), std::asin(direction.y));
+  ctx.camera->set_yaw_pitch(::atan2(direction.x, -direction.z), ::asin(direction.y));
   ctx.camera->speed = 15.0f;
   RX_INFO(
       "feature gym: nine self-contained districts ready; use RX_SHOWCASE=1 "
@@ -970,14 +971,14 @@ void FeatureGym::Impl::CreateBase() {
   // Floor spans the 3x3 district grid plus the driving circuit apron to the
   // south (z down to ~-100).
   SpawnBox("world_floor", {62, 0.25f, 72}, {0, -2.65f, -31}, floor.id, false, true);
-  for (size_t i = 0; i < std::size(kAreas); ++i) {
+  for (size_t i = 0; i < (sizeof(kAreas) / sizeof(kAreas[0])); ++i) {
     const AreaInfo& info = kAreas[i];
     const Vec3 tint{static_cast<f32>((info.color >> 24) & 0xff) / 255.0f,
                     static_cast<f32>((info.color >> 16) & 0xff) / 255.0f,
                     static_cast<f32>((info.color >> 8) & 0xff) / 255.0f};
     if (static_cast<Area>(i + 1) != Area::kWater) {
-      asset::AssetId pad = AddMaterial("pad_" + std::to_string(i), tint * 0.22f, 0.88f);
-      SpawnBox("pad_" + std::to_string(i), {16.0f, 0.08f, 13.5f}, info.center + Vec3{0, 0.02f, 0},
+      asset::AssetId pad = AddMaterial("pad_" + rx::ToString(i), tint * 0.22f, 0.88f);
+      SpawnBox("pad_" + rx::ToString(i), {16.0f, 0.08f, 13.5f}, info.center + Vec3{0, 0.02f, 0},
                pad, false, true);
       physics.AddStaticBox(info.center + Vec3{0, -0.25f, 0}, {16.0f, 0.25f, 13.5f});
     }
@@ -986,11 +987,11 @@ void FeatureGym::Impl::CreateBase() {
     const f32 x1 = info.center.x + 15.8f;
     const f32 z0 = info.center.z - 13.3f;
     const f32 z1 = info.center.z + 13.3f;
-    for (const auto& edge : std::array<std::pair<Vec3, Vec3>, 4>{
-             std::pair{Vec3{x0, 0.14f, z0}, Vec3{x1, 0.14f, z0}},
-             std::pair{Vec3{x1, 0.14f, z0}, Vec3{x1, 0.14f, z1}},
-             std::pair{Vec3{x1, 0.14f, z1}, Vec3{x0, 0.14f, z1}},
-             std::pair{Vec3{x0, 0.14f, z1}, Vec3{x0, 0.14f, z0}},
+    for (const auto& edge : base::Array<base::Pair<Vec3, Vec3>, 4>{
+             base::Pair{Vec3{x0, 0.14f, z0}, Vec3{x1, 0.14f, z0}},
+             base::Pair{Vec3{x1, 0.14f, z0}, Vec3{x1, 0.14f, z1}},
+             base::Pair{Vec3{x1, 0.14f, z1}, Vec3{x0, 0.14f, z1}},
+             base::Pair{Vec3{x0, 0.14f, z1}, Vec3{x0, 0.14f, z0}},
          })
       lines.push_back({edge.first, edge.second, info.color});
   }
@@ -1002,11 +1003,11 @@ void FeatureGym::Impl::CreateMaterials() {
   const Vec3 c = Info(Area::kMaterials).center;
   int index = 0;
   auto sphere = [&](Vec3 position, asset::Material material) {
-    const std::string stem = "material_" + std::to_string(index++);
+    const base::String stem = "material_" + rx::ToString(index++);
     material.id = asset::MakeAssetId("featuregym/material/" + stem);
     asset::Mesh mesh =
         asset::MakeSphere(0.72f, 28, 40, asset::MakeAssetId("featuregym/mesh/" + stem));
-    mesh = WithMaterial(std::move(mesh), material.id);
+    mesh = WithMaterial(base::move(mesh), material.id);
     if (SoftwareGiOnly()) mesh.exclude_from_rt = true;
     if (!headless) {
       renderer.UploadMaterial(material);
@@ -1214,12 +1215,12 @@ void FeatureGym::Impl::CreateLighting() {
   asset::AssetId white = AddMaterial("light_receiver", {0.30f, 0.31f, 0.34f}, 0.48f);
   for (int i = 0; i < 7; ++i) {
     asset::Mesh sphere = asset::MakeSphere(
-        0.65f, 20, 28, asset::MakeAssetId("featuregym/mesh/light_receiver_" + std::to_string(i)));
-    const asset::AssetId id = UploadMesh(std::move(sphere), white, true);
+        0.65f, 20, 28, asset::MakeAssetId("featuregym/mesh/light_receiver_" + rx::ToString(i)));
+    const asset::AssetId id = UploadMesh(base::move(sphere), white, true);
     Spawn(id, c + Vec3{-9 + i * 3.0f, 0.75f, -1.0f + (i & 1) * 2.0f});
   }
   for (int i = 0; i < 6; ++i)
-    SpawnBox("light_pillar_" + std::to_string(i), {0.22f, 1.2f, 0.35f},
+    SpawnBox("light_pillar_" + rx::ToString(i), {0.22f, 1.2f, 0.35f},
              c + Vec3{-7.5f + i * 3.0f, 1.2f, -3.0f}, white, false, true);
 
   const Vec3 colors[] = {{1, 0.12f, 0.08f}, {0.08f, 1, 0.20f}, {0.12f, 0.35f, 1},
@@ -1250,8 +1251,8 @@ void FeatureGym::Impl::CreateLighting() {
   spot.direction_type[1] = spot_direction.y;
   spot.direction_type[2] = spot_direction.z;
   spot.direction_type[3] = 1;
-  spot.params[0] = std::cos(0.28f);
-  spot.params[1] = std::cos(0.48f);
+  spot.params[0] = ::cos(0.28f);
+  spot.params[1] = ::cos(0.48f);
   lights.push_back(spot);
 
   render::PointLight sphere;
@@ -1287,12 +1288,12 @@ void FeatureGym::Impl::CreateGeometry() {
   const Vec3 c = Info(Area::kGeometry).center;
   asset::AssetId blue = AddMaterial("geometry", {0.15f, 0.46f, 0.78f}, 0.38f);
   asset::Mesh lod = asset::MakeLodSphere(1.15f, asset::MakeAssetId("featuregym/mesh/lod"));
-  const asset::AssetId lod_id = UploadMesh(std::move(lod), blue);
+  const asset::AssetId lod_id = UploadMesh(base::move(lod), blue);
   for (int i = 0; i < 5; ++i) Spawn(lod_id, c + Vec3{-10 + i * 4.2f, 1.25f, 6});
 
   asset::Mesh auto_lod =
       asset::MakeSphere(1.0f, 60, 90, asset::MakeAssetId("featuregym/mesh/auto_lod"));
-  auto_lod = WithMaterial(std::move(auto_lod), blue);
+  auto_lod = WithMaterial(base::move(auto_lod), blue);
   asset::GenerateLods(&auto_lod);
   if (SoftwareGiOnly()) auto_lod.exclude_from_rt = true;
   const asset::AssetId auto_id = auto_lod.id;
@@ -1339,7 +1340,7 @@ void FeatureGym::Impl::CreateGeometry() {
       const f32 pz = (static_cast<f32>(z) / kGrid - 0.5f) * kVirtualGeometrySize;
       asset::Vertex vertex{};
       vertex.position[0] = px;
-      vertex.position[1] = std::sin(px * 1.4f) * std::cos(pz * 1.2f) * 0.6f;
+      vertex.position[1] = ::sin(px * 1.4f) * ::cos(pz * 1.2f) * 0.6f;
       vertex.position[2] = pz;
       vertex.normal[1] = 1;
       terrain_lod.vertices.push_back(vertex);
@@ -1362,7 +1363,7 @@ void FeatureGym::Impl::CreateGeometry() {
           1.0f / kVirtualGeometrySize);
     }
     const Mat4 instance = MakeTranslation(c + Vec3{0, 0.4f, -6});
-    renderer.SetVirtualGeometryInstances(std::span<const Mat4>(&instance, 1));
+    renderer.SetVirtualGeometryInstances(base::Span<const Mat4>(&instance, 1));
   }
 
   asset::Mesh tree = MakeTree(asset::MakeAssetId("featuregym/mesh/tree"),
@@ -1372,7 +1373,7 @@ void FeatureGym::Impl::CreateGeometry() {
 
   if (!headless) {
     asset::Mesh prop = asset::MakeCube(0.36f, asset::MakeAssetId("featuregym/mesh/instance_prop"));
-    prop = WithMaterial(std::move(prop),
+    prop = WithMaterial(base::move(prop),
                         AddMaterial("instance_prop", {0.06f, 0.72f, 0.92f}, 0.28f, 0.45f));
     renderer.UploadMesh(prop);
     prop_mesh = prop.id.hash;
@@ -1384,7 +1385,7 @@ void FeatureGym::Impl::CreateGeometry() {
         const Vec3 position = c + Vec3{-10.0f + column * 2.2f, 0.45f, -1.0f - row * 2.1f};
         prop_transforms.push_back(MakeTranslation(position) * MakeScale(scale));
         prop_updated_transforms.push_back(
-            MakeTranslation(position + Vec3{0, 0.35f + 0.12f * std::sin(column * 0.7f), -0.45f}) *
+            MakeTranslation(position + Vec3{0, 0.35f + 0.12f * ::sin(column * 0.7f), -0.45f}) *
             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.18f * (row + column))) * MakeScale(scale));
       }
     }
@@ -1399,14 +1400,14 @@ void FeatureGym::Impl::CreateGeometry() {
   if (headless) return;
   const u32 baked = renderer.BakeImposter(tree);
   if (baked == render::ImposterPass::kNoMesh) return;
-  std::vector<render::ImposterPass::Instance> imposters;
+  base::Vector<render::ImposterPass::Instance> imposters;
   for (int i = 0; i < 80; ++i) {
     const f32 angle = i * 2.39996323f;
     const f32 radius = 10.0f + (i % 9) * 0.65f;
     render::ImposterPass::Instance instance;
-    instance.position[0] = c.x + std::cos(angle) * radius;
+    instance.position[0] = c.x + ::cos(angle) * radius;
     instance.position[1] = 0.1f;
-    instance.position[2] = c.z + std::sin(angle) * radius;
+    instance.position[2] = c.z + ::sin(angle) * radius;
     instance.scale = 0.65f + (i % 5) * 0.08f;
     instance.mesh = baked;
     imposters.push_back(instance);
@@ -1419,7 +1420,7 @@ void FeatureGym::Impl::CreateAtmosphere() {
   asset::AssetId tower = AddMaterial("atmosphere_tower", {0.34f, 0.28f, 0.48f}, 0.78f);
   for (int i = 0; i < 9; ++i) {
     const f32 height_value = 1.2f + i * 0.65f;
-    SpawnBox("atmosphere_tower_" + std::to_string(i), {0.65f, height_value, 0.65f},
+    SpawnBox("atmosphere_tower_" + rx::ToString(i), {0.65f, height_value, 0.65f},
              c + Vec3{-9 + i * 2.25f, height_value, -5.5f}, tower);
   }
   asset::Material cloth;
@@ -1438,7 +1439,7 @@ void FeatureGym::Impl::CreateAtmosphere() {
   asset::Mesh banner = MakeBanner(asset::MakeAssetId("featuregym/mesh/weather_banner"), cloth.id);
   if (!headless) renderer.UploadMesh(banner);
   for (int i = 0; i < 5; ++i) {
-    SpawnBox("weather_pole_" + std::to_string(i), {0.07f, 2.7f, 0.07f},
+    SpawnBox("weather_pole_" + rx::ToString(i), {0.07f, 2.7f, 0.07f},
              c + Vec3{-8 + i * 4.0f, 2.7f, 4.5f}, neutral_material);
     Spawn(banner.id, c + Vec3{-6.8f + i * 4.0f, 5.1f, 4.5f});
   }
@@ -1477,7 +1478,7 @@ void FeatureGym::Impl::CreateWater() {
       const f32 local_x = -kIslandRadius + 2.0f * kIslandRadius * static_cast<f32>(x) / kIslandGrid;
       const f32 local_z = -kIslandRadius + 2.0f * kIslandRadius * static_cast<f32>(z) / kIslandGrid;
       const f32 gaussian =
-          std::exp(-(local_x * local_x + local_z * local_z) / (2.0f * kIslandSigma * kIslandSigma));
+          ::exp(-(local_x * local_x + local_z * local_z) / (2.0f * kIslandSigma * kIslandSigma));
       const f32 slope = kIslandPeak * 2.0f * gaussian / (kIslandSigma * kIslandSigma);
       const Vec3 island_normal = Normalize(Vec3{slope * local_x, 1, slope * local_z});
       asset::Vertex vertex{};
@@ -1510,7 +1511,7 @@ void FeatureGym::Impl::CreateWater() {
   Spawn(island.id, island_center);
 
   physics.set_water_height([this, c](const Vec3& p, f32* out, Vec3* flow) {
-    if (std::abs(p.x - c.x) > 14 || std::abs(p.z - c.z) > 14) return false;
+    if (::abs(p.x - c.x) > 14 || ::abs(p.z - c.z) > 14) return false;
     Vec3 orbital_flow{};
     *out = water_height + physics::GerstnerWaveHeight(p.x, p.z, sim_time, &orbital_flow);
     if (flow) *flow = orbital_flow;
@@ -1553,7 +1554,7 @@ void FeatureGym::Impl::CreateMarina() {
   // the cruise runs it gently so a hull that can only turn wide still stays on
   // the small lake.
   physics::BoatDesc desc = physics::SpeedboatProfile();
-  boat = std::make_unique<physics::Boat>(physics, desc, boat_berth, 0.0f);
+  boat = base::MakeUnique<physics::Boat>(physics, desc, boat_berth, 0.0f);
   if (!boat->valid())
     RX_WARN("feature gym: marina boat is static; rebuild with Jolt for buoyancy");
 
@@ -1589,9 +1590,9 @@ void FeatureGym::Impl::CreateEffects() {
   for (u32 i = 0; i < kSplatCount; ++i) {
     const f32 t = (i + 0.5f) / kSplatCount;
     const f32 y = 1.0f - 2.0f * t;
-    const f32 radius = std::sqrt(std::max(0.0f, 1.0f - y * y));
+    const f32 radius = ::sqrt(rx::Max(0.0f, 1.0f - y * y));
     const f32 angle = i * 2.39996323f;
-    const Vec3 direction{std::cos(angle) * radius, y, std::sin(angle) * radius};
+    const Vec3 direction{::cos(angle) * radius, y, ::sin(angle) * radius};
     render::GaussianInstance splat;
     splat.position[0] = c.x + 5.2f + direction.x * 1.6f;
     splat.position[1] = 2.0f + direction.y * 1.6f;
@@ -1678,8 +1679,8 @@ void FeatureGym::Impl::CreateNetworkBubbles() {
   }
   bubble_map.Configure({.hysteresis = 1.15f, .cell_size = 4.0f});
   if (!headless) {
-    bubble_viz = std::make_unique<net::BubbleVisualizer>();
-    if (!bubble_viz->Init(renderer)) bubble_viz.reset();
+    bubble_viz = base::MakeUnique<net::BubbleVisualizer>();
+    if (!bubble_viz->Init(renderer)) bubble_viz.Reset();
   }
 }
 
@@ -1769,10 +1770,10 @@ void FeatureGym::Impl::CreatePhysics() {
   bike = physics.CreateMotorcycle(bike_desc, c + Vec3{8, 1.0f, -4}, kPi * 0.5f);
 
   constexpr u32 kHeightSamples = 17;
-  std::array<f32, kHeightSamples * kHeightSamples> heights{};
+  base::Array<f32, kHeightSamples * kHeightSamples> heights{};
   for (u32 z = 0; z < kHeightSamples; ++z)
     for (u32 x = 0; x < kHeightSamples; ++x)
-      heights[z * kHeightSamples + x] = 0.25f * std::sin(x * 0.7f) * std::cos(z * 0.55f);
+      heights[z * kHeightSamples + x] = 0.25f * ::sin(x * 0.7f) * ::cos(z * 0.55f);
   physics.AddHeightField(c + Vec3{-11, 0, -10}, heights.data(), kHeightSamples, 8.0f);
   CreateCloth();
 }
@@ -1902,7 +1903,7 @@ void FeatureGym::Impl::CreateDrivingCircuit() {
   // full-grip asphalt.
   constexpr u32 kSamples = 41;
   constexpr f32 kFieldSize = 46.0f;
-  std::array<f32, kSamples * kSamples> flat{};
+  base::Array<f32, kSamples * kSamples> flat{};
   physics.AddHeightField(c + Vec3{-kFieldSize * 0.5f, 0.0f, -kFieldSize * 0.5f}, flat.data(),
                          kSamples, kFieldSize);
 
@@ -1917,8 +1918,8 @@ void FeatureGym::Impl::CreateDrivingCircuit() {
     for (u32 i = 0; i < kOvalSegments; ++i) {
       const f32 a0 = (static_cast<f32>(i) / kOvalSegments) * 2.0f * kPi;
       const f32 a1 = (static_cast<f32>(i + 1) / kOvalSegments) * 2.0f * kPi;
-      lines.push_back({c + Vec3{rx * std::cos(a0), 0.09f, rz * std::sin(a0)},
-                       c + Vec3{rx * std::cos(a1), 0.09f, rz * std::sin(a1)}, color});
+      lines.push_back({c + Vec3{rx * ::cos(a0), 0.09f, rz * ::sin(a0)},
+                       c + Vec3{rx * ::cos(a1), 0.09f, rz * ::sin(a1)}, color});
     }
   };
   oval(circuit_rx, circuit_rz, 0xf4f4f5ff);
@@ -1933,7 +1934,7 @@ void FeatureGym::Impl::CreateDrivingCircuit() {
   for (u32 i = 0; i < kCones; ++i) {
     const f32 a = (static_cast<f32>(i) / kCones) * 2.0f * kPi;
     Spawn(cone,
-          c + Vec3{(circuit_rx + 1.3f) * std::cos(a), 0.36f, (circuit_rz + 1.3f) * std::sin(a)});
+          c + Vec3{(circuit_rx + 1.3f) * ::cos(a), 0.36f, (circuit_rz + 1.3f) * ::sin(a)});
   }
 
   // The circuit car reuses the chassis + wheel meshes uploaded in
@@ -1974,7 +1975,7 @@ void FeatureGym::Impl::CreateAircraft() {
   // settle (zero-input steps in AddSimulation) before the flyby flings it aloft.
   const Vec3 apron = circuit_center + Vec3{circuit_rx + 6.0f, 1.4f, -circuit_rz - 2.0f};
   physics::AircraftDesc desc;
-  aircraft = std::make_unique<physics::Aircraft>(physics, desc, apron, 0.0f);
+  aircraft = base::MakeUnique<physics::Aircraft>(physics, desc, apron, 0.0f);
   if (!aircraft->valid())
     RX_WARN("feature gym: flyover aircraft is static; rebuild with Jolt for flight");
 }
@@ -1989,7 +1990,7 @@ void FeatureGym::Impl::CreateAnimation() {
   biped_material.roughness_factor = 0.68f;
   asset::Mesh biped;
   asset::MakeSkinnedBiped(asset::MakeAssetId("featuregym/mesh/biped"), &skeleton, &biped);
-  biped = WithMaterial(std::move(biped), biped_material.id);
+  biped = WithMaterial(base::move(biped), biped_material.id);
   skin = biped.skin;
   biped_mesh = biped.id.hash;
   if (!headless) {
@@ -2004,18 +2005,18 @@ void FeatureGym::Impl::CreateAnimation() {
   biped_position = c + Vec3{-7, 0.2f, -2};
 
   asset::Mesh morph = asset::MakeSphere(1.35f, 34, 48, asset::MakeAssetId("featuregym/mesh/morph"));
-  morph = WithMaterial(std::move(morph), AddMaterial("morph", {0.74f, 0.16f, 0.58f}, 0.32f));
+  morph = WithMaterial(base::move(morph), AddMaterial("morph", {0.74f, 0.16f, 0.58f}, 0.32f));
   asset::MorphTarget target;
   target.name = "pulse";
   target.name_hash = asset::MakeAssetId(target.name).hash;
   target.position_deltas.reserve(morph.lods[0].vertices.size() * 3);
   for (const asset::Vertex& vertex : morph.lods[0].vertices) {
-    const f32 wave = 0.26f * std::sin(vertex.position[1] * 6.0f);
+    const f32 wave = 0.26f * ::sin(vertex.position[1] * 6.0f);
     target.position_deltas.push_back(vertex.normal[0] * wave);
     target.position_deltas.push_back(vertex.normal[1] * wave);
     target.position_deltas.push_back(vertex.normal[2] * wave);
   }
-  morph.morph_targets.push_back(std::move(target));
+  morph.morph_targets.push_back(base::move(target));
   morph_mesh = morph.id.hash;
   if (!headless) renderer.UploadMesh(morph);
   morph_transform = MakeTranslation(c + Vec3{6.5f, 1.7f, 1.0f});
@@ -2024,7 +2025,7 @@ void FeatureGym::Impl::CreateAnimation() {
   asset::AssetId step = AddMaterial("ik_step", {0.30f, 0.34f, 0.28f}, 0.94f);
   for (int i = 0; i < 6; ++i) {
     const f32 h = 0.06f + (i % 3) * 0.07f;
-    SpawnBox("ik_step_" + std::to_string(i), {0.8f, h, 0.85f},
+    SpawnBox("ik_step_" + rx::ToString(i), {0.8f, h, 0.85f},
              c + Vec3{-6 + i * 2.1f, h + 0.1f, -1.5f}, step, true);
   }
 }
@@ -2053,7 +2054,7 @@ void FeatureGym::Impl::CreatePost() {
     ecs::Entity moving = Spawn(
         i & 1 ? glow_mesh
               : UploadMesh(asset::MakeCube(0.65f, asset::MakeAssetId("featuregym/mesh/post_cube_" +
-                                                                     std::to_string(i))),
+                                                                     rx::ToString(i))),
                            i & 2 ? white : black),
         c + Vec3{-9 + i * 3.0f, 1.1f, 1.0f + (i & 1) * 2.0f});
     world.Add(moving, GymMotion{.origin = c + Vec3{-9 + i * 3.0f, 1.1f, 1.0f + (i & 1) * 2.0f},
@@ -2065,8 +2066,8 @@ void FeatureGym::Impl::CreatePost() {
   for (int i = 0; i < 9; ++i) {
     const f32 value = static_cast<f32>(i) / 8.0f;
     asset::AssetId ramp =
-        AddMaterial("post_ramp_" + std::to_string(i), {value, value, value}, 0.65f);
-    SpawnBox("post_ramp_" + std::to_string(i), {0.6f, 1.8f, 0.35f},
+        AddMaterial("post_ramp_" + rx::ToString(i), {value, value, value}, 0.65f);
+    SpawnBox("post_ramp_" + rx::ToString(i), {0.6f, 1.8f, 0.35f},
              c + Vec3{-8 + i * 2.0f, 1.9f, -4.5f}, ramp);
   }
 }
@@ -2106,13 +2107,13 @@ void FeatureGym::Impl::CreateCameraExhibit() {
   }
 }
 
-void FeatureGym::Impl::AddLabel(const Vec3& anchor, std::string_view text, f32 height, u32 color) {
+void FeatureGym::Impl::AddLabel(const Vec3& anchor, base::StringRef text, f32 height, u32 color) {
   render::WorldText label;
   label.position = anchor;
-  label.text = std::string(text);
+  label.text = base::String(text);
   label.size = height;
   label.rgba = color;
-  labels.push_back(std::move(label));
+  labels.push_back(base::move(label));
 }
 
 void FeatureGym::Impl::CreateLabels() {
@@ -2143,13 +2144,13 @@ void FeatureGym::Impl::CreateLabels() {
 
 void FeatureGym::Impl::StartAudio() {
   if (headless || !ctx.audio || !ctx.audio->active()) return;
-  const std::filesystem::path path = FeatureAssetPath("spatial_tone.wav");
-  std::vector<u8> bytes = ReadBytes(path);
+  const base::String path = FeatureAssetPath("spatial_tone.wav");
+  base::Vector<u8> bytes = ReadBytes(path);
   if (bytes.empty()) {
-    RX_WARN("feature gym: generated audio missing at {}", path.string());
+    RX_WARN("feature gym: generated audio missing at {}", path);
     return;
   }
-  std::unique_ptr<audio::Decoder> decoder =
+  base::UniquePointer<audio::Decoder> decoder =
       audio::OpenDecoder(ByteSpan(bytes.data(), bytes.size()), ".wav");
   audio::PlayParams params;
   params.loop = true;
@@ -2157,7 +2158,7 @@ void FeatureGym::Impl::StartAudio() {
   params.position = Info(Area::kAnimation).center + Vec3{6, 1.5f, -5};
   params.gain = 0.18f;
   params.fade_in = 0.5f;
-  audio_voice = ctx.audio->mixer().Play(std::move(decoder), params);
+  audio_voice = ctx.audio->mixer().Play(base::move(decoder), params);
 }
 
 void FeatureGym::Impl::AddSimulation() {
@@ -2170,7 +2171,7 @@ void FeatureGym::Impl::AddSimulation() {
             [this](ecs::Entity, GymMotion& motion, scene::Transform& transform) {
               const f32 angle = sim_time * motion.speed + motion.phase;
               transform.position[0] = motion.origin.x;
-              transform.position[1] = motion.origin.y + std::sin(angle * 1.7f) * motion.amplitude;
+              transform.position[1] = motion.origin.y + ::sin(angle * 1.7f) * motion.amplitude;
               transform.position[2] = motion.origin.z;
               const Quat rotation = QuatFromAxisAngle(motion.axis, angle);
               transform.rotation[0] = rotation.x;
@@ -2183,25 +2184,25 @@ void FeatureGym::Impl::AddSimulation() {
             [dt](ecs::Entity, BubbleAgent& agent, scene::Transform& transform) {
               agent.time += dt;
               transform.position[0] =
-                  agent.center.x + std::sin(agent.time * agent.rate_x) * agent.extent;
+                  agent.center.x + ::sin(agent.time * agent.rate_x) * agent.extent;
               transform.position[1] = agent.center.y;
               transform.position[2] =
-                  agent.center.z + std::cos(agent.time * agent.rate_z) * agent.extent;
+                  agent.center.z + ::cos(agent.time * agent.rate_z) * agent.extent;
             });
         if (strand_sim) {
           const f32 angle = sim_time * 0.85f;
           const Vec3 position =
-              strand_center + Vec3{0.08f * std::sin(angle), 0.10f * std::sin(angle * 1.7f), 0};
+              strand_center + Vec3{0.08f * ::sin(angle), 0.10f * ::sin(angle * 1.7f), 0};
           strand_transform = MakeTranslation(position) *
-                             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.7f * std::sin(angle)));
+                             MakeFromQuat(QuatFromAxisAngle({0, 1, 0}, 0.7f * ::sin(angle)));
           physics.SetStrandGroomTransform(strand_sim, strand_transform, dt);
           physics.SetStrandGroomWind(strand_sim,
-                                     {0.8f + 0.45f * std::sin(sim_time * 2.1f), 0.12f, -0.35f});
+                                     {0.8f + 0.45f * ::sin(sim_time * 2.1f), 0.12f, -0.35f});
         }
 
         const f32 identity[4] = {0, 0, 0, 1};
         if (platform_body) {
-          const Vec3 target = platform_origin + Vec3{std::sin(sim_time * 0.7f) * 3.5f, 0, 0};
+          const Vec3 target = platform_origin + Vec3{::sin(sim_time * 0.7f) * 3.5f, 0, 0};
           physics.MoveBodyKinematic(platform_body, target, identity, dt);
           if (scene::Transform* transform = sim_world.Get<scene::Transform>(platform_entity)) {
             transform->position[0] = target.x;
@@ -2220,7 +2221,7 @@ void FeatureGym::Impl::AddSimulation() {
             if (transform->position[0] < physics_x - 9.0f) character_direction = 1;
           }
           const int cycle = static_cast<int>(sim_time / 5.0f);
-          const bool jump = cycle != jump_cycle && std::fmod(sim_time, 5.0f) < dt * 1.5f;
+          const bool jump = cycle != jump_cycle && ::fmod(sim_time, 5.0f) < dt * 1.5f;
           if (jump) jump_cycle = cycle;
           physics.MoveCharacter(character, {character_direction * 2.0f, 0, 0}, jump, dt, &position,
                                 &grounded);
@@ -2236,7 +2237,7 @@ void FeatureGym::Impl::AddSimulation() {
           if (active == Area::kPhysics) {
             const bool accelerating = physics_active_time < 1.0f;
             physics.DriveVehicle(car, accelerating ? 0.10f : 0.0f,
-                                 std::sin(physics_active_time * 0.35f) * 0.35f,
+                                 ::sin(physics_active_time * 0.35f) * 0.35f,
                                  accelerating ? 0.0f : 0.65f, 0.0f);
           } else {
             physics.DriveVehicle(car, 0, 0, 1, 0);
@@ -2246,7 +2247,7 @@ void FeatureGym::Impl::AddSimulation() {
           if (active == Area::kPhysics) {
             const bool accelerating = physics_active_time < 1.0f;
             physics.DriveVehicle(bike, accelerating ? 0.08f : 0.0f,
-                                 std::sin(physics_active_time * 0.42f) * 0.22f,
+                                 ::sin(physics_active_time * 0.42f) * 0.22f,
                                  accelerating ? 0.0f : 0.55f, 0.0f);
           } else {
             physics.DriveVehicle(bike, 0, 0, 1, 0);
@@ -2256,18 +2257,18 @@ void FeatureGym::Impl::AddSimulation() {
           if (active_mode == TourMode::kVehicleCircuit) {
             circuit_time += dt;
             const f32 theta = circuit_time * 0.6f + 0.42f;
-            const Vec3 target = circuit_center + Vec3{circuit_rx * std::cos(theta), 0,
-                                                      circuit_rz * std::sin(theta)};
+            const Vec3 target = circuit_center + Vec3{circuit_rx * ::cos(theta), 0,
+                                                      circuit_rz * ::sin(theta)};
             Vec3 pos;
             f32 rot[4];
             if (physics.GetVehicleTransform(circuit_car, &pos, rot)) {
               const Vec3 fwd = Rotate(Quat{rot[0], rot[1], rot[2], rot[3]}, Vec3{0, 0, 1});
-              f32 err = std::atan2(target.x - pos.x, target.z - pos.z) - std::atan2(fwd.x, fwd.z);
+              f32 err = ::atan2(target.x - pos.x, target.z - pos.z) - ::atan2(fwd.x, fwd.z);
               while (err > kPi) err -= 2.0f * kPi;
               while (err < -kPi) err += 2.0f * kPi;
               // +Z forward, right = -X, so steer (positive = right) chases the
               // target against the sign of the yaw error.
-              physics.DriveVehicle(circuit_car, 0.42f, std::clamp(-err * 1.3f, -1.0f, 1.0f), 0.0f,
+              physics.DriveVehicle(circuit_car, 0.42f, rx::Clamp(-err * 1.3f, -1.0f, 1.0f), 0.0f,
                                    0.0f);
             }
           } else {
@@ -2300,8 +2301,8 @@ void FeatureGym::Impl::AddSimulation() {
                           const physics::BoatState& s = boat->state();
                           const f32 theta = boat_time * 0.5f + 0.6f;
                           Vec3 target = boat_circuit_center +
-                                        Vec3{boat_circuit_radius * std::cos(theta), 0,
-                                             boat_circuit_radius * std::sin(theta)};
+                                        Vec3{boat_circuit_radius * ::cos(theta), 0,
+                                             boat_circuit_radius * ::sin(theta)};
                           // Safety backstop: a heavy hull turns wide, so if it
                           // drifts past the ring steer straight for the lake
                           // centre. This bounds the path inside the water region
@@ -2313,14 +2314,14 @@ void FeatureGym::Impl::AddSimulation() {
                                                (boat_circuit_radius + 1.0f) * (boat_circuit_radius + 1.0f);
                           if (outside) target = boat_circuit_center;
                           const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
-                          f32 err = std::atan2(target.x - s.position.x, target.z - s.position.z) -
-                                    std::atan2(fwd.x, fwd.z);
+                          f32 err = ::atan2(target.x - s.position.x, target.z - s.position.z) -
+                                    ::atan2(fwd.x, fwd.z);
                           while (err > kPi) err -= 2.0f * kPi;
                           while (err < -kPi) err += 2.0f * kPi;
                           // Ease off the throttle when steering hard or recovering
                           // so the hull stays slow enough to answer the helm.
-                          input.steer = std::clamp(-err * 2.2f, -1.0f, 1.0f);
-                          input.throttle = (outside || std::abs(err) > 1.0f) ? 0.12f : 0.22f;
+                          input.steer = rx::Clamp(-err * 2.2f, -1.0f, 1.0f);
+                          input.throttle = (outside || ::abs(err) > 1.0f) ? 0.12f : 0.22f;
                         } else {
                           boat_cruise_active = false;
                           boat_time = 0;
@@ -2353,16 +2354,16 @@ void FeatureGym::Impl::AddSimulation() {
           plane_time += dt;
           const physics::AircraftState& s = aircraft->state();
           const Vec3 fwd = Rotate(s.rotation, Vec3{0, 0, 1});
-          f32 herr = (kPi * 0.5f) - std::atan2(fwd.x, fwd.z);
+          f32 herr = (kPi * 0.5f) - ::atan2(fwd.x, fwd.z);
           while (herr > kPi) herr -= 2.0f * kPi;
           while (herr < -kPi) herr += 2.0f * kPi;
           // Hold heading +X with a gentle bank + rudder, hold the cruise altitude
           // with the elevator, full power. Wings stay near level so lift stays
           // up and the pass is sustainable.
           ai.throttle = 1.0f;
-          ai.roll = std::clamp(-herr * 0.8f, -0.35f, 0.35f);
-          ai.yaw = std::clamp(-herr * 0.3f, -0.3f, 0.3f);
-          ai.pitch = std::clamp((plane_orbit_alt - s.position.y) * 0.08f -
+          ai.roll = rx::Clamp(-herr * 0.8f, -0.35f, 0.35f);
+          ai.yaw = rx::Clamp(-herr * 0.3f, -0.3f, 0.3f);
+          ai.pitch = rx::Clamp((plane_orbit_alt - s.position.y) * 0.08f -
                                     s.vertical_speed_mps * 0.06f,
                                 -0.6f, 0.6f);
         } else {
@@ -2380,7 +2381,7 @@ void FeatureGym::Impl::EmitCloth(render::FrameView& view) {
     return;
   }
 
-  std::fill(cloth_normals.begin(), cloth_normals.end(), Vec3{});
+  base::Fill(cloth_normals.begin(), cloth_normals.end(), Vec3{});
   cloth_lines.clear();
   for (size_t i = 0; i < cloth_indices.size(); i += 3) {
     const u32 a = cloth_indices[i];
@@ -2433,14 +2434,14 @@ void FeatureGym::Impl::EmitCloth(render::FrameView& view) {
   draw.skin_offset = skin_offset;
   view.draws.push_back(draw);
   view.debug_lines_overlay =
-      std::span<const render::DebugLine>(cloth_lines.data(), cloth_lines.size());
+      base::Span<const render::DebugLine>(cloth_lines.data(), cloth_lines.size());
 }
 
 void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
   if (!graph.valid()) return;
-  const f32 animation_dt = std::min(dt, 0.05f);
+  const f32 animation_dt = rx::Min(dt, 0.05f);
   biped_time += animation_dt;
-  const f32 phase = std::fmod(biped_time, 8.0f);
+  const f32 phase = ::fmod(biped_time, 8.0f);
   const f32 speed = phase < 1.0f ? 0.0f : phase < 3.0f ? 1.6f : 3.8f;
   rig.SetSpeed(speed);
   Vec3 root = rig.Update(animation_dt, &pose, [&](const anim::RigPlayer::Event& event) {
@@ -2512,7 +2513,7 @@ void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
     if (splat_timer > 0.8f) {
       splat_timer = 0;
       const f32 angle = static_cast<f32>(splat_index) * 2.39996f;  // golden angle
-      const Vec3 dir{std::cos(angle), 0.0f, std::sin(angle)};
+      const Vec3 dir{::cos(angle), 0.0f, ::sin(angle)};
       const f32 height = 0.55f + 0.28f * static_cast<f32>(splat_index % 4);
       render::DecalStamp splat;
       splat.receiver = biped_decal_receiver;
@@ -2535,14 +2536,14 @@ void FeatureGym::Impl::EmitAnimation(f32 dt, render::FrameView& view) {
   morph.prev_transform = morph_previous;
   morph.morph_offset = static_cast<i32>(view.morph_weights.size());
   morph.morph_count = 1;
-  view.morph_weights.push_back({0, std::sin(render_time * 1.7f) * 0.5f + 0.5f});
+  view.morph_weights.push_back({0, ::sin(render_time * 1.7f) * 0.5f + 0.5f});
   view.draws.push_back(morph);
   morph_previous = morph_transform;
 }
 
 void FeatureGym::Impl::EmitVehicles(render::FrameView& view) {
-  auto emit = [&](physics::VehicleId vehicle, u64 chassis, std::span<Mat4> wheel_previous,
-                  std::span<bool> wheel_previous_valid, Mat4& chassis_previous,
+  auto emit = [&](physics::VehicleId vehicle, u64 chassis, base::Span<Mat4> wheel_previous,
+                  base::Span<bool> wheel_previous_valid, Mat4& chassis_previous,
                   bool& chassis_previous_valid) {
     if (!vehicle) return;
     Vec3 position;
@@ -2611,11 +2612,11 @@ void FeatureGym::Impl::EmitBoat(f32 dt, render::FrameView& view) {
   wake.position = {stern.x, water_height + physics::GerstnerWaveHeight(stern.x, stern.z, sim_time),
                    stern.z};
   wake.radius = 1.4f;
-  wake.ripple_strength = std::min(1.0f, speed * 0.2f);
-  wake.foam_amount = std::min(1.0f, speed * 0.18f);
+  wake.ripple_strength = rx::Min(1.0f, speed * 0.2f);
+  wake.foam_amount = rx::Min(1.0f, speed * 0.18f);
   wake.velocity_x = velocity.x;
   wake.velocity_z = velocity.z;
-  wake.elongation = std::min(4.0f, speed * 0.4f);
+  wake.elongation = rx::Min(4.0f, speed * 0.4f);
   view.water_disturbances.push_back(wake);
 }
 
@@ -2740,11 +2741,11 @@ void FeatureGym::Impl::EmitSkewedNormals(render::FrameView& view) {
 void FeatureGym::Impl::EmitCameraExhibit(f32 dt, render::FrameView& view) {
   if (active_mode != TourMode::kEcsCameraStackRig || !camera_activation) return;
   if (scene::CameraOrbit* orbit = world.Get<scene::CameraOrbit>(camera_rig_mode))
-    orbit->yaw = 0.22f * std::sin(active_mode_elapsed * 0.7f);
+    orbit->yaw = 0.22f * ::sin(active_mode_elapsed * 0.7f);
   if (scene::CameraAnchor* anchor = world.Get<scene::CameraAnchor>(camera_rig_mode)) {
     const Vec3 c = Info(Area::kPost).center;
-    anchor->position = c + Vec3{std::sin(active_mode_elapsed * 0.6f) * 1.2f, 0.4f, 0};
-    anchor->velocity = {std::cos(active_mode_elapsed * 0.6f) * 0.72f, 0, 0};
+    anchor->position = c + Vec3{::sin(active_mode_elapsed * 0.6f) * 1.2f, 0.4f, 0};
+    anchor->velocity = {::cos(active_mode_elapsed * 0.6f) * 0.72f, 0, 0};
   }
   scene::BuildCameraRigs(world, dt);
   scene::PrepareCameraRigConstraints(world, dt);
@@ -2758,7 +2759,7 @@ void FeatureGym::Impl::EmitCameraExhibit(f32 dt, render::FrameView& view) {
 }
 
 void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
-  render_time += std::min(dt, 0.05f);
+  render_time += rx::Min(dt, 0.05f);
   if (!activations.empty()) {
     render::RenderSettings& settings = renderer.settings();
     if (active_mode == TourMode::kWeatherRain) {
@@ -2777,7 +2778,7 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
     Area nearest_area = Area::kOverview;
     f32 nearest_distance = 18.0f * 18.0f;
     if (view.camera.eye.y < 16.0f) {
-      for (size_t i = 0; i < std::size(kAreas); ++i) {
+      for (size_t i = 0; i < (sizeof(kAreas) / sizeof(kAreas[0])); ++i) {
         const Vec3 delta = view.camera.eye - kAreas[i].center;
         const f32 distance = delta.x * delta.x + delta.z * delta.z;
         if (distance < nearest_distance) {
@@ -2829,7 +2830,7 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
   if (active == Area::kMaterials) view.decals = decals;
   EmitSkewedNormals(view);
   EmitNetworkBubbles(view);
-  view.debug_lines = std::span<const render::DebugLine>(lines.data(), lines.size());
+  view.debug_lines = base::Span<const render::DebugLine>(lines.data(), lines.size());
   view.world_texts = labels;  // floating district + exhibit captions
   // Captions that ride the active vehicle exhibit.
   auto tag = [&](const Vec3& p, const char* text, f32 h, u32 color) {
@@ -2838,7 +2839,7 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
     t.text = text;
     t.size = h;
     t.rgba = color;
-    view.world_texts.push_back(std::move(t));
+    view.world_texts.push_back(base::move(t));
   };
   if (active_mode == TourMode::kVehicleCircuit && circuit_car) {
     Vec3 p;
@@ -2865,11 +2866,11 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
         position.x, water_height + physics::GerstnerWaveHeight(position.x, position.z, sim_time),
         position.z};
     disturbance.radius = 0.8f;
-    disturbance.ripple_strength = std::min(1.0f, Length(velocity) * 0.15f);
-    disturbance.foam_amount = std::min(0.8f, Length(velocity) * 0.08f);
+    disturbance.ripple_strength = rx::Min(1.0f, Length(velocity) * 0.15f);
+    disturbance.foam_amount = rx::Min(0.8f, Length(velocity) * 0.08f);
     disturbance.velocity_x = velocity.x;
     disturbance.velocity_z = velocity.z;
-    disturbance.elongation = std::min(3.0f, Length(velocity) * 0.25f);
+    disturbance.elongation = rx::Min(3.0f, Length(velocity) * 0.25f);
     view.water_disturbances.push_back(disturbance);
   }
 }
@@ -2877,7 +2878,7 @@ void FeatureGym::Impl::Emit(f32 dt, render::FrameView& view) {
 bool FeatureGym::Impl::BuildTour(ShowcaseCamera& camera) {
   if (!created) return false;
   activations.clear();
-  applied_activation = std::numeric_limits<size_t>::max();
+  applied_activation = SIZE_MAX;
   auto add = [&](TourMode mode, Vec3 eye, Vec3 look, f32 travel, const char* label) {
     // A waypoint captures at the end of its segment. Keep its mode through that
     // boundary, then switch shortly after travel toward the next stop begins.
@@ -3002,7 +3003,7 @@ void FeatureGym::Impl::ApplyArea(Area area) {
       settings.mesh_shader_lod = true;
       settings.vrs = true;
       settings.async_compute = true;
-      settings.dynamic_resolution = std::getenv("RX_SHOWCASE_SHOTS") == nullptr;
+      settings.dynamic_resolution = ::getenv("RX_SHOWCASE_SHOTS") == nullptr;
       settings.dynamic_target_ms = 16.6f;
       settings.texture_budget_mb = 96;
       break;
@@ -3207,16 +3208,16 @@ void FeatureGym::Impl::SetTourTime(f32 seconds) {
     applied_activation = selected;
     ApplyTourMode(activations[selected].mode);
   }
-  active_mode_elapsed = std::max(0.0f, seconds - activations[selected].time);
+  active_mode_elapsed = rx::Max(0.0f, seconds - activations[selected].time);
 }
 
-FeatureGym::FeatureGym(EngineContext& ctx) : impl_(std::make_unique<Impl>(ctx)) {}
+FeatureGym::FeatureGym(EngineContext& ctx) : impl_(base::MakeUnique<Impl>(ctx)) {}
 FeatureGym::~FeatureGym() = default;
 
 void FeatureGym::Create() { impl_->Create(); }
 void FeatureGym::Emit(f32 dt, render::FrameView& view) { impl_->Emit(dt, view); }
 bool FeatureGym::BuildTour(ShowcaseCamera& camera) { return impl_->BuildTour(camera); }
 void FeatureGym::SetTourTime(f32 seconds) { impl_->SetTourTime(seconds); }
-std::string_view FeatureGym::active_area() const { return Info(impl_->active).name; }
+base::StringRef FeatureGym::active_area() const { return Info(impl_->active).name; }
 
 }  // namespace rx

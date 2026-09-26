@@ -1,5 +1,7 @@
 #include "core/world_clock.h"
 
+#include <math.h>
+
 namespace rx {
 
 namespace {
@@ -22,8 +24,8 @@ SkyLighting ComputeSkyLighting(f32 hour) {
   // 18 -> pi (sunset, due west). A small constant south lean (the -0.25 z) keeps
   // shadows off the world axes for a more natural look.
   const f32 a = (hour - 6.0f) / 12.0f * kPi;
-  const f32 ca = std::cos(a);
-  const f32 elev = std::sin(a);  // sun elevation: > 0 day, < 0 night
+  const f32 ca = ::cos(a);
+  const f32 elev = ::sin(a);  // sun elevation: > 0 day, < 0 night
 
   // Daylight weight, with a soft twilight band as the sun crosses the horizon.
   const f32 day = Smoothstep(-0.12f, 0.12f, elev);

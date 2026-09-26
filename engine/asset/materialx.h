@@ -1,9 +1,9 @@
 #ifndef RX_ASSET_MATERIALX_H_
 #define RX_ASSET_MATERIALX_H_
 
-#include <string>
 
 #include "asset/material.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 
 namespace rx::asset {
@@ -17,12 +17,12 @@ namespace rx::asset {
 // LoadMaterialX only reports the files; opening them is the caller's, since
 // publishing a texture needs a database and a gpu this module has neither of.
 struct MaterialXMaps {
-  std::string base_color;
-  std::string normal;
-  std::string roughness;
-  std::string metallic;
-  std::string occlusion;
-  std::string emissive;
+  base::String base_color;
+  base::String normal;
+  base::String roughness;
+  base::String metallic;
+  base::String occlusion;
+  base::String emissive;
 };
 
 // Loads the first standard_surface or open_pbr_surface node of a MaterialX
@@ -45,7 +45,7 @@ struct MaterialXMaps {
 //
 // False on a read/parse error or a document with no surface shader; `out` keeps
 // its defaults for whatever the document omits.
-RX_ASSET_EXPORT bool LoadMaterialX(const std::string& path, Material* out,
+RX_ASSET_EXPORT bool LoadMaterialX(const base::String& path, Material* out,
                                    MaterialXMaps* maps = nullptr);
 
 }  // namespace rx::asset

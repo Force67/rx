@@ -1,9 +1,9 @@
 #include "scene/camera.h"
 
-#include <algorithm>
-#include <cmath>
-#include <utility>
+#include <math.h>
 
+#include "base/memory/move.h"
+#include "core/scalar.h"
 #include "ecs/world.h"
 
 namespace rx::scene {
@@ -14,7 +14,7 @@ bool IsModeValid(ecs::World& world, ecs::Entity mode) {
 }
 
 f32 ApplyEasing(CameraEasing easing, f32 amount) {
-  const f32 t = std::clamp(amount, 0.0f, 1.0f);
+  const f32 t = rx::Clamp(amount, 0.0f, 1.0f);
   switch (easing) {
     case CameraEasing::kLinear:
       return t;
@@ -46,7 +46,7 @@ void BeginTransition(CameraOutput& output, CameraStack& stack, ecs::Entity mode,
 
   const bool compatible_projection =
       output.view.lens.projection == camera_mode.view.lens.projection;
-  if (!std::isfinite(spec.duration) || spec.duration <= 0 || !had_output ||
+  if (!::isfinite(spec.duration) || spec.duration <= 0 || !had_output ||
       !compatible_projection) {
     CutToMode(output, stack, mode, camera_mode);
     return;
@@ -135,7 +135,7 @@ CameraStackResult InitializeCameraStack(ecs::World& world, ecs::Entity output,
 
   CameraStack stack;
   stack.entries.push_back({base_mode, 0});
-  world.Add(output, std::move(stack));
+  world.Add(output, base::move(stack));
 
   CameraOutput camera_output;
   camera_output.view = initial_mode.view;
@@ -143,7 +143,7 @@ CameraStackResult InitializeCameraStack(ecs::World& world, ecs::Entity output,
   camera_output.active_mode = base_mode;
   camera_output.observed_discontinuity_revision = initial_mode.discontinuity_revision;
   camera_output.valid = true;
-  world.Add(output, std::move(camera_output));
+  world.Add(output, base::move(camera_output));
   return CameraStackResult::kSuccess;
 }
 
@@ -194,26 +194,26 @@ void InvalidateCameraMode(ecs::World& world, ecs::Entity mode) {
 
 CameraView InterpolateCameraView(const CameraView& source, const CameraView& destination,
                                  f32 amount) {
-  const f32 t = std::clamp(amount, 0.0f, 1.0f);
+  const f32 t = rx::Clamp(amount, 0.0f, 1.0f);
   CameraView view;
   view.position = Lerp(source.position, destination.position, t);
   view.orientation = Slerp(Normalize(source.orientation), Normalize(destination.orientation), t);
   view.lens = destination.lens;
 
   if (destination.lens.projection == CameraProjection::kPerspective) {
-    const f32 source_scale = std::tan(source.lens.fov_y * 0.5f);
-    const f32 destination_scale = std::tan(destination.lens.fov_y * 0.5f);
-    view.lens.fov_y = 2.0f * std::atan(std::lerp(source_scale, destination_scale, t));
+    const f32 source_scale = ::tan(source.lens.fov_y * 0.5f);
+    const f32 destination_scale = ::tan(destination.lens.fov_y * 0.5f);
+    view.lens.fov_y = 2.0f * ::atan(rx::Lerp(source_scale, destination_scale, t));
   } else {
-    view.lens.ortho_height = std::lerp(source.lens.ortho_height, destination.lens.ortho_height, t);
-    view.lens.ortho_near = std::lerp(source.lens.ortho_near, destination.lens.ortho_near, t);
-    view.lens.ortho_far = std::lerp(source.lens.ortho_far, destination.lens.ortho_far, t);
+    view.lens.ortho_height = rx::Lerp(source.lens.ortho_height, destination.lens.ortho_height, t);
+    view.lens.ortho_near = rx::Lerp(source.lens.ortho_near, destination.lens.ortho_near, t);
+    view.lens.ortho_far = rx::Lerp(source.lens.ortho_far, destination.lens.ortho_far, t);
   }
   return view;
 }
 
 void ResolveCameraStacks(ecs::World& world, f32 dt) {
-  if (!std::isfinite(dt) || dt < 0) dt = 0;
+  if (!::isfinite(dt) || dt < 0) dt = 0;
   world.Each<CameraStack, CameraOutput>([&](ecs::Entity, CameraStack& stack, CameraOutput& output) {
     if (!PruneInvalidModes(world, stack, output)) return;
 

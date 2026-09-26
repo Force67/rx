@@ -3,12 +3,14 @@
 // that apply to unauthored inputs, and the guarantee that a legacy
 // standard_surface document is not silently reinterpreted as OpenPBR.
 
-#include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <filesystem>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
 
 #include "asset/materialx.h"
+#include "base/containers/vector.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
 
 namespace {
 
@@ -86,20 +88,20 @@ int failures = 0;
 void Check(bool condition, const char *message) {
   if (condition)
     return;
-  std::fprintf(stderr, "openpbr_test: FAIL: %s\n", message);
+  ::fprintf(stderr, "openpbr_test: FAIL: %s\n", message);
   ++failures;
 }
 
-bool Write(const std::filesystem::path &path, const char *text, size_t size) {
-  std::FILE *file = std::fopen(path.string().c_str(), "wb");
+bool Write(const base::String &path, const char *text, size_t size) {
+  FILE *file = ::fopen(path.c_str(), "wb");
   if (!file)
     return false;
-  const bool ok = std::fwrite(text, 1, size, file) == size;
-  std::fclose(file);
+  const bool ok = ::fwrite(text, 1, size, file) == size;
+  ::fclose(file);
   return ok;
 }
 
-bool Near(f32 value, f32 expected) { return std::fabs(value - expected) < 1e-4f; }
+bool Near(f32 value, f32 expected) { return ::fabs(value - expected) < 1e-4f; }
 
 bool Near3(const f32 *value, f32 x, f32 y, f32 z) {
   return Near(value[0], x) && Near(value[1], y) && Near(value[2], z);
@@ -107,13 +109,13 @@ bool Near3(const f32 *value, f32 x, f32 y, f32 z) {
 
 // Writes `text` to a temp .mtlx, loads it, removes it. Returns load success.
 bool LoadDoc(const char *name, const char *text, size_t size, asset::Material *out) {
-  const std::filesystem::path path = std::filesystem::temp_directory_path() / name;
+  const base::String path = rx::fs::Join(rx::fs::TempDirectory(), name);
   if (!Write(path, text, size)) {
-    std::fprintf(stderr, "openpbr_test: cannot create fixture %s\n", name);
+    ::fprintf(stderr, "openpbr_test: cannot create fixture %s\n", name);
     return false;
   }
-  const bool loaded = asset::LoadMaterialX(path.string(), out);
-  std::filesystem::remove(path);
+  const bool loaded = asset::LoadMaterialX(path, out);
+  rx::fs::Remove(path);
   return loaded;
 }
 
@@ -229,7 +231,7 @@ void CheckUnknownShaderRejected() {
   Check(!loaded, "a document with neither surface node is rejected");
 }
 
-bool Finite(f32 v) { return std::isfinite(v); }
+bool Finite(f32 v) { return ::isfinite(v); }
 
 bool Finite3(const f32 *v) { return Finite(v[0]) && Finite(v[1]) && Finite(v[2]); }
 
@@ -238,31 +240,35 @@ bool Finite3(const f32 *v) { return Finite(v[0]) && Finite(v[1]) && Finite(v[2])
 // the failure mode the hand-written fixtures cannot: a real authored document
 // that parses into something the renderer would choke on.
 void CheckExampleCorpus() {
-  const char *dir_env = std::getenv("RX_OPENPBR_EXAMPLES");
+  const char *dir_env = ::getenv("RX_OPENPBR_EXAMPLES");
   if (dir_env == nullptr)
     return;
-  const std::filesystem::path dir(dir_env);
-  if (!std::filesystem::is_directory(dir)) {
+  const base::String dir(dir_env);
+  if (!rx::fs::IsDirectory(dir)) {
     Check(false, "RX_OPENPBR_EXAMPLES points at a directory");
     return;
   }
 
+  base::Vector<rx::fs::DirEntry> entries;
+  if (!rx::fs::ListDirectory(dir, &entries)) {
+    Check(false, "RX_OPENPBR_EXAMPLES can be listed");
+    return;
+  }
   int loaded = 0, rejected = 0;
-  for (const auto &entry : std::filesystem::directory_iterator(dir)) {
-    if (entry.path().extension() != ".mtlx")
+  for (const rx::fs::DirEntry &entry : entries) {
+    if (rx::fs::Extension(entry.path) != ".mtlx")
       continue;
+    const base::String name(rx::fs::Filename(entry.path));
     asset::Material m;
-    if (!asset::LoadMaterialX(entry.path().string(), &m)) {
-      std::fprintf(stderr, "openpbr_test: rejected %s\n",
-                   entry.path().filename().string().c_str());
+    if (!asset::LoadMaterialX(entry.path, &m)) {
+      ::fprintf(stderr, "openpbr_test: rejected %s\n", name.c_str());
       ++rejected;
       continue;
     }
     ++loaded;
 
-    const std::string name = entry.path().filename().string();
     const auto fail = [&](const char *what) {
-      std::fprintf(stderr, "openpbr_test: FAIL: %s: %s\n", name.c_str(), what);
+      ::fprintf(stderr, "openpbr_test: FAIL: %s: %s\n", name.c_str(), what);
       ++failures;
     };
     if (!Finite3(m.base_color_factor) || !Finite(m.base_color_factor[3]))
@@ -292,12 +298,12 @@ void CheckExampleCorpus() {
 
   Check(rejected == 0, "every example material parses");
   Check(loaded > 50, "the example corpus is actually present and populated");
-  std::printf("openpbr_test: swept %d example material(s)\n", loaded);
+  ::printf("openpbr_test: swept %d example material(s)\n", loaded);
 
   // Two spot checks against values read straight out of the source documents,
   // so the sweep cannot pass by importing everything as defaults.
   asset::Material brass;
-  if (asset::LoadMaterialX((dir / "open_pbr_brass.mtlx").string(), &brass)) {
+  if (asset::LoadMaterialX(rx::fs::Join(dir, "open_pbr_brass.mtlx"), &brass)) {
     Check(Near3(brass.base_color_factor, 0.844f, 0.782f, 0.473f) &&
               Near(brass.metallic_factor, 1.0f) &&
               Near(brass.roughness_factor, 0.02f),
@@ -308,7 +314,7 @@ void CheckExampleCorpus() {
           "brass keeps its greater-than-one specular edge tint");
   }
   asset::Material carpaint;
-  if (asset::LoadMaterialX((dir / "open_pbr_carpaint.mtlx").string(), &carpaint)) {
+  if (asset::LoadMaterialX(rx::fs::Join(dir, "open_pbr_carpaint.mtlx"), &carpaint)) {
     Check(Near(carpaint.clearcoat, 1.0f) && Near(carpaint.clearcoat_roughness, 0.02f) &&
               Near(carpaint.coat_ior, 1.6f),
           "car paint imports its coat");
@@ -327,9 +333,9 @@ int main() {
   CheckExampleCorpus();
 
   if (failures == 0) {
-    std::puts("openpbr_test: PASS");
+    ::puts("openpbr_test: PASS");
     return 0;
   }
-  std::fprintf(stderr, "openpbr_test: %d failure(s)\n", failures);
+  ::fprintf(stderr, "openpbr_test: %d failure(s)\n", failures);
   return 1;
 }

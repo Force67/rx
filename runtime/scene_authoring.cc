@@ -1,19 +1,10 @@
 #include "scene_authoring.h"
 
-#include <algorithm>
-#include <cctype>
-#include <cmath>
-#include <cstddef>
-#include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <format>
-#include <fstream>
-#include <memory>
-#include <unordered_map>
-#include <unordered_set>
-#include <utility>
-#include <vector>
+#include <ctype.h>
+#include <math.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "asset/gltf_loader.h"
 #include "asset/image_file.h"
@@ -23,7 +14,21 @@
 #include "asset/scene_import.h"
 #include "asset/texture_compress.h"
 #include "asset/vfs.h"
+#include "base/algorithm.h"
+#include "base/containers/pair.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/containers/unordered_map.h"
+#include "base/containers/unordered_set.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "core/file_system.h"
+#include "core/format.h"
 #include "core/math.h"
+#include "core/scalar.h"
+#include "core/text_reader.h"
 #include "edit/hierarchy.h"
 #include "edit/reflect.h"
 #include "edit/scene_io.h"
@@ -49,7 +54,7 @@ constexpr size_t kPatternKeyBytes =
     offsetof(ScenePattern, roughness_b) + sizeof(f32) - kPatternKeyOffset;
 
 // The layout notices nothing when that invariant is broken: Shape, Surface and
-// Pattern end in tail padding (the std::string forces 8-byte alignment) that an
+// Pattern end in tail padding (the base::String forces 8-byte alignment) that an
 // appended f32 lands in, leaving every offsetof and sizeof exactly as they were,
 // and Stretch has no padding to hide in but no sizeof anything reads either.
 // Counting the fields is what notices. Braces elide into the f32[N] members, so
@@ -87,7 +92,7 @@ static_assert(FieldCount<ScenePattern>() == 15,
 // one list and cannot come to disagree about which props are maps.
 struct SurfaceMap {
   const char* prop;
-  std::string SceneSurface::*path;
+  base::String SceneSurface::*path;
   asset::AssetId asset::Material::*slot;
   bool srgb;
   // Which block format the map compresses to at import. It rides this table
@@ -115,7 +120,7 @@ constexpr SurfaceMap kSurfaceMaps[] = {
 // Numbers go into the key as raw bytes rather than formatted: MakeAssetId
 // hashes the whole span, and a human-readable float would collide across values
 // that happen to print the same.
-void AppendBytes(std::string& key, const void* data, size_t bytes) {
+void AppendBytes(base::String& key, const void* data, size_t bytes) {
   key.append(static_cast<const char*>(data), bytes);
 }
 
@@ -123,9 +128,9 @@ void AppendBytes(std::string& key, const void* data, size_t bytes) {
 // material exactly when sharing them is correct. The stretch is in here because
 // it is baked into the vertices (see SceneStretch): nothing downstream can tell
 // two proportions apart once they have collided onto one mesh.
-std::string ShapeKey(const SceneShape& shape, const SceneStretch& stretch,
+base::String ShapeKey(const SceneShape& shape, const SceneStretch& stretch,
                      const SceneSurface& surface, const ScenePattern* pattern) {
-  std::string key = "rxscene/" + shape.kind + "/" + surface.materialx + "/";
+  base::String key = "rxscene/" + shape.kind + "/" + surface.materialx + "/";
   // By hand, per the INVARIANT above: a string cannot ride the byte range, so
   // two surfaces differing only in which concrete they name would otherwise
   // collide onto one material and the second would draw the first one's maps.
@@ -174,22 +179,22 @@ void ApplySurface(const SceneSurface& surface, asset::Material* material) {
 // nothing to say so. Role is part of the key for the same reason srgb is: it
 // decides how the file decodes, so one file bound as colour and as data stays
 // two textures.
-asset::AssetId SurfaceMapId(const std::string& path, bool srgb, asset::TextureRole role) {
-  return asset::MakeAssetId("rxscene/map/" + std::to_string(static_cast<int>(role)) + "/" +
-                            std::string(srgb ? "srgb/" : "linear/") +
+asset::AssetId SurfaceMapId(const base::String& path, bool srgb, asset::TextureRole role) {
+  return asset::MakeAssetId("rxscene/map/" + rx::ToString(static_cast<int>(role)) + "/" +
+                            base::String(srgb ? "srgb/" : "linear/") +
                             asset::NormalizePath(path));
 }
 
 // Decodes one image file, binds it to `slot` and hands it to the db and the
 // gpu. Empty on success, else the clause saying why the file is not an image.
-std::string BindSurfaceTexture(const std::string& file, bool srgb, asset::TextureRole role,
+base::String BindSurfaceTexture(const base::String& file, bool srgb, asset::TextureRole role,
                                asset::AssetId asset::Material::*slot, asset::AssetDatabase& db,
                                render::Renderer* renderer, asset::Material* material) {
   const asset::AssetId id = SurfaceMapId(file, srgb, role);
   if (!db.FindTexture(id)) {
     asset::Texture texture;
     if (!asset::LoadImageFile(file, srgb, id, &texture)) {
-      std::string problem = asset::ImageFileProblem(file);
+      base::String problem = asset::ImageFileProblem(file);
       // The header read and the decode disagree only on a truncated file.
       if (problem.empty()) problem = "has a readable header and then fails to decode";
       return problem;
@@ -202,7 +207,7 @@ std::string BindSurfaceTexture(const std::string& file, bool srgb, asset::Textur
     // 1x1 defaults for anything not uploaded yet, so every map has to reach the
     // gpu before the material naming it does.
     if (renderer) renderer->UploadTexture(texture);
-    db.AddTexture(std::move(texture));
+    db.AddTexture(base::move(texture));
   }
   material->*slot = id;
   return {};
@@ -224,16 +229,16 @@ void MarkSeparateMetallic(bool roughness, bool metallic, asset::Material* materi
 // not be resolved, which the caller turns into a `path:line:`.
 bool ApplySurfaceMaps(const SceneSurface& surface, asset::AssetDatabase& db,
                       render::Renderer* renderer, asset::Material* material, const char** prop,
-                      std::string* path, std::string* problem) {
+                      base::String* path, base::String* problem) {
   for (const SurfaceMap& map : kSurfaceMaps) {
-    const std::string& file = surface.*map.path;
+    const base::String& file = surface.*map.path;
     if (file.empty()) continue;
-    std::string why =
+    base::String why =
         BindSurfaceTexture(file, map.srgb, map.role, map.slot, db, renderer, material);
     if (!why.empty()) {
       *prop = map.prop;
       *path = file;
-      *problem = std::move(why);
+      *problem = base::move(why);
       return false;
     }
   }
@@ -245,10 +250,10 @@ bool ApplySurfaceMaps(const SceneSurface& surface, asset::AssetDatabase& db,
 // Empty on success, else the clause naming the file inside the document that
 // did not resolve; the caller puts it behind the Surface.materialx assignment,
 // since that is the line the author actually wrote.
-std::string ApplyMaterialXMaps(const asset::MaterialXMaps& maps, asset::AssetDatabase& db,
+base::String ApplyMaterialXMaps(const asset::MaterialXMaps& maps, asset::AssetDatabase& db,
                                render::Renderer* renderer, asset::Material* material) {
   const struct {
-    const std::string& file;
+    const base::String& file;
     asset::AssetId asset::Material::*slot;
     bool srgb;
     asset::TextureRole role;
@@ -262,10 +267,10 @@ std::string ApplyMaterialXMaps(const asset::MaterialXMaps& maps, asset::AssetDat
   };
   for (const auto& binding : bindings) {
     if (binding.file.empty()) continue;
-    std::string why = BindSurfaceTexture(binding.file, binding.srgb, binding.role, binding.slot,
+    base::String why = BindSurfaceTexture(binding.file, binding.srgb, binding.role, binding.slot,
                                          db, renderer, material);
     if (!why.empty()) {
-      return std::format("names an image '{}' that {} (a MaterialX filename resolves against the "
+      return rx::StrFormat("names an image '{}' that {} (a MaterialX filename resolves against the "
                          "document's own directory)", binding.file, why);
     }
   }
@@ -275,8 +280,8 @@ std::string ApplyMaterialXMaps(const asset::MaterialXMaps& maps, asset::AssetDat
 
 // Synthesizes the pattern's maps, binds them to `material` and hands them to
 // the db and the gpu. False + *error on a pattern name nothing generates.
-bool ApplyPattern(const ScenePattern& pattern, const std::string& key, asset::AssetDatabase& db,
-                  render::Renderer* renderer, asset::Material* material, std::string* error) {
+bool ApplyPattern(const ScenePattern& pattern, const base::String& key, asset::AssetDatabase& db,
+                  render::Renderer* renderer, asset::Material* material, base::String* error) {
   asset::PatternDesc desc;
   if (!asset::ParsePatternKind(pattern.kind, &desc.kind)) {
     if (error)
@@ -284,7 +289,7 @@ bool ApplyPattern(const ScenePattern& pattern, const std::string& key, asset::As
                "' (checker | grid | brick | gradient | noise)";
     return false;
   }
-  desc.width = desc.height = std::clamp(pattern.resolution, 4u, 2048u);
+  desc.width = desc.height = rx::Clamp(pattern.resolution, 4u, 2048u);
   desc.scale[0] = pattern.scale[0];
   desc.scale[1] = pattern.scale[1];
   desc.line_width = pattern.line_width;
@@ -301,27 +306,27 @@ bool ApplyPattern(const ScenePattern& pattern, const std::string& key, asset::As
   auto publish = [&](asset::Texture texture, asset::TextureRole role, const char* suffix) {
     asset::CompressTexture(&texture, role, key + suffix);
     if (renderer) renderer->UploadTexture(texture);
-    db.AddTexture(std::move(texture));
+    db.AddTexture(base::move(texture));
   };
 
   asset::Texture color = asset::MakePatternTexture(desc, pattern.color_a, pattern.color_b,
                                                    /*srgb=*/true,
                                                    asset::MakeAssetId(key + "/base_color"));
   material->base_color = color.id;
-  publish(std::move(color), asset::TextureRole::kColor, "/base_color");
+  publish(base::move(color), asset::TextureRole::kColor, "/base_color");
 
   if (pattern.relief > 0.0f) {
     asset::Texture normal = asset::MakePatternNormalMap(desc, pattern.relief,
                                                         asset::MakeAssetId(key + "/normal"));
     material->normal = normal.id;
-    publish(std::move(normal), asset::TextureRole::kNormalTangent, "/normal");
+    publish(base::move(normal), asset::TextureRole::kNormalTangent, "/normal");
   }
   if (pattern.roughness_a != pattern.roughness_b) {
     asset::Texture mr = asset::MakePatternRoughnessMap(desc, pattern.roughness_a,
                                                        pattern.roughness_b,
                                                        asset::MakeAssetId(key + "/roughness"));
     material->metallic_roughness = mr.id;
-    publish(std::move(mr), asset::TextureRole::kData, "/roughness");
+    publish(base::move(mr), asset::TextureRole::kData, "/roughness");
   }
   return true;
 }
@@ -374,13 +379,13 @@ void BakeStretch(const f32 stretch[3], asset::Mesh* mesh) {
   // gpu's RxMaxAxisScale, for the same reason: a sphere that shrank below the
   // geometry would have the culls discard something that is on screen.
   for (u32 axis = 0; axis < 3; ++axis) mesh->bounds_center[axis] *= stretch[axis];
-  mesh->bounds_radius *= std::max({stretch[0], stretch[1], stretch[2]});
+  mesh->bounds_radius *= rx::Max({stretch[0], stretch[1], stretch[2]});
 }
 
 // False + *error on a kind no primitive builds, which would otherwise put a box
 // where the author asked for something else.
 bool BuildShapeMesh(const SceneShape& shape, const SceneStretch& stretch, asset::AssetId id,
-                    asset::Mesh* out, std::string* error) {
+                    asset::Mesh* out, base::String* error) {
   // The table gates the chain rather than the other way round, so a kind added
   // below but not above fails loudly here instead of building a shape
   // --validate would then reject as unknown.
@@ -428,8 +433,8 @@ bool MeshBounds(const asset::Mesh& mesh, SceneBounds* out) {
   }
   for (const asset::Vertex& vertex : vertices) {
     for (u32 axis = 0; axis < 3; ++axis) {
-      out->min[axis] = std::min(out->min[axis], vertex.position[axis]);
-      out->max[axis] = std::max(out->max[axis], vertex.position[axis]);
+      out->min[axis] = rx::Min(out->min[axis], vertex.position[axis]);
+      out->max[axis] = rx::Max(out->max[axis], vertex.position[axis]);
     }
   }
   return true;
@@ -440,28 +445,28 @@ bool MeshBounds(const asset::Mesh& mesh, SceneBounds* out) {
 // ("<path>#mesh<index>"), so what a scene writes and what the importer names
 // its assets are the same convention rather than two that have to be kept in
 // step. Returns the clause saying why the path is not addressable, or empty.
-std::string SplitModelPath(const std::string& path, std::string* file, i32* index) {
+base::String SplitModelPath(const base::String& path, base::String* file, i32* index) {
   *file = path;
   *index = -1;
   if (path.empty()) return "is empty; there is nothing to place";
 
   const size_t hash = path.rfind('#');
-  if (hash != std::string::npos) {
-    const std::string_view fragment = std::string_view(path).substr(hash);
-    const std::string_view digits = fragment.substr(std::min<size_t>(fragment.size(), 5));
+  if (hash != base::String::npos) {
+    const base::StringRef fragment = base::StringRef(path).substr(hash);
+    const base::StringRef digits = fragment.substr(rx::Min<size_t>(fragment.size(), 5));
     if (fragment.compare(0, 5, "#mesh") != 0 || digits.empty() ||
-        digits.find_first_not_of("0123456789") != std::string_view::npos) {
-      return std::format("has fragment '{}'; only '#mesh<N>' selects one mesh of a file",
+        digits.find_first_not_of("0123456789") != base::StringRef::npos) {
+      return rx::StrFormat("has fragment '{}'; only '#mesh<N>' selects one mesh of a file",
                          fragment);
     }
-    *index = static_cast<i32>(std::strtol(std::string(digits).c_str(), nullptr, 10));
+    *index = static_cast<i32>(::strtol(base::String(digits).c_str(), nullptr, 10));
     *file = path.substr(0, hash);
   }
 
-  std::string extension;
-  if (const size_t dot = file->rfind('.'); dot != std::string::npos) {
-    for (char c : std::string_view(*file).substr(dot))
-      extension += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  base::String extension;
+  if (const size_t dot = file->rfind('.'); dot != base::String::npos) {
+    for (char c : base::StringRef(*file).substr(dot))
+      extension += static_cast<char>(::tolower(static_cast<unsigned char>(c)));
   }
   if (extension != ".gltf" && extension != ".glb") {
     return "is not a .gltf or .glb; a usd stage loads through --usd, which has its own importer";
@@ -472,10 +477,10 @@ std::string SplitModelPath(const std::string& path, std::string* file, i32* inde
 // Why the selection a Model.path makes cannot be honoured by the file that was
 // actually imported, or empty. Split out so the message is written once and
 // both a fresh import and an already-imported file are judged by it.
-std::string SelectionProblem(i32 index, size_t meshes, size_t instances) {
+base::String SelectionProblem(i32 index, size_t meshes, size_t instances) {
   if (index >= 0) {
     if (static_cast<size_t>(index) >= meshes) {
-      return std::format("selects mesh {} of a file that has {}", index, meshes);
+      return rx::StrFormat("selects mesh {} of a file that has {}", index, meshes);
     }
     return {};
   }
@@ -492,9 +497,9 @@ std::string SelectionProblem(i32 index, size_t meshes, size_t instances) {
 // external buffers and images and yields N meshes, N materials, N textures and
 // the node instances that place them. The assets go into the database through
 // the Add* side channel below, which is what it is for.
-std::string ImportModel(const std::string& path, asset::ImportedScene* scene, i32* index) {
-  std::string file;
-  if (std::string problem = SplitModelPath(path, &file, index); !problem.empty()) return problem;
+base::String ImportModel(const base::String& path, asset::ImportedScene* scene, i32* index) {
+  base::String file;
+  if (base::String problem = SplitModelPath(path, &file, index); !problem.empty()) return problem;
   if (!asset::LoadGltfScene(file, scene)) {
     return "does not import (the path is relative to the working directory)";
   }
@@ -522,9 +527,9 @@ void EulerDegreesToQuat(const f32 euler[3], f32 out[4]) {
 
 // The Name.value of an entity, or empty. What Located narrows a finding by and
 // what an anchor message names a loop with.
-std::string EntityName(ecs::World& world, ecs::Entity entity) {
+base::String EntityName(ecs::World& world, ecs::Entity entity) {
   const scene::Name* name = world.Get<scene::Name>(entity);
-  return name ? name->value : std::string();
+  return name ? name->value : base::String();
 }
 
 // Puts a build failure on the line that authored it. The pass runs on the
@@ -538,33 +543,36 @@ std::string EntityName(ecs::World& world, ecs::Entity entity) {
 // assignment that is not there verbatim (an unreadable file, an edit since the
 // load, an entity a prefab expanded into) falls back to the first line that
 // matches at all, and then to no line, rather than pointing at the wrong one.
-std::string Located(const std::string& scene_path, const std::string& owner, std::string_view key,
-                    const std::string& value, const std::string& problem) {
-  std::ifstream in(scene_path, std::ios::binary);
-  std::string line;
+base::String Located(const base::String& scene_path, const base::String& owner, base::StringRef key,
+                    const base::String& value, const base::String& problem) {
+  // An unreadable file reads as empty, which falls through to no line.
+  base::String contents;
+  fs::ReadTextFile(scene_path, &contents);
+  LineReader in(contents);
+  base::StringRef line;
   int line_no = 0;
   int anywhere = 0;
   bool inside = owner.empty();
-  while (std::getline(in, line)) {
+  while (in.Next(&line)) {
     ++line_no;
     const size_t a = line.find_first_not_of(" \t\r\n");
-    if (a == std::string::npos || line[a] == '#' || line[a] == ';') continue;
+    if (a == base::StringRef::npos || line[a] == '#' || line[a] == ';') continue;
     const size_t b = line.find_last_not_of(" \t\r\n");
-    const std::string_view text(line.data() + a, b - a + 1);
+    const base::StringRef text(line.data() + a, b - a + 1);
     if (!owner.empty()) {
       if (text == "entity") inside = false;
-      if (text.starts_with("Name.value")) inside = text.find(owner) != std::string_view::npos;
+      if (text.starts_with("Name.value")) inside = text.find(owner) != base::StringRef::npos;
     }
-    if (!text.starts_with(key) || text.find(value) == std::string_view::npos) continue;
+    if (!text.starts_with(key) || text.find(value) == base::StringRef::npos) continue;
     if (inside) {
-      return std::format("{}:{}: {} = \"{}\" {}", scene_path, line_no, key, value, problem);
+      return rx::StrFormat("{}:{}: {} = \"{}\" {}", scene_path, line_no, key, value, problem);
     }
     if (anywhere == 0) anywhere = line_no;
   }
   if (anywhere != 0) {
-    return std::format("{}:{}: {} = \"{}\" {}", scene_path, anywhere, key, value, problem);
+    return rx::StrFormat("{}:{}: {} = \"{}\" {}", scene_path, anywhere, key, value, problem);
   }
-  return std::format("{}: {} = \"{}\" {}", scene_path, key, value, problem);
+  return rx::StrFormat("{}: {} = \"{}\" {}", scene_path, key, value, problem);
 }
 
 u64 PackKey(ecs::Entity entity) {
@@ -574,21 +582,20 @@ u64 PackKey(ecs::Entity entity) {
 // File order. World::Create hands out ascending indices and LoadScene calls it
 // once per `entity` block, so this is the order the author wrote, which is what
 // decides which grid cell a member lands in.
-void SortByDeclaration(std::vector<ecs::Entity>& entities) {
-  std::sort(entities.begin(), entities.end(), [](ecs::Entity a, ecs::Entity b) {
-    return a.index < b.index;
-  });
+void SortByDeclaration(base::Vector<ecs::Entity>& entities) {
+  // Live entities never share an index, so any correct sort agrees.
+  base::Sort(entities.data(), entities.data() + entities.size(),
+             [](ecs::Entity a, ecs::Entity b) { return a.index < b.index; });
 }
 
 // A prefab path is relative to the file that names it, not to the working
 // directory (see ScenePrefab), so that a scene and the prefabs it instances
 // move together.
-std::string ResolveAgainst(const std::string& base, const std::string& path) {
-  const std::filesystem::path relative(path);
-  if (path.empty() || relative.is_absolute()) return path;
-  const std::filesystem::path dir = std::filesystem::path(base).parent_path();
+base::String ResolveAgainst(const base::String& base, const base::String& path) {
+  if (path.empty() || fs::IsAbsolute(path)) return path;
+  const base::StringRef dir = fs::ParentPath(base);
   if (dir.empty()) return path;
-  return (dir / relative).lexically_normal().string();
+  return fs::LexicallyNormal(fs::Join(dir, path));
 }
 
 // What an Anchor.target or a Grid.of resolves through. A name two entities
@@ -599,27 +606,27 @@ class NameIndex {
   explicit NameIndex(ecs::World& world) {
     world.Each<scene::Name>([&](ecs::Entity entity, scene::Name& name) {
       if (name.value.empty()) return;
-      auto [it, inserted] = by_name_.emplace(name.value, entity);
-      if (!inserted) it->second = ecs::kInvalidEntity;
+      auto [found, inserted] = by_name_.emplace(name.value, entity);
+      if (!inserted) *found = ecs::kInvalidEntity;
     });
   }
 
   // The entity called `name`, kInvalidEntity when no entity or two do. `*shared`
   // tells those apart, which is the difference between "you misspelt it" and
   // "you named it twice".
-  ecs::Entity Find(const std::string& name, bool* shared) const {
-    const auto it = by_name_.find(name);
-    *shared = it != by_name_.end() && !it->second;
-    return it == by_name_.end() ? ecs::kInvalidEntity : it->second;
+  ecs::Entity Find(const base::String& name, bool* shared) const {
+    const ecs::Entity* found = by_name_.find(name);
+    *shared = found && !*found;
+    return found ? *found : ecs::kInvalidEntity;
   }
 
  private:
-  std::unordered_map<std::string, ecs::Entity> by_name_;
+  base::UnorderedMap<base::String, ecs::Entity> by_name_;
 };
 
 // Why `name` names no single entity, or empty. Written once so a grid and an
 // anchor explain a bad reference the same way.
-std::string TargetProblem(const std::string& name, ecs::Entity resolved, bool shared) {
+base::String TargetProblem(const base::String& name, ecs::Entity resolved, bool shared) {
   if (name.empty()) return "is empty; a reference needs the target's Name.value";
   if (shared) return "names two entities; one Name has to mean one entity for a reference to work";
   if (!resolved) return "names no entity in this scene (references are by Name.value)";
@@ -628,7 +635,7 @@ std::string TargetProblem(const std::string& name, ecs::Entity resolved, bool sh
 
 }  // namespace
 
-u32 ShapeRequiredSizeAxes(std::string_view kind) {
+u32 ShapeRequiredSizeAxes(base::StringRef kind) {
   for (const ShapeKind& entry : kShapeKinds) {
     if (kind == entry.name) return entry.required_size_axes;
   }
@@ -856,9 +863,9 @@ bool ApplySceneEnvironment(ecs::World& world, render::RenderSettings* settings) 
     // its negation. Azimuth turns +z toward +x, matching what a yaw of 90 does
     // to an entity, so "the sun is where that building is facing" is the same
     // number in both components.
-    const f32 horizontal = std::cos(elevation);
-    const Vec3 to_sun{horizontal * std::sin(azimuth), std::sin(elevation),
-                      horizontal * std::cos(azimuth)};
+    const f32 horizontal = ::cos(elevation);
+    const Vec3 to_sun{horizontal * ::sin(azimuth), ::sin(elevation),
+                      horizontal * ::cos(azimuth)};
     settings->sun_direction = {-to_sun.x, -to_sun.y, -to_sun.z};
     settings->sun_color = {sun.color[0], sun.color[1], sun.color[2]};
     settings->sun_intensity = sun.intensity;
@@ -882,14 +889,14 @@ bool ApplySceneEnvironment(ecs::World& world, render::RenderSettings* settings) 
 }
 
 bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
-                      const std::string& scene_path, std::string* error) {
+                      const base::String& scene_path, base::String* error) {
   // The Renderable is added after the walk: adding a component moves the entity
   // between archetypes, which must not happen under Each.
-  std::vector<std::pair<ecs::Entity, asset::AssetId>> renderables;
-  std::unordered_set<u64> built;
+  base::Vector<base::Pair<ecs::Entity, asset::AssetId>> renderables;
+  base::UnorderedSet<u64> built;
   // Keyed by mesh, not by entity: shapes that agree on every field share one
   // mesh, so the second entity onto a mesh never reaches the builder below.
-  std::unordered_map<u64, SceneBounds> bounds;
+  base::UnorderedMap<u64, SceneBounds> bounds;
   bool ok = true;
 
   world.Each<SceneShape>([&](ecs::Entity e, SceneShape& shape) {
@@ -906,9 +913,9 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
       if (stretch.scale[axis] > 0.0f) continue;
       if (error) {
         *error = Located(scene_path, EntityName(world, e), "Stretch.scale",
-                         std::format("{} {} {}", stretch.scale[0], stretch.scale[1],
+                         rx::StrFormat("{} {} {}", stretch.scale[0], stretch.scale[1],
                                      stretch.scale[2]),
-                         std::format("is {} on {}; every axis has to be positive, because the "
+                         rx::StrFormat("is {} on {}; every axis has to be positive, because the "
                                      "mesh bake divides the normals by it (1 1 1 is no stretch)",
                                      stretch.scale[axis], "xyz"[axis]));
       }
@@ -927,8 +934,8 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
       if (pattern->scale[axis] > 0.0f) continue;
       if (error) {
         *error = Located(scene_path, EntityName(world, e), "Pattern.scale",
-                         std::format("{} {}", pattern->scale[0], pattern->scale[1]),
-                         std::format("is {} along {}; the prop is cells across BY cells up, and "
+                         rx::StrFormat("{} {}", pattern->scale[0], pattern->scale[1]),
+                         rx::StrFormat("is {} along {}; the prop is cells across BY cells up, and "
                                      "both have to be positive (one number pads with a zero)",
                                      pattern->scale[axis], axis == 0 ? "u" : "v"));
       }
@@ -944,7 +951,7 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     for (const SceneSurfaceMapRef& map : SceneSurfaceMaps(surface)) {
       if (!pattern || map.path->empty()) continue;
       if (error) {
-        *error = Located(scene_path, EntityName(world, e), std::string("Surface.") + map.prop,
+        *error = Located(scene_path, EntityName(world, e), base::String("Surface.") + map.prop,
                          *map.path,
                          "is on an entity that also declares a Pattern; both bind the base "
                          "colour, normal and roughness of one material, so one would silently "
@@ -954,10 +961,10 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
       return;
     }
 
-    const std::string key = ShapeKey(shape, stretch, surface, pattern);
+    const base::String key = ShapeKey(shape, stretch, surface, pattern);
     const asset::AssetId mesh_id = asset::MakeAssetId(key);
     renderables.emplace_back(e, mesh_id);
-    if (!built.insert(mesh_id.hash).second) return;
+    if (!built.insert(mesh_id.hash)) return;
 
     asset::Material material;
     asset::MaterialXMaps document_maps;
@@ -971,7 +978,7 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     material.id = asset::MakeAssetId(key + "/material");
     // Before the Surface's own maps, so an explicitly named one replaces the
     // slot the document filled rather than the other way round.
-    if (std::string why = ApplyMaterialXMaps(document_maps, db, renderer, &material);
+    if (base::String why = ApplyMaterialXMaps(document_maps, db, renderer, &material);
         !why.empty()) {
       if (error) {
         *error = Located(scene_path, EntityName(world, e), "Surface.materialx", surface.materialx,
@@ -983,11 +990,11 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     // After the materialx load, so a map named beside a document replaces that
     // one slot of it, which is the precedence a Pattern already has over one.
     const char* prop = nullptr;
-    std::string offender;
-    std::string problem;
+    base::String offender;
+    base::String problem;
     if (!ApplySurfaceMaps(surface, db, renderer, &material, &prop, &offender, &problem)) {
       if (error) {
-        *error = Located(scene_path, EntityName(world, e), std::string("Surface.") + prop,
+        *error = Located(scene_path, EntityName(world, e), base::String("Surface.") + prop,
                          offender, problem);
       }
       ok = false;
@@ -1026,42 +1033,42 @@ bool BuildSceneShapes(ecs::World& world, asset::AssetDatabase& db, render::Rende
     // would upload fine and then never draw.
     if (!world.Has<scene::Transform>(entity)) world.Add(entity, scene::Transform{});
     world.Add(entity, scene::Renderable{mesh});
-    if (const auto it = bounds.find(mesh.hash); it != bounds.end()) {
-      world.Add(entity, it->second);
+    if (const SceneBounds* box = bounds.find(mesh.hash)) {
+      world.Add(entity, *box);
     }
   }
   return true;
 }
 
-std::vector<SceneSurfaceMapRef> SceneSurfaceMaps(const SceneSurface& surface) {
-  std::vector<SceneSurfaceMapRef> maps;
-  maps.reserve(std::size(kSurfaceMaps));
+base::Vector<SceneSurfaceMapRef> SceneSurfaceMaps(const SceneSurface& surface) {
+  base::Vector<SceneSurfaceMapRef> maps;
+  maps.reserve(sizeof(kSurfaceMaps) / sizeof(kSurfaceMaps[0]));
   for (const SurfaceMap& map : kSurfaceMaps) maps.push_back({map.prop, &(surface.*map.path)});
   return maps;
 }
 
-std::string SceneSurfaceMapProblem(const std::string& path) {
+base::String SceneSurfaceMapProblem(const base::String& path) {
   return asset::ImageFileProblem(path);
 }
 
-std::string SceneModelProblem(const std::string& path) {
+base::String SceneModelProblem(const base::String& path) {
   asset::ImportedScene discarded;
   i32 index = -1;
   return ImportModel(path, &discarded, &index);
 }
 
 bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Renderer* renderer,
-                      const std::string& scene_path, std::string* error) {
+                      const base::String& scene_path, base::String* error) {
   // What one imported file leaves behind, so a second entity naming the same
   // file places it again without re-parsing it and, more importantly, without
   // uploading the same mesh ids to the gpu twice.
   struct Imported {
-    std::vector<asset::AssetId> meshes;  // by source index, which is what #mesh<N> counts
-    std::vector<SceneBounds> bounds;     // parallel to meshes; empty entries stay unmeasurable
-    std::vector<bool> measured;
-    std::vector<asset::ImportedScene::Instance> instances;
+    base::Vector<asset::AssetId> meshes;  // by source index, which is what #mesh<N> counts
+    base::Vector<SceneBounds> bounds;     // parallel to meshes; empty entries stay unmeasurable
+    base::Vector<bool> measured;
+    base::Vector<asset::ImportedScene::Instance> instances;
   };
-  std::unordered_map<std::string, Imported> by_file;
+  base::UnorderedMap<base::String, Imported> by_file;
 
   // Both are deferred out of the walk: adding a component moves the entity
   // between archetypes and creating one appends to them, neither of which may
@@ -1072,20 +1079,20 @@ bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Rende
     SceneBounds bounds;
     bool measured = false;
   };
-  std::vector<Placed> renderables;
+  base::Vector<Placed> renderables;
   struct Child : Placed {
     asset::ImportedScene::Instance placement;
   };
-  std::vector<Child> children;
+  base::Vector<Child> children;
   bool ok = true;
 
   world.Each<SceneModel>([&](ecs::Entity e, SceneModel& model) {
     if (!ok) return;
-    std::string file;
+    base::String file;
     i32 index = -1;
-    std::string problem = SplitModelPath(model.path, &file, &index);
-    auto imported = by_file.find(file);
-    if (problem.empty() && imported == by_file.end()) {
+    base::String problem = SplitModelPath(model.path, &file, &index);
+    Imported* imported = by_file.find(file);
+    if (problem.empty() && !imported) {
       asset::ImportedScene scene;
       problem = ImportModel(model.path, &scene, &index);
       if (problem.empty()) {
@@ -1098,7 +1105,7 @@ bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Rende
         for (asset::Texture& texture : scene.textures) {
           if (!texture.id) continue;  // a decode the importer already warned about
           if (renderer) renderer->UploadTexture(texture);
-          db.AddTexture(std::move(texture));
+          db.AddTexture(base::move(texture));
         }
         for (const asset::Material& material : scene.materials) {
           if (renderer) renderer->UploadMaterial(material);
@@ -1110,15 +1117,15 @@ bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Rende
           SceneBounds box;
           entry.measured.push_back(MeshBounds(mesh, &box));
           entry.bounds.push_back(box);
-          db.AddMesh(std::move(mesh));
+          db.AddMesh(base::move(mesh));
         }
         entry.instances.assign(scene.instances.begin(), scene.instances.end());
         imported = by_file.find(file);
       }
     } else if (problem.empty()) {
       // The file is known good; only this entity's own selection is not.
-      problem = SelectionProblem(index, imported->second.meshes.size(),
-                                 imported->second.instances.size());
+      problem = SelectionProblem(index, imported->meshes.size(),
+                                 imported->instances.size());
     }
     if (!problem.empty()) {
       if (error)
@@ -1127,7 +1134,7 @@ bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Rende
       return;
     }
 
-    const Imported& file_assets = imported->second;
+    const Imported& file_assets = *imported;
     auto placed = [&](ecs::Entity entity, size_t mesh_index) {
       return Placed{entity, file_assets.meshes[mesh_index], file_assets.bounds[mesh_index],
                     file_assets.measured[mesh_index]};
@@ -1163,7 +1170,7 @@ bool BuildSceneModels(ecs::World& world, asset::AssetDatabase& db, render::Rende
     transform.position[0] = child.placement.position.x;
     transform.position[1] = child.placement.position.y;
     transform.position[2] = child.placement.position.z;
-    std::memcpy(transform.rotation, child.placement.rotation, sizeof(transform.rotation));
+    base::MemCopy(transform.rotation, child.placement.rotation, sizeof(transform.rotation));
     transform.scale = child.placement.scale;
     world.Add(entity, transform);
     world.Add(entity, scene::Renderable{child.mesh});
@@ -1191,16 +1198,16 @@ struct PrefabFile {
   asset::Vfs vfs;
   asset::AssetDatabase db{vfs};
   ecs::World world;
-  std::vector<ecs::Entity> entities;  // file order; entities[0] is the prefab root
+  base::Vector<ecs::Entity> entities;  // file order; entities[0] is the prefab root
 };
 
 // Loads a prefab file, or the clause saying why it is not instanceable. Strict,
 // like every other .rxscene the runtime loads: a prefab that silently dropped a
 // misspelt component would place a subtly wrong thing everywhere it is used.
-std::string OpenPrefab(const std::string& resolved, PrefabFile* file) {
-  std::string error;
+base::String OpenPrefab(const base::String& resolved, PrefabFile* file) {
+  base::String error;
   if (!edit::LoadScene(file->world, file->db, resolved, &error, /*strict=*/true)) {
-    return std::format("does not load as '{}': {}", resolved, error);
+    return rx::StrFormat("does not load as '{}': {}", resolved, error);
   }
   const size_t count = file->world.entity_count();
   for (size_t index = 0; index < count; ++index) {
@@ -1222,7 +1229,7 @@ std::string OpenPrefab(const std::string& resolved, PrefabFile* file) {
 // so it cannot be copied either, which is correct - the copy's bounds come from
 // the geometry the copy builds.
 void CopyComponents(ecs::World& src, ecs::Entity from, ecs::World& dst, ecs::Entity to,
-                    bool keep_existing, const std::unordered_map<u64, ecs::Entity>& remap) {
+                    bool keep_existing, const base::UnorderedMap<u64, ecs::Entity>& remap) {
   for (const edit::ComponentDesc* comp : edit::ComponentsOn(src, from)) {
     if (comp->id == ecs::GetComponentId<scene::Guid>()) continue;
     if (dst.HasRaw(to, comp->id)) {
@@ -1235,9 +1242,8 @@ void CopyComponents(ecs::World& src, ecs::Entity from, ecs::World& dst, ecs::Ent
       edit::PropValue value;
       if (!edit::GetProp(src, from, *comp, prop, &value)) continue;
       if (prop.type == edit::PropType::kEntity) {
-        const auto found = remap.find(PackKey(value.e));
-        value = edit::PropValue::EntityV(found == remap.end() ? ecs::kInvalidEntity
-                                                             : found->second);
+        const ecs::Entity* found = remap.find(PackKey(value.e));
+        value = edit::PropValue::EntityV(found ? *found : ecs::kInvalidEntity);
       }
       edit::SetProp(dst, to, *comp, prop, value);
     }
@@ -1258,7 +1264,7 @@ constexpr AnchorMode kAnchorModes[] = {
     {"left", 0, false},  {"front", 2, true},  {"behind", 2, false},
 };
 
-const AnchorMode* FindAnchorMode(const std::string& name) {
+const AnchorMode* FindAnchorMode(const base::String& name) {
   for (const AnchorMode& mode : kAnchorModes) {
     if (name == mode.name) return &mode;
   }
@@ -1274,13 +1280,13 @@ struct Aabb {
 void Include(Aabb* box, const Vec3& point) {
   const f32 p[3] = {point.x, point.y, point.z};
   for (u32 axis = 0; axis < 3; ++axis) {
-    box->min[axis] = box->empty ? p[axis] : std::min(box->min[axis], p[axis]);
-    box->max[axis] = box->empty ? p[axis] : std::max(box->max[axis], p[axis]);
+    box->min[axis] = box->empty ? p[axis] : rx::Min(box->min[axis], p[axis]);
+    box->max[axis] = box->empty ? p[axis] : rx::Max(box->max[axis], p[axis]);
   }
   box->empty = false;
 }
 
-using ChildMap = std::unordered_map<u64, std::vector<ecs::Entity>>;
+using ChildMap = base::UnorderedMap<u64, base::Vector<ecs::Entity>>;
 
 ChildMap MapChildren(ecs::World& world) {
   ChildMap children;
@@ -1311,9 +1317,9 @@ void AccumulateBounds(ecs::World& world, const ChildMap& children, ecs::Entity e
       Include(out, origin + Rotate(rotation, local * at.scale));
     }
   }
-  const auto found = children.find(PackKey(entity));
-  if (found == children.end()) return;
-  for (ecs::Entity child : found->second) {
+  const base::Vector<ecs::Entity>* found = children.find(PackKey(entity));
+  if (!found) return;
+  for (ecs::Entity child : *found) {
     const scene::Transform* local = world.Get<scene::Transform>(child);
     AccumulateBounds(world, children, child,
                      edit::ComposeTransform(at, local ? *local : scene::Transform{}), out,
@@ -1341,9 +1347,8 @@ class AnchorOrder {
   AnchorOrder(ecs::World& world, const NameIndex& names) : world_(world), names_(names) {}
 
   bool Visit(ecs::Entity entity) {
-    const auto seen = state_.find(PackKey(entity));
-    if (seen != state_.end()) {
-      if (seen->second == 2) return true;
+    if (const int* seen = state_.find(PackKey(entity))) {
+      if (*seen == 2) return true;
       ReportCycle(entity);
       return false;
     }
@@ -1351,13 +1356,13 @@ class AnchorOrder {
     stack_.push_back(entity);
 
     if (const SceneAnchor* anchor = world_.Get<SceneAnchor>(entity)) {
-      const std::string target = anchor->target;
+      const base::String target = anchor->target;
       bool shared = false;
       const ecs::Entity to = names_.Find(target, &shared);
-      if (std::string why = TargetProblem(target, to, shared); !why.empty()) {
+      if (base::String why = TargetProblem(target, to, shared); !why.empty()) {
         owner_ = EntityName(world_, entity);
         offender_ = target;
-        problem_ = std::move(why);
+        problem_ = base::move(why);
         return false;
       }
       if (!Visit(to)) return false;
@@ -1374,45 +1379,45 @@ class AnchorOrder {
     return true;
   }
 
-  const std::vector<ecs::Entity>& order() const { return order_; }
+  const base::Vector<ecs::Entity>& order() const { return order_; }
   // The entity carrying the assignment that failed, and the value it named.
-  const std::string& owner() const { return owner_; }
-  const std::string& offender() const { return offender_; }
-  const std::string& problem() const { return problem_; }
+  const base::String& owner() const { return owner_; }
+  const base::String& offender() const { return offender_; }
+  const base::String& problem() const { return problem_; }
 
  private:
   void ReportCycle(ecs::Entity closed) {
     if (!problem_.empty()) return;  // the first failure is the one worth naming
-    std::string loop;
+    base::String loop;
     bool inside = false;
     for (ecs::Entity step : stack_) {
       inside = inside || step == closed;
       if (!inside) continue;
-      const std::string step_name = EntityName(world_, step);
+      const base::String step_name = EntityName(world_, step);
       loop += (step_name.empty() ? "<unnamed>" : step_name) + " -> ";
     }
     // The link that closed the loop is the one on top of the stack, so that is
     // the Anchor.target line to put the finding on.
-    owner_ = stack_.empty() ? std::string() : EntityName(world_, stack_.back());
+    owner_ = stack_.empty() ? base::String() : EntityName(world_, stack_.back());
     offender_ = EntityName(world_, closed);
-    problem_ = std::format("closes a cycle ({}{}); anchors resolve in dependency order, which a "
+    problem_ = rx::StrFormat("closes a cycle ({}{}); anchors resolve in dependency order, which a "
                            "loop has none of", loop, offender_);
   }
 
   ecs::World& world_;
   const NameIndex& names_;
-  std::unordered_map<u64, int> state_;
-  std::vector<ecs::Entity> stack_;
-  std::vector<ecs::Entity> order_;
-  std::string owner_;
-  std::string offender_;
-  std::string problem_;
+  base::UnorderedMap<u64, int> state_;
+  base::Vector<ecs::Entity> stack_;
+  base::Vector<ecs::Entity> order_;
+  base::String owner_;
+  base::String offender_;
+  base::String problem_;
 };
 
 }  // namespace
 
-bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::string* error) {
-  std::vector<ecs::Entity> members;
+bool BuildSceneGrids(ecs::World& world, const base::String& scene_path, base::String* error) {
+  base::Vector<ecs::Entity> members;
   world.Each<SceneGrid>([&](ecs::Entity entity, SceneGrid& grid) {
     if (!grid.of.empty()) members.push_back(entity);
   });
@@ -1420,7 +1425,7 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
   SortByDeclaration(members);
 
   const NameIndex names(world);
-  std::unordered_map<u64, u32> taken;  // container -> cells already claimed
+  base::UnorderedMap<u64, u32> taken;  // container -> cells already claimed
   // Deferred out of the loop below for the usual reason: adding Parent or
   // Transform moves an entity between archetypes and invalidates every pointer
   // into the storage the loop is reading.
@@ -1428,16 +1433,16 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
     ecs::Entity entity;
     ecs::Entity container;
     f32 offset[3];
-    std::string cell;
+    base::String cell;
   };
-  std::vector<Placement> placements;
+  base::Vector<Placement> placements;
 
   for (ecs::Entity entity : members) {
-    const std::string of = world.Get<SceneGrid>(entity)->of;
-    const std::string owner = EntityName(world, entity);
+    const base::String of = world.Get<SceneGrid>(entity)->of;
+    const base::String owner = EntityName(world, entity);
     bool shared = false;
     const ecs::Entity container = names.Find(of, &shared);
-    if (std::string why = TargetProblem(of, container, shared); !why.empty()) {
+    if (base::String why = TargetProblem(of, container, shared); !why.empty()) {
       if (error) *error = Located(scene_path, owner, "Grid.of", of, why);
       return false;
     }
@@ -1456,7 +1461,7 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
     if (extent[0] == 0 || extent[1] == 0 || extent[2] == 0) {
       if (error)
         *error = Located(scene_path, owner, "Grid.of", of,
-                         std::format("names a grid whose Grid.count is {} {} {}; an axis with no "
+                         rx::StrFormat("names a grid whose Grid.count is {} {} {}; an axis with no "
                                      "cells leaves it nowhere to put anything",
                                      grid.count[0], grid.count[1], grid.count[2]));
       return false;
@@ -1467,7 +1472,7 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
     if (cell >= cells) {
       if (error)
         *error = Located(scene_path, owner, "Grid.of", of,
-                         std::format("names a grid of {} cells and this is its member {}; two "
+                         rx::StrFormat("names a grid of {} cells and this is its member {}; two "
                                      "members on one coordinate read as a missing object",
                                      cells, cell + 1));
       return false;
@@ -1478,7 +1483,7 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
     for (u32 axis = 0; axis < 3; ++axis) {
       placement.offset[axis] = static_cast<f32>(index[axis]) * grid.step[axis];
     }
-    placements.push_back(std::move(placement));
+    placements.push_back(base::move(placement));
   }
 
   for (const Placement& placement : placements) {
@@ -1486,10 +1491,10 @@ bool BuildSceneGrids(ecs::World& world, const std::string& scene_path, std::stri
     // alongside the Grid.of that gave it, so a layout that added would walk the
     // member one cell further along on every save/load round trip.
     if (scene::Transform* authored = world.Get<scene::Transform>(placement.entity)) {
-      std::memcpy(authored->position, placement.offset, sizeof(authored->position));
+      base::MemCopy(authored->position, placement.offset, sizeof(authored->position));
     } else {
       scene::Transform cell;
-      std::memcpy(cell.position, placement.offset, sizeof(cell.position));
+      base::MemCopy(cell.position, placement.offset, sizeof(cell.position));
       world.Add(placement.entity, cell);
     }
     // Parented rather than resolved to a world position, so the container's
@@ -1537,8 +1542,8 @@ bool TurnedOffAxis(ecs::World& world, ecs::Entity entity) {
 // whatever Stretch the prefab already authored, not replacing it. Refused
 // rather than approximated when a non-uniform stretch meets a turned child
 // (TurnedOffAxis); uniform is a similarity and always safe.
-std::string StretchPrefabChildren(ecs::World& world, ecs::Entity instance,
-                                  const std::vector<ecs::Entity>& children) {
+base::String StretchPrefabChildren(ecs::World& world, ecs::Entity instance,
+                                  const base::Vector<ecs::Entity>& children) {
   const SceneStretch* authored = world.Get<SceneStretch>(instance);
   if (!authored) return {};
   const f32 scale[3] = {authored->scale[0], authored->scale[1], authored->scale[2]};
@@ -1554,7 +1559,7 @@ std::string StretchPrefabChildren(ecs::World& world, ecs::Entity instance,
   if (!uniform) {
     for (ecs::Entity child : children) {
       if (!TurnedOffAxis(world, child)) continue;
-      return std::format(
+      return rx::StrFormat(
           "stretches a prefab by {} {} {} whose part '{}' is turned; a per-axis stretch of a "
           "rotated shape is a shear, which no mesh, bound or transform here can carry. Stretch "
           "it uniformly, turn the whole instance instead of the part, or author the part "
@@ -1566,7 +1571,7 @@ std::string StretchPrefabChildren(ecs::World& world, ecs::Entity instance,
   // Deferred out of the walk for the usual reason: adding a Stretch or a
   // Transform moves the entity between archetypes and invalidates every pointer
   // into the storage above.
-  std::vector<std::pair<ecs::Entity, SceneStretch>> add_stretch;
+  base::Vector<base::Pair<ecs::Entity, SceneStretch>> add_stretch;
   for (ecs::Entity child : children) {
     if (scene::Transform* transform = world.Get<scene::Transform>(child)) {
       for (u32 axis = 0; axis < 3; ++axis) transform->position[axis] *= scale[axis];
@@ -1589,20 +1594,20 @@ std::string StretchPrefabChildren(ecs::World& world, ecs::Entity instance,
   return {};
 }
 
-bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::string* error) {
-  std::unordered_map<std::string, std::unique_ptr<PrefabFile>> files;
+bool BuildScenePrefabs(ecs::World& world, const base::String& scene_path, base::String* error) {
+  base::UnorderedMap<base::String, base::UniquePointer<PrefabFile>> files;
   // The file an entity came from, so a prefab instancing another resolves it
   // relative to itself, and the chain of files that produced it, so a prefab
   // reaching itself is caught on the second visit instead of by expanding until
   // memory runs out.
-  std::unordered_map<u64, std::string> origin;
-  std::unordered_map<u64, std::vector<std::string>> chain;
-  std::unordered_set<u64> expanded;
+  base::UnorderedMap<u64, base::String> origin;
+  base::UnorderedMap<u64, base::Vector<base::String>> chain;
+  base::UnorderedSet<u64> expanded;
 
   // A pass at a time, because expanding one prefab can introduce another: a
   // prefab file whose own entities instance further prefabs.
   for (;;) {
-    std::vector<ecs::Entity> pending;
+    base::Vector<ecs::Entity> pending;
     world.Each<ScenePrefab>([&](ecs::Entity entity, ScenePrefab&) {
       if (!expanded.contains(PackKey(entity))) pending.push_back(entity);
     });
@@ -1614,42 +1619,43 @@ bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::st
       expanded.insert(key);
       // Copied out before anything is added to the entity: an added component
       // moves it between archetypes and leaves the pointer dangling.
-      const std::string path = world.Get<ScenePrefab>(entity)->path;
-      const auto from = origin.find(key);
-      const std::string base = from == origin.end() ? scene_path : from->second;
-      const std::string resolved = ResolveAgainst(base, path);
-      const std::vector<std::string> reached = chain[key];
-      const std::string owner = EntityName(world, entity);
+      const base::String path = world.Get<ScenePrefab>(entity)->path;
+      const base::String* from = origin.find(key);
+      const base::String base = from ? *from : scene_path;
+      const base::String resolved = ResolveAgainst(base, path);
+      const base::Vector<base::String> reached = chain[key];
+      const base::String owner = EntityName(world, entity);
 
-      if (std::find(reached.begin(), reached.end(), resolved) != reached.end()) {
+      if (base::Find(reached.begin(), reached.end(), resolved) != reached.end()) {
         if (error) {
-          std::string loop;
-          for (const std::string& step : reached) loop += step + " -> ";
+          base::String loop;
+          for (const base::String& step : reached) loop += step + " -> ";
           *error = Located(base, owner, "Prefab.path", path,
-                           std::format("instances itself ({}{}); the expansion would not "
+                           rx::StrFormat("instances itself ({}{}); the expansion would not "
                                        "terminate", loop, resolved));
         }
         return false;
       }
 
-      auto file = files.find(resolved);
-      if (file == files.end()) {
-        auto opened = std::make_unique<PrefabFile>();
-        if (std::string why = OpenPrefab(resolved, opened.get()); !why.empty()) {
+      base::UniquePointer<PrefabFile>* file = files.find(resolved);
+      if (!file) {
+        auto opened = base::MakeUnique<PrefabFile>();
+        if (base::String why = OpenPrefab(resolved, &*opened); !why.empty()) {
           if (error) *error = Located(base, owner, "Prefab.path", path, why);
           return false;
         }
-        file = files.emplace(resolved, std::move(opened)).first;
+        file = files.emplace(resolved, base::move(opened)).first;
       }
-      PrefabFile& prefab = *file->second;
+      // Boxed, so this survives the map growing on a later insert.
+      PrefabFile& prefab = **file;
 
       // Every copy exists before anything is copied into it, so a Parent inside
       // the prefab has a destination entity to be remapped onto. The root maps
       // onto the instance itself, which is what turns "Parent = the root" in the
       // file into "Parent = this instance" here.
-      std::unordered_map<u64, ecs::Entity> remap;
+      base::UnorderedMap<u64, ecs::Entity> remap;
       remap.emplace(PackKey(prefab.entities[0]), entity);
-      std::vector<ecs::Entity> copies;
+      base::Vector<ecs::Entity> copies;
       for (size_t i = 1; i < prefab.entities.size(); ++i) {
         copies.push_back(world.Create());
         remap.emplace(PackKey(prefab.entities[i]), copies.back());
@@ -1657,7 +1663,7 @@ bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::st
 
       CopyComponents(prefab.world, prefab.entities[0], world, entity, /*keep_existing=*/true,
                      remap);
-      std::vector<std::string> descend = reached;
+      base::Vector<base::String> descend = reached;
       descend.push_back(resolved);
       for (size_t i = 1; i < prefab.entities.size(); ++i) {
         const ecs::Entity copy = copies[i - 1];
@@ -1676,7 +1682,7 @@ bool BuildScenePrefabs(ecs::World& world, const std::string& scene_path, std::st
       // After every child exists and carries its authored components, so the
       // stretch multiplies into the prefab's own proportions rather than racing
       // the copy that establishes them.
-      if (std::string why = StretchPrefabChildren(world, entity, copies); !why.empty()) {
+      if (base::String why = StretchPrefabChildren(world, entity, copies); !why.empty()) {
         if (error) *error = Located(base, owner, "Prefab.path", path, why);
         return false;
       }
@@ -1691,7 +1697,7 @@ void BuildSceneRotations(ecs::World& world) {
   // Writing through the pointer moves nothing between archetypes, so this half
   // is done in place; the entities needing a Transform ADDED are deferred, for
   // the usual reason.
-  std::vector<ecs::Entity> untransformed;
+  base::Vector<ecs::Entity> untransformed;
   world.Each<SceneRotation>([&](ecs::Entity entity, SceneRotation& rotation) {
     if (scene::Transform* transform = world.Get<scene::Transform>(entity)) {
       EulerDegreesToQuat(rotation.euler, transform->rotation);
@@ -1710,8 +1716,8 @@ void BuildSceneRotations(ecs::World& world) {
   }
 }
 
-bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::string* error) {
-  std::vector<ecs::Entity> anchored;
+bool BuildSceneAnchors(ecs::World& world, const base::String& scene_path, base::String* error) {
+  base::Vector<ecs::Entity> anchored;
   world.Each<SceneAnchor>([&](ecs::Entity entity, SceneAnchor&) { anchored.push_back(entity); });
   if (anchored.empty()) return true;
   SortByDeclaration(anchored);
@@ -1729,12 +1735,12 @@ bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::st
   const ChildMap children = MapChildren(world);
   for (ecs::Entity entity : order.order()) {
     const SceneAnchor& anchor = *world.Get<SceneAnchor>(entity);
-    const std::string target_name = anchor.target;
+    const base::String target_name = anchor.target;
     // Copied out for the same reason target_name is: the placement below adds a
     // Transform to entities that had none, which moves them between archetypes
     // and leaves this reference dangling.
     const f32 offset[3] = {anchor.offset[0], anchor.offset[1], anchor.offset[2]};
-    const std::string owner = EntityName(world, entity);
+    const base::String owner = EntityName(world, entity);
     const AnchorMode* mode = FindAnchorMode(anchor.mode);
     if (!mode) {
       if (error)
@@ -1773,7 +1779,7 @@ bool BuildSceneAnchors(ecs::World& world, const std::string& scene_path, std::st
     // marker at the target's surface rather than refusing it - only the TARGET
     // has to have an extent for "on top of" to mean anything.
     scene::Transform upright = local;
-    std::memset(upright.position, 0, sizeof(upright.position));
+    base::MemSet(upright.position, 0, sizeof(upright.position));
     const Aabb self = SubtreeBounds(world, children, entity, upright);
 
     // Replaced rather than offset: a SaveScene writes the resolved position

@@ -1,6 +1,7 @@
 #include "render/pipeline/mesh_pipeline.h"
 
 #include "asset/mesh.h"
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
 #include "shaders/mesh_instance_vs_hlsl.h"
 #include "shaders/mesh_ps_hlsl.h"
@@ -16,14 +17,14 @@
 
 namespace rx::render {
 
-std::unique_ptr<MeshPipeline> MeshPipeline::Create(Device& device, Format color_format,
+base::UniquePointer<MeshPipeline> MeshPipeline::Create(Device& device, Format color_format,
                                                    Format motion_format,
                                                    Format normal_format, Format depth_format,
                                                    BindingLayoutHandle material_layout,
                                                    BindingLayoutHandle environment_layout,
                                                    BindingLayoutHandle bindless_layout,
                                                    u32 samples) {
-  auto pipeline = std::unique_ptr<MeshPipeline>(new MeshPipeline(device));
+  auto pipeline = base::UniquePointer<MeshPipeline>(new MeshPipeline(device));
   bool rt = device.caps().ray_query;
   bool mesh_caps = device.caps().mesh_shaders;
   pipeline->has_bindless_ = static_cast<bool>(bindless_layout);

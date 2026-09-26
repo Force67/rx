@@ -1,10 +1,10 @@
 #ifndef RX_ASSET_IMAGE_FILE_H_
 #define RX_ASSET_IMAGE_FILE_H_
 
-#include <string>
 
 #include "asset/asset_id.h"
 #include "asset/texture.h"
+#include "base/strings/xstring.h"
 #include "core/export.h"
 
 namespace rx::asset {
@@ -23,14 +23,14 @@ namespace rx::asset {
 // header, so a --validate sweep over a scene full of 4K maps costs no decode.
 // LoadImageFile goes through the same reader, so a path this accepts is one
 // that loads.
-RX_ASSET_EXPORT std::string ImageFileProblem(const std::string& path);
+RX_ASSET_EXPORT base::String ImageFileProblem(const base::String& path);
 
 // Decodes to an opaque rgba8 Texture with a single mip (the material system
 // generates the chain at upload). `srgb` tags the result for the colour slots
 // (base colour, emissive); data maps - normal, roughness, metallic, occlusion -
 // must pass false, or the gpu linearizes values that were never encoded and the
 // surface comes back visibly too smooth and too flat.
-RX_ASSET_EXPORT bool LoadImageFile(const std::string& path, bool srgb, AssetId id, Texture* out);
+RX_ASSET_EXPORT bool LoadImageFile(const base::String& path, bool srgb, AssetId id, Texture* out);
 
 }  // namespace rx::asset
 

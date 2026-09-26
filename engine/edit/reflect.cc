@@ -1,10 +1,16 @@
 #include "edit/reflect.h"
 
-#include <cstring>
-#include <deque>
-#include <memory>
-#include <mutex>
+#include <string.h>
 
+#include "base/containers/span.h"
+#include "base/containers/vector.h"
+#include "base/memory/mem_ops.h"
+#include "base/memory/move.h"
+#include "base/memory/unique_pointer.h"
+#include "base/strings/string_ref.h"
+#include "base/strings/xstring.h"
+#include "base/threading/lock_guard.h"
+#include "base/threading/mutex.h"
 #include "core/log.h"
 #include "scene/components.h"
 
@@ -12,16 +18,17 @@ namespace rx::edit {
 
 namespace detail {
 
-// A component's registration record. Names live in a deque so their c_str()
-// pointers (handed out as PropDesc::name / ComponentDesc::name) stay stable as
-// more props are added; the PropDesc vector may reallocate freely because
-// ComponentDesc::props is recomputed from it on every query.
+// A component's registration record. Names live in their own heap blocks so
+// their c_str() pointers (handed out as PropDesc::name / ComponentDesc::name)
+// stay stable as more props are added (an inline base::String would move); the
+// PropDesc vector may reallocate freely because ComponentDesc::props is
+// recomputed from it on every query.
 struct RegEntry {
-  std::string name;
+  base::String name;
   ecs::ComponentId id = 0;
   void (*default_construct)(void*) = nullptr;
-  std::deque<std::string> prop_names;
-  std::vector<PropDesc> props;
+  base::Vector<base::UniquePointer<base::String>> prop_names;
+  base::Vector<PropDesc> props;
   ComponentDesc desc{};  // rebuilt (props pointer) in Finalize
 };
 
@@ -34,11 +41,11 @@ using detail::RegEntry;
 void RegisterBuiltins();
 
 struct Registry {
-  std::mutex mutex;
-  std::vector<std::unique_ptr<RegEntry>> entries;
+  base::Mutex mutex;
+  base::Vector<base::UniquePointer<RegEntry>> entries;
   // Recomputed view handed out by AllComponents(); stable once builtins and any
   // app components are registered.
-  std::vector<const ComponentDesc*> view;
+  base::Vector<const ComponentDesc*> view;
   bool builtins_done = false;
 };
 
@@ -64,19 +71,19 @@ void Finalize(Registry& reg) {
 void EnsureBuiltins() {
   Registry& reg = TheRegistry();
   {
-    std::lock_guard<std::mutex> lock(reg.mutex);
+    base::LockGuard<base::Mutex> lock(reg.mutex);
     if (reg.builtins_done) return;
     reg.builtins_done = true;  // set first: RegisterBuiltins re-enters via ReflectComponent
   }
   RegisterBuiltins();
-  std::lock_guard<std::mutex> lock(reg.mutex);
+  base::LockGuard<base::Mutex> lock(reg.mutex);
   Finalize(reg);
 }
 
 RegEntry* FindEntry(ecs::ComponentId id) {
   Registry& reg = TheRegistry();
   for (auto& entry : reg.entries)
-    if (entry->id == id) return entry.get();
+    if (entry->id == id) return entry.Get_UseOnlyIfYouKnowWhatYouareDoing();
   return nullptr;
 }
 
@@ -86,31 +93,31 @@ namespace detail {
 
 RegEntry* CreateEntry(const char* name, ecs::ComponentId id, void (*default_construct)(void*)) {
   Registry& reg = TheRegistry();
-  std::lock_guard<std::mutex> lock(reg.mutex);
+  base::LockGuard<base::Mutex> lock(reg.mutex);
   for (auto& entry : reg.entries) {
-    if (entry->id == id) return entry.get();  // already registered
+    if (entry->id == id) return entry.Get_UseOnlyIfYouKnowWhatYouareDoing();  // already registered
   }
-  auto entry = std::make_unique<RegEntry>();
+  auto entry = base::MakeUnique<RegEntry>();
   entry->name = name;
   entry->id = id;
   entry->default_construct = default_construct;
-  RegEntry* raw = entry.get();
-  reg.entries.push_back(std::move(entry));
+  RegEntry* raw = entry.Get_UseOnlyIfYouKnowWhatYouareDoing();
+  reg.entries.push_back(base::move(entry));
   return raw;
 }
 
 void AddProp(RegEntry* entry, const char* name, PropType type, u32 offset) {
   if (!entry) return;
   Registry& reg = TheRegistry();
-  std::lock_guard<std::mutex> lock(reg.mutex);
-  entry->prop_names.emplace_back(name);
-  entry->props.push_back(PropDesc{entry->prop_names.back().c_str(), type, offset});
+  base::LockGuard<base::Mutex> lock(reg.mutex);
+  entry->prop_names.push_back(base::MakeUnique<base::String>(name));
+  entry->props.push_back(PropDesc{entry->prop_names.back()->c_str(), type, offset});
 }
 
 void SetRange(RegEntry* entry, f32 min, f32 max) {
   if (!entry || entry->props.empty()) return;
   Registry& reg = TheRegistry();
-  std::lock_guard<std::mutex> lock(reg.mutex);
+  base::LockGuard<base::Mutex> lock(reg.mutex);
   if (entry->props.empty()) return;
   entry->props.back().min = min;
   entry->props.back().max = max;
@@ -119,12 +126,12 @@ void SetRange(RegEntry* entry, f32 min, f32 max) {
 void SetHint(RegEntry* entry, const char* hint) {
   if (!entry || !hint || entry->props.empty()) return;
   Registry& reg = TheRegistry();
-  std::lock_guard<std::mutex> lock(reg.mutex);
+  base::LockGuard<base::Mutex> lock(reg.mutex);
   if (entry->props.empty()) return;
-  // Parked in the same deque the prop names use, so the handed-out pointer
+  // Parked with the prop names, so the handed-out pointer
   // survives a caller that passed a temporary.
-  entry->prop_names.emplace_back(hint);
-  entry->props.back().hint = entry->prop_names.back().c_str();
+  entry->prop_names.push_back(base::MakeUnique<base::String>(hint));
+  entry->props.back().hint = entry->prop_names.back()->c_str();
 }
 
 }  // namespace detail
@@ -168,18 +175,18 @@ const char* PropTypeName(PropType type) {
   return "?";
 }
 
-std::span<const ComponentDesc* const> AllComponents() {
+base::Span<const ComponentDesc* const> AllComponents() {
   EnsureBuiltins();
   Registry& reg = TheRegistry();
-  std::lock_guard<std::mutex> lock(reg.mutex);
+  base::LockGuard<base::Mutex> lock(reg.mutex);
   Finalize(reg);  // pick up any components registered after builtins
-  return std::span<const ComponentDesc* const>(reg.view.data(), reg.view.size());
+  return base::Span<const ComponentDesc* const>(reg.view.data(), reg.view.size());
 }
 
 const ComponentDesc* FindComponent(ecs::ComponentId id) {
   EnsureBuiltins();
   Registry& reg = TheRegistry();
-  std::lock_guard<std::mutex> lock(reg.mutex);
+  base::LockGuard<base::Mutex> lock(reg.mutex);
   for (auto& entry : reg.entries) {
     if (entry->id == id) {
       entry->desc.props = entry->props.data();
@@ -192,10 +199,10 @@ const ComponentDesc* FindComponent(ecs::ComponentId id) {
   return nullptr;
 }
 
-const ComponentDesc* FindComponentByName(std::string_view name) {
+const ComponentDesc* FindComponentByName(base::StringRef name) {
   EnsureBuiltins();
   Registry& reg = TheRegistry();
-  std::lock_guard<std::mutex> lock(reg.mutex);
+  base::LockGuard<base::Mutex> lock(reg.mutex);
   for (auto& entry : reg.entries) {
     if (entry->name == name) {
       entry->desc.props = entry->props.data();
@@ -208,8 +215,8 @@ const ComponentDesc* FindComponentByName(std::string_view name) {
   return nullptr;
 }
 
-std::vector<const ComponentDesc*> ComponentsOn(ecs::World& world, ecs::Entity entity) {
-  std::vector<const ComponentDesc*> out;
+base::Vector<const ComponentDesc*> ComponentsOn(ecs::World& world, ecs::Entity entity) {
+  base::Vector<const ComponentDesc*> out;
   for (const ComponentDesc* desc : AllComponents()) {
     if (world.HasRaw(entity, desc->id)) out.push_back(desc);
   }
@@ -254,7 +261,7 @@ bool GetProp(ecs::World& world, ecs::Entity entity, const ComponentDesc& comp, c
       break;
     }
     case PropType::kString:
-      *out = PropValue::String(*reinterpret_cast<const std::string*>(field));
+      *out = PropValue::String(*reinterpret_cast<const base::String*>(field));
       break;
     case PropType::kAssetId:
       *out = PropValue::AssetIdV(reinterpret_cast<const asset::AssetId*>(field)->hash);
@@ -278,17 +285,17 @@ bool SetProp(ecs::World& world, ecs::Entity entity, const ComponentDesc& comp, c
     case PropType::kU64: *reinterpret_cast<u64*>(field) = value.u; break;
     case PropType::kF32: *reinterpret_cast<f32*>(field) = value.f[0]; break;
     case PropType::kVec2:
-      std::memcpy(field, value.f, 2 * sizeof(f32));
+      base::MemCopy(field, value.f, 2 * sizeof(f32));
       break;
     case PropType::kVec3:
-      std::memcpy(field, value.f, 3 * sizeof(f32));
+      base::MemCopy(field, value.f, 3 * sizeof(f32));
       break;
     case PropType::kVec4:
     case PropType::kQuat:
     case PropType::kColor:
-      std::memcpy(field, value.f, 4 * sizeof(f32));
+      base::MemCopy(field, value.f, 4 * sizeof(f32));
       break;
-    case PropType::kString: *reinterpret_cast<std::string*>(field) = value.s; break;
+    case PropType::kString: *reinterpret_cast<base::String*>(field) = value.s; break;
     case PropType::kAssetId: reinterpret_cast<asset::AssetId*>(field)->hash = value.u; break;
     case PropType::kEntity: *reinterpret_cast<ecs::Entity*>(field) = value.e; break;
   }
@@ -300,7 +307,7 @@ bool AddComponentByDesc(ecs::World& world, ecs::Entity entity, const ComponentDe
   RegEntry* entry = nullptr;
   {
     Registry& reg = TheRegistry();
-    std::lock_guard<std::mutex> lock(reg.mutex);
+    base::LockGuard<base::Mutex> lock(reg.mutex);
     entry = FindEntry(comp.id);
   }
   if (!entry || !entry->default_construct) {

@@ -1,8 +1,8 @@
 #include "render/geometry/fluid_surface.h"
 
-#include <algorithm>
-
+#include "base/memory/unique_pointer.h"
 #include "core/log.h"
+#include "core/scalar.h"
 #include "render/pipeline/mesh_pipeline.h"
 #include "shaders/fluid_surface_ps_hlsl.h"
 #include "shaders/fluid_surface_vs_hlsl.h"
@@ -36,12 +36,12 @@ constexpr u32 kMaxGridResolution = 512;
 
 }  // namespace
 
-std::unique_ptr<FluidSurfacePass> FluidSurfacePass::Create(
+base::UniquePointer<FluidSurfacePass> FluidSurfacePass::Create(
     Device& device, Format color_format, Format motion_format, Format depth_format,
     BindingLayoutHandle globals_layout, BindingLayoutHandle environment_layout,
     BindingLayoutHandle bindless_layout) {
   (void)bindless_layout;  // IBL rides the environment set; no bindless table here.
-  auto pass = std::unique_ptr<FluidSurfacePass>(new FluidSurfacePass(device));
+  auto pass = base::UniquePointer<FluidSurfacePass>(new FluidSurfacePass(device));
 
   // Linear + clamp: the state/bed/velocity fields are sampled continuously
   // across the (coarser) render grid and must not wrap at the domain edge.
@@ -90,7 +90,7 @@ FluidSurfacePass::~FluidSurfacePass() {
 void FluidSurfacePass::Draw(PassContext& ctx, BindingSetHandle globals,
                             BindingSetHandle environment, const FluidSim& sim, u32 frame_slot,
                             f32 time) {
-  const u32 grid = std::min(sim.domain().resolution, kMaxGridResolution);
+  const u32 grid = rx::Min(sim.domain().resolution, kMaxGridResolution);
   if (grid == 0) return;
 
   ctx.cmd->BindPipeline(pipeline_);
