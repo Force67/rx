@@ -2,9 +2,23 @@
 #include "render/core/presets.h"
 
 #include "core/platform.h"
+#include "render/core/settings_ini.h"
 
 #include <ctype.h>
+#include <string.h>
 #include <initializer_list>
+
+#include "base/check.h"
+
+#include "render/presets/android_high.h"
+#include "render/presets/android_low.h"
+#include "render/presets/android_medium.h"
+#include "render/presets/console.h"
+#include "render/presets/high.h"
+#include "render/presets/low.h"
+#include "render/presets/medium.h"
+#include "render/presets/steamdeck.h"
+#include "render/presets/ultra.h"
 
 namespace rx::render {
 namespace {
@@ -14,174 +28,92 @@ base::String Lower(base::String s) {
   return s;
 }
 
+bool Contains(const base::String& s, const char* marker) {
+  return s.find(marker) != base::String::npos;
+}
+
 bool IsMobileGpu(const base::String& name) {
   const base::String n = Lower(name);
   for (const char* marker :
        {"adreno", "mali", "powervr", "apple", "xclipse", "immortalis", "vivante"}) {
-    if (n.find(marker) != base::String::npos) return true;
+    if (Contains(n, marker)) return true;
   }
   return false;
 }
 
-f32 Degrees(f32 deg) { return deg / 57.29578f; }
+// The model number after `marker` ("adreno (tm) 740" -> 740), 0 when absent.
+u32 ModelNumber(const base::String& n, const char* marker) {
+  size_t i = n.find(marker);
+  if (i == base::String::npos) return 0;
+  i += ::strlen(marker);
+  while (i < n.size() && !::isdigit(static_cast<unsigned char>(n[i]))) ++i;
+  u32 number = 0;
+  while (i < n.size() && ::isdigit(static_cast<unsigned char>(n[i])))
+    number = number * 10 + static_cast<u32>(n[i++] - '0');
+  return number;
+}
 
-// Nvidia gets dlss when present, everyone else (amd, intel, handhelds) fsr3.
-// The renderer falls back to taa if the chosen backend is not compiled or the
-// gpu cannot run it, so this only expresses a preference.
-UpscalerKind PreferredUpscaler(const DeviceCaps& caps) {
-  return Lower(caps.adapter_name).find("nvidia") != base::String::npos ? UpscalerKind::kDlss
-                                                                      : UpscalerKind::kFsr3;
+// Mobile gpus by generation, from the adapter name. A recognized flagship gets
+// the high tier and a recognized old or entry part the low one; a name we do
+// not know lands in the middle rather than guessing either way.
+QualityPreset DetectAndroidTier(const base::String& name) {
+  const base::String n = Lower(name);
+  if (Contains(n, "immortalis") || Contains(n, "xclipse") || Contains(n, "apple"))
+    return QualityPreset::kAndroidHigh;
+  if (const u32 adreno = ModelNumber(n, "adreno")) {
+    if (adreno >= 730) return QualityPreset::kAndroidHigh;  // 8 gen 2 and newer
+    return adreno >= 640 ? QualityPreset::kAndroidMedium : QualityPreset::kAndroidLow;
+  }
+  if (const u32 mali = ModelNumber(n, "mali-g")) {
+    // Three digits since Valhall gen 2 (G710); two before (G57..G78).
+    if (mali >= 100) {
+      if (mali >= 700) return QualityPreset::kAndroidHigh;
+      return mali >= 600 ? QualityPreset::kAndroidMedium : QualityPreset::kAndroidLow;
+    }
+    return mali >= 70 ? QualityPreset::kAndroidMedium : QualityPreset::kAndroidLow;
+  }
+  if (Contains(n, "mali-t") || Contains(n, "powervr") || Contains(n, "vivante"))
+    return QualityPreset::kAndroidLow;
+  return QualityPreset::kAndroidMedium;
+}
+
+struct TierIni {
+  const unsigned char* bytes;
+  size_t size;
+};
+
+template <size_t N>
+TierIni Ini(const unsigned char (&bytes)[N]) {
+  return {bytes, N};
+}
+
+TierIni TierFile(QualityPreset preset) {
+  switch (preset) {
+    case QualityPreset::kAndroidLow: return Ini(kPreset_android_low);
+    case QualityPreset::kAndroidMedium: return Ini(kPreset_android_medium);
+    case QualityPreset::kAndroidHigh: return Ini(kPreset_android_high);
+    case QualityPreset::kSteamDeck: return Ini(kPreset_steamdeck);
+    case QualityPreset::kLowEnd: return Ini(kPreset_low);
+    case QualityPreset::kConsole: return Ini(kPreset_console);
+    case QualityPreset::kMedium: return Ini(kPreset_medium);
+    case QualityPreset::kHigh: return Ini(kPreset_high);
+    case QualityPreset::kUltra: return Ini(kPreset_ultra);
+    case QualityPreset::kAuto: break;  // resolved before this is asked
+  }
+  return {nullptr, 0};
 }
 
 }  // namespace
 
 RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
-  RenderSettings s;  // sane defaults; each tier overrides from here
-  const UpscalerKind up = PreferredUpscaler(caps);
+  RenderSettings s;
+  const QualityPreset tier = ResolvePreset(preset, caps);
+  const TierIni ini = TierFile(tier);
+  const int applied =
+      ApplyIni(base::StringRef(reinterpret_cast<const char*>(ini.bytes), ini.size), s);
+  BASE_FATAL_CHECK(applied > 0, "empty quality tier ini");
 
-  switch (ResolvePreset(preset, caps)) {
-    case QualityPreset::kAndroid:
-      // Bandwidth-starved tile gpus: raster only, cheap screen-space ao.
-      s.aa_mode = AntiAliasingMode::kTaa;
-      s.upscaler = UpscalerKind::kNone;
-      s.rt_shadows = s.rtao = s.ddgi = s.rt_reflections = false;
-      s.water_reflections = s.fog = false;
-      s.bloom = false;
-      s.ssao = true;
-      s.ao_rays = 1;  // 8 screen-space taps
-      s.shadow_resolution = 1024;  // one small cascade atlas fits the power budget
-      s.sun_angular_radius = 0.0f;
-      s.water_triangle_budget = 2048;
-      break;
-
-    case QualityPreset::kSteamDeck:
-      // RDNA2 handheld: ray query exists but the power budget is tiny. The
-      // panel is 1280x800, so performance mode would reconstruct from 640x400,
-      // which reads as mush at arm's length; quality starts from ~853x533.
-      s.aa_mode = AntiAliasingMode::kUpscaler;
-      s.upscaler = UpscalerKind::kFsr3;
-      s.upscaler_quality = UpscalerQuality::kQuality;
-      s.sharpness = 0.3f;
-      // Measured on a Deck (RADV, 1280x800): clouds ~10 ms, froxel fog ~8.6 ms
-      // and motion blur ~2 ms, together more than a whole 60 Hz frame.
-      s.clouds = false;
-      s.froxel_fog = false;
-      s.motion_blur = false;
-      // Gamescope paces FIFO to the panel; mailbox renders frames nobody sees
-      // and spends the battery on them.
-      s.vsync = true;
-      s.rt_shadows = true;
-      s.sun_angular_radius = Degrees(0.25f);
-      s.rtao = true;
-      s.ao_rays = 1;
-      s.ssao = true;  // fallback when ray-traced ao is unavailable
-      s.ddgi = true;
-      s.ddgi_spacing = 2.5f;
-      s.rt_reflections = false;
-      s.water_reflections = false;
-      s.water_triangle_budget = 4096;
-      s.fog = false;
-      break;
-
-    case QualityPreset::kLowEnd:
-      // Weak/old discrete or rt-less desktops: upscale hard, screen-space ao.
-      s.aa_mode = AntiAliasingMode::kUpscaler;
-      s.upscaler = UpscalerKind::kFsr3;
-      s.upscaler_quality = UpscalerQuality::kPerformance;
-      s.rt_shadows = s.rtao = s.ddgi = s.rt_reflections = false;
-      s.water_reflections = s.fog = false;
-      s.water_triangle_budget = 4096;
-      s.ssao = true;
-      s.ao_rays = 2;  // 16 screen-space taps
-      break;
-
-    case QualityPreset::kConsole:
-      // PS5 / Series X: full hybrid rt tuned for a locked 60.
-      s.aa_mode = AntiAliasingMode::kUpscaler;
-      s.upscaler = UpscalerKind::kFsr3;
-      s.upscaler_quality = UpscalerQuality::kBalanced;
-      s.rt_shadows = true;
-      s.sun_angular_radius = Degrees(0.5f);
-      s.rtao = true;
-      s.ao_rays = 3;
-      s.ddgi = true;
-      s.ddgi_spacing = 1.5f;
-      s.rt_reflections = true;
-      s.reflection_roughness_cutoff = 0.5f;
-      s.water_reflections = true;
-      s.water_triangle_budget = 8192;
-      s.fog = false;  // volumetric fog off by default (RX_FOG=1 / debug UI to enable)
-      s.fog_density = 0.02f;
-      break;
-
-    case QualityPreset::kMedium:
-      s.aa_mode = AntiAliasingMode::kUpscaler;
-      s.upscaler = up;
-      s.upscaler_quality = UpscalerQuality::kQuality;
-      s.rt_shadows = true;
-      s.sun_angular_radius = Degrees(0.4f);
-      s.rtao = true;
-      s.ao_rays = 2;
-      s.ddgi = true;
-      s.ddgi_spacing = 1.5f;
-      s.rt_reflections = true;
-      s.reflection_roughness_cutoff = 0.4f;
-      s.water_reflections = true;
-      s.water_triangle_budget = 8192;
-      s.fog = false;
-      break;
-
-    case QualityPreset::kHigh:
-      s.aa_mode = AntiAliasingMode::kUpscaler;
-      s.upscaler = up;
-      s.upscaler_quality = UpscalerQuality::kQuality;
-      s.rt_shadows = true;
-      s.sun_angular_radius = Degrees(0.5f);
-      s.rtao = true;
-      s.ao_rays = 4;
-      // High/ultra ship RCGI (idTech8-style radiance-cached GI, the AC-Shadows
-      // adoption) as the indirect-diffuse GI; ddgi stays enabled as the
-      // automatic fallback when rcgi is unavailable (no ray query / creation
-      // failed; the renderer's rcgi_active predicate gates which one runs).
-      // Measured gather chain ~1.2-1.4 ms on GB10, within this tier's budget.
-      s.ddgi = true;
-      s.ddgi_spacing = 1.0f;
-      s.rcgi = true;
-      s.rt_reflections = true;
-      s.reflection_roughness_cutoff = 0.6f;
-      s.water_reflections = true;
-      s.water_triangle_budget = 16384;
-      s.fog = false;  // volumetric fog off by default (RX_FOG=1 / debug UI to enable)
-      break;
-
-    case QualityPreset::kUltra:
-      // Flagship: native-res reconstruction (dlaa/native) and every effect.
-      s.aa_mode = AntiAliasingMode::kUpscaler;
-      s.upscaler = up;
-      s.upscaler_quality = UpscalerQuality::kNativeAa;
-      s.rt_shadows = true;
-      s.sun_angular_radius = Degrees(0.5f);
-      s.rtao = true;
-      s.ao_rays = 6;
-      s.ddgi = true;  // fallback GI when rcgi is unavailable (see kHigh note)
-      s.ddgi_spacing = 1.0f;
-      s.rcgi = true;  // radiance-cached GI is the ultra-tier indirect diffuse
-      s.rt_reflections = true;
-      s.reflection_roughness_cutoff = 0.85f;
-      s.water_reflections = true;
-      s.water_triangle_budget = 32768;
-      s.fog = false;  // volumetric fog off by default (RX_FOG=1 / debug UI to enable)
-      break;
-
-    case QualityPreset::kAuto:  // already resolved above
-      break;
-  }
-
-  // Every ray-traced-ao tier keeps the screen-space fallback armed; it only
-  // runs when ray-traced ao is actually unavailable (no ray query or no nrd).
-  if (s.rtao) s.ssao = true;
-
-  // Clamp to what the device can actually run so a forced preset never hangs.
+  // Clamp to what the device can actually run so a forced tier never hangs.
   if (!caps.ray_query) {
     s.rt_shadows = false;
     s.rtao = false;
@@ -196,13 +128,12 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
   // Cascaded shadow maps are the sun-shadow path whenever ray tracing isn't, so
   // every non-rt tier (and forced-low on capable gpus) still casts sun shadows.
   if (!s.rt_shadows) s.shadow_maps = true;
-  if (s.upscaler == UpscalerKind::kDlss &&
-      Lower(caps.adapter_name).find("nvidia") == base::String::npos) {
+  // The tier files name dlss where nvidia can run it; everyone else gets fsr3.
+  // The renderer falls back to taa if the backend is not compiled in either.
+  if (s.upscaler == UpscalerKind::kDlss && !Contains(Lower(caps.adapter_name), "nvidia"))
     s.upscaler = UpscalerKind::kFsr3;
-  }
-  if (s.aa_mode == AntiAliasingMode::kUpscaler && s.upscaler == UpscalerKind::kNone) {
+  if (s.aa_mode == AntiAliasingMode::kUpscaler && s.upscaler == UpscalerKind::kNone)
     s.aa_mode = AntiAliasingMode::kTaa;
-  }
   return s;
 }
 
@@ -210,9 +141,13 @@ QualityPreset DetectPreset(const DeviceCaps& caps) {
   // Known from the board rather than guessed from the gpu class, which is all
   // the integrated fallback below can do for other handhelds.
   if (IsSteamDeck()) return QualityPreset::kSteamDeck;
-  if (!caps.ray_query) {
-    return IsMobileGpu(caps.adapter_name) ? QualityPreset::kAndroid : QualityPreset::kLowEnd;
-  }
+  // Before the ray query split: current mobile flagships have ray query too. On
+  // Android every gpu is a mobile one, named in our list or not.
+#if defined(__ANDROID__)
+  return DetectAndroidTier(caps.adapter_name);
+#endif
+  if (IsMobileGpu(caps.adapter_name)) return DetectAndroidTier(caps.adapter_name);
+  if (!caps.ray_query) return QualityPreset::kLowEnd;
   if (caps.integrated) return QualityPreset::kSteamDeck;
 
   const u64 gib = caps.device_local_bytes >> 30;
@@ -224,7 +159,9 @@ QualityPreset DetectPreset(const DeviceCaps& caps) {
 const char* PresetName(QualityPreset preset) {
   switch (preset) {
     case QualityPreset::kAuto: return "auto";
-    case QualityPreset::kAndroid: return "android";
+    case QualityPreset::kAndroidLow: return "android_low";
+    case QualityPreset::kAndroidMedium: return "android_medium";
+    case QualityPreset::kAndroidHigh: return "android_high";
     case QualityPreset::kSteamDeck: return "steamdeck";
     case QualityPreset::kLowEnd: return "low";
     case QualityPreset::kConsole: return "console";
@@ -237,7 +174,10 @@ const char* PresetName(QualityPreset preset) {
 
 QualityPreset ParsePreset(const base::String& name) {
   const base::String n = Lower(name);
-  if (n == "android" || n == "mobile") return QualityPreset::kAndroid;
+  if (n == "android_low") return QualityPreset::kAndroidLow;
+  if (n == "android_medium" || n == "android" || n == "mobile")
+    return QualityPreset::kAndroidMedium;
+  if (n == "android_high") return QualityPreset::kAndroidHigh;
   if (n == "steamdeck" || n == "deck") return QualityPreset::kSteamDeck;
   if (n == "low" || n == "lowend") return QualityPreset::kLowEnd;
   if (n == "console") return QualityPreset::kConsole;

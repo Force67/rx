@@ -890,6 +890,21 @@ if(RX_BUILD_TESTS)
   target_link_libraries(settings_ini_test PRIVATE rx::core)
   add_test(NAME settings_ini_test COMMAND settings_ini_test)
 
+  # The quality tiers are embedded ini files: every key in them must be one
+  # ApplyIni knows, and mobile gpus must land in the right android tier.
+  add_executable(presets_test
+    test/presets_test.cc
+    engine/render/core/presets.cc
+    engine/render/core/settings_ini.cc)
+  target_include_directories(presets_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium
+    ${CMAKE_BINARY_DIR}/generated)
+  target_compile_definitions(presets_test PRIVATE RX_RENDER_IMPLEMENTATION)
+  target_link_libraries(presets_test PRIVATE rx::core)
+  add_dependencies(presets_test rx_render_presets)
+  add_test(NAME presets_test COMMAND presets_test)
+
   # Character surface model: the neutral-parity contract, control independence,
   # terminator energy, tier monotonicity. Pure CPU (the mirror of
   # human_brdf.hlsli), so plain `ctest` runs it everywhere.

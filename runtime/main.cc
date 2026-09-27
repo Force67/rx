@@ -55,8 +55,9 @@ void PrintUsage() {
   RX_INFO("  --camera-fov <deg>    override the vertical field of view");
   RX_INFO("  --width <px>          render/window width (also RX_WIN_W)");
   RX_INFO("  --height <px>         render/window height (also RX_WIN_H)");
-  RX_INFO("  --preset <tier>       auto (default) | android | steamdeck | low |");
-  RX_INFO("                        medium | high | ultra | console");
+  RX_INFO("  --preset <tier>       auto (default) | android_low | android_medium |");
+  RX_INFO("                        android_high | steamdeck | low | medium | high |");
+  RX_INFO("                        ultra | console (engine/render/presets/<tier>.ini)");
   RX_INFO("  --no-taa              disable temporal antialiasing");
   RX_INFO("  --upscaler <id>       fsr3 | dlss | xess");
   RX_INFO("  --no-rt               disable raytracing");

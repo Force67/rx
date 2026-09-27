@@ -116,14 +116,16 @@ ImU32 PressureColor(u64 used, u64 limit) {
 }
 
 // Row 0 is "Custom" (hand-tuned); the rest map to QualityPreset below.
-const char* kPresets[] = {"Custom",  "Auto-detect", "Android", "Steam Deck", "Low end",
-                          "Console", "Medium",      "High",    "Ultra"};
+const char* kPresets[] = {"Custom",         "Auto-detect",  "Android low", "Android medium",
+                          "Android high",   "Steam Deck",   "Low end",     "Console",
+                          "Medium",         "High",         "Ultra"};
 const render::QualityPreset kPresetValues[] = {
-    render::QualityPreset::kAuto,      // unused for row 0
-    render::QualityPreset::kAuto,      render::QualityPreset::kAndroid,
-    render::QualityPreset::kSteamDeck, render::QualityPreset::kLowEnd,
-    render::QualityPreset::kConsole,   render::QualityPreset::kMedium,
-    render::QualityPreset::kHigh,      render::QualityPreset::kUltra};
+    render::QualityPreset::kAuto,  // unused for row 0
+    render::QualityPreset::kAuto,          render::QualityPreset::kAndroidLow,
+    render::QualityPreset::kAndroidMedium, render::QualityPreset::kAndroidHigh,
+    render::QualityPreset::kSteamDeck,     render::QualityPreset::kLowEnd,
+    render::QualityPreset::kConsole,       render::QualityPreset::kMedium,
+    render::QualityPreset::kHigh,          render::QualityPreset::kUltra};
 
 }  // namespace
 

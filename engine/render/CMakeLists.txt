@@ -1,3 +1,21 @@
+# The quality tiers are the ini files in presets/, embedded so a shipped binary
+# cannot run without them; the debug ui edits the same files on disk.
+set(rx_preset_tiers android_low android_medium android_high steamdeck low console
+    medium high ultra)
+set(rx_preset_headers)
+foreach(tier ${rx_preset_tiers})
+  set(src ${CMAKE_CURRENT_SOURCE_DIR}/presets/${tier}.ini)
+  set(header ${CMAKE_BINARY_DIR}/generated/render/presets/${tier}.h)
+  add_custom_command(OUTPUT ${header}
+    COMMAND ${CMAKE_COMMAND} -DSOURCE=${src} -DHEADER=${header}
+            -DSYMBOL=kPreset_${tier} -P ${PROJECT_SOURCE_DIR}/cmake/embed_bytes.cmake
+    DEPENDS ${src} ${PROJECT_SOURCE_DIR}/cmake/embed_bytes.cmake
+    COMMENT "embed preset ${tier}.ini"
+    VERBATIM)
+  list(APPEND rx_preset_headers ${header})
+endforeach()
+add_custom_target(rx_render_presets DEPENDS ${rx_preset_headers})
+
 rx_add_module(render
   core/renderer.cc
   core/presets.cc
@@ -79,6 +97,8 @@ rx_add_module(render
   rhi/rhi.cc
   null/null_device.cc
 )
+add_dependencies(rx_render rx_render_presets)
+target_include_directories(rx_render PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 # Graphics backends. Vulkan is the default everywhere it can run; d3d12 is the
 # native windows/xbox path, and on Linux it runs natively over vkd3d

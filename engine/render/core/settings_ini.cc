@@ -189,7 +189,8 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "ddgi = " << Bool(s.ddgi) << "\n";
   o << "ddgi_spacing = " << s.ddgi_spacing << "\n";
   o << "ddgi_intensity = " << s.ddgi_intensity << "\n";
-  o << "ssgi = " << Bool(s.ssgi) << "\n\n";
+  o << "ssgi = " << Bool(s.ssgi) << "\n";
+  o << "rcgi = " << Bool(s.rcgi) << "\n\n";
 
   o << "[reflections]\n";
   o << "rt_reflections = " << Bool(s.rt_reflections) << "\n";
@@ -359,6 +360,7 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
   fl("ddgi_spacing", s.ddgi_spacing);
   fl("ddgi_intensity", s.ddgi_intensity);
   b("ssgi", s.ssgi);
+  b("rcgi", s.rcgi);
 
   b("rt_reflections", s.rt_reflections);
   fl("reflection_roughness_cutoff", s.reflection_roughness_cutoff);

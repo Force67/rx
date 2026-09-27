@@ -211,84 +211,80 @@ void Host::ApplyRenderPreset() {
     tuned.exposure = 1.0f;
   }
   if (env.path_trace) tuned.path_trace = true;
-  // Carry the path-tracer mode + tunables (RX_PATHTRACE_RECON / _REFERENCE /
-  // _SPP / _ACCUM ...) through the preset, or env-selected recon/reference
-  // silently falls back to the NRD path.
-  tuned.path_trace_reference = env.path_trace_reference;
-  tuned.path_trace_recon = env.path_trace_recon;
-  tuned.path_trace_spp = env.path_trace_spp;
-  tuned.path_trace_accum = env.path_trace_accum;
-  tuned.path_trace_recon_weight = env.path_trace_recon_weight;
-  tuned.path_trace_recon_atrous = env.path_trace_recon_atrous;
-  tuned.path_trace_recon_debug = env.path_trace_recon_debug;
-  tuned.path_trace_restir = env.path_trace_restir;
-  tuned.path_trace_restir_di = env.path_trace_restir_di;
-  tuned.hdr_output = env.hdr_output;
-  tuned.hdr_paper_white = env.hdr_paper_white;
-  tuned.path_trace_rr = env.path_trace_rr;
   if (env.wireframe) tuned.wireframe = true;  // honor RX_WIREFRAME over the preset
-  tuned.ssr = env.ssr;                        // honor RX_SSR over the preset
-  tuned.ssgi = env.ssgi;                      // honor RX_SSGI over the preset
-  // No preset sets these two, so the env value is the only one there is; before
-  // they were carried across, RX_DISTANCE_LOD / RX_MESH_SHADER_LOD were applied
-  // in Renderer::Initialize and then thrown away here, one line later.
-  tuned.distance_lod = env.distance_lod;      // honor RX_DISTANCE_LOD
-  tuned.mesh_shader_lod = env.mesh_shader_lod;  // honor RX_MESH_SHADER_LOD
-  tuned.color_grade = env.color_grade;        // presets never set a grade
-  tuned.sun_direction = env.sun_direction;    // honor RX_SUN_DIR over the default
-  // Sky/weather env overrides (RX_AERIAL / RX_CLOUDS / RX_CLOUD_COVERAGE /
-  // RX_PRECIP / RX_SNOW / RX_WIND / RX_WETNESS / ...), so they survive the preset.
-  tuned.fog = env.fog;  // honor RX_FOG over the preset (fog params are defaults)
-  // Tier-owned (the Deck tier turns them off): the env only wins when it says
-  // something other than the default, or this carry would undo every tier.
+
+  // Every RX_* knob Renderer::Initialize read: the env wins only where it says
+  // something other than the default. An unset option holds the default, and
+  // copying that over would undo whatever the tier's ini chose for the field.
   const render::RenderSettings defaults;
-  if (env.motion_blur != defaults.motion_blur) tuned.motion_blur = env.motion_blur;
-  tuned.lens_flare = env.lens_flare;    // honor RX_LENS_FLARE over the preset
-  tuned.film_grain = env.film_grain;    // honor RX_FILM_GRAIN over the preset
-  tuned.dof = env.dof;
-  tuned.dof_focus = env.dof_focus;
-  tuned.dof_aperture = env.dof_aperture;
-  tuned.sss = env.sss;  // honor RX_SSS over the preset
-  tuned.sss_width = env.sss_width;
-  tuned.async_compute = env.async_compute;  // honor RX_ASYNC_COMPUTE
-  tuned.frame_generation = env.frame_generation;  // honor RX_FRAMEGEN
-  tuned.local_shadows = env.local_shadows;  // honor RX_LOCAL_SHADOWS
-  if (env.froxel_fog != defaults.froxel_fog) tuned.froxel_fog = env.froxel_fog;
-  tuned.froxel_density = env.froxel_density;
-  tuned.froxel_start_distance = env.froxel_start_distance;  // honor RX_FROXEL_START
-  tuned.vrs = env.vrs;  // honor RX_VRS
-  tuned.texture_budget_mb = env.texture_budget_mb;  // honor RX_TEX_BUDGET_MB
-  tuned.gpu_pass_timings = env.gpu_pass_timings;    // honor RX_GPU_TIMINGS
-  tuned.dynamic_resolution = env.dynamic_resolution;  // honor RX_DRS
-  tuned.dynamic_target_ms = env.dynamic_target_ms;
-  tuned.dynamic_min_scale = env.dynamic_min_scale;
-  tuned.restir_di = env.restir_di;  // honor RX_RESTIR_DI
-  // RCGI is now a preset default (ultra/high). RX_RCGI still wins in both
-  // directions, but only when explicitly set; otherwise the preset decides,
-  // so an unset env must not clobber a tier that enabled rcgi.
+  auto carry = [&](auto render::RenderSettings::*field) {
+    if (env.*field != defaults.*field) tuned.*field = env.*field;
+  };
+  using RS = render::RenderSettings;
+  // Path-tracer mode + tunables (RX_PATHTRACE_RECON / _REFERENCE / _SPP / ...),
+  // or env-selected recon/reference silently falls back to the NRD path.
+  carry(&RS::path_trace_reference);
+  carry(&RS::path_trace_recon);
+  carry(&RS::path_trace_spp);
+  carry(&RS::path_trace_accum);
+  carry(&RS::path_trace_recon_weight);
+  carry(&RS::path_trace_recon_atrous);
+  carry(&RS::path_trace_recon_debug);
+  carry(&RS::path_trace_restir);
+  carry(&RS::path_trace_restir_di);
+  carry(&RS::path_trace_rr);
+  carry(&RS::hdr_output);
+  carry(&RS::hdr_paper_white);
+  carry(&RS::ssr);
+  carry(&RS::ssgi);
+  carry(&RS::distance_lod);
+  carry(&RS::mesh_shader_lod);
+  carry(&RS::fog);
+  carry(&RS::motion_blur);
+  carry(&RS::lens_flare);
+  carry(&RS::film_grain);
+  carry(&RS::dof);
+  carry(&RS::dof_focus);
+  carry(&RS::dof_aperture);
+  carry(&RS::sss);
+  carry(&RS::sss_width);
+  carry(&RS::async_compute);
+  carry(&RS::frame_generation);
+  carry(&RS::local_shadows);
+  carry(&RS::froxel_fog);
+  carry(&RS::froxel_density);
+  carry(&RS::froxel_start_distance);
+  carry(&RS::vrs);
+  carry(&RS::vrs_threshold);
+  carry(&RS::texture_budget_mb);
+  carry(&RS::gpu_pass_timings);
+  carry(&RS::dynamic_resolution);
+  carry(&RS::dynamic_target_ms);
+  carry(&RS::dynamic_min_scale);
+  carry(&RS::restir_di);
+  carry(&RS::rcgi_intensity);
+  carry(&RS::fft_ocean);
+  carry(&RS::adaptive_water);
+  carry(&RS::water_field);
+  carry(&RS::water_interaction);
+  carry(&RS::shore_wetting);
+  carry(&RS::water_caustics);
+  carry(&RS::procedural_grass);
+  carry(&RS::aerial_perspective);
+  carry(&RS::clouds);
+  carry(&RS::cloudscape);
+  carry(&RS::cloudscape_steps);
+  carry(&RS::cloud_coverage);
+  // RX_RCGI wins in both directions, but only when explicitly set.
   if (renderer_.rcgi_env_overridden()) tuned.rcgi = env.rcgi;
-  tuned.rcgi_intensity = env.rcgi_intensity;
   // SDF software-trace availability is a startup decision on Renderer::sdf_available_,
   // not a RenderSettings field, so it survives this wholesale preset replacement
   // with no carry needed (see RendererDesc::software_gi / settings.h note).
-  tuned.fft_ocean = env.fft_ocean;  // honor RX_FFT_OCEAN
-  // Water feature env overrides (RX_ADAPTIVE_WATER / RX_WATER_FIELD /
-  // RX_WATER_INTERACTION / RX_SHORE_WETTING / RX_WATER_CAUSTICS); presets never
-  // tune these, so the wholesale replacement was silently discarding the envs.
-  tuned.adaptive_water = env.adaptive_water;
-  tuned.water_field = env.water_field;
-  tuned.water_interaction = env.water_interaction;
-  tuned.shore_wetting = env.shore_wetting;
-  tuned.water_caustics = env.water_caustics;
-  tuned.procedural_grass = env.procedural_grass;  // honor RX_PROCEDURAL_GRASS
-  tuned.vrs_threshold = env.vrs_threshold;
-  tuned.aerial_perspective = env.aerial_perspective;
-  if (env.clouds != defaults.clouds) tuned.clouds = env.clouds;
-  tuned.cloudscape = env.cloudscape;
-  tuned.cloudscape_steps = env.cloudscape_steps;
+  // Live state no tier sets: always the renderer's.
+  tuned.color_grade = env.color_grade;
+  tuned.sun_direction = env.sun_direction;  // honor RX_SUN_DIR over the default
   tuned.cloudscape_controls = env.cloudscape_controls;
-  tuned.cloud_coverage = env.cloud_coverage;
-  tuned.weather = env.weather;  // live weather state; presets never set it
+  tuned.weather = env.weather;
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
 
   ApplyRenderInis(resolved, tuned);
