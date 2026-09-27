@@ -6,6 +6,7 @@
 #include <string.h>
 
 
+#include <base/check.h>
 #include <base/option.h>
 
 #include <stb_image_write.h>
@@ -4072,7 +4073,20 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   // projection, not the matrices used for motion vectors.
   f32 aspect =
       static_cast<f32>(render_width_) / static_cast<f32>(render_height_);
-  Mat4 proj = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f);
+  // The ortho view shares the perspective's reversed-z clip space, so every
+  // depth-aware pass below is unchanged.
+  Mat4 proj;
+  if (view.camera.ortho_height > 0.0f) {
+    // A degenerate depth range collapses the matrix into a silently broken view.
+    BASE_DCHECK(view.camera.ortho_far > view.camera.ortho_near,
+                "ortho camera requires ortho_far > ortho_near");
+    const f32 half_h = view.camera.ortho_height * 0.5f;
+    const f32 half_w = half_h * aspect;
+    proj = OrthographicReversedZ(-half_w, half_w, -half_h, half_h, view.camera.ortho_near,
+                                 view.camera.ortho_far);
+  } else {
+    proj = PerspectiveReversedZ(view.camera.fov_y, aspect, 0.1f);
+  }
   Mat4 view_mat = LookAt(view.camera.eye, view.camera.target, {0, 1, 0});
   Mat4 view_proj = proj * view_mat;
 
