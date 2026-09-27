@@ -101,6 +101,12 @@ struct GamepadState {
   bool buttons[static_cast<u8>(GamepadButton::kCount)] = {};
   bool pressed[static_cast<u8>(GamepadButton::kCount)] = {};  // went down this pump
   f32 axes[static_cast<u8>(GamepadAxis::kCount)] = {};
+  // Angular velocity in rad/s, SDL's frame with the pad held in front of you:
+  // [0] pitch (+ lifts the far edge), [1] yaw (+ turns left), [2] roll. Only
+  // pads with a gyro report it (DualSense, Switch, a Deck without Steam Input);
+  // Steam Input's virtual pad has none and offers gyro-as-mouse instead.
+  bool has_gyro = false;
+  f32 gyro[3] = {};
 
   bool button(GamepadButton b) const { return buttons[static_cast<u8>(b)]; }
   bool button_pressed(GamepadButton b) const { return pressed[static_cast<u8>(b)]; }

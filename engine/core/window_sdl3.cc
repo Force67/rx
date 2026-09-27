@@ -230,6 +230,13 @@ class Sdl3Window final : public Window {
           gamepad_.buttons[static_cast<u8>(b)] = down;
           break;
         }
+        case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+          if (pad_ && event.gsensor.which == pad_id_ && event.gsensor.sensor == SDL_SENSOR_GYRO) {
+            gamepad_.gyro[0] = event.gsensor.data[0];
+            gamepad_.gyro[1] = event.gsensor.data[1];
+            gamepad_.gyro[2] = event.gsensor.data[2];
+          }
+          break;
         case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
           if (event.gaxis.which != pad_id_) break;
           GamepadAxis a = TranslateGamepadAxis(event.gaxis.axis);
@@ -392,10 +399,13 @@ class Sdl3Window final : public Window {
     gamepad_ = {};
     gamepad_.connected = true;
     gamepad_.kind = GamepadKind(pad);
-    RX_INFO("gamepad connected: {} ({})", SDL_GetGamepadName(pad),
+    gamepad_.has_gyro = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO) &&
+                        SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_GYRO, true);
+    RX_INFO("gamepad connected: {} ({}{})", SDL_GetGamepadName(pad),
              gamepad_.kind == GamepadState::Kind::kDualSense ? "DualSense"
              : gamepad_.kind == GamepadState::Kind::kXbox    ? "Xbox"
-                                                             : "generic");
+                                                             : "generic",
+             gamepad_.has_gyro ? ", gyro" : "");
   }
 
   void CloseGamepad() {
