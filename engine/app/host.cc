@@ -46,6 +46,10 @@ base::Option<const char*> RenderIni{"render.ini", nullptr, "RX_RENDER_INI"};
 // RX_FRAME_STATS=<seconds> logs the frame-time spread over each window: the
 // average alone hides the hitches a handheld player feels.
 base::Option<float> FrameStats{"frame.stats", 0.0f, "RX_FRAME_STATS"};
+// Frame-rate cap while the window has lost focus (Steam menu open on a Deck,
+// alt-tabbed on a desktop): nobody is watching, so spend no power on it.
+// 0 renders at full rate regardless.
+base::Option<int> UnfocusedFps{"unfocused.fps", 10, "RX_UNFOCUSED_FPS"};
 // Touch doubling as the mouse is the SDL default and keeps mouse-only UI usable
 // under a finger. Handhelds turn it off: with mouse look in relative mode a
 // thumb resting on the panel drags the camera.
@@ -417,6 +421,16 @@ bool Host::RunFrame() {
     renderer_.RenderFrame(view);
     app_->OnFrameEnd();
     if (FrameStats.get() > 0.0f) LogFrameStats(frame_delta);
+    if (window_) {
+      const bool focused = window_->focused();
+      if (focused != was_focused_) {
+        RX_INFO("window {}", focused ? "focused" : "unfocused, throttling");
+        was_focused_ = focused;
+      }
+      // Sleeping the render time on top keeps this simple and errs slower.
+      if (!focused && UnfocusedFps.get() > 0 && !(timer_.fixed_delta() > 0.0))
+        base::SleepForMilliseconds(1000 / UnfocusedFps.get());
+    }
   } else {
     // No vsync to pace the loop; yield between fixed steps instead of
     // spinning a core.

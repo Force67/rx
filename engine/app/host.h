@@ -116,6 +116,7 @@ class RX_APP_EXPORT Host {
 
   base::Vector<f32> frame_times_;  // RX_FRAME_STATS window
   f32 frame_stats_elapsed_ = 0.0f;
+  bool was_focused_ = true;  // RX_UNFOCUSED_FPS throttle, logged on change
 
   base::Atomic<bool> quit_ = false;
   bool shut_down_ = false;
