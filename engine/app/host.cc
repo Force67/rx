@@ -18,6 +18,7 @@
 #include "core/memory/frame_arena.h"
 #include "core/memory/memory_config.h"
 #include "core/paths.h"
+#include "core/platform.h"
 #include "render/core/settings_ini.h"
 #include "scene/components.h"
 
@@ -34,6 +35,10 @@ namespace {
 base::Option<int> WinW{"win.width", 0, "RX_WIN_W"};
 base::Option<int> WinH{"win.height", 0, "RX_WIN_H"};
 base::Option<bool> NoOcclusion{"no.occlusion", false, "RX_NO_OCCLUSION"};
+// Unset means fullscreen on a Deck and under gamescope, windowed elsewhere: the
+// default 1920x1080 window is larger than the Deck's 1280x800 panel, and
+// gamescope scales whatever it gets to cover its output anyway.
+base::Option<bool> Fullscreen{"win.fullscreen", false, "RX_FULLSCREEN"};
 // One more render ini, applied after the project's (AppConfig::render_ini_dir),
 // for tuning on the device without a rebuild.
 base::Option<const char*> RenderIni{"render.ini", nullptr, "RX_RENDER_INI"};
@@ -86,6 +91,10 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   if (config_.height > 0) desc.height = config_.height;
   if (!config_.headless) {
     desc.touch_emits_mouse = TouchMouse;
+    if (Fullscreen.overridden())
+      desc.fullscreen = Fullscreen;
+    else if (WinW <= 0 && config_.width == 0)
+      desc.fullscreen = IsSteamDeck() || IsGamescope();
     window_ = window ? base::move(window) : Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
     ApplyRenderPreset();
@@ -222,7 +231,10 @@ void Host::ApplyRenderPreset() {
   // Sky/weather env overrides (RX_AERIAL / RX_CLOUDS / RX_CLOUD_COVERAGE /
   // RX_PRECIP / RX_SNOW / RX_WIND / RX_WETNESS / ...), so they survive the preset.
   tuned.fog = env.fog;  // honor RX_FOG over the preset (fog params are defaults)
-  tuned.motion_blur = env.motion_blur;  // honor RX_MOTION_BLUR over the preset
+  // Tier-owned (the Deck tier turns them off): the env only wins when it says
+  // something other than the default, or this carry would undo every tier.
+  const render::RenderSettings defaults;
+  if (env.motion_blur != defaults.motion_blur) tuned.motion_blur = env.motion_blur;
   tuned.lens_flare = env.lens_flare;    // honor RX_LENS_FLARE over the preset
   tuned.film_grain = env.film_grain;    // honor RX_FILM_GRAIN over the preset
   tuned.dof = env.dof;
@@ -233,7 +245,7 @@ void Host::ApplyRenderPreset() {
   tuned.async_compute = env.async_compute;  // honor RX_ASYNC_COMPUTE
   tuned.frame_generation = env.frame_generation;  // honor RX_FRAMEGEN
   tuned.local_shadows = env.local_shadows;  // honor RX_LOCAL_SHADOWS
-  tuned.froxel_fog = env.froxel_fog;  // honor RX_FROXEL
+  if (env.froxel_fog != defaults.froxel_fog) tuned.froxel_fog = env.froxel_fog;
   tuned.froxel_density = env.froxel_density;
   tuned.froxel_start_distance = env.froxel_start_distance;  // honor RX_FROXEL_START
   tuned.vrs = env.vrs;  // honor RX_VRS
@@ -263,7 +275,7 @@ void Host::ApplyRenderPreset() {
   tuned.procedural_grass = env.procedural_grass;  // honor RX_PROCEDURAL_GRASS
   tuned.vrs_threshold = env.vrs_threshold;
   tuned.aerial_perspective = env.aerial_perspective;
-  tuned.clouds = env.clouds;
+  if (env.clouds != defaults.clouds) tuned.clouds = env.clouds;
   tuned.cloudscape = env.cloudscape;
   tuned.cloudscape_steps = env.cloudscape_steps;
   tuned.cloudscape_controls = env.cloudscape_controls;

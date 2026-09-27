@@ -7,6 +7,7 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
 #include "core/log.h"
+#include "core/platform.h"
 #include "core/scalar.h"
 #include "core/window.h"
 #if defined(RX_HAS_WAYLAND_KDE_HDR)
@@ -473,8 +474,11 @@ base::UniquePointer<Window> CreateSdl3Window(const WindowDesc& desc) {
     return nullptr;
   }
   // Receive SDL_EVENT_TEXT_INPUT so editor text fields get typed characters.
-  // Key events still arrive; this only adds the translated text stream.
-  SDL_StartTextInput(window);
+  // Key events still arrive; this only adds the translated text stream. Not on
+  // a Steam Deck: there SDL answers text input with Steam's on-screen keyboard,
+  // which would cover the game from the first frame. A field that wants text
+  // asks for it (SetTextInputActive), and the keyboard then shows when useful.
+  if (!IsSteamDeck()) SDL_StartTextInput(window);
 
   // Enable the PS5 HIDAPI driver with enhanced reports so the DualSense exposes
   // rumble, the lightbar, and adaptive triggers (set before the subsystem inits).

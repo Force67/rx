@@ -16,6 +16,10 @@ Nothing below this layer links back to it; `app` is the only module allowed to
 know about every subsystem.
 
 Render settings resolve in this order: the quality tier (`AppConfig::preset`,
-`kAuto` detects the gpu), the `RX_*` env
+`kAuto` detects the gpu and recognizes a Steam Deck), the `RX_*` env
 overrides, the project's overlays (`AppConfig::render_ini_dir`: `default.ini`,
 then `<tier>.ini`), `RX_RENDER_INI`, and finally `AppConfig::tune_settings`.
+
+On a Steam Deck (`core/platform.h`, `RX_STEAMDECK=0/1` to override) the host
+opens fullscreen and the memory plan defaults to the `steamdeck` preset; under
+any gamescope session it opens fullscreen too (`RX_FULLSCREEN` overrides).

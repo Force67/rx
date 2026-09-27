@@ -1,6 +1,7 @@
 rx_add_module(core
   log.cc
   paths.cc
+  platform.cc
   file_system.cc
   format.cc
   text_reader.cc

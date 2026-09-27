@@ -38,7 +38,8 @@ RX_CORE_EXPORT MemoryConfig DefaultMemoryConfig(base::StringRef preset);
 // Unknown keys are ignored so configs stay forward-compatible.
 RX_CORE_EXPORT void ParseMemoryConfigText(base::StringRef text, MemoryConfig& config);
 
-// DefaultMemoryConfig(RX_MEMORY_PRESET or "desktop"), then overlays the file
+// DefaultMemoryConfig(RX_MEMORY_PRESET, else "steamdeck" on a Deck and
+// "desktop" everywhere else), then overlays the file
 // named by RX_MEMORY_INI (falling back to ./memory.ini when present).
 RX_CORE_EXPORT MemoryConfig LoadMemoryConfig();
 

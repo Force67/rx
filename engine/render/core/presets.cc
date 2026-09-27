@@ -1,6 +1,8 @@
 #include "base/strings/xstring.h"
 #include "render/core/presets.h"
 
+#include "core/platform.h"
+
 #include <ctype.h>
 #include <initializer_list>
 
@@ -53,10 +55,21 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
       break;
 
     case QualityPreset::kSteamDeck:
-      // RDNA2 handheld: ray query exists but the power budget is tiny.
+      // RDNA2 handheld: ray query exists but the power budget is tiny. The
+      // panel is 1280x800, so performance mode would reconstruct from 640x400,
+      // which reads as mush at arm's length; quality starts from ~853x533.
       s.aa_mode = AntiAliasingMode::kUpscaler;
       s.upscaler = UpscalerKind::kFsr3;
-      s.upscaler_quality = UpscalerQuality::kPerformance;
+      s.upscaler_quality = UpscalerQuality::kQuality;
+      s.sharpness = 0.3f;
+      // Measured on a Deck (RADV, 1280x800): clouds ~10 ms, froxel fog ~8.6 ms
+      // and motion blur ~2 ms, together more than a whole 60 Hz frame.
+      s.clouds = false;
+      s.froxel_fog = false;
+      s.motion_blur = false;
+      // Gamescope paces FIFO to the panel; mailbox renders frames nobody sees
+      // and spends the battery on them.
+      s.vsync = true;
       s.rt_shadows = true;
       s.sun_angular_radius = Degrees(0.25f);
       s.rtao = true;
@@ -194,6 +207,9 @@ RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
 }
 
 QualityPreset DetectPreset(const DeviceCaps& caps) {
+  // Known from the board rather than guessed from the gpu class, which is all
+  // the integrated fallback below can do for other handhelds.
+  if (IsSteamDeck()) return QualityPreset::kSteamDeck;
   if (!caps.ray_query) {
     return IsMobileGpu(caps.adapter_name) ? QualityPreset::kAndroid : QualityPreset::kLowEnd;
   }

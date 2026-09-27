@@ -8,6 +8,7 @@
 #include "core/memory/frame_arena.h"
 #include "core/memory/memory_tracker.h"
 #include "core/file_system.h"
+#include "core/platform.h"
 
 namespace rx::mem {
 namespace {
@@ -103,7 +104,8 @@ void ParseMemoryConfigText(base::StringRef text, MemoryConfig& config) {
 
 MemoryConfig LoadMemoryConfig() {
   const char* preset = ::getenv("RX_MEMORY_PRESET");
-  MemoryConfig config = DefaultMemoryConfig(preset ? preset : "desktop");
+  if (!preset) preset = IsSteamDeck() ? "steamdeck" : "desktop";
+  MemoryConfig config = DefaultMemoryConfig(preset);
 
   const char* path = ::getenv("RX_MEMORY_INI");
   base::String text;
