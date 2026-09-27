@@ -417,15 +417,15 @@ bool Host::RunFrame() {
     renderer_.RenderFrame(view);
     app_->OnFrameEnd();
     if (FrameStats.get() > 0.0f) LogFrameStats(frame_delta);
-    if (window_) {
+    // Not in a lockstep capture: its frames are the output, not a display.
+    if (window_ && UnfocusedFps.get() > 0 && !(timer_.fixed_delta() > 0.0)) {
       const bool focused = window_->focused();
       if (focused != was_focused_) {
         RX_INFO("window {}", focused ? "focused" : "unfocused, throttling");
         was_focused_ = focused;
       }
       // Sleeping the render time on top keeps this simple and errs slower.
-      if (!focused && UnfocusedFps.get() > 0 && !(timer_.fixed_delta() > 0.0))
-        base::SleepForMilliseconds(1000 / UnfocusedFps.get());
+      if (!focused) base::SleepForMilliseconds(1000 / UnfocusedFps.get());
     }
   } else {
     // No vsync to pace the loop; yield between fixed steps instead of
