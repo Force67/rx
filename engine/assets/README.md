@@ -7,7 +7,7 @@ game archive so a game can override it:
 
 | directory | archive        | mount point |
 | --------- | -------------- | ----------- |
-| `fonts/`  | `rx_fonts.rxp` | `fonts://`  |
+| `fonts/`  | `rx_fonts.rxp` | `rxe://fonts/`  |
 
 ## fonts
 

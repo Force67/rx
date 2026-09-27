@@ -114,6 +114,7 @@ if(NOT RX_BUILD_ID)
 endif()
 
 add_executable(rx main.cc ${RX_RUNTIME_SOURCES})
+rx_stage_content(rx)
 target_link_libraries(rx PRIVATE ${RX_RUNTIME_MODULES})
 # Radiance .hdr decode for imported UsdLux dome environment maps (viewer.cc).
 target_link_libraries(rx PRIVATE rx::stb_impl)
@@ -303,9 +304,8 @@ rx_embed_shaders(rx
 if(TARGET rx_imgui)
   target_link_libraries(rx PRIVATE rx::imgui)
   target_compile_definitions(rx PRIVATE RX_HAS_IMGUI=1)
-  # Default location of the editable .ini render presets (engine/render/presets).
-  # The debug ui lists and loads them; override with the env var RX_PRESETS_DIR.
-  # Absolute so the dev build finds the source files.
+  # The debug ui lists, loads and saves the platform tiers in the source tree,
+  # so an edit lands in the files that ship; RX_PRESETS_DIR points it elsewhere.
   target_compile_definitions(rx PRIVATE
-    RX_PRESETS_DIR_DEFAULT="${PROJECT_SOURCE_DIR}/engine/render/presets")
+    RX_PRESETS_DIR_DEFAULT="${PROJECT_SOURCE_DIR}/config")
 endif()

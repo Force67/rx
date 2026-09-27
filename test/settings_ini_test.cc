@@ -116,33 +116,6 @@ int main() {
             !deck_round_trip.motion_blur && !deck_round_trip.sss,
         "the new keys round-trip through SettingsToIni");
 
-  // include: the named file applies first, the including file's keys win, a
-  // missing or cyclic include is skipped without taking the file down with it.
-  auto resolve = [](base::StringRef name, base::String* text) {
-    if (name == "base") {
-      *text = "shadow_resolution = 1024\nbloom = false\nssr = false\n";
-      return true;
-    }
-    if (name == "loop") {
-      *text = "include = loop\n";
-      return true;
-    }
-    return false;
-  };
-  rx::render::RenderSettings inc;
-  Check(rx::render::ApplyIni("include = base\nbloom = true\n", inc, resolve) == 2,
-        "a resolved include counts as one applied line");
-  Check(inc.shadow_resolution == 1024 && !inc.ssr, "included keys apply");
-  Check(inc.bloom, "the including file's keys override the included ones");
-  rx::render::RenderSettings missing;
-  Check(rx::render::ApplyIni("include = nope\nssr = false\n", missing, resolve) == 1 &&
-            !missing.ssr,
-        "an unresolved include is skipped, the rest still applies");
-  rx::render::RenderSettings cyclic;
-  Check(rx::render::ApplyIni("include = loop\nssr = false\n", cyclic, resolve) == 2 &&
-            !cyclic.ssr,
-        "a cyclic include stops at the depth limit");
-
   if (failures != 0)
     return 1;
   ::printf("settings_ini_test: PASS\n");

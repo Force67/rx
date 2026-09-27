@@ -57,7 +57,7 @@ void PrintUsage() {
   RX_INFO("  --height <px>         render/window height (also RX_WIN_H)");
   RX_INFO("  --preset <tier>       auto (default) | android_low | android_medium |");
   RX_INFO("                        android_high | steamdeck | low | medium | high |");
-  RX_INFO("                        ultra | console (engine/render/presets/<tier>.ini)");
+  RX_INFO("                        ultra | console (rxe://config/<tier>.ini)");
   RX_INFO("  --no-taa              disable temporal antialiasing");
   RX_INFO("  --upscaler <id>       fsr3 | dlss | xess");
   RX_INFO("  --no-rt               disable raytracing");

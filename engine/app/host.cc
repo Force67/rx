@@ -4,7 +4,9 @@
 
 #include <base/option.h>
 
-#include "asset/engine_archives.h"
+#include "app/platform_config.h"
+#include "base/check.h"
+#include "asset/content_mounts.h"
 #include "base/algorithm.h"
 #include "base/atomic.h"
 #include "base/memory/mem_ops.h"
@@ -12,15 +14,12 @@
 #include "base/memory/unique_pointer.h"
 #include "base/threading/thread.h"
 #include "core/feature_registry.h"
-#include "core/file_system.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/memory/frame_arena.h"
 #include "core/memory/memory_config.h"
-#include "core/paths.h"
 #include "core/platform.h"
 #include "core/sort.h"
-#include "render/core/settings_ini.h"
 #include "scene/components.h"
 
 // Host lifecycle and the per-frame heartbeat: subsystem bringup in dependency
@@ -40,9 +39,6 @@ base::Option<bool> NoOcclusion{"no.occlusion", false, "RX_NO_OCCLUSION"};
 // default 1920x1080 window is larger than the Deck's 1280x800 panel, and
 // gamescope scales whatever it gets to cover its output anyway.
 base::Option<bool> Fullscreen{"win.fullscreen", false, "RX_FULLSCREEN"};
-// One more render ini, applied after the project's (AppConfig::render_ini_dir),
-// for tuning on the device without a rebuild.
-base::Option<const char*> RenderIni{"render.ini", nullptr, "RX_RENDER_INI"};
 // RX_FRAME_STATS=<seconds> logs the frame-time spread over each window: the
 // average alone hides the hitches a handheld player feels.
 base::Option<float> FrameStats{"frame.stats", 0.0f, "RX_FRAME_STATS"};
@@ -66,6 +62,12 @@ base::Option<float> FixedDt{"fixed.dt", 0.0f, "RX_FIXED_DT"};
 base::Option<bool> ShowSplash{"splash", true, "RX_SPLASH"};
 base::Option<float> SplashSeconds{"splash.seconds", ui::Splash::kDefaultSeconds,
                                   "RX_SPLASH_SECONDS"};
+void ApplyMemoryPlan(const base::String& text) {
+  mem::MemoryConfig plan;
+  mem::ParseMemoryConfigText(text, plan);
+  mem::ApplyMemoryConfig(plan);
+}
+
 }  // namespace
 
 bool Host::Initialize(const AppConfig& config, Application& app,
@@ -74,9 +76,16 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   app_ = &app;
   InitFeatures();              // apply RX_FEATURES overrides before any flag read
   base::InitOptionsFromEnv();  // populate every base::Option from the environment
-  // Memory plan first, so the pools are pre-reserved and the budgets are in
-  // place before any subsystem starts allocating in earnest.
-  mem::ApplyMemoryConfig(mem::LoadMemoryConfig());
+  // The engine's and the game's content (rxe://, <title>://) mount first: the
+  // platform config lives there, and the application mounts over it later.
+  asset::MountContent(vfs_, config_.title);
+  // What the config can say before the gpu picks a tier: the default.ini
+  // files' options (window, fullscreen...) and memory plan, in place before any
+  // subsystem starts allocating in earnest.
+  PlatformConfig startup;
+  ReadPlatformChain(vfs_, config_.title, render::QualityPreset::kAuto, &startup);
+  ApplyPlatformOptions(startup);
+  ApplyMemoryPlan(startup.memory);
   jobs_ = base::MakeUnique<JobSystem>();
   ConfigureClock(20.0f);
   // An app that asked for lockstep (AppConfig::fixed_delta, i.e. a capture run)
@@ -85,10 +94,6 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   // nonzero one is re-applied every RunFrame below.
   if (config_.fixed_delta > 0.0f && !FixedDt.overridden())
     timer_.set_fixed_delta(static_cast<f64>(config_.fixed_delta));
-
-  // rx's own content (fonts://, ...) mounts first, so anything the application
-  // mounts later overrides it.
-  asset::MountEngineArchives(vfs_);
 
   // --width/--height first, then RX_WIN_W/RX_WIN_H, then the WindowDesc
   // default; the same size answers for a window and for an offscreen target.
@@ -185,7 +190,14 @@ void Host::ApplyRenderPreset() {
   if (!device || device->is_stub()) return;  // no gpu, nothing to tune
   const render::DeviceCaps& caps = device->caps();
   render::QualityPreset resolved = render::ResolvePreset(config_.preset, caps);
-  render::RenderSettings tuned = render::PresetSettings(resolved, caps);
+  // The whole platform config for the tier: engine then game, default.ini then
+  // <tier>.ini. Options and the memory plan apply again, now with the tier's.
+  PlatformConfig platform;
+  BASE_FATAL_CHECK(ReadPlatformChain(vfs_, config_.title, resolved, &platform),
+                   "no engine platform config for the quality tier");
+  ApplyPlatformOptions(platform);
+  ApplyMemoryPlan(platform.memory);
+  render::RenderSettings tuned = render::PresetSettings(platform.render, caps);
 
   // Explicit reconstruction flags (--no-taa / --upscaler) still win over the
   // preset's choice; --no-rt already gates ray tracing at the device level.
@@ -287,46 +299,14 @@ void Host::ApplyRenderPreset() {
   tuned.weather = env.weather;
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
 
-  ApplyRenderInis(resolved, tuned);
-
   // The app profile runs last, after the tier and every env carry-through, so
   // nothing above can silently undo it.
   if (config_.tune_settings) config_.tune_settings(tuned);
 
   renderer_.settings() = tuned;
-  RX_INFO("render preset: {} ({})", render::PresetName(resolved),
-          config_.preset == render::QualityPreset::kAuto ? "auto" : "forced");
-}
-
-void Host::ApplyRenderInis(render::QualityPreset tier, render::RenderSettings& s) {
-  // An include names a sibling file first, then an engine tier, so a project
-  // file can say `include = low` to start from the engine's low tier.
-  auto overlay = [&s](const base::String& path) {
-    base::String text;
-    if (!fs::ReadTextFile(path, &text)) return false;
-    const base::String dir(fs::ParentPath(path));
-    const int applied = render::ApplyIni(text, s, [&dir](base::StringRef name, base::String* out) {
-      return fs::ReadTextFile(fs::Join(dir, base::String(name) + ".ini"), out) ||
-             render::PresetIni(name, out);
-    });
-    RX_INFO("render ini: {} ({} keys)", path, applied);
-    return true;
-  };
-
-  if (!config_.render_ini_dir.empty()) {
-    base::String dir = config_.render_ini_dir;
-    if (!fs::IsDirectory(dir)) dir = fs::Join(ExecutableDirectory(), config_.render_ini_dir);
-    if (fs::IsDirectory(dir)) {
-      // Both optional: a project only writes the tiers it has an opinion on.
-      overlay(fs::Join(dir, "default.ini"));
-      overlay(fs::Join(dir, base::String(render::PresetName(tier)) + ".ini"));
-    } else {
-      RX_WARN("render ini dir '{}' not found (cwd or beside the executable)",
-              config_.render_ini_dir);
-    }
-  }
-  if (const char* path = RenderIni.get(); path && *path && !overlay(path))
-    RX_WARN("RX_RENDER_INI: cannot read '{}'", path);
+  RX_INFO("render preset: {} ({}), platform config with {} problem(s)",
+          render::PresetName(resolved),
+          config_.preset == render::QualityPreset::kAuto ? "auto" : "forced", platform.problems);
 }
 
 void Host::LogFrameStats(f32 frame_delta) {

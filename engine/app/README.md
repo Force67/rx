@@ -15,13 +15,13 @@ never forks the loop. `runtime/` (the rx viewer) is the reference consumer.
 Nothing below this layer links back to it; `app` is the only module allowed to
 know about every subsystem.
 
-Render settings resolve in this order: the quality tier (`AppConfig::preset`,
-`kAuto` detects the gpu and recognizes a Steam Deck), the `RX_*` env
-overrides, the project's overlays (`AppConfig::render_ini_dir`: `default.ini`,
-then `<tier>.ini`), `RX_RENDER_INI`, and finally `AppConfig::tune_settings`.
+Content and platform config: the host mounts the install layout (`rxe://` for
+the engine, `<title>://` for the game, `AppConfig::title`) and resolves the
+quality tier's platform config from `rxe://config/` and `<title>://config/`
+(render settings, memory plan, options). See [docs/CONFIG.md](../../docs/CONFIG.md).
 
 On a Steam Deck (`core/platform.h`, `RX_STEAMDECK=0/1` to override) the host
-opens fullscreen and the memory plan defaults to the `steamdeck` preset; under
+opens fullscreen (its memory plan comes from `rxe://config/steamdeck.ini`); under
 any gamescope session it opens fullscreen too (`RX_FULLSCREEN` overrides).
 `RX_FRAME_STATS=<seconds>` logs fps and p99/max frame time per window. While the
 window is unfocused (the Steam menu on a Deck, alt-tab on a desktop) the host

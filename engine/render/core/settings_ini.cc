@@ -1,10 +1,7 @@
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "base/containers/unordered_map.h"
-#include "base/containers/vector.h"
-#include "base/memory/move.h"
 #include "core/file_system.h"
-#include "core/log.h"
 #include "core/text_reader.h"
 #include "core/text_writer.h"
 #include "render/core/settings_ini.h"
@@ -124,30 +121,30 @@ const char* Bool(bool b) { return b ? "true" : "false"; }
 
 base::String SettingsToIni(const RenderSettings& s) {
   TextWriter o;
-  o << "# Rx render preset. Editable. Load/save it from the debug ui\n"
-    << "# (Renderer panel -> Platform preset). Unlisted keys keep their value.\n\n";
+  o << "# rx render settings, the [render.*] part of a platform config\n"
+    << "# (docs/CONFIG.md). Unlisted keys keep their value.\n\n";
 
-  o << "[antialiasing]\n";
+  o << "[render.antialiasing]\n";
   o << "aa_mode = " << Name(s.aa_mode) << "\n";
   o << "upscaler = " << Name(s.upscaler) << "\n";
   o << "upscaler_quality = " << Name(s.upscaler_quality) << "\n";
   o << "sharpness = " << s.sharpness << "\n";
   o << "taa_history_blend = " << s.taa_history_blend << "\n\n";
 
-  o << "[resolution]\n";
+  o << "[render.resolution]\n";
   o << "render_scale = " << s.render_scale << "\n";
   o << "dynamic_resolution = " << Bool(s.dynamic_resolution) << "\n";
   o << "dynamic_target_ms = " << s.dynamic_target_ms << "\n";
   o << "dynamic_min_scale = " << s.dynamic_min_scale << "\n\n";
 
-  o << "[shadows]\n";
+  o << "[render.shadows]\n";
   o << "rt_shadows = " << Bool(s.rt_shadows) << "\n";
   o << "sun_angular_radius = " << s.sun_angular_radius << "\n";
   o << "shadow_maps = " << Bool(s.shadow_maps) << "\n";
   o << "shadow_resolution = " << s.shadow_resolution << "\n";
   o << "shadow_distance = " << s.shadow_distance << "\n\n";
 
-  o << "[geometry]\n";
+  o << "[render.geometry]\n";
   o << "gpu_culling = " << Bool(s.gpu_culling) << "\n";
   o << "gpu_occlusion = " << Bool(s.gpu_occlusion) << "\n";
   o << "distance_lod = " << Bool(s.distance_lod) << "\n";
@@ -155,7 +152,7 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "procedural_grass = " << Bool(s.procedural_grass) << "\n";
   o << "vsync = " << Bool(s.vsync) << "\n\n";
 
-  o << "[sky]\n";
+  o << "[render.sky]\n";
   o << "sky = " << Bool(s.sky) << "\n";
   o << "ibl = " << Bool(s.ibl) << "\n";
   o << "ibl_intensity = " << s.ibl_intensity << "\n";
@@ -165,7 +162,7 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "cloudscape = " << Bool(s.cloudscape) << "\n";
   o << "cloudscape_steps = " << s.cloudscape_steps << "\n\n";
 
-  o << "[weather]\n";
+  o << "[render.weather]\n";
   o << "precipitation = " << s.weather.precipitation << "\n";
   o << "precip_snow = " << Bool(s.weather.snow) << "\n";
   o << "volumetric = " << Bool(s.weather.volumetric) << "\n";
@@ -181,27 +178,27 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "aurora = " << Bool(s.weather.aurora) << "\n";
   o << "aurora_intensity = " << s.weather.aurora_intensity << "\n\n";
 
-  o << "[ambient_occlusion]\n";
+  o << "[render.ambient_occlusion]\n";
   o << "rtao = " << Bool(s.rtao) << "\n";
   o << "ssao = " << Bool(s.ssao) << "\n";
   o << "ao_radius = " << s.ao_radius << "\n";
   o << "ao_intensity = " << s.ao_intensity << "\n";
   o << "ao_rays = " << s.ao_rays << "\n\n";
 
-  o << "[global_illumination]\n";
+  o << "[render.global_illumination]\n";
   o << "ddgi = " << Bool(s.ddgi) << "\n";
   o << "ddgi_spacing = " << s.ddgi_spacing << "\n";
   o << "ddgi_intensity = " << s.ddgi_intensity << "\n";
   o << "ssgi = " << Bool(s.ssgi) << "\n";
   o << "rcgi = " << Bool(s.rcgi) << "\n\n";
 
-  o << "[reflections]\n";
+  o << "[render.reflections]\n";
   o << "rt_reflections = " << Bool(s.rt_reflections) << "\n";
   o << "reflection_roughness_cutoff = " << s.reflection_roughness_cutoff << "\n";
   o << "water_reflections = " << Bool(s.water_reflections) << "\n";
   o << "ssr = " << Bool(s.ssr) << "\n\n";
 
-  o << "[water]\n";
+  o << "[render.water]\n";
   o << "adaptive_water = " << Bool(s.adaptive_water) << "\n";
   o << "water_triangle_budget = " << s.water_triangle_budget << "\n";
   o << "water_target_triangle_pixels = " << s.water_target_triangle_pixels << "\n";
@@ -229,7 +226,7 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "water_caustic_depth_fade = " << s.water_caustic_depth_fade << "\n";
   o << "water_caustic_receiver_depth = " << s.water_caustic_receiver_depth << "\n\n";
 
-  o << "[path_tracing]\n";
+  o << "[render.path_tracing]\n";
   o << "path_trace = " << Bool(s.path_trace) << "\n";
   o << "path_trace_reference = " << Bool(s.path_trace_reference) << "\n";
   o << "path_trace_spp = " << s.path_trace_spp << "\n";
@@ -238,7 +235,7 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "path_trace_recon_weight = " << s.path_trace_recon_weight << "\n";
   o << "path_trace_recon_atrous = " << s.path_trace_recon_atrous << "\n\n";
 
-  o << "[fog]\n";
+  o << "[render.fog]\n";
   o << "fog = " << Bool(s.fog) << "\n";
   o << "fog_density = " << s.fog_density << "\n";
   o << "fog_height_falloff = " << s.fog_height_falloff << "\n";
@@ -247,7 +244,7 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "froxel_fog = " << Bool(s.froxel_fog) << "\n";
   o << "froxel_density = " << s.froxel_density << "\n\n";
 
-  o << "[post]\n";
+  o << "[render.post]\n";
   o << "bloom = " << Bool(s.bloom) << "\n";
   o << "bloom_intensity = " << s.bloom_intensity << "\n";
   o << "motion_blur = " << Bool(s.motion_blur) << "\n";
@@ -259,15 +256,9 @@ base::String SettingsToIni(const RenderSettings& s) {
   return o.Take();
 }
 
-namespace {
-
-constexpr int kMaxIncludeDepth = 8;
-
-int ApplyIniAt(base::StringRef text, RenderSettings& s, const IniResolver& resolve,
-               int depth) {
+int ApplyIni(base::StringRef text, RenderSettings& s) {
   // Collect "key = value" pairs (lowercased keys), ignoring sections/comments.
   base::UnorderedMap<base::String, base::String> kv;
-  base::Vector<base::String> includes;  // in file order
   LineReader lines(text);
   base::StringRef piece;
   while (lines.Next(&piece)) {
@@ -277,29 +268,11 @@ int ApplyIniAt(base::StringRef text, RenderSettings& s, const IniResolver& resol
     if (t.empty() || t[0] == '[') continue;
     auto eq = t.find('=');
     if (eq == base::String::npos) continue;
-    base::String key = Lower(Trim(base::StringRef(t).substr(0, eq)));
-    base::String value = Trim(base::StringRef(t).substr(eq + 1));
-    if (key == "include")
-      includes.push_back(base::move(value));
-    else
-      kv[key] = base::move(value);
+    kv[Lower(Trim(base::StringRef(t).substr(0, eq)))] = Trim(base::StringRef(t).substr(eq + 1));
   }
+  if (kv.empty()) return 0;
 
   int applied = 0;
-  // Included files first, so this file's own keys override them.
-  for (const base::String& name : includes) {
-    base::String included;
-    if (depth >= kMaxIncludeDepth) {
-      RX_ERROR("render ini: include '{}' is {} deep, a cycle?", name, depth);
-    } else if (!resolve || !resolve(name, &included)) {
-      RX_ERROR("render ini: include '{}' not found", name);
-    } else {
-      ApplyIniAt(included, s, resolve, depth + 1);
-      ++applied;
-    }
-  }
-  if (kv.empty()) return applied;
-
   auto take = [&](const char* key, auto&& fn) {
     const base::String* value = kv.find(key);
     if (value && fn(*value)) ++applied;
@@ -447,19 +420,10 @@ int ApplyIniAt(base::StringRef text, RenderSettings& s, const IniResolver& resol
   return applied;
 }
 
-}  // namespace
-
-int ApplyIni(base::StringRef text, RenderSettings& s, const IniResolver& resolve) {
-  return ApplyIniAt(text, s, resolve, 0);
-}
-
 bool LoadSettingsIni(base::StringRef path, RenderSettings& s) {
   base::String text;
   if (!fs::ReadTextFile(path, &text)) return false;
-  const base::String dir(fs::ParentPath(path));
-  ApplyIni(text, s, [&dir](base::StringRef name, base::String* out) {
-    return fs::ReadTextFile(fs::Join(dir, base::String(name) + ".ini"), out);
-  });
+  ApplyIni(text, s);
   return true;
 }
 

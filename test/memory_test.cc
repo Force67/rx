@@ -171,9 +171,8 @@ void TestSmallVector() {
 }
 
 void TestConfig() {
-  rx::mem::MemoryConfig config = rx::mem::DefaultMemoryConfig("steamdeck");
-  CHECK(config.preset == "steamdeck");
-  CHECK(config.frame_arena_bytes == 6u << 20);
+  rx::mem::MemoryConfig config;
+  CHECK(config.frame_arena_bytes == 8u << 20);  // the desktop default
 
   rx::mem::ParseMemoryConfigText(
       "; comment\n"
@@ -194,8 +193,6 @@ void TestConfig() {
     if (budget.name == "custom-cat") saw_custom = budget.bytes == 9u << 20;
   }
   CHECK(saw_ecs && saw_custom);
-
-  CHECK(rx::mem::DefaultMemoryConfig("nonsense").preset == "desktop");
 }
 
 }  // namespace

@@ -23,8 +23,8 @@
 namespace rx::render {
 
 // The engine's default UI font, in the archive the host mounts at fonts://
-// (asset::MountEngineArchives).
-constexpr const char* kRxDefaultFontPath = "fonts://roboto/Roboto-Regular.ttf";
+// (asset::MountContent).
+constexpr const char* kRxDefaultFontPath = "rxe://fonts/roboto/Roboto-Regular.ttf";
 constexpr f32 kRxDefaultFontSize = 16.0f;
 
 // Applies the rx palette and metrics to `style`.

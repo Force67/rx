@@ -8,17 +8,7 @@
 #include <string.h>
 #include <initializer_list>
 
-#include "base/check.h"
 
-#include "render/presets/android_high.h"
-#include "render/presets/android_low.h"
-#include "render/presets/android_medium.h"
-#include "render/presets/console.h"
-#include "render/presets/high.h"
-#include "render/presets/low.h"
-#include "render/presets/medium.h"
-#include "render/presets/steamdeck.h"
-#include "render/presets/ultra.h"
 
 namespace rx::render {
 namespace {
@@ -77,51 +67,11 @@ QualityPreset DetectAndroidTier(const base::String& name) {
   return QualityPreset::kAndroidMedium;
 }
 
-struct TierIni {
-  const unsigned char* bytes;
-  size_t size;
-};
-
-template <size_t N>
-TierIni Ini(const unsigned char (&bytes)[N]) {
-  return {bytes, N};
-}
-
-TierIni TierFile(QualityPreset preset) {
-  switch (preset) {
-    case QualityPreset::kAndroidLow: return Ini(kPreset_android_low);
-    case QualityPreset::kAndroidMedium: return Ini(kPreset_android_medium);
-    case QualityPreset::kAndroidHigh: return Ini(kPreset_android_high);
-    case QualityPreset::kSteamDeck: return Ini(kPreset_steamdeck);
-    case QualityPreset::kLowEnd: return Ini(kPreset_low);
-    case QualityPreset::kConsole: return Ini(kPreset_console);
-    case QualityPreset::kMedium: return Ini(kPreset_medium);
-    case QualityPreset::kHigh: return Ini(kPreset_high);
-    case QualityPreset::kUltra: return Ini(kPreset_ultra);
-    case QualityPreset::kAuto: break;  // resolved before this is asked
-  }
-  return {nullptr, 0};
-}
-
 }  // namespace
 
-bool PresetIni(base::StringRef name, base::String* text) {
-  const QualityPreset tier = ParsePreset(base::String(name));
-  // ParsePreset also takes aliases ("deck", "mid"); a file names the tier.
-  if (tier == QualityPreset::kAuto || name != PresetName(tier)) return false;
-  const TierIni ini = TierFile(tier);
-  *text = base::String(reinterpret_cast<const char*>(ini.bytes), ini.size);
-  return true;
-}
-
-RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
+RenderSettings PresetSettings(base::StringRef tier_ini, const DeviceCaps& caps) {
   RenderSettings s;
-  const QualityPreset tier = ResolvePreset(preset, caps);
-  const TierIni ini = TierFile(tier);
-  const int applied =
-      ApplyIni(base::StringRef(reinterpret_cast<const char*>(ini.bytes), ini.size), s,
-               [](base::StringRef name, base::String* text) { return PresetIni(name, text); });
-  BASE_FATAL_CHECK(applied > 0, "empty quality tier ini");
+  ApplyIni(tier_ini, s);
 
   // Clamp to what the device can actually run so a forced tier never hangs.
   if (!caps.ray_query) {

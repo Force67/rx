@@ -212,6 +212,7 @@ if(NOT RX_DXC)
 endif()
 find_program(RX_SLANGC slangc)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/shaders.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/content.cmake)
 
 find_package(SDL3 QUIET)
 # An embedding project may have fetched SDL3 itself before adding rx (recreation
@@ -626,18 +627,20 @@ if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
   rx_set_warnings(rxcall)
 endif()
 
-# The engine's own archives, packed from engine/assets with the tool above and
-# mounted by asset::MountEngineArchives (one namespace each).
+# The engine's own archives, packed from engine/assets with the tool above into
+# Data/ and mounted by asset::MountContent (one rxe:// namespace each).
 if(RX_RXPACK_COMMAND)
   file(GLOB_RECURSE RX_ENGINE_FONT_FILES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts/*)
   add_custom_command(
-    OUTPUT ${PROJECT_BINARY_DIR}/rx_fonts.rxp
-    COMMAND ${RX_RXPACK_COMMAND} create ${PROJECT_BINARY_DIR}/rx_fonts.rxp
+    OUTPUT ${PROJECT_BINARY_DIR}/Data/rx_fonts.rxp
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/Data
+    COMMAND ${RX_RXPACK_COMMAND} create ${PROJECT_BINARY_DIR}/Data/rx_fonts.rxp
             ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts
     DEPENDS ${RX_RXPACK_DEPENDS} ${RX_ENGINE_FONT_FILES}
     COMMENT "Packing rx_fonts.rxp")
-  add_custom_target(rx_engine_archives ALL DEPENDS ${PROJECT_BINARY_DIR}/rx_fonts.rxp)
+  add_custom_target(rx_engine_archives ALL DEPENDS ${PROJECT_BINARY_DIR}/Data/rx_fonts.rxp)
+  rx_finish_content_staging()
 endif()
 
 # Vfs mount points + .rxp pack round trip, pure CPU: no driver or window
@@ -890,20 +893,13 @@ if(RX_BUILD_TESTS)
   target_link_libraries(settings_ini_test PRIVATE rx::core)
   add_test(NAME settings_ini_test COMMAND settings_ini_test)
 
-  # The quality tiers are embedded ini files: every key in them must be one
-  # ApplyIni knows, and mobile gpus must land in the right android tier.
-  add_executable(presets_test
-    test/presets_test.cc
-    engine/render/core/presets.cc
-    engine/render/core/settings_ini.cc)
-  target_include_directories(presets_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/equilibrium
-    ${CMAKE_BINARY_DIR}/generated)
-  target_compile_definitions(presets_test PRIVATE RX_RENDER_IMPLEMENTATION)
-  target_link_libraries(presets_test PRIVATE rx::core)
-  add_dependencies(presets_test rx_render_presets)
-  add_test(NAME presets_test COMMAND presets_test)
+  # Platform config: include and section rules, every shipped tier in
+  # rx/config resolving cleanly, and the android tier detection.
+  add_executable(platform_config_test test/platform_config_test.cc)
+  target_compile_definitions(platform_config_test PRIVATE
+    RX_CONFIG_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/config")
+  target_link_libraries(platform_config_test PRIVATE rx::app)
+  add_test(NAME platform_config_test COMMAND platform_config_test)
 
   # Character surface model: the neutral-parity contract, control independence,
   # terminator energy, tier monotonicity. Pure CPU (the mirror of
