@@ -1088,6 +1088,8 @@ private:
   u32 prev_bone_base_ = 0;
   f64 time_seconds_ = 0;
   bool has_prev_frame_ = false;
+  // Whether the last frame left a depth snapshot for occlusion culling.
+  bool cull_depth_snapshot_ = false;
   bool rt_available_ = false;
   bool rcgi_force_software_ =
       false; // RX_RCGI_SW: force the SDF software tracer

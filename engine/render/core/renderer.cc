@@ -5406,8 +5406,13 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
       cull_visible_ =
           settings_.gpu_culling ? gpu_cull_.last_visible(cull_slot) : cmd_total;
     }
-    bool cull_occlusion =
-        settings_.gpu_culling && settings_.gpu_occlusion && has_prev_frame_;
+    // Occlusion needs last frame's depth snapshot, and something to test
+    // against it. A frame that only draws through the scene hooks (a voxel game
+    // with its own culling) has no draws, and the hi-z build alone costs
+    // ~1.7 ms on a Steam Deck.
+    const bool occlusion_wanted = settings_.gpu_culling && settings_.gpu_occlusion &&
+                                  !view.draws.empty();
+    bool cull_occlusion = occlusion_wanted && has_prev_frame_ && cull_depth_snapshot_;
     ResourceHandle cull_hiz = cull_occlusion
                                   ? gpu_cull_.BuildHiZ(graph_, cull_slot)
                                   : kInvalidResource;
@@ -5745,10 +5750,11 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
           });
     }
 
-    // Snapshot this frame's depth for next frame's occlusion test.
-    if (settings_.gpu_culling && settings_.gpu_occlusion) {
-      gpu_cull_.CopyDepth(graph_, depth_export, cull_slot);
-    }
+    // Snapshot this frame's depth for next frame's occlusion test. Skipped with
+    // the test itself; the next frame then waits for a fresh snapshot rather
+    // than culling against a stale one.
+    cull_depth_snapshot_ = occlusion_wanted;
+    if (occlusion_wanted) gpu_cull_.CopyDepth(graph_, depth_export, cull_slot);
 
     // Persistent foam/ripple field: recenter+advect+decay the rings, step the
     // near-camera ripples, and inject crest foam + object wakes. Scheduled
