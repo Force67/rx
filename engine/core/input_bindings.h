@@ -14,14 +14,15 @@ namespace rx {
 
 // A single physical source that drives an action or axis. For kGamepadAxis,
 // axis_dir picks a half-axis when the binding feeds a digital Action (+1 = the
-// positive half, e.g. stick-down/right past the deadzone), or 0 when it feeds an
-// analog Axis with its full signed value.
+// positive half, e.g. stick-down/right past the deadzone). Feeding an analog
+// Axis it is the value's sign: 0 or +1 as is, -1 negated, so two triggers can
+// share one signed axis (right = throttle, left = brake).
 enum class SourceKind : u8 { kNone, kKey, kMouseButton, kGamepadButton, kGamepadAxis };
 
 struct Binding {
   SourceKind kind = SourceKind::kNone;
   u16 code = 0;     // Key / MouseButton / GamepadButton / GamepadAxis as integer
-  i8 axis_dir = 0;  // gamepad-axis half-axis sign for digital use; 0 for analog
+  i8 axis_dir = 0;  // half-axis for a digital action; sign for an analog axis
 
   bool operator==(const Binding& o) const {
     return kind == o.kind && code == o.code && axis_dir == o.axis_dir;

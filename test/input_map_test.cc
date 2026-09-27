@@ -108,9 +108,34 @@ void TestGamepadLevelEdge() {
   Check("held gamepad button is not", !a.pressed(Action::kFire) && a.down(Action::kFire));
 }
 
+enum class Axis : int { kAccel };
+
+// Two triggers on one signed axis: right adds, left (bound with axis_dir -1)
+// subtracts, and the sum is clamped like any other axis.
+void TestNegatedAxisBinding() {
+  ::printf("negated analog axis binding\n");
+  rx::InputMap map;
+  map.RegisterAxis(Axis::kAccel, "accel");
+  map.AddAxisBinding(Axis::kAccel,
+                     rx::Binding{rx::SourceKind::kGamepadAxis,
+                                 static_cast<rx::u16>(rx::GamepadAxis::kRightTrigger), 0});
+  map.AddAxisBinding(Axis::kAccel,
+                     rx::Binding{rx::SourceKind::kGamepadAxis,
+                                 static_cast<rx::u16>(rx::GamepadAxis::kLeftTrigger), -1});
+  rx::GamepadState pad;
+  pad.connected = true;
+  pad.axes[static_cast<rx::u8>(rx::GamepadAxis::kRightTrigger)] = 1.0f;
+  Check("right trigger drives the axis positive", Pump(map, {}, pad).axis(Axis::kAccel) > 0.99f);
+  pad.axes[static_cast<rx::u8>(rx::GamepadAxis::kRightTrigger)] = 0.0f;
+  pad.axes[static_cast<rx::u8>(rx::GamepadAxis::kLeftTrigger)] = 1.0f;
+  Check("the negated left trigger drives it negative",
+        Pump(map, {}, pad).axis(Axis::kAccel) < -0.99f);
+}
+
 }  // namespace
 
 int main() {
+  TestNegatedAxisBinding();
   TestHeldMouseButton();
   TestClickInsideOnePump();
   TestKeyTapInsideOnePump();
