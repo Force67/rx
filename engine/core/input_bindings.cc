@@ -315,7 +315,7 @@ f32 InputMap::AxisValue(const Binding& b, const GamepadState& pad) const {
   // Rescale so the value ramps from 0 at the deadzone edge to 1 at full throw.
   f32 s = (::fabsf(v) - stick_deadzone) / (1.0f - stick_deadzone);
   s = rx::Clamp(s, 0.0f, 1.0f);
-  return ::copysignf(s, v);
+  return b.axis_dir < 0 ? -::copysignf(s, v) : ::copysignf(s, v);
 }
 
 void InputMap::Resolve(const InputState& kbm, const GamepadState& pad, const TouchState& touch,
