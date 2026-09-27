@@ -1280,6 +1280,7 @@ bool Renderer::SetEnvironmentMap(const f32 *rgba, u32 width, u32 height,
   // The cubemap is only re-convolved when the sun moves; an authored dome does
   // not move, so nudge the cached sun so the next frame rebuilds it.
   applied_sun_intensity_ = -1.0f;
+  env_baked_sun_intensity_ = -1.0f;
   return environment_->SetEnvironmentMap(rgba, width, height, tint, intensity,
                                          rotation_radians);
 }
@@ -1287,6 +1288,7 @@ bool Renderer::SetEnvironmentMap(const f32 *rgba, u32 width, u32 height,
 void Renderer::ClearEnvironmentMap() {
   if (!environment_) return;
   applied_sun_intensity_ = -1.0f;
+  env_baked_sun_intensity_ = -1.0f;
   environment_->ClearEnvironmentMap();
 }
 
@@ -1722,7 +1724,20 @@ void Renderer::ApplySettings() {
     applied_sun_direction_ = sun;
     applied_sun_intensity_ = settings_.sun_intensity;
     applied_sun_color_ = settings_.sun_color;
-    environment_dirty_ = true;
+    // Re-bake once the change would show: 0.1 degrees of sun travel (under half
+    // the disk's radius) or 1% of intensity or color. A clock-driven sun then
+    // re-bakes every second or so instead of every frame.
+    constexpr f32 kCosBakeAngle = 0.99999848f;  // cos(0.1 deg)
+    auto differs = [](f32 a, f32 b) {
+      return ::fabsf(a - b) > 0.01f * rx::Max(rx::Max(::fabsf(a), ::fabsf(b)), 1e-3f);
+    };
+    if (Dot(sun, env_baked_sun_direction_) < kCosBakeAngle ||
+        differs(settings_.sun_intensity, env_baked_sun_intensity_) ||
+        differs(settings_.sun_color.x, env_baked_sun_color_.x) ||
+        differs(settings_.sun_color.y, env_baked_sun_color_.y) ||
+        differs(settings_.sun_color.z, env_baked_sun_color_.z)) {
+      environment_dirty_ = true;
+    }
   }
 }
 
@@ -4602,6 +4617,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   prev_env_aurora_ = env_aurora;
   if (environment_dirty_ && (settings_.ibl || settings_.sky)) {
     environment_dirty_ = false;
+    env_baked_sun_direction_ = applied_sun_direction_;
+    env_baked_sun_intensity_ = applied_sun_intensity_;
+    env_baked_sun_color_ = applied_sun_color_;
     Vec3 env_sun = applied_sun_direction_;
     f32 env_intensity = applied_sun_intensity_;
     Vec3 env_color = applied_sun_color_;
