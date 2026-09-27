@@ -15,10 +15,11 @@ never forks the loop. `runtime/` (the rx viewer) is the reference consumer.
 Nothing below this layer links back to it; `app` is the only module allowed to
 know about every subsystem.
 
-Content and platform config: the host mounts the install layout (`rxe://` for
-the engine, `<title>://` for the game, `AppConfig::title`) and resolves the
-quality tier's platform config from `rxe://config/` and `<title>://config/`
-(render settings, memory plan, options). See [docs/CONFIG.md](../../docs/CONFIG.md).
+Identity, content and platform config: `AppConfig::id` / `name` / `title` say
+who the app is; the host mounts the install layout (`rxe://` for the engine,
+`<name>://` for the game, `user://` for the player) and resolves the quality
+tier's platform config from those three (render settings, memory plan,
+options). See [docs/CONFIG.md](../../docs/CONFIG.md).
 
 On a Steam Deck (`core/platform.h`, `RX_STEAMDECK=0/1` to override) the host
 opens fullscreen (its memory plan comes from `rxe://config/steamdeck.ini`); under

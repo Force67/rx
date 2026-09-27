@@ -1,13 +1,14 @@
 # engine/assets
 
-Content rx itself ships. Each subdirectory is packed into its own `.rxp`
-archive at build time (see the `rx_engine_archives` target) and mounted by
-`asset::MountEngineArchives` under the namespace it is named for, ahead of any
-game archive so a game can override it:
+Content rx itself ships. It is packed with the platform tiers from `config/`
+into one archive, `Data/rx_engine.rxp`, at build time (the `rx_engine_archives`
+target) and mounted at `rxe://` by `asset::MountContent`
+([docs/CONFIG.md](../../docs/CONFIG.md)):
 
-| directory | archive        | mount point |
-| --------- | -------------- | ----------- |
-| `fonts/`  | `rx_fonts.rxp` | `rxe://fonts/`  |
+| directory       | mount point      |
+| --------------- | ---------------- |
+| `fonts/`        | `rxe://fonts/`   |
+| `../../config/` | `rxe://config/`  |
 
 ## fonts
 

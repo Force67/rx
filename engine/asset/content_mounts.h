@@ -13,18 +13,20 @@ namespace rx::asset {
 // when set (to run a binary against content somewhere else).
 RX_ASSET_EXPORT base::String ContentDirectory();
 
-// Mounts the install layout beside the executable (docs/CONFIG.md), archives
-// before loose files so a loose file overrides the packed one:
+// Mounts the install layout beside the executable and the app's user folder
+// (docs/CONFIG.md), archives before loose files so a loose file overrides the
+// packed one:
 //
-//   Data/rx_fonts.rxp  -> rxe://fonts/   the engine's own archives, by name
-//   Data/*.rxp         -> <title>://     every other archive, in name order
-//   rxe/               -> rxe://         the engine's loose files (rxe/config/)
-//   ./                 -> <title>://     the game's loose files (config/, ...)
+//   Data/rx_engine.rxp -> rxe://      everything the engine ships (fonts/, config/)
+//   Data/*.rxp         -> <name>://   the game's archives, in name order
+//   rxe/               -> rxe://      loose engine files, where an engine build
+//                                     ships them (the viewer, the editor)
+//   ./                 -> <name>://   the game's loose files (config/, ...)
+//   UserConfigDirectory() -> user://  the player's settings (config/, controls.ini)
 //
-// RX_ENGINE_ARCHIVES names another directory to take the engine's archives
-// from. An empty title mounts the game's side at the root namespace. Returns the
-// number of providers mounted.
-RX_ASSET_EXPORT size_t MountContent(Vfs& vfs, base::StringRef title);
+// RX_ENGINE_ARCHIVES names another directory to take rx_engine.rxp from. Returns
+// the number of providers mounted.
+RX_ASSET_EXPORT size_t MountContent(Vfs& vfs, base::StringRef name);
 
 }  // namespace rx::asset
 

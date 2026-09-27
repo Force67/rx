@@ -627,19 +627,26 @@ if(RX_BUILD_TOOLS AND NOT WIN32 AND "rpc" IN_LIST RX_MODULES)
   rx_set_warnings(rxcall)
 endif()
 
-# The engine's own archives, packed from engine/assets with the tool above into
-# Data/ and mounted by asset::MountContent (one rxe:// namespace each).
+# Everything the engine ships, packed into one archive: engine/assets (fonts/)
+# and the platform tiers from config/, as rxe://fonts/ and rxe://config/. Games
+# add their own archives beside it (docs/CONFIG.md).
 if(RX_RXPACK_COMMAND)
-  file(GLOB_RECURSE RX_ENGINE_FONT_FILES CONFIGURE_DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts/*)
+  file(GLOB_RECURSE RX_ENGINE_ARCHIVE_FILES CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts/*
+    ${CMAKE_CURRENT_SOURCE_DIR}/config/*)
+  set(rx_engine_tree ${PROJECT_BINARY_DIR}/rx_engine_archive)
   add_custom_command(
-    OUTPUT ${PROJECT_BINARY_DIR}/Data/rx_fonts.rxp
+    OUTPUT ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp
+    COMMAND ${CMAKE_COMMAND} -E rm -rf ${rx_engine_tree}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts ${rx_engine_tree}/fonts
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/config ${rx_engine_tree}/config
     COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/Data
-    COMMAND ${RX_RXPACK_COMMAND} create ${PROJECT_BINARY_DIR}/Data/rx_fonts.rxp
-            ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts
-    DEPENDS ${RX_RXPACK_DEPENDS} ${RX_ENGINE_FONT_FILES}
-    COMMENT "Packing rx_fonts.rxp")
-  add_custom_target(rx_engine_archives ALL DEPENDS ${PROJECT_BINARY_DIR}/Data/rx_fonts.rxp)
+    COMMAND ${RX_RXPACK_COMMAND} create ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp ${rx_engine_tree}
+    DEPENDS ${RX_RXPACK_DEPENDS} ${RX_ENGINE_ARCHIVE_FILES}
+    COMMENT "Packing rx_engine.rxp")
+  add_custom_target(rx_engine_archives ALL DEPENDS ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp)
   rx_finish_content_staging()
 endif()
 

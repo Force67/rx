@@ -11,6 +11,7 @@
 #include "base/memory/unique_pointer.h"
 #include "base/strings/xstring.h"
 #include "base/threading/lock_guard.h"
+#include "core/app_identity.h"
 #include "core/format.h"
 #include "core/file_system.h"
 #include "core/log.h"
@@ -528,7 +529,9 @@ base::UniquePointer<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Win
 #endif
 
   VkApplicationInfo app_info{.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO};
-  app_info.pApplicationName = "rx";
+  // Drivers and compositors key per-app behaviour on this (gamescope's WSI
+  // layer logs it, driver profiles match on it), so it is the game's title.
+  app_info.pApplicationName = GetAppIdentity().title.c_str();
   app_info.apiVersion = api_budget;
 
   VkInstanceCreateInfo instance_info{.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
@@ -945,10 +948,8 @@ base::UniquePointer<Device> VulkanDevice::CreateImpl(const DeviceDesc& desc, Win
   // happen once per driver/app version. Stale or corrupt blobs are rejected by
   // the driver, so loading is fire-and-forget.
   {
-    const char* home = ::getenv("HOME");
-    base::String dir = base::String(home ? home : ".") + "/.cache/rx";
-    fs::CreateDirectories(dir);
-    device->pipeline_cache_path_ = dir + "/pipeline.cache";
+    // Per app: each game compiles its own pipelines.
+    device->pipeline_cache_path_ = fs::Join(UserCacheDirectory(), "pipeline.cache");
     base::Vector<u8> blob;
     fs::ReadFile(device->pipeline_cache_path_, &blob);
     VkPipelineCacheCreateInfo cache_info{.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};

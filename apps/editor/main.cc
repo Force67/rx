@@ -20,6 +20,9 @@ int main(int argc, char** argv) {
 #endif
 
   rx::app::AppConfig config;
+  config.id = "xn5ec6v99hcwg9d8xzbqshr0";
+  config.name = "rx-editor";
+  config.title = "rx editor";
   config.headless = false;
   // The editor emits its own draws in OnBuildView (parent transforms + selection
   // tint), so the host must not also auto-gather them.

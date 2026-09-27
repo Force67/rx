@@ -17,6 +17,7 @@
 #include <imgui_impl_sdl3.h>
 
 #include "app/platform_config.h"
+#include "core/app_identity.h"
 #include "asset/vfs.h"
 #include "base/containers/vector.h"
 #include "base/optional.h"
@@ -282,10 +283,10 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
         const f32 cloud_coverage = settings.cloud_coverage;
         const render::CloudscapeControls cloudscape_controls = settings.cloudscape_controls;
         const render::WeatherSettings weather = settings.weather;
-        // The engine's tier files only: the viewer has no game title.
         app::PlatformConfig tier;
         if (vfs_)
-          app::ReadPlatformChain(*vfs_, "", render::ResolvePreset(preset, *caps), &tier);
+          app::ReadPlatformChain(*vfs_, GetAppIdentity().name, render::ResolvePreset(preset, *caps),
+                                 &tier);
         settings = render::PresetSettings(tier.render, *caps);
         settings.clouds = clouds;
         settings.cloudscape = cloudscape;

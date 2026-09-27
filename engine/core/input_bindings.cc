@@ -6,6 +6,8 @@
 #include "base/strings/format.h"
 #include "core/file_system.h"
 #include "core/input_bindings.h"
+
+#include "core/app_identity.h"
 #include "core/scalar.h"
 #include "core/text_reader.h"
 
@@ -394,21 +396,8 @@ base::String Trim(const base::String& s) {
 }  // namespace
 
 base::String InputMap::DefaultConfigPath() {
-#if defined(_WIN32)
-  if (const char* appdata = ::getenv("APPDATA"))
-    return base::String(appdata) + "\\rx\\controls.ini";
-  return "";
-#elif defined(__APPLE__)
-  if (const char* home = ::getenv("HOME"))
-    return base::String(home) + "/Library/Application Support/rx/controls.ini";
-  return "";
-#else
-  if (const char* xdg = ::getenv("XDG_CONFIG_HOME"))
-    return base::String(xdg) + "/rx/controls.ini";
-  if (const char* home = ::getenv("HOME"))
-    return base::String(home) + "/.config/rx/controls.ini";
-  return "";
-#endif
+  // Per game: one title's rebinding must not follow the player into another.
+  return fs::Join(UserConfigDirectory(), "controls.ini");
 }
 
 bool InputMap::LoadFromIni(const base::String& path) {

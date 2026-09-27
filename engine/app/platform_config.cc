@@ -2,6 +2,8 @@
 
 #include <stdlib.h>
 
+#include <initializer_list>
+
 #include <base/option.h>
 
 #include "core/file_system.h"
@@ -108,20 +110,22 @@ bool ReadPlatformConfig(const asset::Vfs& vfs, base::StringRef path, PlatformCon
   return ReadAt(vfs, path, out, 0);
 }
 
-bool ReadPlatformChain(const asset::Vfs& vfs, base::StringRef title,
+bool ReadPlatformChain(const asset::Vfs& vfs, base::StringRef name,
                        render::QualityPreset tier, PlatformConfig* out) {
   const bool tiered = tier != render::QualityPreset::kAuto;
   const base::String tier_file = base::String(render::PresetName(tier)) + ".ini";
-  const base::String game = title.empty() ? base::String() : base::String(title) + "://config/";
   ReadPlatformConfig(vfs, "rxe://config/default.ini", out);
   if (tiered && !ReadPlatformConfig(vfs, "rxe://config/" + tier_file, out)) {
-    RX_ERROR("rxe://config/{} not found: rxe/config/ must sit beside the executable "
-             "(docs/CONFIG.md)", tier_file);
+    RX_ERROR("rxe://config/{} not found: Data/rx_engine.rxp must sit beside the "
+             "executable (docs/CONFIG.md)", tier_file);
     return false;
   }
-  if (!game.empty()) {
-    ReadPlatformConfig(vfs, game + "default.ini", out);
-    if (tiered) ReadPlatformConfig(vfs, game + tier_file, out);
+  if (!name.empty()) {
+    // The game's, then the player's: a player's setting beats the game's.
+    for (const base::String dir : {base::String(name) + "://config/", base::String("user://config/")}) {
+      ReadPlatformConfig(vfs, dir + "default.ini", out);
+      if (tiered) ReadPlatformConfig(vfs, dir + tier_file, out);
+    }
   }
   if (const char* extra = ExtraConfig.get(); extra && *extra && !ReadPlatformConfig(vfs, extra, out)) {
     RX_ERROR("RX_CONFIG: cannot read '{}'", extra);

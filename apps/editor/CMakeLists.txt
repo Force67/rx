@@ -9,6 +9,8 @@ add_executable(rx_editor
   editor_ui.cc
   editor_input.cc
   fly_camera.cc)
+# An engine build: the tiers ship loose beside it, to be edited.
+rx_stage_content(rx_editor LOOSE_ENGINE_CONFIG)
 
 target_link_libraries(rx_editor PRIVATE
   rx::app rx::ui rx::edit rx::terrain rx::render rx::anim rx::asset rx::scene rx::ecs rx::core

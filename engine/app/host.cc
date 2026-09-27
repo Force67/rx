@@ -13,6 +13,9 @@
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/threading/thread.h"
+#include <base/hashing/cuid2.h>
+
+#include "core/app_identity.h"
 #include "core/feature_registry.h"
 #include "core/log.h"
 #include "core/math.h"
@@ -76,14 +79,22 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   app_ = &app;
   InitFeatures();              // apply RX_FEATURES overrides before any flag read
   base::InitOptionsFromEnv();  // populate every base::Option from the environment
+  // Identity first: the mounts, the per-user folders and the window all name
+  // the app by it.
+  BASE_FATAL_CHECK(base::IsValidCuid2(config_.id.c_str()),
+                   "AppConfig::id must be a cuid2: run `rx --new-app-id` for one");
+  BASE_FATAL_CHECK(IsValidAppName(config_.name),
+                   "AppConfig::name must be a slug: lowercase [a-z0-9_-], not rxe or user");
+  BASE_FATAL_CHECK(!config_.title.empty(), "AppConfig::title must be set");
+  SetAppIdentity({config_.id, config_.name, config_.title});
   // The engine's and the game's content (rxe://, <title>://) mount first: the
   // platform config lives there, and the application mounts over it later.
-  asset::MountContent(vfs_, config_.title);
+  asset::MountContent(vfs_, config_.name);
   // What the config can say before the gpu picks a tier: the default.ini
   // files' options (window, fullscreen...) and memory plan, in place before any
   // subsystem starts allocating in earnest.
   PlatformConfig startup;
-  ReadPlatformChain(vfs_, config_.title, render::QualityPreset::kAuto, &startup);
+  ReadPlatformChain(vfs_, config_.name, render::QualityPreset::kAuto, &startup);
   ApplyPlatformOptions(startup);
   ApplyMemoryPlan(startup.memory);
   jobs_ = base::MakeUnique<JobSystem>();
@@ -98,6 +109,7 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   // --width/--height first, then RX_WIN_W/RX_WIN_H, then the WindowDesc
   // default; the same size answers for a window and for an offscreen target.
   WindowDesc desc;
+  desc.title = GetAppIdentity().title;
   if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
   if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
   if (config_.width > 0) desc.width = config_.width;
@@ -193,7 +205,7 @@ void Host::ApplyRenderPreset() {
   // The whole platform config for the tier: engine then game, default.ini then
   // <tier>.ini. Options and the memory plan apply again, now with the tier's.
   PlatformConfig platform;
-  BASE_FATAL_CHECK(ReadPlatformChain(vfs_, config_.title, resolved, &platform),
+  BASE_FATAL_CHECK(ReadPlatformChain(vfs_, config_.name, resolved, &platform),
                    "no engine platform config for the quality tier");
   ApplyPlatformOptions(platform);
   ApplyMemoryPlan(platform.memory);

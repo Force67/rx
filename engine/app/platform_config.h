@@ -41,15 +41,17 @@ RX_APP_EXPORT bool ReadPlatformConfig(const asset::Vfs& vfs, base::StringRef pat
                                       PlatformConfig* out);
 
 // Reads a platform's config files into `out`, in override order:
-//   rxe://config/default.ini     the engine, every tier (optional)
-//   rxe://config/<tier>.ini      the engine's tier (required)
-//   <title>://config/default.ini the game, every tier (optional)
-//   <title>://config/<tier>.ini  the game's tier (optional)
-//   RX_CONFIG                    one more file, from disk or the vfs (optional)
+//   rxe://config/default.ini   the engine, every tier (optional)
+//   rxe://config/<tier>.ini    the engine's tier (required)
+//   <name>://config/default.ini  the game, every tier (optional)
+//   <name>://config/<tier>.ini   the game's tier (optional)
+//   user://config/default.ini  the player, every tier (optional)
+//   user://config/<tier>.ini   the player's tier (optional)
+//   RX_CONFIG                  one more file, from disk or the vfs (optional)
 // kAuto reads the default.ini files only: what can be known before the gpu,
-// and with it the tier, is. An empty title skips the game's files. False when a
-// concrete tier has no engine file, which is no config to run with.
-RX_APP_EXPORT bool ReadPlatformChain(const asset::Vfs& vfs, base::StringRef title,
+// and with it the tier, is. An empty name skips the game's and the player's
+// files. False when a concrete tier has no engine file: no config to run with.
+RX_APP_EXPORT bool ReadPlatformChain(const asset::Vfs& vfs, base::StringRef name,
                                      render::QualityPreset tier, PlatformConfig* out);
 
 // Sets each [options] entry on its registered base::Option. An option the

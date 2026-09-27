@@ -4,6 +4,7 @@
 
 #include "asset/pack.h"
 #include "base/memory/move.h"
+#include "core/app_identity.h"
 #include "core/file_system.h"
 #include "core/log.h"
 #include "core/paths.h"
@@ -15,18 +16,8 @@ namespace {
 base::Option<const char*> ContentDir{"content.dir", nullptr, "RX_CONTENT_DIR"};
 base::Option<const char*> EngineArchivesDir{"engine.archives", nullptr, "RX_ENGINE_ARCHIVES"};
 
-// The engine's archives: one per namespace under rxe://.
-struct EngineArchive {
-  const char* file_name;
-  const char* mount_point;
-};
-constexpr EngineArchive kEngineArchives[] = {{"rx_fonts.rxp", "rxe://fonts/"}};
-
-bool IsEngineArchive(base::StringRef file_name) {
-  for (const EngineArchive& archive : kEngineArchives)
-    if (file_name == archive.file_name) return true;
-  return false;
-}
+// Everything the engine ships, one archive: a game adds its own beside it.
+constexpr const char* kEngineArchive = "rx_engine.rxp";
 
 bool MountPack(Vfs& vfs, const base::String& path, base::StringRef mount_point) {
   base::UniquePointer<FileProvider> provider = MakePackFileProvider(path);
@@ -46,22 +37,19 @@ base::String ContentDirectory() {
   return ExecutableDirectory();
 }
 
-size_t MountContent(Vfs& vfs, base::StringRef title) {
+size_t MountContent(Vfs& vfs, base::StringRef name) {
   const base::String root = ContentDirectory();
   const base::String data = fs::Join(root, "Data");
-  const base::String game = title.empty() ? base::String() : base::String(title) + "://";
+  const base::String game = name.empty() ? base::String() : base::String(name) + "://";
   size_t mounted = 0;
 
   const char* engine_dir = EngineArchivesDir.get();
-  const base::String engine_data = engine_dir && *engine_dir ? base::String(engine_dir) : data;
-  for (const EngineArchive& archive : kEngineArchives) {
-    const base::String path = fs::Join(engine_data, archive.file_name);
-    if (!fs::IsRegularFile(path)) {
-      RX_WARN("engine archive {} not found (Data/ beside the executable)", path);
-      continue;
-    }
-    mounted += MountPack(vfs, path, archive.mount_point);
-  }
+  const base::String engine_pack =
+      fs::Join(engine_dir && *engine_dir ? base::String(engine_dir) : data, kEngineArchive);
+  if (fs::IsRegularFile(engine_pack))
+    mounted += MountPack(vfs, engine_pack, "rxe://");
+  else
+    RX_WARN("engine archive {} not found (Data/ beside the executable)", engine_pack);
 
   base::Vector<fs::DirEntry> entries;
   if (fs::ListDirectory(data, &entries)) {
@@ -70,21 +58,21 @@ size_t MountContent(Vfs& vfs, base::StringRef title) {
                    [](const fs::DirEntry& a, const fs::DirEntry& b) { return a.path < b.path; });
     for (const fs::DirEntry& entry : entries) {
       const base::StringRef name = fs::Filename(entry.path);
-      if (!entry.is_regular || fs::Extension(entry.path) != ".rxp" || IsEngineArchive(name))
+      if (!entry.is_regular || fs::Extension(entry.path) != ".rxp" || name == kEngineArchive)
         continue;
       mounted += MountPack(vfs, entry.path, game);
     }
   }
 
-  const base::String engine_loose = fs::Join(root, "rxe");
-  if (fs::IsDirectory(engine_loose)) {
+  // Loose engine files only where an engine build ships them; a game carries
+  // the engine in its archive.
+  if (const base::String engine_loose = fs::Join(root, "rxe"); fs::IsDirectory(engine_loose)) {
     vfs.Mount("rxe://", MakeLooseFileProvider(engine_loose));
     ++mounted;
-  } else {
-    RX_WARN("engine directory {} not found: no rxe://config", engine_loose);
   }
   vfs.Mount(game, MakeLooseFileProvider(root));
-  return mounted + 1;
+  vfs.Mount("user://", MakeLooseFileProvider(UserConfigDirectory()));
+  return mounted + 2;
 }
 
 }  // namespace rx::asset
