@@ -43,6 +43,15 @@ struct AppConfig {
   // lockstep-capture runs, which is where it would do damage. RX_SPLASH
   // overrides this in both directions.
   bool splash = true;
+  // The project's render overlays, amending the tier the host resolved:
+  // "default.ini" applies on every tier, then "<tier>.ini" (PresetName:
+  // steamdeck.ini, medium.ini, ...) on that one. Both are optional
+  // render::ApplyIni files that name only the keys the project changes. They
+  // land after the tier and the RX_* carry-through and before tune_settings;
+  // RX_RENDER_INI names one more file on top, for tuning on the device. A
+  // relative path is tried against the working directory, then beside the
+  // executable. Empty: no overlays.
+  base::String render_ini_dir;
   // Last word on the resolved RenderSettings. ApplyRenderPreset replaces the
   // settings wholesale from the tier, then re-applies each env override by
   // hand; anything an app tuned earlier is lost in that replacement. This runs

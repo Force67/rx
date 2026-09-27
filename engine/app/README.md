@@ -14,3 +14,8 @@ never forks the loop. `runtime/` (the rx viewer) is the reference consumer.
 
 Nothing below this layer links back to it; `app` is the only module allowed to
 know about every subsystem.
+
+Render settings resolve in this order: the quality tier (`AppConfig::preset`,
+`kAuto` detects the gpu), the `RX_*` env
+overrides, the project's overlays (`AppConfig::render_ini_dir`: `default.ini`,
+then `<tier>.ini`), `RX_RENDER_INI`, and finally `AppConfig::tune_settings`.

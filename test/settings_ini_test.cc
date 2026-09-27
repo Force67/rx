@@ -101,6 +101,21 @@ int main() {
   Check(!invalid.procedural_grass,
         "invalid boolean preserves the incoming value");
 
+  // Keys a handheld profile needs to reach: resolution, froxel fog, post.
+  rx::render::RenderSettings deck;
+  Check(rx::render::ApplyIni("render_scale = 0.75\ndynamic_resolution = true\n"
+                             "froxel_fog = false\nmotion_blur = off\nsss = no\n",
+                             deck) == 5,
+        "resolution, froxel and post keys are recognized");
+  Check(deck.render_scale == 0.75f && deck.dynamic_resolution && !deck.froxel_fog &&
+            !deck.motion_blur && !deck.sss,
+        "resolution, froxel and post keys are applied");
+  rx::render::RenderSettings deck_round_trip;
+  rx::render::ApplyIni(rx::render::SettingsToIni(deck), deck_round_trip);
+  Check(deck_round_trip.render_scale == 0.75f && !deck_round_trip.froxel_fog &&
+            !deck_round_trip.motion_blur && !deck_round_trip.sss,
+        "the new keys round-trip through SettingsToIni");
+
   if (failures != 0)
     return 1;
   ::printf("settings_ini_test: PASS\n");

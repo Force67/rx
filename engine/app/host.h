@@ -61,6 +61,9 @@ class RX_APP_EXPORT Host {
   // and applies it to the renderer's live settings, carrying the RX_* debug
   // env overrides through.
   void ApplyRenderPreset();
+  // Overlays the project's render inis for `tier` (AppConfig::render_ini_dir),
+  // then RX_RENDER_INI.
+  void ApplyRenderInis(render::QualityPreset tier, render::RenderSettings& s);
   // Fills view.draws from every visible Transform+Renderable entity, keeping
   // last frame's world matrices for motion vectors.
   void GatherEntityDraws(render::FrameView& view);

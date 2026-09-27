@@ -131,6 +131,12 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "sharpness = " << s.sharpness << "\n";
   o << "taa_history_blend = " << s.taa_history_blend << "\n\n";
 
+  o << "[resolution]\n";
+  o << "render_scale = " << s.render_scale << "\n";
+  o << "dynamic_resolution = " << Bool(s.dynamic_resolution) << "\n";
+  o << "dynamic_target_ms = " << s.dynamic_target_ms << "\n";
+  o << "dynamic_min_scale = " << s.dynamic_min_scale << "\n\n";
+
   o << "[shadows]\n";
   o << "rt_shadows = " << Bool(s.rt_shadows) << "\n";
   o << "sun_angular_radius = " << s.sun_angular_radius << "\n";
@@ -233,11 +239,15 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "fog_density = " << s.fog_density << "\n";
   o << "fog_height_falloff = " << s.fog_height_falloff << "\n";
   o << "fog_base_height = " << s.fog_base_height << "\n";
-  o << "fog_anisotropy = " << s.fog_anisotropy << "\n\n";
+  o << "fog_anisotropy = " << s.fog_anisotropy << "\n";
+  o << "froxel_fog = " << Bool(s.froxel_fog) << "\n";
+  o << "froxel_density = " << s.froxel_density << "\n\n";
 
   o << "[post]\n";
   o << "bloom = " << Bool(s.bloom) << "\n";
   o << "bloom_intensity = " << s.bloom_intensity << "\n";
+  o << "motion_blur = " << Bool(s.motion_blur) << "\n";
+  o << "sss = " << Bool(s.sss) << "\n";
   o << "auto_exposure = " << Bool(s.auto_exposure) << "\n";
   o << "adaptation_speed = " << s.adaptation_speed << "\n";
   o << "exposure = " << s.exposure << "\n";
@@ -298,6 +308,11 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
   en("upscaler_quality", s.upscaler_quality);
   fl("sharpness", s.sharpness);
   fl("taa_history_blend", s.taa_history_blend);
+
+  fl("render_scale", s.render_scale);
+  b("dynamic_resolution", s.dynamic_resolution);
+  fl("dynamic_target_ms", s.dynamic_target_ms);
+  fl("dynamic_min_scale", s.dynamic_min_scale);
 
   b("rt_shadows", s.rt_shadows);
   fl("sun_angular_radius", s.sun_angular_radius);
@@ -389,9 +404,13 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
   fl("fog_height_falloff", s.fog_height_falloff);
   fl("fog_base_height", s.fog_base_height);
   fl("fog_anisotropy", s.fog_anisotropy);
+  b("froxel_fog", s.froxel_fog);
+  fl("froxel_density", s.froxel_density);
 
   b("bloom", s.bloom);
   fl("bloom_intensity", s.bloom_intensity);
+  b("motion_blur", s.motion_blur);
+  b("sss", s.sss);
   b("auto_exposure", s.auto_exposure);
   fl("adaptation_speed", s.adaptation_speed);
   fl("exposure", s.exposure);

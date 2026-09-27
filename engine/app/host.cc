@@ -12,10 +12,13 @@
 #include "base/memory/unique_pointer.h"
 #include "base/threading/thread.h"
 #include "core/feature_registry.h"
+#include "core/file_system.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/memory/frame_arena.h"
 #include "core/memory/memory_config.h"
+#include "core/paths.h"
+#include "render/core/settings_ini.h"
 #include "scene/components.h"
 
 // Host lifecycle and the per-frame heartbeat: subsystem bringup in dependency
@@ -31,6 +34,9 @@ namespace {
 base::Option<int> WinW{"win.width", 0, "RX_WIN_W"};
 base::Option<int> WinH{"win.height", 0, "RX_WIN_H"};
 base::Option<bool> NoOcclusion{"no.occlusion", false, "RX_NO_OCCLUSION"};
+// One more render ini, applied after the project's (AppConfig::render_ini_dir),
+// for tuning on the device without a rebuild.
+base::Option<const char*> RenderIni{"render.ini", nullptr, "RX_RENDER_INI"};
 // Touch doubling as the mouse is the SDL default and keeps mouse-only UI usable
 // under a finger. Handhelds turn it off: with mouse look in relative mode a
 // thumb resting on the panel drags the camera.
@@ -265,6 +271,8 @@ void Host::ApplyRenderPreset() {
   tuned.weather = env.weather;  // live weather state; presets never set it
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
 
+  ApplyRenderInis(resolved, tuned);
+
   // The app profile runs last, after the tier and every env carry-through, so
   // nothing above can silently undo it.
   if (config_.tune_settings) config_.tune_settings(tuned);
@@ -272,6 +280,30 @@ void Host::ApplyRenderPreset() {
   renderer_.settings() = tuned;
   RX_INFO("render preset: {} ({})", render::PresetName(resolved),
           config_.preset == render::QualityPreset::kAuto ? "auto" : "forced");
+}
+
+void Host::ApplyRenderInis(render::QualityPreset tier, render::RenderSettings& s) {
+  auto overlay = [&s](const base::String& path) {
+    base::String text;
+    if (!fs::ReadTextFile(path, &text)) return false;
+    RX_INFO("render ini: {} ({} keys)", path, render::ApplyIni(text, s));
+    return true;
+  };
+
+  if (!config_.render_ini_dir.empty()) {
+    base::String dir = config_.render_ini_dir;
+    if (!fs::IsDirectory(dir)) dir = fs::Join(ExecutableDirectory(), config_.render_ini_dir);
+    if (fs::IsDirectory(dir)) {
+      // Both optional: a project only writes the tiers it has an opinion on.
+      overlay(fs::Join(dir, "default.ini"));
+      overlay(fs::Join(dir, base::String(render::PresetName(tier)) + ".ini"));
+    } else {
+      RX_WARN("render ini dir '{}' not found (cwd or beside the executable)",
+              config_.render_ini_dir);
+    }
+  }
+  if (const char* path = RenderIni.get(); path && *path && !overlay(path))
+    RX_WARN("RX_RENDER_INI: cannot read '{}'", path);
 }
 
 void Host::ConfigureClock(f32 base_timescale) {
