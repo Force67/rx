@@ -76,6 +76,22 @@ add_custom_target(mygame_config ALL COMMAND ${CMAKE_COMMAND} -E
 add_dependencies(mygame mygame_config)
 ```
 
+A game packs its own archives with `rx_add_archive`: CONTENT pairs name a
+directory in the archive and a source directory or file, DEPENDS lists
+generated files (compiled shaders) that have nothing to glob at configure time.
+
+```cmake
+rx_add_archive(mygame_archive OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/Data/mygame.rxp
+  CONTENT shaders ${SHADER_OUT_DIR}/lit.spv
+          terrain ${CMAKE_CURRENT_SOURCE_DIR}/assets/terrain/tile.bin
+          ui      ${CMAKE_CURRENT_SOURCE_DIR}/assets/ui)
+add_dependencies(mygame mygame_archive)
+```
+
+One big archive is fine: mounting reads only its table of contents, and a read
+decompresses just that entry. Reads from one archive share a lock, so a game
+streaming heavily from many threads may want its streamed content split out.
+
 Executables sharing a directory go in one `rx_stage_content` call, or two copies
 race into the same files. Staging copies but never deletes: a renamed or removed
 file lingers in a build tree until the directory is cleaned.

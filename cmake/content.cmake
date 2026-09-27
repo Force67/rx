@@ -45,3 +45,49 @@ function(rx_finish_content_staging)
     add_dependencies(${t} rx_engine_archives)
   endforeach()
 endfunction()
+
+# rx_add_archive(<target> OUTPUT <archive.rxp>
+#                CONTENT <dir in archive> <source dir or file> [...]
+#                [DEPENDS <file or target>...])
+#
+# Packs one .rxp from a tree assembled out of CONTENT pairs ("." is the archive
+# root), rebuilt when a file under a source directory or a DEPENDS file changes.
+# Generated sources (compiled shaders) have no files to glob at configure time:
+# list them in DEPENDS. One big archive costs nothing up front: mounting reads
+# only its table of contents, and a read decompresses just that entry.
+function(rx_add_archive target)
+  cmake_parse_arguments(PARSE_ARGV 1 ARG "" "OUTPUT" "CONTENT;DEPENDS")
+  if(NOT RX_RXPACK_COMMAND)
+    message(STATUS "no host rxpack: ${ARG_OUTPUT} will not be packed")
+    return()
+  endif()
+  set(tree ${CMAKE_CURRENT_BINARY_DIR}/${target}_tree)
+  set(commands COMMAND ${CMAKE_COMMAND} -E rm -rf ${tree})
+  set(deps ${RX_RXPACK_DEPENDS} ${ARG_DEPENDS})
+  list(LENGTH ARG_CONTENT count)
+  math(EXPR last "${count} - 1")
+  foreach(i RANGE 0 ${last} 2)
+    math(EXPR j "${i} + 1")
+    list(GET ARG_CONTENT ${i} dst)
+    list(GET ARG_CONTENT ${j} src)
+    if(IS_DIRECTORY ${src})
+      list(APPEND commands COMMAND ${CMAKE_COMMAND} -E copy_directory ${src} ${tree}/${dst})
+      file(GLOB_RECURSE files CONFIGURE_DEPENDS ${src}/*)
+      list(APPEND deps ${files})
+    else()
+      list(APPEND commands
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${tree}/${dst}
+        COMMAND ${CMAKE_COMMAND} -E copy ${src} ${tree}/${dst}/)
+      list(APPEND deps ${src})
+    endif()
+  endforeach()
+  get_filename_component(out_dir ${ARG_OUTPUT} DIRECTORY)
+  add_custom_command(OUTPUT ${ARG_OUTPUT}
+    ${commands}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${out_dir}
+    COMMAND ${RX_RXPACK_COMMAND} create ${ARG_OUTPUT} ${tree}
+    DEPENDS ${deps}
+    COMMENT "Packing ${ARG_OUTPUT}"
+    VERBATIM)
+  add_custom_target(${target} ALL DEPENDS ${ARG_OUTPUT})
+endfunction()

@@ -631,22 +631,9 @@ endif()
 # and the platform tiers from config/, as rxe://fonts/ and rxe://config/. Games
 # add their own archives beside it (docs/CONFIG.md).
 if(RX_RXPACK_COMMAND)
-  file(GLOB_RECURSE RX_ENGINE_ARCHIVE_FILES CONFIGURE_DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts/*
-    ${CMAKE_CURRENT_SOURCE_DIR}/config/*)
-  set(rx_engine_tree ${PROJECT_BINARY_DIR}/rx_engine_archive)
-  add_custom_command(
-    OUTPUT ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp
-    COMMAND ${CMAKE_COMMAND} -E rm -rf ${rx_engine_tree}
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts ${rx_engine_tree}/fonts
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_CURRENT_SOURCE_DIR}/config ${rx_engine_tree}/config
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/Data
-    COMMAND ${RX_RXPACK_COMMAND} create ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp ${rx_engine_tree}
-    DEPENDS ${RX_RXPACK_DEPENDS} ${RX_ENGINE_ARCHIVE_FILES}
-    COMMENT "Packing rx_engine.rxp")
-  add_custom_target(rx_engine_archives ALL DEPENDS ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp)
+  rx_add_archive(rx_engine_archives OUTPUT ${PROJECT_BINARY_DIR}/Data/rx_engine.rxp
+    CONTENT fonts ${CMAKE_CURRENT_SOURCE_DIR}/engine/assets/fonts
+            config ${CMAKE_CURRENT_SOURCE_DIR}/config)
   rx_finish_content_staging()
 endif()
 
