@@ -19,6 +19,7 @@
 #include "core/memory/memory_config.h"
 #include "core/paths.h"
 #include "core/platform.h"
+#include "core/sort.h"
 #include "render/core/settings_ini.h"
 #include "scene/components.h"
 
@@ -42,6 +43,9 @@ base::Option<bool> Fullscreen{"win.fullscreen", false, "RX_FULLSCREEN"};
 // One more render ini, applied after the project's (AppConfig::render_ini_dir),
 // for tuning on the device without a rebuild.
 base::Option<const char*> RenderIni{"render.ini", nullptr, "RX_RENDER_INI"};
+// RX_FRAME_STATS=<seconds> logs the frame-time spread over each window: the
+// average alone hides the hitches a handheld player feels.
+base::Option<float> FrameStats{"frame.stats", 0.0f, "RX_FRAME_STATS"};
 // Touch doubling as the mouse is the SDL default and keeps mouse-only UI usable
 // under a finger. Handhelds turn it off: with mouse look in relative mode a
 // thumb resting on the panel drags the camera.
@@ -318,6 +322,22 @@ void Host::ApplyRenderInis(render::QualityPreset tier, render::RenderSettings& s
     RX_WARN("RX_RENDER_INI: cannot read '{}'", path);
 }
 
+void Host::LogFrameStats(f32 frame_delta) {
+  frame_times_.push_back(frame_delta);
+  frame_stats_elapsed_ += frame_delta;
+  if (frame_stats_elapsed_ < FrameStats.get()) return;
+  base::Vector<f32>& t = frame_times_;
+  f32 sum = 0.0f;
+  for (f32 dt : t) sum += dt;
+  rx::StableSort(t.data(), t.data() + t.size(), [](f32 a, f32 b) { return a < b; });
+  const size_t n = t.size();
+  const f32 avg_ms = sum / static_cast<f32>(n) * 1000.0f;
+  RX_INFO("frame stats: {:.1f} fps, avg {:.2f} ms, p99 {:.2f} ms, max {:.2f} ms ({} frames)",
+          1000.0f / avg_ms, avg_ms, t[n * 99 / 100] * 1000.0f, t[n - 1] * 1000.0f, n);
+  t.clear();
+  frame_stats_elapsed_ = 0.0f;
+}
+
 void Host::ConfigureClock(f32 base_timescale) {
   f32 timescale = base_timescale > 0 ? base_timescale : 20.0f;
   if (Timescale.overridden() && Timescale.get() >= 0) timescale = Timescale.get();
@@ -396,6 +416,7 @@ bool Host::RunFrame() {
     }
     renderer_.RenderFrame(view);
     app_->OnFrameEnd();
+    if (FrameStats.get() > 0.0f) LogFrameStats(frame_delta);
   } else {
     // No vsync to pace the loop; yield between fixed steps instead of
     // spinning a core.

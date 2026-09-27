@@ -64,6 +64,8 @@ class RX_APP_EXPORT Host {
   // Overlays the project's render inis for `tier` (AppConfig::render_ini_dir),
   // then RX_RENDER_INI.
   void ApplyRenderInis(render::QualityPreset tier, render::RenderSettings& s);
+  // RX_FRAME_STATS: collects frame times and logs their spread per window.
+  void LogFrameStats(f32 frame_delta);
   // Fills view.draws from every visible Transform+Renderable entity, keeping
   // last frame's world matrices for motion vectors.
   void GatherEntityDraws(render::FrameView& view);
@@ -111,6 +113,9 @@ class RX_APP_EXPORT Host {
   render::FrameView frame_view_;
 
   Services services_;
+
+  base::Vector<f32> frame_times_;  // RX_FRAME_STATS window
+  f32 frame_stats_elapsed_ = 0.0f;
 
   base::Atomic<bool> quit_ = false;
   bool shut_down_ = false;

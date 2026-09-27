@@ -23,3 +23,4 @@ then `<tier>.ini`), `RX_RENDER_INI`, and finally `AppConfig::tune_settings`.
 On a Steam Deck (`core/platform.h`, `RX_STEAMDECK=0/1` to override) the host
 opens fullscreen and the memory plan defaults to the `steamdeck` preset; under
 any gamescope session it opens fullscreen too (`RX_FULLSCREEN` overrides).
+`RX_FRAME_STATS=<seconds>` logs fps and p99/max frame time per window.
