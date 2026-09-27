@@ -43,29 +43,6 @@ void SetBudget(MemoryConfig& config, base::StringRef name, u64 bytes) {
 
 }  // namespace
 
-MemoryConfig DefaultMemoryConfig(base::StringRef preset) {
-  MemoryConfig config;
-  config.preset = preset;
-  if (preset == "steamdeck") {
-    config.frame_arena_bytes = 6u << 20;
-    config.ecs_chunk_reserve = 192;
-    config.budgets = {{"assets", 1024 * kMiB}, {"render", 384 * kMiB},
-                      {"ecs", 96 * kMiB},      {"audio", 48 * kMiB}};
-  } else if (preset == "mobile") {
-    config.frame_arena_bytes = 4u << 20;
-    config.ecs_chunk_reserve = 128;
-    config.budgets = {{"assets", 512 * kMiB}, {"render", 256 * kMiB},
-                      {"ecs", 64 * kMiB},     {"audio", 32 * kMiB}};
-  } else {
-    config.preset = "desktop";
-    config.frame_arena_bytes = 8u << 20;
-    config.ecs_chunk_reserve = 256;
-    config.budgets = {{"assets", 2048 * kMiB}, {"render", 512 * kMiB},
-                      {"ecs", 128 * kMiB},     {"audio", 64 * kMiB}};
-  }
-  return config;
-}
-
 void ParseMemoryConfigText(base::StringRef text, MemoryConfig& config) {
   base::String section;
   size_t start = 0;
@@ -99,16 +76,6 @@ void ParseMemoryConfigText(base::StringRef text, MemoryConfig& config) {
       SetBudget(config, key, value * kMiB);
     }
   }
-}
-
-MemoryConfig LoadMemoryConfig() {
-  const char* preset = ::getenv("RX_MEMORY_PRESET");
-  MemoryConfig config = DefaultMemoryConfig(preset ? preset : "desktop");
-
-  const char* path = ::getenv("RX_MEMORY_INI");
-  base::String text;
-  if (fs::ReadTextFile(path ? path : "memory.ini", &text)) ParseMemoryConfigText(text, config);
-  return config;
 }
 
 void ApplyMemoryConfig(const MemoryConfig& config) {

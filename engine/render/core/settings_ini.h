@@ -10,8 +10,9 @@ namespace rx::render {
 
 // Text (de)serialization of RenderSettings as a flat INI: "key = value" lines
 // grouped under cosmetic [section] headers, enums written as lowercase names.
-// This backs the editable platform presets in engine/render/presets and the
-// load/save controls in the debug ui.
+// The quality tiers carry these keys in the [render.<group>] sections of their
+// platform config files (rx/config/<tier>.ini); the debug ui loads and saves the
+// same format.
 //
 // The persistent quality/performance knobs and the [weather] group (so a saved
 // file round-trips a weather look for testing) are covered. Scene state owned
@@ -28,10 +29,11 @@ RX_RENDER_EXPORT base::String SettingsToIni(const RenderSettings& s);
 
 // Overlays recognized "key = value" lines from `text` onto `s`. Section headers,
 // blank lines and ; / # comments are ignored; unknown keys are skipped. Returns
-// the number of keys applied.
+// the number of keys applied. Platform config files (app/platform_config.h)
+// carry these keys in their [render.<group>] sections and handle includes.
 RX_RENDER_EXPORT int ApplyIni(base::StringRef text, RenderSettings& s);
 
-// Reads a preset file and overlays it onto `s` (see ApplyIni). False if the file
+// Reads a file and overlays its keys onto `s` (see ApplyIni). False if the file
 // cannot be opened.
 RX_RENDER_EXPORT bool LoadSettingsIni(base::StringRef path, RenderSettings& s);
 

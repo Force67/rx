@@ -32,7 +32,7 @@ constexpr f32 kLogoWidthFraction = 0.52f;
 
 // rx ships Roboto inside rx_fonts.rxp, so the face has no path of its own and
 // is handed to ultragui as bytes (LoadFontMemory, which keeps its own copy).
-constexpr const char* kFontAsset = "fonts://roboto/Roboto-Medium.ttf";
+constexpr const char* kFontAsset = "rxe://fonts/roboto/Roboto-Medium.ttf";
 
 // A font on the machine, for a tree whose rx_fonts.rxp was never packed. The
 // plate is the wordmark either way: losing this costs the one line above it,

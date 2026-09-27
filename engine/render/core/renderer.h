@@ -1013,10 +1013,16 @@ private:
   SamplerHandle hdr_overlay_sampler_;
   AntiAliasingMode applied_aa_ = AntiAliasingMode::kTaa;
   bool applied_vsync_ = false;
-  // Sun state baked into the environment maps; differing means regenerate.
+  // This frame's sun, as every sun-lit pass reads it.
   Vec3 applied_sun_direction_{};
   f32 applied_sun_intensity_ = -1;
   Vec3 applied_sun_color_{};
+  // The sun the environment maps were last baked with. A day/night clock nudges
+  // the sun every frame, and a re-bake per frame for a change nobody can see is
+  // a full cubemap update each time (~2.8 ms on a Steam Deck); see ApplySettings.
+  Vec3 env_baked_sun_direction_{};
+  f32 env_baked_sun_intensity_ = -1;
+  Vec3 env_baked_sun_color_{};
   bool environment_dirty_ = true;
   // Last frame's aurora bake strength; a fade to zero re-bakes once so the
   // sky/IBL do not keep the final green cubemap after the aurora turns off.
@@ -1082,6 +1088,8 @@ private:
   u32 prev_bone_base_ = 0;
   f64 time_seconds_ = 0;
   bool has_prev_frame_ = false;
+  // Whether the last frame left a depth snapshot for occlusion culling.
+  bool cull_depth_snapshot_ = false;
   bool rt_available_ = false;
   bool rcgi_force_software_ =
       false; // RX_RCGI_SW: force the SDF software tracer

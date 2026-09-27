@@ -1,3 +1,4 @@
+#include <base/hashing/cuid2.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -36,6 +37,7 @@ void PrintUsage() {
   RX_INFO("  --demo <id>           builtin scene: water | fluid | weather | materials | gaussian | cornell |");
   RX_INFO("                        featuregym | cloth | locomotion | ship | nav | gym | shooter | puppet | drive |");
   RX_INFO("                        placement | grass | lod | oit | fire | brick | silpom | sss | scenehook | ... (cube)");
+  RX_INFO("  --new-app-id          print a fresh cuid2 for AppConfig::id and exit");
   RX_INFO("  --dump-schema         print the .rxscene component schema as json and exit");
   RX_INFO("  --dump-commands       print the live command schema as json and exit");
   RX_INFO("  --dump-materials [dir]  print the material palette as json and exit (default");
@@ -55,8 +57,9 @@ void PrintUsage() {
   RX_INFO("  --camera-fov <deg>    override the vertical field of view");
   RX_INFO("  --width <px>          render/window width (also RX_WIN_W)");
   RX_INFO("  --height <px>         render/window height (also RX_WIN_H)");
-  RX_INFO("  --preset <tier>       auto (default) | android | steamdeck | low |");
-  RX_INFO("                        medium | high | ultra | console");
+  RX_INFO("  --preset <tier>       auto (default) | android_low | android_medium |");
+  RX_INFO("                        android_high | steamdeck | low | medium | high |");
+  RX_INFO("                        ultra | console (rxe://config/<tier>.ini)");
   RX_INFO("  --no-taa              disable temporal antialiasing");
   RX_INFO("  --upscaler <id>       fsr3 | dlss | xess");
   RX_INFO("  --no-rt               disable raytracing");
@@ -144,6 +147,9 @@ void DumpCommands() {
 int main(int argc, char** argv) {
   rx::EngineConfig config;
   rx::app::AppConfig app_config;
+  app_config.id = "dyrcg9826wzw53y6vr0g0cjx";
+  app_config.name = "rx";
+  app_config.title = "rx";
   bool no_window = false;
   bool dump_schema = false;
   bool dump_commands = false;
@@ -159,6 +165,12 @@ int main(int argc, char** argv) {
     base::String arg = argv[i];
     auto next = [&]() -> base::String { return i + 1 < argc ? argv[++i] : ""; };
 
+    if (arg == "--new-app-id") {
+      char id[base::kCuid2Length + 1];
+      base::GenerateCuid2(id);
+      ::printf("%s\n", id);
+      return 0;
+    }
     if (arg == "--gltf" || arg == "--usd" || arg == "--scene") config.scene_path = next();
     else if (arg == "--demo") config.demo_scene = next();
     else if (arg == "--world") config.world_path = next();

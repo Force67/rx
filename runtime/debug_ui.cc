@@ -16,6 +16,8 @@
 #include <imgui.h>
 #include <imgui_impl_sdl3.h>
 
+#include "app/platform_config.h"
+#include "core/app_identity.h"
 #include "asset/vfs.h"
 #include "base/containers/vector.h"
 #include "base/optional.h"
@@ -48,18 +50,18 @@ namespace {
 // Config toggle formerly read from getenv (populated by base::InitOptionsFromEnv).
 base::Option<bool> HideDebugUi{"hide.debug.ui", false, "RX_HIDE_DEBUG_UI"};
 
-// Override for the editable .ini render presets directory; defaults to the
-// compiled-in engine/render/presets source path.
+// Override for the platform tier directory the debug ui edits; defaults to the
+// compiled-in rx/config source path.
 base::Option<const char*> PresetsDirOpt{"presets.dir", nullptr, "RX_PRESETS_DIR"};
 
-// Directory holding the .ini render presets: RX_PRESETS_DIR, else the
+// Directory holding the platform tier files: RX_PRESETS_DIR, else the
 // compiled-in source path, else a cwd-relative fallback.
 base::String PresetDir() {
   if (const char* env = PresetsDirOpt.get(); env && *env) return env;
 #ifdef RX_PRESETS_DIR_DEFAULT
   return RX_PRESETS_DIR_DEFAULT;
 #else
-  return "engine/render/presets";
+  return "config";
 #endif
 }
 
@@ -116,14 +118,16 @@ ImU32 PressureColor(u64 used, u64 limit) {
 }
 
 // Row 0 is "Custom" (hand-tuned); the rest map to QualityPreset below.
-const char* kPresets[] = {"Custom",  "Auto-detect", "Android", "Steam Deck", "Low end",
-                          "Console", "Medium",      "High",    "Ultra"};
+const char* kPresets[] = {"Custom",         "Auto-detect",  "Android low", "Android medium",
+                          "Android high",   "Steam Deck",   "Low end",     "Console",
+                          "Medium",         "High",         "Ultra"};
 const render::QualityPreset kPresetValues[] = {
-    render::QualityPreset::kAuto,      // unused for row 0
-    render::QualityPreset::kAuto,      render::QualityPreset::kAndroid,
-    render::QualityPreset::kSteamDeck, render::QualityPreset::kLowEnd,
-    render::QualityPreset::kConsole,   render::QualityPreset::kMedium,
-    render::QualityPreset::kHigh,      render::QualityPreset::kUltra};
+    render::QualityPreset::kAuto,  // unused for row 0
+    render::QualityPreset::kAuto,          render::QualityPreset::kAndroidLow,
+    render::QualityPreset::kAndroidMedium, render::QualityPreset::kAndroidHigh,
+    render::QualityPreset::kSteamDeck,     render::QualityPreset::kLowEnd,
+    render::QualityPreset::kConsole,       render::QualityPreset::kMedium,
+    render::QualityPreset::kHigh,          render::QualityPreset::kUltra};
 
 }  // namespace
 
@@ -131,6 +135,7 @@ DebugUi::DebugUi() = default;
 DebugUi::~DebugUi() { Shutdown(); }
 
 bool DebugUi::Initialize(Window& window, render::Renderer& renderer, asset::Vfs* vfs) {
+  vfs_ = vfs;
   SDL_Window* sdl_window = static_cast<SDL_Window*>(window.native_handles().window);
   render::Device* device = renderer.device();
   if (!sdl_window || !device || device->is_stub()) return false;
@@ -278,7 +283,11 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
         const f32 cloud_coverage = settings.cloud_coverage;
         const render::CloudscapeControls cloudscape_controls = settings.cloudscape_controls;
         const render::WeatherSettings weather = settings.weather;
-        settings = render::PresetSettings(preset, *caps);
+        app::PlatformConfig tier;
+        if (vfs_)
+          app::ReadPlatformChain(*vfs_, GetAppIdentity().name, render::ResolvePreset(preset, *caps),
+                                 &tier);
+        settings = render::PresetSettings(tier.render, *caps);
         settings.clouds = clouds;
         settings.cloudscape = cloudscape;
         settings.cloudscape_steps = cloudscape_steps;
@@ -290,9 +299,10 @@ void DebugUi::Build(render::Renderer& renderer, FlyCamera& camera, const ecs::Wo
         }
       }
 
-      // Editable per-platform .ini presets (engine/render/presets). Loaded
-      // straight onto the live settings; "for now" the debug ui is the only way
-      // in. Save writes the current settings back out so users can author more.
+      // The platform tier files in the source tree (rx/config): Load applies a
+      // file's render keys to the live settings; Save writes the current ones
+      // as [render.*] sections. Saving over a tier drops its includes and its
+      // [options] / [memory.*] sections, so save to a new name and merge.
       if (ImGui::CollapsingHeader("Platform preset (.ini)")) {
         if (!preset_files_scanned_) ScanPresetFiles();
         if (preset_files_.empty()) {

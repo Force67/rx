@@ -43,6 +43,17 @@ struct AppConfig {
   // lockstep-capture runs, which is where it would do damage. RX_SPLASH
   // overrides this in both directions.
   bool splash = true;
+  // Who this is (core/app_identity.h), all three required; the host stops on a
+  // bad one. See docs/CONFIG.md.
+  //   id     a cuid2, unique across rx apps (`rx --new-app-id` makes one): the
+  //          cache folder.
+  //   name   a slug, lowercase [a-z0-9_-]: the vfs namespace <name>:// (its
+  //          loose files beside the executable, Data/*.rxp, config/) and the
+  //          settings folder the player sees (controls.ini, user://config).
+  //   title  what a person reads: the window, the driver application name.
+  base::String id;
+  base::String name;
+  base::String title;
   // Last word on the resolved RenderSettings. ApplyRenderPreset replaces the
   // settings wholesale from the tier, then re-applies each env override by
   // hand; anything an app tuned earlier is lost in that replacement. This runs

@@ -4,6 +4,7 @@
 # every subsystem; nothing below links back to it.
 rx_add_module(app
   host.cc
+  platform_config.cc
 )
 
 target_link_libraries(rx_app PUBLIC

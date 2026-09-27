@@ -13,34 +13,29 @@ namespace rx::mem {
 
 // Declarative memory plan: initial reservations for the pools and soft
 // per-category budgets for the tracker/HUD (the modern shape of the classic
-// "pool config with expected sizes"). Defaults come from a platform preset;
-// a memory.ini overlays them, so a shipped game can tune Steam Deck or mobile
-// footprints without recompiling.
+// "pool config with expected sizes"). The defaults are a desktop's; the
+// [memory.*] sections of the platform config files (docs/CONFIG.md) overlay
+// them, so a shipped game tunes Steam Deck or mobile footprints without
+// recompiling.
 struct MemoryConfig {
-  base::String preset = "desktop";
   size_t frame_arena_bytes = 8u << 20;
   size_t ecs_chunk_reserve = 256;  // 16 KiB chunks (4 MiB)
   struct Budget {
     base::String name;
     u64 bytes = 0;
   };
-  base::Vector<Budget> budgets;
+  base::Vector<Budget> budgets = {{"assets", 2048ull << 20},
+                                  {"render", 512ull << 20},
+                                  {"ecs", 128ull << 20},
+                                  {"audio", 64ull << 20}};
 };
 
-// Preset table: "desktop" (default), "steamdeck", "mobile".
-RX_CORE_EXPORT MemoryConfig DefaultMemoryConfig(base::StringRef preset);
-
 // Overlays ini text onto `config`. Format:
-//   preset is chosen before parsing (RX_MEMORY_PRESET); sections:
 //   [arena]   frame_mb = 8
 //   [pools]   ecs_chunks = 256
 //   [budgets] ecs = 64        ; MiB, one line per category
 // Unknown keys are ignored so configs stay forward-compatible.
 RX_CORE_EXPORT void ParseMemoryConfigText(base::StringRef text, MemoryConfig& config);
-
-// DefaultMemoryConfig(RX_MEMORY_PRESET or "desktop"), then overlays the file
-// named by RX_MEMORY_INI (falling back to ./memory.ini when present).
-RX_CORE_EXPORT MemoryConfig LoadMemoryConfig();
 
 // Pushes the plan into the runtime: budgets into the tracker, chunk reserve
 // into GlobalChunkPool, arena capacity into MainFrameArena.

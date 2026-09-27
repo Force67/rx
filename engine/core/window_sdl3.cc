@@ -7,6 +7,7 @@
 #include "base/memory/mem_ops.h"
 #include "base/memory/unique_pointer.h"
 #include "core/log.h"
+#include "core/platform.h"
 #include "core/scalar.h"
 #include "core/window.h"
 #if defined(RX_HAS_WAYLAND_KDE_HDR)
@@ -230,6 +231,13 @@ class Sdl3Window final : public Window {
           gamepad_.buttons[static_cast<u8>(b)] = down;
           break;
         }
+        case SDL_EVENT_GAMEPAD_SENSOR_UPDATE:
+          if (pad_ && event.gsensor.which == pad_id_ && event.gsensor.sensor == SDL_SENSOR_GYRO) {
+            gamepad_.gyro[0] = event.gsensor.data[0];
+            gamepad_.gyro[1] = event.gsensor.data[1];
+            gamepad_.gyro[2] = event.gsensor.data[2];
+          }
+          break;
         case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
           if (event.gaxis.which != pad_id_) break;
           GamepadAxis a = TranslateGamepadAxis(event.gaxis.axis);
@@ -392,10 +400,13 @@ class Sdl3Window final : public Window {
     gamepad_ = {};
     gamepad_.connected = true;
     gamepad_.kind = GamepadKind(pad);
-    RX_INFO("gamepad connected: {} ({})", SDL_GetGamepadName(pad),
+    gamepad_.has_gyro = SDL_GamepadHasSensor(pad, SDL_SENSOR_GYRO) &&
+                        SDL_SetGamepadSensorEnabled(pad, SDL_SENSOR_GYRO, true);
+    RX_INFO("gamepad connected: {} ({}{})", SDL_GetGamepadName(pad),
              gamepad_.kind == GamepadState::Kind::kDualSense ? "DualSense"
              : gamepad_.kind == GamepadState::Kind::kXbox    ? "Xbox"
-                                                             : "generic");
+                                                             : "generic",
+             gamepad_.has_gyro ? ", gyro" : "");
   }
 
   void CloseGamepad() {
@@ -463,8 +474,11 @@ base::UniquePointer<Window> CreateSdl3Window(const WindowDesc& desc) {
     return nullptr;
   }
   // Receive SDL_EVENT_TEXT_INPUT so editor text fields get typed characters.
-  // Key events still arrive; this only adds the translated text stream.
-  SDL_StartTextInput(window);
+  // Key events still arrive; this only adds the translated text stream. Not on
+  // a Steam Deck: there SDL answers text input with Steam's on-screen keyboard,
+  // which would cover the game from the first frame. A field that wants text
+  // asks for it (SetTextInputActive), and the keyboard then shows when useful.
+  if (!IsSteamDeck()) SDL_StartTextInput(window);
 
   // Enable the PS5 HIDAPI driver with enhanced reports so the DualSense exposes
   // rumble, the lightbar, and adaptive triggers (set before the subsystem inits).

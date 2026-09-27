@@ -121,24 +121,30 @@ const char* Bool(bool b) { return b ? "true" : "false"; }
 
 base::String SettingsToIni(const RenderSettings& s) {
   TextWriter o;
-  o << "# Rx render preset. Editable. Load/save it from the debug ui\n"
-    << "# (Renderer panel -> Platform preset). Unlisted keys keep their value.\n\n";
+  o << "# rx render settings, the [render.*] part of a platform config\n"
+    << "# (docs/CONFIG.md). Unlisted keys keep their value.\n\n";
 
-  o << "[antialiasing]\n";
+  o << "[render.antialiasing]\n";
   o << "aa_mode = " << Name(s.aa_mode) << "\n";
   o << "upscaler = " << Name(s.upscaler) << "\n";
   o << "upscaler_quality = " << Name(s.upscaler_quality) << "\n";
   o << "sharpness = " << s.sharpness << "\n";
   o << "taa_history_blend = " << s.taa_history_blend << "\n\n";
 
-  o << "[shadows]\n";
+  o << "[render.resolution]\n";
+  o << "render_scale = " << s.render_scale << "\n";
+  o << "dynamic_resolution = " << Bool(s.dynamic_resolution) << "\n";
+  o << "dynamic_target_ms = " << s.dynamic_target_ms << "\n";
+  o << "dynamic_min_scale = " << s.dynamic_min_scale << "\n\n";
+
+  o << "[render.shadows]\n";
   o << "rt_shadows = " << Bool(s.rt_shadows) << "\n";
   o << "sun_angular_radius = " << s.sun_angular_radius << "\n";
   o << "shadow_maps = " << Bool(s.shadow_maps) << "\n";
   o << "shadow_resolution = " << s.shadow_resolution << "\n";
   o << "shadow_distance = " << s.shadow_distance << "\n\n";
 
-  o << "[geometry]\n";
+  o << "[render.geometry]\n";
   o << "gpu_culling = " << Bool(s.gpu_culling) << "\n";
   o << "gpu_occlusion = " << Bool(s.gpu_occlusion) << "\n";
   o << "distance_lod = " << Bool(s.distance_lod) << "\n";
@@ -146,7 +152,7 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "procedural_grass = " << Bool(s.procedural_grass) << "\n";
   o << "vsync = " << Bool(s.vsync) << "\n\n";
 
-  o << "[sky]\n";
+  o << "[render.sky]\n";
   o << "sky = " << Bool(s.sky) << "\n";
   o << "ibl = " << Bool(s.ibl) << "\n";
   o << "ibl_intensity = " << s.ibl_intensity << "\n";
@@ -156,7 +162,7 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "cloudscape = " << Bool(s.cloudscape) << "\n";
   o << "cloudscape_steps = " << s.cloudscape_steps << "\n\n";
 
-  o << "[weather]\n";
+  o << "[render.weather]\n";
   o << "precipitation = " << s.weather.precipitation << "\n";
   o << "precip_snow = " << Bool(s.weather.snow) << "\n";
   o << "volumetric = " << Bool(s.weather.volumetric) << "\n";
@@ -172,26 +178,27 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "aurora = " << Bool(s.weather.aurora) << "\n";
   o << "aurora_intensity = " << s.weather.aurora_intensity << "\n\n";
 
-  o << "[ambient_occlusion]\n";
+  o << "[render.ambient_occlusion]\n";
   o << "rtao = " << Bool(s.rtao) << "\n";
   o << "ssao = " << Bool(s.ssao) << "\n";
   o << "ao_radius = " << s.ao_radius << "\n";
   o << "ao_intensity = " << s.ao_intensity << "\n";
   o << "ao_rays = " << s.ao_rays << "\n\n";
 
-  o << "[global_illumination]\n";
+  o << "[render.global_illumination]\n";
   o << "ddgi = " << Bool(s.ddgi) << "\n";
   o << "ddgi_spacing = " << s.ddgi_spacing << "\n";
   o << "ddgi_intensity = " << s.ddgi_intensity << "\n";
-  o << "ssgi = " << Bool(s.ssgi) << "\n\n";
+  o << "ssgi = " << Bool(s.ssgi) << "\n";
+  o << "rcgi = " << Bool(s.rcgi) << "\n\n";
 
-  o << "[reflections]\n";
+  o << "[render.reflections]\n";
   o << "rt_reflections = " << Bool(s.rt_reflections) << "\n";
   o << "reflection_roughness_cutoff = " << s.reflection_roughness_cutoff << "\n";
   o << "water_reflections = " << Bool(s.water_reflections) << "\n";
   o << "ssr = " << Bool(s.ssr) << "\n\n";
 
-  o << "[water]\n";
+  o << "[render.water]\n";
   o << "adaptive_water = " << Bool(s.adaptive_water) << "\n";
   o << "water_triangle_budget = " << s.water_triangle_budget << "\n";
   o << "water_target_triangle_pixels = " << s.water_target_triangle_pixels << "\n";
@@ -219,7 +226,7 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "water_caustic_depth_fade = " << s.water_caustic_depth_fade << "\n";
   o << "water_caustic_receiver_depth = " << s.water_caustic_receiver_depth << "\n\n";
 
-  o << "[path_tracing]\n";
+  o << "[render.path_tracing]\n";
   o << "path_trace = " << Bool(s.path_trace) << "\n";
   o << "path_trace_reference = " << Bool(s.path_trace_reference) << "\n";
   o << "path_trace_spp = " << s.path_trace_spp << "\n";
@@ -228,16 +235,20 @@ base::String SettingsToIni(const RenderSettings& s) {
   o << "path_trace_recon_weight = " << s.path_trace_recon_weight << "\n";
   o << "path_trace_recon_atrous = " << s.path_trace_recon_atrous << "\n\n";
 
-  o << "[fog]\n";
+  o << "[render.fog]\n";
   o << "fog = " << Bool(s.fog) << "\n";
   o << "fog_density = " << s.fog_density << "\n";
   o << "fog_height_falloff = " << s.fog_height_falloff << "\n";
   o << "fog_base_height = " << s.fog_base_height << "\n";
-  o << "fog_anisotropy = " << s.fog_anisotropy << "\n\n";
+  o << "fog_anisotropy = " << s.fog_anisotropy << "\n";
+  o << "froxel_fog = " << Bool(s.froxel_fog) << "\n";
+  o << "froxel_density = " << s.froxel_density << "\n\n";
 
-  o << "[post]\n";
+  o << "[render.post]\n";
   o << "bloom = " << Bool(s.bloom) << "\n";
   o << "bloom_intensity = " << s.bloom_intensity << "\n";
+  o << "motion_blur = " << Bool(s.motion_blur) << "\n";
+  o << "sss = " << Bool(s.sss) << "\n";
   o << "auto_exposure = " << Bool(s.auto_exposure) << "\n";
   o << "adaptation_speed = " << s.adaptation_speed << "\n";
   o << "exposure = " << s.exposure << "\n";
@@ -299,6 +310,11 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
   fl("sharpness", s.sharpness);
   fl("taa_history_blend", s.taa_history_blend);
 
+  fl("render_scale", s.render_scale);
+  b("dynamic_resolution", s.dynamic_resolution);
+  fl("dynamic_target_ms", s.dynamic_target_ms);
+  fl("dynamic_min_scale", s.dynamic_min_scale);
+
   b("rt_shadows", s.rt_shadows);
   fl("sun_angular_radius", s.sun_angular_radius);
   b("shadow_maps", s.shadow_maps);
@@ -344,6 +360,7 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
   fl("ddgi_spacing", s.ddgi_spacing);
   fl("ddgi_intensity", s.ddgi_intensity);
   b("ssgi", s.ssgi);
+  b("rcgi", s.rcgi);
 
   b("rt_reflections", s.rt_reflections);
   fl("reflection_roughness_cutoff", s.reflection_roughness_cutoff);
@@ -389,9 +406,13 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
   fl("fog_height_falloff", s.fog_height_falloff);
   fl("fog_base_height", s.fog_base_height);
   fl("fog_anisotropy", s.fog_anisotropy);
+  b("froxel_fog", s.froxel_fog);
+  fl("froxel_density", s.froxel_density);
 
   b("bloom", s.bloom);
   fl("bloom_intensity", s.bloom_intensity);
+  b("motion_blur", s.motion_blur);
+  b("sss", s.sss);
   b("auto_exposure", s.auto_exposure);
   fl("adaptation_speed", s.adaptation_speed);
   fl("exposure", s.exposure);

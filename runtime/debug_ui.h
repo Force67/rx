@@ -37,7 +37,8 @@ class DebugUi {
   DebugUi(const DebugUi&) = delete;
   DebugUi& operator=(const DebugUi&) = delete;
 
-  // `vfs` supplies the default UI font from the engine's fonts:// archive; a
+  // `vfs` supplies the default UI font from the engine's rxe://fonts/ archive
+  // and the platform tiers the quality preset combo applies; a
   // null one (or a missing archive) falls back to imgui's built-in font.
   bool Initialize(Window& window, render::Renderer& renderer, asset::Vfs* vfs);
   // Call between renderer WaitIdle and renderer Shutdown.
@@ -101,10 +102,11 @@ class DebugUi {
   WorldClock* clock_ = nullptr;  // day/night cycle, for the Lighting time controls
   base::String world_status_;     // --world: one status-bar line, empty when off
   int preset_choice_ = 0;  // 0 = custom/hand-tuned, else a QualityPreset combo row
-  // Editable .ini render presets (engine/render/presets): the discovered file
+  // The platform tier files (rx/config) the debug ui edits: the discovered file
   // list (lazy-scanned, rescannable), the combo selection, the save-as name
   // buffer and the last load/save status line.
   base::Vector<base::String> preset_files_;
+  asset::Vfs* vfs_ = nullptr;  // the host's; the quality tiers are read through it
   bool preset_files_scanned_ = false;
   int preset_file_choice_ = 0;
   char preset_save_name_[64] = "custom";

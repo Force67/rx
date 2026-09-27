@@ -4,18 +4,25 @@
 
 #include <base/option.h>
 
-#include "asset/engine_archives.h"
+#include "app/platform_config.h"
+#include "base/check.h"
+#include "asset/content_mounts.h"
 #include "base/algorithm.h"
 #include "base/atomic.h"
 #include "base/memory/mem_ops.h"
 #include "base/memory/move.h"
 #include "base/memory/unique_pointer.h"
 #include "base/threading/thread.h"
+#include <base/hashing/cuid2.h>
+
+#include "core/app_identity.h"
 #include "core/feature_registry.h"
 #include "core/log.h"
 #include "core/math.h"
 #include "core/memory/frame_arena.h"
 #include "core/memory/memory_config.h"
+#include "core/platform.h"
+#include "core/sort.h"
 #include "scene/components.h"
 
 // Host lifecycle and the per-frame heartbeat: subsystem bringup in dependency
@@ -31,6 +38,17 @@ namespace {
 base::Option<int> WinW{"win.width", 0, "RX_WIN_W"};
 base::Option<int> WinH{"win.height", 0, "RX_WIN_H"};
 base::Option<bool> NoOcclusion{"no.occlusion", false, "RX_NO_OCCLUSION"};
+// Unset means fullscreen on a Deck and under gamescope, windowed elsewhere: the
+// default 1920x1080 window is larger than the Deck's 1280x800 panel, and
+// gamescope scales whatever it gets to cover its output anyway.
+base::Option<bool> Fullscreen{"win.fullscreen", false, "RX_FULLSCREEN"};
+// RX_FRAME_STATS=<seconds> logs the frame-time spread over each window: the
+// average alone hides the hitches a handheld player feels.
+base::Option<float> FrameStats{"frame.stats", 0.0f, "RX_FRAME_STATS"};
+// Frame-rate cap while the window has lost focus (Steam menu open on a Deck,
+// alt-tabbed on a desktop): nobody is watching, so spend no power on it.
+// 0 renders at full rate regardless.
+base::Option<int> UnfocusedFps{"unfocused.fps", 10, "RX_UNFOCUSED_FPS"};
 // Touch doubling as the mouse is the SDL default and keeps mouse-only UI usable
 // under a finger. Handhelds turn it off: with mouse look in relative mode a
 // thumb resting on the panel drags the camera.
@@ -47,6 +65,12 @@ base::Option<float> FixedDt{"fixed.dt", 0.0f, "RX_FIXED_DT"};
 base::Option<bool> ShowSplash{"splash", true, "RX_SPLASH"};
 base::Option<float> SplashSeconds{"splash.seconds", ui::Splash::kDefaultSeconds,
                                   "RX_SPLASH_SECONDS"};
+void ApplyMemoryPlan(const base::String& text) {
+  mem::MemoryConfig plan;
+  mem::ParseMemoryConfigText(text, plan);
+  mem::ApplyMemoryConfig(plan);
+}
+
 }  // namespace
 
 bool Host::Initialize(const AppConfig& config, Application& app,
@@ -55,9 +79,24 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   app_ = &app;
   InitFeatures();              // apply RX_FEATURES overrides before any flag read
   base::InitOptionsFromEnv();  // populate every base::Option from the environment
-  // Memory plan first, so the pools are pre-reserved and the budgets are in
-  // place before any subsystem starts allocating in earnest.
-  mem::ApplyMemoryConfig(mem::LoadMemoryConfig());
+  // Identity first: the mounts, the per-user folders and the window all name
+  // the app by it.
+  BASE_FATAL_CHECK(base::IsValidCuid2(config_.id.c_str()),
+                   "AppConfig::id must be a cuid2: run `rx --new-app-id` for one");
+  BASE_FATAL_CHECK(IsValidAppName(config_.name),
+                   "AppConfig::name must be a slug: lowercase [a-z0-9_-], not rxe or user");
+  BASE_FATAL_CHECK(!config_.title.empty(), "AppConfig::title must be set");
+  SetAppIdentity({config_.id, config_.name, config_.title});
+  // The engine's and the game's content (rxe://, <title>://) mount first: the
+  // platform config lives there, and the application mounts over it later.
+  asset::MountContent(vfs_, config_.name);
+  // What the config can say before the gpu picks a tier: the default.ini
+  // files' options (window, fullscreen...) and memory plan, in place before any
+  // subsystem starts allocating in earnest.
+  PlatformConfig startup;
+  ReadPlatformChain(vfs_, config_.name, render::QualityPreset::kAuto, &startup);
+  ApplyPlatformOptions(startup);
+  ApplyMemoryPlan(startup.memory);
   jobs_ = base::MakeUnique<JobSystem>();
   ConfigureClock(20.0f);
   // An app that asked for lockstep (AppConfig::fixed_delta, i.e. a capture run)
@@ -67,19 +106,20 @@ bool Host::Initialize(const AppConfig& config, Application& app,
   if (config_.fixed_delta > 0.0f && !FixedDt.overridden())
     timer_.set_fixed_delta(static_cast<f64>(config_.fixed_delta));
 
-  // rx's own content (fonts://, ...) mounts first, so anything the application
-  // mounts later overrides it.
-  asset::MountEngineArchives(vfs_);
-
   // --width/--height first, then RX_WIN_W/RX_WIN_H, then the WindowDesc
   // default; the same size answers for a window and for an offscreen target.
   WindowDesc desc;
+  desc.title = GetAppIdentity().title;
   if (WinW > 0) desc.width = static_cast<u32>(WinW.get());
   if (WinH > 0) desc.height = static_cast<u32>(WinH.get());
   if (config_.width > 0) desc.width = config_.width;
   if (config_.height > 0) desc.height = config_.height;
   if (!config_.headless) {
     desc.touch_emits_mouse = TouchMouse;
+    if (Fullscreen.overridden())
+      desc.fullscreen = Fullscreen;
+    else if (WinW <= 0 && config_.width == 0)
+      desc.fullscreen = IsSteamDeck() || IsGamescope();
     window_ = window ? base::move(window) : Window::Create(desc);
     if (!renderer_.Initialize(config_.renderer, *window_)) return false;
     ApplyRenderPreset();
@@ -162,7 +202,14 @@ void Host::ApplyRenderPreset() {
   if (!device || device->is_stub()) return;  // no gpu, nothing to tune
   const render::DeviceCaps& caps = device->caps();
   render::QualityPreset resolved = render::ResolvePreset(config_.preset, caps);
-  render::RenderSettings tuned = render::PresetSettings(resolved, caps);
+  // The whole platform config for the tier: engine then game, default.ini then
+  // <tier>.ini. Options and the memory plan apply again, now with the tier's.
+  PlatformConfig platform;
+  BASE_FATAL_CHECK(ReadPlatformChain(vfs_, config_.name, resolved, &platform),
+                   "no engine platform config for the quality tier");
+  ApplyPlatformOptions(platform);
+  ApplyMemoryPlan(platform.memory);
+  render::RenderSettings tuned = render::PresetSettings(platform.render, caps);
 
   // Explicit reconstruction flags (--no-taa / --upscaler) still win over the
   // preset's choice; --no-rt already gates ray tracing at the device level.
@@ -188,81 +235,80 @@ void Host::ApplyRenderPreset() {
     tuned.exposure = 1.0f;
   }
   if (env.path_trace) tuned.path_trace = true;
-  // Carry the path-tracer mode + tunables (RX_PATHTRACE_RECON / _REFERENCE /
-  // _SPP / _ACCUM ...) through the preset, or env-selected recon/reference
-  // silently falls back to the NRD path.
-  tuned.path_trace_reference = env.path_trace_reference;
-  tuned.path_trace_recon = env.path_trace_recon;
-  tuned.path_trace_spp = env.path_trace_spp;
-  tuned.path_trace_accum = env.path_trace_accum;
-  tuned.path_trace_recon_weight = env.path_trace_recon_weight;
-  tuned.path_trace_recon_atrous = env.path_trace_recon_atrous;
-  tuned.path_trace_recon_debug = env.path_trace_recon_debug;
-  tuned.path_trace_restir = env.path_trace_restir;
-  tuned.path_trace_restir_di = env.path_trace_restir_di;
-  tuned.hdr_output = env.hdr_output;
-  tuned.hdr_paper_white = env.hdr_paper_white;
-  tuned.path_trace_rr = env.path_trace_rr;
   if (env.wireframe) tuned.wireframe = true;  // honor RX_WIREFRAME over the preset
-  tuned.ssr = env.ssr;                        // honor RX_SSR over the preset
-  tuned.ssgi = env.ssgi;                      // honor RX_SSGI over the preset
-  // No preset sets these two, so the env value is the only one there is; before
-  // they were carried across, RX_DISTANCE_LOD / RX_MESH_SHADER_LOD were applied
-  // in Renderer::Initialize and then thrown away here, one line later.
-  tuned.distance_lod = env.distance_lod;      // honor RX_DISTANCE_LOD
-  tuned.mesh_shader_lod = env.mesh_shader_lod;  // honor RX_MESH_SHADER_LOD
-  tuned.color_grade = env.color_grade;        // presets never set a grade
-  tuned.sun_direction = env.sun_direction;    // honor RX_SUN_DIR over the default
-  // Sky/weather env overrides (RX_AERIAL / RX_CLOUDS / RX_CLOUD_COVERAGE /
-  // RX_PRECIP / RX_SNOW / RX_WIND / RX_WETNESS / ...), so they survive the preset.
-  tuned.fog = env.fog;  // honor RX_FOG over the preset (fog params are defaults)
-  tuned.motion_blur = env.motion_blur;  // honor RX_MOTION_BLUR over the preset
-  tuned.lens_flare = env.lens_flare;    // honor RX_LENS_FLARE over the preset
-  tuned.film_grain = env.film_grain;    // honor RX_FILM_GRAIN over the preset
-  tuned.dof = env.dof;
-  tuned.dof_focus = env.dof_focus;
-  tuned.dof_aperture = env.dof_aperture;
-  tuned.sss = env.sss;  // honor RX_SSS over the preset
-  tuned.sss_width = env.sss_width;
-  tuned.async_compute = env.async_compute;  // honor RX_ASYNC_COMPUTE
-  tuned.frame_generation = env.frame_generation;  // honor RX_FRAMEGEN
-  tuned.local_shadows = env.local_shadows;  // honor RX_LOCAL_SHADOWS
-  tuned.froxel_fog = env.froxel_fog;  // honor RX_FROXEL
-  tuned.froxel_density = env.froxel_density;
-  tuned.froxel_start_distance = env.froxel_start_distance;  // honor RX_FROXEL_START
-  tuned.vrs = env.vrs;  // honor RX_VRS
-  tuned.texture_budget_mb = env.texture_budget_mb;  // honor RX_TEX_BUDGET_MB
-  tuned.gpu_pass_timings = env.gpu_pass_timings;    // honor RX_GPU_TIMINGS
-  tuned.dynamic_resolution = env.dynamic_resolution;  // honor RX_DRS
-  tuned.dynamic_target_ms = env.dynamic_target_ms;
-  tuned.dynamic_min_scale = env.dynamic_min_scale;
-  tuned.restir_di = env.restir_di;  // honor RX_RESTIR_DI
-  // RCGI is now a preset default (ultra/high). RX_RCGI still wins in both
-  // directions, but only when explicitly set; otherwise the preset decides,
-  // so an unset env must not clobber a tier that enabled rcgi.
+
+  // Every RX_* knob Renderer::Initialize read: the env wins only where it says
+  // something other than the default. An unset option holds the default, and
+  // copying that over would undo whatever the tier's ini chose for the field.
+  const render::RenderSettings defaults;
+  auto carry = [&](auto render::RenderSettings::*field) {
+    if (env.*field != defaults.*field) tuned.*field = env.*field;
+  };
+  using RS = render::RenderSettings;
+  // Path-tracer mode + tunables (RX_PATHTRACE_RECON / _REFERENCE / _SPP / ...),
+  // or env-selected recon/reference silently falls back to the NRD path.
+  carry(&RS::path_trace_reference);
+  carry(&RS::path_trace_recon);
+  carry(&RS::path_trace_spp);
+  carry(&RS::path_trace_accum);
+  carry(&RS::path_trace_recon_weight);
+  carry(&RS::path_trace_recon_atrous);
+  carry(&RS::path_trace_recon_debug);
+  carry(&RS::path_trace_restir);
+  carry(&RS::path_trace_restir_di);
+  carry(&RS::path_trace_rr);
+  carry(&RS::hdr_output);
+  carry(&RS::hdr_paper_white);
+  carry(&RS::ssr);
+  carry(&RS::ssgi);
+  carry(&RS::distance_lod);
+  carry(&RS::mesh_shader_lod);
+  carry(&RS::fog);
+  carry(&RS::motion_blur);
+  carry(&RS::lens_flare);
+  carry(&RS::film_grain);
+  carry(&RS::dof);
+  carry(&RS::dof_focus);
+  carry(&RS::dof_aperture);
+  carry(&RS::sss);
+  carry(&RS::sss_width);
+  carry(&RS::async_compute);
+  carry(&RS::frame_generation);
+  carry(&RS::local_shadows);
+  carry(&RS::froxel_fog);
+  carry(&RS::froxel_density);
+  carry(&RS::froxel_start_distance);
+  carry(&RS::vrs);
+  carry(&RS::vrs_threshold);
+  carry(&RS::texture_budget_mb);
+  carry(&RS::gpu_pass_timings);
+  carry(&RS::dynamic_resolution);
+  carry(&RS::dynamic_target_ms);
+  carry(&RS::dynamic_min_scale);
+  carry(&RS::restir_di);
+  carry(&RS::rcgi_intensity);
+  carry(&RS::fft_ocean);
+  carry(&RS::adaptive_water);
+  carry(&RS::water_field);
+  carry(&RS::water_interaction);
+  carry(&RS::shore_wetting);
+  carry(&RS::water_caustics);
+  carry(&RS::procedural_grass);
+  carry(&RS::aerial_perspective);
+  carry(&RS::clouds);
+  carry(&RS::cloudscape);
+  carry(&RS::cloudscape_steps);
+  carry(&RS::cloud_coverage);
+  // RX_RCGI wins in both directions, but only when explicitly set.
   if (renderer_.rcgi_env_overridden()) tuned.rcgi = env.rcgi;
-  tuned.rcgi_intensity = env.rcgi_intensity;
   // SDF software-trace availability is a startup decision on Renderer::sdf_available_,
   // not a RenderSettings field, so it survives this wholesale preset replacement
   // with no carry needed (see RendererDesc::software_gi / settings.h note).
-  tuned.fft_ocean = env.fft_ocean;  // honor RX_FFT_OCEAN
-  // Water feature env overrides (RX_ADAPTIVE_WATER / RX_WATER_FIELD /
-  // RX_WATER_INTERACTION / RX_SHORE_WETTING / RX_WATER_CAUSTICS); presets never
-  // tune these, so the wholesale replacement was silently discarding the envs.
-  tuned.adaptive_water = env.adaptive_water;
-  tuned.water_field = env.water_field;
-  tuned.water_interaction = env.water_interaction;
-  tuned.shore_wetting = env.shore_wetting;
-  tuned.water_caustics = env.water_caustics;
-  tuned.procedural_grass = env.procedural_grass;  // honor RX_PROCEDURAL_GRASS
-  tuned.vrs_threshold = env.vrs_threshold;
-  tuned.aerial_perspective = env.aerial_perspective;
-  tuned.clouds = env.clouds;
-  tuned.cloudscape = env.cloudscape;
-  tuned.cloudscape_steps = env.cloudscape_steps;
+  // Live state no tier sets: always the renderer's.
+  tuned.color_grade = env.color_grade;
+  tuned.sun_direction = env.sun_direction;  // honor RX_SUN_DIR over the default
   tuned.cloudscape_controls = env.cloudscape_controls;
-  tuned.cloud_coverage = env.cloud_coverage;
-  tuned.weather = env.weather;  // live weather state; presets never set it
+  tuned.weather = env.weather;
   if (NoOcclusion) tuned.gpu_occlusion = false;  // a/b baseline
 
   // The app profile runs last, after the tier and every env carry-through, so
@@ -270,8 +316,25 @@ void Host::ApplyRenderPreset() {
   if (config_.tune_settings) config_.tune_settings(tuned);
 
   renderer_.settings() = tuned;
-  RX_INFO("render preset: {} ({})", render::PresetName(resolved),
-          config_.preset == render::QualityPreset::kAuto ? "auto" : "forced");
+  RX_INFO("render preset: {} ({}), platform config with {} problem(s)",
+          render::PresetName(resolved),
+          config_.preset == render::QualityPreset::kAuto ? "auto" : "forced", platform.problems);
+}
+
+void Host::LogFrameStats(f32 frame_delta) {
+  frame_times_.push_back(frame_delta);
+  frame_stats_elapsed_ += frame_delta;
+  if (frame_stats_elapsed_ < FrameStats.get()) return;
+  base::Vector<f32>& t = frame_times_;
+  f32 sum = 0.0f;
+  for (f32 dt : t) sum += dt;
+  rx::StableSort(t.data(), t.data() + t.size(), [](f32 a, f32 b) { return a < b; });
+  const size_t n = t.size();
+  const f32 avg_ms = sum / static_cast<f32>(n) * 1000.0f;
+  RX_INFO("frame stats: {:.1f} fps, avg {:.2f} ms, p99 {:.2f} ms, max {:.2f} ms ({} frames)",
+          1000.0f / avg_ms, avg_ms, t[n * 99 / 100] * 1000.0f, t[n - 1] * 1000.0f, n);
+  t.clear();
+  frame_stats_elapsed_ = 0.0f;
 }
 
 void Host::ConfigureClock(f32 base_timescale) {
@@ -352,6 +415,17 @@ bool Host::RunFrame() {
     }
     renderer_.RenderFrame(view);
     app_->OnFrameEnd();
+    if (FrameStats.get() > 0.0f) LogFrameStats(frame_delta);
+    // Not in a lockstep capture: its frames are the output, not a display.
+    if (window_ && UnfocusedFps.get() > 0 && !(timer_.fixed_delta() > 0.0)) {
+      const bool focused = window_->focused();
+      if (focused != was_focused_) {
+        RX_INFO("window {}", focused ? "focused" : "unfocused, throttling");
+        was_focused_ = focused;
+      }
+      // Sleeping the render time on top keeps this simple and errs slower.
+      if (!focused) base::SleepForMilliseconds(1000 / UnfocusedFps.get());
+    }
   } else {
     // No vsync to pace the loop; yield between fixed steps instead of
     // spinning a core.
