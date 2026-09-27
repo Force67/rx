@@ -299,10 +299,17 @@ void Host::ApplyRenderPreset() {
 }
 
 void Host::ApplyRenderInis(render::QualityPreset tier, render::RenderSettings& s) {
+  // An include names a sibling file first, then an engine tier, so a project
+  // file can say `include = low` to start from the engine's low tier.
   auto overlay = [&s](const base::String& path) {
     base::String text;
     if (!fs::ReadTextFile(path, &text)) return false;
-    RX_INFO("render ini: {} ({} keys)", path, render::ApplyIni(text, s));
+    const base::String dir(fs::ParentPath(path));
+    const int applied = render::ApplyIni(text, s, [&dir](base::StringRef name, base::String* out) {
+      return fs::ReadTextFile(fs::Join(dir, base::String(name) + ".ini"), out) ||
+             render::PresetIni(name, out);
+    });
+    RX_INFO("render ini: {} ({} keys)", path, applied);
     return true;
   };
 

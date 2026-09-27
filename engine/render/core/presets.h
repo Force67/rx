@@ -2,6 +2,7 @@
 #define RX_RENDER_PRESETS_H_
 
 
+#include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "core/export.h"
 #include "core/types.h"
@@ -42,6 +43,10 @@ inline QualityPreset ResolvePreset(QualityPreset preset, const DeviceCaps& caps)
 }
 
 RX_RENDER_EXPORT const char* PresetName(QualityPreset preset);
+
+// The embedded ini text of a tier, by PresetName ("medium"), for resolving an
+// `include = medium` line. False for a name that is no tier.
+RX_RENDER_EXPORT bool PresetIni(base::StringRef name, base::String* text);
 RX_RENDER_EXPORT QualityPreset ParsePreset(const base::String& name);  // kAuto on no match
 
 }  // namespace rx::render

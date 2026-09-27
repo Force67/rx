@@ -1,7 +1,10 @@
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "base/containers/unordered_map.h"
+#include "base/containers/vector.h"
+#include "base/memory/move.h"
 #include "core/file_system.h"
+#include "core/log.h"
 #include "core/text_reader.h"
 #include "core/text_writer.h"
 #include "render/core/settings_ini.h"
@@ -256,9 +259,15 @@ base::String SettingsToIni(const RenderSettings& s) {
   return o.Take();
 }
 
-int ApplyIni(base::StringRef text, RenderSettings& s) {
+namespace {
+
+constexpr int kMaxIncludeDepth = 8;
+
+int ApplyIniAt(base::StringRef text, RenderSettings& s, const IniResolver& resolve,
+               int depth) {
   // Collect "key = value" pairs (lowercased keys), ignoring sections/comments.
   base::UnorderedMap<base::String, base::String> kv;
+  base::Vector<base::String> includes;  // in file order
   LineReader lines(text);
   base::StringRef piece;
   while (lines.Next(&piece)) {
@@ -268,11 +277,29 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
     if (t.empty() || t[0] == '[') continue;
     auto eq = t.find('=');
     if (eq == base::String::npos) continue;
-    kv[Lower(Trim(base::StringRef(t).substr(0, eq)))] = Trim(base::StringRef(t).substr(eq + 1));
+    base::String key = Lower(Trim(base::StringRef(t).substr(0, eq)));
+    base::String value = Trim(base::StringRef(t).substr(eq + 1));
+    if (key == "include")
+      includes.push_back(base::move(value));
+    else
+      kv[key] = base::move(value);
   }
-  if (kv.empty()) return 0;
 
   int applied = 0;
+  // Included files first, so this file's own keys override them.
+  for (const base::String& name : includes) {
+    base::String included;
+    if (depth >= kMaxIncludeDepth) {
+      RX_ERROR("render ini: include '{}' is {} deep, a cycle?", name, depth);
+    } else if (!resolve || !resolve(name, &included)) {
+      RX_ERROR("render ini: include '{}' not found", name);
+    } else {
+      ApplyIniAt(included, s, resolve, depth + 1);
+      ++applied;
+    }
+  }
+  if (kv.empty()) return applied;
+
   auto take = [&](const char* key, auto&& fn) {
     const base::String* value = kv.find(key);
     if (value && fn(*value)) ++applied;
@@ -420,10 +447,19 @@ int ApplyIni(base::StringRef text, RenderSettings& s) {
   return applied;
 }
 
+}  // namespace
+
+int ApplyIni(base::StringRef text, RenderSettings& s, const IniResolver& resolve) {
+  return ApplyIniAt(text, s, resolve, 0);
+}
+
 bool LoadSettingsIni(base::StringRef path, RenderSettings& s) {
   base::String text;
   if (!fs::ReadTextFile(path, &text)) return false;
-  ApplyIni(text, s);
+  const base::String dir(fs::ParentPath(path));
+  ApplyIni(text, s, [&dir](base::StringRef name, base::String* out) {
+    return fs::ReadTextFile(fs::Join(dir, base::String(name) + ".ini"), out);
+  });
   return true;
 }
 

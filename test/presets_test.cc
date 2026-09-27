@@ -45,7 +45,9 @@ template <size_t N>
 void CheckTier(const char* name, const unsigned char (&bytes)[N]) {
   const char* text = reinterpret_cast<const char*>(bytes);
   rx::render::RenderSettings s;
-  const int applied = rx::render::ApplyIni(base::StringRef(text, N), s);
+  const int applied = rx::render::ApplyIni(
+      base::StringRef(text, N), s,
+      [](base::StringRef tier, base::String* out) { return rx::render::PresetIni(tier, out); });
   // ApplyIni skips keys it does not know, so a misspelled key in a shipped tier
   // would silently fall back to the default.
   Check(applied == KeyLines(text, N), "every key in the tier ini is recognized", name);

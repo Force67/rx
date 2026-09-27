@@ -1,6 +1,7 @@
 #ifndef RX_RENDER_SETTINGS_INI_H_
 #define RX_RENDER_SETTINGS_INI_H_
 
+#include "base/functional/function.h"
 #include "base/strings/string_ref.h"
 #include "base/strings/xstring.h"
 #include "core/export.h"
@@ -26,13 +27,21 @@ namespace rx::render {
 // Serializes the covered fields of `s` to INI text.
 RX_RENDER_EXPORT base::String SettingsToIni(const RenderSettings& s);
 
-// Overlays recognized "key = value" lines from `text` onto `s`. Section headers,
-// blank lines and ; / # comments are ignored; unknown keys are skipped. Returns
-// the number of keys applied.
-RX_RENDER_EXPORT int ApplyIni(base::StringRef text, RenderSettings& s);
+// Finds the text of the ini an `include = <name>` line names. False when there
+// is no such file.
+using IniResolver = base::Function<bool(base::StringRef name, base::String* text)>;
 
-// Reads a preset file and overlays it onto `s` (see ApplyIni). False if the file
-// cannot be opened.
+// Overlays recognized "key = value" lines from `text` onto `s`. Section headers,
+// blank lines and ; / # comments are ignored; unknown keys are skipped.
+// `include = <name>` lines apply the named ini first, through `resolve`
+// (recursively, at most 8 deep), so the including file's own keys win; an
+// include that does not resolve is logged and skipped. Returns the number of
+// this file's lines applied, resolved includes counted as one each.
+RX_RENDER_EXPORT int ApplyIni(base::StringRef text, RenderSettings& s,
+                              const IniResolver& resolve = {});
+
+// Reads a preset file and overlays it onto `s` (see ApplyIni), resolving
+// includes to <name>.ini beside it. False if the file cannot be opened.
 RX_RENDER_EXPORT bool LoadSettingsIni(base::StringRef path, RenderSettings& s);
 
 // Writes SettingsToIni(s) to `path`. False on a write error.

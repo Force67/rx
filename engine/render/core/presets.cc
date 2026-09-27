@@ -105,12 +105,22 @@ TierIni TierFile(QualityPreset preset) {
 
 }  // namespace
 
+bool PresetIni(base::StringRef name, base::String* text) {
+  const QualityPreset tier = ParsePreset(base::String(name));
+  // ParsePreset also takes aliases ("deck", "mid"); a file names the tier.
+  if (tier == QualityPreset::kAuto || name != PresetName(tier)) return false;
+  const TierIni ini = TierFile(tier);
+  *text = base::String(reinterpret_cast<const char*>(ini.bytes), ini.size);
+  return true;
+}
+
 RenderSettings PresetSettings(QualityPreset preset, const DeviceCaps& caps) {
   RenderSettings s;
   const QualityPreset tier = ResolvePreset(preset, caps);
   const TierIni ini = TierFile(tier);
   const int applied =
-      ApplyIni(base::StringRef(reinterpret_cast<const char*>(ini.bytes), ini.size), s);
+      ApplyIni(base::StringRef(reinterpret_cast<const char*>(ini.bytes), ini.size), s,
+               [](base::StringRef name, base::String* text) { return PresetIni(name, text); });
   BASE_FATAL_CHECK(applied > 0, "empty quality tier ini");
 
   // Clamp to what the device can actually run so a forced tier never hangs.
