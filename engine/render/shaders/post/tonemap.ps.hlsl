@@ -29,7 +29,8 @@ struct PushData {
   float vignette;             // 0..1 corner darkening
   float grain;                // 0..~0.06 film grain amplitude
   float grain_seed;           // per-frame
-  float pad_lens[3];
+  float sharpen;              // 0..1 contrast-adaptive sharpening, 0 = off
+  float pad_lens[2];
 };
 PUSH_CONSTANTS(PushData, push);
 
@@ -76,6 +77,31 @@ float GrainHash(float2 p) {
   return frac(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
 }
 
+// CAS works on [0,1]; this keeps HDR highlights from ringing.
+float3 Compress(float3 c) { return c / (1.0 + c); }
+float3 Expand(float3 c) { return c / max(1.0 - c, 1e-3); }
+
+// Contrast-adaptive sharpening (after AMD FidelityFX CAS): a cross-shaped
+// negative lobe whose weight shrinks where the neighborhood already has
+// contrast, so soft edges crispen without ringing hard ones. TAA's resolve
+// blurs a little every frame, which a small handheld panel shows plainly.
+float3 CasSharpen(float2 uv, float3 center, float amount) {
+  float2 dims;
+  scene.GetDimensions(dims.x, dims.y);
+  float2 t = 1.0 / dims;
+  float3 c = Compress(max(center, 0.0));
+  float3 n = Compress(max(scene.SampleLevel(scene_sampler, uv + float2(0.0, -t.y), 0.0).rgb, 0.0));
+  float3 w = Compress(max(scene.SampleLevel(scene_sampler, uv + float2(-t.x, 0.0), 0.0).rgb, 0.0));
+  float3 e = Compress(max(scene.SampleLevel(scene_sampler, uv + float2(t.x, 0.0), 0.0).rgb, 0.0));
+  float3 s = Compress(max(scene.SampleLevel(scene_sampler, uv + float2(0.0, t.y), 0.0).rgb, 0.0));
+  float3 mn = min(c, min(min(n, w), min(e, s)));
+  float3 mx = max(c, max(max(n, w), max(e, s)));
+  float3 amp = sqrt(saturate(min(mn, 1.0 - mx) / max(mx, 1e-5)));
+  float3 lobe = amp * (-1.0 / lerp(8.0, 5.0, saturate(amount)));
+  float3 sharp = saturate((c + (n + w + e + s) * lobe) / (1.0 + 4.0 * lobe));
+  return Expand(sharp);
+}
+
 float3 FlareHighlight(float2 uv, float exposure) {
   // The clamp sampler would otherwise extend an edge highlight across the image.
   if (any(uv < 0.0) || any(uv > 1.0)) return 0.0.xxx;
@@ -105,6 +131,7 @@ float4 main(float4 sv_position : SV_Position,
                  scene.Sample(scene_sampler, uv - shift).b);
   } else {
     hdr = scene.Sample(scene_sampler, uv).rgb;
+    if (push.sharpen > 0.0) hdr = CasSharpen(uv, hdr, push.sharpen);
   }
   if (push.bloom_enabled != 0u) {
     hdr = lerp(hdr, bloom.Sample(bloom_sampler, uv).rgb, push.bloom_intensity);

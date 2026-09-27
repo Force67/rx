@@ -7646,6 +7646,9 @@ void Renderer::BuildFrameGraph(FrameResources &frame, u32 image_index,
   post_params.vignette = settings_.vignette;
   post_params.grain = settings_.film_grain;
   post_params.grain_seed = static_cast<f32>(frame_index_ % 1024) * 0.6180339f;
+  // Upscalers sharpen inside their own resolve; rx's TAA has none of its own.
+  if (!path_trace && settings_.aa_mode == AntiAliasingMode::kTaa)
+    post_params.sharpen = settings_.sharpness;
   graph_.AddPass(
       "post",
       [&](RenderGraph::PassBuilder &builder) {

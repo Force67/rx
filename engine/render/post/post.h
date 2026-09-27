@@ -40,7 +40,9 @@ class PostPass {
     f32 vignette = 0;
     f32 grain = 0;
     f32 grain_seed = 0;
-    f32 pad_lens[3] = {0, 0, 0};
+    // Contrast-adaptive sharpening of the scene fetch, 0..1 (0 = off).
+    f32 sharpen = 0;
+    f32 pad_lens[2] = {0, 0};
   };
 
   // Rebakes the grading strip LUT when the grade changes (no-op otherwise).

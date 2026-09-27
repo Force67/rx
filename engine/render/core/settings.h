@@ -117,7 +117,9 @@ struct RenderSettings {
   u32 msaa_samples = 4;
   UpscalerKind upscaler = UpscalerKind::kNone;
   UpscalerQuality upscaler_quality = UpscalerQuality::kQuality;
-  f32 sharpness = 0.0f;  // 0..1, used by upscalers that sharpen
+  // 0..1: the upscaler's own sharpening, or contrast-adaptive sharpening in
+  // the tonemap pass after rx's TAA.
+  f32 sharpness = 0.0f;
   f32 taa_history_blend = 0.9f;
   // Internal render resolution as a fraction of output, when no upscaler is
   // active. >1 supersamples (renders above the window, the post pass downscales);
