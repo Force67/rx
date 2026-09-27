@@ -242,7 +242,23 @@ void TestLensAndOrientationInterpolation() {
 
 }  // namespace
 
+// The main view's orthographic projection must share the perspective's
+// reversed-z clip space: near maps to depth 1, far to 0, and y flips for vulkan.
+void TestOrthographicReversedZ() {
+  const rx::Mat4 p = rx::OrthographicReversedZ(-4.0f, 4.0f, -2.0f, 2.0f, 1.0f, 101.0f);
+  auto depth = [&](float view_z) {  // camera looks down -z
+    const float z = p.m[10] * view_z + p.m[14];
+    const float w = p.m[11] * view_z + p.m[15];
+    return z / w;
+  };
+  Check(fabsf(depth(-1.0f) - 1.0f) < 1e-5f, "ortho near plane maps to depth 1");
+  Check(fabsf(depth(-101.0f)) < 1e-5f, "ortho far plane maps to depth 0");
+  Check(fabsf(p.m[0] * 4.0f - 1.0f) < 1e-6f, "ortho right edge maps to x = 1");
+  Check(fabsf(p.m[5] * 2.0f + 1.0f) < 1e-6f, "ortho top edge maps to y = -1 (vulkan flip)");
+}
+
 int main() {
+  TestOrthographicReversedZ();
   TestDynamicStackSurvivesArchetypeGrowth();
   TestOverAlignedComponentStorage();
   TestAnimatedTransitionUsesLiveDestination();

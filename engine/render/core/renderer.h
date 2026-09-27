@@ -226,7 +226,14 @@ struct HdrOverlayContext {
 struct CameraPose {
   Vec3 eye{0, 0, 3};
   Vec3 target{};
-  f32 fov_y = 1.0472f; // 60 degrees
+  f32 fov_y = 1.0472f; // 60 degrees (perspective vertical field of view)
+  // Orthographic main view for isometric / top-down / 2.5D games: > 0 projects
+  // `ortho_height` world units vertically (horizontal follows the aspect) in
+  // place of fov_y; eye/target still place the camera. 0 keeps perspective.
+  // ortho_near/far bound the reversed-z depth, finite unlike perspective's.
+  f32 ortho_height = 0.0f;
+  f32 ortho_near = 0.1f;
+  f32 ortho_far = 1000.0f;
 };
 
 // What the simulation hands the renderer each frame. The engine extracts
